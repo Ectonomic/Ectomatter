@@ -2,3 +2,6 @@
 # parity vectors built from a real keyboard's backups stay on the machine that made them
 /parity/private/
 __pycache__/
+
+# screenshots of the original editor holding a real keyboard's profiles and macros
+/docs/baseline/
