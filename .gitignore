@@ -1,0 +1,4 @@
+/target
+# parity vectors built from a real keyboard's backups stay on the machine that made them
+/parity/private/
+__pycache__/
