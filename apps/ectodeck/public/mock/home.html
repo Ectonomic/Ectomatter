@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ectodeck home mock</title>
+<link rel="stylesheet" href="/fonts.css">
+<style>
+@font-face { font-family: 'Geist'; src: url('/fonts/Geist-Variable-latin.woff2') format('woff2'); font-weight: 100 900; }
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #050506; color: #f5f5f5; font: 14px/1.5 'Geist', system-ui, sans-serif; }
+main { max-width: 1560px; margin: 0 auto; padding: 44px 32px 90px; }
+h1.t { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.03em; }
+p.lede { color: #a3a3a3; max-width: 880px; margin: 8px 0 34px; }
+section { margin-bottom: 60px; }
+section > h2 { display: flex; gap: 10px; align-items: baseline; margin: 0 0 6px; font-size: 15px; font-weight: 600; }
+section > h2 b { color: #c8f22e; font-size: 12px; letter-spacing: .08em; }
+section > p { margin: 0 0 16px; color: #a3a3a3; max-width: 900px; }
+ul.notes { margin: 14px 0 0; padding-left: 18px; color: #a3a3a3; max-width: 940px; font-size: 13.5px; }
+.desk { border-radius: 14px; background: #101012; padding: 32px 0; display: flex; justify-content: center; }
+
+/* the window, as the app draws it */
+.win { width: 1440px; height: 900px; border-radius: 10px; overflow: hidden; background: #222222; box-shadow: 0 30px 80px -20px rgba(0,0,0,.9); position: relative; display: flex; flex-direction: column; }
+.win::after { content: ''; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px #404040; pointer-events: none; }
+.tbar { display: flex; align-items: center; height: 36px; flex: none; padding-left: 12px; background: #262626; border-bottom: 1px solid #404040; }
+.tbar .home { display: flex; align-items: center; gap: 7px; height: 26px; padding: 0 6px; margin-left: -6px; border-radius: 6px; }
+.tbar .wm { font-weight: 600; letter-spacing: -0.04em; font-size: 13.5px; }
+.tbar .right { margin-left: auto; display: flex; align-items: center; height: 100%; }
+.tbar .act { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 6px; color: #d4d4d4; font-size: 13px; }
+.tbar .wb { display: flex; height: 100%; margin-left: 6px; }
+.tbar .wb span { display: flex; align-items: center; justify-content: center; width: 40px; color: #a3a3a3; }
+
+/* home */
+.page { flex: 1; padding: 34px 44px; overflow: hidden; }
+.pagehead { display: flex; align-items: baseline; gap: 12px; margin-bottom: 22px; }
+.pagehead h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
+.pagehead span { color: #a3a3a3; font-size: 13px; }
+.devices { display: grid; grid-template-columns: 2.35fr 1fr; gap: 20px; align-items: end; }
+.card { position: relative; display: flex; flex-direction: column; border-radius: 12px; background: #1f2429; border: 1px solid #404040; overflow: hidden; }
+.card.hover { border-color: #737373; }
+.card .pic { display: flex; align-items: flex-end; justify-content: center; padding: 26px 26px 18px; }
+.card .pic iframe { width: 100%; aspect-ratio: 2.52; border: 0; background: transparent; pointer-events: none; }
+.card .meta { display: grid; grid-template-columns: 1fr auto; gap: 2px 14px; align-items: center; padding: 14px 18px 16px; border-top: 1px solid #404040; background: #222222; }
+.card .meta b { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.card .meta .st { display: flex; align-items: center; gap: 8px; color: #a3a3a3; font-size: 12.5px; }
+.card .meta .st i { width: 6px; height: 6px; border-radius: 50%; background: #8fd6a1; }
+.card .meta .unoff { font-size: 11px; color: #f0b35a; border: 1px solid rgba(240,179,90,.45); border-radius: 4px; padding: 0 5px; }
+.card .meta .open { grid-row: 1 / span 2; grid-column: 2; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 7px; border: 1px solid #404040; color: #f5f5f5; font-size: 13px; }
+.card.hover .meta .open { background: #f5f5f5; color: #1c1c1c; border-color: #f5f5f5; }
+.card .prof { grid-column: 1; color: #a3a3a3; font-size: 12.5px; }
+.card .prof span { display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: #ff2d00; margin-right: 6px; vertical-align: 0; }
+
+/* the M3 as its core will describe it */
+.m3 { display: flex; gap: 14px; align-items: center; width: 100%; }
+.m3 .screen { position: relative; flex: 1; aspect-ratio: 854 / 480; border-radius: 10px; overflow: hidden; background: #000; box-shadow: 0 0 0 5px #151515, 0 10px 24px -8px rgba(0,0,0,.8); }
+.m3 .screen img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.m3 .screen .w { position: absolute; width: 12.9%; aspect-ratio: 1; border-radius: 9px; border: 1.5px solid rgba(255,255,255,.3); }
+.m3 .dials { display: grid; gap: 12px; }
+.m3 .dials span { width: 44px; height: 44px; border-radius: 50%; background: radial-gradient(circle at 40% 35%, #3a3a3a, #121212 70%); box-shadow: 0 0 0 3px #151515; }
+
+.foot { display: flex; align-items: center; gap: 10px; margin-top: 24px; color: #a3a3a3; font-size: 13px; }
+.foot a { color: #f5f5f5; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: #525252; }
+
+/* the device view's bar, with its way back */
+.devbar { display: flex; align-items: center; gap: 22px; height: 56px; padding: 0 28px; border-bottom: 1px solid #404040; font-family: 'Barlow', system-ui, sans-serif; }
+.devbar .back { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px 0 6px; margin-left: -10px; border-radius: 7px; color: #d4d4d4; font-size: 14px; }
+.devbar .back.hover { background: #2e2e2e; color: #f5f5f5; }
+.devbar .brand { font-size: 17px; font-weight: 600; }
+.devbar .tab { color: #a3a3a3; font-weight: 500; font-size: 14.5px; }
+.devbar .tab.on { color: #f5f5f5; box-shadow: 0 2px 0 #f5f5f5; padding-bottom: 17px; margin-bottom: -18px; }
+.devbar .vr { width: 1px; height: 22px; background: #404040; }
+</style>
+</head>
+<body>
+<main>
+  <h1 class="t">Ectodeck home</h1>
+  <p class="lede">What Ectodeck opens on, now that it is a platform. It follows the pattern Logitech G Hub and SteelSeries GG settled on: your devices, each drawn as the real thing, and a click takes you into one. The Z10 below is the real keyboard view, reading your keyboard; the M3 shows a frame from its own renderer.</p>
+
+  <section>
+    <h2><b>01</b> Home</h2>
+    <p>Every connected device, drawn live: the Z10 lit as it is right now with its display running, the M3 showing what its screen shows. Under each, what you need to know at a glance, and the way in.</p>
+    <div class="desk"><div class="win" id="home">
+      <div class="tbar"><span class="home" id="mark"></span>
+        <span class="right"><span class="act">⚙&nbsp; Settings</span><span class="wb"><span>—</span><span>☐</span><span>✕</span></span></span></div>
+      <div class="page">
+        <div class="pagehead"><h1>Devices</h1><span>2 connected</span></div>
+        <div class="devices">
+          <div class="card hover">
+            <div class="pic"><iframe id="z10" title="EVGA Z10 RGB"></iframe></div>
+            <div class="meta">
+              <b>EVGA Z10 RGB</b>
+              <span class="open">Open ›</span>
+              <span class="st"><i></i><span id="fw">Connected</span></span>
+              <span class="prof" style="grid-column:1"><span></span>Profile 1 · Static red</span>
+            </div>
+          </div>
+          <div class="card">
+            <div class="pic"><div class="m3"><div class="screen" id="m3screen"><img src="/mock/m3/aquarium.jpg" alt=""></div><div class="dials"><span></span><span></span><span></span></div></div></div>
+            <div class="meta">
+              <b>VSDinside MagTran M3</b>
+              <span class="open">Open ›</span>
+              <span class="st"><i></i>Connected · 15 keys, 3 dials</span>
+              <span class="prof"><span style="background:#2b6cff"></span>Default · Aquarium</span>
+            </div>
+          </div>
+        </div>
+        <div class="foot">2 cores installed: EVGA Z10 RGB and MagTran M3. <a>Cores and devices</a></div>
+      </div>
+    </div></div>
+    <ul class="notes">
+      <li>Each card is as tall as its device, so the keyboard and the deck sit on one baseline, the way they sit on the desk, and neither floats in space.</li>
+      <li>The Z10's card is shown as the pointer is over it: its edge lightens and Open fills. The whole card opens the device, not only the button.</li>
+      <li>A device that is unplugged stays on the home, dimmed, with "Not connected", so its settings are still there when it comes back.</li>
+      <li>Settings in the title bar is Ectodeck's own: starting with the computer, the tray, and the cores.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><b>02</b> Inside a device, the way back</h2>
+    <p>The device's bar gains "Devices" at its start, the way back to the home. The mark and the wordmark in the title bar also go home.</p>
+    <div class="desk" style="padding:24px 0"><div class="win" style="height:auto">
+      <div class="tbar"><span class="home" id="mark2"></span><span class="right"><span class="act">⚙&nbsp; Settings</span><span class="wb"><span>—</span><span>☐</span><span>✕</span></span></span></div>
+      <div class="devbar"><span class="back hover">‹ Devices</span><span class="vr"></span><span class="brand">EVGA Z10 RGB</span><span class="tab on">Keys</span><span class="tab">Lighting</span><span class="tab">Settings</span></div>
+    </div></div>
+  </section>
+</main>
+<script>
+(async () => {
+  const mark = (await fetch('/mark.svg').then(r => r.text())).replace('<svg', '<svg width="16" height="16"');
+  for (const id of ['mark', 'mark2']) document.getElementById(id).innerHTML = mark + '<span class="wm">Ectodeck</span>';
+  // the M3's key windows over its screen: margins 43/20, key 110, on 854 x 480
+  const px = (854 - 86 - 110) / 4, py = (480 - 40 - 110) / 2, scr = document.getElementById('m3screen');
+  for (let i = 0; i < 15; i++) {
+    const d = document.createElement('span'); d.className = 'w';
+    d.style.left = ((43 + (i % 5) * px) / 854 * 100) + '%'; d.style.top = ((20 + Math.floor(i / 5) * py) / 480 * 100) + '%';
+    scr.append(d);
+  }
+  // the Z10: the app's own keyboard view, reading the keyboard, showing only the board
+  let html = await fetch('/index.html').then(r => r.text());
+  html = html.replace('<head>', `<head><base href="/"><script>
+      const __real = window.fetch;
+      window.fetch = (u, o) => /\\/api\\/(preview|record)/.test(String(u))
+        ? Promise.resolve(new Response('{"mode":null,"recording":false}', { headers: { 'content-type': 'application/json' } })) : __real(u, o);
+      addEventListener('beforeunload', e => e.stopImmediatePropagation(), true);
+    <\/script>`).replace('</head>', `<style>
+      html, body { background: transparent !important; overflow: hidden !important; scrollbar-gutter: auto !important; }
+      .tbar, .nav, .pws-head, #boardhint, section.panel, #view-macros, #boot { display: none !important; }
+      .page { padding: 0 !important; max-width: none !important; }
+      .pws { border: 0 !important; background: transparent !important; }
+      .pws-body { padding: 0 !important; }
+      .pws-body .board { width: 100% !important; }
+    </style></head>`);
+  const f = document.getElementById('z10');
+  f.srcdoc = html;
+  f.addEventListener('load', () => {
+    const poll = setInterval(() => {
+      const fw = f.contentWindow.eval("typeof S !== 'undefined' && S.dev ? S.dev.firmware : null");
+      if (fw != null) {
+        clearInterval(poll);
+        // the home shows the keyboard as it is, without the Keys view's marks
+        f.contentWindow.eval("S.view = 'display'; renderAll(); stopPreview();");
+        const minor = fw & 255;
+        document.getElementById('fw').innerHTML = `Connected · Firmware v${fw >> 8}.${minor}` + (minor >= 100 ? ` <span class="unoff">Unofficial build ${minor - 170}</span>` : '');
+      }
+    }, 300);
+  });
+})();
+</script>
+</body>
+</html>

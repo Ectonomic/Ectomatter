@@ -1,5 +1,5 @@
 :root {
-  --base: #1c1c1c;
+  --base: #222222;   /* the app's ground, a shade darker than the title bar's #262626 */
   --panel: #262626;
   --line: #404040;
   --cap: #141414;
