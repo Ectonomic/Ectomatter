@@ -7,27 +7,29 @@ html.framed { background: transparent; }
 html.framed body { border-radius: 10px; overflow: hidden; height: 100vh; overflow-y: auto; box-shadow: inset 0 0 0 1px #404040; }
 html.framed.maximized body { border-radius: 0; box-shadow: none; }
 
-.nav.tbar { height: 36px; gap: 2px; padding: 0 0 0 12px; background: #262626; border-bottom: 1px solid #404040; user-select: none; font-family: 'Geist', system-ui, sans-serif; }
+.tbar { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; height: 36px; gap: 2px; padding: 0 0 0 12px;
+  background: #262626; border-bottom: 1px solid #404040; user-select: none; font-family: 'Geist', system-ui, sans-serif; }
 .tbar .home { display: flex; align-items: center; gap: 7px; height: 26px; padding: 0 6px; margin-left: -6px; border-radius: 6px; }
 .tbar .home img { display: block; }
 .tbar .wm { font-weight: 600; letter-spacing: -0.04em; font-size: 13.5px; color: #f5f5f5; }
 .tbar .sep { color: #525252; margin: 0 6px; }
 .tbar .crumb { font-size: 13px; color: #f5f5f5; padding: 0 2px; }
-.tbar .navtabs { margin-left: 22px; gap: 2px; }
-.tbar .navtabs button { padding: 0 12px; font: 500 13px 'Geist', system-ui, sans-serif; }
-.tbar .status { margin-left: auto; font-size: 12px; }
-.tbar .conn { margin-left: 14px; font-size: 12px; }
-.tbar .conn .unoff { font-size: 10.5px; }
-.tbar .tact { display: inline-flex; align-items: center; gap: 6px; height: 26px; margin-left: 12px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: #d4d4d4; font: 500 12.5px 'Geist', system-ui, sans-serif; cursor: pointer; }
-.tbar .tact:hover { background: #2e2e2e; color: #f5f5f5; }
-.tbar .wbtns { display: flex; height: 100%; margin-left: 6px; }
+.tbar .wbtns { display: flex; height: 100%; margin-left: auto; }
 .tbar .wbtns button { display: flex; align-items: center; justify-content: center; width: 40px; height: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; color: #a3a3a3; cursor: default; }
 .tbar .wbtns button:hover { background: #2e2e2e; color: #f5f5f5; }
 .tbar .wbtns button.x:hover { background: #dc2626; color: #fff; }
-.win-macros .tbar .status { margin-left: auto; }
+
+/* the device's bar sits under the title bar and stays in view with it */
+.nav.devbar { top: 36px; }
+.devbar .status { margin-left: auto; }
+.devbar .conn { margin-left: 14px; }
+.devbar .tact { display: inline-flex; align-items: center; gap: 7px; height: 30px; margin-left: 16px; padding: 0 12px; border: 1px solid var(--line); border-radius: 7px; background: transparent; color: var(--ink); font: 500 13px 'Barlow', system-ui, sans-serif; cursor: pointer; }
+.devbar .tact:hover { background: #262626; }
+.win-macros .devbar .status { margin-left: 18px; }
 
 /* in an ordinary browser there is no window to move or close */
-html:not(.framed) .tbar .wbtns { display: none; }
+html:not(.framed) .tbar { display: none; }
+html:not(.framed) .nav.devbar { top: 0; }
 
 /* the edges a frameless window is resized from */
 .edge { position: fixed; z-index: 100; }

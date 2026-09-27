@@ -143,12 +143,17 @@ fn tray(app: &AppHandle) -> tauri::Result<()> {
 }
 
 pub fn run() {
-    // WebKitGTK's DMA-BUF renderer fails on NVIDIA under Wayland (the window
-    // dies with a protocol error), so Linux uses its other renderer unless the
-    // user has chosen otherwise.
+    // As Ectodeck's MagTran app does on Linux: WebKitGTK's DMA-BUF renderer
+    // fails on NVIDIA under Wayland (the window dies with a protocol error),
+    // and without compositing mode off the frameless window cannot be
+    // see-through at its corners, so it shows square instead of rounded.
+    // Either can still be set by the user. Nothing else runs yet, so setting
+    // the environment here is safe.
     #[cfg(target_os = "linux")]
-    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
-        unsafe { std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1") };
+    for var in ["WEBKIT_DISABLE_DMABUF_RENDERER", "WEBKIT_DISABLE_COMPOSITING_MODE"] {
+        if std::env::var_os(var).is_none() {
+            unsafe { std::env::set_var(var, "1") };
+        }
     }
 
     tauri::Builder::default()
