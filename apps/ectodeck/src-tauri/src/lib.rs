@@ -105,7 +105,7 @@ fn prepare_macro_editor(app: AppHandle) -> Result<(), String> {
 fn macro_window(app: &AppHandle, hash: String, visible: bool) -> tauri::Result<tauri::WebviewWindow> {
     WebviewWindowBuilder::new(app, "macros", WebviewUrl::App(format!("index.html#{hash}").into()))
         .title("EVGA Z10 RGB / Macro Editor")
-        .inner_size(1180.0, 470.0)
+        .inner_size(1080.0, 620.0)
         .decorations(false)
         .transparent(true)
         .min_inner_size(900.0, 420.0)
