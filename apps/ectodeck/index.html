@@ -13,6 +13,11 @@
   .win-macros #pws, .win-macros .navtabs, .win-macros .crumb:not(.mtitle), .win-macros .sep,
   .win-macros .conn, .win-macros #open-macros { display: none !important; }
   .win-main .mtitle { display: none; }
+  /* The keyboard fills the panel's width, as it did in a tall browser window.
+     Sized to a desktop window's height instead, it came out a third smaller,
+     too small for its display and its keycaps' grain to read cleanly. The
+     page scrolls when the window is short. */
+  .win-main .pws-body .board { width: 100%; }
   .win-macros .page { padding: 0; max-width: none; }
   .win-macros .mws { margin: 0; border: 0; border-radius: 0; }
   .win-macros .mws .sec-head { display: none; }
