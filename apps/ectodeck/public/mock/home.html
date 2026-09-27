@@ -54,11 +54,12 @@ ul.notes li { margin: 3px 0; }
 .home-ground { background: #1a1a1a; }   /* the home sits a step darker than the device screens */
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, 260px); gap: 28px 24px; }
 .tile { cursor: pointer; }
-.tile .sq { aspect-ratio: 1; border-radius: 14px; background: #1f2429; border: 1px solid #333; display: flex; align-items: center; justify-content: center; padding: 26px; transition: border-color .15s ease; }
-.tile.hover .sq { border-color: #8a8a8a; }
+.tile .sq { aspect-ratio: 1; border-radius: 14px; background: #262626; display: flex; align-items: center; justify-content: center; padding: 26px; transition: background-color .15s ease; }
+.tile.hover .sq { background: #303030; }     /* the tile under the pointer lightens; no outline */
 .tile .sq img, .tile .sq svg.drawn { display: block; max-width: 100%; max-height: 100%; width: 100%; height: auto; }
-.tile .sq .glyph { color: #8a8a8a; }
-.tile .sq .glyph svg { display: block; width: 72px; height: 72px; }
+.tile .sq .glyph { color: #a3a3a3; }
+.tile.hover .sq .glyph { color: #d4d4d4; }
+.tile .sq .glyph svg { display: block; width: 88px; height: 88px; }
 .tile b { display: block; margin-top: 10px; font-size: 14px; font-weight: 500; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tile small { display: block; text-align: center; font-size: 12px; color: #a3a3a3; }
 .tile.off { opacity: .45; }
@@ -90,6 +91,13 @@ ul.notes li { margin: 3px 0; }
 .mrail .grow { flex: 1; }
 .mrail .tip { position: absolute; left: 50px; top: 50%; transform: translateY(-50%); white-space: nowrap; padding: 5px 9px; border-radius: 6px; background: #3a3a3a; color: #f5f5f5; font-size: 12.5px; box-shadow: 0 6px 18px -6px rgba(0,0,0,.7); z-index: 3; }
 .mrail.open .tip { display: none; }
+/* the caret that opens and closes the rail: a glyph, not a row */
+.mrail .caret { flex: none; align-self: center; width: 28px; height: 24px; margin-top: 4px; padding: 0; border: 0; border-radius: 6px; background: none; color: #737373; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: margin .22s cubic-bezier(.2,.8,.2,1); }
+.mrail .caret:hover { color: #f5f5f5; background: #262626; }
+.mrail .caret svg { width: 16px; height: 16px; }
+.mrail .caret .l, .mrail.open .caret .r { display: none; }
+.mrail.open .caret .l { display: block; }
+.mrail.open .caret { align-self: flex-end; }
 /* ------------------------------------------------ (earlier passes) */
 .page { flex: 1; padding: 34px 40px; overflow: hidden; }
 .pagehead { display: flex; align-items: baseline; gap: 12px; margin-bottom: 20px; }
@@ -138,29 +146,29 @@ ul.notes li { margin: 3px 0; }
 <body>
 <main>
   <h1 class="t">Ectodeck home</h1>
-  <p class="lede">A minimal rail down the left, a shade of its own: Home, then one glyph for each device, named when you point at it. The button at its foot opens it into a blade with each device's name and status, animated, and the page makes room. The home is the devices' pictures and names, nothing else.</p>
+  <p class="lede">A minimal rail down the left, a shade of its own: Home, then one glyph for each device, named when you point at it. The button at its foot opens it into a blade with each device's name, animated, and the page makes room. The home is the devices' glyphs and names, nothing else.</p>
 
   <section>
     <h2><b>01</b> Home</h2>
-    <p>Only the devices: each one's picture in the same square, and its name. You pass through it on the way to a device.</p>
+    <p>Only the devices: each one's glyph for its kind, in the same plain grey square, and its name. You pass through it on the way to a device.</p>
     <div class="desk"><div class="win">
-      <div class="tbar"><span class="home mark"></span><span class="right"><span class="act gear"></span><span class="wb"><span>—</span><span>☐</span><span>✕</span></span></span></div>
+      <div class="tbar"><span class="home mark"></span><span class="right"><span class="wb"><span>—</span><span>☐</span><span>✕</span></span></span></div>
       <div class="body"><div class="rslot"><nav class="mrail" data-on="home" data-tip="m3"></nav></div><div class="page home-ground"><div class="tiles" id="tiles"></div></div></div>
     </div></div>
     <ul class="notes">
-      <li>A picture is the device's own artwork, a drawing Ectodeck makes from its layout, or its kind's glyph (section 03).</li>
+      <li>Every device shows its kind's glyph, from the standard set (section 03). Product pictures are kept for inside the device, where the editor works on a drawing of it.</li>
       <li>The only other thing a tile ever says is "Not connected", under the name of a device that is unplugged, which dims. The last tile shows one, as an example. Everything else, firmware and profiles included, is inside the device.</li>
-      <li>Closed, the rail has no labels or status: a device's name appears when you point at it (shown on the MagTran), the place you are in is lighter, and an unplugged device dims. Its foot button opens the blade (section 02 shows it open).</li>
+      <li>The rail never carries status. Closed, a device's name appears when you point at it (shown on the MagTran); open, it shows the names. The place you are in is lighter, and an unplugged device dims. Its foot button opens the blade (section 02 shows it open).</li>
       <li>Opened, the blade takes its room from the page, which narrows to make space. Whether it was left open is remembered.</li>
-      <li>Cores and devices live in Ectodeck's Settings, in the title bar.</li>
+      <li>Settings sits at the rail's foot, with cores and devices inside it; the title bar is left with only Ectodeck and the window's controls. The caret under it opens and closes the rail.</li>
     </ul>
   </section>
 
   <section>
     <h2><b>02</b> Inside a device</h2>
-    <p>The Z10 chosen in the rail, with the rail opened into its blade: each device's name and one line of status. It opens and closes with the button at its foot; try it in either window. This is the real editor, reading your keyboard.</p>
+    <p>The Z10 chosen in the rail, with the rail opened into its blade: each device's name, and nothing more. It opens and closes with the button at its foot; try it in either window. This is the real editor, reading your keyboard.</p>
     <div class="desk"><div class="win">
-      <div class="tbar"><span class="home mark"></span><span class="right"><span class="act gear"></span><span class="wb"><span>—</span><span>☐</span><span>✕</span></span></span></div>
+      <div class="tbar"><span class="home mark"></span><span class="right"><span class="wb"><span>—</span><span>☐</span><span>✕</span></span></span></div>
       <div class="body"><div class="rslot"><nav class="mrail open" data-on="z10"></nav></div><div class="devview"><iframe id="z10" title="EVGA Z10 RGB"></iframe></div></div>
     </div></div>
   </section>
@@ -224,15 +232,12 @@ async function z10Layout() {
   const pics = {
     z10: `<img src="/mock/z10-picture.png" alt="">`,
     m3: drawLayout(m3Layout(), 244),
-    ram: `<div class="glyph">${glyphSvg(G.memory)}</div>`,
   };
   const devices = [
     { id: 'z10', name: 'EVGA Z10 RGB', pic: pics.z10, glyph: G.keyboard, rail: '<i class="warn"></i>Unofficial firmware',
       lines: ['<i></i>Connected <span class="unoff">Unofficial firmware</span>', '<span class="sw" style="background:#ff2d00"></span>Profile 1 · Static red'] },
     { id: 'm3', name: 'VSDinside MagTran M3', pic: pics.m3, glyph: G.macropad, rail: '<i></i>Connected',
       lines: ['<i></i>Connected · 15 keys, 3 dials', '<span class="sw" style="background:#2b6cff"></span>Default · Aquarium'] },
-    { id: 'ram', name: 'Corsair Vengeance RGB DDR5', pic: pics.ram, glyph: G.memory, rail: '<i></i>Through OpenRGB',
-      lines: ['<i></i>Found by OpenRGB · lighting only', '<span class="sw" style="background:linear-gradient(90deg,#ff2d00,#ffd000,#22d36b,#2b6cff)"></span>Rainbow wave'] },
   ];
 
   // the rail: Home, each device's glyph (its name, and a line of status, when the blade is open), and the toggle
@@ -241,13 +246,14 @@ async function z10Layout() {
   for (const r of document.querySelectorAll('.mrail')) {
     const on = r.dataset.on, tip = r.dataset.tip;
     r.innerHTML = `<span class="b ${on === 'home' ? 'on' : ''}" title="Home">${glyphSvg(G.house)}<span class="tx"><b>Home</b></span></span><span class="gap"></span>`
-      + rows.map(d => `<span class="b dev ${on === d.id ? 'on' : ''} ${d.off ? 'off' : ''} ${tip === d.id ? 'hover' : ''}" title="${d.name}">${glyphSvg(d.glyph)}<span class="tx"><b>${d.name}</b><small>${d.line}</small></span>${tip === d.id ? `<span class="tip">${d.name}</span>` : ''}</span>`).join('')
-      + `<span class="grow"></span><span class="b toggle" title="Open or close the rail">${glyphSvg(G.sidebar)}<span class="tx"><b>Collapse</b></span></span>`;
-    r.querySelector('.toggle').addEventListener('click', () => r.classList.toggle('open'));
+      + rows.map(d => `<span class="b dev ${on === d.id ? 'on' : ''} ${d.off ? 'off' : ''} ${tip === d.id ? 'hover' : ''}" title="${d.name}">${glyphSvg(d.glyph)}<span class="tx"><b>${d.name}</b></span>${tip === d.id ? `<span class="tip">${d.name}</span>` : ''}</span>`).join('')
+      + `<span class="grow"></span><span class="b" title="Settings">${glyphSvg(G.gear)}<span class="tx"><b>Settings</b></span></span>`
+      + `<button class="caret" type="button" aria-label="Open or close the rail">${glyphSvg(G.caretright, 'r')}${glyphSvg(G.caretleft, 'l')}</button>`;
+    r.querySelector('.caret').addEventListener('click', () => r.classList.toggle('open'));
   }
 
   // the home: pictures and names
-  document.getElementById('tiles').innerHTML = devices.map((d, k) => `<div class="tile ${k === 0 ? 'hover' : ''}"><div class="sq">${d.pic}</div><b>${d.name}</b></div>`).join('')
+  document.getElementById('tiles').innerHTML = devices.map((d, k) => `<div class="tile ${k === 0 ? 'hover' : ''}"><div class="sq"><div class="glyph">${glyphSvg(d.glyph)}</div></div><b>${d.name}</b></div>`).join('')
     + `<div class="tile off"><div class="sq"><div class="glyph">${glyphSvg(G.headset)}</div></div><b>SteelSeries Arctis Nova</b><small>Not connected</small></div>`;
 
   // inside the Z10: the app's own device page, without its title bar, which the window above draws
