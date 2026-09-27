@@ -43,7 +43,7 @@ html:not(.framed) .mrail { top: 0; height: 100vh; }
 
 
 /* ------------------------------------------------ the home: each device's glyph and its name, nothing else */
-#home { background: #202020; padding: 34px 40px; font-family: 'Geist', system-ui, sans-serif; }   /* a step darker than the device's page */
+#home { background: var(--base); padding: 34px 40px; font-family: 'Geist', system-ui, sans-serif; }   /* the same ground as the device's page */
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, 260px); gap: 28px 24px; }
 .tile { display: block; padding: 0; border: 0; background: none; color: #f5f5f5; font: inherit; text-align: center; cursor: pointer; }
 .tile .sq { display: flex; align-items: center; justify-content: center; aspect-ratio: 1; border-radius: 14px; background: #262626; color: #a3a3a3; transition: background-color .15s ease, color .15s ease; }

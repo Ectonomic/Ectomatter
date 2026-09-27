@@ -1,5 +1,5 @@
 :root {
-  --base: #222222;   /* the app's ground, a shade darker than the title bar's #262626 */
+  --base: #202020;   /* the app's ground, the home's shade: the Z10's page and the Macro Editor's workspace sit on it too */
   --panel: #262626;
   --line: #404040;
   --cap: #141414;
@@ -386,7 +386,7 @@ input[type=checkbox] { accent-color: var(--ink); width: 16px; height: 16px; }
 .macro-list .on { grid-column: 3; grid-row: 1 / span 2; display: flex; gap: 4px; }
 .macro-list button.dirty .name::after { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--warn); margin-left: 7px; vertical-align: 2px; }
 
-.ws { display: grid; grid-template-rows: auto 1fr auto; min-height: 660px; min-width: 0; }
+.ws { display: grid; grid-template-rows: auto 1fr auto; min-height: 660px; min-width: 0; background: var(--base); }
 .ws.empty-ws { place-items: center; }
 .ws-head .title { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-head .title-in { font-size: 14px; font-weight: 600; background: var(--panel); border: 1px solid #737373; border-radius: 6px; padding: 4px 8px; width: 320px; }
