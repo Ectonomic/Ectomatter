@@ -1,6 +1,6 @@
 # Ectodeck core protocol
 
-Draft 1, 2026-09-26. For review before anything is built on it.
+Draft 2, 2026-09-26. For review before anything is built on it.
 
 Ectodeck is one app for every device on a desk. It follows the model RetroArch made work for emulators: one frontend, and the engines that know each device brought in as **cores**. The frontend owns the windows, the tray, profiles, and every feature that spans devices. A core owns the truth about the devices it handles: how to find them, what they can do, and how to talk to them.
 
@@ -159,7 +159,13 @@ An **action** is one of a fixed set the frontend knows how to present: a key (`{
 ]
 ```
 
-A deck whose keys each have their own small screen offers one display per key: `{"control": "k0", "kind": "image", "width": 72, "height": 72}`. A deck like the M3, whose keys are windows onto one screen behind them, offers that screen: `{"control": "panel", "kind": "image", "width": 854, "height": 480, "windows": [...]}`, where `windows` is the geometry Ectodeck already uses to place each key's image and to line a background up behind the keys. `display/show {device, control, text | image}` puts something on it, where an image is a PNG. The frontend decides what to show, such as system stats, key images or a background, so every display on the desk can show every kind of content.
+A deck whose keys each have their own small screen offers one display per key: `{"control": "k0", "kind": "image", "width": 72, "height": 72}`. A deck like the M3, whose keys are windows onto one screen behind them, offers that screen: `{"control": "panel", "kind": "image", "width": 854, "height": 480, "windows": [...]}`, where `windows` is the geometry Ectodeck already uses to place each key's image and to line a background up behind the keys.
+
+A core draws its own displays. The M3 is a whole screen with magnetic keys over it, and its core composes that screen (key images, labels, animated backgrounds) the way Ectodeck's M3 plugin does today. The frontend asks for what it needs to show you:
+
+- **Live feed.** `display/feed/start {device, control, rate}` makes the core send `display/frame` notifications with what the display is showing right now (a PNG for an image display, the rows of text for a text display), up to `rate` a second, until `display/feed/stop`. The frontend shows the feed in the device's picture, so the screen on your desk and the one in the app match.
+- **Preview.** `display/preview {device, control, content}` asks the core to draw how some content would look, such as a new background or a key's image, without sending it to the device, and returns the frame. The frontend shows it before you apply anything.
+- **Content.** `display/show {device, control, content}` applies it. Content is what to show, such as text, an image, a key's label and icon, or a background by name; each core lists what it accepts in its description.
 
 ### input: presses, turns and slides
 
@@ -210,6 +216,7 @@ These are why the platform is more than a set of separate apps:
 - **Profiles that follow the app in front,** switching every device together.
 - **One Macro Editor,** for devices that store macros and for devices whose macros the frontend plays.
 - **Lighting across the whole desk,** drawn once by the frontend and streamed to every device that offers `direct`.
+- **Live pictures of every display,** from each core's feed, with previews before anything is applied.
 - **Content for any display:** system stats, clocks, images, key labels.
 - **Actions.** A control assigned to `{"host": ...}` runs an action: open an app, send a shortcut, control media, or run a Stream Deck plugin's action. The Stream Deck plugin host is OpenDeck's code, which is GPL, so it runs as its own service beside the frontend rather than inside it.
 - **Backups** before any write, for every device with its own memory.
@@ -235,7 +242,7 @@ The Z10 and the M3 sit at opposite ends: one keeps everything on the device, the
 
 ## 10. Open questions
 
-1. **Who draws a deck's screen.** Today Ectodeck's M3 plugin composes the whole 854 by 480 screen itself (key images, labels and animated backgrounds) and sends it. Should the frontend compose it and send finished images (so every deck and every display draws the same way, and backgrounds become a frontend feature for any screen), or should the deck core keep composing? The draft says the frontend composes, which moves the background renderers into the frontend.
-2. **Discovery on Windows and macOS.** `matches` by USB id works everywhere, but a core may still need the system's permission first (Input Monitoring on macOS). The frontend should explain that step itself rather than leave it to each core.
-3. **A catalogue of cores.** Bundled cores are enough to start. Downloading cores later means signing them, so a core's source is known before it runs.
-4. **Recording on Windows.** Taking one keyboard's input for a recording has no clean route on Windows; the Z10 core may have to record without keeping keys from other apps there.
+Settled in review: cores draw their own displays and the frontend gets live feeds and previews (section 5, displays); cores will be offered from a catalogue later, signed so a core's source is known before it runs.
+
+1. **System permissions.** Each system asks once before an app may do certain things: on macOS, Input Monitoring (to read a keyboard's presses, which recording needs) and Accessibility (to send keystrokes, which shortcut actions need); on Linux, a rule installed once with admin rights so the app can reach the devices without running as administrator; on Windows, usually nothing. A core reports that it needs one (`device/status` with `"needs": "input-monitoring"`), and the frontend explains the step in plain words at the moment it is needed. The exact list grows as cores find what they need.
+2. **Recording on Windows.** Windows has no clean way for one app to take one keyboard for itself, so while a macro is recorded there, what you press also reaches the window in front. The Macro Editor will keep itself in front while recording so presses land in Ectodeck; shortcuts Windows handles itself, like the Windows key, still act. To settle when the Windows build is made.
