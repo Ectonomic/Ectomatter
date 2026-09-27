@@ -876,17 +876,22 @@ function zoneChips(e) {
 // Every drop-down in the editor is one of these: a panel fixed to the screen
 // under the button that opened it, or above it when there is no room below.
 // A click outside it, Escape, or leaving the window closes it, and so does a
-// second click on the button that opened it.
-function openMenu(anchor, build, { width, align = 'left' } = {}) {
+// second click on the button that opened it. Closed any of those ways, without
+// a choice made, its `onDismiss` runs: menus opened from the macro's chain use
+// it to let go of the step or insert point they were opened on.
+function openMenu(anchor, build, { width, align = 'left', onDismiss } = {}) {
   // This click is the second one on the button whose menu it just closed. Some
   // buttons are redrawn by their own click (a step, an insert point), so the
   // same button is also known by where it sits.
   const shut = S.menuShut, r0 = shut?.rect, r1 = anchor.getBoundingClientRect();
   const same = shut && (shut.anchor === anchor || (Math.abs(r0.left - r1.left) < 2 && Math.abs(r0.top - r1.top) < 2 && Math.abs(r0.width - r1.width) < 2));
-  if (same && performance.now() - shut.at < 800) { S.menuShut = null; return; }
+  if (same && performance.now() - shut.at < 800) { S.menuShut = null; shut.onDismiss?.(); return; }
   S.menuShut = null;
-  // opened from the keyboard, the button's second press has no mousedown before it
-  if (S.menu && S.menu.anchor === anchor) { closeMenu(); return; }
+  // Opened from the keyboard, the button's second press has no mousedown before
+  // it. A choice in the open menu that opens the next one on the same button
+  // (Insert here, then Key) is not a second press.
+  const fromMenu = S.menu && window.event && S.menu.m.contains(window.event.target);
+  if (S.menu && S.menu.anchor === anchor && !fromMenu) { const d = S.menu.onDismiss; closeMenu(); d?.(); return; }
   closeMenu();
   const m = el('div', { class: 'menu float', role: 'menu' });
   if (width) m.style.width = width + 'px';
@@ -908,13 +913,21 @@ function openMenu(anchor, build, { width, align = 'left' } = {}) {
     if (m.contains(e.target)) return;
     // pressed on its own button: close now, and let that button's click, which
     // follows, know not to open it again
-    if (anchor.contains(e.target)) S.menuShut = { anchor, rect: anchor.getBoundingClientRect(), at: performance.now() };
+    if (anchor.contains(e.target)) { S.menuShut = { anchor, rect: anchor.getBoundingClientRect(), at: performance.now(), onDismiss }; closeMenu(); return; }
     closeMenu();
+    // Let go only once this press's click has happened, so a click on another
+    // step or insert point lands on it before the chain is redrawn; a press
+    // that never becomes a click (a drag) lets go a moment later.
+    if (onDismiss) {
+      const run = () => { clearTimeout(t); removeEventListener('click', run, true); onDismiss(); };
+      const t = setTimeout(run, 1000);
+      addEventListener('click', run, true);
+    }
   };
-  const esc = e => { if (e.key === 'Escape') { e.stopPropagation(); closeMenu(); } };
-  const leave = () => closeMenu();
+  const esc = e => { if (e.key === 'Escape') { e.stopPropagation(); closeMenu(); onDismiss?.(); } };
+  const leave = () => { closeMenu(); onDismiss?.(); };
   setTimeout(() => { addEventListener('mousedown', away, true); addEventListener('keydown', esc, true); addEventListener('blur', leave); });
-  S.menu = { m, anchor, off: () => { removeEventListener('mousedown', away, true); removeEventListener('keydown', esc, true); removeEventListener('blur', leave); } };
+  S.menu = { m, anchor, onDismiss, off: () => { removeEventListener('mousedown', away, true); removeEventListener('keydown', esc, true); removeEventListener('blur', leave); } };
   m.querySelector('input')?.focus();
   return m;
 }
@@ -1515,20 +1528,22 @@ function insertWait() {
   S.editWait = i; renderMacros();
 }
 
-function keyPicker(anchor, kind, on, current) {
+// what dismissing a menu opened from the chain does: nothing stays chosen
+const letGo = () => { S.ins = null; S.selStep = null; renderMacros(); };
+function keyPicker(anchor, kind, on, current, onDismiss) {
   const groups = kind === 'media'
     ? [['Media keys', Object.entries(MACRO_MEDIA).map(([c, n]) => [n, { media: +c }])]]
     : [['Modifiers', [112, 113, 114, 115, 116, 117, 118, 119].map(c => [MACRO_KEYS[c], { code: c }])],
        ['Keys', Object.entries(MACRO_KEYS).filter(([c]) => +c < 112).map(([c, n]) => [n, { code: +c }])]];
-  openMenu(anchor, m => pickList(m, groups, current, on, kind === 'media' ? 'Search media keys' : 'Search keys'), { width: 260 });
+  openMenu(anchor, m => pickList(m, groups, current, on, kind === 'media' ? 'Search media keys' : 'Search keys'), { width: 260, onDismiss });
 }
 function insertMenu(anchor) {
   openMenu(anchor, m => {
     m.append(mHead('Insert here'),
-      mItem('Key', () => keyPicker(anchor, 'key', v => insertTap(v))),
-      mItem('Media key', () => keyPicker(anchor, 'media', v => insertTap(v))),
+      mItem('Key', () => keyPicker(anchor, 'key', v => insertTap(v), undefined, letGo)),
+      mItem('Media key', () => keyPicker(anchor, 'media', v => insertTap(v), undefined, letGo)),
       mItem('Wait', () => { closeMenu(); insertWait(); }));
-  }, { width: 220 });
+  }, { width: 220, onDismiss: letGo });
 }
 function stepMenu(anchor, i) {
   const d = mdraft();
@@ -1540,9 +1555,9 @@ function stepMenu(anchor, i) {
       el('hr'),
       mItem('Change key ›', () => keyPicker(anchor, 'media' in st ? 'media' : 'key', v => {
         delete st.code; delete st.media; Object.assign(st, v); renderMacros();
-      }, 'media' in st ? { media: st.media } : { code: st.code })),
+      }, 'media' in st ? { media: st.media } : { code: st.code }, letGo)),
       mItem('Remove', () => { d.steps.splice(i, 1); S.selStep = null; S.ins = null; closeMenu(); renderMacros(); }, { cls: 'danger' }));
-  }, { width: 220 });
+  }, { width: 220, onDismiss: letGo });
 }
 function timingMenu(anchor) {
   const d = mdraft();
