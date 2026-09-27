@@ -676,12 +676,12 @@ function effectColors(L, t) {
 }
 
 // The Z10's LEDs do not show a pure colour: sent FF0000, a key looks like
-// FF6000 (orange); sent 0000FF, like 0040FF; sent 00FF00, like 00FF40. The
+// FF6000 (orange); sent 0000FF, like 0060FF; sent 00FF00, like 00FF60. The
 // keyboard on screen shows a colour as the keys do, so each channel spills
-// into another in proportion: red and blue into green (0x60 and 0x40 at full),
-// green into blue (0x40 at full). The colours chosen and sent are left as
+// into another in proportion: red and blue into green, and green into blue,
+// 0x60 of each at full. The colours chosen and sent are left as
 // they are.
-const LED_SPILL = { redToGreen: 0x60 / 0xff, blueToGreen: 0x40 / 0xff, greenToBlue: 0x40 / 0xff };
+const LED_SPILL = { redToGreen: 0x60 / 0xff, blueToGreen: 0x60 / 0xff, greenToBlue: 0x60 / 0xff };
 const ledLook = ([r, g, b]) => [
   r | 0,
   Math.min(255, g + r * LED_SPILL.redToGreen + b * LED_SPILL.blueToGreen) | 0,
