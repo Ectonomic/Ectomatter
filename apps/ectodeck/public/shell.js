@@ -8,6 +8,15 @@
 (() => {
   const body = document.body;
   body.classList.add('win-' + window.__window);
+  // The Macro Editor shows only its editor; while the keyboard is read, it
+  // shows the same notice the main window does, where its editor will be.
+  if (window.__window === 'macros') {
+    const wait = document.createElement('div');
+    wait.className = 'mboot';
+    wait.append(document.getElementById('boot'));
+    document.querySelector('main.page').prepend(wait);
+    return;
+  }
   if (window.__window !== 'main') return;
 
   // the rail's own marks, from the same outline set as the rest of the frame

@@ -21,7 +21,13 @@
   .win-macros .page { padding: 0; max-width: none; }
   .win-macros .mws { margin: 0; border: 0; border-radius: 0; }
   .win-macros .mws .sec-head { display: none; }
-  .win-macros .mws .ws { min-height: calc(100vh - 37px); }
+  /* The Macro Editor is one device's window, named in its title bar, so it has
+     no device bar: its messages sit beside its Save button instead. */
+  .win-macros .devbar { display: none !important; }
+  .win-macros .mws .ws { min-height: calc(100vh - 36px); }
+  html:not(.framed) .win-macros .mws .ws { min-height: 100vh; }
+  .win-macros .mboot { display: flex; align-items: center; justify-content: center; min-height: calc(100vh - 36px); }
+  .ws-foot .status { margin: 0 8px 0 auto; }
 </style>
 </head>
 <body>
@@ -30,8 +36,7 @@
      moves the window. -->
 <header class="tbar" data-tauri-drag-region>
   <span class="home"><img src="/mark.svg" alt="" width="16" height="16" draggable="false"><span class="wm">Ectodeck</span></span>
-  <span class="sep mtitle" aria-hidden="true">/</span>
-  <span class="crumb mtitle">Macro Editor</span>
+  <span class="crumb mtitle">EVGA Z10 RGB Macro Editor</span>
   <span class="wbtns">
     <button type="button" id="w-min" aria-label="Minimise"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10" stroke="currentColor" stroke-width="1.4"/></svg></button>
     <button type="button" id="w-max" aria-label="Maximise"><svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" rx="1" stroke="currentColor" stroke-width="1.4" fill="none"/></svg></button>

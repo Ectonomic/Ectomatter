@@ -91,6 +91,28 @@ fn open_macro_editor(app: AppHandle, index: Option<u8>) -> Result<(), String> {
     show_macro_editor(&app, index).map_err(|e| e.to_string())
 }
 
+/// Build the Macro Editor window out of sight, once the main window has read
+/// the keyboard, so it has read the keyboard too by the time it is opened;
+/// built only when first opened, it showed nothing for the seconds that takes.
+#[tauri::command]
+fn prepare_macro_editor(app: AppHandle) -> Result<(), String> {
+    if app.get_webview_window("macros").is_some() {
+        return Ok(());
+    }
+    macro_window(&app, "macros".into(), false).map(|_| ()).map_err(|e| e.to_string())
+}
+
+fn macro_window(app: &AppHandle, hash: String, visible: bool) -> tauri::Result<tauri::WebviewWindow> {
+    WebviewWindowBuilder::new(app, "macros", WebviewUrl::App(format!("index.html#{hash}").into()))
+        .title("EVGA Z10 RGB Macro Editor")
+        .inner_size(1180.0, 940.0)
+        .decorations(false)
+        .transparent(true)
+        .min_inner_size(900.0, 600.0)
+        .visible(visible)
+        .build()
+}
+
 fn show_macro_editor(app: &AppHandle, index: Option<u8>) -> tauri::Result<()> {
     let hash = match index { Some(i) => format!("macros/{i}"), None => "macros".into() };
     if let Some(w) = app.get_webview_window("macros") {
@@ -99,13 +121,7 @@ fn show_macro_editor(app: &AppHandle, index: Option<u8>) -> tauri::Result<()> {
         w.unminimize()?;
         return w.set_focus();
     }
-    WebviewWindowBuilder::new(app, "macros", WebviewUrl::App(format!("index.html#{hash}").into()))
-        .title("Macro Editor")
-        .inner_size(1180.0, 800.0)
-        .decorations(false)
-        .transparent(true)
-        .min_inner_size(900.0, 600.0)
-        .build()?;
+    macro_window(app, hash, true)?;
     Ok(())
 }
 
@@ -171,7 +187,7 @@ pub fn run() {
                 let _ = w.hide();
             }
         })
-        .invoke_handler(tauri::generate_handler![state, save, write_macro, activate, preview, record, lcd, open_macro_editor])
+        .invoke_handler(tauri::generate_handler![state, save, write_macro, activate, preview, record, lcd, open_macro_editor, prepare_macro_editor])
         .run(tauri::generate_context!())
         .expect("Ectodeck could not start");
 }

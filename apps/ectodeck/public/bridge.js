@@ -38,6 +38,9 @@
   // Open the Macro Editor window, on macro `n` if given.
   window.__openMacroEditor = n => T ? T.core.invoke('open_macro_editor', { index: n ?? null }) : (location.hash = n ? `#macros/${n}` : '#macros');
 
+  // Build the Macro Editor window out of sight, so it opens ready.
+  window.__prepareMacroEditor = () => { if (T) T.core.invoke('prepare_macro_editor').catch(() => {}); };
+
   // The two windows keep each other current: a macro saved in the Macro
   // Editor, or a profile saved in the main window, is sent to the other.
   window.__tell = (what, data) => { if (T) T.event.emit(what, data).catch(() => {}); };

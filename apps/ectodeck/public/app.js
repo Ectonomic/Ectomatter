@@ -159,8 +159,11 @@ function el(tag, attrs = {}, ...kids) {
   return e;
 }
 
+// In the Macro Editor window the messages sit in the workspace's foot, which is
+// rebuilt as the macro changes, so the one element is kept and moved along.
+const STATUS = document.getElementById('status');
 function status(msg, kind = '') {
-  const s = $('#status');
+  const s = STATUS;
   s.textContent = msg; s.className = 'status ' + kind;
 }
 
@@ -382,6 +385,7 @@ async function refresh() {
     return;
   }
   $('#boot').remove();
+  document.querySelector('.mboot')?.remove();
   $('#conn').classList.remove('wait');
   for (const n of [1, 2, 3, 4, 5]) if (!S.drafts[n]) S.drafts[n] = clone(pick(saved(n)));
   S.editing = S.dev.active || 1;
@@ -412,7 +416,7 @@ async function refresh() {
 function settleWindow() {
   document.body.classList.add('win-' + window.__window);
   if (window.__window === 'macros') {
-    document.title = 'Macro Editor';
+    document.title = 'EVGA Z10 RGB Macro Editor';
     S.view = 'keys'; S.macrosOpen = true;
     const pickMacro = () => {
       const n = +(location.hash.split('/')[1] || 0);
@@ -431,6 +435,7 @@ function settleWindow() {
     });
   } else {
     document.title = 'Ectodeck';
+    window.__prepareMacroEditor();
     window.__hear('macros', macros => { S.dev.macros = macros; renderAll(); });
   }
 }
@@ -1425,6 +1430,7 @@ function workspace() {
   const dirty = macroDirty(n) && !rec;
   const foot = el('div', { class: 'ws-foot' }, playsEl,
     locked ? el('span', { class: 'readonly' }, 'This macro holds something the editor cannot rebuild exactly, so it is shown read only.') : null,
+    window.__window === 'macros' ? STATUS : null,
     el('button', { class: 'ghost', disabled: !dirty || S.busy, onclick: revertMacro }, 'Revert'),
     el('button', { class: 'primary', disabled: !dirty || S.busy || (!d.steps.length), onclick: saveMacro }, 'Save macro'));
   return el('div', { class: 'ws' }, head, canvas, foot);

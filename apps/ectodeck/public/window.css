@@ -18,7 +18,7 @@ html.framed.maximized body { border-radius: 0; }
 .tbar .home img { display: block; }
 .tbar .wm { font-weight: 600; letter-spacing: -0.04em; font-size: 13.5px; color: #f5f5f5; }
 .tbar .sep { color: #525252; margin: 0 6px; }
-.tbar .crumb { font-size: 13px; color: #f5f5f5; padding: 0 2px; }
+.tbar .crumb { font-size: 13px; color: #d4d4d4; margin-left: 14px; }
 .tbar .wbtns { display: flex; height: 100%; margin-left: auto; }
 .tbar .wbtns button { display: flex; align-items: center; justify-content: center; width: 40px; height: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; color: #a3a3a3; cursor: default; }
 .tbar .wbtns button:hover { background: #2e2e2e; color: #f5f5f5; }
