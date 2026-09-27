@@ -23,7 +23,7 @@ window.DESK_GLYPHS = (() => {
   // A macro pad to match: solid keys in a grid of four by three, three dials.
   let pad = `<rect x="6" y="14" width="52" height="36" rx="4"/>`;
   for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) pad += solid(10.5 + c * 8.2, 19.5 + r * 8.7, 6.4, 6.4);
-  pad += `<circle cx="49.5" cy="23.2" r="2.7"/><circle cx="49.5" cy="32" r="2.7"/><circle cx="49.5" cy="40.8" r="2.7"/>`;
+  pad += `<circle cx="49.5" cy="22.7" r="2.7"/><circle cx="49.5" cy="31.4" r="2.7"/><circle cx="49.5" cy="40.1" r="2.7"/>`;
 
   // a mouse from above: its two buttons, its wheel
   const mouse = `<path d="M32 6c-8.8 0-14 6.4-14 16v16c0 11 6.3 20 14 20s14-9 14-20V22c0-9.6-5.2-16-14-16z"/><path d="M32 6v17M18 23h28"/><rect x="29.6" y="11" width="4.8" height="8" rx="2.4" fill="currentColor" stroke="none"/>`;
