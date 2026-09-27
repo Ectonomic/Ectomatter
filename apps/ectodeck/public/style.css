@@ -421,7 +421,11 @@ input[type=checkbox] { accent-color: var(--ink); width: 16px; height: 16px; }
 .cn:hover::before, .cn.hot::before { background: #a3a3a3; }
 .cn.plain { cursor: default; }
 .cn.plain:hover::before { background: #4a4a4a; }
-.cn .plus { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 20px; height: 20px; border-radius: 50%; background: #e5e5e5; color: #171717; font: 700 15px/20px 'Barlow', sans-serif; text-align: center; z-index: 2; }
+/* The plus is drawn, not typed: a font's "+" sits where its designer put it
+   in the line, off the circle's centre, so two bars are laid on the circle's
+   exact middle instead. */
+.cn .plus { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 20px; height: 20px; border-radius: 50%; z-index: 2; font-size: 0; color: transparent;
+  background: linear-gradient(#171717, #171717) center / 10px 2px no-repeat, linear-gradient(#171717, #171717) center / 2px 10px no-repeat, #e5e5e5; }
 .ins { display: inline-block; width: 2px; height: 22px; margin-left: 8px; border-radius: 1px; background: #525252; cursor: pointer; }
 .ins.off { opacity: .25; }
 .caret { display: inline-block; width: 2px; height: 26px; margin-left: 6px; background: #ff5b5b; animation: flash 1s steps(2, jump-none) infinite; }
