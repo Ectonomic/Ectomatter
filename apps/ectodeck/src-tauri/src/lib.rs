@@ -98,6 +98,35 @@ async fn sliders(app: State<'_, App>) -> Result<Value, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Hold the dimmer at a level, or with none give the slider it back.
+#[tauri::command]
+async fn set_dimmer(app: State<'_, App>, level: Option<u8>) -> Result<bool, String> {
+    let kb = app.kb.clone();
+    tauri::async_runtime::spawn_blocking(move || kb.set_dimmer(level))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+/// Set the computer's output or microphone volume, 0 to 1, through
+/// PipeWire's own control. This is how a slider put on either one sets it
+/// exactly where the slider is, instead of sending volume keys.
+#[tauri::command]
+fn set_audio(target: String, level: f32) -> Result<(), String> {
+    let node = match target.as_str() {
+        "output" => "@DEFAULT_AUDIO_SINK@",
+        "microphone" => "@DEFAULT_AUDIO_SOURCE@",
+        _ => return Err(format!("no audio target called {target}")),
+    };
+    let level = level.clamp(0.0, 1.0);
+    let ok = std::process::Command::new("wpctl")
+        .args(["set-volume", node, &format!("{level:.3}")])
+        .status()
+        .map_err(|e| format!("could not run wpctl: {e}"))?
+        .success();
+    if ok { Ok(()) } else { Err("wpctl refused the volume".into()) }
+}
+
 /// Retail or custom firmware, and what the keyboard's build can do (see
 /// ectotype_core::firmware). The app offers a custom feature only if listed.
 #[tauri::command]
@@ -206,7 +235,7 @@ pub fn run() {
                 let _ = w.hide();
             }
         })
-        .invoke_handler(tauri::generate_handler![state, save, write_macro, activate, preview, record, lcd, open_macro_editor, prepare_macro_editor, firmware, sliders])
+        .invoke_handler(tauri::generate_handler![state, save, write_macro, activate, preview, record, lcd, open_macro_editor, prepare_macro_editor, firmware, sliders, set_dimmer, set_audio])
         .run(tauri::generate_context!())
         .expect("Ectodeck could not start");
 }
