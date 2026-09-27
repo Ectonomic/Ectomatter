@@ -1,6 +1,6 @@
 # Ectodeck core protocol
 
-Draft 2, 2026-09-26. For review before anything is built on it.
+Draft 3, 2026-09-26. For review before anything is built on it. Draft 3 takes in the review of the M3 plugin's author.
 
 Ectodeck is one app for every device on a desk. It follows the model RetroArch made work for emulators: one frontend, and the engines that know each device brought in as **cores**. The frontend owns the windows, the tray, profiles, and every feature that spans devices. A core owns the truth about the devices it handles: how to find them, what they can do, and how to talk to them.
 
@@ -40,11 +40,14 @@ Each core is a folder with a manifest, `core.json`:
     "windows-x86_64": "bin/evga-z10.exe",
     "macos-aarch64": "bin/evga-z10"
   },
-  "matches": [{ "usb": { "vendor": "3842", "product": "2611" } }]
+  "matches": [{ "usb": { "vendor": "3842", "product": "2611", "usagePage": "0008", "usage": "004B" } }],
+  "uses": []
 }
 ```
 
-`matches` lets the frontend start a core only when one of its devices is plugged in, the way RetroArch picks a core for a file. A core that finds its devices another way, such as the OpenRGB core, which asks the OpenRGB server, declares `{ "always": true }` instead.
+`matches` lets the frontend start a core only when one of its devices is plugged in, the way RetroArch picks a core for a file. A device often shows several interfaces and only one of them is the one the core talks to (the Z10's is the LED-indicator collection, usage page 0x08; the M3's is usage page 0xFFA0, usage 1), so a match may name an `interface`, a `usagePage` and a `usage` as well as the vendor and product.
+
+`uses` lists what a core does for itself beyond talking to its devices, so the frontend can tell you before the core first runs: `"sound-capture"` (reading what your computer is playing, which the M3's music backgrounds do) and `"network"` (the M3's weather backgrounds fetch forecasts and alerts). A core that finds its devices another way, such as the OpenRGB core, which asks the OpenRGB server, declares `{ "always": true }` instead.
 
 ### Messages
 
@@ -163,13 +166,36 @@ A deck whose keys each have their own small screen offers one display per key: `
 
 A core draws its own displays. The M3 is a whole screen with magnetic keys over it, and its core composes that screen (key images, labels, animated backgrounds) the way Ectodeck's M3 plugin does today. The frontend asks for what it needs to show you:
 
-- **Live feed.** `display/feed/start {device, control, rate}` makes the core send `display/frame` notifications with what the display is showing right now (a PNG for an image display, the rows of text for a text display), up to `rate` a second, until `display/feed/stop`. The frontend shows the feed in the device's picture, so the screen on your desk and the one in the app match.
-- **Preview.** `display/preview {device, control, content}` asks the core to draw how some content would look, such as a new background or a key's image, without sending it to the device, and returns the frame. The frontend shows it before you apply anything.
-- **Content.** `display/show {device, control, content}` applies it. Content is what to show, such as text, an image, a key's label and icon, or a background by name; each core lists what it accepts in its description.
+- **Live feed.** `display/feed/start {device, control, rate}` starts a feed of what the display is showing right now, at no more than `rate` frames a second (the frontend asks for about 30; the app needs no more), until `display/feed/stop`. The frontend shows it in the device's picture, so the screen on your desk and the one in the app match.
+- **Preview.** Nearly everything on a screen like the M3's moves, so one still frame would misrepresent it. A preview is a short feed of its own: `display/preview/start {device, control, content, rate}` draws how some content would look, such as a new background, without sending it to the device, until `display/preview/stop`. A preview running beside the live screen roughly doubles the core's drawing work, so the frontend runs one only while it is on screen.
+- **Content.** `display/show {device, control, content}` applies it. Content is what to show, such as text, an image, a key's label and icon, or a background by name.
+
+**Frames travel on their own channel.** Text displays send their rows in the feed's notifications. Image frames are too large for the message line (60 frames a second of JPEG is several megabytes a second), so `display/feed/start` and `display/preview/start` answer with a frame channel: a local socket (a named pipe on Windows) on which each frame arrives as a small header (`type`, `width`, `height`, `length`) and then its bytes. A frame is whatever the core already makes, JPEG or PNG, as its header says; the M3 core already compresses every frame it sends the deck as a JPEG, so the feed costs it nothing extra.
+
+**What a display can show is a catalogue.** An image display lists the content it accepts in its description:
+
+```json
+{ "control": "panel", "kind": "image", "width": 854, "height": 480, "windows": [...],
+  "content": {
+    "backgrounds": [
+      { "id": "aquarium", "label": "Aquarium", "group": "Scenes", "thumbnail": "thumbs/aquarium.jpg",
+        "settings": { "fish": { "type": "int", "min": 1, "max": 30, "label": "Fish" } } },
+      { "id": "weather", "label": "Weather", "group": "Scenes", "thumbnail": "thumbs/weather.jpg",
+        "settings": { "place": { "type": "place", "label": "Place" }, "intensity": { "type": "number", "min": 0, "max": 1, "step": 0.05 } } }
+    ],
+    "keys": { "image": true, "label": true }
+  } }
+```
+
+Each background carries its own settings in the shared settings language, and the catalogue can change: when you add a shader file of your own, the core sends `display/catalog/changed` and the frontend reads the list again.
 
 ### input: presses, turns and slides
 
 Notifications from the core whenever a control is used: `input/down`, `input/up`, `input/turn {ticks}`, `input/slide {value}`, `input/touch {x, y}`. Devices run by the host, such as the M3, depend on these entirely. Devices with their own memory, such as the Z10, send them only for controls assigned to `{"host": ...}`, so a keyboard key can trigger a frontend action without the keyboard losing its own assignments.
+
+A core acts on its own input first and tells the frontend second. A press has to show on the device within a frame (the M3's backgrounds answer every press with a ripple, a splash or a fish feeding), and a round trip through the frontend would be too slow for that.
+
+`input/simulate {device, control, kind}` goes the other way: the frontend presses a control as if it had been pressed on the device, which is what happens when you click a key in the app's picture of the device.
 
 ### profiles
 
@@ -201,11 +227,14 @@ Every parameter or setting a core offers is described with one of a small set of
 |---|---|---|
 | `bool` | a switch | Game mode disables the Windows key |
 | `int` | a slider or number, with `min`, `max`, `step`, `unit` | Brightness, 0 to 100 percent |
+| `number` | a slider for fractions, with `min`, `max`, `step` | A background's intensity, 0 to 1 |
 | `duration` | a slider in seconds, stored in milliseconds | Wave speed |
 | `choice` | a segmented control or menu, with `options` | Wave direction |
 | `color` | a colour swatch | Static colour |
 | `colors` | a row of swatches, up to `max` | Wave colours |
 | `text` | a text field, with `max` length | Profile name |
+| `place` | a search for a place by name, stored as its name with its latitude and longitude | The city a weather background shows |
+| `image` | a picture you choose | A background photo |
 
 A core cannot send its own interface. If a device needs something this language cannot describe, the language grows in a new protocol version, so every core gains the new control at once.
 
@@ -236,6 +265,13 @@ These are why the platform is more than a set of separate apps:
 
 The Z10 and the M3 sit at opposite ends: one keeps everything on the device, the other keeps nothing. If both fit this protocol without special cases, it will hold for most of what is in between.
 
+The M3 as its core will describe it: 15 keys in three rows of five; three dials down the right edge that turn and press, with no screens of their own; no touch; one 854 by 480 screen seen through a 110-pixel window over each key; nothing stored on the device, so the core sends everything again on reconnect, with a watchdog that reconnects within 15 seconds.
+
+**Never offered.** Some commands a device accepts do harm, and a core must not offer them as settings, however tempting:
+
+- **MagTran M3: key sensitivity and actuation.** Its vendor commands for these (QUCMD and SENS) make keys press on their own and miss presses until the deck is unplugged. The deck core offers no key sensitivity at all.
+- **EVGA Z10: the firmware updater.** Entering update mode cannot be undone without a complete write, so the Z10 core has no path to it (section 2, principle 5).
+
 ## 9. Versions
 
 `protocol` is one whole number. A frontend supports a range of versions and says which it speaks in `initialize`; a core that cannot speak it declines. Within a version, new optional fields may appear and must be ignored by anyone who does not know them.
@@ -244,5 +280,5 @@ The Z10 and the M3 sit at opposite ends: one keeps everything on the device, the
 
 Settled in review: cores draw their own displays and the frontend gets live feeds and previews (section 5, displays); cores will be offered from a catalogue later, signed so a core's source is known before it runs.
 
-1. **System permissions.** Each system asks once before an app may do certain things: on macOS, Input Monitoring (to read a keyboard's presses, which recording needs) and Accessibility (to send keystrokes, which shortcut actions need); on Linux, a rule installed once with admin rights so the app can reach the devices without running as administrator; on Windows, usually nothing. A core reports that it needs one (`device/status` with `"needs": "input-monitoring"`), and the frontend explains the step in plain words at the moment it is needed. The exact list grows as cores find what they need.
+1. **System permissions.** Each system asks once before an app may do certain things: on macOS, Input Monitoring (to read a keyboard's presses, which recording needs) and Accessibility (to send keystrokes, which shortcut actions need); on Linux, a rule installed once with admin rights so the app can reach the devices without running as administrator; on Windows, usually nothing. A core reports that it needs one (`device/status` with `"needs": "input-monitoring"`), and the frontend explains the step in plain words at the moment it is needed. What a core does for itself, such as capturing sound or using the network, is declared in its manifest's `uses` instead (section 3). The exact list grows as cores find what they need.
 2. **Recording on Windows.** Windows has no clean way for one app to take one keyboard for itself, so while a macro is recorded there, what you press also reaches the window in front. The Macro Editor will keep itself in front while recording so presses land in Ectodeck; shortcuts Windows handles itself, like the Windows key, still act. To settle when the Windows build is made.
