@@ -262,13 +262,20 @@ const shade = (c, f) => `rgb(${c.map(v => Math.min(255, Math.round(v * f))).join
 // The keyboard will not read its own display back, so the z10-lcd service writes
 // each frame it sends to a file and the server passes it on. If nothing is
 // driving the display, the panel is drawn unlit rather than showing stale text.
-// the panel is drawn at its shown size, so draw it again when that changes
-let panelSize = '';
+// The panel is drawn at its shown size, so draw it again when that changes:
+// with the window, and with the page, which narrows as the rail opens. While
+// the rail animates the size changes every frame, so it is drawn once it
+// settles. Hidden, the panel has no size and is left as it was.
+let panelSize = '', panelWait = 0;
 new ResizeObserver(() => {
-  const p = document.querySelector('.screen .panel');
-  const r = p?.getBoundingClientRect(), k = r ? `${Math.round(r.width * devicePixelRatio)}x${Math.round(r.height * devicePixelRatio)}` : '';
-  if (k && k !== panelSize) { panelSize = k; drawPanel(); }
-}).observe(document.documentElement);
+  clearTimeout(panelWait);
+  panelWait = setTimeout(() => {
+    const r = document.querySelector('.screen .panel')?.getBoundingClientRect();
+    if (!r || !r.width) return;
+    const k = `${Math.round(r.width * devicePixelRatio)}x${Math.round(r.height * devicePixelRatio)}`;
+    if (k !== panelSize) { panelSize = k; drawPanel(); }
+  }, 60);
+}).observe(document.getElementById('board'));
 
 async function pollLcd() {
   let lcd;

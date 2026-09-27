@@ -1,0 +1,67 @@
+/* Ectodeck's frame round a device's editor: the rail, the home and Settings.
+   The rail is part of the layout: opened into its blade, it widens and the
+   page narrows to make room. */
+@font-face { font-family: 'Geist'; src: url('fonts/Geist-Variable-latin.woff2') format('woff2'); font-weight: 100 900; font-display: swap; }
+
+.shell { display: flex; align-items: flex-start; min-height: calc(100vh - 36px); }
+html:not(.framed) .shell { min-height: 100vh; }
+.content { flex: 1; min-width: 0; align-self: stretch; display: flex; flex-direction: column; }
+
+/* one place at a time: the home, Settings, or the device's editor */
+.place { display: none; }
+body[data-place="home"] #home, body[data-place="settings"] #settings { display: block; flex: 1; }
+body[data-place="z10"] #device { display: block; }
+
+/* ------------------------------------------------ the rail, opening into a blade */
+.mrail { position: sticky; top: 36px; z-index: 25; flex: none; height: calc(100vh - 36px); width: 60px; background: #161616;
+  display: flex; flex-direction: column; gap: 4px; padding: 10px; overflow: hidden; font-family: 'Geist', system-ui, sans-serif; }
+html:not(.framed) .mrail { top: 0; height: 100vh; }
+.mrail.ready { transition: width .22s cubic-bezier(.2,.8,.2,1); }
+.mrail.open { width: 232px; }
+/* closed, the names are hidden, so nothing needs clipping and a name can reach past the rail */
+.mrail:not(.open) { overflow: visible; }
+.mrail:not(.open) .b .tx { visibility: hidden; }
+.mrail .b { position: relative; flex: none; display: flex; align-items: center; gap: 12px; height: 40px; min-width: 40px; padding: 0 9px;   /* a 40px square, closed */
+  border: 0; border-radius: 10px; background: none; color: #a3a3a3; font: inherit; text-align: left; cursor: pointer; white-space: nowrap; }
+.mrail .b svg { flex: none; width: 22px; height: 22px; }
+.mrail .b:hover { background: #262626; color: #f5f5f5; }
+.mrail .b.on { background: #2e2e2e; color: #f5f5f5; }
+.mrail .b.off { opacity: .4; }
+.mrail .b:focus-visible, .mrail .caret:focus-visible, .tile:focus-visible .sq { outline: 1px solid var(--focus); outline-offset: -1px; }
+.mrail .b .tx { display: grid; min-width: 0; line-height: 1.2; opacity: 0; transform: translateX(-6px); transition: opacity .12s ease, transform .22s cubic-bezier(.2,.8,.2,1); }
+.mrail.open .b .tx { opacity: 1; transform: none; transition-delay: .06s; }
+.mrail .b .tx b { font-size: 13.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+.mrail .gap { height: 8px; flex: none; }
+.mrail .grow { flex: 1; }
+/* closed, a device's name appears beside it when you point at it */
+.mrail .tip { display: none; position: absolute; left: 50px; top: 50%; transform: translateY(-50%); white-space: nowrap; padding: 5px 9px; border-radius: 6px;
+  background: #3a3a3a; color: #f5f5f5; font-size: 12.5px; box-shadow: 0 6px 18px -6px rgba(0,0,0,.7); z-index: 3; pointer-events: none; }
+.mrail:not(.open) .b:hover .tip { display: block; }
+/* the caret that opens and closes the rail: a glyph, not a row */
+.mrail .caret { flex: none; align-self: center; width: 28px; height: 24px; margin-top: 4px; padding: 0; border: 0; border-radius: 6px; background: none; color: #737373; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.mrail .caret:hover { color: #f5f5f5; background: #262626; }
+.mrail .caret svg { width: 16px; height: 16px; }
+.mrail .caret .l, .mrail.open .caret .r { display: none; }
+.mrail.open .caret .l { display: block; }
+.mrail.open .caret { align-self: flex-end; }
+
+/* ------------------------------------------------ the home: each device's glyph and its name, nothing else */
+#home { background: #1a1a1a; padding: 34px 40px; font-family: 'Geist', system-ui, sans-serif; }   /* a step darker than the device's page */
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, 260px); gap: 28px 24px; }
+.tile { display: block; padding: 0; border: 0; background: none; color: #f5f5f5; font: inherit; text-align: center; cursor: pointer; }
+.tile .sq { display: flex; align-items: center; justify-content: center; aspect-ratio: 1; border-radius: 14px; background: #262626; color: #a3a3a3; transition: background-color .15s ease, color .15s ease; }
+.tile:hover .sq { background: #303030; color: #d4d4d4; }   /* the tile under the pointer lightens; no outline */
+.tile .sq svg { display: block; width: 88px; height: 88px; }
+.tile b { display: block; margin-top: 10px; font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile small { display: none; font-size: 12px; color: #a3a3a3; }
+.tile.off { opacity: .45; }
+.tile.off small { display: block; }
+
+/* ------------------------------------------------ Settings */
+#settings { padding: 34px 40px; font-family: 'Geist', system-ui, sans-serif; }
+#settings h1 { margin: 0 0 6px; font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
+#settings p { margin: 0; color: #a3a3a3; font-size: 14px; max-width: 640px; }
+
+/* the Macro Editor window shows its editor alone */
+.win-macros .mrail, .win-macros #home, .win-macros #settings { display: none !important; }
+.win-macros #device { display: block; }

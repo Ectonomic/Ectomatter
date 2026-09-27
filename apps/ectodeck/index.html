@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="/fonts.css">
 <link rel="stylesheet" href="/style.css">
 <link rel="stylesheet" href="/window.css">
+<link rel="stylesheet" href="/shell.css">
 <style>
   /* The main window shows Keys, Lighting and Settings; the Macro Editor is its own window. */
   .win-main #view-macros { display: none !important; }
@@ -38,6 +39,22 @@
   </span>
 </header>
 
+<div class="shell">
+<!-- Ectodeck's rail: Home, each device, and Settings (drawn by shell.js) -->
+<nav class="mrail" id="rail" aria-label="Devices"></nav>
+<div class="content">
+
+<!-- The home: each device as its glyph and its name -->
+<section class="place" id="home" aria-label="Home"><div class="tiles" id="tiles"></div></section>
+
+<!-- Ectodeck's own settings -->
+<section class="place" id="settings" aria-labelledby="settings-title">
+  <h1 id="settings-title">Settings</h1>
+  <p>Ectodeck's own settings will be here: the devices it has cores for, and whether it starts with the computer.</p>
+</section>
+
+<!-- A device's editor: here, the Z10's -->
+<div class="place" id="device">
 <!-- The device's own bar: its name, the tabs between its sections, what it is
      doing, and its Macro Editor. -->
 <nav class="nav devbar" aria-label="EVGA Z10 RGB">
@@ -79,8 +96,14 @@
        of a profile: every profile shares them and each one saves on its own. -->
   <section class="mws" id="view-macros" aria-labelledby="macros-title" hidden></section>
 </main>
+</div>
+
+</div>
+</div>
 
 <script src="/bridge.js"></script>
+<script src="/desk-glyphs.js"></script>
+<script src="/shell.js"></script>
 <script src="/window.js"></script>
 <script src="/app.js"></script>
 </body>
