@@ -875,8 +875,18 @@ function zoneChips(e) {
 // ---------------------------------------------------------------- menus
 // Every drop-down in the editor is one of these: a panel fixed to the screen
 // under the button that opened it, or above it when there is no room below.
-// A click outside or Escape closes it.
+// A click outside it, Escape, or leaving the window closes it, and so does a
+// second click on the button that opened it.
 function openMenu(anchor, build, { width, align = 'left' } = {}) {
+  // This click is the second one on the button whose menu it just closed. Some
+  // buttons are redrawn by their own click (a step, an insert point), so the
+  // same button is also known by where it sits.
+  const shut = S.menuShut, r0 = shut?.rect, r1 = anchor.getBoundingClientRect();
+  const same = shut && (shut.anchor === anchor || (Math.abs(r0.left - r1.left) < 2 && Math.abs(r0.top - r1.top) < 2 && Math.abs(r0.width - r1.width) < 2));
+  if (same && performance.now() - shut.at < 800) { S.menuShut = null; return; }
+  S.menuShut = null;
+  // opened from the keyboard, the button's second press has no mousedown before it
+  if (S.menu && S.menu.anchor === anchor) { closeMenu(); return; }
   closeMenu();
   const m = el('div', { class: 'menu float', role: 'menu' });
   if (width) m.style.width = width + 'px';
@@ -894,10 +904,17 @@ function openMenu(anchor, build, { width, align = 'left' } = {}) {
   let left = align === 'right' ? r.right - w : r.left;
   left = Math.max(8, Math.min(left, innerWidth - w - 8));
   Object.assign(m.style, { top: top + 'px', left: left + 'px' });
-  const away = e => { if (!m.contains(e.target) && !anchor.contains(e.target)) closeMenu(); };
+  const away = e => {
+    if (m.contains(e.target)) return;
+    // pressed on its own button: close now, and let that button's click, which
+    // follows, know not to open it again
+    if (anchor.contains(e.target)) S.menuShut = { anchor, rect: anchor.getBoundingClientRect(), at: performance.now() };
+    closeMenu();
+  };
   const esc = e => { if (e.key === 'Escape') { e.stopPropagation(); closeMenu(); } };
-  setTimeout(() => { addEventListener('mousedown', away, true); addEventListener('keydown', esc, true); });
-  S.menu = { m, off: () => { removeEventListener('mousedown', away, true); removeEventListener('keydown', esc, true); } };
+  const leave = () => closeMenu();
+  setTimeout(() => { addEventListener('mousedown', away, true); addEventListener('keydown', esc, true); addEventListener('blur', leave); });
+  S.menu = { m, anchor, off: () => { removeEventListener('mousedown', away, true); removeEventListener('keydown', esc, true); removeEventListener('blur', leave); } };
   m.querySelector('input')?.focus();
   return m;
 }
