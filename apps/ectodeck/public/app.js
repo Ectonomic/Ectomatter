@@ -1418,9 +1418,9 @@ function workspace() {
     chainEl.classList.add('empty');
     chainEl.append(el('div', { class: 'empty' }, el('div', { class: 'big' }, el('i')), rec
       ? [el('b', {}, 'Recording'),
-         el('p', {}, 'Type on your Z10 whatever you want this macro to do. Each key appears here as you press it, and Stop ends the recording.')]
-      : [el('b', {}, 'This macro doesn’t do anything yet'),
-         el('p', {}, 'Press Record, then type on your Z10 exactly what you want the macro to type for you. Press Stop when you’re done, and each key you pressed appears here in order. To build it by hand instead, add keys, media keys and waits with the buttons below.')]));
+         el('p', {}, 'Type the keys on your Z10. Press Stop to finish.')]
+      : [el('b', {}, 'No keys yet'),
+         el('p', {}, 'Press Record and type the keys on your Z10, or add keys, media keys and waits with the buttons below.')]));
   } else {
     eff.forEach((st, i) => {
       if (i) chainEl.append(joint(i));
