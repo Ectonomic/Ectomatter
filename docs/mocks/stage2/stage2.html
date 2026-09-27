@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ectotype stage 2 mock</title>
+<style>
+@font-face { font-family: 'Geist'; src: url('Geist-Variable-latin.woff2') format('woff2'); font-weight: 100 900; }
+:root {
+  color-scheme: dark;
+  --bg: #050506; --fg: #fafafa; --muted: #a1a1aa; --subtle: #71717a; --line: #222226;
+  --lime: #c8f22e; --lime-ink: #163d0a;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 'Geist', system-ui, sans-serif; }
+main { max-width: 1520px; margin: 0 auto; padding: 48px 32px 96px; }
+header.top { display: flex; align-items: baseline; gap: 14px; margin-bottom: 8px; }
+header.top h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.03em; }
+header.top span { color: var(--subtle); font-size: 13px; }
+p.lede { color: var(--muted); max-width: 820px; margin: 0 0 40px; }
+section { margin: 0 0 72px; }
+section > h2 { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; font-size: 15px; font-weight: 600; }
+section > h2 b { color: var(--lime); font-weight: 600; font-size: 12px; letter-spacing: .08em; }
+section > p { margin: 0 0 18px; color: var(--muted); max-width: 900px; }
+ul.notes { margin: 14px 0 0; padding-left: 18px; color: var(--muted); max-width: 900px; }
+ul.notes li { margin: 3px 0; }
+
+/* a desktop to set the windows on */
+.desk { position: relative; border-radius: 14px; background: radial-gradient(120% 90% at 20% 0%, #1b2330 0%, #0c1016 55%, #07090c 100%); padding: 36px; overflow: hidden; }
+.win { position: relative; border-radius: 10px; overflow: hidden; background: #0a0a0a; box-shadow: 0 30px 80px -20px rgba(0,0,0,.9), 0 0 0 1px #3f3f46; }
+.win iframe { display: block; width: 100%; height: 100%; border: 0; background: #0a0a0a; }
+.main-win { width: 1380px; height: 720px; }
+.macro-win { width: 1180px; height: 800px; }
+.stack { display: grid; gap: 40px; justify-items: start; }
+.stack .macro-win { margin-left: 160px; }
+.cap { font-size: 12px; color: var(--subtle); margin: 0 0 -28px 2px; }
+
+/* the tray */
+.panelbar { position: absolute; left: 0; right: 0; bottom: 0; height: 44px; background: rgba(20, 22, 26, .92); border-top: 1px solid rgba(255,255,255,.06); display: flex; align-items: center; justify-content: flex-end; gap: 14px; padding: 0 18px; }
+.panelbar .ico { width: 22px; height: 22px; opacity: .8; border-radius: 4px; background: rgba(255,255,255,.12); }
+.panelbar .ours { opacity: 1; background: none; }
+.panelbar .clock { font-size: 13px; color: #d4d4d8; margin-left: 8px; }
+.traymenu { position: absolute; right: 120px; bottom: 52px; width: 280px; padding: 5px; border-radius: 8px; background: #2a2e32; border: 1px solid #454b52; box-shadow: 0 16px 40px -10px rgba(0,0,0,.8); font: 13px/1.3 'Noto Sans', 'Geist', sans-serif; color: #eff0f1; }
+.traymenu .it { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 4px; }
+.traymenu .it:hover, .traymenu .it.hot { background: #3daee9; color: #fff; }
+.traymenu .it .chk { width: 14px; text-align: center; }
+.traymenu .it .k { margin-left: auto; color: #a8acb0; font-size: 12px; }
+.traymenu .it.hot .k { color: #fff; }
+.traymenu hr { border: 0; border-top: 1px solid #454b52; margin: 5px 4px; }
+.traymenu .head { padding: 6px 10px 4px; font-size: 11px; color: #a8acb0; letter-spacing: .04em; }
+
+/* marks */
+.marks { display: grid; grid-template-columns: repeat(6, 1fr); gap: 18px; }
+.mark { background: #0d0d0f; border: 1px solid var(--line); border-radius: 12px; padding: 20px 16px; text-align: center; }
+.mark svg { width: 96px; height: 96px; display: block; margin: 0 auto 12px; }
+.mark b { display: block; font-weight: 600; font-size: 13.5px; letter-spacing: -0.02em; }
+.mark span { font-size: 12px; color: var(--subtle); }
+.mark.pick { border-color: #3f3f46; background: #111113; }
+.mark .tag { display: inline-block; margin-top: 8px; font-size: 11px; color: var(--lime); letter-spacing: .06em; text-transform: uppercase; }
+.sizes { display: flex; align-items: center; gap: 28px; margin-top: 22px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 12px; background: #0d0d0f; }
+.sizes .grp { display: flex; align-items: center; gap: 14px; }
+.sizes .lab { color: var(--subtle); font-size: 12px; min-width: 110px; }
+.sizes svg { display: block; }
+.word { display: flex; align-items: center; gap: 8px; font-weight: 600; letter-spacing: -0.04em; font-size: 20px; }
+</style>
+</head>
+<body>
+<main>
+  <header class="top"><h1>Ectotype</h1><span>Stage 2 mock · the desktop app in the Ectonomic family's look</span></header>
+  <p class="lede">These are the real editor screens, reading your keyboard, restyled and set into the app's windows. Nothing here writes to the keyboard or shows a preview on it. Everything you approved stays as it was, except the changes listed under each window.</p>
+
+  <section>
+    <h2><b>01</b> The two windows</h2>
+    <p>Ectotype opens in its main window, which holds Keys, Lighting and Settings. The Macro Editor is its own window, opened from the title bar or from a key that plays a macro. Both are drawn the way Ectodeck draws its window: rounded corners, a hairline edge, and a title bar of their own.</p>
+    <div class="desk stack">
+      <div class="cap">Main window, on the Keys tab with E2 chosen</div>
+      <div class="win main-win"><iframe id="main" title="Ectotype main window"></iframe></div>
+      <div class="cap" style="margin-left:162px">Macro Editor window</div>
+      <div class="win macro-win"><iframe id="macros" title="Macro Editor window"></iframe></div>
+    </div>
+    <ul class="notes">
+      <li>The title bar carries the mark and the wordmark, then the three tabs, then the keyboard's status and the Macro Editor button, then the window's own controls.</li>
+      <li>The interface is set in Geist, the family's face. The keycap legends keep their condensed face, which copies EVGA's printing on the real keys.</li>
+      <li>The greys are the family's zinc neutrals on a black ground. Lime appears only as a signal: focus, the connection and live dots, and the box around a key you have changed.</li>
+      <li>On a key that plays a macro, "Edit macro" opens it in the Macro Editor window instead of scrolling down.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><b>02</b> In the tray</h2>
+    <p>Ectotype keeps running in the tray when its windows are closed, so the display keeps showing your stats and the keys keep their assignments. The menu is drawn by the system, so on KDE it looks like this, and on Windows and macOS like theirs.</p>
+    <div class="desk" style="height: 420px;">
+      <div class="traymenu" role="menu">
+        <div class="it hot">Open Ectotype</div>
+        <div class="it">Macro Editor</div>
+        <hr>
+        <div class="head">PROFILE</div>
+        <div class="it"><span class="chk">●</span>Profile 1<span class="k">Static</span></div>
+        <div class="it"><span class="chk"></span>Profile 2<span class="k">Static</span></div>
+        <div class="it"><span class="chk"></span>Profile 3<span class="k">Off</span></div>
+        <div class="it"><span class="chk"></span>Profile 4<span class="k">Off</span></div>
+        <div class="it"><span class="chk"></span>Profile 5<span class="k">Off</span></div>
+        <hr>
+        <div class="it"><span class="chk">✓</span>Start with the computer</div>
+        <div class="it"><span class="chk"></span>Quit Ectotype</div>
+      </div>
+      <div class="panelbar">
+        <span class="ico"></span><span class="ico"></span><span class="ico"></span>
+        <span class="ico ours" id="tray-ours"></span>
+        <span class="clock">8:14 PM</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2><b>03</b> The mark</h2>
+    <p>Every product in the family is the same lime blob with one simple glyph in dark lime. Ectodeck already has a grid of keys, so Ectotype needs a different one. The keyboard, with its spacebar, still reads as a keyboard at tray and title-bar sizes; the key with a cursor shrinks to a square with a bar, which reads as a pause button.</p>
+    <div class="marks" id="marks"></div>
+    <div class="sizes" id="sizes"></div>
+  </section>
+</main>
+
+<script>
+// ---------------------------------------------------------------- the marks
+const BLOB = fetch('ectodeck-mark.svg').then(r => r.text()).then(s => ({
+  defs: s.match(/<defs>.*<\/defs>/s)[0], path: s.match(/<path[^>]*\/>/s)[0],
+}));
+const INK = '#163d0a', LIME = '#c8f22e';
+// glyphs centred where the family centres theirs (31.3, 31.9 in a 64 box)
+const GLYPHS = {
+  keyboard: () => {
+    let g = '';
+    for (const row of [0, 1]) for (let i = 0; i < 4; i++)
+      g += `<rect x="${14.3 + 9 * i}" y="${19.4 + 9 * row}" width="7" height="7" rx="1.9" fill="${INK}"/>`;
+    return g + `<rect x="14.3" y="37.4" width="34" height="7" rx="1.9" fill="${INK}"/>`;
+  },
+  keycap: () => `<rect x="18.8" y="19.4" width="25" height="25" rx="5.5" fill="${INK}"/>`
+    + `<rect x="29.7" y="25.2" width="3.2" height="13.4" rx="1.6" fill="${LIME}"/>`,
+};
+async function markSvg(glyph, size, id) {
+  const b = await BLOB;
+  const defs = b.defs.replace(/id="g"/, `id="g-${id}"`);
+  const path = b.path.replace('url(#g)', `url(#g-${id})`);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="${size}" height="${size}">${defs}${path}${GLYPHS[glyph]()}</svg>`;
+}
+(async () => {
+  const fam = [['ectodeck-mark.svg', 'Ectodeck', 'the MagTran M3'], ['ectochat-mark.svg', 'Ectochat', 'chat'],
+               ['ectofield-mark.svg', 'Ectofield', 'process canvas'], ['ectopulse-icon.svg', 'Ectopulse', 'feedback']];
+  const box = document.getElementById('marks');
+  for (const [f, name, what] of fam) {
+    const s = await fetch(f).then(r => r.text());
+    box.insertAdjacentHTML('beforeend', `<div class="mark">${s.replace('<svg', '<svg width="96" height="96"')}<b>${name}</b><span>${what}</span></div>`);
+  }
+  box.insertAdjacentHTML('beforeend', `<div class="mark pick">${await markSvg('keyboard', 96, 'b')}<b>Ectotype</b><span>a keyboard, keys and spacebar</span><div class="tag">Recommended</div></div>`);
+  box.insertAdjacentHTML('beforeend', `<div class="mark">${await markSvg('keycap', 96, 'a')}<b>Ectotype</b><span>a key with a text cursor</span><div class="tag" style="color:#a1a1aa">Runner-up</div></div>`);
+  const sizes = document.getElementById('sizes');
+  for (const [g, label] of [['keyboard', 'Recommended'], ['keycap', 'Runner-up']]) {
+    sizes.insertAdjacentHTML('beforeend', `<div class="grp"><span class="lab">${label}</span>${await markSvg(g, 48, g + 48)}${await markSvg(g, 32, g + 32)}${await markSvg(g, 22, g + 22)}${await markSvg(g, 16, g + 16)}<span class="word">${await markSvg(g, 22, g + 'w')}Ectotype</span></div>`);
+  }
+  document.getElementById('tray-ours').innerHTML = await markSvg('keyboard', 22, 'tray');
+  window.__markSmall = await markSvg('keyboard', 16, 'tb');
+  startWindows();
+})();
+
+// ---------------------------------------------------------------- the windows
+// The real editor, read from the keyboard once and shared by both windows.
+const STATE = fetch('/api/state').then(r => r.json());
+const ICONS = {
+  min: '<svg width="14" height="14" viewBox="0 0 16 16"><path d="M3 8h10" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>',
+  max: '<svg width="12" height="12" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="1" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>',
+  close: '<svg width="14" height="14" viewBox="0 0 16 16"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>',
+  open: '<svg width="13" height="13" viewBox="0 0 16 16"><rect x="1.5" y="3" width="10.5" height="10.5" rx="1.6" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M8 1.5h6.5V8M14.5 1.5L8.5 7.5" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>',
+};
+const CHROME_CSS = `
+  .tbar { display: flex; align-items: center; height: 36px; padding-left: 12px; background: #1c1c20; border-bottom: 1px solid #2e2e33; user-select: none; position: sticky; top: 0; z-index: 30; }
+  .tbar .home { display: flex; align-items: center; gap: 7px; height: 26px; padding: 0 6px; margin-left: -6px; border-radius: 6px; }
+  .tbar .home:hover { background: #27272a; }
+  .tbar .wm { font-family: 'Geist'; font-weight: 600; letter-spacing: -0.04em; font-size: 13.5px; color: #fafafa; }
+  .tbar .wm small { font-weight: 500; letter-spacing: -0.01em; color: #a1a1aa; font-size: 13px; }
+  .tbar .navtabs { display: flex; height: 100%; margin-left: 18px; gap: 2px; }
+  .tbar .navtabs button { background: none; border: 0; padding: 0 12px; color: #a1a1aa; font: 500 13px 'Geist'; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tbar .navtabs button:hover { color: #fafafa; }
+  .tbar .navtabs button[aria-selected="true"] { color: #fafafa; border-bottom-color: #fafafa; }
+  .tbar .right { margin-left: auto; display: flex; align-items: center; height: 100%; gap: 14px; }
+  .tbar .conn { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: #a1a1aa; white-space: nowrap; }
+  .tbar .conn i { width: 6px; height: 6px; border-radius: 50%; background: #c8f22e; }
+  .tbar .conn .unoff { margin-left: 7px; padding: 0 6px; border: 1px solid rgba(240,179,90,.45); border-radius: 4px; font-size: 11px; color: #f0b35a; }
+  .tbar .act { display: inline-flex; align-items: center; gap: 7px; height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid #303036; background: transparent; color: #e4e4e7; font: 500 12.5px 'Geist'; cursor: pointer; }
+  .tbar .act:hover { background: #27272a; }
+  .tbar .wbtn { display: flex; height: 100%; margin-left: 4px; }
+  .tbar .wbtn span { display: flex; align-items: center; justify-content: center; width: 40px; height: 100%; color: #a1a1aa; }
+  .tbar .wbtn span:hover { background: #27272a; color: #fafafa; }
+  .tbar .wbtn span.x:hover { background: #dc2626; color: #fff; }
+  .nav { display: none !important; }
+  .page { padding-top: 18px; }
+`;
+
+async function editorDoc(mode) {
+  let html = await fetch('/index.html').then(r => r.text());
+  const state = JSON.stringify(await STATE);
+  const stub = `<base href="/"><script>
+    const __STATE = ${state};
+    const __real = window.fetch;
+    window.fetch = (u, o) => {
+      u = String(u);
+      const j = v => Promise.resolve(new Response(JSON.stringify(v), { headers: { 'content-type': 'application/json' } }));
+      if (u.includes('/api/state')) return j(__STATE);
+      if (u.includes('/api/preview')) return j({ mode: null });
+      if (u.includes('/api/record')) return j({ recording: false });
+      if (u.includes('/api/lcd')) return __real(u, o);
+      if (u.includes('/api/')) return j({ error: 'The mock does not save.' });
+      return __real(u, o);
+    };
+    try { localStorage.setItem('z10:macros-open', '1'); } catch (e) {}
+  <\/script>`;
+  html = html.replace('<head>', '<head>' + stub)
+             .replace('href="style.css"', 'href="mock/style-zinc.css"')
+             .replace('</head>', `<style>${CHROME_CSS}${mode === 'macros' ? MACRO_CSS : MAIN_CSS}</style></head>`)
+             .replace('</body>', `<script>(${chrome.toString()})(${JSON.stringify(mode)}, ${JSON.stringify(ICONS)}, ${JSON.stringify(window.__markSmall)});<\/script></body>`);
+  return html;
+}
+const MAIN_CSS = `#view-macros { display: none !important; }`;
+const MACRO_CSS = `
+  #pws { display: none !important; }
+  .page { max-width: none; padding: 0; }
+  .mws { margin: 0; border: 0; border-radius: 0; }
+  .mws .sec-head { display: none; }
+  .mws .ws { min-height: calc(100vh - 36px); }
+`;
+
+// runs inside each window: draws its title bar and settles it into its role
+function chrome(mode, ICONS, mark) {
+  const nav = document.querySelector('.nav');
+  const bar = document.createElement('div');
+  bar.className = 'tbar';
+  bar.innerHTML = `<span class="home">${mark}<span class="wm">${mode === 'macros' ? 'Macro Editor <small>· Ectotype</small>' : 'Ectotype'}</span></span>`
+    + `<span class="slot-tabs"></span><span class="right"><span class="slot-conn"></span>`
+    + (mode === 'main' ? `<button class="act" type="button">${ICONS.open}Macro Editor</button>` : '')
+    + `<span class="wbtn"><span>${ICONS.min}</span><span>${ICONS.max}</span><span class="x">${ICONS.close}</span></span></span>`;
+  document.body.prepend(bar);
+  if (mode === 'main') bar.querySelector('.slot-tabs').replaceWith(nav.querySelector('.navtabs'));
+  else bar.querySelector('.slot-tabs').remove();
+  if (mode === 'main') bar.querySelector('.slot-conn').replaceWith(nav.querySelector('.conn'));
+  else bar.querySelector('.slot-conn').remove();   // the status stays in the hidden top bar, where the editor updates it
+  const settle = () => {
+    if (typeof S === 'undefined' || !S.dev) return setTimeout(settle, 200);
+    if (mode === 'macros') {
+      S.view = 'keys'; S.macrosOpen = true;
+      S.macro = +Object.keys(S.dev.macros)[0];
+      renderView();
+      document.getElementById('view-macros').hidden = false;
+    } else {
+      // show a key that plays a macro, with its link pointing at the other window
+      const k = S.layout.find(k => k.id === 'E2');
+      if (k) selectKey(k.pos);
+      const relabel = () => {
+        for (const a of document.querySelectorAll('#view-keys a.tolink'))
+          if (a.textContent.startsWith('Edit macro below')) a.textContent = 'Edit in Macro Editor ↗';
+      };
+      relabel();
+      new MutationObserver(relabel).observe(document.body, { subtree: true, childList: true, characterData: true });
+    }
+  };
+  settle();
+}
+
+async function startWindows() {
+  document.getElementById('main').srcdoc = await editorDoc('main');
+  document.getElementById('macros').srcdoc = await editorDoc('macros');
+}
+</script>
+</body>
+</html>
