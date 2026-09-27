@@ -416,7 +416,7 @@ async function refresh() {
 function settleWindow() {
   document.body.classList.add('win-' + window.__window);
   if (window.__window === 'macros') {
-    document.title = 'EVGA Z10 RGB Macro Editor';
+    document.title = 'EVGA Z10 RGB / Macro Editor';
     S.view = 'keys'; S.macrosOpen = true;
     const pickMacro = () => {
       const n = +(location.hash.split('/')[1] || 0);
