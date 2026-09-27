@@ -215,19 +215,27 @@ function panelBits(rows) {
   return lit;
 }
 
-// The panel is drawn offscreen at a fixed 4 pixels per LCD pixel and handed to
-// CSS as an image. Drawing into a canvas in the page instead left the element
-// compositing at the wrong scale, and this also means the picture only has to
-// be rebuilt when the text or the backlight colour changes.
-const PITCH = 4;
+// The panel is drawn offscreen and handed to CSS as an image, at exactly the
+// size it is shown in real screen pixels, so it is never scaled: shrinking a
+// finer picture to fit turned the pixel grid into uneven stripes, most of all
+// in WebKit and at the smaller sizes a desktop window shows the keyboard at.
+// Drawing into a canvas in the page instead left the element compositing at
+// the wrong scale. The picture is rebuilt when the text, the backlight colour
+// or the panel's size changes.
+const PITCH = 4;           // pixels per LCD pixel before the panel has a size
 
 function drawPanel() {
   const panel = document.querySelector('.screen .panel');
   if (!panel || !S.font) return;
+  const r = panel.getBoundingClientRect(), dpr = devicePixelRatio || 1;
   const cv = document.createElement('canvas');
-  cv.width = PW * PITCH;
-  cv.height = PH * PITCH;
-  const ctx = cv.getContext('2d'), dot = PITCH * 0.84;
+  cv.width = Math.round(r.width * dpr) || PW * PITCH;
+  cv.height = Math.round(r.height * dpr) || PH * PITCH;
+  const cx = cv.width / PW, cy = cv.height / PH;
+  // a gap round each pixel where it is big enough to show one; smaller, the gaps
+  // would beat against the screen's own pixels and stripe the characters
+  const dot = cx >= 2.5 ? 0.84 : 1;
+  const ctx = cv.getContext('2d');
   const back = S.lcdLive ? (S.lcdColor || [90, 90, 90]) : null;
   // The panel is negative: the field stays dark and only the pixels that are on
   // light up in the backlight colour, so the text glows out of black.
@@ -241,9 +249,9 @@ function drawPanel() {
     const bright = lit[y * PW + x];
     ctx.fillStyle = bright ? on : off;
     // a lit pixel blooms a little into the ones around it, as it does on the panel
-    if (bright && back) { ctx.shadowColor = shade(back, 0.45); ctx.shadowBlur = PITCH * 0.6; }
+    if (bright && back) { ctx.shadowColor = shade(back, 0.45); ctx.shadowBlur = cx * 0.6; }
     else ctx.shadowBlur = 0;
-    ctx.fillRect(x * PITCH, y * PITCH, dot, dot);
+    ctx.fillRect(x * cx, y * cy, cx * dot, cy * dot);
   }
   ctx.shadowBlur = 0;
   panel.style.backgroundImage = `url(${cv.toDataURL()})`;
@@ -254,6 +262,14 @@ const shade = (c, f) => `rgb(${c.map(v => Math.min(255, Math.round(v * f))).join
 // The keyboard will not read its own display back, so the z10-lcd service writes
 // each frame it sends to a file and the server passes it on. If nothing is
 // driving the display, the panel is drawn unlit rather than showing stale text.
+// the panel is drawn at its shown size, so draw it again when that changes
+let panelSize = '';
+new ResizeObserver(() => {
+  const p = document.querySelector('.screen .panel');
+  const r = p?.getBoundingClientRect(), k = r ? `${Math.round(r.width * devicePixelRatio)}x${Math.round(r.height * devicePixelRatio)}` : '';
+  if (k && k !== panelSize) { panelSize = k; drawPanel(); }
+}).observe(document.documentElement);
+
 async function pollLcd() {
   let lcd;
   try { lcd = await api('/api/lcd'); } catch (e) { lcd = { live: false, rows: [] }; }

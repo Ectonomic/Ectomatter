@@ -148,11 +148,17 @@ button:disabled { opacity: .35; cursor: default; }
    deck, so it keeps a flat face over a deep front edge. */
 .key[aria-label="Space"] {
   padding: 0;
-  background: linear-gradient(180deg, #1d1d1d 0%, var(--cap) 63%, var(--cap-front) 63%, #080808 100%);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.1), inset 0 0 0 1px rgba(255,255,255,.035),
-              0 0.08cqw 0.16cqw rgba(0,0,0,.8);
+  /* the same cap as every other key (sloped sides, the back slope catching the
+     light), with its deep front face below where the others have a thin one */
+  background:
+    linear-gradient(90deg, rgba(0,0,0,.55) 0, rgba(0,0,0,.2) 0.4cqw,
+                           rgba(0,0,0,.2) calc(100% - 0.4cqw), rgba(0,0,0,.55) 100%),
+    linear-gradient(180deg, #262626 0, #1c1c1c 0.26cqw, #0d0d0d 63%, var(--cap-front) 63%, #080808 100%);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.03), 0 0.08cqw 0.16cqw rgba(0,0,0,.8);
 }
-.key[aria-label="Space"]::before, .key.molded::before { display: none; }
+/* and the same dished, grained top, ending where the front face begins */
+.key[aria-label="Space"]::before { bottom: calc(37% + 0.24cqw); }
+.key.molded::before { display: none; }
 /* The media buttons are not keycaps. They are moulded blocks that sit much
    lower than the caps and barely below the deck, so they are flat-topped and
    square-edged, with no front edge and no shadow of their own. */
@@ -279,7 +285,7 @@ input[type=checkbox] { accent-color: var(--ink); width: 16px; height: 16px; }
 .page { max-width: 1320px; margin: 0 auto; padding: 22px 28px 40px; }
 
 /* the profile window: Lighting, Keys and Settings */
-.pws { border: 1px solid var(--line); border-radius: 12px; background: #262626; }
+.pws { border: 1px solid var(--line); border-radius: 12px; background: #1f2429; }   /* the grey the keyboard sits on, kept from the original editor */
 .pws-head { display: flex; align-items: center; gap: 10px; min-height: 64px;  /* the height the profile tabs need once loaded, so the board does not move */ padding: 8px 14px; border-bottom: 1px solid #2e2e2e; }
 .pws-head .profiles { display: flex; gap: 4px; overflow-x: auto; }
 .profiles button {
@@ -493,7 +499,7 @@ button.danger:hover { background: #e25f5b; }
 /* The Macro Editor, on the Keys page. Macros are shared by every profile, so
    it is a window of its own under the profile's, built the same way: a head
    row, then the library and the editor filling the body. */
-.mws { margin-top: 18px; border: 1px solid var(--line); border-radius: 12px; background: #262626; overflow: hidden; }
+.mws { margin-top: 18px; border: 1px solid var(--line); border-radius: 12px; background: #1f2429; overflow: hidden; }
 .mws[hidden] { display: none; }
 /* the head row is the fold: click it to open or close the editor */
 .sec-head { display: flex; align-items: baseline; gap: 14px; width: 100%; padding: 14px 18px; border: 0;
