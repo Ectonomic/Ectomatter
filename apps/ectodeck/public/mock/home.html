@@ -51,7 +51,21 @@ ul.notes li { margin: 3px 0; }
 .rail .lab { font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: #737373; padding: 14px 8px 6px; }
 .rail .grow { flex: 1; }
 
-/* ------------------------------------------------ home */
+/* ------------------------------------------------ home: the pictures and their names, nothing else */
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, 260px); gap: 28px 24px; }
+.tile { cursor: pointer; }
+.tile .sq { aspect-ratio: 1; border-radius: 14px; background: #1f2429; border: 1px solid #333; display: flex; align-items: center; justify-content: center; padding: 26px; transition: border-color .15s ease; }
+.tile.hover .sq { border-color: #8a8a8a; }
+.tile .sq img, .tile .sq svg.drawn { display: block; max-width: 100%; max-height: 100%; width: 100%; height: auto; }
+.tile .sq .glyph { color: #8a8a8a; }
+.tile .sq .glyph svg { display: block; width: 72px; height: 72px; }
+.tile b { display: block; margin-top: 10px; font-size: 14px; font-weight: 500; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile small { display: block; text-align: center; font-size: 12px; color: #a3a3a3; }
+.tile.off { opacity: .45; }
+.devbar { display: flex; align-items: center; gap: 22px; height: 56px; padding: 0 28px; border-bottom: 1px solid #404040; font-family: 'Barlow', system-ui, sans-serif; }
+.devbar .back { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px 0 6px; margin-left: -10px; border-radius: 7px; color: #d4d4d4; font-size: 14px; }
+.devbar .vr { width: 1px; height: 22px; background: #404040; }
+/* ------------------------------------------------ (earlier passes) */
 .page { flex: 1; padding: 34px 40px; overflow: hidden; }
 .pagehead { display: flex; align-items: baseline; gap: 12px; margin-bottom: 20px; }
 .pagehead h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
@@ -99,35 +113,28 @@ ul.notes li { margin: 3px 0; }
 <body>
 <main>
   <h1 class="t">Ectodeck home</h1>
-  <p class="lede">A device rail anchors the app. It is always there, down the left: Home, then every device a core has found, each with its picture, its name and one line of status, then the cores. The home shows the same devices as square cards; inside a device, the rail stays and says where you are.</p>
+  <p class="lede">A bare home: the devices a core has found, each as a picture in the same square with its name under it, and nothing else. Click one to go in; its bar leads back.</p>
 
   <section>
     <h2><b>01</b> Home</h2>
-    <p>Home is chosen in the rail. The page shows every device as a square card with its picture fitted inside, what it needs, and what it is set to now.</p>
+    <p>Only the devices: each one's picture in the same square, and its name. You pass through it on the way to a device.</p>
     <div class="desk"><div class="win">
       <div class="tbar"><span class="home mark"></span><span class="right"><span class="act gear"></span><span class="wb"><span>—</span><span>☐</span><span>✕</span></span></span></div>
-      <div class="body"><nav class="rail" data-on="home"></nav>
-        <div class="page">
-          <div class="pagehead"><h1>Devices</h1><span>3 connected</span></div>
-          <div class="shelf" id="shelf"></div>
-        </div>
-      </div>
+      <div class="page"><div class="tiles" id="tiles"></div></div>
     </div></div>
     <ul class="notes">
-      <li>The rail is the one way between places, so the device's own bar no longer needs a link back, and the title bar stays Ectodeck's alone.</li>
-      <li>In the rail every device shows its kind's glyph: at forty pixels a keyboard's picture shrinks to a sliver, while a glyph reads at once. The pictures are for the home, where there is room for them. Each row has one line: connected, or what needs you.</li>
-      <li>An unplugged device stays in the rail, dimmed, "Not connected", so its settings are there when it comes back. The last row shows one.</li>
+      <li>A picture is the device's own artwork, a drawing Ectodeck makes from its layout, or its kind's glyph (section 03).</li>
+      <li>The only other thing a tile ever says is "Not connected", under the name of a device that is unplugged, which dims. The last tile shows one, as an example. Everything else, firmware and profiles included, is inside the device.</li>
+      <li>Cores and devices live in Ectodeck's Settings, in the title bar.</li>
     </ul>
   </section>
 
   <section>
     <h2><b>02</b> Inside a device</h2>
-    <p>The Z10 chosen in the rail: its own bar and screens fill the rest of the window. This is the real editor, reading your keyboard.</p>
+    <p>The device's bar starts with the way back. This is the real editor, reading your keyboard.</p>
     <div class="desk"><div class="win">
       <div class="tbar"><span class="home mark"></span><span class="right"><span class="act gear"></span><span class="wb"><span>—</span><span>☐</span><span>✕</span></span></span></div>
-      <div class="body"><nav class="rail" data-on="z10"></nav>
-        <div class="devview"><iframe id="z10" title="EVGA Z10 RGB"></iframe></div>
-      </div>
+      <div class="devview"><iframe id="z10" title="EVGA Z10 RGB"></iframe></div>
     </div></div>
   </section>
 
@@ -139,7 +146,7 @@ ul.notes li { margin: 3px 0; }
     <div class="rules">
       <div><b>View</b>Straight down from above, the view the editors work in. The device only, on a transparent ground, with no shadow or backdrop of its own: Ectodeck frames every device the same way.</div>
       <div><b>Unlit</b>Keys and screens drawn unlit, so the same picture can be shown dark on the home and in its real colours inside the device.</div>
-      <div><b>Fitted to a square</b>Ectodeck fits every picture inside a square, centred, keeping its shape, on the home and in the rail alike. Artwork is cropped close to the device, with no empty margin of its own.</div>
+      <div><b>Fitted to a square</b>Ectodeck fits every picture inside a square, centred, keeping its shape. Artwork is cropped close to the device, with no empty margin of its own.</div>
       <div><b>Format and licence</b>SVG, or PNG or WebP at twice the size. Its licence is declared in the core's manifest and must allow the picture to be shared, which a maker's product photo usually does not.</div>
     </div>
   </section>
@@ -201,19 +208,9 @@ async function z10Layout() {
       lines: ['<i></i>Found by OpenRGB · lighting only', '<span class="sw" style="background:linear-gradient(90deg,#ff2d00,#ffd000,#22d36b,#2b6cff)"></span>Rainbow wave'] },
   ];
 
-  // the rail
-  const railHtml = on => `
-    <div class="it plain ${on === 'home' ? 'on' : ''}"><span class="ic">${glyphSvg(G.house, 'gl')}</span><span class="tx"><b>Home</b></span></div>
-    <div class="lab">Devices</div>
-    ${devices.map(d => `<div class="it ${on === d.id ? 'on' : ''}"><span class="ic">${glyphSvg(d.glyph, 'gl')}</span><span class="tx"><b>${d.name}</b><small>${d.rail}</small></span></div>`).join('')}
-    <div class="it off"><span class="ic">${glyphSvg(G.headset, 'gl')}</span><span class="tx"><b>SteelSeries Arctis Nova</b><small><i></i>Not connected</small></span></div>
-    <div class="grow"></div>
-    <div class="it plain"><span class="ic">${glyphSvg(G.plugs, 'gl')}</span><span class="tx"><b>Cores and devices</b></span></div>`;
-  for (const r of document.querySelectorAll('.rail')) r.innerHTML = railHtml(r.dataset.on);
-
-  // the home's cards
-  document.getElementById('shelf').innerHTML = devices.map((d, i) => `<div class="card ${i === 0 ? 'hover' : ''}"><div class="stage">${d.pic}</div>
-    <div class="meta"><b>${d.name}</b><span class="go">›</span>${d.lines.map(l => `<span class="line">${l}</span>`).join('')}</div></div>`).join('');
+  // the home: pictures and names
+  document.getElementById('tiles').innerHTML = devices.map((d, k) => `<div class="tile ${k === 0 ? 'hover' : ''}"><div class="sq">${d.pic}</div><b>${d.name}</b></div>`).join('')
+    + `<div class="tile off"><div class="sq"><div class="glyph">${glyphSvg(G.headset)}</div></div><b>SteelSeries Arctis Nova</b><small>Not connected</small></div>`;
 
   // inside the Z10: the app's own device page, without its title bar, which the window above draws
   let html = await fetch('/index.html').then(r => r.text());
@@ -222,7 +219,10 @@ async function z10Layout() {
       window.fetch = (u, o) => /\\/api\\/(preview|record)/.test(String(u))
         ? Promise.resolve(new Response('{"mode":null,"recording":false}', { headers: { 'content-type': 'application/json' } })) : __real(u, o);
       addEventListener('beforeunload', e => e.stopImmediatePropagation(), true);
-    <\/script>`).replace('</head>', `<style>.tbar { display: none !important; } .nav.devbar { top: 0 !important; }</style></head>`);
+    <\/script>`).replace('</head>', `<style>.tbar { display: none !important; } .nav.devbar { top: 0 !important; }
+      .devbar .back { display: inline-flex; align-items: center; height: 30px; padding: 0 10px 0 6px; margin-left: -10px; border-radius: 7px; color: #d4d4d4; font-size: 14px; }
+      .devbar .vr { width: 1px; height: 22px; background: #404040; margin-left: -8px; }</style></head>`)
+    .replace('<span class="brand">EVGA Z10 RGB</span>', '<span class="back">‹ Devices</span><span class="vr"></span><span class="brand">EVGA Z10 RGB</span>');
   document.getElementById('z10').srcdoc = html;
 
   // the same keyboard at each level
