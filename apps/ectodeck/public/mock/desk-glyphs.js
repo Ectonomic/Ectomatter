@@ -13,7 +13,10 @@ window.DESK_GLYPHS = (() => {
   const solid = (x, y, w, h) => `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${w.toFixed(2)}" height="${h.toFixed(2)}" rx="0.9" fill="currentColor" stroke="none"/>`;
   const rows = [[1, 1, 1, 1, 1, 1, 1, 1, 1, 1], [1.5, 1, 1, 1, 1, 1, 1, 1, 1.5], [1.9, 1, 1, 1, 1, 1, 1, 2.1], [1, 1, 1, 5, 1, 1, 1, 1]];
   const KX = 7.5, KW = 49, KH = 3.3, GAP = 1.25, ROW = 4.9, KY = 23.3;
-  let kb = `<rect x="3.5" y="19" width="57" height="26" rx="3.2"/>`;
+  // the keys carry most of the ink, so the outline is drawn lighter to match
+  // the weight of the other glyphs
+  const LIGHT = 'stroke-width="1.8"';
+  let kb = `<rect x="3.5" y="19" width="57" height="26" rx="3.2" ${LIGHT}/>`;
   rows.forEach((units, r) => {
     const unit = (KW - GAP * (units.length - 1)) / units.reduce((a, b) => a + b, 0);
     let x = KX;
@@ -21,9 +24,9 @@ window.DESK_GLYPHS = (() => {
   });
 
   // A macro pad to match: solid keys in a grid of four by three, three dials.
-  let pad = `<rect x="6" y="14" width="52" height="36" rx="4"/>`;
+  let pad = `<rect x="6" y="14" width="52" height="36" rx="4" ${LIGHT}/>`;
   for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) pad += solid(10.5 + c * 8.2, 19.5 + r * 8.7, 6.4, 6.4);
-  pad += `<circle cx="49.5" cy="22.7" r="2.7"/><circle cx="49.5" cy="31.4" r="2.7"/><circle cx="49.5" cy="40.1" r="2.7"/>`;
+  pad += `<circle cx="49.5" cy="22.7" r="2.7" ${LIGHT}/><circle cx="49.5" cy="31.4" r="2.7" ${LIGHT}/><circle cx="49.5" cy="40.1" r="2.7" ${LIGHT}/>`;
 
   // a mouse from above: its two buttons, its wheel
   const mouse = `<path d="M32 6c-8.8 0-14 6.4-14 16v16c0 11 6.3 20 14 20s14-9 14-20V22c0-9.6-5.2-16-14-16z"/><path d="M32 6v17M18 23h28"/><rect x="29.6" y="11" width="4.8" height="8" rx="2.4" fill="currentColor" stroke="none"/>`;
