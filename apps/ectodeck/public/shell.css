@@ -30,7 +30,7 @@ html:not(.framed) .mrail { top: 0; height: 100vh; }
 .mrail .b:hover { background: #262626; color: #f5f5f5; }
 .mrail .b.on { background: #2e2e2e; color: #f5f5f5; }
 .mrail .b.off { opacity: .4; }
-.mrail .b:focus-visible, .mrail .caret:focus-visible, .tile:focus-visible .sq { outline: 1px solid var(--focus); outline-offset: -1px; }
+.mrail .b:focus-visible, .mrail .fold:focus-visible, .tile:focus-visible .sq { outline: 1px solid var(--focus); outline-offset: -1px; }
 .mrail .b .tx { display: grid; min-width: 0; line-height: 1.2; opacity: 0; transform: translateX(-6px); transition: opacity .12s ease, transform .22s cubic-bezier(.2,.8,.2,1); }
 .mrail.open .b .tx { opacity: 1; transform: none; transition-delay: .06s; }
 .mrail .b .tx b { font-size: 13.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
@@ -40,13 +40,14 @@ html:not(.framed) .mrail { top: 0; height: 100vh; }
 .mrail .tip { display: none; position: absolute; left: 50px; top: 50%; transform: translateY(-50%); white-space: nowrap; padding: 5px 9px; border-radius: 6px;
   background: #3a3a3a; color: #f5f5f5; font-size: 12.5px; box-shadow: 0 6px 18px -6px rgba(0,0,0,.7); z-index: 3; pointer-events: none; }
 .mrail:not(.open) .b:hover .tip { display: block; }
-/* the caret that opens and closes the rail: a glyph, not a row */
-.mrail .caret { flex: none; align-self: center; width: 28px; height: 24px; margin-top: 4px; padding: 0; border: 0; border-radius: 6px; background: none; color: #737373; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-.mrail .caret:hover { color: #f5f5f5; background: #262626; }
-.mrail .caret svg { width: 16px; height: 16px; }
-.mrail .caret .l, .mrail.open .caret .r { display: none; }
-.mrail.open .caret .l { display: block; }
-.mrail.open .caret { align-self: flex-end; }
+/* the caret that opens and closes the rail: a glyph, not a row. (Not .caret,
+   which is the macro recorder's blinking cursor.) */
+.mrail .fold { flex: none; align-self: center; width: 28px; height: 24px; margin-top: 4px; padding: 0; border: 0; border-radius: 6px; background: none; color: #737373; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.mrail .fold:hover { color: #f5f5f5; background: #262626; }
+.mrail .fold svg { width: 16px; height: 16px; }
+.mrail .fold .l, .mrail.open .fold .r { display: none; }
+.mrail.open .fold .l { display: block; }
+.mrail.open .fold { align-self: flex-end; }
 
 /* ------------------------------------------------ the home: each device's glyph and its name, nothing else */
 #home { background: #202020; padding: 34px 40px; font-family: 'Geist', system-ui, sans-serif; }   /* a step darker than the device's page */

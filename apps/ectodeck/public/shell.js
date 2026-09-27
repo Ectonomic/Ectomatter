@@ -23,14 +23,14 @@
   rail.innerHTML = item('home', 'Home', HOUSE) + '<span class="gap"></span>'
     + devices.map(d => item(d.id, d.name, DESK_GLYPHS[d.glyph])).join('')
     + '<span class="grow"></span>' + item('settings', 'Settings', GEAR)
-    + `<button type="button" class="caret" aria-label="Open the rail">${RIGHT}${LEFT}</button>`;
+    + `<button type="button" class="fold" aria-label="Open the rail">${RIGHT}${LEFT}</button>`;
 
   document.getElementById('tiles').innerHTML = devices.map(d =>
     `<button type="button" class="tile" data-go="${d.id}"><span class="sq">${DESK_GLYPHS[d.glyph]}</span><b>${d.name}</b><small>Not connected</small></button>`).join('');
 
   // Whether the rail was left open is remembered. It opens as it was without
   // animating, and animates from then on.
-  const caret = rail.querySelector('.caret');
+  const caret = rail.querySelector('.fold');
   const setOpen = open => {
     rail.classList.toggle('open', open);
     caret.setAttribute('aria-label', open ? 'Close the rail' : 'Open the rail');
