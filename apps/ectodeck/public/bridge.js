@@ -22,6 +22,7 @@
     if (path === '/api/state') return call('state');
     if (path === '/api/lcd') return call('lcd');
     if (path === '/api/firmware') return call('firmware', { version: body.version });
+    if (path === '/api/sliders') return call('sliders');
     if (path === '/api/preview') return call('preview', { body });
     if (path === '/api/record') return call('record', body ? { action: body.action, room: body.room, waits: body.waits } : { action: 'status' });
     if (path === '/api/active') return call('activate', { profile: body.profile });

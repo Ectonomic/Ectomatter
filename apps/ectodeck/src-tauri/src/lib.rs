@@ -86,6 +86,18 @@ fn lcd() -> Value {
 }
 
 /// Open the Macro Editor window, or bring it forward, on macro `index` if given.
+/// Where both sliders are. Null on firmware that cannot say. Asked for
+/// several times a second while a device page is open, so unlike the rest it
+/// says nothing in the log unless it fails.
+#[tauri::command]
+async fn sliders(app: State<'_, App>) -> Result<Value, String> {
+    let kb = app.kb.clone();
+    tauri::async_runtime::spawn_blocking(move || kb.sliders())
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
 /// Retail or custom firmware, and what the keyboard's build can do (see
 /// ectotype_core::firmware). The app offers a custom feature only if listed.
 #[tauri::command]
@@ -194,7 +206,7 @@ pub fn run() {
                 let _ = w.hide();
             }
         })
-        .invoke_handler(tauri::generate_handler![state, save, write_macro, activate, preview, record, lcd, open_macro_editor, prepare_macro_editor, firmware])
+        .invoke_handler(tauri::generate_handler![state, save, write_macro, activate, preview, record, lcd, open_macro_editor, prepare_macro_editor, firmware, sliders])
         .run(tauri::generate_context!())
         .expect("Ectodeck could not start");
 }
