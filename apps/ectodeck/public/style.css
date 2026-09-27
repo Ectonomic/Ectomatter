@@ -215,9 +215,27 @@ section.panel { padding: 18px 0 4px; }
 .seg button { border: 0; }
 
 .swatches { display: flex; gap: 8px; flex-wrap: wrap; }
-.swatch-in { position: relative; width: 38px; height: 38px; border-radius: 9px; overflow: hidden; box-shadow: inset 0 0 0 1px rgba(255,255,255,.18); }
-.swatch-in input { position: absolute; inset: -8px; width: 54px; height: 54px; border: 0; padding: 0; cursor: pointer; background: none; }
-.swatch-in:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
+.swatch-in { position: relative; display: block; width: 38px; height: 38px; padding: 0; border: 0; border-radius: 9px; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(255,255,255,.18); }
+.swatch-in:hover { box-shadow: inset 0 0 0 1px rgba(255,255,255,.4); }
+
+/* the colour picker (colorPicker in app.js) */
+.menu.picker { padding: 12px; display: grid; gap: 10px; overflow-x: hidden; }
+.pk-sv { position: relative; height: 160px; border-radius: 8px; cursor: crosshair; touch-action: none; }
+.pk-dot { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; box-shadow: 0 0 0 2px #fff, 0 0 0 3px rgba(0,0,0,.4); pointer-events: none; }
+.pk-hue { position: relative; height: 12px; border-radius: 6px; cursor: pointer; touch-action: none;
+  background: linear-gradient(to right, #f00, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00); }
+.pk-knob { position: absolute; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: transparent; box-shadow: 0 0 0 2px #fff, 0 0 0 3px rgba(0,0,0,.4); pointer-events: none; }
+.pk-row { display: grid; grid-template-columns: 1.7fr 1fr 1fr 1fr; gap: 6px; }
+.pk-row.pk-hsb { grid-template-columns: repeat(3, 1fr); }
+.pk-f { display: grid; gap: 3px; justify-items: center; }
+.pk-f input { width: 100%; min-width: 0; padding: 5px 6px; border: 0; border-radius: 6px; background: #262626; color: var(--ink); font-family: inherit; font-size: 12.5px; font-weight: 500; line-height: 1.2; text-align: center; font-variant-numeric: tabular-nums; -moz-appearance: textfield; }
+.pk-f input::-webkit-inner-spin-button, .pk-f input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.pk-f input:focus { outline: 1px solid #737373; outline-offset: 0; }
+.pk-f span { font-size: 11px; color: var(--quiet); }
+.pk-lab { font-size: 11.5px; color: var(--quiet); margin-bottom: -4px; }
+.pk-wells { display: grid; grid-template-columns: repeat(9, 1fr); gap: 5px; }
+.pk-well { aspect-ratio: 1; padding: 0; border: 0; border-radius: 5px; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(255,255,255,.14); }
+.pk-well:hover { box-shadow: inset 0 0 0 1px rgba(255,255,255,.6); }
 
 input[type=range] { width: 100%; accent-color: var(--ink); }
 .range-val { font-variant-numeric: tabular-nums; color: var(--ink); font-size: 13px; }

@@ -907,9 +907,7 @@ function renderCustom(box) {
   const cols = customColors();
   box.append(el('div', { class: 'paintbar' },
     el('span', { class: 'lab' }, 'Colour'),
-    el('span', { class: 'swatch-in' },
-      el('input', { type: 'color', value: S.paint, 'aria-label': 'Colour to paint with',
-        oninput: e => { S.paint = e.target.value; } })),
+    colorInput(unhex(S.paint), c => { S.paint = hex(c); }),
     el('button', { class: 'ghost', onclick: () => {
       const c = unhex(S.paint);
       for (const k of S.layout) if (k.led) cols[k.pos] = [...c];
@@ -945,8 +943,104 @@ function field(label, ...kids) {
   const note = typeof kids[kids.length - 1] === 'string' ? kids.pop() : null;
   return el('div', { class: 'field' }, label ? el('span', { class: 'lab' }, label) : null, ...kids, note ? el('span', { class: 'note' }, note) : null);
 }
+// A colour swatch that opens Ectodeck's colour picker.
 function colorInput(c, on) {
-  return el('span', { class: 'swatch-in' }, el('input', { type: 'color', value: hex(c), 'aria-label': 'Colour', oninput: e => on(unhex(e.target.value)) }));
+  const sw = el('button', { type: 'button', class: 'swatch-in', 'aria-label': `Colour ${hex(c)}`, 'aria-haspopup': 'dialog', style: `background:${hex(c)}`,
+    onclick: e => colorPicker(e.currentTarget, c, v => { sw.style.background = hex(v); sw.setAttribute('aria-label', `Colour ${hex(v)}`); on(v); }) });
+  return sw;
+}
+
+// ---------------------------------------------------------------- colour picker
+// The picker every colour opens, laid out as design tools lay theirs: a square
+// of saturation across and brightness down for the chosen hue, the hue below
+// it, the colour as a hex code, as red, green and blue from 0 to 255, and as
+// hue, saturation and brightness, then preset colours and the ones used
+// lately. The keyboard follows as it changes.
+const rgb2hsv = ([r, g, b]) => {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let h = 0;
+  if (d) h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [(h * 60 + 360) % 360, mx ? d / mx : 0, mx];
+};
+const hsv2rgb = ([h, s, v]) => {
+  const f = n => { const k = (n + h / 60) % 6; return Math.round(255 * (v - v * s * Math.max(0, Math.min(k, 4 - k, 1)))); };
+  return [f(5), f(3), f(1)];
+};
+const PRESETS = [[255, 255, 255], [255, 0, 0], [255, 96, 0], [255, 200, 0], [0, 255, 0], [0, 255, 200], [0, 120, 255], [120, 0, 255], [255, 0, 180]];
+const recentColors = () => { try { return JSON.parse(localStorage.getItem('ectodeck:recent-colours') || '[]'); } catch (e) { return []; } };
+function keepRecent(c) {
+  const list = [c, ...recentColors().filter(r => hex(r) !== hex(c))].slice(0, 9);
+  try { localStorage.setItem('ectodeck:recent-colours', JSON.stringify(list)); } catch (e) { /* not fatal */ }
+}
+
+function colorPicker(anchor, start, on) {
+  let hsv = rgb2hsv(start), rgb = [...start], wait = 0;
+  openMenu(anchor, m => {
+    m.classList.add('picker');
+    const sv = el('div', { class: 'pk-sv' }, el('span', { class: 'pk-dot' }));
+    const hue = el('div', { class: 'pk-hue' }, el('span', { class: 'pk-knob' }));
+    const hexIn = el('input', { class: 'pk-hex', spellcheck: 'false', 'aria-label': 'Hex code', maxlength: '7' });
+    const num = (label, max) => el('input', { type: 'number', min: 0, max, 'aria-label': label });
+    const [rIn, gIn, bIn] = ['Red', 'Green', 'Blue'].map(l => num(l, 255));
+    const hIn = num('Hue', 359), sIn = num('Saturation', 100), vIn = num('Brightness', 100);
+    const cell = (lab, inp) => el('label', { class: 'pk-f' }, inp, el('span', {}, lab));
+    const well = (c, title) => el('button', { type: 'button', class: 'pk-well', title, 'aria-label': `${title} ${hex(c)}`, style: `background:${hex(c)}`, onclick: () => set(rgb2hsv(c), c) });
+    const recent = recentColors();
+    m.append(sv, hue,
+      el('div', { class: 'pk-row' }, cell('Hex', hexIn), cell('R', rIn), cell('G', gIn), cell('B', bIn)),
+      el('div', { class: 'pk-row pk-hsb' }, cell('H°', hIn), cell('S%', sIn), cell('B%', vIn)),
+      el('div', { class: 'pk-lab' }, 'Presets'), el('div', { class: 'pk-wells' }, PRESETS.map(c => well(c, 'Preset'))),
+      recent.length ? el('div', { class: 'pk-lab' }, 'Recent') : null,
+      recent.length ? el('div', { class: 'pk-wells' }, recent.map(c => well(c, 'Recent'))) : null);
+
+    // show the colour everywhere but the field being typed in
+    const show = skip => {
+      const [h, s, v] = hsv;
+      sv.style.background = `linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, hsl(${h} 100% 50%))`;
+      sv.firstChild.style.left = `${s * 100}%`; sv.firstChild.style.top = `${(1 - v) * 100}%`;
+      sv.firstChild.style.background = hex(rgb);
+      hue.firstChild.style.left = `${h / 360 * 100}%`;
+      if (skip !== hexIn) hexIn.value = hex(rgb).toUpperCase();
+      [rIn, gIn, bIn].forEach((f, i) => { if (skip !== f) f.value = rgb[i]; });
+      if (skip !== hIn) hIn.value = Math.round(h);
+      if (skip !== sIn) sIn.value = Math.round(s * 100);
+      if (skip !== vIn) vIn.value = Math.round(v * 100);
+    };
+    // the keyboard is sent the colour at most once a frame while dragging
+    const set = (nhsv, nrgb, skip) => {
+      hsv = nhsv; rgb = nrgb || hsv2rgb(hsv); show(skip);
+      if (!wait) wait = requestAnimationFrame(() => { wait = 0; on([...rgb]); });
+    };
+    const drag = (area, move) => area.addEventListener('pointerdown', e => {
+      e.preventDefault(); area.setPointerCapture(e.pointerId);
+      const at = ev => { const r = area.getBoundingClientRect(); move(Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width)), Math.max(0, Math.min(1, (ev.clientY - r.top) / r.height))); };
+      at(e);
+      const mv = ev => at(ev), up = () => { area.removeEventListener('pointermove', mv); area.removeEventListener('pointerup', up); };
+      area.addEventListener('pointermove', mv); area.addEventListener('pointerup', up);
+    });
+    drag(sv, (x, y) => set([hsv[0], x, 1 - y]));
+    drag(hue, x => set([Math.min(359.9, x * 360), hsv[1], hsv[2]]));
+    hexIn.addEventListener('input', () => {
+      const t = hexIn.value.trim().replace(/^#/, '');
+      const full = /^[0-9a-f]{3}$/i.test(t) ? t.split('').map(ch => ch + ch).join('') : t;
+      if (/^[0-9a-f]{6}$/i.test(full)) { const c = unhex('#' + full); set(rgb2hsv(c), c, hexIn); }
+    });
+    [rIn, gIn, bIn].forEach((f, i) => f.addEventListener('input', () => {
+      if (f.value === '') return;
+      const c = [...rgb]; c[i] = Math.max(0, Math.min(255, Math.round(+f.value) || 0)); set(rgb2hsv(c), c, f);
+    }));
+    [[hIn, 0, 359, 1], [sIn, 1, 100, 100], [vIn, 2, 100, 100]].forEach(([f, i, max, per]) => f.addEventListener('input', () => {
+      if (f.value === '') return;
+      const n = [...hsv]; n[i] = Math.max(0, Math.min(max, +f.value || 0)) / (per === 1 ? 1 : per); set(n, null, f);
+    }));
+    for (const f of [hexIn, rIn, gIn, bIn, hIn, sIn, vIn]) {
+      f.addEventListener('keydown', e => { if (e.key === 'Enter') { keepRecent(rgb); closeMenu(); } });
+      f.addEventListener('blur', () => { show(); });
+    }
+    show();
+  // the colour the picker is closed on joins the recent ones
+  }, { width: 264, onDismiss: () => { if (hex(rgb) !== hex(start)) keepRecent(rgb); } });
 }
 function rangeField(label, min, max, val, fmt, on) {
   const out = el('span', { class: 'range-val' }, fmt(val));
