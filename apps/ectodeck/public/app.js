@@ -680,7 +680,7 @@ function effectColors(L, t) {
 // keyboard on screen shows a colour as the keys do, so each channel spills
 // into another in proportion: red and blue into green, and green into blue,
 // 0x60 of each at full. The colours chosen and sent are left as
-// they are.
+// they are. The screen's backlight leans the same way.
 const LED_SPILL = { redToGreen: 0x60 / 0xff, blueToGreen: 0x60 / 0xff, greenToBlue: 0x60 / 0xff };
 const ledLook = ([r, g, b]) => [
   r | 0,
@@ -822,7 +822,8 @@ function renderProfiles() {
 function renderBoardLabels() {
   const d = draft(), fac = saved(254);
   const lc = d.lighting.lcd.color;
-  const scaled = lc.color.map(v => Math.round(v * (0.3 + 0.7 * lc.brightness / 255)));
+  // the screen's backlight leans as the keys' LEDs do (see ledLook)
+  const scaled = ledLook(lc.color).map(v => Math.round(v * (0.3 + 0.7 * lc.brightness / 255)));
   S.lcdColor = scaled;
   drawPanel();
   const layer = 'keys';
