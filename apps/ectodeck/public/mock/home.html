@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <title>Ectodeck home mock</title>
 <link rel="stylesheet" href="/fonts.css">
+<script src="/mock/desk-glyphs.js"></script>
 <style>
 @font-face { font-family: 'Geist'; src: url('/fonts/Geist-Variable-latin.woff2') format('woff2'); font-weight: 100 900; }
 :root { color-scheme: dark; }
@@ -134,7 +135,7 @@ ul.notes li { margin: 3px 0; }
 .level .ltext b { display: block; font-size: 14px; margin-bottom: 3px; }
 .level .ltext span { color: #a3a3a3; font-size: 13px; }
 .level .ltext code { font: 12px ui-monospace, monospace; color: #d4d4d4; }
-.glyphs { display: grid; grid-template-columns: repeat(11, 1fr); gap: 10px; margin-top: 18px; }
+.glyphs { display: grid; grid-template-columns: repeat(9, 1fr); gap: 10px; margin-top: 18px; }
 .glyphs div { text-align: center; font-size: 12px; color: #a3a3a3; }
 .glyphs .g { height: 72px; border-radius: 10px; background: #1a1a1a; border: 1px solid #2e2e2e; display: flex; align-items: center; justify-content: center; margin-bottom: 6px; color: #d4d4d4; }
 .glyphs .g svg { width: 34px; height: 34px; }
@@ -156,7 +157,7 @@ ul.notes li { margin: 3px 0; }
       <div class="body"><div class="rslot"><nav class="mrail" data-on="home" data-tip="m3"></nav></div><div class="page home-ground"><div class="tiles" id="tiles"></div></div></div>
     </div></div>
     <ul class="notes">
-      <li>Every device shows its kind's glyph, from the standard set (section 03). Product pictures are kept for inside the device, where the editor works on a drawing of it.</li>
+      <li>Every device shows its kind's glyph, from Ectodeck's own set for desk peripherals (section 03). Product pictures are kept for inside the device, where the editor works on a drawing of it.</li>
       <li>The only other thing a tile ever says is "Not connected", under the name of a device that is unplugged, which dims. The last tile shows one, as an example. Everything else, firmware and profiles included, is inside the device.</li>
       <li>The rail never carries status. Closed, a device's name appears when you point at it (shown on the MagTran); open, it shows the names. The place you are in is lighter, and an unplugged device dims. Its foot button opens the blade (section 02 shows it open).</li>
       <li>Opened, the blade takes its room from the page, which narrows to make space. Whether it was left open is remembered.</li>
@@ -188,6 +189,8 @@ ul.notes li { margin: 3px 0; }
 </main>
 <script>
 const glyphSvg = (paths, cls = '') => `<svg class="${cls}" viewBox="0 0 256 256" fill="currentColor">${paths}</svg>`;
+// a device's kind, drawn from Ectodeck's own set of desk peripherals
+const deskGlyph = kind => DESK_GLYPHS[kind];
 
 // Ectodeck's own drawing of a device from the layout its core describes.
 function drawLayout(d, w) {
@@ -234,27 +237,27 @@ async function z10Layout() {
     m3: drawLayout(m3Layout(), 244),
   };
   const devices = [
-    { id: 'z10', name: 'EVGA Z10 RGB', pic: pics.z10, glyph: G.keyboard, rail: '<i class="warn"></i>Unofficial firmware',
+    { id: 'z10', name: 'EVGA Z10 RGB', pic: pics.z10, glyph: 'keyboard', rail: '<i class="warn"></i>Unofficial firmware',
       lines: ['<i></i>Connected <span class="unoff">Unofficial firmware</span>', '<span class="sw" style="background:#ff2d00"></span>Profile 1 · Static red'] },
-    { id: 'm3', name: 'VSDinside MagTran M3', pic: pics.m3, glyph: G.macropad, rail: '<i></i>Connected',
+    { id: 'm3', name: 'VSDinside MagTran M3', pic: pics.m3, glyph: 'macropad', rail: '<i></i>Connected',
       lines: ['<i></i>Connected · 15 keys, 3 dials', '<span class="sw" style="background:#2b6cff"></span>Default · Aquarium'] },
   ];
 
   // the rail: Home, each device's glyph (its name, and a line of status, when the blade is open), and the toggle
   const rows = [...devices.map(d => ({ id: d.id, name: d.name, glyph: d.glyph, line: d.rail })),
-                { id: 'nova', name: 'SteelSeries Arctis Nova', glyph: G.headset, line: '<i></i>Not connected', off: true }];
+                { id: 'nova', name: 'SteelSeries Arctis Nova', glyph: 'headset', line: '<i></i>Not connected', off: true }];
   for (const r of document.querySelectorAll('.mrail')) {
     const on = r.dataset.on, tip = r.dataset.tip;
     r.innerHTML = `<span class="b ${on === 'home' ? 'on' : ''}" title="Home">${glyphSvg(G.house)}<span class="tx"><b>Home</b></span></span><span class="gap"></span>`
-      + rows.map(d => `<span class="b dev ${on === d.id ? 'on' : ''} ${d.off ? 'off' : ''} ${tip === d.id ? 'hover' : ''}" title="${d.name}">${glyphSvg(d.glyph)}<span class="tx"><b>${d.name}</b></span>${tip === d.id ? `<span class="tip">${d.name}</span>` : ''}</span>`).join('')
+      + rows.map(d => `<span class="b dev ${on === d.id ? 'on' : ''} ${d.off ? 'off' : ''} ${tip === d.id ? 'hover' : ''}" title="${d.name}">${deskGlyph(d.glyph)}<span class="tx"><b>${d.name}</b></span>${tip === d.id ? `<span class="tip">${d.name}</span>` : ''}</span>`).join('')
       + `<span class="grow"></span><span class="b" title="Settings">${glyphSvg(G.gear)}<span class="tx"><b>Settings</b></span></span>`
       + `<button class="caret" type="button" aria-label="Open or close the rail">${glyphSvg(G.caretright, 'r')}${glyphSvg(G.caretleft, 'l')}</button>`;
     r.querySelector('.caret').addEventListener('click', () => r.classList.toggle('open'));
   }
 
   // the home: pictures and names
-  document.getElementById('tiles').innerHTML = devices.map((d, k) => `<div class="tile ${k === 0 ? 'hover' : ''}"><div class="sq"><div class="glyph">${glyphSvg(d.glyph)}</div></div><b>${d.name}</b></div>`).join('')
-    + `<div class="tile off"><div class="sq"><div class="glyph">${glyphSvg(G.headset)}</div></div><b>SteelSeries Arctis Nova</b><small>Not connected</small></div>`;
+  document.getElementById('tiles').innerHTML = devices.map((d, k) => `<div class="tile ${k === 0 ? 'hover' : ''}"><div class="sq"><div class="glyph">${deskGlyph(d.glyph)}</div></div><b>${d.name}</b></div>`).join('')
+    + `<div class="tile off"><div class="sq"><div class="glyph">${deskGlyph('headset')}</div></div><b>SteelSeries Arctis Nova</b><small>Not connected</small></div>`;
 
   // inside the Z10: the app's own device page, without its title bar, which the window above draws
   let html = await fetch('/index.html').then(r => r.text());
@@ -274,10 +277,10 @@ async function z10Layout() {
   document.getElementById('levels').innerHTML = [
     ['1 · Its own artwork', 'Supplied by the core, as <code>picture.art</code>, with the drawing its editor works on as <code>picture.board</code>.', `<img src="/mock/z10-picture.png" width="420" alt="">`],
     ['2 · Drawn from its layout', 'No artwork: Ectodeck draws it from the controls its core already describes, every key, dial, slider and screen where it really is.', drawLayout(z10, 420)],
-    ["3 · Its kind's glyph", 'Nothing but its kind: <code>picture.glyph</code> names one of the glyphs below, from Phosphor, the icon family Ectodeck is built on.', `<div class="glyph">${glyphSvg(G.keyboard)}</div>`],
+    ["3 · Its kind's glyph", 'Nothing but its kind: <code>picture.glyph</code> names one of Ectodeck\'s own glyphs for desk peripherals, below.', `<div class="glyph">${deskGlyph('keyboard')}</div>`],
   ].map(([t, d, p]) => `<div class="level"><div class="lstage">${p}</div><div class="ltext"><b>${t}</b><span>${d}</span></div></div>`).join('');
-  const names = { keyboard: 'Keyboard', mouse: 'Mouse', macropad: 'Macro pad', headset: 'Headset', controller: 'Controller', microphone: 'Microphone', speaker: 'Speaker', display: 'Display', webcam: 'Webcam', light: 'Light', memory: 'Memory' };
-  document.getElementById('glyphs').innerHTML = Object.entries(names).map(([k, n]) => `<div><div class="g">${glyphSvg(G[k])}</div>${n}</div>`).join('');
+  const names = { keyboard: 'Keyboard', macropad: 'Macro pad', mouse: 'Mouse', headset: 'Headset', microphone: 'Microphone', controller: 'Controller', speaker: 'Speaker', webcam: 'Webcam', display: 'Display' };
+  document.getElementById('glyphs').innerHTML = Object.entries(names).map(([k, n]) => `<div><div class="g">${deskGlyph(k)}</div>${n}</div>`).join('');
 })();
 </script>
 </body>
