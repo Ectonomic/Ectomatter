@@ -1,26 +1,29 @@
 // Ectodeck's glyphs for desk peripherals: one drawing style for every kind
-// (a 64 unit square, 2.5 unit strokes, rounded corners and joins, all in
-// line), each device drawn from the view it is known by,
+// (a 64 unit square, 2.5 unit strokes, rounded corners and joins; keys solid,
+// as keyboards are drawn), each device drawn from the view it is known by,
 // top-down where it can be, reduced to what makes it that device.
 window.DESK_GLYPHS = (() => {
   const S = 'fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"';
   const key = (x, y, w = 4, h = 4) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="1" fill="currentColor"/>`;
   const svg = inner => `<svg viewBox="0 0 64 64" ${S}>${inner}</svg>`;
 
-  // a full keyboard. Every key is the same short stroke on a 6-unit pitch; the
-  // spacebar runs along the same grid; the number pad sits one key apart, with
-  // the same margin on both sides of the body.
-  const k = (x, y) => `M${x} ${y}h2`;
-  let keys = [];
-  for (const y of [26, 32]) for (const x of [11, 17, 23, 29, 35, 45, 51]) keys.push(k(x, y));
-  keys.push(k(11, 38), 'M17 38h14', k(35, 38), k(45, 38), k(51, 38));
-  const kb = `<rect x="4" y="18" width="56" height="28" rx="5"/><path d="${keys.join('')}"/>`;
+  // A keyboard as keyboards are drawn: a thin outline, and solid keys laid out
+  // in four staggered rows as on a real board. Each row fills the same width;
+  // widths are in key units (Tab, Caps Lock, Enter and the spacebar wider).
+  const solid = (x, y, w, h) => `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${w.toFixed(2)}" height="${h.toFixed(2)}" rx="0.9" fill="currentColor" stroke="none"/>`;
+  const rows = [[1, 1, 1, 1, 1, 1, 1, 1, 1, 1], [1.5, 1, 1, 1, 1, 1, 1, 1, 1.5], [1.9, 1, 1, 1, 1, 1, 1, 2.1], [1, 1, 1, 5, 1, 1, 1, 1]];
+  const KX = 7.5, KW = 49, KH = 3.3, GAP = 1.25, ROW = 4.9, KY = 23.3;
+  let kb = `<rect x="3.5" y="19" width="57" height="26" rx="3.2"/>`;
+  rows.forEach((units, r) => {
+    const unit = (KW - GAP * (units.length - 1)) / units.reduce((a, b) => a + b, 0);
+    let x = KX;
+    for (const u of units) { kb += solid(x, KY + r * ROW, u * unit, KH); x += u * unit + GAP; }
+  });
 
-  // a macro pad: six square keys in two rows and two dials, with the same
-  // margin all round and gaps wide enough to stay open at small sizes
-  let pad = `<rect x="4" y="13" width="56" height="38" rx="6"/>`;
-  for (let r = 0; r < 2; r++) for (let c = 0; c < 3; c++) pad += `<rect x="${10.5 + c * 12.5}" y="${21.5 + r * 13}" width="8" height="8" rx="2"/>`;
-  pad += `<circle cx="50.5" cy="25.5" r="3.5"/><circle cx="50.5" cy="38.5" r="3.5"/>`;
+  // A macro pad to match: solid keys in a grid of four by three, three dials.
+  let pad = `<rect x="6" y="14" width="52" height="36" rx="4"/>`;
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) pad += solid(10.5 + c * 8.2, 19.5 + r * 8.7, 6.4, 6.4);
+  pad += `<circle cx="49.5" cy="23.2" r="2.7"/><circle cx="49.5" cy="32" r="2.7"/><circle cx="49.5" cy="40.8" r="2.7"/>`;
 
   // a mouse from above: its two buttons, its wheel
   const mouse = `<path d="M32 6c-8.8 0-14 6.4-14 16v16c0 11 6.3 20 14 20s14-9 14-20V22c0-9.6-5.2-16-14-16z"/><path d="M32 6v17M18 23h28"/><rect x="29.6" y="11" width="4.8" height="8" rx="2.4" fill="currentColor" stroke="none"/>`;
