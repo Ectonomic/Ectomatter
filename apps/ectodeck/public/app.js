@@ -1285,7 +1285,14 @@ function renderMacros() {
     const timed = steps.some(s => s.delay);
     return el('button', { 'aria-current': String(S.macro === n), class: macroDirty(n) ? 'dirty' : '',
       // choosing the open macro again puts it away, back to the blank one
-      onclick: () => { S.macro = S.macro === n ? null : n; S.selStep = null; S.ins = null; S.editName = false; renderMacros(); } },
+      onclick: () => { S.macro = S.macro === n ? null : n; S.selStep = null; S.ins = null; S.editName = false; renderMacros(); },
+      // right-clicking a macro opens it and offers Rename, Duplicate and Delete where the pointer is
+      oncontextmenu: e => {
+        e.preventDefault();
+        if (S.rec) return;
+        if (S.macro !== n) { S.macro = n; S.selStep = null; S.ins = null; S.editName = false; renderMacros(); }
+        macroMenu(pointAt(e.clientX, e.clientY));
+      } },
       el('span', { class: 'ico' }, timed ? ICO.clock() : ICO.keys()),
       el('span', { class: 'name' }, (d ? d.name : m.name) || `Macro ${n}`),
       el('span', { class: 'sub' }, d?.isNew ? 'Not saved yet' : describeMacro(steps)));
@@ -1583,10 +1590,17 @@ function playsMenu(anchor) {
       }, { tick: cur && cur !== 'varies' && cur.mode === v })));
   }, { width: 260 });
 }
-function moreMenu(anchor) {
-  const n = S.macro, d = mdraft(), saved = !!S.dev.macros[n];
+// A place on the screen standing in for a button, for a menu opened where the
+// pointer is rather than under a button.
+const pointAt = (x, y) => ({ getBoundingClientRect: () => new DOMRect(x, y, 0, 0), contains: () => false });
+
+// The open macro's own menu: from its More button, or from right-clicking it in the list.
+function moreMenu(anchor) { macroMenu(anchor, { width: 240, align: 'right' }); }
+function macroMenu(anchor, place = { width: 220 }) {
+  const n = S.macro, d = mdraft(), saved = !!S.dev.macros[n], m0 = S.dev.macros[n];
   openMenu(anchor, m => {
     m.append(
+      mItem('Rename', () => { closeMenu(); S.editName = true; renderMacros(); }, { disabled: !!(m0 && !m0.editable) }),
       mItem('Duplicate', () => {
         closeMenu();
         const k = freeSlots()[0]; if (!k) { status('All 100 macro slots are full.', 'bad'); return; }
@@ -1606,7 +1620,7 @@ function moreMenu(anchor) {
           confirm: 'Delete macro', danger: true, onConfirm: deleteMacro,
         });
       }, { cls: 'danger' }));
-  }, { width: 240, align: 'right' });
+  }, place);
 }
 
 // A modal confirmation. Escape or a click outside cancels; Cancel has the focus,
