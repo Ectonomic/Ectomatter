@@ -65,15 +65,33 @@ ul.notes li { margin: 3px 0; }
 .devbar { display: flex; align-items: center; gap: 22px; height: 56px; padding: 0 28px; border-bottom: 1px solid #404040; font-family: 'Barlow', system-ui, sans-serif; }
 .devbar .back { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px 0 6px; margin-left: -10px; border-radius: 7px; color: #d4d4d4; font-size: 14px; }
 .devbar .vr { width: 1px; height: 22px; background: #404040; }
-/* ------------------------------------------------ the minimal rail: glyphs only, the title bar's grey */
-.mrail { width: 60px; flex: none; background: #262626; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 0; }
-.mrail .b { position: relative; width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #a3a3a3; cursor: pointer; }
-.mrail .b svg { width: 22px; height: 22px; }
-.mrail .b:hover, .mrail .b.hover { background: #2e2e2e; color: #f5f5f5; }
-.mrail .b.on { background: #3a3a3a; color: #f5f5f5; }
+/* ------------------------------------------------ the rail: glyphs, opening into a blade
+   The rail keeps a 60px slot in the layout. The blade inside it widens over the
+   page when opened, so the page never reflows while it moves. */
+.rslot { position: relative; width: 60px; flex: none; z-index: 4; }
+.mrail { position: absolute; inset: 0 auto 0 0; width: 60px; background: #161616; display: flex; flex-direction: column; gap: 4px; padding: 10px; overflow: hidden;
+  transition: width .22s cubic-bezier(.2,.8,.2,1), box-shadow .22s ease; }
+.mrail.open { width: 232px; box-shadow: 18px 0 40px -18px rgba(0,0,0,.8); }
+/* closed, the names are hidden, so nothing needs clipping and a tooltip can reach past the rail */
+.mrail:not(.open) { overflow: visible; }
+.mrail:not(.open) .b .tx { visibility: hidden; }
+.mrail .b { position: relative; flex: none; display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 9px; border-radius: 10px; color: #a3a3a3; cursor: pointer; white-space: nowrap; }
+.mrail .b svg { flex: none; width: 22px; height: 22px; }
+.mrail .b:hover, .mrail .b.hover { background: #262626; color: #f5f5f5; }
+.mrail .b.on { background: #2e2e2e; color: #f5f5f5; }
 .mrail .b.off { opacity: .4; }
-.mrail .gap { height: 6px; }
+.mrail .b .tx { display: grid; min-width: 0; opacity: 0; transform: translateX(-6px); transition: opacity .12s ease, transform .22s cubic-bezier(.2,.8,.2,1); }
+.mrail.open .b .tx { opacity: 1; transform: none; transition-delay: .06s; }
+.mrail .b .tx b { font-size: 13.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+.mrail .b .tx small { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #a3a3a3; overflow: hidden; }
+.mrail .b .tx small i { width: 6px; height: 6px; border-radius: 50%; background: #8fd6a1; flex: none; }
+.mrail .b .tx small i.warn { background: #f0b35a; }
+.mrail .b.off .tx small i { background: #737373; }
+.mrail .b.dev { height: 48px; }
+.mrail .gap { height: 8px; flex: none; }
+.mrail .grow { flex: 1; }
 .mrail .tip { position: absolute; left: 50px; top: 50%; transform: translateY(-50%); white-space: nowrap; padding: 5px 9px; border-radius: 6px; background: #3a3a3a; color: #f5f5f5; font-size: 12.5px; box-shadow: 0 6px 18px -6px rgba(0,0,0,.7); z-index: 3; }
+.mrail.open .tip { display: none; }
 /* ------------------------------------------------ (earlier passes) */
 .page { flex: 1; padding: 34px 40px; overflow: hidden; }
 .pagehead { display: flex; align-items: baseline; gap: 12px; margin-bottom: 20px; }
@@ -122,29 +140,30 @@ ul.notes li { margin: 3px 0; }
 <body>
 <main>
   <h1 class="t">Ectodeck home</h1>
-  <p class="lede">A minimal rail down the left, in the title bar's grey: Home, then one glyph for each device, named only when you point at it. The home is the devices' pictures and names, nothing else.</p>
+  <p class="lede">A minimal rail down the left, a shade of its own: Home, then one glyph for each device, named when you point at it. The button at its foot opens it into a blade with each device's name and status, animated, over the page. The home is the devices' pictures and names, nothing else.</p>
 
   <section>
     <h2><b>01</b> Home</h2>
     <p>Only the devices: each one's picture in the same square, and its name. You pass through it on the way to a device.</p>
     <div class="desk"><div class="win">
       <div class="tbar"><span class="home mark"></span><span class="right"><span class="act gear"></span><span class="wb"><span>—</span><span>☐</span><span>✕</span></span></span></div>
-      <div class="body"><nav class="mrail" data-on="home"></nav><div class="page home-ground"><div class="tiles" id="tiles"></div></div></div>
+      <div class="body"><div class="rslot"><nav class="mrail" data-on="home" data-tip="m3"></nav></div><div class="page home-ground"><div class="tiles" id="tiles"></div></div></div>
     </div></div>
     <ul class="notes">
       <li>A picture is the device's own artwork, a drawing Ectodeck makes from its layout, or its kind's glyph (section 03).</li>
       <li>The only other thing a tile ever says is "Not connected", under the name of a device that is unplugged, which dims. The last tile shows one, as an example. Everything else, firmware and profiles included, is inside the device.</li>
-      <li>The rail has no labels or status: a device's name appears when you point at it (shown on the MagTran), the place you are in is lighter, and an unplugged device dims.</li>
+      <li>Closed, the rail has no labels or status: a device's name appears when you point at it (shown on the MagTran), the place you are in is lighter, and an unplugged device dims. Its foot button opens the blade (section 02 shows it open).</li>
+      <li>The blade opens over the page rather than pushing it aside, so the keyboard does not reflow while it moves. Whether it was left open is remembered.</li>
       <li>Cores and devices live in Ectodeck's Settings, in the title bar.</li>
     </ul>
   </section>
 
   <section>
     <h2><b>02</b> Inside a device</h2>
-    <p>The Z10 chosen in the rail. The rail is the way between places, so the device's bar needs no link back. This is the real editor, reading your keyboard.</p>
+    <p>The Z10 chosen in the rail, with the rail opened into its blade: each device's name and one line of status. It opens and closes with the button at its foot; try it in either window. This is the real editor, reading your keyboard.</p>
     <div class="desk"><div class="win">
       <div class="tbar"><span class="home mark"></span><span class="right"><span class="act gear"></span><span class="wb"><span>—</span><span>☐</span><span>✕</span></span></span></div>
-      <div class="body"><nav class="mrail" data-on="z10"></nav><div class="devview"><iframe id="z10" title="EVGA Z10 RGB"></iframe></div></div>
+      <div class="body"><div class="rslot"><nav class="mrail open" data-on="z10"></nav></div><div class="devview"><iframe id="z10" title="EVGA Z10 RGB"></iframe></div></div>
     </div></div>
   </section>
 
@@ -218,12 +237,15 @@ async function z10Layout() {
       lines: ['<i></i>Found by OpenRGB · lighting only', '<span class="sw" style="background:linear-gradient(90deg,#ff2d00,#ffd000,#22d36b,#2b6cff)"></span>Rainbow wave'] },
   ];
 
-  // the minimal rail: Home, then each device's glyph; its name only as a tooltip
+  // the rail: Home, each device's glyph (its name, and a line of status, when the blade is open), and the toggle
+  const rows = [...devices.map(d => ({ id: d.id, name: d.name, glyph: d.glyph, line: d.rail })),
+                { id: 'nova', name: 'SteelSeries Arctis Nova', glyph: G.headset, line: '<i></i>Not connected', off: true }];
   for (const r of document.querySelectorAll('.mrail')) {
-    const on = r.dataset.on;
-    r.innerHTML = `<span class="b ${on === 'home' ? 'on' : ''}" title="Home">${glyphSvg(G.house)}</span><span class="gap"></span>`
-      + devices.map(d => `<span class="b ${on === d.id ? 'on' : ''} ${on === 'home' && d.id === 'm3' ? 'hover' : ''}" title="${d.name}">${glyphSvg(d.glyph)}${on === 'home' && d.id === 'm3' ? `<span class="tip">${d.name}</span>` : ''}</span>`).join('')
-      + `<span class="b off" title="SteelSeries Arctis Nova, not connected">${glyphSvg(G.headset)}</span>`;
+    const on = r.dataset.on, tip = r.dataset.tip;
+    r.innerHTML = `<span class="b ${on === 'home' ? 'on' : ''}" title="Home">${glyphSvg(G.house)}<span class="tx"><b>Home</b></span></span><span class="gap"></span>`
+      + rows.map(d => `<span class="b dev ${on === d.id ? 'on' : ''} ${d.off ? 'off' : ''} ${tip === d.id ? 'hover' : ''}" title="${d.name}">${glyphSvg(d.glyph)}<span class="tx"><b>${d.name}</b><small>${d.line}</small></span>${tip === d.id ? `<span class="tip">${d.name}</span>` : ''}</span>`).join('')
+      + `<span class="grow"></span><span class="b toggle" title="Open or close the rail">${glyphSvg(G.sidebar)}<span class="tx"><b>Collapse</b></span></span>`;
+    r.querySelector('.toggle').addEventListener('click', () => r.classList.toggle('open'));
   }
 
   // the home: pictures and names
