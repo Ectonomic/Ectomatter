@@ -675,6 +675,13 @@ function effectColors(L, t) {
   return out;
 }
 
+// The Z10's LEDs show red as orange: sent FF0000, a key looks like FF6000, and
+// every colour with red in it leans the same way. The keyboard on screen shows
+// a colour as the keys do, so it adds that green, 0x60 of it at full red; the
+// colours chosen and sent are left as they are.
+const LED_GREEN_PER_RED = 0x60 / 0xff;
+const ledLook = ([r, g, b]) => [r | 0, Math.min(255, g + r * LED_GREEN_PER_RED) | 0, b | 0];
+
 function frame(now) {
   const t = now - S.t0;
   if (S.dev) {
@@ -697,7 +704,8 @@ function frame(now) {
     for (const k of S.layout) {
       const v = colors[k.pos];
       if (!v) continue;
-      const c = `rgb(${v[0] | 0},${v[1] | 0},${v[2] | 0})`, a = v[3].toFixed(3);
+      const [lr, lg, lb] = ledLook(v);
+      const c = `rgb(${lr},${lg},${lb})`, a = v[3].toFixed(3);
       if (c === k.lc && a === k.la) continue;
       k.lc = c; k.la = a; changed = true;
       k.el.style.setProperty('--c', c);
