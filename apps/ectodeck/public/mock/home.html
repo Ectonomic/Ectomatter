@@ -66,28 +66,26 @@ ul.notes li { margin: 3px 0; }
 .devbar .back { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px 0 6px; margin-left: -10px; border-radius: 7px; color: #d4d4d4; font-size: 14px; }
 .devbar .vr { width: 1px; height: 22px; background: #404040; }
 /* ------------------------------------------------ the rail: glyphs, opening into a blade
-   The rail keeps a 60px slot in the layout. The blade inside it widens over the
-   page when opened, so the page never reflows while it moves. */
-.rslot { position: relative; width: 60px; flex: none; z-index: 4; }
-.mrail { position: absolute; inset: 0 auto 0 0; width: 60px; background: #161616; display: flex; flex-direction: column; gap: 4px; padding: 10px; overflow: hidden;
-  transition: width .22s cubic-bezier(.2,.8,.2,1), box-shadow .22s ease; }
-.mrail.open { width: 232px; box-shadow: 18px 0 40px -18px rgba(0,0,0,.8); }
+   The rail is part of the layout: opened, it widens and the page makes room. */
+.rslot { position: relative; flex: none; z-index: 4; display: flex; }
+.mrail { position: relative; width: 60px; background: #161616; display: flex; flex-direction: column; gap: 4px; padding: 10px; overflow: hidden;
+  transition: width .22s cubic-bezier(.2,.8,.2,1); }
+.mrail.open { width: 232px; }
 /* closed, the names are hidden, so nothing needs clipping and a tooltip can reach past the rail */
 .mrail:not(.open) { overflow: visible; }
 .mrail:not(.open) .b .tx { visibility: hidden; }
-.mrail .b { position: relative; flex: none; display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 9px; border-radius: 10px; color: #a3a3a3; cursor: pointer; white-space: nowrap; }
+.mrail .b { position: relative; flex: none; display: flex; align-items: center; gap: 12px; height: 40px; min-width: 40px; padding: 0 9px;   /* a 40px square, closed */ border-radius: 10px; color: #a3a3a3; cursor: pointer; white-space: nowrap; }
 .mrail .b svg { flex: none; width: 22px; height: 22px; }
 .mrail .b:hover, .mrail .b.hover { background: #262626; color: #f5f5f5; }
 .mrail .b.on { background: #2e2e2e; color: #f5f5f5; }
 .mrail .b.off { opacity: .4; }
-.mrail .b .tx { display: grid; min-width: 0; opacity: 0; transform: translateX(-6px); transition: opacity .12s ease, transform .22s cubic-bezier(.2,.8,.2,1); }
+.mrail .b .tx { display: grid; min-width: 0; line-height: 1.2; opacity: 0; transform: translateX(-6px); transition: opacity .12s ease, transform .22s cubic-bezier(.2,.8,.2,1); }
 .mrail.open .b .tx { opacity: 1; transform: none; transition-delay: .06s; }
 .mrail .b .tx b { font-size: 13.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
 .mrail .b .tx small { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #a3a3a3; overflow: hidden; }
 .mrail .b .tx small i { width: 6px; height: 6px; border-radius: 50%; background: #8fd6a1; flex: none; }
 .mrail .b .tx small i.warn { background: #f0b35a; }
 .mrail .b.off .tx small i { background: #737373; }
-.mrail .b.dev { height: 48px; }
 .mrail .gap { height: 8px; flex: none; }
 .mrail .grow { flex: 1; }
 .mrail .tip { position: absolute; left: 50px; top: 50%; transform: translateY(-50%); white-space: nowrap; padding: 5px 9px; border-radius: 6px; background: #3a3a3a; color: #f5f5f5; font-size: 12.5px; box-shadow: 0 6px 18px -6px rgba(0,0,0,.7); z-index: 3; }
@@ -140,7 +138,7 @@ ul.notes li { margin: 3px 0; }
 <body>
 <main>
   <h1 class="t">Ectodeck home</h1>
-  <p class="lede">A minimal rail down the left, a shade of its own: Home, then one glyph for each device, named when you point at it. The button at its foot opens it into a blade with each device's name and status, animated, over the page. The home is the devices' pictures and names, nothing else.</p>
+  <p class="lede">A minimal rail down the left, a shade of its own: Home, then one glyph for each device, named when you point at it. The button at its foot opens it into a blade with each device's name and status, animated, and the page makes room. The home is the devices' pictures and names, nothing else.</p>
 
   <section>
     <h2><b>01</b> Home</h2>
@@ -153,7 +151,7 @@ ul.notes li { margin: 3px 0; }
       <li>A picture is the device's own artwork, a drawing Ectodeck makes from its layout, or its kind's glyph (section 03).</li>
       <li>The only other thing a tile ever says is "Not connected", under the name of a device that is unplugged, which dims. The last tile shows one, as an example. Everything else, firmware and profiles included, is inside the device.</li>
       <li>Closed, the rail has no labels or status: a device's name appears when you point at it (shown on the MagTran), the place you are in is lighter, and an unplugged device dims. Its foot button opens the blade (section 02 shows it open).</li>
-      <li>The blade opens over the page rather than pushing it aside, so the keyboard does not reflow while it moves. Whether it was left open is remembered.</li>
+      <li>Opened, the blade takes its room from the page, which narrows to make space. Whether it was left open is remembered.</li>
       <li>Cores and devices live in Ectodeck's Settings, in the title bar.</li>
     </ul>
   </section>
