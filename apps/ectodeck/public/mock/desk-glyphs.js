@@ -7,17 +7,20 @@ window.DESK_GLYPHS = (() => {
   const key = (x, y, w = 4, h = 4) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="1" fill="currentColor"/>`;
   const svg = inner => `<svg viewBox="0 0 64 64" ${S}>${inner}</svg>`;
 
-  // a full keyboard: two rows of keys and the spacebar, drawn in line like the
-  // rest of the set, and the number pad set apart
-  const row = (x0, x1, y) => `<path d="M${x0} ${y}H${x1}" stroke-dasharray="3.2 3.4"/>`;
-  let kb = `<rect x="3" y="18" width="58" height="28" rx="4"/>`;
-  kb += row(9.5, 40, 25.5) + row(9.5, 40, 32) + `<path d="M9.5 38.5h1M16 38.5h16M38 38.5h1"/>`;
-  kb += row(47, 55, 25.5) + row(47, 55, 32) + row(47, 55, 38.5);
+  // a full keyboard. Every key is the same short stroke on a 6-unit pitch; the
+  // spacebar runs along the same grid; the number pad sits one key apart, with
+  // the same margin on both sides of the body.
+  const k = (x, y) => `M${x} ${y}h2`;
+  let keys = [];
+  for (const y of [26, 32]) for (const x of [11, 17, 23, 29, 35, 45, 51]) keys.push(k(x, y));
+  keys.push(k(11, 38), 'M17 38h14', k(35, 38), k(45, 38), k(51, 38));
+  const kb = `<rect x="4" y="18" width="56" height="28" rx="5"/><path d="${keys.join('')}"/>`;
 
-  // a macro pad: a grid of large keys with its dials beside it
-  let pad = `<rect x="5" y="14" width="54" height="36" rx="5"/>`;
-  for (let r = 0; r < 2; r++) for (let c = 0; c < 3; c++) pad += `<rect x="${11 + c * 11}" y="${20 + r * 12}" width="8" height="8" rx="2"/>`;
-  pad += `<circle cx="50" cy="24" r="4.2"/><circle cx="50" cy="40" r="4.2"/>`;
+  // a macro pad: six square keys in two rows and two dials, with the same
+  // margin all round and gaps wide enough to stay open at small sizes
+  let pad = `<rect x="4" y="13" width="56" height="38" rx="6"/>`;
+  for (let r = 0; r < 2; r++) for (let c = 0; c < 3; c++) pad += `<rect x="${10.5 + c * 12.5}" y="${21.5 + r * 13}" width="8" height="8" rx="2"/>`;
+  pad += `<circle cx="50.5" cy="25.5" r="3.5"/><circle cx="50.5" cy="38.5" r="3.5"/>`;
 
   // a mouse from above: its two buttons, its wheel
   const mouse = `<path d="M32 6c-8.8 0-14 6.4-14 16v16c0 11 6.3 20 14 20s14-9 14-20V22c0-9.6-5.2-16-14-16z"/><path d="M32 6v17M18 23h28"/><rect x="29.6" y="11" width="4.8" height="8" rx="2.4" fill="currentColor" stroke="none"/>`;
