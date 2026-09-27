@@ -1,0 +1,172 @@
+//! Ectodeck's desktop shell: the windows, the tray, and the calls the
+//! screens make, answered by the EVGA Z10 RGB core.
+//!
+//! Every call that talks to the keyboard runs off the interface thread, since
+//! a single exchange with the Z10 waits on the keyboard for up to 150 ms.
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use ectotype_core::{Conn, Keyboard, Recorder};
+use serde_json::{Value, json};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+
+struct App {
+    kb: Arc<Keyboard>,
+    rec: Recorder,
+}
+
+/// Run keyboard work on a blocking thread and hand back what it produced,
+/// with any error as the plain sentence the screens show.
+async fn blocking<T: Send + 'static>(what: &'static str, f: impl FnOnce() -> ectotype_core::Result<T> + Send + 'static) -> Result<T, String> {
+    let t = std::time::Instant::now();
+    let r = tauri::async_runtime::spawn_blocking(f).await.map_err(|e| e.to_string())?.map_err(|e| e.to_string());
+    match &r {
+        Ok(_) => eprintln!("ectodeck: {what} took {} ms", t.elapsed().as_millis()),
+        Err(e) => eprintln!("ectodeck: {what} failed: {e}"),
+    }
+    r
+}
+
+#[tauri::command]
+async fn state(app: State<'_, App>) -> Result<Value, String> {
+    let kb = app.kb.clone();
+    blocking("state", move || kb.state()).await
+}
+
+#[tauri::command]
+async fn save(app: State<'_, App>, n: u8, body: Value) -> Result<Value, String> {
+    let kb = app.kb.clone();
+    blocking("save", move || kb.save(n, &body)).await
+}
+
+#[tauri::command]
+async fn write_macro(app: State<'_, App>, index: u8, body: Value) -> Result<Value, String> {
+    let kb = app.kb.clone();
+    blocking("write_macro", move || kb.write_macro(index, &body)).await
+}
+
+#[tauri::command]
+async fn activate(app: State<'_, App>, profile: u8) -> Result<Value, String> {
+    let kb = app.kb.clone();
+    blocking("activate", move || kb.activate(profile).map(|n| json!({ "active": n }))).await
+}
+
+#[tauri::command]
+async fn preview(app: State<'_, App>, body: Value) -> Result<Value, String> {
+    let kb = app.kb.clone();
+    blocking("preview", move || kb.preview(&body)).await
+}
+
+/// `action` is start, stop, cancel or status.
+#[tauri::command]
+fn record(app: State<'_, App>, action: String, room: Option<usize>, waits: Option<bool>) -> Result<Value, String> {
+    match action.as_str() {
+        "start" => app.rec.start(room.unwrap_or(967), waits.unwrap_or(true)).map_err(|e| e.to_string()),
+        "stop" => Ok(app.rec.stop(true)),
+        "cancel" => Ok(app.rec.stop(false)),
+        _ => Ok(app.rec.status()),
+    }
+}
+
+/// What the keyboard's display is showing. The keyboard will not read its
+/// display back, so this is the frame the z10-lcd service last wrote, until
+/// the display's stats move into Ectodeck itself.
+#[tauri::command]
+fn lcd() -> Value {
+    let dir = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    let f = dir.join("z10-lcd/frame");
+    let fresh = std::fs::metadata(&f).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|a| a.as_secs() < 10);
+    let rows: Vec<String> = std::fs::read_to_string(&f)
+        .map(|s| s.split('\n').take(4).map(|r| format!("{:<20}", r.chars().take(20).collect::<String>())).collect())
+        .unwrap_or_default();
+    json!({ "live": fresh && !rows.is_empty(), "rows": rows })
+}
+
+/// Open the Macro Editor window, or bring it forward, on macro `index` if given.
+#[tauri::command]
+fn open_macro_editor(app: AppHandle, index: Option<u8>) -> Result<(), String> {
+    show_macro_editor(&app, index).map_err(|e| e.to_string())
+}
+
+fn show_macro_editor(app: &AppHandle, index: Option<u8>) -> tauri::Result<()> {
+    let hash = match index { Some(i) => format!("macros/{i}"), None => "macros".into() };
+    if let Some(w) = app.get_webview_window("macros") {
+        w.eval(&format!("location.hash = '{hash}'"))?;
+        w.show()?;
+        w.unminimize()?;
+        return w.set_focus();
+    }
+    WebviewWindowBuilder::new(app, "macros", WebviewUrl::App(format!("index.html#{hash}").into()))
+        .title("Macro Editor")
+        .inner_size(1180.0, 800.0)
+        .decorations(false)
+        .transparent(true)
+        .min_inner_size(900.0, 600.0)
+        .build()?;
+    Ok(())
+}
+
+fn show_main(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+}
+
+fn tray(app: &AppHandle) -> tauri::Result<()> {
+    let open = MenuItem::with_id(app, "open", "Open Ectodeck", true, None::<&str>)?;
+    let macros = MenuItem::with_id(app, "macros", "Macro Editor", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit Ectodeck", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open, &macros, &PredefinedMenuItem::separator(app)?, &quit])?;
+    TrayIconBuilder::with_id("ectodeck")
+        .icon(app.default_window_icon().cloned().expect("the app's icon"))
+        .tooltip("Ectodeck")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, e| match e.id.as_ref() {
+            "open" => show_main(app),
+            "macros" => { let _ = show_macro_editor(app, None); }
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|icon, e| {
+            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = e {
+                show_main(icon.app_handle());
+            }
+        })
+        .build(app)?;
+    Ok(())
+}
+
+pub fn run() {
+    // WebKitGTK's DMA-BUF renderer fails on NVIDIA under Wayland (the window
+    // dies with a protocol error), so Linux uses its other renderer unless the
+    // user has chosen otherwise.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        unsafe { std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1") };
+    }
+
+    tauri::Builder::default()
+        .setup(|app| {
+            let backups = app.path().app_data_dir()?.join("backups");
+            app.manage(App { kb: Arc::new(Keyboard::new(Conn::hid(), Some(backups))), rec: Recorder::new() });
+            tray(app.handle())?;
+            Ok(())
+        })
+        // Closing a window keeps Ectodeck running in the tray; Quit in the
+        // tray menu ends it.
+        .on_window_event(|w, e| {
+            if let WindowEvent::CloseRequested { api, .. } = e {
+                api.prevent_close();
+                let _ = w.hide();
+            }
+        })
+        .invoke_handler(tauri::generate_handler![state, save, write_macro, activate, preview, record, lcd, open_macro_editor])
+        .run(tauri::generate_context!())
+        .expect("Ectodeck could not start");
+}

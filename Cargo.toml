@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/ectotype-core"]
+members = ["crates/ectotype-core", "apps/ectodeck/src-tauri"]
 
 [workspace.package]
 edition = "2024"
