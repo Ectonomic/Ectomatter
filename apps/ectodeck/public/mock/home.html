@@ -55,8 +55,8 @@ ul.notes li { margin: 3px 0; }
 .home-ground { background: #1a1a1a; }   /* the home sits a step darker than the device screens */
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, 260px); gap: 28px 24px; }
 .tile { cursor: pointer; }
-.tile .sq { aspect-ratio: 1; border-radius: 14px; background: #1f2429; border: 1px solid #333; display: flex; align-items: center; justify-content: center; padding: 26px; transition: border-color .15s ease; }
-.tile.hover .sq { border-color: #8a8a8a; }
+.tile .sq { aspect-ratio: 1; border-radius: 14px; background: #1f2429; display: flex; align-items: center; justify-content: center; padding: 26px; transition: background-color .15s ease; }
+.tile.hover .sq { background: #283039; }     /* the square under the pointer lightens, no outline */
 .tile .sq img, .tile .sq svg.drawn { display: block; max-width: 100%; max-height: 100%; width: 100%; height: auto; }
 .tile .sq .glyph { color: #8a8a8a; }
 .tile .sq .glyph svg { display: block; width: 72px; height: 72px; }
