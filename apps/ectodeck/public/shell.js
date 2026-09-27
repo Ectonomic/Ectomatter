@@ -56,6 +56,8 @@
     body.dataset.place = where;
     for (const b of rail.querySelectorAll('.b')) b.classList.toggle('on', b.dataset.go === where);
     scrollTo(0, 0);
+    // a device's keyboard is drawn from pictures sized to it, so draw them now it shows
+    if (where !== 'home' && where !== 'settings') { window.drawCaps?.(); window.drawHalos?.(); }
   };
   addEventListener('click', e => {
     const t = e.target.closest('[data-go]');

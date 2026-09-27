@@ -265,18 +265,88 @@ const shade = (c, f) => `rgb(${c.map(v => Math.min(255, Math.round(v * f))).join
 // The keyboard will not read its own display back, so the z10-lcd service writes
 // each frame it sends to a file and the server passes it on. If nothing is
 // driving the display, the panel is drawn unlit rather than showing stale text.
+// The caps' picture, drawn at the board's shown size. While a key is pressed
+// its own cap is drawn live over a hole cut for it here.
+function drawCaps(hole) {
+  const cv = document.querySelector('.board .caps'), img = S.caps;
+  if (!cv || !img?.complete || !img.naturalWidth) return;
+  const r = cv.getBoundingClientRect(), dpr = devicePixelRatio || 1;
+  if (!r.width) return;
+  const w = Math.round(r.width * dpr), h = Math.round(r.height * dpr);
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  const ctx = cv.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.clearRect(0, 0, w, h);
+  ctx.drawImage(img, 0, 0, w, h);
+  S.capsDrawn = true;
+  if (hole) {
+    const s = w / r.width, m = r.width * 0.004;
+    ctx.clearRect((hole.offsetLeft - m) * s, (hole.offsetTop - m) * s, (hole.offsetWidth + 2 * m) * s, (hole.offsetHeight + 2 * m * 2) * s);
+  }
+}
+// The light each key throws onto the deck, drawn as the halo each key once
+// drew for itself (style.css .key .halo): its box grown by 8% of its width and
+// 12% of its height, corners 28% round, in its colour at 0.3 of its light,
+// blurred by 0.9% of the board's width. One picture under the deck's top
+// layer, so the light shows only in the wells. The blurred shape is made once
+// for each size of key and tinted for each key.
+function drawHalos() {
+  const cv = document.querySelector('.board .halos');
+  if (!cv) return;
+  // at half the screen's resolution: the light is a blur, so nothing is lost
+  const r = cv.getBoundingClientRect(), dpr = (devicePixelRatio || 1) / 2;
+  if (!r.width) return;
+  const W = Math.round(r.width * dpr), H = Math.round(r.height * dpr);
+  if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+  const s = W / r.width, sigma = r.width * 0.009 * s, pad = Math.ceil(sigma * 3);
+  const ctx = cv.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+  S.haloSprites ??= {};
+  const tint = S.haloTint ??= document.createElement('canvas');
+  for (const k of S.layout) {
+    const a = +(k.la || 0);
+    if (!(a > 0) || !k.el.offsetWidth) continue;
+    const bw = k.el.offsetWidth, bh = k.el.offsetHeight;
+    const w = bw * 1.16 * s, h = bh * 1.24 * s;
+    const key = `${Math.round(w)}x${Math.round(h)}@${sigma.toFixed(2)}`;
+    let sp = S.haloSprites[key];
+    if (!sp) {
+      sp = S.haloSprites[key] = document.createElement('canvas');
+      sp.width = Math.ceil(w) + 2 * pad; sp.height = Math.ceil(h) + 2 * pad;
+      const g = sp.getContext('2d'), off = sp.width + 10;
+      g.shadowColor = '#fff'; g.shadowBlur = 2 * sigma; g.shadowOffsetX = off;
+      g.fillStyle = '#fff'; g.beginPath();
+      g.roundRect(pad - off, pad, w, h, [{ x: w * 0.28, y: h * 0.28 }]); g.fill();
+    }
+    if (tint.width !== sp.width || tint.height !== sp.height) { tint.width = sp.width; tint.height = sp.height; }
+    const t = tint.getContext('2d');
+    t.globalCompositeOperation = 'copy'; t.drawImage(sp, 0, 0);
+    t.globalCompositeOperation = 'source-in'; t.fillStyle = k.lc; t.fillRect(0, 0, tint.width, tint.height);
+    ctx.globalAlpha = Math.min(1, a) * 0.3;
+    ctx.drawImage(tint, (k.el.offsetLeft - bw * 0.08) * s - pad, (k.el.offsetTop - bh * 0.12) * s - pad);
+  }
+  ctx.globalAlpha = 1;
+}
+function pressKey(k) {
+  k.el.classList.add('press'); drawCaps(k.el);
+  setTimeout(() => { k.el.classList.remove('press'); drawCaps(); }, 90);
+}
+
 // The panel is drawn at its shown size, so draw it again when that changes:
 // with the window, and with the page, which narrows as the rail opens. While
 // the rail animates the size changes every frame, so it is drawn once it
 // settles. Hidden, the panel has no size and is left as it was.
 let panelSize = '', panelWait = 0;
 new ResizeObserver(() => {
+  // the first time the keyboard is shown, its caps and light are drawn at once
+  if (!S.capsDrawn) { drawCaps(); drawHalos(); }
   clearTimeout(panelWait);
   panelWait = setTimeout(() => {
     const r = document.querySelector('.screen .panel')?.getBoundingClientRect();
     if (!r || !r.width) return;
     const k = `${Math.round(r.width * devicePixelRatio)}x${Math.round(r.height * devicePixelRatio)}`;
     if (k !== panelSize) { panelSize = k; drawPanel(); }
+    drawCaps(); drawHalos();
   }, 60);
 }).observe(document.getElementById('board'));
 
@@ -369,6 +439,14 @@ async function load() {
   S.font = font;
   S.zones = { 0x10: zones.WASD, 0x08: zones.Arrows, 0x04: zones.Numbers, 0x02: zones.FKeys, 0x01: zones.Numpad };
   buildBoard();
+  // tools/build_caps.py: the caps alone, for caps.png
+  if (location.search.includes('capsheet')) {
+    document.documentElement.classList.add('capsheet');
+    document.body.replaceChildren($('#board'));
+    await document.fonts.ready;
+    document.title = 'SHEET READY';
+    return;
+  }
   await refresh();
 }
 
@@ -495,9 +573,17 @@ function buildBoard() {
   const at = (x, y, w, h) => `left:${(x - x0) / W * 100}%;top:${(y - y0) / H * 100}%;`
     + `width:${w / W * 100}%;height:${h / H * 100}%`;
   board.append(el('img', { class: 'art', src: 'board.svg', alt: '', draggable: 'false' }));
+  // the light the keys throw onto the deck, all in one picture (see drawHalos)
+  if (!/capsheet|livecaps/.test(location.search)) { board.append(el('canvas', { class: 'halos' })); board.classList.add('haloed'); }
   // Labels printed on the deck, where EVGA's photo has them: under each slider,
   // a minus at one end, the name, and a plus at the other; and G/PC under the
   // mode button.
+  // the caps, drawn once into caps.png, under every key (see .board .caps)
+  board.append(el('canvas', { class: 'caps' }));
+  S.caps = new Image();
+  S.caps.onload = () => { board.classList.add('sheeted'); drawCaps(); };
+  // ?livecaps draws every cap live, to compare the picture against
+  if (!/capsheet|livecaps/.test(location.search)) S.caps.src = 'caps.png';
   const printed = (x, y, w, h, ...words) => board.append(el('div', { class: 'print', style: at(x, y, w, h) },
     words.map(t => el('span', {}, t))));
   const [[dx0, , dx1, dy1], [vx0, , vx1]] = S.board.sliders;
@@ -606,12 +692,18 @@ function frame(now) {
           [i, S.byPos[i] && S.byPos[i].led ? [...c, Math.max(...c) ? 1 : 0] : [0, 0, 0, 0]]))
       : effectColors(L, t);
     S.lastColors = colors;
+    // only a key whose light has changed is touched, so a still effect costs nothing
+    let changed = false;
     for (const k of S.layout) {
       const v = colors[k.pos];
       if (!v) continue;
-      k.el.style.setProperty('--c', `rgb(${v[0] | 0},${v[1] | 0},${v[2] | 0})`);
-      k.el.style.setProperty('--a', v[3].toFixed(3));
+      const c = `rgb(${v[0] | 0},${v[1] | 0},${v[2] | 0})`, a = v[3].toFixed(3);
+      if (c === k.lc && a === k.la) continue;
+      k.lc = c; k.la = a; changed = true;
+      k.el.style.setProperty('--c', c);
+      k.el.style.setProperty('--a', a);
     }
+    if (changed) drawHalos();
   }
   requestAnimationFrame(frame);
 }
@@ -707,7 +799,9 @@ function renderProfiles() {
       title: isDirty(n) ? 'Unsaved changes' : '', onclick: () => chooseProfile(n),
       }, el('span', { class: 'swatch', style: `background:${sw}` }),
     (S.drafts[n].name && !/^DEFAULT/i.test(S.drafts[n].name) ? S.drafts[n].name : `Profile ${n}`),
-    el('span', { class: 'sub' }, (m ? m.name : L.mode) + (n === S.dev.active ? ', active' : ''))));
+    // ", active" keeps its room on every profile, shown only on the one in use,
+    // so the buttons keep their widths as that changes
+    el('span', { class: 'sub' }, m ? m.name : L.mode, el('span', { class: 'act' + (n === S.dev.active ? '' : ' off') }, ', active'))));
   }
 }
 
@@ -979,14 +1073,14 @@ function selectKey(pos) {
     customColors()[pos] = unhex(S.paint);
     saveCustom(); startPreview();
     const k = S.byPos[pos];
-    k.el.classList.add('press'); setTimeout(() => k.el.classList.remove('press'), 90);
+    pressKey(k);
     return;
   }
   if (S.view !== 'keys') { S.view = 'keys'; }
   else if (S.sel === pos) { deselectKey(); return; }     // pressing it again lets it go
   S.sel = pos;
   const k = S.byPos[pos];
-  k.el.classList.add('press'); setTimeout(() => k.el.classList.remove('press'), 90);
+  pressKey(k);
   renderView(); renderBoardLabels();
 }
 
@@ -1816,7 +1910,7 @@ addEventListener('keydown', e => {
   const pos = posForEvent(e);
   if (pos == null) return;
   const k = S.byPos[pos]; if (!k) return;
-  k.el.classList.add('press'); setTimeout(() => k.el.classList.remove('press'), 90);
+  pressKey(k);
   if (draft().lighting.mode === 'trigger') flash(pos);
 });
 addEventListener('beforeunload', e => {
