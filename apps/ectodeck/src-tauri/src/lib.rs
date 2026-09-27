@@ -86,6 +86,13 @@ fn lcd() -> Value {
 }
 
 /// Open the Macro Editor window, or bring it forward, on macro `index` if given.
+/// Retail or custom firmware, and what the keyboard's build can do (see
+/// ectotype_core::firmware). The app offers a custom feature only if listed.
+#[tauri::command]
+fn firmware(version: u16) -> Value {
+    ectotype_core::firmware::describe(version)
+}
+
 #[tauri::command]
 fn open_macro_editor(app: AppHandle, index: Option<u8>) -> Result<(), String> {
     show_macro_editor(&app, index).map_err(|e| e.to_string())
@@ -187,7 +194,7 @@ pub fn run() {
                 let _ = w.hide();
             }
         })
-        .invoke_handler(tauri::generate_handler![state, save, write_macro, activate, preview, record, lcd, open_macro_editor, prepare_macro_editor])
+        .invoke_handler(tauri::generate_handler![state, save, write_macro, activate, preview, record, lcd, open_macro_editor, prepare_macro_editor, firmware])
         .run(tauri::generate_context!())
         .expect("Ectodeck could not start");
 }

@@ -78,7 +78,7 @@ Errors use JSON-RPC's error object, with a `message` written for the person usin
   "name": "EVGA Z10 RGB",
   "vendor": "EVGA",
   "model": "Z10 RGB",
-  "firmware": { "version": "1.171", "official": false, "note": "Unofficial build 1 of EVGA's 1.17" },
+  "firmware": { "kind": "custom", "version": "1.171", "build": 1, "features": [], "later": [{ "id": "sliders.read", "since": 2 }] },
   "picture": { "art": "art/board.svg", "top": "art/board-top.svg", "width": 661, "height": 262 },
   "controls": [
     { "id": "esc", "kind": "key", "label": "Esc", "legend": { "main": "ESC" }, "rect": [54, 60, 27, 27], "light": true },
@@ -90,6 +90,7 @@ Errors use JSON-RPC's error object, with a `message` written for the person usin
 ```
 
 - **picture** is the device's drawing, shipped in the core's folder, with every control's `rect` in the drawing's own units. This is how the frontend draws the Z10 today, with its keys laid over its artwork, and it is how it will draw a mouse or a deck.
+- **firmware** says whether the device runs its maker's firmware (`"kind": "retail"`), Ectodeck's custom firmware (`"custom"`, with its build), or neither (`"unknown"`). **features** lists what the custom build adds, such as `sliders.read`; a core offers a custom feature, and accepts its methods, only when the device's build has it, so a device on retail firmware is never sent a command it does not know. **later** names features of newer builds, for the frontend to mention. The frontend keeps custom features apart from everything else, labelled as needing Ectodeck's firmware.
 - **controls** lists every part of the device a capability can refer to. Controls have stable ids, so settings stay attached to the right key across versions of a core.
 - **capabilities** says which capabilities the device offers, each with its own description (section 5). A device offers only what it really has.
 
