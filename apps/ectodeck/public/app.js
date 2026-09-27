@@ -1436,11 +1436,21 @@ function workspace() {
   return el('div', { class: 'ws' }, head, canvas, foot);
 }
 
+// The chain is drawn again at every look at the recording, several times a
+// second, so a step pops in once, when it arrives: each one's arrival is kept,
+// and a redrawn step carries its pop on from where it had got to, or has none.
 function liveChain(parent, live, chip, waitChip) {
+  const seen = S.rec ? (S.rec.seen ??= {}) : {}, now = performance.now();
+  const pop = (node, id) => {
+    const age = now - (seen[id] ??= now);
+    if (age >= 400) node.classList.remove('fresh');
+    else node.style.animationDelay = `-${Math.round(age)}ms`;
+    return node;
+  };
   live.forEach((st, j) => {
     parent.append(el('span', { class: 'cn plain' }));
-    parent.append(chip(st, 1000 + j, true));
-    if (st.delay) { parent.append(el('span', { class: 'cn plain' })); parent.append(el('span', { class: 'wt fresh' }, `${st.delay.toLocaleString()} ms `, ICO.clock())); }
+    parent.append(pop(chip(st, 1000 + j, true), 's' + j));
+    if (st.delay) { parent.append(el('span', { class: 'cn plain' })); parent.append(pop(el('span', { class: 'wt fresh' }, `${st.delay.toLocaleString()} ms `, ICO.clock()), 'w' + j)); }
   });
 }
 const clockText = s => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`;
