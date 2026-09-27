@@ -52,6 +52,7 @@ ul.notes li { margin: 3px 0; }
 .rail .grow { flex: 1; }
 
 /* ------------------------------------------------ home: the pictures and their names, nothing else */
+.home-ground { background: #1a1a1a; }   /* the home sits a step darker than the device screens */
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, 260px); gap: 28px 24px; }
 .tile { cursor: pointer; }
 .tile .sq { aspect-ratio: 1; border-radius: 14px; background: #1f2429; border: 1px solid #333; display: flex; align-items: center; justify-content: center; padding: 26px; transition: border-color .15s ease; }
@@ -120,7 +121,7 @@ ul.notes li { margin: 3px 0; }
     <p>Only the devices: each one's picture in the same square, and its name. You pass through it on the way to a device.</p>
     <div class="desk"><div class="win">
       <div class="tbar"><span class="home mark"></span><span class="right"><span class="act gear"></span><span class="wb"><span>—</span><span>☐</span><span>✕</span></span></span></div>
-      <div class="page"><div class="tiles" id="tiles"></div></div>
+      <div class="page home-ground"><div class="tiles" id="tiles"></div></div>
     </div></div>
     <ul class="notes">
       <li>A picture is the device's own artwork, a drawing Ectodeck makes from its layout, or its kind's glyph (section 03).</li>
