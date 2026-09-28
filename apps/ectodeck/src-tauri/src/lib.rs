@@ -10,7 +10,7 @@ use std::sync::Arc;
 use ectotype_core::{Conn, Keyboard, Recorder};
 use serde_json::{Value, json};
 use tauri::Emitter;
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
@@ -192,8 +192,9 @@ fn show_main(app: &AppHandle) {
     }
 }
 
-/// A device in the tray's list: its page is one click away, and one that is
-/// not plugged in is greyed rather than dropped, so the list keeps still.
+/// A device in the tray's list, which sits under Ectodeck itself: its page is
+/// one click away, and one that is not plugged in is greyed rather than
+/// dropped, so the list keeps still.
 #[derive(serde::Deserialize)]
 pub struct TrayDevice {
     id: String,
@@ -214,15 +215,11 @@ fn set_tray_devices(app: AppHandle, devices: Vec<TrayDevice>) -> Result<(), Stri
 
 fn tray_menu(app: &AppHandle, devices: &[TrayDevice]) -> tauri::Result<Menu<tauri::Wry>> {
     let mut items: Vec<Box<dyn tauri::menu::IsMenuItem<tauri::Wry>>> = Vec::new();
+    items.push(Box::new(MenuItem::with_id(app, "open", "Open Ectodeck", true, None::<&str>)?));
     for d in devices {
         let label = if d.connected { d.name.clone() } else { format!("{} (not connected)", d.name) };
         items.push(Box::new(MenuItem::with_id(app, format!("device:{}", d.id), label, d.connected, None::<&str>)?));
     }
-    if !devices.is_empty() {
-        items.push(Box::new(PredefinedMenuItem::separator(app)?));
-    }
-    items.push(Box::new(MenuItem::with_id(app, "open", "Open Ectodeck", true, None::<&str>)?));
-    items.push(Box::new(PredefinedMenuItem::separator(app)?));
     items.push(Box::new(MenuItem::with_id(app, "quit", "Quit Ectodeck", true, None::<&str>)?));
     Menu::with_items(app, &items.iter().map(|i| i.as_ref()).collect::<Vec<_>>())
 }
