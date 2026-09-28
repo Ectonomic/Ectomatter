@@ -66,14 +66,26 @@
     else go(t.dataset.go);
   });
   go('home');
+  // picking a device from the tray brings Ectodeck up on that device
+  window.__hear?.('device', id => go(id));
+
 
   // An unplugged device dims, in the rail and on the home, and its tile says so.
   // The editor already knows: it marks its connection line when it cannot reach
   // the keyboard.
   const conn = document.getElementById('conn');
+
+  // The tray lists the devices, so one is a click away without opening the
+  // window first. It is told again whenever a device's connection changes,
+  // since a device that is not plugged in is greyed there.
+  const tellTray = () => window.__api('/api/tray', {
+    devices: devices.map(d => ({ id: d.id, name: d.name, connected: !conn.classList.contains('off') })),
+  }).catch(() => {});
+
   const sync = () => {
     const off = conn.classList.contains('off');
     for (const el of document.querySelectorAll('[data-go="z10"]')) el.classList.toggle('off', off);
+    tellTray();
   };
   new MutationObserver(sync).observe(conn, { attributes: true, attributeFilter: ['class'] });
   sync();

@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use ectotype_core::{Conn, Keyboard, Recorder};
 use serde_json::{Value, json};
+use tauri::Emitter;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
@@ -191,12 +192,43 @@ fn show_main(app: &AppHandle) {
     }
 }
 
-/// The tray belongs to Ectodeck, not to any one device, so it carries nothing
-/// that is a single device's own. The Z10's Macro Editor opens from the Z10.
+/// A device in the tray's list: its page is one click away, and one that is
+/// not plugged in is greyed rather than dropped, so the list keeps still.
+#[derive(serde::Deserialize)]
+pub struct TrayDevice {
+    id: String,
+    name: String,
+    connected: bool,
+}
+
+/// The tray belongs to Ectodeck, not to any one device, so it carries the
+/// devices themselves and nothing that is a single device's own: the Z10's
+/// Macro Editor opens from the Z10. Called again whenever the list or a
+/// device's connection changes.
+#[tauri::command]
+fn set_tray_devices(app: AppHandle, devices: Vec<TrayDevice>) -> Result<(), String> {
+    let tray = app.tray_by_id("ectodeck").ok_or("no tray")?;
+    tray.set_menu(Some(tray_menu(&app, &devices).map_err(|e| e.to_string())?))
+        .map_err(|e| e.to_string())
+}
+
+fn tray_menu(app: &AppHandle, devices: &[TrayDevice]) -> tauri::Result<Menu<tauri::Wry>> {
+    let mut items: Vec<Box<dyn tauri::menu::IsMenuItem<tauri::Wry>>> = Vec::new();
+    for d in devices {
+        let label = if d.connected { d.name.clone() } else { format!("{} (not connected)", d.name) };
+        items.push(Box::new(MenuItem::with_id(app, format!("device:{}", d.id), label, d.connected, None::<&str>)?));
+    }
+    if !devices.is_empty() {
+        items.push(Box::new(PredefinedMenuItem::separator(app)?));
+    }
+    items.push(Box::new(MenuItem::with_id(app, "open", "Open Ectodeck", true, None::<&str>)?));
+    items.push(Box::new(PredefinedMenuItem::separator(app)?));
+    items.push(Box::new(MenuItem::with_id(app, "quit", "Quit Ectodeck", true, None::<&str>)?));
+    Menu::with_items(app, &items.iter().map(|i| i.as_ref()).collect::<Vec<_>>())
+}
+
 fn tray(app: &AppHandle) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, "open", "Open Ectodeck", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit Ectodeck", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &PredefinedMenuItem::separator(app)?, &quit])?;
+    let menu = tray_menu(app, &[])?;
     TrayIconBuilder::with_id("ectodeck")
         .icon(app.default_window_icon().cloned().expect("the app's icon"))
         .tooltip("Ectodeck")
@@ -205,7 +237,12 @@ fn tray(app: &AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, e| match e.id.as_ref() {
             "open" => show_main(app),
             "quit" => app.exit(0),
-            _ => {}
+            id => {
+                if let Some(device) = id.strip_prefix("device:") {
+                    show_main(app);
+                    let _ = app.emit("device", device.to_string());
+                }
+            }
         })
         .on_tray_icon_event(|icon, e| {
             if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = e {
@@ -245,7 +282,7 @@ pub fn run() {
                 let _ = w.hide();
             }
         })
-        .invoke_handler(tauri::generate_handler![state, save, write_macro, activate, preview, record, lcd, open_macro_editor, prepare_macro_editor, firmware, sliders, set_dimmer, set_audio, set_modes])
+        .invoke_handler(tauri::generate_handler![state, save, write_macro, activate, preview, record, lcd, open_macro_editor, prepare_macro_editor, firmware, sliders, set_dimmer, set_audio, set_modes, set_tray_devices])
         .run(tauri::generate_context!())
         .expect("Ectodeck could not start");
 }
