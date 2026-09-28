@@ -1,0 +1,58 @@
+/* The Macro Editor in the language of the home and the rail: Geist, flat greys
+   told apart by shade alone, with no outlines or dividing lines, and a place
+   that is chosen shown lighter, as in the rail. The list sits in the rail's
+   shade, the workspace on the home's ground, and the recording area is a tile.
+   Menus and pop-ups keep their shadows, which is how they lift off the page. */
+.win-macros .mws, .win-macros .menu.float { font-family: 'Geist', system-ui, sans-serif; }
+.win-macros .mwrap { border: 0; background: var(--base); }
+
+/* the library, in the rail's shade, its rows the rail's rounded squares */
+.win-macros .lib { background: #1c1c1c; border-right: 0; }
+.win-macros .lib-head, .win-macros .ws-head { height: 56px; border-bottom: 0; }
+.win-macros .lib-head { padding: 0 18px; }
+.win-macros .lib-head b { font-size: 13px; font-weight: 500; letter-spacing: 0; text-transform: none; color: #a3a3a3; }
+.win-macros .lib-head span { font-size: 12px; color: #737373; }
+.win-macros .macro-list { padding: 0 10px 10px; display: grid; align-content: start; gap: 2px; }
+.win-macros .macro-list button { border: 0; border-radius: 10px; padding: 8px 10px; column-gap: 12px; color: #d4d4d4; }
+.win-macros .macro-list button:hover { background: #262626; color: #f5f5f5; }
+.win-macros .macro-list button[aria-current="true"] { background: #2e2e2e; box-shadow: none; color: #f5f5f5; }
+.win-macros .macro-list .ico { color: #a3a3a3; }
+.win-macros .macro-list button[aria-current="true"] .ico { color: #f5f5f5; }
+.win-macros .macro-list .name { font-size: 13.5px; font-weight: 500; }
+.win-macros .macro-list .sub { font-size: 12px; color: #a3a3a3; }
+
+/* the workspace on the home's ground; the recording area a tile on it */
+.win-macros .ws-head { padding: 0 18px; }
+.win-macros .ws-head .title { font-size: 14.5px; }
+.win-macros .ws-head .title-in { background: #262626; border: 0; border-radius: 8px; }
+.win-macros .ws-head .more:hover:not(:disabled), .win-macros .tb:hover:not(:disabled) { background: #2e2e2e; }
+.win-macros .canvas { margin: 0 18px; border-radius: 14px; background: #262626; box-shadow: none; }
+.win-macros .canvas.rec { box-shadow: 0 0 0 1px rgba(255,91,91,.7); }   /* recording is a signal, so it keeps its red edge */
+.win-macros .chain { padding: 18px; }
+.win-macros .tools { border-top: 0; padding: 8px 10px 10px; }
+.win-macros .tools .sep { background: #3a3a3a; }
+
+/* events: flat chips, a shade up from the tile; the chosen one lightest */
+.win-macros .ev { font: 500 13px/1.2 'Geist', system-ui, sans-serif; letter-spacing: 0; background: #333333; border: 0; border-radius: 8px; padding: 7px 11px; }
+.win-macros .chain .ev:hover { background: #3d3d3d; }
+.win-macros .chain .ev.sel { background: #e5e5e5; color: #171717; }
+.win-macros .chain .ev.sel .dir.up { color: #525252; }
+.win-macros .chain .ev.dropto { box-shadow: -4px 0 0 -1px #a3a3a3; }
+.win-macros .wt { font: 500 12.5px/1 'Geist', system-ui, sans-serif; background: transparent; border: 0; color: #a3a3a3; padding: 6px 8px; border-radius: 8px; }
+.win-macros .wt:hover { background: #2e2e2e; color: #f5f5f5; }
+.win-macros .wt.edit { background: #333333; color: #fff; }
+
+/* Record: the red is its dot, never the button */
+.win-macros .recbtn { border: 0; border-radius: 8px; background: #333333; color: #f5f5f5; font-weight: 500; padding: 6px 12px 6px 10px; }
+.win-macros .recbtn:hover:not(:disabled) { background: #3d3d3d; }
+.win-macros .recbtn.on { background: rgba(226,59,59,.2); color: #ffc9c9; }
+
+/* the foot: flat controls, Save the one light button */
+.win-macros .ws-foot { padding: 14px 18px 18px; }
+.win-macros .ws-foot button.ghost, .win-macros .plays, .win-macros .count input { background: #262626; border: 0; border-radius: 8px; }
+.win-macros .ws-foot button.ghost:hover:not(:disabled), .win-macros .plays:hover:not(:disabled) { background: #2e2e2e; }
+.win-macros .ws-foot button { border-radius: 8px; padding: 7px 14px; }
+
+/* menus lift off by shade and shadow, without an edge */
+.win-macros .menu.float { border: 0; background: #2e2e2e; }
+.win-macros .menu .mh { font-size: 12px; letter-spacing: 0; text-transform: none; color: #a3a3a3; }

@@ -27,6 +27,8 @@
     if (path === '/api/audio') return call('set_audio', { target: body.target, level: body.level });
     if (path === '/api/modes') return call('set_modes', { quietVolume: !!body.quietVolume, keepDimmer: !!body.keepDimmer });
     if (path === '/api/tray') return call('set_tray_devices', { devices: body.devices });
+    if (path === '/api/settings') return body ? call('settings_set', { path: body.path, value: body.value }) : call('settings_get');
+    if (path === '/api/devices') return call('devices_status');
     if (path === '/api/preview') return call('preview', { body });
     if (path === '/api/record') return call('record', body ? { action: body.action, room: body.room, waits: body.waits } : { action: 'status' });
     if (path === '/api/active') return call('activate', { profile: body.profile });

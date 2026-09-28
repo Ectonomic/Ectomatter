@@ -8,6 +8,8 @@
 <link rel="stylesheet" href="/style.css">
 <link rel="stylesheet" href="/window.css">
 <link rel="stylesheet" href="/shell.css">
+<link rel="stylesheet" href="/macro.css">
+<link rel="stylesheet" href="/device.css">
 <style>
   /* The main window shows Keys, Lighting and Settings; the Macro Editor is its own window. */
   .win-main #view-macros { display: none !important; }
@@ -55,13 +57,13 @@
 <!-- Ectodeck's own settings -->
 <section class="place" id="settings" aria-labelledby="settings-title">
   <h1 id="settings-title">Settings</h1>
-  <p>Ectodeck's own settings will be here: the devices it has cores for, and whether it starts with the computer.</p>
+  <div id="settings-body"></div>
 </section>
 
 <!-- A device's editor: here, the Z10's -->
 <div class="place" id="device">
-<!-- The device's own bar: its name, the tabs between its sections, what it is
-     doing, and its Macro Editor. -->
+<!-- The device's own bar: its name, the tabs between its sections and its
+     Macro Editor, which ends them, then what it is doing. -->
 <nav class="nav devbar" aria-label="EVGA Z10 RGB">
   <span class="brand">EVGA Z10 RGB</span>
   <div class="navtabs" role="tablist">
@@ -69,9 +71,9 @@
     <button role="tab" id="tab-lighting" aria-selected="false" data-view="lighting">Lighting</button>
     <button role="tab" id="tab-display" aria-selected="false" data-view="display">Settings</button>
   </div>
+  <button class="tact" id="open-macros" type="button"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="1.5" y="4" width="13" height="8.5" rx="1.6"/><path d="M4 7h1M7 7h1M10 7h2M4.5 9.8h7"/></svg>Macro Editor</button>
   <span id="status" class="status" role="status" aria-live="polite"></span>
   <span class="conn wait" id="conn"><i></i><span id="devline">Looking for the keyboard…</span></span>
-  <button class="tact" id="open-macros" type="button"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="1.5" y="4" width="13" height="8.5" rx="1.6"/><path d="M4 7h1M7 7h1M10 7h2M4.5 9.8h7"/></svg>Macro Editor</button>
 </nav>
 
 <main class="page">

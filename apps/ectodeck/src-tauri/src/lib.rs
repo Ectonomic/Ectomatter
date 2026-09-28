@@ -4,6 +4,9 @@
 //! Every call that talks to the keyboard runs off the interface thread, since
 //! a single exchange with the Z10 waits on the keyboard for up to 150 ms.
 
+mod devices;
+mod settings;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -17,6 +20,19 @@ use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowE
 struct App {
     kb: Arc<Keyboard>,
     rec: Recorder,
+    settings: Arc<settings::Settings>,
+}
+
+/// What a screen is told when Ectodeck has been set not to control the
+/// keyboard, or one part of it. The screens look for the first sentence.
+const NOT_CONTROLLED: &str = "Ectodeck is set not to control this keyboard.";
+
+/// Whether Ectodeck may talk to the keyboard at all (Settings › Devices › Control).
+fn allowed(app: &App) -> Result<(), String> {
+    if !app.settings.on("devices.z10.control") {
+        return Err(NOT_CONTROLLED.into());
+    }
+    Ok(())
 }
 
 /// Run keyboard work on a blocking thread and hand back what it produced,
@@ -33,30 +49,37 @@ async fn blocking<T: Send + 'static>(what: &'static str, f: impl FnOnce() -> ect
 
 #[tauri::command]
 async fn state(app: State<'_, App>) -> Result<Value, String> {
+    allowed(&app)?;
     let kb = app.kb.clone();
     blocking("state", move || kb.state()).await
 }
 
 #[tauri::command]
 async fn save(app: State<'_, App>, n: u8, body: Value) -> Result<Value, String> {
+    allowed(&app)?;
     let kb = app.kb.clone();
     blocking("save", move || kb.save(n, &body)).await
 }
 
 #[tauri::command]
 async fn write_macro(app: State<'_, App>, index: u8, body: Value) -> Result<Value, String> {
+    allowed(&app)?;
     let kb = app.kb.clone();
     blocking("write_macro", move || kb.write_macro(index, &body)).await
 }
 
 #[tauri::command]
 async fn activate(app: State<'_, App>, profile: u8) -> Result<Value, String> {
+    allowed(&app)?;
     let kb = app.kb.clone();
     blocking("activate", move || kb.activate(profile).map(|n| json!({ "active": n }))).await
 }
 
 #[tauri::command]
 async fn preview(app: State<'_, App>, body: Value) -> Result<Value, String> {
+    if !body.get("stop").and_then(Value::as_bool).unwrap_or(false) {
+        allowed(&app)?;
+    }
     let kb = app.kb.clone();
     blocking("preview", move || kb.preview(&body)).await
 }
@@ -65,7 +88,7 @@ async fn preview(app: State<'_, App>, body: Value) -> Result<Value, String> {
 #[tauri::command]
 fn record(app: State<'_, App>, action: String, room: Option<usize>, waits: Option<bool>) -> Result<Value, String> {
     match action.as_str() {
-        "start" => app.rec.start(room.unwrap_or(967), waits.unwrap_or(true)).map_err(|e| e.to_string()),
+        "start" => allowed(&app).and_then(|_| app.rec.start(room.unwrap_or(967), waits.unwrap_or(true)).map_err(|e| e.to_string())),
         "stop" => Ok(app.rec.stop(true)),
         "cancel" => Ok(app.rec.stop(false)),
         _ => Ok(app.rec.status()),
@@ -92,6 +115,7 @@ fn lcd() -> Value {
 /// says nothing in the log unless it fails.
 #[tauri::command]
 async fn sliders(app: State<'_, App>) -> Result<Value, String> {
+    allowed(&app)?;
     let kb = app.kb.clone();
     tauri::async_runtime::spawn_blocking(move || kb.sliders())
         .await
@@ -102,6 +126,7 @@ async fn sliders(app: State<'_, App>) -> Result<Value, String> {
 /// Hold the dimmer at a level, or with none give the slider it back.
 #[tauri::command]
 async fn set_dimmer(app: State<'_, App>, level: Option<u8>) -> Result<bool, String> {
+    allowed(&app)?;
     let kb = app.kb.clone();
     tauri::async_runtime::spawn_blocking(move || kb.set_dimmer(level))
         .await
@@ -112,6 +137,7 @@ async fn set_dimmer(app: State<'_, App>, level: Option<u8>) -> Result<bool, Stri
 /// Ask the keyboard to stop doing a slider's job by itself.
 #[tauri::command]
 async fn set_modes(app: State<'_, App>, quiet_volume: bool, keep_dimmer: bool) -> Result<bool, String> {
+    allowed(&app)?;
     let kb = app.kb.clone();
     tauri::async_runtime::spawn_blocking(move || kb.set_modes(quiet_volume, keep_dimmer))
         .await
@@ -136,6 +162,47 @@ fn set_audio(target: String, level: f32) -> Result<(), String> {
         .map_err(|e| format!("could not run wpctl: {e}"))?
         .success();
     if ok { Ok(()) } else { Err("wpctl refused the volume".into()) }
+}
+
+/// Everything in Ectodeck's own settings.
+#[tauri::command]
+fn settings_get(app: State<'_, App>) -> Value {
+    app.settings.all()
+}
+
+/// Set one of Ectodeck's own settings. Turning control of the keyboard, or of
+/// its sliders, off first gives the keyboard back what Ectodeck had borrowed,
+/// and turning control off altogether closes the keyboard, so nothing of
+/// Ectodeck's has it open.
+#[tauri::command]
+async fn settings_set(app: State<'_, App>, path: String, value: Value) -> Result<Value, String> {
+    let off = value == Value::Bool(false);
+    let kb = app.kb.clone();
+    if off && path == "devices.z10.control" {
+        let k = kb.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            let _ = k.set_modes(false, false);
+            let _ = k.set_dimmer(None);
+        }).await;
+    }
+    if off && path == "devices.z10.control" {
+        let k = kb.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || k.preview(&json!({ "stop": true }))).await;
+    }
+    app.settings.set(&path, value).map_err(|e| format!("could not save the setting: {e}"))?;
+    if off && path == "devices.z10.control" {
+        kb.release();
+    }
+    Ok(app.settings.all())
+}
+
+/// What Ectodeck can see of each device without opening it.
+#[tauri::command]
+fn devices_status(app: State<'_, App>) -> Value {
+    let mut z10 = devices::z10();
+    z10["id"] = json!("z10");
+    z10["control"] = json!(app.settings.on("devices.z10.control"));
+    json!([z10])
 }
 
 /// Retail or custom firmware, and what the keyboard's build can do (see
@@ -267,7 +334,8 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             let backups = app.path().app_data_dir()?.join("backups");
-            app.manage(App { kb: Arc::new(Keyboard::new(Conn::hid(), Some(backups))), rec: Recorder::new() });
+            let settings = Arc::new(settings::Settings::load(app.path().app_config_dir()?.join("settings.json")));
+            app.manage(App { kb: Arc::new(Keyboard::new(Conn::hid(), Some(backups))), rec: Recorder::new(), settings });
             tray(app.handle())?;
             Ok(())
         })
@@ -279,7 +347,7 @@ pub fn run() {
                 let _ = w.hide();
             }
         })
-        .invoke_handler(tauri::generate_handler![state, save, write_macro, activate, preview, record, lcd, open_macro_editor, prepare_macro_editor, firmware, sliders, set_dimmer, set_audio, set_modes, set_tray_devices])
+        .invoke_handler(tauri::generate_handler![state, save, write_macro, activate, preview, record, lcd, open_macro_editor, prepare_macro_editor, firmware, sliders, set_dimmer, set_audio, set_modes, set_tray_devices, settings_get, settings_set, devices_status])
         .run(tauri::generate_context!())
         .expect("Ectodeck could not start");
 }

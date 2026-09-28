@@ -1,0 +1,3 @@
+# Ectodeck: lets the person at the computer open the EVGA Z10 RGB without root.
+# Install: sudo cp 70-ectodeck.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="3842", ATTRS{idProduct}=="2611", TAG+="uaccess"

@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sliders as controls</title>
+<link rel="stylesheet" href="/fonts.css">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/device.css">
+<style>
+@font-face { font-family: 'Geist'; src: url('/fonts/Geist-Variable-latin.woff2') format('woff2'); font-weight: 100 900; }
+:root { color-scheme: dark; }
+body { margin: 0; background: #101010; color: #f5f5f5; font: 14px/1.5 'Geist', system-ui, sans-serif; }
+main { max-width: 1280px; margin: 0 auto; padding: 44px 32px 90px; }
+h1.t { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.03em; }
+p.lede { color: #a3a3a3; max-width: 900px; margin: 8px 0 34px; }
+section { margin-bottom: 52px; }
+section > h2 { display: flex; gap: 10px; align-items: baseline; margin: 0 0 6px; font-size: 15px; font-weight: 600; }
+section > h2 b { color: #c8f22e; font-size: 12px; letter-spacing: .08em; }
+section > p { margin: 0 0 16px; color: #a3a3a3; max-width: 920px; }
+.stage { background: #202020; border-radius: 14px; padding: 26px; position: relative; }
+ul.notes { margin: 16px 0 0; padding-left: 18px; color: #a3a3a3; max-width: 960px; font-size: 13.5px; }
+ul.notes li { margin: 5px 0; }
+ul.notes b { color: #f5f5f5; font-weight: 500; }
+
+/* the live reading of a slider: what the keyboard says it is at, right now */
+.sbar { position: relative; width: 240px; height: 4px; border-radius: 2px; background: #3d3d3d; }
+.sbar .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background: #8a8a8a; }
+.sbar .knob { position: absolute; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: #e5e5e5; }
+.sread { display: flex; align-items: center; gap: 14px; min-height: 34px; }
+.sread .sval { min-width: 42px; color: #d4d4d4; font-size: 13px; font-variant-numeric: tabular-nums; }
+.lpanel .actbtn { border: 0; background: #2e2e2e; border-radius: 8px; padding: 7px 10px; width: min(100%, 260px); }
+.lpanel .actbtn:hover { background: #363636; }
+.held { font-size: 12px; color: #a3a3a3; }
+.menu.float.shown { position: absolute; z-index: 5; }
+.off .lrow-l, .off .sval, .off .actbtn { opacity: .45; }
+</style>
+</head>
+<body class="win-main">
+<main>
+  <h1 class="t">The Z10's two sliders, as controls you choose</h1>
+  <p class="lede">The keyboard has a dimmer and a volume slider. Both are real potentiometers, so the keyboard always knows exactly where each one is; until now it kept that to itself. With Ectodeck's firmware it says, and the app can put each slider on whatever you want it to control. This sits under the keyboard on the Settings page.</p>
+
+  <section>
+    <h2><b>01</b> Sliders</h2>
+    <p>Each slider shows where it is as you move it, and what it controls. The readings here move on their own to show what live looks like.</p>
+    <div class="stage">
+      <div class="lpanel">
+        <div class="lcol">
+          <h3>Sliders</h3>
+          <div class="lrow"><span class="lrow-l">Dimmer</span><div class="lrow-c">
+            <div class="sread"><div class="sbar" id="b1"><span class="fill"></span><span class="knob"></span></div><span class="sval" id="v1">100%</span></div>
+            <button class="actbtn" type="button"><span class="al">Keyboard brightness</span><svg class="chev" viewBox="0 0 12 8" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1 1.5 6 6.5 11 1.5"/></svg></button>
+          </div></div>
+          <div class="lrow"><span class="lrow-l">Volume</span><div class="lrow-c">
+            <div class="sread"><div class="sbar" id="b2"><span class="fill"></span><span class="knob"></span></div><span class="sval" id="v2">28%</span></div>
+            <button class="actbtn" type="button"><span class="al">System volume</span><svg class="chev" viewBox="0 0 12 8" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1 1.5 6 6.5 11 1.5"/></svg></button>
+          </div></div>
+        </div>
+        <div class="lcol">
+          <h3>How they behave</h3>
+          <p class="note">On what the keyboard does by itself, the dimmer sets the backlight and the volume slider sends volume keys. Put either on something else and Ectodeck drives it from the slider's own position, so it lands exactly where you put it.</p>
+          <p class="note">What each slider controls is Ectodeck's, not the keyboard's, so it is the same across all five profiles and applies while Ectodeck is running.</p>
+        </div>
+      </div>
+    </div>
+    <ul class="notes">
+      <li><b>The reading is the point.</b> The keyboard knows both sliders to about one part in four thousand. Showing that, live, is the first thing in Ectodeck that no other software for this keyboard can do.</li>
+      <li><b>Absolute, not stepped.</b> Put the volume slider on system volume through Ectodeck and it sets the volume to where the slider is, rather than sending a string of volume-up presses. Nothing is lost on a fast sweep, and the bottom of the travel stops swallowing presses to leave mute.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><b>02</b> Choosing what a slider controls</h2>
+    <p>The same menu on both sliders. Everything in it is something the computer can be told to do exactly, from a position.</p>
+    <div class="stage" style="min-height:340px">
+      <div class="lpanel" style="grid-template-columns:1fr">
+        <div class="lcol">
+          <h3>Sliders</h3>
+          <div class="lrow"><span class="lrow-l">Dimmer</span><div class="lrow-c">
+            <div class="sread"><div class="sbar" id="b3"><span class="fill" style="width:100%"></span><span class="knob" style="left:100%"></span></div><span class="sval">100%</span></div>
+            <button class="actbtn" type="button" style="border:0;background:#363636"><span class="al">Keyboard brightness</span><svg class="chev" viewBox="0 0 12 8" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1 1.5 6 6.5 11 1.5"/></svg></button>
+          </div></div>
+        </div>
+      </div>
+      <div class="menu float shown" style="left:180px; top:150px; width:260px">
+        <div class="mh">The dimmer controls</div>
+        <button class="mi"><span class="tick">✓</span>Keyboard brightness</button>
+        <button class="mi"><span class="tick"></span>System volume</button>
+        <button class="mi"><span class="tick"></span>Microphone volume</button>
+        <button class="mi"><span class="tick"></span>One app's volume ›</button>
+        <hr>
+        <button class="mi"><span class="tick"></span>Nothing</button>
+      </div>
+    </div>
+    <ul class="notes">
+      <li><b>One app's volume</b> opens a list of what is playing, the way the system's own mixer does.</li>
+      <li><b>Nothing</b> parks the slider. The backlight then stays where you last had it, and moving the dimmer does not change it.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><b>03</b> The volume slider on something else</h2>
+    <p>The keyboard sends volume keys from that slider on its own, underneath anything Ectodeck does with it. Moving it would change the volume as well as the thing you chose, so Ectodeck stops those keys reaching the computer while it is running.</p>
+    <div class="stage">
+      <div class="lpanel" style="grid-template-columns:1fr">
+        <div class="lcol">
+          <h3>Sliders</h3>
+          <div class="lrow"><span class="lrow-l">Volume</span><div class="lrow-c">
+            <div class="sread"><div class="sbar" id="b4"><span class="fill" style="width:62%"></span><span class="knob" style="left:62%"></span></div><span class="sval">62%</span></div>
+            <button class="actbtn" type="button"><span class="al">Microphone volume</span><svg class="chev" viewBox="0 0 12 8" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1 1.5 6 6.5 11 1.5"/></svg></button>
+            <span class="note">Ectodeck holds back the volume keys this slider sends. Close Ectodeck and it goes back to changing the volume.</span>
+          </div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2><b>04</b> On EVGA's firmware</h2>
+    <p>A keyboard that has never been given Ectodeck's firmware cannot say where its sliders are, so the same place says what the firmware would add and leaves it at that.</p>
+    <div class="stage">
+      <div class="lpanel off" style="grid-template-columns:1fr 1fr">
+        <div class="lcol">
+          <h3>Sliders</h3>
+          <div class="lrow"><span class="lrow-l">Dimmer</span><div class="lrow-c">
+            <div class="sread"><div class="sbar"><span class="fill" style="width:0"></span></div><span class="sval">—</span></div>
+            <button class="actbtn" type="button" disabled><span class="al">Keyboard brightness</span></button>
+          </div></div>
+          <div class="lrow"><span class="lrow-l">Volume</span><div class="lrow-c">
+            <div class="sread"><div class="sbar"><span class="fill" style="width:0"></span></div><span class="sval">—</span></div>
+            <button class="actbtn" type="button" disabled><span class="al">System volume</span></button>
+          </div></div>
+        </div>
+        <div class="lcol">
+          <h3>&nbsp;</h3>
+          <p class="note">EVGA's firmware keeps both sliders to itself: the dimmer sets the backlight, the volume slider sends volume keys, and neither can be read or put on anything else. Ectodeck's firmware adds both, and the Custom firmware panel below installs it.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2><b>05</b> What this needs</h2>
+    <ul class="notes" style="margin-top:0">
+      <li><b>Reading both sliders</b> is in the firmware already, flashed today.</li>
+      <li><b>Setting the volume, the microphone or an app</b> is the computer's own audio, which Ectodeck can set exactly.</li>
+      <li><b>Holding the backlight</b> while the dimmer is on something else is in the firmware already.</li>
+      <li><b>Holding back the volume slider's own keys</b> is the one piece still to build. Ectodeck can do it on the computer, because it can see the slider move and knows the keys are the slider's; a later firmware could stop them at the keyboard instead, which is tidier but needs another flash. My preference is the first now and the second later, so nothing waits on firmware.</li>
+    </ul>
+  </section>
+</main>
+<script>
+// the readings move so the page shows what live looks like
+const bars = [['b1','v1',0], ['b2','v2',2.1], ['b3',null,0], ['b4',null,0]];
+const t0 = performance.now();
+function frame(now) {
+  const t = (now - t0) / 1000;
+  for (const [b, v, phase] of bars) {
+    const el = document.getElementById(b);
+    if (!el || !v) continue;
+    const p = Math.round(50 + 48 * Math.sin((t + phase) / 3.4));
+    el.querySelector('.fill').style.width = p + '%';
+    el.querySelector('.knob').style.left = p + '%';
+    document.getElementById(v).textContent = p + '%';
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

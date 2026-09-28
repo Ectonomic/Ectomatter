@@ -58,6 +58,27 @@ html:not(.framed) .mrail { top: 0; height: 100vh; }
 #settings { padding: 34px 40px; font-family: 'Geist', system-ui, sans-serif; }
 #settings h1 { margin: 0 0 6px; font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
 #settings p { margin: 0; color: #a3a3a3; font-size: 14px; max-width: 640px; }
+#settings { background: var(--base); }
+#settings h2 { margin: 26px 0 12px; font-size: 13px; font-weight: 500; color: #a3a3a3; }
+#settings-body { max-width: 860px; display: grid; gap: 14px; }
+#settings-body h2 { margin: 20px 0 0; }
+/* a device: its glyph and name with how it is, then its settings */
+.devcard { grid-template-columns: 1fr; gap: 18px; }
+.devhead { display: flex; align-items: center; gap: 14px; }
+.devhead .sq { display: flex; align-items: center; justify-content: center; width: 48px; height: 48px; border-radius: 10px; background: #1c1c1c; color: #a3a3a3; }
+.devhead .sq svg { width: 30px; height: 30px; }
+.devhead b { display: block; font-size: 14.5px; font-weight: 500; color: #f5f5f5; }
+.devhead small { font-size: 12.5px; color: #a3a3a3; }
+.devcard.dim .devhead small { color: #d4d4d4; }
+.devcard .lrow { grid-template-columns: 132px minmax(0, 1fr); }
+#settings-body .fail { color: var(--bad); font-size: 13.5px; margin: 0; }
+.devcard .state { font-size: 13.5px; color: #d4d4d4; line-height: 34px; display: inline-flex; align-items: center; gap: 8px; }
+.devcard .state::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #5c5c5c; }
+.devcard .state.ok::before { background: var(--good); }
+.devcard .state.bad::before { background: var(--bad); }
+.devcard .holders { font-size: 13.5px; color: #f5f5f5; line-height: 34px; }
+.devcard .cmd { display: block; max-width: 100%; padding: 9px 11px; border-radius: 8px; background: #1c1c1c; color: #d4d4d4;
+  font: 12px/1.5 ui-monospace, 'Geist Mono', monospace; white-space: pre-wrap; word-break: break-all; user-select: all; }
 
 /* the Macro Editor window shows its editor alone */
 .win-macros .mrail, .win-macros #home, .win-macros #settings { display: none !important; }

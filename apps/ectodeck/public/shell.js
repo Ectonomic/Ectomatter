@@ -52,8 +52,11 @@
 
   // One place is shown at a time: the home, Settings, or a device's editor.
   // Ectodeck opens on the home.
+  let settingsTimer = 0;
   const go = where => {
     body.dataset.place = where;
+    clearTimeout(settingsTimer);
+    if (where === 'settings') renderSettings();
     for (const b of rail.querySelectorAll('.b')) b.classList.toggle('on', b.dataset.go === where);
     scrollTo(0, 0);
     // a device's keyboard is drawn from pictures sized to it, so draw them now it shows
@@ -68,6 +71,8 @@
   go('home');
   // picking a device from the tray brings Ectodeck up on that device
   window.__hear?.('device', id => go(id));
+  // a change that reloads the page comes back to where it was made
+  try { const back = sessionStorage.getItem('ectodeck:return'); if (back) { sessionStorage.removeItem('ectodeck:return'); go(back); } } catch (e) { /* none */ }
 
 
   // An unplugged device dims, in the rail and on the home, and its tile says so.
@@ -83,10 +88,82 @@
   }).catch(() => {});
 
   const sync = () => {
-    const off = conn.classList.contains('off');
-    for (const el of document.querySelectorAll('[data-go="z10"]')) el.classList.toggle('off', off);
+    const off = conn.classList.contains('off'), free = conn.classList.contains('free');
+    for (const el of document.querySelectorAll('[data-go="z10"]')) el.classList.toggle('off', off || free);
+    const note = document.querySelector('.tile[data-go="z10"] small');
+    if (note) note.textContent = free ? 'Not controlled by Ectodeck' : 'Not connected';
     tellTray();
   };
   new MutationObserver(sync).observe(conn, { attributes: true, attributeFilter: ['class'] });
   sync();
+
+  // ---------------------------------------------------------------- Settings
+  // Ectodeck's own settings. Devices first: for each one, whether Ectodeck may
+  // open it at all, whether it controls it, and what else has
+  // it open. Kept current while the page shows, since a device can be plugged
+  // in, or another program can take it, at any time.
+  const UDEV = 'SUBSYSTEM=="hidraw", ATTRS{idVendor}=="3842", ATTRS{idProduct}=="2611", TAG+="uaccess"';
+  const FIX = `echo '${UDEV}' | sudo tee /etc/udev/rules.d/70-ectodeck.rules && sudo udevadm control --reload && sudo udevadm trigger`;
+  const h = (tag, attrs = {}, ...kids) => {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) if (k.startsWith('on')) n.addEventListener(k.slice(2), v); else n.setAttribute(k, v);
+    n.append(...kids.flat().filter(k => k != null && k !== false));
+    return n;
+  };
+  const srow = (label, ...kids) => {
+    const note = typeof kids[kids.length - 1] === 'string' ? kids.pop() : null;
+    return h('div', { class: 'lrow' }, h('span', { class: 'lrow-l' }, label),
+      h('div', { class: 'lrow-c' }, ...kids, note ? h('span', { class: 'note' }, note) : null));
+  };
+  const onOff = (value, set) => h('div', { class: 'seg', role: 'group' },
+    [[true, 'On'], [false, 'Off']].map(([v, t]) => h('button', { type: 'button', 'aria-pressed': String(value === v), onclick: () => value !== v && set(v) }, t)));
+
+  // A change to what Ectodeck may use reloads the page, so the device's editor
+  // starts again under the new setting; the page comes back to Settings.
+  const change = (path, value) => window.__api('/api/settings', { path, value }).then(() => {
+    try { sessionStorage.setItem('ectodeck:return', 'settings'); } catch (e) { /* stays on the home */ }
+    location.reload();
+  }, e => {
+    const box = document.getElementById('settings-body');
+    box.querySelector('.fail')?.remove();
+    box.prepend(h('p', { class: 'fail' }, `The setting was not saved: ${e.message || e}`));
+  });
+
+  let drawn = '';
+  function drawSettings(status, conf) {
+    const key = JSON.stringify([status, conf]);
+    if (key === drawn) return;   // redrawn only when something changed, so a menu or a selection survives the check
+    drawn = key;
+    const box = document.getElementById('settings-body');
+    const cards = devices.map(d => {
+      const st = status.find(s => s.id === d.id) || {}, dc = conf.devices?.[d.id] || {};
+      const control = dc.control !== false;
+      const line = !st.present ? 'Not connected' : !st.reachable ? 'Ectodeck can’t open this keyboard' : !control ? 'Control is off' : 'Connected';
+      const rows = [srow('Control', onOff(control, v => change(`devices.${d.id}.control`, v)),
+        'When off, Ectodeck leaves the keyboard to other programs.')];
+      // whether Ectodeck may open the keyboard; always shown, so the state is never a guess
+      if (st.reachable === null || st.reachable === undefined) rows.push(srow('Permission', h('span', { class: 'state' }, 'Not needed on this system')));
+      else if (!st.present) rows.push(srow('Permission', h('span', { class: 'state' }, 'Checked when the keyboard is connected')));
+      else if (st.reachable) rows.push(srow('Permission', h('span', { class: 'state ok' }, 'Granted')));
+      else rows.push(srow('Permission', h('span', { class: 'state bad' }, 'Not granted'),
+        h('span', { class: 'note' }, 'Linux lets only root open the keyboard. This command gives access to whoever is logged in:'),
+        h('code', { class: 'cmd' }, FIX),
+        h('button', { type: 'button', class: 'ghost', onclick: e => { navigator.clipboard?.writeText(FIX); e.currentTarget.textContent = 'Copied'; } }, 'Copy command')));
+      if (st.holders?.length) {
+        rows.push(srow('Also open in', h('span', { class: 'holders' }, st.holders.map(p => p.name).join(', ')),
+          'Two programs sending lighting at once make the keys flicker. Close the other program, or turn Live lighting off here.'));
+      }
+      return h('section', { class: 'lpanel devcard' + (st.present && st.reachable && control ? '' : ' dim') },
+        h('div', { class: 'devhead' }, h('span', { class: 'sq' }), h('div', {}, h('b', {}, d.name), h('small', {}, line))),
+        h('div', { class: 'lcol' }, ...rows));
+    });
+    box.replaceChildren(h('h2', {}, 'Devices'), ...cards);
+    cards.forEach((c, i) => { c.querySelector('.sq').innerHTML = DESK_GLYPHS[devices[i].glyph]; });
+  }
+
+  function renderSettings() {
+    Promise.all([window.__api('/api/devices'), window.__api('/api/settings')])
+      .then(([status, conf]) => drawSettings(status, conf), () => drawSettings([], {}))
+      .finally(() => { if (body.dataset.place === 'settings') settingsTimer = setTimeout(renderSettings, 2000); });
+  }
 })();

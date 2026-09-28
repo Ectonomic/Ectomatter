@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Edited keys</title>
+<style>
+@font-face { font-family: 'Geist'; src: url('/fonts/Geist-Variable-latin.woff2') format('woff2'); font-weight: 100 900; }
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #101010; color: #f5f5f5; font: 14px/1.5 'Geist', system-ui, sans-serif; }
+main { max-width: 1680px; margin: 0 auto; padding: 40px 32px 80px; }
+h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.03em; }
+p.lede { color: #a3a3a3; max-width: 860px; margin: 8px 0 30px; }
+.grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 28px; }
+.card { background: #1a1a1a; border-radius: 14px; overflow: hidden; }
+.card img { display: block; width: 100%; height: auto; image-rendering: auto; }
+.card .t { padding: 14px 18px 16px; }
+.card b { display: flex; gap: 10px; align-items: baseline; font-size: 15px; font-weight: 600; }
+.card b i { font-style: normal; color: #c8f22e; font-size: 12px; letter-spacing: .08em; }
+.card span { display: block; color: #a3a3a3; font-size: 13.5px; margin-top: 3px; }
+.over { position: relative; }
+.bar { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #202020; font-size: 13px; color: #d4d4d4; }
+.sw { width: 30px; height: 18px; border-radius: 9px; background: #e5e5e5; position: relative; }
+.sw::after { content: ''; position: absolute; right: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #171717; }
+.list { padding: 12px 16px; background: #202020; font-size: 13px; color: #a3a3a3; }
+.list em { font-style: normal; color: #f5f5f5; }
+.cursor { position: absolute; left: 44%; top: 38%; width: 14px; height: 20px; background: #fff; clip-path: polygon(0 0, 0 100%, 28% 76%, 48% 100%, 62% 94%, 42% 70%, 80% 70%); filter: drop-shadow(0 1px 1px #000); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Edited keys: ten ways to mark them</h1>
+  <p class="lede">Your seven edited keys (E1 to E5, Fn and the Windows key), each drawn by WebKit exactly as Ectodeck draws the board. Every one is a single small mark or none at all. The chosen key keeps its white edge in all of them.</p>
+  <div class="grid">
+    <div class="card"><img src="edited/a.png" alt=""><div class="t"><b><i>01</i>No mark</b><span>The new meaning printed at the foot of the cap already says the key is changed. Nothing else is added.</span></div></div>
+    <div class="card"><img src="edited/b.png" alt=""><div class="t"><b><i>02</i>A dot in the corner</b><span>A small grey dot at the top right of the cap.</span></div></div>
+    <div class="card"><img src="edited/c.png" alt=""><div class="t"><b><i>03</i>A dot on the deck</b><span>A small dot on the keyboard just below the key, off the cap, like a status light.</span></div></div>
+    <div class="card"><img src="edited/d.png" alt=""><div class="t"><b><i>04</i>A short line</b><span>A short grey line along the cap's front edge.</span></div></div>
+    <div class="card"><img src="edited/e.png" alt=""><div class="t"><b><i>05</i>A folded corner</b><span>A small grey triangle in the top right corner, the way spreadsheets mark a cell with a note.</span></div></div>
+    <div class="card"><img src="edited/f.png" alt=""><div class="t"><b><i>06</i>A lighter cap</b><span>The edited cap's top is a shade lighter than the rest.</span></div></div>
+    <div class="card"><img src="edited/g.png" alt=""><div class="t"><b><i>07</i>The new meaning in white</b><span>No mark. The new meaning at the foot of the cap is printed in white instead of the backlight's colour.</span></div></div>
+    <div class="card over"><img src="edited/b.png" alt=""><span class="cursor"></span><div class="t"><b><i>08</i>Only while pointing at the keyboard</b><span>The board shows no marks until the pointer is over it; then the corner dots of 02 appear.</span></div></div>
+    <div class="card"><div class="bar"><span class="sw"></span>Show edited keys</div><img src="edited/b.png" alt=""><div class="t"><b><i>09</i>Only when asked</b><span>A switch beside the profiles, off by default, turns the corner dots of 02 on.</span></div></div>
+    <div class="card"><img src="edited/j.png" alt=""><div class="list">Changed on this profile: <em>E1, E2, E3, E4, E5, Fn, Windows</em></div><div class="t"><b><i>10</i>A list instead of marks</b><span>Nothing on the board. One line under it names the changed keys; clicking a name chooses that key.</span></div></div>
+  </div>
+</main>
+</body>
+</html>

@@ -28,7 +28,7 @@ html.framed.maximized body { border-radius: 0; }
 .nav.devbar { top: 36px; }
 .devbar .status { margin-left: auto; }
 .devbar .conn { margin-left: 14px; }
-.devbar .tact { display: inline-flex; align-items: center; gap: 7px; height: 30px; margin-left: 16px; padding: 0 12px; border: 1px solid var(--line); border-radius: 7px; background: transparent; color: var(--ink); font: 500 13px 'Barlow', system-ui, sans-serif; cursor: pointer; }
+.devbar .tact { display: inline-flex; align-items: center; gap: 7px; height: 30px; margin-left: -6px; padding: 0 12px; border: 1px solid var(--line); border-radius: 7px; background: transparent; color: var(--ink); font: 500 13px 'Barlow', system-ui, sans-serif; cursor: pointer; }
 .devbar .tact:hover { background: #262626; }
 .win-macros .devbar .status { margin-left: 18px; }
 

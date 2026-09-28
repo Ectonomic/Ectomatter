@@ -1,0 +1,42 @@
+/* The device's page in the language of the home and the rail: nothing boxed,
+   the keyboard straight on the page's ground, flat greys told apart by shade
+   with no outlines or dividing lines, and a chosen item shown lighter, as in
+   the rail. Only what the key panel edits sits on a tile. */
+.win-main .devbar, .win-main .pws-head, .win-main .pws .panel { font-family: 'Geist', system-ui, sans-serif; }
+
+/* the device's bar keeps its rule, which its tabs' underline sits on */
+.win-main .devbar .tact { border: 0; border-radius: 8px; background: #262626; font: 500 13px 'Geist', system-ui, sans-serif; }
+.win-main .devbar .tact:hover { background: #2e2e2e; }
+
+/* no box round the profile's window */
+.win-main .pws { border: 0; border-radius: 0; background: none; }
+.win-main .pws-head { border-bottom: 0; padding: 0 0 6px; }
+.win-main .pws-body { padding: 10px 0 0; }
+
+/* profiles, as the rail's items: lighter under the pointer, lighter still when chosen */
+.win-main .profiles { gap: 10px; }
+.win-main .profiles button { flex: none; border: 0; border-radius: 10px; padding: 6px 12px 6px 10px; background: transparent; color: #d4d4d4; }
+.win-main .profiles button:hover { background: #262626; color: #f5f5f5; }
+.win-main .profiles button[aria-current="true"] { background: #2e2e2e; color: #f5f5f5; }
+.win-main .profiles .sub { color: #a3a3a3; }
+.win-main .pws-head .ghost, .win-main .kfoot .ghost { border: 0; background: #262626; border-radius: 8px; }
+.win-main .pws-head .ghost:hover:not(:disabled), .win-main .kfoot .ghost:hover:not(:disabled) { background: #2e2e2e; }
+.win-main .pws-head .primary { border-radius: 8px; }
+
+/* the chosen key's panel: one tile under the keyboard, its parts set apart by space */
+.win-main .keypanel { margin: 18px 0 0; border-top: 0; border-radius: 14px; background: #262626; }
+.win-main .keypanel > * { padding: 18px 20px; }
+.win-main .layer2, .win-main .kfoot { border-left: 0; }
+.win-main .kname { font-size: 17px; }
+.win-main .kfac { color: #a3a3a3; }
+.win-main .layer2 .lh { font-size: 13px; font-weight: 500; letter-spacing: 0; text-transform: none; color: #a3a3a3; }
+.win-main .actbtn { border: 0; border-radius: 8px; background: #2e2e2e; padding: 7px 10px; width: min(100%, 272px); }
+.win-main .actbtn:hover { background: #363636; }
+.win-main .actbtn .kind { border: 0; background: #3a3a3a; color: #d4d4d4; }
+.win-main .kfoot .ghost { background: #2e2e2e; }
+.win-main .kfoot .ghost:hover:not(:disabled) { background: #363636; }
+
+/* menus lift off by shade and shadow, without an edge */
+.win-main .menu.float { border: 0; font-family: 'Geist', system-ui, sans-serif; }
+.win-main .menu .mh { font-size: 12px; letter-spacing: 0; text-transform: none; color: #a3a3a3; }
+.win-main .menu .msearch { border: 0; background: #262626; }

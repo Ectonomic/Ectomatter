@@ -27,9 +27,9 @@
 <rect x="254.88" y="3.48" width="151.23" height="41.72" fill="#000"/>
 <rect x="273.45" y="13.60" width="114.10" height="25.63" fill="url(#glass)"/>
 <rect x="114.20" y="21.27" width="34.92" height="3.56" rx="1.78" fill="#000"/>
-<rect x="126.66" y="20.36" width="10.01" height="5.05" rx="1.41" fill="url(#knob)"/>
+
 <rect x="511.88" y="21.27" width="34.92" height="3.56" rx="1.78" fill="#000"/>
-<rect x="524.33" y="20.36" width="10.01" height="5.05" rx="1.41" fill="url(#knob)"/>
+
 <circle cx="465.61" cy="48.93" r="1.82" fill="#494949"/>
 <circle cx="491.61" cy="48.93" r="1.82" fill="#494949"/>
 <circle cx="517.61" cy="48.93" r="1.82" fill="#494949"/>

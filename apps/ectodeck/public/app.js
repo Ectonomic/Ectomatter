@@ -43,7 +43,7 @@ const LEGEND = {
 };
 for (let i = 1; i <= 12; i++) LEGEND['F' + i] = 'F' + i;
 LEGEND.F1 = { main: 'F1', sub: MUTE };
-LEGEND.F12 = { main: 'F12', sub: 'G/N' };
+LEGEND.F12 = { main: 'F12', sub: '6/N' };
 
 const FULLNAME = {
   ESC: 'Escape', GraveAccent: 'Grave accent', LBracket: 'Left bracket', RBracket: 'Right bracket', BackSlash: 'Backslash',
@@ -225,7 +225,9 @@ function panelBits(rows) {
 // Drawing into a canvas in the page instead left the element compositing at
 // the wrong scale. The picture is rebuilt when the text, the backlight colour
 // or the panel's size changes.
-const PITCH = 4;           // pixels per LCD pixel before the panel has a size
+const PITCH = 4;
+// the slider knobs, in the drawing's own units, as the artwork had them
+const KNOB_W = 10.01, KNOB_H = 5.05, KNOB_Y = 20.36;           // pixels per LCD pixel before the panel has a size
 
 function drawPanel() {
   const panel = document.querySelector('.screen .panel');
@@ -265,9 +267,8 @@ const shade = (c, f) => `rgb(${c.map(v => Math.min(255, Math.round(v * f))).join
 // The keyboard will not read its own display back, so the z10-lcd service writes
 // each frame it sends to a file and the server passes it on. If nothing is
 // driving the display, the panel is drawn unlit rather than showing stale text.
-// The caps' picture, drawn at the board's shown size. While a key is pressed
-// its own cap is drawn live over a hole cut for it here.
-function drawCaps(hole) {
+// The caps' picture, drawn at the board's shown size.
+function drawCaps() {
   const cv = document.querySelector('.board .caps'), img = S.caps;
   if (!cv || !img?.complete || !img.naturalWidth) return;
   const r = cv.getBoundingClientRect(), dpr = devicePixelRatio || 1;
@@ -279,10 +280,6 @@ function drawCaps(hole) {
   ctx.clearRect(0, 0, w, h);
   ctx.drawImage(img, 0, 0, w, h);
   S.capsDrawn = true;
-  if (hole) {
-    const s = w / r.width, m = r.width * 0.004;
-    ctx.clearRect((hole.offsetLeft - m) * s, (hole.offsetTop - m) * s, (hole.offsetWidth + 2 * m) * s, (hole.offsetHeight + 2 * m * 2) * s);
-  }
 }
 // The light each key throws onto the deck, drawn as the halo each key once
 // drew for itself (style.css .key .halo): its box grown by 8% of its width and
@@ -327,9 +324,126 @@ function drawHalos() {
   }
   ctx.globalAlpha = 1;
 }
+// Where each slider really is, on Ectodeck's firmware from build 2, which
+// reports both sliders' raw readings. A reading becomes a knob position
+// between the lowest and highest readings seen for that slider, which widen
+// as the sliders are moved and are remembered, so the knob reaches both ends
+// of the drawing when the slider reaches both ends of its travel.
+const SLIDER_ENDS = 'ectodeck:z10:slider-ends';
+function sliderEnds() {
+  try { const e = JSON.parse(localStorage.getItem(SLIDER_ENDS)); if (Array.isArray(e) && e.length === 2) return e; } catch (e) { /* none yet */ }
+  return [[400, 3700], [400, 3700]];          // a starting guess, inside both sliders' travel
+}
+function moveKnobs(r) {
+  if (!r || !S.knobs) return;
+  const ends = S.sliderEnds ??= sliderEnds();
+  let wider = false;
+  const fracs = [];
+  [r.dimmer_raw, r.volume_raw].forEach((raw, i) => {
+    const e = ends[i];
+    if (raw < e[0]) { e[0] = raw; wider = true; }
+    if (raw > e[1]) { e[1] = raw; wider = true; }
+    const f = Math.max(0, Math.min(1, (raw - e[0]) / Math.max(1, e[1] - e[0])));
+    fracs[i] = f;
+    const k = S.knobs[i], { x0, W } = S.geom;
+    k.el.style.left = `${(k.x0 + f * k.travel - x0) / W * 100}%`;
+  });
+  if (wider) try { localStorage.setItem(SLIDER_ENDS, JSON.stringify(ends)); } catch (e) { /* not fatal */ }
+  driveSliders(r, fracs);
+}
+// What each slider controls. 'own' is what the keyboard does by itself: the
+// dimmer sets the backlight, the volume slider sends volume keys. Anything
+// else Ectodeck drives from the slider's position, while it is running, so it
+// is the same on every profile.
+const SLIDER_BIND = 'ectodeck:z10:slider-bind';
+const BIND_CHOICES = [
+  [['own', 'Keyboard brightness'], ['output', 'System volume'], ['microphone', 'Microphone volume'], ['none', 'Nothing']],
+  [['own', 'System volume'], ['backlight', 'Keyboard brightness'], ['microphone', 'Microphone volume'], ['none', 'Nothing']],
+];
+// What a slider is really driving. Left on its own job, the dimmer drives the
+// backlight and the volume slider the computer's volume, so those count too:
+// two sliders on one thing would each send it a different position.
+const drives = (i, v) => v === 'own' ? (i === 0 ? 'backlight' : 'output') : v;
+
+function sliderBind() {
+  try { const b = JSON.parse(localStorage.getItem(SLIDER_BIND)); if (Array.isArray(b) && b.length === 2) return b; } catch (e) { /* none yet */ }
+  return ['own', 'own'];
+}
+// From firmware build 3 the keyboard can be asked to stop doing a slider's
+// job by itself, so the two do not fight: no volume keys from the volume
+// slider, and a dimmer level that stays where Ectodeck put it.
+function tellModes() {
+  const b = S.bind ??= sliderBind();
+  const quietVolume = hasFeature('volume.quiet') && b[1] !== 'own';
+  const keepDimmer = hasFeature('dimmer.keep') && b[0] !== 'own';
+  if (!hasFeature('volume.quiet') && !hasFeature('dimmer.keep')) return;
+  api('/api/modes', { quietVolume, keepDimmer }).catch(() => {});
+}
+
+function setSliderBind(i, v) {
+  const b = S.bind ??= sliderBind();
+  const other = 1 - i;
+  b[i] = v;
+  // one job, one slider: taking a job the other one is doing leaves it idle,
+  // rather than the two of them sending it different positions
+  if (v !== 'none' && drives(other, b[other]) === drives(i, v)) b[other] = 'none';
+  try { localStorage.setItem(SLIDER_BIND, JSON.stringify(b)); } catch (e) { /* not fatal */ }
+  holdBacklight();
+  S.sent = [null, null];
+  tellModes();
+  renderView();
+}
+
+// The backlight follows the dimmer inside the keyboard, so taking the dimmer
+// off it means asking the keyboard to hold the backlight where it is. Whoever
+// is driving the backlight sets it from there on; nobody driving it means it
+// stays put.
+function holdBacklight() {
+  const b = S.bind ??= sliderBind();
+  if (b[0] === 'own') { S.heldLevel = null; api('/api/dimmer', { level: null }).catch(() => {}); return; }
+  // held where it is, so nothing jumps; whichever slider drives it, if any,
+  // takes it from there the first time it moves
+  if (S.heldLevel == null) S.heldLevel = S.lastSliders?.dimmer ?? 255;
+  api('/api/dimmer', { level: S.heldLevel }).catch(() => {});
+}
+// Set a target from a slider, but only when the slider has really moved, so
+// opening Ectodeck never throws the volume to wherever the slider sits.
+function driveSliders(r, f) {
+  const b = S.bind ??= sliderBind();
+  const prev = S.lastSliders;
+  S.lastSliders = r;
+  if (!prev) return;
+  const moved = [Math.abs(r.dimmer_raw - prev.dimmer_raw) > 12, Math.abs(r.volume_raw - prev.volume_raw) > 12];
+  S.sent ??= [null, null];
+  const send = (i, target) => {
+    const level = Math.round(f[i] * 100) / 100;
+    if (S.sent[i] === level) return;
+    S.sent[i] = level;
+    if (target === 'backlight') { S.heldLevel = Math.round(level * 255); api('/api/dimmer', { level: S.heldLevel }).catch(() => {}); }
+    else api('/api/audio', { target, level }).catch(() => {});
+  };
+  if (b[0] !== 'own') {
+    // the keyboard lets a held level go when its slider moves; hold it again
+    // being asked to keep a level only stops the slider letting one go; the
+    // level still has to be set, and set again if it was ever let go
+    if (!r.dimmer_held && S.heldLevel != null) api('/api/dimmer', { level: S.heldLevel }).catch(() => {});
+    if (moved[0] && (b[0] === 'output' || b[0] === 'microphone')) send(0, b[0]);
+  }
+  if (moved[1] && (b[1] === 'backlight' || b[1] === 'microphone')) send(1, b[1]);
+}
+
+// asked for ten times a second while the Z10's page shows and its firmware can say
+async function pollSliders() {
+  const on = window.__window === 'main' && document.body.dataset.place === 'z10' && hasFeature('sliders.read');
+  if (on && !document.hidden) {
+    try { moveKnobs(await api('/api/sliders')); } catch (e) { /* a missed reading; the next one will do */ }
+  }
+  setTimeout(pollSliders, on ? 100 : 500);
+}
+
 function pressKey(k) {
-  k.el.classList.add('press'); drawCaps(k.el);
-  setTimeout(() => { k.el.classList.remove('press'); drawCaps(); }, 90);
+  k.el.classList.add('press');
+  setTimeout(() => k.el.classList.remove('press'), 90);
 }
 
 // The panel is drawn at its shown size, so draw it again when that changes:
@@ -454,9 +568,18 @@ async function refresh() {
   try {
     S.dev = await api('/api/state');
   } catch (e) {
+    const boot = $('#boot');
+    // switched off in Ectodeck's Settings: not a fault, so no warning colour
+    if (/not to control/.test(e.message)) {
+      $('#devline').textContent = 'Not controlled by Ectodeck';
+      $('#conn').classList.replace('wait', 'free');
+      boot.replaceChildren(el('div', {}, el('b', {}, 'Control is off'),
+        el('span', {}, 'Ectodeck leaves this keyboard to other programs. '),
+        el('button', { type: 'button', class: 'ghost', 'data-go': 'settings' }, 'Open Settings')));
+      return;
+    }
     $('#devline').textContent = 'Keyboard not connected';
     $('#conn').classList.add('off');
-    const boot = $('#boot');
     boot.classList.add('bad');
     boot.replaceChildren(el('div', {}, el('b', {}, 'The editor cannot reach the keyboard'),
       el('span', {}, `${e.message}. Check that it is plugged in, then reload this page.`)));
@@ -480,9 +603,15 @@ async function refresh() {
       ? `EVGA's firmware v1.${Math.floor(minor / 10)} with our changes, build${build}. EVGA did not make this build.`
       : 'This number is not one EVGA released, so the keyboard is running modified firmware.';
   }
+  // what the keyboard's firmware can do beyond EVGA's (see the core's firmware
+  // module); a custom feature is offered only if the core lists it
+  try { S.fw = await api('/api/firmware', { version: S.dev.firmware }); }
+  catch (e) { S.fw = { kind: 'unknown', version: '', build: null, features: [], later: [] }; }
   buildHidMap();
   settleWindow();
   renderAll();
+  tellModes();
+  pollSliders();
   pollLcd();
   setInterval(pollLcd, 2000);
   if (S.view === 'lighting') startPreview();
@@ -609,6 +738,14 @@ function buildBoard() {
   // covers the light they throw everywhere except down in the wells, which is
   // where that light shows on the keyboard.
   board.append(el('img', { class: 'art top', src: 'board-top.svg', alt: '', draggable: 'false' }));
+  // The two slider knobs. The artwork used to draw them fixed at the halfway
+  // point; the app draws them instead, so they can sit where the sliders
+  // really are (see moveKnobs). Same size and shading as the artwork's.
+  S.knobs = S.board.sliders.map(([x0, , x1]) => {
+    const k = el('span', { class: 'knob', 'aria-hidden': 'true', style: at(x0 + (x1 - x0 - KNOB_W) / 2, KNOB_Y, KNOB_W, KNOB_H) });
+    board.append(k);
+    return { el: k, x0, travel: x1 - x0 - KNOB_W };
+  });
   // the display, drawn into the glass of the drawing
   const [gx0, gy0, gx1, gy1] = GLASS;
   board.append(el('div', { class: 'screen', style: at(gx0, gy0, gx1 - gx0, gy1 - gy0) },
@@ -837,7 +974,7 @@ function renderBoardLabels() {
     k.el.title = `${FULLNAME[k.id] || LEGEND[k.id] || k.id}: ${describe(def)}`;
     k.el.classList.toggle('sel', S.sel === k.pos && S.view === 'keys');
   }
-  $('#boardhint').textContent = S.view === 'lighting' && draft().lighting.mode === 'trigger' ? 'Type anywhere on this page to see the reactive effect.' : '';
+  $('#boardhint').textContent = '';
 }
 
 function renderActions() {
@@ -868,6 +1005,21 @@ function change(fn, rerenderPanel = false) {
 }
 
 // ---------------------------------------------------------------- lighting view
+// A setting on the Lighting and Settings pages: its name in a column of its
+// own, so every control starts on one line, then the control and a short note.
+function lrow(label, ...kids) {
+  const note = typeof kids[kids.length - 1] === 'string' ? kids.pop() : null;
+  return el('div', { class: 'lrow' }, el('span', { class: 'lrow-l' }, label),
+    el('div', { class: 'lrow-c' }, ...kids, note ? el('span', { class: 'note' }, note) : null));
+}
+// a slider with its value beside it
+function lslider(label, min, max, val, fmt, on) {
+  const out = el('span', { class: 'range-val' }, fmt(val));
+  return lrow(label, el('div', { class: 'lslider' },
+    el('input', { type: 'range', min, max, value: val, 'aria-label': label, oninput: e => { const v = +e.target.value; out.textContent = fmt(v); on(v); } }), out));
+}
+const lcol = (title, ...rows) => el('div', { class: 'lcol' }, el('h3', {}, title), ...rows);
+
 function renderLighting() {
   const L = draft().lighting, box = $('#view-lighting');
   box.replaceChildren();
@@ -877,71 +1029,61 @@ function renderLighting() {
       el('span', { class: 'icon', style: `background:${effectIcon(fx.mode)}` }), el('span', { class: 'name' }, fx.name)));
   }
   box.append(row);
-  if (L.mode === 'off') { box.append(el('p', { class: 'quiet' }, 'The backlight stays dark while this profile is active.')); return; }
+  if (L.mode === 'off') { box.append(el('div', { class: 'lpanel lempty' }, el('p', {}, 'The backlight stays dark while this profile is active.'))); return; }
   if (L.mode === 'custom') { renderCustom(box); return; }
-  const e = L[L.mode], fx = EFFECTS.find(x => x.mode === L.mode), grid = el('div', { class: 'grid' });
+  const e = L[L.mode], fx = EFFECTS.find(x => x.mode === L.mode);
+  const look = [], when = [];
 
   // colours
-  if (L.mode === 'static') grid.append(field('Colour', colorInput(e.color, c => change(() => { e.color = c; }))));
-  if (L.mode === 'breathing') grid.append(field('Colours', el('div', { class: 'swatches' }, e.colors.map(c => colorInput(c.color, v => change(() => { c.color = v; }))))
-    , 'Breathes in the first colour, then the second.'));
-  if (['pulse', 'wave', 'trigger', 'spiral'].includes(L.mode)) grid.append(field('Colours', el('div', { class: 'swatches' },
-    e.colors.slice(0, 7).map(c => colorInput(c.color, v => change(() => { c.color = v; })))),
-    L.mode === 'trigger' ? 'Each key press takes the next colour.' : 'The effect runs through these seven colours in order.'));
-  if (L.mode === 'pulse') grid.append(field('Between pulses', colorInput(e.background.color, v => change(() => { e.background.color = v; }))));
+  const swatches = list => el('div', { class: 'swatches' }, list.map(c => colorInput(c.color, v => change(() => { c.color = v; }))));
+  if (L.mode === 'static') look.push(lrow('Colour', colorInput(e.color, c => change(() => { e.color = c; }))));
+  if (L.mode === 'breathing') look.push(lrow('Colours', swatches(e.colors), 'Breathes in the first colour, then the second.'));
+  if (['pulse', 'wave', 'trigger', 'spiral'].includes(L.mode)) look.push(lrow('Colours', swatches(e.colors.slice(0, 7)),
+    L.mode === 'trigger' ? 'Each key press takes the next colour.' : 'Runs through these colours in order.'));
+  if ('random' in e && L.mode !== 'trigger') look.push(lrow('Order', el('label', { class: 'check' },
+    el('input', { type: 'checkbox', checked: !!e.random, onchange: ev => change(() => { e.random = ev.target.checked ? 1 : 0; }) }), 'Random colours')));
+  if (L.mode === 'pulse') look.push(lrow('Between pulses', colorInput(e.background.color, v => change(() => { e.background.color = v; }))));
 
   // brightness
   const briGet = () => L.mode === 'static' ? e.brightness : L.mode === 'stars' ? e.brightness : e.colors[0].brightness;
   const briSet = v => { if (L.mode === 'static' || L.mode === 'stars') e.brightness = v; else { e.colors.forEach(c => { c.brightness = v; }); if (e.background) e.background.brightness = v; } };
-  grid.append(rangeField('Brightness', 0, 255, briGet(), v => `${Math.round(v / 2.55)}%`, v => change(() => briSet(v))));
+  look.push(lslider('Brightness', 0, 255, briGet(), v => `${Math.round(v / 2.55)}%`, v => change(() => briSet(v))));
 
   // speed: stored as a cycle time; the slider runs slow -> fast like EVGA's
   if (fx.speed) {
     const key = fx.key || 'cycle', [lo, hi] = fx.speed;
-    grid.append(rangeField('Speed', lo, hi, lo + hi - e[key], v => `${((lo + hi - v) / 1000).toFixed(2)} s ${L.mode === 'trigger' ? 'colour change' : 'per cycle'}`,
+    look.push(lslider('Speed', lo, hi, lo + hi - e[key], v => `${((lo + hi - v) / 1000).toFixed(2)} s`,
       v => change(() => { e[key] = lo + hi - v; })));
   }
+  if (L.mode === 'spiral') look.push(lrow('Direction', seg([[0, 'Clockwise'], [1, 'Counterclockwise']], e.direction > 1 ? 0 : e.direction, v => change(() => { e.direction = v; }, true))));
+  if (L.mode === 'wave') look.push(lrow('Direction', seg([[0, 'Up'], [1, 'Down'], [3, 'Left'], [2, 'Right']], e.direction > 3 ? 0 : e.direction, v => change(() => { e.direction = v; }, true))));
+  if (L.mode === 'trigger') look.push(lrow('Lights up', seg([[0, 'Each key typed'], [1, 'One key'], [2, '3 by 3 around it']], e.submode > 2 ? 0 : e.submode, v => change(() => { e.submode = v; }, true)),
+    el('label', { class: 'check' }, el('input', { type: 'checkbox', checked: !!S.demoTyping, onchange: ev => { S.demoTyping = ev.target.checked; } }), 'Preview with pretend typing'),
+    'Type, or click keys above, to see it.'));
 
-  if (L.mode === 'spiral') grid.append(field('Direction', seg([[0, 'Clockwise'], [1, 'Counterclockwise']], e.direction > 1 ? 0 : e.direction, v => change(() => { e.direction = v; }, true))));
-  if (L.mode === 'wave') grid.append(field('Direction', seg([[0, 'Up'], [1, 'Down'], [3, 'Left'], [2, 'Right']], e.direction > 3 ? 0 : e.direction, v => change(() => { e.direction = v; }, true))));
-  if (L.mode === 'trigger') grid.append(field('Lights up', seg([[0, 'Each key typed'], [1, 'One key'], [2, '3 by 3 around the key']], e.submode > 2 ? 0 : e.submode, v => change(() => { e.submode = v; }, true)),
-    el('label', { class: 'check' }, el('input', { type: 'checkbox', checked: !!S.demoTyping, onchange: ev => { S.demoTyping = ev.target.checked; } }), 'Preview with pretend typing')));
-  if ('random' in e && L.mode !== 'trigger') grid.append(field('Order', el('label', { class: 'check' },
-    el('input', { type: 'checkbox', checked: !!e.random, onchange: ev => change(() => { e.random = ev.target.checked ? 1 : 0; }) }), 'Random colours instead of the list')));
+  // where and when
+  when.push(lrow('Where', zoneChips(e), 'Keys outside these areas stay dark.'));
+  when.push(lrow('Starts', seg([[0, 'With the profile'], [1, 'On a key press']], e.start, v => change(() => { e.start = v; }, true))));
+  when.push(lrow('Stops', seg([[0, 'Never'], [1, 'On key press'], [2, 'On key release']], e.stop, v => change(() => { e.stop = v; }, true))));
 
-  // zone
-  grid.append(field('Where', zoneChips(e), 'Keys outside these areas stay dark.'));
-  // start and stop
-  grid.append(field('Starts', seg([[0, 'With the profile'], [1, 'On a key press']], e.start, v => change(() => { e.start = v; }, true))));
-  grid.append(field('Stops', seg([[0, 'Never'], [1, 'On key press'], [2, 'On key release']], e.stop, v => change(() => { e.stop = v; }, true))));
-  grid.append(field('', el('button', { class: 'linkish', onclick: () => change(d => { d.lighting[L.mode] = clone(saved(254).lighting[L.mode]); }, true) }, `Reset ${fx.name.toLowerCase()} to factory settings`)));
-  box.append(grid);
+  box.append(el('div', { class: 'lpanel' }, lcol(fx.speed ? 'Colour and motion' : 'Colour', ...look), lcol('Where and when', ...when),
+    el('div', { class: 'lfoot' }, el('button', { class: 'tb', onclick: () => change(d => { d.lighting[L.mode] = clone(saved(254).lighting[L.mode]); }, true) }, `Reset ${fx.name.toLowerCase()} to factory settings`))));
 }
 
 function renderCustom(box) {
   const cols = customColors();
-  box.append(el('div', { class: 'paintbar' },
-    el('span', { class: 'lab' }, 'Colour'),
-    colorInput(unhex(S.paint), c => { S.paint = hex(c); }),
-    el('button', { class: 'ghost', onclick: () => {
-      const c = unhex(S.paint);
-      for (const k of S.layout) if (k.led) cols[k.pos] = [...c];
-      saveCustom(); startPreview(); renderView();
-    } }, 'Fill every key'),
-    el('button', { class: 'ghost', onclick: () => {
-      for (const k of S.layout) cols[k.pos] = [0, 0, 0];
-      saveCustom(); startPreview(); renderView();
-    } }, 'Clear'),
-    el('button', { class: 'ghost', onclick: () => {
-      for (const k of S.layout) if (k.led) cols[k.pos] = [Math.random() * 256 | 0, Math.random() * 256 | 0, Math.random() * 256 | 0];
-      saveCustom(); startPreview(); renderView();
-    } }, 'Scatter')));
-  box.append(el('p', { class: 'quiet', style: 'max-width:62ch' },
-    'Click any key on the keyboard above to paint it. The colours appear on the real keyboard straight away. '
-    + 'The spacebar, the mode button and the media keys have no light behind them, so they stay dark.'),
-    el('p', { class: 'quiet', style: 'max-width:62ch' },
-      'The keyboard cannot store per-key colours by itself, so these only show while this editor is open. '
-      + 'Saving this profile stores the backlight as off, so the keyboard is dark rather than showing a stale effect when the editor is closed.'));
+  const act = (label, fn) => el('button', { class: 'ghost', onclick: () => { fn(); saveCustom(); startPreview(); renderView(); } }, label);
+  box.append(el('div', { class: 'lpanel' },
+    lcol('Painting',
+      lrow('Colour', el('div', { class: 'row' }, colorInput(unhex(S.paint), c => { S.paint = hex(c); }),
+        el('span', { class: 'note' }, 'Click keys on the keyboard to paint them.'))),
+      lrow('Every key', el('div', { class: 'row' },
+        act('Fill', () => { const c = unhex(S.paint); for (const k of S.layout) if (k.led) cols[k.pos] = [...c]; }),
+        act('Scatter', () => { for (const k of S.layout) if (k.led) cols[k.pos] = [Math.random() * 256 | 0, Math.random() * 256 | 0, Math.random() * 256 | 0]; }),
+        act('Clear', () => { for (const k of S.layout) cols[k.pos] = [0, 0, 0]; })))),
+    lcol('How it shows',
+      el('p', { class: 'note' }, 'The spacebar, the mode button and the media keys have no light, so they stay dark.'),
+      el('p', { class: 'note' }, 'The keyboard can’t store colours per key, so they show only while Ectodeck is open. The profile saves with its backlight off.'))));
 }
 
 function effectIcon(mode) {
@@ -1185,6 +1327,13 @@ function selectKey(pos) {
     pressKey(k);
     return;
   }
+  // On the Lighting page a key is not chosen for editing: clicking it lights
+  // it as pressing it would for Reactive, and otherwise only shows the press.
+  if (S.view === 'lighting') {
+    if (draft().lighting.mode === 'trigger') flash(pos);
+    pressKey(S.byPos[pos]);
+    return;
+  }
   if (S.view !== 'keys') { S.view = 'keys'; }
   else if (S.sel === pos) { deselectKey(); return; }     // pressing it again lets it go
   S.sel = pos;
@@ -1286,7 +1435,7 @@ function deselectKey() {
 
 function renderKeys() {
   const box = $('#view-keys'); box.replaceChildren();
-  if (S.sel == null) { box.append(el('p', { class: 'keys-empty' }, 'Choose a key on the keyboard to see and change what it does.')); return; }
+  if (S.sel == null) return;      // nothing chosen: the panel stays away rather than explaining itself
   const k = S.byPos[S.sel], fac = saved(254).keys[k.pos];
   box.append(el('div', { class: 'keypanel' },
     el('div', { class: 'kid' }, el('div', { class: 'kname' }, keyLabel(k)),
@@ -1348,28 +1497,70 @@ function listen(btn, layer, pos) {
 }
 
 // ---------------------------------------------------------------- display view
+// whether the keyboard's firmware has a custom feature, by its id
+const hasFeature = id => !!S.fw?.features?.some(f => f.id === id);
+
+// The two sliders, and what each one controls. Custom firmware only: EVGA's
+// cannot say where they are.
+function slidersPanel() {
+  const b = S.bind ??= sliderBind();
+  if (!hasFeature('sliders.read')) return null;
+  const row = (i, name) => {
+    const cur = BIND_CHOICES[i].find(([v]) => v === b[i]) || BIND_CHOICES[i][0];
+    const btn = el('button', { class: 'actbtn', type: 'button', 'aria-haspopup': 'menu',
+      onclick: e => openMenu(e.currentTarget, m => {
+        m.append(mHead(`The ${name.toLowerCase()} controls`),
+          ...BIND_CHOICES[i].map(([v, label]) => mItem(label, () => { closeMenu(); setSliderBind(i, v); }, { tick: v === b[i] })));
+      }, { width: 240 }) },
+      el('span', { class: 'al' }, cur[1]));
+    btn.append(CHEV());
+    const notes = [];
+    if (i === 1 && b[1] !== 'own' && !hasFeature('volume.quiet')) notes.push('The keyboard still sends volume keys from this slider as well. Its firmware can be told not to, from build 3.');
+    if (i === 0 && b[0] !== 'own') notes.push(hasFeature('dimmer.keep')
+      ? 'The backlight stays where it was, and follows the volume slider if that is on keyboard brightness.'
+      : 'The backlight stays where it was, though it may flicker as this slider moves. Its firmware can hold it steady, from build 3.');
+    return lrow(name, btn, ...notes);
+  };
+  return el('div', { class: 'lpanel fwpanel' }, lcol('Sliders', row(0, 'Dimmer'), row(1, 'Volume')),
+    lcol('', el('p', { class: 'note' }, 'Move a slider and its knob on the keyboard above moves with it. What each one controls is Ectodeck’s, not the keyboard’s, so it is the same on every profile and works while Ectodeck is open.')));
+}
+
+// Custom firmware: kept apart from everything EVGA's firmware does, and
+// offered only as far as the keyboard's build goes.
+function firmwarePanel() {
+  const fw = S.fw || { kind: 'unknown', features: [], later: [] };
+  const list = items => el('ul', { class: 'fwlist' }, items.map(f => el('li', {}, f.name)));
+  const body = fw.kind === 'custom'
+    ? [lrow('Firmware', el('span', { class: 'fwv' }, `Ectodeck v${fw.version}, build ${fw.build}`)),
+       lrow('Adds', fw.features.length ? list(fw.features) : el('span', { class: 'note' }, 'Nothing Ectodeck controls yet. This build fixes how the volume slider steps.')),
+       fw.later?.length ? lrow('In later builds', list(fw.later.map(f => ({ name: `${f.name} (build ${f.since})` })))) : null]
+    : fw.kind === 'retail'
+      ? [lrow('Firmware', el('span', { class: 'fwv' }, `EVGA v${fw.version}`)),
+         el('p', { class: 'note' }, 'Features that need Ectodeck’s custom firmware show here when the keyboard runs it.')]
+      : [lrow('Firmware', el('span', { class: 'fwv' }, fw.version ? `v${fw.version}` : 'Not known')),
+         el('p', { class: 'note' }, 'This version is neither EVGA’s nor Ectodeck’s, so no custom features are offered.')];
+  return el('div', { class: 'lpanel fwpanel' }, lcol('Custom firmware', ...body.filter(Boolean)));
+}
+
 function renderDisplay() {
   const box = $('#view-display'); box.replaceChildren();
   const L = draft().lighting, lc = L.lcd.color;
-  const grid = el('div', { class: 'grid settings' });
-  grid.append(field('Profile name',
-    el('input', { class: 'namefield', type: 'text', maxlength: 60,
-      value: draft().name ?? saved(S.editing).name,
-      'aria-label': 'Profile name',
-      oninput: e => change(d => { d.name = e.target.value; }) }),
-    'Stored on the keyboard with this profile.'));
-  // the screen's colour and its brightness sit together, as one column
-  grid.append(el('div', { class: 'field stack' },
-    field('Screen backlight', el('div', { class: 'row' }, colorInput(lc.color, v => change(() => { lc.color = v; }, true)))),
-    rangeField('Backlight brightness', 0, 255, lc.brightness, v => `${Math.round(v / 2.55)}%`, v => change(() => { lc.brightness = v; }))));
-  grid.append(field('Built-in screens', el('div', {}, LCD_APPS.map(([bit, name]) => el('label', { class: 'check' },
-    el('input', { type: 'checkbox', checked: !!(L.lcd.apps & bit), onchange: e => change(() => { L.lcd.apps = e.target.checked ? L.lcd.apps | bit : L.lcd.apps & ~bit; }) }), name))),
-    'Screens the keyboard can show by itself. Your z10-lcd stats service draws over them while it runs.'));
+  const checks = (list, on, set) => el('div', { class: 'checks' }, list.map(([bit, name]) => el('label', { class: 'check' },
+    el('input', { type: 'checkbox', checked: on(bit), onchange: e => set(bit, e.target.checked) }), name)));
   const blocked = ~L.game_keys & 0x7f;
-  grid.append(field('Blocked in game mode', el('div', {}, GAME_KEYS.map(([bit, name]) => el('label', { class: 'check' },
-    el('input', { type: 'checkbox', checked: !!(blocked & bit), onchange: e => change(() => { const b = e.target.checked ? blocked | bit : blocked & ~bit; L.game_keys = (~b & 0x7f) | 0x80; }, true) }), name))),
-    'These keys do nothing while game mode is on.'));
-  box.append(grid);
+  box.append(el('div', { class: 'lpanel three' },
+    lcol('Profile',
+      lrow('Name', el('input', { class: 'namefield', type: 'text', maxlength: 60, value: draft().name ?? saved(S.editing).name, 'aria-label': 'Profile name',
+        oninput: e => change(d => { d.name = e.target.value; }) }), 'Stored on the keyboard with this profile.'),
+      lrow('Screen colour', colorInput(lc.color, v => change(() => { lc.color = v; }, true))),
+      lslider('Brightness', 0, 255, lc.brightness, v => `${Math.round(v / 2.55)}%`, v => change(() => { lc.brightness = v; }))),
+    lcol('Built-in screens',
+      checks(LCD_APPS, bit => !!(L.lcd.apps & bit), (bit, on) => change(() => { L.lcd.apps = on ? L.lcd.apps | bit : L.lcd.apps & ~bit; })),
+      el('p', { class: 'note' }, 'Screens the keyboard shows by itself. The stats service draws over them while it runs.')),
+    lcol('Blocked in game mode',
+      checks(GAME_KEYS, bit => !!(blocked & bit), (bit, on) => change(() => { const b = on ? blocked | bit : blocked & ~bit; L.game_keys = (~b & 0x7f) | 0x80; }, true)),
+      el('p', { class: 'note' }, 'These keys do nothing while game mode is on.'))),
+    slidersPanel(), firmwarePanel());
 }
 
 // ---------------------------------------------------------------- macros
@@ -2023,6 +2214,9 @@ addEventListener('keydown', e => {
   if (draft().lighting.mode === 'trigger') flash(pos);
 });
 addEventListener('beforeunload', e => {
+  // the keyboard goes back to doing both sliders' jobs itself
+  if (S.fw?.build >= 2) window.__beacon('/api/dimmer', { level: null });
+  if (S.fw?.build >= 3) window.__beacon('/api/modes', { quietVolume: false, keepDimmer: false });
   window.__beacon('/api/preview', { stop: true, tab: TAB });
   if (S.rec) window.__beacon('/api/record', { action: 'cancel' });
   if (S.dev && ([1, 2, 3, 4, 5].some(isDirty) || Object.keys(S.mdrafts).some(n => macroDirty(+n)))) e.preventDefault();
