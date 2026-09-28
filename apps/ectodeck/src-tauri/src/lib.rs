@@ -108,6 +108,16 @@ async fn set_dimmer(app: State<'_, App>, level: Option<u8>) -> Result<bool, Stri
         .map_err(|e| e.to_string())
 }
 
+/// Ask the keyboard to stop doing a slider's job by itself.
+#[tauri::command]
+async fn set_modes(app: State<'_, App>, quiet_volume: bool, keep_dimmer: bool) -> Result<bool, String> {
+    let kb = app.kb.clone();
+    tauri::async_runtime::spawn_blocking(move || kb.set_modes(quiet_volume, keep_dimmer))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
 /// Set the computer's output or microphone volume, 0 to 1, through
 /// PipeWire's own control. This is how a slider put on either one sets it
 /// exactly where the slider is, instead of sending volume keys.
@@ -235,7 +245,7 @@ pub fn run() {
                 let _ = w.hide();
             }
         })
-        .invoke_handler(tauri::generate_handler![state, save, write_macro, activate, preview, record, lcd, open_macro_editor, prepare_macro_editor, firmware, sliders, set_dimmer, set_audio])
+        .invoke_handler(tauri::generate_handler![state, save, write_macro, activate, preview, record, lcd, open_macro_editor, prepare_macro_editor, firmware, sliders, set_dimmer, set_audio, set_modes])
         .run(tauri::generate_context!())
         .expect("Ectodeck could not start");
 }

@@ -25,6 +25,7 @@
     if (path === '/api/sliders') return call('sliders');
     if (path === '/api/dimmer') return call('set_dimmer', { level: body.level ?? null });
     if (path === '/api/audio') return call('set_audio', { target: body.target, level: body.level });
+    if (path === '/api/modes') return call('set_modes', { quietVolume: !!body.quietVolume, keepDimmer: !!body.keepDimmer });
     if (path === '/api/preview') return call('preview', { body });
     if (path === '/api/record') return call('record', body ? { action: body.action, room: body.room, waits: body.waits } : { action: 'status' });
     if (path === '/api/active') return call('activate', { profile: body.profile });
