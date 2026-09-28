@@ -191,11 +191,12 @@ fn show_main(app: &AppHandle) {
     }
 }
 
+/// The tray belongs to Ectodeck, not to any one device, so it carries nothing
+/// that is a single device's own. The Z10's Macro Editor opens from the Z10.
 fn tray(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open Ectodeck", true, None::<&str>)?;
-    let macros = MenuItem::with_id(app, "macros", "Macro Editor", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Ectodeck", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &macros, &PredefinedMenuItem::separator(app)?, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &PredefinedMenuItem::separator(app)?, &quit])?;
     TrayIconBuilder::with_id("ectodeck")
         .icon(app.default_window_icon().cloned().expect("the app's icon"))
         .tooltip("Ectodeck")
@@ -203,7 +204,6 @@ fn tray(app: &AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, e| match e.id.as_ref() {
             "open" => show_main(app),
-            "macros" => { let _ = show_macro_editor(app, None); }
             "quit" => app.exit(0),
             _ => {}
         })
