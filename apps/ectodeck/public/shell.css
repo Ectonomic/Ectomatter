@@ -77,7 +77,7 @@ html:not(.framed) .mrail { top: 0; height: 100vh; }
 .wcard .where input::placeholder { color: #737373; }
 .wcard .where .menu.float { position: absolute; left: 0; right: 0; top: calc(100% + 6px); max-height: 320px; }
 .wcard .where .mi .alt { color: #8a8a8a; }
-.wcard .wbox { display: grid; gap: 6px; width: 100%; max-width: 380px; box-sizing: border-box; padding: 14px 16px; border-radius: 10px; background: #1c1c1c; }
+.wcard .wbox { display: grid; gap: 6px; width: 100%; max-width: 380px; box-sizing: border-box; padding: 14px 16px; border-radius: 10px; background: #141414; }
 .wcard .now { display: flex; align-items: baseline; gap: 12px; line-height: 1.2; flex-wrap: wrap; }
 .wcard .now b { font-size: 22px; font-weight: 500; letter-spacing: -0.02em; }
 .wcard .now span { color: #d4d4d4; font-size: 13.5px; }
