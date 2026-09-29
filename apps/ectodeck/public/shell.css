@@ -77,11 +77,12 @@ html:not(.framed) .mrail { top: 0; height: 100vh; }
 .wcard .where input::placeholder { color: #737373; }
 .wcard .where .menu.float { position: absolute; left: 0; right: 0; top: calc(100% + 6px); max-height: 320px; }
 .wcard .where .mi .alt { color: #8a8a8a; }
-.wcard .now { display: flex; align-items: baseline; gap: 14px; line-height: 34px; }
+.wcard .wbox { display: grid; gap: 6px; width: 100%; max-width: 380px; box-sizing: border-box; padding: 14px 16px; border-radius: 10px; background: #1c1c1c; }
+.wcard .now { display: flex; align-items: baseline; gap: 12px; line-height: 1.2; flex-wrap: wrap; }
 .wcard .now b { font-size: 22px; font-weight: 500; letter-spacing: -0.02em; }
 .wcard .now span { color: #d4d4d4; font-size: 13.5px; }
 .wcard .now small { color: #8a8a8a; font-size: 12.5px; }
-.wcard .facts { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: #a3a3a3; }
+.wcard .facts { display: grid; grid-template-columns: repeat(2, max-content); gap: 4px 28px; font-size: 13px; color: #a3a3a3; }
 .wcard .facts b { color: #d4d4d4; font-weight: 500; }
 .wcard .state.inf::before { background: #f0b35a; }
 .wcard .state.off::before { background: #5c5c5c; }

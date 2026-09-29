@@ -188,7 +188,7 @@
     const tSeg = unitSeg('weather.units.temperature', [['c', 'Celsius'], ['f', 'Fahrenheit']]);
     const wSeg = unitSeg('weather.units.wind', [['kmh', 'km/h'], ['mph', 'mph'], ['ms', 'm/s']]);
     const unitNote = h('span', { class: 'note' });
-    const nowRow = srow('Now', now, facts);
+    const nowRow = srow('Now', h('div', { class: 'wbox' }, now, facts));
 
     // the place: a search as you type, in this computer's language
     let timer = 0, found = [];
