@@ -13,9 +13,11 @@ body[data-place="home"] #home, body[data-place="settings"] #settings { display: 
 body[data-place="z10"] #device { display: block; }
 
 /* ------------------------------------------------ the rail, opening into a blade */
-/* The rail and the home take the shades the approved mock showed in Chrome, which
-   draws dark greys lighter than the app's WebKit does: #161616 and #1a1a1a there
-   read as #1c1c1c and #202020 here. */
+/* The rail and the home take the shades the approved mock showed. The mock was
+   judged in Chrome while Chrome labelled its colours for KWin, which decoded them
+   brighter in the darkest greys than every other app: #161616 and #1a1a1a there
+   looked like #1c1c1c and #202020 do here. Chrome's labelling is now off, so these
+   values look the same in Chrome, in Ectodeck and on Windows. */
 .mrail { position: sticky; top: 36px; z-index: 25; flex: none; height: calc(100vh - 36px); width: 60px; background: #1c1c1c;
   display: flex; flex-direction: column; gap: 4px; padding: 10px; overflow: hidden; font-family: 'Geist', system-ui, sans-serif; }
 html:not(.framed) .mrail { top: 0; height: 100vh; }
