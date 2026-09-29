@@ -227,7 +227,16 @@ fn weather(app: State<'_, App>) -> Value {
         "temperature": app.settings.get("weather.units.temperature").unwrap_or(json!(d.temperature)),
         "wind": app.settings.get("weather.units.wind").unwrap_or(json!(d.wind)),
     });
-    json!({ "place": app.settings.get("weather.place"), "report": app.weather.report(), "units": units })
+    let place = app.settings.get("weather.place");
+    let country = place.as_ref().and_then(|p| p["country_code"].as_str()).unwrap_or("").to_string();
+    json!({
+        "place": place,
+        "report": app.weather.report(),
+        "units": units,
+        "locale": locale(),
+        // who issues warnings for the place, or null where they are read from the weather
+        "warnings": ectodeck_weather::alerts::source(&country).map(|s| s.name()),
+    })
 }
 
 /// Places matching a name, for choosing where the weather is for.

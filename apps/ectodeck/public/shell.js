@@ -134,7 +134,7 @@
     const key = JSON.stringify([status, conf]);
     if (key === drawn) return;   // redrawn only when something changed, so a menu or a selection survives the check
     drawn = key;
-    const box = document.getElementById('settings-body');
+    const box = document.getElementById('set-devices');
     const cards = devices.map(d => {
       const st = status.find(s => s.id === d.id) || {}, dc = conf.devices?.[d.id] || {};
       const control = dc.control !== false;
@@ -161,9 +161,110 @@
     cards.forEach((c, i) => { c.querySelector('.sq').innerHTML = DESK_GLYPHS[devices[i].glyph]; });
   }
 
+  // ---------------------------------------------------------------- Weather
+  // Ectodeck's, not any one device's: one place and one set of units, and every
+  // device that shows weather reads the same report (crate ectodeck-weather).
+  // Built once and then only its readings are updated, so the search field and
+  // its list survive the Settings page checking again every two seconds.
+  const WMO = { 0: 'Clear', 1: 'Mostly clear', 2: 'Partly cloudy', 3: 'Overcast', 45: 'Fog', 48: 'Freezing fog',
+    51: 'Light drizzle', 53: 'Drizzle', 55: 'Heavy drizzle', 56: 'Freezing drizzle', 57: 'Freezing drizzle',
+    61: 'Light rain', 63: 'Rain', 65: 'Heavy rain', 66: 'Freezing rain', 67: 'Freezing rain',
+    71: 'Light snow', 73: 'Snow', 75: 'Heavy snow', 77: 'Snow grains', 80: 'Light showers', 81: 'Showers', 82: 'Heavy showers',
+    85: 'Snow showers', 86: 'Heavy snow showers', 95: 'Thunderstorm', 96: 'Thunderstorm with hail', 99: 'Thunderstorm with hail' };
+  const ALERTS = { 1: 'Tropical storm', 2: 'Hurricane', 3: 'Tornado' };
+  let wx = null;
+  const setW = (path, value) => window.__api('/api/settings', { path, value });
+
+  function buildWeather() {
+    const q = h('input', { type: 'text', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Place', placeholder: 'Search for a city or town' });
+    const list = h('div', { class: 'menu float wlist', role: 'listbox', hidden: '' });
+    const where = h('div', { class: 'where' }, q, list);
+    const placeLine = h('span', { class: 'note' });
+    const temp = h('b'), cond = h('span'), when = h('small'), facts = h('div', { class: 'facts' });
+    const now = h('div', { class: 'now' }, temp, cond, when);
+    const warnState = h('span', { class: 'state' }), warnNote = h('span', { class: 'note' });
+    const unitSeg = (path, opts) => h('div', { class: 'seg', role: 'group' }, opts.map(([v, t]) =>
+      h('button', { type: 'button', 'data-v': v, onclick: () => setW(path, v).then(renderSettings) }, t)));
+    const tSeg = unitSeg('weather.units.temperature', [['c', 'Celsius'], ['f', 'Fahrenheit']]);
+    const wSeg = unitSeg('weather.units.wind', [['kmh', 'km/h'], ['mph', 'mph'], ['ms', 'm/s']]);
+    const unitNote = h('span', { class: 'note' });
+    const nowRow = srow('Now', now, facts);
+
+    // the place: a search as you type, in this computer's language
+    let timer = 0, found = [];
+    const close = () => { list.hidden = true; list.classList.remove('shown'); };
+    q.addEventListener('input', () => {
+      clearTimeout(timer);
+      const text = q.value.trim();
+      if (!text) { close(); return; }
+      timer = setTimeout(async () => {
+        try { found = await window.__api('/api/weather/search', { query: text }); } catch (e) { found = []; }
+        if (q.value.trim() !== text) return;   // typed on since
+        list.replaceChildren(...(found.length ? found.map(p => h('button', { type: 'button', class: 'mi', role: 'option', onclick: () => pick(p) },
+          h('span', {}, p.name, p.latin && p.latin !== p.name ? h('span', { class: 'alt' }, ` (${p.latin})`) : null),
+          h('span', { class: 'msub' }, [p.region, p.country].filter(Boolean).join(', '))))
+          : [h('div', { class: 'mh' }, 'No place by that name')]));
+        list.hidden = false; list.classList.add('shown');
+      }, 300);
+    });
+    q.addEventListener('keydown', e => { if (e.key === 'Escape') { close(); q.value = wx.placeName; } });
+    addEventListener('pointerdown', e => { if (!where.contains(e.target)) close(); });
+    const pick = p => { close(); q.value = p.name; setW('weather.place', p).then(renderSettings); };
+
+    const section = h('section', { class: 'lpanel devcard wcard' }, h('div', { class: 'lcol' },
+      srow('Place', where, placeLine),
+      nowRow,
+      srow('Warnings', warnState, warnNote),
+      srow('Temperature', tSeg),
+      srow('Wind', wSeg, unitNote),
+      srow('', h('span', { class: 'credit' }, 'Weather and air from Open-Meteo (open-meteo.com, CC BY 4.0), every 15 minutes. '
+        + 'Places from Open-Meteo, and from Photon over OpenStreetMap (ODbL) for names Open-Meteo cannot match. '
+        + 'Warnings every 3 minutes from the National Weather Service, Environment and Climate Change Canada, or MeteoAlarm (meteoalarm.org, CC BY 4.0).'))));
+    wx = { q, placeLine, temp, cond, when, facts, nowRow, warnState, warnNote, tSeg, wSeg, unitNote, placeName: '' };
+    return h('div', {}, h('h2', {}, 'Weather'), section);
+  }
+
+  const two = n => String(Math.floor(n)).padStart(2, '0');
+  const clock = secs => `${two(secs / 3600)}:${two((secs % 3600) / 60)}`;
+  const ago = t => { const m = Math.round((Date.now() / 1000 - t) / 60); return m < 1 ? 'Updated just now' : m === 1 ? 'Updated a minute ago' : m < 60 ? `Updated ${m} minutes ago` : `Updated ${Math.round(m / 60)} h ago`; };
+
+  function drawWeather(w, conf) {
+    if (!wx || !w) return;
+    const p = w.place, r = w.report, u = w.units || { temperature: 'c', wind: 'kmh' };
+    wx.placeName = p?.name || '';
+    if (document.activeElement !== wx.q && wx.q.value !== wx.placeName) wx.q.value = wx.placeName;
+    wx.placeLine.textContent = p ? [p.name, p.region, p.country].filter(Boolean).join(', ') : 'Every device that shows weather uses this place.';
+    wx.nowRow.hidden = !p;
+    if (p && !r) { wx.temp.textContent = ''; wx.cond.textContent = 'Getting the weather…'; wx.when.textContent = ''; wx.facts.replaceChildren(); }
+    if (r) {
+      const t = u.temperature === 'f' ? r.temperature * 9 / 5 + 32 : r.temperature;
+      const wind = k => u.wind === 'mph' ? `${Math.round(k / 1.609)} mph` : u.wind === 'ms' ? `${Math.round(k / 3.6)} m/s` : `${Math.round(k)} km/h`;
+      wx.temp.textContent = `${Math.round(t)}°${u.temperature.toUpperCase()}`;
+      wx.cond.textContent = WMO[r.code] || `Weather code ${r.code}`;
+      wx.when.textContent = r.fetched ? ago(r.fetched) : '';
+      const fact = (k, v) => h('span', {}, `${k} `, h('b', {}, v));
+      wx.facts.replaceChildren(fact('Cloud', `${Math.round(r.cloud * 100)}%`), fact('Wind', wind(r.wind_speed)),
+        fact('Sunrise', clock(r.sunrise)), fact('Sunset', clock(r.sunset)));
+    }
+    // the warning service for the place, or the weather standing in for one
+    const official = !!w.warnings;
+    wx.warnState.textContent = !p ? 'Chosen with the place' : official ? w.warnings : 'Read from the weather';
+    wx.warnState.className = 'state' + (!p ? ' off' : official ? ' ok' : ' inf');
+    const inForce = r?.alert ? `${ALERTS[r.alert]} ${official ? 'warning in force' : 'conditions now'}. ` : '';
+    wx.warnNote.textContent = !p ? '' : inForce + (official ? 'Official warnings for this place, checked every 3 minutes.'
+      : 'No warning service covers this country yet, so storm-force wind with rain stands in for an official warning. A tornado cannot be told from the weather alone.');
+    wx.warnNote.classList.toggle('alert', !!r?.alert);
+    for (const [seg, v] of [[wx.tSeg, u.temperature], [wx.wSeg, u.wind]]) for (const b of seg.children) b.setAttribute('aria-pressed', String(b.dataset.v === v));
+    const chosen = conf?.weather?.units || {};
+    wx.unitNote.textContent = chosen.temperature || chosen.wind ? '' : `Set from this computer's region (${w.locale}). Change either and Ectodeck keeps your choice.`;
+    wx.unitNote.hidden = !wx.unitNote.textContent;
+  }
+
   function renderSettings() {
-    Promise.all([window.__api('/api/devices'), window.__api('/api/settings')])
-      .then(([status, conf]) => drawSettings(status, conf), () => drawSettings([], {}))
-      .finally(() => { if (body.dataset.place === 'settings') settingsTimer = setTimeout(renderSettings, 2000); });
+    const bodyBox = document.getElementById('settings-body');
+    if (!document.getElementById('set-devices')) bodyBox.replaceChildren(h('div', { id: 'set-devices' }), buildWeather());
+    Promise.all([window.__api('/api/devices'), window.__api('/api/settings'), window.__api('/api/weather').catch(() => null)])
+      .then(([status, conf, w]) => { drawSettings(status, conf); drawWeather(w, conf); }, () => drawSettings([], {}))
+      .finally(() => { clearTimeout(settingsTimer); if (body.dataset.place === 'settings') settingsTimer = setTimeout(renderSettings, 2000); });
   }
 })();

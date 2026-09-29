@@ -71,6 +71,23 @@ html:not(.framed) .mrail { top: 0; height: 100vh; }
 .devhead small { font-size: 12.5px; color: #a3a3a3; }
 .devcard.dim .devhead small { color: #d4d4d4; }
 .devcard .lrow { grid-template-columns: 132px minmax(0, 1fr); }
+/* Weather: the place, the weather there now, where warnings come from, and units */
+.wcard .where { position: relative; width: 100%; max-width: 380px; }
+.wcard .where input { width: 100%; box-sizing: border-box; padding: 8px 11px; border: 0; border-radius: 8px; background: #1c1c1c; color: #f5f5f5; font: inherit; font-size: 13.5px; }
+.wcard .where input::placeholder { color: #737373; }
+.wcard .where .menu.float { position: absolute; left: 0; right: 0; top: calc(100% + 6px); max-height: 320px; }
+.wcard .where .mi .alt { color: #8a8a8a; }
+.wcard .now { display: flex; align-items: baseline; gap: 14px; line-height: 34px; }
+.wcard .now b { font-size: 22px; font-weight: 500; letter-spacing: -0.02em; }
+.wcard .now span { color: #d4d4d4; font-size: 13.5px; }
+.wcard .now small { color: #8a8a8a; font-size: 12.5px; }
+.wcard .facts { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: #a3a3a3; }
+.wcard .facts b { color: #d4d4d4; font-weight: 500; }
+.wcard .state.inf::before { background: #f0b35a; }
+.wcard .state.off::before { background: #5c5c5c; }
+.wcard .note.alert { color: #f0b35a; }
+.wcard .credit { font-size: 12px; color: #8a8a8a; line-height: 1.5; max-width: 640px; }
+.wcard [hidden] { display: none !important; }
 #settings-body .fail { color: var(--bad); font-size: 13.5px; margin: 0; }
 .devcard .state { font-size: 13.5px; color: #d4d4d4; line-height: 34px; display: inline-flex; align-items: center; gap: 8px; }
 .devcard .state::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #5c5c5c; }
