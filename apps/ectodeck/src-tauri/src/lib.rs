@@ -26,10 +26,19 @@ struct App {
 }
 
 /// The place Settings names for the weather, as saved: `weather.place`
-/// holds `{ name, region, country, lat, lon }`.
-fn weather_place(settings: &settings::Settings) -> Option<(f32, f32)> {
+/// holds a place as the search gave it (see ectodeck_weather::Place).
+fn weather_place(settings: &settings::Settings) -> Option<ectodeck_weather::At> {
     let p = settings.get("weather.place")?;
-    Some((p["lat"].as_f64()? as f32, p["lon"].as_f64()? as f32))
+    Some(ectodeck_weather::At {
+        lat: p["lat"].as_f64()? as f32,
+        lon: p["lon"].as_f64()? as f32,
+        country: p["country_code"].as_str().unwrap_or("").to_string(),
+    })
+}
+
+/// The computer's locale, such as "en-US", for the defaults it implies.
+fn locale() -> String {
+    sys_locale::get_locale().unwrap_or_else(|| "en-US".into())
 }
 
 /// What a screen is told when Ectodeck has been set not to control the
@@ -212,13 +221,20 @@ async fn settings_set(app: State<'_, App>, path: String, value: Value) -> Result
 /// place or the first answer has not come.
 #[tauri::command]
 fn weather(app: State<'_, App>) -> Value {
-    json!({ "place": app.settings.get("weather.place"), "report": app.weather.report() })
+    // units as chosen in Settings, or as the computer's locale implies
+    let d = ectodeck_weather::units::units_for(&locale());
+    let units = json!({
+        "temperature": app.settings.get("weather.units.temperature").unwrap_or(json!(d.temperature)),
+        "wind": app.settings.get("weather.units.wind").unwrap_or(json!(d.wind)),
+    });
+    json!({ "place": app.settings.get("weather.place"), "report": app.weather.report(), "units": units })
 }
 
 /// Places matching a name, for choosing where the weather is for.
 #[tauri::command]
 async fn weather_search(query: String) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || ectodeck_weather::search(&query))
+    let language = ectodeck_weather::units::language(&locale());
+    tauri::async_runtime::spawn_blocking(move || ectodeck_weather::search(&query, &language))
         .await
         .map_err(|e| e.to_string())?
         .map(|p| json!(p))

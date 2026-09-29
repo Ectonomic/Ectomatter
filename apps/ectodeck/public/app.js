@@ -198,10 +198,21 @@ function setLive(on) { $('#live').hidden = !on; }
 const LCD = { cols: 20, rows: 4, cw: 8, ch: 8 };
 const PW = LCD.cols * LCD.cw, PH = LCD.rows * LCD.ch;
 
+// The keyboard draws printable ASCII, the degree sign and the solid block as
+// themselves; anything else is spelled in those first, from the same table the
+// core sends with (ectotype-core lcd::lcd_text), so the panel here shows what
+// the keyboard shows.
+const lcdDraws = c => (c >= ' ' && c <= '~') || c === '\u00b0' || c === '\u2588';
+function lcdText(s) {
+  let out = '';
+  for (const c of s) out += lcdDraws(c) ? c : (S.fold?.[c] ?? '?');
+  return out;
+}
+
 function panelBits(rows) {
   const lit = new Uint8Array(PW * PH);
   for (let r = 0; r < LCD.rows; r++) {
-    const text = (rows[r] || '').padEnd(LCD.cols).slice(0, LCD.cols);
+    const text = lcdText(rows[r] || '').padEnd(LCD.cols).slice(0, LCD.cols);
     for (let c = 0; c < LCD.cols; c++) {
       const ch = text[c];
       if (ch === '\u2588') {   // the solid block lights the whole cell
@@ -534,12 +545,14 @@ function stopPreview() {
 const api = (path, body) => window.__api(path, body);
 
 async function load() {
-  const [layout, zones, font, board] = await Promise.all([
+  const [layout, zones, font, board, fold] = await Promise.all([
     fetch('layout.json').then(r => r.json()),
     fetch('zones.json').then(r => r.json()),
     fetch('lcdfont.json').then(r => r.json()),
     fetch('board.json').then(r => r.json()),
+    fetch('lcdfold.json').then(r => r.json()).catch(() => ({})),
   ]);
+  S.fold = fold;
   const [vx0, vy0, vx1, vy1] = board.view;
   SPACE = { x0: vx0, y0: vy0, x1: vx1, y1: vy1 };
   GLASS = board.glass;
