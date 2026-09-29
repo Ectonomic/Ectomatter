@@ -21,6 +21,15 @@ struct App {
     kb: Arc<Keyboard>,
     rec: Recorder,
     settings: Arc<settings::Settings>,
+    /// One weather feed for every device, for the place in Settings.
+    weather: ectodeck_weather::Feed,
+}
+
+/// The place Settings names for the weather, as saved: `weather.place`
+/// holds `{ name, region, country, lat, lon }`.
+fn weather_place(settings: &settings::Settings) -> Option<(f32, f32)> {
+    let p = settings.get("weather.place")?;
+    Some((p["lat"].as_f64()? as f32, p["lon"].as_f64()? as f32))
 }
 
 /// What a screen is told when Ectodeck has been set not to control the
@@ -190,10 +199,29 @@ async fn settings_set(app: State<'_, App>, path: String, value: Value) -> Result
         let _ = tauri::async_runtime::spawn_blocking(move || k.preview(&json!({ "stop": true }))).await;
     }
     app.settings.set(&path, value).map_err(|e| format!("could not save the setting: {e}"))?;
+    if path.starts_with("weather") {
+        app.weather.set_place(weather_place(&app.settings));
+    }
     if off && path == "devices.z10.control" {
         kb.release();
     }
     Ok(app.settings.all())
+}
+
+/// The weather now for the place in Settings, or no report while there is no
+/// place or the first answer has not come.
+#[tauri::command]
+fn weather(app: State<'_, App>) -> Value {
+    json!({ "place": app.settings.get("weather.place"), "report": app.weather.report() })
+}
+
+/// Places matching a name, for choosing where the weather is for.
+#[tauri::command]
+async fn weather_search(query: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || ectodeck_weather::search(&query))
+        .await
+        .map_err(|e| e.to_string())?
+        .map(|p| json!(p))
 }
 
 /// What Ectodeck can see of each device without opening it.
@@ -335,7 +363,9 @@ pub fn run() {
         .setup(|app| {
             let backups = app.path().app_data_dir()?.join("backups");
             let settings = Arc::new(settings::Settings::load(app.path().app_config_dir()?.join("settings.json")));
-            app.manage(App { kb: Arc::new(Keyboard::new(Conn::hid(), Some(backups))), rec: Recorder::new(), settings });
+            let weather = ectodeck_weather::Feed::start();
+            weather.set_place(weather_place(&settings));
+            app.manage(App { kb: Arc::new(Keyboard::new(Conn::hid(), Some(backups))), rec: Recorder::new(), settings, weather });
             tray(app.handle())?;
             Ok(())
         })
@@ -347,7 +377,7 @@ pub fn run() {
                 let _ = w.hide();
             }
         })
-        .invoke_handler(tauri::generate_handler![state, save, write_macro, activate, preview, record, lcd, open_macro_editor, prepare_macro_editor, firmware, sliders, set_dimmer, set_audio, set_modes, set_tray_devices, settings_get, settings_set, devices_status])
+        .invoke_handler(tauri::generate_handler![state, save, write_macro, activate, preview, record, lcd, open_macro_editor, prepare_macro_editor, firmware, sliders, set_dimmer, set_audio, set_modes, set_tray_devices, settings_get, settings_set, devices_status, weather, weather_search])
         .run(tauri::generate_context!())
         .expect("Ectodeck could not start");
 }
