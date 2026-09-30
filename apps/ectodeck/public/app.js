@@ -701,9 +701,9 @@ function keyFace(id) {
 // Thin punctuation, which at a digit's size looks smaller and lighter than the
 // digits beside it, so it is set a step larger and bolder to match them.
 const MARKS = '`~-_=+^*\'";:,.';
-// The few caps whose legend sits in the middle rather than at the top.
-const CENTRED = new Set(['E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'Tab', 'CapsLock',
-                         'LSHIFT', 'RSHIFT', 'Enter', 'KeypadEnter', 'Backspace'])
+// The few caps whose legend sits in the middle rather than at the top. The E
+// keys print theirs at the top, as every other key does.
+const CENTRED = new Set(['Tab', 'CapsLock', 'LSHIFT', 'RSHIFT', 'Enter', 'KeypadEnter', 'Backspace'])
 
 function buildBoard() {
   const board = $('#board');
