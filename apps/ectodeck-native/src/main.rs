@@ -105,6 +105,8 @@ const LIGHT_GAIN: f32 = 1.0;
 /// The luminance of the keys' light where the drawing's light is fully
 /// opaque, in nits; the light falls from it to none along the light's curve.
 const LIGHT_NITS: f64 = 600.0;
+/// The luminance of the display's lit dots, in nits, as a backlit character LCD's.
+const LCD_NITS: f64 = 400.0;
 /// how far in from the window's edge a press resizes it
 const EDGE: f64 = 6.0;
 
@@ -354,7 +356,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
                 let lights = front.lights();
                 let t4 = Instant::now();
                 if let (Some(b), Some(l)) = (&board, &lights) {
-                    let _ = light(b, l, gain, reference);
+                    let _ = light(b, l, gain, reference, None);
                     pic.encode(rect.0.max(0) as usize, rect.1.max(0) as usize, rect.2, rect.3);
                 }
                 let t5 = Instant::now();
@@ -396,7 +398,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         let lights = front.lights().unwrap_or_default();
         let gain = front.light_gain(reference).max(gain);
         eprintln!("the light at {:.0} nits", gain as f64 * reference);
-        let lit = light(&board, &lights, gain, reference);
+        let lit = light(&board, &lights, gain, reference, front.overlays.panel());
         pic.set_keyboard(rect, Some(&Rc::new(Lit { px: lit, w: rect.2, h: rect.3 })));
         front.ui.set_board_ready(true);
         window.request_redraw();
@@ -560,6 +562,8 @@ struct App {
     levels_peak: f64,
     /// KWin takes the mastering display's luminance in a description
     mastering: bool,
+    /// the display's drawing the keyboard was last lit with
+    panel_rev: u64,
 
     slint: Rc<MinimalSoftwareWindow>,
     front: Front,
@@ -725,6 +729,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         glow_limit: settings.get("hdr.glow_limit").and_then(|v| v.as_f64()),
         levels_peak: 1000.0,
         mastering: false,
+        panel_rev: 0,
         levels: (reference, reference * gain as f64),
         slint,
         front: Front::new(ui, kb, controlled, settings),
@@ -1097,7 +1102,7 @@ impl App {
 
     /// The keyboard came back drawn at a size: light it.
     fn built(&mut self, board: Board) {
-        let lit = light(&board, &self.lights, self.gain, self.pic.reference());
+        let lit = light(&board, &self.lights, self.gain, self.pic.reference(), self.front.overlays.panel());
         self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
         self.board = Some(board);
         self.full = true;
@@ -1111,7 +1116,7 @@ impl App {
         if (g - self.gain).abs() > 1e-3 {
             self.gain = g;
             if let Some(board) = &self.board {
-                let lit = light(board, &self.lights, self.gain, self.pic.reference());
+                let lit = light(board, &self.lights, self.gain, self.pic.reference(), self.front.overlays.panel());
                 self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
             }
         }
@@ -1130,11 +1135,17 @@ impl App {
             self.pic.resize(w, h);
             self.full = true;
         }
-        // the keys' light, when it has changed
-        if let Some(lights) = self.front.lights() {
-            self.lights = lights;
+        // the keys' light, or the display's text, when it has changed
+        let _ = self.front.overlays.panel();
+        let panel_moved = self.front.overlays.panel_rev != self.panel_rev;
+        self.panel_rev = self.front.overlays.panel_rev;
+        let lights = self.front.lights();
+        if lights.is_some() || panel_moved {
+            if let Some(l) = lights {
+                self.lights = l;
+            }
             if let Some(board) = &self.board {
-                let lit = light(board, &self.lights, self.gain, self.pic.reference());
+                let lit = light(board, &self.lights, self.gain, self.pic.reference(), self.front.overlays.panel());
                 self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
             }
         }
@@ -1538,7 +1549,7 @@ impl Dispatch<WpImageDescriptionV1, PictureTag> for App {
             app.pic.set_reference(reference);
             app.gain = LIGHT_GAIN;
             if let Some(board) = &app.board {
-                let lit = light(board, &app.lights, app.gain, app.pic.reference());
+                let lit = light(board, &app.lights, app.gain, app.pic.reference(), app.front.overlays.panel());
                 app.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
             }
             app.full = true;
@@ -1653,7 +1664,37 @@ fn cursor_icon(p: Pointer) -> CursorIcon {
 /// The keyboard lit: its light at LIGHT_NITS where fully opaque (or the
 /// ceiling, if that is lower), no channel past the ceiling, which is Peak
 /// nits over the desktop's white.
-fn light(board: &Board, lights: &[Light], ceiling: f32, reference: f64) -> Vec<f32> {
+fn light(board: &Board, lights: &[Light], ceiling: f32, reference: f64, panel: Option<&overlays::Panel>) -> Vec<f32> {
     let top = ((LIGHT_NITS / reference) as f32).min(ceiling);
-    board.compose(lights, top, ceiling)
+    let mut px = board.compose(lights, top, ceiling);
+    // The display, lit from behind as an LCD is: its lit dots at LCD_NITS of
+    // luminance, everything else on it in proportion, under the glass.
+    if let Some(p) = panel {
+        let (w, h) = (board.w as i32, board.h as i32);
+        let lum = |c: [f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+        let brightest = p.px.iter().map(|c| lum(c.map(|v| v.max(0.0).powf(2.2)))).fold(0.0f32, f32::max);
+        let k = if brightest > 0.0 { ((LCD_NITS / reference) as f32).min(ceiling) / brightest } else { 0.0 };
+        for row in 0..p.h as i32 {
+            let y = p.y + row;
+            if y < 0 || y >= h {
+                continue;
+            }
+            for col in 0..p.w as i32 {
+                let x = p.x + col;
+                if x < 0 || x >= w {
+                    continue;
+                }
+                let c = p.px[(row * p.w as i32 + col) as usize];
+                let mut e = c.map(|v| v.max(0.0).powf(2.2) * k);
+                let m = e[0].max(e[1]).max(e[2]);
+                if m > ceiling {
+                    e = e.map(|v| v * ceiling / m);
+                }
+                let d = ((y * w + x) * 4) as usize;
+                px[d..d + 3].copy_from_slice(&e);
+                px[d + 3] = 1.0;
+            }
+        }
+    }
+    px
 }

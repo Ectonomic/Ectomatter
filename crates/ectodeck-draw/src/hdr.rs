@@ -58,6 +58,16 @@ pub struct Board {
     /// the caps and the legends of unlit keys: premultiplied, sRGB-encoded
     caps: Vec<f32>,
     keys: Vec<KeyArt>,
+    /// each piece's share of the legend's light, from the core's "light", and
+    /// the most opaque point of each kind of piece in the art: [deck, cap, halo]
+    shares: [f32; 3],
+    legend_share: f32,
+    peaks: [f32; 3],
+}
+
+/// A kind of piece's most opaque point, which its share of the light is scaled to.
+fn peak(shapes: impl Iterator<Item = f32>) -> f32 {
+    shapes.fold(0.0f32, f32::max).max(1e-3)
 }
 
 /// sRGB (as the page's colours are) to linear light, as KWin decodes the page: gamma 2.2.
@@ -153,7 +163,12 @@ impl Board {
                 print: [print[0] as f32 / 255.0, print[1] as f32 / 255.0, print[2] as f32 / 255.0],
             });
         }
-        Ok(Board { w, h, under, caps, keys })
+        let l = &device["light"];
+        let share = |k: &str, d: f32| l[k].as_f64().map_or(d, |v| v as f32);
+        let shares = [share("deck", 0.1), share("cap", 0.0), share("halo", 0.0)];
+        let top = |f: fn(&KeyArt) -> Option<&Shape>| peak(keys.iter().filter_map(f).flat_map(|s| s.cover.iter().copied()));
+        let peaks = [top(|k| k.under.as_ref()), top(|k| k.cap.as_ref()), top(|k| k.glow.as_ref())];
+        Ok(Board { w, h, under, caps, keys, shares, legend_share: share("legend", 1.0), peaks })
     }
 
     /// The places of the keys that light.
@@ -165,14 +180,15 @@ impl Board {
     /// at 1.0; the light's luminance at full opacity is `top` times it, and no
     /// channel goes past `ceiling` times it (what the screen can show).
     ///
-    /// The light is light: the drawing's pieces of it (the spill on the deck,
-    /// the light on the cap, the glow round the legend, the legend) are laid
-    /// together, as the web page stacked them, and how opaque they come out
-    /// at a pixel says how bright the light is there: fully opaque is `top`,
-    /// clear is none, along LIGHT_CURVE between. The brightness is luminance,
-    /// the nits the eye sees, whatever the colour: a red key's light is as
-    /// bright as a white key's, as far as the screen's red goes. A key's
-    /// brightness scales its light's nits, never its opacity.
+    /// The light is an LED's under each cap: it comes out through the legend,
+    /// the brightest thing on the key, at `top` where the letter covers the
+    /// pixel, and escapes under the cap onto the deck as a soft glow. Each of
+    /// the art's light pieces gives its share of that, from the core's "light"
+    /// (the deck a tenth; the cap's face and the halo round the letters
+    /// none), in the shape its opacity draws, scaled to its most opaque point
+    /// and along LIGHT_CURVE. Brightness is luminance, the nits the eye sees,
+    /// whatever the colour, and a key's brightness scales its nits, never its
+    /// opacity.
     pub fn compose(&self, lights: &[Light], top: f32, ceiling: f32) -> Vec<f32> {
         let (w, h) = (self.w as usize, self.h as usize);
         let mut out = vec![0f32; w * h * 4];
@@ -228,47 +244,45 @@ impl Board {
                 }
             }
         };
-        // Light pieces stacked: how opaque they are together, and their colour
-        // (premultiplied), as one piece laid over another.
-        let mut opa = vec![0f32; n];
-        let mut col = vec![[0f32; 3]; n];
-        let stack = |opa: &mut [f32], col: &mut [[f32; 3]], s: &Shape, c: [f32; 3], k: f32| {
+        // A piece of light, added: the key's light at its share of the top, in
+        // the shape the art gives it (its opacity over its kind's most opaque
+        // point, along the curve). `curve` false for a legend, whose coverage
+        // is how much of the pixel the letter covers, not a falloff.
+        let add = |em: &mut [[f32; 3]], s: &Shape, c: [f32; 3], share: f32, peak: f32, curve: bool| {
+            if share <= 0.0 {
+                return;
+            }
             each(s, &mut |d, a| {
-                let a = a * k;
-                opa[d] = a + opa[d] * (1.0 - a);
+                let t = (a / peak).min(1.0);
+                let k = top * share * if curve { t.powf(LIGHT_CURVE) } else { t };
                 for i in 0..3 {
-                    col[d][i] = c[i] * a + col[d][i] * (1.0 - a);
+                    em[d][i] += c[i] * k;
                 }
             });
         };
-        // the stacked light, added at its brightness, and the stack cleared
-        let shine = |out: &mut [f32], opa: &mut [f32], col: &mut [[f32; 3]]| {
+        // light given off, held where a colour passes what the screen shows, its hue kept
+        let shine = |out: &mut [f32], em: &mut [[f32; 3]]| {
             for (d, px) in out.chunks_exact_mut(4).enumerate() {
-                let a = opa[d];
-                if a > 0.0 {
-                    let k = top * a.powf(LIGHT_CURVE) / a;
-                    let mut e = [col[d][0] * k, col[d][1] * k, col[d][2] * k];
-                    // a colour past what the screen shows is held at it, its hue kept
-                    let m = e[0].max(e[1]).max(e[2]);
-                    if m > ceiling {
-                        e = e.map(|v| v * ceiling / m);
-                    }
-                    for i in 0..3 {
-                        px[i] += e[i];
-                    }
+                let mut e = em[d];
+                let m = e[0].max(e[1]).max(e[2]);
+                if m > ceiling {
+                    e = e.map(|v| v * ceiling / m);
                 }
-                opa[d] = 0.0;
-                col[d] = [0.0; 3];
+                for i in 0..3 {
+                    px[i] += e[i];
+                }
+                em[d] = [0.0; 3];
             }
         };
+        let mut em = vec![[0f32; 3]; n];
 
-        // the light each key throws on the deck, under the caps
+        // the soft glow on the deck, from the light escaping under each cap; the caps cover it
         for key in &self.keys {
             if let (Some(l), Some(s)) = (light(key.pos), &key.under) {
-                stack(&mut opa, &mut col, s, colour(l), 1.0);
+                add(&mut em, s, colour(l), self.shares[0], self.peaks[0], true);
             }
         }
-        shine(out, &mut opa, &mut col);
+        shine(out, &mut em);
         // the caps over it
         for (i, px) in out.chunks_exact_mut(4).enumerate() {
             let cap = &self.caps[(y0 * w + i) * 4..(y0 * w + i) * 4 + 4];
@@ -280,7 +294,7 @@ impl Board {
                 px[c] = dec(cap[c] / a) * a + px[c] * (1.0 - a);
             }
         }
-        // the print of each lit legend, which shows less as the light behind it outshines it
+        // each lit legend: its print shows less as the light behind it outshines it
         for key in &self.keys {
             if let Some(s) = &key.legend {
                 let l = light(key.pos);
@@ -295,19 +309,22 @@ impl Board {
                 });
             }
         }
-        // the light on each cap, the glow round each legend, and the legend lit from behind
+        // the light through the legends, the brightest thing, and whatever the
+        // core gives the cap's face and the space round the letters
         for key in &self.keys {
             let Some(l) = light(key.pos) else { continue };
             let c = colour(l);
-            let back = if l.dim { 0.35 } else { 1.0 };
-            for s in [&key.cap, &key.glow].into_iter().flatten() {
-                stack(&mut opa, &mut col, s, c, 1.0);
+            if let Some(s) = &key.cap {
+                add(&mut em, s, c, self.shares[1], self.peaks[1], true);
+            }
+            if let Some(s) = &key.glow {
+                add(&mut em, s, c, self.shares[2], self.peaks[2], true);
             }
             if let Some(s) = &key.legend {
-                stack(&mut opa, &mut col, s, c, back);
+                add(&mut em, s, c, self.legend_share * if l.dim { 0.35 } else { 1.0 }, 1.0, false);
             }
         }
-        shine(out, &mut opa, &mut col);
+        shine(out, &mut em);
     }
 }
 

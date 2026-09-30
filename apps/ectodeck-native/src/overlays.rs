@@ -40,12 +40,24 @@ pub struct Overlays {
     scale: f32,
     knobs: Vec<Knob>,
     glass: Option<(slint::Image, [f32; 4])>,
-    panel: Option<slint::Image>,
+    /// the display's panel, drawn into the HDR picture rather than the page:
+    /// where it goes in the board's pixels, and its pixels in sRGB's encoding
+    /// (0 to 1), which is lit as a backlight is; and a count of its drawings
+    panel: Option<Panel>,
+    pub panel_rev: u64,
     /// each slider's place along its travel, 0 to 1, once the keyboard says
     pub fracs: [Option<f32>; 2],
     /// what the display shows: whether something drives it, its four rows, its backlight
     pub lcd: (bool, Vec<String>, [f64; 3]),
     drawn_lcd: Option<(bool, Vec<String>, [f64; 3], (u32, u32))>,
+}
+
+pub struct Panel {
+    pub x: i32,
+    pub y: i32,
+    pub w: u32,
+    pub h: u32,
+    pub px: Vec<[f32; 3]>,
 }
 
 fn image(p: &pieces::Piece) -> slint::Image {
@@ -92,6 +104,7 @@ impl Overlays {
             knobs: Vec::new(),
             glass: None,
             panel: None,
+            panel_rev: 0,
             fracs: [None, None],
             lcd: (false, Vec::new(), [90.0; 3]),
             drawn_lcd: None,
@@ -211,16 +224,24 @@ impl Overlays {
                 }
             }
         }
-        let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(pw, ph);
-        for (o, p) in buf.make_mut_slice().iter_mut().zip(&px) {
-            *o = slint::Rgba8Pixel { r: p[0].round() as u8, g: p[1].round() as u8, b: p[2].round() as u8, a: 255 };
-        }
-        self.panel = Some(slint::Image::from_rgba8_premultiplied(buf));
+        let [x, y, _, _] = self.panel_box();
+        self.panel = Some(Panel { x: x.round() as i32, y: y.round() as i32, w: pw, h: ph, px: px.iter().map(|p| p.map(|v| v / 255.0)).collect() });
+        self.panel_rev += 1;
         self.drawn_lcd = Some(key);
     }
 
+    /// The display's panel, as last drawn, for the HDR picture.
+    pub fn panel(&mut self) -> Option<&Panel> {
+        if self.size.0 == 0 {
+            return None;
+        }
+        self.draw_panel();
+        self.panel.as_ref()
+    }
+
     /// What goes over the keyboard, in the page's logical pixels from the
-    /// keyboard's top left: the knobs, the display, its glass.
+    /// keyboard's top left: the knobs and the display's glass. The display
+    /// itself is in the HDR picture, under the glass.
     pub fn model(&mut self) -> Vec<Overlay> {
         if self.size.0 == 0 {
             return Vec::new();
@@ -235,10 +256,6 @@ impl Overlays {
                 None => k.x,
             };
             out.push(Overlay { image: k.image.clone(), x: x / s, y: k.y / s, w: k.w / s, h: k.h / s });
-        }
-        if let Some(p) = &self.panel {
-            let [x, y, w, h] = self.panel_box();
-            out.push(Overlay { image: p.clone(), x: x / s, y: y / s, w: w.round() / s, h: h.round() / s });
         }
         if let Some((img, [x, y, w, h])) = &self.glass {
             out.push(Overlay { image: img.clone(), x: x / s, y: y / s, w: w / s, h: h / s });
