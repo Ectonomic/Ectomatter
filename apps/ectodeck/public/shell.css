@@ -91,6 +91,14 @@ html:not(.framed) .mrail { top: 0; height: 100vh; }
 .wcard .note.alert { color: #f0b35a; }
 .wcard .credit { font-size: 12px; color: #8a8a8a; line-height: 1.5; max-width: 640px; }
 .wcard [hidden] { display: none !important; }
+.wcard .screens { display: grid; gap: 8px; line-height: 34px; }
+.wcard .screen { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; font-size: 13.5px; }
+.wcard .screen b { font-weight: 500; color: #f5f5f5; min-width: 150px; }
+.wcard .lslider { min-width: 300px; }
+.wcard .lslider input[type=range] { -webkit-appearance: none; appearance: none; flex: 1; height: 16px; background: transparent; }
+.wcard .lslider input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: #3d3d3d; }
+.wcard .lslider input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; margin-top: -6px; border-radius: 50%; background: #e5e5e5; border: 0; }
+.wcard .lcol.off .lrow:not(:first-child) { opacity: .45; }
 #settings-body .fail { color: var(--bad); font-size: 13.5px; margin: 0; }
 .devcard .state { font-size: 13.5px; color: #d4d4d4; line-height: 34px; display: inline-flex; align-items: center; gap: 8px; }
 .devcard .state::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #5c5c5c; }

@@ -30,6 +30,7 @@
     if (path === '/api/settings') return body ? call('settings_set', { path: body.path, value: body.value }) : call('settings_get');
     if (path === '/api/devices') return call('devices_status');
     if (path === '/api/weather') return call('weather');
+    if (path === '/api/screens') return call('screens');
     if (path === '/api/weather/search') return call('weather_search', { query: body.query });
     if (path === '/api/preview') return call('preview', { body });
     if (path === '/api/record') return call('record', body ? { action: body.action, room: body.room, waits: body.waits } : { action: 'status' });

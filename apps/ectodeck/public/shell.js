@@ -260,11 +260,55 @@
     wx.unitNote.hidden = !wx.unitNote.textContent;
   }
 
+  // ---------------------------------------------------------------- HDR
+  // Lighting that glows brighter than the desktop's white, on screens with
+  // room above it: a screen in HDR mode, or one whose brightness is turned
+  // down (KWin keeps the backlight's headroom). Ectodeck's, not a device's.
+  let hx = null;
+  function buildHdr() {
+    const seg = (opts, on) => h('div', { class: 'seg', role: 'group' }, opts.map(([v, t]) =>
+      h('button', { type: 'button', 'data-v': String(v), onclick: () => on(v) }, t)));
+    const mode = seg([['auto', 'Automatic'], ['off', 'Off']], v => setW('hdr.lighting', v).then(renderSettings));
+    const limitSeg = seg([['peak', "Screen's peak"], ['limit', 'Limit']], v => setW('hdr.glow_limit', v === 'peak' ? null : hx.limitDefault).then(renderSettings));
+    const range = h('input', { type: 'range', min: '100', max: '1000', step: '50', 'aria-label': 'Glow brightness limit' });
+    const out = h('span', { class: 'range-val' });
+    range.addEventListener('input', () => { out.textContent = `${range.value} nits`; });
+    range.addEventListener('change', () => setW('hdr.glow_limit', Number(range.value)).then(renderSettings));
+    const slider = h('div', { class: 'lslider' }, range, out);
+    const list = h('div', { class: 'screens' });
+    const section = h('section', { class: 'lpanel devcard wcard' }, h('div', { class: 'lcol' },
+      srow('HDR lighting', mode, 'Lit keys glow brighter than the desktop\u2019s white on screens with room for it. Other screens light them as usual.'),
+      srow('Glow brightness', limitSeg, slider),
+      srow('Screens', list)));
+    hx = { mode, limitSeg, range, out, slider, list, limitDefault: 1000 };
+    return h('div', {}, h('h2', {}, 'HDR'), section);
+  }
+
+  function drawHdr(screens, conf) {
+    if (!hx) return;
+    const c = conf?.hdr || {}, on = c.lighting !== 'off', limit = typeof c.glow_limit === 'number' ? c.glow_limit : null;
+    for (const b of hx.mode.children) b.setAttribute('aria-pressed', String(b.dataset.v === (on ? 'auto' : 'off')));
+    for (const b of hx.limitSeg.children) b.setAttribute('aria-pressed', String(b.dataset.v === (limit == null ? 'peak' : 'limit')));
+    const top = Math.max(0, ...(screens || []).map(s => s.peak || 0));
+    hx.limitDefault = Math.max(100, Math.floor(top / 50) * 50 || 1000);
+    hx.range.max = String(Math.max(100, top || 1000));
+    hx.slider.hidden = limit == null;
+    if (limit != null && document.activeElement !== hx.range) { hx.range.value = String(limit); hx.out.textContent = `${limit} nits`; }
+    hx.mode.closest('.lcol').classList.toggle('off', !on);
+    const model = s => (s.description && s.description.includes(`${s.name}-`) ? s.description.split(`${s.name}-`).pop() : '') || s.name;
+    hx.list.replaceChildren(...(screens?.length ? screens.map(s => {
+      const room = s.peak > s.reference * 1.1;
+      const glow = limit == null ? s.peak : Math.min(limit, s.peak);
+      return h('div', { class: 'screen' }, h('b', {}, model(s)), h('span', { class: 'state' + (room ? ' ok' : ' off') },
+        room ? `Glow up to ${Math.round(glow)} nits over a ${Math.round(s.reference)}-nit white` : 'No room above its white, so keys light as usual'));
+    }) : [h('span', { class: 'note' }, 'Ectodeck can\u2019t tell how bright these screens go, so keys light as usual.')]));
+  }
+
   function renderSettings() {
     const bodyBox = document.getElementById('settings-body');
-    if (!document.getElementById('set-devices')) bodyBox.replaceChildren(h('div', { id: 'set-devices' }), buildWeather());
-    Promise.all([window.__api('/api/devices'), window.__api('/api/settings'), window.__api('/api/weather').catch(() => null)])
-      .then(([status, conf, w]) => { drawSettings(status, conf); drawWeather(w, conf); }, () => drawSettings([], {}))
+    if (!document.getElementById('set-devices')) bodyBox.replaceChildren(h('div', { id: 'set-devices' }), buildWeather(), buildHdr());
+    Promise.all([window.__api('/api/devices'), window.__api('/api/settings'), window.__api('/api/weather').catch(() => null), window.__api('/api/screens').catch(() => [])])
+      .then(([status, conf, w, scr]) => { drawSettings(status, conf); drawWeather(w, conf); drawHdr(scr, conf); }, () => drawSettings([], {}))
       .finally(() => { clearTimeout(settingsTimer); if (body.dataset.place === 'settings') settingsTimer = setTimeout(renderSettings, 2000); });
   }
 })();

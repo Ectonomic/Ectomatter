@@ -5,6 +5,7 @@
 //! a single exchange with the Z10 waits on the keyboard for up to 150 ms.
 
 mod devices;
+mod screens;
 mod settings;
 
 use std::path::PathBuf;
@@ -249,6 +250,12 @@ async fn weather_search(query: String) -> Result<Value, String> {
         .map(|p| json!(p))
 }
 
+/// Each screen: whether it is in HDR, its reference white and its peak.
+#[tauri::command]
+async fn screens() -> Value {
+    json!(tauri::async_runtime::spawn_blocking(screens::screens).await.unwrap_or_default())
+}
+
 /// What Ectodeck can see of each device without opening it.
 #[tauri::command]
 fn devices_status(app: State<'_, App>) -> Value {
@@ -402,7 +409,7 @@ pub fn run() {
                 let _ = w.hide();
             }
         })
-        .invoke_handler(tauri::generate_handler![state, save, write_macro, activate, preview, record, lcd, open_macro_editor, prepare_macro_editor, firmware, sliders, set_dimmer, set_audio, set_modes, set_tray_devices, settings_get, settings_set, devices_status, weather, weather_search])
+        .invoke_handler(tauri::generate_handler![state, save, write_macro, activate, preview, record, lcd, open_macro_editor, prepare_macro_editor, firmware, sliders, set_dimmer, set_audio, set_modes, set_tray_devices, settings_get, settings_set, devices_status, weather, weather_search, screens])
         .run(tauri::generate_context!())
         .expect("Ectodeck could not start");
 }
