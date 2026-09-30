@@ -599,6 +599,66 @@ component LayerEditor inherits VerticalLayout {
 }
 
 // a drop-down: its way back (on a page of it), a search, then its rows. It
+// A scrollbar, as WebKit drew the page's: a thin thumb in a dark rim, lighter
+// while the pointer is on it or it is held. Its thumb is dragged, or a press
+// on its track takes the thumb there; the wheel scrolls the area as ever. The
+// area itself never scrolls by dragging it, as a web page does not.
+component ScrollBar inherits Rectangle {
+    // how much of the area shows, how much there is, and how far it is scrolled
+    in property <length> view;
+    in property <length> content;
+    in property <length> offset;
+    in property <color> thumb-color: #4c4c4c;
+    // the page's has a dark rim round the thumb; a list's is the thumb alone
+    in property <bool> framed: true;
+    callback scroll-to(length);
+    width: 12px;
+    visible: root.content > root.view + 1px;
+    property <length> travel: max(1px, root.content - root.view);
+    property <length> th: max(24px, root.height * root.view / max(1px, root.content));
+    property <length> ty: min(1, max(0, root.offset / root.travel)) * (root.height - root.th);
+    property <length> grab;
+    property <bool> held;
+    pure function at(y: length) -> length {
+        max(0px, min(root.travel, (y - root.grab) / max(1px, root.height - root.th) * root.travel))
+    }
+    Rectangle {
+        x: parent.width - 7px;
+        y: root.ty;
+        width: 5px;
+        height: root.th;
+        border-radius: 2px;
+        background: root.framed ? #191919 : transparent;
+        Rectangle {
+            x: 1px;
+            width: 3px;
+            border-radius: 1.5px;
+            background: bar-ta.has-hover || root.held ? #6e6e6e : root.thumb-color;
+        }
+    }
+    bar-ta := TouchArea {
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
+                if (self.mouse-y >= root.ty && self.mouse-y < root.ty + root.th) {
+                    root.grab = self.mouse-y - root.ty;
+                } else {
+                    root.grab = root.th / 2;
+                    root.scroll-to(root.at(self.mouse-y));
+                }
+                root.held = true;
+            }
+            if (e.kind == PointerEventKind.up) {
+                root.held = false;
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                root.scroll-to(root.at(self.mouse-y));
+            }
+        }
+    }
+}
+
 // lifts off by shade and shadow, without an edge.
 component Menu inherits Rectangle {
     in property <[MenuRow]> rows;
@@ -684,12 +744,13 @@ component Menu inherits Rectangle {
             }
         }
     }
-    Flickable {
+    mflick := Flickable {
         x: 6px;
         y: 6px + back-h + search-h;
         width: parent.width - 12px;
         height: parent.height - self.y - 6px;
         content-height: list.preferred-height;
+        mouse-drag-pan-enabled: false;
         list := VerticalLayout {
             for row[i] in root.rows: Rectangle {
                 height: row.kind == 1 ? 28px : row.kind == 2 ? 11px : 33px;
@@ -832,6 +893,17 @@ component Menu inherits Rectangle {
                 }
             }
         }
+    }
+    ScrollBar {
+        x: parent.width - 12px;
+        y: mflick.y;
+        height: mflick.height;
+        view: mflick.height;
+        content: mflick.content-height;
+        offset: -mflick.content-y;
+        framed: false;
+        thumb-color: #525252;
+        scroll-to(o) => { mflick.content-y = -o; }
     }
 }
 
@@ -1538,6 +1610,7 @@ export component AppWindow inherits Window {
         set-flick := Flickable {
             visible: root.place == "settings";
             content-height: root.settings-h;
+            mouse-drag-pan-enabled: false;
             for c in root.cells: CellView {
                 c: c;
                 glyph: root.keyboard-tile;
@@ -1554,6 +1627,7 @@ export component AppWindow inherits Window {
                 y: 56px;
                 height: parent.height - 56px;
                 content-height: root.page-h;
+                mouse-drag-pan-enabled: false;
                 // the profile's head, on the page: the profiles, and the profile's Discard and Save
                 Rectangle {
                     x: pws-x;
@@ -2060,19 +2134,23 @@ export component AppWindow inherits Window {
     }
 
     // the page's scrollbar, as WebKit drew it, over the whole window
-    if root.place == "z10" && doc-h > root.height: Rectangle {
-        x: root.width - 7px;
-        y: (-flick.content-y) * root.height / doc-h;
-        width: 5px;
-        height: root.height * root.height / doc-h;
-        border-radius: 2px;
-        background: #191919;
-        Rectangle {
-            x: 1px;
-            width: 3px;
-            border-radius: 1.5px;
-            background: #4c4c4c;
-        }
+    if root.place == "z10": ScrollBar {
+        x: root.width - 12px;
+        y: 0;
+        height: root.height;
+        view: root.height;
+        content: doc-h;
+        offset: -flick.content-y;
+        scroll-to(o) => { flick.content-y = -o; }
+    }
+    if root.place == "settings": ScrollBar {
+        x: root.width - 12px;
+        y: 0;
+        height: root.height;
+        view: root.height;
+        content: bar + root.settings-h;
+        offset: -set-flick.content-y;
+        scroll-to(o) => { set-flick.content-y = -o; }
     }
 
     // the open menu, over everything
@@ -2649,6 +2727,7 @@ export component MacroWindow inherits Window {
             height: parent.height - 56px - 10px;
             content-height: root.items.length * 55px;
             content-y <=> root.lib-scroll;
+            mouse-drag-pan-enabled: false;
             for m[i] in root.items: MacroRow {
                 y: i * 55px;
                 width: parent.width;
@@ -2656,6 +2735,17 @@ export component MacroWindow inherits Window {
                 clicked => { root.choose(m.n); }
                 menu(x, y) => { root.row-menu(m.n, x, y); }
             }
+        }
+        ScrollBar {
+            x: parent.width - 12px;
+            y: 56px;
+            height: parent.height - 56px - 10px;
+            view: self.height;
+            content: root.items.length * 55px;
+            offset: -root.lib-scroll;
+            framed: false;
+            thumb-color: #525252;
+            scroll-to(o) => { root.lib-scroll = -o; }
         }
     }
 
@@ -2797,6 +2887,7 @@ export component MacroWindow inherits Window {
                 width: parent.width;
                 height: parent.height - 48px;
                 content-height: max(self.height, root.chain-h + 36px);
+                mouse-drag-pan-enabled: false;
                 for c in root.chain: ChainPiece {
                     c: c;
                     blink: root.blink;
@@ -2855,6 +2946,17 @@ export component MacroWindow inherits Window {
                         vertical-alignment: center;
                     }
                 }
+            }
+            ScrollBar {
+                x: parent.width - 12px;
+                y: 0;
+                height: parent.height - 48px;
+                view: self.height;
+                content: chain-flick.content-height;
+                offset: -chain-flick.content-y;
+                framed: false;
+                thumb-color: #525252;
+                scroll-to(o) => { chain-flick.content-y = -o; }
             }
             // the tools
             HorizontalLayout {
