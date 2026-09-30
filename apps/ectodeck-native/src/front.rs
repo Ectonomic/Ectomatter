@@ -40,7 +40,8 @@ pub enum Ask {
     Unpress(u32),
     Go(String),
     Rail(String),
-    MacroEditor,
+    /// the Macro Editor, on the macro of this layer of the chosen key, or -1
+    MacroEditor(i32),
     /// time to read the sliders again, and the display's text
     PollSliders,
     PollLcd,
@@ -134,6 +135,8 @@ pub enum WindowAsk {
     Minimise,
     Maximise,
     Close,
+    /// open the Macro Editor's window, on this macro (0: as it was)
+    OpenMacros(u32),
 }
 
 const LAYERS: [(&str, &str); 2] = [("keys", "When pressed"), ("fnkeys", "When Fn is held")];
@@ -209,6 +212,8 @@ pub struct Front {
     pub levels: (f64, f64),
     /// Ectodeck is to start again, on this place, for a change to what it may use
     pub restart: Option<String>,
+    /// the Macro Editor's window, once it has been opened
+    pub macros: Option<crate::macro_page::MacroPage>,
 }
 
 /// A profile's colour sample: how many colours, and the colours.
@@ -250,7 +255,7 @@ impl Front {
         on!(on_menu_back_to, Ask::MenuBack);
         on!(on_go, |p| Ask::Go(p.to_string()));
         on!(on_rail, |p| Ask::Rail(p.to_string()));
-        on!(on_macro_editor, Ask::MacroEditor);
+        on!(on_macro_editor, |l| Ask::MacroEditor(l));
         on!(on_effect, |i| Ask::Effect(i));
         on!(on_cell_pick, |id, i, x, y, h| Ask::CellPick(id, i, x, y, h));
         on!(on_cell_slide, |id, v| Ask::CellSlide(id, v));
@@ -320,6 +325,7 @@ impl Front {
             place_menu: false,
             levels: (254.0, 1000.0),
             restart: None,
+            macros: None,
         };
         f.weather.set_place(weather_place(&f.settings));
         f.ui.set_overlays(ModelRc::from(f.overlay_model.clone()));
@@ -392,6 +398,11 @@ impl Front {
                 }
             }
             device::Heard::Done => return,
+            h @ (device::Heard::Macros(..) | device::Heard::KeysSaved(..)) => {
+                if let Some(m) = &mut self.macros {
+                    m.heard(&mut self.page, h);
+                }
+            }
             device::Heard::Preview(r) => {
                 self.preview_asked = false;
                 match r {
@@ -675,9 +686,35 @@ impl Front {
                     // plugged in, or the weather come in, at any time
                     changed = self.ui.get_place() == "settings";
                 }
-                Ask::MacroEditor => self.status("The Macro Editor is not in the native window yet; it comes after the Z10's three pages.", 0),
+                Ask::MacroEditor(l) => {
+                    if self.page.dev.is_none() {
+                        continue;
+                    }
+                    self.close_menu();
+                    let n = match (usize::try_from(l).ok().and_then(|l| LAYERS.get(l)), self.page.sel) {
+                        (Some((layer, _)), Some(pos)) => Some(self.page.def(layer, pos)).filter(|d| d[0] == 3).map_or(0, |d| d[1]),
+                        _ => 0,
+                    };
+                    window.push(WindowAsk::OpenMacros(n));
+                }
             }
         }
+        if changed {
+            self.refresh();
+        }
+        window
+    }
+
+    /// Do what the Macro Editor's page asked; what only its window can do is handed back.
+    pub fn act_macros(&mut self) -> Vec<WindowAsk> {
+        let Some(m) = &mut self.macros else { return Vec::new() };
+        let kb = self.kb.clone();
+        let tell = move |a: device::Ask| {
+            if let Some(k) = &kb {
+                let _ = k.send(a);
+            }
+        };
+        let (window, changed) = m.act(&mut self.page, &tell);
         if changed {
             self.refresh();
         }
@@ -1423,6 +1460,9 @@ impl Front {
         if back != self.overlays.lcd.2 {
             self.overlays.lcd.2 = back;
             self.show_overlays();
+        }        // the Macro Editor shows the same keyboard: its macros, and the keys they are on
+        if let Some(m) = &mut self.macros {
+            m.refresh(&self.page);
         }
     }
 

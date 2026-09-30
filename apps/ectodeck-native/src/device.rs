@@ -24,6 +24,10 @@ pub enum Ask {
     Dimmer(Option<u8>),
     /// ask the keyboard to stop doing a slider's job itself: (quiet volume, keep dimmer)
     Modes(bool, bool),
+    /// save or delete a macro: its name, steps and play settings, or `delete: true`
+    WriteMacro(u8, Value),
+    /// save a profile's keys only, to change how a macro plays on them
+    SaveKeys(u8, Value),
 }
 
 pub enum Heard {
@@ -32,6 +36,9 @@ pub enum Heard {
     Active(u8, Result<Option<u8>, String>),
     Sliders(Result<Value, String>),
     Preview(Result<Value, String>),
+    /// every macro, after one was written; whether it was a delete
+    Macros(bool, Result<Value, String>),
+    KeysSaved(u8, Result<Value, String>),
     Done,
 }
 
@@ -52,6 +59,11 @@ pub fn start(backups: PathBuf, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
                     let _ = kb.set_dimmer(level);
                     Heard::Done
                 }
+                Ask::WriteMacro(n, body) => {
+                    let delete = body.get("delete").is_some();
+                    Heard::Macros(delete, kb.write_macro(n, &body).map_err(|e| e.to_string()))
+                }
+                Ask::SaveKeys(n, body) => Heard::KeysSaved(n, kb.save(n, &body).map_err(|e| e.to_string())),
                 Ask::Modes(quiet, keep) => {
                     let _ = kb.set_modes(quiet, keep);
                     Heard::Done

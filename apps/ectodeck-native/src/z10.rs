@@ -1092,7 +1092,7 @@ fn distinct_part(name: &str, names: &[String]) -> String {
 }
 
 /// A macro step's key, as the macro list names it.
-fn step_name(s: &Value) -> String {
+pub fn step_name(s: &Value) -> String {
     if let Some(m) = s.get("media") {
         let m = u(m);
         let name = match m {

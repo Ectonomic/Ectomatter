@@ -22,6 +22,8 @@ mod devices;
 mod ecto_settings;
 mod front;
 mod lighting;
+mod macro_page;
+mod macros;
 mod overlays;
 mod picture;
 mod screens;
@@ -33,6 +35,7 @@ mod z10;
 
 slint::include_modules!();
 
+use std::cell::RefCell;
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -43,7 +46,7 @@ use front::{Front, WindowAsk};
 use picture::{Lit, Picture};
 use resvg::tiny_skia::{Pixmap, Transform};
 use resvg::usvg;
-use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
+use slint::platform::software_renderer::{MinimalSoftwareWindow, PremultipliedRgbaColor, RepaintBufferType};
 use slint::platform::{Key, PointerEventButton, WindowAdapter, WindowEvent};
 use slint::{LogicalPosition, PhysicalSize, SharedString};
 use smithay_client_toolkit::reexports::calloop::{self, EventLoop};
@@ -88,6 +91,9 @@ use wayland_protocols::wp::color_management::v1::client::{
 /// the size the window opens at, and the least it may be, as the web app's
 const SIZE: (u32, u32) = (1440, 940);
 const MIN_SIZE: (u32, u32) = (1000, 700);
+/// the Macro Editor's window, as the web app's
+const MACRO_SIZE: (u32, u32) = (1080, 620);
+const MACRO_MIN_SIZE: (u32, u32) = (900, 420);
 /// the ground the keyboard sits on: the page's own
 const GROUND: [u8; 3] = [0x20, 0x20, 0x20];
 /// How much brighter than the page's colours the keys' light is drawn. The
@@ -97,15 +103,18 @@ const LIGHT_GAIN: f32 = 1.0;
 /// how far in from the window's edge a press resizes it
 const EDGE: f64 = 6.0;
 
-/// Slint, told to draw into our own buffer and to keep time by our clock.
+/// Slint, told to draw into our own buffers and to keep time by our clock.
+/// Each window it is asked for is kept, in order, for the window to draw.
 struct Platform {
-    window: Rc<MinimalSoftwareWindow>,
+    made: Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>,
     start: Instant,
 }
 
 impl slint::platform::Platform for Platform {
     fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
-        Ok(self.window.clone())
+        let w = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
+        self.made.borrow_mut().push(w.clone());
+        Ok(w)
     }
     fn duration_since_start(&self) -> Duration {
         self.start.elapsed()
@@ -217,9 +226,11 @@ fn main() {
         return;
     }
 
-    let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
-    slint::platform::set_platform(Box::new(Platform { window: window.clone(), start: Instant::now() })).unwrap();
+    let made = Rc::new(RefCell::new(Vec::new()));
+    slint::platform::set_platform(Box::new(Platform { made: made.clone(), start: Instant::now() })).unwrap();
     let ui = AppWindow::new().unwrap();
+    let _ = slint::ComponentHandle::window(&ui);
+    let window = made.borrow().last().cloned().expect("the main window's adapter");
     ui.set_mark(glyph(include_str!("../ui/glyphs/mark.svg"), 16, false));
     ui.set_home_glyph(glyph(include_str!("../ui/glyphs/home.svg"), 22, true));
     ui.set_keyboard_glyph(glyph(include_str!("../ui/glyphs/keyboard.svg"), 22, true));
@@ -234,17 +245,17 @@ fn main() {
     eprintln!("ectodeck-native: the desktop's white is {reference} nits; the light goes to {glow}");
 
     if let Some(path) = snapshot {
-        return snap(&window, ui, reference, gain, &path);
+        return snap(&window, &made, ui, reference, gain, &path);
     }
     // back on the place Ectodeck was started again from, for a change to what it may use
     if let Some(p) = args.iter().position(|a| a == "--place").and_then(|i| args.get(i + 1)) {
         ui.set_place(p.as_str().into());
     }
-    run(window, ui, settings, reference, gain);
+    run(window, made, ui, settings, reference, gain);
 }
 
 /// One frame without a window, saved for checking.
-fn snap(window: &Rc<MinimalSoftwareWindow>, ui: AppWindow, reference: f64, gain: f32, path: &str) {
+fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>, ui: AppWindow, reference: f64, gain: f32, path: &str) {
     let (w, h) = std::env::var("ECTODECK_NATIVE_SIZE")
         .ok()
         .and_then(|s| s.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
@@ -257,6 +268,10 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, ui: AppWindow, reference: f64, gain:
     }
     if let Ok(place) = std::env::var("ECTODECK_NATIVE_PLACE") {
         front.ui.set_place(place.into());
+    }
+    // ECTODECK_NATIVE_MACROS=N: the Macro Editor's window instead, open on macro N
+    if let Some(n) = std::env::var("ECTODECK_NATIVE_MACROS").ok().and_then(|v| v.parse::<u32>().ok()) {
+        return snap_macros(front, made, n, path);
     }
     // lay the page out once, so clicks land where it draws
     let mut pic = Picture::new(reference, GROUND);
@@ -348,6 +363,67 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, ui: AppWindow, reference: f64, gain:
     eprintln!("saved {path}: {w}x{h}, keyboard at {rect:?}");
 }
 
+/// The Macro Editor's window without a window: one frame, saved as a PNG.
+fn snap_macros(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>, n: u32, path: &str) {
+    let (w, h) = std::env::var("ECTODECK_NATIVE_SIZE")
+        .ok()
+        .and_then(|s| s.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
+        .unwrap_or(MACRO_SIZE);
+    let ui = MacroWindow::new().unwrap();
+    let _ = slint::ComponentHandle::window(&ui);
+    let window = made.borrow().last().cloned().unwrap();
+    slint::ComponentHandle::show(&ui).unwrap();
+    window.set_size(PhysicalSize::new(w, h));
+    front.macros = Some(macro_page::MacroPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false)));
+    let mut px = vec![PremultipliedRgbaColor::default(); (w * h) as usize];
+    let draw = |px: &mut Vec<PremultipliedRgbaColor>| {
+        window.draw_if_needed(|r| {
+            r.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
+            r.render(px, w as usize);
+        });
+    };
+    draw(&mut px);
+    if let Some(m) = &mut front.macros {
+        m.open(&front.page, (n > 0).then_some(n));
+    }
+    window.request_redraw();
+    draw(&mut px);
+    for click in std::env::var("ECTODECK_NATIVE_CLICKS").unwrap_or_default().split(';').filter(|c| !c.is_empty()) {
+        let mut xy = click.split(',').map(|v| v.trim().parse::<f32>().unwrap_or(0.0));
+        let (x, y) = (xy.next().unwrap_or(0.0), xy.next().unwrap_or(0.0));
+        let position = LogicalPosition::new(x, y);
+        window.dispatch_event(WindowEvent::PointerMoved { position });
+        if let Some(m) = &mut front.macros {
+            m.pressed_at(x, y);
+        }
+        window.dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Left });
+        window.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
+        front.act_macros();
+        window.request_redraw();
+        draw(&mut px);
+    }
+    for c in std::env::var("ECTODECK_NATIVE_TYPE").unwrap_or_default().chars() {
+        let text: SharedString = if c == '\n' { Key::Return.into() } else { c.to_string().into() };
+        window.dispatch_event(WindowEvent::KeyPressed { text: text.clone() });
+        window.dispatch_event(WindowEvent::KeyReleased { text });
+        slint::platform::update_timers_and_animations();
+        front.act_macros();
+    }
+    if let Ok(at) = std::env::var("ECTODECK_NATIVE_HOVER") {
+        let mut xy = at.split(',').map(|v| v.trim().parse::<f32>().unwrap_or(0.0));
+        window.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(xy.next().unwrap_or(0.0), xy.next().unwrap_or(0.0)) });
+    }
+    front.act_macros();
+    window.request_redraw();
+    draw(&mut px);
+    let mut pix = Pixmap::new(w, h).unwrap();
+    for (d, p) in pix.pixels_mut().iter_mut().zip(&px) {
+        *d = resvg::tiny_skia::PremultipliedColorU8::from_rgba(p.red, p.green, p.blue, p.alpha).unwrap_or(resvg::tiny_skia::PremultipliedColorU8::TRANSPARENT);
+    }
+    pix.save_png(path).unwrap();
+    eprintln!("saved {path}: {w}x{h}");
+}
+
 /// Lay the app's ground where the page leaves it to the window; true if it moved.
 fn lay_ground(pic: &mut Picture, ui: &AppWindow, scale: f32) -> bool {
     let c = ui.get_ground();
@@ -434,6 +510,28 @@ struct App {
     hidden: bool,
     tray: Option<tray::Handle>,
     tray_connected: bool,
+    /// the windows Slint has made, the Macro Editor's among them
+    made: Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>,
+    /// the Macro Editor's window, once opened, and whether the keyboard's and
+    /// the pointer's focus are on it
+    mw: Option<MacroWin>,
+    keys_on_macros: bool,
+}
+
+/// The Macro Editor's window: an ordinary SDR window, drawn whole by Slint.
+struct MacroWin {
+    window: Window,
+    slint: Rc<MinimalSoftwareWindow>,
+    size: (u32, u32),
+    scale: u32,
+    configured: bool,
+    maximized: bool,
+    frame_pending: bool,
+    hidden: bool,
+    full: bool,
+    buffers: Vec<Buffer>,
+    px: Vec<PremultipliedRgbaColor>,
+    at: (f64, f64),
 }
 
 /// A screen's levels as KWin describes them: its white and its peak, in nits.
@@ -464,7 +562,7 @@ where
     params.create(qh, tag)
 }
 
-fn run(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, settings: settings::Settings, reference: f64, gain: f32) {
+fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>, ui: AppWindow, settings: settings::Settings, reference: f64, gain: f32) {
     let conn = Connection::connect_to_env().expect("a Wayland session");
     let (globals, queue) = registry_queue_init::<App>(&conn).unwrap();
     let qh = queue.handle();
@@ -560,6 +658,9 @@ fn run(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, settings: settings::Sett
         hidden: false,
         tray: None,
         tray_connected: false,
+        made,
+        mw: None,
+        keys_on_macros: false,
     };
     // the tray, which the window closes into
     let (tray_tx, tray_rx) = calloop::channel::channel::<tray::TrayAsk>();
@@ -596,8 +697,11 @@ fn run(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, settings: settings::Sett
     app.window.commit();
 
     let mut trial = std::env::var_os("ECTODECK_NATIVE_TRAYTEST").map(|_| Instant::now());
+    // ECTODECK_NATIVE_OPEN_MACROS=N: open the Macro Editor on macro N once the keyboard is read, to check it
+    let mut open_macros = std::env::var("ECTODECK_NATIVE_OPEN_MACROS").ok().and_then(|v| v.parse::<u32>().ok());
     while !app.exit {
-        let busy = (app.slint.has_active_animations() || app.front.animated()) && !app.frame_pending;
+        let busy = ((app.slint.has_active_animations() || app.front.animated()) && !app.frame_pending)
+            || app.mw.as_ref().is_some_and(|m| !m.hidden && m.slint.has_active_animations() && !m.frame_pending);
         let wait = if busy {
             Some(Duration::ZERO)
         } else {
@@ -614,8 +718,13 @@ fn run(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, settings: settings::Sett
                 app.hide();
             }
         }
+        if let Some(n) = open_macros.filter(|_| app.front.page.dev.is_some()) {
+            open_macros = None;
+            app.open_macros(n);
+        }
         app.act();
         app.draw();
+        app.draw_macros();
         // started again for a change to what Ectodeck may use, back on that place
         if let Some(place) = app.front.restart.take() {
             if let Ok(me) = std::env::current_exe() {
@@ -623,6 +732,10 @@ fn run(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, settings: settings::Sett
             }
             app.exit = true;
         }
+    }
+    // a recording lets the keyboard go
+    if let Some(m) = &mut app.front.macros {
+        m.cancel_recording(&app.front.page);
     }
     // the keyboard's thread sends the preview's stop before the window goes
     std::thread::sleep(Duration::from_millis(300));
@@ -653,8 +766,189 @@ impl App {
                     }
                 }
                 WindowAsk::Close => self.hide(),
+                WindowAsk::OpenMacros(n) => self.open_macros(*n),
             }
         }
+        for ask in self.front.act_macros() {
+            let Some(mw) = &mut self.mw else { break };
+            match ask {
+                WindowAsk::Move => {
+                    if let Some(seat) = &self.seat {
+                        mw.window.move_(seat, self.press);
+                    }
+                    let position = LogicalPosition::new(mw.at.0 as f32, mw.at.1 as f32);
+                    mw.slint.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
+                    mw.slint.dispatch_event(WindowEvent::PointerExited);
+                }
+                WindowAsk::Minimise => mw.window.set_minimized(),
+                WindowAsk::Maximise => {
+                    if mw.maximized {
+                        mw.window.unset_maximized()
+                    } else {
+                        mw.window.set_maximized()
+                    }
+                }
+                WindowAsk::Close => self.hide_macros(),
+                WindowAsk::OpenMacros(_) => {}
+            }
+        }
+    }
+
+    /// Open the Macro Editor's window, made the first time, on a macro.
+    fn open_macros(&mut self, n: u32) {
+        if self.front.macros.is_none() {
+            let ui = MacroWindow::new().unwrap();
+            let _ = slint::ComponentHandle::window(&ui);
+            let slint = self.made.borrow().last().cloned().expect("the Macro Editor's adapter");
+            slint::ComponentHandle::show(&ui).unwrap();
+            slint.set_size(PhysicalSize::new(MACRO_SIZE.0, MACRO_SIZE.1));
+            self.front.macros = Some(macro_page::MacroPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false)));
+            let surface = self.compositor.create_surface(&self.qh);
+            let window = self._xdg.create_window(surface, WindowDecorations::RequestClient, &self.qh);
+            window.set_title("EVGA Z10 RGB / Macro Editor");
+            window.set_app_id("com.ectonomic.ectodeck");
+            window.set_min_size(Some(MACRO_MIN_SIZE));
+            window.commit();
+            self.mw = Some(MacroWin {
+                window,
+                slint,
+                size: MACRO_SIZE,
+                scale: 1,
+                configured: false,
+                maximized: false,
+                frame_pending: false,
+                hidden: false,
+                full: true,
+                buffers: Vec::new(),
+                px: Vec::new(),
+                at: (0.0, 0.0),
+            });
+        } else if let Some(mw) = &mut self.mw {
+            if mw.hidden {
+                mw.hidden = false;
+                mw.full = true;
+                mw.window.commit();
+            }
+        }
+        if let Some(m) = &mut self.front.macros {
+            m.open(&self.front.page, (n > 0).then_some(n));
+        }
+    }
+
+    /// Close the Macro Editor's window; it is kept, to open again as it was.
+    fn hide_macros(&mut self) {
+        if let Some(m) = &mut self.front.macros {
+            m.cancel_recording(&self.front.page);
+        }
+        let Some(mw) = &mut self.mw else { return };
+        mw.window.wl_surface().attach(None, 0, 0);
+        mw.window.commit();
+        mw.hidden = true;
+        mw.configured = false;
+        mw.frame_pending = false;
+        mw.buffers.clear();
+    }
+
+    /// Draw the Macro Editor's window, when Slint has something new for it.
+    fn draw_macros(&mut self) {
+        let Some(mw) = &mut self.mw else { return };
+        if mw.hidden || !mw.configured || mw.frame_pending {
+            return;
+        }
+        let (w, h) = ((mw.size.0 * mw.scale) as usize, (mw.size.1 * mw.scale) as usize);
+        if mw.px.len() != w * h {
+            mw.px = vec![PremultipliedRgbaColor::default(); w * h];
+            mw.full = true;
+        }
+        let full = mw.full;
+        let mut dirty = None;
+        let px = &mut mw.px;
+        mw.slint.draw_if_needed(|r| {
+            if full {
+                r.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
+            }
+            let region = r.render(px, w);
+            if full {
+                r.set_repaint_buffer_type(RepaintBufferType::ReusedBuffer);
+            }
+            let (o, sz) = (region.bounding_box_origin(), region.bounding_box_size());
+            if sz.width > 0 && sz.height > 0 {
+                dirty = Some((o.x.max(0), o.y.max(0), sz.width as i32, sz.height as i32));
+            }
+        });
+        let dirty = if full { Some((0, 0, w as i32, h as i32)) } else { dirty };
+        let Some((dx, dy, dw, dh)) = dirty else { return };
+        mw.full = false;
+        let fits = |b: &Buffer| b.height() as usize == h && b.stride() as usize == w * 4;
+        mw.buffers.retain(fits);
+        let pool = &mut self.pool;
+        let i = match mw.buffers.iter().position(|b| b.canvas(pool).is_some()) {
+            Some(i) => i,
+            None => {
+                let (b, _) = self.pool.create_buffer(w as i32, h as i32, (w * 4) as i32, wl_shm::Format::Argb8888).expect("a buffer");
+                mw.buffers.push(b);
+                mw.buffers.len() - 1
+            }
+        };
+        let canvas = mw.buffers[i].canvas(&mut self.pool).unwrap();
+        // the compositor's ARGB, which little-endian memory holds as B, G, R, A
+        for (d, p) in canvas.chunks_exact_mut(4).zip(&mw.px) {
+            d.copy_from_slice(&[p.blue, p.green, p.red, p.alpha]);
+        }
+        let surface = mw.window.wl_surface();
+        surface.damage_buffer(dx, dy, dw, dh);
+        surface.set_buffer_scale(mw.scale as i32);
+        surface.frame(&self.qh, surface.clone());
+        mw.buffers[i].attach_to(surface).unwrap();
+        mw.window.commit();
+        mw.frame_pending = true;
+        if let Some(dir) = &self.dump {
+            let rgba: Vec<u8> = mw.px.iter().flat_map(|p| [p.red, p.green, p.blue, p.alpha]).collect();
+            let _ = std::fs::write(dir.join("macros.raw"), rgba);
+            let _ = std::fs::write(dir.join("macros.txt"), format!("{w} {h}\n"));
+        }
+    }
+
+    fn on_macros(&self, surface: &wl_surface::WlSurface) -> bool {
+        self.mw.as_ref().is_some_and(|m| m.window.wl_surface() == surface)
+    }
+
+    /// The pointer over the Macro Editor's window.
+    fn macro_pointer(&mut self, e: &PointerEvent) {
+        let Some(mw) = &mut self.mw else { return };
+        let (x, y) = e.position;
+        mw.at = (x, y);
+        let position = LogicalPosition::new(x as f32, y as f32);
+        match e.kind {
+            PointerEventKind::Enter { .. } => {
+                self.cursor = None;
+                mw.slint.dispatch_event(WindowEvent::PointerMoved { position });
+            }
+            PointerEventKind::Leave { .. } => mw.slint.dispatch_event(WindowEvent::PointerExited),
+            PointerEventKind::Motion { .. } => mw.slint.dispatch_event(WindowEvent::PointerMoved { position }),
+            PointerEventKind::Press { button: b, serial, .. } => {
+                self.press = serial;
+                if b == 0x110 {
+                    if let (Some(edge), Some(seat)) = (edge(mw.size, mw.maximized, x, y), &self.seat) {
+                        mw.window.resize(seat, serial, edge);
+                        return;
+                    }
+                }
+                if let Some(m) = &mut self.front.macros {
+                    m.pressed_at(x as f32, y as f32);
+                }
+                mw.slint.dispatch_event(WindowEvent::PointerPressed { position, button: pointer_button(b) });
+            }
+            PointerEventKind::Release { button: b, .. } => mw.slint.dispatch_event(WindowEvent::PointerReleased { position, button: pointer_button(b) }),
+            PointerEventKind::Axis { horizontal, vertical, .. } => mw.slint.dispatch_event(WindowEvent::PointerScrolled {
+                position,
+                delta_x: -horizontal.absolute as f32,
+                delta_y: -vertical.absolute as f32,
+            }),
+        }
+        let hand = self.front.macros.as_ref().is_some_and(|m| m.ui.get_hand());
+        let icon = edge_cursor(edge(mw.size, mw.maximized, x, y)).unwrap_or(if hand { CursorIcon::Pointer } else { CursorIcon::Default });
+        self.set_cursor(icon);
     }
 
     /// The screen the window is on has new levels: describe the picture for
@@ -858,26 +1152,17 @@ impl App {
 
     /// The window's edge under the pointer, which a press resizes from.
     fn edge(&self, x: f64, y: f64) -> Option<ResizeEdge> {
-        if self.maximized {
-            return None;
-        }
-        let (w, h) = (self.size.0 as f64, self.size.1 as f64);
-        let (l, r, t, b) = (x < EDGE, x > w - EDGE, y < EDGE, y > h - EDGE);
-        Some(match (l, r, t, b) {
-            (true, _, true, _) => ResizeEdge::TopLeft,
-            (_, true, true, _) => ResizeEdge::TopRight,
-            (true, _, _, true) => ResizeEdge::BottomLeft,
-            (_, true, _, true) => ResizeEdge::BottomRight,
-            (true, ..) => ResizeEdge::Left,
-            (_, true, ..) => ResizeEdge::Right,
-            (_, _, true, _) => ResizeEdge::Top,
-            (_, _, _, true) => ResizeEdge::Bottom,
-            _ => return None,
-        })
+        edge(self.size, self.maximized, x, y)
     }
 
     /// A key on the keyboard, pressed or let go.
     fn key(&mut self, e: &KeyEvent, down: bool) {
+        if self.keys_on_macros {
+            if let (Some(mw), Some(text)) = (&self.mw, key_text(e)) {
+                mw.slint.dispatch_event(if down { WindowEvent::KeyPressed { text } } else { WindowEvent::KeyReleased { text } });
+            }
+            return;
+        }
         if self.front.typed(e.raw_code, down) {
             self.front.refresh();
             return;
@@ -889,17 +1174,32 @@ impl App {
 }
 
 impl CompositorHandler for App {
-    fn scale_factor_changed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, factor: i32) {
+    fn scale_factor_changed(&mut self, _: &Connection, _: &QueueHandle<Self>, surface: &wl_surface::WlSurface, factor: i32) {
+        if self.on_macros(surface) {
+            let mw = self.mw.as_mut().unwrap();
+            mw.scale = factor.max(1) as u32;
+            mw.slint.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: mw.scale as f32 });
+            mw.slint.set_size(PhysicalSize::new(mw.size.0 * mw.scale, mw.size.1 * mw.scale));
+            mw.full = true;
+            return;
+        }
         self.scale = factor.max(1) as u32;
         self.slint.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: self.scale as f32 });
         self.slint.set_size(PhysicalSize::new(self.size.0 * self.scale, self.size.1 * self.scale));
         self.full = true;
     }
     fn transform_changed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: wl_output::Transform) {}
-    fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: u32) {
-        self.frame_pending = false;
+    fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, surface: &wl_surface::WlSurface, _: u32) {
+        if self.on_macros(surface) {
+            self.mw.as_mut().unwrap().frame_pending = false;
+        } else {
+            self.frame_pending = false;
+        }
     }
-    fn surface_enter(&mut self, _: &Connection, qh: &QueueHandle<Self>, _: &wl_surface::WlSurface, output: &wl_output::WlOutput) {
+    fn surface_enter(&mut self, _: &Connection, qh: &QueueHandle<Self>, surface: &wl_surface::WlSurface, output: &wl_output::WlOutput) {
+        if surface != self.window.wl_surface() {
+            return;
+        }
         use smithay_client_toolkit::reexports::client::Proxy;
         self.on_screen = Some(output.id().protocol_id());
         self.retarget(qh);
@@ -925,11 +1225,37 @@ impl OutputHandler for App {
 }
 
 impl WindowHandler for App {
-    fn request_close(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &Window) {
-        self.hide();
+    fn request_close(&mut self, _: &Connection, _: &QueueHandle<Self>, window: &Window) {
+        if self.on_macros(window.wl_surface()) {
+            self.hide_macros();
+        } else {
+            self.hide();
+        }
     }
 
     fn configure(&mut self, _: &Connection, _: &QueueHandle<Self>, window: &Window, configure: WindowConfigure, _: u32) {
+        if self.on_macros(window.wl_surface()) {
+            let mw = self.mw.as_mut().unwrap();
+            let w = configure.new_size.0.map_or(mw.size.0, NonZeroU32::get);
+            let h = configure.new_size.1.map_or(mw.size.1, NonZeroU32::get);
+            if (w, h) != mw.size || !mw.configured {
+                mw.size = (w, h);
+                mw.slint.set_size(PhysicalSize::new(w * mw.scale, h * mw.scale));
+                mw.full = true;
+            }
+            mw.maximized = configure.is_maximized();
+            if let Some(m) = &self.front.macros {
+                m.ui.set_is_maximized(mw.maximized);
+            }
+            window.xdg_surface().set_window_geometry(0, 0, w as i32, h as i32);
+            mw.configured = true;
+            // the chain wraps at the window's width
+            if let Some(m) = &mut self.front.macros {
+                m.refresh(&self.front.page);
+            }
+            self.draw_macros();
+            return;
+        }
         let w = configure.new_size.0.map_or(self.size.0, NonZeroU32::get);
         let h = configure.new_size.1.map_or(self.size.1, NonZeroU32::get);
         if (w, h) != self.size || !self.configured {
@@ -979,11 +1305,19 @@ impl SeatHandler for App {
 }
 
 impl KeyboardHandler for App {
-    fn enter(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: &wl_surface::WlSurface, _: u32, _: &[u32], _: &[Keysym]) {
-        self.slint.dispatch_event(WindowEvent::WindowActiveChanged(true));
+    fn enter(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, surface: &wl_surface::WlSurface, _: u32, _: &[u32], _: &[Keysym]) {
+        self.keys_on_macros = self.on_macros(surface);
+        match &self.mw {
+            Some(mw) if self.keys_on_macros => mw.slint.dispatch_event(WindowEvent::WindowActiveChanged(true)),
+            _ => self.slint.dispatch_event(WindowEvent::WindowActiveChanged(true)),
+        }
     }
-    fn leave(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: &wl_surface::WlSurface, _: u32) {
-        self.slint.dispatch_event(WindowEvent::WindowActiveChanged(false));
+    fn leave(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, surface: &wl_surface::WlSurface, _: u32) {
+        match &self.mw {
+            Some(mw) if self.on_macros(surface) => mw.slint.dispatch_event(WindowEvent::WindowActiveChanged(false)),
+            _ => self.slint.dispatch_event(WindowEvent::WindowActiveChanged(false)),
+        }
+        self.keys_on_macros = false;
     }
     fn press_key(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, event: KeyEvent) {
         self.key(&event, true);
@@ -1000,6 +1334,10 @@ impl PointerHandler for App {
         const BTN_RIGHT: u32 = 0x111;
         const BTN_MIDDLE: u32 = 0x112;
         for e in events {
+            if self.on_macros(&e.surface) {
+                self.macro_pointer(e);
+                continue;
+            }
             if &e.surface != self.window.wl_surface() {
                 continue;
             }
@@ -1145,3 +1483,47 @@ delegate_keyboard!(App);
 delegate_xdg_shell!(App);
 delegate_xdg_window!(App);
 delegate_registry!(App);
+
+/// A window's edge under the pointer, which a press resizes from.
+fn edge(size: (u32, u32), maximized: bool, x: f64, y: f64) -> Option<ResizeEdge> {
+    if maximized {
+        return None;
+    }
+    let (w, h) = (size.0 as f64, size.1 as f64);
+    let (l, r, t, b) = (x < EDGE, x > w - EDGE, y < EDGE, y > h - EDGE);
+    Some(match (l, r, t, b) {
+        (true, _, true, _) => ResizeEdge::TopLeft,
+        (_, true, true, _) => ResizeEdge::TopRight,
+        (true, _, _, true) => ResizeEdge::BottomLeft,
+        (_, true, _, true) => ResizeEdge::BottomRight,
+        (true, ..) => ResizeEdge::Left,
+        (_, true, ..) => ResizeEdge::Right,
+        (_, _, true, _) => ResizeEdge::Top,
+        (_, _, _, true) => ResizeEdge::Bottom,
+        _ => return None,
+    })
+}
+
+fn pointer_button(b: u32) -> PointerEventButton {
+    match b {
+        0x110 => PointerEventButton::Left,
+        0x111 => PointerEventButton::Right,
+        0x112 => PointerEventButton::Middle,
+        _ => PointerEventButton::Other,
+    }
+}
+
+/// The cursor for resizing from an edge.
+fn edge_cursor(e: Option<ResizeEdge>) -> Option<CursorIcon> {
+    Some(match e? {
+        ResizeEdge::TopLeft => CursorIcon::NwResize,
+        ResizeEdge::TopRight => CursorIcon::NeResize,
+        ResizeEdge::BottomLeft => CursorIcon::SwResize,
+        ResizeEdge::BottomRight => CursorIcon::SeResize,
+        ResizeEdge::Left => CursorIcon::WResize,
+        ResizeEdge::Right => CursorIcon::EResize,
+        ResizeEdge::Top => CursorIcon::NResize,
+        ResizeEdge::Bottom => CursorIcon::SResize,
+        _ => return None,
+    })
+}
