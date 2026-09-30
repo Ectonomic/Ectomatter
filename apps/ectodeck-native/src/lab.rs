@@ -74,11 +74,11 @@ const PARAMS: [Param; 17] = [
 
 /// The page's sections: a title, what the part is, and its values.
 const SECTIONS: [(&str, &str, usize, usize); 6] = [
+    ("LED", "Where each key's light comes from.", 9, 10),
     ("Legends", "The LED shines up through the legend: the brightest thing on a key.", 0, 3),
     ("Deck glow", "Light escaping under the cap's skirt onto the deck of the well.", 3, 7),
     ("Skirt's foot", "The deck's glow caught by the foot of each cap.", 7, 9),
     ("Chassis spill", "Light out of the wells onto the chassis round them, from the keys nearest each well's edge.", 10, 12),
-    ("LED", "Where each key's light comes from.", 9, 10),
     ("Display", "The display's backlit dots, and the glass over them.", 12, 17),
 ];
 
