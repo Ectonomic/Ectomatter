@@ -56,6 +56,12 @@ impl Picture {
         changed
     }
 
+    /// Draw for another desktop white from now on.
+    pub fn set_reference(&mut self, reference: f64) {
+        self.enc = Encoder::new(reference);
+        self.reference = reference;
+    }
+
     pub fn reference(&self) -> f64 {
         self.reference
     }

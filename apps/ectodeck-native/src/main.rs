@@ -71,7 +71,9 @@ use smithay_client_toolkit::{
     },
 };
 use wayland_protocols::wp::color_management::v1::client::{
+    wp_color_management_output_v1::{self, WpColorManagementOutputV1},
     wp_color_management_surface_v1::WpColorManagementSurfaceV1,
+    wp_image_description_info_v1::{self, WpImageDescriptionInfoV1},
     wp_color_manager_v1::{self, WpColorManagerV1},
     wp_image_description_creator_params_v1::WpImageDescriptionCreatorParamsV1,
     wp_image_description_v1::{self, WpImageDescriptionV1},
@@ -365,6 +367,15 @@ struct App {
     at: (f64, f64),
     ready: bool,
     failed: Option<String>,
+    /// colour management: the picture's description on the surface, each
+    /// screen's levels as KWin describes them, the screen the window is on,
+    /// and the levels the picture is drawn for (the desktop's white, the light's top)
+    cm: WpColorManagerV1,
+    cm_surface: WpColorManagementSurfaceV1,
+    screens: Vec<ScreenLevels>,
+    on_screen: Option<u32>,
+    glow_limit: Option<f64>,
+    levels: (f64, f64),
 
     slint: Rc<MinimalSoftwareWindow>,
     front: Front,
@@ -386,6 +397,34 @@ struct App {
     frames: u64,
 }
 
+/// A screen's levels as KWin describes them: its white and its peak, in nits.
+struct ScreenLevels {
+    id: u32,
+    _cmo: WpColorManagementOutputV1,
+    reference: f64,
+    peak: f64,
+    reading: (f64, f64),
+}
+
+/// Which screen a description or its information was asked for.
+#[derive(Clone, Copy)]
+struct ScreenTag(u32);
+/// A new description for the picture, for these levels (white, light's top).
+#[derive(Clone, Copy)]
+struct PictureTag(f64, f64);
+
+/// The picture's description: PQ with BT.2020 primaries, its white at the desktop's.
+fn describe<U: Send + Sync + 'static>(cm: &WpColorManagerV1, qh: &QueueHandle<App>, reference: f64, tag: U) -> WpImageDescriptionV1
+where
+    App: Dispatch<WpImageDescriptionV1, U>,
+{
+    let params = cm.create_parametric_creator(qh, ());
+    params.set_tf_named(wp_color_manager_v1::TransferFunction::St2084Pq);
+    params.set_primaries_named(wp_color_manager_v1::Primaries::Bt2020);
+    params.set_luminances(0, 10000, reference.round() as u32);
+    params.create(qh, tag)
+}
+
 fn run(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, settings: &settings::Settings, reference: f64, gain: f32) {
     let conn = Connection::connect_to_env().expect("a Wayland session");
     let (globals, queue) = registry_queue_init::<App>(&conn).unwrap();
@@ -404,12 +443,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, settings: &settings::Set
     window.set_app_id("com.ectonomic.ectodeck");
     window.set_min_size(Some(MIN_SIZE));
 
-    // the picture is PQ with BT.2020 primaries, its white at the desktop's
-    let params = cm.create_parametric_creator(&qh, ());
-    params.set_tf_named(wp_color_manager_v1::TransferFunction::St2084Pq);
-    params.set_primaries_named(wp_color_manager_v1::Primaries::Bt2020);
-    params.set_luminances(0, 10000, reference.round() as u32);
-    let desc = params.create(&qh, ());
+    let desc = describe(&cm, &qh, reference, ());
     let cm_surface = cm.get_surface(window.wl_surface(), &qh, ());
 
     let (built_tx, built_rx) = calloop::channel::channel::<Board>();
@@ -464,6 +498,12 @@ fn run(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, settings: &settings::Set
         at: (0.0, 0.0),
         ready: false,
         failed: None,
+        cm,
+        cm_surface: cm_surface.clone(),
+        screens: Vec::new(),
+        on_screen: None,
+        glow_limit: settings.get("hdr.glow_limit").and_then(|v| v.as_f64()),
+        levels: (reference, reference * gain as f64),
         slint,
         front: Front::new(ui, kb, controlled),
         pic: Picture::new(reference, GROUND),
@@ -533,6 +573,21 @@ impl App {
                 WindowAsk::Close => self.exit = true,
             }
         }
+    }
+
+    /// The screen the window is on has new levels: describe the picture for
+    /// them. The new description takes over once KWin has it ready.
+    fn retarget(&mut self, qh: &QueueHandle<Self>) {
+        let Some(s) = self.screens.iter().find(|s| Some(s.id) == self.on_screen) else { return };
+        if s.reference <= 0.0 {
+            return;
+        }
+        let glow = self.glow_limit.unwrap_or(s.peak).max(s.reference);
+        if (s.reference - self.levels.0).abs() < 0.5 && (glow - self.levels.1).abs() < 0.5 {
+            return;
+        }
+        eprintln!("ectodeck-native: the screen's white is now {} nits; the light goes to {glow}", s.reference);
+        describe(&self.cm, qh, s.reference, PictureTag(s.reference, glow));
     }
 
     /// The keyboard came back drawn at a size: light it.
@@ -705,7 +760,11 @@ impl CompositorHandler for App {
     fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: u32) {
         self.frame_pending = false;
     }
-    fn surface_enter(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: &wl_output::WlOutput) {}
+    fn surface_enter(&mut self, _: &Connection, qh: &QueueHandle<Self>, _: &wl_surface::WlSurface, output: &wl_output::WlOutput) {
+        use smithay_client_toolkit::reexports::client::Proxy;
+        self.on_screen = Some(output.id().protocol_id());
+        self.retarget(qh);
+    }
     fn surface_leave(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: &wl_output::WlOutput) {}
 }
 
@@ -713,7 +772,15 @@ impl OutputHandler for App {
     fn output_state(&mut self) -> &mut OutputState {
         &mut self.outputs
     }
-    fn new_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
+    fn new_output(&mut self, _: &Connection, qh: &QueueHandle<Self>, output: wl_output::WlOutput) {
+        use smithay_client_toolkit::reexports::client::Proxy;
+        // ask KWin for the screen's levels, now and whenever they change
+        let id = output.id().protocol_id();
+        let cmo = self.cm.get_output(&output, qh, ScreenTag(id));
+        let desc = cmo.get_image_description(qh, ScreenTag(id));
+        desc.get_information(qh, ScreenTag(id));
+        self.screens.push(ScreenLevels { id, _cmo: cmo, reference: 0.0, peak: 0.0, reading: (0.0, 0.0) });
+    }
     fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
     fn output_destroyed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
 }
@@ -875,6 +942,53 @@ impl Dispatch<WpImageDescriptionV1, ()> for App {
         match e {
             wp_image_description_v1::Event::Ready { .. } | wp_image_description_v1::Event::Ready2 { .. } => app.ready = true,
             wp_image_description_v1::Event::Failed { msg, .. } => app.failed = Some(msg),
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<WpImageDescriptionV1, PictureTag> for App {
+    fn event(app: &mut Self, desc: &WpImageDescriptionV1, e: wp_image_description_v1::Event, tag: &PictureTag, _: &Connection, _: &QueueHandle<Self>) {
+        if let wp_image_description_v1::Event::Ready { .. } | wp_image_description_v1::Event::Ready2 { .. } = e {
+            // the description and the pixels drawn for it go to KWin together, on the next frame
+            let PictureTag(reference, glow) = *tag;
+            app.cm_surface.set_image_description(desc, wp_color_manager_v1::RenderIntent::Perceptual);
+            app.levels = (reference, glow);
+            app.pic.set_reference(reference);
+            app.gain = (glow / reference).max(1.0) as f32;
+            if let Some(board) = &app.board {
+                let lit = board.compose(&app.lights, app.gain);
+                app.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
+            }
+            app.full = true;
+            app.slint.request_redraw();
+        }
+    }
+}
+
+impl Dispatch<WpImageDescriptionV1, ScreenTag> for App {
+    fn event(_: &mut Self, _: &WpImageDescriptionV1, _: wp_image_description_v1::Event, _: &ScreenTag, _: &Connection, _: &QueueHandle<Self>) {}
+}
+
+impl Dispatch<WpColorManagementOutputV1, ScreenTag> for App {
+    fn event(_: &mut Self, cmo: &WpColorManagementOutputV1, e: wp_color_management_output_v1::Event, tag: &ScreenTag, _: &Connection, qh: &QueueHandle<Self>) {
+        if let wp_color_management_output_v1::Event::ImageDescriptionChanged = e {
+            cmo.get_image_description(qh, *tag).get_information(qh, *tag);
+        }
+    }
+}
+
+impl Dispatch<WpImageDescriptionInfoV1, ScreenTag> for App {
+    fn event(app: &mut Self, _: &WpImageDescriptionInfoV1, e: wp_image_description_info_v1::Event, tag: &ScreenTag, _: &Connection, qh: &QueueHandle<Self>) {
+        let Some(s) = app.screens.iter_mut().find(|s| s.id == tag.0) else { return };
+        match e {
+            wp_image_description_info_v1::Event::Luminances { max_lum, reference_lum, .. } => s.reading = (reference_lum as f64, max_lum as f64),
+            wp_image_description_info_v1::Event::Done => {
+                (s.reference, s.peak) = s.reading;
+                if app.on_screen == Some(tag.0) {
+                    app.retarget(qh);
+                }
+            }
             _ => {}
         }
     }
