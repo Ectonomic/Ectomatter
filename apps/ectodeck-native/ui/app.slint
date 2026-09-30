@@ -656,6 +656,11 @@ component ScrollBar inherits Rectangle {
                 root.scroll-to(root.at(self.mouse-y));
             }
         }
+        // the wheel over the bar scrolls the area, as it does over the area
+        scroll-event(e) => {
+            root.scroll-to(max(0px, min(root.travel, root.offset - e.delta-y)));
+            accept
+        }
     }
 }
 
@@ -2133,22 +2138,25 @@ export component AppWindow inherits Window {
         height: 0;
     }
 
-    // the page's scrollbar, as WebKit drew it, over the whole window
+    // Each page's scrollbar runs beside what scrolls and nothing else: under
+    // the title bar, under the device's bar on its page (which stays put), and
+    // short of the window's rounded corner at the foot.
+    property <length> bar-foot: root.radius > 0 ? 5px : 2px;
     if root.place == "z10": ScrollBar {
         x: root.width - 12px;
-        y: 0;
-        height: root.height;
-        view: root.height;
-        content: doc-h;
+        y: bar + 56px + 2px;
+        height: root.height - bar - 56px - 2px - root.bar-foot;
+        view: flick.height;
+        content: flick.content-height;
         offset: -flick.content-y;
         scroll-to(o) => { flick.content-y = -o; }
     }
     if root.place == "settings": ScrollBar {
         x: root.width - 12px;
-        y: 0;
-        height: root.height;
-        view: root.height;
-        content: bar + root.settings-h;
+        y: bar + 2px;
+        height: root.height - bar - 2px - root.bar-foot;
+        view: set-flick.height;
+        content: set-flick.content-height;
         offset: -set-flick.content-y;
         scroll-to(o) => { set-flick.content-y = -o; }
     }
@@ -2740,7 +2748,7 @@ export component MacroWindow inherits Window {
             x: parent.width - 12px;
             y: 56px;
             height: parent.height - 56px - 10px;
-            view: self.height;
+            view: parent.height - 56px - 10px;
             content: root.items.length * 55px;
             offset: -root.lib-scroll;
             framed: false;
@@ -2949,9 +2957,9 @@ export component MacroWindow inherits Window {
             }
             ScrollBar {
                 x: parent.width - 12px;
-                y: 0;
-                height: parent.height - 48px;
-                view: self.height;
+                y: 8px;
+                height: parent.height - 48px - 8px - 2px;
+                view: chain-flick.height;
                 content: chain-flick.content-height;
                 offset: -chain-flick.content-y;
                 framed: false;

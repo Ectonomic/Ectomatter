@@ -308,7 +308,9 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     }
     // the wheel turned over the page, in logical pixels
     if let Some(dy) = std::env::var("ECTODECK_NATIVE_SCROLL").ok().and_then(|v| v.parse::<f32>().ok()) {
-        let position = LogicalPosition::new(700.0, 600.0);
+        // where the wheel turns: ECTODECK_NATIVE_SCROLL_AT="x,y", or the page's middle
+        let at: Vec<f32> = std::env::var("ECTODECK_NATIVE_SCROLL_AT").unwrap_or_default().split(',').filter_map(|v| v.trim().parse().ok()).collect();
+        let position = if let [x, y] = at[..] { LogicalPosition::new(x, y) } else { LogicalPosition::new(700.0, 600.0) };
         window.dispatch_event(WindowEvent::PointerMoved { position });
         window.dispatch_event(WindowEvent::PointerScrolled { position, delta_x: 0.0, delta_y: -dy });
         let end = Instant::now() + Duration::from_millis(400);

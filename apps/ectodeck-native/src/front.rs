@@ -1537,12 +1537,16 @@ impl Front {
         self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
         let (ax, ay, ah) = anchor;
         let win = self.ui.get_window_height();
-        let below = win - ay - ah - 14.0;
+        // under the button, or over it when below is cramped, as every menu
+        // opens, and never up onto the title bar
+        let (below, above) = (win - ay - ah - 14.0, ay - 70.0);
+        let down = h <= below || below >= h.min(260.0) || below >= above;
+        let room = if down { below } else { above };
         self.ui.set_menu_ax(ax);
         self.ui.set_menu_ay(ay);
         self.ui.set_menu_ah(ah);
-        self.ui.set_menu_top(if h <= below || below >= h.min(260.0) { ay + ah + 6.0 } else { ay - 6.0 - h });
-        self.ui.set_menu_max(win * 0.7);
+        self.ui.set_menu_top(if down { ay + ah + 6.0 } else { ay - 6.0 - h.min(room) });
+        self.ui.set_menu_max(if h > room { room } else { win * 0.7 });
         self.ui.set_menu_open(true);
         self.bind_menu = Some((i, anchor));
     }
