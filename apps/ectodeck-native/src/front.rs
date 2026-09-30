@@ -217,6 +217,8 @@ pub struct Front {
     /// when the sliders were last read, and the time between readings, smoothed
     last_reading: Option<Instant>,
     reading_gap: f32,
+    /// the keyboard as the kernel last showed it, and when
+    dev_status: Option<(Instant, serde_json::Value)>,
 }
 
 /// A profile's colour sample: how many colours, and the colours.
@@ -331,6 +333,7 @@ impl Front {
             macros: None,
             last_reading: None,
             reading_gap: 120.0,
+            dev_status: None,
         };
         f.weather.set_place(weather_place(&f.settings));
         f.ui.set_overlays(ModelRc::from(f.overlay_model.clone()));
@@ -538,6 +541,7 @@ impl Front {
     /// Do what the page asked; what only the window can do is handed back.
     pub fn act(&mut self) -> Vec<WindowAsk> {
         self.search_places();
+        self.settings.flush(false);
         let asks: Vec<Ask> = self.asks.borrow_mut().drain(..).collect();
         let mut window = Vec::new();
         let mut changed = false;
@@ -572,7 +576,7 @@ impl Front {
                     match lighting::ctl(id) {
                         Ctl::PeakNits => {
                             let nits = crate::ecto_settings::peak_at(v, self.levels.0, self.levels.1);
-                            let _ = self.settings.set("hdr.glow_limit", nits.map_or(serde_json::Value::Null, |n| serde_json::json!(n)));
+                            self.settings.set_soon("hdr.glow_limit", nits.map_or(serde_json::Value::Null, |n| serde_json::json!(n)));
                         }
                         Ctl::LcdBrightness => crate::display::act(&mut self.page, Ctl::LcdBrightness, 0, v, None),
                         c => lighting::act(&mut self.page, c, 0, v),
@@ -1449,7 +1453,12 @@ impl Front {
             self.refresh_lighting();
         }
         if self.ui.get_place() == "settings" {
-            let dc = crate::devices::z10();
+            // what the kernel says of the keyboard, looked at every two seconds (it
+            // scans every process), not at every step of a slider
+            if self.dev_status.as_ref().is_none_or(|(t, _)| t.elapsed() > Duration::from_secs(2)) {
+                self.dev_status = Some((Instant::now(), crate::devices::z10()));
+            }
+            let dc = self.dev_status.as_ref().map(|(_, v)| v.clone()).unwrap_or_default();
             let st = crate::ecto_settings::State {
                 status: dc,
                 control: self.controlled,

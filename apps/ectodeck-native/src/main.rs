@@ -839,6 +839,8 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
             app.exit = true;
         }
     }
+    // a setting still being changed is written
+    app.front.settings.flush(true);
     // a recording lets the keyboard go
     if let Some(m) = &mut app.front.macros {
         m.cancel_recording(&app.front.page);

@@ -13,6 +13,9 @@ use serde_json::{Map, Value};
 pub struct Settings {
     path: PathBuf,
     data: Mutex<Value>,
+    /// a change made while it is still being made (a slider dragged), not yet
+    /// written: when it was last changed
+    unsaved: Mutex<Option<std::time::Instant>>,
 }
 
 impl Settings {
@@ -22,7 +25,7 @@ impl Settings {
             .and_then(|s| serde_json::from_str(&s).ok())
             .filter(Value::is_object)
             .unwrap_or_else(|| Value::Object(Map::new()));
-        Settings { path, data: Mutex::new(data) }
+        Settings { path, data: Mutex::new(data), unsaved: Mutex::new(None) }
     }
 
     pub fn all(&self) -> Value {
@@ -47,6 +50,29 @@ impl Settings {
     /// Set the value at a dotted path, making any objects on the way, and
     /// write the file.
     pub fn set(&self, path: &str, value: Value) -> std::io::Result<()> {
+        self.put(path, value);
+        *self.unsaved.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        self.write()
+    }
+
+    /// Set a value that is still being changed, such as a slider being
+    /// dragged: it takes effect at once, and is written once it rests.
+    pub fn set_soon(&self, path: &str, value: Value) {
+        self.put(path, value);
+        *self.unsaved.lock().unwrap_or_else(|p| p.into_inner()) = Some(std::time::Instant::now());
+    }
+
+    /// Write what was set soon, once it has rested a moment (or now, with `now`).
+    pub fn flush(&self, now: bool) {
+        let mut u = self.unsaved.lock().unwrap_or_else(|p| p.into_inner());
+        if u.is_some_and(|t| now || t.elapsed() >= std::time::Duration::from_millis(400)) {
+            *u = None;
+            drop(u);
+            let _ = self.write();
+        }
+    }
+
+    fn put(&self, path: &str, value: Value) {
         let mut d = self.data.lock().unwrap_or_else(|p| p.into_inner());
         let mut v = &mut *d;
         let keys: Vec<&str> = path.split('.').collect();
@@ -57,6 +83,10 @@ impl Settings {
             v = v.get_mut(*k).expect("just made");
         }
         v[keys[keys.len() - 1]] = value;
+    }
+
+    fn write(&self) -> std::io::Result<()> {
+        let d = self.data.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(dir) = self.path.parent() {
             std::fs::create_dir_all(dir)?;
         }
