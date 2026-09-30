@@ -50,7 +50,7 @@ struct Param {
 }
 
 const PARAMS: [Param; 11] = [
-    Param { path: ("legend", "nits"), label: "Brightness", lo: 10.0, hi: 1000.0, step: 5.0, unit: Unit::Nits, note: "The legend at its brightest, nearest the LED, for a key lit fully. A saturated colour may reach less: the readout above says how much." },
+    Param { path: ("legend", "nits"), label: "Brightness", lo: 10.0, hi: 1000.0, step: 5.0, unit: Unit::Nits, note: "The legend at its brightest, nearest the LED, for a key lit fully, up to Peak nits (Settings › HDR)." },
     Param { path: ("legend", "depth"), label: "Spread", lo: 2.0, hi: 30.0, step: 0.5, unit: Unit::Length, note: "How deep under the legend the LED sits. Deeper lights a legend more evenly; shallower keeps the light to the part nearest the LED." },
     Param { path: ("legend", "floor"), label: "Far parts", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, note: "The least any part of a legend is lit, however far from the LED: light bouncing inside the cap." },
     Param { path: ("deck", "nits"), label: "Brightness", lo: 0.0, hi: 300.0, step: 1.0, unit: Unit::Nits, note: "The glow on the deck at its brightest, just outside the skirt on the LED's side, for a key lit fully." },
@@ -78,7 +78,8 @@ const UNITS_PER_MM: f64 = 1.38;
 /// What is on the keyboard now, in nits.
 #[derive(Clone, Copy, Default, PartialEq)]
 pub struct Readout {
-    /// the brightest legend, and how bright the lit keys' colours could go at Peak nits
+    /// the brightest legend, and how bright the lit keys' colour shows before
+    /// the screen clips one of its channels
     pub legend: f64,
     pub reach: f64,
     pub deck: f64,
@@ -314,8 +315,16 @@ impl LabPage {
                 }
                 *cy += 4.0;
             };
-            let limited = r.reach + 0.5 < self.value(0);
-            row(c, cy, "Brightest legend", format!("{:.0} nits", r.legend), limited.then(|| format!("The lit keys' colour reaches {:.0} nits at most at Peak nits {:.0} (Settings › HDR), so the legends stop there.", r.reach, r.peak)));
+            // what holds the legends back, if anything: only Peak nits does; the
+            // colour's clean limit is only told
+            let note = if self.value(0) > r.peak + 0.5 {
+                Some(format!("Held at Peak nits, {:.0} (Settings › HDR).", r.peak))
+            } else if r.legend > r.reach + 0.5 {
+                Some(format!("This colour shows cleanly up to {:.0} nits. Above that the screen clips its red, so the brightest parts turn yellower.", r.reach))
+            } else {
+                None
+            };
+            row(c, cy, "Brightest legend", format!("{:.0} nits", r.legend), note);
             row(c, cy, "Brightest deck glow", format!("{:.0} nits", r.deck), None);
             row(c, cy, "Display's lit dots", format!("{:.0} nits", r.lcd), None);
             row(c, cy, "The desktop's white", format!("{:.0} nits", r.white), None);

@@ -105,8 +105,8 @@ impl Model {
         }
     }
 
-    /// Each part's brightness at its brightest, in the SDR white's units, as
-    /// far as the screen goes: the legend's, the deck's, the skirt foot's.
+    /// Each part's brightness at its brightest, in the SDR white's units, up
+    /// to Peak nits: the legend's, the deck's, the skirt foot's.
     fn tops(&self, white: f32, ceiling: f32) -> (f32, f32, f32) {
         let t = |nits: f32| (nits / white.max(1.0)).min(ceiling);
         (t(self.legend_nits), t(self.deck_nits), t(self.rim_nits))
@@ -240,20 +240,26 @@ fn light_key(key: &mut KeyArt, model: &Model, wells: Option<&[f32]>, w: u32, h: 
 }
 
 /// A key's light: its colour in linear light, its luminance how strongly the
-/// key is lit. A colour the screen cannot show as bright as the top (a
-/// saturated red, whose luminance is a fifth of its channel's) is the same
-/// light made dimmer as a whole, so its brightest point just fits and every
-/// part of it keeps its share, as a dimmer LED's would.
-fn key_colour(l: &Light, top: f32, ceiling: f32) -> [f32; 3] {
+/// key is lit. Nothing holds it back: a part asked for more than the screen
+/// can show in that colour (a saturated red's channel passes the screen's
+/// peak well before its luminance does) is sent as asked, and the screen
+/// clips it there.
+fn key_colour(l: &Light) -> [f32; 3] {
     let c = [lin(l.rgb[0]), lin(l.rgb[1]), lin(l.rgb[2])];
     let y = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
     if y <= 0.0 {
         return [0.0; 3];
     }
-    let unit = c.map(|v| v / y);
-    let widest = unit[0].max(unit[1]).max(unit[2]) * top;
-    let fit = if widest > ceiling { ceiling / widest } else { 1.0 };
-    unit.map(|v| v * l.strength.clamp(0.0, 1.0) * fit)
+    c.map(|v| v / y * l.strength.clamp(0.0, 1.0))
+}
+
+/// How bright a key's colour goes, in the SDR white's units, before one of
+/// its channels passes `ceiling`: past it the screen clips that channel.
+fn clean_limit(l: &Light, ceiling: f32) -> f32 {
+    let c = [lin(l.rgb[0]), lin(l.rgb[1]), lin(l.rgb[2])];
+    let y = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    let widest = c[0].max(c[1]).max(c[2]);
+    if widest <= 0.0 { 0.0 } else { ceiling * y / widest }
 }
 
 /// A clip path somewhere under `g`, by its id, with the group it clips.
@@ -440,21 +446,15 @@ impl Board {
     }
 
     /// The brightest light on the keyboard with these lights, in nits, with
-    /// the SDR white at `white` nits and the screen's limit at `ceiling`
-    /// times it: the legends', the deck's, and how bright the lit keys'
-    /// colour can go at all.
+    /// the SDR white at `white` nits and Peak nits at `ceiling` times it: the
+    /// legends', the deck's, and the brightest the lit keys' colour shows
+    /// cleanly, before the screen clips one of its channels.
     pub fn peaks(&self, lights: &[Light], white: f32, ceiling: f32) -> (f32, f32, f32) {
         let (legend, deck, _) = self.model.tops(white, ceiling);
         let lit: Vec<&Light> = lights.iter().filter(|l| self.keys.iter().any(|k| k.pos == l.pos)).collect();
-        let brightest = |top: f32| {
-            lit.iter()
-                .map(|l| {
-                    let c = key_colour(l, top, ceiling);
-                    (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) * top * white
-                })
-                .fold(0.0f32, f32::max)
-        };
-        (brightest(legend), brightest(deck), brightest(ceiling))
+        let strongest = lit.iter().map(|l| l.strength.clamp(0.0, 1.0)).fold(0.0f32, f32::max);
+        let clean = lit.iter().map(|l| clean_limit(l, ceiling) * l.strength.clamp(0.0, 1.0)).fold(0.0f32, f32::max);
+        (strongest * legend * white, strongest * deck * white, clean * white)
     }
 
     /// The places of the keys that light.
@@ -465,8 +465,9 @@ impl Board {
     /// The picture with this light: premultiplied linear RGBA, the SDR white
     /// at 1.0 (`white` nits). Each part of the light (the legends, the deck's
     /// glow, the skirts' feet) is at its brightest the core's nits for it, in
-    /// luminance, whatever its colour, and no channel goes past `ceiling`
-    /// times the white (what the screen can show).
+    /// luminance, whatever its colour, up to Peak nits (`ceiling` times the
+    /// white). Nothing else holds it back: a colour asked for brighter than the
+    /// screen can show it goes as asked, and the screen clips it.
     ///
     /// The light is each key's LED, under its cap: it comes out through the
     /// legend, brightest nearest the LED, and escapes under the skirt onto the
@@ -506,10 +507,7 @@ impl Board {
             px[3] = 1.0;
         }
         let light = |pos: u32| lights.iter().find(|l| l.pos == pos);
-        // Each part's colour: a key's colour the screen cannot show as bright as a
-        // part's own top is held back for that part alone, so the dim deck of a
-        // bright red key keeps its brightness.
-        let colour = |l: &Light, top: f32| key_colour(l, top, ceiling);
+        let colour = |l: &Light, _top: f32| key_colour(l);
         // each pixel of a shape in this band: its place here, its index in the shape, and its value
         let each = |s: &Shape, f: &mut dyn FnMut(usize, usize, f32)| {
             for row in 0..s.h as i32 {
@@ -530,16 +528,11 @@ impl Board {
                 }
             }
         };
-        // light given off, held where a colour passes what the screen shows, its hue kept
+        // light given off, added as it is
         let shine = |out: &mut [f32], em: &mut [[f32; 3]]| {
             for (d, px) in out.chunks_exact_mut(4).enumerate() {
-                let mut e = em[d];
-                let mx = e[0].max(e[1]).max(e[2]);
-                if mx > ceiling {
-                    e = e.map(|v| v * ceiling / mx);
-                }
                 for i in 0..3 {
-                    px[i] += e[i];
+                    px[i] += em[d][i];
                 }
                 em[d] = [0.0; 3];
             }
@@ -798,11 +791,16 @@ mod tests {
         let (legend, deck, _) = b.peaks(&lights, 254.0, 1000.0 / 254.0);
         eprintln!("legends turned down: legends {legend:.0} nits, deck {deck:.0}");
         assert!((legend - 200.0).abs() < 1.0 && (deck - 90.0).abs() < 1.0, "the deck keeps its own brightness");
-        // a red the screen cannot show at 200 nits holds back its legends, not its dim deck
+        // a red the screen cannot show cleanly at 200 nits is still sent at 200;
+        // its clean limit is only told
         let red: Vec<Light> = b.keys.iter().map(|k| Light { pos: k.pos, rgb: [255, 0, 0], strength: 1.0, dim: false }).collect();
-        let (legend, deck, reach) = b.peaks(&red, 254.0, 600.0 / 254.0);
-        eprintln!("red at a 600-nit peak: legends {legend:.0} nits (reach {reach:.0}), deck {deck:.0}");
-        assert!(legend < 200.0 && (legend - reach).abs() < 1.0 && (deck - 90.0).abs() < 1.0);
+        let (legend, deck, clean) = b.peaks(&red, 254.0, 600.0 / 254.0);
+        eprintln!("red at a 600-nit peak: legends {legend:.0} nits (clean up to {clean:.0}), deck {deck:.0}");
+        assert!((legend - 200.0).abs() < 1.0 && clean < 200.0 && (deck - 90.0).abs() < 1.0);
+        let lit = b.compose(&red, 254.0, 600.0 / 254.0);
+        let hottest = lit.chunks_exact(4).map(|p| 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]).fold(0f32, f32::max) * 254.0;
+        eprintln!("red legends sent at {hottest:.0} nits");
+        assert!((hottest - 200.0).abs() < 2.0, "the legends go as bright as asked");
         // and a key's brightness dims every part of it together
         let half: Vec<Light> = lights.iter().map(|l| Light { strength: 0.5, ..*l }).collect();
         let (legend, deck, _) = b.peaks(&half, 254.0, 1000.0 / 254.0);

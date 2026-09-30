@@ -1900,11 +1900,7 @@ fn light(board: &Board, lights: &[Light], ceiling: f32, reference: f64, panel: O
                     continue;
                 }
                 let c = p.px[(row * p.w as i32 + col) as usize];
-                let mut e = c.map(|v| v.max(0.0).powf(2.2) * k);
-                let m = e[0].max(e[1]).max(e[2]);
-                if m > ceiling {
-                    e = e.map(|v| v * ceiling / m);
-                }
+                let e = c.map(|v| v.max(0.0).powf(2.2) * k);
                 let d = ((y * w + x) * 4) as usize;
                 px[d..d + 3].copy_from_slice(&e);
                 px[d + 3] = 1.0;
