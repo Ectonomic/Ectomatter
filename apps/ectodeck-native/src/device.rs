@@ -48,7 +48,32 @@ pub fn start(backups: PathBuf, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
     let (ask, asked) = mpsc::channel::<Ask>();
     std::thread::spawn(move || {
         let kb = Keyboard::new(Conn::hid(), Some(backups));
-        while let Ok(a) = asked.recv() {
+        let mut queue: std::collections::VecDeque<Ask> = std::collections::VecDeque::new();
+        loop {
+            // Everything asked for so far: a slider reading goes first, so the
+            // knobs keep up while the lighting streams, and of several previews
+            // only the newest is sent (the older ones are already out of date).
+            if queue.is_empty() {
+                match asked.recv() {
+                    Ok(a) => queue.push_back(a),
+                    Err(_) => break,
+                }
+            }
+            while let Ok(a) = asked.try_recv() {
+                queue.push_back(a);
+            }
+            if let Some(i) = queue.iter().position(|a| matches!(a, Ask::Sliders)) {
+                let a = queue.remove(i).unwrap();
+                queue.push_front(a);
+            }
+            let last_preview = queue.iter().rposition(|a| matches!(a, Ask::Preview(_)));
+            let mut k = 0;
+            queue.retain(|a| {
+                let keep = !matches!(a, Ask::Preview(_)) || Some(k) == last_preview;
+                k += 1;
+                keep
+            });
+            let Some(a) = queue.pop_front() else { continue };
             let heard = match a {
                 Ask::State => Heard::State(kb.state().map_err(|e| e.to_string())),
                 Ask::Save(n, body) => Heard::Saved(n, kb.save(n, &body).map_err(|e| e.to_string())),

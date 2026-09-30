@@ -214,6 +214,9 @@ pub struct Front {
     pub restart: Option<String>,
     /// the Macro Editor's window, once it has been opened
     pub macros: Option<crate::macro_page::MacroPage>,
+    /// when the sliders were last read, and the time between readings, smoothed
+    last_reading: Option<Instant>,
+    reading_gap: f32,
 }
 
 /// A profile's colour sample: how many colours, and the colours.
@@ -326,6 +329,8 @@ impl Front {
             levels: (254.0, 1000.0),
             restart: None,
             macros: None,
+            last_reading: None,
+            reading_gap: 120.0,
         };
         f.weather.set_place(weather_place(&f.settings));
         f.ui.set_overlays(ModelRc::from(f.overlay_model.clone()));
@@ -422,6 +427,14 @@ impl Front {
             }
             device::Heard::Sliders(r) => {
                 self.sliders_asked = false;
+                // how often readings really come, which the knobs' glide lasts
+                if let Some(t) = self.last_reading.replace(Instant::now()) {
+                    let gap = t.elapsed().as_secs_f32() * 1000.0;
+                    if gap < 400.0 {
+                        self.reading_gap = self.reading_gap * 0.7 + gap * 0.3;
+                        self.ui.set_knob_glide(self.reading_gap.clamp(60.0, 250.0) as i64);
+                    }
+                }
                 if let Ok(v) = r {
                     self.move_knobs(&v);
                 }

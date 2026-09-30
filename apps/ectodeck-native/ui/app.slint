@@ -1439,6 +1439,7 @@ export component AppWindow inherits Window {
     out property <bool> board-shown: root.place == "z10";
     // the keyboard has been drawn: its knobs and display come with it, never before
     in property <bool> board-ready;
+    in property <duration> knob-glide: 120ms;
     out property <length> board-x: rail-w + pws-x;
     out property <length> board-y: bar + 56px + flick.content-y + board-top;
     out property <length> board-width: board-w;
@@ -1753,9 +1754,9 @@ export component AppWindow inherits Window {
                     for o in root.overlays: Image {
                         visible: root.board-ready;
                         x: o.x;
-                        // a short glide between readings, which come ten times a
-                        // second, keeps the knobs from stepping, as the web app's did
-                        animate x { duration: 120ms; easing: linear; }
+                        // a glide as long as the time between readings, so a knob is
+                        // still moving when the next one comes and never steps
+                        animate x { duration: root.knob-glide; easing: linear; }
                         y: o.y;
                         width: o.w;
                         height: o.h;
@@ -2673,6 +2674,7 @@ export component MacroWindow inherits Window {
             width: parent.width - 30px;
             height: 56px;
             spacing: 8px;
+            // the name: a click into it edits it, as the rename button does
             if !root.editing-name: Text {
                 text: root.macro-name;
                 font-size: 14.5px;
@@ -2680,6 +2682,11 @@ export component MacroWindow inherits Window {
                 color: Ink.ink;
                 vertical-alignment: center;
                 overflow: elide;
+                TouchArea {
+                    enabled: root.can-rename;
+                    mouse-cursor: text;
+                    clicked => { root.rename(); }
+                }
             }
             if root.editing-name: Rectangle {
                 width: 320px;

@@ -162,82 +162,105 @@ impl Board {
     }
 
     /// The picture with this light: premultiplied linear RGBA, the SDR white
-    /// at 1.0 and the light up to `gain` times it.
+    /// at 1.0 and the brightest light at `top` times it.
     ///
-    /// Light is added, as light is: each key's LEDs give off their colour at
-    /// `strength` times `gain` (the brightest legend's brightness over the
-    /// desktop's white), and each piece of light in the drawing (the spill on
-    /// the deck, the light on the cap, the glow round the legend) takes its
-    /// share of it by its shape. A dimmer key is the same light at fewer nits,
-    /// never the same brightness shown fainter. At `gain` 1 and full strength
-    /// every piece comes out as the web design drew it: its shape's coverage,
-    /// which CSS mixed in sRGB's encoding, taken to linear light.
-    pub fn compose(&self, lights: &[Light], gain: f32) -> Vec<f32> {
-        let (w, h) = (self.w as i32, self.h as i32);
+    /// The light is light: the drawing's pieces of it (the spill on the deck,
+    /// the light on the cap, the glow round the legend, the legend) are laid
+    /// together, as the web page stacked them, and how opaque they come out
+    /// at a pixel says how bright the light is there: fully opaque is `top`,
+    /// clear is none, along LIGHT_CURVE between. A key's brightness scales
+    /// its light's nits, never its opacity.
+    pub fn compose(&self, lights: &[Light], top: f32) -> Vec<f32> {
+        let (w, h) = (self.w as usize, self.h as usize);
+        let mut out = vec![0f32; w * h * 4];
+        // in bands of rows, one a thread: every step below is the pixel's own
+        let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(16);
+        let rows = h.div_ceil(threads).max(1);
+        std::thread::scope(|sc| {
+            for (b, band) in out.chunks_mut(rows * w * 4).enumerate() {
+                let y0 = b * rows;
+                sc.spawn(move || self.compose_rows(lights, top, y0, band));
+            }
+        });
+        out
+    }
+
+    fn compose_rows(&self, lights: &[Light], top: f32, y0: usize, out: &mut [f32]) {
+        let w = self.w as usize;
+        let n = out.len() / 4;
+        let y1 = y0 + n / w;
         let dec = |v: f32| v.max(0.0).powf(2.2);
         // the body and its print, in linear light, opaque
-        let mut out = vec![0f32; (self.w * self.h * 4) as usize];
         for (i, px) in out.chunks_exact_mut(4).enumerate() {
+            let j = (y0 * w + i) * 3;
             for c in 0..3 {
-                px[c] = dec(self.under[i * 3 + c]);
+                px[c] = dec(self.under[j + c]);
             }
             px[3] = 1.0;
         }
         let light = |pos: u32| lights.iter().find(|l| l.pos == pos);
-        // the light a key's LEDs give off, in linear light
-        let emit = |l: &Light| {
-            let k = l.strength.max(0.0) * gain;
+        // a key's light: its colour in linear light, as bright as the key is lit
+        let colour = |l: &Light| {
+            let k = l.strength.clamp(0.0, 1.0);
             [lin(l.rgb[0]) * k, lin(l.rgb[1]) * k, lin(l.rgb[2]) * k]
         };
-        // each pixel of a shape: its place in the picture, and its weight
+        // each pixel of a shape in this band: its place here, and its coverage
         let each = |s: &Shape, f: &mut dyn FnMut(usize, f32)| {
             for row in 0..s.h as i32 {
                 let y = s.y + row;
-                if y < 0 || y >= h {
+                if y < y0 as i32 || y >= y1 as i32 {
                     continue;
                 }
                 for col in 0..s.w as i32 {
                     let x = s.x + col;
-                    if x < 0 || x >= w {
+                    if x < 0 || x >= w as i32 {
                         continue;
                     }
                     let a = s.cover[(row * s.w as i32 + col) as usize];
                     if a > 0.0 {
-                        f(((y * w + x) * 4) as usize, a);
+                        f((y as usize - y0) * w + x as usize, a);
                     }
                 }
             }
         };
-        // light added through a shape, as much of it as the design's coverage lets through
-        let add = |out: &mut [f32], s: &Shape, e: [f32; 3], k: f32| {
-            if e.iter().all(|v| *v <= 0.0) || k <= 0.0 {
-                return;
-            }
-            each(s, &mut |d, a| {
-                let wgt = a.powf(2.2) * k;
-                for c in 0..3 {
-                    out[d + c] += e[c] * wgt;
-                }
-            });
-        };
-        // a colour laid over through a shape: the legends' print
-        let over = |out: &mut [f32], s: &Shape, col: [f32; 3], k: f32| {
+        // Light pieces stacked: how opaque they are together, and their colour
+        // (premultiplied), as one piece laid over another.
+        let mut opa = vec![0f32; n];
+        let mut col = vec![[0f32; 3]; n];
+        let stack = |opa: &mut [f32], col: &mut [[f32; 3]], s: &Shape, c: [f32; 3], k: f32| {
             each(s, &mut |d, a| {
                 let a = a * k;
-                for c in 0..3 {
-                    out[d + c] = out[d + c] * (1.0 - a) + col[c] * a;
+                opa[d] = a + opa[d] * (1.0 - a);
+                for i in 0..3 {
+                    col[d][i] = c[i] * a + col[d][i] * (1.0 - a);
                 }
             });
         };
+        // the stacked light, added at its brightness, and the stack cleared
+        let shine = |out: &mut [f32], opa: &mut [f32], col: &mut [[f32; 3]]| {
+            for (d, px) in out.chunks_exact_mut(4).enumerate() {
+                let a = opa[d];
+                if a > 0.0 {
+                    let k = top * a.powf(LIGHT_CURVE) / a;
+                    for i in 0..3 {
+                        px[i] += col[d][i] * k;
+                    }
+                }
+                opa[d] = 0.0;
+                col[d] = [0.0; 3];
+            }
+        };
 
-        // the light each key throws on the deck
+        // the light each key throws on the deck, under the caps
         for key in &self.keys {
             if let (Some(l), Some(s)) = (light(key.pos), &key.under) {
-                add(&mut out, s, emit(l), 1.0);
+                stack(&mut opa, &mut col, s, colour(l), 1.0);
             }
         }
+        shine(out, &mut opa, &mut col);
         // the caps over it
-        for (px, cap) in out.chunks_exact_mut(4).zip(self.caps.chunks_exact(4)) {
+        for (i, px) in out.chunks_exact_mut(4).enumerate() {
+            let cap = &self.caps[(y0 * w + i) * 4..(y0 * w + i) * 4 + 4];
             let a = cap[3];
             if a <= 0.0 {
                 continue;
@@ -246,29 +269,43 @@ impl Board {
                 px[c] = dec(cap[c] / a) * a + px[c] * (1.0 - a);
             }
         }
-        // the light on each cap, the glow round each legend, and the legend lit from behind
+        // the print of each lit legend, which shows less as the light behind it outshines it
         for key in &self.keys {
-            let l = light(key.pos);
-            let e = l.map_or([0.0; 3], emit);
-            if let Some(s) = &key.cap {
-                add(&mut out, s, e, 1.0);
-            }
-            if let Some(s) = &key.glow {
-                add(&mut out, s, e, 1.0);
-            }
             if let Some(s) = &key.legend {
-                // a remapped key's legend steps back
+                let l = light(key.pos);
                 let back = if l.is_some_and(|l| l.dim) { 0.35 } else { 1.0 };
-                // the print shows as the light behind it outshines it
                 let lit = l.map_or(0.0, |l| l.strength.clamp(0.0, 1.0));
-                let print = [dec(key.print[0]) * (1.0 - lit), dec(key.print[1]) * (1.0 - lit), dec(key.print[2]) * (1.0 - lit)];
-                over(&mut out, s, print, back);
-                add(&mut out, s, e, back);
+                let print = [0, 1, 2].map(|c| dec(key.print[c]) * (1.0 - lit));
+                each(s, &mut |d, a| {
+                    let a = a * back;
+                    for c in 0..3 {
+                        out[d * 4 + c] = out[d * 4 + c] * (1.0 - a) + print[c] * a;
+                    }
+                });
             }
         }
-        out
+        // the light on each cap, the glow round each legend, and the legend lit from behind
+        for key in &self.keys {
+            let Some(l) = light(key.pos) else { continue };
+            let c = colour(l);
+            let back = if l.dim { 0.35 } else { 1.0 };
+            for s in [&key.cap, &key.glow].into_iter().flatten() {
+                stack(&mut opa, &mut col, s, c, 1.0);
+            }
+            if let Some(s) = &key.legend {
+                stack(&mut opa, &mut col, s, c, back);
+            }
+        }
+        shine(out, &mut opa, &mut col);
     }
 }
+
+/// How the light's brightness follows its opacity: nits = top x opacity^LIGHT_CURVE.
+/// Above 1 the faint edges fall away faster than the opaque middles, as a
+/// glow round a bright source does; 1.4 keeps the faint light on the caps
+/// and the deck (a tenth to a third opaque in the design) visible, at a few
+/// percent to a fifth of the top.
+pub const LIGHT_CURVE: f32 = 1.4;
 
 /// The first fill colour in a piece: the grey a legend is printed in.
 fn first_fill(node: &usvg::Node) -> Option<[u8; 3]> {
