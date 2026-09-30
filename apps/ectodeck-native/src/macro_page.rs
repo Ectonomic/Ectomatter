@@ -31,6 +31,7 @@ pub enum Ask {
     More(f32, f32, f32),
     ChainClick(i32, i32, f32, f32, f32),
     ChainDrop(i32, f32, f32),
+    ChainDrag(i32, f32, f32, f32, f32),
     WaitDone(i32, String),
     WaitCancel,
     Tool(i32, f32, f32, f32),
@@ -109,6 +110,9 @@ pub struct MacroPage {
     saving: Option<Saving>,
     chain: Rc<VecModel<Cell>>,
     items: Rc<VecModel<MacroItem>>,
+    fake_rec: bool,
+    /// the chosen macro is to be scrolled into view in the list
+    scroll_to: bool,
 }
 
 fn row(kind: i32, label: &str, tick: bool) -> MenuRow {
@@ -141,6 +145,7 @@ impl MacroPage {
         on!(on_more, |x, y, h| Ask::More(x, y, h));
         on!(on_chain_click, |id, i, x, y, h| Ask::ChainClick(id, i, x, y, h));
         on!(on_chain_drop, |i, x, y| Ask::ChainDrop(i, x, y));
+        on!(on_chain_drag, |i, x, y, ox, oy| Ask::ChainDrag(i, x, y, ox, oy));
         on!(on_wait_done, |i, t| Ask::WaitDone(i, t.to_string()));
         on!(on_wait_cancel, Ask::WaitCancel);
         on!(on_tool, |k, x, y, h| Ask::Tool(k, x, y, h));
@@ -173,6 +178,8 @@ impl MacroPage {
             saving: None,
             chain,
             items,
+            fake_rec: false,
+            scroll_to: false,
         }
     }
 
@@ -186,6 +193,7 @@ impl MacroPage {
             self.ed.current = Some(n);
             self.ed.sel_step = None;
             self.ed.ins = None;
+            self.scroll_to = true;
         }
         self.refresh(page);
     }
@@ -238,6 +246,7 @@ impl MacroPage {
                 Ask::New => {
                     if self.ed.rec.is_none() {
                         self.ed.new_macro(page);
+                        self.scroll_to = true;
                     }
                 }
                 Ask::Rename => self.start_rename(page),
@@ -266,14 +275,24 @@ impl MacroPage {
                         _ => {}
                     }
                 }
+                Ask::ChainDrag(from, x, y, ox, oy) => {
+                    if let Some(mut g) = self.chain.iter().find(|c| c.kind == piece::STEP && c.index == from) {
+                        g.x = x - ox;
+                        g.y = y - oy;
+                        g.id = 0;
+                        g.on = false;
+                        self.ui.set_ghost(g);
+                        self.ui.set_ghost_on(true);
+                    }
+                    self.ui.set_drop_index(self.step_at(x, y).filter(|&t| t != from).unwrap_or(-1));
+                    continue;
+                }
                 Ask::ChainDrop(from, x, y) => {
                     // onto the step under the pointer, which it goes before
-                    let (cx, cy) = (290.0 + 18.0, 36.0 + 56.0 + self.ui.get_chain_scroll());
-                    let to = (0..self.chain.row_count())
-                        .filter_map(|k| self.chain.row_data(k))
-                        .find(|c| c.kind == piece::STEP && c.id == hit::STEP && x >= cx + c.x && x < cx + c.x + c.w && y >= cy + c.y && y < cy + c.y + c.h);
-                    if let Some(c) = to {
-                        self.ed.move_step(page, from.max(0) as usize, c.index as usize);
+                    self.ui.set_ghost_on(false);
+                    self.ui.set_drop_index(-1);
+                    if let Some(to) = self.step_at(x, y) {
+                        self.ed.move_step(page, from.max(0) as usize, to as usize);
                     }
                 }
                 Ask::WaitDone(i, t) => self.ed.set_wait(page, i.max(0) as usize, &t),
@@ -339,6 +358,15 @@ impl MacroPage {
         }
         self.refresh(page);
         (window, changed)
+    }
+
+    /// The step under a point in the window, by its index.
+    fn step_at(&self, x: f32, y: f32) -> Option<i32> {
+        let (cx, cy) = (290.0 + 18.0, 36.0 + 56.0 + self.ui.get_chain_scroll());
+        self.chain
+            .iter()
+            .find(|c| c.kind == piece::STEP && c.id == hit::STEP && x >= cx + c.x - 6.0 && x < cx + c.x + c.w && y >= cy + c.y && y < cy + c.y + c.h)
+            .map(|c| c.index)
     }
 
     fn locked(&self, page: &Page) -> bool {
@@ -636,8 +664,9 @@ impl MacroPage {
             }
             Pick::Duplicate => {
                 self.close_menu(false);
-                if let Err(e) = self.ed.duplicate(page) {
-                    self.status(e, 2);
+                match self.ed.duplicate(page) {
+                    Ok(()) => self.scroll_to = true,
+                    Err(e) => self.status(e, 2),
                 }
             }
             Pick::Delete => {
@@ -683,6 +712,14 @@ impl MacroPage {
         self.close_menu(false);
         self.ed.sel_step = None;
         self.ed.edit_wait = None;
+        // ECTODECK_NATIVE_FAKE_REC: steps as JSON, to check how a recording
+        // looks offscreen without taking the keyboard
+        if let Some(steps) = std::env::var("ECTODECK_NATIVE_FAKE_REC").ok().and_then(|v| serde_json::from_str::<Vec<Value>>(&v).ok()) {
+            self.ed.rec = Some(Recording { used: macros::bytes(&steps), steps, elapsed: 3.4 });
+            self.status("Recording. The Z10\u{2019}s keys go only to the recording until you press Stop.", 0);
+            self.fake_rec = true;
+            return;
+        }
         match self.rec.start(room, self.ed.record_waits) {
             Ok(_) => {
                 self.ed.rec = Some(Recording { steps: Vec::new(), used: 0, elapsed: 0.0 });
@@ -695,7 +732,7 @@ impl MacroPage {
     }
 
     fn rec_tick(&mut self, page: &Page) {
-        if self.ed.rec.is_none() {
+        if self.ed.rec.is_none() || self.fake_rec {
             return;
         }
         let r = self.rec.status();
@@ -883,6 +920,19 @@ impl MacroPage {
                 }
             })
             .collect();
+        // the chosen one brought into view, as the web page scrolled it to the nearest edge
+        if std::mem::take(&mut self.scroll_to) {
+            if let Some(i) = items.iter().position(|m| m.current) {
+                let view = self.ui.get_window_height() - 36.0 - 56.0 - 10.0;
+                let (top, bottom) = (i as f32 * 55.0, i as f32 * 55.0 + 53.0);
+                let at = -self.ui.get_lib_scroll();
+                if top < at {
+                    self.ui.set_lib_scroll(-top);
+                } else if bottom > at + view {
+                    self.ui.set_lib_scroll(-(bottom - view));
+                }
+            }
+        }
         set_rows(&self.items, items);
         ui.set_slots_text(format!("{saved_count} of 100 slots").into());
         ui.set_can_new(!self.ed.free_slots(page).is_empty() && !rec);
@@ -913,7 +963,7 @@ impl MacroPage {
         let eff = Editor::effective(&d);
         let live = ed.rec.as_ref().map_or(0, |r| r.steps.len());
         let (cells, h) = macros::chain(ed, &d, locked, chain_w);
-        set_rows(&self.chain, cells);
+        crate::front::sync_cells(&self.chain, cells);
         ui.set_chain_h(h);
         ui.set_chain_empty(if eff.is_empty() && live == 0 { if rec { 2 } else { 1 } } else { 0 });
         let hint = if rec { "Type the keys on your Z10. Press Stop to finish." } else { "Press Record and type the keys on your Z10, or add keys, media keys and waits with the buttons below." };

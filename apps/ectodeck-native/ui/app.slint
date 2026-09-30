@@ -41,9 +41,6 @@ global Ink {
 // how many clickable things the pointer is over: the window shows the hand
 // while it is over any. Each counts itself in and out as it is pointed at,
 // so the order two neighbours hear the pointer in does not matter.
-global Cursor {
-    in-out property <int> hands: 0;
-}
 
 // a profile's button in the panel's head
 export struct ProfileItem {
@@ -188,7 +185,7 @@ component RailItem inherits Rectangle {
         overflow: elide;
     }
     ta := TouchArea {
-        changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+        mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
     if ta.has-hover && !root.open: Rectangle {
@@ -228,7 +225,7 @@ component Tab inherits Rectangle {
         vertical-alignment: center;
     }
     ta := TouchArea {
-        changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+        mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
 }
@@ -261,7 +258,7 @@ component WordButton inherits Rectangle {
     }
     ta := TouchArea {
         enabled: root.enabled;
-        changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+        mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
 }
@@ -285,7 +282,7 @@ component TextButton inherits Rectangle {
         color: root.on ? Ink.warn : ta.has-hover ? Ink.ink : Ink.dim;
     }
     ta := TouchArea {
-        changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+        mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
 }
@@ -380,7 +377,7 @@ component ProfileButton inherits Rectangle {
         background: Ink.warn;
     }
     ta := TouchArea {
-        changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+        mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
 }
@@ -431,7 +428,7 @@ component KeyBox inherits Rectangle {
         background: #bdbdbd;
     }
     ta := TouchArea {
-        changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+        mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
 }
@@ -490,7 +487,7 @@ component ActButton inherits Rectangle {
         }
     }
     ta := TouchArea {
-        changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+        mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
 }
@@ -594,7 +591,7 @@ component LayerEditor inherits VerticalLayout {
                 background: #5c5c5c;
             }
             TouchArea {
-                changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+                mouse-cursor: pointer;
                 clicked => { root.macro-editor(); }
             }
         }
@@ -644,7 +641,7 @@ component Menu inherits Rectangle {
             vertical-alignment: center;
         }
         back-ta := TouchArea {
-            changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+            mouse-cursor: pointer;
             clicked => { root.go-back(); }
         }
     }
@@ -744,7 +741,7 @@ component Menu inherits Rectangle {
                         color: Ink.ink;
                         vertical-alignment: center;
                         TouchArea {
-                            changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+                            mouse-cursor: pointer;
                             clicked => { root.chose(i); }
                         }
                     }
@@ -830,7 +827,7 @@ component Menu inherits Rectangle {
                 }
                 item := TouchArea {
                     enabled: row.kind == 0 || row.kind == 4;
-                    changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+                    mouse-cursor: pointer;
                     clicked => { root.chose(i); }
                 }
             }
@@ -866,7 +863,7 @@ component EffectButton inherits Rectangle {
         vertical-alignment: center;
     }
     ta := TouchArea {
-        changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+        mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
 }
@@ -911,7 +908,7 @@ component CellView inherits Rectangle {
             border-color: sw.has-hover ? #ffffff66 : #ffffff2e;
         }
         sw := TouchArea {
-            changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+            mouse-cursor: pointer;
             clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
         }
     }
@@ -945,7 +942,7 @@ component CellView inherits Rectangle {
             vertical-alignment: center;
         }
         TouchArea {
-            changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+            mouse-cursor: pointer;
             // which box, and the state it is turned to
             clicked => { root.pick(root.c.id, root.c.index * 2 + (root.c.on ? 0 : 1), 0, 0, 0); }
         }
@@ -967,7 +964,7 @@ component CellView inherits Rectangle {
             background: Ink.ink;
         }
         drag := TouchArea {
-            changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+            mouse-cursor: pointer;
             pointer-event(e) => {
                 if (e.kind == PointerEventKind.down) {
                     root.slide(root.c.id, max(0, min(1, (self.mouse-x - 8px) / (self.width - 16px))));
@@ -1064,7 +1061,7 @@ component CellView inherits Rectangle {
             stroke-width: 1.35px;
         }
         dd := TouchArea {
-            changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+            mouse-cursor: pointer;
             clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
         }
     }
@@ -1084,7 +1081,7 @@ component CellView inherits Rectangle {
             color: root.c.on ? #171717 : root.c.kind == 8 ? (b.has-hover ? Ink.ink : Ink.quiet) : root.c.kind == 7 ? Ink.ink : b.has-hover ? #ffffff : Ink.dim;
         }
         b := TouchArea {
-            changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+            mouse-cursor: pointer;
             clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
         }
     }
@@ -1152,7 +1149,7 @@ component Well inherits Rectangle {
         border-color: ta.has-hover ? #ffffff99 : #ffffff24;
     }
     ta := TouchArea {
-        changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+        mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
 }
@@ -1368,7 +1365,7 @@ component Tile inherits Rectangle {
         horizontal-alignment: center;
     }
     ta := TouchArea {
-        changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+        mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
 }
@@ -1440,6 +1437,8 @@ export component AppWindow inherits Window {
 
     // where the keyboard goes, for the window to draw it there, when its page shows
     out property <bool> board-shown: root.place == "z10";
+    // the keyboard has been drawn: its knobs and display come with it, never before
+    in property <bool> board-ready;
     out property <length> board-x: rail-w + pws-x;
     out property <length> board-y: bar + 56px + flick.content-y + board-top;
     out property <length> board-width: board-w;
@@ -1450,7 +1449,6 @@ export component AppWindow inherits Window {
     out property <length> ground-y: bar;
     out property <length> ground-radius: root.radius;
     // the hand, over what can be clicked
-    out property <bool> hand: Cursor.hands > 0;
     // the rail's width, for the window to know when it has settled
     out property <length> rail-width: rail-w;
 
@@ -1753,6 +1751,7 @@ export component AppWindow inherits Window {
                         clicked => { root.key-clicked(k.pos); }
                     }
                     for o in root.overlays: Image {
+                        visible: root.board-ready;
                         x: o.x;
                         // a short glide between readings, which come ten times a
                         // second, keeps the knobs from stepping, as the web app's did
@@ -1837,7 +1836,7 @@ export component AppWindow inherits Window {
                                 }
                             }
                             tact := TouchArea {
-                                changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+                                mouse-cursor: pointer;
                                 clicked => { root.macro-editor(-1); }
                             }
                         }
@@ -2211,7 +2210,7 @@ component MacroRow inherits Rectangle {
         vertical-alignment: center;
     }
     ta := TouchArea {
-        changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+        mouse-cursor: pointer;
         pointer-event(e) => {
             if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
                 root.menu(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
@@ -2226,9 +2225,21 @@ component MacroRow inherits Rectangle {
 component ChainPiece inherits Rectangle {
     in property <Cell> c;
     in property <bool> blink;
+    // a step being dragged is over this one: the web's bar at its left edge
+    in property <bool> drop-to;
     callback clicked(int, int, length, length, length);
     callback dropped(int, length, length);
+    // a step dragged: where the pointer is, and where on the step it was taken
+    callback drag-at(int, length, length, length, length);
     callback wait-typed(int, string);
+    // a step or wait just recorded pops in, once, as the web page's did
+    property <bool> fresh: root.c.index >= 1000 && (root.c.kind == 15 || root.c.kind == 16);
+    property <duration> born;
+    init => { root.born = animation-tick(); }
+    property <float> age: root.fresh ? max(0, min(1, (animation-tick() - root.born) / 400ms)) : 1;
+    property <float> eased: 1 - (1 - root.age) * (1 - root.age);
+    opacity: 0.3 + 0.7 * root.eased;
+    transform-scale: 0.85 + 0.15 * root.eased;
     callback wait-done(int, string);
     callback wait-cancel();
     x: root.c.x;
@@ -2269,8 +2280,20 @@ component ChainPiece inherits Rectangle {
                 vertical-alignment: center;
             }
         }
+        if root.drop-to: Rectangle {
+            x: -4px;
+            y: 1px;
+            width: 3px;
+            height: parent.height - 2px;
+            background: #a3a3a3;
+        }
         ev := TouchArea {
-            changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+            mouse-cursor: pointer;
+            moved => {
+                if (self.pressed && root.c.id != 0 && (abs(self.mouse-x - self.pressed-x) > 5px || abs(self.mouse-y - self.pressed-y) > 5px)) {
+                    root.drag-at(root.c.index, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y, self.pressed-x, self.pressed-y);
+                }
+            }
             pointer-event(e) => {
                 if (e.kind == PointerEventKind.up && e.button == PointerEventButton.left) {
                     if (abs(self.mouse-x - self.pressed-x) > 5px || abs(self.mouse-y - self.pressed-y) > 5px) {
@@ -2308,7 +2331,7 @@ component ChainPiece inherits Rectangle {
             }
         }
         wt := TouchArea {
-            changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+            mouse-cursor: pointer;
             clicked => { root.clicked(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
         }
     }
@@ -2400,7 +2423,7 @@ component ChainPiece inherits Rectangle {
         }
         cn := TouchArea {
             enabled: root.c.style == 0;
-            changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+            mouse-cursor: pointer;
             clicked => { root.clicked(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
         }
     }
@@ -2412,7 +2435,7 @@ component ChainPiece inherits Rectangle {
         TouchArea {
             x: -4px;
             width: parent.width + 8px;
-            changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+            mouse-cursor: pointer;
             clicked => { root.clicked(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
         }
     }
@@ -2427,6 +2450,7 @@ export component MacroWindow inherits Window {
     in property <bool> is-maximized;
     in property <image> mark;
     in property <[MacroItem]> items;
+    in-out property <length> lib-scroll;
     in property <string> slots-text;
     in property <bool> can-new;
     in property <string> macro-name;
@@ -2439,6 +2463,10 @@ export component MacroWindow inherits Window {
     in property <length> chain-h;
     in property <int> chain-empty;     // 0 steps, 1 none yet, 2 recording with none yet
     in property <[string]> empty-lines;
+    // a step being dragged: its chip under the pointer, and the step it would go before
+    in property <bool> ghost-on;
+    in property <Cell> ghost;
+    in property <int> drop-index: -1;
     in property <bool> tools-off;
     in property <bool> can-clear;
     in property <bool> can-key;
@@ -2484,7 +2512,6 @@ export component MacroWindow inherits Window {
     in property <string> confirm-title;
     in property <string> confirm-body;
     in property <string> confirm-body2;
-    out property <bool> hand: Cursor.hands > 0;
 
     callback minimise();
     callback maximise();
@@ -2499,6 +2526,7 @@ export component MacroWindow inherits Window {
     callback more(length, length, length);
     callback chain-click(int, int, length, length, length);
     callback chain-drop(int, length, length);
+    callback chain-drag(int, length, length, length, length);
     callback wait-done(int, string);
     callback wait-cancel();
     callback tool(int, length, length, length);
@@ -2619,6 +2647,7 @@ export component MacroWindow inherits Window {
             width: parent.width - 20px;
             height: parent.height - 56px - 10px;
             content-height: root.items.length * 55px;
+            content-y <=> root.lib-scroll;
             for m[i] in root.items: MacroRow {
                 y: i * 55px;
                 width: parent.width;
@@ -2700,13 +2729,13 @@ export component MacroWindow inherits Window {
                 }
                 TouchArea {
                     enabled: root.can-rename;
-                    changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+                    mouse-cursor: pointer;
                     clicked => { root.rename(); }
                 }
             }
             Rectangle { horizontal-stretch: 1; }
             if root.state-kind == 2: Rectangle {
-                width: 8px;
+                width: 7px;
                 Rectangle {
                     y: 24px;
                     width: 8px;
@@ -2733,13 +2762,22 @@ export component MacroWindow inherits Window {
                     Text { text: "⋯"; font-size: 15px; color: Ink.quiet; }
                     more-ta := TouchArea {
                         enabled: !root.recording;
-                        changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+                        mouse-cursor: pointer;
                         clicked => { root.more(self.absolute-position.x, self.absolute-position.y, 26px); }
                     }
                 }
             }
         }
         // the recording area: the chain, then the tools under it
+        // recording is a signal, so the canvas keeps a red edge while it runs
+        if root.recording: Rectangle {
+            x: 18px - 1px;
+            y: 56px - 1px;
+            width: parent.width - 36px + 2px;
+            height: parent.height - 56px - 66px + 2px;
+            border-radius: 15px;
+            background: #ff5b5bb3;
+        }
         canvas := Rectangle {
             x: 18px;
             y: 56px;
@@ -2747,8 +2785,6 @@ export component MacroWindow inherits Window {
             height: parent.height - 56px - 66px;
             border-radius: 14px;
             background: Ink.shade1;
-            border-width: root.recording ? 1px : 0;
-            border-color: #ff5b5bb3;
             chain-flick := Flickable {
                 y: 0;
                 width: parent.width;
@@ -2757,6 +2793,8 @@ export component MacroWindow inherits Window {
                 for c in root.chain: ChainPiece {
                     c: c;
                     blink: root.blink;
+                    drop-to: root.ghost-on && c.kind == 15 && c.id != 0 && c.index == root.drop-index;
+                    drag-at(i, x, y, ox, oy) => { root.chain-drag(i, x, y, ox, oy); }
                     clicked(id, i, x, y, h) => { root.chain-click(id, i, x, y, h); }
                     dropped(i, x, y) => { root.chain-drop(i, x, y); }
                     wait-done(i, t) => { root.wait-done(i, t); }
@@ -2829,7 +2867,7 @@ export component MacroWindow inherits Window {
                         MacroIcon { width: 14px; height: 14px; which: 2; stroke: Ink.dim; }
                         gear := TouchArea {
                             enabled: !root.tools-off;
-                            changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+                            mouse-cursor: pointer;
                             clicked => { root.tool(0, self.absolute-position.x, self.absolute-position.y, 24px); }
                         }
                     }
@@ -2850,14 +2888,14 @@ export component MacroWindow inherits Window {
                     vertical-alignment: center;
                 }
                 Rectangle { width: 4px; }
+                if root.recording: Rectangle { width: 6px; }
                 if root.recording: Text {
                     text: root.rec-clock;
-                    font-size: 12.5px;
-                    font-weight: 500;
-                    color: #ffc9c9;
+                    font-size: 13px;
+                    color: #ff9a9a;
                     vertical-alignment: center;
                 }
-                if root.recording: Rectangle { width: 8px; }
+                if root.recording: Rectangle { width: 4px; }
                 Rectangle {
                     width: rec-row.preferred-width;
                     border-radius: 8px;
@@ -2868,13 +2906,13 @@ export component MacroWindow inherits Window {
                         padding-right: 12px;
                         spacing: 7px;
                         Rectangle {
-                            width: 9px;
+                            width: root.recording ? 8px : 9px;
                             Rectangle {
-                                y: (parent.height - 9px) / 2;
-                                width: 9px;
-                                height: 9px;
-                                border-radius: root.recording ? 1.5px : 4.5px;
-                                background: #ff5b5b;
+                                y: (parent.height - self.height) / 2;
+                                width: root.recording ? 8px : 9px;
+                                height: self.width;
+                                border-radius: root.recording ? 2px : 4.5px;
+                                background: root.recording ? #ff8a8a : #ff5b5b;
                             }
                         }
                         Text {
@@ -2887,7 +2925,7 @@ export component MacroWindow inherits Window {
                     }
                     rec-ta := TouchArea {
                         enabled: root.recording || root.can-record;
-                        changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+                        mouse-cursor: pointer;
                         clicked => { root.tool(5, self.absolute-position.x, self.absolute-position.y, self.height); }
                     }
                 }
@@ -2932,7 +2970,7 @@ export component MacroWindow inherits Window {
                     }
                     plays-ta := TouchArea {
                         enabled: root.plays-on;
-                        changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+                        mouse-cursor: pointer;
                         clicked => { root.plays(self.absolute-position.x, self.absolute-position.y, 32px); }
                     }
                 }
@@ -2996,6 +3034,12 @@ export component MacroWindow inherits Window {
         }
     }
 
+    // the step being dragged, following the pointer as the web page's drag image did
+    if root.ghost-on: ChainPiece {
+        c: root.ghost;
+        opacity: 0.75;
+    }
+
     // the open menu, over everything
     menu := Menu {
         visible: root.menu-open;
@@ -3055,7 +3099,7 @@ export component MacroWindow inherits Window {
                         background: del-ta.has-hover ? #e25f5b : #d9534f;
                         del := Text { text: "Delete macro"; font-size: 13px; font-weight: 600; color: #ffffff; }
                         del-ta := TouchArea {
-                            changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+                            mouse-cursor: pointer;
                             clicked => { root.confirm-yes(); }
                         }
                     }

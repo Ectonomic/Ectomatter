@@ -1484,16 +1484,11 @@ impl Front {
     }
 
     /// The tile's pieces, changed in place where they can be.
+    /// Show the page's pieces, changing only the ones that changed. Pieces that
+    /// stay keep their place in the model, so one being dragged (a slider) keeps
+    /// its pointer even when pieces before or after it come or go.
     fn show_cells(&mut self, cells: Vec<Cell>) {
-        if self.cells.row_count() == cells.len() {
-            for (i, c) in cells.into_iter().enumerate() {
-                if self.cells.row_data(i).as_ref() != Some(&c) {
-                    self.cells.set_row_data(i, c);
-                }
-            }
-        } else {
-            self.cells.set_vec(cells);
-        }
+        sync_cells(&self.cells, cells);
     }
 
     /// What the keyboard's firmware can do beyond EVGA's.
@@ -1661,6 +1656,35 @@ impl Front {
         if hdr["lighting"].as_str() == Some("off") {
             return 1.0;
         }
+        // up to Peak nits; at the slider's left end, the design's brightness
         hdr["glow_limit"].as_f64().map_or(1.0, |n| (n / reference).max(1.0) as f32)
+    }
+}
+
+/// Bring a model of pieces to `rows`: the same pieces at the start and at the
+/// end are kept (their data updated in place), and only those between are
+/// taken out and put in. A piece is the same piece by its kind, id and index.
+pub fn sync_cells(model: &VecModel<Cell>, rows: Vec<Cell>) {
+    let key = |c: &Cell| (c.kind, c.id, c.index);
+    let old: Vec<Cell> = (0..model.row_count()).filter_map(|i| model.row_data(i)).collect();
+    let (n, m) = (old.len(), rows.len());
+    let mut head = 0;
+    while head < n && head < m && key(&old[head]) == key(&rows[head]) {
+        head += 1;
+    }
+    let mut tail = 0;
+    while tail < n - head && tail < m - head && key(&old[n - 1 - tail]) == key(&rows[m - 1 - tail]) {
+        tail += 1;
+    }
+    for i in (head..n - tail).rev() {
+        model.remove(i);
+    }
+    for (k, c) in rows[head..m - tail].iter().enumerate() {
+        model.insert(head + k, c.clone());
+    }
+    for i in (0..head).chain(m - tail..m) {
+        if model.row_data(i).as_ref() != Some(&rows[i]) {
+            model.set_row_data(i, rows[i].clone());
+        }
     }
 }

@@ -16,6 +16,7 @@
 //! ECTODECK_NATIVE_CLICKS says ("x,y;x,y", logical pixels) and types
 //! ECTODECK_NATIVE_TYPE, so each state of the page can be checked offscreen.
 
+mod adapter;
 mod device;
 mod display;
 mod devices;
@@ -46,7 +47,8 @@ use front::{Front, WindowAsk};
 use picture::{Lit, Picture};
 use resvg::tiny_skia::{Pixmap, Transform};
 use resvg::usvg;
-use slint::platform::software_renderer::{MinimalSoftwareWindow, PremultipliedRgbaColor, RepaintBufferType};
+use adapter::{Pointer, SoftWindow as MinimalSoftwareWindow};
+use slint::platform::software_renderer::{PremultipliedRgbaColor, RepaintBufferType};
 use slint::platform::{Key, PointerEventButton, WindowAdapter, WindowEvent};
 use slint::{LogicalPosition, PhysicalSize, SharedString};
 use smithay_client_toolkit::reexports::calloop::{self, EventLoop};
@@ -330,7 +332,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
             front.act();
         }
     }
-    eprintln!("the hand shows: {}", front.ui.get_hand());
+    eprintln!("the cursor: {:?}", window.pointer());
     window.request_redraw();
     window.draw_if_needed(|r| {
         r.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
@@ -351,8 +353,16 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         let board = Board::new(&tree, &device, GROUND, rect.2 as u32, rect.3 as u32).unwrap();
         eprintln!("keyboard drawn in {:?}", t.elapsed());
         let lights = front.lights().unwrap_or_default();
+        let gain = front.light_gain(reference).max(gain);
+        eprintln!("the light at {:.0} nits", gain as f64 * reference);
         let lit = board.compose(&lights, gain);
         pic.set_keyboard(rect, Some(&Rc::new(Lit { px: lit, w: rect.2, h: rect.3 })));
+        front.ui.set_board_ready(true);
+        window.request_redraw();
+        window.draw_if_needed(|r| {
+            r.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
+            r.render(&mut pic.ui, w as usize);
+        });
     }
     let t = Instant::now();
     pic.encode_all();
@@ -408,6 +418,26 @@ fn snap_macros(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>
         window.dispatch_event(WindowEvent::KeyReleased { text });
         slint::platform::update_timers_and_animations();
         front.act_macros();
+    }
+    // ECTODECK_NATIVE_DRAG="x,y;x,y": a press at the first point, moved to the
+    // second; let go there only with ECTODECK_NATIVE_DRAG_RELEASE
+    if let Ok(d) = std::env::var("ECTODECK_NATIVE_DRAG") {
+        let pts: Vec<(f32, f32)> = d
+            .split(';')
+            .filter_map(|p| p.split_once(',').and_then(|(a, b)| Some((a.trim().parse().ok()?, b.trim().parse().ok()?))))
+            .collect();
+        if let [(x0, y0), (x1, y1)] = pts[..] {
+            let at = |t: f32| LogicalPosition::new(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t);
+            window.dispatch_event(WindowEvent::PointerMoved { position: at(0.0) });
+            window.dispatch_event(WindowEvent::PointerPressed { position: at(0.0), button: PointerEventButton::Left });
+            for k in 1..=10 {
+                window.dispatch_event(WindowEvent::PointerMoved { position: at(k as f32 / 10.0) });
+                front.act_macros();
+            }
+            if std::env::var_os("ECTODECK_NATIVE_DRAG_RELEASE").is_some() {
+                window.dispatch_event(WindowEvent::PointerReleased { position: at(1.0), button: PointerEventButton::Left });
+            }
+        }
     }
     if let Ok(at) = std::env::var("ECTODECK_NATIVE_HOVER") {
         let mut xy = at.split(',').map(|v| v.trim().parse::<f32>().unwrap_or(0.0));
@@ -946,8 +976,7 @@ impl App {
                 delta_y: -vertical.absolute as f32,
             }),
         }
-        let hand = self.front.macros.as_ref().is_some_and(|m| m.ui.get_hand());
-        let icon = edge_cursor(edge(mw.size, mw.maximized, x, y)).unwrap_or(if hand { CursorIcon::Pointer } else { CursorIcon::Default });
+        let icon = edge_cursor(edge(mw.size, mw.maximized, x, y)).unwrap_or(cursor_icon(mw.slint.pointer()));
         self.set_cursor(icon);
     }
 
@@ -1063,12 +1092,17 @@ impl App {
         // the keyboard: the one drawn at this size, or the last one stretched to
         // it while this size is drawn
         let rect = board_rect(&self.front.ui, self.scale as f32);
-        let want = (rect.2 as u32, rect.3 as u32);
-        if want.0 > 0 && self.board.as_ref().map(|b| (b.w, b.h)) != Some(want) && self.asked != Some(want) {
+        // drawn for the window's size even while another page shows, so the
+        // keyboard is there, whole, the moment its page opens
+        let ui = &self.front.ui;
+        let s = self.scale as f32;
+        let want = ((ui.get_board_width() * s).round().max(1.0) as u32, (ui.get_board_height() * s).round().max(1.0) as u32);
+        if want.0 > 1 && self.board.as_ref().map(|b| (b.w, b.h)) != Some(want) && self.asked != Some(want) {
             self.asked = Some(want);
             let _ = self.build.send(want);
         }
         self.front.board_size(rect.2 as u32, rect.3 as u32, self.scale as f32);
+        self.front.ui.set_board_ready(self.lit.is_some());
         let before = self.pic.keyboard_rect();
         if self.pic.set_keyboard(rect, self.lit.as_ref()) {
             for r in [before, rect] {
@@ -1393,8 +1427,7 @@ impl PointerHandler for App {
                 Some(ResizeEdge::Right) => CursorIcon::EResize,
                 Some(ResizeEdge::Top) => CursorIcon::NResize,
                 Some(ResizeEdge::Bottom) => CursorIcon::SResize,
-                _ if self.front.ui.get_hand() => CursorIcon::Pointer,
-                _ => CursorIcon::Default,
+                _ => cursor_icon(self.slint.pointer()),
             };
             self.set_cursor(icon);
         }
@@ -1526,4 +1559,15 @@ fn edge_cursor(e: Option<ResizeEdge>) -> Option<CursorIcon> {
         ResizeEdge::Bottom => CursorIcon::SResize,
         _ => return None,
     })
+}
+
+/// The compositor's cursor for the one Slint asked for.
+fn cursor_icon(p: Pointer) -> CursorIcon {
+    match p {
+        Pointer::Hand => CursorIcon::Pointer,
+        Pointer::Text => CursorIcon::Text,
+        Pointer::Grab => CursorIcon::Grab,
+        Pointer::Grabbing => CursorIcon::Grabbing,
+        Pointer::Default => CursorIcon::Default,
+    }
 }

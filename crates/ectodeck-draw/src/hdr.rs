@@ -163,49 +163,77 @@ impl Board {
 
     /// The picture with this light: premultiplied linear RGBA, the SDR white
     /// at 1.0 and the light up to `gain` times it.
+    ///
+    /// Light is added, as light is: each key's LEDs give off their colour at
+    /// `strength` times `gain` (the brightest legend's brightness over the
+    /// desktop's white), and each piece of light in the drawing (the spill on
+    /// the deck, the light on the cap, the glow round the legend) takes its
+    /// share of it by its shape. A dimmer key is the same light at fewer nits,
+    /// never the same brightness shown fainter. At `gain` 1 and full strength
+    /// every piece comes out as the web design drew it: its shape's coverage,
+    /// which CSS mixed in sRGB's encoding, taken to linear light.
     pub fn compose(&self, lights: &[Light], gain: f32) -> Vec<f32> {
         let (w, h) = (self.w as i32, self.h as i32);
+        let dec = |v: f32| v.max(0.0).powf(2.2);
+        // the body and its print, in linear light, opaque
         let mut out = vec![0f32; (self.w * self.h * 4) as usize];
         for (i, px) in out.chunks_exact_mut(4).enumerate() {
-            px[..3].copy_from_slice(&self.under[i * 3..i * 3 + 3]);
+            for c in 0..3 {
+                px[c] = dec(self.under[i * 3 + c]);
+            }
             px[3] = 1.0;
         }
         let light = |pos: u32| lights.iter().find(|l| l.pos == pos);
-        // lay a colour over the picture through a shape, `alpha` its strength
-        let over = |out: &mut [f32], s: &Shape, col: [f32; 3], alpha: f32| {
-            if alpha <= 0.0 {
-                return;
-            }
+        // the light a key's LEDs give off, in linear light
+        let emit = |l: &Light| {
+            let k = l.strength.max(0.0) * gain;
+            [lin(l.rgb[0]) * k, lin(l.rgb[1]) * k, lin(l.rgb[2]) * k]
+        };
+        // each pixel of a shape: its place in the picture, and its weight
+        let each = |s: &Shape, f: &mut dyn FnMut(usize, f32)| {
             for row in 0..s.h as i32 {
                 let y = s.y + row;
                 if y < 0 || y >= h {
                     continue;
                 }
-                for col_i in 0..s.w as i32 {
-                    let x = s.x + col_i;
+                for col in 0..s.w as i32 {
+                    let x = s.x + col;
                     if x < 0 || x >= w {
                         continue;
                     }
-                    let a = s.cover[(row * s.w as i32 + col_i) as usize] * alpha;
-                    if a <= 0.0 {
-                        continue;
+                    let a = s.cover[(row * s.w as i32 + col) as usize];
+                    if a > 0.0 {
+                        f(((y * w + x) * 4) as usize, a);
                     }
-                    let d = ((y * w + x) * 4) as usize;
-                    for c in 0..3 {
-                        out[d + c] = out[d + c] * (1.0 - a) + col[c] * a;
-                    }
-                    out[d + 3] = out[d + 3] * (1.0 - a) + a;
                 }
             }
         };
-        // the light's colour, encoded as the page's colours are; `gain` above 1 lifts it past white
-        let enc = |v: f32| v.max(0.0).powf(1.0 / 2.2);
-        let glow_colour = |l: &Light| [enc(lin(l.rgb[0]) * gain), enc(lin(l.rgb[1]) * gain), enc(lin(l.rgb[2]) * gain)];
+        // light added through a shape, as much of it as the design's coverage lets through
+        let add = |out: &mut [f32], s: &Shape, e: [f32; 3], k: f32| {
+            if e.iter().all(|v| *v <= 0.0) || k <= 0.0 {
+                return;
+            }
+            each(s, &mut |d, a| {
+                let wgt = a.powf(2.2) * k;
+                for c in 0..3 {
+                    out[d + c] += e[c] * wgt;
+                }
+            });
+        };
+        // a colour laid over through a shape: the legends' print
+        let over = |out: &mut [f32], s: &Shape, col: [f32; 3], k: f32| {
+            each(s, &mut |d, a| {
+                let a = a * k;
+                for c in 0..3 {
+                    out[d + c] = out[d + c] * (1.0 - a) + col[c] * a;
+                }
+            });
+        };
 
         // the light each key throws on the deck
         for key in &self.keys {
             if let (Some(l), Some(s)) = (light(key.pos), &key.under) {
-                over(&mut out, s, glow_colour(l), l.strength);
+                add(&mut out, s, emit(l), 1.0);
             }
         }
         // the caps over it
@@ -215,41 +243,27 @@ impl Board {
                 continue;
             }
             for c in 0..3 {
-                px[c] = cap[c] + px[c] * (1.0 - a);
+                px[c] = dec(cap[c] / a) * a + px[c] * (1.0 - a);
             }
-            px[3] = a + px[3] * (1.0 - a);
         }
-        // the light on each cap, the glow round each legend, and the legend
+        // the light on each cap, the glow round each legend, and the legend lit from behind
         for key in &self.keys {
             let l = light(key.pos);
-            let strength = l.map_or(0.0, |l| l.strength);
-            if let Some(l) = l {
-                if let Some(s) = &key.cap {
-                    over(&mut out, s, glow_colour(l), l.strength);
-                }
-                if let Some(s) = &key.glow {
-                    over(&mut out, s, glow_colour(l), l.strength);
-                }
+            let e = l.map_or([0.0; 3], emit);
+            if let Some(s) = &key.cap {
+                add(&mut out, s, e, 1.0);
+            }
+            if let Some(s) = &key.glow {
+                add(&mut out, s, e, 1.0);
             }
             if let Some(s) = &key.legend {
-                // printed grey where it is unlit, the key's light as strongly as it is lit
-                let g = l.map_or([0.0; 3], glow_colour);
-                let col = [
-                    key.print[0] * (1.0 - strength) + g[0] * strength,
-                    key.print[1] * (1.0 - strength) + g[1] * strength,
-                    key.print[2] * (1.0 - strength) + g[2] * strength,
-                ];
-                let step_back = if l.is_some_and(|l| l.dim) { 0.35 } else { 1.0 };
-                over(&mut out, s, col, step_back);
-            }
-        }
-        // mixed in sRGB's encoding, as the web page's CSS mixed it; handed on in linear light
-        for px in out.chunks_exact_mut(4) {
-            let a = px[3];
-            if a > 0.0 {
-                for c in 0..3 {
-                    px[c] = (px[c] / a).max(0.0).powf(2.2) * a;
-                }
+                // a remapped key's legend steps back
+                let back = if l.is_some_and(|l| l.dim) { 0.35 } else { 1.0 };
+                // the print shows as the light behind it outshines it
+                let lit = l.map_or(0.0, |l| l.strength.clamp(0.0, 1.0));
+                let print = [dec(key.print[0]) * (1.0 - lit), dec(key.print[1]) * (1.0 - lit), dec(key.print[2]) * (1.0 - lit)];
+                over(&mut out, s, print, back);
+                add(&mut out, s, e, back);
             }
         }
         out

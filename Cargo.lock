@@ -1362,6 +1362,7 @@ dependencies = [
  "ectodeck-draw",
  "ectodeck-weather",
  "ectotype-core",
+ "i-slint-core",
  "ksni",
  "resvg 0.45.1",
  "rustybuzz",
