@@ -35,9 +35,15 @@ pub enum Ctl {
     Fill,
     Scatter,
     Clear,
+    Name,
+    LcdColor,
+    LcdBrightness,
+    LcdApp,
+    GameKey,
+    SliderBind,
 }
 
-const CTLS: [Ctl; 18] = [
+const CTLS: [Ctl; 24] = [
     Ctl::None,
     Ctl::Color,
     Ctl::Colors,
@@ -56,12 +62,18 @@ const CTLS: [Ctl; 18] = [
     Ctl::Fill,
     Ctl::Scatter,
     Ctl::Clear,
+    Ctl::Name,
+    Ctl::LcdColor,
+    Ctl::LcdBrightness,
+    Ctl::LcdApp,
+    Ctl::GameKey,
+    Ctl::SliderBind,
 ];
 
 pub fn ctl(id: i32) -> Ctl {
     CTLS.get(id as usize).copied().unwrap_or(Ctl::None)
 }
-fn id(c: Ctl) -> i32 {
+pub fn id(c: Ctl) -> i32 {
     CTLS.iter().position(|x| *x == c).unwrap_or(0) as i32
 }
 
@@ -76,6 +88,9 @@ pub mod kind {
     pub const CHIP: i32 = 6;
     pub const GHOST: i32 = 7;
     pub const LINK: i32 = 8;
+    pub const TILE: i32 = 9;
+    pub const FIELD: i32 = 10;
+    pub const DROPDOWN: i32 = 11;
 }
 /// the text styles
 pub mod style {
@@ -84,6 +99,8 @@ pub mod style {
     pub const NOTE: i32 = 2;
     pub const EMPTY: i32 = 3;
     pub const VALUE: i32 = 4;
+    pub const VALUE_BRIGHT: i32 = 5;
+    pub const ITEM: i32 = 6;
 }
 
 /// the effects' speeds: stored as a cycle time, the slider runs slow to fast, as EVGA's does
@@ -109,26 +126,26 @@ pub struct Tile {
     pub height: f32,
 }
 
-struct Col {
-    x: f32,
-    y: f32,
-    cells: Vec<Cell>,
+pub(crate) struct Col {
+    pub x: f32,
+    pub w: f32,
+    pub y: f32,
+    pub cells: Vec<Cell>,
 }
 
 const COL_W: f32 = 584.0;
 const LABEL_W: f32 = 112.0;
 const CTRL_X: f32 = 128.0;
-const CTRL_W: f32 = 456.0;
 
-fn cell(kind: i32, x: f32, y: f32, w: f32, h: f32) -> Cell {
+pub(crate) fn cell(kind: i32, x: f32, y: f32, w: f32, h: f32) -> Cell {
     Cell { kind, x, y, w, h, text: "".into(), color: slint::Color::from_rgb_u8(0, 0, 0), on: false, value: 0.0, id: 0, index: 0, style: 0 }
 }
-fn text_cell(style: i32, x: f32, y: f32, w: f32, h: f32, s: &str) -> Cell {
+pub(crate) fn text_cell(style: i32, x: f32, y: f32, w: f32, h: f32, s: &str) -> Cell {
     Cell { text: s.into(), style, ..cell(kind::TEXT, x, y, w, h) }
 }
 
 /// One part of a row's control, as it stacks in the control's column.
-enum Part {
+pub(crate) enum Part {
     Swatches(Ctl, Vec<slint::Color>),
     Check(Ctl, bool, &'static str),
     Slider(Ctl, f32, String),
@@ -137,18 +154,44 @@ enum Part {
     Note(String),
     Paint(slint::Color, &'static str),
     Ghosts(Vec<(Ctl, &'static str)>),
+    /// a line of text to type in: the profile's name
+    Field(Ctl, String),
+    /// a button that opens a menu of choices, showing the one chosen
+    Dropdown(Ctl, usize, String),
+    /// a value, as text
+    Value(String),
+    /// a list, one line an item
+    List(Vec<String>),
 }
 
 impl Col {
     fn new(x: f32, title: &str) -> Col {
-        // the column's heading, then its rows 14 apart
-        Col { x, y: 18.0 + 2.0 + 14.0, cells: vec![text_cell(style::HEAD, x, 0.0, COL_W, 18.0, title)] }
+        Col::sized(x, COL_W, title)
+    }
+
+    /// A column `w` wide: its heading, then its rows 14 apart.
+    pub fn sized(x: f32, w: f32, title: &str) -> Col {
+        if title.is_empty() {
+            return Col { x, w, y: 2.0 + 14.0, cells: Vec::new() };
+        }
+        Col { x, w, y: 18.0 + 2.0 + 14.0, cells: vec![text_cell(style::HEAD, x, 0.0, w, 18.0, title)] }
+    }
+
+    /// A column's own list of checkboxes, 9 apart.
+    pub fn checks(&mut self, items: Vec<(Ctl, usize, bool, String)>) {
+        let n = items.len();
+        for (k, (c, index, on, label)) in items.into_iter().enumerate() {
+            let y = self.y + k as f32 * 28.0;
+            self.cells.push(Cell { on, id: id(c), index: index as i32, text: label.clone().into(), ..cell(kind::CHECK, self.x, y, 28.0 + text::width(400, 13.5, &label), 19.0) });
+        }
+        self.y += n as f32 * 28.0 - 9.0 + 14.0;
     }
 
     /// A row: its name in a column of its own, then its control, whose parts
     /// stack 7 apart and sit in the middle of the row when it is short.
-    fn row(&mut self, label: &str, parts: Vec<Part>) {
+    pub fn row(&mut self, label: &str, parts: Vec<Part>) {
         let (x0, cx) = (self.x, self.x + CTRL_X);
+        let ctrl_w = self.w - CTRL_X;
         let mut placed: Vec<Cell> = Vec::new();
         let mut h = 0.0f32;
         for (i, p) in parts.into_iter().enumerate() {
@@ -168,8 +211,8 @@ impl Col {
                     19.0
                 }
                 Part::Slider(c, frac, value) => {
-                    placed.push(Cell { value: frac, id: id(c), ..cell(kind::SLIDER, cx + 2.0, y + 9.0, CTRL_W - 48.0 - 14.0 - 4.0, 16.0) });
-                    placed.push(text_cell(style::VALUE, cx + CTRL_W - 48.0, y + 8.0, 48.0, 18.0, &value));
+                    placed.push(Cell { value: frac, id: id(c), ..cell(kind::SLIDER, cx + 2.0, y + 9.0, ctrl_w - 48.0 - 14.0 - 4.0, 16.0) });
+                    placed.push(text_cell(style::VALUE, cx + ctrl_w - 48.0, y + 8.0, 48.0, 18.0, &value));
                     34.0
                 }
                 Part::Seg(c, opts, current) => {
@@ -189,7 +232,7 @@ impl Col {
                     let (mut bx, mut by) = (0.0f32, 0.0f32);
                     for (j, (name, on)) in chips.iter().enumerate() {
                         let w = text::width(400, 13.0, name) + 24.0;
-                        if bx > 0.0 && bx + w > CTRL_W {
+                        if bx > 0.0 && bx + w > ctrl_w {
                             bx = 0.0;
                             by += 36.0;
                         }
@@ -200,16 +243,36 @@ impl Col {
                 }
                 Part::Note(s) => {
                     // a line a piece, 1.45 apart, as the page spaces them
-                    let lines = text::wrap(400, 12.5, &s, CTRL_W);
+                    let lines = text::wrap(400, 12.5, &s, ctrl_w);
                     for (k, line) in lines.iter().enumerate() {
-                        placed.push(text_cell(style::NOTE, cx, y + k as f32 * 18.125, CTRL_W, 18.0, line));
+                        placed.push(text_cell(style::NOTE, cx, y + k as f32 * 18.125, ctrl_w, 18.0, line));
                     }
                     (lines.len() as f32 * 18.125).floor()
                 }
                 Part::Paint(col, note) => {
                     placed.push(Cell { color: col, id: id(Ctl::Paint), ..cell(kind::SWATCH, cx, y, 34.0, 34.0) });
-                    placed.push(text_cell(style::NOTE, cx + 44.0, y + 8.0, CTRL_W - 44.0, 18.0, note));
+                    placed.push(text_cell(style::NOTE, cx + 44.0, y + 8.0, ctrl_w - 44.0, 18.0, note));
                     34.0
+                }
+                Part::Field(c, v) => {
+                    placed.push(Cell { text: v.into(), id: id(c), ..cell(kind::FIELD, cx, y, ctrl_w.min(280.0), 35.0) });
+                    35.0
+                }
+                Part::Dropdown(c, index, v) => {
+                    placed.push(Cell { text: v.into(), id: id(c), index: index as i32, ..cell(kind::DROPDOWN, cx, y, ctrl_w.min(272.0), 32.0) });
+                    32.0
+                }
+                Part::Value(v) => {
+                    placed.push(text_cell(style::VALUE_BRIGHT, cx, y, ctrl_w, 34.0, &v));
+                    34.0
+                }
+                Part::List(items) => {
+                    // each item 1.5 lines tall, 4 apart; the list starts on the row's line
+                    let n = items.len();
+                    for (k, it) in items.iter().enumerate() {
+                        placed.push(text_cell(style::ITEM, cx, y + 7.0 + k as f32 * 24.25, ctrl_w, 20.0, it));
+                    }
+                    (n as f32 * 24.25 - 4.0 + 14.0).max(34.0)
                 }
                 Part::Ghosts(list) => {
                     let mut bx = cx;
@@ -235,16 +298,16 @@ impl Col {
     }
 
     /// A paragraph across the column.
-    fn para(&mut self, s: &str) {
-        let lines = text::wrap(400, 12.5, s, COL_W);
+    pub fn para(&mut self, s: &str) {
+        let lines = text::wrap(400, 12.5, s, self.w);
         let h = lines.len() as f32 * 18.125;
         for (k, line) in lines.iter().enumerate() {
-            self.cells.push(text_cell(style::NOTE, self.x, self.y + k as f32 * 18.125, COL_W, 18.0, line));
+            self.cells.push(text_cell(style::NOTE, self.x, self.y + k as f32 * 18.125, self.w, 18.0, line));
         }
         self.y += h.floor() + 14.0;
     }
 
-    fn height(&self) -> f32 {
+    pub fn height(&self) -> f32 {
         self.y - 14.0
     }
 }
@@ -424,6 +487,7 @@ pub fn set_color(page: &mut Page, c: Ctl, index: usize, rgb: [u8; 3]) {
         Ctl::Color => e["color"] = json!(rgb),
         Ctl::Colors => e["colors"][index]["color"] = json!(rgb),
         Ctl::Background => e["background"]["color"] = json!(rgb),
+        Ctl::LcdColor => d["lighting"]["lcd"]["color"]["color"] = json!(rgb),
         _ => {}
     }
 }
@@ -436,6 +500,7 @@ pub fn color_of(page: &Page, c: Ctl, index: usize, paint: [u8; 3]) -> [u8; 3] {
         Ctl::Color => &e["color"],
         Ctl::Colors => &e["colors"][index]["color"],
         Ctl::Background => &e["background"]["color"],
+        Ctl::LcdColor => &l["lcd"]["color"]["color"],
         _ => return paint,
     };
     [v[0].as_u64().unwrap_or(0) as u8, v[1].as_u64().unwrap_or(0) as u8, v[2].as_u64().unwrap_or(0) as u8]

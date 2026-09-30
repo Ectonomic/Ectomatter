@@ -17,6 +17,7 @@
 //! ECTODECK_NATIVE_TYPE, so each state of the page can be checked offscreen.
 
 mod device;
+mod display;
 mod front;
 mod lighting;
 mod overlays;

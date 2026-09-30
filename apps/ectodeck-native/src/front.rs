@@ -56,6 +56,7 @@ pub enum Ask {
     PkWell(slint::Color),
     PkEnter,
     PkDismiss,
+    CellTyped(i32, String),
 }
 
 /// The colour picker, open on a swatch: what it sets, the colour it opened
@@ -187,6 +188,13 @@ pub struct Front {
     pub scale: f32,
     pick: Option<Pick>,
     overlay_model: Rc<VecModel<crate::Overlay>>,
+    /// what each slider controls, which slider's menu is open, and what the
+    /// sliders last read and last set
+    bind: [String; 2],
+    bind_menu: Option<(usize, (f32, f32, f32))>,
+    last_sliders: Option<serde_json::Value>,
+    held: Option<u8>,
+    sent: [Option<f64>; 2],
 }
 
 /// A profile's colour sample: how many colours, and the colours.
@@ -237,6 +245,7 @@ impl Front {
         on!(on_pk_field, |i, t| Ask::PkField(i, t.to_string()));
         on!(on_pk_well, |c| Ask::PkWell(c));
         on!(on_pk_enter, Ask::PkEnter);
+        on!(on_cell_typed, |id, t| Ask::CellTyped(id, t.to_string()));
         on!(on_pk_dismiss, Ask::PkDismiss);
         let page = Page::new();
         ui.set_units(page.view_box.2 as f32);
@@ -281,6 +290,11 @@ impl Front {
             scale: 1.0,
             pick: None,
             overlay_model: Rc::new(VecModel::default()),
+            bind: crate::uistate::get("slider_bind").and_then(|v| serde_json::from_value(v).ok()).unwrap_or(["own".into(), "own".into()]),
+            bind_menu: None,
+            last_sliders: None,
+            held: None,
+            sent: [None, None],
         };
         f.ui.set_overlays(ModelRc::from(f.overlay_model.clone()));
         f.ui.set_pk_presets(ModelRc::new(VecModel::from(PRESETS.iter().map(|c| color(*c)).collect::<Vec<_>>())));
@@ -316,6 +330,7 @@ impl Front {
             device::Heard::State(Ok(dev)) => {
                 self.failed_at = None;
                 self.page.loaded(dev);
+                self.tell_modes();
                 let (line, chip) = self.page.firmware_line();
                 self.ui.set_conn_state(1);
                 self.ui.set_conn_text(line.into());
@@ -350,6 +365,7 @@ impl Front {
                     Err(e) => self.status(format!("Profile {n} was not saved: {e}"), 2),
                 }
             }
+            device::Heard::Done => return,
             device::Heard::Preview(r) => {
                 self.preview_asked = false;
                 match r {
@@ -430,8 +446,16 @@ impl Front {
                 }
                 Ask::CellPick(id, i, x, y, h) => self.cell_pick(lighting::ctl(id), i.max(0) as usize, (x, y, h)),
                 Ask::CellSlide(id, v) => {
-                    lighting::act(&mut self.page, lighting::ctl(id), 0, v);
+                    match lighting::ctl(id) {
+                        Ctl::LcdBrightness => crate::display::act(&mut self.page, Ctl::LcdBrightness, 0, v, None),
+                        c => lighting::act(&mut self.page, c, 0, v),
+                    }
                     self.push_preview();
+                }
+                Ask::CellTyped(id, t) => {
+                    if lighting::ctl(id) == Ctl::Name {
+                        crate::display::act(&mut self.page, Ctl::Name, 0, 0.0, Some(&t));
+                    }
                 }
                 Ask::PkSv(x, y) => {
                     if let Some(p) = &self.pick {
@@ -583,6 +607,8 @@ impl Front {
             }
             self.overlays.fracs[i] = Some(((raw - e[0]) / (e[1] - e[0]).max(1.0)).clamp(0.0, 1.0) as f32);
         }
+        let fr = [self.overlays.fracs[0].unwrap_or(0.0), self.overlays.fracs[1].unwrap_or(0.0)];
+        self.drive_sliders(v, fr);
         if wider {
             crate::uistate::set("slider_ends", serde_json::json!(self.slider_ends));
         }
@@ -641,12 +667,18 @@ impl Front {
     /// A piece of the tile used: a swatch opens the colour picker, the rest change the draft.
     fn cell_pick(&mut self, c: Ctl, index: usize, _anchor: (f32, f32, f32)) {
         match c {
-            Ctl::Color | Ctl::Colors | Ctl::Background | Ctl::Paint => {
+            Ctl::Color | Ctl::Colors | Ctl::Background | Ctl::Paint | Ctl::LcdColor => {
                 self.open_picker(c, index, _anchor);
                 return;
             }
-            Ctl::Demo => self.page.demo = index == 1,
-            Ctl::Random => lighting::act(&mut self.page, c, 0, index as f32),
+            // a checkbox: which box, and the state it is turned to
+            Ctl::Demo => self.page.demo = index % 2 == 1,
+            Ctl::Random => lighting::act(&mut self.page, c, 0, (index % 2) as f32),
+            Ctl::LcdApp | Ctl::GameKey => crate::display::act(&mut self.page, c, index / 2, (index % 2) as f32, None),
+            Ctl::SliderBind => {
+                self.open_bind_menu(index, _anchor);
+                return;
+            }
             Ctl::Fill | Ctl::Scatter | Ctl::Clear => {
                 let leds: Vec<u32> = self.page.layout.iter().filter(|k| k.led).map(|k| k.pos).collect();
                 let mut seed = self.t0.elapsed().as_nanos() as u64 | 1;
@@ -950,6 +982,11 @@ impl Front {
     }
 
     fn close_menu(&mut self) {
+        if self.bind_menu.take().is_some() {
+            self.ui.set_menu_open(false);
+            self.ui.set_menu_search(true);
+            self.ui.set_menu_w(300.0);
+        }
         if self.menu.take().is_some() {
             self.ui.set_menu_open(false);
             self.ui.invoke_blur_menu();
@@ -960,6 +997,13 @@ impl Front {
     /// from the open menu closes it, and a press on the button it hangs from
     /// keeps that button's click from opening it again.
     pub fn pressed_at(&mut self, x: f32, y: f32) {
+        if self.bind_menu.is_some() {
+            let (mx, my, mw, mh) = (self.ui.get_menu_x(), self.ui.get_menu_y(), self.ui.get_menu_width(), self.ui.get_menu_height());
+            if !(x >= mx && x < mx + mw && y >= my && y < my + mh) {
+                self.close_menu();
+            }
+            return;
+        }
         // away from the open picker closes it; on the swatch it hangs from too
         if self.pick.is_some() {
             let (px, py, ph) = (self.ui.get_picker_x().max(8.0).min(self.ui.get_window_width() - 272.0), self.ui.get_picker_top(), self.ui.get_picker_height());
@@ -984,6 +1028,15 @@ impl Front {
     }
 
     fn menu_chose(&mut self, i: usize) {
+        if let Some((s, _)) = self.bind_menu.take() {
+            self.ui.set_menu_open(false);
+            self.ui.set_menu_search(true);
+            self.ui.set_menu_w(300.0);
+            if let Some((v, _)) = i.checked_sub(1).and_then(|k| crate::display::BIND_CHOICES[s].get(k)) {
+                self.set_slider_bind(s, v);
+            }
+            return;
+        }
         let Some(m) = &mut self.menu else { return };
         match m.choices.get(i) {
             Some(Choice::Set(d)) => {
@@ -1191,6 +1244,12 @@ impl Front {
         if loaded && self.page.view == View::Lighting {
             self.refresh_lighting();
         }
+        if loaded && self.page.view == View::Display {
+            let fw = self.firmware();
+            let t = crate::display::tiles(&self.page, &fw, &self.bind);
+            self.ui.set_tile_height(t.height);
+            self.show_cells(t.cells);
+        }
         let back = self.page.lcd_color();
         if back != self.overlays.lcd.2 {
             self.overlays.lcd.2 = back;
@@ -1212,14 +1271,127 @@ impl Front {
         self.ui.set_effects(ModelRc::new(VecModel::from(effects)));
         let tile = lighting::tile(&self.page, self.paint, self.page.demo);
         self.ui.set_tile_height(tile.height);
-        if self.cells.row_count() == tile.cells.len() {
-            for (i, c) in tile.cells.into_iter().enumerate() {
+        self.show_cells(tile.cells);
+    }
+
+    /// The tile's pieces, changed in place where they can be.
+    fn show_cells(&mut self, cells: Vec<Cell>) {
+        if self.cells.row_count() == cells.len() {
+            for (i, c) in cells.into_iter().enumerate() {
                 if self.cells.row_data(i).as_ref() != Some(&c) {
                     self.cells.set_row_data(i, c);
                 }
             }
         } else {
-            self.cells.set_vec(tile.cells);
+            self.cells.set_vec(cells);
+        }
+    }
+
+    /// What the keyboard's firmware can do beyond EVGA's.
+    fn firmware(&self) -> serde_json::Value {
+        let v = self.page.dev.as_ref().and_then(|d| d["firmware"].as_u64()).unwrap_or(0) as u16;
+        ectotype_core::firmware::describe(v)
+    }
+
+    // ------------------------------------------------------------ the sliders' jobs
+
+    fn open_bind_menu(&mut self, i: usize, anchor: (f32, f32, f32)) {
+        self.close_menu();
+        let name = if i == 0 { "dimmer" } else { "volume" };
+        let mut rows = vec![MenuRow { kind: 1, label: format!("The {name} controls").into(), tag: "".into(), tick: false }];
+        for (v, label) in crate::display::BIND_CHOICES[i] {
+            rows.push(MenuRow { kind: 0, label: label.into(), tag: "".into(), tick: self.bind[i] == v });
+        }
+        let list: f32 = rows.iter().map(|r| if r.kind == 1 { 28.0 } else { 33.0 }).sum();
+        let h = 6.0 + list + 6.0;
+        self.ui.set_menu_search(false);
+        self.ui.set_menu_back(false);
+        self.ui.set_menu_natural(h);
+        self.ui.set_menu_w(240.0);
+        self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
+        let (ax, ay, ah) = anchor;
+        let win = self.ui.get_window_height();
+        let below = win - ay - ah - 14.0;
+        self.ui.set_menu_ax(ax);
+        self.ui.set_menu_ay(ay);
+        self.ui.set_menu_ah(ah);
+        self.ui.set_menu_top(if h <= below || below >= h.min(260.0) { ay + ah + 6.0 } else { ay - 6.0 - h });
+        self.ui.set_menu_max(win * 0.7);
+        self.ui.set_menu_open(true);
+        self.bind_menu = Some((i, anchor));
+    }
+
+    /// One job, one slider: taking a job the other one does leaves it idle,
+    /// rather than the two of them sending it different positions.
+    fn set_slider_bind(&mut self, i: usize, v: &str) {
+        let other = 1 - i;
+        self.bind[i] = v.into();
+        if v != "none" && crate::display::drives(other, &self.bind[other]) == crate::display::drives(i, v) {
+            self.bind[other] = "none".into();
+        }
+        crate::uistate::set("slider_bind", serde_json::json!(self.bind));
+        self.hold_backlight();
+        self.sent = [None, None];
+        self.tell_modes();
+    }
+
+    /// The backlight follows the dimmer inside the keyboard, so taking the
+    /// dimmer off it means asking the keyboard to hold the backlight where it is.
+    fn hold_backlight(&mut self) {
+        if self.bind[0] == "own" {
+            self.held = None;
+            self.ask_kb(device::Ask::Dimmer(None));
+            return;
+        }
+        if self.held.is_none() {
+            self.held = Some(self.last_sliders.as_ref().and_then(|r| r["dimmer"].as_u64()).unwrap_or(255) as u8);
+        }
+        self.ask_kb(device::Ask::Dimmer(self.held));
+    }
+
+    /// From firmware build 3 the keyboard can be asked to stop doing a
+    /// slider's job itself, so the two do not fight.
+    fn tell_modes(&mut self) {
+        let fw = self.firmware();
+        let (vq, dk) = (crate::display::has(&fw, "volume.quiet"), crate::display::has(&fw, "dimmer.keep"));
+        if vq || dk {
+            self.ask_kb(device::Ask::Modes(vq && self.bind[1] != "own", dk && self.bind[0] != "own"));
+        }
+    }
+
+    /// Set what a slider drives, but only once it has really moved, so opening
+    /// Ectodeck never throws the volume to wherever the slider sits.
+    fn drive_sliders(&mut self, r: &serde_json::Value, f: [f32; 2]) {
+        let prev = self.last_sliders.replace(r.clone());
+        let Some(prev) = prev else { return };
+        let raw = |v: &serde_json::Value, k: &str| v[k].as_f64().unwrap_or(0.0);
+        let moved = [(raw(r, "dimmer_raw") - raw(&prev, "dimmer_raw")).abs() > 12.0, (raw(r, "volume_raw") - raw(&prev, "volume_raw")).abs() > 12.0];
+        let mut send = |me: &mut Self, i: usize, target: &str| {
+            let level = (f[i] as f64 * 100.0).round() / 100.0;
+            if me.sent[i] == Some(level) {
+                return;
+            }
+            me.sent[i] = Some(level);
+            if target == "backlight" {
+                me.held = Some((level * 255.0).round() as u8);
+                me.ask_kb(device::Ask::Dimmer(me.held));
+            } else {
+                set_audio(target, level);
+            }
+        };
+        if self.bind[0] != "own" {
+            // the keyboard lets a held level go when its slider moves; hold it again
+            if !r["dimmer_held"].as_bool().unwrap_or(false) && self.held.is_some() {
+                self.ask_kb(device::Ask::Dimmer(self.held));
+            }
+            if moved[0] && (self.bind[0] == "output" || self.bind[0] == "microphone") {
+                let t = self.bind[0].clone();
+                send(self, 0, &t);
+            }
+        }
+        if moved[1] && (self.bind[1] == "backlight" || self.bind[1] == "microphone") {
+            let t = self.bind[1].clone();
+            send(self, 1, &t);
         }
     }
 
@@ -1250,4 +1422,18 @@ fn keep_recent(c: [u8; 3]) {
     list.extend(recent_colors().into_iter().filter(|r| *r != c));
     list.truncate(9);
     crate::uistate::set("recent_colours", serde_json::json!(list));
+}
+
+/// Set the computer's output or microphone volume, 0 to 1, exactly where the
+/// slider is, instead of sending volume keys.
+fn set_audio(target: &str, level: f64) {
+    let node = match target {
+        "output" => "@DEFAULT_AUDIO_SINK@",
+        "microphone" => "@DEFAULT_AUDIO_SOURCE@",
+        _ => return,
+    };
+    let level = format!("{:.3}", level.clamp(0.0, 1.0));
+    std::thread::spawn(move || {
+        let _ = std::process::Command::new("wpctl").args(["set-volume", node, &level]).status();
+    });
 }

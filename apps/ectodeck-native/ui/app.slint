@@ -606,6 +606,7 @@ component Menu inherits Rectangle {
     in property <[MenuRow]> rows;
     in property <string> placeholder;
     in property <bool> back;
+    in property <bool> search: true;
     in-out property <string> query;
     callback chose(int);
     callback go-back();
@@ -645,7 +646,9 @@ component Menu inherits Rectangle {
             clicked => { root.go-back(); }
         }
     }
+    property <length> search-h: root.search ? 33px + 6px : 0;
     Rectangle {
+        visible: root.search;
         x: 6px;
         y: 6px + back-h;
         width: parent.width - 12px;
@@ -684,7 +687,7 @@ component Menu inherits Rectangle {
     }
     Flickable {
         x: 6px;
-        y: 6px + back-h + 33px + 6px;
+        y: 6px + back-h + search-h;
         width: parent.width - 12px;
         height: parent.height - self.y - 6px;
         content-height: list.preferred-height;
@@ -805,6 +808,7 @@ component CellView inherits Rectangle {
     in property <Cell> c;
     callback pick(int, int, length, length, length);
     callback slide(int, float);
+    callback typed(int, string);
     x: root.c.x;
     y: root.c.y;
     width: root.c.w;
@@ -817,7 +821,7 @@ component CellView inherits Rectangle {
         font-family: "Geist";
         font-size: root.c.style == 1 ? 13px : root.c.style == 2 ? 12.5px : root.c.style == 3 ? 14px : root.c.style == 4 ? 13px : 13.5px;
         font-weight: root.c.style == 1 ? 500 : 400;
-        color: root.c.style == 1 ? Ink.soft : root.c.style == 2 || root.c.style == 3 ? Ink.quiet : Ink.dim;
+        color: root.c.style == 1 ? Ink.soft : root.c.style == 2 || root.c.style == 3 ? Ink.quiet : root.c.style == 5 ? Ink.bright : Ink.dim;
         horizontal-alignment: root.c.style == 4 ? right : left;
         vertical-alignment: center;
     }
@@ -866,7 +870,8 @@ component CellView inherits Rectangle {
         }
         TouchArea {
             changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
-            clicked => { root.pick(root.c.id, root.c.on ? 0 : 1, 0, 0, 0); }
+            // which box, and the state it is turned to
+            clicked => { root.pick(root.c.id, root.c.index * 2 + (root.c.on ? 0 : 1), 0, 0, 0); }
         }
     }
     // a slider: a thin track and a round knob, which follows the pointer while held
@@ -904,8 +909,61 @@ component CellView inherits Rectangle {
         border-radius: 10px;
         background: #1c1c1c;
     }
+    // a tile, under the pieces on it
+    if root.c.kind == 9: Rectangle {
+        border-radius: 14px;
+        background: Ink.shade1;
+    }
+    // a line to type in
+    if root.c.kind == 10: Rectangle {
+        border-radius: 8px;
+        background: #1f1f1f;
+        TextInput {
+            x: 10px;
+            width: parent.width - 20px;
+            height: parent.height;
+            text: root.c.text;
+            font-family: "Geist";
+            font-size: 13.5px;
+            color: Ink.ink;
+            vertical-alignment: center;
+            single-line: true;
+            edited => { root.typed(root.c.id, self.text); }
+        }
+    }
+    // a button that opens a menu of choices, as the key editor's action button
+    if root.c.kind == 11: Rectangle {
+        border-radius: 8px;
+        background: dd.has-hover ? Ink.shade3 : Ink.shade2;
+        Text {
+            x: 10px;
+            width: parent.width - 39px;
+            text: root.c.text;
+            font-family: "Geist";
+            font-size: 13px;
+            color: Ink.ink;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        Path {
+            x: parent.width - 19px;
+            y: (parent.height - 6px) / 2;
+            width: 9px;
+            height: 6px;
+            viewbox-width: 10;
+            viewbox-height: 6;
+            commands: "M1 1l4 4 4-4";
+            fill: transparent;
+            stroke: Ink.quiet;
+            stroke-width: 1.35px;
+        }
+        dd := TouchArea {
+            changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+        }
+    }
     // a switch's choice, an area chip, a button, the reset: words on a shade
-    if root.c.kind >= 5: Rectangle {
+    if root.c.kind >= 5 && root.c.kind <= 8: Rectangle {
         border-radius: root.c.kind == 5 ? 7px : root.c.kind == 8 ? 6px : 8px;
         background: root.c.on ? Ink.ink
             : root.c.kind == 5 ? (b.has-hover ? Ink.shade2 : transparent)
@@ -1260,6 +1318,7 @@ export component AppWindow inherits Window {
     in property <[MenuRow]> menu-rows;
     in property <string> menu-placeholder;
     in property <bool> menu-back;
+    in property <bool> menu-search: true;
     in-out property <string> menu-query;
     // where the menu hangs, fixed when it opens so it stays put while it is searched
     in property <length> menu-top;
@@ -1311,6 +1370,7 @@ export component AppWindow inherits Window {
     callback effect(int);
     callback cell-pick(int, int, length, length, length);
     callback cell-slide(int, float);
+    callback cell-typed(int, string);
 
     background: transparent;
     default-font-family: "Barlow";
@@ -1336,7 +1396,7 @@ export component AppWindow inherits Window {
     property <length> cqw: board-w / 100;
     // the page's height under the device's bar: its head, the keyboard, what is under it, and the page's foot
     property <length> under-board: root.tab == 0 ? (root.key-open ? 18px + 18px + keypanel.preferred-height + 4px : 22px)
-        : root.tab == 1 ? 18px + 18px + 70px + 12px + root.tile-height + 4px : 150px;
+        : root.tab == 1 ? 18px + 18px + 70px + 12px + root.tile-height + 4px : 18px + root.tile-height + 4px;
     property <length> page-h: board-top + board-h + under-board + 40px;
     // the page's scrollbar, as WebKit drew it: over the whole window, when the page is longer than it
     property <length> doc-h: bar + 56px + page-h;
@@ -1552,14 +1612,18 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
-                // Settings, still to be built natively
-                if root.tab == 2: Text {
+                // Settings: its tiles, as the window lays them out
+                if root.tab == 2: Rectangle {
                     x: pws-x;
-                    y: board-top + board-h + 18px + 18px;
-                    text: "Settings: the keyboard's display, sleep and firmware. The next page to be built natively.";
-                    font-family: "Geist";
-                    font-size: 14px;
-                    color: Ink.quiet;
+                    y: board-top + board-h + 18px;
+                    width: pws-w;
+                    height: root.tile-height;
+                    for c in root.cells: CellView {
+                        c: c;
+                        pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
+                        slide(id, v) => { root.cell-slide(id, v); }
+                        typed(id, t) => { root.cell-typed(id, t); }
+                    }
                 }
 
                 // the keys, over the keyboard's hole: a click on the keyboard away
@@ -1911,6 +1975,7 @@ export component AppWindow inherits Window {
         rows: root.menu-rows;
         placeholder: root.menu-placeholder;
         back: root.menu-back;
+        search: root.menu-search;
         query <=> root.menu-query;
         chose(i) => { root.menu-chose(i); }
         go-back => { root.menu-back-to(); }
