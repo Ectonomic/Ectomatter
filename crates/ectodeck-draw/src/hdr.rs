@@ -41,6 +41,9 @@ struct Shape {
 /// A lit key's light, worked out from where its LED sits and the shape of its cap.
 struct KeyArt {
     pos: u32,
+    /// the cap's foot (its skirt's outline) and its face, in the art's units
+    foot: Option<[f32; 4]>,
+    face: [f32; 4],
     /// the glow its LED throws on the deck round the foot of the cap: 1 where it is brightest
     deck: Option<Shape>,
     /// the deck's glow caught by the foot of the cap's skirt
@@ -58,6 +61,10 @@ struct KeyArt {
 struct Model {
     /// how far north of the key's centre the LED sits
     led: f32,
+    /// the legend's luminance at its brightest, in nits, for a key lit fully
+    legend_nits: f32,
+    /// the display's lit dots, in nits
+    lcd_nits: f32,
     legend_share: f32,
     /// how deep under the legend the LED is, which sets how fast the legend dims away from it
     legend_depth: f32,
@@ -81,10 +88,12 @@ impl Model {
         let f = |v: &Value, d: f32| v.as_f64().map_or(d, |v| v as f32);
         Model {
             led: f(&l["led"], 7.0),
+            legend_nits: f(&l["legend"]["nits"], 220.0).max(0.0),
+            lcd_nits: f(&l["lcd"]["nits"], 120.0).max(0.0),
             legend_share: f(&l["legend"]["share"], 1.0),
             legend_depth: f(&l["legend"]["depth"], 10.0),
             legend_floor: f(&l["legend"]["floor"], 0.35),
-            deck_share: f(&l["deck"]["share"], 0.15),
+            deck_share: f(&l["deck"]["share"], 0.08),
             deck_height: f(&l["deck"]["height"], 7.0),
             deck_floor: f(&l["deck"]["floor"], 0.15),
             deck_reach: f(&l["deck"]["reach"], 2.0).max(0.05),
@@ -114,6 +123,8 @@ pub struct Board {
     caps: Vec<f32>,
     keys: Vec<KeyArt>,
     model: Model,
+    /// where the deck is open to the keys' light, a pixel's coverage
+    wells: Option<Vec<f32>>,
     /// the art's own units (the SVG's, which the core's lengths are in) to the
     /// board's pixels: pixel = offset + scale x unit
     pub(crate) art_scale: f32,
@@ -123,6 +134,116 @@ pub struct Board {
 /// sRGB (as the page's colours are) to linear light, as KWin decodes the page: gamma 2.2.
 fn lin(v: u8) -> f32 {
     (v as f32 / 255.0).powf(2.2)
+}
+
+/// One key's light, from where its LED sits and the shape of its cap: the
+/// glow on the deck, the skirt's foot, and how brightly each pixel of its
+/// legend is lit. `ka` and (`ox`, `oy`) take the art's units to the board's pixels.
+#[allow(clippy::too_many_arguments)]
+fn light_key(key: &mut KeyArt, model: &Model, wells: Option<&[f32]>, w: u32, h: u32, ka: f32, ox: f32, oy: f32) {
+    let unit = |x: i32, y: i32| ((x as f32 + 0.5 - ox) / ka, (y as f32 + 0.5 - oy) / ka);
+    let Some(foot) = key.foot else {
+        key.legend_lit = key.legend.as_ref().map_or(Vec::new(), |s| vec![1.0; s.cover.len()]);
+        return;
+    };
+    let face = key.face;
+    let well = |x: i32, y: i32| wells.map_or(1.0, |m| m[(y as u32 * w + x as u32) as usize]);
+    let led = ((foot[0] + foot[2]) / 2.0, (foot[1] + foot[3]) / 2.0 - model.led);
+    // how much light leaves the skirt at a point on its outline
+    let skirt = |px: f32, py: f32| {
+        let r = ((px - led.0).powi(2) + (py - led.1).powi(2)).sqrt();
+        model.deck_floor + (1.0 - model.deck_floor) * falloff(r, model.deck_height)
+    };
+    // the outline's point nearest the LED, where the most light gets out: on
+    // the top edge for a key as wide as it is tall or wider, on a side for a tall one
+    let nearest = [
+        (led.0 - foot[0], (foot[0], led.1)),
+        (foot[2] - led.0, (foot[2], led.1)),
+        (led.1 - foot[1], (led.0, foot[1])),
+        (foot[3] - led.1, (led.0, foot[3])),
+    ]
+    .into_iter()
+    .fold((f32::MAX, (led.0, foot[1])), |b, (d, p)| if d.abs() < b.0 { (d.abs(), p) } else { b })
+    .1;
+    let brightest = skirt(nearest.0, nearest.1);
+    // a box of the board's pixels round the cap, `m` units wider each side
+    let span = |m: f32| {
+        let x0 = (ox + ka * (foot[0] - m)).floor().max(0.0) as i32;
+        let y0 = (oy + ka * (foot[1] - m)).floor().max(0.0) as i32;
+        let x1 = (ox + ka * (foot[2] + m)).ceil().min(w as f32) as i32;
+        let y1 = (oy + ka * (foot[3] + m)).ceil().min(h as f32) as i32;
+        (x0, y0, (x1 - x0).max(0) as u32, (y1 - y0).max(0) as u32)
+    };
+
+    // the deck: the light out from under the skirt, falling away from it
+    let (x0, y0, dw, dh) = span((model.deck_reach * 6.0 + 1.0).min(40.0));
+    let mut cover = vec![0f32; (dw * dh) as usize];
+    for j in 0..dh as i32 {
+        for i in 0..dw as i32 {
+            let (x, y) = (x0 + i, y0 + j);
+            let (u, v) = unit(x, y);
+            let (pu, pv) = (u.clamp(foot[0], foot[2]), v.clamp(foot[1], foot[3]));
+            let d = ((u - pu).powi(2) + (v - pv).powi(2)).sqrt();
+            let e = (skirt(pu, pv) / brightest).min(1.0) * (-d / model.deck_reach).exp() * well(x, y);
+            cover[(j as u32 * dw + i as u32) as usize] = e.max(0.0);
+        }
+    }
+    key.deck = Some(Shape { x: x0, y: y0, w: dw, h: dh, cover });
+
+    // the rim: the foot of the skirt, round the face, catching the deck's glow
+    let (x0, y0, rw, rh) = span(0.0);
+    let mut cover = vec![0f32; (rw * rh) as usize];
+    for j in 0..rh as i32 {
+        for i in 0..rw as i32 {
+            let (u, v) = unit(x0 + i, y0 + j);
+            let sides = [u - foot[0], foot[2] - u, v - foot[1], foot[3] - v];
+            let t = sides.iter().copied().fold(f32::MAX, f32::min);
+            // outside the face, inside the foot, their edges shared out by coverage
+            let off_face = (face[0] - u).max(u - face[2]).max(face[1] - v).max(v - face[3]);
+            let a = (off_face * ka + 0.5).clamp(0.0, 1.0) * (t * ka + 0.5).clamp(0.0, 1.0);
+            if a <= 0.0 {
+                continue;
+            }
+            // the nearest point of the foot's outline
+            let (pu, pv) = match sides.iter().enumerate().fold((0, f32::MAX), |b, (n, s)| if *s < b.1 { (n, *s) } else { b }).0 {
+                0 => (foot[0], v),
+                1 => (foot[2], v),
+                2 => (u, foot[1]),
+                _ => (u, foot[3]),
+            };
+            let e = (skirt(pu, pv) / brightest).min(1.0) * (-t.max(0.0) / model.rim_width).exp();
+            cover[(j as u32 * rw + i as u32) as usize] = a * e;
+        }
+    }
+    key.rim = Some(Shape { x: x0, y: y0, w: rw, h: rh, cover });
+
+    // the legend, brightest nearest the LED under it
+    key.legend_lit = key.legend.as_ref().map_or(Vec::new(), |s| {
+        (0..s.cover.len())
+            .map(|i| {
+                let (u, v) = unit(s.x + (i as u32 % s.w) as i32, s.y + (i as u32 / s.w) as i32);
+                let r = ((u - led.0).powi(2) + (v - led.1).powi(2)).sqrt();
+                model.legend_floor + (1.0 - model.legend_floor) * falloff(r, model.legend_depth)
+            })
+            .collect()
+    });
+}
+
+/// A key's light: its colour in linear light, its luminance how strongly the
+/// key is lit. A colour the screen cannot show as bright as the top (a
+/// saturated red, whose luminance is a fifth of its channel's) is the same
+/// light made dimmer as a whole, so its brightest point just fits and every
+/// part of it keeps its share, as a dimmer LED's would.
+fn key_colour(l: &Light, top: f32, ceiling: f32) -> [f32; 3] {
+    let c = [lin(l.rgb[0]), lin(l.rgb[1]), lin(l.rgb[2])];
+    let y = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    if y <= 0.0 {
+        return [0.0; 3];
+    }
+    let unit = c.map(|v| v / y);
+    let widest = unit[0].max(unit[1]).max(unit[2]) * top;
+    let fit = if widest > ceiling { ceiling / widest } else { 1.0 };
+    unit.map(|v| v * l.strength.clamp(0.0, 1.0) * fit)
 }
 
 /// A clip path somewhere under `g`, by its id, with the group it clips.
@@ -251,9 +372,7 @@ impl Board {
         // the art's units to the board's pixels
         let ka = k * art.sx;
         let (ox, oy) = (tx + k * art.tx, ty + k * art.ty);
-        let well = |x: i32, y: i32| wells.as_ref().map_or(1.0, |m| m[(y as u32 * w + x as u32) as usize]);
-
-        // each lit key's light, from its LED and its cap
+        // each lit key: its legend, and its cap's shape, which its light is worked out from
         let mut keys = Vec::new();
         for c in controls.iter().filter(|c| lit(c)) {
             let Some(pos) = c["pos"].as_u64() else { continue };
@@ -262,99 +381,67 @@ impl Board {
             let print = [print[0] as f32 / 255.0, print[1] as f32 / 255.0, print[2] as f32 / 255.0];
             let legend = legend_n.and_then(|n| shape(&format!("legend_{n}")));
             let parts = c["control"].as_u64().map(|n| children(&format!("control_{n}"))).unwrap_or_default();
-            // the cap's foot (its skirt's outline) and its face, in the art's units
             let rect = |n: &usvg::Node| {
                 let b = n.abs_bounding_box();
                 [(b.left() - art.tx) / art.sx, (b.top() - art.ty) / art.sy, (b.right() - art.tx) / art.sx, (b.bottom() - art.ty) / art.sy]
             };
-            let (Some(foot), Some(face)) = (parts.get(1).map(rect), parts.get(2).map(rect)) else {
-                keys.push(KeyArt { pos: pos as u32, deck: None, rim: None, legend_lit: legend.as_ref().map_or(Vec::new(), |s| vec![1.0; s.cover.len()]), legend, print });
-                continue;
+            let (foot, face) = match (parts.get(1).map(rect), parts.get(2).map(rect)) {
+                (Some(f), Some(a)) => (Some(f), a),
+                _ => (None, [0.0; 4]),
             };
-            let led = ((foot[0] + foot[2]) / 2.0, (foot[1] + foot[3]) / 2.0 - model.led);
-            // how much light leaves the skirt at a point on its outline, 1 at its
-            // brightest, the point nearest the LED
-            let skirt = |px: f32, py: f32| {
-                let r = ((px - led.0).powi(2) + (py - led.1).powi(2)).sqrt();
-                model.deck_floor + (1.0 - model.deck_floor) * falloff(r, model.deck_height)
-            };
-            // the outline's point nearest the LED, where the most light gets out: on
-            // the top edge for a key as wide as it is tall or wider, on a side for a tall one
-            let nearest = [
-                (led.0 - foot[0], (foot[0], led.1)),
-                (foot[2] - led.0, (foot[2], led.1)),
-                (led.1 - foot[1], (led.0, foot[1])),
-                (foot[3] - led.1, (led.0, foot[3])),
-            ]
-            .into_iter()
-            .fold((f32::MAX, (led.0, foot[1])), |b, (d, p)| if d.abs() < b.0 { (d.abs(), p) } else { b })
-            .1;
-            let brightest = skirt(nearest.0, nearest.1);
-            // a box of the board's pixels round the cap, `m` units wider each side
-            let span = |m: f32| {
-                let x0 = (ox + ka * (foot[0] - m)).floor().max(0.0) as i32;
-                let y0 = (oy + ka * (foot[1] - m)).floor().max(0.0) as i32;
-                let x1 = (ox + ka * (foot[2] + m)).ceil().min(w as f32) as i32;
-                let y1 = (oy + ka * (foot[3] + m)).ceil().min(h as f32) as i32;
-                (x0, y0, (x1 - x0).max(0) as u32, (y1 - y0).max(0) as u32)
-            };
-            let unit = |x: i32, y: i32| ((x as f32 + 0.5 - ox) / ka, (y as f32 + 0.5 - oy) / ka);
-
-            // the deck: the light out from under the skirt, falling away from it
-            let (x0, y0, dw, dh) = span(model.deck_reach * 6.0 + 1.0);
-            let mut cover = vec![0f32; (dw * dh) as usize];
-            for j in 0..dh as i32 {
-                for i in 0..dw as i32 {
-                    let (x, y) = (x0 + i, y0 + j);
-                    let (u, v) = unit(x, y);
-                    let (pu, pv) = (u.clamp(foot[0], foot[2]), v.clamp(foot[1], foot[3]));
-                    let d = ((u - pu).powi(2) + (v - pv).powi(2)).sqrt();
-                    let e = (skirt(pu, pv) / brightest).min(1.0) * (-d / model.deck_reach).exp() * well(x, y);
-                    cover[(j as u32 * dw + i as u32) as usize] = e.max(0.0);
-                }
-            }
-            let deck = Some(Shape { x: x0, y: y0, w: dw, h: dh, cover });
-
-            // the rim: the foot of the skirt, round the face, catching the deck's glow
-            let (x0, y0, rw, rh) = span(0.0);
-            let mut cover = vec![0f32; (rw * rh) as usize];
-            for j in 0..rh as i32 {
-                for i in 0..rw as i32 {
-                    let (u, v) = unit(x0 + i, y0 + j);
-                    let sides = [u - foot[0], foot[2] - u, v - foot[1], foot[3] - v];
-                    let t = sides.iter().copied().fold(f32::MAX, f32::min);
-                    // outside the face, inside the foot, their edges shared out by coverage
-                    let off_face = (face[0] - u).max(u - face[2]).max(face[1] - v).max(v - face[3]);
-                    let a = (off_face * ka + 0.5).clamp(0.0, 1.0) * (t * ka + 0.5).clamp(0.0, 1.0);
-                    if a <= 0.0 {
-                        continue;
-                    }
-                    // the nearest point of the foot's outline
-                    let (pu, pv) = match sides.iter().enumerate().fold((0, f32::MAX), |b, (n, s)| if *s < b.1 { (n, *s) } else { b }).0 {
-                        0 => (foot[0], v),
-                        1 => (foot[2], v),
-                        2 => (u, foot[1]),
-                        _ => (u, foot[3]),
-                    };
-                    let e = (skirt(pu, pv) / brightest).min(1.0) * (-t.max(0.0) / model.rim_width).exp();
-                    cover[(j as u32 * rw + i as u32) as usize] = a * e;
-                }
-            }
-            let rim = Some(Shape { x: x0, y: y0, w: rw, h: rh, cover });
-
-            // the legend, brightest nearest the LED under it
-            let legend_lit = legend.as_ref().map_or(Vec::new(), |s| {
-                (0..s.cover.len())
-                    .map(|i| {
-                        let (u, v) = unit(s.x + (i as u32 % s.w) as i32, s.y + (i as u32 / s.w) as i32);
-                        let r = ((u - led.0).powi(2) + (v - led.1).powi(2)).sqrt();
-                        model.legend_floor + (1.0 - model.legend_floor) * falloff(r, model.legend_depth)
-                    })
-                    .collect()
-            });
-            keys.push(KeyArt { pos: pos as u32, deck, rim, legend, legend_lit, print });
+            keys.push(KeyArt { pos: pos as u32, foot, face, deck: None, rim: None, legend, legend_lit: Vec::new(), print });
         }
-        Ok(Board { w, h, under, shadow, caps, keys, model, art_scale: ka, art_offset: (ox, oy) })
+        let mut board = Board { w, h, under, shadow, caps, keys, model, wells, art_scale: ka, art_offset: (ox, oy) };
+        board.relight();
+        Ok(board)
+    }
+
+    /// Light the keyboard by another of the core's "light" descriptions (as the
+    /// Lighting lab tunes it): each key's light is worked out again from its
+    /// cap; the drawing itself stays as it is.
+    pub fn set_light(&mut self, light: &Value) {
+        self.model = Model::from(light);
+        self.relight();
+    }
+
+    /// The legends' brightest luminance, in nits, and the display's lit dots'.
+    pub fn legend_nits(&self) -> f32 {
+        self.model.legend_nits
+    }
+    pub fn lcd_nits(&self) -> f32 {
+        self.model.lcd_nits
+    }
+
+    /// Each key's light from its LED and its cap, on every core at once.
+    fn relight(&mut self) {
+        let Board { w, h, keys, model, wells, art_scale, art_offset, .. } = self;
+        let (w, h, model, wells, ka, (ox, oy)) = (*w, *h, *model, wells.as_deref(), *art_scale, *art_offset);
+        let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(16);
+        let per = keys.len().div_ceil(threads).max(1);
+        std::thread::scope(|sc| {
+            for chunk in keys.chunks_mut(per) {
+                sc.spawn(move || {
+                    for key in chunk {
+                        light_key(key, &model, wells, w, h, ka, ox, oy);
+                    }
+                });
+            }
+        });
+    }
+
+    /// The brightest light on the keyboard with these lights, as luminance in
+    /// the SDR white's units: the legends' and the deck's.
+    pub fn peaks(&self, lights: &[Light], top: f32, ceiling: f32) -> (f32, f32) {
+        let ceiling = ceiling.max(top);
+        let legend = lights
+            .iter()
+            .filter(|l| self.keys.iter().any(|k| k.pos == l.pos))
+            .map(|l| {
+                let c = key_colour(l, top, ceiling);
+                (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) * top
+            })
+            .fold(0.0f32, f32::max);
+        (legend * self.model.legend_share, legend * self.model.deck_share)
     }
 
     /// The places of the keys that light.
@@ -405,22 +492,7 @@ impl Board {
             px[3] = 1.0;
         }
         let light = |pos: u32| lights.iter().find(|l| l.pos == pos);
-        // A key's light: its colour in linear light, its luminance how strongly
-        // the key is lit. A colour the screen cannot show as bright as the top
-        // (a saturated red, whose luminance is a fifth of its channel's) is the
-        // same light made dimmer as a whole, so its brightest point just fits
-        // and every part of it keeps its share, as a dimmer LED's would.
-        let colour = |l: &Light| {
-            let c = [lin(l.rgb[0]), lin(l.rgb[1]), lin(l.rgb[2])];
-            let y = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
-            if y <= 0.0 {
-                return [0.0; 3];
-            }
-            let unit = c.map(|v| v / y);
-            let widest = unit[0].max(unit[1]).max(unit[2]) * top;
-            let fit = if widest > ceiling { ceiling / widest } else { 1.0 };
-            unit.map(|v| v * l.strength.clamp(0.0, 1.0) * fit)
-        };
+        let colour = |l: &Light| key_colour(l, top, ceiling);
         // each pixel of a shape in this band: its place here, its index in the shape, and its value
         let each = |s: &Shape, f: &mut dyn FnMut(usize, usize, f32)| {
             for row in 0..s.h as i32 {

@@ -22,6 +22,7 @@ mod display;
 mod devices;
 mod ecto_settings;
 mod front;
+mod lab;
 mod lighting;
 mod macro_page;
 mod macros;
@@ -96,17 +97,18 @@ const MIN_SIZE: (u32, u32) = (1000, 700);
 /// the Macro Editor's window, as the web app's
 const MACRO_SIZE: (u32, u32) = (1080, 620);
 const MACRO_MIN_SIZE: (u32, u32) = (900, 420);
+/// the Lighting lab's
+const LAB_SIZE: (u32, u32) = (760, 900);
+const LAB_MIN_SIZE: (u32, u32) = (600, 480);
+/// the windows of their own beside the main one, by their place in App's `subs`
+const MACROS: usize = 0;
+const LAB: usize = 1;
 /// the ground the keyboard sits on: the page's own
 const GROUND: [u8; 3] = [0x20, 0x20, 0x20];
 /// How much brighter than the page's colours the keys' light is drawn. The
 /// light is drawn at the web design's brightness, as approved in WebKit; going
 /// above the desktop's white by the screen's headroom looked overdone.
 const LIGHT_GAIN: f32 = 1.0;
-/// The luminance of the keys' light where the drawing's light is fully
-/// opaque, in nits; the light falls from it to none along the light's curve.
-const LIGHT_NITS: f64 = 600.0;
-/// The luminance of the display's lit dots, in nits, as a backlit character LCD's.
-const LCD_NITS: f64 = 400.0;
 /// how far in from the window's edge a press resizes it
 const EDGE: f64 = 6.0;
 
@@ -169,7 +171,7 @@ fn board_builder(done: calloop::channel::Sender<Board>) -> std::sync::mpsc::Send
     let (ask, asked) = std::sync::mpsc::channel::<(u32, u32)>();
     std::thread::spawn(move || {
         let tree = usvg::Tree::from_str(ectodeck_draw::z10::SVG, &usvg::Options::default()).expect("the Z10's art");
-        let device: serde_json::Value = serde_json::from_str(ectodeck_draw::z10::DEVICE).expect("the Z10's device file");
+        let device: serde_json::Value = serde_json::from_str(&core_device()).expect("the Z10's device file");
         while let Ok(mut size) = asked.recv() {
             // only the latest size matters
             while let Ok(s) = asked.try_recv() {
@@ -280,6 +282,10 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     if let Some(n) = std::env::var("ECTODECK_NATIVE_MACROS").ok().and_then(|v| v.parse::<u32>().ok()) {
         return snap_macros(front, made, n, path);
     }
+    // ECTODECK_NATIVE_LAB: the Lighting lab's window instead
+    if std::env::var_os("ECTODECK_NATIVE_LAB").is_some() {
+        return snap_lab(front, made, reference, path);
+    }
     // lay the page out once, so clicks land where it draws
     let mut pic = Picture::new(reference, GROUND);
     pic.resize(w as usize, h as usize);
@@ -343,7 +349,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
             window.dispatch_event(WindowEvent::PointerPressed { position: at(0.0), button: PointerEventButton::Left });
             let rect = board_rect(&front.ui, 1.0);
             let tree = usvg::Tree::from_str(ectodeck_draw::z10::SVG, &usvg::Options::default()).unwrap();
-            let device: serde_json::Value = serde_json::from_str(ectodeck_draw::z10::DEVICE).unwrap();
+            let device: serde_json::Value = serde_json::from_str(&core_device()).unwrap();
             let board = (rect.2 > 0).then(|| Board::new(&tree, &device, GROUND, rect.2 as u32, rect.3 as u32).unwrap());
             for k in 1..=30 {
                 let t0 = Instant::now();
@@ -393,7 +399,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     lay_ground(&mut pic, &front.ui, 1.0);
     if rect.2 > 0 {
         let tree = usvg::Tree::from_str(ectodeck_draw::z10::SVG, &usvg::Options::default()).unwrap();
-        let device: serde_json::Value = serde_json::from_str(ectodeck_draw::z10::DEVICE).unwrap();
+        let device: serde_json::Value = serde_json::from_str(&core_device()).unwrap();
         let t = Instant::now();
         let board = Board::new(&tree, &device, GROUND, rect.2 as u32, rect.3 as u32).unwrap();
         eprintln!("keyboard drawn in {:?}", t.elapsed());
@@ -527,6 +533,76 @@ fn snap_macros(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>
     eprintln!("saved {path}: {w}x{h}");
 }
 
+/// The Lighting lab's window without a window: one frame, saved as a PNG,
+/// its readout from the keyboard lit as the snapshot's state has it.
+fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>, reference: f64, path: &str) {
+    let (w, h) = std::env::var("ECTODECK_NATIVE_SIZE")
+        .ok()
+        .and_then(|s| s.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
+        .unwrap_or(LAB_SIZE);
+    let device: serde_json::Value = serde_json::from_str(&core_device()).unwrap();
+    let tree = usvg::Tree::from_str(ectodeck_draw::z10::SVG, &usvg::Options::default()).unwrap();
+    let board = Board::new(&tree, &device, GROUND, 1264, 506).unwrap();
+    let ui = LabWindow::new().unwrap();
+    let _ = slint::ComponentHandle::window(&ui);
+    let window = made.borrow().last().cloned().unwrap();
+    slint::ComponentHandle::show(&ui).unwrap();
+    window.set_size(PhysicalSize::new(w, h));
+    let mut lab = lab::LabPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false), device["light"].clone());
+    let lights = front.lights().unwrap_or_default();
+    let gain = front.light_gain(reference);
+    let top = ((board.legend_nits() as f64 / reference) as f32).min(gain);
+    let (legend, deck) = board.peaks(&lights, top, gain);
+    let (reach, _) = board.peaks(&lights, gain, gain);
+    lab.set_readout(lab::Readout {
+        legend: legend as f64 * reference,
+        reach: reach as f64 * reference,
+        deck: deck as f64 * reference,
+        lcd: (board.lcd_nits() as f64).min(gain as f64 * reference),
+        peak: gain as f64 * reference,
+        white: reference,
+    });
+    let mut px = vec![PremultipliedRgbaColor::default(); (w * h) as usize];
+    let draw = |px: &mut Vec<PremultipliedRgbaColor>| {
+        window.draw_if_needed(|r| {
+            r.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
+            r.render(px, w as usize);
+        });
+    };
+    lab.refresh();
+    window.request_redraw();
+    draw(&mut px);
+    for click in std::env::var("ECTODECK_NATIVE_CLICKS").unwrap_or_default().split(';').filter(|c| !c.is_empty()) {
+        let mut xy = click.split(',').map(|v| v.trim().parse::<f32>().unwrap_or(0.0));
+        let position = LogicalPosition::new(xy.next().unwrap_or(0.0), xy.next().unwrap_or(0.0));
+        window.dispatch_event(WindowEvent::PointerMoved { position });
+        window.dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Left });
+        window.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
+        lab.act();
+        window.request_redraw();
+        draw(&mut px);
+    }
+    if let Some(dy) = std::env::var("ECTODECK_NATIVE_SCROLL").ok().and_then(|v| v.parse::<f32>().ok()) {
+        let position = LogicalPosition::new(w as f32 / 2.0, h as f32 / 2.0);
+        window.dispatch_event(WindowEvent::PointerMoved { position });
+        window.dispatch_event(WindowEvent::PointerScrolled { position, delta_x: 0.0, delta_y: -dy });
+        let end = Instant::now() + Duration::from_millis(400);
+        while Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(16));
+            slint::platform::update_timers_and_animations();
+        }
+    }
+    lab.act();
+    window.request_redraw();
+    draw(&mut px);
+    let mut pix = Pixmap::new(w, h).unwrap();
+    for (d, p) in pix.pixels_mut().iter_mut().zip(&px) {
+        *d = resvg::tiny_skia::PremultipliedColorU8::from_rgba(p.red, p.green, p.blue, p.alpha).unwrap_or(resvg::tiny_skia::PremultipliedColorU8::TRANSPARENT);
+    }
+    pix.save_png(path).unwrap();
+    eprintln!("saved {path}: {w}x{h}");
+}
+
 /// Lay the app's ground where the page leaves it to the window; true if it moved.
 fn lay_ground(pic: &mut Picture, ui: &AppWindow, scale: f32) -> bool {
     let c = ui.get_ground();
@@ -619,14 +695,20 @@ struct App {
     tray_connected: bool,
     /// the windows Slint has made, the Macro Editor's among them
     made: Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>,
-    /// the Macro Editor's window, once opened, and whether the keyboard's and
-    /// the pointer's focus are on it
-    mw: Option<MacroWin>,
-    keys_on_macros: bool,
+    /// the windows of their own beside the main one (the Macro Editor's, the
+    /// Lighting lab's), once opened, and which of them has the keyboard's focus
+    subs: [Option<SubWin>; 2],
+    keys_on: Option<usize>,
+    /// the keys held down as the keyboard last said, for Ctrl+Shift+L
+    mods: Modifiers,
+    /// the light the Lighting lab has tuned, which the keyboard is lit by, and its change
+    light: Option<serde_json::Value>,
+    light_rev: u64,
+    readout_at: Option<Instant>,
 }
 
-/// The Macro Editor's window: an ordinary SDR window, drawn whole by Slint.
-struct MacroWin {
+/// A window of its own beside the main one: an ordinary SDR window, drawn whole by Slint.
+struct SubWin {
     window: Window,
     slint: Rc<MinimalSoftwareWindow>,
     size: (u32, u32),
@@ -778,8 +860,12 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         tray: None,
         tray_connected: false,
         made,
-        mw: None,
-        keys_on_macros: false,
+        subs: [None, None],
+        keys_on: None,
+        mods: Modifiers::default(),
+        light: None,
+        light_rev: 0,
+        readout_at: None,
     };
     // the tray, which the window closes into
     let (tray_tx, tray_rx) = calloop::channel::channel::<tray::TrayAsk>();
@@ -820,9 +906,11 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
     let mut fps = std::env::var_os("ECTODECK_NATIVE_FPS").map(|_| (Instant::now(), 0u32, Duration::ZERO));
     // ECTODECK_NATIVE_OPEN_MACROS=N: open the Macro Editor on macro N once the keyboard is read, to check it
     let mut open_macros = std::env::var("ECTODECK_NATIVE_OPEN_MACROS").ok().and_then(|v| v.parse::<u32>().ok());
+    // ECTODECK_NATIVE_OPEN_LAB: open the Lighting lab at start, as Ctrl+Shift+L does
+    let mut open_lab = std::env::var_os("ECTODECK_NATIVE_OPEN_LAB").is_some();
     while !app.exit {
         let busy = ((app.slint.has_active_animations() || app.front.animated()) && !app.frame_pending)
-            || app.mw.as_ref().is_some_and(|m| !m.hidden && m.slint.has_active_animations() && !m.frame_pending);
+            || app.subs.iter().flatten().any(|m| !m.hidden && m.slint.has_active_animations() && !m.frame_pending);
         let wait = if busy {
             Some(Duration::ZERO)
         } else {
@@ -843,11 +931,16 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
             open_macros = None;
             app.open_macros(n);
         }
+        if open_lab && app.board.is_some() {
+            open_lab = false;
+            app.open_lab();
+        }
         app.act();
         let t = Instant::now();
         let before = app.frames;
         app.draw();
-        app.draw_macros();
+        app.draw_sub(MACROS);
+        app.draw_sub(LAB);
         // ECTODECK_NATIVE_FPS: frames a second and the slowest, to check smoothness without slowing it
         if let Some((since, n, slow)) = &mut fps {
             if app.frames > before {
@@ -907,27 +1000,54 @@ impl App {
                 WindowAsk::OpenMacros(n) => self.open_macros(*n),
             }
         }
-        for ask in self.front.act_macros() {
-            let Some(mw) = &mut self.mw else { break };
-            match ask {
-                WindowAsk::Move => {
-                    if let Some(seat) = &self.seat {
-                        mw.window.move_(seat, self.press);
+        let asks = [(MACROS, self.front.act_macros()), (LAB, self.front.act_lab())];
+        for (which, asks) in asks {
+            for ask in asks {
+                let Some(sw) = &mut self.subs[which] else { break };
+                match ask {
+                    WindowAsk::Move => {
+                        if let Some(seat) = &self.seat {
+                            sw.window.move_(seat, self.press);
+                        }
+                        let position = LogicalPosition::new(sw.at.0 as f32, sw.at.1 as f32);
+                        sw.slint.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
+                        sw.slint.dispatch_event(WindowEvent::PointerExited);
                     }
-                    let position = LogicalPosition::new(mw.at.0 as f32, mw.at.1 as f32);
-                    mw.slint.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
-                    mw.slint.dispatch_event(WindowEvent::PointerExited);
-                }
-                WindowAsk::Minimise => mw.window.set_minimized(),
-                WindowAsk::Maximise => {
-                    if mw.maximized {
-                        mw.window.unset_maximized()
-                    } else {
-                        mw.window.set_maximized()
+                    WindowAsk::Minimise => sw.window.set_minimized(),
+                    WindowAsk::Maximise => {
+                        if sw.maximized {
+                            sw.window.unset_maximized()
+                        } else {
+                            sw.window.set_maximized()
+                        }
                     }
+                    WindowAsk::Close => self.hide_sub(which),
+                    WindowAsk::OpenMacros(_) => {}
                 }
-                WindowAsk::Close => self.hide_macros(),
-                WindowAsk::OpenMacros(_) => {}
+            }
+        }
+    }
+
+    /// A window of its own beside the main one, for the Slint window made last.
+    fn make_sub(&mut self, title: &str, size: (u32, u32), min: (u32, u32)) -> SubWin {
+        let slint = self.made.borrow().last().cloned().expect("the window's adapter");
+        slint.set_size(PhysicalSize::new(size.0, size.1));
+        let surface = self.compositor.create_surface(&self.qh);
+        let window = self._xdg.create_window(surface, WindowDecorations::RequestClient, &self.qh);
+        window.set_title(title);
+        window.set_app_id("com.ectonomic.ectodeck");
+        window.set_min_size(Some(min));
+        window.commit();
+        SubWin { window, slint, size, scale: 1, configured: false, maximized: false, frame_pending: false, hidden: false, full: true, buffers: Vec::new(), px: Vec::new(), at: (0.0, 0.0) }
+    }
+
+    /// Show a window of its own again, as it was.
+    fn show_sub(&mut self, which: usize) {
+        if let Some(sw) = &mut self.subs[which] {
+            if sw.hidden {
+                sw.hidden = false;
+                sw.full = true;
+                sw.window.commit();
             }
         }
     }
@@ -937,59 +1057,74 @@ impl App {
         if self.front.macros.is_none() {
             let ui = MacroWindow::new().unwrap();
             let _ = slint::ComponentHandle::window(&ui);
-            let slint = self.made.borrow().last().cloned().expect("the Macro Editor's adapter");
             slint::ComponentHandle::show(&ui).unwrap();
-            slint.set_size(PhysicalSize::new(MACRO_SIZE.0, MACRO_SIZE.1));
             self.front.macros = Some(macro_page::MacroPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false)));
-            let surface = self.compositor.create_surface(&self.qh);
-            let window = self._xdg.create_window(surface, WindowDecorations::RequestClient, &self.qh);
-            window.set_title("EVGA Z10 RGB / Macro Editor");
-            window.set_app_id("com.ectonomic.ectodeck");
-            window.set_min_size(Some(MACRO_MIN_SIZE));
-            window.commit();
-            self.mw = Some(MacroWin {
-                window,
-                slint,
-                size: MACRO_SIZE,
-                scale: 1,
-                configured: false,
-                maximized: false,
-                frame_pending: false,
-                hidden: false,
-                full: true,
-                buffers: Vec::new(),
-                px: Vec::new(),
-                at: (0.0, 0.0),
-            });
-        } else if let Some(mw) = &mut self.mw {
-            if mw.hidden {
-                mw.hidden = false;
-                mw.full = true;
-                mw.window.commit();
-            }
+            self.subs[MACROS] = Some(self.make_sub("EVGA Z10 RGB / Macro Editor", MACRO_SIZE, MACRO_MIN_SIZE));
+        } else {
+            self.show_sub(MACROS);
         }
         if let Some(m) = &mut self.front.macros {
             m.open(&self.front.page, (n > 0).then_some(n));
         }
     }
 
-    /// Close the Macro Editor's window; it is kept, to open again as it was.
-    fn hide_macros(&mut self) {
-        if let Some(m) = &mut self.front.macros {
-            m.cancel_recording(&self.front.page);
+    /// Open the Lighting lab, made the first time, on the light the keyboard is lit by.
+    fn open_lab(&mut self) {
+        if self.front.lab.is_none() {
+            let light = self.light.clone().unwrap_or_else(|| serde_json::from_str::<serde_json::Value>(&core_device()).map(|d| d["light"].clone()).unwrap_or_default());
+            let ui = LabWindow::new().unwrap();
+            let _ = slint::ComponentHandle::window(&ui);
+            slint::ComponentHandle::show(&ui).unwrap();
+            self.front.lab = Some(lab::LabPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false), light));
+            self.subs[LAB] = Some(self.make_sub("EVGA Z10 RGB / Lighting lab", LAB_SIZE, LAB_MIN_SIZE));
+        } else {
+            self.show_sub(LAB);
         }
-        let Some(mw) = &mut self.mw else { return };
-        mw.window.wl_surface().attach(None, 0, 0);
-        mw.window.commit();
-        mw.hidden = true;
-        mw.configured = false;
-        mw.frame_pending = false;
-        mw.buffers.clear();
+        self.readout();
     }
 
-    /// Draw the Macro Editor's window, when Slint has something new for it.
-    fn draw_macros(&mut self) {
-        let Some(mw) = &mut self.mw else { return };
+    /// Tell the Lighting lab what is on the keyboard now, in whole nits, at
+    /// most four times a second (an effect changes it every frame).
+    fn readout(&mut self) {
+        if self.readout_at.is_some_and(|t| t.elapsed() < Duration::from_millis(250)) {
+            return;
+        }
+        let (Some(l), Some(b)) = (&mut self.front.lab, &self.board) else { return };
+        self.readout_at = Some(Instant::now());
+        let reference = self.pic.reference();
+        let top = ((b.legend_nits() as f64 / reference) as f32).min(self.gain);
+        let (legend, deck) = b.peaks(&self.lights, top, self.gain);
+        let (reach, _) = b.peaks(&self.lights, self.gain, self.gain);
+        l.set_readout(lab::Readout {
+            legend: (legend as f64 * reference).round(),
+            reach: (reach as f64 * reference).round(),
+            deck: (deck as f64 * reference).round(),
+            lcd: (b.lcd_nits() as f64).min(self.gain as f64 * reference).round(),
+            peak: (self.gain as f64 * reference).round(),
+            white: reference.round(),
+        });
+    }
+
+    /// Close a window of its own; it is kept, to open again as it was. The
+    /// Macro Editor's lets a recording go.
+    fn hide_sub(&mut self, which: usize) {
+        if which == MACROS {
+            if let Some(m) = &mut self.front.macros {
+                m.cancel_recording(&self.front.page);
+            }
+        }
+        let Some(sw) = &mut self.subs[which] else { return };
+        sw.window.wl_surface().attach(None, 0, 0);
+        sw.window.commit();
+        sw.hidden = true;
+        sw.configured = false;
+        sw.frame_pending = false;
+        sw.buffers.clear();
+    }
+
+    /// Draw a window of its own, when Slint has something new for it.
+    fn draw_sub(&mut self, which: usize) {
+        let Some(mw) = &mut self.subs[which] else { return };
         if mw.hidden || !mw.configured || mw.frame_pending {
             return;
         }
@@ -1042,18 +1177,20 @@ impl App {
         mw.frame_pending = true;
         if let Some(dir) = &self.dump {
             let rgba: Vec<u8> = mw.px.iter().flat_map(|p| [p.red, p.green, p.blue, p.alpha]).collect();
-            let _ = std::fs::write(dir.join("macros.raw"), rgba);
-            let _ = std::fs::write(dir.join("macros.txt"), format!("{w} {h}\n"));
+            let name = if which == MACROS { "macros" } else { "lab" };
+            let _ = std::fs::write(dir.join(format!("{name}.raw")), rgba);
+            let _ = std::fs::write(dir.join(format!("{name}.txt")), format!("{w} {h}\n"));
         }
     }
 
-    fn on_macros(&self, surface: &wl_surface::WlSurface) -> bool {
-        self.mw.as_ref().is_some_and(|m| m.window.wl_surface() == surface)
+    /// Which window of its own a surface is, if any.
+    fn which_sub(&self, surface: &wl_surface::WlSurface) -> Option<usize> {
+        (0..self.subs.len()).find(|&i| self.subs[i].as_ref().is_some_and(|m| m.window.wl_surface() == surface))
     }
 
-    /// The pointer over the Macro Editor's window.
-    fn macro_pointer(&mut self, e: &PointerEvent) {
-        let Some(mw) = &mut self.mw else { return };
+    /// The pointer over a window of its own.
+    fn sub_pointer(&mut self, which: usize, e: &PointerEvent) {
+        let Some(mw) = &mut self.subs[which] else { return };
         let (x, y) = e.position;
         mw.at = (x, y);
         let position = LogicalPosition::new(x as f32, y as f32);
@@ -1072,8 +1209,10 @@ impl App {
                         return;
                     }
                 }
-                if let Some(m) = &mut self.front.macros {
-                    m.pressed_at(x as f32, y as f32);
+                if which == MACROS {
+                    if let Some(m) = &mut self.front.macros {
+                        m.pressed_at(x as f32, y as f32);
+                    }
                 }
                 mw.slint.dispatch_event(WindowEvent::PointerPressed { position, button: pointer_button(b) });
             }
@@ -1132,8 +1271,12 @@ impl App {
         self.window.commit();
     }
 
-    /// The keyboard came back drawn at a size: light it.
-    fn built(&mut self, board: Board) {
+    /// The keyboard came back drawn at a size: light it, by the Lighting lab's
+    /// light if it has tuned one.
+    fn built(&mut self, mut board: Board) {
+        if let Some(l) = &self.light {
+            board.set_light(l);
+        }
         let lit = light(&board, &self.lights, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w));
         self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
         self.board = Some(board);
@@ -1171,11 +1314,24 @@ impl App {
         // before the page is drawn, so they move with it in the same frame
         let rect = board_rect(&self.front.ui, self.scale as f32);
         self.front.board_size(rect.2 as u32, rect.3 as u32, self.scale as f32);
+        // the Lighting lab's tuning, when it has changed
+        let mut relit = false;
+        if let Some(lab) = &self.front.lab {
+            if lab.rev != self.light_rev {
+                self.light_rev = lab.rev;
+                self.light = Some(lab.light.clone());
+                if let (Some(b), Some(l)) = (&mut self.board, &self.light) {
+                    b.set_light(l);
+                }
+                relit = true;
+                self.readout_at = None;
+            }
+        }
         // the keys' light, or the display's text, when it has changed
         if let Some(b) = &self.board {
             let _ = self.front.overlays.panel_for(b.w);
         }
-        let panel_moved = self.front.overlays.panel_rev != self.panel_rev;
+        let panel_moved = self.front.overlays.panel_rev != self.panel_rev || relit;
         self.panel_rev = self.front.overlays.panel_rev;
         let lights = self.front.lights();
         if lights.is_some() || panel_moved {
@@ -1186,6 +1342,7 @@ impl App {
                 let lit = light(board, &self.lights, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w));
                 self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
             }
+            self.readout();
         }
         let full = self.full;
         let mut dirty = Vec::new();
@@ -1311,9 +1468,14 @@ impl App {
 
     /// A key on the keyboard, pressed or let go.
     fn key(&mut self, e: &KeyEvent, down: bool) {
-        if self.keys_on_macros {
-            if let (Some(mw), Some(text)) = (&self.mw, key_text(e)) {
-                mw.slint.dispatch_event(if down { WindowEvent::KeyPressed { text } } else { WindowEvent::KeyReleased { text } });
+        // Ctrl+Shift+L, anywhere in Ectodeck: the Lighting lab, a developer's panel
+        if down && self.mods.ctrl && self.mods.shift && matches!(e.keysym, Keysym::l | Keysym::L) {
+            self.open_lab();
+            return;
+        }
+        if let Some(which) = self.keys_on {
+            if let (Some(sw), Some(text)) = (&self.subs[which], key_text(e)) {
+                sw.slint.dispatch_event(if down { WindowEvent::KeyPressed { text } } else { WindowEvent::KeyReleased { text } });
             }
             return;
         }
@@ -1329,8 +1491,8 @@ impl App {
 
 impl CompositorHandler for App {
     fn scale_factor_changed(&mut self, _: &Connection, _: &QueueHandle<Self>, surface: &wl_surface::WlSurface, factor: i32) {
-        if self.on_macros(surface) {
-            let mw = self.mw.as_mut().unwrap();
+        if let Some(which) = self.which_sub(surface) {
+            let mw = self.subs[which].as_mut().unwrap();
             mw.scale = factor.max(1) as u32;
             mw.slint.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: mw.scale as f32 });
             mw.slint.set_size(PhysicalSize::new(mw.size.0 * mw.scale, mw.size.1 * mw.scale));
@@ -1344,8 +1506,8 @@ impl CompositorHandler for App {
     }
     fn transform_changed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: wl_output::Transform) {}
     fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, surface: &wl_surface::WlSurface, _: u32) {
-        if self.on_macros(surface) {
-            self.mw.as_mut().unwrap().frame_pending = false;
+        if let Some(which) = self.which_sub(surface) {
+            self.subs[which].as_mut().unwrap().frame_pending = false;
         } else {
             self.frame_pending = false;
         }
@@ -1380,16 +1542,16 @@ impl OutputHandler for App {
 
 impl WindowHandler for App {
     fn request_close(&mut self, _: &Connection, _: &QueueHandle<Self>, window: &Window) {
-        if self.on_macros(window.wl_surface()) {
-            self.hide_macros();
+        if let Some(which) = self.which_sub(window.wl_surface()) {
+            self.hide_sub(which);
         } else {
             self.hide();
         }
     }
 
     fn configure(&mut self, _: &Connection, _: &QueueHandle<Self>, window: &Window, configure: WindowConfigure, _: u32) {
-        if self.on_macros(window.wl_surface()) {
-            let mw = self.mw.as_mut().unwrap();
+        if let Some(which) = self.which_sub(window.wl_surface()) {
+            let mw = self.subs[which].as_mut().unwrap();
             let w = configure.new_size.0.map_or(mw.size.0, NonZeroU32::get);
             let h = configure.new_size.1.map_or(mw.size.1, NonZeroU32::get);
             if (w, h) != mw.size || !mw.configured {
@@ -1398,16 +1560,20 @@ impl WindowHandler for App {
                 mw.full = true;
             }
             mw.maximized = configure.is_maximized();
-            if let Some(m) = &self.front.macros {
-                m.ui.set_is_maximized(mw.maximized);
-            }
+            let maximized = mw.maximized;
             window.xdg_surface().set_window_geometry(0, 0, w as i32, h as i32);
             mw.configured = true;
-            // the chain wraps at the window's width
-            if let Some(m) = &mut self.front.macros {
-                m.refresh(&self.front.page);
+            // the page laid out again for the window's width: the macro's chain wraps at it
+            if which == MACROS {
+                if let Some(m) = &mut self.front.macros {
+                    m.ui.set_is_maximized(maximized);
+                    m.refresh(&self.front.page);
+                }
+            } else if let Some(l) = &mut self.front.lab {
+                l.ui.set_is_maximized(maximized);
+                l.refresh();
             }
-            self.draw_macros();
+            self.draw_sub(which);
             return;
         }
         let w = configure.new_size.0.map_or(self.size.0, NonZeroU32::get);
@@ -1460,18 +1626,18 @@ impl SeatHandler for App {
 
 impl KeyboardHandler for App {
     fn enter(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, surface: &wl_surface::WlSurface, _: u32, _: &[u32], _: &[Keysym]) {
-        self.keys_on_macros = self.on_macros(surface);
-        match &self.mw {
-            Some(mw) if self.keys_on_macros => mw.slint.dispatch_event(WindowEvent::WindowActiveChanged(true)),
-            _ => self.slint.dispatch_event(WindowEvent::WindowActiveChanged(true)),
+        self.keys_on = self.which_sub(surface);
+        match self.keys_on.and_then(|w| self.subs[w].as_ref()) {
+            Some(sw) => sw.slint.dispatch_event(WindowEvent::WindowActiveChanged(true)),
+            None => self.slint.dispatch_event(WindowEvent::WindowActiveChanged(true)),
         }
     }
     fn leave(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, surface: &wl_surface::WlSurface, _: u32) {
-        match &self.mw {
-            Some(mw) if self.on_macros(surface) => mw.slint.dispatch_event(WindowEvent::WindowActiveChanged(false)),
-            _ => self.slint.dispatch_event(WindowEvent::WindowActiveChanged(false)),
+        match self.which_sub(surface).and_then(|w| self.subs[w].as_ref()) {
+            Some(sw) => sw.slint.dispatch_event(WindowEvent::WindowActiveChanged(false)),
+            None => self.slint.dispatch_event(WindowEvent::WindowActiveChanged(false)),
         }
-        self.keys_on_macros = false;
+        self.keys_on = None;
     }
     fn press_key(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, event: KeyEvent) {
         self.key(&event, true);
@@ -1479,7 +1645,9 @@ impl KeyboardHandler for App {
     fn release_key(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, event: KeyEvent) {
         self.key(&event, false);
     }
-    fn update_modifiers(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, _: Modifiers, _: u32) {}
+    fn update_modifiers(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, mods: Modifiers, _: u32) {
+        self.mods = mods;
+    }
 }
 
 impl PointerHandler for App {
@@ -1488,8 +1656,8 @@ impl PointerHandler for App {
         const BTN_RIGHT: u32 = 0x111;
         const BTN_MIDDLE: u32 = 0x112;
         for e in events {
-            if self.on_macros(&e.surface) {
-                self.macro_pointer(e);
+            if let Some(which) = self.which_sub(&e.surface) {
+                self.sub_pointer(which, e);
                 continue;
             }
             if &e.surface != self.window.wl_surface() {
@@ -1699,19 +1867,34 @@ fn cursor_icon(p: Pointer) -> CursorIcon {
     }
 }
 
-/// The keyboard lit: its light at LIGHT_NITS where fully opaque (or the
-/// ceiling, if that is lower), no channel past the ceiling, which is Peak
-/// nits over the desktop's white.
+/// The Z10 core's description of the keyboard: the core's own file when
+/// Ectodeck runs from its source, which the Lighting lab saves its tuning
+/// into, or the copy built into Ectodeck.
+pub fn core_device() -> String {
+    std::fs::read_to_string(core_device_path()).unwrap_or_else(|_| ectodeck_draw::z10::DEVICE.to_string())
+}
+
+pub fn core_device_path() -> PathBuf {
+    // ECTODECK_CORE_DEVICE: another copy, for checking the lab's Save without touching the core
+    if let Some(p) = std::env::var_os("ECTODECK_CORE_DEVICE") {
+        return PathBuf::from(p);
+    }
+    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../cores/evga-z10/device.json"))
+}
+
+/// The keyboard lit: its legends at the core's legend brightness at their
+/// brightest (or the ceiling, if that is lower), no channel past the
+/// ceiling, which is Peak nits over the desktop's white.
 fn light(board: &Board, lights: &[Light], ceiling: f32, reference: f64, panel: Option<&overlays::Panel>) -> Vec<f32> {
-    let top = ((LIGHT_NITS / reference) as f32).min(ceiling);
+    let top = ((board.legend_nits() as f64 / reference) as f32).min(ceiling);
     let mut px = board.compose(lights, top, ceiling);
-    // The display, lit from behind as an LCD is: its lit dots at LCD_NITS of
-    // luminance, everything else on it in proportion, under the glass.
+    // The display, lit from behind as an LCD is: its lit dots at the core's
+    // display brightness, everything else on it in proportion, under the glass.
     if let Some(p) = panel {
         let (w, h) = (board.w as i32, board.h as i32);
         let lum = |c: [f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
         let brightest = p.px.iter().map(|c| lum(c.map(|v| v.max(0.0).powf(2.2)))).fold(0.0f32, f32::max);
-        let k = if brightest > 0.0 { ((LCD_NITS / reference) as f32).min(ceiling) / brightest } else { 0.0 };
+        let k = if brightest > 0.0 { ((board.lcd_nits() as f64 / reference) as f32).min(ceiling) / brightest } else { 0.0 };
         for row in 0..p.h as i32 {
             let y = p.y + row;
             if y < 0 || y >= h {

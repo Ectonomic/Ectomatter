@@ -3235,3 +3235,229 @@ export component MacroWindow inherits Window {
         }
     }
 }
+
+// A curve on the Lighting lab: its ground, the grid and marks behind it, the
+// area under the curve and the curve itself, drawn from path commands in the
+// plot's own pixels.
+export struct Plot {
+    x: length,
+    y: length,
+    w: length,
+    h: length,
+    grid: string,
+    marks: string,
+    area: string,
+    line: string,
+}
+
+component PlotView inherits Rectangle {
+    in property <Plot> p;
+    x: root.p.x;
+    y: root.p.y;
+    width: root.p.w;
+    height: root.p.h;
+    border-radius: 8px;
+    background: #1b1b1b;
+    Path {
+        width: parent.width;
+        height: parent.height;
+        viewbox-width: root.p.w / 1px;
+        viewbox-height: root.p.h / 1px;
+        commands: root.p.grid;
+        fill: transparent;
+        stroke: #2c2c2c;
+        stroke-width: 1px;
+    }
+    Path {
+        width: parent.width;
+        height: parent.height;
+        viewbox-width: root.p.w / 1px;
+        viewbox-height: root.p.h / 1px;
+        commands: root.p.marks;
+        fill: transparent;
+        stroke: #4a4a4a;
+        stroke-width: 1px;
+    }
+    Path {
+        width: parent.width;
+        height: parent.height;
+        viewbox-width: root.p.w / 1px;
+        viewbox-height: root.p.h / 1px;
+        commands: root.p.area;
+        fill: #f0b35a1f;
+        stroke: transparent;
+    }
+    Path {
+        width: parent.width;
+        height: parent.height;
+        viewbox-width: root.p.w / 1px;
+        viewbox-height: root.p.h / 1px;
+        commands: root.p.line;
+        fill: transparent;
+        stroke: #f0b35a;
+        stroke-width: 1.6px;
+    }
+}
+
+// The Lighting lab: a developer's window for tuning how the Z10's keys are
+// lit, beside the main window so the keyboard stays in view as it changes.
+export component LabWindow inherits Window {
+    in property <bool> is-maximized;
+    in property <image> mark;
+    in property <[Cell]> cells;
+    in property <[Plot]> plots;
+    in property <length> page-h;
+    in property <string> status-text;
+    in property <int> status-kind;
+    in property <bool> can-save;
+    in property <bool> can-revert;
+    out property <length> window-width: root.width;
+
+    callback minimise();
+    callback maximise();
+    callback close-window();
+    callback drag();
+    callback slide(int, float);
+    callback revert();
+    callback save();
+
+    background: transparent;
+    default-font-family: "Geist";
+    property <length> radius: root.is-maximized ? 0 : 10px;
+
+    // the title bar: the mark, the wordmark, and where this window is
+    Rectangle {
+        y: 0;
+        height: 36px;
+        background: #262626;
+        border-top-left-radius: root.radius;
+        border-top-right-radius: root.radius;
+        TouchArea {
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
+                    root.drag();
+                }
+            }
+            double-clicked => { root.maximise(); }
+        }
+        Image {
+            x: 12px;
+            y: 10px;
+            width: 16px;
+            height: 16px;
+            source: root.mark;
+        }
+        Text {
+            x: 35px;
+            height: 36px;
+            text: "Ectodeck";
+            font-weight: 600;
+            font-size: 13.5px;
+            letter-spacing: -0.54px;
+            color: #f5f5f5;
+            vertical-alignment: center;
+        }
+        HorizontalLayout {
+            x: 114px;
+            y: 0;
+            width: self.preferred-width;
+            height: 36px;
+            spacing: 6px;
+            Text { text: "EVGA Z10 RGB"; font-size: 13px; color: Ink.dim; vertical-alignment: center; }
+            Text { text: "/"; font-size: 13px; color: #525252; vertical-alignment: center; }
+            Text { text: "Lighting lab"; font-size: 13px; color: Ink.dim; vertical-alignment: center; }
+        }
+        HorizontalLayout {
+            x: parent.width - 120px;
+            width: 120px;
+            WinButton {
+                commands: "M3 8h10";
+                clicked => { root.minimise(); }
+            }
+            WinButton {
+                size: 12px;
+                commands: "M3.5 2.5h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z";
+                clicked => { root.maximise(); }
+            }
+            WinButton {
+                danger: true;
+                commands: "M3.5 3.5l9 9M12.5 3.5l-9 9";
+                clicked => { root.close-window(); }
+            }
+        }
+    }
+
+    // the page: what is on the keyboard now, then each part of the light
+    Rectangle {
+        y: 36px;
+        height: root.height - 36px - 64px;
+        background: Ink.base;
+        lab-flick := Flickable {
+            content-height: root.page-h;
+            mouse-drag-pan-enabled: false;
+            for c in root.cells: CellView {
+                c: c;
+                slide(id, v) => { root.slide(id, v); }
+            }
+            for p in root.plots: PlotView {
+                p: p;
+            }
+        }
+        ScrollBar {
+            x: parent.width - 12px;
+            y: 2px;
+            height: parent.height - 4px;
+            view: lab-flick.height;
+            content: lab-flick.content-height;
+            offset: -lab-flick.content-y;
+            scroll-to(o) => { lab-flick.content-y = -o; }
+        }
+    }
+
+    // the foot: what was last done, Revert and Save
+    Rectangle {
+        y: root.height - 64px;
+        height: 64px;
+        background: Ink.base;
+        border-bottom-left-radius: root.radius;
+        border-bottom-right-radius: root.radius;
+        Rectangle {
+            x: 24px;
+            y: 0;
+            width: parent.width - 48px;
+            height: 1px;
+            background: #2c2c2c;
+        }
+        HorizontalLayout {
+            x: 24px;
+            y: 15px;
+            width: parent.width - 48px;
+            height: 34px;
+            spacing: 10px;
+            Text {
+                horizontal-stretch: 1;
+                text: root.status-text;
+                font-size: 12.5px;
+                color: root.status-kind == 1 ? Ink.good : root.status-kind == 2 ? Ink.bad : Ink.quiet;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            WordButton {
+                y: 1px;
+                height: 32px;
+                width: 68px;
+                text: "Revert";
+                enabled: root.can-revert;
+                clicked => { root.revert(); }
+            }
+            WordButton {
+                height: 34px;
+                width: 176px;
+                text: "Save to the Z10 core";
+                primary: true;
+                enabled: root.can-save;
+                clicked => { root.save(); }
+            }
+        }
+    }
+}

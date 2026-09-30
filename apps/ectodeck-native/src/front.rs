@@ -214,6 +214,8 @@ pub struct Front {
     pub restart: Option<String>,
     /// the Macro Editor's window, once it has been opened
     pub macros: Option<crate::macro_page::MacroPage>,
+    /// the Lighting lab's window, once it has been opened
+    pub lab: Option<crate::lab::LabPage>,
     /// when the sliders were last read, and the time between readings, smoothed
     last_reading: Option<Instant>,
     reading_gap: f32,
@@ -331,6 +333,7 @@ impl Front {
             levels: (254.0, 1000.0),
             restart: None,
             macros: None,
+            lab: None,
             last_reading: None,
             reading_gap: 120.0,
             dev_status: None,
@@ -720,6 +723,11 @@ impl Front {
             self.refresh();
         }
         window
+    }
+
+    /// Do what the Lighting lab asked; what only its window can do is handed back.
+    pub fn act_lab(&mut self) -> Vec<WindowAsk> {
+        self.lab.as_mut().map_or(Vec::new(), |l| l.act())
     }
 
     /// Do what the Macro Editor's page asked; what only its window can do is handed back.
