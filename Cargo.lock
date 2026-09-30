@@ -1360,6 +1360,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "ectodeck-draw",
+ "ectotype-core",
  "resvg 0.45.1",
  "serde_json",
  "slint",

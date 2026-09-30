@@ -9,40 +9,50 @@
 //! as KWin decodes every SDR app's (gamma 2.2 at the reference white), so the
 //! page looks as the web app did and only the light goes above it.
 //!
-//! `ectodeck-native --snapshot FILE` draws one frame at 1440 x 940 without
-//! opening a window and saves the picture as raw ABGR16161616, for checking.
+//! `ectodeck-native --snapshot FILE` draws one frame at 1440 x 940 without a
+//! window and saves the picture as raw ABGR16161616, for checking. It reads
+//! the keyboard's state from ECTODECK_NATIVE_STATE (a file the window saves
+//! into ECTODECK_NATIVE_DUMP when it reads the keyboard), clicks where
+//! ECTODECK_NATIVE_CLICKS says ("x,y;x,y", logical pixels) and types
+//! ECTODECK_NATIVE_TYPE, so each state of the page can be checked offscreen.
 
+mod device;
+mod front;
 mod picture;
 mod screens;
+mod settings;
+mod z10;
 
 slint::include_modules!();
 
-use std::cell::RefCell;
 use std::num::NonZeroU32;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use ectodeck_draw::hdr::{Board, Light};
+use front::{Front, WindowAsk};
 use picture::{Lit, Picture};
 use resvg::tiny_skia::{Pixmap, Transform};
 use resvg::usvg;
 use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
-use slint::platform::{PointerEventButton, WindowAdapter, WindowEvent};
-use slint::{ComponentHandle, LogicalPosition, PhysicalSize};
+use slint::platform::{Key, PointerEventButton, WindowAdapter, WindowEvent};
+use slint::{LogicalPosition, PhysicalSize, SharedString};
 use smithay_client_toolkit::reexports::calloop::{self, EventLoop};
 use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
 use smithay_client_toolkit::reexports::client::globals::registry_queue_init;
-use smithay_client_toolkit::reexports::client::protocol::{wl_output, wl_pointer, wl_seat, wl_shm, wl_surface};
+use smithay_client_toolkit::reexports::client::protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface};
 use smithay_client_toolkit::reexports::client::{delegate_noop, Connection, Dispatch, QueueHandle};
 use smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge;
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
-    delegate_compositor, delegate_output, delegate_pointer, delegate_registry, delegate_seat, delegate_shm,
+    delegate_compositor, delegate_keyboard, delegate_output, delegate_pointer, delegate_registry, delegate_seat, delegate_shm,
     delegate_xdg_shell, delegate_xdg_window,
     output::{OutputHandler, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
     seat::{
+        keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers},
         pointer::{CursorIcon, PointerEvent, PointerEventKind, PointerHandler, ThemeSpec, ThemedPointer},
         Capability, SeatHandler, SeatState,
     },
@@ -88,15 +98,6 @@ impl slint::platform::Platform for Platform {
     }
 }
 
-/// What the page asked the window to do, done once its event is handled.
-#[derive(Clone, Copy, PartialEq)]
-enum Ask {
-    Move,
-    Minimise,
-    Maximise,
-    Close,
-}
-
 /// A glyph from the app's drawings, as white on clear, for the page to tint.
 fn glyph(svg: &str, px: u32, tint: bool) -> slint::Image {
     let svg = if tint { svg.replace("currentColor", "#ffffff") } else { svg.to_string() };
@@ -109,19 +110,22 @@ fn glyph(svg: &str, px: u32, tint: bool) -> slint::Image {
     slint::Image::from_rgba8_premultiplied(buf)
 }
 
+/// Ectodeck's own folders, the web app's, so the two share settings and backups.
+fn config_dir() -> PathBuf {
+    std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config")).join("com.ectonomic.ectodeck")
+}
+fn data_dir() -> PathBuf {
+    std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/share")).join("com.ectonomic.ectodeck")
+}
+
 /// How bright the desktop's white is and how far the keyboard's light may go
-/// above it, from the brightest screen: (reference, glow), in nits.
-fn levels() -> (f64, f64) {
+/// above it: the Peak nits setting, or the brightest screen's peak.
+fn levels(settings: &settings::Settings) -> (f64, f64) {
     let screens = screens::screens();
     let best = screens.iter().max_by(|a, b| a["peak"].as_f64().partial_cmp(&b["peak"].as_f64()).unwrap_or(std::cmp::Ordering::Equal));
     let reference = best.and_then(|s| s["reference"].as_f64()).filter(|r| *r > 0.0).unwrap_or(203.0);
-    let peak = best.and_then(|s| s["peak"].as_f64()).unwrap_or(reference);
+    let peak = settings.get("hdr.glow_limit").and_then(|v| v.as_f64()).or_else(|| best.and_then(|s| s["peak"].as_f64())).unwrap_or(reference);
     (reference, peak.max(reference))
-}
-
-/// The lighting shown until Ectodeck talks to the keyboard: every key lit orange.
-fn lights(board: &Board) -> Vec<Light> {
-    board.positions().map(|pos| Light { pos, rgb: [255, 96, 16], strength: 1.0, dim: false }).collect()
 }
 
 /// Build the keyboard at each size asked for, away from the window's thread:
@@ -151,9 +155,48 @@ fn board_builder(done: calloop::channel::Sender<Board>) -> std::sync::mpsc::Send
     ask
 }
 
+/// A key as Slint takes it: its own text, or the name Slint gives a key with none.
+fn key_text(e: &KeyEvent) -> Option<SharedString> {
+    let k = match e.keysym {
+        Keysym::BackSpace => Key::Backspace,
+        Keysym::Tab | Keysym::ISO_Left_Tab => Key::Tab,
+        Keysym::Return | Keysym::KP_Enter => Key::Return,
+        Keysym::Escape => Key::Escape,
+        Keysym::Delete | Keysym::KP_Delete => Key::Delete,
+        Keysym::Left | Keysym::KP_Left => Key::LeftArrow,
+        Keysym::Right | Keysym::KP_Right => Key::RightArrow,
+        Keysym::Up | Keysym::KP_Up => Key::UpArrow,
+        Keysym::Down | Keysym::KP_Down => Key::DownArrow,
+        Keysym::Home | Keysym::KP_Home => Key::Home,
+        Keysym::End | Keysym::KP_End => Key::End,
+        Keysym::Page_Up => Key::PageUp,
+        Keysym::Page_Down => Key::PageDown,
+        Keysym::Shift_L | Keysym::Shift_R => Key::Shift,
+        Keysym::Control_L | Keysym::Control_R => Key::Control,
+        Keysym::Alt_L | Keysym::Alt_R => Key::Alt,
+        Keysym::Super_L | Keysym::Super_R => Key::Meta,
+        _ => {
+            let t = e.utf8.clone().or_else(|| e.keysym.key_char().map(|c| c.to_string()))?;
+            return (!t.is_empty() && !t.chars().any(char::is_control)).then(|| t.into());
+        }
+    };
+    Some(k.into())
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let snapshot = args.iter().position(|a| a == "--snapshot").and_then(|i| args.get(i + 1)).cloned();
+    // `--read-state FILE`: read the keyboard's state once, for the snapshots, and stop
+    if let Some(path) = args.iter().position(|a| a == "--read-state").and_then(|i| args.get(i + 1)) {
+        let kb = ectotype_core::Keyboard::new(ectotype_core::Conn::hid(), None);
+        let state = kb.state();
+        kb.release();
+        match state {
+            Ok(s) => std::fs::write(path, serde_json::to_vec(&s).unwrap()).unwrap(),
+            Err(e) => eprintln!("ectodeck-native: the keyboard could not be read: {e}"),
+        }
+        return;
+    }
 
     let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
     slint::platform::set_platform(Box::new(Platform { window: window.clone(), start: Instant::now() })).unwrap();
@@ -162,43 +205,84 @@ fn main() {
     ui.set_home_glyph(glyph(include_str!("../ui/glyphs/home.svg"), 22, true));
     ui.set_keyboard_glyph(glyph(include_str!("../ui/glyphs/keyboard.svg"), 22, true));
     ui.set_settings_glyph(glyph(include_str!("../ui/glyphs/settings.svg"), 22, true));
-    ui.show().unwrap();
+    slint::ComponentHandle::show(&ui).unwrap();
 
-    let (reference, glow) = levels();
+    let settings = settings::Settings::load(config_dir().join("settings.json"));
+    let (reference, glow) = levels(&settings);
     let gain = (glow / reference).max(1.0) as f32;
     eprintln!("ectodeck-native: the desktop's white is {reference} nits; the light goes to {glow}");
 
     if let Some(path) = snapshot {
-        return snap(&window, &ui, reference, gain, &path);
+        return snap(&window, ui, reference, gain, &path);
     }
-    run(window, ui, reference, gain);
+    run(window, ui, &settings, reference, gain);
 }
 
 /// One frame without a window, saved for checking.
-fn snap(window: &Rc<MinimalSoftwareWindow>, ui: &AppWindow, reference: f64, gain: f32, path: &str) {
+fn snap(window: &Rc<MinimalSoftwareWindow>, ui: AppWindow, reference: f64, gain: f32, path: &str) {
     let (w, h) = SIZE;
     window.set_size(PhysicalSize::new(w, h));
-    // the place and the tab to draw, for checking each
+    let mut front = Front::new(ui, None, true);
+    if let Some(state) = std::env::var_os("ECTODECK_NATIVE_STATE") {
+        let dev: serde_json::Value = serde_json::from_slice(&std::fs::read(state).expect("the saved state")).expect("the saved state as JSON");
+        front.heard(device::Heard::State(Ok(dev)));
+    }
     if let Ok(place) = std::env::var("ECTODECK_NATIVE_PLACE") {
-        ui.set_place(place.into());
+        front.ui.set_place(place.into());
     }
-    if let Some(tab) = std::env::var("ECTODECK_NATIVE_TAB").ok().and_then(|t| t.parse().ok()) {
-        ui.set_tab(tab);
-    }
+    // lay the page out once, so clicks land where it draws
     let mut pic = Picture::new(reference, GROUND);
     pic.resize(w as usize, h as usize);
     window.draw_if_needed(|r| {
         r.render(&mut pic.ui, w as usize);
     });
-    let rect = board_rect(ui, 1.0);
-    lay_ground(&mut pic, ui, 1.0);
+    for click in std::env::var("ECTODECK_NATIVE_CLICKS").unwrap_or_default().split(';').filter(|c| !c.is_empty()) {
+        let mut xy = click.split(',').map(|v| v.trim().parse::<f32>().unwrap_or(0.0));
+        let (x, y) = (xy.next().unwrap_or(0.0), xy.next().unwrap_or(0.0));
+        let position = LogicalPosition::new(x, y);
+        window.dispatch_event(WindowEvent::PointerMoved { position });
+        front.pressed_at(x, y);
+        window.dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Left });
+        window.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
+        front.act();
+        window.draw_if_needed(|r| {
+            r.render(&mut pic.ui, w as usize);
+        });
+    }
+    for c in std::env::var("ECTODECK_NATIVE_TYPE").unwrap_or_default().chars() {
+        let text: SharedString = c.to_string().into();
+        window.dispatch_event(WindowEvent::KeyPressed { text: text.clone() });
+        window.dispatch_event(WindowEvent::KeyReleased { text });
+        slint::platform::update_timers_and_animations();
+        front.act();
+    }
+    // keys typed on the keyboard, as Linux key codes: "29+" down, "29-" up
+    for k in std::env::var("ECTODECK_NATIVE_EVDEV").unwrap_or_default().split(',').filter(|k| !k.is_empty()) {
+        let (code, down) = (k.trim_end_matches(['+', '-']).parse().unwrap_or(0), k.ends_with('+'));
+        front.typed(code, down);
+        front.refresh();
+    }
+    // the pointer, where it was last left
+    if let Ok(at) = std::env::var("ECTODECK_NATIVE_HOVER") {
+        let mut xy = at.split(',').map(|v| v.trim().parse::<f32>().unwrap_or(0.0));
+        window.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(xy.next().unwrap_or(0.0), xy.next().unwrap_or(0.0)) });
+    }
+    eprintln!("the hand shows: {}", front.ui.get_hand());
+    window.request_redraw();
+    window.draw_if_needed(|r| {
+        r.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
+        r.render(&mut pic.ui, w as usize);
+    });
+    let rect = board_rect(&front.ui, 1.0);
+    lay_ground(&mut pic, &front.ui, 1.0);
     if rect.2 > 0 {
         let tree = usvg::Tree::from_str(ectodeck_draw::z10::SVG, &usvg::Options::default()).unwrap();
         let device: serde_json::Value = serde_json::from_str(ectodeck_draw::z10::DEVICE).unwrap();
         let t = Instant::now();
         let board = Board::new(&tree, &device, GROUND, rect.2 as u32, rect.3 as u32).unwrap();
         eprintln!("keyboard drawn in {:?}", t.elapsed());
-        let lit = board.compose(&lights(&board), gain);
+        let lights = front.lights().unwrap_or_default();
+        let lit = board.compose(&lights, gain);
         pic.set_keyboard(rect, Some(&Rc::new(Lit { px: lit, w: rect.2, h: rect.3 })));
     }
     let t = Instant::now();
@@ -245,6 +329,7 @@ struct App {
     pool: SlotPool,
     buffers: Vec<Buffer>,
     pointer: Option<ThemedPointer>,
+    keyboard: Option<wl_keyboard::WlKeyboard>,
     seat: Option<wl_seat::WlSeat>,
     cursor: Option<CursorIcon>,
     /// the window's size in logical pixels, and the buffer's scale
@@ -261,26 +346,26 @@ struct App {
     failed: Option<String>,
 
     slint: Rc<MinimalSoftwareWindow>,
-    ui: AppWindow,
-    asks: Rc<RefCell<Vec<Ask>>>,
+    front: Front,
     pic: Picture,
     gain: f32,
-    /// the keyboard at the size last drawn, lit
+    /// the keyboard at the size last drawn, and its light
     board: Option<Board>,
+    lights: Vec<Light>,
     lit: Option<Rc<Lit>>,
     asked: Option<(u32, u32)>,
     build: std::sync::mpsc::Sender<(u32, u32)>,
     /// the whole window needs drawing again, not only what Slint changed
     full: bool,
     /// ECTODECK_NATIVE_DUMP: a folder to save the frames given to the compositor in
-    dump: Option<std::path::PathBuf>,
+    dump: Option<PathBuf>,
     /// ECTODECK_NATIVE_CHECK: encode every frame whole too, and say if the
     /// parts encoded differ from it
     check: bool,
     frames: u64,
 }
 
-fn run(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, reference: f64, gain: f32) {
+fn run(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, settings: &settings::Settings, reference: f64, gain: f32) {
     let conn = Connection::connect_to_env().expect("a Wayland session");
     let (globals, queue) = registry_queue_init::<App>(&conn).unwrap();
     let qh = queue.handle();
@@ -317,17 +402,20 @@ fn run(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, reference: f64, gain: f3
         })
         .unwrap();
 
-    let asks = Rc::new(RefCell::new(Vec::new()));
-    {
-        let a = asks.clone();
-        ui.on_drag(move || a.borrow_mut().push(Ask::Move));
-        let a = asks.clone();
-        ui.on_minimise(move || a.borrow_mut().push(Ask::Minimise));
-        let a = asks.clone();
-        ui.on_maximise(move || a.borrow_mut().push(Ask::Maximise));
-        let a = asks.clone();
-        ui.on_close_window(move || a.borrow_mut().push(Ask::Close));
-    }
+    // the keyboard, unless Ectodeck is set to leave it to other programs
+    let controlled = settings.on("devices.z10.control");
+    let kb = controlled.then(|| {
+        let (heard_tx, heard_rx) = calloop::channel::channel::<device::Heard>();
+        event_loop
+            .handle()
+            .insert_source(heard_rx, |e, _, app: &mut App| {
+                if let calloop::channel::Event::Msg(h) = e {
+                    app.front.heard(h);
+                }
+            })
+            .unwrap();
+        device::start(data_dir().join("backups"), heard_tx)
+    });
 
     let mut app = App {
         registry: RegistryState::new(&globals),
@@ -342,6 +430,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, reference: f64, gain: f3
         window,
         buffers: Vec::new(),
         pointer: None,
+        keyboard: None,
         seat: None,
         cursor: None,
         size: SIZE,
@@ -355,11 +444,11 @@ fn run(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, reference: f64, gain: f3
         ready: false,
         failed: None,
         slint,
-        ui,
-        asks,
+        front: Front::new(ui, kb, controlled),
         pic: Picture::new(reference, GROUND),
         gain,
         board: None,
+        lights: Vec::new(),
         lit: None,
         asked: None,
         build,
@@ -382,13 +471,15 @@ fn run(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, reference: f64, gain: f3
     app.window.commit();
 
     while !app.exit {
-        let wait = if app.slint.has_active_animations() && !app.frame_pending {
+        let busy = (app.slint.has_active_animations() || app.front.animated()) && !app.frame_pending;
+        let wait = if busy {
             Some(Duration::ZERO)
         } else {
-            slint::platform::duration_until_next_timer_update()
+            [slint::platform::duration_until_next_timer_update(), app.front.waiting()].into_iter().flatten().min()
         };
         event_loop.dispatch(wait, &mut app).unwrap();
         slint::platform::update_timers_and_animations();
+        app.front.retry();
         app.act();
         app.draw();
     }
@@ -397,10 +488,10 @@ fn run(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, reference: f64, gain: f3
 impl App {
     /// Do what the page asked.
     fn act(&mut self) {
-        let asks: Vec<Ask> = self.asks.borrow_mut().drain(..).collect();
+        let asks = self.front.act();
         for ask in &asks {
             match ask {
-                Ask::Move if !asks.contains(&Ask::Maximise) => {
+                WindowAsk::Move if !asks.contains(&WindowAsk::Maximise) => {
                     if let Some(seat) = &self.seat {
                         self.window.move_(seat, self.press);
                     }
@@ -409,23 +500,23 @@ impl App {
                     self.slint.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
                     self.slint.dispatch_event(WindowEvent::PointerExited);
                 }
-                Ask::Move => {}
-                Ask::Minimise => self.window.set_minimized(),
-                Ask::Maximise => {
+                WindowAsk::Move => {}
+                WindowAsk::Minimise => self.window.set_minimized(),
+                WindowAsk::Maximise => {
                     if self.maximized {
                         self.window.unset_maximized()
                     } else {
                         self.window.set_maximized()
                     }
                 }
-                Ask::Close => self.exit = true,
+                WindowAsk::Close => self.exit = true,
             }
         }
     }
 
     /// The keyboard came back drawn at a size: light it.
     fn built(&mut self, board: Board) {
-        let lit = board.compose(&lights(&board), self.gain);
+        let lit = board.compose(&self.lights, self.gain);
         self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
         self.board = Some(board);
         self.full = true;
@@ -440,6 +531,14 @@ impl App {
         if self.pic.w != w || self.pic.h != h {
             self.pic.resize(w, h);
             self.full = true;
+        }
+        // the keys' light, when it has changed
+        if let Some(lights) = self.front.lights() {
+            self.lights = lights;
+            if let Some(board) = &self.board {
+                let lit = board.compose(&self.lights, self.gain);
+                self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
+            }
         }
         let full = self.full;
         let mut dirty = Vec::new();
@@ -457,12 +556,12 @@ impl App {
             }
         });
 
-        if lay_ground(&mut self.pic, &self.ui, self.scale as f32) {
+        if lay_ground(&mut self.pic, &self.front.ui, self.scale as f32) {
             self.full = true;
         }
         // the keyboard: the one drawn at this size, or the last one stretched to
         // it while this size is drawn
-        let rect = board_rect(&self.ui, self.scale as f32);
+        let rect = board_rect(&self.front.ui, self.scale as f32);
         let want = (rect.2 as u32, rect.3 as u32);
         if want.0 > 0 && self.board.as_ref().map(|b| (b.w, b.h)) != Some(want) && self.asked != Some(want) {
             self.asked = Some(want);
@@ -560,6 +659,17 @@ impl App {
             _ => return None,
         })
     }
+
+    /// A key on the keyboard, pressed or let go.
+    fn key(&mut self, e: &KeyEvent, down: bool) {
+        if self.front.typed(e.raw_code, down) {
+            self.front.refresh();
+            return;
+        }
+        if let Some(text) = key_text(e) {
+            self.slint.dispatch_event(if down { WindowEvent::KeyPressed { text } } else { WindowEvent::KeyReleased { text } });
+        }
+    }
 }
 
 impl CompositorHandler for App {
@@ -602,7 +712,7 @@ impl WindowHandler for App {
         let maximized = configure.is_maximized();
         if maximized != self.maximized {
             self.maximized = maximized;
-            self.ui.set_is_maximized(maximized);
+            self.front.ui.set_is_maximized(maximized);
         }
         window.xdg_surface().set_window_geometry(0, 0, w as i32, h as i32);
         self.configured = true;
@@ -619,8 +729,11 @@ impl SeatHandler for App {
         if capability == Capability::Pointer && self.pointer.is_none() {
             let surface = self.compositor.create_surface(qh);
             self.pointer = self.seats.get_pointer_with_theme(qh, &seat, self.shm.wl_shm(), surface, ThemeSpec::default()).ok();
-            self.seat = Some(seat);
         }
+        if capability == Capability::Keyboard && self.keyboard.is_none() {
+            self.keyboard = self.seats.get_keyboard(qh, &seat, None).ok();
+        }
+        self.seat = Some(seat);
     }
     fn remove_capability(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat, capability: Capability) {
         if capability == Capability::Pointer {
@@ -628,8 +741,29 @@ impl SeatHandler for App {
                 p.pointer().release();
             }
         }
+        if capability == Capability::Keyboard {
+            if let Some(k) = self.keyboard.take() {
+                k.release();
+            }
+        }
     }
     fn remove_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
+}
+
+impl KeyboardHandler for App {
+    fn enter(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: &wl_surface::WlSurface, _: u32, _: &[u32], _: &[Keysym]) {
+        self.slint.dispatch_event(WindowEvent::WindowActiveChanged(true));
+    }
+    fn leave(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: &wl_surface::WlSurface, _: u32) {
+        self.slint.dispatch_event(WindowEvent::WindowActiveChanged(false));
+    }
+    fn press_key(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, event: KeyEvent) {
+        self.key(&event, true);
+    }
+    fn release_key(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, event: KeyEvent) {
+        self.key(&event, false);
+    }
+    fn update_modifiers(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, _: Modifiers, _: u32) {}
 }
 
 impl PointerHandler for App {
@@ -669,6 +803,7 @@ impl PointerHandler for App {
                             continue;
                         }
                     }
+                    self.front.pressed_at(x as f32, y as f32);
                     self.slint.dispatch_event(WindowEvent::PointerPressed { position, button: button(b) });
                 }
                 PointerEventKind::Release { button: b, .. } => {
@@ -692,7 +827,7 @@ impl PointerHandler for App {
                 Some(ResizeEdge::Right) => CursorIcon::EResize,
                 Some(ResizeEdge::Top) => CursorIcon::NResize,
                 Some(ResizeEdge::Bottom) => CursorIcon::SResize,
-                _ if self.ui.get_hand() => CursorIcon::Pointer,
+                _ if self.front.ui.get_hand() => CursorIcon::Pointer,
                 _ => CursorIcon::Default,
             };
             self.set_cursor(icon);
@@ -731,6 +866,7 @@ delegate_output!(App);
 delegate_shm!(App);
 delegate_seat!(App);
 delegate_pointer!(App);
+delegate_keyboard!(App);
 delegate_xdg_shell!(App);
 delegate_xdg_window!(App);
 delegate_registry!(App);

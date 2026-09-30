@@ -1,14 +1,17 @@
 // Ectodeck's main window, drawn natively: the title bar, the rail, and the
-// Z10's page with its bar and its tabs, in the shades and type of the web
-// app it replaces (window.css, shell.css, style.css).
+// Z10's page with its bar, its tabs, the profile's panel and the key editor,
+// in the shades and type of the web app it replaces (window.css, shell.css,
+// style.css).
 //
 // The keyboard is not drawn here. The page leaves a hole where it goes, and
 // the window draws the keyboard's HDR picture into that hole, under anything
-// the page draws over it.
+// the page draws over it: the keys' outlines, their new meanings, a press.
 
 import "fonts/Barlow-400.ttf";
 import "fonts/Barlow-500.ttf";
 import "fonts/Barlow-600.ttf";
+import "fonts/BarlowSemiCondensed-500.ttf";
+import "fonts/BarlowSemiCondensed-600.ttf";
 import "fonts/Geist-500.ttf";
 import "fonts/Geist-600.ttf";
 
@@ -19,7 +22,67 @@ global Ink {
     out property <color> line: #404040;
     out property <color> ink: #e5e5e5;
     out property <color> quiet: #8a8a8a;
+    out property <color> warn: #f0b35a;
+    out property <color> bad: #ff8a80;
+    out property <color> good: #8fd6a1;
     out property <color> pws: #1f2429;
+    out property <color> rule: #2e2e2e;
+}
+
+// how many clickable things the pointer is over: the window shows the hand
+// while it is over any. Each counts itself in and out as it is pointed at,
+// so the order two neighbours hear the pointer in does not matter.
+global Cursor {
+    in-out property <int> hands: 0;
+}
+
+// a profile's button in the panel's head
+export struct ProfileItem {
+    n: int,
+    name: string,
+    sub: string,
+    active: bool,
+    current: bool,
+    dirty: bool,
+    // its colour sample: one colour, or up to four across it
+    colors: int,
+    c1: color,
+    c2: color,
+    c3: color,
+    c4: color,
+}
+
+// a key over the keyboard: where it is in the drawing's units, from the
+// drawing's top left, and how it shows
+export struct KeyItem {
+    pos: int,
+    x: float,
+    y: float,
+    w: float,
+    h: float,
+    molded: bool,
+    remap: string,
+    selected: bool,
+    pressed: bool,
+}
+
+// one of the chosen key's two layers: what it does when pressed, and with Fn held
+export struct LayerItem {
+    title: string,
+    kind: string,
+    label: string,
+    nothing: bool,
+    held: [string],
+    macro: bool,
+    listening: bool,
+}
+
+// a row in a menu: 0 a choice, 1 a heading, 2 a rule, 3 a note, 4 the way back
+export struct MenuRow {
+    kind: int,
+    label: string,
+    tag: string,
+    tick: bool,
 }
 
 // one of the window's own buttons: minimise, maximise, close
@@ -66,6 +129,7 @@ component RailItem inherits Rectangle {
         colorize: (root.on || ta.has-hover) ? #f5f5f5 : #a3a3a3;
     }
     ta := TouchArea {
+        changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
         clicked => { root.clicked(); }
     }
     if ta.has-hover: Rectangle {
@@ -105,15 +169,19 @@ component Tab inherits Rectangle {
         vertical-alignment: center;
     }
     ta := TouchArea {
+        changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
         clicked => { root.clicked(); }
     }
 }
 
-// a button in the profile's head: Discard (ghost) or Save (primary)
-component HeadButton inherits Rectangle {
+// a button with words: ghost (an outline) or primary (ink), 13px, as the
+// profile's head and the key editor have them
+component WordButton inherits Rectangle {
     in property <string> text;
     in property <bool> primary;
-    in property <bool> enabled;
+    in property <bool> enabled: true;
+    out property <bool> hover: ta.has-hover && root.enabled;
+    callback clicked;
     height: label.preferred-height + 12px;
     width: label.preferred-width + 26px;
     border-radius: 7px;
@@ -122,10 +190,491 @@ component HeadButton inherits Rectangle {
     background: root.primary ? Ink.ink : transparent;
     opacity: root.enabled ? 1 : 0.35;
     label := Text {
+        y: ta.pressed && root.enabled ? 1px + (parent.height - self.height) / 2 : (parent.height - self.height) / 2;
         text: root.text;
         font-size: 13px;
         font-weight: root.primary ? 600 : 500;
         color: root.primary ? Ink.base : Ink.ink;
+    }
+    ta := TouchArea {
+        changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+// a quiet button with words and no outline, as "Press a key" is
+component TextButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> on;
+    out property <bool> hover: ta.has-hover;
+    callback clicked;
+    height: label.preferred-height + 10px;
+    width: label.preferred-width + 18px;
+    border-radius: 6px;
+    background: root.on ? #f0b35a14 : ta.has-hover ? #ffffff0f : transparent;
+    label := Text {
+        y: ta.pressed ? 1px + (parent.height - self.height) / 2 : (parent.height - self.height) / 2;
+        text: root.text;
+        font-size: 13px;
+        font-weight: 500;
+        color: root.on ? Ink.warn : ta.has-hover ? Ink.ink : #d4d4d4;
+    }
+    ta := TouchArea {
+        changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+        clicked => { root.clicked(); }
+    }
+}
+
+// the small ring that turns while the keyboard is read
+component Spinner inherits Rectangle {
+    width: 16px;
+    height: 16px;
+    property <angle> a: mod(animation-tick() / 800ms, 1) * 360deg;
+    Rectangle {
+        border-radius: 8px;
+        border-width: 2px;
+        border-color: Ink.line;
+    }
+    Path {
+        width: 16px;
+        height: 16px;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        fill: transparent;
+        stroke: Ink.ink;
+        stroke-width: 2px;
+        commands: "M " + (8 + 7 * cos(root.a)) + " " + (8 + 7 * sin(root.a)) + " A 7 7 0 0 1 " + (8 + 7 * cos(root.a + 90deg)) + " " + (8 + 7 * sin(root.a + 90deg));
+    }
+}
+
+// a profile's button: its colours, its name, its effect, and whether it is the one in use
+component ProfileButton inherits Rectangle {
+    in property <ProfileItem> p;
+    out property <bool> hover: ta.has-hover;
+    callback clicked;
+    border-radius: 7px;
+    border-width: 1px;
+    border-color: root.p.current ? #737373 : ta.has-hover ? #525252 : Ink.line;
+    background: root.p.current ? Ink.panel : transparent;
+    width: max(name-row.preferred-width, 15px + sub-row.preferred-width) + 22px;
+    height: 47px;
+    name-row := HorizontalLayout {
+        x: 10px;
+        y: 5px;
+        width: self.preferred-width;
+        height: 19px;
+        spacing: 7px;
+        Rectangle {
+            width: 8px;
+            Rectangle {
+                y: 6px;
+                width: 8px;
+                height: 8px;
+                border-radius: 2px;
+                background: root.p.colors <= 1 ? root.p.c1
+                    : root.p.colors == 2 ? @linear-gradient(90deg, root.p.c1 0%, root.p.c2 100%)
+                    : root.p.colors == 3 ? @linear-gradient(90deg, root.p.c1 0%, root.p.c2 50%, root.p.c3 100%)
+                    : @linear-gradient(90deg, root.p.c1 0%, root.p.c2 33.3%, root.p.c3 66.7%, root.p.c4 100%);
+            }
+        }
+        Text {
+            text: root.p.name;
+            font-size: 13px;
+            color: Ink.ink;
+            vertical-alignment: center;
+        }
+    }
+    sub-row := HorizontalLayout {
+        x: 25px;
+        y: 24px;
+        width: self.preferred-width;
+        height: 16px;
+        Text {
+            text: root.p.sub;
+            font-size: 11px;
+            color: Ink.quiet;
+            vertical-alignment: center;
+        }
+        // kept on every profile, shown on the one in use, so the buttons keep their widths
+        Text {
+            text: ", active";
+            font-size: 11px;
+            color: root.p.active ? Ink.quiet : transparent;
+            vertical-alignment: center;
+        }
+    }
+    if root.p.dirty: Rectangle {
+        x: parent.width - 12px;
+        y: 6px;
+        width: 6px;
+        height: 6px;
+        border-radius: 3px;
+        background: Ink.warn;
+    }
+    ta := TouchArea {
+        changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+        clicked => { root.clicked(); }
+    }
+}
+
+// a key over the keyboard: the edge it shows when pointed at or chosen, a
+// press, and its new meaning printed at the foot of its cap
+component KeyBox inherits Rectangle {
+    in property <KeyItem> k;
+    in property <length> unit;      // one of the drawing's units
+    in property <length> cqw;       // a hundredth of the keyboard's width
+    out property <bool> hover: ta.has-hover;
+    callback clicked;
+    x: root.k.x * root.unit;
+    y: root.k.y * root.unit;
+    width: root.k.w * root.unit;
+    height: root.k.h * root.unit;
+    border-radius: (root.k.molded ? 0.13 : 0.24) * root.cqw;
+    background: root.k.pressed ? #00000052 : transparent;
+    border-width: root.k.selected ? 1.5px : ta.has-hover ? 1px : 0;
+    border-color: root.k.selected ? #ffffffe0 : #8c8c8c;
+    if ta.has-hover && !root.k.selected: Rectangle {
+        x: 1px;
+        y: 1px;
+        width: parent.width - 2px;
+        height: 1px;
+        background: root.k.molded ? #ffffff1f : #ffffff1a;
+    }
+    if root.k.remap != "": Text {
+        x: 0.5 * root.cqw;
+        width: parent.width - root.cqw;
+        y: parent.height - 0.66 * root.cqw - self.height;
+        text: root.k.remap;
+        font-family: "Barlow Semi Condensed";
+        font-weight: 600;
+        font-size: 0.78 * root.cqw;
+        letter-spacing: 0.0078 * root.cqw;
+        color: #e8e8e8;
+        horizontal-alignment: center;
+        overflow: elide;
+    }
+    // a changed key is marked by a short grey line along its cap's front edge
+    if root.k.remap != "": Rectangle {
+        x: parent.width * 0.32;
+        width: parent.width * 0.36;
+        y: parent.height - 0.2 * root.cqw - 2px;
+        height: 2px;
+        border-radius: 1px;
+        background: #bdbdbd;
+    }
+    ta := TouchArea {
+        changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+        clicked => { root.clicked(); }
+    }
+}
+
+// the button that opens a layer's action menu: the action's kind, its name, a chevron
+component ActButton inherits Rectangle {
+    in property <string> kind;
+    in property <string> label;
+    in property <bool> nothing;
+    out property <bool> hover: ta.has-hover;
+    callback clicked;
+    height: 32px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: ta.has-hover ? #525252 : Ink.line;
+    background: Ink.panel;
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 10px;
+        if root.kind != "": Rectangle {
+            width: tag.preferred-width + 14px;
+            Rectangle {
+                y: (parent.height - self.height) / 2;
+                height: tag.preferred-height + 2px;
+                border-width: 1px;
+                border-color: Ink.line;
+                border-radius: 4px;
+                tag := Text {
+                    text: root.kind;
+                    font-size: 11px;
+                    color: Ink.quiet;
+                }
+            }
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: root.label;
+            font-size: 13px;
+            color: root.nothing ? Ink.quiet : Ink.ink;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        Rectangle {
+            width: 9px;
+            Path {
+                y: (parent.height - 6px) / 2;
+                width: 9px;
+                height: 6px;
+                viewbox-width: 10;
+                viewbox-height: 6;
+                commands: "M1 1l4 4 4-4";
+                fill: transparent;
+                stroke: Ink.quiet;
+                stroke-width: 1.35px;
+            }
+        }
+    }
+    ta := TouchArea {
+        changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+        clicked => { root.clicked(); }
+    }
+}
+
+// a flat chip naming a key a macro holds
+component Chip inherits Rectangle {
+    in property <string> text;
+    height: label.preferred-height + 4px + 2px;
+    width: label.preferred-width + 12px + 2px;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: Ink.line;
+    background: #1f1f1f;
+    label := Text {
+        text: root.text;
+        font-family: "Barlow Semi Condensed";
+        font-weight: 600;
+        font-size: 11px;
+        letter-spacing: 0.22px;
+        color: #e5e5e5;
+    }
+}
+
+// one of the chosen key's layers: what it does, and how to change it
+component LayerEditor inherits VerticalLayout {
+    in property <LayerItem> l;
+    in property <int> index;
+    out property <bool> hover: act.hover || press.hover;
+    callback menu(int, length, length, length);
+    callback listen(int);
+    padding-left: 18px;
+    padding-right: 18px;
+    padding-top: 16px;
+    padding-bottom: 16px;
+    spacing: 10px;
+    alignment: start;
+    Text {
+        text: root.l.title;
+        font-size: 11.5px;
+        font-weight: 600;
+        letter-spacing: 1.035px;
+        color: #a3a3a3;
+    }
+    HorizontalLayout {
+        spacing: 6px;
+        alignment: start;
+        act := ActButton {
+            horizontal-stretch: 0;
+            preferred-width: 300px;
+            min-width: 120px;
+            kind: root.l.kind;
+            label: root.l.label;
+            nothing: root.l.nothing;
+            clicked => { root.menu(root.index, self.absolute-position.x, self.absolute-position.y, self.height); }
+        }
+        press := TextButton {
+            horizontal-stretch: 0;
+            y: (32px - self.height) / 2;
+            text: root.l.listening ? "Press a key or combination…" : "Press a key";
+            on: root.l.listening;
+            clicked => { root.listen(root.index); }
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+        }
+    }
+    if root.l.macro: HorizontalLayout {
+        spacing: 4px;
+        alignment: start;
+        for name[i] in root.l.held: HorizontalLayout {
+            spacing: 4px;
+            if i > 0: Text {
+                text: "+";
+                font-size: 12px;
+                color: Ink.quiet;
+                vertical-alignment: center;
+            }
+            Chip {
+                text: name;
+            }
+        }
+    }
+}
+
+// a drop-down: a search, then its rows, under the button that opened it or
+// over it when there is no room below
+component Menu inherits Rectangle {
+    in property <[MenuRow]> rows;
+    in property <string> placeholder;
+    in property <bool> back;
+    in-out property <string> query;
+    callback chose(int);
+    callback go-back();
+    callback typed(string);
+    callback enter();
+    callback dismiss();
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: Ink.line;
+    background: #2e2e2e;
+    drop-shadow-blur: 34px;
+    drop-shadow-offset-y: 14px;
+    drop-shadow-color: #00000080;
+    property <length> back-h: root.back ? 34px : 0;
+    out property <length> natural-height: 12px + 2px + back-h + 41px + list.preferred-height;
+    if root.back: Rectangle {
+        x: 6px;
+        y: 6px;
+        width: parent.width - 12px;
+        height: 34px;
+        border-radius: 7px;
+        background: back-ta.has-hover ? #ffffff12 : transparent;
+        HorizontalLayout {
+            padding-left: 10px;
+            padding-right: 10px;
+            spacing: 8px;
+            Rectangle {
+                width: 14px;
+            }
+            Text {
+                text: "‹ Back";
+                font-size: 13.5px;
+                color: Ink.quiet;
+                vertical-alignment: center;
+            }
+        }
+        back-ta := TouchArea {
+            changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+            clicked => { root.go-back(); }
+        }
+    }
+    public function focus-search() {
+        search.focus();
+    }
+    public function blur-search() {
+        search.clear-focus();
+    }
+    Rectangle {
+        x: 7px;
+        y: 7px + back-h;
+        width: parent.width - 14px;
+        height: 35px;
+        border-radius: 7px;
+        border-width: 1px;
+        border-color: Ink.line;
+        background: Ink.base;
+        if search.text == "": Text {
+            x: 11px;
+            height: parent.height;
+            text: root.placeholder;
+            font-size: 13px;
+            color: #737373;
+            vertical-alignment: center;
+        }
+        search := TextInput {
+            x: 11px;
+            width: parent.width - 22px;
+            height: parent.height;
+            text <=> root.query;
+            font-size: 13px;
+            color: Ink.ink;
+            vertical-alignment: center;
+            single-line: true;
+            init => { self.focus(); }
+            edited => { root.typed(self.text); }
+            accepted => { root.enter(); }
+            key-pressed(e) => {
+                if (e.text == Key.Escape) {
+                    root.dismiss();
+                    return accept;
+                }
+                reject
+            }
+        }
+    }
+    Flickable {
+        x: 6px;
+        y: back-h + 7px + 35px + 6px;
+        width: parent.width - 12px;
+        height: parent.height - self.y - 7px;
+        content-height: list.preferred-height;
+        list := VerticalLayout {
+            for row[i] in root.rows: Rectangle {
+                height: row.kind == 1 ? 27px : row.kind == 2 ? 11px : 34px;
+                background: (row.kind == 0 || row.kind == 4) && item.has-hover ? #ffffff12 : transparent;
+                border-radius: 7px;
+                if row.kind == 1: Text {
+                    x: 10px;
+                    y: 7px;
+                    text: row.label;
+                    font-size: 11px;
+                    letter-spacing: 0.66px;
+                    color: Ink.quiet;
+                }
+                if row.kind == 2: Rectangle {
+                    x: 4px;
+                    width: parent.width - 8px;
+                    height: 1px;
+                    background: Ink.line;
+                }
+                if row.kind == 3: Text {
+                    x: 10px;
+                    height: parent.height;
+                    text: row.label;
+                    font-size: 13px;
+                    color: Ink.quiet;
+                    vertical-alignment: center;
+                }
+                if row.kind == 0 || row.kind == 4: HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    spacing: 8px;
+                    Text {
+                        width: 14px;
+                        text: row.tick ? "✓" : "";
+                        font-size: 13.5px;
+                        color: Ink.ink;
+                        vertical-alignment: center;
+                    }
+                    if row.tag != "": Rectangle {
+                        width: tag.preferred-width + 12px;
+                        Rectangle {
+                            y: (parent.height - self.height) / 2;
+                            height: tag.preferred-height + 2px;
+                            border-width: 1px;
+                            border-color: Ink.line;
+                            border-radius: 4px;
+                            tag := Text {
+                                text: row.tag;
+                                font-size: 10.5px;
+                                color: Ink.quiet;
+                            }
+                        }
+                    }
+                    Text {
+                        horizontal-stretch: 1;
+                        text: row.label;
+                        font-size: 13.5px;
+                        color: row.kind == 4 ? Ink.quiet : Ink.ink;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+                item := TouchArea {
+                    enabled: row.kind == 0 || row.kind == 4;
+                    changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+                    clicked => { root.chose(i); }
+                }
+            }
+        }
     }
 }
 
@@ -135,8 +684,51 @@ export component AppWindow inherits Window {
     in property <image> home-glyph;
     in property <image> keyboard-glyph;
     in property <image> settings-glyph;
-    in-out property <int> tab: 0;
+    in property <int> tab: 0;
     in-out property <string> place: "z10";
+
+    // how the keyboard is: 0 being looked for, 1 connected, 2 not connected, 3 left to other programs
+    in property <int> conn-state: 0;
+    in property <string> conn-text: "Looking for the keyboard…";
+    in property <string> conn-chip;
+    // what was last done, in the device's bar: 0 said quietly, 1 went well, 2 went wrong
+    in property <string> status-text;
+    in property <int> status-kind;
+    // while the keyboard is read: 1 reading, 2 it could not be reached, 3 control is off; 0 read
+    in property <int> boot: 1;
+    in property <string> boot-title: "Reading your keyboard";
+    in property <string> boot-text: "Loading its profiles and macros. This takes a few seconds.";
+    in property <[ProfileItem]> profiles;
+    in property <bool> can-save;
+    in property <string> save-label: "Save profile 1";
+    in property <[KeyItem]> keys;
+    in property <float> units: 649;
+    // the chosen key, and its two layers
+    in property <bool> key-open;
+    in property <string> key-name;
+    in property <string> key-factory;
+    in property <[LayerItem]> layers;
+    in property <string> reset-label;
+    // the open menu, and the button it hangs from
+    in property <bool> menu-open;
+    in property <length> menu-ax;
+    in property <length> menu-ay;
+    in property <length> menu-ah;
+    in property <length> menu-w: 300px;
+    in property <[MenuRow]> menu-rows;
+    in property <string> menu-placeholder;
+    in property <bool> menu-back;
+    in-out property <string> menu-query;
+    // where the menu hangs, fixed when it opens so it stays put while it is searched
+    in property <length> menu-top;
+    in property <length> menu-max;
+    out property <length> menu-x: menu.x;
+    out property <length> menu-y: menu.y;
+    out property <length> menu-width: menu.width;
+    out property <length> menu-height: menu.height;
+    out property <length> menu-natural: menu.natural-height;
+    out property <length> window-height: root.height;
+
     // where the keyboard goes, for the window to draw it there, when its page shows
     out property <bool> board-shown: root.place == "z10";
     out property <length> board-x: rail + pws-x + 15px;
@@ -149,11 +741,26 @@ export component AppWindow inherits Window {
     out property <length> ground-y: bar;
     out property <length> ground-radius: root.radius;
     // the hand, over what can be clicked
-    out property <bool> hand: t-keys.hover || t-lighting.hover || t-settings.hover || tact.has-hover || r-home.hover || r-z10.hover || r-settings.hover;
+    out property <bool> hand: Cursor.hands > 0;
+
     callback minimise();
     callback maximise();
     callback close-window();
     callback drag();
+    callback view-changed(int);
+    callback choose-profile(int);
+    callback save();
+    callback discard();
+    callback key-clicked(int);
+    callback board-clicked();
+    callback action-menu(int, length, length, length);
+    callback listen(int);
+    callback reset-key();
+    callback menu-chose(int);
+    callback menu-typed(string);
+    callback menu-enter();
+    callback menu-dismiss();
+    callback menu-back-to();
 
     background: transparent;
     default-font-family: "Barlow";
@@ -164,14 +771,18 @@ export component AppWindow inherits Window {
     property <length> rail: 60px;
     property <length> content-w: root.width - rail;
     property <length> page-w: min(1320px, content-w);
-    // the keyboard fills the panel's width, at the drawing's proportions
     property <length> pws-x: (content-w - page-w) / 2 + 28px;
     property <length> pws-y: 56px + 22px;
     property <length> pws-w: page-w - 56px;
+    // the keyboard fills the panel's width, at the drawing's proportions
     property <length> board-w: pws-w - 30px;
-    property <length> board-h: board-w * 253 / 664;
+    property <length> board-h: board-w * 260 / 649;
     property <length> head-h: 64px;
     property <length> board-top: 1px + head-h + 14px;
+    property <length> unit: board-w / root.units;
+    property <length> cqw: board-w / 100;
+    // under the keyboard: the chosen key's editor, or the tab's own page
+    property <length> panel-h: root.tab == 0 ? (root.key-open ? 18px + keypanel.preferred-height + 4px : 22px) : 150px;
 
     // the content: the device's page, on the app's ground. The window lays
     // the ground under the page itself, so that nothing the page draws lies
@@ -205,23 +816,23 @@ export component AppWindow inherits Window {
                         t-keys := Tab {
                             text: "Keys";
                             selected: root.tab == 0;
-                            clicked => { root.tab = 0; }
+                            clicked => { root.view-changed(0); }
                         }
                         t-lighting := Tab {
                             text: "Lighting";
                             selected: root.tab == 1;
-                            clicked => { root.tab = 1; }
+                            clicked => { root.view-changed(1); }
                         }
                         t-settings := Tab {
                             text: "Settings";
                             selected: root.tab == 2;
-                            clicked => { root.tab = 2; }
+                            clicked => { root.view-changed(2); }
                         }
                     }
                     // the Macro Editor button sits a little closer to the tabs it ends
                     Rectangle {
                         width: tact-row.preferred-width - 6px;
-                        tact-bg := Rectangle {
+                        Rectangle {
                             x: -6px;
                             y: (parent.height - 30px) / 2;
                             width: tact-row.preferred-width;
@@ -254,11 +865,20 @@ export component AppWindow inherits Window {
                                     vertical-alignment: center;
                                 }
                             }
-                            tact := TouchArea { }
+                            tact := TouchArea {
+                                changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+                            }
                         }
                     }
-                    Rectangle {
+                    // what was last done, then how the keyboard is
+                    Text {
                         horizontal-stretch: 1;
+                        text: root.status-text;
+                        font-size: 12.5px;
+                        color: root.status-kind == 1 ? Ink.good : root.status-kind == 2 ? Ink.bad : Ink.quiet;
+                        horizontal-alignment: right;
+                        vertical-alignment: center;
+                        wrap: word-wrap;
                     }
                     HorizontalLayout {
                         spacing: 8px;
@@ -270,14 +890,29 @@ export component AppWindow inherits Window {
                                 width: 7px;
                                 height: 7px;
                                 border-radius: 3.5px;
-                                background: #5c5c5c;
+                                background: root.conn-state == 1 ? Ink.good : root.conn-state == 2 ? Ink.bad : #5c5c5c;
                             }
                         }
                         Text {
-                            text: "Not connected: the native preview";
+                            text: root.conn-text;
                             font-size: 12.5px;
                             color: Ink.quiet;
                             vertical-alignment: center;
+                        }
+                        if root.conn-chip != "": Rectangle {
+                            width: chip.preferred-width + 14px;
+                            Rectangle {
+                                y: (parent.height - self.height) / 2;
+                                height: chip.preferred-height + 4px;
+                                border-width: 1px;
+                                border-color: #f0b35a73;
+                                border-radius: 4px;
+                                chip := Text {
+                                    text: root.conn-chip;
+                                    font-size: 11px;
+                                    color: Ink.warn;
+                                }
+                            }
                         }
                     }
                 }
@@ -301,9 +936,9 @@ export component AppWindow inherits Window {
                 x: pws-x;
                 y: pws-y;
                 width: pws-w;
-                height: 1px + head-h + 14px + board-h + 10px + 150px + 1px;
+                height: 1px + head-h + 14px + board-h + panel-h + 10px + 1px;
 
-                // the head: where the profiles go, and the profile's Discard and Save
+                // the head: the profiles, and the profile's Discard and Save
                 Rectangle {
                     x: 1px;
                     y: 1px;
@@ -317,21 +952,61 @@ export component AppWindow inherits Window {
                         padding-right: 14px;
                         padding-bottom: 1px;
                         spacing: 10px;
-                        alignment: end;
-                        HeadButton {
-                            y: (64px - 1px - self.height) / 2;
-                            text: "Discard";
+                        if root.boot != 0: HorizontalLayout {
+                            padding-left: 2px;
+                            spacing: 10px;
+                            alignment: start;
+                            if root.boot == 1: Rectangle {
+                                width: 16px;
+                                Spinner {
+                                    y: (parent.height - 16px) / 2;
+                                }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                Text {
+                                    text: root.boot-title;
+                                    font-size: 13.5px;
+                                    font-weight: 600;
+                                    color: root.boot == 2 ? Ink.bad : Ink.ink;
+                                }
+                                Text {
+                                    text: root.boot-text;
+                                    font-size: 12px;
+                                    color: Ink.quiet;
+                                }
+                            }
                         }
-                        HeadButton {
-                            y: (64px - 1px - self.height) / 2;
-                            text: "Save profile 1";
+                        if root.boot == 0: HorizontalLayout {
+                            spacing: 4px;
+                            alignment: start;
+                            for p in root.profiles: ProfileButton {
+                                y: (63px - 47px) / 2;
+                                p: p;
+                                clicked => { root.choose-profile(p.n); }
+                            }
+                        }
+                        Rectangle {
+                            horizontal-stretch: 1;
+                        }
+                        discard-b := WordButton {
+                            y: (63px - self.height) / 2;
+                            text: "Discard";
+                            enabled: root.can-save;
+                            clicked => { root.discard(); }
+                        }
+                        save-b := WordButton {
+                            y: (63px - self.height) / 2;
+                            text: root.save-label;
                             primary: true;
+                            enabled: root.can-save;
+                            clicked => { root.save(); }
                         }
                     }
                     Rectangle {
                         y: parent.height - 1px;
                         height: 1px;
-                        background: #2e2e2e;
+                        background: Ink.rule;
                     }
                 }
                 // the body's ground, painted round the keyboard's hole
@@ -364,12 +1039,73 @@ export component AppWindow inherits Window {
                     background: Ink.pws;
                     border-bottom-left-radius: 11px;
                     border-bottom-right-radius: 11px;
-                    // the tab's own page, under the keyboard
-                    Text {
+                    // the chosen key's editor, across the panel under the keyboard
+                    keypanel := HorizontalLayout {
+                        visible: root.tab == 0 && root.key-open;
+                        y: 18px;
+                        height: self.preferred-height;
+                        Rectangle {
+                            width: 200px;
+                            VerticalLayout {
+                                padding-left: 18px;
+                                padding-right: 18px;
+                                padding-top: 16px;
+                                padding-bottom: 16px;
+                                alignment: start;
+                                Text {
+                                    text: root.key-name;
+                                    font-size: 18px;
+                                    font-weight: 600;
+                                    color: Ink.ink;
+                                }
+                                Text {
+                                    text: root.key-factory;
+                                    font-size: 12px;
+                                    color: Ink.quiet;
+                                    wrap: word-wrap;
+                                }
+                            }
+                        }
+                        for l[i] in root.layers: Rectangle {
+                            horizontal-stretch: 1;
+                            Rectangle {
+                                x: 0;
+                                width: 1px;
+                                background: Ink.rule;
+                            }
+                            LayerEditor {
+                                l: l;
+                                index: i;
+                                menu(n, x, y, h) => { root.action-menu(n, x, y, h); }
+                                listen(n) => { root.listen(n); }
+                            }
+                        }
+                        Rectangle {
+                            width: reset.width + 36px;
+                            Rectangle {
+                                x: 0;
+                                width: 1px;
+                                background: Ink.rule;
+                            }
+                            reset := WordButton {
+                                x: 18px;
+                                y: 16px;
+                                text: root.reset-label;
+                                clicked => { root.reset-key(); }
+                            }
+                        }
+                    }
+                    Rectangle {
+                        visible: root.tab == 0 && root.key-open;
+                        y: 18px;
+                        height: 1px;
+                        background: Ink.rule;
+                    }
+                    // the other tabs' own pages, still to be built natively
+                    if root.tab != 0: Text {
                         x: 14px;
                         y: 10px + 18px;
-                        text: root.tab == 0 ? "Keys: pick a key on the keyboard to change what it does. This page is the next to be built natively."
-                            : root.tab == 1 ? "Lighting: the keyboard's effects and colours. Built natively after Keys."
+                        text: root.tab == 1 ? "Lighting: the keyboard's effects and colours. The next page to be built natively."
                             : "Settings: the keyboard's display, sleep and firmware. Built natively after Lighting.";
                         font-size: 14px;
                         color: Ink.quiet;
@@ -381,6 +1117,23 @@ export component AppWindow inherits Window {
                     border-color: Ink.line;
                     border-radius: 12px;
                     background: transparent;
+                }
+                // the keys, over the keyboard's hole: a click on the keyboard
+                // away from every key lets the chosen one go
+                Rectangle {
+                    x: 15px;
+                    y: board-top;
+                    width: board-w;
+                    height: board-h;
+                    TouchArea {
+                        clicked => { root.board-clicked(); }
+                    }
+                    for k in root.keys: KeyBox {
+                        k: k;
+                        unit: root.unit;
+                        cqw: root.cqw;
+                        clicked => { root.key-clicked(k.pos); }
+                    }
                 }
             }
         }
@@ -459,8 +1212,8 @@ export component AppWindow inherits Window {
         }
     }
 
-    // the rail: Home, the device, and Settings at its foot; drawn last, so
-    // the name beside an item shows over the page
+    // the rail: Home, the device, and Settings at its foot; drawn after the
+    // page, so the name beside an item shows over it
     Rectangle {
         x: 0;
         y: bar;
@@ -492,5 +1245,30 @@ export component AppWindow inherits Window {
             on: root.place == "settings";
             clicked => { root.place = "settings"; }
         }
+    }
+
+    public function focus-menu() {
+        menu.focus-search();
+    }
+    public function blur-menu() {
+        menu.blur-search();
+    }
+
+    // the open menu, over everything
+    menu := Menu {
+        visible: root.menu-open;
+        x: max(8px, min(root.menu-ax, root.width - root.menu-w - 8px));
+        width: root.menu-w;
+        height: min(self.natural-height, min(root.menu-max, root.height - root.menu-top - 8px));
+        y: root.menu-top;
+        rows: root.menu-rows;
+        placeholder: root.menu-placeholder;
+        back: root.menu-back;
+        query <=> root.menu-query;
+        go-back => { root.menu-back-to(); }
+        chose(i) => { root.menu-chose(i); }
+        typed(t) => { root.menu-typed(t); }
+        enter => { root.menu-enter(); }
+        dismiss => { root.menu-dismiss(); }
     }
 }

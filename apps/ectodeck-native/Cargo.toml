@@ -8,6 +8,7 @@ description = "Ectodeck as a native window: every pixel drawn in Rust, the keybo
 [dependencies]
 bytemuck = "1"
 ectodeck-draw = { path = "../../crates/ectodeck-draw" }
+ectotype-core = { version = "0.1.0", path = "../../crates/ectotype-core" }
 resvg = "0.45"
 serde_json = "1.0.151"
 slint = { version = "1.18.1", default-features = false, features = ["compat-1-2", "std", "renderer-software", "software-renderer-systemfonts"] }
