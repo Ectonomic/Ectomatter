@@ -507,7 +507,14 @@ button.danger:hover { background: #e25f5b; }
 .sec-head p { margin: 0; font-size: 13px; color: var(--quiet); }
 .mws .mwrap { border: 0; border-radius: 0; }
 
-/* HDR: Ectodeck's own layer under the page draws the plate (and the light) in
-   true HDR, so the page shows it through: no ground of its own, no plate */
+/* HDR: Ectodeck's own layer under the page draws the whole keyboard, so the
+   page shows it through a hole in its ground (#hdrground, whose hole app.js
+   keeps where the keyboard is) and hides its own pictures of it, keeping the
+   keys' buttons, the knobs, the display and its glass over it. */
 html.hdr.framed body { background: transparent; }
-html.hdr .board .art.base, html.hdr .board .key .lit.under { visibility: hidden; }
+#hdrground { display: none; }
+html.hdr #hdrground { display: block; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background: var(--base); border-radius: 10px; }
+html.hdr.maximized #hdrground { border-radius: 0; }
+html.hdr .board .art.base, html.hdr .board .art.caps, html.hdr .board .art.print,
+html.hdr .board .key .lit { visibility: hidden; }

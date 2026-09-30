@@ -8,6 +8,7 @@ mod devices;
 mod screens;
 mod hdr_overlay;
 mod hdr_board;
+mod hdr_draw;
 mod settings;
 mod core_art;
 
@@ -270,9 +271,15 @@ async fn hdr_layout(window: tauri::WebviewWindow, layout: hdr_board::Layout) -> 
     let screens = tauri::async_runtime::spawn_blocking(screens::screens).await.unwrap_or_default();
     let best = screens.iter().max_by(|a, b| a["peak"].as_f64().partial_cmp(&b["peak"].as_f64()).unwrap_or(std::cmp::Ordering::Equal));
     let reference = best.and_then(|s| s["reference"].as_f64()).unwrap_or(203.0);
-    // the plate: the body of the Z10 core's drawing, with what is printed on it
-    let plate = core_art::layers(&["body", "legend-body"]);
-    hdr_board::layout(&window, layout, reference, [plate])
+    // the Z10 core's drawing and its pieces, which the layer draws the keyboard from
+    hdr_board::layout(&window, layout, reference, (core_art::SVG.to_string(), core_art::DEVICE.to_string()))
+}
+
+/// The keys' light, for the HDR layer: six numbers a key (position, red,
+/// green, blue, strength, remapped).
+#[tauri::command]
+fn hdr_light(lights: Vec<f64>) {
+    hdr_board::light(hdr_board::lights(&lights));
 }
 
 /// The Z10's art: its drawing and which pieces belong to each control and screen.
@@ -441,7 +448,7 @@ pub fn run() {
                 let _ = w.hide();
             }
         })
-        .invoke_handler(tauri::generate_handler![state, save, write_macro, activate, preview, record, lcd, open_macro_editor, prepare_macro_editor, firmware, sliders, set_dimmer, set_audio, set_modes, set_tray_devices, settings_get, settings_set, devices_status, weather, weather_search, screens, hdr_spike, hdr_layout, core_art])
+        .invoke_handler(tauri::generate_handler![state, save, write_macro, activate, preview, record, lcd, open_macro_editor, prepare_macro_editor, firmware, sliders, set_dimmer, set_audio, set_modes, set_tray_devices, settings_get, settings_set, devices_status, weather, weather_search, screens, hdr_spike, hdr_layout, hdr_light, core_art])
         .run(tauri::generate_context!())
         .expect("Ectodeck could not start");
 }

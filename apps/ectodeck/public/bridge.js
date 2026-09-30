@@ -33,6 +33,7 @@
     if (path === '/api/screens') return call('screens');
     if (path === '/api/core-art') return call('core_art');
     if (path === '/api/hdr-layout') return call('hdr_layout', body);
+    if (path === '/api/hdr-light') return call('hdr_light', { lights: body.lights });
     if (path === '/api/weather/search') return call('weather_search', { query: body.query });
     if (path === '/api/preview') return call('preview', { body });
     if (path === '/api/record') return call('record', body ? { action: body.action, room: body.room, waits: body.waits } : { action: 'status' });

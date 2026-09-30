@@ -563,31 +563,61 @@ async function refresh() {
 }
 
 // HDR: on a screen with room above the desktop's white, Ectodeck's own layer
-// under the page draws the layers that lie under the light (the plate, then
-// the halos) in true HDR, and the page turns see-through over them, keeping
-// everything else (src-tauri/src/hdr_board.rs). The page tells the layer
-// where the window and the keyboard are whenever either changes.
+// under the page draws the whole keyboard as one HDR picture, its light going
+// brighter than white (src-tauri/src/hdr_board.rs, hdr_draw.rs). The page
+// paints the ground round it itself, with a hole where the keyboard is, and
+// keeps only what is interactive or live over it: the keys' buttons (hover,
+// choosing, pressing, remapping), the slider knobs, the display and its glass.
+// It tells the layer where the keyboard is, and each key's light, whenever
+// either changes.
 async function startHdr() {
   if (window.__window !== 'main' || !window.__TAURI__) return;
   let conf = {}, screens = [];
   try { [conf, screens] = await Promise.all([api('/api/settings'), api('/api/screens')]); } catch (e) { return; }
   if (conf?.hdr?.lighting === 'off' || !screens.some(sc => sc.peak > sc.reference * 1.1)) return;
   document.documentElement.classList.add('hdr');
-  let queued = false;
+  // how bright the light may go: the Peak nits setting, or the screen's own peak
+  const glow = conf?.hdr?.glow_limit ?? Math.max(...screens.map(sc => sc.peak || 0));
+  const ground = document.body.insertBefore(el('div', { id: 'hdrground', 'aria-hidden': 'true' }), document.body.firstChild);
+  // each lit key: position, red, green, blue, strength, remapped
+  const lights = () => {
+    const out = [];
+    for (const k of S.layout) {
+      if (!k.led) continue;
+      const [r = 0, g = 0, b = 0] = (k.lc || '').match(/\d+/g) || [];
+      out.push(k.pos, +r, +g, +b, +(k.la || 0), k.el?.classList.contains('has-remap') ? 1 : 0);
+    }
+    return out;
+  };
+  let queued = false, why = '';
   const send = () => {
     queued = false;
     const d = devicePixelRatio || 1, root = document.documentElement;
     const plate = document.querySelector('.board .art.base');
     const r = plate?.getBoundingClientRect();
     const onPage = document.body.dataset.place === 'z10' && r && r.width > 0;
+    // the ground, with a hole where the keyboard shows through
+    ground.style.clipPath = onPage
+      ? `path(evenodd, "M0 0H${innerWidth}V${innerHeight}H0Z M${r.left} ${r.top}H${r.right}V${r.bottom}H${r.left}Z")`
+      : 'none';
     api('/api/hdr-layout', { layout: {
       win_w: Math.round(innerWidth * d), win_h: Math.round(innerHeight * d),
       radius: root.classList.contains('maximized') ? 0 : 10 * d,
       base: getComputedStyle(root).getPropertyValue('--base').trim() || '#202020',
       board: onPage ? [r.left * d, r.top * d, r.width * d, r.height * d] : null,
+      glow, lights: lights(),
+      why: `${why} place=${document.body.dataset.place} plate=${plate ? Math.round(r.width) + 'x' + Math.round(r.height) : 'none'}`,
     } }).catch(e => console.warn('HDR layer:', e));
+    why = '';
   };
-  window.hdrLayout = () => { if (!queued) { queued = true; requestAnimationFrame(send); } };
+  window.hdrLayout = e => { why += (e?.type || (e ? 'observer' : 'call')) + ' '; if (!queued) { queued = true; requestAnimationFrame(send); } };
+  // the keys' light alone, at most once a frame
+  let lightQueued = false;
+  window.hdrLight = () => {
+    if (lightQueued) return;
+    lightQueued = true;
+    requestAnimationFrame(() => { lightQueued = false; api('/api/hdr-light', { lights: lights() }).catch(e => console.warn('HDR light:', e)); });
+  };
   addEventListener('resize', window.hdrLayout);
   // shown again from the tray, the window has a new surface for the layer to build on
   document.addEventListener('visibilitychange', window.hdrLayout);
@@ -914,6 +944,7 @@ function frame(now) {
       k.el.style.setProperty('--c', c);
       k.el.style.setProperty('--a', a);
     }
+    if (changed) window.hdrLight?.();
   }
   requestAnimationFrame(frame);
 }
@@ -1033,6 +1064,7 @@ function renderBoardLabels() {
     k.el.title = `${FULLNAME[k.id] || LEGEND[k.id] || k.id}: ${describe(def)}`;
     k.el.classList.toggle('sel', S.sel === k.pos && S.view === 'keys');
   }
+  window.hdrLight?.();
   $('#boardhint').textContent = '';
 }
 

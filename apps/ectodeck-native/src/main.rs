@@ -688,9 +688,17 @@ impl App {
             if self.check {
                 let parts = self.pic.out.clone();
                 self.pic.encode_all();
-                let stale = parts.iter().zip(&self.pic.out).filter(|(a, b)| a != b).count();
-                if stale > 0 {
-                    eprintln!("ectodeck-native: CHECK frame {}: {stale} pixels differ from a whole encode", self.frames);
+                let w = self.pic.w;
+                let (mut n, mut bb) = (0, (usize::MAX, usize::MAX, 0, 0));
+                for (i, (a, b)) in parts.iter().zip(&self.pic.out).enumerate() {
+                    if a != b {
+                        n += 1;
+                        let (x, y) = (i % w, i / w);
+                        bb = (bb.0.min(x), bb.1.min(y), bb.2.max(x), bb.3.max(y));
+                    }
+                }
+                if n > 0 {
+                    eprintln!("ectodeck-native: CHECK frame {}: {n} pixels differ from a whole encode, in x {}..{} y {}..{}; encoded {:?}; keyboard at {:?}", self.frames, bb.0, bb.2, bb.1, bb.3, dirty, self.pic.keyboard_rect());
                 }
             }
         }
