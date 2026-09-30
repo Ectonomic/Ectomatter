@@ -1,0 +1,736 @@
+//! Ectodeck as a native window: every pixel drawn by Ectodeck, no web view.
+//!
+//! The window is one HDR picture. The page (ui/app.slint) is drawn by Slint's
+//! software renderer. The keyboard is drawn from the Z10 core's art by
+//! ectodeck-draw and lit in linear light, brighter than the desktop's white
+//! where it glows. The page leaves a hole where the keyboard goes; the two
+//! meet in one picture, in linear light, which goes to the compositor as PQ
+//! with BT.2020 primaries, 16 bits a channel. The page's colours are decoded
+//! as KWin decodes every SDR app's (gamma 2.2 at the reference white), so the
+//! page looks as the web app did and only the light goes above it.
+//!
+//! `ectodeck-native --snapshot FILE` draws one frame at 1440 x 940 without
+//! opening a window and saves the picture as raw ABGR16161616, for checking.
+
+mod picture;
+mod screens;
+
+slint::include_modules!();
+
+use std::cell::RefCell;
+use std::num::NonZeroU32;
+use std::rc::Rc;
+use std::time::{Duration, Instant};
+
+use ectodeck_draw::hdr::{Board, Light};
+use picture::{Lit, Picture};
+use resvg::tiny_skia::{Pixmap, Transform};
+use resvg::usvg;
+use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
+use slint::platform::{PointerEventButton, WindowAdapter, WindowEvent};
+use slint::{ComponentHandle, LogicalPosition, PhysicalSize};
+use smithay_client_toolkit::reexports::calloop::{self, EventLoop};
+use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
+use smithay_client_toolkit::reexports::client::globals::registry_queue_init;
+use smithay_client_toolkit::reexports::client::protocol::{wl_output, wl_pointer, wl_seat, wl_shm, wl_surface};
+use smithay_client_toolkit::reexports::client::{delegate_noop, Connection, Dispatch, QueueHandle};
+use smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge;
+use smithay_client_toolkit::{
+    compositor::{CompositorHandler, CompositorState},
+    delegate_compositor, delegate_output, delegate_pointer, delegate_registry, delegate_seat, delegate_shm,
+    delegate_xdg_shell, delegate_xdg_window,
+    output::{OutputHandler, OutputState},
+    registry::{ProvidesRegistryState, RegistryState},
+    registry_handlers,
+    seat::{
+        pointer::{CursorIcon, PointerEvent, PointerEventKind, PointerHandler, ThemeSpec, ThemedPointer},
+        Capability, SeatHandler, SeatState,
+    },
+    shell::{
+        xdg::{
+            window::{Window, WindowConfigure, WindowDecorations, WindowHandler},
+            XdgShell, XdgSurface,
+        },
+        WaylandSurface,
+    },
+    shm::{
+        slot::{Buffer, SlotPool},
+        Shm, ShmHandler,
+    },
+};
+use wayland_protocols::wp::color_management::v1::client::{
+    wp_color_management_surface_v1::WpColorManagementSurfaceV1,
+    wp_color_manager_v1::{self, WpColorManagerV1},
+    wp_image_description_creator_params_v1::WpImageDescriptionCreatorParamsV1,
+    wp_image_description_v1::{self, WpImageDescriptionV1},
+};
+
+/// the size the window opens at, and the least it may be, as the web app's
+const SIZE: (u32, u32) = (1440, 940);
+const MIN_SIZE: (u32, u32) = (1000, 700);
+/// the ground the keyboard sits on: the profile panel's
+const GROUND: [u8; 3] = [0x1f, 0x24, 0x29];
+/// how far in from the window's edge a press resizes it
+const EDGE: f64 = 6.0;
+
+/// Slint, told to draw into our own buffer and to keep time by our clock.
+struct Platform {
+    window: Rc<MinimalSoftwareWindow>,
+    start: Instant,
+}
+
+impl slint::platform::Platform for Platform {
+    fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+        Ok(self.window.clone())
+    }
+    fn duration_since_start(&self) -> Duration {
+        self.start.elapsed()
+    }
+}
+
+/// What the page asked the window to do, done once its event is handled.
+#[derive(Clone, Copy, PartialEq)]
+enum Ask {
+    Move,
+    Minimise,
+    Maximise,
+    Close,
+}
+
+/// A glyph from the app's drawings, as white on clear, for the page to tint.
+fn glyph(svg: &str, px: u32, tint: bool) -> slint::Image {
+    let svg = if tint { svg.replace("currentColor", "#ffffff") } else { svg.to_string() };
+    let tree = usvg::Tree::from_str(&svg, &usvg::Options::default()).expect("a glyph the app drew");
+    let mut pix = Pixmap::new(px, px).unwrap();
+    let s = tree.size();
+    resvg::render(&tree, Transform::from_scale(px as f32 / s.width(), px as f32 / s.height()), &mut pix.as_mut());
+    let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(px, px);
+    buf.make_mut_bytes().copy_from_slice(pix.data());
+    slint::Image::from_rgba8_premultiplied(buf)
+}
+
+/// How bright the desktop's white is and how far the keyboard's light may go
+/// above it, from the brightest screen: (reference, glow), in nits.
+fn levels() -> (f64, f64) {
+    let screens = screens::screens();
+    let best = screens.iter().max_by(|a, b| a["peak"].as_f64().partial_cmp(&b["peak"].as_f64()).unwrap_or(std::cmp::Ordering::Equal));
+    let reference = best.and_then(|s| s["reference"].as_f64()).filter(|r| *r > 0.0).unwrap_or(203.0);
+    let peak = best.and_then(|s| s["peak"].as_f64()).unwrap_or(reference);
+    (reference, peak.max(reference))
+}
+
+/// The lighting shown until Ectodeck talks to the keyboard: every key lit orange.
+fn lights(board: &Board) -> Vec<Light> {
+    board.positions().map(|pos| Light { pos, rgb: [255, 96, 16], strength: 1.0, dim: false }).collect()
+}
+
+/// Build the keyboard at each size asked for, away from the window's thread:
+/// it takes a third of a second, and the window keeps drawing meanwhile.
+fn board_builder(done: calloop::channel::Sender<Board>) -> std::sync::mpsc::Sender<(u32, u32)> {
+    let (ask, asked) = std::sync::mpsc::channel::<(u32, u32)>();
+    std::thread::spawn(move || {
+        let tree = usvg::Tree::from_str(ectodeck_draw::z10::SVG, &usvg::Options::default()).expect("the Z10's art");
+        let device: serde_json::Value = serde_json::from_str(ectodeck_draw::z10::DEVICE).expect("the Z10's device file");
+        while let Ok(mut size) = asked.recv() {
+            // only the latest size matters
+            while let Ok(s) = asked.try_recv() {
+                size = s;
+            }
+            let t = Instant::now();
+            match Board::new(&tree, &device, GROUND, size.0, size.1) {
+                Ok(b) => {
+                    eprintln!("ectodeck-native: keyboard drawn at {}x{} in {:?}", size.0, size.1, t.elapsed());
+                    if done.send(b).is_err() {
+                        return;
+                    }
+                }
+                Err(e) => eprintln!("ectodeck-native: the keyboard could not be drawn: {e}"),
+            }
+        }
+    });
+    ask
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let snapshot = args.iter().position(|a| a == "--snapshot").and_then(|i| args.get(i + 1)).cloned();
+
+    let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
+    slint::platform::set_platform(Box::new(Platform { window: window.clone(), start: Instant::now() })).unwrap();
+    let ui = AppWindow::new().unwrap();
+    ui.set_mark(glyph(include_str!("../ui/glyphs/mark.svg"), 16, false));
+    ui.set_home_glyph(glyph(include_str!("../ui/glyphs/home.svg"), 22, true));
+    ui.set_keyboard_glyph(glyph(include_str!("../ui/glyphs/keyboard.svg"), 22, true));
+    ui.set_settings_glyph(glyph(include_str!("../ui/glyphs/settings.svg"), 22, true));
+    ui.show().unwrap();
+
+    let (reference, glow) = levels();
+    let gain = (glow / reference).max(1.0) as f32;
+    eprintln!("ectodeck-native: the desktop's white is {reference} nits; the light goes to {glow}");
+
+    if let Some(path) = snapshot {
+        return snap(&window, &ui, reference, gain, &path);
+    }
+    run(window, ui, reference, gain);
+}
+
+/// One frame without a window, saved for checking.
+fn snap(window: &Rc<MinimalSoftwareWindow>, ui: &AppWindow, reference: f64, gain: f32, path: &str) {
+    let (w, h) = SIZE;
+    window.set_size(PhysicalSize::new(w, h));
+    // the place and the tab to draw, for checking each
+    if let Ok(place) = std::env::var("ECTODECK_NATIVE_PLACE") {
+        ui.set_place(place.into());
+    }
+    if let Some(tab) = std::env::var("ECTODECK_NATIVE_TAB").ok().and_then(|t| t.parse().ok()) {
+        ui.set_tab(tab);
+    }
+    let mut pic = Picture::new(reference, GROUND);
+    pic.resize(w as usize, h as usize);
+    window.draw_if_needed(|r| {
+        r.render(&mut pic.ui, w as usize);
+    });
+    let rect = board_rect(ui, 1.0);
+    lay_ground(&mut pic, ui, 1.0);
+    if rect.2 > 0 {
+        let tree = usvg::Tree::from_str(ectodeck_draw::z10::SVG, &usvg::Options::default()).unwrap();
+        let device: serde_json::Value = serde_json::from_str(ectodeck_draw::z10::DEVICE).unwrap();
+        let t = Instant::now();
+        let board = Board::new(&tree, &device, GROUND, rect.2 as u32, rect.3 as u32).unwrap();
+        eprintln!("keyboard drawn in {:?}", t.elapsed());
+        let lit = board.compose(&lights(&board), gain);
+        pic.set_keyboard(rect, Some(&Rc::new(Lit { px: lit, w: rect.2, h: rect.3 })));
+    }
+    let t = Instant::now();
+    pic.encode_all();
+    eprintln!("frame encoded in {:?}", t.elapsed());
+    std::fs::write(path, bytemuck::cast_slice::<[u16; 4], u8>(&pic.out)).unwrap();
+    eprintln!("saved {path}: {w}x{h}, keyboard at {rect:?}");
+}
+
+/// Lay the app's ground where the page leaves it to the window; true if it moved.
+fn lay_ground(pic: &mut Picture, ui: &AppWindow, scale: f32) -> bool {
+    let c = ui.get_ground();
+    pic.set_ground(
+        (ui.get_ground_x() * scale).round() as usize,
+        (ui.get_ground_y() * scale).round() as usize,
+        ui.get_ground_radius() * scale,
+        [c.red(), c.green(), c.blue()],
+    )
+}
+
+/// Where the page's hole for the keyboard is, in the buffer's pixels.
+fn board_rect(ui: &AppWindow, scale: f32) -> (i32, i32, usize, usize) {
+    if !ui.get_board_shown() {
+        return (0, 0, 0, 0);
+    }
+    (
+        (ui.get_board_x() * scale).round() as i32,
+        (ui.get_board_y() * scale).round() as i32,
+        (ui.get_board_width() * scale).round().max(1.0) as usize,
+        (ui.get_board_height() * scale).round().max(1.0) as usize,
+    )
+}
+
+struct App {
+    registry: RegistryState,
+    seats: SeatState,
+    outputs: OutputState,
+    compositor: CompositorState,
+    shm: Shm,
+    _xdg: XdgShell,
+    conn: Connection,
+    qh: QueueHandle<App>,
+    window: Window,
+    pool: SlotPool,
+    buffers: Vec<Buffer>,
+    pointer: Option<ThemedPointer>,
+    seat: Option<wl_seat::WlSeat>,
+    cursor: Option<CursorIcon>,
+    /// the window's size in logical pixels, and the buffer's scale
+    size: (u32, u32),
+    scale: u32,
+    configured: bool,
+    maximized: bool,
+    frame_pending: bool,
+    exit: bool,
+    /// the last button press, which a move or a resize is started from
+    press: u32,
+    at: (f64, f64),
+    ready: bool,
+    failed: Option<String>,
+
+    slint: Rc<MinimalSoftwareWindow>,
+    ui: AppWindow,
+    asks: Rc<RefCell<Vec<Ask>>>,
+    pic: Picture,
+    gain: f32,
+    /// the keyboard at the size last drawn, lit
+    board: Option<Board>,
+    lit: Option<Rc<Lit>>,
+    asked: Option<(u32, u32)>,
+    build: std::sync::mpsc::Sender<(u32, u32)>,
+    /// the whole window needs drawing again, not only what Slint changed
+    full: bool,
+    /// ECTODECK_NATIVE_DUMP: a folder to save the frames given to the compositor in
+    dump: Option<std::path::PathBuf>,
+    /// ECTODECK_NATIVE_CHECK: encode every frame whole too, and say if the
+    /// parts encoded differ from it
+    check: bool,
+    frames: u64,
+}
+
+fn run(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, reference: f64, gain: f32) {
+    let conn = Connection::connect_to_env().expect("a Wayland session");
+    let (globals, queue) = registry_queue_init::<App>(&conn).unwrap();
+    let qh = queue.handle();
+    let mut event_loop: EventLoop<App> = EventLoop::try_new().unwrap();
+    WaylandSource::new(conn.clone(), queue).insert(event_loop.handle()).unwrap();
+
+    let compositor = CompositorState::bind(&globals, &qh).expect("wl_compositor");
+    let xdg = XdgShell::bind(&globals, &qh).expect("xdg_shell");
+    let shm = Shm::bind(&globals, &qh).expect("wl_shm");
+    let cm: WpColorManagerV1 = globals.bind(&qh, 1..=1, ()).expect("the compositor's colour management (KWin 6.3 or later)");
+
+    let surface = compositor.create_surface(&qh);
+    let window = xdg.create_window(surface, WindowDecorations::RequestClient, &qh);
+    window.set_title("Ectodeck");
+    window.set_app_id("com.ectonomic.ectodeck");
+    window.set_min_size(Some(MIN_SIZE));
+
+    // the picture is PQ with BT.2020 primaries, its white at the desktop's
+    let params = cm.create_parametric_creator(&qh, ());
+    params.set_tf_named(wp_color_manager_v1::TransferFunction::St2084Pq);
+    params.set_primaries_named(wp_color_manager_v1::Primaries::Bt2020);
+    params.set_luminances(0, 10000, reference.round() as u32);
+    let desc = params.create(&qh, ());
+    let cm_surface = cm.get_surface(window.wl_surface(), &qh, ());
+
+    let (built_tx, built_rx) = calloop::channel::channel::<Board>();
+    let build = board_builder(built_tx);
+    event_loop
+        .handle()
+        .insert_source(built_rx, |e, _, app: &mut App| {
+            if let calloop::channel::Event::Msg(board) = e {
+                app.built(board);
+            }
+        })
+        .unwrap();
+
+    let asks = Rc::new(RefCell::new(Vec::new()));
+    {
+        let a = asks.clone();
+        ui.on_drag(move || a.borrow_mut().push(Ask::Move));
+        let a = asks.clone();
+        ui.on_minimise(move || a.borrow_mut().push(Ask::Minimise));
+        let a = asks.clone();
+        ui.on_maximise(move || a.borrow_mut().push(Ask::Maximise));
+        let a = asks.clone();
+        ui.on_close_window(move || a.borrow_mut().push(Ask::Close));
+    }
+
+    let mut app = App {
+        registry: RegistryState::new(&globals),
+        seats: SeatState::new(&globals, &qh),
+        outputs: OutputState::new(&globals, &qh),
+        pool: SlotPool::new((SIZE.0 * SIZE.1 * 8) as usize, &shm).expect("a shared memory pool"),
+        compositor,
+        shm,
+        _xdg: xdg,
+        conn: conn.clone(),
+        qh: qh.clone(),
+        window,
+        buffers: Vec::new(),
+        pointer: None,
+        seat: None,
+        cursor: None,
+        size: SIZE,
+        scale: 1,
+        configured: false,
+        maximized: false,
+        frame_pending: false,
+        exit: false,
+        press: 0,
+        at: (0.0, 0.0),
+        ready: false,
+        failed: None,
+        slint,
+        ui,
+        asks,
+        pic: Picture::new(reference, GROUND),
+        gain,
+        board: None,
+        lit: None,
+        asked: None,
+        build,
+        full: true,
+        dump: std::env::var_os("ECTODECK_NATIVE_DUMP").map(Into::into),
+        check: std::env::var_os("ECTODECK_NATIVE_CHECK").is_some(),
+        frames: 0,
+    };
+
+    // the picture's description has to be ready before the surface takes it
+    while !app.ready && app.failed.is_none() {
+        event_loop.dispatch(Some(Duration::from_millis(50)), &mut app).unwrap();
+    }
+    if let Some(e) = &app.failed {
+        eprintln!("ectodeck-native: the compositor refused the HDR picture: {e}");
+        return;
+    }
+    cm_surface.set_image_description(&desc, wp_color_manager_v1::RenderIntent::Perceptual);
+    // mapped by a first commit with no buffer; the compositor answers with the size
+    app.window.commit();
+
+    while !app.exit {
+        let wait = if app.slint.has_active_animations() && !app.frame_pending {
+            Some(Duration::ZERO)
+        } else {
+            slint::platform::duration_until_next_timer_update()
+        };
+        event_loop.dispatch(wait, &mut app).unwrap();
+        slint::platform::update_timers_and_animations();
+        app.act();
+        app.draw();
+    }
+}
+
+impl App {
+    /// Do what the page asked.
+    fn act(&mut self) {
+        let asks: Vec<Ask> = self.asks.borrow_mut().drain(..).collect();
+        for ask in &asks {
+            match ask {
+                Ask::Move if !asks.contains(&Ask::Maximise) => {
+                    if let Some(seat) = &self.seat {
+                        self.window.move_(seat, self.press);
+                    }
+                    // the compositor keeps the button's release: tell the page it is up
+                    let position = LogicalPosition::new(self.at.0 as f32, self.at.1 as f32);
+                    self.slint.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
+                    self.slint.dispatch_event(WindowEvent::PointerExited);
+                }
+                Ask::Move => {}
+                Ask::Minimise => self.window.set_minimized(),
+                Ask::Maximise => {
+                    if self.maximized {
+                        self.window.unset_maximized()
+                    } else {
+                        self.window.set_maximized()
+                    }
+                }
+                Ask::Close => self.exit = true,
+            }
+        }
+    }
+
+    /// The keyboard came back drawn at a size: light it.
+    fn built(&mut self, board: Board) {
+        let lit = board.compose(&lights(&board), self.gain);
+        self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
+        self.board = Some(board);
+        self.full = true;
+        self.draw();
+    }
+
+    fn draw(&mut self) {
+        if !self.configured || self.frame_pending {
+            return;
+        }
+        let (w, h) = ((self.size.0 * self.scale) as usize, (self.size.1 * self.scale) as usize);
+        if self.pic.w != w || self.pic.h != h {
+            self.pic.resize(w, h);
+            self.full = true;
+        }
+        let full = self.full;
+        let mut dirty = Vec::new();
+        let pic = &mut self.pic;
+        self.slint.draw_if_needed(|r| {
+            if full {
+                r.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
+            }
+            let region = r.render(&mut pic.ui, w);
+            if full {
+                r.set_repaint_buffer_type(RepaintBufferType::ReusedBuffer);
+            }
+            for (p, s) in region.iter() {
+                dirty.push((p.x as usize, p.y as usize, s.width as usize, s.height as usize));
+            }
+        });
+
+        if lay_ground(&mut self.pic, &self.ui, self.scale as f32) {
+            self.full = true;
+        }
+        // the keyboard: the one drawn at this size, or the last one stretched to
+        // it while this size is drawn
+        let rect = board_rect(&self.ui, self.scale as f32);
+        let want = (rect.2 as u32, rect.3 as u32);
+        if want.0 > 0 && self.board.as_ref().map(|b| (b.w, b.h)) != Some(want) && self.asked != Some(want) {
+            self.asked = Some(want);
+            let _ = self.build.send(want);
+        }
+        let before = self.pic.keyboard_rect();
+        if self.pic.set_keyboard(rect, self.lit.as_ref()) {
+            for r in [before, rect] {
+                dirty.push((r.0.max(0) as usize, r.1.max(0) as usize, r.2, r.3));
+            }
+        }
+
+        if self.full {
+            self.pic.encode_all();
+            dirty = vec![(0, 0, w, h)];
+        } else if dirty.is_empty() {
+            return;
+        } else {
+            for &(x, y, dw, dh) in &dirty {
+                self.pic.encode(x, y, dw, dh);
+            }
+            if self.check {
+                let parts = self.pic.out.clone();
+                self.pic.encode_all();
+                let stale = parts.iter().zip(&self.pic.out).filter(|(a, b)| a != b).count();
+                if stale > 0 {
+                    eprintln!("ectodeck-native: CHECK frame {}: {stale} pixels differ from a whole encode", self.frames);
+                }
+            }
+        }
+        self.full = false;
+        self.present(&dirty);
+    }
+
+    /// Hand the picture to the compositor.
+    fn present(&mut self, dirty: &[(usize, usize, usize, usize)]) {
+        let (w, h) = (self.pic.w, self.pic.h);
+        let fits = |b: &Buffer| b.height() as usize == h && b.stride() as usize == w * 8;
+        self.buffers.retain(fits);
+        let pool = &mut self.pool;
+        let free = self.buffers.iter().position(|b| b.canvas(pool).is_some());
+        let i = match free {
+            Some(i) => i,
+            None => {
+                let (b, _) = self.pool.create_buffer(w as i32, h as i32, (w * 8) as i32, wl_shm::Format::Abgr16161616).expect("a buffer");
+                self.buffers.push(b);
+                self.buffers.len() - 1
+            }
+        };
+        let canvas = self.buffers[i].canvas(&mut self.pool).unwrap();
+        canvas.copy_from_slice(bytemuck::cast_slice(&self.pic.out));
+        let surface = self.window.wl_surface();
+        for &(x, y, dw, dh) in dirty {
+            surface.damage_buffer(x as i32, y as i32, dw as i32, dh as i32);
+        }
+        surface.set_buffer_scale(self.scale as i32);
+        surface.frame(&self.qh, surface.clone());
+        self.buffers[i].attach_to(surface).unwrap();
+        self.window.commit();
+        self.frame_pending = true;
+        self.frames += 1;
+        if let Some(dir) = &self.dump {
+            let _ = std::fs::write(dir.join("frame.raw"), bytemuck::cast_slice::<[u16; 4], u8>(&self.pic.out));
+            let _ = std::fs::write(dir.join("frame.txt"), format!("{} {} {}\n", w, h, self.frames));
+        }
+    }
+
+    fn set_cursor(&mut self, icon: CursorIcon) {
+        if self.cursor == Some(icon) {
+            return;
+        }
+        if let Some(p) = &self.pointer {
+            if p.set_cursor(&self.conn, icon).is_ok() {
+                self.cursor = Some(icon);
+            }
+        }
+    }
+
+    /// The window's edge under the pointer, which a press resizes from.
+    fn edge(&self, x: f64, y: f64) -> Option<ResizeEdge> {
+        if self.maximized {
+            return None;
+        }
+        let (w, h) = (self.size.0 as f64, self.size.1 as f64);
+        let (l, r, t, b) = (x < EDGE, x > w - EDGE, y < EDGE, y > h - EDGE);
+        Some(match (l, r, t, b) {
+            (true, _, true, _) => ResizeEdge::TopLeft,
+            (_, true, true, _) => ResizeEdge::TopRight,
+            (true, _, _, true) => ResizeEdge::BottomLeft,
+            (_, true, _, true) => ResizeEdge::BottomRight,
+            (true, ..) => ResizeEdge::Left,
+            (_, true, ..) => ResizeEdge::Right,
+            (_, _, true, _) => ResizeEdge::Top,
+            (_, _, _, true) => ResizeEdge::Bottom,
+            _ => return None,
+        })
+    }
+}
+
+impl CompositorHandler for App {
+    fn scale_factor_changed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, factor: i32) {
+        self.scale = factor.max(1) as u32;
+        self.slint.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: self.scale as f32 });
+        self.slint.set_size(PhysicalSize::new(self.size.0 * self.scale, self.size.1 * self.scale));
+        self.full = true;
+    }
+    fn transform_changed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: wl_output::Transform) {}
+    fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: u32) {
+        self.frame_pending = false;
+    }
+    fn surface_enter(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: &wl_output::WlOutput) {}
+    fn surface_leave(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: &wl_output::WlOutput) {}
+}
+
+impl OutputHandler for App {
+    fn output_state(&mut self) -> &mut OutputState {
+        &mut self.outputs
+    }
+    fn new_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
+    fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
+    fn output_destroyed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
+}
+
+impl WindowHandler for App {
+    fn request_close(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &Window) {
+        self.exit = true;
+    }
+
+    fn configure(&mut self, _: &Connection, _: &QueueHandle<Self>, window: &Window, configure: WindowConfigure, _: u32) {
+        let w = configure.new_size.0.map_or(self.size.0, NonZeroU32::get);
+        let h = configure.new_size.1.map_or(self.size.1, NonZeroU32::get);
+        if (w, h) != self.size || !self.configured {
+            self.size = (w, h);
+            self.slint.set_size(PhysicalSize::new(w * self.scale, h * self.scale));
+            self.full = true;
+        }
+        let maximized = configure.is_maximized();
+        if maximized != self.maximized {
+            self.maximized = maximized;
+            self.ui.set_is_maximized(maximized);
+        }
+        window.xdg_surface().set_window_geometry(0, 0, w as i32, h as i32);
+        self.configured = true;
+        self.draw();
+    }
+}
+
+impl SeatHandler for App {
+    fn seat_state(&mut self) -> &mut SeatState {
+        &mut self.seats
+    }
+    fn new_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
+    fn new_capability(&mut self, _: &Connection, qh: &QueueHandle<Self>, seat: wl_seat::WlSeat, capability: Capability) {
+        if capability == Capability::Pointer && self.pointer.is_none() {
+            let surface = self.compositor.create_surface(qh);
+            self.pointer = self.seats.get_pointer_with_theme(qh, &seat, self.shm.wl_shm(), surface, ThemeSpec::default()).ok();
+            self.seat = Some(seat);
+        }
+    }
+    fn remove_capability(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat, capability: Capability) {
+        if capability == Capability::Pointer {
+            if let Some(p) = self.pointer.take() {
+                p.pointer().release();
+            }
+        }
+    }
+    fn remove_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
+}
+
+impl PointerHandler for App {
+    fn pointer_frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_pointer::WlPointer, events: &[PointerEvent]) {
+        const BTN_LEFT: u32 = 0x110;
+        const BTN_RIGHT: u32 = 0x111;
+        const BTN_MIDDLE: u32 = 0x112;
+        for e in events {
+            if &e.surface != self.window.wl_surface() {
+                continue;
+            }
+            let (x, y) = e.position;
+            self.at = (x, y);
+            let position = LogicalPosition::new(x as f32, y as f32);
+            let button = |b: u32| match b {
+                BTN_LEFT => PointerEventButton::Left,
+                BTN_RIGHT => PointerEventButton::Right,
+                BTN_MIDDLE => PointerEventButton::Middle,
+                _ => PointerEventButton::Other,
+            };
+            match e.kind {
+                PointerEventKind::Enter { .. } => {
+                    self.cursor = None;
+                    self.slint.dispatch_event(WindowEvent::PointerMoved { position });
+                }
+                PointerEventKind::Leave { .. } => {
+                    self.slint.dispatch_event(WindowEvent::PointerExited);
+                }
+                PointerEventKind::Motion { .. } => {
+                    self.slint.dispatch_event(WindowEvent::PointerMoved { position });
+                }
+                PointerEventKind::Press { button: b, serial, .. } => {
+                    self.press = serial;
+                    if b == BTN_LEFT {
+                        if let (Some(edge), Some(seat)) = (self.edge(x, y), &self.seat) {
+                            self.window.resize(seat, serial, edge);
+                            continue;
+                        }
+                    }
+                    self.slint.dispatch_event(WindowEvent::PointerPressed { position, button: button(b) });
+                }
+                PointerEventKind::Release { button: b, .. } => {
+                    self.slint.dispatch_event(WindowEvent::PointerReleased { position, button: button(b) });
+                }
+                PointerEventKind::Axis { horizontal, vertical, .. } => {
+                    self.slint.dispatch_event(WindowEvent::PointerScrolled {
+                        position,
+                        delta_x: -horizontal.absolute as f32,
+                        delta_y: -vertical.absolute as f32,
+                    });
+                }
+            }
+            // the cursor: resizing at the edges, the hand over what can be clicked
+            let icon = match self.edge(x, y) {
+                Some(ResizeEdge::TopLeft) => CursorIcon::NwResize,
+                Some(ResizeEdge::TopRight) => CursorIcon::NeResize,
+                Some(ResizeEdge::BottomLeft) => CursorIcon::SwResize,
+                Some(ResizeEdge::BottomRight) => CursorIcon::SeResize,
+                Some(ResizeEdge::Left) => CursorIcon::WResize,
+                Some(ResizeEdge::Right) => CursorIcon::EResize,
+                Some(ResizeEdge::Top) => CursorIcon::NResize,
+                Some(ResizeEdge::Bottom) => CursorIcon::SResize,
+                _ if self.ui.get_hand() => CursorIcon::Pointer,
+                _ => CursorIcon::Default,
+            };
+            self.set_cursor(icon);
+        }
+    }
+}
+
+impl ShmHandler for App {
+    fn shm_state(&mut self) -> &mut Shm {
+        &mut self.shm
+    }
+}
+
+impl ProvidesRegistryState for App {
+    fn registry(&mut self) -> &mut RegistryState {
+        &mut self.registry
+    }
+    registry_handlers![OutputState, SeatState];
+}
+
+impl Dispatch<WpImageDescriptionV1, ()> for App {
+    fn event(app: &mut Self, _: &WpImageDescriptionV1, e: wp_image_description_v1::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        match e {
+            wp_image_description_v1::Event::Ready { .. } | wp_image_description_v1::Event::Ready2 { .. } => app.ready = true,
+            wp_image_description_v1::Event::Failed { msg, .. } => app.failed = Some(msg),
+            _ => {}
+        }
+    }
+}
+
+delegate_noop!(App: ignore WpColorManagerV1);
+delegate_noop!(App: ignore WpColorManagementSurfaceV1);
+delegate_noop!(App: ignore WpImageDescriptionCreatorParamsV1);
+delegate_compositor!(App);
+delegate_output!(App);
+delegate_shm!(App);
+delegate_seat!(App);
+delegate_pointer!(App);
+delegate_xdg_shell!(App);
+delegate_xdg_window!(App);
+delegate_registry!(App);

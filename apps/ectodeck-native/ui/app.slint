@@ -1,0 +1,496 @@
+// Ectodeck's main window, drawn natively: the title bar, the rail, and the
+// Z10's page with its bar and its tabs, in the shades and type of the web
+// app it replaces (window.css, shell.css, style.css).
+//
+// The keyboard is not drawn here. The page leaves a hole where it goes, and
+// the window draws the keyboard's HDR picture into that hole, under anything
+// the page draws over it.
+
+import "fonts/Barlow-400.ttf";
+import "fonts/Barlow-500.ttf";
+import "fonts/Barlow-600.ttf";
+import "fonts/Geist-500.ttf";
+import "fonts/Geist-600.ttf";
+
+// the ground's shades and the ink, from style.css
+global Ink {
+    out property <color> base: #202020;
+    out property <color> panel: #262626;
+    out property <color> line: #404040;
+    out property <color> ink: #e5e5e5;
+    out property <color> quiet: #8a8a8a;
+    out property <color> pws: #1f2429;
+}
+
+// one of the window's own buttons: minimise, maximise, close
+component WinButton inherits Rectangle {
+    in property <string> commands;
+    in property <length> size: 14px;
+    in property <bool> danger;
+    callback clicked;
+    width: 40px;
+    background: ta.has-hover ? (root.danger ? #dc2626 : #2e2e2e) : transparent;
+    Path {
+        width: root.size;
+        height: root.size;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        commands: root.commands;
+        fill: transparent;
+        stroke: ta.has-hover ? (root.danger ? #ffffff : #f5f5f5) : #a3a3a3;
+        stroke-width: 1.4px * root.size / 16px;
+    }
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// an item on the rail: a 40px square with its glyph, and its name beside it
+// when you point at it
+component RailItem inherits Rectangle {
+    in property <image> glyph;
+    in property <string> name;
+    in property <bool> on;
+    out property <bool> hover: ta.has-hover;
+    callback clicked;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: root.on ? #2e2e2e : ta.has-hover ? #262626 : transparent;
+    Image {
+        x: 9px;
+        y: 9px;
+        width: 22px;
+        height: 22px;
+        source: root.glyph;
+        colorize: (root.on || ta.has-hover) ? #f5f5f5 : #a3a3a3;
+    }
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+    if ta.has-hover: Rectangle {
+        x: 50px;
+        y: (parent.height - self.height) / 2;
+        width: tip.preferred-width + 18px;
+        height: tip.preferred-height + 10px;
+        border-radius: 6px;
+        background: #3a3a3a;
+        drop-shadow-blur: 18px;
+        drop-shadow-offset-y: 6px;
+        drop-shadow-color: #000000b3;
+        tip := Text {
+            text: root.name;
+            font-family: "Geist";
+            font-weight: 500;
+            font-size: 12.5px;
+            color: #f5f5f5;
+        }
+    }
+}
+
+// a tab in the device's bar: quiet, then ink with its underline when chosen
+component Tab inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected;
+    out property <bool> hover: ta.has-hover;
+    callback clicked;
+    width: label.preferred-width + 28px;
+    label := Text {
+        y: 0;
+        height: parent.height - 2px;
+        text: root.text;
+        font-size: 14.5px;
+        font-weight: 500;
+        color: (root.selected || ta.has-hover) ? Ink.ink : Ink.quiet;
+        vertical-alignment: center;
+    }
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// a button in the profile's head: Discard (ghost) or Save (primary)
+component HeadButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary;
+    in property <bool> enabled;
+    height: label.preferred-height + 12px;
+    width: label.preferred-width + 26px;
+    border-radius: 7px;
+    border-width: 1px;
+    border-color: root.primary ? transparent : Ink.line;
+    background: root.primary ? Ink.ink : transparent;
+    opacity: root.enabled ? 1 : 0.35;
+    label := Text {
+        text: root.text;
+        font-size: 13px;
+        font-weight: root.primary ? 600 : 500;
+        color: root.primary ? Ink.base : Ink.ink;
+    }
+}
+
+export component AppWindow inherits Window {
+    in property <bool> is-maximized;
+    in property <image> mark;
+    in property <image> home-glyph;
+    in property <image> keyboard-glyph;
+    in property <image> settings-glyph;
+    in-out property <int> tab: 0;
+    in-out property <string> place: "z10";
+    // where the keyboard goes, for the window to draw it there, when its page shows
+    out property <bool> board-shown: root.place == "z10";
+    out property <length> board-x: rail + pws-x + 15px;
+    out property <length> board-y: bar + pws-y + board-top;
+    out property <length> board-width: board-w;
+    out property <length> board-height: board-h;
+    // the app's ground, which the window lays under the content
+    out property <color> ground: Ink.base;
+    out property <length> ground-x: rail;
+    out property <length> ground-y: bar;
+    out property <length> ground-radius: root.radius;
+    // the hand, over what can be clicked
+    out property <bool> hand: t-keys.hover || t-lighting.hover || t-settings.hover || tact.has-hover || r-home.hover || r-z10.hover || r-settings.hover;
+    callback minimise();
+    callback maximise();
+    callback close-window();
+    callback drag();
+
+    background: transparent;
+    default-font-family: "Barlow";
+    default-font-size: 15px;
+
+    property <length> radius: root.is-maximized ? 0 : 10px;
+    property <length> bar: 36px;
+    property <length> rail: 60px;
+    property <length> content-w: root.width - rail;
+    property <length> page-w: min(1320px, content-w);
+    // the keyboard fills the panel's width, at the drawing's proportions
+    property <length> pws-x: (content-w - page-w) / 2 + 28px;
+    property <length> pws-y: 56px + 22px;
+    property <length> pws-w: page-w - 56px;
+    property <length> board-w: pws-w - 30px;
+    property <length> board-h: board-w * 253 / 664;
+    property <length> head-h: 64px;
+    property <length> board-top: 1px + head-h + 14px;
+
+    // the content: the device's page, on the app's ground. The window lays
+    // the ground under the page itself, so that nothing the page draws lies
+    // under the keyboard's hole.
+    Rectangle {
+        x: rail;
+        y: bar;
+        width: content-w;
+        height: root.height - bar;
+
+        Rectangle {
+            visible: root.place == "z10";
+            // the device's own bar: its name, its tabs, its Macro Editor, and how it is
+            devbar := Rectangle {
+                y: 0;
+                height: 56px;
+                HorizontalLayout {
+                    padding-left: 28px;
+                    padding-right: 28px;
+                    spacing: 28px;
+                    Text {
+                        text: "EVGA Z10 RGB";
+                        font-size: 17px;
+                        font-weight: 600;
+                        letter-spacing: 0.17px;
+                        color: Ink.ink;
+                        vertical-alignment: center;
+                    }
+                    HorizontalLayout {
+                        spacing: 2px;
+                        t-keys := Tab {
+                            text: "Keys";
+                            selected: root.tab == 0;
+                            clicked => { root.tab = 0; }
+                        }
+                        t-lighting := Tab {
+                            text: "Lighting";
+                            selected: root.tab == 1;
+                            clicked => { root.tab = 1; }
+                        }
+                        t-settings := Tab {
+                            text: "Settings";
+                            selected: root.tab == 2;
+                            clicked => { root.tab = 2; }
+                        }
+                    }
+                    // the Macro Editor button sits a little closer to the tabs it ends
+                    Rectangle {
+                        width: tact-row.preferred-width - 6px;
+                        tact-bg := Rectangle {
+                            x: -6px;
+                            y: (parent.height - 30px) / 2;
+                            width: tact-row.preferred-width;
+                            height: 30px;
+                            border-width: 1px;
+                            border-color: Ink.line;
+                            border-radius: 7px;
+                            background: tact.has-hover ? #262626 : transparent;
+                            tact-row := HorizontalLayout {
+                                padding-left: 12px;
+                                padding-right: 12px;
+                                spacing: 7px;
+                                alignment: center;
+                                Path {
+                                    width: 14px;
+                                    height: 14px;
+                                    y: (30px - 14px) / 2;
+                                    viewbox-width: 16;
+                                    viewbox-height: 16;
+                                    commands: "M3.1 4h9.8a1.6 1.6 0 0 1 1.6 1.6v5.3a1.6 1.6 0 0 1-1.6 1.6H3.1a1.6 1.6 0 0 1-1.6-1.6V5.6a1.6 1.6 0 0 1 1.6-1.6zM4 7h1M7 7h1M10 7h2M4.5 9.8h7";
+                                    fill: transparent;
+                                    stroke: Ink.ink;
+                                    stroke-width: 1.14px;
+                                }
+                                Text {
+                                    text: "Macro Editor";
+                                    font-size: 13px;
+                                    font-weight: 500;
+                                    color: Ink.ink;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            tact := TouchArea { }
+                        }
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: end;
+                        Rectangle {
+                            width: 7px;
+                            Rectangle {
+                                y: (parent.height - 7px) / 2;
+                                width: 7px;
+                                height: 7px;
+                                border-radius: 3.5px;
+                                background: #5c5c5c;
+                            }
+                        }
+                        Text {
+                            text: "Not connected: the native preview";
+                            font-size: 12.5px;
+                            color: Ink.quiet;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                // its edge, and the chosen tab's underline over it
+                Rectangle {
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: Ink.line;
+                }
+                Rectangle {
+                    x: 28px + devbar-brand-w + 28px + (root.tab == 0 ? 0 : root.tab == 1 ? t-keys.width + 2px : t-keys.width + t-lighting.width + 4px);
+                    y: parent.height - 2px;
+                    width: root.tab == 0 ? t-keys.width : root.tab == 1 ? t-lighting.width : t-settings.width;
+                    height: 2px;
+                    background: Ink.ink;
+                }
+            }
+
+            // the profile's panel, with the keyboard in it
+            pws := Rectangle {
+                x: pws-x;
+                y: pws-y;
+                width: pws-w;
+                height: 1px + head-h + 14px + board-h + 10px + 150px + 1px;
+
+                // the head: where the profiles go, and the profile's Discard and Save
+                Rectangle {
+                    x: 1px;
+                    y: 1px;
+                    width: parent.width - 2px;
+                    height: head-h;
+                    background: Ink.pws;
+                    border-top-left-radius: 11px;
+                    border-top-right-radius: 11px;
+                    HorizontalLayout {
+                        padding-left: 14px;
+                        padding-right: 14px;
+                        padding-bottom: 1px;
+                        spacing: 10px;
+                        alignment: end;
+                        HeadButton {
+                            y: (64px - 1px - self.height) / 2;
+                            text: "Discard";
+                        }
+                        HeadButton {
+                            y: (64px - 1px - self.height) / 2;
+                            text: "Save profile 1";
+                            primary: true;
+                        }
+                    }
+                    Rectangle {
+                        y: parent.height - 1px;
+                        height: 1px;
+                        background: #2e2e2e;
+                    }
+                }
+                // the body's ground, painted round the keyboard's hole
+                Rectangle {
+                    x: 1px;
+                    y: 1px + head-h;
+                    width: parent.width - 2px;
+                    height: 14px;
+                    background: Ink.pws;
+                }
+                Rectangle {
+                    x: 1px;
+                    y: board-top;
+                    width: 14px;
+                    height: board-h;
+                    background: Ink.pws;
+                }
+                Rectangle {
+                    x: 15px + board-w;
+                    y: board-top;
+                    width: parent.width - 16px - board-w;
+                    height: board-h;
+                    background: Ink.pws;
+                }
+                Rectangle {
+                    x: 1px;
+                    y: board-top + board-h;
+                    width: parent.width - 2px;
+                    height: parent.height - 1px - self.y;
+                    background: Ink.pws;
+                    border-bottom-left-radius: 11px;
+                    border-bottom-right-radius: 11px;
+                    // the tab's own page, under the keyboard
+                    Text {
+                        x: 14px;
+                        y: 10px + 18px;
+                        text: root.tab == 0 ? "Keys: pick a key on the keyboard to change what it does. This page is the next to be built natively."
+                            : root.tab == 1 ? "Lighting: the keyboard's effects and colours. Built natively after Keys."
+                            : "Settings: the keyboard's display, sleep and firmware. Built natively after Lighting.";
+                        font-size: 14px;
+                        color: Ink.quiet;
+                    }
+                }
+                // its outline, over its ground
+                Rectangle {
+                    border-width: 1px;
+                    border-color: Ink.line;
+                    border-radius: 12px;
+                    background: transparent;
+                }
+            }
+        }
+        if root.place != "z10": Text {
+            x: 40px;
+            y: 34px;
+            text: root.place == "home" ? "Home" : "Settings";
+            font-family: "Geist";
+            font-size: 20px;
+            font-weight: 600;
+            color: #f5f5f5;
+        }
+    }
+
+    // the brand's width, for the underline's place
+    property <length> devbar-brand-w: brand-measure.preferred-width;
+    brand-measure := Text {
+        visible: false;
+        text: "EVGA Z10 RGB";
+        font-size: 17px;
+        font-weight: 600;
+        letter-spacing: 0.17px;
+    }
+
+    // the title bar: the mark and the wordmark, then the window's own buttons;
+    // dragging it moves the window
+    Rectangle {
+        y: 0;
+        height: bar;
+        background: #262626;
+        border-top-left-radius: root.radius;
+        border-top-right-radius: root.radius;
+        TouchArea {
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
+                    root.drag();
+                }
+            }
+            double-clicked => { root.maximise(); }
+        }
+        Image {
+            x: 12px;
+            y: (bar - 16px) / 2;
+            width: 16px;
+            height: 16px;
+            source: root.mark;
+        }
+        Text {
+            x: 12px + 16px + 7px;
+            height: bar;
+            text: "Ectodeck";
+            font-family: "Geist";
+            font-weight: 600;
+            font-size: 13.5px;
+            letter-spacing: -0.54px;
+            color: #f5f5f5;
+            vertical-alignment: center;
+        }
+        HorizontalLayout {
+            x: parent.width - 120px;
+            width: 120px;
+            WinButton {
+                commands: "M3 8h10";
+                clicked => { root.minimise(); }
+            }
+            WinButton {
+                size: 12px;
+                commands: "M3.5 2.5h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z";
+                clicked => { root.maximise(); }
+            }
+            WinButton {
+                danger: true;
+                commands: "M3.5 3.5l9 9M12.5 3.5l-9 9";
+                clicked => { root.close-window(); }
+            }
+        }
+    }
+
+    // the rail: Home, the device, and Settings at its foot; drawn last, so
+    // the name beside an item shows over the page
+    Rectangle {
+        x: 0;
+        y: bar;
+        width: rail;
+        height: root.height - bar;
+        background: #1c1c1c;
+        border-bottom-left-radius: root.radius;
+        r-home := RailItem {
+            x: 10px;
+            y: 10px;
+            glyph: root.home-glyph;
+            name: "Home";
+            on: root.place == "home";
+            clicked => { root.place = "home"; }
+        }
+        r-z10 := RailItem {
+            x: 10px;
+            y: 10px + 40px + 4px + 8px + 4px;
+            glyph: root.keyboard-glyph;
+            name: "EVGA Z10 RGB";
+            on: root.place == "z10";
+            clicked => { root.place = "z10"; }
+        }
+        r-settings := RailItem {
+            x: 10px;
+            y: parent.height - 10px - 40px;
+            glyph: root.settings-glyph;
+            name: "Settings";
+            on: root.place == "settings";
+            clicked => { root.place = "settings"; }
+        }
+    }
+}

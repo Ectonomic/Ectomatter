@@ -1,8 +1,31 @@
 [workspace]
 resolver = "3"
-members = ["crates/ectotype-core", "crates/ectodeck-weather", "apps/ectodeck/src-tauri"]
+members = ["crates/ectotype-core", "crates/ectodeck-weather", "crates/ectodeck-draw", "apps/ectodeck/src-tauri", "apps/ectodeck-native"]
 
 [workspace.package]
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/OMGrant/Ectotype"
+
+# The HDR keyboard is drawn on the CPU each time its light changes, and the
+# pieces it is drawn from are rendered with resvg; unoptimised, both are too
+# slow to follow a lighting effect, so they are built optimised in development
+# too.
+[profile.dev.package.ectodeck]
+opt-level = 3
+[profile.dev.package.resvg]
+opt-level = 3
+[profile.dev.package.usvg]
+opt-level = 3
+[profile.dev.package.tiny-skia]
+opt-level = 3
+[profile.dev.package.tiny-skia-path]
+opt-level = 3
+[profile.dev.package.ectodeck-native]
+opt-level = 3
+[profile.dev.package.ectodeck-draw]
+opt-level = 3
+[profile.dev.package.i-slint-core]
+opt-level = 3
+[profile.dev.package.i-slint-renderer-software]
+opt-level = 3
