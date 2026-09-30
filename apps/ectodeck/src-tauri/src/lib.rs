@@ -9,6 +9,7 @@ mod screens;
 mod hdr_overlay;
 mod hdr_board;
 mod settings;
+mod core_art;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -269,9 +270,16 @@ async fn hdr_layout(window: tauri::WebviewWindow, layout: hdr_board::Layout) -> 
     let screens = tauri::async_runtime::spawn_blocking(screens::screens).await.unwrap_or_default();
     let best = screens.iter().max_by(|a, b| a["peak"].as_f64().partial_cmp(&b["peak"].as_f64()).unwrap_or(std::cmp::Ordering::Equal));
     let reference = best.and_then(|s| s["reference"].as_f64()).unwrap_or(203.0);
-    // the plate, as the page has it
-    let plate = include_str!("../../public/board.svg").to_string();
+    // the plate: the body of the Z10 core's drawing, with what is printed on it
+    let plate = core_art::layers(&["body", "legend-body"]);
     hdr_board::layout(&window, layout, reference, [plate])
+}
+
+/// The Z10's art: its drawing and which pieces belong to each control and screen.
+#[tauri::command]
+fn core_art() -> Result<Value, String> {
+    let device: Value = serde_json::from_str(core_art::DEVICE).map_err(|e| e.to_string())?;
+    Ok(json!({ "svg": core_art::SVG, "device": device }))
 }
 
 /// Each screen: whether it is in HDR, its reference white and its peak.
@@ -433,7 +441,7 @@ pub fn run() {
                 let _ = w.hide();
             }
         })
-        .invoke_handler(tauri::generate_handler![state, save, write_macro, activate, preview, record, lcd, open_macro_editor, prepare_macro_editor, firmware, sliders, set_dimmer, set_audio, set_modes, set_tray_devices, settings_get, settings_set, devices_status, weather, weather_search, screens, hdr_spike, hdr_layout])
+        .invoke_handler(tauri::generate_handler![state, save, write_macro, activate, preview, record, lcd, open_macro_editor, prepare_macro_editor, firmware, sliders, set_dimmer, set_audio, set_modes, set_tray_devices, settings_get, settings_set, devices_status, weather, weather_search, screens, hdr_spike, hdr_layout, core_art])
         .run(tauri::generate_context!())
         .expect("Ectodeck could not start");
 }

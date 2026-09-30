@@ -57,13 +57,12 @@ const FULLNAME = {
   PageUp: 'Page Up', PageDown: 'Page Down', Space: 'Space', Menu: 'Menu',
 };
 
-// The board is drawn from Grant's Inkscape drawing, built into board.svg by
-// tools/build_board.py. board.json says where the drawing puts the parts the
-// editor draws itself: the drawing area, the display's glass, and the keys that
-// are not in EVGA's layout. Every key is laid out in the same pixel space as
-// EVGA's own top-down photo, which is also the space layout.json uses.
+// The board is the Z10 core's drawing (see the art, below). board.json and
+// layout.json say where the keys are, for the buttons laid over it, and where
+// the display and the sliders sit, in the drawing's own units (the pixel space
+// of EVGA's top-down photo, which the drawing was traced over).
 const GAP = 3;                       // drawn gap between neighbouring keys
-let SPACE, GLASS, BEZEL;
+let SPACE, GLASS;
 
 // The keys EVGA's layout leaves out: the mode button at the far left of the
 // function row, and the four media keys over the numpad. The drawing gives the
@@ -236,9 +235,7 @@ function panelBits(rows) {
 // Drawing into a canvas in the page instead left the element compositing at
 // the wrong scale. The picture is rebuilt when the text, the backlight colour
 // or the panel's size changes.
-const PITCH = 4;
-// the slider knobs, in the drawing's own units, as the artwork had them
-const KNOB_W = 10.01, KNOB_H = 5.05, KNOB_Y = 20.36;           // pixels per LCD pixel before the panel has a size
+const PITCH = 4;           // pixels per LCD pixel before the panel has a size
 
 function drawPanel() {
   const panel = document.querySelector('.screen .panel');
@@ -278,63 +275,6 @@ const shade = (c, f) => `rgb(${c.map(v => Math.min(255, Math.round(v * f))).join
 // The keyboard will not read its own display back, so the z10-lcd service writes
 // each frame it sends to a file and the server passes it on. If nothing is
 // driving the display, the panel is drawn unlit rather than showing stale text.
-// The caps' picture, drawn at the board's shown size.
-function drawCaps() {
-  const cv = document.querySelector('.board .caps'), img = S.caps;
-  if (!cv || !img?.complete || !img.naturalWidth) return;
-  const r = cv.getBoundingClientRect(), dpr = devicePixelRatio || 1;
-  if (!r.width) return;
-  const w = Math.round(r.width * dpr), h = Math.round(r.height * dpr);
-  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
-  const ctx = cv.getContext('2d');
-  ctx.imageSmoothingQuality = 'high';
-  ctx.clearRect(0, 0, w, h);
-  ctx.drawImage(img, 0, 0, w, h);
-  S.capsDrawn = true;
-}
-// The light each key throws onto the deck, drawn as the halo each key once
-// drew for itself (style.css .key .halo): its box grown by 8% of its width and
-// 12% of its height, corners 28% round, in its colour at 0.3 of its light,
-// blurred by 0.9% of the board's width. One picture under the deck's top
-// layer, so the light shows only in the wells. The blurred shape is made once
-// for each size of key and tinted for each key.
-function drawHalos() {
-  const cv = document.querySelector('.board .halos');
-  if (!cv) return;
-  // at half the screen's resolution: the light is a blur, so nothing is lost
-  const r = cv.getBoundingClientRect(), dpr = (devicePixelRatio || 1) / 2;
-  if (!r.width) return;
-  const W = Math.round(r.width * dpr), H = Math.round(r.height * dpr);
-  if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
-  const s = W / r.width, sigma = r.width * 0.009 * s, pad = Math.ceil(sigma * 3);
-  const ctx = cv.getContext('2d');
-  ctx.clearRect(0, 0, W, H);
-  S.haloSprites ??= {};
-  const tint = S.haloTint ??= document.createElement('canvas');
-  for (const k of S.layout) {
-    const a = +(k.la || 0);
-    if (!(a > 0) || !k.el.offsetWidth) continue;
-    const bw = k.el.offsetWidth, bh = k.el.offsetHeight;
-    const w = bw * 1.16 * s, h = bh * 1.24 * s;
-    const key = `${Math.round(w)}x${Math.round(h)}@${sigma.toFixed(2)}`;
-    let sp = S.haloSprites[key];
-    if (!sp) {
-      sp = S.haloSprites[key] = document.createElement('canvas');
-      sp.width = Math.ceil(w) + 2 * pad; sp.height = Math.ceil(h) + 2 * pad;
-      const g = sp.getContext('2d'), off = sp.width + 10;
-      g.shadowColor = '#fff'; g.shadowBlur = 2 * sigma; g.shadowOffsetX = off;
-      g.fillStyle = '#fff'; g.beginPath();
-      g.roundRect(pad - off, pad, w, h, [{ x: w * 0.28, y: h * 0.28 }]); g.fill();
-    }
-    if (tint.width !== sp.width || tint.height !== sp.height) { tint.width = sp.width; tint.height = sp.height; }
-    const t = tint.getContext('2d');
-    t.globalCompositeOperation = 'copy'; t.drawImage(sp, 0, 0);
-    t.globalCompositeOperation = 'source-in'; t.fillStyle = k.lc; t.fillRect(0, 0, tint.width, tint.height);
-    ctx.globalAlpha = Math.min(1, a) * 0.3;
-    ctx.drawImage(tint, (k.el.offsetLeft - bw * 0.08) * s - pad, (k.el.offsetTop - bh * 0.12) * s - pad);
-  }
-  ctx.globalAlpha = 1;
-}
 // Where each slider really is, on Ectodeck's firmware from build 2, which
 // reports both sliders' raw readings. A reading becomes a knob position
 // between the lowest and highest readings seen for that slider, which widen
@@ -463,15 +403,12 @@ function pressKey(k) {
 // settles. Hidden, the panel has no size and is left as it was.
 let panelSize = '', panelWait = 0;
 new ResizeObserver(() => {
-  // the first time the keyboard is shown, its caps and light are drawn at once
-  if (!S.capsDrawn) { drawCaps(); drawHalos(); }
   clearTimeout(panelWait);
   panelWait = setTimeout(() => {
     const r = document.querySelector('.screen .panel')?.getBoundingClientRect();
     if (!r || !r.width) return;
     const k = `${Math.round(r.width * devicePixelRatio)}x${Math.round(r.height * devicePixelRatio)}`;
     if (k !== panelSize) { panelSize = k; drawPanel(); }
-    drawCaps(); drawHalos();
   }, 60);
 }).observe(document.getElementById('board'));
 
@@ -556,7 +493,6 @@ async function load() {
   const [vx0, vy0, vx1, vy1] = board.view;
   SPACE = { x0: vx0, y0: vy0, x1: vx1, y1: vy1 };
   GLASS = board.glass;
-  BEZEL = board.bezel;
   // The spacebar stands taller than its row and overhangs the front of its
   // well; the drawing gives how far down it reaches.
   const space = layout.find(k => k.id === 'Space');
@@ -565,15 +501,10 @@ async function load() {
   S.layout = layout.concat(extraKeys(board));
   S.font = font;
   S.zones = { 0x10: zones.WASD, 0x08: zones.Arrows, 0x04: zones.Numbers, 0x02: zones.FKeys, 0x01: zones.Numpad };
+  // the keyboard's drawing, from the Z10 core
+  const art = await api('/api/core-art');
+  artInit(art.svg, art.device);
   buildBoard();
-  // tools/build_caps.py: the caps alone, for caps.png
-  if (location.search.includes('capsheet')) {
-    document.documentElement.classList.add('capsheet');
-    document.body.replaceChildren($('#board'));
-    await document.fonts.ready;
-    document.title = 'SHEET READY';
-    return;
-  }
   await refresh();
 }
 
@@ -646,7 +577,7 @@ async function startHdr() {
   const send = () => {
     queued = false;
     const d = devicePixelRatio || 1, root = document.documentElement;
-    const plate = document.querySelector('.board .art:not(.top)');
+    const plate = document.querySelector('.board .art.base');
     const r = plate?.getBoundingClientRect();
     const onPage = document.body.dataset.place === 'z10' && r && r.width > 0;
     api('/api/hdr-layout', { layout: {
@@ -715,31 +646,108 @@ function posForEvent(e) {
 }
 
 // ---------------------------------------------------------------- board
-function keyFace(id) {
-  if (id === 'GameMode')
-    return el('span', { class: 'leg printed' }, el('img', { class: 'emark', src: 'evga-e.svg', alt: '' }));
-  const L = LEGEND[id] ?? id;
-  const spec = typeof L === 'string' ? { main: L } : L;
-  const main = spec.main ?? '';
-  // Two sizes only: a single character (a letter, digit, symbol or arrow) is set
-  // large, and anything longer is a word and set small, wherever it sits.
-  const size = t => ([...t].length === 1 ? ' glyph' + (MARKS.includes(t) ? ' mark' : '') : ' word');
-  // The key's own legend at the top of the cap, a shifted symbol beside it,
-  // and a second function at the bottom.
-  const head = [el('span', { class: 'main' + size(main) }, main)];
-  if (spec.top) head.push(el('span', { class: 'top' + size(spec.top) }, spec.top));
-  const parts = [el('span', { class: 'head' }, head)];
-  if (spec.main2) parts.push(el('span', { class: 'main' + size(spec.main2) }, spec.main2));
-  if (spec.sub === MUTE) parts.push(el('span', { class: 'sub icon mute', role: 'img', 'aria-label': 'mute' }));
-  else if (spec.sub) parts.push(el('span', { class: 'sub' + size(spec.sub) }, spec.sub));
-  return el('span', { class: 'leg' + (CENTRED.has(id) ? ' centred' : '') }, parts);
+
+// ---------------------------------------------------------------- the art
+// The keyboard is the Z10 core's own drawing (cores/evga-z10/art/z10.svg),
+// drawn as the core protocol's draft 4 has it: every piece exactly as it is,
+// with Ectodeck adding only what changes. What never changes is shown as
+// pictures of its layers (the body and its print, the caps, the legends of
+// unlit keys, the glass), which WebKit draws once. Each piece that takes a
+// key's light (the light it throws on the deck, the light on its cap, the glow
+// round its legend, and the legend itself) is a shape cut from its piece, filled
+// with the key's colour and faded by its light (--c and --a on the key), so the
+// lighting loop costs what it always has.
+const SVGNS = 'http://www.w3.org/2000/svg', INKNS = 'http://www.inkscape.org/namespaces/inkscape';
+const ART = { ready: false };
+
+function artInit(svg, device) {
+  const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
+  const root = doc.documentElement;
+  if (root.nodeName !== 'svg') throw new Error('The Z10 core’s drawing could not be read.');
+  const defs = new Map([...doc.querySelectorAll('defs > [id]')].map(d => [d.id, d]));
+  // every piece measured once, in a hidden copy of the drawing
+  const host = document.createElement('div');
+  host.style.cssText = 'position:absolute;left:-20000px;top:0;visibility:hidden;pointer-events:none';
+  host.append(document.importNode(root, true));
+  document.body.append(host);
+  const live = host.firstElementChild;
+  const bbox = {};
+  for (const e of live.querySelectorAll('[id]')) {
+    // pieces that are drawn (a mask is a definition the drawing applies, not a shape)
+    if (!/^(body|illumination|control|legend|screen|overlay|print)_\d+$/.test(e.id) || typeof e.getBBox !== 'function') continue;
+    const b = e.getBBox();
+    bbox[e.id] = [b.x, b.y, b.width, b.height];
+  }
+  host.remove();
+  Object.assign(ART, { doc, root, defs, bbox, device, ready: true });
 }
-// Thin punctuation, which at a digit's size looks smaller and lighter than the
-// digits beside it, so it is set a step larger and bolder to match them.
-const MARKS = '`~-_=+^*\'";:,.';
-// The few caps whose legend sits in the middle rather than at the top. The E
-// keys print theirs at the top, as every other key does.
-const CENTRED = new Set(['Tab', 'CapsLock', 'LSHIFT', 'RSHIFT', 'Enter', 'KeypadEnter', 'Backspace'])
+
+// The definitions a piece of markup uses (gradients, filters, clips, masks), and theirs in turn.
+function artDefs(markup) {
+  const want = new Set(), queue = [markup];
+  while (queue.length) {
+    for (const m of queue.pop().matchAll(/url\(#([^)]+)\)/g)) {
+      if (want.has(m[1]) || !ART.defs.has(m[1])) continue;
+      want.add(m[1]);
+      queue.push(new XMLSerializer().serializeToString(ART.defs.get(m[1])));
+    }
+  }
+  return [...want].map(id => new XMLSerializer().serializeToString(ART.defs.get(id))).join('');
+}
+const artURL = text => URL.createObjectURL(new Blob([text], { type: 'image/svg+xml' }));
+
+// A picture of some of the drawing's layers, less any pieces named in `drop`.
+function artLayers(keep, drop = []) {
+  const r = ART.root.cloneNode(true);
+  for (const g of [...r.children]) {
+    if (g.nodeName !== 'g') continue;
+    if (!keep.includes(g.getAttribute('id'))) g.remove();
+  }
+  for (const id of drop) r.querySelector(`[id="${id}"]`)?.remove();
+  return artURL(new XMLSerializer().serializeToString(r));
+}
+
+// One piece on its own, as a picture just big enough for it and its blur.
+function artPiece(id) {
+  const src = ART.doc.querySelector(`[id="${id}"]`);
+  if (!src) return null;
+  const e = src.cloneNode(true);
+  // a <use> of another piece (a legend's glow uses its print) becomes that piece
+  for (const u of [...e.querySelectorAll('use')]) {
+    const ref = ART.doc.querySelector(`[id="${(u.getAttribute('href') || u.getAttributeNS('http://www.w3.org/1999/xlink', 'href')).slice(1)}"]`);
+    if (ref) { const c = ref.cloneNode(true); c.removeAttribute('id'); u.replaceWith(c); }
+  }
+  const markup = new XMLSerializer().serializeToString(e);
+  const defs = artDefs(markup);
+  // room for any blur: three of its standard deviations, and any offset
+  let margin = 0;
+  for (const m of defs.matchAll(/stdDeviation="([\d.]+)"/g)) margin = Math.max(margin, 3 * +m[1]);
+  for (const m of defs.matchAll(/dy="(-?[\d.]+)"/g)) margin += Math.abs(+m[1]);
+  const [x, y, w, h] = ART.bbox[id];
+  const box = [x - margin, y - margin, w + 2 * margin, h + 2 * margin];
+  // its own size in the drawing's units times 20: a piece under a unit across (the I's legend) would
+  // otherwise be an image less than a pixel wide, which WebKit takes as empty; it is vector, and drawn
+  // at whatever size it is shown
+  const text = `<svg xmlns="${SVGNS}" viewBox="${box.join(' ')}" width="${box[2] * 20}" height="${box[3] * 20}" preserveAspectRatio="none">`
+    + `<defs>${defs}</defs>${markup}</svg>`;
+  return { url: artURL(text), box };
+}
+
+// Where a piece sits on a key's button, in the button's own percentages.
+function onKey(k, box) {
+  const kx = k.x + GAP / 2, ky = k.y + GAP / 2, kw = k.w - GAP, kh = k.h - GAP;
+  const [x, y, w, h] = box;
+  return `left:${(x - kx) / kw * 100}%;top:${(y - ky) / kh * 100}%;width:${w / kw * 100}%;height:${h / kh * 100}%`;
+}
+
+// A shape cut from a piece, for a key's light: `kind` is its place in the stack.
+function artLight(k, id, kind) {
+  const p = artPiece(id);
+  if (!p) return null;
+  const s = el('span', { class: 'lit ' + kind, style: onKey(k, p.box) });
+  s.style.webkitMaskImage = s.style.maskImage = `url("${p.url}")`;
+  return s;
+}
 
 function buildBoard() {
   const board = $('#board');
@@ -750,25 +758,15 @@ function buildBoard() {
   S.geom = { x0, y0, W, H };
   const at = (x, y, w, h) => `left:${(x - x0) / W * 100}%;top:${(y - y0) / H * 100}%;`
     + `width:${w / W * 100}%;height:${h / H * 100}%`;
-  board.append(el('img', { class: 'art', src: 'board.svg', alt: '', draggable: 'false' }));
-  // the light the keys throw onto the deck, all in one picture (see drawHalos)
-  if (!/capsheet|livecaps/.test(location.search)) { board.append(el('canvas', { class: 'halos' })); board.classList.add('haloed'); }
-  // Labels printed on the deck, where EVGA's photo has them: under each slider,
-  // a minus at one end, the name, and a plus at the other; and G/PC under the
-  // mode button.
-  // the caps, drawn once into caps.png, under every key (see .board .caps)
-  board.append(el('canvas', { class: 'caps' }));
-  S.caps = new Image();
-  S.caps.onload = () => { board.classList.add('sheeted'); drawCaps(); };
-  // ?livecaps draws every cap live, to compare the picture against
-  if (!/capsheet|livecaps/.test(location.search)) S.caps.src = 'caps.png';
-  const printed = (x, y, w, h, ...words) => board.append(el('div', { class: 'print', style: at(x, y, w, h) },
-    words.map(t => el('span', {}, t))));
-  const [[dx0, , dx1, dy1], [vx0, , vx1]] = S.board.sliders;
-  printed(dx0 + 1.5, dy1 + 3.2, dx1 - dx0 - 3, 4, '\u2212', 'DIMMER', '+');
-  printed(vx0 + 1.5, dy1 + 3.2, vx1 - vx0 - 3, 4, '\u2212', 'VOLUME', '+');
-  const [px0, , px1, py1] = S.board.gpc;
-  printed(px0 - 4, py1 + 2.4, px1 - px0 + 8, 4, 'G/PC');
+  const ties = new Map(ART.device.controls.filter(c => c.pos !== undefined).map(c => [c.pos, c]));
+  const sliders = ART.device.controls.filter(c => c.slider !== undefined).sort((a, b) => a.slider - b.slider);
+  const lit = c => !!c?.illumination;
+  const picture = (cls, src) => board.append(el('img', { class: 'art ' + cls, src, alt: '', draggable: 'false' }));
+  // the body and what is printed on it; the caps, less the slider knobs, which
+  // move; the legends of the keys with no light behind them
+  picture('base', artLayers(['body', 'legend-body']));
+  picture('caps', artLayers(['control'], sliders.map(c => `control_${c.control}`)));
+  picture('print', artLayers(['legend'], [...ties.values()].filter(lit).map(c => `legend_${c.legend}`)));
   for (const k of S.layout) {
     const b = el('button', {
       class: 'key' + (k.led ? '' : ' nolight')
@@ -777,36 +775,41 @@ function buildBoard() {
       style: `left:${(k.x - x0 + GAP / 2) / W * 100}%;top:${(k.y - y0 + GAP / 2) / H * 100}%;`
            + `width:${(k.w - GAP) / W * 100}%;height:${(k.h - GAP) / H * 100}%`,
       onclick: () => selectKey(k.pos),
-    }, el('span', { class: 'halo' }), el('span', { class: 'glow' }),
-       keyFace(k.id), el('span', { class: 'remap' }));
-    board.append(b);
-    // the spacebar bends where the keys beside it end (style.css)
-    if (k.id === 'Space') {
-      const next = S.layout.find(o => o !== k && Math.abs(o.y - k.y) < 1);
-      if (next) b.style.setProperty('--bend', `${(next.h - GAP) / (k.h - GAP) * 100}%`);
+    });
+    // the pieces that take this key's light, in the drawing's order: the light
+    // on the deck under the cap, the light on the cap, the glow round the
+    // legend, and the legend
+    const tie = ties.get(k.pos);
+    if (lit(tie)) {
+      const [under, cap, glow] = tie.illumination;
+      for (const [id, kind] of [[`illumination_${under}`, 'under'], [`illumination_${cap}`, 'cap'], [`illumination_${glow}`, 'glow']]) {
+        const s = artLight(k, id, kind);
+        if (s) b.append(s);
+      }
+      const leg = artLight(k, `legend_${tie.legend}`, 'legend');
+      if (leg) {
+        leg.style.setProperty('--print', ART.doc.querySelector(`[id="legend_${tie.legend}"]`).getAttribute('fill') || '#9e9e9e');
+        b.append(leg);
+      }
     }
+    b.append(el('span', { class: 'remap' }));
+    board.append(b);
     k.el = b; k.cx = k.x + k.w / 2; k.cy = k.y + k.h / 2;
     S.byPos[k.pos] = k;
   }
-  // The drawing again, with its wells cut out. It comes after the keys, so it
-  // covers the light they throw everywhere except down in the wells, which is
-  // where that light shows on the keyboard.
-  board.append(el('img', { class: 'art top', src: 'board-top.svg', alt: '', draggable: 'false' }));
-  // The two slider knobs. The artwork used to draw them fixed at the halfway
-  // point; the app draws them instead, so they can sit where the sliders
-  // really are (see moveKnobs). Same size and shading as the artwork's.
-  S.knobs = S.board.sliders.map(([x0, , x1]) => {
-    const k = el('span', { class: 'knob', 'aria-hidden': 'true', style: at(x0 + (x1 - x0 - KNOB_W) / 2, KNOB_Y, KNOB_W, KNOB_H) });
+  // The two slider knobs, the drawing's own, where the sliders really are (see moveKnobs).
+  S.knobs = S.board.sliders.map(([sx0, , sx1], i) => {
+    const p = artPiece(`control_${sliders[i].control}`);
+    const [kx, ky, kw, kh] = p.box;
+    const k = el('img', { class: 'knob', src: p.url, alt: '', draggable: 'false', 'aria-hidden': 'true', style: at(kx, ky, kw, kh) });
     board.append(k);
-    return { el: k, x0, travel: x1 - x0 - KNOB_W };
+    return { el: k, x0: sx0, travel: sx1 - sx0 - kw };
   });
-  // the display, drawn into the glass of the drawing
+  // the display, drawn live where the drawing has its screen, under its glass
   const [gx0, gy0, gx1, gy1] = GLASS;
   board.append(el('div', { class: 'screen', style: at(gx0, gy0, gx1 - gx0, gy1 - gy0) },
     el('span', { class: 'panel' })));
-  // The screen and its bezel sit behind one pane of glossy glass.
-  const [bx0, by0, bx1, by1] = BEZEL;
-  board.append(el('div', { class: 'glass', style: at(bx0, by0, bx1 - bx0, by1 - by0) }));
+  picture('glass', artLayers(['overlay']));
   const cx = S.layout.map(k => k.cx), cy = S.layout.map(k => k.cy);
   S.center = [(Math.min(...cx) + Math.max(...cx)) / 2, (Math.min(...cy) + Math.max(...cy)) / 2];
   S.span = [Math.max(...cx) - Math.min(...cx), Math.max(...cy) - Math.min(...cy), Math.min(...cx), Math.min(...cy)];
@@ -908,7 +911,6 @@ function frame(now) {
       k.el.style.setProperty('--c', c);
       k.el.style.setProperty('--a', a);
     }
-    if (changed) drawHalos();
   }
   requestAnimationFrame(frame);
 }

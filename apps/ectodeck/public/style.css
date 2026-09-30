@@ -38,88 +38,45 @@ button:disabled { opacity: .35; cursor: default; }
 .board {
   position: relative; isolation: isolate; margin: 0 auto; width: 100%; max-width: 1240px;
   aspect-ratio: 664 / 253; container-type: inline-size;
+  overflow: clip;   /* the drawing ends at its own edge, and so does the light cut from it */
 }
-/* Grant's drawing of the keyboard, built into board.svg, sits under everything.
-   The copy with the wells cut out sits over the light the keys throw and under
-   the keys themselves, so the light only shows in the wells. */
+/* The keyboard is the Z10 core's drawing (app.js, the art): its layers as
+   pictures, in the drawing's order. The body and its print sit under
+   everything; the light each key throws on the deck (.key .lit.under) sits on
+   them, under the caps; the caps, the unlit legends and then each key's own
+   light and legend sit over it; the glass covers the display. */
 .board .art {
-  position: absolute; inset: 0; width: 100%; height: 100%; z-index: -2;
+  position: absolute; inset: 0; width: 100%; height: 100%;
   pointer-events: none; user-select: none;
 }
-.board .art.top { z-index: -1; }
-/* The labels printed on the deck, all in one small size and the same grey as
-   the wordmark and the icons in the drawing. */
-.board .print {
-  position: absolute; display: flex; align-items: center; justify-content: space-between;
-  pointer-events: none; white-space: nowrap;
-  font: 600 0.66cqw/1 'Barlow Semi Condensed', sans-serif;
-  letter-spacing: 0.09cqw; color: #9c9c9c;
-}
-.board .print span:only-child { margin: 0 auto; }   /* a single label is centred */
+.board .art.base { z-index: -2; }
+/* A key is a button laid over its cap in the drawing: it takes the pointer,
+   shows when it is chosen or pressed, and prints a new meaning. Its light and
+   legend are shapes cut from the drawing's pieces, filled with its colour
+   (--c) and faded by its light (--a). */
 .key {
-  position: absolute; border-radius: 0.24cqw; border: 0; cursor: pointer;
-  /* A black keycap seen from above, near-standard profile: the sloped sides
-     show as a rim all round (the front one a little deeper, as a sculpted cap
-     leans toward you), lit from above so the back slope catches the light and
-     the front one falls into shade. The top is the ::before below. The
-     legends centre on the top, not on the whole cap. */
-  padding: 0.26cqw 0.4cqw 0.5cqw;
-  background:
-    linear-gradient(90deg, rgba(0,0,0,.55) 0, rgba(0,0,0,.2) 0.4cqw,
-                           rgba(0,0,0,.2) calc(100% - 0.4cqw), rgba(0,0,0,.55) 100%),
-    linear-gradient(180deg, #2a2a2a 0, #222222 0.26cqw, #151515 calc(100% - 0.5cqw), #0d0d0d 100%);
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,.03), 0 0.08cqw 0.16cqw rgba(0,0,0,.8);
-  color: #d4d4d4; font: 600 1cqw/1 'Barlow Semi Condensed', sans-serif;
-  display: grid; place-items: center; text-align: center; overflow: visible;
-  transition: transform .05s ease;
+  position: absolute; border-radius: 0.24cqw; border: 0; padding: 0; cursor: pointer;
+  background: none; color: #d4d4d4; overflow: visible;
 }
-/* The top of the cap: a flat face, a shade lighter than the sloped sides
-   round it, in one solid grey. A fade across it has only a few greys this dark
-   to step through, and shows them as bands. */
-.key::before {
-  content: ''; position: absolute; pointer-events: none;
-  top: 0.26cqw; left: 0.4cqw; right: 0.4cqw; bottom: 0.5cqw; border-radius: 0.3cqw;
-  background: #232323;
-  box-shadow: inset 0 0.03cqw 0.1cqw rgba(0,0,0,.18), 0 0.03cqw 0 rgba(255,255,255,.035);
+.key .lit {
+  position: absolute; pointer-events: none;
+  -webkit-mask-size: 100% 100%; mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  background: var(--c, transparent); opacity: var(--a, 0);
 }
-.key .glow {
-  position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
-  background: radial-gradient(120% 90% at 50% 0%, var(--c, transparent), transparent 70%);
-  opacity: calc(var(--a, 0) * .07);
+.key .lit.under { z-index: -1; }
+/* A lit legend is the colour of its light, as strongly as the key is lit,
+   over the grey it is printed in. */
+.key .lit.legend {
+  opacity: 1;
+  background: color-mix(in srgb, var(--c, var(--print)) calc(var(--a, 0) * 100%), var(--print));
 }
-.key .halo {
-  position: absolute; inset: -12% -8%; border-radius: 28%; pointer-events: none; z-index: -1;
-  background: var(--c, transparent); opacity: calc(var(--a, 0) * .3); filter: blur(0.9cqw);
-}
-.key .leg {
-  /* the legend area is the top of the cap, inset a little from its edges */
-  position: absolute; z-index: 1; inset: 0.46cqw 0.5cqw 0.66cqw;
-  display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
-  line-height: 1.02; gap: 0.08cqw;
-  color: color-mix(in srgb, var(--c, #d4d4d4) calc(var(--a, 0) * 100%), #9e9e9e);
-  text-shadow: 0 0 .22cqw color-mix(in srgb, var(--c, transparent) calc(var(--a, 0) * 100%), transparent);
-}
-.key .leg.centred, .key .leg.printed { justify-content: center; }
-/* a key's own legend and its shifted symbol, side by side */
-.key .leg .head { display: flex; align-items: baseline; justify-content: center; gap: 0.3cqw; }
-/* a second function sits at the bottom of the cap */
-.key .leg .sub { margin-top: auto; }
-/* two sizes on every cap: words, and single letters, digits and symbols */
-.key .leg .word { font-size: 0.78cqw; letter-spacing: .01em; }
-.key .leg .glyph { font-size: 1.15cqw; }
-.key .leg .glyph.mark { display: inline-block; font-weight: 700; transform: scale(1.22); transform-origin: 50% 62%; }
-.key .leg .top { opacity: .95; }
-.key .leg .sub { opacity: .72; }
-.key .leg .icon { width: 1.05cqw; height: 1.05cqw; background: currentColor;
-  -webkit-mask: var(--icon) center / contain no-repeat; mask: var(--icon) center / contain no-repeat;
-  filter: drop-shadow(0 0 .15cqw color-mix(in srgb, var(--c, transparent) calc(var(--a, 0) * 100%), transparent)); }
-.key .leg .mute { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M3 9h4l5-4v14l-5-4H3z'/%3E%3Cpath d='M16 9l6 6M22 9l-6 6' stroke='%23000' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E"); }
 /* A modified key is marked by a short grey line along its cap's front edge,
-   and its new meaning is printed in white (below). */
+   and its new meaning is printed in white (below), with the key's own legend
+   stepped back behind it. */
 .key.has-remap::after { content: ''; position: absolute; left: 32%; right: 32%; bottom: 0.2cqw; height: 2px; border-radius: 1px;
   background: #bdbdbd; pointer-events: none; }
-/* while a key is remapped the printed extras step aside for the new meaning */
-.key.has-remap .leg .top, .key.has-remap .leg .sub { display: none; }
+.key.has-remap .lit.legend { opacity: .35; }
 /* The new meaning is printed where a second legend goes, at the bottom of
    the cap, in the same capitals and size as the key's own, in white rather
    than the backlight's colour, so a changed key reads as changed. */
@@ -129,66 +86,18 @@ button:disabled { opacity: .35; cursor: default; }
   text-transform: uppercase; text-align: center; color: #e8e8e8;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-
-.key.has-remap .leg.centred { transform: translateY(-22%); }
-.key:hover { box-shadow: inset 0 0 0 1px #8c8c8c, inset 0 1px 0 rgba(255,255,255,.1),
-              0 0.08cqw 0.16cqw rgba(0,0,0,.8); }
-/* The spacebar, as EVGA's photo of the Z10 has it against the keys beside it:
-   one flat top from edge to edge, in one solid grey (a fade this dark bands),
-   with no inset top of its own; a soft bend, about 0.46cqw deep, centred where
-   the keys beside it end (--bend, set by buildBoard); then a much darker front
-   face hanging over the deck, darkest along its bottom edge. Its greys are the
-   photo's, each in the same ratio to a key's top as there, in light. */
-.key[aria-label="Space"] {
-  padding: 0;
-  background:
-    linear-gradient(180deg, #1b1b1b 0, #1b1b1b calc(var(--bend, 70%) - 0.23cqw), #111111 calc(var(--bend, 70%) + 0.23cqw),
-                            #111111 calc(100% - 0.23cqw), #0b0b0b 100%);
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,.03), 0 0.08cqw 0.16cqw rgba(0,0,0,.8);
-}
-.key[aria-label="Space"]::before { display: none; }
-.key.molded::before { display: none; }
-/* The media buttons are not keycaps. They are moulded blocks that sit much
-   lower than the caps and barely below the deck, so they are flat-topped and
-   square-edged, with no front edge and no shadow of their own. */
-.key.molded {
-  border-radius: 0.13cqw; padding: 0;
-  background: linear-gradient(180deg, #232323 0%, #191919 100%);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.12), inset 0 -1px 0 rgba(0,0,0,.7),
-              inset 0 0 0 1px rgba(255,255,255,.03);
-}
+.key:hover { box-shadow: inset 0 0 0 1px #8c8c8c, inset 0 1px 0 rgba(255,255,255,.1); }
+.key.molded { border-radius: 0.13cqw; }
 .key.molded:hover { box-shadow: inset 0 0 0 1px #8c8c8c, inset 0 1px 0 rgba(255,255,255,.12); }
 /* the chosen key: its own edge turns white, one thin line and nothing around it */
-.key.sel, .key.sel:hover { box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.88), 0 0.08cqw 0.16cqw rgba(0,0,0,.8); }
-.key.press { transform: translateY(1px) scale(.96); }
-
-/* The caps drawn once. Every cap drawn live, in its layers of gradients and
-   shadows, made the keyboard slow to repaint, and WebKit repaints it all
-   whenever the page scrolls or the window resizes. So WebKit draws the caps
-   once, exactly as the rules above have them, into caps.png (made by
-   tools/build_caps.py; run it again after changing them), and the board shows
-   that one picture under the keys, which keep their legends, light and edges.
-   A key being pressed darkens where it stands and its legend sinks a pixel. */
-.board .caps { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-/* the slider knobs, which follow the real sliders; a short glide between
-   readings, which come ten times a second, keeps them from stepping */
-.board .knob { position: absolute; pointer-events: none; border-radius: 14% / 28%;
-  background: linear-gradient(180deg, #dcdcdc 0, #a2a2a2 100%); transition: left .12s linear; }
-/* the keys' light on the deck, drawn together by drawHalos in app.js */
-.board .halos { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; }
-.board.haloed .key .halo { display: none; }
-.board.sheeted .key { background: none; box-shadow: none; }
-.board.sheeted .key::before { display: none; }
-.board.sheeted .key:hover { box-shadow: inset 0 0 0 1px #8c8c8c, inset 0 1px 0 rgba(255,255,255,.1); }
-.board.sheeted .key.molded:hover { box-shadow: inset 0 0 0 1px #8c8c8c, inset 0 1px 0 rgba(255,255,255,.12); }
-.board.sheeted .key.sel, .board.sheeted .key.sel:hover { box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.88); }
-.board.sheeted .key.press, .board.sheeted .key.press:hover { transform: none; box-shadow: inset 0 0 0 100vmax rgba(0,0,0,.32); }
-.board.sheeted .key.press .leg { transform: translateY(1px); }
-/* how tools/build_caps.py has the page draw the caps alone */
-html.capsheet, html.capsheet body { background: transparent !important; margin: 0; overflow: hidden; }
-html.capsheet .board { width: 1240px !important; max-width: none !important; margin: 0 !important; }
-html.capsheet .board > :not(.key), html.capsheet .key > *, html.capsheet .key::after { display: none !important; }
-.key.dim .leg { opacity: .45; }
+.key.sel, .key.sel:hover { box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.88); }
+/* a key being pressed darkens where it stands and its legend sinks a pixel */
+.key.press, .key.press:hover { box-shadow: inset 0 0 0 100vmax rgba(0,0,0,.32); }
+.key.press .lit.legend { transform: translateY(1px); }
+/* the slider knobs, the drawing's own, which follow the real sliders; a short
+   glide between readings, which come ten times a second, keeps them from stepping */
+.board .knob { position: absolute; pointer-events: none; transition: left .12s linear; }
+.key.dim .lit.legend { opacity: .45; }
 .hint { text-align: center; color: var(--quiet); font-size: 13px; margin: 12px 0 0; min-height: 1.4em; }
 
 section.panel { padding: 18px 0 4px; }
@@ -325,23 +234,8 @@ input[type=checkbox] { accent-color: var(--ink); width: 16px; height: 16px; }
 .paintbar .swatch-in { width: 44px; height: 44px; }
 
 /* keys with no LED behind them */
-.key.nolight .leg { opacity: .5; }
-/* the E on the G/PC button is printed on it, not lit through it */
-.key.nolight .leg.printed { opacity: 1; }
-.key .leg .emark { display: block; width: 56%; margin: 0 auto; }
-.key .leg.printed { inset: 0; }
 .board.painting .key.nolight { cursor: not-allowed; }
 
-/* The screen and its bezel sit behind one pane of glass: a soft sheen across
-   the top and a reflection falling diagonally across the left of the pane. */
-.board .glass {
-  position: absolute; pointer-events: none;
-  background:
-    linear-gradient(112deg, rgba(255,255,255,.075) 0%, rgba(255,255,255,.035) 34%,
-                    transparent 34.4%, transparent 100%),
-    linear-gradient(180deg, rgba(255,255,255,.06) 0%, transparent 30%);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.14);
-}
 /* the display, drawn into the glass of the drawing: 160 x 32 pixels, so the
    lit area keeps square dots at 96% of the glass across */
 .board .screen {
@@ -616,4 +510,4 @@ button.danger:hover { background: #e25f5b; }
 /* HDR: Ectodeck's own layer under the page draws the plate (and the light) in
    true HDR, so the page shows it through: no ground of its own, no plate */
 html.hdr.framed body { background: transparent; }
-html.hdr .board .art:not(.top), html.hdr .board .halos { visibility: hidden; }
+html.hdr .board .art.base, html.hdr .board .key .lit.under { visibility: hidden; }

@@ -31,6 +31,7 @@
     if (path === '/api/devices') return call('devices_status');
     if (path === '/api/weather') return call('weather');
     if (path === '/api/screens') return call('screens');
+    if (path === '/api/core-art') return call('core_art');
     if (path === '/api/hdr-layout') return call('hdr_layout', body);
     if (path === '/api/weather/search') return call('weather_search', { query: body.query });
     if (path === '/api/preview') return call('preview', { body });
