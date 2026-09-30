@@ -1,6 +1,6 @@
 # Ectodeck core protocol
 
-Draft 4, 2026-09-29. For review before anything is built on it. Draft 3 took in the review of the M3 plugin's author. Draft 4 replaces the device picture with one drawing in named, numbered pieces (section 4, the device's art), so a core brings its own art and the frontend draws it with nothing added by hand.
+Draft 4, 2026-09-29. For review before anything is built on it. Draft 3 took in the review of the M3 plugin's author. Draft 4 replaces the device picture with one drawing in named, numbered pieces (section 4, the device's art), so a core brings its own art and the frontend draws it with nothing added by hand. It adds a layout to the shared settings language (section 6, Layout), so a core arranges its settings without drawing them, and lets a core's files carry comments.
 
 Ectodeck is one app for every device on a desk. It follows the model RetroArch made work for emulators: one frontend, and the engines that know each device brought in as **cores**. The frontend owns the windows, the tray, profiles, and every feature that spans devices. A core owns the truth about the devices it handles: how to find them, what they can do, and how to talk to them.
 
@@ -26,7 +26,9 @@ This document is the contract between the two.
 
 ### A core on disk
 
-Each core is a folder with a manifest, `core.json`:
+Each core is a folder with a manifest, `core.json`. Every file of data in a core's folder is JSON, with comments allowed (`//` to the end of a line, and `/* */`), so a core's files can explain themselves; the messages between a core and the frontend are the same JSON without comments (Messages, below).
+
+The manifest:
 
 ```json
 {
@@ -87,6 +89,7 @@ Errors use JSON-RPC's error object, with a `message` written for the person usin
   "screens": [
     { "id": "lcd", "label": "Display", "screen": 1, "overlay": 1 }
   ],
+  "layout": "layouts/z10.json",
   "capabilities": { "keys": { }, "macros": { }, "lighting": { }, "displays": { }, "profiles": { }, "settings": { } }
 }
 ```
@@ -95,6 +98,7 @@ Errors use JSON-RPC's error object, with a `message` written for the person usin
 - **firmware** says whether the device runs its maker's firmware (`"kind": "retail"`), Ectodeck's custom firmware (`"custom"`, with its build), or neither (`"unknown"`). **features** lists what the custom build adds, such as `sliders.read`; a core offers a custom feature, and accepts its methods, only when the device's build has it, so a device on retail firmware is never sent a command it does not know. **later** names features of newer builds, for the frontend to mention. The frontend keeps custom features apart from everything else, labelled as needing Ectodeck's firmware.
 - **controls** lists every part of the device a capability can refer to, and which pieces of the drawing belong to it. Controls have stable ids, so settings stay attached to the right key across versions of a core. `label` is the control's name in the interface; what is printed on it is in the drawing.
 - **screens** lists the device's displays and the pieces of the drawing that show them. The displays capability refers to a screen by its id, as it does to a control. A key with its own small screen, as on a Stream Deck, is a control that also names its `screen`.
+- **layout** arranges the device's settings on the frontend's pages (section 6, Layout).
 - **capabilities** says which capabilities the device offers, each with its own description (section 5). A device offers only what it really has.
 
 ### The device's art
@@ -269,6 +273,36 @@ Every parameter or setting a core offers is described with one of a small set of
 | `image` | a picture you choose | A background photo |
 
 A core cannot send its own interface. If a device needs something this language cannot describe, the language grows in a new protocol version, so every core gains the new control at once.
+
+### Layout
+
+The types above say what a setting is. A core's layout says where each one goes, so a device's settings read in a sensible order without the core drawing anything. The pages stay the frontend's: Keys, Lighting, Macros, Screen and Profiles look the same for every device, and a layout only arranges what goes inside them, plus the device's own settings on its Device page.
+
+The device description carries the layout, written out or as the name of a file in the core's folder (`"layout": "layouts/z10.json"`):
+
+```jsonc
+"layout": {
+  "lighting": {
+    "wave": [
+      { "section": "Colours", "show": ["colors"] },
+      { "section": "Motion", "show": [{ "row": ["speed", "direction"] }, "zone"] }
+    ]
+  },
+  "device": [
+    { "section": "Game mode",
+      "show": ["game_mode", { "id": "disable_windows_key", "when": { "game_mode": true } }] },
+    { "section": "Display", "show": ["backlight"], "when": { "feature": "display" } }
+  ]
+}
+```
+
+- A layout has one entry per page, named after the capability it arranges; `device` arranges the settings capability. Lighting is arranged per effect, by the effect's id.
+- A page is a list of **sections**, drawn in order, each with a heading and the settings it `show`s, by their ids.
+- An item in `show` is a setting's id; `{"row": [...]}` for settings drawn side by side; or `{"id": ..., "when": ...}` for a setting shown only sometimes.
+- **when** is a condition, on a setting or a whole section: every setting it names must have the value given, or one of the values in a list (`{"effect": ["wave", "ripple"]}`). `{"feature": ...}` holds when the device's firmware has that feature (section 4). A setting hidden by its condition keeps its value.
+- A setting the layout does not place is drawn after the placed ones on its page, in the order the core listed it, so a missing or out-of-date layout never hides anything. A layout is optional.
+
+The layout is the whole of it: headings, order, rows and conditions. Sizes, colours, spacing and styles stay the frontend's, so every core looks like the rest of the app.
 
 ## 7. What the frontend adds across every device
 
