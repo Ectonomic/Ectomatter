@@ -48,7 +48,14 @@ mod imp {
         wp_color_management_surface_v1, wp_color_manager_v1, wp_image_description_creator_params_v1, wp_image_description_v1,
     };
 
-    static CHANNEL: Mutex<Option<mpsc::Sender<Layout>>> = Mutex::new(None);
+    /// The running layer: where to send it layouts, and which showing of the
+    /// window it is built on.
+    static CHANNEL: Mutex<Option<(mpsc::Sender<Layout>, u64)>> = Mutex::new(None);
+    /// How many times the window has been shown. Each showing has a new
+    /// surface, which Wayland may give the old one's id and GTK its address,
+    /// so the count is what tells them apart.
+    static SHOWINGS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    static COUNTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
     /// Show the layout, starting the HDR layer the first time. Only the main
     /// window has the layer, and a window with no size (hidden, or not laid out
@@ -58,44 +65,63 @@ mod imp {
         if window.label() != "main" || layout.win_w == 0 || layout.win_h == 0 {
             return Ok(());
         }
+        // The window's surface as it is now. GTK makes a new one each time the
+        // window is shown again (closing it only hides it, to the tray), and a
+        // hidden window has none, so there is nothing to draw on until it shows.
+        let Ok((display, surface, showing)) = gtk_pointers(window) else { return Ok(()) };
         let mut ch = CHANNEL.lock().map_err(|e| e.to_string())?;
-        if let Some(tx) = ch.as_ref() {
-            if tx.send(layout.clone()).is_ok() {
+        if let Some((tx, on)) = ch.as_ref() {
+            if *on == showing && tx.send(layout.clone()).is_ok() {
                 return Ok(());
             }
         }
-        let (display, surface) = gtk_pointers(window)?;
+        // a new surface, or none yet: the old layer, if any, ends with its own
+        // (dropping its sender ends its thread), and one starts on this one
+        *ch = None;
         let (tx, rx) = mpsc::channel::<Layout>();
         tx.send(layout).map_err(|e| e.to_string())?;
+        let key = showing;
         std::thread::Builder::new()
             .name("hdr-board".into())
             .spawn(move || {
                 if let Err(e) = run(display, surface, reference, art, rx) {
                     eprintln!("ectodeck: HDR board: {e}");
                 }
+                // clear the channel only if it is still this layer's
                 if let Ok(mut c) = CHANNEL.lock() {
-                    *c = None;
+                    if c.as_ref().is_some_and(|(_, on)| *on == key) {
+                        *c = None;
+                    }
                 }
             })
             .map_err(|e| e.to_string())?;
-        *ch = Some(tx);
+        *ch = Some((tx, key));
         Ok(())
     }
 
-    /// GTK's wl_display and the window's wl_surface, fetched on the main thread.
-    fn gtk_pointers(window: &tauri::WebviewWindow) -> Result<(usize, usize), String> {
+    /// GTK's wl_display, the window's wl_surface and which showing of the window
+    /// it belongs to, fetched on the main thread.
+    fn gtk_pointers(window: &tauri::WebviewWindow) -> Result<(usize, usize, u64), String> {
         use gtk::glib::translate::ToGlibPtr;
         use gtk::prelude::*;
         unsafe extern "C" {
             fn gdk_wayland_window_get_wl_surface(window: *mut std::ffi::c_void) -> *mut std::ffi::c_void;
             fn gdk_wayland_display_get_wl_display(display: *mut std::ffi::c_void) -> *mut std::ffi::c_void;
         }
-        let (tx, rx) = mpsc::channel::<Result<(usize, usize), String>>();
+        let (tx, rx) = mpsc::channel::<Result<(usize, usize, u64), String>>();
         let win = window.clone();
         window
             .run_on_main_thread(move || {
                 let r = (|| {
                     let gtk_window = win.gtk_window().map_err(|e| e.to_string())?;
+                    // count the window's showings from now on (it is showing now)
+                    use std::sync::atomic::Ordering;
+                    if !COUNTING.swap(true, Ordering::SeqCst) {
+                        SHOWINGS.fetch_add(1, Ordering::SeqCst);
+                        gtk_window.connect_map(|_| {
+                            SHOWINGS.fetch_add(1, Ordering::SeqCst);
+                        });
+                    }
                     let gdk_window = gtk_window.window().ok_or("the window is not realised")?;
                     let display = gdk_window.display();
                     let d: *mut gtk::gdk::ffi::GdkDisplay = display.to_glib_none().0;
@@ -103,9 +129,9 @@ mod imp {
                     let wl_display = unsafe { gdk_wayland_display_get_wl_display(d as *mut _) };
                     let wl_surface = unsafe { gdk_wayland_window_get_wl_surface(s as *mut _) };
                     if wl_display.is_null() || wl_surface.is_null() {
-                        return Err("not running on Wayland".to_string());
+                        return Err("no Wayland surface".to_string());
                     }
-                    Ok((wl_display as usize, wl_surface as usize))
+                    Ok((wl_display as usize, wl_surface as usize, SHOWINGS.load(Ordering::SeqCst)))
                 })();
                 let _ = tx.send(r);
             })
@@ -303,8 +329,8 @@ mod imp {
             c.set_image_description(&desc, wp_color_manager_v1::RenderIntent::Perceptual);
             (s, sub, c)
         };
-        let (back, back_sub, _back_cm) = make(&qh);
-        let (brd, brd_sub, _brd_cm) = make(&qh);
+        let (back, back_sub, back_cm) = make(&qh);
+        let (brd, brd_sub, brd_cm) = make(&qh);
         back_sub.set_position(0, 0);
         back_sub.place_below(&parent);
         brd_sub.place_above(&back);
@@ -355,6 +381,21 @@ mod imp {
             queue.dispatch_pending(&mut st).map_err(|e| e.to_string())?;
             shown = Some(l);
         }
+        // the window's surface has gone (it was hidden), or the app is ending:
+        // take this layer's own objects down with it
+        drop_shown(back_pic.take());
+        drop_shown(board_pic.take());
+        for cm in [&brd_cm, &back_cm] {
+            cm.destroy();
+        }
+        for sub in [&brd_sub, &back_sub] {
+            sub.destroy();
+        }
+        for s in [&brd, &back] {
+            s.destroy();
+        }
+        desc.destroy();
+        let _ = conn.flush();
         Ok(())
     }
 }

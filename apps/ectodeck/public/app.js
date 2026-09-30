@@ -589,6 +589,9 @@ async function startHdr() {
   };
   window.hdrLayout = () => { if (!queued) { queued = true; requestAnimationFrame(send); } };
   addEventListener('resize', window.hdrLayout);
+  // shown again from the tray, the window has a new surface for the layer to build on
+  document.addEventListener('visibilitychange', window.hdrLayout);
+  addEventListener('focus', window.hdrLayout);
   document.body.addEventListener('scroll', window.hdrLayout, { passive: true });
   addEventListener('scroll', window.hdrLayout, { passive: true });
   const board = document.querySelector('.board');
