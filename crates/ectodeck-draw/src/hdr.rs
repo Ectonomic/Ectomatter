@@ -48,6 +48,8 @@ struct KeyArt {
     deck: Option<Shape>,
     /// the deck's glow caught by the foot of the cap's skirt
     rim: Option<Shape>,
+    /// its light out of the well onto the chassis round it: 1 where brightest, over all keys
+    chassis: Option<Shape>,
     /// the legend's coverage, and how brightly the LED lights each pixel of it (0 to 1)
     legend: Option<Shape>,
     legend_lit: Vec<f32>,
@@ -82,6 +84,10 @@ struct Model {
     rim_nits: f32,
     /// how far up the skirt its foot catches the deck's glow
     rim_width: f32,
+    /// the light out of the wells onto the chassis round them, at its brightest
+    /// just past a well's edge, and how far across the chassis it falls to a third
+    chassis_nits: f32,
+    chassis_reach: f32,
 }
 
 impl Model {
@@ -102,15 +108,40 @@ impl Model {
             deck_reach: f(&l["deck"]["reach"], 2.0).max(0.05),
             rim_nits: nits("rim", 13.0),
             rim_width: f(&l["rim"]["width"], 0.8).max(0.05),
+            chassis_nits: f(&l["chassis"]["nits"], 6.0).max(0.0),
+            chassis_reach: f(&l["chassis"]["reach"], 4.0).max(0.05),
         }
     }
 
     /// Each part's brightness at its brightest, in the SDR white's units, up
     /// to Peak nits: the legend's, the deck's, the skirt foot's.
-    fn tops(&self, white: f32, ceiling: f32) -> (f32, f32, f32) {
+    fn tops(&self, white: f32, ceiling: f32) -> Tops {
         let t = |nits: f32| (nits / white.max(1.0)).min(ceiling);
-        (t(self.legend_nits), t(self.deck_nits), t(self.rim_nits))
+        Tops { legend: t(self.legend_nits), deck: t(self.deck_nits), rim: t(self.rim_nits), chassis: t(self.chassis_nits) }
     }
+}
+
+/// Each part of the light at its brightest, in the SDR white's units.
+#[derive(Clone, Copy, Debug)]
+struct Tops {
+    legend: f32,
+    deck: f32,
+    rim: f32,
+    chassis: f32,
+}
+
+/// The brightest of each part of the light on the keyboard, in nits, and the
+/// brightest the lit keys' colour shows cleanly, before the screen clips it.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Peaks {
+    pub legend: f32,
+    pub deck: f32,
+    pub rim: f32,
+    pub chassis: f32,
+    pub clean: f32,
+}
+
+impl Model {
 }
 
 /// How much of a small source's light falls on a surface `h` below it, at `r`
@@ -133,8 +164,9 @@ pub struct Board {
     caps: Vec<f32>,
     keys: Vec<KeyArt>,
     model: Model,
-    /// where the deck is open to the keys' light, a pixel's coverage
+    /// where the deck is open to the keys' light, and where the chassis is: a pixel's coverage
     wells: Option<Vec<f32>>,
+    chassis: Vec<f32>,
     /// the art's own units (the SVG's, which the core's lengths are in) to the
     /// board's pixels: pixel = offset + scale x unit
     pub(crate) art_scale: f32,
@@ -150,7 +182,7 @@ fn lin(v: u8) -> f32 {
 /// glow on the deck, the skirt's foot, and how brightly each pixel of its
 /// legend is lit. `ka` and (`ox`, `oy`) take the art's units to the board's pixels.
 #[allow(clippy::too_many_arguments)]
-fn light_key(key: &mut KeyArt, model: &Model, wells: Option<&[f32]>, w: u32, h: u32, ka: f32, ox: f32, oy: f32) {
+fn light_key(key: &mut KeyArt, model: &Model, wells: Option<&[f32]>, chassis: &[f32], w: u32, h: u32, ka: f32, ox: f32, oy: f32) {
     let unit = |x: i32, y: i32| ((x as f32 + 0.5 - ox) / ka, (y as f32 + 0.5 - oy) / ka);
     let Some(foot) = key.foot else {
         key.legend_lit = key.legend.as_ref().map_or(Vec::new(), |s| vec![1.0; s.cover.len()]);
@@ -226,6 +258,27 @@ fn light_key(key: &mut KeyArt, model: &Model, wells: Option<&[f32]>, w: u32, h: 
         }
     }
     key.rim = Some(Shape { x: x0, y: y0, w: rw, h: rh, cover });
+
+    // Its light out of the well onto the chassis round it: the same light as
+    // leaves the skirt, falling away with distance from it over the chassis
+    // (never the well, which has its own glow, nor the page round the
+    // keyboard), so only keys near a well's edge light the chassis at all.
+    let (x0, y0, cw, ch) = span((model.chassis_reach * 6.0 + 4.0).min(60.0));
+    let mut cover = vec![0f32; (cw * ch) as usize];
+    for j in 0..ch as i32 {
+        for i in 0..cw as i32 {
+            let (x, y) = (x0 + i, y0 + j);
+            let on = (1.0 - well(x, y)) * chassis[(y as u32 * w + x as u32) as usize];
+            if on <= 0.0 {
+                continue;
+            }
+            let (u, v) = unit(x, y);
+            let (pu, pv) = (u.clamp(foot[0], foot[2]), v.clamp(foot[1], foot[3]));
+            let d = ((u - pu).powi(2) + (v - pv).powi(2)).sqrt();
+            cover[(j as u32 * cw + i as u32) as usize] = (skirt(pu, pv) / brightest).min(1.0) * (-d / model.chassis_reach).exp() * on;
+        }
+    }
+    key.chassis = Some(Shape { x: x0, y: y0, w: cw, h: ch, cover });
 
     // the legend, brightest nearest the LED under it
     key.legend_lit = key.legend.as_ref().map_or(Vec::new(), |s| {
@@ -335,6 +388,10 @@ impl Board {
         pix.fill(resvg::tiny_skia::Color::from_rgba8(base[0], base[1], base[2], 255));
         draw(&mut pix, "body");
         draw(&mut pix, "legend-body");
+        // the chassis itself, which light spilling out of the wells falls on (not the page round it)
+        let mut body = Pixmap::new(w, h).ok_or("board too small")?;
+        draw(&mut body, "body");
+        let chassis: Vec<f32> = body.data().chunks_exact(4).map(|p| p[3] as f32 / 255.0).collect();
         let under = pix.data().chunks_exact(4).flat_map(|p| [p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0]).collect();
 
         // Every cap but the slider knobs (the page moves those): its shadow (its
@@ -405,9 +462,9 @@ impl Board {
                 (Some(f), Some(a)) => (Some(f), a),
                 _ => (None, [0.0; 4]),
             };
-            keys.push(KeyArt { pos: pos as u32, foot, face, deck: None, rim: None, legend, legend_lit: Vec::new(), print });
+            keys.push(KeyArt { pos: pos as u32, foot, face, deck: None, rim: None, chassis: None, legend, legend_lit: Vec::new(), print });
         }
-        let mut board = Board { w, h, under, shadow, caps, keys, model, wells, art_scale: ka, art_offset: (ox, oy) };
+        let mut board = Board { w, h, under, shadow, caps, keys, model, wells, chassis, art_scale: ka, art_offset: (ox, oy) };
         board.relight();
         Ok(board)
     }
@@ -430,31 +487,39 @@ impl Board {
 
     /// Each key's light from its LED and its cap, on every core at once.
     fn relight(&mut self) {
-        let Board { w, h, keys, model, wells, art_scale, art_offset, .. } = self;
-        let (w, h, model, wells, ka, (ox, oy)) = (*w, *h, *model, wells.as_deref(), *art_scale, *art_offset);
+        let Board { w, h, keys, model, wells, chassis, art_scale, art_offset, .. } = self;
+        let (w, h, model, wells, chassis, ka, (ox, oy)) = (*w, *h, *model, wells.as_deref(), chassis.as_slice(), *art_scale, *art_offset);
         let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(16);
         let per = keys.len().div_ceil(threads).max(1);
         std::thread::scope(|sc| {
             for chunk in keys.chunks_mut(per) {
                 sc.spawn(move || {
                     for key in chunk {
-                        light_key(key, &model, wells, w, h, ka, ox, oy);
+                        light_key(key, &model, wells, chassis, w, h, ka, ox, oy);
                     }
                 });
             }
         });
+        // the chassis spill at its brightest (just past the nearest well's edge
+        // to a key) is the core's chassis nits
+        let most = keys.iter().filter_map(|k| k.chassis.as_ref()).flat_map(|s| s.cover.iter().copied()).fold(0.0f32, f32::max);
+        if most > 0.0 {
+            for s in keys.iter_mut().filter_map(|k| k.chassis.as_mut()) {
+                s.cover.iter_mut().for_each(|v| *v /= most);
+            }
+        }
     }
 
     /// The brightest light on the keyboard with these lights, in nits, with
     /// the SDR white at `white` nits and Peak nits at `ceiling` times it: the
     /// legends', the deck's, and the brightest the lit keys' colour shows
     /// cleanly, before the screen clips one of its channels.
-    pub fn peaks(&self, lights: &[Light], white: f32, ceiling: f32) -> (f32, f32, f32) {
-        let (legend, deck, _) = self.model.tops(white, ceiling);
+    pub fn peaks(&self, lights: &[Light], white: f32, ceiling: f32) -> Peaks {
+        let t = self.model.tops(white, ceiling);
         let lit: Vec<&Light> = lights.iter().filter(|l| self.keys.iter().any(|k| k.pos == l.pos)).collect();
-        let strongest = lit.iter().map(|l| l.strength.clamp(0.0, 1.0)).fold(0.0f32, f32::max);
+        let strongest = lit.iter().map(|l| l.strength.clamp(0.0, 1.0)).fold(0.0f32, f32::max) * white;
         let clean = lit.iter().map(|l| clean_limit(l, ceiling) * l.strength.clamp(0.0, 1.0)).fold(0.0f32, f32::max);
-        (strongest * legend * white, strongest * deck * white, clean * white)
+        Peaks { legend: strongest * t.legend, deck: strongest * t.deck, rim: strongest * t.rim, chassis: strongest * t.chassis, clean: clean * white }
     }
 
     /// The places of the keys that light.
@@ -496,7 +561,7 @@ impl Board {
         let n = out.len() / 4;
         let y1 = y0 + n / w;
         let dec = |v: f32| v.max(0.0).powf(2.2);
-        let (legend_top, deck_top, rim_top) = self.model.tops(white, ceiling);
+        let Tops { legend: legend_top, deck: deck_top, rim: rim_top, chassis: chassis_top } = self.model.tops(white, ceiling);
         // the body and its print, in linear light, opaque, under the caps' shadows
         for (i, px) in out.chunks_exact_mut(4).enumerate() {
             let j = y0 * w + i;
@@ -554,6 +619,9 @@ impl Board {
         for key in &self.keys {
             if let (Some(l), Some(s)) = (light(key.pos), &key.deck) {
                 add(&mut em, s, colour(l, deck_top), deck_top, None);
+            }
+            if let (Some(l), Some(s)) = (light(key.pos), &key.chassis) {
+                add(&mut em, s, colour(l, chassis_top), chassis_top, None);
             }
         }
         shine(out, &mut em);
@@ -685,6 +753,7 @@ mod tests {
             "legend": { "nits": 600, "depth": 10.0, "floor": 0.35 },
             "deck": { "nits": 90, "height": 7.0, "floor": 0.15, "reach": 2.0 },
             "rim": { "nits": 36, "width": 0.8 },
+            "chassis": { "nits": 20, "reach": 4.0 },
             "lcd": { "nits": 400 },
             "wells": "mask_1"
         });
@@ -781,20 +850,20 @@ mod tests {
     fn each_part_s_brightness_is_its_own() {
         let (_, device, mut b) = board();
         let lights: Vec<Light> = b.keys.iter().map(|k| Light { pos: k.pos, rgb: [255, 255, 255], strength: 1.0, dim: false }).collect();
-        let (legend, deck, _) = b.peaks(&lights, 254.0, 1000.0 / 254.0);
+        let Peaks { legend, deck, .. } = b.peaks(&lights, 254.0, 1000.0 / 254.0);
         eprintln!("legends {legend:.0} nits, deck {deck:.0}");
         assert!((legend - 600.0).abs() < 1.0 && (deck - 90.0).abs() < 1.0);
         // the legends turned down leave the deck as it was
         let mut light = device["light"].clone();
         light["legend"]["nits"] = serde_json::json!(200);
         b.set_light(&light);
-        let (legend, deck, _) = b.peaks(&lights, 254.0, 1000.0 / 254.0);
+        let Peaks { legend, deck, .. } = b.peaks(&lights, 254.0, 1000.0 / 254.0);
         eprintln!("legends turned down: legends {legend:.0} nits, deck {deck:.0}");
         assert!((legend - 200.0).abs() < 1.0 && (deck - 90.0).abs() < 1.0, "the deck keeps its own brightness");
         // a red the screen cannot show cleanly at 200 nits is still sent at 200;
         // its clean limit is only told
         let red: Vec<Light> = b.keys.iter().map(|k| Light { pos: k.pos, rgb: [255, 0, 0], strength: 1.0, dim: false }).collect();
-        let (legend, deck, clean) = b.peaks(&red, 254.0, 600.0 / 254.0);
+        let Peaks { legend, deck, clean, .. } = b.peaks(&red, 254.0, 600.0 / 254.0);
         eprintln!("red at a 600-nit peak: legends {legend:.0} nits (clean up to {clean:.0}), deck {deck:.0}");
         assert!((legend - 200.0).abs() < 1.0 && clean < 200.0 && (deck - 90.0).abs() < 1.0);
         let lit = b.compose(&red, 254.0, 600.0 / 254.0);
@@ -803,8 +872,33 @@ mod tests {
         assert!((hottest - 200.0).abs() < 2.0, "the legends go as bright as asked");
         // and a key's brightness dims every part of it together
         let half: Vec<Light> = lights.iter().map(|l| Light { strength: 0.5, ..*l }).collect();
-        let (legend, deck, _) = b.peaks(&half, 254.0, 1000.0 / 254.0);
+        let Peaks { legend, deck, .. } = b.peaks(&half, 254.0, 1000.0 / 254.0);
         assert!((legend - 100.0).abs() < 1.0 && (deck - 45.0).abs() < 1.0, "half lit: {legend} {deck}");
+    }
+
+    #[test]
+    fn light_spills_out_of_the_wells_onto_the_chassis() {
+        let (_, device, b) = board();
+        let px = |u: f32, v: f32| ((b.art_offset.0 + b.art_scale * u) as i32, (b.art_offset.1 + b.art_scale * v) as i32);
+        let white: Vec<Light> = b.keys.iter().map(|k| Light { pos: k.pos, rgb: [255, 255, 255], strength: 1.0, dim: false }).collect();
+        let lit = b.compose(&white, 254.0, 1000.0 / 254.0);
+        let dark = b.compose(&[], 254.0, 1000.0 / 254.0);
+        let at = |f: &[f32], (x, y): (i32, i32)| {
+            let i = ((y as u32 * b.w + x as u32) * 4) as usize;
+            0.2126 * f[i] + 0.7152 * f[i + 1] + 0.0722 * f[i + 2]
+        };
+        let esc = device["controls"].as_array().unwrap().iter().find(|c| c["label"] == "Escape").unwrap();
+        let key = b.keys.iter().find(|k| k.pos as u64 == esc["pos"].as_u64().unwrap()).unwrap();
+        let foot = key.foot.unwrap();
+        let cx = (foot[0] + foot[2]) / 2.0;
+        // the Escape key's well starts at 59.26 in the art: the chassis just above it
+        let (near, far, off) = (px(cx, 58.5), px(cx, 50.0), px(cx, 2.0));
+        let (vn, vf, vo) = (at(&lit, near) - at(&dark, near), at(&lit, far) - at(&dark, far), at(&lit, off) - at(&dark, off));
+        eprintln!("chassis spill above Escape: by the well {:.1} nits, further off {:.1}, off the keyboard {:.2}", vn * 254.0, vf * 254.0, vo * 254.0);
+        assert!(vn * 254.0 > 5.0, "the chassis just outside a well catches the keys' light");
+        assert!(vf < vn * 0.5, "and it falls away across the chassis");
+        assert!(vo.abs() < 1e-4, "nothing lights the page round the keyboard");
+        assert!((b.peaks(&white, 254.0, 1000.0 / 254.0).chassis - 20.0).abs() < 0.5);
     }
 
     #[test]

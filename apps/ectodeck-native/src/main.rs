@@ -551,11 +551,12 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
     let mut lab = lab::LabPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false), device["light"].clone());
     let lights = front.lights().unwrap_or_default();
     let gain = front.light_gain(reference);
-    let (legend, deck, reach) = board.peaks(&lights, reference as f32, gain);
+    let p = board.peaks(&lights, reference as f32, gain);
     lab.set_readout(lab::Readout {
-        legend: (legend as f64).round(),
-        reach: (reach as f64).round(),
-        deck: (deck as f64).round(),
+        legend: (p.legend as f64).round(),
+        reach: (p.clean as f64).round(),
+        deck: (p.deck as f64).round(),
+        chassis: (p.chassis as f64).round(),
         lcd: (board.lcd_nits() as f64).min(gain as f64 * reference),
         peak: gain as f64 * reference,
         white: reference,
@@ -1090,11 +1091,12 @@ impl App {
         let (Some(l), Some(b)) = (&mut self.front.lab, &self.board) else { return };
         self.readout_at = Some(Instant::now());
         let reference = self.pic.reference();
-        let (legend, deck, reach) = b.peaks(&self.lights, reference as f32, self.gain);
+        let p = b.peaks(&self.lights, reference as f32, self.gain);
         l.set_readout(lab::Readout {
-            legend: (legend as f64).round(),
-            reach: (reach as f64).round(),
-            deck: (deck as f64).round(),
+            legend: (p.legend as f64).round(),
+            reach: (p.clean as f64).round(),
+            deck: (p.deck as f64).round(),
+            chassis: (p.chassis as f64).round(),
             lcd: (b.lcd_nits() as f64).min(self.gain as f64 * reference).round(),
             peak: (self.gain as f64 * reference).round(),
             white: reference.round(),

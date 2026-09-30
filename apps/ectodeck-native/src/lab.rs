@@ -51,7 +51,7 @@ struct Param {
     note: &'static str,
 }
 
-const PARAMS: [Param; 11] = [
+const PARAMS: [Param; 13] = [
     Param { path: ("legend", "nits"), label: "Brightness", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, note: "The legend at its brightest, nearest the LED, for a key lit fully, up to Peak nits (Settings › HDR)." },
     Param { path: ("legend", "depth"), label: "Spread", lo: 1.0, hi: 60.0, step: 0.5, unit: Unit::Length, note: "How deep under the legend the LED sits. Deeper lights a legend more evenly; shallower keeps the light to the part nearest the LED." },
     Param { path: ("legend", "floor"), label: "Far parts", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, note: "The least any part of a legend is lit, however far from the LED: light bouncing inside the cap." },
@@ -62,16 +62,19 @@ const PARAMS: [Param; 11] = [
     Param { path: ("rim", "nits"), label: "Brightness", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, note: "The glow the foot of each cap's skirt catches from the deck, at its brightest." },
     Param { path: ("rim", "width"), label: "Height", lo: 0.05, hi: 10.0, step: 0.05, unit: Unit::Length, note: "How far up the skirt it reaches." },
     Param { path: ("led", ""), label: "North of centre", lo: -12.0, hi: 12.0, step: 0.25, unit: Unit::Length, note: "Where each key's LED sits under its cap, from the switch's centre toward the top of the key; below 0, toward the bottom, as on a keyboard whose LEDs face south." },
+    Param { path: ("chassis", "nits"), label: "Brightness", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, note: "At its brightest, on the chassis just past a well's edge." },
+    Param { path: ("chassis", "reach"), label: "Reach", lo: 0.1, hi: 40.0, step: 0.1, unit: Unit::Length, note: "How far across the chassis it goes before it falls to a third." },
     Param { path: ("lcd", "nits"), label: "Lit dots", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, note: "The display's lit dots, as bright as its backlight shows them." },
 ];
 
 /// The page's sections: a title, what the part is, and its values.
-const SECTIONS: [(&str, &str, usize, usize); 5] = [
+const SECTIONS: [(&str, &str, usize, usize); 6] = [
     ("Legends", "The LED shines up through the legend: the brightest thing on a key.", 0, 3),
     ("Deck glow", "Light escaping under the cap's skirt onto the deck of the well.", 3, 7),
     ("Skirt's foot", "The deck's glow caught by the foot of each cap.", 7, 9),
+    ("Chassis spill", "Light out of the wells onto the chassis round them, from the keys nearest each well's edge.", 10, 12),
     ("LED", "Where each key's light comes from.", 9, 10),
-    ("Display", "The display's backlit dots.", 10, 11),
+    ("Display", "The display's backlit dots.", 12, 13),
 ];
 
 /// the art's units to the millimetre
@@ -85,6 +88,7 @@ pub struct Readout {
     pub legend: f64,
     pub reach: f64,
     pub deck: f64,
+    pub chassis: f64,
     pub lcd: f64,
     /// Peak nits, from Settings › HDR, and the desktop's white
     pub peak: f64,
@@ -340,6 +344,7 @@ impl LabPage {
             };
             row(c, cy, "Brightest legend", format!("{:.0} nits", r.legend), note);
             row(c, cy, "Brightest deck glow", format!("{:.0} nits", r.deck), None);
+            row(c, cy, "Brightest chassis spill", format!("{:.0} nits", r.chassis), None);
             row(c, cy, "Display's lit dots", format!("{:.0} nits", r.lcd), None);
             row(c, cy, "The desktop's white", format!("{:.0} nits", r.white), None);
         });
@@ -362,7 +367,7 @@ impl LabPage {
                 }
                 // the curves this part's values give, under their captions
                 let pw = w - pad * 2.0;
-                if matches!(title, "Legends" | "Deck glow") {
+                if matches!(title, "Legends" | "Deck glow" | "Chassis spill") {
                     *cy += 26.0;
                 }
                 match title {
@@ -402,6 +407,17 @@ impl LabPage {
                         // the gap between two keys, about 2 units
                         self.plot(c, &mut plots, x0 + pad + half + 12.0, *cy, half, 118.0, &pts, far, peak.max(0.1), &[(2.0, "next key")], "Out from the skirt", "skirt", &format!("{:.0} mm", far / UNITS_PER_MM));
                         *cy += 118.0 + 30.0;
+                    }
+                    "Chassis spill" => {
+                        let (peak, reach) = (self.value(10), self.value(11));
+                        let far = (reach * 4.0).max(4.0);
+                        // from the key's skirt; the well's edge is about 2.5 units out
+                        let pts: Vec<(f64, f64)> = (0..=80).map(|k| {
+                            let d = far * k as f64 / 80.0;
+                            (d, if d < 2.5 { 0.0 } else { peak * (-(d - 2.5) / reach).exp() })
+                        }).collect();
+                        self.plot(c, &mut plots, x0 + pad, *cy, pw, 96.0, &pts, far, peak.max(0.1), &[(2.5, "well's edge")], "Out from a key at a well's edge, across the chassis", "skirt", &format!("{:.0} mm", far / UNITS_PER_MM));
+                        *cy += 96.0 + 30.0;
                     }
                     _ => {}
                 }
@@ -477,6 +493,7 @@ fn light_block(light: &Value) -> String {
     s += &part("legend", &["nits", "depth", "floor"]);
     s += &part("deck", &["nits", "height", "floor", "reach"]);
     s += &part("rim", &["nits", "width"]);
+    s += &part("chassis", &["nits", "reach"]);
     s += &part("lcd", &["nits"]);
     s += &format!("  \"wells\": {}\n", serde_json::to_string(&light["wells"]).unwrap_or_else(|_| "\"mask_1\"".into()));
     s += " },\n";
