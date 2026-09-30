@@ -18,6 +18,8 @@
 
 mod device;
 mod display;
+mod devices;
+mod ecto_settings;
 mod front;
 mod lighting;
 mod overlays;
@@ -120,6 +122,11 @@ fn glyph(svg: &str, px: u32, tint: bool) -> slint::Image {
     let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(px, px);
     buf.make_mut_bytes().copy_from_slice(pix.data());
     slint::Image::from_rgba8_premultiplied(buf)
+}
+
+/// The computer's locale, such as "en-US", for the defaults it implies.
+pub fn locale() -> String {
+    sys_locale::get_locale().unwrap_or_else(|| "en-US".into())
 }
 
 /// Ectodeck's own folders, the web app's, so the two share settings and backups.
@@ -229,7 +236,11 @@ fn main() {
     if let Some(path) = snapshot {
         return snap(&window, ui, reference, gain, &path);
     }
-    run(window, ui, &settings, reference, gain);
+    // back on the place Ectodeck was started again from, for a change to what it may use
+    if let Some(p) = args.iter().position(|a| a == "--place").and_then(|i| args.get(i + 1)) {
+        ui.set_place(p.as_str().into());
+    }
+    run(window, ui, settings, reference, gain);
 }
 
 /// One frame without a window, saved for checking.
@@ -239,7 +250,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, ui: AppWindow, reference: f64, gain:
         .and_then(|s| s.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
         .unwrap_or(SIZE);
     window.set_size(PhysicalSize::new(w, h));
-    let mut front = Front::new(ui, None, true);
+    let mut front = Front::new(ui, None, true, settings::Settings::load(config_dir().join("settings.json")));
     if let Some(state) = std::env::var_os("ECTODECK_NATIVE_STATE") {
         let dev: serde_json::Value = serde_json::from_slice(&std::fs::read(state).expect("the saved state")).expect("the saved state as JSON");
         front.heard(device::Heard::State(Ok(dev)));
@@ -398,6 +409,8 @@ struct App {
     on_screen: Option<u32>,
     glow_limit: Option<f64>,
     levels: (f64, f64),
+    /// the screen's own peak, for Settings › HDR
+    levels_peak: f64,
 
     slint: Rc<MinimalSoftwareWindow>,
     front: Front,
@@ -451,7 +464,7 @@ where
     params.create(qh, tag)
 }
 
-fn run(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, settings: &settings::Settings, reference: f64, gain: f32) {
+fn run(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, settings: settings::Settings, reference: f64, gain: f32) {
     let conn = Connection::connect_to_env().expect("a Wayland session");
     let (globals, queue) = registry_queue_init::<App>(&conn).unwrap();
     let qh = queue.handle();
@@ -529,9 +542,10 @@ fn run(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, settings: &settings::Set
         screens: Vec::new(),
         on_screen: None,
         glow_limit: settings.get("hdr.glow_limit").and_then(|v| v.as_f64()),
+        levels_peak: 1000.0,
         levels: (reference, reference * gain as f64),
         slint,
-        front: Front::new(ui, kb, controlled),
+        front: Front::new(ui, kb, controlled, settings),
         pic: Picture::new(reference, GROUND),
         gain,
         board: None,
@@ -602,6 +616,13 @@ fn run(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, settings: &settings::Set
         }
         app.act();
         app.draw();
+        // started again for a change to what Ectodeck may use, back on that place
+        if let Some(place) = app.front.restart.take() {
+            if let Ok(me) = std::env::current_exe() {
+                let _ = std::process::Command::new(me).args(["--place", &place]).spawn();
+            }
+            app.exit = true;
+        }
     }
     // the keyboard's thread sends the preview's stop before the window goes
     std::thread::sleep(Duration::from_millis(300));
@@ -643,6 +664,7 @@ impl App {
         if s.reference <= 0.0 {
             return;
         }
+        self.levels_peak = s.peak.max(s.reference);
         let glow = self.glow_limit.unwrap_or(s.peak).max(s.reference);
         if (s.reference - self.levels.0).abs() < 0.5 && (glow - self.levels.1).abs() < 0.5 {
             return;
@@ -689,6 +711,16 @@ impl App {
     }
 
     fn draw(&mut self) {
+        // the keys' light as bright as Settings › HDR lets it go
+        self.front.levels = (self.pic.reference(), self.levels_peak);
+        let g = self.front.light_gain(self.pic.reference());
+        if (g - self.gain).abs() > 1e-3 {
+            self.gain = g;
+            if let Some(board) = &self.board {
+                let lit = board.compose(&self.lights, self.gain);
+                self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
+            }
+        }
         if let Some(t) = &self.tray {
             let on = self.front.ui.get_conn_state() == 1;
             if on != self.tray_connected {

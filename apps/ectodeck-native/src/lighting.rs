@@ -41,9 +41,15 @@ pub enum Ctl {
     LcdApp,
     GameKey,
     SliderBind,
+    Control,
+    Temperature,
+    Wind,
+    HdrMode,
+    PeakNits,
+    Place,
 }
 
-const CTLS: [Ctl; 24] = [
+const CTLS: [Ctl; 30] = [
     Ctl::None,
     Ctl::Color,
     Ctl::Colors,
@@ -68,6 +74,12 @@ const CTLS: [Ctl; 24] = [
     Ctl::LcdApp,
     Ctl::GameKey,
     Ctl::SliderBind,
+    Ctl::Control,
+    Ctl::Temperature,
+    Ctl::Wind,
+    Ctl::HdrMode,
+    Ctl::PeakNits,
+    Ctl::Place,
 ];
 
 pub fn ctl(id: i32) -> Ctl {
@@ -91,6 +103,9 @@ pub mod kind {
     pub const TILE: i32 = 9;
     pub const FIELD: i32 = 10;
     pub const DROPDOWN: i32 = 11;
+    pub const DEVICE: i32 = 12;
+    pub const WBOX: i32 = 13;
+    pub const DOT: i32 = 14;
 }
 /// the text styles
 pub mod style {
@@ -101,6 +116,14 @@ pub mod style {
     pub const VALUE: i32 = 4;
     pub const VALUE_BRIGHT: i32 = 5;
     pub const ITEM: i32 = 6;
+    pub const TITLE: i32 = 7;
+    pub const NAME: i32 = 8;
+    pub const SMALL: i32 = 9;
+    pub const BIG: i32 = 10;
+    pub const LABEL_SOFT: i32 = 11;
+    pub const FACT: i32 = 12;
+    pub const FACT_VALUE: i32 = 13;
+    pub const CREDIT: i32 = 14;
 }
 
 /// the effects' speeds: stored as a cycle time, the slider runs slow to fast, as EVGA's does

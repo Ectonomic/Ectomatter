@@ -127,6 +127,7 @@ export struct MenuRow {
     label: string,
     tag: string,
     tick: bool,
+    sub: string,
 }
 
 // one of the window's own buttons: minimise, maximise, close
@@ -759,6 +760,13 @@ component Menu inherits Rectangle {
                         vertical-alignment: center;
                         overflow: elide;
                     }
+                    if row.sub != "": Text {
+                        text: row.sub;
+                        font-family: "Geist";
+                        font-size: 12px;
+                        color: Ink.quiet;
+                        vertical-alignment: center;
+                    }
                 }
                 item := TouchArea {
                     enabled: row.kind == 0;
@@ -809,6 +817,7 @@ component CellView inherits Rectangle {
     callback pick(int, int, length, length, length);
     callback slide(int, float);
     callback typed(int, string);
+    in property <image> glyph;
     x: root.c.x;
     y: root.c.y;
     width: root.c.w;
@@ -819,9 +828,16 @@ component CellView inherits Rectangle {
         width: parent.width;
         text: root.c.text;
         font-family: "Geist";
-        font-size: root.c.style == 1 ? 13px : root.c.style == 2 ? 12.5px : root.c.style == 3 ? 14px : root.c.style == 4 ? 13px : 13.5px;
-        font-weight: root.c.style == 1 ? 500 : 400;
-        color: root.c.style == 1 ? Ink.soft : root.c.style == 2 || root.c.style == 3 ? Ink.quiet : root.c.style == 5 ? Ink.bright : Ink.dim;
+        // 0 a row's name, 1 a heading, 2 a note, 3 an empty tile's words, 4 a slider's value, 5 a value,
+        // 6 a list's item, 7 the page's title, 8 a device's name, 9 its state, 10 the temperature,
+        // 11 the weather's words, 12 a fact, 13 its value, 14 the credit
+        font-size: root.c.style == 1 ? 13px : root.c.style == 2 ? 12.5px : root.c.style == 3 ? 14px : root.c.style == 4 ? 13px
+            : root.c.style == 7 ? 20px : root.c.style == 8 ? 14.5px : root.c.style == 9 ? 12.5px : root.c.style == 10 ? 22px
+            : root.c.style == 12 || root.c.style == 13 ? 13px : root.c.style == 14 ? 12px : 13.5px;
+        font-weight: root.c.style == 1 || root.c.style == 8 || root.c.style == 10 || root.c.style == 13 ? 500 : root.c.style == 7 ? 600 : 400;
+        letter-spacing: root.c.style == 7 ? -0.4px : root.c.style == 10 ? -0.44px : 0;
+        color: root.c.style == 1 || root.c.style == 9 || root.c.style == 12 ? Ink.soft : root.c.style == 2 || root.c.style == 3 || root.c.style == 14 ? Ink.quiet
+            : root.c.style == 5 || root.c.style == 8 ? Ink.bright : root.c.style == 7 || root.c.style == 10 ? Ink.ink : Ink.dim;
         horizontal-alignment: root.c.style == 4 ? right : left;
         vertical-alignment: center;
     }
@@ -914,18 +930,48 @@ component CellView inherits Rectangle {
         border-radius: 14px;
         background: Ink.shade1;
     }
-    // a line to type in
+    // a device's glyph on its square
+    if root.c.kind == 12: Rectangle {
+        border-radius: 10px;
+        background: #1c1c1c;
+        Image {
+            width: 30px;
+            height: 30px;
+            source: root.glyph;
+            colorize: Ink.soft;
+        }
+    }
+    // the weather's box
+    if root.c.kind == 13: Rectangle {
+        border-radius: 10px;
+        background: #141414;
+    }
+    // a state's dot: 0 unknown, 1 good, 2 bad, 3 read from the weather
+    if root.c.kind == 14: Rectangle {
+        border-radius: 3.5px;
+        background: root.c.style == 1 ? Ink.good : root.c.style == 2 ? Ink.bad : root.c.style == 3 ? Ink.warn : #5c5c5c;
+    }
+    // a line to type in: the profile's name, or the weather's place
     if root.c.kind == 10: Rectangle {
         border-radius: 8px;
-        background: #1f1f1f;
-        TextInput {
-            x: 10px;
-            width: parent.width - 20px;
+        background: root.c.style == 1 ? #1c1c1c : #1f1f1f;
+        if root.c.style == 1 && input.text == "": Text {
+            x: 11px;
+            height: parent.height;
+            text: "Search for a city or town";
+            font-family: "Geist";
+            font-size: 13.5px;
+            color: #737373;
+            vertical-alignment: center;
+        }
+        input := TextInput {
+            x: root.c.style == 1 ? 11px : 10px;
+            width: parent.width - 2 * self.x;
             height: parent.height;
             text: root.c.text;
             font-family: "Geist";
             font-size: 13.5px;
-            color: Ink.ink;
+            color: root.c.style == 1 ? Ink.bright : Ink.ink;
             vertical-alignment: center;
             single-line: true;
             edited => { root.typed(root.c.id, self.text); }
@@ -1301,6 +1347,8 @@ export component AppWindow inherits Window {
     in property <[EffectItem]> effects;
     in property <[Cell]> cells;
     in property <length> tile-height;
+    in property <length> settings-h;
+    out property <length> settings-scroll: set-flick.content-y;
     // the keyboard is showing the page's preview
     in property <bool> live;
     // the chosen key, and its two layers
@@ -1427,15 +1475,17 @@ export component AppWindow inherits Window {
                 clicked => { root.go("z10"); }
             }
         }
-        if root.place == "settings": Text {
-            x: 40px;
-            y: 34px;
-            text: "Settings";
-            font-family: "Geist";
-            font-size: 20px;
-            font-weight: 600;
-            letter-spacing: -0.4px;
-            color: Ink.bright;
+        // Ectodeck's own settings, as the window lays them out
+        set-flick := Flickable {
+            visible: root.place == "settings";
+            content-height: root.settings-h;
+            for c in root.cells: CellView {
+                c: c;
+                glyph: root.keyboard-tile;
+                pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
+                slide(id, v) => { root.cell-slide(id, v); }
+                typed(id, t) => { root.cell-typed(id, t); }
+            }
         }
 
         Rectangle {

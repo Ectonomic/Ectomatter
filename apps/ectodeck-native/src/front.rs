@@ -195,6 +195,20 @@ pub struct Front {
     last_sliders: Option<serde_json::Value>,
     held: Option<u8>,
     sent: [Option<f64>; 2],
+    /// Ectodeck's own settings, the weather every device shares, and the
+    /// place search: what is typed, when, and the places found
+    pub settings: crate::settings::Settings,
+    weather: ectodeck_weather::Feed,
+    place_text: String,
+    typed_at: Option<Instant>,
+    found: Vec<ectodeck_weather::Place>,
+    found_tx: mpsc::Sender<(String, Vec<ectodeck_weather::Place>)>,
+    found_rx: mpsc::Receiver<(String, Vec<ectodeck_weather::Place>)>,
+    place_menu: bool,
+    /// the screen's levels, for the Peak nits slider
+    pub levels: (f64, f64),
+    /// Ectodeck is to start again, on this place, for a change to what it may use
+    pub restart: Option<String>,
 }
 
 /// A profile's colour sample: how many colours, and the colours.
@@ -204,7 +218,7 @@ fn swatch(cols: &[[f64; 3]]) -> (i32, [Color; 4]) {
 }
 
 impl Front {
-    pub fn new(ui: AppWindow, kb: Option<mpsc::Sender<device::Ask>>, controlled: bool) -> Front {
+    pub fn new(ui: AppWindow, kb: Option<mpsc::Sender<device::Ask>>, controlled: bool, settings: crate::settings::Settings) -> Front {
         let asks = Rc::new(RefCell::new(Vec::new()));
         macro_rules! on {
             ($set:ident, |$($p:ident),*| $ask:expr) => {{
@@ -247,6 +261,7 @@ impl Front {
         on!(on_pk_enter, Ask::PkEnter);
         on!(on_cell_typed, |id, t| Ask::CellTyped(id, t.to_string()));
         on!(on_pk_dismiss, Ask::PkDismiss);
+        let (ftx, frx) = mpsc::channel();
         let page = Page::new();
         ui.set_units(page.view_box.2 as f32);
         ui.set_units_high(page.view_box.3 as f32);
@@ -295,7 +310,18 @@ impl Front {
             last_sliders: None,
             held: None,
             sent: [None, None],
+            weather: ectodeck_weather::Feed::start(),
+            place_text: settings.get("weather.place").and_then(|p| p["name"].as_str().map(String::from)).unwrap_or_default(),
+            settings,
+            typed_at: None,
+            found: Vec::new(),
+            found_tx: ftx,
+            found_rx: frx,
+            place_menu: false,
+            levels: (254.0, 1000.0),
+            restart: None,
         };
+        f.weather.set_place(weather_place(&f.settings));
         f.ui.set_overlays(ModelRc::from(f.overlay_model.clone()));
         f.ui.set_pk_presets(ModelRc::new(VecModel::from(PRESETS.iter().map(|c| color(*c)).collect::<Vec<_>>())));
         f.ui.set_cells(ModelRc::from(f.cells.clone()));
@@ -413,8 +439,81 @@ impl Front {
         self.failed_at.map(|t| Duration::from_secs(3).saturating_sub(t.elapsed()) + Duration::from_millis(10))
     }
 
+    /// The place search: once typing has paused, the places matching it,
+    /// found away from the window's thread, in this computer's language.
+    fn search_places(&mut self) {
+        if let Some(t) = self.typed_at {
+            if t.elapsed() >= Duration::from_millis(300) {
+                self.typed_at = None;
+                let q = self.place_text.trim().to_string();
+                if q.is_empty() {
+                    self.close_place_menu();
+                    return;
+                }
+                let tx = self.found_tx.clone();
+                let lang = ectodeck_weather::units::language(&crate::locale());
+                std::thread::spawn(move || {
+                    let found = ectodeck_weather::search(&q, &lang).unwrap_or_default();
+                    let _ = tx.send((q, found));
+                });
+            }
+        }
+        while let Ok((q, found)) = self.found_rx.try_recv() {
+            if q != self.place_text.trim() {
+                continue; // typed on since
+            }
+            self.found = found;
+            self.open_place_menu();
+        }
+    }
+
+    fn open_place_menu(&mut self) {
+        let rows: Vec<MenuRow> = if self.found.is_empty() {
+            vec![MenuRow { kind: 1, label: "No place by that name".into(), tag: "".into(), tick: false, sub: "".into() }]
+        } else {
+            self.found
+                .iter()
+                .map(|p| MenuRow {
+                    kind: 0,
+                    label: if !p.latin.is_empty() && p.latin != p.name { format!("{} ({})", p.name, p.latin) } else { p.name.clone() }.into(),
+                    tag: "".into(),
+                    tick: false,
+                    sub: [p.region.as_str(), p.country.as_str()].iter().filter(|x| !x.is_empty()).cloned().collect::<Vec<_>>().join(", ").into(),
+                })
+                .collect()
+        };
+        let list: f32 = rows.iter().map(|r| if r.kind == 1 { 28.0 } else { 33.0 }).sum();
+        // under the place field, as wide as it
+        let field = (0..self.cells.row_count()).filter_map(|i| self.cells.row_data(i)).find(|c| c.kind == lighting::kind::FIELD && lighting::ctl(c.id) == Ctl::Place);
+        let Some(f) = field else { return };
+        let scroll = self.ui.get_settings_scroll();
+        let (x, y) = (self.ui.get_rail_width() + f.x, 36.0 + f.y + scroll);
+        self.ui.set_menu_search(false);
+        self.ui.set_menu_back(false);
+        self.ui.set_menu_natural(6.0 + list.min(320.0) + 6.0);
+        self.ui.set_menu_w(f.w);
+        self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
+        self.ui.set_menu_ax(x);
+        self.ui.set_menu_ay(y);
+        self.ui.set_menu_ah(f.h);
+        self.ui.set_menu_top(y + f.h + 6.0);
+        self.ui.set_menu_max(320.0 + 12.0);
+        self.ui.set_menu_open(true);
+        self.place_menu = true;
+    }
+
+    fn close_place_menu(&mut self) {
+        if self.place_menu {
+            self.place_menu = false;
+            self.ui.set_menu_open(false);
+            self.ui.set_menu_search(true);
+            self.ui.set_menu_w(300.0);
+        }
+    }
+
     /// Do what the page asked; what only the window can do is handed back.
     pub fn act(&mut self) -> Vec<WindowAsk> {
+        self.search_places();
         let asks: Vec<Ask> = self.asks.borrow_mut().drain(..).collect();
         let mut window = Vec::new();
         let mut changed = false;
@@ -447,16 +546,25 @@ impl Front {
                 Ask::CellPick(id, i, x, y, h) => self.cell_pick(lighting::ctl(id), i.max(0) as usize, (x, y, h)),
                 Ask::CellSlide(id, v) => {
                     match lighting::ctl(id) {
+                        Ctl::PeakNits => {
+                            let nits = crate::ecto_settings::peak_at(v, self.levels.0, self.levels.1);
+                            let _ = self.settings.set("hdr.glow_limit", nits.map_or(serde_json::Value::Null, |n| serde_json::json!(n)));
+                        }
                         Ctl::LcdBrightness => crate::display::act(&mut self.page, Ctl::LcdBrightness, 0, v, None),
                         c => lighting::act(&mut self.page, c, 0, v),
                     }
                     self.push_preview();
                 }
-                Ask::CellTyped(id, t) => {
-                    if lighting::ctl(id) == Ctl::Name {
-                        crate::display::act(&mut self.page, Ctl::Name, 0, 0.0, Some(&t));
+                Ask::CellTyped(id, t) => match lighting::ctl(id) {
+                    Ctl::Name => crate::display::act(&mut self.page, Ctl::Name, 0, 0.0, Some(&t)),
+                    Ctl::Place => {
+                        // searched once typing pauses, as the web page did
+                        self.place_text = t;
+                        self.typed_at = Some(Instant::now());
+                        changed = false;
                     }
-                }
+                    _ => {}
+                },
                 Ask::PkSv(x, y) => {
                     if let Some(p) = &self.pick {
                         let h = p.hsv[0];
@@ -562,8 +670,10 @@ impl Front {
                     }
                 }
                 Ask::PollLcd => {
-                    changed = false;
                     self.poll_lcd();
+                    // Settings is kept current while it shows: a device can be
+                    // plugged in, or the weather come in, at any time
+                    changed = self.ui.get_place() == "settings";
                 }
                 Ask::MacroEditor => self.status("The Macro Editor is not in the native window yet; it comes after the Z10's three pages.", 0),
             }
@@ -678,6 +788,32 @@ impl Front {
             Ctl::SliderBind => {
                 self.open_bind_menu(index, _anchor);
                 return;
+            }
+            Ctl::Control | Ctl::Temperature | Ctl::Wind | Ctl::HdrMode => {
+                let Some(v) = crate::ecto_settings::choice(c, index) else { return };
+                let path = match c {
+                    Ctl::Control => "devices.z10.control",
+                    Ctl::Temperature => "weather.units.temperature",
+                    Ctl::Wind => "weather.units.wind",
+                    _ => "hdr.lighting",
+                };
+                if self.settings.get(path).as_ref() == Some(&v) || (c == Ctl::Control && v == serde_json::json!(self.controlled)) {
+                    return;
+                }
+                if c == Ctl::Control && v == serde_json::json!(false) {
+                    // give the keyboard back what Ectodeck borrowed before letting it go
+                    self.ask_kb(device::Ask::Modes(false, false));
+                    self.ask_kb(device::Ask::Dimmer(None));
+                    self.stop_preview();
+                }
+                if let Err(e) = self.settings.set(path, v) {
+                    self.status(format!("The setting was not saved: {e}"), 2);
+                    return;
+                }
+                // a change to what Ectodeck may use starts it again, back on Settings
+                if c == Ctl::Control {
+                    self.restart = Some("settings".into());
+                }
             }
             Ctl::Fill | Ctl::Scatter | Ctl::Clear => {
                 let leds: Vec<u32> = self.page.layout.iter().filter(|k| k.led).map(|k| k.pos).collect();
@@ -997,6 +1133,12 @@ impl Front {
     /// from the open menu closes it, and a press on the button it hangs from
     /// keeps that button's click from opening it again.
     pub fn pressed_at(&mut self, x: f32, y: f32) {
+        if self.place_menu {
+            let (mx, my, mw, mh) = (self.ui.get_menu_x(), self.ui.get_menu_y(), self.ui.get_menu_width(), self.ui.get_menu_height());
+            if !(x >= mx && x < mx + mw && y >= my && y < my + mh) {
+                self.close_place_menu();
+            }
+        }
         if self.bind_menu.is_some() {
             let (mx, my, mw, mh) = (self.ui.get_menu_x(), self.ui.get_menu_y(), self.ui.get_menu_width(), self.ui.get_menu_height());
             if !(x >= mx && x < mx + mw && y >= my && y < my + mh) {
@@ -1028,6 +1170,18 @@ impl Front {
     }
 
     fn menu_chose(&mut self, i: usize) {
+        if self.place_menu {
+            self.close_place_menu();
+            if let Some(p) = self.found.get(i).cloned() {
+                self.place_text = p.name.clone();
+                if let Ok(v) = serde_json::to_value(&p) {
+                    let _ = self.settings.set("weather.place", v);
+                }
+                self.weather.set_place(weather_place(&self.settings));
+                self.refresh();
+            }
+            return;
+        }
         if let Some((s, _)) = self.bind_menu.take() {
             self.ui.set_menu_open(false);
             self.ui.set_menu_search(true);
@@ -1065,7 +1219,7 @@ impl Front {
         let lists: [&Vec<Action>; 5] = [&g.keys, &g.media, &g.mouse, &g.profiles, &g.board];
         let mut rows: Vec<MenuRow> = Vec::new();
         let mut choices: Vec<Choice> = Vec::new();
-        let row = |kind: i32, label: &str, tag: &str, tick: bool| MenuRow { kind, label: label.into(), tag: tag.into(), tick };
+        let row = |kind: i32, label: &str, tag: &str, tick: bool| MenuRow { kind, label: label.into(), tag: tag.into(), tick, sub: "".into() };
         let q = m.query.trim().to_lowercase();
         // a searchable list, as pickList draws it
         let mut pick = |rows: &mut Vec<MenuRow>, choices: &mut Vec<Choice>, groups: &[(&str, Vec<&Action>)]| {
@@ -1241,10 +1395,25 @@ impl Front {
         if self.menu.is_some() {
             self.build_menu();
         }
-        if loaded && self.page.view == View::Lighting {
+        if loaded && self.page.view == View::Lighting && self.ui.get_place() == "z10" {
             self.refresh_lighting();
         }
-        if loaded && self.page.view == View::Display {
+        if self.ui.get_place() == "settings" {
+            let dc = crate::devices::z10();
+            let st = crate::ecto_settings::State {
+                status: dc,
+                control: self.controlled,
+                settings: self.settings.all(),
+                report: self.weather.report(),
+                locale: &crate::locale(),
+                top_peak: self.levels.1,
+                reference: self.levels.0,
+                place_text: &self.place_text,
+            };
+            let (cells, h) = crate::ecto_settings::page(&st);
+            self.ui.set_settings_h(h);
+            self.show_cells(cells);
+        } else if loaded && self.page.view == View::Display {
             let fw = self.firmware();
             let t = crate::display::tiles(&self.page, &fw, &self.bind);
             self.ui.set_tile_height(t.height);
@@ -1298,9 +1467,9 @@ impl Front {
     fn open_bind_menu(&mut self, i: usize, anchor: (f32, f32, f32)) {
         self.close_menu();
         let name = if i == 0 { "dimmer" } else { "volume" };
-        let mut rows = vec![MenuRow { kind: 1, label: format!("The {name} controls").into(), tag: "".into(), tick: false }];
+        let mut rows = vec![MenuRow { kind: 1, label: format!("The {name} controls").into(), tag: "".into(), tick: false, sub: "".into() }];
         for (v, label) in crate::display::BIND_CHOICES[i] {
-            rows.push(MenuRow { kind: 0, label: label.into(), tag: "".into(), tick: self.bind[i] == v });
+            rows.push(MenuRow { kind: 0, label: label.into(), tag: "".into(), tick: self.bind[i] == v, sub: "".into() });
         }
         let list: f32 = rows.iter().map(|r| if r.kind == 1 { 28.0 } else { 33.0 }).sum();
         let h = 6.0 + list + 6.0;
@@ -1436,4 +1605,22 @@ fn set_audio(target: &str, level: f64) {
     std::thread::spawn(move || {
         let _ = std::process::Command::new("wpctl").args(["set-volume", node, &level]).status();
     });
+}
+
+/// The place Settings names for the weather, as saved.
+fn weather_place(settings: &crate::settings::Settings) -> Option<ectodeck_weather::At> {
+    let p = settings.get("weather.place")?;
+    Some(ectodeck_weather::At { lat: p["lat"].as_f64()? as f32, lon: p["lon"].as_f64()? as f32, country: p["country_code"].as_str().unwrap_or("").to_string() })
+}
+
+impl Front {
+    /// How much brighter than the page's colours the keys' light is drawn:
+    /// the design's brightness, unless Settings › HDR lets it go to a peak.
+    pub fn light_gain(&self, reference: f64) -> f32 {
+        let hdr = self.settings.get("hdr").unwrap_or_default();
+        if hdr["lighting"].as_str() == Some("off") {
+            return 1.0;
+        }
+        hdr["glow_limit"].as_f64().map_or(1.0, |n| (n / reference).max(1.0) as f32)
+    }
 }

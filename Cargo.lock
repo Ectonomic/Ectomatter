@@ -1360,6 +1360,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "ectodeck-draw",
+ "ectodeck-weather",
  "ectotype-core",
  "ksni",
  "resvg 0.45.1",
@@ -1368,6 +1369,7 @@ dependencies = [
  "slint",
  "slint-build",
  "smithay-client-toolkit",
+ "sys-locale",
  "wayland-client",
  "wayland-protocols",
 ]
