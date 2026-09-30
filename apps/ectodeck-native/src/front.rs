@@ -11,6 +11,7 @@ use ectodeck_draw::hdr::Light;
 use slint::{Color, Model, ModelRc, SharedString, VecModel};
 
 use crate::device;
+use crate::overlays::Overlays;
 use crate::z10::{self, Action, Page, View};
 use crate::{AppWindow, KeyItem, LayerItem, MenuRow, ProfileItem};
 
@@ -36,6 +37,12 @@ pub enum Ask {
     MenuDismiss,
     MenuBack,
     Unpress(u32),
+    Go(String),
+    Rail(String),
+    MacroEditor,
+    /// time to read the sliders again, and the display's text
+    PollSliders,
+    PollLcd,
 }
 
 /// What the window itself must do.
@@ -47,7 +54,7 @@ pub enum WindowAsk {
     Close,
 }
 
-const LAYERS: [(&str, &str); 2] = [("keys", "WHEN PRESSED"), ("fnkeys", "WHEN FN IS HELD")];
+const LAYERS: [(&str, &str); 2] = [("keys", "When pressed"), ("fnkeys", "When Fn is held")];
 
 /// The action menu's pages under "Other": each one's title and its list.
 const PAGES: [&str; 5] = ["A key", "A media key", "A mouse button", "Switch profile", "Keyboard function"];
@@ -82,6 +89,13 @@ pub struct Front {
     /// when the keyboard could not be read, to try again
     failed_at: Option<Instant>,
     controlled: bool,
+    /// the knobs, the display and its glass, over the keyboard
+    pub overlays: Overlays,
+    sliders_asked: bool,
+    /// the lowest and highest reading seen for each slider, which widen as the
+    /// sliders are moved, so a knob reaches both ends when its slider does
+    slider_ends: [[f64; 2]; 2],
+    _timers: Vec<slint::Timer>,
 }
 
 /// A profile's colour sample: how many colours, and the colours.
@@ -121,9 +135,41 @@ impl Front {
         on!(on_menu_enter, Ask::MenuEnter);
         on!(on_menu_dismiss, Ask::MenuDismiss);
         on!(on_menu_back_to, Ask::MenuBack);
+        on!(on_go, |p| Ask::Go(p.to_string()));
+        on!(on_rail, |p| Ask::Rail(p.to_string()));
+        on!(on_macro_editor, Ask::MacroEditor);
         let page = Page::new();
         ui.set_units(page.view_box.2 as f32);
-        let mut f = Front { ui, page, kb, asks, menu: None, listening: None, shut: None, t0: Instant::now(), last_lights: None, failed_at: None, controlled };
+        ui.set_units_high(page.view_box.3 as f32);
+        // the sliders ten times a second, the display's text every two seconds, as the web app read them
+        let timers = [(Duration::from_millis(100), Ask::PollSliders), (Duration::from_secs(2), Ask::PollLcd)]
+            .into_iter()
+            .map(|(every, ask)| {
+                let t = slint::Timer::default();
+                let a = asks.clone();
+                t.start(slint::TimerMode::Repeated, every, move || a.borrow_mut().push(ask.clone()));
+                t
+            })
+            .collect();
+        let slider_ends = crate::uistate::get("slider_ends").and_then(|v| serde_json::from_value(v).ok()).unwrap_or([[400.0, 3700.0], [400.0, 3700.0]]);
+        let mut f = Front {
+            ui,
+            page,
+            kb,
+            asks,
+            menu: None,
+            listening: None,
+            shut: None,
+            t0: Instant::now(),
+            last_lights: None,
+            failed_at: None,
+            controlled,
+            overlays: Overlays::new(),
+            sliders_asked: false,
+            slider_ends,
+            _timers: timers,
+        };
+        f.poll_lcd();
         if controlled {
             f.ask_kb(device::Ask::State);
         } else {
@@ -182,6 +228,13 @@ impl Front {
                     }
                     Err(e) => self.status(format!("Profile {n} was not saved: {e}"), 2),
                 }
+            }
+            device::Heard::Sliders(r) => {
+                self.sliders_asked = false;
+                if let Ok(v) = r {
+                    self.move_knobs(&v);
+                }
+                return;
             }
             device::Heard::Active(n, r) => match r {
                 Ok(active) => {
@@ -275,12 +328,86 @@ impl Front {
                 Ask::Unpress(pos) => {
                     self.page.pressed.remove(&pos);
                 }
+                Ask::Go(place) => {
+                    self.close_menu();
+                    self.ui.set_place(place.into());
+                }
+                // the item already chosen opens the rail into its blade, or closes it
+                Ask::Rail(place) => {
+                    self.close_menu();
+                    if self.ui.get_place() == place.as_str() {
+                        let open = !self.ui.get_rail_open();
+                        self.ui.set_rail_open(open);
+                        crate::uistate::set("rail_open", serde_json::json!(open));
+                    } else {
+                        self.ui.set_place(place.into());
+                    }
+                }
+                Ask::PollSliders => {
+                    changed = false;
+                    if self.page.reads_sliders() && self.ui.get_place() == "z10" && !self.sliders_asked && self.kb.is_some() {
+                        self.sliders_asked = true;
+                        self.ask_kb(device::Ask::Sliders);
+                    }
+                }
+                Ask::PollLcd => {
+                    changed = false;
+                    self.poll_lcd();
+                }
+                Ask::MacroEditor => self.status("The Macro Editor is not in the native window yet; it comes after the Z10's three pages.", 0),
             }
         }
         if changed {
             self.refresh();
         }
         window
+    }
+
+    /// The display's text: the keyboard will not read its display back, so the
+    /// z10-lcd service writes each frame it sends to a file; if nothing has
+    /// written it for ten seconds, the panel is drawn unlit rather than stale.
+    fn poll_lcd(&mut self) {
+        let dir = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir);
+        let f = dir.join("z10-lcd/frame");
+        let fresh = std::fs::metadata(&f).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|a| a.as_secs() < 10);
+        let rows: Vec<String> = std::fs::read_to_string(&f).map(|s| s.split('\n').take(4).map(|r| format!("{:<20}", r.chars().take(20).collect::<String>())).collect()).unwrap_or_default();
+        let lcd = (fresh && !rows.is_empty(), rows, self.page.lcd_color());
+        if lcd != self.overlays.lcd {
+            self.overlays.lcd = lcd;
+            self.ui.set_overlays(ModelRc::new(VecModel::from(self.overlays.model())));
+        }
+    }
+
+    /// Where the sliders are: each reading becomes a knob's place between the
+    /// lowest and highest readings seen for its slider.
+    fn move_knobs(&mut self, v: &serde_json::Value) {
+        let raws = [v["dimmer_raw"].as_f64(), v["volume_raw"].as_f64()];
+        let mut wider = false;
+        for (i, raw) in raws.iter().enumerate() {
+            let Some(raw) = *raw else { continue };
+            let e = &mut self.slider_ends[i];
+            if raw < e[0] {
+                e[0] = raw;
+                wider = true;
+            }
+            if raw > e[1] {
+                e[1] = raw;
+                wider = true;
+            }
+            self.overlays.fracs[i] = Some(((raw - e[0]) / (e[1] - e[0]).max(1.0)).clamp(0.0, 1.0) as f32);
+        }
+        if wider {
+            crate::uistate::set("slider_ends", serde_json::json!(self.slider_ends));
+        }
+        self.ui.set_overlays(ModelRc::new(VecModel::from(self.overlays.model())));
+    }
+
+    /// The keyboard's size on the page, in the buffer's pixels: the knobs and
+    /// the display's glass are drawn again for a new one.
+    pub fn board_size(&mut self, w: u32, h: u32, scale: f32) {
+        if self.overlays.board(w, h, scale) {
+            self.ui.set_overlays(ModelRc::new(VecModel::from(self.overlays.model())));
+        }
     }
 
     fn choose_profile(&mut self, n: u8) {
@@ -400,13 +527,8 @@ impl Front {
         // under the button when it fits there, or when there is a fair amount of
         // room there anyway (the menu then scrolls); over it only when below is
         // cramped. Where it hangs is fixed now, so it stays put as it is searched.
-        let (ax, ay, ah) = anchor;
-        // its height from its rows, as the page lays them out: Slint lays a
-        // list's rows out only as it draws them
-        let rows = self.ui.get_menu_rows();
-        let list: f32 = (0..rows.row_count()).filter_map(|i| rows.row_data(i)).map(|r| match r.kind { 1 => 27.0, 2 => 11.0, _ => 34.0 }).sum();
-        let h = 14.0 + if self.ui.get_menu_back() { 34.0 } else { 0.0 } + 41.0 + list;
-        let win = self.ui.get_window_height();
+        let (_, ay, ah) = anchor;
+        let (h, win) = (self.ui.get_menu_natural(), self.ui.get_window_height());
         let (below, above) = (win - ay - ah - 14.0, ay - 70.0);
         let down = h <= below || below >= h.min(260.0) || below >= above;
         if std::env::var_os("ECTODECK_NATIVE_DEBUG").is_some() {
@@ -486,7 +608,7 @@ impl Front {
                     continue;
                 }
                 if !head.is_empty() {
-                    rows.push(row(1, &head.to_uppercase(), "", false));
+                    rows.push(row(1, head, "", false));
                     choices.push(Choice::Nothing);
                 }
                 for a in hit.into_iter().take(if q.is_empty() { 400 } else { 60 }) {
@@ -515,7 +637,7 @@ impl Front {
                     pick(&mut rows, &mut choices, &[("", all)]);
                 } else {
                     if !g.macros.is_empty() {
-                        rows.push(row(1, "MACROS", "", false));
+                        rows.push(row(1, "Macros", "", false));
                         choices.push(Choice::Nothing);
                         for a in &g.macros {
                             rows.push(row(0, &a.label, "", def[0] == 3 && def[1] == a.def[1]));
@@ -524,7 +646,7 @@ impl Front {
                         rows.push(row(2, "", "", false));
                         choices.push(Choice::Nothing);
                     }
-                    rows.push(row(1, "OTHER", "", false));
+                    rows.push(row(1, "Other", "", false));
                     choices.push(Choice::Nothing);
                     let kind = z10::kind_of(def);
                     for (p, title) in PAGES.iter().enumerate() {
@@ -544,6 +666,10 @@ impl Front {
         self.ui.set_menu_ah(ah);
         self.ui.set_menu_back(back);
         self.ui.set_menu_placeholder(placeholder.into());
+        // its height as the page lays its rows out: Slint lays a list's rows out
+        // only as it draws them, so the window works it out
+        let list: f32 = rows.iter().map(|r| match r.kind { 1 => 28.0, 2 => 11.0, _ => 33.0 }).sum();
+        self.ui.set_menu_natural(6.0 + if back { 33.0 } else { 0.0 } + 33.0 + 6.0 + list + 6.0);
         self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
         if let Some(m) = &mut self.menu {
             m.choices = choices;
@@ -646,6 +772,11 @@ impl Front {
         }
         if self.menu.is_some() {
             self.build_menu();
+        }
+        let back = self.page.lcd_color();
+        if back != self.overlays.lcd.2 {
+            self.overlays.lcd.2 = back;
+            self.ui.set_overlays(ModelRc::new(VecModel::from(self.overlays.model())));
         }
     }
 

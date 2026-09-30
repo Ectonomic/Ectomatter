@@ -999,6 +999,25 @@ impl Page {
         self.flashes.clear();
     }
 
+    /// The display's backlight as it looks: leaning as the keys' LEDs do, and
+    /// dimmer with its brightness.
+    pub fn lcd_color(&self) -> [f64; 3] {
+        if self.dev.is_none() {
+            return [90.0; 3];
+        }
+        let c = &self.draft()["lighting"]["lcd"]["color"];
+        let b = f(&c["brightness"]);
+        let look = led_look(rgb(&c["color"]));
+        look.map(|v| (v as f64 * (0.3 + 0.7 * b / 255.0)).round())
+    }
+
+    /// Whether the keyboard's firmware can say where its sliders are.
+    pub fn reads_sliders(&self) -> bool {
+        let fw = self.dev.as_ref().map_or(0, |d| u(&d["firmware"]));
+        let minor = fw & 0xff;
+        minor >= 171 && minor - 170 >= 2
+    }
+
     pub fn firmware_line(&self) -> (String, Option<String>) {
         let fw = self.dev.as_ref().map_or(0, |d| u(&d["firmware"]));
         let minor = fw & 0xff;

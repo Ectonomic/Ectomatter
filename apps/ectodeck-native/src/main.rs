@@ -18,9 +18,11 @@
 
 mod device;
 mod front;
+mod overlays;
 mod picture;
 mod screens;
 mod settings;
+mod uistate;
 mod z10;
 
 slint::include_modules!();
@@ -78,8 +80,8 @@ use wayland_protocols::wp::color_management::v1::client::{
 /// the size the window opens at, and the least it may be, as the web app's
 const SIZE: (u32, u32) = (1440, 940);
 const MIN_SIZE: (u32, u32) = (1000, 700);
-/// the ground the keyboard sits on: the profile panel's
-const GROUND: [u8; 3] = [0x1f, 0x24, 0x29];
+/// the ground the keyboard sits on: the page's own
+const GROUND: [u8; 3] = [0x20, 0x20, 0x20];
 /// how far in from the window's edge a press resizes it
 const EDGE: f64 = 6.0;
 
@@ -205,6 +207,8 @@ fn main() {
     ui.set_home_glyph(glyph(include_str!("../ui/glyphs/home.svg"), 22, true));
     ui.set_keyboard_glyph(glyph(include_str!("../ui/glyphs/keyboard.svg"), 22, true));
     ui.set_settings_glyph(glyph(include_str!("../ui/glyphs/settings.svg"), 22, true));
+    ui.set_keyboard_tile(glyph(include_str!("../ui/glyphs/keyboard.svg"), 88, true));
+    ui.set_rail_open(uistate::get("rail_open").and_then(|v| v.as_bool()).unwrap_or(false));
     slint::ComponentHandle::show(&ui).unwrap();
 
     let settings = settings::Settings::load(config_dir().join("settings.json"));
@@ -267,6 +271,15 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, ui: AppWindow, reference: f64, gain:
         let mut xy = at.split(',').map(|v| v.trim().parse::<f32>().unwrap_or(0.0));
         window.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(xy.next().unwrap_or(0.0), xy.next().unwrap_or(0.0)) });
     }
+    // let animations run their course, as the eye would see them settle
+    if let Some(ms) = std::env::var("ECTODECK_NATIVE_WAIT").ok().and_then(|v| v.parse::<u64>().ok()) {
+        let end = Instant::now() + Duration::from_millis(ms);
+        while Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(16));
+            slint::platform::update_timers_and_animations();
+            front.act();
+        }
+    }
     eprintln!("the hand shows: {}", front.ui.get_hand());
     window.request_redraw();
     window.draw_if_needed(|r| {
@@ -274,6 +287,12 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, ui: AppWindow, reference: f64, gain:
         r.render(&mut pic.ui, w as usize);
     });
     let rect = board_rect(&front.ui, 1.0);
+    front.board_size(rect.2 as u32, rect.3 as u32, 1.0);
+    window.request_redraw();
+    window.draw_if_needed(|r| {
+        r.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
+        r.render(&mut pic.ui, w as usize);
+    });
     lay_ground(&mut pic, &front.ui, 1.0);
     if rect.2 > 0 {
         let tree = usvg::Tree::from_str(ectodeck_draw::z10::SVG, &usvg::Options::default()).unwrap();
@@ -289,6 +308,8 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, ui: AppWindow, reference: f64, gain:
     pic.encode_all();
     eprintln!("frame encoded in {:?}", t.elapsed());
     std::fs::write(path, bytemuck::cast_slice::<[u16; 4], u8>(&pic.out)).unwrap();
+    // the white it was encoded for, which decoding it needs
+    std::fs::write(format!("{path}.reference"), format!("{reference}\n")).unwrap();
     eprintln!("saved {path}: {w}x{h}, keyboard at {rect:?}");
 }
 
@@ -567,6 +588,7 @@ impl App {
             self.asked = Some(want);
             let _ = self.build.send(want);
         }
+        self.front.board_size(rect.2 as u32, rect.3 as u32, self.scale as f32);
         let before = self.pic.keyboard_rect();
         if self.pic.set_keyboard(rect, self.lit.as_ref()) {
             for r in [before, rect] {
@@ -625,7 +647,7 @@ impl App {
         self.frames += 1;
         if let Some(dir) = &self.dump {
             let _ = std::fs::write(dir.join("frame.raw"), bytemuck::cast_slice::<[u16; 4], u8>(&self.pic.out));
-            let _ = std::fs::write(dir.join("frame.txt"), format!("{} {} {}\n", w, h, self.frames));
+            let _ = std::fs::write(dir.join("frame.txt"), format!("{} {} {} {}\n", w, h, self.frames, self.pic.reference()));
         }
     }
 

@@ -2,6 +2,7 @@
 //! draft 4): the pieces of one SVG, lit key by key, as one HDR picture.
 
 pub mod hdr;
+pub mod pieces;
 
 /// The Z10 core's art, from its own folder. Until the Z10 core runs as its
 /// own program, Ectodeck reads that folder when it is built.

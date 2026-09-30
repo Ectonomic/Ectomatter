@@ -22,6 +22,7 @@ pub struct Picture {
     /// the picture as the compositor is given it
     pub out: Vec<[u16; 4]>,
     enc: Encoder,
+    reference: f64,
     /// sRGB to linear light, as KWin decodes SDR apps: gamma 2.2
     lin: [f32; 256],
     /// what the hole shows before the keyboard is drawn: the ground it sits on
@@ -44,7 +45,7 @@ impl Picture {
         }
         let ground = [lin[ground[0] as usize], lin[ground[1] as usize], lin[ground[2] as usize]];
         let page_ground = Ground { x: 0, y: 0, radius: 0.0, rgb: [0.0; 3] };
-        Picture { w: 0, h: 0, ui: Vec::new(), out: Vec::new(), enc: Encoder::new(reference), lin, ground, page_ground, rect: (0, 0, 0, 0), src: None, shown: None }
+        Picture { w: 0, h: 0, ui: Vec::new(), out: Vec::new(), enc: Encoder::new(reference), reference, lin, ground, page_ground, rect: (0, 0, 0, 0), src: None, shown: None }
     }
 
     /// Lay the app's ground under the page; true if it changed.
@@ -53,6 +54,10 @@ impl Picture {
         let changed = g != self.page_ground;
         self.page_ground = g;
         changed
+    }
+
+    pub fn reference(&self) -> f64 {
+        self.reference
     }
 
     pub fn resize(&mut self, w: usize, h: usize) {
