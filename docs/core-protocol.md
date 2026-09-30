@@ -1,6 +1,6 @@
 # Ectodeck core protocol
 
-Draft 3, 2026-09-26. For review before anything is built on it. Draft 3 takes in the review of the M3 plugin's author.
+Draft 4, 2026-09-29. For review before anything is built on it. Draft 3 took in the review of the M3 plugin's author. Draft 4 replaces the device picture with one drawing in named, numbered pieces (section 4, the device's art), so a core brings its own art and the frontend draws it with nothing added by hand.
 
 Ectodeck is one app for every device on a desk. It follows the model RetroArch made work for emulators: one frontend, and the engines that know each device brought in as **cores**. The frontend owns the windows, the tray, profiles, and every feature that spans devices. A core owns the truth about the devices it handles: how to find them, what they can do, and how to talk to them.
 
@@ -79,20 +79,51 @@ Errors use JSON-RPC's error object, with a `message` written for the person usin
   "vendor": "EVGA",
   "model": "Z10 RGB",
   "firmware": { "kind": "custom", "version": "1.171", "build": 1, "features": [], "later": [{ "id": "sliders.read", "since": 2 }] },
-  "picture": { "art": "art/board.svg", "top": "art/board-top.svg", "width": 661, "height": 262 },
+  "art": "art/z10.svg",
   "controls": [
-    { "id": "esc", "kind": "key", "label": "Esc", "legend": { "main": "ESC" }, "rect": [54, 60, 27, 27], "light": true },
-    { "id": "volume", "kind": "slider", "label": "Volume", "rect": [582, 36, 50, 6] },
-    { "id": "lcd", "kind": "display", "label": "Display", "rect": [300, 20, 84, 22] }
+    { "id": "esc", "kind": "key", "label": "Esc", "control": 12, "legend": 14, "mask": 1 },
+    { "id": "volume", "kind": "slider", "label": "Volume", "control": 105 }
+  ],
+  "screens": [
+    { "id": "lcd", "label": "Display", "screen": 1, "overlay": 1 }
   ],
   "capabilities": { "keys": { }, "macros": { }, "lighting": { }, "displays": { }, "profiles": { }, "settings": { } }
 }
 ```
 
-- **picture** is the device's drawing, shipped in the core's folder, with every control's `rect` in the drawing's own units. This is how the frontend draws the Z10 today, with its keys laid over its artwork, and it is how it will draw a mouse or a deck.
+- **art** is the device's drawing, one SVG file shipped in the core's folder. The frontend draws the device from it and nothing else (see the device's art, below).
 - **firmware** says whether the device runs its maker's firmware (`"kind": "retail"`), Ectodeck's custom firmware (`"custom"`, with its build), or neither (`"unknown"`). **features** lists what the custom build adds, such as `sliders.read`; a core offers a custom feature, and accepts its methods, only when the device's build has it, so a device on retail firmware is never sent a command it does not know. **later** names features of newer builds, for the frontend to mention. The frontend keeps custom features apart from everything else, labelled as needing Ectodeck's firmware.
-- **controls** lists every part of the device a capability can refer to. Controls have stable ids, so settings stay attached to the right key across versions of a core.
+- **controls** lists every part of the device a capability can refer to, and which pieces of the drawing belong to it. Controls have stable ids, so settings stay attached to the right key across versions of a core. `label` is the control's name in the interface; what is printed on it is in the drawing.
+- **screens** lists the device's displays and the pieces of the drawing that show them. The displays capability refers to a screen by its id, as it does to a control. A key with its own small screen, as on a Stream Deck, is a control that also names its `screen`.
 - **capabilities** says which capabilities the device offers, each with its own description (section 5). A device offers only what it really has.
+
+### The device's art
+
+A core brings its own art, and the frontend draws it exactly as it is. Everything that makes up the look, shading, chrome, print and glass included, is drawn in the SVG, so what a core's artist draws in Inkscape or any other editor is what the app shows. The frontend adds only what changes while the app runs: each light's colour, a pressed control, the live picture on a screen, and its own interface over the drawing, such as a selection outline or the name of a key's new assignment.
+
+**Pieces.** The drawing is broken into pieces. Each piece is a group or shape whose `id` is its kind and a number, such as `control_12`. The number only tells pieces of the same kind apart: each kind counts from 1 on its own, so a keyboard with 104 controls still has `body_1`. How finely to break the drawing up is the artist's choice, with one rule: anything that changes on its own needs a piece of its own. A key that takes its own colour needs its own illumination, a key that presses needs its own control, and a legend that lights with its key needs its own legend.
+
+The kinds, from the bottom of the drawing to the top:
+
+| Kind | What it is | What the frontend does with it |
+|---|---|---|
+| `body` | The shell of the device, with its shading and chrome | Draws it as it is |
+| `illumination` | The light a control throws, drawn in white, with any blur in the drawing | Fills it with the control's current colour |
+| `mask` | Where an illumination may show, such as the wells a row of keys sits in. Never drawn | Shows the illuminations tied to it only inside it, so light does not scatter where the device shows none |
+| `control` | A key, button, dial or slider, with its shading | Draws it as it is; nudges it down and darkens it while it is pressed |
+| `legend` | What is printed, on the body or on a control | Draws it as it is; one tied to a control takes the control's colour while the control is lit, and moves with it when pressed |
+| `screen` | Where a display sits | Shows the display's live picture inside it |
+| `overlay` | Anything in front of everything else, such as the glass over a screen and its glare | Draws it as it is |
+
+**Tying pieces together.** The core says which pieces belong to which control or screen, in its device description: `"control": 12, "legend": 14, "mask": 1`. One tie is automatic: `illumination_12` belongs to whatever uses `control_12`, and a control lists an `illumination` only when its light is drawn under another number. A mask can serve many illuminations; every control that names it is limited by it. A piece that nothing ties to, such as the body, the print on the body or an overlay, is drawn as it is and never changes.
+
+**The file.**
+
+- Pieces are found by their `id`. Inkscape's labels are not read, because saving as plain SVG removes them; an id is set in Inkscape's Object Properties.
+- Each id is used once. A number that is no longer used is not given to a different piece, so settings saved for other pieces do not move.
+- Plain SVG only: no scripts, no animation, and text converted to outlines, so the drawing looks the same wherever it is drawn. Filters such as a blur are fine.
+- Positions come from the drawing, in its own units: where a control sits is where its pieces are, so the core lists no positions.
+- On a screen with room above its white, the frontend draws the illuminations, and the legends they light, brighter than white. The rest of the drawing stays at ordinary white.
 
 ## 5. Capabilities
 
