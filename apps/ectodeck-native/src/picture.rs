@@ -173,6 +173,24 @@ fn encode_row(
             }
         }
     };
+    // The page over what lies under it (the app's ground, the keyboard), mixed
+    // as a browser mixes: in sRGB's own encoding, not in linear light, so a
+    // faint white glare or a press's shade comes out as it did in the web page.
+    // Under is linear RGB, `ua` its alpha; the result is premultiplied linear.
+    let over = |p: PremultipliedRgbaColor, under: [f32; 3], ua: f32| -> [f32; 4] {
+        let a = p.alpha as f32 / 255.0;
+        let t = 1.0 - a;
+        let oa = a + ua * t;
+        if oa <= 0.0 {
+            return [0.0; 4];
+        }
+        let enc = |v: f32| v.max(0.0).powf(1.0 / 2.2);
+        let mix = |c: u8, u: f32| {
+            let e = c as f32 / 255.0 + enc(u) * ua * t;
+            (e / oa).powf(2.2) * oa
+        };
+        [mix(p.red, under[0]), mix(p.green, under[1]), mix(p.blue, under[2]), oa]
+    };
     // most of the page is long runs of one colour: encode each run once
     let mut last: Option<((u32, bool), [u16; 4])> = None;
     for x in x0..x1 {
@@ -182,35 +200,30 @@ fn encode_row(
             // the page over the app's ground, where the page is not opaque
             let c = if p.alpha == 255 { 1.0 } else { cover(x) };
             if c > 0.0 && c < 1.0 {
-                let u = page(p);
-                let t = (1.0 - u[3]) * c;
-                row[x] = enc.pixel([u[0] + g.rgb[0] * t, u[1] + g.rgb[1] * t, u[2] + g.rgb[2] * t, u[3] + t]);
+                row[x] = enc.pixel(over(p, g.rgb, c));
                 continue;
             }
             let key = (u32::from_le_bytes([p.red, p.green, p.blue, p.alpha]), c > 0.0);
             row[x] = match last {
                 Some((k, v)) if k == key => v,
                 _ => {
-                    let u = page(p);
-                    let t = if c > 0.0 { 1.0 - u[3] } else { 0.0 };
-                    let v = enc.pixel([u[0] + g.rgb[0] * t, u[1] + g.rgb[1] * t, u[2] + g.rgb[2] * t, u[3] + t]);
+                    let v = enc.pixel(if c > 0.0 { over(p, g.rgb, 1.0) } else { page(p) });
                     last = Some((key, v));
                     v
                 }
             };
             continue;
         }
-        // the page over the keyboard, in linear light
-        let u = page(p);
-        let k = match kb {
+        // the page over the keyboard
+        let (k, ka) = match kb {
             Some(l) => {
                 let i = (((y as i32 - ky) as usize) * l.w + (x as i32 - kx) as usize) * 4;
-                [l.px[i], l.px[i + 1], l.px[i + 2], l.px[i + 3]]
+                let a = l.px[i + 3];
+                if a > 0.0 { ([l.px[i] / a, l.px[i + 1] / a, l.px[i + 2] / a], a) } else { ([0.0; 3], 0.0) }
             }
-            None => [ground[0], ground[1], ground[2], 1.0],
+            None => (ground, 1.0),
         };
-        let t = 1.0 - u[3];
-        row[x] = enc.pixel([u[0] + k[0] * t, u[1] + k[1] * t, u[2] + k[2] * t, u[3] + k[3] * t]);
+        row[x] = if p.alpha == 0 { enc.pixel([k[0] * ka, k[1] * ka, k[2] * ka, ka]) } else { enc.pixel(over(p, k, ka)) };
     }
 }
 

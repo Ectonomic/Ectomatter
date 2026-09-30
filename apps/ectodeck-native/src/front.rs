@@ -186,6 +186,7 @@ pub struct Front {
     cells: Rc<VecModel<Cell>>,
     pub scale: f32,
     pick: Option<Pick>,
+    overlay_model: Rc<VecModel<crate::Overlay>>,
 }
 
 /// A profile's colour sample: how many colours, and the colours.
@@ -279,7 +280,9 @@ impl Front {
             cells: Rc::new(VecModel::default()),
             scale: 1.0,
             pick: None,
+            overlay_model: Rc::new(VecModel::default()),
         };
+        f.ui.set_overlays(ModelRc::from(f.overlay_model.clone()));
         f.ui.set_pk_presets(ModelRc::new(VecModel::from(PRESETS.iter().map(|c| color(*c)).collect::<Vec<_>>())));
         f.ui.set_cells(ModelRc::from(f.cells.clone()));
         f.poll_lcd();
@@ -558,7 +561,7 @@ impl Front {
         let lcd = (fresh && !rows.is_empty(), rows, self.page.lcd_color());
         if lcd != self.overlays.lcd {
             self.overlays.lcd = lcd;
-            self.ui.set_overlays(ModelRc::new(VecModel::from(self.overlays.model())));
+            self.show_overlays();
         }
     }
 
@@ -583,14 +586,27 @@ impl Front {
         if wider {
             crate::uistate::set("slider_ends", serde_json::json!(self.slider_ends));
         }
-        self.ui.set_overlays(ModelRc::new(VecModel::from(self.overlays.model())));
+        self.show_overlays();
+    }
+
+    /// What is over the keyboard, changed in place, so a knob glides to its
+    /// new place rather than being drawn anew there.
+    fn show_overlays(&mut self) {
+        let list = self.overlays.model();
+        if self.overlay_model.row_count() == list.len() {
+            for (i, o) in list.into_iter().enumerate() {
+                self.overlay_model.set_row_data(i, o);
+            }
+        } else {
+            self.overlay_model.set_vec(list);
+        }
     }
 
     /// The keyboard's size on the page, in the buffer's pixels: the knobs and
     /// the display's glass are drawn again for a new one.
     pub fn board_size(&mut self, w: u32, h: u32, scale: f32) {
         if self.overlays.board(w, h, scale) {
-            self.ui.set_overlays(ModelRc::new(VecModel::from(self.overlays.model())));
+            self.show_overlays();
         }
     }
 
@@ -1178,7 +1194,7 @@ impl Front {
         let back = self.page.lcd_color();
         if back != self.overlays.lcd.2 {
             self.overlays.lcd.2 = back;
-            self.ui.set_overlays(ModelRc::new(VecModel::from(self.overlays.model())));
+            self.show_overlays();
         }
     }
 

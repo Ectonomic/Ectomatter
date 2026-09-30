@@ -86,6 +86,10 @@ const SIZE: (u32, u32) = (1440, 940);
 const MIN_SIZE: (u32, u32) = (1000, 700);
 /// the ground the keyboard sits on: the page's own
 const GROUND: [u8; 3] = [0x20, 0x20, 0x20];
+/// How much brighter than the page's colours the keys' light is drawn. The
+/// light is drawn at the web design's brightness, as approved in WebKit; going
+/// above the desktop's white by the screen's headroom looked overdone.
+const LIGHT_GAIN: f32 = 1.0;
 /// how far in from the window's edge a press resizes it
 const EDGE: f64 = 6.0;
 
@@ -217,7 +221,7 @@ fn main() {
 
     let settings = settings::Settings::load(config_dir().join("settings.json"));
     let (reference, glow) = levels(&settings);
-    let gain = (glow / reference).max(1.0) as f32;
+    let gain = LIGHT_GAIN;
     eprintln!("ectodeck-native: the desktop's white is {reference} nits; the light goes to {glow}");
 
     if let Some(path) = snapshot {
@@ -977,7 +981,7 @@ impl Dispatch<WpImageDescriptionV1, PictureTag> for App {
             app.cm_surface.set_image_description(desc, wp_color_manager_v1::RenderIntent::Perceptual);
             app.levels = (reference, glow);
             app.pic.set_reference(reference);
-            app.gain = (glow / reference).max(1.0) as f32;
+            app.gain = LIGHT_GAIN;
             if let Some(board) = &app.board {
                 let lit = board.compose(&app.lights, app.gain);
                 app.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));

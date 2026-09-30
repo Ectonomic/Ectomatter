@@ -45,7 +45,7 @@ struct KeyArt {
     cap: Option<Shape>,
     glow: Option<Shape>,
     legend: Option<Shape>,
-    /// the grey its legend is printed in, in linear light
+    /// the grey its legend is printed in, in sRGB's encoding
     print: [f32; 3],
 }
 
@@ -53,9 +53,9 @@ struct KeyArt {
 pub struct Board {
     pub w: u32,
     pub h: u32,
-    /// the body and its print over the ground's colour: opaque, linear RGB
+    /// the body and its print over the ground's colour: opaque, sRGB-encoded
     under: Vec<f32>,
-    /// the caps and the legends of unlit keys: premultiplied linear RGBA
+    /// the caps and the legends of unlit keys: premultiplied, sRGB-encoded
     caps: Vec<f32>,
     keys: Vec<KeyArt>,
 }
@@ -115,7 +115,8 @@ impl Board {
         pix.fill(resvg::tiny_skia::Color::from_rgba8(base[0], base[1], base[2], 255));
         draw(&mut pix, "body");
         draw(&mut pix, "legend-body");
-        let under = pix.data().chunks_exact(4).flat_map(|p| [lin(p[0]), lin(p[1]), lin(p[2])]).collect();
+        // kept in sRGB's own encoding: the light is mixed over it as the web page's CSS mixed it
+        let under = pix.data().chunks_exact(4).flat_map(|p| [p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0]).collect();
 
         // over it: every cap but the slider knobs (the page moves those), and the
         // legends of keys with no light behind them
@@ -130,16 +131,8 @@ impl Board {
                 draw(&mut pix, &format!("legend_{n}"));
             }
         }
-        let caps = pix
-            .data()
-            .chunks_exact(4)
-            .flat_map(|p| {
-                let a = p[3] as f32 / 255.0;
-                // premultiplied: unpremultiply to decode, then premultiply the linear value
-                let un = |v: u8| if a > 0.0 { ((v as f32 / 255.0) / a).min(1.0) } else { 0.0 };
-                [un(p[0]).powf(2.2) * a, un(p[1]).powf(2.2) * a, un(p[2]).powf(2.2) * a, a]
-            })
-            .collect();
+        // premultiplied, in sRGB's own encoding, as a browser composites them
+        let caps = pix.data().chunks_exact(4).flat_map(|p| [p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0, p[3] as f32 / 255.0]).collect();
 
         // each lit key's shapes
         let mut keys = Vec::new();
@@ -157,7 +150,7 @@ impl Board {
                 cap: ill.get(1).and_then(|n| shape(&format!("illumination_{n}"))),
                 glow: ill.get(2).and_then(|n| shape(&format!("illumination_{n}"))),
                 legend: legend.and_then(|n| shape(&format!("legend_{n}"))),
-                print: [lin(print[0]), lin(print[1]), lin(print[2])],
+                print: [print[0] as f32 / 255.0, print[1] as f32 / 255.0, print[2] as f32 / 255.0],
             });
         }
         Ok(Board { w, h, under, caps, keys })
@@ -205,7 +198,9 @@ impl Board {
                 }
             }
         };
-        let glow_colour = |l: &Light| [lin(l.rgb[0]) * gain, lin(l.rgb[1]) * gain, lin(l.rgb[2]) * gain];
+        // the light's colour, encoded as the page's colours are; `gain` above 1 lifts it past white
+        let enc = |v: f32| v.max(0.0).powf(1.0 / 2.2);
+        let glow_colour = |l: &Light| [enc(lin(l.rgb[0]) * gain), enc(lin(l.rgb[1]) * gain), enc(lin(l.rgb[2]) * gain)];
 
         // the light each key throws on the deck
         for key in &self.keys {
@@ -246,6 +241,15 @@ impl Board {
                 ];
                 let step_back = if l.is_some_and(|l| l.dim) { 0.35 } else { 1.0 };
                 over(&mut out, s, col, step_back);
+            }
+        }
+        // mixed in sRGB's encoding, as the web page's CSS mixed it; handed on in linear light
+        for px in out.chunks_exact_mut(4) {
+            let a = px[3];
+            if a > 0.0 {
+                for c in 0..3 {
+                    px[c] = (px[c] / a).max(0.0).powf(2.2) * a;
+                }
             }
         }
         out

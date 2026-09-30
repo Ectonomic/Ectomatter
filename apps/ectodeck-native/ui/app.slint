@@ -1580,6 +1580,9 @@ export component AppWindow inherits Window {
                     }
                     for o in root.overlays: Image {
                         x: o.x;
+                        // a short glide between readings, which come ten times a
+                        // second, keeps the knobs from stepping, as the web app's did
+                        animate x { duration: 120ms; easing: linear; }
                         y: o.y;
                         width: o.w;
                         height: o.h;
