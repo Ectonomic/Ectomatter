@@ -1187,6 +1187,7 @@ impl Front {
     /// from the open menu closes it, and a press on the button it hangs from
     /// keeps that button's click from opening it again.
     pub fn pressed_at(&mut self, x: f32, y: f32) {
+        self.let_key_go(x, y);
         if self.place_menu {
             let (mx, my, mw, mh) = (self.ui.get_menu_x(), self.ui.get_menu_y(), self.ui.get_menu_width(), self.ui.get_menu_height());
             if !(x >= mx && x < mx + mw && y >= my && y < my + mh) {
@@ -1221,6 +1222,30 @@ impl Front {
             self.shut = Some(((ax, ay), Instant::now()));
         }
         self.close_menu();
+    }
+
+    /// A press anywhere on the page lets the chosen key go, but on the
+    /// keyboard (a key there is chosen instead, and the chassis lets it go
+    /// itself), on the chosen key's editor, in an open menu or the colour
+    /// picker, or on the title bar, which only moves the window.
+    fn let_key_go(&mut self, x: f32, y: f32) {
+        if self.page.view != View::Keys || self.page.sel.is_none() || self.ui.get_place() != "z10" || y < 36.0 {
+            return;
+        }
+        if self.menu.is_some() || self.bind_menu.is_some() || self.pick.is_some() || self.place_menu {
+            return;
+        }
+        let inside = |x0: f32, y0: f32, w: f32, h: f32| x >= x0 && x < x0 + w && y >= y0 && y < y0 + h;
+        let ui = &self.ui;
+        let board = ui.get_board_shown() && inside(ui.get_board_x(), ui.get_board_y(), ui.get_board_width(), ui.get_board_height());
+        let editor = ui.get_key_open() && inside(ui.get_key_tile_x(), ui.get_key_tile_y(), ui.get_key_tile_w(), ui.get_key_tile_h());
+        if board || editor {
+            return;
+        }
+        self.page.sel = None;
+        self.listening = None;
+        self.close_menu();
+        self.refresh();
     }
 
     fn menu_chose(&mut self, i: usize) {

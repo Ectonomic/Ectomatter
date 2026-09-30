@@ -263,7 +263,7 @@ fn main() {
 
 /// One frame without a window, saved for checking.
 fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>, ui: AppWindow, reference: f64, gain: f32, path: &str) {
-    let (w, h) = std::env::var("ECTODECK_NATIVE_SIZE")
+    let (mut w, mut h) = std::env::var("ECTODECK_NATIVE_SIZE")
         .ok()
         .and_then(|s| s.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
         .unwrap_or(SIZE);
@@ -400,14 +400,42 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         let lights = front.lights().unwrap_or_default();
         let gain = front.light_gain(reference).max(gain);
         eprintln!("the light at {:.0} nits", gain as f64 * reference);
-        let lit = light(&board, &lights, gain, reference, front.overlays.panel());
-        pic.set_keyboard(rect, Some(&Rc::new(Lit { px: lit, w: rect.2, h: rect.3 })));
+        let lit = light(&board, &lights, gain, reference, front.overlays.panel_for(board.w));
+        let lit = Rc::new(Lit { px: lit, w: rect.2, h: rect.3 });
+        pic.set_keyboard(rect, Some(&lit));
         front.ui.set_board_ready(true);
         window.request_redraw();
         window.draw_if_needed(|r| {
             r.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
             r.render(&mut pic.ui, w as usize);
         });
+        // ECTODECK_NATIVE_RESIZE=WxH: the window made that size as the window does
+        // mid-resize: the page laid out and drawn anew, the keyboard's last
+        // picture stretched to its new place until a new one is drawn
+        if let Some((nw, nh)) = std::env::var("ECTODECK_NATIVE_RESIZE").ok().and_then(|s| s.split_once('x').and_then(|(a, b)| Some((a.parse::<u32>().ok()?, b.parse::<u32>().ok()?)))) {
+            window.set_size(PhysicalSize::new(nw, nh));
+            pic.resize(nw as usize, nh as usize);
+            let r2 = board_rect(&front.ui, 1.0);
+            front.board_size(r2.2 as u32, r2.3 as u32, 1.0);
+            slint::platform::update_timers_and_animations();
+            window.request_redraw();
+            window.draw_if_needed(|r| {
+                r.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
+                r.render(&mut pic.ui, nw as usize);
+            });
+            lay_ground(&mut pic, &front.ui, 1.0);
+            pic.set_keyboard(r2, Some(&lit));
+            eprintln!("resized to {nw}x{nh}: keyboard now at {r2:?}, its picture still {}x{}", lit.w, lit.h);
+            if std::env::var_os("ECTODECK_NATIVE_DEBUG").is_some() {
+                use slint::Model;
+                let m = front.ui.get_overlays();
+                for i in 0..m.row_count() {
+                    let o = m.row_data(i).unwrap();
+                    eprintln!("  overlay {i}: x {:.1} y {:.1} w {:.1} h {:.1} travel {:.1} frac {:.2}", o.x, o.y, o.w, o.h, o.travel, o.frac);
+                }
+            }
+            (w, h) = (nw, nh);
+        }
     }
     let t = Instant::now();
     pic.encode_all();
@@ -1106,7 +1134,7 @@ impl App {
 
     /// The keyboard came back drawn at a size: light it.
     fn built(&mut self, board: Board) {
-        let lit = light(&board, &self.lights, self.gain, self.pic.reference(), self.front.overlays.panel());
+        let lit = light(&board, &self.lights, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w));
         self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
         self.board = Some(board);
         self.full = true;
@@ -1120,7 +1148,7 @@ impl App {
         if (g - self.gain).abs() > 1e-3 {
             self.gain = g;
             if let Some(board) = &self.board {
-                let lit = light(board, &self.lights, self.gain, self.pic.reference(), self.front.overlays.panel());
+                let lit = light(board, &self.lights, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w));
                 self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
             }
         }
@@ -1139,8 +1167,14 @@ impl App {
             self.pic.resize(w, h);
             self.full = true;
         }
+        // the knobs and the display's glass for the keyboard's size on the page,
+        // before the page is drawn, so they move with it in the same frame
+        let rect = board_rect(&self.front.ui, self.scale as f32);
+        self.front.board_size(rect.2 as u32, rect.3 as u32, self.scale as f32);
         // the keys' light, or the display's text, when it has changed
-        let _ = self.front.overlays.panel();
+        if let Some(b) = &self.board {
+            let _ = self.front.overlays.panel_for(b.w);
+        }
         let panel_moved = self.front.overlays.panel_rev != self.panel_rev;
         self.panel_rev = self.front.overlays.panel_rev;
         let lights = self.front.lights();
@@ -1149,7 +1183,7 @@ impl App {
                 self.lights = l;
             }
             if let Some(board) = &self.board {
-                let lit = light(board, &self.lights, self.gain, self.pic.reference(), self.front.overlays.panel());
+                let lit = light(board, &self.lights, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w));
                 self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
             }
         }
@@ -1553,7 +1587,7 @@ impl Dispatch<WpImageDescriptionV1, PictureTag> for App {
             app.pic.set_reference(reference);
             app.gain = LIGHT_GAIN;
             if let Some(board) = &app.board {
-                let lit = light(board, &app.lights, app.gain, app.pic.reference(), app.front.overlays.panel());
+                let lit = light(board, &app.lights, app.gain, app.pic.reference(), app.front.overlays.panel_for(board.w));
                 app.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
             }
             app.full = true;

@@ -80,6 +80,9 @@ export struct Overlay {
     y: length,
     w: length,
     h: length,
+    // a knob: how far its track runs, and how far along it the slider is (0 to 1)
+    travel: length,
+    frac: float,
 }
 
 // one of the chosen key's two layers: what it does when pressed, and with Fn held
@@ -1487,6 +1490,11 @@ export component AppWindow inherits Window {
     in property <bool> live;
     // the chosen key, and its two layers
     in property <bool> key-open;
+    // where the chosen key's editor is in the window, which a press on keeps the key chosen
+    out property <length> key-tile-x: key-tile.absolute-position.x;
+    out property <length> key-tile-y: key-tile.absolute-position.y;
+    out property <length> key-tile-w: key-tile.width;
+    out property <length> key-tile-h: key-tile.height;
     in property <string> key-name;
     in property <string> key-factory;
     in property <[LayerItem]> layers;
@@ -1719,7 +1727,7 @@ export component AppWindow inherits Window {
                 }
 
                 // under the keyboard: the chosen key's editor, one tile, its parts set apart by space
-                Rectangle {
+                key-tile := Rectangle {
                     visible: root.tab == 0 && root.key-open;
                     x: pws-x;
                     y: board-top + board-h + 36px;
@@ -1832,10 +1840,12 @@ export component AppWindow inherits Window {
                     }
                     for o in root.overlays: Image {
                         visible: root.board-ready;
-                        x: o.x;
-                        // a glide as long as the time between readings, so a knob is
-                        // still moving when the next one comes and never steps
-                        animate x { duration: root.knob-glide; easing: linear; }
+                        // Only a knob's place along its track glides, as long as the time
+                        // between readings, so it is still moving when the next one comes
+                        // and never steps; its track moves with the keyboard at once.
+                        property <float> along: o.frac;
+                        animate along { duration: root.knob-glide; easing: linear; }
+                        x: o.x + self.along * o.travel;
                         y: o.y;
                         width: o.w;
                         height: o.h;

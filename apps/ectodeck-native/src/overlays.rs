@@ -135,10 +135,10 @@ impl Overlays {
         true
     }
 
-    /// The display's panel in the board's pixels: 96% of the glass across,
-    /// five times as wide as it is tall, in the middle of the glass.
-    fn panel_box(&self) -> [f32; 4] {
-        let unit = self.size.0 as f32 / 649.0;
+    /// The display's panel in the pixels of a board `bw` wide: 96% of the
+    /// glass across, five times as wide as it is tall, in the middle of the glass.
+    fn panel_box(&self, bw: u32) -> [f32; 4] {
+        let unit = bw as f32 / 649.0;
         let [gx0, gy0, gx1, gy1] = self.glass_box;
         let (gw, gh) = (gx1 - gx0, gy1 - gy0);
         let (w, h) = (gw * 0.96, gw * 0.96 / 5.0);
@@ -165,8 +165,8 @@ impl Overlays {
     /// negative display, the field dark and only the pixels that are on lit
     /// in the backlight's colour, behind glass, so even a lit pixel is well
     /// short of full brightness.
-    fn draw_panel(&mut self) {
-        let [_, _, w, h] = self.panel_box();
+    fn draw_panel(&mut self, bw: u32) {
+        let [_, _, w, h] = self.panel_box(bw);
         let (pw, ph) = ((w.round().max(1.0)) as u32, (h.round().max(1.0)) as u32);
         let key = (self.lcd.0, self.lcd.1.clone(), self.lcd.2, (pw, ph));
         if self.drawn_lcd.as_ref() == Some(&key) && self.panel.is_some() {
@@ -224,18 +224,20 @@ impl Overlays {
                 }
             }
         }
-        let [x, y, _, _] = self.panel_box();
+        let [x, y, _, _] = self.panel_box(bw);
         self.panel = Some(Panel { x: x.round() as i32, y: y.round() as i32, w: pw, h: ph, px: px.iter().map(|p| p.map(|v| v / 255.0)).collect() });
         self.panel_rev += 1;
         self.drawn_lcd = Some(key);
     }
 
-    /// The display's panel, as last drawn, for the HDR picture.
-    pub fn panel(&mut self) -> Option<&Panel> {
-        if self.size.0 == 0 {
+    /// The display's panel for a keyboard picture `bw` pixels wide, for the
+    /// HDR picture: drawn for that picture, which is stretched to the page's
+    /// keyboard while a new size is drawn, so the display stays in its glass.
+    pub fn panel_for(&mut self, bw: u32) -> Option<&Panel> {
+        if bw == 0 {
             return None;
         }
-        self.draw_panel();
+        self.draw_panel(bw);
         self.panel.as_ref()
     }
 
@@ -246,19 +248,20 @@ impl Overlays {
         if self.size.0 == 0 {
             return Vec::new();
         }
-        self.draw_panel();
         let s = self.scale;
         let unit = self.size.0 as f32 / 649.0;
         let mut out = Vec::new();
+        // a knob: the start of its track and how far the slider is along it,
+        // which alone glides; before the keyboard says, where the art has it
         for (i, k) in self.knobs.iter().enumerate() {
-            let x = match self.fracs.get(i).copied().flatten() {
-                Some(f) => (k.x0 + f * k.travel - self.view.0) * unit,
-                None => k.x,
+            let o = match self.fracs.get(i).copied().flatten() {
+                Some(f) => Overlay { image: k.image.clone(), x: (k.x0 - self.view.0) * unit / s, y: k.y / s, w: k.w / s, h: k.h / s, travel: k.travel * unit / s, frac: f },
+                None => Overlay { image: k.image.clone(), x: k.x / s, y: k.y / s, w: k.w / s, h: k.h / s, travel: 0.0, frac: 0.0 },
             };
-            out.push(Overlay { image: k.image.clone(), x: x / s, y: k.y / s, w: k.w / s, h: k.h / s });
+            out.push(o);
         }
         if let Some((img, [x, y, w, h])) = &self.glass {
-            out.push(Overlay { image: img.clone(), x: x / s, y: y / s, w: w / s, h: h / s });
+            out.push(Overlay { image: img.clone(), x: x / s, y: y / s, w: w / s, h: h / s, travel: 0.0, frac: 0.0 });
         }
         out
     }
