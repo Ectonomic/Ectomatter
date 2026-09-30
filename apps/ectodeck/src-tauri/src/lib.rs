@@ -6,6 +6,8 @@
 
 mod devices;
 mod screens;
+mod hdr_overlay;
+mod hdr_board;
 mod settings;
 
 use std::path::PathBuf;
@@ -250,6 +252,28 @@ async fn weather_search(query: String) -> Result<Value, String> {
         .map(|p| json!(p))
 }
 
+/// SPIKE: a halo in true HDR over one key's rect (window pixels).
+#[tauri::command]
+async fn hdr_spike(window: tauri::WebviewWindow, x: f64, y: f64, w: f64, h: f64) -> Result<(), String> {
+    eprintln!("ectodeck: HDR overlay asked for ({x}, {y}) {w}x{h}");
+    let screens = tauri::async_runtime::spawn_blocking(screens::screens).await.unwrap_or_default();
+    let best = screens.iter().max_by(|a, b| a["peak"].as_f64().partial_cmp(&b["peak"].as_f64()).unwrap_or(std::cmp::Ordering::Equal));
+    let peak = best.and_then(|s| s["peak"].as_f64()).unwrap_or(1000.0);
+    let reference = best.and_then(|s| s["reference"].as_f64()).unwrap_or(203.0);
+    hdr_overlay::spike(&window, x, y, w, h, peak, reference)
+}
+
+/// Where the page's keyboard and window are, for the HDR layer under it.
+#[tauri::command]
+async fn hdr_layout(window: tauri::WebviewWindow, layout: hdr_board::Layout) -> Result<(), String> {
+    let screens = tauri::async_runtime::spawn_blocking(screens::screens).await.unwrap_or_default();
+    let best = screens.iter().max_by(|a, b| a["peak"].as_f64().partial_cmp(&b["peak"].as_f64()).unwrap_or(std::cmp::Ordering::Equal));
+    let reference = best.and_then(|s| s["reference"].as_f64()).unwrap_or(203.0);
+    // the plate, as the page has it
+    let plate = include_str!("../../public/board.svg").to_string();
+    hdr_board::layout(&window, layout, reference, [plate])
+}
+
 /// Each screen: whether it is in HDR, its reference white and its peak.
 #[tauri::command]
 async fn screens() -> Value {
@@ -409,7 +433,7 @@ pub fn run() {
                 let _ = w.hide();
             }
         })
-        .invoke_handler(tauri::generate_handler![state, save, write_macro, activate, preview, record, lcd, open_macro_editor, prepare_macro_editor, firmware, sliders, set_dimmer, set_audio, set_modes, set_tray_devices, settings_get, settings_set, devices_status, weather, weather_search, screens])
+        .invoke_handler(tauri::generate_handler![state, save, write_macro, activate, preview, record, lcd, open_macro_editor, prepare_macro_editor, firmware, sliders, set_dimmer, set_audio, set_modes, set_tray_devices, settings_get, settings_set, devices_status, weather, weather_search, screens, hdr_spike, hdr_layout])
         .run(tauri::generate_context!())
         .expect("Ectodeck could not start");
 }

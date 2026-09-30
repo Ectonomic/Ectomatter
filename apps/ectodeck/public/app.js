@@ -624,10 +624,46 @@ async function refresh() {
   settleWindow();
   renderAll();
   tellModes();
+  startHdr();
   pollSliders();
   pollLcd();
   setInterval(pollLcd, 2000);
   if (S.view === 'lighting') startPreview();
+}
+
+// HDR: on a screen with room above the desktop's white, Ectodeck's own layer
+// under the page draws the layers that lie under the light (the plate, then
+// the halos) in true HDR, and the page turns see-through over them, keeping
+// everything else (src-tauri/src/hdr_board.rs). The page tells the layer
+// where the window and the keyboard are whenever either changes.
+async function startHdr() {
+  if (window.__window !== 'main' || !window.__TAURI__) return;
+  let conf = {}, screens = [];
+  try { [conf, screens] = await Promise.all([api('/api/settings'), api('/api/screens')]); } catch (e) { return; }
+  if (conf?.hdr?.lighting === 'off' || !screens.some(sc => sc.peak > sc.reference * 1.1)) return;
+  document.documentElement.classList.add('hdr');
+  let queued = false;
+  const send = () => {
+    queued = false;
+    const d = devicePixelRatio || 1, root = document.documentElement;
+    const plate = document.querySelector('.board .art:not(.top)');
+    const r = plate?.getBoundingClientRect();
+    const onPage = document.body.dataset.place === 'z10' && r && r.width > 0;
+    api('/api/hdr-layout', { layout: {
+      win_w: Math.round(innerWidth * d), win_h: Math.round(innerHeight * d),
+      radius: root.classList.contains('maximized') ? 0 : 10 * d,
+      base: getComputedStyle(root).getPropertyValue('--base').trim() || '#202020',
+      board: onPage ? [r.left * d, r.top * d, r.width * d, r.height * d] : null,
+    } }).catch(e => console.warn('HDR layer:', e));
+  };
+  window.hdrLayout = () => { if (!queued) { queued = true; requestAnimationFrame(send); } };
+  addEventListener('resize', window.hdrLayout);
+  document.body.addEventListener('scroll', window.hdrLayout, { passive: true });
+  addEventListener('scroll', window.hdrLayout, { passive: true });
+  const board = document.querySelector('.board');
+  if (board) new ResizeObserver(window.hdrLayout).observe(board);
+  new MutationObserver(window.hdrLayout).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+  window.hdrLayout();
 }
 
 // Ectodeck has two windows over this one page: the main window, with Keys,
