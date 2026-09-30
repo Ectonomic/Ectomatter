@@ -106,6 +106,8 @@ pub mod kind {
     pub const DEVICE: i32 = 12;
     pub const WBOX: i32 = 13;
     pub const DOT: i32 = 14;
+    /// a number to type, set by Enter or by leaving it
+    pub const NUMBER: i32 = 15;
 }
 /// the text styles
 pub mod style {

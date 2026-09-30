@@ -23,6 +23,7 @@ pub enum Ask {
     Maximise,
     Close,
     Slide(i32, f32),
+    Typed(i32, String),
     Revert,
     Save,
 }
@@ -51,7 +52,7 @@ struct Param {
     note: &'static str,
 }
 
-const PARAMS: [Param; 13] = [
+const PARAMS: [Param; 17] = [
     Param { path: ("legend", "nits"), label: "Brightness", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, note: "The legend at its brightest, nearest the LED, for a key lit fully, up to Peak nits (Settings › HDR)." },
     Param { path: ("legend", "depth"), label: "Spread", lo: 1.0, hi: 60.0, step: 0.5, unit: Unit::Length, note: "How deep under the legend the LED sits. Deeper lights a legend more evenly; shallower keeps the light to the part nearest the LED." },
     Param { path: ("legend", "floor"), label: "Far parts", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, note: "The least any part of a legend is lit, however far from the LED: light bouncing inside the cap." },
@@ -65,6 +66,10 @@ const PARAMS: [Param; 13] = [
     Param { path: ("chassis", "nits"), label: "Brightness", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, note: "At its brightest, on the chassis just past a well's edge." },
     Param { path: ("chassis", "reach"), label: "Reach", lo: 0.1, hi: 40.0, step: 0.1, unit: Unit::Length, note: "How far across the chassis it goes before it falls to a third." },
     Param { path: ("lcd", "nits"), label: "Lit dots", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, note: "The display's lit dots, as bright as its backlight shows them." },
+    Param { path: ("lcd", "unlit"), label: "Unlit dots", lo: 0.0, hi: 0.0, step: 0.1, unit: Unit::Nits, note: "The dots that are off, which let a little of the backlight through, as a real display's do." },
+    Param { path: ("lcd", "field"), label: "Background", lo: 0.0, hi: 0.0, step: 0.1, unit: Unit::Nits, note: "The ground between the dots." },
+    Param { path: ("lcd", "dot"), label: "Dot size", lo: 0.05, hi: 1.0, step: 0.01, unit: Unit::Fraction, note: "How much of each cell a dot fills; the rest is the gap between dots." },
+    Param { path: ("lcd", "glass"), label: "Glass sheen", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, note: "How strongly the glass over the display shows its reflection, as the art draws it at 100%." },
 ];
 
 /// The page's sections: a title, what the part is, and its values.
@@ -74,7 +79,7 @@ const SECTIONS: [(&str, &str, usize, usize); 6] = [
     ("Skirt's foot", "The deck's glow caught by the foot of each cap.", 7, 9),
     ("Chassis spill", "Light out of the wells onto the chassis round them, from the keys nearest each well's edge.", 10, 12),
     ("LED", "Where each key's light comes from.", 9, 10),
-    ("Display", "The display's backlit dots.", 12, 13),
+    ("Display", "The display's backlit dots, and the glass over them.", 12, 17),
 ];
 
 /// the art's units to the millimetre
@@ -150,6 +155,7 @@ impl LabPage {
         on!(on_maximise, Ask::Maximise);
         on!(on_close_window, Ask::Close);
         on!(on_slide, |id, v| Ask::Slide(id, v));
+        on!(on_entered, |id, t| Ask::Typed(id, t.to_string()));
         on!(on_revert, Ask::Revert);
         on!(on_save, Ask::Save);
         ui.set_mark(mark);
@@ -184,6 +190,30 @@ impl LabPage {
                             set(&mut self.light, p.path, v);
                             self.rev += 1;
                             self.status = (String::new(), 0);
+                        }
+                    }
+                }
+                Ask::Typed(id, t) => {
+                    if let Some(p) = PARAMS.get(id.max(0) as usize) {
+                        // the number as typed, whatever follows it ("220 nits", "35%")
+                        let num: String = t.trim().chars().take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-').collect();
+                        match num.parse::<f64>() {
+                            Ok(v) => {
+                                // a part is typed as a percentage; nothing else holds a typed value
+                                // back but what cannot be (a negative brightness, a part past the whole)
+                                let v = match p.unit {
+                                    Unit::Fraction => (v / 100.0).clamp(p.lo.max(0.0), 1.0),
+                                    Unit::Nits => v.max(0.0),
+                                    Unit::Length if p.path.0 == "led" => v,
+                                    Unit::Length => v.max(0.01),
+                                };
+                                if get(&self.light, p.path) != Some(v) {
+                                    set(&mut self.light, p.path, v);
+                                    self.rev += 1;
+                                    self.status = (String::new(), 0);
+                                }
+                            }
+                            Err(_) => self.status = (format!("“{}” isn't a number for {}.", t.trim(), p.label.to_lowercase()), 2),
                         }
                     }
                 }
@@ -269,13 +299,15 @@ impl LabPage {
         get(&self.light, p.path).unwrap_or(p.lo)
     }
 
-    fn reads(&self, i: usize) -> String {
+    /// A value as its box shows it, and its unit after the box.
+    fn reads(&self, i: usize) -> (String, String) {
         let p = &PARAMS[i];
         let v = self.value(i);
+        let trim = |s: String| if s.contains('.') { s.trim_end_matches('0').trim_end_matches('.').to_string() } else { s };
         match p.unit {
-            Unit::Nits => format!("{v:.0} nits"),
-            Unit::Length => format!("{v:.2} ({:.1} mm)", v / UNITS_PER_MM),
-            Unit::Fraction => format!("{:.0}%", v * 100.0),
+            Unit::Nits => (trim(format!("{v:.1}")), "nits".into()),
+            Unit::Length => (trim(format!("{v:.2}")), format!("({:.1} mm)", v / UNITS_PER_MM)),
+            Unit::Fraction => (trim(format!("{:.1}", v * 100.0)), "%".into()),
         }
     }
 
@@ -357,7 +389,9 @@ impl LabPage {
                     let (lo, hi) = self.range(i);
                     let frac = ((self.value(i) - lo) / (hi - lo)).clamp(0.0, 1.0) as f32;
                     c.push(Cell { value: frac, id: i as i32, ..cell(kind::SLIDER, cx + 2.0, *cy + 9.0, slider_w, 16.0) });
-                    c.push(text_cell(style::VALUE, cx + slider_w + 12.0, *cy + 8.0, value_w, 18.0, &self.reads(i)));
+                    let (number, unit) = self.reads(i);
+                    c.push(Cell { text: number.into(), id: i as i32, ..cell(kind::NUMBER, cx + slider_w + 12.0, *cy + 4.0, 64.0, 26.0) });
+                    c.push(text_cell(style::FACT, cx + slider_w + 12.0 + 64.0 + 7.0, *cy + 8.0, value_w - 71.0, 18.0, &unit));
                     *cy += 34.0;
                     for line in text::wrap(400, 12.5, p.note, note_w) {
                         c.push(text_cell(style::NOTE, cx, *cy, note_w, 18.0, &line));
@@ -494,7 +528,7 @@ fn light_block(light: &Value) -> String {
     s += &part("deck", &["nits", "height", "floor", "reach"]);
     s += &part("rim", &["nits", "width"]);
     s += &part("chassis", &["nits", "reach"]);
-    s += &part("lcd", &["nits"]);
+    s += &part("lcd", &["nits", "unlit", "field", "dot", "glass"]);
     s += &format!("  \"wells\": {}\n", serde_json::to_string(&light["wells"]).unwrap_or_else(|_| "\"mask_1\"".into()));
     s += " },\n";
     s

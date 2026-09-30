@@ -83,6 +83,8 @@ export struct Overlay {
     // a knob: how far its track runs, and how far along it the slider is (0 to 1)
     travel: length,
     frac: float,
+    // how strongly it shows: the display's glass as the Lighting lab sets its sheen
+    opacity: float,
 }
 
 // one of the chosen key's two layers: what it does when pressed, and with Fn held
@@ -954,6 +956,8 @@ component CellView inherits Rectangle {
     callback pick(int, int, length, length, length);
     callback slide(int, float);
     callback typed(int, string);
+    // a number typed into its box and set, by Enter or by leaving the box
+    callback entered(int, string);
     in property <image> glyph;
     x: root.c.x;
     y: root.c.y;
@@ -1112,6 +1116,56 @@ component CellView inherits Rectangle {
             vertical-alignment: center;
             single-line: true;
             edited => { root.typed(root.c.id, self.text); }
+        }
+    }
+    // a number to type, as the Lighting lab's values are: Enter or leaving the
+    // box sets it, Escape puts it back as it was; set elsewhere (its slider),
+    // the box follows unless it is being typed in
+    if root.c.kind == 15: Rectangle {
+        property <string> shown: root.c.text;
+        changed shown => {
+            if (!num.has-focus) {
+                num.text = self.shown;
+            }
+        }
+        border-radius: 6px;
+        background: #1c1c1c;
+        border-width: 1px;
+        border-color: num.has-focus ? #5c5c5c : box-ta.has-hover ? #444444 : #333333;
+        box-ta := TouchArea {
+            mouse-cursor: text;
+            clicked => { num.focus(); }
+        }
+        num := TextInput {
+            x: 8px;
+            width: parent.width - 16px;
+            height: parent.height;
+            text: root.c.text;
+            font-family: "Geist";
+            font-size: 13px;
+            color: Ink.bright;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            single-line: true;
+            accepted => {
+                root.entered(root.c.id, self.text);
+                self.clear-focus();
+            }
+            changed has-focus => {
+                if (self.has-focus) {
+                    self.select-all();
+                } else if (self.text != root.c.text) {
+                    root.entered(root.c.id, self.text);
+                }
+            }
+            key-pressed(e) => {
+                if (e.text == Key.Escape) {
+                    self.text = root.c.text;
+                    self.clear-focus();
+                    return accept;
+                }
+                reject
+            }
         }
     }
     // a button that opens a menu of choices, as the key editor's action button
@@ -1847,6 +1901,7 @@ export component AppWindow inherits Window {
                         animate along { duration: root.knob-glide; easing: linear; }
                         x: o.x + self.along * o.travel;
                         y: o.y;
+                        opacity: o.opacity;
                         width: o.w;
                         height: o.h;
                         source: o.image;
@@ -3318,6 +3373,7 @@ export component LabWindow inherits Window {
     callback close-window();
     callback drag();
     callback slide(int, float);
+    callback entered(int, string);
     callback revert();
     callback save();
 
@@ -3398,6 +3454,7 @@ export component LabWindow inherits Window {
             for c in root.cells: CellView {
                 c: c;
                 slide(id, v) => { root.slide(id, v); }
+                entered(id, t) => { root.entered(id, t); }
             }
             for p in root.plots: PlotView {
                 p: p;

@@ -789,7 +789,7 @@ impl Front {
 
     /// What is over the keyboard, changed in place, so a knob glides to its
     /// new place rather than being drawn anew there.
-    fn show_overlays(&mut self) {
+    pub fn show_overlays(&mut self) {
         let list = self.overlays.model();
         if self.overlay_model.row_count() == list.len() {
             for (i, o) in list.into_iter().enumerate() {

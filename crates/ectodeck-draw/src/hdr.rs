@@ -65,8 +65,13 @@ struct Model {
     led: f32,
     /// the legend at its brightest, nearest the LED
     legend_nits: f32,
-    /// the display's lit dots
+    /// the display: its lit dots, its unlit dots, the ground between them, in
+    /// nits; how much of each cell a dot fills; how strong the glass's sheen is
     lcd_nits: f32,
+    lcd_unlit: f32,
+    lcd_field: f32,
+    lcd_dot: f32,
+    lcd_glass: f32,
     /// how deep under the legend the LED is, which sets how fast the legend dims away from it
     legend_depth: f32,
     /// the least a legend is lit, however far from the LED, by light bouncing inside the cap
@@ -100,6 +105,10 @@ impl Model {
             led: f(&l["led"], 7.0),
             legend_nits,
             lcd_nits: f(&l["lcd"]["nits"], 120.0).max(0.0),
+            lcd_unlit: f(&l["lcd"]["unlit"], 1.5).max(0.0),
+            lcd_field: f(&l["lcd"]["field"], 0.3).max(0.0),
+            lcd_dot: f(&l["lcd"]["dot"], 0.84).clamp(0.05, 1.0),
+            lcd_glass: f(&l["lcd"]["glass"], 1.0).max(0.0),
             legend_depth: f(&l["legend"]["depth"], 10.0),
             legend_floor: f(&l["legend"]["floor"], 0.35),
             deck_nits: nits("deck", 18.0),
@@ -119,6 +128,16 @@ impl Model {
         let t = |nits: f32| (nits / white.max(1.0)).min(ceiling);
         Tops { legend: t(self.legend_nits), deck: t(self.deck_nits), rim: t(self.rim_nits), chassis: t(self.chassis_nits) }
     }
+}
+
+/// The display's light, from the core's "lcd".
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Lcd {
+    pub lit: f32,
+    pub unlit: f32,
+    pub field: f32,
+    pub dot: f32,
+    pub glass: f32,
 }
 
 /// Each part of the light at its brightest, in the SDR white's units.
@@ -483,6 +502,14 @@ impl Board {
     }
     pub fn lcd_nits(&self) -> f32 {
         self.model.lcd_nits
+    }
+
+    /// The display as the core has it lit: its lit dots, unlit dots and the
+    /// ground between them in nits, how much of each cell a dot fills, and
+    /// how strong the glass's sheen over it is (1 as the art draws it).
+    pub fn lcd(&self) -> Lcd {
+        let m = &self.model;
+        Lcd { lit: m.lcd_nits, unlit: m.lcd_unlit, field: m.lcd_field, dot: m.lcd_dot, glass: m.lcd_glass }
     }
 
     /// Each key's light from its LED and its cap, on every core at once.

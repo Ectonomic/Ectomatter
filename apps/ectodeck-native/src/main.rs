@@ -406,7 +406,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         let lights = front.lights().unwrap_or_default();
         let gain = front.light_gain(reference).max(gain);
         eprintln!("the light at {:.0} nits", gain as f64 * reference);
-        let lit = light(&board, &lights, gain, reference, front.overlays.panel_for(board.w));
+        let lit = light(&board, &lights, gain, reference, front.overlays.panel_for(board.w, board.lcd().dot));
         let lit = Rc::new(Lit { px: lit, w: rect.2, h: rect.3 });
         pic.set_keyboard(rect, Some(&lit));
         front.ui.set_board_ready(true);
@@ -580,6 +580,14 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
         lab.act();
         window.request_redraw();
         draw(&mut px);
+    }
+    // ECTODECK_NATIVE_TYPE: keys typed into whatever has focus; a newline is Return
+    for ch in std::env::var("ECTODECK_NATIVE_TYPE").unwrap_or_default().chars() {
+        let text: SharedString = if ch == '\n' { Key::Return.into() } else { ch.to_string().into() };
+        window.dispatch_event(WindowEvent::KeyPressed { text: text.clone() });
+        window.dispatch_event(WindowEvent::KeyReleased { text });
+        slint::platform::update_timers_and_animations();
+        lab.act();
     }
     if let Some(dy) = std::env::var("ECTODECK_NATIVE_SCROLL").ok().and_then(|v| v.parse::<f32>().ok()) {
         let position = LogicalPosition::new(w as f32 / 2.0, h as f32 / 2.0);
@@ -1275,7 +1283,7 @@ impl App {
         if let Some(l) = &self.light {
             board.set_light(l);
         }
-        let lit = light(&board, &self.lights, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w));
+        let lit = light(&board, &self.lights, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
         self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
         self.board = Some(board);
         self.full = true;
@@ -1289,7 +1297,7 @@ impl App {
         if (g - self.gain).abs() > 1e-3 {
             self.gain = g;
             if let Some(board) = &self.board {
-                let lit = light(board, &self.lights, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w));
+                let lit = light(board, &self.lights, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
                 self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
             }
         }
@@ -1327,7 +1335,13 @@ impl App {
         }
         // the keys' light, or the display's text, when it has changed
         if let Some(b) = &self.board {
-            let _ = self.front.overlays.panel_for(b.w);
+            let _ = self.front.overlays.panel_for(b.w, b.lcd().dot);
+            // the glass's sheen as the core sets it
+            let glass = b.lcd().glass;
+            if (glass - self.front.overlays.glass_opacity).abs() > 1e-4 {
+                self.front.overlays.glass_opacity = glass;
+                self.front.show_overlays();
+            }
         }
         let panel_moved = self.front.overlays.panel_rev != self.panel_rev || relit;
         self.panel_rev = self.front.overlays.panel_rev;
@@ -1337,7 +1351,7 @@ impl App {
                 self.lights = l;
             }
             if let Some(board) = &self.board {
-                let lit = light(board, &self.lights, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w));
+                let lit = light(board, &self.lights, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
                 self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
             }
             self.readout();
@@ -1753,7 +1767,7 @@ impl Dispatch<WpImageDescriptionV1, PictureTag> for App {
             app.pic.set_reference(reference);
             app.gain = LIGHT_GAIN;
             if let Some(board) = &app.board {
-                let lit = light(board, &app.lights, app.gain, app.pic.reference(), app.front.overlays.panel_for(board.w));
+                let lit = light(board, &app.lights, app.gain, app.pic.reference(), app.front.overlays.panel_for(board.w, board.lcd().dot));
                 app.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
             }
             app.full = true;
@@ -1884,16 +1898,21 @@ pub fn core_device_path() -> PathBuf {
 /// no channel past the ceiling, which is Peak nits over the desktop's white.
 fn light(board: &Board, lights: &[Light], ceiling: f32, reference: f64, panel: Option<&overlays::Panel>) -> Vec<f32> {
     let mut px = board.compose(lights, reference as f32, ceiling);
-    // The display, lit from behind as an LCD is: its lit dots at the core's
-    // display brightness, everything else on it in proportion, under the glass.
+    // The display, lit from behind as an LCD is: its lit dots, its unlit dots
+    // and the ground between them each at the core's nits for them, in the
+    // backlight's colour, under the glass. With nothing driving it, it is dark.
     if let Some(p) = panel {
         let (w, h) = (board.w as i32, board.h as i32);
-        let lum = |c: [f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
-        let brightest = p.px.iter().map(|c| lum(c.map(|v| v.max(0.0).powf(2.2)))).fold(0.0f32, f32::max);
-        let k = if brightest > 0.0 { ((board.lcd_nits() as f64 / reference) as f32).min(ceiling) / brightest } else { 0.0 };
+        let lcd = board.lcd();
+        let white = reference as f32;
+        let c = p.backlight.map(|v| v.max(0.0).powf(2.2));
+        let y = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+        let unit = if y > 0.0 { c.map(|v| v / y) } else { [0.0; 3] };
+        let nits = |n: f32| (n / white).min(ceiling);
+        let (lit, unlit, field) = (nits(lcd.lit), nits(lcd.unlit), nits(lcd.field));
         for row in 0..p.h as i32 {
-            let y = p.y + row;
-            if y < 0 || y >= h {
+            let yy = p.y + row;
+            if yy < 0 || yy >= h {
                 continue;
             }
             for col in 0..p.w as i32 {
@@ -1901,9 +1920,15 @@ fn light(board: &Board, lights: &[Light], ceiling: f32, reference: f64, panel: O
                 if x < 0 || x >= w {
                     continue;
                 }
-                let c = p.px[(row * p.w as i32 + col) as usize];
-                let e = c.map(|v| v.max(0.0).powf(2.2) * k);
-                let d = ((y * w + x) * 4) as usize;
+                let i = (row * p.w as i32 + col) as usize;
+                let e = if p.live {
+                    let (on, off) = (p.on[i].min(1.0), p.off[i].min(1.0));
+                    let k = on * lit + off * unlit + (1.0 - on - off).max(0.0) * field;
+                    unit.map(|v| v * k)
+                } else {
+                    p.dark[i].map(|v| v.max(0.0).powf(2.2))
+                };
+                let d = ((yy * w + x) * 4) as usize;
                 px[d..d + 3].copy_from_slice(&e);
                 px[d + 3] = 1.0;
             }

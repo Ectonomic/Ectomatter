@@ -49,15 +49,26 @@ pub struct Overlays {
     pub fracs: [Option<f32>; 2],
     /// what the display shows: whether something drives it, its four rows, its backlight
     pub lcd: (bool, Vec<String>, [f64; 3]),
-    drawn_lcd: Option<(bool, Vec<String>, [f64; 3], (u32, u32))>,
+    drawn_lcd: Option<(bool, Vec<String>, [f64; 3], (u32, u32), u32)>,
+    /// how strong the glass's sheen is over the display, 1 as the art draws it
+    pub glass_opacity: f32,
 }
 
+/// The display's panel, for the HDR picture: where it goes in the board's
+/// pixels, and, a pixel at a time, how much of it lit dots and unlit dots
+/// cover (the rest is the ground between them), with the backlight's colour
+/// (sRGB, 0 to 1). With nothing driving it, it is dark: `dark` holds its
+/// unlit colours, which only the room's light shows.
 pub struct Panel {
     pub x: i32,
     pub y: i32,
     pub w: u32,
     pub h: u32,
-    pub px: Vec<[f32; 3]>,
+    pub live: bool,
+    pub on: Vec<f32>,
+    pub off: Vec<f32>,
+    pub backlight: [f32; 3],
+    pub dark: Vec<[f32; 3]>,
 }
 
 fn image(p: &pieces::Piece) -> slint::Image {
@@ -108,6 +119,7 @@ impl Overlays {
             fracs: [None, None],
             lcd: (false, Vec::new(), [90.0; 3]),
             drawn_lcd: None,
+            glass_opacity: 1.0,
         }
     }
 
@@ -162,21 +174,16 @@ impl Overlays {
     }
 
     /// The panel drawn at its size in real pixels, as the web app drew it: a
-    /// negative display, the field dark and only the pixels that are on lit
-    /// in the backlight's colour, behind glass, so even a lit pixel is well
-    /// short of full brightness.
-    fn draw_panel(&mut self, bw: u32) {
+    /// negative display, only the pixels that are on lit, each dot a square
+    /// filling `dot` of its cell where cells are big enough to show a gap.
+    fn draw_panel(&mut self, bw: u32, dot: f32) {
         let [_, _, w, h] = self.panel_box(bw);
         let (pw, ph) = ((w.round().max(1.0)) as u32, (h.round().max(1.0)) as u32);
-        let key = (self.lcd.0, self.lcd.1.clone(), self.lcd.2, (pw, ph));
+        let key = (self.lcd.0, self.lcd.1.clone(), self.lcd.2, (pw, ph), (dot * 1000.0).round() as u32);
         if self.drawn_lcd.as_ref() == Some(&key) && self.panel.is_some() {
             return;
         }
-        let shade = |c: [f64; 3], f: f64| [(c[0] * f).round().min(255.0) as f32, (c[1] * f).round().min(255.0) as f32, (c[2] * f).round().min(255.0) as f32];
-        let hexc = |r: u8, g: u8, b: u8| [r as f32, g as f32, b as f32];
         let (live, rows, back) = (self.lcd.0, &self.lcd.1, self.lcd.2);
-        let (field, off, on) = if live { (shade(back, 0.05), shade(back, 0.1), shade(back, 0.72)) } else { (hexc(8, 10, 12), hexc(0x12, 0x16, 0x1a), hexc(0x2a, 0x31, 0x38)) };
-        let mut px = vec![field; (pw * ph) as usize];
         let mut lit = vec![false; PW * PH];
         if live {
             for r in 0..ROWS {
@@ -203,29 +210,44 @@ impl Overlays {
             }
         }
         let (cx, cy) = (pw as f32 / PW as f32, ph as f32 / PH as f32);
-        // a gap round each pixel where it is big enough to show one
-        let dot = if cx >= 2.5 { 0.84 } else { 1.0 };
-        // each dot a square laid over the field, its edges shared out by how
-        // much of each pixel they cover, as a canvas fills a rectangle
+        // a gap round each dot where the cells are big enough to show one
+        let dot = if cx >= 2.5 { dot } else { 1.0 };
+        let n = (pw * ph) as usize;
+        let (mut on, mut off) = (vec![0f32; n], vec![0f32; n]);
+        // each dot a square, its edges shared out by how much of each pixel they cover
         for y in 0..PH {
             for x in 0..PW {
-                let col = if lit[y * PW + x] { on } else { off };
+                let into = if lit[y * PW + x] { &mut on } else { &mut off };
                 let (x0, y0) = (x as f32 * cx, y as f32 * cy);
                 let (x1, y1) = (x0 + cx * dot, y0 + cy * dot);
                 for py in (y0.floor() as u32)..(y1.ceil() as u32).min(ph) {
                     let oy = (y1.min(py as f32 + 1.0) - y0.max(py as f32)).max(0.0);
                     for qx in (x0.floor() as u32)..(x1.ceil() as u32).min(pw) {
                         let a = (x1.min(qx as f32 + 1.0) - x0.max(qx as f32)).max(0.0) * oy;
-                        let d = &mut px[(py * pw + qx) as usize];
-                        for c in 0..3 {
-                            d[c] = d[c] * (1.0 - a) + col[c] * a;
-                        }
+                        into[(py * pw + qx) as usize] += a;
                     }
                 }
             }
         }
+        // unlit, with nothing driving it: its own dark colours, which only the room's light shows
+        let shade = |c: [f32; 3], d: [f32; 3], a: f32| [0, 1, 2].map(|i| (c[i] * (1.0 - a) + d[i] * a) / 255.0);
+        let dark = if live {
+            Vec::new()
+        } else {
+            (0..n).map(|i| shade([8.0, 10.0, 12.0], [18.0, 22.0, 26.0], off[i].min(1.0))).collect()
+        };
         let [x, y, _, _] = self.panel_box(bw);
-        self.panel = Some(Panel { x: x.round() as i32, y: y.round() as i32, w: pw, h: ph, px: px.iter().map(|p| p.map(|v| v / 255.0)).collect() });
+        self.panel = Some(Panel {
+            x: x.round() as i32,
+            y: y.round() as i32,
+            w: pw,
+            h: ph,
+            live,
+            on,
+            off,
+            backlight: [back[0] as f32 / 255.0, back[1] as f32 / 255.0, back[2] as f32 / 255.0],
+            dark,
+        });
         self.panel_rev += 1;
         self.drawn_lcd = Some(key);
     }
@@ -233,11 +255,11 @@ impl Overlays {
     /// The display's panel for a keyboard picture `bw` pixels wide, for the
     /// HDR picture: drawn for that picture, which is stretched to the page's
     /// keyboard while a new size is drawn, so the display stays in its glass.
-    pub fn panel_for(&mut self, bw: u32) -> Option<&Panel> {
+    pub fn panel_for(&mut self, bw: u32, dot: f32) -> Option<&Panel> {
         if bw == 0 {
             return None;
         }
-        self.draw_panel(bw);
+        self.draw_panel(bw, dot);
         self.panel.as_ref()
     }
 
@@ -255,13 +277,13 @@ impl Overlays {
         // which alone glides; before the keyboard says, where the art has it
         for (i, k) in self.knobs.iter().enumerate() {
             let o = match self.fracs.get(i).copied().flatten() {
-                Some(f) => Overlay { image: k.image.clone(), x: (k.x0 - self.view.0) * unit / s, y: k.y / s, w: k.w / s, h: k.h / s, travel: k.travel * unit / s, frac: f },
-                None => Overlay { image: k.image.clone(), x: k.x / s, y: k.y / s, w: k.w / s, h: k.h / s, travel: 0.0, frac: 0.0 },
+                Some(f) => Overlay { image: k.image.clone(), x: (k.x0 - self.view.0) * unit / s, y: k.y / s, w: k.w / s, h: k.h / s, travel: k.travel * unit / s, frac: f, opacity: 1.0 },
+                None => Overlay { image: k.image.clone(), x: k.x / s, y: k.y / s, w: k.w / s, h: k.h / s, travel: 0.0, frac: 0.0, opacity: 1.0 },
             };
             out.push(o);
         }
         if let Some((img, [x, y, w, h])) = &self.glass {
-            out.push(Overlay { image: img.clone(), x: x / s, y: y / s, w: w / s, h: h / s, travel: 0.0, frac: 0.0 });
+            out.push(Overlay { image: img.clone(), x: x / s, y: y / s, w: w / s, h: h / s, travel: 0.0, frac: 0.0, opacity: self.glass_opacity });
         }
         out
     }
