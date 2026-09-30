@@ -18,10 +18,12 @@
 
 mod device;
 mod front;
+mod lighting;
 mod overlays;
 mod picture;
 mod screens;
 mod settings;
+mod text;
 mod uistate;
 mod z10;
 
@@ -226,7 +228,10 @@ fn main() {
 
 /// One frame without a window, saved for checking.
 fn snap(window: &Rc<MinimalSoftwareWindow>, ui: AppWindow, reference: f64, gain: f32, path: &str) {
-    let (w, h) = SIZE;
+    let (w, h) = std::env::var("ECTODECK_NATIVE_SIZE")
+        .ok()
+        .and_then(|s| s.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
+        .unwrap_or(SIZE);
     window.set_size(PhysicalSize::new(w, h));
     let mut front = Front::new(ui, None, true);
     if let Some(state) = std::env::var_os("ECTODECK_NATIVE_STATE") {
@@ -261,6 +266,17 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, ui: AppWindow, reference: f64, gain:
         window.dispatch_event(WindowEvent::KeyReleased { text });
         slint::platform::update_timers_and_animations();
         front.act();
+    }
+    // the wheel turned over the page, in logical pixels
+    if let Some(dy) = std::env::var("ECTODECK_NATIVE_SCROLL").ok().and_then(|v| v.parse::<f32>().ok()) {
+        let position = LogicalPosition::new(700.0, 600.0);
+        window.dispatch_event(WindowEvent::PointerMoved { position });
+        window.dispatch_event(WindowEvent::PointerScrolled { position, delta_x: 0.0, delta_y: -dy });
+        let end = Instant::now() + Duration::from_millis(400);
+        while Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(16));
+            slint::platform::update_timers_and_animations();
+        }
     }
     // keys typed on the keyboard, as Linux key codes: "29+" down, "29-" up
     for k in std::env::var("ECTODECK_NATIVE_EVDEV").unwrap_or_default().split(',').filter(|k| !k.is_empty()) {
@@ -544,6 +560,8 @@ fn run(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, settings: &settings::Set
         app.act();
         app.draw();
     }
+    // the keyboard's thread sends the preview's stop before the window goes
+    std::thread::sleep(Duration::from_millis(300));
 }
 
 impl App {
@@ -570,7 +588,10 @@ impl App {
                         self.window.set_maximized()
                     }
                 }
-                WindowAsk::Close => self.exit = true,
+                WindowAsk::Close => {
+                    self.front.stop_preview();
+                    self.exit = true;
+                }
             }
         }
     }
@@ -787,6 +808,7 @@ impl OutputHandler for App {
 
 impl WindowHandler for App {
     fn request_close(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &Window) {
+        self.front.stop_preview();
         self.exit = true;
     }
 

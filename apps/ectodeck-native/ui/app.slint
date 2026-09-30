@@ -96,6 +96,31 @@ export struct LayerItem {
     listening: bool,
 }
 
+// one of the Lighting page's effects: its name, its small picture, whether it is chosen
+export struct EffectItem {
+    name: string,
+    icon: image,
+    on: bool,
+}
+
+// a piece of the Lighting page's tile, placed by the window: text, a colour
+// swatch, a checkbox, a slider, a switch and its buttons, an area chip, a
+// button, the reset at the foot
+export struct Cell {
+    kind: int,
+    x: length,
+    y: length,
+    w: length,
+    h: length,
+    text: string,
+    color: color,
+    on: bool,
+    value: float,
+    id: int,
+    index: int,
+    style: int,
+}
+
 // a row in a menu: 0 a choice, 1 a heading, 2 a rule, 3 a note
 export struct MenuRow {
     kind: int,
@@ -742,6 +767,412 @@ component Menu inherits Rectangle {
     }
 }
 
+// an effect's button: its picture and its name, lighter when chosen
+component EffectButton inherits Rectangle {
+    in property <EffectItem> fx;
+    callback clicked;
+    width: 104px;
+    height: 70px;
+    border-radius: 12px;
+    background: root.fx.on ? #383838 : ta.has-hover ? Ink.shade2 : Ink.shade1;
+    Image {
+        x: 22px;
+        y: 11px;
+        width: 60px;
+        height: 24px;
+        source: root.fx.icon;
+        image-fit: fill;
+    }
+    Text {
+        y: 42px;
+        height: 19px;
+        text: root.fx.name;
+        font-family: "Geist";
+        font-size: 13.5px;
+        font-weight: 500;
+        color: root.fx.on ? #ffffff : ta.has-hover ? Ink.bright : Ink.dim;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    ta := TouchArea {
+        changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+        clicked => { root.clicked(); }
+    }
+}
+
+// one piece of the Lighting page's tile, drawn where the window placed it
+component CellView inherits Rectangle {
+    in property <Cell> c;
+    callback pick(int, int, length, length, length);
+    callback slide(int, float);
+    x: root.c.x;
+    y: root.c.y;
+    width: root.c.w;
+    height: root.c.h;
+    // text: a row's name, a column's heading, a note, the empty tile's words, a slider's value
+    if root.c.kind == 0: Text {
+        x: 0;
+        width: parent.width;
+        text: root.c.text;
+        font-family: "Geist";
+        font-size: root.c.style == 1 ? 13px : root.c.style == 2 ? 12.5px : root.c.style == 3 ? 14px : root.c.style == 4 ? 13px : 13.5px;
+        font-weight: root.c.style == 1 ? 500 : 400;
+        color: root.c.style == 1 ? Ink.soft : root.c.style == 2 || root.c.style == 3 ? Ink.quiet : Ink.dim;
+        horizontal-alignment: root.c.style == 4 ? right : left;
+        vertical-alignment: center;
+    }
+    // a colour: a swatch that opens the colour picker
+    if root.c.kind == 1: Rectangle {
+        border-radius: 8px;
+        background: root.c.color;
+        Rectangle {
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: sw.has-hover ? #ffffff66 : #ffffff2e;
+        }
+        sw := TouchArea {
+            changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+        }
+    }
+    // a checkbox and its words
+    if root.c.kind == 2: Rectangle {
+        Rectangle {
+            x: 0;
+            y: 0.5px;
+            width: 18px;
+            height: 18px;
+            border-radius: 5px;
+            background: root.c.on ? Ink.ink : #333333;
+            if root.c.on: Path {
+                width: 18px;
+                height: 18px;
+                viewbox-width: 18;
+                viewbox-height: 18;
+                commands: "M5.2 9.3 L7.9 11.9 L12.9 6.4";
+                fill: transparent;
+                stroke: #171717;
+                stroke-width: 2px;
+            }
+        }
+        Text {
+            x: 28px;
+            width: parent.width - 28px;
+            text: root.c.text;
+            font-family: "Geist";
+            font-size: 13.5px;
+            color: Ink.dim;
+            vertical-alignment: center;
+        }
+        TouchArea {
+            changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+            clicked => { root.pick(root.c.id, root.c.on ? 0 : 1, 0, 0, 0); }
+        }
+    }
+    // a slider: a thin track and a round knob, which follows the pointer while held
+    if root.c.kind == 3: Rectangle {
+        property <float> at: drag.pressed ? max(0, min(1, (drag.mouse-x - 8px) / (self.width - 16px))) : root.c.value;
+        Rectangle {
+            y: (parent.height - 4px) / 2;
+            height: 4px;
+            border-radius: 2px;
+            background: #3d3d3d;
+        }
+        Rectangle {
+            x: parent.at * (parent.width - 16px);
+            width: 16px;
+            height: 16px;
+            border-radius: 8px;
+            background: Ink.ink;
+        }
+        drag := TouchArea {
+            changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.down) {
+                    root.slide(root.c.id, max(0, min(1, (self.mouse-x - 8px) / (self.width - 16px))));
+                }
+            }
+            moved => {
+                if (self.pressed) {
+                    root.slide(root.c.id, max(0, min(1, (self.mouse-x - 8px) / (self.width - 16px))));
+                }
+            }
+        }
+    }
+    // a switch's ground
+    if root.c.kind == 4: Rectangle {
+        border-radius: 10px;
+        background: #1c1c1c;
+    }
+    // a switch's choice, an area chip, a button, the reset: words on a shade
+    if root.c.kind >= 5: Rectangle {
+        border-radius: root.c.kind == 5 ? 7px : root.c.kind == 8 ? 6px : 8px;
+        background: root.c.on ? Ink.ink
+            : root.c.kind == 5 ? (b.has-hover ? Ink.shade2 : transparent)
+            : root.c.kind == 8 ? (b.has-hover ? #ffffff0f : transparent)
+            : (b.has-hover ? #3d3d3d : #333333);
+        Text {
+            y: (parent.height - self.height) / 2 + (b.pressed && (root.c.kind == 7 || root.c.kind == 8) ? 1px : 0);
+            text: root.c.text;
+            font-family: "Geist";
+            font-size: root.c.kind == 8 ? 12.5px : 13px;
+            font-weight: root.c.kind >= 7 ? 500 : 400;
+            color: root.c.on ? #171717 : root.c.kind == 8 ? (b.has-hover ? Ink.ink : Ink.quiet) : root.c.kind == 7 ? Ink.ink : b.has-hover ? #ffffff : Ink.dim;
+        }
+        b := TouchArea {
+            changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+        }
+    }
+}
+
+// a number or code in the colour picker, its name under it
+component PickField inherits VerticalLayout {
+    in-out property <string> value;
+    in property <string> label;
+    in property <int> which;
+    callback edited(int, string);
+    callback enter();
+    callback dismiss();
+    spacing: 3px;
+    Rectangle {
+        height: 27px;
+        border-radius: 6px;
+        background: Ink.shade1;
+        border-width: input.has-focus ? 1px : 0;
+        border-color: #737373;
+        input := TextInput {
+            x: 6px;
+            width: parent.width - 12px;
+            height: parent.height;
+            text <=> root.value;
+            font-family: "Geist";
+            font-size: 12.5px;
+            font-weight: 500;
+            color: Ink.ink;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            single-line: true;
+            edited => { root.edited(root.which, self.text); }
+            accepted => { root.enter(); }
+            key-pressed(e) => {
+                if (e.text == Key.Escape) {
+                    root.dismiss();
+                    return accept;
+                }
+                reject
+            }
+        }
+    }
+    Text {
+        height: 15px;
+        text: root.label;
+        font-family: "Geist";
+        font-size: 11px;
+        color: Ink.quiet;
+        horizontal-alignment: center;
+    }
+}
+
+// a colour to pick in one click: a preset, or one used lately
+component Well inherits Rectangle {
+    in property <color> c;
+    callback clicked;
+    width: 23.56px;
+    height: 23.56px;
+    border-radius: 5px;
+    background: root.c;
+    Rectangle {
+        border-radius: 5px;
+        border-width: 1px;
+        border-color: ta.has-hover ? #ffffff99 : #ffffff24;
+    }
+    ta := TouchArea {
+        changed has-hover => { Cursor.hands += self.has-hover ? 1 : -1; }
+        clicked => { root.clicked(); }
+    }
+}
+
+// the colour picker every swatch opens, laid out as design tools lay theirs:
+// saturation across and brightness down for the chosen hue, the hue under it,
+// the colour as a hex code, as red, green and blue, and as hue, saturation and
+// brightness, then preset colours and the ones used lately
+component Picker inherits Rectangle {
+    in property <float> hue;
+    in property <float> sat;
+    in property <float> val;
+    in property <color> now;
+    in property <color> pure;
+    in property <image> sv-img;
+    in property <image> hue-img;
+    in-out property <string> t-hex;
+    in-out property <string> t-r;
+    in-out property <string> t-g;
+    in-out property <string> t-b;
+    in-out property <string> t-h;
+    in-out property <string> t-s;
+    in-out property <string> t-v;
+    in property <[color]> presets;
+    in property <[color]> recent;
+    callback sv(float, float);
+    callback hue-at(float);
+    callback field(int, string);
+    callback well(color);
+    callback enter();
+    callback dismiss();
+    width: 264px;
+    border-radius: 10px;
+    background: Ink.shade2;
+    drop-shadow-blur: 34px;
+    drop-shadow-offset-y: 14px;
+    drop-shadow-color: #00000080;
+    // the square: white to the hue across, then to black downward
+    Rectangle {
+        x: 6px;
+        y: 6px;
+        width: 252px;
+        height: 160px;
+        Image {
+            width: parent.width;
+            height: parent.height;
+            source: root.sv-img;
+            image-fit: fill;
+        }
+        sv-ta := TouchArea {
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.down) {
+                    root.sv(max(0, min(1, self.mouse-x / self.width)), max(0, min(1, self.mouse-y / self.height)));
+                }
+            }
+            moved => {
+                if (self.pressed) {
+                    root.sv(max(0, min(1, self.mouse-x / self.width)), max(0, min(1, self.mouse-y / self.height)));
+                }
+            }
+        }
+        Rectangle {
+            x: root.sat * parent.width - 10px;
+            y: (1 - root.val) * parent.height - 10px;
+            width: 20px;
+            height: 20px;
+            border-radius: 10px;
+            background: #00000066;
+            Rectangle {
+                x: 1px;
+                y: 1px;
+                width: 18px;
+                height: 18px;
+                border-radius: 9px;
+                background: #ffffff;
+                Rectangle {
+                    x: 2px;
+                    y: 2px;
+                    width: 14px;
+                    height: 14px;
+                    border-radius: 7px;
+                    background: root.now;
+                }
+            }
+        }
+    }
+    // the hue
+    Rectangle {
+        x: 6px;
+        y: 6px + 160px + 10px;
+        width: 252px;
+        height: 12px;
+        Image {
+            width: parent.width;
+            height: parent.height;
+            source: root.hue-img;
+            image-fit: fill;
+        }
+        hue-ta := TouchArea {
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.down) {
+                    root.hue-at(max(0, min(1, self.mouse-x / self.width)));
+                }
+            }
+            moved => {
+                if (self.pressed) {
+                    root.hue-at(max(0, min(1, self.mouse-x / self.width)));
+                }
+            }
+        }
+        Rectangle {
+            x: root.hue / 360 * parent.width - 10px;
+            y: -4px;
+            width: 20px;
+            height: 20px;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: #00000066;
+            Rectangle {
+                x: 1px;
+                y: 1px;
+                width: 18px;
+                height: 18px;
+                border-radius: 9px;
+                border-width: 2px;
+                border-color: #ffffff;
+            }
+        }
+    }
+    // the colour as numbers
+    HorizontalLayout {
+        x: 6px;
+        y: 6px + 160px + 10px + 12px + 10px;
+        width: 252px;
+        height: 45px;
+        spacing: 6px;
+        PickField { horizontal-stretch: 1.7; label: "Hex"; which: 0; value <=> root.t-hex; edited(i, t) => { root.field(i, t); } enter => { root.enter(); } dismiss => { root.dismiss(); } }
+        PickField { horizontal-stretch: 1; label: "R"; which: 1; value <=> root.t-r; edited(i, t) => { root.field(i, t); } enter => { root.enter(); } dismiss => { root.dismiss(); } }
+        PickField { horizontal-stretch: 1; label: "G"; which: 2; value <=> root.t-g; edited(i, t) => { root.field(i, t); } enter => { root.enter(); } dismiss => { root.dismiss(); } }
+        PickField { horizontal-stretch: 1; label: "B"; which: 3; value <=> root.t-b; edited(i, t) => { root.field(i, t); } enter => { root.enter(); } dismiss => { root.dismiss(); } }
+    }
+    HorizontalLayout {
+        x: 6px;
+        y: 6px + 160px + 10px + 12px + 10px + 45px + 10px;
+        width: 252px;
+        height: 45px;
+        spacing: 6px;
+        PickField { label: "H°"; which: 4; value <=> root.t-h; edited(i, t) => { root.field(i, t); } enter => { root.enter(); } dismiss => { root.dismiss(); } }
+        PickField { label: "S%"; which: 5; value <=> root.t-s; edited(i, t) => { root.field(i, t); } enter => { root.enter(); } dismiss => { root.dismiss(); } }
+        PickField { label: "B%"; which: 6; value <=> root.t-v; edited(i, t) => { root.field(i, t); } enter => { root.enter(); } dismiss => { root.dismiss(); } }
+    }
+    // preset colours, then the ones used lately
+    Text {
+        x: 6px;
+        y: 308px;
+        height: 16px;
+        text: "Presets";
+        font-family: "Geist";
+        font-size: 11.5px;
+        color: Ink.quiet;
+    }
+    for c[i] in root.presets: Well {
+        x: 6px + i * (23.56px + 5px);
+        y: 330px;
+        c: c;
+        clicked => { root.well(c); }
+    }
+    if root.recent.length > 0: Text {
+        x: 6px;
+        y: 363.56px;
+        height: 16px;
+        text: "Recent";
+        font-family: "Geist";
+        font-size: 11.5px;
+        color: Ink.quiet;
+    }
+    for c[i] in root.recent: Well {
+        x: 6px + i * (23.56px + 5px);
+        y: 385.56px;
+        c: c;
+        clicked => { root.well(c); }
+    }
+}
+
 // a device on the home: its glyph on a tile, its name under it
 component Tile inherits Rectangle {
     in property <image> glyph;
@@ -808,6 +1239,12 @@ export component AppWindow inherits Window {
     in property <float> units-high: 260;
     // what is drawn over the keyboard: the slider knobs, the display, its glass
     in property <[Overlay]> overlays;
+    // the Lighting page: its effects, and its tile's pieces as the window lays them out
+    in property <[EffectItem]> effects;
+    in property <[Cell]> cells;
+    in property <length> tile-height;
+    // the keyboard is showing the page's preview
+    in property <bool> live;
     // the chosen key, and its two layers
     in property <bool> key-open;
     in property <string> key-name;
@@ -832,11 +1269,12 @@ export component AppWindow inherits Window {
     out property <length> menu-width: menu.width;
     out property <length> menu-height: menu.height;
     out property <length> window-height: root.height;
+    out property <length> window-width: root.width;
 
     // where the keyboard goes, for the window to draw it there, when its page shows
     out property <bool> board-shown: root.place == "z10";
     out property <length> board-x: rail-w + pws-x;
-    out property <length> board-y: bar + board-top;
+    out property <length> board-y: bar + 56px + flick.content-y + board-top;
     out property <length> board-width: board-w;
     out property <length> board-height: board-h;
     // the app's ground, which the window lays under the content
@@ -870,6 +1308,9 @@ export component AppWindow inherits Window {
     callback menu-enter();
     callback menu-dismiss();
     callback menu-back-to();
+    callback effect(int);
+    callback cell-pick(int, int, length, length, length);
+    callback cell-slide(int, float);
 
     background: transparent;
     default-font-family: "Barlow";
@@ -888,11 +1329,17 @@ export component AppWindow inherits Window {
     property <length> pws-w: page-w - 56px;
     // the keyboard fills the page's width, at the drawing's proportions, under the head
     property <length> head-h: 64px;
-    property <length> board-top: 56px + 22px + head-h + 10px;
+    property <length> board-top: 22px + head-h + 10px;
     property <length> board-w: pws-w;
     property <length> board-h: board-w * root.units-high / root.units;
     property <length> unit: board-w / root.units;
     property <length> cqw: board-w / 100;
+    // the page's height under the device's bar: its head, the keyboard, what is under it, and the page's foot
+    property <length> under-board: root.tab == 0 ? (root.key-open ? 18px + 18px + keypanel.preferred-height + 4px : 22px)
+        : root.tab == 1 ? 18px + 18px + 70px + 12px + root.tile-height + 4px : 150px;
+    property <length> page-h: board-top + board-h + under-board + 40px;
+    // the page's scrollbar, as WebKit drew it: over the whole window, when the page is longer than it
+    property <length> doc-h: bar + 56px + page-h;
 
     public function focus-menu() {
         menu.focus-search();
@@ -933,10 +1380,219 @@ export component AppWindow inherits Window {
 
         Rectangle {
             visible: root.place == "z10";
+            // the page scrolls under the device's bar, as the web page did
+            flick := Flickable {
+                y: 56px;
+                height: parent.height - 56px;
+                content-height: root.page-h;
+                // the profile's head, on the page: the profiles, and the profile's Discard and Save
+                Rectangle {
+                    x: pws-x;
+                    y: 22px;
+                    width: pws-w;
+                    height: head-h;
+                    HorizontalLayout {
+                        padding-bottom: 6px;
+                        spacing: 10px;
+                        if root.boot != 0: HorizontalLayout {
+                            padding-left: 2px;
+                            spacing: 10px;
+                            alignment: start;
+                            if root.boot == 1: Rectangle {
+                                width: 16px;
+                                Spinner {
+                                    y: (parent.height - 16px) / 2;
+                                }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                Text {
+                                    text: root.boot-title;
+                                    font-family: "Geist";
+                                    font-size: 13.5px;
+                                    font-weight: 600;
+                                    color: root.boot == 2 ? Ink.bad : Ink.ink;
+                                }
+                                Text {
+                                    text: root.boot-text;
+                                    font-family: "Geist";
+                                    font-size: 12px;
+                                    color: Ink.quiet;
+                                }
+                            }
+                        }
+                        if root.boot == 0: HorizontalLayout {
+                            spacing: 10px;
+                            alignment: start;
+                            for p in root.profiles: ProfileButton {
+                                y: (58px - 45px) / 2;
+                                p: p;
+                                clicked => { root.choose-profile(p.n); }
+                            }
+                        }
+                        Rectangle {
+                            horizontal-stretch: 1;
+                        }
+                        if root.live: HorizontalLayout {
+                            spacing: 6px;
+                            Rectangle {
+                                width: 6px;
+                                Rectangle {
+                                    y: (parent.height - 6px) / 2;
+                                    width: 6px;
+                                    height: 6px;
+                                    border-radius: 3px;
+                                    background: Ink.good;
+                                    opacity: 0.55 + 0.45 * cos(animation-tick() / 1600ms * 360deg);
+                                }
+                            }
+                            Text {
+                                text: "Showing on keyboard";
+                                font-family: "Geist";
+                                font-size: 12px;
+                                color: Ink.good;
+                                vertical-alignment: center;
+                            }
+                        }
+                        WordButton {
+                            y: (58px - self.height) / 2;
+                            text: "Discard";
+                            enabled: root.can-save;
+                            clicked => { root.discard(); }
+                        }
+                        WordButton {
+                            y: (58px - self.height) / 2;
+                            text: root.save-label;
+                            primary: true;
+                            enabled: root.can-save;
+                            clicked => { root.save(); }
+                        }
+                    }
+                }
+
+                // under the keyboard: the chosen key's editor, one tile, its parts set apart by space
+                Rectangle {
+                    visible: root.tab == 0 && root.key-open;
+                    x: pws-x;
+                    y: board-top + board-h + 36px;
+                    width: pws-w;
+                    height: keypanel.preferred-height;
+                    border-radius: 14px;
+                    background: Ink.shade1;
+                    keypanel := HorizontalLayout {
+                        Rectangle {
+                            width: 200px;
+                            VerticalLayout {
+                                padding-left: 20px;
+                                padding-right: 20px;
+                                padding-top: 18px;
+                                padding-bottom: 18px;
+                                spacing: 2px;
+                                alignment: start;
+                                Text {
+                                    height: 24px;
+                                    text: root.key-name;
+                                    font-family: "Geist";
+                                    font-size: 17px;
+                                    font-weight: 600;
+                                    color: Ink.ink;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: root.key-factory;
+                                    font-family: "Geist";
+                                    font-size: 12px;
+                                    color: Ink.soft;
+                                    wrap: word-wrap;
+                                }
+                            }
+                        }
+                        for l[i] in root.layers: LayerEditor {
+                            horizontal-stretch: 1;
+                            l: l;
+                            index: i;
+                            menu(n, x, y, h) => { root.action-menu(n, x, y, h); }
+                            listen(n) => { root.listen(n); }
+                            macro-editor => { root.macro-editor(); }
+                        }
+                        Rectangle {
+                            width: reset.width + 40px;
+                            reset := WordButton {
+                                x: 20px;
+                                y: 18px;
+                                text: root.reset-label;
+                                fill: Ink.shade2;
+                                fill-hover: Ink.shade3;
+                                clicked => { root.reset-key(); }
+                            }
+                        }
+                    }
+                }
+                // the Lighting page: the effects, then one tile of the effect's settings
+                if root.tab == 1: Rectangle {
+                    x: pws-x;
+                    y: board-top + board-h + 36px;
+                    width: pws-w;
+                    height: 70px + 12px + root.tile-height;
+                    for fx[i] in root.effects: EffectButton {
+                        x: i * 112px;
+                        y: 0;
+                        fx: fx;
+                        clicked => { root.effect(i); }
+                    }
+                    Rectangle {
+                        y: 82px;
+                        height: root.tile-height;
+                        border-radius: 14px;
+                        background: Ink.shade1;
+                        for c in root.cells: CellView {
+                            c: c;
+                            pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
+                            slide(id, v) => { root.cell-slide(id, v); }
+                        }
+                    }
+                }
+                // Settings, still to be built natively
+                if root.tab == 2: Text {
+                    x: pws-x;
+                    y: board-top + board-h + 18px + 18px;
+                    text: "Settings: the keyboard's display, sleep and firmware. The next page to be built natively.";
+                    font-family: "Geist";
+                    font-size: 14px;
+                    color: Ink.quiet;
+                }
+
+                // the keys, over the keyboard's hole: a click on the keyboard away
+                // from every key lets the chosen one go; then what is drawn over it
+                Rectangle {
+                    x: pws-x;
+                    y: board-top;
+                    width: board-w;
+                    height: board-h;
+                    TouchArea {
+                        clicked => { root.board-clicked(); }
+                    }
+                    for k in root.keys: KeyBox {
+                        k: k;
+                        unit: root.unit;
+                        cqw: root.cqw;
+                        clicked => { root.key-clicked(k.pos); }
+                    }
+                    for o in root.overlays: Image {
+                        x: o.x;
+                        y: o.y;
+                        width: o.w;
+                        height: o.h;
+                        source: o.image;
+                        image-fit: fill;
+                    }
+                }
+            }
             // the device's own bar: its name, its tabs, its Macro Editor, and how it is
             devbar := Rectangle {
                 y: 0;
                 height: 56px;
+                background: Ink.base;
                 HorizontalLayout {
                     padding-left: 28px;
                     padding-right: 28px;
@@ -1075,164 +1731,6 @@ export component AppWindow inherits Window {
                 }
             }
 
-            // the profile's head, on the page: the profiles, and the profile's Discard and Save
-            Rectangle {
-                x: pws-x;
-                y: 56px + 22px;
-                width: pws-w;
-                height: head-h;
-                HorizontalLayout {
-                    padding-bottom: 6px;
-                    spacing: 10px;
-                    if root.boot != 0: HorizontalLayout {
-                        padding-left: 2px;
-                        spacing: 10px;
-                        alignment: start;
-                        if root.boot == 1: Rectangle {
-                            width: 16px;
-                            Spinner {
-                                y: (parent.height - 16px) / 2;
-                            }
-                        }
-                        VerticalLayout {
-                            alignment: center;
-                            Text {
-                                text: root.boot-title;
-                                font-family: "Geist";
-                                font-size: 13.5px;
-                                font-weight: 600;
-                                color: root.boot == 2 ? Ink.bad : Ink.ink;
-                            }
-                            Text {
-                                text: root.boot-text;
-                                font-family: "Geist";
-                                font-size: 12px;
-                                color: Ink.quiet;
-                            }
-                        }
-                    }
-                    if root.boot == 0: HorizontalLayout {
-                        spacing: 10px;
-                        alignment: start;
-                        for p in root.profiles: ProfileButton {
-                            y: (58px - 45px) / 2;
-                            p: p;
-                            clicked => { root.choose-profile(p.n); }
-                        }
-                    }
-                    Rectangle {
-                        horizontal-stretch: 1;
-                    }
-                    WordButton {
-                        y: (58px - self.height) / 2;
-                        text: "Discard";
-                        enabled: root.can-save;
-                        clicked => { root.discard(); }
-                    }
-                    WordButton {
-                        y: (58px - self.height) / 2;
-                        text: root.save-label;
-                        primary: true;
-                        enabled: root.can-save;
-                        clicked => { root.save(); }
-                    }
-                }
-            }
-
-            // under the keyboard: the chosen key's editor, one tile, its parts set apart by space
-            Rectangle {
-                visible: root.tab == 0 && root.key-open;
-                x: pws-x;
-                y: board-top + board-h + 36px;
-                width: pws-w;
-                height: keypanel.preferred-height;
-                border-radius: 14px;
-                background: Ink.shade1;
-                keypanel := HorizontalLayout {
-                    Rectangle {
-                        width: 200px;
-                        VerticalLayout {
-                            padding-left: 20px;
-                            padding-right: 20px;
-                            padding-top: 18px;
-                            padding-bottom: 18px;
-                            spacing: 2px;
-                            alignment: start;
-                            Text {
-                                height: 24px;
-                                text: root.key-name;
-                                font-family: "Geist";
-                                font-size: 17px;
-                                font-weight: 600;
-                                color: Ink.ink;
-                                vertical-alignment: center;
-                            }
-                            Text {
-                                text: root.key-factory;
-                                font-family: "Geist";
-                                font-size: 12px;
-                                color: Ink.soft;
-                                wrap: word-wrap;
-                            }
-                        }
-                    }
-                    for l[i] in root.layers: LayerEditor {
-                        horizontal-stretch: 1;
-                        l: l;
-                        index: i;
-                        menu(n, x, y, h) => { root.action-menu(n, x, y, h); }
-                        listen(n) => { root.listen(n); }
-                        macro-editor => { root.macro-editor(); }
-                    }
-                    Rectangle {
-                        width: reset.width + 40px;
-                        reset := WordButton {
-                            x: 20px;
-                            y: 18px;
-                            text: root.reset-label;
-                            fill: Ink.shade2;
-                            fill-hover: Ink.shade3;
-                            clicked => { root.reset-key(); }
-                        }
-                    }
-                }
-            }
-            // the other tabs' own pages, still to be built natively
-            if root.tab != 0: Text {
-                x: pws-x;
-                y: board-top + board-h + 18px + 18px;
-                text: root.tab == 1 ? "Lighting: the keyboard's effects and colours. The next page to be built natively."
-                    : "Settings: the keyboard's display, sleep and firmware. Built natively after Lighting.";
-                font-family: "Geist";
-                font-size: 14px;
-                color: Ink.quiet;
-            }
-
-            // the keys, over the keyboard's hole: a click on the keyboard away
-            // from every key lets the chosen one go; then what is drawn over it
-            Rectangle {
-                x: pws-x;
-                y: board-top;
-                width: board-w;
-                height: board-h;
-                TouchArea {
-                    clicked => { root.board-clicked(); }
-                }
-                for k in root.keys: KeyBox {
-                    k: k;
-                    unit: root.unit;
-                    cqw: root.cqw;
-                    clicked => { root.key-clicked(k.pos); }
-                }
-                for o in root.overlays: Image {
-                    x: o.x;
-                    y: o.y;
-                    width: o.w;
-                    height: o.h;
-                    source: o.image;
-                    image-fit: fill;
-                }
-            }
         }
     }
 
@@ -1347,6 +1845,59 @@ export component AppWindow inherits Window {
         }
     }
 
+    // the colour picker, hung from the swatch that opened it
+    in property <bool> picker-open;
+    in property <length> picker-x;
+    in property <length> picker-top;
+    in property <float> pk-hue;
+    in property <float> pk-sat;
+    in property <float> pk-val;
+    in property <color> pk-now;
+    in property <color> pk-pure;
+    in property <image> pk-sv-img;
+    in property <image> pk-hue-img;
+    in-out property <string> pk-hex;
+    in-out property <string> pk-r;
+    in-out property <string> pk-g;
+    in-out property <string> pk-b;
+    in-out property <string> pk-h;
+    in-out property <string> pk-s;
+    in-out property <string> pk-v;
+    in property <[color]> pk-presets;
+    in property <[color]> pk-recent;
+    out property <length> picker-height: 6px + 353.56px + (root.pk-recent.length > 0 ? 55.56px : 0);
+    callback pk-sv(float, float);
+    callback pk-hue-at(float);
+    callback pk-field(int, string);
+    callback pk-well(color);
+    callback pk-enter();
+    callback pk-dismiss();
+    // closed, the picker's fields let go of the keyboard
+    public function blur-picker() {
+        sink.focus();
+        sink.clear-focus();
+    }
+    sink := FocusScope {
+        width: 0;
+        height: 0;
+    }
+
+    // the page's scrollbar, as WebKit drew it, over the whole window
+    if root.place == "z10" && doc-h > root.height: Rectangle {
+        x: root.width - 7px;
+        y: (-flick.content-y) * root.height / doc-h;
+        width: 5px;
+        height: root.height * root.height / doc-h;
+        border-radius: 2px;
+        background: #191919;
+        Rectangle {
+            x: 1px;
+            width: 3px;
+            border-radius: 1.5px;
+            background: #4c4c4c;
+        }
+    }
+
     // the open menu, over everything
     menu := Menu {
         visible: root.menu-open;
@@ -1363,6 +1914,34 @@ export component AppWindow inherits Window {
         typed(t) => { root.menu-typed(t); }
         enter => { root.menu-enter(); }
         dismiss => { root.menu-dismiss(); }
+    }
+    picker := Picker {
+        visible: root.picker-open;
+        x: max(8px, min(root.picker-x, root.width - 264px - 8px));
+        y: root.picker-top;
+        height: root.picker-height;
+        hue: root.pk-hue;
+        sat: root.pk-sat;
+        val: root.pk-val;
+        now: root.pk-now;
+        pure: root.pk-pure;
+        sv-img: root.pk-sv-img;
+        hue-img: root.pk-hue-img;
+        t-hex <=> root.pk-hex;
+        t-r <=> root.pk-r;
+        t-g <=> root.pk-g;
+        t-b <=> root.pk-b;
+        t-h <=> root.pk-h;
+        t-s <=> root.pk-s;
+        t-v <=> root.pk-v;
+        presets: root.pk-presets;
+        recent: root.pk-recent;
+        sv(x, y) => { root.pk-sv(x, y); }
+        hue-at(x) => { root.pk-hue-at(x); }
+        field(i, t) => { root.pk-field(i, t); }
+        well(c) => { root.pk-well(c); }
+        enter => { root.pk-enter(); }
+        dismiss => { root.pk-dismiss(); }
     }
     // the menu's height as its rows lay out, which the window works out: Slint
     // lays a list's rows out only as it draws them

@@ -11,9 +11,10 @@ use ectodeck_draw::hdr::Light;
 use slint::{Color, Model, ModelRc, SharedString, VecModel};
 
 use crate::device;
+use crate::lighting::{self, Ctl};
 use crate::overlays::Overlays;
 use crate::z10::{self, Action, Page, View};
-use crate::{AppWindow, KeyItem, LayerItem, MenuRow, ProfileItem};
+use crate::{AppWindow, Cell, EffectItem, KeyItem, LayerItem, MenuRow, ProfileItem};
 
 /// What the page asked for, done once its event has been handled.
 #[derive(Clone, Debug, PartialEq)]
@@ -43,6 +44,86 @@ pub enum Ask {
     /// time to read the sliders again, and the display's text
     PollSliders,
     PollLcd,
+    Effect(i32),
+    CellPick(i32, i32, f32, f32, f32),
+    CellSlide(i32, f32),
+    /// time to send the preview again: the effect every two seconds, streamed colours 14 times a second
+    PreviewTick,
+    StreamTick,
+    PkSv(f32, f32),
+    PkHue(f32),
+    PkField(i32, String),
+    PkWell(slint::Color),
+    PkEnter,
+    PkDismiss,
+}
+
+/// The colour picker, open on a swatch: what it sets, the colour it opened
+/// on, and the colour now, as hue (0 to 360), saturation and brightness (0 to 1).
+struct Pick {
+    ctl: Ctl,
+    index: usize,
+    start: [u8; 3],
+    hsv: [f32; 3],
+    rgb: [u8; 3],
+    anchor: (f32, f32, f32),
+}
+
+const PRESETS: [[u8; 3]; 9] = [[255, 255, 255], [255, 0, 0], [255, 96, 0], [255, 200, 0], [0, 255, 0], [0, 255, 200], [0, 120, 255], [120, 0, 255], [255, 0, 180]];
+
+fn rgb2hsv([r, g, b]: [u8; 3]) -> [f32; 3] {
+    let (r, g, b) = (r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0);
+    let (mx, mn) = (r.max(g).max(b), r.min(g).min(b));
+    let d = mx - mn;
+    let mut h = 0.0;
+    if d > 0.0 {
+        h = if mx == r { ((g - b) / d) % 6.0 } else if mx == g { (b - r) / d + 2.0 } else { (r - g) / d + 4.0 };
+    }
+    [(h * 60.0 + 360.0) % 360.0, if mx > 0.0 { d / mx } else { 0.0 }, mx]
+}
+
+fn hsv2rgb([h, s, v]: [f32; 3]) -> [u8; 3] {
+    let f = |n: f32| {
+        let k = (n + h / 60.0) % 6.0;
+        (255.0 * (v - v * s * k.min(4.0 - k).clamp(0.0, 1.0))).round() as u8
+    };
+    [f(5.0), f(3.0), f(1.0)]
+}
+
+/// A rounded box's picture: `f` gives each pixel's colour from its place (0 to 1 across and down).
+fn rounded(w: u32, h: u32, r: f32, f: impl Fn(f32, f32) -> [f32; 3]) -> slint::Image {
+    let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(w, h);
+    let (fw, fh) = (w as f32, h as f32);
+    for (i, p) in buf.make_mut_slice().iter_mut().enumerate() {
+        let (px, py) = ((i as u32 % w) as f32 + 0.5, (i as u32 / w) as f32 + 0.5);
+        let qx = (r - px).max(px - (fw - r)).max(0.0);
+        let qy = (r - py).max(py - (fh - r)).max(0.0);
+        let a = if qx > 0.0 && qy > 0.0 { (r - (qx * qx + qy * qy).sqrt() + 0.5).clamp(0.0, 1.0) } else { 1.0 };
+        let c = f(px / fw, py / fh);
+        *p = slint::Rgba8Pixel { r: (c[0] * a).round() as u8, g: (c[1] * a).round() as u8, b: (c[2] * a).round() as u8, a: (a * 255.0).round() as u8 };
+    }
+    slint::Image::from_rgba8_premultiplied(buf)
+}
+
+/// The picker's square for a hue: white to the hue across, then to black downward, in sRGB as CSS mixes them.
+fn sv_square(hue: f32, scale: f32) -> slint::Image {
+    let pure = hsv2rgb([hue, 1.0, 1.0]).map(|v| v as f32);
+    rounded((252.0 * scale) as u32, (160.0 * scale) as u32, 8.0 * scale, |x, y| [0, 1, 2].map(|k| (255.0 + (pure[k] - 255.0) * x) * (1.0 - y)))
+}
+
+fn hue_bar(scale: f32) -> slint::Image {
+    let stops: [(f32, [f32; 3]); 7] =
+        [(0.0, [255.0, 0.0, 0.0]), (0.17, [255.0, 255.0, 0.0]), (0.33, [0.0, 255.0, 0.0]), (0.5, [0.0, 255.0, 255.0]), (0.67, [0.0, 0.0, 255.0]), (0.83, [255.0, 0.0, 255.0]), (1.0, [255.0, 0.0, 0.0])];
+    rounded((252.0 * scale) as u32, (12.0 * scale) as u32, 6.0 * scale, |x, _| {
+        let i = stops.iter().rposition(|(t, _)| *t <= x).unwrap_or(0).min(5);
+        let ((t0, a), (t1, b)) = (stops[i], stops[i + 1]);
+        let f = ((x - t0) / (t1 - t0)).clamp(0.0, 1.0);
+        [0, 1, 2].map(|k| a[k] + (b[k] - a[k]) * f)
+    })
+}
+
+fn color([r, g, b]: [u8; 3]) -> slint::Color {
+    slint::Color::from_rgb_u8(r, g, b)
 }
 
 /// What the window itself must do.
@@ -96,6 +177,15 @@ pub struct Front {
     /// sliders are moved, so a knob reaches both ends when its slider does
     slider_ends: [[f64; 2]; 2],
     _timers: Vec<slint::Timer>,
+    /// the Lighting page: the colour Per key paints with, whether the keyboard
+    /// is being sent the preview, and the pieces of the tile as last laid out
+    paint: [u8; 3],
+    previewing: bool,
+    preview_asked: bool,
+    icons: Option<(f32, Vec<slint::Image>)>,
+    cells: Rc<VecModel<Cell>>,
+    pub scale: f32,
+    pick: Option<Pick>,
 }
 
 /// A profile's colour sample: how many colours, and the colours.
@@ -138,11 +228,25 @@ impl Front {
         on!(on_go, |p| Ask::Go(p.to_string()));
         on!(on_rail, |p| Ask::Rail(p.to_string()));
         on!(on_macro_editor, Ask::MacroEditor);
+        on!(on_effect, |i| Ask::Effect(i));
+        on!(on_cell_pick, |id, i, x, y, h| Ask::CellPick(id, i, x, y, h));
+        on!(on_cell_slide, |id, v| Ask::CellSlide(id, v));
+        on!(on_pk_sv, |x, y| Ask::PkSv(x, y));
+        on!(on_pk_hue_at, |x| Ask::PkHue(x));
+        on!(on_pk_field, |i, t| Ask::PkField(i, t.to_string()));
+        on!(on_pk_well, |c| Ask::PkWell(c));
+        on!(on_pk_enter, Ask::PkEnter);
+        on!(on_pk_dismiss, Ask::PkDismiss);
         let page = Page::new();
         ui.set_units(page.view_box.2 as f32);
         ui.set_units_high(page.view_box.3 as f32);
         // the sliders ten times a second, the display's text every two seconds, as the web app read them
-        let timers = [(Duration::from_millis(100), Ask::PollSliders), (Duration::from_secs(2), Ask::PollLcd)]
+        let timers = [
+            (Duration::from_millis(100), Ask::PollSliders),
+            (Duration::from_secs(2), Ask::PollLcd),
+            (Duration::from_secs(2), Ask::PreviewTick),
+            (Duration::from_millis(70), Ask::StreamTick),
+        ]
             .into_iter()
             .map(|(every, ask)| {
                 let t = slint::Timer::default();
@@ -168,7 +272,16 @@ impl Front {
             sliders_asked: false,
             slider_ends,
             _timers: timers,
+            paint: [0xff, 0x2d, 0x00],
+            previewing: false,
+            preview_asked: false,
+            icons: None,
+            cells: Rc::new(VecModel::default()),
+            scale: 1.0,
+            pick: None,
         };
+        f.ui.set_pk_presets(ModelRc::new(VecModel::from(PRESETS.iter().map(|c| color(*c)).collect::<Vec<_>>())));
+        f.ui.set_cells(ModelRc::from(f.cells.clone()));
         f.poll_lcd();
         if controlled {
             f.ask_kb(device::Ask::State);
@@ -224,10 +337,32 @@ impl Front {
                 match r {
                     Ok(p) => {
                         self.page.saved_profile(n, p);
+                        if n == self.page.editing && self.page.draft()["lighting"]["mode"] == "off" && self.page.custom.iter().any(|c| c.iter().any(|v| *v > 0)) {
+                            if let Some(d) = self.page.drafts.get_mut(&n) {
+                                d["lighting"]["mode"] = serde_json::json!("custom");
+                            }
+                        }
                         self.status(format!("Saved profile {n} to the keyboard and read it back to check."), 1);
                     }
                     Err(e) => self.status(format!("Profile {n} was not saved: {e}"), 2),
                 }
+            }
+            device::Heard::Preview(r) => {
+                self.preview_asked = false;
+                match r {
+                    Ok(v) => {
+                        self.ui.set_live(self.previewing && !v["mode"].is_null() && v["mode"] != false);
+                        if let Some(e) = v["error"].as_str() {
+                            self.status(format!("The keyboard stopped showing the preview: {e}"), 2);
+                        }
+                    }
+                    Err(e) => {
+                        self.ui.set_live(false);
+                        self.previewing = false;
+                        self.status(format!("Preview unavailable: {e}"), 2);
+                    }
+                }
+                return;
             }
             device::Heard::Sliders(r) => {
                 self.sliders_asked = false;
@@ -278,6 +413,55 @@ impl Front {
                     }
                     self.close_menu();
                     self.page.view = [View::Keys, View::Lighting, View::Display][i.clamp(0, 2) as usize];
+                    if self.page.view == View::Lighting {
+                        self.start_preview();
+                    } else {
+                        self.stop_preview();
+                    }
+                }
+                Ask::Effect(i) => {
+                    if let (Some((mode, _)), Some(d)) = (z10::EFFECTS.get(i as usize), self.page.drafts.get_mut(&self.page.editing)) {
+                        d["lighting"]["mode"] = serde_json::json!(mode);
+                    }
+                    self.push_preview();
+                }
+                Ask::CellPick(id, i, x, y, h) => self.cell_pick(lighting::ctl(id), i.max(0) as usize, (x, y, h)),
+                Ask::CellSlide(id, v) => {
+                    lighting::act(&mut self.page, lighting::ctl(id), 0, v);
+                    self.push_preview();
+                }
+                Ask::PkSv(x, y) => {
+                    if let Some(p) = &self.pick {
+                        let h = p.hsv[0];
+                        self.pick_set([h, x, 1.0 - y], None, None);
+                    }
+                }
+                Ask::PkHue(x) => {
+                    if let Some(p) = &self.pick {
+                        let [_, sv, v] = p.hsv;
+                        self.pick_set([(x * 360.0).min(359.9), sv, v], None, None);
+                    }
+                }
+                Ask::PkField(i, t) => self.pick_field(i, &t),
+                Ask::PkWell(c) => {
+                    let rgb = [c.red(), c.green(), c.blue()];
+                    self.pick_set(rgb2hsv(rgb), Some(rgb), None);
+                }
+                Ask::PkEnter => {
+                    self.close_picker();
+                }
+                Ask::PkDismiss => self.close_picker(),
+                Ask::PreviewTick => {
+                    changed = false;
+                    if self.previewing && !self.page.streams() {
+                        self.push_preview();
+                    }
+                }
+                Ask::StreamTick => {
+                    changed = false;
+                    if self.previewing && self.page.dev.is_some() && self.page.streams() {
+                        self.push_preview();
+                    }
                 }
                 Ask::Profile(n) => self.choose_profile(n as u8),
                 Ask::Save => self.save(),
@@ -410,6 +594,194 @@ impl Front {
         }
     }
 
+    // ------------------------------------------------------------ the Lighting page
+
+    /// The keyboard shows the draft while the Lighting page is open. Nothing is
+    /// stored, so leaving without saving gives the profile back untouched.
+    fn start_preview(&mut self) {
+        self.previewing = true;
+        self.push_preview();
+    }
+
+    pub fn stop_preview(&mut self) {
+        if self.previewing {
+            self.previewing = false;
+            self.ui.set_live(false);
+            self.ask_kb(device::Ask::Preview(serde_json::json!({ "stop": true, "tab": "native", "claim": true })));
+        }
+    }
+
+    fn push_preview(&mut self) {
+        if !self.previewing || self.page.dev.is_none() || self.preview_asked || self.kb.is_none() {
+            return;
+        }
+        let mut body = self.page.preview_body();
+        body["tab"] = serde_json::json!("native");
+        body["claim"] = serde_json::json!(true);
+        self.preview_asked = true;
+        self.ask_kb(device::Ask::Preview(body));
+    }
+
+    /// A piece of the tile used: a swatch opens the colour picker, the rest change the draft.
+    fn cell_pick(&mut self, c: Ctl, index: usize, _anchor: (f32, f32, f32)) {
+        match c {
+            Ctl::Color | Ctl::Colors | Ctl::Background | Ctl::Paint => {
+                self.open_picker(c, index, _anchor);
+                return;
+            }
+            Ctl::Demo => self.page.demo = index == 1,
+            Ctl::Random => lighting::act(&mut self.page, c, 0, index as f32),
+            Ctl::Fill | Ctl::Scatter | Ctl::Clear => {
+                let leds: Vec<u32> = self.page.layout.iter().filter(|k| k.led).map(|k| k.pos).collect();
+                let mut seed = self.t0.elapsed().as_nanos() as u64 | 1;
+                for pos in 0..self.page.custom.len() as u32 {
+                    let led = leds.contains(&pos);
+                    self.page.custom[pos as usize] = match c {
+                        Ctl::Fill if led => self.paint,
+                        Ctl::Scatter if led => [0, 1, 2].map(|_| {
+                            seed ^= seed << 13;
+                            seed ^= seed >> 7;
+                            seed ^= seed << 17;
+                            (seed >> 56) as u8
+                        }),
+                        Ctl::Clear => [0; 3],
+                        _ => self.page.custom[pos as usize],
+                    };
+                }
+                lighting::save_custom(self.page.editing, &self.page.custom);
+            }
+            _ => lighting::act(&mut self.page, c, index, 0.0),
+        }
+        self.push_preview();
+    }
+
+    // ------------------------------------------------------------ the colour picker
+
+    fn open_picker(&mut self, c: Ctl, index: usize, anchor: (f32, f32, f32)) {
+        // the second click on the swatch whose picker a press just closed
+        if let Some((at, when)) = self.shut.take() {
+            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
+                return;
+            }
+        }
+        self.close_menu();
+        self.close_picker();
+        let rgb = lighting::color_of(&self.page, c, index, self.paint);
+        self.pick = Some(Pick { ctl: c, index, start: rgb, hsv: rgb2hsv(rgb), rgb, anchor });
+        let recent = recent_colors();
+        self.ui.set_pk_recent(ModelRc::new(VecModel::from(recent.iter().map(|c| color(*c)).collect::<Vec<_>>())));
+        // under the swatch when it fits there, or when there is a fair amount of room there anyway; over it when below is cramped
+        let (ax, ay, ah) = anchor;
+        let (h, win) = (self.ui.get_picker_height(), self.ui.get_window_height());
+        let (below, above) = (win - ay - ah - 14.0, ay - 70.0);
+        let down = h <= below || below >= h.min(260.0) || below >= above;
+        let room = if down { below } else { above };
+        self.ui.set_picker_x(ax);
+        self.ui.set_picker_top(if down { ay + ah + 6.0 } else { ay - 6.0 - h.min(room) });
+        self.ui.set_pk_hue_img(hue_bar(self.scale));
+        self.show_pick(None);
+        self.ui.set_picker_open(true);
+    }
+
+    fn close_picker(&mut self) {
+        if let Some(p) = self.pick.take() {
+            self.ui.set_picker_open(false);
+            self.ui.invoke_blur_picker();
+            // the colour the picker is closed on joins the recent ones
+            if p.rgb != p.start {
+                keep_recent(p.rgb);
+            }
+        }
+    }
+
+    /// Show the colour everywhere but the field being typed in.
+    fn show_pick(&mut self, skip: Option<i32>) {
+        let Some(p) = &self.pick else { return };
+        let [h, sv, v] = p.hsv;
+        let rgb = p.rgb;
+        self.ui.set_pk_hue(h);
+        self.ui.set_pk_sat(sv);
+        self.ui.set_pk_val(v);
+        self.ui.set_pk_now(color(rgb));
+        self.ui.set_pk_pure(color(hsv2rgb([h, 1.0, 1.0])));
+        self.ui.set_pk_sv_img(sv_square(h, self.scale));
+        let fields = [
+            format!("#{:02X}{:02X}{:02X}", rgb[0], rgb[1], rgb[2]),
+            rgb[0].to_string(),
+            rgb[1].to_string(),
+            rgb[2].to_string(),
+            (h.round() as i32).to_string(),
+            ((sv * 100.0).round() as i32).to_string(),
+            ((v * 100.0).round() as i32).to_string(),
+        ];
+        let setters: [fn(&AppWindow, SharedString); 7] = [
+            AppWindow::set_pk_hex,
+            AppWindow::set_pk_r,
+            AppWindow::set_pk_g,
+            AppWindow::set_pk_b,
+            AppWindow::set_pk_h,
+            AppWindow::set_pk_s,
+            AppWindow::set_pk_v,
+        ];
+        for (i, (set, t)) in setters.iter().zip(fields).enumerate() {
+            if skip != Some(i as i32) {
+                set(&self.ui, t.into());
+            }
+        }
+    }
+
+    /// A new colour in the picker: shown, and set where the picker was opened.
+    fn pick_set(&mut self, hsv: [f32; 3], rgb: Option<[u8; 3]>, skip: Option<i32>) {
+        let Some(p) = &mut self.pick else { return };
+        p.hsv = hsv;
+        p.rgb = rgb.unwrap_or_else(|| hsv2rgb(hsv));
+        let (c, index, rgb) = (p.ctl, p.index, p.rgb);
+        if c == Ctl::Paint {
+            self.paint = rgb;
+        } else {
+            lighting::set_color(&mut self.page, c, index, rgb);
+        }
+        self.show_pick(skip);
+        self.push_preview();
+    }
+
+    /// A field typed in: a hex code, or a number of its own.
+    fn pick_field(&mut self, i: i32, t: &str) {
+        let Some(p) = &self.pick else { return };
+        let (rgb, hsv) = (p.rgb, p.hsv);
+        match i {
+            0 => {
+                let t = t.trim().trim_start_matches('#');
+                let full: String = if t.len() == 3 { t.chars().flat_map(|c| [c, c]).collect() } else { t.to_string() };
+                if full.len() == 6 {
+                    if let Ok(v) = u32::from_str_radix(&full, 16) {
+                        let c = [(v >> 16) as u8, (v >> 8) as u8, v as u8];
+                        self.pick_set(rgb2hsv(c), Some(c), Some(0));
+                    }
+                }
+            }
+            1..=3 => {
+                if let Ok(v) = t.trim().parse::<f32>() {
+                    let mut c = rgb;
+                    c[(i - 1) as usize] = v.round().clamp(0.0, 255.0) as u8;
+                    self.pick_set(rgb2hsv(c), Some(c), Some(i));
+                }
+            }
+            4..=6 => {
+                if let Ok(v) = t.trim().parse::<f32>() {
+                    let mut n = hsv;
+                    match i {
+                        4 => n[0] = v.clamp(0.0, 359.0),
+                        5 => n[1] = v.clamp(0.0, 100.0) / 100.0,
+                        _ => n[2] = v.clamp(0.0, 100.0) / 100.0,
+                    }
+                    self.pick_set(n, None, Some(i));
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn choose_profile(&mut self, n: u8) {
         if self.page.dev.is_none() {
             return;
@@ -439,6 +811,22 @@ impl Front {
         }
         let now = self.t0.elapsed().as_secs_f64() * 1000.0;
         if self.page.view == View::Lighting {
+            // Per key: a click paints the key
+            if self.page.draft()["lighting"]["mode"] == "custom" {
+                let Some(k) = self.page.key(pos).cloned() else { return };
+                if !k.led {
+                    self.status(format!("{} has no light behind it.", self.page.key_label(&k)), 0);
+                    return;
+                }
+                if let Some(c) = self.page.custom.get_mut(pos as usize) {
+                    *c = self.paint;
+                }
+                lighting::save_custom(self.page.editing, &self.page.custom);
+                self.press(pos);
+                self.push_preview();
+                return;
+            }
+            // otherwise it lights as pressing it would, for Reactive
             self.page.flash(pos, now);
             self.press(pos);
             return;
@@ -556,6 +944,17 @@ impl Front {
     /// from the open menu closes it, and a press on the button it hangs from
     /// keeps that button's click from opening it again.
     pub fn pressed_at(&mut self, x: f32, y: f32) {
+        // away from the open picker closes it; on the swatch it hangs from too
+        if self.pick.is_some() {
+            let (px, py, ph) = (self.ui.get_picker_x().max(8.0).min(self.ui.get_window_width() - 272.0), self.ui.get_picker_top(), self.ui.get_picker_height());
+            if !(x >= px && x < px + 264.0 && y >= py && y < py + ph) {
+                let (ax, ay, ah) = self.pick.as_ref().unwrap().anchor;
+                if x >= ax && x < ax + 34.0 && y >= ay && y < ay + ah {
+                    self.shut = Some(((ax, ay), Instant::now()));
+                }
+                self.close_picker();
+            }
+        }
         let Some(m) = &self.menu else { return };
         let (mx, my, mw, mh) = (self.ui.get_menu_x(), self.ui.get_menu_y(), self.ui.get_menu_width(), self.ui.get_menu_height());
         if x >= mx && x < mx + mw && y >= my && y < my + mh {
@@ -773,10 +1172,38 @@ impl Front {
         if self.menu.is_some() {
             self.build_menu();
         }
+        if loaded && self.page.view == View::Lighting {
+            self.refresh_lighting();
+        }
         let back = self.page.lcd_color();
         if back != self.overlays.lcd.2 {
             self.overlays.lcd.2 = back;
             self.ui.set_overlays(ModelRc::new(VecModel::from(self.overlays.model())));
+        }
+    }
+
+    /// The Lighting page's effects and its tile, laid out for the draft. The
+    /// pieces are changed in place, so one being used is never rebuilt under
+    /// the pointer.
+    fn refresh_lighting(&mut self) {
+        let mode = self.page.draft()["lighting"]["mode"].as_str().unwrap_or("off").to_string();
+        let scale = self.scale;
+        if self.icons.as_ref().map(|(s, _)| *s) != Some(scale) {
+            self.icons = Some((scale, z10::EFFECTS.iter().map(|(m, _)| lighting::icon(m, scale)).collect()));
+        }
+        let icons = &self.icons.as_ref().unwrap().1;
+        let effects: Vec<EffectItem> = z10::EFFECTS.iter().zip(icons).map(|((m, name), icon)| EffectItem { name: (*name).into(), icon: icon.clone(), on: *m == mode }).collect();
+        self.ui.set_effects(ModelRc::new(VecModel::from(effects)));
+        let tile = lighting::tile(&self.page, self.paint, self.page.demo);
+        self.ui.set_tile_height(tile.height);
+        if self.cells.row_count() == tile.cells.len() {
+            for (i, c) in tile.cells.into_iter().enumerate() {
+                if self.cells.row_data(i).as_ref() != Some(&c) {
+                    self.cells.set_row_data(i, c);
+                }
+            }
+        } else {
+            self.cells.set_vec(tile.cells);
         }
     }
 
@@ -795,4 +1222,16 @@ impl Front {
         self.page.animated()
     }
 
+}
+
+/// The colours used lately, newest first, as the picker lists them.
+fn recent_colors() -> Vec<[u8; 3]> {
+    crate::uistate::get("recent_colours").and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default()
+}
+
+fn keep_recent(c: [u8; 3]) {
+    let mut list = vec![c];
+    list.extend(recent_colors().into_iter().filter(|r| *r != c));
+    list.truncate(9);
+    crate::uistate::set("recent_colours", serde_json::json!(list));
 }

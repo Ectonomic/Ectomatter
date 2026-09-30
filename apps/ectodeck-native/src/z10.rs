@@ -443,6 +443,12 @@ pub struct Page {
     mod_to_pos: HashMap<u32, u32>,
     /// keys pressed a moment ago, darkened where they stand, and when
     pub pressed: HashMap<u32, f64>,
+    /// the colours the profile being edited paints its keys with, one a key
+    pub custom: Vec<[u8; 3]>,
+    /// Reactive's "Preview with pretend typing"
+    pub demo: bool,
+    /// each lit key's colour and light at the last frame, before the LEDs' lean: what streams to the keyboard
+    pub last_colors: HashMap<u32, [f64; 4]>,
     rng: u64,
 }
 
@@ -523,6 +529,9 @@ impl Page {
             hid_to_pos: HashMap::new(),
             mod_to_pos: HashMap::new(),
             pressed: HashMap::new(),
+            custom: vec![[0; 3]; 116],
+            demo: false,
+            last_colors: HashMap::new(),
             rng: 0x9e3779b97f4a7c15,
         }
     }
@@ -537,6 +546,7 @@ impl Page {
             self.drafts.entry(n).or_insert_with(|| pick(&dev["profiles"][n.to_string()]));
         }
         self.editing = dev["active"].as_u64().filter(|n| (1..=5).contains(n)).unwrap_or(1) as u8;
+        self.custom = crate::lighting::custom_colors(self.editing);
         // a key typed on the page is found on the board by the factory keymap
         self.hid_to_pos.clear();
         self.mod_to_pos.clear();
@@ -872,7 +882,21 @@ impl Page {
                 self.stars.insert(pos, (t, c));
             }
         }
-        let colors = self.effect_colors(&l, &mode, t);
+        if self.demo && mode == "trigger" && self.random() < 0.08 {
+            let i = (self.random() * self.layout.len() as f64) as usize % self.layout.len();
+            let pos = self.layout[i].pos;
+            self.flash(pos, t);
+        }
+        let colors = if mode == "custom" {
+            // each key its own colour, lit wherever it has one
+            self.layout.iter().filter(|k| k.led).map(|k| {
+                let c = self.custom.get(k.pos as usize).copied().unwrap_or([0; 3]);
+                (k.pos, [c[0] as f64, c[1] as f64, c[2] as f64, if c.iter().any(|v| *v > 0) { 1.0 } else { 0.0 }])
+            }).collect()
+        } else {
+            self.effect_colors(&l, &mode, t)
+        };
+        self.last_colors = colors.clone();
         let names = self.board_macro_names();
         self.layout
             .iter()
@@ -997,6 +1021,28 @@ impl Page {
         self.editing = n;
         self.stars.clear();
         self.flashes.clear();
+        self.custom = crate::lighting::custom_colors(n);
+    }
+
+    /// What the keyboard is sent to show the draft while the Lighting page is
+    /// open: each key's colour for Per key, Stars and Reactive (which the
+    /// keyboard cannot play from a preset), or the effect itself.
+    pub fn preview_body(&self) -> Value {
+        let l = &self.draft()["lighting"];
+        match l["mode"].as_str().unwrap_or("off") {
+            "custom" => json!({ "colors": (0..116).map(|i| self.custom.get(i).copied().unwrap_or([0; 3])).collect::<Vec<_>>() }),
+            "stars" | "trigger" => json!({ "colors": self.streamed() }),
+            _ => json!({ "lighting": l }),
+        }
+    }
+
+    pub fn streams(&self) -> bool {
+        matches!(self.draft()["lighting"]["mode"].as_str(), Some("stars") | Some("trigger"))
+    }
+
+    /// Each key's colour as the screen shows it this frame, for the keyboard.
+    pub fn streamed(&self) -> Vec<[u8; 3]> {
+        (0..116u32).map(|i| self.last_colors.get(&i).map_or([0; 3], |v| [0, 1, 2].map(|j| (v[j] * v[3]).round().clamp(0.0, 255.0) as u8))).collect()
     }
 
     /// The display's backlight as it looks: leaning as the keys' LEDs do, and

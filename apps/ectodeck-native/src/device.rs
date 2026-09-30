@@ -18,6 +18,8 @@ pub enum Ask {
     Activate(u8),
     /// where both sliders are, on firmware that can say
     Sliders,
+    /// show a preview on the keyboard: an effect, each key's colour, or stop
+    Preview(Value),
 }
 
 pub enum Heard {
@@ -25,6 +27,7 @@ pub enum Heard {
     Saved(u8, Result<Value, String>),
     Active(u8, Result<Option<u8>, String>),
     Sliders(Result<Value, String>),
+    Preview(Result<Value, String>),
 }
 
 /// Start the keyboard's thread. `backups` is where the first write of a
@@ -39,6 +42,7 @@ pub fn start(backups: PathBuf, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
                 Ask::Save(n, body) => Heard::Saved(n, kb.save(n, &body).map_err(|e| e.to_string())),
                 Ask::Activate(n) => Heard::Active(n, kb.activate(n).map_err(|e| e.to_string())),
                 Ask::Sliders => Heard::Sliders(kb.sliders().map_err(|e| e.to_string())),
+                Ask::Preview(body) => Heard::Preview(kb.preview(&body).map_err(|e| e.to_string())),
             };
             if tell.send(heard).is_err() {
                 break;

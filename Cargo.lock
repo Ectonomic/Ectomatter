@@ -1362,6 +1362,7 @@ dependencies = [
  "ectodeck-draw",
  "ectotype-core",
  "resvg 0.45.1",
+ "rustybuzz",
  "serde_json",
  "slint",
  "slint-build",

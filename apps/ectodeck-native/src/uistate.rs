@@ -17,6 +17,10 @@ pub fn get(key: &str) -> Option<Value> {
 }
 
 pub fn set(key: &str, value: Value) {
+    // offscreen checks leave what the window remembers alone
+    if std::env::args().any(|a| a == "--snapshot") {
+        return;
+    }
     let mut m = all();
     m.insert(key.into(), value);
     let p = path();
