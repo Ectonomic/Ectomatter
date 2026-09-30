@@ -57,31 +57,20 @@ button:disabled { opacity: .35; cursor: default; }
 }
 .board .print span:only-child { margin: 0 auto; }   /* a single label is centred */
 .key {
-  position: absolute; border-radius: 0.24cqw; border: 0; cursor: pointer;
-  /* A black keycap seen from above, near-standard profile: the sloped sides
-     show as a rim all round (the front one a little deeper, as a sculpted cap
-     leans toward you), lit from above so the back slope catches the light and
-     the front one falls into shade. The top is the ::before below. The
-     legends centre on the top, not on the whole cap. */
+  position: absolute; border-radius: 0.3cqw; border: 0; cursor: pointer;
+  /* A keycap as EVGA's photo of the Z10 shows it from above: its top runs
+     flat to the edge, as light as the deck around it (--face, the deck's
+     shade at the key's height, set by buildBoard), and a thin bright rim runs
+     round it where the top rolls off (--rim, twice the top's light). The
+     legends sit on the top. */
   padding: 0.26cqw 0.4cqw 0.5cqw;
-  background:
-    linear-gradient(90deg, rgba(0,0,0,.55) 0, rgba(0,0,0,.2) 0.4cqw,
-                           rgba(0,0,0,.2) calc(100% - 0.4cqw), rgba(0,0,0,.55) 100%),
-    linear-gradient(180deg, #2a2a2a 0, #222222 0.26cqw, #151515 calc(100% - 0.5cqw), #0d0d0d 100%);
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,.03), 0 0.08cqw 0.16cqw rgba(0,0,0,.8);
+  background: var(--face, #282828);
+  box-shadow: inset 0 0 0 0.148cqw var(--rim, #3d3d3d), 0 0.08cqw 0.16cqw rgba(0,0,0,.8);
   color: #d4d4d4; font: 600 1cqw/1 'Barlow Semi Condensed', sans-serif;
   display: grid; place-items: center; text-align: center; overflow: visible;
   transition: transform .05s ease;
 }
-/* The top of the cap: a flat face, a shade lighter than the sloped sides
-   round it, in one solid grey. A fade across it has only a few greys this dark
-   to step through, and shows them as bands. */
-.key::before {
-  content: ''; position: absolute; pointer-events: none;
-  top: 0.26cqw; left: 0.4cqw; right: 0.4cqw; bottom: 0.5cqw; border-radius: 0.3cqw;
-  background: #232323;
-  box-shadow: inset 0 0.03cqw 0.1cqw rgba(0,0,0,.18), 0 0.03cqw 0 rgba(255,255,255,.035);
-}
+.key::before { content: none; }
 .key .glow {
   position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
   background: radial-gradient(120% 90% at 50% 0%, var(--c, transparent), transparent 70%);
@@ -133,20 +122,15 @@ button:disabled { opacity: .35; cursor: default; }
 .key.has-remap .leg.centred { transform: translateY(-22%); }
 .key:hover { box-shadow: inset 0 0 0 1px #8c8c8c, inset 0 1px 0 rgba(255,255,255,.1),
               0 0.08cqw 0.16cqw rgba(0,0,0,.8); }
-/* The spacebar, as EVGA's photo of the Z10 has it against the keys beside it:
-   one flat top from edge to edge, in one solid grey (a fade this dark bands),
-   with no inset top of its own; a soft bend, about 0.46cqw deep, centred where
-   the keys beside it end (--bend, set by buildBoard); then a much darker front
-   face hanging over the deck, darkest along its bottom edge. Its greys are the
-   photo's, each in the same ratio to a key's top as there, in light. */
+/* The spacebar, as EVGA's photo has it: the same flat top and bright rim as
+   every key, a soft bend about 0.46cqw deep centred where the keys beside it
+   end (--bend, set by buildBoard), then its front face hanging over the deck,
+   a little darker (--lip, 72% of the top's light). */
 .key[aria-label="Space"] {
   padding: 0;
-  background:
-    linear-gradient(180deg, #1b1b1b 0, #1b1b1b calc(var(--bend, 70%) - 0.23cqw), #111111 calc(var(--bend, 70%) + 0.23cqw),
-                            #111111 calc(100% - 0.23cqw), #0b0b0b 100%);
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,.03), 0 0.08cqw 0.16cqw rgba(0,0,0,.8);
+  background: linear-gradient(180deg, var(--face, #262626) 0, var(--face, #262626) calc(var(--bend, 70%) - 0.23cqw),
+                                      var(--lip, #202020) calc(var(--bend, 70%) + 0.23cqw), var(--lip, #202020) 100%);
 }
-.key[aria-label="Space"]::before { display: none; }
 .key.molded::before { display: none; }
 /* The media buttons are not keycaps. They are moulded blocks that sit much
    lower than the caps and barely below the deck, so they are flat-topped and
