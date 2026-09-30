@@ -38,7 +38,9 @@ enum Unit {
     Fraction,
 }
 
-/// One value of the core's "light": where it is, what it is called, its range and step.
+/// One value of the core's "light": where it is, what it is called, its
+/// slider's range and step. A brightness's range is 0 to Peak nits, whatever
+/// `lo` and `hi` say, since nothing above Peak nits shows.
 struct Param {
     path: (&'static str, &'static str),
     label: &'static str,
@@ -50,17 +52,17 @@ struct Param {
 }
 
 const PARAMS: [Param; 11] = [
-    Param { path: ("legend", "nits"), label: "Brightness", lo: 10.0, hi: 1000.0, step: 5.0, unit: Unit::Nits, note: "The legend at its brightest, nearest the LED, for a key lit fully, up to Peak nits (Settings › HDR)." },
-    Param { path: ("legend", "depth"), label: "Spread", lo: 2.0, hi: 30.0, step: 0.5, unit: Unit::Length, note: "How deep under the legend the LED sits. Deeper lights a legend more evenly; shallower keeps the light to the part nearest the LED." },
+    Param { path: ("legend", "nits"), label: "Brightness", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, note: "The legend at its brightest, nearest the LED, for a key lit fully, up to Peak nits (Settings › HDR)." },
+    Param { path: ("legend", "depth"), label: "Spread", lo: 1.0, hi: 60.0, step: 0.5, unit: Unit::Length, note: "How deep under the legend the LED sits. Deeper lights a legend more evenly; shallower keeps the light to the part nearest the LED." },
     Param { path: ("legend", "floor"), label: "Far parts", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, note: "The least any part of a legend is lit, however far from the LED: light bouncing inside the cap." },
-    Param { path: ("deck", "nits"), label: "Brightness", lo: 0.0, hi: 300.0, step: 1.0, unit: Unit::Nits, note: "The glow on the deck at its brightest, just outside the skirt on the LED's side, for a key lit fully." },
-    Param { path: ("deck", "height"), label: "Round the skirt", lo: 1.0, hi: 30.0, step: 0.5, unit: Unit::Length, note: "How evenly the light gets out round the skirt. Lower keeps it to the LED's side of the key; higher spreads it all round." },
+    Param { path: ("deck", "nits"), label: "Brightness", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, note: "The glow on the deck at its brightest, just outside the skirt on the LED's side, for a key lit fully." },
+    Param { path: ("deck", "height"), label: "Round the skirt", lo: 0.5, hi: 60.0, step: 0.5, unit: Unit::Length, note: "How evenly the light gets out round the skirt. Lower keeps it to the LED's side of the key; higher spreads it all round." },
     Param { path: ("deck", "floor"), label: "Far side", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, note: "The least the skirt's far side lets out, as a part of its LED side." },
-    Param { path: ("deck", "reach"), label: "Reach", lo: 0.3, hi: 8.0, step: 0.1, unit: Unit::Length, note: "How far across the deck the glow goes before it falls to a third." },
-    Param { path: ("rim", "nits"), label: "Brightness", lo: 0.0, hi: 150.0, step: 1.0, unit: Unit::Nits, note: "The glow the foot of each cap's skirt catches from the deck, at its brightest." },
-    Param { path: ("rim", "width"), label: "Height", lo: 0.1, hi: 3.0, step: 0.05, unit: Unit::Length, note: "How far up the skirt it reaches." },
-    Param { path: ("led", ""), label: "North of centre", lo: 0.0, hi: 12.0, step: 0.25, unit: Unit::Length, note: "Where each key's LED sits under its cap, from the switch's centre toward the top of the key." },
-    Param { path: ("lcd", "nits"), label: "Lit dots", lo: 10.0, hi: 600.0, step: 5.0, unit: Unit::Nits, note: "The display's lit dots, as bright as its backlight shows them." },
+    Param { path: ("deck", "reach"), label: "Reach", lo: 0.1, hi: 30.0, step: 0.1, unit: Unit::Length, note: "How far across the deck the glow goes before it falls to a third." },
+    Param { path: ("rim", "nits"), label: "Brightness", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, note: "The glow the foot of each cap's skirt catches from the deck, at its brightest." },
+    Param { path: ("rim", "width"), label: "Height", lo: 0.05, hi: 10.0, step: 0.05, unit: Unit::Length, note: "How far up the skirt it reaches." },
+    Param { path: ("led", ""), label: "North of centre", lo: -12.0, hi: 12.0, step: 0.25, unit: Unit::Length, note: "Where each key's LED sits under its cap, from the switch's centre toward the top of the key; below 0, toward the bottom, as on a keyboard whose LEDs face south." },
+    Param { path: ("lcd", "nits"), label: "Lit dots", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, note: "The display's lit dots, as bright as its backlight shows them." },
 ];
 
 /// The page's sections: a title, what the part is, and its values.
@@ -171,8 +173,9 @@ impl LabPage {
                 Ask::Close => window.push(WindowAsk::Close),
                 Ask::Slide(id, f) => {
                     if let Some(p) = PARAMS.get(id.max(0) as usize) {
-                        let v = p.lo + f.clamp(0.0, 1.0) as f64 * (p.hi - p.lo);
-                        let v = ((v / p.step).round() * p.step).clamp(p.lo, p.hi);
+                        let (lo, hi) = self.range(id.max(0) as usize);
+                        let v = lo + f.clamp(0.0, 1.0) as f64 * (hi - lo);
+                        let v = ((v / p.step).round() * p.step).clamp(lo, hi);
                         if get(&self.light, p.path) != Some(v) {
                             set(&mut self.light, p.path, v);
                             self.rev += 1;
@@ -243,6 +246,17 @@ impl LabPage {
         self.ui.set_can_revert(changed);
         if changed && self.status.0.is_empty() {
             self.ui.set_status_text("Changed, not saved.".into());
+        }
+    }
+
+    /// A value's slider range: a brightness from 0 to Peak nits (Settings ›
+    /// HDR), since nothing above it shows; the rest their own.
+    fn range(&self, i: usize) -> (f64, f64) {
+        let p = &PARAMS[i];
+        if p.unit == Unit::Nits {
+            (0.0, if self.readout.peak > 0.0 { self.readout.peak } else { 1000.0 })
+        } else {
+            (p.lo, p.hi)
         }
     }
 
@@ -335,7 +349,8 @@ impl LabPage {
                 for i in a..b {
                     let p = &PARAMS[i];
                     c.push(text_cell(style::LABEL, x0 + pad, *cy, label_w, 34.0, p.label));
-                    let frac = ((self.value(i) - p.lo) / (p.hi - p.lo)).clamp(0.0, 1.0) as f32;
+                    let (lo, hi) = self.range(i);
+                    let frac = ((self.value(i) - lo) / (hi - lo)).clamp(0.0, 1.0) as f32;
                     c.push(Cell { value: frac, id: i as i32, ..cell(kind::SLIDER, cx + 2.0, *cy + 9.0, slider_w, 16.0) });
                     c.push(text_cell(style::VALUE, cx + slider_w + 12.0, *cy + 8.0, value_w, 18.0, &self.reads(i)));
                     *cy += 34.0;
@@ -360,7 +375,7 @@ impl LabPage {
                         }).collect();
                         // an upper legend's middle sits about 7.25 units above a 1u key's
                         // centre, a lower one's about 6 below it; the LED `led` above it
-                        let (up, low) = ((7.25 - led).abs(), 6.0 + led);
+                        let (up, low) = ((7.25 - led).abs(), (6.0 + led).abs());
                         let marks = [(up, "upper legend"), (low, "lower legend")];
                         self.plot(c, &mut plots, x0 + pad, *cy, pw, 118.0, &pts, far, nits.max(1.0), &marks, "Across a key: brightness by distance from the LED", "LED", &format!("{:.0} mm", far / UNITS_PER_MM));
                         *cy += 118.0 + 30.0;
@@ -370,12 +385,14 @@ impl LabPage {
                         let half = (pw - 12.0) / 2.0;
                         // round a 1u key's skirt, from the top edge's middle to the bottom edge's
                         let skirt = |x: f64, y: f64| floor + (1.0 - floor) * falloff(((x).powi(2) + (y + led).powi(2)).sqrt(), height);
-                        let nearest = skirt(0.0, -12.0f64.min(led));
-                        let pts: Vec<(f64, f64)> = (0..=96).map(|k| {
+                        let raw: Vec<(f64, f64)> = (0..=96).map(|k| {
                             let s = 48.0 * k as f64 / 96.0;
                             let (x, y) = if s < 12.0 { (s, -12.0) } else if s < 36.0 { (12.0, -12.0 + (s - 12.0)) } else { (12.0 - (s - 36.0), 12.0) };
-                            (s, peak * (skirt(x, y) / nearest).min(1.0))
+                            (s, skirt(x, y))
                         }).collect();
+                        // brightest where the outline is nearest the LED, whichever side that is
+                        let most = raw.iter().map(|p| p.1).fold(0.0f64, f64::max).max(1e-9);
+                        let pts: Vec<(f64, f64)> = raw.iter().map(|&(s, v)| (s, peak * v / most)).collect();
                         self.plot(c, &mut plots, x0 + pad, *cy, half, 118.0, &pts, 48.0, peak.max(0.1), &[(12.0, "corner"), (36.0, "corner")], "Round a key's skirt", "top", "bottom");
                         let far = 8.0;
                         let pts: Vec<(f64, f64)> = (0..=80).map(|k| {
