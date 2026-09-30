@@ -83,7 +83,7 @@ Errors use JSON-RPC's error object, with a `message` written for the person usin
   "firmware": { "kind": "custom", "version": "1.171", "build": 1, "features": [], "later": [{ "id": "sliders.read", "since": 2 }] },
   "art": "art/z10.svg",
   "controls": [
-    { "id": "esc", "kind": "key", "label": "Esc", "control": 12, "legend": 14, "mask": 1 },
+    { "id": "esc", "kind": "key", "label": "Esc", "control": 12, "legend": 112 },
     { "id": "volume", "kind": "slider", "label": "Volume", "control": 105 }
   ],
   "screens": [
@@ -107,19 +107,19 @@ A core brings its own art, and the frontend draws it exactly as it is. Everythin
 
 **Pieces.** The drawing is broken into pieces. Each piece is a group or shape whose `id` is its kind and a number, such as `control_12`. The number only tells pieces of the same kind apart: each kind counts from 1 on its own, so a keyboard with 104 controls still has `body_1`. How finely to break the drawing up is the artist's choice, with one rule: anything that changes on its own needs a piece of its own. A key that takes its own colour needs its own illumination, a key that presses needs its own control, and a legend that lights with its key needs its own legend.
 
-The kinds, from the bottom of the drawing to the top:
+The kinds, in the order they usually sit from the bottom of the drawing to the top. The drawing itself decides: pieces are drawn in the order they come in the file, as SVG always is, and a kind can sit at more than one depth. The Z10 has light under its caps (thrown on the deck) and over them (on each cap's top, and round each legend).
 
 | Kind | What it is | What the frontend does with it |
 |---|---|---|
 | `body` | The shell of the device, with its shading and chrome | Draws it as it is |
-| `illumination` | The light a control throws, drawn in white, with any blur in the drawing | Fills it with the control's current colour |
-| `mask` | Where an illumination may show, such as the wells a row of keys sits in. Never drawn | Shows the illuminations tied to it only inside it, so light does not scatter where the device shows none |
+| `illumination` | The light a control throws, drawn in white at the strength it has at full light, with any blur in the drawing | Sets its colour (`fill` and `color`) to the control's, and fades it by how strongly the control is lit |
+| `mask` | Where an illumination may show, such as the wells a row of keys sits in: a `<clipPath>`, which the illuminations use in the drawing (`clip-path="url(#mask_1)"`), so the drawing looks right in any editor | Nothing more; it is part of the drawing |
 | `control` | A key, button, dial or slider, with its shading | Draws it as it is; nudges it down and darkens it while it is pressed |
-| `legend` | What is printed, on the body or on a control | Draws it as it is; one tied to a control takes the control's colour while the control is lit, and moves with it when pressed |
+| `legend` | What is printed, on the body or on a control, in its colour when unlit | Draws it as it is; one tied to a control takes on the control's colour as strongly as the control is lit, and moves with it when pressed |
 | `screen` | Where a display sits | Shows the display's live picture inside it |
 | `overlay` | Anything in front of everything else, such as the glass over a screen and its glare | Draws it as it is |
 
-**Tying pieces together.** The core says which pieces belong to which control or screen, in its device description: `"control": 12, "legend": 14, "mask": 1`. One tie is automatic: `illumination_12` belongs to whatever uses `control_12`, and a control lists an `illumination` only when its light is drawn under another number. A mask can serve many illuminations; every control that names it is limited by it. A piece that nothing ties to, such as the body, the print on the body or an overlay, is drawn as it is and never changes.
+**Tying pieces together.** The core says which pieces belong to which control or screen, in its device description: `"control": 12, "legend": 112`. One tie is automatic: `illumination_12` belongs to whatever uses `control_12`. A control whose light is drawn in more pieces, or under another number, lists them all: `"illumination": [12, 212, 412]`. Masks need no tie, because the drawing applies them itself. A piece that nothing ties to, such as the body, the print on the body or an overlay, is drawn as it is and never changes.
 
 **The file.**
 
