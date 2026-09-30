@@ -91,9 +91,6 @@ html:not(.framed) .mrail { top: 0; height: 100vh; }
 .wcard .note.alert { color: #f0b35a; }
 .wcard .credit { font-size: 12px; color: #8a8a8a; line-height: 1.5; max-width: 640px; }
 .wcard [hidden] { display: none !important; }
-.wcard .screens { display: grid; gap: 8px; line-height: 34px; }
-.wcard .screen { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; font-size: 13.5px; }
-.wcard .screen b { font-weight: 500; color: #f5f5f5; min-width: 150px; }
 .wcard .lslider { min-width: 300px; }
 .wcard .lslider input[type=range] { -webkit-appearance: none; appearance: none; flex: 1; height: 16px; background: transparent; }
 .wcard .lslider input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: #3d3d3d; }
