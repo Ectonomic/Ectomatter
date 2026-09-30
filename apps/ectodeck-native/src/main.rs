@@ -24,6 +24,7 @@ mod picture;
 mod screens;
 mod settings;
 mod text;
+mod tray;
 mod uistate;
 mod z10;
 
@@ -415,6 +416,10 @@ struct App {
     /// parts encoded differ from it
     check: bool,
     frames: u64,
+    /// closed into the tray: the window is unmapped, Ectodeck keeps running
+    hidden: bool,
+    tray: Option<tray::Handle>,
+    tray_connected: bool,
 }
 
 /// A screen's levels as KWin describes them: its white and its peak, in nits.
@@ -537,7 +542,31 @@ fn run(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, settings: &settings::Set
         dump: std::env::var_os("ECTODECK_NATIVE_DUMP").map(Into::into),
         check: std::env::var_os("ECTODECK_NATIVE_CHECK").is_some(),
         frames: 0,
+        hidden: false,
+        tray: None,
+        tray_connected: false,
     };
+    // the tray, which the window closes into
+    let (tray_tx, tray_rx) = calloop::channel::channel::<tray::TrayAsk>();
+    app.tray = tray::start(tray_tx);
+    event_loop
+        .handle()
+        .insert_source(tray_rx, |e, _, app: &mut App| {
+            if let calloop::channel::Event::Msg(a) = e {
+                match a {
+                    tray::TrayAsk::Open => app.show(),
+                    tray::TrayAsk::Device(d) => {
+                        app.show();
+                        app.front.ui.set_place(d.into());
+                    }
+                    tray::TrayAsk::Quit => {
+                        app.front.stop_preview();
+                        app.exit = true;
+                    }
+                }
+            }
+        })
+        .unwrap();
 
     // the picture's description has to be ready before the surface takes it
     while !app.ready && app.failed.is_none() {
@@ -551,6 +580,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, settings: &settings::Set
     // mapped by a first commit with no buffer; the compositor answers with the size
     app.window.commit();
 
+    let mut trial = std::env::var_os("ECTODECK_NATIVE_TRAYTEST").map(|_| Instant::now());
     while !app.exit {
         let busy = (app.slint.has_active_animations() || app.front.animated()) && !app.frame_pending;
         let wait = if busy {
@@ -561,6 +591,14 @@ fn run(slint: Rc<MinimalSoftwareWindow>, ui: AppWindow, settings: &settings::Set
         event_loop.dispatch(wait, &mut app).unwrap();
         slint::platform::update_timers_and_animations();
         app.front.retry();
+        // ECTODECK_NATIVE_TRAYTEST: close into the tray once, three seconds in, to check the way back
+        if let Some(t) = trial {
+            if t.elapsed() > Duration::from_secs(3) {
+                trial = None;
+                eprintln!("ectodeck-native: test: closing into the tray");
+                app.hide();
+            }
+        }
         app.act();
         app.draw();
     }
@@ -592,10 +630,7 @@ impl App {
                         self.window.set_maximized()
                     }
                 }
-                WindowAsk::Close => {
-                    self.front.stop_preview();
-                    self.exit = true;
-                }
+                WindowAsk::Close => self.hide(),
             }
         }
     }
@@ -615,6 +650,34 @@ impl App {
         describe(&self.cm, qh, s.reference, PictureTag(s.reference, glow));
     }
 
+    /// Close the window into the tray: without its buffer the window is
+    /// unmapped, and Ectodeck carries on. With no tray, closing quits.
+    fn hide(&mut self) {
+        self.front.stop_preview();
+        if self.tray.is_none() {
+            self.exit = true;
+            return;
+        }
+        self.window.wl_surface().attach(None, 0, 0);
+        self.window.commit();
+        self.hidden = true;
+        self.configured = false;
+        self.frame_pending = false;
+        self.buffers.clear();
+    }
+
+    /// Bring the window back: a first commit with no buffer, as when it was
+    /// made, and the compositor answers with its size.
+    fn show(&mut self) {
+        if !self.hidden {
+            return;
+        }
+        eprintln!("ectodeck-native: shown again from the tray");
+        self.hidden = false;
+        self.full = true;
+        self.window.commit();
+    }
+
     /// The keyboard came back drawn at a size: light it.
     fn built(&mut self, board: Board) {
         let lit = board.compose(&self.lights, self.gain);
@@ -625,7 +688,14 @@ impl App {
     }
 
     fn draw(&mut self) {
-        if !self.configured || self.frame_pending {
+        if let Some(t) = &self.tray {
+            let on = self.front.ui.get_conn_state() == 1;
+            if on != self.tray_connected {
+                self.tray_connected = on;
+                t.connected(on);
+            }
+        }
+        if self.hidden || !self.configured || self.frame_pending {
             return;
         }
         let (w, h) = ((self.size.0 * self.scale) as usize, (self.size.1 * self.scale) as usize);
@@ -823,8 +893,7 @@ impl OutputHandler for App {
 
 impl WindowHandler for App {
     fn request_close(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &Window) {
-        self.front.stop_preview();
-        self.exit = true;
+        self.hide();
     }
 
     fn configure(&mut self, _: &Connection, _: &QueueHandle<Self>, window: &Window, configure: WindowConfigure, _: u32) {
