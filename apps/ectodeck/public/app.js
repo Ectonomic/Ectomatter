@@ -705,16 +705,6 @@ const MARKS = '`~-_=+^*\'";:,.';
 // keys print theirs at the top, as every other key does.
 const CENTRED = new Set(['Tab', 'CapsLock', 'LSHIFT', 'RSHIFT', 'Enter', 'KeypadEnter', 'Backspace'])
 
-// A cap's shades at a height in the drawing: its top the deck's shade there,
-// its rim twice that light and a lip 72% of it, as EVGA's photo has them.
-function capShades(y) {
-  const top = Math.round(Math.min(42, Math.max(37, 42 - (y - 60) * 5 / 170)));
-  const lin = v => (v /= 255) <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
-  const enc = l => Math.round(255 * (l <= 0.0031308 ? l * 12.92 : 1.055 * l ** (1 / 2.4) - 0.055));
-  const grey = v => `rgb(${v},${v},${v})`;
-  return [grey(top), grey(enc(Math.min(1, lin(top) * 2.2))), grey(enc(lin(top) * 0.72))];
-}
-
 function buildBoard() {
   const board = $('#board');
   const { x0, y0, x1, y1 } = SPACE;
@@ -754,11 +744,6 @@ function buildBoard() {
     }, el('span', { class: 'halo' }), el('span', { class: 'glow' }),
        keyFace(k.id), el('span', { class: 'remap' }));
     board.append(b);
-    // Every cap is as light as the deck where it sits (the deck's shade runs
-    // from 42 at the back row to 37 at the front), with a rim at twice its
-    // light and, on the spacebar, a lip at 72% of it (style.css .key)
-    const [face, rim, lip] = capShades(k.y + k.h / 2);
-    b.style.setProperty('--face', face); b.style.setProperty('--rim', rim); b.style.setProperty('--lip', lip);
     // the spacebar bends where the keys beside it end (style.css)
     if (k.id === 'Space') {
       const next = S.layout.find(o => o !== k && Math.abs(o.y - k.y) < 1);
