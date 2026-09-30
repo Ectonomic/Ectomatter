@@ -744,6 +744,11 @@ function buildBoard() {
     }, el('span', { class: 'halo' }), el('span', { class: 'glow' }),
        keyFace(k.id), el('span', { class: 'remap' }));
     board.append(b);
+    // the spacebar bends where the keys beside it end (style.css)
+    if (k.id === 'Space') {
+      const next = S.layout.find(o => o !== k && Math.abs(o.y - k.y) < 1);
+      if (next) b.style.setProperty('--bend', `${(next.h - GAP) / (k.h - GAP) * 100}%`);
+    }
     k.el = b; k.cx = k.x + k.w / 2; k.cy = k.y + k.h / 2;
     S.byPos[k.pos] = k;
   }
