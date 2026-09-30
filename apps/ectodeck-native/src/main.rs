@@ -102,6 +102,9 @@ const GROUND: [u8; 3] = [0x20, 0x20, 0x20];
 /// light is drawn at the web design's brightness, as approved in WebKit; going
 /// above the desktop's white by the screen's headroom looked overdone.
 const LIGHT_GAIN: f32 = 1.0;
+/// The luminance of the keys' light where the drawing's light is fully
+/// opaque, in nits; the light falls from it to none along the light's curve.
+const LIGHT_NITS: f64 = 600.0;
 /// how far in from the window's edge a press resizes it
 const EDGE: f64 = 6.0;
 
@@ -323,6 +326,44 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         let mut xy = at.split(',').map(|v| v.trim().parse::<f32>().unwrap_or(0.0));
         window.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(xy.next().unwrap_or(0.0), xy.next().unwrap_or(0.0)) });
     }
+    // ECTODECK_NATIVE_DRAG="x,y;x,y": a press dragged from the first point to the
+    // second in 30 steps, each step timed as the window would handle it
+    if let Ok(d) = std::env::var("ECTODECK_NATIVE_DRAG") {
+        let pts: Vec<(f32, f32)> = d
+            .split(';')
+            .filter_map(|p| p.split_once(',').and_then(|(a, b)| Some((a.trim().parse().ok()?, b.trim().parse().ok()?))))
+            .collect();
+        if let [(x0, y0), (x1, y1)] = pts[..] {
+            let at = |t: f32| LogicalPosition::new(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t);
+            window.dispatch_event(WindowEvent::PointerMoved { position: at(0.0) });
+            window.dispatch_event(WindowEvent::PointerPressed { position: at(0.0), button: PointerEventButton::Left });
+            let rect = board_rect(&front.ui, 1.0);
+            let tree = usvg::Tree::from_str(ectodeck_draw::z10::SVG, &usvg::Options::default()).unwrap();
+            let device: serde_json::Value = serde_json::from_str(ectodeck_draw::z10::DEVICE).unwrap();
+            let board = (rect.2 > 0).then(|| Board::new(&tree, &device, GROUND, rect.2 as u32, rect.3 as u32).unwrap());
+            for k in 1..=30 {
+                let t0 = Instant::now();
+                window.dispatch_event(WindowEvent::PointerMoved { position: at(k as f32 / 30.0) });
+                let t1 = Instant::now();
+                front.act();
+                let t2 = Instant::now();
+                window.draw_if_needed(|r| {
+                    r.render(&mut pic.ui, w as usize);
+                });
+                let t3 = Instant::now();
+                let lights = front.lights();
+                let t4 = Instant::now();
+                if let (Some(b), Some(l)) = (&board, &lights) {
+                    let _ = light(b, l, gain, reference);
+                    pic.encode(rect.0.max(0) as usize, rect.1.max(0) as usize, rect.2, rect.3);
+                }
+                let t5 = Instant::now();
+                eprintln!("step {k}: event {:?} act {:?} page {:?} lights {:?} keyboard {:?}", t1 - t0, t2 - t1, t3 - t2, t4 - t3, t5 - t4);
+            }
+            window.dispatch_event(WindowEvent::PointerReleased { position: at(1.0), button: PointerEventButton::Left });
+            front.act();
+        }
+    }
     // let animations run their course, as the eye would see them settle
     if let Some(ms) = std::env::var("ECTODECK_NATIVE_WAIT").ok().and_then(|v| v.parse::<u64>().ok()) {
         let end = Instant::now() + Duration::from_millis(ms);
@@ -355,7 +396,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         let lights = front.lights().unwrap_or_default();
         let gain = front.light_gain(reference).max(gain);
         eprintln!("the light at {:.0} nits", gain as f64 * reference);
-        let lit = board.compose(&lights, gain);
+        let lit = light(&board, &lights, gain, reference);
         pic.set_keyboard(rect, Some(&Rc::new(Lit { px: lit, w: rect.2, h: rect.3 })));
         front.ui.set_board_ready(true);
         window.request_redraw();
@@ -517,6 +558,8 @@ struct App {
     levels: (f64, f64),
     /// the screen's own peak, for Settings › HDR
     levels_peak: f64,
+    /// KWin takes the mastering display's luminance in a description
+    mastering: bool,
 
     slint: Rc<MinimalSoftwareWindow>,
     front: Front,
@@ -580,8 +623,12 @@ struct ScreenTag(u32);
 #[derive(Clone, Copy)]
 struct PictureTag(f64, f64);
 
-/// The picture's description: PQ with BT.2020 primaries, its white at the desktop's.
-fn describe<U: Send + Sync + 'static>(cm: &WpColorManagerV1, qh: &QueueHandle<App>, reference: f64, tag: U) -> WpImageDescriptionV1
+/// The picture's description: PQ with BT.2020 primaries, its white at the
+/// desktop's, and its brightest light no brighter than the screen's peak.
+/// Without that last, KWin takes the picture to reach PQ's 10,000 nits and
+/// tone-maps it down to the screen, which dims every light well below the
+/// nits it was drawn at.
+fn describe<U: Send + Sync + 'static>(cm: &WpColorManagerV1, qh: &QueueHandle<App>, reference: f64, peak: f64, mastering: bool, tag: U) -> WpImageDescriptionV1
 where
     App: Dispatch<WpImageDescriptionV1, U>,
 {
@@ -589,6 +636,12 @@ where
     params.set_tf_named(wp_color_manager_v1::TransferFunction::St2084Pq);
     params.set_primaries_named(wp_color_manager_v1::Primaries::Bt2020);
     params.set_luminances(0, 10000, reference.round() as u32);
+    let peak = peak.max(reference + 1.0).round() as u32;
+    if mastering {
+        params.set_mastering_luminance(1, peak);
+    }
+    params.set_max_cll(peak);
+    params.set_max_fall(peak);
     params.create(qh, tag)
 }
 
@@ -610,7 +663,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
     window.set_app_id("com.ectonomic.ectodeck");
     window.set_min_size(Some(MIN_SIZE));
 
-    let desc = describe(&cm, &qh, reference, ());
+    let desc = describe(&cm, &qh, reference, screens::screens().iter().filter_map(|s| s["peak"].as_f64()).fold(reference, f64::max), false, ());
     let cm_surface = cm.get_surface(window.wl_surface(), &qh, ());
 
     let (built_tx, built_rx) = calloop::channel::channel::<Board>();
@@ -671,6 +724,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         on_screen: None,
         glow_limit: settings.get("hdr.glow_limit").and_then(|v| v.as_f64()),
         levels_peak: 1000.0,
+        mastering: false,
         levels: (reference, reference * gain as f64),
         slint,
         front: Front::new(ui, kb, controlled, settings),
@@ -723,10 +777,12 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         return;
     }
     cm_surface.set_image_description(&desc, wp_color_manager_v1::RenderIntent::Perceptual);
+    eprintln!("ectodeck-native: the compositor {} the mastering display's luminance", if app.mastering { "takes" } else { "does not take" });
     // mapped by a first commit with no buffer; the compositor answers with the size
     app.window.commit();
 
     let mut trial = std::env::var_os("ECTODECK_NATIVE_TRAYTEST").map(|_| Instant::now());
+    let mut fps = std::env::var_os("ECTODECK_NATIVE_FPS").map(|_| (Instant::now(), 0u32, Duration::ZERO));
     // ECTODECK_NATIVE_OPEN_MACROS=N: open the Macro Editor on macro N once the keyboard is read, to check it
     let mut open_macros = std::env::var("ECTODECK_NATIVE_OPEN_MACROS").ok().and_then(|v| v.parse::<u32>().ok());
     while !app.exit {
@@ -753,8 +809,23 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
             app.open_macros(n);
         }
         app.act();
+        let t = Instant::now();
+        let before = app.frames;
         app.draw();
         app.draw_macros();
+        // ECTODECK_NATIVE_FPS: frames a second and the slowest, to check smoothness without slowing it
+        if let Some((since, n, slow)) = &mut fps {
+            if app.frames > before {
+                *n += 1;
+                *slow = (*slow).max(t.elapsed());
+            }
+            if since.elapsed() >= Duration::from_secs(1) {
+                if *n > 0 {
+                    eprintln!("ectodeck-native: {} frames a second, the slowest drawn in {:?}", n, slow);
+                }
+                (*since, *n, *slow) = (Instant::now(), 0, Duration::ZERO);
+            }
+        }
         // started again for a change to what Ectodeck may use, back on that place
         if let Some(place) = app.front.restart.take() {
             if let Ok(me) = std::env::current_exe() {
@@ -993,7 +1064,7 @@ impl App {
             return;
         }
         eprintln!("ectodeck-native: the screen's white is now {} nits; the light goes to {glow}", s.reference);
-        describe(&self.cm, qh, s.reference, PictureTag(s.reference, glow));
+        describe(&self.cm, qh, s.reference, self.levels_peak, self.mastering, PictureTag(s.reference, glow));
     }
 
     /// Close the window into the tray: without its buffer the window is
@@ -1026,7 +1097,7 @@ impl App {
 
     /// The keyboard came back drawn at a size: light it.
     fn built(&mut self, board: Board) {
-        let lit = board.compose(&self.lights, self.gain);
+        let lit = light(&board, &self.lights, self.gain, self.pic.reference());
         self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
         self.board = Some(board);
         self.full = true;
@@ -1040,7 +1111,7 @@ impl App {
         if (g - self.gain).abs() > 1e-3 {
             self.gain = g;
             if let Some(board) = &self.board {
-                let lit = board.compose(&self.lights, self.gain);
+                let lit = light(board, &self.lights, self.gain, self.pic.reference());
                 self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
             }
         }
@@ -1063,7 +1134,7 @@ impl App {
         if let Some(lights) = self.front.lights() {
             self.lights = lights;
             if let Some(board) = &self.board {
-                let lit = board.compose(&self.lights, self.gain);
+                let lit = light(board, &self.lights, self.gain, self.pic.reference());
                 self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
             }
         }
@@ -1467,7 +1538,7 @@ impl Dispatch<WpImageDescriptionV1, PictureTag> for App {
             app.pic.set_reference(reference);
             app.gain = LIGHT_GAIN;
             if let Some(board) = &app.board {
-                let lit = board.compose(&app.lights, app.gain);
+                let lit = light(board, &app.lights, app.gain, app.pic.reference());
                 app.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
             }
             app.full = true;
@@ -1504,7 +1575,14 @@ impl Dispatch<WpImageDescriptionInfoV1, ScreenTag> for App {
     }
 }
 
-delegate_noop!(App: ignore WpColorManagerV1);
+impl Dispatch<WpColorManagerV1, ()> for App {
+    fn event(app: &mut Self, _: &WpColorManagerV1, e: wp_color_manager_v1::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        use smithay_client_toolkit::reexports::client::WEnum;
+        if let wp_color_manager_v1::Event::SupportedFeature { feature: WEnum::Value(wp_color_manager_v1::Feature::SetMasteringDisplayPrimaries) } = e {
+            app.mastering = true;
+        }
+    }
+}
 delegate_noop!(App: ignore WpColorManagementSurfaceV1);
 delegate_noop!(App: ignore WpImageDescriptionCreatorParamsV1);
 delegate_compositor!(App);
@@ -1570,4 +1648,12 @@ fn cursor_icon(p: Pointer) -> CursorIcon {
         Pointer::Grabbing => CursorIcon::Grabbing,
         Pointer::Default => CursorIcon::Default,
     }
+}
+
+/// The keyboard lit: its light at LIGHT_NITS where fully opaque (or the
+/// ceiling, if that is lower), no channel past the ceiling, which is Peak
+/// nits over the desktop's white.
+fn light(board: &Board, lights: &[Light], ceiling: f32, reference: f64) -> Vec<f32> {
+    let top = ((LIGHT_NITS / reference) as f32).min(ceiling);
+    board.compose(lights, top, ceiling)
 }

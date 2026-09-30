@@ -162,15 +162,18 @@ impl Board {
     }
 
     /// The picture with this light: premultiplied linear RGBA, the SDR white
-    /// at 1.0 and the brightest light at `top` times it.
+    /// at 1.0; the light's luminance at full opacity is `top` times it, and no
+    /// channel goes past `ceiling` times it (what the screen can show).
     ///
     /// The light is light: the drawing's pieces of it (the spill on the deck,
     /// the light on the cap, the glow round the legend, the legend) are laid
     /// together, as the web page stacked them, and how opaque they come out
     /// at a pixel says how bright the light is there: fully opaque is `top`,
-    /// clear is none, along LIGHT_CURVE between. A key's brightness scales
-    /// its light's nits, never its opacity.
-    pub fn compose(&self, lights: &[Light], top: f32) -> Vec<f32> {
+    /// clear is none, along LIGHT_CURVE between. The brightness is luminance,
+    /// the nits the eye sees, whatever the colour: a red key's light is as
+    /// bright as a white key's, as far as the screen's red goes. A key's
+    /// brightness scales its light's nits, never its opacity.
+    pub fn compose(&self, lights: &[Light], top: f32, ceiling: f32) -> Vec<f32> {
         let (w, h) = (self.w as usize, self.h as usize);
         let mut out = vec![0f32; w * h * 4];
         // in bands of rows, one a thread: every step below is the pixel's own
@@ -179,13 +182,13 @@ impl Board {
         std::thread::scope(|sc| {
             for (b, band) in out.chunks_mut(rows * w * 4).enumerate() {
                 let y0 = b * rows;
-                sc.spawn(move || self.compose_rows(lights, top, y0, band));
+                sc.spawn(move || self.compose_rows(lights, top, ceiling.max(top), y0, band));
             }
         });
         out
     }
 
-    fn compose_rows(&self, lights: &[Light], top: f32, y0: usize, out: &mut [f32]) {
+    fn compose_rows(&self, lights: &[Light], top: f32, ceiling: f32, y0: usize, out: &mut [f32]) {
         let w = self.w as usize;
         let n = out.len() / 4;
         let y1 = y0 + n / w;
@@ -199,10 +202,12 @@ impl Board {
             px[3] = 1.0;
         }
         let light = |pos: u32| lights.iter().find(|l| l.pos == pos);
-        // a key's light: its colour in linear light, as bright as the key is lit
+        // a key's light: its colour in linear light, its luminance how strongly the key is lit
         let colour = |l: &Light| {
-            let k = l.strength.clamp(0.0, 1.0);
-            [lin(l.rgb[0]) * k, lin(l.rgb[1]) * k, lin(l.rgb[2]) * k]
+            let c = [lin(l.rgb[0]), lin(l.rgb[1]), lin(l.rgb[2])];
+            let y = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+            let k = if y > 0.0 { l.strength.clamp(0.0, 1.0) / y } else { 0.0 };
+            [c[0] * k, c[1] * k, c[2] * k]
         };
         // each pixel of a shape in this band: its place here, and its coverage
         let each = |s: &Shape, f: &mut dyn FnMut(usize, f32)| {
@@ -242,8 +247,14 @@ impl Board {
                 let a = opa[d];
                 if a > 0.0 {
                     let k = top * a.powf(LIGHT_CURVE) / a;
+                    let mut e = [col[d][0] * k, col[d][1] * k, col[d][2] * k];
+                    // a colour past what the screen shows is held at it, its hue kept
+                    let m = e[0].max(e[1]).max(e[2]);
+                    if m > ceiling {
+                        e = e.map(|v| v * ceiling / m);
+                    }
                     for i in 0..3 {
-                        px[i] += col[d][i] * k;
+                        px[i] += e[i];
                     }
                 }
                 opa[d] = 0.0;
@@ -407,7 +418,7 @@ mod tests {
             stat(&|k| k.glow.as_ref()), stat(&|k| k.legend.as_ref()));
         let lights: Vec<Light> = b.keys.iter().map(|k| Light { pos: k.pos, rgb: [255, 45, 0], strength: 1.0, dim: false }).collect();
         let t = std::time::Instant::now();
-        let frame = b.compose(&lights, 1000.0 / 254.0);
+        let frame = b.compose(&lights, 600.0 / 254.0, 1000.0 / 254.0);
         let composed = t.elapsed();
         let enc = Encoder::new(254.0);
         let t = std::time::Instant::now();
