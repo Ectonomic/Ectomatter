@@ -50,8 +50,14 @@ mod imp {
 
     static CHANNEL: Mutex<Option<mpsc::Sender<Layout>>> = Mutex::new(None);
 
-    /// Show the layout, starting the HDR layer the first time.
+    /// Show the layout, starting the HDR layer the first time. Only the main
+    /// window has the layer, and a window with no size (hidden, or not laid out
+    /// yet) has nothing to show: a buffer of no size is a protocol error, which
+    /// ends the whole app.
     pub fn layout(window: &tauri::WebviewWindow, layout: Layout, reference: f64, art: [String; 1]) -> Result<(), String> {
+        if window.label() != "main" || layout.win_w == 0 || layout.win_h == 0 {
+            return Ok(());
+        }
         let mut ch = CHANNEL.lock().map_err(|e| e.to_string())?;
         if let Some(tx) = ch.as_ref() {
             if tx.send(layout.clone()).is_ok() {
@@ -230,8 +236,24 @@ mod imp {
         [v(0), v(2), v(4)]
     }
 
+    /// A surface's picture: its buffer and the memory under it. It is kept
+    /// until the next one replaces it: a buffer destroyed while its surface
+    /// still shows it leaves the surface with nothing to show at its next
+    /// commit, which is how the plate went missing.
+    type Shown = (wl_shm_pool::WlShmPool, wl_buffer::WlBuffer);
+
+    fn drop_shown(old: Option<Shown>) {
+        if let Some((pool, buffer)) = old {
+            buffer.destroy();
+            pool.destroy();
+        }
+    }
+
     /// Put pixels on a surface through a fresh shared-memory buffer.
-    fn show(surface: &wl_surface::WlSurface, shm: &wl_shm::WlShm, qh: &QueueHandle<St>, w: u32, h: u32, bytes: &[u8]) -> Result<(), String> {
+    fn show(surface: &wl_surface::WlSurface, shm: &wl_shm::WlShm, qh: &QueueHandle<St>, w: u32, h: u32, bytes: &[u8]) -> Result<Shown, String> {
+        if w == 0 || h == 0 || bytes.len() != (w * h * 8) as usize {
+            return Err(format!("no picture of {w} x {h} to show"));
+        }
         let path = std::env::temp_dir().join(format!("ectodeck-hdr-{}-{}", std::process::id(), surface.id().protocol_id()));
         let mut file = std::fs::File::options().read(true).write(true).create(true).truncate(true).open(&path).map_err(|e| e.to_string())?;
         let _ = std::fs::remove_file(&path);
@@ -241,9 +263,7 @@ mod imp {
         surface.attach(Some(&buffer), 0, 0);
         surface.damage_buffer(0, 0, w as i32, h as i32);
         surface.commit();
-        pool.destroy();
-        buffer.destroy();
-        Ok(())
+        Ok((pool, buffer))
     }
 
     fn run(display: usize, parent_ptr: usize, reference: f64, art: [String; 1], rx: mpsc::Receiver<Layout>) -> Result<(), String> {
@@ -293,6 +313,7 @@ mod imp {
         let conv = Convert::new(reference);
         let mut shown: Option<Layout> = None;
         let mut board_size: Option<(u32, u32)> = None;
+        let (mut back_pic, mut board_pic): (Option<Shown>, Option<Shown>) = (None, None);
         eprintln!("ectodeck: HDR board: started, reference white {reference} nits");
         loop {
             let Ok(mut l) = rx.recv() else { break };
@@ -300,16 +321,21 @@ mod imp {
             while let Ok(next) = rx.try_recv() {
                 l = next;
             }
+            if l.win_w == 0 || l.win_h == 0 {
+                continue;
+            }
             let prev = shown.clone();
             if prev.as_ref().is_none_or(|p| p.win_w != l.win_w || p.win_h != l.win_h || p.radius != l.radius || p.base != l.base) {
-                show(&back, &shm, &qh, l.win_w, l.win_h, &backdrop(l.win_w, l.win_h, l.radius, hex(&l.base), &conv))?;
+                let pic = show(&back, &shm, &qh, l.win_w, l.win_h, &backdrop(l.win_w, l.win_h, l.radius, hex(&l.base), &conv))?;
+                drop_shown(back_pic.replace(pic));
             }
             match l.board {
                 Some([x, y, w, h]) if w >= 1.0 && h >= 1.0 => {
                     let size = (w.round() as u32, h.round() as u32);
                     brd_sub.set_position(x.round() as i32, y.round() as i32);
                     if board_size != Some(size) {
-                        show(&brd, &shm, &qh, size.0, size.1, &board(size.0, size.1, &art, &conv)?)?;
+                        let pic = show(&brd, &shm, &qh, size.0, size.1, &board(size.0, size.1, &art, &conv)?)?;
+                        drop_shown(board_pic.replace(pic));
                         board_size = Some(size);
                     } else {
                         brd.commit();
@@ -319,6 +345,7 @@ mod imp {
                     if board_size.is_some() {
                         brd.attach(None, 0, 0);
                         brd.commit();
+                        drop_shown(board_pic.take());
                         board_size = None;
                     }
                 }

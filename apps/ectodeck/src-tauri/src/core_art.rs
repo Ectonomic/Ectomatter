@@ -55,6 +55,20 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
+    fn the_plate_draws() {
+        // the HDR layer draws the plate with resvg from these layers; it must come out drawn, not empty
+        let svg = layers(&["body", "legend-body"]);
+        let tree = resvg::usvg::Tree::from_str(&svg, &resvg::usvg::Options::default()).unwrap();
+        let mut pix = resvg::tiny_skia::Pixmap::new(1240, 497).unwrap();
+        let k = 1240.0 / tree.size().width();
+        resvg::render(&tree, resvg::tiny_skia::Transform::from_scale(k, k), &mut pix.as_mut());
+        let opaque = pix.data().chunks_exact(4).filter(|p| p[3] > 200).count();
+        eprintln!("plate: {opaque} of {} pixels drawn, tree {:?}", 1240 * 497, tree.size());
+        assert!(opaque > 1240 * 497 / 2, "the plate came out nearly empty: {opaque} pixels");
+    }
+
+    #[test]
     fn the_device_names_every_key() {
         let d: serde_json::Value = serde_json::from_str(DEVICE).unwrap();
         assert!(d["controls"].as_array().unwrap().len() >= 116);
