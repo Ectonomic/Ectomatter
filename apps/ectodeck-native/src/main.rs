@@ -551,13 +551,11 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
     let mut lab = lab::LabPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false), device["light"].clone());
     let lights = front.lights().unwrap_or_default();
     let gain = front.light_gain(reference);
-    let top = ((board.legend_nits() as f64 / reference) as f32).min(gain);
-    let (legend, deck) = board.peaks(&lights, top, gain);
-    let (reach, _) = board.peaks(&lights, gain, gain);
+    let (legend, deck, reach) = board.peaks(&lights, reference as f32, gain);
     lab.set_readout(lab::Readout {
-        legend: legend as f64 * reference,
-        reach: reach as f64 * reference,
-        deck: deck as f64 * reference,
+        legend: (legend as f64).round(),
+        reach: (reach as f64).round(),
+        deck: (deck as f64).round(),
         lcd: (board.lcd_nits() as f64).min(gain as f64 * reference),
         peak: gain as f64 * reference,
         white: reference,
@@ -1092,13 +1090,11 @@ impl App {
         let (Some(l), Some(b)) = (&mut self.front.lab, &self.board) else { return };
         self.readout_at = Some(Instant::now());
         let reference = self.pic.reference();
-        let top = ((b.legend_nits() as f64 / reference) as f32).min(self.gain);
-        let (legend, deck) = b.peaks(&self.lights, top, self.gain);
-        let (reach, _) = b.peaks(&self.lights, self.gain, self.gain);
+        let (legend, deck, reach) = b.peaks(&self.lights, reference as f32, self.gain);
         l.set_readout(lab::Readout {
-            legend: (legend as f64 * reference).round(),
-            reach: (reach as f64 * reference).round(),
-            deck: (deck as f64 * reference).round(),
+            legend: (legend as f64).round(),
+            reach: (reach as f64).round(),
+            deck: (deck as f64).round(),
             lcd: (b.lcd_nits() as f64).min(self.gain as f64 * reference).round(),
             peak: (self.gain as f64 * reference).round(),
             white: reference.round(),
@@ -1882,12 +1878,10 @@ pub fn core_device_path() -> PathBuf {
     PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../cores/evga-z10/device.json"))
 }
 
-/// The keyboard lit: its legends at the core's legend brightness at their
-/// brightest (or the ceiling, if that is lower), no channel past the
-/// ceiling, which is Peak nits over the desktop's white.
+/// The keyboard lit: each part of its light at the core's brightness for it,
+/// no channel past the ceiling, which is Peak nits over the desktop's white.
 fn light(board: &Board, lights: &[Light], ceiling: f32, reference: f64, panel: Option<&overlays::Panel>) -> Vec<f32> {
-    let top = ((board.legend_nits() as f64 / reference) as f32).min(ceiling);
-    let mut px = board.compose(lights, top, ceiling);
+    let mut px = board.compose(lights, reference as f32, ceiling);
     // The display, lit from behind as an LCD is: its lit dots at the core's
     // display brightness, everything else on it in proportion, under the glass.
     if let Some(p) = panel {

@@ -34,8 +34,6 @@ enum Unit {
     Nits,
     /// a length in the art's units, read in millimetres too
     Length,
-    /// a share of the legends' brightness
-    Share,
     /// a part of the whole, as a percentage
     Fraction,
 }
@@ -55,11 +53,11 @@ const PARAMS: [Param; 11] = [
     Param { path: ("legend", "nits"), label: "Brightness", lo: 10.0, hi: 1000.0, step: 5.0, unit: Unit::Nits, note: "The legend at its brightest, nearest the LED, for a key lit fully. A saturated colour may reach less: the readout above says how much." },
     Param { path: ("legend", "depth"), label: "Spread", lo: 2.0, hi: 30.0, step: 0.5, unit: Unit::Length, note: "How deep under the legend the LED sits. Deeper lights a legend more evenly; shallower keeps the light to the part nearest the LED." },
     Param { path: ("legend", "floor"), label: "Far parts", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, note: "The least any part of a legend is lit, however far from the LED: light bouncing inside the cap." },
-    Param { path: ("deck", "share"), label: "Brightness", lo: 0.0, hi: 0.5, step: 0.005, unit: Unit::Share, note: "The glow on the deck at its brightest, just outside the skirt on the LED's side." },
+    Param { path: ("deck", "nits"), label: "Brightness", lo: 0.0, hi: 300.0, step: 1.0, unit: Unit::Nits, note: "The glow on the deck at its brightest, just outside the skirt on the LED's side, for a key lit fully." },
     Param { path: ("deck", "height"), label: "Round the skirt", lo: 1.0, hi: 30.0, step: 0.5, unit: Unit::Length, note: "How evenly the light gets out round the skirt. Lower keeps it to the LED's side of the key; higher spreads it all round." },
     Param { path: ("deck", "floor"), label: "Far side", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, note: "The least the skirt's far side lets out, as a part of its LED side." },
     Param { path: ("deck", "reach"), label: "Reach", lo: 0.3, hi: 8.0, step: 0.1, unit: Unit::Length, note: "How far across the deck the glow goes before it falls to a third." },
-    Param { path: ("rim", "share"), label: "Brightness", lo: 0.0, hi: 0.3, step: 0.005, unit: Unit::Share, note: "The glow the foot of each cap's skirt catches from the deck." },
+    Param { path: ("rim", "nits"), label: "Brightness", lo: 0.0, hi: 150.0, step: 1.0, unit: Unit::Nits, note: "The glow the foot of each cap's skirt catches from the deck, at its brightest." },
     Param { path: ("rim", "width"), label: "Height", lo: 0.1, hi: 3.0, step: 0.05, unit: Unit::Length, note: "How far up the skirt it reaches." },
     Param { path: ("led", ""), label: "North of centre", lo: 0.0, hi: 12.0, step: 0.25, unit: Unit::Length, note: "Where each key's LED sits under its cap, from the switch's centre toward the top of the key." },
     Param { path: ("lcd", "nits"), label: "Lit dots", lo: 10.0, hi: 600.0, step: 5.0, unit: Unit::Nits, note: "The display's lit dots, as bright as its backlight shows them." },
@@ -258,7 +256,6 @@ impl LabPage {
         match p.unit {
             Unit::Nits => format!("{v:.0} nits"),
             Unit::Length => format!("{v:.2} ({:.1} mm)", v / UNITS_PER_MM),
-            Unit::Share => format!("{:.1}% · {:.0} nits", v * 100.0, v * self.value(0)),
             Unit::Fraction => format!("{:.0}%", v * 100.0),
         }
     }
@@ -360,8 +357,7 @@ impl LabPage {
                         *cy += 118.0 + 30.0;
                     }
                     "Deck glow" => {
-                        let (share, height, floor, reach, led) = (self.value(3), self.value(4), self.value(5), self.value(6), self.value(9));
-                        let peak = share * self.value(0);
+                        let (peak, height, floor, reach, led) = (self.value(3), self.value(4), self.value(5), self.value(6), self.value(9));
                         let half = (pw - 12.0) / 2.0;
                         // round a 1u key's skirt, from the top edge's middle to the bottom edge's
                         let skirt = |x: f64, y: f64| floor + (1.0 - floor) * falloff(((x).powi(2) + (y + led).powi(2)).sqrt(), height);
@@ -453,8 +449,8 @@ fn light_block(light: &Value) -> String {
     s += &format!("  \"about\": {},\n", serde_json::to_string(&light["about"]).unwrap_or_else(|_| "\"\"".into()));
     s += &format!("  \"led\": {},\n", num("led", &light["led"]));
     s += &part("legend", &["nits", "depth", "floor"]);
-    s += &part("deck", &["share", "height", "floor", "reach"]);
-    s += &part("rim", &["share", "width"]);
+    s += &part("deck", &["nits", "height", "floor", "reach"]);
+    s += &part("rim", &["nits", "width"]);
     s += &part("lcd", &["nits"]);
     s += &format!("  \"wells\": {}\n", serde_json::to_string(&light["wells"]).unwrap_or_else(|_| "\"mask_1\"".into()));
     s += " },\n";
