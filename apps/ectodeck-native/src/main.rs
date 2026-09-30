@@ -652,8 +652,11 @@ impl App {
             if full {
                 r.set_repaint_buffer_type(RepaintBufferType::ReusedBuffer);
             }
-            for (p, s) in region.iter() {
-                dirty.push((p.x as usize, p.y as usize, s.width as usize, s.height as usize));
+            // the whole of what Slint changed: its list of rectangles has been
+            // seen to leave out pixels it drew (the title bar's buttons)
+            let (o, sz) = (region.bounding_box_origin(), region.bounding_box_size());
+            if sz.width > 0 && sz.height > 0 {
+                dirty.push((o.x.max(0) as usize, o.y.max(0) as usize, sz.width as usize, sz.height as usize));
             }
         });
 
