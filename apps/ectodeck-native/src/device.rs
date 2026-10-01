@@ -53,6 +53,7 @@ pub fn start(backups: PathBuf, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
     std::thread::spawn(move || {
         let kb = Keyboard::new(Conn::hid(), Some(backups));
         let mut queue: std::collections::VecDeque<Ask> = std::collections::VecDeque::new();
+        let mut handed_back = false;
         loop {
             // Everything asked for so far: a slider reading goes first, so the
             // knobs keep up while the lighting streams, and of several previews
@@ -79,7 +80,18 @@ pub fn start(backups: PathBuf, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
             });
             let Some(a) = queue.pop_front() else { continue };
             let heard = match a {
-                Ask::State => Heard::State(kb.state().map_err(|e| e.to_string())),
+                Ask::State => {
+                    let state = kb.state();
+                    // The first time the keyboard is read, its lighting is handed back to
+                    // its stored profile: a run of Ectodeck stopped short (killed, or
+                    // crashed) while the Lighting page streamed a preview leaves it
+                    // waiting for frames that never come.
+                    if state.is_ok() && !handed_back {
+                        handed_back = true;
+                        let _ = kb.hand_back();
+                    }
+                    Heard::State(state.map_err(|e| e.to_string()))
+                }
                 Ask::Save(n, body) => Heard::Saved(n, kb.save(n, &body).map_err(|e| e.to_string())),
                 Ask::Activate(n) => Heard::Active(n, kb.activate(n).map_err(|e| e.to_string())),
                 Ask::ReadActive => Heard::ActiveNow(kb.active().map_err(|e| e.to_string())),
