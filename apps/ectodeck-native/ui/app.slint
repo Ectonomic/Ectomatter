@@ -388,7 +388,8 @@ component ProfileButton inherits Rectangle {
 }
 
 // a key over the keyboard: the edge it shows when pointed at or chosen, a
-// press, and its new meaning printed at the foot of its cap
+// press (held down on the keyboard, or by the pointer here), and its new
+// meaning printed at the foot of its cap
 component KeyBox inherits Rectangle {
     in property <KeyItem> k;
     in property <length> unit;      // one of the drawing's units
@@ -400,7 +401,7 @@ component KeyBox inherits Rectangle {
     width: root.k.w * root.unit;
     height: root.k.h * root.unit;
     border-radius: (root.k.molded ? 0.13 : 0.24) * root.cqw;
-    background: root.k.pressed ? #00000052 : transparent;
+    background: root.k.pressed || ta.pressed ? #00000052 : transparent;
     border-width: root.k.selected ? 1.5px : ta.has-hover ? 1px : 0;
     border-color: root.k.selected ? #ffffffe0 : #8c8c8c;
     if ta.has-hover && !root.k.selected: Rectangle {

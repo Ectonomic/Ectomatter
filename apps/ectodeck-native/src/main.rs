@@ -1647,7 +1647,11 @@ impl KeyboardHandler for App {
     fn leave(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, surface: &wl_surface::WlSurface, _: u32) {
         match self.which_sub(surface).and_then(|w| self.subs[w].as_ref()) {
             Some(sw) => sw.slint.dispatch_event(WindowEvent::WindowActiveChanged(false)),
-            None => self.slint.dispatch_event(WindowEvent::WindowActiveChanged(false)),
+            None => {
+                self.slint.dispatch_event(WindowEvent::WindowActiveChanged(false));
+                // the keys held down are let go of in another window now
+                self.front.let_keys_go();
+            }
         }
         self.keys_on = None;
     }

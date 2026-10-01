@@ -37,7 +37,6 @@ pub enum Ask {
     MenuEnter,
     MenuDismiss,
     MenuBack,
-    Unpress(u32),
     Go(String),
     Rail(String),
     /// the Macro Editor, on the macro of this layer of the chosen key, or -1
@@ -675,9 +674,6 @@ impl Front {
                     }
                     self.build_menu();
                 }
-                Ask::Unpress(pos) => {
-                    self.page.pressed.remove(&pos);
-                }
                 Ask::Go(place) => {
                     self.close_menu();
                     self.ui.set_place(place.into());
@@ -1068,13 +1064,11 @@ impl Front {
                     *c = self.paint;
                 }
                 lighting::save_custom(self.page.editing, &self.page.custom);
-                self.press(pos);
                 self.push_preview();
                 return;
             }
             // otherwise it lights as pressing it would, for Reactive
             self.page.flash(pos, now);
-            self.press(pos);
             return;
         }
         if self.page.view != View::Keys {
@@ -1088,20 +1082,28 @@ impl Front {
         self.close_menu();
         self.listening = None;
         self.page.sel = Some(pos);
-        self.press(pos);
     }
 
-    /// Show a key pressed: it darkens where it stands for a moment.
-    pub fn press(&mut self, pos: u32) {
-        self.page.pressed.insert(pos, 0.0);
-        let a = self.asks.clone();
-        slint::Timer::single_shot(Duration::from_millis(90), move || a.borrow_mut().push(Ask::Unpress(pos)));
+    /// The keyboard's keys are all let go of: the window lost the keyboard,
+    /// so the keys held down will be let go of somewhere else.
+    pub fn let_keys_go(&mut self) {
+        if !self.page.pressed.is_empty() {
+            self.page.pressed.clear();
+            self.refresh();
+        }
     }
 
     /// A key typed on the keyboard, as a Linux key code: "Press a key" takes
-    /// it, or the board shows it pressed. True if it was taken.
+    /// it, or the board shows it down for as long as it is held. True if it was taken.
     pub fn typed(&mut self, code: u32, down: bool) -> bool {
         let Some((mods, hid)) = z10::evdev_to_hid(code) else { return self.listening.is_some() };
+        let pos = self.page.pos_for(mods, hid).filter(|p| self.page.key(*p).is_some());
+        // a key let go comes back up, whatever is open now
+        if let (false, Some(pos)) = (down, pos) {
+            if self.page.pressed.remove(&pos) {
+                self.refresh();
+            }
+        }
         if let Some((layer, held)) = self.listening {
             if down {
                 if hid == 0 {
@@ -1119,15 +1121,13 @@ impl Front {
             }
             return true;
         }
-        if down && self.menu.is_none() {
-            if let Some(pos) = self.page.pos_for(mods, hid) {
-                if self.page.key(pos).is_some() {
-                    self.press(pos);
-                    let now = self.t0.elapsed().as_secs_f64() * 1000.0;
-                    self.page.flash(pos, now);
-                    self.refresh();
-                }
+        if let (true, true, Some(pos)) = (down, self.menu.is_none(), pos) {
+            // a held key repeating stays down, and lights once, as it went down
+            if self.page.pressed.insert(pos) {
+                let now = self.t0.elapsed().as_secs_f64() * 1000.0;
+                self.page.flash(pos, now);
             }
+            self.refresh();
         }
         false
     }
@@ -1438,7 +1438,7 @@ impl Front {
                 molded: k.id.starts_with("Multimedia"),
                 remap: p.remap(k.pos, &names).map(|s| s.to_uppercase()).unwrap_or_default().into(),
                 selected: p.view == View::Keys && p.sel == Some(k.pos),
-                pressed: p.pressed.contains_key(&k.pos),
+                pressed: p.pressed.contains(&k.pos),
             })
             .collect();
         let same = {

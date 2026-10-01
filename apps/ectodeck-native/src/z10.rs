@@ -2,7 +2,7 @@
 //! keyboard on screen is lit. Ported from the web app (public/app.js): the
 //! same tables, the same drafts and the same preview, so the two agree.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use ectodeck_draw::hdr::Light;
 use serde_json::{json, Value};
@@ -441,8 +441,8 @@ pub struct Page {
     flash_idx: usize,
     hid_to_pos: HashMap<u32, u32>,
     mod_to_pos: HashMap<u32, u32>,
-    /// keys pressed a moment ago, darkened where they stand, and when
-    pub pressed: HashMap<u32, f64>,
+    /// keys held down on the keyboard, darkened where they stand until they are let go
+    pub pressed: HashSet<u32>,
     /// the colours the profile being edited paints its keys with, one a key
     pub custom: Vec<[u8; 3]>,
     /// Reactive's "Preview with pretend typing"
@@ -528,7 +528,7 @@ impl Page {
             flash_idx: 0,
             hid_to_pos: HashMap::new(),
             mod_to_pos: HashMap::new(),
-            pressed: HashMap::new(),
+            pressed: HashSet::new(),
             custom: vec![[0; 3]; 116],
             demo: false,
             last_colors: HashMap::new(),
