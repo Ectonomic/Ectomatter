@@ -194,6 +194,11 @@ pub struct Board {
     /// board's pixels: pixel = offset + scale x unit
     pub(crate) art_scale: f32,
     pub(crate) art_offset: (f32, f32),
+    /// the lock lights: each its light (a kernel light code: 0 Num Lock, 1
+    /// Caps Lock, 2 Scroll Lock) and its dot in the art; and their light,
+    /// at its brightest, in nits, and its colour (sRGB)
+    indicators: Vec<(u8, Shape)>,
+    indicator_light: (f32, [u8; 3]),
 }
 
 /// sRGB (as the page's colours are) to linear light, as KWin decodes the page: gamma 2.2.
@@ -519,7 +524,25 @@ impl Board {
             let second = legend.as_ref().and_then(|s| second_function(s, face, ka, oy));
             keys.push(KeyArt { pos: pos as u32, foot, face, deck: None, rim: None, chassis: None, legend, legend_lit: Vec::new(), second, print });
         }
-        let mut board = Board { w, h, under, shadow, caps, keys, model, wells, chassis, art_scale: ka, art_offset: (ox, oy) };
+        // the lock lights, from the core's "indicators"
+        let ind = &device["indicators"];
+        let indicators = ind["lights"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|l| {
+                let bit = match l["lock"].as_str()? {
+                    "num" => 0,
+                    "caps" => 1,
+                    "scroll" => 2,
+                    _ => return None,
+                };
+                Some((bit, shape(l["art"].as_str()?)?))
+            })
+            .collect();
+        let rgb = ind["rgb"].as_array().map(|c| [0, 1, 2].map(|i| c.get(i).and_then(|v| v.as_u64()).unwrap_or(255).min(255) as u8)).unwrap_or([255; 3]);
+        let indicator_light = (ind["nits"].as_f64().unwrap_or(150.0).max(0.0) as f32, rgb);
+        let mut board = Board { w, h, under, shadow, caps, keys, model, wells, chassis, art_scale: ka, art_offset: (ox, oy), indicators, indicator_light };
         board.relight();
         Ok(board)
     }
@@ -604,7 +627,7 @@ impl Board {
     /// deck's glow. The caps' shadows are the room's light blocked, so the
     /// LEDs' light is not under them. A key's brightness scales its nits,
     /// never its shape.
-    pub fn compose(&self, lights: &[Light], white: f32, ceiling: f32) -> Vec<f32> {
+    pub fn compose(&self, lights: &[Light], locks: u8, white: f32, ceiling: f32) -> Vec<f32> {
         let (w, h) = (self.w as usize, self.h as usize);
         let mut out = vec![0f32; w * h * 4];
         // in bands of rows, one a thread: every step below is the pixel's own
@@ -613,13 +636,13 @@ impl Board {
         std::thread::scope(|sc| {
             for (b, band) in out.chunks_mut(rows * w * 4).enumerate() {
                 let y0 = b * rows;
-                sc.spawn(move || self.compose_rows(lights, white, ceiling, y0, band));
+                sc.spawn(move || self.compose_rows(lights, locks, white, ceiling, y0, band));
             }
         });
         out
     }
 
-    fn compose_rows(&self, lights: &[Light], white: f32, ceiling: f32, y0: usize, out: &mut [f32]) {
+    fn compose_rows(&self, lights: &[Light], locks: u8, white: f32, ceiling: f32, y0: usize, out: &mut [f32]) {
         let w = self.w as usize;
         let n = out.len() / 4;
         let y1 = y0 + n / w;
@@ -724,6 +747,14 @@ impl Board {
             if let Some(s) = &key.legend {
                 let lit: Vec<f32> = key.legend_lit.iter().zip(shown(key, Some(l))).map(|(a, b)| a * b).collect();
                 add(&mut em, s, colour(l, legend_top), legend_top, Some(&lit));
+            }
+        }
+        // the lock lights that are on, lit as the keyboard's own are
+        let (nits, rgb) = self.indicator_light;
+        let lamp = Light { pos: 0, rgb, strength: 1.0, remapped: false };
+        for (bit, s) in &self.indicators {
+            if locks & (1 << bit) != 0 {
+                add(&mut em, s, key_colour(&lamp), (nits / white.max(1.0)).min(ceiling), None);
             }
         }
         shine(out, &mut em);
@@ -841,7 +872,7 @@ mod tests {
         assert!(b.keys.iter().all(|k| k.deck.is_some() && k.rim.is_some()), "every lit key has its deck glow and rim");
         let lights: Vec<Light> = b.keys.iter().map(|k| Light { pos: k.pos, rgb: [255, 45, 0], strength: 1.0, remapped: false }).collect();
         let t = std::time::Instant::now();
-        let frame = b.compose(&lights, 254.0, 1000.0 / 254.0);
+        let frame = b.compose(&lights, 0, 254.0, 1000.0 / 254.0);
         let composed = t.elapsed();
         let enc = Encoder::new(254.0);
         let t = std::time::Instant::now();
@@ -901,8 +932,8 @@ mod tests {
         // Composed, the shadow does not darken the LED's light: the glow just
         // below the skirt, in the cap's shadow, still shows.
         let lights: Vec<Light> = b.keys.iter().map(|k| Light { pos: k.pos, rgb: [255, 255, 255], strength: 1.0, remapped: false }).collect();
-        let lit = b.compose(&lights, 254.0, 1000.0 / 254.0);
-        let dark = b.compose(&[], 254.0, 1000.0 / 254.0);
+        let lit = b.compose(&lights, 0, 254.0, 1000.0 / 254.0);
+        let dark = b.compose(&[], 0, 254.0, 1000.0 / 254.0);
         let i = ((s_.1 as u32 * b.w + s_.0 as u32) * 4) as usize;
         eprintln!("below the W's skirt: lit {:.4}, unlit {:.4}", lit[i], dark[i]);
         assert!(lit[i] > dark[i] + 0.02, "the glow shows in the cap's shadow");
@@ -931,7 +962,7 @@ mod tests {
         let Peaks { legend, deck, clean, .. } = b.peaks(&red, 254.0, 600.0 / 254.0);
         eprintln!("red at a 600-nit peak: legends {legend:.0} nits (clean up to {clean:.0}), deck {deck:.0}");
         assert!((legend - 200.0).abs() < 1.0 && clean < 200.0 && (deck - 90.0).abs() < 1.0);
-        let lit = b.compose(&red, 254.0, 600.0 / 254.0);
+        let lit = b.compose(&red, 0, 254.0, 600.0 / 254.0);
         let hottest = lit.chunks_exact(4).map(|p| 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]).fold(0f32, f32::max) * 254.0;
         eprintln!("red legends sent at {hottest:.0} nits");
         assert!((hottest - 200.0).abs() < 2.0, "the legends go as bright as asked");
@@ -946,8 +977,8 @@ mod tests {
         let (_, device, b) = board();
         let px = |u: f32, v: f32| ((b.art_offset.0 + b.art_scale * u) as i32, (b.art_offset.1 + b.art_scale * v) as i32);
         let white: Vec<Light> = b.keys.iter().map(|k| Light { pos: k.pos, rgb: [255, 255, 255], strength: 1.0, remapped: false }).collect();
-        let lit = b.compose(&white, 254.0, 1000.0 / 254.0);
-        let dark = b.compose(&[], 254.0, 1000.0 / 254.0);
+        let lit = b.compose(&white, 0, 254.0, 1000.0 / 254.0);
+        let dark = b.compose(&[], 0, 254.0, 1000.0 / 254.0);
         let at = |f: &[f32], (x, y): (i32, i32)| {
             let i = ((y as u32 * b.w + x as u32) * 4) as usize;
             0.2126 * f[i] + 0.7152 * f[i + 1] + 0.0722 * f[i + 2]
@@ -1024,6 +1055,37 @@ mod tests {
         }
         for l in ["Caps Lock", "W", "E1", "Fn", "Tab"] {
             assert!(!with.iter().any(|w| w == l), "{l} has none");
+        }
+    }
+
+    /// A lock light shines when its lock is on, at the core's nits, and only then.
+    #[test]
+    fn lock_lights_follow_the_keyboard_s() {
+        let (_, device, b) = board();
+        assert_eq!(b.indicators.len(), 3, "Num Lock, Caps Lock and Scroll Lock");
+        let peak = |f: &[f32], s: &Shape| {
+            let mut most = 0f32;
+            for j in 0..s.h {
+                for i in 0..s.w {
+                    if s.cover[(j * s.w + i) as usize] > 0.99 {
+                        let k = (((s.y + j as i32) as u32 * b.w + (s.x + i as i32) as u32) * 4) as usize;
+                        most = most.max(0.2126 * f[k] + 0.7152 * f[k + 1] + 0.0722 * f[k + 2]);
+                    }
+                }
+            }
+            most * 254.0
+        };
+        let off = b.compose(&[], 0, 254.0, 1000.0 / 254.0);
+        let caps = b.compose(&[], 0b010, 254.0, 1000.0 / 254.0);
+        let nits = device["indicators"]["nits"].as_f64().unwrap() as f32;
+        for (bit, s) in &b.indicators {
+            let (dark, lit) = (peak(&off, s), peak(&caps, s));
+            eprintln!("light {bit}: {dark:.1} nits off, {lit:.1} with Caps Lock on");
+            if *bit == 1 {
+                assert!((lit - dark - nits).abs() < 1.0, "Caps Lock's light is at its nits");
+            } else {
+                assert!((lit - dark).abs() < 1e-3, "the others stay off");
+            }
         }
     }
 

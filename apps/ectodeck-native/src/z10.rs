@@ -439,10 +439,12 @@ pub struct Page {
     stars: HashMap<u32, (f64, [f64; 3])>,
     flashes: HashMap<u32, (f64, [f64; 3])>,
     flash_idx: usize,
-    hid_to_pos: HashMap<u32, u32>,
-    mod_to_pos: HashMap<u32, u32>,
     /// keys held down on the keyboard, darkened where they stand until they are let go
     pub pressed: HashSet<u32>,
+    /// the keyboard's lock lights as it shows them (bit 0 Num Lock, 1 Caps Lock,
+    /// 2 Scroll Lock), and its dimmer's level, 0 to 255, once the firmware says
+    pub locks: u8,
+    pub dimmer: Option<u8>,
     /// the colours the profile being edited paints its keys with, one a key
     pub custom: Vec<[u8; 3]>,
     /// Reactive's "Preview with pretend typing"
@@ -526,9 +528,9 @@ impl Page {
             stars: HashMap::new(),
             flashes: HashMap::new(),
             flash_idx: 0,
-            hid_to_pos: HashMap::new(),
-            mod_to_pos: HashMap::new(),
             pressed: HashSet::new(),
+            locks: 0,
+            dimmer: None,
             custom: vec![[0; 3]; 116],
             demo: false,
             last_colors: HashMap::new(),
@@ -547,22 +549,6 @@ impl Page {
         }
         self.editing = dev["active"].as_u64().filter(|n| (1..=5).contains(n)).unwrap_or(1) as u8;
         self.custom = crate::lighting::custom_colors(self.editing);
-        // a key typed on the page is found on the board by the factory keymap
-        self.hid_to_pos.clear();
-        self.mod_to_pos.clear();
-        if let Some(keys) = dev["profiles"][FACTORY]["keys"].as_array() {
-            for (pos, d) in keys.iter().enumerate() {
-                let d = def_of(d);
-                if d[0] != 0 {
-                    continue;
-                }
-                if d[2] != 0 {
-                    self.hid_to_pos.insert(d[2], pos as u32);
-                } else if d[1] != 0 {
-                    self.mod_to_pos.insert(d[1], pos as u32);
-                }
-            }
-        }
         self.dev = Some(dev);
     }
 
@@ -903,7 +889,9 @@ impl Page {
             .filter(|k| k.led)
             .filter_map(|k| {
                 let v = colors.get(&k.pos)?;
-                Some(Light { pos: k.pos, rgb: led_look([v[0], v[1], v[2]]), strength: ((v[3] * 1000.0).round() / 1000.0) as f32, remapped: self.remap(k.pos, &names).is_some() })
+                // the dimmer scales every key's light inside the keyboard, as colour x level / 256
+                let dim = self.dimmer.map_or(1.0, |d| d as f64 / 256.0);
+                Some(Light { pos: k.pos, rgb: led_look([v[0], v[1], v[2]]), strength: ((v[3] * dim * 1000.0).round() / 1000.0) as f32, remapped: self.remap(k.pos, &names).is_some() })
             })
             .collect()
     }
@@ -988,8 +976,30 @@ impl Page {
     }
 
     /// A key typed on the keyboard: where it is on the board.
-    pub fn pos_for(&self, mods: u32, hid: u32) -> Option<u32> {
-        if hid == 0 { self.mod_to_pos.get(&mods).copied() } else { self.hid_to_pos.get(&hid).copied() }
+    /// Where a key the keyboard sent (a kernel key code) sits on the board:
+    /// the key that sends it now, in the active profile as the keyboard has it
+    /// saved, one that sends only it before one that sends more with it (C
+    /// before Ctrl+C); failing that, one that sends it with Fn held. A key
+    /// whose meaning is a macro, Fn or nothing sends no code of its own.
+    pub fn pos_for(&self, code: u32) -> Option<u32> {
+        let profile = &self.dev.as_ref()?["profiles"][self.active().to_string()];
+        let key = evdev_to_hid(code);
+        let media = ectotype_core::recorder::key_media(code as u16).map(u32::from);
+        // how closely a key's meaning sends the code: 2 only it, 1 it among more, 0 not at all
+        let sends = |d: [u32; 4]| match d[0] {
+            0 => match key {
+                Some((mods, 0)) => u32::from(d[1] == mods && d[2] == 0) * 2,
+                Some((_, hid)) if d[2] == hid || d[3] == hid => if d[1] == 0 && (d[2] == 0 || d[3] == 0) { 2 } else { 1 },
+                _ => 0,
+            },
+            2 => u32::from(media == Some(d[1] | d[2] << 8)) * 2,
+            _ => 0,
+        };
+        ["keys", "fnkeys"].iter().find_map(|layer| {
+            let keys = profile[*layer].as_array()?;
+            let best = keys.iter().enumerate().map(|(pos, d)| (sends(def_of(d)), pos as u32)).filter(|(m, _)| *m > 0).max_by_key(|(m, pos)| (*m, std::cmp::Reverse(*pos)))?;
+            Some(best.1)
+        })
     }
 
     /// Light a key as pressing it would, for Reactive.

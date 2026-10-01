@@ -8,6 +8,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use ectodeck_draw::hdr::Light;
+use ectotype_core::watch::Watched;
 use slint::{Color, Model, ModelRc, SharedString, VecModel};
 
 use crate::device;
@@ -1084,26 +1085,12 @@ impl Front {
         self.page.sel = Some(pos);
     }
 
-    /// The keyboard's keys are all let go of: the window lost the keyboard,
-    /// so the keys held down will be let go of somewhere else.
-    pub fn let_keys_go(&mut self) {
-        if !self.page.pressed.is_empty() {
-            self.page.pressed.clear();
-            self.refresh();
-        }
-    }
 
-    /// A key typed on the keyboard, as a Linux key code: "Press a key" takes
-    /// it, or the board shows it down for as long as it is held. True if it was taken.
+    /// A key typed into Ectodeck's window, as a Linux key code, which "Press
+    /// a key" takes. True if it was taken. (The board shows the keyboard's
+    /// keys going down and coming up from the keyboard itself: see [watched].)
     pub fn typed(&mut self, code: u32, down: bool) -> bool {
         let Some((mods, hid)) = z10::evdev_to_hid(code) else { return self.listening.is_some() };
-        let pos = self.page.pos_for(mods, hid).filter(|p| self.page.key(*p).is_some());
-        // a key let go comes back up, whatever is open now
-        if let (false, Some(pos)) = (down, pos) {
-            if self.page.pressed.remove(&pos) {
-                self.refresh();
-            }
-        }
         if let Some((layer, held)) = self.listening {
             if down {
                 if hid == 0 {
@@ -1121,15 +1108,41 @@ impl Front {
             }
             return true;
         }
-        if let (true, true, Some(pos)) = (down, self.menu.is_none(), pos) {
-            // a held key repeating stays down, and lights once, as it went down
-            if self.page.pressed.insert(pos) {
-                let now = self.t0.elapsed().as_secs_f64() * 1000.0;
-                self.page.flash(pos, now);
-            }
-            self.refresh();
-        }
         false
+    }
+
+    /// What the keyboard did, from its own devices, whichever window has it:
+    /// a key on the board goes down and comes up with the real one (lighting
+    /// its Reactive effect as it goes down), the lock lights follow the
+    /// keyboard's, and a keyboard gone lets every key go.
+    pub fn watched(&mut self, w: Watched) {
+        match w {
+            Watched::Key(code, down) => {
+                let Some(pos) = self.page.pos_for(code as u32).filter(|p| self.page.key(*p).is_some()) else { return };
+                if down {
+                    if self.page.pressed.insert(pos) {
+                        let now = self.t0.elapsed().as_secs_f64() * 1000.0;
+                        self.page.flash(pos, now);
+                        self.refresh();
+                    }
+                } else if self.page.pressed.remove(&pos) {
+                    self.refresh();
+                }
+            }
+            Watched::Locks(bits) => {
+                if self.page.locks != bits {
+                    self.page.locks = bits;
+                    // the keyboard is lit again with them
+                    self.last_lights = None;
+                }
+            }
+            Watched::Gone => {
+                if !self.page.pressed.is_empty() {
+                    self.page.pressed.clear();
+                    self.refresh();
+                }
+            }
+        }
     }
 
     fn assign(&mut self, layer: usize, d: [u32; 4]) {
@@ -1625,6 +1638,8 @@ impl Front {
     /// Set what a slider drives, but only once it has really moved, so opening
     /// Ectodeck never throws the volume to wherever the slider sits.
     fn drive_sliders(&mut self, r: &serde_json::Value, f: [f32; 2]) {
+        // the dimmer's level, which every key's light inside the keyboard is scaled by
+        self.page.dimmer = r["dimmer"].as_u64().map(|v| v.min(255) as u8);
         let prev = self.last_sliders.replace(r.clone());
         let Some(prev) = prev else { return };
         let raw = |v: &serde_json::Value, k: &str| v[k].as_f64().unwrap_or(0.0);

@@ -326,10 +326,20 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         }
     }
     // keys typed on the keyboard, as Linux key codes: "29+" down, "29-" up
+    // keys as the keyboard sends them: into the window, and as its own devices tell of them
     for k in std::env::var("ECTODECK_NATIVE_EVDEV").unwrap_or_default().split(',').filter(|k| !k.is_empty()) {
         let (code, down) = (k.trim_end_matches(['+', '-']).parse().unwrap_or(0), k.ends_with('+'));
         front.typed(code, down);
+        front.watched(ectotype_core::watch::Watched::Key(code as u16, down));
         front.refresh();
+    }
+    // ECTODECK_NATIVE_SLIDERS='{"dimmer":64,...}': a reading of the sliders, as the keyboard sends one
+    if let Some(r) = std::env::var("ECTODECK_NATIVE_SLIDERS").ok().and_then(|v| serde_json::from_str(&v).ok()) {
+        front.heard(device::Heard::Sliders(Ok(r)));
+    }
+    // ECTODECK_NATIVE_LOCKS=N: the keyboard's lock lights (1 Num Lock, 2 Caps Lock, 4 Scroll Lock)
+    if let Some(bits) = std::env::var("ECTODECK_NATIVE_LOCKS").ok().and_then(|v| v.parse::<u8>().ok()) {
+        front.watched(ectotype_core::watch::Watched::Locks(bits));
     }
     // the pointer, where it was last left
     if let Ok(at) = std::env::var("ECTODECK_NATIVE_HOVER") {
@@ -364,7 +374,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
                 let lights = front.lights();
                 let t4 = Instant::now();
                 if let (Some(b), Some(l)) = (&board, &lights) {
-                    let _ = light(b, l, gain, reference, None);
+                    let _ = light(b, l, 0, gain, reference, None);
                     pic.encode(rect.0.max(0) as usize, rect.1.max(0) as usize, rect.2, rect.3);
                 }
                 let t5 = Instant::now();
@@ -406,7 +416,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         let lights = front.lights().unwrap_or_default();
         let gain = front.light_gain(reference).max(gain);
         eprintln!("the light at {:.0} nits", gain as f64 * reference);
-        let lit = light(&board, &lights, gain, reference, front.overlays.panel_for(board.w, board.lcd().dot));
+        let lit = light(&board, &lights, front.page.locks, gain, reference, front.overlays.panel_for(board.w, board.lcd().dot));
         let lit = Rc::new(Lit { px: lit, w: rect.2, h: rect.3 });
         pic.set_keyboard(rect, Some(&lit));
         front.ui.set_board_ready(true);
@@ -812,6 +822,19 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
                 }
             })
             .unwrap();
+        // the keyboard's keys and lock lights, from its own devices, whichever window has it
+        let (watch_tx, watch_rx) = calloop::channel::channel::<ectotype_core::watch::Watched>();
+        event_loop
+            .handle()
+            .insert_source(watch_rx, |e, _, app: &mut App| {
+                if let calloop::channel::Event::Msg(w) = e {
+                    app.front.watched(w);
+                }
+            })
+            .unwrap();
+        ectotype_core::watch::start(move |w| {
+            let _ = watch_tx.send(w);
+        });
         device::start(data_dir().join("backups"), heard_tx)
     });
 
@@ -1283,7 +1306,7 @@ impl App {
         if let Some(l) = &self.light {
             board.set_light(l);
         }
-        let lit = light(&board, &self.lights, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
+        let lit = light(&board, &self.lights, self.front.page.locks, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
         self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
         self.board = Some(board);
         self.full = true;
@@ -1297,7 +1320,7 @@ impl App {
         if (g - self.gain).abs() > 1e-3 {
             self.gain = g;
             if let Some(board) = &self.board {
-                let lit = light(board, &self.lights, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
+                let lit = light(board, &self.lights, self.front.page.locks, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
                 self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
             }
         }
@@ -1351,7 +1374,7 @@ impl App {
                 self.lights = l;
             }
             if let Some(board) = &self.board {
-                let lit = light(board, &self.lights, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
+                let lit = light(board, &self.lights, self.front.page.locks, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
                 self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
             }
             self.readout();
@@ -1647,11 +1670,7 @@ impl KeyboardHandler for App {
     fn leave(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, surface: &wl_surface::WlSurface, _: u32) {
         match self.which_sub(surface).and_then(|w| self.subs[w].as_ref()) {
             Some(sw) => sw.slint.dispatch_event(WindowEvent::WindowActiveChanged(false)),
-            None => {
-                self.slint.dispatch_event(WindowEvent::WindowActiveChanged(false));
-                // the keys held down are let go of in another window now
-                self.front.let_keys_go();
-            }
+            None => self.slint.dispatch_event(WindowEvent::WindowActiveChanged(false)),
         }
         self.keys_on = None;
     }
@@ -1771,7 +1790,7 @@ impl Dispatch<WpImageDescriptionV1, PictureTag> for App {
             app.pic.set_reference(reference);
             app.gain = LIGHT_GAIN;
             if let Some(board) = &app.board {
-                let lit = light(board, &app.lights, app.gain, app.pic.reference(), app.front.overlays.panel_for(board.w, board.lcd().dot));
+                let lit = light(board, &app.lights, app.front.page.locks, app.gain, app.pic.reference(), app.front.overlays.panel_for(board.w, board.lcd().dot));
                 app.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
             }
             app.full = true;
@@ -1899,9 +1918,10 @@ pub fn core_device_path() -> PathBuf {
 }
 
 /// The keyboard lit: each part of its light at the core's brightness for it,
-/// no channel past the ceiling, which is Peak nits over the desktop's white.
-fn light(board: &Board, lights: &[Light], ceiling: f32, reference: f64, panel: Option<&overlays::Panel>) -> Vec<f32> {
-    let mut px = board.compose(lights, reference as f32, ceiling);
+/// no channel past the ceiling, which is Peak nits over the desktop's white,
+/// and its lock lights as the keyboard has them.
+fn light(board: &Board, lights: &[Light], locks: u8, ceiling: f32, reference: f64, panel: Option<&overlays::Panel>) -> Vec<f32> {
+    let mut px = board.compose(lights, locks, reference as f32, ceiling);
     // The display, lit from behind as an LCD is: its lit dots, its unlit dots
     // and the ground between them each at the core's nits for them, in the
     // backlight's colour, under the glass. With nothing driving it, it is dark.
