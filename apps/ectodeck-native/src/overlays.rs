@@ -16,6 +16,11 @@ const ROWS: usize = 4;
 const PW: usize = COLS * 8;
 const PH: usize = ROWS * 8;
 
+/// Where the real panel's dots sit in the screen's window: the room round
+/// them, in dots, on the left, the top, the right and the bottom. They sit
+/// low and to the left, not in the middle.
+const GUTTER: [f32; 4] = [1.0, 3.0, 3.0, 1.0];
+
 struct Knob {
     image: slint::Image,
     /// where the art has it, and its size, in the board's pixels
@@ -148,22 +153,24 @@ impl Overlays {
     }
 
     /// The display in the pixels of a board `bw` wide: the whole of the
-    /// screen's window, from where the bezel ends. Its dots are in the
-    /// middle: 96% of it across, five times as wide as they are tall, the
-    /// display's own background round them.
+    /// screen's window, from where the bezel ends. Its dots sit in it as the
+    /// real panel's do (`GUTTER`), the display's own background round them.
     fn panel_box(&self, bw: u32) -> [f32; 4] {
         let unit = bw as f32 / 649.0;
         let [gx0, gy0, gx1, gy1] = self.glass_box;
         [(gx0 - self.view.0) * unit, (gy0 - self.view.1) * unit, (gx1 - gx0) * unit, (gy1 - gy0) * unit]
     }
 
-    /// The dots' box inside the display, in the display's own pixels.
+    /// The dots' box inside the display, in the display's own pixels: the
+    /// dots and the gutters either side of them fill its width, and the room
+    /// above and below them is shared as the real panel's gutters share it
+    /// (the window is a little taller than the gutters alone would make it).
     fn dots_box(&self, pw: u32, ph: u32) -> [f32; 4] {
-        let [gx0, _, gx1, gy1] = self.glass_box;
-        let (gw, gh) = (gx1 - gx0, gy1 - self.glass_box[1]);
-        let (k, kh) = (pw as f32 / gw, ph as f32 / gh);
-        let (w, h) = (gw * 0.96, gw * 0.96 / 5.0);
-        [(gw - w) / 2.0 * k, (gh - h) / 2.0 * kh, w * k, h * kh]
+        let [l, t, r, b] = GUTTER;
+        let pitch = pw as f32 / (PW as f32 + l + r);
+        let (w, h) = (PW as f32 * pitch, PH as f32 * pitch);
+        let (room_x, room_y) = (pw as f32 - w, ph as f32 - h);
+        [room_x * l / (l + r), room_y * t / (t + b), w, h]
     }
 
     /// The display's text as the keyboard draws it: printable ASCII, the
@@ -295,5 +302,29 @@ impl Overlays {
             out.push(Overlay { image: img.clone(), x: x / s, y: y / s, w: w / s, h: h / s, travel: 0.0, frac: 0.0, opacity: self.glass_opacity });
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The dots sit in the screen's window as the real panel's do: a dot's
+    /// room on the left, three on the right, and the room above and below
+    /// them shared three to one, at any size the keyboard is drawn.
+    #[test]
+    fn the_dots_sit_low_and_to_the_left() {
+        let o = Overlays::new();
+        for bw in [649, 1264, 2528] {
+            let [_, _, w, h] = o.panel_box(bw);
+            let (pw, ph) = (w.round() as u32, h.round() as u32);
+            let [x, y, dw, dh] = o.dots_box(pw, ph);
+            let pitch = dw / PW as f32;
+            let (left, top, right, bottom) = (x / pitch, y / pitch, (pw as f32 - x - dw) / pitch, (ph as f32 - y - dh) / pitch);
+            eprintln!("board {bw} px: window {pw} x {ph} px, a dot {pitch:.3} px; room left {left:.2}, top {top:.2}, right {right:.2}, bottom {bottom:.2} dots");
+            assert!((dh / pitch - PH as f32).abs() < 1e-3, "the dots are square");
+            assert!((left - 1.0).abs() < 1e-3 && (right - 3.0).abs() < 1e-3);
+            assert!((top / bottom - 3.0).abs() < 1e-3);
+        }
     }
 }
