@@ -105,27 +105,27 @@ struct Model {
 impl Model {
     fn from(l: &Value) -> Model {
         let f = |v: &Value, d: f32| v.as_f64().map_or(d, |v| v as f32);
-        let legend_nits = f(&l["legend"]["nits"], 220.0).max(0.0);
+        let legend_nits = f(&l["legend"]["nits"], 705.0).max(0.0);
         // a part's own nits, or (as the core once had it) a share of the legends'
         let nits = |part: &str, d: f32| l[part]["nits"].as_f64().map(|v| v as f32).or_else(|| l[part]["share"].as_f64().map(|v| v as f32 * legend_nits)).unwrap_or(d).max(0.0);
         Model {
             led: f(&l["led"], 7.0),
             legend_nits,
-            lcd_nits: f(&l["lcd"]["nits"], 120.0).max(0.0),
-            lcd_unlit: f(&l["lcd"]["unlit"], 1.5).max(0.0),
-            lcd_field: f(&l["lcd"]["field"], 0.3).max(0.0),
+            lcd_nits: f(&l["lcd"]["nits"], 324.0).max(0.0),
+            lcd_unlit: f(&l["lcd"]["unlit"], 4.1).max(0.0),
+            lcd_field: f(&l["lcd"]["field"], 0.8).max(0.0),
             lcd_dot: f(&l["lcd"]["dot"], 0.84).clamp(0.05, 1.0),
             lcd_glass: f(&l["lcd"]["glass"], 1.0).max(0.0),
             legend_depth: f(&l["legend"]["depth"], 10.0),
             legend_floor: f(&l["legend"]["floor"], 0.35),
             legend_unlit: f(&l["legend"]["unlit"], 0.15).clamp(0.0, 1.0),
-            deck_nits: nits("deck", 18.0),
+            deck_nits: nits("deck", 58.0),
             deck_height: f(&l["deck"]["height"], 7.0),
             deck_floor: f(&l["deck"]["floor"], 0.15),
             deck_reach: f(&l["deck"]["reach"], 2.0).max(0.05),
-            rim_nits: nits("rim", 13.0),
+            rim_nits: nits("rim", 42.0),
             rim_width: f(&l["rim"]["width"], 0.8).max(0.05),
-            chassis_nits: f(&l["chassis"]["nits"], 6.0).max(0.0),
+            chassis_nits: f(&l["chassis"]["nits"], 19.0).max(0.0),
             chassis_reach: f(&l["chassis"]["reach"], 4.0).max(0.05),
         }
     }
@@ -336,18 +336,24 @@ fn light_key(key: &mut KeyArt, model: &Model, wells: Option<&[f32]>, chassis: &[
     });
 }
 
-/// A key's light: its colour in linear light, its luminance how strongly the
-/// key is lit. Nothing holds it back: a part asked for more than the screen
-/// can show in that colour (a saturated red's channel passes the screen's
-/// peak well before its luminance does) is sent as asked, and the screen
-/// clips it there.
+/// A key's light: its LEDs' colour in linear light, as strongly as the key is
+/// lit. An LED gives off as much light as its colour has: white (all three of
+/// its dies full) the most, a red about a third of that; so a part's nits are
+/// a key lit white at full, and a colour shows its own share of them. Nothing
+/// holds it back: a part asked for more than the screen can show in that
+/// colour (a saturated red's channel passes the screen's peak well before its
+/// luminance does) is sent as asked, and the screen clips it there.
 fn key_colour(l: &Light) -> [f32; 3] {
     let c = [lin(l.rgb[0]), lin(l.rgb[1]), lin(l.rgb[2])];
+    c.map(|v| v * l.strength.clamp(0.0, 1.0))
+}
+
+/// A colour in linear light at a luminance of 1, for a light whose nits are
+/// its own whatever its colour (the lock lights).
+fn unit_colour(rgb: [u8; 3]) -> [f32; 3] {
+    let c = [lin(rgb[0]), lin(rgb[1]), lin(rgb[2])];
     let y = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
-    if y <= 0.0 {
-        return [0.0; 3];
-    }
-    c.map(|v| v / y * l.strength.clamp(0.0, 1.0))
+    if y <= 0.0 { [0.0; 3] } else { c.map(|v| v / y) }
 }
 
 /// How bright a key's colour goes, in the SDR white's units, before one of
@@ -657,7 +663,8 @@ impl Board {
     pub fn peaks(&self, lights: &[Light], white: f32, ceiling: f32) -> Peaks {
         let t = self.model.tops(white, ceiling);
         let lit: Vec<&Light> = lights.iter().filter(|l| self.keys.iter().any(|k| k.pos == l.pos)).collect();
-        let strongest = lit.iter().map(|l| l.strength.clamp(0.0, 1.0)).fold(0.0f32, f32::max) * white;
+        // the brightest key's light: how strongly it is lit, by how much light its colour has
+        let strongest = lit.iter().map(|l| { let c = key_colour(l); 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2] }).fold(0.0f32, f32::max) * white;
         let clean = lit.iter().map(|l| clean_limit(l, ceiling) * l.strength.clamp(0.0, 1.0)).fold(0.0f32, f32::max);
         Peaks { legend: strongest * t.legend, deck: strongest * t.deck, rim: strongest * t.rim, chassis: strongest * t.chassis, clean: clean * white }
     }
@@ -807,12 +814,12 @@ impl Board {
         // the lock lights that are on, as the keyboard's own are: each window
         // lit by its LED, and a little of its light out of its edges
         let (nits, spill, rgb) = self.indicator_light;
-        let lamp = Light { pos: 0, rgb, strength: 1.0, remapped: false };
+        let lamp = unit_colour(rgb);
         let top = |n: f32| (n / white.max(1.0)).min(ceiling);
         for ind in &self.indicators {
             if locks & (1 << ind.bit) != 0 {
-                add(&mut em, &ind.window, key_colour(&lamp), top(nits), Some(&ind.lit));
-                add(&mut em, &ind.spill, key_colour(&lamp), top(spill), None);
+                add(&mut em, &ind.window, lamp, top(nits), Some(&ind.lit));
+                add(&mut em, &ind.spill, lamp, top(spill), None);
             }
         }
         shine(out, &mut em);
@@ -1014,20 +1021,24 @@ mod tests {
         let Peaks { legend, deck, .. } = b.peaks(&lights, 254.0, 1000.0 / 254.0);
         eprintln!("legends turned down: legends {legend:.0} nits, deck {deck:.0}");
         assert!((legend - 200.0).abs() < 1.0 && (deck - 90.0).abs() < 1.0, "the deck keeps its own brightness");
-        // a red the screen cannot show cleanly at 200 nits is still sent at 200;
-        // its clean limit is only told
+        // a red gives off its share of the light (its luminance, a fifth of
+        // white's): asked for 1000 nits under a 600-nit peak, white's light is
+        // held at the peak, Peak nits being the only cap, and a red's at its
+        // share of it (128), where its red is at the peak and still clean
+        light["legend"]["nits"] = serde_json::json!(1000);
+        b.set_light(&light);
         let red: Vec<Light> = b.keys.iter().map(|k| Light { pos: k.pos, rgb: [255, 0, 0], strength: 1.0, remapped: false }).collect();
         let Peaks { legend, deck, clean, .. } = b.peaks(&red, 254.0, 600.0 / 254.0);
         eprintln!("red at a 600-nit peak: legends {legend:.0} nits (clean up to {clean:.0}), deck {deck:.0}");
-        assert!((legend - 200.0).abs() < 1.0 && clean < 200.0 && (deck - 90.0).abs() < 1.0);
+        assert!((legend - 127.6).abs() < 1.0 && (clean - legend).abs() < 1.0 && (deck - 19.1).abs() < 0.5, "red: {legend} {clean} {deck}");
         let lit = b.compose(&red, 0, 254.0, 600.0 / 254.0);
         let hottest = lit.chunks_exact(4).map(|p| 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]).fold(0f32, f32::max) * 254.0;
         eprintln!("red legends sent at {hottest:.0} nits");
-        assert!((hottest - 200.0).abs() < 2.0, "the legends go as bright as asked");
+        assert!((hottest - 127.6).abs() < 3.0, "the legends go as bright as the peak lets a red");
         // and a key's brightness dims every part of it together
         let half: Vec<Light> = lights.iter().map(|l| Light { strength: 0.5, ..*l }).collect();
         let Peaks { legend, deck, .. } = b.peaks(&half, 254.0, 1000.0 / 254.0);
-        assert!((legend - 100.0).abs() < 1.0 && (deck - 45.0).abs() < 1.0, "half lit: {legend} {deck}");
+        assert!((legend - 500.0).abs() < 1.0 && (deck - 45.0).abs() < 1.0, "half lit: {legend} {deck}");
     }
 
     #[test]

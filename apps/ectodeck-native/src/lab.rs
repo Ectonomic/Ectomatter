@@ -53,10 +53,10 @@ struct Param {
 }
 
 const PARAMS: [Param; 18] = [
-    Param { path: ("legend", "nits"), label: "Brightness", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, note: "The legend at its brightest, nearest the LED, for a key lit fully, up to Peak nits (Settings › HDR)." },
+    Param { path: ("legend", "nits"), label: "Brightness", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, note: "The legend at its brightest, nearest the LED, for a key lit white at full, up to Peak nits (Settings › HDR). A colour gives off its own share of that, as an LED does: a red about a third." },
     Param { path: ("legend", "depth"), label: "Spread", lo: 1.0, hi: 60.0, step: 0.5, unit: Unit::Length, note: "How deep under the legend the LED sits. Deeper lights a legend more evenly; shallower keeps the light to the part nearest the LED." },
     Param { path: ("legend", "floor"), label: "Far parts", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, note: "The least any part of a legend is lit, however far from the LED: light bouncing inside the cap." },
-    Param { path: ("deck", "nits"), label: "Brightness", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, note: "The glow on the deck at its brightest, just outside the skirt on the LED's side, for a key lit fully." },
+    Param { path: ("deck", "nits"), label: "Brightness", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, note: "The glow on the deck at its brightest, just outside the skirt on the LED's side, for a key lit white at full." },
     Param { path: ("deck", "height"), label: "Round the skirt", lo: 0.5, hi: 60.0, step: 0.5, unit: Unit::Length, note: "How evenly the light gets out round the skirt. Lower keeps it to the LED's side of the key; higher spreads it all round." },
     Param { path: ("deck", "floor"), label: "Far side", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, note: "The least the skirt's far side lets out, as a part of its LED side." },
     Param { path: ("deck", "reach"), label: "Reach", lo: 0.1, hi: 30.0, step: 0.1, unit: Unit::Length, note: "How far across the deck the glow goes before it falls to a third." },
@@ -65,7 +65,7 @@ const PARAMS: [Param; 18] = [
     Param { path: ("led", ""), label: "North of centre", lo: -12.0, hi: 12.0, step: 0.25, unit: Unit::Length, note: "Where each key's LED sits under its cap, from the switch's centre toward the top of the key; below 0, toward the bottom, as on a keyboard whose LEDs face south." },
     Param { path: ("chassis", "nits"), label: "Brightness", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, note: "At its brightest, on the chassis just past a well's edge." },
     Param { path: ("chassis", "reach"), label: "Reach", lo: 0.1, hi: 40.0, step: 0.1, unit: Unit::Length, note: "How far across the chassis it goes before it falls to a third." },
-    Param { path: ("lcd", "nits"), label: "Lit dots", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, note: "The display's lit dots, as bright as its backlight shows them." },
+    Param { path: ("lcd", "nits"), label: "Lit dots", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, note: "The display's lit dots with its backlight white at full. A colour gives off its own share of that, as an LED does." },
     Param { path: ("lcd", "unlit"), label: "Unlit dots", lo: 0.0, hi: 0.0, step: 0.1, unit: Unit::Nits, note: "The dots that are off, which let a little of the backlight through, as a real display's do." },
     Param { path: ("lcd", "field"), label: "Background", lo: 0.0, hi: 0.0, step: 0.1, unit: Unit::Nits, note: "The ground between the dots." },
     Param { path: ("lcd", "dot"), label: "Dot size", lo: 0.05, hi: 1.0, step: 0.01, unit: Unit::Fraction, note: "How much of each cell a dot fills; the rest is the gap between dots." },

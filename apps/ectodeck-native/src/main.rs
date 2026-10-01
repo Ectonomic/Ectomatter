@@ -1933,9 +1933,8 @@ fn light(board: &Board, lights: &[Light], locks: u8, ceiling: f32, reference: f6
         let (w, h) = (board.w as i32, board.h as i32);
         let lcd = board.lcd();
         let white = reference as f32;
-        let c = p.backlight.map(|v| v.max(0.0).powf(2.2));
-        let y = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
-        let unit = if y > 0.0 { c.map(|v| v / y) } else { [0.0; 3] };
+        // the backlight is an LED: as much light as its colour has, white the most
+        let unit = p.backlight.map(|v| v.max(0.0).powf(2.2));
         let nits = |n: f32| (n / white).min(ceiling);
         let (lit, unlit, field) = (nits(lcd.lit), nits(lcd.unlit), nits(lcd.field));
         for row in 0..p.h as i32 {
