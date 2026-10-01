@@ -423,15 +423,17 @@ impl LabPage {
                         let (peak, height, floor, reach, led) = (self.value(3), self.value(4), self.value(5), self.value(6), self.value(9));
                         let half = (pw - 12.0) / 2.0;
                         // round a 1u key's skirt, from the top edge's middle to the bottom edge's
-                        let skirt = |x: f64, y: f64| floor + (1.0 - floor) * falloff(((x).powi(2) + (y + led).powi(2)).sqrt(), height);
+                        // the LED's own light round the skirt, as a part of what reaches its LED side
+                        // (where the outline is nearest the LED, whichever side that is), and the far
+                        // side never less than its share of that, as the keyboard works it out
+                        let direct = |x: f64, y: f64| falloff(((x).powi(2) + (y + led).powi(2)).sqrt(), height);
                         let raw: Vec<(f64, f64)> = (0..=96).map(|k| {
                             let s = 48.0 * k as f64 / 96.0;
                             let (x, y) = if s < 12.0 { (s, -12.0) } else if s < 36.0 { (12.0, -12.0 + (s - 12.0)) } else { (12.0 - (s - 36.0), 12.0) };
-                            (s, skirt(x, y))
+                            (s, direct(x, y))
                         }).collect();
-                        // brightest where the outline is nearest the LED, whichever side that is
-                        let most = raw.iter().map(|p| p.1).fold(0.0f64, f64::max).max(1e-9);
-                        let pts: Vec<(f64, f64)> = raw.iter().map(|&(s, v)| (s, peak * v / most)).collect();
+                        let most = raw.iter().map(|p| p.1).fold(0.0f64, f64::max).max(1e-12);
+                        let pts: Vec<(f64, f64)> = raw.iter().map(|&(s, v)| (s, peak * (floor + (1.0 - floor) * v / most))).collect();
                         self.plot(c, &mut plots, x0 + pad, *cy, half, 118.0, &pts, 48.0, peak.max(0.1), &[(12.0, "corner"), (36.0, "corner")], "Round a key's skirt", "top", "bottom");
                         let far = 8.0;
                         let pts: Vec<(f64, f64)> = (0..=80).map(|k| {

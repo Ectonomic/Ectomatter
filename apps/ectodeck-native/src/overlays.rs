@@ -147,15 +147,23 @@ impl Overlays {
         true
     }
 
-    /// The display's panel in the pixels of a board `bw` wide: 96% of the
-    /// glass across, five times as wide as it is tall, in the middle of the glass.
+    /// The display in the pixels of a board `bw` wide: the whole of the
+    /// screen's window, from where the bezel ends. Its dots are in the
+    /// middle: 96% of it across, five times as wide as they are tall, the
+    /// display's own background round them.
     fn panel_box(&self, bw: u32) -> [f32; 4] {
         let unit = bw as f32 / 649.0;
         let [gx0, gy0, gx1, gy1] = self.glass_box;
-        let (gw, gh) = (gx1 - gx0, gy1 - gy0);
+        [(gx0 - self.view.0) * unit, (gy0 - self.view.1) * unit, (gx1 - gx0) * unit, (gy1 - gy0) * unit]
+    }
+
+    /// The dots' box inside the display, in the display's own pixels.
+    fn dots_box(&self, pw: u32, ph: u32) -> [f32; 4] {
+        let [gx0, _, gx1, gy1] = self.glass_box;
+        let (gw, gh) = (gx1 - gx0, gy1 - self.glass_box[1]);
+        let (k, kh) = (pw as f32 / gw, ph as f32 / gh);
         let (w, h) = (gw * 0.96, gw * 0.96 / 5.0);
-        let (x, y) = (gx0 + (gw - w) / 2.0, gy0 + (gh - h) / 2.0);
-        [(x - self.view.0) * unit, (y - self.view.1) * unit, w * unit, h * unit]
+        [(gw - w) / 2.0 * k, (gh - h) / 2.0 * kh, w * k, h * kh]
     }
 
     /// The display's text as the keyboard draws it: printable ASCII, the
@@ -209,7 +217,8 @@ impl Overlays {
                 }
             }
         }
-        let (cx, cy) = (pw as f32 / PW as f32, ph as f32 / PH as f32);
+        let [mx, my, mw, mh] = self.dots_box(pw, ph);
+        let (cx, cy) = (mw / PW as f32, mh / PH as f32);
         // a gap round each dot where the cells are big enough to show one
         let dot = if cx >= 2.5 { dot } else { 1.0 };
         let n = (pw * ph) as usize;
@@ -218,7 +227,7 @@ impl Overlays {
         for y in 0..PH {
             for x in 0..PW {
                 let into = if lit[y * PW + x] { &mut on } else { &mut off };
-                let (x0, y0) = (x as f32 * cx, y as f32 * cy);
+                let (x0, y0) = (mx + x as f32 * cx, my + y as f32 * cy);
                 let (x1, y1) = (x0 + cx * dot, y0 + cy * dot);
                 for py in (y0.floor() as u32)..(y1.ceil() as u32).min(ph) {
                     let oy = (y1.min(py as f32 + 1.0) - y0.max(py as f32)).max(0.0);

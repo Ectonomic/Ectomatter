@@ -210,11 +210,8 @@ fn light_key(key: &mut KeyArt, model: &Model, wells: Option<&[f32]>, chassis: &[
     let face = key.face;
     let well = |x: i32, y: i32| wells.map_or(1.0, |m| m[(y as u32 * w + x as u32) as usize]);
     let led = ((foot[0] + foot[2]) / 2.0, (foot[1] + foot[3]) / 2.0 - model.led);
-    // how much light leaves the skirt at a point on its outline
-    let skirt = |px: f32, py: f32| {
-        let r = ((px - led.0).powi(2) + (py - led.1).powi(2)).sqrt();
-        model.deck_floor + (1.0 - model.deck_floor) * falloff(r, model.deck_height)
-    };
+    // the LED's own light at a point on the skirt's outline
+    let direct = |px: f32, py: f32| falloff(((px - led.0).powi(2) + (py - led.1).powi(2)).sqrt(), model.deck_height);
     // the outline's point nearest the LED, where the most light gets out: on
     // the top edge for a key as wide as it is tall or wider, on a side for a tall one
     let nearest = [
@@ -226,7 +223,11 @@ fn light_key(key: &mut KeyArt, model: &Model, wells: Option<&[f32]>, chassis: &[
     .into_iter()
     .fold((f32::MAX, (led.0, foot[1])), |b, (d, p)| if d.abs() < b.0 { (d.abs(), p) } else { b })
     .1;
-    let brightest = skirt(nearest.0, nearest.1);
+    // How much light leaves the skirt at a point on its outline: 1 on its LED
+    // side, where it is nearest the LED, and never less than the core's far
+    // side (a part of that), however far round the skirt.
+    let nearest_direct = direct(nearest.0, nearest.1).max(1e-12);
+    let skirt = |px: f32, py: f32| model.deck_floor + (1.0 - model.deck_floor) * (direct(px, py) / nearest_direct).min(1.0);
     // a box of the board's pixels round the cap, `m` units wider each side
     let span = |m: f32| {
         let x0 = (ox + ka * (foot[0] - m)).floor().max(0.0) as i32;
@@ -245,7 +246,7 @@ fn light_key(key: &mut KeyArt, model: &Model, wells: Option<&[f32]>, chassis: &[
             let (u, v) = unit(x, y);
             let (pu, pv) = (u.clamp(foot[0], foot[2]), v.clamp(foot[1], foot[3]));
             let d = ((u - pu).powi(2) + (v - pv).powi(2)).sqrt();
-            let e = (skirt(pu, pv) / brightest).min(1.0) * (-d / model.deck_reach).exp() * well(x, y);
+            let e = skirt(pu, pv) * (-d / model.deck_reach).exp() * well(x, y);
             cover[(j as u32 * dw + i as u32) as usize] = e.max(0.0);
         }
     }
@@ -272,7 +273,7 @@ fn light_key(key: &mut KeyArt, model: &Model, wells: Option<&[f32]>, chassis: &[
                 2 => (u, foot[1]),
                 _ => (u, foot[3]),
             };
-            let e = (skirt(pu, pv) / brightest).min(1.0) * (-t.max(0.0) / model.rim_width).exp();
+            let e = skirt(pu, pv) * (-t.max(0.0) / model.rim_width).exp();
             cover[(j as u32 * rw + i as u32) as usize] = a * e;
         }
     }
@@ -294,7 +295,7 @@ fn light_key(key: &mut KeyArt, model: &Model, wells: Option<&[f32]>, chassis: &[
             let (u, v) = unit(x, y);
             let (pu, pv) = (u.clamp(foot[0], foot[2]), v.clamp(foot[1], foot[3]));
             let d = ((u - pu).powi(2) + (v - pv).powi(2)).sqrt();
-            cover[(j as u32 * cw + i as u32) as usize] = (skirt(pu, pv) / brightest).min(1.0) * (-d / model.chassis_reach).exp() * on;
+            cover[(j as u32 * cw + i as u32) as usize] = skirt(pu, pv) * (-d / model.chassis_reach).exp() * on;
         }
     }
     key.chassis = Some(Shape { x: x0, y: y0, w: cw, h: ch, cover });
@@ -926,6 +927,49 @@ mod tests {
         assert!(vf < vn * 0.5, "and it falls away across the chassis");
         assert!(vo.abs() < 1e-4, "nothing lights the page round the keyboard");
         assert!((b.peaks(&white, 254.0, 1000.0 / 254.0).chassis - 20.0).abs() < 0.5);
+    }
+
+    /// Far side is the skirt's far side as a part of its LED side, across its
+    /// whole range, however the light is spread round the skirt: with the
+    /// light spread as little as it goes, 50% is half, not all.
+    #[test]
+    fn far_side_is_its_share_of_the_led_side() {
+        let (tree, device, mut b) = board();
+        let c = device["controls"].as_array().unwrap().iter().find(|c| c["label"] == "W").unwrap();
+        let Some(usvg::Node::Group(g)) = tree.node_by_id(&format!("control_{}", c["control"])) else { panic!() };
+        let Some(usvg::Node::Group(layer)) = tree.node_by_id("illumination_1") else { panic!() };
+        let art = layer.abs_transform();
+        let f = g.children()[1].abs_bounding_box();
+        let (cx, top, bottom) = (((f.left() + f.right()) / 2.0 - art.tx) / art.sx, (f.top() - art.ty) / art.sy, (f.bottom() - art.ty) / art.sy);
+        let reach = device["light"]["deck"]["reach"].as_f64().unwrap_or(2.0) as f32;
+        for floor in [0.0, 0.5, 1.0] {
+            let mut light = device["light"].clone();
+            light["deck"]["height"] = serde_json::json!(0.5);
+            light["deck"]["floor"] = serde_json::json!(floor);
+            b.set_light(&light);
+            let key = b.keys.iter().find(|k| k.pos as u64 == c["pos"].as_u64().unwrap()).unwrap();
+            let deck = key.deck.as_ref().unwrap();
+            // the light leaving the skirt, from the pixels just outside its top and
+            // bottom in the middle, each with its own fall with distance taken out
+            let side = |north: bool| {
+                let (mut sum, mut n) = (0.0, 0);
+                for j in 0..deck.h as i32 {
+                    for i in 0..deck.w as i32 {
+                        let (x, y) = (deck.x + i, deck.y + j);
+                        let (u, v) = ((x as f32 + 0.5 - b.art_offset.0) / b.art_scale, (y as f32 + 0.5 - b.art_offset.1) / b.art_scale);
+                        let d = if north { top - v } else { v - bottom };
+                        if (u - cx).abs() < 3.0 && (0.4..1.2).contains(&d) {
+                            sum += at(deck, x, y) / (-d / reach).exp();
+                            n += 1;
+                        }
+                    }
+                }
+                sum / n.max(1) as f32
+            };
+            let ratio = side(false) / side(true);
+            eprintln!("far side {:.0}%: the bottom of the skirt lets out {ratio:.2} of its top", floor * 100.0);
+            assert!((ratio - floor as f32).abs() < 0.08, "far side {floor}: {ratio}");
+        }
     }
 
     #[test]
