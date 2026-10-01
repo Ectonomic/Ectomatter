@@ -903,7 +903,7 @@ impl Page {
             .filter(|k| k.led)
             .filter_map(|k| {
                 let v = colors.get(&k.pos)?;
-                Some(Light { pos: k.pos, rgb: led_look([v[0], v[1], v[2]]), strength: ((v[3] * 1000.0).round() / 1000.0) as f32, dim: self.remap(k.pos, &names).is_some() })
+                Some(Light { pos: k.pos, rgb: led_look([v[0], v[1], v[2]]), strength: ((v[3] * 1000.0).round() / 1000.0) as f32, remapped: self.remap(k.pos, &names).is_some() })
             })
             .collect()
     }

@@ -19,13 +19,14 @@ use resvg::usvg::{self, Tree};
 use serde_json::Value;
 
 /// One key's light, as the page has it: its colour (sRGB) and how strongly it
-/// is lit (0 to 1), and whether the key is remapped, which steps its legend back.
+/// is lit (0 to 1), and whether the key is remapped, which puts the second
+/// function at the foot of its cap aside for the new meaning the page prints there.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Light {
     pub pos: u32,
     pub rgb: [u8; 3],
     pub strength: f32,
-    pub dim: bool,
+    pub remapped: bool,
 }
 
 /// A shape on the board: how much of something there is at each pixel, in
@@ -53,6 +54,9 @@ struct KeyArt {
     /// the legend's coverage, and how brightly the LED lights each pixel of it (0 to 1)
     legend: Option<Shape>,
     legend_lit: Vec<f32>,
+    /// the row of the legend's box where its second function begins, if it has
+    /// one: a line of its own at the foot of the cap, like the PF1 under 1
+    second: Option<u32>,
     /// the grey its legend is printed in, in sRGB's encoding
     print: [f32; 3],
 }
@@ -335,6 +339,34 @@ fn clean_limit(l: &Light, ceiling: f32) -> f32 {
     if widest <= 0.0 { 0.0 } else { ceiling * y / widest }
 }
 
+/// Where a legend's second function begins, as a row of the legend's box: a
+/// line of its own, apart from the rest by a gap, starting in the lower part
+/// of the cap's face. A word set in two lines in the middle of a cap, like
+/// CAPS LOCK, starts its second line about half way down, and keeps it; the
+/// second functions start from about three fifths down (the keypad's arrows,
+/// the tallest of them, at 58%).
+fn second_function(s: &Shape, face: [f32; 4], ka: f32, oy: f32) -> Option<u32> {
+    let inked: Vec<bool> = (0..s.h).map(|r| (0..s.w).any(|c| s.cover[(r * s.w + c) as usize] > 0.05)).collect();
+    let last = inked.iter().rposition(|v| *v)? as u32;
+    // the start of the last line: the first inked row after the last gap
+    let start = (0..=last).rev().find(|&r| r == 0 || (inked[r as usize] && !inked[r as usize - 1]))?;
+    let gap = (0..start).rev().take_while(|&r| !inked[r as usize]).count();
+    if start == 0 || gap == 0 || !inked[..start as usize].iter().any(|v| *v) {
+        return None;
+    }
+    // its top, in the art's units
+    let top = (s.y as f32 + start as f32 - oy) / ka;
+    (top > face[1] + (face[3] - face[1]) * 0.54).then_some(start)
+}
+
+/// How much of each pixel of a key's legend shows: all of it, but a remapped
+/// key's second function, which steps aside for its new meaning.
+fn shown(key: &KeyArt, l: Option<&Light>) -> Vec<f32> {
+    let Some(s) = &key.legend else { return Vec::new() };
+    let aside = l.is_some_and(|l| l.remapped).then_some(key.second).flatten();
+    (0..s.cover.len()).map(|i| if aside.is_some_and(|r| i as u32 / s.w >= r) { 0.0 } else { 1.0 }).collect()
+}
+
 /// A clip path somewhere under `g`, by its id, with the group it clips.
 fn find_clip<'a>(g: &'a usvg::Group, id: &str) -> Option<(&'a usvg::Group, &'a usvg::ClipPath)> {
     if let Some(c) = g.clip_path().filter(|c| c.id() == id) {
@@ -415,16 +447,18 @@ impl Board {
         let under = pix.data().chunks_exact(4).flat_map(|p| [p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0]).collect();
 
         // Every cap but the slider knobs (the page moves those): its shadow (its
-        // first piece) apart from the rest, since the shadow is the room's light
-        // blocked, and the LED's light comes from under the cap; and the legends
-        // of keys with no light behind them.
+        // first piece, drawn blurred) apart from the rest, since the shadow is the
+        // room's light blocked, and the LED's light comes from under the cap; and
+        // the legends of keys with no light behind them. The media buttons are
+        // moulded blocks with no shadow of their own: all their pieces are the block.
         let mut shade = Pixmap::new(w, h).ok_or("board too small")?;
         let mut pix = Pixmap::new(w, h).ok_or("board too small")?;
         for c in controls.iter().filter(|c| !sliders(c)) {
             let Some(n) = c["control"].as_u64() else { continue };
             let id = format!("control_{n}");
             let parts = children(&id);
-            if parts.len() >= 3 {
+            let shadow = parts.len() >= 3 && matches!(&parts[0], usvg::Node::Group(g) if !g.filters().is_empty());
+            if shadow {
                 draw_node(&mut shade, &parts[0]);
                 for p in &parts[1..] {
                     draw_node(&mut pix, p);
@@ -482,7 +516,8 @@ impl Board {
                 (Some(f), Some(a)) => (Some(f), a),
                 _ => (None, [0.0; 4]),
             };
-            keys.push(KeyArt { pos: pos as u32, foot, face, deck: None, rim: None, chassis: None, legend, legend_lit: Vec::new(), print });
+            let second = legend.as_ref().and_then(|s| second_function(s, face, ka, oy));
+            keys.push(KeyArt { pos: pos as u32, foot, face, deck: None, rim: None, chassis: None, legend, legend_lit: Vec::new(), second, print });
         }
         let mut board = Board { w, h, under, shadow, caps, keys, model, wells, chassis, art_scale: ka, art_offset: (ox, oy) };
         board.relight();
@@ -664,15 +699,16 @@ impl Board {
                 px[c] = dec(cap[c] / a) * a + px[c] * (1.0 - a);
             }
         }
-        // each lit legend's print, which shows less as the light behind it outshines it
+        // each lit legend's print, which shows less as the light behind it
+        // outshines it; a remapped key's without its second function
         for key in &self.keys {
             if let Some(s) = &key.legend {
                 let l = light(key.pos);
-                let back = if l.is_some_and(|l| l.dim) { 0.35 } else { 1.0 };
+                let shown = shown(key, l);
                 let lit = l.map_or(0.0, |l| l.strength.clamp(0.0, 1.0));
                 let print = [0, 1, 2].map(|c| dec(key.print[c]) * (1.0 - lit));
-                each(s, &mut |d, _, a| {
-                    let a = a * back;
+                each(s, &mut |d, i, a| {
+                    let a = a * shown[i];
                     for c in 0..3 {
                         out[d * 4 + c] = out[d * 4 + c] * (1.0 - a) + print[c] * a;
                     }
@@ -686,7 +722,8 @@ impl Board {
                 add(&mut em, s, colour(l, rim_top), rim_top, None);
             }
             if let Some(s) = &key.legend {
-                add(&mut em, s, colour(l, legend_top), legend_top * if l.dim { 0.35 } else { 1.0 }, Some(&key.legend_lit));
+                let lit: Vec<f32> = key.legend_lit.iter().zip(shown(key, Some(l))).map(|(a, b)| a * b).collect();
+                add(&mut em, s, colour(l, legend_top), legend_top, Some(&lit));
             }
         }
         shine(out, &mut em);
@@ -802,7 +839,7 @@ mod tests {
         };
         eprintln!("shapes: deck {:?} rim {:?} legend {:?}", stat(&|k| k.deck.as_ref()), stat(&|k| k.rim.as_ref()), stat(&|k| k.legend.as_ref()));
         assert!(b.keys.iter().all(|k| k.deck.is_some() && k.rim.is_some()), "every lit key has its deck glow and rim");
-        let lights: Vec<Light> = b.keys.iter().map(|k| Light { pos: k.pos, rgb: [255, 45, 0], strength: 1.0, dim: false }).collect();
+        let lights: Vec<Light> = b.keys.iter().map(|k| Light { pos: k.pos, rgb: [255, 45, 0], strength: 1.0, remapped: false }).collect();
         let t = std::time::Instant::now();
         let frame = b.compose(&lights, 254.0, 1000.0 / 254.0);
         let composed = t.elapsed();
@@ -863,7 +900,7 @@ mod tests {
 
         // Composed, the shadow does not darken the LED's light: the glow just
         // below the skirt, in the cap's shadow, still shows.
-        let lights: Vec<Light> = b.keys.iter().map(|k| Light { pos: k.pos, rgb: [255, 255, 255], strength: 1.0, dim: false }).collect();
+        let lights: Vec<Light> = b.keys.iter().map(|k| Light { pos: k.pos, rgb: [255, 255, 255], strength: 1.0, remapped: false }).collect();
         let lit = b.compose(&lights, 254.0, 1000.0 / 254.0);
         let dark = b.compose(&[], 254.0, 1000.0 / 254.0);
         let i = ((s_.1 as u32 * b.w + s_.0 as u32) * 4) as usize;
@@ -877,7 +914,7 @@ mod tests {
     #[test]
     fn each_part_s_brightness_is_its_own() {
         let (_, device, mut b) = board();
-        let lights: Vec<Light> = b.keys.iter().map(|k| Light { pos: k.pos, rgb: [255, 255, 255], strength: 1.0, dim: false }).collect();
+        let lights: Vec<Light> = b.keys.iter().map(|k| Light { pos: k.pos, rgb: [255, 255, 255], strength: 1.0, remapped: false }).collect();
         let Peaks { legend, deck, .. } = b.peaks(&lights, 254.0, 1000.0 / 254.0);
         eprintln!("legends {legend:.0} nits, deck {deck:.0}");
         assert!((legend - 600.0).abs() < 1.0 && (deck - 90.0).abs() < 1.0);
@@ -890,7 +927,7 @@ mod tests {
         assert!((legend - 200.0).abs() < 1.0 && (deck - 90.0).abs() < 1.0, "the deck keeps its own brightness");
         // a red the screen cannot show cleanly at 200 nits is still sent at 200;
         // its clean limit is only told
-        let red: Vec<Light> = b.keys.iter().map(|k| Light { pos: k.pos, rgb: [255, 0, 0], strength: 1.0, dim: false }).collect();
+        let red: Vec<Light> = b.keys.iter().map(|k| Light { pos: k.pos, rgb: [255, 0, 0], strength: 1.0, remapped: false }).collect();
         let Peaks { legend, deck, clean, .. } = b.peaks(&red, 254.0, 600.0 / 254.0);
         eprintln!("red at a 600-nit peak: legends {legend:.0} nits (clean up to {clean:.0}), deck {deck:.0}");
         assert!((legend - 200.0).abs() < 1.0 && clean < 200.0 && (deck - 90.0).abs() < 1.0);
@@ -908,7 +945,7 @@ mod tests {
     fn light_spills_out_of_the_wells_onto_the_chassis() {
         let (_, device, b) = board();
         let px = |u: f32, v: f32| ((b.art_offset.0 + b.art_scale * u) as i32, (b.art_offset.1 + b.art_scale * v) as i32);
-        let white: Vec<Light> = b.keys.iter().map(|k| Light { pos: k.pos, rgb: [255, 255, 255], strength: 1.0, dim: false }).collect();
+        let white: Vec<Light> = b.keys.iter().map(|k| Light { pos: k.pos, rgb: [255, 255, 255], strength: 1.0, remapped: false }).collect();
         let lit = b.compose(&white, 254.0, 1000.0 / 254.0);
         let dark = b.compose(&[], 254.0, 1000.0 / 254.0);
         let at = |f: &[f32], (x, y): (i32, i32)| {
@@ -969,6 +1006,24 @@ mod tests {
             let ratio = side(false) / side(true);
             eprintln!("far side {:.0}%: the bottom of the skirt lets out {ratio:.2} of its top", floor * 100.0);
             assert!((ratio - floor as f32).abs() < 0.08, "far side {floor}: {ratio}");
+        }
+    }
+
+    /// A remapped key's second function steps aside, and only that: the
+    /// legends with a line of their own at the foot of the cap have one (the
+    /// PF row, the keypad's second functions), and a word set in two lines in
+    /// the middle of a cap keeps both.
+    #[test]
+    fn second_functions_are_the_lines_at_the_foot_of_a_cap() {
+        let (_, device, b) = board();
+        let label = |pos: u32| device["controls"].as_array().unwrap().iter().find(|c| c["pos"].as_u64() == Some(pos as u64)).and_then(|c| c["label"].as_str()).unwrap_or("?").to_string();
+        let with: Vec<String> = b.keys.iter().filter(|k| k.second.is_some()).map(|k| label(k.pos)).collect();
+        eprintln!("{} keys with a second function: {}", with.len(), with.join(", "));
+        for l in ["1", "5", "Keypad7", "Keypad8", "Keypad2", "F1"] {
+            assert!(with.iter().any(|w| w == l), "{l} has a second function");
+        }
+        for l in ["Caps Lock", "W", "E1", "Fn", "Tab"] {
+            assert!(!with.iter().any(|w| w == l), "{l} has none");
         }
     }
 
