@@ -299,6 +299,14 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         window.dispatch_event(WindowEvent::PointerMoved { position });
         front.pressed_at(x, y);
         window.dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Left });
+        // ECTODECK_NATIVE_MIDCLICK: the page refreshed between the press and the
+        // release, as a reading from the keyboard does ten times a second
+        if std::env::var_os("ECTODECK_NATIVE_MIDCLICK").is_some() {
+            front.refresh();
+            window.draw_if_needed(|r| {
+                r.render(&mut pic.ui, w as usize);
+            });
+        }
         window.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
         front.act();
         window.draw_if_needed(|r| {

@@ -1454,7 +1454,7 @@ impl Front {
                     }
                 })
                 .collect();
-            ui.set_profiles(ModelRc::new(VecModel::from(profiles)));
+            show_rows(ui.get_profiles(), |m| ui.set_profiles(m), profiles);
         }
         let dirty = loaded && p.is_dirty(p.editing);
         ui.set_can_save(dirty && !p.busy);
@@ -1478,13 +1478,7 @@ impl Front {
                 pressed: p.pressed.contains(&k.pos),
             })
             .collect();
-        let same = {
-            let old = ui.get_keys();
-            old.row_count() == keys.len() && keys.iter().enumerate().all(|(i, k)| old.row_data(i).as_ref() == Some(k))
-        };
-        if !same {
-            ui.set_keys(ModelRc::new(VecModel::from(keys)));
-        }
+        show_rows(ui.get_keys(), |m| ui.set_keys(m), keys);
 
         // the chosen key's editor
         let chosen = if p.view == View::Keys { p.sel.and_then(|pos| p.key(pos).cloned()) } else { None };
@@ -1514,7 +1508,7 @@ impl Front {
                     }
                 })
                 .collect();
-            ui.set_layers(ModelRc::new(VecModel::from(layers)));
+            show_rows(ui.get_layers(), |m| ui.set_layers(m), layers);
         }
         if self.menu.is_some() {
             self.build_menu();
@@ -1569,7 +1563,7 @@ impl Front {
         }
         let icons = &self.icons.as_ref().unwrap().1;
         let effects: Vec<EffectItem> = z10::EFFECTS.iter().zip(icons).map(|((m, name), icon)| EffectItem { name: (*name).into(), icon: icon.clone(), on: *m == mode }).collect();
-        self.ui.set_effects(ModelRc::new(VecModel::from(effects)));
+        show_rows(self.ui.get_effects(), |m| self.ui.set_effects(m), effects);
         let tile = lighting::tile(&self.page, self.paint, self.page.demo);
         self.ui.set_tile_height(tile.height);
         self.show_cells(tile.cells);
@@ -1756,6 +1750,36 @@ impl Front {
         }
         // up to Peak nits; at the slider's left end, the design's brightness
         hdr["glow_limit"].as_f64().map_or(1.0, |n| (n / reference).max(1.0) as f32)
+    }
+}
+
+/// Bring a model to `rows` in place: each row that changed is changed, rows
+/// are added or taken off the end, and the rest are left alone, so an item
+/// being clicked is never rebuilt under the pointer.
+pub fn set_rows<T: Clone + PartialEq + 'static>(model: &VecModel<T>, rows: Vec<T>) {
+    for (i, r) in rows.iter().enumerate() {
+        if i < model.row_count() {
+            if model.row_data(i).as_ref() != Some(r) {
+                model.set_row_data(i, r.clone());
+            }
+        } else {
+            model.push(r.clone());
+        }
+    }
+    while model.row_count() > rows.len() {
+        model.remove(model.row_count() - 1);
+    }
+}
+
+/// Show a list in one of the page's models, in place (see [set_rows]): a list
+/// set anew rebuilds every item, and the page is refreshed after every
+/// reading from the keyboard (ten a second, while the sliders are read), so a
+/// click on a list set anew each time was often lost between its press and
+/// its release.
+fn show_rows<T: Clone + PartialEq + 'static>(current: ModelRc<T>, set: impl FnOnce(ModelRc<T>), rows: Vec<T>) {
+    match current.as_any().downcast_ref::<VecModel<T>>() {
+        Some(m) => set_rows(m, rows),
+        None => set(ModelRc::new(VecModel::from(rows))),
     }
 }
 

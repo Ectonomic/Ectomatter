@@ -933,7 +933,7 @@ impl MacroPage {
                 }
             }
         }
-        set_rows(&self.items, items);
+        crate::front::set_rows(&self.items, items);
         ui.set_slots_text(format!("{saved_count} of 100 slots").into());
         ui.set_can_new(!self.ed.free_slots(page).is_empty() && !rec);
 
@@ -1022,19 +1022,3 @@ impl MacroPage {
     }
 }
 
-/// Put rows in a model in place, so what is on screen is changed, not made again.
-fn set_rows<T: Clone + PartialEq + 'static>(model: &VecModel<T>, rows: Vec<T>) {
-    use slint::Model;
-    for (i, r) in rows.iter().enumerate() {
-        if i < model.row_count() {
-            if model.row_data(i).as_ref() != Some(r) {
-                model.set_row_data(i, r.clone());
-            }
-        } else {
-            model.push(r.clone());
-        }
-    }
-    while model.row_count() > rows.len() {
-        model.remove(model.row_count() - 1);
-    }
-}
