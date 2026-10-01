@@ -194,11 +194,22 @@ pub struct Board {
     /// board's pixels: pixel = offset + scale x unit
     pub(crate) art_scale: f32,
     pub(crate) art_offset: (f32, f32),
-    /// the lock lights: each its light (a kernel light code: 0 Num Lock, 1
-    /// Caps Lock, 2 Scroll Lock) and its dot in the art; and their light,
-    /// at its brightest, in nits, and its colour (sRGB)
-    indicators: Vec<(u8, Shape)>,
-    indicator_light: (f32, [u8; 3]),
+    /// the lock lights, and their light: the window at its brightest and the
+    /// light out of its edges, in nits, and its colour (sRGB)
+    indicators: Vec<Indicator>,
+    indicator_light: (f32, f32, [u8; 3]),
+}
+
+/// A lock light: which of the keyboard's lights it shows (a kernel light
+/// code: 0 Num Lock, 1 Caps Lock, 2 Scroll Lock), its window in the art, how
+/// brightly the LED under it lights each pixel of the window (1 over the
+/// LED, less to the window's edges), and the light out of the window's edges
+/// onto the chassis round it (1 at the edge).
+struct Indicator {
+    bit: u8,
+    window: Shape,
+    lit: Vec<f32>,
+    spill: Shape,
 }
 
 /// sRGB (as the page's colours are) to linear light, as KWin decodes the page: gamma 2.2.
@@ -524,8 +535,14 @@ impl Board {
             let second = legend.as_ref().and_then(|s| second_function(s, face, ka, oy));
             keys.push(KeyArt { pos: pos as u32, foot, face, deck: None, rim: None, chassis: None, legend, legend_lit: Vec::new(), second, print });
         }
-        // the lock lights, from the core's "indicators"
+        // The lock lights, from the core's "indicators": each a small window
+        // with an LED under it, brightest over the LED and dimmer to the
+        // window's corners (its diffuser keeps it from falling far), and a
+        // little of its light out of the window's edges onto the chassis.
         let ind = &device["indicators"];
+        let num = |v: &Value, d: f32| v.as_f64().map_or(d, |v| v as f32);
+        let (spread, floor) = (num(&ind["spread"], 2.0).max(0.05), num(&ind["floor"], 0.5).clamp(0.0, 1.0));
+        let reach = num(&ind["spill"]["reach"], 1.0).max(0.05);
         let indicators = ind["lights"]
             .as_array()
             .into_iter()
@@ -537,11 +554,44 @@ impl Board {
                     "scroll" => 2,
                     _ => return None,
                 };
-                Some((bit, shape(l["art"].as_str()?)?))
+                let id = l["art"].as_str()?;
+                let window = shape(id)?;
+                // the window's edges and middle, in the board's pixels
+                let b = node(id)?.abs_bounding_box();
+                let (l0, t0, r0, b0) = (tx + k * b.left(), ty + k * b.top(), tx + k * b.right(), ty + k * b.bottom());
+                let (cx, cy) = ((l0 + r0) / 2.0, (t0 + b0) / 2.0);
+                let lit = (0..window.cover.len())
+                    .map(|i| {
+                        let (x, y) = (window.x as f32 + (i as u32 % window.w) as f32 + 0.5, window.y as f32 + (i as u32 / window.w) as f32 + 0.5);
+                        let r = ((x - cx).powi(2) + (y - cy).powi(2)).sqrt() / ka;
+                        floor + (1.0 - floor) * falloff(r, spread)
+                    })
+                    .collect();
+                // out of its edges onto the chassis, falling away from the window
+                let m = reach * 6.0 * ka;
+                let (sx, sy) = ((l0 - m).floor().max(0.0) as i32, (t0 - m).floor().max(0.0) as i32);
+                let sw = ((r0 + m).ceil().min(w as f32) as i32 - sx).max(0) as u32;
+                let sh = ((b0 + m).ceil().min(h as f32) as i32 - sy).max(0) as u32;
+                let mut cover = vec![0f32; (sw * sh) as usize];
+                for j in 0..sh {
+                    for i in 0..sw {
+                        let (x, y) = (sx + i as i32, sy + j as i32);
+                        let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+                        let (dx, dy) = ((l0 - px).max(px - r0).max(0.0), (t0 - py).max(py - b0).max(0.0));
+                        let d = (dx * dx + dy * dy).sqrt() / ka;
+                        let inside = if x >= window.x && y >= window.y && x < window.x + window.w as i32 && y < window.y + window.h as i32 {
+                            window.cover[((y - window.y) as u32 * window.w + (x - window.x) as u32) as usize]
+                        } else {
+                            0.0
+                        };
+                        cover[(j * sw + i) as usize] = chassis[(y as u32 * w + x as u32) as usize] * (1.0 - inside) * (-d / reach).exp();
+                    }
+                }
+                Some(Indicator { bit, window, lit, spill: Shape { x: sx, y: sy, w: sw, h: sh, cover } })
             })
             .collect();
         let rgb = ind["rgb"].as_array().map(|c| [0, 1, 2].map(|i| c.get(i).and_then(|v| v.as_u64()).unwrap_or(255).min(255) as u8)).unwrap_or([255; 3]);
-        let indicator_light = (ind["nits"].as_f64().unwrap_or(150.0).max(0.0) as f32, rgb);
+        let indicator_light = (num(&ind["nits"], 300.0).max(0.0), num(&ind["spill"]["nits"], 6.0).max(0.0), rgb);
         let mut board = Board { w, h, under, shadow, caps, keys, model, wells, chassis, art_scale: ka, art_offset: (ox, oy), indicators, indicator_light };
         board.relight();
         Ok(board)
@@ -749,12 +799,15 @@ impl Board {
                 add(&mut em, s, colour(l, legend_top), legend_top, Some(&lit));
             }
         }
-        // the lock lights that are on, lit as the keyboard's own are
-        let (nits, rgb) = self.indicator_light;
+        // the lock lights that are on, as the keyboard's own are: each window
+        // lit by its LED, and a little of its light out of its edges
+        let (nits, spill, rgb) = self.indicator_light;
         let lamp = Light { pos: 0, rgb, strength: 1.0, remapped: false };
-        for (bit, s) in &self.indicators {
-            if locks & (1 << bit) != 0 {
-                add(&mut em, s, key_colour(&lamp), (nits / white.max(1.0)).min(ceiling), None);
+        let top = |n: f32| (n / white.max(1.0)).min(ceiling);
+        for ind in &self.indicators {
+            if locks & (1 << ind.bit) != 0 {
+                add(&mut em, &ind.window, key_colour(&lamp), top(nits), Some(&ind.lit));
+                add(&mut em, &ind.spill, key_colour(&lamp), top(spill), None);
             }
         }
         shine(out, &mut em);
@@ -1078,11 +1131,18 @@ mod tests {
         let off = b.compose(&[], 0, 254.0, 1000.0 / 254.0);
         let caps = b.compose(&[], 0b010, 254.0, 1000.0 / 254.0);
         let nits = device["indicators"]["nits"].as_f64().unwrap() as f32;
-        for (bit, s) in &b.indicators {
+        for ind in &b.indicators {
+            let s = &ind.window;
             let (dark, lit) = (peak(&off, s), peak(&caps, s));
-            eprintln!("light {bit}: {dark:.1} nits off, {lit:.1} with Caps Lock on");
-            if *bit == 1 {
-                assert!((lit - dark - nits).abs() < 1.0, "Caps Lock's light is at its nits");
+            let corner = ind.lit.iter().zip(&s.cover).filter(|(_, c)| **c > 0.99).map(|(l, _)| *l).fold(1.0f32, f32::min);
+            eprintln!("light {}: {dark:.1} nits off, {lit:.1} with Caps Lock on; its corners {:.0}% of its middle; a dot is {:.2} art units", ind.bit, corner * 100.0, 1.0 / b.art_scale);
+            if ind.bit == 1 {
+                assert!((lit - dark) / nits > 0.98 && lit - dark < nits + 0.5, "Caps Lock's light is at its nits over the LED");
+                assert!(corner < 0.95 && corner > 0.3, "and dimmer to its corners");
+                // a little of it on the chassis just past the window's edge, none further off
+                let sp = &ind.spill;
+                let edge = (0..sp.cover.len()).map(|i| sp.cover[i]).fold(0.0f32, f32::max);
+                assert!(edge > 0.5, "the spill starts at the window's edge");
             } else {
                 assert!((lit - dark).abs() < 1e-3, "the others stay off");
             }
