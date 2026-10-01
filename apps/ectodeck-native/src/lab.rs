@@ -52,7 +52,7 @@ struct Param {
     note: &'static str,
 }
 
-const PARAMS: [Param; 17] = [
+const PARAMS: [Param; 18] = [
     Param { path: ("legend", "nits"), label: "Brightness", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, note: "The legend at its brightest, nearest the LED, for a key lit fully, up to Peak nits (Settings › HDR)." },
     Param { path: ("legend", "depth"), label: "Spread", lo: 1.0, hi: 60.0, step: 0.5, unit: Unit::Length, note: "How deep under the legend the LED sits. Deeper lights a legend more evenly; shallower keeps the light to the part nearest the LED." },
     Param { path: ("legend", "floor"), label: "Far parts", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, note: "The least any part of a legend is lit, however far from the LED: light bouncing inside the cap." },
@@ -70,16 +70,17 @@ const PARAMS: [Param; 17] = [
     Param { path: ("lcd", "field"), label: "Background", lo: 0.0, hi: 0.0, step: 0.1, unit: Unit::Nits, note: "The ground between the dots." },
     Param { path: ("lcd", "dot"), label: "Dot size", lo: 0.05, hi: 1.0, step: 0.01, unit: Unit::Fraction, note: "How much of each cell a dot fills; the rest is the gap between dots." },
     Param { path: ("lcd", "glass"), label: "Glass sheen", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, note: "How strongly the glass over the display shows its reflection, as the art draws it at 100%." },
+    Param { path: ("legend", "unlit"), label: "LED off", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, note: "How bright a legend looks with its LED off (the dimmer at 0%, or a key the lighting leaves dark), as a share of the grey the art prints it in. A backlit legend with no light behind it is dark." },
 ];
 
 /// The page's sections: a title, what the part is, and its values.
-const SECTIONS: [(&str, &str, usize, usize); 6] = [
-    ("LED", "Where each key's light comes from.", 9, 10),
-    ("Legends", "The LED shines up through the legend: the brightest thing on a key.", 0, 3),
-    ("Deck glow", "Light escaping under the cap's skirt onto the deck of the well.", 3, 7),
-    ("Skirt's foot", "The deck's glow caught by the foot of each cap.", 7, 9),
-    ("Chassis spill", "Light out of the wells onto the chassis round them, from the keys nearest each well's edge.", 10, 12),
-    ("Display", "The display's backlit dots, and the glass over them.", 12, 17),
+const SECTIONS: [(&str, &str, &[usize]); 6] = [
+    ("LED", "Where each key's light comes from.", &[9]),
+    ("Legends", "The LED shines up through the legend: the brightest thing on a key.", &[0, 1, 2, 17]),
+    ("Deck glow", "Light escaping under the cap's skirt onto the deck of the well.", &[3, 4, 5, 6]),
+    ("Skirt's foot", "The deck's glow caught by the foot of each cap.", &[7, 8]),
+    ("Chassis spill", "Light out of the wells onto the chassis round them, from the keys nearest each well's edge.", &[10, 11]),
+    ("Display", "The display's backlit dots, and the glass over them.", &[12, 13, 14, 15, 16]),
 ];
 
 /// the art's units to the millimetre
@@ -381,9 +382,9 @@ impl LabPage {
             row(c, cy, "The desktop's white", format!("{:.0} nits", r.white), None);
         });
 
-        for (title, about, a, b) in SECTIONS {
+        for (title, about, values) in SECTIONS {
             card(&mut cells, &mut y, title, about, &mut |c, cy| {
-                for i in a..b {
+                for &i in values {
                     let p = &PARAMS[i];
                     c.push(text_cell(style::LABEL, x0 + pad, *cy, label_w, 34.0, p.label));
                     let (lo, hi) = self.range(i);
@@ -526,7 +527,7 @@ fn light_block(light: &Value) -> String {
     let mut s = String::from(" \"light\": {\n");
     s += &format!("  \"about\": {},\n", serde_json::to_string(&light["about"]).unwrap_or_else(|_| "\"\"".into()));
     s += &format!("  \"led\": {},\n", num("led", &light["led"]));
-    s += &part("legend", &["nits", "depth", "floor"]);
+    s += &part("legend", &["nits", "depth", "floor", "unlit"]);
     s += &part("deck", &["nits", "height", "floor", "reach"]);
     s += &part("rim", &["nits", "width"]);
     s += &part("chassis", &["nits", "reach"]);

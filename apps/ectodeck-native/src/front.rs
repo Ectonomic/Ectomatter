@@ -45,6 +45,7 @@ pub enum Ask {
     /// time to read the sliders again, and the display's text
     PollSliders,
     PollLcd,
+    PollActive,
     Effect(i32),
     CellPick(i32, i32, f32, f32, f32),
     CellSlide(i32, f32),
@@ -177,6 +178,8 @@ pub struct Front {
     /// the knobs, the display and its glass, over the keyboard
     pub overlays: Overlays,
     sliders_asked: bool,
+    /// a reading of the keyboard's profile asked for, not yet heard
+    active_asked: bool,
     /// the lowest and highest reading seen for each slider, which widen as the
     /// sliders are moved, so a knob reaches both ends when its slider does
     slider_ends: [[f64; 2]; 2],
@@ -281,6 +284,7 @@ impl Front {
         let timers = [
             (Duration::from_millis(100), Ask::PollSliders),
             (Duration::from_secs(2), Ask::PollLcd),
+            (Duration::from_millis(500), Ask::PollActive),
             (Duration::from_secs(2), Ask::PreviewTick),
             (Duration::from_millis(70), Ask::StreamTick),
         ]
@@ -307,6 +311,7 @@ impl Front {
             controlled,
             overlays: Overlays::new(),
             sliders_asked: false,
+            active_asked: false,
             slider_ends,
             _timers: timers,
             paint: [0xff, 0x2d, 0x00],
@@ -445,6 +450,17 @@ impl Front {
                     self.move_knobs(&v);
                 }
                 return;
+            }
+            // the keyboard switched profiles itself: the page follows it, keeping every profile's unsaved changes
+            device::Heard::ActiveNow(r) => {
+                self.active_asked = false;
+                if let Ok(Some(n)) = r {
+                    if (1..=5).contains(&n) && n != self.page.active() {
+                        self.page.set_active(n);
+                        self.page.choose(n);
+                        self.status(format!("The keyboard switched to profile {n}."), 0);
+                    }
+                }
             }
             device::Heard::Active(n, r) => match r {
                 Ok(active) => {
@@ -695,6 +711,14 @@ impl Front {
                     if self.page.reads_sliders() && self.ui.get_place() == "z10" && !self.sliders_asked && self.kb.is_some() {
                         self.sliders_asked = true;
                         self.ask_kb(device::Ask::Sliders);
+                    }
+                }
+                // which profile the keyboard is using: it can be switched on the keyboard itself
+                Ask::PollActive => {
+                    changed = false;
+                    if self.page.dev.is_some() && !self.active_asked && self.kb.is_some() {
+                        self.active_asked = true;
+                        self.ask_kb(device::Ask::ReadActive);
                     }
                 }
                 Ask::PollLcd => {

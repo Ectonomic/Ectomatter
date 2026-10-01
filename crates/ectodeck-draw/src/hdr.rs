@@ -80,6 +80,9 @@ struct Model {
     legend_depth: f32,
     /// the least a legend is lit, however far from the LED, by light bouncing inside the cap
     legend_floor: f32,
+    /// how a lit key's legend looks with its LED off, as a share of the grey
+    /// the art prints it in: a backlit legend with no light behind it is dark
+    legend_unlit: f32,
     /// the glow on the deck at its brightest, just outside the skirt on the LED's side
     deck_nits: f32,
     /// how high above the deck the light leaves the cap, which sets how much brighter
@@ -115,6 +118,7 @@ impl Model {
             lcd_glass: f(&l["lcd"]["glass"], 1.0).max(0.0),
             legend_depth: f(&l["legend"]["depth"], 10.0),
             legend_floor: f(&l["legend"]["floor"], 0.35),
+            legend_unlit: f(&l["legend"]["unlit"], 0.15).clamp(0.0, 1.0),
             deck_nits: nits("deck", 18.0),
             deck_height: f(&l["deck"]["height"], 7.0),
             deck_floor: f(&l["deck"]["floor"], 0.15),
@@ -772,14 +776,15 @@ impl Board {
                 px[c] = dec(cap[c] / a) * a + px[c] * (1.0 - a);
             }
         }
-        // each lit legend's print, which shows less as the light behind it
-        // outshines it; a remapped key's without its second function
+        // each lit legend's own look, dark with its LED off (the art's grey
+        // dimmed by the core's unlit share), which shows less as the light
+        // behind it outshines it; a remapped key's without its second function
         for key in &self.keys {
             if let Some(s) = &key.legend {
                 let l = light(key.pos);
                 let shown = shown(key, l);
                 let lit = l.map_or(0.0, |l| l.strength.clamp(0.0, 1.0));
-                let print = [0, 1, 2].map(|c| dec(key.print[c]) * (1.0 - lit));
+                let print = [0, 1, 2].map(|c| dec(key.print[c]) * self.model.legend_unlit * (1.0 - lit));
                 each(s, &mut |d, i, a| {
                     let a = a * shown[i];
                     for c in 0..3 {

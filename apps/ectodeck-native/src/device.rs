@@ -16,6 +16,8 @@ pub enum Ask {
     Save(u8, Value),
     /// make a profile the one in use
     Activate(u8),
+    /// which profile the keyboard is using now
+    ReadActive,
     /// where both sliders are, on firmware that can say
     Sliders,
     /// show a preview on the keyboard: an effect, each key's colour, or stop
@@ -34,6 +36,8 @@ pub enum Heard {
     State(Result<Value, String>),
     Saved(u8, Result<Value, String>),
     Active(u8, Result<Option<u8>, String>),
+    /// the profile the keyboard is using, as read now
+    ActiveNow(Result<Option<u8>, String>),
     Sliders(Result<Value, String>),
     Preview(Result<Value, String>),
     /// every macro, after one was written; whether it was a delete
@@ -78,6 +82,7 @@ pub fn start(backups: PathBuf, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
                 Ask::State => Heard::State(kb.state().map_err(|e| e.to_string())),
                 Ask::Save(n, body) => Heard::Saved(n, kb.save(n, &body).map_err(|e| e.to_string())),
                 Ask::Activate(n) => Heard::Active(n, kb.activate(n).map_err(|e| e.to_string())),
+                Ask::ReadActive => Heard::ActiveNow(kb.active().map_err(|e| e.to_string())),
                 Ask::Sliders => Heard::Sliders(kb.sliders().map_err(|e| e.to_string())),
                 Ask::Preview(body) => Heard::Preview(kb.preview(&body).map_err(|e| e.to_string())),
                 Ask::Dimmer(level) => {

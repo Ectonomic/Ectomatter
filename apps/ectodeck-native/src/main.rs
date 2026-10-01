@@ -337,6 +337,10 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     if let Some(r) = std::env::var("ECTODECK_NATIVE_SLIDERS").ok().and_then(|v| serde_json::from_str(&v).ok()) {
         front.heard(device::Heard::Sliders(Ok(r)));
     }
+    // ECTODECK_NATIVE_ACTIVE=N: the keyboard reports it is using profile N, as when it is switched on the keyboard
+    if let Some(n) = std::env::var("ECTODECK_NATIVE_ACTIVE").ok().and_then(|v| v.parse::<u8>().ok()) {
+        front.heard(device::Heard::ActiveNow(Ok(Some(n))));
+    }
     // ECTODECK_NATIVE_LOCKS=N: the keyboard's lock lights (1 Num Lock, 2 Caps Lock, 4 Scroll Lock)
     if let Some(bits) = std::env::var("ECTODECK_NATIVE_LOCKS").ok().and_then(|v| v.parse::<u8>().ok()) {
         front.watched(ectotype_core::watch::Watched::Locks(bits));
