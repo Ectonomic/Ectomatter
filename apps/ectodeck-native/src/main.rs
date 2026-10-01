@@ -43,7 +43,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use ectodeck_draw::hdr::{Board, Light};
+use ectodeck_draw::hdr::{Board, Light, Peaks};
 use front::{Front, WindowAsk};
 use picture::{Lit, Picture};
 use resvg::tiny_skia::{Pixmap, Transform};
@@ -406,7 +406,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         let lights = front.lights().unwrap_or_default();
         let gain = front.light_gain(reference).max(gain);
         eprintln!("the light at {:.0} nits", gain as f64 * reference);
-        let lit = light(&board, &lights, gain, reference, front.overlays.panel_for(board.w, board.lcd().dot));
+        let (lit, _) = light(&board, &lights, gain, reference, front.overlays.panel_for(board.w, board.lcd().dot));
         let lit = Rc::new(Lit { px: lit, w: rect.2, h: rect.3 });
         pic.set_keyboard(rect, Some(&lit));
         front.ui.set_board_ready(true);
@@ -551,11 +551,12 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
     let mut lab = lab::LabPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false), device["light"].clone());
     let lights = front.lights().unwrap_or_default();
     let gain = front.light_gain(reference);
-    let p = board.peaks(&lights, reference as f32, gain);
+    let (_, p) = board.compose(&lights, reference as f32, gain);
     lab.set_readout(lab::Readout {
         legend: (p.legend as f64).round(),
         reach: (p.clean as f64).round(),
         deck: (p.deck as f64).round(),
+        rim: (p.rim as f64).round(),
         chassis: (p.chassis as f64).round(),
         lcd: (board.lcd_nits() as f64).min(gain as f64 * reference),
         peak: gain as f64 * reference,
@@ -682,10 +683,12 @@ struct App {
     front: Front,
     pic: Picture,
     gain: f32,
-    /// the keyboard at the size last drawn, and its light
+    /// the keyboard at the size last drawn, its light, and how bright each
+    /// part of the light came out
     board: Option<Board>,
     lights: Vec<Light>,
     lit: Option<Rc<Lit>>,
+    peaks: Peaks,
     asked: Option<(u32, u32)>,
     build: std::sync::mpsc::Sender<(u32, u32)>,
     /// the whole window needs drawing again, not only what Slint changed
@@ -857,6 +860,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         board: None,
         lights: Vec::new(),
         lit: None,
+        peaks: Peaks::default(),
         asked: None,
         build,
         full: true,
@@ -1090,6 +1094,15 @@ impl App {
         self.readout();
     }
 
+    /// Light the keyboard as it is now, keeping how bright each part of its
+    /// light came out, for the Lighting lab.
+    fn light_board(&mut self) {
+        let Some(board) = &self.board else { return };
+        let (px, peaks) = light(board, &self.lights, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
+        self.lit = Some(Rc::new(Lit { px, w: board.w as usize, h: board.h as usize }));
+        self.peaks = peaks;
+    }
+
     /// Tell the Lighting lab what is on the keyboard now, in whole nits, at
     /// most four times a second (an effect changes it every frame).
     fn readout(&mut self) {
@@ -1099,11 +1112,12 @@ impl App {
         let (Some(l), Some(b)) = (&mut self.front.lab, &self.board) else { return };
         self.readout_at = Some(Instant::now());
         let reference = self.pic.reference();
-        let p = b.peaks(&self.lights, reference as f32, self.gain);
+        let p = self.peaks;
         l.set_readout(lab::Readout {
             legend: (p.legend as f64).round(),
             reach: (p.clean as f64).round(),
             deck: (p.deck as f64).round(),
+            rim: (p.rim as f64).round(),
             chassis: (p.chassis as f64).round(),
             lcd: (b.lcd_nits() as f64).min(self.gain as f64 * reference).round(),
             peak: (self.gain as f64 * reference).round(),
@@ -1283,9 +1297,8 @@ impl App {
         if let Some(l) = &self.light {
             board.set_light(l);
         }
-        let lit = light(&board, &self.lights, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
-        self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
         self.board = Some(board);
+        self.light_board();
         self.full = true;
         self.draw();
     }
@@ -1296,10 +1309,7 @@ impl App {
         let g = self.front.light_gain(self.pic.reference());
         if (g - self.gain).abs() > 1e-3 {
             self.gain = g;
-            if let Some(board) = &self.board {
-                let lit = light(board, &self.lights, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
-                self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
-            }
+            self.light_board();
         }
         if let Some(t) = &self.tray {
             let on = self.front.ui.get_conn_state() == 1;
@@ -1350,10 +1360,7 @@ impl App {
             if let Some(l) = lights {
                 self.lights = l;
             }
-            if let Some(board) = &self.board {
-                let lit = light(board, &self.lights, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
-                self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
-            }
+            self.light_board();
             self.readout();
         }
         let full = self.full;
@@ -1766,10 +1773,7 @@ impl Dispatch<WpImageDescriptionV1, PictureTag> for App {
             app.levels = (reference, glow);
             app.pic.set_reference(reference);
             app.gain = LIGHT_GAIN;
-            if let Some(board) = &app.board {
-                let lit = light(board, &app.lights, app.gain, app.pic.reference(), app.front.overlays.panel_for(board.w, board.lcd().dot));
-                app.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
-            }
+            app.light_board();
             app.full = true;
             app.slint.request_redraw();
         }
@@ -1895,9 +1899,10 @@ pub fn core_device_path() -> PathBuf {
 }
 
 /// The keyboard lit: each part of its light at the core's brightness for it,
-/// no channel past the ceiling, which is Peak nits over the desktop's white.
-fn light(board: &Board, lights: &[Light], ceiling: f32, reference: f64, panel: Option<&overlays::Panel>) -> Vec<f32> {
-    let mut px = board.compose(lights, reference as f32, ceiling);
+/// up to the ceiling, which is Peak nits over the desktop's white; and how
+/// bright each part came out.
+fn light(board: &Board, lights: &[Light], ceiling: f32, reference: f64, panel: Option<&overlays::Panel>) -> (Vec<f32>, Peaks) {
+    let (mut px, peaks) = board.compose(lights, reference as f32, ceiling);
     // The display, lit from behind as an LCD is: its lit dots, its unlit dots
     // and the ground between them each at the core's nits for them, in the
     // backlight's colour, under the glass. With nothing driving it, it is dark.
@@ -1934,5 +1939,5 @@ fn light(board: &Board, lights: &[Light], ceiling: f32, reference: f64, panel: O
             }
         }
     }
-    px
+    (px, peaks)
 }

@@ -6,8 +6,11 @@
 //! never changes is drawn once for the keyboard's size; each key's light is
 //! worked out once too, from where its LED sits under the cap and the shape of
 //! the cap (see the core's "light"), and filled with the key's colour each time
-//! the lighting changes. Light is added in linear light, and the lit legends
-//! go brighter than the desktop's white.
+//! the lighting changes. The legends' light is added in linear light, and goes
+//! brighter than the desktop's white; the light that falls on things (the
+//! deck's glow, the skirts' feet, the chassis spill) meets them as the core's
+//! "surfaces" blend has it: added too, a paint program's Overlay, or reflected
+//! by their colour.
 //!
 //! The picture comes out as the HDR layer wants it: PQ, BT.2020, 16 bits a
 //! channel, premultiplied. SDR colours are decoded as KWin decodes the page's
@@ -57,6 +60,37 @@ struct KeyArt {
     print: [f32; 3],
 }
 
+/// How the light that falls on things (the deck's glow, the skirts' feet, the
+/// chassis spill) meets what it falls on. The legends and the display give off
+/// their own light, so theirs is always added.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Blend {
+    /// added on top, as light: as bright whatever it falls on
+    Add,
+    /// a paint program's Overlay, in sRGB's encoding: each key's colour laid
+    /// over what is drawn, as strongly as its light is bright (fully at the
+    /// desktop's white), so on black it shows nothing, and it never goes past
+    /// the desktop's white
+    Overlay,
+    /// reflected by what it falls on, by its colour: a part's brightness is
+    /// what a mid-grey surface shows, and every surface reflects at least the
+    /// core's black share of the light
+    Reflect,
+}
+
+impl Blend {
+    fn name(self) -> &'static str {
+        match self {
+            Blend::Add => "add",
+            Blend::Overlay => "overlay",
+            Blend::Reflect => "reflect",
+        }
+    }
+}
+
+/// The reflectance a part's brightness is given for, in Reflect: a mid-grey card's.
+const GREY: f32 = 0.18;
+
 /// How a key's LED light gets out, from the core's "light" (brightness in
 /// nits of luminance for a key lit fully, lengths in the art's units).
 #[derive(Clone, Copy, Debug)]
@@ -93,6 +127,10 @@ struct Model {
     /// just past a well's edge, and how far across the chassis it falls to a third
     chassis_nits: f32,
     chassis_reach: f32,
+    /// how the light that falls on things meets them, and how much of it the
+    /// parts the art paints black reflect, in Reflect
+    blend: Blend,
+    black: f32,
 }
 
 impl Model {
@@ -119,6 +157,12 @@ impl Model {
             rim_width: f(&l["rim"]["width"], 0.8).max(0.05),
             chassis_nits: f(&l["chassis"]["nits"], 6.0).max(0.0),
             chassis_reach: f(&l["chassis"]["reach"], 4.0).max(0.05),
+            blend: match l["surfaces"]["blend"].as_str() {
+                Some("overlay") => Blend::Overlay,
+                Some("reflect") => Blend::Reflect,
+                _ => Blend::Add,
+            },
+            black: f(&l["surfaces"]["black"], 0.04).clamp(0.0, 1.0),
         }
     }
 
@@ -128,6 +172,35 @@ impl Model {
         let t = |nits: f32| (nits / white.max(1.0)).min(ceiling);
         Tops { legend: t(self.legend_nits), deck: t(self.deck_nits), rim: t(self.rim_nits), chassis: t(self.chassis_nits) }
     }
+}
+
+/// The core's "light" with every value the keyboard is lit by written in:
+/// those it leaves out at what the keyboard takes for them.
+pub fn complete(light: &Value) -> Value {
+    let m = Model::from(light);
+    let r = |v: f32| (v as f64 * 1000.0).round() / 1000.0;
+    let full = serde_json::json!({
+        "led": r(m.led),
+        "legend": { "nits": r(m.legend_nits), "depth": r(m.legend_depth), "floor": r(m.legend_floor) },
+        "surfaces": { "blend": m.blend.name(), "black": r(m.black) },
+        "deck": { "nits": r(m.deck_nits), "height": r(m.deck_height), "floor": r(m.deck_floor), "reach": r(m.deck_reach) },
+        "rim": { "nits": r(m.rim_nits), "width": r(m.rim_width) },
+        "chassis": { "nits": r(m.chassis_nits), "reach": r(m.chassis_reach) },
+        "lcd": { "nits": r(m.lcd_nits), "unlit": r(m.lcd_unlit), "field": r(m.lcd_field), "dot": r(m.lcd_dot), "glass": r(m.lcd_glass) },
+    });
+    let mut out = if light.is_object() { light.clone() } else { serde_json::json!({}) };
+    for (k, v) in full.as_object().into_iter().flatten() {
+        match (out.get_mut(k), v) {
+            (Some(Value::Object(have)), Value::Object(parts)) => {
+                for (pk, pv) in parts {
+                    have.entry(pk.clone()).or_insert_with(|| pv.clone());
+                }
+            }
+            (Some(_), _) => {}
+            (None, _) => out[k] = v.clone(),
+        }
+    }
+    out
 }
 
 /// The display's light, from the core's "lcd".
@@ -149,18 +222,17 @@ struct Tops {
     chassis: f32,
 }
 
-/// The brightest of each part of the light on the keyboard, in nits, and the
-/// brightest the lit keys' colour shows cleanly, before the screen clips it.
-#[derive(Clone, Copy, Debug, Default)]
+/// The brightest of each part of the light on the keyboard, in nits, as the
+/// picture came out: how much it brightened the brightest pixel it fell on.
+/// And the brightest the lit keys' colour shows cleanly, before the screen
+/// clips it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Peaks {
     pub legend: f32,
     pub deck: f32,
     pub rim: f32,
     pub chassis: f32,
     pub clean: f32,
-}
-
-impl Model {
 }
 
 /// How much of a small source's light falls on a surface `h` below it, at `r`
@@ -538,29 +610,19 @@ impl Board {
         }
     }
 
-    /// The brightest light on the keyboard with these lights, in nits, with
-    /// the SDR white at `white` nits and Peak nits at `ceiling` times it: the
-    /// legends', the deck's, and the brightest the lit keys' colour shows
-    /// cleanly, before the screen clips one of its channels.
-    pub fn peaks(&self, lights: &[Light], white: f32, ceiling: f32) -> Peaks {
-        let t = self.model.tops(white, ceiling);
-        let lit: Vec<&Light> = lights.iter().filter(|l| self.keys.iter().any(|k| k.pos == l.pos)).collect();
-        let strongest = lit.iter().map(|l| l.strength.clamp(0.0, 1.0)).fold(0.0f32, f32::max) * white;
-        let clean = lit.iter().map(|l| clean_limit(l, ceiling) * l.strength.clamp(0.0, 1.0)).fold(0.0f32, f32::max);
-        Peaks { legend: strongest * t.legend, deck: strongest * t.deck, rim: strongest * t.rim, chassis: strongest * t.chassis, clean: clean * white }
-    }
-
     /// The places of the keys that light.
     pub fn positions(&self) -> impl Iterator<Item = u32> + '_ {
         self.keys.iter().map(|k| k.pos)
     }
 
     /// The picture with this light: premultiplied linear RGBA, the SDR white
-    /// at 1.0 (`white` nits). Each part of the light (the legends, the deck's
-    /// glow, the skirts' feet) is at its brightest the core's nits for it, in
-    /// luminance, whatever its colour, up to Peak nits (`ceiling` times the
-    /// white). Nothing else holds it back: a colour asked for brighter than the
-    /// screen can show it goes as asked, and the screen clips it.
+    /// at 1.0 (`white` nits), and the brightest of each part of its light as
+    /// it came out. Each part of the light (the legends, the deck's glow, the
+    /// skirts' feet, the chassis spill) is at its brightest the core's nits
+    /// for it, in luminance, whatever its colour, up to Peak nits (`ceiling`
+    /// times the white). Nothing else holds it back: a colour asked for
+    /// brighter than the screen can show it goes as asked, and the screen
+    /// clips it.
     ///
     /// The light is each key's LED, under its cap: it comes out through the
     /// legend, brightest nearest the LED, and escapes under the skirt onto the
@@ -568,28 +630,40 @@ impl Board {
     /// couple of millimetres; the foot of the skirt catches a little of the
     /// deck's glow. The caps' shadows are the room's light blocked, so the
     /// LEDs' light is not under them. A key's brightness scales its nits,
-    /// never its shape.
-    pub fn compose(&self, lights: &[Light], white: f32, ceiling: f32) -> Vec<f32> {
+    /// never its shape. The light that falls on things meets them as the
+    /// core's blend has it; the legends' is added.
+    pub fn compose(&self, lights: &[Light], white: f32, ceiling: f32) -> (Vec<f32>, Peaks) {
         let (w, h) = (self.w as usize, self.h as usize);
         let mut out = vec![0f32; w * h * 4];
         // in bands of rows, one a thread: every step below is the pixel's own
         let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(16);
         let rows = h.div_ceil(threads).max(1);
+        let mut most = [0f32; 4];
         std::thread::scope(|sc| {
-            for (b, band) in out.chunks_mut(rows * w * 4).enumerate() {
-                let y0 = b * rows;
-                sc.spawn(move || self.compose_rows(lights, white, ceiling, y0, band));
+            let bands: Vec<_> = out.chunks_mut(rows * w * 4).enumerate().map(|(b, band)| sc.spawn(move || self.compose_rows(lights, white, ceiling, b * rows, band))).collect();
+            for band in bands {
+                let m = band.join().unwrap_or_else(|e| std::panic::resume_unwind(e));
+                for (a, b) in most.iter_mut().zip(m) {
+                    *a = a.max(b);
+                }
             }
         });
-        out
+        let lit = lights.iter().filter(|l| self.keys.iter().any(|k| k.pos == l.pos));
+        let clean = lit.map(|l| clean_limit(l, ceiling) * l.strength.clamp(0.0, 1.0)).fold(0.0f32, f32::max);
+        let [legend, deck, rim, chassis] = most.map(|v| v * white);
+        (out, Peaks { legend, deck, rim, chassis, clean: clean * white })
     }
 
-    fn compose_rows(&self, lights: &[Light], white: f32, ceiling: f32, y0: usize, out: &mut [f32]) {
+    /// One band of rows of the picture, from row `y0`; the most each part of
+    /// the light brightened any pixel of it: the legends', the deck's, the
+    /// skirts' feet's and the chassis's, in the SDR white's units.
+    fn compose_rows(&self, lights: &[Light], white: f32, ceiling: f32, y0: usize, out: &mut [f32]) -> [f32; 4] {
         let w = self.w as usize;
         let n = out.len() / 4;
         let y1 = y0 + n / w;
         let dec = |v: f32| v.max(0.0).powf(2.2);
-        let Tops { legend: legend_top, deck: deck_top, rim: rim_top, chassis: chassis_top } = self.model.tops(white, ceiling);
+        let model = &self.model;
+        let Tops { legend: legend_top, deck: deck_top, rim: rim_top, chassis: chassis_top } = model.tops(white, ceiling);
         // the body and its print, in linear light, opaque, under the caps' shadows
         for (i, px) in out.chunks_exact_mut(4).enumerate() {
             let j = y0 * w + i;
@@ -600,7 +674,6 @@ impl Board {
             px[3] = 1.0;
         }
         let light = |pos: u32| lights.iter().find(|l| l.pos == pos);
-        let colour = |l: &Light, _top: f32| key_colour(l);
         // each pixel of a shape in this band: its place here, its index in the shape, and its value
         let each = |s: &Shape, f: &mut dyn FnMut(usize, usize, f32)| {
             for row in 0..s.h as i32 {
@@ -621,38 +694,97 @@ impl Board {
                 }
             }
         };
-        // light given off, added as it is
-        let shine = |out: &mut [f32], em: &mut [[f32; 3]]| {
-            for (d, px) in out.chunks_exact_mut(4).enumerate() {
-                for i in 0..3 {
-                    px[i] += em[d][i];
-                }
-                em[d] = [0.0; 3];
-            }
-        };
+        // The light falling on each pixel, in linear light; and for Overlay,
+        // the keys' own colours (sRGB, as the page has them), each by how much
+        // of the light is theirs.
         let mut em = vec![[0f32; 3]; n];
-        let add = |em: &mut [[f32; 3]], s: &Shape, c: [f32; 3], k: f32, lit: Option<&[f32]>| {
+        let mut paint = if model.blend == Blend::Overlay { vec![[0f32; 3]; n] } else { Vec::new() };
+        let add = |em: &mut [[f32; 3]], paint: &mut [[f32; 3]], s: &Shape, l: &Light, k: f32, lit: Option<&[f32]>| {
             if k <= 0.0 {
                 return;
             }
+            let c = key_colour(l);
+            let srgb = l.rgb.map(|v| v as f32 / 255.0);
+            let strength = l.strength.clamp(0.0, 1.0);
             each(s, &mut |d, i, a| {
                 let a = a * k * lit.map_or(1.0, |l| l[i]);
                 for ch in 0..3 {
                     em[d][ch] += c[ch] * a;
                 }
+                if let Some(p) = paint.get_mut(d) {
+                    for ch in 0..3 {
+                        p[ch] += srgb[ch] * a * strength;
+                    }
+                }
             });
         };
+        // The light fallen on each pixel meeting what is drawn there, as
+        // `blend` has it (`surface` is the art's own colour there, in linear
+        // light, which Reflect takes on); the most it brightened any pixel.
+        let meet = |out: &mut [f32], em: &mut [[f32; 3]], paint: &mut [[f32; 3]], blend: Blend, surface: &dyn Fn(usize) -> [f32; 3]| -> f32 {
+            let mut most = 0f32;
+            for (d, px) in out.chunks_exact_mut(4).enumerate() {
+                let e = std::mem::take(&mut em[d]);
+                let amount = luminance(e);
+                if amount <= 0.0 {
+                    continue;
+                }
+                let before = luminance([px[0], px[1], px[2]]);
+                match blend {
+                    Blend::Add => {
+                        for c in 0..3 {
+                            px[c] += e[c];
+                        }
+                    }
+                    Blend::Reflect => {
+                        let s = surface(d);
+                        for c in 0..3 {
+                            px[c] += e[c] * (model.black + (1.0 - model.black) * s[c]) / GREY;
+                        }
+                    }
+                    Blend::Overlay => {
+                        // the layer: the keys' colour, as opaque as the light is bright
+                        let layer = std::mem::take(&mut paint[d]);
+                        let opacity = amount.min(1.0);
+                        for c in 0..3 {
+                            let base = px[c].clamp(0.0, 1.0).powf(1.0 / 2.2);
+                            let top = (layer[c] / amount).clamp(0.0, 1.0);
+                            let o = if base < 0.5 { 2.0 * base * top } else { 1.0 - 2.0 * (1.0 - base) * (1.0 - top) };
+                            px[c] = dec(base + (o - base) * opacity);
+                        }
+                    }
+                }
+                most = most.max(luminance([px[0], px[1], px[2]]) - before);
+            }
+            most
+        };
+        // the art's colour under the caps (the deck, the chassis), and with them (the skirts)
+        let ground = |d: usize| {
+            let j = (y0 * w + d) * 3;
+            [dec(self.under[j]), dec(self.under[j + 1]), dec(self.under[j + 2])]
+        };
+        let drawn = |d: usize| {
+            let j = y0 * w + d;
+            let cap = &self.caps[j * 4..j * 4 + 4];
+            let a = cap[3];
+            [0, 1, 2].map(|c| if a > 0.0 { dec(cap[c] / a) * a } else { 0.0 } + dec(self.under[j * 3 + c]) * (1.0 - a))
+        };
+        let mut most = [0f32; 4];
 
         // the glow on the deck, from the light escaping under each cap
         for key in &self.keys {
             if let (Some(l), Some(s)) = (light(key.pos), &key.deck) {
-                add(&mut em, s, colour(l, deck_top), deck_top, None);
-            }
-            if let (Some(l), Some(s)) = (light(key.pos), &key.chassis) {
-                add(&mut em, s, colour(l, chassis_top), chassis_top, None);
+                add(&mut em, &mut paint, s, l, deck_top, None);
             }
         }
-        shine(out, &mut em);
+        most[1] = meet(out, &mut em, &mut paint, model.blend, &ground);
+        // and out of the wells onto the chassis round them
+        for key in &self.keys {
+            if let (Some(l), Some(s)) = (light(key.pos), &key.chassis) {
+                add(&mut em, &mut paint, s, l, chassis_top, None);
+            }
+        }
+        most[3] = meet(out, &mut em, &mut paint, model.blend, &ground);
         // the caps over it
         for (i, px) in out.chunks_exact_mut(4).enumerate() {
             let cap = &self.caps[(y0 * w + i) * 4..(y0 * w + i) * 4 + 4];
@@ -679,18 +811,28 @@ impl Board {
                 });
             }
         }
-        // the light through the legends, the brightest thing, and the skirts' feet
+        // the skirts' feet, catching the deck's glow
         for key in &self.keys {
-            let Some(l) = light(key.pos) else { continue };
-            if let Some(s) = &key.rim {
-                add(&mut em, s, colour(l, rim_top), rim_top, None);
-            }
-            if let Some(s) = &key.legend {
-                add(&mut em, s, colour(l, legend_top), legend_top * if l.dim { 0.35 } else { 1.0 }, Some(&key.legend_lit));
+            if let (Some(l), Some(s)) = (light(key.pos), &key.rim) {
+                add(&mut em, &mut paint, s, l, rim_top, None);
             }
         }
-        shine(out, &mut em);
+        most[2] = meet(out, &mut em, &mut paint, model.blend, &drawn);
+        // the light through the legends, the brightest thing, given off and so added as it is
+        for key in &self.keys {
+            let Some(l) = light(key.pos) else { continue };
+            if let Some(s) = &key.legend {
+                add(&mut em, &mut [], s, l, legend_top * if l.dim { 0.35 } else { 1.0 }, Some(&key.legend_lit));
+            }
+        }
+        most[0] = meet(out, &mut em, &mut [], Blend::Add, &ground);
+        most
     }
+}
+
+/// Linear light's luminance (BT.709).
+fn luminance(c: [f32; 3]) -> f32 {
+    0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
 }
 
 /// The first fill colour in a piece: the grey a legend is printed in.
@@ -776,7 +918,14 @@ mod tests {
     fn board() -> (Tree, Value, Board) {
         let tree = Tree::from_str(crate::z10::SVG, &usvg::Options::default()).unwrap();
         let mut device: Value = serde_json::from_str(crate::z10::DEVICE).unwrap();
-        device["light"] = serde_json::json!({
+        device["light"] = tests_light();
+        let b = Board::new(&tree, &device, [0x20, 0x20, 0x20], 1264, 506).unwrap();
+        (tree, device, b)
+    }
+
+    /// The tests' own light, whatever the core is tuned to.
+    fn tests_light() -> Value {
+        serde_json::json!({
             "led": 7.0,
             "legend": { "nits": 600, "depth": 10.0, "floor": 0.35 },
             "deck": { "nits": 90, "height": 7.0, "floor": 0.15, "reach": 2.0 },
@@ -784,9 +933,7 @@ mod tests {
             "chassis": { "nits": 20, "reach": 4.0 },
             "lcd": { "nits": 400 },
             "wells": "mask_1"
-        });
-        let b = Board::new(&tree, &device, [0x20, 0x20, 0x20], 1264, 506).unwrap();
-        (tree, device, b)
+        })
     }
 
     #[test]
@@ -804,7 +951,7 @@ mod tests {
         assert!(b.keys.iter().all(|k| k.deck.is_some() && k.rim.is_some()), "every lit key has its deck glow and rim");
         let lights: Vec<Light> = b.keys.iter().map(|k| Light { pos: k.pos, rgb: [255, 45, 0], strength: 1.0, dim: false }).collect();
         let t = std::time::Instant::now();
-        let frame = b.compose(&lights, 254.0, 1000.0 / 254.0);
+        let (frame, _) = b.compose(&lights, 254.0, 1000.0 / 254.0);
         let composed = t.elapsed();
         let enc = Encoder::new(254.0);
         let t = std::time::Instant::now();
@@ -812,6 +959,16 @@ mod tests {
         let encoded = t.elapsed();
         assert_eq!(px.len(), (1264 * 506 * 8) as usize);
         eprintln!("made in {made:?}, lit in {composed:?}, encoded in {encoded:?}");
+        // and lit by the other blends
+        let mut b = b;
+        for blend in ["overlay", "reflect"] {
+            let mut light = tests_light();
+            light["surfaces"] = serde_json::json!({ "blend": blend });
+            b.set_light(&light);
+            let t = std::time::Instant::now();
+            let _ = b.compose(&lights, 254.0, 1000.0 / 254.0);
+            eprintln!("lit by {blend} in {:?}", t.elapsed());
+        }
         // the brightest part of the lit keyboard goes beyond the desktop's white
         let brightest = frame.chunks_exact(4).map(|p| p[0] / p[3].max(1e-6)).fold(0f32, f32::max);
         assert!(brightest > 1.2, "the light should go past SDR white: {brightest}");
@@ -864,8 +1021,8 @@ mod tests {
         // Composed, the shadow does not darken the LED's light: the glow just
         // below the skirt, in the cap's shadow, still shows.
         let lights: Vec<Light> = b.keys.iter().map(|k| Light { pos: k.pos, rgb: [255, 255, 255], strength: 1.0, dim: false }).collect();
-        let lit = b.compose(&lights, 254.0, 1000.0 / 254.0);
-        let dark = b.compose(&[], 254.0, 1000.0 / 254.0);
+        let (lit, _) = b.compose(&lights, 254.0, 1000.0 / 254.0);
+        let (dark, _) = b.compose(&[], 254.0, 1000.0 / 254.0);
         let i = ((s_.1 as u32 * b.w + s_.0 as u32) * 4) as usize;
         eprintln!("below the W's skirt: lit {:.4}, unlit {:.4}", lit[i], dark[i]);
         assert!(lit[i] > dark[i] + 0.02, "the glow shows in the cap's shadow");
@@ -874,34 +1031,156 @@ mod tests {
         assert!((brightest - 600.0 / 254.0).abs() < 0.05, "the brightest light is the top: {brightest}");
     }
 
+    /// The board lit by one key alone, the W, in a colour: so each part's
+    /// brightest is that key's own, with no other key's light over it.
+    fn w_key(b: &Board, device: &Value, rgb: [u8; 3], strength: f32) -> Vec<Light> {
+        let c = device["controls"].as_array().unwrap().iter().find(|c| c["label"] == "W").unwrap();
+        let pos = c["pos"].as_u64().unwrap() as u32;
+        assert!(b.keys.iter().any(|k| k.pos == pos));
+        vec![Light { pos, rgb, strength, dim: false }]
+    }
+
+    /// Each part's brightest is its own nits, as the picture comes out: the
+    /// legend's brightest pixel within a hair of it (no pixel is quite over
+    /// the LED), the deck's at it.
     #[test]
     fn each_part_s_brightness_is_its_own() {
+        let near = |v: f32, want: f32| (v / want - 1.0).abs() < 0.01;
         let (_, device, mut b) = board();
-        let lights: Vec<Light> = b.keys.iter().map(|k| Light { pos: k.pos, rgb: [255, 255, 255], strength: 1.0, dim: false }).collect();
-        let Peaks { legend, deck, .. } = b.peaks(&lights, 254.0, 1000.0 / 254.0);
-        eprintln!("legends {legend:.0} nits, deck {deck:.0}");
-        assert!((legend - 600.0).abs() < 1.0 && (deck - 90.0).abs() < 1.0);
+        let lights = w_key(&b, &device, [255, 255, 255], 1.0);
+        let (_, Peaks { legend, deck, rim, .. }) = b.compose(&lights, 254.0, 1000.0 / 254.0);
+        eprintln!("legends {legend:.1} nits, deck {deck:.1}, skirt's foot {rim:.1}");
+        assert!(near(legend, 600.0) && legend <= 600.5 && near(deck, 90.0) && rim > 0.0 && rim <= 36.0 + 0.5);
         // the legends turned down leave the deck as it was
         let mut light = device["light"].clone();
         light["legend"]["nits"] = serde_json::json!(200);
         b.set_light(&light);
-        let Peaks { legend, deck, .. } = b.peaks(&lights, 254.0, 1000.0 / 254.0);
-        eprintln!("legends turned down: legends {legend:.0} nits, deck {deck:.0}");
-        assert!((legend - 200.0).abs() < 1.0 && (deck - 90.0).abs() < 1.0, "the deck keeps its own brightness");
+        let (_, Peaks { legend, deck, .. }) = b.compose(&lights, 254.0, 1000.0 / 254.0);
+        eprintln!("legends turned down: legends {legend:.1} nits, deck {deck:.1}");
+        assert!(near(legend, 200.0) && near(deck, 90.0), "the deck keeps its own brightness");
         // a red the screen cannot show cleanly at 200 nits is still sent at 200;
         // its clean limit is only told
-        let red: Vec<Light> = b.keys.iter().map(|k| Light { pos: k.pos, rgb: [255, 0, 0], strength: 1.0, dim: false }).collect();
-        let Peaks { legend, deck, clean, .. } = b.peaks(&red, 254.0, 600.0 / 254.0);
-        eprintln!("red at a 600-nit peak: legends {legend:.0} nits (clean up to {clean:.0}), deck {deck:.0}");
-        assert!((legend - 200.0).abs() < 1.0 && clean < 200.0 && (deck - 90.0).abs() < 1.0);
-        let lit = b.compose(&red, 254.0, 600.0 / 254.0);
-        let hottest = lit.chunks_exact(4).map(|p| 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]).fold(0f32, f32::max) * 254.0;
+        let red = w_key(&b, &device, [255, 0, 0], 1.0);
+        let (lit, Peaks { legend, deck, clean, .. }) = b.compose(&red, 254.0, 600.0 / 254.0);
+        eprintln!("red at a 600-nit peak: legends {legend:.1} nits (clean up to {clean:.0}), deck {deck:.1}");
+        assert!(near(legend, 200.0) && clean < 200.0 && near(deck, 90.0));
+        let hottest = lit.chunks_exact(4).map(|p| luminance([p[0], p[1], p[2]])).fold(0f32, f32::max) * 254.0;
         eprintln!("red legends sent at {hottest:.0} nits");
         assert!((hottest - 200.0).abs() < 2.0, "the legends go as bright as asked");
         // and a key's brightness dims every part of it together
-        let half: Vec<Light> = lights.iter().map(|l| Light { strength: 0.5, ..*l }).collect();
-        let Peaks { legend, deck, .. } = b.peaks(&half, 254.0, 1000.0 / 254.0);
-        assert!((legend - 100.0).abs() < 1.0 && (deck - 45.0).abs() < 1.0, "half lit: {legend} {deck}");
+        let half = w_key(&b, &device, [255, 255, 255], 0.5);
+        let (_, Peaks { legend, deck, .. }) = b.compose(&half, 254.0, 1000.0 / 254.0);
+        assert!(near(legend, 100.0) && near(deck, 45.0), "half lit: {legend} {deck}");
+    }
+
+    /// A pixel's colour in a picture.
+    fn rgb(b: &Board, f: &[f32], (x, y): (i32, i32)) -> [f32; 3] {
+        let i = ((y as u32 * b.w + x as u32) * 4) as usize;
+        [f[i], f[i + 1], f[i + 2]]
+    }
+
+    /// Two places the light falls on, about the Escape key: the deck just
+    /// north of its skirt, in its well, and the chassis just above the well.
+    fn by_escape(b: &Board, device: &Value) -> ((i32, i32), (i32, i32)) {
+        let px = |u: f32, v: f32| ((b.art_offset.0 + b.art_scale * u) as i32, (b.art_offset.1 + b.art_scale * v) as i32);
+        let esc = device["controls"].as_array().unwrap().iter().find(|c| c["label"] == "Escape").unwrap();
+        let foot = b.keys.iter().find(|k| k.pos as u64 == esc["pos"].as_u64().unwrap()).unwrap().foot.unwrap();
+        let cx = (foot[0] + foot[2]) / 2.0;
+        // the Escape key's well starts at 59.26 in the art
+        (px(cx, foot[1] - 0.6), px(cx, 58.5))
+    }
+
+    /// Reflect takes on what the light falls on: everywhere, the light a
+    /// mid-grey card would show, times what the surface there reflects (its
+    /// colour, and never less than the black's share). The legends, which give
+    /// off their own light, are as they were.
+    #[test]
+    fn reflect_takes_on_what_the_light_falls_on() {
+        let (_, device, mut b) = board();
+        let white: Vec<Light> = b.keys.iter().map(|k| Light { pos: k.pos, rgb: [255, 255, 255], strength: 1.0, dim: false }).collect();
+        let (dark, _) = b.compose(&[], 254.0, 1000.0 / 254.0);
+        let (added, pa) = b.compose(&white, 254.0, 1000.0 / 254.0);
+        let mut light = device["light"].clone();
+        light["surfaces"] = serde_json::json!({ "blend": "reflect", "black": 0.04 });
+        b.set_light(&light);
+        let (reflected, pr) = b.compose(&white, 254.0, 1000.0 / 254.0);
+        let (deck, chassis) = by_escape(&b, &device);
+        for (name, at) in [("deck", deck), ("chassis", chassis)] {
+            let (d, a, r) = (rgb(&b, &dark, at), rgb(&b, &added, at), rgb(&b, &reflected, at));
+            let j = ((at.1 as u32 * b.w + at.0 as u32) * 3) as usize;
+            let surface = b.under[j + 1].powf(2.2);
+            let share = (0.04 + 0.96 * surface) / GREY;
+            let got = (r[1] - d[1]) / (a[1] - d[1]);
+            eprintln!("{name}: the surface reflects {:.1}%, so {share:.3} of a mid-grey's light; reflected/added {got:.3}", (0.04 + 0.96 * surface) * 100.0);
+            assert!(a[1] - d[1] > 1e-3, "the light falls on the {name}");
+            assert!((got - share).abs() < 0.01 * share.max(0.1), "{name}: {got} vs {share}");
+        }
+        eprintln!(
+            "added: legends {:.0}, deck {:.1}, skirt {:.1}, chassis {:.1}; reflected: legends {:.0}, deck {:.1}, skirt {:.1}, chassis {:.1}",
+            pa.legend, pa.deck, pa.rim, pa.chassis, pr.legend, pr.deck, pr.rim, pr.chassis
+        );
+        assert!((pr.legend - pa.legend).abs() < 0.5, "the legends are added, whatever the blend");
+        assert!(pr.deck < pa.deck * 0.5 && pr.rim < pa.rim * 0.5, "the black deck and skirts reflect little of it");
+    }
+
+    /// Overlay is a paint program's: the key's colour over what is drawn, as
+    /// strongly as the light is bright, full at the desktop's white. However
+    /// bright the light, nothing it falls on goes past the desktop's white,
+    /// and black stays black; the legends still go past it.
+    #[test]
+    fn overlay_is_a_paint_program_s() {
+        let (_, device, mut b) = board();
+        let white: Vec<Light> = b.keys.iter().map(|k| Light { pos: k.pos, rgb: [255, 255, 255], strength: 1.0, dim: false }).collect();
+        let (dark, _) = b.compose(&[], 254.0, 1000.0 / 254.0);
+        let mut light = device["light"].clone();
+        light["surfaces"] = serde_json::json!({ "blend": "overlay" });
+        light["deck"]["nits"] = serde_json::json!(1000);
+        light["chassis"]["nits"] = serde_json::json!(1000);
+        b.set_light(&light);
+        let (lit, p) = b.compose(&white, 254.0, 1000.0 / 254.0);
+        let (deck, chassis) = by_escape(&b, &device);
+        let enc = |v: f32| v.max(0.0).powf(1.0 / 2.2);
+        for (name, at) in [("deck", deck), ("chassis", chassis)] {
+            let (d, l) = (rgb(&b, &dark, at), rgb(&b, &lit, at));
+            eprintln!("{name}: drawn {:.4} (sRGB {:.3}), overlaid {:.4} (sRGB {:.3})", d[1], enc(d[1]), l[1], enc(l[1]));
+            assert!(l[1] <= 1.0 + 1e-5, "{name}: never past the desktop's white");
+        }
+        // the chassis is a dark grey: white laid over it fully doubles it in sRGB's encoding
+        let (d, l) = (rgb(&b, &dark, chassis), rgb(&b, &lit, chassis));
+        let full = (2.0 * enc(d[1])).powf(2.2);
+        eprintln!("the chassis with the light fully on: at most {full:.4}, got {:.4}", l[1]);
+        assert!(l[1] > d[1] && l[1] <= full + 1e-4, "a dark grey is lifted, at most to twice its encoding");
+        // pure black stays black: a pixel of the deck the art draws black, out from under the caps
+        let o = |x: i32, y: i32| (y as u32 * b.w + x as u32) as usize;
+        let black = (0..b.w as i32 * b.h as i32).map(|i| (i % b.w as i32, i / b.w as i32)).find(|&(x, y)| {
+            let j = o(x, y);
+            b.under[j * 3..j * 3 + 3].iter().all(|v| *v == 0.0) && b.caps[j * 4 + 3] == 0.0 && b.shadow[j] == 0.0 && b.keys.iter().any(|k| k.deck.as_ref().is_some_and(|s| at(s, x, y) > 0.5))
+        });
+        eprintln!("a black pixel the deck glow falls on: {black:?}");
+        if let Some(at) = black {
+            assert!(rgb(&b, &lit, at)[1] - rgb(&b, &dark, at)[1] < 1e-6, "black stays black under Overlay");
+        }
+        eprintln!("overlay: legends {:.0} nits, deck {:.1}, chassis {:.1}", p.legend, p.deck, p.chassis);
+        assert!(p.legend > 254.0, "the legends still go past the desktop's white");
+    }
+
+    /// The light as the lab tunes it: every value the keyboard uses, those
+    /// the core leaves out at what the keyboard takes for them, and the
+    /// core's own as they are.
+    #[test]
+    fn the_light_comes_complete() {
+        let (_, device, _) = board();
+        let full = complete(&device["light"]);
+        assert_eq!(full["surfaces"]["blend"], "add");
+        assert_eq!(full["surfaces"]["black"], 0.04);
+        assert_eq!(full["legend"]["nits"], 600);
+        assert_eq!(full["wells"], "mask_1");
+        assert_eq!(full["lcd"]["dot"], 0.84);
+        let mut light = device["light"].clone();
+        light["surfaces"] = serde_json::json!({ "blend": "reflect" });
+        let full = complete(&light);
+        assert_eq!(full["surfaces"]["blend"], "reflect");
+        assert_eq!(full["surfaces"]["black"], 0.04);
     }
 
     #[test]
@@ -909,8 +1188,8 @@ mod tests {
         let (_, device, b) = board();
         let px = |u: f32, v: f32| ((b.art_offset.0 + b.art_scale * u) as i32, (b.art_offset.1 + b.art_scale * v) as i32);
         let white: Vec<Light> = b.keys.iter().map(|k| Light { pos: k.pos, rgb: [255, 255, 255], strength: 1.0, dim: false }).collect();
-        let lit = b.compose(&white, 254.0, 1000.0 / 254.0);
-        let dark = b.compose(&[], 254.0, 1000.0 / 254.0);
+        let (lit, _) = b.compose(&white, 254.0, 1000.0 / 254.0);
+        let (dark, _) = b.compose(&[], 254.0, 1000.0 / 254.0);
         let at = |f: &[f32], (x, y): (i32, i32)| {
             let i = ((y as u32 * b.w + x as u32) * 4) as usize;
             0.2126 * f[i] + 0.7152 * f[i + 1] + 0.0722 * f[i + 2]
@@ -926,7 +1205,11 @@ mod tests {
         assert!(vn * 254.0 > 5.0, "the chassis just outside a well catches the keys' light");
         assert!(vf < vn * 0.5, "and it falls away across the chassis");
         assert!(vo.abs() < 1e-4, "nothing lights the page round the keyboard");
-        assert!((b.peaks(&white, 254.0, 1000.0 / 254.0).chassis - 20.0).abs() < 0.5);
+        // the key whose spill is brightest, lit alone, spills the core's chassis nits at its brightest
+        let top = b.keys.iter().find(|k| k.chassis.as_ref().is_some_and(|s| s.cover.iter().any(|v| *v >= 0.9999))).unwrap();
+        let (_, p) = b.compose(&[Light { pos: top.pos, rgb: [255, 255, 255], strength: 1.0, dim: false }], 254.0, 1000.0 / 254.0);
+        eprintln!("the brightest spill, its key alone: {:.1} nits", p.chassis);
+        assert!((p.chassis - 20.0).abs() < 0.5);
     }
 
     /// Far side is the skirt's far side as a part of its LED side, across its

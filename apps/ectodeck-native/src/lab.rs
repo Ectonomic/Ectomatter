@@ -1,9 +1,10 @@
 //! The Lighting lab: a developer's window for tuning how the Z10's keys are
 //! lit. Each part of the light (the legends, the deck's glow, the skirt's
 //! foot, where the LED sits, the display) has its sliders, each in the units
-//! that mean something, and a curve of the shape they give; the keyboard in
-//! the main window takes every change at once. Save writes the tuning into
-//! the Z10 core's own file, which Ectodeck reads when it runs from its source.
+//! that mean something, and a curve of the shape they give; how the light
+//! that falls on things meets them is a switch. The keyboard in the main
+//! window takes every change at once. Save writes the tuning into the Z10
+//! core's own file, which Ectodeck reads when it runs from its source.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -24,6 +25,7 @@ pub enum Ask {
     Close,
     Slide(i32, f32),
     Typed(i32, String),
+    Pick(i32, i32),
     Revert,
     Save,
 }
@@ -52,7 +54,7 @@ struct Param {
     note: &'static str,
 }
 
-const PARAMS: [Param; 17] = [
+const PARAMS: [Param; 18] = [
     Param { path: ("legend", "nits"), label: "Brightness", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, note: "The legend at its brightest, nearest the LED, for a key lit fully, up to Peak nits (Settings › HDR)." },
     Param { path: ("legend", "depth"), label: "Spread", lo: 1.0, hi: 60.0, step: 0.5, unit: Unit::Length, note: "How deep under the legend the LED sits. Deeper lights a legend more evenly; shallower keeps the light to the part nearest the LED." },
     Param { path: ("legend", "floor"), label: "Far parts", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, note: "The least any part of a legend is lit, however far from the LED: light bouncing inside the cap." },
@@ -70,12 +72,25 @@ const PARAMS: [Param; 17] = [
     Param { path: ("lcd", "field"), label: "Background", lo: 0.0, hi: 0.0, step: 0.1, unit: Unit::Nits, note: "The ground between the dots." },
     Param { path: ("lcd", "dot"), label: "Dot size", lo: 0.05, hi: 1.0, step: 0.01, unit: Unit::Fraction, note: "How much of each cell a dot fills; the rest is the gap between dots." },
     Param { path: ("lcd", "glass"), label: "Glass sheen", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, note: "How strongly the glass over the display shows its reflection, as the art draws it at 100%." },
+    Param { path: ("surfaces", "black"), label: "Black reflects", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, note: "How much of the light the parts the art paints black (the deck in the wells, the caps' skirts) reflect, as black plastic does. Every surface reflects at least this much. Used by Reflect." },
 ];
 
+/// How the light that falls on things can meet them: as the core names each
+/// way, as the switch does, and what it does.
+const BLENDS: [(&str, &str, &str); 3] = [
+    ("add", "Add", "Added on top of what it falls on, as light is: as bright on the black deck as on the chassis."),
+    ("overlay", "Overlay", "A paint program's Overlay: each key's colour laid over what it falls on, as strongly as its light is bright, fully at the desktop's white. On black it shows nothing, and it never goes past the desktop's white."),
+    ("reflect", "Reflect", "Reflected by what it falls on, as real light is: brighter on lighter parts, dimmer on darker ones, tinted by their colour. Each part's brightness below is what a mid-grey surface would show; the readout above measures what the keyboard shows."),
+];
+
+/// the switch's id, apart from the values'
+const BLEND: i32 = 100;
+
 /// The page's sections: a title, what the part is, and its values.
-const SECTIONS: [(&str, &str, usize, usize); 6] = [
+const SECTIONS: [(&str, &str, usize, usize); 7] = [
     ("LED", "Where each key's light comes from.", 9, 10),
     ("Legends", "The LED shines up through the legend: the brightest thing on a key.", 0, 3),
+    ("Blending", "How the light that falls on things (the deck glow, the skirt's foot and the chassis spill) meets what it falls on. The legends and the display give off their own light, so theirs is always added.", 17, 18),
     ("Deck glow", "Light escaping under the cap's skirt onto the deck of the well.", 3, 7),
     ("Skirt's foot", "The deck's glow caught by the foot of each cap.", 7, 9),
     ("Chassis spill", "Light out of the wells onto the chassis round them, from the keys nearest each well's edge.", 10, 12),
@@ -93,6 +108,7 @@ pub struct Readout {
     pub legend: f64,
     pub reach: f64,
     pub deck: f64,
+    pub rim: f64,
     pub chassis: f64,
     pub lcd: f64,
     /// Peak nits, from Settings › HDR, and the desktop's white
@@ -156,6 +172,7 @@ impl LabPage {
         on!(on_close_window, Ask::Close);
         on!(on_slide, |id, v| Ask::Slide(id, v));
         on!(on_entered, |id, t| Ask::Typed(id, t.to_string()));
+        on!(on_pick, |id, i| Ask::Pick(id, i));
         on!(on_revert, Ask::Revert);
         on!(on_save, Ask::Save);
         ui.set_mark(mark);
@@ -163,6 +180,8 @@ impl LabPage {
         let plots = Rc::new(VecModel::default());
         ui.set_cells(ModelRc::from(cells.clone()));
         ui.set_plots(ModelRc::from(plots.clone()));
+        // every value the keyboard is lit by, those the core leaves out as the keyboard takes them
+        let light = ectodeck_draw::hdr::complete(&light);
         let mut page = LabPage { ui, asks, saved: light.clone(), light, rev: 0, readout: Readout::default(), status: (String::new(), 0), cells, plots };
         page.refresh();
         page
@@ -217,6 +236,16 @@ impl LabPage {
                         }
                     }
                 }
+                Ask::Pick(BLEND, i) => {
+                    if let Some((v, _, _)) = BLENDS.get(i.max(0) as usize) {
+                        if self.light["surfaces"]["blend"].as_str() != Some(v) {
+                            self.light["surfaces"]["blend"] = json!(v);
+                            self.rev += 1;
+                            self.status = (String::new(), 0);
+                        }
+                    }
+                }
+                Ask::Pick(..) => {}
                 Ask::Revert => {
                     self.light = self.saved.clone();
                     self.rev += 1;
@@ -376,6 +405,7 @@ impl LabPage {
             };
             row(c, cy, "Brightest legend", format!("{:.0} nits", r.legend), note);
             row(c, cy, "Brightest deck glow", format!("{:.0} nits", r.deck), None);
+            row(c, cy, "Brightest skirt's foot", format!("{:.0} nits", r.rim), None);
             row(c, cy, "Brightest chassis spill", format!("{:.0} nits", r.chassis), None);
             row(c, cy, "Display's lit dots", format!("{:.0} nits", r.lcd), None);
             row(c, cy, "The desktop's white", format!("{:.0} nits", r.white), None);
@@ -383,6 +413,27 @@ impl LabPage {
 
         for (title, about, a, b) in SECTIONS {
             card(&mut cells, &mut y, title, about, &mut |c, cy| {
+                // the switch, and what the way it is set does
+                if title == "Blending" {
+                    c.push(text_cell(style::LABEL, x0 + pad, *cy, label_w, 36.0, "Mode"));
+                    let current = self.light["surfaces"]["blend"].as_str().unwrap_or("add");
+                    let mut bx = cx + 3.0;
+                    let mut buttons = Vec::new();
+                    for (j, (v, name, _)) in BLENDS.iter().enumerate() {
+                        let bw = text::width(400, 13.0, name) + 24.0;
+                        buttons.push(Cell { text: (*name).into(), on: *v == current, id: BLEND, index: j as i32, ..cell(kind::SEG_BUTTON, bx, *cy + 3.0, bw, 30.0) });
+                        bx += bw + 2.0;
+                    }
+                    c.push(cell(kind::SEG, cx, *cy, bx - 2.0 + 3.0 - cx, 36.0));
+                    c.extend(buttons);
+                    *cy += 36.0 + 6.0;
+                    let does = BLENDS.iter().find(|b| b.0 == current).map_or("", |b| b.2);
+                    for line in text::wrap(400, 12.5, does, note_w) {
+                        c.push(text_cell(style::NOTE, cx, *cy, note_w, 18.0, &line));
+                        *cy += 18.125;
+                    }
+                    *cy += 16.0;
+                }
                 for i in a..b {
                     let p = &PARAMS[i];
                     c.push(text_cell(style::LABEL, x0 + pad, *cy, label_w, 34.0, p.label));
@@ -508,8 +559,11 @@ impl LabPage {
 /// The core's light section as its file has it: two spaces in, each part's
 /// values on one line.
 fn light_block(light: &Value) -> String {
-    // as the file writes them: nits whole, other lengths and parts with a decimal point
+    // as the file writes them: nits whole, other lengths and parts with a decimal point, words quoted
     let num = |key: &str, v: &Value| {
+        if let Some(t) = v.as_str() {
+            return serde_json::to_string(t).unwrap_or_default();
+        }
         let f = (v.as_f64().unwrap_or(0.0) * 1000.0).round() / 1000.0;
         if key == "nits" {
             format!("{f:.0}")
@@ -519,14 +573,16 @@ fn light_block(light: &Value) -> String {
             format!("{f}")
         }
     };
+    // a part the light has none of is left out
     let part = |name: &str, keys: &[&str]| {
         let body: Vec<String> = keys.iter().filter_map(|k| light[name].get(*k).map(|v| format!("\"{k}\": {}", num(k, v)))).collect();
-        format!("  \"{name}\": {{ {} }},\n", body.join(", "))
+        if body.is_empty() { String::new() } else { format!("  \"{name}\": {{ {} }},\n", body.join(", ")) }
     };
     let mut s = String::from(" \"light\": {\n");
     s += &format!("  \"about\": {},\n", serde_json::to_string(&light["about"]).unwrap_or_else(|_| "\"\"".into()));
     s += &format!("  \"led\": {},\n", num("led", &light["led"]));
     s += &part("legend", &["nits", "depth", "floor"]);
+    s += &part("surfaces", &["blend", "black"]);
     s += &part("deck", &["nits", "height", "floor", "reach"]);
     s += &part("rim", &["nits", "width"]);
     s += &part("chassis", &["nits", "reach"]);

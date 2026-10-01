@@ -3374,6 +3374,8 @@ export component LabWindow inherits Window {
     callback drag();
     callback slide(int, float);
     callback entered(int, string);
+    // a switch's choice: its id, and which
+    callback pick(int, int);
     callback revert();
     callback save();
 
@@ -3455,6 +3457,7 @@ export component LabWindow inherits Window {
                 c: c;
                 slide(id, v) => { root.slide(id, v); }
                 entered(id, t) => { root.entered(id, t); }
+                pick(id, i, x, y, h) => { root.pick(id, i); }
             }
             for p in root.plots: PlotView {
                 p: p;
