@@ -43,6 +43,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use ectodeck_draw::hdr::sim::{self, Physics, Scene, Simulator};
 use ectodeck_draw::hdr::{Board, Light};
 use front::{Front, WindowAsk};
 use picture::{Lit, Picture};
@@ -190,6 +191,21 @@ fn board_builder(done: calloop::channel::Sender<Board>) -> std::sync::mpsc::Send
         }
     });
     ask
+}
+
+/// A brightness for the Lighting lab's readout: whole nits, or tenths below ten.
+fn tenth(nits: f32) -> f64 {
+    let n = nits as f64;
+    if n < 10.0 { (n * 10.0).round() / 10.0 } else { n.round() }
+}
+
+/// The keyboard drawn at a size and lit by its light simulated to the end,
+/// here and now: for a snapshot, which has no window to wait in.
+fn settled(tree: &usvg::Tree, device: &serde_json::Value, w: u32, h: u32) -> Board {
+    let mut board = Board::new(tree, device, GROUND, w, h).unwrap();
+    let snap = Simulator::settle(&Scene::of(&board), Physics::from(&device["light"]), board.led_north(), sim::SETTLED);
+    board.set_sim(std::sync::Arc::new(snap));
+    board
 }
 
 /// A key as Slint takes it: its own text, or the name Slint gives a key with none.
@@ -372,7 +388,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
             let rect = board_rect(&front.ui, 1.0);
             let tree = usvg::Tree::from_str(ectodeck_draw::z10::SVG, &usvg::Options::default()).unwrap();
             let device: serde_json::Value = serde_json::from_str(&core_device()).unwrap();
-            let board = (rect.2 > 0).then(|| Board::new(&tree, &device, GROUND, rect.2 as u32, rect.3 as u32).unwrap());
+            let board = (rect.2 > 0).then(|| settled(&tree, &device, rect.2 as u32, rect.3 as u32));
             for k in 1..=30 {
                 let t0 = Instant::now();
                 window.dispatch_event(WindowEvent::PointerMoved { position: at(k as f32 / 30.0) });
@@ -423,8 +439,8 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         let tree = usvg::Tree::from_str(ectodeck_draw::z10::SVG, &usvg::Options::default()).unwrap();
         let device: serde_json::Value = serde_json::from_str(&core_device()).unwrap();
         let t = Instant::now();
-        let board = Board::new(&tree, &device, GROUND, rect.2 as u32, rect.3 as u32).unwrap();
-        eprintln!("keyboard drawn in {:?}", t.elapsed());
+        let board = settled(&tree, &device, rect.2 as u32, rect.3 as u32);
+        eprintln!("keyboard drawn and its light simulated in {:?}", t.elapsed());
         let lights = front.lights().unwrap_or_default();
         let gain = front.light_gain(reference).max(gain);
         eprintln!("the light at {:.0} nits", gain as f64 * reference);
@@ -564,7 +580,7 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
         .unwrap_or(LAB_SIZE);
     let device: serde_json::Value = serde_json::from_str(&core_device()).unwrap();
     let tree = usvg::Tree::from_str(ectodeck_draw::z10::SVG, &usvg::Options::default()).unwrap();
-    let board = Board::new(&tree, &device, GROUND, 1264, 506).unwrap();
+    let board = settled(&tree, &device, 1264, 506);
     let ui = LabWindow::new().unwrap();
     let _ = slint::ComponentHandle::window(&ui);
     let window = made.borrow().last().cloned().unwrap();
@@ -574,14 +590,18 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
     let lights = front.lights().unwrap_or_default();
     let gain = front.light_gain(reference);
     let p = board.peaks(&lights, reference as f32, gain);
+    let (photons, settled) = board.sim_progress().unwrap_or((0, false));
     lab.set_readout(lab::Readout {
         legend: (p.legend as f64).round(),
         reach: (p.clean as f64).round(),
-        deck: (p.deck as f64).round(),
-        chassis: (p.chassis as f64).round(),
+        deck: tenth(p.deck),
+        skirt: tenth(p.skirt),
+        chassis: tenth(p.chassis),
         lcd: (board.lcd_nits() as f64).min(gain as f64 * reference),
         peak: gain as f64 * reference,
         white: reference,
+        photons,
+        settled,
     });
     let mut px = vec![PremultipliedRgbaColor::default(); (w * h) as usize];
     let draw = |px: &mut Vec<PremultipliedRgbaColor>| {
@@ -734,6 +754,11 @@ struct App {
     light: Option<serde_json::Value>,
     light_rev: u64,
     readout_at: Option<Instant>,
+    /// the keys' light, simulated from the first keyboard drawn on, its way
+    /// of saying it has a clearer picture, and the picture last taken
+    sim: Option<Simulator>,
+    sim_tx: calloop::channel::Sender<()>,
+    sim_seen: u64,
 }
 
 /// A window of its own beside the main one: an ordinary SDR window, drawn whole by Slint.
@@ -818,6 +843,16 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         .insert_source(built_rx, |e, _, app: &mut App| {
             if let calloop::channel::Event::Msg(board) = e {
                 app.built(board);
+            }
+        })
+        .unwrap();
+    // each clearer picture of the keys' light, as the simulation has one
+    let (sim_tx, sim_rx) = calloop::channel::channel::<()>();
+    event_loop
+        .handle()
+        .insert_source(sim_rx, |e, _, app: &mut App| {
+            if let calloop::channel::Event::Msg(()) = e {
+                app.sim_ready();
             }
         })
         .unwrap();
@@ -908,6 +943,9 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         light: None,
         light_rev: 0,
         readout_at: None,
+        sim: None,
+        sim_tx,
+        sim_seen: 0,
     };
     // the tray, which the window closes into
     let (tray_tx, tray_rx) = calloop::channel::channel::<tray::TrayAsk>();
@@ -1110,10 +1148,15 @@ impl App {
         }
     }
 
+    /// The light the keyboard is lit by: the Lighting lab's, if it has tuned one, or the core's.
+    fn light_now(&self) -> serde_json::Value {
+        self.light.clone().unwrap_or_else(|| serde_json::from_str::<serde_json::Value>(&core_device()).map(|d| d["light"].clone()).unwrap_or_default())
+    }
+
     /// Open the Lighting lab, made the first time, on the light the keyboard is lit by.
     fn open_lab(&mut self) {
         if self.front.lab.is_none() {
-            let light = self.light.clone().unwrap_or_else(|| serde_json::from_str::<serde_json::Value>(&core_device()).map(|d| d["light"].clone()).unwrap_or_default());
+            let light = self.light_now();
             let ui = LabWindow::new().unwrap();
             let _ = slint::ComponentHandle::window(&ui);
             slint::ComponentHandle::show(&ui).unwrap();
@@ -1135,14 +1178,18 @@ impl App {
         self.readout_at = Some(Instant::now());
         let reference = self.pic.reference();
         let p = b.peaks(&self.lights, reference as f32, self.gain);
+        let (photons, settled) = b.sim_progress().unwrap_or((0, false));
         l.set_readout(lab::Readout {
             legend: (p.legend as f64).round(),
             reach: (p.clean as f64).round(),
-            deck: (p.deck as f64).round(),
-            chassis: (p.chassis as f64).round(),
+            deck: tenth(p.deck),
+            skirt: tenth(p.skirt),
+            chassis: tenth(p.chassis),
             lcd: (b.lcd_nits() as f64).min(self.gain as f64 * reference).round(),
             peak: (self.gain as f64 * reference).round(),
             white: reference.round(),
+            photons,
+            settled,
         });
     }
 
@@ -1318,10 +1365,47 @@ impl App {
         if let Some(l) = &self.light {
             board.set_light(l);
         }
+        // The keys' light, simulated from the first keyboard drawn on, for
+        // every size (the simulation is in the art's units). Its first
+        // picture, the light straight from the LEDs, is waited for, a tenth
+        // of a second or so, so the keys don't show dark first.
+        if self.sim.is_none() {
+            let tx = std::sync::Mutex::new(self.sim_tx.clone());
+            let s = Simulator::new(Scene::of(&board), Physics::from(&self.light_now()), board.led_north(), Box::new(move || {
+                let _ = tx.lock().map(|t| t.send(()));
+            }));
+            let t = Instant::now();
+            s.wait(Duration::from_millis(1500));
+            eprintln!("ectodeck-native: the keys' light simulated, its first picture in {:?}", t.elapsed());
+            self.sim = Some(s);
+        }
+        if let Some(s) = &self.sim {
+            if let Some(snap) = s.latest() {
+                self.sim_seen = s.version();
+                board.set_sim(snap);
+            }
+        }
         let lit = light(&board, &self.lights, self.front.page.locks, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
         self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
         self.board = Some(board);
         self.full = true;
+        self.draw();
+    }
+
+    /// The simulation has a clearer picture of the keys' light: light the keyboard by it.
+    fn sim_ready(&mut self) {
+        let Some(s) = &self.sim else { return };
+        let version = s.version();
+        let (Some(snap), Some(board)) = (s.latest(), &mut self.board) else { return };
+        if version == self.sim_seen {
+            return;
+        }
+        self.sim_seen = version;
+        board.set_sim(snap);
+        let lit = light(board, &self.lights, self.front.page.locks, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
+        self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
+        self.readout_at = None;
+        self.readout();
         self.draw();
     }
 
@@ -1363,6 +1447,10 @@ impl App {
                 self.light = Some(lab.light.clone());
                 if let (Some(b), Some(l)) = (&mut self.board, &self.light) {
                     b.set_light(l);
+                    // the light simulated again if what it falls on, or where from, has changed
+                    if let Some(s) = &self.sim {
+                        s.set(Physics::from(l), b.led_north());
+                    }
                 }
                 relit = true;
                 self.readout_at = None;

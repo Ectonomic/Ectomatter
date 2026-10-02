@@ -46,6 +46,19 @@ pub fn wrap(weight: u16, size: f32, s: &str, max: f32) -> Vec<String> {
     lines
 }
 
+/// A whole number with its thousands set apart by commas: 200,000.
+pub fn thousands(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

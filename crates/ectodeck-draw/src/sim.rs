@@ -1,0 +1,1547 @@
+//! The keyboard's light, simulated: each key's LED followed through the
+//! keyboard's shape, the art's caps, wells and body stood up to the heights
+//! the core gives, every surface matte and giving back its share of the light.
+//!
+//! An LED gives off its light two ways: most of it in a beam straight up out
+//! of the top of its switch, which lights the legend above it, brightest
+//! over the LED; the rest scattered by the switch's clear housing, which
+//! glows with it all over, its top lighting the back of the cap's top
+//! evenly and its sides the deck round the switch and the inside of the cap.
+//! The light straight from the LED and the housing to the legend, and from
+//! the housing to the deck of its own well, is worked out exactly, cell by
+//! cell; the rest (the light that has bounced off the deck, the caps' insides
+//! and outsides and the wells' walls, and the housing's on what is further
+//! off) is traced as photons, more of them the longer the simulation runs,
+//! so its picture comes clear as it goes.
+//!
+//! What each place shows from above is kept for each LED on its own, so the
+//! keys can be any colours, lit and dimmed at will, without simulating again:
+//! the deck, the chassis, a cap's skirt (its outside, as the slope of its band
+//! shows it from above), and the back of a cap's top, which a legend lets its
+//! share of through. Everything is in the art's units, whatever size the
+//! keyboard is drawn at.
+
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
+
+use serde_json::Value;
+
+use super::{Board, UNITS_PER_MM};
+
+/// the direct light's cells, and the bounced light's, in the art's units
+const FINE: f32 = 0.5;
+const COARSE: f32 = 2.0;
+/// how far from its LED each key's direct and bounced light are kept
+const DIRECT_REACH: f32 = 40.0;
+const BOUNCE_REACH: f32 = 100.0;
+/// photons from each LED for a settled picture, and in each step toward it
+pub const SETTLED: usize = 200_000;
+const STEP: usize = 2_000;
+/// a key's maps of bounced light: the deck, the chassis, the skirts, the caps' tops
+const MAPS: usize = 4;
+/// how many photons the bounced light at a place is evened out over, and how
+/// far round it at most (coarse cells)
+const EVEN: u32 = 128;
+const EVEN_REACH: usize = 8;
+
+/// The keyboard's physical make, from the core's "sim": heights and widths
+/// in millimetres (heights above the deck), shares from 0 to 1. (The core
+/// names them for what they are: skirt_foot, cap_top, depth.)
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Physics {
+    /// the brightest legend, every key lit white at full, in nits: what the
+    /// whole simulation's light is scaled to
+    pub nits: f32,
+    /// the switch's clear housing: how high its top is, where the beam
+    /// leaves it, and how wide it is, a square round the switch's centre
+    pub switch_top: f32,
+    pub switch_width: f32,
+    /// how far the housing's glow carries from the LED before it falls to about a third
+    pub glow_spread: f32,
+    /// how tight the beam is (the power of the cosine it falls as), the
+    /// share of the LED's light the housing scatters instead, glowing with
+    /// it, and the share of that glow that leaves through its sides rather than its top
+    pub beam: f32,
+    pub scatter: f32,
+    pub sides: f32,
+    /// a cap's skirt's foot and its top, and the share of the light on its
+    /// back a legend lets through
+    pub gap: f32,
+    pub top: f32,
+    pub legends: f32,
+    /// the shares the caps' insides and outsides give back
+    pub cap_in: f32,
+    pub cap_out: f32,
+    /// the chassis round the wells, and the shares the deck, the wells'
+    /// walls and the chassis give back
+    pub wall: f32,
+    pub deck: f32,
+    pub walls: f32,
+    pub chassis: f32,
+}
+
+impl Physics {
+    pub fn from(light: &Value) -> Physics {
+        let s = &light["sim"];
+        let f = |k: &str, d: f32| s[k].as_f64().map_or(d, |v| v as f32);
+        let share = |k: &str, d: f32| f(k, d).clamp(0.0, 0.98);
+        let top = f("cap_top", 14.0).max(0.5);
+        Physics {
+            nits: f("nits", 600.0).max(0.0),
+            switch_top: f("switch_top", 6.5).clamp(0.05, top - 0.1),
+            switch_width: f("switch_width", 12.0).clamp(1.0, 30.0),
+            glow_spread: f("glow_spread", 4.0).clamp(0.2, 200.0),
+            beam: f("beam", 24.0).clamp(0.0, 400.0),
+            scatter: f("scatter", 0.7).clamp(0.0, 1.0),
+            sides: f("sides", 0.25).clamp(0.0, 1.0),
+            gap: f("skirt_foot", 5.0).clamp(0.0, top - 0.1),
+            top,
+            legends: share("legends", 0.3),
+            cap_in: share("cap_in", 0.5),
+            cap_out: share("cap_out", 0.18),
+            wall: f("depth", 2.0).max(0.0),
+            deck: share("deck", 0.22),
+            walls: share("walls", 0.25),
+            chassis: share("chassis", 0.4),
+        }
+    }
+
+    /// Whether the light falls as it did: everything but its overall brightness.
+    pub fn same_paths(&self, o: &Physics) -> bool {
+        Physics { nits: 0.0, ..*self } == Physics { nits: 0.0, ..*o }
+    }
+
+    /// The beam's light from its source, `up` the cosine of the angle off
+    /// straight up: (n + 1) / 2pi cos^n, for its share of the LED's.
+    fn beam_at(&self, up: f32) -> f32 {
+        if up <= 0.0 {
+            return 0.0;
+        }
+        (1.0 - self.scatter) * (self.beam + 1.0) / std::f32::consts::TAU * up.powf(self.beam)
+    }
+}
+
+/// A cap: its foot (its skirt's outline) and its face, in the art's units.
+#[derive(Clone, Copy, Debug)]
+struct Cap {
+    foot: [f32; 4],
+    face: [f32; 4],
+}
+
+/// What shows from above at a place: nothing (off the keyboard), the deck,
+/// the chassis, a cap's skirt (which cap, which side of it: left, right, top,
+/// bottom; how far up it, 0 at its foot to 1 at the face), or a cap's top
+/// (which cap).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Surface {
+    None,
+    Deck,
+    Chassis,
+    Skirt(u32, u8, f32),
+    Top(u32),
+}
+
+impl Surface {
+    /// which of a key's maps of bounced light it is in: the deck, the
+    /// chassis, the skirts, the caps' tops
+    fn map(&self) -> Option<usize> {
+        match self {
+            Surface::Deck => Some(0),
+            Surface::Chassis => Some(1),
+            Surface::Skirt(..) => Some(2),
+            Surface::Top(_) => Some(3),
+            Surface::None => None,
+        }
+    }
+
+    /// what a place's surface is, for drawing it: 0 the deck, 1 the chassis,
+    /// 2 a skirt, 3 a cap's top, 255 nothing
+    fn code(&self) -> u8 {
+        self.map().map_or(255, |m| m as u8)
+    }
+}
+
+/// A grid over the art: `cell` units a cell, `w` by `h` cells from (`x0`, `y0`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Grid {
+    pub x0: f32,
+    pub y0: f32,
+    pub cell: f32,
+    pub w: usize,
+    pub h: usize,
+}
+
+impl Grid {
+    fn middle(&self, i: usize, j: usize) -> (f32, f32) {
+        (self.x0 + (i as f32 + 0.5) * self.cell, self.y0 + (j as f32 + 0.5) * self.cell)
+    }
+
+    fn at(&self, x: f32, y: f32) -> Option<(usize, usize)> {
+        let (i, j) = (((x - self.x0) / self.cell).floor(), ((y - self.y0) / self.cell).floor());
+        (i >= 0.0 && j >= 0.0 && (i as usize) < self.w && (j as usize) < self.h).then(|| (i as usize, j as usize))
+    }
+
+    /// A place in the art as a place on the grid, a cell's middle at whole numbers.
+    pub fn place(&self, x: f32, y: f32) -> (f32, f32) {
+        ((x - self.x0) / self.cell - 0.5, (y - self.y0) / self.cell - 0.5)
+    }
+
+    /// The cell nearest a place on the grid.
+    pub fn nearest(&self, gx: f32, gy: f32) -> usize {
+        let (i, j) = ((gx + 0.5).floor().clamp(0.0, (self.w - 1) as f32) as usize, (gy + 0.5).floor().clamp(0.0, (self.h - 1) as f32) as usize);
+        j * self.w + i
+    }
+
+    /// The four cells round a place on the grid, and each one's share of
+    /// it, counting only the cells `ok` takes: none at all, if it takes none.
+    pub fn round(&self, gx: f32, gy: f32, ok: impl Fn(usize) -> bool) -> [(usize, f32); 4] {
+        let gx = gx.clamp(0.0, (self.w - 1) as f32);
+        let gy = gy.clamp(0.0, (self.h - 1) as f32);
+        let (x0, y0) = (gx.floor() as usize, gy.floor() as usize);
+        let (x1, y1) = ((x0 + 1).min(self.w - 1), (y0 + 1).min(self.h - 1));
+        let (fx, fy) = (gx - x0 as f32, gy - y0 as f32);
+        let mut c = [(y0 * self.w + x0, (1.0 - fx) * (1.0 - fy)), (y0 * self.w + x1, fx * (1.0 - fy)), (y1 * self.w + x0, (1.0 - fx) * fy), (y1 * self.w + x1, fx * fy)];
+        let mut sum = 0.0;
+        for (i, w) in c.iter_mut() {
+            if !ok(*i) {
+                *w = 0.0;
+            }
+            sum += *w;
+        }
+        if sum > 0.0 {
+            c.iter_mut().for_each(|(_, w)| *w /= sum);
+        }
+        c
+    }
+}
+
+/// Where to read a place's light: what shows there (0 the deck, 1 the
+/// chassis, 2 a skirt, 3 a cap's top), and the cells round it to read it
+/// from, each with its share: on the fine grid, the cells of that same
+/// surface; on the coarse grid, the cells its map covers.
+#[derive(Clone, Copy, Debug)]
+pub struct At {
+    pub code: u8,
+    pub fine: [(usize, f32); 4],
+    pub coarse: [(usize, f32); 4],
+}
+
+/// The keys' light in their colours, as Snapshot::lit adds it up: on the
+/// fine grid, and on the coarse grid's maps, a channel each.
+pub struct Coloured {
+    pub fine: [Vec<f32>; 3],
+    pub coarse: [[Vec<f32>; 3]; MAPS],
+}
+
+impl Coloured {
+    /// the light at a place, its red, green and blue
+    pub fn at(&self, a: &At) -> [f32; 3] {
+        let maps = &self.coarse[a.code as usize];
+        [0, 1, 2].map(|c| a.fine.iter().map(|(i, w)| self.fine[c][*i] * w).sum::<f32>() + a.coarse.iter().map(|(i, w)| maps[c][*i] * w).sum::<f32>())
+    }
+}
+
+/// A box of a grid's cells, `w` x `h` from cell (`x`, `y`), a value in each.
+#[derive(Clone, Debug)]
+pub struct Boxed {
+    pub x: usize,
+    pub y: usize,
+    pub w: usize,
+    pub h: usize,
+    pub v: Vec<f32>,
+}
+
+impl Boxed {
+    fn round(g: &Grid, (cx, cy): (f32, f32), reach: f32) -> Boxed {
+        let x0 = ((cx - reach - g.x0) / g.cell).floor().max(0.0) as usize;
+        let y0 = ((cy - reach - g.y0) / g.cell).floor().max(0.0) as usize;
+        let x1 = (((cx + reach - g.x0) / g.cell).ceil().max(0.0) as usize).min(g.w);
+        let y1 = (((cy + reach - g.y0) / g.cell).ceil().max(0.0) as usize).min(g.h);
+        let (w, h) = (x1.saturating_sub(x0), y1.saturating_sub(y0));
+        Boxed { x: x0, y: y0, w, h, v: vec![0.0; w * h] }
+    }
+
+    /// add `k` of it into a map of the whole grid
+    pub fn add_into(&self, map: &mut [f32], gw: usize, k: f32) {
+        self.add_into_rows(map, gw, 0, k);
+    }
+
+    /// add `k` of it into the rows from `y0` on of a map of the whole grid,
+    /// `band` being as many of them as it holds
+    pub fn add_into_rows(&self, band: &mut [f32], gw: usize, y0: usize, k: f32) {
+        let rows = band.len() / gw;
+        for y in self.y.max(y0)..(self.y + self.h).min(y0 + rows) {
+            let j = y - self.y;
+            let row = &mut band[(y - y0) * gw + self.x..(y - y0) * gw + self.x + self.w];
+            for (o, v) in row.iter_mut().zip(&self.v[j * self.w..(j + 1) * self.w]) {
+                *o += k * v;
+            }
+        }
+    }
+}
+
+/// The keyboard's shape for the simulation, in the art's units.
+pub struct Scene {
+    wells: Vec<[f32; 4]>,
+    caps: Vec<Cap>,
+    /// the caps by the cells of a grid over the art
+    cells: Vec<Vec<u32>>,
+    cg: Grid,
+    /// what shows from above at each fine cell (where it is nothing, the body is not)
+    fine: Grid,
+    surface: Vec<Surface>,
+    /// each lit key: its place, and its foot's middle (its cap is the same
+    /// in the caps, which start with the lit keys')
+    keys: Vec<(u32, (f32, f32))>,
+}
+
+impl Scene {
+    /// The shape of the keyboard `b` draws: its lit keys' caps, the caps of
+    /// the keys with no light (the spacebar, the media keys), its wells and
+    /// its body.
+    pub fn of(b: &Board) -> Scene {
+        let (ka, (ox, oy)) = (b.art_scale, b.art_offset);
+        let unit = |px: f32, py: f32| ((px - ox) / ka, (py - oy) / ka);
+        let wells: Vec<[f32; 4]> = b.well_boxes.iter().filter(|w| w[0] < w[2] && w[1] < w[3]).copied().collect();
+        let mut caps = Vec::new();
+        let mut keys = Vec::new();
+        for k in &b.keys {
+            if let Some(f) = k.foot {
+                keys.push((k.pos, ((f[0] + f[2]) / 2.0, (f[1] + f[3]) / 2.0)));
+                caps.push(Cap { foot: f, face: k.face });
+            }
+        }
+        caps.extend(b.others.iter().map(|&(foot, face)| Cap { foot, face }));
+        // the art's extent: the board's
+        let (x0, y0) = unit(0.0, 0.0);
+        let (x1, y1) = unit(b.w as f32, b.h as f32);
+        let fine = Grid { x0, y0, cell: FINE, w: ((x1 - x0) / FINE).ceil() as usize, h: ((y1 - y0) / FINE).ceil() as usize };
+        let cell = 13.0;
+        let cg = Grid { x0, y0, cell, w: ((x1 - x0) / cell).ceil() as usize + 1, h: ((y1 - y0) / cell).ceil() as usize + 1 };
+        let mut cells = vec![Vec::new(); cg.w * cg.h];
+        for (i, c) in caps.iter().enumerate() {
+            let (Some((cx0, cy0)), Some((cx1, cy1))) = (cg.at(c.foot[0].max(x0), c.foot[1].max(y0)), cg.at(c.foot[2].min(x1 - 0.01), c.foot[3].min(y1 - 0.01))) else { continue };
+            for cy in cy0..=cy1 {
+                for cx in cx0..=cx1 {
+                    cells[cy * cg.w + cx].push(i as u32);
+                }
+            }
+        }
+        let mut scene = Scene { wells, caps, cells, cg, fine, surface: Vec::new(), keys };
+        let body = |x: f32, y: f32| {
+            let (px, py) = (ox + ka * x, oy + ka * y);
+            px >= 0.0 && py >= 0.0 && (px as u32) < b.w && (py as u32) < b.h && b.chassis[(py as u32 * b.w + px as u32) as usize] > 0.5
+        };
+        scene.surface = (0..fine.w * fine.h)
+            .map(|n| {
+                let (x, y) = fine.middle(n % fine.w, n / fine.w);
+                scene.surface_at(x, y, &body)
+            })
+            .collect();
+        scene
+    }
+
+    fn caps_at(&self, x: f32, y: f32) -> &[u32] {
+        self.cg.at(x, y).map_or(&[], |(i, j)| &self.cells[j * self.cg.w + i])
+    }
+
+    fn surface_at(&self, x: f32, y: f32, body: &dyn Fn(f32, f32) -> bool) -> Surface {
+        for &i in self.caps_at(x, y) {
+            let c = &self.caps[i as usize];
+            let (f, a) = (c.foot, c.face);
+            if x < f[0] || x > f[2] || y < f[1] || y > f[3] {
+                continue;
+            }
+            if x >= a[0] && x <= a[2] && y >= a[1] && y <= a[3] {
+                return Surface::Top(i);
+            }
+            // on the skirt: the side it is furthest up
+            let ups = [
+                (0u8, (x - f[0]) / (a[0] - f[0]).max(1e-3)),
+                (1, (f[2] - x) / (f[2] - a[2]).max(1e-3)),
+                (2, (y - f[1]) / (a[1] - f[1]).max(1e-3)),
+                (3, (f[3] - y) / (f[3] - a[3]).max(1e-3)),
+            ];
+            let (side, up) = ups.iter().copied().filter(|(_, u)| *u < 1.0).fold((0u8, -1.0f32), |b, (s, u)| if u > b.1 { (s, u) } else { b });
+            return Surface::Skirt(i, side, up.clamp(0.0, 1.0));
+        }
+        if self.in_well(x, y) {
+            Surface::Deck
+        } else if body(x, y) {
+            Surface::Chassis
+        } else {
+            Surface::None
+        }
+    }
+
+    fn in_well(&self, x: f32, y: f32) -> bool {
+        self.wells.iter().any(|w| x > w[0] && x < w[2] && y > w[1] && y < w[3])
+    }
+
+    fn well_of(&self, x: f32, y: f32) -> Option<usize> {
+        self.wells.iter().position(|w| x > w[0] && x < w[2] && y > w[1] && y < w[3])
+    }
+
+    fn on_body(&self, x: f32, y: f32) -> bool {
+        self.fine.at(x, y).is_some_and(|(i, j)| self.surface[j * self.fine.w + i] != Surface::None)
+    }
+
+    /// Where a key's LED sits, `north` of its foot's middle.
+    fn led(&self, k: usize, north: f32) -> (f32, f32) {
+        let (x, y) = self.keys[k].1;
+        (x, y - north)
+    }
+}
+
+/// The heights and the housing's half width, in the art's units, and the shares.
+#[derive(Clone, Copy)]
+struct Stood {
+    beam_from: f32,
+    half: f32,
+    spread: f32,
+    gap: f32,
+    top: f32,
+    wall: f32,
+    p: Physics,
+}
+
+impl Stood {
+    fn of(p: &Physics) -> Stood {
+        let mm = UNITS_PER_MM;
+        Stood { beam_from: p.switch_top * mm, half: p.switch_width * mm / 2.0, spread: p.glow_spread * mm, gap: p.gap * mm, top: p.top * mm, wall: p.wall * mm, p: *p }
+    }
+}
+
+/// For the share of a matte rectangle's light that reaches a small surface
+/// facing it, `h` from it and parallel to it: for a rectangle from the point
+/// under the surface out to (x, y), (1/2pi) (X/sqrt(1+X²) atan(Y/sqrt(1+X²))
+/// + Y/sqrt(1+Y²) atan(X/sqrt(1+Y²))) with X = x/h, Y = y/h, signed by its
+/// side; any rectangle's share is the sum of its four corners' (see parallel).
+fn corner(x: f32, y: f32, h: f32) -> f32 {
+    let (a, b) = (x / h, y / h);
+    let (sa, sb) = ((1.0 + a * a).sqrt(), (1.0 + b * b).sqrt());
+    (a / sa * (b / sa).atan() + b / sb * (a / sb).atan()) / std::f32::consts::TAU
+}
+
+/// The share of a matte rectangle's light, from (`x0`, `y0`) to (`x1`, `y1`),
+/// that reaches a small surface over (0, 0) `h` from it, facing it.
+#[cfg(test)]
+fn parallel(x0: f32, y0: f32, x1: f32, y1: f32, h: f32) -> f32 {
+    corner(x1, y1, h) - corner(x0, y1, h) - corner(x1, y0, h) + corner(x0, y0, h)
+}
+
+/// A switch's clear housing, glowing with its LED's scattered light: a box
+/// `half` either side of the switch's centre `c`, from the deck up to the
+/// switch's top `h`, its top giving off its share of the light and its sides
+/// theirs, each as a matte surface does, and each brightest by the LED and
+/// fading away from it as the light carries through the plastic (to about a
+/// third every glow_spread). Taken a patch at a time, each patch even: its
+/// top a grid of `n` by `n` squares, the light to each unit of their areas
+/// in `tops`; its sides in strips up its height, each strip's light summed
+/// up its height exactly: each strip's foot, its outward normal, its width
+/// and the light to each unit of its area. And every patch's light added up
+/// in turn, for sending photons from them by it.
+struct Housing {
+    c: (f32, f32),
+    half: f32,
+    h: f32,
+    n: usize,
+    tops: Vec<f32>,
+    strips: Vec<((f32, f32), (f32, f32), f32, f32)>,
+    cdf: Vec<f32>,
+}
+
+impl Housing {
+    fn of(s: &Stood, c: (f32, f32), led: (f32, f32)) -> Housing {
+        let (half, h) = (s.half, s.beam_from);
+        let w = 2.0 * half;
+        let fade = |x: f32, y: f32| (-((x - led.0).powi(2) + (y - led.1).powi(2)).sqrt() / s.spread).exp();
+        // the top's squares, and the sides' strips, each as bright as it is near the LED
+        let n = 8;
+        let cell = w / n as f32;
+        let mut tops: Vec<f32> = (0..n * n).map(|k| fade(c.0 - half + (k % n) as f32 * cell + cell / 2.0, c.1 - half + (k / n) as f32 * cell + cell / 2.0)).collect();
+        let along = 24;
+        let width = w / along as f32;
+        let mut strips = Vec::new();
+        for (side, nrm) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0f32)].into_iter().enumerate() {
+            for i in 0..along {
+                let a = -half + (i as f32 + 0.5) * width;
+                let foot = if side < 2 { (c.0 + nrm.0 * half, c.1 + a) } else { (c.0 + a, c.1 + nrm.1 * half) };
+                strips.push((foot, nrm, width, fade(foot.0, foot.1)));
+            }
+        }
+        // each part its share of the scattered light, over its patches as bright as they are
+        let top_sum: f32 = tops.iter().map(|t| t * cell * cell).sum();
+        let side_sum: f32 = strips.iter().map(|st| st.3 * st.2 * h).sum();
+        let (to_top, to_sides) = (s.p.scatter * (1.0 - s.p.sides) / top_sum.max(1e-12), s.p.scatter * s.p.sides / side_sum.max(1e-12));
+        tops.iter_mut().for_each(|t| *t *= to_top);
+        strips.iter_mut().for_each(|st| st.3 *= to_sides);
+        let mut cdf = Vec::with_capacity(tops.len() + strips.len());
+        let mut sum = 0.0;
+        for t in &tops {
+            sum += t * cell * cell;
+            cdf.push(sum);
+        }
+        for st in &strips {
+            sum += st.3 * st.2 * h;
+            cdf.push(sum);
+        }
+        Housing { c, half, h, n, tops, strips, cdf }
+    }
+
+    /// A place on it to send a photon from, by how much light each patch
+    /// gives off, and the way it faces there.
+    fn emit(&self, rng: &mut Rng) -> ([f32; 3], [f32; 3]) {
+        let total = self.cdf.last().copied().unwrap_or(0.0);
+        let u = rng.f() * total;
+        let k = self.cdf.partition_point(|c| *c < u).min(self.cdf.len() - 1);
+        let tops = self.n * self.n;
+        if k < tops {
+            let cell = 2.0 * self.half / self.n as f32;
+            let (i, j) = (k % self.n, k / self.n);
+            ([self.c.0 - self.half + (i as f32 + rng.f()) * cell, self.c.1 - self.half + (j as f32 + rng.f()) * cell, self.h], [0.0, 0.0, 1.0])
+        } else {
+            let (f, nrm, width, _) = self.strips[k - tops];
+            let a = (rng.f() - 0.5) * width;
+            let p = if nrm.0 != 0.0 { [f.0, f.1 + a, rng.f() * self.h] } else { [f.0 + a, f.1, rng.f() * self.h] };
+            (p, [nrm.0, nrm.1, 0.0])
+        }
+    }
+
+    /// Its light on the back of its cap's top at `q`: from its top's squares,
+    /// each exactly (see corner), and from its sides, each strip's
+    /// (m/pi) D w (1/(r² + (H-h)²) - 1/(r² + H²)) / 2, D how far `q` is out in
+    /// front of it, r how far across from it, H how high `q` is, m the strip's light.
+    fn on_top(&self, q: [f32; 3]) -> f32 {
+        let (x, y) = (q[0] - self.c.0, q[1] - self.c.1);
+        let hh = (q[2] - self.h).max(1e-3);
+        // the corner terms of the squares' grid, each square's share from its four
+        let n = self.n;
+        let cell = 2.0 * self.half / n as f32;
+        let mut f = vec![0f32; (n + 1) * (n + 1)];
+        for j in 0..=n {
+            for i in 0..=n {
+                f[j * (n + 1) + i] = corner(-self.half + i as f32 * cell - x, -self.half + j as f32 * cell - y, hh);
+            }
+        }
+        let mut face = 0.0;
+        for j in 0..n {
+            for i in 0..n {
+                let at = |i: usize, j: usize| f[j * (n + 1) + i];
+                face += self.tops[j * n + i] * (at(i + 1, j + 1) - at(i, j + 1) - at(i + 1, j) + at(i, j));
+            }
+        }
+        let big = q[2];
+        let small = q[2] - self.h;
+        let mut sides = 0.0;
+        for &(f, nrm, width, m) in &self.strips {
+            let (dx, dy) = (q[0] - f.0, q[1] - f.1);
+            let d = dx * nrm.0 + dy * nrm.1;
+            if d <= 0.0 {
+                continue;
+            }
+            let r2 = dx * dx + dy * dy;
+            sides += m * d * width * 0.5 * (1.0 / (r2 + small * small) - 1.0 / (r2 + big * big));
+        }
+        face + sides / std::f32::consts::PI
+    }
+
+    /// Its light on a floor at `q`, outside its cap's `foot` (the deck of its
+    /// well, or the chassis round the well, from inside which nothing else
+    /// stands in the way): from each strip of its sides between the floor's
+    /// height and as high up as shines out under the skirt at `gap`, Z above
+    /// the floor, (m/pi) D w (1/r² - 1/(r² + Z²)) / 2.
+    fn on_floor(&self, q: [f32; 3], foot: [f32; 4], gap: f32) -> f32 {
+        // how far along the line from a strip to `q` it leaves the foot's outline
+        let leave = |from: f32, to: f32, lo: f32, hi: f32| if to > hi { (hi - from) / (to - from) } else if to < lo { (lo - from) / (to - from) } else { f32::INFINITY };
+        let mut e = 0.0;
+        for &(f, nrm, width, m) in &self.strips {
+            let (dx, dy) = (q[0] - f.0, q[1] - f.1);
+            let d = dx * nrm.0 + dy * nrm.1;
+            if d <= 0.0 {
+                continue;
+            }
+            let t = leave(f.0, q[0], foot[0], foot[2]).min(leave(f.1, q[1], foot[1], foot[3]));
+            if !(t < 1.0) {
+                continue;
+            }
+            // the line from a height z leaves the foot at z + t (floor - z),
+            // under the skirt below `gap`; only above the floor does it come down on it
+            let z = self.h.min((gap - t * q[2]) / (1.0 - t).max(1e-6)) - q[2];
+            if z <= 0.0 {
+                continue;
+            }
+            let r2 = dx * dx + dy * dy;
+            e += m * d * width * 0.5 * (1.0 / r2 - 1.0 / (r2 + z * z));
+        }
+        e / std::f32::consts::PI
+    }
+}
+
+/// The light straight from an LED and its housing on the back of its cap's
+/// top, `along` (the art's units) from over the LED toward the foot of the
+/// cap (back toward its top below 0), the LED `north` of the key's centre:
+/// what a legend there shows of it, for an LED of unit power, before the
+/// light bounced inside the cap. For the Lighting lab's curve.
+pub fn on_cap_top(p: &Physics, north: f32, along: f32) -> f32 {
+    let s = Stood::of(p);
+    let q = [0.0, -north + along, s.top];
+    let from = [0.0, -north, s.beam_from];
+    let d = [q[0] - from[0], q[1] - from[1], q[2] - from[2]];
+    let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+    let up = d[2] / r2.sqrt();
+    let beam = p.beam_at(up) * up / r2;
+    p.legends / std::f32::consts::PI * (beam + Housing::of(&s, (0.0, 0.0), (0.0, -north)).on_top(q))
+}
+
+/// What a ray strikes first.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Struck {
+    Deck,
+    Chassis,
+    Outside(u32, u8),
+    Inside,
+    Under(u32),
+    Top,
+    Wall,
+}
+
+const EPS: f32 = 1e-3;
+
+impl Scene {
+    /// The nearest thing the ray from `o` along `d` strikes within `reach`:
+    /// how far, what, and the normal facing back toward the ray.
+    fn hit(&self, s: &Stood, o: [f32; 3], d: [f32; 3], reach: f32) -> Option<(f32, Struck, [f32; 3])> {
+        let mut best: Option<(f32, Struck, [f32; 3])> = None;
+        let take = |t: f32, k: Struck, n: [f32; 3], best: &mut Option<(f32, Struck, [f32; 3])>| {
+            if t > EPS && t < reach && best.map_or(true, |b| t < b.0) {
+                *best = Some((t, k, n));
+            }
+        };
+        if d[2] < 0.0 {
+            // the deck, in the wells
+            let t = -o[2] / d[2];
+            let (x, y) = (o[0] + t * d[0], o[1] + t * d[1]);
+            if self.in_well(x, y) {
+                take(t, Struck::Deck, [0.0, 0.0, 1.0], &mut best);
+            }
+            // the chassis, round the wells, from above
+            if o[2] > s.wall {
+                let t = (s.wall - o[2]) / d[2];
+                let (x, y) = (o[0] + t * d[0], o[1] + t * d[1]);
+                if !self.in_well(x, y) && self.on_body(x, y) {
+                    take(t, Struck::Chassis, [0.0, 0.0, 1.0], &mut best);
+                }
+            }
+        }
+        // the wells' walls, from inside
+        for w in &self.wells {
+            for (axis, at, inward) in [(0usize, w[0], 1.0f32), (0, w[2], -1.0), (1, w[1], 1.0), (1, w[3], -1.0)] {
+                if d[axis] * inward >= 0.0 {
+                    continue;
+                }
+                let t = (at - o[axis]) / d[axis];
+                let p = [o[0] + t * d[0], o[1] + t * d[1], o[2] + t * d[2]];
+                let (lo, hi) = if axis == 0 { (w[1], w[3]) } else { (w[0], w[2]) };
+                let q = p[1 - axis];
+                if q > lo && q < hi && p[2] > 0.0 && p[2] < s.wall {
+                    let mut n = [0.0; 3];
+                    n[axis] = inward;
+                    take(t, Struck::Wall, n, &mut best);
+                }
+            }
+        }
+        // the caps, by the grid's cells along the ray
+        let far = best.map_or(reach, |b| b.0).min(reach);
+        let mut seen = [u32::MAX; 32];
+        let mut ns = 0usize;
+        self.along(o, d, far, &mut |i| {
+            if seen[..ns].contains(&i) {
+                return;
+            }
+            if ns < seen.len() {
+                seen[ns] = i;
+                ns += 1;
+            }
+            let f = self.caps[i as usize].foot;
+            let inside = o[0] > f[0] && o[0] < f[2] && o[1] > f[1] && o[1] < f[3];
+            for (side, axis, at) in [(0u8, 0usize, f[0]), (1, 0, f[2]), (2, 1, f[1]), (3, 1, f[3])] {
+                if d[axis] == 0.0 {
+                    continue;
+                }
+                let t = (at - o[axis]) / d[axis];
+                let p = [o[0] + t * d[0], o[1] + t * d[1], o[2] + t * d[2]];
+                let (lo, hi) = if axis == 0 { (f[1], f[3]) } else { (f[0], f[2]) };
+                let q = p[1 - axis];
+                if q >= lo && q <= hi && p[2] >= s.gap && p[2] <= s.top {
+                    let mut n = [0.0; 3];
+                    n[axis] = -d[axis].signum();
+                    take(t, if inside { Struck::Inside } else { Struck::Outside(i, side) }, n, &mut best);
+                }
+            }
+            if d[2] != 0.0 {
+                let t = (s.top - o[2]) / d[2];
+                let (x, y) = (o[0] + t * d[0], o[1] + t * d[1]);
+                if x > f[0] && x < f[2] && y > f[1] && y < f[3] {
+                    let below = o[2] < s.top;
+                    take(t, if below { Struck::Under(i) } else { Struck::Top }, [0.0, 0.0, if below { -1.0 } else { 1.0 }], &mut best);
+                }
+            }
+        });
+        best
+    }
+
+    /// Every cap in the grid's cells the ray passes over, as far as `reach`.
+    fn along(&self, o: [f32; 3], d: [f32; 3], reach: f32, f: &mut dyn FnMut(u32)) {
+        let g = &self.cg;
+        let (fx, fy) = ((o[0] - g.x0) / g.cell, (o[1] - g.y0) / g.cell);
+        let (mut cx, mut cy) = (fx.floor() as i64, fy.floor() as i64);
+        let (sx, sy) = (if d[0] > 0.0 { 1 } else { -1 }, if d[1] > 0.0 { 1 } else { -1 });
+        let next = |c: i64, s: i64, from: f32, dir: f32| if dir == 0.0 { f32::INFINITY } else { ((c + if s > 0 { 1 } else { 0 }) as f32 - from) * g.cell / dir };
+        let (mut tx, mut ty) = (next(cx, sx, fx, d[0]), next(cy, sy, fy, d[1]));
+        let (dx, dy) = (if d[0] == 0.0 { f32::INFINITY } else { g.cell / d[0].abs() }, if d[1] == 0.0 { f32::INFINITY } else { g.cell / d[1].abs() });
+        let mut t = 0.0f32;
+        for _ in 0..4096 {
+            if cx >= 0 && cy >= 0 && (cx as usize) < g.w && (cy as usize) < g.h {
+                for &i in &self.cells[cy as usize * g.w + cx as usize] {
+                    f(i);
+                }
+            } else if (cx < 0 && sx < 0) || (cy < 0 && sy < 0) || (cx >= g.w as i64 && sx > 0) || (cy >= g.h as i64 && sy > 0) {
+                return;
+            }
+            if t > reach {
+                return;
+            }
+            if tx < ty {
+                t = tx;
+                tx += dx;
+                cx += sx;
+            } else {
+                t = ty;
+                ty += dy;
+                cy += sy;
+            }
+        }
+    }
+
+    /// Whether nothing stands between the point `a` and the point `b`.
+    fn clear(&self, s: &Stood, a: [f32; 3], b: [f32; 3]) -> bool {
+        let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        if len <= EPS {
+            return true;
+        }
+        let d = [d[0] / len, d[1] / len, d[2] / len];
+        self.hit(s, a, d, len - 2.0 * EPS).is_none()
+    }
+
+    /// Where on the art a skirt's outside at this height shows from above, and
+    /// how much of the skirt each unit of its band stands for.
+    fn band(&self, s: &Stood, cap: u32, side: u8, p: [f32; 3]) -> ((f32, f32), f32) {
+        let c = &self.caps[cap as usize];
+        let up = ((p[2] - s.gap) / (s.top - s.gap)).clamp(0.0, 1.0);
+        let (u, v, band) = match side {
+            0 => (c.foot[0] + (c.face[0] - c.foot[0]) * up, p[1], c.face[0] - c.foot[0]),
+            1 => (c.foot[2] - (c.foot[2] - c.face[2]) * up, p[1], c.foot[2] - c.face[2]),
+            2 => (p[0], c.foot[1] + (c.face[1] - c.foot[1]) * up, c.face[1] - c.foot[1]),
+            _ => (p[0], c.foot[3] - (c.foot[3] - c.face[3]) * up, c.foot[3] - c.face[3]),
+        };
+        ((u, v), band.max(0.05) / (s.top - s.gap))
+    }
+
+    /// The point on a cap's skirt a place on its band shows, and the skirt's
+    /// outward normal there.
+    fn skirt_point(&self, s: &Stood, cap: u32, side: u8, up: f32, (x, y): (f32, f32)) -> ([f32; 3], [f32; 3]) {
+        let f = self.caps[cap as usize].foot;
+        let z = s.gap + up * (s.top - s.gap);
+        match side {
+            0 => ([f[0], y, z], [-1.0, 0.0, 0.0]),
+            1 => ([f[2], y, z], [1.0, 0.0, 0.0]),
+            2 => ([x, f[1], z], [0.0, -1.0, 0.0]),
+            _ => ([x, f[3], z], [0.0, 1.0, 0.0]),
+        }
+    }
+}
+
+/// A small fast random number source, one a thread.
+struct Rng(u64);
+
+impl Rng {
+    fn f(&mut self) -> f32 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        (self.0 >> 40) as f32 / (1u64 << 24) as f32
+    }
+
+    /// straight up, falling as the cosine to the power `n`
+    fn beam(&mut self, n: f32) -> [f32; 3] {
+        let z = self.f().max(1e-9).powf(1.0 / (n + 1.0));
+        let a = std::f32::consts::TAU * self.f();
+        let r = (1.0 - z * z).max(0.0).sqrt();
+        [r * a.cos(), r * a.sin(), z]
+    }
+
+    fn diffuse(&mut self, n: [f32; 3]) -> [f32; 3] {
+        let (u, a) = (self.f(), std::f32::consts::TAU * self.f());
+        let (r, z) = (u.sqrt(), (1.0 - u).max(0.0).sqrt());
+        let t = if n[0].abs() < 0.9 { [1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] };
+        let b = [n[1] * t[2] - n[2] * t[1], n[2] * t[0] - n[0] * t[2], n[0] * t[1] - n[1] * t[0]];
+        let bl = (b[0] * b[0] + b[1] * b[1] + b[2] * b[2]).sqrt();
+        let b = [b[0] / bl, b[1] / bl, b[2] / bl];
+        let c = [n[1] * b[2] - n[2] * b[1], n[2] * b[0] - n[0] * b[2], n[0] * b[1] - n[1] * b[0]];
+        let (x, y) = (r * a.cos(), r * a.sin());
+        [x * b[0] + y * c[0] + z * n[0], x * b[1] + y * c[1] + z * n[1], x * b[2] + y * c[2] + z * n[2]]
+    }
+}
+
+/// The simulation's picture so far: for each lit key (in the order the
+/// scene has them, which is the board's), what its LED shows at each place
+/// from above, for an LED of unit power: straight from the LED, on the fine
+/// grid; bounced, on the coarse grid, a map each for the open deck and
+/// chassis, the skirts and the caps' tops; and every key's added up, for
+/// keys all lit alike. Each place gives the light seen there.
+pub struct Snapshot {
+    pub physics: Physics,
+    pub north: f32,
+    /// photons sent from each LED so far, and whether that is all
+    pub photons: usize,
+    pub settled: bool,
+    pub fine: Grid,
+    pub coarse: Grid,
+    /// what shows at each fine cell: 0 open, 1 skirt, 2 a cap's top, 255 nothing
+    pub surface: Arc<Vec<u8>>,
+    /// how much of each coarse cell each map's surfaces cover
+    pub cover: Arc<[Vec<f32>; MAPS]>,
+    pub keys: Vec<u32>,
+    pub direct: Arc<Vec<Boxed>>,
+    pub bounced: Vec<[Boxed; MAPS]>,
+    pub direct_all: Arc<Vec<f32>>,
+    pub bounced_all: [Vec<f32>; MAPS],
+}
+
+impl Snapshot {
+    /// Where to read the light at a place in the art: as what shows there
+    /// from above, or as `code` says; nothing off the keyboard.
+    pub fn at(&self, u: f32, v: f32, code: Option<u8>) -> Option<At> {
+        let (fx, fy) = self.fine.place(u, v);
+        let code = code.unwrap_or_else(|| self.surface[self.fine.nearest(fx, fy)]);
+        if code as usize >= MAPS {
+            return None;
+        }
+        let fine = self.fine.round(fx, fy, |i| self.surface[i] == code);
+        let (cx, cy) = self.coarse.place(u, v);
+        let cover = &self.cover[code as usize];
+        let coarse = self.coarse.round(cx, cy, |i| cover[i] > 0.0);
+        Some(At { code, fine, coarse })
+    }
+
+    /// The light at a place with every key lit white at full.
+    pub fn white(&self, a: &At) -> f32 {
+        let map = &self.bounced_all[a.code as usize];
+        a.fine.iter().map(|(i, w)| self.direct_all[*i] * w).sum::<f32>() + a.coarse.iter().map(|(i, w)| map[*i] * w).sum::<f32>()
+    }
+
+    /// The light the keys show, each in its own colour (linear, in the
+    /// keys' order), added up.
+    pub fn lit(&self, colours: &[[f32; 3]]) -> Coloured {
+        Coloured { fine: self.spread(&self.fine, colours, &|k| &self.direct[k]), coarse: std::array::from_fn(|m| self.spread(&self.coarse, colours, &|k| &self.bounced[k][m])) }
+    }
+
+    /// Each key's box on a grid in its colour, added up: a map a channel,
+    /// a band of rows a thread.
+    fn spread<'a>(&'a self, g: &Grid, colours: &[[f32; 3]], boxed: &(dyn Fn(usize) -> &'a Boxed + Sync)) -> [Vec<f32>; 3] {
+        let mut maps: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0f32; g.w * g.h]);
+        let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(16);
+        let rows = g.h.div_ceil(threads).max(1);
+        let [r, gr, b] = &mut maps;
+        std::thread::scope(|sc| {
+            for (n, ((r, gr), b)) in r.chunks_mut(rows * g.w).zip(gr.chunks_mut(rows * g.w)).zip(b.chunks_mut(rows * g.w)).enumerate() {
+                sc.spawn(move || {
+                    let y0 = n * rows;
+                    for (k, c) in colours.iter().enumerate() {
+                        let bx = boxed(k);
+                        if bx.y >= y0 + r.len() / g.w || bx.y + bx.h <= y0 {
+                            continue;
+                        }
+                        for (map, c) in [(&mut *r, c[0]), (&mut *gr, c[1]), (&mut *b, c[2])] {
+                            if c > 0.0 {
+                                bx.add_into_rows(map, g.w, y0, c);
+                            }
+                        }
+                    }
+                });
+            }
+        });
+        maps
+    }
+}
+
+/// The simulation, run where it can: started on a keyboard's shape and its
+/// make, it works in the background, with a first picture as soon as it has
+/// the light straight from the LEDs and a first few photons' bounced light
+/// (a tenth of a second or so), and clearer ones as photons come in,
+/// until it has SETTLED photons from each LED; asked for another make (or
+/// the LEDs moved), it starts again. Its brightness is the board's to apply,
+/// so a change of that alone asks nothing of it.
+pub struct Simulator {
+    shared: Arc<Shared>,
+    asked: Mutex<(Physics, f32)>,
+}
+
+struct Shared {
+    ask: Mutex<Option<(Physics, f32)>>,
+    wake: Condvar,
+    latest: Mutex<Option<Arc<Snapshot>>>,
+    published: Condvar,
+    version: AtomicU64,
+    stop: AtomicBool,
+    /// told each time there is a new picture
+    notify: Box<dyn Fn() + Send + Sync>,
+}
+
+impl Simulator {
+    /// Start simulating: `notify` is told, from the simulation's thread, each
+    /// time there is a new picture.
+    pub fn new(scene: Scene, physics: Physics, north: f32, notify: Box<dyn Fn() + Send + Sync>) -> Simulator {
+        let shared = Arc::new(Shared { ask: Mutex::new(Some((physics, north))), wake: Condvar::new(), latest: Mutex::new(None), published: Condvar::new(), version: AtomicU64::new(0), stop: AtomicBool::new(false), notify });
+        let s = shared.clone();
+        std::thread::Builder::new().name("light simulation".into()).spawn(move || work(scene, s)).expect("the simulation's thread");
+        Simulator { shared, asked: Mutex::new((physics, north)) }
+    }
+
+    /// Simulate another make, or the LEDs moved, from the start; but not for
+    /// a change of brightness alone.
+    pub fn set(&self, physics: Physics, north: f32) {
+        let mut asked = self.asked.lock().unwrap();
+        if asked.0.same_paths(&physics) && asked.1 == north {
+            return;
+        }
+        *asked = (physics, north);
+        *self.shared.ask.lock().unwrap() = Some((physics, north));
+        self.shared.wake.notify_all();
+    }
+
+    /// The picture so far, and a count that changes each time there is a new one.
+    pub fn latest(&self) -> Option<Arc<Snapshot>> {
+        self.shared.latest.lock().unwrap().clone()
+    }
+
+    pub fn version(&self) -> u64 {
+        self.shared.version.load(Ordering::SeqCst)
+    }
+
+    /// Wait for a first picture, at most `most`: it comes in a tenth of a second or so.
+    pub fn wait(&self, most: std::time::Duration) -> Option<Arc<Snapshot>> {
+        let latest = self.shared.latest.lock().unwrap();
+        let (latest, _) = self.shared.published.wait_timeout_while(latest, most, |l| l.is_none()).unwrap();
+        latest.clone()
+    }
+
+    /// Simulate to the end, here and now (for a snapshot of the keyboard), `photons` from each LED.
+    pub fn settle(scene: &Scene, physics: Physics, north: f32, photons: usize) -> Snapshot {
+        let mut run = Run::new(scene, physics, north);
+        while run.photons < photons {
+            run.trace(scene, (photons - run.photons).min(STEP * 16));
+        }
+        run.snapshot(true)
+    }
+}
+
+impl Drop for Simulator {
+    fn drop(&mut self) {
+        self.shared.stop.store(true, Ordering::SeqCst);
+        self.shared.wake.notify_all();
+    }
+}
+
+fn work(scene: Scene, shared: Arc<Shared>) {
+    loop {
+        let (physics, north) = {
+            let mut ask = shared.ask.lock().unwrap();
+            loop {
+                if shared.stop.load(Ordering::SeqCst) {
+                    return;
+                }
+                if let Some(a) = ask.take() {
+                    break a;
+                }
+                ask = shared.wake.wait(ask).unwrap();
+            }
+        };
+        let mut run = Run::new(&scene, physics, north);
+        let publish = |run: &Run, settled: bool| {
+            *shared.latest.lock().unwrap() = Some(Arc::new(run.snapshot(settled)));
+            shared.version.fetch_add(1, Ordering::SeqCst);
+            shared.published.notify_all();
+            (shared.notify)();
+        };
+        // the bounced light, a step at a time, a picture each time the photons
+        // double: the first with the first step's, so the bounced light never
+        // goes missing from a picture while the light straight from the LEDs shows
+        let mut next = STEP;
+        while run.photons < SETTLED {
+            if shared.stop.load(Ordering::SeqCst) {
+                return;
+            }
+            if shared.ask.lock().unwrap().is_some() {
+                break;
+            }
+            run.trace(&scene, STEP);
+            if run.photons >= next || run.photons >= SETTLED {
+                publish(&run, run.photons >= SETTLED);
+                next *= 2;
+            }
+        }
+    }
+}
+
+/// One run of the simulation: the light straight from every LED, and the
+/// bounced light gathered so far.
+struct Run {
+    s: Stood,
+    north: f32,
+    fine: Grid,
+    coarse: Grid,
+    direct: Arc<Vec<Boxed>>,
+    direct_all: Arc<Vec<f32>>,
+    surface: Arc<Vec<u8>>,
+    cover: Arc<[Vec<f32>; MAPS]>,
+    /// what each coarse cell of each map is of, which its light is evened
+    /// out among: the deck by its well, the chassis all one, a skirt by its
+    /// cap and side, a cap's top by its cap; u32::MAX none
+    class: Arc<[Vec<u32>; MAPS]>,
+    keys: Vec<u32>,
+    /// each key's bounced light, its maps, added up as the photons land
+    gathered: Vec<Gathered>,
+    photons: usize,
+    seed: u64,
+}
+
+/// A key's bounced light as the photons land: its maps, and how many photons each cell has had.
+struct Gathered {
+    maps: [Boxed; MAPS],
+    counts: [Vec<u32>; MAPS],
+}
+
+impl Run {
+    fn new(scene: &Scene, physics: Physics, north: f32) -> Run {
+        let s = Stood::of(&physics);
+        let fine = scene.fine;
+        let coarse = Grid { x0: fine.x0, y0: fine.y0, cell: COARSE, w: ((fine.w as f32 * FINE) / COARSE).ceil() as usize, h: ((fine.h as f32 * FINE) / COARSE).ceil() as usize };
+        let leds: Vec<(f32, f32)> = (0..scene.keys.len()).map(|k| scene.led(k, north)).collect();
+        // the light straight from each LED, cell by cell
+        let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(16);
+        let per = leds.len().div_ceil(threads).max(1);
+        let mut direct: Vec<Boxed> = leds.iter().map(|&l| Boxed::round(&fine, l, DIRECT_REACH)).collect();
+        std::thread::scope(|sc| {
+            for (n, chunk) in direct.chunks_mut(per).enumerate() {
+                let leds = &leds;
+                sc.spawn(move || {
+                    for (i, b) in chunk.iter_mut().enumerate() {
+                        let k = n * per + i;
+                        straight(scene, &s, k, leds[k], b);
+                    }
+                });
+            }
+        });
+        let mut all = vec![0f32; fine.w * fine.h];
+        for b in &direct {
+            b.add_into(&mut all, fine.w, 1.0);
+        }
+        let gathered = leds
+            .iter()
+            .map(|&l| {
+                let maps: [Boxed; MAPS] = std::array::from_fn(|_| Boxed::round(&coarse, l, BOUNCE_REACH));
+                let counts = std::array::from_fn(|m| vec![0u32; maps[m].v.len()]);
+                Gathered { maps, counts }
+            })
+            .collect();
+        // how much of each coarse cell each map's surfaces cover, which the
+        // light gathered in it is spread over, and what the cell is of
+        let mut cover: [Vec<f32>; MAPS] = std::array::from_fn(|_| vec![0f32; coarse.w * coarse.h]);
+        let mut class: [Vec<u32>; MAPS] = std::array::from_fn(|_| vec![u32::MAX; coarse.w * coarse.h]);
+        let share = (FINE / COARSE).powi(2);
+        let per = (COARSE / FINE).round() as usize;
+        for cj in 0..coarse.h {
+            for ci in 0..coarse.w {
+                let mut of: Vec<(usize, u32)> = Vec::with_capacity(per * per);
+                for fj in cj * per..((cj + 1) * per).min(fine.h) {
+                    for fi in ci * per..((ci + 1) * per).min(fine.w) {
+                        let sf = scene.surface[fj * fine.w + fi];
+                        let (x, y) = fine.middle(fi, fj);
+                        let id = match sf {
+                            Surface::Deck => scene.well_of(x, y).map_or(0, |w| w as u32),
+                            Surface::Chassis => 0,
+                            Surface::Skirt(c, side, _) => c * 4 + side as u32,
+                            Surface::Top(c) => c,
+                            Surface::None => continue,
+                        };
+                        let m = sf.map().unwrap();
+                        cover[m][cj * coarse.w + ci] += share;
+                        of.push((m, id));
+                    }
+                }
+                for (m, class) in class.iter_mut().enumerate() {
+                    let ids: Vec<u32> = of.iter().filter(|o| o.0 == m).map(|o| o.1).collect();
+                    if let Some(&most) = ids.iter().max_by_key(|a| ids.iter().filter(|b| b == a).count()) {
+                        class[cj * coarse.w + ci] = most;
+                    }
+                }
+            }
+        }
+        Run {
+            s,
+            north,
+            fine,
+            coarse,
+            direct: Arc::new(direct),
+            direct_all: Arc::new(all),
+            surface: Arc::new(scene.surface.iter().map(|s| s.code()).collect()),
+            cover: Arc::new(cover),
+            class: Arc::new(class),
+            keys: scene.keys.iter().map(|k| k.0).collect(),
+            gathered,
+            photons: 0,
+            seed: 0x9E37_79B9_7F4A_7C15,
+        }
+    }
+
+    /// Send `n` more photons from each LED, and gather where their bounced light lands.
+    fn trace(&mut self, scene: &Scene, n: usize) {
+        let (s, north, coarse, seed) = (self.s, self.north, self.coarse, self.seed);
+        let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(16);
+        let per = self.gathered.len().div_ceil(threads).max(1);
+        std::thread::scope(|sc| {
+            for (c, chunk) in self.gathered.chunks_mut(per).enumerate() {
+                sc.spawn(move || {
+                    for (i, g) in chunk.iter_mut().enumerate() {
+                        let k = c * per + i;
+                        let mut rng = Rng(seed ^ ((k as u64 + 1).wrapping_mul(0x2545_F491_4F6C_DD1D)).rotate_left(17) | 1);
+                        bounce(scene, &s, k, scene.led(k, north), g, &coarse, n, &mut rng, false);
+                    }
+                });
+            }
+        });
+        self.seed = self.seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.photons += n;
+    }
+
+    fn snapshot(&self, settled: bool) -> Snapshot {
+        let share = if self.photons > 0 { 1.0 / self.photons as f32 } else { 0.0 };
+        // each key's bounced light, each place's evened out over enough photons round it, a thread a share of the keys
+        let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(16);
+        let per = self.gathered.len().div_ceil(threads).max(1);
+        let mut bounced: Vec<[Boxed; MAPS]> = Vec::with_capacity(self.gathered.len());
+        std::thread::scope(|sc| {
+            let jobs: Vec<_> = self
+                .gathered
+                .chunks(per)
+                .map(|chunk| sc.spawn(move || chunk.iter().map(|g| std::array::from_fn(|m| even(&g.maps[m], &g.counts[m], &self.class[m], &self.cover[m], self.coarse.w, share))).collect::<Vec<[Boxed; MAPS]>>()))
+                .collect();
+            for j in jobs {
+                bounced.extend(j.join().unwrap_or_else(|e| std::panic::resume_unwind(e)));
+            }
+        });
+        let n = self.coarse.w * self.coarse.h;
+        let mut all: [Vec<f32>; MAPS] = std::array::from_fn(|_| vec![0f32; n]);
+        for maps in &bounced {
+            for (m, a) in all.iter_mut().enumerate() {
+                maps[m].add_into(a, self.coarse.w, 1.0);
+            }
+        }
+        Snapshot {
+            physics: self.s.p,
+            north: self.north,
+            photons: self.photons,
+            settled,
+            fine: self.fine,
+            coarse: self.coarse,
+            surface: self.surface.clone(),
+            cover: self.cover.clone(),
+            keys: self.keys.clone(),
+            direct: self.direct.clone(),
+            bounced,
+            direct_all: self.direct_all.clone(),
+            bounced_all: all,
+        }
+    }
+}
+
+/// A key's bounced light on one map, each place's the light of the
+/// photons round it over the area they landed on, as far round as holds
+/// EVEN of them (at most EVEN_REACH cells), among the cells of the same
+/// surface only (the same well's deck, the same cap's skirt's side): where
+/// photons are many it keeps its detail, and where they are few it is
+/// smooth rather than speckled. Each photon `share` of its LED's light.
+fn even(b: &Boxed, counts: &[u32], class: &[u32], cover: &[f32], cw: usize, share: f32) -> Boxed {
+    let mut out = Boxed { x: b.x, y: b.y, w: b.w, h: b.h, v: vec![0.0; b.v.len()] };
+    if b.w == 0 || b.h == 0 {
+        return out;
+    }
+    let at = |i: usize, j: usize| (b.y + j) * cw + b.x + i;
+    // the surfaces in the box, and where each is
+    let mut boxes: Vec<(u32, [usize; 4])> = Vec::new();
+    for j in 0..b.h {
+        for i in 0..b.w {
+            let g = at(i, j);
+            if class[g] == u32::MAX || cover[g] <= 0.0 {
+                continue;
+            }
+            match boxes.iter_mut().find(|c| c.0 == class[g]) {
+                Some(c) => c.1 = [c.1[0].min(i), c.1[1].min(j), c.1[2].max(i + 1), c.1[3].max(j + 1)],
+                None => boxes.push((class[g], [i, j, i + 1, j + 1])),
+            }
+        }
+    }
+    for (id, [x0, y0, x1, y1]) in boxes {
+        let (w, h) = (x1 - x0, y1 - y0);
+        // running sums over the surface's box: light, photons, area
+        let mut sums = vec![[0f64; 3]; (w + 1) * (h + 1)];
+        for j in 0..h {
+            for i in 0..w {
+                let (bi, bj) = (x0 + i, y0 + j);
+                let g = at(bi, bj);
+                let cell = if class[g] == id { [b.v[bj * b.w + bi] as f64, counts[bj * b.w + bi] as f64, cover[g] as f64] } else { [0.0; 3] };
+                let s = |i: usize, j: usize| sums[j * (w + 1) + i];
+                let (up, left, both) = (s(i + 1, j), s(i, j + 1), s(i, j));
+                sums[(j + 1) * (w + 1) + i + 1] = [0, 1, 2].map(|c| cell[c] + up[c] + left[c] - both[c]);
+            }
+        }
+        let within = |i: usize, j: usize, r: usize| {
+            let (a0, b0) = (i.saturating_sub(r), j.saturating_sub(r));
+            let (a1, b1) = ((i + r + 1).min(w), (j + r + 1).min(h));
+            let s = |i: usize, j: usize| sums[j * (w + 1) + i];
+            let (p, q, u, v) = (s(a1, b1), s(a0, b1), s(a1, b0), s(a0, b0));
+            [0, 1, 2].map(|c| p[c] - q[c] - u[c] + v[c])
+        };
+        for j in 0..h {
+            for i in 0..w {
+                let (bi, bj) = (x0 + i, y0 + j);
+                let g = at(bi, bj);
+                if class[g] != id || cover[g] <= 0.0 {
+                    continue;
+                }
+                // the least reach that holds enough photons
+                let (mut lo, mut hi) = (0, EVEN_REACH);
+                while lo < hi {
+                    let mid = (lo + hi) / 2;
+                    if within(i, j, mid)[1] >= EVEN as f64 { hi = mid } else { lo = mid + 1 }
+                }
+                let [light, _, area] = within(i, j, lo);
+                out.v[bj * b.w + bi] = if area > 0.0 { (light / area) as f32 * share } else { 0.0 };
+            }
+        }
+    }
+    out
+}
+
+/// The light straight from key `k`'s LED at each cell of its box: on the
+/// back of its own cap's top (its beam, and its housing's glow), on the deck
+/// of its own well and the chassis round the wells (its housing's glow, out
+/// under the skirt), and, from a
+/// switch whose top is below the skirt's foot, on the outsides of other
+/// caps' skirts (its beam, where nothing stands in the way); each as the
+/// surface there gives it back.
+fn straight(scene: &Scene, s: &Stood, k: usize, (lx, ly): (f32, f32), b: &mut Boxed) {
+    let p = &s.p;
+    let pi = std::f32::consts::PI;
+    let high = [lx, ly, s.beam_from];
+    let centre = scene.keys[k].1;
+    let housing = Housing::of(s, centre, (lx, ly));
+    let foot = scene.caps[k].foot;
+    let own_well = scene.well_of(centre.0, centre.1);
+    let beam = |q: [f32; 3], n: [f32; 3]| -> f32 {
+        let d = [q[0] - high[0], q[1] - high[1], q[2] - high[2]];
+        let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+        if r2 <= 1e-6 {
+            return 0.0;
+        }
+        let r = r2.sqrt();
+        let cos_q = -(d[0] * n[0] + d[1] * n[1] + d[2] * n[2]) / r;
+        if cos_q <= 0.0 {
+            return 0.0;
+        }
+        p.beam_at(d[2] / r) * cos_q / r2
+    };
+    for j in 0..b.h {
+        for i in 0..b.w {
+            let (ci, cj) = (b.x + i, b.y + j);
+            let (x, y) = scene.fine.middle(ci, cj);
+            let v = match scene.surface[cj * scene.fine.w + ci] {
+                Surface::Deck if own_well.is_some() && scene.well_of(x, y) == own_well => p.deck / pi * housing.on_floor([x, y, 0.0], foot, s.gap),
+                Surface::Chassis => p.chassis / pi * housing.on_floor([x, y, s.wall], foot, s.gap),
+                Surface::Top(c) if c as usize == k => {
+                    let q = [x, y, s.top];
+                    p.legends / pi * (beam(q, [0.0, 0.0, -1.0]) + housing.on_top(q))
+                }
+                Surface::Skirt(c, side, up) if c as usize != k && s.beam_from < s.gap => {
+                    let (q, n) = scene.skirt_point(s, c, side, up, (x, y));
+                    let off = [q[0] + n[0] * 0.01, q[1] + n[1] * 0.01, q[2]];
+                    if scene.clear(s, off, high) { p.cap_out / pi * beam(q, n) } else { 0.0 }
+                }
+                _ => 0.0,
+            };
+            b.v[j * b.w + i] = v;
+        }
+    }
+}
+
+/// `n` photons from key `k`'s LED at (`lx`, `ly`) and its housing, each
+/// followed, its light gathered where it lands on what shows from above:
+/// the deck and chassis (the first map), the skirts' outsides (the second,
+/// at the place on the band the height shows at), the backs of the caps'
+/// tops (the third); each as that surface gives it back, for the area of a
+/// cell. Where a photon first lands is gathered only where straight() has
+/// not worked out its light exactly already.
+/// (`first`, for checking the two against each other: gather those too,
+/// and follow each photon no further.)
+#[allow(clippy::too_many_arguments)]
+fn bounce(scene: &Scene, s: &Stood, k: usize, (lx, ly): (f32, f32), into: &mut Gathered, g: &Grid, n: usize, rng: &mut Rng, first: bool) {
+    let p = &s.p;
+    let pi = std::f32::consts::PI;
+    let per_area = 1.0 / (g.cell * g.cell);
+    let centre = scene.keys[k].1;
+    let own_well = scene.well_of(centre.0, centre.1);
+    let housing = Housing::of(s, centre, (lx, ly));
+    let mut gather = |m: usize, (x, y): (f32, f32), v: f32| {
+        let b = &mut into.maps[m];
+        if let Some((i, j)) = g.at(x, y) {
+            if i >= b.x && j >= b.y && i < b.x + b.w && j < b.y + b.h {
+                let n = (j - b.y) * b.w + (i - b.x);
+                b.v[n] += v;
+                into.counts[m][n] += 1;
+            }
+        }
+    };
+    let visible = |q: [f32; 3], what: Surface| scene.fine.at(q[0], q[1]).is_some_and(|(i, j)| scene.surface[j * scene.fine.w + i] == what);
+    for _ in 0..n {
+        // from the housing, a place on it by how much light it gives off there, or in the beam
+        let glow = rng.f() < p.scatter;
+        let (mut o, mut d) = if glow {
+            let (q, nrm) = housing.emit(rng);
+            ([q[0] + nrm[0] * EPS * 4.0, q[1] + nrm[1] * EPS * 4.0, q[2] + nrm[2] * EPS * 4.0], rng.diffuse(nrm))
+        } else {
+            ([lx, ly, s.beam_from], rng.beam(p.beam))
+        };
+        for bounce in 0..48 {
+            let Some((t, what, nrm)) = scene.hit(s, o, d, 1e4) else { break };
+            let q = [o[0] + t * d[0], o[1] + t * d[1], o[2] + t * d[2]];
+            // worked out exactly already: the beam's first landing; the
+            // housing's on the back of its own cap's top, and on the deck of
+            // its own well and the chassis near enough for straight()
+            let near = (q[0] - lx).abs() < DIRECT_REACH - 1.0 && (q[1] - ly).abs() < DIRECT_REACH - 1.0;
+            let exact = !first
+                && bounce == 0
+                && (!glow
+                    || match what {
+                        Struck::Under(c) => c as usize == k,
+                        Struck::Deck => near && scene.well_of(q[0], q[1]) == own_well,
+                        Struck::Chassis => near,
+                        _ => false,
+                    });
+            // what it gives back, and where it shows
+            let rho = match what {
+                Struck::Deck => {
+                    if !exact && visible(q, Surface::Deck) {
+                        gather(0, (q[0], q[1]), p.deck / pi * per_area);
+                    }
+                    p.deck
+                }
+                Struck::Chassis => {
+                    if !exact && visible(q, Surface::Chassis) {
+                        gather(1, (q[0], q[1]), p.chassis / pi * per_area);
+                    }
+                    p.chassis
+                }
+                Struck::Outside(c, side) => {
+                    if !exact {
+                        let (at, stands) = scene.band(s, c, side, q);
+                        gather(2, at, p.cap_out / pi * per_area * stands);
+                    }
+                    p.cap_out
+                }
+                Struck::Under(_) => {
+                    if !exact {
+                        gather(3, (q[0], q[1]), p.legends / pi * per_area);
+                    }
+                    p.cap_in
+                }
+                Struck::Inside => p.cap_in,
+                Struck::Top => p.cap_out,
+                Struck::Wall => p.walls,
+            };
+            if first || rng.f() >= rho {
+                break;
+            }
+            o = [q[0] + nrm[0] * EPS * 4.0, q[1] + nrm[1] * EPS * 4.0, q[2] + nrm[2] * EPS * 4.0];
+            d = rng.diffuse(nrm);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use resvg::usvg::{self, Tree};
+
+    fn scene() -> (Board, Scene, Physics) {
+        let tree = Tree::from_str(crate::z10::SVG, &usvg::Options::default()).unwrap();
+        let mut device: Value = serde_json::from_str(crate::z10::DEVICE).unwrap();
+        device["light"] = serde_json::json!({ "led": 4.5, "sim": { "nits": 600 }, "wells": "mask_1" });
+        let b = Board::new(&tree, &device, [0x20, 0x20, 0x20], 1264, 506).unwrap();
+        let scene = Scene::of(&b);
+        (b, scene, Physics::from(&device["light"]))
+    }
+
+    /// The beam holds the LED's light but the share the switch scatters, however tight it is.
+    #[test]
+    fn the_beam_holds_its_share() {
+        for (beam, scatter) in [(0.0, 0.4), (25.0, 0.4), (120.0, 0.1)] {
+            let p = Physics { beam, scatter, ..Physics::from(&Value::Null) };
+            let n = 200_000;
+            let total = (0..n).map(|i| p.beam_at((i as f32 + 0.5) / n as f32) as f64).sum::<f64>() / n as f64 * std::f64::consts::TAU;
+            eprintln!("beam {beam}, scattered {scatter}: the beam holds {total:.4}");
+            assert!((total - (1.0 - scatter) as f64).abs() < 1e-3);
+        }
+    }
+
+    /// The exact share of a rectangle's light, against the rectangle cut
+    /// into small patches, each one's light added up.
+    #[test]
+    fn a_rectangle_s_share_is_exact() {
+        for (x0, y0, x1, y1, h) in [(-5.0f32, -5.0, 5.0, 5.0, 3.0f32), (2.0, -1.0, 9.0, 4.0, 2.5), (-8.0, 3.0, -1.0, 6.0, 10.0)] {
+            let n = 800;
+            let (dx, dy) = ((x1 - x0) / n as f32, (y1 - y0) / n as f32);
+            let mut sum = 0f64;
+            for i in 0..n {
+                for j in 0..n {
+                    let (x, y) = (x0 + (i as f32 + 0.5) * dx, y0 + (j as f32 + 0.5) * dy);
+                    let r2 = (x * x + y * y + h * h) as f64;
+                    sum += (h as f64).powi(2) / (std::f64::consts::PI * r2 * r2) * (dx * dy) as f64;
+                }
+            }
+            let exact = parallel(x0, y0, x1, y1, h) as f64;
+            eprintln!("a {:.0} x {:.0} rectangle {h} away: {exact:.5} exactly, {sum:.5} in patches", x1 - x0, y1 - y0);
+            assert!((exact - sum).abs() < 1e-4 + sum * 1e-3);
+        }
+    }
+
+    /// The light worked out exactly (the beam's and the housing's glow on
+    /// the back of its cap's top, the glow on the deck of its well) and the
+    /// same light traced as photons, each followed to where it first lands,
+    /// agree: for a key in the main block, over the coarse cells wholly
+    /// of each surface.
+    #[test]
+    fn exact_and_traced_light_agree() {
+        let (_, scene, p) = scene();
+        let k = 30;
+        for scatter in [1.0f32, 0.4] {
+            let s = Stood::of(&Physics { scatter, ..p });
+            let fine = scene.fine;
+            let coarse = Grid { x0: fine.x0, y0: fine.y0, cell: COARSE, w: ((fine.w as f32 * FINE) / COARSE).ceil() as usize, h: ((fine.h as f32 * FINE) / COARSE).ceil() as usize };
+            let led = scene.led(k, 4.5);
+            let mut exact = Boxed::round(&fine, led, DIRECT_REACH);
+            straight(&scene, &s, k, led, &mut exact);
+            let n = 4_000_000;
+            let maps: [Boxed; MAPS] = std::array::from_fn(|_| Boxed::round(&coarse, led, BOUNCE_REACH));
+            let mut traced = Gathered { counts: std::array::from_fn(|m| vec![0; maps[m].v.len()]), maps };
+            bounce(&scene, &s, k, led, &mut traced, &coarse, n, &mut Rng(0x1234_5678_9abc_def1), true);
+            let traced = traced.maps;
+            let own_well = scene.well_of(scene.keys[k].1 .0, scene.keys[k].1 .1);
+            let per = (COARSE / FINE) as usize;
+            // the deck: all the light landing on it near the key, exact and traced
+            let (mut e_flux, mut t_flux) = (0f64, 0f64);
+            let t = &traced[0];
+            for cj in 0..t.h {
+                for ci in 0..t.w {
+                    let (gi, gj) = (t.x + ci, t.y + cj);
+                    let (x, y) = coarse.middle(gi, gj);
+                    if (x - led.0).abs() > 30.0 || (y - led.1).abs() > 30.0 {
+                        continue;
+                    }
+                    // the cells of its well's deck (and caps), none of the chassis past its walls
+                    let (mut deck, mut e) = (false, 0f64);
+                    let mut mixed = false;
+                    for f in 0..per * per {
+                        let (ii, jj) = (gi * per + f % per, gj * per + f / per);
+                        let (fx, fy) = fine.middle(ii, jj);
+                        match scene.surface[jj * fine.w + ii] {
+                            Surface::Deck if scene.well_of(fx, fy) == own_well => {
+                                deck = true;
+                                e += (exact.v[(jj - exact.y) * exact.w + (ii - exact.x)] * FINE * FINE) as f64;
+                            }
+                            Surface::Deck | Surface::Chassis | Surface::None => mixed = true,
+                            _ => {}
+                        }
+                    }
+                    if deck && !mixed {
+                        e_flux += e;
+                        t_flux += (t.v[cj * t.w + ci] * COARSE * COARSE) as f64 / n as f64;
+                    }
+                }
+            }
+            eprintln!("scattered {scatter}: on the deck round it, {e_flux:.4e} exactly, {t_flux:.4e} traced ({:+.2}%)", (t_flux / e_flux - 1.0) * 100.0);
+            assert!(e_flux > 0.0 && (t_flux / e_flux - 1.0).abs() < 0.02, "the deck: {t_flux} against {e_flux}");
+            for (m, what) in [(3usize, "the back of its cap's top")] {
+                let (mut e_sum, mut t_sum) = (0f64, 0f64);
+                let t = &traced[m];
+                for cj in 0..t.h {
+                    for ci in 0..t.w {
+                        let (gi, gj) = (t.x + ci, t.y + cj);
+                        let mut e = 0f64;
+                        let whole = (0..per * per).all(|f| {
+                            let (ii, jj) = (gi * per + f % per, gj * per + f / per);
+                            let (x, y) = fine.middle(ii, jj);
+                            let ok = ii >= exact.x && jj >= exact.y && ii < exact.x + exact.w && jj < exact.y + exact.h && match scene.surface[jj * fine.w + ii] {
+                                Surface::Top(c) => m == 3 && c as usize == k,
+                                Surface::Deck => m == 0 && scene.well_of(x, y) == own_well,
+                                _ => false,
+                            };
+                            if ok {
+                                e += exact.v[(jj - exact.y) * exact.w + (ii - exact.x)] as f64;
+                            }
+                            ok
+                        });
+                        if whole {
+                            e_sum += e / (per * per) as f64;
+                            t_sum += t.v[cj * t.w + ci] as f64 / n as f64;
+                        }
+                    }
+                }
+                eprintln!("scattered {scatter}: on {what}, {e_sum:.4e} exactly, {t_sum:.4e} traced ({:+.2}%)", (t_sum / e_sum - 1.0) * 100.0);
+                assert!(e_sum > 0.0 && (t_sum / e_sum - 1.0).abs() < 0.02, "{what}: {t_sum} against {e_sum}");
+            }
+        }
+    }
+
+    /// A well with no LED in it (the media keys') gets none of the LEDs'
+    /// light straight, only a little bounced off the caps round it, every other key lit.
+    #[test]
+    fn wells_without_leds_stay_dark() {
+        let (_, scene, p) = scene();
+        let snap = Simulator::settle(&scene, p, 4.5, 20_000);
+        let leds: Vec<(f32, f32)> = (0..scene.keys.len()).map(|k| scene.led(k, 4.5)).collect();
+        let lit_wells: Vec<usize> = leds.iter().filter_map(|&(x, y)| scene.well_of(x, y)).collect();
+        let deck = |n: usize| {
+            let (i, j) = (n % snap.fine.w, n / snap.fine.w);
+            let (x, y) = snap.fine.middle(i, j);
+            let a = snap.at(x, y, None)?;
+            (scene.surface[n] == Surface::Deck).then(|| (scene.well_of(x, y), snap.white(&a)))
+        };
+        let all: Vec<(Option<usize>, f32)> = (0..snap.fine.w * snap.fine.h).filter_map(deck).collect();
+        let brightest = all.iter().map(|d| d.1).fold(0f32, f32::max);
+        let dark = all.iter().filter(|d| d.0.is_some_and(|w| !lit_wells.contains(&w))).map(|d| d.1).fold(0f32, f32::max);
+        let unlit = (0..scene.wells.len()).filter(|w| !lit_wells.contains(w)).count();
+        eprintln!("{unlit} wells with no LED: their deck at most {:.3}% of the brightest deck", dark / brightest * 100.0);
+        let straight = (0..snap.fine.w * snap.fine.h)
+            .filter(|&n| {
+                let (x, y) = snap.fine.middle(n % snap.fine.w, n / snap.fine.w);
+                scene.surface[n] == Surface::Deck && scene.well_of(x, y).is_some_and(|w| !lit_wells.contains(&w))
+            })
+            .map(|n| snap.direct_all[n])
+            .fold(0f32, f32::max);
+        assert!(unlit >= 1 && straight == 0.0 && dark < brightest * 0.06);
+    }
+}
+
