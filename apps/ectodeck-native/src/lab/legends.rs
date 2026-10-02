@@ -109,7 +109,8 @@ pub enum Lens {
 
 /// The values the legends are drawn from, as the simulation holds them (no
 /// switch or skirt's foot above the cap's top, no switch wider than fits in
-/// a cap): lengths in millimetres, the LED's place in the art's units too.
+/// a cap, no LED outside its switch): lengths in millimetres, the LED's
+/// place in the art's units too.
 #[derive(Clone, Copy, Debug)]
 pub struct Values {
     led: f64,
@@ -149,7 +150,9 @@ fn raw(light: &Value, path: (&str, &str)) -> f64 {
 impl Values {
     pub fn of(light: &Value) -> Values {
         let p = Physics::from(light);
-        let led = raw(light, ("led", ""));
+        // the LED inside its switch, as the simulation holds it
+        let edge = p.switch_edge() as f64;
+        let led = raw(light, ("led", "")).clamp(-edge, edge);
         Values {
             led,
             north: led / MM,
@@ -517,10 +520,12 @@ impl Slice {
             lx0: centre - LEGEND_AT - LEGEND_W / 2.0,
             lx1: centre - LEGEND_AT + LEGEND_W / 2.0,
         };
-        // the switch as wide as asked, as far as it fits in the cap at its top
+        // the switch as wide as asked, as far as it fits in the cap at its
+        // top, and its LED inside it as drawn
         let inner = sl.skirt_x(Side::Left, v.switch_top, true);
         let half = if sl.hollow { (v.switch_width / 2.0).min(centre - inner - 0.25) } else { v.switch_width / 2.0 };
         (sl.hx0, sl.hx1) = (centre - half, centre + half);
+        sl.led = sl.led.clamp(sl.hx0, sl.hx1);
         sl
     }
 
@@ -924,6 +929,21 @@ mod tests {
         light["sim"]["switch_width"] = serde_json::json!(12.0);
         let v = Values::of(&light);
         assert!(v.lit > 0.0 && v.lit <= 1.0);
+    }
+
+    /// The legends' LED stays inside its switch, however far north of centre
+    /// the light asks for it, and comes back out as the switch widens.
+    #[test]
+    fn the_led_stays_inside_its_switch() {
+        let mut light = core_light();
+        light["led"] = serde_json::json!(12.0);
+        light["sim"]["switch_width"] = serde_json::json!(4.0);
+        let v = Values::of(&light);
+        assert!((v.led - 2.0 * MM).abs() < 1e-6, "held at a 4 mm switch's edge: {}", v.led);
+        light["sim"]["switch_width"] = serde_json::json!(14.0);
+        assert!((Values::of(&light).led - 7.0 * MM).abs() < 1e-6);
+        light["led"] = serde_json::json!(4.5);
+        assert_eq!(Values::of(&light).led, 4.5);
     }
 
     /// The labels name the sliders, with their values as the boxes read them.

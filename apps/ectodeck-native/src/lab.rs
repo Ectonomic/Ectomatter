@@ -54,7 +54,8 @@ enum Unit {
 
 /// One value of the core's "light": where it is, what it is called, its
 /// slider's range and step. A brightness's range is 0 to Peak nits, whatever
-/// `lo` and `hi` say, since nothing above Peak nits shows. A brightness and a
+/// `lo` and `hi` say, since nothing above Peak nits shows, and the LED's runs
+/// to its switch's edges, since it sits inside the switch. A brightness and a
 /// length keep three significant figures from their sliders, whatever the
 /// step says, so a small value moves in small steps.
 struct Param {
@@ -70,7 +71,7 @@ struct Param {
 }
 
 const PARAMS: [Param; 23] = [
-    Param { path: ("led", ""), label: "North of centre", lo: -12.0, hi: 12.0, step: 0.25, unit: Unit::Length, def: 7.0, note: "Where each key's LED sits under its cap, from the switch's centre toward the top of the key; below 0, toward the bottom, as on a keyboard whose LEDs face south." },
+    Param { path: ("led", ""), label: "North of centre", lo: -9.66, hi: 9.66, step: 0.25, unit: Unit::Length, def: 7.0, note: "Where each key's LED sits under its cap, from the switch's centre toward the top of the key; below 0, toward the bottom, as on a keyboard whose LEDs face south. It goes as far as the switch's edge, so Switch width sets how far the slider reaches." },
     Param { path: ("sim", "nits"), label: "Brightness", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, def: 600.0, note: "The brightest legend, with every key lit white at full, up to Peak nits (Settings › HDR). Everything else the LEDs light is as bright as the simulation finds it beside that. A colour gives off its own share, as an LED does: a red about a fifth." },
     Param { path: ("sim", "beam"), label: "Beam", lo: 1.0, hi: 200.0, step: 0.5, unit: Unit::Number, def: 24.0, note: "How tight the beam out of the top of the switch is. Higher keeps it to a small bright spot on the legend over the LED; lower spreads it across the cap's top." },
     Param { path: ("sim", "scatter"), label: "Scattered", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.7, note: "The share of the LED's light the switch's clear housing scatters, glowing with it all over, rather than sending up in the beam. More lights the legend more evenly, and the deck and the inside of the cap more; less leaves more for the spot over the LED." },
@@ -328,14 +329,17 @@ impl LabPage {
                         match num.parse::<f64>() {
                             Ok(v) => {
                                 // a part is typed as a percentage; nothing else holds a typed value
-                                // back but what cannot be (a negative brightness, a part past the whole)
+                                // back but what cannot be (a negative brightness, a part past the
+                                // whole, a switch wider than fits inside a cap, an LED outside its switch)
                                 let v = match p.unit {
                                     Unit::Fraction => (v / 100.0).clamp(p.lo.max(0.0), p.hi.min(1.0)),
-                                    // no switch wider than fits inside a cap
                                     Unit::Mm if p.path.1 == "switch_width" => v.clamp(p.lo, p.hi),
                                     Unit::Nits | Unit::Mm => v.max(0.0),
                                     Unit::Reach => v.max(p.lo),
-                                    Unit::Length if p.path.0 == "led" => v,
+                                    Unit::Length if p.path.0 == "led" => {
+                                        let (lo, hi) = self.range(id.max(0) as usize);
+                                        v.clamp(lo, hi)
+                                    }
                                     Unit::Length => v.max(0.01),
                                     Unit::Number => v.max(p.lo),
                                 };
@@ -458,11 +462,15 @@ impl LabPage {
     }
 
     /// A value's slider range: a brightness from 0 to Peak nits (Settings ›
-    /// HDR), since nothing above it shows; the rest their own.
+    /// HDR), since nothing above it shows; the LED from one edge of its
+    /// switch to the other, as wide as Switch width has it; the rest their own.
     fn range(&self, i: usize) -> (f64, f64) {
         let p = &PARAMS[i];
         if p.unit == Unit::Nits {
             (0.0, if self.readout.peak > 0.0 { self.readout.peak } else { 1000.0 })
+        } else if p.path == ("led", "") {
+            let edge = Physics::from(&self.light).switch_edge() as f64;
+            (-edge, edge)
         } else {
             (p.lo, p.hi)
         }
@@ -491,9 +499,18 @@ impl LabPage {
         }
     }
 
+    /// A value as the light has it; the LED's as the simulation holds it,
+    /// inside its switch (a narrower switch pushes it in, and it comes back
+    /// out as the switch widens again).
     fn value(&self, i: usize) -> f64 {
         let p = &PARAMS[i];
-        get(&self.light, p.path).unwrap_or(p.def)
+        let v = get(&self.light, p.path).unwrap_or(p.def);
+        if p.path == ("led", "") {
+            let (lo, hi) = self.range(i);
+            v.clamp(lo, hi)
+        } else {
+            v
+        }
     }
 
     /// A value as its box shows it, and its unit after the box.

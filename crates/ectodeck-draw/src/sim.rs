@@ -112,6 +112,18 @@ impl Physics {
         Physics { nits: 0.0, ..*self } == Physics { nits: 0.0, ..*o }
     }
 
+    /// How far the switch's edge is from its centre, in the art's units:
+    /// the furthest an LED can sit from the centre, inside the switch.
+    pub fn switch_edge(&self) -> f32 {
+        self.switch_width * UNITS_PER_MM / 2.0
+    }
+
+    /// Where an LED sits, `north` of its key's centre in the art's units, as
+    /// the simulation holds it: inside its switch, at most at its edge.
+    pub fn held_north(&self, north: f32) -> f32 {
+        north.clamp(-self.switch_edge(), self.switch_edge())
+    }
+
     /// The beam's light from its source, `up` the cosine of the angle off
     /// straight up: (n + 1) / 2pi cos^n, for its share of the LED's.
     fn beam_at(&self, up: f32) -> f32 {
@@ -581,10 +593,12 @@ impl Housing {
 
 /// The light straight from an LED and its housing on the back of its cap's
 /// top, `along` (the art's units) from over the LED toward the foot of the
-/// cap (back toward its top below 0), the LED `north` of the key's centre:
-/// what a legend there shows of it, for an LED of unit power, before the
-/// light bounced inside the cap. For the Lighting lab's curve.
+/// cap (back toward its top below 0), the LED `north` of the key's centre
+/// (held inside its switch): what a legend there shows of it, for an LED of
+/// unit power, before the light bounced inside the cap. For the Lighting
+/// lab's curve.
 pub fn on_cap_top(p: &Physics, north: f32, along: f32) -> f32 {
+    let north = p.held_north(north);
     let s = Stood::of(p);
     let q = [0.0, -north + along, s.top];
     let from = [0.0, -north, s.beam_from];
@@ -1027,6 +1041,7 @@ struct Gathered {
 
 impl Run {
     fn new(scene: &Scene, physics: Physics, north: f32) -> Run {
+        let north = physics.held_north(north);
         let s = Stood::of(&physics);
         let fine = scene.fine;
         let coarse = Grid { x0: fine.x0, y0: fine.y0, cell: COARSE, w: ((fine.w as f32 * FINE) / COARSE).ceil() as usize, h: ((fine.h as f32 * FINE) / COARSE).ceil() as usize };
@@ -1405,6 +1420,21 @@ mod tests {
             eprintln!("beam {beam}, scattered {scatter}: the beam holds {total:.4}");
             assert!((total - (1.0 - scatter) as f64).abs() < 1e-3);
         }
+    }
+
+    /// An LED stays inside its switch: it sits as far north of centre as
+    /// asked up to the switch's edge and no further, in the light on its
+    /// cap's top too.
+    #[test]
+    fn the_led_stays_inside_its_switch() {
+        let p = Physics { switch_width: 12.0, ..Physics::from(&Value::Null) };
+        let edge = 6.0 * UNITS_PER_MM;
+        assert_eq!(p.held_north(3.0), 3.0);
+        assert!((p.held_north(20.0) - edge).abs() < 1e-5 && (p.held_north(-20.0) + edge).abs() < 1e-5);
+        assert_eq!(on_cap_top(&p, 20.0, 1.5), on_cap_top(&p, edge, 1.5));
+        // a switch wider than fits in a cap is held to 14 mm, and its edge with it
+        let wide = Physics::from(&serde_json::json!({ "sim": { "switch_width": 30.0 } }));
+        assert!((wide.switch_edge() - 7.0 * UNITS_PER_MM).abs() < 1e-5);
     }
 
     /// The exact share of a rectangle's light, against the rectangle cut
