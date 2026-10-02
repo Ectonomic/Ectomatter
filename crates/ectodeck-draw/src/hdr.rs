@@ -67,7 +67,7 @@ struct KeyArt {
 /// What the board takes from the core's "light" itself: where each key's LED
 /// sits, how bright the light is, how a legend looks with its LED off, and
 /// the display's light. How the light falls is the simulation's.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct Model {
     /// how far north of the key's centre the LED sits (the art's units)
     led: f32,
@@ -522,9 +522,14 @@ impl Board {
     /// Light the keyboard by another of the core's "light" descriptions (as the
     /// Lighting lab tunes it): how bright the light is, how a legend looks
     /// with its LED off, the display. How the light falls is the simulation's,
-    /// asked of it on its own (see sim::Simulator::set).
-    pub fn set_light(&mut self, light: &Value) {
-        self.model = Model::from(light);
+    /// asked of it on its own (see sim::Simulator::set). True if the picture
+    /// changes with it; a change in how the light falls shows with the
+    /// simulation's next picture.
+    pub fn set_light(&mut self, light: &Value) -> bool {
+        let model = Model::from(light);
+        let changed = model != self.model;
+        self.model = model;
+        changed
     }
 
     /// Light the keys by the simulation's latest picture of their light.
@@ -568,34 +573,59 @@ impl Board {
     /// The simulation's light at its brightest on each part, every key lit
     /// white at full: on the legends where they are solid, and on the deck,
     /// the chassis and the skirts where no cap's edge covers them part way.
+    /// (The keys' legends a share of them to a thread, and the rest of the
+    /// keyboard in bands of rows, on as many threads as it is worth: a new
+    /// picture comes in while a slider is dragged.)
     fn measure(&self, s: &Snapshot) -> Most {
-        let w = self.w as usize;
-        let mut m = Most::default();
-        for key in &self.keys {
-            let Some(l) = &key.legend else { continue };
-            for (i, c) in l.cover.iter().enumerate() {
-                let (x, y) = (l.x + (i as u32 % l.w) as i32, l.y + (i as u32 / l.w) as i32);
-                if *c < 0.5 || x < 0 || y < 0 || x >= self.w as i32 || y >= self.h as i32 {
-                    continue;
-                }
-                let (u, v) = self.unit(x as usize, y as usize);
-                if let Some(a) = s.at(u, v, Some(3)) {
-                    m.legend = m.legend.max(s.white(&a));
+        let (w, h) = (self.w as usize, self.h as usize);
+        let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(16);
+        let legends = |keys: &[KeyArt]| {
+            let mut m = Most::default();
+            for key in keys {
+                let Some(l) = &key.legend else { continue };
+                for (i, c) in l.cover.iter().enumerate() {
+                    let (x, y) = (l.x + (i as u32 % l.w) as i32, l.y + (i as u32 / l.w) as i32);
+                    if *c < 0.5 || x < 0 || y < 0 || x >= self.w as i32 || y >= self.h as i32 {
+                        continue;
+                    }
+                    let (u, v) = self.unit(x as usize, y as usize);
+                    if let Some(a) = s.at(u, v, Some(3)) {
+                        m.legend = m.legend.max(s.white(&a));
+                    }
                 }
             }
-        }
-        for j in 0..w * self.h as usize {
-            let cap = self.caps[j * 4 + 3];
-            let (u, v) = self.unit(j % w, j / w);
-            let Some(a) = s.at(u, v, None) else { continue };
-            match a.code {
-                0 if cap < 0.01 => m.deck = m.deck.max(s.white(&a)),
-                1 if cap < 0.01 => m.chassis = m.chassis.max(s.white(&a)),
-                2 if cap > 0.99 => m.skirt = m.skirt.max(s.white(&a)),
-                _ => {}
+            m
+        };
+        let rest = |rows: std::ops::Range<usize>| {
+            let mut m = Most::default();
+            for j in rows.start * w..rows.end * w {
+                let cap = self.caps[j * 4 + 3];
+                let (u, v) = self.unit(j % w, j / w);
+                let Some(a) = s.at(u, v, None) else { continue };
+                match a.code {
+                    0 if cap < 0.01 => m.deck = m.deck.max(s.white(&a)),
+                    1 if cap < 0.01 => m.chassis = m.chassis.max(s.white(&a)),
+                    2 if cap > 0.99 => m.skirt = m.skirt.max(s.white(&a)),
+                    _ => {}
+                }
             }
-        }
-        m
+            m
+        };
+        let (per_key, per_row) = (self.keys.len().div_ceil(threads).max(1), h.div_ceil(threads).max(1));
+        std::thread::scope(|sc| {
+            let parts: Vec<_> = self
+                .keys
+                .chunks(per_key)
+                .map(|keys| sc.spawn(move || legends(keys)))
+                .chain((0..h).step_by(per_row).map(|y| sc.spawn(move || rest(y..(y + per_row).min(h)))))
+                .collect();
+            parts.into_iter().map(|p| p.join().expect("a share of the measuring")).fold(Most::default(), |a, b| Most {
+                legend: a.legend.max(b.legend),
+                deck: a.deck.max(b.deck),
+                skirt: a.skirt.max(b.skirt),
+                chassis: a.chassis.max(b.chassis),
+            })
+        })
     }
 
     /// What makes the simulation's light its nits, in the SDR white's units:

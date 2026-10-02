@@ -1446,13 +1446,14 @@ impl App {
                 self.light_rev = lab.rev;
                 self.light = Some(lab.light.clone());
                 if let (Some(b), Some(l)) = (&mut self.board, &self.light) {
-                    b.set_light(l);
+                    // the keys drawn again only if their picture changes now; how
+                    // the light falls shows with the simulation's next picture
+                    relit = b.set_light(l);
                     // the light simulated again if what it falls on, or where from, has changed
                     if let Some(s) = &self.sim {
                         s.set(Physics::from(l), b.led_north());
                     }
                 }
-                relit = true;
                 self.readout_at = None;
             }
         }

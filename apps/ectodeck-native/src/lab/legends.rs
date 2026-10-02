@@ -26,11 +26,11 @@ use crate::text;
 const PLOT: &str = "#1b1b1b";
 const DIM: &str = "#d4d4d4";
 const AMBER: &str = "#f0b35a";
-/// a label's leader, over a dark casing
+/// a label's leader
 const LEAD: &str = "#737373";
-/// a measurement: lighter, with ticks at its ends
+/// a measurement: lighter, with ticks at its ends, over a dark casing
 const DIMENSION: &str = "#b4b4b4";
-/// under every leader and measurement, so they read over the light
+/// under every measurement, so it reads over the light
 const CASING: &str = "#141414";
 
 // the art's shapes, in millimetres: a 1u cap's foot, its face's inset from
@@ -247,10 +247,15 @@ impl Svg {
         self.path(d, fill, "none", 1.0, 1.0);
     }
 
-    /// a leader or a measurement: a dark casing under it, so it reads over anything
+    /// a measurement: a dark casing under it, so it reads over anything
     fn line(&mut self, d: &str, color: &str) {
         self.path(d, "none", CASING, 3.4, 1.0);
         self.path(d, "none", color, 1.0, 1.0);
+    }
+
+    /// a label's leader, a plain line
+    fn leader(&mut self, d: &str) {
+        self.path(d, "none", LEAD, 1.0, 1.0);
     }
 
     fn gradient(&mut self, kind: &str, at: String, stops: &[(f64, &str, f64)]) -> String {
@@ -473,7 +478,7 @@ fn callouts(s: &mut Svg, mut labels: Vec<Label>, w: f64, h: f64) {
                 (w - GUTTER + 22.0, y + 4.0)
             };
             let route = if l.drop { vec![start, (edge, y + 4.0), (ax, y + 4.0), (ax, ay)] } else { vec![start, (edge, y + 4.0), (ax, ay)] };
-            s.line(&poly(&route, false), LEAD);
+            s.leader(&poly(&route, false));
             s.dot(ax, ay, 2.3, DIM);
         }
     }
@@ -736,7 +741,7 @@ pub fn slice(v: &Values, lens: Lens, w: f32, h: f32) -> Drawing {
                     let (tx, ty) = (px(sl.centre - 1.2), pz(mid_z));
                     s.text(tx, ty - 2.0, name, Look::Name, 0.5);
                     s.text(tx, ty + 14.0, &value, Look::Value, 0.5);
-                    s.line(&poly(&[(tx + 26.0, ty + 4.0), p(inner, mid_z)], false), LEAD);
+                    s.leader(&poly(&[(tx + 26.0, ty + 4.0), p(inner, mid_z)], false));
                     let (dx, dy) = p(inner, mid_z);
                     s.dot(dx, dy, 2.3, DIM);
                 } else {
@@ -882,8 +887,9 @@ pub fn display(v: &Values, w: f32, h: f32) -> Drawing {
     s.done()
 }
 
-/// A legend drawn at the window's scale, as the lab shows it.
-pub fn image(d: &Drawing, scale: f32) -> slint::Image {
+/// A legend's pixels at the window's scale, as the lab shows it (on any
+/// thread: the lab draws the legends that changed side by side).
+pub fn pixels(d: &Drawing, scale: f32) -> slint::SharedPixelBuffer<slint::Rgba8Pixel> {
     use resvg::tiny_skia::{Pixmap, Transform};
     let (pw, ph) = (((d.w * scale).round() as u32).max(1), ((d.h * scale).round() as u32).max(1));
     let mut pix = Pixmap::new(pw, ph).expect("a legend's size");
@@ -892,7 +898,7 @@ pub fn image(d: &Drawing, scale: f32) -> slint::Image {
     }
     let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(pw, ph);
     buf.make_mut_bytes().copy_from_slice(pix.data());
-    slint::Image::from_rgba8_premultiplied(buf)
+    buf
 }
 
 #[cfg(test)]

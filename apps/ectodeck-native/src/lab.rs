@@ -448,14 +448,25 @@ impl LabPage {
             legends::display(&v, w, legends::DISPLAY_H),
         ];
         let same_scale = self.drawn_of.as_ref().is_some_and(|o| o.2 == scale);
+        let changed: Vec<usize> = (0..fresh.len()).filter(|&i| !(same_scale && self.drawn.get(i).is_some_and(|(old, _)| *old == fresh[i]))).collect();
+        // those that changed drawn side by side, a thread each
+        let pixels: Vec<_> = std::thread::scope(|sc| {
+            let jobs: Vec<_> = changed.iter().map(|&i| {
+                let d = &fresh[i];
+                sc.spawn(move || legends::pixels(d, scale))
+            }).collect();
+            jobs.into_iter().map(|j| j.join().expect("a legend drawn")).collect()
+        });
+        let mut pixels = pixels.into_iter();
         for (i, d) in fresh.into_iter().enumerate() {
-            if !(same_scale && self.drawn.get(i).is_some_and(|(old, _)| *old == d)) {
-                let image = legends::image(&d, scale);
-                if i < self.drawn.len() {
-                    self.drawn[i] = (d, image);
-                } else {
-                    self.drawn.push((d, image));
-                }
+            if !changed.contains(&i) {
+                continue;
+            }
+            let image = slint::Image::from_rgba8_premultiplied(pixels.next().expect("a changed legend's pixels"));
+            if i < self.drawn.len() {
+                self.drawn[i] = (d, image);
+            } else {
+                self.drawn.push((d, image));
             }
         }
         self.drawn_of = Some(of);

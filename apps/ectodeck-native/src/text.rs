@@ -2,6 +2,8 @@
 //! uses, kerning and all, so what the window lays out in Rust (chips that
 //! wrap, notes that run to two lines) lands where the web page put it.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 static FACES: OnceLock<Vec<(u16, Vec<u8>)>> = OnceLock::new();
@@ -16,24 +18,59 @@ fn faces() -> &'static [(u16, Vec<u8>)] {
     })
 }
 
-/// How wide `s` is in Geist at this weight and size, in pixels.
-pub fn width(weight: u16, size: f32, s: &str) -> f32 {
-    let (_, data) = faces().iter().min_by_key(|(w, _)| w.abs_diff(weight)).expect("a face");
-    let Some(face) = rustybuzz::Face::from_slice(data, 0) else { return 0.0 };
+/// The face nearest a weight, read once.
+fn face(weight: u16) -> Option<&'static rustybuzz::Face<'static>> {
+    static READ: OnceLock<Vec<(u16, Option<rustybuzz::Face<'static>>)>> = OnceLock::new();
+    let read = READ.get_or_init(|| faces().iter().map(|(w, data)| (*w, rustybuzz::Face::from_slice(data, 0))).collect());
+    read.iter().min_by_key(|(w, _)| w.abs_diff(weight)).and_then(|(_, f)| f.as_ref())
+}
+
+thread_local! {
+    /// what has been measured and broken into lines, kept, since a page lays
+    /// out the same text again on every change (a slider dragged); let go
+    /// all at once when there is much of it
+    static WIDTHS: RefCell<HashMap<(u16, u32, String), f32>> = RefCell::new(HashMap::new());
+    static LINES: RefCell<HashMap<(u16, u32, u32, String), Vec<String>>> = RefCell::new(HashMap::new());
+}
+const KEPT: usize = 4096;
+
+fn shaped(weight: u16, size: f32, s: &str) -> f32 {
+    let Some(face) = face(weight) else { return 0.0 };
     let mut buf = rustybuzz::UnicodeBuffer::new();
     buf.push_str(s);
-    let glyphs = rustybuzz::shape(&face, &[], buf);
+    let glyphs = rustybuzz::shape(face, &[], buf);
     let adv: i32 = glyphs.glyph_positions().iter().map(|p| p.x_advance).sum();
     adv as f32 * size / face.units_per_em() as f32
 }
 
+/// How wide `s` is in Geist at this weight and size, in pixels.
+pub fn width(weight: u16, size: f32, s: &str) -> f32 {
+    let key = (weight, size.to_bits(), s.to_string());
+    if let Some(w) = WIDTHS.with(|k| k.borrow().get(&key).copied()) {
+        return w;
+    }
+    let w = shaped(weight, size, s);
+    WIDTHS.with(|k| {
+        let mut k = k.borrow_mut();
+        if k.len() >= KEPT {
+            k.clear();
+        }
+        k.insert(key, w);
+    });
+    w
+}
+
 /// Lines of `s` broken at spaces to fit `max` pixels.
 pub fn wrap(weight: u16, size: f32, s: &str, max: f32) -> Vec<String> {
+    let key = (weight, size.to_bits(), max.to_bits(), s.to_string());
+    if let Some(lines) = LINES.with(|k| k.borrow().get(&key).cloned()) {
+        return lines;
+    }
     let mut lines = Vec::new();
     let mut line = String::new();
     for word in s.split(' ') {
         let next = if line.is_empty() { word.to_string() } else { format!("{line} {word}") };
-        if !line.is_empty() && width(weight, size, &next) > max {
+        if !line.is_empty() && shaped(weight, size, &next) > max {
             lines.push(std::mem::take(&mut line));
             line = word.to_string();
         } else {
@@ -43,6 +80,13 @@ pub fn wrap(weight: u16, size: f32, s: &str, max: f32) -> Vec<String> {
     if !line.is_empty() {
         lines.push(line);
     }
+    LINES.with(|k| {
+        let mut k = k.borrow_mut();
+        if k.len() >= KEPT {
+            k.clear();
+        }
+        k.insert(key, lines.clone());
+    });
     lines
 }
 
