@@ -126,6 +126,9 @@ pub mod style {
     pub const FACT: i32 = 12;
     pub const FACT_VALUE: i32 = 13;
     pub const CREDIT: i32 = 14;
+    /// a value on one of the Lighting lab's legends, and the slice's ends
+    pub const LEGEND_VALUE: i32 = 15;
+    pub const LEGEND_AXIS: i32 = 16;
 }
 
 /// the effects' speeds: stored as a cycle time, the slider runs slow to fast, as EVGA's does

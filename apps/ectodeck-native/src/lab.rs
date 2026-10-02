@@ -9,6 +9,8 @@
 //! clearing as the simulation runs. Save writes the tuning into the Z10
 //! core's own file, which Ectodeck reads when it runs from its source.
 
+mod legends;
+
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -18,7 +20,7 @@ use slint::{Model, ModelRc, VecModel};
 use crate::front::WindowAsk;
 use crate::lighting::{cell, kind, style, text_cell};
 use crate::text;
-use crate::{Cell, LabWindow, Plot};
+use crate::{Cell, LabWindow, Plot, Sketch};
 use ectodeck_draw::hdr::sim::{on_cap_top, Physics};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -74,7 +76,7 @@ const PARAMS: [Param; 23] = [
     Param { path: ("sim", "scatter"), label: "Scattered", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.7, note: "The share of the LED's light the switch's clear housing scatters, glowing with it all over, rather than sending up in the beam. More lights the legend more evenly, and the deck and the inside of the cap more; less leaves more for the spot over the LED." },
     Param { path: ("sim", "sides"), label: "Through its sides", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.25, note: "The share of the housing's glow that leaves through its sides rather than its top. Its sides light the deck round the switch, out under the skirt; its top lights the back of the legend evenly, its parts far from the LED as well." },
     Param { path: ("sim", "glow_spread"), label: "Glow spread", lo: 0.5, hi: 60.0, step: 0.1, unit: Unit::Reach, def: 4.0, note: "How far the housing's glow carries from the LED before it falls to about a third, as the light fades through the plastic. Short keeps it to the LED's side of the switch, so the deck and the legend are brightest there; long glows evenly all round." },
-    Param { path: ("sim", "switch_width"), label: "Switch width", lo: 1.0, hi: 20.0, step: 0.1, unit: Unit::Mm, def: 12.0, note: "How wide the switch's clear housing is: it glows with the scattered light over its top and its sides. Wider spreads the glow across the back of the legend; its sides light the deck round the switch, out under the skirt." },
+    Param { path: ("sim", "switch_width"), label: "Switch width", lo: 1.0, hi: 14.0, step: 0.1, unit: Unit::Mm, def: 12.0, note: "How wide the switch's clear housing is: it glows with the scattered light over its top and its sides. Wider spreads the glow across the back of the legend; its sides light the deck round the switch, out under the skirt." },
     Param { path: ("sim", "switch_top"), label: "Switch top", lo: 0.1, hi: 14.0, step: 0.1, unit: Unit::Mm, def: 6.5, note: "How high above the deck the switch's housing stands, where the beam leaves it. Nearer the cap's top makes the spot on the legend smaller and brighter." },
     Param { path: ("sim", "skirt_foot"), label: "Skirt's foot", lo: 0.0, hi: 12.0, step: 0.1, unit: Unit::Mm, def: 5.0, note: "How high above the deck the foot of each cap's skirt is: the gap the light gets out under it by." },
     Param { path: ("sim", "cap_top"), label: "Cap's top", lo: 1.0, hi: 25.0, step: 0.1, unit: Unit::Mm, def: 14.0, note: "How high above the deck each cap's top is, where the legend is." },
@@ -95,7 +97,7 @@ const PARAMS: [Param; 23] = [
 
 /// The page's sections: a title, what the part is, and its values.
 const SECTIONS: [(&str, &str, &[usize]); 4] = [
-    ("LED", "Each key's LED shines up through its switch: most of its light leaves the switch's top in a beam, onto the back of the legend; the rest the switch's clear housing scatters, glowing with it over its top and sides, which lights the legend evenly, the inside of the cap and the deck round the switch.", &[0, 1, 2, 3, 4, 5, 7, 6]),
+    ("LED", "Each key's LED shines up through its switch: part of its light leaves the switch's top in a beam, onto the back of the legend; the rest the switch's clear housing scatters, glowing with it over its top and sides, which lights the legend evenly, the inside of the cap and the deck round the switch.", &[0, 1, 2, 3, 4, 5, 7, 6]),
     ("Keycaps", "Each cap stands over its switch, its skirt from its foot to its top. Light bounces about inside it; some gets out under the skirt, and some through the legend.", &[8, 9, 10, 11, 12, 13]),
     ("Wells", "The keys sit in wells in the chassis: the deck at their floor, walled round by the chassis. What each gives back of the light falling on it lights the rest.", &[14, 15, 16, 17]),
     ("Display", "The display's backlit dots, and the glass over them.", &[18, 19, 20, 21, 22]),
@@ -151,6 +153,33 @@ fn sig3(v: f64) -> f64 {
     (v / m).round() * m
 }
 
+/// A value as its box shows it, and its unit after the box.
+fn reads(p: &Param, v: f64) -> (String, String) {
+    let trim = |s: String| if s.contains('.') { s.trim_end_matches('0').trim_end_matches('.').to_string() } else { s };
+    match p.unit {
+        // to three significant figures, as its slider keeps it
+        Unit::Nits => (trim(if v >= 100.0 { format!("{v:.0}") } else if v >= 10.0 { format!("{v:.1}") } else if v >= 1.0 { format!("{v:.2}") } else { format!("{v:.3}") }), "nits".into()),
+        Unit::Length => (trim(format!("{v:.2}")), format!("({:.1} mm)", v / UNITS_PER_MM)),
+        Unit::Mm => (trim(format!("{v:.1}")), "mm".into()),
+        Unit::Reach => (trim(format!("{v:.2}")), "mm".into()),
+        Unit::Fraction => (trim(format!("{:.1}", v * 100.0)), "%".into()),
+        Unit::Number => (trim(format!("{v:.2}")), String::new()),
+    }
+}
+
+/// A value as a legend names it: its number and unit, as its box and the
+/// unit after it read ("6.5 mm", "25%"), and a length's millimetres apart.
+fn says(i: usize, v: f64) -> (String, String) {
+    let (n, u) = reads(&PARAMS[i], v);
+    match PARAMS[i].unit {
+        Unit::Length => (n, u),
+        Unit::Fraction => (format!("{n}{u}"), String::new()),
+        Unit::Nits if n == "1" => ("1 nit".into(), String::new()),
+        _ if u.is_empty() => (n, String::new()),
+        _ => (format!("{n} {u}"), String::new()),
+    }
+}
+
 /// What is on the keyboard now, in nits, and how far its light's simulation has got.
 #[derive(Clone, Copy, Default, PartialEq)]
 pub struct Readout {
@@ -182,6 +211,13 @@ pub struct LabPage {
     status: (String, i32),
     cells: Rc<VecModel<Cell>>,
     plots: Rc<VecModel<Plot>>,
+    /// the sections' legends, and their words over them
+    sketches: Rc<VecModel<Sketch>>,
+    over: Rc<VecModel<Cell>>,
+    /// each legend as last drawn, and what they were drawn from: the light,
+    /// the window's width and its scale
+    drawn: Vec<(legends::Drawing, slint::Image)>,
+    drawn_of: Option<(Value, f32, f32)>,
 }
 
 fn get(light: &Value, (a, b): (&str, &str)) -> Option<f64> {
@@ -248,12 +284,16 @@ impl LabPage {
         ui.set_mark(mark);
         let cells = Rc::new(VecModel::default());
         let plots = Rc::new(VecModel::default());
+        let sketches = Rc::new(VecModel::default());
+        let over = Rc::new(VecModel::default());
         ui.set_cells(ModelRc::from(cells.clone()));
         ui.set_plots(ModelRc::from(plots.clone()));
+        ui.set_sketches(ModelRc::from(sketches.clone()));
+        ui.set_over(ModelRc::from(over.clone()));
         // a core lit as it once was, before the light was simulated, is read
         // as the simulation takes it, and is saved so
         let light = simulated(light);
-        let mut page = LabPage { ui, asks, saved: light.clone(), light, rev: 0, readout: Readout::default(), status: (String::new(), 0), cells, plots };
+        let mut page = LabPage { ui, asks, saved: light.clone(), light, rev: 0, readout: Readout::default(), status: (String::new(), 0), cells, plots, sketches, over, drawn: Vec::new(), drawn_of: None };
         page.refresh();
         page
     }
@@ -291,6 +331,8 @@ impl LabPage {
                                 // back but what cannot be (a negative brightness, a part past the whole)
                                 let v = match p.unit {
                                     Unit::Fraction => (v / 100.0).clamp(p.lo.max(0.0), p.hi.min(1.0)),
+                                    // no switch wider than fits inside a cap
+                                    Unit::Mm if p.path.1 == "switch_width" => v.clamp(p.lo, p.hi),
                                     Unit::Nits | Unit::Mm => v.max(0.0),
                                     Unit::Reach => v.max(p.lo),
                                     Unit::Length if p.path.0 == "led" => v,
@@ -351,8 +393,19 @@ impl LabPage {
     // ------------------------------------------------------------ the page
 
     pub fn refresh(&mut self) {
-        let (cells, plots, h) = self.layout();
+        self.draw_legends();
+        let (cells, plots, (sketches, over), h) = self.layout();
         crate::front::sync_cells(&self.cells, cells);
+        crate::front::sync_cells(&self.over, over);
+        if self.sketches.row_count() == sketches.len() {
+            for (i, s) in sketches.into_iter().enumerate() {
+                if self.sketches.row_data(i).as_ref() != Some(&s) {
+                    self.sketches.set_row_data(i, s);
+                }
+            }
+        } else {
+            self.sketches.set_vec(sketches);
+        }
         if self.plots.row_count() == plots.len() {
             for (i, p) in plots.into_iter().enumerate() {
                 if self.plots.row_data(i).as_ref() != Some(&p) {
@@ -371,6 +424,37 @@ impl LabPage {
         if changed && self.status.0.is_empty() {
             self.ui.set_status_text("Changed, not saved.".into());
         }
+    }
+
+    /// Draw the sections' legends again, those whose drawing has changed,
+    /// for the light as it is now, at the window's width and scale.
+    fn draw_legends(&mut self) {
+        let width = self.ui.get_window_width().max(560.0);
+        let scale = slint::ComponentHandle::window(&self.ui).scale_factor();
+        let of = (self.light.clone(), width, scale);
+        if self.drawn_of.as_ref() == Some(&of) {
+            return;
+        }
+        let v = legends::Values::of(&self.light);
+        let w = width - 48.0 - 40.0;
+        let fresh = [
+            legends::slice(&v, legends::Lens::Led, w, legends::SLICE_H),
+            legends::slice(&v, legends::Lens::Caps, w, legends::SLICE_H),
+            legends::slice(&v, legends::Lens::Wells, w, legends::SLICE_H),
+            legends::display(&v, w, legends::DISPLAY_H),
+        ];
+        let same_scale = self.drawn_of.as_ref().is_some_and(|o| o.2 == scale);
+        for (i, d) in fresh.into_iter().enumerate() {
+            if !(same_scale && self.drawn.get(i).is_some_and(|(old, _)| *old == d)) {
+                let image = legends::image(&d, scale);
+                if i < self.drawn.len() {
+                    self.drawn[i] = (d, image);
+                } else {
+                    self.drawn.push((d, image));
+                }
+            }
+        }
+        self.drawn_of = Some(of);
     }
 
     /// A value's slider range: a brightness from 0 to Peak nits (Settings ›
@@ -414,22 +498,12 @@ impl LabPage {
 
     /// A value as its box shows it, and its unit after the box.
     fn reads(&self, i: usize) -> (String, String) {
-        let p = &PARAMS[i];
-        let v = self.value(i);
-        let trim = |s: String| if s.contains('.') { s.trim_end_matches('0').trim_end_matches('.').to_string() } else { s };
-        match p.unit {
-            // to three significant figures, as its slider keeps it
-            Unit::Nits => (trim(if v >= 100.0 { format!("{v:.0}") } else if v >= 10.0 { format!("{v:.1}") } else if v >= 1.0 { format!("{v:.2}") } else { format!("{v:.3}") }), "nits".into()),
-            Unit::Length => (trim(format!("{v:.2}")), format!("({:.1} mm)", v / UNITS_PER_MM)),
-            Unit::Mm => (trim(format!("{v:.1}")), "mm".into()),
-            Unit::Reach => (trim(format!("{v:.2}")), "mm".into()),
-            Unit::Fraction => (trim(format!("{:.1}", v * 100.0)), "%".into()),
-            Unit::Number => (trim(format!("{v:.2}")), String::new()),
-        }
+        reads(&PARAMS[i], self.value(i))
     }
 
-    /// The page laid out: its pieces, its curves, and its height.
-    fn layout(&self) -> (Vec<Cell>, Vec<Plot>, f32) {
+    /// The page laid out: its pieces, its curves, its legends and their
+    /// words, and its height.
+    fn layout(&self) -> (Vec<Cell>, Vec<Plot>, (Vec<Sketch>, Vec<Cell>), f32) {
         let width = self.ui.get_window_width().max(560.0);
         let x0 = 24.0;
         let w = width - 48.0;
@@ -441,6 +515,7 @@ impl LabPage {
         let note_w = w - pad * 2.0 - label_w;
         let mut cells = vec![text_cell(style::TITLE, x0, 22.0, w, 29.0, "Lighting lab")];
         let mut plots = Vec::new();
+        let (mut sketches, mut over) = (Vec::new(), Vec::new());
         let mut y = 22.0 + 29.0 + 6.0;
         for line in text::wrap(400, 12.5, "Tune how the Z10's keys are lit. The keyboard in Ectodeck's window takes each change at once; Save writes them into the Z10 core.", w) {
             cells.push(text_cell(style::NOTE, x0, y, w, 18.0, &line));
@@ -509,8 +584,16 @@ impl LabPage {
             row(c, cy, "The simulation", sim, Some("The light straight from each LED is worked out exactly at once; the light that has bounced is followed photon by photon, and clears as more come in.".into()));
         });
 
-        for (title, about, values) in SECTIONS {
+        for (k, (title, about, values)) in SECTIONS.into_iter().enumerate() {
             card(&mut cells, &mut y, title, about, &mut |c, cy| {
+                // the section's legend, the card's width, under what the part is;
+                // on whole pixels, so its picture lands on the screen's
+                if let Some((d, image)) = self.drawn.get(k) {
+                    let (lx, ly) = (x0 + pad, cy.round());
+                    sketches.push(Sketch { x: lx, y: ly, w: d.w, h: d.h, image: image.clone() });
+                    over.extend(d.words.iter().map(|word| word_cell(lx, ly, word)));
+                    *cy = ly + d.h + 12.0;
+                }
                 for &i in values {
                     let p = &PARAMS[i];
                     c.push(text_cell(style::LABEL, x0 + pad, *cy, label_w, 34.0, p.label));
@@ -549,7 +632,7 @@ impl LabPage {
                 }
             });
         }
-        (cells, plots, y + 28.0)
+        (cells, plots, (sketches, over), y + 28.0)
     }
 
     /// A curve: its points (x from 0 to `xmax`, y from 0 to `ymax`), marks
@@ -593,6 +676,23 @@ impl LabPage {
             }
         }
     }
+}
+
+/// A legend's word as the lab's text, its baseline where the legend has it,
+/// the legend at `x`, `y`.
+fn word_cell(x: f32, y: f32, word: &legends::Word) -> Cell {
+    let (weight, size) = word.look.face();
+    let style = match word.look {
+        legends::Look::Name => style::SMALL,
+        legends::Look::Value => style::LEGEND_VALUE,
+        legends::Look::Extra => style::NOTE,
+        legends::Look::Axis => style::LEGEND_AXIS,
+    };
+    // Geist's line is 1.3 times its size, its baseline 1.005 of its size
+    // down it, and a word is centred down its box
+    let h = 18.0;
+    let top = y + word.y - 1.005 * size - (h - 1.3 * size) / 2.0;
+    text_cell(style, x + word.x, top, text::width(weight, size, &word.text) + 2.0, h, &word.text)
 }
 
 /// The core's light section as its file has it: two spaces in, each part's

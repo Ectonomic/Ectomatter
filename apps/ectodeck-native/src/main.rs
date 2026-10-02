@@ -1632,6 +1632,12 @@ impl CompositorHandler for App {
             mw.slint.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: mw.scale as f32 });
             mw.slint.set_size(PhysicalSize::new(mw.size.0 * mw.scale, mw.size.1 * mw.scale));
             mw.full = true;
+            // the Lighting lab's legends drawn again at the screen's own pixels
+            if which == LAB {
+                if let Some(l) = &mut self.front.lab {
+                    l.refresh();
+                }
+            }
             return;
         }
         self.scale = factor.max(1) as u32;

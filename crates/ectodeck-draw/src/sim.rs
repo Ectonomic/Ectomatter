@@ -54,6 +54,7 @@ pub struct Physics {
     pub nits: f32,
     /// the switch's clear housing: how high its top is, where the beam
     /// leaves it, and how wide it is, a square round the switch's centre
+    /// (at most 14 mm, as fits inside a cap)
     pub switch_top: f32,
     pub switch_width: f32,
     /// how far the housing's glow carries from the LED before it falls to about a third
@@ -89,7 +90,7 @@ impl Physics {
         Physics {
             nits: f("nits", 600.0).max(0.0),
             switch_top: f("switch_top", 6.5).clamp(0.05, top - 0.1),
-            switch_width: f("switch_width", 12.0).clamp(1.0, 30.0),
+            switch_width: f("switch_width", 12.0).clamp(1.0, 14.0),
             glow_spread: f("glow_spread", 4.0).clamp(0.2, 200.0),
             beam: f("beam", 24.0).clamp(0.0, 400.0),
             scatter: f("scatter", 0.7).clamp(0.0, 1.0),
