@@ -959,6 +959,9 @@ component CellView inherits Rectangle {
     callback typed(int, string);
     // a number typed into its box and set, by Enter or by leaving the box
     callback entered(int, string);
+    // the pointer over a zone, or no longer; a box typed in, or no longer
+    callback hovered(int, bool);
+    callback focused(int, bool);
     in property <image> glyph;
     x: root.c.x;
     y: root.c.y;
@@ -972,15 +975,16 @@ component CellView inherits Rectangle {
         font-family: "Geist";
         // 0 a row's name, 1 a heading, 2 a note, 3 an empty tile's words, 4 a slider's value, 5 a value,
         // 6 a list's item, 7 the page's title, 8 a device's name, 9 its state, 10 the temperature,
-        // 11 the weather's words, 12 a fact, 13 its value, 14 the credit, 15 a value on a legend, 16 a legend's slice's ends
+        // 11 the weather's words, 12 a fact, 13 its value, 14 the credit, 21 a small word in its own colour,
+        // 22 a stronger word in its own colour
         font-size: root.c.style == 1 ? 13px : root.c.style == 2 ? 12.5px : root.c.style == 3 ? 14px : root.c.style == 4 ? 13px
-            : root.c.style == 7 ? 20px : root.c.style == 8 ? 14.5px : root.c.style == 9 || root.c.style == 15 ? 12.5px : root.c.style == 10 ? 22px
-            : root.c.style == 12 || root.c.style == 13 ? 13px : root.c.style == 14 ? 12px : root.c.style == 16 ? 11.5px : 13.5px;
-        font-weight: root.c.style == 1 || root.c.style == 8 || root.c.style == 10 || root.c.style == 13 || root.c.style == 15 ? 500 : root.c.style == 7 ? 600 : 400;
+            : root.c.style == 7 ? 20px : root.c.style == 8 ? 14.5px : root.c.style == 9 || root.c.style == 22 ? 12.5px : root.c.style == 10 ? 22px
+            : root.c.style == 12 || root.c.style == 13 ? 13px : root.c.style == 14 ? 12px : root.c.style == 21 ? 11.5px : 13.5px;
+        font-weight: root.c.style == 1 || root.c.style == 8 || root.c.style == 10 || root.c.style == 13 || root.c.style == 22 ? 500 : root.c.style == 7 ? 600 : 400;
         letter-spacing: root.c.style == 7 ? -0.4px : root.c.style == 10 ? -0.44px : 0;
-        color: root.c.style == 1 || root.c.style == 9 || root.c.style == 12 ? Ink.soft : root.c.style == 2 || root.c.style == 3 || root.c.style == 14 ? Ink.quiet
-            : root.c.style == 5 || root.c.style == 8 || root.c.style == 15 ? Ink.bright : root.c.style == 7 || root.c.style == 10 ? Ink.ink
-            : root.c.style == 16 ? #9a9a9a : Ink.dim;
+        color: root.c.style == 21 || root.c.style == 22 ? root.c.color
+            : root.c.style == 1 || root.c.style == 9 || root.c.style == 12 ? Ink.soft : root.c.style == 2 || root.c.style == 3 || root.c.style == 14 ? Ink.quiet
+            : root.c.style == 5 || root.c.style == 8 ? Ink.bright : root.c.style == 7 || root.c.style == 10 ? Ink.ink : Ink.dim;
         horizontal-alignment: root.c.style == 4 ? right : left;
         vertical-alignment: center;
     }
@@ -1068,6 +1072,15 @@ component CellView inherits Rectangle {
         border-radius: 10px;
         background: #1c1c1c;
     }
+    // a box in its colour, rounded at its ends: a mark on a track, a rule between readings
+    if root.c.kind == 16: Rectangle {
+        border-radius: min(self.width, self.height) / 2;
+        background: root.c.color;
+    }
+    // a place that tells the page when the pointer is over it, under the words it covers
+    if root.c.kind == 17: TouchArea {
+        changed has-hover => { root.hovered(root.c.id, self.has-hover); }
+    }
     // a tile, under the pieces on it
     if root.c.kind == 9: Rectangle {
         border-radius: 14px;
@@ -1154,6 +1167,7 @@ component CellView inherits Rectangle {
                 self.clear-focus();
             }
             changed has-focus => {
+                root.focused(root.c.id, self.has-focus);
                 if (self.has-focus) {
                     self.select-all();
                 } else if (self.text != root.c.text) {
@@ -3293,71 +3307,9 @@ export component MacroWindow inherits Window {
     }
 }
 
-// A curve on the Lighting lab: its ground, the grid and marks behind it, the
-// area under the curve and the curve itself, drawn from path commands in the
-// plot's own pixels.
-export struct Plot {
-    x: length,
-    y: length,
-    w: length,
-    h: length,
-    grid: string,
-    marks: string,
-    area: string,
-    line: string,
-}
-
-component PlotView inherits Rectangle {
-    in property <Plot> p;
-    x: root.p.x;
-    y: root.p.y;
-    width: root.p.w;
-    height: root.p.h;
-    border-radius: 8px;
-    background: #1b1b1b;
-    Path {
-        width: parent.width;
-        height: parent.height;
-        viewbox-width: root.p.w / 1px;
-        viewbox-height: root.p.h / 1px;
-        commands: root.p.grid;
-        fill: transparent;
-        stroke: #2c2c2c;
-        stroke-width: 1px;
-    }
-    Path {
-        width: parent.width;
-        height: parent.height;
-        viewbox-width: root.p.w / 1px;
-        viewbox-height: root.p.h / 1px;
-        commands: root.p.marks;
-        fill: transparent;
-        stroke: #4a4a4a;
-        stroke-width: 1px;
-    }
-    Path {
-        width: parent.width;
-        height: parent.height;
-        viewbox-width: root.p.w / 1px;
-        viewbox-height: root.p.h / 1px;
-        commands: root.p.area;
-        fill: #f0b35a1f;
-        stroke: transparent;
-    }
-    Path {
-        width: parent.width;
-        height: parent.height;
-        viewbox-width: root.p.w / 1px;
-        viewbox-height: root.p.h / 1px;
-        commands: root.p.line;
-        fill: transparent;
-        stroke: #f0b35a;
-        stroke-width: 1.6px;
-    }
-}
-
-// A legend on the Lighting lab: a drawing of what a section's sliders
-// change, drawn in Rust at the window's own pixels; its words are cells over it.
+// The stage of the Lighting lab: a section's drawing of the key, with the
+// line from each slider to its part, drawn in Rust at the window's own pixels;
+// its words are cells over it.
 export struct Sketch {
     x: length,
     y: length,
@@ -3366,21 +3318,102 @@ export struct Sketch {
     image: image,
 }
 
+// One of the Lighting lab's sliders, where it stands beside the drawing: its
+// name, its box and unit (a derived one, as a beam's angle, quieter), its
+// knob along its track, and where it was saved, if it has moved from there
+export struct LabRow {
+    x: length,
+    y: length,
+    w: length,
+    id: int,
+    name: string,
+    hot: bool,
+    number: string,
+    unit: string,
+    derived: bool,
+    at: float,
+    was: float,
+    moved: bool,
+}
+
+// A slider of the Lighting lab: the whole row tells the page when the
+// pointer is over it, so its line and its part light up whether the pointer
+// is on its name, its box or its track.
+component LabControl inherits Rectangle {
+    in property <LabRow> r;
+    callback slide(int, float);
+    callback entered(int, string);
+    callback hovered(int, bool);
+    callback focused(int, bool);
+    x: root.r.x - 10px;
+    y: root.r.y - 7px;
+    width: root.r.w + 20px;
+    height: 62px;
+    border-radius: 10px;
+    background: root.r.hot ? #ffffff0b : transparent;
+    zone := TouchArea {
+        changed has-hover => { root.hovered(root.r.id, self.has-hover); }
+        Text {
+            x: 10px;
+            y: 7px;
+            height: 26px;
+            text: root.r.name;
+            font-family: "Geist";
+            font-size: 13.5px;
+            color: root.r.hot ? Ink.bright : Ink.dim;
+            vertical-alignment: center;
+        }
+        CellView {
+            c: { kind: 15, x: root.r.w + 10px - 58px - 7px - 60px, y: 7px, w: 60px, h: 26px, text: root.r.number, id: root.r.id };
+            entered(id, t) => { root.entered(id, t); }
+            focused(id, on) => { root.focused(id, on); }
+        }
+        Text {
+            x: root.r.w + 10px - 58px;
+            y: 7px;
+            width: 58px;
+            height: 26px;
+            text: root.r.unit;
+            font-family: "Geist";
+            font-size: 13px;
+            color: root.r.derived ? #7c7c7c : Ink.soft;
+            vertical-alignment: center;
+        }
+        CellView {
+            c: { kind: 3, x: 10px, y: 39px, w: root.r.w, h: 16px, value: root.r.at, id: root.r.id };
+            slide(id, v) => { root.slide(id, v); }
+        }
+        // where it was saved, on its track
+        if root.r.moved: Rectangle {
+            x: 10px + 8px + root.r.was * (root.r.w - 16px) - 1px;
+            y: 41px;
+            width: 2px;
+            height: 12px;
+            border-radius: 1px;
+            background: #8a8a8a;
+        }
+    }
+}
+
 // The Lighting lab: a developer's window for tuning how the Z10's keys are
 // lit, beside the main window so the keyboard stays in view as it changes.
+// Landscape, one section at a time: its drawing in the middle, its sliders
+// round it, the line under it saying what the slider under the pointer does,
+// and what is on the keyboard now read out by Save.
 export component LabWindow inherits Window {
     in property <bool> is-maximized;
     in property <image> mark;
     in property <[Cell]> cells;
-    in property <[Plot]> plots;
     in property <[Sketch]> sketches;
     in property <[Cell]> over;
-    in property <length> page-h;
+    in property <[LabRow]> rows;
+    in property <[Cell]> foot;
     in property <string> status-text;
     in property <int> status-kind;
     in property <bool> can-save;
     in property <bool> can-revert;
     out property <length> window-width: root.width;
+    out property <length> window-height: root.height;
 
     callback minimise();
     callback maximise();
@@ -3390,6 +3423,10 @@ export component LabWindow inherits Window {
     callback entered(int, string);
     callback revert();
     callback save();
+    // a section chosen; a slider or a reading under the pointer; a slider's box typed in
+    callback pick(int, int);
+    callback hovered(int, bool);
+    callback focused(int, bool);
 
     background: transparent;
     default-font-family: "Geist";
@@ -3457,45 +3494,36 @@ export component LabWindow inherits Window {
         }
     }
 
-    // the page: what is on the keyboard now, then each part of the light
+    // the page: its head and sections, the stage, the line under it
     Rectangle {
         y: 36px;
         height: root.height - 36px - 64px;
         background: Ink.base;
-        lab-flick := Flickable {
-            content-height: root.page-h;
-            mouse-drag-pan-enabled: false;
-            for c in root.cells: CellView {
-                c: c;
-                slide(id, v) => { root.slide(id, v); }
-                entered(id, t) => { root.entered(id, t); }
-            }
-            for p in root.plots: PlotView {
-                p: p;
-            }
-            for s in root.sketches: Image {
-                x: s.x;
-                y: s.y;
-                width: s.w;
-                height: s.h;
-                source: s.image;
-            }
-            for c in root.over: CellView {
-                c: c;
-            }
+        for c in root.cells: CellView {
+            c: c;
+            pick(id, i, x, y, h) => { root.pick(id, i); }
+            hovered(id, on) => { root.hovered(id, on); }
         }
-        ScrollBar {
-            x: parent.width - 12px;
-            y: 2px;
-            height: parent.height - 4px;
-            view: lab-flick.height;
-            content: lab-flick.content-height;
-            offset: -lab-flick.content-y;
-            scroll-to(o) => { lab-flick.content-y = -o; }
+        for s in root.sketches: Image {
+            x: s.x;
+            y: s.y;
+            width: s.w;
+            height: s.h;
+            source: s.image;
+        }
+        for c in root.over: CellView {
+            c: c;
+        }
+        for r in root.rows: LabControl {
+            r: r;
+            slide(id, v) => { root.slide(id, v); }
+            entered(id, t) => { root.entered(id, t); }
+            hovered(id, on) => { root.hovered(id, on); }
+            focused(id, on) => { root.focused(id, on); }
         }
     }
 
-    // the foot: what was last done, Revert and Save
+    // the foot: what is on the keyboard now, what was last done, Revert and Save
     Rectangle {
         y: root.height - 64px;
         height: 64px;
@@ -3509,19 +3537,25 @@ export component LabWindow inherits Window {
             height: 1px;
             background: #2c2c2c;
         }
+        for c in root.foot: CellView {
+            c: c;
+            hovered(id, on) => { root.hovered(id, on); }
+        }
         HorizontalLayout {
             x: 24px;
             y: 15px;
             width: parent.width - 48px;
             height: 34px;
             spacing: 10px;
-            Text {
+            Rectangle {
                 horizontal-stretch: 1;
+            }
+            Text {
                 text: root.status-text;
                 font-size: 12.5px;
                 color: root.status-kind == 1 ? Ink.good : root.status-kind == 2 ? Ink.bad : Ink.quiet;
                 vertical-alignment: center;
-                overflow: elide;
+                horizontal-alignment: right;
             }
             WordButton {
                 y: 1px;

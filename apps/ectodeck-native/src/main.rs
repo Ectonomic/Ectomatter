@@ -99,8 +99,8 @@ const MIN_SIZE: (u32, u32) = (1000, 700);
 const MACRO_SIZE: (u32, u32) = (1080, 620);
 const MACRO_MIN_SIZE: (u32, u32) = (900, 420);
 /// the Lighting lab's
-const LAB_SIZE: (u32, u32) = (760, 900);
-const LAB_MIN_SIZE: (u32, u32) = (600, 480);
+const LAB_SIZE: (u32, u32) = (1280, 800);
+const LAB_MIN_SIZE: (u32, u32) = (1080, 680);
 /// the windows of their own beside the main one, by their place in App's `subs`
 const MACROS: usize = 0;
 const LAB: usize = 1;
@@ -630,6 +630,16 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
         window.dispatch_event(WindowEvent::KeyReleased { text });
         slint::platform::update_timers_and_animations();
         lab.act();
+    }
+    // ECTODECK_NATIVE_WAIT=ms: let that long pass with the pointer where the
+    // clicks left it, for what shows once the pointer rests
+    if let Some(ms) = std::env::var("ECTODECK_NATIVE_WAIT").ok().and_then(|v| v.parse::<u64>().ok()) {
+        let end = Instant::now() + Duration::from_millis(ms);
+        while Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(16));
+            slint::platform::update_timers_and_animations();
+            lab.act();
+        }
     }
     if let Some(dy) = std::env::var("ECTODECK_NATIVE_SCROLL").ok().and_then(|v| v.parse::<f32>().ok()) {
         let position = LogicalPosition::new(w as f32 / 2.0, h as f32 / 2.0);

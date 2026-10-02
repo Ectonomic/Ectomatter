@@ -8,11 +8,18 @@
 //! The keyboard in the main window takes every change at once, its light
 //! clearing as the simulation runs. Save writes the tuning into the Z10
 //! core's own file, which Ectodeck reads when it runs from its source.
+//!
+//! The lab is landscape and shows one section at a time: its drawing of the
+//! key in the middle (see drawing), its sliders round it, each beside the
+//! part it changes and joined to it by a line. The line under the drawing
+//! says what the slider under the pointer does; what is on the keyboard now
+//! is read out by Save.
 
-mod legends;
+mod drawing;
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use slint::{Model, ModelRc, VecModel};
@@ -20,8 +27,8 @@ use slint::{Model, ModelRc, VecModel};
 use crate::front::WindowAsk;
 use crate::lighting::{cell, kind, style, text_cell};
 use crate::text;
-use crate::{Cell, LabWindow, Plot, Sketch};
-use ectodeck_draw::hdr::sim::{on_cap_top, Physics};
+use crate::{Cell, LabRow, LabWindow, Sketch};
+use ectodeck_draw::hdr::sim::Physics;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Ask {
@@ -33,6 +40,14 @@ pub enum Ask {
     Typed(i32, String),
     Revert,
     Save,
+    /// a section chosen
+    Section(i32),
+    /// a slider or a reading under the pointer, or no longer
+    Hover(i32, bool),
+    /// a slider's box typed in, or no longer
+    Focus(i32, bool),
+    /// the pointer has rested where it is
+    Rest,
 }
 
 /// What a value is, which says how it reads.
@@ -168,19 +183,6 @@ fn reads(p: &Param, v: f64) -> (String, String) {
     }
 }
 
-/// A value as a legend names it: its number and unit, as its box and the
-/// unit after it read ("6.5 mm", "25%"), and a length's millimetres apart.
-fn says(i: usize, v: f64) -> (String, String) {
-    let (n, u) = reads(&PARAMS[i], v);
-    match PARAMS[i].unit {
-        Unit::Length => (n, u),
-        Unit::Fraction => (format!("{n}{u}"), String::new()),
-        Unit::Nits if n == "1" => ("1 nit".into(), String::new()),
-        _ if u.is_empty() => (n, String::new()),
-        _ => (format!("{n} {u}"), String::new()),
-    }
-}
-
 /// What is on the keyboard now, in nits, and how far its light's simulation has got.
 #[derive(Clone, Copy, Default, PartialEq)]
 pub struct Readout {
@@ -200,6 +202,22 @@ pub struct Readout {
     pub settled: bool,
 }
 
+/// What the lab says of the page, under its title.
+const INTRO: &str = "Tune how the Z10's keys are lit. The keyboard in Ectodeck's window takes each change at once; Save writes them into the Z10 core.";
+/// What the readout's numbers measure, and the simulation's.
+const READOUT_ABOUT: &str = "Measured from the keys' colours and brightness as the keyboard shows them, every part as if each key were lit as the brightest is.";
+const WHITE_ABOUT: &str = "How bright this screen shows the desktop's white now; the keyboard's light is drawn beside it.";
+const SIM_ABOUT: &str = "The light straight from each LED is worked out exactly at once; the light that has bounced is followed photon by photon, and clears as more come in.";
+/// the readout's numbers' ids, after the sliders', and the sections' tabs'
+const READING: i32 = 100;
+const TABS: i32 = 900;
+/// how long the pointer rests on something before the line under the drawing tells of it
+const REST: Duration = Duration::from_millis(250);
+/// the page's rows below the title bar: its head, the stage after a gap, the
+/// line under the stage, and the foot's 64
+const HEAD_H: f32 = 70.0;
+const HELP_H: f32 = 44.0;
+
 pub struct LabPage {
     pub ui: LabWindow,
     asks: Rc<RefCell<Vec<Ask>>>,
@@ -210,15 +228,27 @@ pub struct LabPage {
     pub rev: u64,
     readout: Readout,
     status: (String, i32),
+    /// the section shown
+    section: usize,
+    /// what is under the pointer and since when, which box is being typed
+    /// in, and what the line under the drawing tells of
+    hovered: Option<i32>,
+    hovered_at: Instant,
+    focused: Option<i32>,
+    told: Option<i32>,
+    rest: slint::Timer,
+    /// where the section's sliders stand, and for which section and size of stage
+    places: Vec<drawing::Place>,
+    places_of: Option<(usize, i32, i32)>,
+    /// the stage as last drawn, and what it was drawn from: the light, the
+    /// section, the stage's size, the window's scale, the slider drawn white
+    drawn: Option<(drawing::Stage, slint::Image)>,
+    drawn_of: Option<(Value, usize, i32, i32, f32, Option<usize>)>,
     cells: Rc<VecModel<Cell>>,
-    plots: Rc<VecModel<Plot>>,
-    /// the sections' legends, and their words over them
     sketches: Rc<VecModel<Sketch>>,
     over: Rc<VecModel<Cell>>,
-    /// each legend as last drawn, and what they were drawn from: the light,
-    /// the window's width and its scale
-    drawn: Vec<(legends::Drawing, slint::Image)>,
-    drawn_of: Option<(Value, f32, f32)>,
+    rows: Rc<VecModel<LabRow>>,
+    foot: Rc<VecModel<Cell>>,
 }
 
 fn get(light: &Value, (a, b): (&str, &str)) -> Option<f64> {
@@ -282,19 +312,45 @@ impl LabPage {
         on!(on_entered, |id, t| Ask::Typed(id, t.to_string()));
         on!(on_revert, Ask::Revert);
         on!(on_save, Ask::Save);
+        on!(on_pick, |_id, index| Ask::Section(index));
+        on!(on_hovered, |id, on| Ask::Hover(id, on));
+        on!(on_focused, |id, on| Ask::Focus(id, on));
         ui.set_mark(mark);
-        let cells = Rc::new(VecModel::default());
-        let plots = Rc::new(VecModel::default());
-        let sketches = Rc::new(VecModel::default());
-        let over = Rc::new(VecModel::default());
+        let (cells, sketches, over, rows, foot) = (Rc::new(VecModel::default()), Rc::new(VecModel::default()), Rc::new(VecModel::default()), Rc::new(VecModel::default()), Rc::new(VecModel::default()));
         ui.set_cells(ModelRc::from(cells.clone()));
-        ui.set_plots(ModelRc::from(plots.clone()));
         ui.set_sketches(ModelRc::from(sketches.clone()));
         ui.set_over(ModelRc::from(over.clone()));
+        ui.set_rows(ModelRc::from(rows.clone()));
+        ui.set_foot(ModelRc::from(foot.clone()));
         // a core lit as it once was, before the light was simulated, is read
         // as the simulation takes it, and is saved so
         let light = simulated(light);
-        let mut page = LabPage { ui, asks, saved: light.clone(), light, rev: 0, readout: Readout::default(), status: (String::new(), 0), cells, plots, sketches, over, drawn: Vec::new(), drawn_of: None };
+        // the section shown when the lab was last open
+        let section = crate::uistate::get("lab_section").and_then(|v| v.as_u64()).map_or(0, |n| (n as usize).min(SECTIONS.len() - 1));
+        let mut page = LabPage {
+            ui,
+            asks,
+            saved: light.clone(),
+            light,
+            rev: 0,
+            readout: Readout::default(),
+            status: (String::new(), 0),
+            section,
+            hovered: None,
+            hovered_at: Instant::now(),
+            focused: None,
+            told: None,
+            rest: slint::Timer::default(),
+            places: Vec::new(),
+            places_of: None,
+            drawn: None,
+            drawn_of: None,
+            cells,
+            sketches,
+            over,
+            rows,
+            foot,
+        };
         page.refresh();
         page
     }
@@ -314,6 +370,8 @@ impl LabPage {
                 Ask::Close => window.push(WindowAsk::Close),
                 Ask::Slide(id, f) => {
                     if let Some(p) = PARAMS.get(id.max(0) as usize) {
+                        // North of centre's slider runs north to south, as the drawing does
+                        let f = if p.path == ("led", "") { 1.0 - f } else { f };
                         let v = self.at_along(id.max(0) as usize, f as f64);
                         if get(&self.light, p.path) != Some(v) {
                             set(&mut self.light, p.path, v);
@@ -359,6 +417,39 @@ impl LabPage {
                     self.status = ("Back to the Z10 core's saved tuning.".into(), 0);
                 }
                 Ask::Save => self.save(),
+                Ask::Section(i) => {
+                    let i = (i.max(0) as usize).min(SECTIONS.len() - 1);
+                    if i != self.section {
+                        self.section = i;
+                        self.hovered = None;
+                        self.told = None;
+                        self.focused = None;
+                        crate::uistate::set("lab_section", json!(i));
+                    }
+                }
+                Ask::Hover(id, on) => {
+                    if on {
+                        self.hovered = Some(id);
+                    } else if self.hovered == Some(id) {
+                        self.hovered = None;
+                    }
+                    // the line under the drawing tells of it once the pointer rests
+                    self.hovered_at = Instant::now();
+                    let a = self.asks.clone();
+                    self.rest.start(slint::TimerMode::SingleShot, REST, move || a.borrow_mut().push(Ask::Rest));
+                }
+                Ask::Focus(id, on) => {
+                    if on {
+                        self.focused = Some(id);
+                    } else if self.focused == Some(id) {
+                        self.focused = None;
+                    }
+                }
+                Ask::Rest => {
+                    if self.hovered_at.elapsed() + Duration::from_millis(20) >= REST {
+                        self.told = self.hovered;
+                    }
+                }
             }
         }
         self.refresh();
@@ -397,29 +488,31 @@ impl LabPage {
     // ------------------------------------------------------------ the page
 
     pub fn refresh(&mut self) {
-        self.draw_legends();
-        let (cells, plots, (sketches, over), h) = self.layout();
+        self.draw_stage();
+        let (cells, (sketches, over, rows), foot) = self.layout();
         crate::front::sync_cells(&self.cells, cells);
         crate::front::sync_cells(&self.over, over);
-        if self.sketches.row_count() == sketches.len() {
-            for (i, s) in sketches.into_iter().enumerate() {
-                if self.sketches.row_data(i).as_ref() != Some(&s) {
-                    self.sketches.set_row_data(i, s);
+        crate::front::sync_cells(&self.foot, foot);
+        for (model, fresh) in [(&self.sketches, sketches)] {
+            if model.row_count() == fresh.len() {
+                for (i, s) in fresh.into_iter().enumerate() {
+                    if model.row_data(i).as_ref() != Some(&s) {
+                        model.set_row_data(i, s);
+                    }
+                }
+            } else {
+                model.set_vec(fresh);
+            }
+        }
+        if self.rows.row_count() == rows.len() {
+            for (i, r) in rows.into_iter().enumerate() {
+                if self.rows.row_data(i).as_ref() != Some(&r) {
+                    self.rows.set_row_data(i, r);
                 }
             }
         } else {
-            self.sketches.set_vec(sketches);
+            self.rows.set_vec(rows);
         }
-        if self.plots.row_count() == plots.len() {
-            for (i, p) in plots.into_iter().enumerate() {
-                if self.plots.row_data(i).as_ref() != Some(&p) {
-                    self.plots.set_row_data(i, p);
-                }
-            }
-        } else {
-            self.plots.set_vec(plots);
-        }
-        self.ui.set_page_h(h);
         self.ui.set_status_text(self.status.0.as_str().into());
         self.ui.set_status_kind(self.status.1);
         let changed = self.light != self.saved;
@@ -430,44 +523,39 @@ impl LabPage {
         }
     }
 
-    /// Draw the sections' legends again, those whose drawing has changed,
-    /// for the light as it is now, at the window's width and scale.
-    fn draw_legends(&mut self) {
-        let width = self.ui.get_window_width().max(560.0);
+    /// The window's size, and the stage's in it.
+    fn sizes(&self) -> (f32, f32, f32, f32) {
+        let (w, h) = (self.ui.get_window_width().max(900.0), self.ui.get_window_height().max(560.0));
+        (w, h, w - 48.0, (h - 36.0 - HEAD_H - 10.0 - HELP_H - 4.0 - 64.0).max(300.0))
+    }
+
+    /// The slider drawn white: the one being typed in, or under the pointer.
+    fn hot(&self) -> Option<usize> {
+        self.focused.or(self.hovered).filter(|&i| (0..READING).contains(&i)).map(|i| i as usize).filter(|i| SECTIONS[self.section].2.contains(i))
+    }
+
+    /// Place the section's sliders when it opens or the stage changes size,
+    /// and draw the stage again when what it shows has changed.
+    fn draw_stage(&mut self) {
+        let (_, _, sw, sh) = self.sizes();
+        let lens = drawing::Lens::of(self.section);
+        let v = drawing::Values::of(&self.light);
+        let size = (self.section, sw.round() as i32, sh.round() as i32);
+        if self.places_of != Some(size) {
+            self.places = drawing::places(&v, lens, sw, sh);
+            self.places_of = Some(size);
+        }
         let scale = slint::ComponentHandle::window(&self.ui).scale_factor();
-        let of = (self.light.clone(), width, scale);
+        let hot = self.hot();
+        let of = (self.light.clone(), self.section, size.1, size.2, scale, hot);
         if self.drawn_of.as_ref() == Some(&of) {
             return;
         }
-        let v = legends::Values::of(&self.light);
-        let w = width - 48.0 - 40.0;
-        let fresh = [
-            legends::slice(&v, legends::Lens::Led, w, legends::SLICE_H),
-            legends::slice(&v, legends::Lens::Caps, w, legends::SLICE_H),
-            legends::slice(&v, legends::Lens::Wells, w, legends::SLICE_H),
-            legends::display(&v, w, legends::DISPLAY_H),
-        ];
-        let same_scale = self.drawn_of.as_ref().is_some_and(|o| o.2 == scale);
-        let changed: Vec<usize> = (0..fresh.len()).filter(|&i| !(same_scale && self.drawn.get(i).is_some_and(|(old, _)| *old == fresh[i]))).collect();
-        // those that changed drawn side by side, a thread each
-        let pixels: Vec<_> = std::thread::scope(|sc| {
-            let jobs: Vec<_> = changed.iter().map(|&i| {
-                let d = &fresh[i];
-                sc.spawn(move || legends::pixels(d, scale))
-            }).collect();
-            jobs.into_iter().map(|j| j.join().expect("a legend drawn")).collect()
-        });
-        let mut pixels = pixels.into_iter();
-        for (i, d) in fresh.into_iter().enumerate() {
-            if !changed.contains(&i) {
-                continue;
-            }
-            let image = slint::Image::from_rgba8_premultiplied(pixels.next().expect("a changed legend's pixels"));
-            if i < self.drawn.len() {
-                self.drawn[i] = (d, image);
-            } else {
-                self.drawn.push((d, image));
-            }
+        let same_scale = self.drawn_of.as_ref().is_some_and(|o| o.4 == scale);
+        let st = drawing::stage(&v, lens, sw, sh, &self.places, hot);
+        if !(same_scale && self.drawn.as_ref().is_some_and(|(old, _)| *old == st)) {
+            let image = slint::Image::from_rgba8_premultiplied(drawing::pixels(&st, scale));
+            self.drawn = Some((st, image));
         }
         self.drawn_of = Some(of);
     }
@@ -498,6 +586,13 @@ impl LabPage {
         .clamp(0.0, 1.0)
     }
 
+    /// Where a value's knob sits on its track: North of centre's runs north
+    /// to south, as the drawing does.
+    fn knob(&self, i: usize, v: f64) -> f64 {
+        let f = self.along(i, v);
+        if PARAMS[i].path == ("led", "") { 1.0 - f } else { f }
+    }
+
     /// The value at a place along its slider, 0 to 1: a brightness or a
     /// length to three significant figures, anything else to its step.
     fn at_along(&self, i: usize, f: f64) -> f64 {
@@ -514,213 +609,221 @@ impl LabPage {
     /// inside its switch (a narrower switch pushes it in, and it comes back
     /// out as the switch widens again).
     fn value(&self, i: usize) -> f64 {
+        self.value_in(&self.light, i)
+    }
+
+    fn value_in(&self, light: &Value, i: usize) -> f64 {
         let p = &PARAMS[i];
-        let v = get(&self.light, p.path).unwrap_or(p.def);
+        let v = get(light, p.path).unwrap_or(p.def);
         if p.path == ("led", "") {
-            let (lo, hi) = self.range(i);
-            v.clamp(lo, hi)
+            let edge = Physics::from(light).switch_edge() as f64;
+            v.clamp(-edge, edge)
         } else {
             v
         }
     }
 
-    /// A value as its box shows it, and its unit after the box.
-    fn reads(&self, i: usize) -> (String, String) {
-        reads(&PARAMS[i], self.value(i))
+    /// What the line under the drawing tells of, and what it says.
+    fn told(&self) -> (String, String) {
+        let r = self.readout;
+        match self.focused.or(self.told) {
+            Some(i) if (0..READING).contains(&i) && SECTIONS[self.section].2.contains(&(i as usize)) => (PARAMS[i as usize].label.into(), PARAMS[i as usize].note.into()),
+            Some(i) if i == READING => ("Brightest legend".into(), self.legend_note().unwrap_or_else(|| READOUT_ABOUT.into())),
+            Some(i) if i == READING + 1 => ("Brightest deck".into(), READOUT_ABOUT.into()),
+            Some(i) if i == READING + 2 => ("Brightest skirt".into(), READOUT_ABOUT.into()),
+            Some(i) if i == READING + 3 => ("Brightest chassis".into(), READOUT_ABOUT.into()),
+            Some(i) if i == READING + 4 => ("Display's lit dots".into(), READOUT_ABOUT.into()),
+            Some(i) if i == READING + 5 => ("The desktop's white".into(), WHITE_ABOUT.into()),
+            Some(i) if i == READING + 6 => ("The simulation".into(), if r.photons == 0 { SIM_ABOUT.into() } else { format!("{} photons from each LED so far. {SIM_ABOUT}", text::thousands(r.photons as u64)) }),
+            _ => (SECTIONS[self.section].0.into(), SECTIONS[self.section].1.into()),
+        }
     }
 
-    /// The page laid out: its pieces, its curves, its legends and their
-    /// words, and its height.
-    fn layout(&self) -> (Vec<Cell>, Vec<Plot>, (Vec<Sketch>, Vec<Cell>), f32) {
-        let width = self.ui.get_window_width().max(560.0);
-        let x0 = 24.0;
-        let w = width - 48.0;
-        let pad = 20.0;
-        let label_w = 132.0;
-        let value_w = 150.0;
-        let cx = x0 + pad + label_w;
-        let slider_w = w - pad * 2.0 - label_w - value_w - 12.0;
-        let note_w = w - pad * 2.0 - label_w;
-        let mut cells = vec![text_cell(style::TITLE, x0, 22.0, w, 29.0, "Lighting lab")];
-        let mut plots = Vec::new();
-        let (mut sketches, mut over) = (Vec::new(), Vec::new());
-        let mut y = 22.0 + 29.0 + 6.0;
-        for line in text::wrap(400, 12.5, "Tune how the Z10's keys are lit. The keyboard in Ectodeck's window takes each change at once; Save writes them into the Z10 core.", w) {
-            cells.push(text_cell(style::NOTE, x0, y, w, 18.0, &line));
-            y += 18.125;
-        }
-
-        // a card: its heading, what the part is, then what `fill` puts in it
-        let card = |cells: &mut Vec<Cell>, y: &mut f32, title: &str, about: &str, fill: &mut dyn FnMut(&mut Vec<Cell>, &mut f32)| {
-            *y += 22.0;
-            cells.push(text_cell(style::HEAD, x0, *y, w, 18.0, title));
-            *y += 18.0;
-            let top = *y;
-            let mut inner = Vec::new();
-            let mut cy = top + 16.0;
-            for line in text::wrap(400, 12.5, about, w - pad * 2.0) {
-                inner.push(text_cell(style::NOTE, x0 + pad, cy, w - pad * 2.0, 18.0, &line));
-                cy += 18.125;
-            }
-            cy += 8.0;
-            fill(&mut inner, &mut cy);
-            let h = cy - top + 6.0;
-            cells.push(cell(kind::TILE, x0, top, w, h));
-            cells.extend(inner);
-            *y = top + h;
-        };
-
-        // what is on the keyboard now
+    /// What holds the legends back, if anything: only Peak nits does; the
+    /// colour's clean limit is only told.
+    fn legend_note(&self) -> Option<String> {
         let r = self.readout;
-        card(&mut cells, &mut y, "On the keyboard now", "Measured from the keys' colours and brightness as the keyboard shows them, every part as if each key were lit as the brightest is.", &mut |c, cy| {
-            let row = |c: &mut Vec<Cell>, cy: &mut f32, label: &str, value: String, note: Option<String>| {
-                c.push(text_cell(style::LABEL, x0 + pad, *cy, label_w + 60.0, 26.0, label));
-                c.push(text_cell(style::VALUE_BRIGHT, cx + 60.0, *cy, w - pad * 2.0 - label_w - 60.0, 26.0, &value));
-                *cy += 26.0;
-                if let Some(n) = note {
-                    for line in text::wrap(400, 12.5, &n, note_w - 60.0) {
-                        c.push(text_cell(style::NOTE, cx + 60.0, *cy, note_w - 60.0, 18.0, &line));
-                        *cy += 18.125;
-                    }
-                }
-                *cy += 4.0;
-            };
-            // what holds the legends back, if anything: only Peak nits does; the
-            // colour's clean limit is only told
-            let note = if self.value(1) > r.peak + 0.5 {
-                Some(format!("Held at Peak nits, {:.0} (Settings › HDR).", r.peak))
-            } else if r.legend > r.reach + 0.5 {
-                Some(format!("This colour shows cleanly up to {:.0} nits. Above that the screen clips its red, so the brightest parts turn yellower.", r.reach))
-            } else {
-                None
-            };
-            // the dimmer parts to a tenth of a nit, where a whole one hides them
-            let nits = |v: f64| if v < 10.0 { format!("{v:.1} nits") } else { format!("{v:.0} nits") };
-            row(c, cy, "Brightest legend", nits(r.legend), note);
-            row(c, cy, "Brightest deck", nits(r.deck), None);
-            row(c, cy, "Brightest skirt", nits(r.skirt), None);
-            row(c, cy, "Brightest chassis", nits(r.chassis), None);
-            row(c, cy, "Display's lit dots", nits(r.lcd), None);
-            row(c, cy, "The desktop's white", nits(r.white), None);
-            let sim = if r.photons == 0 {
-                "Starting".to_string()
-            } else if r.settled {
-                format!("Settled: {} photons from each LED", text::thousands(r.photons as u64))
-            } else {
-                format!("Clearing: {} photons from each LED so far", text::thousands(r.photons as u64))
-            };
-            row(c, cy, "The simulation", sim, Some("The light straight from each LED is worked out exactly at once; the light that has bounced is followed photon by photon, and clears as more come in.".into()));
-        });
+        if self.value(1) > r.peak + 0.5 && r.peak > 0.0 {
+            Some(format!("Held at Peak nits, {:.0} (Settings › HDR).", r.peak))
+        } else if r.legend > r.reach + 0.5 && r.reach > 0.0 {
+            Some(format!("This colour shows cleanly up to {:.0} nits. Above that the screen clips its red, so the brightest parts turn yellower.", r.reach))
+        } else {
+            None
+        }
+    }
 
-        for (k, (title, about, values)) in SECTIONS.into_iter().enumerate() {
-            card(&mut cells, &mut y, title, about, &mut |c, cy| {
-                // the section's legend, the card's width, under what the part is;
-                // on whole pixels, so its picture lands on the screen's
-                if let Some((d, image)) = self.drawn.get(k) {
-                    let (lx, ly) = (x0 + pad, cy.round());
-                    sketches.push(Sketch { x: lx, y: ly, w: d.w, h: d.h, image: image.clone() });
-                    over.extend(d.words.iter().map(|word| word_cell(lx, ly, word)));
-                    *cy = ly + d.h + 12.0;
-                }
-                for &i in values {
-                    let p = &PARAMS[i];
-                    c.push(text_cell(style::LABEL, x0 + pad, *cy, label_w, 34.0, p.label));
-                    let frac = self.along(i, self.value(i)) as f32;
-                    c.push(Cell { value: frac, id: i as i32, ..cell(kind::SLIDER, cx + 2.0, *cy + 9.0, slider_w, 16.0) });
-                    let (number, unit) = self.reads(i);
-                    c.push(Cell { text: number.into(), id: i as i32, ..cell(kind::NUMBER, cx + slider_w + 12.0, *cy + 4.0, 64.0, 26.0) });
-                    c.push(text_cell(style::FACT, cx + slider_w + 12.0 + 64.0 + 7.0, *cy + 8.0, value_w - 71.0, 18.0, &unit));
-                    *cy += 34.0;
-                    for line in text::wrap(400, 12.5, p.note, note_w) {
-                        c.push(text_cell(style::NOTE, cx, *cy, note_w, 18.0, &line));
-                        *cy += 18.125;
-                    }
-                    *cy += 12.0;
-                }
-                // The LED's own light across the back of a cap's top, which its
-                // legend shows: the beam and the scattered light, as a part of
-                // the brightest legend, before the light bounced inside the cap.
-                if title == "LED" {
-                    let pw = w - pad * 2.0;
-                    *cy += 26.0;
-                    let (north, nits) = (self.value(0), self.value(1));
-                    let physics = Physics::from(&self.light);
-                    let at = |r: f64| on_cap_top(&physics, north as f32, r as f32) as f64;
-                    let most = at(0.0).max(1e-12);
-                    let far = 20.0;
-                    let pts: Vec<(f64, f64)> = (0..=96).map(|k| {
-                        let r = far * k as f64 / 96.0;
-                        (r, nits * at(r) / most)
-                    }).collect();
-                    // an upper legend's middle sits about 7.25 units above a 1u key's
-                    // centre, a lower one's about 6 below it; the LED `north` above it
-                    let (up, low) = ((7.25 - north).abs(), (6.0 + north).abs());
-                    self.plot(c, &mut plots, x0 + pad, *cy, pw, 118.0, &pts, far, nits.max(1.0), &[(up, "upper legend"), (low, "lower legend")], "Down a cap's top from over its LED: the LED's own light, before what bounces inside the cap", "LED", &format!("{:.0} mm", far / UNITS_PER_MM));
-                    *cy += 118.0 + 30.0;
-                }
+    /// The page laid out: its pieces; the stage, the words on it and the
+    /// sliders round it; and the foot's readout.
+    #[allow(clippy::type_complexity)]
+    fn layout(&self) -> (Vec<Cell>, (Vec<Sketch>, Vec<Cell>, Vec<LabRow>), Vec<Cell>) {
+        let (w, _, sw, sh) = self.sizes();
+        let colour = |c: [u8; 3]| slint::Color::from_rgb_u8(c[0], c[1], c[2]);
+        let in_colour = |st: i32, x: f32, y: f32, ww: f32, hh: f32, s: &str, c: [u8; 3]| Cell { color: colour(c), ..text_cell(st, x, y, ww, hh, s) };
+        // the head: the title and what the lab is, and the sections
+        let mut cells = vec![text_cell(style::TITLE, 24.0, 14.0, 300.0, 29.0, "Lighting lab")];
+        let mut bx = 0.0;
+        let mut tabs = Vec::new();
+        for (i, (title, _, _)) in SECTIONS.iter().enumerate() {
+            let bw = text::width(400, 13.0, title) + 24.0;
+            tabs.push((i, title, bx, bw));
+            bx += bw + 2.0;
+        }
+        let tabs_w = bx - 2.0 + 6.0;
+        let tx = w - 24.0 - tabs_w;
+        cells.push(text_cell(style::NOTE, 24.0, 44.0, (tx - 48.0).max(200.0), 18.0, INTRO));
+        cells.push(cell(kind::SEG, tx, 17.0, tabs_w, 36.0));
+        for (i, title, x, bw) in tabs {
+            cells.push(Cell { text: (*title).into(), on: i == self.section, id: TABS, index: i as i32, ..cell(kind::SEG_BUTTON, tx + 3.0 + x, 20.0, bw, 30.0) });
+        }
+        // the stage, and the words on it
+        let (sx, sy) = (24.0, HEAD_H);
+        let mut sketches = Vec::new();
+        let mut over = Vec::new();
+        if let Some((st, image)) = &self.drawn {
+            sketches.push(Sketch { x: sx, y: sy, w: st.w, h: st.h, image: image.clone() });
+            for word in &st.words {
+                // a word's baseline where the stage has it, in Geist's 11.5px line centred in its box
+                let top = sy + word.y - 1.005 * 11.5 - (16.0 - 1.3 * 11.5) / 2.0;
+                over.push(in_colour(style::SMALL_IN, sx + word.x, top, text::width(400, 11.5, &word.text) + 2.0, 16.0, &word.text, word.colour));
+            }
+        }
+        // the sliders, each where the section placed it
+        let hot = self.hot();
+        let mut rows = Vec::new();
+        let ids = SECTIONS[self.section].2;
+        for place in &self.places {
+            let i = place.i;
+            if !ids.contains(&i) {
+                continue;
+            }
+            let p = &PARAMS[i];
+            let (number, mut unit) = reads(p, self.value(i));
+            let mut derived = p.unit == Unit::Length;
+            if let Some((_, extra)) = self.drawn.as_ref().and_then(|(st, _)| st.extras.iter().find(|e| e.0 == i)) {
+                unit = extra.clone();
+                derived = true;
+            }
+            let (at, was) = (self.knob(i, self.value(i)), self.knob(i, self.value_in(&self.saved, i)));
+            rows.push(LabRow {
+                x: sx + drawing::column_x(place.left, sw),
+                y: sy + place.y - drawing::ATTACH,
+                w: drawing::CTRL_W,
+                id: i as i32,
+                name: p.label.into(),
+                hot: hot == Some(i),
+                number: number.into(),
+                unit: unit.into(),
+                derived,
+                at: at as f32,
+                was: was as f32,
+                moved: (at - was).abs() > 0.002,
             });
         }
-        (cells, plots, (sketches, over), y + 28.0)
+        // the line under the stage: what the slider under the pointer does, or what the section is
+        let (name, note) = self.told();
+        let hy = sy + sh + 10.0;
+        let nw = text::width(500, 12.5, &name) + 2.0;
+        cells.push(in_colour(style::LABEL_IN, 24.0, hy, nw, 18.0, &name, [0xe5, 0xe5, 0xe5]));
+        let first = (w - 48.0 - nw - 6.0).max(100.0);
+        for (k, line) in wrap_after(&note, first, w - 48.0).iter().take(2).enumerate() {
+            let x = if k == 0 { 24.0 + nw + 6.0 } else { 24.0 };
+            cells.push(text_cell(style::NOTE, x, hy + 18.125 * k as f32, w - 48.0, 18.0, line));
+        }
+        (cells, (sketches, over, rows), self.readout_line())
     }
 
-    /// A curve: its points (x from 0 to `xmax`, y from 0 to `ymax`), marks
-    /// at some x, a caption over it, and both ends of its x axis named.
-    #[allow(clippy::too_many_arguments)]
-    fn plot(&self, c: &mut Vec<Cell>, plots: &mut Vec<Plot>, x: f32, y: f32, w: f32, h: f32, pts: &[(f64, f64)], xmax: f64, ymax: f64, marks: &[(f64, &str)], caption: &str, origin: &str, end: &str) {
-        let (l, r, t, b) = (10.0f64, 10.0f64, 12.0f64, 8.0f64);
-        let (fw, fh) = (w as f64, h as f64);
-        let px = |v: f64| l + (v / xmax).clamp(0.0, 1.0) * (fw - l - r);
-        let py = |v: f64| fh - b - (v / ymax).clamp(0.0, 1.05) * (fh - t - b);
-        let mut line = String::new();
-        for (i, (vx, vy)) in pts.iter().enumerate() {
-            line += &format!("{}{:.1} {:.1}", if i == 0 { "M" } else { "L" }, px(*vx), py(*vy));
-        }
-        let area = format!("{line}L{:.1} {:.1}L{:.1} {:.1}Z", px(pts.last().map_or(0.0, |p| p.0)), fh - b, px(0.0), fh - b);
-        let grid = format!("M{l:.1} {:.1}H{:.1}M{l:.1} {:.1}H{:.1}M{l:.1} {:.1}H{:.1}", py(0.0), fw - r, py(ymax * 0.5), fw - r, py(ymax), fw - r);
-        let mut mk = String::from("M0 0");
-        for (mx, _) in marks {
-            if *mx <= xmax {
-                mk += &format!("M{:.1} {t:.1}V{:.1}", px(*mx), fh - b);
+    /// The foot's readout of what is on the keyboard now, each number with
+    /// a zone that tells of it under the pointer; the numbers dimmed while
+    /// the simulation clears. In a narrow window it says less to fit beside
+    /// what was last done and the buttons: the simulation without its count
+    /// of photons, then without its heading (both still told under the pointer).
+    fn readout_line(&self) -> Vec<Cell> {
+        let (w, _, _, _) = self.sizes();
+        let status = if self.status.0.is_empty() && self.light != self.saved { "Changed, not saved." } else { self.status.0.as_str() };
+        let room = w - 24.0 - 176.0 - 10.0 - 68.0 - 10.0 - if status.is_empty() { 0.0 } else { text::width(400, 12.5, status) + 16.0 } - 24.0;
+        for level in 0..3 {
+            let (cells, end) = self.readout_at(level);
+            if end - 24.0 <= room || level == 2 {
+                return cells;
             }
         }
-        plots.push(Plot { x, y, w, h, grid: grid.into(), marks: mk.into(), area: area.into(), line: line.into() });
-        // the caption over it, the axis's ends and the marks' names under it
-        let top = format!("top {:.0} nits", ymax);
-        let tw = text::width(400, 12.5, &top) + 2.0;
-        c.push(text_cell(style::SMALL, x, y - 20.0, w - tw - 12.0, 17.0, caption));
-        c.push(text_cell(style::SMALL, x + w - tw, y - 20.0, tw, 17.0, &top));
-        let ow = text::width(400, 12.5, origin) + 2.0;
-        c.push(text_cell(style::NOTE, x + l as f32 - 1.0, y + h + 4.0, ow, 18.0, origin));
-        let ew = text::width(400, 12.5, end) + 2.0;
-        c.push(text_cell(style::NOTE, x + w - r as f32 - ew, y + h + 4.0, ew, 18.0, end));
-        // each mark's name under it, kept clear of the axis's ends and of each other
-        let mut free = x + l as f32 + ow + 10.0;
-        for (mx, name) in marks {
-            if *mx <= xmax {
-                let nw = text::width(400, 12.5, name) + 2.0;
-                let at = (x + px(*mx) as f32 - nw / 2.0).max(free).min(x + w - r as f32 - ew - nw - 10.0);
-                c.push(text_cell(style::NOTE, at, y + h + 4.0, nw, 18.0, name));
-                free = at + nw + 10.0;
-            }
+        unreachable!()
+    }
+
+    /// The readout laid out, saying less as `level` rises; and where it ends.
+    fn readout_at(&self, level: u8) -> (Vec<Cell>, f32) {
+        let r = self.readout;
+        let colour = |c: [u8; 3]| slint::Color::from_rgb_u8(c[0], c[1], c[2]);
+        let in_colour = |st: i32, x: f32, s: &str, c: [u8; 3]| {
+            let wgt = if st == style::LABEL_IN { 500 } else { 400 };
+            Cell { color: colour(c), ..text_cell(st, x, 23.0, text::width(wgt, 12.5, s) + 2.0, 18.0, s) }
+        };
+        let clearing = r.photons > 0 && !r.settled;
+        let value_colour = if clearing { [0x7c, 0x7c, 0x7c] } else { [0xe5, 0xe5, 0xe5] };
+        let nits = |v: f64| if v < 10.0 { format!("{v:.1}") } else { format!("{v:.0}") };
+        let mut out = Vec::new();
+        let mut x = 24.0;
+        if level < 2 {
+            let head = "Brightest now";
+            out.push(in_colour(style::LABEL_IN, x, head, [0xa3, 0xa3, 0xa3]));
+            x += text::width(500, 12.5, head) + 12.0;
         }
+        let held = self.legend_note().is_some();
+        let items: [(&str, String); 5] = [("Legend", nits(r.legend)), ("Deck", nits(r.deck)), ("Skirt", nits(r.skirt)), ("Chassis", nits(r.chassis)), ("Display", format!("{} nits", nits(r.lcd)))];
+        let item = |out: &mut Vec<Cell>, x: &mut f32, id: i32, label: &str, value: &str, c: [u8; 3]| {
+            let x0 = *x;
+            out.push(text_cell(style::NOTE, *x, 23.0, text::width(400, 12.5, label) + 2.0, 18.0, label));
+            *x += text::width(400, 12.5, label) + 6.0;
+            out.push(in_colour(style::LABEL_IN, *x, value, c));
+            *x += text::width(500, 12.5, value);
+            out.insert(out.len() - 2, Cell { id, ..cell(kind::ZONE, x0 - 4.0, 16.0, *x - x0 + 8.0, 32.0) });
+            *x += 14.0;
+        };
+        for (k, (label, value)) in items.iter().enumerate() {
+            let c = if k == 0 && held { [0xf0, 0xb3, 0x5a] } else { value_colour };
+            item(&mut out, &mut x, READING + k as i32, label, value, c);
+        }
+        let sep = |out: &mut Vec<Cell>, x: &mut f32| {
+            *x += 2.0;
+            out.push(Cell { color: colour([0x3a, 0x3a, 0x3a]), ..cell(kind::BOX, *x, 25.0, 1.0, 14.0) });
+            *x += 15.0;
+        };
+        sep(&mut out, &mut x);
+        item(&mut out, &mut x, READING + 5, "Desktop white", &format!("{} nits", nits(r.white)), value_colour);
+        sep(&mut out, &mut x);
+        let photons = if level == 0 { format!(", {} photons", text::thousands(r.photons as u64)) } else { String::new() };
+        let sim = if r.photons == 0 {
+            "Starting".to_string()
+        } else if r.settled {
+            format!("Settled{photons}")
+        } else {
+            format!("Clearing{photons}")
+        };
+        let sw = text::width(400, 12.5, &sim) + 2.0;
+        out.push(Cell { id: READING + 6, ..cell(kind::ZONE, x - 4.0, 16.0, sw + 8.0, 32.0) });
+        out.push(text_cell(style::NOTE, x, 23.0, sw, 18.0, &sim));
+        (out, x + sw)
     }
 }
 
-/// A legend's word as the lab's text, its baseline where the legend has it,
-/// the legend at `x`, `y`.
-fn word_cell(x: f32, y: f32, word: &legends::Word) -> Cell {
-    let (weight, size) = word.look.face();
-    let style = match word.look {
-        legends::Look::Name => style::SMALL,
-        legends::Look::Value => style::LEGEND_VALUE,
-        legends::Look::Extra => style::NOTE,
-        legends::Look::Axis => style::LEGEND_AXIS,
-    };
-    // Geist's line is 1.3 times its size, its baseline 1.005 of its size
-    // down it, and a word is centred down its box
-    let h = 18.0;
-    let top = y + word.y - 1.005 * size - (h - 1.3 * size) / 2.0;
-    text_cell(style, x + word.x, top, text::width(weight, size, &word.text) + 2.0, h, &word.text)
+/// Lines of `s` broken at spaces, the first to fit `first` pixels, the rest `rest`.
+fn wrap_after(s: &str, first: f32, rest: f32) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    for word in s.split(' ') {
+        let max = if lines.is_empty() { first } else { rest };
+        let next = if line.is_empty() { word.to_string() } else { format!("{line} {word}") };
+        if !line.is_empty() && text::width(400, 12.5, &next) > max {
+            lines.push(std::mem::take(&mut line));
+            line = word.to_string();
+        } else {
+            line = next;
+        }
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
 }
 
 /// The core's light section as its file has it: two spaces in, each part's
