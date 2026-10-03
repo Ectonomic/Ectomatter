@@ -52,9 +52,11 @@ struct Shape {
 /// A lit key: its place, and its cap, which its light is simulated in.
 struct KeyArt {
     pos: u32,
-    /// the cap's foot (its skirt's outline) and its face, in the art's units
+    /// the cap's foot (its skirt's outline) and its face, in the art's units,
+    /// and the radius of each one's rounded corners
     foot: Option<[f32; 4]>,
     face: [f32; 4],
+    round: [f32; 2],
     /// the legend's coverage
     legend: Option<Shape>,
     /// the row of the legend's box where its second function begins, if it has
@@ -151,8 +153,9 @@ pub struct Board {
     caps: Vec<f32>,
     keys: Vec<KeyArt>,
     /// the caps of the keys with no light of their own (the spacebar, the
-    /// media keys): their feet and faces in the art's units, which stand in the light's way
-    others: Vec<([f32; 4], [f32; 4])>,
+    /// media keys): their feet and faces in the art's units, and their
+    /// corners' radii, which stand in the light's way
+    others: Vec<([f32; 4], [f32; 4], [f32; 2])>,
     model: Model,
     /// where the chassis is: a pixel's coverage
     chassis: Vec<f32>,
@@ -180,7 +183,30 @@ pub struct Board {
     /// one run shares, rather than for every picture drawn
     reads: Vec<Read>,
     legend_reads: Vec<Vec<Read>>,
+    /// the skirts' pixels, in order, with the light just outside their caps' feet
+    edges: Vec<Edge>,
     reads_for: Option<(usize, usize)>,
+}
+
+/// How far up its skirt the foot of a cap catches the light leaving under
+/// it, in the art's units: the glow falls to about a third over this.
+const FOOT_GLOW: f32 = 0.8;
+/// How far outside a cap's foot the light leaving under it is read: a cell
+/// of the simulation's fine grid, clear of the cap.
+const FOOT_OUT: f32 = 0.5;
+
+/// A pixel of a cap's skirt (`j`, the board's index): the light just outside
+/// the cap's foot where it is nearest (on the deck or the chassis there),
+/// and how much of it the foot catches this far up the skirt. The pixel
+/// shows that light where the cap does not cover it, and the foot's glow
+/// where it does. (A pixel just outside the foot that the cap's edge covers
+/// part way reads its own light, and shows the foot's glow at its brightest
+/// where the cap covers it.)
+#[derive(Clone, Copy)]
+struct Edge {
+    j: u32,
+    out: Read,
+    glow: f32,
 }
 
 /// Where a pixel reads the simulation's light, as sim::At has it, kept small:
@@ -462,6 +488,17 @@ impl Board {
             let b = n.abs_bounding_box();
             [(b.left() - art.tx) / art.sx, (b.top() - art.ty) / art.sy, (b.right() - art.tx) / art.sx, (b.bottom() - art.ty) / art.sy]
         };
+        // a piece's corners' radius, in the art's units: the art draws a cap's
+        // foot and face as boxes with rounded corners, each from the start of
+        // its top edge, a radius in from its box's corner
+        let round = |n: &usvg::Node| -> f32 {
+            let usvg::Node::Path(p) = n else { return 0.0 };
+            let (b, Some(first)) = (p.data().bounds(), p.data().points().first()) else { return 0.0 };
+            if (first.y - b.top()).abs() > 1e-3 {
+                return 0.0;
+            }
+            (first.x - b.left()).clamp(0.0, b.width().min(b.height()) / 2.0) * p.abs_transform().sx / art.sx
+        };
         // each lit key: its legend, and its cap's shape, which its light is simulated in
         let mut keys = Vec::new();
         for c in controls.iter().filter(|c| lit(c)) {
@@ -471,12 +508,12 @@ impl Board {
             let print = [print[0] as f32 / 255.0, print[1] as f32 / 255.0, print[2] as f32 / 255.0];
             let legend = legend_n.and_then(|n| shape(&format!("legend_{n}")));
             let parts = c["control"].as_u64().map(|n| children(&format!("control_{n}"))).unwrap_or_default();
-            let (foot, face) = match (parts.get(1).map(rect), parts.get(2).map(rect)) {
-                (Some(f), Some(a)) => (Some(f), a),
-                _ => (None, [0.0; 4]),
+            let (foot, face, rounds) = match (parts.get(1), parts.get(2)) {
+                (Some(f), Some(a)) => (Some(rect(f)), rect(a), [round(f), round(a)]),
+                _ => (None, [0.0; 4], [0.0; 2]),
             };
             let second = legend.as_ref().and_then(|s| second_function(s, face, ka, oy));
-            keys.push(KeyArt { pos: pos as u32, foot, face, legend, second, print });
+            keys.push(KeyArt { pos: pos as u32, foot, face, round: rounds, legend, second, print });
         }
         // the caps of the keys with no light of their own, which stand in its way
         let mut others = Vec::new();
@@ -484,7 +521,7 @@ impl Board {
             let Some(n) = c["control"].as_u64() else { continue };
             let parts = children(&format!("control_{n}"));
             if parts.len() >= 3 && matches!(&parts[0], usvg::Node::Group(g) if !g.filters().is_empty()) {
-                others.push((rect(&parts[1]), rect(&parts[2])));
+                others.push((rect(&parts[1]), rect(&parts[2]), [round(&parts[1]), round(&parts[2])]));
             }
         }
         // The lock lights, from the core's "indicators": each a small window
@@ -575,6 +612,7 @@ impl Board {
             most: Most::default(),
             reads: Vec::new(),
             legend_reads: Vec::new(),
+            edges: Vec::new(),
             reads_for: None,
         })
     }
@@ -653,8 +691,71 @@ impl Board {
                 .collect();
             jobs.into_iter().flat_map(|j| j.join().expect("a share of the legends' reads")).collect()
         });
+        // each cap's skirt, a cap a thread's share: its pixels, and the light
+        // just outside its foot where each is nearest
+        let feet: Vec<([f32; 4], f32)> = board.keys.iter().filter_map(|k| k.foot.map(|f| (f, k.round[0]))).chain(board.others.iter().map(|o| (o.0, o.2[0]))).collect();
+        let (ka, (ox, oy)) = (board.art_scale, board.art_offset);
+        let read = &reads;
+        let near_edges: Vec<(f32, Edge)> = std::thread::scope(|sc| {
+            let per = feet.len().div_ceil(threads).max(1);
+            let jobs: Vec<_> = feet
+                .chunks(per)
+                .map(|feet| {
+                    sc.spawn(move || {
+                        let mut edges = Vec::new();
+                        for &(f, r) in feet {
+                            // its box, and a pixel round it for the edge's
+                            let (x0, y0) = ((ox + ka * f[0] - 1.0).floor().max(0.0) as usize, (oy + ka * f[1] - 1.0).floor().max(0.0) as usize);
+                            let (x1, y1) = (((ox + ka * f[2] + 1.0).ceil().max(0.0) as usize).min(w), ((oy + ka * f[3] + 1.0).ceil().max(0.0) as usize).min(h));
+                            for y in y0..y1 {
+                                for x in x0..x1 {
+                                    let j = y * w + x;
+                                    let (u, v) = board.unit(x, y);
+                                    let (t, n, p) = sim::from_foot(f, r, u, v);
+                                    // the skirt's pixels, and those its edge covers part way, as
+                                    // the art draws it (the simulation's cells are coarser: a pixel
+                                    // it puts on the skirt may be outside it, on the deck)
+                                    let a = board.caps[j * 4 + 3];
+                                    let near = (-t * ka).max(0.0);
+                                    if near > 1.0 || (t < 0.0 && a <= 0.0 && read[j].code != 2) {
+                                        continue;
+                                    }
+                                    let edge = match read[j].code {
+                                        // on the deck or the chassis: its own light
+                                        0 | 1 => Edge { j: j as u32, out: read[j], glow: (-t.max(0.0) / FOOT_GLOW).exp() },
+                                        // on the skirt: the light just outside the foot
+                                        2 => {
+                                            let Some(out) = s.at(p.0 + n.0 * FOOT_OUT, p.1 + n.1 * FOOT_OUT, None).filter(|a| a.code <= 1) else { continue };
+                                            Edge { j: j as u32, out: Read::of(Some(out), fw, cw), glow: (-t.max(0.0) / FOOT_GLOW).exp() }
+                                        }
+                                        _ => continue,
+                                    };
+                                    edges.push((near, edge));
+                                }
+                            }
+                        }
+                        edges
+                    })
+                })
+                .collect();
+            jobs.into_iter().flat_map(|j| j.join().expect("a share of the skirts' reads")).collect()
+        });
+        // a pixel between two caps close together goes with the nearer
+        let mut near_edges = near_edges;
+        near_edges.sort_unstable_by(|a, b| a.1.j.cmp(&b.1.j).then(a.0.total_cmp(&b.0)));
+        near_edges.dedup_by_key(|e| e.1.j);
+        let edges: Vec<Edge> = near_edges.into_iter().map(|e| e.1).collect();
         self.reads = reads;
         self.legend_reads = legend_reads;
+        self.edges = edges;
+    }
+
+    /// How much of the light just outside a cap's foot the foot catches, by
+    /// what lies there (the deck, the chassis): the light leaving under the
+    /// skirt reaches its foot as it does the surface beside it, which gives
+    /// back its own share of it, and the cap's outside gives back its share.
+    fn foot_catches(p: &sim::Physics) -> [f32; 2] {
+        [p.cap_out / p.deck.max(0.01), p.cap_out / p.chassis.max(0.01)]
     }
 
     /// How far the simulation the keys are lit by has got: the photons it
@@ -711,6 +812,7 @@ impl Board {
             }
             m
         };
+        let catches = Board::foot_catches(&s.physics);
         let rest = |rows: std::ops::Range<usize>| {
             let mut m = Most::default();
             for j in rows.start * w..rows.end * w {
@@ -720,6 +822,15 @@ impl Board {
                     1 if cap < 0.01 => m.chassis = m.chassis.max(s.white(&r.at(fw, cw))),
                     2 if cap > 0.99 => m.skirt = m.skirt.max(s.white(&r.at(fw, cw))),
                     _ => {}
+                }
+            }
+            // and the skirts' with their feet's glow
+            let from = self.edges.partition_point(|e| (e.j as usize) < rows.start * w);
+            for e in self.edges[from..].iter().take_while(|e| (e.j as usize) < rows.end * w) {
+                let j = e.j as usize;
+                if self.caps[j * 4 + 3] > 0.99 {
+                    let glow = catches[e.out.code as usize] * e.glow * s.white(&e.out.at(fw, cw));
+                    m.skirt = m.skirt.max(s.white(&self.reads[j].at(fw, cw)) + glow);
                 }
             }
             m
@@ -837,6 +948,24 @@ impl Board {
             let e = k.at(&r.at(fw, cw));
             for c in 0..3 {
                 px[c] += e[c] * share;
+            }
+        }
+        // Each skirt's pixels: the light just outside its cap's foot, where
+        // the cap leaves the pixel uncovered, and the foot's glow in it where
+        // the cap covers it, brightest at the foot.
+        if let Some(k) = keys {
+            let catches = Board::foot_catches(&k.snap.physics);
+            let from = self.edges.partition_point(|e| (e.j as usize) < y0 * w);
+            for e in self.edges[from..].iter().take_while(|e| (e.j as usize) < y1 * w) {
+                let j = e.j as usize;
+                let a = self.caps[j * 4 + 3];
+                let open = if self.reads[j].code == 2 { 1.0 - a } else { 0.0 };
+                let share = catches[e.out.code as usize] * e.glow * a + open;
+                let l = k.at(&e.out.at(fw, cw));
+                let i = (j - y0 * w) * 4;
+                for c in 0..3 {
+                    out[i + c] += l[c] * share;
+                }
             }
         }
         let light = |pos: u32| lights.iter().find(|l| l.pos == pos);
@@ -1058,6 +1187,69 @@ mod tests {
         eprintln!("simulated {photons} photons from each of {} LEDs in {:?}", snap.keys.len(), t.elapsed());
         b.set_sim(Arc::new(snap));
         (tree, device, b)
+    }
+
+    /// The deck is lit right up to each cap's foot, and the foot catches its
+    /// light, brightest at the foot and less up the skirt: across the middle
+    /// of each side of each lit key, from just outside its foot up its skirt,
+    /// the light never dips dark at the edge and comes back.
+    #[test]
+    fn the_light_runs_up_to_each_caps_foot_and_onto_it() {
+        let (_t, _d, b) = lit_board(2000);
+        let frame = b.compose(&white(&b), 0, 254.0, 1000.0 / 254.0);
+        let (ka, (ox, oy)) = (b.art_scale, b.art_offset);
+        let (mut runs, mut worst) = (0, (f32::MAX, 0u32, 0usize));
+        for k in &b.keys {
+            let Some(f) = k.foot else { continue };
+            let (mx, my) = ((ox + ka * (f[0] + f[2]) / 2.0) as i32, (oy + ka * (f[1] + f[3]) / 2.0) as i32);
+            let px = |u: f32| (ox + ka * u).floor() as i32;
+            let py = |v: f32| (oy + ka * v).floor() as i32;
+            // each side's pixels, from one outside the foot to three in
+            let sides: [Vec<(i32, i32)>; 4] = [
+                (px(f[0]) - 1..px(f[0]) + 4).map(|x| (x, my)).collect(),
+                (px(f[2]) - 3..px(f[2]) + 2).rev().map(|x| (x, my)).collect(),
+                (py(f[1]) - 1..py(f[1]) + 4).map(|y| (mx, y)).collect(),
+                (py(f[3]) - 3..py(f[3]) + 2).rev().map(|y| (mx, y)).collect(),
+            ];
+            for (side, run) in sides.iter().enumerate() {
+                let l: Vec<f32> = run.iter().map(|&p| lum(&frame, &b, p)).collect();
+                runs += 1;
+                for i in 0..l.len() - 1 {
+                    // a pixel as dark as this beside a brighter one further up is a dark line
+                    let r = l[i] / l[i + 1].max(1e-6);
+                    if r < worst.0 {
+                        worst = (r, k.pos, side);
+                    }
+                }
+            }
+        }
+        eprintln!("{runs} sides: the darkest pixel against the next one up its skirt is {:.2} of it (key {}, side {})", worst.0, worst.1, worst.2);
+        assert!(worst.0 > 0.6, "a dark line at the foot of key {}, side {}", worst.1, worst.2);
+    }
+
+    /// A cap's foot is rounded as the art draws it: just inside its box's
+    /// corner, outside the round, is the deck, lit as the deck beside the
+    /// foot is.
+    #[test]
+    fn a_caps_foot_is_round_at_its_corners() {
+        let (_t, _d, b) = lit_board(2000);
+        let frame = b.compose(&white(&b), 0, 254.0, 1000.0 / 254.0);
+        let (ka, (ox, oy)) = (b.art_scale, b.art_offset);
+        let (mut corners, mut darkest) = (0, f32::MAX);
+        for k in &b.keys {
+            let (Some(f), r) = (k.foot, k.round[0]) else { continue };
+            assert!(r > 1.0, "key {}'s foot is rounded as the art draws it: {r}", k.pos);
+            // its top left corner: inside the box, outside the round; and the deck beside the foot
+            let (u, v) = (f[0] + 0.15, f[1] + 0.15);
+            let (x, y) = ((ox + ka * u) as i32, (oy + ka * v) as i32);
+            let j = y as usize * b.w as usize + x as usize;
+            assert_eq!(b.reads[j].code, 0, "key {}'s corner is the deck", k.pos);
+            let beside = lum(&frame, &b, ((ox + ka * (f[0] - 0.4)) as i32, (oy + ka * (f[1] + 4.0)) as i32));
+            darkest = darkest.min(lum(&frame, &b, (x, y)) / beside.max(1e-6));
+            corners += 1;
+        }
+        eprintln!("{corners} corners: the darkest is {darkest:.2} of the deck beside its foot");
+        assert!(darkest > 0.4, "a corner is dark: {darkest:.2}");
     }
 
     fn white(b: &Board) -> Vec<Light> {

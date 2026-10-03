@@ -134,11 +134,83 @@ impl Physics {
     }
 }
 
-/// A cap: its foot (its skirt's outline) and its face, in the art's units.
+/// A cap: its foot (its skirt's outline) and its face, in the art's units,
+/// each a box with rounded corners: the foot's radius, then the face's (each
+/// no more than half its box's narrower side).
 #[derive(Clone, Copy, Debug)]
 struct Cap {
     foot: [f32; 4],
     face: [f32; 4],
+    round: [f32; 2],
+}
+
+/// A rounded box's corners' radius, no more than half its narrower side.
+fn radius(b: [f32; 4], r: f32) -> f32 {
+    r.clamp(0.0, ((b[2] - b[0]).min(b[3] - b[1]) / 2.0).max(0.0))
+}
+
+/// Whether (`x`, `y`) is inside the box `b` with its corners rounded to `r`
+/// (on its outline is outside).
+pub fn in_rounded(b: [f32; 4], r: f32, x: f32, y: f32) -> bool {
+    in_round(b, radius(b, r), x, y)
+}
+
+/// in_rounded, for a radius already no more than half the box's narrower side
+fn in_round(b: [f32; 4], r: f32, x: f32, y: f32) -> bool {
+    if x <= b[0] || x >= b[2] || y <= b[1] || y >= b[3] {
+        return false;
+    }
+    // how far into a corner's square it is across and down (none, off them)
+    let dx = (b[0] + r - x).max(x - (b[2] - r)).max(0.0);
+    let dy = (b[1] + r - y).max(y - (b[3] - r)).max(0.0);
+    dx == 0.0 || dy == 0.0 || dx * dx + dy * dy < r * r
+}
+
+/// For a place by a cap's foot (the box `f` with its corners rounded to
+/// `r`): how far in from the foot's outline it is (outside it, less than
+/// nothing), the outline's outward direction where it is nearest, and that
+/// nearest point.
+pub fn from_foot(f: [f32; 4], r: f32, x: f32, y: f32) -> (f32, (f32, f32), (f32, f32)) {
+    let r = radius(f, r);
+    let (cx, cy) = (x.clamp(f[0] + r, f[2] - r), y.clamp(f[1] + r, f[3] - r));
+    let in_box = x > f[0] && x < f[2] && y > f[1] && y < f[3];
+    if !in_box || (r > 0.0 && cx != x && cy != y) {
+        // outside it, or by a corner: out from the box the round goes round
+        let (dx, dy) = (x - cx, y - cy);
+        let d = (dx * dx + dy * dy).sqrt();
+        if d > 1e-6 {
+            let n = (dx / d, dy / d);
+            return (r - d, n, (cx + n.0 * r, cy + n.1 * r));
+        }
+    }
+    let sides = [(x - f[0], (-1.0, 0.0), (f[0], y)), (f[2] - x, (1.0, 0.0), (f[2], y)), (y - f[1], (0.0, -1.0), (x, f[1])), (f[3] - y, (0.0, 1.0), (x, f[3]))];
+    sides.into_iter().fold(sides[0], |b, s| if s.0 < b.0 { s } else { b })
+}
+
+/// How far along the line from `from` (inside the box `b` with its corners
+/// rounded to `r`) to `to` it leaves the box: 0 at `from`, 1 at `to`; with
+/// `to` inside it too, never.
+fn leave_rounded(from: (f32, f32), to: (f32, f32), b: [f32; 4], r: f32) -> f32 {
+    if in_rounded(b, r, to.0, to.1) {
+        return f32::INFINITY;
+    }
+    let edge = |from: f32, to: f32, lo: f32, hi: f32| if to > hi { (hi - from) / (to - from) } else if to < lo { (lo - from) / (to - from) } else { f32::INFINITY };
+    let t = edge(from.0, to.0, b[0], b[2]).min(edge(from.1, to.1, b[1], b[3])).min(1.0);
+    let r = radius(b, r);
+    let (dx, dy) = (to.0 - from.0, to.1 - from.1);
+    let (px, py) = (from.0 + t * dx, from.1 + t * dy);
+    let (cx, cy) = (px.clamp(b[0] + r, b[2] - r), py.clamp(b[1] + r, b[3] - r));
+    if r <= 0.0 || cx == px || cy == py {
+        return t;
+    }
+    // it leaves the box by a corner: where it leaves the corner's round
+    let (ox, oy) = (from.0 - cx, from.1 - cy);
+    let (a, h, c) = (dx * dx + dy * dy, ox * dx + oy * dy, ox * ox + oy * oy - r * r);
+    let disc = h * h - a * c;
+    if a <= 0.0 || disc < 0.0 {
+        return t;
+    }
+    ((-h + disc.sqrt()) / a).min(t)
 }
 
 /// What shows from above at a place: nothing (off the keyboard), the deck,
@@ -321,10 +393,10 @@ impl Scene {
         for k in &b.keys {
             if let Some(f) = k.foot {
                 keys.push((k.pos, ((f[0] + f[2]) / 2.0, (f[1] + f[3]) / 2.0)));
-                caps.push(Cap { foot: f, face: k.face });
+                caps.push(Cap { foot: f, face: k.face, round: [radius(f, k.round[0]), radius(k.face, k.round[1])] });
             }
         }
-        caps.extend(b.others.iter().map(|&(foot, face)| Cap { foot, face }));
+        caps.extend(b.others.iter().map(|&(foot, face, round)| Cap { foot, face, round: [radius(foot, round[0]), radius(face, round[1])] }));
         // the art's extent: the board's
         let (x0, y0) = unit(0.0, 0.0);
         let (x1, y1) = unit(b.w as f32, b.h as f32);
@@ -362,10 +434,10 @@ impl Scene {
         for &i in self.caps_at(x, y) {
             let c = &self.caps[i as usize];
             let (f, a) = (c.foot, c.face);
-            if x < f[0] || x > f[2] || y < f[1] || y > f[3] {
+            if !in_round(f, c.round[0], x, y) {
                 continue;
             }
-            if x >= a[0] && x <= a[2] && y >= a[1] && y <= a[3] {
+            if in_round(a, c.round[1], x, y) {
                 return Surface::Top(i);
             }
             // on the skirt: the side it is furthest up
@@ -564,9 +636,7 @@ impl Housing {
     /// stands in the way): from each strip of its sides between the floor's
     /// height and as high up as shines out under the skirt at `gap`, Z above
     /// the floor, (m/pi) D w (1/r² - 1/(r² + Z²)) / 2.
-    fn on_floor(&self, q: [f32; 3], foot: [f32; 4], gap: f32) -> f32 {
-        // how far along the line from a strip to `q` it leaves the foot's outline
-        let leave = |from: f32, to: f32, lo: f32, hi: f32| if to > hi { (hi - from) / (to - from) } else if to < lo { (lo - from) / (to - from) } else { f32::INFINITY };
+    fn on_floor(&self, q: [f32; 3], foot: [f32; 4], round: f32, gap: f32) -> f32 {
         let mut e = 0.0;
         for &(f, nrm, width, m) in &self.strips {
             let (dx, dy) = (q[0] - f.0, q[1] - f.1);
@@ -574,7 +644,8 @@ impl Housing {
             if d <= 0.0 {
                 continue;
             }
-            let t = leave(f.0, q[0], foot[0], foot[2]).min(leave(f.1, q[1], foot[1], foot[3]));
+            // how far along the line from the strip to `q` it leaves the foot's outline
+            let t = leave_rounded(f, (q[0], q[1]), foot, round);
             if !(t < 1.0) {
                 continue;
             }
@@ -678,8 +749,13 @@ impl Scene {
                 seen[ns] = i;
                 ns += 1;
             }
-            let f = self.caps[i as usize].foot;
-            let inside = o[0] > f[0] && o[0] < f[2] && o[1] > f[1] && o[1] < f[3];
+            let c = &self.caps[i as usize];
+            let (f, r) = (c.foot, c.round[0]);
+            let inside = in_round(f, r, o[0], o[1]);
+            // the skirt's flat sides, between its rounded corners; where the
+            // ray meets a side by a corner, the corner's round instead (a
+            // quarter round about its middle), which it can only meet there
+            let mut rounds = 0u8;
             for (side, axis, at) in [(0u8, 0usize, f[0]), (1, 0, f[2]), (2, 1, f[1]), (3, 1, f[3])] {
                 if d[axis] == 0.0 {
                     continue;
@@ -688,16 +764,54 @@ impl Scene {
                 let p = [o[0] + t * d[0], o[1] + t * d[1], o[2] + t * d[2]];
                 let (lo, hi) = if axis == 0 { (f[1], f[3]) } else { (f[0], f[2]) };
                 let q = p[1 - axis];
-                if q >= lo && q <= hi && p[2] >= s.gap && p[2] <= s.top {
-                    let mut n = [0.0; 3];
-                    n[axis] = -d[axis].signum();
+                if q < lo || q > hi {
+                    continue;
+                }
+                if q >= lo + r && q <= hi - r {
+                    if p[2] >= s.gap && p[2] <= s.top {
+                        let mut n = [0.0; 3];
+                        n[axis] = -d[axis].signum();
+                        take(t, if inside { Struck::Inside } else { Struck::Outside(i, side) }, n, &mut best);
+                    }
+                    continue;
+                }
+                // the corner: left or right (bit 0), top or bottom (bit 1)
+                let high = (q > hi - r) as u8;
+                let corner = if axis == 0 { (side & 1) | (high << 1) } else { high | ((side & 1) << 1) };
+                rounds |= 1 << corner;
+            }
+            let a = d[0] * d[0] + d[1] * d[1];
+            for corner in 0..4u8 {
+                if rounds & (1 << corner) == 0 || a <= 0.0 {
+                    continue;
+                }
+                let (sx, sy) = (if corner & 1 == 0 { -1.0f32 } else { 1.0 }, if corner & 2 == 0 { -1.0f32 } else { 1.0 });
+                let (cx, cy) = (if sx < 0.0 { f[0] + r } else { f[2] - r }, if sy < 0.0 { f[1] + r } else { f[3] - r });
+                let (ox, oy) = (o[0] - cx, o[1] - cy);
+                let (h, cc) = (ox * d[0] + oy * d[1], ox * ox + oy * oy - r * r);
+                let disc = h * h - a * cc;
+                if disc < 0.0 {
+                    continue;
+                }
+                for t in [(-h - disc.sqrt()) / a, (-h + disc.sqrt()) / a] {
+                    let p = [o[0] + t * d[0], o[1] + t * d[1], o[2] + t * d[2]];
+                    let (rx, ry) = (p[0] - cx, p[1] - cy);
+                    if rx * sx < 0.0 || ry * sy < 0.0 || p[2] < s.gap || p[2] > s.top {
+                        continue;
+                    }
+                    // facing back toward the ray; the side it is most on, for its band
+                    let mut n = [rx / r, ry / r, 0.0];
+                    if n[0] * d[0] + n[1] * d[1] > 0.0 {
+                        n = [-n[0], -n[1], 0.0];
+                    }
+                    let side = if rx.abs() > ry.abs() { if sx < 0.0 { 0 } else { 1 } } else if sy < 0.0 { 2 } else { 3 };
                     take(t, if inside { Struck::Inside } else { Struck::Outside(i, side) }, n, &mut best);
                 }
             }
             if d[2] != 0.0 {
                 let t = (s.top - o[2]) / d[2];
                 let (x, y) = (o[0] + t * d[0], o[1] + t * d[1]);
-                if x > f[0] && x < f[2] && y > f[1] && y < f[3] {
+                if in_round(f, r, x, y) {
                     let below = o[2] < s.top;
                     take(t, if below { Struck::Under(i) } else { Struck::Top }, [0.0, 0.0, if below { -1.0 } else { 1.0 }], &mut best);
                 }
@@ -1265,7 +1379,7 @@ fn straight(scene: &Scene, s: &Stood, k: usize, (lx, ly): (f32, f32), b: &mut Bo
     let high = [lx, ly, s.beam_from];
     let centre = scene.keys[k].1;
     let housing = Housing::of(s, centre, (lx, ly));
-    let foot = scene.caps[k].foot;
+    let (foot, round) = (scene.caps[k].foot, scene.caps[k].round[0]);
     let own_well = scene.well_of(centre.0, centre.1);
     let beam = |q: [f32; 3], n: [f32; 3]| -> f32 {
         let d = [q[0] - high[0], q[1] - high[1], q[2] - high[2]];
@@ -1285,8 +1399,8 @@ fn straight(scene: &Scene, s: &Stood, k: usize, (lx, ly): (f32, f32), b: &mut Bo
             let (ci, cj) = (b.x + i, b.y + j);
             let (x, y) = scene.fine.middle(ci, cj);
             let v = match scene.surface[cj * scene.fine.w + ci] {
-                Surface::Deck if own_well.is_some() && scene.well_of(x, y) == own_well => p.deck / pi * housing.on_floor([x, y, 0.0], foot, s.gap),
-                Surface::Chassis => p.chassis / pi * housing.on_floor([x, y, s.wall], foot, s.gap),
+                Surface::Deck if own_well.is_some() && scene.well_of(x, y) == own_well => p.deck / pi * housing.on_floor([x, y, 0.0], foot, round, s.gap),
+                Surface::Chassis => p.chassis / pi * housing.on_floor([x, y, s.wall], foot, round, s.gap),
                 Surface::Top(c) if c as usize == k => {
                     let q = [x, y, s.top];
                     p.legends / pi * (beam(q, [0.0, 0.0, -1.0]) + housing.on_top(q))
