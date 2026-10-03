@@ -169,11 +169,10 @@ pub struct Physics {
     /// the shares the caps' insides and outsides give back
     pub cap_in: f32,
     pub cap_out: f32,
-    /// the chassis round the wells, and the shares the deck, the wells'
-    /// walls and the chassis give back
+    /// how high the chassis round the wells stands, and the shares the deck
+    /// and the chassis give back (the wells' walls are its own sides)
     pub wall: f32,
     pub deck: f32,
-    pub walls: f32,
     pub chassis: f32,
 }
 
@@ -213,7 +212,6 @@ impl Physics {
             cap_out: share("cap_out", 0.18),
             wall: f("depth", 2.0).max(0.0),
             deck: share("deck", 0.22),
-            walls: share("walls", 0.25),
             chassis: share("chassis", 0.4),
         }
     }
@@ -1762,7 +1760,7 @@ fn bounce(scene: &Scene, s: &Stood, k: usize, (lx, ly): (f32, f32), into: &mut G
                     (p.cap_in * k, (p.tops + carried) * k)
                 }
                 Struck::Top => shared(p.cap_out, p.tops),
-                Struck::Wall => (p.walls, 0.0),
+                Struck::Wall => (p.chassis, 0.0),
                 Struck::Housing => (HOUSING, 0.0),
             };
             if first {

@@ -39,6 +39,15 @@ pub struct Light {
     pub remapped: bool,
 }
 
+impl Light {
+    /// How much light its LED gives off, 0 to 1: how strongly it is lit, times
+    /// its colour's own brightness in linear light, so a key lit black is a
+    /// key with its LED off.
+    pub fn shine(&self) -> f32 {
+        self.strength.clamp(0.0, 1.0) * lin(self.rgb.iter().copied().max().unwrap_or(0))
+    }
+}
+
 /// A shape on the board: how much of something there is at each pixel, in
 /// its own small box.
 struct Shape {
@@ -629,7 +638,7 @@ impl Board {
     }
 
     /// Light the keyboard by another of the core's "light" descriptions (as the
-    /// Lighting lab tunes it): how bright the light is, how a legend looks
+    /// Light lab tunes it): how bright the light is, how a legend looks
     /// with its LED off, the display. How the light falls is the simulation's,
     /// asked of it on its own (see sim::Simulator::set). True if the picture
     /// changes with it; a change in how the light falls shows with the
@@ -1060,7 +1069,7 @@ impl Board {
         // share, showing less as the light through it outshines it.
         if let Some(p) = keys.map(|k| &k.snap.physics).filter(|p| p.milky > 0.0 && p.skirts > 0.0) {
             // (a cap with no LED of its own is a lit key's with its LED off)
-            let lit = self.keys.iter().zip(&self.bands).filter_map(|(key, s)| s.as_ref().map(|s| (s, light(key.pos).map_or(0.0, |l| l.strength.clamp(0.0, 1.0)))));
+            let lit = self.keys.iter().zip(&self.bands).filter_map(|(key, s)| s.as_ref().map(|s| (s, light(key.pos).map_or(0.0, Light::shine))));
             for (s, strength) in lit.chain(self.other_bands.iter().map(|s| (s, 0.0))) {
                 let white = MILKY_WHITE.map(|c| dec(c) * p.milky * self.model.legend_unlit * (1.0 - strength));
                 each(s, &mut |d, _, a| {
@@ -1080,7 +1089,7 @@ impl Board {
             let Some(s) = &key.legend else { continue };
             let l = light(key.pos);
             let shown = shown(key, l);
-            let strength = l.map_or(0.0, |l| l.strength.clamp(0.0, 1.0));
+            let strength = l.map_or(0.0, Light::shine);
             let print = [0, 1, 2].map(|c| dec(key.print[c]) * self.model.legend_unlit * (1.0 - strength));
             let reads = self.legend_reads.get(n);
             each(s, &mut |d, i, a| {
@@ -1513,12 +1522,36 @@ mod tests {
         assert!((p.legend - 600.0).abs() < 1.0 && p.deck > 0.0 && p.chassis > 0.0 && p.skirt > 0.0);
     }
 
+    /// A key lit black is a key with its LED off: its legend shows the grey
+    /// it is printed in, as dim as LED off has it, as an unlit key's does.
+    #[test]
+    fn a_key_lit_black_looks_as_its_led_off() {
+        let (_, device, b) = lit_board(4_000);
+        let w = device["controls"].as_array().unwrap().iter().find(|c| c["label"] == "W").unwrap()["pos"].as_u64().unwrap() as u32;
+        let key = b.keys.iter().find(|k| k.pos == w).unwrap();
+        let s = key.legend.as_ref().unwrap();
+        let legend = |pic: &[f32]| (0..s.cover.len()).filter(|&i| s.cover[i] > 0.5).map(|i| {
+            let (x, y) = ((s.x + (i as u32 % s.w) as i32) as usize, (s.y + (i as u32 / s.w) as i32) as usize);
+            pic[(y * b.w as usize + x) * 4 + 1]
+        }).fold(0.0f32, f32::max);
+        let off = b.compose(&[Light { pos: w, rgb: [255, 255, 255], strength: 0.0, remapped: false }], 0, 254.0, 1000.0 / 254.0);
+        let black = b.compose(&[Light { pos: w, rgb: [0, 0, 0], strength: 1.0, remapped: false }], 0, 254.0, 1000.0 / 254.0);
+        let lit = b.compose(&[Light { pos: w, rgb: [255, 255, 255], strength: 1.0, remapped: false }], 0, 254.0, 1000.0 / 254.0);
+        eprintln!("W's legend: its LED off {:.4}, lit black {:.4}, lit white {:.4}", legend(&off), legend(&black), legend(&lit));
+        assert!(legend(&off) > 0.0, "a legend with its LED off shows its print");
+        assert!((legend(&black) - legend(&off)).abs() < 1e-6, "lit black, it looks as with its LED off");
+        assert!(legend(&lit) > legend(&off) * 5.0, "lit, its light outshines the print");
+    }
+
     /// Each key's light is its own: one key lit alone lights its own legend
     /// and the deck round it; two lit together give each one's light added
     /// up; and a red gives off its own share of white's light.
     #[test]
     fn each_key_s_light_is_its_own() {
-        let (_, device, b) = lit_board(4_000);
+        let (_, device, mut b) = lit_board(4_000);
+        // (the legends' LED-off print taken off, LED off at 0%, so what shows
+        // on a legend is its light alone)
+        b.model.legend_unlit = 0.0;
         let pos = |label: &str| device["controls"].as_array().unwrap().iter().find(|c| c["label"] == label).unwrap()["pos"].as_u64().unwrap() as u32;
         let one = |p: u32, rgb: [u8; 3]| Light { pos: p, rgb, strength: 1.0, remapped: false };
         let dark = b.compose(&[], 0, 254.0, 1000.0 / 254.0);
@@ -1535,8 +1568,7 @@ mod tests {
         }
         eprintln!("two keys lit together against each alone, added: {:.2e} at worst", worst);
         assert!(worst < 1e-4, "light adds up");
-        // W's own legend is lit; Q's, beside it, not by much. Against W lit
-        // black at full, whose legend's LED-off print has gone as a lit one's does.
+        // W's own legend is lit; Q's, beside it, not by much. Against W lit black.
         let black = b.compose(&[one(w, [0, 0, 0])], 0, 254.0, 1000.0 / 254.0);
         let legend_most = |f: &[f32], p: u32| {
             let key = b.keys.iter().find(|k| k.pos == p).unwrap();

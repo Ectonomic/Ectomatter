@@ -1,4 +1,4 @@
-//! The Lighting lab's stage: a section's drawing of the key, to scale from
+//! The Light lab's stage: a section's drawing of the key, to scale from
 //! the light's values as the simulation holds them, with each of its
 //! sliders' places round it and the line that joins each slider to the part
 //! it changes. Drawn as an SVG and drawn by resvg, since the window's
@@ -153,7 +153,6 @@ pub struct Values {
     cap_out: f64,
     depth: f64,
     deck: f64,
-    walls: f64,
     chassis: f64,
     lcd_lit: f64,
     lcd_unlit: f64,
@@ -196,7 +195,6 @@ impl Values {
             cap_out: p.cap_out as f64,
             depth: p.wall as f64,
             deck: p.deck as f64,
-            walls: p.walls as f64,
             chassis: p.chassis as f64,
             lcd_lit: raw(light, ("lcd", "nits")),
             lcd_unlit: raw(light, ("lcd", "unlit")),
@@ -769,21 +767,19 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
             labels.push(Label::new(false, p(outside, bounce_z), "Outside"));
         }
         _ => {
-            // light from under the keys: off the main well's deck onto its wall,
-            // and, where the wall is low enough, over it onto the chassis
+            // light from under the keys: off the main well's deck onto its wall
+            // (the chassis's own side, giving back what it does), and, where the
+            // wall is low enough, over it onto the chassis
             let edge = (x_hi + 0.3).min(sl.foot0 + 1.6);
             let wall_z = 1.1f64.min(d * 0.6);
             if d > 0.25 {
-                ray(&mut s, &[p(edge, 1.4f64.min(d + 0.9)), p(0.85, 0.03), p(0.03, wall_z), p(0.9, wall_z + 1.25)], v.walls, grow, white("Walls"));
+                ray(&mut s, &[p(edge, 1.4f64.min(d + 0.9)), p(0.85, 0.03), p(0.03, wall_z), p(0.9, wall_z + 1.25)], v.chassis, grow, white("Chassis"));
                 ray(&mut s, &[p(edge, d + 1.25), p(-0.7, d + 0.03), p(-1.25, d + 1.0)], v.chassis, grow, white("Chassis"));
                 marks.push(Mark::Height { x: px(-STRIP - 0.85), y0: pz(0.0), y1: pz(d), i: slider("Depth") });
                 labels.push(Label::new(true, p(-STRIP - 0.85, d * 0.8), "Depth"));
-                labels.push(Label::new(false, p(0.0, wall_z.max(d * 0.5)), "Walls"));
             } else {
                 ray(&mut s, &[p(edge, 1.2), p(-0.8, 0.03), p(-1.4, 1.0)], v.chassis, grow, white("Chassis"));
                 labels.push(Label { flat: true, ..Label::new(true, p(-STRIP - 0.85, 0.0), "Depth") });
-                // with no walls, Walls where the main well's wall would stand
-                labels.push(Label::new(false, p(0.0, d.max(0.05)), "Walls"));
             }
             let dx = -STRIP - F_DECK * 0.62;
             ray(&mut s, &[p(dx - 1.3, 1.1), p(dx + 0.3, 0.03), p(dx + 1.0, 0.9)], v.deck, grow, white("Deck"));
@@ -1002,7 +998,6 @@ pub fn stage(v: &Values, lens: Lens, w: f32, h: f32, places: &[Place], hot: Opti
     }
     if lens == Lens::Wells && v.depth <= 0.25 {
         extras.push((slider("Depth"), "no walls".to_string()));
-        extras.push((slider("Walls"), "no walls".to_string()));
     }
     svg += "</svg>";
     if lens != Lens::Display {

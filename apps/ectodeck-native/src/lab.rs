@@ -1,4 +1,4 @@
-//! The Lighting lab: a developer's window for tuning how the Z10's keys are
+//! The Light lab: a developer's window for tuning how the Z10's keys are
 //! lit. The keys' light is simulated (see ectodeck_draw's sim): each LED
 //! followed through the keyboard's shape. The lab's sliders are the
 //! keyboard's physical make, each in the units that mean something: where
@@ -91,7 +91,7 @@ struct Param {
     note: &'static str,
 }
 
-const PARAMS: [Param; 26] = [
+const PARAMS: [Param; 25] = [
     Param { path: ("led", ""), label: "North of centre", lo: -9.66, hi: 9.66, step: 0.25, unit: Unit::Length, def: 7.0, note: "Where each key's LED sits under its cap, from the switch's centre toward the top of the key; below 0, toward the bottom, as on a keyboard whose LEDs face south. It goes as far as the switch's edge, so Switch width sets how far the slider reaches." },
     Param { path: ("sim", "nits"), label: "Brightness", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, def: 600.0, note: "The brightest legend, with every key lit white at full, up to Peak nits (Settings › HDR). Everything else the LEDs light is as bright as the simulation finds it beside that. A colour gives off its own share, as an LED does: a red about a fifth." },
     Param { path: ("sim", "beam"), label: "Beam", lo: 1.0, hi: 200.0, step: 0.5, unit: Unit::Number, def: 24.0, note: "How tight the LED's beam out of the top of the switch is. Higher keeps it to a small bright spot on the legend over the LED; lower spreads it across the cap's top and onto the inside of its skirt." },
@@ -108,8 +108,7 @@ const PARAMS: [Param; 26] = [
     Param { path: ("legend", "unlit"), label: "LED off", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.15, note: "How bright a legend looks with its LED off (the dimmer at 0%, or a key the lighting leaves dark), as a share of the grey the art prints it in. A backlit legend with no light behind it is dark." },
     Param { path: ("sim", "depth"), label: "Depth", lo: 0.0, hi: 12.0, step: 0.1, unit: Unit::Mm, def: 2.0, note: "How deep the wells are: how high the chassis round them stands above the deck. Deeper keeps more of the light in the wells." },
     Param { path: ("sim", "deck"), label: "Deck", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.22, note: "The share of the light the deck at the wells' floor gives back." },
-    Param { path: ("sim", "walls"), label: "Walls", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.25, note: "The share of the light the wells' walls give back, into the well." },
-    Param { path: ("sim", "chassis"), label: "Chassis", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.4, note: "The share of the light the chassis's top round the wells gives back." },
+    Param { path: ("sim", "chassis"), label: "Chassis", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.4, note: "The share of the light the chassis gives back: its top round the wells, and the wells' walls, which are its own sides." },
     Param { path: ("lcd", "nits"), label: "Lit dots", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, def: 324.0, note: "The display's lit dots with its backlight white at full. A colour gives off its own share of that, as an LED does." },
     Param { path: ("lcd", "unlit"), label: "Unlit dots", lo: 0.0, hi: 0.0, step: 0.1, unit: Unit::Nits, def: 4.1, note: "The dots that are off, which let a little of the backlight through, as a real display's do." },
     Param { path: ("lcd", "field"), label: "Background", lo: 0.0, hi: 0.0, step: 0.1, unit: Unit::Nits, def: 0.8, note: "The ground between the dots." },
@@ -136,9 +135,9 @@ const CHOICES: [Choice; 2] = [
 /// The page's sections: a title, what the part is, its values, and its choices.
 const SECTIONS: [(&str, &str, &[usize], &[usize]); 4] = [
     ("LED", "Each key's LED shines up out of its switch in a beam, onto the back of the legend. In a black housing that is all its light; a clear housing scatters a share of it instead, glowing with it over its top and sides, which lights the legend evenly, the inside of the cap and the deck round the switch.", &[0, 1, 2, 3, 4, 5, 7, 6], &[0]),
-    ("Keycaps", "Each cap stands over its switch, its skirt from its foot to its top. Light bounces about inside it; some gets out under the skirt, some through the legend, and some through the plastic where it is translucent and not coated black.", &[8, 9, 10, 23, 24, 25, 11, 12, 13], &[1]),
-    ("Wells", "The keys sit in wells in the chassis: the deck at their floor, walled round by the chassis. What each gives back of the light falling on it lights the rest.", &[14, 15, 16, 17], &[]),
-    ("Display", "The display's backlit dots, and the glass over them.", &[18, 19, 20, 21, 22], &[]),
+    ("Keycaps", "Each cap stands over its switch, its skirt from its foot to its top. Light bounces about inside it; some gets out under the skirt, some through the legend, and some through the plastic where it is translucent and not coated black.", &[8, 9, 10, 22, 23, 24, 11, 12, 13], &[1]),
+    ("Wells", "The keys sit in wells in the chassis: the deck at their floor, walled round by the chassis. What each gives back of the light falling on it lights the rest.", &[14, 15, 16], &[]),
+    ("Display", "The display's backlit dots, and the glass over them.", &[17, 18, 19, 20, 21], &[]),
 ];
 
 /// A section's sliders that tune this light: a black housing does not
@@ -374,13 +373,15 @@ fn set(light: &mut Value, (a, b): (&str, &str), v: f64) {
 fn simulated(mut light: Value) -> Value {
     if light["sim"].is_object() {
         // the caps' kind named, as its values had it, so it saves as it is
-        // (a translucent cap's top takes what its plastic lets through)
+        // (a translucent cap's top takes what its plastic lets through), and
+        // the wells' walls the chassis's own sides, giving back what it does
         if light["sim"]["caps"].is_null() {
             let caps = Caps::of(&light["sim"]);
             light["sim"]["caps"] = json!(caps.name());
         }
         if let Some(sim) = light["sim"].as_object_mut() {
             sim.remove("tops");
+            sim.remove("walls");
         }
         return light;
     }
@@ -836,7 +837,7 @@ impl LabPage {
         let colour = |c: [u8; 3]| slint::Color::from_rgb_u8(c[0], c[1], c[2]);
         let in_colour = |st: i32, x: f32, y: f32, ww: f32, hh: f32, s: &str, c: [u8; 3]| Cell { color: colour(c), ..text_cell(st, x, y, ww, hh, s) };
         // the head: the title and what the lab is, and the sections
-        let mut cells = vec![text_cell(style::TITLE, 24.0, 14.0, 300.0, 29.0, "Lighting lab")];
+        let mut cells = vec![text_cell(style::TITLE, 24.0, 14.0, 300.0, 29.0, "Light lab")];
         let mut bx = 0.0;
         let mut tabs = Vec::new();
         for (i, (title, _, _, _)) in SECTIONS.iter().enumerate() {
@@ -1111,7 +1112,7 @@ fn light_block(light: &Value) -> String {
     let mut s = String::from(" \"light\": {\n");
     s += &format!("  \"about\": {},\n", serde_json::to_string(&light["about"]).unwrap_or_else(|_| "\"\"".into()));
     s += &format!("  \"led\": {},\n", num("led", &light["led"]));
-    s += &part("sim", &["nits", "switch", "beam", "scatter", "sides", "glow_spread", "switch_top", "switch_width", "skirt_foot", "cap_top", "legends", "caps", "skirts", "black", "milky", "cap_in", "cap_out", "depth", "deck", "walls", "chassis"]);
+    s += &part("sim", &["nits", "switch", "beam", "scatter", "sides", "glow_spread", "switch_top", "switch_width", "skirt_foot", "cap_top", "legends", "caps", "skirts", "black", "milky", "cap_in", "cap_out", "depth", "deck", "chassis"]);
     s += &part("legend", &["unlit"]);
     s += &part("lcd", &["nits", "unlit", "field", "dot", "glass"]);
     s += &format!("  \"wells\": {}\n", serde_json::to_string(&light["wells"]).unwrap_or_else(|_| "\"mask_1\"".into()));

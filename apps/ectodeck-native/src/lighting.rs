@@ -130,7 +130,7 @@ pub mod style {
     pub const FACT: i32 = 12;
     pub const FACT_VALUE: i32 = 13;
     pub const CREDIT: i32 = 14;
-    /// the Lighting lab's small words in their own colour, and its
+    /// the Light lab's small words in their own colour, and its
     /// stronger ones (a reading's number, the name of what its line tells of)
     pub const SMALL_IN: i32 = 21;
     pub const LABEL_IN: i32 = 22;

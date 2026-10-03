@@ -217,7 +217,7 @@ pub struct Front {
     pub restart: Option<String>,
     /// the Macro Editor's window, once it has been opened
     pub macros: Option<crate::macro_page::MacroPage>,
-    /// the Lighting lab's window, once it has been opened
+    /// the Light lab's window, once it has been opened
     pub lab: Option<crate::lab::LabPage>,
     /// when the sliders were last read, and the time between readings, smoothed
     last_reading: Option<Instant>,
@@ -746,7 +746,7 @@ impl Front {
         window
     }
 
-    /// Do what the Lighting lab asked; what only its window can do is handed back.
+    /// Do what the Light lab asked; what only its window can do is handed back.
     pub fn act_lab(&mut self) -> Vec<WindowAsk> {
         self.lab.as_mut().map_or(Vec::new(), |l| l.act())
     }
