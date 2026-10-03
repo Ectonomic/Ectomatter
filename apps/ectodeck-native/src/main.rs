@@ -43,7 +43,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use ectodeck_draw::hdr::sim::{self, Physics, Scene, Simulator};
+use ectodeck_draw::hdr::sim::{self, Physics, Scene, Simulator, Snapshot};
 use ectodeck_draw::hdr::{Board, Light};
 use front::{Front, WindowAsk};
 use picture::{Lit, Picture};
@@ -164,6 +164,53 @@ fn levels(settings: &settings::Settings) -> (f64, f64) {
     let reference = best.and_then(|s| s["reference"].as_f64()).filter(|r| *r > 0.0).unwrap_or(203.0);
     let peak = settings.get("hdr.glow_limit").and_then(|v| v.as_f64()).or_else(|| best.and_then(|s| s["peak"].as_f64())).unwrap_or(reference);
     (reference, peak.max(reference))
+}
+
+#[cfg(test)]
+mod kept_tests {
+    use super::*;
+
+    /// The Z10's keys to simulate, and a make of their light for each beam.
+    fn scene() -> (Scene, impl Fn(f32) -> (Physics, f32)) {
+        let device: serde_json::Value = serde_json::from_str(&core_device()).unwrap();
+        let tree = usvg::Tree::from_str(ectodeck_draw::z10::SVG, &usvg::Options::default()).unwrap();
+        let board = Board::new(&tree, &device, GROUND, 632, 253).unwrap();
+        let base = Physics::from(&device["light"]);
+        (Scene::of(&board), move |beam: f32| (Physics { beam, ..base }, 7.0f32))
+    }
+
+    /// A picture of another make than the one wanted is taken while the
+    /// keyboard shows an older one (a slider dragged), but never over a
+    /// picture of the one wanted.
+    #[test]
+    fn a_picture_on_the_way_is_taken_but_not_over_the_one_wanted() {
+        let (scene, make) = scene();
+        let (a, b, c) = (make(1.0), make(2.0), make(3.0));
+        let pa = Simulator::settle(&scene, a.0, a.1, 200);
+        let pb = Simulator::settle(&scene, b.0, b.1, 200);
+        assert!(Kept::takes(Some(c), Some(&pa), &pb), "on the way to the one wanted");
+        assert!(Kept::takes(Some(c), None, &pb), "on a keyboard with none");
+        assert!(!Kept::takes(Some(a), Some(&pa), &pb), "not over the one wanted");
+        assert!(Kept::takes(Some(a), Some(&pa), &pa), "the one wanted, clearer");
+    }
+
+    /// The last few settled pictures are kept, the newest found first; past
+    /// the most kept the oldest goes, but never the saved tuning's.
+    #[test]
+    fn pictures_are_kept_but_the_saved_one_stays() {
+        let (scene, make) = scene();
+        let mut kept = Kept { pinned: Some(make(1.0)), ..Kept::default() };
+        for beam in [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0] {
+            let (p, n) = make(beam);
+            kept.keep(std::sync::Arc::new(Simulator::settle(&scene, p, n, 200)));
+        }
+        assert_eq!(kept.pictures.len(), Kept::MOST, "as many as are kept");
+        assert!(kept.get(make(1.0)).is_some(), "the saved tuning's stays");
+        assert!(kept.get(make(2.0)).is_none() && kept.get(make(3.0)).is_none(), "the oldest others go");
+        assert!(kept.get(make(6.0)).is_some_and(|s| Kept::of(&s, make(6.0))), "the newest found");
+        // a brightness of its own is the same picture
+        assert!(kept.get((Physics { nits: 123.0, ..make(6.0).0 }, 7.0)).is_some());
+    }
 }
 
 /// Build the keyboard at each size asked for, away from the window's thread:
@@ -766,15 +813,62 @@ struct App {
     keys_on: Option<usize>,
     /// the keys held down as the keyboard last said, for Ctrl+Shift+L
     mods: Modifiers,
-    /// the light the Lighting lab has tuned, which the keyboard is lit by, and its change
+    /// the light the Lighting lab has tuned, which the keyboard is lit by, and
+    /// its change (and whether Hold to compare was held for it)
     light: Option<serde_json::Value>,
-    light_rev: u64,
+    light_rev: (u64, bool),
     readout_at: Option<Instant>,
     /// the keys' light, simulated from the first keyboard drawn on, its way
     /// of saying it has a clearer picture, and the picture last taken
     sim: Option<Simulator>,
     sim_tx: calloop::channel::Sender<()>,
     sim_seen: u64,
+    /// the simulation the keyboard is to show (its make, and its LEDs' place),
+    /// and the last few settled pictures, the saved tuning's kept among them
+    want: Option<(Physics, f32)>,
+    kept: Kept,
+}
+
+/// Settled pictures of the keys' light, the last few kept, so going back to
+/// one (an undo, Hold to compare, a choice taken back) shows at once rather
+/// than settling again: each is about 27 MB. The saved tuning's stays.
+#[derive(Default)]
+struct Kept {
+    pictures: Vec<std::sync::Arc<Snapshot>>,
+    pinned: Option<(Physics, f32)>,
+}
+
+impl Kept {
+    const MOST: usize = 4;
+
+    /// Whether a picture is of this make and LEDs' place, as the simulation runs it.
+    fn of(snap: &Snapshot, (physics, north): (Physics, f32)) -> bool {
+        snap.physics.same_paths(&physics.simulated()) && snap.north == physics.held_north(north)
+    }
+
+    fn get(&self, want: (Physics, f32)) -> Option<std::sync::Arc<Snapshot>> {
+        self.pictures.iter().rev().find(|s| Kept::of(s, want)).cloned()
+    }
+
+    /// Whether the keyboard takes the simulation's new picture. The
+    /// simulation may still be on a make asked of it before the one wanted
+    /// (a slider dragged): its picture is newer than the one shown, so it is
+    /// taken, but never over a picture of the one wanted.
+    fn takes(want: Option<(Physics, f32)>, shown: Option<&Snapshot>, snap: &Snapshot) -> bool {
+        want.is_none_or(|w| Kept::of(snap, w) || !shown.is_some_and(|s| Kept::of(s, w)))
+    }
+
+    /// Keep a settled picture, the newest last; past the most kept, the oldest
+    /// goes, but never the saved tuning's.
+    fn keep(&mut self, snap: std::sync::Arc<Snapshot>) {
+        self.pictures.retain(|s| !(s.physics.same_paths(&snap.physics) && s.north == snap.north));
+        self.pictures.push(snap);
+        while self.pictures.len() > Kept::MOST {
+            let pinned = self.pinned;
+            let Some(i) = self.pictures.iter().position(|s| !pinned.is_some_and(|w| Kept::of(s, w))) else { break };
+            self.pictures.remove(i);
+        }
+    }
 }
 
 /// A window of its own beside the main one: an ordinary SDR window, drawn whole by Slint.
@@ -959,11 +1053,13 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         keys_on: None,
         mods: Modifiers::default(),
         light: None,
-        light_rev: 0,
+        light_rev: (0, false),
         readout_at: None,
         sim: None,
         sim_tx,
         sim_seen: 0,
+        want: None,
+        kept: Kept::default(),
     };
     // the tray, which the window closes into
     let (tray_tx, tray_rx) = calloop::channel::channel::<tray::TrayAsk>();
@@ -1397,7 +1493,14 @@ impl App {
             eprintln!("ectodeck-native: the keys' light simulated, its first picture in {:?}", t.elapsed());
             self.sim = Some(s);
         }
-        if let Some(s) = &self.sim {
+        let want = (Physics::from(&self.light_now()), board.led_north());
+        self.want = Some(want);
+        if let Some(snap) = self.kept.get(want) {
+            board.set_sim(snap);
+        } else if let Some(s) = &self.sim {
+            // (the simulation's latest, though it may be of the make before:
+            // the keyboard drawn new has none to keep instead)
+            s.set(want.0, want.1);
             if let Some(snap) = s.latest() {
                 self.sim_seen = s.version();
                 board.set_sim(snap);
@@ -1419,6 +1522,12 @@ impl App {
             return;
         }
         self.sim_seen = version;
+        if !Kept::takes(self.want, board.sim(), &snap) {
+            return;
+        }
+        if snap.settled {
+            self.kept.keep(snap.clone());
+        }
         board.set_sim(snap);
         let lit = light(board, &self.lights, self.front.page.locks, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
         self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
@@ -1470,16 +1579,30 @@ impl App {
         // the Lighting lab's tuning, when it has changed
         let mut relit = false;
         if let Some(lab) = &self.front.lab {
-            if lab.rev != self.light_rev {
-                self.light_rev = lab.rev;
-                self.light = Some(lab.light.clone());
+            let rev = (lab.rev, lab.comparing);
+            if rev != self.light_rev {
+                self.light_rev = rev;
+                self.light = Some(lab.shown().clone());
+                let saved = Physics::from(lab.saved());
                 if let (Some(b), Some(l)) = (&mut self.board, &self.light) {
                     // the keys drawn again only if their picture changes now; how
-                    // the light falls shows with the simulation's next picture
+                    // the light falls shows with the simulation's next picture,
+                    // or at once from a picture kept of it
                     relit = b.set_light(l);
-                    // the light simulated again if what it falls on, or where from, has changed
-                    if let Some(s) = &self.sim {
-                        s.set(Physics::from(l), b.led_north());
+                    let want = (Physics::from(l), b.led_north());
+                    self.kept.pinned = Some((saved, b.led_north()));
+                    let changed = self.want.is_none_or(|w| !(w.0.same_paths(&want.0) && w.1 == want.1));
+                    self.want = Some(want);
+                    if changed {
+                        if let Some(snap) = self.kept.get(want) {
+                            b.set_sim(snap);
+                            relit = true;
+                            if let Some(s) = &self.sim {
+                                s.rest();
+                            }
+                        } else if let Some(s) = &self.sim {
+                            s.set(want.0, want.1);
+                        }
                     }
                 }
                 self.readout_at = None;
@@ -1648,6 +1771,12 @@ impl App {
         if down && self.mods.ctrl && self.mods.shift && matches!(e.keysym, Keysym::l | Keysym::L) {
             self.open_lab();
             return;
+        }
+        if self.keys_on == Some(LAB) && down && self.mods.ctrl && matches!(e.keysym, Keysym::z | Keysym::Z | Keysym::y | Keysym::Y) {
+            if let Some(lab) = self.front.lab.as_mut().filter(|l| !l.typing()) {
+                lab.undo(self.mods.shift || matches!(e.keysym, Keysym::y | Keysym::Y));
+                return;
+            }
         }
         if let Some(which) = self.keys_on {
             if let (Some(sw), Some(text)) = (&self.subs[which], key_text(e)) {

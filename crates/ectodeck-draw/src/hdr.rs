@@ -816,6 +816,11 @@ impl Board {
         self.sim.as_ref().map(|s| (s.photons, s.settled))
     }
 
+    /// The simulation's picture the keys are lit by.
+    pub fn sim(&self) -> Option<&Snapshot> {
+        self.sim.as_deref()
+    }
+
     /// The brightest legend, every key lit white at full, in nits, and the display's lit dots'.
     pub fn legend_nits(&self) -> f32 {
         self.model.nits

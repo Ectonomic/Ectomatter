@@ -19,7 +19,7 @@
 
 use std::fmt::Write;
 
-use ectodeck_draw::hdr::sim::{on_cap_top, Physics, Switch};
+use ectodeck_draw::hdr::sim::{on_cap_top, Caps, Physics, Switch};
 use serde_json::Value;
 
 use super::{get, PARAMS, UNITS_PER_MM as MM};
@@ -131,8 +131,9 @@ pub fn choice_y(k: usize) -> f32 {
 #[derive(Clone, Copy, Debug)]
 pub struct Values {
     p: Physics,
-    /// a black housing, its LED through a slot in its top
+    /// a black housing, its LED through a slot in its top; what the caps are
     slot: bool,
+    caps: Caps,
     led: f64,
     north: f64,
     beam: f64,
@@ -175,6 +176,7 @@ impl Values {
         Values {
             p,
             slot: p.switch == Switch::Slot,
+            caps: p.caps,
             led,
             north: led / MM,
             beam: p.beam as f64,
@@ -644,7 +646,7 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
             let (end, anchor) = if peak < (x0 + x1) / 2.0 { (x1, 1.0) } else { (x0, 0.0) };
             s.text(end, base - tall - 22.0, "Light on the cap's top", QUIET_WORD, anchor);
             s.text(end, base - tall - 7.0, "over its two legends", FAINT_WORD, anchor);
-            labels.push(Label { drop: true, ..Label::new(true, (x0, base - tall), "Brightness") });
+            labels.push(Label { drop: true, ..Label::new(false, (x1, base - tall), "Brightness") });
             // the switch's centre line, and the LED north of it
             s.stroke(&poly(&[p(sl.centre, 0.15), p(sl.centre, hz + 0.6)], false), "#5c5c5c", 1.0);
             let y_nc = if hz > 2.6 { hz - 0.6 } else { hz + 0.7 };
@@ -718,31 +720,37 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
                     let band = [p(sl.skirt_x(north, v.foot, false), v.foot), p(sl.skirt_x(north, clear_to, false), clear_to), p(sl.skirt_x(north, clear_to, true), clear_to), p(sl.skirt_x(north, v.foot, true), v.foot)];
                     let milky = if white("Milky") { WHITE } else { "#d8d2c6" };
                     s.path(&poly(&band, true), milky, "none", 1.0, if v.skirts > 0.0 { 0.08 + 0.55 * v.milky } else { 0.0 });
-                    let lit = if white("Sides let through") { WHITE } else { AMBER };
+                    let lit = if white("Plastic lets through") { WHITE } else { AMBER };
                     s.path(&poly(&[band[0], band[1]], false), "none", lit, 2.4 * grow.min(1.2), if v.skirts > 0.0 { op(v.skirts) } else { 0.0 });
                 }
                 if v.tops > 0.0 {
-                    let lit = if white("Tops let through") { WHITE } else { AMBER };
+                    let lit = if white("Plastic lets through") { WHITE } else { AMBER };
                     s.path(&poly(&[p(a0 + 0.3, tz), p(a1 - 0.3, tz)], false), "none", lit, 2.4 * grow.min(1.2), op(v.tops));
                 }
             }
             // light through the north skirt below its black, from inside the cap to its outside
-            let side_z = v.foot + (clear_to - v.foot) * 0.7;
-            let (wall_in, wall_out) = (sl.skirt_x(true, side_z, true), sl.skirt_x(true, side_z, false));
-            ray(&mut s, &[p(wall_in + 1.1, side_z + 0.35), p(wall_out - 1.2, side_z - 0.25)], v.skirts, grow, white("Sides let through"));
-            labels.push(Label::new(true, p(wall_out, side_z), "Sides let through"));
-            // Milky on the plastic low on the north skirt; Black down the sides measured beside the south one
-            let milky_z = v.foot + (clear_to - v.foot) * 0.25;
-            labels.push(Label::new(true, p(sl.skirt_x(true, milky_z, false), milky_z), "Milky"));
-            let bx = (sl.foot1 + 1.0).min(x_hi - 0.4);
-            marks.push(Mark::Height { x: px(bx), y0: pz(clear_to), y1: pz(tz), i: slider("Black down the sides") });
-            labels.push(Label::new(false, p(bx, (clear_to + tz) / 2.0), "Black down the sides"));
+            // (a shine-through cap's plastic shows only through its legends; a translucent one has no black)
+            let (shine, translucent) = (v.caps == Caps::ShineThrough, v.caps == Caps::Translucent);
+            if !shine {
+                let side_z = v.foot + (clear_to - v.foot) * 0.7;
+                let (wall_in, wall_out) = (sl.skirt_x(true, side_z, true), sl.skirt_x(true, side_z, false));
+                ray(&mut s, &[p(wall_in + 1.1, side_z + 0.35), p(wall_out - 1.2, side_z - 0.25)], v.skirts, grow, white("Plastic lets through"));
+                labels.push(Label::new(true, p(wall_out, side_z), "Plastic lets through"));
+                // Milky on the plastic low on the north skirt
+                let milky_z = v.foot + (clear_to - v.foot) * 0.25;
+                labels.push(Label::new(true, p(sl.skirt_x(true, milky_z, false), milky_z), "Milky"));
+            }
+            if !shine && !translucent {
+                // Black down the sides measured beside the south skirt
+                let bx = (sl.foot1 + 1.0).min(x_hi - 0.4);
+                marks.push(Mark::Height { x: px(bx), y0: pz(clear_to), y1: pz(tz), i: slider("Black down the sides") });
+                labels.push(Label::new(false, p(bx, (clear_to + tz) / 2.0), "Black down the sides"));
+            }
             // light up through the top, beside the legends
             let top_x = a1 - 1.6;
             if sl.hollow {
-                ray(&mut s, &[p(top_x, under - 0.6), p(top_x + 0.15, tz + 1.4)], v.tops, grow, white("Tops let through"));
+                ray(&mut s, &[p(top_x, under - 0.6), p(top_x + 0.15, tz + 1.4)], v.tops, grow, white("Plastic lets through"));
             }
-            labels.push(Label { flat: true, ..Label::new(false, p(top_x, tz), "Tops let through") });
             if sl.hollow && rise > 1.0 {
                 // bounced inside the cap: off its inner wall, up to the back of its top
                 let mid_z = (hz.max(v.foot) + under) / 2.0;

@@ -83,6 +83,40 @@ impl Switch {
     }
 }
 
+/// What a cap is, as the core's "caps" says: black all over but its legends
+/// ("shine_through", as the Z10 came); its top black and part of its sides,
+/// below them translucent plastic ("pudding"); or translucent all over
+/// ("translucent"). A core with none is read from its values: a top that
+/// lets light through is translucent, sides that do are pudding.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Caps {
+    ShineThrough,
+    Pudding,
+    Translucent,
+}
+
+impl Caps {
+    pub fn of(sim: &Value) -> Caps {
+        let share = |k: &str| sim[k].as_f64().unwrap_or(0.0);
+        match sim["caps"].as_str() {
+            Some("shine_through") => Caps::ShineThrough,
+            Some("pudding") => Caps::Pudding,
+            Some("translucent") => Caps::Translucent,
+            _ if share("tops") > 0.0 => Caps::Translucent,
+            _ if share("skirts") > 0.0 => Caps::Pudding,
+            _ => Caps::ShineThrough,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Caps::ShineThrough => "shine_through",
+            Caps::Pudding => "pudding",
+            Caps::Translucent => "translucent",
+        }
+    }
+}
+
 /// The share of the light that falls on a switch's black housing that it gives back.
 const HOUSING: f32 = 0.05;
 /// How far round a cap milky plastic carries the light it takes before it
@@ -118,13 +152,16 @@ pub struct Physics {
     pub gap: f32,
     pub top: f32,
     pub legends: f32,
-    /// the shares of the light on a cap's inside that its skirt and its top
-    /// (beside the legend) let through, glowing on their outsides; how far
+    /// what the caps are, and so: the shares of the light on a cap's inside
+    /// that its skirt and its top (beside the legend) let through, glowing on
+    /// their outsides (none for shine-through caps; a translucent cap's top
+    /// lets through what its plastic does); how far
     /// down its sides, as a share of the skirt, the black of its top comes,
     /// which lets none through; and how milky the plastic is, 0 clear to 1
     /// milky. Milky plastic is one body under the black, the top's underside
     /// and the skirt alike: the light it takes in anywhere it carries round
     /// the cap (MILKY at its milkiest), to leave below the black.
+    pub caps: Caps,
     pub skirts: f32,
     pub tops: f32,
     pub black: f32,
@@ -146,6 +183,15 @@ impl Physics {
         let f = |k: &str, d: f32| s[k].as_f64().map_or(d, |v| v as f32);
         let share = |k: &str, d: f32| f(k, d).clamp(0.0, 0.98);
         let top = f("cap_top", 14.0).max(0.5);
+        // what the caps let through, as their kind has it; a core of old with
+        // a top that lets light through keeps its own share for it
+        let caps = Caps::of(s);
+        let plastic = share("skirts", 0.0);
+        let (skirts, tops, black) = match caps {
+            Caps::ShineThrough => (0.0, 0.0, 1.0),
+            Caps::Pudding => (plastic, 0.0, f("black", 0.0).clamp(0.0, 1.0)),
+            Caps::Translucent => (plastic, if s["caps"].is_null() { share("tops", plastic) } else { plastic }, 0.0),
+        };
         Physics {
             nits: f("nits", 600.0).max(0.0),
             switch: Switch::named(s["switch"].as_str()),
@@ -158,9 +204,10 @@ impl Physics {
             gap: f("skirt_foot", 5.0).clamp(0.0, top - 0.1),
             top,
             legends: share("legends", 0.3),
-            skirts: share("skirts", 0.0),
-            tops: share("tops", 0.0),
-            black: f("black", 0.0).clamp(0.0, 1.0),
+            caps,
+            skirts,
+            tops,
+            black,
             milky: f("milky", 0.0).clamp(0.0, 1.0),
             cap_in: share("cap_in", 0.5),
             cap_out: share("cap_out", 0.18),
@@ -169,6 +216,12 @@ impl Physics {
             walls: share("walls", 0.25),
             chassis: share("chassis", 0.4),
         }
+    }
+
+    /// As the simulation runs it: a black housing scatters none of the LED's
+    /// light, so all of it leaves in the beam.
+    pub fn simulated(&self) -> Physics {
+        if self.switch == Switch::Slot { Physics { scatter: 0.0, ..*self } } else { *self }
     }
 
     /// Whether the light falls as it did: everything but its overall brightness.
@@ -559,10 +612,9 @@ struct Stood {
 }
 
 impl Stood {
-    /// (a black housing scatters none of the LED's light: it all leaves in the beam)
     fn of(p: &Physics) -> Stood {
         let mm = UNITS_PER_MM;
-        let p = if p.switch == Switch::Slot { Physics { scatter: 0.0, ..*p } } else { *p };
+        let p = p.simulated();
         let (gap, top) = (p.gap * mm, p.top * mm);
         Stood { beam_from: p.switch_top * mm, half: p.switch_width * mm / 2.0, spread: p.glow_spread * mm, clear_to: gap + (1.0 - p.black) * (top - gap), diffuse: p.milky * MILKY * mm, gap, top, wall: p.wall * mm, p }
     }
@@ -1177,11 +1229,14 @@ impl Snapshot {
 /// so a change of that alone asks nothing of it.
 pub struct Simulator {
     shared: Arc<Shared>,
-    asked: Mutex<(Physics, f32)>,
+    /// what it was last asked to simulate; none once told to rest
+    asked: Mutex<Option<(Physics, f32)>>,
 }
 
 struct Shared {
     ask: Mutex<Option<(Physics, f32)>>,
+    /// stop the run under way, and start none
+    rest: AtomicBool,
     wake: Condvar,
     latest: Mutex<Option<Arc<Snapshot>>>,
     published: Condvar,
@@ -1195,21 +1250,30 @@ impl Simulator {
     /// Start simulating: `notify` is told, from the simulation's thread, each
     /// time there is a new picture.
     pub fn new(scene: Scene, physics: Physics, north: f32, notify: Box<dyn Fn() + Send + Sync>) -> Simulator {
-        let shared = Arc::new(Shared { ask: Mutex::new(Some((physics, north))), wake: Condvar::new(), latest: Mutex::new(None), published: Condvar::new(), version: AtomicU64::new(0), stop: AtomicBool::new(false), notify });
+        let shared = Arc::new(Shared { ask: Mutex::new(Some((physics, north))), rest: AtomicBool::new(false), wake: Condvar::new(), latest: Mutex::new(None), published: Condvar::new(), version: AtomicU64::new(0), stop: AtomicBool::new(false), notify });
         let s = shared.clone();
         std::thread::Builder::new().name("light simulation".into()).spawn(move || work(scene, s)).expect("the simulation's thread");
-        Simulator { shared, asked: Mutex::new((physics, north)) }
+        Simulator { shared, asked: Mutex::new(Some((physics, north))) }
     }
 
     /// Simulate another make, or the LEDs moved, from the start; but not for
     /// a change of brightness alone.
     pub fn set(&self, physics: Physics, north: f32) {
         let mut asked = self.asked.lock().unwrap();
-        if asked.0.same_paths(&physics) && asked.1 == north {
+        if asked.is_some_and(|(p, n)| p.same_paths(&physics) && n == north) {
             return;
         }
-        *asked = (physics, north);
+        *asked = Some((physics, north));
+        self.shared.rest.store(false, Ordering::SeqCst);
         *self.shared.ask.lock().unwrap() = Some((physics, north));
+        self.shared.wake.notify_all();
+    }
+
+    /// Stop simulating, and start nothing new: the picture wanted is kept already.
+    pub fn rest(&self) {
+        *self.asked.lock().unwrap() = None;
+        *self.shared.ask.lock().unwrap() = None;
+        self.shared.rest.store(true, Ordering::SeqCst);
         self.shared.wake.notify_all();
     }
 
@@ -1269,13 +1333,15 @@ fn work(scene: Scene, shared: Arc<Shared>) {
         };
         // the bounced light, a step at a time, a picture each time the photons
         // double: the first with the first step's, so the bounced light never
-        // goes missing from a picture while the light straight from the LEDs shows
+        // goes missing from a picture while the light straight from the LEDs
+        // shows. A newer ask waits for that first picture, so a slider dragged
+        // shows on the keyboard as it goes rather than only once let go.
         let mut next = STEP;
         while run.photons < SETTLED {
             if shared.stop.load(Ordering::SeqCst) {
                 return;
             }
-            if shared.ask.lock().unwrap().is_some() {
+            if shared.rest.swap(false, Ordering::SeqCst) || (next > STEP && shared.ask.lock().unwrap().is_some()) {
                 break;
             }
             run.trace(&scene, STEP);
@@ -1768,6 +1834,36 @@ mod tests {
         let clear = Stood::of(&Physics { switch: Switch::ClearTop, ..p });
         let hit = scene.hit(&clear, o, [0.0, 0.0, -1.0], 1e4).map(|h| h.1);
         assert!(!matches!(hit, Some(Struck::Housing)), "a clear housing lets the light by: {hit:?}");
+    }
+
+    /// A change waits for the run under way to show its first picture, so a
+    /// slider dragged in the lab shows on the keyboard as it goes; then the
+    /// change is simulated.
+    #[test]
+    fn a_change_waits_for_the_first_picture() {
+        let (_b, scene, p) = scene();
+        // each picture held as it is published, until it has been looked at
+        let (published, pictures) = std::sync::mpsc::channel::<()>();
+        let (looked, looked_at) = std::sync::mpsc::channel::<()>();
+        let looked_at = Mutex::new(looked_at);
+        let s = Simulator::new(scene, p, 4.5, Box::new(move || {
+            let _ = published.send(());
+            let _ = looked_at.lock().unwrap().recv();
+        }));
+        let next = || {
+            pictures.recv_timeout(std::time::Duration::from_secs(20)).expect("a picture");
+            let l = s.latest().expect("the picture published");
+            looked.send(()).unwrap();
+            l.physics
+        };
+        // the first run under way, working out its light straight from the LEDs
+        while s.shared.ask.lock().unwrap().is_some() {
+            std::thread::yield_now();
+        }
+        let q = Physics { beam: p.beam * 2.0, ..p };
+        s.set(q, 4.5);
+        assert!(next().same_paths(&p.simulated()), "the first run showed its picture before the change");
+        while !next().same_paths(&q.simulated()) {}
     }
 
     /// The beam holds the LED's light but the share the switch scatters, however tight it is.

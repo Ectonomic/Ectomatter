@@ -244,6 +244,7 @@ component WordButton inherits Rectangle {
     in property <color> fill: Ink.shade1;
     in property <color> fill-hover: Ink.shade2;
     out property <bool> hover: ta.has-hover && root.enabled;
+    out property <bool> down: ta.pressed && root.enabled;
     callback clicked;
     height: root.primary ? 32px : 30px;
     width: label.preferred-width + 24px + (root.primary ? 2px : 0);
@@ -962,6 +963,8 @@ component CellView inherits Rectangle {
     // the pointer over a zone, or no longer; a box typed in, or no longer
     callback hovered(int, bool);
     callback focused(int, bool);
+    // a slider double-clicked, to put it back as it was
+    callback reset(int);
     in property <image> glyph;
     x: root.c.x;
     y: root.c.y;
@@ -1065,6 +1068,7 @@ component CellView inherits Rectangle {
                     root.slide(root.c.id, max(0, min(1, (self.mouse-x - 8px) / (self.width - 16px))));
                 }
             }
+            double-clicked => { root.reset(root.c.id); }
         }
     }
     // a switch's ground
@@ -3348,6 +3352,7 @@ export struct LabRow {
 component LabControl inherits Rectangle {
     in property <LabRow> r;
     callback slide(int, float);
+    callback reset(int);
     callback entered(int, string);
     callback hovered(int, bool);
     callback focused(int, bool);
@@ -3388,6 +3393,7 @@ component LabControl inherits Rectangle {
         CellView {
             c: { kind: 3, x: 10px, y: 39px, w: root.r.w, h: 16px, value: root.r.at, id: root.r.id };
             slide(id, v) => { root.slide(id, v); }
+            reset(id) => { root.reset(id); }
         }
         // where it was saved, on its track
         if root.r.moved: Rectangle {
@@ -3429,8 +3435,11 @@ export component LabWindow inherits Window {
     callback entered(int, string);
     callback revert();
     callback save();
-    // a section chosen; a slider or a reading under the pointer; a slider's box typed in
+    // a section chosen; a slider or a reading under the pointer; a slider's box typed in;
+    // Hold to compare held or let go; a slider put back
     callback pick(int, int);
+    callback compare(bool);
+    callback reset(int);
     callback hovered(int, bool);
     callback focused(int, bool);
 
@@ -3526,6 +3535,7 @@ export component LabWindow inherits Window {
         for r in root.rows: LabControl {
             r: r;
             slide(id, v) => { root.slide(id, v); }
+            reset(id) => { root.reset(id); }
             entered(id, t) => { root.entered(id, t); }
             hovered(id, on) => { root.hovered(id, on); }
             focused(id, on) => { root.focused(id, on); }
@@ -3565,6 +3575,14 @@ export component LabWindow inherits Window {
                 color: root.status-kind == 1 ? Ink.good : root.status-kind == 2 ? Ink.bad : Ink.quiet;
                 vertical-alignment: center;
                 horizontal-alignment: right;
+            }
+            WordButton {
+                y: 1px;
+                height: 32px;
+                width: 132px;
+                text: "Hold to compare";
+                enabled: root.can-revert;
+                changed down => { root.compare(self.down); }
             }
             WordButton {
                 y: 1px;

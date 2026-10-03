@@ -28,7 +28,7 @@ use crate::front::WindowAsk;
 use crate::lighting::{cell, kind, style, text_cell};
 use crate::text;
 use crate::{Cell, LabRow, LabWindow, Sketch};
-use ectodeck_draw::hdr::sim::{Physics, Switch};
+use ectodeck_draw::hdr::sim::{Caps, Physics, Switch};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Ask {
@@ -40,6 +40,10 @@ pub enum Ask {
     Typed(i32, String),
     /// one of a section's choices, and the option chosen
     Choose(i32, i32),
+    /// Hold to compare held down, or let go
+    Compare(bool),
+    /// a slider back to its saved value
+    Reset(i32),
     Revert,
     Save,
     /// a section chosen
@@ -87,7 +91,7 @@ struct Param {
     note: &'static str,
 }
 
-const PARAMS: [Param; 27] = [
+const PARAMS: [Param; 26] = [
     Param { path: ("led", ""), label: "North of centre", lo: -9.66, hi: 9.66, step: 0.25, unit: Unit::Length, def: 7.0, note: "Where each key's LED sits under its cap, from the switch's centre toward the top of the key; below 0, toward the bottom, as on a keyboard whose LEDs face south. It goes as far as the switch's edge, so Switch width sets how far the slider reaches." },
     Param { path: ("sim", "nits"), label: "Brightness", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, def: 600.0, note: "The brightest legend, with every key lit white at full, up to Peak nits (Settings › HDR). Everything else the LEDs light is as bright as the simulation finds it beside that. A colour gives off its own share, as an LED does: a red about a fifth." },
     Param { path: ("sim", "beam"), label: "Beam", lo: 1.0, hi: 200.0, step: 0.5, unit: Unit::Number, def: 24.0, note: "How tight the LED's beam out of the top of the switch is. Higher keeps it to a small bright spot on the legend over the LED; lower spreads it across the cap's top and onto the inside of its skirt." },
@@ -111,8 +115,7 @@ const PARAMS: [Param; 27] = [
     Param { path: ("lcd", "field"), label: "Background", lo: 0.0, hi: 0.0, step: 0.1, unit: Unit::Nits, def: 0.8, note: "The ground between the dots." },
     Param { path: ("lcd", "dot"), label: "Dot size", lo: 0.05, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.84, note: "How much of each cell a dot fills; the rest is the gap between dots." },
     Param { path: ("lcd", "glass"), label: "Glass sheen", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 1.0, note: "How strongly the glass over the display shows its reflection, as the art draws it at 100%." },
-    Param { path: ("sim", "skirts"), label: "Sides let through", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.0, note: "The share of the light inside a cap that its skirt lets through, glowing on its outside, as translucent plastic does. Plastic with no coating lets through about what a legend does; a cap coated all over lets none." },
-    Param { path: ("sim", "tops"), label: "Tops let through", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.0, note: "The share of the light on the back of a cap's top that the top lets through beside the legend, for caps translucent all over. A black top lets through only its legend." },
+    Param { path: ("sim", "skirts"), label: "Plastic lets through", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.0, note: "The share of the light on the inside of a cap that its translucent plastic lets through, glowing on its outside: its sides below the black on pudding caps, all of it but the legends on translucent ones. Plastic with no coating lets through about what a legend does." },
     Param { path: ("sim", "black"), label: "Black down the sides", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.0, note: "How far down a cap's sides the black of its top comes, as a share of the skirt's height. A pudding cap's black comes part of the way, its milky plastic below; light gets out only below the black." },
     Param { path: ("sim", "milky"), label: "Milky", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.0, note: "How milky the translucent plastic is. Milky plastic carries the light it takes some way through itself before it leaves, so it glows evenly round the cap, and looks white with its LED off; clear plastic lets the light out where it went in." },
 ];
@@ -125,17 +128,15 @@ struct Choice {
     options: &'static [&'static str],
 }
 
-const CHOICES: [Choice; 4] = [
+const CHOICES: [Choice; 2] = [
     Choice { label: "Switch", note: "What the switch's housing is: black with its LED through a slot in its top, as older switches like the Z10's Kailh Browns have it, so all the LED's light leaves in its beam; or clear, glowing with a share of it, over its top as most RGB switches have it, or all over. Each sets the switch's values for that kind; the sliders tune from there.", options: &["LED slot", "Clear top", "Clear housing"] },
-    Choice { label: "LED side", note: "Which side of the switch's centre the LED sits on: north, toward the top of the key, as on the Z10, or south, as many newer keyboards have it.", options: &["North", "South"] },
-    Choice { label: "Keycaps", note: "What the caps let light through: shine-through caps, as the Z10 came with, are opaque but for their legends; pudding caps have translucent sides below a black top whose black comes part of the way down them; translucent caps let light through all over. Each sets Sides and Tops let through and Black down the sides; the sliders tune from there.", options: &["Shine-through", "Pudding", "Translucent"] },
-    Choice { label: "Plastic", note: "What the caps' translucent plastic is like: milky white, as most pudding caps are, which glows evenly and looks white with its LED off; or clear, which lets the light through as it comes. Each sets Milky; its slider tunes from there.", options: &["Milky", "Clear"] },
+    Choice { label: "Keycaps", note: "What the caps let light through: shine-through caps, as the Z10 came with, are opaque but for their legends; pudding caps have translucent sides below a black top whose black comes part of the way down them; translucent caps let light through all over. Each fills in Plastic lets through and Black down the sides where they are off; the sliders tune from there.", options: &["Shine-through", "Pudding", "Translucent"] },
 ];
 
 /// The page's sections: a title, what the part is, its values, and its choices.
 const SECTIONS: [(&str, &str, &[usize], &[usize]); 4] = [
-    ("LED", "Each key's LED shines up out of its switch in a beam, onto the back of the legend. In a black housing that is all its light; a clear housing scatters a share of it instead, glowing with it over its top and sides, which lights the legend evenly, the inside of the cap and the deck round the switch.", &[0, 1, 2, 3, 4, 5, 7, 6], &[0, 1]),
-    ("Keycaps", "Each cap stands over its switch, its skirt from its foot to its top. Light bounces about inside it; some gets out under the skirt, some through the legend, and some through the plastic where it is translucent and not coated black.", &[8, 9, 10, 23, 24, 25, 26, 11, 12, 13], &[2, 3]),
+    ("LED", "Each key's LED shines up out of its switch in a beam, onto the back of the legend. In a black housing that is all its light; a clear housing scatters a share of it instead, glowing with it over its top and sides, which lights the legend evenly, the inside of the cap and the deck round the switch.", &[0, 1, 2, 3, 4, 5, 7, 6], &[0]),
+    ("Keycaps", "Each cap stands over its switch, its skirt from its foot to its top. Light bounces about inside it; some gets out under the skirt, some through the legend, and some through the plastic where it is translucent and not coated black.", &[8, 9, 10, 23, 24, 25, 11, 12, 13], &[1]),
     ("Wells", "The keys sit in wells in the chassis: the deck at their floor, walled round by the chassis. What each gives back of the light falling on it lights the rest.", &[14, 15, 16, 17], &[]),
     ("Display", "The display's backlit dots, and the glass over them.", &[18, 19, 20, 21, 22], &[]),
 ];
@@ -144,7 +145,12 @@ const SECTIONS: [(&str, &str, &[usize], &[usize]); 4] = [
 /// glow, so its glow's sliders are not shown with it.
 pub(crate) fn sliders_of(section: usize, light: &Value) -> Vec<usize> {
     let slot = Physics::from(light).switch == Switch::Slot;
-    SECTIONS[section].2.iter().copied().filter(|&i| !(slot && matches!(PARAMS[i].path.1, "scatter" | "sides" | "glow_spread"))).collect()
+    // shine-through caps show their plastic only through their legends; translucent ones have no black
+    let caps = Physics::from(light).caps;
+    SECTIONS[section].2.iter().copied().filter(|&i| {
+        let k = PARAMS[i].path.1;
+        !(slot && matches!(k, "scatter" | "sides" | "glow_spread")) && !(caps == Caps::ShineThrough && matches!(k, "skirts" | "milky" | "black")) && !(caps == Caps::Translucent && k == "black")
+    }).collect()
 }
 
 /// The option of a choice the light has.
@@ -156,17 +162,11 @@ fn chosen(choice: usize, light: &Value) -> usize {
             Switch::ClearTop => 1,
             Switch::Clear => 2,
         },
-        1 => usize::from(get(light, ("led", "")).unwrap_or(7.0) < 0.0),
-        2 => {
-            if p.tops > 0.0 {
-                2
-            } else if p.skirts > 0.0 {
-                1
-            } else {
-                0
-            }
-        }
-        _ => usize::from(p.milky <= 0.0),
+        _ => match p.caps {
+            Caps::ShineThrough => 0,
+            Caps::Pudding => 1,
+            Caps::Translucent => 2,
+        },
     }
 }
 
@@ -195,21 +195,22 @@ fn choose(light: &mut Value, choice: usize, option: usize) {
                 }
             }
         }
-        1 => {
-            // the same distance from the centre, on the side asked; from the centre, where switches put their LEDs
-            let led = get(light, ("led", "")).unwrap_or(7.0).abs();
-            let led = if led < 0.01 { 7.0 } else { led };
-            set(light, ("led", ""), if option == 0 { led } else { -led });
-        }
-        2 => {
-            // uncoated plastic lets through about what a legend does; a pudding
-            // cap's black comes some way down its sides, a shine-through cap's all of it
+        _ => {
+            // The caps' kind, and what it needs where it is off: plastic that
+            // lets light through (about what a legend does, uncoated), and for
+            // pudding caps black some way down the sides. Values already tuned
+            // stay, so going from one kind to another and back keeps them.
+            let caps = [Caps::ShineThrough, Caps::Pudding, Caps::Translucent][option.min(2)];
+            light["sim"]["caps"] = json!(caps.name());
             let plastic = get(light, ("sim", "legends")).unwrap_or(0.3);
-            set(light, ("sim", "skirts"), if option >= 1 { plastic } else { 0.0 });
-            set(light, ("sim", "tops"), if option >= 2 { plastic } else { 0.0 });
-            set(light, ("sim", "black"), [1.0, 0.4, 0.0][option.min(2)]);
+            if caps != Caps::ShineThrough && get(light, ("sim", "skirts")).unwrap_or(0.0) <= 0.0 {
+                set(light, ("sim", "skirts"), plastic);
+            }
+            let black = get(light, ("sim", "black")).unwrap_or(0.0);
+            if caps == Caps::Pudding && !(black > 0.0 && black < 1.0) {
+                set(light, ("sim", "black"), 0.4);
+            }
         }
-        _ => set(light, ("sim", "milky"), if option == 0 { 1.0 } else { 0.0 }),
     }
 }
 
@@ -269,6 +270,8 @@ fn reads(p: &Param, v: f64) -> (String, String) {
     match p.unit {
         // to three significant figures, as its slider keeps it
         Unit::Nits => (trim(if v >= 100.0 { format!("{v:.0}") } else if v >= 10.0 { format!("{v:.1}") } else if v >= 1.0 { format!("{v:.2}") } else { format!("{v:.3}") }), "nits".into()),
+        // the LED's place in millimetres from the centre, and which way
+        Unit::Length if p.path == ("led", "") => (trim(format!("{:.1}", v.abs() / UNITS_PER_MM)), if v.abs() < 0.005 { "centred".into() } else if v > 0.0 { "mm north".into() } else { "mm south".into() }),
         Unit::Length => (trim(format!("{v:.2}")), format!("({:.1} mm)", v / UNITS_PER_MM)),
         Unit::Mm => (trim(format!("{v:.1}")), "mm".into()),
         Unit::Reach => (trim(format!("{v:.2}")), "mm".into()),
@@ -321,6 +324,10 @@ pub struct LabPage {
     saved: Value,
     /// counts each change, for the keyboard to take it
     pub rev: u64,
+    /// Hold to compare held: the keyboard shows the saved light
+    pub comparing: bool,
+    /// the changes, for undoing them and doing them again
+    history: History,
     readout: Readout,
     status: (String, i32),
     /// the section shown
@@ -366,6 +373,15 @@ fn set(light: &mut Value, (a, b): (&str, &str), v: f64) {
 /// core once had: its legends' brightness kept, the rest the simulation's.
 fn simulated(mut light: Value) -> Value {
     if light["sim"].is_object() {
+        // the caps' kind named, as its values had it, so it saves as it is
+        // (a translucent cap's top takes what its plastic lets through)
+        if light["sim"]["caps"].is_null() {
+            let caps = Caps::of(&light["sim"]);
+            light["sim"]["caps"] = json!(caps.name());
+        }
+        if let Some(sim) = light["sim"].as_object_mut() {
+            sim.remove("tops");
+        }
         return light;
     }
     let nits = light["legend"]["nits"].as_f64().unwrap_or(600.0);
@@ -409,6 +425,8 @@ impl LabPage {
         on!(on_save, Ask::Save);
         on!(on_pick, |id, index| if id == TABS { Ask::Section(index) } else { Ask::Choose(id - CHOICE, index) });
         on!(on_hovered, |id, on| Ask::Hover(id, on));
+        on!(on_compare, |on| Ask::Compare(on));
+        on!(on_reset, |id| Ask::Reset(id));
         on!(on_focused, |id, on| Ask::Focus(id, on));
         ui.set_mark(mark);
         let (cells, sketches, over, rows, foot) = (Rc::new(VecModel::default()), Rc::new(VecModel::default()), Rc::new(VecModel::default()), Rc::new(VecModel::default()), Rc::new(VecModel::default()));
@@ -428,6 +446,8 @@ impl LabPage {
             saved: light.clone(),
             light,
             rev: 0,
+            comparing: false,
+            history: History::default(),
             readout: Readout::default(),
             status: (String::new(), 0),
             section,
@@ -469,6 +489,7 @@ impl LabPage {
                         let f = if p.path == ("led", "") { 1.0 - f } else { f };
                         let v = self.at_along(id.max(0) as usize, f as f64);
                         if get(&self.light, p.path) != Some(v) {
+                            self.remember(id);
                             set(&mut self.light, p.path, v);
                             self.rev += 1;
                             self.status = (String::new(), 0);
@@ -489,14 +510,18 @@ impl LabPage {
                                     Unit::Mm if p.path.1 == "switch_width" => v.clamp(p.lo, p.hi),
                                     Unit::Nits | Unit::Mm => v.max(0.0),
                                     Unit::Reach => v.max(p.lo),
+                                    // millimetres, on the side it is on unless typed below 0 or "south"/"north"
                                     Unit::Length if p.path.0 == "led" => {
                                         let (lo, hi) = self.range(id.max(0) as usize);
-                                        v.clamp(lo, hi)
+                                        let typed = t.to_lowercase();
+                                        let south = if typed.contains("south") || num.starts_with('-') { true } else if typed.contains("north") { false } else { self.value(0) < 0.0 };
+                                        (v.abs() * UNITS_PER_MM * if south { -1.0 } else { 1.0 }).clamp(lo, hi)
                                     }
                                     Unit::Length => v.max(0.01),
                                     Unit::Number => v.max(p.lo),
                                 };
                                 if get(&self.light, p.path) != Some(v) {
+                                    self.remember(id);
                                     set(&mut self.light, p.path, v);
                                     self.rev += 1;
                                     self.status = (String::new(), 0);
@@ -509,12 +534,32 @@ impl LabPage {
                 Ask::Choose(choice, option) => {
                     let (choice, option) = (choice.max(0) as usize, option.max(0) as usize);
                     if choice < CHOICES.len() && chosen(choice, &self.light) != option {
+                        self.remember(CHOICE + choice as i32);
                         choose(&mut self.light, choice, option);
                         self.rev += 1;
                         self.status = (String::new(), 0);
                     }
                 }
+                Ask::Compare(on) => {
+                    if on != self.comparing {
+                        self.comparing = on;
+                        self.status = if on { ("Showing the saved tuning while held.".into(), 0) } else { (String::new(), 0) };
+                    }
+                }
+                Ask::Reset(id) => {
+                    let i = id.max(0) as usize;
+                    if let Some(p) = PARAMS.get(i) {
+                        let was = self.value_in(&self.saved, i);
+                        if get(&self.light, p.path) != Some(was) {
+                            self.remember(id);
+                            set(&mut self.light, p.path, was);
+                            self.rev += 1;
+                            self.status = (format!("{} back to its saved value.", p.label), 0);
+                        }
+                    }
+                }
                 Ask::Revert => {
+                    self.remember(-1);
                     self.light = self.saved.clone();
                     self.rev += 1;
                     self.status = ("Back to the Z10 core's saved tuning.".into(), 0);
@@ -557,6 +602,35 @@ impl LabPage {
         }
         self.refresh();
         window
+    }
+
+    /// Remember the light before a change to `id`, for undoing it.
+    fn remember(&mut self, id: i32) {
+        self.history.remember(&self.light, id, Instant::now());
+    }
+
+    /// Undo the last change (Ctrl+Z), or do again the last undone (Ctrl+Shift+Z).
+    pub fn undo(&mut self, again: bool) {
+        if self.history.step(&mut self.light, again) {
+            self.rev += 1;
+            self.status = (if again { "Done again." } else { "Undone." }.into(), 0);
+            self.refresh();
+        }
+    }
+
+    /// Whether a value's box is being typed in (its own keys are its own).
+    pub fn typing(&self) -> bool {
+        self.focused.is_some()
+    }
+
+    /// The light the keyboard shows: the saved one while Hold to compare is held.
+    pub fn shown(&self) -> &Value {
+        if self.comparing { &self.saved } else { &self.light }
+    }
+
+    /// The light as the core's file last had it.
+    pub fn saved(&self) -> &Value {
+        &self.saved
     }
 
     /// What is on the keyboard now, from the main window.
@@ -822,7 +896,7 @@ impl LabPage {
             }
             let p = &PARAMS[i];
             let (number, mut unit) = reads(p, self.value(i));
-            let mut derived = p.unit == Unit::Length;
+            let mut derived = p.unit == Unit::Length && p.path.0 != "led";
             if let Some((_, extra)) = self.drawn.as_ref().and_then(|(st, _)| st.extras.iter().find(|e| e.0 == i)) {
                 unit = extra.clone();
                 derived = true;
@@ -864,7 +938,7 @@ impl LabPage {
     fn readout_line(&self) -> Vec<Cell> {
         let (w, _, _, _) = self.sizes();
         let status = if self.status.0.is_empty() && self.light != self.saved { "Changed, not saved." } else { self.status.0.as_str() };
-        let room = w - 24.0 - 176.0 - 10.0 - 68.0 - 10.0 - if status.is_empty() { 0.0 } else { text::width(400, 12.5, status) + 16.0 } - 24.0;
+        let room = w - 24.0 - 176.0 - 10.0 - 68.0 - 10.0 - 132.0 - 10.0 - if status.is_empty() { 0.0 } else { text::width(400, 12.5, status) + 16.0 } - 24.0;
         for level in 0..3 {
             let (cells, end) = self.readout_at(level);
             if end - 24.0 <= room || level == 2 {
@@ -930,6 +1004,46 @@ impl LabPage {
     }
 }
 
+/// The lab's changes, for undoing them and doing them again: the light as it
+/// was before each change, and as it was before each undo. A change to the
+/// same thing within a moment of the last joins it, so a drag undoes whole.
+#[derive(Default)]
+struct History {
+    back: Vec<Value>,
+    ahead: Vec<Value>,
+    last: Option<(i32, Instant)>,
+}
+
+impl History {
+    const MOST: usize = 200;
+    const JOINS: Duration = Duration::from_millis(800);
+
+    fn remember(&mut self, light: &Value, id: i32, now: Instant) {
+        let joins = self.last.is_some_and(|(last, at)| last == id && now.duration_since(at) < History::JOINS);
+        if !joins {
+            self.back.push(light.clone());
+            if self.back.len() > History::MOST {
+                self.back.remove(0);
+            }
+        }
+        self.ahead.clear();
+        self.last = Some((id, now));
+    }
+
+    /// Back a change (or ahead again), into `light`; false if there is none.
+    fn step(&mut self, light: &mut Value, again: bool) -> bool {
+        let (from, to) = if again { (&mut self.ahead, &mut self.back) } else { (&mut self.back, &mut self.ahead) };
+        match from.pop() {
+            Some(l) => {
+                to.push(std::mem::replace(light, l));
+                self.last = None;
+                true
+            }
+            None => false,
+        }
+    }
+}
+
 /// Lines of `s` broken at spaces, the first to fit `first` pixels, the rest `rest`.
 fn wrap_after(s: &str, first: f32, rest: f32) -> Vec<String> {
     let mut lines = Vec::new();
@@ -976,7 +1090,7 @@ fn light_block(light: &Value) -> String {
     let mut s = String::from(" \"light\": {\n");
     s += &format!("  \"about\": {},\n", serde_json::to_string(&light["about"]).unwrap_or_else(|_| "\"\"".into()));
     s += &format!("  \"led\": {},\n", num("led", &light["led"]));
-    s += &part("sim", &["nits", "switch", "beam", "scatter", "sides", "glow_spread", "switch_top", "switch_width", "skirt_foot", "cap_top", "legends", "skirts", "tops", "black", "milky", "cap_in", "cap_out", "depth", "deck", "walls", "chassis"]);
+    s += &part("sim", &["nits", "switch", "beam", "scatter", "sides", "glow_spread", "switch_top", "switch_width", "skirt_foot", "cap_top", "legends", "caps", "skirts", "black", "milky", "cap_in", "cap_out", "depth", "deck", "walls", "chassis"]);
     s += &part("legend", &["unlit"]);
     s += &part("lcd", &["nits", "unlit", "field", "dot", "glass"]);
     s += &format!("  \"wells\": {}\n", serde_json::to_string(&light["wells"]).unwrap_or_else(|_| "\"mask_1\"".into()));
@@ -988,8 +1102,37 @@ fn light_block(light: &Value) -> String {
 mod tests {
     use super::*;
 
-    /// Each choice reads back as chosen, sets its values, and a black
-    /// housing shows no glow's sliders.
+    /// A drag undoes whole, other changes one at a time, and what is undone
+    /// can be done again until something new is changed.
+    #[test]
+    fn changes_undo_and_do_again() {
+        let mut h = History::default();
+        let t = Instant::now();
+        let at = |ms: u64| t + Duration::from_millis(ms);
+        let mut light = json!({ "v": 0 });
+        // a drag: many changes to one slider close together
+        for (i, ms) in [(1, 0), (2, 16), (3, 32), (4, 48)] {
+            h.remember(&light, 5, at(ms));
+            light["v"] = json!(i);
+        }
+        // then another slider, and the first again after a pause
+        h.remember(&light, 6, at(100));
+        light["w"] = json!(1);
+        h.remember(&light, 5, at(2000));
+        light["v"] = json!(9);
+        assert!(h.step(&mut light, false) && light["v"] == json!(4), "the last change undone");
+        assert!(h.step(&mut light, false) && light["w"].is_null(), "then the other slider's");
+        assert!(h.step(&mut light, false) && light["v"] == json!(0), "then the whole drag at once");
+        assert!(!h.step(&mut light, false), "nothing before it");
+        assert!(h.step(&mut light, true) && light["v"] == json!(4), "done again");
+        h.remember(&light, 7, at(3000));
+        light["x"] = json!(1);
+        assert!(!h.step(&mut light, true), "a new change ends what could be done again");
+    }
+
+    /// Each choice reads back as chosen and sets its values; a black housing
+    /// shows no glow's sliders, and a cap's kind only the sliders it has;
+    /// going from one kind of cap to another and back keeps what was tuned.
     #[test]
     fn the_choices_set_the_light() {
         let mut light = json!({ "led": 4.5, "sim": { "nits": 600, "legends": 0.3 } });
@@ -1000,25 +1143,31 @@ mod tests {
         }
         assert_eq!(get(&light, ("sim", "switch_top")), Some(5.7));
         assert_eq!(get(&light, ("sim", "beam")), Some(3.0));
-        let shown = sliders_of(0, &light);
-        assert!(shown.iter().all(|&i| !matches!(PARAMS[i].path.1, "scatter" | "sides" | "glow_spread")), "a black housing has no glow to tune");
+        let shown = |light: &Value, section| sliders_of(section, light).iter().map(|&i| PARAMS[i].path.1).collect::<Vec<_>>();
+        assert!(shown(&light, 0).iter().all(|k| !matches!(*k, "scatter" | "sides" | "glow_spread")), "a black housing has no glow to tune");
         choose(&mut light, 0, 1);
         assert_eq!(sliders_of(0, &light).len(), SECTIONS[0].2.len(), "a clear one shows them all");
+        // the caps
+        assert_eq!(chosen(1, &light), 0, "no plastic letting light through: shine-through");
+        assert!(shown(&light, 1).iter().all(|k| !matches!(*k, "skirts" | "milky" | "black")), "shine-through caps have none of those");
         choose(&mut light, 1, 1);
-        assert_eq!((chosen(1, &light), get(&light, ("led", ""))), (1, Some(-4.5)), "south, as far from the centre");
+        assert_eq!((chosen(1, &light), get(&light, ("sim", "skirts")), get(&light, ("sim", "black"))), (1, Some(0.3), Some(0.4)), "pudding: the plastic lets through what a legend does, below the black");
+        assert!(["skirts", "milky", "black"].iter().all(|k| shown(&light, 1).contains(k)));
+        set(&mut light, ("sim", "skirts"), 0.0);
+        assert_eq!(chosen(1, &light), 1, "pudding caps stay pudding with their plastic dragged to nothing");
+        set(&mut light, ("sim", "skirts"), 0.45);
+        set(&mut light, ("sim", "black"), 0.3);
+        choose(&mut light, 1, 2);
+        let p = Physics::from(&light);
+        assert_eq!((p.caps, p.skirts, p.tops, p.black), (Caps::Translucent, 0.45, 0.45, 0.0), "a translucent top lets through what the plastic does");
+        assert!(!shown(&light, 1).contains(&"black"), "translucent caps have no black");
         choose(&mut light, 1, 0);
-        assert_eq!(get(&light, ("led", "")), Some(4.5));
-        for option in [1, 2, 0] {
-            choose(&mut light, 2, option);
-            assert_eq!(chosen(2, &light), option);
-        }
-        choose(&mut light, 2, 1);
-        assert_eq!((get(&light, ("sim", "skirts")), get(&light, ("sim", "tops")), get(&light, ("sim", "black"))), (Some(0.3), Some(0.0), Some(0.4)), "pudding: the sides let through what a legend does, below the black");
-        for option in [1, 0] {
-            choose(&mut light, 3, option);
-            assert_eq!(chosen(3, &light), option);
-        }
-        assert_eq!(get(&light, ("sim", "milky")), Some(1.0), "milky plastic");
+        assert_eq!(Physics::from(&light).skirts, 0.0);
+        choose(&mut light, 1, 1);
+        assert_eq!((get(&light, ("sim", "skirts")), get(&light, ("sim", "black"))), (Some(0.45), Some(0.3)), "back to pudding as it was tuned");
+        // the LED's place in millimetres, and its side
+        assert_eq!(reads(&PARAMS[0], 7.0), ("5.1".into(), "mm north".into()));
+        assert_eq!(reads(&PARAMS[0], -2.76), ("2".into(), "mm south".into()));
     }
 
     /// The light section Save writes reads back as the light it was given,
