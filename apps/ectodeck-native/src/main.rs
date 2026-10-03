@@ -896,6 +896,9 @@ struct SubWin {
 }
 
 /// A screen's levels as KWin describes them: its white and its peak, in nits.
+/// How often each screen's levels are asked for again.
+const LEVELS_EVERY: Duration = Duration::from_secs(2);
+
 struct ScreenLevels {
     id: u32,
     _cmo: WpColorManagementOutputV1,
@@ -972,6 +975,22 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
             if let calloop::channel::Event::Msg(()) = e {
                 app.sim_ready();
             }
+        })
+        .unwrap();
+
+    // Each screen's levels asked for again every two seconds: KWin does not
+    // always say when they change (a screen dimmed while the desktop is idle
+    // and lit again comes back without a word), and a picture described for
+    // a white the screen no longer has shows its light as much too strong.
+    event_loop
+        .handle()
+        .insert_source(calloop::timer::Timer::from_duration(LEVELS_EVERY), |_, _, app: &mut App| {
+            for s in &app.screens {
+                let desc = s._cmo.get_image_description(&app.qh, ScreenTag(s.id));
+                desc.get_information(&app.qh, ScreenTag(s.id));
+                desc.destroy();
+            }
+            calloop::timer::TimeoutAction::ToDuration(LEVELS_EVERY)
         })
         .unwrap();
 
