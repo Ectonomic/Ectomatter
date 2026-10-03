@@ -698,6 +698,13 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
             slint::platform::update_timers_and_animations();
         }
     }
+    // ECTODECK_NATIVE_PRESS=x,y: the pointer pressed there and held, for what shows while it is
+    if let Some((x, y)) = std::env::var("ECTODECK_NATIVE_PRESS").ok().and_then(|s| s.split_once(',').and_then(|(a, b)| Some((a.trim().parse::<f32>().ok()?, b.trim().parse::<f32>().ok()?)))) {
+        let position = LogicalPosition::new(x, y);
+        window.dispatch_event(WindowEvent::PointerMoved { position });
+        window.dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Left });
+        lab.act();
+    }
     lab.act();
     window.request_redraw();
     draw(&mut px);

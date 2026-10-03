@@ -643,7 +643,8 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
             s.text(x0 - 8.0, base - tall + 4.0, &format!("{n} {u}"), if white("Brightness") { WHITE_WORD } else { QUIET_WORD }, 1.0);
             s.text(x0 - 8.0, base + 4.0, "0", QUIET_WORD, 1.0);
             let peak = pts.iter().zip(&light).fold((0.0, x0), |a, (q, &l)| if l > a.0 { (l, q.0) } else { a }).1;
-            let (end, anchor) = if peak < (x0 + x1) / 2.0 { (x1, 1.0) } else { (x0, 0.0) };
+            // (on the right, clear of Brightness's line down to the top's end)
+            let (end, anchor) = if peak < (x0 + x1) / 2.0 { (x1 - 12.0, 1.0) } else { (x0, 0.0) };
             s.text(end, base - tall - 22.0, "Light on the cap's top", QUIET_WORD, anchor);
             s.text(end, base - tall - 7.0, "over its two legends", FAINT_WORD, anchor);
             labels.push(Label { drop: true, ..Label::new(false, (x1, base - tall), "Brightness") });

@@ -543,7 +543,7 @@ impl LabPage {
                 Ask::Compare(on) => {
                     if on != self.comparing {
                         self.comparing = on;
-                        self.status = if on { ("Showing the saved tuning while held.".into(), 0) } else { (String::new(), 0) };
+                        self.status = if on { ("Showing the saved tuning.".into(), 0) } else { (String::new(), 0) };
                     }
                 }
                 Ask::Reset(id) => {
@@ -690,14 +690,12 @@ impl LabPage {
         } else {
             self.rows.set_vec(rows);
         }
-        self.ui.set_status_text(self.status.0.as_str().into());
+        self.ui.set_status_text(self.status_shown().into());
         self.ui.set_status_kind(self.status.1);
+        self.ui.set_status_room(self.status_room());
         let changed = self.light != self.saved;
         self.ui.set_can_save(changed);
         self.ui.set_can_revert(changed);
-        if changed && self.status.0.is_empty() {
-            self.ui.set_status_text("Changed, not saved.".into());
-        }
     }
 
     /// The window's size, and the stage's in it.
@@ -934,18 +932,36 @@ impl LabPage {
     /// a zone that tells of it under the pointer; the numbers dimmed while
     /// the simulation clears. In a narrow window it says less to fit beside
     /// what was last done and the buttons: the simulation without its count
-    /// of photons, then without its heading (both still told under the pointer).
+    /// of photons, then without its heading (both still told under the
+    /// pointer), then without the desktop's white, then without the display.
+    /// What was last done takes no more than the room left beside the
+    /// shortest, its words wrapping past it.
     fn readout_line(&self) -> Vec<Cell> {
-        let (w, _, _, _) = self.sizes();
-        let status = if self.status.0.is_empty() && self.light != self.saved { "Changed, not saved." } else { self.status.0.as_str() };
-        let room = w - 24.0 - 176.0 - 10.0 - 68.0 - 10.0 - 132.0 - 10.0 - if status.is_empty() { 0.0 } else { text::width(400, 12.5, status) + 16.0 } - 24.0;
-        for level in 0..3 {
+        let status = self.status_shown();
+        let room = self.foot_room() - if status.is_empty() { 0.0 } else { (text::width(400, 12.5, status) + 16.0).min(self.status_room() + 16.0) };
+        for level in 0..5 {
             let (cells, end) = self.readout_at(level);
-            if end - 24.0 <= room || level == 2 {
+            if end - 24.0 <= room || level == 4 {
                 return cells;
             }
         }
         unreachable!()
+    }
+
+    /// What the foot says was last done: "Changed, not saved." if nothing else.
+    fn status_shown(&self) -> &str {
+        if self.status.0.is_empty() && self.light != self.saved { "Changed, not saved." } else { self.status.0.as_str() }
+    }
+
+    /// The foot's room for its readout and what was last done, beside its buttons.
+    fn foot_room(&self) -> f32 {
+        let (w, _, _, _) = self.sizes();
+        w - 24.0 - 176.0 - 10.0 - 68.0 - 10.0 - 132.0 - 10.0 - 24.0
+    }
+
+    /// The most room what was last done takes: what the shortest readout leaves.
+    fn status_room(&self) -> f32 {
+        self.foot_room() - (self.readout_at(4).1 - 24.0) - 16.0
     }
 
     /// The readout laid out, saying less as `level` rises; and where it ends.
@@ -978,6 +994,9 @@ impl LabPage {
             *x += 14.0;
         };
         for (k, (label, value)) in items.iter().enumerate() {
+            if k == 4 && level >= 4 {
+                continue;
+            }
             let c = if k == 0 && held { [0xf0, 0xb3, 0x5a] } else { value_colour };
             item(&mut out, &mut x, READING + k as i32, label, value, c);
         }
@@ -987,8 +1006,10 @@ impl LabPage {
             *x += 15.0;
         };
         sep(&mut out, &mut x);
-        item(&mut out, &mut x, READING + 5, "Desktop white", &format!("{} nits", nits(r.white)), value_colour);
-        sep(&mut out, &mut x);
+        if level < 3 {
+            item(&mut out, &mut x, READING + 5, "Desktop white", &format!("{} nits", nits(r.white)), value_colour);
+            sep(&mut out, &mut x);
+        }
         let photons = if level == 0 { format!(", {} photons", text::thousands(r.photons as u64)) } else { String::new() };
         let sim = if r.photons == 0 {
             "Starting".to_string()

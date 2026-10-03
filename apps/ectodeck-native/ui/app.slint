@@ -3422,6 +3422,8 @@ export component LabWindow inherits Window {
     in property <[Cell]> foot;
     in property <string> status-text;
     in property <int> status-kind;
+    // the most room what was last done takes, its words wrapping past it
+    in property <length> status-room: 400px;
     in property <bool> can-save;
     in property <bool> can-revert;
     out property <length> window-width: root.width;
@@ -3575,6 +3577,8 @@ export component LabWindow inherits Window {
                 color: root.status-kind == 1 ? Ink.good : root.status-kind == 2 ? Ink.bad : Ink.quiet;
                 vertical-alignment: center;
                 horizontal-alignment: right;
+                max-width: max(0px, root.status-room);
+                wrap: word-wrap;
             }
             WordButton {
                 y: 1px;
