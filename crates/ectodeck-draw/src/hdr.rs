@@ -147,10 +147,6 @@ fn falloff(r: f32, h: f32) -> f32 {
 pub struct Board {
     pub w: u32,
     pub h: u32,
-    /// the body and its print over the ground's colour: opaque, sRGB-encoded
-    under: Vec<f32>,
-    /// the caps' shadows on the body, from the room's light, which the LEDs' light is not under
-    shadow: Vec<f32>,
     /// the caps, and the legends of unlit keys: premultiplied, sRGB-encoded
     caps: Vec<f32>,
     keys: Vec<KeyArt>,
@@ -171,9 +167,58 @@ pub struct Board {
     /// light out of its edges, in nits, and its colour (sRGB)
     indicators: Vec<Indicator>,
     indicator_light: (f32, f32, [u8; 3]),
+    /// the board with none of the keys' light, in linear light, opaque: the
+    /// body under the caps' shadows and the caps over it (it never changes,
+    /// so a picture starts from it)
+    base: Vec<f32>,
     /// the simulation's latest picture of the keys' light, and its brightest on each part
     sim: Option<Arc<Snapshot>>,
     most: Most,
+    /// where each pixel reads the simulation's light, as seen from above,
+    /// and each legend's pixels through its cap's top (a key's in its order):
+    /// worked out once for the simulation's shapes, which every picture of
+    /// one run shares, rather than for every picture drawn
+    reads: Vec<Read>,
+    legend_reads: Vec<Vec<Read>>,
+    reads_for: Option<(usize, usize)>,
+}
+
+/// Where a pixel reads the simulation's light, as sim::At has it, kept small:
+/// the first of its four cells on each grid, whether the others are a step
+/// across and down from it (the grid's edge has none), and their shares.
+#[derive(Clone, Copy)]
+struct Read {
+    code: u8,
+    steps: u8,
+    fine: u32,
+    coarse: u32,
+    fw: [f32; 4],
+    cw: [f32; 4],
+}
+
+impl Read {
+    const NONE: Read = Read { code: 255, steps: 0, fine: 0, coarse: 0, fw: [0.0; 4], cw: [0.0; 4] };
+
+    fn of(a: Option<sim::At>, fine_w: usize, coarse_w: usize) -> Read {
+        let Some(a) = a else { return Read::NONE };
+        let step = |c: &[(usize, f32); 4], w: usize| ((c[1].0 - c[0].0) as u8) | ((((c[2].0 - c[0].0) / w.max(1)) as u8) << 1);
+        Read {
+            code: a.code,
+            steps: step(&a.fine, fine_w) | (step(&a.coarse, coarse_w) << 2),
+            fine: a.fine[0].0 as u32,
+            coarse: a.coarse[0].0 as u32,
+            fw: a.fine.map(|c| c.1),
+            cw: a.coarse.map(|c| c.1),
+        }
+    }
+
+    fn at(&self, fine_w: usize, coarse_w: usize) -> sim::At {
+        let cells = |first: u32, steps: u8, w: usize, ws: [f32; 4]| {
+            let (i, dx, dy) = (first as usize, (steps & 1) as usize, ((steps >> 1) & 1) as usize * w);
+            [(i, ws[0]), (i + dx, ws[1]), (i + dy, ws[2]), (i + dy + dx, ws[3])]
+        };
+        sim::At { code: self.code, fine: cells(self.fine, self.steps, fine_w, self.fw), coarse: cells(self.coarse, self.steps >> 2, coarse_w, self.cw) }
+    }
 }
 
 /// A lock light: which of the keyboard's lights it shows (a kernel light
@@ -352,7 +397,7 @@ impl Board {
         let mut body = Pixmap::new(w, h).ok_or("board too small")?;
         draw(&mut body, "body");
         let chassis: Vec<f32> = body.data().chunks_exact(4).map(|p| p[3] as f32 / 255.0).collect();
-        let under = pix.data().chunks_exact(4).flat_map(|p| [p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0]).collect();
+        let under: Vec<f32> = pix.data().chunks_exact(4).flat_map(|p| [p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0]).collect();
 
         // Every cap but the slider knobs (the page moves those): its shadow (its
         // first piece, drawn blurred) apart from the rest, since the shadow is the
@@ -499,11 +544,22 @@ impl Board {
             .collect();
         let rgb = ind["rgb"].as_array().map(|c| [0, 1, 2].map(|i| c.get(i).and_then(|v| v.as_u64()).unwrap_or(255).min(255) as u8)).unwrap_or([255; 3]);
         let indicator_light = (num(&ind["nits"], 300.0).max(0.0), num(&ind["spill"]["nits"], 6.0).max(0.0), rgb);
+        // the board with none of the keys' light: the body and its print (over
+        // the ground's colour, sRGB-encoded) in linear light under the caps'
+        // shadows (the room's light, which the LEDs' light is not under), the caps over it
+        let dec = |v: f32| v.max(0.0).powf(2.2);
+        let base: Vec<f32> = (0..(w * h) as usize)
+            .flat_map(|j| {
+                let (lit, a) = (1.0 - shadow[j], caps[j * 4 + 3]);
+                [0, 1, 2].map(|c| {
+                    let body = dec(under[j * 3 + c]) * lit;
+                    if a > 0.0 { dec(caps[j * 4 + c] / a) * a + body * (1.0 - a) } else { body }
+                })
+            })
+            .collect();
         Ok(Board {
             w,
             h,
-            under,
-            shadow,
             caps,
             keys,
             others,
@@ -514,8 +570,12 @@ impl Board {
             art_offset: (ox, oy),
             indicators,
             indicator_light,
+            base,
             sim: None,
             most: Most::default(),
+            reads: Vec::new(),
+            legend_reads: Vec::new(),
+            reads_for: None,
         })
     }
 
@@ -534,8 +594,67 @@ impl Board {
 
     /// Light the keys by the simulation's latest picture of their light.
     pub fn set_sim(&mut self, snap: Arc<Snapshot>) {
+        let shapes = (Arc::as_ptr(&snap.surface) as usize, Arc::as_ptr(&snap.cover) as usize);
+        if self.reads_for != Some(shapes) {
+            self.read_from(&snap);
+            self.reads_for = Some(shapes);
+        }
         self.most = self.measure(&snap);
         self.sim = Some(snap);
+    }
+
+    /// Where each pixel reads the simulation's light, and each legend's
+    /// pixels, a band of rows (and a share of the keys) to a thread.
+    fn read_from(&mut self, s: &Snapshot) {
+        let (w, h) = (self.w as usize, self.h as usize);
+        let (fw, cw) = (s.fine.w, s.coarse.w);
+        let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(16);
+        let mut reads = vec![Read::NONE; w * h];
+        let rows = h.div_ceil(threads).max(1);
+        let board = &*self;
+        std::thread::scope(|sc| {
+            for (b, band) in reads.chunks_mut(rows * w).enumerate() {
+                sc.spawn(move || {
+                    for (i, r) in band.iter_mut().enumerate() {
+                        let j = b * rows * w + i;
+                        let (u, v) = board.unit(j % w, j / w);
+                        *r = Read::of(s.at(u, v, None), fw, cw);
+                    }
+                });
+            }
+        });
+        let legend_reads: Vec<Vec<Read>> = std::thread::scope(|sc| {
+            let per = board.keys.len().div_ceil(threads).max(1);
+            let jobs: Vec<_> = board
+                .keys
+                .chunks(per)
+                .map(|keys| {
+                    sc.spawn(move || {
+                        keys.iter()
+                            .map(|key| match &key.legend {
+                                None => Vec::new(),
+                                Some(l) => l
+                                    .cover
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(i, c)| {
+                                        let (x, y) = (l.x + (i as u32 % l.w) as i32, l.y + (i as u32 / l.w) as i32);
+                                        if *c <= 0.0 || x < 0 || y < 0 || x >= w as i32 || y >= h as i32 {
+                                            return Read::NONE;
+                                        }
+                                        let (u, v) = board.unit(x as usize, y as usize);
+                                        Read::of(s.at(u, v, Some(3)), fw, cw)
+                                    })
+                                    .collect(),
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            jobs.into_iter().flat_map(|j| j.join().expect("a share of the legends' reads")).collect()
+        });
+        self.reads = reads;
+        self.legend_reads = legend_reads;
     }
 
     /// How far the simulation the keys are lit by has got: the photons it
@@ -578,19 +697,15 @@ impl Board {
     /// picture comes in while a slider is dragged.)
     fn measure(&self, s: &Snapshot) -> Most {
         let (w, h) = (self.w as usize, self.h as usize);
+        let (fw, cw) = (s.fine.w, s.coarse.w);
         let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(16);
-        let legends = |keys: &[KeyArt]| {
+        let legends = |keys: std::ops::Range<usize>| {
             let mut m = Most::default();
-            for key in keys {
-                let Some(l) = &key.legend else { continue };
-                for (i, c) in l.cover.iter().enumerate() {
-                    let (x, y) = (l.x + (i as u32 % l.w) as i32, l.y + (i as u32 / l.w) as i32);
-                    if *c < 0.5 || x < 0 || y < 0 || x >= self.w as i32 || y >= self.h as i32 {
-                        continue;
-                    }
-                    let (u, v) = self.unit(x as usize, y as usize);
-                    if let Some(a) = s.at(u, v, Some(3)) {
-                        m.legend = m.legend.max(s.white(&a));
+            for k in keys {
+                let (Some(l), Some(reads)) = (&self.keys[k].legend, self.legend_reads.get(k)) else { continue };
+                for (c, r) in l.cover.iter().zip(reads) {
+                    if *c >= 0.5 && r.code != 255 {
+                        m.legend = m.legend.max(s.white(&r.at(fw, cw)));
                     }
                 }
             }
@@ -599,13 +714,11 @@ impl Board {
         let rest = |rows: std::ops::Range<usize>| {
             let mut m = Most::default();
             for j in rows.start * w..rows.end * w {
-                let cap = self.caps[j * 4 + 3];
-                let (u, v) = self.unit(j % w, j / w);
-                let Some(a) = s.at(u, v, None) else { continue };
-                match a.code {
-                    0 if cap < 0.01 => m.deck = m.deck.max(s.white(&a)),
-                    1 if cap < 0.01 => m.chassis = m.chassis.max(s.white(&a)),
-                    2 if cap > 0.99 => m.skirt = m.skirt.max(s.white(&a)),
+                let (cap, r) = (self.caps[j * 4 + 3], &self.reads[j]);
+                match r.code {
+                    0 if cap < 0.01 => m.deck = m.deck.max(s.white(&r.at(fw, cw))),
+                    1 if cap < 0.01 => m.chassis = m.chassis.max(s.white(&r.at(fw, cw))),
+                    2 if cap > 0.99 => m.skirt = m.skirt.max(s.white(&r.at(fw, cw))),
                     _ => {}
                 }
             }
@@ -613,10 +726,9 @@ impl Board {
         };
         let (per_key, per_row) = (self.keys.len().div_ceil(threads).max(1), h.div_ceil(threads).max(1));
         std::thread::scope(|sc| {
-            let parts: Vec<_> = self
-                .keys
-                .chunks(per_key)
-                .map(|keys| sc.spawn(move || legends(keys)))
+            let parts: Vec<_> = (0..self.keys.len())
+                .step_by(per_key)
+                .map(|k| sc.spawn(move || legends(k..(k + per_key).min(self.keys.len()))))
                 .chain((0..h).step_by(per_row).map(|y| sc.spawn(move || rest(y..(y + per_row).min(h)))))
                 .collect();
             parts.into_iter().map(|p| p.join().expect("a share of the measuring")).fold(Most::default(), |a, b| Most {
@@ -667,8 +779,19 @@ impl Board {
     /// screen clips it. The caps' shadows are the room's light blocked, so
     /// the LEDs' light is not under them.
     pub fn compose(&self, lights: &[Light], locks: u8, white: f32, ceiling: f32) -> Vec<f32> {
+        let mut out = Vec::new();
+        self.compose_into(&mut out, lights, locks, white, ceiling);
+        out
+    }
+
+    /// The picture with this light, drawn into `out`, which an animation
+    /// keeps from one frame to the next rather than making it anew.
+    pub fn compose_into(&self, out: &mut Vec<f32>, lights: &[Light], locks: u8, white: f32, ceiling: f32) {
         let (w, h) = (self.w as usize, self.h as usize);
-        let mut out = vec![0f32; w * h * 4];
+        if out.len() != w * h * 4 {
+            out.clear();
+            out.resize(w * h * 4, 0.0);
+        }
         // the keys' light in their colours, made once for every band
         let keys = self.sim.as_deref().map(|snap| {
             let colour = |pos: u32| lights.iter().find(|l| l.pos == pos).map_or([0.0; 3], key_colour);
@@ -687,7 +810,6 @@ impl Board {
                 sc.spawn(move || self.compose_rows(lights, locks, white, ceiling, y0, band, keys));
             }
         });
-        out
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -696,45 +818,25 @@ impl Board {
         let n = out.len() / 4;
         let y1 = y0 + n / w;
         let dec = |v: f32| v.max(0.0).powf(2.2);
-        // The body and its print, in linear light, opaque, under the caps'
-        // shadows; and the keys' light on the deck and the chassis, where no
-        // cap stands over them, which the caps' shadows are not on.
+        let (fw, cw) = keys.map_or((0, 0), |k| (k.snap.fine.w, k.snap.coarse.w));
+        // The board unlit, and the keys' light where it shows: on the deck
+        // and the chassis where no cap stands over them, as much as a cap's
+        // edge lets through (the caps' shadows are the room's light, not
+        // over it), and on the caps' skirts' outsides.
         for (i, px) in out.chunks_exact_mut(4).enumerate() {
             let j = y0 * w + i;
-            let lit = 1.0 - self.shadow[j];
-            for c in 0..3 {
-                px[c] = dec(self.under[j * 3 + c]) * lit;
-            }
+            px[..3].copy_from_slice(&self.base[j * 3..j * 3 + 3]);
             px[3] = 1.0;
-            if let Some(k) = keys.filter(|_| self.caps[j * 4 + 3] < 1.0) {
-                let (u, v) = self.unit(j % w, j / w);
-                if let Some(a) = k.snap.at(u, v, None).filter(|a| a.code <= 1) {
-                    let e = k.at(&a);
-                    for c in 0..3 {
-                        px[c] += e[c];
-                    }
-                }
-            }
-        }
-        // the caps over it, and the keys' light on their skirts' outsides
-        for (i, px) in out.chunks_exact_mut(4).enumerate() {
-            let j = y0 * w + i;
-            let cap = &self.caps[j * 4..j * 4 + 4];
-            let a = cap[3];
-            if a <= 0.0 {
-                continue;
-            }
+            let Some(k) = keys else { continue };
+            let (r, a) = (&self.reads[j], self.caps[j * 4 + 3]);
+            let share = match r.code {
+                0 | 1 if a < 1.0 => 1.0 - a,
+                2 if a > 0.0 => a,
+                _ => continue,
+            };
+            let e = k.at(&r.at(fw, cw));
             for c in 0..3 {
-                px[c] = dec(cap[c] / a) * a + px[c] * (1.0 - a);
-            }
-            if let Some(k) = keys {
-                let (u, v) = self.unit(j % w, j / w);
-                if let Some(at) = k.snap.at(u, v, None).filter(|at| at.code == 2) {
-                    let e = k.at(&at);
-                    for c in 0..3 {
-                        px[c] += e[c] * a;
-                    }
-                }
+                px[c] += e[c] * share;
             }
         }
         let light = |pos: u32| lights.iter().find(|l| l.pos == pos);
@@ -762,12 +864,13 @@ impl Board {
         // dimmed by the core's unlit share), which shows less as the light
         // behind it outshines it; and the light through it, the brightest
         // thing on the keyboard. A remapped key's without its second function.
-        for key in &self.keys {
+        for (n, key) in self.keys.iter().enumerate() {
             let Some(s) = &key.legend else { continue };
             let l = light(key.pos);
             let shown = shown(key, l);
             let strength = l.map_or(0.0, |l| l.strength.clamp(0.0, 1.0));
             let print = [0, 1, 2].map(|c| dec(key.print[c]) * self.model.legend_unlit * (1.0 - strength));
+            let reads = self.legend_reads.get(n);
             each(s, &mut |d, i, a| {
                 let a = a * shown[i];
                 if a <= 0.0 {
@@ -776,14 +879,10 @@ impl Board {
                 for c in 0..3 {
                     out[d * 4 + c] = out[d * 4 + c] * (1.0 - a) + print[c] * a;
                 }
-                if let Some(k) = keys {
-                    let j = y0 * w + d;
-                    let (u, v) = self.unit(j % w, j / w);
-                    if let Some(at) = k.snap.at(u, v, Some(3)) {
-                        let e = k.at(&at);
-                        for c in 0..3 {
-                            out[d * 4 + c] += e[c] * a;
-                        }
+                if let (Some(k), Some(r)) = (keys, reads.and_then(|r| r.get(i)).filter(|r| r.code != 255)) {
+                    let e = k.at(&r.at(fw, cw));
+                    for c in 0..3 {
+                        out[d * 4 + c] += e[c] * a;
                     }
                 }
             });
@@ -833,43 +932,81 @@ fn pq(nits: f64) -> f64 {
 }
 
 /// Linear light to the HDR layer's pixels, quickly: PQ looked up in a table
-/// spaced by the fourth root of brightness, which puts most of its entries in
-/// the dark, where PQ changes fastest.
+/// read at the bits of the light's share of PQ's 10,000 nits, which split
+/// each halving of brightness into the same number of even steps, so most of
+/// the table is in the dark, where PQ changes fastest. Nothing is worked out
+/// for a pixel but where it falls in the table and how far to the next entry.
 pub struct Encoder {
     table: Vec<f32>,
     reference: f32,
 }
 
-const STEPS: usize = 8192;
+/// The halvings of brightness the table covers below PQ's peak (down to a
+/// trillionth of it, far darker than any screen shows), and the bits that
+/// split each into even steps (128 of them).
+const OCTAVES: u32 = 56;
+const STEP_BITS: u32 = 7;
+/// a float's bits past the steps', the way from one entry to the next
+const SHIFT: u32 = 23 - STEP_BITS;
+/// the bits of the table's darkest entry, a float's exponent and the steps' bits
+const FIRST: u32 = (127 - OCTAVES) << STEP_BITS;
+/// the table's darkest entry, as a share of PQ's peak
+const DARKEST: f32 = 1.0 / (1u64 << OCTAVES) as f32;
 
 impl Encoder {
     pub fn new(reference: f64) -> Encoder {
-        let table = (0..=STEPS).map(|i| pq(10000.0 * (i as f64 / STEPS as f64).powi(4)) as f32).collect();
+        let entries = OCTAVES << STEP_BITS;
+        let mut table: Vec<f32> = (0..=entries).map(|i| pq(10000.0 * f32::from_bits((FIRST + i) << SHIFT) as f64) as f32).collect();
+        // what no light at all gives, to read up from in the darkest step
+        table.push(pq(0.0) as f32);
         Encoder { table, reference: reference as f32 }
     }
 
     fn signal(&self, nits: f32) -> f32 {
-        let u = (nits.max(0.0) / 10000.0).sqrt().sqrt().min(1.0) * STEPS as f32;
-        let i = (u as usize).min(STEPS - 1);
-        let f = u - i as f32;
-        self.table[i] * (1.0 - f) + self.table[i + 1] * f
+        let x = nits * (1.0 / 10000.0);
+        let last = (OCTAVES << STEP_BITS) as usize;
+        if x >= 1.0 {
+            return self.table[last];
+        }
+        if !(x >= DARKEST) {
+            // darker than the table goes (or nothing, or not a number)
+            let none = self.table[last + 1];
+            return none + (self.table[0] - none) * (x.max(0.0) / DARKEST);
+        }
+        let b = x.to_bits();
+        let i = ((b >> SHIFT) - FIRST) as usize;
+        let f = (b & ((1 << SHIFT) - 1)) as f32 * (1.0 / (1 << SHIFT) as f32);
+        self.table[i] + (self.table[i + 1] - self.table[i]) * f
     }
 
     /// One pixel: premultiplied linear RGBA (SDR white 1.0, BT.709) to
     /// premultiplied PQ, BT.2020, as the channels of ABGR16161616
     pub fn pixel(&self, px: [f32; 4]) -> [u16; 4] {
-        const M: [[f32; 3]; 3] = [[0.6274, 0.3293, 0.0433], [0.0691, 0.9195, 0.0114], [0.0164, 0.0880, 0.8956]];
         let a = px[3];
         if a <= 0.0 {
             return [0; 4];
         }
-        let c = [px[0] / a, px[1] / a, px[2] / a];
+        let r = 1.0 / a;
+        self.straight([px[0] * r, px[1] * r, px[2] * r], a)
+    }
+
+    /// One pixel given as its colour in linear light (SDR white 1.0, BT.709)
+    /// and how much of it there is, to premultiplied PQ, BT.2020, as the
+    /// channels of ABGR16161616
+    pub fn straight(&self, c: [f32; 3], a: f32) -> [u16; 4] {
+        const M: [[f32; 3]; 3] = [[0.6274, 0.3293, 0.0433], [0.0691, 0.9195, 0.0114], [0.0164, 0.0880, 0.8956]];
+        if a <= 0.0 {
+            return [0; 4];
+        }
+        let k = a * 65535.0;
         let mut out = [0u16; 4];
+        // rounded by a half added and the rest dropped, as round() does for
+        // these (never negative), without the call it makes for each
         for (o, row) in out.iter_mut().zip(M) {
             let v = row[0] * c[0] + row[1] * c[1] + row[2] * c[2];
-            *o = (self.signal(v * self.reference) * a * 65535.0).round().clamp(0.0, 65535.0) as u16;
+            *o = (self.signal(v * self.reference) * k + 0.5).clamp(0.0, 65535.0) as u16;
         }
-        out[3] = (a.min(1.0) * 65535.0).round() as u16;
+        out[3] = (a.min(1.0) * 65535.0 + 0.5) as u16;
         out
     }
 
@@ -1252,12 +1389,27 @@ mod tests {
         }
     }
 
+    /// The table gives PQ to well within one of the screen's 65,536 steps,
+    /// from no light to past PQ's peak, through every halving between.
     #[test]
     fn the_table_matches_pq() {
         let enc = Encoder::new(254.0);
-        for nits in [0.0f32, 0.05, 0.5, 2.7, 10.0, 100.0, 254.0, 1000.0] {
-            let exact = pq(nits as f64) as f32;
-            assert!((enc.signal(nits) - exact).abs() < 0.0005, "{nits} nits: {} vs {exact}", enc.signal(nits));
+        let step = 1.0 / 65535.0;
+        let mut worst = (0f64, 0f32);
+        let mut check = |nits: f32| {
+            // past PQ's peak the screen shows its peak
+            let off = (enc.signal(nits) as f64 - pq((nits as f64).min(10000.0))).abs();
+            if off > worst.0 {
+                worst = (off, nits);
+            }
+        };
+        for nits in [0.0f32, 1e-12, 1e-9, 0.05, 0.5, 2.7, 10.0, 100.0, 254.0, 1000.0, 9999.9, 10000.0, 20000.0] {
+            check(nits);
         }
+        // a million places, evenly through each halving from 1e-10 nits up
+        for i in 0..1_000_000 {
+            check(1e-10 * 2f32.powf(i as f32 / 1_000_000.0 * 46.6));
+        }
+        assert!(worst.0 < 0.1 * step, "{} nits is {:.3} steps off", worst.1, worst.0 / step);
     }
 }

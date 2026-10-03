@@ -697,7 +697,7 @@ struct App {
     qh: QueueHandle<App>,
     window: Window,
     pool: SlotPool,
-    buffers: Vec<Buffer>,
+    buffers: Vec<(Buffer, Vec<Rect>)>,
     pointer: Option<ThemedPointer>,
     keyboard: Option<wl_keyboard::WlKeyboard>,
     seat: Option<wl_seat::WlSeat>,
@@ -738,6 +738,12 @@ struct App {
     board: Option<Board>,
     lights: Vec<Light>,
     lit: Option<Rc<Lit>>,
+    /// the last frame's keyboard picture, taken back once nothing shows it,
+    /// for the next to be drawn into rather than made anew
+    spare: Vec<f32>,
+    /// when a lighting effect's next frame is due, at the rate Settings ›
+    /// Performance asks for
+    effect_due: Instant,
     asked: Option<(u32, u32)>,
     build: std::sync::mpsc::Sender<(u32, u32)>,
     /// the whole window needs drawing again, not only what Slint changed
@@ -782,7 +788,7 @@ struct SubWin {
     frame_pending: bool,
     hidden: bool,
     full: bool,
-    buffers: Vec<Buffer>,
+    buffers: Vec<(Buffer, Vec<Rect>)>,
     px: Vec<PremultipliedRgbaColor>,
     at: (f64, f64),
 }
@@ -937,6 +943,8 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         board: None,
         lights: Vec::new(),
         lit: None,
+        spare: Vec::new(),
+        effect_due: Instant::now(),
         asked: None,
         build,
         full: true,
@@ -999,12 +1007,14 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
     // ECTODECK_NATIVE_OPEN_LAB: open the Lighting lab at start, as Ctrl+Shift+L does
     let mut open_lab = std::env::var_os("ECTODECK_NATIVE_OPEN_LAB").is_some();
     while !app.exit {
-        let busy = ((app.slint.has_active_animations() || app.front.animated()) && !app.frame_pending)
+        let busy = (app.slint.has_active_animations() && !app.frame_pending)
             || app.subs.iter().flatten().any(|m| !m.hidden && m.slint.has_active_animations() && !m.frame_pending);
+        // a lighting effect's next frame, at the rate Settings › Performance asks for
+        let effect = (app.front.animated() && !app.frame_pending).then(|| app.effect_due.saturating_duration_since(Instant::now()));
         let wait = if busy {
             Some(Duration::ZERO)
         } else {
-            [slint::platform::duration_until_next_timer_update(), app.front.waiting()].into_iter().flatten().min()
+            [slint::platform::duration_until_next_timer_update(), app.front.waiting(), effect].into_iter().flatten().min()
         };
         event_loop.dispatch(wait, &mut app).unwrap();
         slint::platform::update_timers_and_animations();
@@ -1250,27 +1260,25 @@ impl App {
         let dirty = if full { Some((0, 0, w as i32, h as i32)) } else { dirty };
         let Some((dx, dy, dw, dh)) = dirty else { return };
         mw.full = false;
-        let fits = |b: &Buffer| b.height() as usize == h && b.stride() as usize == w * 4;
-        mw.buffers.retain(fits);
-        let pool = &mut self.pool;
-        let i = match mw.buffers.iter().position(|b| b.canvas(pool).is_some()) {
-            Some(i) => i,
-            None => {
-                let (b, _) = self.pool.create_buffer(w as i32, h as i32, (w * 4) as i32, wl_shm::Format::Argb8888).expect("a buffer");
-                mw.buffers.push(b);
-                mw.buffers.len() - 1
+        let changed = [(dx.max(0) as usize, dy.max(0) as usize, dw.max(0) as usize, dh.max(0) as usize)];
+        let (i, todo) = free_buffer(&mut mw.buffers, &mut self.pool, (w, h), w * 4, wl_shm::Format::Argb8888, &changed);
+        let canvas = mw.buffers[i].0.canvas(&mut self.pool).unwrap();
+        // the compositor's ARGB, which little-endian memory holds as B, G, R, A;
+        // only what is out of date in this buffer
+        for &(x, y, rw, rh) in &todo {
+            let (x1, y1) = ((x + rw).min(w), (y + rh).min(h));
+            for row in y.min(y1)..y1 {
+                let (a, b) = (row * w + x.min(x1), row * w + x1);
+                for (d, p) in canvas[a * 4..b * 4].chunks_exact_mut(4).zip(&mw.px[a..b]) {
+                    d.copy_from_slice(&[p.blue, p.green, p.red, p.alpha]);
+                }
             }
-        };
-        let canvas = mw.buffers[i].canvas(&mut self.pool).unwrap();
-        // the compositor's ARGB, which little-endian memory holds as B, G, R, A
-        for (d, p) in canvas.chunks_exact_mut(4).zip(&mw.px) {
-            d.copy_from_slice(&[p.blue, p.green, p.red, p.alpha]);
         }
         let surface = mw.window.wl_surface();
         surface.damage_buffer(dx, dy, dw, dh);
         surface.set_buffer_scale(mw.scale as i32);
         surface.frame(&self.qh, surface.clone());
-        mw.buffers[i].attach_to(surface).unwrap();
+        mw.buffers[i].0.attach_to(surface).unwrap();
         mw.window.commit();
         mw.frame_pending = true;
         if let Some(dir) = &self.dump {
@@ -1419,6 +1427,16 @@ impl App {
         self.draw();
     }
 
+    /// How long between a lighting effect's frames: Settings › Performance's
+    /// 30 or 60 a second, or none at all to match the screen.
+    fn effect_frame(&self) -> Duration {
+        match self.front.settings.get("performance.effects").and_then(|v| v.as_str().map(str::to_owned)).as_deref() {
+            Some("screen") => Duration::ZERO,
+            Some("60") => Duration::from_secs_f64(1.0 / 60.0),
+            _ => Duration::from_secs_f64(1.0 / 30.0),
+        }
+    }
+
     fn draw(&mut self) {
         // the keys' light as bright as Settings › HDR lets it go
         self.front.levels = (self.pic.reference(), self.levels_peak);
@@ -1479,14 +1497,24 @@ impl App {
         }
         let panel_moved = self.front.overlays.panel_rev != self.panel_rev || relit;
         self.panel_rev = self.front.overlays.panel_rev;
-        let lights = self.front.lights();
+        // a lighting effect's next frame only when it is due, at the rate
+        // Settings › Performance asks for; anything else as it changes
+        let effect = self.front.animated();
+        let due = !effect || Instant::now() >= self.effect_due;
+        let lights = if due { self.front.lights() } else { None };
+        if effect && lights.is_some() {
+            self.effect_due = Instant::now() + self.effect_frame();
+        }
+        // the last frame's picture, kept until the picture shows the new one
+        let mut shown_before = None;
         if lights.is_some() || panel_moved {
             if let Some(l) = lights {
                 self.lights = l;
             }
             if let Some(board) = &self.board {
-                let lit = light(board, &self.lights, self.front.page.locks, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
-                self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
+                let mut px = std::mem::take(&mut self.spare);
+                light_into(&mut px, board, &self.lights, self.front.page.locks, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
+                shown_before = self.lit.replace(Rc::new(Lit { px, w: board.w as usize, h: board.h as usize }));
             }
             self.readout();
         }
@@ -1532,6 +1560,12 @@ impl App {
                 dirty.push((r.0.max(0) as usize, r.1.max(0) as usize, r.2, r.3));
             }
         }
+        // the last frame's picture taken back, now nothing shows it, for the next
+        if let Some(old) = shown_before {
+            if let Ok(l) = Rc::try_unwrap(old) {
+                self.spare = l.px;
+            }
+        }
 
         if self.full {
             self.pic.encode_all();
@@ -1566,27 +1600,23 @@ impl App {
     /// Hand the picture to the compositor.
     fn present(&mut self, dirty: &[(usize, usize, usize, usize)]) {
         let (w, h) = (self.pic.w, self.pic.h);
-        let fits = |b: &Buffer| b.height() as usize == h && b.stride() as usize == w * 8;
-        self.buffers.retain(fits);
-        let pool = &mut self.pool;
-        let free = self.buffers.iter().position(|b| b.canvas(pool).is_some());
-        let i = match free {
-            Some(i) => i,
-            None => {
-                let (b, _) = self.pool.create_buffer(w as i32, h as i32, (w * 8) as i32, wl_shm::Format::Abgr16161616).expect("a buffer");
-                self.buffers.push(b);
-                self.buffers.len() - 1
+        let (i, todo) = free_buffer(&mut self.buffers, &mut self.pool, (w, h), w * 8, wl_shm::Format::Abgr16161616, dirty);
+        let canvas = self.buffers[i].0.canvas(&mut self.pool).unwrap();
+        let src: &[u8] = bytemuck::cast_slice(&self.pic.out);
+        for &(x, y, rw, rh) in &todo {
+            let (x1, y1) = ((x + rw).min(w), (y + rh).min(h));
+            for row in y.min(y1)..y1 {
+                let (a, b) = ((row * w + x.min(x1)) * 8, (row * w + x1) * 8);
+                canvas[a..b].copy_from_slice(&src[a..b]);
             }
-        };
-        let canvas = self.buffers[i].canvas(&mut self.pool).unwrap();
-        canvas.copy_from_slice(bytemuck::cast_slice(&self.pic.out));
+        }
         let surface = self.window.wl_surface();
         for &(x, y, dw, dh) in dirty {
             surface.damage_buffer(x as i32, y as i32, dw as i32, dh as i32);
         }
         surface.set_buffer_scale(self.scale as i32);
         surface.frame(&self.qh, surface.clone());
-        self.buffers[i].attach_to(surface).unwrap();
+        self.buffers[i].0.attach_to(surface).unwrap();
         self.window.commit();
         self.frame_pending = true;
         self.frames += 1;
@@ -2034,11 +2064,49 @@ pub fn core_device_path() -> PathBuf {
     PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../cores/evga-z10/device.json"))
 }
 
+/// A rectangle of a picture, in its pixels: x, y, width, height.
+type Rect = (usize, usize, usize, usize);
+
+/// A free buffer of the pool for a picture `w` by `h` (made if none is
+/// free), and what of it is out of date: this frame's changes, and those of
+/// the frames drawn into the window's other buffers since it was last drawn
+/// into (all of it, if it is new). Only that much is copied into it.
+fn free_buffer(buffers: &mut Vec<(Buffer, Vec<Rect>)>, pool: &mut SlotPool, (w, h): (usize, usize), stride: usize, format: wl_shm::Format, dirty: &[Rect]) -> (usize, Vec<Rect>) {
+    buffers.retain(|(b, _)| b.height() as usize == h && b.stride() as usize == stride);
+    let i = match buffers.iter().position(|(b, _)| b.canvas(pool).is_some()) {
+        Some(i) => i,
+        None => {
+            let (b, _) = pool.create_buffer(w as i32, h as i32, stride as i32, format).expect("a buffer");
+            buffers.push((b, vec![(0, 0, w, h)]));
+            buffers.len() - 1
+        }
+    };
+    let mut todo = std::mem::take(&mut buffers[i].1);
+    todo.extend_from_slice(dirty);
+    for (j, (_, stale)) in buffers.iter_mut().enumerate() {
+        if j != i {
+            stale.extend_from_slice(dirty);
+            if stale.len() > 32 {
+                *stale = vec![(0, 0, w, h)];
+            }
+        }
+    }
+    (i, todo)
+}
+
 /// The keyboard lit: each part of its light at the core's brightness for it,
 /// no channel past the ceiling, which is Peak nits over the desktop's white,
 /// and its lock lights as the keyboard has them.
 fn light(board: &Board, lights: &[Light], locks: u8, ceiling: f32, reference: f64, panel: Option<&overlays::Panel>) -> Vec<f32> {
-    let mut px = board.compose(lights, locks, reference as f32, ceiling);
+    let mut px = Vec::new();
+    light_into(&mut px, board, lights, locks, ceiling, reference, panel);
+    px
+}
+
+/// The keyboard's picture as `light` draws it, into `px`, which an effect
+/// keeps from one frame to the next rather than making it anew.
+fn light_into(px: &mut Vec<f32>, board: &Board, lights: &[Light], locks: u8, ceiling: f32, reference: f64, panel: Option<&overlays::Panel>) {
+    board.compose_into(px, lights, locks, reference as f32, ceiling);
     // The display, lit from behind as an LCD is: its lit dots, its unlit dots
     // and the ground between them each at the core's nits for them, in the
     // backlight's colour, under the glass. With nothing driving it, it is dark.
@@ -2074,5 +2142,4 @@ fn light(board: &Board, lights: &[Light], locks: u8, ceiling: f32, reference: f6
             }
         }
     }
-    px
 }

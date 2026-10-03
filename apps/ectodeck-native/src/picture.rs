@@ -219,11 +219,16 @@ fn encode_row(
             Some(l) => {
                 let i = (((y as i32 - ky) as usize) * l.w + (x as i32 - kx) as usize) * 4;
                 let a = l.px[i + 3];
-                if a > 0.0 { ([l.px[i] / a, l.px[i + 1] / a, l.px[i + 2] / a], a) } else { ([0.0; 3], 0.0) }
+                if a > 0.0 {
+                    let r = 1.0 / a;
+                    ([l.px[i] * r, l.px[i + 1] * r, l.px[i + 2] * r], a)
+                } else {
+                    ([0.0; 3], 0.0)
+                }
             }
             None => (ground, 1.0),
         };
-        row[x] = if p.alpha == 0 { enc.pixel([k[0] * ka, k[1] * ka, k[2] * ka, ka]) } else { enc.pixel(over(p, k, ka)) };
+        row[x] = if p.alpha == 0 { enc.straight(k, ka) } else { enc.pixel(over(p, k, ka)) };
     }
 }
 
