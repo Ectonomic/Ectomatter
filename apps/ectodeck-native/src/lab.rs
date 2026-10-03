@@ -87,7 +87,7 @@ struct Param {
     note: &'static str,
 }
 
-const PARAMS: [Param; 25] = [
+const PARAMS: [Param; 27] = [
     Param { path: ("led", ""), label: "North of centre", lo: -9.66, hi: 9.66, step: 0.25, unit: Unit::Length, def: 7.0, note: "Where each key's LED sits under its cap, from the switch's centre toward the top of the key; below 0, toward the bottom, as on a keyboard whose LEDs face south. It goes as far as the switch's edge, so Switch width sets how far the slider reaches." },
     Param { path: ("sim", "nits"), label: "Brightness", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, def: 600.0, note: "The brightest legend, with every key lit white at full, up to Peak nits (Settings › HDR). Everything else the LEDs light is as bright as the simulation finds it beside that. A colour gives off its own share, as an LED does: a red about a fifth." },
     Param { path: ("sim", "beam"), label: "Beam", lo: 1.0, hi: 200.0, step: 0.5, unit: Unit::Number, def: 24.0, note: "How tight the LED's beam out of the top of the switch is. Higher keeps it to a small bright spot on the legend over the LED; lower spreads it across the cap's top and onto the inside of its skirt." },
@@ -112,7 +112,9 @@ const PARAMS: [Param; 25] = [
     Param { path: ("lcd", "dot"), label: "Dot size", lo: 0.05, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.84, note: "How much of each cell a dot fills; the rest is the gap between dots." },
     Param { path: ("lcd", "glass"), label: "Glass sheen", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 1.0, note: "How strongly the glass over the display shows its reflection, as the art draws it at 100%." },
     Param { path: ("sim", "skirts"), label: "Sides let through", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.0, note: "The share of the light inside a cap that its skirt lets through, glowing on its outside, as translucent plastic does. Plastic with no coating lets through about what a legend does; a cap coated all over lets none." },
-    Param { path: ("sim", "tops"), label: "Tops let through", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.0, note: "The share of the light on the back of a cap's top that the top lets through beside the legend, for caps translucent all over. A top coated black, as the Z10's are, lets through only its legend." },
+    Param { path: ("sim", "tops"), label: "Tops let through", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.0, note: "The share of the light on the back of a cap's top that the top lets through beside the legend, for caps translucent all over. A black top lets through only its legend." },
+    Param { path: ("sim", "black"), label: "Black down the sides", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.0, note: "How far down a cap's sides the black of its top comes, as a share of the skirt's height. A pudding cap's black comes part of the way, its milky plastic below; light gets out only below the black." },
+    Param { path: ("sim", "milky"), label: "Milky", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.0, note: "How milky the translucent plastic is. Milky plastic carries the light it takes some way through itself before it leaves, so it glows evenly round the cap, and looks white with its LED off; clear plastic lets the light out where it went in." },
 ];
 
 /// One of a section's choices, at the top of its left column, which says
@@ -123,16 +125,17 @@ struct Choice {
     options: &'static [&'static str],
 }
 
-const CHOICES: [Choice; 3] = [
+const CHOICES: [Choice; 4] = [
     Choice { label: "Switch", note: "What the switch's housing is: black with its LED through a slot in its top, as older switches like the Z10's Kailh Browns have it, so all the LED's light leaves in its beam; or clear, glowing with a share of it, over its top as most RGB switches have it, or all over. Each sets the switch's values for that kind; the sliders tune from there.", options: &["LED slot", "Clear top", "Clear housing"] },
     Choice { label: "LED side", note: "Which side of the switch's centre the LED sits on: north, toward the top of the key, as on the Z10, or south, as many newer keyboards have it.", options: &["North", "South"] },
-    Choice { label: "Keycaps", note: "What the caps' plastic lets through: shine-through caps are opaque but for their legends; pudding caps have translucent sides under an opaque top, as the Z10's do; translucent caps let light through all over. Each sets Sides and Tops let through; the sliders tune from there.", options: &["Shine-through", "Pudding", "Translucent"] },
+    Choice { label: "Keycaps", note: "What the caps let light through: shine-through caps, as the Z10 came with, are opaque but for their legends; pudding caps have translucent sides below a black top whose black comes part of the way down them; translucent caps let light through all over. Each sets Sides and Tops let through and Black down the sides; the sliders tune from there.", options: &["Shine-through", "Pudding", "Translucent"] },
+    Choice { label: "Plastic", note: "What the caps' translucent plastic is like: milky white, as most pudding caps are, which glows evenly and looks white with its LED off; or clear, which lets the light through as it comes. Each sets Milky; its slider tunes from there.", options: &["Milky", "Clear"] },
 ];
 
 /// The page's sections: a title, what the part is, its values, and its choices.
 const SECTIONS: [(&str, &str, &[usize], &[usize]); 4] = [
     ("LED", "Each key's LED shines up out of its switch in a beam, onto the back of the legend. In a black housing that is all its light; a clear housing scatters a share of it instead, glowing with it over its top and sides, which lights the legend evenly, the inside of the cap and the deck round the switch.", &[0, 1, 2, 3, 4, 5, 7, 6], &[0, 1]),
-    ("Keycaps", "Each cap stands over its switch, its skirt from its foot to its top. Light bounces about inside it; some gets out under the skirt, some through the legend, and some through the plastic where it is translucent.", &[8, 9, 10, 23, 24, 11, 12, 13], &[2]),
+    ("Keycaps", "Each cap stands over its switch, its skirt from its foot to its top. Light bounces about inside it; some gets out under the skirt, some through the legend, and some through the plastic where it is translucent and not coated black.", &[8, 9, 10, 23, 24, 25, 26, 11, 12, 13], &[2, 3]),
     ("Wells", "The keys sit in wells in the chassis: the deck at their floor, walled round by the chassis. What each gives back of the light falling on it lights the rest.", &[14, 15, 16, 17], &[]),
     ("Display", "The display's backlit dots, and the glass over them.", &[18, 19, 20, 21, 22], &[]),
 ];
@@ -154,7 +157,7 @@ fn chosen(choice: usize, light: &Value) -> usize {
             Switch::Clear => 2,
         },
         1 => usize::from(get(light, ("led", "")).unwrap_or(7.0) < 0.0),
-        _ => {
+        2 => {
             if p.tops > 0.0 {
                 2
             } else if p.skirts > 0.0 {
@@ -163,6 +166,7 @@ fn chosen(choice: usize, light: &Value) -> usize {
                 0
             }
         }
+        _ => usize::from(p.milky <= 0.0),
     }
 }
 
@@ -197,12 +201,15 @@ fn choose(light: &mut Value, choice: usize, option: usize) {
             let led = if led < 0.01 { 7.0 } else { led };
             set(light, ("led", ""), if option == 0 { led } else { -led });
         }
-        _ => {
-            // uncoated plastic lets through about what a legend does
+        2 => {
+            // uncoated plastic lets through about what a legend does; a pudding
+            // cap's black comes some way down its sides, a shine-through cap's all of it
             let plastic = get(light, ("sim", "legends")).unwrap_or(0.3);
             set(light, ("sim", "skirts"), if option >= 1 { plastic } else { 0.0 });
             set(light, ("sim", "tops"), if option >= 2 { plastic } else { 0.0 });
+            set(light, ("sim", "black"), [1.0, 0.4, 0.0][option.min(2)]);
         }
+        _ => set(light, ("sim", "milky"), if option == 0 { 1.0 } else { 0.0 }),
     }
 }
 
@@ -969,7 +976,7 @@ fn light_block(light: &Value) -> String {
     let mut s = String::from(" \"light\": {\n");
     s += &format!("  \"about\": {},\n", serde_json::to_string(&light["about"]).unwrap_or_else(|_| "\"\"".into()));
     s += &format!("  \"led\": {},\n", num("led", &light["led"]));
-    s += &part("sim", &["nits", "switch", "beam", "scatter", "sides", "glow_spread", "switch_top", "switch_width", "skirt_foot", "cap_top", "legends", "skirts", "tops", "cap_in", "cap_out", "depth", "deck", "walls", "chassis"]);
+    s += &part("sim", &["nits", "switch", "beam", "scatter", "sides", "glow_spread", "switch_top", "switch_width", "skirt_foot", "cap_top", "legends", "skirts", "tops", "black", "milky", "cap_in", "cap_out", "depth", "deck", "walls", "chassis"]);
     s += &part("legend", &["unlit"]);
     s += &part("lcd", &["nits", "unlit", "field", "dot", "glass"]);
     s += &format!("  \"wells\": {}\n", serde_json::to_string(&light["wells"]).unwrap_or_else(|_| "\"mask_1\"".into()));
@@ -1006,7 +1013,12 @@ mod tests {
             assert_eq!(chosen(2, &light), option);
         }
         choose(&mut light, 2, 1);
-        assert_eq!((get(&light, ("sim", "skirts")), get(&light, ("sim", "tops"))), (Some(0.3), Some(0.0)), "pudding: the sides let through what a legend does");
+        assert_eq!((get(&light, ("sim", "skirts")), get(&light, ("sim", "tops")), get(&light, ("sim", "black"))), (Some(0.3), Some(0.0), Some(0.4)), "pudding: the sides let through what a legend does, below the black");
+        for option in [1, 0] {
+            choose(&mut light, 3, option);
+            assert_eq!(chosen(3, &light), option);
+        }
+        assert_eq!(get(&light, ("sim", "milky")), Some(1.0), "milky plastic");
     }
 
     /// The light section Save writes reads back as the light it was given,

@@ -146,6 +146,8 @@ pub struct Values {
     legends: f64,
     skirts: f64,
     tops: f64,
+    black: f64,
+    milky: f64,
     cap_in: f64,
     cap_out: f64,
     depth: f64,
@@ -186,6 +188,8 @@ impl Values {
             legends: p.legends as f64,
             skirts: p.skirts as f64,
             tops: p.tops as f64,
+            black: p.black as f64,
+            milky: p.milky as f64,
             cap_in: p.cap_in as f64,
             cap_out: p.cap_out as f64,
             depth: p.wall as f64,
@@ -699,23 +703,35 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
                 let out = 1.6f64.min(v.foot.max(0.6) * 0.4);
                 ray(&mut s, &[p(sl.hx1 + 0.15, out), p(sl.foot1 + 0.95, out * 0.15)], v.scatter * v.sides, grow, false);
             }
-            // the skirts glowing with the light they let through, and the top beside its legends
+            // the skirts: black from the top down Black down the sides, and below
+            // it their translucent plastic, as white as it is milky, glowing with
+            // the light it lets through; and the top beside its legends
+            let clear_to = v.foot + (1.0 - v.black) * (tz - v.foot);
             if sl.hollow {
                 let op = |share: f64| 0.12 + 0.7 * share.clamp(0.0, 1.0);
-                for (f, a) in [(sl.foot0, a0), (sl.foot1, a1)] {
+                for north in [true, false] {
+                    let band = [p(sl.skirt_x(north, v.foot, false), v.foot), p(sl.skirt_x(north, clear_to, false), clear_to), p(sl.skirt_x(north, clear_to, true), clear_to), p(sl.skirt_x(north, v.foot, true), v.foot)];
+                    let milky = if white("Milky") { WHITE } else { "#d8d2c6" };
+                    s.path(&poly(&band, true), milky, "none", 1.0, if v.skirts > 0.0 { 0.08 + 0.55 * v.milky } else { 0.0 });
                     let lit = if white("Sides let through") { WHITE } else { AMBER };
-                    s.path(&poly(&[p(f, v.foot), p(a, tz)], false), "none", lit, 2.4 * grow.min(1.2), if v.skirts > 0.0 { op(v.skirts) } else { 0.0 });
+                    s.path(&poly(&[band[0], band[1]], false), "none", lit, 2.4 * grow.min(1.2), if v.skirts > 0.0 { op(v.skirts) } else { 0.0 });
                 }
                 if v.tops > 0.0 {
                     let lit = if white("Tops let through") { WHITE } else { AMBER };
                     s.path(&poly(&[p(a0 + 0.3, tz), p(a1 - 0.3, tz)], false), "none", lit, 2.4 * grow.min(1.2), op(v.tops));
                 }
             }
-            // light through the north skirt, from inside the cap to its outside
-            let side_z = v.foot + (tz - v.foot) * 0.55;
+            // light through the north skirt below its black, from inside the cap to its outside
+            let side_z = v.foot + (clear_to - v.foot) * 0.7;
             let (wall_in, wall_out) = (sl.skirt_x(true, side_z, true), sl.skirt_x(true, side_z, false));
             ray(&mut s, &[p(wall_in + 1.1, side_z + 0.35), p(wall_out - 1.2, side_z - 0.25)], v.skirts, grow, white("Sides let through"));
             labels.push(Label::new(true, p(wall_out, side_z), "Sides let through"));
+            // Milky on the plastic low on the north skirt; Black down the sides measured beside the south one
+            let milky_z = v.foot + (clear_to - v.foot) * 0.25;
+            labels.push(Label::new(true, p(sl.skirt_x(true, milky_z, false), milky_z), "Milky"));
+            let bx = (sl.foot1 + 1.0).min(x_hi - 0.4);
+            marks.push(Mark::Height { x: px(bx), y0: pz(clear_to), y1: pz(tz), i: slider("Black down the sides") });
+            labels.push(Label::new(false, p(bx, (clear_to + tz) / 2.0), "Black down the sides"));
             // light up through the top, beside the legends
             let top_x = a1 - 1.6;
             if sl.hollow {
