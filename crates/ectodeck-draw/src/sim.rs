@@ -117,6 +117,71 @@ impl Caps {
     }
 }
 
+/// A key's light, as the core's light description has it: all keys' values
+/// with the key's own (its entry in "keys") over them.
+pub fn key_light(light: &Value, own: &Value) -> Value {
+    let mut out = light.clone();
+    if let Some(o) = out.as_object_mut() {
+        o.remove("keys");
+    }
+    for (a, v) in own.as_object().into_iter().flatten() {
+        match (v.as_object(), out[a.as_str()].is_object()) {
+            (Some(section), true) => {
+                for (b, x) in section {
+                    out[a.as_str()][b.as_str()] = x.clone();
+                }
+            }
+            _ => out[a.as_str()] = v.clone(),
+        }
+    }
+    out
+}
+
+/// How every key is lit: all keys' physics, and the keys with physics of
+/// their own (another cap, a switch moved, a beam of its own), each by its
+/// place among the scene's caps.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Setup {
+    pub all: Physics,
+    pub own: Arc<Vec<(u32, Physics)>>,
+}
+
+impl Setup {
+    /// Every key alike.
+    pub fn alike(all: Physics) -> Setup {
+        Setup { all, own: Arc::new(Vec::new()) }
+    }
+
+    /// As a core's light description has it: all keys' values, and each
+    /// key's own ("keys", by its control's id) over them; `ids` the scene's
+    /// caps' controls, in its order.
+    pub fn from(light: &Value, ids: &[String]) -> Setup {
+        let mut own: Vec<(u32, Physics)> = light["keys"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter_map(|(id, values)| Some((ids.iter().position(|c| c == id)? as u32, Physics::from(&key_light(light, values)))))
+            .collect();
+        own.sort_by_key(|o| o.0);
+        Setup { all: Physics::from(light), own: Arc::new(own) }
+    }
+
+    /// A cap's physics: its own, or all keys'.
+    pub fn of(&self, cap: u32) -> &Physics {
+        self.own.binary_search_by_key(&cap, |o| o.0).map_or(&self.all, |i| &self.own[i].1)
+    }
+
+    /// As the simulation runs it (see Physics::simulated).
+    pub fn simulated(&self) -> Setup {
+        Setup { all: self.all.simulated(), own: Arc::new(self.own.iter().map(|(i, p)| (*i, p.simulated())).collect()) }
+    }
+
+    /// Whether the light falls as it did: everything but the brightness.
+    pub fn same_paths(&self, o: &Setup) -> bool {
+        self.all.same_paths(&o.all) && self.own.len() == o.own.len() && self.own.iter().zip(o.own.iter()).all(|(a, b)| a.0 == b.0 && a.1.same_paths(&b.1))
+    }
+}
+
 /// The share of the light that falls on a switch's black housing that it gives back.
 const HOUSING: f32 = 0.05;
 /// How far round a cap milky plastic carries the light it takes before it
@@ -132,6 +197,11 @@ pub struct Physics {
     /// how many of the art's units make a millimetre, as the core's light
     /// description says: the art is in its own units, the heights in mm
     pub units_per_mm: f32,
+    /// where the LED sits, north of its switch's centre in the art's units
+    /// (south below 0; held inside the switch); and where the switch sits
+    /// under its cap, mm east and north of the cap's middle (a key's own)
+    pub led: f32,
+    pub place: [f32; 2],
     /// the brightest legend, every key lit white at full, in nits: what the
     /// whole simulation's light is scaled to
     pub nits: f32,
@@ -196,6 +266,8 @@ impl Physics {
         };
         Physics {
             units_per_mm: light["units_per_mm"].as_f64().map_or(1.0, |v| v as f32).max(0.01),
+            led: light["led"].as_f64().map_or(7.0, |v| v as f32),
+            place: [light["place"]["east"].as_f64().unwrap_or(0.0) as f32, light["place"]["north"].as_f64().unwrap_or(0.0) as f32],
             nits: f("nits", 600.0).max(0.0),
             switch: Switch::named(s["switch"].as_str()),
             switch_top: f("switch_top", 6.5).clamp(0.05, top - 0.1),
@@ -241,6 +313,11 @@ impl Physics {
     /// the simulation holds it: inside its switch, at most at its edge.
     pub fn held_north(&self, north: f32) -> f32 {
         north.clamp(-self.switch_edge(), self.switch_edge())
+    }
+
+    /// Its own LED's place, held inside its switch.
+    pub fn held_led(&self) -> f32 {
+        self.held_north(self.led)
     }
 
     /// The beam's light from its source, `up` the cosine of the angle off
@@ -590,10 +667,17 @@ impl Scene {
         self.fine.at(x, y).is_some_and(|(i, j)| self.surface[j * self.fine.w + i] != Surface::None)
     }
 
-    /// Where a key's LED sits, `north` of its foot's middle.
-    fn led(&self, k: usize, north: f32) -> (f32, f32) {
+    /// Where a key's switch's centre is: its foot's middle, or as far east
+    /// and north of it as the key's own physics has its switch.
+    fn switch_at(&self, k: usize, p: &Physics) -> (f32, f32) {
         let (x, y) = self.keys[k].1;
-        (x, y - north)
+        (x + p.place[0] * p.units_per_mm, y - p.place[1] * p.units_per_mm)
+    }
+
+    /// Where a key's LED sits: north of its switch's centre, inside the switch.
+    fn led_at(&self, k: usize, p: &Physics) -> (f32, f32) {
+        let (x, y) = self.switch_at(k, p);
+        (x, y - p.held_led())
     }
 }
 
@@ -619,6 +703,24 @@ impl Stood {
         let p = p.simulated();
         let (gap, top) = (p.gap * mm, p.top * mm);
         Stood { beam_from: p.switch_top * mm, half: p.switch_width * mm / 2.0, spread: p.glow_spread * mm, clear_to: gap + (1.0 - p.black) * (top - gap), diffuse: p.milky * MILKY * mm, gap, top, wall: p.wall * mm, p }
+    }
+}
+
+/// Every cap's physics as the simulation stands it up: each cap's own where
+/// the setup gives it one, all keys' otherwise. The wells, the deck and the
+/// chassis are every key's alike: all keys'.
+struct Stoods {
+    all: Stood,
+    caps: Vec<Stood>,
+}
+
+impl Stoods {
+    fn of(scene: &Scene, setup: &Setup) -> Stoods {
+        Stoods { all: Stood::of(&setup.all), caps: (0..scene.caps.len() as u32).map(|i| Stood::of(setup.of(i))).collect() }
+    }
+
+    fn cap(&self, i: u32) -> &Stood {
+        self.caps.get(i as usize).unwrap_or(&self.all)
     }
 }
 
@@ -820,7 +922,7 @@ enum Struck {
     Outside(u32, u8),
     Inside(u32, u8),
     Under(u32),
-    Top,
+    Top(u32),
     Wall,
     Housing,
 }
@@ -856,7 +958,8 @@ fn enter_box(lo: [f32; 3], hi: [f32; 3], o: [f32; 3], d: [f32; 3]) -> Option<(f3
 impl Scene {
     /// The nearest thing the ray from `o` along `d` strikes within `reach`:
     /// how far, what, and the normal facing back toward the ray.
-    fn hit(&self, s: &Stood, o: [f32; 3], d: [f32; 3], reach: f32) -> Option<(f32, Struck, [f32; 3])> {
+    fn hit(&self, ss: &Stoods, o: [f32; 3], d: [f32; 3], reach: f32) -> Option<(f32, Struck, [f32; 3])> {
+        let wall = ss.all.wall;
         let mut best: Option<(f32, Struck, [f32; 3])> = None;
         let take = |t: f32, k: Struck, n: [f32; 3], best: &mut Option<(f32, Struck, [f32; 3])>| {
             if t > EPS && t < reach && best.map_or(true, |b| t < b.0) {
@@ -871,8 +974,8 @@ impl Scene {
                 take(t, Struck::Deck, [0.0, 0.0, 1.0], &mut best);
             }
             // the chassis, round the wells, from above
-            if o[2] > s.wall {
-                let t = (s.wall - o[2]) / d[2];
+            if o[2] > wall {
+                let t = (wall - o[2]) / d[2];
                 let (x, y) = (o[0] + t * d[0], o[1] + t * d[1]);
                 if !self.in_well(x, y) && self.on_body(x, y) {
                     take(t, Struck::Chassis, [0.0, 0.0, 1.0], &mut best);
@@ -889,7 +992,7 @@ impl Scene {
                 let p = [o[0] + t * d[0], o[1] + t * d[1], o[2] + t * d[2]];
                 let (lo, hi) = if axis == 0 { (w[1], w[3]) } else { (w[0], w[2]) };
                 let q = p[1 - axis];
-                if q > lo && q < hi && p[2] > 0.0 && p[2] < s.wall {
+                if q > lo && q < hi && p[2] > 0.0 && p[2] < wall {
                     let mut n = [0.0; 3];
                     n[axis] = inward;
                     take(t, Struck::Wall, n, &mut best);
@@ -909,6 +1012,7 @@ impl Scene {
                 ns += 1;
             }
             let c = &self.caps[i as usize];
+            let s = ss.cap(i);
             let (f, r) = (c.foot, c.round[0]);
             let inside = in_round(f, r, o[0], o[1]);
             // the skirt's flat sides, between its rounded corners; where the
@@ -969,7 +1073,7 @@ impl Scene {
             }
             // a lit key's switch, its housing black, in the light's way
             if s.p.switch == Switch::Slot && (i as usize) < self.keys.len() {
-                let (cx, cy) = self.keys[i as usize].1;
+                let (cx, cy) = self.switch_at(i as usize, &s.p);
                 if let Some((t, n)) = enter_box([cx - s.half, cy - s.half, 0.0], [cx + s.half, cy + s.half, s.beam_from], o, d) {
                     take(t, Struck::Housing, n, &mut best);
                 }
@@ -979,7 +1083,7 @@ impl Scene {
                 let (x, y) = (o[0] + t * d[0], o[1] + t * d[1]);
                 if in_round(f, r, x, y) {
                     let below = o[2] < s.top;
-                    take(t, if below { Struck::Under(i) } else { Struck::Top }, [0.0, 0.0, if below { -1.0 } else { 1.0 }], &mut best);
+                    take(t, if below { Struck::Under(i) } else { Struck::Top(i) }, [0.0, 0.0, if below { -1.0 } else { 1.0 }], &mut best);
                 }
             }
         });
@@ -1021,20 +1125,20 @@ impl Scene {
     }
 
     /// Whether nothing stands between the point `a` and the point `b`.
-    fn clear(&self, s: &Stood, a: [f32; 3], b: [f32; 3]) -> bool {
+    fn clear(&self, ss: &Stoods, a: [f32; 3], b: [f32; 3]) -> bool {
         let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
         let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
         if len <= EPS {
             return true;
         }
         let d = [d[0] / len, d[1] / len, d[2] / len];
-        self.hit(s, a, d, len - 2.0 * EPS).is_none()
+        self.hit(ss, a, d, len - 2.0 * EPS).is_none()
     }
 
     /// Where on the art a skirt's outside at this height shows from above, and
     /// how much of the skirt each unit of its band stands for.
-    fn band(&self, s: &Stood, cap: u32, side: u8, p: [f32; 3]) -> ((f32, f32), f32) {
-        let c = &self.caps[cap as usize];
+    fn band(&self, ss: &Stoods, cap: u32, side: u8, p: [f32; 3]) -> ((f32, f32), f32) {
+        let (c, s) = (&self.caps[cap as usize], ss.cap(cap));
         let up = ((p[2] - s.gap) / (s.top - s.gap)).clamp(0.0, 1.0);
         let (u, v, band) = match side {
             0 => (c.foot[0] + (c.face[0] - c.foot[0]) * up, p[1], c.face[0] - c.foot[0]),
@@ -1051,8 +1155,8 @@ impl Scene {
     /// skirt below the black (from the top, it does not carry it to the
     /// skirt); milky plastic carries it round the cap's foot, as far each way
     /// as it spreads light, to anywhere up the skirt below the black.
-    fn exit(&self, s: &Stood, cap: u32, side: Option<u8>, q: [f32; 3], rng: &mut Rng) -> Option<([f32; 3], u8)> {
-        let f = self.caps[cap as usize].foot;
+    fn exit(&self, ss: &Stoods, cap: u32, side: Option<u8>, q: [f32; 3], rng: &mut Rng) -> Option<([f32; 3], u8)> {
+        let (f, s) = (self.caps[cap as usize].foot, ss.cap(cap));
         if s.clear_to <= s.gap {
             return None;
         }
@@ -1088,8 +1192,8 @@ impl Scene {
 
     /// The point on a cap's skirt a place on its band shows, and the skirt's
     /// outward normal there.
-    fn skirt_point(&self, s: &Stood, cap: u32, side: u8, up: f32, (x, y): (f32, f32)) -> ([f32; 3], [f32; 3]) {
-        let f = self.caps[cap as usize].foot;
+    fn skirt_point(&self, ss: &Stoods, cap: u32, side: u8, up: f32, (x, y): (f32, f32)) -> ([f32; 3], [f32; 3]) {
+        let (f, s) = (self.caps[cap as usize].foot, ss.cap(cap));
         let z = s.gap + up * (s.top - s.gap);
         match side {
             0 => ([f[0], y, z], [-1.0, 0.0, 0.0]),
@@ -1147,8 +1251,8 @@ impl Rng {
 /// chassis, the skirts and the caps' tops; and every key's added up, for
 /// keys all lit alike. Each place gives the light seen there.
 pub struct Snapshot {
-    pub physics: Physics,
-    pub north: f32,
+    /// how every key was lit, as the simulation ran it
+    pub setup: Setup,
     /// photons sent from each LED so far, and whether that is all
     pub photons: usize,
     pub settled: bool,
@@ -1232,11 +1336,11 @@ impl Snapshot {
 pub struct Simulator {
     shared: Arc<Shared>,
     /// what it was last asked to simulate; none once told to rest
-    asked: Mutex<Option<(Physics, f32)>>,
+    asked: Mutex<Option<Setup>>,
 }
 
 struct Shared {
-    ask: Mutex<Option<(Physics, f32)>>,
+    ask: Mutex<Option<Setup>>,
     /// stop the run under way, and start none
     rest: AtomicBool,
     wake: Condvar,
@@ -1251,23 +1355,23 @@ struct Shared {
 impl Simulator {
     /// Start simulating: `notify` is told, from the simulation's thread, each
     /// time there is a new picture.
-    pub fn new(scene: Scene, physics: Physics, north: f32, notify: Box<dyn Fn() + Send + Sync>) -> Simulator {
-        let shared = Arc::new(Shared { ask: Mutex::new(Some((physics, north))), rest: AtomicBool::new(false), wake: Condvar::new(), latest: Mutex::new(None), published: Condvar::new(), version: AtomicU64::new(0), stop: AtomicBool::new(false), notify });
+    pub fn new(scene: Scene, setup: Setup, notify: Box<dyn Fn() + Send + Sync>) -> Simulator {
+        let shared = Arc::new(Shared { ask: Mutex::new(Some(setup.clone())), rest: AtomicBool::new(false), wake: Condvar::new(), latest: Mutex::new(None), published: Condvar::new(), version: AtomicU64::new(0), stop: AtomicBool::new(false), notify });
         let s = shared.clone();
         std::thread::Builder::new().name("light simulation".into()).spawn(move || work(scene, s)).expect("the simulation's thread");
-        Simulator { shared, asked: Mutex::new(Some((physics, north))) }
+        Simulator { shared, asked: Mutex::new(Some(setup)) }
     }
 
     /// Simulate another make, or the LEDs moved, from the start; but not for
     /// a change of brightness alone.
-    pub fn set(&self, physics: Physics, north: f32) {
+    pub fn set(&self, setup: &Setup) {
         let mut asked = self.asked.lock().unwrap();
-        if asked.is_some_and(|(p, n)| p.same_paths(&physics) && n == north) {
+        if asked.as_ref().is_some_and(|a| a.same_paths(setup)) {
             return;
         }
-        *asked = Some((physics, north));
+        *asked = Some(setup.clone());
         self.shared.rest.store(false, Ordering::SeqCst);
-        *self.shared.ask.lock().unwrap() = Some((physics, north));
+        *self.shared.ask.lock().unwrap() = Some(setup.clone());
         self.shared.wake.notify_all();
     }
 
@@ -1296,8 +1400,8 @@ impl Simulator {
     }
 
     /// Simulate to the end, here and now (for a snapshot of the keyboard), `photons` from each LED.
-    pub fn settle(scene: &Scene, physics: Physics, north: f32, photons: usize) -> Snapshot {
-        let mut run = Run::new(scene, physics, north);
+    pub fn settle(scene: &Scene, setup: &Setup, photons: usize) -> Snapshot {
+        let mut run = Run::new(scene, setup);
         while run.photons < photons {
             run.trace(scene, (photons - run.photons).min(STEP * 16));
         }
@@ -1314,7 +1418,7 @@ impl Drop for Simulator {
 
 fn work(scene: Scene, shared: Arc<Shared>) {
     loop {
-        let (physics, north) = {
+        let setup = {
             let mut ask = shared.ask.lock().unwrap();
             loop {
                 if shared.stop.load(Ordering::SeqCst) {
@@ -1326,7 +1430,7 @@ fn work(scene: Scene, shared: Arc<Shared>) {
                 ask = shared.wake.wait(ask).unwrap();
             }
         };
-        let mut run = Run::new(&scene, physics, north);
+        let mut run = Run::new(&scene, &setup);
         let publish = |run: &Run, settled: bool| {
             *shared.latest.lock().unwrap() = Some(Arc::new(run.snapshot(settled)));
             shared.version.fetch_add(1, Ordering::SeqCst);
@@ -1358,8 +1462,9 @@ fn work(scene: Scene, shared: Arc<Shared>) {
 /// One run of the simulation: the light straight from every LED, and the
 /// bounced light gathered so far.
 struct Run {
-    s: Stood,
-    north: f32,
+    ss: Stoods,
+    setup: Setup,
+    leds: Vec<(f32, f32)>,
     fine: Grid,
     coarse: Grid,
     direct: Arc<Vec<Boxed>>,
@@ -1384,23 +1489,23 @@ struct Gathered {
 }
 
 impl Run {
-    fn new(scene: &Scene, physics: Physics, north: f32) -> Run {
-        let north = physics.held_north(north);
-        let s = Stood::of(&physics);
+    fn new(scene: &Scene, setup: &Setup) -> Run {
+        let setup = setup.simulated();
+        let ss = Stoods::of(scene, &setup);
         let fine = scene.fine;
         let coarse = Grid { x0: fine.x0, y0: fine.y0, cell: COARSE, w: ((fine.w as f32 * FINE) / COARSE).ceil() as usize, h: ((fine.h as f32 * FINE) / COARSE).ceil() as usize };
-        let leds: Vec<(f32, f32)> = (0..scene.keys.len()).map(|k| scene.led(k, north)).collect();
+        let leds: Vec<(f32, f32)> = (0..scene.keys.len()).map(|k| scene.led_at(k, &ss.cap(k as u32).p)).collect();
         // the light straight from each LED, cell by cell
         let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(16);
         let per = leds.len().div_ceil(threads).max(1);
         let mut direct: Vec<Boxed> = leds.iter().map(|&l| Boxed::round(&fine, l, DIRECT_REACH)).collect();
         std::thread::scope(|sc| {
             for (n, chunk) in direct.chunks_mut(per).enumerate() {
-                let leds = &leds;
+                let (leds, ss) = (&leds, &ss);
                 sc.spawn(move || {
                     for (i, b) in chunk.iter_mut().enumerate() {
                         let k = n * per + i;
-                        straight(scene, &s, k, leds[k], b);
+                        straight(scene, ss, k, leds[k], b);
                     }
                 });
             }
@@ -1451,8 +1556,9 @@ impl Run {
             }
         }
         Run {
-            s,
-            north,
+            ss,
+            setup,
+            leds,
             fine,
             coarse,
             direct: Arc::new(direct),
@@ -1469,7 +1575,8 @@ impl Run {
 
     /// Send `n` more photons from each LED, and gather where their bounced light lands.
     fn trace(&mut self, scene: &Scene, n: usize) {
-        let (s, north, coarse, seed) = (self.s, self.north, self.coarse, self.seed);
+        let (coarse, seed) = (self.coarse, self.seed);
+        let (ss, leds) = (&self.ss, &self.leds);
         let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(16);
         let per = self.gathered.len().div_ceil(threads).max(1);
         std::thread::scope(|sc| {
@@ -1478,7 +1585,7 @@ impl Run {
                     for (i, g) in chunk.iter_mut().enumerate() {
                         let k = c * per + i;
                         let mut rng = Rng(seed ^ ((k as u64 + 1).wrapping_mul(0x2545_F491_4F6C_DD1D)).rotate_left(17) | 1);
-                        bounce(scene, &s, k, scene.led(k, north), g, &coarse, n, &mut rng, false);
+                        bounce(scene, ss, k, leds[k], g, &coarse, n, &mut rng, false);
                     }
                 });
             }
@@ -1511,8 +1618,7 @@ impl Run {
             }
         }
         Snapshot {
-            physics: self.s.p,
-            north: self.north,
+            setup: self.setup.clone(),
             photons: self.photons,
             settled,
             fine: self.fine,
@@ -1604,14 +1710,15 @@ fn even(b: &Boxed, counts: &[u32], class: &[u32], cover: &[f32], cw: usize, shar
 /// below the skirt's foot, on the outsides of other caps' skirts (its beam,
 /// where nothing stands in the way); each as the surface there gives it back
 /// or lets it through.
-fn straight(scene: &Scene, s: &Stood, k: usize, (lx, ly): (f32, f32), b: &mut Boxed) {
-    let p = &s.p;
+fn straight(scene: &Scene, ss: &Stoods, k: usize, (lx, ly): (f32, f32), b: &mut Boxed) {
+    let s = ss.cap(k as u32);
+    let (p, body) = (&s.p, &ss.all.p);
     let pi = std::f32::consts::PI;
     let high = [lx, ly, s.beam_from];
-    let centre = scene.keys[k].1;
-    let housing = Housing::of(s, centre, (lx, ly));
+    let housing = Housing::of(s, scene.switch_at(k, p), (lx, ly));
     let (foot, round) = (scene.caps[k].foot, scene.caps[k].round[0]);
-    let own_well = scene.well_of(centre.0, centre.1);
+    let middle = scene.keys[k].1;
+    let own_well = scene.well_of(middle.0, middle.1);
     let beam = |q: [f32; 3], n: [f32; 3]| -> f32 {
         let d = [q[0] - high[0], q[1] - high[1], q[2] - high[2]];
         let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
@@ -1630,22 +1737,22 @@ fn straight(scene: &Scene, s: &Stood, k: usize, (lx, ly): (f32, f32), b: &mut Bo
             let (ci, cj) = (b.x + i, b.y + j);
             let (x, y) = scene.fine.middle(ci, cj);
             let v = match scene.surface[cj * scene.fine.w + ci] {
-                Surface::Deck if own_well.is_some() && scene.well_of(x, y) == own_well => p.deck / pi * housing.on_floor([x, y, 0.0], foot, round, s.gap),
-                Surface::Chassis => p.chassis / pi * housing.on_floor([x, y, s.wall], foot, round, s.gap),
+                Surface::Deck if own_well.is_some() && scene.well_of(x, y) == own_well => body.deck / pi * housing.on_floor([x, y, 0.0], foot, round, s.gap),
+                Surface::Chassis => body.chassis / pi * housing.on_floor([x, y, ss.all.wall], foot, round, s.gap),
                 Surface::Top(c) if c as usize == k => {
                     let q = [x, y, s.top];
                     p.legends / pi * (beam(q, [0.0, 0.0, -1.0]) + housing.on_top(q))
                 }
                 // (milky plastic spreads it: its photons are followed instead)
                 Surface::Skirt(c, side, up) if c as usize == k && p.skirts > 0.0 && p.milky <= 0.0 => {
-                    let (q, n) = scene.skirt_point(s, c, side, up, (x, y));
+                    let (q, n) = scene.skirt_point(ss, c, side, up, (x, y));
                     let through = shared(p.cap_in, p.skirts).1;
                     if q[2] <= s.clear_to { through / pi * beam(q, [-n[0], -n[1], -n[2]]) } else { 0.0 }
                 }
                 Surface::Skirt(c, side, up) if c as usize != k && s.beam_from < s.gap => {
-                    let (q, n) = scene.skirt_point(s, c, side, up, (x, y));
+                    let (q, n) = scene.skirt_point(ss, c, side, up, (x, y));
                     let off = [q[0] + n[0] * 0.01, q[1] + n[1] * 0.01, q[2]];
-                    if scene.clear(s, off, high) { p.cap_out / pi * beam(q, n) } else { 0.0 }
+                    if scene.clear(ss, off, high) { ss.cap(c).p.cap_out / pi * beam(q, n) } else { 0.0 }
                 }
                 _ => 0.0,
             };
@@ -1666,13 +1773,14 @@ fn straight(scene: &Scene, s: &Stood, k: usize, (lx, ly): (f32, f32), b: &mut Bo
 /// (`first`, for checking the two against each other: gather those too,
 /// and follow each photon no further.)
 #[allow(clippy::too_many_arguments)]
-fn bounce(scene: &Scene, s: &Stood, k: usize, (lx, ly): (f32, f32), into: &mut Gathered, g: &Grid, n: usize, rng: &mut Rng, first: bool) {
-    let p = &s.p;
+fn bounce(scene: &Scene, ss: &Stoods, k: usize, (lx, ly): (f32, f32), into: &mut Gathered, g: &Grid, n: usize, rng: &mut Rng, first: bool) {
+    let s = ss.cap(k as u32);
+    let (p, body) = (&s.p, &ss.all.p);
     let pi = std::f32::consts::PI;
     let per_area = 1.0 / (g.cell * g.cell);
-    let centre = scene.keys[k].1;
-    let own_well = scene.well_of(centre.0, centre.1);
-    let housing = Housing::of(s, centre, (lx, ly));
+    let middle = scene.keys[k].1;
+    let own_well = scene.well_of(middle.0, middle.1);
+    let housing = Housing::of(s, scene.switch_at(k, p), (lx, ly));
     let mut gather = |m: usize, (x, y): (f32, f32), v: f32| {
         let b = &mut into.maps[m];
         if let Some((i, j)) = g.at(x, y) {
@@ -1694,8 +1802,13 @@ fn bounce(scene: &Scene, s: &Stood, k: usize, (lx, ly): (f32, f32), into: &mut G
             ([lx, ly, s.beam_from], rng.beam(p.beam))
         };
         for bounce in 0..48 {
-            let Some((t, what, nrm)) = scene.hit(s, o, d, 1e4) else { break };
+            let Some((t, what, nrm)) = scene.hit(ss, o, d, 1e4) else { break };
             let q = [o[0] + t * d[0], o[1] + t * d[1], o[2] + t * d[2]];
+            // the cap struck, by its own physics; the body, by all keys'
+            let (sc, pc) = match what {
+                Struck::Outside(c, _) | Struck::Inside(c, _) | Struck::Under(c) | Struck::Top(c) => (ss.cap(c), &ss.cap(c).p),
+                _ => (&ss.all, &ss.all.p),
+            };
             // worked out exactly already: the beam's first landing; the
             // housing's on the back of its own cap's top, and on the deck of
             // its own well and the chassis near enough for straight()
@@ -1704,7 +1817,7 @@ fn bounce(scene: &Scene, s: &Stood, k: usize, (lx, ly): (f32, f32), into: &mut G
                 && bounce == 0
                 && match what {
                     // a milky skirt spreads the light it takes: followed photon by photon
-                    Struck::Inside(..) if p.milky > 0.0 => false,
+                    Struck::Inside(..) if pc.milky > 0.0 => false,
                     _ if !glow => true,
                     Struck::Under(c) => c as usize == k,
                     Struck::Deck => near && scene.well_of(q[0], q[1]) == own_well,
@@ -1713,58 +1826,58 @@ fn bounce(scene: &Scene, s: &Stood, k: usize, (lx, ly): (f32, f32), into: &mut G
                 };
             // where light the cap's plastic takes in from inside the cap would come out of it
             let out = match what {
-                Struck::Inside(c, side) if p.skirts > 0.0 => scene.exit(s, c, Some(side), q, rng),
-                Struck::Under(c) if p.skirts > 0.0 && p.milky > 0.0 => scene.exit(s, c, None, q, rng),
+                Struck::Inside(c, side) if pc.skirts > 0.0 => scene.exit(ss, c, Some(side), q, rng),
+                Struck::Under(c) if pc.skirts > 0.0 && pc.milky > 0.0 => scene.exit(ss, c, None, q, rng),
                 _ => None,
             };
             // what it gives back and lets through, and where it shows
             let (rho, through) = match what {
                 Struck::Deck => {
                     if !exact && visible(q, Surface::Deck) {
-                        gather(0, (q[0], q[1]), p.deck / pi * per_area);
+                        gather(0, (q[0], q[1]), body.deck / pi * per_area);
                     }
-                    (p.deck, 0.0)
+                    (body.deck, 0.0)
                 }
                 Struck::Chassis => {
                     if !exact && visible(q, Surface::Chassis) {
-                        gather(1, (q[0], q[1]), p.chassis / pi * per_area);
+                        gather(1, (q[0], q[1]), body.chassis / pi * per_area);
                     }
-                    (p.chassis, 0.0)
+                    (body.chassis, 0.0)
                 }
                 Struck::Outside(c, side) => {
                     // (the black comes down the sides on the outside: nothing gets in under it)
-                    let (back, through) = shared(p.cap_out, if q[2] <= s.clear_to { p.skirts } else { 0.0 });
+                    let (back, through) = shared(pc.cap_out, if q[2] <= sc.clear_to { pc.skirts } else { 0.0 });
                     if !exact {
-                        let (at, stands) = scene.band(s, c, side, q);
+                        let (at, stands) = scene.band(ss, c, side, q);
                         gather(2, at, back / pi * per_area * stands);
                     }
                     (back, through)
                 }
                 Struck::Inside(c, _) => {
                     // the light it lets through glows on the skirt's outside, where it comes out
-                    let (back, through) = shared(p.cap_in, p.skirts);
+                    let (back, through) = shared(pc.cap_in, pc.skirts);
                     if let (false, true, Some((e, side))) = (exact, through > 0.0, out) {
-                        let (at, stands) = scene.band(s, c, side, e);
+                        let (at, stands) = scene.band(ss, c, side, e);
                         gather(2, at, through / pi * per_area * stands);
                     }
                     (back, through)
                 }
                 Struck::Under(c) => {
                     if !exact {
-                        gather(3, (q[0], q[1]), p.legends / pi * per_area);
+                        gather(3, (q[0], q[1]), pc.legends / pi * per_area);
                     }
                     // milky plastic under the black top takes its share in, and carries it to the skirt
-                    let carried = if out.is_some() { p.skirts } else { 0.0 };
-                    let all = p.cap_in + p.tops + carried;
+                    let carried = if out.is_some() { pc.skirts } else { 0.0 };
+                    let all = pc.cap_in + pc.tops + carried;
                     let k = if all > 1.0 { 1.0 / all } else { 1.0 };
                     if let (false, true, Some((e, side))) = (exact, carried > 0.0, out) {
-                        let (at, stands) = scene.band(s, c, side, e);
+                        let (at, stands) = scene.band(ss, c, side, e);
                         gather(2, at, carried * k / pi * per_area * stands);
                     }
-                    (p.cap_in * k, (p.tops + carried) * k)
+                    (pc.cap_in * k, (pc.tops + carried) * k)
                 }
-                Struck::Top => shared(p.cap_out, p.tops),
-                Struck::Wall => (p.chassis, 0.0),
+                Struck::Top(_) => shared(pc.cap_out, pc.tops),
+                Struck::Wall => (body.chassis, 0.0),
                 Struck::Housing => (HOUSING, 0.0),
             };
             if first {
@@ -1776,7 +1889,7 @@ fn bounce(scene: &Scene, s: &Stood, k: usize, (lx, ly): (f32, f32), into: &mut G
                 // cap's plastic lets it out (under the black, it is lost)
                 let carried = match what {
                     Struck::Inside(..) => true,
-                    Struck::Under(_) => r >= through * p.tops / (p.tops + if out.is_some() { p.skirts } else { 0.0 }).max(1e-9),
+                    Struck::Under(_) => r >= through * pc.tops / (pc.tops + if out.is_some() { pc.skirts } else { 0.0 }).max(1e-9),
                     _ => false,
                 };
                 let (q, n) = if carried {
@@ -1825,15 +1938,16 @@ mod tests {
         let (_b, scene, p) = scene();
         let slot = Physics { switch: Switch::Slot, scatter: 0.7, ..p };
         let s = Stood::of(&slot);
+        let ss = Stoods::of(&scene, &Setup::alike(slot));
         let n = 200_000;
         let total = (0..n).map(|i| s.p.beam_at((i as f32 + 0.5) / n as f32) as f64).sum::<f64>() / n as f64 * std::f64::consts::TAU;
         assert!((total - 1.0).abs() < 1e-3, "the beam holds {total:.4} of the LED's light");
         // straight down onto the top of the first lit key's switch, from under its cap
         let (cx, cy) = scene.keys[0].1;
         let o = [cx + 0.3, cy - 0.2, s.beam_from + 1.0];
-        let hit = scene.hit(&s, o, [0.0, 0.0, -1.0], 1e4).map(|h| (h.0, h.1));
+        let hit = scene.hit(&ss, o, [0.0, 0.0, -1.0], 1e4).map(|h| (h.0, h.1));
         assert!(matches!(hit, Some((t, Struck::Housing)) if (t - 1.0).abs() < 1e-3), "a black housing is struck: {hit:?}");
-        let clear = Stood::of(&Physics { switch: Switch::ClearTop, ..p });
+        let clear = Stoods::of(&scene, &Setup::alike(Physics { switch: Switch::ClearTop, ..p }));
         let hit = scene.hit(&clear, o, [0.0, 0.0, -1.0], 1e4).map(|h| h.1);
         assert!(!matches!(hit, Some(Struck::Housing)), "a clear housing lets the light by: {hit:?}");
     }
@@ -1848,7 +1962,7 @@ mod tests {
         let (published, pictures) = std::sync::mpsc::channel::<()>();
         let (looked, looked_at) = std::sync::mpsc::channel::<()>();
         let looked_at = Mutex::new(looked_at);
-        let s = Simulator::new(scene, p, 4.5, Box::new(move || {
+        let s = Simulator::new(scene, Setup::alike(p), Box::new(move || {
             let _ = published.send(());
             let _ = looked_at.lock().unwrap().recv();
         }));
@@ -1856,14 +1970,14 @@ mod tests {
             pictures.recv_timeout(std::time::Duration::from_secs(20)).expect("a picture");
             let l = s.latest().expect("the picture published");
             looked.send(()).unwrap();
-            l.physics
+            l.setup.all
         };
         // the first run under way, working out its light straight from the LEDs
         while s.shared.ask.lock().unwrap().is_some() {
             std::thread::yield_now();
         }
         let q = Physics { beam: p.beam * 2.0, ..p };
-        s.set(q, 4.5);
+        s.set(&Setup::alike(q));
         assert!(next().same_paths(&p.simulated()), "the first run showed its picture before the change");
         while !next().same_paths(&q.simulated()) {}
     }
@@ -1926,16 +2040,16 @@ mod tests {
         let (_, scene, p) = scene();
         let k = 30;
         for scatter in [1.0f32, 0.4] {
-            let s = Stood::of(&Physics { scatter, ..p });
+            let ss = Stoods::of(&scene, &Setup::alike(Physics { scatter, ..p }));
             let fine = scene.fine;
             let coarse = Grid { x0: fine.x0, y0: fine.y0, cell: COARSE, w: ((fine.w as f32 * FINE) / COARSE).ceil() as usize, h: ((fine.h as f32 * FINE) / COARSE).ceil() as usize };
-            let led = scene.led(k, 4.5);
+            let led = scene.led_at(k, &ss.all.p);
             let mut exact = Boxed::round(&fine, led, DIRECT_REACH);
-            straight(&scene, &s, k, led, &mut exact);
+            straight(&scene, &ss, k, led, &mut exact);
             let n = 4_000_000;
             let maps: [Boxed; MAPS] = std::array::from_fn(|_| Boxed::round(&coarse, led, BOUNCE_REACH));
             let mut traced = Gathered { counts: std::array::from_fn(|m| vec![0; maps[m].v.len()]), maps };
-            bounce(&scene, &s, k, led, &mut traced, &coarse, n, &mut Rng(0x1234_5678_9abc_def1), true);
+            bounce(&scene, &ss, k, led, &mut traced, &coarse, n, &mut Rng(0x1234_5678_9abc_def1), true);
             let traced = traced.maps;
             let own_well = scene.well_of(scene.keys[k].1 .0, scene.keys[k].1 .1);
             let per = (COARSE / FINE) as usize;
@@ -2009,8 +2123,8 @@ mod tests {
     #[test]
     fn wells_without_leds_stay_dark() {
         let (_, scene, p) = scene();
-        let snap = Simulator::settle(&scene, p, 4.5, 20_000);
-        let leds: Vec<(f32, f32)> = (0..scene.keys.len()).map(|k| scene.led(k, 4.5)).collect();
+        let snap = Simulator::settle(&scene, &Setup::alike(p), 20_000);
+        let leds: Vec<(f32, f32)> = (0..scene.keys.len()).map(|k| scene.led_at(k, &p)).collect();
         let lit_wells: Vec<usize> = leds.iter().filter_map(|&(x, y)| scene.well_of(x, y)).collect();
         let deck = |n: usize| {
             let (i, j) = (n % snap.fine.w, n / snap.fine.w);
@@ -2031,6 +2145,87 @@ mod tests {
             .map(|n| snap.direct_all[n])
             .fold(0f32, f32::max);
         assert!(unlit >= 1 && straight == 0.0 && dark < brightest * 0.06);
+    }
+
+    /// The keys' light as the core's light description has it, with one key's
+    /// own values ("keys", by its control's id): `own` its values, of the
+    /// key `k` in the simulation's order of the caps.
+    fn own_setup(b: &Board, k: usize, own: Value) -> (Setup, Setup) {
+        let ids: Vec<String> = b.cap_shapes.iter().map(|c| c.id.clone()).collect();
+        let mut light = serde_json::json!({ "units_per_mm": 1.38, "led": 4.5, "sim": { "nits": 600, "switch": "slot", "beam": 3.0 }, "wells": "mask_1" });
+        let all = Setup::from(&light, &ids);
+        light["keys"] = serde_json::json!({ ids[k].clone(): own });
+        (all, Setup::from(&light, &ids))
+    }
+
+    /// A key's own values are its alone: it takes every other value from all
+    /// keys'; its cap of another kind lights its own skirt; and the keys far
+    /// from it are lit as before.
+    #[test]
+    fn a_key_s_own_values_are_its_alone() {
+        let (b, scene, _) = scene();
+        let k = 30;
+        let (all, own) = own_setup(&b, k, serde_json::json!({ "sim": { "caps": "translucent", "skirts": 0.5 } }));
+        let p = *own.of(k as u32);
+        assert_eq!((p.caps, p.skirts, p.tops, p.black), (Caps::Translucent, 0.5, 0.5, 0.0));
+        assert_eq!(Physics { caps: Caps::ShineThrough, skirts: 0.0, tops: 0.0, black: 1.0, ..p }, all.all, "the rest is all keys'");
+        assert!(own.all == all.all && (0..b.cap_shapes.len() as u32).filter(|&c| c != k as u32).all(|c| own.of(c) == &all.all), "the other keys are as all keys are");
+        let (a, o) = (Simulator::settle(&scene, &all, 4000), Simulator::settle(&scene, &own, 4000));
+        // its skirt, seen from above
+        let skirt = |snap: &Snapshot| {
+            let cells = (0..snap.fine.w * snap.fine.h).filter(|&n| matches!(scene.surface[n], Surface::Skirt(c, ..) if c as usize == k));
+            cells.map(|n| snap.fine.middle(n % snap.fine.w, n / snap.fine.w)).filter_map(|(x, y)| snap.at(x, y, None)).map(|at| snap.white(&at)).sum::<f32>()
+        };
+        eprintln!("its skirt: {:.4} shine-through, {:.4} translucent", skirt(&a), skirt(&o));
+        assert!(skirt(&o) > 3.0 * skirt(&a), "its translucent skirt glows");
+        // the keys far from it: the same light straight from their LEDs, and much the same bounced
+        let (kx, ky) = scene.keys[k].1;
+        let far: Vec<usize> = (0..scene.keys.len()).filter(|&j| ((scene.keys[j].1 .0 - kx).powi(2) + (scene.keys[j].1 .1 - ky).powi(2)).sqrt() > 2.5 * BOUNCE_REACH).collect();
+        assert!(far.len() > 20, "keys far from it: {}", far.len());
+        let total = |x: &Boxed| x.v.iter().map(|v| *v as f64).sum::<f64>();
+        for &j in &far {
+            assert!(a.direct[j].v == o.direct[j].v, "key {j}'s light straight from its LED");
+            for m in 0..MAPS {
+                let (ta, to) = (total(&a.bounced[j][m]), total(&o.bounced[j][m]));
+                assert!((ta - to).abs() <= 0.01 * ta.max(1e-12), "key {j}'s bounced light ({m}): {ta} against {to}");
+            }
+        }
+    }
+
+    /// A key's switch moved under its cap takes its LED with it: the LED is
+    /// as far east and north of where it was, and its light on the back of
+    /// the cap's top goes the same way; every other key's stays where it was.
+    #[test]
+    fn a_key_s_switch_moved_takes_its_led_with_it() {
+        let (b, scene, _) = scene();
+        let k = 30;
+        let (east, north) = (-2.0f32, 3.0f32);
+        let (all, own) = own_setup(&b, k, serde_json::json!({ "place": { "east": east, "north": north } }));
+        let (a, o) = (Run::new(&scene, &all), Run::new(&scene, &own));
+        let mm = all.all.units_per_mm;
+        let moved = (o.leds[k].0 - a.leds[k].0, a.leds[k].1 - o.leds[k].1);
+        assert!((moved.0 - east * mm).abs() < 1e-4 && (moved.1 - north * mm).abs() < 1e-4, "its LED moved {moved:?}");
+        assert!((0..scene.keys.len()).filter(|&j| j != k).all(|j| a.leds[j] == o.leds[j]), "the other keys' LEDs stay");
+        // the light straight on the back of its cap's top: where it is, on the average
+        let middle = |r: &Run| {
+            let d = &r.direct[k];
+            let (mut sum, mut sx, mut sy) = (0f64, 0f64, 0f64);
+            for j in 0..d.h {
+                for i in 0..d.w {
+                    let (ci, cj) = (d.x + i, d.y + j);
+                    if matches!(scene.surface[cj * scene.fine.w + ci], Surface::Top(c) if c as usize == k) {
+                        let (x, y) = scene.fine.middle(ci, cj);
+                        let v = d.v[j * d.w + i] as f64;
+                        (sum, sx, sy) = (sum + v, sx + v * x as f64, sy + v * y as f64);
+                    }
+                }
+            }
+            (sx / sum, sy / sum)
+        };
+        let (ma, mo) = (middle(&a), middle(&o));
+        let went = ((mo.0 - ma.0) as f32, (ma.1 - mo.1) as f32);
+        eprintln!("its LED moved {:.2} east, {:.2} north; the light on its top {:.2} east, {:.2} north", moved.0, moved.1, went.0, went.1);
+        assert!(went.0 < 0.3 * east * mm && went.1 > 0.3 * north * mm, "the light on its top goes with it: {went:?}");
     }
 }
 

@@ -199,9 +199,13 @@ pub struct Values {
     lcd_dot: f64,
     lcd_glass: f64,
     nits: f64,
-    /// the art's units to the millimetre, and the key drawn
+    /// the art's units to the millimetre, and the key drawn; where its
+    /// switch sits, mm east and north of its middle; and whether it has an
+    /// LED of its own
     mm: f64,
     g: Geometry,
+    place: (f64, f64),
+    lit: bool,
 }
 
 /// A value as the light has it, or what the keyboard takes when it has none.
@@ -247,7 +251,15 @@ impl Values {
             nits: p.nits as f64,
             mm,
             g,
+            place: (raw(light, ("place", "east")), raw(light, ("place", "north"))),
+            lit: true,
         }
+    }
+
+    /// For a key with no LED of its own: none of an LED's light drawn.
+    pub fn unlit(mut self) -> Values {
+        self.lit = false;
+        self
     }
 
     /// the LED's own light on the back of the cap's top, `x` mm along the
@@ -448,7 +460,7 @@ struct Slice {
     v: Values,
     foot0: f64,
     foot1: f64,
-    /// the cap's middle, and the switch's centre under it
+    /// the cap's middle, and the switch's centre, north of it as far as it sits
     mid: f64,
     centre: f64,
     /// the W key's foot
@@ -467,7 +479,7 @@ impl Slice {
     fn of(v: &Values) -> Slice {
         let (foot0, foot1) = (v.g.deck_n, v.g.deck_n + v.g.foot);
         let mid = (foot0 + foot1) / 2.0;
-        let centre = mid;
+        let centre = mid - v.place.1;
         let span = v.top - v.foot;
         let mut sl = Slice {
             v: *v,
@@ -485,8 +497,8 @@ impl Slice {
         };
         // the switch as wide as asked, as far as it fits in the cap at its
         // top, and its LED inside it as drawn
-        let inner = sl.skirt_x(true, v.switch_top, true);
-        let half = if sl.hollow { (v.switch_width / 2.0).min(centre - inner - 0.25) } else { v.switch_width / 2.0 };
+        let (inner, inner_s) = (sl.skirt_x(true, v.switch_top, true), sl.skirt_x(false, v.switch_top, true));
+        let half = if sl.hollow { (v.switch_width / 2.0).min(centre - inner - 0.25).min(inner_s - centre - 0.25) } else { v.switch_width / 2.0 };
         (sl.hx0, sl.hx1) = (centre - half, centre + half);
         sl.led = sl.led.clamp(sl.hx0, sl.hx1);
         sl
@@ -585,7 +597,7 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
     let on = |part: Lens| part == lens;
     let line = |part: Lens| if on(part) { "#b0b0b0" } else { "#454545" };
     let fill = |part: Lens| if on(part) { "#3a3a3a" } else { "#262626" };
-    let glow = if on(Lens::Led) { 1.0 } else { 0.55 };
+    let glow = if !v.lit { 0.0 } else if on(Lens::Led) { 1.0 } else { 0.55 };
     let white = |name: &str| hot.is_some_and(|i| PARAMS[i].label == name);
     let frame = (px(x_lo).round(), pz(z_hi).round(), px(x_hi).round(), pz(z_lo).round());
 
@@ -615,7 +627,7 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
     // out to half its brightness, inside the cap; as strong as the light the switch doesn't scatter
     let rise = tz - sl.top_t - hz;
     let wide = beam_half(v.beam).to_radians().min(1.35).tan() * rise.max(0.0);
-    if rise > 0.3 {
+    if rise > 0.3 && v.lit {
         let mut cone = vec![(sl.led, hz), (sl.led + wide, hz + rise), (sl.led - wide, hz + rise)];
         if sl.hollow && !on(Lens::Led) {
             cone = clip_to(&cone, &sl.interior());
@@ -626,12 +638,12 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
             s.stroke(&poly(&pp(&cone), true), WHITE, 1.3);
         }
     }
-    if x_lo < sl.led && sl.led < x_hi && rise > 0.4 {
+    if v.lit && x_lo < sl.led && sl.led < x_hi && rise > 0.4 {
         s.dot(px(sl.led), pz(hz) + 1.5, 3.4 * grow, if white("North of centre") { WHITE } else { AMBER });
     }
     // the deck lit out under the skirts, either side of the key
     for (x0, x1) in [(x_lo.max(0.0), sl.foot0 + 0.6), (sl.foot1 - 0.6, (sl.w0 + 0.6).min(x_hi))] {
-        if x1 > x0 {
+        if x1 > x0 && v.lit {
             let g = s.linear(px(x0), 0.0, px(x1), 0.0, &[(0.0, AMBER, 0.15), (0.55, AMBER, 0.6), (1.0, AMBER, 0.1)]);
             s.path(&poly(&[p(x0, 0.0), p(x1, 0.0), p(x1, 0.2), p(x0, 0.2)], true), &g, "none", 1.0, if on(Lens::Led) { 0.9 } else { 0.5 });
         }
@@ -981,9 +993,13 @@ fn drawn(v: &Values, lens: Lens, w: f64, h: f64, hot: Option<usize>) -> (Svg, Ve
 /// under the section's `choices`. A section's sliders are placed once, as
 /// it opens, and stay put while its values change; only the drawing and the
 /// ends of their lines follow.
-pub fn places(v: &Values, lens: Lens, w: f32, h: f32, choices: usize) -> Vec<Place> {
+pub fn places(v: &Values, lens: Lens, w: f32, h: f32, choices: usize, right_top: f32, shown: Option<&[usize]>) -> Vec<Place> {
     let (w, h) = (w as f64, h as f64);
-    let (_, labels, _) = drawn(v, lens, w, h, None);
+    let (_, mut labels, _) = drawn(v, lens, w, h, None);
+    // only the sliders shown take a place
+    if let Some(shown) = shown {
+        labels.retain(|l| shown.contains(&l.i));
+    }
     let (px0, _, pw, _) = panel(w, h);
     let rise = 46.0;
     let mut out = Vec::new();
@@ -996,8 +1012,9 @@ pub fn places(v: &Values, lens: Lens, w: f32, h: f32, choices: usize) -> Vec<Pla
             let kb = (level(b) - if b.drop { 2000.0 } else { 0.0 }, -(b.at.0 - edge).abs());
             ka.partial_cmp(&kb).unwrap_or(std::cmp::Ordering::Equal)
         });
-        let under = if left { choices as f64 * CHOICE_H as f64 } else { 0.0 };
+        let under = if left { choices as f64 * CHOICE_H as f64 } else { right_top as f64 };
         let (lo, hi) = (14.0 + ATTACH as f64 + under, h - 14.0 - (CTRL_H - ATTACH) as f64);
+        let hi = hi.max(lo);
         let want: Vec<f64> = mine.iter().map(|l| if l.drop { lo } else if l.flat { level(l) - rise } else { level(l) }).collect();
         let gap = PITCH.min((hi - lo) / (want.len().max(2) - 1) as f64);
         let mut ys: Vec<f64> = Vec::new();
@@ -1065,6 +1082,50 @@ pub fn stage(v: &Values, lens: Lens, w: f32, h: f32, places: &[Place], hot: Opti
     Stage { w, h, svg, words: s.words, extras }
 }
 
+/// Where the switch pad has the key: its cap's middle on the pad, and the
+/// pad's pixels to the millimetre.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PadMap {
+    pub x: f32,
+    pub y: f32,
+    pub k: f32,
+}
+
+/// One key from above, for moving its switch: its cap's foot and face as
+/// big as the art has them (`size`, mm across and north to south), a mark
+/// at its middle, its switch's housing where it sits and its LED north of
+/// the housing's centre, north up; the housing white while it is moved.
+pub fn from_above(v: &Values, size: (f64, f64), w: f32, h: f32, hot: bool) -> (Stage, PadMap) {
+    let (wf, hf) = (w as f64, h as f64);
+    let (fw, fd) = (size.0.max(1.0), size.1.max(1.0));
+    // room round the key, and above it for the word that says which way north is
+    let (side, above, below) = (16.0, 24.0, 12.0);
+    let k = ((wf - 2.0 * side) / fw).min((hf - above - below) / fd);
+    let (cx, cy) = (wf / 2.0, above + (hf - above - below) / 2.0);
+    let (x0, y0, x1, y1) = (cx - fw * k / 2.0, cy - fd * k / 2.0, cx + fw * k / 2.0, cy + fd * k / 2.0);
+    let mut svg = String::new();
+    let _ = write!(svg, r#"<svg xmlns="http://www.w3.org/2000/svg" width="{wf}" height="{hf}" viewBox="0 0 {wf} {hf}">"#);
+    let _ = write!(svg, r#"<path d="{}" fill="{PLOT}"/>"#, rounded(0.0, 0.0, wf, hf, 8.0));
+    // the cap: its foot, and its face inside it
+    let r = (1.6 * k).min(6.0);
+    let _ = write!(svg, r##"<path d="{}" fill="#262626" stroke="#5c5c5c" stroke-width="1"/>"##, rounded(x0, y0, x1, y1, r));
+    let i = v.g.inset * k;
+    let _ = write!(svg, r##"<path d="{}" fill="none" stroke="#3a3a3a" stroke-width="1"/>"##, rounded(x0 + i, y0 + i, x1 - i, y1 - i, (r - 1.0).max(1.0)));
+    // its middle
+    let _ = write!(svg, r##"<path d="M{:.1} {cy:.1} H{:.1} M{cx:.1} {:.1} V{:.1}" stroke="#6f6f6f" stroke-width="1"/>"##, cx - 5.0, cx + 5.0, cy - 5.0, cy + 5.0);
+    // the switch where it sits, a line to it from the middle once it has moved, and its LED
+    let (sx, sy) = (cx + v.place.0 * k, cy - v.place.1 * k);
+    if v.place.0.abs() + v.place.1.abs() > 0.05 {
+        let _ = write!(svg, r#"<path d="M{cx:.1} {cy:.1} L{sx:.1} {sy:.1}" stroke="{DIMENSION}" stroke-width="1" stroke-dasharray="3 3"/>"#);
+    }
+    let half = v.switch_width / 2.0 * k;
+    let _ = write!(svg, r##"<path d="{}" fill="#1f1f1f" fill-opacity="0.9" stroke="{}" stroke-width="{}"/>"##, rounded(sx - half, sy - half, sx + half, sy + half, (1.2 * k).min(4.0)), if hot { WHITE } else { "#a3a3a3" }, if hot { 1.5 } else { 1.2 });
+    let _ = write!(svg, r#"<circle cx="{sx:.1}" cy="{:.1}" r="3.2" fill="{AMBER}"/>"#, sy - v.north * k);
+    svg += "</svg>";
+    let words = vec![Word { x: 12.0, y: 16.0, text: "North".into(), colour: QUIET_WORD }];
+    (Stage { w, h, svg, words, extras: Vec::new() }, PadMap { x: cx as f32, y: cy as f32, k: k as f32 })
+}
+
 /// A stage's pixels at the window's scale, as the lab shows it.
 pub fn pixels(st: &Stage, scale: f32) -> slint::SharedPixelBuffer<slint::Rgba8Pixel> {
     use resvg::tiny_skia::{Pixmap, Transform};
@@ -1100,7 +1161,7 @@ mod tests {
                 let v = Values::of(&l, Geometry::default());
                 for section in 0..4 {
                     let lens = Lens::of(section);
-                    let places = places(&v, lens, w, h, super::super::SECTIONS[section].3.len());
+                    let places = places(&v, lens, w, h, super::super::SECTIONS[section].3.len(), 0.0, None);
                     let ids = &super::super::sliders_of(section, &l);
                     assert_eq!(places.len(), ids.len(), "{lens:?}: a place for each of its sliders");
                     assert!(ids.iter().all(|i| places.iter().any(|p| p.i == *i)), "{lens:?}: its own sliders");
@@ -1122,7 +1183,7 @@ mod tests {
     fn the_sliders_stand_still() {
         let light = core_light();
         let v = Values::of(&light, Geometry::default());
-        let places = places(&v, Lens::Led, 1232.0, 572.0, 2);
+        let places = places(&v, Lens::Led, 1232.0, 572.0, 2, 0.0, None);
         let mut moved = light.clone();
         moved["sim"]["switch_top"] = serde_json::json!(9.5);
         let st = stage(&Values::of(&moved, Geometry::default()), Lens::Led, 1232.0, 572.0, &places, None);

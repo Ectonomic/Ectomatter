@@ -1,4 +1,4 @@
-//! The keyboard as one HDR picture, drawn from the Z10 core's art.
+//! A keyboard as one HDR picture, drawn from its core's art.
 //!
 //! Everything the drawing shows under and on the keys is flattened into one
 //! picture: the body and its print, the caps' shadows, and the keys' light
@@ -94,6 +94,8 @@ struct Shape {
 /// A lit key: its place, and its cap, which its light is simulated in.
 struct KeyArt {
     pos: u32,
+    /// its cap's place among the simulation's caps (as cap_shapes counts them)
+    cap: Option<u32>,
     /// the cap's foot (its skirt's outline) and its face, in the art's units,
     /// and the radius of each one's rounded corners
     foot: Option<[f32; 4]>,
@@ -113,8 +115,6 @@ struct KeyArt {
 /// the display's light. How the light falls is the simulation's.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Model {
-    /// how far north of the key's centre the LED sits (the art's units)
-    led: f32,
     /// the brightest legend, every key lit white at full, in nits: what all
     /// the simulation's light is scaled by
     nits: f32,
@@ -134,7 +134,6 @@ impl Model {
     fn from(l: &Value) -> Model {
         let f = |v: &Value, d: f32| v.as_f64().map_or(d, |v| v as f32);
         Model {
-            led: f(&l["led"], 7.0),
             // or, as the core once had it, the legends' own nits
             nits: f(&l["sim"]["nits"], f(&l["legend"]["nits"], 600.0)).max(0.0),
             legend_unlit: f(&l["legend"]["unlit"], 0.15).clamp(0.0, 1.0),
@@ -232,18 +231,49 @@ pub struct Board {
     /// their other part shows
     edges: Vec<Edge>,
     /// each lit key's milky band, below where the black of its cap's top
-    /// comes down its sides (a key's in its order), the other caps' bands,
-    /// how much of each pixel a band covers, and for how far down the black comes
+    /// comes down its sides (a key's in its order), the other caps' bands
+    /// (in theirs), how much of each pixel a band covers, and for how far
+    /// down each cap's black comes, by the simulation's order of the caps
     bands: Vec<Option<Shape>>,
-    other_bands: Vec<Shape>,
+    other_bands: Vec<Option<Shape>>,
     band_map: Vec<f32>,
-    bands_for: Option<u32>,
+    bands_for: Option<Vec<u32>>,
+    /// which cap each pixel is on, by the simulation's order of the caps
+    /// (NO_CAP off them all), for the light each cap's own physics gives it
+    cap_of: Vec<u16>,
     reads_for: Option<(usize, usize)>,
 }
 
 /// How far either side of a cap's foot the light either side of its edge
 /// is read: a cell of the simulation's fine grid, clear of the edge.
 const EDGE_READ: f32 = 0.5;
+
+/// A pixel on no cap, in the board's map of which cap each pixel is on.
+const NO_CAP: u16 = u16::MAX;
+
+/// Which cap each of the board's pixels is on, by the caps' order in `feet`
+/// (each its foot in the art's units and its corners' radius): the one it is
+/// furthest inside, of those whose foot's box (and a pixel round it, as a
+/// cap's band has) it is in; NO_CAP for the rest.
+fn cap_map(w: u32, h: u32, ka: f32, (ox, oy): (f32, f32), feet: &[([f32; 4], f32)]) -> Vec<u16> {
+    let mut map = vec![NO_CAP; (w * h) as usize];
+    let mut depth = vec![f32::MIN; (w * h) as usize];
+    for (i, &(f, r)) in feet.iter().enumerate().take(NO_CAP as usize) {
+        let (x0, y0) = (((ox + ka * f[0]).floor() as i32 - 1).max(0), ((oy + ka * f[1]).floor() as i32 - 1).max(0));
+        let (x1, y1) = (((ox + ka * f[2]).ceil() as i32 + 1).min(w as i32), ((oy + ka * f[3]).ceil() as i32 + 1).min(h as i32));
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let j = (y as u32 * w + x as u32) as usize;
+                let (u, v) = ((x as f32 + 0.5 - ox) / ka, (y as f32 + 0.5 - oy) / ka);
+                let inside = sim::from_foot(f, r, u, v).0;
+                if inside > depth[j] {
+                    (depth[j], map[j]) = (inside, i as u16);
+                }
+            }
+        }
+    }
+    map
+}
 
 /// Milky plastic's own colour, sRGB-encoded: the grey the art prints the
 /// legends in (the same plastic), a little warm, as milky white is.
@@ -319,9 +349,21 @@ struct KeysLight<'a> {
     gain: f32,
     alike: Option<[f32; 3]>,
     coloured: Option<Coloured>,
+    /// each cap's, by the simulation's order of them: how much more of its
+    /// sides' light its band takes, where the black of its top comes down
+    /// them (none where it does not); and how its translucent top glows
+    /// beside its legend, for a legend's share of its light
+    to_band: Vec<f32>,
+    top_glow: Vec<f32>,
 }
 
 impl KeysLight<'_> {
+    /// A cap's band's and top's share of its light (see to_band and top_glow); none off the caps.
+    fn cap(&self, c: u16) -> (f32, f32) {
+        let c = c as usize;
+        (self.to_band.get(c).copied().unwrap_or(0.0), self.top_glow.get(c).copied().unwrap_or(0.0))
+    }
+
     fn at(&self, a: &At) -> [f32; 3] {
         match (self.alike, &self.coloured) {
             (Some(c), _) => {
@@ -566,10 +608,11 @@ impl Board {
                 _ => (None, [0.0; 4], [0.0; 2]),
             };
             let second = legend.as_ref().and_then(|s| second_function(s, face, ka, oy));
+            let cap = foot.map(|_| cap_shapes.len() as u32);
             if let Some(f) = foot {
                 cap_shapes.push(CapShape { id: control_id(c), label: c["label"].as_str().unwrap_or_default().to_string(), foot: f, lit: true, legend: legend.is_some() });
             }
-            keys.push(KeyArt { pos: pos as u32, foot, face, round: rounds, legend, second, print });
+            keys.push(KeyArt { pos: pos as u32, cap, foot, face, round: rounds, legend, second, print });
         }
         // the caps of the keys with no light of their own, which stand in its way
         let mut others = Vec::new();
@@ -651,6 +694,8 @@ impl Board {
                 })
             })
             .collect();
+        let feet: Vec<([f32; 4], f32)> = keys.iter().filter_map(|k| k.foot.map(|f| (f, k.round[0]))).chain(others.iter().map(|o| (o.0, o.2[0]))).collect();
+        let cap_of = cap_map(w, h, ka, (ox, oy), &feet);
         Ok(Board {
             w,
             h,
@@ -675,6 +720,7 @@ impl Board {
             other_bands: Vec::new(),
             band_map: Vec::new(),
             bands_for: None,
+            cap_of,
             reads_for: None,
         })
     }
@@ -699,13 +745,15 @@ impl Board {
             self.read_from(&snap);
             self.reads_for = Some(shapes);
         }
-        let black = snap.physics.black;
-        if self.bands_for != Some(black.to_bits()) {
-            self.bands = self.keys.iter().map(|k| k.foot.and_then(|f| self.band(f, k.face, k.round[0], black))).collect();
-            self.other_bands = self.others.iter().filter_map(|&(f, a, r)| self.band(f, a, r[0], black)).collect();
+        let blacks: Vec<u32> = (0..self.cap_shapes.len() as u32).map(|c| snap.setup.of(c).black.to_bits()).collect();
+        if self.bands_for.as_ref() != Some(&blacks) {
+            let black = |c: u32| f32::from_bits(blacks[c as usize]);
+            self.bands = self.keys.iter().map(|k| k.foot.zip(k.cap).and_then(|(f, c)| self.band(f, k.face, k.round[0], black(c)))).collect();
+            let lit = self.lit_caps();
+            self.other_bands = self.others.iter().enumerate().map(|(i, &(f, a, r))| self.band(f, a, r[0], black((lit + i) as u32))).collect();
             // how much of each pixel is band, to keep the skirts' light to them
             let mut map = vec![0f32; (self.w * self.h) as usize];
-            for s in self.bands.iter().flatten().chain(&self.other_bands) {
+            for s in self.bands.iter().chain(&self.other_bands).flatten() {
                 for (i, c) in s.cover.iter().enumerate() {
                     let (x, y) = (s.x + (i as u32 % s.w) as i32, s.y + (i as u32 / s.w) as i32);
                     if *c > 0.0 && x >= 0 && y >= 0 && (x as u32) < self.w && (y as u32) < self.h {
@@ -715,7 +763,7 @@ impl Board {
                 }
             }
             self.band_map = map;
-            self.bands_for = Some(black.to_bits());
+            self.bands_for = Some(blacks);
         }
         self.most = self.measure(&snap);
         self.sim = Some(snap);
@@ -861,6 +909,19 @@ impl Board {
         cover.iter().any(|c| *c > 0.0).then_some(Shape { x: x0, y: y0, w: bw, h: bh, cover })
     }
 
+    /// How many of the simulation's caps are the lit keys' (the others' follow).
+    fn lit_caps(&self) -> usize {
+        self.keys.iter().filter(|k| k.cap.is_some()).count()
+    }
+
+    /// How every key is lit, as a core's light description has it: all
+    /// keys' values, and each key's own (its "keys", by the control's id)
+    /// over them, for this board's caps.
+    pub fn setup(&self, light: &Value) -> sim::Setup {
+        let ids: Vec<String> = self.cap_shapes.iter().map(|c| c.id.clone()).collect();
+        sim::Setup::from(light, &ids)
+    }
+
     /// Whether the device has wells round its keys.
     pub fn has_wells(&self) -> bool {
         !self.well_boxes.is_empty()
@@ -931,11 +992,6 @@ impl Board {
     }
     pub fn lcd_nits(&self) -> f32 {
         self.model.lcd_nits
-    }
-
-    /// How far north of its key's centre each LED sits, in the art's units.
-    pub fn led_north(&self) -> f32 {
-        self.model.led
     }
 
     /// The display as the core has it lit: its lit dots, unlit dots and the
@@ -1060,7 +1116,16 @@ impl Board {
             let colours: Vec<[f32; 3]> = snap.keys.iter().map(|&p| colour(p)).collect();
             let alike = colours.first().copied().filter(|c| colours.iter().all(|o| o == c));
             let coloured = alike.is_none().then(|| snap.lit(&colours));
-            KeysLight { snap, gain: self.gain(white, ceiling), alike, coloured }
+            // Where the black of a cap's top comes down its sides, the light
+            // through them keeps to the band below it: the simulation's cells
+            // are coarser than the band, so the band takes all of a side's
+            // light, as much more as the black leaves it less of the side. A
+            // translucent top glows beside its legend with the light on its
+            // back, as much as it lets through for a legend's share of it.
+            let physics = (0..self.cap_shapes.len() as u32).map(|c| snap.setup.of(c));
+            let to_band = physics.clone().map(|p| if p.skirts > 0.0 && p.black > 0.0 && !self.band_map.is_empty() { 1.0 / (1.0 - p.black).max(0.05) } else { 0.0 }).collect();
+            let top_glow = physics.map(|p| if p.tops > 0.0 { p.tops / p.legends.max(0.01) } else { 0.0 }).collect();
+            KeysLight { snap, gain: self.gain(white, ceiling), alike, coloured, to_band, top_glow }
         });
         let keys = keys.as_ref();
         // in bands of rows, one a thread: every step below is the pixel's own
@@ -1081,20 +1146,6 @@ impl Board {
         let y1 = y0 + n / w;
         let dec = |v: f32| v.max(0.0).powf(2.2);
         let (fw, cw) = keys.map_or((0, 0), |k| (k.snap.fine.w, k.snap.coarse.w));
-        // Where the black of a cap's top comes down its sides, the light
-        // through them keeps to the band below it: the simulation's cells are
-        // coarser than the band, so the band takes all of a side's light, as
-        // much more as the black leaves it less of the side.
-        let to_band = keys
-            .map(|k| &k.snap.physics)
-            .filter(|p| p.skirts > 0.0 && p.black > 0.0 && !self.band_map.is_empty())
-            .map(|p| 1.0 / (1.0 - p.black).max(0.05));
-        // a translucent top glows beside its legend with the light on its
-        // back, as much as it lets through for a legend's share of it
-        let top_glow = keys.map_or(0.0, |k| {
-            let p = &k.snap.physics;
-            if p.tops > 0.0 { p.tops / p.legends.max(0.01) } else { 0.0 }
-        });
         // The board unlit, and the keys' light where it shows: on the deck
         // and the chassis where no cap stands over them, as much as a cap's
         // edge lets through (the caps' shadows are the room's light, not
@@ -1105,9 +1156,11 @@ impl Board {
             px[3] = 1.0;
             let Some(k) = keys else { continue };
             let (r, a) = (&self.reads[j], self.caps[j * 4 + 3]);
+            // (each cap's band and top by its own physics)
+            let (to_band, top_glow) = k.cap(self.cap_of[j]);
             let share = match r.code {
                 0 | 1 if a < 1.0 => 1.0 - a,
-                2 if to_band.is_some() => self.band_map[j] * to_band.unwrap_or(1.0),
+                2 if to_band > 0.0 => self.band_map[j] * to_band,
                 2 if a > 0.0 => a,
                 3 if a > 0.0 && top_glow > 0.0 => a * top_glow,
                 _ => continue,
@@ -1125,9 +1178,9 @@ impl Board {
             for e in self.edges[from..].iter().take_while(|e| (e.j as usize) < y1 * w) {
                 let j = e.j as usize;
                 let a = self.caps[j * 4 + 3];
-                let share = match (self.reads[j].code, to_band) {
+                let share = match (self.reads[j].code, k.cap(self.cap_of[j]).0) {
                     (2, _) => 1.0 - a,
-                    (_, Some(more)) => self.band_map[j] * more,
+                    (_, more) if more > 0.0 => self.band_map[j] * more,
                     _ => a,
                 };
                 let l = k.at(&e.other.at(fw, cw));
@@ -1161,11 +1214,18 @@ impl Board {
         // Pudding caps: each lit key's milky band below the black of its top,
         // in place of the art's dark skirt, looking as the legends do (milky
         // plastic is what they are): its own white dimmed by the core's unlit
-        // share, showing less as the light through it outshines it.
-        if let Some(p) = keys.map(|k| &k.snap.physics).filter(|p| p.milky > 0.0 && p.skirts > 0.0) {
+        // share, showing less as the light through it outshines it. Each cap
+        // by its own physics: a key with a cap of another kind has none.
+        if let Some(k) = keys {
             // (a cap with no LED of its own is a lit key's with its LED off)
-            let lit = self.keys.iter().zip(&self.bands).filter_map(|(key, s)| s.as_ref().map(|s| (s, light(key.pos).map_or(0.0, Light::shine))));
-            for (s, strength) in lit.chain(self.other_bands.iter().map(|s| (s, 0.0))) {
+            let lit = self.keys.iter().zip(&self.bands).filter_map(|(key, s)| Some((s.as_ref()?, key.cap?, light(key.pos).map_or(0.0, Light::shine))));
+            let n = self.lit_caps();
+            let others = self.other_bands.iter().enumerate().filter_map(|(i, s)| Some((s.as_ref()?, (n + i) as u32, 0.0)));
+            for (s, cap, strength) in lit.chain(others) {
+                let p = k.snap.setup.of(cap);
+                if p.milky <= 0.0 || p.skirts <= 0.0 {
+                    continue;
+                }
                 let white = MILKY_WHITE.map(|c| dec(c) * p.milky * self.model.legend_unlit * (1.0 - strength));
                 each(s, &mut |d, _, a| {
                     let cap = &self.caps[(y0 * w + d) * 4..(y0 * w + d) * 4 + 4];
@@ -1342,7 +1402,7 @@ impl Encoder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sim::{Physics, Scene, Simulator};
+    use sim::{Physics, Scene, Setup, Simulator};
 
     /// The light the tests simulate, whatever the core is tuned to: the
     /// brightest legend at 600 nits, and the core's own defaults for the rest.
@@ -1395,7 +1455,7 @@ mod tests {
         let (tree, device, mut b) = board();
         let scene = Scene::of(&b);
         let t = std::time::Instant::now();
-        let snap = Simulator::settle(&scene, Physics::from(&device["light"]), b.led_north(), photons);
+        let snap = Simulator::settle(&scene, &Setup::alike(Physics::from(&device["light"])), photons);
         eprintln!("simulated {photons} photons from each of {} LEDs in {:?}", snap.keys.len(), t.elapsed());
         b.set_sim(Arc::new(snap));
         (tree, device, b)
@@ -1482,7 +1542,7 @@ mod tests {
             l["sim"]["switch"] = serde_json::json!("slot");
             l["sim"]["beam"] = serde_json::json!(3.0);
             l["sim"]["skirts"] = serde_json::json!(skirts);
-            b.set_sim(Arc::new(Simulator::settle(&scene, Physics::from(&l), b.led_north(), 4000)));
+            b.set_sim(Arc::new(Simulator::settle(&scene, &Setup::alike(Physics::from(&l)), 4000)));
             let frame = b.compose(&white(&b), 0, 254.0, 1000.0 / 254.0);
             (b.most.skirt / b.most.legend, lum(&frame, &b, north), lum(&frame, &b, south))
         };
@@ -1515,7 +1575,7 @@ mod tests {
             l["sim"]["skirts"] = serde_json::json!(0.3);
             l["sim"]["black"] = serde_json::json!(0.4);
             l["sim"]["milky"] = serde_json::json!(milky);
-            b.set_sim(Arc::new(Simulator::settle(&scene, Physics::from(&l), b.led_north(), 4000)));
+            b.set_sim(Arc::new(Simulator::settle(&scene, &Setup::alike(Physics::from(&l)), 4000)));
             let frame = b.compose(&white(&b), 0, 254.0, 1000.0 / 254.0);
             // the black at each of the top's corners too: on the diagonal from the
             // foot's rounded corner to the face's, as far toward the face as along the sides
@@ -1537,6 +1597,43 @@ mod tests {
         eprintln!("clear: band {clear_band:.3}, under the black {clear_black:.3}, south {clear_south:.3}; milky: band {milky_band:.3}, under the black {milky_black:.3}, south {milky_south:.3}");
         assert!(clear_band > 4.0 * clear_black && milky_band > 4.0 * milky_black, "the light gets out below the black, which is dark all round the top, its corners too");
         assert!(milky_south / milky_band > clear_south / clear_band, "milky plastic glows more evenly round the cap");
+    }
+
+    /// A key with a cap of its own kind is drawn as its own: among pudding
+    /// caps, a stock shine-through cap has no milky band, its LED off or lit,
+    /// and the keys far from it look as they did.
+    #[test]
+    fn a_key_s_own_cap_is_drawn_as_its_own() {
+        let (_t, device, mut b) = board();
+        let scene = Scene::of(&b);
+        let ids: Vec<String> = b.cap_shapes.iter().map(|c| c.id.clone()).collect();
+        let mut l = device["light"].clone();
+        for (k, v) in [("caps", serde_json::json!("pudding")), ("skirts", 0.3.into()), ("black", 0.4.into()), ("milky", 1.0.into()), ("switch", "slot".into()), ("beam", 3.0.into())] {
+            l["sim"][k] = v;
+        }
+        let key = |label: &str| {
+            let pos = device["controls"].as_array().unwrap().iter().find(|c| c["label"] == label).unwrap()["pos"].as_u64().unwrap() as u32;
+            b.keys.iter().position(|k| k.pos == pos).unwrap()
+        };
+        let (w, far) = (key("W"), key("Keypad6"));
+        let frames = |b: &mut Board, l: &Value| {
+            b.set_sim(Arc::new(Simulator::settle(&scene, &Setup::from(l, &ids), 2000)));
+            (b.compose(&[], 0, 254.0, 1000.0 / 254.0), b.compose(&white(b), 0, 254.0, 1000.0 / 254.0))
+        };
+        let (all_off, all_lit) = frames(&mut b, &l);
+        let (bands_w, bands_far) = (b.bands[w].take().unwrap(), b.bands[far].take().unwrap());
+        l["keys"] = serde_json::json!({ ids[b.keys[w].cap.unwrap() as usize].clone(): { "sim": { "caps": "shine_through" } } });
+        let (own_off, own_lit) = frames(&mut b, &l);
+        assert!(b.bands[w].as_ref().is_some_and(|s| s.cover.iter().filter(|c| **c > 0.0).count() < bands_w.cover.iter().filter(|c| **c > 0.0).count() / 4), "its band is the black's edge alone");
+        // a band's pixels, each one's light in a frame, added up
+        let on = |s: &Shape, f: &[f32]| {
+            (0..s.cover.len()).filter(|&i| s.cover[i] > 0.5).map(|i| lum(f, &b, (s.x + (i as u32 % s.w) as i32, s.y + (i as u32 / s.w) as i32))).sum::<f32>()
+        };
+        eprintln!("W's band, its LED off: {:.3} pudding, {:.3} shine-through; lit: {:.3}, {:.3}", on(&bands_w, &all_off), on(&bands_w, &own_off), on(&bands_w, &all_lit), on(&bands_w, &own_lit));
+        assert!(on(&bands_w, &own_off) < 0.25 * on(&bands_w, &all_off), "no milky band with its LED off");
+        assert!(on(&bands_w, &own_lit) < 0.25 * on(&bands_w, &all_lit), "no light through its skirt lit");
+        let (a, o) = (on(&bands_far, &all_lit), on(&bands_far, &own_lit));
+        assert!(on(&bands_far, &all_off) == on(&bands_far, &own_off) && (a - o).abs() < 0.01 * a, "a key far from it as it was: {a} against {o}");
     }
 
     fn white(b: &Board) -> Vec<Light> {
@@ -1603,7 +1700,7 @@ mod tests {
         // W: its legend brighter by its LED (north) than further off
         let c = device["controls"].as_array().unwrap().iter().find(|c| c["label"] == "W").unwrap();
         let key = b.keys.iter().find(|k| k.pos as u64 == c["pos"].as_u64().unwrap()).unwrap();
-        let (f, north) = (key.foot.unwrap(), b.led_north());
+        let (f, north) = (key.foot.unwrap(), Physics::from(&device["light"]).held_led());
         let (cx, cy) = ((f[0] + f[2]) / 2.0, (f[1] + f[3]) / 2.0);
         let l = key.legend.as_ref().unwrap();
         let by = |far: bool| {
@@ -1782,7 +1879,7 @@ mod tests {
         }
         let mut b = Board::new(&tree, &device, [0x20, 0x20, 0x20], 1264, 506).unwrap();
         let photons = std::env::var("ECTODECK_SIM_PHOTONS").ok().and_then(|v| v.parse().ok()).unwrap_or(40_000);
-        let snap = Simulator::settle(&Scene::of(&b), Physics::from(&device["light"]), b.led_north(), photons);
+        let snap = Simulator::settle(&Scene::of(&b), &Setup::alike(Physics::from(&device["light"])), photons);
         b.set_sim(Arc::new(snap));
         let nits = device["light"]["sim"]["nits"].as_f64().unwrap_or(600.0) as f32;
         let lit = b.compose(&white(&b), 0, 254.0, 4000.0 / 254.0);

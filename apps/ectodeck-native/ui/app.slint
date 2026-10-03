@@ -965,6 +965,8 @@ component CellView inherits Rectangle {
     callback focused(int, bool);
     // a slider double-clicked, to put it back as it was
     callback reset(int);
+    // a pad pressed or dragged on: where, as a share of it across and down
+    callback pad(int, float, float);
     in property <image> glyph;
     x: root.c.x;
     y: root.c.y;
@@ -1085,10 +1087,31 @@ component CellView inherits Rectangle {
     if root.c.kind == 17: TouchArea {
         changed has-hover => { root.hovered(root.c.id, self.has-hover); }
     }
+    // a pad to move something on, both ways at once: where the pointer is on it
+    if root.c.kind == 18: TouchArea {
+        mouse-cursor: move;
+        changed has-hover => { root.hovered(root.c.id, self.has-hover); }
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                root.pad(root.c.id, max(0, min(1, self.mouse-x / self.width)), max(0, min(1, self.mouse-y / self.height)));
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                root.pad(root.c.id, max(0, min(1, self.mouse-x / self.width)), max(0, min(1, self.mouse-y / self.height)));
+            }
+        }
+    }
     // a tile, under the pieces on it
+    // (style 27: a panel over the page, raised off it; 28: the page behind one, dimmed)
     if root.c.kind == 9: Rectangle {
         border-radius: 14px;
-        background: Ink.shade1;
+        background: root.c.style == 27 ? #2c2c2c : root.c.style == 28 ? #141414b8 : Ink.shade1;
+        border-width: root.c.style == 27 ? 1px : 0;
+        border-color: #3a3a3a;
+        drop-shadow-blur: root.c.style == 27 ? 28px : 0;
+        drop-shadow-offset-y: root.c.style == 27 ? 10px : 0;
+        drop-shadow-color: root.c.style == 27 ? #00000099 : transparent;
     }
     // a device's glyph on its square
     if root.c.kind == 12: Rectangle {
@@ -1220,21 +1243,38 @@ component CellView inherits Rectangle {
         }
     }
     // a switch's choice, an area chip, a button, the reset: words on a shade
+    // (style 24: it opens a list, a chevron after its words; 25: a key on the
+    // Light lab's map, its words small; 26: not to be chosen here, its words faint)
     if root.c.kind >= 5 && root.c.kind <= 8: Rectangle {
-        border-radius: root.c.kind == 5 ? 7px : root.c.kind == 8 ? 6px : 8px;
+        border-radius: root.c.style == 25 ? 4px : root.c.kind == 5 ? 7px : root.c.kind == 8 ? 6px : 8px;
         background: root.c.on ? Ink.ink
+            : root.c.style == 26 ? transparent
             : root.c.kind == 5 ? (b.has-hover ? Ink.shade2 : transparent)
             : root.c.kind == 8 ? (b.has-hover ? #ffffff0f : transparent)
             : (b.has-hover ? #3d3d3d : #333333);
         Text {
+            x: (parent.width - self.width) / 2 - (root.c.style == 24 ? 7px : 0);
             y: (parent.height - self.height) / 2 + (b.pressed && (root.c.kind == 7 || root.c.kind == 8) ? 1px : 0);
             text: root.c.text;
             font-family: "Geist";
-            font-size: root.c.kind == 8 ? 12.5px : 13px;
+            font-size: root.c.style == 25 ? 10.5px : root.c.kind == 8 ? 12.5px : 13px;
             font-weight: root.c.kind >= 7 ? 500 : 400;
-            color: root.c.on ? #171717 : root.c.kind == 8 ? (b.has-hover ? Ink.ink : Ink.quiet) : root.c.kind == 7 ? Ink.ink : b.has-hover ? #ffffff : Ink.dim;
+            color: root.c.on ? #171717 : root.c.style == 26 ? #5a5a5a : root.c.kind == 8 ? (b.has-hover ? Ink.ink : Ink.quiet) : root.c.kind == 7 ? Ink.ink : b.has-hover ? #ffffff : Ink.dim;
+        }
+        if root.c.style == 24: Path {
+            x: parent.width - 19px;
+            y: (parent.height - 6px) / 2;
+            width: 9px;
+            height: 6px;
+            viewbox-width: 10;
+            viewbox-height: 6;
+            commands: "M1 1l4 4 4-4";
+            fill: transparent;
+            stroke: root.c.on ? #171717 : Ink.quiet;
+            stroke-width: 1.35px;
         }
         b := TouchArea {
+            enabled: root.c.style != 26;
             mouse-cursor: pointer;
             clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
             // style 23: it tells the page the pointer is over it, as a zone does
@@ -3442,6 +3482,7 @@ export component LabWindow inherits Window {
     callback pick(int, int);
     callback compare(bool);
     callback reset(int);
+    callback pad(int, float, float);
     callback hovered(int, bool);
     callback focused(int, bool);
 
@@ -3533,6 +3574,7 @@ export component LabWindow inherits Window {
             c: c;
             pick(id, i, x, y, h) => { root.pick(id, i); }
             hovered(id, on) => { root.hovered(id, on); }
+            pad(id, x, y) => { root.pad(id, x, y); }
         }
         for r in root.rows: LabControl {
             r: r;

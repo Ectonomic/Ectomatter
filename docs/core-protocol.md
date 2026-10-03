@@ -141,7 +141,11 @@ How the device's light gets out, for the frontend to draw it as light: the `ligh
   "sim": { "nits": 705, "switch": "slot", "beam": 3.0, "switch_top": 5.7, "cap_top": 14.0, "legends": 0.3, "caps": "shine_through", "depth": 2.0, "deck": 0.22, "chassis": 0.4 },
   "legend": { "unlit": 0.15 },
   "lcd": { "nits": 324, "unlit": 4.1, "field": 0.8, "dot": 0.84, "glass": 1.0 },
-  "wells": "mask_1"
+  "wells": "mask_1",
+  "keys": {
+    "64": { "place": { "east": 0.0, "north": 9.5 } },
+    "106": { "sim": { "caps": "shine_through" } }
+  }
 }
 ```
 
@@ -150,6 +154,7 @@ How the device's light gets out, for the frontend to draw it as light: the `ligh
 - **led** is where each key's LED sits, north of its switch's centre in the art's units (south below 0).
 - **sim** is the device's make: its switches, its caps and their plastic, the wells' depth, and what each surface gives back. Its values are the Light lab's sliders; each is described there and in the file's own `about`.
 - **legend**, **lcd** and **wells** are how a legend looks with its LED off, the display's backlit dots, and the mask piece of the drawing that holds the wells.
+- **keys** holds a key's own values, where they differ from all keys', by the control's stable id (the Z10's description uses its key numbers until its controls carry ids). An entry takes any of the sections above that belong to a key, `led` and `sim` and `legend`, and only what differs: a stock cap among pudding caps, say. It can also say where the key's switch sits under its cap: **place**, how far east and north of the cap's middle, in millimetres, as on a long key whose switch is off its middle. The LED goes with its switch. A key with nothing of its own has no entry.
 
 What a device has decides what the Light lab tunes: keys with LEDs under caps, wells round them, a display, small lights behind windows. Anything the description leaves out is the frontend's ordinary default.
 

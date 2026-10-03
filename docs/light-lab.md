@@ -49,8 +49,8 @@ For example, a Z10 with pudding caps on all but a stock spacebar, and keypad +'s
 "light": {
   "sim": { "caps": "pudding", "skirts": 0.3, "black": 0.4, "milky": 1.0 },
   "keys": {
-    "106": { "sim": { "caps": "shine_through" } },
-    "64": { "place": { "north": 9.5 } }
+    "64": { "place": { "east": 0.0, "north": 9.5 } },
+    "106": { "sim": { "caps": "shine_through" } }
   }
 }
 ```

@@ -30,7 +30,7 @@ use crate::front::WindowAsk;
 use crate::lighting::{cell, kind, style, text_cell};
 use crate::text;
 use crate::{Cell, LabRow, LabWindow, Sketch};
-use ectodeck_draw::hdr::sim::{Caps, Physics, Switch};
+use ectodeck_draw::hdr::sim::{key_light, Caps, Physics, Switch};
 use ectodeck_draw::hdr::{CapShape, KeyGeometry};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -57,6 +57,15 @@ pub enum Ask {
     Focus(i32, bool),
     /// the pointer has rested where it is
     Rest,
+    /// the keys the page tunes: all of them (0), or one, whose map it opens (1)
+    Scope(i32),
+    /// a key chosen on the map, by its place among the caps
+    Key(i32),
+    /// a value of the chosen key's own given back, a slider's or a choice's:
+    /// the key takes all keys' again
+    Follow(i32),
+    /// the switch pad pressed or dragged on, where on it, across and down
+    Pad(f32, f32),
 }
 
 /// What a value is, which says how it reads.
@@ -74,6 +83,9 @@ enum Unit {
     Fraction,
     /// a plain number, as a beam's power
     Number,
+    /// a key's switch's place under its cap, in millimetres east or north of
+    /// its middle (the path says which), below 0 west or south
+    Place,
 }
 
 /// One value of the core's "light": where it is, what it is called, its
@@ -94,7 +106,7 @@ struct Param {
     note: &'static str,
 }
 
-const PARAMS: [Param; 25] = [
+const PARAMS: [Param; 27] = [
     Param { path: ("led", ""), label: "North of centre", lo: -9.66, hi: 9.66, step: 0.25, unit: Unit::Length, def: 7.0, note: "Where each key's LED sits under its cap, from the switch's centre toward the top of the key; below 0, toward the bottom, as on a keyboard whose LEDs face south. It goes as far as the switch's edge, so Switch width sets how far the slider reaches." },
     Param { path: ("sim", "nits"), label: "Brightness", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, def: 600.0, note: "The brightest legend, with every key lit white at full, up to Peak nits (Settings › HDR). Everything else the LEDs light is as bright as the simulation finds it beside that. A colour gives off its own share, as an LED does: a red about a fifth." },
     Param { path: ("sim", "beam"), label: "Beam", lo: 1.0, hi: 200.0, step: 0.5, unit: Unit::Number, def: 24.0, note: "How tight the LED's beam out of the top of the switch is. Higher keeps it to a small bright spot on the legend over the LED; lower spreads it across the cap's top and onto the inside of its skirt." },
@@ -120,6 +132,8 @@ const PARAMS: [Param; 25] = [
     Param { path: ("sim", "skirts"), label: "Plastic lets through", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.0, note: "The share of the light on the inside of a cap that its translucent plastic lets through, glowing on its outside: its sides below the black on pudding caps, all of it but the legends on translucent ones. Plastic with no coating lets through about what a legend does." },
     Param { path: ("sim", "black"), label: "Black down the sides", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.0, note: "How far down a cap's sides the black of its top comes, as a share of the skirt's height. A pudding cap's black comes part of the way, its milky plastic below; light gets out only below the black." },
     Param { path: ("sim", "milky"), label: "Milky", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.0, note: "How milky the translucent plastic is. Milky plastic carries the light it takes some way through itself before it leaves, so it glows evenly round the cap, and looks white with its LED off; clear plastic lets the light out where it went in." },
+    Param { path: ("place", "east"), label: "Switch east–west", lo: -60.0, hi: 60.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Where this key's switch sits under its cap, east or west of the cap's middle: where the plate holds it, which on a long key can be off its middle. Its LED goes with it." },
+    Param { path: ("place", "north"), label: "Switch north–south", lo: -30.0, hi: 30.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Where this key's switch sits under its cap, north or south of the cap's middle, as on a cap that reaches down past its row. Its LED goes with it." },
 ];
 
 /// One of a section's choices, at the top of its left column, which says
@@ -277,6 +291,11 @@ fn reads(p: &Param, v: f64, mm: f64) -> (String, String) {
         Unit::Reach => (trim(format!("{v:.2}")), "mm".into()),
         Unit::Fraction => (trim(format!("{:.1}", v * 100.0)), "%".into()),
         Unit::Number => (trim(format!("{v:.2}")), String::new()),
+        // a key's switch's place: how far, and which way
+        Unit::Place => {
+            let (plus, minus) = if p.path.1 == "east" { ("mm east", "mm west") } else { ("mm north", "mm south") };
+            (trim(format!("{:.1}", v.abs())), if v.abs() < 0.05 { "centred".into() } else if v > 0.0 { plus.into() } else { minus.into() })
+        }
     }
 }
 
@@ -307,6 +326,22 @@ const SIM_ABOUT: &str = "The light straight from each LED is worked out exactly 
 const READING: i32 = 100;
 const CHOICE: i32 = 800;
 const TABS: i32 = 900;
+/// the keys tuned (all or one), a key on the map, a value's mark that it is
+/// the key's own, and the switch pad
+const SCOPE: i32 = 940;
+const MAP: i32 = 950;
+const OWN: i32 = 960;
+const PAD: i32 = 970;
+/// the switch's place, east and north: values of one key's only
+const PLACE_E: usize = 25;
+const PLACE_N: usize = 26;
+/// what a choice sets, which a key takes as its own when it is chosen for it
+const CHOSEN: [&[(&str, &str)]; 2] = [
+    &[("sim", "switch"), ("sim", "switch_top"), ("sim", "beam"), ("sim", "scatter"), ("sim", "sides"), ("sim", "glow_spread")],
+    &[("sim", "caps"), ("sim", "skirts"), ("sim", "black")],
+];
+/// what the switch pad does
+const PAD_NOTE: &str = "Drag the switch to where it sits under this key's cap, as you see it with the cap off; its LED goes with it. The numbers below it say where it is from the cap's middle.";
 /// how long the pointer rests on something before the line under the drawing tells of it
 const REST: Duration = Duration::from_millis(250);
 /// the page's rows below the title bar: its head, the stage after a gap, the
@@ -363,16 +398,121 @@ pub struct LabPage {
     rest: slint::Timer,
     /// where the section's sliders stand, and for which section, size of stage and sliders
     places: Vec<drawing::Place>,
-    places_of: Option<(usize, i32, i32, Vec<usize>)>,
+    places_of: Option<(usize, i32, i32, Vec<usize>, Option<usize>)>,
     /// the stage as last drawn, and what it was drawn from: the light, the
     /// section, the stage's size, the window's scale, the slider drawn white
     drawn: Option<(drawing::Stage, slint::Image)>,
-    drawn_of: Option<(Value, usize, i32, i32, f32, Option<usize>)>,
+    drawn_of: Option<(Value, usize, i32, i32, f32, Option<usize>, Option<usize>)>,
     cells: Rc<VecModel<Cell>>,
     sketches: Rc<VecModel<Sketch>>,
     over: Rc<VecModel<Cell>>,
     rows: Rc<VecModel<LabRow>>,
     foot: Rc<VecModel<Cell>>,
+    /// the cap whose own setup the page shows, if one is chosen (its place
+    /// among the device's caps), and whether the map to choose one is open
+    scope: Option<usize>,
+    picking: bool,
+    /// the switch pad as last drawn, where it has the key, and what it was drawn from
+    pad: Option<(drawing::Stage, drawing::PadMap, slint::Image)>,
+    pad_of: Option<(Value, usize, bool, f32)>,
+}
+
+/// The value at a path in a light: a section's value, or the section itself
+/// where the path names one ("led").
+fn at<'a>(light: &'a Value, (a, b): (&str, &str)) -> &'a Value {
+    if b.is_empty() { &light[a] } else { &light[a][b] }
+}
+
+fn put_at(light: &mut Value, (a, b): (&str, &str), v: Value) {
+    if b.is_empty() {
+        light[a] = v;
+    } else {
+        if !light[a].is_object() {
+            light[a] = json!({});
+        }
+        light[a][b] = v;
+    }
+}
+
+/// A key's own value, under the light's "keys" by its control's id.
+fn own_put(light: &mut Value, id: &str, path: (&str, &str), v: Value) {
+    if !light["keys"].is_object() {
+        light["keys"] = json!({});
+    }
+    if !light["keys"][id].is_object() {
+        light["keys"][id] = json!({});
+    }
+    put_at(&mut light["keys"][id], path, v);
+}
+
+/// A key's own value given back, and with it its entry if that leaves it
+/// none, and the light's "keys" if no key has any.
+fn own_take(light: &mut Value, id: &str, path: (&str, &str)) {
+    if !light["keys"][id].is_object() {
+        return;
+    }
+    remove_at(&mut light["keys"][id], path);
+    if light["keys"][id].as_object().is_some_and(|o| o.is_empty()) {
+        if let Some(keys) = light["keys"].as_object_mut() {
+            keys.remove(id);
+        }
+    }
+    if light["keys"].as_object().is_some_and(|o| o.is_empty()) {
+        if let Some(l) = light.as_object_mut() {
+            l.remove("keys");
+        }
+    }
+}
+
+/// A value taken out of a light, and its section with it if it leaves it empty.
+fn remove_at(light: &mut Value, (a, b): (&str, &str)) {
+    let Some(o) = light.as_object_mut() else { return };
+    if b.is_empty() {
+        o.remove(a);
+    } else if let Some(section) = o.get_mut(a).and_then(Value::as_object_mut) {
+        section.remove(b);
+        if section.is_empty() {
+            o.remove(a);
+        }
+    }
+}
+
+/// A key's name as short as its cap on the map has room for.
+fn short(label: &str) -> String {
+    let s = match label {
+        "Escape" => "Esc",
+        "Grave accent" => "`",
+        "Minus" => "-",
+        "Equals" => "=",
+        "Backspace" => "Bksp",
+        "Left bracket" => "[",
+        "Right bracket" => "]",
+        "Backslash" => "\\",
+        "Caps Lock" => "Caps",
+        "Semicolon" => ";",
+        "Quote" => "'",
+        "Left Shift" | "Right Shift" => "Shift",
+        "Comma" => ",",
+        "Period" => ".",
+        "Slash" => "/",
+        "Left Ctrl" | "Right Ctrl" => "Ctrl",
+        "Left Alt" | "Right Alt" => "Alt",
+        "Print Screen" => "PrtSc",
+        "Scroll Lock" => "ScrLk",
+        "Pause/Break" => "Pause",
+        "Insert" => "Ins",
+        "Page Up" => "PgUp",
+        "Delete" => "Del",
+        "Page Down" => "PgDn",
+        "Up arrow" => "↑",
+        "Down arrow" => "↓",
+        "Left arrow" => "←",
+        "Right arrow" => "→",
+        "Num Lock" => "Num",
+        "Keypad Enter" => "Enter",
+        _ => return label.strip_prefix("Keypad").map_or(label, str::trim).to_string(),
+    };
+    s.to_string()
 }
 
 fn get(light: &Value, (a, b): (&str, &str)) -> Option<f64> {
@@ -447,7 +587,14 @@ impl LabPage {
         on!(on_entered, |id, t| Ask::Typed(id, t.to_string()));
         on!(on_revert, Ask::Revert);
         on!(on_save, Ask::Save);
-        on!(on_pick, |id, index| if id == TABS { Ask::Section(index) } else { Ask::Choose(id - CHOICE, index) });
+        on!(on_pick, |id, index| match id {
+            TABS => Ask::Section(index),
+            SCOPE => Ask::Scope(index),
+            MAP => Ask::Key(index),
+            OWN => Ask::Follow(index),
+            _ => Ask::Choose(id - CHOICE, index),
+        });
+        on!(on_pad, |_id, x, y| Ask::Pad(x, y));
         on!(on_hovered, |id, on| Ask::Hover(id, on));
         on!(on_compare, |on| Ask::Compare(on));
         on!(on_reset, |id| Ask::Reset(id));
@@ -490,6 +637,10 @@ impl LabPage {
             over,
             rows,
             foot,
+            scope: None,
+            picking: false,
+            pad: None,
+            pad_of: None,
         };
         // a section the device has
         if !page.sections().contains(&page.section) {
@@ -505,9 +656,11 @@ impl LabPage {
         [d.keys, d.keys, d.wells, d.screens].iter().enumerate().filter(|(_, has)| **has).map(|(i, _)| i).collect()
     }
 
-    /// The key the stage draws: the core's typical key, in section as its art has it.
+    /// The key the stage draws, in section as its art has it: the one chosen,
+    /// or the core's typical key.
     fn drawn_key(&self) -> drawing::Geometry {
-        drawing::Geometry::of(self.device.typical.as_deref().and_then(|id| self.device.geometry(id)))
+        let id = self.key().map(|k| k.id.as_str()).or(self.device.typical.as_deref());
+        drawing::Geometry::of(id.and_then(|id| self.device.geometry(id)))
     }
 
     /// Every cap of the device, each in section, once its board is drawn
@@ -524,9 +677,17 @@ impl LabPage {
         !self.device.caps.is_empty()
     }
 
-    /// What the lab says of the page, under its title.
-    fn intro(&self) -> String {
-        format!("Tune how the {} is lit. Ectodeck's window shows each change at once; Save writes them into its core.", self.device.name)
+    /// What the lab says of the page, under its title, and more briefly
+    /// where the head is narrow: what it tunes, or whose own setup it shows.
+    fn intro(&self) -> (String, String) {
+        match self.key() {
+            None => {
+                let name = &self.device.name;
+                (format!("Tune how the {name} is lit. Ectodeck's window shows each change at once; Save writes them into its core."), format!("Tune how the {name} is lit; Save writes it into its core."))
+            }
+            Some(k) if !k.lit => (format!("{0}'s own setup. It has no LED of its own, so only its cap is set here; the rest follows all keys.", k.label), format!("{}'s own setup: its cap; it has no LED of its own.", k.label)),
+            Some(k) => (format!("{0}'s own setup. Changes here are for {0} alone; everything else follows all keys.", k.label), format!("{0}'s own setup: changes here are for {0} alone.", k.label)),
+        }
     }
 
     /// How many of the art's units make a millimetre, as the core's light says.
@@ -552,9 +713,9 @@ impl LabPage {
                         // North of centre's slider runs north to south, as the drawing does
                         let f = if p.path == ("led", "") { 1.0 - f } else { f };
                         let v = self.at_along(id.max(0) as usize, f as f64);
-                        if get(&self.light, p.path) != Some(v) {
+                        if get(&self.work(), p.path) != Some(v) {
                             self.remember(id);
-                            set(&mut self.light, p.path, v);
+                            self.put_num(p.path, v);
                             self.rev += 1;
                             self.status = (String::new(), 0);
                         }
@@ -583,10 +744,17 @@ impl LabPage {
                                     }
                                     Unit::Length => v.max(0.01),
                                     Unit::Number => v.max(p.lo),
+                                    // the other way when typed below 0, or west or south
+                                    Unit::Place => {
+                                        let (lo, hi) = self.range(id.max(0) as usize);
+                                        let typed = t.to_lowercase();
+                                        let other = num.starts_with('-') || typed.contains("west") || typed.contains("south");
+                                        (v.abs() * if other { -1.0 } else { 1.0 }).clamp(lo, hi)
+                                    }
                                 };
-                                if get(&self.light, p.path) != Some(v) {
+                                if get(&self.work(), p.path) != Some(v) {
                                     self.remember(id);
-                                    set(&mut self.light, p.path, v);
+                                    self.put_num(p.path, v);
                                     self.rev += 1;
                                     self.status = (String::new(), 0);
                                 }
@@ -597,9 +765,24 @@ impl LabPage {
                 }
                 Ask::Choose(choice, option) => {
                     let (choice, option) = (choice.max(0) as usize, option.max(0) as usize);
-                    if choice < CHOICES.len() && chosen(choice, &self.light) != option {
+                    let work = self.work();
+                    if choice < CHOICES.len() && chosen(choice, &work) != option {
                         self.remember(CHOICE + choice as i32);
-                        choose(&mut self.light, choice, option);
+                        let mut after = work;
+                        choose(&mut after, choice, option);
+                        if self.key().is_some() {
+                            let all = key_light(&self.light, &Value::Null);
+                            for &path in CHOSEN[choice] {
+                                let v = at(&after, path).clone();
+                                if v.is_null() || &v == at(&all, path) {
+                                    self.unput(path);
+                                } else {
+                                    self.put(path, v);
+                                }
+                            }
+                        } else {
+                            self.light = after;
+                        }
                         self.rev += 1;
                         self.status = (String::new(), 0);
                     }
@@ -610,6 +793,20 @@ impl LabPage {
                         self.status = if on { ("Showing the saved tuning.".into(), 0) } else { (String::new(), 0) };
                     }
                 }
+                Ask::Reset(id) | Ask::Follow(id) if self.key().is_some() => {
+                    let path = match id {
+                        id if (CHOICE..CHOICE + CHOICES.len() as i32).contains(&id) => CHOSEN[(id - CHOICE) as usize][0],
+                        id => PARAMS.get(id.max(0) as usize).map_or(("", ""), |p| p.path),
+                    };
+                    if !path.0.is_empty() && self.owns(path) {
+                        self.remember(id);
+                        self.unput(path);
+                        self.rev += 1;
+                        let what = if id >= CHOICE { CHOICES[(id - CHOICE) as usize].label } else { PARAMS[id as usize].label };
+                        self.status = (format!("{what} follows all keys again."), 0);
+                    }
+                }
+                Ask::Follow(_) => {}
                 Ask::Reset(id) => {
                     let i = id.max(0) as usize;
                     if let Some(p) = PARAMS.get(i) {
@@ -631,7 +828,7 @@ impl LabPage {
                 Ask::Save => self.save(),
                 Ask::Section(i) => {
                     let i = (i.max(0) as usize).min(SECTIONS.len() - 1);
-                    if i != self.section && self.sections().contains(&i) {
+                    if i != self.section && self.sections().contains(&i) && self.section_open(i) {
                         self.section = i;
                         self.hovered = None;
                         self.told = None;
@@ -662,10 +859,131 @@ impl LabPage {
                         self.told = self.hovered;
                     }
                 }
+                Ask::Scope(0) => {
+                    self.scope = None;
+                    self.picking = false;
+                }
+                Ask::Scope(_) => self.picking = !self.picking,
+                Ask::Key(i) => {
+                    if let Some(lit) = self.device.caps.get(i.max(0) as usize).map(|(c, _)| c.lit) {
+                        self.scope = Some(i as usize);
+                        self.picking = false;
+                        // a key's own sections only: a key with no LED has none of its own
+                        if !self.section_open(self.section) {
+                            self.section = if lit { 0 } else { 1 };
+                        }
+                    }
+                }
+                Ask::Pad(fx, fy) => {
+                    if let (true, Some(map)) = (self.key().is_some_and(|k| k.lit), self.pad.as_ref().map(|p| p.1)) {
+                        let (px, py, pw, ph) = self.pad_box();
+                        let (x, y) = (px + fx * pw, py + fy * ph);
+                        let (cx, cy) = (px + map.x, py + map.y);
+                        let (e_range, n_range) = (self.range(PLACE_E), self.range(PLACE_N));
+                        let east = ((((x - cx) / map.k) as f64 * 10.0).round() / 10.0).clamp(e_range.0, e_range.1);
+                        let north = ((((cy - y) / map.k) as f64 * 10.0).round() / 10.0).clamp(n_range.0, n_range.1);
+                        let work = self.work();
+                        if get(&work, PARAMS[PLACE_E].path) != Some(east) || get(&work, PARAMS[PLACE_N].path) != Some(north) {
+                            self.remember(PAD);
+                            self.put_num(PARAMS[PLACE_E].path, east);
+                            self.put_num(PARAMS[PLACE_N].path, north);
+                            self.rev += 1;
+                            self.status = (String::new(), 0);
+                        }
+                    }
+                }
             }
         }
         self.refresh();
         window
+    }
+
+    /// The key whose own setup the page shows, if one is chosen.
+    fn key(&self) -> Option<&CapShape> {
+        self.scope.and_then(|i| self.device.caps.get(i)).map(|(c, _)| c)
+    }
+
+    /// The chosen key's own values, by its control's id, as the light has them.
+    fn own<'a>(&self, light: &'a Value) -> &'a Value {
+        self.key().map_or(&Value::Null, |k| &light["keys"][k.id.as_str()])
+    }
+
+    /// The light the page works on: all keys', or the chosen key's own values over theirs.
+    fn work(&self) -> Value {
+        self.work_of(&self.light)
+    }
+
+    fn work_of(&self, light: &Value) -> Value {
+        match self.key() {
+            None => light.clone(),
+            Some(_) => key_light(light, self.own(light)),
+        }
+    }
+
+    /// Whether the chosen key has a value of its own there.
+    fn owns(&self, path: (&str, &str)) -> bool {
+        !at(self.own(&self.light), path).is_null()
+    }
+
+    /// Set a value: the chosen key's own, or all keys'.
+    fn put(&mut self, path: (&str, &str), v: Value) {
+        match self.key().map(|k| k.id.clone()) {
+            Some(id) => own_put(&mut self.light, &id, path, v),
+            None => put_at(&mut self.light, path, v),
+        }
+    }
+
+    fn put_num(&mut self, path: (&str, &str), v: f64) {
+        self.put(path, json!((v * 1000.0).round() / 1000.0));
+    }
+
+    /// A value of the chosen key's own given back: it takes all keys' again
+    /// (and a key with none of its own left is no longer in the light's keys).
+    fn unput(&mut self, path: (&str, &str)) {
+        if let Some(id) = self.key().map(|k| k.id.clone()) {
+            own_take(&mut self.light, &id, path);
+        }
+    }
+
+    /// Whether a section is the page's to show: all of them for all keys;
+    /// for one key, its LED's (if it has one) and its cap's, the wells and the
+    /// display being every key's.
+    fn section_open(&self, i: usize) -> bool {
+        match self.key() {
+            None => true,
+            Some(k) => i == 1 || (i == 0 && k.lit),
+        }
+    }
+
+    /// The sliders the section shows: those that tune the light worked on;
+    /// for one key, none of what is every key's (the brightness) nor of a
+    /// legend it does not have, and its switch's place.
+    fn sliders(&self) -> Vec<usize> {
+        let mut ids = sliders_of(self.section, &self.work());
+        if let Some(k) = self.key() {
+            ids.retain(|&i| PARAMS[i].path != ("sim", "nits") && (k.legend || !matches!(PARAMS[i].path, ("sim", "legends") | ("legend", "unlit"))));
+            if self.section == 0 && k.lit {
+                ids.extend([PLACE_E, PLACE_N]);
+            }
+        }
+        ids
+    }
+
+    /// The chosen key's cap, in millimetres across and north to south.
+    fn key_size(&self) -> Option<(f64, f64)> {
+        let mm = self.mm();
+        self.key().map(|k| ((k.foot[2] - k.foot[0]) as f64 / mm, (k.foot[3] - k.foot[1]) as f64 / mm))
+    }
+
+    /// Where the switch pad is on the page: at the top of the right column,
+    /// as tall as the key is for its width, within bounds.
+    fn pad_box(&self) -> (f32, f32, f32, f32) {
+        let (_, _, sw, sh) = self.sizes();
+        let (across, deep) = self.key_size().unwrap_or((17.4, 17.4));
+        // (shorter in a short window, to leave the column room for its other sliders)
+        let most = (sh - 300.0).clamp(110.0, 200.0);
+        let h = (36.0 + (drawing::CTRL_W - 32.0) * (deep / across) as f32).clamp(110.0, most);
+        (24.0 + drawing::column_x(false, sw), HEAD_H + drawing::choice_y(0) + 30.0, drawing::CTRL_W, h)
     }
 
     /// Remember the light before a change to `id`, for undoing it.
@@ -770,7 +1088,7 @@ impl LabPage {
 
     /// The slider drawn white: the one being typed in, or under the pointer.
     fn hot(&self) -> Option<usize> {
-        self.focused.or(self.hovered).filter(|&i| (0..READING).contains(&i)).map(|i| i as usize).filter(|i| sliders_of(self.section, &self.light).contains(i))
+        self.focused.or(self.hovered).filter(|&i| (0..READING).contains(&i)).map(|i| i as usize).filter(|i| self.sliders().contains(i))
     }
 
     /// Place the section's sliders when it opens or the stage changes size,
@@ -778,20 +1096,46 @@ impl LabPage {
     fn draw_stage(&mut self) {
         let (_, _, sw, sh) = self.sizes();
         let lens = drawing::Lens::of(self.section);
-        let v = drawing::Values::of(&self.light, self.drawn_key());
-        let size = (self.section, sw.round() as i32, sh.round() as i32, sliders_of(self.section, &self.light));
+        let work = self.work();
+        // the key drawn: the one chosen, as the art has it, with no LED's
+        // light if it has no LED of its own; or the device's typical key
+        let mut v = drawing::Values::of(&work, self.drawn_key());
+        if self.key().is_some_and(|k| !k.lit) {
+            v = v.unlit();
+        }
+        let size = (self.section, sw.round() as i32, sh.round() as i32, self.sliders(), self.scope);
         if self.places_of.as_ref() != Some(&size) {
-            self.places = drawing::places(&v, lens, sw, sh, SECTIONS[self.section].3.len());
+            // one lit key's switch pad and its values at the top of the right column
+            let right_top = if self.section == 0 && self.key().is_some_and(|k| k.lit) { self.pad_box().3 + 182.0 } else { 0.0 };
+            self.places = drawing::places(&v, lens, sw, sh, SECTIONS[self.section].3.len(), right_top, Some(&size.3));
             self.places_of = Some(size.clone());
         }
         let scale = slint::ComponentHandle::window(&self.ui).scale_factor();
         let hot = self.hot();
-        let of = (self.light.clone(), self.section, size.1, size.2, scale, hot);
+        // the switch pad, for one lit key's LED
+        let pad_on = self.section == 0 && self.key().is_some_and(|k| k.lit);
+        if pad_on {
+            let hot_pad = self.hovered == Some(PAD) || matches!(hot, Some(PLACE_E | PLACE_N));
+            let of = (work.clone(), self.scope.unwrap_or(0), hot_pad, scale);
+            if self.pad_of.as_ref() != Some(&of) {
+                let (_, _, pw, ph) = self.pad_box();
+                let (st, map) = drawing::from_above(&v, self.key_size().unwrap_or((17.4, 17.4)), pw, ph, hot_pad);
+                let image = slint::Image::from_rgba8_premultiplied(drawing::pixels(&st, scale));
+                self.pad = Some((st, map, image));
+                self.pad_of = Some(of);
+            }
+        } else {
+            self.pad = None;
+            self.pad_of = None;
+        }
+        let of = (work, self.section, size.1, size.2, scale, hot, self.scope);
         if self.drawn_of.as_ref() == Some(&of) {
             return;
         }
         let same_scale = self.drawn_of.as_ref().is_some_and(|o| o.4 == scale);
-        let st = drawing::stage(&v, lens, sw, sh, &self.places, hot);
+        // (lines only to the sliders shown: one key shows fewer)
+        let shown: Vec<drawing::Place> = self.places.iter().filter(|p| size.3.contains(&p.i)).copied().collect();
+        let st = drawing::stage(&v, lens, sw, sh, &shown, hot);
         if !(same_scale && self.drawn.as_ref().is_some_and(|(old, _)| *old == st)) {
             let image = slint::Image::from_rgba8_premultiplied(drawing::pixels(&st, scale));
             self.drawn = Some((st, image));
@@ -807,8 +1151,14 @@ impl LabPage {
         if p.unit == Unit::Nits {
             (0.0, if self.readout.peak > 0.0 { self.readout.peak } else { 1000.0 })
         } else if p.path == ("led", "") {
-            let edge = Physics::from(&self.light).switch_edge() as f64;
+            let edge = Physics::from(&self.work()).switch_edge() as f64;
             (-edge, edge)
+        } else if p.unit == Unit::Place {
+            // the switch's housing inside its cap's foot
+            let (across, deep) = self.key_size().unwrap_or((17.4, 17.4));
+            let half = Physics::from(&self.work()).switch_width as f64 / 2.0;
+            let reach = ((if p.path.1 == "east" { across } else { deep }) / 2.0 - half).max(0.0);
+            (-reach, reach)
         } else {
             (p.lo, p.hi)
         }
@@ -848,7 +1198,7 @@ impl LabPage {
     /// inside its switch (a narrower switch pushes it in, and it comes back
     /// out as the switch widens again).
     fn value(&self, i: usize) -> f64 {
-        self.value_in(&self.light, i)
+        self.value_in(&self.work(), i)
     }
 
     fn value_in(&self, light: &Value, i: usize) -> f64 {
@@ -866,7 +1216,14 @@ impl LabPage {
     fn told(&self) -> (String, String) {
         let r = self.readout;
         match self.focused.or(self.told) {
-            Some(i) if (0..READING).contains(&i) && sliders_of(self.section, &self.light).contains(&(i as usize)) => (PARAMS[i as usize].label.into(), PARAMS[i as usize].note.into()),
+            Some(i) if (0..READING).contains(&i) && self.sliders().contains(&(i as usize)) => {
+                let p = &PARAMS[i as usize];
+                match self.key().filter(|_| self.owns(p.path)) {
+                    Some(k) => (p.label.into(), format!("{} This is {}'s own; double-click the slider, or click the dot before its name, and it follows all keys again.", p.note, k.label)),
+                    None => (p.label.into(), p.note.into()),
+                }
+            }
+            Some(i) if i == PAD => ("Switch's place".into(), PAD_NOTE.into()),
             Some(i) if (CHOICE..CHOICE + CHOICES.len() as i32).contains(&i) => (CHOICES[(i - CHOICE) as usize].label.into(), CHOICES[(i - CHOICE) as usize].note.into()),
             Some(i) if i == READING => ("Brightest legend".into(), self.legend_note().unwrap_or_else(|| READOUT_ABOUT.into())),
             Some(i) if i == READING + 1 => ("Brightest deck".into(), READOUT_ABOUT.into()),
@@ -911,11 +1268,32 @@ impl LabPage {
         }
         let tabs_w = bx - 2.0 + 6.0;
         let tx = w - 24.0 - tabs_w;
-        cells.push(text_cell(style::NOTE, 24.0, 44.0, (tx - 48.0).max(200.0), 18.0, &self.intro()));
+        // the keys tuned, before the sections: all of them, or one, which opens the map to choose it
+        let one = self.key().map_or_else(|| "One key".to_string(), |k| k.label.clone());
+        let (aw, kw) = (text::width(400, 13.0, "All keys") + 24.0, text::width(400, 13.0, &one) + 24.0 + 16.0);
+        let scope_w = aw + 2.0 + kw + 6.0;
+        let qx = tx - 12.0 - scope_w;
+        // what the page is, or whose own setup it shows; shorter where the head is narrow
+        let room = (qx - 48.0).max(200.0);
+        let (full, brief) = self.intro();
+        let intro = if text::width(400, 12.5, &full) <= room { full } else { brief };
+        cells.push(text_cell(style::NOTE, 24.0, 44.0, room, 18.0, &intro));
+        cells.push(cell(kind::SEG, qx, 17.0, scope_w, 36.0));
+        cells.push(Cell { text: "All keys".into(), on: self.scope.is_none() && !self.picking, id: SCOPE, index: 0, ..cell(kind::SEG_BUTTON, qx + 3.0, 20.0, aw, 30.0) });
+        cells.push(Cell { text: one.into(), on: self.scope.is_some() || self.picking, id: SCOPE, index: 1, style: 24, ..cell(kind::SEG_BUTTON, qx + 3.0 + aw + 2.0, 20.0, kw, 30.0) });
         cells.push(cell(kind::SEG, tx, 17.0, tabs_w, 36.0));
         for (i, title, x, bw) in tabs {
-            cells.push(Cell { text: (*title).into(), on: i == self.section, id: TABS, index: i as i32, ..cell(kind::SEG_BUTTON, tx + 3.0 + x, 20.0, bw, 30.0) });
+            // (for one key, the sections that are every key's are not to be chosen)
+            let style = if self.section_open(i) { 0 } else { 26 };
+            cells.push(Cell { text: (*title).into(), on: i == self.section, id: TABS, index: i as i32, style, ..cell(kind::SEG_BUTTON, tx + 3.0 + x, 20.0, bw, 30.0) });
         }
+        let work = self.work();
+        let saved_work = self.work_of(&self.saved);
+        // a value of the chosen key's own: a mark before its name, which gives it back to all keys
+        let own_mark = |over: &mut Vec<Cell>, x: f32, y: f32, index: i32| {
+            over.push(Cell { style: 3, ..cell(kind::DOT, x - 19.0, y + 9.5, 7.0, 7.0) });
+            over.push(Cell { id: OWN, index, ..cell(kind::LINK, x - 25.0, y + 4.0, 19.0, 18.0) });
+        };
         // the stage, and the words on it
         let (sx, sy) = (24.0, HEAD_H);
         let mut sketches = Vec::new();
@@ -941,7 +1319,10 @@ impl LabPage {
             let widths: Vec<f32> = choice.options.iter().map(|name| text::width(400, 13.0, name) + 20.0).collect();
             let seg_w = widths.iter().sum::<f32>() + 2.0 * (widths.len() as f32 - 1.0) + 6.0;
             over.push(cell(kind::SEG, cx, y + 30.0, seg_w, 34.0));
-            let on = chosen(c, &self.light);
+            if self.owns(CHOSEN[c][0]) {
+                own_mark(&mut over, cx, y, CHOICE + c as i32);
+            }
+            let on = chosen(c, &work);
             let mut bx = cx + 3.0;
             for (j, (name, bw)) in choice.options.iter().zip(widths).enumerate() {
                 over.push(Cell { text: (*name).into(), on: j == on, id, index: j as i32, style: style::TELLS, ..cell(kind::SEG_BUTTON, bx, y + 32.0, bw, 30.0) });
@@ -951,8 +1332,8 @@ impl LabPage {
         // the sliders, each where the section placed it
         let hot = self.hot();
         let mut rows = Vec::new();
-        let ids = sliders_of(self.section, &self.light);
-        for place in &self.places {
+        let ids = self.sliders();
+        for place in self.places.iter().filter(|_| !self.picking) {
             let i = place.i;
             if !ids.contains(&i) {
                 continue;
@@ -964,10 +1345,14 @@ impl LabPage {
                 unit = extra.clone();
                 derived = true;
             }
-            let (at, was) = (self.knob(i, self.value(i)), self.knob(i, self.value_in(&self.saved, i)));
+            let (at, was) = (self.knob(i, self.value(i)), self.knob(i, self.value_in(&saved_work, i)));
+            let (rx, ry) = (sx + drawing::column_x(place.left, sw), sy + place.y - drawing::ATTACH);
+            if self.owns(p.path) {
+                own_mark(&mut over, rx, ry, i as i32);
+            }
             rows.push(LabRow {
-                x: sx + drawing::column_x(place.left, sw),
-                y: sy + place.y - drawing::ATTACH,
+                x: rx,
+                y: ry,
                 w: drawing::CTRL_W,
                 id: i as i32,
                 name: p.label.into(),
@@ -979,6 +1364,52 @@ impl LabPage {
                 was: was as f32,
                 moved: (at - was).abs() > 0.002,
             });
+        }
+        // one lit key's switch's place: the key from above, its switch to drag
+        // where it sits, and how far that is from the cap's middle each way
+        if let (false, Some((st, _, image))) = (self.picking, &self.pad) {
+            let (px, py, pw, ph) = self.pad_box();
+            over.push(text_cell(style::LABEL, px, py - 30.0, pw, 26.0, "Switch's place"));
+            sketches.push(Sketch { x: px, y: py, w: st.w, h: st.h, image: image.clone() });
+            for word in &st.words {
+                let top = py + word.y - 1.005 * 11.5 - (16.0 - 1.3 * 11.5) / 2.0;
+                over.push(in_colour(style::SMALL_IN, px + word.x, top, text::width(400, 11.5, &word.text) + 2.0, 16.0, &word.text, word.colour));
+            }
+            over.push(Cell { id: PAD, ..cell(18, px, py, pw, ph) });
+            if self.owns(PARAMS[PLACE_E].path) || self.owns(PARAMS[PLACE_N].path) {
+                own_mark(&mut over, px, py - 30.0, PLACE_E as i32);
+            }
+            for (n, i) in [PLACE_E, PLACE_N].into_iter().enumerate() {
+                let p = &PARAMS[i];
+                let (number, unit) = reads(p, self.value(i), self.mm());
+                let (at, was) = (self.knob(i, self.value(i)), self.knob(i, self.value_in(&saved_work, i)));
+                rows.push(LabRow { x: px, y: py + ph + 18.0 + n as f32 * 64.0, w: pw, id: i as i32, name: p.label.into(), hot: hot == Some(i), number: number.into(), unit: unit.into(), derived: false, at: at as f32, was: was as f32, moved: (at - was).abs() > 0.002 });
+            }
+        }
+        // the map, open to choose a key: every cap where the art has it, the
+        // chosen one lit, those with a setup of their own marked
+        if self.picking && !self.device.caps.is_empty() {
+            let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+            for (c, _) in &self.device.caps {
+                (x0, y0, x1, y1) = (x0.min(c.foot[0]), y0.min(c.foot[1]), x1.max(c.foot[2]), y1.max(c.foot[3]));
+            }
+            let (mx, my, mw) = (24.0, HEAD_H + 4.0, w - 48.0);
+            let k = (mw - 48.0) / (x1 - x0);
+            let map_h = (y1 - y0) * k;
+            // the page behind it dimmed, the map raised over it
+            over.push(Cell { style: 28, ..cell(kind::TILE, sx, sy, sw, sh) });
+            over.push(Cell { style: 27, ..cell(kind::TILE, mx, my, mw, map_h + 92.0) });
+            over.push(text_cell(style::LABEL, mx + 24.0, my + 18.0, 200.0, 26.0, "Choose a key"));
+            let note = "Changes you make to a chosen key are for it alone. A dot marks a key with its own setup.";
+            over.push(text_cell(style::NOTE, mx + 24.0 + text::width(400, 13.5, "Choose a key") + 14.0, my + 22.0, mw - 200.0, 18.0, note));
+            for (i, (c, _)) in self.device.caps.iter().enumerate() {
+                let (kx, ky) = (mx + 24.0 + (c.foot[0] - x0) * k, my + 64.0 + (c.foot[1] - y0) * k);
+                let (kw, kh) = ((c.foot[2] - c.foot[0]) * k, (c.foot[3] - c.foot[1]) * k);
+                over.push(Cell { text: short(&c.label).into(), on: self.scope == Some(i), id: MAP, index: i as i32, style: 25, ..cell(kind::GHOST, kx + 1.5, ky + 1.5, kw - 3.0, kh - 3.0) });
+                if self.light["keys"][c.id.as_str()].is_object() {
+                    over.push(Cell { style: 3, ..cell(kind::DOT, kx + kw - 10.0, ky + 4.5, 6.0, 6.0) });
+                }
+            }
         }
         // the line under the stage: what the slider under the pointer does, or what the section is
         let (name, note) = self.told();
@@ -1169,10 +1600,9 @@ fn light_block(light: &Value) -> String {
             format!("{f}")
         }
     };
-    let part = |name: &str, keys: &[&str]| {
-        let body: Vec<String> = keys.iter().filter_map(|k| light[name].get(*k).map(|v| format!("\"{k}\": {}", num(k, v)))).collect();
-        format!("  \"{name}\": {{ {} }},\n", body.join(", "))
-    };
+    let fields = |section: &Value, keys: &[&str]| -> Vec<String> { keys.iter().filter_map(|k| section.get(*k).map(|v| format!("\"{k}\": {}", num(k, v)))).collect() };
+    let part = |name: &str, keys: &[&str]| format!("  \"{name}\": {{ {} }},\n", fields(&light[name], keys).join(", "));
+    const SIM: [&str; 20] = ["nits", "switch", "beam", "scatter", "sides", "glow_spread", "switch_top", "switch_width", "skirt_foot", "cap_top", "legends", "caps", "skirts", "black", "milky", "cap_in", "cap_out", "depth", "deck", "chassis"];
     let mut s = String::from(" \"light\": {\n");
     s += &format!("  \"about\": {},\n", serde_json::to_string(&light["about"]).unwrap_or_else(|_| "\"\"".into()));
     // what the light says of the art: its millimetre, and the key the lab draws for all keys
@@ -1182,11 +1612,33 @@ fn light_block(light: &Value) -> String {
         }
     }
     s += &format!("  \"led\": {},\n", num("led", &light["led"]));
-    s += &part("sim", &["nits", "switch", "beam", "scatter", "sides", "glow_spread", "switch_top", "switch_width", "skirt_foot", "cap_top", "legends", "caps", "skirts", "black", "milky", "cap_in", "cap_out", "depth", "deck", "chassis"]);
+    s += &part("sim", &SIM);
     s += &part("legend", &["unlit"]);
     s += &part("lcd", &["nits", "unlit", "field", "dot", "glass"]);
-    s += &format!("  \"wells\": {}\n", serde_json::to_string(&light["wells"]).unwrap_or_else(|_| "\"mask_1\"".into()));
-    s += " },\n";
+    s += &format!("  \"wells\": {}", serde_json::to_string(&light["wells"]).unwrap_or_else(|_| "\"mask_1\"".into()));
+    // each key's own values, by its control's id, a line a key, in the ids'
+    // order (by number where they are numbers)
+    let mut own: Vec<(&String, &Value)> = light["keys"].as_object().into_iter().flatten().filter(|(_, v)| v.as_object().is_some_and(|o| !o.is_empty())).collect();
+    own.sort_by_key(|(id, _)| (id.parse::<u64>().unwrap_or(u64::MAX), id.to_string()));
+    if !own.is_empty() {
+        s += ",\n  \"keys\": {\n";
+        let lines: Vec<String> = own
+            .iter()
+            .map(|(id, v)| {
+                let mut parts: Vec<String> = v.get("led").map(|l| format!("\"led\": {}", num("led", l))).into_iter().collect();
+                for (name, keys) in [("sim", &SIM[..]), ("legend", &["unlit"][..]), ("place", &["east", "north"][..])] {
+                    let body = fields(&v[name], keys);
+                    if !body.is_empty() {
+                        parts.push(format!("\"{name}\": {{ {} }}", body.join(", ")));
+                    }
+                }
+                format!("   {}: {{ {} }}", serde_json::to_string(id).unwrap_or_default(), parts.join(", "))
+            })
+            .collect();
+        s += &lines.join(",\n");
+        s += "\n  }";
+    }
+    s += "\n },\n";
     s
 }
 
@@ -1262,6 +1714,27 @@ mod tests {
         assert_eq!(reads(&PARAMS[0], -2.76, 1.38), ("2".into(), "mm south".into()));
     }
 
+    /// A key's own values go under the light's "keys" by its control's id,
+    /// over all keys' for that key alone; and given back, they leave the
+    /// light as it was.
+    #[test]
+    fn a_key_s_own_values_come_and_go() {
+        let light = json!({ "led": 4.5, "sim": { "nits": 600, "caps": "pudding", "black": 0.4 } });
+        let mut l = light.clone();
+        own_put(&mut l, "106", ("sim", "caps"), json!("shine_through"));
+        own_put(&mut l, "64", ("place", "north"), json!(9.5));
+        own_put(&mut l, "64", ("led", ""), json!(-3.0));
+        assert_eq!(l["keys"], json!({ "106": { "sim": { "caps": "shine_through" } }, "64": { "place": { "north": 9.5 }, "led": -3.0 } }));
+        let k64 = key_light(&l, &l["keys"]["64"]);
+        assert_eq!((k64["led"].clone(), k64["place"]["north"].clone(), k64["sim"]["caps"].clone(), k64["keys"].clone()), (json!(-3.0), json!(9.5), json!("pudding"), Value::Null));
+        assert_eq!(key_light(&l, &l["keys"]["106"])["sim"], json!({ "nits": 600, "caps": "shine_through", "black": 0.4 }));
+        own_take(&mut l, "64", ("place", "north"));
+        assert_eq!(l["keys"]["64"], json!({ "led": -3.0 }), "what it does not give back stays its own");
+        own_take(&mut l, "64", ("led", ""));
+        own_take(&mut l, "106", ("sim", "caps"));
+        assert_eq!(l, light, "nothing of the keys' own left");
+    }
+
     /// The light section Save writes reads back as the light it was given,
     /// in the core's own file, and a core lit as it once was is read as the
     /// simulation takes it.
@@ -1279,6 +1752,14 @@ mod tests {
         for p in PARAMS.iter().filter(|p| p.path.0 == "sim") {
             assert!(back["light"]["sim"][p.path.1].is_number(), "{} is saved", p.path.1);
         }
+        // each key's own values too, a line a key, in the ids' order
+        let mut keyed = light.clone();
+        keyed["keys"] = json!({ "64": { "place": { "east": 0.0, "north": 9.5 } }, "106": { "sim": { "caps": "shine_through" } }, "24": { "led": -3.5, "sim": { "beam": 12.0 } } });
+        let block = light_block(&keyed);
+        let back: Value = serde_json::from_str(&format!("{}{}{}", &text[..a], block, &text[b..])).unwrap();
+        assert_eq!(back["light"], keyed);
+        let (k24, k64, k106) = (block.find("\"24\": {").unwrap(), block.find("\"64\": {").unwrap(), block.find("\"106\": {").unwrap());
+        assert!(k24 < k64 && k64 < k106, "{block}");
         let old = json!({ "led": 7.0, "legend": { "nits": 705, "depth": 10.0, "floor": 0.35, "unlit": 0.15 }, "deck": { "nits": 58 }, "rim": { "nits": 42 }, "chassis": { "nits": 19 }, "lcd": { "nits": 324 }, "wells": "mask_1" });
         let new = simulated(old);
         assert_eq!(new["sim"]["nits"], json!(705.0));

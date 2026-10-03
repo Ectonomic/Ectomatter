@@ -44,7 +44,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use ectodeck_draw::hdr::sim::{self, Physics, Scene, Simulator, Snapshot};
+use ectodeck_draw::hdr::sim::{self, Scene, Setup, Simulator, Snapshot};
 use ectodeck_draw::hdr::{Board, Light};
 use front::{Front, WindowAsk};
 use picture::{Lit, Picture};
@@ -170,14 +170,15 @@ fn levels(settings: &settings::Settings) -> (f64, f64) {
 #[cfg(test)]
 mod kept_tests {
     use super::*;
+    use ectodeck_draw::hdr::sim::Physics;
 
-    /// The Z10's keys to simulate, and a make of their light for each beam.
-    fn scene() -> (Scene, impl Fn(f32) -> (Physics, f32)) {
+    /// The device's keys to simulate, and a make of their light for each beam.
+    fn scene() -> (Scene, impl Fn(f32) -> Setup) {
         let device: serde_json::Value = cores::shown().device_now();
         let tree = cores::shown().tree();
         let board = Board::new(&tree, &device, GROUND, 632, 253).unwrap();
         let base = Physics::from(&device["light"]);
-        (Scene::of(&board), move |beam: f32| (Physics { beam, ..base }, 7.0f32))
+        (Scene::of(&board), move |beam: f32| Setup::alike(Physics { beam, led: 7.0, ..base }))
     }
 
     /// A picture of another make than the one wanted is taken while the
@@ -187,12 +188,12 @@ mod kept_tests {
     fn a_picture_on_the_way_is_taken_but_not_over_the_one_wanted() {
         let (scene, make) = scene();
         let (a, b, c) = (make(1.0), make(2.0), make(3.0));
-        let pa = Simulator::settle(&scene, a.0, a.1, 200);
-        let pb = Simulator::settle(&scene, b.0, b.1, 200);
-        assert!(Kept::takes(Some(c), Some(&pa), &pb), "on the way to the one wanted");
-        assert!(Kept::takes(Some(c), None, &pb), "on a keyboard with none");
-        assert!(!Kept::takes(Some(a), Some(&pa), &pb), "not over the one wanted");
-        assert!(Kept::takes(Some(a), Some(&pa), &pa), "the one wanted, clearer");
+        let pa = Simulator::settle(&scene, &a, 200);
+        let pb = Simulator::settle(&scene, &b, 200);
+        assert!(Kept::takes(Some(&c), Some(&pa), &pb), "on the way to the one wanted");
+        assert!(Kept::takes(Some(&c), None, &pb), "on a keyboard with none");
+        assert!(!Kept::takes(Some(&a), Some(&pa), &pb), "not over the one wanted");
+        assert!(Kept::takes(Some(&a), Some(&pa), &pa), "the one wanted, clearer");
     }
 
     /// The last few settled pictures are kept, the newest found first; past
@@ -202,15 +203,14 @@ mod kept_tests {
         let (scene, make) = scene();
         let mut kept = Kept { pinned: Some(make(1.0)), ..Kept::default() };
         for beam in [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0] {
-            let (p, n) = make(beam);
-            kept.keep(std::sync::Arc::new(Simulator::settle(&scene, p, n, 200)));
+            kept.keep(std::sync::Arc::new(Simulator::settle(&scene, &make(beam), 200)));
         }
         assert_eq!(kept.pictures.len(), Kept::MOST, "as many as are kept");
-        assert!(kept.get(make(1.0)).is_some(), "the saved tuning's stays");
-        assert!(kept.get(make(2.0)).is_none() && kept.get(make(3.0)).is_none(), "the oldest others go");
-        assert!(kept.get(make(6.0)).is_some_and(|s| Kept::of(&s, make(6.0))), "the newest found");
+        assert!(kept.get(&make(1.0)).is_some(), "the saved tuning's stays");
+        assert!(kept.get(&make(2.0)).is_none() && kept.get(&make(3.0)).is_none(), "the oldest others go");
+        assert!(kept.get(&make(6.0)).is_some_and(|s| Kept::of(&s, &make(6.0))), "the newest found");
         // a brightness of its own is the same picture
-        assert!(kept.get((Physics { nits: 123.0, ..make(6.0).0 }, 7.0)).is_some());
+        assert!(kept.get(&Setup::alike(Physics { nits: 123.0, ..make(6.0).all })).is_some());
     }
 }
 
@@ -251,7 +251,7 @@ fn tenth(nits: f32) -> f64 {
 /// here and now: for a snapshot, which has no window to wait in.
 fn settled(tree: &usvg::Tree, device: &serde_json::Value, w: u32, h: u32) -> Board {
     let mut board = Board::new(tree, device, GROUND, w, h).unwrap();
-    let snap = Simulator::settle(&Scene::of(&board), Physics::from(&device["light"]), board.led_north(), sim::SETTLED);
+    let snap = Simulator::settle(&Scene::of(&board), &board.setup(&device["light"]), sim::SETTLED);
     board.set_sim(std::sync::Arc::new(snap));
     board
 }
@@ -831,9 +831,9 @@ struct App {
     sim: Option<Simulator>,
     sim_tx: calloop::channel::Sender<()>,
     sim_seen: u64,
-    /// the simulation the keyboard is to show (its make, and its LEDs' place),
-    /// and the last few settled pictures, the saved tuning's kept among them
-    want: Option<(Physics, f32)>,
+    /// the simulation the keyboard is to show (how every key is lit), and
+    /// the last few settled pictures, the saved tuning's kept among them
+    want: Option<Setup>,
     kept: Kept,
 }
 
@@ -843,18 +843,18 @@ struct App {
 #[derive(Default)]
 struct Kept {
     pictures: Vec<std::sync::Arc<Snapshot>>,
-    pinned: Option<(Physics, f32)>,
+    pinned: Option<Setup>,
 }
 
 impl Kept {
     const MOST: usize = 4;
 
-    /// Whether a picture is of this make and LEDs' place, as the simulation runs it.
-    fn of(snap: &Snapshot, (physics, north): (Physics, f32)) -> bool {
-        snap.physics.same_paths(&physics.simulated()) && snap.north == physics.held_north(north)
+    /// Whether a picture is of this setup, as the simulation runs it.
+    fn of(snap: &Snapshot, setup: &Setup) -> bool {
+        snap.setup.same_paths(&setup.simulated())
     }
 
-    fn get(&self, want: (Physics, f32)) -> Option<std::sync::Arc<Snapshot>> {
+    fn get(&self, want: &Setup) -> Option<std::sync::Arc<Snapshot>> {
         self.pictures.iter().rev().find(|s| Kept::of(s, want)).cloned()
     }
 
@@ -862,18 +862,18 @@ impl Kept {
     /// simulation may still be on a make asked of it before the one wanted
     /// (a slider dragged): its picture is newer than the one shown, so it is
     /// taken, but never over a picture of the one wanted.
-    fn takes(want: Option<(Physics, f32)>, shown: Option<&Snapshot>, snap: &Snapshot) -> bool {
+    fn takes(want: Option<&Setup>, shown: Option<&Snapshot>, snap: &Snapshot) -> bool {
         want.is_none_or(|w| Kept::of(snap, w) || !shown.is_some_and(|s| Kept::of(s, w)))
     }
 
     /// Keep a settled picture, the newest last; past the most kept, the oldest
     /// goes, but never the saved tuning's.
     fn keep(&mut self, snap: std::sync::Arc<Snapshot>) {
-        self.pictures.retain(|s| !(s.physics.same_paths(&snap.physics) && s.north == snap.north));
+        self.pictures.retain(|s| !s.setup.same_paths(&snap.setup));
         self.pictures.push(snap);
         while self.pictures.len() > Kept::MOST {
-            let pinned = self.pinned;
-            let Some(i) = self.pictures.iter().position(|s| !pinned.is_some_and(|w| Kept::of(s, w))) else { break };
+            let pinned = &self.pinned;
+            let Some(i) = self.pictures.iter().position(|s| !pinned.as_ref().is_some_and(|w| Kept::of(s, w))) else { break };
             self.pictures.remove(i);
         }
     }
@@ -1497,7 +1497,7 @@ impl App {
         // of a second or so, so the keys don't show dark first.
         if self.sim.is_none() {
             let tx = std::sync::Mutex::new(self.sim_tx.clone());
-            let s = Simulator::new(Scene::of(&board), Physics::from(&self.light_now()), board.led_north(), Box::new(move || {
+            let s = Simulator::new(Scene::of(&board), board.setup(&self.light_now()), Box::new(move || {
                 let _ = tx.lock().map(|t| t.send(()));
             }));
             let t = Instant::now();
@@ -1505,19 +1505,19 @@ impl App {
             eprintln!("ectodeck-native: the keys' light simulated, its first picture in {:?}", t.elapsed());
             self.sim = Some(s);
         }
-        let want = (Physics::from(&self.light_now()), board.led_north());
-        self.want = Some(want);
-        if let Some(snap) = self.kept.get(want) {
+        let want = board.setup(&self.light_now());
+        if let Some(snap) = self.kept.get(&want) {
             board.set_sim(snap);
         } else if let Some(s) = &self.sim {
             // (the simulation's latest, though it may be of the make before:
             // the keyboard drawn new has none to keep instead)
-            s.set(want.0, want.1);
+            s.set(&want);
             if let Some(snap) = s.latest() {
                 self.sim_seen = s.version();
                 board.set_sim(snap);
             }
         }
+        self.want = Some(want);
         let lit = light(&board, &self.lights, self.front.page.locks, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
         self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
         self.board = Some(board);
@@ -1534,7 +1534,7 @@ impl App {
             return;
         }
         self.sim_seen = version;
-        if !Kept::takes(self.want, board.sim(), &snap) {
+        if !Kept::takes(self.want.as_ref(), board.sim(), &snap) {
             return;
         }
         if snap.settled {
@@ -1595,27 +1595,26 @@ impl App {
             if rev != self.light_rev {
                 self.light_rev = rev;
                 self.light = Some(lab.shown().clone());
-                let saved = Physics::from(lab.saved());
                 if let (Some(b), Some(l)) = (&mut self.board, &self.light) {
                     // the keys drawn again only if their picture changes now; how
                     // the light falls shows with the simulation's next picture,
                     // or at once from a picture kept of it
                     relit = b.set_light(l);
-                    let want = (Physics::from(l), b.led_north());
-                    self.kept.pinned = Some((saved, b.led_north()));
-                    let changed = self.want.is_none_or(|w| !(w.0.same_paths(&want.0) && w.1 == want.1));
-                    self.want = Some(want);
+                    let want = b.setup(l);
+                    self.kept.pinned = Some(b.setup(lab.saved()));
+                    let changed = self.want.as_ref().is_none_or(|w| !w.same_paths(&want));
                     if changed {
-                        if let Some(snap) = self.kept.get(want) {
+                        if let Some(snap) = self.kept.get(&want) {
                             b.set_sim(snap);
                             relit = true;
                             if let Some(s) = &self.sim {
                                 s.rest();
                             }
                         } else if let Some(s) = &self.sim {
-                            s.set(want.0, want.1);
+                            s.set(&want);
                         }
                     }
+                    self.want = Some(want);
                 }
                 self.readout_at = None;
             }
