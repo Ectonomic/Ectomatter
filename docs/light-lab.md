@@ -27,6 +27,7 @@ A device's parts are what its description has: keys with LEDs under caps, wells 
 | Part | What it is | Its values | Its sections in the lab |
 |---|---|---|---|
 | keys | A switch with its LED, under a cap | the switch's kind, beam, LED place, housing; the cap's kind, plastic, black, milkiness, heights and surfaces; one key's own of any of these, and where its switch sits | LED, Keycaps |
+| buttons | A moulded block with no light of its own, standing in the keys' light | how high it stands, and what its outside gives back | Keycaps, for one button |
 | body | The deck in the wells and the chassis round them | how much each gives back; the wells' depth | Wells |
 | screens | A backlit display | lit dots, unlit dots, the ground between them, dot size, glass | Display |
 | windows | An LED behind a diffusing window | how far its light spreads, and how much reaches the window's corners | none yet |

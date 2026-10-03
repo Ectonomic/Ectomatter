@@ -340,6 +340,8 @@ const CHOSEN: [&[(&str, &str)]; 2] = [
     &[("sim", "switch"), ("sim", "switch_top"), ("sim", "beam"), ("sim", "scatter"), ("sim", "sides"), ("sim", "glow_spread")],
     &[("sim", "caps"), ("sim", "skirts"), ("sim", "black")],
 ];
+/// what a button is, under the drawing when one is chosen
+const BUTTON_ABOUT: &str = "A button stands on the chassis, from its foot to its top, in the light coming out of the keys round it: its sides and top give back their share of what falls on them, and it stands in the way of the rest.";
 /// what the switch pad does
 const PAD_NOTE: &str = "Drag the switch to where it sits under this key's cap, as you see it with the cap off; its LED goes with it. The numbers below it say where it is from the cap's middle.";
 /// how long the pointer rests on something before the line under the drawing tells of it
@@ -477,7 +479,8 @@ fn remove_at(light: &mut Value, (a, b): (&str, &str)) {
     }
 }
 
-/// A key's name as short as its cap on the map has room for.
+/// A key's name as short as its cap on the map has room for, where the
+/// core gives none: the usual short names of a keyboard's keys.
 fn short(label: &str) -> String {
     let s = match label {
         "Escape" => "Esc",
@@ -685,6 +688,7 @@ impl LabPage {
                 let name = &self.device.name;
                 (format!("Tune how the {name} is lit. Ectodeck's window shows each change at once; Save writes them into its core."), format!("Tune how the {name} is lit; Save writes it into its core."))
             }
+            Some(k) if k.button => (format!("{0}'s own setup. A button with no light of its own, standing in the keys' light: how high it stands, and what it gives back of the light.", k.label), format!("{0}'s own setup: a button in the keys' light.", k.label)),
             Some(k) if !k.lit => (format!("{0}'s own setup. It has no LED of its own, so only its cap is set here; the rest follows all keys.", k.label), format!("{}'s own setup: its cap; it has no LED of its own.", k.label)),
             Some(k) => (format!("{0}'s own setup. Changes here are for {0} alone; everything else follows all keys.", k.label), format!("{0}'s own setup: changes here are for {0} alone.", k.label)),
         }
@@ -960,6 +964,11 @@ impl LabPage {
     /// legend it does not have, and its switch's place.
     fn sliders(&self) -> Vec<usize> {
         let mut ids = sliders_of(self.section, &self.work());
+        // a button: how high it stands, and what its outside gives back
+        if self.key().is_some_and(|k| k.button) {
+            ids.retain(|&i| matches!(PARAMS[i].path, ("sim", "skirt_foot") | ("sim", "cap_top") | ("sim", "cap_out")));
+            return ids;
+        }
         if let Some(k) = self.key() {
             ids.retain(|&i| PARAMS[i].path != ("sim", "nits") && (k.legend || !matches!(PARAMS[i].path, ("sim", "legends") | ("legend", "unlit"))));
             if self.section == 0 && k.lit {
@@ -967,6 +976,12 @@ impl LabPage {
             }
         }
         ids
+    }
+
+    /// The section's choices at the top of its left column: a button's kind
+    /// is no choice, a moulded block being what it is.
+    fn choices(&self) -> &'static [usize] {
+        if self.key().is_some_and(|k| k.button) { &[] } else { SECTIONS[self.section].3 }
     }
 
     /// The chosen key's cap, in millimetres across and north to south.
@@ -1100,14 +1115,16 @@ impl LabPage {
         // the key drawn: the one chosen, as the art has it, with no LED's
         // light if it has no LED of its own; or the device's typical key
         let mut v = drawing::Values::of(&work, self.drawn_key());
-        if self.key().is_some_and(|k| !k.lit) {
+        if self.key().is_some_and(|k| k.button) {
+            v = v.button();
+        } else if self.key().is_some_and(|k| !k.lit) {
             v = v.unlit();
         }
         let size = (self.section, sw.round() as i32, sh.round() as i32, self.sliders(), self.scope);
         if self.places_of.as_ref() != Some(&size) {
             // one lit key's switch pad and its values at the top of the right column
             let right_top = if self.section == 0 && self.key().is_some_and(|k| k.lit) { self.pad_box().3 + 182.0 } else { 0.0 };
-            self.places = drawing::places(&v, lens, sw, sh, SECTIONS[self.section].3.len(), right_top, Some(&size.3));
+            self.places = drawing::places(&v, lens, sw, sh, self.choices().len(), right_top, Some(&size.3));
             self.places_of = Some(size.clone());
         }
         let scale = slint::ComponentHandle::window(&self.ui).scale_factor();
@@ -1232,6 +1249,7 @@ impl LabPage {
             Some(i) if i == READING + 4 => ("Display's lit dots".into(), READOUT_ABOUT.into()),
             Some(i) if i == READING + 5 => ("The desktop's white".into(), WHITE_ABOUT.into()),
             Some(i) if i == READING + 6 => ("The simulation".into(), if r.photons == 0 { SIM_ABOUT.into() } else { format!("{} photons from each LED so far. {SIM_ABOUT}", text::thousands(r.photons as u64)) }),
+            _ if self.key().is_some_and(|k| k.button) => (SECTIONS[self.section].0.into(), BUTTON_ABOUT.into()),
             _ => (SECTIONS[self.section].0.into(), SECTIONS[self.section].1.into()),
         }
     }
@@ -1309,7 +1327,7 @@ impl LabPage {
         // the section's choices, at the top of its left column, over the stage:
         // each its name over its options, all of it telling of it under the pointer
         let cx = sx + drawing::column_x(true, sw);
-        for (k, &c) in SECTIONS[self.section].3.iter().enumerate() {
+        for (k, &c) in self.choices().iter().enumerate() {
             let choice = &CHOICES[c];
             let y = sy + drawing::choice_y(k);
             let id = CHOICE + c as i32;
@@ -1403,9 +1421,16 @@ impl LabPage {
             let note = "Changes you make to a chosen key are for it alone. A dot marks a key with its own setup.";
             over.push(text_cell(style::NOTE, mx + 24.0 + text::width(400, 13.5, "Choose a key") + 14.0, my + 22.0, mw - 200.0, 18.0, note));
             for (i, (c, _)) in self.device.caps.iter().enumerate() {
-                let (kx, ky) = (mx + 24.0 + (c.foot[0] - x0) * k, my + 64.0 + (c.foot[1] - y0) * k);
-                let (kw, kh) = ((c.foot[2] - c.foot[0]) * k, (c.foot[3] - c.foot[1]) * k);
-                over.push(Cell { text: short(&c.label).into(), on: self.scope == Some(i), id: MAP, index: i as i32, style: 25, ..cell(kind::GHOST, kx + 1.5, ky + 1.5, kw - 3.0, kh - 3.0) });
+                let (mut kx, mut ky) = (mx + 24.0 + (c.foot[0] - x0) * k, my + 64.0 + (c.foot[1] - y0) * k);
+                let (mut kw, mut kh) = ((c.foot[2] - c.foot[0]) * k, (c.foot[3] - c.foot[1]) * k);
+                let name = c.short.clone().unwrap_or_else(|| short(&c.label));
+                // a button smaller than a key: its box round its middle, as big as
+                // its name needs, with room above it for the dot
+                if c.button {
+                    let (bw, bh) = (kw.max(text::width(400, 10.5, &name) + 24.0), kh.max(32.0));
+                    (kx, ky, kw, kh) = (kx + (kw - bw) / 2.0, ky + (kh - bh) / 2.0, bw, bh);
+                }
+                over.push(Cell { text: name.into(), on: self.scope == Some(i), id: MAP, index: i as i32, style: 25, ..cell(kind::GHOST, kx + 1.5, ky + 1.5, kw - 3.0, kh - 3.0) });
                 if self.light["keys"][c.id.as_str()].is_object() {
                     over.push(Cell { style: 3, ..cell(kind::DOT, kx + kw - 10.0, ky + 4.5, 6.0, 6.0) });
                 }

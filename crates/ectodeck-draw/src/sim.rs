@@ -45,8 +45,13 @@ const BOUNCE_REACH: f32 = 100.0;
 /// photons from each LED for a settled picture, and in each step toward it
 pub const SETTLED: usize = 200_000;
 const STEP: usize = 2_000;
-/// a key's maps of bounced light: the deck, the chassis, the skirts, the caps' tops
-const MAPS: usize = 4;
+/// a key's maps of bounced light: the deck, the chassis, the skirts, the
+/// backs of the caps' tops (seen through their legends and translucent
+/// tops), and the tops' outsides, which only a part lower than what stands
+/// round it catches (a button on the chassis among the caps): the same
+/// places as the tops' backs
+const MAPS: usize = 5;
+pub const TOP_OUTSIDE: usize = 4;
 /// how many photons the bounced light at a place is evened out over, and how
 /// far round it at most (coarse cells)
 const EVEN: u32 = 128;
@@ -515,10 +520,11 @@ pub struct Coloured {
 }
 
 impl Coloured {
-    /// the light at a place, its red, green and blue
+    /// the light at a place, its red, green and blue (as Snapshot::white has it)
     pub fn at(&self, a: &At) -> [f32; 3] {
         let maps = &self.coarse[a.code as usize];
-        [0, 1, 2].map(|c| a.fine.iter().map(|(i, w)| self.fine[c][*i] * w).sum::<f32>() + a.coarse.iter().map(|(i, w)| maps[c][*i] * w).sum::<f32>())
+        let direct = a.code as usize != TOP_OUTSIDE;
+        [0, 1, 2].map(|c| if direct { a.fine.iter().map(|(i, w)| self.fine[c][*i] * w).sum::<f32>() } else { 0.0 } + a.coarse.iter().map(|(i, w)| maps[c][*i] * w).sum::<f32>())
     }
 }
 
@@ -1258,7 +1264,7 @@ pub struct Snapshot {
     pub settled: bool,
     pub fine: Grid,
     pub coarse: Grid,
-    /// what shows at each fine cell: 0 open, 1 skirt, 2 a cap's top, 255 nothing
+    /// what shows at each fine cell (Surface::code): 0 the deck, 1 the chassis, 2 a skirt, 3 a cap's top, 255 nothing
     pub surface: Arc<Vec<u8>>,
     /// how much of each coarse cell each map's surfaces cover
     pub cover: Arc<[Vec<f32>; MAPS]>,
@@ -1278,17 +1284,21 @@ impl Snapshot {
         if code as usize >= MAPS {
             return None;
         }
-        let fine = self.fine.round(fx, fy, |i| self.surface[i] == code);
+        // (the outside of a cap's top is where its top is)
+        let cells = if code as usize == TOP_OUTSIDE { 3 } else { code };
+        let fine = self.fine.round(fx, fy, |i| self.surface[i] == cells);
         let (cx, cy) = self.coarse.place(u, v);
         let cover = &self.cover[code as usize];
         let coarse = self.coarse.round(cx, cy, |i| cover[i] > 0.0);
         Some(At { code, fine, coarse })
     }
 
-    /// The light at a place with every key lit white at full.
+    /// The light at a place with every key lit white at full. (The light
+    /// straight from an LED onto a cap's top is on its back: its outside has none.)
     pub fn white(&self, a: &At) -> f32 {
         let map = &self.bounced_all[a.code as usize];
-        a.fine.iter().map(|(i, w)| self.direct_all[*i] * w).sum::<f32>() + a.coarse.iter().map(|(i, w)| map[*i] * w).sum::<f32>()
+        let direct = if a.code as usize == TOP_OUTSIDE { 0.0 } else { a.fine.iter().map(|(i, w)| self.direct_all[*i] * w).sum::<f32>() };
+        direct + a.coarse.iter().map(|(i, w)| map[*i] * w).sum::<f32>()
     }
 
     /// The light the keys show, each in its own colour (linear, in the
@@ -1555,6 +1565,8 @@ impl Run {
                 }
             }
         }
+        // (the tops' outsides are where the tops are)
+        (cover[TOP_OUTSIDE], class[TOP_OUTSIDE]) = (cover[3].clone(), class[3].clone());
         Run {
             ss,
             setup,
@@ -1876,7 +1888,14 @@ fn bounce(scene: &Scene, ss: &Stoods, k: usize, (lx, ly): (f32, f32), into: &mut
                     }
                     (pc.cap_in * k, (pc.tops + carried) * k)
                 }
-                Struck::Top(_) => shared(pc.cap_out, pc.tops),
+                Struck::Top(_) => {
+                    // the light coming down on a top, as its outside gives it back
+                    let (back, through) = shared(pc.cap_out, pc.tops);
+                    if !exact {
+                        gather(TOP_OUTSIDE, (q[0], q[1]), back / pi * per_area);
+                    }
+                    (back, through)
+                }
                 Struck::Wall => (body.chassis, 0.0),
                 Struck::Housing => (HOUSING, 0.0),
             };
@@ -2192,6 +2211,39 @@ mod tests {
         }
     }
 
+    /// A button with no light of its own (G/PC, the media keys) stands in
+    /// the keys' light on the chassis: a ray across the chassis strikes its
+    /// side, and the light coming down on its top, lower than the caps round
+    /// it, is gathered there; a cap's top, as high as any, catches none.
+    #[test]
+    fn a_button_stands_in_the_light_and_catches_it() {
+        let (b, scene, _) = scene();
+        let ids: Vec<String> = b.cap_shapes.iter().map(|c| c.id.clone()).collect();
+        let at = |label: &str| b.cap_shapes.iter().position(|c| c.label == label).unwrap_or_else(|| panic!("{label} stands in the light"));
+        let (gpc, stop) = (at("Game mode button"), at("Media stop"));
+        assert!(gpc >= scene.keys.len() && stop >= scene.keys.len(), "they have no light of their own");
+        let mut light = serde_json::json!({ "units_per_mm": 1.38, "led": 4.5, "sim": { "nits": 600, "switch": "slot", "beam": 3.0, "caps": "pudding", "skirts": 0.3, "black": 0.4, "milky": 1.0 }, "wells": "mask_1" });
+        for id in [&ids[gpc], &ids[stop]] {
+            light["keys"][id.as_str()] = serde_json::json!({ "sim": { "skirt_foot": 2.0, "cap_top": 4.0, "caps": "shine_through" } });
+        }
+        let setup = Setup::from(&light, &ids);
+        // a ray along the chassis, a millimetre up, into the media key's west side
+        let ss = Stoods::of(&scene, &setup);
+        let f = scene.caps[stop].foot;
+        let (y, z) = ((f[1] + f[3]) / 2.0, 3.0);
+        let hit = scene.hit(&ss, [f[0] - 5.0, y, z], [1.0, 0.0, 0.0], 1e4).map(|h| (h.0, h.1));
+        assert!(matches!(hit, Some((t, Struck::Outside(c, 0))) if c as usize == stop && (t - 5.0).abs() < 1e-3), "it stands in the way: {hit:?}");
+        let snap = Simulator::settle(&scene, &setup, 20_000);
+        let top = |c: usize| {
+            let f = scene.caps[c].foot;
+            snap.at((f[0] + f[2]) / 2.0, (f[1] + f[3]) / 2.0, Some(TOP_OUTSIDE as u8)).map_or(0.0, |a| snap.white(&a))
+        };
+        let escape = (0..scene.keys.len()).find(|&k| b.cap_shapes[k].label == "Escape").unwrap();
+        eprintln!("light coming down on G/PC's top {:.3e}, Escape's {:.3e}", top(gpc), top(escape));
+        assert!(top(gpc) > 0.0, "G/PC's top catches the light coming down on it");
+        assert_eq!(top(escape), 0.0, "a cap as high as any catches none on its top");
+    }
+
     /// A key's switch moved under its cap takes its LED with it: the LED is
     /// as far east and north of where it was, and its light on the back of
     /// the cap's top goes the same way; every other key's stays where it was.
@@ -2228,4 +2280,5 @@ mod tests {
         assert!(went.0 < 0.3 * east * mm && went.1 > 0.3 * north * mm, "the light on its top goes with it: {went:?}");
     }
 }
+
 

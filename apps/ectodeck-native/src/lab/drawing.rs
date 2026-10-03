@@ -95,6 +95,7 @@ impl Geometry {
 /// the heights each drawing keeps its scale up to (a cap's top, a well's
 /// depth); past them it shrinks to fit
 const USUAL_TOP: f64 = 16.0;
+const USUAL_BUTTON: f64 = 8.0;
 const USUAL_DEPTH: f64 = 3.0;
 
 // the stage: a column of sliders either side of the panel the drawing is in
@@ -200,12 +201,14 @@ pub struct Values {
     lcd_glass: f64,
     nits: f64,
     /// the art's units to the millimetre, and the key drawn; where its
-    /// switch sits, mm east and north of its middle; and whether it has an
-    /// LED of its own
+    /// switch sits, mm east and north of its middle; whether it has an LED
+    /// of its own; and whether it is a button, a moulded block standing on
+    /// the chassis, not a cap over a switch in a well
     mm: f64,
     g: Geometry,
     place: (f64, f64),
     lit: bool,
+    solid: bool,
 }
 
 /// A value as the light has it, or what the keyboard takes when it has none.
@@ -253,12 +256,19 @@ impl Values {
             g,
             place: (raw(light, ("place", "east")), raw(light, ("place", "north"))),
             lit: true,
+            solid: false,
         }
     }
 
     /// For a key with no LED of its own: none of an LED's light drawn.
     pub fn unlit(mut self) -> Values {
         self.lit = false;
+        self
+    }
+
+    /// For a button: a solid block on the chassis, with no switch and no LED.
+    pub fn button(mut self) -> Values {
+        (self.lit, self.solid) = (false, true);
         self
     }
 
@@ -491,7 +501,7 @@ impl Slice {
             led: centre - v.north,
             wall_t: (span * 0.25 + 0.2).min(1.15),
             top_t: (span * 0.3).min(1.25),
-            hollow: span > 1.6,
+            hollow: !v.solid && span > 1.6,
             hx0: 0.0,
             hx1: 0.0,
         };
@@ -548,9 +558,12 @@ impl Slice {
     }
 
     /// the F-row's deck, its wall, the chassis between the wells, the main
-    /// well's wall and its deck, as one outline
+    /// well's wall and its deck, as one outline; under a button, the chassis
     fn body(&self, x_lo: f64, x_hi: f64) -> Vec<Pt> {
         let (d, strip) = (self.v.depth, self.v.g.strip);
+        if self.v.solid {
+            return vec![(x_lo, -PLATE), (x_lo, d), (x_hi, d), (x_hi, -PLATE)];
+        }
         vec![(x_lo, -PLATE), (x_lo, 0.0), (-strip, 0.0), (-strip, d), (0.0, d), (0.0, 0.0), (x_hi, 0.0), (x_hi, -PLATE)]
     }
 }
@@ -558,7 +571,8 @@ impl Slice {
 /// The part of the slice a section shows, in millimetres, widened about its
 /// middle to the panel's shape (`aspect`, width over height) so the drawing fills it.
 fn frame_of(v: &Values, sl: &Slice, lens: Lens, aspect: f64) -> (f64, f64, f64, f64) {
-    let top = v.top.max(USUAL_TOP).max(v.switch_top + 0.5) + 2.4 + if lens == Lens::Led { 1.6 } else { 0.0 };
+    // (a button, low on the chassis, to a scale of its own)
+    let top = if v.solid { v.top.max(USUAL_BUTTON) + 2.4 } else { v.top.max(USUAL_TOP).max(v.switch_top + 0.5) + 2.4 + if lens == Lens::Led { 1.6 } else { 0.0 } };
     let (mut x_lo, mut x_hi, z_lo, z_hi) = match lens {
         Lens::Led => (sl.foot0 - 1.0, sl.foot1 + 1.0, -0.9, top),
         Lens::Caps => (sl.foot0 - 2.0, sl.foot1 + 1.3, -0.6, top),
@@ -604,7 +618,9 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
     // the body: the decks, the walls and the chassis between the wells
     s.path(&poly(&pp(&clip(&sl.body(x_lo - 1.0, x_hi + 1.0), x_lo, x_hi)), true), fill(Lens::Wells), line(Lens::Wells), 1.0, 1.0);
     let housing_box = clip(&[(sl.hx0, 0.0), (sl.hx0, hz), (sl.hx1, hz), (sl.hx1, 0.0)], x_lo, x_hi);
-    if v.slot {
+    if v.solid {
+        // a button has no switch to draw
+    } else if v.slot {
         // the housing, black, and the LED's slot at its top, glowing round the LED
         s.path(&poly(&pp(&housing_box), true), "#141414", if on(Lens::Led) { "#6a6a6a" } else { "#3a3a3a" }, 1.0, 1.0);
         let (wx0, wx1, wz) = (sl.led - 1.3, sl.led + 1.3, (hz - 1.1).max(hz * 0.6));
@@ -658,7 +674,8 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
             s.path(&poly(&[p(x, under), (px(x), pz(under) + 34.0)], false), "none", &g, 1.0, 1.0);
         }
     } else {
-        for (f0, f1) in [(sl.foot0, sl.foot1), (sl.w0, sl.w0 + v.g.south_foot)] {
+        // (a button alone on the chassis)
+        for (f0, f1) in [(sl.foot0, sl.foot1), (sl.w0, sl.w0 + v.g.south_foot)].into_iter().take(if v.solid { 1 } else { 2 }) {
             let shape = clip(&sl.cap(f0, f1), x_lo, x_hi);
             if !shape.is_empty() {
                 s.path(&poly(&pp(&shape), true), fill(Lens::Caps), if f0 == sl.foot0 { line(Lens::Caps) } else { "#3a3a3a" }, 1.0, 1.0);
@@ -774,7 +791,7 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
                 labels.push(Label { flat: true, ..Label::new(false, p(mid + wide / 2.0 - 0.4, tz), "LED off") });
             }
             // light out of a clear switch's side and under the skirt's foot onto the deck
-            if !v.slot {
+            if !v.slot && !v.solid {
                 let out = 1.6f64.min(v.foot.max(0.6) * 0.4);
                 ray(&mut s, &[p(sl.hx1 + 0.15, out), p(sl.foot1 + 0.95, out * 0.15)], v.scatter * v.sides, grow, false);
             }
@@ -826,14 +843,24 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
                 ray(&mut s, &[p(sl.hx1 - 0.6, hz + 0.2), p(inner, mid_z), p(sl.centre + 2.2, under - 0.35)], v.cap_in, grow, white("Inside"));
             }
             // Inside's line comes in under the skirt's foot, as the light does, to the wall just above it
-            let low = v.foot + 0.7f64.min((tz - v.foot) * 0.5);
-            labels.push(Label { elbow: Some(pz(v.foot * 0.45)), ..Label::new(false, p(sl.skirt_x(false, low, true), low), "Inside") });
-            // light from the next key: onto the outside of this one's skirt, and off it
+            // (a button is solid: nothing inside it)
+            if !v.solid {
+                let low = v.foot + 0.7f64.min((tz - v.foot) * 0.5);
+                labels.push(Label { elbow: Some(pz(v.foot * 0.45)), ..Label::new(false, p(sl.skirt_x(false, low, true), low), "Inside") });
+            }
+            // light from the next key: onto the outside of this one's skirt, and off it;
+            // onto a button from above the chassis it stands on, and onto its top too
             let bounce_z = v.foot + 1.8f64.min((tz - v.foot) * 0.3);
             let outside = sl.skirt_x(false, bounce_z, false);
-            ray(&mut s, &[p((x_hi - 0.1).min(outside + 2.4), v.foot * 0.55), p(outside + 0.08, bounce_z - 0.05)], 0.5, grow, false);
+            let from_z = if v.solid { bounce_z + 1.2 } else { v.foot * 0.55 };
+            ray(&mut s, &[p((x_hi - 0.1).min(outside + 2.4), from_z), p(outside + 0.08, bounce_z - 0.05)], 0.5, grow, false);
             ray(&mut s, &[p(outside + 0.1, bounce_z + 0.15), p((x_hi - 0.25).min(outside + 2.2), bounce_z + 1.6)], v.cap_out, grow, white("Outside"));
             labels.push(Label::new(false, p(outside, bounce_z), "Outside"));
+            if v.solid {
+                let top_x = (a0 + a1) / 2.0;
+                ray(&mut s, &[p(top_x + 2.2, tz + 2.0), p(top_x + 0.1, tz + 0.05)], 0.5, grow, false);
+                ray(&mut s, &[p(top_x - 0.1, tz + 0.1), p(top_x - 1.6, tz + 1.7)], v.cap_out, grow, white("Outside"));
+            }
         }
         _ => {
             // light from under the keys: off the main well's deck onto its wall

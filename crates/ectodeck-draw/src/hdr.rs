@@ -27,15 +27,20 @@ use sim::{At, Coloured, Snapshot};
 
 
 /// A cap as the art draws it, for choosing it in the Light lab: its
-/// control's id, what the core calls its key, its foot (its skirt's outline)
-/// in the art's units, and whether it has an LED and a legend of its own.
+/// control's id, what the core calls its key (and more briefly, where the
+/// core says so), its foot (its skirt's outline) in the art's units, and
+/// whether it has an LED and a legend of its own. A button with no light
+/// of its own, standing in the keys' light, is one too: a moulded block
+/// rather than a cap over a switch.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CapShape {
     pub id: String,
     pub label: String,
+    pub short: Option<String>,
     pub foot: [f32; 4],
     pub lit: bool,
     pub legend: bool,
+    pub button: bool,
 }
 
 /// A key in section, north to south, as the art has it, in millimetres, for
@@ -355,13 +360,17 @@ struct KeysLight<'a> {
     /// beside its legend, for a legend's share of its light
     to_band: Vec<f32>,
     top_glow: Vec<f32>,
+    /// and whether its top is lower than another cap's, which only then can
+    /// send light down onto it (a button on the chassis among the caps)
+    top_lit: Vec<bool>,
 }
 
 impl KeysLight<'_> {
-    /// A cap's band's and top's share of its light (see to_band and top_glow); none off the caps.
-    fn cap(&self, c: u16) -> (f32, f32) {
+    /// A cap's band's and top's share of its light, and whether light comes
+    /// down on its top (see to_band, top_glow and top_lit); none off the caps.
+    fn cap(&self, c: u16) -> (f32, f32, bool) {
         let c = c as usize;
-        (self.to_band.get(c).copied().unwrap_or(0.0), self.top_glow.get(c).copied().unwrap_or(0.0))
+        (self.to_band.get(c).copied().unwrap_or(0.0), self.top_glow.get(c).copied().unwrap_or(0.0), self.top_lit.get(c).copied().unwrap_or(false))
     }
 
     fn at(&self, a: &At) -> [f32; 3] {
@@ -506,6 +515,10 @@ impl Board {
         let controls = device["controls"].as_array().ok_or("the device names no controls")?;
         let lit = |c: &Value| c["illumination"].is_array();
         let sliders = |c: &Value| c.get("slider").is_some();
+        let label = |c: &Value| c["label"].as_str().unwrap_or_default().to_string();
+        let short = |c: &Value| c["short"].as_str().map(str::to_string);
+        // whether one box lies inside another, not all of it
+        let inside = |a: [f32; 4], b: [f32; 4]| a[0] >= b[0] && a[1] >= b[1] && a[2] <= b[2] && a[3] <= b[3] && a != b;
         let model = Model::from(&device["light"]);
 
         // under the light: the body and its print, over the ground
@@ -610,19 +623,28 @@ impl Board {
             let second = legend.as_ref().and_then(|s| second_function(s, face, ka, oy));
             let cap = foot.map(|_| cap_shapes.len() as u32);
             if let Some(f) = foot {
-                cap_shapes.push(CapShape { id: control_id(c), label: c["label"].as_str().unwrap_or_default().to_string(), foot: f, lit: true, legend: legend.is_some() });
+                cap_shapes.push(CapShape { id: control_id(c), label: label(c), short: short(c), foot: f, lit: true, legend: legend.is_some(), button: false });
             }
             keys.push(KeyArt { pos: pos as u32, cap, foot, face, round: rounds, legend, second, print });
         }
-        // the caps of the keys with no light of their own, which stand in its way
+        // The controls with no light of their own, which stand in its way and
+        // catch it: the caps of the keys with none (a shadow, then the cap's
+        // foot and face), and the buttons, moulded blocks with no shadow (their
+        // first piece the block; its face the next piece where that lies
+        // inside it, as a button's in its bezel, or else all of its top).
         let mut others = Vec::new();
         for c in controls.iter().filter(|c| !lit(c) && !sliders(c)) {
             let Some(n) = c["control"].as_u64() else { continue };
             let parts = children(&format!("control_{n}"));
-            if parts.len() >= 3 && matches!(&parts[0], usvg::Node::Group(g) if !g.filters().is_empty()) {
-                others.push((rect(&parts[1]), rect(&parts[2]), [round(&parts[1]), round(&parts[2])]));
-                cap_shapes.push(CapShape { id: control_id(c), label: c["label"].as_str().unwrap_or_default().to_string(), foot: rect(&parts[1]), lit: false, legend: false });
-            }
+            let shadow = parts.len() >= 3 && matches!(&parts[0], usvg::Node::Group(g) if !g.filters().is_empty());
+            let (foot, face) = match (shadow, parts.first(), parts.get(1)) {
+                (true, ..) => (&parts[1], &parts[2]),
+                (false, Some(block), Some(face @ usvg::Node::Path(_))) if inside(rect(face), rect(block)) => (block, face),
+                (false, Some(block), _) => (block, block),
+                _ => continue,
+            };
+            others.push((rect(foot), rect(face), [round(foot), round(face)]));
+            cap_shapes.push(CapShape { id: control_id(c), label: label(c), short: short(c), foot: rect(foot), lit: false, legend: false, button: !shadow });
         }
         // The lock lights, from the core's "indicators": each a small window
         // with an LED under it, brightest over the LED and dimmer to the
@@ -1124,8 +1146,10 @@ impl Board {
             // back, as much as it lets through for a legend's share of it.
             let physics = (0..self.cap_shapes.len() as u32).map(|c| snap.setup.of(c));
             let to_band = physics.clone().map(|p| if p.skirts > 0.0 && p.black > 0.0 && !self.band_map.is_empty() { 1.0 / (1.0 - p.black).max(0.05) } else { 0.0 }).collect();
-            let top_glow = physics.map(|p| if p.tops > 0.0 { p.tops / p.legends.max(0.01) } else { 0.0 }).collect();
-            KeysLight { snap, gain: self.gain(white, ceiling), alike, coloured, to_band, top_glow }
+            let top_glow = physics.clone().map(|p| if p.tops > 0.0 { p.tops / p.legends.max(0.01) } else { 0.0 }).collect();
+            let highest = physics.clone().map(|p| p.top).fold(0.0f32, f32::max);
+            let top_lit = physics.map(|p| p.top < highest - 0.01).collect();
+            KeysLight { snap, gain: self.gain(white, ceiling), alike, coloured, to_band, top_glow, top_lit }
         });
         let keys = keys.as_ref();
         // in bands of rows, one a thread: every step below is the pixel's own
@@ -1157,7 +1181,14 @@ impl Board {
             let Some(k) = keys else { continue };
             let (r, a) = (&self.reads[j], self.caps[j * 4 + 3]);
             // (each cap's band and top by its own physics)
-            let (to_band, top_glow) = k.cap(self.cap_of[j]);
+            let (to_band, top_glow, top_lit) = k.cap(self.cap_of[j]);
+            // a low top: the light coming down on it, as much as the cap covers
+            if r.code == 3 && top_lit && a > 0.0 {
+                let e = k.at(&sim::At { code: sim::TOP_OUTSIDE as u8, ..r.at(fw, cw) });
+                for c in 0..3 {
+                    px[c] += e[c] * a;
+                }
+            }
             let share = match r.code {
                 0 | 1 if a < 1.0 => 1.0 - a,
                 2 if to_band > 0.0 => self.band_map[j] * to_band,
@@ -1634,6 +1665,40 @@ mod tests {
         assert!(on(&bands_w, &own_lit) < 0.25 * on(&bands_w, &all_lit), "no light through its skirt lit");
         let (a, o) = (on(&bands_far, &all_lit), on(&bands_far, &own_lit));
         assert!(on(&bands_far, &all_off) == on(&bands_far, &own_off) && (a - o).abs() < 0.01 * a, "a key far from it as it was: {a} against {o}");
+    }
+
+    /// The buttons with no light of their own catch the keys' light round
+    /// them: G/PC's face and the media keys are brighter with every key lit
+    /// than with none, and the chassis by them is as the art has it unlit.
+    #[test]
+    fn the_buttons_catch_the_keys_light() {
+        let (_t, device, mut b) = board();
+        let scene = Scene::of(&b);
+        let mut l = device["light"].clone();
+        for (k, v) in [("caps", serde_json::json!("pudding")), ("skirts", 0.3.into()), ("black", 0.4.into()), ("milky", 1.0.into()), ("switch", "slot".into()), ("beam", 3.0.into())] {
+            l["sim"][k] = v;
+        }
+        let mut faces = Vec::new();
+        for label in ["Game mode button", "Media stop", "Next track"] {
+            let c = device["controls"].as_array().unwrap().iter().find(|c| c["label"] == label).unwrap();
+            l["keys"][control_id(c)] = serde_json::json!({ "sim": { "skirt_foot": 2.0, "cap_top": if label == "Game mode button" { 3.0 } else { 6.0 }, "caps": "shine_through" } });
+            let f = b.cap_shapes.iter().find(|s| s.label == label).unwrap().foot;
+            faces.push((label, f));
+        }
+        b.set_sim(Arc::new(Simulator::settle(&scene, &b.setup(&l), 4000)));
+        let (off, lit) = (b.compose(&[], 0, 254.0, 1000.0 / 254.0), b.compose(&white(&b), 0, 254.0, 1000.0 / 254.0));
+        let (ka, (ox, oy)) = (b.art_scale, b.art_offset);
+        for (label, f) in faces {
+            // its middle, clear of its edges
+            let (x0, y0, x1, y1) = ((ox + ka * (f[0] + 2.0)) as i32, (oy + ka * (f[1] + 2.0)) as i32, (ox + ka * (f[2] - 2.0)) as i32, (oy + ka * (f[3] - 2.0)) as i32);
+            let mean = |frame: &[f32]| {
+                let px: Vec<f32> = (y0..y1).flat_map(|y| (x0..x1).map(move |x| (x, y))).map(|p| lum(frame, &b, p)).collect();
+                px.iter().sum::<f32>() / px.len().max(1) as f32
+            };
+            eprintln!("{label}: {:.4} unlit, {:.4} with every key lit", mean(&off), mean(&lit));
+            // (before they stood in the light, the art covered them from it: no light at all)
+            assert!(mean(&lit) > mean(&off) * 1.05, "{label} catches the keys' light");
+        }
     }
 
     fn white(b: &Board) -> Vec<Light> {
