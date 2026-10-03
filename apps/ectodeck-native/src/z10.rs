@@ -7,6 +7,9 @@ use std::collections::{HashMap, HashSet};
 use ectodeck_draw::hdr::Light;
 use serde_json::{json, Value};
 
+/// The Z10's core: its folder among Ectodeck's cores.
+pub const CORE: &str = "evga-z10";
+
 /// drawn gap between neighbouring keys, in the drawing's units
 pub const GAP: f64 = 3.0;
 

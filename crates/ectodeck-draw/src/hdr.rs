@@ -25,8 +25,41 @@ pub mod sim;
 
 use sim::{At, Coloured, Snapshot};
 
-/// the art's units to the millimetre
-const UNITS_PER_MM: f32 = 1.38;
+
+/// A cap as the art draws it, for choosing it in the Light lab: its
+/// control's id, what the core calls its key, its foot (its skirt's outline)
+/// in the art's units, and whether it has an LED and a legend of its own.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CapShape {
+    pub id: String,
+    pub label: String,
+    pub foot: [f32; 4],
+    pub lit: bool,
+    pub legend: bool,
+}
+
+/// A key in section, north to south, as the art has it, in millimetres, for
+/// the Light lab to draw: its foot and its face's inset from it; the deck
+/// between its well's north wall and its foot; the key south of it (the gap
+/// to its foot, and that foot); north of its well, the chassis to the next
+/// well and that well's deck south of its keys; and its legends, north to
+/// south, each one's middle south of the foot's (north below 0) and how far
+/// it runs north to south. What the art does not have is none.
+#[derive(Clone, Debug, PartialEq)]
+pub struct KeyGeometry {
+    pub foot: f32,
+    pub inset: f32,
+    pub deck_north: Option<f32>,
+    pub south: Option<(f32, f32)>,
+    pub strip: Option<(f32, f32)>,
+    pub legends: Vec<(f32, f32)>,
+}
+
+/// A control's id: the core protocol's own, or the key's number where a
+/// core's description has only that (the Z10's).
+pub fn control_id(c: &Value) -> String {
+    c["id"].as_str().map(str::to_string).or_else(|| c["pos"].as_u64().map(|p| p.to_string())).unwrap_or_default()
+}
 
 /// One key's light, as the page has it: its colour (sRGB) and how strongly it
 /// is lit (0 to 1), and whether the key is remapped, which puts the second
@@ -165,6 +198,9 @@ pub struct Board {
     /// media keys): their feet and faces in the art's units, and their
     /// corners' radii, which stand in the light's way
     others: Vec<([f32; 4], [f32; 4], [f32; 2])>,
+    /// every cap, lit or not, and the controls they are: the lit keys' in
+    /// their order, then the others', as the simulation counts its caps
+    pub cap_shapes: Vec<CapShape>,
     model: Model,
     /// where the chassis is: a pixel's coverage
     chassis: Vec<f32>,
@@ -517,6 +553,7 @@ impl Board {
         };
         // each lit key: its legend, and its cap's shape, which its light is simulated in
         let mut keys = Vec::new();
+        let mut cap_shapes = Vec::new();
         for c in controls.iter().filter(|c| lit(c)) {
             let Some(pos) = c["pos"].as_u64() else { continue };
             let legend_n = c["legend"].as_u64();
@@ -529,6 +566,9 @@ impl Board {
                 _ => (None, [0.0; 4], [0.0; 2]),
             };
             let second = legend.as_ref().and_then(|s| second_function(s, face, ka, oy));
+            if let Some(f) = foot {
+                cap_shapes.push(CapShape { id: control_id(c), label: c["label"].as_str().unwrap_or_default().to_string(), foot: f, lit: true, legend: legend.is_some() });
+            }
             keys.push(KeyArt { pos: pos as u32, foot, face, round: rounds, legend, second, print });
         }
         // the caps of the keys with no light of their own, which stand in its way
@@ -538,6 +578,7 @@ impl Board {
             let parts = children(&format!("control_{n}"));
             if parts.len() >= 3 && matches!(&parts[0], usvg::Node::Group(g) if !g.filters().is_empty()) {
                 others.push((rect(&parts[1]), rect(&parts[2]), [round(&parts[1]), round(&parts[2])]));
+                cap_shapes.push(CapShape { id: control_id(c), label: c["label"].as_str().unwrap_or_default().to_string(), foot: rect(&parts[1]), lit: false, legend: false });
             }
         }
         // The lock lights, from the core's "indicators": each a small window
@@ -616,6 +657,7 @@ impl Board {
             caps,
             keys,
             others,
+            cap_shapes,
             model,
             chassis,
             well_boxes,
@@ -817,6 +859,59 @@ impl Board {
             }
         }
         cover.iter().any(|c| *c > 0.0).then_some(Shape { x: x0, y: y0, w: bw, h: bh, cover })
+    }
+
+    /// Whether the device has wells round its keys.
+    pub fn has_wells(&self) -> bool {
+        !self.well_boxes.is_empty()
+    }
+
+    /// A key in section, north to south, as the art has it (see
+    /// KeyGeometry), at `mm` of the art's units to the millimetre; none for a
+    /// control that is not a cap.
+    pub fn key_geometry(&self, id: &str, mm: f32) -> Option<KeyGeometry> {
+        let f = self.cap_shapes.iter().find(|c| c.id == id)?.foot;
+        let key = self.keys.iter().find(|k| k.foot == Some(f));
+        let face = match key {
+            Some(k) => k.face,
+            None => self.others.iter().find(|o| o.0 == f)?.1,
+        };
+        let (mid_x, mid_y) = ((f[0] + f[2]) / 2.0, (f[1] + f[3]) / 2.0);
+        let inside = |w: &[f32; 4], x: f32, y: f32| x >= w[0] && x <= w[2] && y >= w[1] && y <= w[3];
+        // (a well over its middle; a key anywhere over it, as the rows are staggered)
+        let over = |c: &[f32; 4]| c[0] <= mid_x && mid_x <= c[2];
+        let beside = |c: &[f32; 4]| c[0] < f[2] && c[2] > f[0];
+        // its well; the one north of it, the chassis between, and that well's deck south of its keys
+        let well = self.well_boxes.iter().find(|w| inside(w, mid_x, mid_y));
+        let deck_north = well.map(|w| (f[1] - w[1]) / mm);
+        let strip = well.and_then(|w| {
+            let north = self.well_boxes.iter().filter(|n| n[3] <= w[1] + 0.5 && over(n)).max_by(|a, b| a[3].total_cmp(&b[3]))?;
+            let last = self.cap_shapes.iter().map(|c| c.foot).filter(|c| beside(c) && inside(north, (c[0] + c[2]) / 2.0, (c[1] + c[3]) / 2.0)).map(|c| c[3]).reduce(f32::max)?;
+            Some(((w[1] - north[3]) / mm, (north[3] - last) / mm))
+        });
+        // the key south of it
+        let south = self.cap_shapes.iter().map(|c| c.foot).filter(|c| c[1] >= f[3] - 0.5 && beside(c)).min_by(|a, b| a[1].total_cmp(&b[1])).map(|c| ((c[1] - f[3]) / mm, (c[3] - c[1]) / mm));
+        // its legend, and the second function at the foot of the cap if it has one, each north to south
+        let (ka, oy) = (self.art_scale, self.art_offset.1);
+        let legends = key
+            .and_then(|k| k.legend.as_ref().map(|s| (k, s)))
+            .map(|(k, s)| {
+                let inked = |r: u32| (0..s.w).any(|c| s.cover[(r * s.w + c) as usize] > 0.25);
+                let lines = match k.second {
+                    Some(r) => vec![(0, r), (r, s.h)],
+                    None => vec![(0, s.h)],
+                };
+                lines
+                    .into_iter()
+                    .filter_map(|(a, b)| {
+                        let (first, last) = ((a..b).find(|&r| inked(r))?, (a..b).rev().find(|&r| inked(r))?);
+                        let (top, bottom) = ((s.y as f32 + first as f32 - oy) / ka, (s.y as f32 + last as f32 + 1.0 - oy) / ka);
+                        Some((((top + bottom) / 2.0 - mid_y) / mm, (bottom - top) / mm))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Some(KeyGeometry { foot: (f[3] - f[1]) / mm, inset: (face[1] - f[1]) / mm, deck_north, south, strip, legends })
     }
 
     /// How far the simulation the keys are lit by has got: the photons it
@@ -1253,6 +1348,7 @@ mod tests {
     /// brightest legend at 600 nits, and the core's own defaults for the rest.
     fn light() -> Value {
         serde_json::json!({
+            "units_per_mm": 1.38,
             "led": 4.5,
             "sim": { "nits": 600 },
             "legend": { "unlit": 0.15 },
@@ -1261,10 +1357,34 @@ mod tests {
         })
     }
 
+    /// A key in section comes from the art: the Z10's 2 key, against the
+    /// measurements the Light lab's drawing was first made from (its foot,
+    /// its face's inset, the deck and the chassis north of it, the W key
+    /// south of it), and its two legends where the art prints them: 2@ about
+    /// 3 mm north of its middle, PF2 about 4 mm south. A cap with no legend
+    /// has none.
+    #[test]
+    fn a_key_in_section_is_as_the_art_has_it() {
+        let (_, _, b) = board();
+        let g = b.key_geometry("24", 1.38).expect("the 2 key");
+        eprintln!("{g:?}");
+        let near = |a: f32, b: f32| (a - b).abs() < 0.06;
+        assert!(near(g.foot, 17.39) && near(g.inset, 1.63), "its foot and face");
+        assert!(g.deck_north.is_some_and(|d| near(d, 1.62)), "the deck north of it");
+        assert!(g.strip.is_some_and(|(s, d)| near(s, 2.55) && near(d, 2.36)), "the chassis north of its well, and the F row's deck");
+        assert!(g.south.is_some_and(|(gap, foot)| near(gap, 1.45) && near(foot, 17.39)), "the W key south of it");
+        assert_eq!(g.legends.len(), 2, "2@ and PF2");
+        assert!((g.legends[0].0 + 3.0).abs() < 0.3 && (g.legends[0].1 - 4.1).abs() < 0.5, "2@: {:?}", g.legends[0]);
+        assert!((g.legends[1].0 - 4.0).abs() < 0.3 && (g.legends[1].1 - 2.6).abs() < 0.5, "PF2: {:?}", g.legends[1]);
+        let space = b.cap_shapes.iter().find(|c| c.label == "Space").expect("the spacebar");
+        assert!(!space.lit && !space.legend);
+        assert!(b.key_geometry(&space.id, 1.38).is_some_and(|g| g.legends.is_empty() && g.south.is_none()));
+    }
+
     /// The Z10's board at the size the window first draws it, unlit.
     fn board() -> (Tree, Value, Board) {
-        let tree = Tree::from_str(crate::z10::SVG, &usvg::Options::default()).unwrap();
-        let mut device: Value = serde_json::from_str(crate::z10::DEVICE).unwrap();
+        let tree = Tree::from_str(&crate::fixture::svg(), &usvg::Options::default()).unwrap();
+        let mut device: Value = serde_json::from_str(&crate::fixture::device()).unwrap();
         device["light"] = light();
         let b = Board::new(&tree, &device, [0x20, 0x20, 0x20], 1264, 506).unwrap();
         (tree, device, b)

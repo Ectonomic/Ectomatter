@@ -34,7 +34,7 @@ use std::sync::{Arc, Condvar, Mutex};
 
 use serde_json::Value;
 
-use super::{Board, UNITS_PER_MM};
+use super::Board;
 
 /// the direct light's cells, and the bounced light's, in the art's units
 const FINE: f32 = 0.5;
@@ -129,6 +129,9 @@ pub const MILKY: f32 = 20.0;
 /// names them for what they are: skirt_foot, cap_top, depth.)
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Physics {
+    /// how many of the art's units make a millimetre, as the core's light
+    /// description says: the art is in its own units, the heights in mm
+    pub units_per_mm: f32,
     /// the brightest legend, every key lit white at full, in nits: what the
     /// whole simulation's light is scaled to
     pub nits: f32,
@@ -192,6 +195,7 @@ impl Physics {
             Caps::Translucent => (plastic, if s["caps"].is_null() { share("tops", plastic) } else { plastic }, 0.0),
         };
         Physics {
+            units_per_mm: light["units_per_mm"].as_f64().map_or(1.0, |v| v as f32).max(0.01),
             nits: f("nits", 600.0).max(0.0),
             switch: Switch::named(s["switch"].as_str()),
             switch_top: f("switch_top", 6.5).clamp(0.05, top - 0.1),
@@ -230,7 +234,7 @@ impl Physics {
     /// How far the switch's edge is from its centre, in the art's units:
     /// the furthest an LED can sit from the centre, inside the switch.
     pub fn switch_edge(&self) -> f32 {
-        self.switch_width * UNITS_PER_MM / 2.0
+        self.switch_width * self.units_per_mm / 2.0
     }
 
     /// Where an LED sits, `north` of its key's centre in the art's units, as
@@ -611,7 +615,7 @@ struct Stood {
 
 impl Stood {
     fn of(p: &Physics) -> Stood {
-        let mm = UNITS_PER_MM;
+        let mm = p.units_per_mm;
         let p = p.simulated();
         let (gap, top) = (p.gap * mm, p.top * mm);
         Stood { beam_from: p.switch_top * mm, half: p.switch_width * mm / 2.0, spread: p.glow_spread * mm, clear_to: gap + (1.0 - p.black) * (top - gap), diffuse: p.milky * MILKY * mm, gap, top, wall: p.wall * mm, p }
@@ -1805,9 +1809,9 @@ mod tests {
     use resvg::usvg::{self, Tree};
 
     fn scene() -> (Board, Scene, Physics) {
-        let tree = Tree::from_str(crate::z10::SVG, &usvg::Options::default()).unwrap();
-        let mut device: Value = serde_json::from_str(crate::z10::DEVICE).unwrap();
-        device["light"] = serde_json::json!({ "led": 4.5, "sim": { "nits": 600 }, "wells": "mask_1" });
+        let tree = Tree::from_str(&crate::fixture::svg(), &usvg::Options::default()).unwrap();
+        let mut device: Value = serde_json::from_str(&crate::fixture::device()).unwrap();
+        device["light"] = serde_json::json!({ "units_per_mm": 1.38, "led": 4.5, "sim": { "nits": 600 }, "wells": "mask_1" });
         let b = Board::new(&tree, &device, [0x20, 0x20, 0x20], 1264, 506).unwrap();
         let scene = Scene::of(&b);
         (b, scene, Physics::from(&device["light"]))
@@ -1882,13 +1886,13 @@ mod tests {
     #[test]
     fn the_led_stays_inside_its_switch() {
         let p = Physics { switch_width: 12.0, ..Physics::from(&Value::Null) };
-        let edge = 6.0 * UNITS_PER_MM;
+        let edge = 6.0 * p.units_per_mm;
         assert_eq!(p.held_north(3.0), 3.0);
         assert!((p.held_north(20.0) - edge).abs() < 1e-5 && (p.held_north(-20.0) + edge).abs() < 1e-5);
         assert_eq!(on_cap_top(&p, 20.0, 1.5), on_cap_top(&p, edge, 1.5));
         // a switch wider than fits in a cap is held to 14 mm, and its edge with it
         let wide = Physics::from(&serde_json::json!({ "sim": { "switch_width": 30.0 } }));
-        assert!((wide.switch_edge() - 7.0 * UNITS_PER_MM).abs() < 1e-5);
+        assert!((wide.switch_edge() - 7.0 * p.units_per_mm).abs() < 1e-5);
     }
 
     /// The exact share of a rectangle's light, against the rectangle cut

@@ -17,6 +17,7 @@
 //! ECTODECK_NATIVE_TYPE, so each state of the page can be checked offscreen.
 
 mod adapter;
+mod cores;
 mod device;
 mod display;
 mod devices;
@@ -172,8 +173,8 @@ mod kept_tests {
 
     /// The Z10's keys to simulate, and a make of their light for each beam.
     fn scene() -> (Scene, impl Fn(f32) -> (Physics, f32)) {
-        let device: serde_json::Value = serde_json::from_str(&core_device()).unwrap();
-        let tree = usvg::Tree::from_str(ectodeck_draw::z10::SVG, &usvg::Options::default()).unwrap();
+        let device: serde_json::Value = cores::shown().device_now();
+        let tree = cores::shown().tree();
         let board = Board::new(&tree, &device, GROUND, 632, 253).unwrap();
         let base = Physics::from(&device["light"]);
         (Scene::of(&board), move |beam: f32| (Physics { beam, ..base }, 7.0f32))
@@ -218,8 +219,8 @@ mod kept_tests {
 fn board_builder(done: calloop::channel::Sender<Board>) -> std::sync::mpsc::Sender<(u32, u32)> {
     let (ask, asked) = std::sync::mpsc::channel::<(u32, u32)>();
     std::thread::spawn(move || {
-        let tree = usvg::Tree::from_str(ectodeck_draw::z10::SVG, &usvg::Options::default()).expect("the Z10's art");
-        let device: serde_json::Value = serde_json::from_str(&core_device()).expect("the Z10's device file");
+        let tree = cores::shown().tree();
+        let device: serde_json::Value = cores::shown().device_now();
         while let Ok(mut size) = asked.recv() {
             // only the latest size matters
             while let Ok(s) = asked.try_recv() {
@@ -433,8 +434,8 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
             window.dispatch_event(WindowEvent::PointerMoved { position: at(0.0) });
             window.dispatch_event(WindowEvent::PointerPressed { position: at(0.0), button: PointerEventButton::Left });
             let rect = board_rect(&front.ui, 1.0);
-            let tree = usvg::Tree::from_str(ectodeck_draw::z10::SVG, &usvg::Options::default()).unwrap();
-            let device: serde_json::Value = serde_json::from_str(&core_device()).unwrap();
+            let tree = cores::shown().tree();
+            let device: serde_json::Value = cores::shown().device_now();
             let board = (rect.2 > 0).then(|| settled(&tree, &device, rect.2 as u32, rect.3 as u32));
             for k in 1..=30 {
                 let t0 = Instant::now();
@@ -483,8 +484,8 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     });
     lay_ground(&mut pic, &front.ui, 1.0);
     if rect.2 > 0 {
-        let tree = usvg::Tree::from_str(ectodeck_draw::z10::SVG, &usvg::Options::default()).unwrap();
-        let device: serde_json::Value = serde_json::from_str(&core_device()).unwrap();
+        let tree = cores::shown().tree();
+        let device: serde_json::Value = cores::shown().device_now();
         let t = Instant::now();
         let board = settled(&tree, &device, rect.2 as u32, rect.3 as u32);
         eprintln!("keyboard drawn and its light simulated in {:?}", t.elapsed());
@@ -625,15 +626,15 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
         .ok()
         .and_then(|s| s.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
         .unwrap_or(LAB_SIZE);
-    let device: serde_json::Value = serde_json::from_str(&core_device()).unwrap();
-    let tree = usvg::Tree::from_str(ectodeck_draw::z10::SVG, &usvg::Options::default()).unwrap();
+    let device: serde_json::Value = cores::shown().device_now();
+    let tree = cores::shown().tree();
     let board = settled(&tree, &device, 1264, 506);
     let ui = LabWindow::new().unwrap();
     let _ = slint::ComponentHandle::window(&ui);
     let window = made.borrow().last().cloned().unwrap();
     slint::ComponentHandle::show(&ui).unwrap();
     window.set_size(PhysicalSize::new(w, h));
-    let mut lab = lab::LabPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false), device["light"].clone());
+    let mut lab = lab::LabPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false), device["light"].clone(), lab_device(Some(&board)));
     let lights = front.lights().unwrap_or_default();
     let gain = front.light_gain(reference);
     let p = board.peaks(&lights, reference as f32, gain);
@@ -1273,7 +1274,7 @@ impl App {
 
     /// The light the keyboard is lit by: the Light lab's, if it has tuned one, or the core's.
     fn light_now(&self) -> serde_json::Value {
-        self.light.clone().unwrap_or_else(|| serde_json::from_str::<serde_json::Value>(&core_device()).map(|d| d["light"].clone()).unwrap_or_default())
+        self.light.clone().unwrap_or_else(|| cores::shown().device_now()["light"].clone())
     }
 
     /// Open the Light lab, made the first time, on the light the keyboard is lit by.
@@ -1283,8 +1284,8 @@ impl App {
             let ui = LabWindow::new().unwrap();
             let _ = slint::ComponentHandle::window(&ui);
             slint::ComponentHandle::show(&ui).unwrap();
-            self.front.lab = Some(lab::LabPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false), light));
-            self.subs[LAB] = Some(self.make_sub("EVGA Z10 RGB / Light lab", LAB_SIZE, LAB_MIN_SIZE));
+            self.front.lab = Some(lab::LabPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false), light, lab_device(self.board.as_ref())));
+            self.subs[LAB] = Some(self.make_sub(&format!("{} / Light lab", cores::shown().name()), LAB_SIZE, LAB_MIN_SIZE));
         } else {
             self.show_sub(LAB);
         }
@@ -1483,6 +1484,10 @@ impl App {
     /// The keyboard came back drawn at a size: light it, by the Light lab's
     /// light if it has tuned one.
     fn built(&mut self, mut board: Board) {
+        // the Light lab, open before the device was first drawn, takes its caps
+        if let Some(l) = self.front.lab.as_mut().filter(|l| !l.has_caps()) {
+            l.set_caps(lab_device(Some(&board)).caps);
+        }
         if let Some(l) = &self.light {
             board.set_light(l);
         }
@@ -2185,19 +2190,24 @@ fn cursor_icon(p: Pointer) -> CursorIcon {
     }
 }
 
-/// The Z10 core's description of the keyboard: the core's own file when
-/// Ectodeck runs from its source, which the Light lab saves its tuning
-/// into, or the copy built into Ectodeck.
-pub fn core_device() -> String {
-    std::fs::read_to_string(core_device_path()).unwrap_or_else(|_| ectodeck_draw::z10::DEVICE.to_string())
-}
-
-pub fn core_device_path() -> PathBuf {
-    // ECTODECK_CORE_DEVICE: another copy, for checking the lab's Save without touching the core
-    if let Some(p) = std::env::var_os("ECTODECK_CORE_DEVICE") {
-        return PathBuf::from(p);
+/// The device the Light lab tunes, as the shown core describes it: its
+/// name, where its description is, which of the light's parts it has, and
+/// (once its board is drawn) every cap, each in section as the art has it.
+fn lab_device(board: Option<&Board>) -> lab::LabDevice {
+    let core = cores::shown();
+    let light = core.device_now()["light"].clone();
+    let mm = sim::Physics::from(&light).units_per_mm;
+    let typical = light["typical"].as_str().map(str::to_string).or_else(|| light["typical"].as_u64().map(|n| n.to_string()));
+    lab::LabDevice {
+        name: core.name().to_string(),
+        path: core.path.clone(),
+        // (before its board is drawn, a device with art is taken to have keys and wells)
+        keys: board.is_none_or(|b| b.cap_shapes.iter().any(|c| c.lit)),
+        wells: board.is_none_or(|b| b.has_wells()),
+        screens: core.device["screens"].as_array().is_some_and(|a| !a.is_empty()),
+        caps: board.map(|b| b.cap_shapes.iter().map(|c| (c.clone(), b.key_geometry(&c.id, mm))).collect()).unwrap_or_default(),
+        typical,
     }
-    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../cores/evga-z10/device.json"))
 }
 
 /// A rectangle of a picture, in its pixels: x, y, width, height.

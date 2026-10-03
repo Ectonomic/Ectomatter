@@ -1,13 +1,15 @@
-//! The Light lab: a developer's window for tuning how the Z10's keys are
-//! lit. The keys' light is simulated (see ectodeck_draw's sim): each LED
-//! followed through the keyboard's shape. The lab's sliders are the
-//! keyboard's physical make, each in the units that mean something: where
-//! the LED sits and how its light leaves the switch, the caps' heights and
-//! how much light their plastic gives back or lets through, the wells' depth
-//! and finish; and the light's brightness, which everything else follows.
-//! The keyboard in the main window takes every change at once, its light
-//! clearing as the simulation runs. Save writes the tuning into the Z10
-//! core's own file, which Ectodeck reads when it runs from its source.
+//! The Light lab: a developer's window for tuning how a device is lit,
+//! whichever device it is: it knows none, and works from what the device's
+//! core describes (see LabDevice). The light is simulated (see
+//! ectodeck_draw's sim): each LED followed through the device's shape. The
+//! lab's sliders are the device's physical make, each in the units that
+//! mean something: where the LED sits and how its light leaves the switch,
+//! the caps' heights and how much light their plastic gives back or lets
+//! through, the wells' depth and finish; and the light's brightness, which
+//! everything else follows. The device in the main window takes every change
+//! at once, its light clearing as the simulation runs. Save writes the
+//! tuning into the device's core, which Ectodeck reads when it runs from its
+//! source.
 //!
 //! The lab is landscape and shows one section at a time: its drawing of the
 //! key in the middle (see drawing), its sliders round it, each beside the
@@ -29,6 +31,7 @@ use crate::lighting::{cell, kind, style, text_cell};
 use crate::text;
 use crate::{Cell, LabRow, LabWindow, Sketch};
 use ectodeck_draw::hdr::sim::{Caps, Physics, Switch};
+use ectodeck_draw::hdr::{CapShape, KeyGeometry};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Ask {
@@ -99,7 +102,7 @@ const PARAMS: [Param; 25] = [
     Param { path: ("sim", "sides"), label: "Through its sides", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.25, note: "The share of the housing's glow that leaves through its sides rather than its top. Its sides light the deck round the switch, out under the skirt; its top lights the back of the legend evenly, its parts far from the LED as well." },
     Param { path: ("sim", "glow_spread"), label: "Glow spread", lo: 0.5, hi: 60.0, step: 0.1, unit: Unit::Reach, def: 4.0, note: "How far the housing's glow carries from the LED before it falls to about a third, as the light fades through the plastic. Short keeps it to the LED's side of the switch, so the deck and the legend are brightest there; long glows evenly all round." },
     Param { path: ("sim", "switch_width"), label: "Switch width", lo: 1.0, hi: 14.0, step: 0.1, unit: Unit::Mm, def: 12.0, note: "How wide the switch's housing is. A black one stands in the way of the light bouncing about inside the cap; a clear one glows with the scattered light over its top and its sides, spreading it across the back of the legend and, out under the skirt, onto the deck round the switch." },
-    Param { path: ("sim", "switch_top"), label: "Switch top", lo: 0.1, hi: 14.0, step: 0.1, unit: Unit::Mm, def: 6.5, note: "How high above the deck the switch's housing stands, where the beam leaves it: 5.7 mm on Cherry-style switches like the Z10's Kailhs. Nearer the cap's top makes the spot on the legend smaller and brighter." },
+    Param { path: ("sim", "switch_top"), label: "Switch top", lo: 0.1, hi: 14.0, step: 0.1, unit: Unit::Mm, def: 6.5, note: "How high above the deck the switch's housing stands, where the beam leaves it: 5.7 mm on Cherry-style switches. Nearer the cap's top makes the spot on the legend smaller and brighter." },
     Param { path: ("sim", "skirt_foot"), label: "Skirt's foot", lo: 0.0, hi: 12.0, step: 0.1, unit: Unit::Mm, def: 5.0, note: "How high above the deck the foot of each cap's skirt is: the gap the light gets out under it by." },
     Param { path: ("sim", "cap_top"), label: "Cap's top", lo: 1.0, hi: 25.0, step: 0.1, unit: Unit::Mm, def: 14.0, note: "How high above the deck each cap's top is, where the legend is." },
     Param { path: ("sim", "legends"), label: "Legends let through", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.3, note: "The share of the light on the back of a cap's top that its legend lets through. With Brightness fixing the legends, less makes everything else brighter beside them." },
@@ -128,8 +131,8 @@ struct Choice {
 }
 
 const CHOICES: [Choice; 2] = [
-    Choice { label: "Switch", note: "What the switch's housing is: black with its LED through a slot in its top, as older switches like the Z10's Kailh Browns have it, so all the LED's light leaves in its beam; or clear, glowing with a share of it, over its top as most RGB switches have it, or all over. Each sets the switch's values for that kind; the sliders tune from there.", options: &["LED slot", "Clear top", "Clear housing"] },
-    Choice { label: "Keycaps", note: "What the caps let light through: shine-through caps, as the Z10 came with, are opaque but for their legends; pudding caps have translucent sides below a black top whose black comes part of the way down them; translucent caps let light through all over. Each fills in Plastic lets through and Black down the sides where they are off; the sliders tune from there.", options: &["Shine-through", "Pudding", "Translucent"] },
+    Choice { label: "Switch", note: "What the switch's housing is: black with its LED through a slot in its top, as some older switches have it (Kailh's among them), so all the LED's light leaves in its beam; or clear, glowing with a share of it, over its top as most RGB switches have it, or all over. Each sets the switch's values for that kind; the sliders tune from there.", options: &["LED slot", "Clear top", "Clear housing"] },
+    Choice { label: "Keycaps", note: "What the caps let light through: shine-through caps are opaque but for their legends; pudding caps have translucent sides below a black top whose black comes part of the way down them; translucent caps let light through all over. Each fills in Plastic lets through and Black down the sides where they are off; the sliders tune from there.", options: &["Shine-through", "Pudding", "Translucent"] },
 ];
 
 /// The page's sections: a title, what the part is, its values, and its choices.
@@ -213,8 +216,6 @@ fn choose(light: &mut Value, choice: usize, option: usize) {
     }
 }
 
-/// the art's units to the millimetre
-const UNITS_PER_MM: f64 = 1.38;
 
 /// How a slider spreads its values along it.
 #[derive(Clone, Copy, PartialEq)]
@@ -264,14 +265,14 @@ fn sig3(v: f64) -> f64 {
 }
 
 /// A value as its box shows it, and its unit after the box.
-fn reads(p: &Param, v: f64) -> (String, String) {
+fn reads(p: &Param, v: f64, mm: f64) -> (String, String) {
     let trim = |s: String| if s.contains('.') { s.trim_end_matches('0').trim_end_matches('.').to_string() } else { s };
     match p.unit {
         // to three significant figures, as its slider keeps it
         Unit::Nits => (trim(if v >= 100.0 { format!("{v:.0}") } else if v >= 10.0 { format!("{v:.1}") } else if v >= 1.0 { format!("{v:.2}") } else { format!("{v:.3}") }), "nits".into()),
         // the LED's place in millimetres from the centre, and which way
-        Unit::Length if p.path == ("led", "") => (trim(format!("{:.1}", v.abs() / UNITS_PER_MM)), if v.abs() < 0.005 { "centred".into() } else if v > 0.0 { "mm north".into() } else { "mm south".into() }),
-        Unit::Length => (trim(format!("{v:.2}")), format!("({:.1} mm)", v / UNITS_PER_MM)),
+        Unit::Length if p.path == ("led", "") => (trim(format!("{:.1}", v.abs() / mm)), if v.abs() < 0.005 { "centred".into() } else if v > 0.0 { "mm north".into() } else { "mm south".into() }),
+        Unit::Length => (trim(format!("{v:.2}")), format!("({:.1} mm)", v / mm)),
         Unit::Mm => (trim(format!("{v:.1}")), "mm".into()),
         Unit::Reach => (trim(format!("{v:.2}")), "mm".into()),
         Unit::Fraction => (trim(format!("{:.1}", v * 100.0)), "%".into()),
@@ -298,8 +299,6 @@ pub struct Readout {
     pub settled: bool,
 }
 
-/// What the lab says of the page, under its title.
-const INTRO: &str = "Tune how the Z10's keys are lit. The keyboard in Ectodeck's window takes each change at once; Save writes them into the Z10 core.";
 /// What the readout's numbers measure, and the simulation's.
 const READOUT_ABOUT: &str = "Measured from the keys' colours and brightness as the keyboard shows them, every part as if each key were lit as the brightest is.";
 const WHITE_ABOUT: &str = "How bright this screen shows the desktop's white now; the keyboard's light is drawn beside it.";
@@ -315,8 +314,32 @@ const REST: Duration = Duration::from_millis(250);
 const HEAD_H: f32 = 70.0;
 const HELP_H: f32 = 44.0;
 
+/// The device the lab tunes, as its core describes it: what it is called
+/// and where its core's description is (Save writes there); which of the
+/// light's parts it has: keys with LEDs in them (the LED and Keycaps
+/// sections), wells round them (Wells), a display (Display); every cap, each
+/// in section as the art has it; and the key drawn for all keys.
+pub struct LabDevice {
+    pub name: String,
+    pub path: std::path::PathBuf,
+    pub keys: bool,
+    pub wells: bool,
+    pub screens: bool,
+    pub caps: Vec<(CapShape, Option<KeyGeometry>)>,
+    pub typical: Option<String>,
+}
+
+impl LabDevice {
+    /// A cap's section, by its control's id.
+    fn geometry(&self, id: &str) -> Option<&KeyGeometry> {
+        self.caps.iter().find(|(c, _)| c.id == id).and_then(|(_, g)| g.as_ref())
+    }
+}
+
 pub struct LabPage {
     pub ui: LabWindow,
+    /// the device tuned
+    device: LabDevice,
     asks: Rc<RefCell<Vec<Ask>>>,
     /// the light being tuned, and as the core's file last had it
     pub light: Value,
@@ -404,7 +427,7 @@ fn simulated(mut light: Value) -> Value {
 }
 
 impl LabPage {
-    pub fn new(ui: LabWindow, mark: slint::Image, light: Value) -> LabPage {
+    pub fn new(ui: LabWindow, mark: slint::Image, light: Value, device: LabDevice) -> LabPage {
         let asks = Rc::new(RefCell::new(Vec::new()));
         macro_rules! on {
             ($set:ident, |$($p:ident),*| $ask:expr) => {{
@@ -443,6 +466,7 @@ impl LabPage {
         let section = crate::uistate::get("lab_section").and_then(|v| v.as_u64()).map_or(0, |n| (n as usize).min(SECTIONS.len() - 1));
         let mut page = LabPage {
             ui,
+            device,
             asks,
             saved: light.clone(),
             light,
@@ -467,8 +491,47 @@ impl LabPage {
             rows,
             foot,
         };
+        // a section the device has
+        if !page.sections().contains(&page.section) {
+            page.section = page.sections().first().copied().unwrap_or(0);
+        }
         page.refresh();
         page
+    }
+
+    /// The sections the device has parts for, in order.
+    fn sections(&self) -> Vec<usize> {
+        let d = &self.device;
+        [d.keys, d.keys, d.wells, d.screens].iter().enumerate().filter(|(_, has)| **has).map(|(i, _)| i).collect()
+    }
+
+    /// The key the stage draws: the core's typical key, in section as its art has it.
+    fn drawn_key(&self) -> drawing::Geometry {
+        drawing::Geometry::of(self.device.typical.as_deref().and_then(|id| self.device.geometry(id)))
+    }
+
+    /// Every cap of the device, each in section, once its board is drawn
+    /// (the lab can open before it is).
+    pub fn set_caps(&mut self, caps: Vec<(CapShape, Option<KeyGeometry>)>) {
+        if self.device.caps != caps {
+            self.device.caps = caps;
+            self.refresh();
+        }
+    }
+
+    /// Whether it has the device's caps yet.
+    pub fn has_caps(&self) -> bool {
+        !self.device.caps.is_empty()
+    }
+
+    /// What the lab says of the page, under its title.
+    fn intro(&self) -> String {
+        format!("Tune how the {} is lit. Ectodeck's window shows each change at once; Save writes them into its core.", self.device.name)
+    }
+
+    /// How many of the art's units make a millimetre, as the core's light says.
+    fn mm(&self) -> f64 {
+        Physics::from(&self.light).units_per_mm as f64
     }
 
     /// Do what the page asked; what only its window can do is handed back.
@@ -516,7 +579,7 @@ impl LabPage {
                                         let (lo, hi) = self.range(id.max(0) as usize);
                                         let typed = t.to_lowercase();
                                         let south = if typed.contains("south") || num.starts_with('-') { true } else if typed.contains("north") { false } else { self.value(0) < 0.0 };
-                                        (v.abs() * UNITS_PER_MM * if south { -1.0 } else { 1.0 }).clamp(lo, hi)
+                                        (v.abs() * self.mm() * if south { -1.0 } else { 1.0 }).clamp(lo, hi)
                                     }
                                     Unit::Length => v.max(0.01),
                                     Unit::Number => v.max(p.lo),
@@ -563,12 +626,12 @@ impl LabPage {
                     self.remember(-1);
                     self.light = self.saved.clone();
                     self.rev += 1;
-                    self.status = ("Back to the Z10 core's saved tuning.".into(), 0);
+                    self.status = ("Back to the core's saved tuning.".into(), 0);
                 }
                 Ask::Save => self.save(),
                 Ask::Section(i) => {
                     let i = (i.max(0) as usize).min(SECTIONS.len() - 1);
-                    if i != self.section {
+                    if i != self.section && self.sections().contains(&i) {
                         self.section = i;
                         self.hovered = None;
                         self.told = None;
@@ -642,9 +705,9 @@ impl LabPage {
         }
     }
 
-    /// Write the tuning into the Z10 core's file, keeping the file as it is round it.
+    /// Write the tuning into the device's core, keeping its file as it is round it.
     fn save(&mut self) {
-        let path = crate::core_device_path();
+        let path = self.device.path.clone();
         let result = std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|s| {
             let a = s.find(" \"light\": {").ok_or("the core's file has no light section")?;
             let b = s[a..].find("\n },\n").map(|i| a + i + "\n },\n".len()).ok_or("the core's light section has no end")?;
@@ -657,7 +720,7 @@ impl LabPage {
         self.status = match result {
             Ok(()) => {
                 self.saved = self.light.clone();
-                ("Saved into the Z10 core's device.json.".into(), 1)
+                (format!("Saved into the {} core.", self.device.name), 1)
             }
             Err(e) => (format!("Not saved: {e}."), 2),
         };
@@ -715,7 +778,7 @@ impl LabPage {
     fn draw_stage(&mut self) {
         let (_, _, sw, sh) = self.sizes();
         let lens = drawing::Lens::of(self.section);
-        let v = drawing::Values::of(&self.light);
+        let v = drawing::Values::of(&self.light, self.drawn_key());
         let size = (self.section, sw.round() as i32, sh.round() as i32, sliders_of(self.section, &self.light));
         if self.places_of.as_ref() != Some(&size) {
             self.places = drawing::places(&v, lens, sw, sh, SECTIONS[self.section].3.len());
@@ -840,14 +903,15 @@ impl LabPage {
         let mut cells = vec![text_cell(style::TITLE, 24.0, 14.0, 300.0, 29.0, "Light lab")];
         let mut bx = 0.0;
         let mut tabs = Vec::new();
-        for (i, (title, _, _, _)) in SECTIONS.iter().enumerate() {
+        let open = self.sections();
+        for (i, (title, _, _, _)) in SECTIONS.iter().enumerate().filter(|(i, _)| open.contains(i)) {
             let bw = text::width(400, 13.0, title) + 24.0;
             tabs.push((i, title, bx, bw));
             bx += bw + 2.0;
         }
         let tabs_w = bx - 2.0 + 6.0;
         let tx = w - 24.0 - tabs_w;
-        cells.push(text_cell(style::NOTE, 24.0, 44.0, (tx - 48.0).max(200.0), 18.0, INTRO));
+        cells.push(text_cell(style::NOTE, 24.0, 44.0, (tx - 48.0).max(200.0), 18.0, &self.intro()));
         cells.push(cell(kind::SEG, tx, 17.0, tabs_w, 36.0));
         for (i, title, x, bw) in tabs {
             cells.push(Cell { text: (*title).into(), on: i == self.section, id: TABS, index: i as i32, ..cell(kind::SEG_BUTTON, tx + 3.0 + x, 20.0, bw, 30.0) });
@@ -894,7 +958,7 @@ impl LabPage {
                 continue;
             }
             let p = &PARAMS[i];
-            let (number, mut unit) = reads(p, self.value(i));
+            let (number, mut unit) = reads(p, self.value(i), self.mm());
             let mut derived = p.unit == Unit::Length && p.path.0 != "led";
             if let Some((_, extra)) = self.drawn.as_ref().and_then(|(st, _)| st.extras.iter().find(|e| e.0 == i)) {
                 unit = extra.clone();
@@ -1111,6 +1175,12 @@ fn light_block(light: &Value) -> String {
     };
     let mut s = String::from(" \"light\": {\n");
     s += &format!("  \"about\": {},\n", serde_json::to_string(&light["about"]).unwrap_or_else(|_| "\"\"".into()));
+    // what the light says of the art: its millimetre, and the key the lab draws for all keys
+    for key in ["units_per_mm", "typical"] {
+        if !light[key].is_null() {
+            s += &format!("  \"{key}\": {},\n", num(key, &light[key]));
+        }
+    }
     s += &format!("  \"led\": {},\n", num("led", &light["led"]));
     s += &part("sim", &["nits", "switch", "beam", "scatter", "sides", "glow_spread", "switch_top", "switch_width", "skirt_foot", "cap_top", "legends", "caps", "skirts", "black", "milky", "cap_in", "cap_out", "depth", "deck", "chassis"]);
     s += &part("legend", &["unlit"]);
@@ -1188,8 +1258,8 @@ mod tests {
         choose(&mut light, 1, 1);
         assert_eq!((get(&light, ("sim", "skirts")), get(&light, ("sim", "black"))), (Some(0.45), Some(0.3)), "back to pudding as it was tuned");
         // the LED's place in millimetres, and its side
-        assert_eq!(reads(&PARAMS[0], 7.0), ("5.1".into(), "mm north".into()));
-        assert_eq!(reads(&PARAMS[0], -2.76), ("2".into(), "mm south".into()));
+        assert_eq!(reads(&PARAMS[0], 7.0, 1.38), ("5.1".into(), "mm north".into()));
+        assert_eq!(reads(&PARAMS[0], -2.76, 1.38), ("2".into(), "mm south".into()));
     }
 
     /// The light section Save writes reads back as the light it was given,
@@ -1205,6 +1275,7 @@ mod tests {
         let out = format!("{}{}{}", &text[..a], light_block(&light), &text[b..]);
         let back: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(back["light"], light);
+        assert!(back["light"]["units_per_mm"].is_number() && back["light"]["typical"].is_string(), "what the light says of the art is saved");
         for p in PARAMS.iter().filter(|p| p.path.0 == "sim") {
             assert!(back["light"]["sim"][p.path.1].is_number(), "{} is saved", p.path.1);
         }

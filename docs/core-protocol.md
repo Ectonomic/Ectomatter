@@ -1,6 +1,6 @@
 # Ectodeck core protocol
 
-Draft 4, 2026-09-29. For review before anything is built on it. Draft 3 took in the review of the M3 plugin's author. Draft 4 replaces the device picture with one drawing in named, numbered pieces (section 4, the device's art), so a core brings its own art and the frontend draws it with nothing added by hand. It adds a layout to the shared settings language (section 6, Layout), so a core arranges its settings without drawing them, and lets a core's files carry comments.
+Draft 5, 2026-10-03. Draft 5 adds the device's light (section 4), the description Ectodeck's Light lab tunes and draws the device's light from. Draft 4, 2026-09-29, was for review before anything was built on it. Draft 3 took in the review of the M3 plugin's author. Draft 4 replaces the device picture with one drawing in named, numbered pieces (section 4, the device's art), so a core brings its own art and the frontend draws it with nothing added by hand. It adds a layout to the shared settings language (section 6, Layout), so a core arranges its settings without drawing them, and lets a core's files carry comments.
 
 Ectodeck is one app for every device on a desk. It follows the model RetroArch made work for emulators: one frontend, and the engines that know each device brought in as **cores**. The frontend owns the windows, the tray, profiles, and every feature that spans devices. A core owns the truth about the devices it handles: how to find them, what they can do, and how to talk to them.
 
@@ -128,6 +128,30 @@ The kinds, in the order they usually sit from the bottom of the drawing to the t
 - Plain SVG only: no scripts, no animation, and text converted to outlines, so the drawing looks the same wherever it is drawn. Filters such as a blur are fine.
 - Positions come from the drawing, in its own units: where a control sits is where its pieces are, so the core lists no positions.
 - On a screen with room above its white, the frontend draws the illuminations, and the legends they light, brighter than white. The rest of the drawing stays at ordinary white.
+
+### The device's light
+
+How the device's light gets out, for the frontend to draw it as light: the `light` section of the device description. The frontend simulates it, following each LED through the device's shape as a lamp's light is followed, so the section describes the device physically rather than how it should look. Ectodeck's Light lab tunes it on any device and saves it back here. The lab is the frontend's: it knows no device, and a core carries none of it.
+
+```json
+"light": {
+  "units_per_mm": 1.38,
+  "typical": "24",
+  "led": 7.0,
+  "sim": { "nits": 705, "switch": "slot", "beam": 3.0, "switch_top": 5.7, "cap_top": 14.0, "legends": 0.3, "caps": "shine_through", "depth": 2.0, "deck": 0.22, "chassis": 0.4 },
+  "legend": { "unlit": 0.15 },
+  "lcd": { "nits": 324, "unlit": 4.1, "field": 0.8, "dot": 0.84, "glass": 1.0 },
+  "wells": "mask_1"
+}
+```
+
+- **units_per_mm** is how many of the art's units make a millimetre. Positions come from the art in its own units; heights and widths here are in millimetres.
+- **typical** is the control the Light lab draws in section when no key is chosen: a key as most of the device's are.
+- **led** is where each key's LED sits, north of its switch's centre in the art's units (south below 0).
+- **sim** is the device's make: its switches, its caps and their plastic, the wells' depth, and what each surface gives back. Its values are the Light lab's sliders; each is described there and in the file's own `about`.
+- **legend**, **lcd** and **wells** are how a legend looks with its LED off, the display's backlit dots, and the mask piece of the drawing that holds the wells.
+
+What a device has decides what the Light lab tunes: keys with LEDs under caps, wells round them, a display, small lights behind windows. Anything the description leaves out is the frontend's ordinary default.
 
 ## 5. Capabilities
 

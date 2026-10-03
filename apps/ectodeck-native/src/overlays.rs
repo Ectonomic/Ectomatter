@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use ectodeck_draw::pieces;
-use resvg::usvg::{self, Tree};
+use resvg::usvg::Tree;
 use serde_json::Value;
 
 use crate::Overlay;
@@ -88,7 +88,7 @@ fn num(v: &Value) -> f32 {
 
 impl Overlays {
     pub fn new() -> Overlays {
-        let tree = usvg::Tree::from_str(ectodeck_draw::z10::SVG, &usvg::Options::default()).expect("the Z10's art");
+        let tree = crate::cores::shown().tree();
         let board: Value = serde_json::from_str(include_str!("../../ectodeck/public/board.json")).unwrap();
         let v = &board["view"];
         let sliders = board["sliders"].as_array().map(|a| a.iter().map(|s| [num(&s[0]), num(&s[1]), num(&s[2]), num(&s[3])]).collect()).unwrap_or_default();

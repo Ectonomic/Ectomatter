@@ -4,9 +4,17 @@
 pub mod hdr;
 pub mod pieces;
 
-/// The Z10 core's art, from its own folder. Until the Z10 core runs as its
-/// own program, Ectodeck reads that folder when it is built.
-pub mod z10 {
-    pub const SVG: &str = include_str!("../../../cores/evga-z10/art/z10.svg");
-    pub const DEVICE: &str = include_str!("../../../cores/evga-z10/device.json");
+/// A real device for the tests to draw: the Z10's core, read from its own
+/// folder. The drawing itself knows no device; it draws what it is given.
+#[cfg(test)]
+pub(crate) mod fixture {
+    const DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../cores/evga-z10");
+
+    pub fn svg() -> String {
+        std::fs::read_to_string(format!("{DIR}/art/z10.svg")).expect("the Z10 core's art")
+    }
+
+    pub fn device() -> String {
+        std::fs::read_to_string(format!("{DIR}/device.json")).expect("the Z10 core's device description")
+    }
 }

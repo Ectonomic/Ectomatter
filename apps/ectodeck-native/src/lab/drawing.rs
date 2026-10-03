@@ -22,7 +22,8 @@ use std::fmt::Write;
 use ectodeck_draw::hdr::sim::{on_cap_top, Caps, Physics, Switch};
 use serde_json::Value;
 
-use super::{get, PARAMS, UNITS_PER_MM as MM};
+use super::{get, PARAMS};
+use ectodeck_draw::hdr::KeyGeometry;
 use crate::text;
 
 // the lab's own colours
@@ -37,22 +38,60 @@ const DOT: &str = "#d4d4d4";
 const DIMENSION: &str = "#b4b4b4";
 const CASING: &str = "#141414";
 
-// the art's shapes, in millimetres: a 1u cap's foot, its face's inset from
-// the foot, the deck between the main well's north wall and the 2 key, the
-// gap between rows, the chassis between the F-row's well and the main well,
-// the F-row's deck south of F1, and the plate under the deck
-const FOOT: f64 = 17.39;
-const INSET: f64 = 1.63;
-const DECK_N: f64 = 1.62;
-const ROW_GAP: f64 = 1.45;
-const STRIP: f64 = 2.55;
-const F_DECK: f64 = 2.36;
+/// the plate under the deck, in millimetres
 const PLATE: f64 = 1.5;
-/// the 2 key's legends: the upper one's middle north of the key's, the
-/// lower one's south of it, and how wide each is
-const LEGEND_AT: f64 = 5.25;
-const LOWER_AT: f64 = 6.0 / MM;
-const LEGEND_W: f64 = 3.5;
+
+/// The key the stage draws, in section north to south, in millimetres, as
+/// the device's art has it (see KeyGeometry): its foot and its face's inset
+/// from it; the deck between its well's north wall and its foot; the gap to
+/// the key south of it and that key's foot; north of its well, the chassis
+/// to the next well and that well's deck south of its keys; and its legends,
+/// each one's middle south of the foot's (north below 0) and how far it
+/// runs. Where the art has nothing to say, as a 1u key in a well usually
+/// stands (the Z10's 2 key's measurements).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Geometry {
+    foot: f64,
+    inset: f64,
+    deck_n: f64,
+    gap_s: f64,
+    south_foot: f64,
+    strip: f64,
+    deck_beyond: f64,
+    legends: [Option<(f64, f64)>; 2],
+}
+
+impl Default for Geometry {
+    fn default() -> Geometry {
+        Geometry { foot: 17.39, inset: 1.63, deck_n: 1.62, gap_s: 1.45, south_foot: 17.39, strip: 2.55, deck_beyond: 2.36, legends: [Some((-3.0, 4.1)), Some((4.0, 2.6))] }
+    }
+}
+
+impl Geometry {
+    /// A key as its art has it.
+    pub fn of(k: Option<&KeyGeometry>) -> Geometry {
+        let mut g = Geometry::default();
+        if let Some(k) = k {
+            (g.foot, g.inset) = (k.foot as f64, k.inset as f64);
+            if let Some(d) = k.deck_north {
+                g.deck_n = d as f64;
+            }
+            if let Some((gap, foot)) = k.south {
+                (g.gap_s, g.south_foot) = (gap as f64, foot as f64);
+            }
+            if let Some((strip, deck)) = k.strip {
+                (g.strip, g.deck_beyond) = (strip as f64, deck as f64);
+            }
+            g.legends = [0, 1].map(|i| k.legends.get(i).map(|&(m, w)| (m as f64, w as f64)));
+        }
+        g
+    }
+
+    /// its legends: all of them, or only the first
+    fn legends(&self, all: bool) -> Vec<(f64, f64)> {
+        self.legends.iter().take(if all { 2 } else { 1 }).flatten().copied().collect()
+    }
+}
 /// the heights each drawing keeps its scale up to (a cap's top, a well's
 /// depth); past them it shrinks to fit
 const USUAL_TOP: f64 = 16.0;
@@ -127,7 +166,7 @@ pub fn choice_y(k: usize) -> f32 {
 /// The values the drawing is drawn from, as the simulation holds them (no
 /// switch or skirt's foot above the cap's top, no switch wider than fits in
 /// a cap, no LED outside its switch): lengths in millimetres, the LED's
-/// place in the art's units too.
+/// place in the art's units too; and the key drawn, as the art has it.
 #[derive(Clone, Copy, Debug)]
 pub struct Values {
     p: Physics,
@@ -160,6 +199,9 @@ pub struct Values {
     lcd_dot: f64,
     lcd_glass: f64,
     nits: f64,
+    /// the art's units to the millimetre, and the key drawn
+    mm: f64,
+    g: Geometry,
 }
 
 /// A value as the light has it, or what the keyboard takes when it has none.
@@ -168,8 +210,9 @@ fn raw(light: &Value, path: (&str, &str)) -> f64 {
 }
 
 impl Values {
-    pub fn of(light: &Value) -> Values {
+    pub fn of(light: &Value, g: Geometry) -> Values {
         let p = Physics::from(light);
+        let mm = p.units_per_mm as f64;
         let edge = p.switch_edge() as f64;
         let led = raw(light, ("led", "")).clamp(-edge, edge);
         Values {
@@ -177,7 +220,7 @@ impl Values {
             slot: p.switch == Switch::Slot,
             caps: p.caps,
             led,
-            north: led / MM,
+            north: led / mm,
             beam: p.beam as f64,
             scatter: p.scatter as f64,
             sides: p.sides as f64,
@@ -202,13 +245,15 @@ impl Values {
             lcd_dot: raw(light, ("lcd", "dot")),
             lcd_glass: raw(light, ("lcd", "glass")),
             nits: p.nits as f64,
+            mm,
+            g,
         }
     }
 
     /// the LED's own light on the back of the cap's top, `x` mm along the
     /// slice from the key's middle (north below 0), for an LED of unit power
     fn on_top(&self, x: f64) -> f64 {
-        on_cap_top(&self.p, self.led as f32, (x * MM) as f32 + self.led as f32) as f64
+        on_cap_top(&self.p, self.led as f32, (x * self.mm) as f32 + self.led as f32) as f64
     }
 }
 
@@ -403,6 +448,8 @@ struct Slice {
     v: Values,
     foot0: f64,
     foot1: f64,
+    /// the cap's middle, and the switch's centre under it
+    mid: f64,
     centre: f64,
     /// the W key's foot
     w0: f64,
@@ -418,15 +465,17 @@ struct Slice {
 
 impl Slice {
     fn of(v: &Values) -> Slice {
-        let (foot0, foot1) = (DECK_N, DECK_N + FOOT);
-        let centre = (foot0 + foot1) / 2.0;
+        let (foot0, foot1) = (v.g.deck_n, v.g.deck_n + v.g.foot);
+        let mid = (foot0 + foot1) / 2.0;
+        let centre = mid;
         let span = v.top - v.foot;
         let mut sl = Slice {
             v: *v,
             foot0,
             foot1,
+            mid,
             centre,
-            w0: foot1 + ROW_GAP,
+            w0: foot1 + v.g.gap_s,
             led: centre - v.north,
             wall_t: (span * 0.25 + 0.2).min(1.15),
             top_t: (span * 0.3).min(1.25),
@@ -448,20 +497,21 @@ impl Slice {
         let v = &self.v;
         let t = ((z - v.foot) / (v.top - v.foot).max(1e-3)).clamp(0.0, 1.0);
         let wall = if inner { self.wall_t } else { 0.0 };
-        if north { self.foot0 + INSET * t + wall } else { self.foot1 - INSET * t - wall }
+        let inset = self.v.g.inset;
+        if north { self.foot0 + inset * t + wall } else { self.foot1 - inset * t - wall }
     }
 
     /// a cap in section: its skirt from its foot up to its face, and its
     /// top; a cap too low to be hollow, a slab
     fn cap(&self, f0: f64, f1: f64) -> Vec<Pt> {
         let v = &self.v;
-        let (a0, a1) = (f0 + INSET, f1 - INSET);
+        let (a0, a1) = (f0 + v.g.inset, f1 - v.g.inset);
         let (fz, tz) = (v.foot, v.top);
         let mut outer = vec![(f0, fz), (a0, tz), (a1, tz), (f1, fz)];
         if !self.hollow {
             return outer;
         }
-        let lean = INSET / (tz - fz).max(1e-3);
+        let lean = v.g.inset / (tz - fz).max(1e-3);
         let under = tz - self.top_t;
         let t = self.wall_t;
         outer.extend([(f1 - t, fz), (a1 - t + lean * self.top_t, under), (a0 + t - lean * self.top_t, under), (f0 + t, fz)]);
@@ -488,8 +538,8 @@ impl Slice {
     /// the F-row's deck, its wall, the chassis between the wells, the main
     /// well's wall and its deck, as one outline
     fn body(&self, x_lo: f64, x_hi: f64) -> Vec<Pt> {
-        let d = self.v.depth;
-        vec![(x_lo, -PLATE), (x_lo, 0.0), (-STRIP, 0.0), (-STRIP, d), (0.0, d), (0.0, 0.0), (x_hi, 0.0), (x_hi, -PLATE)]
+        let (d, strip) = (self.v.depth, self.v.g.strip);
+        vec![(x_lo, -PLATE), (x_lo, 0.0), (-strip, 0.0), (-strip, d), (0.0, d), (0.0, 0.0), (x_hi, 0.0), (x_hi, -PLATE)]
     }
 }
 
@@ -500,7 +550,7 @@ fn frame_of(v: &Values, sl: &Slice, lens: Lens, aspect: f64) -> (f64, f64, f64, 
     let (mut x_lo, mut x_hi, z_lo, z_hi) = match lens {
         Lens::Led => (sl.foot0 - 1.0, sl.foot1 + 1.0, -0.9, top),
         Lens::Caps => (sl.foot0 - 2.0, sl.foot1 + 1.3, -0.6, top),
-        _ => (-STRIP - F_DECK - 0.3, sl.foot0 - 0.3, -0.8, v.depth.max(USUAL_DEPTH) + 1.6),
+        _ => (-v.g.strip - v.g.deck_beyond - 0.3, sl.foot0 - 0.3, -0.8, v.depth.max(USUAL_DEPTH) + 1.6),
     };
     let want = (z_hi - z_lo) * aspect;
     if want > x_hi - x_lo {
@@ -587,7 +637,7 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
         }
     }
     // the caps: in the LED's drawing only the 2 key's top, its skirt cut away to show the switch
-    let (a0, a1) = (sl.foot0 + INSET, sl.foot1 - INSET);
+    let (a0, a1) = (sl.foot0 + v.g.inset, sl.foot1 - v.g.inset);
     let under = tz - sl.top_t;
     if on(Lens::Led) {
         s.path(&poly(&[p(a0, tz), p(a1, tz), p(a1, under), p(a0, under)], true), fill(Lens::Caps), line(Lens::Caps), 1.0, 1.0);
@@ -596,22 +646,23 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
             s.path(&poly(&[p(x, under), (px(x), pz(under) + 34.0)], false), "none", &g, 1.0, 1.0);
         }
     } else {
-        for (f0, f1) in [(sl.foot0, sl.foot1), (sl.w0, sl.w0 + FOOT)] {
+        for (f0, f1) in [(sl.foot0, sl.foot1), (sl.w0, sl.w0 + v.g.south_foot)] {
             let shape = clip(&sl.cap(f0, f1), x_lo, x_hi);
             if !shape.is_empty() {
                 s.path(&poly(&pp(&shape), true), fill(Lens::Caps), if f0 == sl.foot0 { line(Lens::Caps) } else { "#3a3a3a" }, 1.0, 1.0);
             }
         }
     }
-    // the 2 key's legends, each as brightly as the light behind it lets: the
-    // upper one north of the key's middle, the lower one south of it
+    // the key's legends where the art prints them, each as brightly as the
+    // light behind it lets (in the LED's drawing all of them, the second
+    // function too; in the caps' the first)
     let face: Vec<f64> = (0..=200).map(|i| a0 + (a1 - a0) * i as f64 / 200.0).collect();
     let light: Vec<f64> = face.iter().map(|&x| v.on_top(x - sl.centre)).collect();
     let most = light.iter().cloned().fold(0.0, f64::max).max(1e-12);
-    let mids: &[f64] = if on(Lens::Led) { &[sl.centre - LEGEND_AT, sl.centre + LOWER_AT] } else { &[sl.centre - LEGEND_AT] };
-    for &mid in mids {
+    for (at, wide) in v.g.legends(on(Lens::Led)) {
+        let mid = sl.mid + at;
         let bright = v.on_top(mid - sl.centre) / most;
-        let (lx0, lx1) = (mid - LEGEND_W / 2.0, mid + LEGEND_W / 2.0);
+        let (lx0, lx1) = (mid - wide / 2.0, mid + wide / 2.0);
         s.path(&poly(&[p(lx0, tz), p(lx1, tz), p(lx1, under), p(lx0, under)], true), AMBER, "none", 1.0, 0.2 + 0.78 * bright);
         if lens == Lens::Caps {
             // the light the legend lets through, as strong as its share
@@ -637,14 +688,18 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
             let _ = write!(area, " L{x1:.1} {base:.1} L{x0:.1} {base:.1} Z");
             s.path(&area, AMBER, "none", 1.0, 0.1);
             s.stroke(&poly(&pts, false), AMBER, 1.6);
-            let (n, u) = super::reads(&PARAMS[slider("Brightness")], v.nits);
+            let (n, u) = super::reads(&PARAMS[slider("Brightness")], v.nits, v.mm);
             s.text(x0 - 8.0, base - tall + 4.0, &format!("{n} {u}"), if white("Brightness") { WHITE_WORD } else { QUIET_WORD }, 1.0);
             s.text(x0 - 8.0, base + 4.0, "0", QUIET_WORD, 1.0);
             let peak = pts.iter().zip(&light).fold((0.0, x0), |a, (q, &l)| if l > a.0 { (l, q.0) } else { a }).1;
             // (on the right, clear of Brightness's line down to the top's end)
             let (end, anchor) = if peak < (x0 + x1) / 2.0 { (x1 - 12.0, 1.0) } else { (x0, 0.0) };
             s.text(end, base - tall - 22.0, "Light on the cap's top", QUIET_WORD, anchor);
-            s.text(end, base - tall - 7.0, "over its two legends", FAINT_WORD, anchor);
+            match v.g.legends(true).len() {
+                0 => {}
+                1 => s.text(end, base - tall - 7.0, "over its legend", FAINT_WORD, anchor),
+                _ => s.text(end, base - tall - 7.0, "over its two legends", FAINT_WORD, anchor),
+            }
             labels.push(Label { drop: true, ..Label::new(false, (x1, base - tall), "Brightness") });
             // the switch's centre line, and the LED north of it
             s.stroke(&poly(&[p(sl.centre, 0.15), p(sl.centre, hz + 0.6)], false), "#5c5c5c", 1.0);
@@ -701,9 +756,11 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
             labels.push(Label::new(true, p(sl.foot0 - 1.3, v.foot * 0.5), "Skirt's foot"));
             marks.push(Mark::Height { x: px(sl.foot0 - 0.55), y0: pz(0.0), y1: pz(tz), i: slider("Cap's top") });
             labels.push(Label::new(true, p(sl.foot0 - 0.55, tz * 0.62), "Cap's top"));
-            let mid = sl.centre - LEGEND_AT;
-            labels.push(Label { drop: true, ..Label::new(true, p(mid - LEGEND_W / 2.0 + 0.9, tz), "Legends let through") });
-            labels.push(Label { flat: true, ..Label::new(false, p(mid + LEGEND_W / 2.0 - 0.4, tz), "LED off") });
+            if let Some(&(at, wide)) = v.g.legends(false).first() {
+                let mid = sl.mid + at;
+                labels.push(Label { drop: true, ..Label::new(true, p(mid - wide / 2.0 + 0.9, tz), "Legends let through") });
+                labels.push(Label { flat: true, ..Label::new(false, p(mid + wide / 2.0 - 0.4, tz), "LED off") });
+            }
             // light out of a clear switch's side and under the skirt's foot onto the deck
             if !v.slot {
                 let out = 1.6f64.min(v.foot.max(0.6) * 0.4);
@@ -775,13 +832,13 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
             if d > 0.25 {
                 ray(&mut s, &[p(edge, 1.4f64.min(d + 0.9)), p(0.85, 0.03), p(0.03, wall_z), p(0.9, wall_z + 1.25)], v.chassis, grow, white("Chassis"));
                 ray(&mut s, &[p(edge, d + 1.25), p(-0.7, d + 0.03), p(-1.25, d + 1.0)], v.chassis, grow, white("Chassis"));
-                marks.push(Mark::Height { x: px(-STRIP - 0.85), y0: pz(0.0), y1: pz(d), i: slider("Depth") });
-                labels.push(Label::new(true, p(-STRIP - 0.85, d * 0.8), "Depth"));
+                marks.push(Mark::Height { x: px(-v.g.strip - 0.85), y0: pz(0.0), y1: pz(d), i: slider("Depth") });
+                labels.push(Label::new(true, p(-v.g.strip - 0.85, d * 0.8), "Depth"));
             } else {
                 ray(&mut s, &[p(edge, 1.2), p(-0.8, 0.03), p(-1.4, 1.0)], v.chassis, grow, white("Chassis"));
-                labels.push(Label { flat: true, ..Label::new(true, p(-STRIP - 0.85, 0.0), "Depth") });
+                labels.push(Label { flat: true, ..Label::new(true, p(-v.g.strip - 0.85, 0.0), "Depth") });
             }
-            let dx = -STRIP - F_DECK * 0.62;
+            let dx = -v.g.strip - v.g.deck_beyond * 0.62;
             ray(&mut s, &[p(dx - 1.3, 1.1), p(dx + 0.3, 0.03), p(dx + 1.0, 0.9)], v.deck, grow, white("Deck"));
             labels.push(Label { flat: true, ..Label::new(true, p(-1.6, d), "Chassis") });
             labels.push(Label { flat: true, ..Label::new(true, p(dx, 0.0), "Deck") });
@@ -1040,7 +1097,7 @@ mod tests {
             for (w, h) in [(1032.0, 452.0), (1232.0, 572.0), (1800.0, 900.0)] {
                 let mut l = light.clone();
                 l["sim"][k] = serde_json::json!(x);
-                let v = Values::of(&l);
+                let v = Values::of(&l, Geometry::default());
                 for section in 0..4 {
                     let lens = Lens::of(section);
                     let places = places(&v, lens, w, h, super::super::SECTIONS[section].3.len());
@@ -1064,11 +1121,11 @@ mod tests {
     #[test]
     fn the_sliders_stand_still() {
         let light = core_light();
-        let v = Values::of(&light);
+        let v = Values::of(&light, Geometry::default());
         let places = places(&v, Lens::Led, 1232.0, 572.0, 2);
         let mut moved = light.clone();
         moved["sim"]["switch_top"] = serde_json::json!(9.5);
-        let st = stage(&Values::of(&moved), Lens::Led, 1232.0, 572.0, &places, None);
+        let st = stage(&Values::of(&moved, Geometry::default()), Lens::Led, 1232.0, 572.0, &places, None);
         let lines = st.svg.matches(r##"stroke="#737373""##).count();
         assert_eq!(lines, places.len(), "a line from each slider, from where it stood");
     }
