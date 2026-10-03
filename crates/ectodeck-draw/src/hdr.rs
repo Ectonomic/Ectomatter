@@ -187,8 +187,11 @@ pub struct Board {
     /// their other part shows
     edges: Vec<Edge>,
     /// each lit key's milky band, below where the black of its cap's top
-    /// comes down its sides (a key's in its order), and for how far down
+    /// comes down its sides (a key's in its order), the other caps' bands,
+    /// how much of each pixel a band covers, and for how far down the black comes
     bands: Vec<Option<Shape>>,
+    other_bands: Vec<Shape>,
+    band_map: Vec<f32>,
     bands_for: Option<u32>,
     reads_for: Option<(usize, usize)>,
 }
@@ -618,6 +621,8 @@ impl Board {
             legend_reads: Vec::new(),
             edges: Vec::new(),
             bands: Vec::new(),
+            other_bands: Vec::new(),
+            band_map: Vec::new(),
             bands_for: None,
             reads_for: None,
         })
@@ -645,7 +650,20 @@ impl Board {
         }
         let black = snap.physics.black;
         if self.bands_for != Some(black.to_bits()) {
-            self.bands = self.keys.iter().map(|k| self.band(k, black)).collect();
+            self.bands = self.keys.iter().map(|k| k.foot.and_then(|f| self.band(f, k.face, k.round[0], black))).collect();
+            self.other_bands = self.others.iter().filter_map(|&(f, a, r)| self.band(f, a, r[0], black)).collect();
+            // how much of each pixel is band, to keep the skirts' light to them
+            let mut map = vec![0f32; (self.w * self.h) as usize];
+            for s in self.bands.iter().flatten().chain(&self.other_bands) {
+                for (i, c) in s.cover.iter().enumerate() {
+                    let (x, y) = (s.x + (i as u32 % s.w) as i32, s.y + (i as u32 / s.w) as i32);
+                    if *c > 0.0 && x >= 0 && y >= 0 && (x as u32) < self.w && (y as u32) < self.h {
+                        let j = (y as u32 * self.w + x as u32) as usize;
+                        map[j] = map[j].max(*c);
+                    }
+                }
+            }
+            self.band_map = map;
             self.bands_for = Some(black.to_bits());
         }
         self.most = self.measure(&snap);
@@ -757,12 +775,12 @@ impl Board {
     }
 
 
-    /// A key's milky band as its cap's art covers it: its skirt from its foot
-    /// up to where the black of its top comes `black` of the way down it (the
-    /// band runs from the foot to the face as the skirt does from its foot to
-    /// its top), its edge shared out over a pixel. None for a key with no cap.
-    fn band(&self, key: &KeyArt, black: f32) -> Option<Shape> {
-        let (f, a, r) = (key.foot?, key.face, key.round[0]);
+    /// A cap's band as its art covers it (its foot `f` with its corners'
+    /// radius `r`, its face `a`): its skirt from its foot up to where the
+    /// black of its top comes `black` of the way down it (the band runs from
+    /// the foot to the face as the skirt does from its foot to its top), its
+    /// edge shared out over a pixel.
+    fn band(&self, f: [f32; 4], a: [f32; 4], r: f32, black: f32) -> Option<Shape> {
         let (w, h) = (self.w as i32, self.h as i32);
         let (ka, (ox, oy)) = (self.art_scale, self.art_offset);
         let (x0, y0) = (((ox + ka * f[0]).floor() as i32 - 1).max(0), ((oy + ka * f[1]).floor() as i32 - 1).max(0));
@@ -779,13 +797,13 @@ impl Board {
                 if cap <= 0.0 {
                     continue;
                 }
+                // how far in from the foot it is and how far out from the face:
+                // the band's edge is (1 - black) of the way from one outline to
+                // the other, so its corners round as theirs do
                 let (u, v) = self.unit(x as usize, y as usize);
-                let (t, n, _) = sim::from_foot(f, r, u, v);
-                // the skirt's band across, from the foot to the face, on this side
-                let across_x = if n.0 < 0.0 { a[0] - f[0] } else { f[2] - a[2] };
-                let across_y = if n.1 < 0.0 { a[1] - f[1] } else { f[3] - a[3] };
-                let across = n.0.abs() * across_x + n.1.abs() * across_y;
-                let milky = ((1.0 - black) * across - t.max(0.0)) * ka + 0.5;
+                let in_foot = sim::from_foot(f, r, u, v).0.max(0.0);
+                let out_face = (-sim::from_foot(a, r, u, v).0).max(0.0);
+                let milky = ((1.0 - black) * (in_foot + out_face) - in_foot) * ka + 0.5;
                 cover[(j as u32 * bw + i as u32) as usize] = cap * milky.clamp(0.0, 1.0);
             }
         }
@@ -954,6 +972,14 @@ impl Board {
         let y1 = y0 + n / w;
         let dec = |v: f32| v.max(0.0).powf(2.2);
         let (fw, cw) = keys.map_or((0, 0), |k| (k.snap.fine.w, k.snap.coarse.w));
+        // Where the black of a cap's top comes down its sides, the light
+        // through them keeps to the band below it: the simulation's cells are
+        // coarser than the band, so the band takes all of a side's light, as
+        // much more as the black leaves it less of the side.
+        let to_band = keys
+            .map(|k| &k.snap.physics)
+            .filter(|p| p.skirts > 0.0 && p.black > 0.0 && !self.band_map.is_empty())
+            .map(|p| 1.0 / (1.0 - p.black).max(0.05));
         // a translucent top glows beside its legend with the light on its
         // back, as much as it lets through for a legend's share of it
         let top_glow = keys.map_or(0.0, |k| {
@@ -972,6 +998,7 @@ impl Board {
             let (r, a) = (&self.reads[j], self.caps[j * 4 + 3]);
             let share = match r.code {
                 0 | 1 if a < 1.0 => 1.0 - a,
+                2 if to_band.is_some() => self.band_map[j] * to_band.unwrap_or(1.0),
                 2 if a > 0.0 => a,
                 3 if a > 0.0 && top_glow > 0.0 => a * top_glow,
                 _ => continue,
@@ -989,7 +1016,11 @@ impl Board {
             for e in self.edges[from..].iter().take_while(|e| (e.j as usize) < y1 * w) {
                 let j = e.j as usize;
                 let a = self.caps[j * 4 + 3];
-                let share = if self.reads[j].code == 2 { 1.0 - a } else { a };
+                let share = match (self.reads[j].code, to_band) {
+                    (2, _) => 1.0 - a,
+                    (_, Some(more)) => self.band_map[j] * more,
+                    _ => a,
+                };
                 let l = k.at(&e.other.at(fw, cw));
                 let i = (j - y0 * w) * 4;
                 for c in 0..3 {
@@ -1023,9 +1054,9 @@ impl Board {
         // plastic is what they are): its own white dimmed by the core's unlit
         // share, showing less as the light through it outshines it.
         if let Some(p) = keys.map(|k| &k.snap.physics).filter(|p| p.milky > 0.0 && p.skirts > 0.0) {
-            for (n, key) in self.keys.iter().enumerate() {
-                let Some(Some(s)) = self.bands.get(n) else { continue };
-                let strength = light(key.pos).map_or(0.0, |l| l.strength.clamp(0.0, 1.0));
+            // (a cap with no LED of its own is a lit key's with its LED off)
+            let lit = self.keys.iter().zip(&self.bands).filter_map(|(key, s)| s.as_ref().map(|s| (s, light(key.pos).map_or(0.0, |l| l.strength.clamp(0.0, 1.0)))));
+            for (s, strength) in lit.chain(self.other_bands.iter().map(|s| (s, 0.0))) {
                 let white = MILKY_WHITE.map(|c| dec(c) * p.milky * self.model.legend_unlit * (1.0 - strength));
                 each(s, &mut |d, _, a| {
                     let cap = &self.caps[(y0 * w + d) * 4..(y0 * w + d) * 4 + 4];
@@ -1328,7 +1359,8 @@ mod tests {
         assert!(n > s, "brightest on the LED's side: north {n:.3}, south {s:.3}");
     }
 
-    /// A pudding cap glows only below the black of its top, and its milky
+    /// A pudding cap glows only below the black of its top, which stays dark
+    /// all round the top, at its corners as along its sides; and its milky
     /// plastic carries the light round the cap, so it glows more evenly than
     /// clear plastic does.
     #[test]
@@ -1351,12 +1383,25 @@ mod tests {
             l["sim"]["milky"] = serde_json::json!(milky);
             b.set_sim(Arc::new(Simulator::settle(&scene, Physics::from(&l), b.led_north(), 4000)));
             let frame = b.compose(&white(&b), 0, 254.0, 1000.0 / 254.0);
-            (lum(&frame, &b, north(0.3)), lum(&frame, &b, north(0.85)), lum(&frame, &b, south))
+            // the black at each of the top's corners too: on the diagonal from the
+            // foot's rounded corner to the face's, as far toward the face as along the sides
+            let r = b.keys[k].round[0];
+            let arc = |x: f32, y: f32, sx: f32, sy: f32| (x - sx * r * (1.0 - std::f32::consts::FRAC_1_SQRT_2), y - sy * r * (1.0 - std::f32::consts::FRAC_1_SQRT_2));
+            let corner = |sx: f32, sy: f32| {
+                let pick = |lo: f32, hi: f32, s: f32| if s < 0.0 { lo } else { hi };
+                let foot = arc(pick(f[0], f[2], sx), pick(f[1], f[3], sy), sx, sy);
+                let face = arc(pick(a[0], a[2], sx), pick(a[1], a[3], sy), sx, sy);
+                let (cx, cy) = (foot.0 + (face.0 - foot.0) * 0.85, foot.1 + (face.1 - foot.1) * 0.85);
+                lum(&frame, &b, ((ox + ka * cx) as i32, (oy + ka * cy) as i32))
+            };
+            let corners = [corner(-1.0, -1.0), corner(1.0, -1.0), corner(-1.0, 1.0), corner(1.0, 1.0)];
+            let black = corners.iter().cloned().fold(lum(&frame, &b, north(0.85)), f32::max);
+            (lum(&frame, &b, north(0.3)), black, lum(&frame, &b, south))
         };
         let (clear_band, clear_black, clear_south) = lit(0.0);
         let (milky_band, milky_black, milky_south) = lit(1.0);
         eprintln!("clear: band {clear_band:.3}, under the black {clear_black:.3}, south {clear_south:.3}; milky: band {milky_band:.3}, under the black {milky_black:.3}, south {milky_south:.3}");
-        assert!(clear_band > 4.0 * clear_black && milky_band > 4.0 * milky_black, "the light gets out below the black");
+        assert!(clear_band > 4.0 * clear_black && milky_band > 4.0 * milky_black, "the light gets out below the black, which is dark all round the top, its corners too");
         assert!(milky_south / milky_band > clear_south / clear_band, "milky plastic glows more evenly round the cap");
     }
 
