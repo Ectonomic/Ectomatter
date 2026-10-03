@@ -28,7 +28,7 @@ use crate::front::WindowAsk;
 use crate::lighting::{cell, kind, style, text_cell};
 use crate::text;
 use crate::{Cell, LabRow, LabWindow, Sketch};
-use ectodeck_draw::hdr::sim::Physics;
+use ectodeck_draw::hdr::sim::{Physics, Switch};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Ask {
@@ -38,6 +38,8 @@ pub enum Ask {
     Close,
     Slide(i32, f32),
     Typed(i32, String),
+    /// one of a section's choices, and the option chosen
+    Choose(i32, i32),
     Revert,
     Save,
     /// a section chosen
@@ -85,15 +87,15 @@ struct Param {
     note: &'static str,
 }
 
-const PARAMS: [Param; 23] = [
+const PARAMS: [Param; 25] = [
     Param { path: ("led", ""), label: "North of centre", lo: -9.66, hi: 9.66, step: 0.25, unit: Unit::Length, def: 7.0, note: "Where each key's LED sits under its cap, from the switch's centre toward the top of the key; below 0, toward the bottom, as on a keyboard whose LEDs face south. It goes as far as the switch's edge, so Switch width sets how far the slider reaches." },
     Param { path: ("sim", "nits"), label: "Brightness", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, def: 600.0, note: "The brightest legend, with every key lit white at full, up to Peak nits (Settings › HDR). Everything else the LEDs light is as bright as the simulation finds it beside that. A colour gives off its own share, as an LED does: a red about a fifth." },
-    Param { path: ("sim", "beam"), label: "Beam", lo: 1.0, hi: 200.0, step: 0.5, unit: Unit::Number, def: 24.0, note: "How tight the beam out of the top of the switch is. Higher keeps it to a small bright spot on the legend over the LED; lower spreads it across the cap's top." },
-    Param { path: ("sim", "scatter"), label: "Scattered", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.7, note: "The share of the LED's light the switch's clear housing scatters, glowing with it all over, rather than sending up in the beam. More lights the legend more evenly, and the deck and the inside of the cap more; less leaves more for the spot over the LED." },
+    Param { path: ("sim", "beam"), label: "Beam", lo: 1.0, hi: 200.0, step: 0.5, unit: Unit::Number, def: 24.0, note: "How tight the LED's beam out of the top of the switch is. Higher keeps it to a small bright spot on the legend over the LED; lower spreads it across the cap's top and onto the inside of its skirt." },
+    Param { path: ("sim", "scatter"), label: "Scattered", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.7, note: "The share of the LED's light a clear housing scatters, glowing with it all over, rather than sending up in the beam. More lights the legend more evenly, and the deck and the inside of the cap more; less leaves more for the spot over the LED." },
     Param { path: ("sim", "sides"), label: "Through its sides", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.25, note: "The share of the housing's glow that leaves through its sides rather than its top. Its sides light the deck round the switch, out under the skirt; its top lights the back of the legend evenly, its parts far from the LED as well." },
     Param { path: ("sim", "glow_spread"), label: "Glow spread", lo: 0.5, hi: 60.0, step: 0.1, unit: Unit::Reach, def: 4.0, note: "How far the housing's glow carries from the LED before it falls to about a third, as the light fades through the plastic. Short keeps it to the LED's side of the switch, so the deck and the legend are brightest there; long glows evenly all round." },
-    Param { path: ("sim", "switch_width"), label: "Switch width", lo: 1.0, hi: 14.0, step: 0.1, unit: Unit::Mm, def: 12.0, note: "How wide the switch's clear housing is: it glows with the scattered light over its top and its sides. Wider spreads the glow across the back of the legend; its sides light the deck round the switch, out under the skirt." },
-    Param { path: ("sim", "switch_top"), label: "Switch top", lo: 0.1, hi: 14.0, step: 0.1, unit: Unit::Mm, def: 6.5, note: "How high above the deck the switch's housing stands, where the beam leaves it. Nearer the cap's top makes the spot on the legend smaller and brighter." },
+    Param { path: ("sim", "switch_width"), label: "Switch width", lo: 1.0, hi: 14.0, step: 0.1, unit: Unit::Mm, def: 12.0, note: "How wide the switch's housing is. A black one stands in the way of the light bouncing about inside the cap; a clear one glows with the scattered light over its top and its sides, spreading it across the back of the legend and, out under the skirt, onto the deck round the switch." },
+    Param { path: ("sim", "switch_top"), label: "Switch top", lo: 0.1, hi: 14.0, step: 0.1, unit: Unit::Mm, def: 6.5, note: "How high above the deck the switch's housing stands, where the beam leaves it: 5.7 mm on Cherry-style switches like the Z10's Kailhs. Nearer the cap's top makes the spot on the legend smaller and brighter." },
     Param { path: ("sim", "skirt_foot"), label: "Skirt's foot", lo: 0.0, hi: 12.0, step: 0.1, unit: Unit::Mm, def: 5.0, note: "How high above the deck the foot of each cap's skirt is: the gap the light gets out under it by." },
     Param { path: ("sim", "cap_top"), label: "Cap's top", lo: 1.0, hi: 25.0, step: 0.1, unit: Unit::Mm, def: 14.0, note: "How high above the deck each cap's top is, where the legend is." },
     Param { path: ("sim", "legends"), label: "Legends let through", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.3, note: "The share of the light on the back of a cap's top that its legend lets through. With Brightness fixing the legends, less makes everything else brighter beside them." },
@@ -109,15 +111,100 @@ const PARAMS: [Param; 23] = [
     Param { path: ("lcd", "field"), label: "Background", lo: 0.0, hi: 0.0, step: 0.1, unit: Unit::Nits, def: 0.8, note: "The ground between the dots." },
     Param { path: ("lcd", "dot"), label: "Dot size", lo: 0.05, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.84, note: "How much of each cell a dot fills; the rest is the gap between dots." },
     Param { path: ("lcd", "glass"), label: "Glass sheen", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 1.0, note: "How strongly the glass over the display shows its reflection, as the art draws it at 100%." },
+    Param { path: ("sim", "skirts"), label: "Sides let through", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.0, note: "The share of the light inside a cap that its skirt lets through, glowing on its outside, as translucent plastic does. Plastic with no coating lets through about what a legend does; a cap coated all over lets none." },
+    Param { path: ("sim", "tops"), label: "Tops let through", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.0, note: "The share of the light on the back of a cap's top that the top lets through beside the legend, for caps translucent all over. A top coated black, as the Z10's are, lets through only its legend." },
 ];
 
-/// The page's sections: a title, what the part is, and its values.
-const SECTIONS: [(&str, &str, &[usize]); 4] = [
-    ("LED", "Each key's LED shines up through its switch: part of its light leaves the switch's top in a beam, onto the back of the legend; the rest the switch's clear housing scatters, glowing with it over its top and sides, which lights the legend evenly, the inside of the cap and the deck round the switch.", &[0, 1, 2, 3, 4, 5, 7, 6]),
-    ("Keycaps", "Each cap stands over its switch, its skirt from its foot to its top. Light bounces about inside it; some gets out under the skirt, and some through the legend.", &[8, 9, 10, 11, 12, 13]),
-    ("Wells", "The keys sit in wells in the chassis: the deck at their floor, walled round by the chassis. What each gives back of the light falling on it lights the rest.", &[14, 15, 16, 17]),
-    ("Display", "The display's backlit dots, and the glass over them.", &[18, 19, 20, 21, 22]),
+/// One of a section's choices, at the top of its left column, which says
+/// what the keyboard is as a whole: what it is called, what it does, and its options.
+struct Choice {
+    label: &'static str,
+    note: &'static str,
+    options: &'static [&'static str],
+}
+
+const CHOICES: [Choice; 3] = [
+    Choice { label: "Switch", note: "What the switch's housing is: black with its LED through a slot in its top, as older switches like the Z10's Kailh Browns have it, so all the LED's light leaves in its beam; or clear, glowing with a share of it, over its top as most RGB switches have it, or all over. Each sets the switch's values for that kind; the sliders tune from there.", options: &["LED slot", "Clear top", "Clear housing"] },
+    Choice { label: "LED side", note: "Which side of the switch's centre the LED sits on: north, toward the top of the key, as on the Z10, or south, as many newer keyboards have it.", options: &["North", "South"] },
+    Choice { label: "Keycaps", note: "What the caps' plastic lets through: shine-through caps are opaque but for their legends; pudding caps have translucent sides under an opaque top, as the Z10's do; translucent caps let light through all over. Each sets Sides and Tops let through; the sliders tune from there.", options: &["Shine-through", "Pudding", "Translucent"] },
 ];
+
+/// The page's sections: a title, what the part is, its values, and its choices.
+const SECTIONS: [(&str, &str, &[usize], &[usize]); 4] = [
+    ("LED", "Each key's LED shines up out of its switch in a beam, onto the back of the legend. In a black housing that is all its light; a clear housing scatters a share of it instead, glowing with it over its top and sides, which lights the legend evenly, the inside of the cap and the deck round the switch.", &[0, 1, 2, 3, 4, 5, 7, 6], &[0, 1]),
+    ("Keycaps", "Each cap stands over its switch, its skirt from its foot to its top. Light bounces about inside it; some gets out under the skirt, some through the legend, and some through the plastic where it is translucent.", &[8, 9, 10, 23, 24, 11, 12, 13], &[2]),
+    ("Wells", "The keys sit in wells in the chassis: the deck at their floor, walled round by the chassis. What each gives back of the light falling on it lights the rest.", &[14, 15, 16, 17], &[]),
+    ("Display", "The display's backlit dots, and the glass over them.", &[18, 19, 20, 21, 22], &[]),
+];
+
+/// A section's sliders that tune this light: a black housing does not
+/// glow, so its glow's sliders are not shown with it.
+pub(crate) fn sliders_of(section: usize, light: &Value) -> Vec<usize> {
+    let slot = Physics::from(light).switch == Switch::Slot;
+    SECTIONS[section].2.iter().copied().filter(|&i| !(slot && matches!(PARAMS[i].path.1, "scatter" | "sides" | "glow_spread"))).collect()
+}
+
+/// The option of a choice the light has.
+fn chosen(choice: usize, light: &Value) -> usize {
+    let p = Physics::from(light);
+    match choice {
+        0 => match p.switch {
+            Switch::Slot => 0,
+            Switch::ClearTop => 1,
+            Switch::Clear => 2,
+        },
+        1 => usize::from(get(light, ("led", "")).unwrap_or(7.0) < 0.0),
+        _ => {
+            if p.tops > 0.0 {
+                2
+            } else if p.skirts > 0.0 {
+                1
+            } else {
+                0
+            }
+        }
+    }
+}
+
+/// The light with an option of a choice taken, and the values it sets for it.
+fn choose(light: &mut Value, choice: usize, option: usize) {
+    match choice {
+        0 => {
+            let switch = [Switch::Slot, Switch::ClearTop, Switch::Clear][option.min(2)];
+            light["sim"]["switch"] = json!(switch.name());
+            // a Cherry-style housing's top, and a clear one's glow as such switches have it
+            set(light, ("sim", "switch_top"), 5.7);
+            match switch {
+                // all the LED's light in its beam: as wide as a diffused LED's, to light the whole cap
+                Switch::Slot => set(light, ("sim", "beam"), 3.0),
+                Switch::ClearTop => {
+                    set(light, ("sim", "beam"), 24.0);
+                    set(light, ("sim", "scatter"), 0.7);
+                    set(light, ("sim", "sides"), 0.25);
+                    set(light, ("sim", "glow_spread"), 4.0);
+                }
+                Switch::Clear => {
+                    set(light, ("sim", "beam"), 24.0);
+                    set(light, ("sim", "scatter"), 0.85);
+                    set(light, ("sim", "sides"), 0.5);
+                    set(light, ("sim", "glow_spread"), 6.0);
+                }
+            }
+        }
+        1 => {
+            // the same distance from the centre, on the side asked; from the centre, where switches put their LEDs
+            let led = get(light, ("led", "")).unwrap_or(7.0).abs();
+            let led = if led < 0.01 { 7.0 } else { led };
+            set(light, ("led", ""), if option == 0 { led } else { -led });
+        }
+        _ => {
+            // uncoated plastic lets through about what a legend does
+            let plastic = get(light, ("sim", "legends")).unwrap_or(0.3);
+            set(light, ("sim", "skirts"), if option >= 1 { plastic } else { 0.0 });
+            set(light, ("sim", "tops"), if option >= 2 { plastic } else { 0.0 });
+        }
+    }
+}
 
 /// the art's units to the millimetre
 const UNITS_PER_MM: f64 = 1.38;
@@ -208,8 +295,9 @@ const INTRO: &str = "Tune how the Z10's keys are lit. The keyboard in Ectodeck's
 const READOUT_ABOUT: &str = "Measured from the keys' colours and brightness as the keyboard shows them, every part as if each key were lit as the brightest is.";
 const WHITE_ABOUT: &str = "How bright this screen shows the desktop's white now; the keyboard's light is drawn beside it.";
 const SIM_ABOUT: &str = "The light straight from each LED is worked out exactly at once; the light that has bounced is followed photon by photon, and clears as more come in.";
-/// the readout's numbers' ids, after the sliders', and the sections' tabs'
+/// the readout's numbers' ids, after the sliders', the choices', and the sections' tabs'
 const READING: i32 = 100;
+const CHOICE: i32 = 800;
 const TABS: i32 = 900;
 /// how long the pointer rests on something before the line under the drawing tells of it
 const REST: Duration = Duration::from_millis(250);
@@ -237,9 +325,9 @@ pub struct LabPage {
     focused: Option<i32>,
     told: Option<i32>,
     rest: slint::Timer,
-    /// where the section's sliders stand, and for which section and size of stage
+    /// where the section's sliders stand, and for which section, size of stage and sliders
     places: Vec<drawing::Place>,
-    places_of: Option<(usize, i32, i32)>,
+    places_of: Option<(usize, i32, i32, Vec<usize>)>,
     /// the stage as last drawn, and what it was drawn from: the light, the
     /// section, the stage's size, the window's scale, the slider drawn white
     drawn: Option<(drawing::Stage, slint::Image)>,
@@ -312,7 +400,7 @@ impl LabPage {
         on!(on_entered, |id, t| Ask::Typed(id, t.to_string()));
         on!(on_revert, Ask::Revert);
         on!(on_save, Ask::Save);
-        on!(on_pick, |_id, index| Ask::Section(index));
+        on!(on_pick, |id, index| if id == TABS { Ask::Section(index) } else { Ask::Choose(id - CHOICE, index) });
         on!(on_hovered, |id, on| Ask::Hover(id, on));
         on!(on_focused, |id, on| Ask::Focus(id, on));
         ui.set_mark(mark);
@@ -409,6 +497,14 @@ impl LabPage {
                             }
                             Err(_) => self.status = (format!("“{}” isn't a number for {}.", t.trim(), p.label.to_lowercase()), 2),
                         }
+                    }
+                }
+                Ask::Choose(choice, option) => {
+                    let (choice, option) = (choice.max(0) as usize, option.max(0) as usize);
+                    if choice < CHOICES.len() && chosen(choice, &self.light) != option {
+                        choose(&mut self.light, choice, option);
+                        self.rev += 1;
+                        self.status = (String::new(), 0);
                     }
                 }
                 Ask::Revert => {
@@ -531,7 +627,7 @@ impl LabPage {
 
     /// The slider drawn white: the one being typed in, or under the pointer.
     fn hot(&self) -> Option<usize> {
-        self.focused.or(self.hovered).filter(|&i| (0..READING).contains(&i)).map(|i| i as usize).filter(|i| SECTIONS[self.section].2.contains(i))
+        self.focused.or(self.hovered).filter(|&i| (0..READING).contains(&i)).map(|i| i as usize).filter(|i| sliders_of(self.section, &self.light).contains(i))
     }
 
     /// Place the section's sliders when it opens or the stage changes size,
@@ -540,10 +636,10 @@ impl LabPage {
         let (_, _, sw, sh) = self.sizes();
         let lens = drawing::Lens::of(self.section);
         let v = drawing::Values::of(&self.light);
-        let size = (self.section, sw.round() as i32, sh.round() as i32);
-        if self.places_of != Some(size) {
-            self.places = drawing::places(&v, lens, sw, sh);
-            self.places_of = Some(size);
+        let size = (self.section, sw.round() as i32, sh.round() as i32, sliders_of(self.section, &self.light));
+        if self.places_of.as_ref() != Some(&size) {
+            self.places = drawing::places(&v, lens, sw, sh, SECTIONS[self.section].3.len());
+            self.places_of = Some(size.clone());
         }
         let scale = slint::ComponentHandle::window(&self.ui).scale_factor();
         let hot = self.hot();
@@ -627,7 +723,8 @@ impl LabPage {
     fn told(&self) -> (String, String) {
         let r = self.readout;
         match self.focused.or(self.told) {
-            Some(i) if (0..READING).contains(&i) && SECTIONS[self.section].2.contains(&(i as usize)) => (PARAMS[i as usize].label.into(), PARAMS[i as usize].note.into()),
+            Some(i) if (0..READING).contains(&i) && sliders_of(self.section, &self.light).contains(&(i as usize)) => (PARAMS[i as usize].label.into(), PARAMS[i as usize].note.into()),
+            Some(i) if (CHOICE..CHOICE + CHOICES.len() as i32).contains(&i) => (CHOICES[(i - CHOICE) as usize].label.into(), CHOICES[(i - CHOICE) as usize].note.into()),
             Some(i) if i == READING => ("Brightest legend".into(), self.legend_note().unwrap_or_else(|| READOUT_ABOUT.into())),
             Some(i) if i == READING + 1 => ("Brightest deck".into(), READOUT_ABOUT.into()),
             Some(i) if i == READING + 2 => ("Brightest skirt".into(), READOUT_ABOUT.into()),
@@ -663,7 +760,7 @@ impl LabPage {
         let mut cells = vec![text_cell(style::TITLE, 24.0, 14.0, 300.0, 29.0, "Lighting lab")];
         let mut bx = 0.0;
         let mut tabs = Vec::new();
-        for (i, (title, _, _)) in SECTIONS.iter().enumerate() {
+        for (i, (title, _, _, _)) in SECTIONS.iter().enumerate() {
             let bw = text::width(400, 13.0, title) + 24.0;
             tabs.push((i, title, bx, bw));
             bx += bw + 2.0;
@@ -687,10 +784,30 @@ impl LabPage {
                 over.push(in_colour(style::SMALL_IN, sx + word.x, top, text::width(400, 11.5, &word.text) + 2.0, 16.0, &word.text, word.colour));
             }
         }
+        // the section's choices, at the top of its left column, over the stage:
+        // each its name over its options, all of it telling of it under the pointer
+        let cx = sx + drawing::column_x(true, sw);
+        for (k, &c) in SECTIONS[self.section].3.iter().enumerate() {
+            let choice = &CHOICES[c];
+            let y = sy + drawing::choice_y(k);
+            let id = CHOICE + c as i32;
+            over.push(Cell { id, ..cell(kind::ZONE, cx - 10.0, y - 7.0, drawing::CTRL_W + 20.0, drawing::CHOICE_H) });
+            over.push(text_cell(style::LABEL, cx, y, drawing::CTRL_W, 26.0, choice.label));
+            // its options as wide as their words, the box round them as wide as they are
+            let widths: Vec<f32> = choice.options.iter().map(|name| text::width(400, 13.0, name) + 20.0).collect();
+            let seg_w = widths.iter().sum::<f32>() + 2.0 * (widths.len() as f32 - 1.0) + 6.0;
+            over.push(cell(kind::SEG, cx, y + 30.0, seg_w, 34.0));
+            let on = chosen(c, &self.light);
+            let mut bx = cx + 3.0;
+            for (j, (name, bw)) in choice.options.iter().zip(widths).enumerate() {
+                over.push(Cell { text: (*name).into(), on: j == on, id, index: j as i32, style: style::TELLS, ..cell(kind::SEG_BUTTON, bx, y + 32.0, bw, 30.0) });
+                bx += bw + 2.0;
+            }
+        }
         // the sliders, each where the section placed it
         let hot = self.hot();
         let mut rows = Vec::new();
-        let ids = SECTIONS[self.section].2;
+        let ids = sliders_of(self.section, &self.light);
         for place in &self.places {
             let i = place.i;
             if !ids.contains(&i) {
@@ -852,7 +969,7 @@ fn light_block(light: &Value) -> String {
     let mut s = String::from(" \"light\": {\n");
     s += &format!("  \"about\": {},\n", serde_json::to_string(&light["about"]).unwrap_or_else(|_| "\"\"".into()));
     s += &format!("  \"led\": {},\n", num("led", &light["led"]));
-    s += &part("sim", &["nits", "beam", "scatter", "sides", "glow_spread", "switch_top", "switch_width", "skirt_foot", "cap_top", "legends", "cap_in", "cap_out", "depth", "deck", "walls", "chassis"]);
+    s += &part("sim", &["nits", "switch", "beam", "scatter", "sides", "glow_spread", "switch_top", "switch_width", "skirt_foot", "cap_top", "legends", "skirts", "tops", "cap_in", "cap_out", "depth", "deck", "walls", "chassis"]);
     s += &part("legend", &["unlit"]);
     s += &part("lcd", &["nits", "unlit", "field", "dot", "glass"]);
     s += &format!("  \"wells\": {}\n", serde_json::to_string(&light["wells"]).unwrap_or_else(|_| "\"mask_1\"".into()));
@@ -863,6 +980,34 @@ fn light_block(light: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Each choice reads back as chosen, sets its values, and a black
+    /// housing shows no glow's sliders.
+    #[test]
+    fn the_choices_set_the_light() {
+        let mut light = json!({ "led": 4.5, "sim": { "nits": 600, "legends": 0.3 } });
+        for (option, switch) in [(1, Switch::ClearTop), (2, Switch::Clear), (0, Switch::Slot)] {
+            choose(&mut light, 0, option);
+            assert_eq!(chosen(0, &light), option);
+            assert_eq!(Physics::from(&light).switch, switch);
+        }
+        assert_eq!(get(&light, ("sim", "switch_top")), Some(5.7));
+        assert_eq!(get(&light, ("sim", "beam")), Some(3.0));
+        let shown = sliders_of(0, &light);
+        assert!(shown.iter().all(|&i| !matches!(PARAMS[i].path.1, "scatter" | "sides" | "glow_spread")), "a black housing has no glow to tune");
+        choose(&mut light, 0, 1);
+        assert_eq!(sliders_of(0, &light).len(), SECTIONS[0].2.len(), "a clear one shows them all");
+        choose(&mut light, 1, 1);
+        assert_eq!((chosen(1, &light), get(&light, ("led", ""))), (1, Some(-4.5)), "south, as far from the centre");
+        choose(&mut light, 1, 0);
+        assert_eq!(get(&light, ("led", "")), Some(4.5));
+        for option in [1, 2, 0] {
+            choose(&mut light, 2, option);
+            assert_eq!(chosen(2, &light), option);
+        }
+        choose(&mut light, 2, 1);
+        assert_eq!((get(&light, ("sim", "skirts")), get(&light, ("sim", "tops"))), (Some(0.3), Some(0.0)), "pudding: the sides let through what a legend does");
+    }
 
     /// The light section Save writes reads back as the light it was given,
     /// in the core's own file, and a core lit as it once was is read as the

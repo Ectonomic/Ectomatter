@@ -134,6 +134,8 @@ pub mod style {
     /// stronger ones (a reading's number, the name of what its line tells of)
     pub const SMALL_IN: i32 = 21;
     pub const LABEL_IN: i32 = 22;
+    /// a segmented button that tells the page when the pointer is over it, as a zone does
+    pub const TELLS: i32 = 23;
 }
 
 /// the effects' speeds: stored as a cycle time, the slider runs slow to fast, as EVGA's does

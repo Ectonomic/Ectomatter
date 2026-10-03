@@ -1233,6 +1233,12 @@ component CellView inherits Rectangle {
         b := TouchArea {
             mouse-cursor: pointer;
             clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+            // style 23: it tells the page the pointer is over it, as a zone does
+            changed has-hover => {
+                if (root.c.style == 23) {
+                    root.hovered(root.c.id, self.has-hover);
+                }
+            }
         }
     }
 }
@@ -3511,8 +3517,11 @@ export component LabWindow inherits Window {
             height: s.h;
             source: s.image;
         }
+        // the words on the stage, and the section's choices over it
         for c in root.over: CellView {
             c: c;
+            pick(id, i, x, y, h) => { root.pick(id, i); }
+            hovered(id, on) => { root.hovered(id, on); }
         }
         for r in root.rows: LabControl {
             r: r;

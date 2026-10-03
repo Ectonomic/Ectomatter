@@ -2,17 +2,22 @@
 //! keyboard's shape, the art's caps, wells and body stood up to the heights
 //! the core gives, every surface matte and giving back its share of the light.
 //!
-//! An LED gives off its light two ways: most of it in a beam straight up out
-//! of the top of its switch, which lights the legend above it, brightest
-//! over the LED; the rest scattered by the switch's clear housing, which
-//! glows with it all over, its top lighting the back of the cap's top
+//! An LED gives off its light out of the top of its switch, in a beam straight
+//! up, which lights the legend above it, brightest over the LED. In a switch
+//! with a black housing (the LED through a slot in its top, in a small clear
+//! window) that is all its light, and the housing stands in the way of the light that falls
+//! back on it; in a clear one, the housing scatters a share of it instead,
+//! glowing with it all over, its top lighting the back of the cap's top
 //! evenly and its sides the deck round the switch and the inside of the cap.
-//! The light straight from the LED and the housing to the legend, and from
-//! the housing to the deck of its own well, is worked out exactly, cell by
-//! cell; the rest (the light that has bounced off the deck, the caps' insides
-//! and outsides and the wells' walls, and the housing's on what is further
-//! off) is traced as photons, more of them the longer the simulation runs,
-//! so its picture comes clear as it goes.
+//! A cap's plastic gives back its share of the light that falls on it, and,
+//! where it is translucent, lets a share through: its skirt glows on its
+//! outside with the light inside it, and so may its top. The light straight
+//! from the LED and the housing to the legend and through the cap's own
+//! skirt, and from the housing to the deck of its own well, is worked out
+//! exactly, cell by cell; the rest (the light that has bounced off the deck,
+//! the caps' insides and outsides and the wells' walls, and the housing's on
+//! what is further off) is traced as photons, more of them the longer the
+//! simulation runs, so its picture comes clear as it goes.
 //!
 //! What each place shows from above is kept for each LED on its own, so the
 //! keys can be any colours, lit and dimmed at will, without simulating again:
@@ -44,6 +49,40 @@ const MAPS: usize = 4;
 const EVEN: u32 = 128;
 const EVEN_REACH: usize = 8;
 
+/// What a switch's housing is, as the core's "switch" says: black, its LED
+/// through a slot in its top, in a small clear window ("slot", as older
+/// switches with LEDs have it); or clear and glowing with the LED's light,
+/// its top as most RGB switches have it ("clear_top"), or all over
+/// ("clear"), which differ in how the core shares the glow out.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Switch {
+    Slot,
+    ClearTop,
+    Clear,
+}
+
+impl Switch {
+    /// as the core's "switch" names it; a core with none is lit as before switches had styles
+    pub fn named(name: Option<&str>) -> Switch {
+        match name {
+            Some("slot") => Switch::Slot,
+            Some("clear") => Switch::Clear,
+            _ => Switch::ClearTop,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Switch::Slot => "slot",
+            Switch::ClearTop => "clear_top",
+            Switch::Clear => "clear",
+        }
+    }
+}
+
+/// The share of the light that falls on a switch's black housing that it gives back.
+const HOUSING: f32 = 0.05;
+
 /// The keyboard's physical make, from the core's "sim": heights and widths
 /// in millimetres (heights above the deck), shares from 0 to 1. (The core
 /// names them for what they are: skirt_foot, cap_top, depth.)
@@ -52,15 +91,17 @@ pub struct Physics {
     /// the brightest legend, every key lit white at full, in nits: what the
     /// whole simulation's light is scaled to
     pub nits: f32,
-    /// the switch's clear housing: how high its top is, where the beam
-    /// leaves it, and how wide it is, a square round the switch's centre
-    /// (at most 14 mm, as fits inside a cap)
+    /// the switch's housing: black with the LED through a slot in it, or clear
+    pub switch: Switch,
+    /// the switch's housing: how high its top is, where the beam leaves it,
+    /// and how wide it is, a square round the switch's centre (at most 14
+    /// mm, as fits inside a cap)
     pub switch_top: f32,
     pub switch_width: f32,
     /// how far the housing's glow carries from the LED before it falls to about a third
     pub glow_spread: f32,
     /// how tight the beam is (the power of the cosine it falls as), the
-    /// share of the LED's light the housing scatters instead, glowing with
+    /// share of the LED's light a clear housing scatters instead, glowing with
     /// it, and the share of that glow that leaves through its sides rather than its top
     pub beam: f32,
     pub scatter: f32,
@@ -70,6 +111,10 @@ pub struct Physics {
     pub gap: f32,
     pub top: f32,
     pub legends: f32,
+    /// the shares of the light on a cap's inside that its skirt and its top
+    /// (beside the legend) let through, glowing on their outsides
+    pub skirts: f32,
+    pub tops: f32,
     /// the shares the caps' insides and outsides give back
     pub cap_in: f32,
     pub cap_out: f32,
@@ -89,6 +134,7 @@ impl Physics {
         let top = f("cap_top", 14.0).max(0.5);
         Physics {
             nits: f("nits", 600.0).max(0.0),
+            switch: Switch::named(s["switch"].as_str()),
             switch_top: f("switch_top", 6.5).clamp(0.05, top - 0.1),
             switch_width: f("switch_width", 12.0).clamp(1.0, 14.0),
             glow_spread: f("glow_spread", 4.0).clamp(0.2, 200.0),
@@ -98,6 +144,8 @@ impl Physics {
             gap: f("skirt_foot", 5.0).clamp(0.0, top - 0.1),
             top,
             legends: share("legends", 0.3),
+            skirts: share("skirts", 0.0),
+            tops: share("tops", 0.0),
             cap_in: share("cap_in", 0.5),
             cap_out: share("cap_out", 0.18),
             wall: f("depth", 2.0).max(0.0),
@@ -491,10 +539,19 @@ struct Stood {
 }
 
 impl Stood {
+    /// (a black housing scatters none of the LED's light: it all leaves in the beam)
     fn of(p: &Physics) -> Stood {
         let mm = UNITS_PER_MM;
-        Stood { beam_from: p.switch_top * mm, half: p.switch_width * mm / 2.0, spread: p.glow_spread * mm, gap: p.gap * mm, top: p.top * mm, wall: p.wall * mm, p: *p }
+        let p = if p.switch == Switch::Slot { Physics { scatter: 0.0, ..*p } } else { *p };
+        Stood { beam_from: p.switch_top * mm, half: p.switch_width * mm / 2.0, spread: p.glow_spread * mm, gap: p.gap * mm, top: p.top * mm, wall: p.wall * mm, p }
     }
+}
+
+/// How a surface's light is shared out: what it gives back and what it lets
+/// through, each its share, together never more than the light it takes.
+fn shared(back: f32, through: f32) -> (f32, f32) {
+    let all = back + through;
+    if all > 1.0 { (back / all, through / all) } else { (back, through) }
 }
 
 /// For the share of a matte rectangle's light that reaches a small surface
@@ -676,7 +733,7 @@ pub fn on_cap_top(p: &Physics, north: f32, along: f32) -> f32 {
     let d = [q[0] - from[0], q[1] - from[1], q[2] - from[2]];
     let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
     let up = d[2] / r2.sqrt();
-    let beam = p.beam_at(up) * up / r2;
+    let beam = s.p.beam_at(up) * up / r2;
     p.legends / std::f32::consts::PI * (beam + Housing::of(&s, (0.0, 0.0), (0.0, -north)).on_top(q))
 }
 
@@ -686,13 +743,40 @@ enum Struck {
     Deck,
     Chassis,
     Outside(u32, u8),
-    Inside,
+    Inside(u32, u8),
     Under(u32),
     Top,
     Wall,
+    Housing,
 }
 
 const EPS: f32 = 1e-3;
+
+/// Where the ray from `o` along `d` enters the box from `lo` to `hi`, and the
+/// face's normal there, toward the ray; none if it misses the box or starts inside it.
+fn enter_box(lo: [f32; 3], hi: [f32; 3], o: [f32; 3], d: [f32; 3]) -> Option<(f32, [f32; 3])> {
+    let (mut near, mut far, mut axis) = (f32::NEG_INFINITY, f32::INFINITY, 0);
+    for a in 0..3 {
+        if d[a] == 0.0 {
+            if o[a] < lo[a] || o[a] > hi[a] {
+                return None;
+            }
+            continue;
+        }
+        let (t0, t1) = ((lo[a] - o[a]) / d[a], (hi[a] - o[a]) / d[a]);
+        let (t_in, t_out) = if t0 < t1 { (t0, t1) } else { (t1, t0) };
+        if t_in > near {
+            (near, axis) = (t_in, a);
+        }
+        far = far.min(t_out);
+    }
+    if near > far || near <= EPS {
+        return None;
+    }
+    let mut n = [0.0; 3];
+    n[axis] = -d[axis].signum();
+    Some((near, n))
+}
 
 impl Scene {
     /// The nearest thing the ray from `o` along `d` strikes within `reach`:
@@ -771,7 +855,7 @@ impl Scene {
                     if p[2] >= s.gap && p[2] <= s.top {
                         let mut n = [0.0; 3];
                         n[axis] = -d[axis].signum();
-                        take(t, if inside { Struck::Inside } else { Struck::Outside(i, side) }, n, &mut best);
+                        take(t, if inside { Struck::Inside(i, side) } else { Struck::Outside(i, side) }, n, &mut best);
                     }
                     continue;
                 }
@@ -805,7 +889,14 @@ impl Scene {
                         n = [-n[0], -n[1], 0.0];
                     }
                     let side = if rx.abs() > ry.abs() { if sx < 0.0 { 0 } else { 1 } } else if sy < 0.0 { 2 } else { 3 };
-                    take(t, if inside { Struck::Inside } else { Struck::Outside(i, side) }, n, &mut best);
+                    take(t, if inside { Struck::Inside(i, side) } else { Struck::Outside(i, side) }, n, &mut best);
+                }
+            }
+            // a lit key's switch, its housing black, in the light's way
+            if s.p.switch == Switch::Slot && (i as usize) < self.keys.len() {
+                let (cx, cy) = self.keys[i as usize].1;
+                if let Some((t, n)) = enter_box([cx - s.half, cy - s.half, 0.0], [cx + s.half, cy + s.half, s.beam_from], o, d) {
+                    take(t, Struck::Housing, n, &mut best);
                 }
             }
             if d[2] != 0.0 {
@@ -821,6 +912,7 @@ impl Scene {
     }
 
     /// Every cap in the grid's cells the ray passes over, as far as `reach`.
+    /// (A lit key's switch stands inside its cap's foot, so the caps' cells hold it too.)
     fn along(&self, o: [f32; 3], d: [f32; 3], reach: f32, f: &mut dyn FnMut(u32)) {
         let g = &self.cg;
         let (fx, fy) = ((o[0] - g.x0) / g.cell, (o[1] - g.y0) / g.cell);
@@ -1367,12 +1459,13 @@ fn even(b: &Boxed, counts: &[u32], class: &[u32], cover: &[f32], cw: usize, shar
 }
 
 /// The light straight from key `k`'s LED at each cell of its box: on the
-/// back of its own cap's top (its beam, and its housing's glow), on the deck
-/// of its own well and the chassis round the wells (its housing's glow, out
-/// under the skirt), and, from a
-/// switch whose top is below the skirt's foot, on the outsides of other
-/// caps' skirts (its beam, where nothing stands in the way); each as the
-/// surface there gives it back.
+/// back of its own cap's top (its beam, and its housing's glow), through its
+/// own cap's skirt where the plastic lets it (its beam, on the skirt's
+/// inside), on the deck of its own well and the chassis round the wells (its
+/// housing's glow, out under the skirt), and, from a switch whose top is
+/// below the skirt's foot, on the outsides of other caps' skirts (its beam,
+/// where nothing stands in the way); each as the surface there gives it back
+/// or lets it through.
 fn straight(scene: &Scene, s: &Stood, k: usize, (lx, ly): (f32, f32), b: &mut Boxed) {
     let p = &s.p;
     let pi = std::f32::consts::PI;
@@ -1405,6 +1498,11 @@ fn straight(scene: &Scene, s: &Stood, k: usize, (lx, ly): (f32, f32), b: &mut Bo
                     let q = [x, y, s.top];
                     p.legends / pi * (beam(q, [0.0, 0.0, -1.0]) + housing.on_top(q))
                 }
+                Surface::Skirt(c, side, up) if c as usize == k && p.skirts > 0.0 => {
+                    let (q, n) = scene.skirt_point(s, c, side, up, (x, y));
+                    let through = shared(p.cap_in, p.skirts).1;
+                    through / pi * beam(q, [-n[0], -n[1], -n[2]])
+                }
                 Surface::Skirt(c, side, up) if c as usize != k && s.beam_from < s.gap => {
                     let (q, n) = scene.skirt_point(s, c, side, up, (x, y));
                     let off = [q[0] + n[0] * 0.01, q[1] + n[1] * 0.01, q[2]];
@@ -1421,9 +1519,11 @@ fn straight(scene: &Scene, s: &Stood, k: usize, (lx, ly): (f32, f32), b: &mut Bo
 /// followed, its light gathered where it lands on what shows from above:
 /// the deck and chassis (the first map), the skirts' outsides (the second,
 /// at the place on the band the height shows at), the backs of the caps'
-/// tops (the third); each as that surface gives it back, for the area of a
-/// cell. Where a photon first lands is gathered only where straight() has
-/// not worked out its light exactly already.
+/// tops (the third); each as that surface gives it back, or, landing on a
+/// skirt's inside, as much as it lets through to its outside, for the area
+/// of a cell. Where a photon first lands is gathered only where straight()
+/// has not worked out its light exactly already. A photon goes on off what
+/// it lands on, or through it, each by its share.
 /// (`first`, for checking the two against each other: gather those too,
 /// and follow each photon no further.)
 #[allow(clippy::too_many_arguments)]
@@ -1470,42 +1570,61 @@ fn bounce(scene: &Scene, s: &Stood, k: usize, (lx, ly): (f32, f32), into: &mut G
                         Struck::Chassis => near,
                         _ => false,
                     });
-            // what it gives back, and where it shows
-            let rho = match what {
+            // what it gives back and lets through, and where it shows
+            let (rho, through) = match what {
                 Struck::Deck => {
                     if !exact && visible(q, Surface::Deck) {
                         gather(0, (q[0], q[1]), p.deck / pi * per_area);
                     }
-                    p.deck
+                    (p.deck, 0.0)
                 }
                 Struck::Chassis => {
                     if !exact && visible(q, Surface::Chassis) {
                         gather(1, (q[0], q[1]), p.chassis / pi * per_area);
                     }
-                    p.chassis
+                    (p.chassis, 0.0)
                 }
                 Struck::Outside(c, side) => {
+                    let (back, through) = shared(p.cap_out, p.skirts);
                     if !exact {
                         let (at, stands) = scene.band(s, c, side, q);
-                        gather(2, at, p.cap_out / pi * per_area * stands);
+                        gather(2, at, back / pi * per_area * stands);
                     }
-                    p.cap_out
+                    (back, through)
+                }
+                Struck::Inside(c, side) => {
+                    // the light it lets through glows on the skirt's outside
+                    let (back, through) = shared(p.cap_in, p.skirts);
+                    if !exact && through > 0.0 {
+                        let (at, stands) = scene.band(s, c, side, q);
+                        gather(2, at, through / pi * per_area * stands);
+                    }
+                    (back, through)
                 }
                 Struck::Under(_) => {
                     if !exact {
                         gather(3, (q[0], q[1]), p.legends / pi * per_area);
                     }
-                    p.cap_in
+                    shared(p.cap_in, p.tops)
                 }
-                Struck::Inside => p.cap_in,
-                Struck::Top => p.cap_out,
-                Struck::Wall => p.walls,
+                Struck::Top => shared(p.cap_out, p.tops),
+                Struck::Wall => (p.walls, 0.0),
+                Struck::Housing => (HOUSING, 0.0),
             };
-            if first || rng.f() >= rho {
+            if first {
                 break;
             }
-            o = [q[0] + nrm[0] * EPS * 4.0, q[1] + nrm[1] * EPS * 4.0, q[2] + nrm[2] * EPS * 4.0];
-            d = rng.diffuse(nrm);
+            let r = rng.f();
+            if r < through {
+                // through it, out of its other side
+                o = [q[0] - nrm[0] * EPS * 4.0, q[1] - nrm[1] * EPS * 4.0, q[2] - nrm[2] * EPS * 4.0];
+                d = rng.diffuse([-nrm[0], -nrm[1], -nrm[2]]);
+            } else if r < through + rho {
+                o = [q[0] + nrm[0] * EPS * 4.0, q[1] + nrm[1] * EPS * 4.0, q[2] + nrm[2] * EPS * 4.0];
+                d = rng.diffuse(nrm);
+            } else {
+                break;
+            }
         }
     }
 }
@@ -1522,6 +1641,27 @@ mod tests {
         let b = Board::new(&tree, &device, [0x20, 0x20, 0x20], 1264, 506).unwrap();
         let scene = Scene::of(&b);
         (b, scene, Physics::from(&device["light"]))
+    }
+
+    /// A black housing scatters none of its LED's light: the beam holds it
+    /// all, whatever the core's scatter says; and it stands in the way of
+    /// light falling back on it, where a clear one lets it by.
+    #[test]
+    fn a_black_housing_sends_all_its_light_up_and_stops_what_falls_on_it() {
+        let (_b, scene, p) = scene();
+        let slot = Physics { switch: Switch::Slot, scatter: 0.7, ..p };
+        let s = Stood::of(&slot);
+        let n = 200_000;
+        let total = (0..n).map(|i| s.p.beam_at((i as f32 + 0.5) / n as f32) as f64).sum::<f64>() / n as f64 * std::f64::consts::TAU;
+        assert!((total - 1.0).abs() < 1e-3, "the beam holds {total:.4} of the LED's light");
+        // straight down onto the top of the first lit key's switch, from under its cap
+        let (cx, cy) = scene.keys[0].1;
+        let o = [cx + 0.3, cy - 0.2, s.beam_from + 1.0];
+        let hit = scene.hit(&s, o, [0.0, 0.0, -1.0], 1e4).map(|h| (h.0, h.1));
+        assert!(matches!(hit, Some((t, Struck::Housing)) if (t - 1.0).abs() < 1e-3), "a black housing is struck: {hit:?}");
+        let clear = Stood::of(&Physics { switch: Switch::ClearTop, ..p });
+        let hit = scene.hit(&clear, o, [0.0, 0.0, -1.0], 1e4).map(|h| h.1);
+        assert!(!matches!(hit, Some(Struck::Housing)), "a clear housing lets the light by: {hit:?}");
     }
 
     /// The beam holds the LED's light but the share the switch scatters, however tight it is.

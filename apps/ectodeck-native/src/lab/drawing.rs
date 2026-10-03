@@ -19,7 +19,7 @@
 
 use std::fmt::Write;
 
-use ectodeck_draw::hdr::sim::{on_cap_top, Physics};
+use ectodeck_draw::hdr::sim::{on_cap_top, Physics, Switch};
 use serde_json::Value;
 
 use super::{get, PARAMS, UNITS_PER_MM as MM};
@@ -63,6 +63,8 @@ pub const CTRL_W: f32 = 280.0;
 pub const CTRL_H: f32 = 48.0;
 /// how far down a slider its line leaves it, and how far apart sliders stand
 pub const ATTACH: f32 = 13.0;
+/// how much of its column a choice takes, its name over its options
+pub const CHOICE_H: f32 = 74.0;
 const PITCH: f64 = 62.0;
 const COL: f64 = 20.0;
 const GAP: f64 = 28.0;
@@ -117,6 +119,11 @@ pub fn column_x(left: bool, w: f32) -> f32 {
     if left { COL as f32 } else { w - COL as f32 - CTRL_W }
 }
 
+/// Where the top of a section's `k`th choice is on the stage, at the top of its left column.
+pub fn choice_y(k: usize) -> f32 {
+    14.0 + k as f32 * CHOICE_H
+}
+
 /// The values the drawing is drawn from, as the simulation holds them (no
 /// switch or skirt's foot above the cap's top, no switch wider than fits in
 /// a cap, no LED outside its switch): lengths in millimetres, the LED's
@@ -124,6 +131,8 @@ pub fn column_x(left: bool, w: f32) -> f32 {
 #[derive(Clone, Copy, Debug)]
 pub struct Values {
     p: Physics,
+    /// a black housing, its LED through a slot in its top
+    slot: bool,
     led: f64,
     north: f64,
     beam: f64,
@@ -135,6 +144,8 @@ pub struct Values {
     foot: f64,
     top: f64,
     legends: f64,
+    skirts: f64,
+    tops: f64,
     cap_in: f64,
     cap_out: f64,
     depth: f64,
@@ -161,6 +172,7 @@ impl Values {
         let led = raw(light, ("led", "")).clamp(-edge, edge);
         Values {
             p,
+            slot: p.switch == Switch::Slot,
             led,
             north: led / MM,
             beam: p.beam as f64,
@@ -172,6 +184,8 @@ impl Values {
             foot: p.gap as f64,
             top: p.top as f64,
             legends: p.legends as f64,
+            skirts: p.skirts as f64,
+            tops: p.tops as f64,
             cap_in: p.cap_in as f64,
             cap_out: p.cap_out as f64,
             depth: p.wall as f64,
@@ -518,15 +532,26 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
 
     // the body: the decks, the walls and the chassis between the wells
     s.path(&poly(&pp(&clip(&sl.body(x_lo - 1.0, x_hi + 1.0), x_lo, x_hi)), true), fill(Lens::Wells), line(Lens::Wells), 1.0, 1.0);
-    // the housing, glowing with the LED's scattered light: brightest by the LED, a third every glow spread
-    let stops: Vec<(f64, &str, f64)> = (0..17)
-        .map(|i| {
-            let x = sl.hx0 + (sl.hx1 - sl.hx0) * i as f64 / 16.0;
-            (i as f64 / 16.0, AMBER, (0.07 + 0.38 * (-(x - sl.led).abs() / v.spread.max(0.05)).exp()) * glow)
-        })
-        .collect();
-    let housing = s.linear(px(sl.hx0), 0.0, px(sl.hx1), 0.0, &stops);
-    s.path(&poly(&pp(&clip(&[(sl.hx0, 0.0), (sl.hx0, hz), (sl.hx1, hz), (sl.hx1, 0.0)], x_lo, x_hi)), true), &housing, if on(Lens::Led) { "#b98a48" } else { "#5a4b36" }, 1.0, 1.0);
+    let housing_box = clip(&[(sl.hx0, 0.0), (sl.hx0, hz), (sl.hx1, hz), (sl.hx1, 0.0)], x_lo, x_hi);
+    if v.slot {
+        // the housing, black, and the LED's slot at its top, glowing round the LED
+        s.path(&poly(&pp(&housing_box), true), "#141414", if on(Lens::Led) { "#6a6a6a" } else { "#3a3a3a" }, 1.0, 1.0);
+        let (wx0, wx1, wz) = (sl.led - 1.3, sl.led + 1.3, (hz - 1.1).max(hz * 0.6));
+        let window = s.linear(0.0, pz(hz), 0.0, pz(wz), &[(0.0, AMBER, 0.55 * glow), (1.0, AMBER, 0.12 * glow)]);
+        s.path(&poly(&pp(&clip(&[(wx0, wz), (wx0, hz), (wx1, hz), (wx1, wz)], x_lo, x_hi)), true), &window, "none", 1.0, 1.0);
+    } else {
+        // the housing, glowing with the LED's scattered light: brightest by the LED, a third every glow spread
+        let stops: Vec<(f64, &str, f64)> = (0..17)
+            .map(|i| {
+                let x = sl.hx0 + (sl.hx1 - sl.hx0) * i as f64 / 16.0;
+                (i as f64 / 16.0, AMBER, (0.07 + 0.38 * (-(x - sl.led).abs() / v.spread.max(0.05)).exp()) * glow)
+            })
+            .collect();
+        let housing = s.linear(px(sl.hx0), 0.0, px(sl.hx1), 0.0, &stops);
+        s.path(&poly(&pp(&housing_box), true), &housing, if on(Lens::Led) { "#b98a48" } else { "#5a4b36" }, 1.0, 1.0);
+    }
+    // the share of the LED's light the housing scatters: none from a black one
+    let scatter = if v.slot { 0.0 } else { v.scatter };
     // the beam, from the switch's top at the LED to the back of the cap's top,
     // out to half its brightness, inside the cap; as strong as the light the switch doesn't scatter
     let rise = tz - sl.top_t - hz;
@@ -536,7 +561,7 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
         if sl.hollow && !on(Lens::Led) {
             cone = clip_to(&cone, &sl.interior());
         }
-        let beam = s.radial(px(sl.led), pz(hz), k * rise * 1.1, &[(0.0, AMBER, (0.25 + 0.6 * (1.0 - v.scatter)) * glow), (1.0, AMBER, 0.06 * glow)]);
+        let beam = s.radial(px(sl.led), pz(hz), k * rise * 1.1, &[(0.0, AMBER, (0.25 + 0.6 * (1.0 - scatter)) * glow), (1.0, AMBER, 0.06 * glow)]);
         s.fill(&poly(&pp(&cone), true), &beam);
         if white("Beam") {
             s.stroke(&poly(&pp(&cone), true), WHITE, 1.3);
@@ -619,6 +644,13 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
             // Beam on the cone's edge; with no room for a beam, where it would meet the cap's top
             let beam_at = if rise > 0.3 { p(sl.led - wide * 0.62, hz + rise * 0.62) } else { p(sl.led, under) };
             labels.push(Label::new(true, beam_at, "Beam"));
+            let width_z = if hz > 2.6 { 0.45 } else { hz + 2.1 };
+            marks.push(Mark::Across { x0: px(sl.hx0), x1: px(sl.hx1), y: pz(width_z), i: slider("Switch width") });
+            labels.push(Label { flat: true, ..Label::new(true, p(sl.hx0, width_z), "Switch width") });
+            marks.push(Mark::Height { x: px(sl.hx1 + 1.9), y0: pz(0.0), y1: pz(hz), i: slider("Switch top") });
+            labels.push(Label::new(false, p(sl.hx1 + 1.9, hz * 0.5), "Switch top"));
+            // a clear housing's glow (a black one has none)
+            if !v.slot {
             // the housing's glow falling away from the LED: to a third every glow spread
             let far = (sl.hx1 - sl.led).max(sl.led - sl.hx0);
             let toward = if sl.hx1 - sl.led >= sl.led - sl.hx0 { 1.0 } else { -1.0 };
@@ -631,11 +663,6 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
             s.path(&poly(&curve, false), "none", if white("Glow spread") { WHITE } else { AMBER }, 1.2, 0.95);
             let at = spread.min(far);
             labels.push(Label::new(true, p(sl.led + toward * at, zb + amp * (-at / spread).exp()), "Glow spread"));
-            let width_z = if hz > 2.6 { 0.45 } else { hz + 2.1 };
-            marks.push(Mark::Across { x0: px(sl.hx0), x1: px(sl.hx1), y: pz(width_z), i: slider("Switch width") });
-            labels.push(Label { flat: true, ..Label::new(true, p(sl.hx0, width_z), "Switch width") });
-            marks.push(Mark::Height { x: px(sl.hx1 + 1.9), y0: pz(0.0), y1: pz(hz), i: slider("Switch top") });
-            labels.push(Label::new(false, p(sl.hx1 + 1.9, hz * 0.5), "Switch top"));
             // the glow out of the housing's top and, short, out of its sides, each as strong as its share
             let (top_share, side_share) = (v.scatter * (1.0 - v.sides), v.scatter * v.sides);
             let mut ups = Vec::new();
@@ -657,6 +684,7 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
             ray(&mut s, &[p(sl.hx1 + 0.15, out), p(sl.hx1 + 1.5, out - 0.55)], side_share, grow, white("Through its sides"));
             ray(&mut s, &[p(sl.hx0 - 0.15, out), p(sl.hx0 - 1.5, out - 0.55)], side_share, grow, white("Through its sides"));
             labels.push(Label::new(false, p(sl.hx1 + 0.85, out - 0.27), "Through its sides"));
+            }
         }
         Lens::Caps => {
             marks.push(Mark::Height { x: px(sl.foot0 - 1.3), y0: pz(0.0), y1: pz(v.foot), i: slider("Skirt's foot") });
@@ -666,9 +694,34 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
             let mid = sl.centre - LEGEND_AT;
             labels.push(Label { drop: true, ..Label::new(true, p(mid - LEGEND_W / 2.0 + 0.9, tz), "Legends let through") });
             labels.push(Label { flat: true, ..Label::new(false, p(mid + LEGEND_W / 2.0 - 0.4, tz), "LED off") });
-            // light out of the switch's side and under the skirt's foot onto the deck
-            let out = 1.6f64.min(v.foot.max(0.6) * 0.4);
-            ray(&mut s, &[p(sl.hx1 + 0.15, out), p(sl.foot1 + 0.95, out * 0.15)], v.scatter * v.sides, grow, false);
+            // light out of a clear switch's side and under the skirt's foot onto the deck
+            if !v.slot {
+                let out = 1.6f64.min(v.foot.max(0.6) * 0.4);
+                ray(&mut s, &[p(sl.hx1 + 0.15, out), p(sl.foot1 + 0.95, out * 0.15)], v.scatter * v.sides, grow, false);
+            }
+            // the skirts glowing with the light they let through, and the top beside its legends
+            if sl.hollow {
+                let op = |share: f64| 0.12 + 0.7 * share.clamp(0.0, 1.0);
+                for (f, a) in [(sl.foot0, a0), (sl.foot1, a1)] {
+                    let lit = if white("Sides let through") { WHITE } else { AMBER };
+                    s.path(&poly(&[p(f, v.foot), p(a, tz)], false), "none", lit, 2.4 * grow.min(1.2), if v.skirts > 0.0 { op(v.skirts) } else { 0.0 });
+                }
+                if v.tops > 0.0 {
+                    let lit = if white("Tops let through") { WHITE } else { AMBER };
+                    s.path(&poly(&[p(a0 + 0.3, tz), p(a1 - 0.3, tz)], false), "none", lit, 2.4 * grow.min(1.2), op(v.tops));
+                }
+            }
+            // light through the north skirt, from inside the cap to its outside
+            let side_z = v.foot + (tz - v.foot) * 0.55;
+            let (wall_in, wall_out) = (sl.skirt_x(true, side_z, true), sl.skirt_x(true, side_z, false));
+            ray(&mut s, &[p(wall_in + 1.1, side_z + 0.35), p(wall_out - 1.2, side_z - 0.25)], v.skirts, grow, white("Sides let through"));
+            labels.push(Label::new(true, p(wall_out, side_z), "Sides let through"));
+            // light up through the top, beside the legends
+            let top_x = a1 - 1.6;
+            if sl.hollow {
+                ray(&mut s, &[p(top_x, under - 0.6), p(top_x + 0.15, tz + 1.4)], v.tops, grow, white("Tops let through"));
+            }
+            labels.push(Label { flat: true, ..Label::new(false, p(top_x, tz), "Tops let through") });
             if sl.hollow && rise > 1.0 {
                 // bounced inside the cap: off its inner wall, up to the back of its top
                 let mid_z = (hz.max(v.foot) + under) / 2.0;
@@ -841,10 +894,11 @@ fn drawn(v: &Values, lens: Lens, w: f64, h: f64, hot: Option<usize>) -> (Svg, Ve
 
 /// Where each slider of a section stands on a stage `w` by `h`, from these
 /// values: on its side, level with what it names where its neighbours let
-/// it, in the order of what they name, so no two lines cross. A section's
-/// sliders are placed once, as it opens, and stay put while its values
-/// change; only the drawing and the ends of their lines follow.
-pub fn places(v: &Values, lens: Lens, w: f32, h: f32) -> Vec<Place> {
+/// it, in the order of what they name, so no two lines cross; on the left,
+/// under the section's `choices`. A section's sliders are placed once, as
+/// it opens, and stay put while its values change; only the drawing and the
+/// ends of their lines follow.
+pub fn places(v: &Values, lens: Lens, w: f32, h: f32, choices: usize) -> Vec<Place> {
     let (w, h) = (w as f64, h as f64);
     let (_, labels, _) = drawn(v, lens, w, h, None);
     let (px0, _, pw, _) = panel(w, h);
@@ -859,7 +913,8 @@ pub fn places(v: &Values, lens: Lens, w: f32, h: f32) -> Vec<Place> {
             let kb = (level(b) - if b.drop { 2000.0 } else { 0.0 }, -(b.at.0 - edge).abs());
             ka.partial_cmp(&kb).unwrap_or(std::cmp::Ordering::Equal)
         });
-        let (lo, hi) = (14.0 + ATTACH as f64, h - 14.0 - (CTRL_H - ATTACH) as f64);
+        let under = if left { choices as f64 * CHOICE_H as f64 } else { 0.0 };
+        let (lo, hi) = (14.0 + ATTACH as f64 + under, h - 14.0 - (CTRL_H - ATTACH) as f64);
         let want: Vec<f64> = mine.iter().map(|l| if l.drop { lo } else if l.flat { level(l) - rise } else { level(l) }).collect();
         let gap = PITCH.min((hi - lo) / (want.len().max(2) - 1) as f64);
         let mut ys: Vec<f64> = Vec::new();
@@ -963,8 +1018,8 @@ mod tests {
                 let v = Values::of(&l);
                 for section in 0..4 {
                     let lens = Lens::of(section);
-                    let places = places(&v, lens, w, h);
-                    let ids = &super::super::SECTIONS[section].2;
+                    let places = places(&v, lens, w, h, super::super::SECTIONS[section].3.len());
+                    let ids = &super::super::sliders_of(section, &l);
                     assert_eq!(places.len(), ids.len(), "{lens:?}: a place for each of its sliders");
                     assert!(ids.iter().all(|i| places.iter().any(|p| p.i == *i)), "{lens:?}: its own sliders");
                     for p in &places {
@@ -985,7 +1040,7 @@ mod tests {
     fn the_sliders_stand_still() {
         let light = core_light();
         let v = Values::of(&light);
-        let places = places(&v, Lens::Led, 1232.0, 572.0);
+        let places = places(&v, Lens::Led, 1232.0, 572.0, 2);
         let mut moved = light.clone();
         moved["sim"]["switch_top"] = serde_json::json!(9.5);
         let st = stage(&Values::of(&moved), Lens::Led, 1232.0, 572.0, &places, None);
