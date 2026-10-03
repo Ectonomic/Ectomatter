@@ -468,15 +468,20 @@ impl Slice {
         outer
     }
 
-    /// the space inside the 2 key's cap, as an outline, anticlockwise on the page
+    /// the space inside the 2 key's cap, as an outline, anticlockwise on the
+    /// page: up the inside of each skirt from its foot to the top, and
+    /// straight down below the feet
     fn interior(&self) -> Vec<Pt> {
         let v = &self.v;
         let under = v.top - self.top_t;
+        let (n_foot, s_foot) = (self.skirt_x(true, v.foot, true), self.skirt_x(false, v.foot, true));
         vec![
-            (self.skirt_x(true, v.foot, true), v.foot - 50.0),
-            (self.skirt_x(false, v.foot, true), v.foot - 50.0),
+            (n_foot, v.foot - 50.0),
+            (s_foot, v.foot - 50.0),
+            (s_foot, v.foot),
             (self.skirt_x(false, under, true), under),
             (self.skirt_x(true, under, true), under),
+            (n_foot, v.foot),
         ]
     }
 
