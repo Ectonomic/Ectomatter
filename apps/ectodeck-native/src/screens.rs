@@ -7,7 +7,9 @@
 //! mode has it, and so does an SDR screen whose brightness is turned down,
 //! since KWin keeps the backlight's headroom (its EDR). KWin describes every
 //! screen as gamma 2.2, even in HDR mode, so the transfer function is not
-//! read. Elsewhere there is no such question to ask yet, so the list is empty
+//! read. The white a screen's user set is KDE's word (kde_output): KWin's
+//! reference is lower while the desktop is idle and the screen dimmed.
+//! Elsewhere there is no such question to ask yet, so the list is empty
 //! and Settings says it cannot tell.
 
 use serde_json::{Value, json};
@@ -28,11 +30,15 @@ pub fn screens() -> Vec<Value> {
         peak: f64,
         done: bool,
     }
+    use crate::kde_output::client::{kde_output_device_mode_v2::KdeOutputDeviceModeV2, kde_output_device_registry_v2::{self, KdeOutputDeviceRegistryV2}, kde_output_device_v2::{self, KdeOutputDeviceV2}};
+
     #[derive(Default)]
     struct App {
         cm: Option<wp_color_manager_v1::WpColorManagerV1>,
         outputs: Vec<wl_output::WlOutput>,
         screens: Vec<Screen>,
+        /// what KDE says of each screen, and whether its word is whole
+        kde: Vec<(KdeOutputDeviceV2, crate::kde_output::Device, bool)>,
     }
     impl Dispatch<wl_registry::WlRegistry, ()> for App {
         fn event(app: &mut Self, reg: &wl_registry::WlRegistry, event: wl_registry::Event, _: &(), _: &Connection, qh: &QueueHandle<Self>) {
@@ -44,6 +50,9 @@ pub fn screens() -> Vec<Value> {
                         app.screens.push(Screen::default());
                     }
                     "wp_color_manager_v1" => app.cm = Some(reg.bind(name, 1, qh, ())),
+                    "kde_output_device_registry_v2" if version >= 21 => {
+                        let _: KdeOutputDeviceRegistryV2 = reg.bind(name, version.min(23), qh, ());
+                    }
                     _ => {}
                 }
             }
@@ -71,6 +80,27 @@ pub fn screens() -> Vec<Value> {
             }
         }
     }
+    impl Dispatch<KdeOutputDeviceRegistryV2, ()> for App {
+        fn event(app: &mut Self, _: &KdeOutputDeviceRegistryV2, e: kde_output_device_registry_v2::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+            if let kde_output_device_registry_v2::Event::Output { output } = e {
+                app.kde.push((output, crate::kde_output::Device::default(), false));
+            }
+        }
+        wayland_client::event_created_child!(App, KdeOutputDeviceRegistryV2, [
+            kde_output_device_registry_v2::EVT_OUTPUT_OPCODE => (KdeOutputDeviceV2, ()),
+        ]);
+    }
+    impl Dispatch<KdeOutputDeviceV2, ()> for App {
+        fn event(app: &mut Self, dev: &KdeOutputDeviceV2, e: kde_output_device_v2::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+            if let Some(k) = app.kde.iter_mut().find(|k| &k.0 == dev) {
+                k.2 |= k.1.take(e);
+            }
+        }
+        wayland_client::event_created_child!(App, KdeOutputDeviceV2, [
+            kde_output_device_v2::EVT_MODE_OPCODE => (KdeOutputDeviceModeV2, ()),
+        ]);
+    }
+    delegate_noop!(App: ignore KdeOutputDeviceModeV2);
     delegate_noop!(App: ignore wp_color_manager_v1::WpColorManagerV1);
     delegate_noop!(App: ignore wp_color_management_output_v1::WpColorManagementOutputV1);
     delegate_noop!(App: ignore wp_image_description_v1::WpImageDescriptionV1);
@@ -91,11 +121,18 @@ pub fn screens() -> Vec<Value> {
         keep.push((desc.get_information(&qh, i), desc, cmo));
     }
     for _ in 0..20 {
-        if app.screens.iter().all(|s| s.done) || queue.roundtrip(&mut app).is_err() {
+        if (app.screens.iter().all(|s| s.done) && app.kde.iter().all(|k| k.2)) || queue.roundtrip(&mut app).is_err() {
             break;
         }
     }
-    app.screens.iter().map(|s| json!({ "name": s.name, "description": s.description, "reference": s.reference, "peak": s.peak })).collect()
+    // each screen's white: the one its user set, where KDE says it
+    app.screens
+        .iter()
+        .map(|s| {
+            let kde = app.kde.iter().map(|k| &k.1).find(|d| d.name == s.name);
+            json!({ "name": s.name, "description": s.description, "reference": s.reference, "white": crate::kde_output::white(s.reference, kde, None), "peak": s.peak })
+        })
+        .collect()
 }
 
 #[cfg(not(target_os = "linux"))]

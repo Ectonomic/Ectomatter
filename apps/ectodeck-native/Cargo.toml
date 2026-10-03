@@ -21,6 +21,10 @@ smithay-client-toolkit = { version = "0.19", default-features = false, features 
 sys-locale = "0.3.2"
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+# KDE's own account of each screen (kde-output-device-v2, vendored in protocols/)
+wayland-scanner = "0.31"
+wayland-backend = "0.3"
+bitflags = "2"
 
 [build-dependencies]
 slint-build = "1.18.1"

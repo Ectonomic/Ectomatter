@@ -1358,6 +1358,7 @@ dependencies = [
 name = "ectodeck-native"
 version = "0.1.0"
 dependencies = [
+ "bitflags 2.13.2",
  "bytemuck",
  "ectodeck-draw",
  "ectodeck-weather",
@@ -1371,8 +1372,10 @@ dependencies = [
  "slint-build",
  "smithay-client-toolkit",
  "sys-locale",
+ "wayland-backend",
  "wayland-client",
  "wayland-protocols",
+ "wayland-scanner",
 ]
 
 [[package]]

@@ -23,6 +23,7 @@ mod display;
 mod devices;
 mod ecto_settings;
 mod front;
+mod kde_output;
 mod lab;
 mod lighting;
 mod macro_page;
@@ -47,6 +48,9 @@ use std::time::{Duration, Instant};
 use ectodeck_draw::hdr::sim::{self, Scene, Setup, Simulator, Snapshot};
 use ectodeck_draw::hdr::{Board, Light};
 use front::{Front, WindowAsk};
+use kde_output::client::kde_output_device_mode_v2::KdeOutputDeviceModeV2;
+use kde_output::client::kde_output_device_registry_v2::{self, KdeOutputDeviceRegistryV2};
+use kde_output::client::kde_output_device_v2::{self, KdeOutputDeviceV2};
 use picture::{Lit, Picture};
 use resvg::tiny_skia::{Pixmap, Transform};
 use resvg::usvg;
@@ -162,7 +166,8 @@ fn data_dir() -> PathBuf {
 fn levels(settings: &settings::Settings) -> (f64, f64) {
     let screens = screens::screens();
     let best = screens.iter().max_by(|a, b| a["peak"].as_f64().partial_cmp(&b["peak"].as_f64()).unwrap_or(std::cmp::Ordering::Equal));
-    let reference = best.and_then(|s| s["reference"].as_f64()).filter(|r| *r > 0.0).unwrap_or(203.0);
+    // (the white the screen's user set, which an idle dim does not change)
+    let reference = best.and_then(|s| s["white"].as_f64().or(s["reference"].as_f64())).filter(|r| *r > 0.0).unwrap_or(203.0);
     let peak = settings.get("hdr.glow_limit").and_then(|v| v.as_f64()).or_else(|| best.and_then(|s| s["peak"].as_f64())).unwrap_or(reference);
     (reference, peak.max(reference))
 }
@@ -775,6 +780,10 @@ struct App {
     cm: WpColorManagerV1,
     cm_surface: WpColorManagementSurfaceV1,
     screens: Vec<ScreenLevels>,
+    /// what KDE says of each screen (its set SDR white), as its last word
+    /// left it and as its words come in
+    kde: Vec<(KdeOutputDeviceV2, kde_output::Device, kde_output::Device)>,
+    _kde_registry: Option<KdeOutputDeviceRegistryV2>,
     on_screen: Option<u32>,
     glow_limit: Option<f64>,
     levels: (f64, f64),
@@ -896,15 +905,14 @@ struct SubWin {
 }
 
 /// A screen's levels as KWin describes them: its white and its peak, in nits.
-/// How often each screen's levels are asked for again.
-const LEVELS_EVERY: Duration = Duration::from_secs(2);
-
 struct ScreenLevels {
     id: u32,
-    _cmo: WpColorManagementOutputV1,
+    cmo: WpColorManagementOutputV1,
     reference: f64,
     peak: f64,
     reading: (f64, f64),
+    /// the white it reported last while not dimmed (see kde_output::white)
+    undimmed: Option<f64>,
 }
 
 /// Which screen a description or its information was asked for.
@@ -947,6 +955,8 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
     let xdg = XdgShell::bind(&globals, &qh).expect("xdg_shell");
     let shm = Shm::bind(&globals, &qh).expect("wl_shm");
     let cm: WpColorManagerV1 = globals.bind(&qh, 1..=1, ()).expect("the compositor's colour management (KWin 6.3 or later)");
+    // KDE's account of each screen, for the SDR white its user set (none on another compositor)
+    let kde_registry: Option<KdeOutputDeviceRegistryV2> = globals.bind(&qh, 21..=23, ()).ok();
 
     let surface = compositor.create_surface(&qh);
     let window = xdg.create_window(surface, WindowDecorations::RequestClient, &qh);
@@ -975,22 +985,6 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
             if let calloop::channel::Event::Msg(()) = e {
                 app.sim_ready();
             }
-        })
-        .unwrap();
-
-    // Each screen's levels asked for again every two seconds: KWin does not
-    // always say when they change (a screen dimmed while the desktop is idle
-    // and lit again comes back without a word), and a picture described for
-    // a white the screen no longer has shows its light as much too strong.
-    event_loop
-        .handle()
-        .insert_source(calloop::timer::Timer::from_duration(LEVELS_EVERY), |_, _, app: &mut App| {
-            for s in &app.screens {
-                let desc = s._cmo.get_image_description(&app.qh, ScreenTag(s.id));
-                desc.get_information(&app.qh, ScreenTag(s.id));
-                desc.destroy();
-            }
-            calloop::timer::TimeoutAction::ToDuration(LEVELS_EVERY)
         })
         .unwrap();
 
@@ -1051,6 +1045,8 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         cm,
         cm_surface: cm_surface.clone(),
         screens: Vec::new(),
+        kde: Vec::new(),
+        _kde_registry: kde_registry,
         on_screen: None,
         glow_limit: settings.get("hdr.glow_limit").and_then(|v| v.as_f64()),
         levels_peak: 1000.0,
@@ -1457,19 +1453,35 @@ impl App {
     }
 
     /// The screen the window is on has new levels: describe the picture for
-    /// them. The new description takes over once KWin has it ready.
+    /// them, for the white its user set where KDE says it (an idle dim does
+    /// not change it; see kde_output::white). The new description takes over
+    /// once KWin has it ready.
     fn retarget(&mut self, qh: &QueueHandle<Self>) {
-        let Some(s) = self.screens.iter().find(|s| Some(s.id) == self.on_screen) else { return };
-        if s.reference <= 0.0 {
+        let Some((id, reported, peak, undimmed)) = self.screens.iter().find(|s| Some(s.id) == self.on_screen).map(|s| (s.id, s.reference, s.peak, s.undimmed)) else { return };
+        if reported <= 0.0 {
             return;
         }
-        self.levels_peak = s.peak.max(s.reference);
-        let glow = self.glow_limit.unwrap_or(s.peak).max(s.reference);
-        if (s.reference - self.levels.0).abs() < 0.5 && (glow - self.levels.1).abs() < 0.5 {
+        let white = kde_output::white(reported, self.kde_of(id), undimmed);
+        self.levels_peak = peak.max(white);
+        let glow = self.glow_limit.unwrap_or(peak).max(white);
+        if (white - self.levels.0).abs() < 0.5 && (glow - self.levels.1).abs() < 0.5 {
             return;
         }
-        eprintln!("ectodeck-native: the screen's white is now {} nits; the light goes to {glow}", s.reference);
-        describe(&self.cm, qh, s.reference, self.levels_peak, self.mastering, PictureTag(s.reference, glow));
+        eprintln!("ectodeck-native: the screen's white is now {white} nits; the light goes to {glow}");
+        describe(&self.cm, qh, white, self.levels_peak, self.mastering, PictureTag(white, glow));
+    }
+
+    /// What KDE says of a screen, by its output's id: the one of its name.
+    fn kde_of(&self, id: u32) -> Option<&kde_output::Device> {
+        let name = self.output_name(id)?;
+        self.kde.iter().map(|k| &k.1).find(|d| d.name == name)
+    }
+
+    /// A screen's name, by its output's id.
+    fn output_name(&self, id: u32) -> Option<String> {
+        use smithay_client_toolkit::reexports::client::Proxy;
+        let output = self.outputs.outputs().find(|o| o.id().protocol_id() == id)?;
+        self.outputs.info(&output)?.name
     }
 
     /// Close the window into the tray: without its buffer the window is
@@ -1875,7 +1887,7 @@ impl OutputHandler for App {
         let cmo = self.cm.get_output(&output, qh, ScreenTag(id));
         let desc = cmo.get_image_description(qh, ScreenTag(id));
         desc.get_information(qh, ScreenTag(id));
-        self.screens.push(ScreenLevels { id, _cmo: cmo, reference: 0.0, peak: 0.0, reading: (0.0, 0.0) });
+        self.screens.push(ScreenLevels { id, cmo, reference: 0.0, peak: 0.0, reading: (0.0, 0.0), undimmed: None });
     }
     fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
     fn output_destroyed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
@@ -2124,7 +2136,13 @@ impl Dispatch<WpImageDescriptionInfoV1, ScreenTag> for App {
             wp_image_description_info_v1::Event::Luminances { max_lum, reference_lum, .. } => s.reading = (reference_lum as f64, max_lum as f64),
             wp_image_description_info_v1::Event::Done => {
                 (s.reference, s.peak) = s.reading;
-                if app.on_screen == Some(tag.0) {
+                // its white undimmed, for while it is dimmed
+                let id = tag.0;
+                let dimmed = app.kde_of(id).is_some_and(|d| d.dimmed());
+                if let Some(s) = app.screens.iter_mut().find(|s| s.id == id && !dimmed && s.reference > 0.0) {
+                    s.undimmed = Some(s.reference);
+                }
+                if app.on_screen == Some(id) {
                     app.retarget(qh);
                 }
             }
@@ -2132,6 +2150,42 @@ impl Dispatch<WpImageDescriptionInfoV1, ScreenTag> for App {
         }
     }
 }
+
+impl Dispatch<KdeOutputDeviceRegistryV2, ()> for App {
+    fn event(app: &mut Self, _: &KdeOutputDeviceRegistryV2, e: kde_output_device_registry_v2::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        if let kde_output_device_registry_v2::Event::Output { output } = e {
+            app.kde.push((output, kde_output::Device::default(), kde_output::Device::default()));
+        }
+    }
+    smithay_client_toolkit::reexports::client::event_created_child!(App, KdeOutputDeviceRegistryV2, [
+        kde_output_device_registry_v2::EVT_OUTPUT_OPCODE => (KdeOutputDeviceV2, ()),
+    ]);
+}
+
+impl Dispatch<KdeOutputDeviceV2, ()> for App {
+    fn event(app: &mut Self, dev: &KdeOutputDeviceV2, e: kde_output_device_v2::Event, _: &(), _: &Connection, qh: &QueueHandle<Self>) {
+        let Some(k) = app.kde.iter_mut().find(|k| &k.0 == dev) else { return };
+        // A screen's word is whole at its done. KWin does not say when an
+        // idle dim changes its white, but KDE says the dim: ask KWin for the
+        // screen's levels again (their information retargets the window's).
+        if k.2.take(e) {
+            k.1 = k.2.clone();
+            let name = k.1.name.clone();
+            let ids: Vec<u32> = app.screens.iter().map(|s| s.id).filter(|&id| app.output_name(id).as_deref() == Some(name.as_str())).collect();
+            for s in app.screens.iter().filter(|s| ids.contains(&s.id)) {
+                let desc = s.cmo.get_image_description(qh, ScreenTag(s.id));
+                desc.get_information(qh, ScreenTag(s.id));
+                desc.destroy();
+            }
+            app.retarget(qh);
+        }
+    }
+    smithay_client_toolkit::reexports::client::event_created_child!(App, KdeOutputDeviceV2, [
+        kde_output_device_v2::EVT_MODE_OPCODE => (KdeOutputDeviceModeV2, ()),
+    ]);
+}
+
+delegate_noop!(App: ignore KdeOutputDeviceModeV2);
 
 impl Dispatch<WpColorManagerV1, ()> for App {
     fn event(app: &mut Self, _: &WpColorManagerV1, e: wp_color_manager_v1::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
