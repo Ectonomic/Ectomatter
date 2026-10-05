@@ -282,6 +282,16 @@ fn sig3(v: f64) -> f64 {
     (v / m).round() * m
 }
 
+/// A value in words: its number and its unit, as its box and unit show them.
+fn said(p: &Param, v: f64) -> String {
+    match reads(p, v) {
+        (_, u) if u == "centred" => u,
+        (n, u) if u.is_empty() => n,
+        (n, u) if u == "%" => format!("{n}%"),
+        (n, u) => format!("{n} {u}"),
+    }
+}
+
 /// A value as its box shows it, and its unit after the box.
 fn reads(p: &Param, v: f64) -> (String, String) {
     let trim = |s: String| if s.contains('.') { s.trim_end_matches('0').trim_end_matches('.').to_string() } else { s };
@@ -335,6 +345,8 @@ const SCOPE: i32 = 940;
 const MAP: i32 = 950;
 const OWN: i32 = 960;
 const PAD: i32 = 970;
+/// a slider's reset: this, plus its slider's id
+const RESET: i32 = 1000;
 /// the switch's place, east and north: values of one key's only
 const PLACE_E: usize = 25;
 const PLACE_N: usize = 26;
@@ -479,6 +491,33 @@ fn remove_at(light: &mut Value, (a, b): (&str, &str)) {
         if section.is_empty() {
             o.remove(a);
         }
+    }
+}
+
+/// What a light has that the page tunes: all of it, or one key's own values
+/// (by its control's id).
+fn tuned<'a>(light: &'a Value, key: Option<&str>) -> &'a Value {
+    match key {
+        Some(id) => &light["keys"][id],
+        None => light,
+    }
+}
+
+/// Whether a value differs from the saved light's, in what the page tunes.
+fn differs(light: &Value, saved: &Value, key: Option<&str>, path: (&str, &str)) -> bool {
+    at(tuned(light, key), path) != at(tuned(saved, key), path)
+}
+
+/// A value put back as the saved light has it, in what the page tunes: all
+/// keys', or one key's own, which follows all keys again where the saved
+/// light gives the key none of its own.
+fn put_back(light: &mut Value, saved: &Value, key: Option<&str>, path: (&str, &str)) {
+    let was = at(tuned(saved, key), path).clone();
+    match key {
+        Some(id) if was.is_null() => own_take(light, id, path),
+        Some(id) => own_put(light, id, path, was),
+        None if was.is_null() => remove_at(light, path),
+        None => put_at(light, path, was),
     }
 }
 
@@ -773,7 +812,7 @@ impl LabPage {
                         self.status = if on { ("Showing the saved tuning.".into(), 0) } else { (String::new(), 0) };
                     }
                 }
-                Ask::Reset(id) | Ask::Follow(id) if self.key().is_some() => {
+                Ask::Follow(id) if self.key().is_some() => {
                     let path = match id {
                         id if (CHOICE..CHOICE + CHOICES.len() as i32).contains(&id) => CHOSEN[(id - CHOICE) as usize][0],
                         id => PARAMS.get(id.max(0) as usize).map_or(("", ""), |p| p.path),
@@ -787,16 +826,18 @@ impl LabPage {
                     }
                 }
                 Ask::Follow(_) => {}
+                // a slider back to its saved value: all keys', or the chosen key's own as saved
                 Ask::Reset(id) => {
                     let i = id.max(0) as usize;
-                    if let Some(p) = PARAMS.get(i) {
-                        let was = self.value_in(&self.saved, i);
-                        if get(&self.light, p.path) != Some(was) {
-                            self.remember(id);
-                            set(&mut self.light, p.path, was);
-                            self.rev += 1;
-                            self.status = (format!("{} back to its saved value.", p.label), 0);
-                        }
+                    if let Some(p) = PARAMS.get(i).filter(|_| self.changed(i)) {
+                        self.remember(id);
+                        let key = self.key().map(|k| k.id.clone());
+                        put_back(&mut self.light, &self.saved, key.as_deref(), p.path);
+                        self.rev += 1;
+                        self.status = match self.key() {
+                            Some(k) => (format!("{} back to {}'s saved value.", p.label, k.label), 0),
+                            None => (format!("{} back to its saved value.", p.label), 0),
+                        };
                     }
                 }
                 Ask::Revert => {
@@ -818,8 +859,14 @@ impl LabPage {
                 }
                 Ask::Hover(id, on) => {
                     if on {
-                        self.hovered = Some(id);
+                        // (a slider's reset is over its slider: the slider's hover never covers its reset's)
+                        if self.hovered != Some(id + RESET) {
+                            self.hovered = Some(id);
+                        }
                     } else if self.hovered == Some(id) {
+                        // off a slider's reset, the pointer is on its slider still
+                        self.hovered = (id >= RESET).then(|| id - RESET);
+                    } else if id < RESET && self.hovered == Some(id + RESET) {
                         self.hovered = None;
                     }
                     // the line under the drawing tells of it once the pointer rests
@@ -898,6 +945,12 @@ impl LabPage {
             None => light.clone(),
             Some(_) => key_light(light, self.own(light)),
         }
+    }
+
+    /// Whether a slider's value is other than the saved one, in what the
+    /// page tunes: all keys', or the chosen key's own. Its reset puts it back.
+    fn changed(&self, i: usize) -> bool {
+        differs(&self.light, &self.saved, self.key().map(|k| k.id.as_str()), PARAMS[i].path)
     }
 
     /// Whether the chosen key has a value of its own there.
@@ -1076,7 +1129,8 @@ impl LabPage {
 
     /// The slider drawn white: the one being typed in, or under the pointer.
     fn hot(&self) -> Option<usize> {
-        self.focused.or(self.hovered).filter(|&i| (0..READING).contains(&i)).map(|i| i as usize).filter(|i| self.sliders().contains(i))
+        // (a slider's reset is its slider's)
+        self.focused.or(self.hovered).map(|i| if i >= RESET { i - RESET } else { i }).filter(|&i| (0..READING).contains(&i)).map(|i| i as usize).filter(|i| self.sliders().contains(i))
     }
 
     /// Place the section's sliders when it opens or the stage changes size,
@@ -1209,9 +1263,19 @@ impl LabPage {
             Some(i) if (0..READING).contains(&i) && self.sliders().contains(&(i as usize)) => {
                 let p = &PARAMS[i as usize];
                 match self.key().filter(|_| self.owns(p.path)) {
-                    Some(k) => (p.label.into(), format!("{} This is {}'s own; double-click the slider, or click the dot before its name, and it follows all keys again.", p.note, k.label)),
+                    Some(k) => (p.label.into(), format!("{} This is {}'s own value; the dot before the name gives the value back to all keys.", p.note, k.label)),
                     None => (p.label.into(), p.note.into()),
                 }
+            }
+            Some(i) if (RESET..RESET + PARAMS.len() as i32).contains(&i) => {
+                let p = &PARAMS[(i - RESET) as usize];
+                let was = at(tuned(&self.saved, self.key().map(|k| k.id.as_str())), p.path).as_f64();
+                let back = match (self.key(), was) {
+                    (Some(k), Some(v)) => format!("Back to {}, {}'s saved value.", said(p, v), k.label),
+                    (Some(_), None) => "Back to all keys' value, as saved.".into(),
+                    (None, v) => format!("Back to {}, the saved value.", said(p, v.unwrap_or(p.def))),
+                };
+                (p.label.into(), back)
             }
             Some(i) if i == PAD => ("Switch's place".into(), PAD_NOTE.into()),
             Some(i) if (CHOICE..CHOICE + CHOICES.len() as i32).contains(&i) => (CHOICES[(i - CHOICE) as usize].label.into(), CHOICES[(i - CHOICE) as usize].note.into()),
@@ -1354,6 +1418,7 @@ impl LabPage {
                 at: at as f32,
                 was: was as f32,
                 moved: (at - was).abs() > 0.002,
+                changed: self.changed(i),
             });
         }
         // one lit key's switch's place: the key from above, its switch to drag
@@ -1374,7 +1439,7 @@ impl LabPage {
                 let p = &PARAMS[i];
                 let (number, unit) = reads(p, self.value(i));
                 let (at, was) = (self.knob(i, self.value(i)), self.knob(i, self.value_in(&saved_work, i)));
-                rows.push(LabRow { x: px, y: py + ph + 18.0 + n as f32 * 64.0, w: pw, id: i as i32, name: p.label.into(), hot: hot == Some(i), number: number.into(), unit: unit.into(), derived: false, at: at as f32, was: was as f32, moved: (at - was).abs() > 0.002 });
+                rows.push(LabRow { x: px, y: py + ph + 18.0 + n as f32 * 64.0, w: pw, id: i as i32, name: p.label.into(), hot: hot == Some(i), number: number.into(), unit: unit.into(), derived: false, at: at as f32, was: was as f32, moved: (at - was).abs() > 0.002, changed: self.changed(i) });
             }
         }
         // the map, open to choose a key: every cap where the art has it, the
@@ -1690,6 +1755,39 @@ mod tests {
         own_take(&mut l, "enter", ("switches", "led"));
         own_take(&mut l, "space", ("caps", "kind"));
         assert_eq!(l, light, "nothing of the keys' own left");
+    }
+
+    /// A slider's reset puts back the saved value in what the page tunes:
+    /// all keys' (a value set since the save taken out again), or one key's
+    /// own (a value of its own set since the save given back, so the key
+    /// follows all keys); a change to all keys is no change to a key's own.
+    /// And the line under the drawing says the value it goes back to.
+    #[test]
+    fn a_reset_puts_back_what_was_saved() {
+        let saved = json!({ "switches": { "beam": 3.0 }, "caps": { "top": 14.0 }, "keys": { "gpc": { "caps": { "top": 3.0 } } } });
+        let mut light = saved.clone();
+        set(&mut light, ("switches", "beam"), 27.0);
+        set(&mut light, ("switches", "glow"), 6.0);
+        own_put(&mut light, "gpc", ("caps", "top"), json!(5.0));
+        own_put(&mut light, "enter", ("place", "north"), json!(-3.0));
+        let (beam, glow, top, north) = (("switches", "beam"), ("switches", "glow"), ("caps", "top"), ("place", "north"));
+        assert!(differs(&light, &saved, None, beam) && differs(&light, &saved, None, glow) && !differs(&light, &saved, None, top));
+        assert!(!differs(&light, &saved, Some("gpc"), beam), "all keys' beam is no change to G/PC's own");
+        put_back(&mut light, &saved, None, beam);
+        put_back(&mut light, &saved, None, glow);
+        assert_eq!(light["switches"], saved["switches"], "back as saved, the value set since taken out");
+        assert!(differs(&light, &saved, Some("gpc"), top) && differs(&light, &saved, Some("enter"), north));
+        put_back(&mut light, &saved, Some("gpc"), top);
+        assert_eq!(light["keys"]["gpc"], json!({ "caps": { "top": 3.0 } }), "G/PC's own, as saved");
+        put_back(&mut light, &saved, Some("enter"), north);
+        assert_eq!(light, saved, "Enter had none of its own: it follows all keys again");
+        let p = |label: &str| PARAMS.iter().find(|p| p.label == label).unwrap();
+        assert_eq!(said(p("Beam"), 3.0), "3");
+        assert_eq!(said(p("North of centre"), 5.08), "5.08 mm north");
+        assert_eq!(said(p("Legends let through"), 0.3), "30%");
+        assert_eq!(said(p("Cap's top"), 3.0), "3 mm");
+        assert_eq!(said(p("Switch north–south"), 0.0), "centred");
+        assert_eq!(said(p("Brightness"), 1000.0), "1000 nits");
     }
 
     /// Save changes the core's file only where the tuning differs from it,

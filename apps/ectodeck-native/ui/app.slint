@@ -36,6 +36,8 @@ global Ink {
     out property <color> shade2: #2e2e2e;
     out property <color> shade3: #363636;
     out property <color> shade4: #3a3a3a;
+    // a slider's track, and its reset beside it while there is nothing to reset
+    out property <color> track: #3d3d3d;
 }
 
 // how many clickable things the pointer is over: the window shows the hand
@@ -1049,7 +1051,7 @@ component CellView inherits Rectangle {
             y: (parent.height - 4px) / 2;
             height: 4px;
             border-radius: 2px;
-            background: #3d3d3d;
+            background: Ink.track;
         }
         Rectangle {
             x: parent.at * (parent.width - 16px);
@@ -3370,7 +3372,8 @@ export struct Sketch {
 
 // One of the Light lab's sliders, where it stands beside the drawing: its
 // name, its box and unit (a derived one, as a beam's angle, quieter), its
-// knob along its track, and where it was saved, if it has moved from there
+// knob along its track, where it was saved, if it has moved from there, and
+// whether its value is other than the saved one, which its reset puts back
 export struct LabRow {
     x: length,
     y: length,
@@ -3384,6 +3387,7 @@ export struct LabRow {
     at: float,
     was: float,
     moved: bool,
+    changed: bool,
 }
 
 // A slider of the Light lab: the whole row tells the page when the
@@ -3430,19 +3434,46 @@ component LabControl inherits Rectangle {
             color: root.r.derived ? #7c7c7c : Ink.soft;
             vertical-alignment: center;
         }
+        // its track, short of the reset at its end
         CellView {
-            c: { kind: 3, x: 10px, y: 39px, w: root.r.w, h: 16px, value: root.r.at, id: root.r.id };
+            c: { kind: 3, x: 10px, y: 39px, w: root.r.w - 26px, h: 16px, value: root.r.at, id: root.r.id };
             slide(id, v) => { root.slide(id, v); }
             reset(id) => { root.reset(id); }
         }
         // where it was saved, on its track
         if root.r.moved: Rectangle {
-            x: 10px + 8px + root.r.was * (root.r.w - 16px) - 1px;
+            x: 10px + 8px + root.r.was * (root.r.w - 26px - 16px) - 1px;
             y: 41px;
             width: 2px;
             height: 12px;
             border-radius: 1px;
             background: #8a8a8a;
+        }
+        // its reset, at the end of its track: the arrow alone, as grey as the
+        // track while the value is the saved one, brighter once it differs,
+        // and brighter still under the pointer; a click puts the value back
+        Path {
+            x: 10px + root.r.w - 18px;
+            y: 40px;
+            width: 14px;
+            height: 14px;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            commands: "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8M3 3v5h5";
+            fill: transparent;
+            stroke: !root.r.changed ? Ink.track : back.has-hover ? Ink.bright : Ink.soft;
+            stroke-width: 1.4px;
+        }
+        back := TouchArea {
+            x: 10px + root.r.w - 22px;
+            y: 36px;
+            width: 22px;
+            height: 22px;
+            // (nothing to put back at the saved value)
+            enabled: root.r.changed;
+            mouse-cursor: pointer;
+            changed has-hover => { root.hovered(root.r.id + 1000, self.has-hover); }
+            clicked => { root.reset(root.r.id); }
         }
     }
 }

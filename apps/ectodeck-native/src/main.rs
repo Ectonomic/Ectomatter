@@ -684,6 +684,11 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
         slint::platform::update_timers_and_animations();
         lab.act();
     }
+    // ECTODECK_NATIVE_HOVER=x,y: the pointer moved there after the clicks
+    if let Some((x, y)) = std::env::var("ECTODECK_NATIVE_HOVER").ok().and_then(|s| s.split_once(',').and_then(|(a, b)| Some((a.trim().parse::<f32>().ok()?, b.trim().parse::<f32>().ok()?)))) {
+        window.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(x, y) });
+        lab.act();
+    }
     // ECTODECK_NATIVE_WAIT=ms: let that long pass with the pointer where the
     // clicks left it, for what shows once the pointer rests
     if let Some(ms) = std::env::var("ECTODECK_NATIVE_WAIT").ok().and_then(|v| v.parse::<u64>().ok()) {
