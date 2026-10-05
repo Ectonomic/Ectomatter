@@ -622,6 +622,34 @@ fn floats(v: Value) -> Value {
     }
 }
 
+/// A light as the lab holds it: its numbers floats (see floats), and each
+/// key's own setup only what differs from all keys' and what its kind uses,
+/// as the lab keeps it while it tunes (see own_set and prune_own). A core
+/// saved otherwise (a switch moved, set back to its cap's middle and saved)
+/// reads so, and saves so the next time. A kind a key names stays its own
+/// even where all keys have it: a button's opaque cap stays opaque whatever
+/// caps the keys have.
+fn plain(light: Value) -> Value {
+    let mut light = floats(light);
+    let ids: Vec<String> = light["keys"].as_object().map(|k| k.keys().cloned().collect()).unwrap_or_default();
+    for id in ids {
+        let numbers: Vec<(String, String)> = light["keys"][&id]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .flat_map(|(a, section)| section.as_object().into_iter().flatten().filter(|(_, v)| v.is_number()).map(move |(b, _)| (a.clone(), b.clone())))
+            .collect();
+        for (a, b) in numbers {
+            let path = (a.as_str(), b.as_str());
+            if jsonc::same(at(&light["keys"][&id], path), &all_keys(&light, path)) {
+                own_take(&mut light, &id, path);
+            }
+        }
+        prune_own(&mut light, &id);
+    }
+    light
+}
+
 impl LabPage {
     pub fn new(ui: LabWindow, mark: slint::Image, light: Value, device: LabDevice) -> LabPage {
         let asks = Rc::new(RefCell::new(Vec::new()));
@@ -662,7 +690,7 @@ impl LabPage {
         ui.set_over(ModelRc::from(over.clone()));
         ui.set_rows(ModelRc::from(rows.clone()));
         ui.set_foot(ModelRc::from(foot.clone()));
-        let light = floats(light);
+        let light = plain(light);
         // the section shown when the lab was last open
         let section = crate::uistate::get("lab_section").and_then(|v| v.as_u64()).map_or(0, |n| (n as usize).min(SECTIONS.len() - 1));
         let mut page = LabPage {
@@ -1824,6 +1852,25 @@ mod tests {
         own_take(&mut l, "space", ("caps", "kind"));
         prune_own(&mut l, "space");
         assert_eq!(l, light, "a shine-through cap has no plastic, black or milkiness to keep");
+    }
+
+    /// A core's keys read as the lab keeps them: a key's own numbers that are
+    /// all keys' (a switch set back to its cap's middle, and saved) and what
+    /// its kind does not use are no setup of its own; a button's own cap,
+    /// opaque as all keys' are now, stays its own.
+    #[test]
+    fn a_core_s_keys_read_as_only_what_differs() {
+        let all = json!({ "switches": { "kind": "led-slot", "beam": 3 }, "caps": { "kind": "shine-through", "foot": 5, "top": 14 } });
+        let mut core = all.clone();
+        core["keys"] = json!({
+            "gpc": { "caps": { "kind": "shine-through", "foot": 2, "top": 3 } },
+            "keypad-plus": { "place": { "north": 0 } },
+            "enter": { "place": { "east": 0 }, "switches": { "beam": 3.0 } },
+            "space": { "caps": { "plastic": 0.3, "top": 14 } },
+            "w": { "place": { "north": -1.5 } }
+        });
+        let read = plain(core);
+        assert_eq!(read["keys"], floats(json!({ "gpc": { "caps": { "kind": "shine-through", "foot": 2, "top": 3 } }, "w": { "place": { "north": -1.5 } } })));
     }
 
     /// A slider's reset puts back the saved value in what the page tunes:
