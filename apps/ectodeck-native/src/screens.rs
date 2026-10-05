@@ -103,7 +103,19 @@ pub fn screens() -> Vec<Value> {
     delegate_noop!(App: ignore KdeOutputDeviceModeV2);
     delegate_noop!(App: ignore wp_color_manager_v1::WpColorManagerV1);
     delegate_noop!(App: ignore wp_color_management_output_v1::WpColorManagementOutputV1);
-    delegate_noop!(App: ignore wp_image_description_v1::WpImageDescriptionV1);
+    // a screen's description asked for its levels once KWin has it ready (a
+    // screen turned off has none: asking a failed one is a protocol error)
+    impl Dispatch<wp_image_description_v1::WpImageDescriptionV1, usize> for App {
+        fn event(app: &mut Self, desc: &wp_image_description_v1::WpImageDescriptionV1, e: wp_image_description_v1::Event, i: &usize, _: &Connection, qh: &QueueHandle<Self>) {
+            match e {
+                wp_image_description_v1::Event::Ready { .. } | wp_image_description_v1::Event::Ready2 { .. } => {
+                    desc.get_information(qh, *i);
+                }
+                wp_image_description_v1::Event::Failed { .. } => app.screens[*i].done = true,
+                _ => {}
+            }
+        }
+    }
 
     let Ok(conn) = Connection::connect_to_env() else { return vec![] };
     let mut queue = conn.new_event_queue();
@@ -117,8 +129,7 @@ pub fn screens() -> Vec<Value> {
     let mut keep = Vec::new();
     for (i, o) in app.outputs.iter().enumerate() {
         let cmo = cm.get_output(o, &qh, ());
-        let desc = cmo.get_image_description(&qh, ());
-        keep.push((desc.get_information(&qh, i), desc, cmo));
+        keep.push((cmo.get_image_description(&qh, i), cmo));
     }
     for _ in 0..20 {
         if (app.screens.iter().all(|s| s.done) && app.kde.iter().all(|k| k.2)) || queue.roundtrip(&mut app).is_err() {

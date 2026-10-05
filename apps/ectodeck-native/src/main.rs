@@ -1885,8 +1885,7 @@ impl OutputHandler for App {
         // ask KWin for the screen's levels, now and whenever they change
         let id = output.id().protocol_id();
         let cmo = self.cm.get_output(&output, qh, ScreenTag(id));
-        let desc = cmo.get_image_description(qh, ScreenTag(id));
-        desc.get_information(qh, ScreenTag(id));
+        cmo.get_image_description(qh, ScreenTag(id));
         self.screens.push(ScreenLevels { id, cmo, reference: 0.0, peak: 0.0, reading: (0.0, 0.0), undimmed: None });
     }
     fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
@@ -2117,14 +2116,26 @@ impl Dispatch<WpImageDescriptionV1, PictureTag> for App {
     }
 }
 
+/// A screen's description, asked for its levels once KWin has it ready: a
+/// screen turned off has none, and asking a failed description for its
+/// levels is a protocol error, which ends the window's connection.
 impl Dispatch<WpImageDescriptionV1, ScreenTag> for App {
-    fn event(_: &mut Self, _: &WpImageDescriptionV1, _: wp_image_description_v1::Event, _: &ScreenTag, _: &Connection, _: &QueueHandle<Self>) {}
+    fn event(_: &mut Self, desc: &WpImageDescriptionV1, e: wp_image_description_v1::Event, tag: &ScreenTag, _: &Connection, qh: &QueueHandle<Self>) {
+        match e {
+            wp_image_description_v1::Event::Ready { .. } | wp_image_description_v1::Event::Ready2 { .. } => {
+                desc.get_information(qh, *tag);
+                desc.destroy();
+            }
+            wp_image_description_v1::Event::Failed { .. } => desc.destroy(),
+            _ => {}
+        }
+    }
 }
 
 impl Dispatch<WpColorManagementOutputV1, ScreenTag> for App {
     fn event(_: &mut Self, cmo: &WpColorManagementOutputV1, e: wp_color_management_output_v1::Event, tag: &ScreenTag, _: &Connection, qh: &QueueHandle<Self>) {
         if let wp_color_management_output_v1::Event::ImageDescriptionChanged = e {
-            cmo.get_image_description(qh, *tag).get_information(qh, *tag);
+            cmo.get_image_description(qh, *tag);
         }
     }
 }
@@ -2173,9 +2184,7 @@ impl Dispatch<KdeOutputDeviceV2, ()> for App {
             let name = k.1.name.clone();
             let ids: Vec<u32> = app.screens.iter().map(|s| s.id).filter(|&id| app.output_name(id).as_deref() == Some(name.as_str())).collect();
             for s in app.screens.iter().filter(|s| ids.contains(&s.id)) {
-                let desc = s.cmo.get_image_description(qh, ScreenTag(s.id));
-                desc.get_information(qh, ScreenTag(s.id));
-                desc.destroy();
+                s.cmo.get_image_description(qh, ScreenTag(s.id));
             }
             app.retarget(qh);
         }
