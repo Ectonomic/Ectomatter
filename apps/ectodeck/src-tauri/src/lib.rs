@@ -272,7 +272,7 @@ async fn hdr_layout(window: tauri::WebviewWindow, layout: hdr_board::Layout) -> 
     let best = screens.iter().max_by(|a, b| a["peak"].as_f64().partial_cmp(&b["peak"].as_f64()).unwrap_or(std::cmp::Ordering::Equal));
     let reference = best.and_then(|s| s["reference"].as_f64()).unwrap_or(203.0);
     // the Z10 core's drawing and its pieces, which the layer draws the keyboard from
-    hdr_board::layout(&window, layout, reference, (core_art::SVG.to_string(), core_art::DEVICE.to_string()))
+    hdr_board::layout(&window, layout, reference, (core_art::SVG.to_string(), core_art::device().to_string()))
 }
 
 /// The keys' light, for the HDR layer: six numbers a key (position, red,
@@ -285,8 +285,7 @@ fn hdr_light(lights: Vec<f64>) {
 /// The Z10's art: its drawing and which pieces belong to each control and screen.
 #[tauri::command]
 fn core_art() -> Result<Value, String> {
-    let device: Value = serde_json::from_str(core_art::DEVICE).map_err(|e| e.to_string())?;
-    Ok(json!({ "svg": core_art::SVG, "device": device }))
+    Ok(json!({ "svg": core_art::SVG, "device": core_art::device() }))
 }
 
 /// Each screen: whether it is in HDR, its reference white and its peak.

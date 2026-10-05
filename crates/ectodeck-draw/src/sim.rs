@@ -57,10 +57,10 @@ pub const TOP_OUTSIDE: usize = 4;
 const EVEN: u32 = 128;
 const EVEN_REACH: usize = 8;
 
-/// What a switch's housing is, as the core's "switch" says: black, its LED
-/// through a slot in its top, in a small clear window ("slot", as older
-/// switches with LEDs have it); or clear and glowing with the LED's light,
-/// its top as most RGB switches have it ("clear_top"), or all over
+/// What a switch's housing is, as the core's switches' "kind" says: black,
+/// its LED through a slot in its top, in a small clear window ("led-slot",
+/// as older switches with LEDs have it); or clear and glowing with the LED's
+/// light, its top as most RGB switches have it ("clear-top"), or all over
 /// ("clear"), which differ in how the core shares the glow out.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Switch {
@@ -70,10 +70,10 @@ pub enum Switch {
 }
 
 impl Switch {
-    /// as the core's "switch" names it; a core with none is lit as before switches had styles
+    /// as the core names it; a core with none is lit as before switches had kinds
     pub fn named(name: Option<&str>) -> Switch {
         match name {
-            Some("slot") => Switch::Slot,
+            Some("led-slot") => Switch::Slot,
             Some("clear") => Switch::Clear,
             _ => Switch::ClearTop,
         }
@@ -81,18 +81,18 @@ impl Switch {
 
     pub fn name(self) -> &'static str {
         match self {
-            Switch::Slot => "slot",
-            Switch::ClearTop => "clear_top",
+            Switch::Slot => "led-slot",
+            Switch::ClearTop => "clear-top",
             Switch::Clear => "clear",
         }
     }
 }
 
-/// What a cap is, as the core's "caps" says: black all over but its legends
-/// ("shine_through", as the Z10 came); its top black and part of its sides,
-/// below them translucent plastic ("pudding"); or translucent all over
-/// ("translucent"). A core with none is read from its values: a top that
-/// lets light through is translucent, sides that do are pudding.
+/// What a cap is, as the core's caps' "kind" says: black all over but its
+/// legends ("shine-through", as the Z10 came); its top black and part of its
+/// sides, below them translucent plastic ("pudding"); or translucent all
+/// over ("translucent"). A core with none is read from its values: plastic
+/// that lets light through is a pudding cap's.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Caps {
     ShineThrough,
@@ -101,21 +101,20 @@ pub enum Caps {
 }
 
 impl Caps {
-    pub fn of(sim: &Value) -> Caps {
-        let share = |k: &str| sim[k].as_f64().unwrap_or(0.0);
-        match sim["caps"].as_str() {
-            Some("shine_through") => Caps::ShineThrough,
+    /// the core's caps, its light's "caps"
+    pub fn of(caps: &Value) -> Caps {
+        match caps["kind"].as_str() {
+            Some("shine-through") => Caps::ShineThrough,
             Some("pudding") => Caps::Pudding,
             Some("translucent") => Caps::Translucent,
-            _ if share("tops") > 0.0 => Caps::Translucent,
-            _ if share("skirts") > 0.0 => Caps::Pudding,
+            _ if caps["plastic"].as_f64().unwrap_or(0.0) > 0.0 => Caps::Pudding,
             _ => Caps::ShineThrough,
         }
     }
 
     pub fn name(self) -> &'static str {
         match self {
-            Caps::ShineThrough => "shine_through",
+            Caps::ShineThrough => "shine-through",
             Caps::Pudding => "pudding",
             Caps::Translucent => "translucent",
         }
@@ -123,7 +122,8 @@ impl Caps {
 }
 
 /// A key's light, as the core's light description has it: all keys' values
-/// with the key's own (its entry in "keys") over them.
+/// with the key's own (its entry in "keys", by its control's id) over them,
+/// a section's values one by one.
 pub fn key_light(light: &Value, own: &Value) -> Value {
     let mut out = light.clone();
     if let Some(o) = out.as_object_mut() {
@@ -194,17 +194,19 @@ const HOUSING: f32 = 0.05;
 /// each way round the cap's foot from where it went in.
 pub const MILKY: f32 = 20.0;
 
-/// The keyboard's physical make, from the core's "sim": heights and widths
-/// in millimetres (heights above the deck), shares from 0 to 1. (The core
-/// names them for what they are: skirt_foot, cap_top, depth.)
+/// The keyboard's physical make, from the core's light: its switches, caps
+/// and wells, heights and widths in millimetres (heights above the deck),
+/// shares from 0 to 1. (The core names them as the Light lab does: the caps'
+/// foot and top, the wells' depth.)
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Physics {
     /// how many of the art's units make a millimetre, as the core's light
-    /// description says: the art is in its own units, the heights in mm
+    /// says (its "scale"): the art is in its own units, the core's lengths in mm
     pub units_per_mm: f32,
     /// where the LED sits, north of its switch's centre in the art's units
-    /// (south below 0; held inside the switch); and where the switch sits
-    /// under its cap, mm east and north of the cap's middle (a key's own)
+    /// (the core says it in mm; south below 0; held inside the switch); and
+    /// where the switch sits under its cap, mm east and north of the cap's
+    /// middle (a key's own "place")
     pub led: f32,
     pub place: [f32; 2],
     /// the brightest legend, every key lit white at full, in nits: what the
@@ -256,44 +258,45 @@ pub struct Physics {
 
 impl Physics {
     pub fn from(light: &Value) -> Physics {
-        let s = &light["sim"];
-        let f = |k: &str, d: f32| s[k].as_f64().map_or(d, |v| v as f32);
-        let share = |k: &str, d: f32| f(k, d).clamp(0.0, 0.98);
-        let top = f("cap_top", 14.0).max(0.5);
-        // what the caps let through, as their kind has it; a core of old with
-        // a top that lets light through keeps its own share for it
-        let caps = Caps::of(s);
-        let plastic = share("skirts", 0.0);
+        let (sw, cp, wl) = (&light["switches"], &light["caps"], &light["wells"]);
+        let f = |v: &Value, d: f32| v.as_f64().map_or(d, |v| v as f32);
+        let share = |v: &Value, d: f32| f(v, d).clamp(0.0, 0.98);
+        let scale = light["scale"].as_f64().unwrap_or(1.0).max(0.01);
+        let top = f(&cp["top"], 14.0).max(0.5);
+        // what the caps let through, as their kind has it
+        let caps = Caps::of(cp);
+        let plastic = share(&cp["plastic"], 0.0);
         let (skirts, tops, black) = match caps {
             Caps::ShineThrough => (0.0, 0.0, 1.0),
-            Caps::Pudding => (plastic, 0.0, f("black", 0.0).clamp(0.0, 1.0)),
-            Caps::Translucent => (plastic, if s["caps"].is_null() { share("tops", plastic) } else { plastic }, 0.0),
+            Caps::Pudding => (plastic, 0.0, f(&cp["black"], 0.0).clamp(0.0, 1.0)),
+            Caps::Translucent => (plastic, plastic, 0.0),
         };
         Physics {
-            units_per_mm: light["units_per_mm"].as_f64().map_or(1.0, |v| v as f32).max(0.01),
-            led: light["led"].as_f64().map_or(7.0, |v| v as f32),
-            place: [light["place"]["east"].as_f64().unwrap_or(0.0) as f32, light["place"]["north"].as_f64().unwrap_or(0.0) as f32],
-            nits: f("nits", 600.0).max(0.0),
-            switch: Switch::named(s["switch"].as_str()),
-            switch_top: f("switch_top", 6.5).clamp(0.05, top - 0.1),
-            switch_width: f("switch_width", 12.0).clamp(1.0, 14.0),
-            glow_spread: f("glow_spread", 4.0).clamp(0.2, 200.0),
-            beam: f("beam", 24.0).clamp(0.0, 400.0),
-            scatter: f("scatter", 0.7).clamp(0.0, 1.0),
-            sides: f("sides", 0.25).clamp(0.0, 1.0),
-            gap: f("skirt_foot", 5.0).clamp(0.0, top - 0.1),
+            units_per_mm: scale as f32,
+            // (5.08 mm north, as Cherry's and Kailh's switches have it)
+            led: (sw["led"].as_f64().unwrap_or(5.08) * scale) as f32,
+            place: [f(&light["place"]["east"], 0.0), f(&light["place"]["north"], 0.0)],
+            nits: f(&light["brightness"], 600.0).max(0.0),
+            switch: Switch::named(sw["kind"].as_str()),
+            switch_top: f(&sw["top"], 6.5).clamp(0.05, top - 0.1),
+            switch_width: f(&sw["width"], 12.0).clamp(1.0, 14.0),
+            glow_spread: f(&sw["glow"], 4.0).clamp(0.2, 200.0),
+            beam: f(&sw["beam"], 24.0).clamp(0.0, 400.0),
+            scatter: f(&sw["scattered"], 0.7).clamp(0.0, 1.0),
+            sides: f(&sw["sides"], 0.25).clamp(0.0, 1.0),
+            gap: f(&cp["foot"], 5.0).clamp(0.0, top - 0.1),
             top,
-            legends: share("legends", 0.3),
+            legends: share(&cp["legends"], 0.3),
             caps,
             skirts,
             tops,
             black,
-            milky: f("milky", 0.0).clamp(0.0, 1.0),
-            cap_in: share("cap_in", 0.5),
-            cap_out: share("cap_out", 0.18),
-            wall: f("depth", 2.0).max(0.0),
-            deck: share("deck", 0.22),
-            chassis: share("chassis", 0.4),
+            milky: f(&cp["milky"], 0.0).clamp(0.0, 1.0),
+            cap_in: share(&cp["inside"], 0.5),
+            cap_out: share(&cp["outside"], 0.18),
+            wall: f(&wl["depth"], 2.0).max(0.0),
+            deck: share(&wl["deck"], 0.22),
+            chassis: share(&wl["chassis"], 0.4),
         }
     }
 
@@ -1942,8 +1945,8 @@ mod tests {
 
     fn scene() -> (Board, Scene, Physics) {
         let tree = Tree::from_str(&crate::fixture::svg(), &usvg::Options::default()).unwrap();
-        let mut device: Value = serde_json::from_str(&crate::fixture::device()).unwrap();
-        device["light"] = serde_json::json!({ "units_per_mm": 1.38, "led": 4.5, "sim": { "nits": 600 }, "wells": "mask_1" });
+        let mut device: Value = crate::jsonc::parse(&crate::fixture::device()).unwrap();
+        device["light"] = serde_json::json!({ "scale": 1.38, "brightness": 600, "switches": { "led": 4.5 / 1.38 }, "wells": { "art": "mask_1" } });
         let b = Board::new(&tree, &device, [0x20, 0x20, 0x20], 1264, 506).unwrap();
         let scene = Scene::of(&b);
         (b, scene, Physics::from(&device["light"]))
@@ -2024,7 +2027,7 @@ mod tests {
         assert!((p.held_north(20.0) - edge).abs() < 1e-5 && (p.held_north(-20.0) + edge).abs() < 1e-5);
         assert_eq!(on_cap_top(&p, 20.0, 1.5), on_cap_top(&p, edge, 1.5));
         // a switch wider than fits in a cap is held to 14 mm, and its edge with it
-        let wide = Physics::from(&serde_json::json!({ "sim": { "switch_width": 30.0 } }));
+        let wide = Physics::from(&serde_json::json!({ "switches": { "width": 30.0 } }));
         assert!((wide.switch_edge() - 7.0 * p.units_per_mm).abs() < 1e-5);
     }
 
@@ -2171,7 +2174,7 @@ mod tests {
     /// key `k` in the simulation's order of the caps.
     fn own_setup(b: &Board, k: usize, own: Value) -> (Setup, Setup) {
         let ids: Vec<String> = b.cap_shapes.iter().map(|c| c.id.clone()).collect();
-        let mut light = serde_json::json!({ "units_per_mm": 1.38, "led": 4.5, "sim": { "nits": 600, "switch": "slot", "beam": 3.0 }, "wells": "mask_1" });
+        let mut light = serde_json::json!({ "scale": 1.38, "brightness": 600, "switches": { "kind": "led-slot", "led": 4.5 / 1.38, "beam": 3.0 }, "wells": { "art": "mask_1" } });
         let all = Setup::from(&light, &ids);
         light["keys"] = serde_json::json!({ ids[k].clone(): own });
         (all, Setup::from(&light, &ids))
@@ -2184,7 +2187,7 @@ mod tests {
     fn a_key_s_own_values_are_its_alone() {
         let (b, scene, _) = scene();
         let k = 30;
-        let (all, own) = own_setup(&b, k, serde_json::json!({ "sim": { "caps": "translucent", "skirts": 0.5 } }));
+        let (all, own) = own_setup(&b, k, serde_json::json!({ "caps": { "kind": "translucent", "plastic": 0.5 } }));
         let p = *own.of(k as u32);
         assert_eq!((p.caps, p.skirts, p.tops, p.black), (Caps::Translucent, 0.5, 0.5, 0.0));
         assert_eq!(Physics { caps: Caps::ShineThrough, skirts: 0.0, tops: 0.0, black: 1.0, ..p }, all.all, "the rest is all keys'");
@@ -2222,9 +2225,9 @@ mod tests {
         let at = |label: &str| b.cap_shapes.iter().position(|c| c.label == label).unwrap_or_else(|| panic!("{label} stands in the light"));
         let (gpc, stop) = (at("Game mode button"), at("Media stop"));
         assert!(gpc >= scene.keys.len() && stop >= scene.keys.len(), "they have no light of their own");
-        let mut light = serde_json::json!({ "units_per_mm": 1.38, "led": 4.5, "sim": { "nits": 600, "switch": "slot", "beam": 3.0, "caps": "pudding", "skirts": 0.3, "black": 0.4, "milky": 1.0 }, "wells": "mask_1" });
+        let mut light = serde_json::json!({ "scale": 1.38, "brightness": 600, "switches": { "kind": "led-slot", "led": 4.5 / 1.38, "beam": 3.0 }, "caps": { "kind": "pudding", "plastic": 0.3, "black": 0.4, "milky": 1.0 }, "wells": { "art": "mask_1" } });
         for id in [&ids[gpc], &ids[stop]] {
-            light["keys"][id.as_str()] = serde_json::json!({ "sim": { "skirt_foot": 2.0, "cap_top": 4.0, "caps": "shine_through" } });
+            light["keys"][id.as_str()] = serde_json::json!({ "caps": { "kind": "shine-through", "foot": 2.0, "top": 4.0 } });
         }
         let setup = Setup::from(&light, &ids);
         // a ray along the chassis, a millimetre up, into the media key's west side

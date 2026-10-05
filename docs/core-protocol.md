@@ -1,6 +1,6 @@
 # Ectodeck core protocol
 
-Draft 5, 2026-10-03. Draft 5 adds the device's light (section 4), the description Ectodeck's Light lab tunes and draws the device's light from. Draft 4, 2026-09-29, was for review before anything was built on it. Draft 3 took in the review of the M3 plugin's author. Draft 4 replaces the device picture with one drawing in named, numbered pieces (section 4, the device's art), so a core brings its own art and the frontend draws it with nothing added by hand. It adds a layout to the shared settings language (section 6, Layout), so a core arranges its settings without drawing them, and lets a core's files carry comments.
+Draft 6, 2026-10-04. Draft 6 writes a device's description to be read by people as well as programs (section 4): each control is tied to the drawing by one number, its other pieces following by rule; the light's values are named as the Light lab names them, every length in millimetres; and the lock lights are described. Draft 5, 2026-10-03, added the device's light (section 4), the description Ectodeck's Light lab tunes and draws the device's light from. Draft 4, 2026-09-29, was for review before anything was built on it. Draft 3 took in the review of the M3 plugin's author. Draft 4 replaces the device picture with one drawing in named, numbered pieces (section 4, the device's art), so a core brings its own art and the frontend draws it with nothing added by hand. It adds a layout to the shared settings language (section 6, Layout), so a core arranges its settings without drawing them, and lets a core's files carry comments.
 
 Ectodeck is one app for every device on a desk. It follows the model RetroArch made work for emulators: one frontend, and the engines that know each device brought in as **cores**. The frontend owns the windows, the tray, profiles, and every feature that spans devices. A core owns the truth about the devices it handles: how to find them, what they can do, and how to talk to them.
 
@@ -83,11 +83,11 @@ Errors use JSON-RPC's error object, with a `message` written for the person usin
   "firmware": { "kind": "custom", "version": "1.171", "build": 1, "features": [], "later": [{ "id": "sliders.read", "since": 2 }] },
   "art": "art/z10.svg",
   "controls": [
-    { "id": "esc", "kind": "key", "label": "Esc", "control": 12, "legend": 112 },
-    { "id": "volume", "kind": "slider", "label": "Volume", "control": 105 }
+    { "id": "esc", "kind": "key", "label": "Esc", "art": 12 },
+    { "id": "volume", "kind": "slider", "label": "Volume", "art": 105 }
   ],
   "screens": [
-    { "id": "lcd", "label": "Display", "screen": 1, "overlay": 1 }
+    { "id": "lcd", "label": "Display", "art": 1 }
   ],
   "layout": "layouts/z10.json",
   "capabilities": { "keys": { }, "macros": { }, "lighting": { }, "displays": { }, "profiles": { }, "settings": { } }
@@ -96,7 +96,7 @@ Errors use JSON-RPC's error object, with a `message` written for the person usin
 
 - **art** is the device's drawing, one SVG file shipped in the core's folder. The frontend draws the device from it and nothing else (see the device's art, below).
 - **firmware** says whether the device runs its maker's firmware (`"kind": "retail"`), Ectodeck's custom firmware (`"custom"`, with its build), or neither (`"unknown"`). **features** lists what the custom build adds, such as `sliders.read`; a core offers a custom feature, and accepts its methods, only when the device's build has it, so a device on retail firmware is never sent a command it does not know. **later** names features of newer builds, for the frontend to mention. The frontend keeps custom features apart from everything else, labelled as needing Ectodeck's firmware.
-- **controls** lists every part of the device a capability can refer to, and which pieces of the drawing belong to it. Controls have stable ids, so settings stay attached to the right key across versions of a core. `label` is the control's name in the interface; `short`, where a control has one, is a shorter name for where room is tight, as on the Light lab's map of the keys. What is printed on a control is in the drawing.
+- **controls** lists every part of the device a capability can refer to, and which pieces of the drawing belong to it. Controls have stable ids, so settings stay attached to the right key across versions of a core; an id is a word a person can read, such as `esc`, `f1` or `keypad-plus`, and names the control everywhere else in the description. `label` is the control's name in the interface; `short`, where a control has one, is a shorter name for where room is tight, as on the Light lab's map of the keys. What is printed on a control is in the drawing. A core may give a control fields of its own, as the Z10 core gives each key its `pos`, its place in the keyboard's own reports.
 - **screens** lists the device's displays and the pieces of the drawing that show them. The displays capability refers to a screen by its id, as it does to a control. A key with its own small screen, as on a Stream Deck, is a control that also names its `screen`.
 - **layout** arranges the device's settings on the frontend's pages (section 6, Layout).
 - **capabilities** says which capabilities the device offers, each with its own description (section 5). A device offers only what it really has.
@@ -119,7 +119,7 @@ The kinds, in the order they usually sit from the bottom of the drawing to the t
 | `screen` | Where a display sits | Shows the display's live picture inside it |
 | `overlay` | Anything in front of everything else, such as the glass over a screen and its glare | Draws it as it is |
 
-**Tying pieces together.** The core says which pieces belong to which control or screen, in its device description: `"control": 12, "legend": 112`. One tie is automatic: `illumination_12` belongs to whatever uses `control_12`. A control whose light is drawn in more pieces, or under another number, lists them all: `"illumination": [12, 212, 412]`. Masks need no tie, because the drawing applies them itself. A piece that nothing ties to, such as the body, the print on the body or an overlay, is drawn as it is and never changes.
+**Tying pieces together.** Each control names its piece of the drawing by number, `"art": 12`, and its other pieces follow from that number by rule: its control is `control_12`, its legend `legend_112` (100 more) and its light `illumination_12`, `illumination_212` and `illumination_412` (200 and 400 more), where the drawing has them. A key with no LED of its own says so, `"lit": false`. A screen's `"art": 1` is its `screen_1` and the `overlay_1` over it. A drawing numbered otherwise (a device with 200 controls or more, say) names a control's pieces itself: `"legend": 312`, `"illumination": [12, 212, 412]`. Masks need no tie, because the drawing applies them itself. A piece that nothing ties to, such as the body, the print on the body or an overlay, is drawn as it is and never changes.
 
 **The file.**
 
@@ -131,31 +131,47 @@ The kinds, in the order they usually sit from the bottom of the drawing to the t
 
 ### The device's light
 
-How the device's light gets out, for the frontend to draw it as light: the `light` section of the device description. The frontend simulates it, following each LED through the device's shape as a lamp's light is followed, so the section describes the device physically rather than how it should look. Ectodeck's Light lab tunes it on any device and saves it back here. The lab is the frontend's: it knows no device, and a core carries none of it.
+How the device's light gets out, for the frontend to draw it as light: the `light` section of the device description. The frontend simulates it, following each LED through the device's shape as a lamp's light is followed, so the section describes the device physically rather than how it should look. Ectodeck's Light lab tunes it on any device and saves it back here, each value it changes in its place, so the file's comments and lines stay as the core's author wrote them. The lab is the frontend's: it knows no device, and a core carries none of it.
 
-```json
+```jsonc
 "light": {
-  "units_per_mm": 1.38,
-  "typical": "24",
-  "led": 7.0,
-  "sim": { "nits": 705, "switch": "slot", "beam": 3.0, "switch_top": 5.7, "cap_top": 14.0, "legends": 0.3, "caps": "shine_through", "depth": 2.0, "deck": 0.22, "chassis": 0.4 },
-  "legend": { "unlit": 0.15 },
-  "lcd": { "nits": 324, "unlit": 4.1, "field": 0.8, "dot": 0.84, "glass": 1.0 },
-  "wells": "mask_1",
+  "scale": 1.38,       // the drawing's units to the millimetre
+  "typical": "2",      // the key the Light lab draws for all keys
+  "brightness": 705,   // the brightest legend, every key lit white at full
+  "switches": { "kind": "led-slot", "top": 5.7, "width": 12, "led": 5.08, "beam": 3 },
+  "caps": { "kind": "shine-through", "foot": 5, "top": 14, "legends": 0.3, "inside": 0.5, "outside": 0.18 },
+  "legends": { "unlit": 0.15 },
+  "wells": { "art": "mask_1", "depth": 2, "deck": 0.22, "chassis": 0.4 },
+  "display": { "lit": 324, "unlit": 4.1, "background": 0.8, "dot": 0.84, "glass": 1 },
   "keys": {
-    "64": { "place": { "east": 0.0, "north": 9.5 } },
-    "106": { "sim": { "caps": "shine_through" } }
+    "keypad-plus": { "place": { "east": 0, "north": 9.5 } },
+    "space": { "caps": { "kind": "shine-through" } }
   }
 }
 ```
 
-- **units_per_mm** is how many of the art's units make a millimetre. Positions come from the art in its own units; heights and widths here are in millimetres.
-- **typical** is the control the Light lab draws in section when no key is chosen: a key as most of the device's are.
-- **led** is where each key's LED sits, north of its switch's centre in the art's units (south below 0).
-- **sim** is the device's make: its switches, its caps and their plastic, the wells' depth, and what each surface gives back. Its values are the Light lab's sliders; each is described there and in the file's own `about`.
-- **legend**, **lcd** and **wells** are how a legend looks with its LED off, the display's backlit dots, and the mask piece of the drawing that holds the wells.
-- **keys** holds a key's own values, where they differ from all keys', by the control's stable id (the Z10's description uses its key numbers until its controls carry ids). An entry takes any of the sections above that belong to a key, `led` and `sim` and `legend`, and only what differs: a stock cap among pudding caps, say. It can also say where the key's switch sits under its cap: **place**, how far east and north of the cap's middle, in millimetres, as on a long key whose switch is off its middle. The LED goes with its switch. A key with nothing of its own has no entry.
-- A button with no light of its own stands in the keys' light too: the drawing shows it as a block (its control's first piece, with no shadow drawn under it as a cap has; its face the next piece where that lies inside it). Its entry in **keys** says where it stands and how high, `skirt_foot` and `cap_top`, as the Z10's G/PC and media keys stand on its chassis.
+- **scale** is how many of the drawing's units make a millimetre. Positions come from the drawing in its own units; every length in the description is in millimetres, and every brightness in nits.
+- **typical** is the control the Light lab draws in section when no key is chosen, by its id: a key as most of the device's are.
+- **brightness** is the brightest legend, with every key lit white at full. Everything else the LEDs light is as bright as the simulation finds it beside that.
+- **switches** is the switch under each key: its housing's `kind` (`led-slot`, black with its LED through a slot in its top; `clear-top`; or `clear`), its `top` above the deck and its `width`, where its LED sits (`led`, north of the switch's middle, south below 0), how tight the LED's `beam` is, and how a clear housing glows (`scattered`, `sides`, `glow`).
+- **caps** is the cap over it: its `kind` (`shine-through`, `pudding` or `translucent`), its skirt's `foot` and its `top` above the deck, the shares of light its `legends` and its `plastic` let through, how far down a pudding cap's sides its `black` comes, how `milky` the plastic is, and the shares its `inside` and `outside` give back.
+- **legends**, **wells** and **display** are how a legend looks with its LED off (`unlit`, a share of the drawing's grey); the wells (the mask piece of the drawing that holds them, their `depth`, and the shares the `deck` and the `chassis` give back); and the display's backlit dots, in nits, with how much of its cell a dot fills and how strongly the glass shows its sheen.
+- Each value is one of the Light lab's sliders or choices, named as the lab names it. The Z10's file says what each one is in a comment beside it.
+- **keys** holds a key's own values, where they differ from all keys', by the control's id. An entry takes any of the sections above that belong to a key, `switches`, `caps` and `legends`, and only what differs: a stock cap among pudding caps, say. It can also say where the key's switch sits under its cap: **place**, how far east and north of the cap's middle, as on a long key whose switch is off its middle. The LED goes with its switch. A key with nothing of its own has no entry.
+- A button with no light of its own stands in the keys' light too: the drawing shows it as a block (its control's first piece, with no shadow drawn under it as a cap has; its face the next piece where that lies inside it). Its entry in **keys** says where it stands and how high, its caps' `foot` and `top`, as the Z10's G/PC and media keys stand on its chassis.
+
+The lock lights, small windows with an LED behind each, are the description's `lock_lights`: the piece of the drawing for each of `num`, `caps` and `scroll`, their `colour` and `brightness`, how far from the LED a window stays bright (`spread`), how lit its corners stay (`floor`), and the little light out of its edges (`spill`, its brightness and how far it reaches).
+
+```jsonc
+"lock_lights": {
+  "num": "num-lock-light", "caps": "caps-lock-light", "scroll": "scroll-lock-light",
+  "colour": "#ff6000",
+  "brightness": 300,
+  "spread": 1.45,
+  "floor": 0.5,
+  "spill": { "brightness": 6, "reach": 0.72 }
+}
+```
 
 What a device has decides what the Light lab tunes: keys with LEDs under caps, wells round them, a display, small lights behind windows. Anything the description leaves out is the frontend's ordinary default.
 

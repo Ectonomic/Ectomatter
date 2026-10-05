@@ -221,7 +221,8 @@ impl Values {
         let p = Physics::from(light);
         let mm = p.units_per_mm as f64;
         let edge = p.switch_edge() as f64;
-        let led = raw(light, ("led", "")).clamp(-edge, edge);
+        // the LED's place in the art's units, as the simulation holds it
+        let led = (p.led as f64).clamp(-edge, edge);
         Values {
             p,
             slot: p.switch == Switch::Slot,
@@ -246,11 +247,11 @@ impl Values {
             depth: p.wall as f64,
             deck: p.deck as f64,
             chassis: p.chassis as f64,
-            lcd_lit: raw(light, ("lcd", "nits")),
-            lcd_unlit: raw(light, ("lcd", "unlit")),
-            lcd_field: raw(light, ("lcd", "field")),
-            lcd_dot: raw(light, ("lcd", "dot")),
-            lcd_glass: raw(light, ("lcd", "glass")),
+            lcd_lit: raw(light, ("display", "lit")),
+            lcd_unlit: raw(light, ("display", "unlit")),
+            lcd_field: raw(light, ("display", "background")),
+            lcd_dot: raw(light, ("display", "dot")),
+            lcd_glass: raw(light, ("display", "glass")),
             nits: p.nits as f64,
             mm,
             g,
@@ -717,7 +718,7 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
             let _ = write!(area, " L{x1:.1} {base:.1} L{x0:.1} {base:.1} Z");
             s.path(&area, AMBER, "none", 1.0, 0.1);
             s.stroke(&poly(&pts, false), AMBER, 1.6);
-            let (n, u) = super::reads(&PARAMS[slider("Brightness")], v.nits, v.mm);
+            let (n, u) = super::reads(&PARAMS[slider("Brightness")], v.nits);
             s.text(x0 - 8.0, base - tall + 4.0, &format!("{n} {u}"), if white("Brightness") { WHITE_WORD } else { QUIET_WORD }, 1.0);
             s.text(x0 - 8.0, base + 4.0, "0", QUIET_WORD, 1.0);
             let peak = pts.iter().zip(&light).fold((0.0, x0), |a, (q, &l)| if l > a.0 { (l, q.0) } else { a }).1;
@@ -1172,7 +1173,7 @@ mod tests {
 
     fn core_light() -> Value {
         let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../cores/evga-z10/device.json")).unwrap();
-        super::super::simulated(serde_json::from_str::<Value>(&text).unwrap()["light"].clone())
+        ectodeck_draw::jsonc::parse(&text).unwrap()["light"].clone()
     }
 
     /// Every section's stage reads as an SVG with a line to each of its
@@ -1181,10 +1182,10 @@ mod tests {
     #[test]
     fn the_stages_draw() {
         let light = core_light();
-        for (k, x) in [("cap_top", 25.0), ("skirt_foot", 24.0), ("depth", 12.0), ("depth", 0.0), ("switch_top", 30.0), ("switch_width", 1.0), ("beam", 1.0)] {
+        for ((a, b), x) in [(("caps", "top"), 25.0), (("caps", "foot"), 24.0), (("wells", "depth"), 12.0), (("wells", "depth"), 0.0), (("switches", "top"), 30.0), (("switches", "width"), 1.0), (("switches", "beam"), 1.0)] {
             for (w, h) in [(1032.0, 452.0), (1232.0, 572.0), (1800.0, 900.0)] {
                 let mut l = light.clone();
-                l["sim"][k] = serde_json::json!(x);
+                l[a][b] = serde_json::json!(x);
                 let v = Values::of(&l, Geometry::default());
                 for section in 0..4 {
                     let lens = Lens::of(section);
@@ -1212,7 +1213,7 @@ mod tests {
         let v = Values::of(&light, Geometry::default());
         let places = places(&v, Lens::Led, 1232.0, 572.0, 2, 0.0, None);
         let mut moved = light.clone();
-        moved["sim"]["switch_top"] = serde_json::json!(9.5);
+        moved["switches"]["top"] = serde_json::json!(9.5);
         let st = stage(&Values::of(&moved, Geometry::default()), Lens::Led, 1232.0, 572.0, &places, None);
         let lines = st.svg.matches(r##"stroke="#737373""##).count();
         assert_eq!(lines, places.len(), "a line from each slider, from where it stood");

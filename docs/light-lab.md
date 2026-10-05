@@ -1,6 +1,6 @@
 # The Light lab and the light model
 
-2026-10-03. Approved, and built in this order: the boundary, then one key's own setup.
+2026-10-03. Approved, and built in this order: the boundary, then one key's own setup. 2026-10-04: the light description written to be read, its values named as the lab names them (the core protocol's draft 6).
 
 The Light lab is Ectodeck's, not a device's. It is built to tune any peripheral's light, and the Z10 is only the first device it tunes. This sets out where the boundary runs, so the lab never carries a device and a core never carries the lab.
 
@@ -36,27 +36,27 @@ Windows are the Z10's lock lights today, and the logos, light bars and rings of 
 
 ## 3. The light description
 
-The `light` section of a core's device description, `cores/<core>/device.json`, written into the core protocol as its own section. It holds:
+The `light` section of a core's device description, `cores/<core>/device.json` (JSON with comments), written into the core protocol as its own section. It holds:
 
-- the art pieces its parts use (the Z10's wells are `mask_1`);
+- how many of the art's units make a millimetre (`scale`, 1.38 for the Z10);
 - the typical key the lab draws when no key is chosen (the Z10's 2 key);
-- how many of the art's units make a millimetre (1.38 for the Z10);
-- each part's values;
-- under `keys`, a key's own values, by the control's stable id, so they stay on the right key across versions of the core. The Z10's file still uses its key number (`pos`) as that id.
+- each part's values, in sections named as the lab's are (`switches`, `caps`, `legends`, `wells`, `display`), each value named as its slider or choice is, every length in millimetres;
+- the art pieces its parts use (the Z10's wells are `mask_1`);
+- under `keys`, a key's own values, by the control's stable id (`esc`, `space`, `keypad-plus`), so they stay on the right key across versions of the core.
 
 For example, a Z10 with pudding caps on all but a stock spacebar, and keypad +'s switch in the top half of its cap:
 
-```json
+```jsonc
 "light": {
-  "sim": { "caps": "pudding", "skirts": 0.3, "black": 0.4, "milky": 1.0 },
+  "caps": { "kind": "pudding", "plastic": 0.3, "black": 0.4, "milky": 1 },
   "keys": {
-    "64": { "place": { "east": 0.0, "north": 9.5 } },
-    "106": { "sim": { "caps": "shine_through" } }
+    "keypad-plus": { "place": { "east": 0, "north": 9.5 } },
+    "space": { "caps": { "kind": "shine-through" } }
   }
 }
 ```
 
-A key's entry holds only what differs from all keys.
+A key's entry holds only what differs from all keys. Save writes each value the lab changed in its place in the file, adds what is new and takes out what was given back; the file's comments and lines stay as they were.
 
 ## 4. How the lab follows the device
 

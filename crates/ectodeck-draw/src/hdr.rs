@@ -60,8 +60,8 @@ pub struct KeyGeometry {
     pub legends: Vec<(f32, f32)>,
 }
 
-/// A control's id: the core protocol's own, or the key's number where a
-/// core's description has only that (the Z10's).
+/// A control's id, as the core names it (or its number in the keyboard's
+/// reports, where a core names none).
 pub fn control_id(c: &Value) -> String {
     c["id"].as_str().map(str::to_string).or_else(|| c["pos"].as_u64().map(|p| p.to_string())).unwrap_or_default()
 }
@@ -138,20 +138,27 @@ struct Model {
 impl Model {
     fn from(l: &Value) -> Model {
         let f = |v: &Value, d: f32| v.as_f64().map_or(d, |v| v as f32);
+        let d = &l["display"];
         Model {
-            // or, as the core once had it, the legends' own nits
-            nits: f(&l["sim"]["nits"], f(&l["legend"]["nits"], 600.0)).max(0.0),
-            legend_unlit: f(&l["legend"]["unlit"], 0.15).clamp(0.0, 1.0),
-            lcd_nits: f(&l["lcd"]["nits"], 324.0).max(0.0),
-            lcd_unlit: f(&l["lcd"]["unlit"], 4.1).max(0.0),
-            lcd_field: f(&l["lcd"]["field"], 0.8).max(0.0),
-            lcd_dot: f(&l["lcd"]["dot"], 0.84).clamp(0.05, 1.0),
-            lcd_glass: f(&l["lcd"]["glass"], 1.0).max(0.0),
+            nits: f(&l["brightness"], 600.0).max(0.0),
+            legend_unlit: f(&l["legends"]["unlit"], 0.15).clamp(0.0, 1.0),
+            lcd_nits: f(&d["lit"], 324.0).max(0.0),
+            lcd_unlit: f(&d["unlit"], 4.1).max(0.0),
+            lcd_field: f(&d["background"], 0.8).max(0.0),
+            lcd_dot: f(&d["dot"], 0.84).clamp(0.05, 1.0),
+            lcd_glass: f(&d["glass"], 1.0).max(0.0),
         }
     }
 }
 
-/// The display's light, from the core's "lcd".
+/// A colour as the core writes it, "#rrggbb".
+fn hex(s: &str) -> Option<[u8; 3]> {
+    let s = s.strip_prefix('#').filter(|s| s.len() == 6)?;
+    let c = |i: usize| u8::from_str_radix(&s[i..i + 2], 16).ok();
+    Some([c(0)?, c(2)?, c(4)?])
+}
+
+/// The display's light, from the core's light's "display".
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Lcd {
     pub lit: f32,
@@ -512,9 +519,14 @@ impl Board {
             }
         };
 
+        // Each control's pieces in the art, by its number there ("art"): its
+        // cap or button control_<art>, its legend legend_<100 + art> (or the
+        // one it names, in art numbered otherwise); a key has an LED unless
+        // the core says it has none ("lit": false)
         let controls = device["controls"].as_array().ok_or("the device names no controls")?;
-        let lit = |c: &Value| c["illumination"].is_array();
         let sliders = |c: &Value| c.get("slider").is_some();
+        let lit = |c: &Value| !sliders(c) && c["lit"].as_bool() != Some(false);
+        let legend_of = |c: &Value| c["legend"].as_u64().or_else(|| c["art"].as_u64().map(|n| 100 + n));
         let label = |c: &Value| c["label"].as_str().unwrap_or_default().to_string();
         let short = |c: &Value| c["short"].as_str().map(str::to_string);
         // whether one box lies inside another, not all of it
@@ -540,7 +552,7 @@ impl Board {
         let mut shade = Pixmap::new(w, h).ok_or("board too small")?;
         let mut pix = Pixmap::new(w, h).ok_or("board too small")?;
         for c in controls.iter().filter(|c| !sliders(c)) {
-            let Some(n) = c["control"].as_u64() else { continue };
+            let Some(n) = c["art"].as_u64() else { continue };
             let id = format!("control_{n}");
             let parts = children(&id);
             let shadow = parts.len() >= 3 && matches!(&parts[0], usvg::Node::Group(g) if !g.filters().is_empty());
@@ -554,7 +566,7 @@ impl Board {
             }
         }
         for c in controls.iter().filter(|c| !lit(c)) {
-            if let Some(n) = c["legend"].as_u64() {
+            if let Some(n) = legend_of(c) {
                 draw(&mut pix, &format!("legend_{n}"));
             }
         }
@@ -564,9 +576,8 @@ impl Board {
 
         // The wells, where the deck is open to the keys' light: a clip in the
         // art, in the art's own units, as the group it clips has them. That
-        // group's transform takes the art's units to the drawing's; the core's
-        // lengths are in the art's units.
-        let wells_id = device["light"]["wells"].as_str().unwrap_or("mask_1");
+        // group's transform takes the art's units to the drawing's.
+        let wells_id = device["light"]["wells"]["art"].as_str().unwrap_or("mask_1");
         let found = find_clip(tree.root(), wells_id);
         let art = found.map_or(Transform::identity(), |(g, _)| g.abs_transform());
         // the art's units to the board's pixels
@@ -611,11 +622,11 @@ impl Board {
         let mut cap_shapes = Vec::new();
         for c in controls.iter().filter(|c| lit(c)) {
             let Some(pos) = c["pos"].as_u64() else { continue };
-            let legend_n = c["legend"].as_u64();
+            let legend_n = legend_of(c);
             let print = legend_n.and_then(|n| tree.node_by_id(&format!("legend_{n}"))).and_then(first_fill).unwrap_or([0x9e, 0x9e, 0x9e]);
             let print = [print[0] as f32 / 255.0, print[1] as f32 / 255.0, print[2] as f32 / 255.0];
             let legend = legend_n.and_then(|n| shape(&format!("legend_{n}")));
-            let parts = c["control"].as_u64().map(|n| children(&format!("control_{n}"))).unwrap_or_default();
+            let parts = c["art"].as_u64().map(|n| children(&format!("control_{n}"))).unwrap_or_default();
             let (foot, face, rounds) = match (parts.get(1), parts.get(2)) {
                 (Some(f), Some(a)) => (Some(rect(f)), rect(a), [round(f), round(a)]),
                 _ => (None, [0.0; 4], [0.0; 2]),
@@ -634,7 +645,7 @@ impl Board {
         // inside it, as a button's in its bezel, or else all of its top).
         let mut others = Vec::new();
         for c in controls.iter().filter(|c| !lit(c) && !sliders(c)) {
-            let Some(n) = c["control"].as_u64() else { continue };
+            let Some(n) = c["art"].as_u64() else { continue };
             let parts = children(&format!("control_{n}"));
             let shadow = parts.len() >= 3 && matches!(&parts[0], usvg::Node::Group(g) if !g.filters().is_empty());
             let (foot, face) = match (shadow, parts.first(), parts.get(1)) {
@@ -646,26 +657,21 @@ impl Board {
             others.push((rect(foot), rect(face), [round(foot), round(face)]));
             cap_shapes.push(CapShape { id: control_id(c), label: label(c), short: short(c), foot: rect(foot), lit: false, legend: false, button: !shadow });
         }
-        // The lock lights, from the core's "indicators": each a small window
-        // with an LED under it, brightest over the LED and dimmer to the
-        // window's corners (its diffuser keeps it from falling far), and a
-        // little of its light out of the window's edges onto the chassis.
-        let ind = &device["indicators"];
+        // The lock lights, from the core's "lock_lights": each a small window
+        // with an LED under it (the art's piece the core names), brightest over
+        // the LED and dimmer to the window's corners (its diffuser keeps it from
+        // falling far), and a little of its light out of the window's edges
+        // onto the chassis. Their lengths are in mm, read in the art's units.
+        let ll = &device["lock_lights"];
         let num = |v: &Value, d: f32| v.as_f64().map_or(d, |v| v as f32);
-        let (spread, floor) = (num(&ind["spread"], 2.0).max(0.05), num(&ind["floor"], 0.5).clamp(0.0, 1.0));
-        let reach = num(&ind["spill"]["reach"], 1.0).max(0.05);
-        let indicators = ind["lights"]
-            .as_array()
+        let scale = device["light"]["scale"].as_f64().unwrap_or(1.0).max(0.01);
+        let length = |v: &Value, d: f64| (v.as_f64().unwrap_or(d) * scale) as f32;
+        let (spread, floor) = (length(&ll["spread"], 1.45).max(0.05), num(&ll["floor"], 0.5).clamp(0.0, 1.0));
+        let reach = length(&ll["spill"]["reach"], 0.72).max(0.05);
+        let indicators = [("num", 0), ("caps", 1), ("scroll", 2)]
             .into_iter()
-            .flatten()
-            .filter_map(|l| {
-                let bit = match l["lock"].as_str()? {
-                    "num" => 0,
-                    "caps" => 1,
-                    "scroll" => 2,
-                    _ => return None,
-                };
-                let id = l["art"].as_str()?;
+            .filter_map(|(lock, bit)| {
+                let id = ll[lock].as_str()?;
                 let window = shape(id)?;
                 // the window's edges and middle, in the board's pixels
                 let b = node(id)?.abs_bounding_box();
@@ -701,8 +707,8 @@ impl Board {
                 Some(Indicator { bit, window, lit, spill: Shape { x: sx, y: sy, w: sw, h: sh, cover } })
             })
             .collect();
-        let rgb = ind["rgb"].as_array().map(|c| [0, 1, 2].map(|i| c.get(i).and_then(|v| v.as_u64()).unwrap_or(255).min(255) as u8)).unwrap_or([255; 3]);
-        let indicator_light = (num(&ind["nits"], 300.0).max(0.0), num(&ind["spill"]["nits"], 6.0).max(0.0), rgb);
+        let rgb = ll["colour"].as_str().and_then(hex).unwrap_or([255; 3]);
+        let indicator_light = (num(&ll["brightness"], 300.0).max(0.0), num(&ll["spill"]["brightness"], 6.0).max(0.0), rgb);
         // the board with none of the keys' light: the body and its print (over
         // the ground's colour, sRGB-encoded) in linear light under the caps'
         // shadows (the room's light, which the LEDs' light is not under), the caps over it
@@ -1439,12 +1445,12 @@ mod tests {
     /// brightest legend at 600 nits, and the core's own defaults for the rest.
     fn light() -> Value {
         serde_json::json!({
-            "units_per_mm": 1.38,
-            "led": 4.5,
-            "sim": { "nits": 600 },
-            "legend": { "unlit": 0.15 },
-            "lcd": { "nits": 400 },
-            "wells": "mask_1"
+            "scale": 1.38,
+            "brightness": 600,
+            "switches": { "led": 4.5 / 1.38 },
+            "legends": { "unlit": 0.15 },
+            "wells": { "art": "mask_1" },
+            "display": { "lit": 400 }
         })
     }
 
@@ -1457,7 +1463,7 @@ mod tests {
     #[test]
     fn a_key_in_section_is_as_the_art_has_it() {
         let (_, _, b) = board();
-        let g = b.key_geometry("24", 1.38).expect("the 2 key");
+        let g = b.key_geometry("2", 1.38).expect("the 2 key");
         eprintln!("{g:?}");
         let near = |a: f32, b: f32| (a - b).abs() < 0.06;
         assert!(near(g.foot, 17.39) && near(g.inset, 1.63), "its foot and face");
@@ -1475,7 +1481,7 @@ mod tests {
     /// The Z10's board at the size the window first draws it, unlit.
     fn board() -> (Tree, Value, Board) {
         let tree = Tree::from_str(&crate::fixture::svg(), &usvg::Options::default()).unwrap();
-        let mut device: Value = serde_json::from_str(&crate::fixture::device()).unwrap();
+        let mut device: Value = crate::jsonc::parse(&crate::fixture::device()).unwrap();
         device["light"] = light();
         let b = Board::new(&tree, &device, [0x20, 0x20, 0x20], 1264, 506).unwrap();
         (tree, device, b)
@@ -1570,9 +1576,10 @@ mod tests {
         let south = (mx, (oy + ka * (f[3] - (f[3] - a[3]) * 0.33)) as i32);
         let mut lit = |skirts: f32| {
             let mut l = device["light"].clone();
-            l["sim"]["switch"] = serde_json::json!("slot");
-            l["sim"]["beam"] = serde_json::json!(3.0);
-            l["sim"]["skirts"] = serde_json::json!(skirts);
+            l["switches"]["kind"] = serde_json::json!("led-slot");
+            l["switches"]["beam"] = serde_json::json!(3.0);
+            // (pudding caps, black nowhere, as the plastic letting light through has it)
+            l["caps"] = serde_json::json!({ "plastic": skirts });
             b.set_sim(Arc::new(Simulator::settle(&scene, &Setup::alike(Physics::from(&l)), 4000)));
             let frame = b.compose(&white(&b), 0, 254.0, 1000.0 / 254.0);
             (b.most.skirt / b.most.legend, lum(&frame, &b, north), lum(&frame, &b, south))
@@ -1601,11 +1608,9 @@ mod tests {
         let south = (mx, (oy + ka * (f[3] - (f[3] - a[3]) * 0.3)) as i32);
         let mut lit = |milky: f32| {
             let mut l = device["light"].clone();
-            l["sim"]["switch"] = serde_json::json!("slot");
-            l["sim"]["beam"] = serde_json::json!(3.0);
-            l["sim"]["skirts"] = serde_json::json!(0.3);
-            l["sim"]["black"] = serde_json::json!(0.4);
-            l["sim"]["milky"] = serde_json::json!(milky);
+            l["switches"]["kind"] = serde_json::json!("led-slot");
+            l["switches"]["beam"] = serde_json::json!(3.0);
+            l["caps"] = serde_json::json!({ "kind": "pudding", "plastic": 0.3, "black": 0.4, "milky": milky });
             b.set_sim(Arc::new(Simulator::settle(&scene, &Setup::alike(Physics::from(&l)), 4000)));
             let frame = b.compose(&white(&b), 0, 254.0, 1000.0 / 254.0);
             // the black at each of the top's corners too: on the diagonal from the
@@ -1639,9 +1644,9 @@ mod tests {
         let scene = Scene::of(&b);
         let ids: Vec<String> = b.cap_shapes.iter().map(|c| c.id.clone()).collect();
         let mut l = device["light"].clone();
-        for (k, v) in [("caps", serde_json::json!("pudding")), ("skirts", 0.3.into()), ("black", 0.4.into()), ("milky", 1.0.into()), ("switch", "slot".into()), ("beam", 3.0.into())] {
-            l["sim"][k] = v;
-        }
+        l["caps"] = serde_json::json!({ "kind": "pudding", "plastic": 0.3, "black": 0.4, "milky": 1.0 });
+        l["switches"]["kind"] = serde_json::json!("led-slot");
+        l["switches"]["beam"] = serde_json::json!(3.0);
         let key = |label: &str| {
             let pos = device["controls"].as_array().unwrap().iter().find(|c| c["label"] == label).unwrap()["pos"].as_u64().unwrap() as u32;
             b.keys.iter().position(|k| k.pos == pos).unwrap()
@@ -1653,7 +1658,7 @@ mod tests {
         };
         let (all_off, all_lit) = frames(&mut b, &l);
         let (bands_w, bands_far) = (b.bands[w].take().unwrap(), b.bands[far].take().unwrap());
-        l["keys"] = serde_json::json!({ ids[b.keys[w].cap.unwrap() as usize].clone(): { "sim": { "caps": "shine_through" } } });
+        l["keys"] = serde_json::json!({ ids[b.keys[w].cap.unwrap() as usize].clone(): { "caps": { "kind": "shine-through" } } });
         let (own_off, own_lit) = frames(&mut b, &l);
         assert!(b.bands[w].as_ref().is_some_and(|s| s.cover.iter().filter(|c| **c > 0.0).count() < bands_w.cover.iter().filter(|c| **c > 0.0).count() / 4), "its band is the black's edge alone");
         // a band's pixels, each one's light in a frame, added up
@@ -1675,13 +1680,13 @@ mod tests {
         let (_t, device, mut b) = board();
         let scene = Scene::of(&b);
         let mut l = device["light"].clone();
-        for (k, v) in [("caps", serde_json::json!("pudding")), ("skirts", 0.3.into()), ("black", 0.4.into()), ("milky", 1.0.into()), ("switch", "slot".into()), ("beam", 3.0.into())] {
-            l["sim"][k] = v;
-        }
+        l["caps"] = serde_json::json!({ "kind": "pudding", "plastic": 0.3, "black": 0.4, "milky": 1.0 });
+        l["switches"]["kind"] = serde_json::json!("led-slot");
+        l["switches"]["beam"] = serde_json::json!(3.0);
         let mut faces = Vec::new();
         for label in ["Game mode button", "Media stop", "Next track"] {
             let c = device["controls"].as_array().unwrap().iter().find(|c| c["label"] == label).unwrap();
-            l["keys"][control_id(c)] = serde_json::json!({ "sim": { "skirt_foot": 2.0, "cap_top": if label == "Game mode button" { 3.0 } else { 6.0 }, "caps": "shine_through" } });
+            l["keys"][control_id(c)] = serde_json::json!({ "caps": { "kind": "shine-through", "foot": 2.0, "top": if label == "Game mode button" { 3.0 } else { 6.0 } } });
             let f = b.cap_shapes.iter().find(|s| s.label == label).unwrap().foot;
             faces.push((label, f));
         }
@@ -1905,7 +1910,7 @@ mod tests {
         };
         let off = b.compose(&[], 0, 254.0, 1000.0 / 254.0);
         let caps = b.compose(&[], 0b010, 254.0, 1000.0 / 254.0);
-        let nits = device["indicators"]["nits"].as_f64().unwrap() as f32;
+        let nits = device["lock_lights"]["brightness"].as_f64().unwrap() as f32;
         for ind in &b.indicators {
             let s = &ind.window;
             let (dark, lit) = (peak(&off, s), peak(&caps, s));
@@ -1925,7 +1930,8 @@ mod tests {
     }
 
     /// For tuning the simulation's defaults by hand: the light of
-    /// ECTODECK_SIM (the core's "sim", as JSON over the tests' own), how
+    /// ECTODECK_SIM (as JSON over the tests' own, a section's values one by
+    /// one, as a key's own are: {"switches": {"beam": 3}}), how
     /// bright each part is at its brightest and typically, and how evenly
     /// the wide legends are lit. Run with --ignored.
     #[test]
@@ -1933,20 +1939,13 @@ mod tests {
     fn calibrate() {
         let (tree, mut device, _) = board();
         if let Ok(j) = std::env::var("ECTODECK_SIM") {
-            let more: Value = serde_json::from_str(&j).unwrap();
-            for (k, v) in more.as_object().unwrap() {
-                if k == "led" {
-                    device["light"]["led"] = v.clone();
-                } else {
-                    device["light"]["sim"][k] = v.clone();
-                }
-            }
+            device["light"] = sim::key_light(&device["light"], &serde_json::from_str(&j).unwrap());
         }
         let mut b = Board::new(&tree, &device, [0x20, 0x20, 0x20], 1264, 506).unwrap();
         let photons = std::env::var("ECTODECK_SIM_PHOTONS").ok().and_then(|v| v.parse().ok()).unwrap_or(40_000);
         let snap = Simulator::settle(&Scene::of(&b), &Setup::alike(Physics::from(&device["light"])), photons);
         b.set_sim(Arc::new(snap));
-        let nits = device["light"]["sim"]["nits"].as_f64().unwrap_or(600.0) as f32;
+        let nits = device["light"]["brightness"].as_f64().unwrap_or(600.0) as f32;
         let lit = b.compose(&white(&b), 0, 254.0, 4000.0 / 254.0);
         // every key lit black at full: no light, and the legends' LED-off print gone as a lit key's is
         let black: Vec<Light> = white(&b).into_iter().map(|l| Light { rgb: [0, 0, 0], ..l }).collect();

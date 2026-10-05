@@ -1,5 +1,5 @@
-//! A device's core, as Ectodeck reads it: its device description, and the
-//! art the description names, from the core's own folder. Ectodeck runs from
+//! A device's core, as Ectodeck reads it: its device description (JSON with
+//! comments), and the art the description names, from the core's own folder. Ectodeck runs from
 //! its source, so the cores are the source's folders; the Light lab saves the
 //! light it tunes into the core it came from.
 
@@ -24,7 +24,7 @@ impl Core {
         let folder = dir().join(id);
         let path = std::env::var_os("ECTODECK_CORE_DEVICE").map(PathBuf::from).unwrap_or_else(|| folder.join("device.json"));
         let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let device: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+        let device = ectodeck_draw::jsonc::parse(&text).map_err(|e| format!("{}: {e}", path.display()))?;
         let art_path = folder.join(device["art"].as_str().ok_or("its device description names no art")?);
         let art = std::fs::read_to_string(&art_path).map_err(|e| format!("{}: {e}", art_path.display()))?;
         Ok(Core { id: id.to_string(), device, path, art })
@@ -43,7 +43,7 @@ impl Core {
     /// Its device description as its file has it now, which the Light lab
     /// may have saved into since it was read.
     pub fn device_now(&self) -> serde_json::Value {
-        std::fs::read_to_string(&self.path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_else(|| self.device.clone())
+        std::fs::read_to_string(&self.path).ok().and_then(|t| ectodeck_draw::jsonc::parse(&t).ok()).unwrap_or_else(|| self.device.clone())
     }
 }
 

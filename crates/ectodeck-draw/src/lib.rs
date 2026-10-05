@@ -1,7 +1,9 @@
-//! Ectodeck's drawing of a device from its core's art (the core protocol's
-//! draft 4): the pieces of one SVG, lit key by key, as one HDR picture.
+//! Ectodeck's drawing of a device from its core's art and description (the
+//! core protocol's draft 6): the pieces of one SVG, lit key by key, as one
+//! HDR picture; and the description's own format, JSON with comments (jsonc).
 
 pub mod hdr;
+pub mod jsonc;
 pub mod pieces;
 
 /// A real device for the tests to draw: the Z10's core, read from its own
@@ -14,6 +16,7 @@ pub(crate) mod fixture {
         std::fs::read_to_string(format!("{DIR}/art/z10.svg")).expect("the Z10 core's art")
     }
 
+    /// its device description, as its file has it (JSON with comments)
     pub fn device() -> String {
         std::fs::read_to_string(format!("{DIR}/device.json")).expect("the Z10 core's device description")
     }
