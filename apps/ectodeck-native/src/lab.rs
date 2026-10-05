@@ -481,6 +481,41 @@ fn own_take(light: &mut Value, id: &str, path: (&str, &str)) {
     }
 }
 
+/// All keys' value at a path, as a key with none of its own takes it: the
+/// light's own, or what the keyboard takes where the light has none.
+fn all_keys(light: &Value, path: (&str, &str)) -> Value {
+    match at(light, path) {
+        Value::Null => PARAMS.iter().find(|p| p.path == path).map_or(Value::Null, |p| json!(p.def)),
+        v => v.clone(),
+    }
+}
+
+/// A key's own value set. Where it is all keys' value it is not the key's
+/// own, and the key follows all keys there: a key's setup holds only what
+/// differs from all keys' (a switch dragged back to its cap's middle is no
+/// setup of its own).
+fn own_set(light: &mut Value, id: &str, path: (&str, &str), v: Value) {
+    if jsonc::same(&v, &all_keys(light, path)) {
+        own_take(light, id, path);
+    } else {
+        own_put(light, id, path, v);
+    }
+}
+
+/// A key's own values that its kind does not use given back: those whose
+/// sliders its switch or its caps hide (a black housing's glow, a
+/// shine-through cap's plastic). Kept, they would leave the key a setup of
+/// its own that nothing on the page shows or gives back.
+fn prune_own(light: &mut Value, id: &str) {
+    let work = key_light(light, &light["keys"][id]);
+    let shown: Vec<usize> = (0..SECTIONS.len()).flat_map(|s| sliders_of(s, &work)).collect();
+    for section in &SECTIONS {
+        for &i in section.2.iter().filter(|i| !shown.contains(i)) {
+            own_take(light, id, PARAMS[i].path);
+        }
+    }
+}
+
 /// A value taken out of a light, and its section with it if it leaves it empty.
 fn remove_at(light: &mut Value, (a, b): (&str, &str)) {
     let Some(o) = light.as_object_mut() else { return };
@@ -789,16 +824,16 @@ impl LabPage {
                         self.remember(CHOICE + choice as i32);
                         let mut after = work;
                         choose(&mut after, choice, option);
-                        if self.key().is_some() {
-                            let all = key_light(&self.light, &Value::Null);
+                        if let Some(id) = self.key().map(|k| k.id.clone()) {
                             for &path in CHOSEN[choice] {
                                 let v = at(&after, path).clone();
-                                if v.is_null() || &v == at(&all, path) {
+                                if v.is_null() {
                                     self.unput(path);
                                 } else {
                                     self.put(path, v);
                                 }
                             }
+                            prune_own(&mut self.light, &id);
                         } else {
                             self.light = after;
                         }
@@ -813,15 +848,22 @@ impl LabPage {
                     }
                 }
                 Ask::Follow(id) if self.key().is_some() => {
-                    let path = match id {
-                        id if (CHOICE..CHOICE + CHOICES.len() as i32).contains(&id) => CHOSEN[(id - CHOICE) as usize][0],
-                        id => PARAMS.get(id.max(0) as usize).map_or(("", ""), |p| p.path),
+                    // what the mark gives back: the switch's place, both ways; a choice's kind; a slider's value
+                    let (paths, what) = match id {
+                        PAD => (vec![PARAMS[PLACE_E].path, PARAMS[PLACE_N].path], "Switch's place"),
+                        id if (CHOICE..CHOICE + CHOICES.len() as i32).contains(&id) => (vec![CHOSEN[(id - CHOICE) as usize][0]], CHOICES[(id - CHOICE) as usize].label),
+                        id => PARAMS.get(id.max(0) as usize).map_or((vec![], ""), |p| (vec![p.path], p.label)),
                     };
-                    if !path.0.is_empty() && self.owns(path) {
+                    if paths.iter().any(|&p| self.owns(p)) {
                         self.remember(id);
-                        self.unput(path);
+                        for &p in &paths {
+                            self.unput(p);
+                        }
+                        // (and what its kind no longer uses, given a kind back)
+                        if let Some(k) = self.key().map(|k| k.id.clone()) {
+                            prune_own(&mut self.light, &k);
+                        }
                         self.rev += 1;
-                        let what = if id >= CHOICE { CHOICES[(id - CHOICE) as usize].label } else { PARAMS[id as usize].label };
                         self.status = (format!("{what} follows all keys again."), 0);
                     }
                 }
@@ -961,7 +1003,7 @@ impl LabPage {
     /// Set a value: the chosen key's own, or all keys'.
     fn put(&mut self, path: (&str, &str), v: Value) {
         match self.key().map(|k| k.id.clone()) {
-            Some(id) => own_put(&mut self.light, &id, path, v),
+            Some(id) => own_set(&mut self.light, &id, path, v),
             None => put_at(&mut self.light, path, v),
         }
     }
@@ -1433,7 +1475,7 @@ impl LabPage {
             }
             over.push(Cell { id: PAD, ..cell(18, px, py, pw, ph) });
             if self.owns(PARAMS[PLACE_E].path) || self.owns(PARAMS[PLACE_N].path) {
-                own_mark(&mut over, px, py - 30.0, PLACE_E as i32);
+                own_mark(&mut over, px, py - 30.0, PAD);
             }
             for (n, i) in [PLACE_E, PLACE_N].into_iter().enumerate() {
                 let p = &PARAMS[i];
@@ -1757,6 +1799,33 @@ mod tests {
         assert_eq!(l, light, "nothing of the keys' own left");
     }
 
+    /// A key's own setup holds only what differs from all keys': a value set
+    /// back to all keys' (a switch dragged back to its cap's middle) is the
+    /// key's own no longer, and the values its kind does not use go when its
+    /// kind does, so nothing of its own is left that the page cannot show.
+    #[test]
+    fn a_key_s_own_setup_holds_only_what_differs() {
+        let light = json!({ "switches": { "kind": "led-slot", "beam": 3.0 }, "caps": { "kind": "shine-through", "legends": 0.3, "plastic": 0.0, "black": 1.0 } });
+        let mut l = light.clone();
+        own_set(&mut l, "enter", ("place", "north"), json!(-0.9));
+        own_set(&mut l, "enter", ("place", "east"), json!(0.0));
+        assert_eq!(l["keys"]["enter"], json!({ "place": { "north": -0.9 } }), "centred is all keys' place");
+        own_set(&mut l, "enter", ("place", "north"), json!(0.0));
+        assert_eq!(l, light, "dragged back to its cap's middle: Enter follows all keys");
+        own_set(&mut l, "space", ("switches", "beam"), json!(3));
+        assert_eq!(l, light, "all keys' beam, as 3 or 3.0");
+        // Space tried with a pudding cap, then back to shine-through as all keys are
+        own_set(&mut l, "space", ("caps", "kind"), json!("pudding"));
+        own_set(&mut l, "space", ("caps", "plastic"), json!(0.3));
+        own_set(&mut l, "space", ("caps", "black"), json!(0.4));
+        own_set(&mut l, "space", ("caps", "milky"), json!(1.0));
+        prune_own(&mut l, "space");
+        assert_eq!(l["keys"]["space"]["caps"], json!({ "kind": "pudding", "plastic": 0.3, "black": 0.4, "milky": 1.0 }), "a pudding cap uses them all");
+        own_take(&mut l, "space", ("caps", "kind"));
+        prune_own(&mut l, "space");
+        assert_eq!(l, light, "a shine-through cap has no plastic, black or milkiness to keep");
+    }
+
     /// A slider's reset puts back the saved value in what the page tunes:
     /// all keys' (a value set since the save taken out again), or one key's
     /// own (a value of its own set since the save given back, so the key
@@ -1795,8 +1864,13 @@ mod tests {
     /// own values go in by its id, and given back they leave the file as it was.
     #[test]
     fn the_light_saves_in_its_place() {
-        let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../cores/evga-z10/device.json")).unwrap();
-        let light = floats(jsonc::parse(&text).unwrap()["light"].clone());
+        // the core's own file, its keys set apart as the core ships them (the
+        // five buttons), whatever keys a tuning in it now has
+        let file = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../cores/evga-z10/device.json")).unwrap();
+        let mut light = floats(jsonc::parse(&file).unwrap()["light"].clone());
+        let button = |top: f64| json!({ "caps": { "kind": "shine-through", "foot": 2.0, "top": top } });
+        light["keys"] = json!({ "gpc": button(3.0), "stop": button(6.0), "previous": button(6.0), "play": button(6.0), "next": button(6.0) });
+        let text = saved_into(&file, &light).unwrap();
         assert_eq!(saved_into(&text, &light).unwrap(), text, "the tuning as the file has it: nothing changes");
         let mut tuned = light.clone();
         set(&mut tuned, ("caps", "top"), 12.5);

@@ -290,7 +290,8 @@ pub fn update(text: &str, at: &[&str], to: &Value) -> Result<String, String> {
     Ok(out)
 }
 
-fn same(a: &Value, b: &Value) -> bool {
+/// Whether two values are the same, numbers by their values (14 and 14.0).
+pub fn same(a: &Value, b: &Value) -> bool {
     match (a.as_f64(), b.as_f64()) {
         (Some(x), Some(y)) => x == y,
         _ => a == b,
