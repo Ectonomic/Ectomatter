@@ -48,7 +48,7 @@ For example, a Z10 with pudding caps on all but a stock spacebar, and keypad +'s
 
 ```jsonc
 "light": {
-  "caps": { "kind": "pudding", "plastic": 0.3, "black": 0.4, "milky": 1 },
+  "caps": { "kind": "pudding", "opacity": 0.7, "black": 0.4, "milky": 1 },
   "keys": {
     "keypad-plus": { "place": { "east": 0, "north": 9.5 } },
     "space": { "caps": { "kind": "shine-through" } }

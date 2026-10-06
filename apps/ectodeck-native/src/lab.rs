@@ -135,7 +135,7 @@ const PARAMS: [Param; 27] = [
     Param { path: ("display", "background"), label: "Background", lo: 0.0, hi: 0.0, step: 0.1, unit: Unit::Nits, def: 0.8, note: "The ground between the dots." },
     Param { path: ("display", "dot"), label: "Dot size", lo: 0.05, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.84, note: "How much of each cell a dot fills; the rest is the gap between dots." },
     Param { path: ("display", "glass"), label: "Glass sheen", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 1.0, note: "How strongly the glass over the display shows its reflection, as the art draws it at 100%." },
-    Param { path: ("caps", "plastic"), label: "Plastic lets through", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.0, note: "The share of the light on the inside of a cap that its translucent plastic lets through, glowing on its outside: its sides below the black on pudding caps, all of it but the legends on translucent ones. Plastic with no coating lets through about what a legend does." },
+    Param { path: ("caps", "opacity"), label: "Wall opacity", lo: 0.02, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 1.0, note: "How much of the light inside a cap its translucent plastic holds back: its walls below the black on pudding caps, all of it but the legends on translucent ones. At 0% the plastic lets the light through, glowing on its outside; at 100% it is opaque. Plastic with no coating is about as opaque as a legend." },
     Param { path: ("caps", "black"), label: "Black down the sides", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.0, note: "How far down a cap's sides the black of its top comes, as a share of the skirt's height. A pudding cap's black comes part of the way, its milky plastic below; light gets out only below the black." },
     Param { path: ("caps", "milky"), label: "Milky", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.0, note: "How milky the translucent plastic is. Milky plastic carries the light it takes some way through itself before it leaves, so it glows evenly round the cap, and looks white with its LED off; clear plastic lets the light out where it went in." },
     Param { path: ("place", "east"), label: "Switch east–west", lo: -60.0, hi: 60.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Where this key's switch sits under its cap, east or west of the cap's middle: where the plate holds it, which on a long key can be off its middle. Its LED goes with it." },
@@ -152,7 +152,7 @@ struct Choice {
 
 const CHOICES: [Choice; 2] = [
     Choice { label: "Switch", note: "What the switch's housing is: black with its LED through a slot in its top, as some older switches have it (Kailh's among them), so all the LED's light leaves in its beam; or clear, glowing with a share of it, over its top as most RGB switches have it, or all over. Each sets the switch's values for that kind; the sliders tune from there.", options: &["LED slot", "Clear top", "Clear housing"] },
-    Choice { label: "Keycaps", note: "What the caps let light through: shine-through caps are opaque but for their legends; pudding caps have translucent sides below a black top whose black comes part of the way down them; translucent caps let light through all over. Each fills in Plastic lets through and Black down the sides where they are off; the sliders tune from there.", options: &["Shine-through", "Pudding", "Translucent"] },
+    Choice { label: "Keycaps", note: "What the caps let light through: shine-through caps are opaque but for their legends; pudding caps have translucent sides below a black top whose black comes part of the way down them; translucent caps let light through all over. Each fills in Wall opacity and Black down the sides where they are off; the sliders tune from there.", options: &["Shine-through", "Pudding", "Translucent"] },
 ];
 
 /// The page's sections: a title, what the part is, its values, and its choices.
@@ -171,7 +171,7 @@ pub(crate) fn sliders_of(section: usize, light: &Value) -> Vec<usize> {
     let caps = Physics::from(light).caps;
     SECTIONS[section].2.iter().copied().filter(|&i| {
         let path = PARAMS[i].path;
-        !(slot && matches!(path, ("switches", "scattered" | "sides" | "glow"))) && !(caps == Caps::ShineThrough && matches!(path, ("caps", "plastic" | "milky" | "black"))) && !(caps == Caps::Translucent && path == ("caps", "black"))
+        !(slot && matches!(path, ("switches", "scattered" | "sides" | "glow"))) && !(caps == Caps::ShineThrough && matches!(path, ("caps", "opacity" | "milky" | "black"))) && !(caps == Caps::Translucent && path == ("caps", "black"))
     }).collect()
 }
 
@@ -224,9 +224,10 @@ fn choose(light: &mut Value, choice: usize, option: usize) {
             // stay, so going from one kind to another and back keeps them.
             let caps = [Caps::ShineThrough, Caps::Pudding, Caps::Translucent][option.min(2)];
             light["caps"]["kind"] = json!(caps.name());
-            let plastic = 1.0 - get(light, ("legends", "opacity")).unwrap_or(0.7);
-            if caps != Caps::ShineThrough && get(light, ("caps", "plastic")).unwrap_or(0.0) <= 0.0 {
-                set(light, ("caps", "plastic"), plastic);
+            // (plastic with no coating about as opaque as a legend)
+            let legend = get(light, ("legends", "opacity")).unwrap_or(0.7);
+            if caps != Caps::ShineThrough && get(light, ("caps", "opacity")).unwrap_or(1.0) >= 1.0 {
+                set(light, ("caps", "opacity"), legend);
             }
             let black = get(light, ("caps", "black")).unwrap_or(0.0);
             if caps == Caps::Pudding && !(black > 0.0 && black < 1.0) {
@@ -356,7 +357,7 @@ const PLACE_N: usize = 26;
 /// what a choice sets, which a key takes as its own when it is chosen for it
 const CHOSEN: [&[(&str, &str)]; 2] = [
     &[("switches", "kind"), ("switches", "top"), ("switches", "beam"), ("switches", "scattered"), ("switches", "sides"), ("switches", "glow")],
-    &[("caps", "kind"), ("caps", "plastic"), ("caps", "black")],
+    &[("caps", "kind"), ("caps", "opacity"), ("caps", "black")],
 ];
 /// what a button is, under the drawing when one is chosen
 const BUTTON_ABOUT: &str = "A button stands on the chassis, from its foot to its top, in the light coming out of the keys round it: its sides and top give back their share of what falls on them, and it stands in the way of the rest.";
@@ -1779,28 +1780,28 @@ mod tests {
         assert_eq!(light["switches"]["kind"], json!("led-slot"));
         assert_eq!(get(&light, ("switches", "top")), Some(5.7));
         assert_eq!(get(&light, ("switches", "beam")), Some(3.0));
-        let shown = |light: &Value, section| sliders_of(section, light).iter().map(|&i| PARAMS[i].path.1).collect::<Vec<_>>();
-        assert!(shown(&light, 0).iter().all(|k| !matches!(*k, "scattered" | "sides" | "glow")), "a black housing has no glow to tune");
+        let shown = |light: &Value, section| sliders_of(section, light).iter().map(|&i| PARAMS[i].path).collect::<Vec<_>>();
+        assert!(shown(&light, 0).iter().all(|k| !matches!(*k, ("switches", "scattered" | "sides" | "glow"))), "a black housing has no glow to tune");
         choose(&mut light, 0, 1);
         assert_eq!(sliders_of(0, &light).len(), SECTIONS[0].2.len(), "a clear one shows them all");
         // the caps
         assert_eq!(chosen(1, &light), 0, "no plastic letting light through: shine-through");
-        assert!(shown(&light, 1).iter().all(|k| !matches!(*k, "plastic" | "milky" | "black")), "shine-through caps have none of those");
+        assert!(shown(&light, 1).iter().all(|k| !matches!(*k, ("caps", "opacity" | "milky" | "black"))), "shine-through caps have none of those");
         choose(&mut light, 1, 1);
-        assert_eq!((chosen(1, &light), get(&light, ("caps", "plastic")), get(&light, ("caps", "black"))), (1, Some(0.3), Some(0.4)), "pudding: the plastic lets through what a legend does, below the black");
-        assert!(["plastic", "milky", "black"].iter().all(|k| shown(&light, 1).contains(k)));
-        set(&mut light, ("caps", "plastic"), 0.0);
-        assert_eq!(chosen(1, &light), 1, "pudding caps stay pudding with their plastic dragged to nothing");
-        set(&mut light, ("caps", "plastic"), 0.45);
+        assert_eq!((chosen(1, &light), get(&light, ("caps", "opacity")), get(&light, ("caps", "black"))), (1, Some(0.7), Some(0.4)), "pudding: the walls as opaque as a legend, below the black");
+        assert!(["opacity", "milky", "black"].iter().all(|k| shown(&light, 1).contains(&("caps", *k))));
+        set(&mut light, ("caps", "opacity"), 1.0);
+        assert_eq!(chosen(1, &light), 1, "pudding caps stay pudding with their walls dragged to opaque");
+        set(&mut light, ("caps", "opacity"), 0.55);
         set(&mut light, ("caps", "black"), 0.3);
         choose(&mut light, 1, 2);
         let p = Physics::from(&light);
         assert_eq!((p.caps, p.skirts, p.tops, p.black), (Caps::Translucent, 0.45, 0.45, 0.0), "a translucent top lets through what the plastic does");
-        assert!(!shown(&light, 1).contains(&"black"), "translucent caps have no black");
+        assert!(!shown(&light, 1).contains(&("caps", "black")), "translucent caps have no black");
         choose(&mut light, 1, 0);
         assert_eq!((light["caps"]["kind"].clone(), Physics::from(&light).skirts), (json!("shine-through"), 0.0));
         choose(&mut light, 1, 1);
-        assert_eq!((get(&light, ("caps", "plastic")), get(&light, ("caps", "black"))), (Some(0.45), Some(0.3)), "back to pudding as it was tuned");
+        assert_eq!((get(&light, ("caps", "opacity")), get(&light, ("caps", "black"))), (Some(0.55), Some(0.3)), "back to pudding as it was tuned");
         // the LED's place in millimetres, and its side
         assert_eq!(reads(&PARAMS[0], 5.08), ("5.08".into(), "mm north".into()));
         assert_eq!(reads(&PARAMS[0], -2.0), ("2".into(), "mm south".into()));
@@ -1834,7 +1835,7 @@ mod tests {
     /// kind does, so nothing of its own is left that the page cannot show.
     #[test]
     fn a_key_s_own_setup_holds_only_what_differs() {
-        let light = json!({ "switches": { "kind": "led-slot", "beam": 3.0 }, "caps": { "kind": "shine-through", "plastic": 0.0, "black": 1.0 }, "legends": { "opacity": 0.7 } });
+        let light = json!({ "switches": { "kind": "led-slot", "beam": 3.0 }, "caps": { "kind": "shine-through", "opacity": 1.0, "black": 1.0 }, "legends": { "opacity": 0.7 } });
         let mut l = light.clone();
         own_set(&mut l, "enter", ("place", "north"), json!(-0.9));
         own_set(&mut l, "enter", ("place", "east"), json!(0.0));
@@ -1845,11 +1846,11 @@ mod tests {
         assert_eq!(l, light, "all keys' beam, as 3 or 3.0");
         // Space tried with a pudding cap, then back to shine-through as all keys are
         own_set(&mut l, "space", ("caps", "kind"), json!("pudding"));
-        own_set(&mut l, "space", ("caps", "plastic"), json!(0.3));
+        own_set(&mut l, "space", ("caps", "opacity"), json!(0.7));
         own_set(&mut l, "space", ("caps", "black"), json!(0.4));
         own_set(&mut l, "space", ("caps", "milky"), json!(1.0));
         prune_own(&mut l, "space");
-        assert_eq!(l["keys"]["space"]["caps"], json!({ "kind": "pudding", "plastic": 0.3, "black": 0.4, "milky": 1.0 }), "a pudding cap uses them all");
+        assert_eq!(l["keys"]["space"]["caps"], json!({ "kind": "pudding", "opacity": 0.7, "black": 0.4, "milky": 1.0 }), "a pudding cap uses them all");
         own_take(&mut l, "space", ("caps", "kind"));
         prune_own(&mut l, "space");
         assert_eq!(l, light, "a shine-through cap has no plastic, black or milkiness to keep");
@@ -1867,7 +1868,7 @@ mod tests {
             "gpc": { "caps": { "kind": "shine-through", "foot": 2, "top": 3 } },
             "keypad-plus": { "place": { "north": 0 } },
             "enter": { "place": { "east": 0 }, "switches": { "beam": 3.0 } },
-            "space": { "caps": { "plastic": 0.3, "top": 14 } },
+            "space": { "caps": { "opacity": 0.7, "top": 14 } },
             "w": { "place": { "north": -1.5 } }
         });
         let read = plain(core);

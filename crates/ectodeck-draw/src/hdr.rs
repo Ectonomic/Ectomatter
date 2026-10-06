@@ -1726,7 +1726,7 @@ mod tests {
             l["switches"]["kind"] = serde_json::json!("led-slot");
             l["switches"]["beam"] = serde_json::json!(3.0);
             // (pudding caps, black nowhere, as the plastic letting light through has it)
-            l["caps"] = serde_json::json!({ "plastic": skirts });
+            l["caps"] = serde_json::json!({ "opacity": 1.0 - skirts });
             b.set_sim(Arc::new(Simulator::settle(&scene, &Setup::alike(Physics::from(&l)), 4000)));
             let frame = b.compose(&white(&b), 0, 254.0, 1000.0 / 254.0);
             (b.most.skirt / b.most.legend, lum(&frame, &b, north), lum(&frame, &b, south))
@@ -1757,7 +1757,7 @@ mod tests {
             let mut l = device["light"].clone();
             l["switches"]["kind"] = serde_json::json!("led-slot");
             l["switches"]["beam"] = serde_json::json!(3.0);
-            l["caps"] = serde_json::json!({ "kind": "pudding", "plastic": 0.3, "black": 0.4, "milky": milky });
+            l["caps"] = serde_json::json!({ "kind": "pudding", "opacity": 0.7, "black": 0.4, "milky": milky });
             b.set_sim(Arc::new(Simulator::settle(&scene, &Setup::alike(Physics::from(&l)), 4000)));
             let frame = b.compose(&white(&b), 0, 254.0, 1000.0 / 254.0);
             // the black at each of the top's corners too: on the diagonal from the
@@ -1791,7 +1791,7 @@ mod tests {
         let scene = Scene::of(&b);
         let ids: Vec<String> = b.cap_shapes.iter().map(|c| c.id.clone()).collect();
         let mut l = device["light"].clone();
-        l["caps"] = serde_json::json!({ "kind": "pudding", "plastic": 0.3, "black": 0.4, "milky": 1.0 });
+        l["caps"] = serde_json::json!({ "kind": "pudding", "opacity": 0.7, "black": 0.4, "milky": 1.0 });
         l["switches"]["kind"] = serde_json::json!("led-slot");
         l["switches"]["beam"] = serde_json::json!(3.0);
         let key = |label: &str| {
@@ -1827,7 +1827,7 @@ mod tests {
         let (_t, device, mut b) = board();
         let scene = Scene::of(&b);
         let mut l = device["light"].clone();
-        l["caps"] = serde_json::json!({ "kind": "pudding", "plastic": 0.3, "black": 0.4, "milky": 1.0 });
+        l["caps"] = serde_json::json!({ "kind": "pudding", "opacity": 0.7, "black": 0.4, "milky": 1.0 });
         l["switches"]["kind"] = serde_json::json!("led-slot");
         l["switches"]["beam"] = serde_json::json!(3.0);
         let mut faces = Vec::new();

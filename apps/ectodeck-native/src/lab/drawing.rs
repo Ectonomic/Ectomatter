@@ -806,11 +806,11 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
                     let band = [p(sl.skirt_x(north, v.foot, false), v.foot), p(sl.skirt_x(north, clear_to, false), clear_to), p(sl.skirt_x(north, clear_to, true), clear_to), p(sl.skirt_x(north, v.foot, true), v.foot)];
                     let milky = if white("Milky") { WHITE } else { "#d8d2c6" };
                     s.path(&poly(&band, true), milky, "none", 1.0, if v.skirts > 0.0 { 0.08 + 0.55 * v.milky } else { 0.0 });
-                    let lit = if white("Plastic lets through") { WHITE } else { AMBER };
+                    let lit = if white("Wall opacity") { WHITE } else { AMBER };
                     s.path(&poly(&[band[0], band[1]], false), "none", lit, 2.4 * grow.min(1.2), if v.skirts > 0.0 { op(v.skirts) } else { 0.0 });
                 }
                 if v.tops > 0.0 {
-                    let lit = if white("Plastic lets through") { WHITE } else { AMBER };
+                    let lit = if white("Wall opacity") { WHITE } else { AMBER };
                     s.path(&poly(&[p(a0 + 0.3, tz), p(a1 - 0.3, tz)], false), "none", lit, 2.4 * grow.min(1.2), op(v.tops));
                 }
             }
@@ -820,8 +820,8 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
             if !shine {
                 let side_z = v.foot + (clear_to - v.foot) * 0.7;
                 let (wall_in, wall_out) = (sl.skirt_x(true, side_z, true), sl.skirt_x(true, side_z, false));
-                ray(&mut s, &[p(wall_in + 1.1, side_z + 0.35), p(wall_out - 1.2, side_z - 0.25)], v.skirts, grow, white("Plastic lets through"));
-                labels.push(Label::new(true, p(wall_out, side_z), "Plastic lets through"));
+                ray(&mut s, &[p(wall_in + 1.1, side_z + 0.35), p(wall_out - 1.2, side_z - 0.25)], v.skirts, grow, white("Wall opacity"));
+                labels.push(Label::new(true, p(wall_out, side_z), "Wall opacity"));
                 // Milky on the plastic low on the north skirt
                 let milky_z = v.foot + (clear_to - v.foot) * 0.25;
                 labels.push(Label::new(true, p(sl.skirt_x(true, milky_z, false), milky_z), "Milky"));
@@ -835,7 +835,7 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
             // light up through the top, beside the legends
             let top_x = a1 - 1.6;
             if sl.hollow {
-                ray(&mut s, &[p(top_x, under - 0.6), p(top_x + 0.15, tz + 1.4)], v.tops, grow, white("Plastic lets through"));
+                ray(&mut s, &[p(top_x, under - 0.6), p(top_x + 0.15, tz + 1.4)], v.tops, grow, white("Wall opacity"));
             }
             if sl.hollow && rise > 1.0 {
                 // bounced inside the cap: off its inner wall, up to the back of its top

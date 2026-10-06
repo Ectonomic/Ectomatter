@@ -91,8 +91,8 @@ impl Switch {
 /// What a cap is, as the core's caps' "kind" says: black all over but its
 /// legends ("shine-through", as the Z10 came); its top black and part of its
 /// sides, below them translucent plastic ("pudding"); or translucent all
-/// over ("translucent"). A core with none is read from its values: plastic
-/// that lets light through is a pudding cap's.
+/// over ("translucent"). A core with none is read from its values: walls
+/// less than opaque are a pudding cap's.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Caps {
     ShineThrough,
@@ -107,7 +107,7 @@ impl Caps {
             Some("shine-through") => Caps::ShineThrough,
             Some("pudding") => Caps::Pudding,
             Some("translucent") => Caps::Translucent,
-            _ if caps["plastic"].as_f64().unwrap_or(0.0) > 0.0 => Caps::Pudding,
+            _ if caps["opacity"].as_f64().unwrap_or(1.0) < 1.0 => Caps::Pudding,
             _ => Caps::ShineThrough,
         }
     }
@@ -265,7 +265,8 @@ impl Physics {
         let top = f(&cp["top"], 14.0).max(0.5);
         // what the caps let through, as their kind has it
         let caps = Caps::of(cp);
-        let plastic = share(&cp["plastic"], 0.0);
+        // (the walls' opacity: what the plastic lets through is the rest)
+        let plastic = (1.0 - f(&cp["opacity"], 1.0)).clamp(0.0, 0.98);
         let (skirts, tops, black) = match caps {
             Caps::ShineThrough => (0.0, 0.0, 1.0),
             Caps::Pudding => (plastic, 0.0, f(&cp["black"], 0.0).clamp(0.0, 1.0)),
@@ -2264,7 +2265,7 @@ mod tests {
     fn a_key_s_own_values_are_its_alone() {
         let (b, scene, _) = scene();
         let k = 30;
-        let (all, own) = own_setup(&b, k, serde_json::json!({ "caps": { "kind": "translucent", "plastic": 0.5 } }));
+        let (all, own) = own_setup(&b, k, serde_json::json!({ "caps": { "kind": "translucent", "opacity": 0.5 } }));
         let p = *own.of(k as u32);
         assert_eq!((p.caps, p.skirts, p.tops, p.black), (Caps::Translucent, 0.5, 0.5, 0.0));
         assert_eq!(Physics { caps: Caps::ShineThrough, skirts: 0.0, tops: 0.0, black: 1.0, ..p }, all.all, "the rest is all keys'");
@@ -2302,7 +2303,7 @@ mod tests {
         let at = |label: &str| b.cap_shapes.iter().position(|c| c.label == label).unwrap_or_else(|| panic!("{label} stands in the light"));
         let (gpc, stop) = (at("Game mode button"), at("Media stop"));
         assert!(gpc >= scene.keys.len() && stop >= scene.keys.len(), "they have no light of their own");
-        let mut light = serde_json::json!({ "scale": 1.38, "switches": { "kind": "led-slot", "led": 4.5 / 1.38, "beam": 3.0 }, "caps": { "kind": "pudding", "plastic": 0.3, "black": 0.4, "milky": 1.0 }, "wells": { "art": "mask_1" } });
+        let mut light = serde_json::json!({ "scale": 1.38, "switches": { "kind": "led-slot", "led": 4.5 / 1.38, "beam": 3.0 }, "caps": { "kind": "pudding", "opacity": 0.7, "black": 0.4, "milky": 1.0 }, "wells": { "art": "mask_1" } });
         for id in [&ids[gpc], &ids[stop]] {
             light["keys"][id.as_str()] = serde_json::json!({ "caps": { "kind": "shine-through", "foot": 2.0, "top": 4.0 } });
         }
