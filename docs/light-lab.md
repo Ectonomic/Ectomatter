@@ -67,13 +67,18 @@ A key's entry holds only what differs from all keys. Save writes each value the 
 
 A setup of the person's own is the device as they have it where it differs from the core's description: pudding caps on a Z10 whose core describes shine-through caps. The lab's head has a button for the setup it tunes, first in its row (the setup, the keys, the section); its menu lists the core's setup and the person's own, and makes, renames and deletes them. Ectodeck lights the device by the setup chosen, and keeps the choice in its settings (`devices.z10.light`, the setup's id; none is the core's), so it starts lit by it.
 
-Each setup is a file in Ectodeck's own data, `light/<core>/<id>.json` (JSON with comments), holding its name and what its light changes from the core's, as a JSON merge patch (RFC 7386): a value takes the place of the core's, an object is merged into the core's, null takes the core's out.
+Each setup is a file in Ectodeck's own data, `light/<core>/<id>.json` (JSON with comments), holding its name and what its light changes from the core's, as a JSON merge patch (RFC 7386): a value takes the place of the core's, an object is merged into the core's, null takes the core's out. The lab writes it to be read: a head saying what the file is and how to edit it, and each value on a line of its own with its name and its value in the lab beside it.
 
 ```jsonc
 {
-  "name": "Pudding caps",
-  "light": {
-    "caps": { "kind": "pudding", "opacity": 0.8, "black": 0.4, "milky": 0.8 }
+  "name": "Pudding caps",  // its name in the setup menu
+  "light": {               // what this setup changes from Core
+    "caps": {
+      "kind": "pudding",  // Keycaps: Pudding
+      "opacity": 0.8,     // Keycaps › Wall opacity: 80%
+      "black": 0.4,       // Keycaps › Black down the sides: 40%
+      "milky": 0.8        // Keycaps › Haze: 80%
+    }
   }
 }
 ```

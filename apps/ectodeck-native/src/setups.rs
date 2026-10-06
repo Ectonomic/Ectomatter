@@ -63,39 +63,102 @@ pub fn in_use(settings: &crate::settings::Settings, core: &str) -> Option<Setup>
     read(core, settings.get(IN_USE)?.as_str()?)
 }
 
+/// The words beside a value in a setup's file, by the value's path from
+/// the light down: its name and its value as the Light lab shows them.
+pub type Note<'a> = &'a dyn Fn(&[String], &Value) -> Option<String>;
+
 /// Write a setup's file, by way of a temporary one so a crash mid-write
 /// never leaves half a file. `device` is what the core calls its device.
-pub fn write(core: &str, device: &str, s: &Setup) -> Result<(), String> {
+pub fn write(core: &str, device: &str, s: &Setup, note: Note) -> Result<(), String> {
     let folder = dir(core);
     std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
-    let text = format!(
-        "// A light setup of your own for the {device}, made in Ectodeck's Light lab:\n\
-         // its name, and what its light changes from the {core} core's. What it\n\
-         // leaves out follows the core's; null takes out what the core has.\n\
-         {{\n  \"name\": {},\n  \"light\": {}\n}}\n",
-        json!(s.name),
-        light_text(&s.changes)
-    );
     let path = folder.join(format!("{}.json", s.id));
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, text).and_then(|_| std::fs::rename(&tmp, &path)).map_err(|e| e.to_string())
+    std::fs::write(&tmp, file_text(device, s, note)).and_then(|_| std::fs::rename(&tmp, &path)).map_err(|e| e.to_string())
 }
 
-/// What a setup changes, as its file writes it: each of the light's parts
-/// on a line, each key set apart on a line of its own.
-fn light_text(changes: &Value) -> String {
-    let Some(parts) = changes.as_object().filter(|o| !o.is_empty()) else { return "{}".into() };
-    let lines: Vec<String> = parts
-        .iter()
-        .map(|(k, v)| match v.as_object().filter(|keys| k == "keys" && !keys.is_empty()) {
-            Some(keys) => {
-                let keys: Vec<String> = keys.iter().map(|(id, own)| format!("      {}: {}", json!(id), jsonc::inline(own))).collect();
-                format!("    \"keys\": {{\n{}\n    }}", keys.join(",\n"))
+/// A setup's file as a person reads it: what it is and how it works, at
+/// its head; then its name, and each value it changes on a line of its
+/// own with its name and its value in the lab beside it.
+fn file_text(device: &str, s: &Setup, note: Note) -> String {
+    let name = &s.name;
+    let mut out = vec![format!("// {name}: a light setup of your own for the {device}."), "//".to_string()];
+    out.extend(comment("The Light lab writes this file each time you save the setup. It holds only what the setup changes from Core, the keyboard as its core has it; anything not listed here stays as Core has it. Beside each value is its name in the lab and the value as the lab shows it.", ""));
+    out.push("//".into());
+    out.extend(comment("You can edit a value here by hand, and Ectodeck reads it the next time it starts. Percentages are written from 0 to 1 (80% is 0.8), and lengths in millimetres. To go back to Core, or to rename or delete this setup, use the setup menu at the top of the Light lab.", ""));
+    out.push("{".into());
+    match s.changes.as_object().filter(|o| !o.is_empty()) {
+        None => {
+            out.push(format!("  \"name\": {},  // its name in the setup menu", json!(name)));
+            out.push(String::new());
+            out.extend(comment("This setup changes nothing yet, so it lights the keyboard just as Core does. Change something in the Light lab and save it, and the change is written here.", "  "));
+            out.push("  \"light\": {}".into());
+        }
+        Some(_) => {
+            let file = json!({ "name": name, "light": s.changes });
+            let top = |path: &[String], v: &Value| match path {
+                [n] if n == "name" => Some("its name in the setup menu".to_string()),
+                [l] if l == "light" => Some("what this setup changes from Core".to_string()),
+                [_, rest @ ..] => note(rest, v),
+                [] => None,
+            };
+            object_lines(file.as_object().expect("an object"), &mut Vec::new(), 1, &top, &mut out);
+        }
+    }
+    out.push("}".into());
+    out.join("\n") + "\n"
+}
+
+/// Words as comment lines `indent` in, wrapped to keep within 80 columns.
+fn comment(words: &str, indent: &str) -> Vec<String> {
+    let most = 80 - indent.len() - 3;
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    for w in words.split(' ') {
+        if !line.is_empty() && line.chars().count() + 1 + w.chars().count() > most {
+            lines.push(format!("{indent}// {line}"));
+            line.clear();
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(w);
+    }
+    if !line.is_empty() {
+        lines.push(format!("{indent}// {line}"));
+    }
+    lines
+}
+
+/// An object's members, `depth` in: each value on a line of its own, an
+/// object's members on the lines after its own, and the notes of the
+/// members of one object in one column.
+fn object_lines(o: &Map<String, Value>, path: &mut Vec<String>, depth: usize, note: Note, out: &mut Vec<String>) {
+    let pad = "  ".repeat(depth);
+    let mut rows: Vec<(String, Option<String>, Vec<String>)> = Vec::new();
+    for (k, (key, v)) in o.iter().enumerate() {
+        let comma = if k + 1 < o.len() { "," } else { "" };
+        path.push(key.clone());
+        let said = note(path, v);
+        match v.as_object().filter(|inner| !inner.is_empty()) {
+            Some(inner) => {
+                let mut lines = Vec::new();
+                object_lines(inner, path, depth + 1, note, &mut lines);
+                lines.push(format!("{pad}}}{comma}"));
+                rows.push((format!("{pad}{}: {{", json!(key)), said, lines));
             }
-            None => format!("    {}: {}", json!(k), jsonc::inline(v)),
-        })
-        .collect();
-    format!("{{\n{}\n  }}", lines.join(",\n"))
+            None => rows.push((format!("{pad}{}: {}{comma}", json!(key), jsonc::inline(v)), said, Vec::new())),
+        }
+        path.pop();
+    }
+    let column = rows.iter().filter(|r| r.1.is_some()).map(|r| r.0.chars().count()).max().unwrap_or(0) + 2;
+    for (head, said, lines) in rows {
+        out.push(match said {
+            Some(said) => format!("{head:<column$}// {said}"),
+            None => head,
+        });
+        out.extend(lines);
+    }
 }
 
 /// Take a setup's file away.
@@ -191,13 +254,22 @@ mod tests {
         assert_eq!(id_for("???", &[]), "setup");
     }
 
-    /// Its file reads back as written, comments and all.
+    /// Its file reads back as written, each value on a line of its own
+    /// with its note beside it, the notes of one object in one column; one
+    /// that changes nothing says so.
     #[test]
     fn a_setup_s_file_reads_back() {
         let ch = json!({ "caps": { "kind": "pudding", "opacity": 0.8 }, "keys": { "space": { "caps": { "kind": "shine-through" } }, "w": null } });
-        let text = format!("{{ \"name\": \"Pudding caps\", \"light\": {} }}", light_text(&ch));
-        assert_eq!(jsonc::parse(&text).unwrap()["light"], ch);
-        assert!(light_text(&ch).contains("\n      \"space\": { \"caps\": { \"kind\": \"shine-through\" } },\n"), "a key a line");
-        assert_eq!(light_text(&json!({})), "{}");
+        let note = |path: &[String], v: &Value| Some(format!("{} is {}", path.join("."), v));
+        let s = Setup { id: "pudding-caps".into(), name: "Pudding caps".into(), changes: ch.clone() };
+        let text = file_text("EVGA Z10 RGB", &s, &note);
+        let read = jsonc::parse(&text).unwrap();
+        assert_eq!((read["name"].as_str(), &read["light"]), (Some("Pudding caps"), &ch));
+        assert!(text.contains("\n      \"kind\": \"pudding\",  // caps.kind is \"pudding\"\n      \"opacity\": 0.8      // caps.opacity is 0.8\n"), "a value a line, the notes in one column:\n{text}");
+        assert!(text.contains("\n      \"w\": null   // keys.w is null\n"), "{text}");
+        assert!(text.lines().all(|l| l.chars().count() <= 80 || !l.trim_start().starts_with("//")), "comments within 80 columns");
+        let empty = file_text("EVGA Z10 RGB", &Setup { id: "studio".into(), name: "Studio".into(), changes: json!({}) }, &note);
+        assert_eq!(jsonc::parse(&empty).unwrap()["light"], json!({}));
+        assert!(empty.starts_with("// Studio: a light setup of your own for the EVGA Z10 RGB.\n") && empty.contains("This setup changes nothing yet"), "{empty}");
     }
 }

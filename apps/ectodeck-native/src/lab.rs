@@ -404,8 +404,9 @@ const PAD: i32 = 970;
 const RESET: i32 = 1000;
 /// the light setups' button and its menu, by index: the button (0), the
 /// page round the menu (1), Save as a new setup (2), Rename (3), Delete (4),
-/// a name given or a delete agreed to (5), Cancel (6); the core's setup
-/// (10), and the person's own from 11; and the box their name is typed in
+/// a name given or a delete agreed to (5), Cancel (6), the menu between its
+/// rows (7); the core's setup (10), and the person's own from 11; and the
+/// box their name is typed in
 const SETUP: i32 = 930;
 const NAME: i32 = 935;
 /// a setup's words in the menu and on Save: as long as fits
@@ -1477,7 +1478,7 @@ impl LabPage {
         if let Some(id) = self.setup.clone() {
             let name = self.setup_name();
             let s = Setup { id, name: name.clone(), changes: self.changes_of(&self.light) };
-            self.status = match setups::write(&self.device.core, &self.device.name, &s) {
+            self.status = match setups::write(&self.device.core, &self.device.name, &s, &|path, v| self.file_note(path, v)) {
                 Ok(()) => {
                     self.saved = self.light.clone();
                     self.setups = setups::list(&self.device.core);
@@ -1512,6 +1513,23 @@ impl LabPage {
 
     fn changes_of(&self, light: &Value) -> Value {
         setup_changes(&self.core_saved, light)
+    }
+
+    /// The note beside a value in a setup's file (`path` from the light
+    /// down): a key by its name, and a value by where the lab has it, its
+    /// name and its value there (see value_note).
+    fn file_note(&self, path: &[String], v: &Value) -> Option<String> {
+        let path: Vec<&str> = path.iter().map(String::as_str).collect();
+        match path[..] {
+            ["keys"] => Some("keys with a setup of their own".into()),
+            ["keys", id] => {
+                let name = self.device.caps.iter().find(|(c, _)| c.id == id).map_or_else(|| id.to_string(), |(c, _)| c.label.clone());
+                Some(if v.is_null() { format!("{name}: as all keys, not set apart") } else { name })
+            }
+            ["keys", _, a, b] => value_note((a, b), v, true),
+            [a, b] => value_note((a, b), v, false),
+            _ => None,
+        }
     }
 
     /// What a setup of the person's own changes, as its row in the menu
@@ -1610,12 +1628,12 @@ impl LabPage {
         let id = setups::id_for(&name, &ids);
         let result = match self.menu {
             // the light as it is, changes and all: the setup it came from stays as saved
-            Menu::New => setups::write(&core, &self.device.name, &Setup { id: id.clone(), name: name.clone(), changes: self.changes_of(&self.light) }),
+            Menu::New => setups::write(&core, &self.device.name, &Setup { id: id.clone(), name: name.clone(), changes: self.changes_of(&self.light) }, &|path, v| self.file_note(path, v)),
             // the one in use, its saved changes under its new name (its file named anew with it)
             _ => {
                 let was = self.setups.iter().find(|s| Some(&s.id) == self.setup.as_ref()).cloned();
                 match was {
-                    Some(was) => setups::write(&core, &self.device.name, &Setup { id: id.clone(), name: name.clone(), changes: was.changes.clone() }).and_then(|_| if was.id != id { setups::remove(&core, &was.id) } else { Ok(()) }),
+                    Some(was) => setups::write(&core, &self.device.name, &Setup { id: id.clone(), name: name.clone(), changes: was.changes.clone() }, &|path, v| self.file_note(path, v)).and_then(|_| if was.id != id { setups::remove(&core, &was.id) } else { Ok(()) }),
                     None => Err("it is not there".into()),
                 }
             }
@@ -1777,6 +1795,8 @@ impl LabPage {
         }
         y += 8.0;
         top.push(Cell { style: 27, ..cell(kind::TILE, mx, my, mw, y) });
+        // (a click on the menu between its rows stays on it)
+        top.push(Cell { id: SETUP, index: 7, style: 29, ..cell(kind::LINK, mx, my, mw, y) });
         top.extend(items);
         top
     }
@@ -2450,6 +2470,42 @@ fn setup_changes(core: &Value, light: &Value) -> Value {
     ch
 }
 
+/// A value's note in a setup's file: where the lab has it, its name and its
+/// value there, as the lab shows them ("Keycaps › Haze: 80%", "LED ›
+/// Switch: Clear housing"). A value the setup takes out: for one key's own,
+/// that it is as all keys have it; else the legends' print, or the default.
+fn value_note(path: (&str, &str), v: &Value, of_key: bool) -> Option<String> {
+    let gone = || -> String {
+        if of_key {
+            "as all keys have it".into()
+        } else if path.0 == "legends" && matches!(path.1, "typeface" | "weight" | "place") {
+            "as the keyboard's print has it".into()
+        } else {
+            "the default".into()
+        }
+    };
+    // a choice's option, by the name the light gives it
+    let option = |choice: usize, names: [&str; 3]| -> String {
+        v.as_str().and_then(|s| names.iter().position(|n| *n == s)).map_or_else(gone, |i| CHOICES[choice].options[i].to_string())
+    };
+    Some(match path {
+        ("switches", "kind") => format!("LED › Switch: {}", option(0, ["led-slot", "clear-top", "clear"])),
+        ("caps", "kind") => format!("Keycaps: {}", option(1, ["shine-through", "pudding", "translucent"])),
+        ("legends", "place") => format!("Legends › Placement: {}", option(2, ["top", "middle", "topleft"])),
+        ("legends", "weight") => {
+            let w = v.as_f64().map(|w| CHOICES[3].options[((w.round() as usize + 50) / 100).clamp(1, 9) - 1].to_string());
+            format!("Legends › Weight: {}", w.unwrap_or_else(gone))
+        }
+        ("legends", "typeface") => format!("Legends › Typeface: {}", v.as_str().map_or_else(gone, str::to_string)),
+        _ => {
+            let i = PARAMS.iter().position(|p| p.path == path)?;
+            let section = SECTIONS.iter().find(|s| s.2.contains(&i)).map_or(if path.0 == "place" { "LED" } else { "" }, |s| s.0);
+            let value = v.as_f64().map_or_else(gone, |x| said(&PARAMS[i], x));
+            if section.is_empty() { format!("{}: {value}", PARAMS[i].label) } else { format!("{section} › {}: {value}", PARAMS[i].label) }
+        }
+    })
+}
+
 /// Words cut to `most` wide, set at `weight` and `size`, an ellipsis where they were cut.
 fn elide(s: &str, most: f32, weight: u16, size: f32) -> String {
     if text::width(weight, size, s) <= most {
@@ -2529,6 +2585,23 @@ mod tests {
         assert_eq!(again["switches"]["lumens"], json!(0.745));
         // a setup the same as the core keeps nothing
         assert_eq!(setup_changes(&core, &core), json!({}));
+    }
+
+    /// The notes beside a setup file's values say them as the lab does.
+    #[test]
+    fn a_setup_s_file_says_its_values_as_the_lab_does() {
+        let note = |a: &str, b: &str, v: Value| value_note((a, b), &v, false).unwrap();
+        assert_eq!(note("caps", "kind", json!("pudding")), "Keycaps: Pudding");
+        assert_eq!(note("caps", "milky", json!(0.8)), "Keycaps › Haze: 80%");
+        assert_eq!(note("legends", "opacity", json!(0.7)), "Keycaps › Legend opacity: 70%");
+        assert_eq!(note("switches", "kind", json!("clear")), "LED › Switch: Clear housing");
+        assert_eq!(note("switches", "lumens", json!(1.056)), "LED › LED output: 1.06 lumens");
+        assert_eq!(note("legends", "weight", json!(600.0)), "Legends › Weight: Semibold");
+        assert_eq!(note("legends", "typeface", Value::Null), "Legends › Typeface: as the keyboard's print has it");
+        assert_eq!(note("display", "lit", json!(45.0)), "Display › Lit dots: 45 nits");
+        assert_eq!(value_note(("place", "north"), &json!(4.5), true).unwrap(), "LED › Switch north–south: 4.5 mm north");
+        assert_eq!(value_note(("caps", "top"), &Value::Null, true).unwrap(), "Keycaps › Cap's top: as all keys have it");
+        assert_eq!(value_note(("wells", "art"), &json!("mask_1"), false), None, "not the lab's to say");
     }
 
     #[test]
