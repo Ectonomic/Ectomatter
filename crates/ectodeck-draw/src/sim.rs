@@ -572,7 +572,8 @@ impl Boxed {
 
 /// The keyboard's shape for the simulation, in the art's units.
 pub struct Scene {
-    wells: Vec<[f32; 4]>,
+    /// each well's box, and the radius its corners are rounded to
+    wells: Vec<([f32; 4], f32)>,
     caps: Vec<Cap>,
     /// the caps by the cells of a grid over the art
     cells: Vec<Vec<u32>>,
@@ -592,7 +593,7 @@ impl Scene {
     pub fn of(b: &Board) -> Scene {
         let (ka, (ox, oy)) = (b.art_scale, b.art_offset);
         let unit = |px: f32, py: f32| ((px - ox) / ka, (py - oy) / ka);
-        let wells: Vec<[f32; 4]> = b.well_boxes.iter().filter(|w| w[0] < w[2] && w[1] < w[3]).copied().collect();
+        let wells: Vec<([f32; 4], f32)> = b.well_boxes.iter().zip(&b.well_round).filter(|(w, _)| w[0] < w[2] && w[1] < w[3]).map(|(&w, &r)| (w, radius(w, r))).collect();
         let mut caps = Vec::new();
         let mut keys = Vec::new();
         for k in &b.keys {
@@ -664,12 +665,13 @@ impl Scene {
         }
     }
 
+    /// Whether a place is in a well, its corners as round as the art has them.
     fn in_well(&self, x: f32, y: f32) -> bool {
-        self.wells.iter().any(|w| x > w[0] && x < w[2] && y > w[1] && y < w[3])
+        self.well_of(x, y).is_some()
     }
 
     fn well_of(&self, x: f32, y: f32) -> Option<usize> {
-        self.wells.iter().position(|w| x > w[0] && x < w[2] && y > w[1] && y < w[3])
+        self.wells.iter().position(|&(w, r)| in_round(w, r, x, y))
     }
 
     fn on_body(&self, x: f32, y: f32) -> bool {
@@ -991,8 +993,9 @@ impl Scene {
                 }
             }
         }
-        // the wells' walls, from inside
-        for w in &self.wells {
+        // the wells' walls, from inside: their flat sides, between the
+        // corners, and the corners' rounds
+        for &(w, r) in &self.wells {
             for (axis, at, inward) in [(0usize, w[0], 1.0f32), (0, w[2], -1.0), (1, w[1], 1.0), (1, w[3], -1.0)] {
                 if d[axis] * inward >= 0.0 {
                     continue;
@@ -1001,10 +1004,28 @@ impl Scene {
                 let p = [o[0] + t * d[0], o[1] + t * d[1], o[2] + t * d[2]];
                 let (lo, hi) = if axis == 0 { (w[1], w[3]) } else { (w[0], w[2]) };
                 let q = p[1 - axis];
-                if q > lo && q < hi && p[2] > 0.0 && p[2] < wall {
+                if q > lo + r && q < hi - r && p[2] > 0.0 && p[2] < wall {
                     let mut n = [0.0; 3];
                     n[axis] = inward;
                     take(t, Struck::Wall, n, &mut best);
+                }
+            }
+            // each corner a quarter of a round wall, met from inside on the way out
+            let a = d[0] * d[0] + d[1] * d[1];
+            if r > 0.0 && a > 1e-12 {
+                for (cx, cy, sx, sy) in [(w[0] + r, w[1] + r, -1.0f32, -1.0f32), (w[2] - r, w[1] + r, 1.0, -1.0), (w[0] + r, w[3] - r, -1.0, 1.0), (w[2] - r, w[3] - r, 1.0, 1.0)] {
+                    let (ex, ey) = (o[0] - cx, o[1] - cy);
+                    let half_b = ex * d[0] + ey * d[1];
+                    let disc = half_b * half_b - a * (ex * ex + ey * ey - r * r);
+                    if disc < 0.0 {
+                        continue;
+                    }
+                    let t = (-half_b + disc.sqrt()) / a;
+                    let p = [o[0] + t * d[0], o[1] + t * d[1], o[2] + t * d[2]];
+                    let (dx, dy) = (p[0] - cx, p[1] - cy);
+                    if dx * sx > 0.0 && dy * sy > 0.0 && p[2] > 0.0 && p[2] < wall {
+                        take(t, Struck::Wall, [-dx / r, -dy / r, 0.0], &mut best);
+                    }
                 }
             }
         }
@@ -2014,6 +2035,28 @@ mod tests {
             eprintln!("beam {beam}, scattered {scatter}: the beam holds {total:.4}");
             assert!((total - (1.0 - scatter) as f64).abs() < 1e-3);
         }
+    }
+
+    /// The wells are as round at their corners as the art draws them: a
+    /// place in a corner's square but outside its round is the chassis, not
+    /// the deck, and a ray across the deck meets the corner's round wall.
+    #[test]
+    fn the_wells_corners_are_round() {
+        let (_b, scene, _) = scene();
+        let &(w, r) = scene.wells.iter().find(|(w, _)| (w[0] - 52.262).abs() < 0.1 && (w[3] - 225.739).abs() < 0.1).expect("the main well");
+        assert!((r - 3.518).abs() < 0.01, "its corners' radius: {r}");
+        let (x, y) = (w[0] + 0.5, w[3] - 0.5);
+        assert!(!scene.in_well(x, y) && scene.in_well(w[0] + r, w[3] - r) && scene.in_well(w[0] + 0.5, w[3] - r - 1.0), "in the corner's square, out of its round");
+        let (fx, fy) = scene.fine.at(x, y).unwrap();
+        assert_eq!(scene.surface[fy * scene.fine.w + fx], Surface::Chassis);
+        // a ray along the deck toward the corner, a millimetre up, meets its round wall
+        let ss = Stoods::of(&scene, &Setup::alike(Physics::from(&serde_json::json!({ "scale": 1.38 }))));
+        let (cx, cy) = (w[0] + r, w[3] - r);
+        let from = [cx + 5.0, cy - 5.0, 1.0];
+        let d = [-std::f32::consts::FRAC_1_SQRT_2, std::f32::consts::FRAC_1_SQRT_2, 0.0];
+        let hit = scene.hit(&ss, from, d, 1e4).map(|h| (h.0, h.1));
+        let want = 5.0 * std::f32::consts::SQRT_2 + r;
+        assert!(matches!(hit, Some((t, Struck::Wall)) if (t - want).abs() < 0.05), "the corner's round: {hit:?}, {want}");
     }
 
     /// An LED stays inside its switch: it sits as far north of centre as

@@ -216,8 +216,10 @@ pub struct Board {
     /// where the chassis is: a pixel's coverage
     chassis: Vec<f32>,
     /// each well's box in the art's units, left, top, right, bottom (the
-    /// wells' clip's pieces, in order; with no wells in the art, the board's)
+    /// wells' clip's pieces, in order; with no wells in the art, the board's),
+    /// and the radius its corners are rounded to
     well_boxes: Vec<[f32; 4]>,
+    well_round: Vec<f32>,
     /// the art's own units (the SVG's, which the core's lengths are in) to the
     /// board's pixels: pixel = offset + scale x unit
     pub(crate) art_scale: f32,
@@ -584,22 +586,31 @@ impl Board {
         let ka = k * art.sx;
         let (ox, oy) = (tx + k * art.tx, ty + k * art.ty);
         // each well on its own: its box in the art's units, from its piece of
-        // the clip; with no wells in the art, the board is one
-        let mut well_boxes: Vec<[f32; 4]> = Vec::new();
+        // the clip, and its corners' radius (a rounded box starts its top edge a
+        // radius in from its corner, as the art's caps do); with no wells in the
+        // art, the board is one
+        let (mut well_boxes, mut well_round): (Vec<[f32; 4]>, Vec<f32>) = (Vec::new(), Vec::new());
         if let Some((_, clip)) = found {
             for n in clip.root().children() {
                 let usvg::Node::Path(p) = n else { continue };
                 let b = p.data().bounds();
+                let to_art = clip.transform().pre_concat(p.abs_transform());
                 let mut corners = [(b.left(), b.top()), (b.right(), b.top()), (b.left(), b.bottom()), (b.right(), b.bottom())].map(|(x, y)| resvg::tiny_skia::Point::from_xy(x, y));
-                clip.transform().pre_concat(p.abs_transform()).map_points(&mut corners);
+                to_art.map_points(&mut corners);
                 let (xs, ys) = (corners.map(|p| p.x), corners.map(|p| p.y));
                 let lo = |v: [f32; 4]| v.into_iter().fold(f32::MAX, f32::min);
                 let hi = |v: [f32; 4]| v.into_iter().fold(-f32::MAX, f32::max);
                 well_boxes.push([lo(xs), lo(ys), hi(xs), hi(ys)]);
+                let r = match p.data().points().first() {
+                    Some(first) if (first.y - b.top()).abs() < 1e-3 => (first.x - b.left()).clamp(0.0, b.width().min(b.height()) / 2.0) * to_art.sx.abs(),
+                    _ => 0.0,
+                };
+                well_round.push(r);
             }
         }
         if well_boxes.is_empty() {
             well_boxes.push([-ox / ka, -oy / ka, (w as f32 - ox) / ka, (h as f32 - oy) / ka]);
+            well_round.push(0.0);
         }
         // a piece's box, in the art's units
         let rect = |n: &usvg::Node| {
@@ -734,6 +745,7 @@ impl Board {
             model,
             chassis,
             well_boxes,
+            well_round,
             art_scale: ka,
             art_offset: (ox, oy),
             indicators,
