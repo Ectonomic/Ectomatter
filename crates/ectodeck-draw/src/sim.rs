@@ -653,11 +653,6 @@ impl Scene {
                 (2, (y - f[1]) / (a[1] - f[1]).max(1e-3)),
                 (3, (f[3] - y) / (f[3] - a[3]).max(1e-3)),
             ];
-            // a cap standing in a well has no wall where its base runs past the
-            // well, over the chassis (the spacebar's front): there it is its lip, its top
-            if !self.in_well(x, y) && self.in_well((f[0] + f[2]) / 2.0, (f[1] + f[3]) / 2.0) {
-                return Surface::Top(i);
-            }
             let (side, up) = ups.iter().copied().filter(|(_, u)| *u < 1.0).fold((0u8, -1.0f32), |b, (s, u)| if u > b.1 { (s, u) } else { b });
             return Surface::Skirt(i, side, up.clamp(0.0, 1.0));
         }
@@ -2040,29 +2035,6 @@ mod tests {
             eprintln!("beam {beam}, scattered {scatter}: the beam holds {total:.4}");
             assert!((total - (1.0 - scatter) as f64).abs() < 1e-3);
         }
-    }
-
-    /// The spacebar runs past the bottom of its well, over the chassis: there
-    /// it has no wall, its lip being its top; its sides inside the well are
-    /// walls still; the buttons, wholly in their slots or in no well, have none.
-    #[test]
-    fn the_spacebar_s_lip_has_no_wall() {
-        let (b, scene, _) = scene();
-        let space = b.cap_shapes.iter().position(|c| c.label == "Space").unwrap();
-        let f = scene.caps[space].foot;
-        let at = |x: f32, y: f32| {
-            let (i, j) = scene.fine.at(x, y).unwrap();
-            scene.surface[j * scene.fine.w + i]
-        };
-        assert_eq!(at(f[0] + 0.5, f[3] - 0.5), Surface::Top(space as u32), "its lip's corner, over the chassis");
-        assert_eq!(at((f[0] + f[2]) / 2.0, f[3] - 0.3), Surface::Top(space as u32), "its front, over the chassis");
-        assert!(matches!(at(f[0] + 0.5, f[1] + 10.0), Surface::Skirt(c, ..) if c as usize == space), "its side, in the well");
-        // the buttons have no lip: a media key lies wholly in its slot, G/PC in no well at all
-        let foot = |label: &str| scene.caps[b.cap_shapes.iter().position(|c| c.label == label).unwrap()].foot;
-        let g = foot("Media stop");
-        assert!([(g[0], g[1]), (g[2], g[1]), (g[0], g[3]), (g[2], g[3])].iter().all(|&(x, y)| scene.in_well(x + (g[0] + g[2] - 2.0 * x) * 0.02, y + (g[1] + g[3] - 2.0 * y) * 0.02)), "a media key in its slot");
-        let g = foot("Game mode button");
-        assert!(!scene.in_well((g[0] + g[2]) / 2.0, (g[1] + g[3]) / 2.0), "G/PC on the chassis");
     }
 
     /// The wells are as round at their corners as the art draws them: a
