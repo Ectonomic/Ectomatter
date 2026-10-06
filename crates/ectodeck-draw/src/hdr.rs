@@ -88,6 +88,7 @@ impl Light {
 
 /// A shape on the board: how much of something there is at each pixel, in
 /// its own small box.
+#[derive(Clone, Debug)]
 struct Shape {
     x: i32,
     y: i32,
@@ -209,6 +210,9 @@ pub struct Board {
     /// media keys): their feet and faces in the art's units, and their
     /// corners' radii, which stand in the light's way
     others: Vec<([f32; 4], [f32; 4], [f32; 2])>,
+    /// each cap's foot's own shape, where it is no rounded box, in the
+    /// simulation's order of the caps
+    odd_feet: Vec<Option<Shape>>,
     /// every cap, lit or not, and the controls they are: the lit keys' in
     /// their order, then the others', as the simulation counts its caps
     pub cap_shapes: Vec<CapShape>,
@@ -502,8 +506,7 @@ impl Board {
             }
         };
         // cut one piece's coverage, in its own box
-        let shape = |id: &str| -> Option<Shape> {
-            let n = node(id)?;
+        let shape_of = |n: &usvg::Node| -> Option<Shape> {
             let bb = n.abs_layer_bounding_box()?;
             let (fx, fy) = (tx + k * bb.x(), ty + k * bb.y());
             let (x, y) = (fx.floor() as i32, fy.floor() as i32);
@@ -513,6 +516,13 @@ impl Board {
             resvg::render_node(n, t, &mut pix.as_mut());
             let cover = pix.data().chunks_exact(4).map(|p| p[3] as f32 / 255.0).collect();
             Some(Shape { x, y, w: sw, h: sh, cover })
+        };
+        let shape = |id: &str| shape_of(node(id)?);
+        // a cap's foot where it is no rounded box (a spacebar whose walls step
+        // in over the chassis): its shape, which the simulation keeps its cap to
+        let odd_foot = |n: &usvg::Node| match n {
+            usvg::Node::Path(p) if p.data().segments().count() > 10 => shape_of(n),
+            _ => None,
         };
         let children = |id: &str| -> Vec<usvg::Node> {
             match node(id) {
@@ -631,6 +641,7 @@ impl Board {
         // each lit key: its legend, and its cap's shape, which its light is simulated in
         let mut keys = Vec::new();
         let mut cap_shapes = Vec::new();
+        let mut odd_feet = Vec::new();
         for c in controls.iter().filter(|c| lit(c)) {
             let Some(pos) = c["pos"].as_u64() else { continue };
             let legend_n = legend_of(c);
@@ -646,6 +657,7 @@ impl Board {
             let cap = foot.map(|_| cap_shapes.len() as u32);
             if let Some(f) = foot {
                 cap_shapes.push(CapShape { id: control_id(c), label: label(c), short: short(c), foot: f, lit: true, legend: legend.is_some(), button: false });
+                odd_feet.push(parts.get(1).and_then(odd_foot));
             }
             keys.push(KeyArt { pos: pos as u32, cap, foot, face, round: rounds, legend, second, print });
         }
@@ -667,6 +679,7 @@ impl Board {
             };
             others.push((rect(foot), rect(face), [round(foot), round(face)]));
             cap_shapes.push(CapShape { id: control_id(c), label: label(c), short: short(c), foot: rect(foot), lit: false, legend: false, button: !shadow });
+            odd_feet.push(odd_foot(foot));
         }
         // The lock lights, from the core's "lock_lights": each a small window
         // with an LED under it (the art's piece the core names), brightest over
@@ -741,6 +754,7 @@ impl Board {
             caps,
             keys,
             others,
+            odd_feet,
             cap_shapes,
             model,
             chassis,

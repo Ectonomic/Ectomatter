@@ -584,6 +584,10 @@ pub struct Scene {
     /// each lit key: its place, and its foot's middle (its cap is the same
     /// in the caps, which start with the lit keys')
     keys: Vec<(u32, (f32, f32))>,
+    /// the art's units to the board's pixels: scale, and offset across and down
+    px: (f32, f32, f32),
+    /// each cap's foot's own shape, where it is no rounded box, in the board's pixels
+    odd: Vec<Option<Arc<super::Shape>>>,
 }
 
 impl Scene {
@@ -603,6 +607,7 @@ impl Scene {
             }
         }
         caps.extend(b.others.iter().map(|&(foot, face, round)| Cap { foot, face, round: [radius(foot, round[0]), radius(face, round[1])] }));
+
         // the art's extent: the board's
         let (x0, y0) = unit(0.0, 0.0);
         let (x1, y1) = unit(b.w as f32, b.h as f32);
@@ -618,7 +623,8 @@ impl Scene {
                 }
             }
         }
-        let mut scene = Scene { wells, caps, cells, cg, fine, surface: Vec::new(), keys };
+        let odd = b.odd_feet.iter().map(|o| o.clone().map(Arc::new)).collect();
+        let mut scene = Scene { wells, caps, cells, cg, fine, surface: Vec::new(), keys, px: (ka, ox, oy), odd };
         let body = |x: f32, y: f32| {
             let (px, py) = (ox + ka * x, oy + ka * y);
             px >= 0.0 && py >= 0.0 && (px as u32) < b.w && (py as u32) < b.h && b.chassis[(py as u32 * b.w + px as u32) as usize] > 0.5
@@ -642,6 +648,14 @@ impl Scene {
             let (f, a) = (c.foot, c.face);
             if !in_round(f, c.round[0], x, y) {
                 continue;
+            }
+            // (a foot of its own shape: only where it is)
+            if let Some(o) = self.odd.get(i as usize).and_then(|o| o.as_deref()) {
+                let (ka, ox, oy) = self.px;
+                let (i, j) = ((ox + ka * x).floor() as i32 - o.x, (oy + ka * y).floor() as i32 - o.y);
+                if i < 0 || j < 0 || i >= o.w as i32 || j >= o.h as i32 || o.cover[(j as u32 * o.w + i as u32) as usize] < 0.5 {
+                    continue;
+                }
             }
             if in_round(a, c.round[1], x, y) {
                 return Surface::Top(i);
@@ -2035,6 +2049,25 @@ mod tests {
             eprintln!("beam {beam}, scattered {scatter}: the beam holds {total:.4}");
             assert!((total - (1.0 - scatter) as f64).abs() < 1e-3);
         }
+    }
+
+    /// The spacebar's walls step in where it runs over the chassis, as the
+    /// art draws its foot: beside the step it is the chassis, not its wall;
+    /// above the step, and inside it, its wall.
+    #[test]
+    fn the_spacebar_s_walls_step_in_over_the_chassis() {
+        let (b, scene, _) = scene();
+        let space = b.cap_shapes.iter().position(|c| c.label == "Space").unwrap() as u32;
+        let f = scene.caps[space as usize].foot;
+        let at = |x: f32, y: f32| {
+            let (i, j) = scene.fine.at(x, y).unwrap();
+            scene.surface[j * scene.fine.w + i]
+        };
+        assert!(scene.odd[space as usize].is_some(), "its foot is its own shape");
+        assert_eq!(at(f[0] + 0.4, f[3] - 3.0), Surface::Chassis, "beside the step, over the chassis");
+        assert!(matches!(at(f[0] + 0.4, f[1] + 10.0), Surface::Skirt(c, ..) if c == space), "its wall above the step");
+        assert!(matches!(at(f[0] + 1.3, f[3] - 3.0), Surface::Skirt(c, ..) if c == space), "its shorter wall below it");
+        assert!((0..scene.caps.len()).filter(|&c| c != space as usize).all(|c| scene.odd[c].is_none()), "every other cap a rounded box");
     }
 
     /// The wells are as round at their corners as the art draws them: a
