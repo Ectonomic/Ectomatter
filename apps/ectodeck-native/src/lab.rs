@@ -112,7 +112,7 @@ struct Param {
 
 const PARAMS: [Param; 27] = [
     Param { path: ("switches", "led"), label: "North of centre", lo: -7.0, hi: 7.0, step: 0.05, unit: Unit::North, def: 5.08, note: "Where each key's LED sits under its cap, from the switch's centre toward the top of the key; below 0, toward the bottom, as on a keyboard whose LEDs face south. It goes as far as the switch's edge, so Switch width sets how far the slider reaches." },
-    Param { path: ("brightness", ""), label: "Brightness", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, def: 600.0, note: "The brightest legend, with every key lit white at full, up to Peak nits (Settings › HDR). Everything else the LEDs light is as bright as the simulation finds it beside that. A colour gives off its own share, as an LED does: a red about a fifth." },
+    Param { path: ("brightness", ""), label: "Brightness", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, def: 2000.0, note: "How strong the LEDs are, with every key lit white at full: how bright a legend would be if it let all their light through. The legends show their share of it (Legends let through), up to Peak nits (Settings › HDR); everything else the LEDs light follows this alone. A colour gives off its own share, as an LED does: a red about a fifth." },
     Param { path: ("switches", "beam"), label: "Beam", lo: 1.0, hi: 200.0, step: 0.5, unit: Unit::Number, def: 24.0, note: "How tight the LED's beam out of the top of the switch is. Higher keeps it to a small bright spot on the legend over the LED; lower spreads it across the cap's top and onto the inside of its skirt." },
     Param { path: ("switches", "scattered"), label: "Scattered", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.7, note: "The share of the LED's light a clear housing scatters, glowing with it all over, rather than sending up in the beam. More lights the legend more evenly, and the deck and the inside of the cap more; less leaves more for the spot over the LED." },
     Param { path: ("switches", "sides"), label: "Through its sides", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.25, note: "The share of the housing's glow that leaves through its sides rather than its top. Its sides light the deck round the switch, out under the skirt; its top lights the back of the legend evenly, its parts far from the LED as well." },
@@ -121,7 +121,7 @@ const PARAMS: [Param; 27] = [
     Param { path: ("switches", "top"), label: "Switch top", lo: 0.1, hi: 14.0, step: 0.1, unit: Unit::Mm, def: 6.5, note: "How high above the deck the switch's housing stands, where the beam leaves it: 5.7 mm on Cherry-style switches. Nearer the cap's top makes the spot on the legend smaller and brighter." },
     Param { path: ("caps", "foot"), label: "Skirt's foot", lo: 0.0, hi: 12.0, step: 0.1, unit: Unit::Mm, def: 5.0, note: "How high above the deck the foot of each cap's skirt is: the gap the light gets out under it by." },
     Param { path: ("caps", "top"), label: "Cap's top", lo: 1.0, hi: 25.0, step: 0.1, unit: Unit::Mm, def: 14.0, note: "How high above the deck each cap's top is, where the legend is." },
-    Param { path: ("caps", "legends"), label: "Legends let through", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.3, note: "The share of the light on the back of a cap's top that its legend lets through. With Brightness fixing the legends, less makes everything else brighter beside them." },
+    Param { path: ("caps", "legends"), label: "Legends let through", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.3, note: "The share of the light on the back of a cap's top that its legend lets through. Less dims the legends; the rest of the keyboard's light stays as it is." },
     Param { path: ("caps", "inside"), label: "Inside", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.5, note: "The share of the light the inside of a cap gives back. More of it bounces about inside the cap, and more gets out under the skirt onto the deck round it." },
     Param { path: ("caps", "outside"), label: "Outside", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.18, note: "The share of the light the outside of a cap's skirt gives back: what the skirts show of the light round them." },
     Param { path: ("legends", "unlit"), label: "LED off", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.15, note: "How bright a legend looks with its LED off (the dimmer at 0%, or a key the lighting leaves dark), as a share of the grey the art prints it in. A backlit legend with no light behind it is dark." },
@@ -1258,12 +1258,16 @@ impl LabPage {
     }
 
     /// A value's slider range: a brightness from 0 to Peak nits (Settings ›
-    /// HDR), since nothing above it shows; the LED from one edge of its
-    /// switch to the other, as wide as Switch width has it; the rest their own.
+    /// HDR), since nothing above it shows (the LEDs' Brightness to as strong
+    /// as puts the legends, with the share they let through, at Peak nits);
+    /// the LED from one edge of its switch to the other, as wide as Switch
+    /// width has it; the rest their own.
     fn range(&self, i: usize) -> (f64, f64) {
         let p = &PARAMS[i];
         if p.unit == Unit::Nits {
-            (0.0, if self.readout.peak > 0.0 { self.readout.peak } else { 1000.0 })
+            let peak = if self.readout.peak > 0.0 { self.readout.peak } else { 1000.0 };
+            let share = if p.path == ("brightness", "") { (Physics::from(&self.work()).legends as f64).max(0.01) } else { 1.0 };
+            (0.0, peak / share)
         } else if p.unit == Unit::North {
             let edge = Physics::from(&self.work()).switch_width as f64 / 2.0;
             (-edge, edge)
@@ -1365,7 +1369,7 @@ impl LabPage {
     /// colour's clean limit is only told.
     fn legend_note(&self) -> Option<String> {
         let r = self.readout;
-        if self.value(1) > r.peak + 0.5 && r.peak > 0.0 {
+        if self.value(1) * Physics::from(&self.work()).legends as f64 > r.peak + 0.5 && r.peak > 0.0 {
             Some(format!("Held at Peak nits, {:.0} (Settings › HDR).", r.peak))
         } else if r.legend > r.reach + 0.5 && r.reach > 0.0 {
             Some(format!("This colour shows cleanly up to {:.0} nits. Above that the screen clips its red, so the brightest parts turn yellower.", r.reach))

@@ -209,8 +209,8 @@ pub struct Physics {
     /// middle (a key's own "place")
     pub led: f32,
     pub place: [f32; 2],
-    /// the brightest legend, every key lit white at full, in nits: what the
-    /// whole simulation's light is scaled to
+    /// the LEDs' strength, in nits: how bright the brightest legend would be,
+    /// every key lit white at full, if it let all their light through
     pub nits: f32,
     /// the switch's housing: black with the LED through a slot in it, or clear
     pub switch: Switch,
@@ -276,7 +276,7 @@ impl Physics {
             // (5.08 mm north, as Cherry's and Kailh's switches have it)
             led: (sw["led"].as_f64().unwrap_or(5.08) * scale) as f32,
             place: [f(&light["place"]["east"], 0.0), f(&light["place"]["north"], 0.0)],
-            nits: f(&light["brightness"], 600.0).max(0.0),
+            nits: f(&light["brightness"], 2000.0).max(0.0),
             switch: Switch::named(sw["kind"].as_str()),
             switch_top: f(&sw["top"], 6.5).clamp(0.05, top - 0.1),
             switch_width: f(&sw["width"], 12.0).clamp(1.0, 14.0),

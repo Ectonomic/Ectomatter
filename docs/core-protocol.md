@@ -137,7 +137,7 @@ How the device's light gets out, for the frontend to draw it as light: the `ligh
 "light": {
   "scale": 1.38,       // the drawing's units to the millimetre
   "typical": "2",      // the key the Light lab draws for all keys
-  "brightness": 705,   // the brightest legend, every key lit white at full
+  "brightness": 2350,  // the LEDs' strength, as a legend letting all their light through
   "switches": { "kind": "led-slot", "top": 5.7, "width": 12, "led": 5.08, "beam": 3 },
   "caps": { "kind": "shine-through", "foot": 5, "top": 14, "legends": 0.3, "inside": 0.5, "outside": 0.18 },
   "legends": { "unlit": 0.15 },
@@ -152,7 +152,7 @@ How the device's light gets out, for the frontend to draw it as light: the `ligh
 
 - **scale** is how many of the drawing's units make a millimetre. Positions come from the drawing in its own units; every length in the description is in millimetres, and every brightness in nits.
 - **typical** is the control the Light lab draws in section when no key is chosen, by its id: a key as most of the device's are.
-- **brightness** is the brightest legend, with every key lit white at full. Everything else the LEDs light is as bright as the simulation finds it beside that.
+- **brightness** is the LEDs' strength, with every key lit white at full: how bright a legend would be if it let all their light through. The legends show their share of it (`legends`, under `caps`), up to the screen's peak; everything else the LEDs light is as bright as the simulation finds it from the LEDs' strength alone, whatever share the legends let through.
 - **switches** is the switch under each key: its housing's `kind` (`led-slot`, black with its LED through a slot in its top; `clear-top`; or `clear`), its `top` above the deck and its `width`, where its LED sits (`led`, north of the switch's middle, south below 0), how tight the LED's `beam` is, and how a clear housing glows (`scattered`, `sides`, `glow`).
 - **caps** is the cap over it: its `kind` (`shine-through`, `pudding` or `translucent`), its skirt's `foot` and its `top` above the deck, the shares of light its `legends` and its `plastic` let through, how far down a pudding cap's sides its `black` comes, how `milky` the plastic is, and the shares its `inside` and `outside` give back.
 - **legends**, **wells** and **display** are how a legend looks with its LED off (`unlit`, a share of the drawing's grey); the wells (the mask piece of the drawing that holds them, their `depth`, and the shares the `deck` and the `chassis` give back); and the display's backlit dots, in nits, with how much of its cell a dot fills and how strongly the glass shows its sheen.

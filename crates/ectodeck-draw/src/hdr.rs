@@ -121,8 +121,8 @@ struct KeyArt {
 /// the display's light. How the light falls is the simulation's.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Model {
-    /// the brightest legend, every key lit white at full, in nits: what all
-    /// the simulation's light is scaled by
+    /// the LEDs' strength, in nits: how bright the brightest legend would be,
+    /// every key lit white at full, if it let all their light through (see gain)
     nits: f32,
     /// how a lit key's legend looks with its LED off, as a share of the grey
     /// the art prints it in: a backlit legend with no light behind it is dark
@@ -141,7 +141,7 @@ impl Model {
         let f = |v: &Value, d: f32| v.as_f64().map_or(d, |v| v as f32);
         let d = &l["display"];
         Model {
-            nits: f(&l["brightness"], 600.0).max(0.0),
+            nits: f(&l["brightness"], 2000.0).max(0.0),
             legend_unlit: f(&l["legends"]["unlit"], 0.15).clamp(0.0, 1.0),
             lcd_nits: f(&d["lit"], 324.0).max(0.0),
             lcd_unlit: f(&d["unlit"], 4.1).max(0.0),
@@ -1040,7 +1040,8 @@ impl Board {
         self.sim.as_deref()
     }
 
-    /// The brightest legend, every key lit white at full, in nits, and the display's lit dots'.
+    /// The LEDs' strength, as a legend letting all their light through would
+    /// be (every key lit white at full), in nits, and the display's lit dots'.
     pub fn legend_nits(&self) -> f32 {
         self.model.nits
     }
@@ -1112,11 +1113,16 @@ impl Board {
         })
     }
 
-    /// What makes the simulation's light its nits, in the SDR white's units:
-    /// the brightest legend, every key lit white at full, at the core's nits,
-    /// up to Peak nits (`ceiling` times the white).
+    /// What makes the simulation's light its nits, in the SDR white's units.
+    /// The core's brightness is the LEDs' strength: how bright the brightest
+    /// legend would be, every key lit white at full, if it let all their
+    /// light through. The legends let their share of that through, so the
+    /// brightest is the brightness times that share, up to Peak nits
+    /// (`ceiling` times the white); the rest of the light is as strong
+    /// whatever share the legends let through.
     fn gain(&self, white: f32, ceiling: f32) -> f32 {
-        let top = (self.model.nits / white.max(1.0)).min(ceiling);
+        let share = self.sim.as_ref().map_or(0.3, |s| s.setup.all.legends).max(0.01);
+        let top = (self.model.nits * share / white.max(1.0)).min(ceiling);
         if self.most.legend > 0.0 { top / self.most.legend } else { 0.0 }
     }
 
@@ -1472,7 +1478,8 @@ mod tests {
     fn light() -> Value {
         serde_json::json!({
             "scale": 1.38,
-            "brightness": 600,
+            // (the LEDs as strong as puts the brightest legend, letting its 30% through, at 600 nits)
+            "brightness": 2000,
             "switches": { "led": 4.5 / 1.38 },
             "legends": { "unlit": 0.15 },
             "wells": { "art": "mask_1" },
@@ -1770,10 +1777,32 @@ mod tests {
         }
     }
 
-    /// The brightest legend is the core's nits, every key lit white at full;
-    /// a legend is brightest over its LED; the deck by a key's skirt is
-    /// brightest on its LED's side; the chassis catches the light out of the
-    /// wells; and nothing lights the page round the keyboard.
+    /// The legends' share dims the legends alone: a tenth of it leaves the
+    /// rest of the keyboard's light about as it was.
+    #[test]
+    fn the_legends_share_dims_the_legends_alone() {
+        let (_, device, mut b) = board();
+        let scene = Scene::of(&b);
+        let brightest = |b: &mut Board, legends: f64| {
+            let mut l = device["light"].clone();
+            l["caps"]["legends"] = serde_json::json!(legends);
+            b.set_sim(Arc::new(Simulator::settle(&scene, &Setup::alike(Physics::from(&l)), 4000)));
+            let lit = b.compose(&white(b), 0, 254.0, 4000.0 / 254.0);
+            let most = |code: u8| (0..b.w as usize * b.h as usize).filter(|&j| b.reads[j].code == code && b.caps[j * 4 + 3] < 0.01).map(|j| lum(&lit, b, ((j % b.w as usize) as i32, (j / b.w as usize) as i32))).fold(0f32, f32::max);
+            (b.peaks(&white(b), 254.0, 4000.0 / 254.0).legend, most(0))
+        };
+        let (legend, deck) = brightest(&mut b, 0.3);
+        let (legend_dim, deck_dim) = brightest(&mut b, 0.03);
+        eprintln!("legends at 30%: brightest legend {legend:.0} nits, deck {deck:.4}; at 3%: {legend_dim:.0} nits, deck {deck_dim:.4}");
+        assert!(legend_dim < legend * 0.2, "the legends dim with their share");
+        assert!((deck_dim - deck).abs() < deck * 0.15, "the deck stays about as it was");
+    }
+
+    /// The brightest legend, every key lit white at full, is the LEDs'
+    /// strength times the share the legends let through; a legend is
+    /// brightest over its LED; the deck by a key's skirt is brightest on its
+    /// LED's side; the chassis catches the light out of the wells; and
+    /// nothing lights the page round the keyboard.
     #[test]
     fn the_light_falls_as_the_simulation_has_it() {
         let (_, device, b) = lit_board(20_000);
@@ -1781,7 +1810,7 @@ mod tests {
         let lit = b.compose(&white(&b), 0, 254.0, 1000.0 / 254.0);
         let dark = b.compose(&[], 0, 254.0, 1000.0 / 254.0);
         let add = |p: (i32, i32)| (lum(&lit, &b, p) - lum(&dark, &b, p)) * 254.0;
-        // the brightest legend at the core's nits
+        // the brightest legend at the LEDs' strength, times the share the legends let through
         let mut brightest = 0f32;
         for key in &b.keys {
             let Some(l) = &key.legend else { continue };
@@ -1792,7 +1821,7 @@ mod tests {
             }
         }
         eprintln!("the brightest legend: {brightest:.1} nits");
-        assert!((brightest - 600.0).abs() < 600.0 * 0.03, "the brightest legend is the core's nits: {brightest}");
+        assert!((brightest - 600.0).abs() < 600.0 * 0.03, "the brightest legend is the LEDs' strength times the legends' share: {brightest}");
         // W: its legend brighter by its LED (north) than further off
         let c = device["controls"].as_array().unwrap().iter().find(|c| c["label"] == "W").unwrap();
         let key = b.keys.iter().find(|k| k.pos as u64 == c["pos"].as_u64().unwrap()).unwrap();
