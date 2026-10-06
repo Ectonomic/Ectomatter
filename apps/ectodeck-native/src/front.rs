@@ -748,7 +748,13 @@ impl Front {
 
     /// Do what the Light lab asked; what only its window can do is handed back.
     pub fn act_lab(&mut self) -> Vec<WindowAsk> {
-        self.lab.as_mut().map_or(Vec::new(), |l| l.act())
+        let Some(l) = &mut self.lab else { return Vec::new() };
+        let window = l.act();
+        // the light setup chosen to light the keyboard, kept for next time
+        if let Some(setup) = l.switched.take() {
+            let _ = self.settings.set(crate::setups::IN_USE, setup.map_or(serde_json::Value::Null, serde_json::Value::from));
+        }
+        window
     }
 
     /// Do what the Macro Editor's page asked; what only its window can do is handed back.

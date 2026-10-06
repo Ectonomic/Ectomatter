@@ -32,6 +32,7 @@ mod overlays;
 mod picture;
 mod screens;
 mod settings;
+mod setups;
 mod text;
 mod tray;
 mod uistate;
@@ -281,6 +282,17 @@ fn settled(tree: &usvg::Tree, device: &serde_json::Value, w: u32, h: u32) -> Boa
     board
 }
 
+/// The core's device description, its light as the setup in use makes it
+/// (the core's own, with none of the person's own in use).
+fn device_in_use(settings: &settings::Settings) -> serde_json::Value {
+    let core = cores::shown();
+    let mut device = core.device_now();
+    if let Some(s) = setups::in_use(settings, &core.id) {
+        device["light"] = setups::merged(&device["light"], &s.changes);
+    }
+    device
+}
+
 /// A key as Slint takes it: its own text, or the name Slint gives a key with none.
 fn key_text(e: &KeyEvent) -> Option<SharedString> {
     let k = match e.keysym {
@@ -464,7 +476,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
             window.dispatch_event(WindowEvent::PointerPressed { position: at(0.0), button: PointerEventButton::Left });
             let rect = board_rect(&front.ui, 1.0);
             let tree = cores::shown().tree();
-            let device: serde_json::Value = cores::shown().device_now();
+            let device = device_in_use(&front.settings);
             let board = (rect.2 > 0).then(|| settled(&tree, &device, rect.2 as u32, rect.3 as u32));
             for k in 1..=30 {
                 let t0 = Instant::now();
@@ -514,7 +526,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     lay_ground(&mut pic, &front.ui, 1.0);
     if rect.2 > 0 {
         let tree = cores::shown().tree();
-        let device: serde_json::Value = cores::shown().device_now();
+        let device = device_in_use(&front.settings);
         let t = Instant::now();
         let board = settled(&tree, &device, rect.2 as u32, rect.3 as u32);
         eprintln!("keyboard drawn and its light simulated in {:?}", t.elapsed());
@@ -655,7 +667,7 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
         .ok()
         .and_then(|s| s.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
         .unwrap_or(LAB_SIZE);
-    let device: serde_json::Value = cores::shown().device_now();
+    let device = device_in_use(&front.settings);
     let tree = cores::shown().tree();
     let board = settled(&tree, &device, 1264, 506);
     let ui = LabWindow::new().unwrap();
@@ -663,7 +675,8 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
     let window = made.borrow().last().cloned().unwrap();
     slint::ComponentHandle::show(&ui).unwrap();
     window.set_size(PhysicalSize::new(w, h));
-    let mut lab = lab::LabPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false), device["light"].clone(), lab_device(Some(&board)));
+    let setup = setups::in_use(&front.settings, &cores::shown().id).map(|s| s.id);
+    let mut lab = lab::LabPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false), device["light"].clone(), lab_device(Some(&board)), setup);
     let lights = front.lights().unwrap_or_default();
     let gain = front.light_gain(reference);
     let p = board.peaks(&lights, reference as f32, gain);
@@ -1058,6 +1071,8 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         device::start(data_dir().join("backups"), heard_tx)
     });
 
+    // the keyboard lit by the light setup in use, if it is one of the person's own
+    let lit_by = setups::in_use(&settings, &cores::shown().id).map(|s| setups::merged(&cores::shown().device_now()["light"], &s.changes));
     let mut app = App {
         registry: RegistryState::new(&globals),
         seats: SeatState::new(&globals, &qh),
@@ -1118,7 +1133,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         subs: [None, None],
         keys_on: None,
         mods: Modifiers::default(),
-        light: None,
+        light: lit_by,
         light_rev: (0, false),
         readout_at: None,
         sim: None,
@@ -1330,7 +1345,8 @@ impl App {
         }
     }
 
-    /// The light the keyboard is lit by: the Light lab's, if it has tuned one, or the core's.
+    /// The light the keyboard is lit by: the Light lab's, if it has tuned
+    /// one, or that of the setup in use (the core's, or one of the person's own).
     fn light_now(&self) -> serde_json::Value {
         self.light.clone().unwrap_or_else(|| cores::shown().device_now()["light"].clone())
     }
@@ -1342,7 +1358,8 @@ impl App {
             let ui = LabWindow::new().unwrap();
             let _ = slint::ComponentHandle::window(&ui);
             slint::ComponentHandle::show(&ui).unwrap();
-            self.front.lab = Some(lab::LabPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false), light, lab_device(self.board.as_ref())));
+            let setup = setups::in_use(&self.front.settings, &cores::shown().id).map(|s| s.id);
+            self.front.lab = Some(lab::LabPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false), light, lab_device(self.board.as_ref()), setup));
             self.subs[LAB] = Some(self.make_sub(&format!("{} / Light lab", cores::shown().name()), LAB_SIZE, LAB_MIN_SIZE));
         } else {
             self.show_sub(LAB);
@@ -2346,6 +2363,7 @@ fn lab_device(board: Option<&Board>) -> lab::LabDevice {
     let typical = light["typical"].as_str().map(str::to_string).or_else(|| light["typical"].as_u64().map(|n| n.to_string()));
     lab::LabDevice {
         name: core.name().to_string(),
+        core: core.id.clone(),
         path: core.path.clone(),
         // (before its board is drawn, a device with art is taken to have keys and wells)
         keys: board.is_none_or(|b| b.cap_shapes.iter().any(|c| c.lit)),

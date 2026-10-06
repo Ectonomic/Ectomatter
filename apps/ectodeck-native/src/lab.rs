@@ -10,7 +10,9 @@
 //! at once, its light clearing as the simulation runs. Save writes the
 //! tuning into the device's core, which Ectodeck reads when it runs from its
 //! source: each value that changed in its place in the core's file, the rest
-//! of the file (its comments, its lines) as its author wrote it.
+//! of the file (its comments, its lines) as its author wrote it. Or, where
+//! the lab tunes a light setup of the person's own (see setups), into that
+//! setup's file: only what it changes from the core's.
 //!
 //! The lab is landscape and shows one section at a time: its drawing of the
 //! key in the middle (see drawing), its sliders round it, each beside the
@@ -29,6 +31,7 @@ use slint::{Model, ModelRc, VecModel};
 
 use crate::front::WindowAsk;
 use crate::lighting::{cell, kind, style, text_cell};
+use crate::setups::{self, Setup};
 use crate::text;
 use crate::{Cell, LabRow, LabWindow, Sketch};
 use ectodeck_draw::hdr::sim::{key_light, Caps, Physics, Switch};
@@ -73,6 +76,8 @@ pub enum Ask {
     Faces,
     Face(i32),
     FacesScroll(f32),
+    /// the light setups' menu: its button, and what was chosen on it (see SETUP)
+    Setups(i32),
 }
 
 /// What a value is, which says how it reads.
@@ -397,6 +402,14 @@ const OWN: i32 = 960;
 const PAD: i32 = 970;
 /// a slider's reset: this, plus its slider's id
 const RESET: i32 = 1000;
+/// the light setups' button and its menu, by index: the button (0), the
+/// page round the menu (1), Save as a new setup (2), Rename (3), Delete (4),
+/// a name given or a delete agreed to (5), Cancel (6); the core's setup
+/// (10), and the person's own from 11; and the box their name is typed in
+const SETUP: i32 = 930;
+const NAME: i32 = 935;
+/// a setup's words in the menu and on Save: as long as fits
+const SETUP_W: f32 = 200.0;
 /// the switch's place, east and north: values of one key's only
 const PLACE_E: usize = 25;
 const PLACE_N: usize = 26;
@@ -431,6 +444,8 @@ const HELP_H: f32 = 44.0;
 /// in section as the art has it; and the key drawn for all keys.
 pub struct LabDevice {
     pub name: String,
+    /// its core's id, which the person's own setups of its light are kept under
+    pub core: String,
     pub path: std::path::PathBuf,
     pub keys: bool,
     pub wells: bool,
@@ -501,6 +516,31 @@ pub struct LabPage {
     face_query: String,
     face_first: usize,
     face_sketch: Option<(FaceListOf, drawing::Stage, slint::Image)>,
+    /// the light setup the page tunes and the keyboard is lit by: one of
+    /// the person's own (by its id), or none for the core's; the person's
+    /// own, as their files have them; the core's light as its file last had
+    /// it, which theirs change; and a setup chosen since the settings were
+    /// told, for them to keep (none: the core's)
+    setup: Option<String>,
+    setups: Vec<Setup>,
+    core_saved: Value,
+    pub switched: Option<Option<String>>,
+    /// the setups' menu, and the name being typed for one
+    menu: Menu,
+    naming: String,
+    top: Rc<VecModel<Cell>>,
+}
+
+/// The light setups' menu: shut; open; giving a setup a name, a new one
+/// for the light as it is or the one in use a new name; or asking whether
+/// to delete the one in use.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Menu {
+    Shut,
+    Open,
+    New,
+    Rename,
+    Delete,
 }
 
 /// What the typefaces' list was drawn from: the first it shows, how many,
@@ -740,7 +780,7 @@ fn plain(light: Value, print: &Value) -> Value {
 }
 
 impl LabPage {
-    pub fn new(ui: LabWindow, mark: slint::Image, light: Value, device: LabDevice) -> LabPage {
+    pub fn new(ui: LabWindow, mark: slint::Image, light: Value, device: LabDevice, setup: Option<String>) -> LabPage {
         let asks = Rc::new(RefCell::new(Vec::new()));
         macro_rules! on {
             ($set:ident, |$($p:ident),*| $ask:expr) => {{
@@ -761,6 +801,9 @@ impl LabPage {
         on!(on_revert, Ask::Revert);
         on!(on_save, Ask::Save);
         on!(on_pick, |id, index| match id {
+            SETUP => Ask::Setups(index),
+            // (Enter in the name's box gives it; Escape cancels)
+            NAME => Ask::Setups(if index == 1 { 5 } else { 6 }),
             TABS => Ask::Section(index),
             SCOPE => Ask::Scope(index),
             MAP => Ask::Key(index),
@@ -777,19 +820,32 @@ impl LabPage {
         on!(on_focused, |id, on| Ask::Focus(id, on));
         ui.set_mark(mark);
         let (cells, sketches, over, rows, foot) = (Rc::new(VecModel::default()), Rc::new(VecModel::default()), Rc::new(VecModel::default()), Rc::new(VecModel::default()), Rc::new(VecModel::default()));
+        let top = Rc::new(VecModel::default());
+        ui.set_top(ModelRc::from(top.clone()));
         ui.set_cells(ModelRc::from(cells.clone()));
         ui.set_sketches(ModelRc::from(sketches.clone()));
         ui.set_over(ModelRc::from(over.clone()));
         ui.set_rows(ModelRc::from(rows.clone()));
         ui.set_foot(ModelRc::from(foot.clone()));
         let light = plain(light, &device.print);
+        // the core's light as its file has it, and the person's own setups of it
+        let core_light = std::fs::read_to_string(&device.path).ok().and_then(|t| jsonc::parse(&t).ok()).map(|d| d["light"].clone()).filter(Value::is_object);
+        let setups = setups::list(&device.core);
+        let setup = setup.filter(|id| setups.iter().any(|s| &s.id == id));
+        let (core_saved, saved) = match core_light {
+            Some(core) => {
+                let saved = setup.as_ref().and_then(|id| setups.iter().find(|s| &s.id == id)).map_or_else(|| core.clone(), |s| setups::merged(&core, &s.changes));
+                (plain(core, &device.print), plain(saved, &device.print))
+            }
+            None => (light.clone(), light.clone()),
+        };
         // the section shown when the lab was last open
         let section = crate::uistate::get("lab_section").and_then(|v| v.as_u64()).map_or(0, |n| (n as usize).min(SECTIONS.len() - 1));
         let mut page = LabPage {
             ui,
             device,
             asks,
-            saved: light.clone(),
+            saved,
             light,
             rev: 0,
             comparing: false,
@@ -820,6 +876,13 @@ impl LabPage {
             face_query: String::new(),
             face_first: 0,
             face_sketch: None,
+            setup,
+            setups,
+            core_saved,
+            switched: None,
+            menu: Menu::Shut,
+            naming: String::new(),
+            top,
         };
         // a section the device has
         if !page.sections().contains(&page.section) {
@@ -861,6 +924,10 @@ impl LabPage {
     /// where the head is narrow: what it tunes, or whose own setup it shows.
     fn intro(&self) -> (String, String) {
         match self.key() {
+            None if self.setup.is_some() => {
+                let name = &self.device.name;
+                (format!("Your own setup of the {name}, kept in Ectodeck. What you change here is its own; what you leave alone follows the core."), "Your own setup, kept in Ectodeck. What you leave alone follows the core.".into())
+            }
             None => {
                 let name = &self.device.name;
                 (format!("Tune how the {name} is lit. Ectodeck's window shows each change at once; Save writes them into its core."), format!("Tune how the {name} is lit; Save writes it into its core."))
@@ -906,6 +973,11 @@ impl LabPage {
                     self.face_query = t;
                     self.face_first = 0;
                 }
+                Ask::Typed(NAME, t) => {
+                    self.naming = t;
+                    self.status = (String::new(), 0);
+                }
+                Ask::Setups(i) => self.setups_menu(i),
                 Ask::Typed(id, t) => {
                     if let Some(p) = PARAMS.get(id.max(0) as usize) {
                         // the number as typed, whatever follows it ("220 nits", "35%")
@@ -973,6 +1045,7 @@ impl LabPage {
                     }
                 }
                 Ask::Compare(on) => {
+                    self.menu = Menu::Shut;
                     if on != self.comparing {
                         self.comparing = on;
                         self.status = if on { ("Showing the saved tuning.".into(), 0) } else { (String::new(), 0) };
@@ -982,6 +1055,7 @@ impl LabPage {
                     // what the mark gives back: the switch's place, both ways; a choice's kind; a slider's value
                     let (paths, what) = match id {
                         PAD => (vec![PARAMS[PLACE_E].path, PARAMS[PLACE_N].path], "Switch's place"),
+                        TYPEFACE => (vec![("legends", "typeface"), ("legends", "weight")], "Typeface"),
                         id if (CHOICE..CHOICE + CHOICES.len() as i32).contains(&id) => (vec![CHOSEN[(id - CHOICE) as usize][0]], CHOICES[(id - CHOICE) as usize].label),
                         id => PARAMS.get(id.max(0) as usize).map_or((vec![], ""), |p| (vec![p.path], p.label)),
                     };
@@ -996,6 +1070,22 @@ impl LabPage {
                         }
                         self.rev += 1;
                         self.status = (format!("{what} follows all keys again."), 0);
+                    }
+                }
+                // a value of the setup's own given back: it takes the core's again
+                Ask::Follow(id) if self.setup.is_some() => {
+                    let (paths, what) = match id {
+                        TYPEFACE => (vec![("legends", "typeface"), ("legends", "weight")], "Typeface"),
+                        id if (CHOICE..CHOICE + CHOICES.len() as i32).contains(&id) => (vec![CHOSEN[(id - CHOICE) as usize][0]], CHOICES[(id - CHOICE) as usize].label),
+                        id => PARAMS.get(id.max(0) as usize).map_or((vec![], ""), |p| (vec![p.path], p.label)),
+                    };
+                    if paths.iter().any(|&p| self.owns(p)) {
+                        self.remember(id);
+                        for &p in &paths {
+                            put_back(&mut self.light, &self.core_saved, None, p);
+                        }
+                        self.rev += 1;
+                        self.status = (format!("{what} follows the core again."), 0);
                     }
                 }
                 Ask::Follow(_) => {}
@@ -1017,9 +1107,16 @@ impl LabPage {
                     self.remember(-1);
                     self.light = self.saved.clone();
                     self.rev += 1;
-                    self.status = ("Back to the core's saved tuning.".into(), 0);
+                    self.menu = Menu::Shut;
+                    self.status = match self.setup {
+                        Some(_) => (format!("Back to {} as saved.", self.setup_name()), 0),
+                        None => ("Back to the core's saved tuning.".into(), 0),
+                    };
                 }
-                Ask::Save => self.save(),
+                Ask::Save => {
+                    self.menu = Menu::Shut;
+                    self.save();
+                }
                 Ask::Section(i) => {
                     let i = (i.max(0) as usize).min(SECTIONS.len() - 1);
                     if i != self.section && self.sections().contains(&i) && self.section_open(i) {
@@ -1236,9 +1333,14 @@ impl LabPage {
         differs(&self.light, &self.saved, self.key().map(|k| k.id.as_str()), PARAMS[i].path)
     }
 
-    /// Whether the chosen key has a value of its own there.
+    /// Whether a value is the page's own, over the one it would follow: the
+    /// chosen key's, over all keys'; or, for all keys in a setup of the
+    /// person's own, the setup's, where it differs from the core's.
     fn owns(&self, path: (&str, &str)) -> bool {
-        !at(self.own(&self.light), path).is_null()
+        match self.key() {
+            Some(_) => !at(self.own(&self.light), path).is_null(),
+            None => self.setup.is_some() && !jsonc::same(at(&self.light, path), at(&self.core_saved, path)),
+        }
     }
 
     /// Set a value: the chosen key's own, or all keys'.
@@ -1346,7 +1448,7 @@ impl LabPage {
 
     /// Whether a value's box is being typed in (its own keys are its own).
     pub fn typing(&self) -> bool {
-        self.focused.is_some()
+        self.focused.is_some() || matches!(self.menu, Menu::New | Menu::Rename)
     }
 
     /// The light the keyboard shows: the saved one while Hold to compare is held.
@@ -1367,9 +1469,24 @@ impl LabPage {
         }
     }
 
-    /// Write the tuning into the device's core: each value that changed in
-    /// its place in the core's file, the rest of the file as it is.
+    /// Write the tuning where it belongs: into the setup of the person's own
+    /// it is (only what it changes from the core's), or into the device's
+    /// core, each value that changed in its place in the core's file, the
+    /// rest of the file as it is.
     fn save(&mut self) {
+        if let Some(id) = self.setup.clone() {
+            let name = self.setup_name();
+            let s = Setup { id, name: name.clone(), changes: self.changes_of(&self.light) };
+            self.status = match setups::write(&self.device.core, &self.device.name, &s) {
+                Ok(()) => {
+                    self.saved = self.light.clone();
+                    self.setups = setups::list(&self.device.core);
+                    (format!("Saved to {name}."), 1)
+                }
+                Err(e) => (format!("Not saved: {e}."), 2),
+            };
+            return;
+        }
         let path = self.device.path.clone();
         let result = std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|s| {
             let out = saved_into(&s, &self.light)?;
@@ -1379,17 +1496,297 @@ impl LabPage {
         self.status = match result {
             Ok(()) => {
                 self.saved = self.light.clone();
+                self.core_saved = self.light.clone();
                 (format!("Saved into the {} core.", self.device.name), 1)
             }
             Err(e) => (format!("Not saved: {e}."), 2),
         };
     }
 
+    // ------------------------------------------------------ the light setups
+
+    /// What the setup in use is called: its name, or the core's.
+    fn setup_name(&self) -> String {
+        self.setup.as_ref().and_then(|id| self.setups.iter().find(|s| &s.id == id)).map_or_else(|| "Core".to_string(), |s| s.name.clone())
+    }
+
+    fn changes_of(&self, light: &Value) -> Value {
+        setup_changes(&self.core_saved, light)
+    }
+
+    /// What a setup of the person's own changes, as its row in the menu
+    /// says it: the sections of the page it has values of its own in.
+    fn changes_said(&self, s: &Setup) -> String {
+        let ch = &s.changes;
+        let mut parts: Vec<&str> = Vec::new();
+        for (i, (title, _, params, choices)) in SECTIONS.iter().enumerate() {
+            let has = params.iter().any(|&p| !at(ch, PARAMS[p].path).is_null())
+                || choices.iter().any(|&c| CHOSEN[c].iter().any(|&p| !at(ch, p).is_null()))
+                || (i == LEGENDS && !ch["legends"]["typeface"].is_null());
+            if has {
+                parts.push(title);
+            }
+        }
+        if ch["keys"].as_object().is_some_and(|k| !k.is_empty()) {
+            parts.push("some keys");
+        }
+        match parts.len() {
+            0 => "Same as the core's".into(),
+            1 => format!("Changes {}", parts[0]),
+            n => format!("Changes {} and {}", parts[..n - 1].join(", "), parts[n - 1]),
+        }
+    }
+
+    /// What the setups' menu asked for.
+    fn setups_menu(&mut self, i: i32) {
+        let changed = self.light != self.saved;
+        match i {
+            0 => self.menu = if self.menu == Menu::Shut { Menu::Open } else { Menu::Shut },
+            1 | 6 => self.menu = if self.menu == Menu::Open || i == 1 { Menu::Shut } else { Menu::Open },
+            2 => {
+                self.menu = Menu::New;
+                self.naming.clear();
+            }
+            3 if self.setup.is_some() => {
+                self.menu = Menu::Rename;
+                self.naming = self.setup_name();
+            }
+            4 if self.setup.is_some() => self.menu = Menu::Delete,
+            5 => match self.menu {
+                Menu::New | Menu::Rename => self.give_name(),
+                Menu::Delete => self.delete_setup(),
+                _ => {}
+            },
+            // a setup chosen: the keyboard lit by it, unless changes not saved
+            // would be lost (the one in use only shuts the menu)
+            i if i >= 10 => {
+                let to = if i == 10 { None } else { self.setups.get((i - 11) as usize).map(|s| s.id.clone()) };
+                if to == self.setup {
+                    self.menu = Menu::Shut;
+                } else if !changed && (i == 10 || to.is_some()) {
+                    self.menu = Menu::Shut;
+                    self.switch_to(to);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Tune and light the keyboard by another setup, as saved.
+    fn switch_to(&mut self, to: Option<String>) {
+        let core = self.core_saved.clone();
+        self.saved = match to.as_ref().and_then(|id| self.setups.iter().find(|s| &s.id == id)) {
+            Some(s) => plain(setups::merged(&core, &s.changes), &self.device.print),
+            None => core,
+        };
+        self.light = self.saved.clone();
+        self.setup = to;
+        self.switched = Some(self.setup.clone());
+        // (undoing goes no further back than the setup it is in)
+        self.history = History::default();
+        self.rev += 1;
+        self.status = (format!("Lit by {}.", if self.setup.is_some() { self.setup_name() } else { "the core's setup".into() }), 0);
+    }
+
+    /// The name typed taken: a new setup of the light as it is, or the one
+    /// in use named anew; unless it is no name, or one taken.
+    fn give_name(&mut self) {
+        let name = self.naming.trim().to_string();
+        let taken = |n: &str| n.eq_ignore_ascii_case("core") || self.setups.iter().any(|s| s.name.eq_ignore_ascii_case(n) && (self.menu == Menu::New || Some(&s.id) != self.setup.as_ref()));
+        if name.is_empty() {
+            self.status = ("Give it a name to save it by.".into(), 2);
+            return;
+        }
+        if name.eq_ignore_ascii_case("core") {
+            self.status = ("Core is the core's own setup. Give yours another name.".into(), 2);
+            return;
+        }
+        if taken(&name) {
+            self.status = (format!("There is a setup called {name} already."), 2);
+            return;
+        }
+        let core = self.device.core.clone();
+        let ids: Vec<String> = self.setups.iter().filter(|s| self.menu == Menu::New || Some(&s.id) != self.setup.as_ref()).map(|s| s.id.clone()).collect();
+        let id = setups::id_for(&name, &ids);
+        let result = match self.menu {
+            // the light as it is, changes and all: the setup it came from stays as saved
+            Menu::New => setups::write(&core, &self.device.name, &Setup { id: id.clone(), name: name.clone(), changes: self.changes_of(&self.light) }),
+            // the one in use, its saved changes under its new name (its file named anew with it)
+            _ => {
+                let was = self.setups.iter().find(|s| Some(&s.id) == self.setup.as_ref()).cloned();
+                match was {
+                    Some(was) => setups::write(&core, &self.device.name, &Setup { id: id.clone(), name: name.clone(), changes: was.changes.clone() }).and_then(|_| if was.id != id { setups::remove(&core, &was.id) } else { Ok(()) }),
+                    None => Err("it is not there".into()),
+                }
+            }
+        };
+        match result {
+            Ok(()) => {
+                let new = self.menu == Menu::New;
+                self.setups = setups::list(&core);
+                self.setup = Some(id);
+                self.switched = Some(self.setup.clone());
+                if new {
+                    self.saved = self.light.clone();
+                    self.rev += 1;
+                }
+                self.menu = Menu::Shut;
+                self.status = (if new { format!("Saved as {name}.") } else { format!("Renamed to {name}.") }, 1);
+            }
+            Err(e) => self.status = (format!("Not saved: {e}."), 2),
+        }
+    }
+
+    /// The setup in use deleted: the keyboard lit by the core's again.
+    fn delete_setup(&mut self) {
+        let Some(id) = self.setup.clone() else { return };
+        let name = self.setup_name();
+        match setups::remove(&self.device.core, &id) {
+            Ok(()) => {
+                self.setups = setups::list(&self.device.core);
+                self.menu = Menu::Shut;
+                self.switch_to(None);
+                self.status = (format!("{name} deleted. Lit by the core's setup."), 0);
+            }
+            Err(e) => self.status = (format!("Not deleted: {e}."), 2),
+        }
+    }
+
+    /// How wide Save is: as its words need, and no narrower than it was.
+    fn save_w(&self) -> f32 {
+        (text::width(600, 13.0, &self.save_text()) + 26.0).max(176.0)
+    }
+
+    fn save_text(&self) -> String {
+        match self.setup {
+            Some(_) => format!("Save to {}", elide(&self.setup_name(), SETUP_W, 600, 13.0)),
+            None => "Save to the core".into(),
+        }
+    }
+
+    /// The setups' menu, open under its button (its segment from `x`): the
+    /// core's setup and the person's own, the one in use lit, each with
+    /// what it changes; and what can be done; or a name being given, or a
+    /// delete asked about.
+    fn menu_cells(&self, x: f32, w: f32) -> Vec<Cell> {
+        let mut top = Vec::new();
+        if self.menu == Menu::Shut {
+            return top;
+        }
+        let (_, h, _, _) = self.sizes();
+        let colour = |c: [u8; 3]| slint::Color::from_rgb_u8(c[0], c[1], c[2]);
+        let (quiet, faint, dim, bright) = ([0x9a, 0x9a, 0x9a], [0x5a, 0x5a, 0x5a], [0xd4, 0xd4, 0xd4], [0xf5, 0xf5, 0xf5]);
+        let small = |x: f32, y: f32, s: &str, c: [u8; 3]| Cell { color: colour(c), ..text_cell(style::SMALL_IN, x, y, text::width(400, 11.5, s) + 2.0, 16.0, s) };
+        let words = |x: f32, y: f32, s: &str, c: [u8; 3]| Cell { color: colour(c), ..text_cell(20, x, y, text::width(400, 13.5, s) + 2.0, 20.0, s) };
+        let mw = 344.0;
+        let (mx, my) = (x.min(w - 24.0 - mw), 59.0);
+        // anywhere else on the page shuts it
+        top.push(Cell { id: SETUP, index: 1, style: 29, ..cell(kind::LINK, 0.0, 0.0, w, h - 36.0 - 64.0) });
+        let mut items = Vec::new();
+        let changed = self.light != self.saved;
+        let naming = matches!(self.menu, Menu::New | Menu::Rename | Menu::Delete);
+        // a setup's row: its name, what it changes, lit if in use; faint
+        // where changes not saved would be lost by choosing it
+        let row = |items: &mut Vec<Cell>, y: f32, index: i32, name: &str, what: &str, in_use: bool| {
+            let can = in_use || (!changed && !naming);
+            if in_use {
+                items.push(Cell { style: 30, ..cell(kind::TILE, mx + 8.0, my + y, mw - 16.0, 36.0) });
+            }
+            let name = elide(name, SETUP_W, 400, 13.5);
+            items.push(words(mx + 20.0, my + y + 8.0, &name, if in_use { bright } else if can { dim } else { faint }));
+            let ww = text::width(400, 11.5, what);
+            items.push(small(mx + mw - 20.0 - ww, my + y + 10.0, what, if can { quiet } else { faint }));
+            if can && !naming {
+                items.push(Cell { id: SETUP, index, ..cell(kind::LINK, mx + 8.0, my + y, mw - 16.0, 36.0) });
+            }
+        };
+        let mut y = 8.0;
+        row(&mut items, y, 10, "Core", "The keyboard as its core has it", self.setup.is_none());
+        y += 44.0;
+        items.push(small(mx + 20.0, my + y, "Your own, kept in Ectodeck", quiet));
+        y += 22.0;
+        if self.setups.is_empty() {
+            items.push(Cell { color: colour(faint), ..text_cell(20, mx + 20.0, my + y + 8.0, mw - 40.0, 20.0, "None yet") });
+            y += 36.0;
+        }
+        for (k, s) in self.setups.iter().enumerate() {
+            row(&mut items, y, 11 + k as i32, &s.name, &self.changes_said(s), self.setup.as_ref() == Some(&s.id));
+            y += 36.0;
+        }
+        if changed && !naming {
+            for line in wrap_after("Your changes aren't saved. Save or revert them to switch, or save them as a new setup.", mw - 40.0, mw - 40.0) {
+                items.push(text_cell(style::NOTE, mx + 20.0, my + y + 6.0, mw - 40.0, 18.0, &line));
+                y += 18.0;
+            }
+            y += 8.0;
+        }
+        y += 6.0;
+        items.push(Cell { color: colour([0x3a, 0x3a, 0x3a]), ..cell(kind::BOX, mx + 8.0, my + y, mw - 16.0, 1.0) });
+        y += 7.0;
+        let action = |items: &mut Vec<Cell>, y: f32, index: i32, s: &str| {
+            items.push(words(mx + 20.0, my + y + 8.0, s, dim));
+            items.push(Cell { id: SETUP, index, ..cell(kind::LINK, mx + 8.0, my + y, mw - 16.0, 36.0) });
+        };
+        match self.menu {
+            Menu::New | Menu::Rename => {
+                let head = if self.menu == Menu::New { "Save as a new setup".to_string() } else { format!("Rename {}", elide(&self.setup_name(), SETUP_W, 400, 13.5)) };
+                items.push(text_cell(style::LABEL, mx + 20.0, my + y + 6.0, mw - 40.0, 26.0, &head));
+                y += 36.0;
+                items.push(Cell { id: NAME, style: 3, text: self.naming.clone().into(), ..cell(kind::FIELD, mx + 16.0, my + y, mw - 32.0, 34.0) });
+                y += 34.0;
+                if self.menu == Menu::New {
+                    let note = if changed { format!("It keeps your changes. {} stays as saved.", self.setup_name()) } else { "It starts as the light is now.".to_string() };
+                    items.push(text_cell(style::NOTE, mx + 20.0, my + y + 8.0, mw - 40.0, 18.0, &note));
+                    y += 34.0;
+                } else {
+                    y += 12.0;
+                }
+            }
+            Menu::Delete => {
+                items.push(text_cell(style::LABEL, mx + 20.0, my + y + 6.0, mw - 40.0, 26.0, &format!("Delete {}?", elide(&self.setup_name(), SETUP_W, 400, 13.5))));
+                y += 34.0;
+                for line in wrap_after("This deletes its file. The keyboard goes back to the core's setup.", mw - 40.0, mw - 40.0) {
+                    items.push(text_cell(style::NOTE, mx + 20.0, my + y, mw - 40.0, 18.0, &line));
+                    y += 18.0;
+                }
+                y += 10.0;
+            }
+            _ => {
+                action(&mut items, y, 2, "Save as a new setup…");
+                y += 36.0;
+                if self.setup.is_some() {
+                    let name = elide(&self.setup_name(), SETUP_W - 60.0, 400, 13.5);
+                    action(&mut items, y, 3, &format!("Rename {name}…"));
+                    y += 36.0;
+                    action(&mut items, y, 4, &format!("Delete {name}…"));
+                    y += 36.0;
+                }
+            }
+        }
+        if naming {
+            // Cancel, and the name given or the delete agreed to
+            let go = match self.menu {
+                Menu::New => "Save",
+                Menu::Rename => "Rename",
+                _ => "Delete",
+            };
+            let (gw, cw) = (text::width(500, 13.0, go) + 28.0, text::width(500, 13.0, "Cancel") + 28.0);
+            items.push(Cell { text: go.into(), on: true, id: SETUP, index: 5, ..cell(kind::SEG_BUTTON, mx + mw - 16.0 - gw, my + y, gw, 30.0) });
+            items.push(Cell { text: "Cancel".into(), id: SETUP, index: 6, ..cell(kind::GHOST, mx + mw - 16.0 - gw - 8.0 - cw, my + y, cw, 30.0) });
+            y += 30.0;
+        }
+        y += 8.0;
+        top.push(Cell { style: 27, ..cell(kind::TILE, mx, my, mw, y) });
+        top.extend(items);
+        top
+    }
+
     // ------------------------------------------------------------ the page
 
     pub fn refresh(&mut self) {
         self.draw_stage();
-        let (cells, (sketches, over, rows), foot) = self.layout();
+        let (cells, (sketches, over, rows), foot, top) = self.layout();
+        crate::front::sync_cells(&self.top, top);
         crate::front::sync_cells(&self.cells, cells);
         crate::front::sync_cells(&self.over, over);
         crate::front::sync_cells(&self.foot, foot);
@@ -1431,6 +1828,8 @@ impl LabPage {
         let changed = self.light != self.saved;
         self.ui.set_can_save(changed);
         self.ui.set_can_revert(changed);
+        self.ui.set_save_text(self.save_text().into());
+        self.ui.set_save_w(self.save_w());
     }
 
     /// The window's size, and the stage's in it.
@@ -1597,6 +1996,10 @@ impl LabPage {
                 let p = &PARAMS[i as usize];
                 match self.key().filter(|_| self.owns(p.path)) {
                     Some(k) => (p.label.into(), format!("{} This is {}'s own value; the dot before the name gives the value back to all keys.", p.note, k.label)),
+                    None if self.key().is_none() && self.owns(p.path) => {
+                        let core = at(&self.core_saved, p.path).as_f64().or_else(|| default_of(p.path, &self.device.print)).unwrap_or(p.def);
+                        (p.label.into(), format!("{} {} has its own value; the core's is {}. The dot before the name gives the core's back.", p.note, self.setup_name(), said(p, core)))
+                    }
                     None => (p.label.into(), p.note.into()),
                 }
             }
@@ -1611,7 +2014,14 @@ impl LabPage {
                 (p.label.into(), back)
             }
             Some(i) if i == PAD => ("Switch's place".into(), PAD_NOTE.into()),
-            Some(i) if (CHOICE..CHOICE + CHOICES.len() as i32).contains(&i) => (CHOICES[(i - CHOICE) as usize].label.into(), CHOICES[(i - CHOICE) as usize].note.into()),
+            Some(i) if (CHOICE..CHOICE + CHOICES.len() as i32).contains(&i) => {
+                let c = &CHOICES[(i - CHOICE) as usize];
+                if self.key().is_none() && self.owns(CHOSEN[(i - CHOICE) as usize][0]) {
+                    (c.label.into(), format!("{} {} has its own; the dot before the name gives the core's back.", c.note, self.setup_name()))
+                } else {
+                    (c.label.into(), c.note.into())
+                }
+            }
             Some(i) if i == READING => ("Brightest legend".into(), self.legend_note().unwrap_or_else(|| READOUT_ABOUT.into())),
             Some(i) if i == READING + 1 => ("Brightest deck".into(), READOUT_ABOUT.into()),
             Some(i) if i == READING + 2 => ("Brightest skirt".into(), READOUT_ABOUT.into()),
@@ -1638,7 +2048,7 @@ impl LabPage {
     /// The page laid out: its pieces; the stage, the words on it and the
     /// sliders round it; and the foot's readout.
     #[allow(clippy::type_complexity)]
-    fn layout(&self) -> (Vec<Cell>, (Vec<Sketch>, Vec<Cell>, Vec<LabRow>), Vec<Cell>) {
+    fn layout(&self) -> (Vec<Cell>, (Vec<Sketch>, Vec<Cell>, Vec<LabRow>), Vec<Cell>, Vec<Cell>) {
         let (w, _, sw, sh) = self.sizes();
         let colour = |c: [u8; 3]| slint::Color::from_rgb_u8(c[0], c[1], c[2]);
         let in_colour = |st: i32, x: f32, y: f32, ww: f32, hh: f32, s: &str, c: [u8; 3]| Cell { color: colour(c), ..text_cell(st, x, y, ww, hh, s) };
@@ -1659,11 +2069,19 @@ impl LabPage {
         let (aw, kw) = (text::width(400, 13.0, "All keys") + 24.0, text::width(400, 13.0, &one) + 24.0 + 16.0);
         let scope_w = aw + 2.0 + kw + 6.0;
         let qx = tx - 12.0 - scope_w;
+        // the light setup tuned, before the keys: the core's, or one of the
+        // person's own, which opens the menu of them
+        let setup = elide(&self.setup_name(), SETUP_W, 400, 13.0);
+        let uw = text::width(400, 13.0, &setup) + 24.0 + 16.0;
+        let ux = qx - 12.0 - (uw + 6.0);
         // what the page is, or whose own setup it shows; shorter where the head is narrow
-        let room = (qx - 48.0).max(200.0);
+        let room = (ux - 48.0).max(200.0);
         let (full, brief) = self.intro();
-        let intro = if text::width(400, 12.5, &full) <= room { full } else { brief };
+        // (cut short where even the brief one does not fit)
+        let intro = if text::width(400, 12.5, &full) <= room { full } else { elide(&brief, room, 400, 12.5) };
         cells.push(text_cell(style::NOTE, 24.0, 44.0, room, 18.0, &intro));
+        cells.push(cell(kind::SEG, ux, 17.0, uw + 6.0, 36.0));
+        cells.push(Cell { text: setup.into(), on: self.menu != Menu::Shut, id: SETUP, index: 0, style: 24, ..cell(kind::SEG_BUTTON, ux + 3.0, 20.0, uw, 30.0) });
         cells.push(cell(kind::SEG, qx, 17.0, scope_w, 36.0));
         cells.push(Cell { text: "All keys".into(), on: self.scope.is_none() && !self.picking, id: SCOPE, index: 0, ..cell(kind::SEG_BUTTON, qx + 3.0, 20.0, aw, 30.0) });
         cells.push(Cell { text: one.into(), on: self.scope.is_some() || self.picking, id: SCOPE, index: 1, style: 24, ..cell(kind::SEG_BUTTON, qx + 3.0 + aw + 2.0, 20.0, kw, 30.0) });
@@ -1855,7 +2273,7 @@ impl LabPage {
             let x = if k == 0 { 24.0 + nw + 6.0 } else { 24.0 };
             cells.push(text_cell(style::NOTE, x, hy + 18.125 * k as f32, w - 48.0, 18.0, line));
         }
-        (cells, (sketches, over, rows), self.readout_line())
+        (cells, (sketches, over, rows), self.readout_line(), self.menu_cells(ux, w))
     }
 
     /// The foot's readout of what is on the keyboard now, each number with
@@ -1886,7 +2304,7 @@ impl LabPage {
     /// The foot's room for its readout and what was last done, beside its buttons.
     fn foot_room(&self) -> f32 {
         let (w, _, _, _) = self.sizes();
-        w - 24.0 - 176.0 - 10.0 - 68.0 - 10.0 - 132.0 - 10.0 - 24.0
+        w - 24.0 - self.save_w() - 10.0 - 68.0 - 10.0 - 132.0 - 10.0 - 24.0
     }
 
     /// The most room what was last done takes: what the shortest readout leaves.
@@ -2015,6 +2433,35 @@ fn wrap_after(s: &str, first: f32, rest: f32) -> Vec<String> {
     lines
 }
 
+/// What a light changes from the core's, as a setup of the person's own
+/// keeps it: what differs, and the values its kinds of switch and cap use
+/// that the core's kinds do not. The core holds those idle, not as the
+/// core's to give, so the setup keeps its own whatever becomes of them.
+fn setup_changes(core: &Value, light: &Value) -> Value {
+    let mut ch = setups::changes(core, light);
+    for section in 0..SECTIONS.len() {
+        let core_has = sliders_of(section, core);
+        for i in sliders_of(section, light).into_iter().filter(|i| !core_has.contains(i)) {
+            if let Some(v) = at(light, PARAMS[i].path).as_f64() {
+                put_at(&mut ch, PARAMS[i].path, json!(v));
+            }
+        }
+    }
+    ch
+}
+
+/// Words cut to `most` wide, set at `weight` and `size`, an ellipsis where they were cut.
+fn elide(s: &str, most: f32, weight: u16, size: f32) -> String {
+    if text::width(weight, size, s) <= most {
+        return s.to_string();
+    }
+    let mut out: String = s.to_string();
+    while !out.is_empty() && text::width(weight, size, &format!("{}…", out.trim_end())) > most {
+        out.pop();
+    }
+    format!("{}…", out.trim_end())
+}
+
 /// A core's file with a light saved into it: each of its values that
 /// differs from the file's set in its place, each new one added, each the
 /// light no longer has taken out, and the rest of the file as it was. A light
@@ -2062,6 +2509,28 @@ mod tests {
 
     /// Save writes the legends as the lab set them into the core's light,
     /// all keys' and a key's own, the file's comments and lines kept.
+    /// A setup of pudding caps over a core of shine-through caps keeps the
+    /// values only pudding caps use, which the core holds idle, as its own;
+    /// what it leaves alone follows the core as the core changes.
+    #[test]
+    fn a_setup_keeps_what_only_its_kind_uses() {
+        let print = json!({});
+        let core = plain(json!({ "scale": 1.38, "switches": { "kind": "led-slot", "lumens": 1.056 }, "caps": { "kind": "shine-through", "opacity": 0.8, "black": 0.4, "milky": 0.8, "inside": 0.2 } }), &print);
+        let mut light = core.clone();
+        choose(&mut light, 1, 1);
+        let ch = setup_changes(&core, &light);
+        assert_eq!(ch, json!({ "caps": { "kind": "pudding", "opacity": 0.8, "black": 0.4, "milky": 0.8 } }), "the kind, and what only pudding caps use");
+        // the core's idle values set back as they were stock, its LEDs tuned: the setup keeps its caps, and its LEDs follow
+        let mut stock = core.clone();
+        stock["caps"]["milky"] = json!(0.0);
+        stock["switches"]["lumens"] = json!(0.745);
+        let again = setups::merged(&stock, &ch);
+        assert_eq!(again["caps"]["milky"], json!(0.8));
+        assert_eq!(again["switches"]["lumens"], json!(0.745));
+        // a setup the same as the core keeps nothing
+        assert_eq!(setup_changes(&core, &core), json!({}));
+    }
+
     #[test]
     fn the_legends_save_into_the_core() {
         let core = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../cores/evga-z10/device.json")).unwrap();

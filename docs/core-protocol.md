@@ -152,7 +152,7 @@ What is printed on each control, as words, for the frontend to set a device's le
 
 ### The device's light
 
-How the device's light gets out, for the frontend to draw it as light: the `light` section of the device description. The frontend simulates it, following each LED through the device's shape as a lamp's light is followed, so the section describes the device physically rather than how it should look. Ectodeck's Light lab tunes it on any device and saves it back here, each value it changes in its place, so the file's comments and lines stay as the core's author wrote them. The lab is the frontend's: it knows no device, and a core carries none of it.
+How the device's light gets out, for the frontend to draw it as light: the `light` section of the device description. The frontend simulates it, following each LED through the device's shape as a lamp's light is followed, so the section describes the device physically rather than how it should look. Ectodeck's Light lab tunes it on any device and saves it back here, each value it changes in its place, so the file's comments and lines stay as the core's author wrote them. The lab is the frontend's: it knows no device, and a core carries none of it. A person may also keep light setups of their own in the frontend, each holding only what it changes from this section (the device with other caps on it, say); what they leave alone follows the core, so a change here reaches them too.
 
 ```jsonc
 "light": {
@@ -380,6 +380,7 @@ These are why the platform is more than a set of separate apps:
 - **Content for any display:** system stats, clocks, images, key labels.
 - **Actions.** A control assigned to `{"host": ...}` runs an action: open an app, send a shortcut, control media, or run a Stream Deck plugin's action. The Stream Deck plugin host is OpenDeck's code, which is GPL, so it runs as its own service beside the frontend rather than inside it.
 - **Backups** before any write, for every device with its own memory.
+- **Light setups of the person's own** over each core's light, made in the Light lab, for the device as they have it.
 
 ## 8. How the first cores fit
 
