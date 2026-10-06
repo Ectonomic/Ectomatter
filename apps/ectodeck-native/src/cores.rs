@@ -35,6 +35,12 @@ impl Core {
         resvg::usvg::Tree::from_str(&self.art, &resvg::usvg::Options::default()).unwrap_or_else(|e| panic!("the {} core's art: {e}", self.id))
     }
 
+    /// Its typefaces' files: those its art's legends are drawn in.
+    pub fn fonts(&self) -> Vec<PathBuf> {
+        let folder = dir().join(&self.id);
+        self.device["print"]["fonts"].as_array().into_iter().flatten().filter_map(|f| f.as_str()).map(|f| folder.join(f)).collect()
+    }
+
     /// What the device is called.
     pub fn name(&self) -> &str {
         self.device["name"].as_str().unwrap_or(&self.id)

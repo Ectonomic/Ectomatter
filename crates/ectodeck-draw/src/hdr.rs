@@ -41,6 +41,9 @@ pub struct CapShape {
     pub lit: bool,
     pub legend: bool,
     pub button: bool,
+    /// its top, in the art's units, and what it has printed on it
+    pub face: [f32; 4],
+    pub print: Option<crate::print::Print>,
 }
 
 /// A key in section, north to south, as the art has it, in millimetres, for
@@ -114,6 +117,14 @@ struct KeyArt {
     second: Option<u32>,
     /// the grey its legend is printed in, in sRGB's encoding
     print: [f32; 3],
+    /// its control's id, what its cap has printed on it (as the core gives
+    /// it), its legend and second function as the art draws them, and the
+    /// style its legend is set in now (none for the art's own)
+    id: String,
+    printed: Option<crate::print::Print>,
+    art_legend: Option<Shape>,
+    art_second: Option<u32>,
+    style: Option<crate::print::Style>,
 }
 
 /// What the board takes from the core's "light" itself: where each key's LED
@@ -260,6 +271,8 @@ pub struct Board {
     /// down each cap's black comes, by the simulation's order of the caps
     bands: Vec<Option<Shape>>,
     other_bands: Vec<Option<Shape>>,
+    /// how the core's art prints its legends, for setting them anew
+    own_print: Option<crate::print::Own>,
     band_map: Vec<f32>,
     bands_for: Option<Vec<u32>>,
     /// which cap each pixel is on, by the simulation's order of the caps
@@ -505,6 +518,79 @@ fn shown(key: &KeyArt, l: Option<&Light>) -> Vec<f32> {
     (0..s.cover.len()).map(|i| if aside.is_some_and(|r| i as u32 / s.w >= r) { 0.0 } else { 1.0 }).collect()
 }
 
+/// Legends a light asks a keyboard for, to set away from the window's
+/// thread (setting them takes a moment): each key's style, print and cap
+/// top, and where the keyboard has the art.
+pub struct LegendsAsk {
+    own: crate::print::Own,
+    keys: Vec<(Option<crate::print::Style>, Option<crate::print::Print>, [f32; 4])>,
+    per_mm: f32,
+    at: (u32, u32, f32, (f32, f32)),
+}
+
+impl LegendsAsk {
+    /// Set them, in the typefaces there are.
+    pub fn set(self, db: &usvg::fontdb::Database) -> Legends {
+        let (_, _, ka, off) = self.at;
+        let keys = self
+            .keys
+            .into_iter()
+            .map(|(style, print, face)| match (style, print) {
+                (Some(style), Some(print)) => {
+                    let set = crate::print::set(db, &print, &style, &self.own, face, self.per_mm);
+                    let shape = raster(&set, ka, off);
+                    (Some(style), shape)
+                }
+                _ => (None, None),
+            })
+            .collect();
+        Legends { keys, at: self.at }
+    }
+}
+
+/// Legends set for a keyboard, to put on it with Board::set_legends.
+pub struct Legends {
+    keys: Vec<(Option<crate::print::Style>, Option<(Shape, Option<u32>)>)>,
+    at: (u32, u32, f32, (f32, f32)),
+}
+
+/// A legend set, as coverage in its box of the board's pixels (the art's
+/// units to them as `ka` and `off` have it), and the row of the box where
+/// its second function begins.
+fn raster(set: &crate::print::Set, ka: f32, (ox, oy): (f32, f32)) -> Option<(Shape, Option<u32>)> {
+    use resvg::tiny_skia::{FillRule, LineCap, LineJoin, Paint, Stroke};
+    let board = Transform::from_row(ka, 0.0, 0.0, ka, ox, oy);
+    let stroke = |w: f32| Stroke { width: w, line_cap: LineCap::Round, line_join: LineJoin::Round, ..Stroke::default() };
+    // the inks' box, a pixel round it
+    let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+    for ink in &set.inks {
+        let t = board.pre_concat(ink.to_art);
+        let Some(p) = ink.path.clone().transform(t) else { continue };
+        let b = p.bounds();
+        let pad = ink.stroke.map_or(0.0, |w| w * t.sx.abs().max(t.sy.abs()));
+        (x0, y0, x1, y1) = (x0.min(b.left() - pad), y0.min(b.top() - pad), x1.max(b.right() + pad), y1.max(b.bottom() + pad));
+    }
+    if x0 > x1 {
+        return None;
+    }
+    let (x, y) = (x0.floor() as i32 - 1, y0.floor() as i32 - 1);
+    let (w, h) = ((x1.ceil() as i32 + 1 - x) as u32, (y1.ceil() as i32 + 1 - y) as u32);
+    let mut pix = Pixmap::new(w.max(1), h.max(1))?;
+    for ink in &set.inks {
+        let mut paint = Paint::default();
+        paint.set_color_rgba8(0, 0, 0, (ink.opacity.clamp(0.0, 1.0) * 255.0).round() as u8);
+        paint.anti_alias = true;
+        let t = Transform::from_translate(-x as f32, -y as f32).pre_concat(board).pre_concat(ink.to_art);
+        match ink.stroke {
+            None => pix.fill_path(&ink.path, &paint, FillRule::Winding, t, None),
+            Some(sw) => pix.stroke_path(&ink.path, &paint, &stroke(sw), t, None),
+        }
+    }
+    let cover = pix.data().chunks_exact(4).map(|p| p[3] as f32 / 255.0).collect();
+    let second = set.second_top.map(|top| ((oy + ka * top).floor() as i32 - y).max(0) as u32);
+    Some((Shape { x, y, w, h, cover }, second))
+}
+
 /// A clip path somewhere under `g`, by its id, with the group it clips.
 fn find_clip<'a>(g: &'a usvg::Group, id: &str) -> Option<(&'a usvg::Group, &'a usvg::ClipPath)> {
     if let Some(c) = g.clip_path().filter(|c| c.id() == id) {
@@ -701,10 +787,11 @@ impl Board {
             let second = legend.as_ref().and_then(|s| second_function(s, face, ka, oy));
             let cap = foot.map(|_| cap_shapes.len() as u32);
             if let Some(f) = foot {
-                cap_shapes.push(CapShape { id: control_id(c), label: label(c), short: short(c), foot: f, lit: true, legend: legend.is_some(), button: false });
+                cap_shapes.push(CapShape { id: control_id(c), label: label(c), short: short(c), foot: f, lit: true, legend: legend.is_some(), button: false, face, print: crate::print::Print::of(c) });
                 odd_feet.push(parts.get(1).and_then(odd_foot));
             }
-            keys.push(KeyArt { pos: pos as u32, cap, foot, face, round: rounds, legend, second, print });
+            let printed = crate::print::Print::of(c);
+            keys.push(KeyArt { pos: pos as u32, cap, foot, face, round: rounds, legend: legend.clone(), second, print, id: control_id(c), printed, art_legend: legend, art_second: second, style: None });
         }
         // The controls with no light of their own, which stand in its way and
         // catch it: the caps of the keys with none (a shadow, then the cap's
@@ -723,7 +810,7 @@ impl Board {
                 _ => continue,
             };
             others.push((rect(foot), rect(face), [round(foot), round(face)]));
-            cap_shapes.push(CapShape { id: control_id(c), label: label(c), short: short(c), foot: rect(foot), lit: false, legend: false, button: !shadow });
+            cap_shapes.push(CapShape { id: control_id(c), label: label(c), short: short(c), foot: rect(foot), lit: false, legend: false, button: !shadow, face: rect(face), print: None });
             odd_feet.push(odd_foot(foot));
         }
         // The lock lights, from the core's "lock_lights": each a small window
@@ -793,7 +880,7 @@ impl Board {
             .collect();
         let feet: Vec<([f32; 4], f32)> = keys.iter().filter_map(|k| k.foot.map(|f| (f, k.round[0]))).chain(others.iter().map(|o| (o.0, o.2[0]))).collect();
         let cap_of = cap_map(w, h, ka, (ox, oy), &feet);
-        Ok(Board {
+        let mut board = Board {
             w,
             h,
             caps,
@@ -822,7 +909,11 @@ impl Board {
             bands_for: None,
             cap_of,
             reads_for: None,
-        })
+            own_print: crate::print::Own::of(device),
+        };
+        // the legends as the light asks for them
+        board.set_legends_from(&device["light"]);
+        Ok(board)
     }
 
     /// Light the keyboard by another of the core's "light" descriptions (as the
@@ -836,6 +927,64 @@ impl Board {
         let changed = model != self.model;
         self.model = model;
         changed
+    }
+
+    /// The style each key's legend is to be set in, as a light asks: its
+    /// "legends" over the core's own print, a key's own over all keys'.
+    /// None for a key whose legend is the art's own: set as the core prints
+    /// it, or with no print to set it from.
+    fn legends_wanted(&self, light: &Value) -> Vec<Option<crate::print::Style>> {
+        let Some(own) = &self.own_print else { return vec![None; self.keys.len()] };
+        let all = crate::print::Style::over(&own.style, &light["legends"]);
+        self.keys
+            .iter()
+            .map(|k| {
+                k.printed.as_ref()?;
+                let style = crate::print::Style::over(&all, &light["keys"][k.id.as_str()]["legends"]);
+                (style != own.style).then_some(style)
+            })
+            .collect()
+    }
+
+    /// The legends a light asks for, to set away from the window's thread
+    /// and put on the keyboard with set_legends: none if they are on it.
+    pub fn legends_for(&self, light: &Value) -> Option<LegendsAsk> {
+        let want = self.legends_wanted(light);
+        if want.iter().zip(&self.keys).all(|(w, k)| *w == k.style) {
+            return None;
+        }
+        let keys = self.keys.iter().zip(want).map(|(k, w)| (w, k.printed.clone(), k.face)).collect();
+        Some(LegendsAsk { own: self.own_print.clone()?, keys, per_mm: self.model.scale, at: (self.w, self.h, self.art_scale, self.art_offset) })
+    }
+
+    /// Put legends set for this keyboard on it: each key's as asked, the
+    /// art's own where it asked for none. (Legends set for another size are
+    /// left out.)
+    pub fn set_legends(&mut self, legends: Legends) {
+        if legends.at != (self.w, self.h, self.art_scale, self.art_offset) || legends.keys.len() != self.keys.len() {
+            return;
+        }
+        for (k, (style, set)) in self.keys.iter_mut().zip(legends.keys) {
+            (k.legend, k.second) = match (&style, set) {
+                (Some(_), Some((shape, second))) => (Some(shape), second),
+                (Some(_), None) => (None, None),
+                (None, _) => (k.art_legend.clone(), k.art_second),
+            };
+            k.style = style;
+        }
+        if let Some(snap) = self.sim.clone() {
+            self.legend_reads = self.legend_reads_from(&snap);
+            self.most = self.measure(&snap);
+        }
+    }
+
+    /// The legends a light asks for, set here and now (for a keyboard being
+    /// drawn, away from the window).
+    pub fn set_legends_from(&mut self, light: &Value) {
+        if let Some(ask) = self.legends_for(light) {
+            let legends = ask.set(&crate::print::faces());
+            self.set_legends(legends);
+        }
     }
 
     /// Light the keys by the simulation's latest picture of their light.
@@ -889,36 +1038,7 @@ impl Board {
                 });
             }
         });
-        let legend_reads: Vec<Vec<Read>> = std::thread::scope(|sc| {
-            let per = board.keys.len().div_ceil(threads).max(1);
-            let jobs: Vec<_> = board
-                .keys
-                .chunks(per)
-                .map(|keys| {
-                    sc.spawn(move || {
-                        keys.iter()
-                            .map(|key| match &key.legend {
-                                None => Vec::new(),
-                                Some(l) => l
-                                    .cover
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(i, c)| {
-                                        let (x, y) = (l.x + (i as u32 % l.w) as i32, l.y + (i as u32 / l.w) as i32);
-                                        if *c <= 0.0 || x < 0 || y < 0 || x >= w as i32 || y >= h as i32 {
-                                            return Read::NONE;
-                                        }
-                                        let (u, v) = board.unit(x as usize, y as usize);
-                                        Read::of(s.at(u, v, Some(3)), fw, cw)
-                                    })
-                                    .collect(),
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                })
-                .collect();
-            jobs.into_iter().flat_map(|j| j.join().expect("a share of the legends' reads")).collect()
-        });
+        let legend_reads = board.legend_reads_from(s);
         // each cap's skirt, a cap a thread's share: its pixels, and the light
         // just outside its foot where each is nearest
         let feet: Vec<([f32; 4], f32)> = board.keys.iter().filter_map(|k| k.foot.map(|f| (f, k.round[0]))).chain(board.others.iter().map(|o| (o.0, o.2[0]))).collect();
@@ -1025,6 +1145,45 @@ impl Board {
         self.face_edges = face_edges;
     }
 
+
+    /// Where each legend's pixels read the simulation's light through their
+    /// cap's top, a share of the keys to a thread.
+    fn legend_reads_from(&self, s: &Snapshot) -> Vec<Vec<Read>> {
+        let (w, h) = (self.w as usize, self.h as usize);
+        let (fw, cw) = (s.fine.w, s.coarse.w);
+        let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(16);
+        let board = self;
+        std::thread::scope(|sc| {
+            let per = board.keys.len().div_ceil(threads).max(1);
+            let jobs: Vec<_> = board
+                .keys
+                .chunks(per)
+                .map(|keys| {
+                    sc.spawn(move || {
+                        keys.iter()
+                            .map(|key| match &key.legend {
+                                None => Vec::new(),
+                                Some(l) => l
+                                    .cover
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(i, c)| {
+                                        let (x, y) = (l.x + (i as u32 % l.w) as i32, l.y + (i as u32 / l.w) as i32);
+                                        if *c <= 0.0 || x < 0 || y < 0 || x >= w as i32 || y >= h as i32 {
+                                            return Read::NONE;
+                                        }
+                                        let (u, v) = board.unit(x as usize, y as usize);
+                                        Read::of(s.at(u, v, Some(3)), fw, cw)
+                                    })
+                                    .collect(),
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            jobs.into_iter().flat_map(|j| j.join().expect("a share of the legends' reads")).collect()
+        })
+    }
 
     /// A cap's band as its art covers it (its foot `f` with its corners'
     /// radius `r`, its face `a`): its skirt from its foot up to where the
@@ -1882,6 +2041,98 @@ mod tests {
             eprintln!("{label}: {:.4} unlit, {:.4} with every key lit", mean(&off), mean(&lit));
             // (before they stood in the light, the art covered them from it: no light at all)
             assert!(mean(&lit) > mean(&off) * 1.05, "{label} catches the keys' light");
+        }
+    }
+
+    /// A light asking for other legends has them set on the keyboard, as
+    /// Ectodeck does away from its window (legends_for, then set, then
+    /// set_legends); a key's own only on that key; and asking for the
+    /// core's own again puts the art's legends back exactly.
+    #[test]
+    fn legends_asked_are_set_and_the_art_s_come_back() {
+        let db = crate::fixture::faces();
+        let (_t, device, mut b) = board();
+        let art: Vec<Option<(i32, i32, u32, u32, Vec<f32>)>> = b.keys.iter().map(|k| k.legend.as_ref().map(|s| (s.x, s.y, s.w, s.h, s.cover.clone()))).collect();
+        let now = |b: &Board| b.keys.iter().map(|k| k.legend.as_ref().map(|s| (s.x, s.y, s.w, s.h, s.cover.clone()))).collect::<Vec<_>>();
+        let mut light = device["light"].clone();
+        assert!(b.legends_for(&light).is_none(), "as the core prints them: nothing to set");
+        // one key's own words smaller: that key's legend alone
+        light["keys"] = serde_json::json!({ "enter": { "legends": { "words": 2.0 } } });
+        let ask = b.legends_for(&light).expect("Enter's to set");
+        b.set_legends(ask.set(&db));
+        let enter = b.keys.iter().position(|k| k.id == "enter").unwrap();
+        let changed: Vec<usize> = now(&b).iter().zip(&art).enumerate().filter(|(_, (a, b))| a != b).map(|(i, _)| i).collect();
+        assert_eq!(changed, vec![enter], "only Enter's legend is set anew");
+        assert!(b.legends_for(&light).is_none(), "and it is on the keyboard");
+        // all keys' letters larger: every printed key's
+        light["legends"]["letters"] = serde_json::json!(4.6);
+        let t = std::time::Instant::now();
+        b.set_legends(b.legends_for(&light).unwrap().set(&db));
+        eprintln!("every key's legend set anew in {:?}", t.elapsed());
+        let one_letter = b.keys.iter().position(|k| k.id == "q").unwrap();
+        assert_ne!(now(&b)[one_letter], art[one_letter], "Q's letter set larger");
+        // the core's own again: the art's legends, exactly
+        light["legends"].as_object_mut().unwrap().remove("letters");
+        light.as_object_mut().unwrap().remove("keys");
+        b.set_legends(b.legends_for(&light).unwrap().set(&db));
+        assert!(now(&b) == art, "the art's legends back");
+        assert!(b.legends_for(&light).is_none());
+    }
+
+    /// Set anew in the core's own typeface, sizes and place, every key's
+    /// legend is the art's: its ink as high on the cap as the art's and as
+    /// much of it, so a legend set anew does not jump from the art's. (Across
+    /// it may sit up to a pixel apart: the art spaced some words' letters as
+    /// the page it was drawn from did, not by the typeface's own spacing.)
+    #[test]
+    fn the_core_s_own_legends_set_anew_are_the_art_s() {
+        let db = crate::fixture::faces();
+        let (_t, device, b) = board();
+        let own = crate::print::Own::of(&device).unwrap();
+        let ink = |s: &Shape| {
+            let (mut sum, mut sx, mut sy) = (0f64, 0f64, 0f64);
+            for (i, c) in s.cover.iter().enumerate() {
+                let (x, y) = (s.x as f64 + (i as u32 % s.w) as f64 + 0.5, s.y as f64 + (i as u32 / s.w) as f64 + 0.5);
+                sum += *c as f64;
+                sx += *c as f64 * x;
+                sy += *c as f64 * y;
+            }
+            (sum, sx / sum.max(1e-9), sy / sum.max(1e-9))
+        };
+        let at = |s: &Shape, x: i32, y: i32| if x >= s.x && y >= s.y && x < s.x + s.w as i32 && y < s.y + s.h as i32 { s.cover[((y - s.y) as u32 * s.w + (x - s.x) as u32) as usize] } else { 0.0 };
+        let mut rows = Vec::new();
+        for k in &b.keys {
+            let (Some(p), Some(art)) = (&k.printed, &k.art_legend) else { continue };
+            let set = crate::print::set(&db, p, &own.style, &own, k.face, b.model.scale);
+            let (new, _) = raster(&set, b.art_scale, b.art_offset).expect("a legend set");
+            let ((sa, xa, ya), (sn, xn, yn)) = (ink(art), ink(&new));
+            // how much of the two is alike, pixel by pixel
+            let (x0, y0) = (art.x.min(new.x), art.y.min(new.y));
+            let (x1, y1) = ((art.x + art.w as i32).max(new.x + new.w as i32), (art.y + art.h as i32).max(new.y + new.h as i32));
+            let (mut both, mut either) = (0f64, 0f64);
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let (a, n) = (at(art, x, y) as f64, at(&new, x, y) as f64);
+                    both += a.min(n);
+                    either += a.max(n);
+                }
+            }
+            rows.push((k.id.clone(), xn - xa, yn - ya, sn / sa, both / either.max(1e-9)));
+        }
+        rows.sort_by(|a, b| a.4.total_cmp(&b.4));
+        for r in rows.iter().take(12) {
+            eprintln!("{:14} moved {:+.2} px across, {:+.2} px down; ink {:.3} of the art's; alike {:.3}", r.0, r.1, r.2, r.3, r.4);
+        }
+
+        let worst_move = rows.iter().map(|r| r.1.abs().max(r.2.abs())).fold(0.0, f64::max);
+        let mean_alike = rows.iter().map(|r| r.4).sum::<f64>() / rows.len() as f64;
+        eprintln!("{} legends; the furthest moved {worst_move:.2} px; alike {mean_alike:.3} on average", rows.len());
+        assert_eq!(rows.len(), 110, "every printed key");
+        for r in &rows {
+            // (its ink's middle, weighed by how much there is of each line)
+            assert!(r.2.abs() < 0.35, "{} as high as the art's: {:+.2} px", r.0, r.2);
+            assert!(r.1.abs() < 1.0, "{} within a pixel across: {:+.2} px", r.0, r.1);
+            assert!((0.92..1.08).contains(&r.3), "{} as much ink: {:.3}", r.0, r.3);
         }
     }
 

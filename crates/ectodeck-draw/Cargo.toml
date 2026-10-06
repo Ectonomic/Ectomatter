@@ -7,4 +7,5 @@ description = "Draws a core's device art in HDR: the keyboard as one picture, li
 
 [dependencies]
 resvg = "0.45"
+rustybuzz = "0.20.1"
 serde_json = "1"

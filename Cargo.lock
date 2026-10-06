@@ -1351,6 +1351,7 @@ name = "ectodeck-draw"
 version = "0.1.0"
 dependencies = [
  "resvg 0.45.1",
+ "rustybuzz",
  "serde_json",
 ]
 

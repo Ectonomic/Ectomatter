@@ -68,6 +68,11 @@ pub enum Ask {
     Follow(i32),
     /// the switch pad pressed or dragged on, where on it, across and down
     Pad(f32, f32),
+    /// the typefaces' list opened or closed, a typeface chosen on it (by its
+    /// place there), and the list turned (by so many pixels)
+    Faces,
+    Face(i32),
+    FacesScroll(f32),
 }
 
 /// What a value is, which says how it reads.
@@ -112,7 +117,7 @@ struct Param {
     note: &'static str,
 }
 
-const PARAMS: [Param; 27] = [
+const PARAMS: [Param; 30] = [
     Param { path: ("switches", "led"), label: "North of centre", lo: -7.0, hi: 7.0, step: 0.05, unit: Unit::North, def: 5.08, note: "Where each key's LED sits under its cap, from the switch's centre toward the top of the key; below 0, toward the bottom, as on a keyboard whose LEDs face south. It goes as far as the switch's edge, so Switch width sets how far the slider reaches." },
     Param { path: ("switches", "lumens"), label: "LED output", lo: 0.05, hi: 10.0, step: 0.01, unit: Unit::Lumens, def: 1.0, note: "The light each LED gives off at full white, in lumens: about 1 for a keyboard's RGB LED. Everything the LEDs light is as bright as the light that reaches it makes it; what is brighter than the screen shows (Peak nits, Settings › HDR) is drawn at the most it shows, in its own colour. A colour gives off its own share, as an LED does: a red about a fifth." },
     Param { path: ("switches", "beam"), label: "Beam", lo: 1.0, hi: 200.0, step: 0.5, unit: Unit::Number, def: 24.0, note: "How tight the LED's beam out of the top of the switch is. Higher keeps it to a small bright spot on the legend over the LED; lower spreads it across the cap's top and onto the inside of its skirt." },
@@ -140,6 +145,9 @@ const PARAMS: [Param; 27] = [
     Param { path: ("caps", "milky"), label: "Haze", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.0, note: "The share of the light the translucent plastic scatters, which plastics makers call its haze. What it scatters it carries some way round the cap before letting it out, so the cap glows evenly and looks milky white with its LED off. The rest comes out where it went in, as through clear plastic." },
     Param { path: ("place", "east"), label: "Switch east–west", lo: -60.0, hi: 60.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Where this key's switch sits under its cap, east or west of the cap's middle: where the plate holds it, which on a long key can be off its middle. Its LED goes with it." },
     Param { path: ("place", "north"), label: "Switch north–south", lo: -30.0, hi: 30.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Where this key's switch sits under its cap, north or south of the cap's middle, as on a cap that reaches down past its row. Its LED goes with it." },
+    Param { path: ("legends", "letters"), label: "Letter size", lo: 1.5, hi: 6.0, step: 0.1, unit: Unit::Mm, def: 3.8, note: "How tall a legend of one letter or sign is (Q, 2, @), measured on its capitals." },
+    Param { path: ("legends", "words"), label: "Word size", lo: 1.2, hi: 5.0, step: 0.1, unit: Unit::Mm, def: 2.6, note: "How tall a legend of words is (ESC, ENTER, the second functions), measured on its capitals. A word too long for its cap is set smaller to fit, and the key's other words with it." },
+    Param { path: ("legends", "inset"), label: "Inset", lo: 0.0, hi: 4.0, step: 0.1, unit: Unit::Mm, def: 1.0, note: "How far down from the top edge of the cap's top a one-letter legend starts; words start a little higher. At the top left, how far in from the left edge too. In the middle it has no say." },
 ];
 
 /// What each end of a share's slider stands for, in the words under its
@@ -168,15 +176,18 @@ struct Choice {
     options: &'static [&'static str],
 }
 
-const CHOICES: [Choice; 2] = [
+const CHOICES: [Choice; 4] = [
     Choice { label: "Switch", note: "What the switch's housing is: black with its LED through a slot in its top, as some older switches have it (Kailh's among them), so all the LED's light leaves in its beam; or clear, glowing with a share of it, over its top as most RGB switches have it, or all over. Each sets the switch's values for that kind; the sliders tune from there.", options: &["LED slot", "Clear top", "Clear housing"] },
     Choice { label: "Keycaps", note: "What the caps let light through: shine-through caps are opaque but for their legends; pudding caps have translucent sides below a black top whose black comes part of the way down them; translucent caps let light through all over. Each fills in Wall opacity and Black down the sides where they are off; the sliders tune from there.", options: &["Shine-through", "Pudding", "Translucent"] },
+    Choice { label: "Placement", note: "Where the legend sits on the cap: at the top, its second function at the foot, as the keyboard's own caps print it; in the middle, as many pudding and doubleshot caps print it; or at the top left, as classic caps print it.", options: &["Top", "Middle", "Top left"] },
+    Choice { label: "Weight", note: "How heavy the typeface's strokes are, of the weights it comes in. A heavier legend lets more of the light through.", options: &["Thin", "Extra light", "Light", "Regular", "Medium", "Semibold", "Bold", "Extra bold", "Black"] },
 ];
 
 /// The page's sections: a title, what the part is, its values, and its choices.
-const SECTIONS: [(&str, &str, &[usize], &[usize]); 4] = [
+const SECTIONS: [(&str, &str, &[usize], &[usize]); 5] = [
     ("LED", "Each key's LED shines up out of its switch in a beam, onto the back of the legend. In a black housing that is all its light; a clear housing scatters a share of it instead, glowing with it over its top and sides, which lights the legend evenly, the inside of the cap and the deck round the switch.", &[0, 1, 2, 3, 4, 5, 7, 6], &[0]),
     ("Keycaps", "Each cap stands over its switch, its skirt from its foot to its top. Light bounces about inside it; some gets out under the skirt, some through the legend, and some through the plastic where it is translucent and not coated black.", &[8, 9, 10, 22, 23, 24, 11, 12, 13], &[1]),
+    ("Legends", "What the light comes through: the print on each cap. Set it as your caps print it: its typeface, how tall its letters are, and where on the cap it sits.", &[29, 27, 28], &[2, 3]),
     ("Wells", "The keys sit in wells in the chassis: the deck at their floor, walled round by the chassis. What each gives back of the light falling on it lights the rest.", &[14, 15, 16], &[]),
     ("Display", "The display's backlit dots, and the glass over them.", &[17, 18, 19, 20, 21], &[]),
 ];
@@ -189,14 +200,24 @@ pub(crate) fn sliders_of(section: usize, light: &Value) -> Vec<usize> {
     let caps = Physics::from(light).caps;
     SECTIONS[section].2.iter().copied().filter(|&i| {
         let path = PARAMS[i].path;
-        !(slot && matches!(path, ("switches", "scattered" | "sides" | "glow"))) && !(caps == Caps::ShineThrough && matches!(path, ("caps", "opacity" | "milky" | "black"))) && !(caps == Caps::Translucent && path == ("caps", "black"))
+        !(slot && matches!(path, ("switches", "scattered" | "sides" | "glow"))) && !(caps == Caps::ShineThrough && matches!(path, ("caps", "opacity" | "milky" | "black"))) && !(caps == Caps::Translucent && path == ("caps", "black")) && !(path == ("legends", "inset") && light["legends"]["place"] == "middle")
     }).collect()
 }
 
-/// The option of a choice the light has.
-fn chosen(choice: usize, light: &Value) -> usize {
+/// The option of a choice the light has (`print` the core's own print, for
+/// the legends' weight where the light says none).
+fn chosen(choice: usize, light: &Value, print: &Value) -> usize {
     let p = Physics::from(light);
     match choice {
+        2 => match ectodeck_draw::print::Place::named(light["legends"]["place"].as_str()) {
+            ectodeck_draw::print::Place::Top => 0,
+            ectodeck_draw::print::Place::Middle => 1,
+            ectodeck_draw::print::Place::TopLeft => 2,
+        },
+        3 => {
+            let w = light["legends"]["weight"].as_f64().or_else(|| print["weight"].as_f64()).unwrap_or(400.0);
+            ((w.round() as usize + 50) / 100).clamp(1, 9) - 1
+        }
         0 => match p.switch {
             Switch::Slot => 0,
             Switch::ClearTop => 1,
@@ -210,9 +231,16 @@ fn chosen(choice: usize, light: &Value) -> usize {
     }
 }
 
+/// The weight an option of the Weight choice is: Thin's 100 to Black's 900.
+fn weight_of(option: usize) -> u64 {
+    100 * (option.min(8) as u64 + 1)
+}
+
 /// The light with an option of a choice taken, and the values it sets for it.
 fn choose(light: &mut Value, choice: usize, option: usize) {
     match choice {
+        2 => put_at(light, ("legends", "place"), json!(["top", "middle", "topleft"][option.min(2)])),
+        3 => put_at(light, ("legends", "weight"), json!(weight_of(option))),
         0 => {
             let switch = [Switch::Slot, Switch::ClearTop, Switch::Clear][option.min(2)];
             light["switches"]["kind"] = json!(switch.name());
@@ -373,10 +401,18 @@ const RESET: i32 = 1000;
 const PLACE_E: usize = 25;
 const PLACE_N: usize = 26;
 /// what a choice sets, which a key takes as its own when it is chosen for it
-const CHOSEN: [&[(&str, &str)]; 2] = [
+const CHOSEN: [&[(&str, &str)]; 4] = [
     &[("switches", "kind"), ("switches", "top"), ("switches", "beam"), ("switches", "scattered"), ("switches", "sides"), ("switches", "glow")],
     &[("caps", "kind"), ("caps", "opacity"), ("caps", "black")],
+    &[("legends", "place")],
+    &[("legends", "weight")],
 ];
+/// the Legends section; the typeface's button, a typeface on its list, and
+/// the box to find one by name
+const LEGENDS: usize = 2;
+const TYPEFACE: i32 = 980;
+const FACE: i32 = 990;
+const FIND: i32 = 985;
 /// what a button is, under the drawing when one is chosen
 const BUTTON_ABOUT: &str = "A button stands on the chassis, from its foot to its top, in the light coming out of the keys round it: its sides and top give back their share of what falls on them, and it stands in the way of the rest.";
 /// what the switch pad does
@@ -401,6 +437,9 @@ pub struct LabDevice {
     pub screens: bool,
     pub caps: Vec<(CapShape, Option<KeyGeometry>)>,
     pub typical: Option<String>,
+    /// how the core's art prints its legends, as its description has it
+    /// (none for a device without): what the Legends section starts from
+    pub print: Value,
 }
 
 impl LabDevice {
@@ -454,7 +493,20 @@ pub struct LabPage {
     /// the switch pad as last drawn, where it has the key, and what it was drawn from
     pad: Option<(drawing::Stage, drawing::PadMap, slint::Image)>,
     pad_of: Option<(Value, usize, bool, f32)>,
+    /// the typefaces to set the legends in (read when first asked), whether
+    /// their list is open, what is typed to find one, the first it shows,
+    /// and the list as last drawn, with what it was drawn from
+    faces: Vec<(String, Vec<u16>)>,
+    faces_open: bool,
+    face_query: String,
+    face_first: usize,
+    face_sketch: Option<(FaceListOf, drawing::Stage, slint::Image)>,
 }
+
+/// What the typefaces' list was drawn from: the first it shows, how many,
+/// the one the legends are set in, how many there are, its size, the
+/// window's scale and what was typed to find one.
+type FaceListOf = (usize, usize, usize, usize, i32, i32, u32, String);
 
 /// The value at a path in a light: a section's value, or the light's own
 /// where the path names no section.
@@ -503,11 +555,26 @@ fn own_take(light: &mut Value, id: &str, path: (&str, &str)) {
     }
 }
 
+/// What the keyboard takes for a value the light does not have: for the
+/// legends', how the core prints them (`print`, as its description has
+/// it); else the lab's own default.
+fn default_of(path: (&str, &str), print: &Value) -> Option<f64> {
+    if path.0 == "legends" {
+        if let Some(v) = print[path.1].as_f64() {
+            return Some(v);
+        }
+    }
+    PARAMS.iter().find(|p| p.path == path).map(|p| p.def)
+}
+
 /// All keys' value at a path, as a key with none of its own takes it: the
 /// light's own, or what the keyboard takes where the light has none.
-fn all_keys(light: &Value, path: (&str, &str)) -> Value {
+fn all_keys(light: &Value, path: (&str, &str), print: &Value) -> Value {
     match at(light, path) {
-        Value::Null => PARAMS.iter().find(|p| p.path == path).map_or(Value::Null, |p| json!(p.def)),
+        // (the legends' typeface and weight as the core prints them, at the top)
+        Value::Null if path.0 == "legends" && !print[path.1].is_null() => print[path.1].clone(),
+        Value::Null if path == ("legends", "place") => json!("top"),
+        Value::Null => default_of(path, print).map_or(Value::Null, |d| json!(d)),
         v => v.clone(),
     }
 }
@@ -516,8 +583,8 @@ fn all_keys(light: &Value, path: (&str, &str)) -> Value {
 /// own, and the key follows all keys there: a key's setup holds only what
 /// differs from all keys' (a switch dragged back to its cap's middle is no
 /// setup of its own).
-fn own_set(light: &mut Value, id: &str, path: (&str, &str), v: Value) {
-    if jsonc::same(&v, &all_keys(light, path)) {
+fn own_set(light: &mut Value, id: &str, path: (&str, &str), v: Value, print: &Value) {
+    if jsonc::same(&v, &all_keys(light, path, print)) {
         own_take(light, id, path);
     } else {
         own_put(light, id, path, v);
@@ -651,7 +718,7 @@ fn floats(v: Value) -> Value {
 /// reads so, and saves so the next time. A kind a key names stays its own
 /// even where all keys have it: a button's opaque cap stays opaque whatever
 /// caps the keys have.
-fn plain(light: Value) -> Value {
+fn plain(light: Value, print: &Value) -> Value {
     let mut light = floats(light);
     let ids: Vec<String> = light["keys"].as_object().map(|k| k.keys().cloned().collect()).unwrap_or_default();
     for id in ids {
@@ -663,7 +730,7 @@ fn plain(light: Value) -> Value {
             .collect();
         for (a, b) in numbers {
             let path = (a.as_str(), b.as_str());
-            if jsonc::same(at(&light["keys"][&id], path), &all_keys(&light, path)) {
+            if jsonc::same(at(&light["keys"][&id], path), &all_keys(&light, path, print)) {
                 own_take(&mut light, &id, path);
             }
         }
@@ -698,9 +765,12 @@ impl LabPage {
             SCOPE => Ask::Scope(index),
             MAP => Ask::Key(index),
             OWN => Ask::Follow(index),
+            TYPEFACE => Ask::Faces,
+            FACE => Ask::Face(index),
             _ => Ask::Choose(id - CHOICE, index),
         });
         on!(on_pad, |_id, x, y| Ask::Pad(x, y));
+        on!(on_list_scroll, |dy| Ask::FacesScroll(dy));
         on!(on_hovered, |id, on| Ask::Hover(id, on));
         on!(on_compare, |on| Ask::Compare(on));
         on!(on_reset, |id| Ask::Reset(id));
@@ -712,7 +782,7 @@ impl LabPage {
         ui.set_over(ModelRc::from(over.clone()));
         ui.set_rows(ModelRc::from(rows.clone()));
         ui.set_foot(ModelRc::from(foot.clone()));
-        let light = plain(light);
+        let light = plain(light, &device.print);
         // the section shown when the lab was last open
         let section = crate::uistate::get("lab_section").and_then(|v| v.as_u64()).map_or(0, |n| (n as usize).min(SECTIONS.len() - 1));
         let mut page = LabPage {
@@ -745,6 +815,11 @@ impl LabPage {
             picking: false,
             pad: None,
             pad_of: None,
+            faces: Vec::new(),
+            faces_open: false,
+            face_query: String::new(),
+            face_first: 0,
+            face_sketch: None,
         };
         // a section the device has
         if !page.sections().contains(&page.section) {
@@ -757,7 +832,8 @@ impl LabPage {
     /// The sections the device has parts for, in order.
     fn sections(&self) -> Vec<usize> {
         let d = &self.device;
-        [d.keys, d.keys, d.wells, d.screens].iter().enumerate().filter(|(_, has)| **has).map(|(i, _)| i).collect()
+        let printed = d.keys && d.print.is_object() && d.caps.iter().any(|(c, _)| c.print.is_some());
+        [d.keys, d.keys, printed, d.wells, d.screens].iter().enumerate().filter(|(_, has)| **has).map(|(i, _)| i).collect()
     }
 
     /// The key the stage draws, in section as its art has it: the one chosen,
@@ -826,6 +902,10 @@ impl LabPage {
                         }
                     }
                 }
+                Ask::Typed(FIND, t) => {
+                    self.face_query = t;
+                    self.face_first = 0;
+                }
                 Ask::Typed(id, t) => {
                     if let Some(p) = PARAMS.get(id.max(0) as usize) {
                         // the number as typed, whatever follows it ("220 nits", "35%")
@@ -870,7 +950,7 @@ impl LabPage {
                 Ask::Choose(choice, option) => {
                     let (choice, option) = (choice.max(0) as usize, option.max(0) as usize);
                     let work = self.work();
-                    if choice < CHOICES.len() && chosen(choice, &work) != option {
+                    if choice < CHOICES.len() && chosen(choice, &work, &self.device.print) != option {
                         self.remember(CHOICE + choice as i32);
                         let mut after = work;
                         choose(&mut after, choice, option);
@@ -887,6 +967,7 @@ impl LabPage {
                         } else {
                             self.light = after;
                         }
+                        self.tidy_print();
                         self.rev += 1;
                         self.status = (String::new(), 0);
                     }
@@ -978,6 +1059,32 @@ impl LabPage {
                         self.told = self.hovered;
                     }
                 }
+                Ask::Faces => {
+                    if self.faces.is_empty() {
+                        self.faces = ectodeck_draw::print::families(&ectodeck_draw::print::faces());
+                    }
+                    self.faces_open = !self.faces_open;
+                    self.face_query.clear();
+                    self.face_first = self.face_centred();
+                }
+                Ask::Face(i) => {
+                    if let Some((family, weights)) = self.face_list().get(i.max(0) as usize).cloned() {
+                        self.remember(TYPEFACE);
+                        // the weight it has nearest the one the legends are set in
+                        let want = self.style().map_or(400, |s| s.weight);
+                        let weight = weights.iter().copied().min_by_key(|w| (*w as i32 - want as i32).abs()).unwrap_or(want);
+                        self.put(("legends", "typeface"), json!(family));
+                        self.put(("legends", "weight"), json!(weight as f64));
+                        self.tidy_print();
+                        self.rev += 1;
+                    }
+                    self.faces_open = false;
+                }
+                Ask::FacesScroll(dy) => {
+                    let most = self.face_list().len().saturating_sub(1 + self.face_rows());
+                    let by = (dy / 34.0).round() as i64;
+                    self.face_first = (self.face_first as i64 - by).clamp(0, most as i64) as usize;
+                }
                 Ask::Scope(0) => {
                     self.scope = None;
                     self.picking = false;
@@ -1017,6 +1124,90 @@ impl LabPage {
         window
     }
 
+    /// How the core's art prints its legends, for the Legends section.
+    fn own_print(&self) -> Option<ectodeck_draw::print::Own> {
+        ectodeck_draw::print::Own::of(&json!({ "print": self.device.print }))
+    }
+
+    /// How the legends are set as the page tunes them now: all keys', or
+    /// the chosen key's (its own over all keys').
+    fn style(&self) -> Option<ectodeck_draw::print::Style> {
+        let own = self.own_print()?;
+        Some(ectodeck_draw::print::Style::over(&own.style, &self.work()["legends"]))
+    }
+
+    /// A key drawn with its print, by its control's id, as the art has it.
+    fn printed(&self, id: &str) -> Option<drawing::Printed> {
+        let mm = self.mm() as f32;
+        let (cap, _) = self.device.caps.iter().find(|(c, _)| c.id == id)?;
+        let print = cap.print.clone()?;
+        let f = cap.foot;
+        let rel = |v: f32, from: f32| ((v - from) / mm) as f64;
+        Some(drawing::Printed { foot: (rel(f[2], f[0]), rel(f[3], f[1])), face: [rel(cap.face[0], f[0]), rel(cap.face[1], f[1]), rel(cap.face[2], f[0]), rel(cap.face[3], f[1])], print })
+    }
+
+    /// Keys of other kinds than the key drawn, to show one look covers the
+    /// keyboard: the first the core has of a key of words, of a letter, of
+    /// a wide key of words, and of a letter with a second function under it.
+    fn others(&self, but: &str) -> Vec<drawing::Printed> {
+        use ectodeck_draw::print::{Role, Run};
+        let caps: Vec<&CapShape> = self.device.caps.iter().map(|(c, _)| c).filter(|c| c.print.is_some() && c.id != but && !c.button).collect();
+        let width = |c: &CapShape| c.foot[2] - c.foot[0];
+        let usual = caps.iter().map(|c| width(c)).fold(f32::MAX, f32::min);
+        let runs = |c: &CapShape| c.print.as_ref().map(|p| p.runs.clone()).unwrap_or_default();
+        let word = |r: &Run| r.icon.is_none() && r.text.trim().chars().count() > 1;
+        let one = |r: &Run| r.icon.is_none() && r.text.trim().chars().count() == 1;
+        let letter = |r: &Run| one(r) && r.text.trim().chars().all(char::is_alphabetic);
+        let kinds: [&dyn Fn(&CapShape) -> bool; 4] = [
+            &|c| width(c) < usual * 1.2 && matches!(runs(c).as_slice(), [r] if word(r) && r.role == Role::Main),
+            &|c| matches!(runs(c).as_slice(), [r] if letter(r) && r.role == Role::Main),
+            &|c| width(c) > usual * 1.8 && runs(c).iter().all(|r| word(r) && r.role == Role::Main),
+            &|c| matches!(runs(c).as_slice(), [a, b] if one(a) && a.role == Role::Main && word(b) && b.role == Role::Second),
+        ];
+        kinds.iter().filter_map(|is| caps.iter().find(|c| is(c))).filter_map(|c| self.printed(&c.id)).collect()
+    }
+
+    /// The legends' drawing: the key drawn (the one chosen, or the core's
+    /// typical key) and, for all keys, keys of other kinds beside it.
+    fn legends(&self) -> Option<drawing::Legends> {
+        let (own, style) = (self.own_print()?, self.style()?);
+        let id = self.key().map(|k| k.id.clone()).or_else(|| self.device.typical.clone())?;
+        let key = self.printed(&id)?;
+        let others = if self.key().is_some() { Vec::new() } else { self.others(&id) };
+        Some(drawing::Legends { style, own, key, others })
+    }
+
+    /// Where the typefaces' list stands: under the typeface's button, over the stage.
+    fn face_box(&self) -> (f32, f32, f32, f32) {
+        let (_, _, sw, sh) = self.sizes();
+        let (x, y) = (24.0 + drawing::column_x(true, sw) - 8.0, HEAD_H + drawing::choice_y(1) + 70.0);
+        (x, y, 460.0f32.min(sw - 40.0), (HEAD_H + sh - 12.0 - y).max(160.0))
+    }
+
+    /// How many of this computer's typefaces the list has room for.
+    fn face_rows(&self) -> usize {
+        ((self.face_box().3 - 146.0) / 34.0).floor().max(1.0) as usize
+    }
+
+    /// The first of this computer's typefaces to show, to have the one the
+    /// legends are set in in view.
+    fn face_centred(&self) -> usize {
+        let list = self.face_list();
+        let family = self.style().map(|s| s.typeface).unwrap_or_default();
+        let current = list.iter().position(|(n, _)| *n == family).unwrap_or(0);
+        current.saturating_sub(4).min(list.len().saturating_sub(1 + self.face_rows()))
+    }
+
+    /// The typefaces on the list: the core's own first, then this
+    /// computer's that what is typed finds (not the core's for its signs alone).
+    fn face_list(&self) -> Vec<(String, Vec<u16>)> {
+        let p = &self.device.print;
+        let (core, symbols) = (p["typeface"].as_str().unwrap_or(""), p["symbols"].as_str().unwrap_or(""));
+        let own = self.faces.iter().find(|(n, _)| n == core).cloned().unwrap_or_else(|| (core.to_string(), vec![p["weight"].as_f64().map_or(400, |w| w.round() as u16)]));
+        let q = self.face_query.trim().to_lowercase();
+        std::iter::once(own).chain(self.faces.iter().filter(|(n, _)| n != core && n != symbols && n.to_lowercase().contains(&q)).cloned()).collect()
+    }
+
     /// The key whose own setup the page shows, if one is chosen.
     fn key(&self) -> Option<&CapShape> {
         self.scope.and_then(|i| self.device.caps.get(i)).map(|(c, _)| c)
@@ -1053,8 +1244,24 @@ impl LabPage {
     /// Set a value: the chosen key's own, or all keys'.
     fn put(&mut self, path: (&str, &str), v: Value) {
         match self.key().map(|k| k.id.clone()) {
-            Some(id) => own_set(&mut self.light, &id, path, v),
+            Some(id) => own_set(&mut self.light, &id, path, v, &self.device.print),
             None => put_at(&mut self.light, path, v),
+        }
+    }
+
+    /// All keys' legends' typeface, weight and place taken out where they are
+    /// how the core prints its own, so choosing the core's own leaves
+    /// nothing to save.
+    fn tidy_print(&mut self) {
+        let core = |k: &str| match k {
+            "place" => json!("top"),
+            _ => self.device.print[k].clone(),
+        };
+        for k in ["typeface", "weight", "place"] {
+            let (v, c) = (self.light["legends"][k].clone(), core(k));
+            if !v.is_null() && jsonc::same(&v, &c) {
+                remove_at(&mut self.light, ("legends", k));
+            }
         }
     }
 
@@ -1076,7 +1283,8 @@ impl LabPage {
     fn section_open(&self, i: usize) -> bool {
         match self.key() {
             None => true,
-            Some(k) => i == 1 || (i == 0 && k.lit),
+            Some(k) if k.button => i == 1,
+            Some(k) => i == 1 || (i == 0 && k.lit) || (i == LEGENDS && k.print.is_some()),
         }
     }
 
@@ -1205,6 +1413,18 @@ impl LabPage {
         } else {
             self.rows.set_vec(rows);
         }
+        // where the typefaces' list turns with the wheel (nowhere while it is shut)
+        let (lx, ly, lw, lh) = match (&self.face_sketch, self.faces_open && self.section == LEGENDS) {
+            (Some((_, st, _)), true) => {
+                let (fx, fy, _, _) = self.face_box();
+                (fx, fy, st.w, st.h)
+            }
+            _ => (0.0, 0.0, 0.0, 0.0),
+        };
+        self.ui.set_list_x(lx);
+        self.ui.set_list_y(ly);
+        self.ui.set_list_w(lw);
+        self.ui.set_list_h(lh);
         self.ui.set_status_text(self.status_shown().into());
         self.ui.set_status_kind(self.status.1);
         self.ui.set_status_room(self.status_room());
@@ -1243,7 +1463,9 @@ impl LabPage {
         if self.places_of.as_ref() != Some(&size) {
             // one lit key's switch pad and its values at the top of the right column
             let right_top = if self.section == 0 && self.key().is_some_and(|k| k.lit) { self.pad_box().3 + 182.0 } else { 0.0 };
-            self.places = drawing::places(&v, lens, sw, sh, self.choices().len(), right_top, Some(&size.3));
+            let set = (self.section == LEGENDS).then(|| self.legends()).flatten();
+            let choices = self.choices().len() + (self.section == LEGENDS && !self.choices().is_empty()) as usize;
+            self.places = drawing::places(&v, lens, sw, sh, choices, right_top, Some(&size.3), set.as_ref());
             self.places_of = Some(size.clone());
         }
         let scale = slint::ComponentHandle::window(&self.ui).scale_factor();
@@ -1264,6 +1486,24 @@ impl LabPage {
             self.pad = None;
             self.pad_of = None;
         }
+        // the typefaces' list, when it is open
+        if self.faces_open && self.section == LEGENDS {
+            let (_, _, fw, fh) = self.face_box();
+            let (first, rows) = (self.face_first, self.face_rows());
+            let list = self.face_list();
+            // as tall as what it shows
+            let fh = fh.min(152.0 + 34.0 * rows.min(list.len().saturating_sub(1 + first)).max(1) as f32);
+            let family = self.style().map(|s| s.typeface).unwrap_or_default();
+            let current = list.iter().position(|(n, _)| *n == family).unwrap_or(0);
+            let total = self.faces.iter().filter(|(n, _)| Some(n.as_str()) != self.device.print["typeface"].as_str() && Some(n.as_str()) != self.device.print["symbols"].as_str()).count();
+            let key = (first, rows, current, list.len(), fw.round() as i32, fh.round() as i32, (scale * 100.0) as u32, self.face_query.clone());
+            if self.face_sketch.as_ref().map(|f| &f.0) != Some(&key) {
+                let core = (list[0].0.clone(), list[0].1.iter().copied().min_by_key(|w| (*w as i32 - 600).abs()).unwrap_or(400));
+                let st = drawing::face_list(&core, &list[1..], first, rows, current, total, fw, fh);
+                let image = slint::Image::from_rgba8_premultiplied(drawing::pixels_set(&st, scale));
+                self.face_sketch = Some((key, st, image));
+            }
+        }
         let of = (work, self.section, size.1, size.2, scale, hot, self.scope);
         if self.drawn_of.as_ref() == Some(&of) {
             return;
@@ -1271,7 +1511,8 @@ impl LabPage {
         let same_scale = self.drawn_of.as_ref().is_some_and(|o| o.4 == scale);
         // (lines only to the sliders shown: one key shows fewer)
         let shown: Vec<drawing::Place> = self.places.iter().filter(|p| size.3.contains(&p.i)).copied().collect();
-        let st = drawing::stage(&v, lens, sw, sh, &shown, hot);
+        let set = (self.section == LEGENDS).then(|| self.legends()).flatten();
+        let st = drawing::stage(&v, lens, sw, sh, &shown, hot, set.as_ref());
         if !(same_scale && self.drawn.as_ref().is_some_and(|(old, _)| *old == st)) {
             let image = slint::Image::from_rgba8_premultiplied(drawing::pixels(&st, scale));
             self.drawn = Some((st, image));
@@ -1339,7 +1580,7 @@ impl LabPage {
 
     fn value_in(&self, light: &Value, i: usize) -> f64 {
         let p = &PARAMS[i];
-        let v = get(light, p.path).unwrap_or(p.def);
+        let v = get(light, p.path).or_else(|| default_of(p.path, &self.device.print)).unwrap_or(p.def);
         if p.unit == Unit::North {
             let edge = Physics::from(light).switch_width as f64 / 2.0;
             v.clamp(-edge, edge)
@@ -1365,7 +1606,7 @@ impl LabPage {
                 let back = match (self.key(), was) {
                     (Some(k), Some(v)) => format!("Back to {}, {}'s saved value.", said(p, v), k.label),
                     (Some(_), None) => "Back to all keys' value, as saved.".into(),
-                    (None, v) => format!("Back to {}, the saved value.", said(p, v.unwrap_or(p.def))),
+                    (None, v) => format!("Back to {}, the saved value.", said(p, v.or_else(|| default_of(p.path, &self.device.print)).unwrap_or(p.def))),
                 };
                 (p.label.into(), back)
             }
@@ -1454,23 +1695,45 @@ impl LabPage {
         // the section's choices, at the top of its left column, over the stage:
         // each its name over its options, all of it telling of it under the pointer
         let cx = sx + drawing::column_x(true, sw);
+        let style = self.style();
+        if self.section == LEGENDS && !self.choices().is_empty() {
+            // the typeface: its name on a button that opens the list of them
+            let family = style.as_ref().map_or(String::new(), |s| s.typeface.clone());
+            let y = sy + drawing::choice_y(1);
+            over.push(Cell { id: TYPEFACE, ..cell(kind::ZONE, cx - 10.0, y - 7.0, drawing::CTRL_W + 20.0, drawing::CHOICE_H) });
+            over.push(text_cell(style::LABEL, cx, y, drawing::CTRL_W, 26.0, "Typeface"));
+            if self.owns(("legends", "typeface")) {
+                own_mark(&mut over, cx, y, TYPEFACE);
+            }
+            let bw = (text::width(400, 13.0, &family) + 24.0 + 16.0).min(drawing::CTRL_W - 6.0);
+            over.push(cell(kind::SEG, cx, y + 30.0, bw + 6.0, 34.0));
+            over.push(Cell { text: family.into(), on: self.faces_open, id: TYPEFACE, index: 0, style: 24, ..cell(kind::SEG_BUTTON, cx + 3.0, y + 32.0, bw, 30.0) });
+        }
+        let weights: Vec<u16> = style.as_ref().map(|s| self.faces.iter().chain(self.face_list().iter()).find(|(n, _)| *n == s.typeface).map_or_else(|| vec![s.weight], |(_, w)| w.clone())).unwrap_or_default();
         for (k, &c) in self.choices().iter().enumerate() {
             let choice = &CHOICES[c];
+            // (the weight under the typeface's button; both under its list while it is open)
+            let k = if self.section == LEGENDS && c == 3 { 2 } else { k };
+            if self.faces_open && self.section == LEGENDS && k >= 2 {
+                continue;
+            }
             let y = sy + drawing::choice_y(k);
             let id = CHOICE + c as i32;
             over.push(Cell { id, ..cell(kind::ZONE, cx - 10.0, y - 7.0, drawing::CTRL_W + 20.0, drawing::CHOICE_H) });
             over.push(text_cell(style::LABEL, cx, y, drawing::CTRL_W, 26.0, choice.label));
-            // its options as wide as their words, the box round them as wide as they are
-            let widths: Vec<f32> = choice.options.iter().map(|name| text::width(400, 13.0, name) + 20.0).collect();
+            // its options as wide as their words, the box round them as wide as
+            // they are (of the weights, those the typeface has)
+            let options: Vec<(usize, &str)> = choice.options.iter().copied().enumerate().filter(|&(j, _)| c != 3 || weights.contains(&(weight_of(j) as u16))).collect();
+            let widths: Vec<f32> = options.iter().map(|(_, name)| text::width(400, 13.0, name) + 20.0).collect();
             let seg_w = widths.iter().sum::<f32>() + 2.0 * (widths.len() as f32 - 1.0) + 6.0;
             over.push(cell(kind::SEG, cx, y + 30.0, seg_w, 34.0));
             if self.owns(CHOSEN[c][0]) {
                 own_mark(&mut over, cx, y, CHOICE + c as i32);
             }
-            let on = chosen(c, &work);
+            let on = chosen(c, &work, &self.device.print);
             let mut bx = cx + 3.0;
-            for (j, (name, bw)) in choice.options.iter().zip(widths).enumerate() {
-                over.push(Cell { text: (*name).into(), on: j == on, id, index: j as i32, style: style::TELLS, ..cell(kind::SEG_BUTTON, bx, y + 32.0, bw, 30.0) });
+            for ((j, name), bw) in options.into_iter().zip(widths) {
+                over.push(Cell { text: name.into(), on: j == on, id, index: j as i32, style: style::TELLS, ..cell(kind::SEG_BUTTON, bx, y + 32.0, bw, 30.0) });
                 bx += bw + 2.0;
             }
         }
@@ -1532,6 +1795,22 @@ impl LabPage {
                 let (number, unit) = reads(p, self.value(i));
                 let (at, was) = (self.knob(i, self.value(i)), self.knob(i, self.value_in(&saved_work, i)));
                 rows.push(LabRow { x: px, y: py + ph + 18.0 + n as f32 * 64.0, w: pw, id: i as i32, name: p.label.into(), hot: hot == Some(i), number: number.into(), unit: unit.into(), derived: false, at: at as f32, was: was as f32, moved: (at - was).abs() > 0.002, changed: self.changed(i), low: "".into(), high: "".into() });
+            }
+        }
+        // the typefaces' list, open under its button: its picture, the box to
+        // find one by name, and each typeface on it to choose
+        if let (true, Some((_, st, image))) = (self.faces_open && self.section == LEGENDS, &self.face_sketch) {
+            let (fx, fy, fw, _) = self.face_box();
+            sketches.push(Sketch { x: fx, y: fy, w: st.w, h: st.h, image: image.clone() });
+            for word in &st.words {
+                let top = fy + word.y - 1.005 * 11.5 - (16.0 - 1.3 * 11.5) / 2.0;
+                over.push(in_colour(style::SMALL_IN, fx + word.x, top, text::width(400, 11.5, &word.text) + 2.0, 16.0, &word.text, word.colour));
+            }
+            let (first, rows) = (self.face_first, self.face_rows());
+            over.push(Cell { id: FIND, style: 2, text: self.face_query.clone().into(), ..cell(kind::FIELD, fx + 12.0, fy + 12.0, fw - 24.0, 34.0) });
+            over.push(Cell { id: FACE, index: 0, ..cell(kind::LINK, fx + 8.0, fy + 66.0, fw - 16.0, 34.0) });
+            for i in 0..rows.min(self.face_list().len().saturating_sub(1 + first)) {
+                over.push(Cell { id: FACE, index: (first + i + 1) as i32, ..cell(kind::LINK, fx + 8.0, fy + 132.0 + i as f32 * 34.0, fw - 16.0, 34.0) });
             }
         }
         // the map, open to choose a key: every cap where the art has it, the
@@ -1758,6 +2037,50 @@ fn saved_into(text: &str, light: &Value) -> Result<String, String> {
 mod tests {
     use super::*;
 
+    /// The Legends section's sliders: Inset where the legend sits at the top
+    /// or the top left, none in the middle; and the legends' sliders take
+    /// the core's own print where the light says nothing.
+    #[test]
+    fn the_legends_sliders_follow_where_the_legend_sits() {
+        let inset = PARAMS.iter().position(|p| p.path == ("legends", "inset")).unwrap();
+        let light = json!({ "legends": { "opacity": 0.7 } });
+        assert!(sliders_of(LEGENDS, &light).contains(&inset));
+        let middle = json!({ "legends": { "place": "middle" } });
+        assert!(!sliders_of(LEGENDS, &middle).contains(&inset), "in the middle Inset has no say");
+        let print = json!({ "typeface": "Barlow Semi Condensed", "weight": 600, "letters": 3.786, "words": 2.568, "inset": 2.022 });
+        assert_eq!(default_of(("legends", "letters"), &print), Some(3.786));
+        assert_eq!(all_keys(&light, ("legends", "typeface"), &print), json!("Barlow Semi Condensed"));
+        assert_eq!(all_keys(&light, ("legends", "place"), &print), json!("top"));
+        // a key's own value as all keys' is no setup of its own
+        let mut l = json!({ "legends": {} });
+        own_set(&mut l, "enter", ("legends", "words"), json!(2.568), &print);
+        assert!(l["keys"].is_null(), "Enter's words as all keys': none of its own");
+        own_set(&mut l, "enter", ("legends", "words"), json!(2.2), &print);
+        assert_eq!(l["keys"]["enter"]["legends"]["words"], json!(2.2));
+        assert_eq!((chosen(2, &middle, &print), chosen(3, &light, &print)), (1, 5), "Middle; the core's own Semibold");
+    }
+
+    /// Save writes the legends as the lab set them into the core's light,
+    /// all keys' and a key's own, the file's comments and lines kept.
+    #[test]
+    fn the_legends_save_into_the_core() {
+        let core = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../cores/evga-z10/device.json")).unwrap();
+        let mut light = jsonc::parse(&core).unwrap()["light"].clone();
+        light["legends"]["typeface"] = json!("Montserrat");
+        light["legends"]["place"] = json!("middle");
+        light["legends"]["letters"] = json!(3.8);
+        light["keys"]["enter"] = json!({ "legends": { "words": 2.2 } });
+        let out = saved_into(&core, &light).unwrap();
+        let read = jsonc::parse(&out).unwrap();
+        assert_eq!(read["light"]["legends"]["typeface"], json!("Montserrat"));
+        assert_eq!(read["light"]["legends"]["place"], json!("middle"));
+        assert_eq!(read["light"]["keys"]["enter"]["legends"]["words"], json!(2.2));
+        assert_eq!(read["print"], jsonc::parse(&core).unwrap()["print"], "the core's own print as it was");
+        for line in core.lines().filter(|l| l.trim_start().starts_with("//")) {
+            assert!(out.contains(line), "a comment kept: {line}");
+        }
+    }
+
     /// Every share's slider says what each end of its track stands for, and
     /// only a share's: a length or a brightness says so in its unit.
     #[test]
@@ -1807,7 +2130,7 @@ mod tests {
         let mut light = json!({ "switches": { "led": 3.3, "lumens": 1.0 }, "legends": { "opacity": 0.7 } });
         for (option, switch) in [(1, Switch::ClearTop), (2, Switch::Clear), (0, Switch::Slot)] {
             choose(&mut light, 0, option);
-            assert_eq!(chosen(0, &light), option);
+            assert_eq!(chosen(0, &light, &Value::Null), option);
             assert_eq!(Physics::from(&light).switch, switch);
         }
         assert_eq!(light["switches"]["kind"], json!("led-slot"));
@@ -1818,13 +2141,13 @@ mod tests {
         choose(&mut light, 0, 1);
         assert_eq!(sliders_of(0, &light).len(), SECTIONS[0].2.len(), "a clear one shows them all");
         // the caps
-        assert_eq!(chosen(1, &light), 0, "no plastic letting light through: shine-through");
+        assert_eq!(chosen(1, &light, &Value::Null), 0, "no plastic letting light through: shine-through");
         assert!(shown(&light, 1).iter().all(|k| !matches!(*k, ("caps", "opacity" | "milky" | "black"))), "shine-through caps have none of those");
         choose(&mut light, 1, 1);
-        assert_eq!((chosen(1, &light), get(&light, ("caps", "opacity")), get(&light, ("caps", "black"))), (1, Some(0.7), Some(0.4)), "pudding: the walls as opaque as a legend, below the black");
+        assert_eq!((chosen(1, &light, &Value::Null), get(&light, ("caps", "opacity")), get(&light, ("caps", "black"))), (1, Some(0.7), Some(0.4)), "pudding: the walls as opaque as a legend, below the black");
         assert!(["opacity", "milky", "black"].iter().all(|k| shown(&light, 1).contains(&("caps", *k))));
         set(&mut light, ("caps", "opacity"), 1.0);
-        assert_eq!(chosen(1, &light), 1, "pudding caps stay pudding with their walls dragged to opaque");
+        assert_eq!(chosen(1, &light, &Value::Null), 1, "pudding caps stay pudding with their walls dragged to opaque");
         set(&mut light, ("caps", "opacity"), 0.55);
         set(&mut light, ("caps", "black"), 0.3);
         choose(&mut light, 1, 2);
@@ -1870,18 +2193,18 @@ mod tests {
     fn a_key_s_own_setup_holds_only_what_differs() {
         let light = json!({ "switches": { "kind": "led-slot", "beam": 3.0 }, "caps": { "kind": "shine-through", "opacity": 1.0, "black": 1.0 }, "legends": { "opacity": 0.7 } });
         let mut l = light.clone();
-        own_set(&mut l, "enter", ("place", "north"), json!(-0.9));
-        own_set(&mut l, "enter", ("place", "east"), json!(0.0));
+        own_set(&mut l, "enter", ("place", "north"), json!(-0.9), &Value::Null);
+        own_set(&mut l, "enter", ("place", "east"), json!(0.0), &Value::Null);
         assert_eq!(l["keys"]["enter"], json!({ "place": { "north": -0.9 } }), "centred is all keys' place");
-        own_set(&mut l, "enter", ("place", "north"), json!(0.0));
+        own_set(&mut l, "enter", ("place", "north"), json!(0.0), &Value::Null);
         assert_eq!(l, light, "dragged back to its cap's middle: Enter follows all keys");
-        own_set(&mut l, "space", ("switches", "beam"), json!(3));
+        own_set(&mut l, "space", ("switches", "beam"), json!(3), &Value::Null);
         assert_eq!(l, light, "all keys' beam, as 3 or 3.0");
         // Space tried with a pudding cap, then back to shine-through as all keys are
-        own_set(&mut l, "space", ("caps", "kind"), json!("pudding"));
-        own_set(&mut l, "space", ("caps", "opacity"), json!(0.7));
-        own_set(&mut l, "space", ("caps", "black"), json!(0.4));
-        own_set(&mut l, "space", ("caps", "milky"), json!(1.0));
+        own_set(&mut l, "space", ("caps", "kind"), json!("pudding"), &Value::Null);
+        own_set(&mut l, "space", ("caps", "opacity"), json!(0.7), &Value::Null);
+        own_set(&mut l, "space", ("caps", "black"), json!(0.4), &Value::Null);
+        own_set(&mut l, "space", ("caps", "milky"), json!(1.0), &Value::Null);
         prune_own(&mut l, "space");
         assert_eq!(l["keys"]["space"]["caps"], json!({ "kind": "pudding", "opacity": 0.7, "black": 0.4, "milky": 1.0 }), "a pudding cap uses them all");
         own_take(&mut l, "space", ("caps", "kind"));
@@ -1904,7 +2227,7 @@ mod tests {
             "space": { "caps": { "opacity": 0.7, "top": 14 } },
             "w": { "place": { "north": -1.5 } }
         });
-        let read = plain(core);
+        let read = plain(core, &Value::Null);
         assert_eq!(read["keys"], floats(json!({ "gpc": { "caps": { "kind": "shine-through", "foot": 2, "top": 3 } }, "w": { "place": { "north": -1.5 } } })));
     }
 

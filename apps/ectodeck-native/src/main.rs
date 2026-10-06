@@ -246,6 +246,26 @@ fn board_builder(done: calloop::channel::Sender<Board>) -> std::sync::mpsc::Send
     ask
 }
 
+/// Set the legends a light asks for, away from the window's thread: setting
+/// them takes a moment, and only the latest asked matters.
+fn legends_builder(done: calloop::channel::Sender<ectodeck_draw::hdr::Legends>) -> std::sync::mpsc::Sender<ectodeck_draw::hdr::LegendsAsk> {
+    let (ask, asked) = std::sync::mpsc::channel::<ectodeck_draw::hdr::LegendsAsk>();
+    std::thread::spawn(move || {
+        while let Ok(mut a) = asked.recv() {
+            while let Ok(later) = asked.try_recv() {
+                a = later;
+            }
+            let t = Instant::now();
+            let legends = a.set(&ectodeck_draw::print::faces());
+            eprintln!("ectodeck-native: legends set in {:?}", t.elapsed());
+            if done.send(legends).is_err() {
+                return;
+            }
+        }
+    });
+    ask
+}
+
 /// A brightness for the Light lab's readout: whole nits, or tenths below ten.
 fn tenth(nits: f32) -> f64 {
     let n = nits as f64;
@@ -292,6 +312,10 @@ fn key_text(e: &KeyEvent) -> Option<SharedString> {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let snapshot = args.iter().position(|a| a == "--snapshot").and_then(|i| args.get(i + 1)).cloned();
+    // the typefaces legends can be set in, the core's own among them, loaded
+    // in the background so the Light lab's list of them opens at once
+    ectodeck_draw::print::add_fonts(cores::shown().fonts());
+    ectodeck_draw::print::warm();
     // `--read-state FILE`: read the keyboard's state once, for the snapshots, and stop
     if let Some(path) = args.iter().position(|a| a == "--read-state").and_then(|i| args.get(i + 1)) {
         let kb = ectotype_core::Keyboard::new(ectotype_core::Conn::hid(), None);
@@ -815,6 +839,8 @@ struct App {
     effect_due: Instant,
     asked: Option<(u32, u32)>,
     build: std::sync::mpsc::Sender<(u32, u32)>,
+    /// legends to set as the light asks, away from the window
+    set_legends: std::sync::mpsc::Sender<ectodeck_draw::hdr::LegendsAsk>,
     /// the whole window needs drawing again, not only what Slint changed
     full: bool,
     /// ECTODECK_NATIVE_DUMP: a folder to save the frames given to the compositor in
@@ -974,6 +1000,17 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
 
     let (built_tx, built_rx) = calloop::channel::channel::<Board>();
     let build = board_builder(built_tx);
+    // the legends, set anew as the Light lab asks
+    let (legends_tx, legends_rx) = calloop::channel::channel::<ectodeck_draw::hdr::Legends>();
+    let set_legends = legends_builder(legends_tx);
+    event_loop
+        .handle()
+        .insert_source(legends_rx, |e, _, app: &mut App| {
+            if let calloop::channel::Event::Msg(legends) = e {
+                app.legends_ready(legends);
+            }
+        })
+        .unwrap();
     event_loop
         .handle()
         .insert_source(built_rx, |e, _, app: &mut App| {
@@ -1069,6 +1106,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         effect_due: Instant::now(),
         asked: None,
         build,
+        set_legends,
         full: true,
         dump: std::env::var_os("ECTODECK_NATIVE_DUMP").map(Into::into),
         check: std::env::var_os("ECTODECK_NATIVE_CHECK").is_some(),
@@ -1527,6 +1565,10 @@ impl App {
         if let Some(l) = &self.light {
             board.set_light(l);
         }
+        // (drawn from the core as it was read: the legends the light asks for now)
+        if let Some(ask) = board.legends_for(&self.light_now()) {
+            let _ = self.set_legends.send(ask);
+        }
         // The keys' light, simulated from the first keyboard drawn on, for
         // every size (the simulation is in the art's units). Its first
         // picture, the light straight from the LEDs, is waited for, a tenth
@@ -1557,6 +1599,20 @@ impl App {
         let lit = light(&board, &self.lights, self.front.page.locks, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
         self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
         self.board = Some(board);
+        self.full = true;
+        self.draw();
+    }
+
+    /// Legends set as the light asks: put them on the keyboard, and light it again.
+    fn legends_ready(&mut self, legends: ectodeck_draw::hdr::Legends) {
+        let Some(board) = &mut self.board else { return };
+        board.set_legends(legends);
+        // (the light may have changed again while they were set)
+        if let Some(ask) = board.legends_for(&self.light.clone().unwrap_or_else(|| cores::shown().device_now()["light"].clone())) {
+            let _ = self.set_legends.send(ask);
+        }
+        let lit = light(board, &self.lights, self.front.page.locks, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
+        self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
         self.full = true;
         self.draw();
     }
@@ -1636,6 +1692,10 @@ impl App {
                     // the light falls shows with the simulation's next picture,
                     // or at once from a picture kept of it
                     relit = b.set_light(l);
+                    // the legends, as the light asks for them, when they are set
+                    if let Some(ask) = b.legends_for(l) {
+                        let _ = self.set_legends.send(ask);
+                    }
                     let want = b.setup(l);
                     self.kept.pinned = Some(b.setup(lab.saved()));
                     let changed = self.want.as_ref().is_none_or(|w| !w.same_paths(&want));
@@ -2293,6 +2353,7 @@ fn lab_device(board: Option<&Board>) -> lab::LabDevice {
         screens: core.device["screens"].as_array().is_some_and(|a| !a.is_empty()),
         caps: board.map(|b| b.cap_shapes.iter().map(|c| (c.clone(), b.key_geometry(&c.id, mm))).collect()).unwrap_or_default(),
         typical,
+        print: core.device_now()["print"].clone(),
     }
 }
 

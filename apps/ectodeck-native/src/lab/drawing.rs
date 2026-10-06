@@ -112,18 +112,19 @@ const COL: f64 = 20.0;
 const GAP: f64 = 28.0;
 const MARGIN: f64 = 24.0;
 
-/// Which part of the key a section shows: LED, Keycaps, Wells, Display.
+/// Which part of the key a section shows: LED, Keycaps, Legends, Wells, Display.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Lens {
     Led,
     Caps,
+    Legends,
     Wells,
     Display,
 }
 
 impl Lens {
     pub fn of(section: usize) -> Lens {
-        [Lens::Led, Lens::Caps, Lens::Wells, Lens::Display][section.min(3)]
+        [Lens::Led, Lens::Caps, Lens::Legends, Lens::Wells, Lens::Display][section.min(4)]
     }
 }
 
@@ -999,11 +1000,15 @@ fn panel(w: f64, h: f64) -> (f64, f64, f64, f64) {
     (px0, 14.0, (w - 2.0 * px0).max(120.0), h - 28.0)
 }
 
-fn drawn(v: &Values, lens: Lens, w: f64, h: f64, hot: Option<usize>) -> (Svg, Vec<Label>, Option<(f64, f64, f64, f64)>) {
+fn drawn(v: &Values, lens: Lens, w: f64, h: f64, hot: Option<usize>, set: Option<&Legends>) -> (Svg, Vec<Label>, Option<(f64, f64, f64, f64)>) {
     let (px0, py0, pw, ph) = panel(w, h);
     let (mut s, mut labels, frame) = match lens {
         Lens::Display => {
             let (s, l) = display(v, pw, ph, hot);
+            (s, l, None)
+        }
+        Lens::Legends => {
+            let (s, l) = set.map_or_else(|| (Svg::new(), Vec::new()), |set| legends(set, pw, ph, hot));
             (s, l, None)
         }
         _ => {
@@ -1028,9 +1033,9 @@ fn drawn(v: &Values, lens: Lens, w: f64, h: f64, hot: Option<usize>) -> (Svg, Ve
 /// under the section's `choices`. A section's sliders are placed once, as
 /// it opens, and stay put while its values change; only the drawing and the
 /// ends of their lines follow.
-pub fn places(v: &Values, lens: Lens, w: f32, h: f32, choices: usize, right_top: f32, shown: Option<&[usize]>) -> Vec<Place> {
+pub fn places(v: &Values, lens: Lens, w: f32, h: f32, choices: usize, right_top: f32, shown: Option<&[usize]>, set: Option<&Legends>) -> Vec<Place> {
     let (w, h) = (w as f64, h as f64);
-    let (_, mut labels, _) = drawn(v, lens, w, h, None);
+    let (_, mut labels, _) = drawn(v, lens, w, h, None, set);
     // only the sliders shown take a place
     if let Some(shown) = shown {
         labels.retain(|l| shown.contains(&l.i));
@@ -1077,9 +1082,9 @@ pub fn places(v: &Values, lens: Lens, w: f32, h: f32, choices: usize, right_top:
 /// The stage, `w` by `h`: the tile, the drawing in its panel, and the line
 /// from each slider, standing at its place, to its part; `hot` the slider
 /// under the pointer or in use, drawn white.
-pub fn stage(v: &Values, lens: Lens, w: f32, h: f32, places: &[Place], hot: Option<usize>) -> Stage {
+pub fn stage(v: &Values, lens: Lens, w: f32, h: f32, places: &[Place], hot: Option<usize>, set: Option<&Legends>) -> Stage {
     let (wf, hf) = (w as f64, h as f64);
-    let (mut s, labels, frame) = drawn(v, lens, wf, hf, hot);
+    let (mut s, labels, frame) = drawn(v, lens, wf, hf, hot, set);
     let (px0, py0, pw, ph) = panel(wf, hf);
     let mut svg = String::new();
     let _ = write!(svg, r#"<svg xmlns="http://www.w3.org/2000/svg" width="{wf}" height="{hf}" viewBox="0 0 {wf} {hf}"><defs>{}</defs>"#, s.defs);
@@ -1114,12 +1119,201 @@ pub fn stage(v: &Values, lens: Lens, w: f32, h: f32, places: &[Place], hot: Opti
         extras.push((slider("Depth"), "no walls".to_string()));
     }
     svg += "</svg>";
-    if lens != Lens::Display {
+    // (the slices are seen from the side, north to south; the legends from above)
+    if !matches!(lens, Lens::Display | Lens::Legends) {
         s.words.push(Word { x: (px0 + 16.0) as f32, y: (py0 + ph - 12.0) as f32, text: "North".into(), colour: QUIET_WORD });
         let south = text::width(400, 11.5, "South") as f64;
         s.words.push(Word { x: (px0 + pw - 16.0 - south) as f32, y: (py0 + ph - 12.0) as f32, text: "South".into(), colour: QUIET_WORD });
     }
     Stage { w, h, svg, words: s.words, extras }
+}
+
+// ---------------------------------------------------------------- the legends
+
+/// A key drawn from above with its print: its foot across and north to
+/// south, and its top from the foot's top left corner (mm), and what is
+/// printed on it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Printed {
+    pub foot: (f64, f64),
+    pub face: [f64; 4],
+    pub print: ectodeck_draw::print::Print,
+}
+
+/// The legends' drawing: how they are set, how the core's art prints them,
+/// and the key it is of, large, with keys of other kinds beside it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Legends {
+    pub style: ectodeck_draw::print::Style,
+    pub own: ectodeck_draw::print::Own,
+    pub key: Printed,
+    pub others: Vec<Printed>,
+}
+
+/// A path as SVG's path data.
+fn svg_path(p: &resvg::tiny_skia::Path) -> String {
+    use resvg::tiny_skia::PathSegment;
+    let mut d = String::new();
+    for seg in p.segments() {
+        let _ = match seg {
+            PathSegment::MoveTo(a) => write!(d, "M{:.2} {:.2}", a.x, a.y),
+            PathSegment::LineTo(a) => write!(d, "L{:.2} {:.2}", a.x, a.y),
+            PathSegment::QuadTo(a, b) => write!(d, "Q{:.2} {:.2} {:.2} {:.2}", a.x, a.y, b.x, b.y),
+            PathSegment::CubicTo(a, b, c) => write!(d, "C{:.2} {:.2} {:.2} {:.2} {:.2} {:.2}", a.x, a.y, b.x, b.y, c.x, c.y),
+            PathSegment::Close => write!(d, "Z"),
+        };
+    }
+    d
+}
+
+/// A key's print set as the section says, on its top at (`x`, `y`) `k`
+/// pixels to the millimetre: its inks drawn in the light's amber (a glow
+/// under them), and its lines.
+fn print_on(s: &mut Svg, set: &Legends, key: &Printed, x: f64, y: f64, k: f64) -> Vec<ectodeck_draw::print::Line> {
+    let face = [(x + key.face[0] * k) as f32, (y + key.face[1] * k) as f32, (x + key.face[2] * k) as f32, (y + key.face[3] * k) as f32];
+    let db = ectodeck_draw::print::faces();
+    let laid = ectodeck_draw::print::set(&db, &key.print, &set.style, &set.own, face, k as f32);
+    let blur = s.gid();
+    let _ = write!(s.defs, r#"<filter id="{blur}" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="{:.2}"/></filter>"#, (k * 0.35).max(0.8));
+    for glow in [true, false] {
+        let _ = write!(s.body, r#"<g{}>"#, if glow { format!(r#" filter="url(#{blur})" opacity="0.55""#) } else { String::new() });
+        for ink in &laid.inks {
+            let t = ink.to_art;
+            let paint = match ink.stroke {
+                None => format!(r#"fill="{AMBER}" fill-opacity="{:.2}""#, ink.opacity),
+                Some(w) => format!(r#"fill="none" stroke="{AMBER}" stroke-opacity="{:.2}" stroke-width="{w}" stroke-linecap="round" stroke-linejoin="round""#, ink.opacity),
+            };
+            let _ = write!(s.body, r#"<path d="{}" transform="matrix({} {} {} {} {} {})" {paint}/>"#, svg_path(&ink.path), t.sx, t.ky, t.kx, t.sy, t.tx, t.ty);
+        }
+        s.body += "</g>";
+    }
+    laid.lines
+}
+
+/// A key's cap from above: its foot and its top inside it.
+fn cap_from_above(s: &mut Svg, key: &Printed, x: f64, y: f64, k: f64, big: bool) {
+    let (w, d) = (key.foot.0 * k, key.foot.1 * k);
+    let r = (1.6 * k).min(10.0);
+    s.path(&rounded(x, y, x + w, y + d, r), "#262626", if big { "#5c5c5c" } else { "#454545" }, 1.0, 1.0);
+    let [a0, b0, a1, b1] = key.face;
+    s.path(&rounded(x + a0 * k, y + b0 * k, x + a1 * k, y + b1 * k, (r - 2.0).max(1.0)), "#2b2b2b", "#3a3a3a", 1.0, 1.0);
+}
+
+/// The legends' drawing, `pw` by `ph`: the key it is of from above, large,
+/// its print set as the section sets it, and its letters' and words'
+/// heights and its inset measured on it; under it, keys of other kinds set
+/// alike, to one scale.
+fn legends(set: &Legends, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, Vec<Label>) {
+    use ectodeck_draw::print::{Place as At, Role};
+    let mut s = Svg::new();
+    let white = |name: &str| hot.is_some_and(|i| PARAMS[i].label == name);
+    let key = &set.key;
+    let k = ((pw - 140.0) / key.foot.0).min((ph * if set.others.is_empty() { 0.8 } else { 0.52 }) / key.foot.1).min(26.0);
+    let (x, y) = ((pw - key.foot.0 * k) / 2.0, if set.others.is_empty() { (ph - key.foot.1 * k) / 2.0 } else { 34.0 });
+    cap_from_above(&mut s, key, x, y, k, true);
+    let lines = print_on(&mut s, set, key, x, y, k);
+    let mut labels = Vec::new();
+    // each size on its line's capitals, beside the key's top
+    let face_right = x + key.face[2] * k;
+    let sx = x + key.foot.0 * k + 14.0;
+    let letters = lines.iter().find(|l| l.letter && l.role != Role::Second).or_else(|| lines.iter().find(|l| l.letter));
+    let words = lines.iter().find(|l| !l.letter);
+    for (line, name) in [(letters, "Letter size"), (words, "Word size")] {
+        let Some(l) = line else { continue };
+        let (top, base) = (l.top as f64, l.base as f64);
+        let c = if white(name) { WHITE } else { DIMENSION };
+        s.mark(&poly(&[(sx, top), (sx, base)], false), c);
+        for yy in [top, base] {
+            s.mark(&poly(&[(sx - 5.0, yy), (sx + 5.0, yy)], false), c);
+        }
+        let _ = write!(s.marks, r##"<path d="M{face_right:.1} {top:.1} H{sx:.1} M{face_right:.1} {base:.1} H{sx:.1}" stroke="#5a5a5a" stroke-width="1" stroke-dasharray="2 3"/>"##);
+        labels.push(Label::new(false, (sx, (top + base) / 2.0), name));
+    }
+    // Inset: down from the top's edge to the first line's capitals, and in
+    // from its left at the top left (in the middle it has no say)
+    // (nor on a key whose legend sits in the middle of its cap at the top)
+    let inset_says = set.style.place == At::TopLeft || (set.style.place == At::Top && !key.print.centred);
+    if let (Some(first), true) = (lines.first(), inset_says) {
+        let face_top = y + key.face[1] * k;
+        let top = first.top as f64;
+        let ix = face_right - 16.0;
+        let c = if white("Inset") { WHITE } else { DIMENSION };
+        s.mark(&poly(&[(ix, face_top), (ix, top)], false), c);
+        for yy in [face_top, top] {
+            s.mark(&poly(&[(ix - 5.0, yy), (ix + 5.0, yy)], false), c);
+        }
+        if set.style.place == At::TopLeft {
+            let face_left = x + key.face[0] * k;
+            let iy = first.base as f64 + 0.6 * (first.base - first.top) as f64;
+            s.mark(&poly(&[(face_left, iy), (first.left as f64, iy)], false), c);
+            for xx in [face_left, first.left as f64] {
+                s.mark(&poly(&[(xx, iy - 5.0), (xx, iy + 5.0)], false), c);
+            }
+        }
+        labels.push(Label::new(false, (ix, (face_top + top) / 2.0), "Inset"));
+    }
+    // the others, a row of them under it, to one scale
+    if !set.others.is_empty() {
+        let room = pw - 48.0;
+        let total: f64 = set.others.iter().map(|o| o.foot.0).sum::<f64>() + 4.0 * set.others.len().saturating_sub(1) as f64;
+        let ks = (room / total).min((ph * 0.24) / set.others.iter().map(|o| o.foot.1).fold(1.0, f64::max)).min(k * 0.62);
+        let mut ox = (pw - total * ks) / 2.0;
+        let oy = ph - 26.0 - set.others.iter().map(|o| o.foot.1).fold(0.0, f64::max) * ks;
+        for o in &set.others {
+            cap_from_above(&mut s, o, ox, oy, ks, false);
+            print_on(&mut s, set, o, ox, oy, ks);
+            ox += (o.foot.0 + 4.0) * ks;
+        }
+    }
+    (s, labels)
+}
+
+fn xml(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+/// The typefaces' list, `w` by `h`: the core's own at the top, then this
+/// computer's from `first`, `rows` of them, each its name set in itself and
+/// a few legends beside it in amber; `current` the one the legends are set
+/// in (its place on the list, the core's own 0).
+#[allow(clippy::too_many_arguments)]
+pub fn face_list(core: &(String, u16), others: &[(String, Vec<u16>)], first: usize, rows: usize, current: usize, total: usize, w: f32, h: f32) -> Stage {
+    let (wf, hf) = (w as f64, h as f64);
+    let mut svg = String::new();
+    let _ = write!(svg, r#"<svg xmlns="http://www.w3.org/2000/svg" width="{wf}" height="{hf}" viewBox="0 0 {wf} {hf}">"#);
+    let _ = write!(svg, r##"<path d="{}" fill="#2c2c2c" stroke="#3a3a3a" stroke-width="1"/>"##, rounded(0.5, 0.5, wf - 0.5, hf - 0.5, 12.0));
+    let row = |svg: &mut String, y: f64, family: &str, weight: u16, on: bool| {
+        if on {
+            let _ = write!(svg, r##"<path d="{}" fill="#3a3a3a"/>"##, rounded(8.0, y, wf - 8.0, y + 34.0, 7.0));
+        }
+        let _ = write!(svg, r##"<text x="20" y="{:.1}" font-family="'{}'" font-weight="{weight}" font-size="15" fill="{}">{}</text>"##, y + 22.5, xml(family), if on { "#ffffff" } else { "#d4d4d4" }, xml(family));
+        let _ = write!(svg, r##"<text x="{:.1}" y="{:.1}" font-family="'{}'" font-weight="{weight}" font-size="13" fill="{AMBER}" text-anchor="end" opacity="0.9">ESC  Q  2 @  ENTER</text>"##, wf - 20.0, y + 22.0, xml(family));
+    };
+    // (the box to find one by name above them, the page's own)
+    let mut words = vec![Word { x: 20.0, y: 58.0, text: "The core's own".into(), colour: QUIET_WORD }];
+    row(&mut svg, 66.0, &core.0, core.1, current == 0);
+    words.push(Word { x: 20.0, y: 124.0, text: if others.len() == total { format!("On this computer, {total}") } else { format!("On this computer, {} found", others.len()) }, colour: QUIET_WORD });
+    for (i, (family, weights)) in others.iter().skip(first).take(rows).enumerate() {
+        let weight = weights.iter().copied().min_by_key(|w| (*w as i32 - 600).abs()).unwrap_or(400);
+        row(&mut svg, 132.0 + i as f64 * 34.0, family, weight, current == first + i + 1);
+    }
+    svg += "</svg>";
+    Stage { w, h, svg, words, extras: Vec::new() }
+}
+
+/// A stage's pixels with its words set in the typefaces they name (the
+/// typefaces' list).
+pub fn pixels_set(st: &Stage, scale: f32) -> slint::SharedPixelBuffer<slint::Rgba8Pixel> {
+    use resvg::tiny_skia::{Pixmap, Transform};
+    let (pw, ph) = (((st.w * scale).round() as u32).max(1), ((st.h * scale).round() as u32).max(1));
+    let mut pix = Pixmap::new(pw, ph).expect("the stage's size");
+    let opt = resvg::usvg::Options { fontdb: ectodeck_draw::print::faces(), ..Default::default() };
+    if let Ok(tree) = resvg::usvg::Tree::from_str(&st.svg, &opt) {
+        resvg::render(&tree, Transform::from_scale(pw as f32 / st.w, ph as f32 / st.h), &mut pix.as_mut());
+    }
+    let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(pw, ph);
+    buf.make_mut_bytes().copy_from_slice(pix.data());
+    buf
 }
 
 /// Where the switch pad has the key: its cap's middle on the pad, and the
@@ -1199,16 +1393,16 @@ mod tests {
                 let mut l = light.clone();
                 l[a][b] = serde_json::json!(x);
                 let v = Values::of(&l, Geometry::default());
-                for section in 0..4 {
+                for section in [0, 1, 3, 4] {
                     let lens = Lens::of(section);
-                    let places = places(&v, lens, w, h, super::super::SECTIONS[section].3.len(), 0.0, None);
+                    let places = places(&v, lens, w, h, super::super::SECTIONS[section].3.len(), 0.0, None, None);
                     let ids = &super::super::sliders_of(section, &l);
                     assert_eq!(places.len(), ids.len(), "{lens:?}: a place for each of its sliders");
                     assert!(ids.iter().all(|i| places.iter().any(|p| p.i == *i)), "{lens:?}: its own sliders");
                     for p in &places {
                         assert!(p.y - ATTACH >= 0.0 && p.y - ATTACH + ctrl_h(p.i) <= h, "{lens:?}: slider {} inside the stage at {}", p.i, p.y);
                     }
-                    let st = stage(&v, lens, w, h, &places, Some(ids[0]));
+                    let st = stage(&v, lens, w, h, &places, Some(ids[0]), None);
                     resvg::usvg::Tree::from_str(&st.svg, &resvg::usvg::Options::default()).expect("a stage reads as an SVG");
                     for word in &st.words {
                         assert!(word.x >= 0.0 && word.x + text::width(400, 11.5, &word.text) <= w + 0.5 && word.y <= h, "{} inside the stage", word.text);
@@ -1223,10 +1417,10 @@ mod tests {
     fn the_sliders_stand_still() {
         let light = core_light();
         let v = Values::of(&light, Geometry::default());
-        let places = places(&v, Lens::Led, 1232.0, 572.0, 2, 0.0, None);
+        let places = places(&v, Lens::Led, 1232.0, 572.0, 2, 0.0, None, None);
         let mut moved = light.clone();
         moved["switches"]["top"] = serde_json::json!(9.5);
-        let st = stage(&Values::of(&moved, Geometry::default()), Lens::Led, 1232.0, 572.0, &places, None);
+        let st = stage(&Values::of(&moved, Geometry::default()), Lens::Led, 1232.0, 572.0, &places, None, None);
         let lines = st.svg.matches(r##"stroke="#737373""##).count();
         assert_eq!(lines, places.len(), "a line from each slider, from where it stood");
     }

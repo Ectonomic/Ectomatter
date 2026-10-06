@@ -1140,6 +1140,15 @@ component CellView inherits Rectangle {
     if root.c.kind == 10: Rectangle {
         border-radius: 8px;
         background: root.c.style == 1 ? #1c1c1c : #1f1f1f;
+        if root.c.style == 2 && input.text == "": Text {
+            x: 10px;
+            height: parent.height;
+            text: "Find a typeface";
+            font-family: "Geist";
+            font-size: 13.5px;
+            color: #737373;
+            vertical-alignment: center;
+        }
         if root.c.style == 1 && input.text == "": Text {
             x: 11px;
             height: parent.height;
@@ -3542,6 +3551,12 @@ export component LabWindow inherits Window {
     callback pad(int, float, float);
     callback hovered(int, bool);
     callback focused(int, bool);
+    // the typefaces' list's place on the page (none while it is shut), and the wheel turning it
+    in property <length> list-x;
+    in property <length> list-y;
+    in property <length> list-w;
+    in property <length> list-h;
+    callback list-scroll(float);
 
     background: transparent;
     default-font-family: "Geist";
@@ -3626,12 +3641,24 @@ export component LabWindow inherits Window {
             height: s.h;
             source: s.image;
         }
+        // the typefaces' list, open: turned by the wheel anywhere on it
+        TouchArea {
+            x: root.list-x;
+            y: root.list-y;
+            width: root.list-w;
+            height: root.list-h;
+            scroll-event(e) => {
+                root.list-scroll(e.delta-y / 1px);
+                accept
+            }
+        }
         // the words on the stage, and the section's choices over it
         for c in root.over: CellView {
             c: c;
             pick(id, i, x, y, h) => { root.pick(id, i); }
             hovered(id, on) => { root.hovered(id, on); }
             pad(id, x, y) => { root.pad(id, x, y); }
+            typed(id, t) => { root.entered(id, t); }
         }
         for r in root.rows: LabControl {
             r: r;
