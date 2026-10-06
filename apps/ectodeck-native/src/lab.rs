@@ -114,7 +114,7 @@ struct Param {
 
 const PARAMS: [Param; 27] = [
     Param { path: ("switches", "led"), label: "North of centre", lo: -7.0, hi: 7.0, step: 0.05, unit: Unit::North, def: 5.08, note: "Where each key's LED sits under its cap, from the switch's centre toward the top of the key; below 0, toward the bottom, as on a keyboard whose LEDs face south. It goes as far as the switch's edge, so Switch width sets how far the slider reaches." },
-    Param { path: ("switches", "lumens"), label: "LED output", lo: 0.05, hi: 10.0, step: 0.01, unit: Unit::Lumens, def: 1.0, note: "The light each LED gives off at full white, in lumens: about 1 for a keyboard's RGB LED. Everything the LEDs light is as bright as the light that reaches it makes it, up to Peak nits (Settings › HDR). A colour gives off its own share, as an LED does: a red about a fifth." },
+    Param { path: ("switches", "lumens"), label: "LED output", lo: 0.05, hi: 10.0, step: 0.01, unit: Unit::Lumens, def: 1.0, note: "The light each LED gives off at full white, in lumens: about 1 for a keyboard's RGB LED. Everything the LEDs light is as bright as the light that reaches it makes it; what is brighter than the screen shows (Peak nits, Settings › HDR) is drawn at the most it shows, in its own colour. A colour gives off its own share, as an LED does: a red about a fifth." },
     Param { path: ("switches", "beam"), label: "Beam", lo: 1.0, hi: 200.0, step: 0.5, unit: Unit::Number, def: 24.0, note: "How tight the LED's beam out of the top of the switch is. Higher keeps it to a small bright spot on the legend over the LED; lower spreads it across the cap's top and onto the inside of its skirt." },
     Param { path: ("switches", "scattered"), label: "Scattered", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.7, note: "The share of the LED's light a clear housing scatters, glowing with it all over, rather than sending up in the beam. More lights the legend more evenly, and the deck and the inside of the cap more; less leaves more for the spot over the LED." },
     Param { path: ("switches", "sides"), label: "Through its sides", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.25, note: "The share of the housing's glow that leaves through its sides rather than its top. Its sides light the deck round the switch, out under the skirt; its top lights the back of the legend evenly, its parts far from the LED as well." },
@@ -1364,14 +1364,12 @@ impl LabPage {
         }
     }
 
-    /// What holds the legends back, if anything: only Peak nits does; the
-    /// colour's clean limit is only told.
+    /// What holds the legends back, if anything: the screen, past the most
+    /// it shows in their colour.
     fn legend_note(&self) -> Option<String> {
         let r = self.readout;
-        if r.legend >= r.peak - 0.5 && r.peak > 0.0 {
-            Some(format!("Held at Peak nits, {:.0} (Settings › HDR).", r.peak))
-        } else if r.legend > r.reach + 0.5 && r.reach > 0.0 {
-            Some(format!("This colour shows cleanly up to {:.0} nits. Above that the screen clips its red, so the brightest parts turn yellower.", r.reach))
+        if r.legend > r.reach + 0.5 && r.reach > 0.0 {
+            Some(format!("The screen shows this colour up to {:.0} nits (Peak nits {:.0}, Settings › HDR): the legends brighter than that are drawn at it, in their own colour.", r.reach, r.peak))
         } else {
             None
         }
