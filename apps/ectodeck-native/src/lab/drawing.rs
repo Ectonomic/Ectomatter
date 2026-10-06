@@ -252,7 +252,7 @@ impl Values {
             lcd_field: raw(light, ("display", "background")),
             lcd_dot: raw(light, ("display", "dot")),
             lcd_glass: raw(light, ("display", "glass")),
-            nits: p.nits as f64,
+            nits: p.lumens as f64,
             mm,
             g,
             place: (raw(light, ("place", "east")), raw(light, ("place", "north"))),
@@ -707,19 +707,19 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
         Lens::Led => {
             // the light on the back of the cap's top, along it, drawn over it
             // with its scale: the LED's own light, before what bounces inside
-            // the cap; its top is Brightness
+            // the cap; its top as bright as LED output makes it
             let base = pz(tz) - 12.0;
             let tall = 74.0f64.min(pz(tz) - pz(z_hi) - 40.0);
             let pts: Vec<Pt> = face.iter().zip(&light).map(|(&x, &l)| (px(x), base - tall * l / most)).collect();
             let (x0, x1) = (pts[0].0, pts[pts.len() - 1].0);
-            s.stroke(&format!("M{x0:.1} {:.1} L{x1:.1} {:.1}", base - tall, base - tall), if white("Brightness") { WHITE } else { "#333333" }, 1.0);
+            s.stroke(&format!("M{x0:.1} {:.1} L{x1:.1} {:.1}", base - tall, base - tall), if white("LED output") { WHITE } else { "#333333" }, 1.0);
             s.stroke(&format!("M{x0:.1} {base:.1} L{x1:.1} {base:.1}"), "#3a3a3a", 1.0);
             let mut area = poly(&pts, false);
             let _ = write!(area, " L{x1:.1} {base:.1} L{x0:.1} {base:.1} Z");
             s.path(&area, AMBER, "none", 1.0, 0.1);
             s.stroke(&poly(&pts, false), AMBER, 1.6);
-            let (n, u) = super::reads(&PARAMS[slider("Brightness")], v.nits);
-            s.text(x0 - 8.0, base - tall + 4.0, &format!("{n} {u}"), if white("Brightness") { WHITE_WORD } else { QUIET_WORD }, 1.0);
+            let (n, u) = super::reads(&PARAMS[slider("LED output")], v.nits);
+            s.text(x0 - 8.0, base - tall + 4.0, &format!("{n} {u}"), if white("LED output") { WHITE_WORD } else { QUIET_WORD }, 1.0);
             s.text(x0 - 8.0, base + 4.0, "0", QUIET_WORD, 1.0);
             let peak = pts.iter().zip(&light).fold((0.0, x0), |a, (q, &l)| if l > a.0 { (l, q.0) } else { a }).1;
             // (on the right, clear of Brightness's line down to the top's end)
@@ -730,7 +730,7 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
                 1 => s.text(end, base - tall - 7.0, "over its legend", FAINT_WORD, anchor),
                 _ => s.text(end, base - tall - 7.0, "over its two legends", FAINT_WORD, anchor),
             }
-            labels.push(Label { drop: true, ..Label::new(false, (x1, base - tall), "Brightness") });
+            labels.push(Label { drop: true, ..Label::new(false, (x1, base - tall), "LED output") });
             // the switch's centre line, and the LED north of it
             s.stroke(&poly(&[p(sl.centre, 0.15), p(sl.centre, hz + 0.6)], false), "#5c5c5c", 1.0);
             let y_nc = if hz > 2.6 { hz - 0.6 } else { hz + 0.7 };

@@ -209,9 +209,9 @@ pub struct Physics {
     /// middle (a key's own "place")
     pub led: f32,
     pub place: [f32; 2],
-    /// the LEDs' strength, in nits: how bright the brightest legend would be,
-    /// every key lit white at full, if it let all their light through
-    pub nits: f32,
+    /// the light each LED gives off at full white, in lumens: what the
+    /// simulation's light, followed as shares of it, is made real by
+    pub lumens: f32,
     /// the switch's housing: black with the LED through a slot in it, or clear
     pub switch: Switch,
     /// the switch's housing: how high its top is, where the beam leaves it,
@@ -276,7 +276,7 @@ impl Physics {
             // (5.08 mm north, as Cherry's and Kailh's switches have it)
             led: (sw["led"].as_f64().unwrap_or(5.08) * scale) as f32,
             place: [f(&light["place"]["east"], 0.0), f(&light["place"]["north"], 0.0)],
-            nits: f(&light["brightness"], 2000.0).max(0.0),
+            lumens: f(&sw["lumens"], 1.0).max(0.0),
             switch: Switch::named(sw["kind"].as_str()),
             switch_top: f(&sw["top"], 6.5).clamp(0.05, top - 0.1),
             switch_width: f(&sw["width"], 12.0).clamp(1.0, 14.0),
@@ -308,7 +308,7 @@ impl Physics {
 
     /// Whether the light falls as it did: everything but its overall brightness.
     pub fn same_paths(&self, o: &Physics) -> bool {
-        Physics { nits: 0.0, ..*self } == Physics { nits: 0.0, ..*o }
+        Physics { lumens: 0.0, ..*self } == Physics { lumens: 0.0, ..*o }
     }
 
     /// How far the switch's edge is from its centre, in the art's units:
@@ -1981,7 +1981,7 @@ mod tests {
     fn scene() -> (Board, Scene, Physics) {
         let tree = Tree::from_str(&crate::fixture::svg(), &usvg::Options::default()).unwrap();
         let mut device: Value = crate::jsonc::parse(&crate::fixture::device()).unwrap();
-        device["light"] = serde_json::json!({ "scale": 1.38, "brightness": 600, "switches": { "led": 4.5 / 1.38 }, "wells": { "art": "mask_1" } });
+        device["light"] = serde_json::json!({ "scale": 1.38, "switches": { "led": 4.5 / 1.38 }, "wells": { "art": "mask_1" } });
         let b = Board::new(&tree, &device, [0x20, 0x20, 0x20], 1264, 506).unwrap();
         let scene = Scene::of(&b);
         (b, scene, Physics::from(&device["light"]))
@@ -2250,7 +2250,7 @@ mod tests {
     /// key `k` in the simulation's order of the caps.
     fn own_setup(b: &Board, k: usize, own: Value) -> (Setup, Setup) {
         let ids: Vec<String> = b.cap_shapes.iter().map(|c| c.id.clone()).collect();
-        let mut light = serde_json::json!({ "scale": 1.38, "brightness": 600, "switches": { "kind": "led-slot", "led": 4.5 / 1.38, "beam": 3.0 }, "wells": { "art": "mask_1" } });
+        let mut light = serde_json::json!({ "scale": 1.38, "switches": { "kind": "led-slot", "led": 4.5 / 1.38, "beam": 3.0 }, "wells": { "art": "mask_1" } });
         let all = Setup::from(&light, &ids);
         light["keys"] = serde_json::json!({ ids[k].clone(): own });
         (all, Setup::from(&light, &ids))
@@ -2301,7 +2301,7 @@ mod tests {
         let at = |label: &str| b.cap_shapes.iter().position(|c| c.label == label).unwrap_or_else(|| panic!("{label} stands in the light"));
         let (gpc, stop) = (at("Game mode button"), at("Media stop"));
         assert!(gpc >= scene.keys.len() && stop >= scene.keys.len(), "they have no light of their own");
-        let mut light = serde_json::json!({ "scale": 1.38, "brightness": 600, "switches": { "kind": "led-slot", "led": 4.5 / 1.38, "beam": 3.0 }, "caps": { "kind": "pudding", "plastic": 0.3, "black": 0.4, "milky": 1.0 }, "wells": { "art": "mask_1" } });
+        let mut light = serde_json::json!({ "scale": 1.38, "switches": { "kind": "led-slot", "led": 4.5 / 1.38, "beam": 3.0 }, "caps": { "kind": "pudding", "plastic": 0.3, "black": 0.4, "milky": 1.0 }, "wells": { "art": "mask_1" } });
         for id in [&ids[gpc], &ids[stop]] {
             light["keys"][id.as_str()] = serde_json::json!({ "caps": { "kind": "shine-through", "foot": 2.0, "top": 4.0 } });
         }

@@ -214,8 +214,8 @@ mod kept_tests {
         assert!(kept.get(&make(1.0)).is_some(), "the saved tuning's stays");
         assert!(kept.get(&make(2.0)).is_none() && kept.get(&make(3.0)).is_none(), "the oldest others go");
         assert!(kept.get(&make(6.0)).is_some_and(|s| Kept::of(&s, &make(6.0))), "the newest found");
-        // a brightness of its own is the same picture
-        assert!(kept.get(&Setup::alike(Physics { nits: 123.0, ..make(6.0).all })).is_some());
+        // an LED output of its own is the same picture
+        assert!(kept.get(&Setup::alike(Physics { lumens: 1.23, ..make(6.0).all })).is_some());
     }
 }
 

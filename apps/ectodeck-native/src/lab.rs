@@ -5,8 +5,8 @@
 //! lab's sliders are the device's physical make, each in the units that
 //! mean something: where the LED sits and how its light leaves the switch,
 //! the caps' heights and how much light their plastic gives back or lets
-//! through, the wells' depth and finish; and the light's brightness, which
-//! everything else follows. The device in the main window takes every change
+//! through, the wells' depth and finish; and how much light each LED gives
+//! off, in lumens, which everything else is lit by. The device in the main window takes every change
 //! at once, its light clearing as the simulation runs. Save writes the
 //! tuning into the device's core, which Ectodeck reads when it runs from its
 //! source: each value that changed in its place in the core's file, the rest
@@ -75,6 +75,8 @@ pub enum Ask {
 enum Unit {
     /// luminance, in nits
     Nits,
+    /// light given off, in lumens
+    Lumens,
     /// how far north of its switch's middle the LED sits, in millimetres,
     /// below 0 south
     North,
@@ -112,7 +114,7 @@ struct Param {
 
 const PARAMS: [Param; 27] = [
     Param { path: ("switches", "led"), label: "North of centre", lo: -7.0, hi: 7.0, step: 0.05, unit: Unit::North, def: 5.08, note: "Where each key's LED sits under its cap, from the switch's centre toward the top of the key; below 0, toward the bottom, as on a keyboard whose LEDs face south. It goes as far as the switch's edge, so Switch width sets how far the slider reaches." },
-    Param { path: ("brightness", ""), label: "Brightness", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, def: 2000.0, note: "How strong the LEDs are, with every key lit white at full: how bright a legend would be if it let all their light through. The legends show their share of it (Legends let through), up to Peak nits (Settings › HDR); everything else the LEDs light follows this alone. A colour gives off its own share, as an LED does: a red about a fifth." },
+    Param { path: ("switches", "lumens"), label: "LED output", lo: 0.05, hi: 10.0, step: 0.01, unit: Unit::Lumens, def: 1.0, note: "The light each LED gives off at full white, in lumens: about 1 for a keyboard's RGB LED. Everything the LEDs light is as bright as the light that reaches it makes it, up to Peak nits (Settings › HDR). A colour gives off its own share, as an LED does: a red about a fifth." },
     Param { path: ("switches", "beam"), label: "Beam", lo: 1.0, hi: 200.0, step: 0.5, unit: Unit::Number, def: 24.0, note: "How tight the LED's beam out of the top of the switch is. Higher keeps it to a small bright spot on the legend over the LED; lower spreads it across the cap's top and onto the inside of its skirt." },
     Param { path: ("switches", "scattered"), label: "Scattered", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.7, note: "The share of the LED's light a clear housing scatters, glowing with it all over, rather than sending up in the beam. More lights the legend more evenly, and the deck and the inside of the cap more; less leaves more for the spot over the LED." },
     Param { path: ("switches", "sides"), label: "Through its sides", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.25, note: "The share of the housing's glow that leaves through its sides rather than its top. Its sides light the deck round the switch, out under the skirt; its top lights the back of the legend evenly, its parts far from the LED as well." },
@@ -252,7 +254,7 @@ impl Param {
     fn scale(&self) -> Scale {
         match self.unit {
             Unit::Nits => Scale::Seen,
-            Unit::Number | Unit::Reach if self.lo > 0.0 => Scale::Ratio,
+            Unit::Number | Unit::Reach | Unit::Lumens if self.lo > 0.0 => Scale::Ratio,
             _ => Scale::Even,
         }
     }
@@ -298,6 +300,7 @@ fn reads(p: &Param, v: f64) -> (String, String) {
     match p.unit {
         // to three significant figures, as its slider keeps it
         Unit::Nits => (trim(if v >= 100.0 { format!("{v:.0}") } else if v >= 10.0 { format!("{v:.1}") } else if v >= 1.0 { format!("{v:.2}") } else { format!("{v:.3}") }), "nits".into()),
+        Unit::Lumens => (trim(if v >= 10.0 { format!("{v:.1}") } else { format!("{v:.2}") }), "lumens".into()),
         // the LED's place from the switch's middle, and which way
         Unit::North => (trim(format!("{:.2}", v.abs())), if v.abs() < 0.005 { "centred".into() } else if v > 0.0 { "mm north".into() } else { "mm south".into() }),
         Unit::Mm => (trim(format!("{v:.1}")), "mm".into()),
@@ -435,7 +438,7 @@ pub struct LabPage {
 }
 
 /// The value at a path in a light: a section's value, or the light's own
-/// where the path names no section ("brightness").
+/// where the path names no section.
 fn at<'a>(light: &'a Value, (a, b): (&str, &str)) -> &'a Value {
     if b.is_empty() { &light[a] } else { &light[a][b] }
 }
@@ -816,7 +819,7 @@ impl LabPage {
                                 let v = match p.unit {
                                     Unit::Fraction => (v / 100.0).clamp(p.lo.max(0.0), p.hi.min(1.0)),
                                     Unit::Mm if p.path == ("switches", "width") => v.clamp(p.lo, p.hi),
-                                    Unit::Nits | Unit::Mm => v.max(0.0),
+                                    Unit::Nits | Unit::Mm | Unit::Lumens => v.max(0.0),
                                     Unit::Reach => v.max(p.lo),
                                     // on the side it is on unless typed below 0 or "south"/"north"
                                     Unit::North => {
@@ -1059,7 +1062,7 @@ impl LabPage {
     }
 
     /// The sliders the section shows: those that tune the light worked on;
-    /// for one key, none of what is every key's (the brightness) nor of a
+    /// for one key, none of what is every key's (the LEDs' output) nor of a
     /// legend it does not have, and its switch's place.
     fn sliders(&self) -> Vec<usize> {
         let mut ids = sliders_of(self.section, &self.work());
@@ -1069,7 +1072,7 @@ impl LabPage {
             return ids;
         }
         if let Some(k) = self.key() {
-            ids.retain(|&i| PARAMS[i].path != ("brightness", "") && (k.legend || !matches!(PARAMS[i].path, ("caps", "legends") | ("legends", "unlit"))));
+            ids.retain(|&i| PARAMS[i].path != ("switches", "lumens") && (k.legend || !matches!(PARAMS[i].path, ("caps", "legends") | ("legends", "unlit"))));
             if self.section == 0 && k.lit {
                 ids.extend([PLACE_E, PLACE_N]);
             }
@@ -1258,16 +1261,12 @@ impl LabPage {
     }
 
     /// A value's slider range: a brightness from 0 to Peak nits (Settings ›
-    /// HDR), since nothing above it shows (the LEDs' Brightness to as strong
-    /// as puts the legends, with the share they let through, at Peak nits);
-    /// the LED from one edge of its switch to the other, as wide as Switch
-    /// width has it; the rest their own.
+    /// HDR), since nothing above it shows; the LED from one edge of its
+    /// switch to the other, as wide as Switch width has it; the rest their own.
     fn range(&self, i: usize) -> (f64, f64) {
         let p = &PARAMS[i];
         if p.unit == Unit::Nits {
-            let peak = if self.readout.peak > 0.0 { self.readout.peak } else { 1000.0 };
-            let share = if p.path == ("brightness", "") { (Physics::from(&self.work()).legends as f64).max(0.01) } else { 1.0 };
-            (0.0, peak / share)
+            (0.0, if self.readout.peak > 0.0 { self.readout.peak } else { 1000.0 })
         } else if p.unit == Unit::North {
             let edge = Physics::from(&self.work()).switch_width as f64 / 2.0;
             (-edge, edge)
@@ -1369,7 +1368,7 @@ impl LabPage {
     /// colour's clean limit is only told.
     fn legend_note(&self) -> Option<String> {
         let r = self.readout;
-        if self.value(1) * Physics::from(&self.work()).legends as f64 > r.peak + 0.5 && r.peak > 0.0 {
+        if r.legend >= r.peak - 0.5 && r.peak > 0.0 {
             Some(format!("Held at Peak nits, {:.0} (Settings › HDR).", r.peak))
         } else if r.legend > r.reach + 0.5 && r.reach > 0.0 {
             Some(format!("This colour shows cleanly up to {:.0} nits. Above that the screen clips its red, so the brightest parts turn yellower.", r.reach))
@@ -1773,7 +1772,7 @@ mod tests {
     /// going from one kind of cap to another and back keeps what was tuned.
     #[test]
     fn the_choices_set_the_light() {
-        let mut light = json!({ "brightness": 600.0, "switches": { "led": 3.3 }, "caps": { "legends": 0.3 } });
+        let mut light = json!({ "switches": { "led": 3.3, "lumens": 1.0 }, "caps": { "legends": 0.3 } });
         for (option, switch) in [(1, Switch::ClearTop), (2, Switch::Clear), (0, Switch::Slot)] {
             choose(&mut light, 0, option);
             assert_eq!(chosen(0, &light), option);
@@ -1815,7 +1814,7 @@ mod tests {
     /// light as it was.
     #[test]
     fn a_key_s_own_values_come_and_go() {
-        let light = json!({ "brightness": 600.0, "switches": { "led": 3.3 }, "caps": { "kind": "pudding", "black": 0.4 } });
+        let light = json!({ "switches": { "led": 3.3, "lumens": 1.0 }, "caps": { "kind": "pudding", "black": 0.4 } });
         let mut l = light.clone();
         own_put(&mut l, "space", ("caps", "kind"), json!("shine-through"));
         own_put(&mut l, "enter", ("place", "north"), json!(9.5));
@@ -1907,7 +1906,7 @@ mod tests {
         assert_eq!(said(p("Legends let through"), 0.3), "30%");
         assert_eq!(said(p("Cap's top"), 3.0), "3 mm");
         assert_eq!(said(p("Switch north–south"), 0.0), "centred");
-        assert_eq!(said(p("Brightness"), 1000.0), "1000 nits");
+        assert_eq!(said(p("LED output"), 1.056), "1.06 lumens");
     }
 
     /// Save changes the core's file only where the tuning differs from it,
