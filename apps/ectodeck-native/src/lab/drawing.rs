@@ -788,7 +788,7 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
             labels.push(Label::new(true, p(sl.foot0 - 0.55, tz * 0.62), "Cap's top"));
             if let Some(&(at, wide)) = v.g.legends(false).first() {
                 let mid = sl.mid + at;
-                labels.push(Label { drop: true, ..Label::new(true, p(mid - wide / 2.0 + 0.9, tz), "Legends let through") });
+                labels.push(Label { drop: true, ..Label::new(true, p(mid - wide / 2.0 + 0.9, tz), "Legend opacity") });
                 labels.push(Label { flat: true, ..Label::new(false, p(mid + wide / 2.0 - 0.4, tz), "LED off") });
             }
             // light out of a clear switch's side and under the skirt's foot onto the deck

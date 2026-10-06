@@ -123,7 +123,7 @@ const PARAMS: [Param; 27] = [
     Param { path: ("switches", "top"), label: "Switch top", lo: 0.1, hi: 14.0, step: 0.1, unit: Unit::Mm, def: 6.5, note: "How high above the deck the switch's housing stands, where the beam leaves it: 5.7 mm on Cherry-style switches. Nearer the cap's top makes the spot on the legend smaller and brighter." },
     Param { path: ("caps", "foot"), label: "Skirt's foot", lo: 0.0, hi: 12.0, step: 0.1, unit: Unit::Mm, def: 5.0, note: "How high above the deck the foot of each cap's skirt is: the gap the light gets out under it by." },
     Param { path: ("caps", "top"), label: "Cap's top", lo: 1.0, hi: 25.0, step: 0.1, unit: Unit::Mm, def: 14.0, note: "How high above the deck each cap's top is, where the legend is." },
-    Param { path: ("caps", "legends"), label: "Legends let through", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.3, note: "The share of the light on the back of a cap's top that its legend lets through. Less dims the legends; the rest of the keyboard's light stays as it is." },
+    Param { path: ("legends", "opacity"), label: "Legend opacity", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.7, note: "How much of the light on the back of a cap's top its legend holds back. At 0% the legend lets all of it through; at 100% none, as dark as the cap's black." },
     Param { path: ("caps", "inside"), label: "Inside", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.5, note: "The share of the light the inside of a cap gives back. More of it bounces about inside the cap, and more gets out under the skirt onto the deck round it." },
     Param { path: ("caps", "outside"), label: "Outside", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.18, note: "The share of the light the outside of a cap's skirt gives back: what the skirts show of the light round them." },
     Param { path: ("legends", "unlit"), label: "LED off", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.15, note: "How bright a legend looks with its LED off (the dimmer at 0%, or a key the lighting leaves dark), as a share of the grey the art prints it in. A backlit legend with no light behind it is dark." },
@@ -224,7 +224,7 @@ fn choose(light: &mut Value, choice: usize, option: usize) {
             // stay, so going from one kind to another and back keeps them.
             let caps = [Caps::ShineThrough, Caps::Pudding, Caps::Translucent][option.min(2)];
             light["caps"]["kind"] = json!(caps.name());
-            let plastic = get(light, ("caps", "legends")).unwrap_or(0.3);
+            let plastic = 1.0 - get(light, ("legends", "opacity")).unwrap_or(0.7);
             if caps != Caps::ShineThrough && get(light, ("caps", "plastic")).unwrap_or(0.0) <= 0.0 {
                 set(light, ("caps", "plastic"), plastic);
             }
@@ -1072,7 +1072,7 @@ impl LabPage {
             return ids;
         }
         if let Some(k) = self.key() {
-            ids.retain(|&i| PARAMS[i].path != ("switches", "lumens") && (k.legend || !matches!(PARAMS[i].path, ("caps", "legends") | ("legends", "unlit"))));
+            ids.retain(|&i| PARAMS[i].path != ("switches", "lumens") && (k.legend || !matches!(PARAMS[i].path, ("legends", "opacity" | "unlit"))));
             if self.section == 0 && k.lit {
                 ids.extend([PLACE_E, PLACE_N]);
             }
@@ -1772,7 +1772,7 @@ mod tests {
     /// going from one kind of cap to another and back keeps what was tuned.
     #[test]
     fn the_choices_set_the_light() {
-        let mut light = json!({ "switches": { "led": 3.3, "lumens": 1.0 }, "caps": { "legends": 0.3 } });
+        let mut light = json!({ "switches": { "led": 3.3, "lumens": 1.0 }, "legends": { "opacity": 0.7 } });
         for (option, switch) in [(1, Switch::ClearTop), (2, Switch::Clear), (0, Switch::Slot)] {
             choose(&mut light, 0, option);
             assert_eq!(chosen(0, &light), option);
@@ -1836,7 +1836,7 @@ mod tests {
     /// kind does, so nothing of its own is left that the page cannot show.
     #[test]
     fn a_key_s_own_setup_holds_only_what_differs() {
-        let light = json!({ "switches": { "kind": "led-slot", "beam": 3.0 }, "caps": { "kind": "shine-through", "legends": 0.3, "plastic": 0.0, "black": 1.0 } });
+        let light = json!({ "switches": { "kind": "led-slot", "beam": 3.0 }, "caps": { "kind": "shine-through", "plastic": 0.0, "black": 1.0 }, "legends": { "opacity": 0.7 } });
         let mut l = light.clone();
         own_set(&mut l, "enter", ("place", "north"), json!(-0.9));
         own_set(&mut l, "enter", ("place", "east"), json!(0.0));
@@ -1903,7 +1903,7 @@ mod tests {
         let p = |label: &str| PARAMS.iter().find(|p| p.label == label).unwrap();
         assert_eq!(said(p("Beam"), 3.0), "3");
         assert_eq!(said(p("North of centre"), 5.08), "5.08 mm north");
-        assert_eq!(said(p("Legends let through"), 0.3), "30%");
+        assert_eq!(said(p("Legend opacity"), 0.7), "70%");
         assert_eq!(said(p("Cap's top"), 3.0), "3 mm");
         assert_eq!(said(p("Switch north–south"), 0.0), "centred");
         assert_eq!(said(p("LED output"), 1.056), "1.06 lumens");

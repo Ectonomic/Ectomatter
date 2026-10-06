@@ -1806,7 +1806,7 @@ mod tests {
         let scene = Scene::of(&b);
         let brightest = |b: &mut Board, legends: f64| {
             let mut l = device["light"].clone();
-            l["caps"]["legends"] = serde_json::json!(legends);
+            l["legends"]["opacity"] = serde_json::json!(1.0 - legends);
             b.set_sim(Arc::new(Simulator::settle(&scene, &Setup::alike(Physics::from(&l)), 4000)));
             let lit = b.compose(&white(b), 0, 254.0, 4000.0 / 254.0);
             let most = |code: u8| (0..b.w as usize * b.h as usize).filter(|&j| b.reads[j].code == code && b.caps[j * 4 + 3] < 0.01).map(|j| lum(&lit, b, ((j % b.w as usize) as i32, (j / b.w as usize) as i32))).fold(0f32, f32::max);

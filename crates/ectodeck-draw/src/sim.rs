@@ -286,7 +286,8 @@ impl Physics {
             sides: f(&sw["sides"], 0.25).clamp(0.0, 1.0),
             gap: f(&cp["foot"], 5.0).clamp(0.0, top - 0.1),
             top,
-            legends: share(&cp["legends"], 0.3),
+            // (the legends' opacity: what they let through is the rest)
+            legends: (1.0 - f(&light["legends"]["opacity"], 0.7)).clamp(0.0, 1.0),
             caps,
             skirts,
             tops,
