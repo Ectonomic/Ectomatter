@@ -251,6 +251,9 @@ pub struct Board {
     /// the pixels on the caps' feet's edges, in order, with the light of what
     /// their other part shows
     edges: Vec<Edge>,
+    /// the pixels on the edges of the caps' faces, in order: the skirt's light
+    /// each shows, and how much of it, as much as the face leaves of the pixel
+    face_edges: Vec<FaceEdge>,
     /// each lit key's milky band, below where the black of its cap's top
     /// comes down its sides (a key's in its order), the other caps' bands
     /// (in theirs), how much of each pixel a band covers, and for how far
@@ -310,6 +313,15 @@ const MILKY_WHITE: [f32; 3] = [0x9e as f32 / 255.0, 0x9b as f32 / 255.0, 0x93 as
 struct Edge {
     j: u32,
     other: Read,
+}
+
+/// A pixel on the edge of a cap's face, part face and part skirt, and the
+/// skirt's light it takes beyond what its own read gives it: `share` of what
+/// `skirt` reads (below 0 where the pixel reads as skirt but is part face).
+struct FaceEdge {
+    j: u32,
+    skirt: Read,
+    share: f32,
 }
 
 /// Where a pixel reads the simulation's light, as sim::At has it, kept small:
@@ -803,6 +815,7 @@ impl Board {
             reads: Vec::new(),
             legend_reads: Vec::new(),
             edges: Vec::new(),
+            face_edges: Vec::new(),
             bands: Vec::new(),
             other_bands: Vec::new(),
             band_map: Vec::new(),
@@ -955,9 +968,61 @@ impl Board {
         near_edges.sort_unstable_by(|a, b| a.1.j.cmp(&b.1.j).then(a.0.total_cmp(&b.0)));
         near_edges.dedup_by_key(|e| e.1.j);
         let edges: Vec<Edge> = near_edges.into_iter().map(|e| e.1).collect();
+        // each cap's face's edge, a pixel either side of it: how much of each
+        // pixel there the face covers (sixteen points of it), and the skirt's
+        // light just outside the face for a pixel that reads as the face
+        let faces: Vec<([f32; 4], f32)> = board.keys.iter().filter(|k| k.foot.is_some()).map(|k| (k.face, k.round[1])).chain(board.others.iter().map(|o| (o.1, o.2[1]))).collect();
+        let mut face_edges: Vec<FaceEdge> = std::thread::scope(|sc| {
+            let per = faces.len().div_ceil(threads).max(1);
+            let jobs: Vec<_> = faces
+                .chunks(per)
+                .map(|faces| {
+                    sc.spawn(move || {
+                        let mut out = Vec::new();
+                        for &(f, r) in faces {
+                            let (x0, y0) = ((ox + ka * f[0] - 1.0).floor().max(0.0) as usize, (oy + ka * f[1] - 1.0).floor().max(0.0) as usize);
+                            let (x1, y1) = (((ox + ka * f[2] + 1.0).ceil().max(0.0) as usize).min(w), ((oy + ka * f[3] + 1.0).ceil().max(0.0) as usize).min(h));
+                            for y in y0..y1 {
+                                for x in x0..x1 {
+                                    let inside = (0..16).filter(|q| {
+                                        let (u, v) = (((x as f32 + (q % 4) as f32 * 0.25 + 0.125) - ox) / ka, ((y as f32 + (q / 4) as f32 * 0.25 + 0.125) - oy) / ka);
+                                        sim::in_rounded(f, r, u, v)
+                                    });
+                                    let covered = inside.count() as f32 / 16.0;
+                                    let j = y * w + x;
+                                    let a = board.caps[j * 4 + 3];
+                                    // (the simulation's cells are coarser than the pixels: a pixel
+                                    // by the edge can read as the face though the face covers none
+                                    // of it, or as the skirt though it covers all of it)
+                                    let edge = match read[j].code {
+                                        3 if covered >= 1.0 => None,
+                                        2 if covered <= 0.0 => None,
+                                        // read as the face: the skirt's light just outside it, for the rest of the pixel
+                                        3 => {
+                                            let (u, v) = board.unit(x, y);
+                                            let (_, n, p) = sim::from_foot(f, r, u, v);
+                                            s.at(p.0 + n.0 * EDGE_READ, p.1 + n.1 * EDGE_READ, Some(2)).map(|at| FaceEdge { j: j as u32, skirt: Read::of(Some(at), fw, cw), share: (1.0 - covered) * a })
+                                        }
+                                        // read as the skirt: none of its light on the face's part
+                                        2 => Some(FaceEdge { j: j as u32, skirt: read[j], share: -covered * a }),
+                                        _ => None,
+                                    };
+                                    out.extend(edge);
+                                }
+                            }
+                        }
+                        out
+                    })
+                })
+                .collect();
+            jobs.into_iter().flat_map(|j| j.join().expect("a share of the faces' edges")).collect()
+        });
+        face_edges.sort_unstable_by_key(|e| e.j);
+        face_edges.dedup_by_key(|e| e.j);
         self.reads = reads;
         self.legend_reads = legend_reads;
         self.edges = edges;
+        self.face_edges = face_edges;
     }
 
 
@@ -1285,6 +1350,23 @@ impl Board {
                 let i = (j - y0 * w) * 4;
                 for c in 0..3 {
                     out[i + c] += l[c] * share;
+                }
+            }
+        }
+        // The caps' faces' edges: each pixel there shows the skirt's light as
+        // much as the face leaves of it, on caps whose skirts are lit all the
+        // way up (a pudding cap's band keeps its own)
+        if let Some(k) = keys {
+            let from = self.face_edges.partition_point(|e| (e.j as usize) < y0 * w);
+            for e in self.face_edges[from..].iter().take_while(|e| (e.j as usize) < y1 * w) {
+                let j = e.j as usize;
+                if k.cap(self.cap_of[j]).0 > 0.0 {
+                    continue;
+                }
+                let l = k.at(&e.skirt.at(fw, cw));
+                let i = (j - y0 * w) * 4;
+                for c in 0..3 {
+                    out[i + c] = (out[i + c] + l[c] * e.share).max(0.0);
                 }
             }
         }
@@ -1828,6 +1910,31 @@ mod tests {
         let per_m = b.model.scale * 1000.0;
         let nits: f32 = std::env::var("ECTODECK_NITS").ok().and_then(|v| v.parse().ok()).unwrap_or(1000.0);
         eprintln!("lumens for {nits} nits: {:.4}", nits / (b.most.legend * per_m * per_m));
+    }
+
+    /// A cap's face's edge, with its skirt lit bright, is no darker than
+    /// both the skirt and the face beside it: the pixel there shows the
+    /// skirt's light for as much of it as the face leaves.
+    #[test]
+    fn a_face_s_edge_leaves_no_dark_line() {
+        let (_, device, mut b) = board();
+        let mut l = device["light"].clone();
+        l["caps"]["outside"] = serde_json::json!(0.98);
+        b.set_sim(Arc::new(Simulator::settle(&Scene::of(&b), &Setup::alike(Physics::from(&l)), 4000)));
+        let lit = b.compose(&white(&b), 0, 254.0, 4000.0 / 254.0);
+        let (ka, (ox, oy)) = (b.art_scale, b.art_offset);
+        let mut worst = f32::MAX;
+        for k in b.keys.iter().filter(|k| k.foot.is_some()) {
+            // down the middle of the face's top edge, and across the middle of its left
+            let (cx, cy) = (ox + ka * (k.face[0] + k.face[2]) / 2.0, oy + ka * (k.face[1] + k.face[3]) / 2.0);
+            let (top, left) = ((oy + ka * k.face[1]).floor() as i32, (ox + ka * k.face[0]).floor() as i32);
+            for (edge, before, after) in [((cx as i32, top), (cx as i32, top - 2), (cx as i32, top + 2)), ((left, cy as i32), (left - 2, cy as i32), (left + 2, cy as i32))] {
+                let (e, a, c) = (lum(&lit, &b, edge), lum(&lit, &b, before), lum(&lit, &b, after));
+                worst = worst.min(e / a.min(c).max(1e-6));
+            }
+        }
+        eprintln!("the darkest face edge against the darker of its neighbours: {worst:.3}");
+        assert!(worst > 0.6, "a dark line at a face's edge: {worst}");
     }
 
     /// The screen's peak holds back only what passes it: three times the
