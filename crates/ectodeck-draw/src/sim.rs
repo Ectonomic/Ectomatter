@@ -189,9 +189,9 @@ impl Setup {
 
 /// The share of the light that falls on a switch's black housing that it gives back.
 const HOUSING: f32 = 0.05;
-/// How far round a cap milky plastic carries the light it takes before it
-/// leaves, at its milkiest, in millimetres: the spread of where it comes out,
-/// each way round the cap's foot from where it went in.
+/// How far round a cap milky plastic carries the light it scatters before it
+/// leaves, in millimetres: the spread of where it comes out, each way round
+/// the cap's foot from where it went in.
 pub const MILKY: f32 = 20.0;
 
 /// The keyboard's physical make, from the core's light: its switches, caps
@@ -238,9 +238,12 @@ pub struct Physics {
     /// lets through what its plastic does); how far
     /// down its sides, as a share of the skirt, the black of its top comes,
     /// which lets none through; and how milky the plastic is, 0 clear to 1
-    /// milky. Milky plastic is one body under the black, the top's underside
-    /// and the skirt alike: the light it takes in anywhere it carries round
-    /// the cap (MILKY at its milkiest), to leave below the black.
+    /// milky: the share of the light it takes in that it scatters. Milky
+    /// plastic is one body under the black, the top's underside and the skirt
+    /// alike: what it scatters, taken in anywhere, it carries round the cap
+    /// (MILKY each way), to leave below the black; the rest it lets straight
+    /// through, as clear plastic does, out where it went in (from under the
+    /// top, into the black).
     pub caps: Caps,
     pub skirts: f32,
     pub tops: f32,
@@ -715,7 +718,7 @@ struct Stood {
     half: f32,
     spread: f32,
     /// how high the skirt lets light through, up to where the black comes down
-    /// it, and how far milky plastic spreads the light it takes
+    /// it, and how far milky plastic carries the light it scatters
     clear_to: f32,
     diffuse: f32,
     gap: f32,
@@ -729,7 +732,7 @@ impl Stood {
         let mm = p.units_per_mm;
         let p = p.simulated();
         let (gap, top) = (p.gap * mm, p.top * mm);
-        Stood { beam_from: p.switch_top * mm, half: p.switch_width * mm / 2.0, spread: p.glow_spread * mm, clear_to: gap + (1.0 - p.black) * (top - gap), diffuse: p.milky * MILKY * mm, gap, top, wall: p.wall * mm, p }
+        Stood { beam_from: p.switch_top * mm, half: p.switch_width * mm / 2.0, spread: p.glow_spread * mm, clear_to: gap + (1.0 - p.black) * (top - gap), diffuse: MILKY * mm, gap, top, wall: p.wall * mm, p }
     }
 }
 
@@ -1197,16 +1200,17 @@ impl Scene {
 
     /// Where light a cap's plastic takes in at `q` (on its skirt's side
     /// `side`, or the underside of its top) comes out of it, and on which side
-    /// of the skirt: clear plastic lets it out where it went in, through the
-    /// skirt below the black (from the top, it does not carry it to the
-    /// skirt); milky plastic carries it round the cap's foot, as far each way
-    /// as it spreads light, to anywhere up the skirt below the black.
-    fn exit(&self, ss: &Stoods, cap: u32, side: Option<u8>, q: [f32; 3], rng: &mut Rng) -> Option<([f32; 3], u8)> {
+    /// of the skirt. What it lets straight through comes out where it went
+    /// in, through the skirt below the black (from the top, it goes into the
+    /// black: it never reaches the skirt); what milky plastic scatters
+    /// (`scattered`) it carries round the cap's foot, as far each way as it
+    /// carries light, to anywhere up the skirt below the black.
+    fn exit(&self, ss: &Stoods, cap: u32, side: Option<u8>, q: [f32; 3], scattered: bool, rng: &mut Rng) -> Option<([f32; 3], u8)> {
         let (f, s) = (self.caps[cap as usize].foot, ss.cap(cap));
         if s.clear_to <= s.gap {
             return None;
         }
-        if s.diffuse <= 0.0 {
+        if !scattered {
             return side.filter(|_| q[2] <= s.clear_to).map(|side| (q, side));
         }
         // round the foot from its north-west corner: east along its north
@@ -1756,12 +1760,12 @@ fn even(b: &Boxed, counts: &[u32], class: &[u32], cover: &[f32], cw: usize, shar
 
 /// The light straight from key `k`'s LED at each cell of its box: on the
 /// back of its own cap's top (its beam, and its housing's glow), through its
-/// own cap's skirt where the plastic lets it (its beam, on the skirt's
-/// inside), on the deck of its own well and the chassis round the wells (its
-/// housing's glow, out under the skirt), and, from a switch whose top is
-/// below the skirt's foot, on the outsides of other caps' skirts (its beam,
-/// where nothing stands in the way); each as the surface there gives it back
-/// or lets it through.
+/// own cap's skirt where the plastic lets it straight through (its beam, on
+/// the skirt's inside), on the deck of its own well and the chassis round
+/// the wells (its housing's glow, out under the skirt), and, from a switch
+/// whose top is below the skirt's foot, on the outsides of other caps'
+/// skirts (its beam, where nothing stands in the way); each as the surface
+/// there gives it back or lets it through.
 fn straight(scene: &Scene, ss: &Stoods, k: usize, (lx, ly): (f32, f32), b: &mut Boxed) {
     let s = ss.cap(k as u32);
     let (p, body) = (&s.p, &ss.all.p);
@@ -1795,10 +1799,10 @@ fn straight(scene: &Scene, ss: &Stoods, k: usize, (lx, ly): (f32, f32), b: &mut 
                     let q = [x, y, s.top];
                     p.legends / pi * (beam(q, [0.0, 0.0, -1.0]) + housing.on_top(q))
                 }
-                // (milky plastic spreads it: its photons are followed instead)
-                Surface::Skirt(c, side, up) if c as usize == k && p.skirts > 0.0 && p.milky <= 0.0 => {
+                // (what milky plastic scatters it carries round the cap: those photons are followed instead)
+                Surface::Skirt(c, side, up) if c as usize == k && p.skirts > 0.0 && p.milky < 1.0 => {
                     let (q, n) = scene.skirt_point(ss, c, side, up, (x, y));
-                    let through = shared(p.cap_in, p.skirts).1;
+                    let through = shared(p.cap_in, p.skirts).1 * (1.0 - p.milky);
                     if q[2] <= s.clear_to { through / pi * beam(q, [-n[0], -n[1], -n[2]]) } else { 0.0 }
                 }
                 Surface::Skirt(c, side, up) if c as usize != k && s.beam_from < s.gap => {
@@ -1868,18 +1872,22 @@ fn bounce(scene: &Scene, ss: &Stoods, k: usize, (lx, ly): (f32, f32), into: &mut
             let exact = !first
                 && bounce == 0
                 && match what {
-                    // a milky skirt spreads the light it takes: followed photon by photon
-                    Struck::Inside(..) if pc.milky > 0.0 => false,
                     _ if !glow => true,
                     Struck::Under(c) => c as usize == k,
                     Struck::Deck => near && scene.well_of(q[0], q[1]) == own_well,
                     Struck::Chassis => near,
                     _ => false,
                 };
-            // where light the cap's plastic takes in from inside the cap would come out of it
+            // where light the cap's plastic takes in from inside the cap would
+            // come out of it: milky plastic scatters a photon as often as it
+            // is milky, and carries it round the cap; the rest it lets
+            // straight through (from under the top, into the black). (Drawn
+            // however milky it is, so a little more milky changes only the
+            // photons it scatters, not where every other one goes.)
+            let scattered = pc.skirts > 0.0 && matches!(what, Struck::Inside(..) | Struck::Under(_)) && rng.f() < pc.milky;
             let out = match what {
-                Struck::Inside(c, side) if pc.skirts > 0.0 => scene.exit(ss, c, Some(side), q, rng),
-                Struck::Under(c) if pc.skirts > 0.0 && pc.milky > 0.0 => scene.exit(ss, c, None, q, rng),
+                Struck::Inside(c, side) if pc.skirts > 0.0 => scene.exit(ss, c, Some(side), q, scattered, rng),
+                Struck::Under(c) if pc.skirts > 0.0 && scattered => scene.exit(ss, c, None, q, true, rng),
                 _ => None,
             };
             // what it gives back and lets through, and where it shows
@@ -1906,9 +1914,11 @@ fn bounce(scene: &Scene, ss: &Stoods, k: usize, (lx, ly): (f32, f32), into: &mut
                     (back, through)
                 }
                 Struck::Inside(c, _) => {
-                    // the light it lets through glows on the skirt's outside, where it comes out
+                    // the light it lets through glows on the skirt's outside, where it
+                    // comes out (straight through, worked out exactly for the beam's
+                    // first landing)
                     let (back, through) = shared(pc.cap_in, pc.skirts);
-                    if let (false, true, Some((e, side))) = (exact, through > 0.0, out) {
+                    if let (false, true, Some((e, side))) = (exact && !scattered, through > 0.0, out) {
                         let (at, stands) = scene.band(ss, c, side, e);
                         gather(2, at, through / pi * per_area * stands);
                     }
@@ -1918,7 +1928,8 @@ fn bounce(scene: &Scene, ss: &Stoods, k: usize, (lx, ly): (f32, f32), into: &mut
                     if !exact {
                         gather(3, (q[0], q[1]), pc.legends / pi * per_area);
                     }
-                    // milky plastic under the black top takes its share in, and carries it to the skirt
+                    // milky plastic under the black top takes its share in, and carries
+                    // what it scatters to the skirt
                     let carried = if out.is_some() { pc.skirts } else { 0.0 };
                     let all = pc.cap_in + pc.tops + carried;
                     let k = if all > 1.0 { 1.0 / all } else { 1.0 };

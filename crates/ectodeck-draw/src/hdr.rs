@@ -1392,10 +1392,11 @@ impl Board {
             }
         };
         // Pudding caps: each lit key's milky band below the black of its top,
-        // in place of the art's dark skirt, looking as the legends do (milky
-        // plastic is what they are): its own white dimmed by the core's unlit
-        // share, showing less as the light through it outshines it. Each cap
-        // by its own physics: a key with a cap of another kind has none.
+        // looking as the legends do (milky plastic is what they are): its own
+        // white dimmed by the core's unlit share, showing less as the light
+        // through it outshines it, in place of the art's dark skirt as far as
+        // the plastic is milky (clear plastic shows the dark inside the cap).
+        // Each cap by its own physics: a key with a cap of another kind has none.
         if let Some(k) = keys {
             // (a cap with no LED of its own is a lit key's with its LED off)
             let lit = self.keys.iter().zip(&self.bands).filter_map(|(key, s)| Some((s.as_ref()?, key.cap?, light(key.pos).map_or(0.0, Light::shine))));
@@ -1406,12 +1407,12 @@ impl Board {
                 if p.milky <= 0.0 || p.skirts <= 0.0 {
                     continue;
                 }
-                let white = MILKY_WHITE.map(|c| dec(c) * p.milky * self.model.legend_unlit * (1.0 - strength));
+                let white = MILKY_WHITE.map(|c| dec(c) * self.model.legend_unlit * (1.0 - strength));
                 each(s, &mut |d, _, a| {
                     let cap = &self.caps[(y0 * w + d) * 4..(y0 * w + d) * 4 + 4];
                     let ca = cap[3].max(1e-6);
                     for c in 0..3 {
-                        out[d * 4 + c] += a * (white[c] - dec(cap[c] / ca));
+                        out[d * 4 + c] += a * p.milky * (white[c] - dec(cap[c] / ca));
                     }
                 });
             }
@@ -1780,6 +1781,37 @@ mod tests {
         eprintln!("clear: band {clear_band:.3}, under the black {clear_black:.3}, south {clear_south:.3}; milky: band {milky_band:.3}, under the black {milky_black:.3}, south {milky_south:.3}");
         assert!(clear_band > 4.0 * clear_black && milky_band > 4.0 * milky_black, "the light gets out below the black, which is dark all round the top, its corners too");
         assert!(milky_south / milky_band > clear_south / clear_band, "milky plastic glows more evenly round the cap");
+    }
+
+    /// Milky plastic comes on as the slider moves, with no jump from clear:
+    /// a pudding cap's band, and the whole keyboard, are at 1% milky all but
+    /// as they are clear, and at 50% about halfway to their light at 100%.
+    #[test]
+    fn milky_plastic_comes_on_without_a_jump() {
+        let (_t, device, mut b) = board();
+        let scene = Scene::of(&b);
+        let pos = device["controls"].as_array().unwrap().iter().find(|c| c["label"] == "W").unwrap()["pos"].as_u64().unwrap() as u32;
+        let w = b.keys.iter().position(|k| k.pos == pos).unwrap();
+        let mut lit = |milky: f32| {
+            let mut l = device["light"].clone();
+            l["switches"]["kind"] = serde_json::json!("led-slot");
+            l["switches"]["beam"] = serde_json::json!(3.0);
+            l["caps"] = serde_json::json!({ "kind": "pudding", "opacity": 0.7, "black": 0.4, "milky": milky });
+            b.set_sim(Arc::new(Simulator::settle(&scene, &Setup::alike(Physics::from(&l)), 4000)));
+            let frame = b.compose(&white(&b), 0, 254.0, 1000.0 / 254.0);
+            let band = b.bands[w].as_ref().unwrap();
+            let on_band = (0..band.cover.len()).filter(|&i| band.cover[i] > 0.5).map(|i| lum(&frame, &b, (band.x + (i as u32 % band.w) as i32, band.y + (i as u32 / band.w) as i32))).sum::<f32>();
+            let all = (0..b.h as i32).flat_map(|y| (0..b.w as i32).map(move |x| (x, y))).map(|p| lum(&frame, &b, p)).sum::<f32>();
+            [on_band, all]
+        };
+        let [clear, one, half, milky] = [0.0, 0.01, 0.5, 1.0].map(|m| lit(m));
+        for (i, what) in ["W's band", "the keyboard"].iter().enumerate() {
+            let way = |v: [f32; 2]| (v[i] - clear[i]) / (milky[i] - clear[i]);
+            eprintln!("{what}: {:.1} clear, {:.1} at 1%, {:.1} at 50%, {:.1} milky; 1% is {:.1}% of the way, 50% is {:.0}%", clear[i], one[i], half[i], milky[i], 100.0 * way(one), 100.0 * way(half));
+            assert!(milky[i] > 1.05 * clear[i], "{what}: milky plastic carries the light from under the top to the skirt");
+            assert!(way(one).abs() < 0.05, "{what}: no jump at 1% milky");
+            assert!((0.25..0.75).contains(&way(half)), "{what}: halfway milky, about halfway lit");
+        }
     }
 
     /// A key with a cap of its own kind is drawn as its own: among pudding
