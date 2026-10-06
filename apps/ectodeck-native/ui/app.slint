@@ -3372,8 +3372,9 @@ export struct Sketch {
 
 // One of the Light lab's sliders, where it stands beside the drawing: its
 // name, its box and unit (a derived one, as a beam's angle, quieter), its
-// knob along its track, where it was saved, if it has moved from there, and
-// whether its value is other than the saved one, which its reset puts back
+// knob along its track, where it was saved, if it has moved from there,
+// whether its value is other than the saved one, which its reset puts back,
+// and, for a share, what each end of its track stands for
 export struct LabRow {
     x: length,
     y: length,
@@ -3388,6 +3389,8 @@ export struct LabRow {
     was: float,
     moved: bool,
     changed: bool,
+    low: string,
+    high: string,
 }
 
 // A slider of the Light lab: the whole row tells the page when the
@@ -3403,7 +3406,7 @@ component LabControl inherits Rectangle {
     x: root.r.x - 10px;
     y: root.r.y - 7px;
     width: root.r.w + 20px;
-    height: 62px;
+    height: root.r.low != "" ? 76px : 62px;
     border-radius: 10px;
     background: root.r.hot ? #ffffff0b : transparent;
     zone := TouchArea {
@@ -3439,6 +3442,29 @@ component LabControl inherits Rectangle {
             c: { kind: 3, x: 10px, y: 39px, w: root.r.w - 26px, h: 16px, value: root.r.at, id: root.r.id };
             slide(id, v) => { root.slide(id, v); }
             reset(id) => { root.reset(id); }
+        }
+        // what each end of its track stands for, under its ends
+        if root.r.low != "": Text {
+            x: 10px;
+            y: 55px;
+            height: 14px;
+            text: root.r.low;
+            font-family: "Geist";
+            font-size: 11.5px;
+            color: root.r.hot ? Ink.dim : Ink.soft;
+            vertical-alignment: center;
+        }
+        if root.r.high != "": Text {
+            x: 10px;
+            y: 55px;
+            width: root.r.w - 26px;
+            height: 14px;
+            text: root.r.high;
+            font-family: "Geist";
+            font-size: 11.5px;
+            color: root.r.hot ? Ink.dim : Ink.soft;
+            horizontal-alignment: right;
+            vertical-alignment: center;
         }
         // where it was saved, on its track
         if root.r.moved: Rectangle {

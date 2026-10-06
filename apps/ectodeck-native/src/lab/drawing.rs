@@ -22,7 +22,7 @@ use std::fmt::Write;
 use ectodeck_draw::hdr::sim::{on_cap_top, Caps, Physics, Switch};
 use serde_json::Value;
 
-use super::{get, PARAMS};
+use super::{ends, get, PARAMS};
 use ectodeck_draw::hdr::KeyGeometry;
 use crate::text;
 
@@ -101,6 +101,8 @@ const USUAL_DEPTH: f64 = 3.0;
 // the stage: a column of sliders either side of the panel the drawing is in
 pub const CTRL_W: f32 = 280.0;
 pub const CTRL_H: f32 = 48.0;
+/// how much taller a share's slider is, for the words under its track
+pub const ENDS_H: f32 = 14.0;
 /// how far down a slider its line leaves it, and how far apart sliders stand
 pub const ATTACH: f32 = 13.0;
 /// how much of its column a choice takes, its name over its options
@@ -287,6 +289,11 @@ fn beam_half(beam: f64) -> f64 {
 
 fn slider(name: &str) -> usize {
     PARAMS.iter().position(|p| p.label == name).expect("one of the lab's sliders")
+}
+
+/// How tall a slider is: a share's the taller, for its ends' words.
+pub fn ctrl_h(i: usize) -> f32 {
+    CTRL_H + if ends(PARAMS[i].path).is_some() { ENDS_H } else { 0.0 }
 }
 
 // ---------------------------------------------------------------- drawing
@@ -804,7 +811,7 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
                 let op = |share: f64| 0.12 + 0.7 * share.clamp(0.0, 1.0);
                 for north in [true, false] {
                     let band = [p(sl.skirt_x(north, v.foot, false), v.foot), p(sl.skirt_x(north, clear_to, false), clear_to), p(sl.skirt_x(north, clear_to, true), clear_to), p(sl.skirt_x(north, v.foot, true), v.foot)];
-                    let milky = if white("Milky") { WHITE } else { "#d8d2c6" };
+                    let milky = if white("Haze") { WHITE } else { "#d8d2c6" };
                     s.path(&poly(&band, true), milky, "none", 1.0, if v.skirts > 0.0 { 0.08 + 0.55 * v.milky } else { 0.0 });
                     let lit = if white("Wall opacity") { WHITE } else { AMBER };
                     s.path(&poly(&[band[0], band[1]], false), "none", lit, 2.4 * grow.min(1.2), if v.skirts > 0.0 { op(v.skirts) } else { 0.0 });
@@ -822,9 +829,9 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
                 let (wall_in, wall_out) = (sl.skirt_x(true, side_z, true), sl.skirt_x(true, side_z, false));
                 ray(&mut s, &[p(wall_in + 1.1, side_z + 0.35), p(wall_out - 1.2, side_z - 0.25)], v.skirts, grow, white("Wall opacity"));
                 labels.push(Label::new(true, p(wall_out, side_z), "Wall opacity"));
-                // Milky on the plastic low on the north skirt
+                // Haze on the plastic low on the north skirt
                 let milky_z = v.foot + (clear_to - v.foot) * 0.25;
-                labels.push(Label::new(true, p(sl.skirt_x(true, milky_z, false), milky_z), "Milky"));
+                labels.push(Label::new(true, p(sl.skirt_x(true, milky_z, false), milky_z), "Haze"));
             }
             if !shine && !translucent {
                 // Black down the sides measured beside the south skirt
@@ -841,13 +848,13 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
                 // bounced inside the cap: off its inner wall, up to the back of its top
                 let mid_z = (hz.max(v.foot) + under) / 2.0;
                 let inner = sl.skirt_x(false, mid_z, true);
-                ray(&mut s, &[p(sl.hx1 - 0.6, hz + 0.2), p(inner, mid_z), p(sl.centre + 2.2, under - 0.35)], v.cap_in, grow, white("Inside"));
+                ray(&mut s, &[p(sl.hx1 - 0.6, hz + 0.2), p(inner, mid_z), p(sl.centre + 2.2, under - 0.35)], v.cap_in, grow, white("Inside reflection"));
             }
             // Inside's line comes in under the skirt's foot, as the light does, to the wall just above it
             // (a button is solid: nothing inside it)
             if !v.solid {
                 let low = v.foot + 0.7f64.min((tz - v.foot) * 0.5);
-                labels.push(Label { elbow: Some(pz(v.foot * 0.45)), ..Label::new(false, p(sl.skirt_x(false, low, true), low), "Inside") });
+                labels.push(Label { elbow: Some(pz(v.foot * 0.45)), ..Label::new(false, p(sl.skirt_x(false, low, true), low), "Inside reflection") });
             }
             // light from the next key: onto the outside of this one's skirt, and off it;
             // onto a button from above the chassis it stands on, and onto its top too
@@ -855,12 +862,12 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
             let outside = sl.skirt_x(false, bounce_z, false);
             let from_z = if v.solid { bounce_z + 1.2 } else { v.foot * 0.55 };
             ray(&mut s, &[p((x_hi - 0.1).min(outside + 2.4), from_z), p(outside + 0.08, bounce_z - 0.05)], 0.5, grow, false);
-            ray(&mut s, &[p(outside + 0.1, bounce_z + 0.15), p((x_hi - 0.25).min(outside + 2.2), bounce_z + 1.6)], v.cap_out, grow, white("Outside"));
-            labels.push(Label::new(false, p(outside, bounce_z), "Outside"));
+            ray(&mut s, &[p(outside + 0.1, bounce_z + 0.15), p((x_hi - 0.25).min(outside + 2.2), bounce_z + 1.6)], v.cap_out, grow, white("Outside reflection"));
+            labels.push(Label::new(false, p(outside, bounce_z), "Outside reflection"));
             if v.solid {
                 let top_x = (a0 + a1) / 2.0;
                 ray(&mut s, &[p(top_x + 2.2, tz + 2.0), p(top_x + 0.1, tz + 0.05)], 0.5, grow, false);
-                ray(&mut s, &[p(top_x - 0.1, tz + 0.1), p(top_x - 1.6, tz + 1.7)], v.cap_out, grow, white("Outside"));
+                ray(&mut s, &[p(top_x - 0.1, tz + 0.1), p(top_x - 1.6, tz + 1.7)], v.cap_out, grow, white("Outside reflection"));
             }
         }
         _ => {
@@ -870,18 +877,18 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
             let edge = (x_hi + 0.3).min(sl.foot0 + 1.6);
             let wall_z = 1.1f64.min(d * 0.6);
             if d > 0.25 {
-                ray(&mut s, &[p(edge, 1.4f64.min(d + 0.9)), p(0.85, 0.03), p(0.03, wall_z), p(0.9, wall_z + 1.25)], v.chassis, grow, white("Chassis"));
-                ray(&mut s, &[p(edge, d + 1.25), p(-0.7, d + 0.03), p(-1.25, d + 1.0)], v.chassis, grow, white("Chassis"));
+                ray(&mut s, &[p(edge, 1.4f64.min(d + 0.9)), p(0.85, 0.03), p(0.03, wall_z), p(0.9, wall_z + 1.25)], v.chassis, grow, white("Chassis reflection"));
+                ray(&mut s, &[p(edge, d + 1.25), p(-0.7, d + 0.03), p(-1.25, d + 1.0)], v.chassis, grow, white("Chassis reflection"));
                 marks.push(Mark::Height { x: px(-v.g.strip - 0.85), y0: pz(0.0), y1: pz(d), i: slider("Depth") });
                 labels.push(Label::new(true, p(-v.g.strip - 0.85, d * 0.8), "Depth"));
             } else {
-                ray(&mut s, &[p(edge, 1.2), p(-0.8, 0.03), p(-1.4, 1.0)], v.chassis, grow, white("Chassis"));
+                ray(&mut s, &[p(edge, 1.2), p(-0.8, 0.03), p(-1.4, 1.0)], v.chassis, grow, white("Chassis reflection"));
                 labels.push(Label { flat: true, ..Label::new(true, p(-v.g.strip - 0.85, 0.0), "Depth") });
             }
             let dx = -v.g.strip - v.g.deck_beyond * 0.62;
-            ray(&mut s, &[p(dx - 1.3, 1.1), p(dx + 0.3, 0.03), p(dx + 1.0, 0.9)], v.deck, grow, white("Deck"));
-            labels.push(Label { flat: true, ..Label::new(true, p(-1.6, d), "Chassis") });
-            labels.push(Label { flat: true, ..Label::new(true, p(dx, 0.0), "Deck") });
+            ray(&mut s, &[p(dx - 1.3, 1.1), p(dx + 0.3, 0.03), p(dx + 1.0, 0.9)], v.deck, grow, white("Deck reflection"));
+            labels.push(Label { flat: true, ..Label::new(true, p(-1.6, d), "Chassis reflection") });
+            labels.push(Label { flat: true, ..Label::new(true, p(dx, 0.0), "Deck reflection") });
         }
     }
     // the slice goes on past the frame: each end fades into the ground, and its top where the frame cuts it
@@ -1041,20 +1048,25 @@ pub fn places(v: &Values, lens: Lens, w: f32, h: f32, choices: usize, right_top:
             ka.partial_cmp(&kb).unwrap_or(std::cmp::Ordering::Equal)
         });
         let under = if left { choices as f64 * CHOICE_H as f64 } else { right_top as f64 };
-        let (lo, hi) = (14.0 + ATTACH as f64 + under, h - 14.0 - (CTRL_H - ATTACH) as f64);
+        // how far each slider stands above the next: its own height and the
+        // gap between, all the less where the column is short of room
+        let pitch: Vec<f64> = mine.iter().map(|l| ctrl_h(l.i) as f64 + PITCH - CTRL_H as f64).collect();
+        let last = mine.last().map_or(CTRL_H, |l| ctrl_h(l.i)) as f64;
+        let (lo, hi) = (14.0 + ATTACH as f64 + under, h - 14.0 - (last - ATTACH as f64));
         let hi = hi.max(lo);
         let want: Vec<f64> = mine.iter().map(|l| if l.drop { lo } else if l.flat { level(l) - rise } else { level(l) }).collect();
-        let gap = PITCH.min((hi - lo) / (want.len().max(2) - 1) as f64);
+        let need: f64 = pitch.iter().rev().skip(1).sum();
+        let room = if need > 0.0 { ((hi - lo) / need).min(1.0) } else { 1.0 };
         let mut ys: Vec<f64> = Vec::new();
-        for y in want {
+        for (n, y) in want.into_iter().enumerate() {
             let y = y.clamp(lo, hi);
-            ys.push(ys.last().map_or(y, |&last: &f64| y.max(last + gap)));
+            ys.push(ys.last().map_or(y, |&last: &f64| y.max(last + pitch[n - 1] * room)));
         }
         let n = ys.len();
         for i in (0..n).rev() {
-            ys[i] = ys[i].min(hi - gap * (n - 1 - i) as f64);
+            ys[i] = ys[i].min(hi - pitch[i..n - 1].iter().sum::<f64>() * room);
             if i + 1 < n {
-                ys[i] = ys[i].min(ys[i + 1] - gap);
+                ys[i] = ys[i].min(ys[i + 1] - pitch[i] * room);
             }
         }
         out.extend(mine.iter().zip(ys).map(|(l, y)| Place { i: l.i, left, y: y as f32 }));
@@ -1194,7 +1206,7 @@ mod tests {
                     assert_eq!(places.len(), ids.len(), "{lens:?}: a place for each of its sliders");
                     assert!(ids.iter().all(|i| places.iter().any(|p| p.i == *i)), "{lens:?}: its own sliders");
                     for p in &places {
-                        assert!(p.y - ATTACH >= 0.0 && p.y - ATTACH + CTRL_H <= h, "{lens:?}: slider {} inside the stage at {}", p.i, p.y);
+                        assert!(p.y - ATTACH >= 0.0 && p.y - ATTACH + ctrl_h(p.i) <= h, "{lens:?}: slider {} inside the stage at {}", p.i, p.y);
                     }
                     let st = stage(&v, lens, w, h, &places, Some(ids[0]));
                     resvg::usvg::Tree::from_str(&st.svg, &resvg::usvg::Options::default()).expect("a stage reads as an SVG");

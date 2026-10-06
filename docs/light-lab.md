@@ -40,7 +40,7 @@ The `light` section of a core's device description, `cores/<core>/device.json` (
 
 - how many of the art's units make a millimetre (`scale`, 1.38 for the Z10);
 - the typical key the lab draws when no key is chosen (the Z10's 2 key);
-- each part's values, in sections named as the lab's are (`switches`, `caps`, `legends`, `wells`, `display`), each value named as its slider or choice is, every length in millimetres;
+- each part's values, in sections named as the lab's are (`switches`, `caps`, `legends`, `wells`, `display`), each value named for its slider or choice (`milky` is the lab's Haze), every length in millimetres;
 - the art pieces its parts use (the Z10's wells are `mask_1`);
 - under `keys`, a key's own values, by the control's stable id (`esc`, `space`, `keypad-plus`), so they stay on the right key across versions of the core.
 

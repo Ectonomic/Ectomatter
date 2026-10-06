@@ -124,12 +124,12 @@ const PARAMS: [Param; 27] = [
     Param { path: ("caps", "foot"), label: "Skirt's foot", lo: 0.0, hi: 12.0, step: 0.1, unit: Unit::Mm, def: 5.0, note: "How high above the deck the foot of each cap's skirt is: the gap the light gets out under it by." },
     Param { path: ("caps", "top"), label: "Cap's top", lo: 1.0, hi: 25.0, step: 0.1, unit: Unit::Mm, def: 14.0, note: "How high above the deck each cap's top is, where the legend is." },
     Param { path: ("legends", "opacity"), label: "Legend opacity", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.7, note: "How much of the light on the back of a cap's top its legend holds back. At 0% the legend lets all of it through; at 100% none, as dark as the cap's black." },
-    Param { path: ("caps", "inside"), label: "Inside", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.5, note: "The share of the light the inside of a cap gives back. More of it bounces about inside the cap, and more gets out under the skirt onto the deck round it." },
-    Param { path: ("caps", "outside"), label: "Outside", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.18, note: "The share of the light the outside of a cap's skirt gives back: what the skirts show of the light round them." },
+    Param { path: ("caps", "inside"), label: "Inside reflection", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.5, note: "The share of the light the inside of a cap gives back. More of it bounces about inside the cap, and more gets out under the skirt onto the deck round it." },
+    Param { path: ("caps", "outside"), label: "Outside reflection", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.18, note: "The share of the light the outside of a cap's skirt gives back: what the skirts show of the light round them." },
     Param { path: ("legends", "unlit"), label: "LED off", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.15, note: "How bright a legend looks with its LED off (the dimmer at 0%, or a key the lighting leaves dark), as a share of the grey the art prints it in. A backlit legend with no light behind it is dark." },
     Param { path: ("wells", "depth"), label: "Depth", lo: 0.0, hi: 12.0, step: 0.1, unit: Unit::Mm, def: 2.0, note: "How deep the wells are: how high the chassis round them stands above the deck. Deeper keeps more of the light in the wells." },
-    Param { path: ("wells", "deck"), label: "Deck", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.22, note: "The share of the light the deck at the wells' floor gives back." },
-    Param { path: ("wells", "chassis"), label: "Chassis", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.4, note: "The share of the light the chassis gives back: its top round the wells, and the wells' walls, which are its own sides." },
+    Param { path: ("wells", "deck"), label: "Deck reflection", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.22, note: "The share of the light the deck at the wells' floor gives back." },
+    Param { path: ("wells", "chassis"), label: "Chassis reflection", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.4, note: "The share of the light the chassis gives back: its top round the wells, and the wells' walls, which are its own sides." },
     Param { path: ("display", "lit"), label: "Lit dots", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, def: 324.0, note: "The display's lit dots with its backlight white at full. A colour gives off its own share of that, as an LED does." },
     Param { path: ("display", "unlit"), label: "Unlit dots", lo: 0.0, hi: 0.0, step: 0.1, unit: Unit::Nits, def: 4.1, note: "The dots that are off, which let a little of the backlight through, as a real display's do." },
     Param { path: ("display", "background"), label: "Background", lo: 0.0, hi: 0.0, step: 0.1, unit: Unit::Nits, def: 0.8, note: "The ground between the dots." },
@@ -137,10 +137,28 @@ const PARAMS: [Param; 27] = [
     Param { path: ("display", "glass"), label: "Glass sheen", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 1.0, note: "How strongly the glass over the display shows its reflection, as the art draws it at 100%." },
     Param { path: ("caps", "opacity"), label: "Wall opacity", lo: 0.02, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 1.0, note: "How much of the light inside a cap its translucent plastic holds back: its walls below the black on pudding caps, all of it but the legends on translucent ones. At 0% the plastic lets the light through, glowing on its outside; at 100% it is opaque. Plastic with no coating is about as opaque as a legend." },
     Param { path: ("caps", "black"), label: "Black down the sides", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.0, note: "How far down a cap's sides the black of its top comes, as a share of the skirt's height. A pudding cap's black comes part of the way, its milky plastic below; light gets out only below the black." },
-    Param { path: ("caps", "milky"), label: "Milky", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.0, note: "How milky the translucent plastic is: the share of the light it takes in that it scatters. What it scatters it carries some way round the cap before letting it out, so the cap glows evenly and looks white with its LED off; the rest it lets out where it went in, as clear plastic does." },
+    Param { path: ("caps", "milky"), label: "Haze", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.0, note: "The share of the light the translucent plastic scatters, which plastics makers call its haze. What it scatters it carries some way round the cap before letting it out, so the cap glows evenly and looks milky white with its LED off. The rest comes out where it went in, as through clear plastic." },
     Param { path: ("place", "east"), label: "Switch east–west", lo: -60.0, hi: 60.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Where this key's switch sits under its cap, east or west of the cap's middle: where the plate holds it, which on a long key can be off its middle. Its LED goes with it." },
     Param { path: ("place", "north"), label: "Switch north–south", lo: -30.0, hi: 30.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Where this key's switch sits under its cap, north or south of the cap's middle, as on a cap that reaches down past its row. Its LED goes with it." },
 ];
+
+/// What each end of a share's slider stands for, in the words under its
+/// track: a percentage alone does not say which end is which, or what it
+/// counts.
+fn ends(path: (&str, &str)) -> Option<(&'static str, &'static str)> {
+    Some(match path {
+        ("switches", "scattered") => ("Beam only", "Glow only"),
+        ("switches", "sides") => ("Top only", "Sides only"),
+        ("legends", "opacity") | ("caps", "opacity") => ("Clear", "Opaque"),
+        ("caps", "inside" | "outside") | ("wells", "deck" | "chassis") => ("None", "All"),
+        ("legends", "unlit") => ("Black", "As drawn"),
+        ("caps", "black") => ("Top only", "To the foot"),
+        ("caps", "milky") => ("Clear", "Milky white"),
+        ("display", "dot") => ("Pinpoints", "Touching"),
+        ("display", "glass") => ("None", "As drawn"),
+        _ => return None,
+    })
+}
 
 /// One of a section's choices, at the top of its left column, which says
 /// what the keyboard is as a whole: what it is called, what it does, and its options.
@@ -1491,6 +1509,8 @@ impl LabPage {
                 was: was as f32,
                 moved: (at - was).abs() > 0.002,
                 changed: self.changed(i),
+                low: ends(p.path).map_or("", |e| e.0).into(),
+                high: ends(p.path).map_or("", |e| e.1).into(),
             });
         }
         // one lit key's switch's place: the key from above, its switch to drag
@@ -1511,7 +1531,7 @@ impl LabPage {
                 let p = &PARAMS[i];
                 let (number, unit) = reads(p, self.value(i));
                 let (at, was) = (self.knob(i, self.value(i)), self.knob(i, self.value_in(&saved_work, i)));
-                rows.push(LabRow { x: px, y: py + ph + 18.0 + n as f32 * 64.0, w: pw, id: i as i32, name: p.label.into(), hot: hot == Some(i), number: number.into(), unit: unit.into(), derived: false, at: at as f32, was: was as f32, moved: (at - was).abs() > 0.002, changed: self.changed(i) });
+                rows.push(LabRow { x: px, y: py + ph + 18.0 + n as f32 * 64.0, w: pw, id: i as i32, name: p.label.into(), hot: hot == Some(i), number: number.into(), unit: unit.into(), derived: false, at: at as f32, was: was as f32, moved: (at - was).abs() > 0.002, changed: self.changed(i), low: "".into(), high: "".into() });
             }
         }
         // the map, open to choose a key: every cap where the art has it, the
@@ -1737,6 +1757,19 @@ fn saved_into(text: &str, light: &Value) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every share's slider says what each end of its track stands for, and
+    /// only a share's: a length or a brightness says so in its unit.
+    #[test]
+    fn a_share_s_slider_says_what_its_ends_stand_for() {
+        for p in &PARAMS {
+            let e = ends(p.path);
+            assert_eq!(e.is_some(), p.unit == Unit::Fraction, "{}", p.label);
+            if let Some((low, high)) = e {
+                assert!(text::width(400, 11.5, low) + 16.0 + text::width(400, 11.5, high) <= drawing::CTRL_W - 26.0, "{}: its words fit under its track", p.label);
+            }
+        }
+    }
 
     /// A drag undoes whole, other changes one at a time, and what is undone
     /// can be done again until something new is changed.
