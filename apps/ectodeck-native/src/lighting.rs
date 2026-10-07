@@ -47,10 +47,9 @@ pub enum Ctl {
     HdrMode,
     PeakNits,
     Place,
-    EffectRate,
 }
 
-const CTLS: [Ctl; 31] = [
+const CTLS: [Ctl; 30] = [
     Ctl::None,
     Ctl::Color,
     Ctl::Colors,
@@ -81,7 +80,6 @@ const CTLS: [Ctl; 31] = [
     Ctl::HdrMode,
     Ctl::PeakNits,
     Ctl::Place,
-    Ctl::EffectRate,
 ];
 
 pub fn ctl(id: i32) -> Ctl {

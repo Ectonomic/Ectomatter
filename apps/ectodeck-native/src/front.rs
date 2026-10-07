@@ -925,13 +925,12 @@ impl Front {
                 self.open_bind_menu(index, _anchor);
                 return;
             }
-            Ctl::Control | Ctl::Temperature | Ctl::Wind | Ctl::HdrMode | Ctl::EffectRate => {
+            Ctl::Control | Ctl::Temperature | Ctl::Wind | Ctl::HdrMode => {
                 let Some(v) = crate::ecto_settings::choice(c, index) else { return };
                 let path = match c {
                     Ctl::Control => "devices.z10.control",
                     Ctl::Temperature => "weather.units.temperature",
                     Ctl::Wind => "weather.units.wind",
-                    Ctl::EffectRate => "performance.effects",
                     _ => "hdr.lighting",
                 };
                 if self.settings.get(path).as_ref() == Some(&v) || (c == Ctl::Control && v == serde_json::json!(self.controlled)) {

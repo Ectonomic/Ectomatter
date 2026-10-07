@@ -1272,9 +1272,8 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
     while !app.exit {
         let busy = (app.slint.has_active_animations() && !app.frame_pending)
             || app.subs.iter().flatten().any(|m| !m.hidden && m.slint.has_active_animations() && !m.frame_pending);
-        // a lighting effect's next frame, at the rate Settings › Performance asks
-        // for; none while the window is closed into the tray, where it is not
-        // drawn (at "Match screen", waking for one there spun the loop flat out)
+        // a lighting effect's next frame, 30 a second; none while the window is
+        // closed into the tray, where it is not drawn
         let effect = (app.front.animated() && !app.frame_pending && !app.hidden).then(|| app.effect_due.saturating_duration_since(Instant::now()));
         let wait = if busy {
             Some(Duration::ZERO)
@@ -1747,14 +1746,11 @@ impl App {
         self.draw();
     }
 
-    /// How long between a lighting effect's frames: Settings › Performance's
-    /// 30 or 60 a second, or none at all to match the screen.
+    /// How long between a lighting effect's frames: 30 a second, which
+    /// shows an effect smoothly and keeps Ectodeck light on the computer
+    /// (the keyboard plays the effect itself; the window only copies it).
     fn effect_frame(&self) -> Duration {
-        match self.front.settings.get("performance.effects").and_then(|v| v.as_str().map(str::to_owned)).as_deref() {
-            Some("screen") => Duration::ZERO,
-            Some("60") => Duration::from_secs_f64(1.0 / 60.0),
-            _ => Duration::from_secs_f64(1.0 / 30.0),
-        }
+        Duration::from_secs_f64(1.0 / 30.0)
     }
 
     fn draw(&mut self) {
@@ -1842,8 +1838,8 @@ impl App {
         }
         let panel_moved = self.front.overlays.panel_rev != self.panel_rev || relit;
         self.panel_rev = self.front.overlays.panel_rev;
-        // a lighting effect's next frame only when it is due, at the rate
-        // Settings › Performance asks for; anything else as it changes
+        // a lighting effect's next frame only when it is due, 30 a second;
+        // anything else as it changes
         let effect = self.front.animated();
         let due = !effect || Instant::now() >= self.effect_due;
         let lights = if due { self.front.lights() } else { None };

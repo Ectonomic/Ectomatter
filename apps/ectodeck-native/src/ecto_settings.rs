@@ -241,15 +241,6 @@ pub fn page(s: &State) -> (Vec<Cell>, f32) {
         c.next(34.0);
     });
 
-    // how hard Ectodeck works the computer
-    let rate = s.settings["performance"]["effects"].as_str().unwrap_or("30");
-    section(&mut cells, &mut y, "Performance", |c| {
-        c.label("Effects preview");
-        c.seg(c.y, Ctl::EffectRate, &[("30", "30 fps"), ("60", "60 fps"), ("screen", "Match screen")], rate);
-        let mut ny = c.y + 36.0 + 7.0;
-        c.note(&mut ny, "How often the window redraws the keyboard while a lighting effect plays; lower is lighter on the computer.", 664.0);
-        c.next(ny - c.y - 0.125);
-    });
     (cells, y - 14.0 + 40.0)
 }
 
@@ -268,7 +259,6 @@ pub fn choice(c: Ctl, index: usize) -> Option<Value> {
         Ctl::Temperature => ["c", "f"].get(index).map(|v| json!(v)),
         Ctl::Wind => ["kmh", "mph", "ms"].get(index).map(|v| json!(v)),
         Ctl::HdrMode => ["auto", "off"].get(index).map(|v| json!(v)),
-        Ctl::EffectRate => ["30", "60", "screen"].get(index).map(|v| json!(v)),
         _ => None,
     }
 }
