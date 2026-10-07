@@ -485,8 +485,8 @@ const TEXT_NAMES: [(&str, &str); 3] = [
     ("Bottom", "The second function, at the bottom of the key."),
 ];
 /// the glyphs a key's text can take from its list, each with its name
-const GLYPHS: [(&str, &str); 44] = [
-    ("⌘", "Command"), ("⌥", "Option"), ("⌃", "Control"), ("⇧", "Shift"), ("⇪", "Caps Lock"), ("⎋", "Escape"), ("⇥", "Tab"), ("↹", "Tab, both ways"), ("⌫", "Backspace"), ("⌦", "Delete"),
+const GLYPHS: [(&str, &str); 45] = [
+    ("⌘", "Command"), ("⌥", "Option"), ("⌃", "Control"), ("⇧", "Shift"), ("⇪", "Caps Lock"), ("⎋", "Escape"), ("⇥", "Tab"), ("↹", "Tab, both ways"), ("⮀", "Tab, both ways, solid tips"), ("⌫", "Backspace"), ("⌦", "Delete"),
     ("↵", "Return"), ("⏎", "Enter"), ("␣", "Space"), ("←", "Left"), ("↑", "Up"), ("→", "Right"), ("↓", "Down"), ("⇞", "Page Up"), ("⇟", "Page Down"),
     ("⏯", "Play and pause"), ("⏮", "Previous track"), ("⏭", "Next track"), ("⏏", "Eject"), ("⏻", "Power"), ("⊞", "Windows"), ("≡", "Menu"), ("⎙", "Print Screen"), ("☀", "Brightness"),
     ("◀", "Left triangle"), ("▲", "Up triangle"), ("▶", "Right triangle"), ("▼", "Down triangle"),
@@ -497,7 +497,7 @@ const GLYPHS: [(&str, &str); 44] = [
 /// How many of them stand in each row of the list, a row to a kind after
 /// the first three: the triangles and the arrows with closed tips; the
 /// heavy arrows and the volume keys' speakers.
-const GLYPH_ROWS: [usize; 5] = [10, 9, 9, 8, 8];
+const GLYPH_ROWS: [usize; 5] = [11, 9, 9, 8, 8];
 /// the switch's place, east and north: values of one key's only
 const PLACE_E: usize = 25;
 const PLACE_N: usize = 26;
