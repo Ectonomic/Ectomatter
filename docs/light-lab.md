@@ -1,6 +1,6 @@
 # The Light lab and the light model
 
-2026-10-03. Approved, and built in this order: the boundary, then one key's own setup. 2026-10-04: the light description written to be read, its values named as the lab names them (the core protocol's draft 6). 2026-10-06: setups of the person's own beside the core's, kept in Ectodeck's own data (section 4).
+2026-10-03. Approved, and built in this order: the boundary, then one key's own setup. 2026-10-04: the light description written to be read, its values named as the lab names them (the core protocol's draft 6). 2026-10-06: custom setups beside Core, the core's own, kept in Ectodeck's own data (section 4).
 
 The Light lab is Ectodeck's, not a device's. It is built to tune any peripheral's light, and the Z10 is only the first device it tunes. This sets out where the boundary runs, so the lab never carries a device and a core never carries the lab.
 
@@ -10,7 +10,7 @@ The Light lab is Ectodeck's, not a device's. It is built to tune any peripheral'
 
 **A core, the device's package.** Its art, its controls, and its light description: which lit parts the device has, their shapes (taken from the art) and heights, and the values that light it, each key's own included. For the Z10 as it ships: Kailh Brown switches with the LED through a slot 5.08 mm north of the stem, shine-through caps, wells 2 mm deep. A core describes its device in data and carries no interface, as the core protocol already rules.
 
-**The person, who uses the device.** Setups of their own, kept in Ectodeck's own data: the device as they have made it, with pudding caps on it, say. Each holds only what it changes from the core's light description, so what it leaves alone follows the core.
+**The person, who uses the device.** Custom setups of their own, kept in Ectodeck's own data: the device as they have made it, with pudding caps on it, say. Each holds only what it changes from the core's light description, so what it leaves alone follows the core.
 
 The lab tunes a core's light description and saves it back into that core, or tunes one of the person's own setups and saves that.
 
@@ -63,9 +63,9 @@ For example, a Z10 with pudding caps on all but a stock spacebar, and keypad +'s
 
 A key's entry holds only what differs from all keys. Save writes each value the lab changed in its place in the file, adds what is new and takes out what was given back; the file's comments and lines stay as they were.
 
-## 4. The person's own setups
+## 4. Custom setups
 
-A setup of the person's own is the device as they have it where it differs from the core's description: pudding caps on a Z10 whose core describes shine-through caps. The lab's head has a button for the setup it tunes, first in its row (the setup, the keys, the section); its menu lists the core's setup and the person's own, and makes, renames and deletes them. Ectodeck lights the device by the setup chosen, and keeps the choice in its settings (`devices.z10.light`, the setup's id; none is the core's), so it starts lit by it.
+A custom setup is the device as the person has it where it differs from the core's description: pudding caps on a Z10 whose core describes shine-through caps. The lab's head has a button for the setup it tunes, first in its row (the setup, the keys, the section); its menu lists Core (the core's own setup) and, under Custom, the person's custom setups, and makes, renames and deletes them. Ectodeck lights the device by the setup chosen, and keeps the choice in its settings (`devices.z10.light`, the setup's id; none is the core's), so it starts lit by it.
 
 Each setup is a file in Ectodeck's own data, `light/<core>/<id>.json` (JSON with comments), holding its name and what its light changes from the core's, as a JSON merge patch (RFC 7386): a value takes the place of the core's, an object is merged into the core's, null takes the core's out. The lab writes it to be read: a head saying what the file is and how to edit it, and each value on a line of its own with its name and its value in the lab beside it.
 

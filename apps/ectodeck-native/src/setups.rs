@@ -83,7 +83,7 @@ pub fn write(core: &str, device: &str, s: &Setup, note: Note) -> Result<(), Stri
 fn file_text(device: &str, s: &Setup, note: Note) -> String {
     let name = &s.name;
     let mut out = vec![format!("// {name}: a light setup of your own for the {device}."), "//".to_string()];
-    out.extend(comment("The Light lab writes this file each time you save the setup. It holds only what the setup changes from Core, the keyboard as its core has it; anything not listed here stays as Core has it. Beside each value is its name in the lab and the value as the lab shows it.", ""));
+    out.extend(comment("The Light lab writes this file each time you save the setup. It holds only what the setup changes from Core; anything not listed here uses Core's values. Beside each value is its name in the lab and the value as the lab shows it.", ""));
     out.push("//".into());
     out.extend(comment("You can edit a value here by hand, and Ectodeck reads it the next time it starts. Percentages are written from 0 to 1 (80% is 0.8), and lengths in millimetres. To go back to Core, or to rename or delete this setup, use the setup menu at the top of the Light lab.", ""));
     out.push("{".into());
@@ -91,7 +91,7 @@ fn file_text(device: &str, s: &Setup, note: Note) -> String {
         None => {
             out.push(format!("  \"name\": {},  // its name in the setup menu", json!(name)));
             out.push(String::new());
-            out.extend(comment("This setup changes nothing yet, so it lights the keyboard just as Core does. Change something in the Light lab and save it, and the change is written here.", "  "));
+            out.extend(comment("This setup has no changes yet, so the keyboard looks the same as with Core. Change something in the Light lab and save it, and the change is written here.", "  "));
             out.push("  \"light\": {}".into());
         }
         Some(_) => {
@@ -270,6 +270,6 @@ mod tests {
         assert!(text.lines().all(|l| l.chars().count() <= 80 || !l.trim_start().starts_with("//")), "comments within 80 columns");
         let empty = file_text("EVGA Z10 RGB", &Setup { id: "studio".into(), name: "Studio".into(), changes: json!({}) }, &note);
         assert_eq!(jsonc::parse(&empty).unwrap()["light"], json!({}));
-        assert!(empty.starts_with("// Studio: a light setup of your own for the EVGA Z10 RGB.\n") && empty.contains("This setup changes nothing yet"), "{empty}");
+        assert!(empty.starts_with("// Studio: a light setup of your own for the EVGA Z10 RGB.\n") && empty.contains("This setup has no changes yet"), "{empty}");
     }
 }

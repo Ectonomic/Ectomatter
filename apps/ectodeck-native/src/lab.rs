@@ -926,8 +926,8 @@ impl LabPage {
     fn intro(&self) -> (String, String) {
         match self.key() {
             None if self.setup.is_some() => {
-                let name = &self.device.name;
-                (format!("Your own setup of the {name}, kept in Ectodeck. What you change here is its own; what you leave alone follows the core."), "Your own setup, kept in Ectodeck. What you leave alone follows the core.".into())
+                let setup = self.setup_name();
+                (format!("{setup} is a custom setup. Save writes your changes to {setup}; anything you haven't changed uses Core's values."), format!("Save writes your changes to {setup}. Anything you haven't changed uses Core's values."))
             }
             None => {
                 let name = &self.device.name;
@@ -1086,7 +1086,7 @@ impl LabPage {
                             put_back(&mut self.light, &self.core_saved, None, p);
                         }
                         self.rev += 1;
-                        self.status = (format!("{what} follows the core again."), 0);
+                        self.status = (format!("{what} uses Core's value again."), 0);
                     }
                 }
                 Ask::Follow(_) => {}
@@ -1110,7 +1110,7 @@ impl LabPage {
                     self.rev += 1;
                     self.menu = Menu::Shut;
                     self.status = match self.setup {
-                        Some(_) => (format!("Back to {} as saved.", self.setup_name()), 0),
+                        Some(_) => (format!("Back to {} as last saved.", self.setup_name()), 0),
                         None => ("Back to the core's saved tuning.".into(), 0),
                     };
                 }
@@ -1532,29 +1532,6 @@ impl LabPage {
         }
     }
 
-    /// What a setup of the person's own changes, as its row in the menu
-    /// says it: the sections of the page it has values of its own in.
-    fn changes_said(&self, s: &Setup) -> String {
-        let ch = &s.changes;
-        let mut parts: Vec<&str> = Vec::new();
-        for (i, (title, _, params, choices)) in SECTIONS.iter().enumerate() {
-            let has = params.iter().any(|&p| !at(ch, PARAMS[p].path).is_null())
-                || choices.iter().any(|&c| CHOSEN[c].iter().any(|&p| !at(ch, p).is_null()))
-                || (i == LEGENDS && !ch["legends"]["typeface"].is_null());
-            if has {
-                parts.push(title);
-            }
-        }
-        if ch["keys"].as_object().is_some_and(|k| !k.is_empty()) {
-            parts.push("some keys");
-        }
-        match parts.len() {
-            0 => "Same as the core's".into(),
-            1 => format!("Changes {}", parts[0]),
-            n => format!("Changes {} and {}", parts[..n - 1].join(", "), parts[n - 1]),
-        }
-    }
-
     /// What the setups' menu asked for.
     fn setups_menu(&mut self, i: i32) {
         let changed = self.light != self.saved;
@@ -1603,7 +1580,7 @@ impl LabPage {
         // (undoing goes no further back than the setup it is in)
         self.history = History::default();
         self.rev += 1;
-        self.status = (format!("Lit by {}.", if self.setup.is_some() { self.setup_name() } else { "the core's setup".into() }), 0);
+        self.status = (format!("Switched to {}.", self.setup_name()), 0);
     }
 
     /// The name typed taken: a new setup of the light as it is, or the one
@@ -1612,15 +1589,15 @@ impl LabPage {
         let name = self.naming.trim().to_string();
         let taken = |n: &str| n.eq_ignore_ascii_case("core") || self.setups.iter().any(|s| s.name.eq_ignore_ascii_case(n) && (self.menu == Menu::New || Some(&s.id) != self.setup.as_ref()));
         if name.is_empty() {
-            self.status = ("Give it a name to save it by.".into(), 2);
+            self.status = ("Type a name for the setup.".into(), 2);
             return;
         }
         if name.eq_ignore_ascii_case("core") {
-            self.status = ("Core is the core's own setup. Give yours another name.".into(), 2);
+            self.status = ("Core is already used. Choose another name.".into(), 2);
             return;
         }
         if taken(&name) {
-            self.status = (format!("There is a setup called {name} already."), 2);
+            self.status = (format!("{name} is already used. Choose another name."), 2);
             return;
         }
         let core = self.device.core.clone();
@@ -1664,7 +1641,7 @@ impl LabPage {
                 self.setups = setups::list(&self.device.core);
                 self.menu = Menu::Shut;
                 self.switch_to(None);
-                self.status = (format!("{name} deleted. Lit by the core's setup."), 0);
+                self.status = (format!("Deleted {name}. Switched to Core."), 0);
             }
             Err(e) => self.status = (format!("Not deleted: {e}."), 2),
         }
@@ -1703,36 +1680,34 @@ impl LabPage {
         let mut items = Vec::new();
         let changed = self.light != self.saved;
         let naming = matches!(self.menu, Menu::New | Menu::Rename | Menu::Delete);
-        // a setup's row: its name, what it changes, lit if in use; faint
-        // where changes not saved would be lost by choosing it
-        let row = |items: &mut Vec<Cell>, y: f32, index: i32, name: &str, what: &str, in_use: bool| {
+        // a setup's row: its name, lit if in use; faint where changes not
+        // saved would be lost by choosing it
+        let row = |items: &mut Vec<Cell>, y: f32, index: i32, name: &str, in_use: bool| {
             let can = in_use || (!changed && !naming);
             if in_use {
                 items.push(Cell { style: 30, ..cell(kind::TILE, mx + 8.0, my + y, mw - 16.0, 36.0) });
             }
             let name = elide(name, SETUP_W, 400, 13.5);
             items.push(words(mx + 20.0, my + y + 8.0, &name, if in_use { bright } else if can { dim } else { faint }));
-            let ww = text::width(400, 11.5, what);
-            items.push(small(mx + mw - 20.0 - ww, my + y + 10.0, what, if can { quiet } else { faint }));
             if can && !naming {
                 items.push(Cell { id: SETUP, index, ..cell(kind::LINK, mx + 8.0, my + y, mw - 16.0, 36.0) });
             }
         };
         let mut y = 8.0;
-        row(&mut items, y, 10, "Core", "The keyboard as its core has it", self.setup.is_none());
+        row(&mut items, y, 10, "Core", self.setup.is_none());
         y += 44.0;
-        items.push(small(mx + 20.0, my + y, "Your own, kept in Ectodeck", quiet));
+        items.push(small(mx + 20.0, my + y, "Custom", quiet));
         y += 22.0;
         if self.setups.is_empty() {
-            items.push(Cell { color: colour(faint), ..text_cell(20, mx + 20.0, my + y + 8.0, mw - 40.0, 20.0, "None yet") });
+            items.push(Cell { color: colour(faint), ..text_cell(20, mx + 20.0, my + y + 8.0, mw - 40.0, 20.0, "No custom setups yet") });
             y += 36.0;
         }
         for (k, s) in self.setups.iter().enumerate() {
-            row(&mut items, y, 11 + k as i32, &s.name, &self.changes_said(s), self.setup.as_ref() == Some(&s.id));
+            row(&mut items, y, 11 + k as i32, &s.name, self.setup.as_ref() == Some(&s.id));
             y += 36.0;
         }
         if changed && !naming {
-            for line in wrap_after("Your changes aren't saved. Save or revert them to switch, or save them as a new setup.", mw - 40.0, mw - 40.0) {
+            for line in wrap_after("Save or revert your changes before switching setups.", mw - 40.0, mw - 40.0) {
                 items.push(text_cell(style::NOTE, mx + 20.0, my + y + 6.0, mw - 40.0, 18.0, &line));
                 y += 18.0;
             }
@@ -1753,9 +1728,13 @@ impl LabPage {
                 items.push(Cell { id: NAME, style: 3, text: self.naming.clone().into(), ..cell(kind::FIELD, mx + 16.0, my + y, mw - 32.0, 34.0) });
                 y += 34.0;
                 if self.menu == Menu::New {
-                    let note = if changed { format!("It keeps your changes. {} stays as saved.", self.setup_name()) } else { "It starts as the light is now.".to_string() };
-                    items.push(text_cell(style::NOTE, mx + 20.0, my + y + 8.0, mw - 40.0, 18.0, &note));
-                    y += 34.0;
+                    let note = if changed { format!("Your unsaved changes go into the new setup. {} is not changed.", self.setup_name()) } else { format!("The new setup starts as a copy of {}.", self.setup_name()) };
+                    y += 8.0;
+                    for line in wrap_after(&note, mw - 40.0, mw - 40.0) {
+                        items.push(text_cell(style::NOTE, mx + 20.0, my + y, mw - 40.0, 18.0, &line));
+                        y += 18.0;
+                    }
+                    y += 8.0;
                 } else {
                     y += 12.0;
                 }
@@ -1763,7 +1742,7 @@ impl LabPage {
             Menu::Delete => {
                 items.push(text_cell(style::LABEL, mx + 20.0, my + y + 6.0, mw - 40.0, 26.0, &format!("Delete {}?", elide(&self.setup_name(), SETUP_W, 400, 13.5))));
                 y += 34.0;
-                for line in wrap_after("This deletes its file. The keyboard goes back to the core's setup.", mw - 40.0, mw - 40.0) {
+                for line in wrap_after(&format!("This deletes {}. The keyboard switches back to Core.", self.setup_name()), mw - 40.0, mw - 40.0) {
                     items.push(text_cell(style::NOTE, mx + 20.0, my + y, mw - 40.0, 18.0, &line));
                     y += 18.0;
                 }
@@ -2018,7 +1997,7 @@ impl LabPage {
                     Some(k) => (p.label.into(), format!("{} This is {}'s own value; the dot before the name gives the value back to all keys.", p.note, k.label)),
                     None if self.key().is_none() && self.owns(p.path) => {
                         let core = at(&self.core_saved, p.path).as_f64().or_else(|| default_of(p.path, &self.device.print)).unwrap_or(p.def);
-                        (p.label.into(), format!("{} {} has its own value; the core's is {}. The dot before the name gives the core's back.", p.note, self.setup_name(), said(p, core)))
+                        (p.label.into(), format!("{} changes this from Core's {}. Click the dot before the name to use Core's value again. {}", self.setup_name(), said(p, core), p.note))
                     }
                     None => (p.label.into(), p.note.into()),
                 }
@@ -2037,7 +2016,7 @@ impl LabPage {
             Some(i) if (CHOICE..CHOICE + CHOICES.len() as i32).contains(&i) => {
                 let c = &CHOICES[(i - CHOICE) as usize];
                 if self.key().is_none() && self.owns(CHOSEN[(i - CHOICE) as usize][0]) {
-                    (c.label.into(), format!("{} {} has its own; the dot before the name gives the core's back.", c.note, self.setup_name()))
+                    (c.label.into(), format!("{} changes this from Core. Click the dot before the name to use Core's choice again. {}", self.setup_name(), c.note))
                 } else {
                     (c.label.into(), c.note.into())
                 }
@@ -2289,9 +2268,12 @@ impl LabPage {
         let nw = text::width(500, 12.5, &name) + 2.0;
         cells.push(in_colour(style::LABEL_IN, 24.0, hy, nw, 18.0, &name, [0xe5, 0xe5, 0xe5]));
         let first = (w - 48.0 - nw - 6.0).max(100.0);
-        for (k, line) in wrap_after(&note, first, w - 48.0).iter().take(2).enumerate() {
+        // (two lines of it, the second ending in an ellipsis where it goes on)
+        let lines = wrap_after(&note, first, w - 48.0);
+        for (k, line) in lines.iter().take(2).enumerate() {
             let x = if k == 0 { 24.0 + nw + 6.0 } else { 24.0 };
-            cells.push(text_cell(style::NOTE, x, hy + 18.125 * k as f32, w - 48.0, 18.0, line));
+            let line = if k == 1 && lines.len() > 2 { elide(&format!("{line}…"), w - 48.0, 400, 12.5) } else { line.clone() };
+            cells.push(text_cell(style::NOTE, x, hy + 18.125 * k as f32, w - 48.0, 18.0, &line));
         }
         (cells, (sketches, over, rows), self.readout_line(), self.menu_cells(ux, w))
     }
