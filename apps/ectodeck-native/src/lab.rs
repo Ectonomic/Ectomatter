@@ -204,7 +204,7 @@ const ORDER: [usize; 5] = [LEGENDS, 1, 0, 3, 4];
 const SECTIONS: [(&str, &str, &[usize], &[usize]); 5] = [
     ("LEDs", "Each key's LED shines up out of its switch in a beam, onto the back of the legend. In a black housing that is all its light; a clear housing scatters a share of it instead, glowing with it over its top and sides, which lights the legend evenly, the inside of the cap and the deck round the switch.", &[0, 1, 2, 3, 4, 5, 7, 6], &[0]),
     ("Keycaps", "Each cap stands over its switch, its skirt from its foot to its top. Light bounces about inside it; some gets out under the skirt, some through the legend, and some through the plastic where it is translucent and not coated black.", &[8, 9, 10, 22, 23, 24, 11, 12, 13], &[1]),
-    ("Legends", "What the light comes through: the print on each cap. Set it as your caps print it: its typeface, how tall its letters are, and where on the cap it sits.", &[29, 30, 27, 28], &[2, 3]),
+    ("Legends", "What the light comes through: the print on each cap. Set it as your caps print it: its typeface, how tall its letters are, and where on the cap it sits.", &[27, 28, 29, 30], &[2, 3]),
     ("Wells", "The keys sit in wells in the chassis: the deck at their floor, walled round by the chassis. What each gives back of the light falling on it lights the rest.", &[14, 15, 16], &[]),
     ("Display", "The display's backlit dots, and the glass over them.", &[17, 18, 19, 20, 21], &[]),
 ];

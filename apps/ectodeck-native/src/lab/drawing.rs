@@ -1052,6 +1052,11 @@ pub fn places(v: &Values, lens: Lens, w: f32, h: f32, choices: usize, right_top:
             let kb = (level(b) - if b.drop { 2000.0 } else { 0.0 }, -(b.at.0 - edge).abs());
             ka.partial_cmp(&kb).unwrap_or(std::cmp::Ordering::Equal)
         });
+        // what they name nearly level (a legend's sizes measured at its
+        // middle, where its moves' dot is too) in the section's own order,
+        // so a pixel's difference never swaps them from key to key
+        let rank = |l: &&Label| shown.and_then(|s| s.iter().position(|&i| i == l.i)).unwrap_or(l.i);
+        mine = level_runs(mine, |l| level(l) - if l.drop { 2000.0 } else { 0.0 }, rank);
         let under = if left { choices as f64 * CHOICE_H as f64 } else { right_top as f64 };
         // how far each slider stands above the next: its own height and the
         // gap between, all the less where the column is short of room
@@ -1076,6 +1081,30 @@ pub fn places(v: &Values, lens: Lens, w: f32, h: f32, choices: usize, right_top:
         }
         out.extend(mine.iter().zip(ys).map(|(l, y)| Place { i: l.i, left, y: y as f32 }));
     }
+    out
+}
+
+/// Marks this close in height (px) count as level.
+const LEVEL: f64 = 8.0;
+
+/// Things in the order of their levels, as sorted, but each run of them
+/// whose levels lie within LEVEL of its first in the order of their ranks.
+fn level_runs<T>(sorted: Vec<T>, level: impl Fn(&T) -> f64, rank: impl Fn(&T) -> usize) -> Vec<T> {
+    let mut out = Vec::new();
+    let mut run: Vec<T> = Vec::new();
+    let mut first = 0.0;
+    for t in sorted {
+        if !run.is_empty() && level(&t) - first > LEVEL {
+            run.sort_by_key(&rank);
+            out.append(&mut run);
+        }
+        if run.is_empty() {
+            first = level(&t);
+        }
+        run.push(t);
+    }
+    run.sort_by_key(&rank);
+    out.append(&mut run);
     out
 }
 
@@ -1386,6 +1415,20 @@ pub fn pixels(st: &Stage, scale: f32) -> slint::SharedPixelBuffer<slint::Rgba8Pi
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Sliders whose marks are nearly level keep their section's order;
+    /// those further apart go by height.
+    #[test]
+    fn nearly_level_marks_keep_the_section_s_order() {
+        // (rank, level): Letter size ranked first, a pixel below the moves' dot
+        let marks = vec![(2, 190.0), (0, 192.0), (1, 190.5), (3, 260.0)];
+        let mut sorted = marks.clone();
+        sorted.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        let order: Vec<usize> = level_runs(sorted, |m| m.1, |m| m.0).iter().map(|m| m.0).collect();
+        assert_eq!(order, [0, 1, 2, 3]);
+        let apart = vec![(1, 100.0), (0, 200.0)];
+        assert_eq!(level_runs(apart, |m| m.1, |m| m.0).iter().map(|m| m.0).collect::<Vec<_>>(), [1, 0], "far apart: by height");
+    }
 
     fn core_light() -> Value {
         let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../cores/evga-z10/device.json")).unwrap();
