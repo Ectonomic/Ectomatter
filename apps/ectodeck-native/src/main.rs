@@ -1272,8 +1272,10 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
     while !app.exit {
         let busy = (app.slint.has_active_animations() && !app.frame_pending)
             || app.subs.iter().flatten().any(|m| !m.hidden && m.slint.has_active_animations() && !m.frame_pending);
-        // a lighting effect's next frame, at the rate Settings › Performance asks for
-        let effect = (app.front.animated() && !app.frame_pending).then(|| app.effect_due.saturating_duration_since(Instant::now()));
+        // a lighting effect's next frame, at the rate Settings › Performance asks
+        // for; none while the window is closed into the tray, where it is not
+        // drawn (at "Match screen", waking for one there spun the loop flat out)
+        let effect = (app.front.animated() && !app.frame_pending && !app.hidden).then(|| app.effect_due.saturating_duration_since(Instant::now()));
         let wait = if busy {
             Some(Duration::ZERO)
         } else {
