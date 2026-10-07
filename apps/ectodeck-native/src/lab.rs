@@ -505,10 +505,9 @@ const GLYPHS: [(&str, &str); 48] = [
     ("🠜", "Left, heavy"), ("🠝", "Up, heavy"), ("🠞", "Right, heavy"), ("🠟", "Down, heavy"),
     ("🔇", "Mute"), ("🔈", "Volume"), ("🔉", "Volume down"), ("🔊", "Volume up"),
 ];
-/// How many of them stand in each row of the list, a row to a kind after
-/// the first three: the triangles and the arrows with closed tips; the
-/// heavy arrows and the volume keys' speakers.
-const GLYPH_ROWS: [usize; 5] = [11, 11, 10, 8, 8];
+/// How many of them stand in a row of the list: one after another, in
+/// their order, the keyboard's own icons after them; only the last row short.
+const GLYPH_COLS: usize = 10;
 /// the switch's place, east and north: values of one key's only
 const PLACE_E: usize = 25;
 const PLACE_N: usize = 26;
@@ -2147,11 +2146,12 @@ impl LabPage {
         let boxes = self.text_boxes();
         let Some(&(bx, by, _, bh)) = self.glyphs.and_then(|p| boxes.get(p)) else { return Vec::new() };
         let (_, h, _, _) = self.sizes();
-        let (cols, side, gap) = (GLYPH_ROWS.iter().copied().max().unwrap_or(9), 32.0, 4.0);
-        // (the keyboard's own icons on a row of their own, after the glyphs)
+        let (cols, side, gap) = (GLYPH_COLS, 32.0, 4.0);
+        // (the keyboard's own icons straight after the glyphs, the volume keys' speakers before them)
         let icons = self.own_print().map(|o| o.icons).unwrap_or_default();
         let names = self.icon_names();
-        let rows = GLYPH_ROWS.len() + usize::from(!names.is_empty());
+        let rows = (GLYPHS.len() + names.len()).div_ceil(cols);
+        let at = |n: usize| ((n % cols) as f32, (n / cols) as f32);
         let (lw, lh) = (cols as f32 * (side + gap) - gap + 24.0, rows as f32 * (side + gap) - gap + 24.0);
         let (lx, ly) = ((bx - 84.0).min(w - 24.0 - lw), by + bh + 6.0);
         let mut out = vec![
@@ -2160,14 +2160,14 @@ impl LabPage {
             Cell { style: 27, ..cell(kind::TILE, lx, ly, lw, lh) },
             Cell { id: GLYPH_LIST, style: 29, ..cell(kind::LINK, lx, ly, lw, lh) },
         ];
-        let at = GLYPH_ROWS.iter().enumerate().flat_map(|(r, &n)| (0..n).map(move |c| (c as f32, r as f32)));
-        for (g, ((glyph, _), (c, r))) in GLYPHS.iter().zip(at).enumerate() {
+        for (g, (glyph, _)) in GLYPHS.iter().enumerate() {
+            let (c, r) = at(g);
             out.push(Cell { text: (*glyph).into(), id: GLYPH + g as i32, style: 31, ..cell(kind::SEG_BUTTON, lx + 12.0 + c * (side + gap), ly + 12.0 + r * (side + gap), side, side) });
         }
-        let r = GLYPH_ROWS.len() as f32;
         for (n, name) in names.iter().enumerate() {
             let Some(icon) = icons.get(name) else { continue };
-            out.push(Cell { fill: icon.fill.as_str().into(), lines: icon.stroke.as_str().into(), id: GLYPH_ICON + n as i32, style: 31, ..cell(kind::SEG_BUTTON, lx + 12.0 + n as f32 * (side + gap), ly + 12.0 + r * (side + gap), side, side) });
+            let (c, r) = at(GLYPHS.len() + n);
+            out.push(Cell { fill: icon.fill.as_str().into(), lines: icon.stroke.as_str().into(), id: GLYPH_ICON + n as i32, style: 31, ..cell(kind::SEG_BUTTON, lx + 12.0 + c * (side + gap), ly + 12.0 + r * (side + gap), side, side) });
         }
         out
     }
@@ -3406,7 +3406,6 @@ mod tests {
         for (glyph, name) in GLYPHS {
             assert!(glyph.chars().all(|c| fonts.iter().any(|f| f.glyph_index(c).is_some())), "{name} ({glyph})");
         }
-        assert_eq!(GLYPH_ROWS.iter().sum::<usize>(), GLYPHS.len(), "each glyph a place in the list");
     }
 
     /// The caps' colours where the light gives none: black tops (clear on

@@ -331,11 +331,32 @@ fn key_text(e: &KeyEvent) -> Option<SharedString> {
         Keysym::Alt_L | Keysym::Alt_R => Key::Alt,
         Keysym::Super_L | Keysym::Super_R => Key::Meta,
         _ => {
-            let t = e.utf8.clone().or_else(|| e.keysym.key_char().map(|c| c.to_string()))?;
+            // (with Ctrl held the key's text is a control character, Ctrl+C's
+            // "\u{3}": the key's own letter in its place, which Slint's text
+            // boxes take with Ctrl as copy, cut, paste and select all)
+            let own = e.utf8.clone().filter(|t| !t.is_empty() && !t.chars().any(char::is_control));
+            let t = own.or_else(|| e.keysym.key_char().map(|c| c.to_string()))?;
             return (!t.is_empty() && !t.chars().any(char::is_control)).then(|| t.into());
         }
     };
     Some(k.into())
+}
+
+#[cfg(test)]
+mod key_tests {
+    use super::*;
+
+    /// A letter with Ctrl held reaches the text boxes as the letter, so
+    /// Ctrl+C copies; typed alone, as typed; a control character never.
+    #[test]
+    fn ctrl_c_reaches_the_text_boxes_as_c() {
+        let key = |keysym, utf8: Option<&str>| key_text(&KeyEvent { time: 0, raw_code: 46, keysym, utf8: utf8.map(str::to_string) });
+        assert_eq!(key(Keysym::c, Some("\u{3}")).as_deref(), Some("c"), "Ctrl+C");
+        assert_eq!(key(Keysym::x, Some("\u{18}")).as_deref(), Some("x"), "Ctrl+X");
+        assert_eq!(key(Keysym::c, Some("c")).as_deref(), Some("c"), "c");
+        assert_eq!(key(Keysym::C, Some("C")).as_deref(), Some("C"), "Shift+C");
+        assert_eq!(key(Keysym::c, None).as_deref(), Some("c"), "c let go");
+    }
 }
 
 /// Ectodeck's own fonts for a keyboard's glyphs in the windows' text too
