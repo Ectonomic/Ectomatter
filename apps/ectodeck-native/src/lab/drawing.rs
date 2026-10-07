@@ -1206,6 +1206,9 @@ pub struct Legends {
     pub own: ectodeck_draw::print::Own,
     pub key: Printed,
     pub others: Vec<Printed>,
+    /// the part the sliders act on: the whole legend (0), or Main, Shifted
+    /// or Bottom (1 to 3), the rest of the legend drawn dim
+    pub part: usize,
 }
 
 /// A path as SVG's path data.
@@ -1243,7 +1246,7 @@ pub fn legend_face(set: &Legends, w: f32, h: f32) -> (f32, f32, f32) {
 /// A key's print set as the section says, on its top at (`x`, `y`) `k`
 /// pixels to the millimetre: its inks drawn in the light's amber (a glow
 /// under them), and its lines and the box its inks cover.
-fn print_on(s: &mut Svg, set: &Legends, key: &Printed, x: f64, y: f64, k: f64) -> (Vec<ectodeck_draw::print::Line>, Option<(f32, f32, f32, f32)>) {
+fn print_on(s: &mut Svg, set: &Legends, key: &Printed, x: f64, y: f64, k: f64) -> ectodeck_draw::print::Set {
     let face = [(x + key.face[0] * k) as f32, (y + key.face[1] * k) as f32, (x + key.face[2] * k) as f32, (y + key.face[3] * k) as f32];
     let db = ectodeck_draw::print::faces();
     let laid = ectodeck_draw::print::set(&db, &key.print, &set.style, &set.own, face, k as f32);
@@ -1253,16 +1256,17 @@ fn print_on(s: &mut Svg, set: &Legends, key: &Printed, x: f64, y: f64, k: f64) -
         let _ = write!(s.body, r#"<g{}>"#, if glow { format!(r#" filter="url(#{blur})" opacity="0.55""#) } else { String::new() });
         for ink in &laid.inks {
             let t = ink.to_art;
+            // (with one part chosen, the rest dim)
+            let o = ink.opacity * if set.part > 0 && ink.role.index() != set.part - 1 { 0.3 } else { 1.0 };
             let paint = match ink.stroke {
-                None => format!(r#"fill="{AMBER}" fill-opacity="{:.2}""#, ink.opacity),
-                Some(w) => format!(r#"fill="none" stroke="{AMBER}" stroke-opacity="{:.2}" stroke-width="{w}" stroke-linecap="round" stroke-linejoin="round""#, ink.opacity),
+                None => format!(r#"fill="{AMBER}" fill-opacity="{o:.2}""#),
+                Some(w) => format!(r#"fill="none" stroke="{AMBER}" stroke-opacity="{o:.2}" stroke-width="{w}" stroke-linecap="round" stroke-linejoin="round""#),
             };
             let _ = write!(s.body, r#"<path d="{}" transform="matrix({} {} {} {} {} {})" {paint}/>"#, svg_path(&ink.path), t.sx, t.ky, t.kx, t.sy, t.tx, t.ty);
         }
         s.body += "</g>";
     }
-    let bounds = laid.bounds();
-    (laid.lines, bounds)
+    laid
 }
 
 /// A key's cap from above: its foot and its top inside it.
@@ -1288,14 +1292,23 @@ fn legends(set: &Legends, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, Vec<Lab
     let key = &set.key;
     let (k, x, y) = key_at(set, pw, ph);
     cap_from_above(&mut s, key, x, y, k, true);
-    let (lines, bounds) = print_on(&mut s, set, key, x, y, k);
+    let laid = print_on(&mut s, set, key, x, y, k);
+    let lines = &laid.lines;
     let mut labels = Vec::new();
-    // each size on its line's capitals, beside the key's top
+    // each size on its line's capitals, beside the key's top: Letter size's
+    // and Word size's, or the chosen part's own
     let face_right = x + key.face[2] * k;
     let sx = x + key.foot.0 * k + 14.0;
+    let chosen = (set.part > 0).then(|| (ectodeck_draw::print::TEXTS[set.part - 1].1, ["Main", "Shifted", "Bottom"][set.part - 1]));
     let letters = lines.iter().find(|l| l.letter && l.role != Role::Second).or_else(|| lines.iter().find(|l| l.letter));
     let words = lines.iter().find(|l| !l.letter);
-    for (line, name) in [(letters, "Letter size"), (words, "Word size")] {
+    let part_size = chosen.map(|(role, name)| (lines.iter().find(|l| l.role == role), format!("{name} size")));
+    let sizes: Vec<(Option<&ectodeck_draw::print::Line>, String)> = match part_size {
+        Some(p) => vec![p],
+        None => vec![(letters, "Letter size".into()), (words, "Word size".into())],
+    };
+    for (line, name) in sizes {
+        let name = name.as_str();
         let Some(l) = line else { continue };
         let (top, base) = (l.top as f64, l.base as f64);
         let c = if white(name) { WHITE } else { DIMENSION };
@@ -1306,12 +1319,19 @@ fn legends(set: &Legends, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, Vec<Lab
         let _ = write!(s.marks, r##"<path d="M{face_right:.1} {top:.1} H{sx:.1} M{face_right:.1} {base:.1} H{sx:.1}" stroke="#5a5a5a" stroke-width="1" stroke-dasharray="2 3"/>"##);
         labels.push(Label::new(false, (sx, (top + base) / 2.0), name));
     }
-    // Left–right and Up–down: where the legend is, its middle, and where its
-    // place put it before it was moved (a cross, a dashed line between)
+    // Left–right and Up–down: where the legend (or the chosen part) is, its
+    // middle, and where it was before it was moved (a cross, a dashed line between)
+    let (bounds, moved, across, down) = match chosen {
+        Some((role, name)) => {
+            let pt = set.style.part(role);
+            (laid.bounds_of(role), (pt.across, pt.down), format!("{name} left–right"), format!("{name} up–down"))
+        }
+        None => (laid.bounds(), (set.style.across, set.style.down), "Left–right".to_string(), "Up–down".to_string()),
+    };
     if let Some((l, t, r, b)) = bounds {
         let (cx, cy) = (((l + r) / 2.0) as f64, ((t + b) / 2.0) as f64);
-        let (ox, oy) = (cx - set.style.across as f64 * k, cy - set.style.down as f64 * k);
-        let c = if white("Left–right") || white("Up–down") { WHITE } else { DIMENSION };
+        let (ox, oy) = (cx - moved.0 as f64 * k, cy - moved.1 as f64 * k);
+        let c = if white(&across) || white(&down) { WHITE } else { DIMENSION };
         if (ox - cx).abs() + (oy - cy).abs() > 0.5 {
             let _ = write!(s.marks, r#"<path d="M{ox:.1} {oy:.1} L{cx:.1} {cy:.1}" stroke="{DIMENSION}" stroke-width="1" stroke-dasharray="3 3"/>"#);
             s.mark(&poly(&[(ox - 5.0, oy), (ox + 5.0, oy)], false), "#6f6f6f");
@@ -1320,8 +1340,8 @@ fn legends(set: &Legends, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, Vec<Lab
         // (the sliders' lines meet just right of the legend, clear of its ink)
         let at = (r as f64 + 6.0, cy);
         let _ = write!(s.marks, r#"<circle cx="{:.1}" cy="{:.1}" r="2.5" fill="{c}"/>"#, at.0, at.1);
-        labels.push(Label::new(false, at, "Left–right"));
-        labels.push(Label::new(false, at, "Up–down"));
+        labels.push(Label::new(false, at, &across));
+        labels.push(Label::new(false, at, &down));
     }
     // the others, a row of them under it, to one scale
     if !set.others.is_empty() {

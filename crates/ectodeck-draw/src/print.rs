@@ -72,6 +72,15 @@ pub enum Role {
 }
 
 impl Role {
+    /// Its place among a key's legend's parts, as TEXTS has them.
+    pub fn index(self) -> usize {
+        match self {
+            Role::Main => 0,
+            Role::Shift => 1,
+            Role::Second => 2,
+        }
+    }
+
     /// How strongly the part is printed: a shifted sign a touch lighter
     /// than the key's own legend, a second function lighter still.
     fn opacity(self) -> f32 {
@@ -208,9 +217,37 @@ pub struct Style {
     /// right and down (left and up below 0)
     pub across: f32,
     pub down: f32,
+    /// each part's own (Main, Shifted, Bottom, as TEXTS has them): its size
+    /// as a share of what its kind's size makes it, and how far it is moved
+    /// from where the rest puts it
+    pub parts: [Part; 3],
+}
+
+/// A part of a legend's own size and place.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Part {
+    pub size: f32,
+    pub across: f32,
+    pub down: f32,
+}
+
+impl Default for Part {
+    fn default() -> Part {
+        Part { size: 1.0, across: 0.0, down: 0.0 }
+    }
+}
+
+/// A part's values in a light's "legends": its name in TEXTS and the value's.
+pub fn part_key(part: usize, value: &str) -> String {
+    format!("{}_{value}", TEXTS[part].0)
 }
 
 impl Style {
+    /// A part's own size and place.
+    pub fn part(&self, role: Role) -> Part {
+        self.parts[role.index()]
+    }
+
     /// The style `legends` (a light's "legends", or a key's own) asks for,
     /// `under`'s where it says nothing.
     pub fn over(under: &Style, legends: &Value) -> Style {
@@ -224,6 +261,10 @@ impl Style {
             inset: f("inset", under.inset).max(0.0),
             across: f("across", under.across),
             down: f("down", under.down),
+            parts: [0, 1, 2].map(|i| {
+                let u = under.parts[i];
+                Part { size: f(&part_key(i, "size"), u.size).max(0.1), across: f(&part_key(i, "across"), u.across), down: f(&part_key(i, "down"), u.down) }
+            }),
         }
     }
 }
@@ -255,7 +296,7 @@ impl Own {
     pub fn of(device: &Value) -> Option<Own> {
         let p = &device["print"];
         let f = |k: &str| p[k].as_f64().map(|v| v as f32);
-        let style = Style { typeface: p["typeface"].as_str()?.to_string(), weight: p["weight"].as_f64().map_or(400, |w| w.round() as u16), place: Place::Printed, letters: f("letters")?, words: f("words")?, inset: f("inset")?, across: 0.0, down: 0.0 };
+        let style = Style { typeface: p["typeface"].as_str()?.to_string(), weight: p["weight"].as_f64().map_or(400, |w| w.round() as u16), place: Place::Printed, letters: f("letters")?, words: f("words")?, inset: f("inset")?, across: 0.0, down: 0.0, parts: [Part::default(); 3] };
         let icons = p["icons"]
             .as_object()
             .map(|o| {
@@ -400,6 +441,11 @@ impl Set {
             });
         }
         b
+    }
+
+    /// The box one part's inks cover, as bounds gives the whole's.
+    pub fn bounds_of(&self, role: Role) -> Option<(f32, f32, f32, f32)> {
+        Set { inks: self.inks.iter().filter(|i| i.role == role).cloned().collect(), second_top: None, lines: Vec::new() }.bounds()
     }
 }
 
@@ -571,7 +617,7 @@ pub fn set(db: &fontdb::Database, print: &Print, style: &Style, own: &Own, face:
     let (fw, fh) = ((face[2] - face[0]) / per_mm, (face[3] - face[1]) / per_mm);
     // each run at its kind's size, a word too long for its cap set smaller,
     // a key's words all alike (PRINT over SCREEN the same size)
-    let cap_of = |r: &Run| if r.letter() { style.letters } else { style.words };
+    let cap_of = |r: &Run| if r.letter() { style.letters } else { style.words } * style.part(r.role).size;
     let mut laid: Vec<Laid> = print.runs.iter().map(|r| lay_run(db, r, cap_of(r), id, &fallbacks, symbols, own)).collect();
     let room = fw - 2.0 * FIT;
     let words = laid.iter().filter(|l| !l.run.letter() && l.run.icon.is_none() && l.advance > room && room > 0.0).map(|l| room / l.advance).fold(1.0f32, f32::min);
@@ -600,7 +646,7 @@ pub fn set(db: &fontdb::Database, print: &Print, style: &Style, own: &Own, face:
     }
     // each line's baseline (mm, down from the top edge of the cap's top),
     // as at the top; and the second function's at the foot
-    let unscaled = |i: usize| if laid[i].run.letter() { style.letters } else { style.words };
+    let unscaled = |i: usize| if laid[i].run.letter() { style.letters } else { style.words } * style.part(laid[i].run.role).size;
     let mut bases: Vec<f32> = Vec::new();
     for (n, line) in lines.iter().enumerate() {
         let lead = line[0];
@@ -670,15 +716,24 @@ pub fn set(db: &fontdb::Database, print: &Print, style: &Style, own: &Own, face:
     // onto the art: mm from the cap top's corner, moved as the style says, to its units
     let (ax, ay) = (style.across, style.down);
     let to_face = Transform::from_row(per_mm, 0.0, 0.0, per_mm, face[0], face[1]);
+    // (each part moved on from there as its own values say)
     let mut inks = Vec::new();
     for (i, x, y) in placed {
         let l = &laid[i];
+        let pt = style.part(l.run.role);
         for (p, t, w) in &l.parts {
-            inks.push(Ink { path: p.clone(), to_art: to_face.pre_translate(x + ax, y + ay).pre_concat(*t), opacity: l.run.role.opacity(), stroke: *w, role: l.run.role });
+            inks.push(Ink { path: p.clone(), to_art: to_face.pre_translate(x + ax + pt.across, y + ay + pt.down).pre_concat(*t), opacity: l.run.role.opacity(), stroke: *w, role: l.run.role });
         }
     }
-    let lines = set_lines.into_iter().map(|l| Line { top: face[1] + (l.top + ay) * per_mm, base: face[1] + (l.base + ay) * per_mm, left: face[0] + (l.left + ax) * per_mm, ..l }).collect();
-    Set { inks, second_top: second_top.map(|t| face[1] + (t + ay) * per_mm), lines }
+    let lines = set_lines
+        .into_iter()
+        .map(|l| {
+            let pt = style.part(l.role);
+            Line { top: face[1] + (l.top + ay + pt.down) * per_mm, base: face[1] + (l.base + ay + pt.down) * per_mm, left: face[0] + (l.left + ax + pt.across) * per_mm, ..l }
+        })
+        .collect();
+    let second = style.part(Role::Second);
+    Set { inks, second_top: second_top.map(|t| face[1] + (t + ay + second.down) * per_mm), lines }
 }
 
 #[cfg(test)]
@@ -727,6 +782,29 @@ mod tests {
         assert_eq!(f1.text_of(Role::Second), "[mute]", "an icon by its name");
         assert!(f1.with_text(&serde_json::json!({ "main": "F1" })).runs.iter().any(|r| r.icon.as_deref() == Some("mute")), "an icon kept where no text takes its place");
         assert!(caps.with_text(&serde_json::json!({ "main": "⇪" })).centred, "a centred key stays centred");
+    }
+
+    /// Each part of a legend sizes and moves on its own: the bottom legend
+    /// at half its size, the main legend raised a millimetre, the rest where
+    /// it was; with no part's values, the legend as it was.
+    #[test]
+    fn a_legend_s_parts_size_and_move_on_their_own() {
+        let d = device();
+        let db = crate::fixture::faces();
+        let own = Own::of(&d).unwrap();
+        let control = d["controls"].as_array().unwrap().iter().find(|c| c["id"] == "keypad-8").cloned().unwrap();
+        let print = Print::of(&control).unwrap();
+        let face = [0.0, 0.0, 13.0, 13.0];
+        let plain = set(&db, &print, &own.style, &own, face, 1.0);
+        let same = set(&db, &print, &Style::over(&own.style, &serde_json::json!({})), &own, face, 1.0);
+        assert_eq!(same.bounds(), plain.bounds(), "no part's values: as it was");
+        let style = Style::over(&own.style, &serde_json::json!({ "second_size": 0.5, "main_down": -1.0 }));
+        let moved = set(&db, &print, &style, &own, face, 1.0);
+        let tall = |s: &Set, r: Role| s.bounds_of(r).map(|b| b.3 - b.1).unwrap();
+        assert!((tall(&moved, Role::Second) / tall(&plain, Role::Second) - 0.5).abs() < 0.02, "the bottom legend half as tall");
+        let (was, now) = (plain.bounds_of(Role::Main).unwrap(), moved.bounds_of(Role::Main).unwrap());
+        assert!((was.1 - now.1 - 1.0).abs() < 1e-3 && (was.0 - now.0).abs() < 1e-3, "the main legend a millimetre up, no further across");
+        assert_eq!(tall(&moved, Role::Main), tall(&plain, Role::Main), "the main legend its own size");
     }
 
     /// A keyboard's glyphs are set from Ectodeck's own typefaces on a

@@ -53,6 +53,10 @@ pub enum Ask {
     /// a slider back to its saved value
     Reset(i32),
     Revert,
+    /// which part of the legend the Legends section's sliders act on
+    Part(i32),
+    /// the section on screen back as Default has it
+    SectionDefault,
     Save,
     /// a section chosen
     Section(i32),
@@ -127,6 +131,8 @@ enum Unit {
     /// a key's switch's place under its cap, in millimetres east or north of
     /// its middle (the path says which), below 0 west or south
     Place,
+    /// a size as a share of another's, as a percentage, past 100% too
+    Scale,
 }
 
 /// One value of the core's "light": where it is (a section's value, or the
@@ -148,7 +154,7 @@ struct Param {
     note: &'static str,
 }
 
-const PARAMS: [Param; 32] = [
+const PARAMS: [Param; 41] = [
     Param { path: ("switches", "led"), label: "North of centre", lo: -7.0, hi: 7.0, step: 0.05, unit: Unit::North, def: 5.08, note: "Where each key's LED sits under its cap, from the switch's centre toward the top of the key; below 0, toward the bottom, as on a keyboard whose LEDs face south. It goes as far as the switch's edge, so Switch width sets how far the slider reaches." },
     Param { path: ("switches", "lumens"), label: "LED output", lo: 0.05, hi: 10.0, step: 0.01, unit: Unit::Lumens, def: 1.0, note: "The light each LED gives off at full white, in lumens: about 1 for a keyboard's RGB LED. Everything the LEDs light is as bright as the light that reaches it makes it; what is brighter than the screen shows (Peak nits, Settings › HDR) is drawn at the most it shows, in its own colour. A colour gives off its own share, as an LED does: a red about a fifth." },
     Param { path: ("switches", "beam"), label: "Beam", lo: 1.0, hi: 200.0, step: 0.5, unit: Unit::Number, def: 24.0, note: "How tight the LED's beam out of the top of the switch is. Higher keeps it to a small bright spot on the legend over the LED; lower spreads it across the cap's top and onto the inside of its skirt." },
@@ -181,6 +187,15 @@ const PARAMS: [Param; 32] = [
     Param { path: ("legends", "across"), label: "Left–right", lo: -10.0, hi: 10.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Moves the legend left or right on the key, from where Placement puts it. Drag the legend on the drawing to move it both ways at once." },
     Param { path: ("legends", "down"), label: "Up–down", lo: -10.0, hi: 10.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Moves the legend up or down on the key, from where Placement puts it. Drag the legend on the drawing to move it both ways at once." },
     Param { path: ("legends", "inset"), label: "Inset", lo: 0.0, hi: 4.0, step: 0.1, unit: Unit::Mm, def: 1.0, note: "How far down from the top edge of the cap's top a one-letter legend starts; words start a little higher. At the top left, how far in from the left edge too. In the middle it has no say." },
+    Param { path: ("legends", "main_size"), label: "Main size", lo: 0.3, hi: 2.0, step: 0.01, unit: Unit::Scale, def: 1.0, note: "How big the main legend is, as a share of the size Letter size or Word size gives it. Under 100% the main legend prints smaller than the rest of the legend; over 100%, larger." },
+    Param { path: ("legends", "main_across"), label: "Main left–right", lo: -10.0, hi: 10.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Moves the main legend left or right, leaving the rest of the legend where it is. Drag the main legend on the drawing to move it there." },
+    Param { path: ("legends", "main_down"), label: "Main up–down", lo: -10.0, hi: 10.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Moves the main legend up or down, leaving the rest of the legend where it is, as on caps that print a period high on the key. Drag the main legend on the drawing to move it there." },
+    Param { path: ("legends", "shift_size"), label: "Shifted size", lo: 0.3, hi: 2.0, step: 0.01, unit: Unit::Scale, def: 1.0, note: "How big the shifted sign beside the main legend is, as a share of the size Letter size or Word size gives it. Under 100% the shifted sign prints smaller than the main legend; over 100%, larger." },
+    Param { path: ("legends", "shift_across"), label: "Shifted left–right", lo: -10.0, hi: 10.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Moves the shifted sign left or right, leaving the rest of the legend where it is. Drag the shifted sign on the drawing to move it there." },
+    Param { path: ("legends", "shift_down"), label: "Shifted up–down", lo: -10.0, hi: 10.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Moves the shifted sign up or down, leaving the rest of the legend where it is. Drag the shifted sign on the drawing to move it there." },
+    Param { path: ("legends", "second_size"), label: "Bottom size", lo: 0.3, hi: 2.0, step: 0.01, unit: Unit::Scale, def: 1.0, note: "How big the bottom legend is, as a share of the size Letter size or Word size gives it, as on number pads that print their arrows smaller than the numbers. Under 100% the bottom legend prints smaller; over 100%, larger." },
+    Param { path: ("legends", "second_across"), label: "Bottom left–right", lo: -10.0, hi: 10.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Moves the bottom legend left or right, leaving the rest of the legend where it is. Drag the bottom legend on the drawing to move it there." },
+    Param { path: ("legends", "second_down"), label: "Bottom up–down", lo: -10.0, hi: 10.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Moves the bottom legend up or down, leaving the rest of the legend where it is. Drag the bottom legend on the drawing to move it there." },
 ];
 
 /// What each end of a share's slider stands for, in the words under its
@@ -393,13 +408,14 @@ fn reads(p: &Param, v: f64) -> (String, String) {
         Unit::Mm => (trim(format!("{v:.1}")), "mm".into()),
         Unit::Reach => (trim(format!("{v:.2}")), "mm".into()),
         Unit::Fraction => (trim(format!("{:.1}", v * 100.0)), "%".into()),
+        Unit::Scale => (format!("{:.0}", v * 100.0), "%".into()),
         Unit::Number => (trim(format!("{v:.2}")), String::new()),
         // a key's switch's place: how far, and which way
         Unit::Place => {
             let (plus, minus) = match p.path.1 {
                 "east" => ("mm east", "mm west"),
-                "across" => ("mm right", "mm left"),
-                "down" => ("mm down", "mm up"),
+                a if a.ends_with("across") => ("mm right", "mm left"),
+                d if d.ends_with("down") => ("mm down", "mm up"),
                 _ => ("mm north", "mm south"),
             };
             let still = if p.path.0 == "legends" { "mm" } else { "centred" };
@@ -500,6 +516,15 @@ const FACE: i32 = 990;
 const FIND: i32 = 985;
 /// the caps' colour: its row, its tops' button and its sides', and the page
 /// round the open picker, which shuts it
+/// the Legends section's part the sliders act on, and its options
+const PART: i32 = 1600;
+/// the parts' names, as the Adjust row and the sliders have them, and what
+/// "Whole" is
+const PART_NAMES: [&str; 4] = ["Whole", "Main", "Shifted", "Bottom"];
+/// each part's sliders (size, left–right, up–down), Main's, Shifted's, Bottom's
+const PART_PARAMS: [usize; 9] = [32, 33, 34, 35, 36, 37, 38, 39, 40];
+/// the button that puts the section on screen back as Default has it
+const SECTION_DEFAULT: i32 = 1610;
 const COLOUR: i32 = 1500;
 const COLOUR_TOP: i32 = 1501;
 const COLOUR_SIDES: i32 = 1502;
@@ -630,10 +655,13 @@ pub struct LabPage {
     /// how many times a legend has been dragged on the drawing: its sliders
     /// are placed anew after each drag, level with where it went
     legend_drags: u32,
+    /// which part of the legend the Legends section's sliders act on: the
+    /// whole legend (0), or Main, Shifted or Bottom (1 to 3)
+    part: usize,
     /// the stage as last drawn, and what it was drawn from: the light, the
     /// section, the stage's size, the window's scale, the slider drawn white
     drawn: Option<(drawing::Stage, slint::Image)>,
-    drawn_of: Option<(Value, usize, i32, i32, f32, Option<usize>, Option<usize>)>,
+    drawn_of: Option<(Value, usize, i32, i32, f32, Option<usize>, Option<usize>, usize)>,
     cells: Rc<VecModel<Cell>>,
     sketches: Rc<VecModel<Sketch>>,
     over: Rc<VecModel<Cell>>,
@@ -959,6 +987,8 @@ impl LabPage {
             COLOUR_TOP => Ask::Colour(0),
             COLOUR_SIDES => Ask::Colour(1),
             PICK_SHUT => Ask::Colour(-1),
+            PART => Ask::Part(index),
+            SECTION_DEFAULT => Ask::SectionDefault,
             _ => Ask::Choose(id - CHOICE, index),
         });
         on!(on_pk_sv, |x, y| Ask::PkSv(x, y));
@@ -1018,6 +1048,7 @@ impl LabPage {
             places: Vec::new(),
             places_of: None,
             legend_drags: 0,
+            part: 0,
             pick: None,
             drawn: None,
             drawn_of: None,
@@ -1166,17 +1197,21 @@ impl LabPage {
                 // the legend's middle where the pointer is: how far that is from
                 // where its place puts it, both ways, within the key's top
                 Ask::MoveLegend(fx, fy) => {
-                    if let Some((l, t, r, b, fw, fh)) = self.legend_box() {
-                        let (ia, id_) = (PARAMS.iter().position(|p| p.path == ("legends", "across")).unwrap_or(0), PARAMS.iter().position(|p| p.path == ("legends", "down")).unwrap_or(0));
+                    // the whole legend, or the part the sliders act on
+                    let part = self.part_on();
+                    let role = (part > 0).then(|| ectodeck_draw::print::TEXTS[part - 1].1);
+                    let (ia, id_) = if part > 0 { (PART_PARAMS[(part - 1) * 3 + 1], PART_PARAMS[(part - 1) * 3 + 2]) } else { (PARAMS.iter().position(|p| p.path == ("legends", "across")).unwrap_or(0), PARAMS.iter().position(|p| p.path == ("legends", "down")).unwrap_or(0)) };
+                    if let Some((l, t, r, b, fw, fh)) = self.legend_box(role) {
                         let ((alo, ahi), (dlo, dhi)) = (self.range(ia), self.range(id_));
                         let across = ((fx as f64 * fw - (l + r) / 2.0) * 10.0).round() / 10.0;
                         let down = ((fy as f64 * fh - (t + b) / 2.0) * 10.0).round() / 10.0;
                         let (across, down) = (across.clamp(alo, ahi.max(alo)), down.clamp(dlo, dhi.max(dlo)));
                         let work = self.work();
-                        if get(&work, ("legends", "across")) != Some(across) || get(&work, ("legends", "down")) != Some(down) {
+                        let (pa, pd) = (PARAMS[ia].path, PARAMS[id_].path);
+                        if get(&work, pa) != Some(across) || get(&work, pd) != Some(down) {
                             self.remember(LEGEND_PAD);
-                            self.put_num(("legends", "across"), across);
-                            self.put_num(("legends", "down"), down);
+                            self.put_num(pa, across);
+                            self.put_num(pd, down);
                             self.legend_drags += 1;
                             self.rev += 1;
                             self.status = (String::new(), 0);
@@ -1213,6 +1248,7 @@ impl LabPage {
                                 // whole, a switch wider than fits inside a cap, an LED outside its switch)
                                 let v = match p.unit {
                                     Unit::Fraction => (v / 100.0).clamp(p.lo.max(0.0), p.hi.min(1.0)),
+                                    Unit::Scale => (v / 100.0).clamp(p.lo, p.hi),
                                     Unit::Mm if p.path == ("switches", "width") => v.clamp(p.lo, p.hi),
                                     Unit::Nits | Unit::Mm | Unit::Lumens => v.max(0.0),
                                     Unit::Reach => v.max(p.lo),
@@ -1331,6 +1367,25 @@ impl LabPage {
                         };
                     }
                 }
+                Ask::Part(i) => {
+                    self.part = (i.max(0) as usize).min(3);
+                    self.hovered = None;
+                }
+                // (none while Default itself is tuned: Revert gives back its last save)
+                Ask::SectionDefault if self.setup.is_some() => {
+                    let reset = self.section_reset();
+                    if !jsonc::same(&reset, &self.light) {
+                        self.remember(SECTION_DEFAULT);
+                        self.light = reset;
+                        self.rev += 1;
+                        let name = SECTIONS[self.section].0;
+                        self.status = match self.key() {
+                            Some(k) => (format!("{} follows all keys in {name} again. Ctrl+Z undoes it.", k.label), 0),
+                            None => (format!("{name} is back as {DEFAULT} has it. Ctrl+Z undoes it."), 0),
+                        };
+                    }
+                }
+                Ask::SectionDefault => {}
                 Ask::Revert => {
                     self.remember(-1);
                     self.light = self.saved.clone();
@@ -1504,19 +1559,28 @@ impl LabPage {
         let id = self.key().map(|k| k.id.clone()).or_else(|| self.device.typical.clone())?;
         let key = self.printed(&id)?;
         let others = if self.key().is_some() { Vec::new() } else { self.others(&id) };
-        Some(drawing::Legends { style, own, key, others })
+        // (the part the sliders act on, if this key's legend has it)
+        let part = if self.part > 0 && key.print.runs.iter().any(|r| r.role == ectodeck_draw::print::TEXTS[self.part - 1].1) { self.part } else { 0 };
+        Some(drawing::Legends { style, own, key, others, part })
     }
 
     /// The drawn key's legend where its place puts it, before it is moved:
     /// the box its inks cover on the key's top (mm from the top's top left
     /// corner: left, top, right, bottom), and the top's width and depth.
-    fn legend_box(&self) -> Option<(f64, f64, f64, f64, f64, f64)> {
+    /// One part's (`role`), where the rest of the legend puts it.
+    fn legend_box(&self, role: Option<ectodeck_draw::print::Role>) -> Option<(f64, f64, f64, f64, f64, f64)> {
         let mut set = self.legends()?;
-        (set.style.across, set.style.down) = (0.0, 0.0);
+        match role {
+            None => (set.style.across, set.style.down) = (0.0, 0.0),
+            Some(r) => (set.style.parts[r.index()].across, set.style.parts[r.index()].down) = (0.0, 0.0),
+        }
         let [a0, b0, a1, b1] = set.key.face;
         let (fw, fh) = ((a1 - a0) as f32, (b1 - b0) as f32);
         let laid = ectodeck_draw::print::set(&ectodeck_draw::print::faces(), &set.key.print, &set.style, &set.own, [0.0, 0.0, fw, fh], 1.0);
-        let (l, t, r, b) = laid.bounds()?;
+        let (l, t, r, b) = match role {
+            None => laid.bounds()?,
+            Some(r) => laid.bounds_of(r)?,
+        };
         Some((l as f64, t as f64, r as f64, b as f64, fw as f64, fh as f64))
     }
 
@@ -1652,7 +1716,83 @@ impl LabPage {
                 ids.extend([PLACE_E, PLACE_N]);
             }
         }
+        // one part of the legend: its size and its moves
+        if self.section == LEGENDS && self.part_on() > 0 {
+            let n = self.part_on() - 1;
+            ids = PART_PARAMS[n * 3..n * 3 + 3].to_vec();
+        }
         ids
+    }
+
+    /// The parts the drawn key's legend has (Main, Shifted, Bottom).
+    fn parts_here(&self) -> [bool; 3] {
+        let runs = self.legends().map(|l| l.key.print.runs).unwrap_or_default();
+        ectodeck_draw::print::TEXTS.map(|(_, role)| runs.iter().any(|r| r.role == role))
+    }
+
+    /// The part the sliders act on: the one chosen, if the drawn key's
+    /// legend has it, or the whole legend.
+    fn part_on(&self) -> usize {
+        if self.part > 0 && self.parts_here()[self.part - 1] { self.part } else { 0 }
+    }
+
+    /// The values the section on screen shows: its sliders' and its choices',
+    /// and what else is set on it (the typeface, each part's size and moves,
+    /// the caps' colours; for one key, its text and its switch's place).
+    fn section_paths(&self) -> Vec<(&'static str, &'static str)> {
+        let s = self.section;
+        let mut paths: Vec<(&'static str, &'static str)> = SECTIONS[s].2.iter().map(|&i| PARAMS[i].path).collect();
+        for &c in SECTIONS[s].3 {
+            paths.extend(CHOSEN[c].iter().copied());
+        }
+        match s {
+            LEGENDS => {
+                paths.extend([("legends", "typeface"), ("legends", "inset")]);
+                paths.extend(PART_PARAMS.iter().map(|&i| PARAMS[i].path));
+                if self.key().is_some() {
+                    paths.extend(ectodeck_draw::print::TEXTS.map(|(n, _)| ("legends", n)));
+                }
+            }
+            1 => paths.extend(COLOUR_PATHS),
+            0 if self.key().is_some() => paths.extend([PARAMS[PLACE_E].path, PARAMS[PLACE_N].path]),
+            _ => {}
+        }
+        paths.sort();
+        paths.dedup();
+        paths
+    }
+
+    /// The light with the section on screen back as Default has it: for all
+    /// keys in a setup of the person's own, Default's values in it (keys with
+    /// values of their own in it keep them); in Default, its values as last
+    /// saved; for one key, the key's own values in it taken out, so it
+    /// follows all keys there again.
+    fn section_reset(&self) -> Value {
+        let mut light = self.light.clone();
+        let paths = self.section_paths();
+        match self.key() {
+            Some(k) => {
+                for &p in &paths {
+                    own_take(&mut light, &k.id, p);
+                }
+            }
+            None => {
+                for &p in &paths {
+                    put_back(&mut light, &self.core_saved, None, p);
+                }
+            }
+        }
+        light
+    }
+
+    /// The section reset button's words, and what it does.
+    fn section_reset_words(&self) -> (String, String) {
+        let name = SECTIONS[self.section].0;
+        let note = match self.key() {
+            Some(k) => format!("Takes out the {name} settings made for {} alone, so {} follows all keys in {name} again. Ctrl+Z undoes it.", k.label, k.label),
+            None => format!("Puts every {name} setting back as {DEFAULT} has it. Keys with {name} settings of their own keep them; reset each one with One key. Ctrl+Z undoes it."),
+        };
+        (format!("Reset {name}"), note)
     }
 
     /// The section's choices at the top of its left column: a button's kind
@@ -2094,6 +2234,11 @@ impl LabPage {
     }
 
     /// How wide Save is: as its words need, and no narrower than it was.
+    /// The section reset button's width, as its words make it.
+    fn default_w(&self) -> f32 {
+        text::width(500, 13.0, &self.section_reset_words().0) + 24.0
+    }
+
     fn save_w(&self) -> f32 {
         (text::width(600, 13.0, &self.save_text()) + 26.0).max(176.0)
     }
@@ -2294,6 +2439,9 @@ impl LabPage {
         let changed = self.light != self.saved;
         self.ui.set_can_save(changed);
         self.ui.set_can_revert(changed);
+        self.ui.set_default_text(self.section_reset_words().0.into());
+        self.ui.set_has_default(self.setup.is_some());
+        self.ui.set_can_default(self.setup.is_some() && !jsonc::same(&self.section_reset(), &self.light));
         self.ui.set_save_text(self.save_text().into());
         self.ui.set_save_w(self.save_w());
     }
@@ -2330,7 +2478,14 @@ impl LabPage {
         let size = (self.section, sw.round() as i32, sh.round() as i32, self.sliders(), self.scope, self.legend_drags, text);
         if self.places_of.as_ref() != Some(&size) {
             // one lit key's switch pad and its values at the top of the right column
-            let right_top = if self.section == 0 && self.key().is_some_and(|k| k.lit) { self.pad_box().3 + 182.0 } else { 0.0 };
+            let right_top = if self.section == 0 && self.key().is_some_and(|k| k.lit) {
+                self.pad_box().3 + 182.0
+            } else if self.section == LEGENDS && !self.choices().is_empty() {
+                // (the Adjust row, which part the sliders act on)
+                drawing::CHOICE_H
+            } else {
+                0.0
+            };
             let set = (self.section == LEGENDS).then(|| self.legends()).flatten();
             let choices = self.choices().len() + (self.section == LEGENDS && !self.choices().is_empty()) as usize + (self.section == 1) as usize;
             self.places = drawing::places(&v, lens, sw, sh, choices, right_top, Some(&size.3), set.as_ref());
@@ -2372,7 +2527,7 @@ impl LabPage {
                 self.face_sketch = Some((key, st, image));
             }
         }
-        let of = (work, self.section, size.1, size.2, scale, hot, self.scope);
+        let of = (work, self.section, size.1, size.2, scale, hot, self.scope, self.part);
         if self.drawn_of.as_ref() == Some(&of) {
             return;
         }
@@ -2398,11 +2553,12 @@ impl LabPage {
         } else if p.unit == Unit::North {
             let edge = Physics::from(&self.work()).switch_width as f64 / 2.0;
             (-edge, edge)
-        } else if p.path.0 == "legends" && matches!(p.path.1, "across" | "down") {
-            // as far as the legend can go and stay on the key's top
-            match self.legend_box() {
+        } else if p.path.0 == "legends" && (p.path.1.ends_with("across") || p.path.1.ends_with("down")) {
+            // as far as the legend, or its part, can go and stay on the key's top
+            let role = ectodeck_draw::print::TEXTS.iter().find(|(n, _)| p.path.1.starts_with(&format!("{n}_"))).map(|&(_, r)| r);
+            match self.legend_box(role) {
                 Some((l, t, r, b, fw, fh)) => {
-                    let (lo, hi) = if p.path.1 == "across" { (-l, fw - r) } else { (-t, fh - b) };
+                    let (lo, hi) = if p.path.1.ends_with("across") { (-l, fw - r) } else { (-t, fh - b) };
                     ((lo * 10.0).ceil() / 10.0, (hi * 10.0).floor() / 10.0)
                 }
                 None => (p.lo, p.hi),
@@ -2472,7 +2628,12 @@ impl LabPage {
         // (a glyph under the pointer tells of itself over the box being typed in)
         let glyph = self.told.filter(|i| (GLYPH..GLYPH + GLYPHS.len() as i32).contains(i));
         match glyph.or(self.focused).or(self.told) {
-            Some(LEGEND_PAD) => ("The legend".into(), "Drag the legend to move it anywhere on the key. Left–right and Up–down show how far it has moved from where Placement puts it.".into()),
+            Some(LEGEND_PAD) => match self.part_on() {
+                0 => ("The legend".into(), "Drag the legend to move it anywhere on the key. Left–right and Up–down show how far it has moved from where Placement puts it.".into()),
+                n => (format!("The {} legend", PART_NAMES[n].to_lowercase()), format!("Drag the {} part of the legend to move it on its own. {} left–right and {} up–down show how far it has moved from where the rest of the legend puts it.", PART_NAMES[n].to_lowercase(), PART_NAMES[n], PART_NAMES[n])),
+            },
+            Some(PART) => ("Adjust".into(), "Which part of the legend the sliders below size and move. Whole sizes and moves the legend as one. Main, Shifted and Bottom each size and move one part on its own: the main legend, the shifted sign beside it, and the bottom legend at the foot of the key.".into()),
+            Some(SECTION_DEFAULT) => self.section_reset_words(),
             Some(i) if (TEXT..TEXT + 3).contains(&i) => (TEXT_NAMES[(i - TEXT) as usize].0.into(), format!("{} The ⌘ button in the box lists keyboard glyphs to add.", TEXT_NAMES[(i - TEXT) as usize].1)),
             Some(i) if (GLYPH..GLYPH + GLYPHS.len() as i32).contains(&i) => {
                 let (glyph, name) = GLYPHS[(i - GLYPH) as usize];
@@ -2669,6 +2830,25 @@ impl LabPage {
                 over.push(Cell { text: ["Top", "Sides"][part].into(), color: slint::Color::from_rgb_u8(r, g, b), on: open, id: [COLOUR_TOP, COLOUR_SIDES][part], style: 32, ..cell(kind::SEG_BUTTON, bx, by, bw, bh) });
             }
         }
+        // which part of the legend the sliders act on, at the top of the right
+        // column over them: the whole legend, or one of the parts the drawn
+        // key's legend has
+        if self.section == LEGENDS && !self.picking && !self.choices().is_empty() {
+            let (rx, y) = (sx + drawing::column_x(false, sw), sy + drawing::choice_y(0));
+            over.push(Cell { id: PART, ..cell(kind::ZONE, rx - 10.0, y - 7.0, drawing::CTRL_W + 20.0, drawing::CHOICE_H) });
+            over.push(text_cell(style::LABEL, rx, y, drawing::CTRL_W, 26.0, "Adjust"));
+            let here = self.parts_here();
+            let options: Vec<(usize, &str)> = PART_NAMES.iter().copied().enumerate().filter(|&(j, _)| j == 0 || here[j - 1]).collect();
+            let widths: Vec<f32> = options.iter().map(|(_, name)| text::width(400, 13.0, name) + 20.0).collect();
+            let seg_w = widths.iter().sum::<f32>() + 2.0 * (widths.len() as f32 - 1.0) + 6.0;
+            over.push(cell(kind::SEG, rx, y + 30.0, seg_w, 34.0));
+            let on = self.part_on();
+            let mut bx = rx + 3.0;
+            for ((j, name), bw) in options.into_iter().zip(widths) {
+                over.push(Cell { text: name.into(), on: j == on, id: PART, index: j as i32, style: style::TELLS, ..cell(kind::SEG_BUTTON, bx, y + 32.0, bw, 30.0) });
+                bx += bw + 2.0;
+            }
+        }
         // the legend to drag anywhere on the drawing's key's top
         if let (LEGENDS, false, false, Some((st, _)), Some(set)) = (self.section, self.picking, self.faces_open, &self.drawn, self.legends()) {
             let (fx, fy, k) = drawing::legend_face(&set, st.w, st.h);
@@ -2845,7 +3025,8 @@ impl LabPage {
     /// The foot's room for its readout and what was last done, beside its buttons.
     fn foot_room(&self) -> f32 {
         let (w, _, _, _) = self.sizes();
-        w - 24.0 - self.save_w() - 10.0 - 68.0 - 10.0 - 132.0 - 10.0 - 24.0
+        let reset = if self.setup.is_some() { self.default_w() + 10.0 } else { 0.0 };
+        w - 24.0 - self.save_w() - 10.0 - 68.0 - 10.0 - reset - 132.0 - 10.0 - 24.0
     }
 
     /// The most room what was last done takes: what the shortest readout leaves.
@@ -2996,7 +3177,8 @@ fn section_of(path: (&str, &str)) -> Option<&'static str> {
     match path {
         ("switches", "kind") | ("place", _) => Some(SECTIONS[0].0),
         ("caps", "kind") => Some(SECTIONS[1].0),
-        ("legends", "place" | "weight" | "typeface" | "main" | "shift" | "second") => Some(SECTIONS[LEGENDS].0),
+        ("legends", "place" | "weight" | "typeface" | "main" | "shift" | "second" | "inset") => Some(SECTIONS[LEGENDS].0),
+        ("legends", v) if PART_PARAMS.iter().any(|&i| PARAMS[i].path.1 == v) => Some(SECTIONS[LEGENDS].0),
         _ => PARAMS.iter().position(|p| p.path == path).and_then(|i| SECTIONS.iter().find(|s| s.2.contains(&i))).map(|s| s.0),
     }
 }
@@ -3162,6 +3344,8 @@ mod tests {
         let note = |a: &str, b: &str, v: Value| value_note((a, b), &v, false).unwrap();
         assert_eq!(note("caps", "kind", json!("pudding")), "Keycaps: Pudding");
         assert_eq!(note("caps", "milky", json!(0.8)), "Keycaps › Haze: 80%");
+        assert_eq!(note("legends", "second_size", json!(0.65)), "Legends › Bottom size: 65%");
+        assert_eq!(note("legends", "main_down", json!(-2.6)), "Legends › Main up–down: 2.6 mm up");
         assert_eq!(note("legends", "opacity", json!(0.7)), "Keycaps › Legend opacity: 70%");
         assert_eq!(note("switches", "kind", json!("clear")), "LEDs › Switch: Clear housing");
         assert_eq!(note("switches", "lumens", json!(1.056)), "LEDs › LED output: 1.06 lumens");

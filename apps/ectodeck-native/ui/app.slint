@@ -3634,6 +3634,11 @@ export component LabWindow inherits Window {
     // Save's words, and its width: where it saves, the core or the light setup in use
     in property <string> save-text: "Save to the core";
     in property <length> save-w: 176px;
+    // the button that puts the section on screen back as Default has it: its words, and whether there is anything to put back
+    in property <string> default-text: "Reset";
+    in property <bool> can-default;
+    // whether there is one: a setup of the person's own is tuned, not Default itself
+    in property <bool> has-default;
     // what is over everything on the page: the light setups' menu, open
     in property <[Cell]> top;
     // the chosen key's text boxes, a list of their own
@@ -3886,6 +3891,14 @@ export component LabWindow inherits Window {
                 text: "Hold to compare";
                 enabled: root.can-revert;
                 changed down => { root.compare(self.down); }
+            }
+            if root.has-default: WordButton {
+                y: 1px;
+                height: 32px;
+                text: root.default-text;
+                enabled: root.can-default;
+                clicked => { root.pick(1610, 0); }
+                changed hover => { root.hovered(1610, self.hover); }
             }
             WordButton {
                 y: 1px;
