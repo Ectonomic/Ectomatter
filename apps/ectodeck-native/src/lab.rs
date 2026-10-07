@@ -450,10 +450,11 @@ const TEXT_NAMES: [(&str, &str); 3] = [
     ("Bottom", "The second function, at the bottom of the key."),
 ];
 /// the glyphs a key's text can take from its list, each with its name
-const GLYPHS: [(&str, &str); 27] = [
+const GLYPHS: [(&str, &str); 31] = [
     ("⌘", "Command"), ("⌥", "Option"), ("⌃", "Control"), ("⇧", "Shift"), ("⇪", "Caps Lock"), ("⎋", "Escape"), ("⇥", "Tab"), ("⌫", "Backspace"), ("⌦", "Delete"),
     ("↵", "Return"), ("⏎", "Enter"), ("␣", "Space"), ("←", "Left"), ("↑", "Up"), ("→", "Right"), ("↓", "Down"), ("⇞", "Page Up"), ("⇟", "Page Down"),
     ("⏯", "Play and pause"), ("⏮", "Previous track"), ("⏭", "Next track"), ("⏏", "Eject"), ("⏻", "Power"), ("⊞", "Windows"), ("≡", "Menu"), ("⎙", "Print Screen"), ("☀", "Brightness"),
+    ("◀", "Left triangle"), ("▲", "Up triangle"), ("▶", "Right triangle"), ("▼", "Down triangle"),
 ];
 /// the switch's place, east and north: values of one key's only
 const PLACE_E: usize = 25;
