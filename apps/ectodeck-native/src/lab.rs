@@ -931,7 +931,7 @@ impl LabPage {
             }
             None => {
                 let name = &self.device.name;
-                (format!("Tune how the {name} is lit. Ectodeck's window shows each change at once; Save writes them into its core."), format!("Tune how the {name} is lit; Save writes it into its core."))
+                (format!("Tune how the {name} is lit. Ectodeck's window shows each change at once; Save writes your changes to the core."), format!("Tune how the {name} is lit. Save writes your changes to the core."))
             }
             Some(k) if k.button => (format!("{0}'s own setup. A button with no light of its own, standing in the keys' light: how high it stands, and what it gives back of the light.", k.label), format!("{0}'s own setup: a button in the keys' light.", k.label)),
             Some(k) if !k.lit => (format!("{0}'s own setup. It has no LED of its own, so only its cap is set here; the rest follows all keys.", k.label), format!("{}'s own setup: its cap; it has no LED of its own.", k.label)),
@@ -1532,6 +1532,56 @@ impl LabPage {
         }
     }
 
+    /// What a custom setup changes, as its row in the menu says it: how many
+    /// of Core's values it changes, and where they are in the lab.
+    fn changes_note(&self, s: &Setup) -> String {
+        fn values(v: &Value) -> usize {
+            match v.as_object() {
+                Some(o) => o.values().map(values).sum::<usize>().max(1),
+                None => 1,
+            }
+        }
+        let (mut n, mut places, mut keys) = (0, Vec::new(), Vec::new());
+        for (a, part) in s.changes.as_object().into_iter().flatten() {
+            match (a.as_str(), part.as_object()) {
+                ("keys", Some(own)) => {
+                    for (id, v) in own {
+                        n += values(v);
+                        keys.push(self.device.caps.iter().find(|(c, _)| &c.id == id).map_or_else(|| id.clone(), |(c, _)| c.label.clone()));
+                    }
+                }
+                (_, Some(part)) => {
+                    for b in part.keys() {
+                        n += 1;
+                        if let Some(section) = section_of((a, b)) {
+                            if !places.contains(&section) {
+                                places.push(section);
+                            }
+                        }
+                    }
+                }
+                _ => n += 1,
+            }
+        }
+        if n == 0 {
+            return "No changes from Core yet.".into();
+        }
+        // the sections in the lab's order, then the keys
+        let mut said: Vec<String> = SECTIONS.iter().map(|s| s.0).filter(|t| places.contains(t)).map(str::to_string).collect();
+        match keys.len() {
+            0 => {}
+            1 => said.push(format!("the {} key", keys[0])),
+            2 => said.push(format!("the {} and {} keys", keys[0], keys[1])),
+            k => said.push(format!("{k} keys")),
+        }
+        let places = match said.len() {
+            0 => String::new(),
+            1 => format!(", in {}", said[0]),
+            k => format!(", in {} and {}", said[..k - 1].join(", "), said[k - 1]),
+        };
+        format!("{n} change{} from Core{places}.", if n == 1 { "" } else { "s" })
+    }
+
     /// What the setups' menu asked for.
     fn setups_menu(&mut self, i: i32) {
         let changed = self.light != self.saved;
@@ -1672,39 +1722,53 @@ impl LabPage {
         let colour = |c: [u8; 3]| slint::Color::from_rgb_u8(c[0], c[1], c[2]);
         let (quiet, faint, dim, bright) = ([0x9a, 0x9a, 0x9a], [0x5a, 0x5a, 0x5a], [0xd4, 0xd4, 0xd4], [0xf5, 0xf5, 0xf5]);
         let small = |x: f32, y: f32, s: &str, c: [u8; 3]| Cell { color: colour(c), ..text_cell(style::SMALL_IN, x, y, text::width(400, 11.5, s) + 2.0, 16.0, s) };
-        let words = |x: f32, y: f32, s: &str, c: [u8; 3]| Cell { color: colour(c), ..text_cell(20, x, y, text::width(400, 13.5, s) + 2.0, 20.0, s) };
-        let mw = 344.0;
+        let words = |x: f32, y: f32, s: &str, c: [u8; 3]| Cell { color: colour(c), ..text_cell(style::WORDS_IN, x, y, text::width(400, 13.5, s) + 2.0, 20.0, s) };
+        let mw = 380.0;
         let (mx, my) = (x.min(w - 24.0 - mw), 59.0);
         // anywhere else on the page shuts it
         top.push(Cell { id: SETUP, index: 1, style: 29, ..cell(kind::LINK, 0.0, 0.0, w, h - 36.0 - 64.0) });
         let mut items = Vec::new();
         let changed = self.light != self.saved;
         let naming = matches!(self.menu, Menu::New | Menu::Rename | Menu::Delete);
-        // a setup's row: its name, lit if in use; faint where changes not
-        // saved would be lost by choosing it
-        let row = |items: &mut Vec<Cell>, y: f32, index: i32, name: &str, in_use: bool| {
+        // a setup's row: its name, and under the name what the setup is;
+        // lit if in use; faint where changes not saved would be lost by
+        // choosing it. How tall it is.
+        let row = |items: &mut Vec<Cell>, y: f32, index: i32, name: &str, note: &str, in_use: bool| -> f32 {
             let can = in_use || (!changed && !naming);
+            let lines = wrap_after(note, mw - 40.0, mw - 40.0);
+            let h = 34.0 + 18.0 * lines.len() as f32;
             if in_use {
-                items.push(Cell { style: 30, ..cell(kind::TILE, mx + 8.0, my + y, mw - 16.0, 36.0) });
+                items.push(Cell { style: 30, ..cell(kind::TILE, mx + 8.0, my + y, mw - 16.0, h) });
             }
             let name = elide(name, SETUP_W, 400, 13.5);
             items.push(words(mx + 20.0, my + y + 8.0, &name, if in_use { bright } else if can { dim } else { faint }));
-            if can && !naming {
-                items.push(Cell { id: SETUP, index, ..cell(kind::LINK, mx + 8.0, my + y, mw - 16.0, 36.0) });
+            for (k, line) in lines.iter().enumerate() {
+                items.push(Cell { color: colour(if can { quiet } else { faint }), ..text_cell(style::NOTE_IN, mx + 20.0, my + y + 27.0 + 18.0 * k as f32, mw - 40.0, 18.0, line) });
             }
+            if can && !naming {
+                items.push(Cell { id: SETUP, index, ..cell(kind::LINK, mx + 8.0, my + y, mw - 16.0, h) });
+            }
+            h
         };
         let mut y = 8.0;
-        row(&mut items, y, 10, "Core", self.setup.is_none());
-        y += 44.0;
-        items.push(small(mx + 20.0, my + y, "Custom", quiet));
-        y += 22.0;
+        y += row(&mut items, y, 10, "Core", "The default lighting. Saving changes the core.", self.setup.is_none());
+        y += 10.0;
+        items.push(Cell { color: colour([0xa3, 0xa3, 0xa3]), ..text_cell(style::LABEL_IN, mx + 20.0, my + y, 200.0, 18.0, "Custom") });
+        y += 20.0;
+        for line in wrap_after("Custom setups save only what you change. Everything else comes from Core.", mw - 40.0, mw - 40.0) {
+            items.push(Cell { color: colour(quiet), ..text_cell(style::NOTE_IN, mx + 20.0, my + y, mw - 40.0, 18.0, &line) });
+            y += 18.0;
+        }
+        y += 6.0;
         if self.setups.is_empty() {
-            items.push(Cell { color: colour(faint), ..text_cell(20, mx + 20.0, my + y + 8.0, mw - 40.0, 20.0, "No custom setups yet") });
-            y += 36.0;
+            for line in wrap_after("No custom setups yet. To make one, choose Save as a new setup below.", mw - 40.0, mw - 40.0) {
+                items.push(Cell { color: colour(dim), ..text_cell(style::NOTE_IN, mx + 20.0, my + y + 4.0, mw - 40.0, 18.0, &line) });
+                y += 18.0;
+            }
+            y += 12.0;
         }
         for (k, s) in self.setups.iter().enumerate() {
-            row(&mut items, y, 11 + k as i32, &s.name, self.setup.as_ref() == Some(&s.id));
-            y += 36.0;
+            y += row(&mut items, y, 11 + k as i32, &s.name, &self.changes_note(s), self.setup.as_ref() == Some(&s.id));
         }
         if changed && !naming {
             for line in wrap_after("Save or revert your changes before switching setups.", mw - 40.0, mw - 40.0) {
@@ -1997,7 +2061,7 @@ impl LabPage {
                     Some(k) => (p.label.into(), format!("{} This is {}'s own value; the dot before the name gives the value back to all keys.", p.note, k.label)),
                     None if self.key().is_none() && self.owns(p.path) => {
                         let core = at(&self.core_saved, p.path).as_f64().or_else(|| default_of(p.path, &self.device.print)).unwrap_or(p.def);
-                        (p.label.into(), format!("{} changes this from Core's {}. Click the dot before the name to use Core's value again. {}", self.setup_name(), said(p, core), p.note))
+                        (p.label.into(), format!("{} changes {} from Core's {}. Click the dot before {} to use Core's {} again. {}", self.setup_name(), p.label, said(p, core), p.label, said(p, core), p.note))
                     }
                     None => (p.label.into(), p.note.into()),
                 }
@@ -2016,7 +2080,8 @@ impl LabPage {
             Some(i) if (CHOICE..CHOICE + CHOICES.len() as i32).contains(&i) => {
                 let c = &CHOICES[(i - CHOICE) as usize];
                 if self.key().is_none() && self.owns(CHOSEN[(i - CHOICE) as usize][0]) {
-                    (c.label.into(), format!("{} changes this from Core. Click the dot before the name to use Core's choice again. {}", self.setup_name(), c.note))
+                    let core = c.options[chosen((i - CHOICE) as usize, &self.core_saved, &self.device.print)];
+                    (c.label.into(), format!("{} changes {} from Core's {core}. Click the dot before {} to use Core's {core} again. {}", self.setup_name(), c.label, c.label, c.note))
                 } else {
                     (c.label.into(), c.note.into())
                 }
@@ -2452,6 +2517,16 @@ fn setup_changes(core: &Value, light: &Value) -> Value {
     ch
 }
 
+/// The section of the lab a value of the light is set in.
+fn section_of(path: (&str, &str)) -> Option<&'static str> {
+    match path {
+        ("switches", "kind") | ("place", _) => Some(SECTIONS[0].0),
+        ("caps", "kind") => Some(SECTIONS[1].0),
+        ("legends", "place" | "weight" | "typeface") => Some(SECTIONS[LEGENDS].0),
+        _ => PARAMS.iter().position(|p| p.path == path).and_then(|i| SECTIONS.iter().find(|s| s.2.contains(&i))).map(|s| s.0),
+    }
+}
+
 /// A value's note in a setup's file: where the lab has it, its name and its
 /// value there, as the lab shows them ("Keycaps › Haze: 80%", "LED ›
 /// Switch: Clear housing"). A value the setup takes out: for one key's own,
@@ -2481,7 +2556,7 @@ fn value_note(path: (&str, &str), v: &Value, of_key: bool) -> Option<String> {
         ("legends", "typeface") => format!("Legends › Typeface: {}", v.as_str().map_or_else(gone, str::to_string)),
         _ => {
             let i = PARAMS.iter().position(|p| p.path == path)?;
-            let section = SECTIONS.iter().find(|s| s.2.contains(&i)).map_or(if path.0 == "place" { "LED" } else { "" }, |s| s.0);
+            let section = section_of(path).unwrap_or("");
             let value = v.as_f64().map_or_else(gone, |x| said(&PARAMS[i], x));
             if section.is_empty() { format!("{}: {value}", PARAMS[i].label) } else { format!("{section} › {}: {value}", PARAMS[i].label) }
         }
