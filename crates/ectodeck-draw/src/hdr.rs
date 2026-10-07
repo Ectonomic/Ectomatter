@@ -444,6 +444,10 @@ struct FaceEdge {
     j: u32,
     skirt: Read,
     share: f32,
+    /// and, read as the skirt though part face, the light on the back of the
+    /// top just inside the face, for the face's part (a top that glows shows it)
+    top: Option<Read>,
+    top_share: f32,
 }
 
 /// Where a pixel reads the simulation's light, as sim::At has it, kept small:
@@ -1273,10 +1277,15 @@ impl Board {
                                         3 => {
                                             let (u, v) = board.unit(x, y);
                                             let (_, n, p) = sim::from_foot(f, r, u, v);
-                                            s.at(p.0 + n.0 * EDGE_READ, p.1 + n.1 * EDGE_READ, Some(2)).map(|at| FaceEdge { j: j as u32, skirt: Read::of(Some(at), fw, cw), share: (1.0 - covered) * a })
+                                            s.at(p.0 + n.0 * EDGE_READ, p.1 + n.1 * EDGE_READ, Some(2)).map(|at| FaceEdge { j: j as u32, skirt: Read::of(Some(at), fw, cw), share: (1.0 - covered) * a, top: None, top_share: 0.0 })
                                         }
-                                        // read as the skirt: none of its light on the face's part
-                                        2 => Some(FaceEdge { j: j as u32, skirt: read[j], share: -covered * a }),
+                                        // read as the skirt: none of its light on the face's part, but the top's
+                                        2 => {
+                                            let (u, v) = board.unit(x, y);
+                                            let (_, n, p) = sim::from_foot(f, r, u, v);
+                                            let top = s.at(p.0 - n.0 * EDGE_READ, p.1 - n.1 * EDGE_READ, Some(3)).map(|at| Read::of(Some(at), fw, cw));
+                                            Some(FaceEdge { j: j as u32, skirt: read[j], share: -covered * a, top, top_share: covered * a })
+                                        }
                                         _ => None,
                                     };
                                     out.extend(edge);
@@ -1705,14 +1714,22 @@ impl Board {
             let from = self.face_edges.partition_point(|e| (e.j as usize) < y0 * w);
             for e in self.face_edges[from..].iter().take_while(|e| (e.j as usize) < y1 * w) {
                 let j = e.j as usize;
-                if k.cap(self.cap_of[j]).0 > 0.0 {
+                let (to_band, top_glow, _) = k.cap(self.cap_of[j]);
+                if to_band > 0.0 {
                     continue;
                 }
                 let l = k.at(&e.skirt.at(fw, cw));
-                let m = self.plastics.get(self.cap_of[j] as usize).copied().flatten().map_or([1.0; 3], |pl| if pl.tint != [1.0; 3] { pl.tint } else { pl.reflect });
+                let plastic = self.plastics.get(self.cap_of[j] as usize).copied().flatten();
+                let m = plastic.map_or([1.0; 3], |pl| if pl.tint != [1.0; 3] { pl.tint } else { pl.reflect });
+                // (and a glowing top's light on its part of a pixel read as the skirt)
+                let t = match (&e.top, top_glow > 0.0) {
+                    (Some(r), true) => k.at(&r.at(fw, cw)).map(|v| v * e.top_share * top_glow),
+                    _ => [0.0; 3],
+                };
+                let tt = plastic.map_or([1.0; 3], |pl| pl.top_tint);
                 let i = (j - y0 * w) * 4;
                 for c in 0..3 {
-                    out[i + c] = (out[i + c] + l[c] * e.share * m[c]).max(0.0);
+                    out[i + c] = (out[i + c] + l[c] * e.share * m[c] + t[c] * tt[c]).max(0.0);
                 }
             }
         }

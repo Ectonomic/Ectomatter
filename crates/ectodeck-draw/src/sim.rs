@@ -1865,6 +1865,51 @@ fn straight(scene: &Scene, ss: &Stoods, k: usize, (lx, ly): (f32, f32), b: &mut 
             b.v[j * b.w + i] = v;
         }
     }
+    // a milky top that lets light through spreads what it takes in a little
+    // way through itself, as milky sides do round the cap: as often as it is
+    // milky, the light on its back comes out of it spread that far, within the top
+    if p.tops > 0.0 && p.milky > 0.0 {
+        let on_top: Vec<bool> = (0..b.w * b.h).map(|n| matches!(scene.surface[(b.y + n / b.w) * scene.fine.w + b.x + n % b.w], Surface::Top(c) if c as usize == k)).collect();
+        let spread = spread_within(&b.v, &on_top, b.w, b.h, s.diffuse / scene.fine.cell);
+        for n in 0..b.v.len() {
+            if on_top[n] {
+                b.v[n] = (1.0 - p.milky) * b.v[n] + p.milky * spread[n];
+            }
+        }
+    }
+}
+
+/// Values on a grid `w` by `h`, each spread as a Gaussian `sigma` cells wide,
+/// over the cells `within` only (what would spread outside them stays in).
+fn spread_within(v: &[f32], within: &[bool], w: usize, h: usize, sigma: f32) -> Vec<f32> {
+    let r = (3.0 * sigma).ceil().max(1.0) as isize;
+    let k: Vec<f32> = (-r..=r).map(|d| (-(d * d) as f32 / (2.0 * sigma * sigma).max(1e-6)).exp()).collect();
+    let pass = |src: &[f32], across: bool| -> Vec<f32> {
+        let mut out = vec![0.0; src.len()];
+        for j in 0..h {
+            for i in 0..w {
+                let n = j * w + i;
+                if !within[n] {
+                    continue;
+                }
+                let (mut sum, mut wt) = (0.0, 0.0);
+                for (t, d) in (-r..=r).enumerate() {
+                    let (x, y) = if across { (i as isize + d, j as isize) } else { (i as isize, j as isize + d) };
+                    if x < 0 || y < 0 || x >= w as isize || y >= h as isize {
+                        continue;
+                    }
+                    let m = y as usize * w + x as usize;
+                    if within[m] {
+                        sum += k[t] * src[m];
+                        wt += k[t];
+                    }
+                }
+                out[n] = if wt > 0.0 { sum / wt } else { src[n] };
+            }
+        }
+        out
+    };
+    pass(&pass(v, true), false)
 }
 
 /// `n` photons from key `k`'s LED at (`lx`, `ly`) and its housing, each
