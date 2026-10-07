@@ -116,7 +116,10 @@ impl Print {
 /// Where on its cap a legend sits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Place {
-    /// at the top, as the Z10 prints them, its second function at the foot
+    /// where the keyboard prints each legend: at the top, its second
+    /// function at the foot, and in the middle on the keys the core prints so
+    Printed,
+    /// at the top on every key, its second function at the foot
     Top,
     /// in the middle, as many pudding and doubleshot caps print them
     Middle,
@@ -129,12 +132,14 @@ impl Place {
         match name {
             Some("middle") => Place::Middle,
             Some("topleft") => Place::TopLeft,
-            _ => Place::Top,
+            Some("top") => Place::Top,
+            _ => Place::Printed,
         }
     }
 
     pub fn name(self) -> &'static str {
         match self {
+            Place::Printed => "printed",
             Place::Top => "top",
             Place::Middle => "middle",
             Place::TopLeft => "topleft",
@@ -199,7 +204,7 @@ impl Own {
     pub fn of(device: &Value) -> Option<Own> {
         let p = &device["print"];
         let f = |k: &str| p[k].as_f64().map(|v| v as f32);
-        let style = Style { typeface: p["typeface"].as_str()?.to_string(), weight: p["weight"].as_f64().map_or(400, |w| w.round() as u16), place: Place::Top, letters: f("letters")?, words: f("words")?, inset: f("inset")? };
+        let style = Style { typeface: p["typeface"].as_str()?.to_string(), weight: p["weight"].as_f64().map_or(400, |w| w.round() as u16), place: Place::Printed, letters: f("letters")?, words: f("words")?, inset: f("inset")? };
         let icons = p["icons"]
             .as_object()
             .map(|o| {
@@ -507,7 +512,7 @@ pub fn set(db: &fontdb::Database, print: &Print, style: &Style, own: &Own, face:
     // in the middle, all of it there; at the top left, all at the top
     let centre_of = |top: f32, foot: f32| fh / 2.0 - CENTRE_RISE * first_cap - (top + foot) / 2.0;
     let (main_shift, second_shift) = match (style.place, bases.first(), bases.last()) {
-        (Place::Top, Some(&b0), Some(&bn)) if print.centred => (centre_of(b0 - first_cap, bn), 0.0),
+        (Place::Printed, Some(&b0), Some(&bn)) if print.centred => (centre_of(b0 - first_cap, bn), 0.0),
         (Place::Middle, Some(&b0), Some(&bn)) => {
             let foot = second_base.unwrap_or(bn).max(bn);
             let d = centre_of(b0 - first_cap, foot);

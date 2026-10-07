@@ -1231,8 +1231,8 @@ fn legends(set: &Legends, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, Vec<Lab
     }
     // Inset: down from the top's edge to the first line's capitals, and in
     // from its left at the top left (in the middle it has no say)
-    // (nor on a key whose legend sits in the middle of its cap at the top)
-    let inset_says = set.style.place == At::TopLeft || (set.style.place == At::Top && !key.print.centred);
+    // (nor, as the keyboard prints them, on a key it prints in the middle)
+    let inset_says = matches!(set.style.place, At::TopLeft | At::Top) || (set.style.place == At::Printed && !key.print.centred);
     if let (Some(first), true) = (lines.first(), inset_says) {
         let face_top = y + key.face[1] * k;
         let top = first.top as f64;

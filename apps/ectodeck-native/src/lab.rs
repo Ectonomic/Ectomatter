@@ -184,13 +184,16 @@ struct Choice {
 const CHOICES: [Choice; 4] = [
     Choice { label: "Switch", note: "What the switch's housing is: black with its LED through a slot in its top, as some older switches have it (Kailh's among them), so all the LED's light leaves in its beam; or clear, glowing with a share of it, over its top as most RGB switches have it, or all over. Each sets the switch's values for that kind; the sliders tune from there.", options: &["LED slot", "Clear top", "Clear housing"] },
     Choice { label: "Keycaps", note: "What the caps let light through: shine-through caps are opaque but for their legends; pudding caps have translucent sides below a black top whose black comes part of the way down them; translucent caps let light through all over. Each fills in Wall opacity and Black down the sides where they are off; the sliders tune from there.", options: &["Shine-through", "Pudding", "Translucent"] },
-    Choice { label: "Placement", note: "Where the legend sits on the cap: at the top, its second function at the foot, as the keyboard's own caps print it; in the middle, as many pudding and doubleshot caps print it; or at the top left, as classic caps print it.", options: &["Top", "Middle", "Top left"] },
+    Choice { label: "Placement", note: "Where the legends sit on the caps. Default puts each one where this keyboard prints it. Top, Middle and Top left put every legend there, including the ones this keyboard prints in the middle.", options: &["Default", "Top", "Middle", "Top left"] },
     Choice { label: "Weight", note: "How heavy the typeface's strokes are, of the weights it comes in. A heavier legend lets more of the light through.", options: &["Thin", "Extra light", "Light", "Regular", "Medium", "Semibold", "Bold", "Extra bold", "Black"] },
 ];
 
+/// The order of the sections on the page's tabs, by their place in SECTIONS.
+const ORDER: [usize; 5] = [LEGENDS, 1, 0, 3, 4];
+
 /// The page's sections: a title, what the part is, its values, and its choices.
 const SECTIONS: [(&str, &str, &[usize], &[usize]); 5] = [
-    ("LED", "Each key's LED shines up out of its switch in a beam, onto the back of the legend. In a black housing that is all its light; a clear housing scatters a share of it instead, glowing with it over its top and sides, which lights the legend evenly, the inside of the cap and the deck round the switch.", &[0, 1, 2, 3, 4, 5, 7, 6], &[0]),
+    ("LEDs", "Each key's LED shines up out of its switch in a beam, onto the back of the legend. In a black housing that is all its light; a clear housing scatters a share of it instead, glowing with it over its top and sides, which lights the legend evenly, the inside of the cap and the deck round the switch.", &[0, 1, 2, 3, 4, 5, 7, 6], &[0]),
     ("Keycaps", "Each cap stands over its switch, its skirt from its foot to its top. Light bounces about inside it; some gets out under the skirt, some through the legend, and some through the plastic where it is translucent and not coated black.", &[8, 9, 10, 22, 23, 24, 11, 12, 13], &[1]),
     ("Legends", "What the light comes through: the print on each cap. Set it as your caps print it: its typeface, how tall its letters are, and where on the cap it sits.", &[29, 27, 28], &[2, 3]),
     ("Wells", "The keys sit in wells in the chassis: the deck at their floor, walled round by the chassis. What each gives back of the light falling on it lights the rest.", &[14, 15, 16], &[]),
@@ -215,9 +218,10 @@ fn chosen(choice: usize, light: &Value, print: &Value) -> usize {
     let p = Physics::from(light);
     match choice {
         2 => match ectodeck_draw::print::Place::named(light["legends"]["place"].as_str()) {
-            ectodeck_draw::print::Place::Top => 0,
-            ectodeck_draw::print::Place::Middle => 1,
-            ectodeck_draw::print::Place::TopLeft => 2,
+            ectodeck_draw::print::Place::Printed => 0,
+            ectodeck_draw::print::Place::Top => 1,
+            ectodeck_draw::print::Place::Middle => 2,
+            ectodeck_draw::print::Place::TopLeft => 3,
         },
         3 => {
             let w = light["legends"]["weight"].as_f64().or_else(|| print["weight"].as_f64()).unwrap_or(400.0);
@@ -236,6 +240,9 @@ fn chosen(choice: usize, light: &Value, print: &Value) -> usize {
     }
 }
 
+/// What the light calls the Placement choice's options.
+const PLACES: [&str; 4] = ["printed", "top", "middle", "topleft"];
+
 /// The weight an option of the Weight choice is: Thin's 100 to Black's 900.
 fn weight_of(option: usize) -> u64 {
     100 * (option.min(8) as u64 + 1)
@@ -244,7 +251,7 @@ fn weight_of(option: usize) -> u64 {
 /// The light with an option of a choice taken, and the values it sets for it.
 fn choose(light: &mut Value, choice: usize, option: usize) {
     match choice {
-        2 => put_at(light, ("legends", "place"), json!(["top", "middle", "topleft"][option.min(2)])),
+        2 => put_at(light, ("legends", "place"), json!(PLACES[option.min(3)])),
         3 => put_at(light, ("legends", "weight"), json!(weight_of(option))),
         0 => {
             let switch = [Switch::Slot, Switch::ClearTop, Switch::Clear][option.min(2)];
@@ -616,7 +623,7 @@ fn all_keys(light: &Value, path: (&str, &str), print: &Value) -> Value {
     match at(light, path) {
         // (the legends' typeface and weight as the core prints them, at the top)
         Value::Null if path.0 == "legends" && !print[path.1].is_null() => print[path.1].clone(),
-        Value::Null if path == ("legends", "place") => json!("top"),
+        Value::Null if path == ("legends", "place") => json!("printed"),
         Value::Null => default_of(path, print).map_or(Value::Null, |d| json!(d)),
         v => v.clone(),
     }
@@ -843,7 +850,7 @@ impl LabPage {
             None => (light.clone(), light.clone()),
         };
         // the section shown when the lab was last open
-        let section = crate::uistate::get("lab_section").and_then(|v| v.as_u64()).map_or(0, |n| (n as usize).min(SECTIONS.len() - 1));
+        let section = crate::uistate::get("lab_section").and_then(|v| v.as_u64()).map_or(ORDER[0], |n| (n as usize).min(SECTIONS.len() - 1));
         let mut page = LabPage {
             ui,
             device,
@@ -899,7 +906,8 @@ impl LabPage {
     fn sections(&self) -> Vec<usize> {
         let d = &self.device;
         let printed = d.keys && d.print.is_object() && d.caps.iter().any(|(c, _)| c.print.is_some());
-        [d.keys, d.keys, printed, d.wells, d.screens].iter().enumerate().filter(|(_, has)| **has).map(|(i, _)| i).collect()
+        let has = [d.keys, d.keys, printed, d.wells, d.screens];
+        ORDER.iter().copied().filter(|&i| has[i]).collect()
     }
 
     /// The key the stage draws, in section as its art has it: the one chosen,
@@ -989,6 +997,11 @@ impl LabPage {
                                 let v = match p.unit {
                                     Unit::Fraction => (v / 100.0).clamp(p.lo.max(0.0), p.hi.min(1.0)),
                                     Unit::Mm if p.path == ("switches", "width") => v.clamp(p.lo, p.hi),
+                                    // (a legend kept on its cap's top)
+                                    Unit::Mm if p.path == ("legends", "inset") => {
+                                        let (lo, hi) = self.range(id.max(0) as usize);
+                                        v.clamp(lo, hi)
+                                    }
                                     Unit::Nits | Unit::Mm | Unit::Lumens => v.max(0.0),
                                     Unit::Reach => v.max(p.lo),
                                     // on the side it is on unless typed below 0 or "south"/"north"
@@ -1352,7 +1365,7 @@ impl LabPage {
     /// nothing to save.
     fn tidy_print(&mut self) {
         let core = |k: &str| match k {
-            "place" => json!("top"),
+            "place" => json!("printed"),
             _ => self.device.print[k].clone(),
         };
         for k in ["typeface", "weight", "place"] {
@@ -1400,6 +1413,12 @@ impl LabPage {
             ids.retain(|&i| PARAMS[i].path != ("switches", "lumens") && (k.legend || !matches!(PARAMS[i].path, ("legends", "opacity" | "unlit"))));
             if self.section == 0 && k.lit {
                 ids.extend([PLACE_E, PLACE_N]);
+            }
+            // where the keyboard prints its legend in the middle, Inset has
+            // no say while the legends sit as it prints them (as the drawing shows)
+            let printed = matches!(self.work()["legends"]["place"].as_str(), None | Some("printed"));
+            if self.section == LEGENDS && printed && k.print.as_ref().is_some_and(|p| p.centred) {
+                ids.retain(|&i| PARAMS[i].path != ("legends", "inset"));
             }
         }
         ids
@@ -1936,6 +1955,21 @@ impl LabPage {
         } else if p.unit == Unit::North {
             let edge = Physics::from(&self.work()).switch_width as f64 / 2.0;
             (-edge, edge)
+        } else if p.path == ("legends", "inset") {
+            // as far down the cap's top as the legend can go and stay on it,
+            // and at the top left as far in: the key's top, less the letter
+            let id = self.key().map(|k| k.id.clone()).or_else(|| self.device.typical.clone());
+            let face = id.and_then(|id| self.device.caps.iter().find(|(c, _)| c.id == id)).map(|(c, _)| c.face);
+            let work = self.work();
+            let letters = get(&work, ("legends", "letters")).or_else(|| default_of(("legends", "letters"), &self.device.print)).unwrap_or(p.def);
+            match face {
+                Some(f) => {
+                    let (across, deep) = ((f[2] - f[0]) as f64 / self.mm(), (f[3] - f[1]) as f64 / self.mm());
+                    let room = if work["legends"]["place"] == "topleft" { across.min(deep) } else { deep };
+                    (p.lo, (((room - letters) * 10.0).floor() / 10.0).max(p.hi))
+                }
+                None => (p.lo, p.hi),
+            }
         } else if p.unit == Unit::Place {
             // the switch's housing inside its cap's foot
             let (across, deep) = self.key_size().unwrap_or((17.4, 17.4));
@@ -2064,8 +2098,8 @@ impl LabPage {
         let mut cells = vec![text_cell(style::TITLE, 24.0, 14.0, 300.0, 29.0, "Light lab")];
         let mut bx = 0.0;
         let mut tabs = Vec::new();
-        let open = self.sections();
-        for (i, (title, _, _, _)) in SECTIONS.iter().enumerate().filter(|(i, _)| open.contains(i)) {
+        for i in self.sections() {
+            let title = &SECTIONS[i].0;
             let bw = text::width(400, 13.0, title) + 24.0;
             tabs.push((i, title, bx, bw));
             bx += bw + 2.0;
@@ -2486,13 +2520,13 @@ fn value_note(path: (&str, &str), v: &Value, of_key: bool) -> Option<String> {
         }
     };
     // a choice's option, by the name the light gives it
-    let option = |choice: usize, names: [&str; 3]| -> String {
+    let option = |choice: usize, names: &[&str]| -> String {
         v.as_str().and_then(|s| names.iter().position(|n| *n == s)).map_or_else(gone, |i| CHOICES[choice].options[i].to_string())
     };
     Some(match path {
-        ("switches", "kind") => format!("LED › Switch: {}", option(0, ["led-slot", "clear-top", "clear"])),
-        ("caps", "kind") => format!("Keycaps: {}", option(1, ["shine-through", "pudding", "translucent"])),
-        ("legends", "place") => format!("Legends › Placement: {}", option(2, ["top", "middle", "topleft"])),
+        ("switches", "kind") => format!("{} › Switch: {}", SECTIONS[0].0, option(0, &["led-slot", "clear-top", "clear"])),
+        ("caps", "kind") => format!("Keycaps: {}", option(1, &["shine-through", "pudding", "translucent"])),
+        ("legends", "place") => format!("Legends › Placement: {}", option(2, &PLACES)),
         ("legends", "weight") => {
             let w = v.as_f64().map(|w| CHOICES[3].options[((w.round() as usize + 50) / 100).clamp(1, 9) - 1].to_string());
             format!("Legends › Weight: {}", w.unwrap_or_else(gone))
@@ -2554,14 +2588,17 @@ mod tests {
         let print = json!({ "typeface": "Barlow Semi Condensed", "weight": 600, "letters": 3.786, "words": 2.568, "inset": 2.022 });
         assert_eq!(default_of(("legends", "letters"), &print), Some(3.786));
         assert_eq!(all_keys(&light, ("legends", "typeface"), &print), json!("Barlow Semi Condensed"));
-        assert_eq!(all_keys(&light, ("legends", "place"), &print), json!("top"));
+        assert_eq!(all_keys(&light, ("legends", "place"), &print), json!("printed"));
         // a key's own value as all keys' is no setup of its own
         let mut l = json!({ "legends": {} });
         own_set(&mut l, "enter", ("legends", "words"), json!(2.568), &print);
         assert!(l["keys"].is_null(), "Enter's words as all keys': none of its own");
         own_set(&mut l, "enter", ("legends", "words"), json!(2.2), &print);
         assert_eq!(l["keys"]["enter"]["legends"]["words"], json!(2.2));
-        assert_eq!((chosen(2, &middle, &print), chosen(3, &light, &print)), (1, 5), "Middle; the core's own Semibold");
+        assert_eq!((chosen(2, &light, &print), chosen(2, &middle, &print), chosen(3, &light, &print)), (0, 2, 5), "Default; Middle; the core's own Semibold");
+        let mut top = light.clone();
+        choose(&mut top, 2, 1);
+        assert_eq!((top["legends"]["place"].clone(), chosen(2, &top, &print)), (json!("top"), 1), "Top, kept as such");
     }
 
     /// Save writes the legends as the lab set them into the core's light,
@@ -2595,12 +2632,12 @@ mod tests {
         assert_eq!(note("caps", "kind", json!("pudding")), "Keycaps: Pudding");
         assert_eq!(note("caps", "milky", json!(0.8)), "Keycaps › Haze: 80%");
         assert_eq!(note("legends", "opacity", json!(0.7)), "Keycaps › Legend opacity: 70%");
-        assert_eq!(note("switches", "kind", json!("clear")), "LED › Switch: Clear housing");
-        assert_eq!(note("switches", "lumens", json!(1.056)), "LED › LED output: 1.06 lumens");
+        assert_eq!(note("switches", "kind", json!("clear")), "LEDs › Switch: Clear housing");
+        assert_eq!(note("switches", "lumens", json!(1.056)), "LEDs › LED output: 1.06 lumens");
         assert_eq!(note("legends", "weight", json!(600.0)), "Legends › Weight: Semibold");
         assert_eq!(note("legends", "typeface", Value::Null), "Legends › Typeface: as the keyboard's print has it");
         assert_eq!(note("display", "lit", json!(45.0)), "Display › Lit dots: 45 nits");
-        assert_eq!(value_note(("place", "north"), &json!(4.5), true).unwrap(), "LED › Switch north–south: 4.5 mm north");
+        assert_eq!(value_note(("place", "north"), &json!(4.5), true).unwrap(), "LEDs › Switch north–south: 4.5 mm north");
         assert_eq!(value_note(("caps", "top"), &Value::Null, true).unwrap(), "Keycaps › Cap's top: as all keys have it");
         assert_eq!(value_note(("wells", "art"), &json!("mask_1"), false), None, "not the lab's to say");
     }
