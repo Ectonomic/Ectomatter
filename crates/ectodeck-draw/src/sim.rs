@@ -196,7 +196,7 @@ pub const MILKY: f32 = 20.0;
 
 /// The keyboard's physical make, from the core's light: its switches, caps
 /// and wells, heights and widths in millimetres (heights above the deck),
-/// shares from 0 to 1. (The core names them as the Light lab does: the caps'
+/// shares from 0 to 1. (The core names them as the Key lab does: the caps'
 /// foot and top, the wells' depth.)
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Physics {

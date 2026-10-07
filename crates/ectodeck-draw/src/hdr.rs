@@ -26,7 +26,7 @@ pub mod sim;
 use sim::{At, Coloured, Snapshot};
 
 
-/// A cap as the art draws it, for choosing it in the Light lab: its
+/// A cap as the art draws it, for choosing it in the Key lab: its
 /// control's id, what the core calls its key (and more briefly, where the
 /// core says so), its foot (its skirt's outline) in the art's units, and
 /// whether it has an LED and a legend of its own. A button with no light
@@ -47,7 +47,7 @@ pub struct CapShape {
 }
 
 /// A key in section, north to south, as the art has it, in millimetres, for
-/// the Light lab to draw: its foot and its face's inset from it; the deck
+/// the Key lab to draw: its foot and its face's inset from it; the deck
 /// between its well's north wall and its foot; the key south of it (the gap
 /// to its foot, and that foot); north of its well, the chassis to the next
 /// well and that well's deck south of its keys; and its legends, north to
@@ -917,7 +917,7 @@ impl Board {
     }
 
     /// Light the keyboard by another of the core's "light" descriptions (as the
-    /// Light lab tunes it): how bright the light is, how a legend looks
+    /// Key lab tunes it): how bright the light is, how a legend looks
     /// with its LED off, the display. How the light falls is the simulation's,
     /// asked of it on its own (see sim::Simulator::set). True if the picture
     /// changes with it; a change in how the light falls shows with the
@@ -1763,7 +1763,7 @@ mod tests {
     }
 
     /// A key in section comes from the art: the Z10's 2 key, against the
-    /// measurements the Light lab's drawing was first made from (its foot,
+    /// measurements the Key lab's drawing was first made from (its foot,
     /// its face's inset, the deck and the chassis north of it, the W key
     /// south of it), and its two legends where the art prints them: 2@ about
     /// 3 mm north of its middle, PF2 about 4 mm south. A cap with no legend

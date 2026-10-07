@@ -1,12 +1,12 @@
-# The Light lab and the light model
+# The Key lab and the light model
 
 2026-10-03. Approved, and built in this order: the boundary, then one key's own setup. 2026-10-04: the light description written to be read, its values named as the lab names them (the core protocol's draft 6). 2026-10-06: custom setups beside Default, the core's own setup, kept in Ectodeck's own data (section 4). 2026-10-07: a key's legend typed, keyboard glyphs included, and moved anywhere on its key (section 2).
 
-The Light lab is Ectodeck's, not a device's. It is built to tune any peripheral's light, and the Z10 is only the first device it tunes. This sets out where the boundary runs, so the lab never carries a device and a core never carries the lab.
+The Key lab is Ectodeck's, not a device's. It is built to tune any peripheral's light, and the Z10 is only the first device it tunes. This sets out where the boundary runs, so the lab never carries a device and a core never carries the lab.
 
 ## 1. Who owns what
 
-**Ectodeck, the platform.** The light model, which is the vocabulary of lit parts and how light moves through them; the engine that simulates the light and draws it in HDR (`crates/ectodeck-draw`); and the Light lab, the window that tunes it. None of them knows any one device. Each works from what a core describes.
+**Ectodeck, the platform.** The light model, which is the vocabulary of lit parts and how light moves through them; the engine that simulates the light and draws it in HDR (`crates/ectodeck-draw`); and the Key lab, the window that tunes it. None of them knows any one device. Each works from what a core describes.
 
 **A core, the device's package.** Its art, its controls, and its light description: which lit parts the device has, their shapes (taken from the art) and heights, and the values that light it, each key's own included. For the Z10 as it ships: Kailh Brown switches with the LED through a slot 5.08 mm north of the stem, shine-through caps, wells 2 mm deep. A core describes its device in data and carries no interface, as the core protocol already rules.
 
@@ -19,7 +19,7 @@ The lab tunes a core's light description and saves it back into that core, or tu
   ───────────────────                  ────────────────────────
   light model: parts, physics    ◀──   art: art/z10.svg
   engine: simulate, draw HDR     ◀──   light description: device.json "light"
-  Light lab: tunes a device      ──▶   Save to the core writes the light description
+  Key lab: tunes a device      ──▶   Save to the core writes the light description
            │
            └──▶  the person's own setups, in Ectodeck's data: light/evga-z10/<setup>.json
 ```

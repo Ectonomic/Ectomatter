@@ -1,6 +1,6 @@
 //! A device's core, as Ectodeck reads it: its device description (JSON with
 //! comments), and the art the description names, from the core's own folder. Ectodeck runs from
-//! its source, so the cores are the source's folders; the Light lab saves the
+//! its source, so the cores are the source's folders; the Key lab saves the
 //! light it tunes into the core it came from.
 
 use std::path::PathBuf;
@@ -10,7 +10,7 @@ pub struct Core {
     /// the core's name: its folder's
     pub id: String,
     /// its device description as it was read, where it was read from (where
-    /// the Light lab saves), and the art it names
+    /// the Key lab saves), and the art it names
     pub device: serde_json::Value,
     pub path: PathBuf,
     pub art: String,
@@ -46,7 +46,7 @@ impl Core {
         self.device["name"].as_str().unwrap_or(&self.id)
     }
 
-    /// Its device description as its file has it now, which the Light lab
+    /// Its device description as its file has it now, which the Key lab
     /// may have saved into since it was read.
     pub fn device_now(&self) -> serde_json::Value {
         std::fs::read_to_string(&self.path).ok().and_then(|t| ectodeck_draw::jsonc::parse(&t).ok()).unwrap_or_else(|| self.device.clone())

@@ -64,7 +64,7 @@ pub fn in_use(settings: &crate::settings::Settings, core: &str) -> Option<Setup>
 }
 
 /// The words beside a value in a setup's file, by the value's path from
-/// the light down: its name and its value as the Light lab shows them.
+/// the light down: its name and its value as the Key lab shows them.
 pub type Note<'a> = &'a dyn Fn(&[String], &Value) -> Option<String>;
 
 /// Write a setup's file, by way of a temporary one so a crash mid-write
@@ -83,15 +83,15 @@ pub fn write(core: &str, device: &str, s: &Setup, note: Note) -> Result<(), Stri
 fn file_text(device: &str, s: &Setup, note: Note) -> String {
     let name = &s.name;
     let mut out = vec![format!("// {name}: a custom light setup for the {device}."), "//".to_string()];
-    out.extend(comment(&format!("The Light lab writes this file each time you save {name}. The file holds only the settings {name} changes from Default; every setting not listed here uses Default's value. The note beside each value names the setting as the Light lab does, for example \"Keycaps › Haze: 80%\"."), ""));
+    out.extend(comment(&format!("The Key lab writes this file each time you save {name}. The file holds only the settings {name} changes from Default; every setting not listed here uses Default's value. The note beside each value names the setting as the Key lab does, for example \"Keycaps › Haze: 80%\"."), ""));
     out.push("//".into());
-    out.extend(comment(&format!("You can edit values here by hand; the changes apply the next time Ectodeck starts. Percentages are written from 0 to 1 (80% is 0.8), and lengths in millimetres. To switch back to Default, or to rename or delete {name}, use the setup menu at the top of the Light lab."), ""));
+    out.extend(comment(&format!("You can edit values here by hand; the changes apply the next time Ectodeck starts. Percentages are written from 0 to 1 (80% is 0.8), and lengths in millimetres. To switch back to Default, or to rename or delete {name}, use the setup menu at the top of the Key lab."), ""));
     out.push("{".into());
     match s.changes.as_object().filter(|o| !o.is_empty()) {
         None => {
             out.push(format!("  \"name\": {},  // the name shown in the setup menu", json!(name)));
             out.push(String::new());
-            out.extend(comment(&format!("{name} has no changes from Default yet, so the keyboard looks the same as with Default. Change a setting in the Light lab and press Save to {name}; the change is written here."), "  "));
+            out.extend(comment(&format!("{name} has no changes from Default yet, so the keyboard looks the same as with Default. Change a setting in the Key lab and press Save to {name}; the change is written here."), "  "));
             out.push("  \"light\": {}".into());
         }
         Some(_) => {

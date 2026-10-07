@@ -1,6 +1,6 @@
 //! Legends set anew from each key's print: the words its cap has printed on
 //! it, as the core gives them, set in a typeface, as tall and where on the
-//! cap a light's "legends" say (the Light lab's Legends section). They are
+//! cap a light's "legends" say (the Key lab's Legends section). They are
 //! laid out as the Z10's caps are printed: a key's own legend at the top of
 //! its cap, its shifted sign beside it, words of more than one line one under
 //! the other, its second function at its foot; a legend the core prints in

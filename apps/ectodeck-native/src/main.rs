@@ -104,7 +104,7 @@ const MIN_SIZE: (u32, u32) = (1000, 700);
 /// the Macro Editor's window, as the web app's
 const MACRO_SIZE: (u32, u32) = (1080, 620);
 const MACRO_MIN_SIZE: (u32, u32) = (900, 420);
-/// the Light lab's
+/// the Key lab's
 const LAB_SIZE: (u32, u32) = (1280, 800);
 const LAB_MIN_SIZE: (u32, u32) = (1080, 680);
 /// the windows of their own beside the main one, by their place in App's `subs`
@@ -267,7 +267,7 @@ fn legends_builder(done: calloop::channel::Sender<ectodeck_draw::hdr::Legends>) 
     ask
 }
 
-/// A brightness for the Light lab's readout: whole nits, or tenths below ten.
+/// A brightness for the Key lab's readout: whole nits, or tenths below ten.
 fn tenth(nits: f32) -> f64 {
     let n = nits as f64;
     if n < 10.0 { (n * 10.0).round() / 10.0 } else { n.round() }
@@ -322,7 +322,7 @@ fn key_text(e: &KeyEvent) -> Option<SharedString> {
 }
 
 /// Ectodeck's own fonts for a keyboard's glyphs in the windows' text too
-/// (the Light lab's glyph list, a key's text as typed): looked in after the
+/// (the Key lab's glyph list, a key's text as typed): looked in after the
 /// computer's own fonts, so a glyph the computer has no font for still shows.
 fn glyph_fonts_in_windows() {
     use i_slint_core::textlayout::sharedparley::fontique::{Blob, GenericFamily};
@@ -342,7 +342,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let snapshot = args.iter().position(|a| a == "--snapshot").and_then(|i| args.get(i + 1)).cloned();
     // the typefaces legends can be set in, the core's own among them, loaded
-    // in the background so the Light lab's list of them opens at once
+    // in the background so the Key lab's list of them opens at once
     ectodeck_draw::print::add_fonts(cores::shown().fonts());
     ectodeck_draw::print::warm();
     // `--read-state FILE`: read the keyboard's state once, for the snapshots, and stop
@@ -405,7 +405,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     if let Some(n) = std::env::var("ECTODECK_NATIVE_MACROS").ok().and_then(|v| v.parse::<u32>().ok()) {
         return snap_macros(front, made, n, path);
     }
-    // ECTODECK_NATIVE_LAB: the Light lab's window instead
+    // ECTODECK_NATIVE_LAB: the Key lab's window instead
     if std::env::var_os("ECTODECK_NATIVE_LAB").is_some() {
         return snap_lab(front, made, reference, path);
     }
@@ -678,7 +678,7 @@ fn snap_macros(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>
     eprintln!("saved {path}: {w}x{h}");
 }
 
-/// The Light lab's window without a window: one frame, saved as a PNG,
+/// The Key lab's window without a window: one frame, saved as a PNG,
 /// its readout from the keyboard lit as the snapshot's state has it.
 fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>, reference: f64, path: &str) {
     let (w, h) = std::env::var("ECTODECK_NATIVE_SIZE")
@@ -892,12 +892,12 @@ struct App {
     /// the windows Slint has made, the Macro Editor's among them
     made: Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>,
     /// the windows of their own beside the main one (the Macro Editor's, the
-    /// Light lab's), once opened, and which of them has the keyboard's focus
+    /// Key lab's), once opened, and which of them has the keyboard's focus
     subs: [Option<SubWin>; 2],
     keys_on: Option<usize>,
     /// the keys held down as the keyboard last said, for Ctrl+Shift+L
     mods: Modifiers,
-    /// the light the Light lab has tuned, which the keyboard is lit by, and
+    /// the light the Key lab has tuned, which the keyboard is lit by, and
     /// its change (and whether Hold to compare was held for it)
     light: Option<serde_json::Value>,
     light_rev: (u64, bool),
@@ -1036,7 +1036,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
 
     let (built_tx, built_rx) = calloop::channel::channel::<Board>();
     let build = board_builder(built_tx);
-    // the legends, set anew as the Light lab asks
+    // the legends, set anew as the Key lab asks
     let (legends_tx, legends_rx) = calloop::channel::channel::<ectodeck_draw::hdr::Legends>();
     let set_legends = legends_builder(legends_tx);
     event_loop
@@ -1204,7 +1204,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
     let mut fps = std::env::var_os("ECTODECK_NATIVE_FPS").map(|_| (Instant::now(), 0u32, Duration::ZERO));
     // ECTODECK_NATIVE_OPEN_MACROS=N: open the Macro Editor on macro N once the keyboard is read, to check it
     let mut open_macros = std::env::var("ECTODECK_NATIVE_OPEN_MACROS").ok().and_then(|v| v.parse::<u32>().ok());
-    // ECTODECK_NATIVE_OPEN_LAB: open the Light lab at start, as Ctrl+Shift+L does
+    // ECTODECK_NATIVE_OPEN_LAB: open the Key lab at start, as Ctrl+Shift+L does
     let mut open_lab = std::env::var_os("ECTODECK_NATIVE_OPEN_LAB").is_some();
     while !app.exit {
         let busy = (app.slint.has_active_animations() && !app.frame_pending)
@@ -1368,13 +1368,13 @@ impl App {
         }
     }
 
-    /// The light the keyboard is lit by: the Light lab's, if it has tuned
+    /// The light the keyboard is lit by: the Key lab's, if it has tuned
     /// one, or that of the setup in use (the core's, or one of the person's own).
     fn light_now(&self) -> serde_json::Value {
         self.light.clone().unwrap_or_else(|| cores::shown().device_now()["light"].clone())
     }
 
-    /// Open the Light lab, made the first time, on the light the keyboard is lit by.
+    /// Open the Key lab, made the first time, on the light the keyboard is lit by.
     fn open_lab(&mut self) {
         if self.front.lab.is_none() {
             let light = self.light_now();
@@ -1383,14 +1383,14 @@ impl App {
             slint::ComponentHandle::show(&ui).unwrap();
             let setup = setups::in_use(&self.front.settings, &cores::shown().id).map(|s| s.id);
             self.front.lab = Some(lab::LabPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false), light, lab_device(self.board.as_ref()), setup));
-            self.subs[LAB] = Some(self.make_sub(&format!("{} / Light lab", cores::shown().name()), LAB_SIZE, LAB_MIN_SIZE));
+            self.subs[LAB] = Some(self.make_sub(&format!("{} / Key lab", cores::shown().name()), LAB_SIZE, LAB_MIN_SIZE));
         } else {
             self.show_sub(LAB);
         }
         self.readout();
     }
 
-    /// Tell the Light lab what is on the keyboard now, in whole nits, at
+    /// Tell the Key lab what is on the keyboard now, in whole nits, at
     /// most four times a second (an effect changes it every frame).
     fn readout(&mut self) {
         if self.readout_at.is_some_and(|t| t.elapsed() < Duration::from_millis(250)) {
@@ -1595,10 +1595,10 @@ impl App {
         self.window.commit();
     }
 
-    /// The keyboard came back drawn at a size: light it, by the Light lab's
+    /// The keyboard came back drawn at a size: light it, by the Key lab's
     /// light if it has tuned one.
     fn built(&mut self, mut board: Board) {
-        // the Light lab, open before the device was first drawn, takes its caps
+        // the Key lab, open before the device was first drawn, takes its caps
         if let Some(l) = self.front.lab.as_mut().filter(|l| !l.has_caps()) {
             l.set_caps(lab_device(Some(&board)).caps);
         }
@@ -1720,7 +1720,7 @@ impl App {
         // before the page is drawn, so they move with it in the same frame
         let rect = board_rect(&self.front.ui, self.scale as f32);
         self.front.board_size(rect.2 as u32, rect.3 as u32, self.scale as f32);
-        // the Light lab's tuning, when it has changed
+        // the Key lab's tuning, when it has changed
         let mut relit = false;
         if let Some(lab) = &self.front.lab {
             let rev = (lab.rev, lab.comparing);
@@ -1914,7 +1914,7 @@ impl App {
 
     /// A key on the keyboard, pressed or let go.
     fn key(&mut self, e: &KeyEvent, down: bool) {
-        // Ctrl+Shift+L, anywhere in Ectodeck: the Light lab, a developer's panel
+        // Ctrl+Shift+L, anywhere in Ectodeck: the Key lab, a developer's panel
         if down && self.mods.ctrl && self.mods.shift && matches!(e.keysym, Keysym::l | Keysym::L) {
             self.open_lab();
             return;
@@ -1949,7 +1949,7 @@ impl CompositorHandler for App {
             mw.slint.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: mw.scale as f32 });
             mw.slint.set_size(PhysicalSize::new(mw.size.0 * mw.scale, mw.size.1 * mw.scale));
             mw.full = true;
-            // the Light lab's legends drawn again at the screen's own pixels
+            // the Key lab's legends drawn again at the screen's own pixels
             if which == LAB {
                 if let Some(l) = &mut self.front.lab {
                     l.refresh();
@@ -2376,7 +2376,7 @@ fn cursor_icon(p: Pointer) -> CursorIcon {
     }
 }
 
-/// The device the Light lab tunes, as the shown core describes it: its
+/// The device the Key lab tunes, as the shown core describes it: its
 /// name, where its description is, which of the light's parts it has, and
 /// (once its board is drawn) every cap, each in section as the art has it.
 fn lab_device(board: Option<&Board>) -> lab::LabDevice {

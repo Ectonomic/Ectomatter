@@ -1,4 +1,4 @@
-//! The Light lab's stage: a section's drawing of the key, to scale from
+//! The Key lab's stage: a section's drawing of the key, to scale from
 //! the light's values as the simulation holds them, with each of its
 //! sliders' places round it and the line that joins each slider to the part
 //! it changes. Drawn as an SVG and drawn by resvg, since the window's

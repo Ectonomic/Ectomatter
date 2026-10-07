@@ -1,4 +1,4 @@
-//! The Light lab: a developer's window for tuning how a device is lit,
+//! The Key lab: a developer's window for tuning how a device is lit,
 //! whichever device it is: it knows none, and works from what the device's
 //! core describes (see LabDevice). The light is simulated (see
 //! ectodeck_draw's sim): each LED followed through the device's shape. The
@@ -2267,7 +2267,7 @@ impl LabPage {
         let colour = |c: [u8; 3]| slint::Color::from_rgb_u8(c[0], c[1], c[2]);
         let in_colour = |st: i32, x: f32, y: f32, ww: f32, hh: f32, s: &str, c: [u8; 3]| Cell { color: colour(c), ..text_cell(st, x, y, ww, hh, s) };
         // the head: the title and what the lab is, and the sections
-        let mut cells = vec![text_cell(style::TITLE, 24.0, 14.0, 300.0, 29.0, "Light lab")];
+        let mut cells = vec![text_cell(style::TITLE, 24.0, 14.0, 300.0, 29.0, "Key lab")];
         let mut bx = 0.0;
         let mut tabs = Vec::new();
         for i in self.sections() {

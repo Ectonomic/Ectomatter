@@ -1,5 +1,5 @@
 """Ectodeck's own fonts for a keyboard's glyphs: ⌘ ⌥ ⇧ ⎋ ⏻ and the rest of
-the Unicode blocks they come from. They are cut from the fonts the Light lab's
+the Unicode blocks they come from. They are cut from the fonts the Key lab's
 glyph list was made with, so a key's typed legend draws the same, and the list
 still shows every glyph, on a computer that has none of those fonts.
 
@@ -81,7 +81,7 @@ def main():
         '# Ectodeck\'s fonts for a keyboard\'s glyphs\n\n'
         'The glyphs a key\'s legend can have that its typeface lacks: ⌘ ⌥ ⇧ ⎋ ⏻ and the rest of the Unicode blocks they come from '
         '(arrows, mathematical operators, technical signs, control pictures, shapes, symbols, and the supplemental arrows). '
-        'Ectodeck builds them in, so a typed legend draws the same, and the Light lab\'s glyph list still shows every glyph, on a computer that has none of the fonts they were cut from. '
+        'Ectodeck builds them in, so a typed legend draws the same, and the Key lab\'s glyph list still shows every glyph, on a computer that has none of the fonts they were cut from. '
         'The legends reach them after a core\'s own symbols font, and the lab\'s text after the computer\'s own fonts.\n\n'
         + '\n'.join(lines) + '\n\n'
         'Each is cut from its font and renamed, as DejaVu\'s licence asks of a changed font and as Google\'s trademark on Noto asks. '

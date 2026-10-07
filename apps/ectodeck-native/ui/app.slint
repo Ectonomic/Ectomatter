@@ -85,7 +85,7 @@ export struct Overlay {
     // a knob: how far its track runs, and how far along it the slider is (0 to 1)
     travel: length,
     frac: float,
-    // how strongly it shows: the display's glass as the Light lab sets its sheen
+    // how strongly it shows: the display's glass as the Key lab sets its sheen
     opacity: float,
 }
 
@@ -1255,7 +1255,7 @@ component CellView inherits Rectangle {
             }
         }
     }
-    // a number to type, as the Light lab's values are: Enter or leaving the
+    // a number to type, as the Key lab's values are: Enter or leaving the
     // box sets it, Escape puts it back as it was; set elsewhere (its slider),
     // the box follows unless it is being typed in
     if root.c.kind == 15: Rectangle {
@@ -1339,7 +1339,7 @@ component CellView inherits Rectangle {
     }
     // a switch's choice, an area chip, a button, the reset: words on a shade
     // (style 24: it opens a list, a chevron after its words; 25: a key on the
-    // Light lab's map, its words small; 26: not to be chosen here, its words
+    // Key lab's map, its words small; 26: not to be chosen here, its words
     // faint; 29: the page round a menu, which shuts it, with no shade or hand)
     if root.c.kind >= 5 && root.c.kind <= 8: Rectangle {
         border-radius: root.c.style == 25 ? 4px : root.c.kind == 5 ? 7px : root.c.kind == 8 ? 6px : 8px;
@@ -3454,7 +3454,7 @@ export component MacroWindow inherits Window {
     }
 }
 
-// The stage of the Light lab: a section's drawing of the key, with the
+// The stage of the Key lab: a section's drawing of the key, with the
 // line from each slider to its part, drawn in Rust at the window's own pixels;
 // its words are cells over it.
 export struct Sketch {
@@ -3465,7 +3465,7 @@ export struct Sketch {
     image: image,
 }
 
-// One of the Light lab's sliders, where it stands beside the drawing: its
+// One of the Key lab's sliders, where it stands beside the drawing: its
 // name, its box and unit (a derived one, as a beam's angle, quieter), its
 // knob along its track, where it was saved, if it has moved from there,
 // whether its value is other than the saved one, which its reset puts back,
@@ -3488,7 +3488,7 @@ export struct LabRow {
     high: string,
 }
 
-// A slider of the Light lab: the whole row tells the page when the
+// A slider of the Key lab: the whole row tells the page when the
 // pointer is over it, so its line and its part light up whether the pointer
 // is on its name, its box or its track.
 component LabControl inherits Rectangle {
@@ -3599,7 +3599,7 @@ component LabControl inherits Rectangle {
     }
 }
 
-// The Light lab: a developer's window for tuning how the Z10's keys are
+// The Key lab: a developer's window for tuning how the Z10's keys are
 // lit, beside the main window so the keyboard stays in view as it changes.
 // Landscape, one section at a time: its drawing in the middle, its sliders
 // round it, the line under it saying what the slider under the pointer does,
@@ -3695,7 +3695,7 @@ export component LabWindow inherits Window {
             spacing: 6px;
             Text { text: "EVGA Z10 RGB"; font-size: 13px; color: Ink.dim; vertical-alignment: center; }
             Text { text: "/"; font-size: 13px; color: #525252; vertical-alignment: center; }
-            Text { text: "Light lab"; font-size: 13px; color: Ink.dim; vertical-alignment: center; }
+            Text { text: "Key lab"; font-size: 13px; color: Ink.dim; vertical-alignment: center; }
         }
         HorizontalLayout {
             x: parent.width - 120px;
