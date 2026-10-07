@@ -469,12 +469,19 @@ const TEXT_NAMES: [(&str, &str); 3] = [
     ("Bottom", "The second function, at the bottom of the key."),
 ];
 /// the glyphs a key's text can take from its list, each with its name
-const GLYPHS: [(&str, &str); 31] = [
-    ("⌘", "Command"), ("⌥", "Option"), ("⌃", "Control"), ("⇧", "Shift"), ("⇪", "Caps Lock"), ("⎋", "Escape"), ("⇥", "Tab"), ("⌫", "Backspace"), ("⌦", "Delete"),
+const GLYPHS: [(&str, &str); 44] = [
+    ("⌘", "Command"), ("⌥", "Option"), ("⌃", "Control"), ("⇧", "Shift"), ("⇪", "Caps Lock"), ("⎋", "Escape"), ("⇥", "Tab"), ("↹", "Tab, both ways"), ("⌫", "Backspace"), ("⌦", "Delete"),
     ("↵", "Return"), ("⏎", "Enter"), ("␣", "Space"), ("←", "Left"), ("↑", "Up"), ("→", "Right"), ("↓", "Down"), ("⇞", "Page Up"), ("⇟", "Page Down"),
     ("⏯", "Play and pause"), ("⏮", "Previous track"), ("⏭", "Next track"), ("⏏", "Eject"), ("⏻", "Power"), ("⊞", "Windows"), ("≡", "Menu"), ("⎙", "Print Screen"), ("☀", "Brightness"),
     ("◀", "Left triangle"), ("▲", "Up triangle"), ("▶", "Right triangle"), ("▼", "Down triangle"),
+    ("⭠", "Left, closed tip"), ("⭡", "Up, closed tip"), ("⭢", "Right, closed tip"), ("⭣", "Down, closed tip"),
+    ("🠜", "Left, heavy"), ("🠝", "Up, heavy"), ("🠞", "Right, heavy"), ("🠟", "Down, heavy"),
+    ("🔇", "Mute"), ("🔈", "Volume"), ("🔉", "Volume down"), ("🔊", "Volume up"),
 ];
+/// How many of them stand in each row of the list, a row to a kind after
+/// the first three: the triangles and the arrows with closed tips; the
+/// heavy arrows and the volume keys' speakers.
+const GLYPH_ROWS: [usize; 5] = [10, 9, 9, 8, 8];
 /// the switch's place, east and north: values of one key's only
 const PLACE_E: usize = 25;
 const PLACE_N: usize = 26;
@@ -619,7 +626,7 @@ pub struct LabPage {
     rest: slint::Timer,
     /// where the section's sliders stand, and for which section, size of stage and sliders
     places: Vec<drawing::Place>,
-    places_of: Option<(usize, i32, i32, Vec<usize>, Option<usize>, u32)>,
+    places_of: Option<(usize, i32, i32, Vec<usize>, Option<usize>, u32, String)>,
     /// how many times a legend has been dragged on the drawing: its sliders
     /// are placed anew after each drag, level with where it went
     legend_drags: u32,
@@ -1954,8 +1961,8 @@ impl LabPage {
         let boxes = self.text_boxes();
         let Some(&(bx, by, _, bh)) = self.glyphs.and_then(|p| boxes.get(p)) else { return Vec::new() };
         let (_, h, _, _) = self.sizes();
-        let (cols, side, gap) = (9usize, 32.0, 4.0);
-        let rows = GLYPHS.len().div_ceil(cols);
+        let (cols, side, gap) = (GLYPH_ROWS.iter().copied().max().unwrap_or(9), 32.0, 4.0);
+        let rows = GLYPH_ROWS.len();
         let (lw, lh) = (cols as f32 * (side + gap) - gap + 24.0, rows as f32 * (side + gap) - gap + 24.0);
         let (lx, ly) = ((bx - 84.0).min(w - 24.0 - lw), by + bh + 6.0);
         let mut out = vec![
@@ -1964,8 +1971,8 @@ impl LabPage {
             Cell { style: 27, ..cell(kind::TILE, lx, ly, lw, lh) },
             Cell { id: GLYPH + GLYPHS.len() as i32 + 1, style: 29, ..cell(kind::LINK, lx, ly, lw, lh) },
         ];
-        for (g, (glyph, _)) in GLYPHS.iter().enumerate() {
-            let (c, r) = ((g % cols) as f32, (g / cols) as f32);
+        let at = GLYPH_ROWS.iter().enumerate().flat_map(|(r, &n)| (0..n).map(move |c| (c as f32, r as f32)));
+        for (g, ((glyph, _), (c, r))) in GLYPHS.iter().zip(at).enumerate() {
             out.push(Cell { text: (*glyph).into(), id: GLYPH + g as i32, style: 31, ..cell(kind::SEG_BUTTON, lx + 12.0 + c * (side + gap), ly + 12.0 + r * (side + gap), side, side) });
         }
         out
@@ -2317,7 +2324,10 @@ impl LabPage {
         } else if self.key().is_some_and(|k| !k.lit) {
             v = v.unlit();
         }
-        let size = (self.section, sw.round() as i32, sh.round() as i32, self.sliders(), self.scope, self.legend_drags);
+        // (and placed anew as the chosen key's text changes: a word typed
+        // over a letter is sized by Word size, a glyph over a word by Letter size)
+        let text = if self.section == LEGENDS && self.key().is_some() { (0..3).map(|p| self.text_of(p)).collect::<Vec<_>>().join("\u{1}") } else { String::new() };
+        let size = (self.section, sw.round() as i32, sh.round() as i32, self.sliders(), self.scope, self.legend_drags, text);
         if self.places_of.as_ref() != Some(&size) {
             // one lit key's switch pad and its values at the top of the right column
             let right_top = if self.section == 0 && self.key().is_some_and(|k| k.lit) { self.pad_box().3 + 182.0 } else { 0.0 };
@@ -3129,6 +3139,7 @@ mod tests {
         for (glyph, name) in GLYPHS {
             assert!(glyph.chars().all(|c| fonts.iter().any(|f| f.glyph_index(c).is_some())), "{name} ({glyph})");
         }
+        assert_eq!(GLYPH_ROWS.iter().sum::<usize>(), GLYPHS.len(), "each glyph a place in the list");
     }
 
     /// The caps' colours where the light gives none: black tops (clear on

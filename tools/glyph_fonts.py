@@ -25,9 +25,10 @@ NOTO_COPYRIGHT = 'Copyright 2022 The Noto Project Authors (https://github.com/no
 
 # The blocks a keyboard's glyphs come from: arrows, mathematical operators,
 # technical signs (⌘ ⌥ ⎋ ⏏ ⏻), control pictures (␣), shapes (▲ ◀), symbols
-# (☀), and the supplemental arrows.
+# (☀), and the supplemental arrows; the speakers of the volume keys
+# (🔇 🔈 🔉 🔊, and 🕨 🕩 🕪); and heavy arrows with wide tips (🠜 🠝 🠞 🠟).
 BLOCKS = [(0x2190, 0x21FF), (0x2200, 0x22FF), (0x2300, 0x23FF), (0x2400, 0x243F), (0x25A0, 0x25FF),
-          (0x2600, 0x26FF), (0x27F0, 0x27FF), (0x2900, 0x297F), (0x2B00, 0x2BFF)]
+          (0x2600, 0x26FF), (0x27F0, 0x27FF), (0x2900, 0x297F), (0x2B00, 0x2BFF), (0x1F507, 0x1F50A), (0x1F568, 0x1F56A), (0x1F81C, 0x1F81F)]
 
 # (file, family, style, PostScript name, source, its name and version, licence)
 FONTS = [
@@ -80,7 +81,7 @@ def main():
     (OUT / 'README.md').write_text(
         '# Ectodeck\'s fonts for a keyboard\'s glyphs\n\n'
         'The glyphs a key\'s legend can have that its typeface lacks: ⌘ ⌥ ⇧ ⎋ ⏻ and the rest of the Unicode blocks they come from '
-        '(arrows, mathematical operators, technical signs, control pictures, shapes, symbols, and the supplemental arrows). '
+        '(arrows, mathematical operators, technical signs, control pictures, shapes, symbols, and the supplemental arrows), the volume keys\' speakers, and heavy arrows with wide tips. '
         'Ectodeck builds them in, so a typed legend draws the same, and the Key lab\'s glyph list still shows every glyph, on a computer that has none of the fonts they were cut from. '
         'The legends reach them after a core\'s own symbols font, and the lab\'s text after the computer\'s own fonts.\n\n'
         + '\n'.join(lines) + '\n\n'
