@@ -1190,6 +1190,56 @@ component CellView inherits Rectangle {
                 input.text = self.shown;
             }
         }
+        // a key's picture in place of its text (style 6): a frame, its file's
+        // name, and the button that takes it off
+        if root.c.style == 6: Path {
+            x: 11px;
+            y: (34px - 14px) / 2;
+            width: 16px;
+            height: 14px;
+            viewbox-width: 16;
+            viewbox-height: 14;
+            commands: "M1.5 1.5h13v11h-13z M3.5 10.5l3.5-4 2.5 2.5 1.5-1.5 2.5 3";
+            fill: transparent;
+            stroke: Ink.quiet;
+            stroke-width: 1.2px;
+        }
+        if root.c.style == 6: Text {
+            x: 34px;
+            width: parent.width - 34px - 36px;
+            height: 34px;
+            text: root.c.text;
+            font-family: "Geist";
+            font-size: 13.5px;
+            color: Ink.ink;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        // (the box tells the page the pointer is over it, for its note)
+        if root.c.style == 6: TouchArea {
+            width: parent.width - 36px;
+            height: parent.height;
+            changed has-hover => { root.hovered(root.c.id, self.has-hover); }
+        }
+        if root.c.style == 6: Rectangle {
+            x: parent.width - 32px;
+            y: 3px;
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            background: off.has-hover ? #ffffff14 : transparent;
+            Text {
+                text: "×";
+                font-size: 17px;
+                color: off.has-hover ? Ink.ink : Ink.quiet;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            off := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.pick(root.c.id, 2, 0, 0, 0); }
+            }
+        }
         // a key's text: its glyphs' button, which gives the box the keys and opens their list
         if root.c.style == 4 || root.c.style == 5: Rectangle {
             x: parent.width - 32px;
@@ -1219,6 +1269,8 @@ component CellView inherits Rectangle {
             }
         }
         input := TextInput {
+            visible: root.c.style != 6;
+            enabled: root.c.style != 6;
             x: root.c.style == 1 ? 11px : 10px;
             y: root.c.style == 5 ? 8px : 0;
             width: parent.width - 2 * self.x - (root.c.style >= 4 ? 30px : 0);

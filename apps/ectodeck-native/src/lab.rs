@@ -85,6 +85,9 @@ pub enum Ask {
     /// the glyphs' list opened from a key's text box (by its part), shut
     /// (-1), or a glyph chosen on it (by its place there)
     GlyphsFor(i32),
+    /// a picture for the part whose glyph list is open; a part's taken off
+    ChooseImage,
+    RemoveImage(i32),
     Glyph(i32),
     /// the keyboard's own icon chosen in the list (by its place there)
     GlyphIcon(i32),
@@ -486,6 +489,10 @@ const GLYPH: i32 = 1300;
 const GLYPH_ICON: i32 = GLYPH + 70;
 const GLYPH_SHUT: i32 = GLYPH + 98;
 const GLYPH_LIST: i32 = GLYPH + 99;
+/// the glyph list's button that puts a picture of the person's own on the key
+const IMAGE_CHOOSE: i32 = 1700;
+/// a part's picture, in place of its text, by its file's name (see print::Print::with_text)
+const IMAGE_KEYS: [&str; 3] = ["main_image", "shift_image", "second_image"];
 /// the drawing's key's top, where the legend is dragged
 const LEGEND_PAD: i32 = 1400;
 /// the parts of a key's legend its text boxes set, as the page names them
@@ -711,6 +718,8 @@ pub struct LabPage {
     /// the part whose glyphs' list is open
     boxes: Rc<VecModel<Cell>>,
     glyphs: Option<usize>,
+    /// a picture asked for, for this part: the window opens the file picker
+    pub image_wanted: Option<usize>,
 }
 
 /// The light setups' menu: shut; open; giving a setup a name, a new one
@@ -991,7 +1000,9 @@ impl LabPage {
             MAP => Ask::Key(index),
             OWN => Ask::Follow(index),
             TYPEFACE => Ask::Faces,
+            id if (TEXT..TEXT + 3).contains(&id) && index == 2 => Ask::RemoveImage(id - TEXT),
             id if (TEXT..TEXT + 3).contains(&id) => Ask::GlyphsFor(id - TEXT),
+            IMAGE_CHOOSE => Ask::ChooseImage,
             id if (GLYPH..GLYPH + GLYPHS.len() as i32).contains(&id) => Ask::Glyph(id - GLYPH),
             id if (GLYPH_ICON..GLYPH_SHUT).contains(&id) => Ask::GlyphIcon(id - GLYPH_ICON),
             GLYPH_SHUT => Ask::GlyphsFor(-1),
@@ -1087,6 +1098,7 @@ impl LabPage {
             top,
             boxes,
             glyphs: None,
+            image_wanted: None,
         };
         // a section the device has
         if !page.sections().contains(&page.section) {
@@ -1231,6 +1243,21 @@ impl LabPage {
                     }
                 }
                 Ask::GlyphsFor(part) => self.glyphs = (part >= 0 && self.glyphs != Some(part as usize)).then_some(part as usize),
+                Ask::ChooseImage => {
+                    self.image_wanted = self.glyphs;
+                    self.glyphs = None;
+                    // (the list gone, its button tells of nothing)
+                    (self.hovered, self.told) = (None, None);
+                }
+                Ask::RemoveImage(part) => {
+                    let p = part.clamp(0, 2) as usize;
+                    if self.image_of(p).is_some() {
+                        self.remember(TEXT + part);
+                        self.unput(("legends", IMAGE_KEYS[p]));
+                        self.rev += 1;
+                        self.status = (format!("The picture is off. {} shows the key's text again.", TEXT_NAMES[p].0), 0);
+                    }
+                }
                 // the glyph typed into the box that has the keys, where its cursor is
                 // the keyboard's own icon, by its name in brackets, as the box shows it
                 Ask::GlyphIcon(n) => {
@@ -1342,7 +1369,7 @@ impl LabPage {
                         PAD => (vec![PARAMS[PLACE_E].path, PARAMS[PLACE_N].path], "Switch's place"),
                         COLOUR => (COLOUR_PATHS.to_vec(), "Colour"),
                         TYPEFACE => (vec![("legends", "typeface"), ("legends", "weight")], "Typeface"),
-                        id if (TEXT..TEXT + 3).contains(&id) => (vec![("legends", ectodeck_draw::print::TEXTS[(id - TEXT) as usize].0)], TEXT_NAMES[(id - TEXT) as usize].0),
+                        id if (TEXT..TEXT + 3).contains(&id) => (vec![("legends", ectodeck_draw::print::TEXTS[(id - TEXT) as usize].0), ("legends", IMAGE_KEYS[(id - TEXT) as usize])], TEXT_NAMES[(id - TEXT) as usize].0),
                         id if (CHOICE..CHOICE + CHOICES.len() as i32).contains(&id) => (vec![CHOSEN[(id - CHOICE) as usize][0]], CHOICES[(id - CHOICE) as usize].label),
                         id => PARAMS.get(id.max(0) as usize).map_or((vec![], ""), |p| (vec![p.path], p.label)),
                     };
@@ -1364,7 +1391,7 @@ impl LabPage {
                     let (paths, what) = match id {
                         COLOUR => (COLOUR_PATHS.to_vec(), "Colour"),
                         TYPEFACE => (vec![("legends", "typeface"), ("legends", "weight")], "Typeface"),
-                        id if (TEXT..TEXT + 3).contains(&id) => (vec![("legends", ectodeck_draw::print::TEXTS[(id - TEXT) as usize].0)], TEXT_NAMES[(id - TEXT) as usize].0),
+                        id if (TEXT..TEXT + 3).contains(&id) => (vec![("legends", ectodeck_draw::print::TEXTS[(id - TEXT) as usize].0), ("legends", IMAGE_KEYS[(id - TEXT) as usize])], TEXT_NAMES[(id - TEXT) as usize].0),
                         id if (CHOICE..CHOICE + CHOICES.len() as i32).contains(&id) => (vec![CHOSEN[(id - CHOICE) as usize][0]], CHOICES[(id - CHOICE) as usize].label),
                         id => PARAMS.get(id.max(0) as usize).map_or((vec![], ""), |p| (vec![p.path], p.label)),
                     };
@@ -1964,6 +1991,29 @@ impl LabPage {
 
     /// A part of the chosen key's legend as its box shows it: the key's own
     /// text, or what its cap has printed there.
+    /// The picture a part of the chosen key's legend is, by its file's name.
+    fn image_of(&self, part: usize) -> Option<String> {
+        self.key()?;
+        self.work()["legends"][IMAGE_KEYS[part]].as_str().filter(|n| !n.is_empty()).map(str::to_string)
+    }
+
+    /// A picture put on the chosen key, for a part of its legend, by its
+    /// file's name (one Ectodeck keeps: see setups::import_image).
+    pub fn put_image(&mut self, part: usize, name: &str) {
+        let Some(k) = self.key().cloned() else { return };
+        self.remember(TEXT + part as i32);
+        own_put(&mut self.light, &k.id, ("legends", IMAGE_KEYS[part]), json!(name));
+        self.rev += 1;
+        self.status = (format!("{name} is on {}. Adjust sizes and places the picture.", k.label), 0);
+        self.refresh();
+    }
+
+    /// A picture that could not be used: why, in a sentence, in the foot.
+    pub fn image_refused(&mut self, why: &str) {
+        self.status = (why.to_string(), 0);
+        self.refresh();
+    }
+
     fn text_of(&self, part: usize) -> String {
         let (name, role) = ectodeck_draw::print::TEXTS[part];
         match self.work()["legends"][name].as_str() {
@@ -1997,7 +2047,7 @@ impl LabPage {
         let mut y = HEAD_H + drawing::choice_y(3) + 30.0;
         (0..3)
             .map(|part| {
-                let lines = self.text_of(part).split('\n').count().clamp(1, 3) as f32;
+                let lines = if self.image_of(part).is_some() { 1.0 } else { self.text_of(part).split('\n').count().clamp(1, 3) as f32 };
                 let h = 34.0 + 18.0 * (lines - 1.0);
                 let b = (cx + 72.0, y, drawing::CTRL_W - 72.0, h);
                 y += h + 6.0;
@@ -2008,7 +2058,15 @@ impl LabPage {
 
     /// The chosen key's text boxes (see text_boxes).
     fn box_cells(&self) -> Vec<Cell> {
-        self.text_boxes().into_iter().enumerate().map(|(part, (x, y, w, h))| Cell { id: TEXT + part as i32, style: if part == 0 { 5 } else { 4 }, text: self.text_of(part).into(), ..cell(kind::FIELD, x, y, w, h) }).collect()
+        self.text_boxes()
+            .into_iter()
+            .enumerate()
+            .map(|(part, (x, y, w, h))| match self.image_of(part) {
+                // (a picture: its name, and the button that takes it off)
+                Some(name) => Cell { id: TEXT + part as i32, style: 6, text: name.into(), ..cell(kind::FIELD, x, y, w, h) },
+                None => Cell { id: TEXT + part as i32, style: if part == 0 { 5 } else { 4 }, text: self.text_of(part).into(), ..cell(kind::FIELD, x, y, w, h) },
+            })
+            .collect()
     }
 
     /// The glyphs' list, open under the box it was opened from: every
@@ -2152,7 +2210,8 @@ impl LabPage {
         let names = self.icon_names();
         let rows = (GLYPHS.len() + names.len()).div_ceil(cols);
         let at = |n: usize| ((n % cols) as f32, (n / cols) as f32);
-        let (lw, lh) = (cols as f32 * (side + gap) - gap + 24.0, rows as f32 * (side + gap) - gap + 24.0);
+        // (under the glyphs, the button for a picture of the person's own)
+        let (lw, lh) = (cols as f32 * (side + gap) - gap + 24.0, rows as f32 * (side + gap) - gap + 24.0 + 42.0);
         let (lx, ly) = ((bx - 84.0).min(w - 24.0 - lw), by + bh + 6.0);
         let mut out = vec![
             // anywhere else on the page shuts it
@@ -2169,6 +2228,7 @@ impl LabPage {
             let (c, r) = at(GLYPHS.len() + n);
             out.push(Cell { fill: icon.fill.as_str().into(), lines: icon.stroke.as_str().into(), id: GLYPH_ICON + n as i32, style: 31, ..cell(kind::SEG_BUTTON, lx + 12.0 + c * (side + gap), ly + 12.0 + r * (side + gap), side, side) });
         }
+        out.push(Cell { text: "Choose a picture…".into(), id: IMAGE_CHOOSE, style: 23, ..cell(kind::GHOST, lx + 12.0, ly + lh - 12.0 - 32.0, lw - 24.0, 32.0) });
         out
     }
 
@@ -2539,7 +2599,7 @@ impl LabPage {
         }
         // (and placed anew as the chosen key's text changes: a word typed
         // over a letter is sized by Word size, a glyph over a word by Letter size)
-        let text = if self.section == LEGENDS && self.key().is_some() { (0..3).map(|p| self.text_of(p)).collect::<Vec<_>>().join("\u{1}") } else { String::new() };
+        let text = if self.section == LEGENDS && self.key().is_some() { (0..3).map(|p| self.image_of(p).unwrap_or_else(|| self.text_of(p))).collect::<Vec<_>>().join("\u{1}") } else { String::new() };
         let size = (self.section, sw.round() as i32, sh.round() as i32, self.sliders(), self.scope, self.legend_drags, text);
         if self.places_of.as_ref() != Some(&size) {
             // one lit key's switch pad and its values at the top of the right column
@@ -2702,7 +2762,7 @@ impl LabPage {
     fn told(&self) -> (String, String) {
         let r = self.readout;
         // (a glyph under the pointer tells of itself over the box being typed in)
-        let glyph = self.told.filter(|i| (GLYPH..GLYPH + GLYPHS.len() as i32).contains(i) || (GLYPH_ICON..GLYPH_SHUT).contains(i));
+        let glyph = self.told.filter(|i| (GLYPH..GLYPH + GLYPHS.len() as i32).contains(i) || (GLYPH_ICON..GLYPH_SHUT).contains(i) || *i == IMAGE_CHOOSE);
         match glyph.or(self.focused).or(self.told) {
             Some(LEGEND_PAD) => match self.part_on() {
                 0 => ("The legend".into(), "Drag the legend to move it anywhere on the key. Left–right and Up–down show how far it has moved from where Placement puts it.".into()),
@@ -2710,7 +2770,11 @@ impl LabPage {
             },
             Some(PART) => ("Adjust".into(), "Which part of the legend the sliders below size and move. Whole sizes and moves the legend as one. Main, Shifted and Bottom each size and move one part on its own: the main legend, the shifted sign beside it, and the bottom legend at the foot of the key.".into()),
             Some(SECTION_DEFAULT) => self.section_reset_words(),
-            Some(i) if (TEXT..TEXT + 3).contains(&i) => (TEXT_NAMES[(i - TEXT) as usize].0.into(), format!("{} The ⌘ button in the box lists keyboard glyphs to add.", TEXT_NAMES[(i - TEXT) as usize].1)),
+            Some(IMAGE_CHOOSE) => ("Choose a picture".into(), "Puts a picture from an SVG file on the key in place of this text, lit as a legend is: the logo on an artisan cap, say. The picture's shapes print in one colour, as legends do. Turn any text in the file into shapes first.".into()),
+            Some(i) if (TEXT..TEXT + 3).contains(&i) => match self.image_of((i - TEXT) as usize) {
+                Some(name) => (TEXT_NAMES[(i - TEXT) as usize].0.into(), format!("A picture, {name}, in place of the key's text. Size and move the picture with Adjust. × takes the picture off and gives the key its text back.")),
+                None => (TEXT_NAMES[(i - TEXT) as usize].0.into(), format!("{} The ⌘ button in the box lists keyboard glyphs and pictures to add.", TEXT_NAMES[(i - TEXT) as usize].1)),
+            },
             Some(i) if (GLYPH..GLYPH + GLYPHS.len() as i32).contains(&i) => {
                 let (glyph, name) = GLYPHS[(i - GLYPH) as usize];
                 (name.to_string(), format!("Adds {glyph} where the cursor is in the box."))
@@ -2952,7 +3016,7 @@ impl LabPage {
             }
             for (part, &(_, by, _, _)) in boxes.iter().enumerate() {
                 over.push(text_cell(style::NOTE, cx, by + 8.0, 70.0, 18.0, TEXT_NAMES[part].0));
-                if self.owns(("legends", ectodeck_draw::print::TEXTS[part].0)) {
+                if self.owns(("legends", ectodeck_draw::print::TEXTS[part].0)) || self.owns(("legends", IMAGE_KEYS[part])) {
                     own_mark(&mut over, cx, by + 4.0, TEXT + part as i32);
                 }
             }

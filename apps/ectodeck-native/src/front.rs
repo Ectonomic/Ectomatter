@@ -224,6 +224,8 @@ pub struct Front {
     /// the keys whose caps have tops pale enough that a new meaning printed
     /// on them reads in dark ink, by their place in the keyboard's reports
     pale: std::collections::HashSet<u32>,
+    /// the desktop's file picker, open for a picture for a part of a key's legend
+    picking: Option<(usize, std::sync::mpsc::Receiver<Option<std::path::PathBuf>>)>,
     /// whether a rebound key's new action is printed on it on the keyboard
     rebindings: bool,
     /// when the sliders were last read, and the time between readings, smoothed
@@ -316,6 +318,7 @@ impl Front {
             t0: Instant::now(),
             last_lights: None,
             pale: Default::default(),
+            picking: None,
             rebindings: crate::uistate::get("show_rebindings").and_then(|v| v.as_bool()).unwrap_or(true),
             failed_at: None,
             controlled,
@@ -492,7 +495,9 @@ impl Front {
     }
 
     pub fn waiting(&self) -> Option<Duration> {
-        self.failed_at.map(|t| Duration::from_secs(3).saturating_sub(t.elapsed()) + Duration::from_millis(10))
+        // (and, while the desktop's file picker is open, often enough to take its answer)
+        let picking = self.picking.as_ref().map(|_| Duration::from_millis(100));
+        [self.failed_at.map(|t| Duration::from_secs(3).saturating_sub(t.elapsed()) + Duration::from_millis(10)), picking].into_iter().flatten().min()
     }
 
     /// The place search: once typing has paused, the places matching it,
@@ -774,6 +779,27 @@ impl Front {
         // the light setup chosen to light the keyboard, kept for next time
         if let Some(setup) = l.switched.take() {
             let _ = self.settings.set(crate::setups::IN_USE, setup.map_or(serde_json::Value::Null, serde_json::Value::from));
+        }
+        // a picture asked for: the desktop's own file picker, and the file
+        // chosen there put on the key, kept in Ectodeck's data
+        if let Some(part) = l.image_wanted.take() {
+            self.picking = Some((part, crate::picker::open_file("Choose a picture for the key", "SVG pictures", &["*.svg", "*.SVG"])));
+        }
+        if let Some((part, rx)) = &self.picking {
+            let part = *part;
+            match rx.try_recv() {
+                Ok(chosen) => {
+                    self.picking = None;
+                    if let Some(path) = chosen {
+                        match crate::setups::import_image(&crate::cores::shown().id, &path) {
+                            Ok(name) => l.put_image(part, &name),
+                            Err(why) => l.image_refused(&why),
+                        }
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.picking = None,
+            }
         }
         window
     }

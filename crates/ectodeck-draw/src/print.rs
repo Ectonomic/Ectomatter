@@ -146,9 +146,14 @@ impl Print {
     /// "legends" for the key give it (see TEXTS): its own legend's lines one
     /// under the other at each line break, "" for a part printed with nothing;
     /// a line that is one of the core's `icons` by its name in brackets
-    /// ("[mute]", as text_of gives it) that icon.
+    /// ("[mute]", as text_of gives it) that icon. A part may be a picture of
+    /// the person's own in place of its text, by its file's name
+    /// ("main_image"), one of the images added (add_image); a key whose own
+    /// legend is a picture has it in the middle of its cap, whatever the
+    /// legends' place (see set).
     pub fn with_text(&self, legends: &Value, icons: &HashMap<String, Icon>) -> Print {
-        if TEXTS.iter().all(|(k, _)| !legends[*k].is_string()) {
+        let image = |k: &str| legends[format!("{k}_image")].as_str().filter(|n| !n.is_empty()).map(str::to_string);
+        if TEXTS.iter().all(|(k, _)| !legends[*k].is_string() && image(k).is_none()) {
             return self.clone();
         }
         let run = |t: &str, role: Role| {
@@ -160,13 +165,17 @@ impl Print {
         };
         let mut runs = Vec::new();
         for (k, role) in TEXTS {
+            if let Some(name) = image(k) {
+                runs.push(Run { text: String::new(), icon: Some(format!("{IMAGE}{name}")), role, scale: 1.0 });
+                continue;
+            }
             match legends[k].as_str() {
                 Some(text) if role == Role::Main => runs.extend(text.split('\n').filter(|l| !l.trim().is_empty()).map(|l| run(l, role))),
                 Some(text) => runs.extend(Some(text.replace('\n', " ")).filter(|t| !t.trim().is_empty()).map(|t| run(&t, role))),
                 None => runs.extend(self.runs.iter().filter(|r| r.role == role).cloned()),
             }
         }
-        Print { runs, centred: self.centred }
+        Print { runs, centred: self.centred || image("main").is_some() }
     }
 
     /// A part of the print as words: its runs', a line each (an icon by its
@@ -322,6 +331,191 @@ impl Own {
         let fonts = p["fonts"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default();
         Some(Own { style, symbols: p["symbols"].as_str().unwrap_or("").to_string(), fonts, icons })
     }
+}
+
+// ------------------------------------------------------------------ images
+
+/// The start of an icon's name that is a picture of the person's own.
+const IMAGE: &str = "image:";
+/// A picture, as tall as so many of its part's capitals (its part's size
+/// scaling it), its middle level with theirs.
+const IMAGE_SIZE: f32 = 2.4;
+/// The most a picture's file may hold, and the most pieces of outline it may
+/// have, before it is too much for a key's legend.
+pub const IMAGE_BYTES: usize = 1 << 20;
+const IMAGE_PIECES: usize = 100_000;
+static IMAGES: Mutex<Option<HashMap<String, Icon>>> = Mutex::new(None);
+
+/// Add a picture of the person's own, by its file's name: its outline on a
+/// 24-unit square, as image_from_svg makes it.
+pub fn add_image(name: &str, fill: String) {
+    if let Ok(mut m) = IMAGES.lock() {
+        m.get_or_insert_with(HashMap::new).insert(format!("{IMAGE}{name}"), Icon { fill, stroke: String::new(), width: 0.0, size: IMAGE_SIZE, drop: (IMAGE_SIZE - 1.0) / 2.0 });
+    }
+}
+
+fn image(name: &str) -> Option<Icon> {
+    IMAGES.lock().ok()?.as_ref()?.get(name).cloned()
+}
+
+/// One outline of a shape: its start, then each piece to its end ('L' a
+/// line; 'Q' and 'C' curves, their control points first).
+type Contour = Vec<(char, Vec<(f32, f32)>)>;
+
+/// A picture's file (SVG) as one outline, as a legend is one ink: its
+/// shapes, filled and stroked, in one colour, fitted to a 24-unit square
+/// and in its middle. Only shapes are kept: text not turned into outlines,
+/// pictures within it and its colours are left out. Each shape's holes stay
+/// holes (its outlines wound as filling them all as one needs: outer ones
+/// one way, the holes in them the other).
+pub fn image_from_svg(svg: &str) -> Result<String, String> {
+    if svg.len() > IMAGE_BYTES {
+        return Err("larger than 1 MB".into());
+    }
+    let tree = usvg::Tree::from_str(svg, &usvg::Options::default()).map_err(|e| e.to_string())?;
+    fn walk(g: &usvg::Group, out: &mut Vec<(Path, bool)>) {
+        use resvg::tiny_skia::{LineCap, LineJoin, Stroke};
+        for n in g.children() {
+            match n {
+                usvg::Node::Group(g) => walk(g, out),
+                usvg::Node::Path(p) if p.is_visible() => {
+                    let t = p.abs_transform();
+                    if let Some(d) = p.fill().and_then(|_| p.data().clone().transform(t)) {
+                        out.push((d, p.fill().is_some_and(|f| f.rule() == usvg::FillRule::EvenOdd)));
+                    }
+                    if let Some(s) = p.stroke() {
+                        let st = Stroke {
+                            width: s.width().get(),
+                            line_cap: match s.linecap() {
+                                usvg::LineCap::Round => LineCap::Round,
+                                usvg::LineCap::Square => LineCap::Square,
+                                _ => LineCap::Butt,
+                            },
+                            line_join: match s.linejoin() {
+                                usvg::LineJoin::Round => LineJoin::Round,
+                                usvg::LineJoin::Bevel => LineJoin::Bevel,
+                                _ => LineJoin::Miter,
+                            },
+                            ..Stroke::default()
+                        };
+                        if let Some(d) = p.data().stroke(&st, 1.0).and_then(|d| d.transform(t)) {
+                            out.push((d, false));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut shapes: Vec<(Path, bool)> = Vec::new();
+    walk(tree.root(), &mut shapes);
+    let area = |p: &[(f32, f32)]| p.iter().zip(p.iter().cycle().skip(1)).map(|(a, b)| a.0 * b.1 - b.0 * a.1).sum::<f32>() / 2.0;
+    let inside = |pt: (f32, f32), poly: &[(f32, f32)]| {
+        let mut c = false;
+        for (a, b) in poly.iter().zip(poly.iter().cycle().skip(1)) {
+            if (a.1 > pt.1) != (b.1 > pt.1) && pt.0 < (b.0 - a.0) * (pt.1 - a.1) / (b.1 - a.1) + a.0 {
+                c = !c;
+            }
+        }
+        c
+    };
+    let mut outlines: Vec<Contour> = Vec::new();
+    let mut pieces = 0;
+    for (path, even_odd) in &shapes {
+        let mut contours: Vec<Contour> = Vec::new();
+        for seg in path.segments() {
+            use resvg::tiny_skia::PathSegment as S;
+            pieces += 1;
+            let last = contours.last_mut();
+            match (seg, last) {
+                (S::MoveTo(p), _) => contours.push(vec![('M', vec![(p.x, p.y)])]),
+                (S::LineTo(p), Some(c)) => c.push(('L', vec![(p.x, p.y)])),
+                (S::QuadTo(a, p), Some(c)) => c.push(('Q', vec![(a.x, a.y), (p.x, p.y)])),
+                (S::CubicTo(a, b, p), Some(c)) => c.push(('C', vec![(a.x, a.y), (b.x, b.y), (p.x, p.y)])),
+                _ => {}
+            }
+        }
+        if pieces > IMAGE_PIECES {
+            return Err("too detailed".into());
+        }
+        contours.retain(|c| c.len() > 1);
+        let polys: Vec<Vec<(f32, f32)>> = contours.iter().map(|c| flatten(c)).collect();
+        // a shape filled as wound keeps its outlines' turns, all turned the
+        // way its largest outline should go if that goes the other way
+        let largest = (0..polys.len()).max_by(|&a, &b| area(&polys[a]).abs().partial_cmp(&area(&polys[b]).abs()).unwrap_or(std::cmp::Ordering::Equal));
+        let flip = largest.is_some_and(|o| area(&polys[o]) < 0.0);
+        for (i, c) in contours.into_iter().enumerate() {
+            let positive = area(&polys[i]) >= 0.0;
+            let want = if *even_odd {
+                // as deep inside the shape's other outlines as it is: the outermost
+                // one way (inside another where most of its points are, as a
+                // hole touching its shape's edge at a point still is)
+                let within = |j: usize| 2 * polys[i].iter().filter(|&&p| inside(p, &polys[j])).count() > polys[i].len();
+                (0..polys.len()).filter(|&j| j != i && within(j)).count() % 2 == 0
+            } else {
+                positive != flip
+            };
+            outlines.push(if want == positive { c } else { reversed(&c) });
+        }
+    }
+    // fitted to the square, in its middle
+    let all: Vec<(f32, f32)> = outlines.iter().flat_map(|c| flatten(c)).collect();
+    if all.is_empty() {
+        return Err("no shapes".into());
+    }
+    let (x0, y0) = all.iter().fold((f32::MAX, f32::MAX), |m, p| (m.0.min(p.0), m.1.min(p.1)));
+    let (x1, y1) = all.iter().fold((f32::MIN, f32::MIN), |m, p| (m.0.max(p.0), m.1.max(p.1)));
+    let k = 24.0 / (x1 - x0).max(y1 - y0).max(1e-6);
+    let (ox, oy) = ((24.0 - (x1 - x0) * k) / 2.0, (24.0 - (y1 - y0) * k) / 2.0);
+    let mut d = String::new();
+    for c in &outlines {
+        for (cmd, pts) in c {
+            d.push(*cmd);
+            d.push_str(&pts.iter().map(|p| format!("{:.3} {:.3}", ox + (p.0 - x0) * k, oy + (p.1 - y0) * k)).collect::<Vec<_>>().join(" "));
+        }
+        d.push('Z');
+    }
+    Ok(d)
+}
+
+/// An outline as points along it, its curves in steps.
+fn flatten(c: &[(char, Vec<(f32, f32)>)]) -> Vec<(f32, f32)> {
+    let mut out = Vec::new();
+    let mut at = (0.0, 0.0);
+    for (cmd, p) in c {
+        for i in 1..=8 {
+            let (t, u) = (i as f32 / 8.0, 1.0 - i as f32 / 8.0);
+            match cmd {
+                'Q' => out.push((u * u * at.0 + 2.0 * u * t * p[0].0 + t * t * p[1].0, u * u * at.1 + 2.0 * u * t * p[0].1 + t * t * p[1].1)),
+                'C' => {
+                    let b = |a: f32, b: f32, c: f32, d: f32| u * u * u * a + 3.0 * u * u * t * b + 3.0 * u * t * t * c + t * t * t * d;
+                    out.push((b(at.0, p[0].0, p[1].0, p[2].0), b(at.1, p[0].1, p[1].1, p[2].1)));
+                }
+                _ => {
+                    out.push(p[0]);
+                    break;
+                }
+            }
+        }
+        at = *p.last().unwrap_or(&at);
+    }
+    out
+}
+
+/// An outline wound the other way.
+fn reversed(c: &[(char, Vec<(f32, f32)>)]) -> Contour {
+    let ends: Vec<(f32, f32)> = c.iter().map(|(_, p)| *p.last().unwrap_or(&(0.0, 0.0))).collect();
+    let mut out = vec![('M', vec![*ends.last().unwrap_or(&(0.0, 0.0))])];
+    for i in (1..c.len()).rev() {
+        let to = ends[i - 1];
+        let (cmd, p) = &c[i];
+        out.push(match cmd {
+            'Q' => ('Q', vec![p[0], to]),
+            'C' => ('C', vec![p[1], p[0], to]),
+            _ => ('L', vec![to]),
+        });
+    }
+    out
 }
 
 // ---------------------------------------------------------------- typefaces
@@ -559,7 +753,8 @@ fn icon_paths(icon: &Icon) -> Vec<(Path, Option<f32>)> {
 /// signs from different typefaces look alike.
 fn lay_run(db: &fontdb::Database, run: &Run, cap: f32, face: fontdb::ID, fallbacks: &[fontdb::ID], symbols: Option<fontdb::ID>, own: &Own) -> Laid {
     if let Some(name) = &run.icon {
-        let Some(icon) = own.icons.get(name) else { return Laid { run: run.clone(), parts: Vec::new(), advance: 0.0, cap, drop: 0.0 } };
+        let Some(icon) = own.icons.get(name).cloned().or_else(|| image(name)) else { return Laid { run: run.clone(), parts: Vec::new(), advance: 0.0, cap, drop: 0.0 } };
+        let icon = &icon;
         let side = icon.size * cap;
         let s = side / 24.0;
         // its square's foot `drop` below the line
@@ -673,7 +868,9 @@ pub fn set(db: &fontdb::Database, print: &Print, style: &Style, own: &Own, face:
     // a legend the core prints in the middle of its cap, there at the top;
     // in the middle, all of it there; at the top left, all at the top
     let centre_of = |top: f32, foot: f32| fh / 2.0 - CENTRE_RISE * first_cap - (top + foot) / 2.0;
-    let (main_shift, second_shift) = match (style.place, bases.first(), bases.last()) {
+    // a key whose own legend is a picture has it in the middle, however the rest are placed
+    let place = if print.runs.iter().any(|r| r.role == Role::Main && r.icon.as_deref().is_some_and(|i| i.starts_with(IMAGE))) { Place::Middle } else { style.place };
+    let (main_shift, second_shift) = match (place, bases.first(), bases.last()) {
         (Place::Printed, Some(&b0), Some(&bn)) if print.centred => (centre_of(b0 - first_cap, bn), 0.0),
         (Place::Middle, Some(&b0), Some(&bn)) => {
             let foot = second_base.unwrap_or(bn).max(bn);
@@ -693,7 +890,7 @@ pub fn set(db: &fontdb::Database, print: &Print, style: &Style, own: &Own, face:
         }
         w
     };
-    let start = |w: f32| if style.place == Place::TopLeft { style.inset } else { (fw - w) / 2.0 };
+    let start = |w: f32| if place == Place::TopLeft { style.inset } else { (fw - w) / 2.0 };
     let mut placed: Vec<(usize, f32, f32)> = Vec::new();
     let mut set_lines: Vec<Line> = Vec::new();
     for (n, line) in lines.iter().enumerate() {
@@ -718,7 +915,7 @@ pub fn set(db: &fontdb::Database, print: &Print, style: &Style, own: &Own, face:
         }
         for &i in &seconds {
             let y = base + second_shift + laid[i].drop;
-            let top = if laid[i].run.icon.is_some() { y - own.icons.get(laid[i].run.icon.as_deref().unwrap_or("")).map_or(0.0, |ic| (ic.size - ic.drop) * laid[i].cap) } else { y - laid[i].cap };
+            let top = if let Some(name) = laid[i].run.icon.as_deref() { y - own.icons.get(name).cloned().or_else(|| image(name)).map_or(0.0, |ic| (ic.size - ic.drop) * laid[i].cap) } else { y - laid[i].cap };
             second_top = Some(second_top.map_or(top, |t: f32| t.min(top)));
             placed.push((i, x, y));
             x += laid[i].advance + SHIFT_GAP * style.words / CAP;
@@ -840,5 +1037,30 @@ mod tests {
             assert!(!has(&db, face, c) && ours.iter().any(|&id| has(&db, id, c)), "{c}: from Ectodeck's own");
         }
         assert_eq!(families(&db).iter().map(|(f, _)| f.as_str()).collect::<Vec<_>>(), ["Barlow Semi Condensed"]);
+    }
+
+    /// A picture of the person's own becomes one outline on a 24-unit
+    /// square: a ring drawn with even-odd filling keeps its hole when its
+    /// outline is filled as legends are, a stroked line comes as its
+    /// outline, and its colours go; and more than the file may hold is refused.
+    #[test]
+    fn a_picture_s_shapes_keep_their_holes() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+            <path fill="#e4572e" fill-rule="evenodd" d="M50 4a46 46 0 1 0 0.01 0ZM50 12a38 38 0 1 1-0.01 0Z"/>
+            <path d="M30 50H70" stroke="#123" stroke-width="6" fill="none"/></svg>"##;
+        let d = image_from_svg(svg).unwrap();
+        let pix = resvg::tiny_skia::Pixmap::new(48, 48).unwrap();
+        let mut pix = pix;
+        let path = usvg::Tree::from_str(&format!(r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="{d}"/></svg>"#), &usvg::Options::default()).unwrap();
+        let usvg::Node::Path(p) = &path.root().children()[0] else { panic!("a path") };
+        let mut paint = resvg::tiny_skia::Paint::default();
+        paint.set_color_rgba8(0, 0, 0, 255);
+        pix.fill_path(p.data(), &paint, resvg::tiny_skia::FillRule::Winding, Transform::from_scale(2.0, 2.0), None);
+        let at = |x: u32, y: u32| pix.pixel(x, y).unwrap().alpha();
+        assert_eq!(at(24, 16), 0, "the ring's hole stays a hole");
+        assert!(at(24, 1) > 200 && at(1, 24) > 200, "the ring itself, filled, as wide as the square");
+        assert!(at(24, 24) > 200, "the stroked line, as its outline");
+        assert!(image_from_svg(&" ".repeat(IMAGE_BYTES + 1)).is_err());
+        assert!(image_from_svg(r#"<svg xmlns="http://www.w3.org/2000/svg"><text>hi</text></svg>"#).is_err(), "no shapes");
     }
 }

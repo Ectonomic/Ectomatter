@@ -227,6 +227,56 @@ pub fn changes(core: &Value, light: &Value) -> Value {
     Value::Object(out)
 }
 
+/// Where a core's pictures are kept: the person's own, put on keys in place
+/// of their text, each by its file's name from a setup's light.
+pub fn images_dir(core: &str) -> PathBuf {
+    dir(core).join("images")
+}
+
+/// The core's pictures, made ready for the legends.
+pub fn load_images(core: &str) {
+    for e in std::fs::read_dir(images_dir(core)).into_iter().flatten().flatten() {
+        let (path, name) = (e.path(), e.file_name().to_string_lossy().to_string());
+        if let Some(d) = std::fs::read_to_string(&path).ok().and_then(|t| ectodeck_draw::print::image_from_svg(&t).ok()) {
+            ectodeck_draw::print::add_image(&name, d);
+        }
+    }
+}
+
+/// A picture's file taken in: as one outline, its shapes only, kept among
+/// the core's pictures under a name made from its own (numbered on where
+/// another picture has it; the same picture again keeps its name), and made
+/// ready for the legends. Its name, or a sentence saying why not.
+pub fn import_image(core: &str, from: &Path) -> Result<String, String> {
+    let meta = std::fs::metadata(from).map_err(|_| "That file can't be read.".to_string())?;
+    if meta.len() as usize > ectodeck_draw::print::IMAGE_BYTES {
+        return Err("That file is larger than 1 MB.".into());
+    }
+    let text = std::fs::read_to_string(from).map_err(|_| "That file can't be read.".to_string())?;
+    let d = ectodeck_draw::print::image_from_svg(&text).map_err(|e| match e.as_str() {
+        "no shapes" => "No shapes in that file to use. Turn its text into shapes first.".to_string(),
+        "too detailed" => "That picture has too many shapes for a key.".to_string(),
+        _ => "That file isn't an SVG picture.".to_string(),
+    })?;
+    let folder = images_dir(core);
+    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    let stem = from.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    let svg = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">\n<!-- {stem}: a picture put on a key by Ectodeck's Key lab, its shapes only -->\n<path d=\"{d}\"/>\n</svg>\n");
+    let mut taken: Vec<String> = Vec::new();
+    for e in std::fs::read_dir(&folder).into_iter().flatten().flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        if std::fs::read_to_string(e.path()).is_ok_and(|t| t == svg) {
+            ectodeck_draw::print::add_image(&name, d);
+            return Ok(name);
+        }
+        taken.extend(e.path().file_stem().map(|s| s.to_string_lossy().to_string()));
+    }
+    let name = format!("{}.svg", id_for(&stem, &taken));
+    std::fs::write(folder.join(&name), svg).map_err(|e| e.to_string())?;
+    ectodeck_draw::print::add_image(&name, d);
+    Ok(name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

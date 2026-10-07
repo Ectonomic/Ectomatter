@@ -30,6 +30,7 @@ mod lighting;
 mod macro_page;
 mod macros;
 mod overlays;
+mod picker;
 mod picture;
 mod screens;
 mod settings;
@@ -382,6 +383,8 @@ fn main() {
     // the typefaces legends can be set in, the core's own among them, loaded
     // in the background so the Key lab's list of them opens at once
     ectodeck_draw::print::add_fonts(cores::shown().fonts());
+    // the person's own pictures, put on keys in place of their text
+    setups::load_images(&cores::shown().id);
     ectodeck_draw::print::warm();
     // `--read-state FILE`: read the keyboard's state once, for the snapshots, and stop
     if let Some(path) = args.iter().position(|a| a == "--read-state").and_then(|i| args.get(i + 1)) {
@@ -770,6 +773,14 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
         window.dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Left });
         window.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
         lab.act();
+        // ECTODECK_NATIVE_IMPORT=file: the picture chosen when the file picker opens
+        if let (Some(part), Some(file)) = (lab.image_wanted.take(), std::env::var_os("ECTODECK_NATIVE_IMPORT")) {
+            match setups::import_image(&cores::shown().id, std::path::Path::new(&file)) {
+                Ok(name) => lab.put_image(part, &name),
+                Err(why) => lab.image_refused(&why),
+            }
+            lab.act();
+        }
         window.request_redraw();
         draw(&mut px);
     }
