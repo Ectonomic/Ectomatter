@@ -1780,6 +1780,9 @@ export component AppWindow inherits Window {
     callback discard();
     callback key-clicked(int);
     callback board-clicked();
+    // whether a rebound key's new action is printed on it, and turning it on or off
+    in property <bool> show-rebindings-on: true;
+    callback show-rebindings();
     callback action-menu(int, length, length, length);
     callback listen(int);
     callback reset-key();
@@ -1918,6 +1921,40 @@ export component AppWindow inherits Window {
                         }
                         Rectangle {
                             horizontal-stretch: 1;
+                        }
+                        // a checkbox: whether rebound keys show their new actions on the keyboard
+                        if root.boot == 0: Rectangle {
+                            width: 28px + rebind-words.preferred-width;
+                            Rectangle {
+                                x: 0;
+                                y: (parent.height - 18px) / 2;
+                                width: 18px;
+                                height: 18px;
+                                border-radius: 5px;
+                                background: root.show-rebindings-on ? Ink.ink : #333333;
+                                if root.show-rebindings-on: Path {
+                                    width: 18px;
+                                    height: 18px;
+                                    viewbox-width: 18;
+                                    viewbox-height: 18;
+                                    commands: "M5.2 9.3 L7.9 11.9 L12.9 6.4";
+                                    fill: transparent;
+                                    stroke: #171717;
+                                    stroke-width: 2px;
+                                }
+                            }
+                            rebind-words := Text {
+                                x: 28px;
+                                text: "Show rebindings";
+                                font-family: "Geist";
+                                font-size: 13.5px;
+                                color: Ink.dim;
+                                vertical-alignment: center;
+                            }
+                            TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.show-rebindings(); }
+                            }
                         }
                         if root.live: HorizontalLayout {
                             spacing: 6px;

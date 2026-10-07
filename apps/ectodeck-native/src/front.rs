@@ -20,6 +20,8 @@ use crate::{AppWindow, Cell, EffectItem, KeyItem, LayerItem, MenuRow, ProfileIte
 /// What the page asked for, done once its event has been handled.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Ask {
+    /// the rebindings shown on the keyboard, or not
+    ShowRebindings,
     Move,
     Minimise,
     Maximise,
@@ -222,6 +224,8 @@ pub struct Front {
     /// the keys whose caps have tops pale enough that a new meaning printed
     /// on them reads in dark ink, by their place in the keyboard's reports
     pale: std::collections::HashSet<u32>,
+    /// whether a rebound key's new action is printed on it on the keyboard
+    rebindings: bool,
     /// when the sliders were last read, and the time between readings, smoothed
     last_reading: Option<Instant>,
     reading_gap: f32,
@@ -258,6 +262,7 @@ impl Front {
         on!(on_discard, Ask::Discard);
         on!(on_key_clicked, |p| Ask::Key(p));
         on!(on_board_clicked, Ask::Board);
+        on!(on_show_rebindings, Ask::ShowRebindings);
         on!(on_action_menu, |l, x, y, h| Ask::ActionMenu(l, x, y, h));
         on!(on_listen, |l| Ask::Listen(l));
         on!(on_reset_key, Ask::Reset);
@@ -311,6 +316,7 @@ impl Front {
             t0: Instant::now(),
             last_lights: None,
             pale: Default::default(),
+            rebindings: crate::uistate::get("show_rebindings").and_then(|v| v.as_bool()).unwrap_or(true),
             failed_at: None,
             controlled,
             overlays: Overlays::new(),
@@ -656,6 +662,11 @@ impl Front {
                     self.status(format!("Discarded the unsaved changes to profile {}.", self.page.editing), 0);
                 }
                 Ask::Key(pos) => self.select_key(pos as u32),
+                Ask::ShowRebindings => {
+                    self.rebindings = !self.rebindings;
+                    crate::uistate::set("show_rebindings", serde_json::json!(self.rebindings));
+                    self.refresh();
+                }
                 Ask::Board => {
                     if self.page.view == View::Keys && self.page.sel.is_some() {
                         self.page.sel = None;
@@ -1490,13 +1501,14 @@ impl Front {
                 w: (k.w - z10::GAP) as f32,
                 h: (k.h - z10::GAP) as f32,
                 molded: k.id.starts_with("Multimedia"),
-                remap: p.remap(k.pos, &names).map(|s| s.to_uppercase()).unwrap_or_default().into(),
+                remap: p.remap(k.pos, &names).filter(|_| self.rebindings).map(|s| s.to_uppercase()).unwrap_or_default().into(),
                 pale: self.pale.contains(&k.pos),
                 selected: p.view == View::Keys && p.sel == Some(k.pos),
                 pressed: p.pressed.contains(&k.pos),
             })
             .collect();
         show_rows(ui.get_keys(), |m| ui.set_keys(m), keys);
+        ui.set_show_rebindings_on(self.rebindings);
 
         // the chosen key's editor
         let chosen = if p.view == View::Keys { p.sel.and_then(|pos| p.key(pos).cloned()) } else { None };
