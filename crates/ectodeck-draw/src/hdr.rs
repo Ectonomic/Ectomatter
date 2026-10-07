@@ -279,6 +279,13 @@ pub struct Board {
     /// (NO_CAP off them all), for the light each cap's own physics gives it
     cap_of: Vec<u16>,
     reads_for: Option<(usize, usize)>,
+    /// how much of each pixel its cap's face covers, and each cap's plastic
+    /// where its colours are its own (see Plastic)
+    face_cover: Vec<f32>,
+    plastics: Vec<Option<Plastic>>,
+    /// how much of each pixel the art's ink on a cap's face covers: the
+    /// print that is no lit legend (MACRO 3 under E2's, the media keys' signs)
+    ink: Vec<f32>,
 }
 
 /// How far either side of a cap's foot the light either side of its edge
@@ -310,6 +317,108 @@ fn cap_map(w: u32, h: u32, ka: f32, (ox, oy): (f32, f32), feet: &[([f32; 4], f32
         }
     }
     map
+}
+
+/// The caps' colours as the art draws them: black plastic (the "Black" a
+/// cap's colour is measured from, so a black cap is the art's own), and
+/// clear plastic, which tints nothing. A colour is what the plastic looks
+/// like on the cap's top, in the room's light, as sRGB.
+pub const CAP_BLACK: [u8; 3] = [0x2a, 0x2a, 0x2a];
+pub const CAP_CLEAR: [u8; 3] = [0xff, 0xff, 0xff];
+/// How bright a cap's sides look beside its top, which faces the room's light more.
+const SIDE_SHADE: f32 = 0.55;
+/// The share of the light on the back of a white opaque top that it lets
+/// through (a legend lets through its own share, "legends" "opacity"): a pale
+/// cap glows a little round its legend, tinted by its plastic.
+const TOP_THROUGH: f32 = 0.05;
+/// The share of the light falling on them that white opaque sides give back.
+const WHITE_GIVES: f32 = 0.85;
+/// The ink a pale cap is printed in, where the art prints a light ink on its
+/// black caps; a top paler than INK_TURNS (its colour's luminance in linear
+/// light) takes it, a darker one keeps the art's light ink.
+const DARK_INK: [u8; 3] = [0x30, 0x30, 0x30];
+const INK_TURNS: f32 = 0.2;
+/// A cap's face whose brightest point stands less than this (linear light)
+/// above its middling one has no ink, only its shading; and ink counts from
+/// INK_FROM of the way up.
+const INK_SPAN: f32 = 0.05;
+const INK_FROM: f32 = 0.15;
+
+/// A cap's plastic where the light gives it colours of its own: what the
+/// art's black cap gains in linear light to look as the plastic does, on
+/// its top, its sides, and (on a pudding cap) the part of its sides its
+/// top's colour comes down; what more of the light on the top's back an
+/// opaque top lets through, for each channel, as a share of a legend's;
+/// how much more light its opaque sides give back; and the tint its
+/// translucent sides and top give the light through them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Plastic {
+    top: [f32; 3],
+    side: [f32; 3],
+    band: [f32; 3],
+    through: [f32; 3],
+    reflect: [f32; 3],
+    tint: [f32; 3],
+    top_tint: [f32; 3],
+    /// the colour the art's ink on its face prints in, none the art's own
+    ink: Option<[f32; 3]>,
+}
+
+impl Plastic {
+    /// A cap's plastic from its caps' values ("colour" its top's, "sides"
+    /// its sides'), none where it gives neither and the cap is the art's.
+    fn of(caps: &Value, p: &sim::Physics) -> Option<Plastic> {
+        let colour = |k: &str| caps[k].as_str().and_then(hex);
+        let (top, sides) = (colour("colour"), colour("sides"));
+        if top.is_none() && sides.is_none() {
+            return None;
+        }
+        let l = |c: [u8; 3]| c.map(lin);
+        let black = l(CAP_BLACK);
+        let pale = |c: [u8; 3]| [0, 1, 2].map(|i| ((l(c)[i] - black[i]) / (1.0 - black[i])).max(0.0));
+        let over = |c: [u8; 3], k: f32| [0, 1, 2].map(|i| k * (l(c)[i] - black[i]));
+        let none = [0.0; 3];
+        let once = [1.0; 3];
+        Some(match p.caps {
+            sim::Caps::Translucent => {
+                let (t, s) = (top.unwrap_or(CAP_CLEAR), sides.unwrap_or(CAP_CLEAR));
+                Plastic { top: none, side: none, band: none, through: none, reflect: once, tint: l(s), top_tint: l(t), ink: None }
+            }
+            kind => {
+                let t = top.unwrap_or(CAP_BLACK);
+                let through = pale(t).map(|v| TOP_THROUGH * v / p.legends.max(0.01));
+                let lt = l(t);
+                let ink = (0.2126 * lt[0] + 0.7152 * lt[1] + 0.0722 * lt[2] > INK_TURNS).then(|| l(DARK_INK));
+                if kind == sim::Caps::Pudding {
+                    let s = sides.unwrap_or(CAP_CLEAR);
+                    Plastic { top: over(t, 1.0), side: none, band: over(t, SIDE_SHADE), through, reflect: once, tint: l(s), top_tint: once, ink }
+                } else {
+                    let s = sides.unwrap_or(t);
+                    let out = p.cap_out.max(0.01);
+                    let reflect = pale(s).map(|v| (out + (WHITE_GIVES - out).max(0.0) * v) / out);
+                    Plastic { top: over(t, 1.0), side: over(s, SIDE_SHADE), band: none, through, reflect, tint: once, top_tint: once, ink }
+                }
+            }
+        })
+    }
+}
+
+/// Whether a key's cap, as a light gives it, has a top pale enough that
+/// what is printed on it reads in dark ink (the art's ink on it is).
+pub fn pale_top(light: &Value, id: &str) -> bool {
+    let l = sim::key_light(light, &light["keys"][id]);
+    Plastic::of(&l["caps"], &sim::Physics::from(&l)).is_some_and(|p| p.ink.is_some())
+}
+
+/// Each cap's plastic, by the simulation's order of the caps, as a light
+/// description has it (all keys' caps, and a key's own over them).
+fn plastics(light: &Value, ids: &[String]) -> Vec<Option<Plastic>> {
+    ids.iter()
+        .map(|id| {
+            let l = sim::key_light(light, &light["keys"][id.as_str()]);
+            Plastic::of(&l["caps"], &sim::Physics::from(&l))
+        })
+        .collect()
 }
 
 /// Milky plastic's own colour, sRGB-encoded: the grey the art prints the
@@ -880,6 +989,42 @@ impl Board {
             .collect();
         let feet: Vec<([f32; 4], f32)> = keys.iter().filter_map(|k| k.foot.map(|f| (f, k.round[0]))).chain(others.iter().map(|o| (o.0, o.2[0]))).collect();
         let cap_of = cap_map(w, h, ka, (ox, oy), &feet);
+        // how much of each pixel on a cap its face covers (sixteen points of it)
+        let faces: Vec<([f32; 4], f32)> = keys.iter().filter(|k| k.foot.is_some()).map(|k| (k.face, k.round[1])).chain(others.iter().map(|o| (o.1, o.2[1]))).collect();
+        let face_cover: Vec<f32> = (0..(w * h) as usize)
+            .map(|j| {
+                let Some(&(f, r)) = faces.get(cap_of[j] as usize) else { return 0.0 };
+                if caps[j * 4 + 3] <= 0.0 {
+                    return 0.0;
+                }
+                let (x, y) = ((j % w as usize) as f32, (j / w as usize) as f32);
+                (0..16).filter(|q| sim::in_rounded(f, r, (x + (q % 4) as f32 * 0.25 + 0.125 - ox) / ka, (y + (q / 4) as f32 * 0.25 + 0.125 - oy) / ka)).count() as f32 / 16.0
+            })
+            .collect();
+        // the art's ink on each cap: how far each pixel stands above its
+        // face's middling brightness, as a share of the way to the face's brightest
+        let luma = |j: usize| 0.2126 * base[j * 3] + 0.7152 * base[j * 3 + 1] + 0.0722 * base[j * 3 + 2];
+        let mut on_face: Vec<Vec<f32>> = vec![Vec::new(); faces.len()];
+        for j in 0..(w * h) as usize {
+            if let Some(v) = on_face.get_mut(cap_of[j] as usize).filter(|_| face_cover[j] >= 1.0) {
+                v.push(luma(j));
+            }
+        }
+        let spans: Vec<(f32, f32)> = on_face
+            .into_iter()
+            .map(|mut v| {
+                v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                v.get(v.len() / 2).map_or((0.0, 0.0), |&m| (m, v[v.len() - 1]))
+            })
+            .collect();
+        let ink: Vec<f32> = (0..(w * h) as usize)
+            .map(|j| match spans.get(cap_of[j] as usize) {
+                Some(&(m, top)) if caps[j * 4 + 3] > 0.0 && top - m >= INK_SPAN => (((luma(j) - m) / (top - m) - INK_FROM) / (1.0 - INK_FROM)).clamp(0.0, 1.0),
+                _ => 0.0,
+            })
+            .collect();
+        let ids: Vec<String> = cap_shapes.iter().map(|c| c.id.clone()).collect();
+        let plastics = plastics(&device["light"], &ids);
         let mut board = Board {
             w,
             h,
@@ -910,6 +1055,9 @@ impl Board {
             cap_of,
             reads_for: None,
             own_print: crate::print::Own::of(device),
+            face_cover,
+            plastics,
+            ink,
         };
         // the legends as the light asks for them
         board.set_legends_from(&device["light"]);
@@ -924,8 +1072,11 @@ impl Board {
     /// simulation's next picture.
     pub fn set_light(&mut self, light: &Value) -> bool {
         let model = Model::from(light);
-        let changed = model != self.model;
+        let ids: Vec<String> = self.cap_shapes.iter().map(|c| c.id.clone()).collect();
+        let plastics = plastics(light, &ids);
+        let changed = model != self.model || plastics != self.plastics;
         self.model = model;
+        self.plastics = plastics;
         changed
     }
 
@@ -1470,6 +1621,24 @@ impl Board {
             let j = y0 * w + i;
             px[..3].copy_from_slice(&self.base[j * 3..j * 3 + 3]);
             px[3] = 1.0;
+            // a cap of a colour of its own: its plastic over the art's black,
+            // on its face and its sides (on a pudding cap, the top's colour
+            // down the sides above the milky band)
+            let plastic = self.plastics.get(self.cap_of[j] as usize).copied().flatten();
+            if let Some(pl) = plastic {
+                let (a, f) = (self.caps[j * 4 + 3], self.face_cover[j]);
+                let band = self.band_map.get(j).copied().unwrap_or(0.0);
+                let art = [px[0], px[1], px[2]];
+                // (the art's ink printed as it shows on this plastic: dark on a pale top)
+                let k = self.ink[j];
+                for c in 0..3 {
+                    let gain = a * (f * pl.top[c] + (1.0 - f) * (pl.side[c] + (1.0 - band) * pl.band[c]));
+                    px[c] = match pl.ink {
+                        Some(i) => (art[c] + gain).max(0.0) * (1.0 - k) + i[c] * k,
+                        None => (art[c] + gain * (1.0 - k)).max(0.0),
+                    };
+                }
+            }
             let Some(k) = keys else { continue };
             let (r, a) = (&self.reads[j], self.caps[j * 4 + 3]);
             // (each cap's band and top by its own physics)
@@ -1481,6 +1650,15 @@ impl Board {
                     px[c] += e[c] * a;
                 }
             }
+            // a pale opaque top: the light on its back it lets through, in its colour
+            if let (3, Some(pl)) = (r.code, plastic) {
+                if a > 0.0 && pl.through.iter().any(|t| *t > 0.0) {
+                    let e = k.at(&r.at(fw, cw));
+                    for c in 0..3 {
+                        px[c] += e[c] * a * pl.through[c];
+                    }
+                }
+            }
             let share = match r.code {
                 0 | 1 if a < 1.0 => 1.0 - a,
                 2 if to_band > 0.0 => self.band_map[j] * to_band,
@@ -1488,9 +1666,16 @@ impl Board {
                 3 if a > 0.0 && top_glow > 0.0 => a * top_glow,
                 _ => continue,
             };
+            // through a cap's coloured plastic, tinted; off its pale opaque sides, more of it
+            let tint = match (r.code, plastic) {
+                (2, Some(pl)) if to_band > 0.0 || pl.tint != [1.0; 3] => pl.tint,
+                (2, Some(pl)) => pl.reflect,
+                (3, Some(pl)) => pl.top_tint,
+                _ => [1.0; 3],
+            };
             let e = k.at(&r.at(fw, cw));
             for c in 0..3 {
-                px[c] += e[c] * share;
+                px[c] += e[c] * share * tint[c];
             }
         }
         // The caps' feet's edges: each pixel there shows the light of its
@@ -1524,9 +1709,10 @@ impl Board {
                     continue;
                 }
                 let l = k.at(&e.skirt.at(fw, cw));
+                let m = self.plastics.get(self.cap_of[j] as usize).copied().flatten().map_or([1.0; 3], |pl| if pl.tint != [1.0; 3] { pl.tint } else { pl.reflect });
                 let i = (j - y0 * w) * 4;
                 for c in 0..3 {
-                    out[i + c] = (out[i + c] + l[c] * e.share).max(0.0);
+                    out[i + c] = (out[i + c] + l[c] * e.share * m[c]).max(0.0);
                 }
             }
         }
@@ -1567,7 +1753,8 @@ impl Board {
                 if p.milky <= 0.0 || p.skirts <= 0.0 {
                     continue;
                 }
-                let white = MILKY_WHITE.map(|c| dec(c) * self.model.legend_unlit * (1.0 - strength));
+                let tint = self.plastics.get(cap as usize).copied().flatten().map_or([1.0; 3], |pl| pl.tint);
+                let white = [0, 1, 2].map(|c| dec(MILKY_WHITE[c]) * self.model.legend_unlit * (1.0 - strength) * tint[c]);
                 each(s, &mut |d, _, a| {
                     let cap = &self.caps[(y0 * w + d) * 4..(y0 * w + d) * 4 + 4];
                     let ca = cap[3].max(1e-6);
@@ -2135,6 +2322,36 @@ mod tests {
             assert!(r.1.abs() < 1.0, "{} within a pixel across: {:+.2} px", r.0, r.1);
             assert!((0.92..1.08).contains(&r.3), "{} as much ink: {:.3}", r.0, r.3);
         }
+    }
+
+    /// A cap's colour is its own: black as the art draws it is the art; a
+    /// white top comes out pale on that key alone, its sides pale too on a
+    /// shine-through cap; and lit, a white top lets a little of the light
+    /// through, in the light's colour.
+    #[test]
+    fn a_cap_s_colour_is_its_own() {
+        let (_t, d, mut b) = lit_board(2000);
+        let face_middle = |b: &Board, id: &str| {
+            let c = b.cap_shapes.iter().find(|c| c.id == id).unwrap();
+            let (ka, (ox, oy)) = (b.art_scale, b.art_offset);
+            // (a little in from the face's left edge, clear of the legend)
+            ((ox + ka * (c.face[0] + 0.8)) as i32, (oy + ka * (c.face[1] + c.face[3]) / 2.0) as i32)
+        };
+        let lights = white(&b);
+        let plain = b.compose(&lights, 0, 200.0, 4.0);
+        let mut light = d["light"].clone();
+        light["caps"]["colour"] = serde_json::json!("#2A2A2A");
+        b.set_light(&light);
+        assert_eq!(b.compose(&lights, 0, 200.0, 4.0), plain, "black is the art's");
+        light["keys"] = serde_json::json!({ "esc": { "caps": { "colour": "#E6E6E6" } } });
+        light["caps"].as_object_mut().unwrap().remove("colour");
+        assert!(b.set_light(&light), "a new colour changes the picture");
+        let lit = b.compose(&lights, 0, 200.0, 4.0);
+        let (e, two) = (face_middle(&b, "esc"), face_middle(&b, "2"));
+        assert!(lum(&lit, &b, e) > 10.0 * lum(&plain, &b, e), "Escape's top white: {} against {}", lum(&lit, &b, e), lum(&plain, &b, e));
+        assert_eq!(lum(&lit, &b, two), lum(&plain, &b, two), "the 2 key's black as it was");
+        let dark = b.compose(&[], 0, 200.0, 4.0);
+        assert!(lum(&lit, &b, e) > lum(&dark, &b, e), "lit, the white top lets some light through");
     }
 
     fn white(b: &Board) -> Vec<Light> {

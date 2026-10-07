@@ -74,7 +74,7 @@ struct Pick {
 
 const PRESETS: [[u8; 3]; 9] = [[255, 255, 255], [255, 0, 0], [255, 96, 0], [255, 200, 0], [0, 255, 0], [0, 255, 200], [0, 120, 255], [120, 0, 255], [255, 0, 180]];
 
-fn rgb2hsv([r, g, b]: [u8; 3]) -> [f32; 3] {
+pub(crate) fn rgb2hsv([r, g, b]: [u8; 3]) -> [f32; 3] {
     let (r, g, b) = (r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0);
     let (mx, mn) = (r.max(g).max(b), r.min(g).min(b));
     let d = mx - mn;
@@ -85,7 +85,7 @@ fn rgb2hsv([r, g, b]: [u8; 3]) -> [f32; 3] {
     [(h * 60.0 + 360.0) % 360.0, if mx > 0.0 { d / mx } else { 0.0 }, mx]
 }
 
-fn hsv2rgb([h, s, v]: [f32; 3]) -> [u8; 3] {
+pub(crate) fn hsv2rgb([h, s, v]: [f32; 3]) -> [u8; 3] {
     let f = |n: f32| {
         let k = (n + h / 60.0) % 6.0;
         (255.0 * (v - v * s * k.min(4.0 - k).clamp(0.0, 1.0))).round() as u8
@@ -109,12 +109,12 @@ fn rounded(w: u32, h: u32, r: f32, f: impl Fn(f32, f32) -> [f32; 3]) -> slint::I
 }
 
 /// The picker's square for a hue: white to the hue across, then to black downward, in sRGB as CSS mixes them.
-fn sv_square(hue: f32, scale: f32) -> slint::Image {
+pub(crate) fn sv_square(hue: f32, scale: f32) -> slint::Image {
     let pure = hsv2rgb([hue, 1.0, 1.0]).map(|v| v as f32);
     rounded((252.0 * scale) as u32, (160.0 * scale) as u32, 8.0 * scale, |x, y| [0, 1, 2].map(|k| (255.0 + (pure[k] - 255.0) * x) * (1.0 - y)))
 }
 
-fn hue_bar(scale: f32) -> slint::Image {
+pub(crate) fn hue_bar(scale: f32) -> slint::Image {
     let stops: [(f32, [f32; 3]); 7] =
         [(0.0, [255.0, 0.0, 0.0]), (0.17, [255.0, 255.0, 0.0]), (0.33, [0.0, 255.0, 0.0]), (0.5, [0.0, 255.0, 255.0]), (0.67, [0.0, 0.0, 255.0]), (0.83, [255.0, 0.0, 255.0]), (1.0, [255.0, 0.0, 0.0])];
     rounded((252.0 * scale) as u32, (12.0 * scale) as u32, 6.0 * scale, |x, _| {
@@ -125,7 +125,7 @@ fn hue_bar(scale: f32) -> slint::Image {
     })
 }
 
-fn color([r, g, b]: [u8; 3]) -> slint::Color {
+pub(crate) fn color([r, g, b]: [u8; 3]) -> slint::Color {
     slint::Color::from_rgb_u8(r, g, b)
 }
 
@@ -219,6 +219,9 @@ pub struct Front {
     pub macros: Option<crate::macro_page::MacroPage>,
     /// the Key lab's window, once it has been opened
     pub lab: Option<crate::lab::LabPage>,
+    /// the keys whose caps have tops pale enough that a new meaning printed
+    /// on them reads in dark ink, by their place in the keyboard's reports
+    pale: std::collections::HashSet<u32>,
     /// when the sliders were last read, and the time between readings, smoothed
     last_reading: Option<Instant>,
     reading_gap: f32,
@@ -307,6 +310,7 @@ impl Front {
             shut: None,
             t0: Instant::now(),
             last_lights: None,
+            pale: Default::default(),
             failed_at: None,
             controlled,
             overlays: Overlays::new(),
@@ -744,6 +748,12 @@ impl Front {
             self.refresh();
         }
         window
+    }
+
+    /// The keyboard's light as it lights it now: which caps are pale.
+    pub fn light_caps(&mut self, light: &serde_json::Value) {
+        let controls = crate::cores::shown().device["controls"].as_array().cloned().unwrap_or_default();
+        self.pale = controls.iter().filter_map(|c| Some((c["id"].as_str()?, c["pos"].as_u64()? as u32))).filter(|(id, _)| ectodeck_draw::hdr::pale_top(light, id)).map(|(_, pos)| pos).collect();
     }
 
     /// Do what the Key lab asked; what only its window can do is handed back.
@@ -1481,6 +1491,7 @@ impl Front {
                 h: (k.h - z10::GAP) as f32,
                 molded: k.id.starts_with("Multimedia"),
                 remap: p.remap(k.pos, &names).map(|s| s.to_uppercase()).unwrap_or_default().into(),
+                pale: self.pale.contains(&k.pos),
                 selected: p.view == View::Keys && p.sel == Some(k.pos),
                 pressed: p.pressed.contains(&k.pos),
             })

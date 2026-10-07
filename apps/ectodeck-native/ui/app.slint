@@ -70,6 +70,8 @@ export struct KeyItem {
     h: float,
     molded: bool,
     remap: string,
+    // its cap's top is pale: what is printed on it reads in dark ink
+    pale: bool,
     selected: bool,
     pressed: bool,
 }
@@ -423,7 +425,7 @@ component KeyBox inherits Rectangle {
         font-weight: 600;
         font-size: 0.78 * root.cqw;
         letter-spacing: 0.0078 * root.cqw;
-        color: #e8e8e8;
+        color: root.k.pale ? #303030 : #e8e8e8;
         horizontal-alignment: center;
         overflow: elide;
     }
@@ -434,7 +436,7 @@ component KeyBox inherits Rectangle {
         y: parent.height - 0.2 * root.cqw - 2px;
         height: 2px;
         border-radius: 1px;
-        background: #bdbdbd;
+        background: root.k.pale ? #5c5c5c : #bdbdbd;
     }
     ta := TouchArea {
         mouse-cursor: pointer;
@@ -1349,8 +1351,19 @@ component CellView inherits Rectangle {
             : root.c.kind == 5 ? (b.has-hover ? Ink.shade2 : transparent)
             : root.c.kind == 8 ? (b.has-hover && root.c.style != 29 ? #ffffff0f : transparent)
             : (b.has-hover ? #3d3d3d : #333333);
+        // style 32: a colour's button, its colour in a small square before its words
+        if root.c.style == 32: Rectangle {
+            x: 9px;
+            y: (parent.height - 16px) / 2;
+            width: 16px;
+            height: 16px;
+            border-radius: 4px;
+            background: root.c.color;
+            border-width: 1px;
+            border-color: root.c.on ? #00000033 : #ffffff33;
+        }
         Text {
-            x: (parent.width - self.width) / 2 - (root.c.style == 24 ? 7px : 0);
+            x: root.c.style == 32 ? 32px : (parent.width - self.width) / 2 - (root.c.style == 24 ? 7px : 0);
             y: (parent.height - self.height) / 2 + (b.pressed && (root.c.kind == 7 || root.c.kind == 8) ? 1px : 0);
             text: root.c.text;
             font-family: "Geist";
@@ -1358,7 +1371,7 @@ component CellView inherits Rectangle {
             font-weight: root.c.kind >= 7 ? 500 : 400;
             color: root.c.on ? #171717 : root.c.style == 26 ? #5a5a5a : root.c.kind == 8 ? (b.has-hover ? Ink.ink : Ink.quiet) : root.c.kind == 7 ? Ink.ink : b.has-hover ? #ffffff : Ink.dim;
         }
-        if root.c.style == 24: Path {
+        if root.c.style == 24 || root.c.style == 32: Path {
             x: parent.width - 19px;
             y: (parent.height - 6px) / 2;
             width: 9px;
@@ -1376,7 +1389,7 @@ component CellView inherits Rectangle {
             clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
             // style 23: it tells the page the pointer is over it, as a zone does
             changed has-hover => {
-                if (root.c.style == 23 || root.c.style == 31) {
+                if (root.c.style == 23 || root.c.style == 31 || root.c.style == 32) {
                     root.hovered(root.c.id, self.has-hover);
                 }
             }
@@ -3650,6 +3663,33 @@ export component LabWindow inherits Window {
     in property <length> list-w;
     in property <length> list-h;
     callback list-scroll(float);
+    // the colour picker, as the main window's, hung from the cap colour's button that opened it
+    in property <bool> picker-open;
+    in property <length> picker-x;
+    in property <length> picker-top;
+    in property <float> pk-hue;
+    in property <float> pk-sat;
+    in property <float> pk-val;
+    in property <color> pk-now;
+    in property <color> pk-pure;
+    in property <image> pk-sv-img;
+    in property <image> pk-hue-img;
+    in-out property <string> pk-hex;
+    in-out property <string> pk-r;
+    in-out property <string> pk-g;
+    in-out property <string> pk-b;
+    in-out property <string> pk-h;
+    in-out property <string> pk-s;
+    in-out property <string> pk-v;
+    in property <[color]> pk-presets;
+    in property <[color]> pk-recent;
+    out property <length> picker-height: 6px + 353.56px + (root.pk-recent.length > 0 ? 55.56px : 0);
+    callback pk-sv(float, float);
+    callback pk-hue-at(float);
+    callback pk-field(int, string);
+    callback pk-well(color);
+    callback pk-enter();
+    callback pk-dismiss();
 
     background: transparent;
     default-font-family: "Geist";
@@ -3772,6 +3812,34 @@ export component LabWindow inherits Window {
             pick(id, i, x, y, h) => { root.pick(id, i); }
             hovered(id, on) => { root.hovered(id, on); }
             typed(id, t) => { root.entered(id, t); }
+        }
+        Picker {
+            visible: root.picker-open;
+            x: max(8px, min(root.picker-x, root.width - 264px - 8px));
+            y: root.picker-top;
+            height: root.picker-height;
+            hue: root.pk-hue;
+            sat: root.pk-sat;
+            val: root.pk-val;
+            now: root.pk-now;
+            pure: root.pk-pure;
+            sv-img: root.pk-sv-img;
+            hue-img: root.pk-hue-img;
+            t-hex <=> root.pk-hex;
+            t-r <=> root.pk-r;
+            t-g <=> root.pk-g;
+            t-b <=> root.pk-b;
+            t-h <=> root.pk-h;
+            t-s <=> root.pk-s;
+            t-v <=> root.pk-v;
+            presets: root.pk-presets;
+            recent: root.pk-recent;
+            sv(x, y) => { root.pk-sv(x, y); }
+            hue-at(x) => { root.pk-hue-at(x); }
+            field(i, t) => { root.pk-field(i, t); }
+            well(c) => { root.pk-well(c); }
+            enter => { root.pk-enter(); }
+            dismiss => { root.pk-dismiss(); }
         }
     }
 

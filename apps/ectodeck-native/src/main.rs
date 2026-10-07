@@ -529,6 +529,10 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         }
     }
     eprintln!("the cursor: {:?}", window.pointer());
+    // (the caps' colours, for what is printed over the keys)
+    let in_use = device_in_use(&front.settings)["light"].clone();
+    front.light_caps(&in_use);
+    front.refresh();
     window.request_redraw();
     window.draw_if_needed(|r| {
         r.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
@@ -1605,6 +1609,8 @@ impl App {
         if let Some(l) = &self.light {
             board.set_light(l);
         }
+        let now = self.light_now();
+        self.front.light_caps(&now);
         // (drawn from the core as it was read: the legends the light asks for now)
         if let Some(ask) = board.legends_for(&self.light_now()) {
             let _ = self.set_legends.send(ask);
@@ -1722,6 +1728,7 @@ impl App {
         self.front.board_size(rect.2 as u32, rect.3 as u32, self.scale as f32);
         // the Key lab's tuning, when it has changed
         let mut relit = false;
+        let mut relit_caps = false;
         if let Some(lab) = &self.front.lab {
             let rev = (lab.rev, lab.comparing);
             if rev != self.light_rev {
@@ -1753,7 +1760,14 @@ impl App {
                     self.want = Some(want);
                 }
                 self.readout_at = None;
+                // (the caps' colours, for what is printed over the keys)
+                relit_caps = true;
             }
+        }
+        if relit_caps {
+            let now = self.light_now();
+            self.front.light_caps(&now);
+            self.front.refresh();
         }
         // the keys' light, or the display's text, when it has changed
         if let Some(b) = &self.board {

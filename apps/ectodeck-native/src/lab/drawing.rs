@@ -212,6 +212,8 @@ pub struct Values {
     place: (f64, f64),
     lit: bool,
     solid: bool,
+    /// the caps' colours, their tops' and their sides' (see cap_colours)
+    colours: [[u8; 3]; 2],
 }
 
 /// A value as the light has it, or what the keyboard takes when it has none.
@@ -261,6 +263,7 @@ impl Values {
             place: (raw(light, ("place", "east")), raw(light, ("place", "north"))),
             lit: true,
             solid: false,
+            colours: super::cap_colours(light),
         }
     }
 
@@ -676,6 +679,11 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
     // the caps: in the LED's drawing only the 2 key's top, its skirt cut away to show the switch
     let (a0, a1) = (sl.foot0 + v.g.inset, sl.foot1 - v.g.inset);
     let under = tz - sl.top_t;
+    // the caps in their plastic's colours, where they have their own: black
+    // as the drawing draws it; a shine-through cap's sides in theirs, and on
+    // pudding caps the top's colour as far down the sides as it comes
+    let paint = |c: [u8; 3]| if c == ectodeck_draw::hdr::CAP_BLACK || !on(Lens::Caps) { None } else { Some(format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2])) };
+    let [top_paint, side_paint] = v.colours.map(paint);
     if on(Lens::Led) {
         s.path(&poly(&[p(a0, tz), p(a1, tz), p(a1, under), p(a0, under)], true), fill(Lens::Caps), line(Lens::Caps), 1.0, 1.0);
         for x in [a0, a1] {
@@ -687,7 +695,24 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
         for (f0, f1) in [(sl.foot0, sl.foot1), (sl.w0, sl.w0 + v.g.south_foot)].into_iter().take(if v.solid { 1 } else { 2 }) {
             let shape = clip(&sl.cap(f0, f1), x_lo, x_hi);
             if !shape.is_empty() {
-                s.path(&poly(&pp(&shape), true), fill(Lens::Caps), if f0 == sl.foot0 { line(Lens::Caps) } else { "#3a3a3a" }, 1.0, 1.0);
+                let own = if f0 == sl.foot0 && v.caps == Caps::ShineThrough { side_paint.clone() } else { None };
+                s.path(&poly(&pp(&shape), true), own.as_deref().unwrap_or(fill(Lens::Caps)), if f0 == sl.foot0 { line(Lens::Caps) } else { "#3a3a3a" }, 1.0, 1.0);
+            }
+        }
+        if let (Some(top), false) = (&top_paint, v.caps == Caps::Translucent) {
+            let under = tz - sl.top_t;
+            let mut pieces = vec![vec![(sl.skirt_x(true, tz, false), tz), (sl.skirt_x(false, tz, false), tz), (sl.skirt_x(false, under, true), under), (sl.skirt_x(true, under, true), under)]];
+            if v.caps == Caps::Pudding && sl.hollow {
+                let clear_to = v.foot + (1.0 - v.black) * (tz - v.foot);
+                for north in [true, false] {
+                    pieces.push(vec![(sl.skirt_x(north, clear_to, false), clear_to), (sl.skirt_x(north, tz, false), tz), (sl.skirt_x(north, under, true), under), (sl.skirt_x(north, clear_to, true), clear_to)]);
+                }
+            }
+            for piece in pieces {
+                let piece = clip(&piece, x_lo, x_hi);
+                if !piece.is_empty() {
+                    s.path(&poly(&pp(&piece), true), top, "none", 1.0, 1.0);
+                }
             }
         }
     }
@@ -804,7 +829,7 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
                 let out = 1.6f64.min(v.foot.max(0.6) * 0.4);
                 ray(&mut s, &[p(sl.hx1 + 0.15, out), p(sl.foot1 + 0.95, out * 0.15)], v.scatter * v.sides, grow, false);
             }
-            // the skirts: black from the top down Black down the sides, and below
+            // the skirts: the top's colour down Colour down the sides, and below
             // it their translucent plastic, as white as it is milky, glowing with
             // the light it lets through; and the top beside its legends
             let clear_to = v.foot + (1.0 - v.black) * (tz - v.foot);
@@ -812,7 +837,8 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
                 let op = |share: f64| 0.12 + 0.7 * share.clamp(0.0, 1.0);
                 for north in [true, false] {
                     let band = [p(sl.skirt_x(north, v.foot, false), v.foot), p(sl.skirt_x(north, clear_to, false), clear_to), p(sl.skirt_x(north, clear_to, true), clear_to), p(sl.skirt_x(north, v.foot, true), v.foot)];
-                    let milky = if white("Haze") { WHITE } else { "#d8d2c6" };
+                    let tinted = side_paint.clone().filter(|_| v.caps != Caps::ShineThrough && v.colours[1] != ectodeck_draw::hdr::CAP_CLEAR);
+                    let milky = if white("Haze") { WHITE } else { tinted.as_deref().unwrap_or("#d8d2c6") };
                     s.path(&poly(&band, true), milky, "none", 1.0, if v.skirts > 0.0 { 0.08 + 0.55 * v.milky } else { 0.0 });
                     let lit = if white("Wall opacity") { WHITE } else { AMBER };
                     s.path(&poly(&[band[0], band[1]], false), "none", lit, 2.4 * grow.min(1.2), if v.skirts > 0.0 { op(v.skirts) } else { 0.0 });
@@ -835,10 +861,10 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
                 labels.push(Label::new(true, p(sl.skirt_x(true, milky_z, false), milky_z), "Haze"));
             }
             if !shine && !translucent {
-                // Black down the sides measured beside the south skirt
+                // Colour down the sides measured beside the south skirt
                 let bx = (sl.foot1 + 1.0).min(x_hi - 0.4);
-                marks.push(Mark::Height { x: px(bx), y0: pz(clear_to), y1: pz(tz), i: slider("Black down the sides") });
-                labels.push(Label::new(false, p(bx, (clear_to + tz) / 2.0), "Black down the sides"));
+                marks.push(Mark::Height { x: px(bx), y0: pz(clear_to), y1: pz(tz), i: slider("Colour down the sides") });
+                labels.push(Label::new(false, p(bx, (clear_to + tz) / 2.0), "Colour down the sides"));
             }
             // light up through the top, beside the legends
             let top_x = a1 - 1.6;
@@ -1167,6 +1193,9 @@ pub struct Printed {
     pub foot: (f64, f64),
     pub face: [f64; 4],
     pub print: ectodeck_draw::print::Print,
+    /// the colours its top and the top of its sides are seen in from above,
+    /// none where they are the art's black
+    pub colours: Option<[[u8; 3]; 2]>,
 }
 
 /// The legends' drawing: how they are set, how the core's art prints them,
@@ -1240,9 +1269,12 @@ fn print_on(s: &mut Svg, set: &Legends, key: &Printed, x: f64, y: f64, k: f64) -
 fn cap_from_above(s: &mut Svg, key: &Printed, x: f64, y: f64, k: f64, big: bool) {
     let (w, d) = (key.foot.0 * k, key.foot.1 * k);
     let r = (1.6 * k).min(10.0);
-    s.path(&rounded(x, y, x + w, y + d, r), "#262626", if big { "#5c5c5c" } else { "#454545" }, 1.0, 1.0);
+    // (in its own colours, the sides a shade darker than they are, as they face the room's light less)
+    let hex = |c: [u8; 3]| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
+    let (sides, top) = key.colours.map_or(("#262626".to_string(), "#2b2b2b".to_string()), |[t, s]| (mix(&hex(s), "#000000", 0.25), hex(t)));
+    s.path(&rounded(x, y, x + w, y + d, r), &sides, if big { "#5c5c5c" } else { "#454545" }, 1.0, 1.0);
     let [a0, b0, a1, b1] = key.face;
-    s.path(&rounded(x + a0 * k, y + b0 * k, x + a1 * k, y + b1 * k, (r - 2.0).max(1.0)), "#2b2b2b", "#3a3a3a", 1.0, 1.0);
+    s.path(&rounded(x + a0 * k, y + b0 * k, x + a1 * k, y + b1 * k, (r - 2.0).max(1.0)), &top, "#3a3a3a", 1.0, 1.0);
 }
 
 /// The legends' drawing, `pw` by `ph`: the key it is of from above, large,
