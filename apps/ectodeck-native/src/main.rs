@@ -954,7 +954,7 @@ struct App {
     /// Key lab's), once opened, and which of them has the keyboard's focus
     subs: [Option<SubWin>; 2],
     keys_on: Option<usize>,
-    /// the keys held down as the keyboard last said, for Ctrl+Shift+L
+    /// the keys held down as the keyboard last said, for Ctrl+Shift+K
     mods: Modifiers,
     /// the light the Key lab has tuned, which the keyboard is lit by, and
     /// its change (and whether Hold to compare was held for it)
@@ -1267,7 +1267,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
     let mut fps = std::env::var_os("ECTODECK_NATIVE_FPS").map(|_| (Instant::now(), 0u32, Duration::ZERO));
     // ECTODECK_NATIVE_OPEN_MACROS=N: open the Macro Editor on macro N once the keyboard is read, to check it
     let mut open_macros = std::env::var("ECTODECK_NATIVE_OPEN_MACROS").ok().and_then(|v| v.parse::<u32>().ok());
-    // ECTODECK_NATIVE_OPEN_LAB: open the Key lab at start, as Ctrl+Shift+L does
+    // ECTODECK_NATIVE_OPEN_LAB: open the Key lab at start, as Ctrl+Shift+K does
     let mut open_lab = std::env::var_os("ECTODECK_NATIVE_OPEN_LAB").is_some();
     while !app.exit {
         let busy = (app.slint.has_active_animations() && !app.frame_pending)
@@ -1987,8 +1987,8 @@ impl App {
 
     /// A key on the keyboard, pressed or let go.
     fn key(&mut self, e: &KeyEvent, down: bool) {
-        // Ctrl+Shift+L, anywhere in Ectodeck: the Key lab, a developer's panel
-        if down && self.mods.ctrl && self.mods.shift && matches!(e.keysym, Keysym::l | Keysym::L) {
+        // Ctrl+Shift+K, anywhere in Ectodeck: the Key lab, a developer's panel
+        if down && self.mods.ctrl && self.mods.shift && matches!(e.keysym, Keysym::k | Keysym::K) {
             self.open_lab();
             return;
         }

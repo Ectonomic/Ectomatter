@@ -100,7 +100,7 @@ Each setup is a file in Ectodeck's own data, `light/<core>/<id>.json` (JSON with
 
 ## 5. How the lab follows the device
 
-- It opens on the device whose page it is opened from (Ctrl+Shift+L), named in its title bar, and on the setup lighting it, and saves into that setup: the device's core, or one of the person's own.
+- It opens on the device whose page it is opened from (Ctrl+Shift+K), named in its title bar, and on the setup lighting it, and saves into that setup: the device's core, or one of the person's own.
 - Its words name the device and its parts from the description. None of its text names a particular device.
 - Its sections are the parts the device has.
 - Its drawings take their key, wells and legends from the device's art: the typical key for all keys, or the key chosen.
