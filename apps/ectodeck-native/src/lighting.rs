@@ -177,7 +177,7 @@ const LABEL_W: f32 = 112.0;
 const CTRL_X: f32 = 128.0;
 
 pub(crate) fn cell(kind: i32, x: f32, y: f32, w: f32, h: f32) -> Cell {
-    Cell { kind, x, y, w, h, text: "".into(), color: slint::Color::from_rgb_u8(0, 0, 0), on: false, value: 0.0, id: 0, index: 0, style: 0 }
+    Cell { kind, x, y, w, h, text: "".into(), fill: "".into(), lines: "".into(), color: slint::Color::from_rgb_u8(0, 0, 0), on: false, value: 0.0, id: 0, index: 0, style: 0 }
 }
 pub(crate) fn text_cell(style: i32, x: f32, y: f32, w: f32, h: f32, s: &str) -> Cell {
     Cell { text: s.into(), style, ..cell(kind::TEXT, x, y, w, h) }

@@ -119,6 +119,10 @@ export struct Cell {
     w: length,
     h: length,
     text: string,
+    // an icon drawn in place of its words, on a 24-unit square: its filled
+    // shapes and its lines (2 units wide), as SVG path data
+    fill: string,
+    lines: string,
     color: color,
     on: bool,
     value: float,
@@ -1361,6 +1365,31 @@ component CellView inherits Rectangle {
             background: root.c.color;
             border-width: 1px;
             border-color: root.c.on ? #00000033 : #ffffff33;
+        }
+        // style 31 with an icon's shapes: the icon, as its key prints it
+        if root.c.style == 31 && (root.c.fill != "" || root.c.lines != ""): Rectangle {
+            x: (parent.width - 20px) / 2;
+            y: (parent.height - 20px) / 2;
+            width: 20px;
+            height: 20px;
+            Path {
+                width: 20px;
+                height: 20px;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                commands: root.c.fill;
+                fill: b.has-hover ? #ffffff : Ink.dim;
+            }
+            Path {
+                width: 20px;
+                height: 20px;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                commands: root.c.lines;
+                fill: transparent;
+                stroke: b.has-hover ? #ffffff : Ink.dim;
+                stroke-width: 1.67px;
+            }
         }
         Text {
             x: root.c.style == 32 ? 32px : (parent.width - self.width) / 2 - (root.c.style == 24 ? 7px : 0);

@@ -86,6 +86,8 @@ pub enum Ask {
     /// (-1), or a glyph chosen on it (by its place there)
     GlyphsFor(i32),
     Glyph(i32),
+    /// the keyboard's own icon chosen in the list (by its place there)
+    GlyphIcon(i32),
     /// the legend dragged on the drawing: where its middle goes on the key's
     /// top, across and down, as shares of it
     MoveLegend(f32, f32),
@@ -479,6 +481,11 @@ const DEFAULT: &str = "Default";
 /// with the page round the list after them
 const TEXT: i32 = 1200;
 const GLYPH: i32 = 1300;
+/// the keyboard's own icons in the glyph list, after its glyphs; the page
+/// round the list, which shuts it; and the list itself
+const GLYPH_ICON: i32 = GLYPH + 70;
+const GLYPH_SHUT: i32 = GLYPH + 98;
+const GLYPH_LIST: i32 = GLYPH + 99;
 /// the drawing's key's top, where the legend is dragged
 const LEGEND_PAD: i32 = 1400;
 /// the parts of a key's legend its text boxes set, as the page names them
@@ -987,7 +994,8 @@ impl LabPage {
             TYPEFACE => Ask::Faces,
             id if (TEXT..TEXT + 3).contains(&id) => Ask::GlyphsFor(id - TEXT),
             id if (GLYPH..GLYPH + GLYPHS.len() as i32).contains(&id) => Ask::Glyph(id - GLYPH),
-            id if id == GLYPH + GLYPHS.len() as i32 => Ask::GlyphsFor(-1),
+            id if (GLYPH_ICON..GLYPH_SHUT).contains(&id) => Ask::GlyphIcon(id - GLYPH_ICON),
+            GLYPH_SHUT => Ask::GlyphsFor(-1),
             FACE => Ask::Face(index),
             COLOUR_TOP => Ask::Colour(0),
             COLOUR_SIDES => Ask::Colour(1),
@@ -1225,6 +1233,15 @@ impl LabPage {
                 }
                 Ask::GlyphsFor(part) => self.glyphs = (part >= 0 && self.glyphs != Some(part as usize)).then_some(part as usize),
                 // the glyph typed into the box that has the keys, where its cursor is
+                // the keyboard's own icon, by its name in brackets, as the box shows it
+                Ask::GlyphIcon(n) => {
+                    if let Some(name) = self.icon_names().get(n.max(0) as usize) {
+                        let window = slint::ComponentHandle::window(&self.ui);
+                        let text: slint::SharedString = format!("[{name}]").into();
+                        window.dispatch_event(slint::platform::WindowEvent::KeyPressed { text: text.clone() });
+                        window.dispatch_event(slint::platform::WindowEvent::KeyReleased { text });
+                    }
+                }
                 Ask::Glyph(g) => {
                     if let Some((glyph, _)) = GLYPHS.get(g.max(0) as usize) {
                         let window = slint::ComponentHandle::window(&self.ui);
@@ -1526,7 +1543,8 @@ impl LabPage {
     fn printed(&self, id: &str) -> Option<drawing::Printed> {
         let mm = self.mm() as f32;
         let (cap, _) = self.device.caps.iter().find(|(c, _)| c.id == id)?;
-        let print = cap.print.as_ref()?.with_text(&self.light["keys"][id]["legends"]);
+        let icons = self.own_print().map(|o| o.icons).unwrap_or_default();
+        let print = cap.print.as_ref()?.with_text(&self.light["keys"][id]["legends"], &icons);
         let f = cap.foot;
         let rel = |v: f32, from: f32| ((v - from) / mm) as f64;
         // its colours from above: its top, and the top of its sides (a pudding
@@ -2130,20 +2148,36 @@ impl LabPage {
         let Some(&(bx, by, _, bh)) = self.glyphs.and_then(|p| boxes.get(p)) else { return Vec::new() };
         let (_, h, _, _) = self.sizes();
         let (cols, side, gap) = (GLYPH_ROWS.iter().copied().max().unwrap_or(9), 32.0, 4.0);
-        let rows = GLYPH_ROWS.len();
+        // (the keyboard's own icons on a row of their own, after the glyphs)
+        let icons = self.own_print().map(|o| o.icons).unwrap_or_default();
+        let names = self.icon_names();
+        let rows = GLYPH_ROWS.len() + usize::from(!names.is_empty());
         let (lw, lh) = (cols as f32 * (side + gap) - gap + 24.0, rows as f32 * (side + gap) - gap + 24.0);
         let (lx, ly) = ((bx - 84.0).min(w - 24.0 - lw), by + bh + 6.0);
         let mut out = vec![
             // anywhere else on the page shuts it
-            Cell { id: GLYPH + GLYPHS.len() as i32, style: 29, ..cell(kind::LINK, 0.0, 0.0, w, h - 36.0 - 64.0) },
+            Cell { id: GLYPH_SHUT, style: 29, ..cell(kind::LINK, 0.0, 0.0, w, h - 36.0 - 64.0) },
             Cell { style: 27, ..cell(kind::TILE, lx, ly, lw, lh) },
-            Cell { id: GLYPH + GLYPHS.len() as i32 + 1, style: 29, ..cell(kind::LINK, lx, ly, lw, lh) },
+            Cell { id: GLYPH_LIST, style: 29, ..cell(kind::LINK, lx, ly, lw, lh) },
         ];
         let at = GLYPH_ROWS.iter().enumerate().flat_map(|(r, &n)| (0..n).map(move |c| (c as f32, r as f32)));
         for (g, ((glyph, _), (c, r))) in GLYPHS.iter().zip(at).enumerate() {
             out.push(Cell { text: (*glyph).into(), id: GLYPH + g as i32, style: 31, ..cell(kind::SEG_BUTTON, lx + 12.0 + c * (side + gap), ly + 12.0 + r * (side + gap), side, side) });
         }
+        let r = GLYPH_ROWS.len() as f32;
+        for (n, name) in names.iter().enumerate() {
+            let Some(icon) = icons.get(name) else { continue };
+            out.push(Cell { fill: icon.fill.as_str().into(), lines: icon.stroke.as_str().into(), id: GLYPH_ICON + n as i32, style: 31, ..cell(kind::SEG_BUTTON, lx + 12.0 + n as f32 * (side + gap), ly + 12.0 + r * (side + gap), side, side) });
+        }
         out
+    }
+
+    /// The keyboard's own icons, by their names, A to Z.
+    fn icon_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.own_print().map(|o| o.icons.into_keys().collect()).unwrap_or_default();
+        names.sort();
+        names.truncate((GLYPH_SHUT - GLYPH_ICON) as usize);
+        names
     }
 
     /// What the setups' menu asked for.
@@ -2668,7 +2702,7 @@ impl LabPage {
     fn told(&self) -> (String, String) {
         let r = self.readout;
         // (a glyph under the pointer tells of itself over the box being typed in)
-        let glyph = self.told.filter(|i| (GLYPH..GLYPH + GLYPHS.len() as i32).contains(i));
+        let glyph = self.told.filter(|i| (GLYPH..GLYPH + GLYPHS.len() as i32).contains(i) || (GLYPH_ICON..GLYPH_SHUT).contains(i));
         match glyph.or(self.focused).or(self.told) {
             Some(LEGEND_PAD) => match self.part_on() {
                 0 => ("The legend".into(), "Drag the legend to move it anywhere on the key. Left–right and Up–down show how far it has moved from where Placement puts it.".into()),
@@ -2680,6 +2714,14 @@ impl LabPage {
             Some(i) if (GLYPH..GLYPH + GLYPHS.len() as i32).contains(&i) => {
                 let (glyph, name) = GLYPHS[(i - GLYPH) as usize];
                 (name.to_string(), format!("Adds {glyph} where the cursor is in the box."))
+            }
+            Some(i) if (GLYPH_ICON..GLYPH_SHUT).contains(&i) => {
+                let name = self.icon_names().get((i - GLYPH_ICON) as usize).cloned().unwrap_or_default();
+                let mut title = name.clone();
+                if let Some(c) = title.get_mut(0..1) {
+                    c.make_ascii_uppercase();
+                }
+                (title, format!("The {name} icon, as this keyboard prints it. The box shows it as [{name}]; keep it on a line of its own and the key prints the icon."))
             }
             Some(i) if (0..READING).contains(&i) && self.sliders().contains(&(i as usize)) => {
                 let p = &PARAMS[i as usize];

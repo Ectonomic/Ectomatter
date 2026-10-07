@@ -1331,7 +1331,7 @@ impl Board {
             .map(|k| {
                 let printed = k.printed.as_ref()?;
                 let legends = &light["keys"][k.id.as_str()]["legends"];
-                let (style, print) = (crate::print::Style::over(&all, legends), printed.with_text(legends));
+                let (style, print) = (crate::print::Style::over(&all, legends), printed.with_text(legends, &own.icons));
                 (style != own.style || print != *printed).then_some((style, print))
             })
             .collect()

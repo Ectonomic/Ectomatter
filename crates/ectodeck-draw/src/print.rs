@@ -144,16 +144,25 @@ impl Print {
 
     /// The print with a key's own text in place of its parts, as a light's
     /// "legends" for the key give it (see TEXTS): its own legend's lines one
-    /// under the other at each line break, "" for a part printed with nothing.
-    pub fn with_text(&self, legends: &Value) -> Print {
+    /// under the other at each line break, "" for a part printed with nothing;
+    /// a line that is one of the core's `icons` by its name in brackets
+    /// ("[mute]", as text_of gives it) that icon.
+    pub fn with_text(&self, legends: &Value, icons: &HashMap<String, Icon>) -> Print {
         if TEXTS.iter().all(|(k, _)| !legends[*k].is_string()) {
             return self.clone();
         }
+        let run = |t: &str, role: Role| {
+            let t = t.trim();
+            match t.strip_prefix('[').and_then(|n| n.strip_suffix(']')).filter(|n| icons.contains_key(*n)) {
+                Some(n) => Run { text: String::new(), icon: Some(n.to_string()), role, scale: 1.0 },
+                None => Run { text: t.to_string(), icon: None, role, scale: 1.0 },
+            }
+        };
         let mut runs = Vec::new();
         for (k, role) in TEXTS {
             match legends[k].as_str() {
-                Some(text) if role == Role::Main => runs.extend(text.split('\n').filter(|l| !l.trim().is_empty()).map(|l| Run { text: l.trim().to_string(), icon: None, role, scale: 1.0 })),
-                Some(text) => runs.extend(Some(text.replace('\n', " ")).filter(|t| !t.trim().is_empty()).map(|t| Run { text: t.trim().to_string(), icon: None, role, scale: 1.0 })),
+                Some(text) if role == Role::Main => runs.extend(text.split('\n').filter(|l| !l.trim().is_empty()).map(|l| run(l, role))),
+                Some(text) => runs.extend(Some(text.replace('\n', " ")).filter(|t| !t.trim().is_empty()).map(|t| run(&t, role))),
                 None => runs.extend(self.runs.iter().filter(|r| r.role == role).cloned()),
             }
         }
@@ -771,19 +780,25 @@ mod tests {
     #[test]
     fn a_key_s_own_text_takes_the_place_of_its_print() {
         let d = device();
+        let icons = Own::of(&d).unwrap().icons;
         let control = |id: &str| d["controls"].as_array().unwrap().iter().find(|c| c["id"] == id).cloned().unwrap();
         let two = Print::of(&control("2")).unwrap();
-        assert_eq!(two.with_text(&serde_json::json!({})), two, "no text of its own");
+        assert_eq!(two.with_text(&serde_json::json!({}), &icons), two, "no text of its own");
         let parts = |p: &Print| p.runs.iter().map(|r| (r.text.clone(), r.role)).collect::<Vec<_>>();
-        let mac = two.with_text(&serde_json::json!({ "main": "⌘", "second": "" }));
+        let mac = two.with_text(&serde_json::json!({ "main": "⌘", "second": "" }), &icons);
         assert_eq!(parts(&mac), [("⌘".to_string(), Role::Main), ("@".to_string(), Role::Shift)], "the main its own, the second gone, the shift as printed");
         let caps = Print::of(&control("caps-lock")).unwrap();
         assert_eq!(caps.text_of(Role::Main), "CAPS\nLOCK", "lines at line breaks");
-        assert_eq!(parts(&caps.with_text(&serde_json::json!({ "main": "CAPS\nLOCK" }))), parts(&caps), "the same text, the same print");
+        assert_eq!(parts(&caps.with_text(&serde_json::json!({ "main": "CAPS\nLOCK" }), &icons)), parts(&caps), "the same text, the same print");
         let f1 = Print::of(&control("f1")).unwrap();
         assert_eq!(f1.text_of(Role::Second), "[mute]", "an icon by its name");
-        assert!(f1.with_text(&serde_json::json!({ "main": "F1" })).runs.iter().any(|r| r.icon.as_deref() == Some("mute")), "an icon kept where no text takes its place");
-        assert!(caps.with_text(&serde_json::json!({ "main": "⇪" })).centred, "a centred key stays centred");
+        assert!(f1.with_text(&serde_json::json!({ "main": "F1" }), &icons).runs.iter().any(|r| r.icon.as_deref() == Some("mute")), "an icon kept where no text takes its place");
+        assert!(caps.with_text(&serde_json::json!({ "main": "⇪" }), &icons).centred, "a centred key stays centred");
+        // the core's icon by its name, as the text box shows it, is the icon; a name it has none of, words
+        let muted = f1.with_text(&serde_json::json!({ "second": "[mute]" }), &icons);
+        assert_eq!(muted, f1, "[mute] the icon, as printed");
+        let none = f1.with_text(&serde_json::json!({ "second": "[volume]" }), &icons);
+        assert_eq!(none.runs.iter().find(|r| r.role == Role::Second).map(|r| (r.text.as_str(), r.icon.is_none())), Some(("[volume]", true)));
     }
 
     /// Each part of a legend sizes and moves on its own: the bottom legend
