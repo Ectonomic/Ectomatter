@@ -198,6 +198,11 @@ const HOUSING: f32 = 0.05;
 /// (MILKY_NEAR, fully milky), never all the way round the cap.
 pub const MILKY: f32 = 20.0;
 const MILKY_NEAR: f32 = 3.0;
+/// How far from a wall light that clear plastic takes in under a cap's
+/// black top still gets into the wall, and down it to the skirt below the
+/// black, in millimetres: the top and the sides are one piece of plastic,
+/// which carries light as clear plastic does; further in, the black takes it.
+const CLEAR_REACH: f32 = 2.0;
 
 /// How far round a cap plastic this milky carries the light it scatters.
 pub fn milky_spread(milky: f32) -> f32 {
@@ -728,9 +733,11 @@ struct Stood {
     half: f32,
     spread: f32,
     /// how high the skirt lets light through, up to where the black comes down
-    /// it, and how far milky plastic carries the light it scatters
+    /// it, how far milky plastic carries the light it scatters, and how far
+    /// from a wall clear plastic under the top carries light into it
     clear_to: f32,
     diffuse: f32,
+    reach: f32,
     gap: f32,
     top: f32,
     wall: f32,
@@ -742,7 +749,7 @@ impl Stood {
         let mm = p.units_per_mm;
         let p = p.simulated();
         let (gap, top) = (p.gap * mm, p.top * mm);
-        Stood { beam_from: p.switch_top * mm, half: p.switch_width * mm / 2.0, spread: p.glow_spread * mm, clear_to: gap + (1.0 - p.black) * (top - gap), diffuse: milky_spread(p.milky) * mm, gap, top, wall: p.wall * mm, p }
+        Stood { beam_from: p.switch_top * mm, half: p.switch_width * mm / 2.0, spread: p.glow_spread * mm, clear_to: gap + (1.0 - p.black) * (top - gap), diffuse: milky_spread(p.milky) * mm, reach: CLEAR_REACH * mm, gap, top, wall: p.wall * mm, p }
     }
 }
 
@@ -1211,25 +1218,55 @@ impl Scene {
     /// Where light a cap's plastic takes in at `q` (on its skirt's side
     /// `side`, or the underside of its top) comes out of it, and on which side
     /// of the skirt. What it lets straight through comes out where it went
-    /// in, through the skirt below the black (from the top, it goes into the
-    /// black: it never reaches the skirt); what milky plastic scatters
+    /// in, through the skirt below the black (from the top, into the black,
+    /// but near a wall down the wall: CLEAR_REACH); what milky plastic scatters
     /// (`scattered`) it carries round the cap's foot, as far each way as it
-    /// carries light, to anywhere up the skirt below the black.
+    /// carries light, to anywhere up the skirt below the black; from under
+    /// the top, only as much of it as gets as far as the skirt.
     fn exit(&self, ss: &Stoods, cap: u32, side: Option<u8>, q: [f32; 3], scattered: bool, rng: &mut Rng) -> Option<([f32; 3], u8)> {
         let (f, s) = (self.caps[cap as usize].foot, ss.cap(cap));
         if s.clear_to <= s.gap {
             return None;
         }
         if !scattered {
-            return side.filter(|_| q[2] <= s.clear_to).map(|side| (q, side));
+            return match side {
+                Some(side) => (q[2] <= s.clear_to).then_some((q, side)),
+                None => {
+                    // (in under the top: down the nearest wall, if it is near enough)
+                    let d = [q[0] - f[0], f[2] - q[0], q[1] - f[1], f[3] - q[1]];
+                    let near = (0..4).fold(0usize, |b, i| if d[i] < d[b] { i } else { b });
+                    if rng.f() > (-d[near].max(0.0) / s.reach).exp() {
+                        return None;
+                    }
+                    let z = s.gap + rng.f() * (s.clear_to - s.gap);
+                    let (x, y) = (q[0].clamp(f[0], f[2]), q[1].clamp(f[1], f[3]));
+                    Some(match near {
+                        0 => ([f[0], y, z], 0),
+                        1 => ([f[2], y, z], 1),
+                        2 => ([x, f[1], z], 2),
+                        _ => ([x, f[3], z], 3),
+                    })
+                }
+            };
         }
         // round the foot from its north-west corner: east along its north
         // side, south down its east, west along its south, north up its west
         let (w, h) = (f[2] - f[0], f[3] - f[1]);
-        let side = side.unwrap_or_else(|| {
-            let d = [q[0] - f[0], f[2] - q[0], q[1] - f[1], f[3] - q[1]];
-            (0..4).fold(0u8, |b, i| if d[i] < d[b as usize] { i as u8 } else { b })
-        });
+        let side = match side {
+            Some(side) => side,
+            None => {
+                // taken in under the black top: it reaches the sides only as
+                // often as the plastic carries light that far, the black
+                // taking the rest (light in near a side gets out; from the
+                // middle of the top, little does)
+                let d = [q[0] - f[0], f[2] - q[0], q[1] - f[1], f[3] - q[1]];
+                let near = (0..4).fold(0u8, |b, i| if d[i] < d[b as usize] { i as u8 } else { b });
+                if rng.f() > (-d[near as usize].max(0.0) / s.diffuse).exp() {
+                    return None;
+                }
+                near
+            }
+        };
         let went_in = match side {
             2 => (q[0] - f[0]).clamp(0.0, w),
             1 => w + (q[1] - f[1]).clamp(0.0, h),
@@ -1897,7 +1934,7 @@ fn bounce(scene: &Scene, ss: &Stoods, k: usize, (lx, ly): (f32, f32), into: &mut
             let scattered = pc.skirts > 0.0 && matches!(what, Struck::Inside(..) | Struck::Under(_)) && rng.f() < pc.milky;
             let out = match what {
                 Struck::Inside(c, side) if pc.skirts > 0.0 => scene.exit(ss, c, Some(side), q, scattered, rng),
-                Struck::Under(c) if pc.skirts > 0.0 && scattered => scene.exit(ss, c, None, q, true, rng),
+                Struck::Under(c) if pc.skirts > 0.0 => scene.exit(ss, c, None, q, scattered, rng),
                 _ => None,
             };
             // what it gives back and lets through, and where it shows
