@@ -83,22 +83,22 @@ pub fn write(core: &str, device: &str, s: &Setup, note: Note) -> Result<(), Stri
 fn file_text(device: &str, s: &Setup, note: Note) -> String {
     let name = &s.name;
     let mut out = vec![format!("// {name}: a custom light setup for the {device}."), "//".to_string()];
-    out.extend(comment(&format!("The Light lab writes this file each time you save {name}. The file holds only the settings {name} changes from Core; every setting not listed here uses Core's value. The note beside each value names the setting as the Light lab does, for example \"Keycaps › Haze: 80%\"."), ""));
+    out.extend(comment(&format!("The Light lab writes this file each time you save {name}. The file holds only the settings {name} changes from Default; every setting not listed here uses Default's value. The note beside each value names the setting as the Light lab does, for example \"Keycaps › Haze: 80%\"."), ""));
     out.push("//".into());
-    out.extend(comment(&format!("You can edit values here by hand; the changes apply the next time Ectodeck starts. Percentages are written from 0 to 1 (80% is 0.8), and lengths in millimetres. To switch back to Core, or to rename or delete {name}, use the setup menu at the top of the Light lab."), ""));
+    out.extend(comment(&format!("You can edit values here by hand; the changes apply the next time Ectodeck starts. Percentages are written from 0 to 1 (80% is 0.8), and lengths in millimetres. To switch back to Default, or to rename or delete {name}, use the setup menu at the top of the Light lab."), ""));
     out.push("{".into());
     match s.changes.as_object().filter(|o| !o.is_empty()) {
         None => {
             out.push(format!("  \"name\": {},  // the name shown in the setup menu", json!(name)));
             out.push(String::new());
-            out.extend(comment(&format!("{name} has no changes from Core yet, so the keyboard looks the same as with Core. Change a setting in the Light lab and press Save to {name}; the change is written here."), "  "));
+            out.extend(comment(&format!("{name} has no changes from Default yet, so the keyboard looks the same as with Default. Change a setting in the Light lab and press Save to {name}; the change is written here."), "  "));
             out.push("  \"light\": {}".into());
         }
         Some(_) => {
             let file = json!({ "name": name, "light": s.changes });
             let top = |path: &[String], v: &Value| match path {
                 [n] if n == "name" => Some("the name shown in the setup menu".to_string()),
-                [l] if l == "light" => Some(format!("the settings {name} changes from Core")),
+                [l] if l == "light" => Some(format!("the settings {name} changes from Default")),
                 [_, rest @ ..] => note(rest, v),
                 [] => None,
             };
@@ -270,6 +270,6 @@ mod tests {
         assert!(text.lines().all(|l| l.chars().count() <= 80 || !l.trim_start().starts_with("//")), "comments within 80 columns");
         let empty = file_text("EVGA Z10 RGB", &Setup { id: "studio".into(), name: "Studio".into(), changes: json!({}) }, &note);
         assert_eq!(jsonc::parse(&empty).unwrap()["light"], json!({}));
-        assert!(empty.starts_with("// Studio: a custom light setup for the EVGA Z10 RGB.\n") && empty.contains("Studio has no changes from Core yet"), "{empty}");
+        assert!(empty.starts_with("// Studio: a custom light setup for the EVGA Z10 RGB.\n") && empty.contains("Studio has no changes from Default yet"), "{empty}");
     }
 }

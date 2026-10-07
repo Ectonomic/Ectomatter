@@ -411,6 +411,8 @@ const SETUP: i32 = 930;
 const NAME: i32 = 935;
 /// a setup's words in the menu and on Save: as long as fits
 const SETUP_W: f32 = 200.0;
+/// what the core's own setup is called, beside the person's custom ones
+const DEFAULT: &str = "Default";
 /// the switch's place, east and north: values of one key's only
 const PLACE_E: usize = 25;
 const PLACE_N: usize = 26;
@@ -925,13 +927,9 @@ impl LabPage {
     /// where the head is narrow: what it tunes, or whose own setup it shows.
     fn intro(&self) -> (String, String) {
         match self.key() {
-            None if self.setup.is_some() => {
-                let setup = self.setup_name();
-                (format!("{setup} is a custom setup. Save writes your changes to {setup}; anything you haven't changed uses Core's values."), format!("Save writes your changes to {setup}. Anything you haven't changed uses Core's values."))
-            }
             None => {
-                let name = &self.device.name;
-                (format!("Tune how the {name} is lit. Ectodeck's window shows each change at once; Save writes your changes to the core."), format!("Tune how the {name} is lit. Save writes your changes to the core."))
+                let line = format!("Tune how the {} is lit. Changes save to {}.", self.device.name, self.setup_name());
+                (line.clone(), line)
             }
             Some(k) if k.button => (format!("{0}'s own setup. A button with no light of its own, standing in the keys' light: how high it stands, and what it gives back of the light.", k.label), format!("{0}'s own setup: a button in the keys' light.", k.label)),
             Some(k) if !k.lit => (format!("{0}'s own setup. It has no LED of its own, so only its cap is set here; the rest follows all keys.", k.label), format!("{}'s own setup: its cap; it has no LED of its own.", k.label)),
@@ -1086,7 +1084,7 @@ impl LabPage {
                             put_back(&mut self.light, &self.core_saved, None, p);
                         }
                         self.rev += 1;
-                        self.status = (format!("{what} uses Core's value again."), 0);
+                        self.status = (format!("{what} is back to {DEFAULT}'s value."), 0);
                     }
                 }
                 Ask::Follow(_) => {}
@@ -1109,10 +1107,7 @@ impl LabPage {
                     self.light = self.saved.clone();
                     self.rev += 1;
                     self.menu = Menu::Shut;
-                    self.status = match self.setup {
-                        Some(_) => (format!("Back to {} as last saved.", self.setup_name()), 0),
-                        None => ("Back to the core's saved tuning.".into(), 0),
-                    };
+                    self.status = (format!("Back to {} as last saved.", self.setup_name()), 0);
                 }
                 Ask::Save => {
                     self.menu = Menu::Shut;
@@ -1498,7 +1493,7 @@ impl LabPage {
             Ok(()) => {
                 self.saved = self.light.clone();
                 self.core_saved = self.light.clone();
-                (format!("Saved into the {} core.", self.device.name), 1)
+                (format!("Saved to {DEFAULT}."), 1)
             }
             Err(e) => (format!("Not saved: {e}."), 2),
         };
@@ -1508,7 +1503,7 @@ impl LabPage {
 
     /// What the setup in use is called: its name, or the core's.
     fn setup_name(&self) -> String {
-        self.setup.as_ref().and_then(|id| self.setups.iter().find(|s| &s.id == id)).map_or_else(|| "Core".to_string(), |s| s.name.clone())
+        self.setup.as_ref().and_then(|id| self.setups.iter().find(|s| &s.id == id)).map_or_else(|| DEFAULT.to_string(), |s| s.name.clone())
     }
 
     fn changes_of(&self, light: &Value) -> Value {
@@ -1530,56 +1525,6 @@ impl LabPage {
             [a, b] => value_note((a, b), v, false),
             _ => None,
         }
-    }
-
-    /// What a custom setup changes, as its row in the menu says it: how many
-    /// of Core's values it changes, and where they are in the lab.
-    fn changes_note(&self, s: &Setup) -> String {
-        fn values(v: &Value) -> usize {
-            match v.as_object() {
-                Some(o) => o.values().map(values).sum::<usize>().max(1),
-                None => 1,
-            }
-        }
-        let (mut n, mut places, mut keys) = (0, Vec::new(), Vec::new());
-        for (a, part) in s.changes.as_object().into_iter().flatten() {
-            match (a.as_str(), part.as_object()) {
-                ("keys", Some(own)) => {
-                    for (id, v) in own {
-                        n += values(v);
-                        keys.push(self.device.caps.iter().find(|(c, _)| &c.id == id).map_or_else(|| id.clone(), |(c, _)| c.label.clone()));
-                    }
-                }
-                (_, Some(part)) => {
-                    for b in part.keys() {
-                        n += 1;
-                        if let Some(section) = section_of((a, b)) {
-                            if !places.contains(&section) {
-                                places.push(section);
-                            }
-                        }
-                    }
-                }
-                _ => n += 1,
-            }
-        }
-        if n == 0 {
-            return "No changes from Core yet.".into();
-        }
-        // the sections in the lab's order, then the keys
-        let mut said: Vec<String> = SECTIONS.iter().map(|s| s.0).filter(|t| places.contains(t)).map(str::to_string).collect();
-        match keys.len() {
-            0 => {}
-            1 => said.push(format!("the {} key", keys[0])),
-            2 => said.push(format!("the {} and {} keys", keys[0], keys[1])),
-            k => said.push(format!("{k} keys")),
-        }
-        let places = match said.len() {
-            0 => String::new(),
-            1 => format!(", in {}", said[0]),
-            k => format!(", in {} and {}", said[..k - 1].join(", "), said[k - 1]),
-        };
-        format!("{n} change{} from Core{places}.", if n == 1 { "" } else { "s" })
     }
 
     /// What the setups' menu asked for.
@@ -1637,13 +1582,13 @@ impl LabPage {
     /// in use named anew; unless it is no name, or one taken.
     fn give_name(&mut self) {
         let name = self.naming.trim().to_string();
-        let taken = |n: &str| n.eq_ignore_ascii_case("core") || self.setups.iter().any(|s| s.name.eq_ignore_ascii_case(n) && (self.menu == Menu::New || Some(&s.id) != self.setup.as_ref()));
+        let taken = |n: &str| n.eq_ignore_ascii_case(DEFAULT) || self.setups.iter().any(|s| s.name.eq_ignore_ascii_case(n) && (self.menu == Menu::New || Some(&s.id) != self.setup.as_ref()));
         if name.is_empty() {
             self.status = ("Type a name for the setup.".into(), 2);
             return;
         }
-        if name.eq_ignore_ascii_case("core") {
-            self.status = ("Core is already used. Choose another name.".into(), 2);
+        if name.eq_ignore_ascii_case(DEFAULT) {
+            self.status = (format!("{DEFAULT} is already used. Choose another name."), 2);
             return;
         }
         if taken(&name) {
@@ -1691,7 +1636,7 @@ impl LabPage {
                 self.setups = setups::list(&self.device.core);
                 self.menu = Menu::Shut;
                 self.switch_to(None);
-                self.status = (format!("Deleted {name}. Switched to Core."), 0);
+                self.status = (format!("Deleted {name}. Switched to {DEFAULT}."), 0);
             }
             Err(e) => self.status = (format!("Not deleted: {e}."), 2),
         }
@@ -1705,7 +1650,7 @@ impl LabPage {
     fn save_text(&self) -> String {
         match self.setup {
             Some(_) => format!("Save to {}", elide(&self.setup_name(), SETUP_W, 600, 13.0)),
-            None => "Save to the core".into(),
+            None => format!("Save to {DEFAULT}"),
         }
     }
 
@@ -1721,7 +1666,6 @@ impl LabPage {
         let (_, h, _, _) = self.sizes();
         let colour = |c: [u8; 3]| slint::Color::from_rgb_u8(c[0], c[1], c[2]);
         let (quiet, faint, dim, bright) = ([0x9a, 0x9a, 0x9a], [0x5a, 0x5a, 0x5a], [0xd4, 0xd4, 0xd4], [0xf5, 0xf5, 0xf5]);
-        let small = |x: f32, y: f32, s: &str, c: [u8; 3]| Cell { color: colour(c), ..text_cell(style::SMALL_IN, x, y, text::width(400, 11.5, s) + 2.0, 16.0, s) };
         let words = |x: f32, y: f32, s: &str, c: [u8; 3]| Cell { color: colour(c), ..text_cell(style::WORDS_IN, x, y, text::width(400, 13.5, s) + 2.0, 20.0, s) };
         let mw = 380.0;
         let (mx, my) = (x.min(w - 24.0 - mw), 59.0);
@@ -1736,7 +1680,7 @@ impl LabPage {
         let row = |items: &mut Vec<Cell>, y: f32, index: i32, name: &str, note: &str, in_use: bool| -> f32 {
             let can = in_use || (!changed && !naming);
             let lines = wrap_after(note, mw - 40.0, mw - 40.0);
-            let h = 34.0 + 18.0 * lines.len() as f32;
+            let h = if lines.is_empty() { 36.0 } else { 34.0 + 18.0 * lines.len() as f32 };
             if in_use {
                 items.push(Cell { style: 30, ..cell(kind::TILE, mx + 8.0, my + y, mw - 16.0, h) });
             }
@@ -1751,24 +1695,24 @@ impl LabPage {
             h
         };
         let mut y = 8.0;
-        y += row(&mut items, y, 10, "Core", "The default lighting. Saving changes the core.", self.setup.is_none());
+        y += row(&mut items, y, 10, DEFAULT, "The standard lighting for this keyboard.", self.setup.is_none());
         y += 10.0;
         items.push(Cell { color: colour([0xa3, 0xa3, 0xa3]), ..text_cell(style::LABEL_IN, mx + 20.0, my + y, 200.0, 18.0, "Custom") });
         y += 20.0;
-        for line in wrap_after("Custom setups save only what you change. Everything else comes from Core.", mw - 40.0, mw - 40.0) {
+        for line in wrap_after("For a keyboard you've changed, such as new keycaps.", mw - 40.0, mw - 40.0) {
             items.push(Cell { color: colour(quiet), ..text_cell(style::NOTE_IN, mx + 20.0, my + y, mw - 40.0, 18.0, &line) });
             y += 18.0;
         }
         y += 6.0;
         if self.setups.is_empty() {
-            for line in wrap_after("No custom setups yet. To make one, choose Save as a new setup below.", mw - 40.0, mw - 40.0) {
+            for line in wrap_after("None yet. Choose Save as a new setup to make one.", mw - 40.0, mw - 40.0) {
                 items.push(Cell { color: colour(dim), ..text_cell(style::NOTE_IN, mx + 20.0, my + y + 4.0, mw - 40.0, 18.0, &line) });
                 y += 18.0;
             }
             y += 12.0;
         }
         for (k, s) in self.setups.iter().enumerate() {
-            y += row(&mut items, y, 11 + k as i32, &s.name, &self.changes_note(s), self.setup.as_ref() == Some(&s.id));
+            y += row(&mut items, y, 11 + k as i32, &s.name, "", self.setup.as_ref() == Some(&s.id));
         }
         if changed && !naming {
             for line in wrap_after("Save or revert your changes before switching setups.", mw - 40.0, mw - 40.0) {
@@ -1806,7 +1750,7 @@ impl LabPage {
             Menu::Delete => {
                 items.push(text_cell(style::LABEL, mx + 20.0, my + y + 6.0, mw - 40.0, 26.0, &format!("Delete {}?", elide(&self.setup_name(), SETUP_W, 400, 13.5))));
                 y += 34.0;
-                for line in wrap_after(&format!("This deletes {}. The keyboard switches back to Core.", self.setup_name()), mw - 40.0, mw - 40.0) {
+                for line in wrap_after(&format!("This deletes {}. The keyboard switches back to {DEFAULT}.", self.setup_name()), mw - 40.0, mw - 40.0) {
                     items.push(text_cell(style::NOTE, mx + 20.0, my + y, mw - 40.0, 18.0, &line));
                     y += 18.0;
                 }
@@ -2061,7 +2005,7 @@ impl LabPage {
                     Some(k) => (p.label.into(), format!("{} This is {}'s own value; the dot before the name gives the value back to all keys.", p.note, k.label)),
                     None if self.key().is_none() && self.owns(p.path) => {
                         let core = at(&self.core_saved, p.path).as_f64().or_else(|| default_of(p.path, &self.device.print)).unwrap_or(p.def);
-                        (p.label.into(), format!("{} changes {} from Core's {}. Click the dot before {} to use Core's {} again. {}", self.setup_name(), p.label, said(p, core), p.label, said(p, core), p.note))
+                        (p.label.into(), format!("Changed from {DEFAULT}'s {}. Click the dot to go back to {}. {}", said(p, core), said(p, core), p.note))
                     }
                     None => (p.label.into(), p.note.into()),
                 }
@@ -2081,7 +2025,7 @@ impl LabPage {
                 let c = &CHOICES[(i - CHOICE) as usize];
                 if self.key().is_none() && self.owns(CHOSEN[(i - CHOICE) as usize][0]) {
                     let core = c.options[chosen((i - CHOICE) as usize, &self.core_saved, &self.device.print)];
-                    (c.label.into(), format!("{} changes {} from Core's {core}. Click the dot before {} to use Core's {core} again. {}", self.setup_name(), c.label, c.label, c.note))
+                    (c.label.into(), format!("Changed from {DEFAULT}'s {core}. Click the dot to go back to {core}. {}", c.note))
                 } else {
                     (c.label.into(), c.note.into())
                 }

@@ -1,6 +1,6 @@
 # The Light lab and the light model
 
-2026-10-03. Approved, and built in this order: the boundary, then one key's own setup. 2026-10-04: the light description written to be read, its values named as the lab names them (the core protocol's draft 6). 2026-10-06: custom setups beside Core, the core's own, kept in Ectodeck's own data (section 4).
+2026-10-03. Approved, and built in this order: the boundary, then one key's own setup. 2026-10-04: the light description written to be read, its values named as the lab names them (the core protocol's draft 6). 2026-10-06: custom setups beside Default, the core's own setup, kept in Ectodeck's own data (section 4).
 
 The Light lab is Ectodeck's, not a device's. It is built to tune any peripheral's light, and the Z10 is only the first device it tunes. This sets out where the boundary runs, so the lab never carries a device and a core never carries the lab.
 
@@ -65,14 +65,14 @@ A key's entry holds only what differs from all keys. Save writes each value the 
 
 ## 4. Custom setups
 
-A custom setup is the device as the person has it where it differs from the core's description: pudding caps on a Z10 whose core describes shine-through caps. The lab's head has a button for the setup it tunes, first in its row (the setup, the keys, the section); its menu lists Core (the core's own setup) and, under Custom, the person's custom setups, and makes, renames and deletes them. Ectodeck lights the device by the setup chosen, and keeps the choice in its settings (`devices.z10.light`, the setup's id; none is the core's), so it starts lit by it.
+A custom setup is the device as the person has it where it differs from the core's description: pudding caps on a Z10 whose core describes shine-through caps. The lab's head has a button for the setup it tunes, first in its row (the setup, the keys, the section); its menu lists Default (the core's own setup) and, under Custom, the person's custom setups, and makes, renames and deletes them. Ectodeck lights the device by the setup chosen, and keeps the choice in its settings (`devices.z10.light`, the setup's id; none is the core's), so it starts lit by it.
 
 Each setup is a file in Ectodeck's own data, `light/<core>/<id>.json` (JSON with comments), holding its name and what its light changes from the core's, as a JSON merge patch (RFC 7386): a value takes the place of the core's, an object is merged into the core's, null takes the core's out. The lab writes it to be read: a head saying what the file is and how to edit it, and each value on a line of its own with its name and its value in the lab beside it.
 
 ```jsonc
 {
-  "name": "Pudding caps",  // its name in the setup menu
-  "light": {               // what this setup changes from Core
+  "name": "Pudding caps",  // the name shown in the setup menu
+  "light": {               // the settings Pudding caps changes from Default
     "caps": {
       "kind": "pudding",  // Keycaps: Pudding
       "opacity": 0.8,     // Keycaps › Wall opacity: 80%
@@ -85,7 +85,7 @@ Each setup is a file in Ectodeck's own data, `light/<core>/<id>.json` (JSON with
 
 - **Only what it changes,** so what it leaves alone follows the core as the core is tuned: the Z10's LEDs are the same LEDs under any caps.
 - **And what only its kinds use.** A value its kind of switch or cap uses that the core's kind does not (a pudding cap's Haze, where the core's caps are shine-through) is the setup's own even where it equals the core's, since the core holds it unused and may change it with no thought of the setup.
-- **Save follows the setup in use,** "Save to the core" or "Save to" the setup's name. Save as a new setup keeps the light as it is, changes not saved and all, under a new name; the setup it came from stays as saved. Switching setups waits until changes are saved or reverted.
+- **Save follows the setup in use,** "Save to Default" (into the core) or "Save to" the custom setup's name. Save as a new setup keeps the light as it is, changes not saved and all, under a new name; the setup it came from stays as saved. Switching setups waits until changes are saved or reverted.
 - **For all keys in a setup of the person's own, a dot** marks a value of its own, where it differs from the core's, as one key's dot marks the key's own; the dot gives the core's value back.
 
 ## 5. How the lab follows the device
