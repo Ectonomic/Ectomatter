@@ -1567,10 +1567,17 @@ impl LabPage {
 
     /// A key drawn with its print, by its control's id, as the art has it.
     fn printed(&self, id: &str) -> Option<drawing::Printed> {
+        self.printed_with(id, true)
+    }
+
+    /// A key drawn with its print as the keyboard prints it, or with its own
+    /// text in place of it (`own_text`).
+    fn printed_with(&self, id: &str, own_text: bool) -> Option<drawing::Printed> {
         let mm = self.mm() as f32;
         let (cap, _) = self.device.caps.iter().find(|(c, _)| c.id == id)?;
         let icons = self.own_print().map(|o| o.icons).unwrap_or_default();
-        let print = cap.print.as_ref()?.with_text(&self.light["keys"][id]["legends"], &icons);
+        let own = if own_text { self.light["keys"][id]["legends"].clone() } else { Value::Null };
+        let print = cap.print.as_ref()?.with_text(&own, &icons);
         let f = cap.foot;
         let rel = |v: f32, from: f32| ((v - from) / mm) as f64;
         // its colours from above: its top, and the top of its sides (a pudding
@@ -1610,7 +1617,9 @@ impl LabPage {
     fn legends(&self) -> Option<drawing::Legends> {
         let (own, style) = (self.own_print()?, self.style()?);
         let id = self.key().map(|k| k.id.clone()).or_else(|| self.device.typical.clone())?;
-        let key = self.printed(&id)?;
+        // (for all keys, the typical key as the keyboard prints it: its own
+        // text is its own, and the sizes all keys take are measured on its print)
+        let key = self.printed_with(&id, self.key().is_some())?;
         let others = if self.key().is_some() { Vec::new() } else { self.others(&id) };
         // (the part the sliders act on, if this key's legend has it)
         let part = if self.part > 0 && key.print.runs.iter().any(|r| r.role == ectodeck_draw::print::TEXTS[self.part - 1].1) { self.part } else { 0 };
