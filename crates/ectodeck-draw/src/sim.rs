@@ -1231,8 +1231,10 @@ impl Scene {
         if !scattered {
             return match side {
                 Some(side) => (q[2] <= s.clear_to).then_some((q, side)),
+                // (a top that lets light through lets it out itself)
+                None if s.p.tops > 0.0 => None,
                 None => {
-                    // (in under the top: down the nearest wall, if it is near enough)
+                    // (in under the black top: down the nearest wall, if it is near enough)
                     let d = [q[0] - f[0], f[2] - q[0], q[1] - f[1], f[3] - q[1]];
                     let near = (0..4).fold(0usize, |b, i| if d[i] < d[b] { i } else { b });
                     if rng.f() > (-d[near].max(0.0) / s.reach).exp() {
@@ -1255,13 +1257,14 @@ impl Scene {
         let side = match side {
             Some(side) => side,
             None => {
-                // taken in under the black top: it reaches the sides only as
+                // taken in under a black top: it reaches the sides only as
                 // often as the plastic carries light that far, the black
                 // taking the rest (light in near a side gets out; from the
-                // middle of the top, little does)
+                // middle of the top, little does). Under a top that lets
+                // light through, what it does not let out goes to the sides.
                 let d = [q[0] - f[0], f[2] - q[0], q[1] - f[1], f[3] - q[1]];
                 let near = (0..4).fold(0u8, |b, i| if d[i] < d[b as usize] { i as u8 } else { b });
-                if rng.f() > (-d[near as usize].max(0.0) / s.diffuse).exp() {
+                if s.p.tops <= 0.0 && rng.f() > (-d[near as usize].max(0.0) / s.diffuse).exp() {
                     return None;
                 }
                 near
