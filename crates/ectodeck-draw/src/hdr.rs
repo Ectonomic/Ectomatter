@@ -1335,7 +1335,8 @@ impl Board {
                 let printed = k.printed.as_ref()?;
                 let legends = &light["keys"][k.id.as_str()]["legends"];
                 let (style, print) = (crate::print::Style::over(&all, legends), printed.with_text(legends, &own.icons));
-                (style != own.style || print != *printed).then_some((style, print))
+                // (the drawing's own legends where they are what the light asks for)
+                (style != own.drawn() || print != *printed).then_some((style, print))
             })
             .collect()
     }
@@ -2254,6 +2255,9 @@ mod tests {
         let tree = Tree::from_str(&crate::fixture::svg(), &usvg::Options::default()).unwrap();
         let mut device: Value = crate::jsonc::parse(&crate::fixture::device()).unwrap();
         device["light"] = light();
+        // (the drawing's own legends, as it draws them: these are about the light)
+        device["light"]["legends"]["typeface"] = serde_json::json!("Barlow Semi Condensed");
+        device["light"]["legends"]["weight"] = serde_json::json!(600);
         let b = Board::new(&tree, &device, [0x20, 0x20, 0x20], 1264, 506).unwrap();
         (tree, device, b)
     }
@@ -2599,6 +2603,8 @@ mod tests {
         let db = crate::fixture::faces();
         let (_t, device, b) = board();
         let own = crate::print::Own::of(&device).unwrap();
+        // (set in the typeface the drawing's legends are drawn in)
+        let drawn = own.drawn();
         let ink = |s: &Shape| {
             let (mut sum, mut sx, mut sy) = (0f64, 0f64, 0f64);
             for (i, c) in s.cover.iter().enumerate() {
@@ -2613,7 +2619,7 @@ mod tests {
         let mut rows = Vec::new();
         for k in &b.keys {
             let (Some(p), Some(art)) = (&k.printed, &k.art_legend) else { continue };
-            let set = crate::print::set(&db, p, &own.style, &own, k.face, b.model.scale);
+            let set = crate::print::set(&db, p, &drawn, &own, k.face, b.model.scale);
             let (new, _) = raster(&set, b.art_scale, b.art_offset).expect("a legend set");
             let ((sa, xa, ya), (sn, xn, yn)) = (ink(art), ink(&new));
             // how much of the two is alike, pixel by pixel

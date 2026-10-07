@@ -1379,12 +1379,13 @@ fn xml(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
-/// The typefaces' list, `w` by `h`: the core's own at the top, then this
-/// computer's from `first`, `rows` of them, each its name set in itself and
-/// a few legends beside it in amber; `current` the one the legends are set
-/// in (its place on the list, the core's own 0).
+/// The typefaces' list, `w` by `h`: the keyboard's own at the top, then
+/// Ectodeck's from `first`, `rows` of them, each its name set in itself and
+/// a few legends beside it in amber, those the person `added` marked so;
+/// `current` the one the legends are set in (its place on the list, the
+/// keyboard's own 0); room at the foot for the button that adds one.
 #[allow(clippy::too_many_arguments)]
-pub fn face_list(core: &(String, u16), others: &[(String, Vec<u16>)], first: usize, rows: usize, current: usize, total: usize, w: f32, h: f32) -> Stage {
+pub fn face_list(core: &(String, u16), others: &[(String, Vec<u16>)], added: &[String], first: usize, rows: usize, current: usize, total: usize, w: f32, h: f32) -> Stage {
     let (wf, hf) = (w as f64, h as f64);
     let mut svg = String::new();
     let _ = write!(svg, r#"<svg xmlns="http://www.w3.org/2000/svg" width="{wf}" height="{hf}" viewBox="0 0 {wf} {hf}">"#);
@@ -1397,12 +1398,18 @@ pub fn face_list(core: &(String, u16), others: &[(String, Vec<u16>)], first: usi
         let _ = write!(svg, r##"<text x="{:.1}" y="{:.1}" font-family="'{}'" font-weight="{weight}" font-size="13" fill="{AMBER}" text-anchor="end" opacity="0.9">ESC  Q  2 @  ENTER</text>"##, wf - 20.0, y + 22.0, xml(family));
     };
     // (the box to find one by name above them, the page's own)
-    let mut words = vec![Word { x: 20.0, y: 58.0, text: "The core's own".into(), colour: QUIET_WORD }];
+    let mut words = vec![Word { x: 20.0, y: 58.0, text: "This keyboard's own".into(), colour: QUIET_WORD }];
     row(&mut svg, 66.0, &core.0, core.1, current == 0);
-    words.push(Word { x: 20.0, y: 124.0, text: if others.len() == total { format!("On this computer, {total}") } else { format!("On this computer, {} found", others.len()) }, colour: QUIET_WORD });
+    words.push(Word { x: 20.0, y: 124.0, text: if others.len() == total { format!("In Ectodeck, {total}") } else { format!("In Ectodeck, {} found", others.len()) }, colour: QUIET_WORD });
     for (i, (family, weights)) in others.iter().skip(first).take(rows).enumerate() {
         let weight = weights.iter().copied().min_by_key(|w| (*w as i32 - 600).abs()).unwrap_or(400);
-        row(&mut svg, 132.0 + i as f64 * 34.0, family, weight, current == first + i + 1);
+        let y = 132.0 + i as f64 * 34.0;
+        row(&mut svg, y, family, weight, current == first + i + 1);
+        // (after its name, set in itself)
+        if added.contains(family) {
+            let name = ectodeck_draw::print::text_width(&ectodeck_draw::print::faces(), family, weight, family, 15.0).unwrap_or(120.0) as f64;
+            words.push(Word { x: (20.0 + name + 10.0) as f32, y: (y + 22.0) as f32, text: "Added".into(), colour: QUIET_WORD });
+        }
     }
     svg += "</svg>";
     Stage { w, h, svg, words, extras: Vec::new() }

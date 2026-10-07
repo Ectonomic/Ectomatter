@@ -36,6 +36,7 @@ mod screens;
 mod settings;
 mod setups;
 mod text;
+mod typefaces;
 mod tray;
 mod uistate;
 mod z10;
@@ -360,6 +361,23 @@ mod key_tests {
     }
 }
 
+/// The typefaces the person's setups and the core's light name, all keys'
+/// and keys' own.
+fn setups_typefaces(core: &str) -> Vec<String> {
+    let mut lights: Vec<serde_json::Value> = setups::list(core).into_iter().map(|s| s.changes).collect();
+    lights.push(cores::shown().device_now()["light"].clone());
+    let mut out: Vec<String> = Vec::new();
+    for l in &lights {
+        let keys = l["keys"].as_object().map(|k| k.values().cloned().collect::<Vec<_>>()).unwrap_or_default();
+        for v in std::iter::once(&l["legends"]["typeface"]).chain(keys.iter().map(|k| &k["legends"]["typeface"])) {
+            if let Some(t) = v.as_str().filter(|t| !out.iter().any(|o| o == t)) {
+                out.push(t.to_string());
+            }
+        }
+    }
+    out
+}
+
 /// Ectodeck's own fonts for a keyboard's glyphs in the windows' text too
 /// (the Key lab's glyph list, a key's text as typed): looked in after the
 /// computer's own fonts, so a glyph the computer has no font for still shows.
@@ -380,9 +398,16 @@ fn glyph_fonts_in_windows() {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let snapshot = args.iter().position(|a| a == "--snapshot").and_then(|i| args.get(i + 1)).cloned();
-    // the typefaces legends can be set in, the core's own among them, loaded
-    // in the background so the Key lab's list of them opens at once
+    // the typefaces legends can be set in: Ectodeck's own, the core's and
+    // the person's added, loaded in the background so the Key lab's list of
+    // them opens at once; and a typeface a setup names from before Ectodeck
+    // kept its own, taken in from this computer
     ectodeck_draw::print::add_fonts(cores::shown().fonts());
+    ectodeck_draw::print::add_fonts(typefaces::files());
+    let named = setups_typefaces(&cores::shown().id);
+    for name in typefaces::adopt_named(&named) {
+        eprintln!("ectodeck-native: the typeface {name} taken into Ectodeck's own from this computer");
+    }
     // the person's own pictures, put on keys in place of their text
     setups::load_images(&cores::shown().id);
     ectodeck_draw::print::warm();
@@ -773,6 +798,14 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
         window.dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Left });
         window.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
         lab.act();
+        // ECTODECK_NATIVE_IMPORT_FONT=file: the typeface chosen when the file picker opens
+        if let (true, Some(file)) = (std::mem::take(&mut lab.typeface_wanted), std::env::var_os("ECTODECK_NATIVE_IMPORT_FONT")) {
+            match typefaces::add(std::path::Path::new(&file)) {
+                Ok(families) => lab.typeface_added(&families),
+                Err(why) => lab.image_refused(&why),
+            }
+            lab.act();
+        }
         // ECTODECK_NATIVE_IMPORT=file: the picture chosen when the file picker opens
         if let (Some(part), Some(file)) = (lab.image_wanted.take(), std::env::var_os("ECTODECK_NATIVE_IMPORT")) {
             match setups::import_image(&cores::shown().id, std::path::Path::new(&file)) {

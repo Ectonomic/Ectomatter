@@ -162,6 +162,9 @@ struct Menu {
     choices: Vec<Choice>,
 }
 
+/// The file picker open for a typeface, in place of a part of a legend's picture.
+const TYPEFACE_PICK: usize = usize::MAX;
+
 pub struct Front {
     pub ui: AppWindow,
     pub page: Page,
@@ -773,6 +776,7 @@ impl Front {
     }
 
     /// Do what the Key lab asked; what only its window can do is handed back.
+    /// (The picker's answer for a typeface, not a part's picture.)
     pub fn act_lab(&mut self) -> Vec<WindowAsk> {
         let Some(l) = &mut self.lab else { return Vec::new() };
         let window = l.act();
@@ -785,16 +789,26 @@ impl Front {
         if let Some(part) = l.image_wanted.take() {
             self.picking = Some((part, crate::picker::open_file("Choose a picture for the key", "SVG pictures", &["*.svg", "*.SVG"])));
         }
+        // a typeface of the person's own asked for: the same picker, the file
+        // chosen kept in Ectodeck's typefaces and the legends set in it
+        if std::mem::take(&mut l.typeface_wanted) {
+            self.picking = Some((TYPEFACE_PICK, crate::picker::open_file("Choose a typeface", "Typefaces", &["*.ttf", "*.otf", "*.TTF", "*.OTF"])));
+        }
         if let Some((part, rx)) = &self.picking {
             let part = *part;
             match rx.try_recv() {
                 Ok(chosen) => {
                     self.picking = None;
-                    if let Some(path) = chosen {
-                        match crate::setups::import_image(&crate::cores::shown().id, &path) {
+                    match (chosen, part) {
+                        (Some(path), TYPEFACE_PICK) => match crate::typefaces::add(&path) {
+                            Ok(families) => l.typeface_added(&families),
+                            Err(why) => l.image_refused(&why),
+                        },
+                        (Some(path), _) => match crate::setups::import_image(&crate::cores::shown().id, &path) {
                             Ok(name) => l.put_image(part, &name),
                             Err(why) => l.image_refused(&why),
-                        }
+                        },
+                        (None, _) => {}
                     }
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}

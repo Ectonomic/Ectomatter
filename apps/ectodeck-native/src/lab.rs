@@ -87,6 +87,8 @@ pub enum Ask {
     GlyphsFor(i32),
     /// a picture for the part whose glyph list is open; a part's taken off
     ChooseImage,
+    /// a typeface of the person's own to add, from the desktop's file picker
+    AddTypeface,
     RemoveImage(i32),
     Glyph(i32),
     /// the keyboard's own icon chosen in the list (by its place there)
@@ -295,6 +297,9 @@ fn chosen(choice: usize, light: &Value, print: &Value) -> usize {
 const PLACES: [&str; 4] = ["printed", "top", "middle", "topleft"];
 
 /// The weight an option of the Weight choice is: Thin's 100 to Black's 900.
+/// How far down a choice's second row of options stands from its first.
+const ROW_H: f32 = 36.0;
+
 fn weight_of(option: usize) -> u64 {
     100 * (option.min(8) as u64 + 1)
 }
@@ -491,6 +496,8 @@ const GLYPH_SHUT: i32 = GLYPH + 98;
 const GLYPH_LIST: i32 = GLYPH + 99;
 /// the glyph list's button that puts a picture of the person's own on the key
 const IMAGE_CHOOSE: i32 = 1700;
+/// the typefaces' list's button that adds a typeface of the person's own
+const ADD_TYPEFACE: i32 = 1710;
 /// a part's picture, in place of its text, by its file's name (see print::Print::with_text)
 const IMAGE_KEYS: [&str; 3] = ["main_image", "shift_image", "second_image"];
 /// the drawing's key's top, where the legend is dragged
@@ -720,6 +727,8 @@ pub struct LabPage {
     glyphs: Option<usize>,
     /// a picture asked for, for this part: the window opens the file picker
     pub image_wanted: Option<usize>,
+    /// a typeface of the person's own asked for, from the desktop's file picker
+    pub typeface_wanted: bool,
 }
 
 /// The light setups' menu: shut; open; giving a setup a name, a new one
@@ -1003,6 +1012,7 @@ impl LabPage {
             id if (TEXT..TEXT + 3).contains(&id) && index == 2 => Ask::RemoveImage(id - TEXT),
             id if (TEXT..TEXT + 3).contains(&id) => Ask::GlyphsFor(id - TEXT),
             IMAGE_CHOOSE => Ask::ChooseImage,
+            ADD_TYPEFACE => Ask::AddTypeface,
             id if (GLYPH..GLYPH + GLYPHS.len() as i32).contains(&id) => Ask::Glyph(id - GLYPH),
             id if (GLYPH_ICON..GLYPH_SHUT).contains(&id) => Ask::GlyphIcon(id - GLYPH_ICON),
             GLYPH_SHUT => Ask::GlyphsFor(-1),
@@ -1084,7 +1094,8 @@ impl LabPage {
             picking: false,
             pad: None,
             pad_of: None,
-            faces: Vec::new(),
+            // (the typefaces and their weights, for the Weight choice from the start)
+            faces: ectodeck_draw::print::families(&ectodeck_draw::print::faces()),
             faces_open: false,
             face_query: String::new(),
             face_first: 0,
@@ -1099,6 +1110,7 @@ impl LabPage {
             boxes,
             glyphs: None,
             image_wanted: None,
+            typeface_wanted: false,
         };
         // a section the device has
         if !page.sections().contains(&page.section) {
@@ -1243,6 +1255,11 @@ impl LabPage {
                     }
                 }
                 Ask::GlyphsFor(part) => self.glyphs = (part >= 0 && self.glyphs != Some(part as usize)).then_some(part as usize),
+                Ask::AddTypeface => {
+                    self.typeface_wanted = true;
+                    self.faces_open = false;
+                    (self.hovered, self.told) = (None, None);
+                }
                 Ask::ChooseImage => {
                     self.image_wanted = self.glyphs;
                     self.glyphs = None;
@@ -1653,12 +1670,13 @@ impl LabPage {
         (x, y, 460.0f32.min(sw - 40.0), (HEAD_H + sh - 12.0 - y).max(160.0))
     }
 
-    /// How many of this computer's typefaces the list has room for.
+    /// How many of Ectodeck's typefaces the list has room for, over its
+    /// button for adding one.
     fn face_rows(&self) -> usize {
-        ((self.face_box().3 - 146.0) / 34.0).floor().max(1.0) as usize
+        ((self.face_box().3 - 146.0 - 46.0) / 34.0).floor().max(1.0) as usize
     }
 
-    /// The first of this computer's typefaces to show, to have the one the
+    /// The first of Ectodeck's typefaces to show, to have the one the
     /// legends are set in in view.
     fn face_centred(&self) -> usize {
         let list = self.face_list();
@@ -1667,8 +1685,9 @@ impl LabPage {
         current.saturating_sub(4).min(list.len().saturating_sub(1 + self.face_rows()))
     }
 
-    /// The typefaces on the list: the core's own first, then this
-    /// computer's that what is typed finds (not the core's for its signs alone).
+    /// The typefaces on the list: the keyboard's own first, then Ectodeck's
+    /// that what is typed finds, its own and the person's added (not the
+    /// core's for its signs alone).
     fn face_list(&self) -> Vec<(String, Vec<u16>)> {
         let p = &self.device.print;
         let (core, symbols) = (p["typeface"].as_str().unwrap_or(""), p["symbols"].as_str().unwrap_or(""));
@@ -2018,6 +2037,25 @@ impl LabPage {
     }
 
     /// A picture that could not be used: why, in a sentence, in the foot.
+    /// A typeface of the person's own added: the list has it, and the
+    /// legends are set in the first family its file holds.
+    pub fn typeface_added(&mut self, families: &[String]) {
+        self.faces = ectodeck_draw::print::families(&ectodeck_draw::print::faces());
+        let Some(family) = families.first() else { return };
+        if let Some((_, weights)) = self.face_list().into_iter().find(|(n, _)| n == family) {
+            self.remember(TYPEFACE);
+            // the weight it has nearest the one the legends are set in
+            let want = self.style().map_or(400, |s| s.weight);
+            let weight = weights.iter().copied().min_by_key(|w| (*w as i32 - want as i32).abs()).unwrap_or(want);
+            self.put(("legends", "typeface"), json!(family));
+            self.put(("legends", "weight"), json!(weight as f64));
+            self.tidy_print();
+            self.rev += 1;
+        }
+        self.status = (format!("{family} is in Ectodeck's typefaces now, and the legends are set in it."), 0);
+        self.refresh();
+    }
+
     pub fn image_refused(&mut self, why: &str) {
         self.status = (why.to_string(), 0);
         self.refresh();
@@ -2044,6 +2082,41 @@ impl LabPage {
         }
     }
 
+    /// A choice's options, in rows no wider than its column: each option's
+    /// index, name and width. (Of the weights, those the typeface has.)
+    fn option_rows(&self, c: usize) -> Vec<Vec<(usize, &'static str, f32)>> {
+        let weights: Vec<u16> = if c == 3 {
+            let style = self.style();
+            style.as_ref().map(|s| self.faces.iter().chain(self.face_list().iter()).find(|(n, _)| *n == s.typeface).map_or_else(|| vec![s.weight], |(_, w)| w.clone())).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let mut rows: Vec<Vec<(usize, &'static str, f32)>> = vec![Vec::new()];
+        let mut x = 6.0;
+        for (j, &name) in CHOICES[c].options.iter().enumerate() {
+            if c == 3 && !weights.contains(&(weight_of(j) as u16)) {
+                continue;
+            }
+            let w = text::width(400, 13.0, name) + 20.0;
+            if x + w > drawing::CTRL_W && rows.last().is_some_and(|r| !r.is_empty()) {
+                rows.push(Vec::new());
+                x = 6.0;
+            }
+            rows.last_mut().expect("a row").push((j, name, w));
+            x += w + 2.0;
+        }
+        rows
+    }
+
+    /// How much further down the legends' text stands for a weight's choice in two rows.
+    fn text_drop(&self) -> f32 {
+        if self.section == LEGENDS && self.choices().contains(&3) {
+            ROW_H * (self.option_rows(3).len() as f32 - 1.0)
+        } else {
+            0.0
+        }
+    }
+
     /// Where the chosen key's text boxes stand, a box for each part of its
     /// legend: under the section's choices, each as tall as its lines. None
     /// for all keys, or while the typefaces' list or the keys' map covers them.
@@ -2053,7 +2126,7 @@ impl LabPage {
         }
         let (_, _, sw, _) = self.sizes();
         let cx = 24.0 + drawing::column_x(true, sw);
-        let mut y = HEAD_H + drawing::choice_y(3) + 30.0;
+        let mut y = HEAD_H + drawing::choice_y(3) + 30.0 + self.text_drop();
         (0..3)
             .map(|part| {
                 let lines = if self.image_of(part).is_some() { 1.0 } else { self.text_of(part).split('\n').count().clamp(1, 3) as f32 };
@@ -2649,14 +2722,15 @@ impl LabPage {
             let (first, rows) = (self.face_first, self.face_rows());
             let list = self.face_list();
             // as tall as what it shows
-            let fh = fh.min(152.0 + 34.0 * rows.min(list.len().saturating_sub(1 + first)).max(1) as f32);
+            let fh = fh.min(152.0 + 34.0 * rows.min(list.len().saturating_sub(1 + first)).max(1) as f32 + 46.0);
             let family = self.style().map(|s| s.typeface).unwrap_or_default();
             let current = list.iter().position(|(n, _)| *n == family).unwrap_or(0);
             let total = self.faces.iter().filter(|(n, _)| Some(n.as_str()) != self.device.print["typeface"].as_str() && Some(n.as_str()) != self.device.print["symbols"].as_str()).count();
             let key = (first, rows, current, list.len(), fw.round() as i32, fh.round() as i32, (scale * 100.0) as u32, self.face_query.clone());
             if self.face_sketch.as_ref().map(|f| &f.0) != Some(&key) {
                 let core = (list[0].0.clone(), list[0].1.iter().copied().min_by_key(|w| (*w as i32 - 600).abs()).unwrap_or(400));
-                let st = drawing::face_list(&core, &list[1..], first, rows, current, total, fw, fh);
+                let added: Vec<String> = crate::typefaces::files().iter().flat_map(|f| ectodeck_draw::print::families_in(f)).collect();
+                let st = drawing::face_list(&core, &list[1..], &added, first, rows, current, total, fw, fh);
                 let image = slint::Image::from_rgba8_premultiplied(drawing::pixels_set(&st, scale));
                 self.face_sketch = Some((key, st, image));
             }
@@ -2771,13 +2845,14 @@ impl LabPage {
     fn told(&self) -> (String, String) {
         let r = self.readout;
         // (a glyph under the pointer tells of itself over the box being typed in)
-        let glyph = self.told.filter(|i| (GLYPH..GLYPH + GLYPHS.len() as i32).contains(i) || (GLYPH_ICON..GLYPH_SHUT).contains(i) || *i == IMAGE_CHOOSE);
+        let glyph = self.told.filter(|i| (GLYPH..GLYPH + GLYPHS.len() as i32).contains(i) || (GLYPH_ICON..GLYPH_SHUT).contains(i) || *i == IMAGE_CHOOSE || *i == ADD_TYPEFACE);
         match glyph.or(self.focused).or(self.told) {
             Some(LEGEND_PAD) => match self.part_on() {
                 0 => ("The legend".into(), "Drag the legend to move it anywhere on the key. Left–right and Up–down show how far it has moved from where Placement puts it.".into()),
                 n => (format!("The {} legend", PART_NAMES[n].to_lowercase()), format!("Drag the {} part of the legend to move it on its own. {} left–right and {} up–down show how far it has moved from where the rest of the legend puts it.", PART_NAMES[n].to_lowercase(), PART_NAMES[n], PART_NAMES[n])),
             },
             Some(PART) => ("Adjust".into(), "Which part of the legend the sliders below size and move. Whole sizes and moves the legend as one. Main, Shifted and Bottom each size and move one part on its own: the main legend, the shifted sign beside it, and the bottom legend at the foot of the key.".into()),
+            Some(ADD_TYPEFACE) => ("Add a typeface".into(), "Choose a typeface file (.ttf or .otf) from your computer, such as the one your keycaps are printed in. Ectodeck keeps its own copy, so your setups look the same on any computer.".into()),
             Some(SECTION_DEFAULT) => self.section_reset_words(),
             Some(IMAGE_CHOOSE) => ("Choose a picture".into(), "Puts a picture from an SVG file on the key in place of this text, lit as a legend is: the logo on an artisan cap, say. The picture's shapes print in one colour, as legends do. Turn any text in the file into shapes first.".into()),
             Some(i) if (TEXT..TEXT + 3).contains(&i) => match self.image_of((i - TEXT) as usize) {
@@ -2941,7 +3016,6 @@ impl LabPage {
             over.push(cell(kind::SEG, cx, y + 30.0, bw + 6.0, 34.0));
             over.push(Cell { text: family.into(), on: self.faces_open, id: TYPEFACE, index: 0, style: 24, ..cell(kind::SEG_BUTTON, cx + 3.0, y + 32.0, bw, 30.0) });
         }
-        let weights: Vec<u16> = style.as_ref().map(|s| self.faces.iter().chain(self.face_list().iter()).find(|(n, _)| *n == s.typeface).map_or_else(|| vec![s.weight], |(_, w)| w.clone())).unwrap_or_default();
         for (k, &c) in self.choices().iter().enumerate() {
             let choice = &CHOICES[c];
             // (the weight under the typeface's button; both under its list while it is open)
@@ -2951,22 +3025,24 @@ impl LabPage {
             }
             let y = sy + drawing::choice_y(k);
             let id = CHOICE + c as i32;
-            over.push(Cell { id, ..cell(kind::ZONE, cx - 10.0, y - 7.0, drawing::CTRL_W + 20.0, drawing::CHOICE_H) });
+            let rows = self.option_rows(c);
+            over.push(Cell { id, ..cell(kind::ZONE, cx - 10.0, y - 7.0, drawing::CTRL_W + 20.0, drawing::CHOICE_H + ROW_H * (rows.len() as f32 - 1.0)) });
             over.push(text_cell(style::LABEL, cx, y, drawing::CTRL_W, 26.0, choice.label));
-            // its options as wide as their words, the box round them as wide as
-            // they are (of the weights, those the typeface has)
-            let options: Vec<(usize, &str)> = choice.options.iter().copied().enumerate().filter(|&(j, _)| c != 3 || weights.contains(&(weight_of(j) as u16))).collect();
-            let widths: Vec<f32> = options.iter().map(|(_, name)| text::width(400, 13.0, name) + 20.0).collect();
-            let seg_w = widths.iter().sum::<f32>() + 2.0 * (widths.len() as f32 - 1.0) + 6.0;
-            over.push(cell(kind::SEG, cx, y + 30.0, seg_w, 34.0));
             if self.owns(CHOSEN[c][0]) {
                 own_mark(&mut over, cx, y, CHOICE + c as i32);
             }
+            // its options as wide as their words, the box round them as wide as
+            // they are, in rows as many as it takes
             let on = self.chosen_here(c, &work);
-            let mut bx = cx + 3.0;
-            for ((j, name), bw) in options.into_iter().zip(widths) {
-                over.push(Cell { text: name.into(), on: j == on, id, index: j as i32, style: style::TELLS, ..cell(kind::SEG_BUTTON, bx, y + 32.0, bw, 30.0) });
-                bx += bw + 2.0;
+            for (r, row) in rows.into_iter().enumerate() {
+                let ry = y + 30.0 + ROW_H * r as f32;
+                let seg_w = row.iter().map(|(_, _, w)| w).sum::<f32>() + 2.0 * (row.len() as f32 - 1.0) + 6.0;
+                over.push(cell(kind::SEG, cx, ry, seg_w, 34.0));
+                let mut bx = cx + 3.0;
+                for (j, name, bw) in row {
+                    over.push(Cell { text: name.into(), on: j == on, id, index: j as i32, style: style::TELLS, ..cell(kind::SEG_BUTTON, bx, ry + 2.0, bw, 30.0) });
+                    bx += bw + 2.0;
+                }
             }
         }
         // the caps' colour, under the section's choices: a button for their
@@ -3015,7 +3091,7 @@ impl LabPage {
         // a key's own text: the heading, each part's name beside its box and
         // its mark where the key has text of its own; for all keys, the way there
         if self.section == LEGENDS && !self.picking && !self.faces_open && !self.choices().is_empty() {
-            let y = sy + drawing::choice_y(3);
+            let y = sy + drawing::choice_y(3) + self.text_drop();
             over.push(text_cell(style::LABEL, cx, y, drawing::CTRL_W, 26.0, "Text"));
             let boxes = self.text_boxes();
             if boxes.is_empty() {
@@ -3105,6 +3181,8 @@ impl LabPage {
             for i in 0..rows.min(self.face_list().len().saturating_sub(1 + first)) {
                 over.push(Cell { id: FACE, index: (first + i + 1) as i32, ..cell(kind::LINK, fx + 8.0, fy + 132.0 + i as f32 * 34.0, fw - 16.0, 34.0) });
             }
+            // (at its foot, the button that adds a typeface of the person's own)
+            over.push(Cell { text: "Add a typeface…".into(), id: ADD_TYPEFACE, style: 23, ..cell(kind::GHOST, fx + 12.0, fy + st.h - 12.0 - 34.0, fw - 24.0, 34.0) });
         }
         // the map, open to choose a key: every cap where the art has it, the
         // chosen one lit, those with a setup of their own marked

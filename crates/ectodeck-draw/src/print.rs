@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 use resvg::tiny_skia::{Path, PathBuilder, Transform};
 use resvg::usvg::{self, fontdb};
@@ -49,9 +49,10 @@ pub const GLYPH_FONTS: [&[u8]; 3] = [
 ];
 const GLYPH_FAMILIES: [(&str, u16); 3] = [("Ectodeck Key Glyphs", 700), ("Ectodeck Key Glyphs Symbols", 400), ("Ectodeck Key Glyphs Symbols 2", 400)];
 /// Typefaces for the signs a legend's typeface lacks, after the core's own
-/// symbols: Ectodeck's, then this computer's that have more of them, each at
-/// the weight nearest the one given.
-const FALLBACKS: [(&str, u16); 4] = [("DejaVu Sans", 700), ("Noto Sans Symbols", 700), ("Noto Sans Symbols 2", 400), ("Noto Sans Math", 400)];
+/// symbols and Ectodeck's glyphs: letters from Ectodeck's own typefaces
+/// (Greek and Cyrillic, Japanese kana, Korean jamo), each at the weight
+/// nearest the one given.
+const FALLBACKS: [(&str, u16); 3] = [("Arimo", 700), ("Noto Sans JP", 500), ("Noto Sans KR", 500)];
 /// A sign from those, as tall as so many of the capitals beside it (one
 /// that lies flat as wide as a quarter as much again), and the room between two.
 const SIGN: f32 = 1.1;
@@ -306,12 +307,29 @@ pub struct Icon {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Own {
     pub style: Style,
+    /// the typeface and weight the core's drawing has its legends in, where
+    /// that is other than its print's own: the drawing's legends are shown
+    /// as drawn only when they are set as it draws them
+    pub art: Option<(String, u16)>,
     pub symbols: String,
     pub fonts: Vec<String>,
     pub icons: HashMap<String, Icon>,
+    /// signs its typeface draws otherwise than its keys print them, each set
+    /// as another of its signs (Orbitron's zero is slashed, its O is not)
+    pub swap: Vec<(char, char)>,
 }
 
 impl Own {
+    /// The style the drawing's legends are drawn in: the print's own, in the
+    /// typeface the drawing has them in where that is another.
+    pub fn drawn(&self) -> Style {
+        let mut s = self.style.clone();
+        if let Some((t, w)) = &self.art {
+            (s.typeface, s.weight) = (t.clone(), *w);
+        }
+        s
+    }
+
     /// The core's own print, as its device description gives it.
     pub fn of(device: &Value) -> Option<Own> {
         let p = &device["print"];
@@ -329,7 +347,9 @@ impl Own {
             })
             .unwrap_or_default();
         let fonts = p["fonts"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default();
-        Some(Own { style, symbols: p["symbols"].as_str().unwrap_or("").to_string(), fonts, icons })
+        let art = p["art"]["typeface"].as_str().map(|t| (t.to_string(), p["art"]["weight"].as_f64().map_or(400, |w| w.round() as u16)));
+        let swap = p["swap"].as_object().map(|o| o.iter().filter_map(|(k, v)| Some((k.chars().next()?, v.as_str()?.chars().next()?))).collect()).unwrap_or_default();
+        Some(Own { style, art, symbols: p["symbols"].as_str().unwrap_or("").to_string(), fonts, icons, swap })
     }
 }
 
@@ -520,34 +540,86 @@ fn reversed(c: &[(char, Vec<(f32, f32)>)]) -> Contour {
 
 // ---------------------------------------------------------------- typefaces
 
-static FACES: OnceLock<Arc<fontdb::Database>> = OnceLock::new();
+static FACES: Mutex<Option<Arc<fontdb::Database>>> = Mutex::new(None);
 static FILES: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
-/// Add typefaces' files (a core's own) to those legends can be set in,
-/// before they are first loaded.
+/// Ectodeck's own typefaces for legends, the faces keyboards are printed in
+/// (typefaces/README.md): with the cores' own and the person's added, the
+/// only ones legends are set in, so a setup looks the same on any computer.
+pub const LIBRARY: [&[u8]; 21] = [
+    include_bytes!("../typefaces/BrunoAce-Regular.ttf"),
+    include_bytes!("../typefaces/Audiowide-Regular.ttf"),
+    include_bytes!("../typefaces/Orbitron.ttf"),
+    include_bytes!("../typefaces/Michroma-Regular.ttf"),
+    include_bytes!("../typefaces/Saira.ttf"),
+    include_bytes!("../typefaces/Rajdhani-Medium.ttf"),
+    include_bytes!("../typefaces/Rajdhani-SemiBold.ttf"),
+    include_bytes!("../typefaces/Rajdhani-Bold.ttf"),
+    include_bytes!("../typefaces/Barlow-Regular.ttf"),
+    include_bytes!("../typefaces/Barlow-SemiBold.ttf"),
+    include_bytes!("../typefaces/Arimo.ttf"),
+    include_bytes!("../typefaces/Inter.ttf"),
+    include_bytes!("../typefaces/Nunito.ttf"),
+    include_bytes!("../typefaces/Jost.ttf"),
+    include_bytes!("../typefaces/OpenGorton-Regular.otf"),
+    include_bytes!("../typefaces/OpenGorton-Bold.otf"),
+    include_bytes!("../typefaces/JetBrainsMono.ttf"),
+    include_bytes!("../typefaces/CourierPrime-Regular.ttf"),
+    include_bytes!("../typefaces/CourierPrime-Bold.ttf"),
+    include_bytes!("../typefaces/NotoSansJP.ttf"),
+    include_bytes!("../typefaces/NotoSansKR.ttf"),
+];
+
+/// Add typefaces' files (a core's own, the person's added) to those legends
+/// can be set in; after they are first loaded, reload() takes them in.
 pub fn add_fonts(files: impl IntoIterator<Item = PathBuf>) {
     if let Ok(mut f) = FILES.lock() {
-        f.extend(files);
+        for file in files {
+            if !f.contains(&file) {
+                f.push(file);
+            }
+        }
     }
 }
 
-/// The typefaces legends can be set in: this computer's, the cores' added
-/// before, and Ectodeck's own for a keyboard's glyphs, loaded once (the
-/// first to ask waits for them).
+/// The typefaces legends can be set in: Ectodeck's own library, the cores'
+/// and the person's added, and Ectodeck's own for a keyboard's glyphs; not
+/// this computer's, which another computer may not have. Loaded once (the
+/// first to ask waits for them), and again after reload().
 pub fn faces() -> Arc<fontdb::Database> {
-    FACES
-        .get_or_init(|| {
-            let mut db = fontdb::Database::new();
-            db.load_system_fonts();
-            for f in FILES.lock().map(|f| f.clone()).unwrap_or_default() {
-                if let Err(e) = db.load_font_file(&f) {
-                    eprintln!("ectodeck-draw: the typeface {}: {e}", f.display());
-                }
+    let Ok(mut held) = FACES.lock() else { return Arc::new(fontdb::Database::new()) };
+    held.get_or_insert_with(|| {
+        let mut db = fontdb::Database::new();
+        for data in LIBRARY {
+            db.load_font_source(fontdb::Source::Binary(Arc::new(data)));
+        }
+        for f in FILES.lock().map(|f| f.clone()).unwrap_or_default() {
+            if let Err(e) = db.load_font_file(&f) {
+                eprintln!("ectodeck-draw: the typeface {}: {e}", f.display());
             }
-            add_glyph_fonts(&mut db);
-            Arc::new(db)
-        })
-        .clone()
+        }
+        add_glyph_fonts(&mut db);
+        Arc::new(db)
+    })
+    .clone()
+}
+
+/// Load the typefaces again, with any added since: the next faces() has them.
+pub fn reload() {
+    if let Ok(mut held) = FACES.lock() {
+        *held = None;
+    }
+}
+
+/// The families a typeface's file holds, upright, by name.
+pub fn families_in(file: &std::path::Path) -> Vec<String> {
+    let mut db = fontdb::Database::new();
+    if db.load_font_file(file).is_err() {
+        return Vec::new();
+    }
+    let mut out: Vec<String> = db.faces().filter_map(|f| f.families.first().map(|(n, _)| n.clone())).collect();
+    out.dedup();
+    out
 }
 
 /// Ectodeck's own typefaces for a keyboard's glyphs, added to these.
@@ -565,14 +637,17 @@ pub fn warm() {
 }
 
 /// The typefaces there are, each its family's name and the weights it has
-/// upright, A to Z; not Ectodeck's own for glyphs, which have no letters.
+/// upright (a variable one's every hundred it spans), A to Z; not
+/// Ectodeck's own for glyphs, which have no letters.
 pub fn families(db: &fontdb::Database) -> Vec<(String, Vec<u16>)> {
     let mut by: std::collections::BTreeMap<String, Vec<u16>> = std::collections::BTreeMap::new();
     for f in db.faces().filter(|f| f.style == fontdb::Style::Normal) {
         if let Some((name, _)) = f.families.first().filter(|(name, _)| !GLYPH_FAMILIES.iter().any(|(g, _)| g == name)) {
             let w = by.entry(name.clone()).or_default();
-            if !w.contains(&f.weight.0) {
-                w.push(f.weight.0);
+            for weight in weights_of(db, f.id).unwrap_or_else(|| vec![f.weight.0]) {
+                if !w.contains(&weight) {
+                    w.push(weight);
+                }
             }
         }
     }
@@ -582,6 +657,18 @@ pub fn families(db: &fontdb::Database) -> Vec<(String, Vec<u16>)> {
             (n, w)
         })
         .collect()
+}
+
+/// A variable face's weights, every hundred its weight axis spans; none for
+/// a face of one weight.
+fn weights_of(db: &fontdb::Database, id: fontdb::ID) -> Option<Vec<u16>> {
+    db.with_face_data(id, |data, index| {
+        let f = ttf_parser::Face::parse(data, index).ok()?;
+        let axis = f.variation_axes().into_iter().find(|a| a.tag == ttf_parser::Tag::from_bytes(b"wght"))?;
+        let w: Vec<u16> = (1..=9).map(|n| n * 100).filter(|&n| (axis.min_value..=axis.max_value).contains(&(n as f32))).collect();
+        (!w.is_empty()).then_some(w)
+    })
+    .flatten()
 }
 
 /// A typeface's face, by its family's name: the weight it has nearest the one asked.
@@ -686,10 +773,14 @@ fn cap_share(db: &fontdb::Database, id: fontdb::ID) -> f32 {
 }
 
 /// Text shaped in a face, the glyphs it has: their outlines and places, in
-/// the face's units; and which of its characters it lacks.
-fn shape(db: &fontdb::Database, id: fontdb::ID, text: &str) -> Option<Shaped> {
+/// the face's units; and which of its characters it lacks. A variable
+/// typeface is set at the weight asked, where one is.
+fn shape(db: &fontdb::Database, id: fontdb::ID, weight: Option<u16>, text: &str) -> Option<Shaped> {
     db.with_face_data(id, |data, index| {
-        let face = rustybuzz::Face::from_slice(data, index)?;
+        let mut face = rustybuzz::Face::from_slice(data, index)?;
+        if let Some(w) = weight.filter(|_| face.is_variable()) {
+            face.set_variations(&[rustybuzz::Variation { tag: ttf_parser::Tag::from_bytes(b"wght"), value: w as f32 }]);
+        }
         let mut buf = rustybuzz::UnicodeBuffer::new();
         buf.push_str(text);
         let out = rustybuzz::shape(&face, &[], buf);
@@ -707,6 +798,13 @@ fn shape(db: &fontdb::Database, id: fontdb::ID, text: &str) -> Option<Shaped> {
         Some(Shaped { glyphs, advance: pen, per_em: face.units_per_em() as f32 })
     })
     .flatten()
+}
+
+/// How wide a line of text is in a typeface at a size (px), or none where
+/// Ectodeck has no such typeface.
+pub fn text_width(db: &fontdb::Database, family: &str, weight: u16, text: &str, px: f32) -> Option<f32> {
+    let s = shape(db, query(db, family, weight)?, Some(weight), text)?;
+    Some(s.advance / s.per_em * px)
 }
 
 /// Whether a face has a character.
@@ -751,7 +849,7 @@ fn icon_paths(icon: &Icon) -> Vec<(Path, Option<f32>)> {
 /// legends' and the core's own symbols (`symbols`), whose signs are drawn as
 /// the art draws them, is sized to the capitals and stands on the line, so
 /// signs from different typefaces look alike.
-fn lay_run(db: &fontdb::Database, run: &Run, cap: f32, face: fontdb::ID, fallbacks: &[fontdb::ID], symbols: Option<fontdb::ID>, own: &Own) -> Laid {
+fn lay_run(db: &fontdb::Database, run: &Run, cap: f32, face: fontdb::ID, weight: u16, fallbacks: &[fontdb::ID], symbols: Option<fontdb::ID>, own: &Own) -> Laid {
     if let Some(name) = &run.icon {
         let Some(icon) = own.icons.get(name).cloned().or_else(|| image(name)) else { return Laid { run: run.clone(), parts: Vec::new(), advance: 0.0, cap, drop: 0.0 } };
         let icon = &icon;
@@ -780,7 +878,7 @@ fn lay_run(db: &fontdb::Database, run: &Run, cap: f32, face: fontdb::ID, fallbac
         if id != face && Some(id) != symbols {
             let mut first = true;
             for c in text.chars() {
-                let Some(sh) = shape(db, id, &c.to_string()) else { continue };
+                let Some(sh) = shape(db, id, None, &c.to_string()) else { continue };
                 // its outline's box, in the typeface's units (y up)
                 let (mut l, mut lo, mut r, mut hi) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
                 for (p, x) in &sh.glyphs {
@@ -803,7 +901,7 @@ fn lay_run(db: &fontdb::Database, run: &Run, cap: f32, face: fontdb::ID, fallbac
             }
             continue;
         }
-        let Some(sh) = shape(db, id, &text) else { continue };
+        let Some(sh) = shape(db, id, (id == face).then_some(weight), &text) else { continue };
         let k = size / sh.per_em;
         for (p, x) in sh.glyphs {
             parts.push((p, Transform::from_row(k, 0.0, 0.0, -k, pen + x * k, 0.0), None));
@@ -824,7 +922,15 @@ pub fn set(db: &fontdb::Database, print: &Print, style: &Style, own: &Own, face:
     // each run at its kind's size, a word too long for its cap set smaller,
     // a key's words all alike (PRINT over SCREEN the same size)
     let cap_of = |r: &Run| style.part(r.role).size.unwrap_or(if r.letter() { style.letters } else { style.words });
-    let mut laid: Vec<Laid> = print.runs.iter().map(|r| lay_run(db, r, cap_of(r), id, &fallbacks, symbols, own)).collect();
+    // in the core's own typeface, its signs swapped for those its keys print
+    let swapped = |r: &Run| -> Run {
+        let mut r = r.clone();
+        if style.typeface == own.style.typeface && !own.swap.is_empty() {
+            r.text = r.text.chars().map(|c| own.swap.iter().find(|(a, _)| *a == c).map_or(c, |(_, b)| *b)).collect();
+        }
+        r
+    };
+    let mut laid: Vec<Laid> = print.runs.iter().map(|r| lay_run(db, &swapped(r), cap_of(r), id, style.weight, &fallbacks, symbols, own)).collect();
     let room = fw - 2.0 * FIT;
     let words = laid.iter().filter(|l| !l.run.letter() && l.run.icon.is_none() && l.advance > room && room > 0.0).map(|l| room / l.advance).fold(1.0f32, f32::min);
     for l in laid.iter_mut() {
@@ -965,7 +1071,10 @@ mod tests {
         let f1 = &prints.iter().find(|(id, _)| id == "f1").unwrap().1;
         assert_eq!(f1.runs[1].icon.as_deref(), Some("mute"));
         let own = Own::of(&d).unwrap();
-        assert_eq!((own.style.typeface.as_str(), own.style.weight, own.symbols.as_str()), ("Barlow Semi Condensed", 600, "Z10 Symbols"));
+        assert_eq!((own.style.typeface.as_str(), own.style.weight, own.symbols.as_str()), ("Orbitron", 600, "Z10 Symbols"));
+        assert_eq!(own.swap, [('0', 'O')], "Orbitron's plain zero");
+        assert_eq!(own.art, Some(("Barlow Semi Condensed".to_string(), 600)), "the drawing's legends in Barlow");
+        assert_eq!((own.drawn().typeface.as_str(), own.drawn().weight, own.drawn().letters), ("Barlow Semi Condensed", 600, own.style.letters));
         assert!(own.icons.contains_key("mute"));
         let s = Style::over(&own.style, &serde_json::json!({ "typeface": "Montserrat", "place": "middle", "words": 2.2 }));
         assert_eq!((s.typeface.as_str(), s.place, s.words, s.letters), ("Montserrat", Place::Middle, 2.2, own.style.letters));
@@ -1039,6 +1148,59 @@ mod tests {
         assert_eq!(families(&db).iter().map(|(f, _)| f.as_str()).collect::<Vec<_>>(), ["Barlow Semi Condensed"]);
     }
 
+    /// Ectodeck's own typefaces need nothing on the computer: each family is
+    /// there, a variable one offering every weight it spans and set at the
+    /// weight asked; and Japanese, Korean and Cyrillic letters a legend's
+    /// typeface lacks come from them.
+    #[test]
+    fn ectodeck_s_own_typefaces_and_their_weights() {
+        let mut db = fontdb::Database::new();
+        for data in LIBRARY {
+            db.load_font_source(fontdb::Source::Binary(Arc::new(data)));
+        }
+        add_glyph_fonts(&mut db);
+        let all = families(&db);
+        let names: Vec<&str> = all.iter().map(|(f, _)| f.as_str()).collect();
+        for f in ["Arimo", "Audiowide", "Barlow", "Bruno Ace", "Courier Prime", "Inter", "JetBrains Mono", "Jost", "Michroma", "Noto Sans JP", "Noto Sans KR", "Nunito", "Open Gorton", "Orbitron", "Rajdhani", "Saira"] {
+            assert!(names.contains(&f), "{f} in {names:?}");
+        }
+        let weights = |f: &str| all.iter().find(|(n, _)| n == f).unwrap().1.clone();
+        assert_eq!(weights("Orbitron"), [400, 500, 600, 700, 800, 900], "a variable typeface's every weight");
+        assert_eq!(weights("Rajdhani"), [500, 600, 700]);
+        // an I's stem, as thick as its weight
+        let id = query(&db, "Orbitron", 400).unwrap();
+        let stem = |w| shape(&db, id, Some(w), "I").unwrap().glyphs[0].0.bounds().width();
+        assert!(stem(900) > stem(400) * 1.8, "set at the weight asked: {} {}", stem(400), stem(900));
+        assert!(stem(600) > stem(400) * 1.2 && stem(900) > stem(600) * 1.2);
+        // a Japanese key's kana, a Korean key's jamo, a Russian key's letter, under Orbitron
+        let face = query(&db, "Orbitron", 600).unwrap();
+        let fallbacks: Vec<fontdb::ID> = FALLBACKS.iter().filter_map(|&(f, w)| query(&db, f, w)).collect();
+        assert_eq!(fallbacks.len(), 3);
+        for c in "ぬふあうカ英数ㄱㅂ한영ЙЦ".chars() {
+            assert!(!has(&db, face, c) && fallbacks.iter().any(|&id| has(&db, id, c)), "{c}: from Ectodeck's own");
+        }
+    }
+
+    /// In the core's own typeface a sign is set as its keys print it: the
+    /// Z10's zero as Orbitron's plain O, not its slashed zero; in another
+    /// typeface, as it is.
+    #[test]
+    fn the_z10_s_zero_is_plain() {
+        let mut db = fontdb::Database::new();
+        for data in LIBRARY {
+            db.load_font_source(fontdb::Source::Binary(Arc::new(data)));
+        }
+        let own = Own::of(&device()).unwrap();
+        let ink = |style: &Style, text: &str| {
+            let print = Print { runs: vec![Run { text: text.into(), icon: None, role: Role::Main, scale: 1.0 }], centred: false };
+            let set = set(&db, &print, style, &own, [0.0, 0.0, 18.0, 18.0], 1.0);
+            set.inks.iter().map(|i| i.path.len()).sum::<usize>()
+        };
+        assert_eq!(ink(&own.style, "0"), ink(&own.style, "O"), "the zero drawn as the O");
+        let other = Style { typeface: "Arimo".into(), ..own.style.clone() };
+        assert_ne!(ink(&other, "0"), ink(&other, "O"), "another typeface's own zero");
+    }
+
     /// A picture of the person's own becomes one outline on a 24-unit
     /// square: a ring drawn with even-odd filling keeps its hole when its
     /// outline is filled as legends are, a stroked line comes as its
@@ -1064,3 +1226,4 @@ mod tests {
         assert!(image_from_svg(r#"<svg xmlns="http://www.w3.org/2000/svg"><text>hi</text></svg>"#).is_err(), "no shapes");
     }
 }
+
