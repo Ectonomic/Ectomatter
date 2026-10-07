@@ -321,6 +321,23 @@ fn key_text(e: &KeyEvent) -> Option<SharedString> {
     Some(k.into())
 }
 
+/// Ectodeck's own fonts for a keyboard's glyphs in the windows' text too
+/// (the Light lab's glyph list, a key's text as typed): looked in after the
+/// computer's own fonts, so a glyph the computer has no font for still shows.
+fn glyph_fonts_in_windows() {
+    use i_slint_core::textlayout::sharedparley::fontique::{Blob, GenericFamily};
+    let _ = i_slint_core::context::with_global_context(
+        || Err(slint::PlatformError::NoPlatform),
+        |ctx| {
+            let mut fonts = ctx.font_context().borrow_mut();
+            let ours: Vec<_> = ectodeck_draw::print::GLYPH_FONTS.iter().flat_map(|&data| fonts.collection.register_fonts(Blob::new(std::sync::Arc::new(data)), None)).map(|(family, _)| family).collect();
+            // the last of the families Slint looks in for a glyph, after the computer's own
+            let computer: Vec<_> = fonts.collection.generic_families(GenericFamily::SystemUi).collect();
+            fonts.collection.set_generic_families(GenericFamily::SystemUi, computer.into_iter().chain(ours));
+        },
+    );
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let snapshot = args.iter().position(|a| a == "--snapshot").and_then(|i| args.get(i + 1)).cloned();
@@ -342,6 +359,7 @@ fn main() {
 
     let made = Rc::new(RefCell::new(Vec::new()));
     slint::platform::set_platform(Box::new(Platform { made: made.clone(), start: Instant::now() })).unwrap();
+    glyph_fonts_in_windows();
     let ui = AppWindow::new().unwrap();
     let _ = slint::ComponentHandle::window(&ui);
     let window = made.borrow().last().cloned().expect("the main window's adapter");
@@ -713,9 +731,10 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
         window.request_redraw();
         draw(&mut px);
     }
-    // ECTODECK_NATIVE_TYPE: keys typed into whatever has focus; a newline is Return
+    // ECTODECK_NATIVE_TYPE: keys typed into whatever has focus; a newline is
+    // Return, a backspace (\u{8}) Backspace
     for ch in std::env::var("ECTODECK_NATIVE_TYPE").unwrap_or_default().chars() {
-        let text: SharedString = if ch == '\n' { Key::Return.into() } else { ch.to_string().into() };
+        let text: SharedString = if ch == '\n' { Key::Return.into() } else if ch == '\u{8}' { Key::Backspace.into() } else { ch.to_string().into() };
         window.dispatch_event(WindowEvent::KeyPressed { text: text.clone() });
         window.dispatch_event(WindowEvent::KeyReleased { text });
         slint::platform::update_timers_and_animations();
@@ -756,6 +775,10 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
     lab.act();
     window.request_redraw();
     draw(&mut px);
+    // ECTODECK_NATIVE_LIGHT=file: the light the lab has tuned, written there
+    if let Some(out) = std::env::var_os("ECTODECK_NATIVE_LIGHT") {
+        let _ = std::fs::write(out, serde_json::to_string_pretty(lab.shown()).unwrap_or_default());
+    }
     let mut pix = Pixmap::new(w, h).unwrap();
     for (d, p) in pix.pixels_mut().iter_mut().zip(&px) {
         *d = resvg::tiny_skia::PremultipliedColorU8::from_rgba(p.red, p.green, p.blue, p.alpha).unwrap_or(resvg::tiny_skia::PremultipliedColorU8::TRANSPARENT);

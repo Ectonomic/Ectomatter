@@ -1166,10 +1166,26 @@ fn svg_path(p: &resvg::tiny_skia::Path) -> String {
     d
 }
 
+/// Where the legends' drawing has its key, in the panel: its pixels to the
+/// millimetre, and its foot's top left corner.
+fn key_at(set: &Legends, pw: f64, ph: f64) -> (f64, f64, f64) {
+    let key = &set.key;
+    let k = ((pw - 140.0) / key.foot.0).min((ph * if set.others.is_empty() { 0.8 } else { 0.52 }) / key.foot.1).min(26.0);
+    (k, (pw - key.foot.0 * k) / 2.0, if set.others.is_empty() { (ph - key.foot.1 * k) / 2.0 } else { 34.0 })
+}
+
+/// Where the legends' drawing on a stage `w` by `h` has its key's top, on
+/// the stage: its left and top, and its pixels to the millimetre.
+pub fn legend_face(set: &Legends, w: f32, h: f32) -> (f32, f32, f32) {
+    let (px0, py0, pw, ph) = panel(w as f64, h as f64);
+    let (k, x, y) = key_at(set, pw, ph);
+    ((px0 + x + set.key.face[0] * k) as f32, (py0 + y + set.key.face[1] * k) as f32, k as f32)
+}
+
 /// A key's print set as the section says, on its top at (`x`, `y`) `k`
 /// pixels to the millimetre: its inks drawn in the light's amber (a glow
-/// under them), and its lines.
-fn print_on(s: &mut Svg, set: &Legends, key: &Printed, x: f64, y: f64, k: f64) -> Vec<ectodeck_draw::print::Line> {
+/// under them), and its lines and the box its inks cover.
+fn print_on(s: &mut Svg, set: &Legends, key: &Printed, x: f64, y: f64, k: f64) -> (Vec<ectodeck_draw::print::Line>, Option<(f32, f32, f32, f32)>) {
     let face = [(x + key.face[0] * k) as f32, (y + key.face[1] * k) as f32, (x + key.face[2] * k) as f32, (y + key.face[3] * k) as f32];
     let db = ectodeck_draw::print::faces();
     let laid = ectodeck_draw::print::set(&db, &key.print, &set.style, &set.own, face, k as f32);
@@ -1187,7 +1203,8 @@ fn print_on(s: &mut Svg, set: &Legends, key: &Printed, x: f64, y: f64, k: f64) -
         }
         s.body += "</g>";
     }
-    laid.lines
+    let bounds = laid.bounds();
+    (laid.lines, bounds)
 }
 
 /// A key's cap from above: its foot and its top inside it.
@@ -1200,18 +1217,17 @@ fn cap_from_above(s: &mut Svg, key: &Printed, x: f64, y: f64, k: f64, big: bool)
 }
 
 /// The legends' drawing, `pw` by `ph`: the key it is of from above, large,
-/// its print set as the section sets it, and its letters' and words'
-/// heights and its inset measured on it; under it, keys of other kinds set
-/// alike, to one scale.
+/// its print set as the section sets it, its letters' and words' heights
+/// measured on it, and how far it has been moved; under it, keys of other
+/// kinds set alike, to one scale.
 fn legends(set: &Legends, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, Vec<Label>) {
-    use ectodeck_draw::print::{Place as At, Role};
+    use ectodeck_draw::print::Role;
     let mut s = Svg::new();
     let white = |name: &str| hot.is_some_and(|i| PARAMS[i].label == name);
     let key = &set.key;
-    let k = ((pw - 140.0) / key.foot.0).min((ph * if set.others.is_empty() { 0.8 } else { 0.52 }) / key.foot.1).min(26.0);
-    let (x, y) = ((pw - key.foot.0 * k) / 2.0, if set.others.is_empty() { (ph - key.foot.1 * k) / 2.0 } else { 34.0 });
+    let (k, x, y) = key_at(set, pw, ph);
     cap_from_above(&mut s, key, x, y, k, true);
-    let lines = print_on(&mut s, set, key, x, y, k);
+    let (lines, bounds) = print_on(&mut s, set, key, x, y, k);
     let mut labels = Vec::new();
     // each size on its line's capitals, beside the key's top
     let face_right = x + key.face[2] * k;
@@ -1229,28 +1245,22 @@ fn legends(set: &Legends, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, Vec<Lab
         let _ = write!(s.marks, r##"<path d="M{face_right:.1} {top:.1} H{sx:.1} M{face_right:.1} {base:.1} H{sx:.1}" stroke="#5a5a5a" stroke-width="1" stroke-dasharray="2 3"/>"##);
         labels.push(Label::new(false, (sx, (top + base) / 2.0), name));
     }
-    // Inset: down from the top's edge to the first line's capitals, and in
-    // from its left at the top left (in the middle it has no say)
-    // (nor, as the keyboard prints them, on a key it prints in the middle)
-    let inset_says = matches!(set.style.place, At::TopLeft | At::Top) || (set.style.place == At::Printed && !key.print.centred);
-    if let (Some(first), true) = (lines.first(), inset_says) {
-        let face_top = y + key.face[1] * k;
-        let top = first.top as f64;
-        let ix = face_right - 16.0;
-        let c = if white("Inset") { WHITE } else { DIMENSION };
-        s.mark(&poly(&[(ix, face_top), (ix, top)], false), c);
-        for yy in [face_top, top] {
-            s.mark(&poly(&[(ix - 5.0, yy), (ix + 5.0, yy)], false), c);
+    // Left–right and Up–down: where the legend is, its middle, and where its
+    // place put it before it was moved (a cross, a dashed line between)
+    if let Some((l, t, r, b)) = bounds {
+        let (cx, cy) = (((l + r) / 2.0) as f64, ((t + b) / 2.0) as f64);
+        let (ox, oy) = (cx - set.style.across as f64 * k, cy - set.style.down as f64 * k);
+        let c = if white("Left–right") || white("Up–down") { WHITE } else { DIMENSION };
+        if (ox - cx).abs() + (oy - cy).abs() > 0.5 {
+            let _ = write!(s.marks, r#"<path d="M{ox:.1} {oy:.1} L{cx:.1} {cy:.1}" stroke="{DIMENSION}" stroke-width="1" stroke-dasharray="3 3"/>"#);
+            s.mark(&poly(&[(ox - 5.0, oy), (ox + 5.0, oy)], false), "#6f6f6f");
+            s.mark(&poly(&[(ox, oy - 5.0), (ox, oy + 5.0)], false), "#6f6f6f");
         }
-        if set.style.place == At::TopLeft {
-            let face_left = x + key.face[0] * k;
-            let iy = first.base as f64 + 0.6 * (first.base - first.top) as f64;
-            s.mark(&poly(&[(face_left, iy), (first.left as f64, iy)], false), c);
-            for xx in [face_left, first.left as f64] {
-                s.mark(&poly(&[(xx, iy - 5.0), (xx, iy + 5.0)], false), c);
-            }
-        }
-        labels.push(Label::new(false, (ix, (face_top + top) / 2.0), "Inset"));
+        // (the sliders' lines meet just right of the legend, clear of its ink)
+        let at = (r as f64 + 6.0, cy);
+        let _ = write!(s.marks, r#"<circle cx="{:.1}" cy="{:.1}" r="2.5" fill="{c}"/>"#, at.0, at.1);
+        labels.push(Label::new(false, at, "Left–right"));
+        labels.push(Label::new(false, at, "Up–down"));
     }
     // the others, a row of them under it, to one scale
     if !set.others.is_empty() {

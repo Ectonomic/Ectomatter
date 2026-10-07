@@ -1,6 +1,6 @@
 # The Light lab and the light model
 
-2026-10-03. Approved, and built in this order: the boundary, then one key's own setup. 2026-10-04: the light description written to be read, its values named as the lab names them (the core protocol's draft 6). 2026-10-06: custom setups beside Default, the core's own setup, kept in Ectodeck's own data (section 4).
+2026-10-03. Approved, and built in this order: the boundary, then one key's own setup. 2026-10-04: the light description written to be read, its values named as the lab names them (the core protocol's draft 6). 2026-10-06: custom setups beside Default, the core's own setup, kept in Ectodeck's own data (section 4). 2026-10-07: a key's legend typed, keyboard glyphs included, and moved anywhere on its key (section 2).
 
 The Light lab is Ectodeck's, not a device's. It is built to tune any peripheral's light, and the Z10 is only the first device it tunes. This sets out where the boundary runs, so the lab never carries a device and a core never carries the lab.
 
@@ -31,11 +31,13 @@ A device's parts are what its description has: keys with LEDs under caps, wells 
 | Part | What it is | Its values | Its sections in the lab |
 |---|---|---|---|
 | keys | A switch with its LED, under a cap | the switch's kind, beam, LED place, housing; the cap's kind, plastic, black, milkiness, heights and surfaces; one key's own of any of these, and where its switch sits | LED, Keycaps |
-| legends | What each key's cap has printed on it, which its light comes through | the typeface and its weight, where on the cap, how tall its letters and its words are, how far in from the edge; one key's own of any of these | Legends |
+| legends | What each key's cap has printed on it, which its light comes through | the typeface and its weight, where on the cap it starts and how far it is moved from there, how tall its letters and its words are; one key's own of any of these, and its own words | Legends |
 | buttons | A moulded block with no light of its own, standing in the keys' light | how high it stands, and what its outside gives back | Keycaps, for one button |
 | body | The deck in the wells and the chassis round them | how much each gives back; the wells' depth | Wells |
 | screens | A backlit display | lit dots, unlit dots, the ground between them, dot size, glass | Display |
 | windows | An LED behind a diffusing window | how far its light spreads, and how much reaches the window's corners | none yet |
+
+A key's legend can be typed: its own legend, its shifted sign and its second function, each in place of what the core's print has, with a list of 27 keyboard glyphs to add (⌘ ⇧ ⎋ and the like). Ectodeck carries its own fonts for those glyphs and the rest of their Unicode blocks (`crates/ectodeck-draw/fonts`, cut from DejaVu Sans Bold, Noto Sans Symbols and Noto Sans Symbols 2), so they show on any computer, in the lab and on the keys; where the computer has fonts of its own for them, the lab's text uses those first. A legend moves anywhere on its key, from where its place sets it: by the Left–right and Up–down sliders, or by dragging it on the drawing.
 
 Windows are the Z10's lock lights today, and the logos, light bars and rings of mice and headsets later. The lab has no section for them yet, so they keep the values the core gives; one comes with the first device whose windows need tuning. Any further kind enters the model the same way, with the first core that needs it. A part's place and shape always come from the core's art, so the lab's drawings come from the device too.
 
@@ -107,3 +109,4 @@ Each setup is a file in Ectodeck's own data, `light/<core>/<id>.json` (JSON with
 1. **The boundary.** Cores loaded by id, the engine with no built-in device, and the lab's words, sections and drawings from the device. The only visible change is in the words: they name the device from its description rather than the Z10.
 2. **One key's own setup,** as in the approved mock (`apps/ectodeck/public/mock/light-lab-keys.html`): saved under `keys` in the core's light description, and lit and drawn per key by the engine.
 3. **Setups of the person's own,** as in the approved mock (`apps/ectodeck/public/mock/light-lab-setups.html`): the setup button and its menu, the setups' files, and the keyboard lit by the setup in use.
+4. **A key's legend typed and moved,** as in the approved mock (`apps/ectodeck/public/mock/light-lab-legend-text.html`): a box for each part of the chosen key's legend with the glyph list, the glyph fonts built in, and Left–right and Up–down in place of Inset, on every key and with every placement.

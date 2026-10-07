@@ -38,6 +38,27 @@ const MARK_DROP: f32 = 0.0729;
 const FIT: f32 = 0.45;
 /// The share of capitals' height to font size where a typeface does not say.
 const CAP: f32 = 0.7;
+/// Ectodeck's own typefaces for a keyboard's glyphs (⌘ ⌥ ⇧ ⎋ ⏻ and the rest
+/// of the Unicode blocks they come from), cut from DejaVu Sans Bold, Noto Sans
+/// Symbols and Noto Sans Symbols 2 (fonts/README.md), so a legend has them on
+/// a computer that has none of those; and their families.
+pub const GLYPH_FONTS: [&[u8]; 3] = [
+    include_bytes!("../fonts/KeyGlyphs-Bold.ttf"),
+    include_bytes!("../fonts/KeyGlyphsSymbols-Regular.ttf"),
+    include_bytes!("../fonts/KeyGlyphsSymbols2-Regular.ttf"),
+];
+const GLYPH_FAMILIES: [(&str, u16); 3] = [("Ectodeck Key Glyphs", 700), ("Ectodeck Key Glyphs Symbols", 400), ("Ectodeck Key Glyphs Symbols 2", 400)];
+/// Typefaces for the signs a legend's typeface lacks, after the core's own
+/// symbols: Ectodeck's, then this computer's that have more of them, each at
+/// the weight nearest the one given.
+const FALLBACKS: [(&str, u16); 4] = [("DejaVu Sans", 700), ("Noto Sans Symbols", 700), ("Noto Sans Symbols 2", 400), ("Noto Sans Math", 400)];
+/// A sign from those, as tall as so many of the capitals beside it (one
+/// that lies flat as wide as a quarter as much again), and the room between two.
+const SIGN: f32 = 1.1;
+const SIGN_GAP: f32 = 0.15;
+/// A key's own text for the parts of its print, as a light's "legends" for
+/// the key give them, and the part each is.
+pub const TEXTS: [(&str, Role); 3] = [("main", Role::Main), ("shift", Role::Shift), ("second", Role::Second)];
 
 /// Which part of a key's legend a run of its print is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -111,6 +132,30 @@ impl Print {
             .collect();
         (!runs.is_empty()).then(|| Print { runs, centred: control["centred"].as_bool() == Some(true) })
     }
+
+    /// The print with a key's own text in place of its parts, as a light's
+    /// "legends" for the key give it (see TEXTS): its own legend's lines one
+    /// under the other at each line break, "" for a part printed with nothing.
+    pub fn with_text(&self, legends: &Value) -> Print {
+        if TEXTS.iter().all(|(k, _)| !legends[*k].is_string()) {
+            return self.clone();
+        }
+        let mut runs = Vec::new();
+        for (k, role) in TEXTS {
+            match legends[k].as_str() {
+                Some(text) if role == Role::Main => runs.extend(text.split('\n').filter(|l| !l.trim().is_empty()).map(|l| Run { text: l.trim().to_string(), icon: None, role, scale: 1.0 })),
+                Some(text) => runs.extend(Some(text.replace('\n', " ")).filter(|t| !t.trim().is_empty()).map(|t| Run { text: t.trim().to_string(), icon: None, role, scale: 1.0 })),
+                None => runs.extend(self.runs.iter().filter(|r| r.role == role).cloned()),
+            }
+        }
+        Print { runs, centred: self.centred }
+    }
+
+    /// A part of the print as words: its runs', a line each (an icon by its
+    /// name in brackets).
+    pub fn text_of(&self, role: Role) -> String {
+        self.runs.iter().filter(|r| r.role == role).map(|r| r.icon.as_ref().map_or_else(|| r.text.clone(), |i| format!("[{i}]"))).collect::<Vec<_>>().join("\n")
+    }
 }
 
 /// Where on its cap a legend sits.
@@ -159,6 +204,10 @@ pub struct Style {
     pub letters: f32,
     pub words: f32,
     pub inset: f32,
+    /// how far the whole legend is moved from where its place puts it (mm),
+    /// right and down (left and up below 0)
+    pub across: f32,
+    pub down: f32,
 }
 
 impl Style {
@@ -173,6 +222,8 @@ impl Style {
             letters: f("letters", under.letters).max(0.2),
             words: f("words", under.words).max(0.2),
             inset: f("inset", under.inset).max(0.0),
+            across: f("across", under.across),
+            down: f("down", under.down),
         }
     }
 }
@@ -204,7 +255,7 @@ impl Own {
     pub fn of(device: &Value) -> Option<Own> {
         let p = &device["print"];
         let f = |k: &str| p[k].as_f64().map(|v| v as f32);
-        let style = Style { typeface: p["typeface"].as_str()?.to_string(), weight: p["weight"].as_f64().map_or(400, |w| w.round() as u16), place: Place::Printed, letters: f("letters")?, words: f("words")?, inset: f("inset")? };
+        let style = Style { typeface: p["typeface"].as_str()?.to_string(), weight: p["weight"].as_f64().map_or(400, |w| w.round() as u16), place: Place::Printed, letters: f("letters")?, words: f("words")?, inset: f("inset")?, across: 0.0, down: 0.0 };
         let icons = p["icons"]
             .as_object()
             .map(|o| {
@@ -234,8 +285,9 @@ pub fn add_fonts(files: impl IntoIterator<Item = PathBuf>) {
     }
 }
 
-/// The typefaces legends can be set in: this computer's and the cores'
-/// added before, loaded once (the first to ask waits for them).
+/// The typefaces legends can be set in: this computer's, the cores' added
+/// before, and Ectodeck's own for a keyboard's glyphs, loaded once (the
+/// first to ask waits for them).
 pub fn faces() -> Arc<fontdb::Database> {
     FACES
         .get_or_init(|| {
@@ -246,9 +298,17 @@ pub fn faces() -> Arc<fontdb::Database> {
                     eprintln!("ectodeck-draw: the typeface {}: {e}", f.display());
                 }
             }
+            add_glyph_fonts(&mut db);
             Arc::new(db)
         })
         .clone()
+}
+
+/// Ectodeck's own typefaces for a keyboard's glyphs, added to these.
+pub fn add_glyph_fonts(db: &mut fontdb::Database) {
+    for data in GLYPH_FONTS {
+        db.load_font_source(fontdb::Source::Binary(Arc::new(data)));
+    }
 }
 
 /// Load the typefaces in the background, so they are ready when asked for.
@@ -259,11 +319,11 @@ pub fn warm() {
 }
 
 /// The typefaces there are, each its family's name and the weights it has
-/// upright, A to Z.
+/// upright, A to Z; not Ectodeck's own for glyphs, which have no letters.
 pub fn families(db: &fontdb::Database) -> Vec<(String, Vec<u16>)> {
     let mut by: std::collections::BTreeMap<String, Vec<u16>> = std::collections::BTreeMap::new();
     for f in db.faces().filter(|f| f.style == fontdb::Style::Normal) {
-        if let Some((name, _)) = f.families.first() {
+        if let Some((name, _)) = f.families.first().filter(|(name, _)| !GLYPH_FAMILIES.iter().any(|(g, _)| g == name)) {
             let w = by.entry(name.clone()).or_default();
             if !w.contains(&f.weight.0) {
                 w.push(f.weight.0);
@@ -324,6 +384,23 @@ struct Shaped {
     glyphs: Vec<(Path, f32)>,
     advance: f32,
     per_em: f32,
+}
+
+impl Set {
+    /// The box the legend's inks cover, in the units it was set in: left,
+    /// top, right, bottom; none for a legend with nothing to draw.
+    pub fn bounds(&self) -> Option<(f32, f32, f32, f32)> {
+        let mut b: Option<(f32, f32, f32, f32)> = None;
+        for ink in &self.inks {
+            let Some(p) = ink.path.clone().transform(ink.to_art) else { continue };
+            let r = p.bounds();
+            b = Some(match b {
+                Some((l, t, rr, bb)) => (l.min(r.left()), t.min(r.top()), rr.max(r.right()), bb.max(r.bottom())),
+                None => (r.left(), r.top(), r.right(), r.bottom()),
+            });
+        }
+        b
+    }
 }
 
 /// Outlines of a face's glyphs, as tiny-skia paths.
@@ -417,9 +494,13 @@ fn icon_paths(icon: &Icon) -> Vec<(Path, Option<f32>)> {
     out
 }
 
-/// A run set in `face` (and `symbols` for the signs it lacks) at a capitals'
-/// height `cap` (mm): its glyphs placed along it from its start, on its baseline.
-fn lay_run(db: &fontdb::Database, run: &Run, cap: f32, face: fontdb::ID, symbols: Option<fontdb::ID>, own: &Own) -> Laid {
+/// A run set in `face` (and the first of `fallbacks` that has each sign it
+/// lacks) at a capitals' height `cap` (mm): its glyphs placed along it from
+/// its start, on its baseline. A sign from a typeface other than the
+/// legends' and the core's own symbols (`symbols`), whose signs are drawn as
+/// the art draws them, is sized to the capitals and stands on the line, so
+/// signs from different typefaces look alike.
+fn lay_run(db: &fontdb::Database, run: &Run, cap: f32, face: fontdb::ID, fallbacks: &[fontdb::ID], symbols: Option<fontdb::ID>, own: &Own) -> Laid {
     if let Some(name) = &run.icon {
         let Some(icon) = own.icons.get(name) else { return Laid { run: run.clone(), parts: Vec::new(), advance: 0.0, cap, drop: 0.0 } };
         let side = icon.size * cap;
@@ -435,10 +516,7 @@ fn lay_run(db: &fontdb::Database, run: &Run, cap: f32, face: fontdb::ID, symbols
     // the text in pieces, each in the face that has it
     let mut pieces: Vec<(fontdb::ID, String)> = Vec::new();
     for c in run.text.chars() {
-        let id = match symbols {
-            Some(sy) if !c.is_whitespace() && !has(db, face, c) && has(db, sy, c) => sy,
-            _ => face,
-        };
+        let id = if c.is_whitespace() || has(db, face, c) { face } else { fallbacks.iter().copied().find(|&f| has(db, f, c)).unwrap_or(face) };
         match pieces.last_mut() {
             Some((last, s)) if *last == id => s.push(c),
             _ => pieces.push((id, c.to_string())),
@@ -447,6 +525,32 @@ fn lay_run(db: &fontdb::Database, run: &Run, cap: f32, face: fontdb::ID, symbols
     let mut parts = Vec::new();
     let mut pen = 0.0;
     for (id, text) in pieces {
+        if id != face && Some(id) != symbols {
+            let mut first = true;
+            for c in text.chars() {
+                let Some(sh) = shape(db, id, &c.to_string()) else { continue };
+                // its outline's box, in the typeface's units (y up)
+                let (mut l, mut lo, mut r, mut hi) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+                for (p, x) in &sh.glyphs {
+                    let b = p.bounds();
+                    (l, lo, r, hi) = (l.min(b.left() + x), lo.min(b.top()), r.max(b.right() + x), hi.max(b.bottom()));
+                }
+                if l > r {
+                    continue;
+                }
+                let tall = cap * run.scale * SIGN;
+                let k = (tall / (hi - lo).max(1e-3)).min(tall * 1.25 / (r - l).max(1e-3));
+                if !first {
+                    pen += SIGN_GAP * cap;
+                }
+                first = false;
+                for (p, x) in sh.glyphs {
+                    parts.push((p, Transform::from_row(k, 0.0, 0.0, -k, pen + (x - l) * k, lo * k), None));
+                }
+                pen += (r - l) * k;
+            }
+            continue;
+        }
         let Some(sh) = shape(db, id, &text) else { continue };
         let k = size / sh.per_em;
         for (p, x) in sh.glyphs {
@@ -463,11 +567,12 @@ fn lay_run(db: &fontdb::Database, run: &Run, cap: f32, face: fontdb::ID, symbols
 pub fn set(db: &fontdb::Database, print: &Print, style: &Style, own: &Own, face: [f32; 4], per_mm: f32) -> Set {
     let Some(id) = query(db, &style.typeface, style.weight).or_else(|| query(db, &own.style.typeface, own.style.weight)) else { return Set::default() };
     let symbols = (!own.symbols.is_empty()).then(|| query(db, &own.symbols, 700)).flatten();
+    let fallbacks: Vec<fontdb::ID> = symbols.into_iter().chain(GLYPH_FAMILIES.iter().chain(&FALLBACKS).filter_map(|&(f, w)| query(db, f, w))).collect();
     let (fw, fh) = ((face[2] - face[0]) / per_mm, (face[3] - face[1]) / per_mm);
     // each run at its kind's size, a word too long for its cap set smaller,
     // a key's words all alike (PRINT over SCREEN the same size)
     let cap_of = |r: &Run| if r.letter() { style.letters } else { style.words };
-    let mut laid: Vec<Laid> = print.runs.iter().map(|r| lay_run(db, r, cap_of(r), id, symbols, own)).collect();
+    let mut laid: Vec<Laid> = print.runs.iter().map(|r| lay_run(db, r, cap_of(r), id, &fallbacks, symbols, own)).collect();
     let room = fw - 2.0 * FIT;
     let words = laid.iter().filter(|l| !l.run.letter() && l.run.icon.is_none() && l.advance > room && room > 0.0).map(|l| room / l.advance).fold(1.0f32, f32::min);
     for l in laid.iter_mut() {
@@ -562,17 +667,18 @@ pub fn set(db: &fontdb::Database, print: &Print, style: &Style, own: &Own, face:
             x += laid[i].advance + SHIFT_GAP * style.words / CAP;
         }
     }
-    // onto the art: mm from the cap top's corner, to its units
+    // onto the art: mm from the cap top's corner, moved as the style says, to its units
+    let (ax, ay) = (style.across, style.down);
     let to_face = Transform::from_row(per_mm, 0.0, 0.0, per_mm, face[0], face[1]);
     let mut inks = Vec::new();
     for (i, x, y) in placed {
         let l = &laid[i];
         for (p, t, w) in &l.parts {
-            inks.push(Ink { path: p.clone(), to_art: to_face.pre_translate(x, y).pre_concat(*t), opacity: l.run.role.opacity(), stroke: *w, role: l.run.role });
+            inks.push(Ink { path: p.clone(), to_art: to_face.pre_translate(x + ax, y + ay).pre_concat(*t), opacity: l.run.role.opacity(), stroke: *w, role: l.run.role });
         }
     }
-    let lines = set_lines.into_iter().map(|l| Line { top: face[1] + l.top * per_mm, base: face[1] + l.base * per_mm, left: face[0] + l.left * per_mm, ..l }).collect();
-    Set { inks, second_top: second_top.map(|t| face[1] + t * per_mm), lines }
+    let lines = set_lines.into_iter().map(|l| Line { top: face[1] + (l.top + ay) * per_mm, base: face[1] + (l.base + ay) * per_mm, left: face[0] + (l.left + ax) * per_mm, ..l }).collect();
+    Set { inks, second_top: second_top.map(|t| face[1] + (t + ay) * per_mm), lines }
 }
 
 #[cfg(test)]
@@ -600,5 +706,43 @@ mod tests {
         assert!(own.icons.contains_key("mute"));
         let s = Style::over(&own.style, &serde_json::json!({ "typeface": "Montserrat", "place": "middle", "words": 2.2 }));
         assert_eq!((s.typeface.as_str(), s.place, s.words, s.letters), ("Montserrat", Place::Middle, 2.2, own.style.letters));
+    }
+
+    /// A key's own text takes the place of the parts it names: its own
+    /// legend's lines at each line break, a part of none taken away, the
+    /// parts it does not name as printed; with none, the print as it is.
+    #[test]
+    fn a_key_s_own_text_takes_the_place_of_its_print() {
+        let d = device();
+        let control = |id: &str| d["controls"].as_array().unwrap().iter().find(|c| c["id"] == id).cloned().unwrap();
+        let two = Print::of(&control("2")).unwrap();
+        assert_eq!(two.with_text(&serde_json::json!({})), two, "no text of its own");
+        let parts = |p: &Print| p.runs.iter().map(|r| (r.text.clone(), r.role)).collect::<Vec<_>>();
+        let mac = two.with_text(&serde_json::json!({ "main": "⌘", "second": "" }));
+        assert_eq!(parts(&mac), [("⌘".to_string(), Role::Main), ("@".to_string(), Role::Shift)], "the main its own, the second gone, the shift as printed");
+        let caps = Print::of(&control("caps-lock")).unwrap();
+        assert_eq!(caps.text_of(Role::Main), "CAPS\nLOCK", "lines at line breaks");
+        assert_eq!(parts(&caps.with_text(&serde_json::json!({ "main": "CAPS\nLOCK" }))), parts(&caps), "the same text, the same print");
+        let f1 = Print::of(&control("f1")).unwrap();
+        assert_eq!(f1.text_of(Role::Second), "[mute]", "an icon by its name");
+        assert!(f1.with_text(&serde_json::json!({ "main": "F1" })).runs.iter().any(|r| r.icon.as_deref() == Some("mute")), "an icon kept where no text takes its place");
+        assert!(caps.with_text(&serde_json::json!({ "main": "⇪" })).centred, "a centred key stays centred");
+    }
+
+    /// A keyboard's glyphs are set from Ectodeck's own typefaces on a
+    /// computer that has no fonts for them, each the same as the font it was
+    /// cut from draws it; and those typefaces are not offered for legends.
+    #[test]
+    fn a_keyboard_s_glyphs_need_no_fonts_on_the_computer() {
+        let mut db = fontdb::Database::new();
+        db.load_font_file(concat!(env!("CARGO_MANIFEST_DIR"), "/../../cores/evga-z10/fonts/BarlowSemiCondensed-SemiBold.ttf")).unwrap();
+        add_glyph_fonts(&mut db);
+        let face = query(&db, "Barlow Semi Condensed", 600).unwrap();
+        let ours: Vec<fontdb::ID> = GLYPH_FAMILIES.iter().filter_map(|&(f, w)| query(&db, f, w)).collect();
+        assert_eq!(ours.len(), 3, "each found by its family");
+        for c in "⌘⌥⌃⇧⇪⎋⇥⌫⌦↵⏎␣←↑→↓⇞⇟⏯⏮⏭⏏⏻⊞≡⎙☀▲◀▶▼".chars() {
+            assert!(!has(&db, face, c) && ours.iter().any(|&id| has(&db, id, c)), "{c}: from Ectodeck's own");
+        }
+        assert_eq!(families(&db).iter().map(|(f, _)| f.as_str()).collect::<Vec<_>>(), ["Barlow Semi Condensed"]);
     }
 }

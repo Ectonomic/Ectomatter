@@ -119,12 +119,12 @@ struct KeyArt {
     print: [f32; 3],
     /// its control's id, what its cap has printed on it (as the core gives
     /// it), its legend and second function as the art draws them, and the
-    /// style its legend is set in now (none for the art's own)
+    /// style and print its legend is set in now (none for the art's own)
     id: String,
     printed: Option<crate::print::Print>,
     art_legend: Option<Shape>,
     art_second: Option<u32>,
-    style: Option<crate::print::Style>,
+    set_as: Option<(crate::print::Style, crate::print::Print)>,
 }
 
 /// What the board takes from the core's "light" itself: where each key's LED
@@ -523,7 +523,7 @@ fn shown(key: &KeyArt, l: Option<&Light>) -> Vec<f32> {
 /// top, and where the keyboard has the art.
 pub struct LegendsAsk {
     own: crate::print::Own,
-    keys: Vec<(Option<crate::print::Style>, Option<crate::print::Print>, [f32; 4])>,
+    keys: Vec<(Option<(crate::print::Style, crate::print::Print)>, [f32; 4])>,
     per_mm: f32,
     at: (u32, u32, f32, (f32, f32)),
 }
@@ -535,13 +535,13 @@ impl LegendsAsk {
         let keys = self
             .keys
             .into_iter()
-            .map(|(style, print, face)| match (style, print) {
-                (Some(style), Some(print)) => {
+            .map(|(wanted, face)| match wanted {
+                Some((style, print)) => {
                     let set = crate::print::set(db, &print, &style, &self.own, face, self.per_mm);
                     let shape = raster(&set, ka, off);
-                    (Some(style), shape)
+                    (Some((style, print)), shape)
                 }
-                _ => (None, None),
+                None => (None, None),
             })
             .collect();
         Legends { keys, at: self.at }
@@ -550,7 +550,7 @@ impl LegendsAsk {
 
 /// Legends set for a keyboard, to put on it with Board::set_legends.
 pub struct Legends {
-    keys: Vec<(Option<crate::print::Style>, Option<(Shape, Option<u32>)>)>,
+    keys: Vec<(Option<(crate::print::Style, crate::print::Print)>, Option<(Shape, Option<u32>)>)>,
     at: (u32, u32, f32, (f32, f32)),
 }
 
@@ -791,7 +791,7 @@ impl Board {
                 odd_feet.push(parts.get(1).and_then(odd_foot));
             }
             let printed = crate::print::Print::of(c);
-            keys.push(KeyArt { pos: pos as u32, cap, foot, face, round: rounds, legend: legend.clone(), second, print, id: control_id(c), printed, art_legend: legend, art_second: second, style: None });
+            keys.push(KeyArt { pos: pos as u32, cap, foot, face, round: rounds, legend: legend.clone(), second, print, id: control_id(c), printed, art_legend: legend, art_second: second, set_as: None });
         }
         // The controls with no light of their own, which stand in its way and
         // catch it: the caps of the keys with none (a shadow, then the cap's
@@ -933,15 +933,16 @@ impl Board {
     /// "legends" over the core's own print, a key's own over all keys'.
     /// None for a key whose legend is the art's own: set as the core prints
     /// it, or with no print to set it from.
-    fn legends_wanted(&self, light: &Value) -> Vec<Option<crate::print::Style>> {
+    fn legends_wanted(&self, light: &Value) -> Vec<Option<(crate::print::Style, crate::print::Print)>> {
         let Some(own) = &self.own_print else { return vec![None; self.keys.len()] };
         let all = crate::print::Style::over(&own.style, &light["legends"]);
         self.keys
             .iter()
             .map(|k| {
-                k.printed.as_ref()?;
-                let style = crate::print::Style::over(&all, &light["keys"][k.id.as_str()]["legends"]);
-                (style != own.style).then_some(style)
+                let printed = k.printed.as_ref()?;
+                let legends = &light["keys"][k.id.as_str()]["legends"];
+                let (style, print) = (crate::print::Style::over(&all, legends), printed.with_text(legends));
+                (style != own.style || print != *printed).then_some((style, print))
             })
             .collect()
     }
@@ -950,10 +951,10 @@ impl Board {
     /// and put on the keyboard with set_legends: none if they are on it.
     pub fn legends_for(&self, light: &Value) -> Option<LegendsAsk> {
         let want = self.legends_wanted(light);
-        if want.iter().zip(&self.keys).all(|(w, k)| *w == k.style) {
+        if want.iter().zip(&self.keys).all(|(w, k)| *w == k.set_as) {
             return None;
         }
-        let keys = self.keys.iter().zip(want).map(|(k, w)| (w, k.printed.clone(), k.face)).collect();
+        let keys = want.into_iter().zip(&self.keys).map(|(w, k)| (w, k.face)).collect();
         Some(LegendsAsk { own: self.own_print.clone()?, keys, per_mm: self.model.scale, at: (self.w, self.h, self.art_scale, self.art_offset) })
     }
 
@@ -964,13 +965,13 @@ impl Board {
         if legends.at != (self.w, self.h, self.art_scale, self.art_offset) || legends.keys.len() != self.keys.len() {
             return;
         }
-        for (k, (style, set)) in self.keys.iter_mut().zip(legends.keys) {
-            (k.legend, k.second) = match (&style, set) {
+        for (k, (wanted, set)) in self.keys.iter_mut().zip(legends.keys) {
+            (k.legend, k.second) = match (&wanted, set) {
                 (Some(_), Some((shape, second))) => (Some(shape), second),
                 (Some(_), None) => (None, None),
                 (None, _) => (k.art_legend.clone(), k.art_second),
             };
-            k.style = style;
+            k.set_as = wanted;
         }
         if let Some(snap) = self.sim.clone() {
             self.legend_reads = self.legend_reads_from(&snap);

@@ -78,6 +78,13 @@ pub enum Ask {
     FacesScroll(f32),
     /// the light setups' menu: its button, and what was chosen on it (see SETUP)
     Setups(i32),
+    /// the glyphs' list opened from a key's text box (by its part), shut
+    /// (-1), or a glyph chosen on it (by its place there)
+    GlyphsFor(i32),
+    Glyph(i32),
+    /// the legend dragged on the drawing: where its middle goes on the key's
+    /// top, across and down, as shares of it
+    MoveLegend(f32, f32),
 }
 
 /// What a value is, which says how it reads.
@@ -122,7 +129,7 @@ struct Param {
     note: &'static str,
 }
 
-const PARAMS: [Param; 30] = [
+const PARAMS: [Param; 32] = [
     Param { path: ("switches", "led"), label: "North of centre", lo: -7.0, hi: 7.0, step: 0.05, unit: Unit::North, def: 5.08, note: "Where each key's LED sits under its cap, from the switch's centre toward the top of the key; below 0, toward the bottom, as on a keyboard whose LEDs face south. It goes as far as the switch's edge, so Switch width sets how far the slider reaches." },
     Param { path: ("switches", "lumens"), label: "LED output", lo: 0.05, hi: 10.0, step: 0.01, unit: Unit::Lumens, def: 1.0, note: "The light each LED gives off at full white, in lumens: about 1 for a keyboard's RGB LED. Everything the LEDs light is as bright as the light that reaches it makes it; what is brighter than the screen shows (Peak nits, Settings › HDR) is drawn at the most it shows, in its own colour. A colour gives off its own share, as an LED does: a red about a fifth." },
     Param { path: ("switches", "beam"), label: "Beam", lo: 1.0, hi: 200.0, step: 0.5, unit: Unit::Number, def: 24.0, note: "How tight the LED's beam out of the top of the switch is. Higher keeps it to a small bright spot on the legend over the LED; lower spreads it across the cap's top and onto the inside of its skirt." },
@@ -152,6 +159,8 @@ const PARAMS: [Param; 30] = [
     Param { path: ("place", "north"), label: "Switch north–south", lo: -30.0, hi: 30.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Where this key's switch sits under its cap, north or south of the cap's middle, as on a cap that reaches down past its row. Its LED goes with it." },
     Param { path: ("legends", "letters"), label: "Letter size", lo: 1.5, hi: 6.0, step: 0.1, unit: Unit::Mm, def: 3.8, note: "How tall a legend of one letter or sign is (Q, 2, @), measured on its capitals." },
     Param { path: ("legends", "words"), label: "Word size", lo: 1.2, hi: 5.0, step: 0.1, unit: Unit::Mm, def: 2.6, note: "How tall a legend of words is (ESC, ENTER, the second functions), measured on its capitals. A word too long for its cap is set smaller to fit, and the key's other words with it." },
+    Param { path: ("legends", "across"), label: "Left–right", lo: -10.0, hi: 10.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Moves the legend left or right on the key, from where Placement puts it. Drag the legend on the drawing to move it both ways at once." },
+    Param { path: ("legends", "down"), label: "Up–down", lo: -10.0, hi: 10.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Moves the legend up or down on the key, from where Placement puts it. Drag the legend on the drawing to move it both ways at once." },
     Param { path: ("legends", "inset"), label: "Inset", lo: 0.0, hi: 4.0, step: 0.1, unit: Unit::Mm, def: 1.0, note: "How far down from the top edge of the cap's top a one-letter legend starts; words start a little higher. At the top left, how far in from the left edge too. In the middle it has no say." },
 ];
 
@@ -195,7 +204,7 @@ const ORDER: [usize; 5] = [LEGENDS, 1, 0, 3, 4];
 const SECTIONS: [(&str, &str, &[usize], &[usize]); 5] = [
     ("LEDs", "Each key's LED shines up out of its switch in a beam, onto the back of the legend. In a black housing that is all its light; a clear housing scatters a share of it instead, glowing with it over its top and sides, which lights the legend evenly, the inside of the cap and the deck round the switch.", &[0, 1, 2, 3, 4, 5, 7, 6], &[0]),
     ("Keycaps", "Each cap stands over its switch, its skirt from its foot to its top. Light bounces about inside it; some gets out under the skirt, some through the legend, and some through the plastic where it is translucent and not coated black.", &[8, 9, 10, 22, 23, 24, 11, 12, 13], &[1]),
-    ("Legends", "What the light comes through: the print on each cap. Set it as your caps print it: its typeface, how tall its letters are, and where on the cap it sits.", &[29, 27, 28], &[2, 3]),
+    ("Legends", "What the light comes through: the print on each cap. Set it as your caps print it: its typeface, how tall its letters are, and where on the cap it sits.", &[29, 30, 27, 28], &[2, 3]),
     ("Wells", "The keys sit in wells in the chassis: the deck at their floor, walled round by the chassis. What each gives back of the light falling on it lights the rest.", &[14, 15, 16], &[]),
     ("Display", "The display's backlit dots, and the glass over them.", &[17, 18, 19, 20, 21], &[]),
 ];
@@ -208,7 +217,7 @@ pub(crate) fn sliders_of(section: usize, light: &Value) -> Vec<usize> {
     let caps = Physics::from(light).caps;
     SECTIONS[section].2.iter().copied().filter(|&i| {
         let path = PARAMS[i].path;
-        !(slot && matches!(path, ("switches", "scattered" | "sides" | "glow"))) && !(caps == Caps::ShineThrough && matches!(path, ("caps", "opacity" | "milky" | "black"))) && !(caps == Caps::Translucent && path == ("caps", "black")) && !(path == ("legends", "inset") && light["legends"]["place"] == "middle")
+        !(slot && matches!(path, ("switches", "scattered" | "sides" | "glow"))) && !(caps == Caps::ShineThrough && matches!(path, ("caps", "opacity" | "milky" | "black"))) && !(caps == Caps::Translucent && path == ("caps", "black"))
     }).collect()
 }
 
@@ -368,8 +377,14 @@ fn reads(p: &Param, v: f64) -> (String, String) {
         Unit::Number => (trim(format!("{v:.2}")), String::new()),
         // a key's switch's place: how far, and which way
         Unit::Place => {
-            let (plus, minus) = if p.path.1 == "east" { ("mm east", "mm west") } else { ("mm north", "mm south") };
-            (trim(format!("{:.1}", v.abs())), if v.abs() < 0.05 { "centred".into() } else if v > 0.0 { plus.into() } else { minus.into() })
+            let (plus, minus) = match p.path.1 {
+                "east" => ("mm east", "mm west"),
+                "across" => ("mm right", "mm left"),
+                "down" => ("mm down", "mm up"),
+                _ => ("mm north", "mm south"),
+            };
+            let still = if p.path.0 == "legends" { "mm" } else { "centred" };
+            (trim(format!("{:.1}", v.abs())), if v.abs() < 0.05 { still.into() } else if v > 0.0 { plus.into() } else { minus.into() })
         }
     }
 }
@@ -420,6 +435,26 @@ const NAME: i32 = 935;
 const SETUP_W: f32 = 200.0;
 /// what the core's own setup is called, beside the person's custom ones
 const DEFAULT: &str = "Default";
+/// a key's own text for the parts of its legend (see print::TEXTS): their
+/// boxes, by part; and the glyphs' list's glyphs, by their place on it,
+/// with the page round the list after them
+const TEXT: i32 = 1200;
+const GLYPH: i32 = 1300;
+/// the drawing's key's top, where the legend is dragged
+const LEGEND_PAD: i32 = 1400;
+/// the parts of a key's legend its text boxes set, as the page names them
+/// and tells of them
+const TEXT_NAMES: [(&str, &str); 3] = [
+    ("Main", "The key's own legend. Enter starts a second line."),
+    ("Shifted", "The sign beside it, the one the key types with Shift."),
+    ("Bottom", "The second function, at the bottom of the key."),
+];
+/// the glyphs a key's text can take from its list, each with its name
+const GLYPHS: [(&str, &str); 27] = [
+    ("⌘", "Command"), ("⌥", "Option"), ("⌃", "Control"), ("⇧", "Shift"), ("⇪", "Caps Lock"), ("⎋", "Escape"), ("⇥", "Tab"), ("⌫", "Backspace"), ("⌦", "Delete"),
+    ("↵", "Return"), ("⏎", "Enter"), ("␣", "Space"), ("←", "Left"), ("↑", "Up"), ("→", "Right"), ("↓", "Down"), ("⇞", "Page Up"), ("⇟", "Page Down"),
+    ("⏯", "Play and pause"), ("⏮", "Previous track"), ("⏭", "Next track"), ("⏏", "Eject"), ("⏻", "Power"), ("⊞", "Windows"), ("≡", "Menu"), ("⎙", "Print Screen"), ("☀", "Brightness"),
+];
 /// the switch's place, east and north: values of one key's only
 const PLACE_E: usize = 25;
 const PLACE_N: usize = 26;
@@ -501,7 +536,10 @@ pub struct LabPage {
     rest: slint::Timer,
     /// where the section's sliders stand, and for which section, size of stage and sliders
     places: Vec<drawing::Place>,
-    places_of: Option<(usize, i32, i32, Vec<usize>, Option<usize>)>,
+    places_of: Option<(usize, i32, i32, Vec<usize>, Option<usize>, u32)>,
+    /// how many times a legend has been dragged on the drawing: its sliders
+    /// are placed anew after each drag, level with where it went
+    legend_drags: u32,
     /// the stage as last drawn, and what it was drawn from: the light, the
     /// section, the stage's size, the window's scale, the slider drawn white
     drawn: Option<(drawing::Stage, slint::Image)>,
@@ -539,6 +577,11 @@ pub struct LabPage {
     menu: Menu,
     naming: String,
     top: Rc<VecModel<Cell>>,
+    /// the chosen key's text boxes, in a list of their own so a box keeps
+    /// the keys while it is typed in, whatever else the page redraws; and
+    /// the part whose glyphs' list is open
+    boxes: Rc<VecModel<Cell>>,
+    glyphs: Option<usize>,
 }
 
 /// The light setups' menu: shut; open; giving a setup a name, a new one
@@ -819,10 +862,13 @@ impl LabPage {
             MAP => Ask::Key(index),
             OWN => Ask::Follow(index),
             TYPEFACE => Ask::Faces,
+            id if (TEXT..TEXT + 3).contains(&id) => Ask::GlyphsFor(id - TEXT),
+            id if (GLYPH..GLYPH + GLYPHS.len() as i32).contains(&id) => Ask::Glyph(id - GLYPH),
+            id if id == GLYPH + GLYPHS.len() as i32 => Ask::GlyphsFor(-1),
             FACE => Ask::Face(index),
             _ => Ask::Choose(id - CHOICE, index),
         });
-        on!(on_pad, |_id, x, y| Ask::Pad(x, y));
+        on!(on_pad, |id, x, y| if id == LEGEND_PAD { Ask::MoveLegend(x, y) } else { Ask::Pad(x, y) });
         on!(on_list_scroll, |dy| Ask::FacesScroll(dy));
         on!(on_hovered, |id, on| Ask::Hover(id, on));
         on!(on_compare, |on| Ask::Compare(on));
@@ -832,6 +878,8 @@ impl LabPage {
         let (cells, sketches, over, rows, foot) = (Rc::new(VecModel::default()), Rc::new(VecModel::default()), Rc::new(VecModel::default()), Rc::new(VecModel::default()), Rc::new(VecModel::default()));
         let top = Rc::new(VecModel::default());
         ui.set_top(ModelRc::from(top.clone()));
+        let boxes = Rc::new(VecModel::default());
+        ui.set_boxes(ModelRc::from(boxes.clone()));
         ui.set_cells(ModelRc::from(cells.clone()));
         ui.set_sketches(ModelRc::from(sketches.clone()));
         ui.set_over(ModelRc::from(over.clone()));
@@ -870,6 +918,7 @@ impl LabPage {
             rest: slint::Timer::default(),
             places: Vec::new(),
             places_of: None,
+            legend_drags: 0,
             drawn: None,
             drawn_of: None,
             cells,
@@ -893,6 +942,8 @@ impl LabPage {
             menu: Menu::Shut,
             naming: String::new(),
             top,
+            boxes,
+            glyphs: None,
         };
         // a section the device has
         if !page.sections().contains(&page.section) {
@@ -976,6 +1027,45 @@ impl LabPage {
                         }
                     }
                 }
+                Ask::Typed(id, t) if (TEXT..TEXT + 3).contains(&id) => {
+                    let part = (id - TEXT) as usize;
+                    if self.text_of(part) != t {
+                        self.remember(id);
+                        self.put_text(part, t);
+                        self.rev += 1;
+                        self.status = (String::new(), 0);
+                    }
+                }
+                // the legend's middle where the pointer is: how far that is from
+                // where its place puts it, both ways, within the key's top
+                Ask::MoveLegend(fx, fy) => {
+                    if let Some((l, t, r, b, fw, fh)) = self.legend_box() {
+                        let (ia, id_) = (PARAMS.iter().position(|p| p.path == ("legends", "across")).unwrap_or(0), PARAMS.iter().position(|p| p.path == ("legends", "down")).unwrap_or(0));
+                        let ((alo, ahi), (dlo, dhi)) = (self.range(ia), self.range(id_));
+                        let across = ((fx as f64 * fw - (l + r) / 2.0) * 10.0).round() / 10.0;
+                        let down = ((fy as f64 * fh - (t + b) / 2.0) * 10.0).round() / 10.0;
+                        let (across, down) = (across.clamp(alo, ahi.max(alo)), down.clamp(dlo, dhi.max(dlo)));
+                        let work = self.work();
+                        if get(&work, ("legends", "across")) != Some(across) || get(&work, ("legends", "down")) != Some(down) {
+                            self.remember(LEGEND_PAD);
+                            self.put_num(("legends", "across"), across);
+                            self.put_num(("legends", "down"), down);
+                            self.legend_drags += 1;
+                            self.rev += 1;
+                            self.status = (String::new(), 0);
+                        }
+                    }
+                }
+                Ask::GlyphsFor(part) => self.glyphs = (part >= 0 && self.glyphs != Some(part as usize)).then_some(part as usize),
+                // the glyph typed into the box that has the keys, where its cursor is
+                Ask::Glyph(g) => {
+                    if let Some((glyph, _)) = GLYPHS.get(g.max(0) as usize) {
+                        let window = slint::ComponentHandle::window(&self.ui);
+                        let text: slint::SharedString = (*glyph).into();
+                        window.dispatch_event(slint::platform::WindowEvent::KeyPressed { text: text.clone() });
+                        window.dispatch_event(slint::platform::WindowEvent::KeyReleased { text });
+                    }
+                }
                 Ask::Typed(FIND, t) => {
                     self.face_query = t;
                     self.face_first = 0;
@@ -997,11 +1087,6 @@ impl LabPage {
                                 let v = match p.unit {
                                     Unit::Fraction => (v / 100.0).clamp(p.lo.max(0.0), p.hi.min(1.0)),
                                     Unit::Mm if p.path == ("switches", "width") => v.clamp(p.lo, p.hi),
-                                    // (a legend kept on its cap's top)
-                                    Unit::Mm if p.path == ("legends", "inset") => {
-                                        let (lo, hi) = self.range(id.max(0) as usize);
-                                        v.clamp(lo, hi)
-                                    }
                                     Unit::Nits | Unit::Mm | Unit::Lumens => v.max(0.0),
                                     Unit::Reach => v.max(p.lo),
                                     // on the side it is on unless typed below 0 or "south"/"north"
@@ -1016,7 +1101,7 @@ impl LabPage {
                                     Unit::Place => {
                                         let (lo, hi) = self.range(id.max(0) as usize);
                                         let typed = t.to_lowercase();
-                                        let other = num.starts_with('-') || typed.contains("west") || typed.contains("south");
+                                        let other = num.starts_with('-') || ["west", "south", "left", "up"].iter().any(|w| typed.contains(w));
                                         (v.abs() * if other { -1.0 } else { 1.0 }).clamp(lo, hi)
                                     }
                                 };
@@ -1068,6 +1153,7 @@ impl LabPage {
                     let (paths, what) = match id {
                         PAD => (vec![PARAMS[PLACE_E].path, PARAMS[PLACE_N].path], "Switch's place"),
                         TYPEFACE => (vec![("legends", "typeface"), ("legends", "weight")], "Typeface"),
+                        id if (TEXT..TEXT + 3).contains(&id) => (vec![("legends", ectodeck_draw::print::TEXTS[(id - TEXT) as usize].0)], TEXT_NAMES[(id - TEXT) as usize].0),
                         id if (CHOICE..CHOICE + CHOICES.len() as i32).contains(&id) => (vec![CHOSEN[(id - CHOICE) as usize][0]], CHOICES[(id - CHOICE) as usize].label),
                         id => PARAMS.get(id.max(0) as usize).map_or((vec![], ""), |p| (vec![p.path], p.label)),
                     };
@@ -1088,6 +1174,7 @@ impl LabPage {
                 Ask::Follow(id) if self.setup.is_some() => {
                     let (paths, what) = match id {
                         TYPEFACE => (vec![("legends", "typeface"), ("legends", "weight")], "Typeface"),
+                        id if (TEXT..TEXT + 3).contains(&id) => (vec![("legends", ectodeck_draw::print::TEXTS[(id - TEXT) as usize].0)], TEXT_NAMES[(id - TEXT) as usize].0),
                         id if (CHOICE..CHOICE + CHOICES.len() as i32).contains(&id) => (vec![CHOSEN[(id - CHOICE) as usize][0]], CHOICES[(id - CHOICE) as usize].label),
                         id => PARAMS.get(id.max(0) as usize).map_or((vec![], ""), |p| (vec![p.path], p.label)),
                     };
@@ -1246,7 +1333,7 @@ impl LabPage {
     fn printed(&self, id: &str) -> Option<drawing::Printed> {
         let mm = self.mm() as f32;
         let (cap, _) = self.device.caps.iter().find(|(c, _)| c.id == id)?;
-        let print = cap.print.clone()?;
+        let print = cap.print.as_ref()?.with_text(&self.light["keys"][id]["legends"]);
         let f = cap.foot;
         let rel = |v: f32, from: f32| ((v - from) / mm) as f64;
         Some(drawing::Printed { foot: (rel(f[2], f[0]), rel(f[3], f[1])), face: [rel(cap.face[0], f[0]), rel(cap.face[1], f[1]), rel(cap.face[2], f[0]), rel(cap.face[3], f[1])], print })
@@ -1281,6 +1368,19 @@ impl LabPage {
         let key = self.printed(&id)?;
         let others = if self.key().is_some() { Vec::new() } else { self.others(&id) };
         Some(drawing::Legends { style, own, key, others })
+    }
+
+    /// The drawn key's legend where its place puts it, before it is moved:
+    /// the box its inks cover on the key's top (mm from the top's top left
+    /// corner: left, top, right, bottom), and the top's width and depth.
+    fn legend_box(&self) -> Option<(f64, f64, f64, f64, f64, f64)> {
+        let mut set = self.legends()?;
+        (set.style.across, set.style.down) = (0.0, 0.0);
+        let [a0, b0, a1, b1] = set.key.face;
+        let (fw, fh) = ((a1 - a0) as f32, (b1 - b0) as f32);
+        let laid = ectodeck_draw::print::set(&ectodeck_draw::print::faces(), &set.key.print, &set.style, &set.own, [0.0, 0.0, fw, fh], 1.0);
+        let (l, t, r, b) = laid.bounds()?;
+        Some((l as f64, t as f64, r as f64, b as f64, fw as f64, fh as f64))
     }
 
     /// Where the typefaces' list stands: under the typeface's button, over the stage.
@@ -1414,12 +1514,6 @@ impl LabPage {
             if self.section == 0 && k.lit {
                 ids.extend([PLACE_E, PLACE_N]);
             }
-            // where the keyboard prints its legend in the middle, Inset has
-            // no say while the legends sit as it prints them (as the drawing shows)
-            let printed = matches!(self.work()["legends"]["place"].as_str(), None | Some("printed"));
-            if self.section == LEGENDS && printed && k.print.as_ref().is_some_and(|p| p.centred) {
-                ids.retain(|&i| PARAMS[i].path != ("legends", "inset"));
-            }
         }
         ids
     }
@@ -1544,6 +1638,78 @@ impl LabPage {
             [a, b] => value_note((a, b), v, false),
             _ => None,
         }
+    }
+
+    /// A part of the chosen key's legend as its box shows it: the key's own
+    /// text, or what its cap has printed there.
+    fn text_of(&self, part: usize) -> String {
+        let (name, role) = ectodeck_draw::print::TEXTS[part];
+        match self.work()["legends"][name].as_str() {
+            Some(t) => t.to_string(),
+            None => self.key().and_then(|k| k.print.as_ref()).map_or_else(String::new, |p| p.text_of(role)),
+        }
+    }
+
+    /// Text typed for a part of the chosen key's legend: the key's own,
+    /// unless it is what its cap has printed there.
+    fn put_text(&mut self, part: usize, text: String) {
+        let (name, role) = ectodeck_draw::print::TEXTS[part];
+        let Some(k) = self.key().cloned() else { return };
+        let printed = k.print.as_ref().map_or_else(String::new, |p| p.text_of(role));
+        if text == printed {
+            own_take(&mut self.light, &k.id, ("legends", name));
+        } else {
+            own_put(&mut self.light, &k.id, ("legends", name), json!(text));
+        }
+    }
+
+    /// Where the chosen key's text boxes stand, a box for each part of its
+    /// legend: under the section's choices, each as tall as its lines. None
+    /// for all keys, or while the typefaces' list or the keys' map covers them.
+    fn text_boxes(&self) -> Vec<(f32, f32, f32, f32)> {
+        if self.section != LEGENDS || self.picking || self.faces_open || !self.key().is_some_and(|k| k.print.is_some()) {
+            return Vec::new();
+        }
+        let (_, _, sw, _) = self.sizes();
+        let cx = 24.0 + drawing::column_x(true, sw);
+        let mut y = HEAD_H + drawing::choice_y(3) + 30.0;
+        (0..3)
+            .map(|part| {
+                let lines = self.text_of(part).split('\n').count().clamp(1, 3) as f32;
+                let h = 34.0 + 18.0 * (lines - 1.0);
+                let b = (cx + 72.0, y, drawing::CTRL_W - 72.0, h);
+                y += h + 6.0;
+                b
+            })
+            .collect()
+    }
+
+    /// The chosen key's text boxes (see text_boxes).
+    fn box_cells(&self) -> Vec<Cell> {
+        self.text_boxes().into_iter().enumerate().map(|(part, (x, y, w, h))| Cell { id: TEXT + part as i32, style: if part == 0 { 5 } else { 4 }, text: self.text_of(part).into(), ..cell(kind::FIELD, x, y, w, h) }).collect()
+    }
+
+    /// The glyphs' list, open under the box it was opened from: every
+    /// glyph a key's text can take, each telling of itself under the pointer.
+    fn glyph_cells(&self, w: f32) -> Vec<Cell> {
+        let boxes = self.text_boxes();
+        let Some(&(bx, by, _, bh)) = self.glyphs.and_then(|p| boxes.get(p)) else { return Vec::new() };
+        let (_, h, _, _) = self.sizes();
+        let (cols, side, gap) = (9usize, 32.0, 4.0);
+        let rows = GLYPHS.len().div_ceil(cols);
+        let (lw, lh) = (cols as f32 * (side + gap) - gap + 24.0, rows as f32 * (side + gap) - gap + 24.0);
+        let (lx, ly) = ((bx - 84.0).min(w - 24.0 - lw), by + bh + 6.0);
+        let mut out = vec![
+            // anywhere else on the page shuts it
+            Cell { id: GLYPH + GLYPHS.len() as i32, style: 29, ..cell(kind::LINK, 0.0, 0.0, w, h - 36.0 - 64.0) },
+            Cell { style: 27, ..cell(kind::TILE, lx, ly, lw, lh) },
+            Cell { id: GLYPH + GLYPHS.len() as i32 + 1, style: 29, ..cell(kind::LINK, lx, ly, lw, lh) },
+        ];
+        for (g, (glyph, _)) in GLYPHS.iter().enumerate() {
+            let (c, r) = ((g % cols) as f32, (g / cols) as f32);
+            out.push(Cell { text: (*glyph).into(), id: GLYPH + g as i32, style: 31, ..cell(kind::SEG_BUTTON, lx + 12.0 + c * (side + gap), ly + 12.0 + r * (side + gap), side, side) });
+        }
+        out
     }
 
     /// What the setups' menu asked for.
@@ -1811,8 +1977,11 @@ impl LabPage {
 
     pub fn refresh(&mut self) {
         self.draw_stage();
-        let (cells, (sketches, over, rows), foot, top) = self.layout();
+        let (cells, (sketches, over, rows), foot, mut top) = self.layout();
+        let (w, _, _, _) = self.sizes();
+        top.extend(self.glyph_cells(w));
         crate::front::sync_cells(&self.top, top);
+        crate::front::sync_cells(&self.boxes, self.box_cells());
         crate::front::sync_cells(&self.cells, cells);
         crate::front::sync_cells(&self.over, over);
         crate::front::sync_cells(&self.foot, foot);
@@ -1884,7 +2053,7 @@ impl LabPage {
         } else if self.key().is_some_and(|k| !k.lit) {
             v = v.unlit();
         }
-        let size = (self.section, sw.round() as i32, sh.round() as i32, self.sliders(), self.scope);
+        let size = (self.section, sw.round() as i32, sh.round() as i32, self.sliders(), self.scope, self.legend_drags);
         if self.places_of.as_ref() != Some(&size) {
             // one lit key's switch pad and its values at the top of the right column
             let right_top = if self.section == 0 && self.key().is_some_and(|k| k.lit) { self.pad_box().3 + 182.0 } else { 0.0 };
@@ -1955,18 +2124,12 @@ impl LabPage {
         } else if p.unit == Unit::North {
             let edge = Physics::from(&self.work()).switch_width as f64 / 2.0;
             (-edge, edge)
-        } else if p.path == ("legends", "inset") {
-            // as far down the cap's top as the legend can go and stay on it,
-            // and at the top left as far in: the key's top, less the letter
-            let id = self.key().map(|k| k.id.clone()).or_else(|| self.device.typical.clone());
-            let face = id.and_then(|id| self.device.caps.iter().find(|(c, _)| c.id == id)).map(|(c, _)| c.face);
-            let work = self.work();
-            let letters = get(&work, ("legends", "letters")).or_else(|| default_of(("legends", "letters"), &self.device.print)).unwrap_or(p.def);
-            match face {
-                Some(f) => {
-                    let (across, deep) = ((f[2] - f[0]) as f64 / self.mm(), (f[3] - f[1]) as f64 / self.mm());
-                    let room = if work["legends"]["place"] == "topleft" { across.min(deep) } else { deep };
-                    (p.lo, (((room - letters) * 10.0).floor() / 10.0).max(p.hi))
+        } else if p.path.0 == "legends" && matches!(p.path.1, "across" | "down") {
+            // as far as the legend can go and stay on the key's top
+            match self.legend_box() {
+                Some((l, t, r, b, fw, fh)) => {
+                    let (lo, hi) = if p.path.1 == "across" { (-l, fw - r) } else { (-t, fh - b) };
+                    ((lo * 10.0).ceil() / 10.0, (hi * 10.0).floor() / 10.0)
                 }
                 None => (p.lo, p.hi),
             }
@@ -2032,7 +2195,15 @@ impl LabPage {
     /// What the line under the drawing tells of, and what it says.
     fn told(&self) -> (String, String) {
         let r = self.readout;
-        match self.focused.or(self.told) {
+        // (a glyph under the pointer tells of itself over the box being typed in)
+        let glyph = self.told.filter(|i| (GLYPH..GLYPH + GLYPHS.len() as i32).contains(i));
+        match glyph.or(self.focused).or(self.told) {
+            Some(LEGEND_PAD) => ("The legend".into(), "Drag the legend to move it anywhere on the key. Left–right and Up–down show how far it has moved from where Placement puts it.".into()),
+            Some(i) if (TEXT..TEXT + 3).contains(&i) => (TEXT_NAMES[(i - TEXT) as usize].0.into(), format!("{} The ⌘ button in the box lists keyboard glyphs to add.", TEXT_NAMES[(i - TEXT) as usize].1)),
+            Some(i) if (GLYPH..GLYPH + GLYPHS.len() as i32).contains(&i) => {
+                let (glyph, name) = GLYPHS[(i - GLYPH) as usize];
+                (name.to_string(), format!("Adds {glyph} where the cursor is in the box."))
+            }
             Some(i) if (0..READING).contains(&i) && self.sliders().contains(&(i as usize)) => {
                 let p = &PARAMS[i as usize];
                 match self.key().filter(|_| self.owns(p.path)) {
@@ -2195,6 +2366,30 @@ impl LabPage {
             for ((j, name), bw) in options.into_iter().zip(widths) {
                 over.push(Cell { text: name.into(), on: j == on, id, index: j as i32, style: style::TELLS, ..cell(kind::SEG_BUTTON, bx, y + 32.0, bw, 30.0) });
                 bx += bw + 2.0;
+            }
+        }
+        // the legend to drag anywhere on the drawing's key's top
+        if let (LEGENDS, false, false, Some((st, _)), Some(set)) = (self.section, self.picking, self.faces_open, &self.drawn, self.legends()) {
+            let (fx, fy, k) = drawing::legend_face(&set, st.w, st.h);
+            let [a0, b0, a1, b1] = set.key.face;
+            over.push(Cell { id: LEGEND_PAD, ..cell(18, sx + fx, sy + fy, (a1 - a0) as f32 * k, (b1 - b0) as f32 * k) });
+        }
+        // a key's own text: the heading, each part's name beside its box and
+        // its mark where the key has text of its own; for all keys, the way there
+        if self.section == LEGENDS && !self.picking && !self.faces_open && !self.choices().is_empty() {
+            let y = sy + drawing::choice_y(3);
+            over.push(text_cell(style::LABEL, cx, y, drawing::CTRL_W, 26.0, "Text"));
+            let boxes = self.text_boxes();
+            if boxes.is_empty() {
+                for (n, line) in wrap_after("Choose One key above to change a key's text.", drawing::CTRL_W, drawing::CTRL_W).iter().enumerate() {
+                    over.push(text_cell(style::NOTE, cx, y + 30.0 + 18.0 * n as f32, drawing::CTRL_W, 18.0, line));
+                }
+            }
+            for (part, &(_, by, _, _)) in boxes.iter().enumerate() {
+                over.push(text_cell(style::NOTE, cx, by + 8.0, 70.0, 18.0, TEXT_NAMES[part].0));
+                if self.owns(("legends", ectodeck_draw::print::TEXTS[part].0)) {
+                    own_mark(&mut over, cx, by + 4.0, TEXT + part as i32);
+                }
             }
         }
         // the sliders, each where the section placed it
@@ -2500,7 +2695,7 @@ fn section_of(path: (&str, &str)) -> Option<&'static str> {
     match path {
         ("switches", "kind") | ("place", _) => Some(SECTIONS[0].0),
         ("caps", "kind") => Some(SECTIONS[1].0),
-        ("legends", "place" | "weight" | "typeface") => Some(SECTIONS[LEGENDS].0),
+        ("legends", "place" | "weight" | "typeface" | "main" | "shift" | "second") => Some(SECTIONS[LEGENDS].0),
         _ => PARAMS.iter().position(|p| p.path == path).and_then(|i| SECTIONS.iter().find(|s| s.2.contains(&i))).map(|s| s.0),
     }
 }
@@ -2532,6 +2727,14 @@ fn value_note(path: (&str, &str), v: &Value, of_key: bool) -> Option<String> {
             format!("Legends › Weight: {}", w.unwrap_or_else(gone))
         }
         ("legends", "typeface") => format!("Legends › Typeface: {}", v.as_str().map_or_else(gone, str::to_string)),
+        ("legends", part @ ("main" | "shift" | "second")) => {
+            let name = TEXT_NAMES[ectodeck_draw::print::TEXTS.iter().position(|(k, _)| *k == part).unwrap_or(0)].0;
+            match v.as_str() {
+                Some("") => format!("Legends › {name}: none"),
+                Some(t) => format!("Legends › {name}: {}", t.replace('\n', " / ")),
+                None => format!("Legends › {name}: {}", if of_key { "as printed" } else { "the default" }),
+            }
+        }
         _ => {
             let i = PARAMS.iter().position(|p| p.path == path)?;
             let section = section_of(path).unwrap_or("");
@@ -2575,16 +2778,17 @@ fn saved_into(text: &str, light: &Value) -> Result<String, String> {
 mod tests {
     use super::*;
 
-    /// The Legends section's sliders: Inset where the legend sits at the top
-    /// or the top left, none in the middle; and the legends' sliders take
-    /// the core's own print where the light says nothing.
+    /// The Legends section's sliders: Left–right and Up–down wherever the
+    /// legend is placed; and the legends' sliders take the core's own print
+    /// where the light says nothing.
     #[test]
     fn the_legends_sliders_follow_where_the_legend_sits() {
-        let inset = PARAMS.iter().position(|p| p.path == ("legends", "inset")).unwrap();
+        let moves: Vec<usize> = [("legends", "across"), ("legends", "down")].iter().map(|&m| PARAMS.iter().position(|p| p.path == m).unwrap()).collect();
         let light = json!({ "legends": { "opacity": 0.7 } });
-        assert!(sliders_of(LEGENDS, &light).contains(&inset));
         let middle = json!({ "legends": { "place": "middle" } });
-        assert!(!sliders_of(LEGENDS, &middle).contains(&inset), "in the middle Inset has no say");
+        for l in [&light, &middle] {
+            assert!(moves.iter().all(|i| sliders_of(LEGENDS, l).contains(i)), "a legend moves wherever it is placed");
+        }
         let print = json!({ "typeface": "Barlow Semi Condensed", "weight": 600, "letters": 3.786, "words": 2.568, "inset": 2.022 });
         assert_eq!(default_of(("legends", "letters"), &print), Some(3.786));
         assert_eq!(all_keys(&light, ("legends", "typeface"), &print), json!("Barlow Semi Condensed"));
@@ -2623,6 +2827,16 @@ mod tests {
         assert_eq!(again["switches"]["lumens"], json!(0.745));
         // a setup the same as the core keeps nothing
         assert_eq!(setup_changes(&core, &core), json!({}));
+    }
+
+    /// Every glyph the list offers is in Ectodeck's own fonts, so it shows
+    /// in the list and on the key on a computer that has no fonts for it.
+    #[test]
+    fn every_glyph_offered_shows_on_any_computer() {
+        let fonts: Vec<rustybuzz::Face> = ectodeck_draw::print::GLYPH_FONTS.iter().map(|data| rustybuzz::Face::from_slice(data, 0).unwrap()).collect();
+        for (glyph, name) in GLYPHS {
+            assert!(glyph.chars().all(|c| fonts.iter().any(|f| f.glyph_index(c).is_some())), "{name} ({glyph})");
+        }
     }
 
     /// The notes beside a setup file's values say them as the lab does.

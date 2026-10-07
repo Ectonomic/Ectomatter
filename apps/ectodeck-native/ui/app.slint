@@ -1150,6 +1150,15 @@ component CellView inherits Rectangle {
             color: #737373;
             vertical-alignment: center;
         }
+        if (root.c.style == 4 || root.c.style == 5) && input.text == "": Text {
+            x: 10px;
+            height: 34px;
+            text: "None";
+            font-family: "Geist";
+            font-size: 13.5px;
+            color: #737373;
+            vertical-alignment: center;
+        }
         if root.c.style == 3 && input.text == "": Text {
             x: 10px;
             height: parent.height;
@@ -1168,17 +1177,58 @@ component CellView inherits Rectangle {
             color: #737373;
             vertical-alignment: center;
         }
+        // (a key's text: what the page sets it to, unless it is being typed in)
+        property <string> shown: root.c.text;
+        changed shown => {
+            if (root.c.style >= 4 && !input.has-focus && input.text != self.shown) {
+                input.text = self.shown;
+            }
+        }
+        // a key's text: its glyphs' button, which gives the box the keys and opens their list
+        if root.c.style == 4 || root.c.style == 5: Rectangle {
+            x: parent.width - 32px;
+            y: 3px;
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            background: glyphs.has-hover ? #ffffff14 : transparent;
+            Text {
+                text: "⌘";
+                font-size: 15px;
+                color: glyphs.has-hover ? Ink.ink : Ink.quiet;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            // (the box's text chosen as it takes the keys, so a glyph takes its
+            // place; with the cursor already in the box, a glyph goes there)
+            glyphs := TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    if (!input.has-focus) {
+                        input.focus();
+                        input.select-all();
+                    }
+                    root.pick(root.c.id, 1, 0, 0, 0);
+                }
+            }
+        }
         input := TextInput {
             x: root.c.style == 1 ? 11px : 10px;
-            width: parent.width - 2 * self.x;
-            height: parent.height;
+            y: root.c.style == 5 ? 8px : 0;
+            width: parent.width - 2 * self.x - (root.c.style >= 4 ? 30px : 0);
+            height: root.c.style == 5 ? parent.height - 16px : parent.height;
             text: root.c.text;
             font-family: "Geist";
             font-size: 13.5px;
             color: root.c.style == 1 ? Ink.bright : Ink.ink;
-            vertical-alignment: center;
-            single-line: true;
+            vertical-alignment: root.c.style == 5 ? top : center;
+            single-line: root.c.style != 5;
             edited => { root.typed(root.c.id, self.text); }
+            changed has-focus => {
+                if (root.c.style >= 4) {
+                    root.focused(root.c.id, self.has-focus);
+                }
+            }
             // (style 3, a name to give: it takes the keys as it shows, all of
             // it chosen; Enter gives it, Escape cancels)
             init => {
@@ -1195,6 +1245,10 @@ component CellView inherits Rectangle {
             key-pressed(e) => {
                 if (root.c.style == 3 && e.text == Key.Escape) {
                     root.pick(root.c.id, 2, 0, 0, 0);
+                    return accept;
+                }
+                if (root.c.style >= 4 && e.text == Key.Escape) {
+                    self.clear-focus();
                     return accept;
                 }
                 reject
@@ -1291,6 +1345,7 @@ component CellView inherits Rectangle {
         border-radius: root.c.style == 25 ? 4px : root.c.kind == 5 ? 7px : root.c.kind == 8 ? 6px : 8px;
         background: root.c.on ? Ink.ink
             : root.c.style == 26 ? transparent
+            : root.c.style == 31 ? (b.has-hover ? #484848 : #363636)
             : root.c.kind == 5 ? (b.has-hover ? Ink.shade2 : transparent)
             : root.c.kind == 8 ? (b.has-hover && root.c.style != 29 ? #ffffff0f : transparent)
             : (b.has-hover ? #3d3d3d : #333333);
@@ -1299,7 +1354,7 @@ component CellView inherits Rectangle {
             y: (parent.height - self.height) / 2 + (b.pressed && (root.c.kind == 7 || root.c.kind == 8) ? 1px : 0);
             text: root.c.text;
             font-family: "Geist";
-            font-size: root.c.style == 25 ? 10.5px : root.c.kind == 8 ? 12.5px : 13px;
+            font-size: root.c.style == 25 ? 10.5px : root.c.style == 31 ? 17px : root.c.kind == 8 ? 12.5px : 13px;
             font-weight: root.c.kind >= 7 ? 500 : 400;
             color: root.c.on ? #171717 : root.c.style == 26 ? #5a5a5a : root.c.kind == 8 ? (b.has-hover ? Ink.ink : Ink.quiet) : root.c.kind == 7 ? Ink.ink : b.has-hover ? #ffffff : Ink.dim;
         }
@@ -1321,7 +1376,7 @@ component CellView inherits Rectangle {
             clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
             // style 23: it tells the page the pointer is over it, as a zone does
             changed has-hover => {
-                if (root.c.style == 23) {
+                if (root.c.style == 23 || root.c.style == 31) {
                     root.hovered(root.c.id, self.has-hover);
                 }
             }
@@ -3568,6 +3623,8 @@ export component LabWindow inherits Window {
     in property <length> save-w: 176px;
     // what is over everything on the page: the light setups' menu, open
     in property <[Cell]> top;
+    // the chosen key's text boxes, a list of their own
+    in property <[Cell]> boxes;
     out property <length> window-width: root.width;
     out property <length> window-height: root.height;
 
@@ -3695,6 +3752,12 @@ export component LabWindow inherits Window {
             hovered(id, on) => { root.hovered(id, on); }
             pad(id, x, y) => { root.pad(id, x, y); }
             typed(id, t) => { root.entered(id, t); }
+        }
+        for c in root.boxes: CellView {
+            c: c;
+            pick(id, i, x, y, h) => { root.pick(id, i); }
+            typed(id, t) => { root.entered(id, t); }
+            focused(id, on) => { root.focused(id, on); }
         }
         for r in root.rows: LabControl {
             r: r;
