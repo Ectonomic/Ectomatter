@@ -489,10 +489,10 @@ const TEXT_NAMES: [(&str, &str); 3] = [
     ("Bottom", "The second function, at the bottom of the key."),
 ];
 /// the glyphs a key's text can take from its list, each with its name
-const GLYPHS: [(&str, &str); 45] = [
-    ("⌘", "Command"), ("⌥", "Option"), ("⌃", "Control"), ("⇧", "Shift"), ("⇪", "Caps Lock"), ("⎋", "Escape"), ("⇥", "Tab"), ("↹", "Tab, both ways"), ("⮀", "Tab, both ways, solid tips"), ("⌫", "Backspace"), ("⌦", "Delete"),
+const GLYPHS: [(&str, &str); 48] = [
+    ("⌘", "Command"), ("⌥", "Option"), ("⌃", "Control"), ("⇧", "Shift"), ("⬆", "Shift, solid"), ("🡅", "Shift, heavy"), ("⇪", "Caps Lock"), ("⎋", "Escape"), ("⇥", "Tab"), ("↹", "Tab, both ways"), ("⮀", "Tab, both ways, solid tips"), ("⌫", "Backspace"), ("⌦", "Delete"),
     ("↵", "Return"), ("⏎", "Enter"), ("␣", "Space"), ("←", "Left"), ("↑", "Up"), ("→", "Right"), ("↓", "Down"), ("⇞", "Page Up"), ("⇟", "Page Down"),
-    ("⏯", "Play and pause"), ("⏮", "Previous track"), ("⏭", "Next track"), ("⏏", "Eject"), ("⏻", "Power"), ("⊞", "Windows"), ("≡", "Menu"), ("⎙", "Print Screen"), ("☀", "Brightness"),
+    ("⏯", "Play and pause"), ("⏮", "Previous track"), ("⏭", "Next track"), ("⏏", "Eject"), ("⏻", "Power"), ("⊞", "Windows"), ("≡", "Menu"), ("⎙", "Print Screen"), ("☀", "Brightness"), ("¦", "Broken bar"),
     ("◀", "Left triangle"), ("▲", "Up triangle"), ("▶", "Right triangle"), ("▼", "Down triangle"),
     ("⭠", "Left, closed tip"), ("⭡", "Up, closed tip"), ("⭢", "Right, closed tip"), ("⭣", "Down, closed tip"),
     ("🠜", "Left, heavy"), ("🠝", "Up, heavy"), ("🠞", "Right, heavy"), ("🠟", "Down, heavy"),
@@ -501,7 +501,7 @@ const GLYPHS: [(&str, &str); 45] = [
 /// How many of them stand in each row of the list, a row to a kind after
 /// the first three: the triangles and the arrows with closed tips; the
 /// heavy arrows and the volume keys' speakers.
-const GLYPH_ROWS: [usize; 5] = [11, 9, 9, 8, 8];
+const GLYPH_ROWS: [usize; 5] = [11, 11, 10, 8, 8];
 /// the switch's place, east and north: values of one key's only
 const PLACE_E: usize = 25;
 const PLACE_N: usize = 26;

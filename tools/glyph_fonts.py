@@ -26,9 +26,10 @@ NOTO_COPYRIGHT = 'Copyright 2022 The Noto Project Authors (https://github.com/no
 # The blocks a keyboard's glyphs come from: arrows, mathematical operators,
 # technical signs (⌘ ⌥ ⎋ ⏏ ⏻), control pictures (␣), shapes (▲ ◀), symbols
 # (☀), and the supplemental arrows; the speakers of the volume keys
-# (🔇 🔈 🔉 🔊, and 🕨 🕩 🕪); and heavy arrows with wide tips (🠜 🠝 🠞 🠟).
+# (🔇 🔈 🔉 🔊, and 🕨 🕩 🕪); heavy arrows with wide tips (🠜 🠝 🠞 🠟, and the
+# heavy up arrow some Shift keys print, 🡅); and the broken bar (¦).
 BLOCKS = [(0x2190, 0x21FF), (0x2200, 0x22FF), (0x2300, 0x23FF), (0x2400, 0x243F), (0x25A0, 0x25FF),
-          (0x2600, 0x26FF), (0x27F0, 0x27FF), (0x2900, 0x297F), (0x2B00, 0x2BFF), (0x1F507, 0x1F50A), (0x1F568, 0x1F56A), (0x1F81C, 0x1F81F)]
+          (0x2600, 0x26FF), (0x27F0, 0x27FF), (0x2900, 0x297F), (0x2B00, 0x2BFF), (0x1F507, 0x1F50A), (0x1F568, 0x1F56A), (0x1F81C, 0x1F81F), (0x1F845, 0x1F845), (0xA6, 0xA6)]
 
 # (file, family, style, PostScript name, source, its name and version, licence)
 FONTS = [
