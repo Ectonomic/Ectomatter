@@ -2088,8 +2088,9 @@ mod tests {
 
     /// A pudding cap glows only below the black of its top, which stays dark
     /// all round the top, at its corners as along its sides; and its milky
-    /// plastic carries the light round the cap, so it glows more evenly than
-    /// clear plastic does.
+    /// plastic glows where the light reaches it, spreading it a little way,
+    /// never all the way round the cap as a light guide would: fully milky,
+    /// the side away from the LED stays well below the side by it.
     #[test]
     fn pudding_caps_glow_below_the_black_and_evenly() {
         let (_t, device, mut b) = board();
@@ -2127,7 +2128,8 @@ mod tests {
         let (milky_band, milky_black, milky_south) = lit(1.0);
         eprintln!("clear: band {clear_band:.3}, under the black {clear_black:.3}, south {clear_south:.3}; milky: band {milky_band:.3}, under the black {milky_black:.3}, south {milky_south:.3}");
         assert!(clear_band > 4.0 * clear_black && milky_band > 4.0 * milky_black, "the light gets out below the black, which is dark all round the top, its corners too");
-        assert!(milky_south / milky_band > clear_south / clear_band, "milky plastic glows more evenly round the cap");
+        assert!(milky_south > clear_south, "a milky skirt glows where the light reaches it");
+        assert!(milky_south < 0.7 * milky_band, "milky is not a light guide: the far side {milky_south:.3} against the LED's side {milky_band:.3}");
     }
 
     /// Milky plastic comes on as the slider moves, with no jump from clear:

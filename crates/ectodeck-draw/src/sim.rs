@@ -191,8 +191,18 @@ impl Setup {
 const HOUSING: f32 = 0.05;
 /// How far round a cap milky plastic carries the light it scatters before it
 /// leaves, in millimetres: the spread of where it comes out, each way round
-/// the cap's foot from where it went in.
+/// the cap's foot from where it went in. The more milky the plastic, the
+/// sooner it turns a photon out of it, so the less far it carries it: a
+/// little haze carries light a long way, as clear plastic guides it (MILKY
+/// at the farthest); milky white plastic glows near where the light went in
+/// (MILKY_NEAR, fully milky), never all the way round the cap.
 pub const MILKY: f32 = 20.0;
+const MILKY_NEAR: f32 = 3.0;
+
+/// How far round a cap plastic this milky carries the light it scatters.
+pub fn milky_spread(milky: f32) -> f32 {
+    (MILKY_NEAR / milky.max(1e-3)).min(MILKY)
+}
 
 /// The keyboard's physical make, from the core's light: its switches, caps
 /// and wells, heights and widths in millimetres (heights above the deck),
@@ -241,7 +251,7 @@ pub struct Physics {
     /// milky: the share of the light it takes in that it scatters. Milky
     /// plastic is one body under the black, the top's underside and the skirt
     /// alike: what it scatters, taken in anywhere, it carries round the cap
-    /// (MILKY each way), to leave below the black; the rest it lets straight
+    /// (milky_spread each way), to leave below the black; the rest it lets straight
     /// through, as clear plastic does, out where it went in (from under the
     /// top, into the black).
     pub caps: Caps,
@@ -732,7 +742,7 @@ impl Stood {
         let mm = p.units_per_mm;
         let p = p.simulated();
         let (gap, top) = (p.gap * mm, p.top * mm);
-        Stood { beam_from: p.switch_top * mm, half: p.switch_width * mm / 2.0, spread: p.glow_spread * mm, clear_to: gap + (1.0 - p.black) * (top - gap), diffuse: MILKY * mm, gap, top, wall: p.wall * mm, p }
+        Stood { beam_from: p.switch_top * mm, half: p.switch_width * mm / 2.0, spread: p.glow_spread * mm, clear_to: gap + (1.0 - p.black) * (top - gap), diffuse: milky_spread(p.milky) * mm, gap, top, wall: p.wall * mm, p }
     }
 }
 
