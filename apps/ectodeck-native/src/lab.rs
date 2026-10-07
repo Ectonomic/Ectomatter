@@ -536,7 +536,7 @@ const COLOUR_PATHS: [(&str, &str); 2] = [("caps", "colour"), ("caps", "sides")];
 /// nothing
 const CAP_COLOURS: [([u8; 3], &str); 9] = [
     (ectodeck_draw::hdr::CAP_BLACK, "Black"),
-    ([0xe6, 0xe6, 0xe6], "White"),
+    ([0xcc, 0xcc, 0xcc], "White"),
     ([0x8a, 0x8a, 0x8a], "Grey"),
     ([0xe6, 0xd9, 0xbe], "Cream"),
     ([0x24, 0x34, 0x5c], "Navy"),
@@ -3340,13 +3340,13 @@ mod tests {
     /// on pudding caps; a colour given is kept, and named as offered.
     #[test]
     fn the_caps_colours_follow_their_kind() {
-        let (black, clear, white) = (ectodeck_draw::hdr::CAP_BLACK, ectodeck_draw::hdr::CAP_CLEAR, [0xe6, 0xe6, 0xe6]);
+        let (black, clear, white) = (ectodeck_draw::hdr::CAP_BLACK, ectodeck_draw::hdr::CAP_CLEAR, [0xcc, 0xcc, 0xcc]);
         assert_eq!(cap_colours(&json!({ "caps": { "kind": "shine-through" } })), [black, black]);
-        assert_eq!(cap_colours(&json!({ "caps": { "kind": "shine-through", "colour": "#E6E6E6" } })), [white, white], "one plastic all over");
-        assert_eq!(cap_colours(&json!({ "caps": { "kind": "pudding", "colour": "#E6E6E6" } })), [white, clear], "a white top over clear sides");
+        assert_eq!(cap_colours(&json!({ "caps": { "kind": "shine-through", "colour": "#CCCCCC" } })), [white, white], "one plastic all over");
+        assert_eq!(cap_colours(&json!({ "caps": { "kind": "pudding", "colour": "#CCCCCC" } })), [white, clear], "a white top over clear sides");
         assert_eq!(cap_colours(&json!({ "caps": { "kind": "translucent" } })), [clear, clear]);
         assert_eq!((colour_name(white), colour_name([0x12, 0x34, 0x56])), ("White".to_string(), "#123456".to_string()));
-        assert_eq!(value_note(("caps", "colour"), &json!("#E6E6E6"), false).unwrap(), "Keycaps › Top colour: White");
+        assert_eq!(value_note(("caps", "colour"), &json!("#CCCCCC"), false).unwrap(), "Keycaps › Top colour: White");
     }
 
     /// The notes beside a setup file's values say them as the lab does.
