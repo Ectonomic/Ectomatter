@@ -17,6 +17,7 @@
 //! ECTODECK_NATIVE_TYPE, so each state of the page can be checked offscreen.
 
 mod adapter;
+mod clipboard;
 mod cores;
 mod device;
 mod display;
@@ -65,9 +66,16 @@ use smithay_client_toolkit::reexports::client::globals::registry_queue_init;
 use smithay_client_toolkit::reexports::client::protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface};
 use smithay_client_toolkit::reexports::client::{delegate_noop, Connection, Dispatch, QueueHandle};
 use smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge;
+use smithay_client_toolkit::data_device_manager::{
+    data_device::{DataDevice, DataDeviceHandler},
+    data_offer::{receive_to_fd, DataOfferHandler, DragOffer},
+    data_source::{CopyPasteSource, DataSourceHandler},
+    DataDeviceManagerState, WritePipe,
+};
+use smithay_client_toolkit::reexports::client::protocol::{wl_data_device::WlDataDevice, wl_data_device_manager::DndAction, wl_data_source::WlDataSource};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
-    delegate_compositor, delegate_keyboard, delegate_output, delegate_pointer, delegate_registry, delegate_seat, delegate_shm,
+    delegate_compositor, delegate_data_device, delegate_keyboard, delegate_output, delegate_pointer, delegate_registry, delegate_seat, delegate_shm,
     delegate_xdg_shell, delegate_xdg_window,
     output::{OutputHandler, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
@@ -134,6 +142,15 @@ impl slint::platform::Platform for Platform {
     }
     fn duration_since_start(&self) -> Duration {
         self.start.elapsed()
+    }
+    // the desktop's clipboard, through Wayland's (clipboard.rs); none of the selection's
+    fn set_clipboard_text(&self, text: &str, clipboard: slint::platform::Clipboard) {
+        if clipboard == slint::platform::Clipboard::DefaultClipboard {
+            clipboard::copied(text);
+        }
+    }
+    fn clipboard_text(&self, clipboard: slint::platform::Clipboard) -> Option<String> {
+        (clipboard == slint::platform::Clipboard::DefaultClipboard).then(clipboard::text).flatten()
     }
 }
 
@@ -830,6 +847,12 @@ struct App {
     pointer: Option<ThemedPointer>,
     keyboard: Option<wl_keyboard::WlKeyboard>,
     seat: Option<wl_seat::WlSeat>,
+    /// the desktop's clipboard: its manager, the seat's device, the text
+    /// Ectodeck offers on it, and the last key press's serial to offer it at
+    data: Option<DataDeviceManagerState>,
+    data_device: Option<DataDevice>,
+    copy_source: Option<CopyPasteSource>,
+    key_serial: u32,
     cursor: Option<CursorIcon>,
     /// the window's size in logical pixels, and the buffer's scale
     size: (u32, u32),
@@ -1115,6 +1138,10 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         pointer: None,
         keyboard: None,
         seat: None,
+        data: DataDeviceManagerState::bind(&globals, &qh).ok(),
+        data_device: None,
+        copy_source: None,
+        key_serial: 0,
         cursor: None,
         size: SIZE,
         scale: 1,
@@ -2077,6 +2104,7 @@ impl SeatHandler for App {
         }
         if capability == Capability::Keyboard && self.keyboard.is_none() {
             self.keyboard = self.seats.get_keyboard(qh, &seat, None).ok();
+            self.data_device = self.data.as_ref().map(|d| d.get_data_device(qh, &seat));
         }
         self.seat = Some(seat);
     }
@@ -2110,8 +2138,16 @@ impl KeyboardHandler for App {
         }
         self.keys_on = None;
     }
-    fn press_key(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, event: KeyEvent) {
+    fn press_key(&mut self, _: &Connection, qh: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, serial: u32, event: KeyEvent) {
+        self.key_serial = serial;
         self.key(&event, true);
+        // text the key copied or cut, offered on the desktop's clipboard
+        if let (Some(text), Some(data), Some(device)) = (clipboard::take_pending(), &self.data, &self.data_device) {
+            let source = data.create_copy_paste_source(qh, clipboard::TEXT);
+            source.set_selection(device, serial);
+            clipboard::hold(Some(text));
+            self.copy_source = Some(source);
+        }
     }
     fn release_key(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, event: KeyEvent) {
         self.key(&event, false);
@@ -2331,6 +2367,61 @@ delegate_shm!(App);
 delegate_seat!(App);
 delegate_pointer!(App);
 delegate_keyboard!(App);
+delegate_data_device!(App);
+
+impl DataDeviceHandler for App {
+    fn enter(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice, _: f64, _: f64, _: &wl_surface::WlSurface) {}
+    fn leave(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {}
+    fn motion(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice, _: f64, _: f64) {}
+    fn drop_performed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {}
+    /// What is on the clipboard changed: another program's text is read in
+    /// the background (Ectodeck's own it pastes from what it holds).
+    fn selection(&mut self, conn: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {
+        let Some(offer) = self.data_device.as_ref().and_then(|d| d.data().selection_offer()) else {
+            clipboard::read_theirs(None);
+            return;
+        };
+        let Some(mime) = offer.with_mime_types(|m| clipboard::TEXT.iter().find(|t| m.iter().any(|o| o == *t)).map(|t| t.to_string())) else {
+            clipboard::read_theirs(None);
+            return;
+        };
+        match std::io::pipe() {
+            Ok((read, write)) => {
+                receive_to_fd(offer.inner(), mime, write.into());
+                let _ = conn.flush();
+                clipboard::read_theirs(Some(read));
+            }
+            Err(_) => clipboard::read_theirs(None),
+        }
+    }
+}
+
+impl DataOfferHandler for App {
+    fn source_actions(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &mut DragOffer, _: DndAction) {}
+    fn selected_action(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &mut DragOffer, _: DndAction) {}
+}
+
+impl DataSourceHandler for App {
+    fn accept_mime(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource, _: Option<String>) {}
+    /// A program pastes Ectodeck's text: written to it, the pipe then closed.
+    fn send_request(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource, _: String, mut fd: WritePipe) {
+        if let Some(text) = clipboard::ours() {
+            use std::io::Write;
+            let _ = fd.write_all(text.as_bytes());
+        }
+    }
+    /// Another program holds the clipboard now.
+    fn cancelled(&mut self, _: &Connection, _: &QueueHandle<Self>, source: &WlDataSource) {
+        // (dropped, the source is destroyed)
+        if self.copy_source.as_ref().is_some_and(|s| s.inner() == source) {
+            self.copy_source = None;
+            clipboard::hold(None);
+        }
+    }
+    fn dnd_dropped(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource) {}
+    fn dnd_finished(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource) {}
+    fn action(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource, _: DndAction) {}
+}
 delegate_xdg_shell!(App);
 delegate_xdg_window!(App);
 delegate_registry!(App);
