@@ -1,6 +1,6 @@
 //! The Lighting page, as the web app had it (renderLighting in app.js at
 //! cd9ea82): the row of effects, then one tile of settings for the effect in
-//! two columns, "Colour and motion" and "Where and when", each row a name in
+//! two columns, "Color and motion" and "Where and when", each row a name in
 //! a column of its own and then its control, and a reset at the foot.
 //!
 //! The window lays the tile out here, with the page's own measurements, and
@@ -371,11 +371,11 @@ pub fn tile(page: &Page, paint: [u8; 3], demo: bool) -> Tile {
     let (mut look, mut when);
     if mode == "custom" {
         look = Col::new(px, "Painting");
-        look.row("Colour", vec![Part::Paint(slint::Color::from_rgb_u8(paint[0], paint[1], paint[2]), "Click keys on the keyboard to paint them.")]);
+        look.row("Color", vec![Part::Paint(slint::Color::from_rgb_u8(paint[0], paint[1], paint[2]), "Click keys on the keyboard to paint them.")]);
         look.row("Every key", vec![Part::Ghosts(vec![(Ctl::Fill, "Fill"), (Ctl::Scatter, "Scatter"), (Ctl::Clear, "Clear")])]);
         when = Col::new(px + COL_W + 48.0, "How it shows");
         when.para("The spacebar, the mode button and the media keys have no light, so they stay dark.");
-        when.para("The keyboard can’t store colours per key, so they show only while Ectodeck is open. The profile saves with its backlight off.");
+        when.para("The keyboard can’t store colors per key, so they show only while Ectodeck is open. The profile saves with its backlight off.");
         let h = look.height().max(when.height());
         cells.extend(look.cells);
         cells.extend(when.cells);
@@ -386,22 +386,22 @@ pub fn tile(page: &Page, paint: [u8; 3], demo: bool) -> Tile {
     }
     let e = &l[mode.as_str()];
     let sp = speed(&mode);
-    look = Col::new(px, if sp.is_some() { "Colour and motion" } else { "Colour" });
+    look = Col::new(px, if sp.is_some() { "Color and motion" } else { "Color" });
     let list = |n: usize| -> Vec<slint::Color> { e["colors"].as_array().map(|a| a.iter().take(n).map(|c| rgb(&c["color"])).collect()).unwrap_or_default() };
     match mode.as_str() {
-        "static" => look.row("Colour", vec![Part::Swatches(Ctl::Color, vec![rgb(&e["color"])])]),
-        "breathing" => look.row("Colours", vec![Part::Swatches(Ctl::Colors, list(2)), Part::Note("Breathes in the first colour, then the second.".into())]),
+        "static" => look.row("Color", vec![Part::Swatches(Ctl::Color, vec![rgb(&e["color"])])]),
+        "breathing" => look.row("Colors", vec![Part::Swatches(Ctl::Colors, list(2)), Part::Note("Breathes in the first color, then the second.".into())]),
         "pulse" | "wave" | "trigger" | "spiral" => look.row(
-            "Colours",
+            "Colors",
             vec![
                 Part::Swatches(Ctl::Colors, list(7)),
-                Part::Note(if mode == "trigger" { "Each key press takes the next colour." } else { "Runs through these colours in order." }.into()),
+                Part::Note(if mode == "trigger" { "Each key press takes the next color." } else { "Runs through these colors in order." }.into()),
             ],
         ),
         _ => {}
     }
     if e.get("random").is_some() && mode != "trigger" {
-        look.row("Order", vec![Part::Check(Ctl::Random, e["random"].as_u64().unwrap_or(0) != 0, "Random colours")]);
+        look.row("Order", vec![Part::Check(Ctl::Random, e["random"].as_u64().unwrap_or(0) != 0, "Random colors")]);
     }
     if mode == "pulse" {
         look.row("Between pulses", vec![Part::Swatches(Ctl::Background, vec![rgb(&e["background"]["color"])])]);

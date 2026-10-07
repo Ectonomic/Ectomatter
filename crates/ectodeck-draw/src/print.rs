@@ -1099,7 +1099,7 @@ mod tests {
         let f1 = Print::of(&control("f1")).unwrap();
         assert_eq!(f1.text_of(Role::Second), "[mute]", "an icon by its name");
         assert!(f1.with_text(&serde_json::json!({ "main": "F1" }), &icons).runs.iter().any(|r| r.icon.as_deref() == Some("mute")), "an icon kept where no text takes its place");
-        assert!(caps.with_text(&serde_json::json!({ "main": "⇪" }), &icons).centred, "a centred key stays centred");
+        assert!(caps.with_text(&serde_json::json!({ "main": "⇪" }), &icons).centred, "a centered key stays centered");
         // the core's icon by its name, as the text box shows it, is the icon; a name it has none of, words
         let muted = f1.with_text(&serde_json::json!({ "second": "[mute]" }), &icons);
         assert_eq!(muted, f1, "[mute] the icon, as printed");

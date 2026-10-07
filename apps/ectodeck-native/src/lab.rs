@@ -162,8 +162,8 @@ struct Param {
 }
 
 const PARAMS: [Param; 41] = [
-    Param { path: ("switches", "led"), label: "North of centre", lo: -7.0, hi: 7.0, step: 0.05, unit: Unit::North, def: 5.08, note: "Where each key's LED sits under its cap, from the switch's centre toward the top of the key; below 0, toward the bottom, as on a keyboard whose LEDs face south. It goes as far as the switch's edge, so Switch width sets how far the slider reaches." },
-    Param { path: ("switches", "lumens"), label: "LED output", lo: 0.05, hi: 10.0, step: 0.01, unit: Unit::Lumens, def: 1.0, note: "The light each LED gives off at full white, in lumens: about 1 for a keyboard's RGB LED. Everything the LEDs light is as bright as the light that reaches it makes it; what is brighter than the screen shows (Peak nits, Settings › HDR) is drawn at the most it shows, in its own colour. A colour gives off its own share, as an LED does: a red about a fifth." },
+    Param { path: ("switches", "led"), label: "North of center", lo: -7.0, hi: 7.0, step: 0.05, unit: Unit::North, def: 5.08, note: "Where each key's LED sits under its cap, from the switch's center toward the top of the key; below 0, toward the bottom, as on a keyboard whose LEDs face south. It goes as far as the switch's edge, so Switch width sets how far the slider reaches." },
+    Param { path: ("switches", "lumens"), label: "LED output", lo: 0.05, hi: 10.0, step: 0.01, unit: Unit::Lumens, def: 1.0, note: "The light each LED gives off at full white, in lumens: about 1 for a keyboard's RGB LED. Everything the LEDs light is as bright as the light that reaches it makes it; what is brighter than the screen shows (Peak nits, Settings › HDR) is drawn at the most it shows, in its own color. A color gives off its own share, as an LED does: a red about a fifth." },
     Param { path: ("switches", "beam"), label: "Beam", lo: 1.0, hi: 200.0, step: 0.5, unit: Unit::Number, def: 24.0, note: "How tight the LED's beam out of the top of the switch is. Higher keeps it to a small bright spot on the legend over the LED; lower spreads it across the cap's top and onto the inside of its skirt." },
     Param { path: ("switches", "scattered"), label: "Scattered", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.7, note: "The share of the LED's light a clear housing scatters, glowing with it all over, rather than sending up in the beam. More lights the legend more evenly, and the deck and the inside of the cap more; less leaves more for the spot over the LED." },
     Param { path: ("switches", "sides"), label: "Through its sides", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.25, note: "The share of the housing's glow that leaves through its sides rather than its top. Its sides light the deck round the switch, out under the skirt; its top lights the back of the legend evenly, its parts far from the LED as well." },
@@ -175,17 +175,17 @@ const PARAMS: [Param; 41] = [
     Param { path: ("legends", "opacity"), label: "Legend opacity", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.7, note: "How much of the light on the back of a cap's top its legend holds back. At 0% the legend lets all of it through; at 100% none, as dark as the cap's black." },
     Param { path: ("caps", "inside"), label: "Inside reflection", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.5, note: "The share of the light the inside of a cap gives back. More of it bounces about inside the cap, and more gets out under the skirt onto the deck round it." },
     Param { path: ("caps", "outside"), label: "Outside reflection", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.18, note: "The share of the light the outside of a cap's skirt gives back: what the skirts show of the light round them." },
-    Param { path: ("legends", "unlit"), label: "LED off", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.15, note: "How bright a legend looks with its LED off (the dimmer at 0%, or a key the lighting leaves dark), as a share of the grey the art prints it in. A backlit legend with no light behind it is dark." },
+    Param { path: ("legends", "unlit"), label: "LED off", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.15, note: "How bright a legend looks with its LED off (the dimmer at 0%, or a key the lighting leaves dark), as a share of the gray the art prints it in. A backlit legend with no light behind it is dark." },
     Param { path: ("wells", "depth"), label: "Depth", lo: 0.0, hi: 12.0, step: 0.1, unit: Unit::Mm, def: 2.0, note: "How deep the wells are: how high the chassis round them stands above the deck. Deeper keeps more of the light in the wells." },
     Param { path: ("wells", "deck"), label: "Deck reflection", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.22, note: "The share of the light the deck at the wells' floor gives back." },
     Param { path: ("wells", "chassis"), label: "Chassis reflection", lo: 0.0, hi: 0.98, step: 0.01, unit: Unit::Fraction, def: 0.4, note: "The share of the light the chassis gives back: its top round the wells, and the wells' walls, which are its own sides." },
-    Param { path: ("display", "lit"), label: "Lit dots", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, def: 324.0, note: "The display's lit dots with its backlight white at full. A colour gives off its own share of that, as an LED does." },
+    Param { path: ("display", "lit"), label: "Lit dots", lo: 0.0, hi: 0.0, step: 1.0, unit: Unit::Nits, def: 324.0, note: "The display's lit dots with its backlight white at full. A color gives off its own share of that, as an LED does." },
     Param { path: ("display", "unlit"), label: "Unlit dots", lo: 0.0, hi: 0.0, step: 0.1, unit: Unit::Nits, def: 4.1, note: "The dots that are off, which let a little of the backlight through, as a real display's do." },
     Param { path: ("display", "background"), label: "Background", lo: 0.0, hi: 0.0, step: 0.1, unit: Unit::Nits, def: 0.8, note: "The ground between the dots." },
     Param { path: ("display", "dot"), label: "Dot size", lo: 0.05, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.84, note: "How much of each cell a dot fills; the rest is the gap between dots." },
     Param { path: ("display", "glass"), label: "Glass sheen", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 1.0, note: "How strongly the glass over the display shows its reflection, as the art draws it at 100%." },
     Param { path: ("caps", "opacity"), label: "Wall opacity", lo: 0.02, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 1.0, note: "How much of the light inside a cap its translucent plastic holds back: its walls below the black on pudding caps, all of it but the legends on translucent ones. At 0% the plastic lets the light through, glowing on its outside; at 100% it is opaque. Plastic with no coating is about as opaque as a legend." },
-    Param { path: ("caps", "black"), label: "Colour down the sides", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.0, note: "How far down a cap's sides the colour of its top comes, as a share of the skirt's height. On a pudding cap the top's colour comes part of the way, with milky plastic below it, where most of the light gets out." },
+    Param { path: ("caps", "black"), label: "Color down the sides", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.0, note: "How far down a cap's sides the color of its top comes, as a share of the skirt's height. On a pudding cap the top's color comes part of the way, with milky plastic below it, where most of the light gets out." },
     Param { path: ("caps", "milky"), label: "Haze", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.0, note: "The share of the light the translucent plastic scatters, which plastics makers call its haze. What it scatters it spreads a little way before letting it out, so the cap glows softly near its LED and looks milky white with its LED off. The milkier the plastic, the nearer to where the light went in it glows; only a faint haze carries light far round the cap, as clear plastic does. The rest comes out where it went in, as through clear plastic." },
     Param { path: ("place", "east"), label: "Switch east–west", lo: -60.0, hi: 60.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Where this key's switch sits under its cap, east or west of the cap's middle: where the plate holds it, which on a long key can be off its middle. Its LED goes with it." },
     Param { path: ("place", "north"), label: "Switch north–south", lo: -30.0, hi: 30.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Where this key's switch sits under its cap, north or south of the cap's middle, as on a cap that reaches down past its row. Its LED goes with it." },
@@ -233,7 +233,7 @@ struct Choice {
 
 const CHOICES: [Choice; 5] = [
     Choice { label: "Switch", note: "What the switch's housing is: black with its LED through a slot in its top, as some older switches have it (Kailh's among them), so all the LED's light leaves in its beam; or clear, glowing with a share of it, over its top as most RGB switches have it, or all over. Each sets the switch's values for that kind; the sliders tune from there.", options: &["LED slot", "Clear top", "Clear housing"] },
-    Choice { label: "Keycaps", note: "What the caps let light through: shine-through caps are opaque but for their legends; pudding caps have translucent sides below a top whose colour comes part of the way down them; translucent caps let light through all over. Each fills in Wall opacity and Colour down the sides where they are off; the sliders tune from there.", options: &["Shine-through", "Pudding", "Translucent"] },
+    Choice { label: "Keycaps", note: "What the caps let light through: shine-through caps are opaque but for their legends; pudding caps have translucent sides below a top whose color comes part of the way down them; translucent caps let light through all over. Each fills in Wall opacity and Color down the sides where they are off; the sliders tune from there.", options: &["Shine-through", "Pudding", "Translucent"] },
     Choice { label: "Placement", note: "Where the legends sit on the caps. Default puts each one where this keyboard prints it. Top, Middle and Top left put every legend there, including the ones this keyboard prints in the middle.", options: &["Default", "Top", "Middle", "Top left"] },
     Choice { label: "Weight", note: "How heavy the typeface's strokes are, of the weights it comes in. A heavier legend lets more of the light through.", options: &["Thin", "Extra light", "Light", "Regular", "Medium", "Semibold", "Bold", "Extra bold", "Black"] },
     Choice { label: "Homing bump", note: "A raised mark on the cap's top that your finger finds without looking. F and J have a bar, so your hands find the home row; the number pad's 5 has a dot. Bar is a short raised line low on the top, Dot a raised dot in the middle, and None leaves the top smooth.", options: &["None", "Bar", "Dot"] },
@@ -403,7 +403,7 @@ fn sig3(v: f64) -> f64 {
 /// A value in words: its number and its unit, as its box and unit show them.
 fn said(p: &Param, v: f64) -> String {
     match reads(p, v) {
-        (_, u) if u == "centred" => u,
+        (_, u) if u == "centered" => u,
         (n, u) if u.is_empty() => n,
         (n, u) if u == "%" => format!("{n}%"),
         (n, u) => format!("{n} {u}"),
@@ -418,7 +418,7 @@ fn reads(p: &Param, v: f64) -> (String, String) {
         Unit::Nits => (trim(if v >= 100.0 { format!("{v:.0}") } else if v >= 10.0 { format!("{v:.1}") } else if v >= 1.0 { format!("{v:.2}") } else { format!("{v:.3}") }), "nits".into()),
         Unit::Lumens => (trim(if v >= 10.0 { format!("{v:.1}") } else { format!("{v:.2}") }), "lumens".into()),
         // the LED's place from the switch's middle, and which way
-        Unit::North => (trim(format!("{:.2}", v.abs())), if v.abs() < 0.005 { "centred".into() } else if v > 0.0 { "mm north".into() } else { "mm south".into() }),
+        Unit::North => (trim(format!("{:.2}", v.abs())), if v.abs() < 0.005 { "centered".into() } else if v > 0.0 { "mm north".into() } else { "mm south".into() }),
         Unit::Mm => (trim(format!("{v:.1}")), "mm".into()),
         Unit::Reach => (trim(format!("{v:.2}")), "mm".into()),
         Unit::Fraction => (trim(format!("{:.1}", v * 100.0)), "%".into()),
@@ -432,7 +432,7 @@ fn reads(p: &Param, v: f64) -> (String, String) {
                 d if d.ends_with("down") => ("mm down", "mm up"),
                 _ => ("mm north", "mm south"),
             };
-            let still = if p.path.0 == "legends" { "mm" } else { "centred" };
+            let still = if p.path.0 == "legends" { "mm" } else { "centered" };
             (trim(format!("{:.1}", v.abs())), if v.abs() < 0.05 { still.into() } else if v > 0.0 { plus.into() } else { minus.into() })
         }
     }
@@ -458,7 +458,7 @@ pub struct Readout {
 }
 
 /// What the readout's numbers measure, and the simulation's.
-const READOUT_ABOUT: &str = "Measured from the keys' colours and brightness as the keyboard shows them, every part as if each key were lit as the brightest is.";
+const READOUT_ABOUT: &str = "Measured from the keys' colors and brightness as the keyboard shows them, every part as if each key were lit as the brightest is.";
 const WHITE_ABOUT: &str = "How bright this screen shows the desktop's white now; the keyboard's light is drawn beside it.";
 const SIM_ABOUT: &str = "The light straight from each LED is worked out exactly at once; the light that has bounced is followed photon by photon, and clears as more come in.";
 /// the readout's numbers' ids, after the sliders', the choices', and the sections' tabs'
@@ -562,7 +562,7 @@ const COLOUR_PATHS: [(&str, &str); 2] = [("caps", "colour"), ("caps", "sides")];
 const CAP_COLOURS: [([u8; 3], &str); 9] = [
     (ectodeck_draw::hdr::CAP_BLACK, "Black"),
     ([0xcc, 0xcc, 0xcc], "White"),
-    ([0x8a, 0x8a, 0x8a], "Grey"),
+    ([0x8a, 0x8a, 0x8a], "Gray"),
     ([0xe6, 0xd9, 0xbe], "Cream"),
     ([0x24, 0x34, 0x5c], "Navy"),
     ([0xb0, 0x2b, 0x31], "Red"),
@@ -601,11 +601,11 @@ fn cap_colours(light: &Value) -> [[u8; 3]; 2] {
 /// What each part's colour button tells of under the drawing, by the caps' kind.
 fn colour_note(part: usize, kind: Caps) -> &'static str {
     match (part, kind) {
-        (0, Caps::Translucent) => "The colour of the clear plastic on each cap's top. Light coming up through it takes on its colour; Clear leaves the light as it is.",
-        (0, _) => "The colour of each cap's top, as it looks in the room's light. A pale top lets a little of the key's light through around the legend, tinted by the plastic. A black top lets none through.",
-        (_, Caps::ShineThrough) => "The colour of each cap's sides. They match the top until you choose a colour for them, as most caps are one plastic all over.",
-        (_, Caps::Pudding) => "The colour of the clear plastic below the top's colour, where the key's light glows through. Clear leaves the light as it is; a colour tints the glow.",
-        _ => "The colour of each cap's clear sides. Light glowing through them takes on its colour; Clear leaves the light as it is.",
+        (0, Caps::Translucent) => "The color of the clear plastic on each cap's top. Light coming up through it takes on its color; Clear leaves the light as it is.",
+        (0, _) => "The color of each cap's top, as it looks in the room's light. A pale top lets a little of the key's light through around the legend, tinted by the plastic. A black top lets none through.",
+        (_, Caps::ShineThrough) => "The color of each cap's sides. They match the top until you choose a color for them, as most caps are one plastic all over.",
+        (_, Caps::Pudding) => "The color of the clear plastic below the top's color, where the key's light glows through. Clear leaves the light as it is; a color tints the glow.",
+        _ => "The color of each cap's clear sides. Light glowing through them takes on its color; Clear leaves the light as it is.",
     }
 }
 
@@ -1384,7 +1384,7 @@ impl LabPage {
                     // what the mark gives back: the switch's place, both ways; a choice's kind; a slider's value
                     let (paths, what) = match id {
                         PAD => (vec![PARAMS[PLACE_E].path, PARAMS[PLACE_N].path], "Switch's place"),
-                        COLOUR => (COLOUR_PATHS.to_vec(), "Colour"),
+                        COLOUR => (COLOUR_PATHS.to_vec(), "Color"),
                         TYPEFACE => (vec![("legends", "typeface"), ("legends", "weight")], "Typeface"),
                         id if (TEXT..TEXT + 3).contains(&id) => (vec![("legends", ectodeck_draw::print::TEXTS[(id - TEXT) as usize].0), ("legends", IMAGE_KEYS[(id - TEXT) as usize])], TEXT_NAMES[(id - TEXT) as usize].0),
                         id if (CHOICE..CHOICE + CHOICES.len() as i32).contains(&id) => (vec![CHOSEN[(id - CHOICE) as usize][0]], CHOICES[(id - CHOICE) as usize].label),
@@ -1406,7 +1406,7 @@ impl LabPage {
                 // a value of the setup's own given back: it takes the core's again
                 Ask::Follow(id) if self.setup.is_some() => {
                     let (paths, what) = match id {
-                        COLOUR => (COLOUR_PATHS.to_vec(), "Colour"),
+                        COLOUR => (COLOUR_PATHS.to_vec(), "Color"),
                         TYPEFACE => (vec![("legends", "typeface"), ("legends", "weight")], "Typeface"),
                         id if (TEXT..TEXT + 3).contains(&id) => (vec![("legends", ectodeck_draw::print::TEXTS[(id - TEXT) as usize].0), ("legends", IMAGE_KEYS[(id - TEXT) as usize])], TEXT_NAMES[(id - TEXT) as usize].0),
                         id if (CHOICE..CHOICE + CHOICES.len() as i32).contains(&id) => (vec![CHOSEN[(id - CHOICE) as usize][0]], CHOICES[(id - CHOICE) as usize].label),
@@ -2854,7 +2854,7 @@ impl LabPage {
             Some(PART) => ("Adjust".into(), "Which part of the legend the sliders below size and move. Whole sizes and moves the legend as one. Main, Shifted and Bottom each size and move one part on its own: the main legend, the shifted sign beside it, and the bottom legend at the foot of the key.".into()),
             Some(ADD_TYPEFACE) => ("Add a typeface".into(), "Choose a typeface file (.ttf or .otf) from your computer, such as the one your keycaps are printed in. Ectodeck keeps its own copy, so your setups look the same on any computer.".into()),
             Some(SECTION_DEFAULT) => self.section_reset_words(),
-            Some(IMAGE_CHOOSE) => ("Choose a picture".into(), "Puts a picture from an SVG file on the key in place of this text, lit as a legend is: the logo on an artisan cap, say. The picture's shapes print in one colour, as legends do. Turn any text in the file into shapes first.".into()),
+            Some(IMAGE_CHOOSE) => ("Choose a picture".into(), "Puts a picture from an SVG file on the key in place of this text, lit as a legend is: the logo on an artisan cap, say. The picture's shapes print in one color, as legends do. Turn any text in the file into shapes first.".into()),
             Some(i) if (TEXT..TEXT + 3).contains(&i) => match self.image_of((i - TEXT) as usize) {
                 Some(name) => (TEXT_NAMES[(i - TEXT) as usize].0.into(), format!("A picture, {name}, in place of the key's text. Size and move the picture with Adjust. × takes the picture off and gives the key its text back.")),
                 None => (TEXT_NAMES[(i - TEXT) as usize].0.into(), format!("{} The ⌘ button in the box lists keyboard glyphs and pictures to add.", TEXT_NAMES[(i - TEXT) as usize].1)),
@@ -2896,11 +2896,11 @@ impl LabPage {
             Some(i) if i == COLOUR_TOP || i == COLOUR_SIDES => {
                 let part = (i - COLOUR_TOP) as usize;
                 let c = cap_colours(&self.work())[part];
-                (format!("{}: {}", ["Top colour", "Side colour"][part], colour_name(c)), colour_note(part, Physics::from(&self.work()).caps).into())
+                (format!("{}: {}", ["Top color", "Side color"][part], colour_name(c)), colour_note(part, Physics::from(&self.work()).caps).into())
             }
             Some(i) if i == COLOUR => match self.key().filter(|_| COLOUR_PATHS.iter().any(|&p| self.owns(p))) {
-                Some(k) => ("Colour".into(), format!("The colour of the caps' tops and sides. This is {}'s own colour; the dot before the name gives it back to all keys.", k.label)),
-                None => ("Colour".into(), "The colour of the caps' tops and sides. Choose a key above to give one cap a colour of its own, as on a set with a few white keys.".into()),
+                Some(k) => ("Color".into(), format!("The color of the caps' tops and sides. This is {}'s own color; the dot before the name gives it back to all keys.", k.label)),
+                None => ("Color".into(), "The color of the caps' tops and sides. Choose a key above to give one cap a color of its own, as on a set with a few white keys.".into()),
             },
             Some(i) if (CHOICE..CHOICE + CHOICES.len() as i32).contains(&i) => {
                 let c = &CHOICES[(i - CHOICE) as usize];
@@ -2928,7 +2928,7 @@ impl LabPage {
     fn legend_note(&self) -> Option<String> {
         let r = self.readout;
         if r.legend > r.reach + 0.5 && r.reach > 0.0 {
-            Some(format!("The screen shows this colour up to {:.0} nits (Peak nits {:.0}, Settings › HDR): the legends brighter than that are drawn at it, in their own colour.", r.reach, r.peak))
+            Some(format!("The screen shows this color up to {:.0} nits (Peak nits {:.0}, Settings › HDR): the legends brighter than that are drawn at it, in their own color.", r.reach, r.peak))
         } else {
             None
         }
@@ -3050,7 +3050,7 @@ impl LabPage {
         if self.section == 1 {
             let y = sy + drawing::choice_y(self.choices().len());
             over.push(Cell { id: COLOUR, ..cell(kind::ZONE, cx - 10.0, y - 7.0, drawing::CTRL_W + 20.0, drawing::CHOICE_H) });
-            over.push(text_cell(style::LABEL, cx, y, drawing::CTRL_W, 26.0, "Colour"));
+            over.push(text_cell(style::LABEL, cx, y, drawing::CTRL_W, 26.0, "Color"));
             if COLOUR_PATHS.iter().any(|&p| self.owns(p)) {
                 own_mark(&mut over, cx, y, COLOUR);
             }
@@ -3439,7 +3439,7 @@ fn value_note(path: (&str, &str), v: &Value, of_key: bool) -> Option<String> {
     Some(match path {
         ("switches", "kind") => format!("{} › Switch: {}", SECTIONS[0].0, option(0, &["led-slot", "clear-top", "clear"])),
         ("caps", "kind") => format!("Keycaps: {}", option(1, &["shine-through", "pudding", "translucent"])),
-        ("caps", part @ ("colour" | "sides")) => format!("Keycaps › {}: {}", if part == "colour" { "Top colour" } else { "Side colour" }, rgb_of(v).map_or_else(gone, colour_name)),
+        ("caps", part @ ("colour" | "sides")) => format!("Keycaps › {}: {}", if part == "colour" { "Top color" } else { "Side color" }, rgb_of(v).map_or_else(gone, colour_name)),
         ("legends", "place") => format!("Legends › Placement: {}", option(2, &PLACES)),
         ("caps", "bump") => format!("Keycaps › Homing bump: {}", option(BUMP, &["none", "bar", "dot"])),
         ("legends", "weight") => {
@@ -3570,7 +3570,7 @@ mod tests {
         assert_eq!(cap_colours(&json!({ "caps": { "kind": "pudding", "colour": "#CCCCCC" } })), [white, clear], "a white top over clear sides");
         assert_eq!(cap_colours(&json!({ "caps": { "kind": "translucent" } })), [clear, clear]);
         assert_eq!((colour_name(white), colour_name([0x12, 0x34, 0x56])), ("White".to_string(), "#123456".to_string()));
-        assert_eq!(value_note(("caps", "colour"), &json!("#CCCCCC"), false).unwrap(), "Keycaps › Top colour: White");
+        assert_eq!(value_note(("caps", "colour"), &json!("#CCCCCC"), false).unwrap(), "Keycaps › Top color: White");
     }
 
     /// The notes beside a setup file's values say them as the lab does.
@@ -3727,7 +3727,7 @@ mod tests {
         let mut l = light.clone();
         own_set(&mut l, "enter", ("place", "north"), json!(-0.9), &Value::Null);
         own_set(&mut l, "enter", ("place", "east"), json!(0.0), &Value::Null);
-        assert_eq!(l["keys"]["enter"], json!({ "place": { "north": -0.9 } }), "centred is all keys' place");
+        assert_eq!(l["keys"]["enter"], json!({ "place": { "north": -0.9 } }), "centered is all keys' place");
         own_set(&mut l, "enter", ("place", "north"), json!(0.0), &Value::Null);
         assert_eq!(l, light, "dragged back to its cap's middle: Enter follows all keys");
         own_set(&mut l, "space", ("switches", "beam"), json!(3), &Value::Null);
@@ -3789,10 +3789,10 @@ mod tests {
         assert_eq!(light, saved, "Enter had none of its own: it follows all keys again");
         let p = |label: &str| PARAMS.iter().find(|p| p.label == label).unwrap();
         assert_eq!(said(p("Beam"), 3.0), "3");
-        assert_eq!(said(p("North of centre"), 5.08), "5.08 mm north");
+        assert_eq!(said(p("North of center"), 5.08), "5.08 mm north");
         assert_eq!(said(p("Legend opacity"), 0.7), "70%");
         assert_eq!(said(p("Cap's top"), 3.0), "3 mm");
-        assert_eq!(said(p("Switch north–south"), 0.0), "centred");
+        assert_eq!(said(p("Switch north–south"), 0.0), "centered");
         assert_eq!(said(p("LED output"), 1.056), "1.06 lumens");
     }
 

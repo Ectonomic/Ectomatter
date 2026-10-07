@@ -46,7 +46,7 @@ pub fn tiles(page: &Page, fw: &Value, bind: &[String; 2]) -> Tiles {
     prof.row("Name", vec![Part::Field(Ctl::Name, name), Part::Note("Stored on the keyboard with this profile.".into())]);
     let lc = &l["lcd"]["color"];
     let c = &lc["color"];
-    prof.row("Screen colour", vec![Part::Swatches(Ctl::LcdColor, vec![slint::Color::from_rgb_u8(c[0].as_u64().unwrap_or(0) as u8, c[1].as_u64().unwrap_or(0) as u8, c[2].as_u64().unwrap_or(0) as u8)])]);
+    prof.row("Screen color", vec![Part::Swatches(Ctl::LcdColor, vec![slint::Color::from_rgb_u8(c[0].as_u64().unwrap_or(0) as u8, c[1].as_u64().unwrap_or(0) as u8, c[2].as_u64().unwrap_or(0) as u8)])]);
     let b = lc["brightness"].as_f64().unwrap_or(255.0);
     prof.row("Brightness", vec![Part::Slider(Ctl::LcdBrightness, (b / 255.0) as f32, format!("{}%", (b / 2.55).round()))]);
     let apps = l["lcd"]["apps"].as_u64().unwrap_or(0);

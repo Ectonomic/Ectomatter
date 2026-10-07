@@ -1113,7 +1113,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
     let compositor = CompositorState::bind(&globals, &qh).expect("wl_compositor");
     let xdg = XdgShell::bind(&globals, &qh).expect("xdg_shell");
     let shm = Shm::bind(&globals, &qh).expect("wl_shm");
-    let cm: WpColorManagerV1 = globals.bind(&qh, 1..=1, ()).expect("the compositor's colour management (KWin 6.3 or later)");
+    let cm: WpColorManagerV1 = globals.bind(&qh, 1..=1, ()).expect("the compositor's color management (KWin 6.3 or later)");
     // KDE's account of each screen, for the SDR white its user set (none on another compositor)
     let kde_registry: Option<KdeOutputDeviceRegistryV2> = globals.bind(&qh, 21..=23, ()).ok();
 

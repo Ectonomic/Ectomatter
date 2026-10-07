@@ -670,7 +670,7 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
         }
     }
     if v.lit && x_lo < sl.led && sl.led < x_hi && rise > 0.4 {
-        s.dot(px(sl.led), pz(hz) + 1.5, 3.4 * grow, if white("North of centre") { WHITE } else { AMBER });
+        s.dot(px(sl.led), pz(hz) + 1.5, 3.4 * grow, if white("North of center") { WHITE } else { AMBER });
     }
     // the deck lit out under the skirts, either side of the key
     for (x0, x1) in [(x_lo.max(0.0), sl.foot0 + 0.6), (sl.foot1 - 0.6, (sl.w0 + 0.6).min(x_hi))] {
@@ -783,8 +783,8 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
             // the switch's centre line, and the LED north of it
             s.stroke(&poly(&[p(sl.centre, 0.15), p(sl.centre, hz + 0.6)], false), "#5c5c5c", 1.0);
             let y_nc = if hz > 2.6 { hz - 0.6 } else { hz + 0.7 };
-            marks.push(Mark::Across { x0: px(sl.led), x1: px(sl.centre), y: pz(y_nc), i: slider("North of centre") });
-            labels.push(Label::new(true, p(sl.led, hz), "North of centre"));
+            marks.push(Mark::Across { x0: px(sl.led), x1: px(sl.centre), y: pz(y_nc), i: slider("North of center") });
+            labels.push(Label::new(true, p(sl.led, hz), "North of center"));
             // Beam on the cone's edge; with no room for a beam, where it would meet the cap's top
             let beam_at = if rise > 0.3 { p(sl.led - wide * 0.62, hz + rise * 0.62) } else { p(sl.led, under) };
             labels.push(Label::new(true, beam_at, "Beam"));
@@ -879,8 +879,8 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
             if !shine && !translucent {
                 // Colour down the sides measured beside the south skirt
                 let bx = (sl.foot1 + 1.0).min(x_hi - 0.4);
-                marks.push(Mark::Height { x: px(bx), y0: pz(clear_to), y1: pz(tz), i: slider("Colour down the sides") });
-                labels.push(Label::new(false, p(bx, (clear_to + tz) / 2.0), "Colour down the sides"));
+                marks.push(Mark::Height { x: px(bx), y0: pz(clear_to), y1: pz(tz), i: slider("Color down the sides") });
+                labels.push(Label::new(false, p(bx, (clear_to + tz) / 2.0), "Color down the sides"));
             }
             // light up through the top, beside the legends
             let top_x = a1 - 1.6;

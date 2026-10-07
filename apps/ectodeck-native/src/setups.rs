@@ -85,7 +85,7 @@ fn file_text(device: &str, s: &Setup, note: Note) -> String {
     let mut out = vec![format!("// {name}: a custom light setup for the {device}."), "//".to_string()];
     out.extend(comment(&format!("The Key lab writes this file each time you save {name}. The file holds only the settings {name} changes from Default; every setting not listed here uses Default's value. The note beside each value names the setting as the Key lab does, for example \"Keycaps › Haze: 80%\"."), ""));
     out.push("//".into());
-    out.extend(comment(&format!("You can edit values here by hand; the changes apply the next time Ectodeck starts. Percentages are written from 0 to 1 (80% is 0.8), and lengths in millimetres. To switch back to Default, or to rename or delete {name}, use the setup menu at the top of the Key lab."), ""));
+    out.extend(comment(&format!("You can edit values here by hand; the changes apply the next time Ectodeck starts. Percentages are written from 0 to 1 (80% is 0.8), and lengths in millimeters. To switch back to Default, or to rename or delete {name}, use the setup menu at the top of the Key lab."), ""));
     out.push("{".into());
     match s.changes.as_object().filter(|o| !o.is_empty()) {
         None => {

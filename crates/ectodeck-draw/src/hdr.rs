@@ -2291,8 +2291,8 @@ mod tests {
         let fine: usize = snap.direct.iter().map(|x| x.w * x.h).sum();
         let coarse: usize = snap.bounced.iter().map(|m| m.iter().map(|x| x.w * x.h).sum::<usize>()).sum();
         eprintln!("{} keys; fine grid {} x {}, their boxes {} cells; coarse grid {} x {}, their boxes {} cells", snap.keys.len(), snap.fine.w, snap.fine.h, fine, snap.coarse.w, snap.coarse.h, coarse);
-        time("compose, every key its own colour", &mut |i| b.compose_into(&mut out, &rainbow(i), 0, 254.0, 4.0));
-        time("compose, all one colour", &mut |_| b.compose_into(&mut out, &white(&b), 0, 254.0, 4.0));
+        time("compose, every key its own color", &mut |i| b.compose_into(&mut out, &rainbow(i), 0, 254.0, 4.0));
+        time("compose, all one color", &mut |_| b.compose_into(&mut out, &white(&b), 0, 254.0, 4.0));
         // pudding caps, with their milky bands (Grant's Studio)
         let (_t2, d2, mut pb) = board();
         let mut light = d2["light"].clone();
@@ -2300,7 +2300,7 @@ mod tests {
         pb.set_light(&light);
         let scene = Scene::of(&pb);
         pb.set_sim(Arc::new(Simulator::settle(&scene, &pb.setup(&light), 2000)));
-        time("compose, pudding caps, every key its own colour", &mut |i| pb.compose_into(&mut out, &rainbow(i), 0, 254.0, 4.0));
+        time("compose, pudding caps, every key its own color", &mut |i| pb.compose_into(&mut out, &rainbow(i), 0, 254.0, 4.0));
         let colours: Vec<[f32; 3]> = snap.keys.iter().map(|&p| key_colour(&rainbow(1).into_iter().find(|l| l.pos == p).unwrap())).collect();
         time("  of which the coloured light maps", &mut |_| {
             let _ = snap.lit(&colours);
@@ -2673,7 +2673,7 @@ mod tests {
         assert_eq!(b.compose(&lights, 0, 200.0, 4.0), plain, "black is the art's");
         light["keys"] = serde_json::json!({ "esc": { "caps": { "colour": "#E6E6E6" } } });
         light["caps"].as_object_mut().unwrap().remove("colour");
-        assert!(b.set_light(&light), "a new colour changes the picture");
+        assert!(b.set_light(&light), "a new color changes the picture");
         let lit = b.compose(&lights, 0, 200.0, 4.0);
         let (e, two) = (face_middle(&b, "esc"), face_middle(&b, "2"));
         assert!(lum(&lit, &b, e) > 10.0 * lum(&plain, &b, e), "Escape's top white: {} against {}", lum(&lit, &b, e), lum(&plain, &b, e));
@@ -2767,7 +2767,7 @@ mod tests {
         let px = enc.encode(&frame);
         let encoded = t.elapsed();
         assert_eq!(px.len(), (1264 * 506 * 8) as usize);
-        eprintln!("made and simulated in {made:?}, lit in {composed:?} (every key its own colour {each:?}), encoded in {encoded:?}");
+        eprintln!("made and simulated in {made:?}, lit in {composed:?} (every key its own color {each:?}), encoded in {encoded:?}");
         // the brightest part of the lit keyboard goes beyond the desktop's white
         let brightest = frame.chunks_exact(4).map(|p| p[0] / p[3].max(1e-6)).fold(0f32, f32::max);
         assert!(brightest > 1.2, "the light should go past SDR white: {brightest}");
@@ -2849,9 +2849,9 @@ mod tests {
         // the brightest pixel held back: its colour as at a third of the light
         let j = (0..n).filter(|&j| one[j * 4 + 3] > 0.99).max_by(|&x, &y| widest(&three, x).total_cmp(&widest(&three, y))).unwrap();
         let hue = |f: &[f32]| [f[j * 4 + 1] / f[j * 4], f[j * 4 + 2] / f[j * 4].max(1e-9)];
-        eprintln!("the brightest pixel: {:.3} of the peak, its colour {:?} against {:?}", widest(&three, j) / ceiling, hue(&three), hue(&one));
+        eprintln!("the brightest pixel: {:.3} of the peak, its color {:?} against {:?}", widest(&three, j) / ceiling, hue(&three), hue(&one));
         assert!(widest(&three, j) > 0.85 * ceiling, "held near the peak");
-        assert!(hue(&three).iter().zip(hue(&one)).all(|(a, b)| (a - b).abs() < 0.02), "in its own colour");
+        assert!(hue(&three).iter().zip(hue(&one)).all(|(a, b)| (a - b).abs() < 0.02), "in its own color");
     }
 
     /// The legends' share dims the legends alone: a tenth of it leaves the
