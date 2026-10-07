@@ -63,7 +63,7 @@ pub struct Overlays {
 /// pixels, and, a pixel at a time, how much of it lit dots and unlit dots
 /// cover (the rest is the ground between them), with the backlight's colour
 /// (sRGB, 0 to 1). With nothing driving it, it is dark: `dark` holds its
-/// unlit colours, which only the room's light shows.
+/// unlit colours in linear light, which only the room's light shows.
 pub struct Panel {
     pub x: i32,
     pub y: i32,
@@ -250,7 +250,8 @@ impl Overlays {
         let dark = if live {
             Vec::new()
         } else {
-            (0..n).map(|i| shade([8.0, 10.0, 12.0], [18.0, 22.0, 26.0], off[i].min(1.0))).collect()
+            // (in linear light, made once here rather than at every frame)
+            (0..n).map(|i| shade([8.0, 10.0, 12.0], [18.0, 22.0, 26.0], off[i].min(1.0)).map(|v| v.max(0.0).powf(2.2))).collect()
         };
         let [x, y, _, _] = self.panel_box(bw);
         self.panel = Some(Panel {

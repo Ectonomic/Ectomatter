@@ -547,7 +547,23 @@ impl Coloured {
     pub fn at(&self, a: &At) -> [f32; 3] {
         let maps = &self.coarse[a.code as usize];
         let direct = a.code as usize != TOP_OUTSIDE;
-        [0, 1, 2].map(|c| if direct { a.fine.iter().map(|(i, w)| self.fine[c][*i] * w).sum::<f32>() } else { 0.0 } + a.coarse.iter().map(|(i, w)| maps[c][*i] * w).sum::<f32>())
+        // (plain loops, a channel at a time: this is asked for at every pixel of every frame)
+        let mut out = [0.0f32; 3];
+        for (c, o) in out.iter_mut().enumerate() {
+            let mut d = 0.0f32;
+            if direct {
+                let m = &self.fine[c];
+                for &(i, w) in &a.fine {
+                    d += m[i] * w;
+                }
+            }
+            let (m, mut b) = (&maps[c], 0.0f32);
+            for &(i, w) in &a.coarse {
+                b += m[i] * w;
+            }
+            *o = d + b;
+        }
+        out
     }
 }
 
@@ -574,6 +590,31 @@ impl Boxed {
     /// add `k` of it into a map of the whole grid
     pub fn add_into(&self, map: &mut [f32], gw: usize, k: f32) {
         self.add_into_rows(map, gw, 0, k);
+    }
+
+    /// add it in a colour `c` into the rows from `y0` on of a map of the
+    /// whole grid a channel, `band` being as many of them as they hold;
+    /// a channel of none left as it is
+    pub fn add_rgb_into_rows(&self, band: &mut [&mut [f32]; 3], gw: usize, y0: usize, c: [f32; 3]) {
+        let [r, g, b] = band;
+        let rows = r.len() / gw;
+        let (y_from, y_to) = (self.y.max(y0), (self.y + self.h).min(y0 + rows));
+        if y_from >= y_to || c == [0.0; 3] {
+            return;
+        }
+        let [cr, cg, cb] = c.map(|v| v.max(0.0));
+        for y in y_from..y_to {
+            let j = y - self.y;
+            let at = (y - y0) * gw + self.x;
+            let v = &self.v[j * self.w..(j + 1) * self.w];
+            let (r, g, b) = (&mut r[at..at + self.w], &mut g[at..at + self.w], &mut b[at..at + self.w]);
+            for x in 0..self.w {
+                let v = v[x];
+                r[x] += cr * v;
+                g[x] += cg * v;
+                b[x] += cb * v;
+            }
+        }
     }
 
     /// add `k` of it into the rows from `y0` on of a map of the whole grid,
@@ -1397,36 +1438,45 @@ impl Snapshot {
 
     /// The light the keys show, each in its own colour (linear, in the
     /// keys' order), added up.
+    ///
+    /// Each key's boxes on the grids in its colour, added up, a map a
+    /// channel: in bands of rows of all the maps at once, shared among a
+    /// thread a core, each box's cells read once for all three channels.
     pub fn lit(&self, colours: &[[f32; 3]]) -> Coloured {
-        Coloured { fine: self.spread(&self.fine, colours, &|k| &self.direct[k]), coarse: std::array::from_fn(|m| self.spread(&self.coarse, colours, &|k| &self.bounced[k][m])) }
-    }
-
-    /// Each key's box on a grid in its colour, added up: a map a channel,
-    /// a band of rows a thread.
-    fn spread<'a>(&'a self, g: &Grid, colours: &[[f32; 3]], boxed: &(dyn Fn(usize) -> &'a Boxed + Sync)) -> [Vec<f32>; 3] {
-        let mut maps: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0f32; g.w * g.h]);
-        let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(16);
-        let rows = g.h.div_ceil(threads).max(1);
-        let [r, gr, b] = &mut maps;
+        const ROWS: usize = 16;
+        let new = |g: &Grid| -> [Vec<f32>; 3] { std::array::from_fn(|_| vec![0f32; g.w * g.h]) };
+        let (mut fine, mut coarse): ([Vec<f32>; 3], [[Vec<f32>; 3]; MAPS]) = (new(&self.fine), std::array::from_fn(|_| new(&self.coarse)));
+        // (each band: which map, its grid's width, its first row, its rows of each channel)
+        fn cut<'a>(m: Option<usize>, gw: usize, maps: &'a mut [Vec<f32>; 3], bands: &mut Vec<(Option<usize>, usize, usize, [&'a mut [f32]; 3])>) {
+            let [r, g, b] = maps;
+            for (n, ((r, g), b)) in r.chunks_mut(ROWS * gw).zip(g.chunks_mut(ROWS * gw)).zip(b.chunks_mut(ROWS * gw)).enumerate() {
+                bands.push((m, gw, n * ROWS, [r, g, b]));
+            }
+        }
+        let mut bands = Vec::new();
+        cut(None, self.fine.w, &mut fine, &mut bands);
+        for (m, maps) in coarse.iter_mut().enumerate() {
+            cut(Some(m), self.coarse.w, maps, &mut bands);
+        }
+        // (a thread for each share of the bands, all the maps' bands shared out together)
+        let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(crate::hdr::FRAME_THREADS);
+        let per = bands.len().div_ceil(threads).max(1);
         std::thread::scope(|sc| {
-            for (n, ((r, gr), b)) in r.chunks_mut(rows * g.w).zip(gr.chunks_mut(rows * g.w)).zip(b.chunks_mut(rows * g.w)).enumerate() {
+            for share in bands.chunks_mut(per) {
                 sc.spawn(move || {
-                    let y0 = n * rows;
-                    for (k, c) in colours.iter().enumerate() {
-                        let bx = boxed(k);
-                        if bx.y >= y0 + r.len() / g.w || bx.y + bx.h <= y0 {
-                            continue;
-                        }
-                        for (map, c) in [(&mut *r, c[0]), (&mut *gr, c[1]), (&mut *b, c[2])] {
-                            if c > 0.0 {
-                                bx.add_into_rows(map, g.w, y0, c);
-                            }
+                    for (m, gw, y0, band) in share.iter_mut() {
+                        for (k, c) in colours.iter().enumerate() {
+                            let bx = match m {
+                                None => &self.direct[k],
+                                Some(m) => &self.bounced[k][*m],
+                            };
+                            bx.add_rgb_into_rows(band, *gw, *y0, *c);
                         }
                     }
                 });
             }
         });
-        maps
+        Coloured { fine, coarse }
     }
 }
 
@@ -2093,6 +2143,32 @@ mod tests {
         let b = Board::new(&tree, &device, [0x20, 0x20, 0x20], 1264, 506).unwrap();
         let scene = Scene::of(&b);
         (b, scene, Physics::from(&device["light"]))
+    }
+
+    /// The keys' light in their colours, added up in one pass of all three
+    /// channels, is the light each channel's own pass makes: every value alike.
+    #[test]
+    fn the_coloured_light_is_each_channel_s_own() {
+        let (_b, scene, p) = scene();
+        let snap = Simulator::settle(&scene, &Setup::alike(p), 2000);
+        let colours: Vec<[f32; 3]> = (0..snap.keys.len()).map(|i| [((i * 37) % 7) as f32 / 6.0, ((i * 11) % 5) as f32 / 4.0, if i % 3 == 0 { 0.0 } else { 0.5 }]).collect();
+        let lit = snap.lit(&colours);
+        // each channel on its own, a key at a time, over the whole grid
+        let one = |g: &Grid, c: usize, boxes: Vec<&Boxed>| {
+            let mut map = vec![0f32; g.w * g.h];
+            for (bx, col) in boxes.into_iter().zip(&colours) {
+                if col[c] > 0.0 {
+                    bx.add_into_rows(&mut map, g.w, 0, col[c]);
+                }
+            }
+            map
+        };
+        for c in 0..3 {
+            assert!(lit.fine[c] == one(&snap.fine, c, snap.direct.iter().collect()), "the direct light's channel {c}");
+            for m in 0..MAPS {
+                assert!(lit.coarse[m][c] == one(&snap.coarse, c, snap.bounced.iter().map(|b| &b[m]).collect()), "the bounced light's map {m}, channel {c}");
+            }
+        }
     }
 
     /// A black housing scatters none of its LED's light: the beam holds it

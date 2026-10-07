@@ -400,6 +400,9 @@ fn face_box(face: [f32; 4], ka: f32, (ox, oy): (f32, f32), (w, h): (u32, u32)) -
     (x0, y0, x1.saturating_sub(x0), y1.saturating_sub(y0))
 }
 
+/// How many threads draw a frame (see compose_into).
+pub const FRAME_THREADS: usize = 4;
+
 /// How far either side of a cap's foot the light either side of its edge
 /// is read: a cell of the simulation's fine grid, clear of the edge.
 const EDGE_READ: f32 = 0.5;
@@ -1839,8 +1842,10 @@ impl Board {
             KeysLight { snap, gain: self.gain(white), alike, coloured, to_band, top_glow, top_lit }
         });
         let keys = keys.as_ref();
-        // in bands of rows, one a thread: every step below is the pixel's own
-        let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(16);
+        // in bands of rows, one a thread: every step below is the pixel's own.
+        // (Four threads: more finish a frame little sooner for far more of the
+        // computer's time, measured by how_long_a_frame_takes.)
+        let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(FRAME_THREADS);
         let rows = h.div_ceil(threads).max(1);
         std::thread::scope(|sc| {
             for (b, band) in out.chunks_mut(rows * w * 4).enumerate() {
@@ -2037,6 +2042,10 @@ impl Board {
         // thing on the keyboard. A remapped key's without its second function.
         for (n, key) in self.keys.iter().enumerate() {
             let Some(s) = &key.legend else { continue };
+            // (only the legends in this band of rows)
+            if s.y + s.h as i32 <= y0 as i32 || s.y >= y1 as i32 {
+                continue;
+            }
             let l = light(key.pos);
             let shown = shown(key, l);
             let strength = l.map_or(0.0, Light::shine);
@@ -2250,6 +2259,50 @@ mod tests {
     }
 
     /// The board lit by a simulation run to `photons` from each LED.
+    /// How long a frame takes to compose, as a lighting effect plays (every
+    /// key its own colour) and with the keys all one colour; and its parts.
+    #[test]
+    #[ignore]
+    fn how_long_a_frame_takes() {
+        let (_t, _d, b) = lit_board(2000);
+        let snap = b.sim.clone().unwrap();
+        let rainbow = |f: usize| -> Vec<Light> { b.keys.iter().enumerate().map(|(i, k)| Light { pos: k.pos, rgb: [((i * 37 + f * 11) % 255) as u8, ((i * 91 + f * 7) % 255) as u8, ((i * 13 + f * 3) % 255) as u8], strength: 1.0, remapped: false }).collect() };
+        let mut out = Vec::new();
+        let n = 100;
+        // (the process's CPU time, all its threads', in ms)
+        let cpu = || {
+            let s = std::fs::read_to_string("/proc/self/stat").unwrap_or_default();
+            let f: Vec<&str> = s.rsplit(')').next().unwrap_or("").split_whitespace().collect();
+            (f.get(11).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0) + f.get(12).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0)) * 10.0
+        };
+        let time = |what: &str, f: &mut dyn FnMut(usize)| {
+            f(0);
+            let (t, c) = (std::time::Instant::now(), cpu());
+            for i in 0..n {
+                f(i);
+            }
+            eprintln!("{what}: {:.2} ms a frame, {:.1} ms of CPU", t.elapsed().as_secs_f64() * 1000.0 / n as f64, (cpu() - c) / n as f64);
+        };
+        eprintln!("board {} x {}", b.w, b.h);
+        let fine: usize = snap.direct.iter().map(|x| x.w * x.h).sum();
+        let coarse: usize = snap.bounced.iter().map(|m| m.iter().map(|x| x.w * x.h).sum::<usize>()).sum();
+        eprintln!("{} keys; fine grid {} x {}, their boxes {} cells; coarse grid {} x {}, their boxes {} cells", snap.keys.len(), snap.fine.w, snap.fine.h, fine, snap.coarse.w, snap.coarse.h, coarse);
+        time("compose, every key its own colour", &mut |i| b.compose_into(&mut out, &rainbow(i), 0, 254.0, 4.0));
+        time("compose, all one colour", &mut |_| b.compose_into(&mut out, &white(&b), 0, 254.0, 4.0));
+        // pudding caps, with their milky bands (Grant's Studio)
+        let (_t2, d2, mut pb) = board();
+        let mut light = d2["light"].clone();
+        light["caps"] = serde_json::json!({ "kind": "pudding", "milky": 1.0, "opacity": 0.8, "black": 0.4 });
+        pb.set_light(&light);
+        let scene = Scene::of(&pb);
+        pb.set_sim(Arc::new(Simulator::settle(&scene, &pb.setup(&light), 2000)));
+        time("compose, pudding caps, every key its own colour", &mut |i| pb.compose_into(&mut out, &rainbow(i), 0, 254.0, 4.0));
+        let colours: Vec<[f32; 3]> = snap.keys.iter().map(|&p| key_colour(&rainbow(1).into_iter().find(|l| l.pos == p).unwrap())).collect();
+        time("  of which the coloured light maps", &mut |_| {
+            let _ = snap.lit(&colours);
+        });
+    }
+
     fn lit_board(photons: usize) -> (Tree, Value, Board) {
         let (tree, device, mut b) = board();
         let scene = Scene::of(&b);

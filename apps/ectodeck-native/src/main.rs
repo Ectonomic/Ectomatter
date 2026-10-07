@@ -2605,7 +2605,7 @@ fn light_into(px: &mut Vec<f32>, board: &Board, lights: &[Light], locks: u8, cei
                     let k = on * lit + off * unlit + (1.0 - on - off).max(0.0) * field;
                     unit.map(|v| v * k)
                 } else {
-                    p.dark[i].map(|v| v.max(0.0).powf(2.2))
+                    p.dark[i]
                 };
                 let d = ((yy * w + x) * 4) as usize;
                 px[d..d + 3].copy_from_slice(&e);
