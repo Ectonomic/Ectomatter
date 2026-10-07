@@ -44,6 +44,102 @@ pub struct CapShape {
     /// its top, in the art's units, and what it has printed on it
     pub face: [f32; 4],
     pub print: Option<crate::print::Print>,
+    /// the homing bump the art draws on its top
+    pub bump: Bump,
+}
+
+/// A cap's homing bump: the raised mark on its top that a finger finds its
+/// place by, as F and J have to set the hands on the home row.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Bump {
+    #[default]
+    None,
+    /// a short raised bar low on the top
+    Bar,
+    /// a raised dot in its middle
+    Dot,
+}
+
+impl Bump {
+    pub const ALL: [Bump; 3] = [Bump::None, Bump::Bar, Bump::Dot];
+
+    /// As a light names it ("bump").
+    pub fn name(self) -> &'static str {
+        match self {
+            Bump::None => "none",
+            Bump::Bar => "bar",
+            Bump::Dot => "dot",
+        }
+    }
+
+    pub fn named(name: &str) -> Option<Bump> {
+        Bump::ALL.into_iter().find(|b| b.name() == name)
+    }
+}
+
+/// Where a bump stands on a cap's top, `face` in the art's units, as the
+/// Z10's art draws its own: a bar a third of the top's width across and
+/// 0.075 of its depth deep, its middle 0.76 of the way down the top (F and
+/// J); a dot 0.11 of the top's width across, 0.56 of the way down (the
+/// number pad's 5). Its box, its corners' radius, and how far its shadow
+/// falls below it (blurred by half that).
+fn bump_box(bump: Bump, face: [f32; 4]) -> Option<([f32; 4], f32, f32)> {
+    let (tw, th) = (face[2] - face[0], face[3] - face[1]);
+    let (bw, bh, at) = match bump {
+        Bump::Bar => (0.33 * tw, 0.075 * th, 0.76),
+        Bump::Dot => (0.11 * tw, 0.11 * tw, 0.56),
+        Bump::None => return None,
+    };
+    let (x, y) = (face[0] + (tw - bw) / 2.0, face[1] + at * th - bh / 2.0);
+    Some(([x, y, x + bw, y + bh], bh / 2.0, 0.0269 * th))
+}
+
+/// A bump as the art draws one, in the art's units, on a top of this colour
+/// (sRGB): its shadow, blurred, then the bump as much lighter than the top
+/// as the art's is, and the light along its top lighter still.
+fn bump_svg(bump: Bump, face: [f32; 4], top: [u8; 3]) -> Option<String> {
+    let ([x0, y0, x1, y1], r, drop) = bump_box(bump, face)?;
+    let (bw, bh) = (x1 - x0, y1 - y0);
+    let enc = |l: f32| {
+        let v = if l <= 0.003_130_8 { l * 12.92 } else { 1.055 * l.powf(1.0 / 2.4) - 0.055 };
+        (v * 255.0).round().clamp(0.0, 255.0) as u8
+    };
+    let shade = |k: f32| {
+        let c = top.map(|v| enc((lin(v) * k).min(1.0)));
+        format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2])
+    };
+    let lit_r = r.min(bh * 0.25);
+    Some(format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="4000" height="4000"><defs><filter id="b" x="-50%" y="-50%" width="200%" height="200%" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="{blur}"/></filter></defs><rect x="{x0}" y="{sy}" width="{bw}" height="{bh}" rx="{r}" fill="#000" fill-opacity=".28" filter="url(#b)"/><rect x="{x0}" y="{y0}" width="{bw}" height="{bh}" rx="{r}" fill="{body}"/><rect x="{lx}" y="{y0}" width="{lw}" height="{lh}" rx="{lit_r}" fill="{lit}"/></svg>"##,
+        blur = drop / 2.0,
+        sy = y0 + drop,
+        body = shade(1.3),
+        lx = x0 + r * 0.3,
+        lw = bw - r * 0.6,
+        lh = bh * 0.5,
+        lit = shade(2.4),
+    ))
+}
+
+/// A cap's top drawn anew round its bump: the pixels of its face's box, in
+/// linear light, without any bump (as the board's base has them where the
+/// art draws none), and how much lighter or darker the bump makes each, as
+/// a share of it: so a bump shows as the art draws one on a black top, and
+/// on a top of any colour as light and shade on that colour.
+#[derive(Clone, Debug, PartialEq)]
+struct Patch {
+    x: usize,
+    y: usize,
+    w: usize,
+    h: usize,
+    base: Vec<[f32; 3]>,
+    shade: Vec<[f32; 3]>,
+}
+
+impl Patch {
+    fn index(&self, x: usize, y: usize) -> Option<usize> {
+        (x >= self.x && y >= self.y && x < self.x + self.w && y < self.y + self.h).then(|| (y - self.y) * self.w + x - self.x)
+    }
 }
 
 /// A key in section, north to south, as the art has it, in millimetres, for
@@ -286,6 +382,22 @@ pub struct Board {
     /// how much of each pixel the art's ink on a cap's face covers: the
     /// print that is no lit legend (MACRO 3 under E2's, the media keys' signs)
     ink: Vec<f32>,
+    /// each cap's homing bump as the light asks, and whether its plastic has
+    /// a colour of its own; the face's box of a cap the art draws one on,
+    /// without it (sRGB); and each cap's top drawn anew where its bump is
+    /// other than the art's, or is on a top of a colour of its own
+    bumps: Vec<(Bump, bool)>,
+    bump_plain: Vec<Option<Vec<[f32; 3]>>>,
+    patches: Vec<Option<Patch>>,
+}
+
+/// A cap's face's box in the board's pixels: its left, top, width and height.
+fn face_box(face: [f32; 4], ka: f32, (ox, oy): (f32, f32), (w, h): (u32, u32)) -> (usize, usize, usize, usize) {
+    let x0 = (ox + ka * face[0]).floor().max(0.0) as usize;
+    let y0 = (oy + ka * face[1]).floor().max(0.0) as usize;
+    let x1 = ((ox + ka * face[2]).ceil() as usize).min(w as usize);
+    let y1 = ((oy + ka * face[3]).ceil() as usize).min(h as usize);
+    (x0, y0, x1.saturating_sub(x0), y1.saturating_sub(y0))
 }
 
 /// How far either side of a cap's foot the light either side of its edge
@@ -365,6 +477,12 @@ struct Plastic {
 }
 
 impl Plastic {
+    /// Whether it is the art's own plastic, changing nothing it draws.
+    fn is_art(&self) -> bool {
+        let (none, once) = ([0.0; 3], [1.0; 3]);
+        self.top == none && self.side == none && self.band == none && self.through == none && self.reflect == once && self.tint == once && self.top_tint == once && self.ink.is_none()
+    }
+
     /// A cap's plastic from its caps' values ("colour" its top's, "sides"
     /// its sides'), none where it gives neither and the cap is the art's.
     fn of(caps: &Value, p: &sim::Physics) -> Option<Plastic> {
@@ -885,6 +1003,21 @@ impl Board {
         // each lit key: its legend, and its cap's shape, which its light is simulated in
         let mut keys = Vec::new();
         let mut cap_shapes = Vec::new();
+        // each cap's pieces, for its top drawn again without the art's bump
+        let mut plain_parts: Vec<Vec<usvg::Node>> = Vec::new();
+        // the art's homing bump on a cap: three pieces after its foot and top
+        // (its shadow, the bump, the light along it), a bar where it is
+        // wider than it is deep, else a dot
+        let art_bump = |parts: &[usvg::Node]| match parts.get(4).map(|b| b.abs_bounding_box()) {
+            Some(b) if parts.len() >= 6 => {
+                if b.width() > 2.0 * b.height() {
+                    Bump::Bar
+                } else {
+                    Bump::Dot
+                }
+            }
+            _ => Bump::None,
+        };
         let mut odd_feet = Vec::new();
         for c in controls.iter().filter(|c| lit(c)) {
             let Some(pos) = c["pos"].as_u64() else { continue };
@@ -900,7 +1033,8 @@ impl Board {
             let second = legend.as_ref().and_then(|s| second_function(s, face, ka, oy));
             let cap = foot.map(|_| cap_shapes.len() as u32);
             if let Some(f) = foot {
-                cap_shapes.push(CapShape { id: control_id(c), label: label(c), short: short(c), foot: f, lit: true, legend: legend.is_some(), button: false, face, print: crate::print::Print::of(c) });
+                cap_shapes.push(CapShape { id: control_id(c), label: label(c), short: short(c), foot: f, lit: true, legend: legend.is_some(), button: false, face, print: crate::print::Print::of(c), bump: art_bump(&parts) });
+                plain_parts.push(parts.clone());
                 odd_feet.push(parts.get(1).and_then(odd_foot));
             }
             let printed = crate::print::Print::of(c);
@@ -923,7 +1057,8 @@ impl Board {
                 _ => continue,
             };
             others.push((rect(foot), rect(face), [round(foot), round(face)]));
-            cap_shapes.push(CapShape { id: control_id(c), label: label(c), short: short(c), foot: rect(foot), lit: false, legend: false, button: !shadow, face: rect(face), print: None });
+            cap_shapes.push(CapShape { id: control_id(c), label: label(c), short: short(c), foot: rect(foot), lit: false, legend: false, button: !shadow, face: rect(face), print: None, bump: if shadow { art_bump(&parts) } else { Bump::None } });
+            plain_parts.push(parts.clone());
             odd_feet.push(odd_foot(foot));
         }
         // The lock lights, from the core's "lock_lights": each a small window
@@ -1029,6 +1164,32 @@ impl Board {
             .collect();
         let ids: Vec<String> = cap_shapes.iter().map(|c| c.id.clone()).collect();
         let plastics = plastics(&device["light"], &ids);
+        // each cap with a bump in the art: its face's box drawn again with its
+        // foot and top alone, sRGB-encoded, for the bump to be taken off
+        let mut plain_pix = Pixmap::new(w, h).ok_or("board too small")?;
+        for (cap, parts) in cap_shapes.iter().zip(&plain_parts) {
+            if cap.bump != Bump::None {
+                for p in &parts[1..3] {
+                    draw_node(&mut plain_pix, p);
+                }
+            }
+        }
+        let bump_plain: Vec<Option<Vec<[f32; 3]>>> = cap_shapes
+            .iter()
+            .map(|cap| {
+                (cap.bump != Bump::None).then(|| {
+                    let (x, y, pw, ph) = face_box(cap.face, ka, (ox, oy), (w, h));
+                    (0..pw * ph)
+                        .map(|q| {
+                            let d = &plain_pix.data()[((y + q / pw) * w as usize + x + q % pw) * 4..];
+                            [d[0] as f32 / 255.0, d[1] as f32 / 255.0, d[2] as f32 / 255.0]
+                        })
+                        .collect()
+                })
+            })
+            .collect();
+        let art_bumps: Vec<Bump> = cap_shapes.iter().map(|c| c.bump).collect();
+        let caps_n = cap_shapes.len();
         let mut board = Board {
             w,
             h,
@@ -1062,8 +1223,12 @@ impl Board {
             face_cover,
             plastics,
             ink,
+            bumps: art_bumps.iter().map(|&b| (b, false)).collect(),
+            bump_plain,
+            patches: vec![None; caps_n],
         };
-        // the legends as the light asks for them
+        // the homing bumps and the legends as the light asks for them
+        board.set_bumps(&device["light"]);
         board.set_legends_from(&device["light"]);
         Ok(board)
     }
@@ -1081,7 +1246,77 @@ impl Board {
         let changed = model != self.model || plastics != self.plastics;
         self.model = model;
         self.plastics = plastics;
+        let bumped = self.set_bumps(light);
+        changed || bumped
+    }
+
+    /// The homing bumps as a light asks for them: "bump" in a cap's "caps"
+    /// ("none", "bar" or "dot"), a key's own over all keys'; where it says
+    /// none, the art's own. A button has none. True if any changes.
+    fn set_bumps(&mut self, light: &Value) -> bool {
+        let mut changed = false;
+        for cap in 0..self.cap_shapes.len() {
+            let shape = &self.cap_shapes[cap];
+            let own = sim::key_light(light, &light["keys"][shape.id.as_str()]);
+            let want = if shape.button { Bump::None } else { own["caps"]["bump"].as_str().and_then(Bump::named).unwrap_or(shape.bump) };
+            let coloured = self.plastics.get(cap).copied().flatten().is_some_and(|p| !p.is_art());
+            if (want, coloured) != self.bumps[cap] {
+                // (the art's own bump on its own top as the art draws it)
+                let art = want == shape.bump && (want == Bump::None || !coloured);
+                self.patches[cap] = if art { None } else { self.patch(cap, want) };
+                self.bumps[cap] = (want, coloured);
+                changed = true;
+            }
+        }
         changed
+    }
+
+    /// A cap's top drawn anew with this bump: from its face's box as the art
+    /// draws it (without the art's bump), the bump drawn on it as the art
+    /// draws its own, in the top's colour there.
+    fn patch(&self, cap: usize, bump: Bump) -> Option<Patch> {
+        let shape = &self.cap_shapes[cap];
+        let (x, y, pw, ph) = face_box(shape.face, self.art_scale, self.art_offset, (self.w, self.h));
+        if pw == 0 || ph == 0 {
+            return None;
+        }
+        let w = self.w as usize;
+        let art = |q: usize| {
+            let j = (y + q / pw) * w + x + q % pw;
+            [self.caps[j * 4], self.caps[j * 4 + 1], self.caps[j * 4 + 2]]
+        };
+        let start: Vec<[f32; 3]> = match &self.bump_plain[cap] {
+            Some(plain) => plain.clone(),
+            None => (0..pw * ph).map(art).collect(),
+        };
+        let mut pix = Pixmap::new(pw as u32, ph as u32)?;
+        for (d, c) in pix.data_mut().chunks_exact_mut(4).zip(&start) {
+            d.copy_from_slice(&[(c[0] * 255.0).round() as u8, (c[1] * 255.0).round() as u8, (c[2] * 255.0).round() as u8, 255]);
+        }
+        // (the top's colour where the bump stands, as the art's own bump takes its key's)
+        if let Some(([bx0, by0, bx1, by1], ..)) = bump_box(bump, shape.face) {
+            let (cx, cy) = ((self.art_offset.0 + self.art_scale * (bx0 + bx1) / 2.0) as usize, (self.art_offset.1 + self.art_scale * (by0 + by1) / 2.0) as usize);
+            let c = start[cy.saturating_sub(y).min(ph - 1) * pw + cx.saturating_sub(x).min(pw - 1)];
+            if let Some(svg) = bump_svg(bump, shape.face, c.map(|v| (v * 255.0).round() as u8)) {
+                let tree = Tree::from_str(&svg, &usvg::Options::default()).ok()?;
+                let t = Transform::from_row(self.art_scale, 0.0, 0.0, self.art_scale, self.art_offset.0 - x as f32, self.art_offset.1 - y as f32);
+                resvg::render(&tree, t, &mut pix.as_mut());
+            }
+        }
+        // the top without a bump (where the cap's pixels are as they were, the
+        // board's own), and the bump as light and shade on it
+        let dec = |v: f32| v.max(0.0).powf(2.2);
+        let mut base = Vec::with_capacity(pw * ph);
+        let mut shade = Vec::with_capacity(pw * ph);
+        for (q, d) in pix.data().chunks_exact(4).enumerate() {
+            let j = (y + q / pw) * w + x + q % pw;
+            let plain = if (0..3).all(|c| (start[q][c] - art(q)[c]).abs() < 0.5 / 255.0) { [self.base[j * 3], self.base[j * 3 + 1], self.base[j * 3 + 2]] } else { start[q].map(dec) };
+            let drawn = [0, 1, 2].map(|c| dec(d[c] as f32 / 255.0));
+            let changed = (0..3).any(|c| (d[c] as f32 - start[q][c] * 255.0).abs() >= 0.5);
+            shade.push(if changed { [0, 1, 2].map(|c| (drawn[c] / plain[c].max(1e-4)).min(4.0)) } else { [1.0; 3] });
+            base.push(plain);
+        }
+        Some(Patch { x, y, w: pw, h: ph, base, shade })
     }
 
     /// The style each key's legend is to be set in, as a light asks: its
@@ -1628,7 +1863,12 @@ impl Board {
         // over it), and on the caps' skirts' outsides.
         for (i, px) in out.chunks_exact_mut(4).enumerate() {
             let j = y0 * w + i;
-            px[..3].copy_from_slice(&self.base[j * 3..j * 3 + 3]);
+            // (a cap's top drawn anew round its homing bump: see Patch)
+            let patch = self.patches.get(self.cap_of[j] as usize).and_then(Option::as_ref).and_then(|p| Some((p, p.index(j % w, j / w)?)));
+            match patch {
+                Some((p, q)) => px[..3].copy_from_slice(&p.base[q]),
+                None => px[..3].copy_from_slice(&self.base[j * 3..j * 3 + 3]),
+            }
             px[3] = 1.0;
             // a cap of a colour of its own: its plastic over the art's black,
             // on its face and its sides (on a pudding cap, the top's colour
@@ -1646,6 +1886,16 @@ impl Board {
                         Some(i) => (art[c] + gain).max(0.0) * (1.0 - k) + i[c] * k,
                         None => (art[c] + gain * (1.0 - k)).max(0.0),
                     };
+                }
+            }
+            // the bump's light and shade on the top as it is now (where it
+            // catches the light, no brighter than white unless the top is)
+            if let Some((p, q)) = patch {
+                let s = p.shade[q];
+                if s != [1.0; 3] {
+                    for c in 0..3 {
+                        px[c] = (px[c] * s[c]).min(px[c].max(1.0));
+                    }
                 }
             }
             let Some(k) = keys else { continue };
@@ -2375,6 +2625,62 @@ mod tests {
 
     fn white(b: &Board) -> Vec<Light> {
         b.keys.iter().map(|k| Light { pos: k.pos, rgb: [255, 255, 255], strength: 1.0, remapped: false }).collect()
+    }
+
+    /// The art's homing bumps are found where it draws them (F's and J's
+    /// bars, the number pad's 5's dot); a light takes one off with its top
+    /// as the art draws it there, and draws one on another key as the art
+    /// draws its own; and a light that names a key's own bump changes nothing.
+    #[test]
+    fn homing_bumps_come_and_go() {
+        let (_t, d, mut b) = board();
+        let bump_of = |b: &Board, id: &str| b.cap_shapes.iter().find(|c| c.id == id).unwrap().bump;
+        assert_eq!((bump_of(&b, "f"), bump_of(&b, "j"), bump_of(&b, "keypad-5"), bump_of(&b, "g")), (Bump::Bar, Bump::Bar, Bump::Dot, Bump::None));
+        assert_eq!(b.cap_shapes.iter().filter(|c| c.bump != Bump::None).count(), 3, "those three alone");
+        let plain = b.compose(&[], 0, 200.0, 4.0);
+        let mut light = d["light"].clone();
+        light["keys"] = serde_json::json!({ "f": { "caps": { "bump": "bar" } } });
+        assert!(!b.set_light(&light), "F's own bar: as it was");
+        // F's bar off, a bar on G: F's top as G's is without one, and G's bar as F's was
+        light["keys"] = serde_json::json!({ "f": { "caps": { "bump": "none" } }, "g": { "caps": { "bump": "bar" } } });
+        assert!(b.set_light(&light));
+        let moved = b.compose(&[], 0, 200.0, 4.0);
+        let face_px = |id: &str| {
+            let c = b.cap_shapes.iter().find(|c| c.id == id).unwrap();
+            face_box(c.face, b.art_scale, b.art_offset, (b.w, b.h))
+        };
+        let ((fx, fy, fw, fh), (gx, gy, ..)) = (face_px("f"), face_px("g"));
+        let at = |f: &[f32], x: usize, y: usize| lum(f, &b, (x as i32, y as i32));
+        let (mut bar_gone, mut bar_like) = (0.0f32, 0.0f32);
+        // (round the bar, clear of the letters each key prints and of the top's edge)
+        let f_face = b.cap_shapes.iter().find(|c| c.id == "f").unwrap().face;
+        let ([bx0, by0, bx1, by1], ..) = bump_box(Bump::Bar, f_face).unwrap();
+        let px = |v: f32, o: f32| (o + b.art_scale * v) as usize;
+        let (x0, x1, y0, y1) = (px(bx0, b.art_offset.0) - 2 - fx, px(bx1, b.art_offset.0) + 3 - fx, px(by0, b.art_offset.1) - 2 - fy, px(by1, b.art_offset.1) + 4 - fy);
+        assert!(x1 <= fw && y1 <= fh);
+        for dy in y0..y1 {
+            for dx in x0..x1 {
+                // F's top now as G's was, and G's as F's was (keys a column apart, same shape)
+                bar_gone = bar_gone.max((at(&moved, fx + dx, fy + dy) - at(&plain, gx + dx, gy + dy)).abs());
+                bar_like = bar_like.max((at(&moved, gx + dx, gy + dy) - at(&plain, fx + dx, fy + dy)).abs());
+            }
+        }
+        eprintln!("F's top without its bar against G's: {bar_gone:.4}; G's bar against F's: {bar_like:.4}");
+        assert!(bar_gone < 0.004, "F's bar taken off cleanly");
+        // (its edges a fraction of a pixel elsewhere on G than on F)
+        assert!(bar_like < 0.03, "G's bar as the art draws F's");
+        let others = b.cap_shapes.iter().position(|c| c.id == "h").map(|_| face_px("h")).unwrap();
+        assert_eq!(at(&moved, others.0 + 5, others.1 + 5), at(&plain, others.0 + 5, others.1 + 5), "the other keys as they were");
+        // on a white top, a bar as light and shade on the white: it shows
+        light["keys"] = serde_json::json!({ "g": { "caps": { "colour": "#CCCCCC" } } });
+        b.set_light(&light);
+        let white = b.compose(&[], 0, 200.0, 4.0);
+        light["keys"]["g"]["caps"]["bump"] = serde_json::json!("bar");
+        b.set_light(&light);
+        let barred = b.compose(&[], 0, 200.0, 4.0);
+        let shows = (y0..y1).flat_map(|dy| (x0..x1).map(move |dx| (dx, dy))).map(|(dx, dy)| (lum(&barred, &b, ((gx + dx) as i32, (gy + dy) as i32)) - lum(&white, &b, ((gx + dx) as i32, (gy + dy) as i32))).abs()).fold(0.0f32, f32::max);
+        eprintln!("a bar on a white top: {shows:.3} from the top beside it");
+        assert!(shows > 0.05, "a bar shows on a white top");
     }
 
     fn lum(f: &[f32], b: &Board, (x, y): (i32, i32)) -> f32 {

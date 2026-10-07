@@ -224,12 +224,15 @@ struct Choice {
     options: &'static [&'static str],
 }
 
-const CHOICES: [Choice; 4] = [
+const CHOICES: [Choice; 5] = [
     Choice { label: "Switch", note: "What the switch's housing is: black with its LED through a slot in its top, as some older switches have it (Kailh's among them), so all the LED's light leaves in its beam; or clear, glowing with a share of it, over its top as most RGB switches have it, or all over. Each sets the switch's values for that kind; the sliders tune from there.", options: &["LED slot", "Clear top", "Clear housing"] },
     Choice { label: "Keycaps", note: "What the caps let light through: shine-through caps are opaque but for their legends; pudding caps have translucent sides below a top whose colour comes part of the way down them; translucent caps let light through all over. Each fills in Wall opacity and Colour down the sides where they are off; the sliders tune from there.", options: &["Shine-through", "Pudding", "Translucent"] },
     Choice { label: "Placement", note: "Where the legends sit on the caps. Default puts each one where this keyboard prints it. Top, Middle and Top left put every legend there, including the ones this keyboard prints in the middle.", options: &["Default", "Top", "Middle", "Top left"] },
     Choice { label: "Weight", note: "How heavy the typeface's strokes are, of the weights it comes in. A heavier legend lets more of the light through.", options: &["Thin", "Extra light", "Light", "Regular", "Medium", "Semibold", "Bold", "Extra bold", "Black"] },
+    Choice { label: "Homing bump", note: "A raised mark on the cap's top that your finger finds without looking. F and J have a bar, so your hands find the home row; the number pad's 5 has a dot. Bar is a short raised line low on the top, Dot a raised dot in the middle, and None leaves the top smooth.", options: &["None", "Bar", "Dot"] },
 ];
+/// The Homing bump choice, which only one key chosen has.
+const BUMP: usize = 4;
 
 /// The order of the sections on the page's tabs, by their place in SECTIONS.
 const ORDER: [usize; 5] = [LEGENDS, 1, 0, 3, 4];
@@ -295,6 +298,7 @@ fn weight_of(option: usize) -> u64 {
 fn choose(light: &mut Value, choice: usize, option: usize) {
     match choice {
         2 => put_at(light, ("legends", "place"), json!(PLACES[option.min(3)])),
+        BUMP => put_at(light, ("caps", "bump"), json!(ectodeck_draw::hdr::Bump::ALL[option.min(2)].name())),
         3 => put_at(light, ("legends", "weight"), json!(weight_of(option))),
         0 => {
             let switch = [Switch::Slot, Switch::ClearTop, Switch::Clear][option.min(2)];
@@ -502,11 +506,12 @@ const GLYPH_ROWS: [usize; 5] = [11, 9, 9, 8, 8];
 const PLACE_E: usize = 25;
 const PLACE_N: usize = 26;
 /// what a choice sets, which a key takes as its own when it is chosen for it
-const CHOSEN: [&[(&str, &str)]; 4] = [
+const CHOSEN: [&[(&str, &str)]; 5] = [
     &[("switches", "kind"), ("switches", "top"), ("switches", "beam"), ("switches", "scattered"), ("switches", "sides"), ("switches", "glow")],
     &[("caps", "kind"), ("caps", "opacity"), ("caps", "black")],
     &[("legends", "place")],
     &[("legends", "weight")],
+    &[("caps", "bump")],
 ];
 /// the Legends section; the typeface's button, a typeface on its list, and
 /// the box to find one by name
@@ -1282,10 +1287,14 @@ impl LabPage {
                 Ask::Choose(choice, option) => {
                     let (choice, option) = (choice.max(0) as usize, option.max(0) as usize);
                     let work = self.work();
-                    if choice < CHOICES.len() && chosen(choice, &work, &self.device.print) != option {
+                    if choice < CHOICES.len() && self.chosen_here(choice, &work) != option {
                         self.remember(CHOICE + choice as i32);
                         let mut after = work;
                         choose(&mut after, choice, option);
+                        // (a key's bump as the keyboard makes it is none of its own)
+                        if choice == BUMP && self.key().is_some_and(|k| ectodeck_draw::hdr::Bump::ALL[option.min(2)] == k.bump) {
+                            after["caps"]["bump"] = Value::Null;
+                        }
                         if let Some(id) = self.key().map(|k| k.id.clone()) {
                             for &path in CHOSEN[choice] {
                                 let v = at(&after, path).clone();
@@ -1753,7 +1762,11 @@ impl LabPage {
                     paths.extend(ectodeck_draw::print::TEXTS.map(|(n, _)| ("legends", n)));
                 }
             }
-            1 => paths.extend(COLOUR_PATHS),
+            1 => {
+                paths.extend(COLOUR_PATHS);
+                // (a key's homing bump with it)
+                paths.extend(CHOSEN[BUMP].iter().copied());
+            }
             0 if self.key().is_some() => paths.extend([PARAMS[PLACE_E].path, PARAMS[PLACE_N].path]),
             _ => {}
         }
@@ -1798,7 +1811,22 @@ impl LabPage {
     /// The section's choices at the top of its left column: a button's kind
     /// is no choice, a moulded block being what it is.
     fn choices(&self) -> &'static [usize] {
-        if self.key().is_some_and(|k| k.button) { &[] } else { SECTIONS[self.section].3 }
+        match self.key() {
+            Some(k) if k.button => &[],
+            // (a homing bump is one key's)
+            Some(_) if self.section == 1 => &[1, BUMP],
+            _ => SECTIONS[self.section].3,
+        }
+    }
+
+    /// A choice's option in this light: the chosen key's homing bump its own,
+    /// or as the keyboard makes it.
+    fn chosen_here(&self, choice: usize, light: &Value) -> usize {
+        if choice != BUMP {
+            return chosen(choice, light, &self.device.print);
+        }
+        let bump = light["caps"]["bump"].as_str().and_then(ectodeck_draw::hdr::Bump::named).or_else(|| self.key().map(|k| k.bump)).unwrap_or_default();
+        ectodeck_draw::hdr::Bump::ALL.iter().position(|&b| b == bump).unwrap_or(0)
     }
 
     /// The chosen key's cap, in millimetres across and north to south.
@@ -2472,6 +2500,9 @@ impl LabPage {
         } else if self.key().is_some_and(|k| !k.lit) {
             v = v.unlit();
         }
+        if self.key().is_some() {
+            v.bump = ectodeck_draw::hdr::Bump::ALL[self.chosen_here(BUMP, &work)];
+        }
         // (and placed anew as the chosen key's text changes: a word typed
         // over a letter is sized by Word size, a glyph over a word by Letter size)
         let text = if self.section == LEGENDS && self.key().is_some() { (0..3).map(|p| self.text_of(p)).collect::<Vec<_>>().join("\u{1}") } else { String::new() };
@@ -2816,7 +2847,7 @@ impl LabPage {
             if self.owns(CHOSEN[c][0]) {
                 own_mark(&mut over, cx, y, CHOICE + c as i32);
             }
-            let on = chosen(c, &work, &self.device.print);
+            let on = self.chosen_here(c, &work);
             let mut bx = cx + 3.0;
             for ((j, name), bw) in options.into_iter().zip(widths) {
                 over.push(Cell { text: name.into(), on: j == on, id, index: j as i32, style: style::TELLS, ..cell(kind::SEG_BUTTON, bx, y + 32.0, bw, 30.0) });
@@ -3217,6 +3248,7 @@ fn value_note(path: (&str, &str), v: &Value, of_key: bool) -> Option<String> {
         ("caps", "kind") => format!("Keycaps: {}", option(1, &["shine-through", "pudding", "translucent"])),
         ("caps", part @ ("colour" | "sides")) => format!("Keycaps › {}: {}", if part == "colour" { "Top colour" } else { "Side colour" }, rgb_of(v).map_or_else(gone, colour_name)),
         ("legends", "place") => format!("Legends › Placement: {}", option(2, &PLACES)),
+        ("caps", "bump") => format!("Keycaps › Homing bump: {}", option(BUMP, &["none", "bar", "dot"])),
         ("legends", "weight") => {
             let w = v.as_f64().map(|w| CHOICES[3].options[((w.round() as usize + 50) / 100).clamp(1, 9) - 1].to_string());
             format!("Legends › Weight: {}", w.unwrap_or_else(gone))
@@ -3355,6 +3387,8 @@ mod tests {
         let note = |a: &str, b: &str, v: Value| value_note((a, b), &v, false).unwrap();
         assert_eq!(note("caps", "kind", json!("pudding")), "Keycaps: Pudding");
         assert_eq!(note("caps", "milky", json!(0.8)), "Keycaps › Haze: 80%");
+        assert_eq!(note("caps", "bump", json!("dot")), "Keycaps › Homing bump: Dot");
+        assert_eq!(value_note(("caps", "bump"), &Value::Null, true).unwrap(), "Keycaps › Homing bump: as all keys have it");
         assert_eq!(note("legends", "second_size", json!(2.5)), "Legends › Bottom size: 2.5 mm");
         assert_eq!(note("legends", "main_down", json!(-2.6)), "Legends › Main up–down: 2.6 mm up");
         assert_eq!(note("legends", "opacity", json!(0.7)), "Keycaps › Legend opacity: 70%");

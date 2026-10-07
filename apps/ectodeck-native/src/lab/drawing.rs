@@ -214,6 +214,8 @@ pub struct Values {
     solid: bool,
     /// the caps' colours, their tops' and their sides' (see cap_colours)
     colours: [[u8; 3]; 2],
+    /// the homing bump on the key drawn
+    pub bump: ectodeck_draw::hdr::Bump,
 }
 
 /// A value as the light has it, or what the keyboard takes when it has none.
@@ -264,6 +266,7 @@ impl Values {
             lit: true,
             solid: false,
             colours: super::cap_colours(light),
+            bump: ectodeck_draw::hdr::Bump::None,
         }
     }
 
@@ -714,6 +717,19 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
                     s.path(&poly(&pp(&piece), true), top, "none", 1.0, 1.0);
                 }
             }
+        }
+        // the key's homing bump, standing up from its top where the art puts
+        // one: a bar low on the top, a dot in its middle (north to south)
+        let along = match v.bump {
+            ectodeck_draw::hdr::Bump::Bar => Some((0.76, 0.075 * (a1 - a0))),
+            ectodeck_draw::hdr::Bump::Dot => Some((0.56, 0.11 * (a1 - a0))),
+            ectodeck_draw::hdr::Bump::None => None,
+        };
+        if let (Some((at, deep)), true) = (along, on(Lens::Caps)) {
+            let (mid, rise) = (a0 + at * (a1 - a0), 0.45);
+            let (n, sth) = (mid - deep / 2.0, mid + deep / 2.0);
+            let bump = [p(n, tz), p(n, tz + rise * 0.6), p(n + deep * 0.2, tz + rise), p(sth - deep * 0.2, tz + rise), p(sth, tz + rise * 0.6), p(sth, tz)];
+            s.path(&poly(&bump, true), top_paint.as_deref().unwrap_or(fill(Lens::Caps)), line(Lens::Caps), 1.0, 1.0);
         }
     }
     // the key's legends where the art prints them, each as brightly as the
