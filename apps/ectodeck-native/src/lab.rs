@@ -187,13 +187,13 @@ const PARAMS: [Param; 41] = [
     Param { path: ("legends", "across"), label: "Left–right", lo: -10.0, hi: 10.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Moves the legend left or right on the key, from where Placement puts it. Drag the legend on the drawing to move it both ways at once." },
     Param { path: ("legends", "down"), label: "Up–down", lo: -10.0, hi: 10.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Moves the legend up or down on the key, from where Placement puts it. Drag the legend on the drawing to move it both ways at once." },
     Param { path: ("legends", "inset"), label: "Inset", lo: 0.0, hi: 4.0, step: 0.1, unit: Unit::Mm, def: 1.0, note: "How far down from the top edge of the cap's top a one-letter legend starts; words start a little higher. At the top left, how far in from the left edge too. In the middle it has no say." },
-    Param { path: ("legends", "main_size"), label: "Main size", lo: 0.3, hi: 2.0, step: 0.01, unit: Unit::Scale, def: 1.0, note: "How big the main legend is, as a share of the size Letter size or Word size gives it. Under 100% the main legend prints smaller than the rest of the legend; over 100%, larger." },
+    Param { path: ("legends", "main_size"), label: "Main size", lo: 1.0, hi: 6.0, step: 0.1, unit: Unit::Mm, def: 0.0, note: "How tall the main legend is, measured on its capitals. Until you set it, it is as tall as Letter size or Word size makes it." },
     Param { path: ("legends", "main_across"), label: "Main left–right", lo: -10.0, hi: 10.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Moves the main legend left or right, leaving the rest of the legend where it is. Drag the main legend on the drawing to move it there." },
     Param { path: ("legends", "main_down"), label: "Main up–down", lo: -10.0, hi: 10.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Moves the main legend up or down, leaving the rest of the legend where it is, as on caps that print a period high on the key. Drag the main legend on the drawing to move it there." },
-    Param { path: ("legends", "shift_size"), label: "Shifted size", lo: 0.3, hi: 2.0, step: 0.01, unit: Unit::Scale, def: 1.0, note: "How big the shifted sign beside the main legend is, as a share of the size Letter size or Word size gives it. Under 100% the shifted sign prints smaller than the main legend; over 100%, larger." },
+    Param { path: ("legends", "shift_size"), label: "Shifted size", lo: 1.0, hi: 6.0, step: 0.1, unit: Unit::Mm, def: 0.0, note: "How tall the shifted sign beside the main legend is, measured on its capitals. Until you set it, it is as tall as Letter size or Word size makes it." },
     Param { path: ("legends", "shift_across"), label: "Shifted left–right", lo: -10.0, hi: 10.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Moves the shifted sign left or right, leaving the rest of the legend where it is. Drag the shifted sign on the drawing to move it there." },
     Param { path: ("legends", "shift_down"), label: "Shifted up–down", lo: -10.0, hi: 10.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Moves the shifted sign up or down, leaving the rest of the legend where it is. Drag the shifted sign on the drawing to move it there." },
-    Param { path: ("legends", "second_size"), label: "Bottom size", lo: 0.3, hi: 2.0, step: 0.01, unit: Unit::Scale, def: 1.0, note: "How big the bottom legend is, as a share of the size Letter size or Word size gives it, as on number pads that print their arrows smaller than the numbers. Under 100% the bottom legend prints smaller; over 100%, larger." },
+    Param { path: ("legends", "second_size"), label: "Bottom size", lo: 1.0, hi: 6.0, step: 0.1, unit: Unit::Mm, def: 0.0, note: "How tall the bottom legend is, measured on its capitals, as on number pads that print their arrows smaller than the numbers. Until you set it, it is as tall as Letter size or Word size makes it." },
     Param { path: ("legends", "second_across"), label: "Bottom left–right", lo: -10.0, hi: 10.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Moves the bottom legend left or right, leaving the rest of the legend where it is. Drag the bottom legend on the drawing to move it there." },
     Param { path: ("legends", "second_down"), label: "Bottom up–down", lo: -10.0, hi: 10.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Moves the bottom legend up or down, leaving the rest of the legend where it is. Drag the bottom legend on the drawing to move it there." },
 ];
@@ -2613,13 +2613,24 @@ impl LabPage {
 
     fn value_in(&self, light: &Value, i: usize) -> f64 {
         let p = &PARAMS[i];
-        let v = get(light, p.path).or_else(|| default_of(p.path, &self.device.print)).unwrap_or(p.def);
+        let v = get(light, p.path).or_else(|| self.part_size_follows(light, p.path)).or_else(|| default_of(p.path, &self.device.print)).unwrap_or(p.def);
         if p.unit == Unit::North {
             let edge = Physics::from(light).switch_width as f64 / 2.0;
             v.clamp(-edge, edge)
         } else {
             v
         }
+    }
+
+    /// A part's size where it has none of its own: what Letter size gives
+    /// it on the key drawn, where its print there is a letter or a sign, or
+    /// else what Word size does.
+    fn part_size_follows(&self, light: &Value, path: (&str, &str)) -> Option<f64> {
+        let part = ectodeck_draw::print::TEXTS.iter().position(|(name, _)| path.0 == "legends" && path.1.strip_suffix("_size") == Some(*name))?;
+        let role = ectodeck_draw::print::TEXTS[part].1;
+        let letter = self.legends().is_some_and(|l| l.key.print.runs.iter().any(|r| r.role == role && r.letter()));
+        let kind = if letter { "letters" } else { "words" };
+        get(light, ("legends", kind)).or_else(|| default_of(("legends", kind), &self.device.print))
     }
 
     /// What the line under the drawing tells of, and what it says.
@@ -3344,7 +3355,7 @@ mod tests {
         let note = |a: &str, b: &str, v: Value| value_note((a, b), &v, false).unwrap();
         assert_eq!(note("caps", "kind", json!("pudding")), "Keycaps: Pudding");
         assert_eq!(note("caps", "milky", json!(0.8)), "Keycaps › Haze: 80%");
-        assert_eq!(note("legends", "second_size", json!(0.65)), "Legends › Bottom size: 65%");
+        assert_eq!(note("legends", "second_size", json!(2.5)), "Legends › Bottom size: 2.5 mm");
         assert_eq!(note("legends", "main_down", json!(-2.6)), "Legends › Main up–down: 2.6 mm up");
         assert_eq!(note("legends", "opacity", json!(0.7)), "Keycaps › Legend opacity: 70%");
         assert_eq!(note("switches", "kind", json!("clear")), "LEDs › Switch: Clear housing");

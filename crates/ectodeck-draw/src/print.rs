@@ -106,7 +106,7 @@ pub struct Run {
 impl Run {
     /// A run of one letter or sign, set at the letters' size; words, and
     /// icons that are second functions, at the words'.
-    fn letter(&self) -> bool {
+    pub fn letter(&self) -> bool {
         match &self.icon {
             Some(_) => self.role != Role::Second,
             None => self.text.chars().filter(|c| !c.is_whitespace()).count() == 1,
@@ -217,23 +217,24 @@ pub struct Style {
     /// right and down (left and up below 0)
     pub across: f32,
     pub down: f32,
-    /// each part's own (Main, Shifted, Bottom, as TEXTS has them): its size
-    /// as a share of what its kind's size makes it, and how far it is moved
-    /// from where the rest puts it
+    /// each part's own (Main, Shifted, Bottom, as TEXTS has them): how tall
+    /// its capitals are (mm), in place of its kind's size (letters or words),
+    /// and how far it is moved from where the rest puts it
     pub parts: [Part; 3],
 }
 
 /// A part of a legend's own size and place.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Part {
-    pub size: f32,
+    /// none where it takes its kind's size, as the rest of the legend does
+    pub size: Option<f32>,
     pub across: f32,
     pub down: f32,
 }
 
 impl Default for Part {
     fn default() -> Part {
-        Part { size: 1.0, across: 0.0, down: 0.0 }
+        Part { size: None, across: 0.0, down: 0.0 }
     }
 }
 
@@ -263,7 +264,8 @@ impl Style {
             down: f("down", under.down),
             parts: [0, 1, 2].map(|i| {
                 let u = under.parts[i];
-                Part { size: f(&part_key(i, "size"), u.size).max(0.1), across: f(&part_key(i, "across"), u.across), down: f(&part_key(i, "down"), u.down) }
+                let size = legends[part_key(i, "size").as_str()].as_f64().map(|v| (v as f32).max(0.2)).or(u.size);
+                Part { size, across: f(&part_key(i, "across"), u.across), down: f(&part_key(i, "down"), u.down) }
             }),
         }
     }
@@ -617,7 +619,7 @@ pub fn set(db: &fontdb::Database, print: &Print, style: &Style, own: &Own, face:
     let (fw, fh) = ((face[2] - face[0]) / per_mm, (face[3] - face[1]) / per_mm);
     // each run at its kind's size, a word too long for its cap set smaller,
     // a key's words all alike (PRINT over SCREEN the same size)
-    let cap_of = |r: &Run| if r.letter() { style.letters } else { style.words } * style.part(r.role).size;
+    let cap_of = |r: &Run| style.part(r.role).size.unwrap_or(if r.letter() { style.letters } else { style.words });
     let mut laid: Vec<Laid> = print.runs.iter().map(|r| lay_run(db, r, cap_of(r), id, &fallbacks, symbols, own)).collect();
     let room = fw - 2.0 * FIT;
     let words = laid.iter().filter(|l| !l.run.letter() && l.run.icon.is_none() && l.advance > room && room > 0.0).map(|l| room / l.advance).fold(1.0f32, f32::min);
@@ -646,7 +648,7 @@ pub fn set(db: &fontdb::Database, print: &Print, style: &Style, own: &Own, face:
     }
     // each line's baseline (mm, down from the top edge of the cap's top),
     // as at the top; and the second function's at the foot
-    let unscaled = |i: usize| if laid[i].run.letter() { style.letters } else { style.words } * style.part(laid[i].run.role).size;
+    let unscaled = |i: usize| style.part(laid[i].run.role).size.unwrap_or(if laid[i].run.letter() { style.letters } else { style.words });
     let mut bases: Vec<f32> = Vec::new();
     for (n, line) in lines.iter().enumerate() {
         let lead = line[0];
@@ -798,7 +800,8 @@ mod tests {
         let plain = set(&db, &print, &own.style, &own, face, 1.0);
         let same = set(&db, &print, &Style::over(&own.style, &serde_json::json!({})), &own, face, 1.0);
         assert_eq!(same.bounds(), plain.bounds(), "no part's values: as it was");
-        let style = Style::over(&own.style, &serde_json::json!({ "second_size": 0.5, "main_down": -1.0 }));
+        // (the bottom legend, keypad 8's arrow, set at half the letters' size in mm)
+        let style = Style::over(&own.style, &serde_json::json!({ "second_size": own.style.letters / 2.0, "main_down": -1.0 }));
         let moved = set(&db, &print, &style, &own, face, 1.0);
         let tall = |s: &Set, r: Role| s.bounds_of(r).map(|b| b.3 - b.1).unwrap();
         assert!((tall(&moved, Role::Second) / tall(&plain, Role::Second) - 0.5).abs() < 0.02, "the bottom legend half as tall");
