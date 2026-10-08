@@ -1854,11 +1854,13 @@ component Tile inherits Rectangle {
 // and anything beside the title at its top right.
 component PageBox inherits Rectangle {
     in property <string> title;
+    // where the title sits: lower when something comes before it in the box
+    in property <length> title-y: 14px;
     background: Ink.box;
     border-radius: 12px;
     Text {
         x: 16px;
-        y: 14px;
+        y: root.title-y;
         height: 22px;
         text: root.title;
         font-family: "Geist";
@@ -1995,7 +1997,7 @@ component EffectGrid inherits PageBox {
     }
 }
 
-// The layer the Keys tab edits, as a switch over the Key library: each side
+// The layer the Keys tab edits, as a switch at the top of the Key library: each side
 // its key (a blank cap for Base, Fn for Function), its name, and how many of
 // its keys are rebound. At rest the well shows; under the pointer a step
 // lighter; chosen lighter still, and lighter again under the pointer.
@@ -2078,16 +2080,32 @@ component KeyLibrary inherits PageBox {
     callback all(bool);
     callback find(string);
     callback pick(int);
+    // the layer shown, as a switch at the box's top, and its keys rebound
+    in property <int> layer;
+    in property <int> base-count;
+    in property <int> fn-count;
+    callback layer-chosen(int);
+    property <length> top: 16px + 46px;
+    title-y: root.top + 14px;
+    LayerSwitch {
+        x: 16px;
+        y: 16px;
+        width: parent.width - 32px;
+        layer: root.layer;
+        base-count: root.base-count;
+        fn-count: root.fn-count;
+        chosen(i) => { root.layer-chosen(i); }
+    }
     BoxLink {
         x: parent.width - self.width - 10px;
-        y: 12px;
+        y: root.top + 12px;
         text: root.any-open ? "Collapse all" : "Expand all";
         clicked => { root.all(!root.any-open); }
     }
     // find a key, or what it does
     Rectangle {
         x: 16px;
-        y: 46px;
+        y: root.top + 46px;
         width: parent.width - 32px;
         height: 34px;
         border-radius: 8px;
@@ -2116,9 +2134,9 @@ component KeyLibrary inherits PageBox {
     }
     Flickable {
         x: 8px;
-        y: 90px;
+        y: root.top + 90px;
         width: parent.width - 16px;
-        height: parent.height - 90px - 10px;
+        height: parent.height - root.top - 90px - 10px;
         mouse-drag-pan-enabled: false;
         VerticalLayout {
             alignment: start;
@@ -2989,11 +3007,10 @@ export component AppWindow inherits Window {
     // the page's height under the device's bar: its head, the keyboard, what is under it, and the page's foot
     // Keys: the library, and its neighbor beside it, or under it where the page is narrow;
     // side by side, both reach the foot of the anchoring column
-    // (the library under the layers' switch, the two as tall as the box beside them)
+    // (the library, the layers' switch at its top, as tall as the box beside it)
     property <length> lib-w: 440px;
-    property <length> keys-h: max(anchor.preferred-height, 420px);
-    property <length> layers-h: 46px + 12px;
-    property <length> lib-h: keys-h - layers-h;
+    property <length> keys-h: max(anchor.preferred-height, 440px);
+    property <length> lib-h: keys-h;
     property <length> second-w: root.key-open ? 460px : root.slider-chosen != 0 ? 360px : 340px;
     property <length> second-h: second-fits || root.key-open || root.slider-chosen != 0 ? keys-h : 210px;
     property <bool> second-fits: lib-w + 12px + second-w <= under-w;
@@ -3182,18 +3199,13 @@ export component AppWindow inherits Window {
                 }
 
                 // Keys: the Key library, and beside it Game mode, or the chosen key or slider
-                if root.tab == 0 && root.boot == 0: LayerSwitch {
+                if root.tab == 0 && root.boot == 0: KeyLibrary {
                     x: under-x;
                     y: under-top;
-                    width: lib-w;
                     layer: root.layer;
                     base-count: root.base-count;
                     fn-count: root.fn-count;
-                    chosen(i) => { root.layer-changed(i); }
-                }
-                if root.tab == 0 && root.boot == 0: KeyLibrary {
-                    x: under-x;
-                    y: under-top + layers-h;
+                    layer-chosen(i) => { root.layer-changed(i); }
                     width: lib-w;
                     height: lib-h;
                     title: root.layer == 1 ? "Key library, Function layer" : "Key library";
