@@ -2007,15 +2007,18 @@ component LayerSwitch inherits Rectangle {
     in property <int> layer;
     callback chosen(int);
     height: 50px;
-    // behind both: dark, rounded with the box at the top
+    // the pointer over the tab that is not open
+    property <bool> shut-hover;
+    // the dark tab's color, at rest or under the pointer
+    property <color> shut: root.shut-hover ? #1a1a1e : Ink.well;
+    // behind both, the dark tab's color, which shows round the open tab's inner corner
     Rectangle {
         border-top-left-radius: 12px;
         border-top-right-radius: 12px;
-        background: Ink.well;
+        background: root.shut;
     }
     for l[i] in [{ name: "Base", cap: "" }, { name: "Function", cap: "Fn" }]: t := Rectangle {
         property <bool> open: root.layer == i;
-        property <color> shut: tab.has-hover ? #1a1a1e : Ink.well;
         x: i * root.width / 2;
         width: root.width / 2;
         // the dark tab curves into the box where it meets the open one: the box's
@@ -2032,7 +2035,7 @@ component LayerSwitch inherits Rectangle {
             border-top-right-radius: i == 1 ? 12px : t.open ? 10px : 0;
             border-bottom-left-radius: !t.open && i == 1 ? 10px : 0;
             border-bottom-right-radius: !t.open && i == 0 ? 10px : 0;
-            background: t.open ? Ink.box : t.shut;
+            background: t.open ? Ink.box : root.shut;
         }
         // the layer's key, a small cap
         Rectangle {
@@ -2067,8 +2070,9 @@ component LayerSwitch inherits Rectangle {
             height: parent.height;
             text: l.name;
             font-family: "Geist";
-            font-size: 14px;
-            font-weight: t.open ? 600 : 500;
+            // (the size and weight of the boxes' titles)
+            font-size: 13.5px;
+            font-weight: 600;
             color: t.open ? Ink.ink : tab.has-hover ? Ink.dim : Ink.quiet;
             vertical-alignment: center;
         }
@@ -2076,7 +2080,11 @@ component LayerSwitch inherits Rectangle {
         tab := TouchArea {
             enabled: !t.open;
             mouse-cursor: t.open ? MouseCursor.default : MouseCursor.pointer;
-            clicked => { root.chosen(i); }
+            clicked => {
+                root.shut-hover = false;
+                root.chosen(i);
+            }
+            changed has-hover => { root.shut-hover = self.has-hover && !t.open; }
         }
     }
 }
@@ -2992,6 +3000,8 @@ export component AppWindow inherits Window {
     property <float> reveal: root.rail-open ? 1 : 0;
     animate reveal { duration: 160ms; delay: 60ms; easing: ease; }
     property <length> content-w: root.width - rail-w;
+    // the status bar at the window's foot
+    property <length> status-h: 44px;
     // the page runs the window's width, a gutter either side
     property <length> pws-x: 24px;
     property <length> pws-w: content-w - 48px;
@@ -3054,7 +3064,7 @@ export component AppWindow inherits Window {
         x: rail-w;
         y: bar;
         width: content-w;
-        height: root.height - bar;
+        height: root.height - bar - status-h;
 
         // the home: each device as its glyph and its name, nothing else
         if root.place == "home": Rectangle {
@@ -3409,74 +3419,9 @@ export component AppWindow inherits Window {
                             clicked => { root.view-changed(2); }
                         }
                     }
-                    // what was last done (how the keyboard is connected is on Settings)
-                    Text {
+                    // (what was last done, and saving, are on the status bar at the window's foot)
+                    Rectangle {
                         horizontal-stretch: 1;
-                        text: root.status-text;
-                        font-family: "Geist";
-                        font-size: 12.5px;
-                        color: root.status-kind == 1 ? Ink.good : root.status-kind == 2 ? Ink.bad : Ink.quiet;
-                        horizontal-alignment: right;
-                        vertical-alignment: center;
-                        wrap: word-wrap;
-                    }
-                    // unsaved changes: how many, Discard (which asks first) and Save, where
-                    // the bar keeps them in view on every tab as the page scrolls
-                    if root.can-save: HorizontalLayout {
-                        horizontal-stretch: 0;
-                        spacing: 8px;
-                        alignment: end;
-                        if !root.asking-discard: Rectangle {
-                            width: 6px;
-                            Rectangle {
-                                y: (parent.height - 6px) / 2;
-                                width: 6px;
-                                height: 6px;
-                                border-radius: 3px;
-                                background: Ink.warn;
-                            }
-                        }
-                        Text {
-                            text: root.asking-discard ? "Discard the changes to " + root.editing-name + "?" : root.unsaved-words;
-                            font-family: "Geist";
-                            font-size: 12.5px;
-                            color: root.asking-discard ? Ink.warn : Ink.soft;
-                            vertical-alignment: center;
-                        }
-                        Rectangle { width: 4px; }
-                        VerticalLayout {
-                            alignment: center;
-                            WordButton {
-                                height: 32px;
-                                text: root.asking-discard ? "Keep" : "Discard";
-                                fill: transparent;
-                                fill-hover: Ink.hover-box;
-                                clicked => { root.asking-discard = !root.asking-discard; }
-                            }
-                        }
-                        VerticalLayout {
-                            alignment: center;
-                            WordButton {
-                                text: root.asking-discard ? "Discard" : "Save";
-                                primary: !root.asking-discard;
-                                fill: #5c2420;
-                                fill-hover: #74302a;
-                                clicked => {
-                                    if (root.asking-discard) { root.asking-discard = false; root.discard(); } else { root.save(); }
-                                }
-                            }
-                        }
-                        // a rule between saving and the Macro Editor
-                        Rectangle {
-                            width: 17px;
-                            Rectangle {
-                                x: 8px;
-                                y: (parent.height - 24px) / 2;
-                                width: 1px;
-                                height: 24px;
-                                background: Ink.line;
-                            }
-                        }
                     }
                     // the Macro Editor, at the bar's end
                     Rectangle {
@@ -3689,11 +3634,87 @@ export component AppWindow inherits Window {
     // Each page's scrollbar runs beside what scrolls and nothing else: under
     // the title bar, under the device's bar on its page (which stays put), and
     // short of the window's rounded corner at the foot.
-    property <length> bar-foot: root.radius > 0 ? 5px : 2px;
+    // The status bar, across the window's foot beside the rail: what Ectodeck
+    // last did (in green when it went well, red when it did not), and on the
+    // device's page, while there is something unsaved, how much and on which
+    // profile, Discard (which asks first, in the same place) and Save.
+    Rectangle {
+        x: rail-w;
+        y: root.height - status-h;
+        width: content-w;
+        height: status-h;
+        background: Ink.title;
+        border-bottom-right-radius: root.radius;
+        Rectangle {
+            y: 0;
+            height: 1px;
+            background: Ink.line;
+        }
+        HorizontalLayout {
+            padding-left: 28px;
+            padding-right: 16px;
+            spacing: 8px;
+            Text {
+                horizontal-stretch: 1;
+                text: root.status-text;
+                font-family: "Geist";
+                font-size: 12.5px;
+                color: root.status-kind == 1 ? Ink.good : root.status-kind == 2 ? Ink.bad : Ink.soft;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            if root.place == "z10" && root.can-save: HorizontalLayout {
+                horizontal-stretch: 0;
+                spacing: 8px;
+                if !root.asking-discard: Rectangle {
+                    width: 6px;
+                    Rectangle {
+                        y: (parent.height - 6px) / 2;
+                        width: 6px;
+                        height: 6px;
+                        border-radius: 3px;
+                        background: Ink.warn;
+                    }
+                }
+                Text {
+                    text: root.asking-discard ? "Discard the changes to " + root.editing-name + "?" : root.unsaved-words;
+                    font-family: "Geist";
+                    font-size: 12.5px;
+                    color: root.asking-discard ? Ink.warn : Ink.dim;
+                    vertical-alignment: center;
+                }
+                Rectangle { width: 6px; }
+                VerticalLayout {
+                    alignment: center;
+                    WordButton {
+                        height: 30px;
+                        text: root.asking-discard ? "Keep" : "Discard";
+                        fill: transparent;
+                        fill-hover: Ink.hover-box;
+                        clicked => { root.asking-discard = !root.asking-discard; }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    WordButton {
+                        height: 30px;
+                        text: root.asking-discard ? "Discard" : "Save";
+                        primary: !root.asking-discard;
+                        fill: #5c2420;
+                        fill-hover: #74302a;
+                        clicked => {
+                            if (root.asking-discard) { root.asking-discard = false; root.discard(); } else { root.save(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     if root.place == "z10": ScrollBar {
         x: root.width - 12px;
         y: bar + 56px + 2px;
-        height: root.height - bar - 56px - 2px - root.bar-foot;
+        height: root.height - bar - 56px - 2px - status-h - 2px;
         view: flick.height;
         content: flick.content-height;
         offset: -flick.content-y;
@@ -3702,7 +3723,7 @@ export component AppWindow inherits Window {
     if root.place == "settings": ScrollBar {
         x: root.width - 12px;
         y: bar + 2px;
-        height: root.height - bar - 2px - root.bar-foot;
+        height: root.height - bar - 2px - status-h - 2px;
         view: set-flick.height;
         content: set-flick.content-height;
         offset: -set-flick.content-y;
