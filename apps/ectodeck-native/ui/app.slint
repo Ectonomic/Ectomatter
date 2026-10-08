@@ -2103,6 +2103,12 @@ component LayerSwitch inherits Rectangle {
 component KeyLibrary inherits PageBox {
     in property <[LibGroup]> groups;
     in property <bool> any-open;
+    // a key or slider newly chosen: how far down the list its row is; each new one scrolls to it
+    in property <length> reveal-y;
+    in property <int> reveal-n;
+    changed reveal-n => {
+        lib-flick.viewport-y = -max(0, min(root.reveal-y - 40px, lib-flick.viewport-height - lib-flick.height));
+    }
     in-out property <string> query;
     callback toggle(string);
     callback all(bool);
@@ -2157,7 +2163,7 @@ component KeyLibrary inherits PageBox {
             edited => { root.find(self.text); }
         }
     }
-    Flickable {
+    lib-flick := Flickable {
         x: 8px;
         y: root.top + 90px;
         width: parent.width - 16px;
@@ -2863,6 +2869,9 @@ export component AppWindow inherits Window {
     in property <[Overlay]> overlays;
     // the Lighting page: its effects, and its tile's pieces as the window lays them out
     in property <string> slider-note;
+    // the Key library scrolled to a row newly chosen
+    in property <length> lib-reveal-y;
+    in property <int> lib-reveal-n;
     // Undo offered beside "Saved", for a moment after a change
     in property <bool> undo-shown;
     callback undo(bool);
@@ -3027,12 +3036,13 @@ export component AppWindow inherits Window {
     // the page's height under the device's bar: its head, the keyboard, what is under it, and the page's foot
     // Keys: the library, and its neighbor beside it, or under it where the page is narrow;
     // side by side, both reach the foot of the anchoring column
-    // (the library, the layers' switch at its top, as tall as the box beside it)
+    // (the library, its layers' tabs at its top, and Game mode as tall as the Profiles
+    // box; a chosen key's or slider's box as tall too, or as tall as it needs)
     property <length> lib-w: 440px;
-    property <length> keys-h: max(anchor.preferred-height, 440px);
+    property <length> keys-h: anchor.preferred-height;
     property <length> lib-h: keys-h;
     property <length> second-w: root.key-open ? 460px : root.slider-chosen != 0 ? 360px : 340px;
-    property <length> second-h: second-fits || root.key-open || root.slider-chosen != 0 ? keys-h : 210px;
+    property <length> second-h: root.slider-chosen != 0 ? max(keys-h, 340px) : root.key-open ? max(keys-h, root.key-note != "" ? 320px : 270px) : second-fits ? keys-h : 210px;
     property <bool> second-fits: lib-w + 12px + second-w <= under-w;
     // Lighting: the effects (300 wide), the effect's settings (360) and where and when
     // (320), side by side while they fit and wrapping under when they don't; the
@@ -3223,6 +3233,8 @@ export component AppWindow inherits Window {
                     x: under-x;
                     y: under-top;
                     layer: root.layer;
+                    reveal-y: root.lib-reveal-y;
+                    reveal-n: root.lib-reveal-n;
                     layer-chosen(i) => { root.layer-changed(i); }
                     width: lib-w;
                     height: lib-h;

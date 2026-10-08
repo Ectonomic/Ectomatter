@@ -2009,7 +2009,8 @@ impl Front {
                 2 => Some(-2),
                 _ => p.sel.map(|pos| pos as i32),
             };
-            if chosen != self.lib_revealed {
+            let newly = chosen != self.lib_revealed;
+            if newly {
                 self.lib_revealed = chosen;
                 let group = match chosen {
                     Some(-1) | Some(-2) => Some("Sliders"),
@@ -2067,6 +2068,20 @@ impl Front {
                     .filter(|r| q.is_empty() || r.name.to_lowercase().contains(&q) || r.job.to_lowercase().contains(&q))
                     .collect();
                 push(&g, rows, total);
+            }
+            // something newly chosen: the list scrolls to its row (a heading 30 high, a row 34)
+            if newly && chosen.is_some() {
+                let mut y = 0.0;
+                for g in &groups {
+                    y += 30.0;
+                    let rows: Vec<LibRow> = (0..g.rows.row_count()).filter_map(|i| g.rows.row_data(i)).collect();
+                    if let Some(i) = rows.iter().position(|r| r.chosen) {
+                        ui.set_lib_reveal_y(y + i as f32 * 34.0);
+                        ui.set_lib_reveal_n(ui.get_lib_reveal_n() + 1);
+                        break;
+                    }
+                    y += rows.len() as f32 * 34.0;
+                }
             }
             show_rows(ui.get_lib_groups(), |m| ui.set_lib_groups(m), groups);
             ui.set_lib_any_open(any_open);
