@@ -837,6 +837,11 @@ fn find_clip<'a>(g: &'a usvg::Group, id: &str) -> Option<(&'a usvg::Group, &'a u
 }
 
 impl Board {
+    /// How much of each pixel the keyboard itself covers (not the page round it), 0 to 1.
+    pub fn chassis(&self) -> &[f32] {
+        &self.chassis
+    }
+
     /// Draw what never changes, and find each key's cap, for a board `w` x
     /// `h` pixels: the drawing fitted into it, keeping its proportions. The
     /// keys' light comes from the simulation (see set_sim); till then the

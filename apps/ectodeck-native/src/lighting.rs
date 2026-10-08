@@ -1,11 +1,12 @@
-//! The Lighting page, as the web app had it (renderLighting in app.js at
-//! cd9ea82): the row of effects, then one tile of settings for the effect in
-//! two columns, "Color and motion" and "Where and when", each row a name in
-//! a column of its own and then its control, and a reset at the foot.
+//! The Lighting page: beside the effects (which the page draws itself), a
+//! box of the chosen effect's settings, in groups (Color, Motion), and a box
+//! of where and when it plays; or, painting key by key, the brush.
 //!
-//! The window lays the tile out here, with the page's own measurements, and
-//! the page draws each piece where it is told: so chips wrap and notes run on
-//! as they did, and a slider being dragged is never rebuilt under the pointer.
+//! Each box is a fixed width, so its pieces are placed here from its own top
+//! left, and the page places the boxes and wraps them: so chips wrap and
+//! notes run on as they should, and a slider being dragged is never rebuilt
+//! under the pointer. The `Col` rows are the older layout, which Settings
+//! still uses.
 
 use serde_json::{json, Value};
 
@@ -47,9 +48,14 @@ pub enum Ctl {
     HdrMode,
     PeakNits,
     Place,
+    /// Where: the whole keyboard (0) or some areas (1); every area at once
+    WhereMode,
+    WhereAll,
+    /// one of the brush's ready colors
+    Preset,
 }
 
-const CTLS: [Ctl; 30] = [
+const CTLS: [Ctl; 33] = [
     Ctl::None,
     Ctl::Color,
     Ctl::Colors,
@@ -80,6 +86,9 @@ const CTLS: [Ctl; 30] = [
     Ctl::HdrMode,
     Ctl::PeakNits,
     Ctl::Place,
+    Ctl::WhereMode,
+    Ctl::WhereAll,
+    Ctl::Preset,
 ];
 
 pub fn ctl(id: i32) -> Ctl {
@@ -110,6 +119,19 @@ pub mod kind {
     pub const BOX: i32 = 16;
     /// a place that tells the page when the pointer is over it
     pub const ZONE: i32 = 17;
+    // the Lighting page's own pieces, in the shades of its boxes:
+    // a value in a small well; a slider filled to its place; a color's dot;
+    // a piece of a run of colors; a switch's choice; an area's chip; a
+    // dropdown; a quiet link; a checkbox
+    pub const PILL: i32 = 40;
+    pub const FILLED: i32 = 41;
+    pub const COLOR_DOT: i32 = 42;
+    pub const STRIP: i32 = 43;
+    pub const CHOICE: i32 = 44;
+    pub const AREA: i32 = 45;
+    pub const DROP: i32 = 46;
+    pub const QUIET: i32 = 47;
+    pub const CHECKBOX: i32 = 48;
 }
 /// the text styles
 pub mod style {
@@ -138,6 +160,13 @@ pub mod style {
     pub const LABEL_IN: i32 = 22;
     /// a segmented button that tells the page when the pointer is over it, as a zone does
     pub const TELLS: i32 = 23;
+    /// a group's heading, in small capitals; a color's code; a setting's
+    /// name; the words at a slider's ends, left and right
+    pub const GROUP: i32 = 33;
+    pub const CODE: i32 = 34;
+    pub const PROP: i32 = 35;
+    pub const END_L: i32 = 36;
+    pub const END_R: i32 = 37;
 }
 
 /// the effects' speeds: stored as a cycle time, the slider runs slow to fast, as EVGA's does
@@ -153,16 +182,6 @@ fn speed(mode: &str) -> Option<(f64, f64, &'static str)> {
 
 pub const ZONES: [(u64, &str); 6] = [(0x80, "Whole keyboard"), (0x02, "F-keys"), (0x04, "Number row"), (0x10, "WASD"), (0x08, "Arrows"), (0x01, "Numpad")];
 
-fn rgb(v: &Value) -> slint::Color {
-    slint::Color::from_rgb_u8(v[0].as_u64().unwrap_or(0) as u8, v[1].as_u64().unwrap_or(0) as u8, v[2].as_u64().unwrap_or(0) as u8)
-}
-
-/// The tile's pieces, placed; and its height.
-pub struct Tile {
-    pub cells: Vec<Cell>,
-    pub height: f32,
-}
-
 pub(crate) struct Col {
     pub x: f32,
     pub w: f32,
@@ -170,7 +189,6 @@ pub(crate) struct Col {
     pub cells: Vec<Cell>,
 }
 
-const COL_W: f32 = 584.0;
 const LABEL_W: f32 = 112.0;
 const CTRL_X: f32 = 128.0;
 
@@ -202,10 +220,6 @@ pub(crate) enum Part {
 }
 
 impl Col {
-    fn new(x: f32, title: &str) -> Col {
-        Col::sized(x, COL_W, title)
-    }
-
     /// A column `w` wide: its heading, then its rows 14 apart.
     pub fn sized(x: f32, w: f32, title: &str) -> Col {
         if title.is_empty() {
@@ -358,100 +372,405 @@ pub fn save_custom(n: u8, cols: &[[u8; 3]]) {
     crate::uistate::set(&format!("custom:{n}"), json!(cols));
 }
 
-/// The tile for the profile being edited.
-pub fn tile(page: &Page, paint: [u8; 3], demo: bool) -> Tile {
+/// The Lighting page's boxes beside the effects: the chosen effect's
+/// settings, and where and when it plays (or, painting key by key, the
+/// brush). Each box is a fixed width, so its pieces are placed here, from
+/// its own top left; the page places the boxes and wraps them.
+pub struct Boxes {
+    /// 0 an effect's settings, 1 the keys dark, 2 painting key by key
+    pub kind: i32,
+    pub title: String,
+    pub set: Vec<Cell>,
+    pub set_h: f32,
+    pub place: Vec<Cell>,
+    pub place_h: f32,
+}
+
+pub const SET_W: f32 = 360.0;
+pub const PLACE_W: f32 = 320.0;
+/// every area at once, when Some areas is first chosen
+pub const ALL_AREAS: u64 = 0x1F;
+/// the brush's ready colors; black turns a key off
+pub const PRESETS: [[u8; 3]; 9] = [[0xff, 0x08, 0x00], [0xff, 0x80, 0x00], [0xff, 0xd0, 0x00], [0x3b, 0xdc, 0x6b], [0x3f, 0xa9, 0xff], [0x6a, 0x3b, 0xff], [0xff, 0x3b, 0xd2], [0xff, 0xff, 0xff], [0, 0, 0]];
+
+const RESET_ICON: &str = "M4 12a8 8 0 1 0 2.4-5.7M4 4v4h4";
+const CW: &str = "M20 12a8 8 0 1 1-2.6-5.9M20 4v5h-5";
+const CCW: &str = "M4 12a8 8 0 1 0 2.6-5.9M4 4v5h5";
+const UP: &str = "M12 20V5M7 10l5-5 5 5";
+const DOWN: &str = "M12 4v15M7 14l5 5 5-5";
+const LEFT: &str = "M20 12H5M10 7l-5 5 5 5";
+const RIGHT: &str = "M4 12h15M14 7l5 5-5 5";
+
+fn hex_of(c: [u8; 3]) -> String {
+    format!("#{:02X}{:02X}{:02X}", c[0], c[1], c[2])
+}
+fn color(c: [u8; 3]) -> slint::Color {
+    slint::Color::from_rgb_u8(c[0], c[1], c[2])
+}
+fn rgb3(v: &Value) -> [u8; 3] {
+    [v[0].as_u64().unwrap_or(0) as u8, v[1].as_u64().unwrap_or(0) as u8, v[2].as_u64().unwrap_or(0) as u8]
+}
+
+/// A box's pieces, top to bottom, 16 in from its sides.
+struct Stack {
+    w: f32,
+    y: f32,
+    cells: Vec<Cell>,
+    groups: usize,
+}
+
+impl Stack {
+    fn new(w: f32) -> Stack {
+        // under the box's title
+        Stack { w, y: 48.0, cells: Vec::new(), groups: 0 }
+    }
+    fn inner(&self) -> f32 {
+        self.w - 32.0
+    }
+    fn gap(&mut self, h: f32) {
+        self.y += h;
+    }
+    fn note(&mut self, s: &str) {
+        let lines = text::wrap(400, 12.5, s, self.inner());
+        for (k, line) in lines.iter().enumerate() {
+            self.cells.push(text_cell(style::NOTE, 16.0, self.y + k as f32 * 18.0, self.inner(), 18.0, line));
+        }
+        self.y += lines.len() as f32 * 18.0;
+    }
+    /// a group: a hairline over all but the first, then its name in small capitals
+    fn group(&mut self, name: &str) {
+        if self.groups > 0 {
+            self.y += 16.0;
+            self.cells.push(Cell { color: slint::Color::from_rgb_u8(0x2b, 0x2b, 0x30), ..cell(kind::BOX, 16.0, self.y, self.inner(), 1.0) });
+            self.y += 15.0;
+        } else {
+            self.y += 6.0;
+        }
+        self.groups += 1;
+        self.cells.push(text_cell(style::GROUP, 16.0, self.y, self.inner(), 14.0, &name.to_uppercase()));
+        self.y += 14.0 + 12.0;
+    }
+    /// a setting's name, and its value in a small well at the right
+    fn head(&mut self, label: &str, value: Option<&str>) {
+        self.cells.push(text_cell(style::PROP, 16.0, self.y, self.inner(), 20.0, label));
+        if let Some(v) = value {
+            let w = text::width(500, 11.5, v) + 16.0;
+            self.cells.push(Cell { text: v.into(), ..cell(kind::PILL, self.w - 16.0 - w, self.y, w, 20.0) });
+        }
+        self.y += 20.0 + 8.0;
+    }
+    /// a slider, filled to its place in `fill`, its ends named under it
+    fn slider(&mut self, c: Ctl, frac: f32, fill: slint::Color, ends: Option<(&str, &str)>) {
+        self.cells.push(Cell { value: frac, color: fill, id: id(c), ..cell(kind::FILLED, 16.0, self.y, self.inner(), 20.0) });
+        self.y += 20.0;
+        if let Some((l, r)) = ends {
+            self.y += 4.0;
+            self.cells.push(text_cell(style::END_L, 16.0, self.y, self.inner() / 2.0, 14.0, l));
+            self.cells.push(text_cell(style::END_R, 16.0 + self.inner() / 2.0, self.y, self.inner() / 2.0, 14.0, r));
+            self.y += 14.0;
+        }
+    }
+    /// a run of colors, as the effect blends them
+    fn strip(&mut self, cols: &[[u8; 3]]) {
+        let n = cols.len().max(2) - 1;
+        let w = self.inner() / n as f32;
+        for k in 0..n {
+            let (a, b) = (cols[k], cols[(k + 1).min(cols.len() - 1)]);
+            let ends = (if k == 0 { 1 } else { 0 }) | (if k == n - 1 { 2 } else { 0 });
+            self.cells.push(Cell { color: color(a), value: (b[0] as u32 * 65536 + b[1] as u32 * 256 + b[2] as u32) as f32, style: ends, ..cell(kind::STRIP, 16.0 + k as f32 * w, self.y, w + 0.5, 10.0) });
+        }
+        self.y += 10.0 + 12.0;
+    }
+    /// colors as dots, 8 apart, wrapping; the one the picker is open on ringed
+    fn dots(&mut self, c: Ctl, cols: &[[u8; 3]], open: Option<usize>, code: bool) {
+        let (mut x, mut y) = (16.0f32, self.y);
+        for (j, col) in cols.iter().enumerate() {
+            if x > 16.0 && x + 28.0 > self.w - 16.0 {
+                x = 16.0;
+                y += 36.0;
+            }
+            self.cells.push(Cell { color: color(*col), on: open == Some(j), id: id(c), index: j as i32, ..cell(kind::COLOR_DOT, x, y, 28.0, 28.0) });
+            x += 36.0;
+        }
+        if code && cols.len() == 1 {
+            self.cells.push(text_cell(style::CODE, x - 4.0, y, 90.0, 28.0, &hex_of(cols[0])));
+        }
+        self.y = y + 28.0;
+    }
+    /// a switch across the box: each choice its share, with its icon if it has one
+    fn switch(&mut self, c: Ctl, opts: &[(&str, &str)], chosen: usize) {
+        self.cells.push(Cell { style: 1, ..cell(kind::SEG, 16.0, self.y, self.inner(), 34.0) });
+        let n = opts.len() as f32;
+        let each = (self.inner() - 6.0 - 2.0 * (n - 1.0)) / n;
+        for (j, (name, icon)) in opts.iter().enumerate() {
+            self.cells.push(Cell {
+                text: (*name).into(),
+                lines: (*icon).into(),
+                on: j == chosen,
+                id: id(c),
+                index: j as i32,
+                ..cell(kind::CHOICE, 16.0 + 3.0 + j as f32 * (each + 2.0), self.y + 3.0, each, 28.0)
+            });
+        }
+        self.y += 34.0;
+    }
+    fn check(&mut self, c: Ctl, on: bool, label: &str) {
+        self.cells.push(Cell { on, id: id(c), text: label.into(), ..cell(kind::CHECKBOX, 16.0, self.y, 28.0 + text::width(400, 13.0, label), 20.0) });
+        self.y += 20.0;
+    }
+    fn dropdown(&mut self, c: Ctl, shown: &str, open: bool) {
+        self.cells.push(Cell { text: shown.into(), on: open, id: id(c), ..cell(kind::DROP, 16.0, self.y, self.inner(), 34.0) });
+        self.y += 34.0;
+    }
+    /// areas as chips, 6 apart, wrapping; `index` is each one's place in ZONES
+    fn chips(&mut self, c: Ctl, chips: &[(usize, &str, bool)], ticks: bool) {
+        let (mut x, mut y) = (0.0f32, self.y);
+        for (index, name, on) in chips {
+            let w = text::width(400, 12.5, name) + 22.0 + if ticks && *on { 17.0 } else { 0.0 };
+            if x > 0.0 && x + w > self.inner() {
+                x = 0.0;
+                y += 34.0;
+            }
+            self.cells.push(Cell { text: (*name).into(), on: *on, style: ticks as i32, id: id(c), index: *index as i32, ..cell(kind::AREA, 16.0 + x, y, w, 28.0) });
+            x += w + 6.0;
+        }
+        self.y = y + 28.0;
+    }
+    /// a quiet link at the right of the row it sits on
+    fn link_right(&mut self, c: Ctl, label: &str, y: f32, icon: &str) {
+        let w = text::width(500, 12.5, label) + 18.0 + if icon.is_empty() { 0.0 } else { 20.0 };
+        self.cells.push(Cell { text: label.into(), lines: icon.into(), id: id(c), ..cell(kind::QUIET, self.w - 16.0 - w + 8.0, y, w, 24.0) });
+    }
+    fn height(&self) -> f32 {
+        self.y + 18.0
+    }
+}
+
+/// The boxes for the profile being edited. `open` is the swatch the color
+/// picker is open on, `menu` the dropdown open.
+pub fn boxes(page: &Page, paint: [u8; 3], demo: bool, open: Option<(Ctl, usize)>, menu: Option<Ctl>) -> Boxes {
     let l = &page.draft()["lighting"];
     let mode = l["mode"].as_str().unwrap_or("off").to_string();
-    let (px, pad) = (24.0, 20.0);
-    let mut cells = Vec::new();
+    let title = EFFECTS.iter().find(|(m, _)| *m == mode).map_or(mode.clone(), |(_, n)| n.to_string());
+    let profile = page.profile_name(page.editing);
     if mode == "off" {
-        cells.push(text_cell(style::EMPTY, px, pad, 1216.0, 20.0, "The backlight stays dark while this profile is active."));
-        return Tile { cells, height: pad * 2.0 + 20.0 };
+        let mut s = Stack::new(SET_W);
+        s.note(&format!("The keys stay dark on {profile}. Choose an effect to light them."));
+        return Boxes { kind: 1, title, set_h: s.height(), set: s.cells, place: Vec::new(), place_h: 0.0 };
     }
-    let (mut look, mut when);
     if mode == "custom" {
-        look = Col::new(px, "Painting");
-        look.row("Color", vec![Part::Paint(slint::Color::from_rgb_u8(paint[0], paint[1], paint[2]), "Click keys on the keyboard to paint them.")]);
-        look.row("Every key", vec![Part::Ghosts(vec![(Ctl::Fill, "Fill"), (Ctl::Scatter, "Scatter"), (Ctl::Clear, "Clear")])]);
-        when = Col::new(px + COL_W + 48.0, "How it shows");
-        when.para("The spacebar, the mode button and the media keys have no light, so they stay dark.");
-        when.para("The keyboard can’t store colors per key, so they show only while Ectodeck is open. The profile saves with its backlight off.");
-        let h = look.height().max(when.height());
-        cells.extend(look.cells);
-        cells.extend(when.cells);
-        for c in &mut cells {
-            c.y += pad;
+        let mut s = Stack::new(SET_W);
+        s.group("Color");
+        let mut cols: Vec<[u8; 3]> = PRESETS.to_vec();
+        let chosen = PRESETS.iter().position(|c| *c == paint);
+        if chosen.is_none() {
+            cols.push(paint);
         }
-        return Tile { cells, height: pad + h + pad };
+        let at = chosen.unwrap_or(PRESETS.len());
+        // (a little closer than the effects' colors, so the ready ones and "+" share a line)
+        let (mut x, mut y) = (16.0f32, s.y);
+        for (j, col) in cols.iter().enumerate() {
+            if x > 16.0 && x + 28.0 > SET_W - 16.0 {
+                x = 16.0;
+                y += 36.0;
+            }
+            s.cells.push(Cell { color: color(*col), on: j == at, id: id(Ctl::Preset), index: j as i32, ..cell(kind::COLOR_DOT, x, y, 28.0, 28.0) });
+            x += 33.0;
+        }
+        // any other color, from the picker
+        if x + 28.0 > SET_W - 16.0 {
+            x = 16.0;
+            y += 36.0;
+        }
+        s.cells.push(Cell { style: 1, on: open.map(|o| o.0) == Some(Ctl::Paint), id: id(Ctl::Paint), ..cell(kind::COLOR_DOT, x, y, 28.0, 28.0) });
+        s.y = y + 28.0;
+        s.group("Fill an area");
+        let chips: Vec<(usize, &str, bool)> = ZONES.iter().enumerate().map(|(i, (_, n))| (i, *n, false)).collect();
+        s.chips(Ctl::Fill, &chips, false);
+        s.gap(10.0);
+        let row = s.y;
+        let w1 = text::width(500, 12.5, "Scatter colors") + 18.0;
+        s.cells.push(Cell { text: "Scatter colors".into(), id: id(Ctl::Scatter), ..cell(kind::QUIET, 8.0, row, w1, 24.0) });
+        s.cells.push(Cell { text: "Clear every key".into(), id: id(Ctl::Clear), ..cell(kind::QUIET, 8.0 + w1 + 4.0, row, text::width(500, 12.5, "Clear every key") + 18.0, 24.0) });
+        s.y = row + 24.0 + 12.0;
+        s.note("Click keys on the keyboard to paint them. Black turns a key off. The keyboard can’t store a color for each key, so they show only while Ectodeck is open.");
+        return Boxes { kind: 2, title: "Brush".into(), set_h: s.height(), set: s.cells, place: Vec::new(), place_h: 0.0 };
     }
+
     let e = &l[mode.as_str()];
-    let sp = speed(&mode);
-    look = Col::new(px, if sp.is_some() { "Color and motion" } else { "Color" });
-    let list = |n: usize| -> Vec<slint::Color> { e["colors"].as_array().map(|a| a.iter().take(n).map(|c| rgb(&c["color"])).collect()).unwrap_or_default() };
-    match mode.as_str() {
-        "static" => look.row("Color", vec![Part::Swatches(Ctl::Color, vec![rgb(&e["color"])])]),
-        "breathing" => look.row("Colors", vec![Part::Swatches(Ctl::Colors, list(2)), Part::Note("Breathes in the first color, then the second.".into())]),
-        "pulse" | "wave" | "trigger" | "spiral" => look.row(
-            "Colors",
-            vec![
-                Part::Swatches(Ctl::Colors, list(7)),
-                Part::Note(if mode == "trigger" { "Each key press takes the next color." } else { "Runs through these colors in order." }.into()),
-            ],
-        ),
-        _ => {}
-    }
-    if e.get("random").is_some() && mode != "trigger" {
-        look.row("Order", vec![Part::Check(Ctl::Random, e["random"].as_u64().unwrap_or(0) != 0, "Random colors")]);
-    }
-    if mode == "pulse" {
-        look.row("Between pulses", vec![Part::Swatches(Ctl::Background, vec![rgb(&e["background"]["color"])])]);
+    let int = |k: &str| e[k].as_i64().unwrap_or(0);
+    let mut s = Stack::new(SET_W);
+    // the reset, at the top right, level with the title
+    s.link_right(Ctl::Reset, "Reset", 13.0, RESET_ICON);
+    s.y -= 6.0;
+    s.note(match mode.as_str() {
+        "static" => "One color on every key.",
+        "breathing" => "The keys fade in and out, a color each breath.",
+        "pulse" => "Colors flash in turn over a background color.",
+        "spiral" => "Colors turn around the keyboard like a pinwheel.",
+        "wave" => "Colors roll across the keyboard.",
+        "stars" => "Keys twinkle on at random.",
+        "trigger" => "A key lights when you press it, then fades.",
+        _ => "",
+    });
+    s.gap(4.0);
+    let picking = |c: Ctl| open.filter(|o| o.0 == c).map(|o| o.1);
+    let list = |n: usize| -> Vec<[u8; 3]> { e["colors"].as_array().map(|a| a.iter().take(n).map(|c| rgb3(&c["color"])).collect()).unwrap_or_default() };
+    let mut first = [255u8, 255, 255];
+    if mode != "stars" {
+        s.group("Color");
+        match mode.as_str() {
+            "static" => {
+                first = rgb3(&e["color"]);
+                s.dots(Ctl::Color, &[first], picking(Ctl::Color), true);
+            }
+            _ => {
+                let cols = list(if mode == "breathing" { 2 } else { 7 });
+                first = cols.first().copied().unwrap_or(first);
+                s.strip(&cols);
+                s.dots(Ctl::Colors, &cols, picking(Ctl::Colors), false);
+            }
+        }
+        if e.get("random").is_some() && mode != "trigger" {
+            s.gap(14.0);
+            s.check(Ctl::Random, e["random"].as_u64().unwrap_or(0) != 0, "In a random order");
+        }
+        if mode == "pulse" {
+            s.gap(16.0);
+            s.head("Between pulses", None);
+            s.dots(Ctl::Background, &[rgb3(&e["background"]["color"])], picking(Ctl::Background), true);
+        }
+        s.gap(16.0);
+    } else {
+        s.group("Color");
     }
     let bri = if mode == "static" || mode == "stars" { e["brightness"].as_f64() } else { e["colors"][0]["brightness"].as_f64() }.unwrap_or(255.0);
-    look.row("Brightness", vec![Part::Slider(Ctl::Brightness, (bri / 255.0) as f32, format!("{}%", (bri / 2.55).round()))]);
-    if let Some((lo, hi, key)) = sp {
-        let v = lo + hi - e[key].as_f64().unwrap_or(lo);
-        look.row("Speed", vec![Part::Slider(Ctl::Speed, ((v - lo) / (hi - lo)) as f32, format!("{:.2} s", (lo + hi - v) / 1000.0))]);
+    s.head("Brightness", Some(&format!("{}%", (bri / 2.55).round())));
+    s.slider(Ctl::Brightness, (bri / 255.0) as f32, color(first), None);
+    if let Some((lo, hi, key)) = speed(&mode) {
+        s.group("Motion");
+        let stored = e[key].as_f64().unwrap_or(lo).clamp(lo, hi);
+        // the slider runs slow to fast: right is faster
+        let frac = ((hi - stored) / (hi - lo)) as f32;
+        s.head("Speed", Some(&format!("{:.1} s", stored / 1000.0)));
+        s.slider(Ctl::Speed, frac, slint::Color::from_rgb_u8(0xd4, 0xd4, 0xd8), Some(("Slow", "Fast")));
+        if mode == "spiral" {
+            s.gap(16.0);
+            s.head("Direction", None);
+            let d = if int("direction") > 1 { 0 } else { int("direction") } as usize;
+            s.switch(Ctl::Direction, &[("Clockwise", CW), ("Counterclockwise", CCW)], d);
+        }
+        if mode == "wave" {
+            s.gap(16.0);
+            s.head("Direction", None);
+            // stored 0 up, 1 down, 2 right, 3 left; shown up, down, left, right
+            let d = match int("direction") {
+                1 => 1,
+                3 => 2,
+                2 => 3,
+                _ => 0,
+            };
+            s.switch(Ctl::Direction, &[("Up", UP), ("Down", DOWN), ("Left", LEFT), ("Right", RIGHT)], d);
+        }
+        if mode == "trigger" {
+            s.gap(16.0);
+            s.head("Lights up", None);
+            let sub = if int("submode") > 2 { 0 } else { int("submode") } as usize;
+            s.dropdown(Ctl::Submode, SUBMODES[sub], menu == Some(Ctl::Submode));
+            s.gap(14.0);
+            s.check(Ctl::Demo, demo, "Preview with pretend typing");
+        }
     }
-    let int = |k: &str| e[k].as_i64().unwrap_or(0);
-    if mode == "spiral" {
-        let d = if int("direction") > 1 { 0 } else { int("direction") };
-        look.row("Direction", vec![Part::Seg(Ctl::Direction, vec![(0, "Clockwise"), (1, "Counterclockwise")], d)]);
-    }
-    if mode == "wave" {
-        let d = if int("direction") > 3 { 0 } else { int("direction") };
-        look.row("Direction", vec![Part::Seg(Ctl::Direction, vec![(0, "Up"), (1, "Down"), (3, "Left"), (2, "Right")], d)]);
-    }
-    if mode == "trigger" {
-        let s = if int("submode") > 2 { 0 } else { int("submode") };
-        look.row(
-            "Lights up",
-            vec![
-                Part::Seg(Ctl::Submode, vec![(0, "Each key typed"), (1, "One key"), (2, "3 by 3 around it")], s),
-                Part::Check(Ctl::Demo, demo, "Preview with pretend typing"),
-                Part::Note("Type, or click keys above, to see it.".into()),
-            ],
-        );
-    }
-    when = Col::new(px + COL_W + 48.0, "Where and when");
-    let zone = e["zone"].as_u64().unwrap_or(0x80);
-    let chips = ZONES.iter().map(|(bit, name)| (*name, if *bit == 0x80 { zone & 0x80 != 0 } else { zone & 0x80 == 0 && zone & bit != 0 })).collect();
-    when.row("Where", vec![Part::Chips(chips), Part::Note("Keys outside these areas stay dark.".into())]);
-    when.row("Starts", vec![Part::Seg(Ctl::Start, vec![(0, "With the profile"), (1, "On a key press")], int("start"))]);
-    when.row("Stops", vec![Part::Seg(Ctl::Stop, vec![(0, "Never"), (1, "On key press"), (2, "On key release")], int("stop"))]);
 
-    let h = look.height().max(when.height());
-    cells.extend(look.cells);
-    cells.extend(when.cells);
-    // the reset, at the foot, on the right
-    let name = EFFECTS.iter().find(|(m, _)| *m == mode).map_or(mode.clone(), |(_, n)| n.to_lowercase());
-    let label = format!("Reset {name} to factory settings");
-    let w = text::width(500, 12.5, &label) + 18.0;
-    let fy = h + 8.0 + 4.0;
-    cells.push(Cell { text: label.into(), id: id(Ctl::Reset), ..cell(kind::LINK, px + 1216.0 - w, fy, w, 28.0) });
-    for c in &mut cells {
-        c.y += pad;
+    // where and when
+    let mut p = Stack::new(PLACE_W);
+    p.group("Where");
+    let zone = e["zone"].as_u64().unwrap_or(0x80);
+    let whole = zone & 0x80 != 0;
+    p.switch(Ctl::WhereMode, &[("Whole keyboard", ""), ("Some areas", "")], if whole { 0 } else { 1 });
+    if !whole {
+        let picks = zone & ALL_AREAS;
+        let n = (1..ZONES.len()).filter(|i| picks & ZONES[*i].0 != 0).count();
+        p.gap(12.0);
+        let row = p.y;
+        p.cells.push(text_cell(style::PROP, 16.0, row, PLACE_W - 32.0, 24.0, &if n > 0 { format!("{n} of {} areas", ZONES.len() - 1) } else { "No areas chosen".into() }));
+        if n < ZONES.len() - 1 {
+            p.link_right(Ctl::WhereAll, "Select all", row, "");
+        }
+        p.y = row + 24.0 + 8.0;
+        let chips: Vec<(usize, &str, bool)> = ZONES.iter().enumerate().skip(1).map(|(i, (bit, name))| (i, *name, picks & bit != 0)).collect();
+        p.chips(Ctl::Zone, &chips, true);
+        if n == 0 {
+            p.gap(10.0);
+            p.note("Choose the areas to light. Until you do, the effect lights nothing.");
+        }
     }
-    Tile { cells, height: pad + fy + 28.0 + pad }
+    p.group("When");
+    p.head("Starts", None);
+    let (start, stop) = (int("start").clamp(0, 1) as usize, int("stop").clamp(0, 2) as usize);
+    p.dropdown(Ctl::Start, STARTS[start], menu == Some(Ctl::Start));
+    p.gap(14.0);
+    p.head("Stops", None);
+    p.dropdown(Ctl::Stop, STOPS[stop], menu == Some(Ctl::Stop));
+    p.gap(10.0);
+    let begins = if start == 1 { "Starts when you press a key".to_string() } else { format!("Plays as soon as {profile} is on") };
+    let ends = [", and keeps going.", ", and stops at the next key press.", ", and stops when you let go of the key."][stop];
+    p.note(&format!("{begins}{ends}"));
+    Boxes { kind: 0, title, set_h: s.height(), set: s.cells, place_h: p.height(), place: p.cells }
+}
+
+/// The choices the dropdowns list, in the order the keyboard numbers them.
+pub const STARTS: [&str; 2] = ["With the profile", "On a key press"];
+pub const STOPS: [&str; 3] = ["Never", "On the next key press", "On key release"];
+pub const SUBMODES: [&str; 3] = ["Each key you type", "One key", "The key and the keys around it"];
+
+/// The choices for a dropdown, and the one chosen.
+pub fn choices(page: &Page, c: Ctl) -> Option<(&'static [&'static str], usize)> {
+    let l = &page.draft()["lighting"];
+    let e = &l[l["mode"].as_str().unwrap_or("off")];
+    let int = |k: &str| e[k].as_i64().unwrap_or(0).max(0) as usize;
+    match c {
+        Ctl::Start => Some((&STARTS[..], int("start").min(1))),
+        Ctl::Stop => Some((&STOPS[..], int("stop").min(2))),
+        Ctl::Submode => Some((&SUBMODES[..], if int("submode") > 2 { 0 } else { int("submode") })),
+        _ => None,
+    }
+}
+
+/// Where the effect plays: the whole keyboard or some areas, an area in or
+/// out, or every area. `areas` keeps the areas chosen while the whole
+/// keyboard is lit, so choosing Some areas again brings them back.
+pub fn place(page: &mut Page, c: Ctl, index: usize, areas: &mut u64) {
+    let n = page.editing;
+    let Some(d) = page.drafts.get_mut(&n) else { return };
+    let mode = d["lighting"]["mode"].as_str().unwrap_or("off").to_string();
+    let e = &mut d["lighting"][mode.as_str()];
+    let zone = e["zone"].as_u64().unwrap_or(0x80);
+    let z = match c {
+        Ctl::WhereMode if index == 0 => {
+            if zone & 0x80 == 0 {
+                *areas = zone & ALL_AREAS;
+            }
+            0x80
+        }
+        Ctl::WhereMode => {
+            if zone & 0x80 == 0 {
+                zone
+            } else {
+                *areas
+            }
+        }
+        Ctl::WhereAll => ALL_AREAS,
+        Ctl::Zone => {
+            let bit = ZONES.get(index).map_or(0, |z| z.0) & ALL_AREAS;
+            (if zone & 0x80 != 0 { *areas } else { zone }) ^ bit
+        }
+        _ => return,
+    };
+    if z & 0x80 == 0 {
+        *areas = z;
+    }
+    e["zone"] = json!(z);
 }
 
 /// Use a piece of the tile. `value` is a slider's place (0 to 1) or a
@@ -543,9 +862,13 @@ pub fn color_of(page: &Page, c: Ctl, index: usize, paint: [u8; 3]) -> [u8; 3] {
     [v[0].as_u64().unwrap_or(0) as u8, v[1].as_u64().unwrap_or(0) as u8, v[2].as_u64().unwrap_or(0) as u8]
 }
 
-/// Each effect's small picture, as the web app drew it with CSS, at `scale`.
+/// Each effect's small picture, for its tile on the Lighting page, at `scale`:
+/// 72 by 40, and Wave's twice as wide, its colors round twice, to roll along.
 pub fn icon(mode: &str, scale: f32) -> slint::Image {
-    let (w, h) = ((60.0 * scale).round() as u32, (24.0 * scale).round() as u32);
+    const W: f32 = 72.0;
+    const H: f32 = 40.0;
+    let across = if mode == "wave" { 2.0 } else { 1.0 };
+    let (w, h) = ((W * across * scale).round() as u32, (H * scale).round() as u32);
     let hex = |s: &str| -> [f32; 3] {
         let s = s.trim_start_matches('#');
         let s: String = if s.len() == 3 { s.chars().flat_map(|c| [c, c]).collect() } else { s.into() };
@@ -563,7 +886,8 @@ pub fn icon(mode: &str, scale: f32) -> slint::Image {
     let dark = hex("#0c0e10");
     let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(w, h);
     let (fw, fh) = (w as f32, h as f32);
-    let r = 6.0 * scale;
+    // (square: the tile rounds its corners)
+    let r = 0.0f32;
     for (i, p) in buf.make_mut_slice().iter_mut().enumerate() {
         let (px, py) = ((i as u32 % w) as f32 + 0.5, (i as u32 / w) as f32 + 0.5);
         let u = px / fw;
@@ -573,7 +897,7 @@ pub fn icon(mode: &str, scale: f32) -> slint::Image {
             "static" => hex("#d8421e"),
             "breathing" => run(&["#140806", "#d8421e", "#140806"], u),
             "pulse" => {
-                if cx % 16.0 < 10.0 {
+                if cx % 13.0 < 9.0 {
                     hex("#1d6bff")
                 } else {
                     dark
@@ -581,37 +905,37 @@ pub fn icon(mode: &str, scale: f32) -> slint::Image {
             }
             "spiral" => {
                 // conic, from 90deg: 0 at the right, going round clockwise
-                let a = (cy - 12.0).atan2(cx - 30.0).to_degrees();
+                let a = (cy - H / 2.0).atan2(cx - W / 2.0).to_degrees();
                 let t = ((a + 360.0) % 360.0) / 360.0;
                 run(&["#f33", "#fd3", "#3f6", "#3cf", "#94f", "#f33"], t)
             }
-            "wave" => run(&["#f33", "#fd3", "#3f6", "#3cf", "#94f"], u),
+            "wave" => run(&["#f33", "#fd3", "#3f6", "#3cf", "#94f", "#f33"], (u * across) % 1.0),
             "stars" => {
                 let mut c = dark;
-                for (sx, sy, col) in [(0.2, 0.4, "#fff"), (0.6, 0.7, "#9cf"), (0.82, 0.3, "#fc9")] {
-                    let d = ((cx - sx * 60.0).powi(2) + (cy - sy * 24.0).powi(2)).sqrt();
-                    let a = (3.0 - d).clamp(0.0, 1.0);
+                for (sx, sy, col) in [(0.2, 0.4, "#fff"), (0.7, 0.65, "#9cf"), (0.85, 0.25, "#fc9"), (0.42, 0.78, "#fff")] {
+                    let d = ((cx - sx * W).powi(2) + (cy - sy * H).powi(2)).sqrt();
+                    let a = (3.2 - d).clamp(0.0, 1.0);
                     let s = hex(col);
                     c = [0, 1, 2].map(|k| c[k] * (1.0 - a) + s[k] * a);
                 }
                 c
             }
             "trigger" => {
-                let d = ((cx - 30.0).powi(2) + (cy - 12.0).powi(2)).sqrt();
-                if d <= 5.0 {
-                    hex("#3cf")
-                } else if d <= 12.0 {
-                    run(&["#3cf", "#123"], (d - 5.0) / 7.0)
+                let d = ((cx - W / 2.0).powi(2) + (cy - H / 2.0).powi(2)).sqrt();
+                if d <= 4.0 {
+                    hex("#7fe3ff")
+                } else if d <= 10.0 {
+                    run(&["#7fe3ff", "#1a7dc4"], (d - 4.0) / 6.0)
                 } else {
-                    run(&["#123", "#0c0e10"], ((d - 12.0) / 10.0).min(1.0))
+                    run(&["#1a7dc4", "#0e0e12"], ((d - 10.0) / 10.0).min(1.0))
                 }
             }
             "custom" => {
                 // 135deg, as CSS lays it: along (sin, -cos) of the angle, the line
                 // as long as the box's projection onto it
                 let (sn, cs) = (0.70710677f32, 0.70710677f32);
-                let len = 60.0 * sn + 24.0 * cs;
-                let t = ((cx - 30.0) * sn + (cy - 12.0) * cs) / len + 0.5;
+                let len = W * sn + H * cs;
+                let t = ((cx - W / 2.0) * sn + (cy - H / 2.0) * cs) / len + 0.5;
                 match t {
                     t if t < 0.25 => hex("#f33"),
                     t if t < 0.5 => hex("#3cf"),
@@ -628,4 +952,44 @@ pub fn icon(mode: &str, scale: f32) -> slint::Image {
         *p = slint::Rgba8Pixel { r: (c[0] * a).round() as u8, g: (c[1] * a).round() as u8, b: (c[2] * a).round() as u8, a: (a * 255.0).round() as u8 };
     }
     slint::Image::from_rgba8_premultiplied(buf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn page_with(zone: u64) -> Page {
+        let mut p = Page::new();
+        p.editing = 1;
+        p.drafts.insert(1, json!({ "lighting": { "mode": "spiral", "spiral": { "zone": zone } } }));
+        p
+    }
+    fn zone(p: &Page) -> u64 {
+        p.drafts[&1]["lighting"]["spiral"]["zone"].as_u64().unwrap()
+    }
+
+    #[test]
+    fn some_areas_remembers_its_areas_and_never_snaps_back() {
+        let mut p = page_with(0x80);
+        let mut areas = ALL_AREAS;
+        // Some areas, first time: every area
+        place(&mut p, Ctl::WhereMode, 1, &mut areas);
+        assert_eq!(zone(&p), ALL_AREAS);
+        // every area taken out, one by one: nothing lit, and still Some areas
+        for i in 1..ZONES.len() {
+            place(&mut p, Ctl::Zone, i, &mut areas);
+        }
+        assert_eq!(zone(&p), 0, "no areas chosen lights nothing; it is not the whole keyboard");
+        // two put back, then the whole keyboard, then Some areas again: the two come back
+        place(&mut p, Ctl::Zone, 1, &mut areas);
+        place(&mut p, Ctl::Zone, 3, &mut areas);
+        let two = ZONES[1].0 | ZONES[3].0;
+        assert_eq!(zone(&p), two);
+        place(&mut p, Ctl::WhereMode, 0, &mut areas);
+        assert_eq!(zone(&p), 0x80);
+        place(&mut p, Ctl::WhereMode, 1, &mut areas);
+        assert_eq!(zone(&p), two);
+        place(&mut p, Ctl::WhereAll, 0, &mut areas);
+        assert_eq!(zone(&p), ALL_AREAS);
+    }
 }

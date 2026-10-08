@@ -3,6 +3,7 @@
 //! knows about the window, so the offscreen check drives it the same way.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -76,6 +77,8 @@ pub enum Ask {
     /// a slider chosen in the library (0 none), and what it controls
     SliderSel(i32),
     SliderBind(i32),
+    /// the pointer over an area's chip on the Lighting page, or off it: its place in ZONES
+    AreaHover(i32, bool),
 }
 
 /// The colour picker, open on a swatch: what it sets, the colour it opened
@@ -285,6 +288,13 @@ pub struct Front {
     preview_asked: bool,
     icons: Option<(f32, Vec<slint::Image>)>,
     cells: Rc<VecModel<Cell>>,
+    /// the Where and when box's pieces; the areas chosen for each profile's
+    /// effects, kept while the whole keyboard is lit; the dropdown open; the
+    /// area the pointer is over, which the keyboard shows
+    place_cells: Rc<VecModel<Cell>>,
+    areas: HashMap<(u8, String), u64>,
+    light_menu: Option<Ctl>,
+    pub hover_area: Option<usize>,
     pub scale: f32,
     pick: Option<Pick>,
     overlay_model: Rc<VecModel<crate::Overlay>>,
@@ -387,6 +397,7 @@ impl Front {
         on!(on_kind_picked, |i, x, y, h| Ask::Kind(i, x, y, h));
         on!(on_slider_chosen_at, |i| Ask::SliderSel(i));
         on!(on_slider_bind_at, |i| Ask::SliderBind(i));
+        on!(on_area_hover, |i, on| Ask::AreaHover(i, on));
         let (ftx, frx) = mpsc::channel();
         let page = Page::new();
         ui.set_units(page.view_box.2 as f32);
@@ -432,11 +443,15 @@ impl Front {
             active_asked: false,
             slider_ends,
             _timers: timers,
-            paint: [0xff, 0x2d, 0x00],
+            paint: lighting::PRESETS[0],
             previewing: false,
             preview_asked: false,
             icons: None,
             cells: Rc::new(VecModel::default()),
+            place_cells: Rc::new(VecModel::default()),
+            areas: HashMap::new(),
+            light_menu: None,
+            hover_area: None,
             scale: 1.0,
             pick: None,
             overlay_model: Rc::new(VecModel::default()),
@@ -465,6 +480,7 @@ impl Front {
         f.ui.set_overlays(ModelRc::from(f.overlay_model.clone()));
         f.ui.set_pk_presets(ModelRc::new(VecModel::from(PRESETS.iter().map(|c| color(*c)).collect::<Vec<_>>())));
         f.ui.set_cells(ModelRc::from(f.cells.clone()));
+        f.ui.set_place_cells(ModelRc::from(f.place_cells.clone()));
         f.poll_lcd();
         if controlled {
             f.ask_kb(device::Ask::State);
@@ -721,6 +737,14 @@ impl Front {
                         c => lighting::act(&mut self.page, c, 0, v),
                     }
                     self.push_preview();
+                }
+                Ask::AreaHover(i, on) => {
+                    let i = i.max(0) as usize;
+                    if on {
+                        self.hover_area = Some(i);
+                    } else if self.hover_area == Some(i) {
+                        self.hover_area = None;
+                    }
                 }
                 Ask::Rename(t) => crate::display::act(&mut self.page, Ctl::Name, 0, 0.0, Some(&t)),
                 Ask::Layer(i) => {
@@ -1085,6 +1109,20 @@ impl Front {
                 self.open_picker(c, index, _anchor);
                 return;
             }
+            Ctl::Start | Ctl::Stop | Ctl::Submode => {
+                self.open_light_menu(c, _anchor);
+                return;
+            }
+            Ctl::WhereMode | Ctl::WhereAll | Ctl::Zone => {
+                let mode = self.page.draft()["lighting"]["mode"].as_str().unwrap_or("off").to_string();
+                let areas = self.areas.entry((self.page.editing, mode)).or_insert(lighting::ALL_AREAS);
+                lighting::place(&mut self.page, c, index, areas);
+            }
+            Ctl::Preset => {
+                if let Some(c) = lighting::PRESETS.get(index) {
+                    self.paint = *c;
+                }
+            }
             // a checkbox: which box, and the state it is turned to
             Ctl::Demo => self.page.demo = index % 2 == 1,
             Ctl::Random => lighting::act(&mut self.page, c, 0, (index % 2) as f32),
@@ -1120,7 +1158,10 @@ impl Front {
                 }
             }
             Ctl::Fill | Ctl::Scatter | Ctl::Clear => {
-                let leds: Vec<u32> = self.page.layout.iter().filter(|k| k.led).map(|k| k.pos).collect();
+                // Fill paints an area (the whole keyboard, or one of the others); the rest every key
+                let area = if c == Ctl::Fill { lighting::ZONES.get(index).map_or(0x80, |z| z.0) as u8 } else { 0x80 };
+                let within = self.page.zone_set(area);
+                let leds: Vec<u32> = self.page.layout.iter().filter(|k| k.led && within.as_ref().is_none_or(|w| w.contains(&k.pos))).map(|k| k.pos).collect();
                 let mut seed = self.t0.elapsed().as_nanos() as u64 | 1;
                 for pos in 0..self.page.custom.len() as u32 {
                     let led = leds.contains(&pos);
@@ -1453,7 +1494,7 @@ impl Front {
     }
 
     fn close_menu(&mut self) {
-        if self.bind_menu.take().is_some() {
+        if self.bind_menu.take().is_some() || self.light_menu.take().is_some() {
             self.ui.set_menu_open(false);
             self.ui.set_menu_search(true);
             self.ui.set_menu_w(300.0);
@@ -1475,10 +1516,16 @@ impl Front {
                 self.close_place_menu();
             }
         }
-        if self.bind_menu.is_some() {
+        if self.bind_menu.is_some() || self.light_menu.is_some() {
             let (mx, my, mw, mh) = (self.ui.get_menu_x(), self.ui.get_menu_y(), self.ui.get_menu_width(), self.ui.get_menu_height());
             if !(x >= mx && x < mx + mw && y >= my && y < my + mh) {
+                // a press on the dropdown the menu hangs from shuts it, and its click must not open it again
+                let (ax, ay, ah) = (self.ui.get_menu_ax(), self.ui.get_menu_ay(), self.ui.get_menu_ah());
+                if self.light_menu.is_some() && x >= ax && x < ax + self.ui.get_menu_w() && y >= ay && y < ay + ah {
+                    self.shut = Some(((ax, ay), Instant::now()));
+                }
                 self.close_menu();
+                self.refresh();
             }
             return;
         }
@@ -1513,7 +1560,7 @@ impl Front {
         if self.page.view != View::Keys || self.page.sel.is_none() || self.ui.get_place() != "z10" || y < 36.0 {
             return;
         }
-        if self.menu.is_some() || self.bind_menu.is_some() || self.pick.is_some() || self.place_menu {
+        if self.menu.is_some() || self.bind_menu.is_some() || self.light_menu.is_some() || self.pick.is_some() || self.place_menu {
             return;
         }
         let inside = |x0: f32, y0: f32, w: f32, h: f32| x >= x0 && x < x0 + w && y >= y0 && y < y0 + h;
@@ -1540,6 +1587,16 @@ impl Front {
                 self.weather.set_place(weather_place(&self.settings));
                 self.refresh();
             }
+            return;
+        }
+        if let Some(c) = self.light_menu.take() {
+            self.ui.set_menu_open(false);
+            self.ui.set_menu_search(true);
+            self.ui.set_menu_w(300.0);
+            let index = if c == Ctl::Submode { i.min(2) } else { i };
+            lighting::act(&mut self.page, c, index, 0.0);
+            self.push_preview();
+            self.refresh();
             return;
         }
         if let Some((s, _)) = self.bind_menu.take() {
@@ -1720,8 +1777,9 @@ impl Front {
             .into(),
         );
 
-        // the keys over the keyboard
+        // the keys over the keyboard; on Lighting, the area the pointer is over outlined
         let (x0, y0, _, _) = p.view_box;
+        let zoned = self.area_keys();
         let names = p.board_macro_names();
         let keys: Vec<KeyItem> = p
             .layout
@@ -1737,9 +1795,11 @@ impl Front {
                 pale: self.pale.contains(&k.pos),
                 selected: p.view == View::Keys && p.sel == Some(k.pos),
                 pressed: p.pressed.contains(&k.pos),
+                zoned: zoned.as_ref().is_some_and(|z| z.contains(&k.pos)),
             })
             .collect();
         show_rows(ui.get_keys(), |m| ui.set_keys(m), keys);
+        ui.set_dimming(zoned.is_some());
         ui.set_show_rebindings_on(self.rebindings);
 
         // the chosen key's editor
@@ -1908,11 +1968,59 @@ impl Front {
             self.icons = Some((scale, z10::EFFECTS.iter().map(|(m, _)| lighting::icon(m, scale)).collect()));
         }
         let icons = &self.icons.as_ref().unwrap().1;
-        let effects: Vec<EffectItem> = z10::EFFECTS.iter().zip(icons).map(|((m, name), icon)| EffectItem { name: (*name).into(), icon: icon.clone(), on: *m == mode }).collect();
+        let effects: Vec<EffectItem> = z10::EFFECTS
+            .iter()
+            .zip(icons)
+            .map(|((m, name), icon)| EffectItem {
+                name: (*name).into(),
+                icon: icon.clone(),
+                on: *m == mode,
+                motion: match *m {
+                    "breathing" => 1,
+                    "pulse" => 2,
+                    "wave" => 3,
+                    "stars" => 4,
+                    "trigger" => 5,
+                    _ => 0,
+                },
+            })
+            .collect();
+        self.ui.set_effect_moves(effects.iter().any(|e| e.on && e.motion != 0));
         show_rows(self.ui.get_effects(), |m| self.ui.set_effects(m), effects);
-        let tile = lighting::tile(&self.page, self.paint, self.page.demo);
-        self.ui.set_tile_height(tile.height);
-        self.show_cells(tile.cells);
+        let open = self.pick.as_ref().map(|p| (p.ctl, p.index));
+        let b = lighting::boxes(&self.page, self.paint, self.page.demo, open, self.light_menu);
+        self.ui.set_light_kind(b.kind);
+        self.ui.set_light_title(b.title.into());
+        self.ui.set_set_h(b.set_h);
+        self.ui.set_place_h(b.place_h);
+        self.show_cells(b.set);
+        sync_cells(&self.place_cells, b.place);
+    }
+
+    /// The keys of the area the pointer is over on the Lighting page, if it is over one.
+    fn area_keys(&self) -> Option<Vec<u32>> {
+        let p = &self.page;
+        if p.view != View::Lighting {
+            return None;
+        }
+        let bit = lighting::ZONES.get(self.hover_area?)?.0 as u8;
+        Some(p.zone_set(bit).unwrap_or_else(|| p.layout.iter().filter(|k| k.led).map(|k| k.pos).collect()))
+    }
+
+    /// Where the keys of the area the pointer is over are, in the keyboard's
+    /// own pixels `w` across: the rest of the picture is dimmed around them.
+    pub fn dim_rects(&self, w: u32) -> Option<Vec<[f32; 4]>> {
+        let keys = self.area_keys()?;
+        let (x0, y0, vw, _) = self.page.view_box;
+        let s = w as f64 / vw;
+        Some(
+            self.page
+                .layout
+                .iter()
+                .filter(|k| keys.contains(&k.pos))
+                .map(|k| [((k.x - x0 + z10::GAP / 2.0) * s) as f32, ((k.y - y0 + z10::GAP / 2.0) * s) as f32, ((k.w - z10::GAP) * s) as f32, ((k.h - z10::GAP) * s) as f32])
+                .collect(),
+        )
     }
 
     /// The tile's pieces, changed in place where they can be.
@@ -1930,6 +2038,38 @@ impl Front {
     }
 
     // ------------------------------------------------------------ the sliders' jobs
+
+    /// A dropdown on the Lighting page opened: its choices, under it, as wide as it is.
+    fn open_light_menu(&mut self, c: Ctl, anchor: (f32, f32, f32)) {
+        if let Some((at, when)) = self.shut.take() {
+            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
+                return;
+            }
+        }
+        let Some((list, chosen)) = lighting::choices(&self.page, c) else { return };
+        self.close_menu();
+        self.close_picker();
+        let rows: Vec<MenuRow> = list.iter().enumerate().map(|(j, label)| MenuRow { kind: 0, label: (*label).into(), tag: "".into(), tick: j == chosen, sub: "".into() }).collect();
+        let h = 6.0 + rows.len() as f32 * 33.0 + 6.0;
+        self.ui.set_menu_search(false);
+        self.ui.set_menu_back(false);
+        self.ui.set_menu_natural(h);
+        let w = if c == Ctl::Submode { lighting::SET_W } else { lighting::PLACE_W } - 32.0;
+        self.ui.set_menu_w(w);
+        self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
+        let (ax, ay, ah) = anchor;
+        let win = self.ui.get_window_height();
+        let (below, above) = (win - ay - ah - 14.0, ay - 70.0);
+        let down = h <= below || below >= h.min(260.0) || below >= above;
+        let room = if down { below } else { above };
+        self.ui.set_menu_ax(ax);
+        self.ui.set_menu_ay(ay);
+        self.ui.set_menu_ah(ah);
+        self.ui.set_menu_top(if down { ay + ah + 6.0 } else { ay - 6.0 - h.min(room) });
+        self.ui.set_menu_max(if h > room { room } else { win * 0.7 });
+        self.ui.set_menu_open(true);
+        self.light_menu = Some(c);
+    }
 
     fn open_bind_menu(&mut self, i: usize, anchor: (f32, f32, f32)) {
         self.close_menu();

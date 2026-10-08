@@ -621,7 +621,10 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         let lights = front.lights().unwrap_or_default();
         let gain = front.light_gain(reference).max(gain);
         eprintln!("the light at {:.0} nits", gain as f64 * reference);
-        let lit = light(&board, &lights, front.page.locks, gain, reference, front.overlays.panel_for(board.w, board.lcd().dot));
+        let mut lit = light(&board, &lights, front.page.locks, gain, reference, front.overlays.panel_for(board.w, board.lcd().dot));
+        if let Some(rects) = front.dim_rects(board.w) {
+            dim_around(&mut lit, board.w as usize, &rects, board.chassis());
+        }
         let lit = Rc::new(Lit { px: lit, w: rect.2, h: rect.3 });
         pic.set_keyboard(rect, Some(&lit));
         front.ui.set_board_ready(true);
@@ -962,6 +965,8 @@ struct App {
     /// the last frame's keyboard picture, taken back once nothing shows it,
     /// for the next to be drawn into rather than made anew
     spare: Vec<f32>,
+    /// the keys of the area the Lighting page has the pointer over, which the rest of the picture dims around
+    dim: Option<Vec<[f32; 4]>>,
     /// when a lighting effect's next frame is due, at the rate Settings ›
     /// Performance asks for
     effect_due: Instant,
@@ -1237,6 +1242,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         lights: Vec::new(),
         lit: None,
         spare: Vec::new(),
+        dim: None,
         effect_due: Instant::now(),
         asked: None,
         build,
@@ -1881,13 +1887,20 @@ impl App {
         }
         // the last frame's picture, kept until the picture shows the new one
         let mut shown_before = None;
-        if lights.is_some() || panel_moved {
+        // the area the pointer is over on the Lighting page: the rest of the keyboard dims
+        let dim = self.board.as_ref().and_then(|b| self.front.dim_rects(b.w));
+        let dim_moved = dim != self.dim;
+        if lights.is_some() || panel_moved || dim_moved {
             if let Some(l) = lights {
                 self.lights = l;
             }
+            self.dim = dim;
             if let Some(board) = &self.board {
                 let mut px = std::mem::take(&mut self.spare);
                 light_into(&mut px, board, &self.lights, self.front.page.locks, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
+                if let Some(rects) = &self.dim {
+                    dim_around(&mut px, board.w as usize, rects, board.chassis());
+                }
                 shown_before = self.lit.replace(Rc::new(Lit { px, w: board.w as usize, h: board.h as usize }));
             }
             self.readout();
@@ -2607,6 +2620,35 @@ fn light(board: &Board, lights: &[Light], locks: u8, ceiling: f32, reference: f6
 
 /// The keyboard's picture as `light` draws it, into `px`, which an effect
 /// keeps from one frame to the next rather than making it anew.
+/// The keyboard dimmed and dulled everywhere but inside `rects`, so the keys
+/// of one area stand out; the page round the keyboard (where `chassis`, its
+/// coverage, is 0) stays as it is.
+fn dim_around(px: &mut [f32], w: usize, rects: &[[f32; 4]], chassis: &[f32]) {
+    let h = px.len() / 4 / w.max(1);
+    let mut keep = vec![false; w * h];
+    for r in rects {
+        let (x0, y0) = (r[0].max(0.0) as usize, r[1].max(0.0) as usize);
+        let (x1, y1) = (((r[0] + r[2]).ceil() as usize).min(w), ((r[1] + r[3]).ceil() as usize).min(h));
+        for y in y0..y1 {
+            keep[y * w + x0..y * w + x1.max(x0)].iter_mut().for_each(|k| *k = true);
+        }
+    }
+    for (i, p) in px.chunks_exact_mut(4).enumerate() {
+        if keep[i] {
+            continue;
+        }
+        let a = chassis.get(i).copied().unwrap_or(1.0);
+        if a <= 0.0 {
+            continue;
+        }
+        let l = 0.2627 * p[0] + 0.678 * p[1] + 0.0593 * p[2];
+        for c in &mut p[..3] {
+            let dimmed = (l + (*c - l) * 0.6) * 0.38;
+            *c += (dimmed - *c) * a;
+        }
+    }
+}
+
 fn light_into(px: &mut Vec<f32>, board: &Board, lights: &[Light], locks: u8, ceiling: f32, reference: f64, panel: Option<&overlays::Panel>) {
     board.compose_into(px, lights, locks, reference as f32, ceiling);
     // The display, lit from behind as an LCD is: its lit dots, its unlit dots

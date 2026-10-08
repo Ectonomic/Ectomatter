@@ -856,7 +856,7 @@ impl Page {
         }
     }
 
-    fn zone_set(&self, zone: u8) -> Option<Vec<u32>> {
+    pub fn zone_set(&self, zone: u8) -> Option<Vec<u32>> {
         if zone & 0x80 != 0 {
             return None;
         }

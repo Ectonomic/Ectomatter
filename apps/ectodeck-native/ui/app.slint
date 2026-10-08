@@ -90,6 +90,8 @@ export struct KeyItem {
     pale: bool,
     selected: bool,
     pressed: bool,
+    // in the area the pointer is over on the Lighting page
+    zoned: bool,
 }
 
 // a picture over the keyboard (a slider knob, the display, its glass), where
@@ -123,6 +125,8 @@ export struct EffectItem {
     name: string,
     icon: image,
     on: bool,
+    // how its picture moves while chosen: 0 still, 1 breathing, 2 flashing, 3 rolling, 4 twinkling, 5 a press fading
+    motion: int,
 }
 
 // the Key library: every key and slider, in the groups the keyboard has them in
@@ -291,15 +295,17 @@ component WordButton inherits Rectangle {
     in property <bool> enabled: true;
     in property <color> fill: Ink.shade1;
     in property <color> fill-hover: Ink.shade2;
+    // as wide as it is given, rather than as its words
+    in property <length> wide: 0;
     out property <bool> hover: ta.has-hover && root.enabled;
     out property <bool> down: ta.pressed && root.enabled;
     callback clicked;
     height: root.primary ? 32px : 30px;
-    width: label.preferred-width + 24px + (root.primary ? 2px : 0);
+    width: root.wide > 0 ? root.wide : label.preferred-width + 24px + (root.primary ? 2px : 0);
     border-radius: 8px;
     // turned off, the whole button fades to 35% over the page's ground, as the
     // web app's does; faded piece by piece, its words would come out lighter
-    property <color> face: root.primary ? Ink.ink : ta.has-hover && root.enabled ? root.fill-hover : root.fill;
+    property <color> face: root.primary ? (ta.has-hover && root.enabled ? #ffffff : Ink.ink) : ta.has-hover && root.enabled ? root.fill-hover : root.fill;
     property <color> ink: root.primary ? Ink.base : Ink.ink;
     background: root.enabled ? root.face : root.face.mix(Ink.base, 0.35);
     label := Text {
@@ -363,79 +369,6 @@ component Spinner inherits Rectangle {
     }
 }
 
-// a profile's button, as the rail's items are: lighter under the pointer,
-// lighter still when chosen; its colours, name and effect, and whether it is
-// the one in use
-component ProfileButton inherits Rectangle {
-    in property <ProfileItem> p;
-    out property <bool> hover: ta.has-hover;
-    callback clicked;
-    border-radius: 10px;
-    background: root.p.current ? Ink.shade2 : ta.has-hover ? Ink.shade1 : transparent;
-    width: max(name-row.preferred-width, 15px + sub-row.preferred-width) + 22px;
-    height: 45px;
-    name-row := HorizontalLayout {
-        x: 10px;
-        y: 6px;
-        width: self.preferred-width;
-        height: 19px;
-        spacing: 7px;
-        Rectangle {
-            width: 8px;
-            Rectangle {
-                y: 5px;
-                width: 8px;
-                height: 8px;
-                border-radius: 2px;
-                background: root.p.colors <= 1 ? root.p.c1
-                    : root.p.colors == 2 ? @linear-gradient(90deg, root.p.c1 0%, root.p.c2 100%)
-                    : root.p.colors == 3 ? @linear-gradient(90deg, root.p.c1 0%, root.p.c2 50%, root.p.c3 100%)
-                    : @linear-gradient(90deg, root.p.c1 0%, root.p.c2 33.3%, root.p.c3 66.7%, root.p.c4 100%);
-            }
-        }
-        Text {
-            text: root.p.name;
-            font-family: "Geist";
-            font-size: 13px;
-            color: (root.p.current || ta.has-hover) ? Ink.bright : Ink.dim;
-            vertical-alignment: center;
-        }
-    }
-    sub-row := HorizontalLayout {
-        x: 25px;
-        y: 24px;
-        width: self.preferred-width;
-        height: 15px;
-        Text {
-            text: root.p.sub;
-            font-family: "Geist";
-            font-size: 11px;
-            color: Ink.soft;
-            vertical-alignment: center;
-        }
-        // kept on every profile, shown on the one in use, so the buttons keep their widths
-        Text {
-            text: ", active";
-            font-family: "Geist";
-            font-size: 11px;
-            color: root.p.active ? Ink.soft : transparent;
-            vertical-alignment: center;
-        }
-    }
-    if root.p.dirty: Rectangle {
-        x: parent.width - 12px;
-        y: 6px;
-        width: 6px;
-        height: 6px;
-        border-radius: 3px;
-        background: Ink.warn;
-    }
-    ta := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-}
-
 // a key over the keyboard: the edge it shows when pointed at or chosen, a
 // press (held down on the keyboard, or by the pointer here), and its new
 // meaning printed at the foot of its cap
@@ -451,8 +384,8 @@ component KeyBox inherits Rectangle {
     height: root.k.h * root.unit;
     border-radius: (root.k.molded ? 0.13 : 0.24) * root.cqw;
     background: root.k.pressed || ta.pressed ? #00000052 : transparent;
-    border-width: root.k.selected ? 1.5px : ta.has-hover ? 1px : 0;
-    border-color: root.k.selected ? #ffffffe0 : #8c8c8c;
+    border-width: root.k.zoned ? 2px : root.k.selected ? 1.5px : ta.has-hover ? 1px : 0;
+    border-color: root.k.zoned ? Ink.ink : root.k.selected ? #ffffffe0 : #8c8c8c;
     if ta.has-hover && !root.k.selected: Rectangle {
         x: 1px;
         y: 1px;
@@ -485,171 +418,6 @@ component KeyBox inherits Rectangle {
     ta := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
-    }
-}
-
-// the button that opens a layer's action menu: the action's kind, its name, a chevron
-component ActButton inherits Rectangle {
-    in property <string> kind;
-    in property <string> label;
-    in property <bool> nothing;
-    out property <bool> hover: ta.has-hover;
-    callback clicked;
-    height: 32px;
-    border-radius: 8px;
-    background: ta.has-hover ? Ink.shade3 : Ink.shade2;
-    HorizontalLayout {
-        padding-left: 10px;
-        padding-right: 10px;
-        spacing: 10px;
-        if root.kind != "": Rectangle {
-            width: tag.preferred-width + 12px;
-            Rectangle {
-                y: (parent.height - self.height) / 2;
-                height: 15px;
-                border-radius: 4px;
-                background: Ink.shade4;
-                tag := Text {
-                    text: root.kind;
-                    font-family: "Geist";
-                    font-size: 11px;
-                    color: Ink.dim;
-                }
-            }
-        }
-        Text {
-            horizontal-stretch: 1;
-            text: root.label;
-            font-family: "Geist";
-            font-size: 13px;
-            color: root.nothing ? Ink.quiet : Ink.ink;
-            vertical-alignment: center;
-            overflow: elide;
-        }
-        Rectangle {
-            width: 9px;
-            Path {
-                y: (parent.height - 6px) / 2;
-                width: 9px;
-                height: 6px;
-                viewbox-width: 10;
-                viewbox-height: 6;
-                commands: "M1 1l4 4 4-4";
-                fill: transparent;
-                stroke: Ink.quiet;
-                stroke-width: 1.35px;
-            }
-        }
-    }
-    ta := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-}
-
-// a flat chip naming a key a macro holds
-component Chip inherits Rectangle {
-    in property <string> text;
-    height: 19px;
-    width: label.preferred-width + 12px + 2px;
-    border-radius: 4px;
-    border-width: 1px;
-    border-color: Ink.line;
-    background: Ink.well;
-    label := Text {
-        text: root.text;
-        font-family: "Barlow Semi Condensed";
-        font-weight: 600;
-        font-size: 11px;
-        letter-spacing: 0.22px;
-        color: Ink.ink;
-    }
-}
-
-// one of the chosen key's layers: what it does, and how to change it
-component LayerEditor inherits VerticalLayout {
-    in property <LayerItem> l;
-    in property <int> index;
-    callback menu(int, length, length, length);
-    callback listen(int);
-    callback macro-editor();
-    padding-left: 20px;
-    padding-right: 20px;
-    padding-top: 18px;
-    padding-bottom: 18px;
-    spacing: 10px;
-    alignment: start;
-    Text {
-        height: 18px;
-        text: root.l.title;
-        font-family: "Geist";
-        font-size: 13px;
-        font-weight: 500;
-        color: Ink.soft;
-        vertical-alignment: center;
-    }
-    HorizontalLayout {
-        spacing: 6px;
-        alignment: start;
-        act := ActButton {
-            horizontal-stretch: 0;
-            preferred-width: 272px;
-            min-width: 120px;
-            kind: root.l.kind;
-            label: root.l.label;
-            nothing: root.l.nothing;
-            clicked => { root.menu(root.index, self.absolute-position.x, self.absolute-position.y, self.height); }
-        }
-        press := TextButton {
-            horizontal-stretch: 0;
-            y: 2px;
-            text: root.l.listening ? "Press a key or combination…" : "Press a key";
-            on: root.l.listening;
-            clicked => { root.listen(root.index); }
-        }
-        Rectangle {
-            horizontal-stretch: 1;
-        }
-    }
-    if root.l.macro: HorizontalLayout {
-        height: 19px;
-        spacing: 4px;
-        alignment: start;
-        for name[i] in root.l.held: HorizontalLayout {
-            spacing: 4px;
-            if i > 0: Text {
-                text: "+";
-                font-family: "Geist";
-                font-size: 12px;
-                color: Ink.quiet;
-                vertical-alignment: center;
-            }
-            Chip {
-                text: name;
-            }
-        }
-        Rectangle {
-            width: link.preferred-width + 10px;
-            link := Text {
-                x: 10px;
-                text: "Edit in Macro Editor ›";
-                font-family: "Geist";
-                font-size: 12px;
-                color: Ink.ink;
-                vertical-alignment: center;
-            }
-            Rectangle {
-                x: 10px;
-                y: link.y + link.height - 1px;
-                width: link.width - 7px;
-                height: 1px;
-                background: #5c5c5c;
-            }
-            TouchArea {
-                mouse-cursor: pointer;
-                clicked => { root.macro-editor(); }
-            }
-        }
     }
 }
 
@@ -967,39 +735,6 @@ component Menu inherits Rectangle {
     }
 }
 
-// an effect's button: its picture and its name, lighter when chosen
-component EffectButton inherits Rectangle {
-    in property <EffectItem> fx;
-    callback clicked;
-    width: 104px;
-    height: 70px;
-    border-radius: 12px;
-    background: root.fx.on ? #383838 : ta.has-hover ? Ink.shade2 : Ink.shade1;
-    Image {
-        x: 22px;
-        y: 11px;
-        width: 60px;
-        height: 24px;
-        source: root.fx.icon;
-        image-fit: fill;
-    }
-    Text {
-        y: 42px;
-        height: 19px;
-        text: root.fx.name;
-        font-family: "Geist";
-        font-size: 13.5px;
-        font-weight: 500;
-        color: root.fx.on ? #ffffff : ta.has-hover ? Ink.bright : Ink.dim;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-    ta := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-}
-
 // one piece of the Lighting page's tile, drawn where the window placed it
 component CellView inherits Rectangle {
     in property <Cell> c;
@@ -1020,8 +755,22 @@ component CellView inherits Rectangle {
     y: root.c.y;
     width: root.c.w;
     height: root.c.h;
+    // the Lighting page's words: a group's heading in small capitals (33), a color's hex
+    // code (34), a setting's name (35), the words at a slider's ends (36 left, 37 right)
+    if root.c.kind == 0 && root.c.style >= 33: Text {
+        x: 0;
+        width: parent.width;
+        text: root.c.text;
+        font-family: "Geist";
+        font-size: root.c.style == 33 ? 10.5px : root.c.style == 34 ? 12px : root.c.style == 35 ? 12.5px : 11px;
+        font-weight: root.c.style == 33 ? 600 : root.c.style == 34 ? 500 : 400;
+        letter-spacing: root.c.style == 33 ? 0.95px : 0;
+        color: root.c.style == 35 || root.c.style == 34 ? Ink.dim : Ink.quiet;
+        horizontal-alignment: root.c.style == 37 ? right : left;
+        vertical-alignment: center;
+    }
     // text: a row's name, a column's heading, a note, the empty tile's words, a slider's value
-    if root.c.kind == 0: Text {
+    if root.c.kind == 0 && root.c.style < 33: Text {
         x: 0;
         width: parent.width;
         text: root.c.text;
@@ -1516,6 +1265,279 @@ component CellView inherits Rectangle {
             }
         }
     }
+    // ---- the Lighting page's own pieces, in the shades of its boxes
+    // a value in a small well
+    if root.c.kind == 40: Rectangle {
+        border-radius: 6px;
+        background: Ink.well;
+        Text {
+            text: root.c.text;
+            font-family: "Geist";
+            font-size: 11.5px;
+            font-weight: 500;
+            color: Ink.dim;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    // a slider on a well, filled to its place in its color; the knob follows the pointer while held
+    if root.c.kind == 41: filled := Rectangle {
+        property <float> at: fdrag.pressed ? max(0, min(1, (fdrag.mouse-x - 9px) / (self.width - 18px))) : root.c.value;
+        Rectangle {
+            y: 7px;
+            height: 6px;
+            border-radius: 3px;
+            background: Ink.well;
+            clip: true;
+            Rectangle {
+                x: 0;
+                width: 9px + filled.at * (parent.width - 18px);
+                border-radius: 3px;
+                background: root.c.color;
+            }
+        }
+        // the knob, ringed in the box's color
+        Rectangle {
+            property <length> d: fdrag.has-hover || fdrag.pressed ? 19.5px : 18px;
+            x: parent.at * (parent.width - 18px) + 9px - self.d / 2 - 3px;
+            y: 10px - self.d / 2 - 3px;
+            width: self.d + 6px;
+            height: self.d + 6px;
+            border-radius: self.width / 2;
+            background: Ink.box;
+            drop-shadow-blur: 6px;
+            drop-shadow-offset-y: 2px;
+            drop-shadow-color: #000000aa;
+            Rectangle {
+                x: 3px;
+                y: 3px;
+                width: parent.d;
+                height: parent.d;
+                border-radius: self.width / 2;
+                background: #fafafa;
+            }
+        }
+        fdrag := TouchArea {
+            mouse-cursor: pointer;
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.down) {
+                    root.slide(root.c.id, max(0, min(1, (self.mouse-x - 9px) / (self.width - 18px))));
+                }
+            }
+            moved => {
+                if (self.pressed) {
+                    root.slide(root.c.id, max(0, min(1, (self.mouse-x - 9px) / (self.width - 18px))));
+                }
+            }
+            double-clicked => { root.reset(root.c.id); }
+        }
+    }
+    // a color's dot, ringed while the picker is open on it; style 1 opens the picker for any color
+    if root.c.kind == 42: Rectangle {
+        border-radius: 14px;
+        border-width: root.c.on ? 2px : 0;
+        border-color: Ink.dim;
+        Rectangle {
+            property <length> d: dot-ta.has-hover ? 26px : 24px;
+            x: (parent.width - self.d) / 2;
+            y: (parent.height - self.d) / 2;
+            width: self.d;
+            height: self.d;
+            border-radius: self.d / 2;
+            background: root.c.style == 1 ? (dot-ta.has-hover ? Ink.hover-box : transparent) : root.c.color;
+            border-width: 1px;
+            border-color: root.c.style == 1 ? (dot-ta.has-hover ? #8a8a94 : #4a4a52) : #ffffff2a;
+            if root.c.style == 1: Path {
+                width: 12px;
+                height: 12px;
+                viewbox-width: 12;
+                viewbox-height: 12;
+                commands: "M6 1.5v9M1.5 6h9";
+                fill: transparent;
+                stroke: dot-ta.has-hover ? Ink.bright : Ink.soft;
+                stroke-width: 1.5px;
+            }
+        }
+        dot-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+        }
+    }
+    // a piece of a run of colors, from its color to the next (its red, green and blue packed in
+    // `value`, as 65536 r + 256 g + b); style says which ends are round
+    if root.c.kind == 43: Rectangle {
+        property <color> next: rgb(floor(root.c.value / 65536), mod(floor(root.c.value / 256), 256), mod(root.c.value, 256));
+        border-top-left-radius: mod(root.c.style, 2) == 1 ? 5px : 0;
+        border-bottom-left-radius: mod(root.c.style, 2) == 1 ? 5px : 0;
+        border-top-right-radius: root.c.style >= 2 ? 5px : 0;
+        border-bottom-right-radius: root.c.style >= 2 ? 5px : 0;
+        background: @linear-gradient(90deg, root.c.color 0%, self.next 100%);
+    }
+    // a switch's choice on its well, its icon before its words if it has one
+    if root.c.kind == 44: Rectangle {
+        border-radius: 6px;
+        background: root.c.on ? (ch-ta.has-hover ? Ink.pick-hover : Ink.pick) : ch-ta.has-hover ? Ink.hover-well : transparent;
+        HorizontalLayout {
+            alignment: center;
+            spacing: 6px;
+            if root.c.lines != "": Path {
+                y: (parent.height - 14px) / 2;
+                width: 14px;
+                height: 14px;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                commands: root.c.lines;
+                fill: transparent;
+                stroke: root.c.on || ch-ta.has-hover ? Ink.bright : Ink.soft;
+                stroke-width: 1.8px;
+            }
+            Text {
+                text: root.c.text;
+                font-family: "Geist";
+                font-size: 12.5px;
+                color: root.c.on || ch-ta.has-hover ? Ink.bright : Ink.soft;
+                vertical-alignment: center;
+            }
+        }
+        ch-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+        }
+    }
+    // an area's chip: outlined, white when chosen (with a tick, style 1); it tells the page the pointer is over it
+    if root.c.kind == 45: Rectangle {
+        border-radius: 14px;
+        background: root.c.on ? (ar-ta.has-hover ? #ffffff : Ink.ink) : ar-ta.has-hover ? Ink.hover-box : transparent;
+        border-width: root.c.on ? 0 : 1px;
+        border-color: #3a3a41;
+        HorizontalLayout {
+            alignment: center;
+            spacing: 5px;
+            if root.c.on && root.c.style == 1: Path {
+                y: (parent.height - 12px) / 2;
+                width: 12px;
+                height: 12px;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                commands: "M5 12.5l4.5 4.5L19 7.5";
+                fill: transparent;
+                stroke: #131316;
+                stroke-width: 2.6px;
+            }
+            Text {
+                text: root.c.text;
+                font-family: "Geist";
+                font-size: 12.5px;
+                color: root.c.on ? #131316 : ar-ta.has-hover ? Ink.bright : Ink.dim;
+                vertical-alignment: center;
+            }
+        }
+        ar-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+            changed has-hover => { root.hovered(root.c.index, self.has-hover); }
+        }
+    }
+    // a dropdown on a well: what is chosen, and a chevron
+    if root.c.kind == 46: Rectangle {
+        border-radius: 8px;
+        background: dr-ta.has-hover || root.c.on ? Ink.hover-box : Ink.well;
+        Text {
+            x: 12px;
+            width: parent.width - 40px;
+            text: root.c.text;
+            font-family: "Geist";
+            font-size: 13px;
+            color: Ink.bright;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        Path {
+            x: parent.width - 24px;
+            y: (parent.height - 12px) / 2;
+            width: 12px;
+            height: 12px;
+            viewbox-width: 12;
+            viewbox-height: 12;
+            commands: "M3 4.5l3 3 3-3";
+            fill: transparent;
+            stroke: Ink.quiet;
+            stroke-width: 1.6px;
+        }
+        dr-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+        }
+    }
+    // a quiet link: Reset (with its icon), Select all, Scatter colors
+    if root.c.kind == 47: Rectangle {
+        border-radius: 6px;
+        background: q-ta.has-hover ? Ink.hover-box : transparent;
+        HorizontalLayout {
+            padding-left: 9px;
+            padding-right: 9px;
+            spacing: 6px;
+            if root.c.lines != "": Path {
+                y: (parent.height - 13px) / 2;
+                width: 13px;
+                height: 13px;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                commands: root.c.lines;
+                fill: transparent;
+                stroke: q-ta.has-hover ? Ink.bright : Ink.soft;
+                stroke-width: 1.9px;
+            }
+            Text {
+                text: root.c.text;
+                font-family: "Geist";
+                font-size: 12.5px;
+                font-weight: 500;
+                color: q-ta.has-hover ? Ink.bright : Ink.soft;
+                vertical-alignment: center;
+            }
+        }
+        q-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+        }
+    }
+    // a checkbox on a box, and its words
+    if root.c.kind == 48: Rectangle {
+        Rectangle {
+            x: 0;
+            y: 1px;
+            width: 18px;
+            height: 18px;
+            border-radius: 5px;
+            background: root.c.on ? (cb-ta.has-hover ? Ink.bright : Ink.dim) : cb-ta.has-hover ? Ink.hover-box : Ink.well;
+            border-width: root.c.on ? 0 : 1px;
+            border-color: cb-ta.has-hover ? #6a6a74 : #4a4a52;
+            if root.c.on: Path {
+                width: 18px;
+                height: 18px;
+                viewbox-width: 18;
+                viewbox-height: 18;
+                commands: "M5.2 9.3 L7.9 11.9 L12.9 6.4";
+                fill: transparent;
+                stroke: #131316;
+                stroke-width: 2px;
+            }
+        }
+        Text {
+            x: 28px;
+            width: parent.width - 28px;
+            text: root.c.text;
+            font-family: "Geist";
+            font-size: 13px;
+            color: cb-ta.has-hover ? Ink.bright : Ink.dim;
+            vertical-alignment: center;
+        }
+        cb-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.pick(root.c.id, root.c.index * 2 + (root.c.on ? 0 : 1), 0, 0, 0); }
+        }
+    }
 }
 
 // a number or code in the colour picker, its name under it
@@ -1878,6 +1900,70 @@ component SmallCap inherits Rectangle {
         overflow: elide;
         width: parent.width - 4px;
         x: 2px;
+    }
+}
+
+// The effects, three across: each a well with its small picture under a
+// film and its name; the chosen one lit, and only its picture moving
+component EffectGrid inherits PageBox {
+    in property <[EffectItem]> effects;
+    callback chose(int);
+    // whether the chosen effect's picture moves: the page is drawn again only while it does
+    in property <bool> moving;
+    title: "Effect";
+    property <length> tw: (self.width - 32px - 16px) / 3;
+    property <duration> t: root.moving ? animation-tick() : 0ms;
+    for fx[i] in root.effects: Rectangle {
+        x: 16px + mod(i, 3) * (root.tw + 8px);
+        y: 48px + floor(i / 3) * (76px + 8px);
+        width: root.tw;
+        height: 76px;
+        border-radius: 10px;
+        background: fx.on ? (fx-ta.has-hover ? Ink.pick-hover : Ink.pick) : fx-ta.has-hover ? Ink.hover-box : Ink.well;
+        Rectangle {
+            x: 6px;
+            y: 6px;
+            width: parent.width - 12px;
+            height: 40px;
+            border-radius: 6px;
+            clip: true;
+            background: fx.name == "Off" ? Ink.hover-box : #0c0e10;
+            property <float> phase: fx.on && fx.motion != 0 ? root.t / 1ms : 0;
+            if fx.name != "Off": Image {
+                // rolling: a picture twice as wide, slid along and round again
+                x: fx.on && fx.motion == 3 ? -mod(parent.phase / 3000, 1) * parent.width : 0;
+                width: fx.motion == 3 ? parent.width * 2 : parent.width;
+                height: parent.height;
+                source: fx.icon;
+                image-fit: fill;
+                opacity: !fx.on ? 1
+                    : fx.motion == 1 ? 0.3 + 0.7 * (0.5 - 0.5 * cos(parent.phase / 3000 * 360deg))
+                    : fx.motion == 2 ? (mod(parent.phase, 1200) < 600 ? 1 : 0.3)
+                    : fx.motion == 4 ? 0.55 + 0.45 * (0.5 - 0.5 * cos(parent.phase / 1600 * 360deg))
+                    : fx.motion == 5 ? 1 - 0.75 * min(1, mod(parent.phase, 1400) / 1400)
+                    : 1;
+            }
+            // the film every picture sits under
+            Rectangle {
+                background: Ink.pick.with-alpha(0.35);
+            }
+        }
+        Text {
+            y: 53px;
+            height: 15px;
+            width: parent.width;
+            text: fx.name;
+            font-family: "Geist";
+            font-size: 12px;
+            font-weight: fx.on ? 500 : 400;
+            color: fx.on || fx-ta.has-hover ? Ink.bright : Ink.soft;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        fx-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.chose(i); }
+        }
     }
 }
 
@@ -2622,15 +2708,17 @@ component AnchorColumn inherits VerticalLayout {
             }
             HorizontalLayout {
                 spacing: 6px;
+                height: 32px;
                 WordButton {
-                    horizontal-stretch: 1;
+                    wide: (sbox.width - 20px - 6px) / 2;
+                    height: 32px;
                     text: root.asking ? "Keep" : "Discard";
                     fill: Ink.well;
                     fill-hover: Ink.hover-well;
                     clicked => { root.asking = !root.asking; }
                 }
                 WordButton {
-                    horizontal-stretch: 1;
+                    wide: (sbox.width - 20px - 6px) / 2;
                     text: root.asking ? "Discard" : "Save";
                     primary: !root.asking;
                     fill: #5c2420;
@@ -2742,6 +2830,17 @@ export component AppWindow inherits Window {
     in property <[Overlay]> overlays;
     // the Lighting page: its effects, and its tile's pieces as the window lays them out
     in property <[EffectItem]> effects;
+    // the chosen effect's picture moves; what the boxes beside the effects hold (0 an effect's
+    // settings, 1 the keys dark, 2 the brush), the first one's title, and their heights
+    in property <bool> effect-moves;
+    in property <int> light-kind;
+    in property <string> light-title;
+    in property <length> set-h;
+    in property <length> place-h;
+    in property <[Cell]> place-cells;
+    // the pointer over an area on the Lighting page: the keyboard dims around it
+    in property <bool> dimming;
+    callback area-hover(int, bool);
     in property <[Cell]> cells;
     in property <length> tile-height;
     in property <length> settings-h;
@@ -2898,8 +2997,22 @@ export component AppWindow inherits Window {
     property <length> second-w: root.key-open ? 460px : root.slider-chosen != 0 ? 360px : 340px;
     property <length> second-h: second-fits || root.key-open || root.slider-chosen != 0 ? lib-h : 210px;
     property <bool> second-fits: lib-w + 12px + second-w <= under-w;
+    // Lighting: the effects (300 wide), the effect's settings (360) and where and when
+    // (320), side by side while they fit and wrapping under when they don't; the
+    // boxes in a row as tall as its tallest, a single row reaching the anchor's foot
+    property <length> lfx-h: 48px + 3 * 76px + 2 * 8px + 18px;
+    property <bool> lfits1: 300px + 12px + 360px <= under-w;
+    property <int> lr1: lfits1 ? 0 : 1;
+    property <length> lx1: lfits1 ? 312px : 0;
+    property <int> lr2: root.light-kind != 0 ? -1 : lfits1 ? (300px + 12px + 360px + 12px + 320px <= under-w ? 0 : 1) : (360px + 12px + 320px <= under-w ? 1 : 2);
+    property <length> lx2: lr2 == 0 ? 684px : lr2 == 1 && !lfits1 ? 372px : 0;
+    property <int> lrows: lr2 == 2 ? 3 : lr1 == 1 || lr2 == 1 ? 2 : 1;
+    property <length> lrow0: max(lrows == 1 ? anchor.preferred-height : 0, max(lfx-h, max(lr1 == 0 ? root.set-h : 0, lr2 == 0 ? root.place-h : 0)));
+    property <length> lrow1: max(lr1 == 1 ? root.set-h : 0, lr2 == 1 ? root.place-h : 0);
+    property <length> lrow2: lr2 == 2 ? root.place-h : 0;
+    property <length> light-h: lrow0 + (lrows > 1 ? 12px + lrow1 : 0) + (lrows > 2 ? 12px + lrow2 : 0);
     property <length> tab-h: root.tab == 0 ? (second-fits ? lib-h : lib-h + 12px + second-h)
-        : root.tab == 1 ? 70px + 12px + root.tile-height : root.tile-height;
+        : root.tab == 1 ? light-h : root.tile-height;
     property <length> under-board: 18px + max(anchor.preferred-height, tab-h);
     property <length> page-h: board-top + board-h + under-board + 40px;
     // the page's scrollbar, as WebKit drew it: over the whole window, when the page is longer than it
@@ -3135,28 +3248,39 @@ export component AppWindow inherits Window {
                         picked(i) => { root.slider-bind-at(i); }
                     }
                 }
-                // the Lighting page: the effects, then one tile of the effect's settings
-                if root.tab == 1: Rectangle {
+                // the Lighting page: the effects, the chosen one's settings, and where and when it plays
+                if root.tab == 1 && root.boot == 0: EffectGrid {
                     x: under-x;
                     y: under-top;
-                    width: under-w;
-                    height: 70px + 12px + root.tile-height;
-                    for fx[i] in root.effects: EffectButton {
-                        x: i * 112px;
-                        y: 0;
-                        fx: fx;
-                        clicked => { root.effect(i); }
+                    width: 300px;
+                    height: lrow0;
+                    effects: root.effects;
+                    moving: root.effect-moves;
+                    chose(i) => { root.effect(i); }
+                }
+                if root.tab == 1 && root.boot == 0: PageBox {
+                    x: under-x + lx1;
+                    y: under-top + (lr1 == 0 ? 0 : lrow0 + 12px);
+                    width: 360px;
+                    height: lr1 == 0 ? lrow0 : lrow1;
+                    title: root.light-title;
+                    for c in root.cells: CellView {
+                        c: c;
+                        pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
+                        slide(id, v) => { root.cell-slide(id, v); }
                     }
-                    Rectangle {
-                        y: 82px;
-                        height: root.tile-height;
-                        border-radius: 14px;
-                        background: Ink.shade1;
-                        for c in root.cells: CellView {
-                            c: c;
-                            pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
-                            slide(id, v) => { root.cell-slide(id, v); }
-                        }
+                }
+                if root.tab == 1 && root.boot == 0 && root.light-kind == 0: PageBox {
+                    x: under-x + lx2;
+                    y: under-top + (lr2 == 0 ? 0 : lr2 == 1 ? lrow0 + 12px : lrow0 + 12px + lrow1 + 12px);
+                    width: 320px;
+                    height: lr2 == 0 ? lrow0 : lr2 == 1 ? lrow1 : lrow2;
+                    title: "Where and when";
+                    for c in root.place-cells: CellView {
+                        c: c;
+                        pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
+                        slide(id, v) => { root.cell-slide(id, v); }
+                        hovered(i, on) => { root.area-hover(i, on); }
                     }
                 }
                 // Settings: its tiles, as the window lays them out
@@ -3198,7 +3322,8 @@ export component AppWindow inherits Window {
                         animate along { duration: root.knob-glide; easing: linear; }
                         x: o.x + self.along * o.travel;
                         y: o.y;
-                        opacity: o.opacity;
+                        // (dimmed with the keyboard round an area the pointer is over)
+                        opacity: o.opacity * (root.dimming ? 0.45 : 1);
                         width: o.w;
                         height: o.h;
                         source: o.image;
