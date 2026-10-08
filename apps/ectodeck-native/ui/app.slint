@@ -2102,7 +2102,6 @@ component LayerSwitch inherits Rectangle {
 // a key lit while chosen; its jobs show only where a key is rebound.
 component KeyLibrary inherits PageBox {
     in property <[LibGroup]> groups;
-    in property <bool> any-open;
     // a key or slider newly chosen: how far down the list its row is; each new one scrolls to it
     in property <length> reveal-y;
     in property <int> reveal-n;
@@ -2111,14 +2110,12 @@ component KeyLibrary inherits PageBox {
     }
     in-out property <string> query;
     callback toggle(string);
-    callback all(bool);
     callback find(string);
     callback pick(int);
     // the layer shown, as tabs at the box's top
     in property <int> layer;
     callback layer-chosen(int);
     property <length> top: 50px;
-    title-y: root.top + 14px;
     LayerSwitch {
         x: 0;
         y: 0;
@@ -2126,16 +2123,10 @@ component KeyLibrary inherits PageBox {
         layer: root.layer;
         chosen(i) => { root.layer-chosen(i); }
     }
-    BoxLink {
-        x: parent.width - self.width - 10px;
-        y: root.top + 12px;
-        text: root.any-open ? "Collapse all" : "Expand all";
-        clicked => { root.all(!root.any-open); }
-    }
-    // find a key, or what it does
+    // find a key, or what it does, under the tabs
     Rectangle {
         x: 16px;
-        y: root.top + 46px;
+        y: root.top + 16px;
         width: parent.width - 32px;
         height: 34px;
         border-radius: 8px;
@@ -2165,9 +2156,9 @@ component KeyLibrary inherits PageBox {
     }
     lib-flick := Flickable {
         x: 8px;
-        y: root.top + 90px;
+        y: root.top + 60px;
         width: parent.width - 16px;
-        height: parent.height - root.top - 90px - 10px;
+        height: parent.height - root.top - 60px - 10px;
         mouse-drag-pan-enabled: false;
         VerticalLayout {
             alignment: start;
@@ -2976,10 +2967,8 @@ export component AppWindow inherits Window {
     callback rename-profile(string);
     // the Key library
     in property <[LibGroup]> lib-groups;
-    in property <bool> lib-any-open;
     in-out property <string> lib-query;
     callback lib-toggle(string);
-    callback lib-all(bool);
     callback lib-find(string);
     // Game mode's keys
     in property <[CheckItem]> game-items;
@@ -3250,12 +3239,9 @@ export component AppWindow inherits Window {
                     layer-chosen(i) => { root.layer-changed(i); }
                     width: lib-w;
                     height: lib-h;
-                    title: root.layer == 1 ? "Key library, Function layer" : "Key library";
                     groups: root.lib-groups;
-                    any-open: root.lib-any-open;
                     query <=> root.lib-query;
                     toggle(g) => { root.lib-toggle(g); }
-                    all(o) => { root.lib-all(o); }
                     find(t) => { root.lib-find(t); }
                     pick(id) => { if (id >= 0) { root.key-clicked(id); } else { root.slider-chosen-at(-id); } }
                 }

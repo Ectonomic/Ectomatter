@@ -68,9 +68,8 @@ pub enum Ask {
     Rename(String),
     /// the layer the Keys tab edits: 0 Base, 1 Function
     Layer(i32),
-    /// the Key library: a group opened or closed, all of them, a search
+    /// the Key library: a group opened or closed, a search
     LibToggle(String),
-    LibAll(bool),
     LibFind(String),
     /// one of Game mode's keys blocked or not
     Game(i32),
@@ -411,7 +410,6 @@ impl Front {
         on!(on_rename_profile, |t| Ask::Rename(t.to_string()));
         on!(on_layer_changed, |i| Ask::Layer(i));
         on!(on_lib_toggle, |g| Ask::LibToggle(g.to_string()));
-        on!(on_lib_all, |o| Ask::LibAll(o));
         on!(on_lib_find, |t| Ask::LibFind(t.to_string()));
         on!(on_game_toggled, |i| Ask::Game(i));
         on!(on_kind_picked, |i, x, y, h| Ask::Kind(i, x, y, h));
@@ -803,12 +801,6 @@ impl Front {
                 Ask::LibToggle(g) => {
                     if !self.lib_shut.remove(&g) {
                         self.lib_shut.insert(g);
-                    }
-                }
-                Ask::LibAll(open) => {
-                    self.lib_shut.clear();
-                    if !open {
-                        self.lib_shut.extend(lib_groups(&self.page).into_iter().map(|(g, _)| g));
                     }
                 }
                 Ask::LibFind(t) => self.lib_query = t,
@@ -2024,7 +2016,6 @@ impl Front {
             let layer = LAYERS[self.layer].0;
             let q = self.lib_query.trim().to_lowercase();
             let mut groups: Vec<LibGroup> = Vec::new();
-            let mut any_open = false;
             // the sliders first, as keys are listed
             let bind_label = |i: usize| crate::display::BIND_CHOICES[i].iter().find(|(v, _)| *v == self.bind[i]).map_or("", |c| c.1).to_string();
             let mut slider_rows = vec![
@@ -2040,7 +2031,6 @@ impl Front {
                     return;
                 }
                 let open = !q.is_empty() || !self.lib_shut.contains(name);
-                any_open |= !self.lib_shut.contains(name);
                 let rebound = rows.iter().filter(|r| r.rebound).count() as i32;
                 let model = lib_rows.entry(name.to_string()).or_insert_with(|| Rc::new(VecModel::default())).clone();
                 set_rows(&model, if open { rows } else { Vec::new() });
@@ -2084,7 +2074,6 @@ impl Front {
                 }
             }
             show_rows(ui.get_lib_groups(), |m| ui.set_lib_groups(m), groups);
-            ui.set_lib_any_open(any_open);
             // Game mode's keys, blocked or not
             let blocked = !p.draft()["lighting"]["game_keys"].as_u64().unwrap_or(0) & 0x7f;
             let items: Vec<CheckItem> = crate::display::GAME_KEYS.iter().map(|(bit, n)| CheckItem { name: (*n).into(), on: blocked & bit != 0 }).collect();
