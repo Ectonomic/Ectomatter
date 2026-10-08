@@ -825,7 +825,8 @@ impl Page {
     /// What each key prints as its new meaning, where it has one: on the Keys
     /// view, a key set to something other than its factory action.
     pub fn remap(&self, pos: u32, names: &[String]) -> Option<String> {
-        if self.dev.is_none() || self.view != View::Keys {
+        // (on every tab that shows the keyboard, not only Keys)
+        if self.dev.is_none() {
             return None;
         }
         let d = self.def("keys", pos);

@@ -262,6 +262,10 @@ pub struct Front {
     /// the Key library: the groups closed, what is searched for, the slider chosen (1 dimmer, 2 volume)
     lib_shut: std::collections::HashSet<String>,
     lib_query: String,
+    lib_rows: HashMap<String, Rc<VecModel<LibRow>>>,
+    /// the screen's light and built-in screens the keyboard was last sent (or
+    /// had when it was read), so a change to them shows on it at once
+    screen_sent: Option<([u8; 4], u8)>,
     slider_sel: usize,
     /// "Press a key": the layer listening, and the modifiers held so far
     pub listening: Option<(usize, u32)>,
@@ -428,6 +432,8 @@ impl Front {
             layer: 0,
             lib_shut: LIB_GROUPS.iter().map(|g| g.to_string()).chain(["Sliders".to_string(), "Buttons".to_string()]).collect(),
             lib_query: String::new(),
+            lib_rows: HashMap::new(),
+            screen_sent: None,
             slider_sel: 0,
             listening: None,
             shut: None,
@@ -512,6 +518,9 @@ impl Front {
             device::Heard::State(Ok(dev)) => {
                 self.failed_at = None;
                 self.page.loaded(dev);
+                // the keyboard already shows the screen of the profile it is using
+                let n = self.page.active();
+                self.screen_sent = self.page.dev.as_ref().map(|d| screen_of(&d["profiles"][n.to_string()]["lighting"]));
                 self.tell_modes();
                 let (line, chip) = self.page.firmware_line();
                 self.ui.set_conn_state(1);
@@ -1046,6 +1055,10 @@ impl Front {
             self.overlays.fracs[i] = Some(((raw - e[0]) / (e[1] - e[0]).max(1.0)).clamp(0.0, 1.0) as f32);
         }
         let fr = [self.overlays.fracs[0].unwrap_or(0.0), self.overlays.fracs[1].unwrap_or(0.0)];
+        // the chosen slider's box follows it as it moves
+        if self.slider_sel != 0 {
+            self.ui.set_slider_at(fr[self.slider_sel - 1]);
+        }
         self.drive_sliders(v, fr);
         if wider {
             crate::uistate::set("slider_ends", serde_json::json!(self.slider_ends));
@@ -1081,6 +1094,19 @@ impl Front {
     fn start_preview(&mut self) {
         self.previewing = true;
         self.push_preview();
+    }
+
+    /// The window closing or Ectodeck quitting: the keyboard goes back to what its
+    /// profile stores, its lighting and its screen, whatever is left unsaved.
+    pub fn hand_back(&mut self) {
+        self.stop_preview();
+        if let Some(d) = &self.page.dev {
+            let saved = screen_of(&d["profiles"][self.page.active().to_string()]["lighting"]);
+            if self.screen_sent != Some(saved) {
+                self.screen_sent = Some(saved);
+                self.ask_kb(device::Ask::Screen(saved.0, saved.1));
+            }
+        }
     }
 
     pub fn stop_preview(&mut self) {
@@ -1761,6 +1787,12 @@ impl Front {
         }
         let dirty = loaded && p.is_dirty(p.editing);
         ui.set_can_save(dirty && !p.busy);
+        if loaded {
+            let n = p.unsaved(p.editing).max(1);
+            let name = p.profile_name(p.editing);
+            ui.set_unsaved_words(format!("{n} unsaved {} on {name}", if n == 1 { "change" } else { "changes" }).into());
+            ui.set_editing_name(name.into());
+        }
         ui.set_save_label(format!("Save profile {}", p.editing).into());
         ui.set_layer(self.layer as i32);
         if loaded {
@@ -1868,6 +1900,9 @@ impl Front {
                 LibRow { id: -2, cap: "♪".into(), name: "Volume".into(), job: bind_label(1).into(), rebound: false, chosen: self.slider_sel == 2 },
             ];
             slider_rows.retain(|r| q.is_empty() || r.name.to_lowercase().contains(&q) || r.job.to_lowercase().contains(&q));
+            // each group's rows keep one list, changed in place, so a click on a
+            // heading or a row is never lost to a refresh between press and release
+            let lib_rows = &mut self.lib_rows;
             let mut push = |name: &str, rows: Vec<LibRow>, total: usize| {
                 if rows.is_empty() && !q.is_empty() {
                     return;
@@ -1876,7 +1911,9 @@ impl Front {
                 let open = !q.is_empty() || holds || !self.lib_shut.contains(name);
                 any_open |= !self.lib_shut.contains(name);
                 let rebound = rows.iter().filter(|r| r.rebound).count() as i32;
-                groups.push(LibGroup { name: name.into(), count: total as i32, rebound, open, rows: ModelRc::new(VecModel::from(if open { rows } else { Vec::new() })) });
+                let model = lib_rows.entry(name.to_string()).or_insert_with(|| Rc::new(VecModel::default())).clone();
+                set_rows(&model, if open { rows } else { Vec::new() });
+                groups.push(LibGroup { name: name.into(), count: total as i32, rebound, open, rows: ModelRc::from(model) });
             };
             push("Sliders", slider_rows, 2);
             for (g, keys) in lib_groups(p) {
@@ -1901,19 +1938,19 @@ impl Front {
                     .collect();
                 push(&g, rows, total);
             }
-            ui.set_lib_groups(ModelRc::new(VecModel::from(groups)));
+            show_rows(ui.get_lib_groups(), |m| ui.set_lib_groups(m), groups);
             ui.set_lib_any_open(any_open);
             // Game mode's keys, blocked or not
             let blocked = !p.draft()["lighting"]["game_keys"].as_u64().unwrap_or(0) & 0x7f;
             let items: Vec<CheckItem> = crate::display::GAME_KEYS.iter().map(|(bit, n)| CheckItem { name: (*n).into(), on: blocked & bit != 0 }).collect();
-            ui.set_game_items(ModelRc::new(VecModel::from(items)));
+            show_rows(ui.get_game_items(), |m| ui.set_game_items(m), items);
             // a slider chosen: where it sits, what it controls
             ui.set_slider_chosen(self.slider_sel as i32);
             if self.slider_sel != 0 {
                 let s = self.slider_sel - 1;
                 ui.set_slider_at(self.overlays.fracs[s].unwrap_or(0.0));
                 let choices: Vec<CheckItem> = crate::display::BIND_CHOICES[s].iter().map(|(v, l)| CheckItem { name: (*l).into(), on: self.bind[s] == *v }).collect();
-                ui.set_slider_choices(ModelRc::new(VecModel::from(choices)));
+                show_rows(ui.get_slider_choices(), |m| ui.set_slider_choices(m), choices);
                 // what the firmware can't do yet, said where it matters
                 let fw = self.firmware();
                 let note = if s == 1 && self.bind[1] != "own" && !crate::display::has(&fw, "volume.quiet") {
@@ -1966,6 +2003,14 @@ impl Front {
             let t = crate::display::tiles(&self.page, &fw, connected);
             self.ui.set_tile_height(t.height);
             self.show_cells(t.cells);
+        }
+        // the screen as the profile being edited has it, on the keyboard now
+        if loaded && self.controlled {
+            let want = screen_of(&self.page.draft()["lighting"]);
+            if self.screen_sent != Some(want) {
+                self.screen_sent = Some(want);
+                self.ask_kb(device::Ask::Screen(want.0, want.1));
+            }
         }
         let back = self.page.lcd_color();
         if back != self.overlays.lcd.2 {
@@ -2274,6 +2319,13 @@ pub fn set_rows<T: Clone + PartialEq + 'static>(model: &VecModel<T>, rows: Vec<T
     while model.row_count() > rows.len() {
         model.remove(model.row_count() - 1);
     }
+}
+
+/// A profile's screen: its light (brightness, red, green, blue) and its built-in screens.
+fn screen_of(l: &serde_json::Value) -> ([u8; 4], u8) {
+    let c = &l["lcd"]["color"];
+    let b = |v: &serde_json::Value| v.as_u64().unwrap_or(0).min(255) as u8;
+    ([c["brightness"].as_u64().map_or(255, |v| v.min(255) as u8), b(&c["color"][0]), b(&c["color"][1]), b(&c["color"][2])], b(&l["lcd"]["apps"]))
 }
 
 /// Show a list in one of the page's models, in place (see [set_rows]): a list

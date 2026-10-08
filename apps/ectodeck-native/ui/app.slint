@@ -1904,19 +1904,20 @@ component SmallCap inherits Rectangle {
     in property <length> size: 11px;
     width: 34px;
     height: 26px;
+    // the cap's edge, deeper at its front, all of it following the rounded corners
     border-radius: 5px;
-    background: Ink.well;
-    border-width: 1px;
-    border-color: #3a3a41;
+    background: #3a3a41;
     Rectangle {
-        y: parent.height - 3px;
-        height: 2px;
         x: 1px;
+        y: 1px;
         width: parent.width - 2px;
-        background: #0b0b0d;
-        border-radius: 1px;
+        height: parent.height - 4px;
+        border-radius: 4px;
+        background: Ink.well;
     }
     Text {
+        y: 0;
+        height: parent.height - 3px;
         text: root.text;
         font-family: "Geist";
         font-size: root.size;
@@ -2100,7 +2101,9 @@ component KeyLibrary inherits PageBox {
                         clicked => { root.toggle(g.name); }
                     }
                 }
+                // its keys, set in under the group's name
                 if g.open: VerticalLayout {
+                    padding-left: 18px;
                     for r in g.rows: Rectangle {
                         height: 34px;
                         border-radius: 7px;
@@ -2475,25 +2478,26 @@ component SliderDetail inherits PageBox {
     Text {
         x: 16px;
         y: 46px;
-        text: root.side + ", where it sits now:";
+        text: "Where the " + root.side + " slider on the keyboard sits now";
         font-family: "Geist";
         font-size: 12.5px;
         color: Ink.quiet;
     }
+    // a reading, not a control: a thin bar filled to where the slider is, and how far that is
     Rectangle {
         x: 16px;
-        y: 76px;
+        y: 81px;
         width: parent.width - 32px - 56px;
-        height: 16px;
-        border-radius: 8px;
+        height: 6px;
+        border-radius: 3px;
         background: Ink.well;
+        clip: true;
         Rectangle {
-            x: 1px + root.at * (parent.width - 34px);
-            y: 1px;
-            width: 32px;
-            height: 14px;
-            border-radius: 4px;
-            background: @linear-gradient(180deg, #f4f4f4 0%, #b9b9b9 100%);
+            x: 0;
+            width: root.at * parent.width;
+            border-radius: 3px;
+            background: Ink.soft;
+            animate width { duration: 120ms; easing: ease-out; }
         }
     }
     Text {
@@ -2503,8 +2507,9 @@ component SliderDetail inherits PageBox {
         height: 16px;
         text: round(root.at * 100) + "%";
         font-family: "Geist";
-        font-size: 12px;
-        color: Ink.soft;
+        font-size: 12.5px;
+        font-weight: 500;
+        color: Ink.dim;
         horizontal-alignment: right;
         vertical-alignment: center;
     }
@@ -2588,23 +2593,18 @@ component AnchorHead inherits Text {
 }
 
 // The anchoring column under the keyboard: the profiles (the one the Z10 is
-// running marked by a white bar at its edge, the one being edited lit), a box
-// to Discard or Save while there is something to save, and on the Keys tab
-// the layers. Choices go top to bottom: a profile, then a layer, then a key.
+// running marked by a white bar at its edge, the one being edited lit), and
+// on the Keys tab the layers (Save and Discard are in the device's bar). Choices go top to bottom: a profile, then a layer, then a key.
 component AnchorColumn inherits VerticalLayout {
     in property <[ProfileItem]> profiles;
-    in property <bool> can-save;
     in property <bool> show-layers;
     in property <int> layer;
     in property <int> base-count;
     in property <int> fn-count;
     callback choose(int);
     callback rename(string);
-    callback save();
-    callback discard();
     callback layer-chosen(int);
     property <bool> renaming;
-    property <bool> asking;
     spacing: 12px;
     alignment: start;
 
@@ -2720,46 +2720,6 @@ component AnchorColumn inherits VerticalLayout {
         }
     }
 
-    // saving: only while there is something to save
-    if root.can-save: Rectangle {
-        background: Ink.well;
-        border-radius: 12px;
-        height: sbox.preferred-height;
-        sbox := VerticalLayout {
-            padding: 10px;
-            spacing: 10px;
-            if root.asking: Text {
-                text: "Discard the changes to this profile?";
-                font-family: "Geist";
-                font-size: 12.5px;
-                color: Ink.warn;
-                wrap: word-wrap;
-            }
-            HorizontalLayout {
-                spacing: 6px;
-                height: 32px;
-                WordButton {
-                    wide: (sbox.width - 20px - 6px) / 2;
-                    height: 32px;
-                    text: root.asking ? "Keep" : "Discard";
-                    fill: Ink.well;
-                    fill-hover: Ink.hover-well;
-                    clicked => { root.asking = !root.asking; }
-                }
-                WordButton {
-                    wide: (sbox.width - 20px - 6px) / 2;
-                    text: root.asking ? "Discard" : "Save";
-                    primary: !root.asking;
-                    fill: #5c2420;
-                    fill-hover: #74302a;
-                    clicked => {
-                        if (root.asking) { root.asking = false; root.discard(); } else { root.save(); }
-                    }
-                }
-            }
-        }
-    }
-
     // the layers the Keys tab edits, named as profiles are
     if root.show-layers: Rectangle {
         background: Ink.well;
@@ -2859,6 +2819,11 @@ export component AppWindow inherits Window {
     in property <[Overlay]> overlays;
     // the Lighting page: its effects, and its tile's pieces as the window lays them out
     in property <string> slider-note;
+    // what is unsaved, as the bar says it; the profile being edited; Discard asking first
+    in property <string> unsaved-words;
+    in property <string> editing-name;
+    property <bool> asking-discard;
+    changed can-save => { if (!self.can-save) { self.asking-discard = false; } }
     in property <[EffectItem]> effects;
     // the chosen effect's picture moves; what the boxes beside the effects hold (0 an effect's
     // settings, 1 the keys dark, 2 the brush), the first one's title, and their heights
@@ -3207,15 +3172,12 @@ export component AppWindow inherits Window {
                     y: under-top;
                     width: anchor-w;
                     profiles: root.profiles;
-                    can-save: root.can-save;
                     show-layers: root.tab == 0;
                     layer: root.layer;
                     base-count: root.base-count;
                     fn-count: root.fn-count;
                     choose(n) => { root.choose-profile(n); }
                     rename(t) => { root.rename-profile(t); }
-                    save => { root.save(); }
-                    discard => { root.discard(); }
                     layer-chosen(i) => { root.layer-changed(i); }
                 }
 
@@ -3271,7 +3233,7 @@ export component AppWindow inherits Window {
                         width: parent.width;
                         height: parent.height;
                         title: root.slider-chosen == 1 ? "Dimmer" : "Volume";
-                        side: root.slider-chosen == 1 ? "The left slider" : "The right slider";
+                        side: root.slider-chosen == 1 ? "left" : "right";
                         at: root.slider-at;
                         choices: root.slider-choices;
                         note: root.slider-note;
@@ -3433,6 +3395,64 @@ export component AppWindow inherits Window {
                         horizontal-alignment: right;
                         vertical-alignment: center;
                         wrap: word-wrap;
+                    }
+                    // unsaved changes: how many, Discard (which asks first) and Save, where
+                    // the bar keeps them in view on every tab as the page scrolls
+                    if root.can-save: HorizontalLayout {
+                        horizontal-stretch: 0;
+                        spacing: 8px;
+                        alignment: end;
+                        if !root.asking-discard: Rectangle {
+                            width: 6px;
+                            Rectangle {
+                                y: (parent.height - 6px) / 2;
+                                width: 6px;
+                                height: 6px;
+                                border-radius: 3px;
+                                background: Ink.warn;
+                            }
+                        }
+                        Text {
+                            text: root.asking-discard ? "Discard the changes to " + root.editing-name + "?" : root.unsaved-words;
+                            font-family: "Geist";
+                            font-size: 12.5px;
+                            color: root.asking-discard ? Ink.warn : Ink.soft;
+                            vertical-alignment: center;
+                        }
+                        Rectangle { width: 4px; }
+                        VerticalLayout {
+                            alignment: center;
+                            WordButton {
+                                height: 32px;
+                                text: root.asking-discard ? "Keep" : "Discard";
+                                fill: transparent;
+                                fill-hover: Ink.hover-box;
+                                clicked => { root.asking-discard = !root.asking-discard; }
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            WordButton {
+                                text: root.asking-discard ? "Discard" : "Save";
+                                primary: !root.asking-discard;
+                                fill: #5c2420;
+                                fill-hover: #74302a;
+                                clicked => {
+                                    if (root.asking-discard) { root.asking-discard = false; root.discard(); } else { root.save(); }
+                                }
+                            }
+                        }
+                        // a rule between saving and the Macro Editor
+                        Rectangle {
+                            width: 17px;
+                            Rectangle {
+                                x: 8px;
+                                y: (parent.height - 24px) / 2;
+                                width: 1px;
+                                height: 24px;
+                                background: Ink.line;
+                            }
+                        }
                     }
                     // the Macro Editor, at the bar's end
                     Rectangle {

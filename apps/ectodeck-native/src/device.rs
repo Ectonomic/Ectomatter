@@ -30,6 +30,9 @@ pub enum Ask {
     WriteMacro(u8, Value),
     /// save a profile's keys only, to change how a macro plays on them
     SaveKeys(u8, Value),
+    /// the screen as a profile being edited has it, shown now without saving:
+    /// its light (brightness, red, green, blue) and its built-in screens
+    Screen([u8; 4], u8),
 }
 
 pub enum Heard {
@@ -72,9 +75,11 @@ pub fn start(backups: PathBuf, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
                 queue.push_front(a);
             }
             let last_preview = queue.iter().rposition(|a| matches!(a, Ask::Preview(_)));
+            let last_screen = queue.iter().rposition(|a| matches!(a, Ask::Screen(..)));
             let mut k = 0;
             queue.retain(|a| {
-                let keep = !matches!(a, Ask::Preview(_)) || Some(k) == last_preview;
+                // only the newest preview and the newest screen are worth sending
+                let keep = (!matches!(a, Ask::Preview(_)) || Some(k) == last_preview) && (!matches!(a, Ask::Screen(..)) || Some(k) == last_screen);
                 k += 1;
                 keep
             });
@@ -99,6 +104,11 @@ pub fn start(backups: PathBuf, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
                 Ask::Preview(body) => Heard::Preview(kb.preview(&body).map_err(|e| e.to_string())),
                 Ask::Dimmer(level) => {
                     let _ = kb.set_dimmer(level);
+                    Heard::Done
+                }
+                Ask::Screen(light, apps) => {
+                    let _ = kb.set_lcd_light(light[0], [light[1], light[2], light[3]]);
+                    let _ = kb.set_lcd_apps(apps);
                     Heard::Done
                 }
                 Ask::WriteMacro(n, body) => {

@@ -1281,7 +1281,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
                         app.front.ui.set_place(d.into());
                     }
                     tray::TrayAsk::Quit => {
-                        app.front.stop_preview();
+                        app.front.hand_back();
                         app.exit = true;
                     }
                 }
@@ -1673,7 +1673,7 @@ impl App {
     /// Close the window into the tray: without its buffer the window is
     /// unmapped, and Ectodeck carries on. With no tray, closing quits.
     fn hide(&mut self) {
-        self.front.stop_preview();
+        self.front.hand_back();
         if self.tray.is_none() {
             self.exit = true;
             return;
