@@ -121,7 +121,7 @@ const LAB_MIN_SIZE: (u32, u32) = (1080, 680);
 const MACROS: usize = 0;
 const LAB: usize = 1;
 /// the ground the keyboard sits on: the page's own
-const GROUND: [u8; 3] = [0x20, 0x20, 0x20];
+const GROUND: [u8; 3] = [0x18, 0x18, 0x1b];
 /// How much brighter than the page's colours the keys' light is drawn. The
 /// light is drawn at the web design's brightness, as approved in WebKit; going
 /// above the desktop's white by the screen's headroom looked overdone.

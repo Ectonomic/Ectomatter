@@ -567,6 +567,37 @@ impl Page {
         self.dev.is_some() && self.drafts.get(&n).is_some_and(|d| *d != pick(self.saved(&n.to_string())))
     }
 
+    /// How many of a profile's settings differ from what the keyboard holds:
+    /// each key's job, and each lighting value, counts once.
+    pub fn unsaved(&self, n: u8) -> usize {
+        fn count(a: &Value, b: &Value) -> usize {
+            match (a, b) {
+                (Value::Object(x), Value::Object(y)) => {
+                    let keys: std::collections::BTreeSet<&String> = x.keys().chain(y.keys()).collect();
+                    keys.into_iter().map(|k| count(x.get(k).unwrap_or(&Value::Null), y.get(k).unwrap_or(&Value::Null))).sum()
+                }
+                // a list of lists (the keys, the colours): each entry once
+                (Value::Array(x), Value::Array(y)) if x.iter().chain(y).any(|v| v.is_array() || v.is_object()) => {
+                    (0..x.len().max(y.len())).map(|i| count(x.get(i).unwrap_or(&Value::Null), y.get(i).unwrap_or(&Value::Null)).min(1)).sum()
+                }
+                _ => usize::from(a != b),
+            }
+        }
+        match (self.dev.is_some(), self.drafts.get(&n)) {
+            (true, Some(d)) => count(d, &pick(self.saved(&n.to_string()))),
+            _ => 0,
+        }
+    }
+
+    /// How many keys a layer ("keys" or "fnkeys") of the profile being edited
+    /// gives a job other than their factory one.
+    pub fn rebound(&self, layer: &str) -> usize {
+        if self.dev.is_none() {
+            return 0;
+        }
+        self.layout.iter().filter(|k| self.def(layer, k.pos) != self.factory(layer, k.pos)).count()
+    }
+
     pub fn discard(&mut self) {
         let p = pick(self.saved(&self.editing.to_string()));
         self.drafts.insert(self.editing, p);

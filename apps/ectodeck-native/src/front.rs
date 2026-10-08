@@ -15,7 +15,7 @@ use crate::device;
 use crate::lighting::{self, Ctl};
 use crate::overlays::Overlays;
 use crate::z10::{self, Action, Page, View};
-use crate::{AppWindow, Cell, EffectItem, KeyItem, LayerItem, MenuRow, ProfileItem};
+use crate::{AppWindow, Cell, CheckItem, EffectItem, KeyItem, LayerItem, LibGroup, LibRow, MenuRow, ProfileItem};
 
 /// What the page asked for, done once its event has been handled.
 #[derive(Clone, Debug, PartialEq)]
@@ -61,6 +61,21 @@ pub enum Ask {
     PkEnter,
     PkDismiss,
     CellTyped(i32, String),
+    /// the profile being edited, given a new name
+    Rename(String),
+    /// the layer the Keys tab edits: 0 Base, 1 Function
+    Layer(i32),
+    /// the Key library: a group opened or closed, all of them, a search
+    LibToggle(String),
+    LibAll(bool),
+    LibFind(String),
+    /// one of Game mode's keys blocked or not
+    Game(i32),
+    /// the chosen key's kind of job, from its switch, under the switch's part
+    Kind(i32, f32, f32, f32),
+    /// a slider chosen in the library (0 none), and what it controls
+    SliderSel(i32),
+    SliderBind(i32),
 }
 
 /// The colour picker, open on a swatch: what it sets, the colour it opened
@@ -146,6 +161,74 @@ const LAYERS: [(&str, &str); 2] = [("keys", "When pressed"), ("fnkeys", "When Fn
 
 /// The action menu's pages under "Other": each one's title and its list.
 const PAGES: [&str; 5] = ["A key", "A media key", "A mouse button", "Switch profile", "Keyboard function"];
+/// the action menu's page of macros, opened from the key's Macro switch
+const MACRO_PAGE: usize = 5;
+
+/// The Key library's groups after the sliders and the buttons, and the keys in each by their ids.
+const LIB_GROUPS: [&str; 7] = ["Macro keys", "F-keys", "Number row", "Letters and symbols", "Modifiers and space", "Navigation", "Number pad"];
+fn lib_group_of(id: &str) -> &'static str {
+    match id {
+        "GameMode" | "MultimediaStop" | "MultimediaPreviousTrack" | "MultimediaPlayPause" | "MultimediaNextTrack" => "Buttons",
+        "E1" | "E2" | "E3" | "E4" | "E5" => "Macro keys",
+        "ESC" | "PrintScreen" | "ScrollLock" | "PauseBreak" => "F-keys",
+        f if f.len() <= 3 && f.starts_with('F') && f[1..].parse::<u8>().is_ok() => "F-keys",
+        "GraveAccent" | "Minus" | "Equals" | "Backspace" => "Number row",
+        d if d.len() == 1 && d.chars().all(|c| c.is_ascii_digit()) => "Number row",
+        "Tab" | "CapsLock" | "LSHIFT" | "RSHIFT" | "LCONTROL" | "RCONTROL" | "WIN" | "LALT" | "RALT" | "FN" | "Menu" | "Space" | "Enter" => "Modifiers and space",
+        "Insert" | "Home" | "PageUp" | "Delete" | "End" | "PageDown" | "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" | "E6" | "E7" => "Navigation",
+        k if k.starts_with("Keypad") || k == "NumLock" => "Number pad",
+        _ => "Letters and symbols",
+    }
+}
+
+/// The Key library's groups and their keys, in the order the keyboard has them.
+fn lib_groups(p: &Page) -> Vec<(String, Vec<z10::Key>)> {
+    let mut out: Vec<(String, Vec<z10::Key>)> = ["Buttons"].iter().chain(LIB_GROUPS.iter()).map(|g| (g.to_string(), Vec::new())).collect();
+    for k in &p.layout {
+        let g = lib_group_of(&k.id);
+        if let Some(e) = out.iter_mut().find(|(n, _)| n == g) {
+            e.1.push(k.clone());
+        }
+    }
+    out
+}
+
+/// A key's cap, short, for the Key library.
+fn lib_cap(id: &str, name: &str) -> String {
+    let fixed = match id {
+        "GameMode" => "G/PC",
+        "MultimediaStop" => "Stop",
+        "MultimediaPreviousTrack" => "Prev",
+        "MultimediaPlayPause" => "Play",
+        "MultimediaNextTrack" => "Next",
+        "WIN" => "Win",
+        "LCONTROL" | "RCONTROL" => "Ctrl",
+        "LALT" | "RALT" => "Alt",
+        "LSHIFT" | "RSHIFT" => "Shift",
+        "ArrowUp" => "↑",
+        "ArrowDown" => "↓",
+        "ArrowLeft" => "←",
+        "ArrowRight" => "→",
+        "NumLock" => "Num",
+        "KeypadEnter" => "Ent",
+        "KeypadPlus" => "+",
+        "KeypadMinus" => "−",
+        "KeypadMultiply" => "*",
+        "KeypadDivide" => "/",
+        "KeypadPeriod" => ".",
+        _ => "",
+    };
+    if !fixed.is_empty() {
+        return fixed.into();
+    }
+    if let Some(d) = id.strip_prefix("Keypad") {
+        return d.into();
+    }
+    if name.chars().count() <= 3 {
+        return name.into();
+    }
+    name.split_whitespace().next().unwrap_or(name).chars().take(4).collect()
+}
 
 enum Choice {
     Nothing,
@@ -171,6 +254,12 @@ pub struct Front {
     kb: Option<mpsc::Sender<device::Ask>>,
     pub asks: Rc<RefCell<Vec<Ask>>>,
     menu: Option<Menu>,
+    /// the layer the Keys tab edits: 0 Base (when pressed), 1 Function (Fn held)
+    pub layer: usize,
+    /// the Key library: the groups closed, what is searched for, the slider chosen (1 dimmer, 2 volume)
+    lib_shut: std::collections::HashSet<String>,
+    lib_query: String,
+    slider_sel: usize,
     /// "Press a key": the layer listening, and the modifiers held so far
     pub listening: Option<(usize, u32)>,
     /// a menu closed by a press on its own button, which that button's click must not open again
@@ -289,6 +378,15 @@ impl Front {
         on!(on_pk_enter, Ask::PkEnter);
         on!(on_cell_typed, |id, t| Ask::CellTyped(id, t.to_string()));
         on!(on_pk_dismiss, Ask::PkDismiss);
+        on!(on_rename_profile, |t| Ask::Rename(t.to_string()));
+        on!(on_layer_changed, |i| Ask::Layer(i));
+        on!(on_lib_toggle, |g| Ask::LibToggle(g.to_string()));
+        on!(on_lib_all, |o| Ask::LibAll(o));
+        on!(on_lib_find, |t| Ask::LibFind(t.to_string()));
+        on!(on_game_toggled, |i| Ask::Game(i));
+        on!(on_kind_picked, |i, x, y, h| Ask::Kind(i, x, y, h));
+        on!(on_slider_chosen_at, |i| Ask::SliderSel(i));
+        on!(on_slider_bind_at, |i| Ask::SliderBind(i));
         let (ftx, frx) = mpsc::channel();
         let page = Page::new();
         ui.set_units(page.view_box.2 as f32);
@@ -316,6 +414,10 @@ impl Front {
             kb,
             asks,
             menu: None,
+            layer: 0,
+            lib_shut: LIB_GROUPS.iter().map(|g| g.to_string()).chain(["Sliders".to_string(), "Buttons".to_string()]).collect(),
+            lib_query: String::new(),
+            slider_sel: 0,
             listening: None,
             shut: None,
             t0: Instant::now(),
@@ -619,6 +721,58 @@ impl Front {
                         c => lighting::act(&mut self.page, c, 0, v),
                     }
                     self.push_preview();
+                }
+                Ask::Rename(t) => crate::display::act(&mut self.page, Ctl::Name, 0, 0.0, Some(&t)),
+                Ask::Layer(i) => {
+                    self.layer = i.clamp(0, 1) as usize;
+                    self.listening = None;
+                    self.close_menu();
+                }
+                Ask::LibToggle(g) => {
+                    if !self.lib_shut.remove(&g) {
+                        self.lib_shut.insert(g);
+                    }
+                }
+                Ask::LibAll(open) => {
+                    self.lib_shut.clear();
+                    if !open {
+                        self.lib_shut.extend(lib_groups(&self.page).into_iter().map(|(g, _)| g));
+                    }
+                }
+                Ask::LibFind(t) => self.lib_query = t,
+                Ask::Game(i) => {
+                    let blocked = !self.page.draft()["lighting"]["game_keys"].as_u64().unwrap_or(0) & 0x7f;
+                    let on = crate::display::GAME_KEYS.get(i as usize).is_some_and(|g| blocked & g.0 != 0);
+                    crate::display::act(&mut self.page, Ctl::GameKey, i as usize, if on { 0.0 } else { 1.0 }, None);
+                }
+                Ask::Kind(i, x, y, h) => {
+                    // the parts of the switch, as the menu's pages are; Nothing at once
+                    match i {
+                        6 => {
+                            self.close_menu();
+                            self.assign(self.layer, [0, 0, 0, 0]);
+                        }
+                        _ => {
+                            let page = [0, 1, 2, MACRO_PAGE, 3, 4][i.clamp(0, 5) as usize];
+                            self.open_menu_on(self.layer, (x, y, h), Some(page));
+                        }
+                    }
+                }
+                Ask::SliderSel(i) => {
+                    self.slider_sel = i.clamp(0, 2) as usize;
+                    if self.slider_sel != 0 {
+                        self.page.sel = None;
+                        self.listening = None;
+                        self.close_menu();
+                    }
+                }
+                Ask::SliderBind(i) => {
+                    if self.slider_sel != 0 {
+                        let s = self.slider_sel - 1;
+                        if let Some((v, _)) = crate::display::BIND_CHOICES[s].get(i as usize) {
+                            self.set_slider_bind(s, v);
+                        }
+                    }
                 }
                 Ask::CellTyped(id, t) => match lighting::ctl(id) {
                     Ctl::Name => crate::display::act(&mut self.page, Ctl::Name, 0, 0.0, Some(&t)),
@@ -1140,6 +1294,7 @@ impl Front {
     /// A key clicked on the board: chosen for editing on the Keys page; on
     /// the Lighting page it lights as pressing it would.
     fn select_key(&mut self, pos: u32) {
+        self.slider_sel = 0;
         if self.page.dev.is_none() {
             return;
         }
@@ -1247,6 +1402,20 @@ impl Front {
     // ------------------------------------------------------------ the action menu
 
     fn open_menu(&mut self, layer: usize, anchor: (f32, f32, f32)) {
+        // the job's own kind of list, or the whole menu for a key that does nothing
+        let page = self.page.sel.map(|pos| self.page.def(LAYERS[layer].0, pos)).and_then(|d| match z10::kind_of(d) {
+            "Key" => Some(0),
+            "Media" => Some(1),
+            "Mouse" => Some(2),
+            "Macro" => Some(MACRO_PAGE),
+            "Profile" => Some(3),
+            "Keyboard" => Some(4),
+            _ => None,
+        });
+        self.open_menu_on(layer, anchor, page);
+    }
+
+    fn open_menu_on(&mut self, layer: usize, anchor: (f32, f32, f32), page: Option<usize>) {
         let Some(pos) = self.page.sel else { return };
         // the second click on the button whose menu a press just closed
         if let Some((at, when)) = self.shut.take() {
@@ -1254,12 +1423,12 @@ impl Front {
                 return;
             }
         }
-        if self.menu.as_ref().is_some_and(|m| m.layer == layer) {
+        if self.menu.as_ref().is_some_and(|m| m.layer == layer && m.page == page) {
             self.close_menu();
             return;
         }
         self.listening = None;
-        self.menu = Some(Menu { layer, pos, page: None, query: String::new(), anchor, choices: Vec::new() });
+        self.menu = Some(Menu { layer, pos, page, query: String::new(), anchor, choices: Vec::new() });
         self.ui.set_menu_query("".into());
         self.build_menu();
         // under the button when it fits there, or when there is a fair amount of
@@ -1437,6 +1606,15 @@ impl Front {
         };
         let placeholder;
         match m.page {
+            Some(MACRO_PAGE) => {
+                placeholder = "Search macros".to_string();
+                if g.macros.is_empty() {
+                    rows.push(row(3, "No macros yet. Make one in the Macro Editor.", "", false));
+                    choices.push(Choice::Nothing);
+                } else {
+                    pick(&mut rows, &mut choices, &[("Macros", g.macros.iter().collect())]);
+                }
+            }
             Some(p) => {
                 let title = PAGES[p];
                 let what = title.trim_start_matches("A ").trim_start_matches("An ").to_lowercase();
@@ -1513,6 +1691,7 @@ impl Front {
                         active: n == p.active(),
                         current: n == p.editing,
                         dirty: p.is_dirty(n),
+                        unsaved: p.unsaved(n) as i32,
                         colors,
                         c1,
                         c2,
@@ -1526,6 +1705,20 @@ impl Front {
         let dirty = loaded && p.is_dirty(p.editing);
         ui.set_can_save(dirty && !p.busy);
         ui.set_save_label(format!("Save profile {}", p.editing).into());
+        ui.set_layer(self.layer as i32);
+        if loaded {
+            ui.set_base_count(p.rebound("keys") as i32);
+            ui.set_fn_count(p.rebound("fnkeys") as i32);
+        }
+        ui.set_hint(
+            match p.view {
+                View::Keys if p.sel.is_some() => "Escape clears the choice.",
+                View::Keys => "Click a key on the keyboard or in the Key library.",
+                View::Lighting => "The keyboard plays the effect as you change it.",
+                View::Display => "",
+            }
+            .into(),
+        );
 
         // the keys over the keyboard
         let (x0, y0, _, _) = p.view_box;
@@ -1578,6 +1771,90 @@ impl Front {
                 })
                 .collect();
             show_rows(ui.get_layers(), |m| ui.set_layers(m), layers);
+            // the one editor, on the layer shown
+            let layer = LAYERS[self.layer].0;
+            let d = p.def(layer, k.pos);
+            let rebound_here = d != p.factory(layer, k.pos);
+            let rebound = rebound_here || p.def(LAYERS[1 - self.layer].0, k.pos) != p.factory(LAYERS[1 - self.layer].0, k.pos);
+            let fn_unset = self.layer == 1 && d == p.def("keys", k.pos);
+            let job = if fn_unset { "Same as on Base".to_string() } else if d[0] == 3 { p.macro_label(d[1]) } else if z10::is_nothing(d) { "Nothing".into() } else { p.describe(d) };
+            ui.set_key_cap(lib_cap(&k.id, &name).into());
+            ui.set_key_state((if rebound { format!("Rebound on {}.", p.profile_name(p.editing)) } else { "As it came from the factory.".to_string() }).into());
+            ui.set_key_rebound(rebound);
+            ui.set_layer_rebound(rebound_here);
+            ui.set_key_kind(match z10::kind_of(d) {
+                "Key" => 0,
+                "Media" => 1,
+                "Mouse" => 2,
+                "Macro" => 3,
+                "Profile" => 4,
+                "Keyboard" => 5,
+                _ => 6,
+            });
+            ui.set_key_job(job.into());
+            ui.set_key_listening(self.listening.is_some_and(|(l, _)| l == self.layer));
+            ui.set_key_note((if fn_unset { "On the Function layer this key does what it does on Base, until you choose a job here." } else { "" }).into());
+        }
+        // the Key library: each group, open or closed, its keys as they are on the layer shown
+        if loaded && p.view == View::Keys {
+            let layer = LAYERS[self.layer].0;
+            let q = self.lib_query.trim().to_lowercase();
+            let mut groups: Vec<LibGroup> = Vec::new();
+            let mut any_open = false;
+            // the sliders first, as keys are listed
+            let bind_label = |i: usize| crate::display::BIND_CHOICES[i].iter().find(|(v, _)| *v == self.bind[i]).map_or("", |c| c.1).to_string();
+            let mut slider_rows = vec![
+                LibRow { id: -1, cap: "◐".into(), name: "Dimmer".into(), job: bind_label(0).into(), rebound: false, chosen: self.slider_sel == 1 },
+                LibRow { id: -2, cap: "♪".into(), name: "Volume".into(), job: bind_label(1).into(), rebound: false, chosen: self.slider_sel == 2 },
+            ];
+            slider_rows.retain(|r| q.is_empty() || r.name.to_lowercase().contains(&q) || r.job.to_lowercase().contains(&q));
+            let mut push = |name: &str, rows: Vec<LibRow>, total: usize| {
+                if rows.is_empty() && !q.is_empty() {
+                    return;
+                }
+                let holds = rows.iter().any(|r| r.chosen);
+                let open = !q.is_empty() || holds || !self.lib_shut.contains(name);
+                any_open |= !self.lib_shut.contains(name);
+                let rebound = rows.iter().filter(|r| r.rebound).count() as i32;
+                groups.push(LibGroup { name: name.into(), count: total as i32, rebound, open, rows: ModelRc::new(VecModel::from(if open { rows } else { Vec::new() })) });
+            };
+            push("Sliders", slider_rows, 2);
+            for (g, keys) in lib_groups(p) {
+                let total = keys.len();
+                let rows: Vec<LibRow> = keys
+                    .iter()
+                    .map(|k| {
+                        let name = p.key_label(k);
+                        let d = p.def(layer, k.pos);
+                        let fac = p.factory(layer, k.pos);
+                        let re = d != fac;
+                        let job = if re {
+                            if d[0] == 3 { p.macro_label(d[1]) } else if z10::is_nothing(d) { "Nothing".into() } else { p.describe(d) }
+                        } else if g == "Buttons" && !z10::is_nothing(fac) && p.describe(fac) != name {
+                            p.describe(fac)
+                        } else {
+                            String::new()
+                        };
+                        LibRow { id: k.pos as i32, cap: lib_cap(&k.id, &name).into(), name: name.clone().into(), job: job.into(), rebound: re, chosen: p.sel == Some(k.pos) }
+                    })
+                    .filter(|r| q.is_empty() || r.name.to_lowercase().contains(&q) || r.job.to_lowercase().contains(&q))
+                    .collect();
+                push(&g, rows, total);
+            }
+            ui.set_lib_groups(ModelRc::new(VecModel::from(groups)));
+            ui.set_lib_any_open(any_open);
+            // Game mode's keys, blocked or not
+            let blocked = !p.draft()["lighting"]["game_keys"].as_u64().unwrap_or(0) & 0x7f;
+            let items: Vec<CheckItem> = crate::display::GAME_KEYS.iter().map(|(bit, n)| CheckItem { name: (*n).into(), on: blocked & bit != 0 }).collect();
+            ui.set_game_items(ModelRc::new(VecModel::from(items)));
+            // a slider chosen: where it sits, what it controls
+            ui.set_slider_chosen(self.slider_sel as i32);
+            if self.slider_sel != 0 {
+                let s = self.slider_sel - 1;
+                ui.set_slider_at(self.overlays.fracs[s].unwrap_or(0.0));
+                let choices: Vec<CheckItem> = crate::display::BIND_CHOICES[s].iter().map(|(v, l)| CheckItem { name: (*l).into(), on: self.bind[s] == *v }).collect();
+                ui.set_slider_choices(ModelRc::new(VecModel::from(choices)));
+            }
         }
         if self.menu.is_some() {
             self.build_menu();
