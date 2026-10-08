@@ -589,15 +589,6 @@ impl Page {
         }
     }
 
-    /// How many keys a layer ("keys" or "fnkeys") of the profile being edited
-    /// gives a job other than their factory one.
-    pub fn rebound(&self, layer: &str) -> usize {
-        if self.dev.is_none() {
-            return 0;
-        }
-        self.layout.iter().filter(|k| self.def(layer, k.pos) != self.factory(layer, k.pos)).count()
-    }
-
     pub fn discard(&mut self) {
         let p = pick(self.saved(&self.editing.to_string()));
         self.drafts.insert(self.editing, p);

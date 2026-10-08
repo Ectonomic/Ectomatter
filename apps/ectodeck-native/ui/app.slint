@@ -2002,11 +2002,9 @@ component EffectGrid inherits PageBox {
 // box's own color, running on into it, its inner corner rounded against the
 // other; the other dark, curving into the box where they meet, a half step
 // lighter under the pointer and never as light as the open one. Each its key
-// (a blank cap for Base, Fn for Function), its name and its keys rebound.
+// (a blank cap for Base, Fn for Function) and its name.
 component LayerSwitch inherits Rectangle {
     in property <int> layer;
-    in property <int> base-count;
-    in property <int> fn-count;
     callback chosen(int);
     height: 50px;
     // behind both: dark, rounded with the box at the top
@@ -2015,7 +2013,7 @@ component LayerSwitch inherits Rectangle {
         border-top-right-radius: 12px;
         background: Ink.well;
     }
-    for l[i] in [{ name: "Base", cap: "", n: root.base-count }, { name: "Function", cap: "Fn", n: root.fn-count }]: t := Rectangle {
+    for l[i] in [{ name: "Base", cap: "" }, { name: "Function", cap: "Fn" }]: t := Rectangle {
         property <bool> open: root.layer == i;
         property <color> shut: tab.has-hover ? #1a1a1e : Ink.well;
         x: i * root.width / 2;
@@ -2074,15 +2072,6 @@ component LayerSwitch inherits Rectangle {
             color: t.open ? Ink.ink : tab.has-hover ? Ink.dim : Ink.quiet;
             vertical-alignment: center;
         }
-        Text {
-            x: parent.width - 16px - self.width;
-            height: parent.height;
-            text: l.n == 0 ? "Nothing rebound" : l.n + " rebound";
-            font-family: "Geist";
-            font-size: 11.5px;
-            color: l.n > 0 ? (t.open ? Ink.warn : Ink.warn.with-alpha(0.7)) : Ink.quiet;
-            vertical-alignment: center;
-        }
         // the open tab is already chosen: only the other one answers the pointer
         tab := TouchArea {
             enabled: !t.open;
@@ -2102,10 +2091,8 @@ component KeyLibrary inherits PageBox {
     callback all(bool);
     callback find(string);
     callback pick(int);
-    // the layer shown, as a switch at the box's top, and its keys rebound
+    // the layer shown, as tabs at the box's top
     in property <int> layer;
-    in property <int> base-count;
-    in property <int> fn-count;
     callback layer-chosen(int);
     property <length> top: 50px;
     title-y: root.top + 14px;
@@ -2114,8 +2101,6 @@ component KeyLibrary inherits PageBox {
         y: 0;
         width: parent.width;
         layer: root.layer;
-        base-count: root.base-count;
-        fn-count: root.fn-count;
         chosen(i) => { root.layer-chosen(i); }
     }
     BoxLink {
@@ -2951,10 +2936,8 @@ export component AppWindow inherits Window {
     callback show-rebindings();
     // the line over the keyboard, saying what to do on this tab
     in property <string> hint;
-    // the layer the Keys tab edits (0 Base, 1 Function), and how many keys each rebinds
+    // the layer the Keys tab edits (0 Base, 1 Function)
     in property <int> layer;
-    in property <int> base-count;
-    in property <int> fn-count;
     callback layer-changed(int);
     callback rename-profile(string);
     // the Key library
@@ -3225,8 +3208,6 @@ export component AppWindow inherits Window {
                     x: under-x;
                     y: under-top;
                     layer: root.layer;
-                    base-count: root.base-count;
-                    fn-count: root.fn-count;
                     layer-chosen(i) => { root.layer-changed(i); }
                     width: lib-w;
                     height: lib-h;

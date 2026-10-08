@@ -1796,8 +1796,6 @@ impl Front {
         ui.set_save_label(format!("Save profile {}", p.editing).into());
         ui.set_layer(self.layer as i32);
         if loaded {
-            ui.set_base_count(p.rebound("keys") as i32);
-            ui.set_fn_count(p.rebound("fnkeys") as i32);
         }
         ui.set_hint(
             match p.view {
