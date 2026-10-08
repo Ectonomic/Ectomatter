@@ -929,6 +929,8 @@ struct App {
     maximized: bool,
     frame_pending: bool,
     exit: bool,
+    /// quitting asked for, when: Ectodeck goes once what changed is saved
+    quitting: Option<Instant>,
     /// the last button press, which a move or a resize is started from
     press: u32,
     at: (f64, f64),
@@ -1219,6 +1221,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         maximized: false,
         frame_pending: false,
         exit: false,
+        quitting: None,
         press: 0,
         at: (0.0, 0.0),
         ready: false,
@@ -1282,7 +1285,8 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
                     }
                     tray::TrayAsk::Quit => {
                         app.front.hand_back();
-                        app.exit = true;
+                        // (once what changed is saved: see the loop)
+                        app.quitting = Some(Instant::now());
                     }
                 }
             }
@@ -1309,6 +1313,13 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
     // ECTODECK_NATIVE_OPEN_LAB: open the Key lab at start, as Ctrl+Shift+K does
     let mut open_lab = std::env::var_os("ECTODECK_NATIVE_OPEN_LAB").is_some();
     while !app.exit {
+        // quitting: what changed is saved first, for up to four seconds
+        if let Some(t) = app.quitting {
+            if app.front.flush() || t.elapsed() > Duration::from_secs(4) {
+                app.exit = true;
+                break;
+            }
+        }
         let busy = (app.slint.has_active_animations() && !app.frame_pending)
             || app.subs.iter().flatten().any(|m| !m.hidden && m.slint.has_active_animations() && !m.frame_pending);
         // a lighting effect's next frame, 30 a second; none while the window is
@@ -1675,7 +1686,7 @@ impl App {
     fn hide(&mut self) {
         self.front.hand_back();
         if self.tray.is_none() {
-            self.exit = true;
+            self.quitting = Some(Instant::now());
             return;
         }
         self.window.wl_surface().attach(None, 0, 0);
@@ -2041,6 +2052,12 @@ impl App {
                 lab.undo(self.mods.shift || matches!(e.keysym, Keysym::y | Keysym::Y));
                 return;
             }
+        }
+        // Ctrl+Z and Ctrl+Shift+Z (or Ctrl+Y) in the main window: undo a change to a profile,
+        // or do it again; a box being typed in takes them itself
+        if self.keys_on.is_none() && down && self.mods.ctrl && matches!(e.keysym, Keysym::z | Keysym::Z | Keysym::y | Keysym::Y) && !self.front.typing() {
+            self.front.asks.borrow_mut().push(front::Ask::Undo(self.mods.shift || matches!(e.keysym, Keysym::y | Keysym::Y)));
+            return;
         }
         if let Some(which) = self.keys_on {
             if let (Some(sw), Some(text)) = (&self.subs[which], key_text(e)) {

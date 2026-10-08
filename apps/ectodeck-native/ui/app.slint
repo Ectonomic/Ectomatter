@@ -25,6 +25,11 @@ import "fonts/Geist-600.ttf";
 // panel) sit darker than the box they are in. Every control has four
 // states, each a step apart and none the colour behind it: at rest, under
 // the pointer (in a well, on a box), chosen, chosen under the pointer.
+// whether a box in the main window is being typed in: Ctrl+Z is then the box's own
+export global Typing {
+    in-out property <bool> on;
+}
+
 global Ink {
     out property <color> frame: #0e0e10;
     out property <color> title: #131316;
@@ -552,6 +557,7 @@ component Menu inherits Rectangle {
             vertical-alignment: center;
         }
         search := TextInput {
+            changed has-focus => { Typing.on = self.has-focus; }
             x: 10px;
             width: parent.width - 20px;
             height: parent.height;
@@ -656,7 +662,7 @@ component Menu inherits Rectangle {
                                 vertical-alignment: center;
                                 single-line: true;
                                 accepted => { root.field-done(i, self.text); }
-                                changed has-focus => { if (!self.has-focus && self.text != row.tag) { root.field-done(i, self.text); } }
+                                changed has-focus => { Typing.on = self.has-focus; if (!self.has-focus && self.text != row.tag) { root.field-done(i, self.text); } }
                             }
                         }
                     }
@@ -1072,6 +1078,7 @@ component CellView inherits Rectangle {
             single-line: root.c.style != 5;
             edited => { root.typed(root.c.id, self.text); }
             changed has-focus => {
+                Typing.on = self.has-focus;
                 if (root.c.style >= 4) {
                     root.focused(root.c.id, self.has-focus);
                 }
@@ -1136,6 +1143,7 @@ component CellView inherits Rectangle {
                 self.clear-focus();
             }
             changed has-focus => {
+                Typing.on = self.has-focus;
                 root.focused(root.c.id, self.has-focus);
                 if (self.has-focus) {
                     self.select-all();
@@ -1583,6 +1591,7 @@ component PickField inherits VerticalLayout {
         border-width: input.has-focus ? 1px : 0;
         border-color: #737373;
         input := TextInput {
+            changed has-focus => { Typing.on = self.has-focus; }
             x: 6px;
             width: parent.width - 12px;
             height: parent.height;
@@ -2135,6 +2144,7 @@ component KeyLibrary inherits PageBox {
             vertical-alignment: center;
         }
         find-in := TextInput {
+            changed has-focus => { Typing.on = self.has-focus; }
             x: 12px;
             width: parent.width - 24px;
             height: parent.height;
@@ -2774,6 +2784,7 @@ component AnchorColumn inherits VerticalLayout {
                     border-width: 1px;
                     border-color: Ink.warn;
                     name-in := TextInput {
+                        changed has-focus => { Typing.on = self.has-focus; }
                         x: 9px;
                         width: parent.width - 18px;
                         height: parent.height;
@@ -2845,8 +2856,6 @@ export component AppWindow inherits Window {
     in property <string> boot-title: "Reading your keyboard";
     in property <string> boot-text: "Loading its profiles and macros. This takes a few seconds.";
     in property <[ProfileItem]> profiles;
-    in property <bool> can-save;
-    in property <string> save-label: "Save profile 1";
     in property <[KeyItem]> keys;
     in property <float> units: 649;
     in property <float> units-high: 260;
@@ -2854,11 +2863,9 @@ export component AppWindow inherits Window {
     in property <[Overlay]> overlays;
     // the Lighting page: its effects, and its tile's pieces as the window lays them out
     in property <string> slider-note;
-    // what is unsaved, as the bar says it; the profile being edited; Discard asking first
-    in property <string> unsaved-words;
-    in property <string> editing-name;
-    property <bool> asking-discard;
-    changed can-save => { if (!self.can-save) { self.asking-discard = false; } }
+    // Undo offered beside "Saved", for a moment after a change
+    in property <bool> undo-shown;
+    callback undo(bool);
     in property <[EffectItem]> effects;
     // the chosen effect's picture moves; what the boxes beside the effects hold (0 an effect's
     // settings, 1 the keys dark, 2 the brush), the first one's title, and their heights
@@ -2935,8 +2942,6 @@ export component AppWindow inherits Window {
     callback rail(string);
     callback view-changed(int);
     callback choose-profile(int);
-    callback save();
-    callback discard();
     callback key-clicked(int);
     callback board-clicked();
     // whether a rebound key's new action is printed on it, and turning it on or off
@@ -3000,8 +3005,8 @@ export component AppWindow inherits Window {
     property <float> reveal: root.rail-open ? 1 : 0;
     animate reveal { duration: 160ms; delay: 60ms; easing: ease; }
     property <length> content-w: root.width - rail-w;
-    // the status bar at the window's foot
-    property <length> status-h: 44px;
+    // the scrollbars stop short of the window's rounded corner
+    property <length> bar-foot: root.radius > 0 ? 5px : 2px;
     // the page runs the window's width, a gutter either side
     property <length> pws-x: 24px;
     property <length> pws-w: content-w - 48px;
@@ -3064,7 +3069,7 @@ export component AppWindow inherits Window {
         x: rail-w;
         y: bar;
         width: content-w;
-        height: root.height - bar - status-h;
+        height: root.height - bar;
 
         // the home: each device as its glyph and its name, nothing else
         if root.place == "home": Rectangle {
@@ -3419,9 +3424,25 @@ export component AppWindow inherits Window {
                             clicked => { root.view-changed(2); }
                         }
                     }
-                    // (what was last done, and saving, are on the status bar at the window's foot)
-                    Rectangle {
+                    // what was last done ("Saved", which fades, or a problem, which
+                    // stays), and for a moment after a change, Undo
+                    Text {
                         horizontal-stretch: 1;
+                        text: root.status-text;
+                        font-family: "Geist";
+                        font-size: 12.5px;
+                        color: root.status-kind == 2 ? Ink.bad : Ink.quiet;
+                        horizontal-alignment: right;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    if root.undo-shown: VerticalLayout {
+                        horizontal-stretch: 0;
+                        alignment: center;
+                        BoxLink {
+                            text: "Undo";
+                            clicked => { root.undo(false); }
+                        }
                     }
                     // the Macro Editor, at the bar's end
                     Rectangle {
@@ -3634,87 +3655,10 @@ export component AppWindow inherits Window {
     // Each page's scrollbar runs beside what scrolls and nothing else: under
     // the title bar, under the device's bar on its page (which stays put), and
     // short of the window's rounded corner at the foot.
-    // The status bar, across the window's foot beside the rail: what Ectodeck
-    // last did (in green when it went well, red when it did not), and on the
-    // device's page, while there is something unsaved, how much and on which
-    // profile, Discard (which asks first, in the same place) and Save.
-    Rectangle {
-        x: rail-w;
-        y: root.height - status-h;
-        width: content-w;
-        height: status-h;
-        background: Ink.title;
-        border-bottom-right-radius: root.radius;
-        Rectangle {
-            y: 0;
-            height: 1px;
-            background: Ink.line;
-        }
-        HorizontalLayout {
-            padding-left: 28px;
-            padding-right: 16px;
-            spacing: 8px;
-            Text {
-                horizontal-stretch: 1;
-                text: root.status-text;
-                font-family: "Geist";
-                font-size: 12.5px;
-                color: root.status-kind == 1 ? Ink.good : root.status-kind == 2 ? Ink.bad : Ink.soft;
-                vertical-alignment: center;
-                overflow: elide;
-            }
-            if root.place == "z10" && root.can-save: HorizontalLayout {
-                horizontal-stretch: 0;
-                spacing: 8px;
-                if !root.asking-discard: Rectangle {
-                    width: 6px;
-                    Rectangle {
-                        y: (parent.height - 6px) / 2;
-                        width: 6px;
-                        height: 6px;
-                        border-radius: 3px;
-                        background: Ink.warn;
-                    }
-                }
-                Text {
-                    text: root.asking-discard ? "Discard the changes to " + root.editing-name + "?" : root.unsaved-words;
-                    font-family: "Geist";
-                    font-size: 12.5px;
-                    color: root.asking-discard ? Ink.warn : Ink.dim;
-                    vertical-alignment: center;
-                }
-                Rectangle { width: 6px; }
-                VerticalLayout {
-                    alignment: center;
-                    WordButton {
-                        height: 30px;
-                        text: root.asking-discard ? "Keep" : "Discard";
-                        fill: transparent;
-                        fill-hover: Ink.hover-box;
-                        clicked => { root.asking-discard = !root.asking-discard; }
-                    }
-                }
-                VerticalLayout {
-                    alignment: center;
-                    WordButton {
-                        height: 30px;
-                        text: root.asking-discard ? "Discard" : "Save";
-                        primary: !root.asking-discard;
-                        fill: #5c2420;
-                        fill-hover: #74302a;
-                        clicked => {
-                            if (root.asking-discard) { root.asking-discard = false; root.discard(); } else { root.save(); }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     if root.place == "z10": ScrollBar {
         x: root.width - 12px;
         y: bar + 56px + 2px;
-        height: root.height - bar - 56px - 2px - status-h - 2px;
+        height: root.height - bar - 56px - 2px - root.bar-foot;
         view: flick.height;
         content: flick.content-height;
         offset: -flick.content-y;
@@ -3723,7 +3667,7 @@ export component AppWindow inherits Window {
     if root.place == "settings": ScrollBar {
         x: root.width - 12px;
         y: bar + 2px;
-        height: root.height - bar - 2px - status-h - 2px;
+        height: root.height - bar - 2px - root.bar-foot;
         view: set-flick.height;
         content: set-flick.content-height;
         offset: -set-flick.content-y;
@@ -4027,6 +3971,7 @@ component ChainPiece inherits Rectangle {
                 reject
             }
             changed has-focus => {
+                Typing.on = self.has-focus;
                 if (!self.has-focus) {
                     root.wait-done(root.c.index, self.text);
                 }

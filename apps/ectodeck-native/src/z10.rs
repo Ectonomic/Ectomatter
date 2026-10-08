@@ -563,52 +563,26 @@ impl Page {
         &self.drafts[&self.editing]
     }
 
+    /// Whether a profile differs from what the keyboard holds. (Per key is
+    /// held as the backlight off, its colors kept by Ectodeck, so the two are the same.)
     pub fn is_dirty(&self, n: u8) -> bool {
-        self.dev.is_some() && self.drafts.get(&n).is_some_and(|d| *d != pick(self.saved(&n.to_string())))
+        self.dev.is_some() && self.drafts.get(&n).is_some_and(|d| stored_form(d) != pick(self.saved(&n.to_string())))
     }
 
-    /// How many of a profile's settings differ from what the keyboard holds:
-    /// each key's job, and each lighting value, counts once.
-    pub fn unsaved(&self, n: u8) -> usize {
-        fn count(a: &Value, b: &Value) -> usize {
-            match (a, b) {
-                (Value::Object(x), Value::Object(y)) => {
-                    let keys: std::collections::BTreeSet<&String> = x.keys().chain(y.keys()).collect();
-                    keys.into_iter().map(|k| count(x.get(k).unwrap_or(&Value::Null), y.get(k).unwrap_or(&Value::Null))).sum()
-                }
-                // a list of lists (the keys, the colours): each entry once
-                (Value::Array(x), Value::Array(y)) if x.iter().chain(y).any(|v| v.is_array() || v.is_object()) => {
-                    (0..x.len().max(y.len())).map(|i| count(x.get(i).unwrap_or(&Value::Null), y.get(i).unwrap_or(&Value::Null)).min(1)).sum()
-                }
-                _ => usize::from(a != b),
-            }
-        }
-        match (self.dev.is_some(), self.drafts.get(&n)) {
-            (true, Some(d)) => count(d, &pick(self.saved(&n.to_string()))),
-            _ => 0,
-        }
-    }
-
-    pub fn discard(&mut self) {
-        let p = pick(self.saved(&self.editing.to_string()));
-        self.drafts.insert(self.editing, p);
-    }
-
-    /// A profile saved and read back: it is the draft now.
-    pub fn saved_profile(&mut self, n: u8, p: Value) {
+    /// A profile saved and read back: what the keyboard holds now, and the
+    /// draft too unless it changed while it was saving (`replace` false).
+    pub fn saved_profile(&mut self, n: u8, p: Value, replace: bool) {
         if let Some(dev) = &mut self.dev {
             dev["profiles"][n.to_string()] = p.clone();
         }
-        self.drafts.insert(n, pick(&p));
+        if replace {
+            self.drafts.insert(n, pick(&p));
+        }
     }
 
-    /// What the page sends to save the profile being edited.
-    pub fn save_body(&self) -> Value {
-        let mut body = self.draft().clone();
-        if body["lighting"]["mode"] == "custom" {
-            body["lighting"]["mode"] = json!("off");
-        }
-        body
+    /// What the page sends to save a profile.
+    pub fn save_body_of(&self, n: u8) -> Value {
+        self.drafts.get(&n).map(stored_form).unwrap_or(Value::Null)
     }
 
     pub fn set_active(&mut self, n: u8) {
@@ -1109,6 +1083,15 @@ impl Page {
     }
 }
 
+/// A draft as the keyboard stores it: Per key as the backlight off.
+fn stored_form(d: &Value) -> Value {
+    let mut d = d.clone();
+    if d["lighting"]["mode"] == "custom" {
+        d["lighting"]["mode"] = json!("off");
+    }
+    d
+}
+
 /// the words at the end of a name that tell it apart from the others
 fn distinct_part(name: &str, names: &[String]) -> String {
     let w: Vec<&str> = name.split_whitespace().collect();
@@ -1189,4 +1172,41 @@ fn ramp(colors: &[[f64; 3]], u: f64) -> [f64; 3] {
 fn led_look(c: [f64; 3]) -> [u8; 3] {
     let spill = 0x60 as f64 / 255.0;
     [c[0] as u8, (c[1] + c[0] * spill + c[2] * spill).min(255.0) as u8, (c[2] + c[1] * spill).min(255.0) as u8]
+}
+
+#[cfg(test)]
+mod saving_tests {
+    use super::*;
+
+    fn page() -> Page {
+        let mut p = Page::new();
+        let prof = json!({ "name": "DEFAULT 1", "lighting": { "mode": "off", "static": { "zone": 128 } }, "keys": [], "fnkeys": [] });
+        p.dev = Some(json!({ "active": 1, "profiles": { "1": prof.clone() } }));
+        p.drafts.insert(1, pick(&prof));
+        p.editing = 1;
+        p
+    }
+
+    #[test]
+    fn per_key_is_saved_once_the_keyboard_holds_its_backlight_off() {
+        let mut p = page();
+        p.drafts.get_mut(&1).unwrap()["lighting"]["mode"] = json!("custom");
+        // the keyboard stores Per key as off, so a draft of Per key over a stored off is saved
+        assert!(!p.is_dirty(1));
+        assert_eq!(p.save_body_of(1)["lighting"]["mode"], "off");
+        p.drafts.get_mut(&1).unwrap()["lighting"]["mode"] = json!("static");
+        assert!(p.is_dirty(1));
+    }
+
+    #[test]
+    fn a_change_made_while_saving_is_kept() {
+        let mut p = page();
+        p.drafts.get_mut(&1).unwrap()["lighting"]["mode"] = json!("static");
+        let read_back = json!({ "name": "DEFAULT 1", "lighting": { "mode": "static", "static": { "zone": 128 } }, "keys": [], "fnkeys": [] });
+        // changed again before the keyboard answered
+        p.drafts.get_mut(&1).unwrap()["name"] = json!("Games");
+        p.saved_profile(1, read_back, false);
+        assert_eq!(p.drafts[&1]["name"], "Games");
+        assert!(p.is_dirty(1), "the newer change still saves");
+    }
 }

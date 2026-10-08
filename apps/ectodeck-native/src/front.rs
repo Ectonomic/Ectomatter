@@ -29,8 +29,6 @@ pub enum Ask {
     Close,
     View(i32),
     Profile(i32),
-    Save,
-    Discard,
     Key(i32),
     Board,
     ActionMenu(i32, f32, f32, f32),
@@ -55,6 +53,10 @@ pub enum Ask {
     /// time to send the preview again: the effect every two seconds, streamed colours 14 times a second
     PreviewTick,
     StreamTick,
+    /// time to save what has changed, once it has stopped changing
+    AutoSave,
+    /// undo the last change, or do again the last one undone
+    Undo(bool),
     PkSv(f32, f32),
     PkHue(f32),
     PkField(i32, String),
@@ -262,6 +264,17 @@ pub struct Front {
     /// the Key library: the groups closed, what is searched for, the slider chosen (1 dimmer, 2 volume)
     lib_shut: std::collections::HashSet<String>,
     lib_query: String,
+    /// saving as things change: each profile's draft as last seen, when it last
+    /// changed, the profile being saved and its draft as sent, what can be
+    /// undone and done again (a profile and its draft before the change), and
+    /// when the message showing now was put up
+    last_drafts: HashMap<u8, serde_json::Value>,
+    changed_at: HashMap<u8, Instant>,
+    saving: Option<(u8, serde_json::Value)>,
+    undo: Vec<(u8, serde_json::Value)>,
+    redo: Vec<(u8, serde_json::Value)>,
+    undo_mark: Option<(u8, Instant)>,
+    status_at: Option<Instant>,
     /// the key or slider (-1 the dimmer, -2 the volume slider) whose group was
     /// last opened to show it: a group opens once when something in it is
     /// chosen, and after that its heading closes it again
@@ -370,8 +383,7 @@ impl Front {
         on!(on_close_window, Ask::Close);
         on!(on_view_changed, |i| Ask::View(i));
         on!(on_choose_profile, |n| Ask::Profile(n));
-        on!(on_save, Ask::Save);
-        on!(on_discard, Ask::Discard);
+        on!(on_undo, |redo| Ask::Undo(redo));
         on!(on_key_clicked, |p| Ask::Key(p));
         on!(on_board_clicked, Ask::Board);
         on!(on_show_rebindings, Ask::ShowRebindings);
@@ -417,6 +429,7 @@ impl Front {
             (Duration::from_millis(500), Ask::PollActive),
             (Duration::from_secs(2), Ask::PreviewTick),
             (Duration::from_millis(70), Ask::StreamTick),
+            (Duration::from_millis(250), Ask::AutoSave),
         ]
             .into_iter()
             .map(|(every, ask)| {
@@ -436,6 +449,13 @@ impl Front {
             layer: 0,
             lib_shut: LIB_GROUPS.iter().map(|g| g.to_string()).chain(["Sliders".to_string(), "Buttons".to_string()]).collect(),
             lib_query: String::new(),
+            last_drafts: HashMap::new(),
+            changed_at: HashMap::new(),
+            saving: None,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            undo_mark: None,
+            status_at: None,
             lib_revealed: None,
             lib_rows: HashMap::new(),
             screen_sent: None,
@@ -512,9 +532,11 @@ impl Front {
         }
     }
 
-    fn status(&self, text: impl Into<SharedString>, kind: i32) {
+    fn status(&mut self, text: impl Into<SharedString>, kind: i32) {
         self.ui.set_status_text(text.into());
         self.ui.set_status_kind(kind);
+        self.ui.set_undo_shown(false);
+        self.status_at = Some(Instant::now());
     }
 
     /// The keyboard answered.
@@ -548,17 +570,29 @@ impl Front {
             }
             device::Heard::Saved(n, r) => {
                 self.page.busy = false;
+                let sent = self.saving.take().filter(|(m, _)| *m == n).map(|(_, d)| d);
                 match r {
                     Ok(p) => {
-                        self.page.saved_profile(n, p);
-                        if n == self.page.editing && self.page.draft()["lighting"]["mode"] == "off" && self.page.custom.iter().any(|c| c.iter().any(|v| *v > 0)) {
+                        // changed again while it was saving: the newer draft stays, and saves next
+                        let unchanged = sent.as_ref() == self.page.drafts.get(&n);
+                        let was_custom = sent.as_ref().is_some_and(|d| d["lighting"]["mode"] == "custom");
+                        self.page.saved_profile(n, p, unchanged);
+                        if unchanged && was_custom {
                             if let Some(d) = self.page.drafts.get_mut(&n) {
                                 d["lighting"]["mode"] = serde_json::json!("custom");
                             }
                         }
-                        self.status(format!("Saved profile {n} to the keyboard and read it back to check."), 1);
+                        if let Some(d) = self.page.drafts.get(&n) {
+                            self.last_drafts.insert(n, d.clone());
+                        }
+                        self.status("Saved", 1);
+                        self.ui.set_undo_shown(!self.undo.is_empty());
                     }
-                    Err(e) => self.status(format!("Profile {n} was not saved: {e}"), 2),
+                    Err(e) => {
+                        // not tried again until it changes again
+                        self.changed_at.remove(&n);
+                        self.status(format!("{} was not saved to the keyboard: {e}", self.page.profile_name(n)), 2);
+                    }
                 }
             }
             device::Heard::Done => return,
@@ -856,11 +890,17 @@ impl Front {
                     }
                 }
                 Ask::Profile(n) => self.choose_profile(n as u8),
-                Ask::Save => self.save(),
-                Ask::Discard => {
-                    self.page.discard();
-                    self.status(format!("Discarded the unsaved changes to profile {}.", self.page.editing), 0);
+                Ask::AutoSave => {
+                    changed = false;
+                    self.auto_save();
+                    // a passing message goes after a while; a problem stays until the next
+                    if self.status_at.is_some_and(|t| t.elapsed() > Duration::from_secs(6)) && self.ui.get_status_kind() != 2 {
+                        self.status_at = None;
+                        self.ui.set_status_text("".into());
+                        self.ui.set_undo_shown(false);
+                    }
                 }
+                Ask::Undo(redo) => self.undo(redo),
                 Ask::Key(pos) => self.select_key(pos as u32),
                 Ask::ShowRebindings => {
                     self.rebindings = !self.rebindings;
@@ -1353,14 +1393,93 @@ impl Front {
         }
     }
 
-    fn save(&mut self) {
-        if self.page.dev.is_none() || self.page.busy || !self.page.is_dirty(self.page.editing) {
+    /// Notice what changed since last looked: each change marks its profile
+    /// to be saved, and what it was before can be undone. Changes close
+    /// together (a slider dragged, a color picked) undo as one.
+    fn note_changes(&mut self) {
+        if self.page.dev.is_none() {
             return;
         }
-        let n = self.page.editing;
+        let now = Instant::now();
+        for (n, d) in &self.page.drafts {
+            match self.last_drafts.get(n) {
+                None => {
+                    self.last_drafts.insert(*n, d.clone());
+                }
+                Some(before) if before != d => {
+                    let burst = self.undo_mark.is_some_and(|(m, t)| m == *n && t.elapsed() < Duration::from_millis(1200));
+                    if !burst {
+                        self.undo.push((*n, before.clone()));
+                        if self.undo.len() > 100 {
+                            self.undo.remove(0);
+                        }
+                    }
+                    self.undo_mark = Some((*n, now));
+                    self.redo.clear();
+                    self.changed_at.insert(*n, now);
+                    self.last_drafts.insert(*n, d.clone());
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Save a profile that has changed, once it has been still a moment.
+    fn auto_save(&mut self) {
+        self.note_changes();
+        if self.page.dev.is_none() || self.page.busy || self.kb.is_none() {
+            return;
+        }
+        let quiet = |t: Option<&Instant>| t.is_some_and(|t| t.elapsed() >= Duration::from_millis(1200));
+        let due = (1..=5u8).find(|n| self.page.is_dirty(*n) && quiet(self.changed_at.get(n)));
+        if let Some(n) = due {
+            self.save_now(n);
+        }
+    }
+
+    fn save_now(&mut self, n: u8) {
+        let Some(d) = self.page.drafts.get(&n).cloned() else { return };
         self.page.busy = true;
-        self.status(format!("Saving profile {n}…"), 0);
-        self.ask_kb(device::Ask::Save(n, self.page.save_body()));
+        self.saving = Some((n, d));
+        self.ask_kb(device::Ask::Save(n, self.page.save_body_of(n)));
+    }
+
+    /// Put back how a profile was before its last change (or, `redo`, as it
+    /// was before the last undo); it saves as any change does.
+    fn undo(&mut self, redo: bool) {
+        self.note_changes();
+        let (from, to) = if redo { (&mut self.redo, &mut self.undo) } else { (&mut self.undo, &mut self.redo) };
+        let Some((n, d)) = from.pop() else { return };
+        if let Some(now) = self.page.drafts.insert(n, d.clone()) {
+            to.push((n, now));
+        }
+        self.last_drafts.insert(n, d);
+        self.changed_at.insert(n, Instant::now());
+        self.undo_mark = None;
+        let name = self.page.profile_name(n);
+        self.status(if redo { format!("Did again the change to {name}") } else { format!("Undid the last change to {name}") }, 0);
+        self.push_preview();
+        self.refresh();
+    }
+
+    /// Ectodeck closing: whatever has changed is saved now, without waiting.
+    /// Whether everything is saved, so it may go.
+    pub fn flush(&mut self) -> bool {
+        self.note_changes();
+        if self.page.dev.is_none() || self.kb.is_none() {
+            return true;
+        }
+        if !self.page.busy {
+            if let Some(n) = (1..=5u8).find(|n| self.page.is_dirty(*n) && self.changed_at.contains_key(n)) {
+                self.save_now(n);
+            }
+        }
+        !self.page.busy && !(1..=5u8).any(|n| self.page.is_dirty(n) && self.changed_at.contains_key(&n))
+    }
+
+    /// What the page's typing goes to: a box being typed in takes Ctrl+Z itself.
+    pub fn typing(&self) -> bool {
+        slint::ComponentHandle::global::<crate::Typing>(&self.ui).get_on()
     }
 
     /// A key clicked on the board: chosen for editing on the Keys page; on
@@ -1759,6 +1878,7 @@ impl Front {
 
     /// Draw the page from the page's state.
     pub fn refresh(&mut self) {
+        self.note_changes();
         let ui = &self.ui;
         let p = &self.page;
         ui.set_tab(match p.view {
@@ -1779,7 +1899,7 @@ impl Front {
                         active: n == p.active(),
                         current: n == p.editing,
                         dirty: p.is_dirty(n),
-                        unsaved: p.unsaved(n) as i32,
+                        unsaved: 0,
                         colors,
                         c1,
                         c2,
@@ -1790,15 +1910,6 @@ impl Front {
                 .collect();
             show_rows(ui.get_profiles(), |m| ui.set_profiles(m), profiles);
         }
-        let dirty = loaded && p.is_dirty(p.editing);
-        ui.set_can_save(dirty && !p.busy);
-        if loaded {
-            let n = p.unsaved(p.editing).max(1);
-            let name = p.profile_name(p.editing);
-            ui.set_unsaved_words(format!("{n} unsaved {} on {name}", if n == 1 { "change" } else { "changes" }).into());
-            ui.set_editing_name(name.into());
-        }
-        ui.set_save_label(format!("Save profile {}", p.editing).into());
         ui.set_layer(self.layer as i32);
         if loaded {
         }
