@@ -262,6 +262,10 @@ pub struct Front {
     /// the Key library: the groups closed, what is searched for, the slider chosen (1 dimmer, 2 volume)
     lib_shut: std::collections::HashSet<String>,
     lib_query: String,
+    /// the key or slider (-1 the dimmer, -2 the volume slider) whose group was
+    /// last opened to show it: a group opens once when something in it is
+    /// chosen, and after that its heading closes it again
+    lib_revealed: Option<i32>,
     lib_rows: HashMap<String, Rc<VecModel<LibRow>>>,
     /// the screen's light and built-in screens the keyboard was last sent (or
     /// had when it was read), so a change to them shows on it at once
@@ -432,6 +436,7 @@ impl Front {
             layer: 0,
             lib_shut: LIB_GROUPS.iter().map(|g| g.to_string()).chain(["Sliders".to_string(), "Buttons".to_string()]).collect(),
             lib_query: String::new(),
+            lib_revealed: None,
             lib_rows: HashMap::new(),
             screen_sent: None,
             slider_sel: 0,
@@ -1887,6 +1892,23 @@ impl Front {
         }
         // the Key library: each group, open or closed, its keys as they are on the layer shown
         if loaded && p.view == View::Keys {
+            // something newly chosen: its group opens, once
+            let chosen = match self.slider_sel {
+                1 => Some(-1),
+                2 => Some(-2),
+                _ => p.sel.map(|pos| pos as i32),
+            };
+            if chosen != self.lib_revealed {
+                self.lib_revealed = chosen;
+                let group = match chosen {
+                    Some(-1) | Some(-2) => Some("Sliders"),
+                    Some(pos) => p.key(pos as u32).map(|k| lib_group_of(&k.id)),
+                    None => None,
+                };
+                if let Some(g) = group {
+                    self.lib_shut.remove(g);
+                }
+            }
             let layer = LAYERS[self.layer].0;
             let q = self.lib_query.trim().to_lowercase();
             let mut groups: Vec<LibGroup> = Vec::new();
@@ -1905,8 +1927,7 @@ impl Front {
                 if rows.is_empty() && !q.is_empty() {
                     return;
                 }
-                let holds = rows.iter().any(|r| r.chosen);
-                let open = !q.is_empty() || holds || !self.lib_shut.contains(name);
+                let open = !q.is_empty() || !self.lib_shut.contains(name);
                 any_open |= !self.lib_shut.contains(name);
                 let rebound = rows.iter().filter(|r| r.rebound).count() as i32;
                 let model = lib_rows.entry(name.to_string()).or_insert_with(|| Rc::new(VecModel::default())).clone();
