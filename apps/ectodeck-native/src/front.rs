@@ -1772,7 +1772,7 @@ impl Front {
                 View::Keys if p.sel.is_some() => "Escape clears the choice.",
                 View::Keys => "Click a key on the keyboard or in the Key library.",
                 View::Lighting => "The keyboard plays the effect as you change it.",
-                View::Display => "",
+                View::Display => "The keyboard’s settings are the same on every profile.",
             }
             .into(),
         );
@@ -1914,6 +1914,20 @@ impl Front {
                 ui.set_slider_at(self.overlays.fracs[s].unwrap_or(0.0));
                 let choices: Vec<CheckItem> = crate::display::BIND_CHOICES[s].iter().map(|(v, l)| CheckItem { name: (*l).into(), on: self.bind[s] == *v }).collect();
                 ui.set_slider_choices(ModelRc::new(VecModel::from(choices)));
+                // what the firmware can't do yet, said where it matters
+                let fw = self.firmware();
+                let note = if s == 1 && self.bind[1] != "own" && !crate::display::has(&fw, "volume.quiet") {
+                    "The keyboard still sends volume keys from this slider as well. Its firmware can be told not to, from build 3."
+                } else if s == 0 && self.bind[0] != "own" {
+                    if crate::display::has(&fw, "dimmer.keep") {
+                        "The backlight stays where it was, and follows the volume slider if that is on keyboard brightness."
+                    } else {
+                        "The backlight stays where it was, though it may flicker as this slider moves. Its firmware can hold it steady, from build 3."
+                    }
+                } else {
+                    ""
+                };
+                ui.set_slider_note(note.into());
             }
         }
         if self.menu.is_some() {
@@ -1944,7 +1958,12 @@ impl Front {
             self.show_cells(cells);
         } else if loaded && self.page.view == View::Display {
             let fw = self.firmware();
-            let t = crate::display::tiles(&self.page, &fw, &self.bind);
+            let connected = match self.ui.get_conn_state() {
+                1 => Some(true),
+                3 => None,
+                _ => Some(false),
+            };
+            let t = crate::display::tiles(&self.page, &fw, connected);
             self.ui.set_tile_height(t.height);
             self.show_cells(t.cells);
         }

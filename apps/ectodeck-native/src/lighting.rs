@@ -5,8 +5,7 @@
 //! Each box is a fixed width, so its pieces are placed here from its own top
 //! left, and the page places the boxes and wraps them: so chips wrap and
 //! notes run on as they should, and a slider being dragged is never rebuilt
-//! under the pointer. The `Col` rows are the older layout, which Settings
-//! still uses.
+//! under the pointer.
 
 use serde_json::{json, Value};
 
@@ -98,7 +97,9 @@ pub fn id(c: Ctl) -> i32 {
     CTLS.iter().position(|x| *x == c).unwrap_or(0) as i32
 }
 
-/// the pieces' kinds, as the page draws them
+/// the pieces' kinds, as the page draws them (every kind it draws is named
+/// here, used from Rust or not)
+#[allow(dead_code)]
 pub mod kind {
     pub const TEXT: i32 = 0;
     pub const SWATCH: i32 = 1;
@@ -132,8 +133,11 @@ pub mod kind {
     pub const DROP: i32 = 46;
     pub const QUIET: i32 = 47;
     pub const CHECKBOX: i32 = 48;
+    /// a thing the firmware adds, a tick before it
+    pub const TICKED: i32 = 49;
 }
 /// the text styles
+#[allow(dead_code)]
 pub mod style {
     pub const LABEL: i32 = 0;
     pub const HEAD: i32 = 1;
@@ -167,6 +171,8 @@ pub mod style {
     pub const PROP: i32 = 35;
     pub const END_L: i32 = 36;
     pub const END_R: i32 = 37;
+    /// a card's title, as a box's
+    pub const BOX_TITLE: i32 = 38;
 }
 
 /// the effects' speeds: stored as a cycle time, the slider runs slow to fast, as EVGA's does
@@ -182,16 +188,6 @@ fn speed(mode: &str) -> Option<(f64, f64, &'static str)> {
 
 pub const ZONES: [(u64, &str); 6] = [(0x80, "Whole keyboard"), (0x02, "F-keys"), (0x04, "Number row"), (0x10, "WASD"), (0x08, "Arrows"), (0x01, "Numpad")];
 
-pub(crate) struct Col {
-    pub x: f32,
-    pub w: f32,
-    pub y: f32,
-    pub cells: Vec<Cell>,
-}
-
-const LABEL_W: f32 = 112.0;
-const CTRL_X: f32 = 128.0;
-
 pub(crate) fn cell(kind: i32, x: f32, y: f32, w: f32, h: f32) -> Cell {
     Cell { kind, x, y, w, h, text: "".into(), fill: "".into(), lines: "".into(), color: slint::Color::from_rgb_u8(0, 0, 0), on: false, value: 0.0, id: 0, index: 0, style: 0 }
 }
@@ -199,171 +195,7 @@ pub(crate) fn text_cell(style: i32, x: f32, y: f32, w: f32, h: f32, s: &str) -> 
     Cell { text: s.into(), style, ..cell(kind::TEXT, x, y, w, h) }
 }
 
-/// One part of a row's control, as it stacks in the control's column.
-pub(crate) enum Part {
-    Swatches(Ctl, Vec<slint::Color>),
-    Check(Ctl, bool, &'static str),
-    Slider(Ctl, f32, String),
-    Seg(Ctl, Vec<(i64, &'static str)>, i64),
-    Chips(Vec<(&'static str, bool)>),
-    Note(String),
-    Paint(slint::Color, &'static str),
-    Ghosts(Vec<(Ctl, &'static str)>),
-    /// a line of text to type in: the profile's name
-    Field(Ctl, String),
-    /// a button that opens a menu of choices, showing the one chosen
-    Dropdown(Ctl, usize, String),
-    /// a value, as text
-    Value(String),
-    /// a list, one line an item
-    List(Vec<String>),
-}
-
-impl Col {
-    /// A column `w` wide: its heading, then its rows 14 apart.
-    pub fn sized(x: f32, w: f32, title: &str) -> Col {
-        if title.is_empty() {
-            return Col { x, w, y: 2.0 + 14.0, cells: Vec::new() };
-        }
-        Col { x, w, y: 18.0 + 2.0 + 14.0, cells: vec![text_cell(style::HEAD, x, 0.0, w, 18.0, title)] }
-    }
-
-    /// A column's own list of checkboxes, 9 apart.
-    pub fn checks(&mut self, items: Vec<(Ctl, usize, bool, String)>) {
-        let n = items.len();
-        for (k, (c, index, on, label)) in items.into_iter().enumerate() {
-            let y = self.y + k as f32 * 28.0;
-            self.cells.push(Cell { on, id: id(c), index: index as i32, text: label.clone().into(), ..cell(kind::CHECK, self.x, y, 28.0 + text::width(400, 13.5, &label), 19.0) });
-        }
-        self.y += n as f32 * 28.0 - 9.0 + 14.0;
-    }
-
-    /// A row: its name in a column of its own, then its control, whose parts
-    /// stack 7 apart and sit in the middle of the row when it is short.
-    pub fn row(&mut self, label: &str, parts: Vec<Part>) {
-        let (x0, cx) = (self.x, self.x + CTRL_X);
-        let ctrl_w = self.w - CTRL_X;
-        let mut placed: Vec<Cell> = Vec::new();
-        let mut h = 0.0f32;
-        for (i, p) in parts.into_iter().enumerate() {
-            if i > 0 {
-                h += 7.0;
-            }
-            let y = h;
-            h += match p {
-                Part::Swatches(c, cols) => {
-                    for (j, col) in cols.into_iter().enumerate() {
-                        placed.push(Cell { color: col, id: id(c), index: j as i32, ..cell(kind::SWATCH, cx + j as f32 * 40.0, y, 34.0, 34.0) });
-                    }
-                    34.0
-                }
-                Part::Check(c, on, label) => {
-                    placed.push(Cell { on, id: id(c), text: label.into(), ..cell(kind::CHECK, cx, y, 28.0 + text::width(400, 13.5, label), 19.0) });
-                    19.0
-                }
-                Part::Slider(c, frac, value) => {
-                    placed.push(Cell { value: frac, id: id(c), ..cell(kind::SLIDER, cx + 2.0, y + 9.0, ctrl_w - 48.0 - 14.0 - 4.0, 16.0) });
-                    placed.push(text_cell(style::VALUE, cx + ctrl_w - 48.0, y + 8.0, 48.0, 18.0, &value));
-                    34.0
-                }
-                Part::Seg(c, opts, current) => {
-                    let mut bx = cx + 3.0;
-                    let mut buttons = Vec::new();
-                    for (j, (v, name)) in opts.iter().enumerate() {
-                        let w = text::width(400, 13.0, name) + 24.0;
-                        buttons.push(Cell { text: (*name).into(), on: *v == current, id: id(c), index: j as i32, ..cell(kind::SEG_BUTTON, bx, y + 3.0, w, 30.0) });
-                        bx += w + 2.0;
-                    }
-                    placed.push(cell(kind::SEG, cx, y, bx - 2.0 + 3.0 - cx, 36.0));
-                    placed.extend(buttons);
-                    36.0
-                }
-                Part::Chips(chips) => {
-                    // chips 6 apart, wrapping at the control's edge
-                    let (mut bx, mut by) = (0.0f32, 0.0f32);
-                    for (j, (name, on)) in chips.iter().enumerate() {
-                        let w = text::width(400, 13.0, name) + 24.0;
-                        if bx > 0.0 && bx + w > ctrl_w {
-                            bx = 0.0;
-                            by += 36.0;
-                        }
-                        placed.push(Cell { text: (*name).into(), on: *on, id: id(Ctl::Zone), index: j as i32, ..cell(kind::CHIP, cx + bx, y + by, w, 30.0) });
-                        bx += w + 6.0;
-                    }
-                    by + 30.0
-                }
-                Part::Note(s) => {
-                    // a line a piece, 1.45 apart, as the page spaces them
-                    let lines = text::wrap(400, 12.5, &s, ctrl_w);
-                    for (k, line) in lines.iter().enumerate() {
-                        placed.push(text_cell(style::NOTE, cx, y + k as f32 * 18.125, ctrl_w, 18.0, line));
-                    }
-                    (lines.len() as f32 * 18.125).floor()
-                }
-                Part::Paint(col, note) => {
-                    placed.push(Cell { color: col, id: id(Ctl::Paint), ..cell(kind::SWATCH, cx, y, 34.0, 34.0) });
-                    placed.push(text_cell(style::NOTE, cx + 44.0, y + 8.0, ctrl_w - 44.0, 18.0, note));
-                    34.0
-                }
-                Part::Field(c, v) => {
-                    placed.push(Cell { text: v.into(), id: id(c), ..cell(kind::FIELD, cx, y, ctrl_w.min(280.0), 35.0) });
-                    35.0
-                }
-                Part::Dropdown(c, index, v) => {
-                    placed.push(Cell { text: v.into(), id: id(c), index: index as i32, ..cell(kind::DROPDOWN, cx, y, ctrl_w.min(272.0), 32.0) });
-                    32.0
-                }
-                Part::Value(v) => {
-                    placed.push(text_cell(style::VALUE_BRIGHT, cx, y, ctrl_w, 34.0, &v));
-                    34.0
-                }
-                Part::List(items) => {
-                    // each item 1.5 lines tall, 4 apart; the list starts on the row's line
-                    let n = items.len();
-                    for (k, it) in items.iter().enumerate() {
-                        placed.push(text_cell(style::ITEM, cx, y + 7.0 + k as f32 * 24.25, ctrl_w, 20.0, it));
-                    }
-                    (n as f32 * 24.25 - 4.0 + 14.0).max(34.0)
-                }
-                Part::Ghosts(list) => {
-                    let mut bx = cx;
-                    for (c, name) in list {
-                        let w = text::width(500, 13.0, name) + 24.0;
-                        placed.push(Cell { text: name.into(), id: id(c), ..cell(kind::GHOST, bx, y + 2.0, w, 30.0) });
-                        bx += w + 10.0;
-                    }
-                    34.0
-                }
-            };
-        }
-        let row_h = h.max(34.0);
-        // a short control sits in the middle of the row
-        let shift = ((row_h - h) / 2.0).max(0.0);
-        let top = self.y;
-        self.cells.push(text_cell(style::LABEL, x0, top, LABEL_W, 34.0, label));
-        for mut c in placed {
-            c.y += top + shift;
-            self.cells.push(c);
-        }
-        self.y += row_h + 14.0;
-    }
-
-    /// A paragraph across the column.
-    pub fn para(&mut self, s: &str) {
-        let lines = text::wrap(400, 12.5, s, self.w);
-        let h = lines.len() as f32 * 18.125;
-        for (k, line) in lines.iter().enumerate() {
-            self.cells.push(text_cell(style::NOTE, self.x, self.y + k as f32 * 18.125, self.w, 18.0, line));
-        }
-        self.y += h.floor() + 14.0;
-    }
-
-    pub fn height(&self) -> f32 {
-        self.y - 14.0
-    }
-}
-
-/// The colours a profile paints its keys with, one a key: kept by the window,
+/// The colors a profile paints its keys with, one a key: kept by the window,
 /// since the keyboard stores none.
 pub fn custom_colors(n: u8) -> Vec<[u8; 3]> {
     crate::uistate::get(&format!("custom:{n}")).and_then(|v| serde_json::from_value(v).ok()).unwrap_or_else(|| vec![[0; 3]; 116])

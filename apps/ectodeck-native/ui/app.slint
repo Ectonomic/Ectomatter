@@ -762,10 +762,10 @@ component CellView inherits Rectangle {
         width: parent.width;
         text: root.c.text;
         font-family: "Geist";
-        font-size: root.c.style == 33 ? 10.5px : root.c.style == 34 ? 12px : root.c.style == 35 ? 12.5px : 11px;
-        font-weight: root.c.style == 33 ? 600 : root.c.style == 34 ? 500 : 400;
+        font-size: root.c.style == 33 ? 10.5px : root.c.style == 34 ? 12px : root.c.style == 35 ? 12.5px : root.c.style == 38 ? 13.5px : 11px;
+        font-weight: root.c.style == 33 || root.c.style == 38 ? 600 : root.c.style == 34 ? 500 : 400;
         letter-spacing: root.c.style == 33 ? 0.95px : 0;
-        color: root.c.style == 35 || root.c.style == 34 ? Ink.dim : Ink.quiet;
+        color: root.c.style == 38 ? Ink.bright : root.c.style == 35 || root.c.style == 34 ? Ink.dim : Ink.quiet;
         horizontal-alignment: root.c.style == 37 ? right : left;
         vertical-alignment: center;
     }
@@ -903,7 +903,7 @@ component CellView inherits Rectangle {
     // (style 27: a panel over the page, raised off it; 28: the page behind one,
     // dimmed; 30: the row of a menu that is in use)
     if root.c.kind == 9: Rectangle {
-        border-radius: root.c.style == 30 ? 7px : 14px;
+        border-radius: root.c.style == 30 ? 7px : root.c.style == 1 ? 12px : 14px;
         background: root.c.style == 27 ? #2c2c2c : root.c.style == 28 ? #141414b8 : root.c.style == 30 ? Ink.shade4 : Ink.shade1;
         border-width: root.c.style == 27 ? 1px : 0;
         border-color: #3a3a3a;
@@ -1266,16 +1266,18 @@ component CellView inherits Rectangle {
         }
     }
     // ---- the Lighting page's own pieces, in the shades of its boxes
-    // a value in a small well
+    // a value in a small well; style 1, a warning's tag, outlined in amber
     if root.c.kind == 40: Rectangle {
-        border-radius: 6px;
-        background: Ink.well;
+        border-radius: root.c.style == 1 ? 4px : 6px;
+        background: root.c.style == 1 ? transparent : Ink.well;
+        border-width: root.c.style == 1 ? 1px : 0;
+        border-color: #f0b35a73;
         Text {
             text: root.c.text;
             font-family: "Geist";
-            font-size: 11.5px;
-            font-weight: 500;
-            color: Ink.dim;
+            font-size: root.c.style == 1 ? 11px : 11.5px;
+            font-weight: root.c.style == 1 ? 400 : 500;
+            color: root.c.style == 1 ? Ink.warn : Ink.dim;
             horizontal-alignment: center;
             vertical-alignment: center;
         }
@@ -1500,6 +1502,31 @@ component CellView inherits Rectangle {
         q-ta := TouchArea {
             mouse-cursor: pointer;
             clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+        }
+    }
+    // a thing the firmware adds: a tick, then its name
+    if root.c.kind == 49: Rectangle {
+        Path {
+            x: 0;
+            y: (parent.height - 12px) / 2;
+            width: 12px;
+            height: 12px;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            commands: "M5 12.5l4.5 4.5L19 7.5";
+            fill: transparent;
+            stroke: Ink.good;
+            stroke-width: 2.4px;
+        }
+        Text {
+            x: 19px;
+            width: parent.width - 19px;
+            text: root.c.text;
+            font-family: "Geist";
+            font-size: 13px;
+            color: Ink.dim;
+            vertical-alignment: center;
+            overflow: elide;
         }
     }
     // a checkbox on a box, and its words
@@ -2434,6 +2461,8 @@ component KeyDetail inherits PageBox {
 component SliderDetail inherits PageBox {
     in property <string> side;
     in property <float> at;
+    // what the firmware can't do yet with the job chosen, if anything
+    in property <string> note;
     in property <[CheckItem]> choices;
     callback done();
     callback picked(int);
@@ -2522,7 +2551,7 @@ component SliderDetail inherits PageBox {
         x: 16px;
         y: 138px + root.choices.length * 36px + 8px;
         width: parent.width - 32px;
-        text: "The same on every profile, while Ectodeck is open.";
+        text: root.note == "" ? "The same on every profile, while Ectodeck is open." : "The same on every profile, while Ectodeck is open. " + root.note;
         font-family: "Geist";
         font-size: 12px;
         color: Ink.quiet;
@@ -2829,6 +2858,7 @@ export component AppWindow inherits Window {
     // what is drawn over the keyboard: the slider knobs, the display, its glass
     in property <[Overlay]> overlays;
     // the Lighting page: its effects, and its tile's pieces as the window lays them out
+    in property <string> slider-note;
     in property <[EffectItem]> effects;
     // the chosen effect's picture moves; what the boxes beside the effects hold (0 an effect's
     // settings, 1 the keys dark, 2 the brush), the first one's title, and their heights
@@ -2880,7 +2910,7 @@ export component AppWindow inherits Window {
     out property <length> window-width: root.width;
 
     // where the keyboard goes, for the window to draw it there, when its page shows
-    out property <bool> board-shown: root.place == "z10";
+    out property <bool> board-shown: root.place == "z10" && root.tab != 2;
     // the keyboard has been drawn: its knobs and display come with it, never before
     in property <bool> board-ready;
     in property <duration> knob-glide: 120ms;
@@ -3014,7 +3044,7 @@ export component AppWindow inherits Window {
     property <length> tab-h: root.tab == 0 ? (second-fits ? lib-h : lib-h + 12px + second-h)
         : root.tab == 1 ? light-h : root.tile-height;
     property <length> under-board: 18px + max(anchor.preferred-height, tab-h);
-    property <length> page-h: board-top + board-h + under-board + 40px;
+    property <length> page-h: root.tab == 2 ? 12px + head-h + 6px + 24px + root.tile-height + 40px : board-top + board-h + under-board + 40px;
     // the page's scrollbar, as WebKit drew it: over the whole window, when the page is longer than it
     property <length> doc-h: bar + 56px + page-h;
 
@@ -3132,7 +3162,7 @@ export component AppWindow inherits Window {
                             horizontal-stretch: 1;
                         }
                         // whether rebound keys show their new actions on the keyboard
-                        Rectangle {
+                        if root.tab != 2: Rectangle {
                             width: 28px + rebind-words.preferred-width;
                             Rectangle {
                                 x: 0;
@@ -3172,7 +3202,7 @@ export component AppWindow inherits Window {
 
                 // the anchoring column: the profiles, saving, and on Keys the layers
                 anchor := AnchorColumn {
-                    visible: root.boot == 0;
+                    visible: root.boot == 0 && root.tab != 2;
                     x: pws-x;
                     y: under-top;
                     width: anchor-w;
@@ -3244,6 +3274,7 @@ export component AppWindow inherits Window {
                         side: root.slider-chosen == 1 ? "The left slider" : "The right slider";
                         at: root.slider-at;
                         choices: root.slider-choices;
+                        note: root.slider-note;
                         done => { root.slider-chosen-at(0); }
                         picked(i) => { root.slider-bind-at(i); }
                     }
@@ -3284,10 +3315,18 @@ export component AppWindow inherits Window {
                     }
                 }
                 // Settings: its tiles, as the window lays them out
+                // Settings: one column of cards in the middle of the page, under a rule
                 if root.tab == 2: Rectangle {
-                    x: under-x;
-                    y: under-top;
-                    width: under-w;
+                    x: 0;
+                    y: 12px + head-h + 6px;
+                    width: content-w;
+                    height: 1px;
+                    background: Ink.line;
+                }
+                if root.tab == 2: Rectangle {
+                    x: pws-x + max(0, (pws-w - 820px) / 2);
+                    y: 12px + head-h + 6px + 24px;
+                    width: 820px;
                     height: root.tile-height;
                     for c in root.cells: CellView {
                         c: c;
@@ -3300,6 +3339,7 @@ export component AppWindow inherits Window {
                 // the keys, over the keyboard's hole: a click on the keyboard away
                 // from every key lets the chosen one go; then what is drawn over it
                 Rectangle {
+                    visible: root.tab != 2;
                     x: pws-x;
                     y: board-top;
                     width: board-w;
@@ -3340,16 +3380,32 @@ export component AppWindow inherits Window {
                     padding-left: 28px;
                     padding-right: 28px;
                     spacing: 28px;
-                    Text {
-                        text: "EVGA Z10 RGB";
-                        font-family: "Geist";
-                        font-size: 17px;
-                        font-weight: 600;
-                        letter-spacing: 0.17px;
-                        color: Ink.ink;
-                        vertical-alignment: center;
+                    // the device's name, its connection's dot before it
+                    HorizontalLayout {
+                        horizontal-stretch: 0;
+                        spacing: 10px;
+                        Rectangle {
+                            width: 7px;
+                            Rectangle {
+                                y: (parent.height - 7px) / 2;
+                                width: 7px;
+                                height: 7px;
+                                border-radius: 3.5px;
+                                background: root.conn-state == 1 ? Ink.good : root.conn-state == 2 ? Ink.bad : #5c5c5c;
+                            }
+                        }
+                        Text {
+                            text: "EVGA Z10 RGB";
+                            font-family: "Geist";
+                            font-size: 17px;
+                            font-weight: 600;
+                            letter-spacing: 0.17px;
+                            color: Ink.ink;
+                            vertical-alignment: center;
+                        }
                     }
                     HorizontalLayout {
+                        horizontal-stretch: 0;
                         spacing: 2px;
                         t-keys := Tab {
                             text: "Keys";
@@ -3367,7 +3423,7 @@ export component AppWindow inherits Window {
                             clicked => { root.view-changed(2); }
                         }
                     }
-                    // what was last done, then how the keyboard is
+                    // what was last done (how the keyboard is connected is on Settings)
                     Text {
                         horizontal-stretch: 1;
                         text: root.status-text;
@@ -3377,45 +3433,6 @@ export component AppWindow inherits Window {
                         horizontal-alignment: right;
                         vertical-alignment: center;
                         wrap: word-wrap;
-                    }
-                    HorizontalLayout {
-                        padding-left: 14px - 28px;
-                        spacing: 8px;
-                        alignment: end;
-                        Rectangle {
-                            width: 7px;
-                            Rectangle {
-                                y: (parent.height - 7px) / 2;
-                                width: 7px;
-                                height: 7px;
-                                border-radius: 3.5px;
-                                background: root.conn-state == 1 ? Ink.good : root.conn-state == 2 ? Ink.bad : #5c5c5c;
-                            }
-                        }
-                        Text {
-                            text: root.conn-text;
-                            font-family: "Geist";
-                            font-size: 12.5px;
-                            color: Ink.quiet;
-                            vertical-alignment: center;
-                        }
-                        if root.conn-chip != "": Rectangle {
-                            width: chip.preferred-width + 14px - 1px;
-                            Rectangle {
-                                x: -1px;
-                                y: (parent.height - self.height) / 2;
-                                height: 18px;
-                                border-width: 1px;
-                                border-color: #f0b35a73;
-                                border-radius: 4px;
-                                chip := Text {
-                                    text: root.conn-chip;
-                                    font-family: "Geist";
-                                    font-size: 11px;
-                                    color: Ink.warn;
-                                }
-                            }
-                        }
                     }
                     // the Macro Editor, at the bar's end
                     Rectangle {
@@ -3466,7 +3483,7 @@ export component AppWindow inherits Window {
                     background: Ink.line;
                 }
                 Rectangle {
-                    x: 28px + devbar-brand-w + 28px + (root.tab == 0 ? 0 : root.tab == 1 ? t-keys.width + 2px : t-keys.width + t-lighting.width + 4px);
+                    x: 28px + 17px + devbar-brand-w + 28px + (root.tab == 0 ? 0 : root.tab == 1 ? t-keys.width + 2px : t-keys.width + t-lighting.width + 4px);
                     y: parent.height - 2px;
                     width: root.tab == 0 ? t-keys.width : root.tab == 1 ? t-lighting.width : t-settings.width;
                     height: 2px;
