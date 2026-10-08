@@ -1995,6 +1995,79 @@ component EffectGrid inherits PageBox {
     }
 }
 
+// The layer the Keys tab edits, as a switch over the Key library: each side
+// its key (a blank cap for Base, Fn for Function), its name, and how many of
+// its keys are rebound. At rest the well shows; under the pointer a step
+// lighter; chosen lighter still, and lighter again under the pointer.
+component LayerSwitch inherits Rectangle {
+    in property <int> layer;
+    in property <int> base-count;
+    in property <int> fn-count;
+    callback chosen(int);
+    height: 46px;
+    border-radius: 10px;
+    background: Ink.well;
+    for l[i] in [{ name: "Base", cap: "", n: root.base-count }, { name: "Function", cap: "Fn", n: root.fn-count }]: Rectangle {
+        x: 3px + i * (root.width - 6px) / 2;
+        y: 3px;
+        width: (root.width - 6px) / 2 - (i == 0 ? 2px : 0);
+        height: root.height - 6px;
+        border-radius: 7px;
+        background: root.layer == i ? (seg.has-hover ? Ink.pick-hover : Ink.pick) : seg.has-hover ? Ink.hover-well : transparent;
+        // the layer's key, a small cap
+        Rectangle {
+            x: 8px;
+            y: (parent.height - 24px) / 2;
+            width: 30px;
+            height: 24px;
+            border-radius: 5px;
+            background: Ink.box;
+            border-width: 1px;
+            border-color: root.layer == i ? #5a5a62 : #3a3a41;
+            if l.cap != "": Text {
+                text: l.cap;
+                font-family: "Geist";
+                font-size: 10.5px;
+                font-weight: 600;
+                color: root.layer == i || seg.has-hover ? Ink.bright : Ink.soft;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            if l.cap == "": Rectangle {
+                x: (parent.width - 12px) / 2;
+                y: 15px;
+                width: 12px;
+                height: 2px;
+                border-radius: 1px;
+                background: #6a6a72;
+            }
+        }
+        Text {
+            x: 48px;
+            height: parent.height;
+            text: l.name;
+            font-family: "Geist";
+            font-size: 13px;
+            font-weight: 500;
+            color: root.layer == i || seg.has-hover ? Ink.bright : Ink.soft;
+            vertical-alignment: center;
+        }
+        Text {
+            x: parent.width - 12px - self.width;
+            height: parent.height;
+            text: l.n == 0 ? "Nothing rebound" : l.n + " rebound";
+            font-family: "Geist";
+            font-size: 11.5px;
+            color: l.n > 0 ? Ink.warn : Ink.quiet;
+            vertical-alignment: center;
+        }
+        seg := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.chosen(i); }
+        }
+    }
+}
+
 // The Key library: a find box, then the groups, each closing to its heading,
 // a key lit while chosen; its jobs show only where a key is rebound.
 component KeyLibrary inherits PageBox {
@@ -2593,17 +2666,12 @@ component AnchorHead inherits Text {
 }
 
 // The anchoring column under the keyboard: the profiles (the one the Z10 is
-// running marked by a white bar at its edge, the one being edited lit), and
-// on the Keys tab the layers (Save and Discard are in the device's bar). Choices go top to bottom: a profile, then a layer, then a key.
+// running marked by a white bar at its edge, the one being edited lit). The
+// layers are a switch over the Key library; Save and Discard are in the device's bar. Choices go top to bottom: a profile, then a layer, then a key.
 component AnchorColumn inherits VerticalLayout {
     in property <[ProfileItem]> profiles;
-    in property <bool> show-layers;
-    in property <int> layer;
-    in property <int> base-count;
-    in property <int> fn-count;
     callback choose(int);
     callback rename(string);
-    callback layer-chosen(int);
     property <bool> renaming;
     spacing: 12px;
     alignment: start;
@@ -2714,72 +2782,6 @@ component AnchorColumn inherits VerticalLayout {
                     pen-ta := TouchArea {
                         mouse-cursor: pointer;
                         clicked => { root.renaming = true; }
-                    }
-                }
-            }
-        }
-    }
-
-    // the layers the Keys tab edits, named as profiles are
-    if root.show-layers: Rectangle {
-        background: Ink.well;
-        border-radius: 12px;
-        height: llist.preferred-height;
-        llist := VerticalLayout {
-            padding: 8px;
-            padding-top: 4px;
-            spacing: 2px;
-            AnchorHead {
-                x: 6px;
-                text: "LAYERS";
-            }
-            for l[i] in [{ name: "Base", cap: "", n: root.base-count }, { name: "Function", cap: "Fn", n: root.fn-count }]: AnchorRow {
-                chosen: root.layer == i;
-                clicked => { root.layer-chosen(i); }
-                // the layer's key, a small cap
-                Rectangle {
-                    x: 8px;
-                    y: (parent.height - 26px) / 2;
-                    width: 32px;
-                    height: 26px;
-                    border-radius: 5px;
-                    background: Ink.box;
-                    border-width: 1px;
-                    border-color: root.layer == i ? #5a5a62 : #3a3a41;
-                    if l.cap != "": Text {
-                        text: l.cap;
-                        font-family: "Geist";
-                        font-size: 10.5px;
-                        font-weight: 600;
-                        color: root.layer == i ? Ink.bright : Ink.soft;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
-                    if l.cap == "": Rectangle {
-                        x: (parent.width - 12px) / 2;
-                        y: 16px;
-                        width: 12px;
-                        height: 2px;
-                        border-radius: 1px;
-                        background: #6a6a72;
-                    }
-                }
-                VerticalLayout {
-                    x: 50px;
-                    width: parent.width - 58px;
-                    alignment: center;
-                    Text {
-                        text: l.name;
-                        font-family: "Geist";
-                        font-size: 13px;
-                        font-weight: 500;
-                        color: root.layer == i ? Ink.bright : Ink.dim;
-                    }
-                    Text {
-                        text: l.n == 0 ? "Nothing rebound" : l.n + " rebound";
-                        font-family: "Geist";
-                        font-size: 11.5px;
-                        color: Ink.quiet;
                     }
                 }
             }
@@ -2987,10 +2989,13 @@ export component AppWindow inherits Window {
     // the page's height under the device's bar: its head, the keyboard, what is under it, and the page's foot
     // Keys: the library, and its neighbor beside it, or under it where the page is narrow;
     // side by side, both reach the foot of the anchoring column
+    // (the library under the layers' switch, the two as tall as the box beside them)
     property <length> lib-w: 440px;
-    property <length> lib-h: max(anchor.preferred-height, 360px);
+    property <length> keys-h: max(anchor.preferred-height, 420px);
+    property <length> layers-h: 46px + 12px;
+    property <length> lib-h: keys-h - layers-h;
     property <length> second-w: root.key-open ? 460px : root.slider-chosen != 0 ? 360px : 340px;
-    property <length> second-h: second-fits || root.key-open || root.slider-chosen != 0 ? lib-h : 210px;
+    property <length> second-h: second-fits || root.key-open || root.slider-chosen != 0 ? keys-h : 210px;
     property <bool> second-fits: lib-w + 12px + second-w <= under-w;
     // Lighting: the effects (300 wide), the effect's settings (360) and where and when
     // (320), side by side while they fit and wrapping under when they don't; the
@@ -3006,7 +3011,7 @@ export component AppWindow inherits Window {
     property <length> lrow1: max(lr1 == 1 ? root.set-h : 0, lr2 == 1 ? root.place-h : 0);
     property <length> lrow2: lr2 == 2 ? root.place-h : 0;
     property <length> light-h: lrow0 + (lrows > 1 ? 12px + lrow1 : 0) + (lrows > 2 ? 12px + lrow2 : 0);
-    property <length> tab-h: root.tab == 0 ? (second-fits ? lib-h : lib-h + 12px + second-h)
+    property <length> tab-h: root.tab == 0 ? (second-fits ? keys-h : keys-h + 12px + second-h)
         : root.tab == 1 ? light-h : root.tile-height;
     property <length> under-board: 18px + max(anchor.preferred-height, tab-h);
     property <length> page-h: root.tab == 2 ? 12px + head-h + 6px + 24px + root.tile-height + 40px : board-top + board-h + under-board + 40px;
@@ -3172,19 +3177,23 @@ export component AppWindow inherits Window {
                     y: under-top;
                     width: anchor-w;
                     profiles: root.profiles;
-                    show-layers: root.tab == 0;
-                    layer: root.layer;
-                    base-count: root.base-count;
-                    fn-count: root.fn-count;
                     choose(n) => { root.choose-profile(n); }
                     rename(t) => { root.rename-profile(t); }
-                    layer-chosen(i) => { root.layer-changed(i); }
                 }
 
                 // Keys: the Key library, and beside it Game mode, or the chosen key or slider
-                if root.tab == 0 && root.boot == 0: KeyLibrary {
+                if root.tab == 0 && root.boot == 0: LayerSwitch {
                     x: under-x;
                     y: under-top;
+                    width: lib-w;
+                    layer: root.layer;
+                    base-count: root.base-count;
+                    fn-count: root.fn-count;
+                    chosen(i) => { root.layer-changed(i); }
+                }
+                if root.tab == 0 && root.boot == 0: KeyLibrary {
+                    x: under-x;
+                    y: under-top + layers-h;
                     width: lib-w;
                     height: lib-h;
                     title: root.layer == 1 ? "Key library, Function layer" : "Key library";
@@ -3199,7 +3208,7 @@ export component AppWindow inherits Window {
                 key-tile := Rectangle {
                     visible: root.tab == 0 && root.boot == 0;
                     x: under-x + (second-fits ? lib-w + 12px : 0);
-                    y: under-top + (second-fits ? 0 : lib-h + 12px);
+                    y: under-top + (second-fits ? 0 : keys-h + 12px);
                     width: second-w;
                     height: second-h;
                     if !root.key-open && root.slider-chosen == 0: GameBox {
