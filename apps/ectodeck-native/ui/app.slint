@@ -1997,33 +1997,44 @@ component EffectGrid inherits PageBox {
     }
 }
 
-// The layer the Keys tab edits, as a switch at the top of the Key library: each side
-// its key (a blank cap for Base, Fn for Function), its name, and how many of
-// its keys are rebound. At rest the well shows; under the pointer a step
-// lighter; chosen lighter still, and lighter again under the pointer.
+// The layer the Keys tab edits, as two tabs across the top of the Key library,
+// a rule under them: each its key (a blank cap for Base, Fn for Function), its
+// name and how many of its keys are rebound; the chosen one underlined. At rest
+// its words are quiet; under the pointer brighter on a light shade; chosen
+// bright and underlined, the shade too under the pointer.
 component LayerSwitch inherits Rectangle {
     in property <int> layer;
     in property <int> base-count;
     in property <int> fn-count;
     callback chosen(int);
-    height: 46px;
-    border-radius: 10px;
-    background: Ink.well;
+    height: 50px;
+    // the rule under the tabs, across the box
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Ink.line;
+    }
     for l[i] in [{ name: "Base", cap: "", n: root.base-count }, { name: "Function", cap: "Fn", n: root.fn-count }]: Rectangle {
-        x: 3px + i * (root.width - 6px) / 2;
-        y: 3px;
-        width: (root.width - 6px) / 2 - (i == 0 ? 2px : 0);
+        x: 8px + i * (root.width - 16px) / 2;
+        y: 6px;
+        width: (root.width - 16px) / 2;
         height: root.height - 6px;
-        border-radius: 7px;
-        background: root.layer == i ? (seg.has-hover ? Ink.pick-hover : Ink.pick) : seg.has-hover ? Ink.hover-well : transparent;
+        // the shade under the pointer, rounded at the top only
+        Rectangle {
+            x: 2px;
+            width: parent.width - 4px;
+            height: parent.height - 4px;
+            border-radius: 8px;
+            background: tab.has-hover ? Ink.hover-box : transparent;
+        }
         // the layer's key, a small cap
         Rectangle {
-            x: 8px;
-            y: (parent.height - 24px) / 2;
+            x: 14px;
+            y: (parent.height - 24px) / 2 - 1px;
             width: 30px;
             height: 24px;
             border-radius: 5px;
-            background: Ink.box;
+            background: Ink.well;
             border-width: 1px;
             border-color: root.layer == i ? #5a5a62 : #3a3a41;
             if l.cap != "": Text {
@@ -2031,7 +2042,7 @@ component LayerSwitch inherits Rectangle {
                 font-family: "Geist";
                 font-size: 10.5px;
                 font-weight: 600;
-                color: root.layer == i || seg.has-hover ? Ink.bright : Ink.soft;
+                color: root.layer == i || tab.has-hover ? Ink.bright : Ink.soft;
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
@@ -2045,25 +2056,33 @@ component LayerSwitch inherits Rectangle {
             }
         }
         Text {
-            x: 48px;
-            height: parent.height;
+            x: 54px;
+            y: 0;
+            height: parent.height - 2px;
             text: l.name;
             font-family: "Geist";
-            font-size: 13px;
+            font-size: 14px;
             font-weight: 500;
-            color: root.layer == i || seg.has-hover ? Ink.bright : Ink.soft;
+            color: root.layer == i || tab.has-hover ? Ink.ink : Ink.quiet;
             vertical-alignment: center;
         }
         Text {
-            x: parent.width - 12px - self.width;
-            height: parent.height;
+            x: parent.width - 14px - self.width;
+            y: 0;
+            height: parent.height - 2px;
             text: l.n == 0 ? "Nothing rebound" : l.n + " rebound";
             font-family: "Geist";
             font-size: 11.5px;
             color: l.n > 0 ? Ink.warn : Ink.quiet;
             vertical-alignment: center;
         }
-        seg := TouchArea {
+        // the chosen tab's underline, over the rule
+        if root.layer == i: Rectangle {
+            y: parent.height - 2px;
+            height: 2px;
+            background: Ink.ink;
+        }
+        tab := TouchArea {
             mouse-cursor: pointer;
             clicked => { root.chosen(i); }
         }
@@ -2085,12 +2104,12 @@ component KeyLibrary inherits PageBox {
     in property <int> base-count;
     in property <int> fn-count;
     callback layer-chosen(int);
-    property <length> top: 16px + 46px;
+    property <length> top: 50px;
     title-y: root.top + 14px;
     LayerSwitch {
-        x: 16px;
-        y: 16px;
-        width: parent.width - 32px;
+        x: 0;
+        y: 0;
+        width: parent.width;
         layer: root.layer;
         base-count: root.base-count;
         fn-count: root.fn-count;
