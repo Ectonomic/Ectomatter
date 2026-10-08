@@ -2268,6 +2268,18 @@ component KeyLibrary inherits PageBox {
             }
         }
     }
+    // its scrollbar, at the box's right edge beside the list
+    ScrollBar {
+        x: parent.width - 12px;
+        y: lib-flick.y;
+        height: lib-flick.height;
+        view: lib-flick.height;
+        content: lib-flick.viewport-height;
+        offset: -lib-flick.viewport-y;
+        framed: false;
+        thumb-color: #4a4a52;
+        scroll-to(o) => { lib-flick.viewport-y = -o; }
+    }
 }
 
 // a checkbox: a well with a tick when on, its words beside it
@@ -3042,7 +3054,7 @@ export component AppWindow inherits Window {
     property <length> keys-h: anchor.preferred-height;
     property <length> lib-h: keys-h;
     property <length> second-w: root.key-open ? 460px : root.slider-chosen != 0 ? 360px : 340px;
-    property <length> second-h: root.slider-chosen != 0 ? max(keys-h, 340px) : root.key-open ? max(keys-h, root.key-note != "" ? 320px : 270px) : second-fits ? keys-h : 210px;
+    property <length> second-h: root.slider-chosen != 0 ? max(keys-h, 328px) : root.key-open ? max(keys-h, root.key-note != "" ? 320px : 270px) : second-fits ? keys-h : 210px;
     property <bool> second-fits: lib-w + 12px + second-w <= under-w;
     // Lighting: the effects (300 wide), the effect's settings (360) and where and when
     // (320), side by side while they fit and wrapping under when they don't; the

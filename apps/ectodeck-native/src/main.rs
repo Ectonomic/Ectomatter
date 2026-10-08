@@ -108,8 +108,10 @@ use wayland_protocols::wp::color_management::v1::client::{
     wp_image_description_v1::{self, WpImageDescriptionV1},
 };
 
-/// the size the window opens at, and the least it may be, as the web app's
-const SIZE: (u32, u32) = (1440, 940);
+/// the size the window opens at: under a 1080p screen with a taskbar, and
+/// tall enough that the Keys and Settings tabs show whole under the keyboard,
+/// which scales with the window's width; and the least it may be
+const SIZE: (u32, u32) = (1440, 1028);
 const MIN_SIZE: (u32, u32) = (1000, 700);
 /// the Macro Editor's window, as the web app's
 const MACRO_SIZE: (u32, u32) = (1080, 620);
