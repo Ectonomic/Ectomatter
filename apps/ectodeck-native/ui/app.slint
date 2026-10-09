@@ -3818,21 +3818,21 @@ export component AppWindow inherits Window {
                             clicked => { root.undo(false); }
                         }
                     }
-                    // the Key lab and the Macro Editor, at the bar's end
+                    // the Macro Editor and the Key lab, at the bar's end
                     HorizontalLayout {
                         horizontal-stretch: 0;
                         spacing: 8px;
+                        BarButton {
+                            commands: "M3.1 4h9.8a1.6 1.6 0 0 1 1.6 1.6v5.3a1.6 1.6 0 0 1-1.6 1.6H3.1a1.6 1.6 0 0 1-1.6-1.6V5.6a1.6 1.6 0 0 1 1.6-1.6zM4 7h1M7 7h1M10 7h2M4.5 9.8h7";
+                            text: "Macro Editor";
+                            clicked => { root.macro-editor(-1); }
+                        }
                         BarButton {
                             // a flask drawn for this size, its lines on the pixel grid
                             commands: "M5.14 1.14h5.72M6.29 1.14v4.58L2.95 11.93a1.25 1.25 0 0 0 1.1 1.79h7.9a1.25 1.25 0 0 0 1.1-1.79L9.71 5.72V1.14M4.3 10.29h7.4";
                             round: true;
                             text: "Key lab";
                             clicked => { root.rail("lab"); }
-                        }
-                        BarButton {
-                            commands: "M3.1 4h9.8a1.6 1.6 0 0 1 1.6 1.6v5.3a1.6 1.6 0 0 1-1.6 1.6H3.1a1.6 1.6 0 0 1-1.6-1.6V5.6a1.6 1.6 0 0 1 1.6-1.6zM4 7h1M7 7h1M10 7h2M4.5 9.8h7";
-                            text: "Macro Editor";
-                            clicked => { root.macro-editor(-1); }
                         }
                     }
                 }
