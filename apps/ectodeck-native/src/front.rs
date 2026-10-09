@@ -601,7 +601,7 @@ impl Front {
             reading_gap: 120.0,
             dev_status: None,
             player: None,
-            lcd: crate::lcd_player::News { rows: Vec::new(), sequence: None, state: crate::lcd_player::State::Missing },
+            lcd: crate::lcd_player::News { rows: Vec::new(), sequence: None, state: crate::lcd_player::State::Missing, page: 0 },
             lcd_paused: false,
             launch_frames: launch_frames(),
             launch_at: (0, Instant::now()),
@@ -911,11 +911,18 @@ impl Front {
                     self.close_menu();
                     self.editor = Some(crate::screen_edit::Editor { page: i, chosen: None, grid: crate::uistate::get("screen_grid").and_then(|v| v.as_bool()).unwrap_or(true) });
                     self.read_now();
+                    // the keyboard stays on the page being edited
+                    if let Some(pl) = &self.player {
+                        pl.tell(crate::lcd_player::Control::Hold(Some(i)));
+                    }
                 }
                 Ask::EditDone => {
                     self.close_menu();
                     self.editor = None;
                     self.save_pages();
+                    if let Some(pl) = &self.player {
+                        pl.tell(crate::lcd_player::Control::Hold(None));
+                    }
                 }
                 Ask::AddPiece(what) => {
                     let first = crate::lcd_page::available(&self.readings, self.weather.report().is_some()).first().copied().unwrap_or(crate::lcd_page::Source::CpuLoad);
@@ -2829,10 +2836,10 @@ impl Front {
         self.tell_page();
     }
 
-    /// The page the screen plays, to the player.
+    /// The pages the screen plays in turn, to the player.
     fn tell_page(&mut self) {
-        if let (Some(pl), Some(p)) = (&self.player, self.pages.first()) {
-            pl.tell(crate::lcd_player::Control::Page(p.clone()));
+        if let Some(pl) = &self.player {
+            pl.tell(crate::lcd_player::Control::Pages(self.pages.clone()));
         }
     }
 
@@ -2882,12 +2889,18 @@ impl Front {
     /// The screen's light while Ectodeck plays it: the page's own, or the
     /// profile's.
     fn page_light(&self, profile: [u8; 3]) -> [u8; 3] {
-        self.pages.first().and_then(|p| p.light).unwrap_or(profile)
+        self.pages.get(self.shown_page()).and_then(|p| p.light).unwrap_or(profile)
+    }
+
+    /// The page on the keyboard's screen: the one being edited, or the one
+    /// the playlist has come to.
+    fn shown_page(&self) -> usize {
+        self.editor.as_ref().map_or(self.lcd.page, |ed| ed.page)
     }
 
     /// The player said what the screen shows now.
     pub fn screen_news(&mut self, n: crate::lcd_player::News) {
-        let state_changed = n.state != self.lcd.state || n.sequence != self.lcd.sequence;
+        let state_changed = n.state != self.lcd.state || n.sequence != self.lcd.sequence || n.page != self.lcd.page;
         self.lcd = n;
         if self.page.view == View::Screen && self.ui.get_place() == "z10" {
             if state_changed {

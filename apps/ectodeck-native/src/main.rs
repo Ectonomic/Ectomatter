@@ -501,7 +501,9 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
             "exit" => Some("exit"),
             _ => None,
         };
-        front.screen_news(lcd_player::News { rows, sequence, state });
+        // ECTODECK_NATIVE_LCD_PAGE: which page of the playlist shows
+        let page = std::env::var("ECTODECK_NATIVE_LCD_PAGE").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+        front.screen_news(lcd_player::News { rows, sequence, state, page });
     }
     if let Ok(place) = std::env::var("ECTODECK_NATIVE_PLACE") {
         front.ui.set_place(place.into());

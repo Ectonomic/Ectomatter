@@ -172,6 +172,8 @@ pub struct Piece {
     pub width: u8,
     /// set against its right edge rather than its left
     pub right: bool,
+    /// set in the middle of its width (before `right`)
+    pub center: bool,
     /// the spaces kept after the piece before it, when that piece runs long
     pub gap: u8,
 }
@@ -187,6 +189,46 @@ impl Piece {
     }
 }
 
+/// How a page comes onto the screen after the one before it: a column of #
+/// sweeping across (as a game's launch begins), its cells changing in a
+/// random order, its words typed in, or at once.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Transition {
+    Wipe,
+    Dissolve,
+    Type,
+    Cut,
+}
+
+pub const TRANSITIONS: [Transition; 4] = [Transition::Wipe, Transition::Dissolve, Transition::Type, Transition::Cut];
+
+impl Transition {
+    pub fn key(self) -> &'static str {
+        match self {
+            Transition::Wipe => "wipe",
+            Transition::Dissolve => "dissolve",
+            Transition::Type => "type",
+            Transition::Cut => "cut",
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Transition::Wipe => "Wipe",
+            Transition::Dissolve => "Dissolve",
+            Transition::Type => "Type",
+            Transition::Cut => "Cut",
+        }
+    }
+
+    fn from_key(k: &str) -> Option<Transition> {
+        TRANSITIONS.iter().copied().find(|t| t.key() == k)
+    }
+}
+
+/// How long a page shows, in seconds: the least, the most, and a new page's.
+pub const SECS: (u32, u32, u32) = (3, 60, 8);
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Page {
     pub id: String,
@@ -194,15 +236,32 @@ pub struct Page {
     /// the screen's light while this page shows; None, the profile's
     pub light: Option<[u8; 3]>,
     pub pieces: Vec<Piece>,
+    /// how long it shows before the next page, among others
+    pub secs: u32,
+    /// how it comes onto the screen after the page before it
+    pub comes_in: Transition,
 }
 
 fn words(row: u8, col: u8, t: &str) -> Piece {
-    Piece { kind: Kind::Text(t.into()), row, col, width: t.chars().count() as u8, right: false, gap: 1 }
+    Piece { kind: Kind::Text(t.into()), row, col, width: t.chars().count() as u8, right: false, center: false, gap: 1 }
 }
 
 fn reading(row: u8, col: u8, width: u8, s: Source, gap: u8) -> Piece {
-    Piece { kind: Kind::Data(s, false), row, col, width, right: true, gap }
+    Piece { kind: Kind::Data(s, false), row, col, width, right: true, center: false, gap }
 }
+
+/// A piece across the whole of a row, in its middle.
+fn middle(row: u8, kind: Kind) -> Piece {
+    Piece { kind, row, col: 0, width: COLS, right: false, center: true, gap: 1 }
+}
+
+/// The pages that can be added to the playlist: what each is called, and
+/// what it shows.
+pub const TEMPLATES: [(&str, &str, &str); 3] = [
+    ("stats", "Stats", "CPU, GPU, RAM and VRAM, every second."),
+    ("clock", "Clock", "The time and the date, in the middle of the screen."),
+    ("weather", "Weather", "The temperature and the sky outside, for the place set in Ectodeck’s Settings."),
+];
 
 impl Page {
     /// The Stats page as Grant laid it out for the z10-lcd service.
@@ -211,6 +270,8 @@ impl Page {
             id: "stats".into(),
             name: "Stats".into(),
             light: None,
+            secs: SECS.2,
+            comes_in: Transition::Wipe,
             pieces: vec![
                 words(0, 0, "CPU"),
                 reading(0, 4, 3, Source::CpuTemp, 1),
@@ -228,12 +289,57 @@ impl Page {
         }
     }
 
+    /// The time on the second row and the date on the third, in the middle.
+    pub fn clock() -> Page {
+        Page {
+            id: "clock".into(),
+            name: "Clock".into(),
+            light: None,
+            secs: SECS.2,
+            comes_in: Transition::Wipe,
+            pieces: vec![middle(1, Kind::Clock(false)), middle(2, Kind::Data(Source::Date, false))],
+        }
+    }
+
+    /// The temperature outside on the second row and the sky on the third.
+    pub fn weather() -> Page {
+        Page {
+            id: "weather".into(),
+            name: "Weather".into(),
+            light: None,
+            secs: SECS.2,
+            comes_in: Transition::Wipe,
+            pieces: vec![middle(1, Kind::Data(Source::OutsideTemp, false)), middle(2, Kind::Data(Source::Sky, false))],
+        }
+    }
+
+    /// A page of one of the TEMPLATES, by its key, with an id no page in
+    /// `taken` has (a second Clock is clock-2).
+    pub fn template(key: &str, taken: &[Page]) -> Option<Page> {
+        let mut p = match key {
+            "stats" => Page::stats(),
+            "clock" => Page::clock(),
+            "weather" => Page::weather(),
+            _ => return None,
+        };
+        let base = p.id.clone();
+        let mut n = 1;
+        while taken.iter().any(|q| q.id == p.id) {
+            n += 1;
+            p.id = format!("{base}-{n}");
+        }
+        Some(p)
+    }
+
     pub fn to_json(&self) -> Value {
         let pieces: Vec<Value> = self
             .pieces
             .iter()
             .map(|p| {
                 let mut v = json!({ "row": p.row, "col": p.col, "width": p.width, "right": p.right, "gap": p.gap });
+                if p.center {
+                    v["center"] = json!(true);
+                }
                 match &p.kind {
                     Kind::Text(t) => {
                         v["type"] = json!("text");
@@ -256,7 +362,7 @@ impl Page {
                 v
             })
             .collect();
-        let mut v = json!({ "id": self.id, "name": self.name, "pieces": pieces });
+        let mut v = json!({ "id": self.id, "name": self.name, "pieces": pieces, "secs": self.secs, "comes_in": self.comes_in.key() });
         if let Some(l) = self.light {
             v["light"] = json!(l);
         }
@@ -282,12 +388,15 @@ impl Page {
                     col: b(&p["col"])?.min(COLS - 1),
                     width: b(&p["width"])?.clamp(1, COLS),
                     right: p["right"].as_bool().unwrap_or(false),
+                    center: p["center"].as_bool().unwrap_or(false),
                     gap: b(&p["gap"]).unwrap_or(1).min(1),
                 })
             })
             .collect();
         let light = v["light"].as_array().filter(|a| a.len() == 3).map(|a| std::array::from_fn(|i| b(&a[i]).unwrap_or(0)));
-        Some(Page { id: v["id"].as_str()?.into(), name: v["name"].as_str().unwrap_or("Page").into(), light, pieces })
+        let secs = v["secs"].as_u64().map_or(SECS.2, |n| (n as u32).clamp(SECS.0, SECS.1));
+        let comes_in = v["comes_in"].as_str().and_then(Transition::from_key).unwrap_or(Transition::Wipe);
+        Some(Page { id: v["id"].as_str()?.into(), name: v["name"].as_str().unwrap_or("Page").into(), light, pieces, secs, comes_in })
     }
 }
 
@@ -467,7 +576,7 @@ fn lay_out(page: &Page, r: &Readings) -> (Vec<String>, Vec<(u8, usize, usize)>) 
                 let w = p.width as usize;
                 let start = if k == 0 { p.col as usize } else { (p.col as usize).max(cursor + p.gap as usize) };
                 out.push_str(&" ".repeat(start.saturating_sub(cursor)));
-                let text = if p.right { format!("{s:>w$}") } else { format!("{s:<w$}") };
+                let text = if p.center { format!("{s:^w$}") } else if p.right { format!("{s:>w$}") } else { format!("{s:<w$}") };
                 let len = text.chars().count();
                 spans[*i] = (row, start, len);
                 cursor = start + len;
@@ -562,13 +671,15 @@ mod tests {
             id: "x".into(),
             name: "X".into(),
             light: None,
+            secs: SECS.2,
+            comes_in: Transition::Wipe,
             pieces: vec![
-                Piece { kind: Kind::Clock(false), row: 0, col: 0, width: 5, right: false, gap: 1 },
-                Piece { kind: Kind::Data(Source::Date, false), row: 0, col: 9, width: 11, right: true, gap: 1 },
-                Piece { kind: Kind::Bar(Source::CpuLoad), row: 1, col: 0, width: 12, right: false, gap: 1 },
-                Piece { kind: Kind::Data(Source::CpuTemp, true), row: 2, col: 0, width: 4, right: false, gap: 1 },
-                Piece { kind: Kind::Clock(true), row: 3, col: 0, width: 8, right: false, gap: 1 },
-                Piece { kind: Kind::Data(Source::Profile, false), row: 3, col: 10, width: 10, right: true, gap: 1 },
+                Piece { kind: Kind::Clock(false), row: 0, col: 0, width: 5, right: false, center: false, gap: 1 },
+                Piece { kind: Kind::Data(Source::Date, false), row: 0, col: 9, width: 11, right: true, center: false, gap: 1 },
+                Piece { kind: Kind::Bar(Source::CpuLoad), row: 1, col: 0, width: 12, right: false, center: false, gap: 1 },
+                Piece { kind: Kind::Data(Source::CpuTemp, true), row: 2, col: 0, width: 4, right: false, center: false, gap: 1 },
+                Piece { kind: Kind::Clock(true), row: 3, col: 0, width: 8, right: false, center: false, gap: 1 },
+                Piece { kind: Kind::Data(Source::Profile, false), row: 3, col: 10, width: 10, right: true, center: false, gap: 1 },
             ],
         };
         let rows = render(&p, &r);
@@ -578,5 +689,33 @@ mod tests {
         assert_eq!(rows[3], "9:05 PM    DEFAULT 1");
         assert_eq!(bar(1.0, 4), "[##]");
         assert_eq!(bar(0.0, 2), "[]");
+    }
+
+    #[test]
+    fn the_clock_and_the_weather_sit_in_the_middle() {
+        let mut r = readings();
+        assert_eq!(render(&Page::clock(), &r), vec!["", "       21:05", "     Fri Oct 9", ""]);
+        r.outside = Some((21.6, "Partly cloudy".into()));
+        assert_eq!(render(&Page::weather(), &r), vec!["", "        22°", "   Partly cloudy", ""]);
+        // with no weather to show, the screen says so plainly
+        r.outside = None;
+        assert_eq!(render(&Page::weather(), &r), vec!["", "Weather unavailable", "", ""]);
+    }
+
+    #[test]
+    fn a_page_keeps_its_time_and_how_it_comes_in() {
+        let mut p = Page::clock();
+        p.secs = 15;
+        p.comes_in = Transition::Dissolve;
+        assert_eq!(Page::from_json(&p.to_json()), Some(p.clone()));
+        // pages saved before pages had times come in with a wipe, after eight seconds
+        let mut old = Page::stats().to_json();
+        old.as_object_mut().unwrap().remove("secs");
+        old.as_object_mut().unwrap().remove("comes_in");
+        assert_eq!(Page::from_json(&old), Some(Page::stats()));
+        // and a second Clock is told apart from the first
+        let q = Page::template("clock", &[p]).unwrap();
+        assert_eq!(q.id, "clock-2");
+        assert!(Page::template("rain", &[]).is_none());
     }
 }

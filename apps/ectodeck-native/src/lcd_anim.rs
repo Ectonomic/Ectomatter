@@ -179,6 +179,71 @@ pub fn fit(rows: &[String]) -> Vec<String> {
     (0..H).map(|i| cell(rows.get(i).map_or("", |s| s.as_str()))).collect()
 }
 
+// ------------------------------------------------------------------ one page to the next
+
+/// The frames that carry the screen from the page shown (`old`) to the next
+/// (`new`), as `how` brings a page in, built as the launch sequence builds
+/// its own: the wipe a column of # sweeping left to right (25 ms a column),
+/// the dissolve the cells changing in a random order over 16 frames (35 ms
+/// each), Type the screen cleared and the page's words typed in row by row
+/// behind a cursor (30 ms a letter). Cut has none: the page shows at once.
+/// The new page itself is not among them; it follows the last.
+pub fn page_turn(old: &[String], new: &[String], how: crate::lcd_page::Transition, seed: u64) -> Vec<Frame> {
+    use crate::lcd_page::Transition;
+    let (old, new) = (fit(old), fit(new));
+    let mut out = Vec::new();
+    let mut add = |rows: Vec<String>, ms: u32| out.push(Frame { rows, ms, phase: "Turn" });
+    match how {
+        Transition::Cut => {}
+        Transition::Wipe => {
+            for x in -1..W as i32 {
+                let rows = old
+                    .iter()
+                    .zip(&new)
+                    .map(|(o, n)| {
+                        let mark = if x >= 0 { "#" } else { "" };
+                        cell(&format!("{}{mark}{}", slice(n, 0, x.max(0) as usize), slice(o, (x + 1) as usize, usize::MAX)))
+                    })
+                    .collect();
+                add(rows, 25);
+            }
+        }
+        Transition::Dissolve => {
+            let mut rng = PyRandom::new(seed);
+            let (oc, nc): (Vec<Vec<char>>, Vec<Vec<char>>) = (old.iter().map(|r| chars(r)).collect(), new.iter().map(|r| chars(r)).collect());
+            let mut cells: Vec<(usize, usize)> = (0..H).flat_map(|r| (0..W).map(move |c| (r, c))).filter(|&(r, c)| oc[r][c] != nc[r][c]).collect();
+            rng.shuffle(&mut cells);
+            let mut grid = oc.clone();
+            let per = cells.len().div_ceil(16).max(1);
+            // (the last cells change as the page itself shows)
+            for chunk in cells.chunks(per).take(cells.len().div_ceil(per).saturating_sub(1)) {
+                for &(r, c) in chunk {
+                    grid[r][c] = nc[r][c];
+                }
+                add(grid.iter().map(|g| g.iter().collect()).collect(), 35);
+            }
+        }
+        Transition::Type => {
+            let mut rows = blank();
+            add(rows.clone(), 60);
+            for (r, line) in new.iter().enumerate() {
+                let text = line.trim_end();
+                let n = text.chars().count();
+                for i in 1..=n {
+                    // a space is typed with the letter after it
+                    if text.chars().nth(i - 1) == Some(' ') {
+                        continue;
+                    }
+                    rows[r] = cell(&format!("{}_", slice(text, 0, i)));
+                    add(rows.clone(), 30);
+                }
+                rows[r] = cell(text);
+            }
+        }
+    }
+    out
+}
+
 // ------------------------------------------------------------------ a sequence, frame by frame
 
 /// The sequence was dropped before it finished: stop where it stands.
@@ -434,6 +499,44 @@ impl Playing {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn rows(s: &[&str]) -> Vec<String> {
+        s.iter().map(|r| r.to_string()).collect()
+    }
+
+    #[test]
+    fn one_page_comes_in_after_another() {
+        use crate::lcd_page::Transition;
+        let old = rows(&["CPU 64°  5% 4365MHz", "GPU 45° 12% 1837MHz", "", ""]);
+        let new = rows(&["", "       21:05", "     Fri Oct 9", ""]);
+        // Cut: no frames between, the page shows at once
+        assert!(page_turn(&old, &new, Transition::Cut, 1).is_empty());
+        // Wipe: the old page first, then a column of # sweeping across with the new page behind it
+        let w = page_turn(&old, &new, Transition::Wipe, 1);
+        assert_eq!(w.len(), 21);
+        assert_eq!(w[0].rows, fit(&old));
+        assert_eq!(w[1].rows[0], format!("#{}", &fit(&old)[0][1..]));
+        assert_eq!(w[8].rows[1], format!("       #{}", slice(&fit(&old)[1], 8, 20)));
+        assert_eq!(w[20].rows[1], format!("       21:05       #"));
+        assert!(w.iter().all(|f| f.ms == 25));
+        // Dissolve: each frame closer to the new page, every cell either the old or the new
+        let d = page_turn(&old, &new, Transition::Dissolve, 7);
+        // (at most 15: the sixteenth step is the page itself)
+        assert!(!d.is_empty() && d.len() <= 15 && d.iter().all(|f| f.ms == 35), "{} frames", d.len());
+        let differ = |rows: &[String]| (0..H).map(|r| chars(&rows[r]).iter().zip(chars(&fit(&new)[r])).filter(|(a, b)| **a != *b).count()).sum::<usize>();
+        for k in 1..d.len() {
+            assert!(differ(&d[k].rows) < differ(&d[k - 1].rows));
+        }
+        assert_eq!(d, page_turn(&old, &new, Transition::Dissolve, 7), "the same seed, the same order");
+        // Type: a blank screen, then each row's words letter by letter behind a cursor
+        let t = page_turn(&old, &new, Transition::Type, 1);
+        assert_eq!(t[0].rows, blank());
+        assert_eq!(t[1].rows[1], cell("       2_"));
+        assert_eq!(t.last().unwrap().rows[2], cell("     Fri Oct 9_"));
+        assert_eq!(t.last().unwrap().rows[1], cell("       21:05"));
+        // 5 letters of the time, 7 of the date (its spaces come with the letters after them)
+        assert_eq!(t.len(), 1 + 5 + 7);
+    }
 
     #[test]
     fn pythons_random_comes_out_the_same() {

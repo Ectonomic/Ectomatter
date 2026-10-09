@@ -42,7 +42,7 @@ fn stepper(s: &mut Stack, c: Ctl, x: f32, value: &str) {
 
 /// What a piece looks like now, for its box.
 fn looks(p: &Piece, r: &Readings) -> String {
-    let page = Page { id: String::new(), name: String::new(), light: None, pieces: vec![Piece { row: 0, col: 0, gap: 0, ..p.clone() }] };
+    let page = Page { pieces: vec![Piece { row: 0, col: 0, gap: 0, ..p.clone() }], ..Page::stats() };
     let row = crate::lcd_page::render(&page, r).remove(0);
     if row.ends_with(" unavailable") || row.is_empty() { "Unavailable".into() } else { row.trim().to_string() }
 }
@@ -168,7 +168,7 @@ pub fn source_menu(current: Source, bars: bool, avail: &[Source], r: &Readings) 
             group = s.group();
             rows.push((1, group.to_string(), String::new(), false, None));
         }
-        let p = Piece { kind: if bars { Kind::Bar(s) } else { Kind::Data(s, false) }, row: 0, col: 0, width: if bars { 10 } else { 1 }, right: false, gap: 0 };
+        let p = Piece { kind: if bars { Kind::Bar(s) } else { Kind::Data(s, false) }, row: 0, col: 0, width: if bars { 10 } else { 1 }, right: false, center: false, gap: 0 };
         rows.push((0, s.name().to_string(), looks(&p, r), s == current, Some(s)));
     }
     rows
@@ -238,7 +238,7 @@ pub fn add(page: &mut Page, ed: &mut Editor, what: usize, first: Source) {
     let taken = |row: u8, col: u8| page.pieces.iter().any(|p| p.row == row && col >= p.col && col < p.col + p.width);
     let spot = (0..ROWS).find_map(|row| (0..=COLS - width).find(|&c| (c..c + width).all(|k| !taken(row, k))).map(|c| (row, c)));
     let (row, col) = spot.unwrap_or((0, 0));
-    page.pieces.push(Piece { kind, row, col, width, right, gap: 1 });
+    page.pieces.push(Piece { kind, row, col, width, right, center: false, gap: 1 });
     ed.chosen = Some(page.pieces.len() - 1);
 }
 

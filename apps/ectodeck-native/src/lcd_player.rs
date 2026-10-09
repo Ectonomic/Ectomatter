@@ -10,8 +10,9 @@
 //! service wrote it: the keyboard will not read its screen back, so that file
 //! is how anything else knows what it shows.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -226,8 +227,12 @@ pub enum Control {
     /// stop, and hand the screen back to the keyboard's own screens (or, with
     /// false, leave it blank); the sender hears once it has
     Quit(bool, mpsc::Sender<()>),
-    /// the page to play, shown at once, paused or not (an edit is seen as it is made)
-    Page(crate::lcd_page::Page),
+    /// the pages to play in turn (an edit is seen as it is made)
+    Pages(Vec<crate::lcd_page::Page>),
+    /// show this page now, as it is, and carry on from it
+    Show(usize),
+    /// stay on this page, which is being edited; None carries on
+    Hold(Option<usize>),
     /// what a page may show besides the computer's readings: the profile the
     /// keyboard is using, and the weather outside (°C, the sky in words)
     Context(Option<String>, Option<(f64, String)>),
@@ -240,6 +245,8 @@ pub struct News {
     /// the sequence playing, "launch" or "exit", while one plays
     pub sequence: Option<&'static str>,
     pub state: State,
+    /// which page of the playlist shows, or is coming in
+    pub page: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -272,6 +279,15 @@ pub struct Core {
     pub pushed: Option<Vec<String>>,
     /// the page changed: show it at the next turn, paused or not
     pub redraw: bool,
+    /// the playlist: each page's seconds and how it comes in, in order; the
+    /// page showing, which `stats` reads; staying on it while it is edited
+    pub playlist: Vec<(f64, crate::lcd_page::Transition)>,
+    pub current: Arc<AtomicUsize>,
+    pub hold: bool,
+    /// when the page showing came on; None until its first frame
+    page_since: Option<f64>,
+    /// the frames carrying the screen to the next page, still to show
+    between: VecDeque<Frame>,
 }
 
 impl Core {
@@ -294,6 +310,11 @@ impl Core {
             paused: false,
             pushed: None,
             redraw: false,
+            playlist: Vec::new(),
+            current: Arc::new(AtomicUsize::new(0)),
+            hold: false,
+            page_since: None,
+            between: VecDeque::new(),
         }
     }
 
@@ -342,6 +363,8 @@ impl Core {
                 };
                 self.session.update(ev, start, self.stats.clone(), &mut self.seeds);
                 self.frame_until = 0.0;
+                // (a game's launch breaks in on a page coming in, too)
+                self.between.clear();
             }
         }
         if self.session.frames.is_some() {
@@ -353,17 +376,97 @@ impl Core {
                     }
                     None => {
                         self.stats_at = 0.0;
+                        // the page it ends on gets its whole time
+                        self.page_since = None;
                         return false;
                     }
                 }
             }
+        } else if !self.between.is_empty() {
+            if now >= self.frame_until {
+                let f = self.between.pop_front().expect("a frame between pages");
+                self.push(f.rows, now);
+                self.frame_until = now + f.ms as f64 / 1000.0;
+                if self.between.is_empty() {
+                    // the page itself, once the last frame has had its time
+                    self.stats_at = self.frame_until;
+                }
+            }
+        } else if self.turn_due(now) {
+            self.turn(now);
         } else if (now >= self.stats_at && !self.paused) || self.redraw {
             self.redraw = false;
             let rows = (self.stats)();
             self.push(rows, now);
             self.stats_at = now + INTERVAL;
+            if self.page_since.is_none() {
+                self.page_since = Some(now);
+            }
         }
         true
+    }
+
+    /// The page showing.
+    pub fn page(&self) -> usize {
+        self.current.load(Ordering::Relaxed)
+    }
+
+    /// Whether the page showing has had its time and another should come in.
+    fn turn_due(&self, now: f64) -> bool {
+        let n = self.playlist.len();
+        !self.paused && !self.hold && n > 1 && self.page_since.is_some_and(|t| now >= t + self.playlist[self.page() % n].0)
+    }
+
+    /// The next page comes in: the frames between the page shown and it,
+    /// then the page itself.
+    fn turn(&mut self, now: f64) {
+        let n = self.playlist.len();
+        let next = (self.page() + 1) % n;
+        let old = self.shown.clone().unwrap_or_default();
+        self.current.store(next, Ordering::Relaxed);
+        let new = (self.stats)();
+        let seed = (self.seeds)();
+        let frames = crate::lcd_anim::page_turn(&old, &new, self.playlist[next].1, seed);
+        self.page_since = None;
+        if frames.is_empty() {
+            self.push(new, now);
+            self.stats_at = now + INTERVAL;
+            self.page_since = Some(now);
+        } else {
+            self.between = frames.into();
+            self.frame_until = now;
+        }
+    }
+
+    /// The pages to play, and how long each shows and comes in.
+    pub fn set_playlist(&mut self, list: Vec<(f64, crate::lcd_page::Transition)>) {
+        if self.page() >= list.len() {
+            self.current.store(0, Ordering::Relaxed);
+        }
+        self.playlist = list;
+        self.redraw = true;
+    }
+
+    /// Show page `i` now and carry on from it.
+    pub fn show(&mut self, i: usize) {
+        self.current.store(i.min(self.playlist.len().saturating_sub(1)), Ordering::Relaxed);
+        self.between.clear();
+        self.page_since = None;
+        self.redraw = true;
+    }
+
+    /// Stay on page `i` while it is edited, or (None) carry on.
+    pub fn hold_on(&mut self, i: Option<usize>) {
+        match i {
+            Some(i) => {
+                self.hold = true;
+                self.show(i);
+            }
+            None => {
+                self.hold = false;
+                self.page_since = None;
+            }
+        }
     }
 
     /// Stop any sequence playing (launches no longer break in).
@@ -424,16 +527,18 @@ impl Player {
             let stats = Arc::new(Mutex::new(Stats::here()));
             // primed, as the service primed it: the first reading of the load is 0
             stats.lock().unwrap().cpu_load();
-            // the page, and what it may show besides the computer's readings
-            let shared = Arc::new(Mutex::new((crate::lcd_page::Page::stats(), None::<String>, None::<(f64, String)>)));
-            let (reader, page) = (stats.clone(), shared.clone());
+            // the pages, the one showing, and what they may show besides the computer's readings
+            let shared = Arc::new(Mutex::new((vec![crate::lcd_page::Page::stats()], None::<String>, None::<(f64, String)>)));
+            let current = Arc::new(AtomicUsize::new(0));
+            let (reader, page, at) = (stats.clone(), shared.clone(), current.clone());
             let ask: Ask<Vec<String>> = Arc::new(move || {
                 let mut r = reader.lock().unwrap().read();
                 let p = page.lock().unwrap();
                 r.now = Some(crate::lcd_page::Moment::now());
                 r.profile = p.1.clone();
                 r.outside = p.2.clone();
-                crate::lcd_page::render(&p.0, &r)
+                let i = at.load(Ordering::Relaxed);
+                p.0.get(i).or(p.0.first()).map_or_else(Vec::new, |page| crate::lcd_page::render(page, &r))
             });
             let seeds = Box::new(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64));
             let mut core = Core::new(Box::new(Hidraw::default()), ask, runtime_dir().join("z10-lcd/session"), seeds);
@@ -441,9 +546,10 @@ impl Player {
             core.trace = std::env::var_os("Z10_LCD_TRACE").map(PathBuf::from);
             core.announce = announce;
             core.paused = paused;
+            core.current = current;
             let start = Instant::now();
             let (mut other, mut other_at) = (other_running(), Instant::now());
-            let mut told: Option<(State, Option<&'static str>)> = None;
+            let mut told: Option<(State, Option<&'static str>, usize)> = None;
             loop {
                 // what Ectodeck asks
                 while let Ok(c) = heard.try_recv() {
@@ -458,12 +564,15 @@ impl Player {
                             core.paused = p;
                             if !p {
                                 core.stats_at = 0.0;
+                                core.restart_page();
                             }
                         }
-                        Control::Page(p) => {
-                            shared.lock().unwrap().0 = p;
-                            core.redraw = true;
+                        Control::Pages(pages) => {
+                            core.set_playlist(pages.iter().map(|p| (p.secs as f64, p.comes_in)).collect());
+                            shared.lock().unwrap().0 = pages;
                         }
+                        Control::Show(i) => core.show(i),
+                        Control::Hold(i) => core.hold_on(i),
                         Control::Context(profile, outside) => {
                             let mut s = shared.lock().unwrap();
                             if s.1 != profile || s.2 != outside {
@@ -492,13 +601,13 @@ impl Player {
                 let again = if other { true } else { core.tick(start.elapsed().as_secs_f64()) };
                 let found = other || core.sink.find();
                 let state = if other { State::Other } else if !found { State::Missing } else if core.paused && !core.playing_sequence() { State::Paused } else { State::Playing };
-                let sequence = core.sequence();
+                let (sequence, page) = (core.sequence(), core.page());
                 if let Some(rows) = core.pushed.take() {
-                    news(News { rows, sequence, state });
-                    told = Some((state, sequence));
-                } else if told != Some((state, sequence)) {
-                    news(News { rows: core.shown_rows(), sequence, state });
-                    told = Some((state, sequence));
+                    news(News { rows, sequence, state, page });
+                    told = Some((state, sequence, page));
+                } else if told != Some((state, sequence, page)) {
+                    news(News { rows: core.shown_rows(), sequence, state, page });
+                    told = Some((state, sequence, page));
                 }
                 if again {
                     std::thread::sleep(Duration::from_millis(10));
@@ -525,6 +634,11 @@ impl Core {
     fn shown_rows(&self) -> Vec<String> {
         self.shown.clone().unwrap_or_default()
     }
+
+    /// The page showing starts its time again (after a pause).
+    fn restart_page(&mut self) {
+        self.page_since = None;
+    }
 }
 
 #[cfg(test)]
@@ -538,6 +652,110 @@ mod tests {
         assert_eq!(f[8 + 6], 0xB0);
         assert_eq!(f[8..88].iter().fold(0u8, |a, b| a.wrapping_add(*b)).wrapping_add(f[7]), 0);
         assert_eq!(frame(&[], 0)[3], 0);
+    }
+
+    /// A screen that keeps what it is sent, and when.
+    struct Kept(Arc<Mutex<Vec<(f64, Vec<String>)>>>, Arc<Mutex<f64>>);
+
+    impl Sink for Kept {
+        fn find(&mut self) -> bool {
+            true
+        }
+        fn send(&mut self, rows: &[String], _cmd: u8) -> Result<(), ()> {
+            let t = *self.1.lock().unwrap();
+            self.0.lock().unwrap().push((t, rows.to_vec()));
+            Ok(())
+        }
+    }
+
+    /// A player of two pages, A for 3 s and B for 5 s, B coming in with `how`;
+    /// the pages say which they are and the second the clock is in.
+    fn two_pages(how: crate::lcd_page::Transition) -> (Core, Arc<Mutex<Vec<(f64, Vec<String>)>>>, Arc<Mutex<f64>>) {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let clock = Arc::new(Mutex::new(0.0));
+        let current = Arc::new(AtomicUsize::new(0));
+        let (at, c) = (current.clone(), clock.clone());
+        let ask: Ask<Vec<String>> = Arc::new(move || {
+            let page = ["A", "B"][at.load(Ordering::Relaxed)];
+            vec![format!("PAGE {page}"), format!("{:.0}", *c.lock().unwrap())]
+        });
+        let note = std::env::temp_dir().join(format!("ectodeck-turn-{}-{:?}", std::process::id(), how));
+        let _ = std::fs::remove_file(&note);
+        let mut core = Core::new(Box::new(Kept(sent.clone(), clock.clone())), ask, note, Box::new(|| 7));
+        core.current = current;
+        core.set_playlist(vec![(3.0, crate::lcd_page::Transition::Wipe), (5.0, how)]);
+        (core, sent, clock)
+    }
+
+    /// Run `core` from `from` to `to` seconds, 10 ms a turn.
+    fn run(core: &mut Core, clock: &Arc<Mutex<f64>>, from: f64, to: f64) {
+        let mut t = from;
+        while t < to {
+            *clock.lock().unwrap() = t;
+            core.tick(t);
+            t += 0.01;
+        }
+    }
+
+    fn first_at(sent: &Arc<Mutex<Vec<(f64, Vec<String>)>>>, row0: &str) -> Option<f64> {
+        sent.lock().unwrap().iter().find(|(_, r)| r[0] == row0).map(|(t, _)| *t)
+    }
+
+    #[test]
+    fn pages_play_in_turn_each_for_its_time() {
+        use crate::lcd_page::Transition;
+        // Cut: B shows the moment A's three seconds are up; A again after B's five
+        let (mut core, sent, clock) = two_pages(Transition::Cut);
+        run(&mut core, &clock, 0.0, 9.0);
+        let b = first_at(&sent, "PAGE B").expect("B shows");
+        assert!((b - 3.0).abs() < 0.02, "B at {b}");
+        // (A comes in with a wipe: its first frame as B's five seconds end)
+        let back = sent.lock().unwrap().iter().find(|(t, r)| *t > b && r[0] != "PAGE B").map(|(t, _)| *t).expect("A again");
+        assert!((back - 8.0).abs() < 0.05, "A again at {back}");
+        // every second the page shows is read again
+        assert!(sent.lock().unwrap().iter().any(|(t, r)| r[0] == "PAGE B" && *t > b + 0.9));
+
+        // Wipe: 21 frames of 25 ms between, then B, its five seconds from then
+        let (mut core, sent, clock) = two_pages(Transition::Wipe);
+        run(&mut core, &clock, 0.0, 9.0);
+        let wipe: Vec<f64> = sent.lock().unwrap().iter().filter(|(t, r)| *t < 5.0 && r[0].contains('#')).map(|(t, _)| *t).collect();
+        assert_eq!(wipe.len(), 20, "the frames with a # in them (the first is A as it was)");
+        assert!((wipe[0] - 3.0).abs() < 0.05);
+        let b = first_at(&sent, "PAGE B").unwrap();
+        // (each 25 ms frame waits for the loop's next 10 ms turn, as the service's did: about 30 ms)
+        assert!(b > 3.0 + 21.0 * 0.025 && b < 3.0 + 21.0 * 0.031, "B at {b}");
+        let back = sent.lock().unwrap().iter().filter(|(t, r)| *t > b && r[0].contains('#')).map(|(t, _)| *t).next().unwrap();
+        assert!((back - (b + 5.0)).abs() < 0.05, "A comes in again at {back}");
+    }
+
+    #[test]
+    fn paused_or_edited_the_page_stays() {
+        use crate::lcd_page::Transition;
+        let (mut core, sent, clock) = two_pages(Transition::Cut);
+        core.paused = true;
+        run(&mut core, &clock, 0.0, 10.0);
+        assert!(first_at(&sent, "PAGE B").is_none(), "paused, no page turns");
+        core.paused = false;
+        core.restart_page();
+        run(&mut core, &clock, 10.0, 12.0);
+        assert!(first_at(&sent, "PAGE B").is_none(), "after a pause, the page gets its whole time again");
+        run(&mut core, &clock, 12.0, 13.5);
+        assert!(first_at(&sent, "PAGE B").is_some());
+        // held on A while A is edited: shown at once, and it stays
+        core.hold_on(Some(0));
+        run(&mut core, &clock, 13.5, 30.0);
+        let last_b = sent.lock().unwrap().iter().rev().find(|(_, r)| r[0] == "PAGE B").map(|(t, _)| *t).unwrap();
+        assert!(last_b < 13.6, "B last at {last_b}");
+        // done editing: A has its whole time from its next reading (within a second), then B
+        core.hold_on(None);
+        run(&mut core, &clock, 30.0, 32.9);
+        assert!(!sent.lock().unwrap().iter().any(|(t, r)| r[0] == "PAGE B" && *t > 30.0));
+        run(&mut core, &clock, 32.9, 34.1);
+        assert!(sent.lock().unwrap().iter().any(|(t, r)| r[0] == "PAGE B" && *t > 32.9));
+        // shown on asking
+        core.show(0);
+        run(&mut core, &clock, 34.1, 34.2);
+        assert_eq!(sent.lock().unwrap().last().unwrap().1[0], "PAGE A");
     }
 
     #[test]
