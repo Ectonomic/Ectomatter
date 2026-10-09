@@ -374,19 +374,19 @@ impl Core {
 
     /// Hand the screen back: blank it, then, unless `own` is false, leave the
     /// screen to the keyboard's own screens, as EVGA's software does on closing.
-    pub fn hand_back(&mut self, own: bool) {
+    pub fn hand_back(&mut self, own: bool) -> bool {
         if !self.sink.find() {
-            return;
+            return false;
         }
         let blank = vec![String::new(); 4];
+        let mut done = false;
         if self.sink.send(&blank, 1).is_ok() {
-            if own {
-                let _ = self.sink.send(&blank, 0);
-            }
+            done = !own || self.sink.send(&blank, 0).is_ok();
             if let Some(f) = &self.frame_file {
                 publish(f, &blank);
             }
         }
+        done
     }
 }
 
@@ -444,7 +444,8 @@ impl Player {
                         }
                         Control::Quit(own, done) => {
                             if !other {
-                                core.hand_back(own);
+                                let done = core.hand_back(own);
+                                eprintln!("ectodeck-native: the screen {}", if !done { "could not be handed back" } else if own { "handed back to the keyboard's own screens" } else { "left blank" });
                             }
                             let _ = done.send(());
                             return;

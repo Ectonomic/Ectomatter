@@ -31,3 +31,6 @@ unused flash; flashing EVGA's own file puts everything back.
 | The keyboard drawn in HDR and lit the way its LEDs light it, through the caps, with the light simulated | `e4b9e9a` | A flat picture of the keyboard |
 | The Key lab: set up the caps (shine-through, pudding or translucent), the legends (typeface, weight, size and place, for every key or one), and the LEDs, and save them as setups | `e9805b2` | None |
 | Changes to a profile can be undone (Ctrl+Z) and done again | `3834c40` | No undo |
+| The screen shows the computer's processor, graphics card and memory, live, from Ectodeck itself | `fc4b2b0` | Nothing writes to the screen; only EVGA Precision X1, a separate program for EVGA's graphics cards, could fill it |
+| A game's launch and exit play on the screen, with game-helper's steps as they happen | `d6d93a0` | None |
+| The screen drawn live in the app, dot for dot in the keyboard's own font | `fc4b2b0` | A swatch of the screen light's color |
