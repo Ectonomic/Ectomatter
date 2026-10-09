@@ -25,6 +25,7 @@ mod devices;
 mod ecto_settings;
 mod front;
 mod kde_output;
+mod shadow;
 mod lab;
 mod lighting;
 mod macro_page;
@@ -914,6 +915,8 @@ struct App {
     qh: QueueHandle<App>,
     window: Window,
     pool: SlotPool,
+    /// KWin's shadow round each window, which Ectodeck's own title bars go without
+    shadows: shadow::Shadows,
     buffers: Vec<(Buffer, Vec<Rect>)>,
     pointer: Option<ThemedPointer>,
     keyboard: Option<wl_keyboard::WlKeyboard>,
@@ -1126,6 +1129,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
     let cm: WpColorManagerV1 = globals.bind(&qh, 1..=1, ()).expect("the compositor's color management (KWin 6.3 or later)");
     // KDE's account of each screen, for the SDR white its user set (none on another compositor)
     let kde_registry: Option<KdeOutputDeviceRegistryV2> = globals.bind(&qh, 21..=23, ()).ok();
+    let shadow_manager: Option<shadow::client::org_kde_kwin_shadow_manager::OrgKdeKwinShadowManager> = globals.bind(&qh, 1..=2, ()).ok();
 
     let surface = compositor.create_surface(&qh);
     let window = xdg.create_window(surface, WindowDecorations::RequestClient, &qh);
@@ -1203,6 +1207,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         seats: SeatState::new(&globals, &qh),
         outputs: OutputState::new(&globals, &qh),
         pool: SlotPool::new((SIZE.0 * SIZE.1 * 8) as usize, &shm).expect("a shared memory pool"),
+        shadows: shadow::Shadows::new(shadow_manager),
         compositor,
         shm,
         _xdg: xdg,
@@ -2148,7 +2153,9 @@ impl WindowHandler for App {
         }
     }
 
-    fn configure(&mut self, _: &Connection, _: &QueueHandle<Self>, window: &Window, configure: WindowConfigure, _: u32) {
+    fn configure(&mut self, _: &Connection, qh: &QueueHandle<Self>, window: &Window, configure: WindowConfigure, _: u32) {
+        // its shadow, but when it fills the screen
+        self.shadows.set(window.wl_surface(), !configure.is_maximized(), &mut self.pool, qh);
         if let Some(which) = self.which_sub(window.wl_surface()) {
             let mw = self.subs[which].as_mut().unwrap();
             let w = configure.new_size.0.map_or(mw.size.0, NonZeroU32::get);
@@ -2416,6 +2423,14 @@ impl Dispatch<WpImageDescriptionInfoV1, ScreenTag> for App {
             _ => {}
         }
     }
+}
+
+impl Dispatch<shadow::client::org_kde_kwin_shadow_manager::OrgKdeKwinShadowManager, ()> for App {
+    fn event(_: &mut Self, _: &shadow::client::org_kde_kwin_shadow_manager::OrgKdeKwinShadowManager, _: shadow::client::org_kde_kwin_shadow_manager::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+}
+
+impl Dispatch<shadow::client::org_kde_kwin_shadow::OrgKdeKwinShadow, ()> for App {
+    fn event(_: &mut Self, _: &shadow::client::org_kde_kwin_shadow::OrgKdeKwinShadow, _: shadow::client::org_kde_kwin_shadow::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
 }
 
 impl Dispatch<KdeOutputDeviceRegistryV2, ()> for App {
