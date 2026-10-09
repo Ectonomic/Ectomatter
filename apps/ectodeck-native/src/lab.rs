@@ -161,7 +161,7 @@ struct Param {
     note: &'static str,
 }
 
-const PARAMS: [Param; 41] = [
+const PARAMS: [Param; 43] = [
     Param { path: ("switches", "led"), label: "North of center", lo: -7.0, hi: 7.0, step: 0.05, unit: Unit::North, def: 5.08, note: "Where each key's LED sits under its cap, from the switch's center toward the top of the key; below 0, toward the bottom, as on a keyboard whose LEDs face south. It goes as far as the switch's edge, so Switch width sets how far the slider reaches." },
     Param { path: ("switches", "lumens"), label: "LED output", lo: 0.05, hi: 10.0, step: 0.01, unit: Unit::Lumens, def: 1.0, note: "The light each LED gives off at full white, in lumens: about 1 for a keyboard's RGB LED. Everything the LEDs light is as bright as the light that reaches it makes it; what is brighter than the screen shows (Peak nits, Settings › HDR) is drawn at the most it shows, in its own color. A color gives off its own share, as an LED does: a red about a fifth." },
     Param { path: ("switches", "beam"), label: "Beam", lo: 1.0, hi: 200.0, step: 0.5, unit: Unit::Number, def: 24.0, note: "How tight the LED's beam out of the top of the switch is. Higher keeps it to a small bright spot on the legend over the LED; lower spreads it across the cap's top and onto the inside of its skirt." },
@@ -203,6 +203,8 @@ const PARAMS: [Param; 41] = [
     Param { path: ("legends", "second_size"), label: "Bottom size", lo: 1.0, hi: 6.0, step: 0.1, unit: Unit::Mm, def: 0.0, note: "How tall the bottom legend is, measured on its capitals, as on number pads that print their arrows smaller than the numbers. Until you set it, it is as tall as Letter size or Word size makes it." },
     Param { path: ("legends", "second_across"), label: "Bottom left–right", lo: -10.0, hi: 10.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Moves the bottom legend left or right, leaving the rest of the legend where it is. Drag the bottom legend on the drawing to move it there." },
     Param { path: ("legends", "second_down"), label: "Bottom up–down", lo: -10.0, hi: 10.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Moves the bottom legend up or down, leaving the rest of the legend where it is. Drag the bottom legend on the drawing to move it there." },
+    Param { path: ("switches", "bleed"), label: "Color bleed", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: crate::z10::BLEED, note: "How much of each LED's red and blue shows as green, and its green as blue, as on the Z10's own LEDs. Raise it until a red key on screen matches a red key on the keyboard." },
+    Param { path: ("display", "bleed"), label: "Color bleed", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: crate::z10::BLEED, note: "How much of the backlight's red and blue shows as green, and its green as blue. Raise it until the screen in Ectodeck matches the color of the keyboard's screen." },
 ];
 
 /// What each end of a share's slider stands for, in the words under its
@@ -219,6 +221,7 @@ fn ends(path: (&str, &str)) -> Option<(&'static str, &'static str)> {
         ("caps", "milky") => ("Clear", "Milky white"),
         ("display", "dot") => ("Pinpoints", "Touching"),
         ("display", "glass") => ("None", "As drawn"),
+        ("switches", "bleed") | ("display", "bleed") => ("None", "All"),
         _ => return None,
     })
 }
@@ -246,11 +249,11 @@ const ORDER: [usize; 5] = [LEGENDS, 1, 0, 3, 4];
 
 /// The page's sections: a title, what the part is, its values, and its choices.
 const SECTIONS: [(&str, &str, &[usize], &[usize]); 5] = [
-    ("LEDs", "Each key's LED shines up out of its switch in a beam, onto the back of the legend. In a black housing that is all its light; a clear housing scatters a share of it instead, glowing with it over its top and sides, which lights the legend evenly, the inside of the cap and the deck round the switch.", &[0, 1, 2, 3, 4, 5, 7, 6], &[0]),
+    ("LEDs", "Each key's LED shines up out of its switch in a beam, onto the back of the legend. In a black housing that is all its light; a clear housing scatters a share of it instead, glowing with it over its top and sides, which lights the legend evenly, the inside of the cap and the deck round the switch.", &[0, 1, 2, 3, 4, 5, 7, 6, 41], &[0]),
     ("Keycaps", "Each cap stands over its switch, its skirt from its foot to its top. Light bounces about inside it; some gets out under the skirt, some through the legend, and some through the plastic where it is translucent and not coated black.", &[8, 9, 10, 22, 23, 24, 11, 12, 13], &[1]),
     ("Legends", "What the light comes through: the print on each cap. Set it as your caps print it: its typeface, how tall its letters are, and where on the cap it sits.", &[27, 28, 29, 30], &[2, 3]),
     ("Wells", "The keys sit in wells in the chassis: the deck at their floor, walled round by the chassis. What each gives back of the light falling on it lights the rest.", &[14, 15, 16], &[]),
-    ("Display", "The display's backlit dots, and the glass over them.", &[17, 18, 19, 20, 21], &[]),
+    ("Display", "The display's backlit dots, and the glass over them.", &[17, 18, 19, 20, 21, 42], &[]),
 ];
 
 /// A section's sliders that tune this light: a black housing does not

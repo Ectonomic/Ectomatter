@@ -1188,8 +1188,32 @@ fn ramp(colors: &[[f64; 3]], u: f64) -> [f64; 3] {
 /// another (red and blue into green, green into blue, 0x60 of each at full),
 /// so the keyboard on screen shows a colour as the keys do.
 fn led_look(c: [f64; 3]) -> [u8; 3] {
-    let spill = 0x60 as f64 / 255.0;
+    bleed(c, f64::from_bits(KEYS_BLEED.load(std::sync::atomic::Ordering::Relaxed)))
+}
+
+/// How far a color bleeds, as a share of each channel at full: the core's
+/// light says (switches.bleed for the keys' LEDs, display.bleed for the
+/// screen's backlight; the Key lab tunes both), 0x60 of each until it does.
+pub const BLEED: f64 = 0x60 as f64 / 255.0;
+// (BLEED's bits, as an atomic starts from a constant)
+static KEYS_BLEED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0x3FD8_1818_1818_1818);
+static SCREEN_BLEED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0x3FD8_1818_1818_1818);
+
+/// The bleeds the core's light asks for now.
+pub fn set_bleeds(light: &Value) {
+    let of = |v: &Value| v.as_f64().unwrap_or(BLEED).clamp(0.0, 1.0).to_bits();
+    KEYS_BLEED.store(of(&light["switches"]["bleed"]), std::sync::atomic::Ordering::Relaxed);
+    SCREEN_BLEED.store(of(&light["display"]["bleed"]), std::sync::atomic::Ordering::Relaxed);
+}
+
+fn bleed(c: [f64; 3], spill: f64) -> [u8; 3] {
     [c[0] as u8, (c[1] + c[0] * spill + c[2] * spill).min(255.0) as u8, (c[2] + c[1] * spill).min(255.0) as u8]
+}
+
+/// A screen light as the Z10's screen shows it: its backlight bleeds as the
+/// keys' LEDs do, by its own share (display.bleed).
+pub fn as_lit(c: [u8; 3]) -> [u8; 3] {
+    bleed(c.map(f64::from), f64::from_bits(SCREEN_BLEED.load(std::sync::atomic::Ordering::Relaxed)))
 }
 
 #[cfg(test)]

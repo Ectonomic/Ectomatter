@@ -1317,6 +1317,7 @@ impl Front {
 
     /// The keyboard's light as it lights it now: which caps are pale.
     pub fn light_caps(&mut self, light: &serde_json::Value) {
+        crate::z10::set_bleeds(light);
         let controls = crate::cores::shown().device["controls"].as_array().cloned().unwrap_or_default();
         self.pale = controls.iter().filter_map(|c| Some((c["id"].as_str()?, c["pos"].as_u64()? as u32))).filter(|(id, _)| ectodeck_draw::hdr::pale_top(light, id)).map(|(_, pos)| pos).collect();
     }
@@ -3027,7 +3028,7 @@ impl Front {
         let mut rows_out = Vec::with_capacity(n);
         for (i, p) in self.pages.iter().enumerate() {
             let rows = if i == shown && self.lcd.sequence.is_none() && !self.lcd.rows.is_empty() { self.lcd.rows.clone() } else { crate::lcd_page::render(p, &self.readings) };
-            let key: PicKey = (rows, p.light.unwrap_or(profile), level, px(150.0));
+            let key: PicKey = (rows, crate::z10::as_lit(p.light.unwrap_or(profile)), level, px(150.0));
             let thumb = match &self.pl_thumbs[i] {
                 Some((k, img)) if *k == key => img.clone(),
                 _ => {
@@ -3056,7 +3057,7 @@ impl Front {
                     let page = crate::lcd_page::Page::template(key, &[]).expect("a page of the list");
                     let rows = crate::lcd_page::render(&page, &self.readings);
                     let note = if *key == "weather" && !weather { "Needs a place in Ectodeck’s Settings. Until then, the page says “Weather unavailable”." } else { note };
-                    crate::LibCard { name: (*name).into(), note: note.into(), pic: crate::lcd_draw::picture(&rows, profile, lv, px(185.0), px(37.0)), on: self.lib_pick == Some(k) }
+                    crate::LibCard { name: (*name).into(), note: note.into(), pic: crate::lcd_draw::picture(&rows, crate::z10::as_lit(profile), lv, px(185.0), px(37.0)), on: self.lib_pick == Some(k) }
                 })
                 .collect();
             show_rows(self.ui.get_lib_cards(), |m| self.ui.set_lib_cards(m), cards);
@@ -3082,7 +3083,8 @@ impl Front {
             return;
         }
         let (light, _) = screen_of(&self.page.draft()["lighting"]);
-        let (level, rgb) = (light[0], self.page_light([light[1], light[2], light[3]]));
+        // the light as the keyboard's screen shows it, bled as its backlight bleeds
+        let (level, rgb) = (light[0], crate::z10::as_lit(self.page_light([light[1], light[2], light[3]])));
         let sc = self.scale.max(1.0);
         let px = |w: f32| (w * sc).round() as u32;
         // editing: the page as edited, read here; otherwise what the keyboard shows

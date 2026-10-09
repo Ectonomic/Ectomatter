@@ -477,6 +477,13 @@ impl Label {
     fn new(left: bool, at: Pt, name: &str) -> Label {
         Label { i: slider(name), left, at, flat: false, drop: false, elbow: None }
     }
+
+    /// One for the slider of the core's value at `path`, where two sliders
+    /// share a name (each section's Color bleed).
+    fn of(left: bool, at: Pt, path: (&str, &str)) -> Label {
+        let i = PARAMS.iter().position(|p| p.path == path).expect("one of the lab's sliders");
+        Label { i, left, at, flat: false, drop: false, elbow: None }
+    }
 }
 
 /// The slice, in millimetres: x north to south from the main well's north
@@ -785,6 +792,8 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
             let y_nc = if hz > 2.6 { hz - 0.6 } else { hz + 0.7 };
             marks.push(Mark::Across { x0: px(sl.led), x1: px(sl.centre), y: pz(y_nc), i: slider("North of center") });
             labels.push(Label::new(true, p(sl.led, hz), "North of center"));
+            // the LED's own color, on the LED
+            labels.push(Label::of(false, p(sl.led + 0.4, hz * 0.5), ("switches", "bleed")));
             // Beam on the cone's edge; with no room for a beam, where it would meet the cap's top
             let beam_at = if rise > 0.3 { p(sl.led - wide * 0.62, hz + rise * 0.62) } else { p(sl.led, under) };
             labels.push(Label::new(true, beam_at, "Beam"));
@@ -1026,6 +1035,8 @@ fn display(v: &Values, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, Vec<Label>
     let band = (bx0 + bx1) / 2.0 + lean * (1.0 - (cell * 0.5) / fh);
     let labels = vec![
         Label { flat: true, ..Label::new(true, (x0 + cell + dot * 0.5, y0 + dot * 0.5), "Lit dots") },
+        // the backlight's color, on a lit dot
+        Label::of(true, (x0 + cell + dot * 0.8, y0 + dot * 0.8), ("display", "bleed")),
         Label::new(true, (x0 + dot * 0.5, y0 + cell * 3.0 + dot * 0.5), "Unlit dots"),
         Label { flat: true, ..Label::new(false, (band, gy0 + cell * 0.5), "Glass sheen") },
         Label::new(false, (gx0 + fw - cell * 0.5, gy0 + cell * 2.5), "Background"),
