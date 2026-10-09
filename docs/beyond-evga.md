@@ -36,3 +36,4 @@ unused flash; flashing EVGA's own file puts everything back.
 | A game's launch and exit play on the screen, with game-helper's steps as they happen | `d6d93a0` | None |
 | The screen drawn live in the app, dot for dot in the keyboard's own font | `fc4b2b0` | A swatch of the screen light's color |
 | The screen's pages edited in the app: words, readings, bars and a clock, each placed and moved cell by cell, live on the keyboard while they change | `48c36f5` | Only the screen's light, its brightness and which of the keyboard's own screens show |
+| Several pages play on the screen in turn (Stats, a clock, the weather), each for its own time, coming in with a wipe, a dissolve, typed in or at once | `6bb2332` | None: Unleash never writes to the screen |
