@@ -243,9 +243,11 @@ mod kept_tests {
 }
 
 /// Build the keyboard at each size asked for, away from the window's thread:
-/// it takes a third of a second, and the window keeps drawing meanwhile.
-fn board_builder(done: calloop::channel::Sender<Board>) -> std::sync::mpsc::Sender<(u32, u32)> {
-    let (ask, asked) = std::sync::mpsc::channel::<(u32, u32)>();
+/// it takes a third of a second, and the window keeps drawing meanwhile. Its
+/// legends are set as the light in use asks before it is handed over, so a
+/// keyboard drawn anew never shows the drawing's own legends first.
+fn board_builder(done: calloop::channel::Sender<Board>) -> std::sync::mpsc::Sender<(u32, u32, serde_json::Value)> {
+    let (ask, asked) = std::sync::mpsc::channel::<(u32, u32, serde_json::Value)>();
     std::thread::spawn(move || {
         let tree = cores::shown().tree();
         let device: serde_json::Value = cores::shown().device_now();
@@ -256,7 +258,8 @@ fn board_builder(done: calloop::channel::Sender<Board>) -> std::sync::mpsc::Send
             }
             let t = Instant::now();
             match Board::new(&tree, &device, GROUND, size.0, size.1) {
-                Ok(b) => {
+                Ok(mut b) => {
+                    b.set_legends_from(&size.2);
                     eprintln!("ectodeck-native: keyboard drawn at {}x{} in {:?}", size.0, size.1, t.elapsed());
                     if done.send(b).is_err() {
                         return;
@@ -979,7 +982,7 @@ struct App {
     /// Performance asks for
     effect_due: Instant,
     asked: Option<(u32, u32)>,
-    build: std::sync::mpsc::Sender<(u32, u32)>,
+    build: std::sync::mpsc::Sender<(u32, u32, serde_json::Value)>,
     /// legends to set as the light asks, away from the window
     set_legends: std::sync::mpsc::Sender<ectodeck_draw::hdr::LegendsAsk>,
     /// the whole window needs drawing again, not only what Slint changed
@@ -1961,7 +1964,7 @@ impl App {
         let want = ((ui.get_board_width() * s).round().max(1.0) as u32, (ui.get_board_height() * s).round().max(1.0) as u32);
         if want.0 > 1 && self.board.as_ref().map(|b| (b.w, b.h)) != Some(want) && self.asked != Some(want) {
             self.asked = Some(want);
-            let _ = self.build.send(want);
+            let _ = self.build.send((want.0, want.1, self.light_now()));
         }
         self.front.board_size(rect.2 as u32, rect.3 as u32, self.scale as f32);
         self.front.ui.set_board_ready(self.lit.is_some());
