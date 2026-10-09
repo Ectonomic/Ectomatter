@@ -27,6 +27,11 @@ mod front;
 mod kde_output;
 mod shadow;
 mod lab;
+mod lcd_anim;
+#[cfg(test)]
+mod lcd_parity;
+mod lcd_player;
+mod lcd_stats;
 mod lighting;
 mod macro_page;
 mod macros;

@@ -27,6 +27,9 @@ wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 wayland-scanner = "0.31"
 wayland-backend = "0.3"
 bitflags = "2"
+libc = "0.2"
+# game names folded to plain letters for the screen, as the z10-lcd service did (NFKD)
+unicode-normalization = "0.1"
 
 [build-dependencies]
 slint-build = "1.18.1"
