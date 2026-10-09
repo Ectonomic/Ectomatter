@@ -434,7 +434,7 @@ pub fn boxes(page: &Page, paint: [u8; 3], demo: bool, open: Option<(Ctl, usize)>
         s.cells.push(Cell { text: "Scatter colors".into(), id: id(Ctl::Scatter), ..cell(kind::QUIET, 8.0, row, w1, 24.0) });
         s.cells.push(Cell { text: "Clear every key".into(), id: id(Ctl::Clear), ..cell(kind::QUIET, 8.0 + w1 + 4.0, row, text::width(500, 12.5, "Clear every key") + 18.0, 24.0) });
         s.y = row + 24.0 + 12.0;
-        s.note("Click keys on the keyboard to paint them. Black turns a key off. The keyboard can’t store a color for each key, so they show only while Ectodeck is open.");
+        s.note("Select keys on the keyboard to paint them. Black turns a key off. The keyboard can’t store a color for each key, so they show only while Ectodeck is open.");
         return Boxes { kind: 2, title: "Brush".into(), set_h: s.height(), set: s.cells, place: Vec::new(), place_h: 0.0 };
     }
 

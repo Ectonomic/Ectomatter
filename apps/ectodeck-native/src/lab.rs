@@ -2877,7 +2877,7 @@ impl LabPage {
                     Some(k) => (p.label.into(), format!("{} This is {}'s own value; the dot before the name gives the value back to all keys.", p.note, k.label)),
                     None if self.key().is_none() && self.owns(p.path) => {
                         let core = at(&self.core_saved, p.path).as_f64().or_else(|| default_of(p.path, &self.device.print)).unwrap_or(p.def);
-                        (p.label.into(), format!("Changed from {DEFAULT}'s {}. Click the dot to go back to {}. {}", said(p, core), said(p, core), p.note))
+                        (p.label.into(), format!("Changed from {DEFAULT}'s {}. Select the dot to go back to {}. {}", said(p, core), said(p, core), p.note))
                     }
                     None => (p.label.into(), p.note.into()),
                 }
@@ -2906,7 +2906,7 @@ impl LabPage {
                 let c = &CHOICES[(i - CHOICE) as usize];
                 if self.key().is_none() && self.owns(CHOSEN[(i - CHOICE) as usize][0]) {
                     let core = c.options[chosen((i - CHOICE) as usize, &self.core_saved, &self.device.print)];
-                    (c.label.into(), format!("Changed from {DEFAULT}'s {core}. Click the dot to go back to {core}. {}", c.note))
+                    (c.label.into(), format!("Changed from {DEFAULT}'s {core}. Select the dot to go back to {core}. {}", c.note))
                 } else {
                     (c.label.into(), c.note.into())
                 }
