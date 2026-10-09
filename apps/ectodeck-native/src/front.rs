@@ -3094,6 +3094,7 @@ impl Front {
         if self.lcd_drawn.as_ref() != Some(&key) {
             let lv = level as f32 / 255.0;
             self.ui.set_lcd_big(crate::lcd_draw::picture(&rows, rgb, lv, px(860.0), px(172.0)));
+            self.ui.set_lcd_field(crate::lcd_draw::field(rgb, lv, px(860.0)));
             self.lcd_drawn = Some(key);
         }
         self.refresh_playlist([light[1], light[2], light[3]], level);

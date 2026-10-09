@@ -81,6 +81,19 @@ fn spans(n_px: usize, n_dots: usize, p: f32, fill: f32) -> Vec<[(usize, f32); 2]
         .collect()
 }
 
+/// The screen's own background, between and under its unlit dots, as one
+/// color: what a picture `w` pixels across averages to where nothing is lit,
+/// so a surface in it meets the picture without an edge.
+pub fn field(rgb: [u8; 3], level: f32, w: u32) -> slint::Color {
+    let p = w.max(1) as f32 / PW as f32;
+    let fill = if p >= 3.0 { 0.82 } else { 0.9 };
+    let cov = fill * fill;
+    let back = [10.0f32, 9.0, 8.0];
+    let unlit = mix(rgb, 0.075 * (0.4 + level * 0.6));
+    let c = [0, 1, 2].map(|k| (back[k] * (1.0 - cov) + unlit[k] * cov).round() as u8);
+    slint::Color::from_rgb_u8(c[0], c[1], c[2])
+}
+
 /// The screen showing `rows`, lit in `rgb` at `level` (0 to 1), `w` by `h` pixels.
 pub fn picture(rows: &[String], rgb: [u8; 3], level: f32, w: u32, h: u32) -> Image {
     let (w, h) = (w.max(1) as usize, h.max(1) as usize);

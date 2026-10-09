@@ -3482,6 +3482,8 @@ export component AppWindow inherits Window {
     property <length> lcd-w: 860px;
     property <length> lcd-h: 172px;
     property <length> lcd-box-h: lcd-h + 2 * kb-pad-y;
+    // the screen's own background, which its bay is
+    in property <color> lcd-field: #0a0908;
     property <length> under-top: root.tab == 3 ? head-end + lcd-box-h + 18px : head-end + board-h + 2 * kb-pad-y + 18px;
     property <length> anchor-w: 240px;
     property <length> under-x: pws-x + anchor-w + 16px;
@@ -3949,6 +3951,24 @@ export component AppWindow inherits Window {
                     height: lcd-box-h;
                     border-radius: 12px;
                     background: Ink.well;
+                    // the bay the screen is set into, between plain walls: the screen's own
+                    // background color, its corners rounded inside the box's, its top edge
+                    // shaded as a step down into it
+                    Rectangle {
+                        x: (parent.width - lcd-w) / 2 - kb-pad-y;
+                        width: lcd-w + 2 * kb-pad-y;
+                        height: parent.height;
+                        border-radius: 10px;
+                        background: root.lcd-field;
+                        animate background { duration: 450ms; easing: ease; }
+                        border-width: 1px;
+                        border-color: #0000008c;
+                        clip: true;
+                        Rectangle {
+                            height: 14px;
+                            background: @linear-gradient(180deg, #00000073 0%, #00000000 100%);
+                        }
+                    }
                     Rectangle {
                         x: (parent.width - lcd-w) / 2;
                         y: kb-pad-y;
