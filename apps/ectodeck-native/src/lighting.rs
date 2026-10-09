@@ -54,9 +54,11 @@ pub enum Ctl {
     Preset,
     /// one of the screen light's ready colors
     LcdPreset,
+    /// when the effect plays: one of PLAYS, a start and a stop together
+    Plays,
 }
 
-const CTLS: [Ctl; 34] = [
+const CTLS: [Ctl; 35] = [
     Ctl::None,
     Ctl::Color,
     Ctl::Colors,
@@ -91,6 +93,7 @@ const CTLS: [Ctl; 34] = [
     Ctl::WhereAll,
     Ctl::Preset,
     Ctl::LcdPreset,
+    Ctl::Plays,
 ];
 
 pub fn ctl(id: i32) -> Ctl {
@@ -357,16 +360,19 @@ impl Stack {
         self.cells.push(Cell { text: shown.into(), on: open, id: id(c), ..cell(kind::DROP, 16.0, self.y, self.inner(), 34.0) });
         self.y += 34.0;
     }
-    /// areas as chips, 6 apart, wrapping; `index` is each one's place in ZONES
-    fn chips(&mut self, c: Ctl, chips: &[(usize, &str, bool)], ticks: bool) {
+    /// areas as chips, 6 apart, wrapping, a chosen one ticked; `index` is each
+    /// one's place in ZONES. Faded (style 2) while the whole keyboard is lit;
+    /// `hot` is the one the pointer is over on the keyboard's picture.
+    fn chips(&mut self, c: Ctl, chips: &[(usize, &str, bool)], faded: bool, hot: Option<usize>) {
         let (mut x, mut y) = (0.0f32, self.y);
         for (index, name, on) in chips {
-            let w = text::width(400, 12.5, name) + 22.0 + if ticks && *on { 17.0 } else { 0.0 };
+            let w = text::width(400, 12.5, name) + 24.0 + if *on { 14.0 } else { 0.0 };
             if x > 0.0 && x + w > self.inner() {
                 x = 0.0;
                 y += 34.0;
             }
-            self.cells.push(Cell { text: (*name).into(), on: *on, style: ticks as i32, id: id(c), index: *index as i32, ..cell(kind::AREA, 16.0 + x, y, w, 28.0) });
+            let hot = if hot == Some(*index) { 1.0 } else { 0.0 };
+            self.cells.push(Cell { text: (*name).into(), on: *on, style: if faded { 2 } else { 1 }, value: hot, id: id(c), index: *index as i32, ..cell(kind::AREA, 16.0 + x, y, w, 28.0) });
             x += w + 6.0;
         }
         self.y = y + 28.0;
@@ -383,7 +389,7 @@ impl Stack {
 
 /// The boxes for the profile being edited. `open` is the swatch the color
 /// picker is open on, `menu` the dropdown open.
-pub fn boxes(page: &Page, paint: [u8; 3], demo: bool, open: Option<(Ctl, usize)>, menu: Option<Ctl>) -> Boxes {
+pub fn boxes(page: &Page, paint: [u8; 3], demo: bool, open: Option<(Ctl, usize)>, menu: Option<Ctl>, hot_area: Option<usize>) -> Boxes {
     let l = &page.draft()["lighting"];
     let mode = l["mode"].as_str().unwrap_or("off").to_string();
     let title = EFFECTS.iter().find(|(m, _)| *m == mode).map_or(mode.clone(), |(_, n)| n.to_string());
@@ -421,7 +427,7 @@ pub fn boxes(page: &Page, paint: [u8; 3], demo: bool, open: Option<(Ctl, usize)>
         s.y = y + 28.0;
         s.group("Fill an area");
         let chips: Vec<(usize, &str, bool)> = ZONES.iter().enumerate().map(|(i, (_, n))| (i, *n, false)).collect();
-        s.chips(Ctl::Fill, &chips, false);
+        s.chips(Ctl::Fill, &chips, false, None);
         s.gap(10.0);
         let row = s.y;
         let w1 = text::width(500, 12.5, "Scatter colors") + 18.0;
@@ -512,41 +518,58 @@ pub fn boxes(page: &Page, paint: [u8; 3], demo: bool, open: Option<(Ctl, usize)>
         }
     }
 
-    // where and when
+    // where and when: the whole keyboard or some areas, the areas as chips
+    // (faded on the whole keyboard, where picking one lights only that), and
+    // when it plays, one choice for the keyboard's start and stop together.
+    // Everything sits where it always does, so nothing moves as it changes.
     let mut p = Stack::new(PLACE_W);
-    p.group("Where");
+    p.y = 46.0;
     let zone = e["zone"].as_u64().unwrap_or(0x80);
     let whole = zone & 0x80 != 0;
     p.switch(Ctl::WhereMode, &[("Whole keyboard", ""), ("Some areas", "")], if whole { 0 } else { 1 });
-    if !whole {
-        let picks = zone & ALL_AREAS;
-        let n = (1..ZONES.len()).filter(|i| picks & ZONES[*i].0 != 0).count();
-        p.gap(12.0);
-        let row = p.y;
-        p.cells.push(text_cell(style::PROP, 16.0, row, PLACE_W - 32.0, 24.0, &if n > 0 { format!("{n} of {} areas", ZONES.len() - 1) } else { "No areas chosen".into() }));
-        if n < ZONES.len() - 1 {
-            p.link_right(Ctl::WhereAll, "Select all", row, "");
-        }
-        p.y = row + 24.0 + 8.0;
-        let chips: Vec<(usize, &str, bool)> = ZONES.iter().enumerate().skip(1).map(|(i, (bit, name))| (i, *name, picks & bit != 0)).collect();
-        p.chips(Ctl::Zone, &chips, true);
-        if n == 0 {
-            p.gap(10.0);
-            p.note("Choose the areas to light. Until you do, the effect lights nothing.");
-        }
-    }
-    p.group("When");
-    p.head("Starts", None);
-    let (start, stop) = (int("start").clamp(0, 1) as usize, int("stop").clamp(0, 2) as usize);
-    p.dropdown(Ctl::Start, STARTS[start], menu == Some(Ctl::Start));
     p.gap(14.0);
-    p.head("Stops", None);
-    p.dropdown(Ctl::Stop, STOPS[stop], menu == Some(Ctl::Stop));
-    p.gap(10.0);
-    let begins = if start == 1 { "Starts when you press a key".to_string() } else { format!("Plays as soon as {profile} is on") };
-    let ends = [", and keeps going.", ", and stops at the next key press.", ", and stops when you let go of the key."][stop];
-    p.note(&format!("{begins}{ends}"));
+    let picks = if whole { 0 } else { zone & ALL_AREAS };
+    let chips: Vec<(usize, &str, bool)> = ZONES.iter().enumerate().skip(1).map(|(i, (bit, name))| (i, *name, picks & bit != 0)).collect();
+    p.chips(Ctl::Zone, &chips, whole, hot_area);
+    p.gap(8.0);
+    p.note(if whole {
+        "Every key lights. Pick an area to light only that."
+    } else if picks != 0 {
+        "Pick areas here or on the keyboard."
+    } else {
+        "Nothing lights until you pick an area."
+    });
+    p.y = p.y.max(182.0) + 14.0;
+    p.cells.push(Cell { color: slint::Color::from_rgb_u8(0x2b, 0x2b, 0x30), ..cell(kind::BOX, 16.0, p.y, p.inner(), 1.0) });
+    p.y += 14.0;
+    p.cells.push(text_cell(style::PROP, 16.0, p.y, p.inner(), 20.0, "Plays"));
+    p.y += 24.0;
+    let (start, stop) = (int("start").max(0) as u64, int("stop").max(0) as u64);
+    p.dropdown(Ctl::Plays, &plays_label(start, stop), menu == Some(Ctl::Plays));
+    p.y += 10.0;
     Boxes { kind: 0, title, set_h: s.height(), set: s.cells, place_h: p.height(), place: p.cells }
+}
+
+/// When an effect plays, as one choice: what it is called, and the
+/// keyboard's start (0 with the profile, 1 on a key press) and stop (0 never,
+/// 1 on a key press, 2 on key release), EVGA's LedStartMode and LedStopMode.
+pub const PLAYS: [(&str, u64, u64); 6] = [
+    ("All the time", 0, 0),
+    ("Until you press a key", 0, 1),
+    ("Until you let go of a key", 0, 2),
+    ("From your first key press", 1, 0),
+    ("While you hold a key", 1, 2),
+    ("From one key press to the next", 1, 1),
+];
+
+/// Which of PLAYS a stored start and stop are, if either is one the keyboard knows.
+pub fn plays_of(start: u64, stop: u64) -> Option<usize> {
+    PLAYS.iter().position(|(_, a, b)| *a == start && *b == stop)
+}
+
+/// What Plays shows: its choice, or what is stored if it is none of them.
+pub fn plays_label(start: u64, stop: u64) -> String {
+    plays_of(start, stop).map_or_else(|| format!("Something else (start {start}, stop {stop})"), |i| PLAYS[i].0.to_string())
 }
 
 /// The choices the dropdowns list, in the order the keyboard numbers them.
@@ -593,7 +616,8 @@ pub fn place(page: &mut Page, c: Ctl, index: usize, areas: &mut u64) {
         Ctl::WhereAll => ALL_AREAS,
         Ctl::Zone => {
             let bit = ZONES.get(index).map_or(0, |z| z.0) & ALL_AREAS;
-            (if zone & 0x80 != 0 { *areas } else { zone }) ^ bit
+            // on the whole keyboard, an area picked is the only one lit
+            if zone & 0x80 != 0 { bit } else { zone ^ bit }
         }
         _ => return,
     };
@@ -642,6 +666,12 @@ pub fn act(page: &mut Page, c: Ctl, index: usize, value: f32) {
         Ctl::Submode => e["submode"] = json!(index.min(2)),
         Ctl::Start => e["start"] = json!(index.min(1)),
         Ctl::Stop => e["stop"] = json!(index.min(2)),
+        Ctl::Plays => {
+            if let Some((_, a, b)) = PLAYS.get(index) {
+                e["start"] = json!(a);
+                e["stop"] = json!(b);
+            }
+        }
         Ctl::Zone => {
             let bit = ZONES.get(index).map_or(0x80, |z| z.0);
             if bit == 0x80 {
@@ -821,5 +851,40 @@ mod tests {
         assert_eq!(zone(&p), two);
         place(&mut p, Ctl::WhereAll, 0, &mut areas);
         assert_eq!(zone(&p), ALL_AREAS);
+    }
+
+    #[test]
+    fn an_area_picked_on_the_whole_keyboard_is_the_only_one_lit() {
+        let mut p = page_with(0x80);
+        let mut areas = ALL_AREAS;
+        place(&mut p, Ctl::Zone, 3, &mut areas);
+        assert_eq!(zone(&p), ZONES[3].0, "WASD alone, and Some areas");
+        // then another added, and the first taken out again
+        place(&mut p, Ctl::Zone, 1, &mut areas);
+        assert_eq!(zone(&p), ZONES[3].0 | ZONES[1].0);
+        place(&mut p, Ctl::Zone, 3, &mut areas);
+        assert_eq!(zone(&p), ZONES[1].0);
+        // the whole keyboard and back keeps it
+        place(&mut p, Ctl::WhereMode, 0, &mut areas);
+        place(&mut p, Ctl::WhereMode, 1, &mut areas);
+        assert_eq!(zone(&p), ZONES[1].0);
+    }
+
+    #[test]
+    fn plays_is_the_keyboards_start_and_stop_both_ways() {
+        // the six, each the pair EVGA's LedStartMode and LedStopMode name
+        let want = [(0, 0), (0, 1), (0, 2), (1, 0), (1, 2), (1, 1)];
+        for (i, (start, stop)) in want.iter().enumerate() {
+            let mut p = page_with(0x80);
+            act(&mut p, Ctl::Plays, i, 0.0);
+            let e = &p.drafts[&1]["lighting"]["spiral"];
+            assert_eq!((e["start"].as_u64().unwrap(), e["stop"].as_u64().unwrap()), (*start, *stop), "{}", PLAYS[i].0);
+            assert_eq!(plays_of(*start, *stop), Some(i));
+            assert_eq!(plays_label(*start, *stop), PLAYS[i].0);
+        }
+        // every pair the keyboard knows has a name; one it doesn't is said as it is
+        assert_eq!(plays_label(0, 0), "All the time");
+        assert_eq!(plays_of(2, 0), None);
+        assert_eq!(plays_label(3, 0), "Something else (start 3, stop 0)");
     }
 }

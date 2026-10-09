@@ -80,6 +80,8 @@ pub enum Ask {
     SliderBind(i32),
     /// the pointer over an area's chip on the Lighting page, or off it: its place in ZONES
     AreaHover(i32, bool),
+    /// the pointer onto (true) or off a key on the keyboard's picture
+    KeyHover(i32, bool),
     /// the Screen tab: Pause or Play; game launches breaking in, or not; time
     /// for the playlist's picture of a launch to move on
     LcdPause,
@@ -166,6 +168,29 @@ pub enum WindowAsk {
     OpenMacros(u32),
     /// open the Key lab's window
     OpenLab,
+}
+
+/// The Plays menu: the six choices, a rule between those that start with the
+/// profile and those that start on a key press, and a pair stored that is
+/// none of them, after its own rule, ticked, so it is never hidden.
+fn plays_rows(page: &Page) -> Vec<MenuRow> {
+    let l = &page.draft()["lighting"];
+    let e = &l[l["mode"].as_str().unwrap_or("off")];
+    let (start, stop) = (e["start"].as_u64().unwrap_or(0), e["stop"].as_u64().unwrap_or(0));
+    let at = lighting::plays_of(start, stop);
+    let rule = || MenuRow { kind: 2, label: "".into(), tag: "".into(), tick: false, sub: "".into() };
+    let mut rows = Vec::new();
+    for (j, (label, _, _)) in lighting::PLAYS.iter().enumerate() {
+        if j == 3 {
+            rows.push(rule());
+        }
+        rows.push(MenuRow { kind: 0, label: (*label).into(), tag: "".into(), tick: at == Some(j), sub: "".into() });
+    }
+    if at.is_none() {
+        rows.push(rule());
+        rows.push(MenuRow { kind: 0, label: lighting::plays_label(start, stop).into(), tag: "".into(), tick: true, sub: "".into() });
+    }
+    rows
 }
 
 const LAYERS: [(&str, &str); 2] = [("keys", "When pressed"), ("fnkeys", "When Fn is held")];
@@ -322,6 +347,8 @@ pub struct Front {
     areas: HashMap<(u8, String), u64>,
     light_menu: Option<Ctl>,
     pub hover_area: Option<usize>,
+    /// the key the pointer is over on the keyboard's picture
+    picture_key: Option<u32>,
     pub scale: f32,
     pick: Option<Pick>,
     overlay_model: Rc<VecModel<crate::Overlay>>,
@@ -438,6 +465,7 @@ impl Front {
         on!(on_slider_chosen_at, |i| Ask::SliderSel(i));
         on!(on_slider_bind_at, |i| Ask::SliderBind(i));
         on!(on_area_hover, |i, on| Ask::AreaHover(i, on));
+        on!(on_key_hovered, |p, on| Ask::KeyHover(p, on));
         on!(on_lcd_pause, Ask::LcdPause);
         on!(on_lcd_announce_toggled, Ask::LcdAnnounce);
         let (ftx, frx) = mpsc::channel();
@@ -506,6 +534,7 @@ impl Front {
             areas: HashMap::new(),
             light_menu: None,
             hover_area: None,
+            picture_key: None,
             scale: 1.0,
             pick: None,
             overlay_model: Rc::new(VecModel::default()),
@@ -847,6 +876,19 @@ impl Front {
                         }
                     }
                     continue;
+                }
+                Ask::KeyHover(pos, on) => {
+                    let pos = pos.max(0) as u32;
+                    let was = self.picture_area();
+                    if on {
+                        self.picture_key = Some(pos);
+                    } else if self.picture_key == Some(pos) {
+                        self.picture_key = None;
+                    }
+                    // only a change of area lit on the picture changes the page
+                    if self.picture_area() == was {
+                        continue;
+                    }
                 }
                 Ask::AreaHover(i, on) => {
                     let i = i.max(0) as usize;
@@ -1245,7 +1287,7 @@ impl Front {
                 self.open_picker(c, index, _anchor);
                 return;
             }
-            Ctl::Start | Ctl::Stop | Ctl::Submode => {
+            Ctl::Start | Ctl::Stop | Ctl::Submode | Ctl::Plays => {
                 self.open_light_menu(c, _anchor);
                 return;
             }
@@ -1574,6 +1616,13 @@ impl Front {
                 self.push_preview();
                 return;
             }
+            // on Some areas, a key in an area turns that area on or off, as its chip does
+            if self.some_areas() {
+                if let Some(i) = self.area_of(pos) {
+                    self.cell_pick(Ctl::Zone, i, (0.0, 0.0, 0.0));
+                    return;
+                }
+            }
             // otherwise it lights as pressing it would, for Reactive
             self.page.flash(pos, now);
             return;
@@ -1813,6 +1862,19 @@ impl Front {
             self.ui.set_menu_search(true);
             self.ui.set_menu_w(300.0);
             let index = if c == Ctl::Submode { i.min(2) } else { i };
+            // Plays: its rows, a rule between the two halves (and, for a pair it
+            // has no name for, that one after another rule, which changes nothing)
+            let index = if c == Ctl::Plays {
+                match plays_rows(&self.page).get(i).filter(|r| r.kind == 0).and_then(|r| lighting::PLAYS.iter().position(|p| p.0 == r.label.as_str())) {
+                    Some(k) => k,
+                    None => {
+                        self.refresh();
+                        return;
+                    }
+                }
+            } else {
+                index
+            };
             lighting::act(&mut self.page, c, index, 0.0);
             self.push_preview();
             self.refresh();
@@ -1997,6 +2059,7 @@ impl Front {
         // the keys over the keyboard; on Lighting, the area the pointer is over outlined
         let (x0, y0, _, _) = p.view_box;
         let zoned = self.area_keys();
+        let some = self.some_areas();
         let names = p.board_macro_names();
         let keys: Vec<KeyItem> = p
             .layout
@@ -2013,6 +2076,14 @@ impl Front {
                 selected: p.view == View::Keys && p.sel == Some(k.pos),
                 pressed: p.pressed.contains(&k.pos),
                 zoned: zoned.as_ref().is_some_and(|z| z.contains(&k.pos)),
+                // the hand only where a click does something: choosing a key, painting
+                // one, or on Some areas, turning its area on or off
+                clickable: match p.view {
+                    View::Keys => true,
+                    View::Lighting if p.drafts.get(&p.editing).is_some_and(|d| d["lighting"]["mode"] == "custom") => k.led,
+                    View::Lighting => some && self.area_of(k.pos).is_some(),
+                    _ => false,
+                },
             })
             .collect();
         show_rows(ui.get_keys(), |m| ui.set_keys(m), keys);
@@ -2278,7 +2349,7 @@ impl Front {
         self.ui.set_effect_moves(effects.iter().any(|e| e.on && e.motion != 0));
         show_rows(self.ui.get_effects(), |m| self.ui.set_effects(m), effects);
         let open = self.pick.as_ref().map(|p| (p.ctl, p.index));
-        let b = lighting::boxes(&self.page, self.paint, self.page.demo, open, self.light_menu);
+        let b = lighting::boxes(&self.page, self.paint, self.page.demo, open, self.light_menu, self.picture_area());
         self.ui.set_light_kind(b.kind);
         self.ui.set_light_title(b.title.into());
         self.ui.set_set_h(b.set_h);
@@ -2287,13 +2358,37 @@ impl Front {
         sync_cells(&self.place_cells, b.place);
     }
 
-    /// The keys of the area the pointer is over on the Lighting page, if it is over one.
+    /// Whether the Lighting page lights some areas of the keyboard, not all of it.
+    fn some_areas(&self) -> bool {
+        let p = &self.page;
+        // (nothing to say before the keyboard's profiles are read)
+        let Some(d) = p.drafts.get(&p.editing) else { return false };
+        let l = &d["lighting"];
+        let mode = l["mode"].as_str().unwrap_or("off");
+        p.view == View::Lighting && mode != "off" && mode != "custom" && l[mode]["zone"].as_u64().unwrap_or(0x80) & 0x80 == 0
+    }
+
+    /// The area a key is in, by its place in ZONES.
+    fn area_of(&self, pos: u32) -> Option<usize> {
+        (1..lighting::ZONES.len()).find(|&i| self.page.zone_set(lighting::ZONES[i].0 as u8).is_some_and(|keys| keys.contains(&pos)))
+    }
+
+    /// On Some areas, the area the pointer is over on the keyboard's picture.
+    fn picture_area(&self) -> Option<usize> {
+        if !self.some_areas() {
+            return None;
+        }
+        self.area_of(self.picture_key?)
+    }
+
+    /// The keys of the area the pointer is over on the Lighting page, if it is
+    /// over one: its chip, or the area itself on the keyboard's picture.
     fn area_keys(&self) -> Option<Vec<u32>> {
         let p = &self.page;
         if p.view != View::Lighting {
             return None;
         }
-        let bit = lighting::ZONES.get(self.hover_area?)?.0 as u8;
+        let bit = lighting::ZONES.get(self.hover_area.or_else(|| self.picture_area())?)?.0 as u8;
         Some(p.zone_set(bit).unwrap_or_else(|| p.layout.iter().filter(|k| k.led).map(|k| k.pos).collect()))
     }
 
@@ -2336,11 +2431,15 @@ impl Front {
                 return;
             }
         }
-        let Some((list, chosen)) = lighting::choices(&self.page, c) else { return };
+        let rows: Vec<MenuRow> = if c == Ctl::Plays {
+            plays_rows(&self.page)
+        } else {
+            let Some((list, chosen)) = lighting::choices(&self.page, c) else { return };
+            list.iter().enumerate().map(|(j, label)| MenuRow { kind: 0, label: (*label).into(), tag: "".into(), tick: j == chosen, sub: "".into() }).collect()
+        };
         self.close_menu();
         self.close_picker();
-        let rows: Vec<MenuRow> = list.iter().enumerate().map(|(j, label)| MenuRow { kind: 0, label: (*label).into(), tag: "".into(), tick: j == chosen, sub: "".into() }).collect();
-        let h = 6.0 + rows.len() as f32 * 33.0 + 6.0;
+        let h = 6.0 + rows.iter().map(|r| if r.kind == 2 { 11.0 } else { 33.0 }).sum::<f32>() + 6.0;
         self.ui.set_menu_search(false);
         self.ui.set_menu_back(false);
         self.ui.set_menu_natural(h);

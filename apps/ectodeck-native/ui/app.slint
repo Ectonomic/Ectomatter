@@ -96,6 +96,8 @@ export struct KeyItem {
     pressed: bool,
     // in the area the pointer is over on the Lighting page
     zoned: bool,
+    // a click on it does something here (shows the hand)
+    clickable: bool,
 }
 
 // a picture over the keyboard (a slider knob, the display, its glass), where
@@ -382,6 +384,7 @@ component KeyBox inherits Rectangle {
     in property <length> cqw;       // a hundredth of the keyboard's width
     out property <bool> hover: ta.has-hover;
     callback clicked;
+    callback hovered(bool);
     x: root.k.x * root.unit;
     y: root.k.y * root.unit;
     width: root.k.w * root.unit;
@@ -420,8 +423,9 @@ component KeyBox inherits Rectangle {
         background: root.k.pale ? #5c5c5c : #bdbdbd;
     }
     ta := TouchArea {
-        mouse-cursor: pointer;
+        mouse-cursor: root.k.clickable ? pointer : default;
         clicked => { root.clicked(); }
+        changed has-hover => { root.hovered(self.has-hover); }
     }
 }
 
@@ -1417,14 +1421,17 @@ component CellView inherits Rectangle {
     }
     // an area's chip: outlined, white when chosen (with a tick, style 1); it tells the page the pointer is over it
     if root.c.kind == 45: Rectangle {
+        // (style 1 ticked when chosen; style 2 faded, the whole keyboard lit;
+        // value 1 when the pointer is over its area on the keyboard's picture)
+        property <bool> hot: ar-ta.has-hover || root.c.value > 0.5;
         border-radius: 14px;
-        background: root.c.on ? (ar-ta.has-hover ? #ffffff : Ink.ink) : ar-ta.has-hover ? Ink.hover-box : transparent;
-        border-width: root.c.on ? 0 : 1px;
-        border-color: #3a3a41;
+        background: root.c.on ? (self.hot ? Ink.pick-hover : Ink.pick) : self.hot ? Ink.hover-well : Ink.well;
+        opacity: root.c.style == 2 && !self.hot ? 0.45 : 1;
         HorizontalLayout {
-            alignment: center;
+            padding-left: root.c.on ? 9px : 12px;
+            padding-right: 12px;
             spacing: 5px;
-            if root.c.on && root.c.style == 1: Path {
+            if root.c.on: Path {
                 y: (parent.height - 12px) / 2;
                 width: 12px;
                 height: 12px;
@@ -1432,14 +1439,14 @@ component CellView inherits Rectangle {
                 viewbox-height: 24;
                 commands: "M5 12.5l4.5 4.5L19 7.5";
                 fill: transparent;
-                stroke: #131316;
+                stroke: Ink.bright;
                 stroke-width: 2.6px;
             }
             Text {
                 text: root.c.text;
                 font-family: "Geist";
                 font-size: 12.5px;
-                color: root.c.on ? #131316 : ar-ta.has-hover ? Ink.bright : Ink.dim;
+                color: root.c.on || ar-ta.has-hover || root.c.value > 0.5 ? Ink.bright : Ink.soft;
                 vertical-alignment: center;
             }
         }
@@ -3164,6 +3171,7 @@ export component AppWindow inherits Window {
     callback view-changed(int);
     callback choose-profile(int);
     callback key-clicked(int);
+    callback key-hovered(int, bool);
     callback board-clicked();
     // whether a rebound key's new action is printed on it, and turning it on or off
     in property <bool> show-rebindings-on: true;
@@ -3725,6 +3733,7 @@ export component AppWindow inherits Window {
                         unit: root.unit;
                         cqw: root.cqw;
                         clicked => { root.key-clicked(k.pos); }
+                        hovered(on) => { root.key-hovered(k.pos, on); }
                     }
                     for o in root.overlays: Image {
                         visible: root.board-ready;
