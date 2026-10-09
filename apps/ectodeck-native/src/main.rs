@@ -1353,6 +1353,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
                     }
                     tray::TrayAsk::Quit => {
                         app.front.hand_back();
+                        app.front.release_sliders();
                         // (once what changed is saved: see the loop)
                         app.quitting = Some(Instant::now());
                     }
@@ -1383,6 +1384,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
     while !app.exit {
         if TERM.load(std::sync::atomic::Ordering::Relaxed) && app.quitting.is_none() {
             app.front.hand_back();
+            app.front.release_sliders();
             app.quitting = Some(Instant::now());
         }
         // quitting: what changed is saved first, for up to four seconds
@@ -1765,6 +1767,7 @@ impl App {
     fn hide(&mut self) {
         self.front.hand_back();
         if self.tray.is_none() {
+            self.front.release_sliders();
             self.quitting = Some(Instant::now());
             return;
         }

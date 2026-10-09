@@ -168,6 +168,30 @@ pub enum WindowAsk {
     OpenLab,
 }
 
+/// Whether Ectodeck does a slider's job itself rather than the keyboard,
+/// given its job on Base and whether it has another while Fn is held.
+fn drives_itself(bind: &str, fn_job: bool) -> bool {
+    bind != "own" || fn_job
+}
+
+/// What slider `i` drives now, when Ectodeck is the one to drive it.
+fn job_now(i: usize, bind: &str, bind_fn: &str, fn_job: bool, fn_held: bool) -> Option<String> {
+    if fn_held && fn_job {
+        return Some(bind_fn.into());
+    }
+    drives_itself(bind, fn_job).then(|| crate::display::drives(i, bind))
+}
+
+/// What a slider can do while Fn is held: as on Base, or one of its jobs, by
+/// what it drives (the keyboard's own job is done by Ectodeck then).
+fn fn_choices(i: usize) -> Vec<(&'static str, &'static str)> {
+    let mut v = vec![("same", "Same as the Base layer")];
+    for &(val, label) in &crate::display::BIND_CHOICES[i] {
+        v.push((if val == "own" { if i == 0 { "backlight" } else { "output" } } else { val }, label));
+    }
+    v
+}
+
 const LAYERS: [(&str, &str); 2] = [("keys", "When pressed"), ("fnkeys", "When Fn is held")];
 
 /// The action menu's pages under "Other": each one's title and its list.
@@ -331,9 +355,16 @@ pub struct Front {
     bind_menu: Option<(usize, (f32, f32, f32))>,
     /// a slider set to Nothing because the other took its job: the job it had
     idled: [Option<String>; 2],
+    /// what each slider does while Fn is held, on the Function layer: "same"
+    /// as on Base, or what it drives ("backlight", "output", "microphone", "none")
+    bind_fn: [String; 2],
     last_sliders: Option<serde_json::Value>,
     held: Option<u8>,
-    sent: [Option<f64>; 2],
+    /// what each slider last set, and to what
+    sent: [Option<(String, f64)>; 2],
+    /// quitting: when the keyboard was asked to take its sliders back, which
+    /// Ectodeck waits a moment for before it goes
+    released: Option<Instant>,
     /// Ectodeck's own settings, the weather every device shares, and the
     /// place search: what is typed, when, and the places found
     pub settings: crate::settings::Settings,
@@ -509,9 +540,11 @@ impl Front {
             bind: crate::uistate::get("slider_bind").and_then(|v| serde_json::from_value(v).ok()).unwrap_or(["own".into(), "own".into()]),
             bind_menu: None,
             idled: crate::uistate::get("slider_idled").and_then(|v| serde_json::from_value(v).ok()).unwrap_or([None, None]),
+            bind_fn: crate::uistate::get("slider_bind_fn").and_then(|v| serde_json::from_value(v).ok()).unwrap_or(["same".into(), "same".into()]),
             last_sliders: None,
             held: None,
             sent: [None, None],
+            released: None,
             weather: ectodeck_weather::Feed::start(),
             place_text: settings.get("weather.place").and_then(|p| p["name"].as_str().map(String::from)).unwrap_or_default(),
             settings,
@@ -893,7 +926,11 @@ impl Front {
                 Ask::SliderBind(i) => {
                     if self.slider_sel != 0 {
                         let s = self.slider_sel - 1;
-                        if let Some((v, _)) = crate::display::BIND_CHOICES[s].get(i as usize) {
+                        if self.layer == 1 {
+                            if let Some((v, _)) = fn_choices(s).get(i as usize) {
+                                self.set_slider_bind_fn(s, v);
+                            }
+                        } else if let Some((v, _)) = crate::display::BIND_CHOICES[s].get(i as usize) {
                             self.set_slider_bind(s, v);
                         }
                     }
@@ -1524,6 +1561,9 @@ impl Front {
     /// Whether everything is saved, so it may go.
     pub fn flush(&mut self) -> bool {
         self.note_changes();
+        if self.released.is_some_and(|t| t.elapsed() < Duration::from_millis(300)) {
+            return false;
+        }
         if self.page.dev.is_none() || self.kb.is_none() {
             return true;
         }
@@ -2085,10 +2125,13 @@ impl Front {
             let q = self.lib_query.trim().to_lowercase();
             let mut groups: Vec<LibGroup> = Vec::new();
             // the sliders first, as keys are listed
+            // (on the Function layer, a slider's job there in amber where it has its own)
             let bind_label = |i: usize| crate::display::BIND_CHOICES[i].iter().find(|(v, _)| *v == self.bind[i]).map_or("", |c| c.1).to_string();
+            let fn_own = |i: usize| self.layer == 1 && self.bind_fn[i] != "same";
+            let job_label = |i: usize| if fn_own(i) { fn_choices(i).into_iter().find(|(v, _)| *v == self.bind_fn[i]).map_or("", |c| c.1).to_string() } else { bind_label(i) };
             let mut slider_rows = vec![
-                LibRow { id: -1, cap: "◐".into(), name: "Dimmer".into(), job: bind_label(0).into(), rebound: false, chosen: self.slider_sel == 1 },
-                LibRow { id: -2, cap: "♪".into(), name: "Volume".into(), job: bind_label(1).into(), rebound: false, chosen: self.slider_sel == 2 },
+                LibRow { id: -1, cap: "◐".into(), name: "Dimmer".into(), job: job_label(0).into(), rebound: fn_own(0), chosen: self.slider_sel == 1 },
+                LibRow { id: -2, cap: "♪".into(), name: "Volume".into(), job: job_label(1).into(), rebound: fn_own(1), chosen: self.slider_sel == 2 },
             ];
             slider_rows.retain(|r| q.is_empty() || r.name.to_lowercase().contains(&q) || r.job.to_lowercase().contains(&q));
             // each group's rows keep one list, changed in place, so a click on a
@@ -2151,27 +2194,38 @@ impl Front {
             if self.slider_sel != 0 {
                 let s = self.slider_sel - 1;
                 ui.set_slider_at(self.overlays.fracs[s].unwrap_or(0.0));
-                let choices: Vec<CheckItem> = crate::display::BIND_CHOICES[s].iter().map(|(v, l)| CheckItem { name: (*l).into(), on: self.bind[s] == *v }).collect();
+                // on the Function layer, what it does while Fn is held
+                let fn_layer = self.layer == 1;
+                let choices: Vec<CheckItem> = if fn_layer {
+                    fn_choices(s).into_iter().map(|(v, l)| CheckItem { name: l.into(), on: self.bind_fn[s] == v }).collect()
+                } else {
+                    crate::display::BIND_CHOICES[s].iter().map(|(v, l)| CheckItem { name: (*l).into(), on: self.bind[s] == *v }).collect()
+                };
                 show_rows(ui.get_slider_choices(), |m| ui.set_slider_choices(m), choices);
+                ui.set_slider_heading((if fn_layer { "Controls while you hold Fn" } else { "Controls" }).into());
                 // what the firmware can't do yet, said where it matters
                 let fw = self.firmware();
-                let resting = self.idled[s].as_ref().filter(|_| self.bind[s] == "none").and_then(|job| crate::display::BIND_CHOICES[s].iter().find(|(v, _)| v == job)).map(|(_, l)| *l);
-                let other = if s == 0 { "volume slider" } else { "dimmer" };
-                let rest_note = resting.map(|l| format!("Set to Nothing while the {other} does {}. It goes back to {} when the {other} does something else.", l.to_lowercase(), l.to_lowercase()));
-                let note = if let Some(n) = &rest_note {
-                    n.as_str()
-                } else if s == 1 && self.bind[1] != "own" && !crate::display::has(&fw, "volume.quiet") {
-                    "The keyboard still sends volume keys from this slider as well. Its firmware can be told not to, from build 3."
-                } else if s == 0 && self.bind[0] != "own" {
-                    if crate::display::has(&fw, "dimmer.keep") {
-                        "The backlight stays where it was, and follows the volume slider if that is on keyboard brightness."
-                    } else {
-                        "The backlight stays where it was, though it may flicker as this slider moves. Its firmware can hold it steady, from build 3."
-                    }
+                if fn_layer {
+                    ui.set_slider_note((if !crate::display::has(&fw, "fn.read") { "Needs Ectodeck's firmware, build 4 or later, which tells Ectodeck when Fn is held." } else { "" }).into());
                 } else {
-                    ""
-                };
-                ui.set_slider_note(note.into());
+                    let resting = self.idled[s].as_ref().filter(|_| self.bind[s] == "none").and_then(|job| crate::display::BIND_CHOICES[s].iter().find(|(v, _)| v == job)).map(|(_, l)| *l);
+                    let other = if s == 0 { "volume slider" } else { "dimmer" };
+                    let rest_note = resting.map(|l| format!("Set to Nothing while the {other} does {}. It goes back to {} when the {other} does something else.", l.to_lowercase(), l.to_lowercase()));
+                    let note = if let Some(n) = &rest_note {
+                        n.as_str()
+                    } else if s == 1 && self.bind[1] != "own" && !crate::display::has(&fw, "volume.quiet") {
+                        "The keyboard still sends volume keys from this slider as well. Its firmware can be told not to, from build 3."
+                    } else if s == 0 && self.bind[0] != "own" {
+                        if crate::display::has(&fw, "dimmer.keep") {
+                            "The backlight stays where it was, and follows the volume slider if that is on keyboard brightness."
+                        } else {
+                            "The backlight stays where it was, though it may flicker as this slider moves. Its firmware can hold it steady, from build 3."
+                        }
+                    } else {
+                        ""
+                    };
+                    ui.set_slider_note(note.into());
+                }
             }
         }
         if self.menu.is_some() {
@@ -2400,10 +2454,53 @@ impl Front {
         self.tell_modes();
     }
 
+    fn set_slider_bind_fn(&mut self, i: usize, v: &str) {
+        self.bind_fn[i] = v.into();
+        crate::uistate::set("slider_bind_fn", serde_json::json!(self.bind_fn));
+        self.hold_backlight();
+        self.sent = [None, None];
+        self.tell_modes();
+    }
+
+    /// Whether slider `i` has a job of its own while Fn is held, which the
+    /// keyboard can tell Ectodeck about from firmware build 4.
+    fn has_fn_job(&self, i: usize) -> bool {
+        self.bind_fn[i] != "same" && crate::display::has(&self.firmware(), "fn.read")
+    }
+
+    /// Whether Ectodeck does slider `i`'s job itself rather than the
+    /// keyboard: a job the keyboard has no part in, or its own job when Fn
+    /// gives the slider another, as the keyboard would carry on with its own
+    /// with Fn held.
+    fn drives_itself(&self, i: usize) -> bool {
+        drives_itself(&self.bind[i], self.has_fn_job(i))
+    }
+
+    /// What slider `i` does now, when Ectodeck is the one to do it.
+    fn job_now(&self, i: usize, fn_held: bool) -> Option<String> {
+        job_now(i, &self.bind[i], &self.bind_fn[i], self.has_fn_job(i), fn_held)
+    }
+
+    /// Quitting: the keyboard does its sliders' jobs by itself again, so
+    /// they keep working with Ectodeck gone.
+    pub fn release_sliders(&mut self) {
+        let fw = self.firmware();
+        if self.kb.is_none() || self.released.is_some() {
+            return;
+        }
+        if crate::display::has(&fw, "volume.quiet") || crate::display::has(&fw, "dimmer.keep") {
+            self.ask_kb(device::Ask::Modes(false, false));
+        }
+        if crate::display::has(&fw, "dimmer.set") {
+            self.ask_kb(device::Ask::Dimmer(None));
+        }
+        self.released = Some(Instant::now());
+    }
+
     /// The backlight follows the dimmer inside the keyboard, so taking the
     /// dimmer off it means asking the keyboard to hold the backlight where it is.
     fn hold_backlight(&mut self) {
-        if self.bind[0] == "own" {
+        if !self.drives_itself(0) {
             self.held = None;
             self.ask_kb(device::Ask::Dimmer(None));
             return;
@@ -2420,7 +2517,7 @@ impl Front {
         let fw = self.firmware();
         let (vq, dk) = (crate::display::has(&fw, "volume.quiet"), crate::display::has(&fw, "dimmer.keep"));
         if vq || dk {
-            self.ask_kb(device::Ask::Modes(vq && self.bind[1] != "own", dk && self.bind[0] != "own"));
+            self.ask_kb(device::Ask::Modes(vq && self.drives_itself(1), dk && self.drives_itself(0)));
         }
     }
 
@@ -2433,32 +2530,33 @@ impl Front {
         let Some(prev) = prev else { return };
         let raw = |v: &serde_json::Value, k: &str| v[k].as_f64().unwrap_or(0.0);
         let moved = [(raw(r, "dimmer_raw") - raw(&prev, "dimmer_raw")).abs() > 12.0, (raw(r, "volume_raw") - raw(&prev, "volume_raw")).abs() > 12.0];
-        let mut send = |me: &mut Self, i: usize, target: &str| {
+        // Fn held, as the keyboard says from build 4
+        let fn_held = r["fn_held"].as_bool().unwrap_or(false) && crate::display::has(&self.firmware(), "fn.read");
+        let send = |me: &mut Self, i: usize, target: &str| {
             let level = (f[i] as f64 * 100.0).round() / 100.0;
-            if me.sent[i] == Some(level) {
+            if me.sent[i].as_ref().is_some_and(|(t, l)| t == target && *l == level) {
                 return;
             }
-            me.sent[i] = Some(level);
-            if target == "backlight" {
-                me.held = Some((level * 255.0).round() as u8);
-                me.ask_kb(device::Ask::Dimmer(me.held));
-            } else {
-                set_audio(target, level);
+            me.sent[i] = Some((target.to_string(), level));
+            match target {
+                "backlight" => {
+                    me.held = Some((level * 255.0).round() as u8);
+                    me.ask_kb(device::Ask::Dimmer(me.held));
+                }
+                "none" => {}
+                _ => set_audio(target, level),
             }
         };
-        if self.bind[0] != "own" {
-            // the keyboard lets a held level go when its slider moves; hold it again
-            if !r["dimmer_held"].as_bool().unwrap_or(false) && self.held.is_some() {
-                self.ask_kb(device::Ask::Dimmer(self.held));
-            }
-            if moved[0] && (self.bind[0] == "output" || self.bind[0] == "microphone") {
-                let t = self.bind[0].clone();
-                send(self, 0, &t);
-            }
+        // the keyboard lets a held level go when its slider moves; hold it again
+        if self.drives_itself(0) && !r["dimmer_held"].as_bool().unwrap_or(false) && self.held.is_some() {
+            self.ask_kb(device::Ask::Dimmer(self.held));
         }
-        if moved[1] && (self.bind[1] == "backlight" || self.bind[1] == "microphone") {
-            let t = self.bind[1].clone();
-            send(self, 1, &t);
+        for i in 0..2 {
+            if moved[i] {
+                if let Some(t) = self.job_now(i, fn_held) {
+                    send(self, i, &t);
+                }
+            }
         }
     }
 
@@ -2678,5 +2776,52 @@ pub fn sync_cells(model: &VecModel<Cell>, rows: Vec<Cell>) {
         if model.row_data(i).as_ref() != Some(&rows[i]) {
             model.set_row_data(i, rows[i].clone());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_slider_with_no_fn_job_is_left_to_the_keyboard_on_its_own_job() {
+        // the dimmer on keyboard brightness, the volume slider on system volume: the keyboard does both
+        assert_eq!(job_now(0, "own", "same", false, false), None);
+        assert_eq!(job_now(0, "own", "same", false, true), None);
+        assert_eq!(job_now(1, "own", "same", false, true), None);
+        // a job the keyboard has no part in is Ectodeck's, Fn or not
+        assert_eq!(job_now(0, "output", "same", false, true).as_deref(), Some("output"));
+        assert_eq!(job_now(1, "microphone", "same", false, false).as_deref(), Some("microphone"));
+    }
+
+    #[test]
+    fn with_an_fn_job_ectodeck_does_both_jobs() {
+        // the volume slider: system volume, and keyboard brightness while Fn is held
+        assert_eq!(job_now(1, "own", "backlight", true, false).as_deref(), Some("output"));
+        assert_eq!(job_now(1, "own", "backlight", true, true).as_deref(), Some("backlight"));
+        // the dimmer: keyboard brightness, and the microphone while Fn is held
+        assert_eq!(job_now(0, "own", "microphone", true, false).as_deref(), Some("backlight"));
+        assert_eq!(job_now(0, "own", "microphone", true, true).as_deref(), Some("microphone"));
+        // Nothing while Fn is held: the slider rests then
+        assert_eq!(job_now(1, "own", "none", true, true).as_deref(), Some("none"));
+        // so the keyboard is asked to leave the slider's own job to Ectodeck
+        assert!(drives_itself("own", true));
+        assert!(!drives_itself("own", false));
+    }
+
+    #[test]
+    fn without_firmware_that_says_when_fn_is_held_an_fn_job_changes_nothing() {
+        // (has_fn_job is false then, whatever was chosen)
+        assert_eq!(job_now(1, "own", "backlight", false, true), None);
+        assert!(!drives_itself("own", false));
+    }
+
+    #[test]
+    fn the_fn_choices_name_what_each_slider_drives() {
+        let v: Vec<&str> = fn_choices(0).iter().map(|c| c.0).collect();
+        assert_eq!(v, ["same", "backlight", "output", "microphone", "none"]);
+        let v: Vec<&str> = fn_choices(1).iter().map(|c| c.0).collect();
+        assert_eq!(v, ["same", "output", "backlight", "microphone", "none"]);
+        assert_eq!(fn_choices(1)[1].1, "System volume");
     }
 }
