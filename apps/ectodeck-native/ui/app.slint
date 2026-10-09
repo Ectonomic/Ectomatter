@@ -3601,7 +3601,7 @@ export component AppWindow inherits Window {
                         width: parent.width;
                         height: max(root.place-h, lr2 == 0 ? lrow0 : lr2 == 1 ? lrow1 : lrow2);
                         fill: transparent;
-                        title: "Where and when";
+                        title: "Zones and timing";
                         for c in root.place-cells: CellView {
                             c: c;
                             pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }

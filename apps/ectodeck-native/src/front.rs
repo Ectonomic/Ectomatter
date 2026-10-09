@@ -80,6 +80,8 @@ pub enum Ask {
     SliderBind(i32),
     /// the pointer over an area's chip on the Lighting page, or off it: its place in ZONES
     AreaHover(i32, bool),
+    /// time to let go of a zone the pointer left, unless it went on to another
+    HoverSettle,
     /// the pointer onto (true) or off a key on the keyboard's picture
     KeyHover(i32, bool),
     /// the Screen tab: Pause or Play; game launches breaking in, or not; time
@@ -349,6 +351,11 @@ pub struct Front {
     pub hover_area: Option<usize>,
     /// the key the pointer is over on the keyboard's picture
     picture_key: Option<u32>,
+    /// a zone's chip, or a key on the picture, the pointer has just left, and
+    /// when: it stays lit a moment, so crossing the gap to the next one does
+    /// not blink the keyboard
+    chip_left: Option<(usize, Instant)>,
+    key_left: Option<(u32, Instant)>,
     pub scale: f32,
     pick: Option<Pick>,
     overlay_model: Rc<VecModel<crate::Overlay>>,
@@ -480,6 +487,7 @@ impl Front {
             (Duration::from_secs(2), Ask::PreviewTick),
             (Duration::from_millis(70), Ask::StreamTick),
             (Duration::from_millis(250), Ask::AutoSave),
+            (Duration::from_millis(50), Ask::HoverSettle),
             (Duration::from_millis(100), Ask::LcdTick),
         ]
             .into_iter()
@@ -535,6 +543,8 @@ impl Front {
             light_menu: None,
             hover_area: None,
             picture_key: None,
+            chip_left: None,
+            key_left: None,
             scale: 1.0,
             pick: None,
             overlay_model: Rc::new(VecModel::default()),
@@ -809,9 +819,11 @@ impl Front {
         self.settings.flush(false);
         let asks: Vec<Ask> = self.asks.borrow_mut().drain(..).collect();
         let mut window = Vec::new();
-        let mut changed = false;
+        // whether any ask changed the page (a timer's changing nothing must
+        // not hide a change an earlier ask made)
+        let mut any = false;
         for ask in asks {
-            changed = true;
+            let mut changed = true;
             match ask {
                 Ask::Move => window.push(WindowAsk::Move),
                 Ask::Minimise => window.push(WindowAsk::Minimise),
@@ -882,8 +894,11 @@ impl Front {
                     let was = self.picture_area();
                     if on {
                         self.picture_key = Some(pos);
+                        self.key_left = None;
                     } else if self.picture_key == Some(pos) {
-                        self.picture_key = None;
+                        // let go of in a moment, unless the pointer reaches another key first
+                        self.key_left = Some((pos, Instant::now()));
+                        continue;
                     }
                     // only a change of area lit on the picture changes the page
                     if self.picture_area() == was {
@@ -894,9 +909,25 @@ impl Front {
                     let i = i.max(0) as usize;
                     if on {
                         self.hover_area = Some(i);
+                        self.chip_left = None;
                     } else if self.hover_area == Some(i) {
+                        // let go of in a moment, unless the pointer reaches another chip first
+                        self.chip_left = Some((i, Instant::now()));
+                        continue;
+                    }
+                }
+                Ask::HoverSettle => {
+                    const HOLD: Duration = Duration::from_millis(150);
+                    let was = self.area_keys();
+                    if self.chip_left.is_some_and(|(i, t)| t.elapsed() >= HOLD && self.hover_area == Some(i)) {
+                        self.chip_left = None;
                         self.hover_area = None;
                     }
+                    if self.key_left.is_some_and(|(k, t)| t.elapsed() >= HOLD && self.picture_key == Some(k)) {
+                        self.key_left = None;
+                        self.picture_key = None;
+                    }
+                    changed = self.area_keys() != was;
                 }
                 Ask::Rename(t) => crate::display::act(&mut self.page, Ctl::Name, 0, 0.0, Some(&t)),
                 Ask::Layer(i) => {
@@ -1101,8 +1132,9 @@ impl Front {
                     window.push(WindowAsk::OpenMacros(n));
                 }
             }
+            any |= changed;
         }
-        if changed {
+        if any {
             self.refresh();
         }
         window

@@ -425,7 +425,7 @@ pub fn boxes(page: &Page, paint: [u8; 3], demo: bool, open: Option<(Ctl, usize)>
         }
         s.cells.push(Cell { style: 1, on: open.map(|o| o.0) == Some(Ctl::Paint), id: id(Ctl::Paint), ..cell(kind::COLOR_DOT, x, y, 28.0, 28.0) });
         s.y = y + 28.0;
-        s.group("Fill an area");
+        s.group("Fill a zone");
         let chips: Vec<(usize, &str, bool)> = ZONES.iter().enumerate().map(|(i, (_, n))| (i, *n, false)).collect();
         s.chips(Ctl::Fill, &chips, false, None);
         s.gap(10.0);
@@ -526,18 +526,18 @@ pub fn boxes(page: &Page, paint: [u8; 3], demo: bool, open: Option<(Ctl, usize)>
     p.y = 46.0;
     let zone = e["zone"].as_u64().unwrap_or(0x80);
     let whole = zone & 0x80 != 0;
-    p.switch(Ctl::WhereMode, &[("Whole keyboard", ""), ("Some areas", "")], if whole { 0 } else { 1 });
+    p.switch(Ctl::WhereMode, &[("Whole keyboard", ""), ("Some zones", "")], if whole { 0 } else { 1 });
     p.gap(14.0);
     let picks = if whole { 0 } else { zone & ALL_AREAS };
     let chips: Vec<(usize, &str, bool)> = ZONES.iter().enumerate().skip(1).map(|(i, (bit, name))| (i, *name, picks & bit != 0)).collect();
     p.chips(Ctl::Zone, &chips, whole, hot_area);
     p.gap(8.0);
     p.note(if whole {
-        "Every key lights. Pick an area to light only that."
+        "Every key lights. Pick a zone to light only that."
     } else if picks != 0 {
-        "Pick areas here or on the keyboard."
+        "Pick zones here or on the keyboard."
     } else {
-        "Nothing lights until you pick an area."
+        "Nothing lights until you pick a zone."
     });
     p.y = p.y.max(182.0) + 14.0;
     p.cells.push(Cell { color: slint::Color::from_rgb_u8(0x2b, 0x2b, 0x30), ..cell(kind::BOX, 16.0, p.y, p.inner(), 1.0) });
