@@ -2728,6 +2728,59 @@ component KeyDetail inherits PageBox {
 }
 
 // A slider chosen in the Key library: where it sits now, and what it controls.
+// a button on the device's bar: a glyph (a path, or a picture) and its name
+component BarButton inherits Rectangle {
+    in property <string> text;
+    in property <string> commands;
+    in property <image> icon;
+    callback clicked;
+    width: row.preferred-width;
+    Rectangle {
+        x: 0;
+        y: (parent.height - 30px) / 2;
+        width: row.preferred-width;
+        height: 30px;
+        border-radius: 8px;
+        background: ta.has-hover ? Ink.shade2 : Ink.shade1;
+        row := HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 12px;
+            spacing: 7px;
+            alignment: center;
+            if root.commands != "": Path {
+                width: 14px;
+                height: 14px;
+                y: (30px - 14px) / 2;
+                viewbox-width: 16;
+                viewbox-height: 16;
+                commands: root.commands;
+                fill: transparent;
+                stroke: Ink.ink;
+                stroke-width: 1.14px;
+            }
+            if root.commands == "": Image {
+                width: 14px;
+                height: 14px;
+                y: (30px - 14px) / 2;
+                source: root.icon;
+                colorize: Ink.ink;
+            }
+            Text {
+                text: root.text;
+                font-family: "Geist";
+                font-size: 13px;
+                font-weight: 500;
+                color: Ink.ink;
+                vertical-alignment: center;
+            }
+        }
+        ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.clicked(); }
+        }
+    }
+}
+
 component SliderDetail inherits PageBox {
     in property <string> side;
     in property <float> at;
@@ -2993,6 +3046,8 @@ export component AppWindow inherits Window {
     in property <image> settings-glyph;
     // the Key lab's flask, and whether its window is open
     in property <image> lab-glyph;
+    // (drawn small, for its button on the device's bar)
+    in property <image> lab-glyph-small;
     in property <bool> lab-open;
     in property <int> tab: 0;
     in-out property <string> place: "home";
@@ -3770,45 +3825,19 @@ export component AppWindow inherits Window {
                             clicked => { root.undo(false); }
                         }
                     }
-                    // the Macro Editor, at the bar's end
-                    Rectangle {
-                        width: tact-row.preferred-width;
-                        Rectangle {
-                            x: 0;
-                            y: (parent.height - 30px) / 2;
-                            width: tact-row.preferred-width;
-                            height: 30px;
-                            border-radius: 8px;
-                            background: tact.has-hover ? Ink.shade2 : Ink.shade1;
-                            tact-row := HorizontalLayout {
-                                padding-left: 12px;
-                                padding-right: 12px;
-                                spacing: 7px;
-                                alignment: center;
-                                Path {
-                                    width: 14px;
-                                    height: 14px;
-                                    y: (30px - 14px) / 2;
-                                    viewbox-width: 16;
-                                    viewbox-height: 16;
-                                    commands: "M3.1 4h9.8a1.6 1.6 0 0 1 1.6 1.6v5.3a1.6 1.6 0 0 1-1.6 1.6H3.1a1.6 1.6 0 0 1-1.6-1.6V5.6a1.6 1.6 0 0 1 1.6-1.6zM4 7h1M7 7h1M10 7h2M4.5 9.8h7";
-                                    fill: transparent;
-                                    stroke: Ink.ink;
-                                    stroke-width: 1.14px;
-                                }
-                                Text {
-                                    text: "Macro Editor";
-                                    font-family: "Geist";
-                                    font-size: 13px;
-                                    font-weight: 500;
-                                    color: Ink.ink;
-                                    vertical-alignment: center;
-                                }
-                            }
-                            tact := TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => { root.macro-editor(-1); }
-                            }
+                    // the Key lab and the Macro Editor, at the bar's end
+                    HorizontalLayout {
+                        horizontal-stretch: 0;
+                        spacing: 8px;
+                        BarButton {
+                            icon: root.lab-glyph-small;
+                            text: "Key lab";
+                            clicked => { root.rail("lab"); }
+                        }
+                        BarButton {
+                            commands: "M3.1 4h9.8a1.6 1.6 0 0 1 1.6 1.6v5.3a1.6 1.6 0 0 1-1.6 1.6H3.1a1.6 1.6 0 0 1-1.6-1.6V5.6a1.6 1.6 0 0 1 1.6-1.6zM4 7h1M7 7h1M10 7h2M4.5 9.8h7";
+                            text: "Macro Editor";
+                            clicked => { root.macro-editor(-1); }
                         }
                     }
                 }
@@ -3927,18 +3956,6 @@ export component AppWindow inherits Window {
             open: root.rail-open;
             reveal: root.reveal;
             clicked => { root.rail("z10"); }
-        }
-        // the Key lab, which opens in a window of its own, over Settings
-        r-lab := RailItem {
-            x: 10px;
-            y: parent.height - 10px - 40px - 4px - 40px;
-            width: rail-w - 20px;
-            glyph: root.lab-glyph;
-            name: "Key lab";
-            on: root.lab-open;
-            open: root.rail-open;
-            reveal: root.reveal;
-            clicked => { root.rail("lab"); }
         }
         r-settings := RailItem {
             x: 10px;
