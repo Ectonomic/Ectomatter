@@ -3847,7 +3847,7 @@ component MacroRow inherits Rectangle {
     callback menu(length, length);
     height: 53px;
     border-radius: 10px;
-    background: root.m.current ? (ta.has-hover ? Ink.pick-hover : Ink.pick) : ta.has-hover ? Ink.hover-box : transparent;
+    background: root.m.current ? Ink.shade2 : ta.has-hover ? Ink.shade1 : transparent;
     MacroIcon {
         x: 11.5px;
         y: 19px;
@@ -3971,7 +3971,7 @@ component ChainPiece inherits Rectangle {
             y: 1px;
             width: 3px;
             height: parent.height - 2px;
-            background: Ink.soft;
+            background: #a3a3a3;
         }
         ev := TouchArea {
             mouse-cursor: pointer;
@@ -4024,7 +4024,7 @@ component ChainPiece inherits Rectangle {
     // a wait being typed
     if root.c.kind == 20: Rectangle {
         border-radius: 8px;
-        background: Ink.well;
+        background: #333333;
         MacroIcon {
             x: 8px;
             y: (parent.height - 12px) / 2;
@@ -4091,7 +4091,7 @@ component ChainPiece inherits Rectangle {
             width: 6px;
             height: 6px;
             border-radius: 3px;
-            background: Ink.quiet;
+            background: #5c5c5c;
         }
         if root.c.on: Rectangle {
             x: 0;
@@ -4105,7 +4105,7 @@ component ChainPiece inherits Rectangle {
                 font-family: "Geist";
                 font-size: 14px;
                 font-weight: 600;
-                color: #131316;
+                color: #171717;
             }
         }
         cn := TouchArea {
@@ -4117,7 +4117,7 @@ component ChainPiece inherits Rectangle {
     // where new steps go
     if root.c.kind == 18: Rectangle {
         border-radius: 1px;
-        background: #4a4a52;
+        background: #525252;
         opacity: root.c.on ? 1 : 0.25;
         TouchArea {
             x: -4px;
@@ -4246,7 +4246,7 @@ export component MacroWindow inherits Window {
     Rectangle {
         y: 0;
         height: 36px;
-        background: Ink.title;
+        background: #262626;
         border-top-left-radius: root.radius;
         border-top-right-radius: root.radius;
         TouchArea {
@@ -4271,7 +4271,7 @@ export component MacroWindow inherits Window {
             font-weight: 600;
             font-size: 13.5px;
             letter-spacing: -0.54px;
-            color: Ink.ink;
+            color: #f5f5f5;
             vertical-alignment: center;
         }
         HorizontalLayout {
@@ -4281,7 +4281,7 @@ export component MacroWindow inherits Window {
             height: 36px;
             spacing: 6px;
             Text { text: "EVGA Z10 RGB"; font-size: 13px; color: Ink.dim; vertical-alignment: center; }
-            Text { text: "/"; font-size: 13px; color: Ink.quiet; vertical-alignment: center; }
+            Text { text: "/"; font-size: 13px; color: #525252; vertical-alignment: center; }
             Text { text: "Macro Editor"; font-size: 13px; color: Ink.dim; vertical-alignment: center; }
         }
         HorizontalLayout {
@@ -4310,8 +4310,7 @@ export component MacroWindow inherits Window {
         y: 36px;
         width: 290px;
         height: root.height - 36px;
-        // (the boxes' own shade)
-        background: Ink.box;
+        background: #1c1c1c;
         border-bottom-left-radius: root.radius;
         HorizontalLayout {
             x: 18px;
@@ -4320,7 +4319,7 @@ export component MacroWindow inherits Window {
             height: 56px;
             spacing: 8px;
             Text { text: "All macros"; font-size: 13px; font-weight: 500; color: Ink.soft; vertical-alignment: center; }
-            Text { text: root.slots-text; font-size: 12px; color: Ink.quiet; vertical-alignment: center; }
+            Text { text: root.slots-text; font-size: 12px; color: #737373; vertical-alignment: center; }
             Rectangle { horizontal-stretch: 1; }
             TextButton {
                 y: 14px;
@@ -4353,7 +4352,7 @@ export component MacroWindow inherits Window {
             content: root.items.length * 55px;
             offset: -root.lib-scroll;
             framed: false;
-            thumb-color: #4a4a52;
+            thumb-color: #525252;
             scroll-to(o) => { root.lib-scroll = -o; }
         }
     }
@@ -4564,7 +4563,7 @@ export component MacroWindow inherits Window {
                 content: chain-flick.content-height;
                 offset: -chain-flick.content-y;
                 framed: false;
-                thumb-color: #4a4a52;
+                thumb-color: #525252;
                 scroll-to(o) => { chain-flick.content-y = -o; }
             }
             // the tools
@@ -4617,7 +4616,7 @@ export component MacroWindow inherits Window {
                 Rectangle {
                     width: rec-row.preferred-width;
                     border-radius: 8px;
-                    background: root.recording ? #e23b3b33 : rec-ta.has-hover && root.can-record ? Ink.pick : Ink.hover-box;
+                    background: root.recording ? #e23b3b33 : rec-ta.has-hover && root.can-record ? #3d3d3d : #333333;
                     opacity: root.recording || root.can-record ? 1 : 0.35;
                     rec-row := HorizontalLayout {
                         padding-left: 10px;
@@ -4789,9 +4788,9 @@ export component MacroWindow inherits Window {
             width: min(440px, parent.width - 32px);
             height: dlg.preferred-height + 40px;
             border-radius: 12px;
-            background: Ink.pop;
+            background: Ink.shade2;
             border-width: 1px;
-            border-color: #3a3a41;
+            border-color: Ink.line;
             drop-shadow-blur: 60px;
             drop-shadow-offset-y: 24px;
             drop-shadow-color: #000000cc;
@@ -4814,8 +4813,8 @@ export component MacroWindow inherits Window {
                         width: del.preferred-width + 28px;
                         height: 30px;
                         border-radius: 7px;
-                        background: del-ta.has-hover ? #74302a : #5c2420;
-                        del := Text { text: "Delete macro"; font-size: 13px; font-weight: 600; color: #ffd6d2; }
+                        background: del-ta.has-hover ? #e25f5b : #d9534f;
+                        del := Text { text: "Delete macro"; font-size: 13px; font-weight: 600; color: #ffffff; }
                         del-ta := TouchArea {
                             mouse-cursor: pointer;
                             clicked => { root.confirm-yes(); }
