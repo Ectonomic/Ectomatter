@@ -4010,9 +4010,12 @@ export component AppWindow inherits Window {
                                 background: p.on ? #f0b35a1a : drag.has-hover ? #ffffff0d : transparent;
                                 drag := TouchArea {
                                     mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.pointer;
+                                    // the pointer measured from where it was pressed on the screen:
+                                    // the outline moves with the drag, so how far it has moved
+                                    // already is added back, or the piece snaps to and fro
                                     moved => {
-                                        parent.dc = round((self.mouse-x - self.pressed-x) / cw);
-                                        parent.dr = round((self.mouse-y - self.pressed-y) / ch);
+                                        parent.dc = round((self.mouse-x - self.pressed-x + (parent.at-col - p.col) * cw) / cw);
+                                        parent.dr = round((self.mouse-y - self.pressed-y + (parent.at-row - p.row) * ch) / ch);
                                     }
                                     pointer-event(e) => {
                                         if (e.kind == PointerEventKind.down) {

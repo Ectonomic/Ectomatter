@@ -57,14 +57,12 @@ pub enum Ctl {
     /// when the effect plays: one of PLAYS, a start and a stop together
     Plays,
     /// the screen's page editor: a piece's words, its reading (the menu),
-    /// °C or °F, a 24- or 12-hour clock, its row, column and width (0 less,
-    /// 1 more), its alignment, taking it off; the page's screen light
+    /// °C or °F, a 24- or 12-hour clock, its width (0 less, 1 more), its
+    /// alignment, taking it off (it moves by dragging); the page's screen light
     ScrText,
     ScrSource,
     ScrUnits,
     ScrHours,
-    ScrRow,
-    ScrCol,
     ScrWidth,
     ScrAlign,
     ScrRemove,
@@ -74,7 +72,7 @@ pub enum Ctl {
     ScrComes,
 }
 
-const CTLS: [Ctl; 47] = [
+const CTLS: [Ctl; 45] = [
     Ctl::None,
     Ctl::Color,
     Ctl::Colors,
@@ -114,8 +112,6 @@ const CTLS: [Ctl; 47] = [
     Ctl::ScrSource,
     Ctl::ScrUnits,
     Ctl::ScrHours,
-    Ctl::ScrRow,
-    Ctl::ScrCol,
     Ctl::ScrWidth,
     Ctl::ScrAlign,
     Ctl::ScrRemove,

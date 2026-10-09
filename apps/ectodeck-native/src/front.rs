@@ -1498,7 +1498,7 @@ impl Front {
                 self.open_light_menu(c, _anchor);
                 return;
             }
-            Ctl::ScrUnits | Ctl::ScrHours | Ctl::ScrRow | Ctl::ScrCol | Ctl::ScrWidth | Ctl::ScrAlign | Ctl::ScrRemove | Ctl::ScrLight | Ctl::ScrSecs | Ctl::ScrComes => {
+            Ctl::ScrUnits | Ctl::ScrHours | Ctl::ScrWidth | Ctl::ScrAlign | Ctl::ScrRemove | Ctl::ScrLight | Ctl::ScrSecs | Ctl::ScrComes => {
                 if let Some(ed) = &mut self.editor {
                     if let Some(p) = self.pages.get_mut(ed.page) {
                         crate::screen_edit::act(p, ed, c, index, None);

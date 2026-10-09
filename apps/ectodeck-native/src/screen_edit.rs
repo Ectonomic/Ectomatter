@@ -3,7 +3,7 @@
 //! controls does to the page, and a new piece's first place.
 
 use crate::lcd_page::{Kind, Page, Piece, Readings, Source, Transition, COLS, ROWS, SECS, TRANSITIONS};
-use crate::lighting::{cell, id, kind, style, text_cell, Ctl, Stack};
+use crate::lighting::{cell, id, kind, Ctl, Stack};
 use crate::Cell;
 
 /// Every box is this wide, as the When-closed box is.
@@ -111,22 +111,15 @@ pub fn boxes(page: &Page, chosen: Option<usize>, r: &Readings, avail: &[Source],
     // where it sits
     let mut s = Stack::new(BOX_W);
     match piece {
-        None => s.note("Where the selected piece sits on the screen’s 20 columns and 4 rows."),
+        None => s.note("Drag a piece on the screen to move the piece. Select a piece to change the width and alignment."),
         Some(p) => {
-            s.head("Row", None);
-            s.switch(Ctl::ScrRow, &[("1", ""), ("2", ""), ("3", ""), ("4", "")], p.row as usize);
-            s.gap(16.0);
-            let half = s.inner() / 2.0;
-            s.cells.push(text_cell(style::PROP, 16.0, s.y, half, 20.0, "Column"));
-            s.cells.push(text_cell(style::PROP, 16.0 + half + 8.0, s.y, half, 20.0, "Width"));
-            s.y += 28.0;
-            stepper(&mut s, Ctl::ScrCol, 16.0, &(p.col + 1).to_string());
-            stepper(&mut s, Ctl::ScrWidth, 16.0 + half + 8.0, &p.width.to_string());
+            s.note("Drag on the screen to move the piece.");
+            s.gap(4.0);
+            s.head("Width", None);
+            stepper(&mut s, Ctl::ScrWidth, 16.0, &p.width.to_string());
             s.y += 30.0 + 16.0;
             s.head("Align", None);
             s.switch(Ctl::ScrAlign, &[("Left", ""), ("Center", ""), ("Right", "")], if p.center { 1 } else if p.right { 2 } else { 0 });
-            s.gap(12.0);
-            s.note("Or drag the piece on the screen.");
         }
     }
     let place_h = s.height();
@@ -225,8 +218,6 @@ pub fn act(page: &mut Page, ed: &mut Editor, c: Ctl, index: usize, words: Option
             }
         }
         Ctl::ScrHours => p.kind = Kind::Clock(index == 1),
-        Ctl::ScrRow => p.row = (index as u8).min(ROWS - 1),
-        Ctl::ScrCol => p.col = if index == 0 { p.col.saturating_sub(1) } else { (p.col + 1).min(COLS - 1) },
         Ctl::ScrWidth => p.width = if index == 0 { p.width.saturating_sub(1).max(1) } else { (p.width + 1).min(COLS) },
         Ctl::ScrAlign => {
             p.center = index == 1;
@@ -295,14 +286,12 @@ mod tests {
         let mut ed = Editor { page: 0, chosen: Some(1), grid: true };
         act(&mut p, &mut ed, Ctl::ScrUnits, 1, None);
         assert_eq!(p.pieces[1].kind, Kind::Data(Source::CpuTemp, true));
-        act(&mut p, &mut ed, Ctl::ScrCol, 1, None);
         act(&mut p, &mut ed, Ctl::ScrWidth, 0, None);
-        act(&mut p, &mut ed, Ctl::ScrRow, 3, None);
         act(&mut p, &mut ed, Ctl::ScrAlign, 1, None);
         assert!(p.pieces[1].center && !p.pieces[1].right);
         act(&mut p, &mut ed, Ctl::ScrAlign, 0, None);
         let q = &p.pieces[1];
-        assert_eq!((q.row, q.col, q.width, q.right, q.center), (3, 5, 2, false, false));
+        assert_eq!((q.row, q.col, q.width, q.right, q.center), (0, 4, 2, false, false));
         set_source(&mut p, &ed, Source::GpuLoad);
         assert_eq!(p.pieces[1].kind, Kind::Data(Source::GpuLoad, false), "°F goes with a reading that isn't a temperature");
         move_to(&mut p, 1, 9, 25);
