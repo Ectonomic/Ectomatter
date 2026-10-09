@@ -324,6 +324,8 @@ pub struct Front {
     /// sliders last read and last set
     bind: [String; 2],
     bind_menu: Option<(usize, (f32, f32, f32))>,
+    /// a slider set to Nothing because the other took its job: the job it had
+    idled: [Option<String>; 2],
     last_sliders: Option<serde_json::Value>,
     held: Option<u8>,
     sent: [Option<f64>; 2],
@@ -488,6 +490,7 @@ impl Front {
             overlay_model: Rc::new(VecModel::default()),
             bind: crate::uistate::get("slider_bind").and_then(|v| serde_json::from_value(v).ok()).unwrap_or(["own".into(), "own".into()]),
             bind_menu: None,
+            idled: crate::uistate::get("slider_idled").and_then(|v| serde_json::from_value(v).ok()).unwrap_or([None, None]),
             last_sliders: None,
             held: None,
             sent: [None, None],
@@ -2094,7 +2097,12 @@ impl Front {
                 show_rows(ui.get_slider_choices(), |m| ui.set_slider_choices(m), choices);
                 // what the firmware can't do yet, said where it matters
                 let fw = self.firmware();
-                let note = if s == 1 && self.bind[1] != "own" && !crate::display::has(&fw, "volume.quiet") {
+                let resting = self.idled[s].as_ref().filter(|_| self.bind[s] == "none").and_then(|job| crate::display::BIND_CHOICES[s].iter().find(|(v, _)| v == job)).map(|(_, l)| *l);
+                let other = if s == 0 { "volume slider" } else { "dimmer" };
+                let rest_note = resting.map(|l| format!("Set to Nothing while the {other} does {}. It goes back to {} when the {other} does something else.", l.to_lowercase(), l.to_lowercase()));
+                let note = if let Some(n) = &rest_note {
+                    n.as_str()
+                } else if s == 1 && self.bind[1] != "own" && !crate::display::has(&fw, "volume.quiet") {
                     "The keyboard still sends volume keys from this slider as well. Its firmware can be told not to, from build 3."
                 } else if s == 0 && self.bind[0] != "own" {
                     if crate::display::has(&fw, "dimmer.keep") {
@@ -2312,9 +2320,18 @@ impl Front {
         let other = 1 - i;
         self.bind[i] = v.into();
         if v != "none" && crate::display::drives(other, &self.bind[other]) == crate::display::drives(i, v) {
-            self.bind[other] = "none".into();
+            // the other slider did this job: it rests, and remembers the job
+            self.idled[other] = Some(std::mem::replace(&mut self.bind[other], "none".into()));
+        } else if let Some(job) = self.idled[other].take() {
+            // this slider has given up the other's job: the other has it back
+            if self.bind[other] == "none" && crate::display::drives(other, &job) != crate::display::drives(i, v) {
+                self.bind[other] = job;
+            }
         }
+        // (a slider given a job of its own forgets the one it rested from)
+        self.idled[i] = None;
         crate::uistate::set("slider_bind", serde_json::json!(self.bind));
+        crate::uistate::set("slider_idled", serde_json::json!(self.idled));
         self.hold_backlight();
         self.sent = [None, None];
         self.tell_modes();
