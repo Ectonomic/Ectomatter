@@ -27,16 +27,16 @@ use ectodeck_draw::hdr::KeyGeometry;
 use crate::text;
 
 // the lab's own colours
-const PLOT: &str = "#1b1b1b";
-const TILE: &str = "#262626";
+const PLOT: &str = "#131316";
+const TILE: &str = "#1f1f23";
 const AMBER: &str = "#f0b35a";
 const WHITE: &str = "#f5f5f5";
 /// a slider's line, and the dot it ends on
-const LEAD: &str = "#737373";
-const DOT: &str = "#d4d4d4";
+const LEAD: &str = "#74747c";
+const DOT: &str = "#d4d4d8";
 /// a measurement: lighter, with ticks at its ends, over a dark casing so it reads over the light
-const DIMENSION: &str = "#b4b4b4";
-const CASING: &str = "#141414";
+const DIMENSION: &str = "#b0b0b8";
+const CASING: &str = "#131316";
 
 /// the plate under the deck, in millimetres
 const PLATE: f64 = 1.5;
@@ -624,8 +624,8 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
     let pp = move |pts: &[Pt]| pts.iter().map(|&(x, z)| p(x, z)).collect::<Vec<Pt>>();
     let grow = (k / 14.0).min(1.5);
     let on = |part: Lens| part == lens;
-    let line = |part: Lens| if on(part) { "#b0b0b0" } else { "#454545" };
-    let fill = |part: Lens| if on(part) { "#3a3a3a" } else { "#262626" };
+    let line = |part: Lens| if on(part) { "#acacb4" } else { "#45454d" };
+    let fill = |part: Lens| if on(part) { "#3a3a41" } else { "#24242a" };
     let glow = if !v.lit { 0.0 } else if on(Lens::Led) { 1.0 } else { 0.55 };
     let white = |name: &str| hot.is_some_and(|i| PARAMS[i].label == name);
     let frame = (px(x_lo).round(), pz(z_hi).round(), px(x_hi).round(), pz(z_lo).round());
@@ -637,7 +637,7 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
         // a button has no switch to draw
     } else if v.slot {
         // the housing, black, and the LED's slot at its top, glowing round the LED
-        s.path(&poly(&pp(&housing_box), true), "#141414", if on(Lens::Led) { "#6a6a6a" } else { "#3a3a3a" }, 1.0, 1.0);
+        s.path(&poly(&pp(&housing_box), true), "#131316", if on(Lens::Led) { "#6a6a74" } else { "#3a3a41" }, 1.0, 1.0);
         let (wx0, wx1, wz) = (sl.led - 1.3, sl.led + 1.3, (hz - 1.1).max(hz * 0.6));
         let window = s.linear(0.0, pz(hz), 0.0, pz(wz), &[(0.0, AMBER, 0.55 * glow), (1.0, AMBER, 0.12 * glow)]);
         s.path(&poly(&pp(&clip(&[(wx0, wz), (wx0, hz), (wx1, hz), (wx1, wz)], x_lo, x_hi)), true), &window, "none", 1.0, 1.0);
@@ -690,7 +690,7 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
     if on(Lens::Led) {
         s.path(&poly(&[p(a0, tz), p(a1, tz), p(a1, under), p(a0, under)], true), fill(Lens::Caps), line(Lens::Caps), 1.0, 1.0);
         for x in [a0, a1] {
-            let g = s.linear(0.0, pz(under), 0.0, pz(under) + 34.0, &[(0.0, "#454545", 0.8), (1.0, "#454545", 0.0)]);
+            let g = s.linear(0.0, pz(under), 0.0, pz(under) + 34.0, &[(0.0, "#45454d", 0.8), (1.0, "#45454d", 0.0)]);
             s.path(&poly(&[p(x, under), (px(x), pz(under) + 34.0)], false), "none", &g, 1.0, 1.0);
         }
     } else {
@@ -699,7 +699,7 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
             let shape = clip(&sl.cap(f0, f1), x_lo, x_hi);
             if !shape.is_empty() {
                 let own = if f0 == sl.foot0 && v.caps == Caps::ShineThrough { side_paint.clone() } else { None };
-                s.path(&poly(&pp(&shape), true), own.as_deref().unwrap_or(fill(Lens::Caps)), if f0 == sl.foot0 { line(Lens::Caps) } else { "#3a3a3a" }, 1.0, 1.0);
+                s.path(&poly(&pp(&shape), true), own.as_deref().unwrap_or(fill(Lens::Caps)), if f0 == sl.foot0 { line(Lens::Caps) } else { "#3a3a41" }, 1.0, 1.0);
             }
         }
         if let (Some(top), false) = (&top_paint, v.caps == Caps::Translucent) {
@@ -761,8 +761,8 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
             let tall = 74.0f64.min(pz(tz) - pz(z_hi) - 40.0);
             let pts: Vec<Pt> = face.iter().zip(&light).map(|(&x, &l)| (px(x), base - tall * l / most)).collect();
             let (x0, x1) = (pts[0].0, pts[pts.len() - 1].0);
-            s.stroke(&format!("M{x0:.1} {:.1} L{x1:.1} {:.1}", base - tall, base - tall), if white("LED output") { WHITE } else { "#333333" }, 1.0);
-            s.stroke(&format!("M{x0:.1} {base:.1} L{x1:.1} {base:.1}"), "#3a3a3a", 1.0);
+            s.stroke(&format!("M{x0:.1} {:.1} L{x1:.1} {:.1}", base - tall, base - tall), if white("LED output") { WHITE } else { "#2f2f36" }, 1.0);
+            s.stroke(&format!("M{x0:.1} {base:.1} L{x1:.1} {base:.1}"), "#3a3a41", 1.0);
             let mut area = poly(&pts, false);
             let _ = write!(area, " L{x1:.1} {base:.1} L{x0:.1} {base:.1} Z");
             s.path(&area, AMBER, "none", 1.0, 0.1);
@@ -781,7 +781,7 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
             }
             labels.push(Label { drop: true, ..Label::new(false, (x1, base - tall), "LED output") });
             // the switch's centre line, and the LED north of it
-            s.stroke(&poly(&[p(sl.centre, 0.15), p(sl.centre, hz + 0.6)], false), "#5c5c5c", 1.0);
+            s.stroke(&poly(&[p(sl.centre, 0.15), p(sl.centre, hz + 0.6)], false), "#5c5c66", 1.0);
             let y_nc = if hz > 2.6 { hz - 0.6 } else { hz + 0.7 };
             marks.push(Mark::Across { x0: px(sl.led), x1: px(sl.centre), y: pz(y_nc), i: slider("North of center") });
             labels.push(Label::new(true, p(sl.led, hz), "North of center"));
@@ -1015,7 +1015,7 @@ fn display(v: &Values, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, Vec<Label>
     s.fill(&poly(&[(bx0 + lean, gy0), (bx1 + lean, gy0), (bx1, gy0 + fh), (bx0, gy0 + fh)], true), &g);
     // one cell outlined, and its dot's width across under the dots
     let (cx0, cy0) = (x0 + cell * 9.0, y0 + cell * 6.0);
-    s.stroke(&poly(&[(cx0, cy0), (cx0 + cell, cy0), (cx0 + cell, cy0 + cell), (cx0, cy0 + cell)], true), "#d0d0d0", 1.0);
+    s.stroke(&poly(&[(cx0, cy0), (cx0 + cell, cy0), (cx0 + cell, cy0 + cell), (cx0, cy0 + cell)], true), "#d0d0d6", 1.0);
     let yy = y0 + cell * rows + cell * 0.45;
     let c = if hot == Some(slider("Dot size")) { WHITE } else { DIMENSION };
     s.mark(&poly(&[(cx0, yy), (cx0 + dot, yy)], false), c);
@@ -1291,10 +1291,10 @@ fn cap_from_above(s: &mut Svg, key: &Printed, x: f64, y: f64, k: f64, big: bool)
     let r = (1.6 * k).min(10.0);
     // (in its own colours, the sides a shade darker than they are, as they face the room's light less)
     let hex = |c: [u8; 3]| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
-    let (sides, top) = key.colours.map_or(("#262626".to_string(), "#2b2b2b".to_string()), |[t, s]| (mix(&hex(s), "#000000", 0.25), hex(t)));
-    s.path(&rounded(x, y, x + w, y + d, r), &sides, if big { "#5c5c5c" } else { "#454545" }, 1.0, 1.0);
+    let (sides, top) = key.colours.map_or(("#24242a".to_string(), "#2a2a30".to_string()), |[t, s]| (mix(&hex(s), "#000000", 0.25), hex(t)));
+    s.path(&rounded(x, y, x + w, y + d, r), &sides, if big { "#5c5c66" } else { "#45454d" }, 1.0, 1.0);
     let [a0, b0, a1, b1] = key.face;
-    s.path(&rounded(x + a0 * k, y + b0 * k, x + a1 * k, y + b1 * k, (r - 2.0).max(1.0)), &top, "#3a3a3a", 1.0, 1.0);
+    s.path(&rounded(x + a0 * k, y + b0 * k, x + a1 * k, y + b1 * k, (r - 2.0).max(1.0)), &top, "#3a3a41", 1.0, 1.0);
 }
 
 /// The legends' drawing, `pw` by `ph`: the key it is of from above, large,
@@ -1332,7 +1332,7 @@ fn legends(set: &Legends, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, Vec<Lab
         for yy in [top, base] {
             s.mark(&poly(&[(sx - 5.0, yy), (sx + 5.0, yy)], false), c);
         }
-        let _ = write!(s.marks, r##"<path d="M{face_right:.1} {top:.1} H{sx:.1} M{face_right:.1} {base:.1} H{sx:.1}" stroke="#5a5a5a" stroke-width="1" stroke-dasharray="2 3"/>"##);
+        let _ = write!(s.marks, r##"<path d="M{face_right:.1} {top:.1} H{sx:.1} M{face_right:.1} {base:.1} H{sx:.1}" stroke="#5a5a64" stroke-width="1" stroke-dasharray="2 3"/>"##);
         labels.push(Label::new(false, (sx, (top + base) / 2.0), name));
     }
     // Left–right and Up–down: where the legend (or the chosen part) is, its
@@ -1350,8 +1350,8 @@ fn legends(set: &Legends, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, Vec<Lab
         let c = if white(&across) || white(&down) { WHITE } else { DIMENSION };
         if (ox - cx).abs() + (oy - cy).abs() > 0.5 {
             let _ = write!(s.marks, r#"<path d="M{ox:.1} {oy:.1} L{cx:.1} {cy:.1}" stroke="{DIMENSION}" stroke-width="1" stroke-dasharray="3 3"/>"#);
-            s.mark(&poly(&[(ox - 5.0, oy), (ox + 5.0, oy)], false), "#6f6f6f");
-            s.mark(&poly(&[(ox, oy - 5.0), (ox, oy + 5.0)], false), "#6f6f6f");
+            s.mark(&poly(&[(ox - 5.0, oy), (ox + 5.0, oy)], false), "#6f6f79");
+            s.mark(&poly(&[(ox, oy - 5.0), (ox, oy + 5.0)], false), "#6f6f79");
         }
         // (the sliders' lines meet just right of the legend, clear of its ink)
         let at = (r as f64 + 6.0, cy);
@@ -1389,12 +1389,12 @@ pub fn face_list(core: &(String, u16), others: &[(String, Vec<u16>)], added: &[S
     let (wf, hf) = (w as f64, h as f64);
     let mut svg = String::new();
     let _ = write!(svg, r#"<svg xmlns="http://www.w3.org/2000/svg" width="{wf}" height="{hf}" viewBox="0 0 {wf} {hf}">"#);
-    let _ = write!(svg, r##"<path d="{}" fill="#2c2c2c" stroke="#3a3a3a" stroke-width="1"/>"##, rounded(0.5, 0.5, wf - 0.5, hf - 0.5, 12.0));
+    let _ = write!(svg, r##"<path d="{}" fill="#2a2a30" stroke="#3a3a41" stroke-width="1"/>"##, rounded(0.5, 0.5, wf - 0.5, hf - 0.5, 12.0));
     let row = |svg: &mut String, y: f64, family: &str, weight: u16, on: bool| {
         if on {
-            let _ = write!(svg, r##"<path d="{}" fill="#3a3a3a"/>"##, rounded(8.0, y, wf - 8.0, y + 34.0, 7.0));
+            let _ = write!(svg, r##"<path d="{}" fill="#3a3a41"/>"##, rounded(8.0, y, wf - 8.0, y + 34.0, 7.0));
         }
-        let _ = write!(svg, r##"<text x="20" y="{:.1}" font-family="'{}'" font-weight="{weight}" font-size="15" fill="{}">{}</text>"##, y + 22.5, xml(family), if on { "#ffffff" } else { "#d4d4d4" }, xml(family));
+        let _ = write!(svg, r##"<text x="20" y="{:.1}" font-family="'{}'" font-weight="{weight}" font-size="15" fill="{}">{}</text>"##, y + 22.5, xml(family), if on { "#ffffff" } else { "#d4d4d8" }, xml(family));
         let _ = write!(svg, r##"<text x="{:.1}" y="{:.1}" font-family="'{}'" font-weight="{weight}" font-size="13" fill="{AMBER}" text-anchor="end" opacity="0.9">ESC  Q  2 @  ENTER</text>"##, wf - 20.0, y + 22.0, xml(family));
     };
     // (the box to find one by name above them, the page's own)
@@ -1456,18 +1456,18 @@ pub fn from_above(v: &Values, size: (f64, f64), w: f32, h: f32, hot: bool) -> (S
     let _ = write!(svg, r#"<path d="{}" fill="{PLOT}"/>"#, rounded(0.0, 0.0, wf, hf, 8.0));
     // the cap: its foot, and its face inside it
     let r = (1.6 * k).min(6.0);
-    let _ = write!(svg, r##"<path d="{}" fill="#262626" stroke="#5c5c5c" stroke-width="1"/>"##, rounded(x0, y0, x1, y1, r));
+    let _ = write!(svg, r##"<path d="{}" fill="#24242a" stroke="#5c5c66" stroke-width="1"/>"##, rounded(x0, y0, x1, y1, r));
     let i = v.g.inset * k;
-    let _ = write!(svg, r##"<path d="{}" fill="none" stroke="#3a3a3a" stroke-width="1"/>"##, rounded(x0 + i, y0 + i, x1 - i, y1 - i, (r - 1.0).max(1.0)));
+    let _ = write!(svg, r##"<path d="{}" fill="none" stroke="#3a3a41" stroke-width="1"/>"##, rounded(x0 + i, y0 + i, x1 - i, y1 - i, (r - 1.0).max(1.0)));
     // its middle
-    let _ = write!(svg, r##"<path d="M{:.1} {cy:.1} H{:.1} M{cx:.1} {:.1} V{:.1}" stroke="#6f6f6f" stroke-width="1"/>"##, cx - 5.0, cx + 5.0, cy - 5.0, cy + 5.0);
+    let _ = write!(svg, r##"<path d="M{:.1} {cy:.1} H{:.1} M{cx:.1} {:.1} V{:.1}" stroke="#6f6f79" stroke-width="1"/>"##, cx - 5.0, cx + 5.0, cy - 5.0, cy + 5.0);
     // the switch where it sits, a line to it from the middle once it has moved, and its LED
     let (sx, sy) = (cx + v.place.0 * k, cy - v.place.1 * k);
     if v.place.0.abs() + v.place.1.abs() > 0.05 {
         let _ = write!(svg, r#"<path d="M{cx:.1} {cy:.1} L{sx:.1} {sy:.1}" stroke="{DIMENSION}" stroke-width="1" stroke-dasharray="3 3"/>"#);
     }
     let half = v.switch_width / 2.0 * k;
-    let _ = write!(svg, r##"<path d="{}" fill="#1f1f1f" fill-opacity="0.9" stroke="{}" stroke-width="{}"/>"##, rounded(sx - half, sy - half, sx + half, sy + half, (1.2 * k).min(4.0)), if hot { WHITE } else { "#a3a3a3" }, if hot { 1.5 } else { 1.2 });
+    let _ = write!(svg, r##"<path d="{}" fill="#1f1f23" fill-opacity="0.9" stroke="{}" stroke-width="{}"/>"##, rounded(sx - half, sy - half, sx + half, sy + half, (1.2 * k).min(4.0)), if hot { WHITE } else { "#a1a1aa" }, if hot { 1.5 } else { 1.2 });
     let _ = write!(svg, r#"<circle cx="{sx:.1}" cy="{:.1}" r="3.2" fill="{AMBER}"/>"#, sy - v.north * k);
     svg += "</svg>";
     let words = vec![Word { x: 12.0, y: 16.0, text: "North".into(), colour: QUIET_WORD }];
@@ -1549,7 +1549,7 @@ mod tests {
         let mut moved = light.clone();
         moved["switches"]["top"] = serde_json::json!(9.5);
         let st = stage(&Values::of(&moved, Geometry::default()), Lens::Led, 1232.0, 572.0, &places, None, None);
-        let lines = st.svg.matches(r##"stroke="#737373""##).count();
+        let lines = st.svg.matches(r##"stroke="#74747c""##).count();
         assert_eq!(lines, places.len(), "a line from each slider, from where it stood");
     }
 }

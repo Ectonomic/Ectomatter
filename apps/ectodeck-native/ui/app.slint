@@ -817,7 +817,9 @@ component CellView inherits Rectangle {
             width: 18px;
             height: 18px;
             border-radius: 5px;
-            background: root.c.on ? Ink.ink : #333333;
+            background: root.c.on ? (tick-ta.has-hover ? Ink.bright : Ink.dim) : tick-ta.has-hover ? Ink.hover-box : Ink.well;
+            border-width: root.c.on ? 0 : 1px;
+            border-color: tick-ta.has-hover ? #6a6a74 : #4a4a52;
             if root.c.on: Path {
                 width: 18px;
                 height: 18px;
@@ -825,7 +827,7 @@ component CellView inherits Rectangle {
                 viewbox-height: 18;
                 commands: "M5.2 9.3 L7.9 11.9 L12.9 6.4";
                 fill: transparent;
-                stroke: #171717;
+                stroke: Ink.base;
                 stroke-width: 2px;
             }
         }
@@ -835,10 +837,10 @@ component CellView inherits Rectangle {
             text: root.c.text;
             font-family: "Geist";
             font-size: 13.5px;
-            color: Ink.dim;
+            color: tick-ta.has-hover ? Ink.bright : Ink.dim;
             vertical-alignment: center;
         }
-        TouchArea {
+        tick-ta := TouchArea {
             mouse-cursor: pointer;
             // which box, and the state it is turned to
             clicked => { root.pick(root.c.id, root.c.index * 2 + (root.c.on ? 0 : 1), 0, 0, 0); }
@@ -909,9 +911,9 @@ component CellView inherits Rectangle {
     // dimmed; 30: the row of a menu that is in use)
     if root.c.kind == 9: Rectangle {
         border-radius: root.c.style == 30 ? 7px : root.c.style == 1 ? 12px : 14px;
-        background: root.c.style == 27 ? #2c2c2c : root.c.style == 28 ? #141414b8 : root.c.style == 30 ? Ink.shade4 : Ink.shade1;
+        background: root.c.style == 27 ? Ink.pop : root.c.style == 28 ? #131316b8 : root.c.style == 30 ? Ink.shade4 : Ink.shade1;
         border-width: root.c.style == 27 ? 1px : 0;
-        border-color: #3a3a3a;
+        border-color: #3a3a41;
         drop-shadow-blur: root.c.style == 27 ? 28px : 0;
         drop-shadow-offset-y: root.c.style == 27 ? 10px : 0;
         drop-shadow-color: root.c.style == 27 ? #00000099 : transparent;
@@ -930,12 +932,12 @@ component CellView inherits Rectangle {
     // the weather's box
     if root.c.kind == 13: Rectangle {
         border-radius: 10px;
-        background: #141414;
+        background: Ink.well;
     }
     // a state's dot: 0 unknown, 1 good, 2 bad, 3 read from the weather
     if root.c.kind == 14: Rectangle {
         border-radius: 3.5px;
-        background: root.c.style == 1 ? Ink.good : root.c.style == 2 ? Ink.bad : root.c.style == 3 ? Ink.warn : #5c5c5c;
+        background: root.c.style == 1 ? Ink.good : root.c.style == 2 ? Ink.bad : root.c.style == 3 ? Ink.warn : #5c5c66;
     }
     // a line to type in: the profile's name, or the weather's place
     if root.c.kind == 10: Rectangle {
@@ -947,7 +949,7 @@ component CellView inherits Rectangle {
             text: "Find a typeface";
             font-family: "Geist";
             font-size: 13.5px;
-            color: #737373;
+            color: Ink.quiet;
             vertical-alignment: center;
         }
         if (root.c.style == 4 || root.c.style == 5) && input.text == "": Text {
@@ -956,7 +958,7 @@ component CellView inherits Rectangle {
             text: "None";
             font-family: "Geist";
             font-size: 13.5px;
-            color: #737373;
+            color: Ink.quiet;
             vertical-alignment: center;
         }
         if root.c.style == 3 && input.text == "": Text {
@@ -965,7 +967,7 @@ component CellView inherits Rectangle {
             text: "Setup name";
             font-family: "Geist";
             font-size: 13.5px;
-            color: #737373;
+            color: Ink.quiet;
             vertical-alignment: center;
         }
         if root.c.style == 1 && input.text == "": Text {
@@ -974,7 +976,7 @@ component CellView inherits Rectangle {
             text: "Search for a city or town";
             font-family: "Geist";
             font-size: 13.5px;
-            color: #737373;
+            color: Ink.quiet;
             vertical-alignment: center;
         }
         // (a key's text: what the page sets it to, unless it is being typed in)
@@ -1121,7 +1123,7 @@ component CellView inherits Rectangle {
         border-radius: 6px;
         background: Ink.well;
         border-width: 1px;
-        border-color: num.has-focus ? #5c5c5c : box-ta.has-hover ? #444444 : #333333;
+        border-color: num.has-focus ? #6a6a74 : box-ta.has-hover ? #4a4a52 : #34343a;
         box-ta := TouchArea {
             mouse-cursor: text;
             clicked => { num.focus(); }
@@ -1197,12 +1199,12 @@ component CellView inherits Rectangle {
     // faint; 29: the page round a menu, which shuts it, with no shade or hand)
     if root.c.kind >= 5 && root.c.kind <= 8: Rectangle {
         border-radius: root.c.style == 25 ? 4px : root.c.kind == 5 ? 7px : root.c.kind == 8 ? 6px : 8px;
-        background: root.c.on ? Ink.ink
+        background: root.c.on ? (b.has-hover ? Ink.pick-hover : Ink.pick)
             : root.c.style == 26 ? transparent
-            : root.c.style == 31 ? (b.has-hover ? #484848 : #363636)
-            : root.c.kind == 5 ? (b.has-hover ? Ink.shade2 : transparent)
+            : root.c.style == 31 ? (b.has-hover ? Ink.pick : Ink.hover-box)
+            : root.c.kind == 5 ? (b.has-hover ? Ink.hover-well : transparent)
             : root.c.kind == 8 ? (b.has-hover && root.c.style != 29 ? #ffffff0f : transparent)
-            : (b.has-hover ? #3d3d3d : #333333);
+            : (b.has-hover ? Ink.pick : Ink.hover-box);
         // style 32: a colour's button, its colour in a small square before its words
         if root.c.style == 32: Rectangle {
             x: 9px;
@@ -1212,7 +1214,7 @@ component CellView inherits Rectangle {
             border-radius: 4px;
             background: root.c.color;
             border-width: 1px;
-            border-color: root.c.on ? #00000033 : #ffffff33;
+            border-color: #ffffff33;
         }
         // style 31 with an icon's shapes: the icon, as its key prints it
         if root.c.style == 31 && (root.c.fill != "" || root.c.lines != ""): Rectangle {
@@ -1246,7 +1248,7 @@ component CellView inherits Rectangle {
             font-family: "Geist";
             font-size: root.c.style == 25 ? 10.5px : root.c.style == 31 ? 17px : root.c.kind == 8 ? 12.5px : 13px;
             font-weight: root.c.kind >= 7 ? 500 : 400;
-            color: root.c.on ? #171717 : root.c.style == 26 ? #5a5a5a : root.c.kind == 8 ? (b.has-hover ? Ink.ink : Ink.quiet) : root.c.kind == 7 ? Ink.ink : b.has-hover ? #ffffff : Ink.dim;
+            color: root.c.on ? Ink.bright : root.c.style == 26 ? #5a5a60 : root.c.kind == 8 ? (b.has-hover ? Ink.ink : Ink.quiet) : root.c.kind == 7 ? Ink.ink : b.has-hover ? #ffffff : Ink.dim;
         }
         if root.c.style == 24 || root.c.style == 32: Path {
             x: parent.width - 19px;
@@ -1588,7 +1590,7 @@ component PickField inherits VerticalLayout {
         border-radius: 6px;
         background: Ink.shade1;
         border-width: input.has-focus ? 1px : 0;
-        border-color: #737373;
+        border-color: #6a6a74;
         input := TextInput {
             changed has-focus => { Typing.on = self.has-focus; }
             x: 6px;
@@ -2728,7 +2730,7 @@ component KeyDetail inherits PageBox {
 }
 
 // A slider chosen in the Key library: where it sits now, and what it controls.
-// a button on the device's bar: its glyph, drawn in lines, and its name
+// a button on the device's bar: its glyph, drawn in lines, and its name if it has one
 component BarButton inherits Rectangle {
     in property <string> text;
     in property <string> commands;
@@ -2744,9 +2746,10 @@ component BarButton inherits Rectangle {
         height: 30px;
         border-radius: 8px;
         background: ta.has-hover ? Ink.shade2 : Ink.shade1;
+        // (with no name, a square round its glyph)
         row := HorizontalLayout {
-            padding-left: 12px;
-            padding-right: 12px;
+            padding-left: root.text == "" ? 8px : 12px;
+            padding-right: root.text == "" ? 8px : 12px;
             spacing: 7px;
             alignment: start;
             Path {
@@ -2761,7 +2764,7 @@ component BarButton inherits Rectangle {
                 stroke-width: 1.14px;
                 stroke-line-cap: root.round ? LineCap.round : LineCap.butt;
             }
-            Text {
+            if root.text != "": Text {
                 text: root.text;
                 font-family: "Geist";
                 font-size: 13px;
@@ -3831,7 +3834,7 @@ export component AppWindow inherits Window {
                             // a flask drawn for this size, its lines on the pixel grid
                             commands: "M5.14 1.14h5.72M6.29 1.14v4.58L2.95 11.93a1.25 1.25 0 0 0 1.1 1.79h7.9a1.25 1.25 0 0 0 1.1-1.79L9.71 5.72V1.14M4.3 10.29h7.4";
                             round: true;
-                            text: "Key lab";
+                            text: "";
                             clicked => { root.rail("lab"); }
                         }
                     }
@@ -5165,7 +5168,7 @@ component LabControl inherits Rectangle {
             text: root.r.unit;
             font-family: "Geist";
             font-size: 13px;
-            color: root.r.derived ? #7c7c7c : Ink.soft;
+            color: root.r.derived ? Ink.quiet : Ink.soft;
             vertical-alignment: center;
         }
         // its track, short of the reset at its end
@@ -5204,7 +5207,7 @@ component LabControl inherits Rectangle {
             width: 2px;
             height: 12px;
             border-radius: 1px;
-            background: #8a8a8a;
+            background: #8a8a94;
         }
         // its reset, at the end of its track: the arrow alone, as grey as the
         // track while the value is the saved one, brighter once it differs,
@@ -5327,7 +5330,7 @@ export component LabWindow inherits Window {
     Rectangle {
         y: 0;
         height: 36px;
-        background: #262626;
+        background: Ink.title;
         border-top-left-radius: root.radius;
         border-top-right-radius: root.radius;
         TouchArea {
@@ -5352,7 +5355,7 @@ export component LabWindow inherits Window {
             font-weight: 600;
             font-size: 13.5px;
             letter-spacing: -0.54px;
-            color: #f5f5f5;
+            color: Ink.bright;
             vertical-alignment: center;
         }
         HorizontalLayout {
@@ -5362,7 +5365,7 @@ export component LabWindow inherits Window {
             height: 36px;
             spacing: 6px;
             Text { text: "EVGA Z10 RGB"; font-size: 13px; color: Ink.dim; vertical-alignment: center; }
-            Text { text: "/"; font-size: 13px; color: #525252; vertical-alignment: center; }
+            Text { text: "/"; font-size: 13px; color: #4a4a52; vertical-alignment: center; }
             Text { text: "Key lab"; font-size: 13px; color: Ink.dim; vertical-alignment: center; }
         }
         HorizontalLayout {
@@ -5483,7 +5486,7 @@ export component LabWindow inherits Window {
             y: 0;
             width: parent.width - 48px;
             height: 1px;
-            background: #2c2c2c;
+            background: Ink.line;
         }
         for c in root.foot: CellView {
             c: c;
