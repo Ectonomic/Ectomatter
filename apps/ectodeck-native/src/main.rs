@@ -40,6 +40,7 @@ mod macros;
 mod overlays;
 mod picker;
 mod picture;
+mod screen_edit;
 mod screens;
 mod settings;
 mod setups;
@@ -535,6 +536,22 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
             });
         }
         window.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
+        front.act();
+        window.draw_if_needed(|r| {
+            r.render(&mut pic.ui, w as usize);
+        });
+    }
+    // ECTODECK_NATIVE_DRAG_DROP="x0,y0;x1,y1": pressed at the first point, dragged to the second, let go
+    let drag: Vec<f32> = std::env::var("ECTODECK_NATIVE_DRAG_DROP").unwrap_or_default().split([',', ';']).filter_map(|v| v.trim().parse().ok()).collect();
+    if let [x0, y0, x1, y1] = drag[..] {
+        let (from, to) = (LogicalPosition::new(x0, y0), LogicalPosition::new(x1, y1));
+        window.dispatch_event(WindowEvent::PointerMoved { position: from });
+        window.dispatch_event(WindowEvent::PointerPressed { position: from, button: PointerEventButton::Left });
+        for k in 1..=8 {
+            let f = k as f32 / 8.0;
+            window.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(x0 + (x1 - x0) * f, y0 + (y1 - y0) * f) });
+        }
+        window.dispatch_event(WindowEvent::PointerReleased { position: to, button: PointerEventButton::Left });
         front.act();
         window.draw_if_needed(|r| {
             r.render(&mut pic.ui, w as usize);

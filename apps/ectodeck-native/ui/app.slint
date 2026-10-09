@@ -182,6 +182,16 @@ export struct Cell {
 }
 
 // a row in a menu: 0 a choice, 1 a heading, 2 a rule, 3 a note
+// a piece of a page being edited, as the screen outlines it: its row, first
+// column and width in cells, whether chosen, and its name
+export struct EdPiece {
+    row: int,
+    col: int,
+    width: int,
+    on: bool,
+    name: string,
+}
+
 export struct MenuRow {
     kind: int,
     label: string,
@@ -2390,6 +2400,8 @@ component PlaylistBox inherits PageBox {
     in property <image> launch;
     in property <bool> announce;
     callback announce-toggled();
+    // the page opened in the page editor
+    callback edit();
     title: "Playlist";
     // the page: its picture, its place in the order, its name and what it shows
     Rectangle {
@@ -2445,13 +2457,21 @@ component PlaylistBox inherits PageBox {
             x: 206px;
             y: 27px;
             height: 18px;
-            width: parent.width - 216px;
+            width: parent.width - 216px - 72px;
             text: "CPU, GPU, RAM and VRAM, every second";
             font-family: "Geist";
             font-size: 12px;
             color: Ink.quiet;
             vertical-alignment: center;
             overflow: elide;
+        }
+        WordButton {
+            x: parent.width - self.width - 12px;
+            y: (parent.height - self.height) / 2;
+            text: "Edit";
+            fill: Ink.hover-well;
+            fill-hover: Ink.pick;
+            clicked => { root.edit(); }
         }
     }
     Rectangle {
@@ -3114,6 +3134,26 @@ export component AppWindow inherits Window {
     in property <bool> lcd-announce: true;
     in property <length> closed-h;
     callback lcd-pause();
+    // the page editor: whether a page is being edited, the toolbar's words,
+    // the grid on or off, the pieces over the screen, and its three boxes
+    in property <bool> screen-editing;
+    in property <string> ed-title;
+    in property <bool> ed-grid;
+    in property <[EdPiece]> ed-pieces;
+    in property <string> ed-piece-title;
+    in property <[Cell]> ed-piece-cells;
+    in property <length> ed-piece-h;
+    in property <[Cell]> ed-place-cells;
+    in property <length> ed-place-h;
+    in property <string> ed-page-title;
+    in property <[Cell]> ed-page-cells;
+    in property <length> ed-page-h;
+    callback screen-edit(int);
+    callback screen-done();
+    callback screen-add(int);
+    callback screen-grid();
+    callback piece-chosen(int);
+    callback piece-moved(int, int, int);
     // what the screen is doing now, shown beside Pause
     in property <string> screen-status;
     callback lcd-announce-toggled();
@@ -3305,8 +3345,15 @@ export component AppWindow inherits Window {
     property <bool> sfits: pl-w + 12px + 320px <= under-w;
     property <length> srow0: sfits ? min(band-max, max(band-min, max(pl-need, root.closed-h))) : max(band-min, pl-need);
     property <length> srow1: root.closed-h;
+    // editing a page: its three boxes (320 wide), as many to a row as fit,
+    // each row as tall as the tallest box needs
+    property <int> ed-n: under-w >= 3 * 320px + 24px ? 3 : under-w >= 2 * 320px + 12px ? 2 : 1;
+    property <int> ed-rows: ed-n == 3 ? 1 : ed-n == 2 ? 2 : 3;
+    property <length> ed-need: max(root.ed-piece-h, max(root.ed-place-h, root.ed-page-h));
+    property <length> ed-row: ed-rows == 1 ? min(band-max, max(band-min, ed-need)) : max(band-min, ed-need);
+    property <length> ed-h: ed-rows * ed-row + (ed-rows - 1) * 12px;
     property <length> tab-h: root.tab == 0 ? (second-fits ? keys-h : keys-h + 12px + second-h)
-        : root.tab == 1 ? light-h : root.tab == 3 ? (sfits ? srow0 : srow0 + 12px + srow1) : root.tile-height;
+        : root.tab == 1 ? light-h : root.tab == 3 ? (root.screen-editing ? ed-h : sfits ? srow0 : srow0 + 12px + srow1) : root.tile-height;
     property <length> under-board: 18px + max(anchor.preferred-height, tab-h);
     property <length> page-h: root.tab == 2 ? 12px + head-h + 6px + 24px + root.tile-height + 40px : root.tab == 3 ? under-top - 18px + under-board + 24px : board-top + board-h + kb-pad-y + under-board + 24px;
     // the page's scrollbar, as WebKit drew it: over the whole window, when the page is longer than it
@@ -3394,6 +3441,15 @@ export component AppWindow inherits Window {
                     }
                     if root.boot == 0: HorizontalLayout {
                         spacing: 16px;
+                        // editing a page: which, before what to do
+                        if root.tab == 3 && root.screen-editing: Text {
+                            text: root.ed-title;
+                            font-family: "Geist";
+                            font-size: 13.5px;
+                            font-weight: 600;
+                            color: Ink.ink;
+                            vertical-alignment: center;
+                        }
                         Text {
                             text: root.hint;
                             font-family: "Geist";
@@ -3464,7 +3520,78 @@ export component AppWindow inherits Window {
                         // on Screen, what it is doing now, a dot that breathes while
                         // Ectodeck plays it; then Pause, which holds the screen as it
                         // is, and Play, which carries on
-                        if root.tab == 3: HorizontalLayout {
+                        // editing a page: a new piece of each kind, the grid, and Done
+                        if root.tab == 3 && root.screen-editing: HorizontalLayout {
+                            horizontal-stretch: 0;
+                            spacing: 8px;
+                            Text {
+                                text: "Add";
+                                font-family: "Geist";
+                                font-size: 12.5px;
+                                color: Ink.quiet;
+                                vertical-alignment: center;
+                            }
+                            for w[k] in ["Text", "Data", "Bar", "Clock"]: VerticalLayout {
+                                alignment: center;
+                                WordButton {
+                                    text: w;
+                                    clicked => { root.screen-add(k); }
+                                }
+                            }
+                            Rectangle {
+                                width: 1px;
+                                Rectangle {
+                                    y: (parent.height - 20px) / 2;
+                                    height: 20px;
+                                    background: Ink.line;
+                                }
+                            }
+                            Rectangle {
+                                width: 28px + grid-words.preferred-width;
+                                Rectangle {
+                                    x: 0;
+                                    y: (parent.height - 18px) / 2;
+                                    width: 18px;
+                                    height: 18px;
+                                    border-radius: 5px;
+                                    background: root.ed-grid ? (grid-ta.has-hover ? Ink.bright : Ink.dim) : grid-ta.has-hover ? Ink.hover-box : Ink.well;
+                                    border-width: root.ed-grid ? 0 : 1px;
+                                    border-color: grid-ta.has-hover ? #6a6a74 : #4a4a52;
+                                    if root.ed-grid: Path {
+                                        width: 18px;
+                                        height: 18px;
+                                        viewbox-width: 18;
+                                        viewbox-height: 18;
+                                        commands: "M5.2 9.3 L7.9 11.9 L12.9 6.4";
+                                        fill: transparent;
+                                        stroke: Ink.base;
+                                        stroke-width: 2px;
+                                    }
+                                }
+                                grid-words := Text {
+                                    x: 28px;
+                                    text: "Grid";
+                                    font-family: "Geist";
+                                    font-size: 13px;
+                                    color: grid-ta.has-hover ? Ink.bright : Ink.dim;
+                                    vertical-alignment: center;
+                                }
+                                grid-ta := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.screen-grid(); }
+                                }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                WordButton {
+                                    text: "Done";
+                                    fill: Ink.pick;
+                                    fill-hover: Ink.pick-hover;
+                                    clicked => { root.screen-done(); }
+                                }
+                            }
+                        }
+                        if root.tab == 3 && !root.screen-editing: HorizontalLayout {
                             horizontal-stretch: 0;
                             spacing: 8px;
                             if root.lcd-state == 0: Rectangle {
@@ -3486,7 +3613,7 @@ export component AppWindow inherits Window {
                                 vertical-alignment: center;
                             }
                         }
-                        if root.tab == 3 && root.lcd-state <= 1: VerticalLayout {
+                        if root.tab == 3 && !root.screen-editing && root.lcd-state <= 1: VerticalLayout {
                             alignment: center;
                             WordButton {
                                 text: root.lcd-state == 1 ? "Play" : "Pause";
@@ -3648,9 +3775,81 @@ export component AppWindow inherits Window {
                             height: parent.height;
                             source: root.lcd-big;
                         }
+                        // editing: a press away from every piece lets the chosen one go
+                        if root.screen-editing: TouchArea {
+                            // (on the press itself: a drag let go here is no press away)
+                            pointer-event(e) => {
+                                if (e.kind == PointerEventKind.down) {
+                                    root.piece-chosen(-1);
+                                }
+                            }
+                        }
+                        // the screen's 20 by 4 cells
+                        if root.screen-editing && root.ed-grid: Rectangle {
+                            for k in 19: Rectangle {
+                                x: (k + 1) * parent.width / 20 - 0.5px;
+                                width: 1px;
+                                background: #ffffff1c;
+                            }
+                            for k in 3: Rectangle {
+                                y: (k + 1) * parent.height / 4 - 0.5px;
+                                height: 1px;
+                                background: #ffffff1c;
+                            }
+                        }
+                        // each piece outlined; the chosen one in amber, named; a
+                        // piece dragged follows the pointer cell by cell
+                        if root.screen-editing: Rectangle {
+                            property <length> cw: parent.width / 20;
+                            property <length> ch: parent.height / 4;
+                            for p[i] in root.ed-pieces: Rectangle {
+                                // how many cells across and down the piece has been dragged
+                                property <int> dc: 0;
+                                property <int> dr: 0;
+                                property <int> at-col: max(0, min(20 - p.width, p.col + dc));
+                                property <int> at-row: max(0, min(3, p.row + dr));
+                                // (the drag ends once the page has the piece where it was dropped)
+                                property <int> home: p.row * 100 + p.col;
+                                changed home => {
+                                    self.dc = 0;
+                                    self.dr = 0;
+                                }
+                                x: at-col * cw + 1px;
+                                y: at-row * ch + 1px;
+                                width: p.width * cw - 2px;
+                                height: ch - 2px;
+                                border-radius: 3px;
+                                border-width: p.on || drag.pressed ? 2px : 1px;
+                                border-color: p.on || drag.pressed ? Ink.warn : drag.has-hover ? #ffffff80 : #ffffff33;
+                                background: p.on ? #f0b35a1a : drag.has-hover ? #ffffff0d : transparent;
+                                drag := TouchArea {
+                                    mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.pointer;
+                                    moved => {
+                                        parent.dc = round((self.mouse-x - self.pressed-x) / cw);
+                                        parent.dr = round((self.mouse-y - self.pressed-y) / ch);
+                                    }
+                                    pointer-event(e) => {
+                                        if (e.kind == PointerEventKind.down) {
+                                            parent.dc = 0;
+                                            parent.dr = 0;
+                                        }
+                                        if (e.kind == PointerEventKind.up) {
+                                            if (parent.at-col != p.col || parent.at-row != p.row) {
+                                                // stays where it was dropped until the page has it there
+                                                root.piece-moved(i, parent.at-row, parent.at-col);
+                                            } else {
+                                                parent.dc = 0;
+                                                parent.dr = 0;
+                                                root.piece-chosen(i);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
-                if root.tab == 3 && root.boot == 0: PlaylistBox {
+                if root.tab == 3 && root.boot == 0 && !root.screen-editing: PlaylistBox {
                     x: under-x;
                     y: under-top;
                     width: pl-w;
@@ -3659,8 +3858,9 @@ export component AppWindow inherits Window {
                     launch: root.lcd-launch;
                     announce: root.lcd-announce;
                     announce-toggled => { root.lcd-announce-toggled(); }
+                    edit => { root.screen-edit(0); }
                 }
-                if root.tab == 3 && root.boot == 0: ScrollBox {
+                if root.tab == 3 && root.boot == 0 && !root.screen-editing: ScrollBox {
                     x: under-x + (sfits ? pl-w + 12px : 0);
                     y: under-top + (sfits ? 0 : srow0 + 12px);
                     width: 320px;
@@ -3675,6 +3875,66 @@ export component AppWindow inherits Window {
                             c: c;
                             pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
                             slide(id, v) => { root.cell-slide(id, v); }
+                        }
+                    }
+                }
+                // the page editor's box 1 of 3: the piece chosen
+                if root.tab == 3 && root.boot == 0 && root.screen-editing: ScrollBox {
+                    x: under-x + mod(0, ed-n) * 332px;
+                    y: under-top + floor(0 / ed-n) * (ed-row + 12px);
+                    width: 320px;
+                    height: ed-row;
+                    need: root.ed-piece-h;
+                    PageBox {
+                        width: parent.width;
+                        height: max(root.ed-piece-h, ed-row);
+                        fill: transparent;
+                        title: root.ed-piece-title;
+                        for c in root.ed-piece-cells: CellView {
+                            c: c;
+                            pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
+                            slide(id, v) => { root.cell-slide(id, v); }
+                            typed(id, t) => { root.cell-typed(id, t); }
+                        }
+                    }
+                }
+                // the page editor's box 2 of 3: where the piece sits
+                if root.tab == 3 && root.boot == 0 && root.screen-editing: ScrollBox {
+                    x: under-x + mod(1, ed-n) * 332px;
+                    y: under-top + floor(1 / ed-n) * (ed-row + 12px);
+                    width: 320px;
+                    height: ed-row;
+                    need: root.ed-place-h;
+                    PageBox {
+                        width: parent.width;
+                        height: max(root.ed-place-h, ed-row);
+                        fill: transparent;
+                        title: "Place";
+                        for c in root.ed-place-cells: CellView {
+                            c: c;
+                            pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
+                            slide(id, v) => { root.cell-slide(id, v); }
+                            typed(id, t) => { root.cell-typed(id, t); }
+                        }
+                    }
+                }
+                // the page editor's box 3 of 3: the page
+                if root.tab == 3 && root.boot == 0 && root.screen-editing: ScrollBox {
+                    x: under-x + mod(2, ed-n) * 332px;
+                    y: under-top + floor(2 / ed-n) * (ed-row + 12px);
+                    width: 320px;
+                    height: ed-row;
+                    need: root.ed-page-h;
+                    PageBox {
+                        width: parent.width;
+                        height: max(root.ed-page-h, ed-row);
+                        fill: transparent;
+                        title: root.ed-page-title;
+                        for c in root.ed-page-cells: CellView {
+                            c: c;
+                            pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
+                            slide(id, v) => { root.cell-slide(id, v); }
+                            typed(id, t) => { root.cell-typed(id, t); }
                         }
                     }
                 }

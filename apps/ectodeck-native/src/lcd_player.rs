@@ -226,6 +226,11 @@ pub enum Control {
     /// stop, and hand the screen back to the keyboard's own screens (or, with
     /// false, leave it blank); the sender hears once it has
     Quit(bool, mpsc::Sender<()>),
+    /// the page to play, shown at once, paused or not (an edit is seen as it is made)
+    Page(crate::lcd_page::Page),
+    /// what a page may show besides the computer's readings: the profile the
+    /// keyboard is using, and the weather outside (°C, the sky in words)
+    Context(Option<String>, Option<(f64, String)>),
 }
 
 /// What the player tells Ectodeck: what the screen shows, and why.
@@ -265,6 +270,8 @@ pub struct Core {
     pub paused: bool,
     /// what was pushed, for the page
     pub pushed: Option<Vec<String>>,
+    /// the page changed: show it at the next turn, paused or not
+    pub redraw: bool,
 }
 
 impl Core {
@@ -286,6 +293,7 @@ impl Core {
             announce: true,
             paused: false,
             pushed: None,
+            redraw: false,
         }
     }
 
@@ -349,7 +357,8 @@ impl Core {
                     }
                 }
             }
-        } else if now >= self.stats_at && !self.paused {
+        } else if (now >= self.stats_at && !self.paused) || self.redraw {
+            self.redraw = false;
             let rows = (self.stats)();
             self.push(rows, now);
             self.stats_at = now + INTERVAL;
@@ -415,8 +424,17 @@ impl Player {
             let stats = Arc::new(Mutex::new(Stats::here()));
             // primed, as the service primed it: the first reading of the load is 0
             stats.lock().unwrap().cpu_load();
-            let reader = stats.clone();
-            let ask: Ask<Vec<String>> = Arc::new(move || reader.lock().unwrap().rows());
+            // the page, and what it may show besides the computer's readings
+            let shared = Arc::new(Mutex::new((crate::lcd_page::Page::stats(), None::<String>, None::<(f64, String)>)));
+            let (reader, page) = (stats.clone(), shared.clone());
+            let ask: Ask<Vec<String>> = Arc::new(move || {
+                let mut r = reader.lock().unwrap().read();
+                let p = page.lock().unwrap();
+                r.now = Some(crate::lcd_page::Moment::now());
+                r.profile = p.1.clone();
+                r.outside = p.2.clone();
+                crate::lcd_page::render(&p.0, &r)
+            });
             let seeds = Box::new(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64));
             let mut core = Core::new(Box::new(Hidraw::default()), ask, runtime_dir().join("z10-lcd/session"), seeds);
             core.frame_file = Some(runtime_dir().join("z10-lcd/frame"));
@@ -440,6 +458,17 @@ impl Player {
                             core.paused = p;
                             if !p {
                                 core.stats_at = 0.0;
+                            }
+                        }
+                        Control::Page(p) => {
+                            shared.lock().unwrap().0 = p;
+                            core.redraw = true;
+                        }
+                        Control::Context(profile, outside) => {
+                            let mut s = shared.lock().unwrap();
+                            if s.1 != profile || s.2 != outside {
+                                (s.1, s.2) = (profile, outside);
+                                core.redraw = true;
                             }
                         }
                         Control::Quit(own, done) => {

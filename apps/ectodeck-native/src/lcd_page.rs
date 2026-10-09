@@ -414,12 +414,25 @@ fn show(p: &Piece, r: &Readings) -> Result<String, &'static str> {
 
 /// The page's four rows, with these readings.
 pub fn render(page: &Page, r: &Readings) -> Vec<String> {
+    lay_out(page, r).0
+}
+
+/// Where each piece lands, in the page's order: its row, the cell it starts
+/// at and how many it takes (a long reading runs past its width and pushes
+/// the rest of its row along). A row said to be unavailable keeps its
+/// pieces where they were put.
+pub fn spans(page: &Page, r: &Readings) -> Vec<(u8, usize, usize)> {
+    lay_out(page, r).1
+}
+
+fn lay_out(page: &Page, r: &Readings) -> (Vec<String>, Vec<(u8, usize, usize)>) {
     let mut said: Vec<&'static str> = Vec::new();
-    (0..ROWS)
+    let mut spans: Vec<(u8, usize, usize)> = page.pieces.iter().map(|p| (p.row, p.col as usize, p.width as usize)).collect();
+    let rows = (0..ROWS)
         .map(|row| {
-            let mut pieces: Vec<&Piece> = page.pieces.iter().filter(|p| p.row == row).collect();
-            pieces.sort_by_key(|p| p.col);
-            let shown: Vec<Result<String, &'static str>> = pieces.iter().map(|p| show(p, r)).collect();
+            let mut pieces: Vec<(usize, &Piece)> = page.pieces.iter().enumerate().filter(|(_, p)| p.row == row).collect();
+            pieces.sort_by_key(|(_, p)| p.col);
+            let shown: Vec<Result<String, &'static str>> = pieces.iter().map(|(_, p)| show(p, r)).collect();
             let failed: Vec<&'static str> = shown.iter().filter_map(|s| s.as_ref().err().copied()).collect();
             if !failed.is_empty() {
                 let new = failed.iter().any(|f| !said.contains(f));
@@ -432,14 +445,14 @@ pub fn render(page: &Page, r: &Readings) -> Vec<String> {
                     return String::new();
                 }
                 // the row's own first words, or what it read
-                let label = pieces.iter().find_map(|p| match &p.kind {
+                let label = pieces.iter().find_map(|(_, p)| match &p.kind {
                     Kind::Text(t) if !t.trim().is_empty() => Some(ectotype_core::lcd::lcd_text(t.trim())),
                     _ => None,
                 });
                 let label = label.unwrap_or_else(|| {
                     pieces
                         .iter()
-                        .find_map(|p| match &p.kind {
+                        .find_map(|(_, p)| match &p.kind {
                             Kind::Data(s, _) | Kind::Bar(s) => Some(s.short().to_string()),
                             _ => None,
                         })
@@ -449,18 +462,21 @@ pub fn render(page: &Page, r: &Readings) -> Vec<String> {
             }
             let mut out = String::new();
             let mut cursor = 0usize;
-            for (i, (p, s)) in pieces.iter().zip(&shown).enumerate() {
+            for (k, ((i, p), s)) in pieces.iter().zip(&shown).enumerate() {
                 let s = s.as_ref().unwrap();
                 let w = p.width as usize;
-                let start = if i == 0 { p.col as usize } else { (p.col as usize).max(cursor + p.gap as usize) };
+                let start = if k == 0 { p.col as usize } else { (p.col as usize).max(cursor + p.gap as usize) };
                 out.push_str(&" ".repeat(start.saturating_sub(cursor)));
                 let text = if p.right { format!("{s:>w$}") } else { format!("{s:<w$}") };
-                cursor = start + text.chars().count();
+                let len = text.chars().count();
+                spans[*i] = (row, start, len);
+                cursor = start + len;
                 out.push_str(&text);
             }
             out.trim_end().to_string()
         })
-        .collect()
+        .collect();
+    (rows, spans)
 }
 
 /// The readings this computer can give, for the menu of readings.
@@ -527,6 +543,16 @@ mod tests {
         let mut p = Page::stats();
         p.pieces.retain(|x| x.row != 1);
         assert_eq!(render(&p, &r)[3], "VRAM unavailable");
+    }
+
+    #[test]
+    fn a_piece_that_runs_long_is_outlined_where_it_lands() {
+        let mut r = readings();
+        r.cpu_temp = Some(105.0);
+        let sp = spans(&Page::stats(), &r);
+        assert_eq!(sp[1], (0, 4, 4), "105° takes four cells from column 4");
+        assert_eq!(sp[2], (0, 9, 4), "the load after it, pushed along by one");
+        assert_eq!(sp[10], (3, 0, 4));
     }
 
     #[test]

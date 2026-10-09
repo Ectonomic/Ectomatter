@@ -89,6 +89,15 @@ pub enum Ask {
     LcdPause,
     LcdAnnounce,
     LcdTick,
+    /// the page editor: open on the playlist's page, close; add a piece (0
+    /// words, 1 a reading, 2 a bar, 3 a clock); the grid on or off; a piece
+    /// chosen (-1 none); a piece dragged to a row and a column
+    EditPage(i32),
+    EditDone,
+    AddPiece(i32),
+    EditGrid,
+    PieceChosen(i32),
+    PieceMoved(i32, i32, i32),
 }
 
 /// The colour picker, open on a swatch: what it sets, the colour it opened
@@ -411,6 +420,21 @@ pub struct Front {
     launch_at: (usize, Instant),
     lcd_drawn: Option<(Vec<String>, [u8; 3], u8, u32)>,
     launch_drawn: Option<(usize, [u8; 3], u8, u32)>,
+    /// the screen's pages (the same on every profile), as last noted for
+    /// undo and as last saved, and when they last changed
+    pages: Vec<crate::lcd_page::Page>,
+    pages_noted: Vec<crate::lcd_page::Page>,
+    pages_saved: Vec<crate::lcd_page::Page>,
+    pages_changed: Option<Instant>,
+    /// the page being edited, the piece chosen; this computer's readings,
+    /// read here for the editor's picture once a second, and when last
+    editor: Option<crate::screen_edit::Editor>,
+    reader: Option<crate::lcd_stats::Stats>,
+    readings: crate::lcd_page::Readings,
+    read_at: Option<Instant>,
+    /// the menu of readings open: the reading each of its rows stands for
+    source_menu: Vec<Option<crate::lcd_page::Source>>,
+    ed_models: [Rc<VecModel<Cell>>; 3],
 }
 
 /// A profile's colour sample: how many colours, and the colours.
@@ -474,6 +498,12 @@ impl Front {
         on!(on_area_hover, |i, on| Ask::AreaHover(i, on));
         on!(on_key_hovered, |p, on| Ask::KeyHover(p, on));
         on!(on_lcd_pause, Ask::LcdPause);
+        on!(on_screen_edit, |i| Ask::EditPage(i));
+        on!(on_screen_done, Ask::EditDone);
+        on!(on_screen_add, |i| Ask::AddPiece(i));
+        on!(on_screen_grid, Ask::EditGrid);
+        on!(on_piece_chosen, |i| Ask::PieceChosen(i));
+        on!(on_piece_moved, |i, r, c| Ask::PieceMoved(i, r, c));
         on!(on_lcd_announce_toggled, Ask::LcdAnnounce);
         let (ftx, frx) = mpsc::channel();
         let page = Page::new();
@@ -577,7 +607,23 @@ impl Front {
             launch_at: (0, Instant::now()),
             lcd_drawn: None,
             launch_drawn: None,
+            pages: Vec::new(),
+            pages_noted: Vec::new(),
+            pages_saved: Vec::new(),
+            pages_changed: None,
+            editor: None,
+            reader: None,
+            readings: crate::lcd_page::Readings::default(),
+            read_at: None,
+            source_menu: Vec::new(),
+            ed_models: [Rc::new(VecModel::default()), Rc::new(VecModel::default()), Rc::new(VecModel::default())],
         };
+        f.pages = crate::lcd_page::pages_of(f.settings.get("devices.z10.screen.pages").as_ref());
+        f.pages_noted = f.pages.clone();
+        f.pages_saved = f.pages.clone();
+        f.ui.set_ed_piece_cells(ModelRc::from(f.ed_models[0].clone()));
+        f.ui.set_ed_place_cells(ModelRc::from(f.ed_models[1].clone()));
+        f.ui.set_ed_page_cells(ModelRc::from(f.ed_models[2].clone()));
         f.weather.set_place(weather_place(&f.settings));
         f.ui.set_overlays(ModelRc::from(f.overlay_model.clone()));
         f.ui.set_pk_presets(ModelRc::new(VecModel::from(PRESETS.iter().map(|c| color(*c)).collect::<Vec<_>>())));
@@ -860,6 +906,47 @@ impl Front {
                     }
                     self.push_preview();
                 }
+                Ask::EditPage(i) => {
+                    let i = (i.max(0) as usize).min(self.pages.len().saturating_sub(1));
+                    self.close_menu();
+                    self.editor = Some(crate::screen_edit::Editor { page: i, chosen: None, grid: crate::uistate::get("screen_grid").and_then(|v| v.as_bool()).unwrap_or(true) });
+                    self.read_now();
+                }
+                Ask::EditDone => {
+                    self.close_menu();
+                    self.editor = None;
+                    self.save_pages();
+                }
+                Ask::AddPiece(what) => {
+                    let first = crate::lcd_page::available(&self.readings, self.weather.report().is_some()).first().copied().unwrap_or(crate::lcd_page::Source::CpuLoad);
+                    if let Some(ed) = &mut self.editor {
+                        if let Some(p) = self.pages.get_mut(ed.page) {
+                            crate::screen_edit::add(p, ed, what.clamp(0, 3) as usize, first);
+                        }
+                    }
+                    self.pages_edited();
+                }
+                Ask::EditGrid => {
+                    if let Some(ed) = &mut self.editor {
+                        ed.grid = !ed.grid;
+                        crate::uistate::set("screen_grid", serde_json::json!(ed.grid));
+                    }
+                }
+                Ask::PieceChosen(i) => {
+                    self.close_menu();
+                    if let Some(ed) = &mut self.editor {
+                        ed.chosen = usize::try_from(i).ok();
+                    }
+                }
+                Ask::PieceMoved(i, row, col) => {
+                    if let Some(ed) = &mut self.editor {
+                        if let Some(p) = self.pages.get_mut(ed.page) {
+                            crate::screen_edit::move_to(p, i.max(0) as usize, row, col);
+                            ed.chosen = Some(i.max(0) as usize);
+                        }
+                    }
+                    self.pages_edited();
+                }
                 Ask::LcdPause => {
                     self.lcd_paused = !self.lcd_paused;
                     if let Some(pl) = &self.player {
@@ -886,6 +973,12 @@ impl Front {
                             self.launch_at = ((i + 1) % self.launch_frames.len(), Instant::now());
                             self.draw_screen();
                         }
+                    }
+                    // editing a page: the readings again each second, for its picture and its boxes
+                    if self.editor.is_some() && self.read_at.is_none_or(|t| t.elapsed() >= Duration::from_secs(1)) {
+                        self.read_now();
+                        self.refresh_editor();
+                        self.draw_screen();
                     }
                     continue;
                 }
@@ -981,6 +1074,14 @@ impl Front {
                 }
                 Ask::CellTyped(id, t) => match lighting::ctl(id) {
                     Ctl::Name => crate::display::act(&mut self.page, Ctl::Name, 0, 0.0, Some(&t)),
+                    Ctl::ScrText => {
+                        if let Some(ed) = &mut self.editor {
+                            if let Some(p) = self.pages.get_mut(ed.page) {
+                                crate::screen_edit::act(p, ed, Ctl::ScrText, 0, Some(&t));
+                            }
+                        }
+                        self.pages_edited();
+                    }
                     Ctl::Place => {
                         // searched once typing pauses, as the web page did
                         self.place_text = t;
@@ -1116,6 +1217,8 @@ impl Front {
                 }
                 Ask::PollLcd => {
                     self.poll_lcd();
+                    // the profile the keyboard is using and the weather, for the pages that show them
+                    self.tell_context();
                     // Settings is kept current while it shows: a device can be
                     // plugged in, or the weather come in, at any time
                     changed = self.ui.get_place() == "settings";
@@ -1319,8 +1422,17 @@ impl Front {
                 self.open_picker(c, index, _anchor);
                 return;
             }
-            Ctl::Start | Ctl::Stop | Ctl::Submode | Ctl::Plays => {
+            Ctl::Start | Ctl::Stop | Ctl::Submode | Ctl::Plays | Ctl::ScrSource => {
                 self.open_light_menu(c, _anchor);
+                return;
+            }
+            Ctl::ScrUnits | Ctl::ScrHours | Ctl::ScrRow | Ctl::ScrCol | Ctl::ScrWidth | Ctl::ScrAlign | Ctl::ScrRemove | Ctl::ScrLight => {
+                if let Some(ed) = &mut self.editor {
+                    if let Some(p) = self.pages.get_mut(ed.page) {
+                        crate::screen_edit::act(p, ed, c, index, None);
+                    }
+                }
+                self.pages_edited();
                 return;
             }
             Ctl::WhereMode | Ctl::WhereAll | Ctl::Zone => {
@@ -1537,6 +1649,19 @@ impl Front {
     /// to be saved, and what it was before can be undone. Changes close
     /// together (a slider dragged, a color picked) undo as one.
     fn note_changes(&mut self) {
+        // the screen's pages, undone as one entry (0, which no profile is)
+        if self.pages != self.pages_noted {
+            let burst = self.undo_mark.is_some_and(|(m, t)| m == 0 && t.elapsed() < Duration::from_millis(1200));
+            if !burst {
+                self.undo.push((0, pages_json(&self.pages_noted)));
+                if self.undo.len() > 100 {
+                    self.undo.remove(0);
+                }
+            }
+            self.undo_mark = Some((0, Instant::now()));
+            self.redo.clear();
+            self.pages_noted = self.pages.clone();
+        }
         if self.page.dev.is_none() {
             return;
         }
@@ -1567,6 +1692,9 @@ impl Front {
     /// Save a profile that has changed, once it has been still a moment.
     fn auto_save(&mut self) {
         self.note_changes();
+        if self.pages_changed.is_some_and(|t| t.elapsed() >= Duration::from_millis(1200)) {
+            self.save_pages();
+        }
         if self.page.dev.is_none() || self.page.busy || self.kb.is_none() {
             return;
         }
@@ -1590,6 +1718,19 @@ impl Front {
         self.note_changes();
         let (from, to) = if redo { (&mut self.redo, &mut self.undo) } else { (&mut self.undo, &mut self.redo) };
         let Some((n, d)) = from.pop() else { return };
+        if n == 0 {
+            to.push((0, pages_json(&self.pages)));
+            self.pages = crate::lcd_page::pages_of(Some(&d));
+            self.pages_noted = self.pages.clone();
+            self.undo_mark = None;
+            if let Some(ed) = &mut self.editor {
+                ed.chosen = ed.chosen.filter(|i| self.pages.get(ed.page).is_some_and(|p| *i < p.pieces.len()));
+            }
+            self.pages_edited();
+            self.status(if redo { "Did again the last change to the screen’s page" } else { "Undid the last change to the screen’s page" }, 0);
+            self.refresh();
+            return;
+        }
         if let Some(now) = self.page.drafts.insert(n, d.clone()) {
             to.push((n, now));
         }
@@ -1606,6 +1747,7 @@ impl Front {
     /// Whether everything is saved, so it may go.
     pub fn flush(&mut self) -> bool {
         self.note_changes();
+        self.save_pages();
         if self.released.is_some_and(|t| t.elapsed() < Duration::from_millis(300)) {
             return false;
         }
@@ -1893,6 +2035,17 @@ impl Front {
             self.ui.set_menu_open(false);
             self.ui.set_menu_search(true);
             self.ui.set_menu_w(300.0);
+            // a reading for the piece chosen in the page editor
+            if c == Ctl::ScrSource {
+                if let (Some(Some(src)), Some(ed)) = (self.source_menu.get(i).copied(), &self.editor) {
+                    if let Some(p) = self.pages.get_mut(ed.page) {
+                        crate::screen_edit::set_source(p, ed, src);
+                    }
+                    self.pages_edited();
+                }
+                self.refresh();
+                return;
+            }
             let index = if c == Ctl::Submode { i.min(2) } else { i };
             // Plays: its rows, a rule between the two halves (and, for a pair it
             // has no name for, that one after another rule, which changes nothing)
@@ -2083,6 +2236,7 @@ impl Front {
                 View::Keys => "Select a key on the keyboard or in the Key library to change what a key does.",
                 View::Lighting => "Choose a lighting effect for this profile, then set the colors, speed and zones below.",
                 View::Display => "Check the keyboard’s connection and which features the installed firmware supports.",
+                View::Screen if self.editor.is_some() => "Select a piece on the screen to change what the piece shows and where the piece sits.",
                 View::Screen => "Choose what the keyboard’s screen shows while Ectodeck is open and when Ectodeck is closed.",
             }
             .into(),
@@ -2323,6 +2477,7 @@ impl Front {
             let t = crate::display::closed(&self.page, 320.0);
             self.ui.set_closed_h(t.height);
             self.show_cells(t.cells);
+            self.refresh_editor();
             self.draw_screen();
         } else if loaded && self.page.view == View::Display {
             let fw = self.firmware();
@@ -2337,7 +2492,11 @@ impl Front {
         }
         // the screen as the profile being edited has it, on the keyboard now
         if loaded && self.controlled {
-            let want = screen_of(&self.page.draft()["lighting"]);
+            let mut want = screen_of(&self.page.draft()["lighting"]);
+            if self.player.is_some() {
+                let l = self.page_light([want.0[1], want.0[2], want.0[3]]);
+                want.0[1..4].copy_from_slice(&l);
+            }
             if self.screen_sent != Some(want) {
                 self.screen_sent = Some(want);
                 self.ask_kb(device::Ask::Screen(want.0, want.1));
@@ -2467,6 +2626,17 @@ impl Front {
         }
         let rows: Vec<MenuRow> = if c == Ctl::Plays {
             plays_rows(&self.page)
+        } else if c == Ctl::ScrSource {
+            let Some(piece) = self.editor.as_ref().and_then(|ed| self.pages.get(ed.page)?.pieces.get(ed.chosen?)) else { return };
+            let (current, bars) = match piece.kind {
+                crate::lcd_page::Kind::Data(s, _) => (s, false),
+                crate::lcd_page::Kind::Bar(s) => (s, true),
+                _ => return,
+            };
+            let avail = crate::lcd_page::available(&self.readings, self.weather.report().is_some());
+            let rows = crate::screen_edit::source_menu(current, bars, &avail, &self.readings);
+            self.source_menu = rows.iter().map(|r| r.4).collect();
+            rows.into_iter().map(|(kind, label, tag, tick, _)| MenuRow { kind, label: label.into(), tag: tag.into(), tick, sub: "".into() }).collect()
         } else {
             let Some((list, chosen)) = lighting::choices(&self.page, c) else { return };
             list.iter().enumerate().map(|(j, label)| MenuRow { kind: 0, label: (*label).into(), tag: "".into(), tick: j == chosen, sub: "".into() }).collect()
@@ -2648,6 +2818,65 @@ impl Front {
             p.tell(crate::lcd_player::Control::Paused(true));
         }
         self.player = Some(p);
+        self.tell_page();
+        self.tell_context();
+    }
+
+    /// A page edited: the keyboard shows the change at once, and it is saved
+    /// once the editing pauses.
+    fn pages_edited(&mut self) {
+        self.pages_changed = Some(Instant::now());
+        self.tell_page();
+    }
+
+    /// The page the screen plays, to the player.
+    fn tell_page(&mut self) {
+        if let (Some(pl), Some(p)) = (&self.player, self.pages.first()) {
+            pl.tell(crate::lcd_player::Control::Page(p.clone()));
+        }
+    }
+
+    /// What a page may show besides the computer's readings, to the player:
+    /// the profile the keyboard is using, and the weather outside.
+    fn tell_context(&mut self) {
+        let profile = self.page.dev.as_ref().map(|_| self.page.profile_name(self.page.active()));
+        let outside = self.weather.report().map(|r| (r.temperature as f64, crate::ecto_settings::sky(r.code)));
+        if let Some(pl) = &self.player {
+            pl.tell(crate::lcd_player::Control::Context(profile, outside));
+        }
+    }
+
+    /// The pages into Ectodeck's settings, if they changed since last saved.
+    fn save_pages(&mut self) {
+        if self.pages == self.pages_saved {
+            return;
+        }
+        let v = serde_json::Value::Array(self.pages.iter().map(|p| p.to_json()).collect());
+        match self.settings.set("devices.z10.screen.pages", v) {
+            Ok(()) => self.pages_saved = self.pages.clone(),
+            Err(e) => self.status(format!("The screen’s pages were not saved: {e}"), 2),
+        }
+        self.pages_changed = None;
+    }
+
+    /// This computer's readings now, for the editor's picture of the page.
+    fn read_now(&mut self) {
+        let mut r = self.reader.get_or_insert_with(|| {
+            let mut s = crate::lcd_stats::Stats::here();
+            s.cpu_load();
+            s
+        }).read();
+        r.now = Some(crate::lcd_page::Moment::now());
+        r.profile = self.page.dev.as_ref().map(|_| self.page.profile_name(self.page.active()));
+        r.outside = self.weather.report().map(|w| (w.temperature as f64, crate::ecto_settings::sky(w.code)));
+        self.readings = r;
+        self.read_at = Some(Instant::now());
+    }
+
+    /// The screen's light while Ectodeck plays it: the page's own, or the
+    /// profile's.
+    fn page_light(&self, profile: [u8; 3]) -> [u8; 3] {
+        self.pages.first().and_then(|p| p.light).unwrap_or(profile)
     }
 
     /// The player said what the screen shows now.
@@ -2700,13 +2929,18 @@ impl Front {
             return;
         }
         let (light, _) = screen_of(&self.page.draft()["lighting"]);
-        let (level, rgb) = (light[0], [light[1], light[2], light[3]]);
+        let (level, rgb) = (light[0], self.page_light([light[1], light[2], light[3]]));
         let sc = self.scale.max(1.0);
         let px = |w: f32| (w * sc).round() as u32;
-        let key = (self.lcd.rows.clone(), rgb, level, px(860.0));
+        // editing: the page as edited, read here; otherwise what the keyboard shows
+        let rows = match self.editor.as_ref().and_then(|ed| self.pages.get(ed.page)) {
+            Some(p) => crate::lcd_page::render(p, &self.readings),
+            None => self.lcd.rows.clone(),
+        };
+        let key = (rows.clone(), rgb, level, px(860.0));
         if self.lcd_drawn.as_ref() != Some(&key) {
             let lv = level as f32 / 255.0;
-            self.ui.set_lcd_big(crate::lcd_draw::picture(&self.lcd.rows, rgb, lv, px(860.0), px(172.0)));
+            self.ui.set_lcd_big(crate::lcd_draw::picture(&rows, rgb, lv, px(860.0), px(172.0)));
             self.ui.set_lcd_thumb(crate::lcd_draw::picture(&self.lcd.rows, rgb, lv, px(150.0), px(30.0)));
             self.lcd_drawn = Some(key);
         }
@@ -2720,6 +2954,46 @@ impl Front {
         }
     }
 
+}
+
+impl Front {
+    /// The page editor's boxes, its pieces over the screen, and its toolbar's words.
+    fn refresh_editor(&mut self) {
+        self.ui.set_screen_editing(self.editor.is_some());
+        let Some(ed) = self.editor.clone() else { return };
+        let Some(page) = self.pages.get(ed.page) else { return };
+        let avail = crate::lcd_page::available(&self.readings, self.weather.report().is_some());
+        let (light, _) = screen_of(&self.page.draft()["lighting"]);
+        let b = crate::screen_edit::boxes(page, ed.chosen, &self.readings, &avail, [light[1], light[2], light[3]], self.light_menu == Some(Ctl::ScrSource));
+        self.ui.set_ed_title(format!("Editing {}", page.name).into());
+        self.ui.set_ed_grid(ed.grid);
+        self.ui.set_ed_piece_title(b.piece_title.into());
+        self.ui.set_ed_piece_h(b.piece_h);
+        self.ui.set_ed_place_h(b.place_h);
+        self.ui.set_ed_page_title(b.page_title.into());
+        self.ui.set_ed_page_h(b.page_h);
+        sync_cells(&self.ed_models[0], b.piece);
+        sync_cells(&self.ed_models[1], b.place);
+        sync_cells(&self.ed_models[2], b.page);
+        // each piece outlined where it lands on the screen
+        let spans = crate::lcd_page::spans(page, &self.readings);
+        let pieces: Vec<crate::EdPiece> = page
+            .pieces
+            .iter()
+            .zip(spans)
+            .enumerate()
+            .map(|(i, (p, (row, start, len)))| {
+                let col = start.min(19);
+                crate::EdPiece { row: row as i32, col: col as i32, width: len.clamp(1, 20 - col) as i32, on: ed.chosen == Some(i), name: p.name().into() }
+            })
+            .collect();
+        show_rows(self.ui.get_ed_pieces(), |m| self.ui.set_ed_pieces(m), pieces);
+    }
+}
+
+/// The screen's pages as Ectodeck's settings keep them.
+fn pages_json(pages: &[crate::lcd_page::Page]) -> serde_json::Value {
+    serde_json::Value::Array(pages.iter().map(|p| p.to_json()).collect())
 }
 
 /// The launch sequence the playlist plays as its picture: the frames Grant

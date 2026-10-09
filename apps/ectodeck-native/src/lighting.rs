@@ -56,9 +56,22 @@ pub enum Ctl {
     LcdPreset,
     /// when the effect plays: one of PLAYS, a start and a stop together
     Plays,
+    /// the screen's page editor: a piece's words, its reading (the menu),
+    /// °C or °F, a 24- or 12-hour clock, its row, column and width (0 less,
+    /// 1 more), its alignment, taking it off; the page's screen light
+    ScrText,
+    ScrSource,
+    ScrUnits,
+    ScrHours,
+    ScrRow,
+    ScrCol,
+    ScrWidth,
+    ScrAlign,
+    ScrRemove,
+    ScrLight,
 }
 
-const CTLS: [Ctl; 35] = [
+const CTLS: [Ctl; 45] = [
     Ctl::None,
     Ctl::Color,
     Ctl::Colors,
@@ -94,6 +107,16 @@ const CTLS: [Ctl; 35] = [
     Ctl::Preset,
     Ctl::LcdPreset,
     Ctl::Plays,
+    Ctl::ScrText,
+    Ctl::ScrSource,
+    Ctl::ScrUnits,
+    Ctl::ScrHours,
+    Ctl::ScrRow,
+    Ctl::ScrCol,
+    Ctl::ScrWidth,
+    Ctl::ScrAlign,
+    Ctl::ScrRemove,
+    Ctl::ScrLight,
 ];
 
 pub fn ctl(id: i32) -> Ctl {
@@ -250,25 +273,25 @@ fn rgb3(v: &Value) -> [u8; 3] {
 }
 
 /// A box's pieces, top to bottom, 16 in from its sides.
-struct Stack {
-    w: f32,
-    y: f32,
-    cells: Vec<Cell>,
+pub(crate) struct Stack {
+    pub(crate) w: f32,
+    pub(crate) y: f32,
+    pub(crate) cells: Vec<Cell>,
     groups: usize,
 }
 
 impl Stack {
-    fn new(w: f32) -> Stack {
+    pub(crate) fn new(w: f32) -> Stack {
         // under the box's title
         Stack { w, y: 48.0, cells: Vec::new(), groups: 0 }
     }
-    fn inner(&self) -> f32 {
+    pub(crate) fn inner(&self) -> f32 {
         self.w - 32.0
     }
-    fn gap(&mut self, h: f32) {
+    pub(crate) fn gap(&mut self, h: f32) {
         self.y += h;
     }
-    fn note(&mut self, s: &str) {
+    pub(crate) fn note(&mut self, s: &str) {
         let lines = text::wrap(400, 12.5, s, self.inner());
         for (k, line) in lines.iter().enumerate() {
             self.cells.push(text_cell(style::NOTE, 16.0, self.y + k as f32 * 18.0, self.inner(), 18.0, line));
@@ -276,7 +299,7 @@ impl Stack {
         self.y += lines.len() as f32 * 18.0;
     }
     /// a group: a hairline over all but the first, then its name in small capitals
-    fn group(&mut self, name: &str) {
+    pub(crate) fn group(&mut self, name: &str) {
         if self.groups > 0 {
             self.y += 16.0;
             self.cells.push(Cell { color: slint::Color::from_rgb_u8(0x2b, 0x2b, 0x30), ..cell(kind::BOX, 16.0, self.y, self.inner(), 1.0) });
@@ -289,7 +312,7 @@ impl Stack {
         self.y += 14.0 + 12.0;
     }
     /// a setting's name, and its value in a small well at the right
-    fn head(&mut self, label: &str, value: Option<&str>) {
+    pub(crate) fn head(&mut self, label: &str, value: Option<&str>) {
         self.cells.push(text_cell(style::PROP, 16.0, self.y, self.inner(), 20.0, label));
         if let Some(v) = value {
             let w = text::width(500, 11.5, v) + 16.0;
@@ -298,7 +321,7 @@ impl Stack {
         self.y += 20.0 + 8.0;
     }
     /// a slider, filled to its place in `fill`, its ends named under it
-    fn slider(&mut self, c: Ctl, frac: f32, fill: slint::Color, ends: Option<(&str, &str)>) {
+    pub(crate) fn slider(&mut self, c: Ctl, frac: f32, fill: slint::Color, ends: Option<(&str, &str)>) {
         self.cells.push(Cell { value: frac, color: fill, id: id(c), ..cell(kind::FILLED, 16.0, self.y, self.inner(), 20.0) });
         self.y += 20.0;
         if let Some((l, r)) = ends {
@@ -309,7 +332,7 @@ impl Stack {
         }
     }
     /// a run of colors, as the effect blends them
-    fn strip(&mut self, cols: &[[u8; 3]]) {
+    pub(crate) fn strip(&mut self, cols: &[[u8; 3]]) {
         let n = cols.len().max(2) - 1;
         let w = self.inner() / n as f32;
         for k in 0..n {
@@ -320,7 +343,7 @@ impl Stack {
         self.y += 10.0 + 12.0;
     }
     /// colors as dots, 8 apart, wrapping; the one the picker is open on ringed
-    fn dots(&mut self, c: Ctl, cols: &[[u8; 3]], open: Option<usize>, code: bool) {
+    pub(crate) fn dots(&mut self, c: Ctl, cols: &[[u8; 3]], open: Option<usize>, code: bool) {
         let (mut x, mut y) = (16.0f32, self.y);
         for (j, col) in cols.iter().enumerate() {
             if x > 16.0 && x + 28.0 > self.w - 16.0 {
@@ -336,7 +359,7 @@ impl Stack {
         self.y = y + 28.0;
     }
     /// a switch across the box: each choice its share, with its icon if it has one
-    fn switch(&mut self, c: Ctl, opts: &[(&str, &str)], chosen: usize) {
+    pub(crate) fn switch(&mut self, c: Ctl, opts: &[(&str, &str)], chosen: usize) {
         self.cells.push(Cell { style: 1, ..cell(kind::SEG, 16.0, self.y, self.inner(), 34.0) });
         let n = opts.len() as f32;
         let each = (self.inner() - 6.0 - 2.0 * (n - 1.0)) / n;
@@ -352,18 +375,18 @@ impl Stack {
         }
         self.y += 34.0;
     }
-    fn check(&mut self, c: Ctl, on: bool, label: &str) {
+    pub(crate) fn check(&mut self, c: Ctl, on: bool, label: &str) {
         self.cells.push(Cell { on, id: id(c), text: label.into(), ..cell(kind::CHECKBOX, 16.0, self.y, 28.0 + text::width(400, 13.0, label), 20.0) });
         self.y += 20.0;
     }
-    fn dropdown(&mut self, c: Ctl, shown: &str, open: bool) {
+    pub(crate) fn dropdown(&mut self, c: Ctl, shown: &str, open: bool) {
         self.cells.push(Cell { text: shown.into(), on: open, id: id(c), ..cell(kind::DROP, 16.0, self.y, self.inner(), 34.0) });
         self.y += 34.0;
     }
     /// areas as chips, 6 apart, wrapping, a chosen one ticked; `index` is each
     /// one's place in ZONES. Faded (style 2) while the whole keyboard is lit;
     /// `hot` is the one the pointer is over on the keyboard's picture.
-    fn chips(&mut self, c: Ctl, chips: &[(usize, &str, bool)], faded: bool, hot: Option<usize>) {
+    pub(crate) fn chips(&mut self, c: Ctl, chips: &[(usize, &str, bool)], faded: bool, hot: Option<usize>) {
         let (mut x, mut y) = (0.0f32, self.y);
         for (index, name, on) in chips {
             let w = text::width(400, 12.5, name) + 24.0 + if *on { 14.0 } else { 0.0 };
@@ -378,11 +401,11 @@ impl Stack {
         self.y = y + 28.0;
     }
     /// a quiet link at the right of the row it sits on
-    fn link_right(&mut self, c: Ctl, label: &str, y: f32, icon: &str) {
+    pub(crate) fn link_right(&mut self, c: Ctl, label: &str, y: f32, icon: &str) {
         let w = text::width(500, 12.5, label) + 18.0 + if icon.is_empty() { 0.0 } else { 20.0 };
         self.cells.push(Cell { text: label.into(), lines: icon.into(), id: id(c), ..cell(kind::QUIET, self.w - 16.0 - w + 8.0, y, w, 24.0) });
     }
-    fn height(&self) -> f32 {
+    pub(crate) fn height(&self) -> f32 {
         self.y + 18.0
     }
 }

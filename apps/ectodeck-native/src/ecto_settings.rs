@@ -16,6 +16,10 @@ const WMO: [(i32, &str); 28] = [
     (71, "Light snow"), (73, "Snow"), (75, "Heavy snow"), (77, "Snow grains"), (80, "Light showers"), (81, "Showers"), (82, "Heavy showers"),
     (85, "Snow showers"), (86, "Heavy snow showers"), (95, "Thunderstorm"), (96, "Thunderstorm with hail"), (99, "Thunderstorm with hail"),
 ];
+/// The sky in words, from the weather's code.
+pub fn sky(code: i32) -> String {
+    WMO.iter().find(|(k, _)| *k == code).map_or(format!("Weather code {code}"), |(_, n)| n.to_string())
+}
 const ALERTS: [(i32, &str); 3] = [(1, "Tropical storm"), (2, "Hurricane"), (3, "Tornado")];
 
 /// the page's column, inside its padding, and a card's rows
