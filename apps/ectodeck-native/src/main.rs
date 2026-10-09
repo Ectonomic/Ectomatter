@@ -564,6 +564,18 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         slint::platform::update_timers_and_animations();
         front.act();
     }
+    // ECTODECK_NATIVE_CLICKS_AFTER: clicks once the typing is done ("x,y;x,y")
+    for click in std::env::var("ECTODECK_NATIVE_CLICKS_AFTER").unwrap_or_default().split(';').filter(|c| !c.is_empty()) {
+        let mut xy = click.split(',').map(|v| v.trim().parse::<f32>().unwrap_or(0.0));
+        let position = LogicalPosition::new(xy.next().unwrap_or(0.0), xy.next().unwrap_or(0.0));
+        window.dispatch_event(WindowEvent::PointerMoved { position });
+        window.dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Left });
+        window.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
+        front.act();
+        window.draw_if_needed(|r| {
+            r.render(&mut pic.ui, w as usize);
+        });
+    }
     // the wheel turned over the page, in logical pixels
     if let Some(dy) = std::env::var("ECTODECK_NATIVE_SCROLL").ok().and_then(|v| v.parse::<f32>().ok()) {
         // where the wheel turns: ECTODECK_NATIVE_SCROLL_AT="x,y", or the page's middle
