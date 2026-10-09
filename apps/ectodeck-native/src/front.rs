@@ -2080,10 +2080,10 @@ impl Front {
         ui.set_hint(
             match p.view {
                 View::Keys if p.sel.is_some() => "Escape clears the choice.",
-                View::Keys => "Pick any key to give it a new job. The keyboard keeps it, even with Ectodeck closed.",
-                View::Lighting => "Pick an effect and tune it below. Each profile keeps its own lighting, saved on the keyboard.",
+                View::Keys => "Click a key on the keyboard or in the Key library to change what the key does.",
+                View::Lighting => "Choose a lighting effect for this profile, then set the colors, speed and zones below.",
                 View::Display => "The keyboard’s settings are the same on every profile.",
-                View::Screen => "Keep an eye on your computer from the keyboard’s screen. Set its light below, and what it shows when Ectodeck is closed.",
+                View::Screen => "Choose what the keyboard’s screen shows while Ectodeck is open and when Ectodeck is closed.",
             }
             .into(),
         );
