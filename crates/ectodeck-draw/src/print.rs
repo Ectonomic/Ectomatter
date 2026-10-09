@@ -308,9 +308,12 @@ pub struct Icon {
 pub struct Own {
     pub style: Style,
     /// the typeface and weight the core's drawing has its legends in, where
-    /// that is other than its print's own: the drawing's legends are shown
+    /// that is other than its print's own, and the sizes it draws them at
+    /// (letters, words, inset), where those are other than the print's (the
+    /// print's follow the keyboard itself): the drawing's legends are shown
     /// as drawn only when they are set as it draws them
     pub art: Option<(String, u16)>,
+    pub art_sizes: Option<(f32, f32, f32)>,
     pub symbols: String,
     pub fonts: Vec<String>,
     pub icons: HashMap<String, Icon>,
@@ -321,11 +324,14 @@ pub struct Own {
 
 impl Own {
     /// The style the drawing's legends are drawn in: the print's own, in the
-    /// typeface the drawing has them in where that is another.
+    /// typeface and at the sizes the drawing has them in where those are others.
     pub fn drawn(&self) -> Style {
         let mut s = self.style.clone();
         if let Some((t, w)) = &self.art {
             (s.typeface, s.weight) = (t.clone(), *w);
+        }
+        if let Some((l, w, i)) = self.art_sizes {
+            (s.letters, s.words, s.inset) = (l, w, i);
         }
         s
     }
@@ -348,8 +354,13 @@ impl Own {
             .unwrap_or_default();
         let fonts = p["fonts"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default();
         let art = p["art"]["typeface"].as_str().map(|t| (t.to_string(), p["art"]["weight"].as_f64().map_or(400, |w| w.round() as u16)));
+        let a = |k: &str| p["art"][k].as_f64().map(|v| v as f32);
+        let art_sizes = match (a("letters"), a("words"), a("inset")) {
+            (Some(l), Some(w), Some(i)) => Some((l, w, i)),
+            _ => None,
+        };
         let swap = p["swap"].as_object().map(|o| o.iter().filter_map(|(k, v)| Some((k.chars().next()?, v.as_str()?.chars().next()?))).collect()).unwrap_or_default();
-        Some(Own { style, art, symbols: p["symbols"].as_str().unwrap_or("").to_string(), fonts, icons, swap })
+        Some(Own { style, art, art_sizes, symbols: p["symbols"].as_str().unwrap_or("").to_string(), fonts, icons, swap })
     }
 }
 
@@ -1074,7 +1085,8 @@ mod tests {
         assert_eq!((own.style.typeface.as_str(), own.style.weight, own.symbols.as_str()), ("Orbitron", 600, "Z10 Symbols"));
         assert_eq!(own.swap, [('0', 'O')], "Orbitron's plain zero");
         assert_eq!(own.art, Some(("Barlow Semi Condensed".to_string(), 600)), "the drawing's legends in Barlow");
-        assert_eq!((own.drawn().typeface.as_str(), own.drawn().weight, own.drawn().letters), ("Barlow Semi Condensed", 600, own.style.letters));
+        assert_eq!((own.drawn().typeface.as_str(), own.drawn().weight, own.drawn().letters), ("Barlow Semi Condensed", 600, 3.786), "the drawing's legends at the drawing's sizes");
+        assert_eq!((own.style.letters, own.style.words), (2.8, 1.9), "the print's at the keyboard's own, measured from photographs");
         assert!(own.icons.contains_key("mute"));
         let s = Style::over(&own.style, &serde_json::json!({ "typeface": "Montserrat", "place": "middle", "words": 2.2 }));
         assert_eq!((s.typeface.as_str(), s.place, s.words, s.letters), ("Montserrat", Place::Middle, 2.2, own.style.letters));

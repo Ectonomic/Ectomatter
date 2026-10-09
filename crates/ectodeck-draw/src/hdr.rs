@@ -2263,6 +2263,9 @@ mod tests {
         // (the drawing's own legends, as it draws them: these are about the light)
         device["light"]["legends"]["typeface"] = serde_json::json!("Barlow Semi Condensed");
         device["light"]["legends"]["weight"] = serde_json::json!(600);
+        for k in ["letters", "words", "inset"] {
+            device["light"]["legends"][k] = device["print"]["art"][k].clone();
+        }
         let b = Board::new(&tree, &device, [0x20, 0x20, 0x20], 1264, 506).unwrap();
         (tree, device, b)
     }
@@ -2590,8 +2593,8 @@ mod tests {
         eprintln!("every key's legend set anew in {:?}", t.elapsed());
         let one_letter = b.keys.iter().position(|k| k.id == "q").unwrap();
         assert_ne!(now(&b)[one_letter], art[one_letter], "Q's letter set larger");
-        // the core's own again: the art's legends, exactly
-        light["legends"].as_object_mut().unwrap().remove("letters");
+        // the drawing's own again: the art's legends, exactly
+        light["legends"]["letters"] = device["print"]["art"]["letters"].clone();
         light.as_object_mut().unwrap().remove("keys");
         b.set_legends(b.legends_for(&light).unwrap().set(&db));
         assert!(now(&b) == art, "the art's legends back");
