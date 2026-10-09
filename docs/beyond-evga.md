@@ -19,6 +19,7 @@ unused flash; flashing EVGA's own file puts everything back.
 | The computer can set the dimmer's level and hold it there | build 2 | Only the slider set the backlight |
 | The volume slider can be lent to the computer: the keyboard stops sending volume keys from it, so it can do another job | build 3 | It always sent volume keys |
 | The dimmer stays where it is set until the slider moves | build 3 | The slider's position always won |
+| The keyboard tells the computer when Fn is held, so a slider can do something else with it | build 4 | Fn stayed inside the keyboard; nothing of it reached the computer |
 
 ## Ectodeck
 
@@ -27,6 +28,7 @@ unused flash; flashing EVGA's own file puts everything back.
 | Runs on Linux | first release | Windows only |
 | Each slider can be given another job: the dimmer can control the system or microphone volume, the volume slider the keyboard's brightness or the microphone, or either nothing (needs firmware build 2 or 3) | `b8b0e72` | No settings for the sliders |
 | A slider set aside because the other took its job gets it back when the other gives it up | `286e082` | (no slider jobs) |
+| Each slider can do a second job while Fn is held, set on the Function layer (needs firmware build 4) | `3b138a1` | (no slider jobs) |
 | The sliders' positions shown live on the picture of the keyboard and in their boxes | `ef08dae` | None |
 | The keyboard drawn in HDR and lit the way its LEDs light it, through the caps, with the light simulated | `e4b9e9a` | A flat picture of the keyboard |
 | The Key lab: set up the caps (shine-through, pudding or translucent), the legends (typeface, weight, size and place, for every key or one), and the LEDs, and save them as setups | `e9805b2` | None |
