@@ -1,10 +1,9 @@
 // Ectodeck's main window, drawn natively: the title bar, the rail, the home,
 // and the Z10's page, as the web app showed them before the HDR work began
 // (commit cd9ea82: window.css, shell.css, style.css, and device.css over it).
-// The device's page is in the language of the home and the rail: nothing
-// boxed, the keyboard straight on the page's ground, flat greys told apart by
-// shade with no outlines or dividing lines, and a chosen item shown lighter,
-// as in the rail. Only what the key panel edits sits on a tile.
+// The device's page: the keyboard in a dark box of its own, the tab's boxes
+// under it, flat greys told apart by shade with no outlines or dividing
+// lines, and a chosen item shown lighter, as in the rail.
 //
 // The keyboard is not drawn here. The page leaves a hole where it goes, and
 // the window draws the keyboard's HDR picture into that hole, under anything
@@ -2105,7 +2104,8 @@ component LayerSwitch inherits Rectangle {
 // library's scrollbar at its edge when there is more than shows.
 component ScrollBox inherits Rectangle {
     in property <length> need;
-    background: Ink.box;
+    in property <brush> fill: Ink.box;
+    background: root.fill;
     border-radius: 12px;
     clip: true;
     sb-flick := Flickable {
@@ -2966,7 +2966,7 @@ export component AppWindow inherits Window {
     // the keyboard has been drawn: its knobs and display come with it, never before
     in property <bool> board-ready;
     in property <duration> knob-glide: 120ms;
-    out property <length> board-x: rail-w + pws-x;
+    out property <length> board-x: rail-w + pws-x + kb-pad-x;
     out property <length> board-y: bar + 56px + flick.content-y + board-top;
     out property <length> board-width: board-w;
     out property <length> board-height: board-h;
@@ -3056,14 +3056,18 @@ export component AppWindow inherits Window {
     // the keyboard fills the page's width, at the drawing's proportions, under the head
     // over the keyboard, one line: what to do here, and Show rebindings
     property <length> head-h: 36px;
-    property <length> board-top: 12px + head-h + 6px;
+    property <length> head-end: 12px + head-h + 6px;
+    // the keyboard sits in a box of its own, a gutter round it
+    property <length> kb-pad-x: 48px;
+    property <length> kb-pad-y: 24px;
+    property <length> board-top: head-end + kb-pad-y;
     // under the keyboard: the anchoring column (the profiles, what goes with
     // them), and beside it the tab's boxes
-    property <length> under-top: board-top + board-h + 18px;
+    property <length> under-top: head-end + board-h + 2 * kb-pad-y + 18px;
     property <length> anchor-w: 240px;
     property <length> under-x: pws-x + anchor-w + 16px;
     out property <length> under-w: pws-w - anchor-w - 16px;
-    property <length> board-w: pws-w;
+    property <length> board-w: pws-w - 2 * kb-pad-x;
     property <length> board-h: board-w * root.units-high / root.units;
     property <length> unit: board-w / root.units;
     property <length> cqw: board-w / 100;
@@ -3078,7 +3082,7 @@ export component AppWindow inherits Window {
     // its foot), between those as tall as the tallest holds. What holds more
     // than that scrolls inside its block.
     property <length> band-min: anchor.preferred-height;
-    property <length> room: flick.height - under-top - 24px;
+    property <length> room: flick.height - head-end - board-h - 2 * kb-pad-y - 18px - 24px;
     property <length> band-max: max(band-min, room);
     property <length> second-need: root.slider-chosen != 0 ? 328px : root.key-open ? (root.key-note != "" ? 320px : 270px) : 230px;
     property <length> keys-h: min(band-max, max(band-min, second-fits ? second-need : 0));
@@ -3104,7 +3108,7 @@ export component AppWindow inherits Window {
     property <length> tab-h: root.tab == 0 ? (second-fits ? keys-h : keys-h + 12px + second-h)
         : root.tab == 1 ? light-h : root.tile-height;
     property <length> under-board: 18px + max(anchor.preferred-height, tab-h);
-    property <length> page-h: root.tab == 2 ? 12px + head-h + 6px + 24px + root.tile-height + 40px : board-top + board-h + under-board + 24px;
+    property <length> page-h: root.tab == 2 ? 12px + head-h + 6px + 24px + root.tile-height + 40px : board-top + board-h + kb-pad-y + under-board + 24px;
     // the page's scrollbar, as WebKit drew it: over the whole window, when the page is longer than it
     property <length> doc-h: bar + 56px + page-h;
 
@@ -3289,6 +3293,8 @@ export component AppWindow inherits Window {
                 }
                 key-tile := ScrollBox {
                     visible: root.tab == 0 && root.boot == 0;
+                    // Game mode in the Profiles box's darker shade; a key or a slider in a box's
+                    fill: !root.key-open && root.slider-chosen == 0 ? Ink.well : Ink.box;
                     x: under-x + (second-fits ? lib-w + 12px : 0);
                     y: under-top + (second-fits ? 0 : keys-h + 12px);
                     width: second-w;
@@ -3411,11 +3417,45 @@ export component AppWindow inherits Window {
                     }
                 }
 
+                // the keyboard's box, in the Profiles box's shade, which the keyboard
+                // is drawn on: a frame round the hole, which the window fills
+                if root.tab != 2: Rectangle {
+                    x: pws-x;
+                    y: board-top - kb-pad-y;
+                    width: pws-w;
+                    height: kb-pad-y;
+                    border-top-left-radius: 12px;
+                    border-top-right-radius: 12px;
+                    background: Ink.well;
+                }
+                if root.tab != 2: Rectangle {
+                    x: pws-x;
+                    y: board-top + board-h;
+                    width: pws-w;
+                    height: kb-pad-y;
+                    border-bottom-left-radius: 12px;
+                    border-bottom-right-radius: 12px;
+                    background: Ink.well;
+                }
+                if root.tab != 2: Rectangle {
+                    x: pws-x;
+                    y: board-top;
+                    width: kb-pad-x;
+                    height: board-h;
+                    background: Ink.well;
+                }
+                if root.tab != 2: Rectangle {
+                    x: pws-x + pws-w - kb-pad-x;
+                    y: board-top;
+                    width: kb-pad-x;
+                    height: board-h;
+                    background: Ink.well;
+                }
                 // the keys, over the keyboard's hole: a click on the keyboard away
                 // from every key lets the chosen one go; then what is drawn over it
                 Rectangle {
                     visible: root.tab != 2;
-                    x: pws-x;
+                    x: pws-x + kb-pad-x;
                     y: board-top;
                     width: board-w;
                     height: board-h;
