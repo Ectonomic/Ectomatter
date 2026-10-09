@@ -83,24 +83,21 @@ impl Stats {
         Some(((total - avail) as f64 / (1u64 << 30) as f64, total as f64 / (1u64 << 30) as f64))
     }
 
-    /// The four rows. A reading that can't be had says so in its row.
+    /// Everything the computer reads now, for a page (the time, the profile
+    /// and the weather are the page's player's to add).
+    pub fn read(&mut self) -> crate::lcd_page::Readings {
+        // in the order the service read them
+        let (cpu_temp, cpu_load, cpu_ghz) = (self.cpu_temp(), self.cpu_load(), self.cpu_ghz());
+        let ram = self.ram_gib();
+        let gpu = self.gpu.read().ok();
+        crate::lcd_page::Readings { cpu_temp, cpu_load, cpu_ghz, ram, gpu, ..Default::default() }
+    }
+
+    /// The Stats page's four rows, as the service wrote them. A reading that
+    /// can't be had says so in its row.
     pub fn rows(&mut self) -> Vec<String> {
-        // a 20-column grid: the label at the left edge, the temperature from
-        // column 4, every row ending flush at column 19
-        let (t, load, ghz) = (self.cpu_temp(), self.cpu_load(), self.cpu_ghz());
-        let cpu = match (t, ghz) {
-            (Some(t), Some(ghz)) => format!("CPU {t:>2.0}° {load:>3.0}% {:>4.0}MHz", ghz * 1000.0),
-            _ => "CPU unavailable".into(),
-        };
-        let ram = match self.ram_gib() {
-            Some((used, total)) => format!("RAM {:>16}", format!("{used:.1} / {total:.1} GB")),
-            None => "RAM unavailable".into(),
-        };
-        let (gpu, vram) = match self.gpu.read() {
-            Ok((t, load, mhz, vused, vtotal)) => (format!("GPU {t:>2}° {load:>3}% {mhz:>4}MHz"), format!("VRAM{:>16}", format!("{vused:.1} / {vtotal:.1} GB"))),
-            Err(_) => ("GPU unavailable".into(), String::new()),
-        };
-        vec![cpu, gpu, ram, vram]
+        let r = self.read();
+        crate::lcd_page::render(&crate::lcd_page::Page::stats(), &r)
     }
 }
 

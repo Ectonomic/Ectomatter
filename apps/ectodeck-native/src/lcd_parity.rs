@@ -42,7 +42,12 @@ fn the_stats_page_reads_alike() {
         let mut s = Stats::new(&dir, Box::new(FakeGpu(vec![gpu])));
         s.cpu_load();
         computer(&dir, c["temp"].as_i64().unwrap(), &freqs, stat(1), mem);
-        assert_eq!(s.rows(), strings(&case["rows"]), "computer {i}");
+        // read once, then shown by the Stats page as it ships and as it comes
+        // back from Ectodeck's settings: both as the service wrote it
+        let r = s.read();
+        let saved = crate::lcd_page::Page::from_json(&crate::lcd_page::Page::stats().to_json()).unwrap();
+        assert_eq!(crate::lcd_page::render(&crate::lcd_page::Page::stats(), &r), strings(&case["rows"]), "computer {i}");
+        assert_eq!(crate::lcd_page::render(&saved, &r), strings(&case["rows"]), "computer {i}, the saved page");
         std::fs::remove_dir_all(&dir).ok();
     }
 }

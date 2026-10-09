@@ -29,6 +29,7 @@ mod shadow;
 mod lab;
 mod lcd_anim;
 mod lcd_draw;
+mod lcd_page;
 #[cfg(test)]
 mod lcd_parity;
 mod lcd_player;
