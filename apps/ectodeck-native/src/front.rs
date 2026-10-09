@@ -2080,13 +2080,15 @@ impl Front {
         ui.set_hint(
             match p.view {
                 View::Keys if p.sel.is_some() => "Escape clears the choice.",
-                View::Keys => "Click a key on the keyboard or in the Key library.",
-                View::Lighting => "The keyboard plays the effect as you change it.",
+                View::Keys => "Pick any key to give it a new job. The keyboard keeps it, even with Ectodeck closed.",
+                View::Lighting => "Pick an effect and tune it below. Each profile keeps its own lighting, saved on the keyboard.",
                 View::Display => "The keyboard’s settings are the same on every profile.",
-                View::Screen => self.screen_hint(),
+                View::Screen => "Keep an eye on your computer from the keyboard’s screen. Set its light below, and what it shows when Ectodeck is closed.",
             }
             .into(),
         );
+        // on Screen, what the screen is doing now, beside Pause
+        ui.set_screen_status(self.screen_status().into());
 
         // the keys over the keyboard; on Lighting, the area the pointer is over outlined
         let (x0, y0, _, _) = p.view_box;
@@ -2668,7 +2670,8 @@ impl Front {
         }
     }
 
-    fn screen_hint(&self) -> &'static str {
+    /// What the screen is doing now, said beside Pause on the Screen tab.
+    fn screen_status(&self) -> &'static str {
         use crate::lcd_player::State;
         match (self.lcd.state, self.lcd.sequence) {
             (_, _) if !self.controlled => "Ectodeck leaves this keyboard to other programs.",

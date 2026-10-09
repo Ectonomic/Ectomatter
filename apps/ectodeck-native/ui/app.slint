@@ -3111,6 +3111,8 @@ export component AppWindow inherits Window {
     in property <bool> lcd-announce: true;
     in property <length> closed-h;
     callback lcd-pause();
+    // what the screen is doing now, shown beside Pause
+    in property <string> screen-status;
     callback lcd-announce-toggled();
     // the chosen key, and its two layers
     in property <bool> key-open;
@@ -3389,18 +3391,6 @@ export component AppWindow inherits Window {
                     }
                     if root.boot == 0: HorizontalLayout {
                         spacing: 16px;
-                        // on Screen, a dot that breathes while Ectodeck plays the screen
-                        if root.tab == 3 && root.lcd-state == 0: Rectangle {
-                            width: 6px;
-                            Rectangle {
-                                y: (parent.height - 6px) / 2;
-                                width: 6px;
-                                height: 6px;
-                                border-radius: 3px;
-                                background: Ink.good;
-                                opacity: 0.55 + 0.45 * cos(animation-tick() / 1600ms * 360deg);
-                            }
-                        }
                         Text {
                             text: root.hint;
                             font-family: "Geist";
@@ -3468,7 +3458,31 @@ export component AppWindow inherits Window {
                                 clicked => { root.show-rebindings(); }
                             }
                         }
-                        // on Screen, Pause holds the screen as it is; Play carries on
+                        // on Screen, what it is doing now, a dot that breathes while
+                        // Ectodeck plays it; then Pause, which holds the screen as it
+                        // is, and Play, which carries on
+                        if root.tab == 3: HorizontalLayout {
+                            horizontal-stretch: 0;
+                            spacing: 8px;
+                            if root.lcd-state == 0: Rectangle {
+                                width: 6px;
+                                Rectangle {
+                                    y: (parent.height - 6px) / 2;
+                                    width: 6px;
+                                    height: 6px;
+                                    border-radius: 3px;
+                                    background: Ink.good;
+                                    opacity: 0.55 + 0.45 * cos(animation-tick() / 1600ms * 360deg);
+                                }
+                            }
+                            Text {
+                                text: root.screen-status;
+                                font-family: "Geist";
+                                font-size: 12.5px;
+                                color: Ink.soft;
+                                vertical-alignment: center;
+                            }
+                        }
                         if root.tab == 3 && root.lcd-state <= 1: VerticalLayout {
                             alignment: center;
                             WordButton {
