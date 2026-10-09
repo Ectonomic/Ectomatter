@@ -727,7 +727,8 @@ pub fn color_of(page: &Page, c: Ctl, index: usize, paint: [u8; 3]) -> [u8; 3] {
 pub fn icon(mode: &str, scale: f32) -> slint::Image {
     const W: f32 = 72.0;
     const H: f32 = 40.0;
-    let across = if mode == "wave" { 2.0 } else { 1.0 };
+    // (Wave rolls along a picture twice as wide; Pulse is five tiles wide, a color each)
+    let across = if mode == "wave" { 2.0 } else if mode == "pulse" { 5.0 } else { 1.0 };
     let (w, h) = ((W * across * scale).round() as u32, (H * scale).round() as u32);
     let hex = |s: &str| -> [f32; 3] {
         let s = s.trim_start_matches('#');
@@ -756,13 +757,10 @@ pub fn icon(mode: &str, scale: f32) -> slint::Image {
         let c = match mode {
             "static" => hex("#d8421e"),
             "breathing" => run(&["#140806", "#d8421e", "#140806"], u),
-            "pulse" => {
-                if cx % 13.0 < 9.0 {
-                    hex("#1d6bff")
-                } else {
-                    dark
-                }
-            }
+            // five colors side by side, hard against each other: the keys take
+            // each in turn, with nothing between (the tile, chosen, shows one
+            // at a time)
+            "pulse" => hex(["#f33", "#fd3", "#3f6", "#3cf", "#94f"][((u * 5.0) as usize).min(4)]),
             "spiral" => {
                 // conic, from 90deg: 0 at the right, going round clockwise
                 let a = (cy - H / 2.0).atan2(cx - W / 2.0).to_degrees();
