@@ -861,6 +861,10 @@ impl Front {
                     self.layer = i.clamp(0, 1) as usize;
                     self.listening = None;
                     self.close_menu();
+                    // the sliders are no part of the Function layer
+                    if self.layer == 1 {
+                        self.slider_sel = 0;
+                    }
                 }
                 Ask::LibToggle(g) => {
                     if !self.lib_shut.remove(&g) {
@@ -2111,7 +2115,10 @@ impl Front {
                 set_rows(&model, if open { rows } else { Vec::new() });
                 groups.push(LibGroup { name: name.into(), count: total as i32, rebound, open, rows: ModelRc::from(model) });
             };
-            push("Sliders", slider_rows, 2);
+            // (on Base only: Fn gives the sliders no second job)
+            if self.layer == 0 {
+                push("Sliders", slider_rows, 2);
+            }
             for (g, keys) in lib_groups(p) {
                 let total = keys.len();
                 let rows: Vec<LibRow> = keys
@@ -2167,8 +2174,6 @@ impl Front {
                 let rest_note = resting.map(|l| format!("Set to Nothing while the {other} does {}. It goes back to {} when the {other} does something else.", l.to_lowercase(), l.to_lowercase()));
                 let note = if let Some(n) = &rest_note {
                     n.as_str()
-                } else if self.layer == 1 {
-                    "The sliders do the same on both layers."
                 } else if s == 1 && self.bind[1] != "own" && !crate::display::has(&fw, "volume.quiet") {
                     "The keyboard still sends volume keys from this slider as well. Its firmware can be told not to, from build 3."
                 } else if s == 0 && self.bind[0] != "own" {
