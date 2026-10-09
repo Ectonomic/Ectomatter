@@ -435,6 +435,7 @@ fn main() {
     ui.set_home_glyph(glyph(include_str!("../ui/glyphs/home.svg"), 22, true));
     ui.set_keyboard_glyph(glyph(include_str!("../ui/glyphs/keyboard.svg"), 22, true));
     ui.set_settings_glyph(glyph(include_str!("../ui/glyphs/settings.svg"), 22, true));
+    ui.set_lab_glyph(glyph(include_str!("../ui/glyphs/lab.svg"), 22, true));
     ui.set_keyboard_tile(glyph(include_str!("../ui/glyphs/keyboard.svg"), 88, true));
     ui.set_rail_open(uistate::get("rail_open").and_then(|v| v.as_bool()).unwrap_or(false));
     slint::ComponentHandle::show(&ui).unwrap();
@@ -1414,6 +1415,7 @@ impl App {
                 }
                 WindowAsk::Close => self.hide(),
                 WindowAsk::OpenMacros(n) => self.open_macros(*n),
+                WindowAsk::OpenLab => self.open_lab(),
             }
         }
         let asks = [(MACROS, self.front.act_macros()), (LAB, self.front.act_lab())];
@@ -1438,7 +1440,7 @@ impl App {
                         }
                     }
                     WindowAsk::Close => self.hide_sub(which),
-                    WindowAsk::OpenMacros(_) => {}
+                    WindowAsk::OpenMacros(_) | WindowAsk::OpenLab => {}
                 }
             }
         }
@@ -1503,6 +1505,7 @@ impl App {
         } else {
             self.show_sub(LAB);
         }
+        self.front.ui.set_lab_open(true);
         self.readout();
     }
 
@@ -1538,6 +1541,9 @@ impl App {
             if let Some(m) = &mut self.front.macros {
                 m.cancel_recording(&self.front.page);
             }
+        }
+        if which == LAB {
+            self.front.ui.set_lab_open(false);
         }
         let Some(sw) = &mut self.subs[which] else { return };
         sw.window.wl_surface().attach(None, 0, 0);

@@ -159,6 +159,8 @@ pub enum WindowAsk {
     Close,
     /// open the Macro Editor's window, on this macro (0: as it was)
     OpenMacros(u32),
+    /// open the Key lab's window
+    OpenLab,
 }
 
 const LAYERS: [(&str, &str); 2] = [("keys", "When pressed"), ("fnkeys", "When Fn is held")];
@@ -943,6 +945,11 @@ impl Front {
                     self.ui.set_place(place.into());
                 }
                 // the item already chosen opens the rail into its blade, or closes it
+                // the Key lab is a window of its own, not a place in this one
+                Ask::Rail(place) if place == "lab" => {
+                    self.close_menu();
+                    window.push(WindowAsk::OpenLab);
+                }
                 Ask::Rail(place) => {
                     self.close_menu();
                     if self.ui.get_place() == place.as_str() {

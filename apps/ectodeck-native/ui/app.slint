@@ -2879,6 +2879,9 @@ export component AppWindow inherits Window {
     in property <image> keyboard-glyph;
     in property <image> keyboard-tile;
     in property <image> settings-glyph;
+    // the Key lab's flask, and whether its window is open
+    in property <image> lab-glyph;
+    in property <bool> lab-open;
     in property <int> tab: 0;
     in-out property <string> place: "home";
     in-out property <bool> rail-open;
@@ -3672,6 +3675,18 @@ export component AppWindow inherits Window {
             open: root.rail-open;
             reveal: root.reveal;
             clicked => { root.rail("z10"); }
+        }
+        // the Key lab, which opens in a window of its own, over Settings
+        r-lab := RailItem {
+            x: 10px;
+            y: parent.height - 10px - 40px - 4px - 40px;
+            width: rail-w - 20px;
+            glyph: root.lab-glyph;
+            name: "Key lab";
+            on: root.lab-open;
+            open: root.rail-open;
+            reveal: root.reveal;
+            clicked => { root.rail("lab"); }
         }
         r-settings := RailItem {
             x: 10px;
