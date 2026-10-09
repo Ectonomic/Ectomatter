@@ -924,13 +924,19 @@ impl Page {
                     a = (std::f64::consts::PI * (u % 1.0)).sin().powi(2) * bri;
                 }
                 "pulse" => {
+                    // as the keyboard's own Pulse draws it (its firmware at 0xC7FC):
+                    // each color for its share of the cycle, then straight to the
+                    // next, with no fade and nothing between; in a random order, a
+                    // random color each step. (The profile's background and hold
+                    // times are stored, but the keyboard never reads them.)
                     let n = (e["count"].as_u64().filter(|c| *c > 0).unwrap_or(7) as usize).clamp(1, 7);
                     let step = cycle / n as f64;
-                    let i = ((t / step).floor() as usize) % n;
-                    let uu = (t % step) / step;
-                    let col = cols.get(i).copied().unwrap_or([255.0; 3]);
-                    let on = (uu * 6.0).min(1.0) * ((1.0 - uu) * 6.0).min(1.0);
-                    c = mix(rgb(&e["background"]["color"]), col, on);
+                    let k = (t / step).floor() as u64;
+                    c = if e["random"].as_u64().unwrap_or(0) != 0 {
+                        random_color(k)
+                    } else {
+                        cols.get(k as usize % n).copied().unwrap_or([255.0; 3])
+                    };
                     a = bri;
                 }
                 "spiral" => {
@@ -1153,6 +1159,16 @@ pub fn step_name(s: &Value) -> String {
     name.unwrap_or(format!("Code {code}"))
 }
 
+/// A color for Pulse's step `k` in a random order: the same one for the
+/// whole step, as the keyboard picks one as each step begins.
+fn random_color(k: u64) -> [f64; 3] {
+    let mut x = k.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 0xD1B5_4A32_D192_ED03;
+    x ^= x >> 31;
+    x = x.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    x ^= x >> 29;
+    [(x & 0xff) as f64, ((x >> 8) & 0xff) as f64, ((x >> 16) & 0xff) as f64]
+}
+
 fn mix(a: [f64; 3], b: [f64; 3], t: f64) -> [f64; 3] {
     [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
 }
@@ -1198,6 +1214,21 @@ mod saving_tests {
         assert_eq!(p.save_body_of(1)["lighting"]["mode"], "off");
         p.drafts.get_mut(&1).unwrap()["lighting"]["mode"] = json!("static");
         assert!(p.is_dirty(1));
+    }
+
+    #[test]
+    fn pulse_jumps_from_color_to_color_as_the_keyboard_does() {
+        let mut p = page();
+        let c = |r: u8, g: u8, b: u8| json!({ "brightness": 255, "color": [r, g, b] });
+        let l = json!({ "pulse": { "zone": 128, "cycle": 9000, "count": 3, "random": 0, "background": c(0, 0, 255),
+            "colors": [c(255, 0, 0), c(0, 255, 0), c(255, 255, 255)] } });
+        let at = |p: &mut Page, t: f64| p.effect_colors(&l, "pulse", t).values().next().copied().expect("a lit key");
+        // 3 s a color: the whole color from the first moment of its step to the last, never the background
+        assert_eq!(at(&mut p, 0.0), [255.0, 0.0, 0.0, 1.0]);
+        assert_eq!(at(&mut p, 2999.0), [255.0, 0.0, 0.0, 1.0]);
+        assert_eq!(at(&mut p, 3000.0), [0.0, 255.0, 0.0, 1.0]);
+        assert_eq!(at(&mut p, 7500.0), [255.0, 255.0, 255.0, 1.0]);
+        assert_eq!(at(&mut p, 9000.0), [255.0, 0.0, 0.0, 1.0]);
     }
 
     #[test]

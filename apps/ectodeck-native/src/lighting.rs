@@ -441,7 +441,7 @@ pub fn boxes(page: &Page, paint: [u8; 3], demo: bool, open: Option<(Ctl, usize)>
     s.note(match mode.as_str() {
         "static" => "One color on every key.",
         "breathing" => "The keys fade in and out, a color each breath.",
-        "pulse" => "Colors flash in turn over a background color.",
+        "pulse" => "The keys jump from one color to the next, in turn.",
         "spiral" => "Colors turn around the keyboard like a pinwheel.",
         "wave" => "Colors roll across the keyboard.",
         "stars" => "Keys twinkle on at random.",
@@ -469,11 +469,6 @@ pub fn boxes(page: &Page, paint: [u8; 3], demo: bool, open: Option<(Ctl, usize)>
         if e.get("random").is_some() && mode != "trigger" {
             s.gap(14.0);
             s.check(Ctl::Random, e["random"].as_u64().unwrap_or(0) != 0, "In a random order");
-        }
-        if mode == "pulse" {
-            s.gap(16.0);
-            s.head("Between pulses", None);
-            s.dots(Ctl::Background, &[rgb3(&e["background"]["color"])], picking(Ctl::Background), true);
         }
         s.gap(16.0);
     } else {
