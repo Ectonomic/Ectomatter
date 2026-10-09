@@ -2730,8 +2730,6 @@ component KeyDetail inherits PageBox {
 // A slider chosen in the Key library: where it sits now, and what it controls.
 component SliderDetail inherits PageBox {
     in property <string> side;
-    // over the choices: Controls, or on the Function layer, while Fn is held
-    in property <string> heading: "Controls";
     in property <float> at;
     // what the firmware can't do yet with the job chosen, if anything
     in property <string> note;
@@ -2785,7 +2783,7 @@ component SliderDetail inherits PageBox {
     Text {
         x: 16px;
         y: 112px;
-        text: root.heading;
+        text: "Controls";
         font-family: "Geist";
         font-size: 12.5px;
         font-weight: 600;
@@ -3019,7 +3017,6 @@ export component AppWindow inherits Window {
     in property <[Overlay]> overlays;
     // the Lighting page: its effects, and its tile's pieces as the window lays them out
     in property <string> slider-note;
-    in property <string> slider-heading: "Controls";
     // the Key library scrolled to a row newly chosen
     in property <length> lib-reveal-y;
     in property <int> lib-reveal-n;
@@ -3216,7 +3213,7 @@ export component AppWindow inherits Window {
     property <length> band-min: anchor.preferred-height;
     property <length> room: flick.height - under-top - 24px;
     property <length> band-max: max(band-min, room);
-    property <length> second-need: root.slider-chosen != 0 ? 328px + max(0, root.slider-choices.length - 4) * 36px : root.key-open ? (root.key-note != "" ? 320px : 270px) : 230px;
+    property <length> second-need: root.slider-chosen != 0 ? 328px : root.key-open ? (root.key-note != "" ? 320px : 270px) : 230px;
     property <length> keys-h: min(band-max, max(band-min, second-fits ? second-need : 0));
     property <length> lib-h: keys-h;
     property <length> second-w: root.key-open ? 460px : root.slider-chosen != 0 ? 360px : 340px;
@@ -3497,7 +3494,6 @@ export component AppWindow inherits Window {
                         at: root.slider-at;
                         choices: root.slider-choices;
                         note: root.slider-note;
-                        heading: root.slider-heading;
                         done => { root.slider-chosen-at(0); }
                         picked(i) => { root.slider-bind-at(i); }
                     }
