@@ -1,7 +1,7 @@
-//! The Z10's Settings tab: one column of cards, the same on every profile
-//! but the screen's: the keyboard (its connection, its firmware and what that
-//! adds, its model), and the screen's light and the screens it shows by
-//! itself. What the sliders control and the keys game mode blocks are on Keys.
+//! The Z10's Settings tab: the keyboard (its connection, its firmware and
+//! what that adds, its model), the same on every profile. What the sliders
+//! control and the keys game mode blocks are on Keys; the screen's light and
+//! the screens it shows by itself are on Screen (see [closed]).
 
 use serde_json::{json, Value};
 
@@ -81,8 +81,8 @@ impl Card {
 }
 
 /// The tab: the keyboard (how it is connected, its firmware and what that
-/// adds, the model), then the screen's own settings for the profile.
-pub fn tiles(page: &Page, fw: &Value, connected: Option<bool>) -> Tiles {
+/// adds, the model).
+pub fn tiles(fw: &Value, connected: Option<bool>) -> Tiles {
     let mut cells = Vec::new();
     let mut k = Card::new(0.0, "Keyboard", &mut cells);
     let (tone, words) = match connected {
@@ -141,37 +141,59 @@ pub fn tiles(page: &Page, fw: &Value, connected: Option<bool>) -> Tiles {
     }
     let model = format!("EVGA Z10 RGB, USB {:04x}:{:04x}", ectotype_core::protocol::VID, ectotype_core::protocol::PID);
     k.row("Model", 20.0, |c, x, y| c.push(text_cell(style::FACT_VALUE, x, y, CARD_W - 24.0 - x, 20.0, &model)));
-    let mut y = k.close(&mut cells);
+    let y = k.close(&mut cells);
+    Tiles { cells, height: y - 12.0 }
+}
 
-    // the screen, for this profile: its light and the screens it shows by itself
+/// The screen light's ready colors, as the approved mock has them.
+pub const LIGHTS: [[u8; 3]; 7] = [[0xff, 0x20, 0x00], [0xff, 0x8a, 0x00], [0xff, 0xd0, 0x00], [0x3b, 0xdc, 0x6b], [0x3f, 0xa9, 0xff], [0xb0, 0x6b, 0xff], [0xff, 0xff, 0xff]];
+
+/// The Screen tab's "When Ectodeck is closed" box, `w` wide, for the profile
+/// being edited: its screen light (the ready colors, or one of its own from
+/// the picker), how bright, and which of the keyboard's own screens show.
+/// The pieces sit in the box, under its title.
+pub fn closed(page: &Page, w: f32) -> Tiles {
+    let mut c = Vec::new();
     let l = &page.draft()["lighting"];
-    let mut sc = Card::new(y, "Screen", &mut cells);
-    sc.note(24.0, &format!("For {}, when Ectodeck isn’t drawing on the screen.", page.profile_name(page.editing)));
+    let x = 16.0;
+    let inner = w - 32.0;
+    c.push(text_cell(style::END_R, w - 16.0 - 150.0, 14.0, 150.0, 22.0, &page.profile_name(page.editing)));
     let lc = &l["lcd"]["color"];
-    let c = &lc["color"];
-    let col = slint::Color::from_rgb_u8(c[0].as_u64().unwrap_or(0) as u8, c[1].as_u64().unwrap_or(0) as u8, c[2].as_u64().unwrap_or(0) as u8);
-    sc.row("Screen light", 28.0, |cs, x, y| cs.push(Cell { color: col, id: id(Ctl::LcdColor), ..cell(kind::COLOR_DOT, x - 2.0, y - 4.0, 28.0, 28.0) }));
-    let b = lc["brightness"].as_f64().unwrap_or(255.0);
-    sc.row("Brightness", 20.0, |cs, x, y| {
-        let w = CARD_W - 24.0 - x - 60.0;
-        cs.push(Cell { value: (b / 255.0) as f32, color: col, id: id(Ctl::LcdBrightness), ..cell(kind::FILLED, x, y, w, 20.0) });
-        let v = format!("{}%", (b / 2.55).round());
-        let pw = crate::text::width(500, 11.5, &v) + 16.0;
-        cs.push(Cell { text: v.into(), ..cell(kind::PILL, CARD_W - 24.0 - pw, y, pw, 20.0) });
-    });
+    let b = |v: &Value| v.as_u64().unwrap_or(0).min(255) as u8;
+    let rgb = [b(&lc["color"][0]), b(&lc["color"][1]), b(&lc["color"][2])];
+    let mut y = 48.0;
+    c.push(text_cell(style::PROP, x, y, inner, 20.0, "Default screen light"));
+    y += 26.0;
+    let step = 34.0;
+    let preset = LIGHTS.iter().position(|p| *p == rgb);
+    for (i, p) in LIGHTS.iter().enumerate() {
+        let col = slint::Color::from_rgb_u8(p[0], p[1], p[2]);
+        c.push(Cell { color: col, on: preset == Some(i), id: id(Ctl::LcdPreset), index: i as i32, ..cell(kind::COLOR_DOT, x - 2.0 + i as f32 * step, y, 28.0, 28.0) });
+    }
+    // a color of its own: shown as itself once chosen, otherwise a dot to choose one
+    let own = preset.is_none();
+    let col = slint::Color::from_rgb_u8(rgb[0], rgb[1], rgb[2]);
+    c.push(Cell { color: col, on: own, style: if own { 0 } else { 1 }, id: id(Ctl::LcdColor), ..cell(kind::COLOR_DOT, x - 2.0 + LIGHTS.len() as f32 * step, y, 28.0, 28.0) });
+    y += 28.0 + 16.0;
+    let br = lc["brightness"].as_f64().unwrap_or(255.0);
+    c.push(text_cell(style::PROP, x, y, inner - 60.0, 20.0, "Brightness"));
+    let v = format!("{}%", (br / 2.55).round());
+    let pw = crate::text::width(500, 11.5, &v) + 16.0;
+    c.push(Cell { text: v.into(), ..cell(kind::PILL, w - 16.0 - pw, y, pw, 20.0) });
+    y += 28.0;
+    c.push(Cell { value: (br / 255.0) as f32, color: col, id: id(Ctl::LcdBrightness), ..cell(kind::FILLED, x, y, inner, 20.0) });
+    y += 20.0 + 18.0;
+    c.push(Cell { color: slint::Color::from_rgb_u8(0x2b, 0x2b, 0x30), ..cell(kind::BOX, x, y, inner, 1.0) });
+    y += 15.0;
+    c.push(text_cell(style::NOTE, x, y, inner, 18.0, "The Z10 shows its own screens:"));
+    y += 28.0;
     let apps = l["lcd"]["apps"].as_u64().unwrap_or(0);
     // (not EVGA Precision X1's stats: EVGA makes no graphics cards now, so nothing sends them)
-    let shown: Vec<(usize, &str, bool)> = LCD_APPS.iter().enumerate().filter(|(_, (bit, _))| *bit != 0x02).map(|(i, (bit, n))| (i, *n, apps & bit != 0)).collect();
-    sc.row("Built-in screens", shown.len().div_ceil(2) as f32 * 28.0 - 8.0, |cs, x, y| {
-        let colw = (CARD_W - 24.0 - x) / 2.0;
-        for (k, (i, n, on)) in shown.iter().enumerate() {
-            cs.push(Cell { on: *on, id: id(Ctl::LcdApp), index: *i as i32, text: (*n).into(), ..cell(kind::CHECKBOX, x + (k % 2) as f32 * colw, y + (k / 2) as f32 * 28.0, colw - 8.0, 20.0) });
-        }
-    });
-    sc.y += 10.0;
-    sc.note(24.0 + LABEL_W, "Screens the keyboard shows by itself. Ectodeck’s own pages draw over them while it runs.");
-    y = sc.close(&mut cells);
-    Tiles { cells, height: y - 12.0 }
+    for (i, (bit, n)) in LCD_APPS.iter().enumerate().filter(|(_, (bit, _))| *bit != 0x02) {
+        c.push(Cell { on: apps & bit != 0, id: id(Ctl::LcdApp), index: i as i32, text: (*n).into(), ..cell(kind::CHECKBOX, x, y, inner, 20.0) });
+        y += 28.0;
+    }
+    Tiles { cells: c, height: y - 8.0 + 16.0 }
 }
 
 /// Use a piece of the tab. `on` is a checkbox's new state; `index` which box.
@@ -181,6 +203,11 @@ pub fn act(page: &mut Page, c: Ctl, index: usize, value: f32, text: Option<&str>
     let l = &mut d["lighting"];
     match c {
         Ctl::LcdBrightness => l["lcd"]["color"]["brightness"] = json!((value.clamp(0.0, 1.0) * 255.0).round() as u64),
+        Ctl::LcdPreset => {
+            if let Some(c) = LIGHTS.get(index) {
+                l["lcd"]["color"]["color"] = json!(c);
+            }
+        }
         Ctl::LcdApp => {
             let bit = LCD_APPS.get(index).map_or(0, |a| a.0);
             let apps = l["lcd"]["apps"].as_u64().unwrap_or(0);

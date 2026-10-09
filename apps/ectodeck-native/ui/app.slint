@@ -2371,6 +2371,118 @@ component GameBox inherits PageBox {
     }
 }
 
+// the Screen tab's playlist: the pages Ectodeck plays on the screen, in turn
+// (Stats alone, for now), and game-helper's launches breaking in
+component PlaylistBox inherits PageBox {
+    in property <image> thumb;
+    in property <image> launch;
+    in property <bool> announce;
+    callback announce-toggled();
+    title: "Playlist";
+    // the page: its picture, its place in the order, its name and what it shows
+    Rectangle {
+        x: 10px;
+        y: 46px;
+        width: parent.width - 20px;
+        height: 54px;
+        border-radius: 10px;
+        background: Ink.well;
+        Rectangle {
+            x: 10px;
+            y: (parent.height - 30px) / 2;
+            width: 150px;
+            height: 30px;
+            border-radius: 3px;
+            clip: true;
+            Image {
+                width: parent.width;
+                height: parent.height;
+                source: root.thumb;
+            }
+        }
+        Rectangle {
+            x: 176px;
+            y: (parent.height - 20px) / 2;
+            width: 20px;
+            height: 20px;
+            border-radius: 10px;
+            background: Ink.pick;
+            Text {
+                width: parent.width;
+                height: parent.height;
+                text: "1";
+                font-family: "Geist";
+                font-size: 11px;
+                color: Ink.soft;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+        Text {
+            x: 206px;
+            y: 9px;
+            height: 18px;
+            text: "Stats";
+            font-family: "Geist";
+            font-size: 13px;
+            font-weight: 500;
+            color: Ink.ink;
+            vertical-alignment: center;
+        }
+        Text {
+            x: 206px;
+            y: 27px;
+            height: 18px;
+            width: parent.width - 216px;
+            text: "CPU, GPU, RAM and VRAM, every second";
+            font-family: "Geist";
+            font-size: 12px;
+            color: Ink.quiet;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+    Rectangle {
+        x: 16px;
+        y: 114px;
+        width: parent.width - 32px;
+        height: 1px;
+        background: Ink.line;
+    }
+    // game-helper's launches and exits: what they show, and whether they break in
+    Rectangle {
+        x: 20px;
+        y: 130px;
+        width: 150px;
+        height: 30px;
+        border-radius: 3px;
+        clip: true;
+        Image {
+            width: parent.width;
+            height: parent.height;
+            source: root.launch;
+        }
+    }
+    CheckBox {
+        x: 186px;
+        y: 126px;
+        width: parent.width - 202px;
+        text: "Game launches break in";
+        on: root.announce;
+        clicked => { root.announce-toggled(); }
+    }
+    Text {
+        x: 213px;
+        y: 156px;
+        width: parent.width - 229px;
+        text: "From game-helper, when a game starts or closes. Then the playlist carries on.";
+        font-family: "Geist";
+        font-size: 12.5px;
+        color: Ink.quiet;
+        wrap: word-wrap;
+    }
+}
+
 // a segmented switch on a well: the chosen part a step lighter
 component SegSwitch inherits Rectangle {
     in property <[string]> options;
@@ -2929,6 +3041,19 @@ export component AppWindow inherits Window {
     out property <length> settings-scroll: set-flick.content-y;
     // the keyboard is showing the page's preview
     in property <bool> live;
+    // the Screen tab: the screen as it is now, drawn large and as the playlist's
+    // picture of Stats; the launch sequence's picture beside its checkbox; what
+    // is playing (0 playing, 1 paused, 2 another program has the screen, 3 the
+    // keyboard's screen isn't there); whether launches break in; and the
+    // closed box's height
+    in property <image> lcd-big;
+    in property <image> lcd-thumb;
+    in property <image> lcd-launch;
+    in property <int> lcd-state;
+    in property <bool> lcd-announce: true;
+    in property <length> closed-h;
+    callback lcd-pause();
+    callback lcd-announce-toggled();
     // the chosen key, and its two layers
     in property <bool> key-open;
     // where the chosen key's editor is in the window, which a press on keeps the key chosen
@@ -2962,7 +3087,7 @@ export component AppWindow inherits Window {
     out property <length> window-width: root.width;
 
     // where the keyboard goes, for the window to draw it there, when its page shows
-    out property <bool> board-shown: root.place == "z10" && root.tab != 2;
+    out property <bool> board-shown: root.place == "z10" && root.tab < 2;
     // the keyboard has been drawn: its knobs and display come with it, never before
     in property <bool> board-ready;
     in property <duration> knob-glide: 120ms;
@@ -3063,7 +3188,11 @@ export component AppWindow inherits Window {
     property <length> board-top: head-end + kb-pad-y;
     // under the keyboard: the anchoring column (the profiles, what goes with
     // them), and beside it the tab's boxes
-    property <length> under-top: head-end + board-h + 2 * kb-pad-y + 18px;
+    // the Screen tab's screen: a fixed size, in the middle of its dark box
+    property <length> lcd-w: 860px;
+    property <length> lcd-h: 172px;
+    property <length> lcd-box-h: lcd-h + 2 * kb-pad-y;
+    property <length> under-top: root.tab == 3 ? head-end + lcd-box-h + 18px : head-end + board-h + 2 * kb-pad-y + 18px;
     property <length> anchor-w: 240px;
     property <length> under-x: pws-x + anchor-w + 16px;
     out property <length> under-w: pws-w - anchor-w - 16px;
@@ -3082,7 +3211,7 @@ export component AppWindow inherits Window {
     // its foot), between those as tall as the tallest holds. What holds more
     // than that scrolls inside its block.
     property <length> band-min: anchor.preferred-height;
-    property <length> room: flick.height - head-end - board-h - 2 * kb-pad-y - 18px - 24px;
+    property <length> room: flick.height - under-top - 24px;
     property <length> band-max: max(band-min, room);
     property <length> second-need: root.slider-chosen != 0 ? 328px : root.key-open ? (root.key-note != "" ? 320px : 270px) : 230px;
     property <length> keys-h: min(band-max, max(band-min, second-fits ? second-need : 0));
@@ -3105,10 +3234,17 @@ export component AppWindow inherits Window {
     property <length> lrow1: max(lr1 == 1 ? root.set-h : 0, lr2 == 1 ? root.place-h : 0);
     property <length> lrow2: lr2 == 2 ? root.place-h : 0;
     property <length> light-h: lrow0 + (lrows > 1 ? 12px + lrow1 : 0) + (lrows > 2 ? 12px + lrow2 : 0);
+    // Screen: the playlist (540 wide) and what shows when Ectodeck is closed
+    // (320), side by side while they fit, as tall as each other
+    property <length> pl-w: 540px;
+    property <length> pl-need: 222px;
+    property <bool> sfits: pl-w + 12px + 320px <= under-w;
+    property <length> srow0: sfits ? min(band-max, max(band-min, max(pl-need, root.closed-h))) : max(band-min, pl-need);
+    property <length> srow1: root.closed-h;
     property <length> tab-h: root.tab == 0 ? (second-fits ? keys-h : keys-h + 12px + second-h)
-        : root.tab == 1 ? light-h : root.tile-height;
+        : root.tab == 1 ? light-h : root.tab == 3 ? (sfits ? srow0 : srow0 + 12px + srow1) : root.tile-height;
     property <length> under-board: 18px + max(anchor.preferred-height, tab-h);
-    property <length> page-h: root.tab == 2 ? 12px + head-h + 6px + 24px + root.tile-height + 40px : board-top + board-h + kb-pad-y + under-board + 24px;
+    property <length> page-h: root.tab == 2 ? 12px + head-h + 6px + 24px + root.tile-height + 40px : root.tab == 3 ? under-top - 18px + under-board + 24px : board-top + board-h + kb-pad-y + under-board + 24px;
     // the page's scrollbar, as WebKit drew it: over the whole window, when the page is longer than it
     property <length> doc-h: bar + 56px + page-h;
 
@@ -3194,6 +3330,18 @@ export component AppWindow inherits Window {
                     }
                     if root.boot == 0: HorizontalLayout {
                         spacing: 16px;
+                        // on Screen, a dot that breathes while Ectodeck plays the screen
+                        if root.tab == 3 && root.lcd-state == 0: Rectangle {
+                            width: 6px;
+                            Rectangle {
+                                y: (parent.height - 6px) / 2;
+                                width: 6px;
+                                height: 6px;
+                                border-radius: 3px;
+                                background: Ink.good;
+                                opacity: 0.55 + 0.45 * cos(animation-tick() / 1600ms * 360deg);
+                            }
+                        }
                         Text {
                             text: root.hint;
                             font-family: "Geist";
@@ -3226,7 +3374,7 @@ export component AppWindow inherits Window {
                             horizontal-stretch: 1;
                         }
                         // whether rebound keys show their new actions on the keyboard
-                        if root.tab != 2: Rectangle {
+                        if root.tab < 2: Rectangle {
                             width: 28px + rebind-words.preferred-width;
                             Rectangle {
                                 x: 0;
@@ -3259,6 +3407,14 @@ export component AppWindow inherits Window {
                             rebind-ta := TouchArea {
                                 mouse-cursor: pointer;
                                 clicked => { root.show-rebindings(); }
+                            }
+                        }
+                        // on Screen, Pause holds the screen as it is; Play carries on
+                        if root.tab == 3 && root.lcd-state <= 1: VerticalLayout {
+                            alignment: center;
+                            WordButton {
+                                text: root.lcd-state == 1 ? "Play" : "Pause";
+                                clicked => { root.lcd-pause(); }
                             }
                         }
                     }
@@ -3395,6 +3551,57 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
+                // Screen: the screen in its dark box, as large as it stays; under it the
+                // playlist and what the screen shows when Ectodeck is closed
+                if root.tab == 3: Rectangle {
+                    x: pws-x;
+                    y: head-end;
+                    width: pws-w;
+                    height: lcd-box-h;
+                    border-radius: 12px;
+                    background: Ink.well;
+                    Rectangle {
+                        x: (parent.width - lcd-w) / 2;
+                        y: kb-pad-y;
+                        width: lcd-w;
+                        height: lcd-h;
+                        border-radius: 4px;
+                        clip: true;
+                        Image {
+                            width: parent.width;
+                            height: parent.height;
+                            source: root.lcd-big;
+                        }
+                    }
+                }
+                if root.tab == 3 && root.boot == 0: PlaylistBox {
+                    x: under-x;
+                    y: under-top;
+                    width: pl-w;
+                    height: srow0;
+                    thumb: root.lcd-thumb;
+                    launch: root.lcd-launch;
+                    announce: root.lcd-announce;
+                    announce-toggled => { root.lcd-announce-toggled(); }
+                }
+                if root.tab == 3 && root.boot == 0: ScrollBox {
+                    x: under-x + (sfits ? pl-w + 12px : 0);
+                    y: under-top + (sfits ? 0 : srow0 + 12px);
+                    width: 320px;
+                    height: sfits ? srow0 : srow1;
+                    need: root.closed-h;
+                    PageBox {
+                        width: parent.width;
+                        height: max(root.closed-h, sfits ? srow0 : srow1);
+                        fill: transparent;
+                        title: "When Ectodeck is closed";
+                        for c in root.cells: CellView {
+                            c: c;
+                            pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
+                            slide(id, v) => { root.cell-slide(id, v); }
+                        }
+                    }
+                }
                 // Settings: its tiles, as the window lays them out
                 // Settings: one column of cards in the middle of the page, under a rule
                 if root.tab == 2: Rectangle {
@@ -3419,7 +3626,7 @@ export component AppWindow inherits Window {
 
                 // the keyboard's box, in the Profiles box's shade, which the keyboard
                 // is drawn on: a frame round the hole, which the window fills
-                if root.tab != 2: Rectangle {
+                if root.tab < 2: Rectangle {
                     x: pws-x;
                     y: board-top - kb-pad-y;
                     width: pws-w;
@@ -3428,7 +3635,7 @@ export component AppWindow inherits Window {
                     border-top-right-radius: 12px;
                     background: Ink.well;
                 }
-                if root.tab != 2: Rectangle {
+                if root.tab < 2: Rectangle {
                     x: pws-x;
                     y: board-top + board-h;
                     width: pws-w;
@@ -3437,14 +3644,14 @@ export component AppWindow inherits Window {
                     border-bottom-right-radius: 12px;
                     background: Ink.well;
                 }
-                if root.tab != 2: Rectangle {
+                if root.tab < 2: Rectangle {
                     x: pws-x;
                     y: board-top;
                     width: kb-pad-x;
                     height: board-h;
                     background: Ink.well;
                 }
-                if root.tab != 2: Rectangle {
+                if root.tab < 2: Rectangle {
                     x: pws-x + pws-w - kb-pad-x;
                     y: board-top;
                     width: kb-pad-x;
@@ -3454,7 +3661,7 @@ export component AppWindow inherits Window {
                 // the keys, over the keyboard's hole: a click on the keyboard away
                 // from every key lets the chosen one go; then what is drawn over it
                 Rectangle {
-                    visible: root.tab != 2;
+                    visible: root.tab < 2;
                     x: pws-x + kb-pad-x;
                     y: board-top;
                     width: board-w;
@@ -3532,6 +3739,11 @@ export component AppWindow inherits Window {
                             selected: root.tab == 1;
                             clicked => { root.view-changed(1); }
                         }
+                        t-screen := Tab {
+                            text: "Screen";
+                            selected: root.tab == 3;
+                            clicked => { root.view-changed(3); }
+                        }
                         t-settings := Tab {
                             text: "Settings";
                             selected: root.tab == 2;
@@ -3607,9 +3819,9 @@ export component AppWindow inherits Window {
                     background: Ink.line;
                 }
                 Rectangle {
-                    x: 28px + 17px + devbar-brand-w + 28px + (root.tab == 0 ? 0 : root.tab == 1 ? t-keys.width + 2px : t-keys.width + t-lighting.width + 4px);
+                    x: 28px + 17px + devbar-brand-w + 28px + (root.tab == 0 ? 0 : root.tab == 1 ? t-keys.width + 2px : root.tab == 3 ? t-keys.width + t-lighting.width + 4px : t-keys.width + t-lighting.width + t-screen.width + 6px);
                     y: parent.height - 2px;
-                    width: root.tab == 0 ? t-keys.width : root.tab == 1 ? t-lighting.width : t-settings.width;
+                    width: root.tab == 0 ? t-keys.width : root.tab == 1 ? t-lighting.width : root.tab == 3 ? t-screen.width : t-settings.width;
                     height: 2px;
                     background: Ink.ink;
                 }

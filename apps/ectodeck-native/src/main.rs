@@ -28,6 +28,7 @@ mod kde_output;
 mod shadow;
 mod lab;
 mod lcd_anim;
+mod lcd_draw;
 #[cfg(test)]
 mod lcd_parity;
 mod lcd_player;
@@ -406,6 +407,12 @@ fn glyph_fonts_in_windows() {
     );
 }
 
+/// A stop asked for by a signal, for the window's loop to act on.
+static TERM: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+extern "C" fn on_term(_: libc::c_int) {
+    TERM.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let snapshot = args.iter().position(|a| a == "--snapshot").and_then(|i| args.get(i + 1)).cloned();
@@ -475,6 +482,25 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     if let Some(state) = std::env::var_os("ECTODECK_NATIVE_STATE") {
         let dev: serde_json::Value = serde_json::from_slice(&std::fs::read(state).expect("the saved state")).expect("the saved state as JSON");
         front.heard(device::Heard::State(Ok(dev)));
+    }
+    // the screen as the player would have it: this computer's Stats, or
+    // ECTODECK_NATIVE_LCD's rows (split by |), in ECTODECK_NATIVE_LCD_STATE
+    // (playing, paused, other, missing, launch, exit)
+    {
+        let rows = std::env::var("ECTODECK_NATIVE_LCD").map(|r| r.split('|').map(String::from).collect()).unwrap_or_else(|_| lcd_stats::Stats::here().rows());
+        let st = std::env::var("ECTODECK_NATIVE_LCD_STATE").unwrap_or_default();
+        let state = match st.as_str() {
+            "paused" => lcd_player::State::Paused,
+            "other" => lcd_player::State::Other,
+            "missing" => lcd_player::State::Missing,
+            _ => lcd_player::State::Playing,
+        };
+        let sequence = match st.as_str() {
+            "launch" => Some("launch"),
+            "exit" => Some("exit"),
+            _ => None,
+        };
+        front.screen_news(lcd_player::News { rows, sequence, state });
     }
     if let Ok(place) = std::env::var("ECTODECK_NATIVE_PLACE") {
         front.ui.set_place(place.into());
@@ -1287,6 +1313,32 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         kept: Kept::default(),
     };
     // the tray, which the window closes into
+    // the screen, played by Ectodeck while it controls the keyboard
+    if controlled {
+        let (news_tx, news_rx) = calloop::channel::channel::<lcd_player::News>();
+        event_loop
+            .handle()
+            .insert_source(news_rx, |e, _, app: &mut App| {
+                if let calloop::channel::Event::Msg(n) = e {
+                    app.front.screen_news(n);
+                }
+            })
+            .unwrap();
+        let p = lcd_player::Player::start(
+            move |n| {
+                let _ = news_tx.send(n);
+            },
+            app.front.settings.on("devices.z10.screen.announce"),
+            false,
+        );
+        app.front.set_player(p);
+    }
+    // asked to stop (a log out, or kill): quit as the tray's Quit does, so
+    // what changed is saved and the screen handed back
+    unsafe {
+        libc::signal(libc::SIGTERM, on_term as *const () as libc::sighandler_t);
+        libc::signal(libc::SIGINT, on_term as *const () as libc::sighandler_t);
+    }
     let (tray_tx, tray_rx) = calloop::channel::channel::<tray::TrayAsk>();
     app.tray = tray::start(tray_tx);
     event_loop
@@ -1329,6 +1381,10 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
     // ECTODECK_NATIVE_OPEN_LAB: open the Key lab at start, as Ctrl+Shift+K does
     let mut open_lab = std::env::var_os("ECTODECK_NATIVE_OPEN_LAB").is_some();
     while !app.exit {
+        if TERM.load(std::sync::atomic::Ordering::Relaxed) && app.quitting.is_none() {
+            app.front.hand_back();
+            app.quitting = Some(Instant::now());
+        }
         // quitting: what changed is saved first, for up to four seconds
         if let Some(t) = app.quitting {
             if app.front.flush() || t.elapsed() > Duration::from_secs(4) {
@@ -1392,6 +1448,8 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
             app.exit = true;
         }
     }
+    // the screen handed back to the keyboard's own screens
+    app.front.quit_screen();
     // a setting still being changed is written
     app.front.settings.flush(true);
     // a recording lets the keyboard go

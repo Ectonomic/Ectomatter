@@ -80,6 +80,11 @@ pub enum Ask {
     SliderBind(i32),
     /// the pointer over an area's chip on the Lighting page, or off it: its place in ZONES
     AreaHover(i32, bool),
+    /// the Screen tab: Pause or Play; game launches breaking in, or not; time
+    /// for the playlist's picture of a launch to move on
+    LcdPause,
+    LcdAnnounce,
+    LcdTick,
 }
 
 /// The colour picker, open on a swatch: what it sets, the colour it opened
@@ -359,6 +364,16 @@ pub struct Front {
     reading_gap: f32,
     /// the keyboard as the kernel last showed it, and when
     dev_status: Option<(Instant, serde_json::Value)>,
+    /// the screen: Ectodeck's player, what it last said, whether it is
+    /// paused, the launch the playlist plays as its picture (its frames, the
+    /// one showing and since when), and what the pictures were last drawn from
+    pub player: Option<crate::lcd_player::Player>,
+    lcd: crate::lcd_player::News,
+    lcd_paused: bool,
+    launch_frames: Vec<(Vec<String>, u32)>,
+    launch_at: (usize, Instant),
+    lcd_drawn: Option<(Vec<String>, [u8; 3], u8, u32)>,
+    launch_drawn: Option<(usize, [u8; 3], u8, u32)>,
 }
 
 /// A profile's colour sample: how many colours, and the colours.
@@ -420,6 +435,8 @@ impl Front {
         on!(on_slider_chosen_at, |i| Ask::SliderSel(i));
         on!(on_slider_bind_at, |i| Ask::SliderBind(i));
         on!(on_area_hover, |i, on| Ask::AreaHover(i, on));
+        on!(on_lcd_pause, Ask::LcdPause);
+        on!(on_lcd_announce_toggled, Ask::LcdAnnounce);
         let (ftx, frx) = mpsc::channel();
         let page = Page::new();
         ui.set_units(page.view_box.2 as f32);
@@ -432,6 +449,7 @@ impl Front {
             (Duration::from_secs(2), Ask::PreviewTick),
             (Duration::from_millis(70), Ask::StreamTick),
             (Duration::from_millis(250), Ask::AutoSave),
+            (Duration::from_millis(100), Ask::LcdTick),
         ]
             .into_iter()
             .map(|(every, ask)| {
@@ -509,12 +527,20 @@ impl Front {
             last_reading: None,
             reading_gap: 120.0,
             dev_status: None,
+            player: None,
+            lcd: crate::lcd_player::News { rows: Vec::new(), sequence: None, state: crate::lcd_player::State::Missing },
+            lcd_paused: false,
+            launch_frames: launch_frames(),
+            launch_at: (0, Instant::now()),
+            lcd_drawn: None,
+            launch_drawn: None,
         };
         f.weather.set_place(weather_place(&f.settings));
         f.ui.set_overlays(ModelRc::from(f.overlay_model.clone()));
         f.ui.set_pk_presets(ModelRc::new(VecModel::from(PRESETS.iter().map(|c| color(*c)).collect::<Vec<_>>())));
         f.ui.set_cells(ModelRc::from(f.cells.clone()));
         f.ui.set_place_cells(ModelRc::from(f.place_cells.clone()));
+        f.ui.set_lcd_announce(f.settings.on("devices.z10.screen.announce"));
         f.poll_lcd();
         if controlled {
             f.ask_kb(device::Ask::State);
@@ -764,7 +790,7 @@ impl Front {
                         continue;
                     }
                     self.close_menu();
-                    self.page.view = [View::Keys, View::Lighting, View::Display][i.clamp(0, 2) as usize];
+                    self.page.view = [View::Keys, View::Lighting, View::Display, View::Screen][i.clamp(0, 3) as usize];
                     if self.page.view == View::Lighting {
                         self.start_preview();
                     } else {
@@ -788,6 +814,35 @@ impl Front {
                         c => lighting::act(&mut self.page, c, 0, v),
                     }
                     self.push_preview();
+                }
+                Ask::LcdPause => {
+                    self.lcd_paused = !self.lcd_paused;
+                    if let Some(pl) = &self.player {
+                        pl.tell(crate::lcd_player::Control::Paused(self.lcd_paused));
+                    }
+                }
+                Ask::LcdAnnounce => {
+                    let on = !self.settings.on("devices.z10.screen.announce");
+                    if let Err(e) = self.settings.set("devices.z10.screen.announce", serde_json::json!(on)) {
+                        self.status(format!("The setting was not saved: {e}"), 2);
+                    }
+                    self.ui.set_lcd_announce(on);
+                    if let Some(pl) = &self.player {
+                        pl.tell(crate::lcd_player::Control::Announce(on));
+                    }
+                }
+                Ask::LcdTick => {
+                    // the playlist's picture of a launch, frame by frame, round and round
+                    if self.page.view == View::Screen && self.ui.get_place() == "z10" && !self.launch_frames.is_empty() {
+                        let (i, since) = self.launch_at;
+                        // a pause at the end before it plays again, as the mock had
+                        let ms = self.launch_frames[i].1 as u128 + if i + 1 == self.launch_frames.len() { 2500 } else { 0 };
+                        if since.elapsed().as_millis() >= ms {
+                            self.launch_at = ((i + 1) % self.launch_frames.len(), Instant::now());
+                            self.draw_screen();
+                        }
+                    }
+                    continue;
                 }
                 Ask::AreaHover(i, on) => {
                     let i = i.max(0) as usize;
@@ -1200,6 +1255,7 @@ impl Front {
             Ctl::Demo => self.page.demo = index % 2 == 1,
             Ctl::Random => lighting::act(&mut self.page, c, 0, (index % 2) as f32),
             Ctl::LcdApp | Ctl::GameKey => crate::display::act(&mut self.page, c, index / 2, (index % 2) as f32, None),
+            Ctl::LcdPreset => crate::display::act(&mut self.page, c, index, 0.0, None),
             Ctl::SliderBind => {
                 self.open_bind_menu(index, _anchor);
                 return;
@@ -1887,6 +1943,7 @@ impl Front {
             View::Keys => 0,
             View::Lighting => 1,
             View::Display => 2,
+            View::Screen => 3,
         });
         let loaded = p.dev.is_some();
         if loaded {
@@ -1921,6 +1978,7 @@ impl Front {
                 View::Keys => "Click a key on the keyboard or in the Key library.",
                 View::Lighting => "The keyboard plays the effect as you change it.",
                 View::Display => "The keyboard’s settings are the same on every profile.",
+                View::Screen => self.screen_hint(),
             }
             .into(),
         );
@@ -2142,6 +2200,11 @@ impl Front {
             let (cells, h) = crate::ecto_settings::page(&st);
             self.ui.set_settings_h(h);
             self.show_cells(cells);
+        } else if loaded && self.page.view == View::Screen {
+            let t = crate::display::closed(&self.page, 320.0);
+            self.ui.set_closed_h(t.height);
+            self.show_cells(t.cells);
+            self.draw_screen();
         } else if loaded && self.page.view == View::Display {
             let fw = self.firmware();
             let connected = match self.ui.get_conn_state() {
@@ -2149,7 +2212,7 @@ impl Front {
                 3 => None,
                 _ => Some(false),
             };
-            let t = crate::display::tiles(&self.page, &fw, connected);
+            let t = crate::display::tiles(&fw, connected);
             self.ui.set_tile_height(t.height);
             self.show_cells(t.cells);
         }
@@ -2414,6 +2477,98 @@ impl Front {
         self.page.animated()
     }
 
+    // ------------------------------------------------------------ the screen
+
+    /// Ectodeck playing the screen, from now on.
+    pub fn set_player(&mut self, p: crate::lcd_player::Player) {
+        if self.lcd_paused {
+            p.tell(crate::lcd_player::Control::Paused(true));
+        }
+        self.player = Some(p);
+    }
+
+    /// The player said what the screen shows now.
+    pub fn screen_news(&mut self, n: crate::lcd_player::News) {
+        let state_changed = n.state != self.lcd.state || n.sequence != self.lcd.sequence;
+        self.lcd = n;
+        if self.page.view == View::Screen && self.ui.get_place() == "z10" {
+            if state_changed {
+                self.refresh();
+            } else {
+                self.draw_screen();
+            }
+        }
+    }
+
+    /// Ectodeck closing: the screen handed back to the keyboard's own screens.
+    pub fn quit_screen(&mut self) {
+        if let Some(p) = self.player.take() {
+            p.quit(true);
+        }
+    }
+
+    fn screen_hint(&self) -> &'static str {
+        use crate::lcd_player::State;
+        match (self.lcd.state, self.lcd.sequence) {
+            (_, _) if !self.controlled => "Ectodeck leaves this keyboard to other programs.",
+            (State::Other, _) => "Another program is using the screen. Ectodeck plays it once that stops.",
+            (State::Missing, _) => "Ectodeck can’t reach the keyboard’s screen.",
+            (_, Some("launch")) => "A game is starting",
+            (_, Some(_)) => "A game just closed",
+            (State::Paused, _) => "Paused on Stats",
+            (State::Playing, None) => "Now playing Stats",
+        }
+    }
+
+    /// The screen drawn large, the playlist's picture of Stats, and its
+    /// picture of a launch, each in the profile's screen light, when changed.
+    fn draw_screen(&mut self) {
+        use crate::lcd_player::State;
+        let state = match self.lcd.state {
+            _ if !self.controlled => 4,
+            State::Playing => 0,
+            State::Paused => 1,
+            State::Other => 2,
+            State::Missing => 3,
+        };
+        self.ui.set_lcd_state(state);
+        if self.page.dev.is_none() {
+            return;
+        }
+        let (light, _) = screen_of(&self.page.draft()["lighting"]);
+        let (level, rgb) = (light[0], [light[1], light[2], light[3]]);
+        let sc = self.scale.max(1.0);
+        let px = |w: f32| (w * sc).round() as u32;
+        let key = (self.lcd.rows.clone(), rgb, level, px(860.0));
+        if self.lcd_drawn.as_ref() != Some(&key) {
+            let lv = level as f32 / 255.0;
+            self.ui.set_lcd_big(crate::lcd_draw::picture(&self.lcd.rows, rgb, lv, px(860.0), px(172.0)));
+            self.ui.set_lcd_thumb(crate::lcd_draw::picture(&self.lcd.rows, rgb, lv, px(150.0), px(30.0)));
+            self.lcd_drawn = Some(key);
+        }
+        let i = self.launch_at.0;
+        let key = (i, rgb, level, px(150.0));
+        if self.launch_drawn != Some(key) {
+            if let Some((rows, _)) = self.launch_frames.get(i) {
+                self.ui.set_lcd_launch(crate::lcd_draw::picture(rows, rgb, level as f32 / 255.0, px(150.0), px(30.0)));
+            }
+            self.launch_drawn = Some(key);
+        }
+    }
+
+}
+
+/// The launch sequence the playlist plays as its picture: the frames Grant
+/// approved for game-helper's launches (DEEPDRIVER II), each with its time.
+fn launch_frames() -> Vec<(Vec<String>, u32)> {
+    let v: serde_json::Value = serde_json::from_str(include_str!("../data/lcd-launch.json")).unwrap_or_default();
+    v.as_array()
+        .map(|a| {
+            a.iter()
+                .map(|f| (f["r"].as_array().map(|r| r.iter().map(|x| x.as_str().unwrap_or("").to_string()).collect()).unwrap_or_default(), f["ms"].as_u64().unwrap_or(40) as u32))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// The colours used lately, newest first, as the picker lists them.

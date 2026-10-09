@@ -37,6 +37,8 @@ pub enum View {
     Keys,
     Lighting,
     Display,
+    /// the screen: what Ectodeck plays on it, and what it shows when Ectodeck is closed
+    Screen,
 }
 
 /// Each cap's legend, for the key's name where it has no full name.

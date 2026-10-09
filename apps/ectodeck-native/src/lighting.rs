@@ -52,9 +52,11 @@ pub enum Ctl {
     WhereAll,
     /// one of the brush's ready colors
     Preset,
+    /// one of the screen light's ready colors
+    LcdPreset,
 }
 
-const CTLS: [Ctl; 33] = [
+const CTLS: [Ctl; 34] = [
     Ctl::None,
     Ctl::Color,
     Ctl::Colors,
@@ -88,6 +90,7 @@ const CTLS: [Ctl; 33] = [
     Ctl::WhereMode,
     Ctl::WhereAll,
     Ctl::Preset,
+    Ctl::LcdPreset,
 ];
 
 pub fn ctl(id: i32) -> Ctl {

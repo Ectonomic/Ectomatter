@@ -158,6 +158,8 @@ struct Session {
     key: Option<(Option<String>, Option<String>)>,
     ev: Arc<Mutex<HashMap<String, String>>>,
     frames: Option<Playing>,
+    /// which sequence is playing: "launch" or "exit"
+    kind: Option<&'static str>,
 }
 
 fn alive(ev: &HashMap<String, String>) -> bool {
@@ -166,7 +168,7 @@ fn alive(ev: &HashMap<String, String>) -> bool {
 
 impl Session {
     fn new() -> Session {
-        Session { key: None, ev: Arc::new(Mutex::new(HashMap::new())), frames: None }
+        Session { key: None, ev: Arc::new(Mutex::new(HashMap::new())), frames: None, kind: None }
     }
 
     fn update(&mut self, ev: HashMap<String, String>, shown: Vec<String>, stats: Ask<Vec<String>>, seed: &mut dyn FnMut() -> u64) {
@@ -186,7 +188,10 @@ impl Session {
             if alive(&ev) { int(ev.get("done"), 0) } else { 1_000_000 }
         });
         match ev.get("phase").map(|s| s.as_str()) {
-            Some("launch") => self.frames = Some(Playing::launch(seed(), name, steps, done, stats, shown)),
+            Some("launch") => {
+                self.frames = Some(Playing::launch(seed(), name, steps, done, stats, shown));
+                self.kind = Some("launch");
+            }
             Some("exit") => {
                 let minutes = ((int(ev.get("ended"), 0) - int(ev.get("started"), 0)).div_euclid(60)).max(0);
                 let shared = self.ev.clone();
@@ -195,6 +200,7 @@ impl Session {
                     ev.get("finished").is_some_and(|f| f == "1") || !alive(&ev)
                 });
                 self.frames = Some(Playing::exit(seed(), name, steps, minutes, done, finished, stats, shown));
+                self.kind = Some("exit");
             }
             _ => {}
         }
@@ -226,8 +232,8 @@ pub enum Control {
 #[derive(Clone, Debug, PartialEq)]
 pub struct News {
     pub rows: Vec<String>,
-    /// the launch or exit sequence's step, while one plays
-    pub phase: Option<&'static str>,
+    /// the sequence playing, "launch" or "exit", while one plays
+    pub sequence: Option<&'static str>,
     pub state: State,
 }
 
@@ -257,9 +263,8 @@ pub struct Core {
     stats_at: f64,
     pub announce: bool,
     pub paused: bool,
-    /// what was pushed, for the page: rows and the sequence's step
-    pub pushed: Option<(Vec<String>, Option<&'static str>)>,
-    phase: Option<&'static str>,
+    /// what was pushed, for the page
+    pub pushed: Option<Vec<String>>,
 }
 
 impl Core {
@@ -281,7 +286,6 @@ impl Core {
             announce: true,
             paused: false,
             pushed: None,
-            phase: None,
         }
     }
 
@@ -302,7 +306,7 @@ impl Core {
                     let _ = writeln!(file, "{now:.3} {}", rows.join("|"));
                 }
             }
-            self.pushed = Some((rows.clone(), self.phase));
+            self.pushed = Some(rows.clone());
             self.shown = Some(rows);
         } else {
             // unplugged or found anew; look again next time
@@ -336,12 +340,10 @@ impl Core {
             if now >= self.frame_until {
                 match self.session.next() {
                     Some(f) => {
-                        self.phase = Some(f.phase);
                         self.push(f.rows, now);
                         self.frame_until = now + f.ms as f64 / 1000.0;
                     }
                     None => {
-                        self.phase = None;
                         self.stats_at = 0.0;
                         return false;
                     }
@@ -358,12 +360,16 @@ impl Core {
     /// Stop any sequence playing (launches no longer break in).
     pub fn drop_sequence(&mut self) {
         self.session.frames = None;
-        self.phase = None;
         self.stats_at = 0.0;
     }
 
     pub fn playing_sequence(&self) -> bool {
         self.session.frames.is_some()
+    }
+
+    /// The sequence playing, "launch" or "exit"; None while the Stats page shows.
+    pub fn sequence(&self) -> Option<&'static str> {
+        self.session.frames.as_ref().and(self.session.kind)
     }
 
     /// Hand the screen back: blank it, then, unless `own` is false, leave the
@@ -419,8 +425,7 @@ impl Player {
             core.paused = paused;
             let start = Instant::now();
             let (mut other, mut other_at) = (other_running(), Instant::now());
-            let mut told: Option<(State, usize)> = None;
-            let mut pushes = 0usize;
+            let mut told: Option<(State, Option<&'static str>)> = None;
             loop {
                 // what Ectodeck asks
                 while let Ok(c) = heard.try_recv() {
@@ -457,13 +462,13 @@ impl Player {
                 let again = if other { true } else { core.tick(start.elapsed().as_secs_f64()) };
                 let found = other || core.sink.find();
                 let state = if other { State::Other } else if !found { State::Missing } else if core.paused && !core.playing_sequence() { State::Paused } else { State::Playing };
-                if let Some((rows, phase)) = core.pushed.take() {
-                    pushes += 1;
-                    news(News { rows, phase, state });
-                    told = Some((state, pushes));
-                } else if told.is_none_or(|(s, _)| s != state) {
-                    news(News { rows: core.shown_rows(), phase: None, state });
-                    told = Some((state, pushes));
+                let sequence = core.sequence();
+                if let Some(rows) = core.pushed.take() {
+                    news(News { rows, sequence, state });
+                    told = Some((state, sequence));
+                } else if told != Some((state, sequence)) {
+                    news(News { rows: core.shown_rows(), sequence, state });
+                    told = Some((state, sequence));
                 }
                 if again {
                     std::thread::sleep(Duration::from_millis(10));
