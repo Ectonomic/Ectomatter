@@ -192,6 +192,30 @@ export struct EdPiece {
     name: string,
 }
 
+// a page in the Screen tab's playlist: its name, what it does next, its
+// picture, its place in the order, whether the screen shows it, and whether
+// it is first, last or the only page
+export struct PlPage {
+    name: string,
+    note: string,
+    thumb: image,
+    n: int,
+    on: bool,
+    live: bool,
+    first: bool,
+    last: bool,
+    only: bool,
+}
+
+// a page that can be added to the playlist: its name, what it shows, its
+// picture, and whether it is selected
+export struct LibCard {
+    name: string,
+    note: string,
+    pic: image,
+    on: bool,
+}
+
 export struct MenuRow {
     kind: int,
     label: string,
@@ -2395,18 +2419,65 @@ component GameBox inherits PageBox {
 
 // the Screen tab's playlist: the pages Ectodeck plays on the screen, in turn
 // (Stats alone, for now), and game-helper's launches breaking in
+// a small square button with a line glyph, on a well
+component IconButton inherits Rectangle {
+    in property <string> commands;
+    in property <bool> enabled: true;
+    callback clicked;
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    background: !root.enabled ? transparent : ta.pressed ? Ink.pick : ta.has-hover ? Ink.hover-box : transparent;
+    Path {
+        x: 6px;
+        y: 6px;
+        width: 14px;
+        height: 14px;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        commands: root.commands;
+        fill: transparent;
+        stroke: !root.enabled ? #3a3a41 : ta.has-hover ? Ink.bright : Ink.soft;
+        stroke-width: 1.4px;
+        stroke-line-cap: LineCap.round;
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? MouseCursor.pointer : MouseCursor.default;
+        clicked => { root.clicked(); }
+    }
+}
+
 component PlaylistBox inherits PageBox {
-    in property <image> thumb;
+    in property <[PlPage]> pages;
     in property <image> launch;
     in property <bool> announce;
     callback announce-toggled();
-    // the page opened in the page editor
-    callback edit();
+    // a page opened in the page editor, shown now, moved, taken off; a page added
+    callback edit(int);
+    callback show(int);
+    callback up(int);
+    callback down(int);
+    callback remove(int);
+    callback add();
     title: "Playlist";
-    // the page: its picture, its place in the order, its name and what it shows
-    Rectangle {
+    property <length> list-top: 70px;
+    property <length> add-top: list-top + root.pages.length * 60px;
+    property <length> foot-top: add-top + 40px + 14px;
+    Text {
+        x: 16px;
+        y: 42px;
+        width: parent.width - 32px;
+        text: "Pages play in this order, then start again. Select a page’s picture to show the page now.";
+        font-family: "Geist";
+        font-size: 12.5px;
+        color: Ink.quiet;
+        wrap: word-wrap;
+    }
+    // each page: its picture, its place in the order, its name and what comes next
+    for p[i] in root.pages: Rectangle {
         x: 10px;
-        y: 46px;
+        y: list-top + i * 60px;
         width: parent.width - 20px;
         height: 54px;
         border-radius: 10px;
@@ -2421,11 +2492,21 @@ component PlaylistBox inherits PageBox {
             Image {
                 width: parent.width;
                 height: parent.height;
-                source: root.thumb;
+                source: p.thumb;
+            }
+            // (a ring while the pointer is over it: selecting it shows the page)
+            Rectangle {
+                border-radius: 3px;
+                border-width: pic-ta.has-hover ? 1px : 0;
+                border-color: #ffffff80;
+            }
+            pic-ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.show(i); }
             }
         }
         Rectangle {
-            x: 176px;
+            x: 172px;
             y: (parent.height - 20px) / 2;
             width: 20px;
             height: 20px;
@@ -2434,7 +2515,7 @@ component PlaylistBox inherits PageBox {
             Text {
                 width: parent.width;
                 height: parent.height;
-                text: "1";
+                text: p.n;
                 font-family: "Geist";
                 font-size: 11px;
                 color: Ink.soft;
@@ -2442,41 +2523,101 @@ component PlaylistBox inherits PageBox {
                 vertical-alignment: center;
             }
         }
+        // the page the screen shows: a dot before its name, breathing while it plays
+        if p.on: Rectangle {
+            x: 202px;
+            y: 9px + 6px;
+            width: 6px;
+            height: 6px;
+            border-radius: 3px;
+            background: p.live ? Ink.good : Ink.quiet;
+            opacity: p.live ? 0.55 + 0.45 * cos(animation-tick() / 1600ms * 360deg) : 1;
+        }
         Text {
-            x: 206px;
+            x: p.on ? 214px : 202px;
             y: 9px;
             height: 18px;
-            text: "Stats";
+            width: parent.width - self.x - 152px;
+            text: p.name;
             font-family: "Geist";
             font-size: 13px;
             font-weight: 500;
             color: Ink.ink;
             vertical-alignment: center;
+            overflow: elide;
         }
         Text {
-            x: 206px;
+            x: 202px;
             y: 27px;
             height: 18px;
-            width: parent.width - 216px - 72px;
-            text: "CPU, GPU, RAM and VRAM, every second";
+            width: parent.width - 202px - 152px;
+            text: p.note;
             font-family: "Geist";
             font-size: 12px;
             color: Ink.quiet;
             vertical-alignment: center;
             overflow: elide;
         }
+        // earlier, later, off the playlist, and the page editor
+        IconButton {
+            x: parent.width - 148px;
+            y: (parent.height - 26px) / 2;
+            commands: "M4 10 L8 6 L12 10";
+            enabled: !p.first;
+            clicked => { root.up(i); }
+        }
+        IconButton {
+            x: parent.width - 120px;
+            y: (parent.height - 26px) / 2;
+            commands: "M4 6 L8 10 L12 6";
+            enabled: !p.last;
+            clicked => { root.down(i); }
+        }
+        IconButton {
+            x: parent.width - 92px;
+            y: (parent.height - 26px) / 2;
+            commands: "M4.5 4.5 L11.5 11.5 M11.5 4.5 L4.5 11.5";
+            enabled: !p.only;
+            clicked => { root.remove(i); }
+        }
         WordButton {
-            x: parent.width - self.width - 12px;
+            x: parent.width - self.width - 10px;
             y: (parent.height - self.height) / 2;
             text: "Edit";
             fill: Ink.hover-well;
             fill-hover: Ink.pick;
-            clicked => { root.edit(); }
+            clicked => { root.edit(i); }
+        }
+    }
+    // a page added at the end
+    Rectangle {
+        x: 10px;
+        y: add-top;
+        width: parent.width - 20px;
+        height: 40px;
+        border-radius: 10px;
+        background: add-ta.pressed ? Ink.pick : add-ta.has-hover ? Ink.hover-well : transparent;
+        border-width: 1px;
+        border-color: add-ta.has-hover ? #4a4a52 : Ink.line;
+        Text {
+            width: parent.width;
+            height: parent.height;
+            text: "+  Add a page";
+            font-family: "Geist";
+            font-size: 13px;
+            font-weight: 500;
+            color: add-ta.has-hover ? Ink.bright : Ink.dim;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        add-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.add(); }
         }
     }
     Rectangle {
         x: 16px;
-        y: 114px;
+        y: foot-top;
         width: parent.width - 32px;
         height: 1px;
         background: Ink.line;
@@ -2484,7 +2625,7 @@ component PlaylistBox inherits PageBox {
     // game-helper's launches and exits: what they show, and whether they break in
     Rectangle {
         x: 20px;
-        y: 130px;
+        y: foot-top + 16px;
         width: 150px;
         height: 30px;
         border-radius: 3px;
@@ -2497,7 +2638,7 @@ component PlaylistBox inherits PageBox {
     }
     CheckBox {
         x: 186px;
-        y: 126px;
+        y: foot-top + 12px;
         width: parent.width - 202px;
         text: "Game launches break in";
         on: root.announce;
@@ -2505,7 +2646,7 @@ component PlaylistBox inherits PageBox {
     }
     Text {
         x: 213px;
-        y: 156px;
+        y: foot-top + 42px;
         width: parent.width - 229px;
         text: "From game-helper, when a game starts or closes. Then the playlist carries on.";
         font-family: "Geist";
@@ -3159,7 +3300,7 @@ export component AppWindow inherits Window {
     // keyboard's screen isn't there); whether launches break in; and the
     // closed box's height
     in property <image> lcd-big;
-    in property <image> lcd-thumb;
+    in property <[PlPage]> pl-pages;
     in property <image> lcd-launch;
     in property <int> lcd-state;
     in property <bool> lcd-announce: true;
@@ -3180,6 +3321,20 @@ export component AppWindow inherits Window {
     in property <[Cell]> ed-page-cells;
     in property <length> ed-page-h;
     callback screen-edit(int);
+    // the playlist: a page shown now, moved earlier or later, taken off; the
+    // sheet of pages to add, a page selected on it, added, the sheet closed
+    callback page-show(int);
+    callback page-up(int);
+    callback page-down(int);
+    callback page-remove(int);
+    in property <bool> lib-open;
+    in property <[LibCard]> lib-cards;
+    in property <string> lib-add-text: "Add";
+    in property <bool> lib-can-add;
+    callback lib-open-at();
+    callback lib-pick(int);
+    callback lib-add();
+    callback lib-close();
     callback screen-done();
     callback screen-add(int);
     callback screen-grid();
@@ -3372,7 +3527,7 @@ export component AppWindow inherits Window {
     // Screen: the playlist (540 wide) and what shows when Ectodeck is closed
     // (320), side by side while they fit, as tall as each other
     property <length> pl-w: 540px;
-    property <length> pl-need: 222px;
+    property <length> pl-need: 70px + root.pl-pages.length * 60px + 40px + 14px + 96px;
     property <bool> sfits: pl-w + 12px + 320px <= under-w;
     property <length> srow0: sfits ? min(band-max, max(band-min, max(pl-need, root.closed-h))) : max(band-min, pl-need);
     property <length> srow1: root.closed-h;
@@ -3880,16 +4035,27 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
-                if root.tab == 3 && root.boot == 0 && !root.screen-editing: PlaylistBox {
+                if root.tab == 3 && root.boot == 0 && !root.screen-editing: ScrollBox {
                     x: under-x;
                     y: under-top;
                     width: pl-w;
                     height: srow0;
-                    thumb: root.lcd-thumb;
+                    need: pl-need;
+                    PlaylistBox {
+                    width: parent.width;
+                    height: max(pl-need, srow0);
+                    fill: transparent;
+                    pages: root.pl-pages;
                     launch: root.lcd-launch;
                     announce: root.lcd-announce;
                     announce-toggled => { root.lcd-announce-toggled(); }
-                    edit => { root.screen-edit(0); }
+                    edit(i) => { root.screen-edit(i); }
+                    show(i) => { root.page-show(i); }
+                    up(i) => { root.page-up(i); }
+                    down(i) => { root.page-down(i); }
+                    remove(i) => { root.page-remove(i); }
+                    add => { root.lib-open-at(); }
+                    }
                 }
                 if root.tab == 3 && root.boot == 0 && !root.screen-editing: ScrollBox {
                     x: under-x + (sfits ? pl-w + 12px : 0);
@@ -4282,6 +4448,112 @@ export component AppWindow inherits Window {
             open: root.rail-open;
             reveal: root.reveal;
             clicked => { root.rail("settings"); }
+        }
+    }
+
+    // the pages that can be added to the playlist, on a sheet over the window:
+    // a picture and a line for each; select one, then add it
+    if root.lib-open: Rectangle {
+        y: bar;
+        height: root.height - bar;
+        background: #0a0c0f9e;
+        border-bottom-left-radius: root.radius;
+        border-bottom-right-radius: root.radius;
+        TouchArea {
+            clicked => { root.lib-close(); }
+        }
+        Rectangle {
+            property <length> card-w: (self.width - 40px - 2 * 12px) / 3;
+            width: min(680px, parent.width - 32px);
+            height: 20px + 26px + 22px + 24px + card-w * 0.7 + 24px + 32px + 20px;
+            border-radius: 12px;
+            background: Ink.box;
+            border-width: 1px;
+            border-color: Ink.line;
+            drop-shadow-blur: 60px;
+            drop-shadow-offset-y: 24px;
+            drop-shadow-color: #000000cc;
+            TouchArea { }
+            Text {
+                x: 20px;
+                y: 20px;
+                text: "Add a page";
+                font-family: "Geist";
+                font-size: 16px;
+                font-weight: 600;
+                color: Ink.ink;
+            }
+            Text {
+                x: 20px;
+                y: 20px + 26px;
+                width: parent.width - 40px;
+                text: "Select a page to add to the end of the playlist.";
+                font-family: "Geist";
+                font-size: 13px;
+                color: Ink.quiet;
+            }
+            for c[i] in root.lib-cards: Rectangle {
+                x: 20px + i * (card-w + 12px);
+                y: 20px + 26px + 22px + 24px;
+                width: card-w;
+                height: card-w * 0.7;
+                border-radius: 10px;
+                background: c.on ? (card-ta.has-hover ? Ink.pick-hover : Ink.pick) : card-ta.has-hover ? Ink.hover-well : Ink.well;
+                Rectangle {
+                    x: 10px;
+                    y: 10px;
+                    width: parent.width - 20px;
+                    height: (parent.width - 20px) / 5;
+                    border-radius: 3px;
+                    clip: true;
+                    Image {
+                        width: parent.width;
+                        height: parent.height;
+                        source: c.pic;
+                    }
+                }
+                Text {
+                    x: 12px;
+                    y: 10px + (parent.width - 20px) / 5 + 10px;
+                    text: c.name;
+                    font-family: "Geist";
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: c.on || card-ta.has-hover ? Ink.bright : Ink.ink;
+                }
+                Text {
+                    x: 12px;
+                    y: 10px + (parent.width - 20px) / 5 + 30px;
+                    width: parent.width - 24px;
+                    text: c.note;
+                    font-family: "Geist";
+                    font-size: 12px;
+                    color: Ink.soft;
+                    wrap: word-wrap;
+                }
+                card-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.lib-pick(i); }
+                }
+            }
+            HorizontalLayout {
+                x: 20px;
+                y: parent.height - 20px - 32px;
+                width: parent.width - 40px;
+                height: 32px;
+                spacing: 8px;
+                alignment: end;
+                VerticalLayout {
+                    alignment: center;
+                    WordButton { text: "Cancel"; clicked => { root.lib-close(); } }
+                }
+                WordButton {
+                    primary: true;
+                    text: root.lib-add-text;
+                    enabled: root.lib-can-add;
+                    clicked => { root.lib-add(); }
+                }
+            }
         }
     }
 

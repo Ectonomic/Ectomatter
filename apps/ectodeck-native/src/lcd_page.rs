@@ -260,7 +260,7 @@ fn middle(row: u8, kind: Kind) -> Piece {
 pub const TEMPLATES: [(&str, &str, &str); 3] = [
     ("stats", "Stats", "CPU, GPU, RAM and VRAM, every second."),
     ("clock", "Clock", "The time and the date, in the middle of the screen."),
-    ("weather", "Weather", "The temperature and the sky outside, for the place set in Ectodeck’s Settings."),
+    ("weather", "Weather", "The temperature and the sky outside, for the place in Ectodeck’s Settings."),
 ];
 
 impl Page {

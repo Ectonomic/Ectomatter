@@ -2,7 +2,7 @@
 //! edited (the piece chosen, where it sits, the page), what each of their
 //! controls does to the page, and a new piece's first place.
 
-use crate::lcd_page::{Kind, Page, Piece, Readings, Source, COLS, ROWS};
+use crate::lcd_page::{Kind, Page, Piece, Readings, Source, Transition, COLS, ROWS, SECS, TRANSITIONS};
 use crate::lighting::{cell, id, kind, style, text_cell, Ctl, Stack};
 use crate::Cell;
 
@@ -48,8 +48,9 @@ fn looks(p: &Piece, r: &Readings) -> String {
 }
 
 /// The boxes for the page, with the piece chosen. `avail` is what this
-/// computer can read; `profile_light` the profile's screen light.
-pub fn boxes(page: &Page, chosen: Option<usize>, r: &Readings, avail: &[Source], profile_light: [u8; 3], menu_open: bool) -> Boxes {
+/// computer can read; `profile_light` the profile's screen light; `only`
+/// whether the page is the playlist's only one.
+pub fn boxes(page: &Page, chosen: Option<usize>, r: &Readings, avail: &[Source], profile_light: [u8; 3], menu_open: bool, only: bool) -> Boxes {
     let piece = chosen.and_then(|i| page.pieces.get(i));
     // the piece
     let mut s = Stack::new(BOX_W);
@@ -123,7 +124,7 @@ pub fn boxes(page: &Page, chosen: Option<usize>, r: &Readings, avail: &[Source],
             stepper(&mut s, Ctl::ScrWidth, 16.0 + half + 8.0, &p.width.to_string());
             s.y += 30.0 + 16.0;
             s.head("Align", None);
-            s.switch(Ctl::ScrAlign, &[("Left", ""), ("Right", "")], if p.right { 1 } else { 0 });
+            s.switch(Ctl::ScrAlign, &[("Left", ""), ("Center", ""), ("Right", "")], if p.center { 1 } else if p.right { 2 } else { 0 });
             s.gap(12.0);
             s.note("Or drag the piece on the screen.");
         }
@@ -133,6 +134,23 @@ pub fn boxes(page: &Page, chosen: Option<usize>, r: &Readings, avail: &[Source],
 
     // the page
     let mut s = Stack::new(BOX_W);
+    s.head("Shows for", None);
+    stepper(&mut s, Ctl::ScrSecs, 16.0, &format!("{} s", page.secs));
+    s.y += 30.0 + 10.0;
+    if only {
+        s.note("With one page in the playlist, this page stays on the screen.");
+    }
+    s.gap(6.0);
+    s.head("Comes in with", None);
+    s.switch(Ctl::ScrComes, &[("Wipe", ""), ("Dissolve", ""), ("Type", ""), ("Cut", "")], TRANSITIONS.iter().position(|t| *t == page.comes_in).unwrap_or(0));
+    s.gap(8.0);
+    s.note(match page.comes_in {
+        Transition::Wipe => "A column of # sweeps across the screen, uncovering this page.",
+        Transition::Dissolve => "The page before changes into this page a few characters at a time.",
+        Transition::Type => "The screen clears, then this page types in row by row.",
+        Transition::Cut => "This page replaces the page before at once.",
+    });
+    s.gap(14.0);
     s.head("Screen light", None);
     let own = page.light;
     let mut x = 16.0;
@@ -180,6 +198,14 @@ pub fn act(page: &mut Page, ed: &mut Editor, c: Ctl, index: usize, words: Option
         page.light = if index == 0 { None } else { crate::display::LIGHTS.get(index - 1).copied() };
         return;
     }
+    if c == Ctl::ScrSecs {
+        page.secs = if index == 0 { page.secs.saturating_sub(1) } else { page.secs + 1 }.clamp(SECS.0, SECS.1);
+        return;
+    }
+    if c == Ctl::ScrComes {
+        page.comes_in = TRANSITIONS.get(index).copied().unwrap_or(Transition::Wipe);
+        return;
+    }
     let Some(i) = ed.chosen.filter(|i| *i < page.pieces.len()) else { return };
     if c == Ctl::ScrRemove {
         page.pieces.remove(i);
@@ -202,7 +228,10 @@ pub fn act(page: &mut Page, ed: &mut Editor, c: Ctl, index: usize, words: Option
         Ctl::ScrRow => p.row = (index as u8).min(ROWS - 1),
         Ctl::ScrCol => p.col = if index == 0 { p.col.saturating_sub(1) } else { (p.col + 1).min(COLS - 1) },
         Ctl::ScrWidth => p.width = if index == 0 { p.width.saturating_sub(1).max(1) } else { (p.width + 1).min(COLS) },
-        Ctl::ScrAlign => p.right = index == 1,
+        Ctl::ScrAlign => {
+            p.center = index == 1;
+            p.right = index == 2;
+        }
         _ => {}
     }
 }
@@ -269,9 +298,11 @@ mod tests {
         act(&mut p, &mut ed, Ctl::ScrCol, 1, None);
         act(&mut p, &mut ed, Ctl::ScrWidth, 0, None);
         act(&mut p, &mut ed, Ctl::ScrRow, 3, None);
+        act(&mut p, &mut ed, Ctl::ScrAlign, 1, None);
+        assert!(p.pieces[1].center && !p.pieces[1].right);
         act(&mut p, &mut ed, Ctl::ScrAlign, 0, None);
         let q = &p.pieces[1];
-        assert_eq!((q.row, q.col, q.width, q.right), (3, 5, 2, false));
+        assert_eq!((q.row, q.col, q.width, q.right, q.center), (3, 5, 2, false, false));
         set_source(&mut p, &ed, Source::GpuLoad);
         assert_eq!(p.pieces[1].kind, Kind::Data(Source::GpuLoad, false), "°F goes with a reading that isn't a temperature");
         move_to(&mut p, 1, 9, 25);
@@ -280,5 +311,14 @@ mod tests {
         assert_eq!(p.light, Some(crate::display::LIGHTS[1]));
         act(&mut p, &mut ed, Ctl::ScrRemove, 0, None);
         assert_eq!((p.pieces.len(), ed.chosen), (11, None));
+        // the page's own time, within three seconds and a minute, and how it comes in
+        for _ in 0..10 {
+            act(&mut p, &mut ed, Ctl::ScrSecs, 0, None);
+        }
+        assert_eq!(p.secs, SECS.0);
+        act(&mut p, &mut ed, Ctl::ScrSecs, 1, None);
+        assert_eq!(p.secs, SECS.0 + 1);
+        act(&mut p, &mut ed, Ctl::ScrComes, 2, None);
+        assert_eq!(p.comes_in, Transition::Type);
     }
 }
