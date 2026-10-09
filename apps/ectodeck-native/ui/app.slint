@@ -1865,7 +1865,9 @@ component PageBox inherits Rectangle {
     in property <string> title;
     // where the title sits: lower when something comes before it in the box
     in property <length> title-y: 14px;
-    background: Ink.box;
+    // (clear inside a ScrollBox, which draws the box itself)
+    in property <brush> fill: Ink.box;
+    background: root.fill;
     border-radius: 12px;
     Text {
         x: 16px;
@@ -2095,6 +2097,34 @@ component LayerSwitch inherits Rectangle {
             }
             changed has-hover => { root.shut-hover = self.has-hover && !t.open; }
         }
+    }
+}
+
+// A box under the keyboard that holds more than its height: the box itself,
+// rounded, and what it holds (`need` tall) scrolling inside it, with the Key
+// library's scrollbar at its edge when there is more than shows.
+component ScrollBox inherits Rectangle {
+    in property <length> need;
+    background: Ink.box;
+    border-radius: 12px;
+    clip: true;
+    sb-flick := Flickable {
+        width: parent.width;
+        height: parent.height;
+        viewport-height: max(root.need, root.height);
+        mouse-drag-pan-enabled: false;
+        @children
+    }
+    ScrollBar {
+        x: parent.width - 12px;
+        y: 8px;
+        height: parent.height - 16px;
+        view: sb-flick.height;
+        content: sb-flick.viewport-height;
+        offset: -sb-flick.viewport-y;
+        framed: false;
+        thumb-color: #4a4a52;
+        scroll-to(o) => { sb-flick.viewport-y = -o; }
     }
 }
 
@@ -3040,29 +3070,38 @@ export component AppWindow inherits Window {
     // (the library, its layers' tabs at its top, and Game mode as tall as the Profiles
     // box; a chosen key's or slider's box as tall too, or as tall as it needs)
     property <length> lib-w: 440px;
-    property <length> keys-h: anchor.preferred-height;
+    // Every block in a row is as tall as the others: at least the Profiles box,
+    // at most the room under the keyboard in the window (so it never runs off
+    // its foot), between those as tall as the tallest holds. What holds more
+    // than that scrolls inside its block.
+    property <length> band-min: anchor.preferred-height;
+    property <length> room: flick.height - under-top - 24px;
+    property <length> band-max: max(band-min, room);
+    property <length> second-need: root.slider-chosen != 0 ? 328px : root.key-open ? (root.key-note != "" ? 320px : 270px) : 230px;
+    property <length> keys-h: min(band-max, max(band-min, second-fits ? second-need : 0));
     property <length> lib-h: keys-h;
     property <length> second-w: root.key-open ? 460px : root.slider-chosen != 0 ? 360px : 340px;
-    property <length> second-h: root.slider-chosen != 0 ? max(keys-h, 328px) : root.key-open ? max(keys-h, root.key-note != "" ? 320px : 270px) : second-fits ? keys-h : 210px;
+    property <length> second-h: second-fits ? keys-h : max(band-min, second-need);
     property <bool> second-fits: lib-w + 12px + second-w <= under-w;
     // Lighting: the effects (300 wide), the effect's settings (360) and where and when
     // (320), side by side while they fit and wrapping under when they don't; the
     // boxes in a row as tall as its tallest, a single row reaching the anchor's foot
-    property <length> lfx-h: 48px + 3 * 76px + 2 * 8px + 18px;
+    property <length> lfx-h: 48px + 3 * 76px + 2 * 8px + 14px;
     property <bool> lfits1: 300px + 12px + 360px <= under-w;
     property <int> lr1: lfits1 ? 0 : 1;
     property <length> lx1: lfits1 ? 312px : 0;
     property <int> lr2: root.light-kind != 0 ? -1 : lfits1 ? (300px + 12px + 360px + 12px + 320px <= under-w ? 0 : 1) : (360px + 12px + 320px <= under-w ? 1 : 2);
     property <length> lx2: lr2 == 0 ? 684px : lr2 == 1 && !lfits1 ? 372px : 0;
     property <int> lrows: lr2 == 2 ? 3 : lr1 == 1 || lr2 == 1 ? 2 : 1;
-    property <length> lrow0: max(lrows == 1 ? anchor.preferred-height : 0, max(lfx-h, max(lr1 == 0 ? root.set-h : 0, lr2 == 0 ? root.place-h : 0)));
+    property <length> lneed0: max(lfx-h, max(lr1 == 0 ? root.set-h : 0, lr2 == 0 ? root.place-h : 0));
+    property <length> lrow0: lrows == 1 ? min(band-max, max(band-min, lneed0)) : max(band-min, lneed0);
     property <length> lrow1: max(lr1 == 1 ? root.set-h : 0, lr2 == 1 ? root.place-h : 0);
     property <length> lrow2: lr2 == 2 ? root.place-h : 0;
     property <length> light-h: lrow0 + (lrows > 1 ? 12px + lrow1 : 0) + (lrows > 2 ? 12px + lrow2 : 0);
     property <length> tab-h: root.tab == 0 ? (second-fits ? keys-h : keys-h + 12px + second-h)
         : root.tab == 1 ? light-h : root.tile-height;
     property <length> under-board: 18px + max(anchor.preferred-height, tab-h);
-    property <length> page-h: root.tab == 2 ? 12px + head-h + 6px + 24px + root.tile-height + 40px : board-top + board-h + under-board + 40px;
+    property <length> page-h: root.tab == 2 ? 12px + head-h + 6px + 24px + root.tile-height + 40px : board-top + board-h + under-board + 24px;
     // the page's scrollbar, as WebKit drew it: over the whole window, when the page is longer than it
     property <length> doc-h: bar + 56px + page-h;
 
@@ -3245,21 +3284,24 @@ export component AppWindow inherits Window {
                     find(t) => { root.lib-find(t); }
                     pick(id) => { if (id >= 0) { root.key-clicked(id); } else { root.slider-chosen-at(-id); } }
                 }
-                key-tile := Rectangle {
+                key-tile := ScrollBox {
                     visible: root.tab == 0 && root.boot == 0;
                     x: under-x + (second-fits ? lib-w + 12px : 0);
                     y: under-top + (second-fits ? 0 : keys-h + 12px);
                     width: second-w;
                     height: second-h;
+                    need: second-need;
                     if !root.key-open && root.slider-chosen == 0: GameBox {
                         width: parent.width;
-                        height: parent.height;
+                        height: max(second-need, second-h);
+                        fill: transparent;
                         items: root.game-items;
                         toggled(i) => { root.game-toggled(i); }
                     }
                     if root.key-open: KeyDetail {
                         width: parent.width;
-                        height: parent.height;
+                        height: max(second-need, second-h);
+                        fill: transparent;
                         title: root.key-name;
                         cap: root.key-cap;
                         factory: root.key-factory;
@@ -3280,7 +3322,8 @@ export component AppWindow inherits Window {
                     }
                     if root.slider-chosen != 0: SliderDetail {
                         width: parent.width;
-                        height: parent.height;
+                        height: max(second-need, second-h);
+                        fill: transparent;
                         title: root.slider-chosen == 1 ? "Dimmer" : "Volume";
                         side: root.slider-chosen == 1 ? "left" : "right";
                         at: root.slider-at;
@@ -3291,38 +3334,56 @@ export component AppWindow inherits Window {
                     }
                 }
                 // the Lighting page: the effects, the chosen one's settings, and where and when it plays
-                if root.tab == 1 && root.boot == 0: EffectGrid {
+                if root.tab == 1 && root.boot == 0: ScrollBox {
                     x: under-x;
                     y: under-top;
                     width: 300px;
                     height: lrow0;
-                    effects: root.effects;
-                    moving: root.effect-moves;
-                    chose(i) => { root.effect(i); }
+                    need: lfx-h;
+                    EffectGrid {
+                        width: parent.width;
+                        height: max(lfx-h, lrow0);
+                        fill: transparent;
+                        effects: root.effects;
+                        moving: root.effect-moves;
+                        chose(i) => { root.effect(i); }
+                    }
                 }
-                if root.tab == 1 && root.boot == 0: PageBox {
+                if root.tab == 1 && root.boot == 0: ScrollBox {
                     x: under-x + lx1;
                     y: under-top + (lr1 == 0 ? 0 : lrow0 + 12px);
                     width: 360px;
                     height: lr1 == 0 ? lrow0 : lrow1;
-                    title: root.light-title;
-                    for c in root.cells: CellView {
-                        c: c;
-                        pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
-                        slide(id, v) => { root.cell-slide(id, v); }
+                    need: root.set-h;
+                    PageBox {
+                        width: parent.width;
+                        height: max(root.set-h, lr1 == 0 ? lrow0 : lrow1);
+                        fill: transparent;
+                        title: root.light-title;
+                        for c in root.cells: CellView {
+                            c: c;
+                            pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
+                            slide(id, v) => { root.cell-slide(id, v); }
+                        }
                     }
                 }
-                if root.tab == 1 && root.boot == 0 && root.light-kind == 0: PageBox {
+                if root.tab == 1 && root.boot == 0 && root.light-kind == 0: ScrollBox {
                     x: under-x + lx2;
                     y: under-top + (lr2 == 0 ? 0 : lr2 == 1 ? lrow0 + 12px : lrow0 + 12px + lrow1 + 12px);
                     width: 320px;
                     height: lr2 == 0 ? lrow0 : lr2 == 1 ? lrow1 : lrow2;
-                    title: "Where and when";
-                    for c in root.place-cells: CellView {
-                        c: c;
-                        pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
-                        slide(id, v) => { root.cell-slide(id, v); }
-                        hovered(i, on) => { root.area-hover(i, on); }
+                    need: root.place-h;
+                    PageBox {
+                        width: parent.width;
+                        height: max(root.place-h, lr2 == 0 ? lrow0 : lr2 == 1 ? lrow1 : lrow2);
+                        fill: transparent;
+                        title: "Where and when";
+                        for c in root.place-cells: CellView {
+                            c: c;
+                            pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
+                            slide(id, v) => { root.cell-slide(id, v); }
+                            hovered(i, on) => { root.area-hover(i, on); }
+                        }
                     }
                 }
                 // Settings: its tiles, as the window lays them out
