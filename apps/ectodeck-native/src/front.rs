@@ -2082,7 +2082,7 @@ impl Front {
                 View::Keys if p.sel.is_some() => "Escape clears the choice.",
                 View::Keys => "Select a key on the keyboard or in the Key library to change what a key does.",
                 View::Lighting => "Choose a lighting effect for this profile, then set the colors, speed and zones below.",
-                View::Display => "The keyboard’s settings are the same on every profile.",
+                View::Display => "Check the keyboard’s connection and which features the installed firmware supports.",
                 View::Screen => "Choose what the keyboard’s screen shows while Ectodeck is open and when Ectodeck is closed.",
             }
             .into(),
