@@ -3847,7 +3847,7 @@ component MacroRow inherits Rectangle {
     callback menu(length, length);
     height: 53px;
     border-radius: 10px;
-    background: root.m.current ? (ta.has-hover ? Ink.pick-hover : Ink.pick) : ta.has-hover ? Ink.hover-well : transparent;
+    background: root.m.current ? (ta.has-hover ? Ink.pick-hover : Ink.pick) : ta.has-hover ? Ink.hover-box : transparent;
     MacroIcon {
         x: 11.5px;
         y: 19px;
@@ -4310,8 +4310,8 @@ export component MacroWindow inherits Window {
         y: 36px;
         width: 290px;
         height: root.height - 36px;
-        // (the well, as the main window's Profiles list is)
-        background: Ink.well;
+        // (the boxes' own shade)
+        background: Ink.box;
         border-bottom-left-radius: root.radius;
         HorizontalLayout {
             x: 18px;
