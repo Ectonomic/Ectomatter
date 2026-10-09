@@ -2848,12 +2848,18 @@ impl Front {
 
     /// The pages into Ectodeck's settings, if they changed since last saved.
     fn save_pages(&mut self) {
+        self.note_changes();
         if self.pages == self.pages_saved {
             return;
         }
         let v = serde_json::Value::Array(self.pages.iter().map(|p| p.to_json()).collect());
         match self.settings.set("devices.z10.screen.pages", v) {
-            Ok(()) => self.pages_saved = self.pages.clone(),
+            Ok(()) => {
+                self.pages_saved = self.pages.clone();
+                // said as a profile's saving is, with Undo beside it
+                self.status("Saved", 1);
+                self.ui.set_undo_shown(!self.undo.is_empty());
+            }
             Err(e) => self.status(format!("The screen’s pages were not saved: {e}"), 2),
         }
         self.pages_changed = None;
