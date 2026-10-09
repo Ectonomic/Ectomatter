@@ -2728,17 +2728,19 @@ component KeyDetail inherits PageBox {
 }
 
 // A slider chosen in the Key library: where it sits now, and what it controls.
-// a button on the device's bar: a glyph (a path, or a picture) and its name
+// a button on the device's bar: its glyph, drawn in lines, and its name
 component BarButton inherits Rectangle {
     in property <string> text;
     in property <string> commands;
-    in property <image> icon;
+    // the lines' ends and corners rounded
+    in property <bool> round;
     callback clicked;
-    width: row.preferred-width;
+    // a whole number of pixels wide, so its glyph's lines land on the pixel grid
+    width: ceil(row.preferred-width / 1px) * 1px;
     Rectangle {
         x: 0;
         y: (parent.height - 30px) / 2;
-        width: row.preferred-width;
+        width: parent.width;
         height: 30px;
         border-radius: 8px;
         background: ta.has-hover ? Ink.shade2 : Ink.shade1;
@@ -2746,8 +2748,8 @@ component BarButton inherits Rectangle {
             padding-left: 12px;
             padding-right: 12px;
             spacing: 7px;
-            alignment: center;
-            if root.commands != "": Path {
+            alignment: start;
+            Path {
                 width: 14px;
                 height: 14px;
                 y: (30px - 14px) / 2;
@@ -2757,13 +2759,7 @@ component BarButton inherits Rectangle {
                 fill: transparent;
                 stroke: Ink.ink;
                 stroke-width: 1.14px;
-            }
-            if root.commands == "": Image {
-                width: 14px;
-                height: 14px;
-                y: (30px - 14px) / 2;
-                source: root.icon;
-                colorize: Ink.ink;
+                stroke-line-cap: root.round ? LineCap.round : LineCap.butt;
             }
             Text {
                 text: root.text;
@@ -3045,9 +3041,6 @@ export component AppWindow inherits Window {
     in property <image> keyboard-tile;
     in property <image> settings-glyph;
     // the Key lab's flask, and whether its window is open
-    in property <image> lab-glyph;
-    // (drawn small, for its button on the device's bar)
-    in property <image> lab-glyph-small;
     in property <bool> lab-open;
     in property <int> tab: 0;
     in-out property <string> place: "home";
@@ -3830,7 +3823,9 @@ export component AppWindow inherits Window {
                         horizontal-stretch: 0;
                         spacing: 8px;
                         BarButton {
-                            icon: root.lab-glyph-small;
+                            // a flask drawn for this size, its lines on the pixel grid
+                            commands: "M5.14 1.14h5.72M6.29 1.14v4.58L2.95 11.93a1.25 1.25 0 0 0 1.1 1.79h7.9a1.25 1.25 0 0 0 1.1-1.79L9.71 5.72V1.14M4.3 10.29h7.4";
+                            round: true;
                             text: "Key lab";
                             clicked => { root.rail("lab"); }
                         }

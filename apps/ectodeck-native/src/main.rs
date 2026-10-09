@@ -451,8 +451,6 @@ fn main() {
     ui.set_home_glyph(glyph(include_str!("../ui/glyphs/home.svg"), 22, true));
     ui.set_keyboard_glyph(glyph(include_str!("../ui/glyphs/keyboard.svg"), 22, true));
     ui.set_settings_glyph(glyph(include_str!("../ui/glyphs/settings.svg"), 22, true));
-    ui.set_lab_glyph(glyph(include_str!("../ui/glyphs/lab.svg"), 22, true));
-    ui.set_lab_glyph_small(glyph(include_str!("../ui/glyphs/lab.svg"), 28, true));
     ui.set_keyboard_tile(glyph(include_str!("../ui/glyphs/keyboard.svg"), 88, true));
     ui.set_rail_open(uistate::get("rail_open").and_then(|v| v.as_bool()).unwrap_or(false));
     slint::ComponentHandle::show(&ui).unwrap();
