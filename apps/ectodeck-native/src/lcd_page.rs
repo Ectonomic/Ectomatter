@@ -257,7 +257,8 @@ fn middle(row: u8, kind: Kind) -> Piece {
 
 /// The pages that can be added to the playlist: what each is called, and
 /// what it shows.
-pub const TEMPLATES: [(&str, &str, &str); 3] = [
+pub const TEMPLATES: [(&str, &str, &str); 4] = [
+    ("blank", "Blank", "An empty page for your own text, readings and clocks."),
     ("stats", "Stats", "CPU, GPU, RAM and VRAM, every second."),
     ("clock", "Clock", "The time and the date, in the middle of the screen."),
     ("weather", "Weather", "The temperature and the sky outside, for the place in Ectodeck’s Settings."),
@@ -289,6 +290,11 @@ impl Page {
         }
     }
 
+    /// A page with nothing on it yet, to be made in the editor.
+    pub fn blank() -> Page {
+        Page { id: "custom".into(), name: "Custom".into(), light: None, secs: SECS.2, comes_in: Transition::Wipe, pieces: Vec::new() }
+    }
+
     /// The time on the second row and the date on the third, in the middle.
     pub fn clock() -> Page {
         Page {
@@ -317,6 +323,7 @@ impl Page {
     /// `taken` has (a second Clock is clock-2).
     pub fn template(key: &str, taken: &[Page]) -> Option<Page> {
         let mut p = match key {
+            "blank" => Page::blank(),
             "stats" => Page::stats(),
             "clock" => Page::clock(),
             "weather" => Page::weather(),
@@ -327,6 +334,10 @@ impl Page {
         while taken.iter().any(|q| q.id == p.id) {
             n += 1;
             p.id = format!("{base}-{n}");
+        }
+        // pages made from blank are told apart by name too: Custom, Custom 2
+        if key == "blank" && n > 1 {
+            p.name = format!("Custom {n}");
         }
         Some(p)
     }
@@ -606,6 +617,17 @@ pub fn available(r: &Readings, weather: bool) -> Vec<Source> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_blank_page_starts_empty_and_each_one_is_named_apart() {
+        let one = Page::template("blank", &[]).unwrap();
+        assert!(one.pieces.is_empty());
+        assert_eq!((one.id.as_str(), one.name.as_str()), ("custom", "Custom"));
+        let two = Page::template("blank", &[one.clone()]).unwrap();
+        assert_eq!((two.id.as_str(), two.name.as_str()), ("custom-2", "Custom 2"));
+        assert_eq!(TEMPLATES[0].0, "blank", "Blank first in Add a page");
+    }
+
     use super::*;
 
     fn readings() -> Readings {

@@ -4464,8 +4464,10 @@ export component AppWindow inherits Window {
         }
         Rectangle {
             property <length> card-w: (self.width - 40px - 2 * 12px) / 3;
+            // three to a row, as many rows as the pages take
+            property <int> card-rows: ceil(root.lib-cards.length / 3);
             width: min(680px, parent.width - 32px);
-            height: 20px + 26px + 22px + 24px + card-w * 0.7 + 24px + 32px + 20px;
+            height: 20px + 26px + 22px + 24px + card-rows * card-w * 0.7 + (card-rows - 1) * 12px + 24px + 32px + 20px;
             border-radius: 12px;
             background: Ink.box;
             border-width: 1px;
@@ -4493,8 +4495,8 @@ export component AppWindow inherits Window {
                 color: Ink.quiet;
             }
             for c[i] in root.lib-cards: Rectangle {
-                x: 20px + i * (card-w + 12px);
-                y: 20px + 26px + 22px + 24px;
+                x: 20px + mod(i, 3) * (card-w + 12px);
+                y: 20px + 26px + 22px + 24px + floor(i / 3) * (card-w * 0.7 + 12px);
                 width: card-w;
                 height: card-w * 0.7;
                 border-radius: 10px;

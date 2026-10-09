@@ -932,16 +932,7 @@ impl Front {
                     }
                     self.push_preview();
                 }
-                Ask::EditPage(i) => {
-                    let i = (i.max(0) as usize).min(self.pages.len().saturating_sub(1));
-                    self.close_menu();
-                    self.editor = Some(crate::screen_edit::Editor { page: i, chosen: None, grid: crate::uistate::get("screen_grid").and_then(|v| v.as_bool()).unwrap_or(true) });
-                    self.read_now();
-                    // the keyboard stays on the page being edited
-                    if let Some(pl) = &self.player {
-                        pl.tell(crate::lcd_player::Control::Hold(Some(i)));
-                    }
-                }
+                Ask::EditPage(i) => self.edit_page(i.max(0) as usize),
                 Ask::EditDone => {
                     self.close_menu();
                     self.editor = None;
@@ -1009,13 +1000,17 @@ impl Front {
                 }
                 Ask::LibPick(i) => self.lib_pick = usize::try_from(i).ok().filter(|i| *i < crate::lcd_page::TEMPLATES.len()),
                 Ask::LibAdd => {
-                    if let Some(p) = self.lib_pick.and_then(|k| crate::lcd_page::Page::template(crate::lcd_page::TEMPLATES[k].0, &self.pages)) {
+                    let key = self.lib_pick.map(|k| crate::lcd_page::TEMPLATES[k].0);
+                    if let Some(p) = key.and_then(|k| crate::lcd_page::Page::template(k, &self.pages)) {
                         self.pages.push(p);
                         self.lib_open = false;
                         self.pages_edited();
-                        // the page added, on the screen now
+                        // the page added, on the screen now; a blank one opens to be made
                         if let Some(pl) = &self.player {
                             pl.tell(crate::lcd_player::Control::Show(self.pages.len() - 1));
+                        }
+                        if key == Some("blank") {
+                            self.edit_page(self.pages.len() - 1);
                         }
                     }
                 }
@@ -2985,6 +2980,18 @@ impl Front {
     pub fn quit_screen(&mut self) {
         if let Some(p) = self.player.take() {
             p.quit(true);
+        }
+    }
+
+    /// Page `i` opened in the editor, the keyboard's screen held on it.
+    fn edit_page(&mut self, i: usize) {
+        let i = i.min(self.pages.len().saturating_sub(1));
+        self.close_menu();
+        self.editor = Some(crate::screen_edit::Editor { page: i, chosen: None, grid: crate::uistate::get("screen_grid").and_then(|v| v.as_bool()).unwrap_or(true) });
+        self.read_now();
+        // the keyboard stays on the page being edited
+        if let Some(pl) = &self.player {
+            pl.tell(crate::lcd_player::Control::Hold(Some(i)));
         }
     }
 
