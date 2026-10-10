@@ -67,12 +67,9 @@ pub enum Ctl {
     ScrAlign,
     ScrRemove,
     ScrLight,
-    /// the page's time on the screen (0 less, 1 more), and how it comes in
-    ScrSecs,
-    ScrComes,
 }
 
-const CTLS: [Ctl; 45] = [
+const CTLS: [Ctl; 43] = [
     Ctl::None,
     Ctl::Color,
     Ctl::Colors,
@@ -116,8 +113,6 @@ const CTLS: [Ctl; 45] = [
     Ctl::ScrAlign,
     Ctl::ScrRemove,
     Ctl::ScrLight,
-    Ctl::ScrSecs,
-    Ctl::ScrComes,
 ];
 
 pub fn ctl(id: i32) -> Ctl {

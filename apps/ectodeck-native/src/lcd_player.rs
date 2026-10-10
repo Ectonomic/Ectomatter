@@ -233,6 +233,8 @@ pub enum Control {
     Show(usize),
     /// stay on this page, which is being edited; None carries on
     Hold(Option<usize>),
+    /// end the launch or exit sequence playing, back to the playlist
+    EndSequence,
     /// what a page may show besides the computer's readings: the profile the
     /// keyboard is using, and the weather outside (°C, the sky in words)
     Context(Option<String>, Option<(f64, String)>),
@@ -247,6 +249,12 @@ pub struct News {
     pub state: State,
     /// which page of the playlist shows, or is coming in
     pub page: usize,
+    /// where the playlist stands in that page's turn: whether the page is
+    /// still coming in, the seconds that part has run, and how long it runs
+    /// (coming in, its frames; showing, the page's own time)
+    pub turning: bool,
+    pub elapsed: f64,
+    pub length: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -286,8 +294,13 @@ pub struct Core {
     pub hold: bool,
     /// when the page showing came on; None until its first frame
     page_since: Option<f64>,
-    /// the frames carrying the screen to the next page, still to show
+    /// the frames carrying the screen to the next page, still to show; when
+    /// they began, and how long they take in all
     between: VecDeque<Frame>,
+    turn_from: f64,
+    turn_len: f64,
+    /// paused: how long the page had shown, which it carries on from
+    held: Option<f64>,
 }
 
 impl Core {
@@ -315,6 +328,9 @@ impl Core {
             hold: false,
             page_since: None,
             between: VecDeque::new(),
+            turn_from: 0.0,
+            turn_len: 0.0,
+            held: None,
         }
     }
 
@@ -433,8 +449,46 @@ impl Core {
             self.stats_at = now + INTERVAL;
             self.page_since = Some(now);
         } else {
+            self.turn_from = now;
+            self.turn_len = frames.iter().map(|f| f.ms as f64 / 1000.0).sum();
             self.between = frames.into();
             self.frame_until = now;
+        }
+    }
+
+    /// Where the playlist stands at `now`: whether a page is coming in, how
+    /// long that part has run, and how long it runs (see [News]).
+    pub fn standing(&self, now: f64) -> (bool, f64, f64) {
+        let n = self.playlist.len();
+        if self.session.frames.is_some() || n == 0 {
+            return (false, 0.0, 0.0);
+        }
+        if !self.between.is_empty() {
+            return (true, (now - self.turn_from).max(0.0), self.turn_len);
+        }
+        let length = self.playlist[self.page() % n].0;
+        let elapsed = match (self.held, self.page_since) {
+            (Some(h), _) => h,
+            (None, Some(t)) => now - t,
+            (None, None) => 0.0,
+        };
+        (false, elapsed.clamp(0.0, length), length)
+    }
+
+    /// Hold the screen as it is, or (false) carry on from where it stood:
+    /// the page keeps the time it had shown.
+    pub fn pause(&mut self, paused: bool, now: f64) {
+        if paused == self.paused {
+            return;
+        }
+        self.paused = paused;
+        if paused {
+            self.held = self.page_since.map(|t| now - t);
+        } else {
+            self.stats_at = 0.0;
+            if let Some(h) = self.held.take() {
+                self.page_since = Some(now - h);
+            }
         }
     }
 
@@ -549,7 +603,7 @@ impl Player {
             core.current = current;
             let start = Instant::now();
             let (mut other, mut other_at) = (other_running(), Instant::now());
-            let mut told: Option<(State, Option<&'static str>, usize)> = None;
+            let mut told: Option<(State, Option<&'static str>, usize, bool)> = None;
             loop {
                 // what Ectodeck asks
                 while let Ok(c) = heard.try_recv() {
@@ -560,10 +614,10 @@ impl Player {
                                 core.drop_sequence();
                             }
                         }
-                        Control::Paused(p) => {
-                            core.paused = p;
-                            if !p {
-                                core.stats_at = 0.0;
+                        Control::Paused(p) => core.pause(p, start.elapsed().as_secs_f64()),
+                        Control::EndSequence => {
+                            if core.playing_sequence() {
+                                core.drop_sequence();
                                 core.restart_page();
                             }
                         }
@@ -602,12 +656,15 @@ impl Player {
                 let found = other || core.sink.find();
                 let state = if other { State::Other } else if !found { State::Missing } else if core.paused && !core.playing_sequence() { State::Paused } else { State::Playing };
                 let (sequence, page) = (core.sequence(), core.page());
+                let (turning, elapsed, length) = core.standing(start.elapsed().as_secs_f64());
+                // (said again as the page comes on after coming in, so the time it shows from is right)
+                let now_told = (state, sequence, page, turning);
                 if let Some(rows) = core.pushed.take() {
-                    news(News { rows, sequence, state, page });
-                    told = Some((state, sequence, page));
-                } else if told != Some((state, sequence, page)) {
-                    news(News { rows: core.shown_rows(), sequence, state, page });
-                    told = Some((state, sequence, page));
+                    news(News { rows, sequence, state, page, turning, elapsed, length });
+                    told = Some(now_told);
+                } else if told != Some(now_told) {
+                    news(News { rows: core.shown_rows(), sequence, state, page, turning, elapsed, length });
+                    told = Some(now_told);
                 }
                 if again {
                     std::thread::sleep(Duration::from_millis(10));
@@ -732,15 +789,20 @@ mod tests {
     fn paused_or_edited_the_page_stays() {
         use crate::lcd_page::Transition;
         let (mut core, sent, clock) = two_pages(Transition::Cut);
-        core.paused = true;
-        run(&mut core, &clock, 0.0, 10.0);
+        // A shows for a second, then the screen holds for nine
+        run(&mut core, &clock, 0.0, 1.0);
+        core.pause(true, 1.0);
+        run(&mut core, &clock, 1.0, 10.0);
         assert!(first_at(&sent, "PAGE B").is_none(), "paused, no page turns");
-        core.paused = false;
-        core.restart_page();
-        run(&mut core, &clock, 10.0, 12.0);
-        assert!(first_at(&sent, "PAGE B").is_none(), "after a pause, the page gets its whole time again");
-        run(&mut core, &clock, 12.0, 13.5);
-        assert!(first_at(&sent, "PAGE B").is_some());
+        assert_eq!(core.standing(10.0).0, false);
+        assert!((core.standing(10.0).1 - 1.0).abs() < 0.02, "the time A had shown, held: {:?}", core.standing(10.0));
+        // A carries on with the two seconds it had left
+        core.pause(false, 10.0);
+        run(&mut core, &clock, 10.0, 11.9);
+        assert!(first_at(&sent, "PAGE B").is_none());
+        run(&mut core, &clock, 11.9, 13.5);
+        let b = first_at(&sent, "PAGE B").expect("B after A's three seconds in all");
+        assert!((b - 12.0).abs() < 0.05, "B at {b}");
         // held on A while A is edited: shown at once, and it stays
         core.hold_on(Some(0));
         run(&mut core, &clock, 13.5, 30.0);
@@ -756,6 +818,23 @@ mod tests {
         core.show(0);
         run(&mut core, &clock, 34.1, 34.2);
         assert_eq!(sent.lock().unwrap().last().unwrap().1[0], "PAGE A");
+    }
+
+    #[test]
+    fn the_playlist_says_where_it_stands() {
+        use crate::lcd_page::Transition;
+        let (mut core, _sent, clock) = two_pages(Transition::Wipe);
+        run(&mut core, &clock, 0.0, 2.0);
+        let (turning, elapsed, length) = core.standing(2.0);
+        assert!(!turning && (elapsed - 2.0).abs() < 0.03 && length == 3.0, "{turning} {elapsed} {length}");
+        // B coming in: the wipe's frames, from when they began
+        run(&mut core, &clock, 2.0, 3.2);
+        let (turning, elapsed, length) = core.standing(3.2);
+        assert!(turning && elapsed > 0.1 && elapsed < 0.25 && (length - 21.0 * 0.025).abs() < 1e-9, "{turning} {elapsed} {length}");
+        // B showing, for its five seconds
+        run(&mut core, &clock, 3.2, 4.5);
+        let (turning, _, length) = core.standing(4.5);
+        assert!(!turning && length == 5.0);
     }
 
     #[test]

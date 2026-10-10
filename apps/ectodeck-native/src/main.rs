@@ -503,7 +503,15 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         };
         // ECTODECK_NATIVE_LCD_PAGE: which page of the playlist shows
         let page = std::env::var("ECTODECK_NATIVE_LCD_PAGE").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
-        front.screen_news(lcd_player::News { rows, sequence, state, page });
+        // ECTODECK_NATIVE_LCD_AT=s or turning,s,length: where the playlist stands in the page's
+        // turn (by default three seconds into an eight-second page)
+        let at: Vec<f64> = std::env::var("ECTODECK_NATIVE_LCD_AT").unwrap_or_default().split(',').filter_map(|v| v.trim().parse().ok()).collect();
+        let (turning, elapsed, length) = match at.as_slice() {
+            [t, e, l] => (*t > 0.5, *e, *l),
+            [e] => (false, *e, 8.0),
+            _ => (false, 3.0, 8.0),
+        };
+        front.screen_news(lcd_player::News { rows, sequence, state, page, turning, elapsed, length });
     }
     if let Ok(place) = std::env::var("ECTODECK_NATIVE_PLACE") {
         front.ui.set_place(place.into());

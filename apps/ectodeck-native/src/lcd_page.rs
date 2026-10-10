@@ -1,7 +1,9 @@
 //! A page of the Z10's screen as pieces: words, readings, bars and a clock,
-//! each in a row of the 20 by 4 screen at a column and a width. Pages are the
-//! same on every profile and kept in Ectodeck's settings
-//! (devices.z10.screen.pages).
+//! each in a row of the 20 by 4 screen at a column and a width. The pages are
+//! the Library, every screen there is (devices.z10.screen.pages); the
+//! playlist plays some of them in turn, each for its own time and coming in
+//! its own way (devices.z10.screen.playlist). Both are the same on every
+//! profile and kept in Ectodeck's settings.
 //!
 //! A row is laid out as the z10-lcd service's format strings laid out the
 //! Stats page, so the Stats page made of pieces shows what it always showed,
@@ -236,9 +238,10 @@ pub struct Page {
     /// the screen's light while this page shows; None, the profile's
     pub light: Option<[u8; 3]>,
     pub pieces: Vec<Piece>,
-    /// how long it shows before the next page, among others
+    /// as played: how long it shows before the next page, and how it comes
+    /// onto the screen after the page before it (each turn of the playlist
+    /// says, see [Entry]; a page in the Library alone keeps a new page's)
     pub secs: u32,
-    /// how it comes onto the screen after the page before it
     pub comes_in: Transition,
 }
 
@@ -342,6 +345,7 @@ impl Page {
         Some(p)
     }
 
+    /// The page as the Library keeps it: what it shows, not how it plays.
     pub fn to_json(&self) -> Value {
         let pieces: Vec<Value> = self
             .pieces
@@ -373,7 +377,7 @@ impl Page {
                 v
             })
             .collect();
-        let mut v = json!({ "id": self.id, "name": self.name, "pieces": pieces, "secs": self.secs, "comes_in": self.comes_in.key() });
+        let mut v = json!({ "id": self.id, "name": self.name, "pieces": pieces });
         if let Some(l) = self.light {
             v["light"] = json!(l);
         }
@@ -415,6 +419,130 @@ impl Page {
 pub fn pages_of(v: Option<&Value>) -> Vec<Page> {
     let pages: Vec<Page> = v.and_then(|v| v.as_array()).map(|a| a.iter().filter_map(Page::from_json).collect()).unwrap_or_default();
     if pages.is_empty() { vec![Page::stats()] } else { pages }
+}
+
+/// One turn of the playlist: a screen of the Library, how long it shows,
+/// and how it comes in after the one before it. The same screen can have
+/// more than one turn. `key` tells turns apart while Ectodeck runs (it is
+/// not kept), so a turn's block on the strip stays the same block when
+/// others move.
+#[derive(Clone, Debug)]
+pub struct Entry {
+    pub page: String,
+    pub secs: u32,
+    pub comes_in: Transition,
+    pub key: u64,
+}
+
+impl PartialEq for Entry {
+    fn eq(&self, o: &Entry) -> bool {
+        (&self.page, self.secs, self.comes_in) == (&o.page, o.secs, o.comes_in)
+    }
+}
+
+/// A key no other turn has.
+fn new_key() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+impl Entry {
+    pub fn new(page: &str, secs: u32, comes_in: Transition) -> Entry {
+        Entry { page: page.into(), secs: secs.clamp(SECS.0, SECS.1), comes_in, key: new_key() }
+    }
+
+    pub fn to_json(&self) -> Value {
+        json!({ "page": self.page, "secs": self.secs, "comes_in": self.comes_in.key() })
+    }
+
+    pub fn from_json(v: &Value) -> Option<Entry> {
+        let secs = v["secs"].as_u64().map_or(SECS.2, |n| (n as u32).clamp(SECS.0, SECS.1));
+        let comes_in = v["comes_in"].as_str().and_then(Transition::from_key).unwrap_or(Transition::Wipe);
+        Some(Entry::new(v["page"].as_str()?, secs, comes_in))
+    }
+}
+
+/// The Library and the playlist, as Ectodeck keeps them.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Screens {
+    pub library: Vec<Page>,
+    pub playlist: Vec<Entry>,
+}
+
+impl Screens {
+    /// From Ectodeck's settings: the Library's pages, and the playlist's
+    /// turns of those that are there. Kept before there was a Library, the
+    /// pages were the playlist, each with its own time and way in.
+    pub fn of(pages: Option<&Value>, playlist: Option<&Value>) -> Screens {
+        let library = pages_of(pages);
+        let mut turns: Vec<Entry> = playlist
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(Entry::from_json).filter(|e| library.iter().any(|p| p.id == e.page)).collect())
+            .unwrap_or_default();
+        if turns.is_empty() {
+            let old: Vec<Value> = pages.and_then(|v| v.as_array()).cloned().unwrap_or_default();
+            turns = library
+                .iter()
+                .map(|p| {
+                    let o = old.iter().find(|v| v["id"].as_str() == Some(p.id.as_str()));
+                    Entry::from_json(&json!({ "page": p.id, "secs": o.map(|o| o["secs"].clone()), "comes_in": o.map(|o| o["comes_in"].clone()) })).expect("a page's turn")
+                })
+                .collect();
+        }
+        Screens { library, playlist: turns }
+    }
+
+    /// Both, as one value: for the settings, and for undoing a change.
+    pub fn to_json(&self) -> Value {
+        json!({ "pages": self.library.iter().map(|p| p.to_json()).collect::<Vec<_>>(), "playlist": self.playlist.iter().map(|e| e.to_json()).collect::<Vec<_>>() })
+    }
+
+    pub fn from_json(v: &Value) -> Screens {
+        Screens::of(v.get("pages"), v.get("playlist"))
+    }
+
+    /// The pages the screen plays, in turn: each turn's page, with the
+    /// turn's time and way in.
+    pub fn played(&self) -> Vec<Page> {
+        self.playlist.iter().filter_map(|e| self.page_of(e).map(|p| Page { secs: e.secs, comes_in: e.comes_in, ..p.clone() })).collect()
+    }
+
+    pub fn page_of(&self, e: &Entry) -> Option<&Page> {
+        self.library.iter().find(|p| p.id == e.page)
+    }
+
+    /// Where in the Library a page is, by its id.
+    pub fn index_of(&self, id: &str) -> Option<usize> {
+        self.library.iter().position(|p| p.id == id)
+    }
+
+    /// A turn of page `id` put in the playlist at `at`, as a new turn plays:
+    /// eight seconds, coming in with a wipe.
+    pub fn add_turn(&mut self, at: usize, id: &str) -> usize {
+        let at = at.min(self.playlist.len());
+        self.playlist.insert(at, Entry::new(id, SECS.2, Transition::Wipe));
+        at
+    }
+
+    /// Turn `i` moved to `to` (counted among the turns that stay); where it is now.
+    pub fn move_turn(&mut self, i: usize, to: usize) -> Option<usize> {
+        if i >= self.playlist.len() {
+            return None;
+        }
+        let e = self.playlist.remove(i);
+        let to = to.min(self.playlist.len());
+        self.playlist.insert(to, e);
+        Some(to)
+    }
+
+    /// Turn `i` taken off the playlist, never the last.
+    pub fn remove_turn(&mut self, i: usize) -> bool {
+        if self.playlist.len() > 1 && i < self.playlist.len() {
+            self.playlist.remove(i);
+            return true;
+        }
+        false
+    }
 }
 
 /// The local time, for the clock and the date.
@@ -725,19 +853,47 @@ mod tests {
     }
 
     #[test]
-    fn a_page_keeps_its_time_and_how_it_comes_in() {
-        let mut p = Page::clock();
-        p.secs = 15;
-        p.comes_in = Transition::Dissolve;
-        assert_eq!(Page::from_json(&p.to_json()), Some(p.clone()));
-        // pages saved before pages had times come in with a wipe, after eight seconds
-        let mut old = Page::stats().to_json();
-        old.as_object_mut().unwrap().remove("secs");
-        old.as_object_mut().unwrap().remove("comes_in");
-        assert_eq!(Page::from_json(&old), Some(Page::stats()));
+    fn a_turn_keeps_its_time_and_how_it_comes_in() {
+        let p = Page::clock();
+        let mut s = Screens { library: vec![Page::stats(), p.clone()], playlist: vec![Entry::new("clock", 15, Transition::Dissolve)] };
+        s.add_turn(0, "stats");
+        let back = Screens::from_json(&s.to_json());
+        assert_eq!(back, s);
+        assert_eq!(back.played().iter().map(|p| (p.id.as_str(), p.secs, p.comes_in)).collect::<Vec<_>>(), vec![("stats", SECS.2, Transition::Wipe), ("clock", 15, Transition::Dissolve)]);
+        // a page in the Library keeps what it shows; its turns keep how it plays
+        assert!(p.to_json().get("secs").is_none());
         // and a second Clock is told apart from the first
         let q = Page::template("clock", &[p]).unwrap();
         assert_eq!(q.id, "clock-2");
         assert!(Page::template("rain", &[]).is_none());
+    }
+
+    #[test]
+    fn pages_kept_before_the_library_are_the_playlist() {
+        // each with its own time and way in, or a new page's
+        let mut old = Page::stats().to_json();
+        old["secs"] = json!(12);
+        old["comes_in"] = json!("type");
+        let s = Screens::of(Some(&json!([old, Page::clock().to_json()])), None);
+        assert_eq!(s.library.len(), 2);
+        assert_eq!(s.playlist, vec![Entry::new("stats", 12, Transition::Type), Entry::new("clock", SECS.2, Transition::Wipe)]);
+        // a turn of a page not in the Library is dropped; none left, every page plays
+        let s = Screens::of(Some(&json!([Page::stats().to_json()])), Some(&json!([{ "page": "gone", "secs": 5 }])));
+        assert_eq!(s.playlist, vec![Entry::new("stats", SECS.2, Transition::Wipe)]);
+    }
+
+    #[test]
+    fn turns_are_added_moved_and_taken_off() {
+        let mut s = Screens { library: vec![Page::stats(), Page::clock()], playlist: vec![Entry::new("stats", 8, Transition::Wipe), Entry::new("clock", 8, Transition::Wipe)] };
+        // the same page twice
+        assert_eq!(s.add_turn(9, "stats"), 2);
+        assert_eq!(s.playlist.iter().map(|e| e.page.as_str()).collect::<Vec<_>>(), ["stats", "clock", "stats"]);
+        // keys tell the two Stats apart
+        assert_ne!(s.playlist[0].key, s.playlist[2].key);
+        assert_eq!(s.move_turn(2, 0), Some(0));
+        assert_eq!(s.playlist.iter().map(|e| e.page.as_str()).collect::<Vec<_>>(), ["stats", "stats", "clock"]);
+        assert!(s.remove_turn(0) && s.remove_turn(0));
+        assert!(!s.remove_turn(0), "never the last turn");
+        assert_eq!(s.playlist.len(), 1);
     }
 }

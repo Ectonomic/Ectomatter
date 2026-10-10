@@ -434,12 +434,14 @@ pub struct Front {
     /// the sheet of pages to add: open, and the page selected on it
     lib_open: bool,
     lib_pick: Option<usize>,
-    /// the screen's pages (the same on every profile), as last noted for
-    /// undo and as last saved, and when they last changed
-    pages: Vec<crate::lcd_page::Page>,
-    pages_noted: Vec<crate::lcd_page::Page>,
-    pages_saved: Vec<crate::lcd_page::Page>,
+    /// the screen's Library and playlist (the same on every profile), as
+    /// last noted for undo and as last saved, and when they last changed
+    screens: crate::lcd_page::Screens,
+    screens_noted: crate::lcd_page::Screens,
+    screens_saved: crate::lcd_page::Screens,
     pages_changed: Option<Instant>,
+    /// editing: the playlist's turn that showed before, which shows again after
+    edit_from: usize,
     /// the page being edited, the piece chosen; this computer's readings,
     /// read here for the editor's picture once a second, and when last
     editor: Option<crate::screen_edit::Editor>,
@@ -622,17 +624,18 @@ impl Front {
             reading_gap: 120.0,
             dev_status: None,
             player: None,
-            lcd: crate::lcd_player::News { rows: Vec::new(), sequence: None, state: crate::lcd_player::State::Missing, page: 0 },
+            lcd: crate::lcd_player::News { rows: Vec::new(), sequence: None, state: crate::lcd_player::State::Missing, page: 0, turning: false, elapsed: 0.0, length: 0.0 },
             lcd_paused: false,
             page_from: Instant::now(),
             lcd_drawn: None,
             pl_thumbs: Vec::new(),
             lib_open: false,
             lib_pick: None,
-            pages: Vec::new(),
-            pages_noted: Vec::new(),
-            pages_saved: Vec::new(),
+            screens: crate::lcd_page::Screens::default(),
+            screens_noted: crate::lcd_page::Screens::default(),
+            screens_saved: crate::lcd_page::Screens::default(),
             pages_changed: None,
+            edit_from: 0,
             editor: None,
             reader: None,
             readings: crate::lcd_page::Readings::default(),
@@ -640,9 +643,9 @@ impl Front {
             source_menu: Vec::new(),
             ed_models: [Rc::new(VecModel::default()), Rc::new(VecModel::default()), Rc::new(VecModel::default())],
         };
-        f.pages = crate::lcd_page::pages_of(f.settings.get("devices.z10.screen.pages").as_ref());
-        f.pages_noted = f.pages.clone();
-        f.pages_saved = f.pages.clone();
+        f.screens = crate::lcd_page::Screens::of(f.settings.get("devices.z10.screen.pages").as_ref(), f.settings.get("devices.z10.screen.playlist").as_ref());
+        f.screens_noted = f.screens.clone();
+        f.screens_saved = f.screens.clone();
         f.ui.set_ed_piece_cells(ModelRc::from(f.ed_models[0].clone()));
         f.ui.set_ed_place_cells(ModelRc::from(f.ed_models[1].clone()));
         f.ui.set_ed_page_cells(ModelRc::from(f.ed_models[2].clone()));
@@ -933,19 +936,26 @@ impl Front {
                     }
                     self.push_preview();
                 }
-                Ask::EditPage(i) => self.edit_page(i.max(0) as usize),
+                Ask::EditPage(i) => {
+                    // a turn's page, from the playlist
+                    if let Some(k) = self.screens.playlist.get(i.max(0) as usize).and_then(|e| self.screens.index_of(&e.page)) {
+                        self.edit_page(k);
+                    }
+                }
                 Ask::EditDone => {
                     self.close_menu();
                     self.editor = None;
                     self.save_pages();
+                    self.tell_page();
                     if let Some(pl) = &self.player {
+                        pl.tell(crate::lcd_player::Control::Show(self.edit_from.min(self.screens.playlist.len().saturating_sub(1))));
                         pl.tell(crate::lcd_player::Control::Hold(None));
                     }
                 }
                 Ask::AddPiece(what) => {
                     let first = crate::lcd_page::available(&self.readings, self.weather.report().is_some()).first().copied().unwrap_or(crate::lcd_page::Source::CpuLoad);
                     if let Some(ed) = &mut self.editor {
-                        if let Some(p) = self.pages.get_mut(ed.page) {
+                        if let Some(p) = self.screens.library.get_mut(ed.page) {
                             crate::screen_edit::add(p, ed, what.clamp(0, 3) as usize, first);
                         }
                     }
@@ -965,7 +975,7 @@ impl Front {
                 }
                 Ask::PieceMoved(i, row, col) => {
                     if let Some(ed) = &mut self.editor {
-                        if let Some(p) = self.pages.get_mut(ed.page) {
+                        if let Some(p) = self.screens.library.get_mut(ed.page) {
                             crate::screen_edit::move_to(p, i.max(0) as usize, row, col);
                             ed.chosen = Some(i.max(0) as usize);
                         }
@@ -979,23 +989,21 @@ impl Front {
                 }
                 Ask::PageMove(i, j) => {
                     let (i, j) = (i.max(0) as usize, j.max(0) as usize);
-                    let shown = self.shown_page();
-                    if let Some(now) = move_page(&mut self.pages, i, j, shown) {
+                    let shown = self.lcd.page;
+                    let playing = self.screens.playlist.get(shown).map(|e| e.key);
+                    if i != j && self.screens.move_turn(i, j).is_some() {
                         self.pages_edited();
-                        // the page on the screen stays on, at its new place
-                        if now != shown {
-                            if let Some(pl) = &self.player {
-                                pl.tell(crate::lcd_player::Control::Show(now));
-                            }
-                        }
+                        self.keep_playing(playing, shown);
                     }
                 }
                 Ask::PageRemove(i) => {
                     let i = i.max(0) as usize;
-                    // (never the last page: the screen always has one to play)
-                    if self.pages.len() > 1 && i < self.pages.len() {
-                        self.pages.remove(i);
+                    let shown = self.lcd.page;
+                    let playing = self.screens.playlist.get(shown).map(|e| e.key);
+                    // (never the last turn: the screen always has one to play)
+                    if self.screens.remove_turn(i) {
                         self.pages_edited();
+                        self.keep_playing(playing, shown);
                     }
                 }
                 Ask::LibOpen => {
@@ -1007,16 +1015,18 @@ impl Front {
                 Ask::LibPick(i) => self.lib_pick = usize::try_from(i).ok().filter(|i| *i < crate::lcd_page::TEMPLATES.len()),
                 Ask::LibAdd => {
                     let key = self.lib_pick.map(|k| crate::lcd_page::TEMPLATES[k].0);
-                    if let Some(p) = key.and_then(|k| crate::lcd_page::Page::template(k, &self.pages)) {
-                        self.pages.push(p);
+                    if let Some(p) = key.and_then(|k| crate::lcd_page::Page::template(k, &self.screens.library)) {
+                        let id = p.id.clone();
+                        self.screens.library.push(p);
+                        let at = self.screens.add_turn(usize::MAX, &id);
                         self.lib_open = false;
                         self.pages_edited();
                         // the page added, on the screen now; a blank one opens to be made
                         if let Some(pl) = &self.player {
-                            pl.tell(crate::lcd_player::Control::Show(self.pages.len() - 1));
+                            pl.tell(crate::lcd_player::Control::Show(at));
                         }
                         if key == Some("blank") {
-                            self.edit_page(self.pages.len() - 1);
+                            self.edit_page(self.screens.library.len() - 1);
                         }
                     }
                 }
@@ -1144,7 +1154,7 @@ impl Front {
                     Ctl::Name => crate::display::act(&mut self.page, Ctl::Name, 0, 0.0, Some(&t)),
                     Ctl::ScrText => {
                         if let Some(ed) = &mut self.editor {
-                            if let Some(p) = self.pages.get_mut(ed.page) {
+                            if let Some(p) = self.screens.library.get_mut(ed.page) {
                                 crate::screen_edit::act(p, ed, Ctl::ScrText, 0, Some(&t));
                             }
                         }
@@ -1495,9 +1505,9 @@ impl Front {
                 self.open_light_menu(c, _anchor);
                 return;
             }
-            Ctl::ScrUnits | Ctl::ScrHours | Ctl::ScrWidth | Ctl::ScrAlign | Ctl::ScrRemove | Ctl::ScrLight | Ctl::ScrSecs | Ctl::ScrComes => {
+            Ctl::ScrUnits | Ctl::ScrHours | Ctl::ScrWidth | Ctl::ScrAlign | Ctl::ScrRemove | Ctl::ScrLight => {
                 if let Some(ed) = &mut self.editor {
-                    if let Some(p) = self.pages.get_mut(ed.page) {
+                    if let Some(p) = self.screens.library.get_mut(ed.page) {
                         crate::screen_edit::act(p, ed, c, index, None);
                     }
                 }
@@ -1719,17 +1729,17 @@ impl Front {
     /// together (a slider dragged, a color picked) undo as one.
     fn note_changes(&mut self) {
         // the screen's pages, undone as one entry (0, which no profile is)
-        if self.pages != self.pages_noted {
+        if self.screens != self.screens_noted {
             let burst = self.undo_mark.is_some_and(|(m, t)| m == 0 && t.elapsed() < Duration::from_millis(1200));
             if !burst {
-                self.undo.push((0, pages_json(&self.pages_noted)));
+                self.undo.push((0, self.screens_noted.to_json()));
                 if self.undo.len() > 100 {
                     self.undo.remove(0);
                 }
             }
             self.undo_mark = Some((0, Instant::now()));
             self.redo.clear();
-            self.pages_noted = self.pages.clone();
+            self.screens_noted = self.screens.clone();
         }
         if self.page.dev.is_none() {
             return;
@@ -1788,12 +1798,13 @@ impl Front {
         let (from, to) = if redo { (&mut self.redo, &mut self.undo) } else { (&mut self.undo, &mut self.redo) };
         let Some((n, d)) = from.pop() else { return };
         if n == 0 {
-            to.push((0, pages_json(&self.pages)));
-            self.pages = crate::lcd_page::pages_of(Some(&d));
-            self.pages_noted = self.pages.clone();
+            to.push((0, self.screens.to_json()));
+            self.screens = crate::lcd_page::Screens::from_json(&d);
+            self.screens_noted = self.screens.clone();
             self.undo_mark = None;
             if let Some(ed) = &mut self.editor {
-                ed.chosen = ed.chosen.filter(|i| self.pages.get(ed.page).is_some_and(|p| *i < p.pieces.len()));
+                ed.page = ed.page.min(self.screens.library.len().saturating_sub(1));
+                ed.chosen = ed.chosen.filter(|i| self.screens.library.get(ed.page).is_some_and(|p| *i < p.pieces.len()));
             }
             self.pages_edited();
             self.status(if redo { "Did again the last change to the screen’s page" } else { "Undid the last change to the screen’s page" }, 0);
@@ -2107,7 +2118,7 @@ impl Front {
             // a reading for the piece chosen in the page editor
             if c == Ctl::ScrSource {
                 if let (Some(Some(src)), Some(ed)) = (self.source_menu.get(i).copied(), &self.editor) {
-                    if let Some(p) = self.pages.get_mut(ed.page) {
+                    if let Some(p) = self.screens.library.get_mut(ed.page) {
                         crate::screen_edit::set_source(p, ed, src);
                     }
                     self.pages_edited();
@@ -2696,7 +2707,7 @@ impl Front {
         let rows: Vec<MenuRow> = if c == Ctl::Plays {
             plays_rows(&self.page)
         } else if c == Ctl::ScrSource {
-            let Some(piece) = self.editor.as_ref().and_then(|ed| self.pages.get(ed.page)?.pieces.get(ed.chosen?)) else { return };
+            let Some(piece) = self.editor.as_ref().and_then(|ed| self.screens.library.get(ed.page)?.pieces.get(ed.chosen?)) else { return };
             let (current, bars) = match piece.kind {
                 crate::lcd_page::Kind::Data(s, _) => (s, false),
                 crate::lcd_page::Kind::Bar(s) => (s, true),
@@ -2898,10 +2909,27 @@ impl Front {
         self.tell_page();
     }
 
-    /// The pages the screen plays in turn, to the player.
+    /// The pages the screen plays in turn, to the player: the playlist's
+    /// turns, or, while a page is edited, that page alone.
     fn tell_page(&mut self) {
+        let pages = match self.editor.as_ref().and_then(|ed| self.screens.library.get(ed.page)) {
+            Some(p) => vec![p.clone()],
+            None => self.screens.played(),
+        };
         if let Some(pl) = &self.player {
-            pl.tell(crate::lcd_player::Control::Pages(self.pages.clone()));
+            pl.tell(crate::lcd_player::Control::Pages(pages));
+        }
+    }
+
+    /// After the playlist changed: the turn that was playing (by its key)
+    /// goes on playing where it now is; taken off, the turn now in its place.
+    fn keep_playing(&mut self, playing: Option<u64>, was: usize) {
+        let now = playing.and_then(|k| self.screens.playlist.iter().position(|e| e.key == k));
+        let at = now.unwrap_or(was.min(self.screens.playlist.len().saturating_sub(1)));
+        if now != Some(was) {
+            if let Some(pl) = &self.player {
+                pl.tell(crate::lcd_player::Control::Show(at));
+            }
         }
     }
 
@@ -2915,16 +2943,18 @@ impl Front {
         }
     }
 
-    /// The pages into Ectodeck's settings, if they changed since last saved.
+    /// The Library and the playlist into Ectodeck's settings, if they
+    /// changed since last saved.
     fn save_pages(&mut self) {
         self.note_changes();
-        if self.pages == self.pages_saved {
+        if self.screens == self.screens_saved {
             return;
         }
-        let v = serde_json::Value::Array(self.pages.iter().map(|p| p.to_json()).collect());
-        match self.settings.set("devices.z10.screen.pages", v) {
+        let v = self.screens.to_json();
+        let saved = self.settings.set("devices.z10.screen.pages", v["pages"].clone()).and_then(|_| self.settings.set("devices.z10.screen.playlist", v["playlist"].clone()));
+        match saved {
             Ok(()) => {
-                self.pages_saved = self.pages.clone();
+                self.screens_saved = self.screens.clone();
                 // said as a profile's saving is, with Undo beside it
                 self.status("Saved", 1);
                 self.ui.set_undo_shown(!self.undo.is_empty());
@@ -2951,13 +2981,21 @@ impl Front {
     /// The screen's light while Ectodeck plays it: the page's own, or the
     /// profile's.
     fn page_light(&self, profile: [u8; 3]) -> [u8; 3] {
-        self.pages.get(self.shown_page()).and_then(|p| p.light).unwrap_or(profile)
+        self.shown().and_then(|p| p.light).unwrap_or(profile)
     }
 
-    /// The page on the keyboard's screen: the one being edited, or the one
-    /// the playlist has come to.
+    /// The page on the keyboard's screen: the one being edited, or the
+    /// page of the turn the playlist has come to.
+    fn shown(&self) -> Option<&crate::lcd_page::Page> {
+        match &self.editor {
+            Some(ed) => self.screens.library.get(ed.page),
+            None => self.screens.playlist.get(self.lcd.page).and_then(|e| self.screens.page_of(e)),
+        }
+    }
+
+    /// The playlist's turn on the keyboard's screen.
     fn shown_page(&self) -> usize {
-        self.editor.as_ref().map_or(self.lcd.page, |ed| ed.page)
+        self.lcd.page
     }
 
     /// The player said what the screen shows now.
@@ -2984,15 +3022,20 @@ impl Front {
         }
     }
 
-    /// Page `i` opened in the editor, the keyboard's screen held on it.
+    /// Page `i` of the Library opened in the editor, the keyboard's screen
+    /// held on it.
     fn edit_page(&mut self, i: usize) {
-        let i = i.min(self.pages.len().saturating_sub(1));
+        let i = i.min(self.screens.library.len().saturating_sub(1));
         self.close_menu();
+        if self.editor.is_none() {
+            self.edit_from = self.lcd.page;
+        }
         self.editor = Some(crate::screen_edit::Editor { page: i, chosen: None, grid: crate::uistate::get("screen_grid").and_then(|v| v.as_bool()).unwrap_or(true) });
         self.read_now();
-        // the keyboard stays on the page being edited
+        // the keyboard shows the page being edited, and stays on it
+        self.tell_page();
         if let Some(pl) = &self.player {
-            pl.tell(crate::lcd_player::Control::Hold(Some(i)));
+            pl.tell(crate::lcd_player::Control::Hold(Some(0)));
         }
     }
 
@@ -3000,7 +3043,8 @@ impl Front {
     fn screen_status(&self) -> String {
         use crate::lcd_player::State;
         let i = self.shown_page();
-        let name = |k: usize| self.pages.get(k).map_or("", |p| p.name.as_str());
+        let played = self.screens.played();
+        let name = |k: usize| played.get(k).map_or("", |p| p.name.as_str());
         match (self.lcd.state, self.lcd.sequence) {
             (_, _) if !self.controlled => "Ectodeck leaves this keyboard to other programs.".into(),
             (State::Other, _) => "Another program is using the screen. Ectodeck plays it once that stops.".into(),
@@ -3008,7 +3052,7 @@ impl Front {
             (_, Some("launch")) => "A game is starting".into(),
             (_, Some(_)) => "A game just closed".into(),
             (State::Paused, _) => format!("Paused on {}", name(i)),
-            (State::Playing, None) if self.pages.len() > 1 && self.editor.is_none() => format!("Now playing {}, then {}", name(i), name((i + 1) % self.pages.len())),
+            (State::Playing, None) if played.len() > 1 && self.editor.is_none() => format!("Now playing {}, then {}", name(i), name((i + 1) % played.len())),
             (State::Playing, None) => format!("Now playing {}", name(i)),
         }
     }
@@ -3018,7 +3062,8 @@ impl Front {
     /// pages to add. `profile` is the profile's screen light.
     fn refresh_playlist(&mut self, profile: [u8; 3], level: u8) {
         use crate::lcd_player::State;
-        let n = self.pages.len();
+        let played = self.screens.played();
+        let n = played.len();
         let sc = self.scale.max(1.0);
         let px = |w: f32| (w * sc).round() as u32;
         let lv = level as f32 / 255.0;
@@ -3028,7 +3073,7 @@ impl Front {
         // the page on the screen is marked while Ectodeck plays the screen, playing or paused
         let marked = self.controlled && matches!(self.lcd.state, State::Playing | State::Paused);
         let mut rows_out = Vec::with_capacity(n);
-        for (i, p) in self.pages.iter().enumerate() {
+        for (i, p) in played.iter().enumerate() {
             let rows = if i == shown && self.lcd.sequence.is_none() && !self.lcd.rows.is_empty() { self.lcd.rows.clone() } else { crate::lcd_page::render(p, &self.readings) };
             let rgb = crate::z10::as_lit(p.light.unwrap_or(profile));
             let key: PicKey = (rows, rgb, level, px(320.0));
@@ -3097,7 +3142,7 @@ impl Front {
         let sc = self.scale.max(1.0);
         let px = |w: f32| (w * sc).round() as u32;
         // editing: the page as edited, read here; otherwise what the keyboard shows
-        let rows = match self.editor.as_ref().and_then(|ed| self.pages.get(ed.page)) {
+        let rows = match self.editor.as_ref().and_then(|ed| self.screens.library.get(ed.page)) {
             Some(p) => crate::lcd_page::render(p, &self.readings),
             None => self.lcd.rows.clone(),
         };
@@ -3118,10 +3163,10 @@ impl Front {
     fn refresh_editor(&mut self) {
         self.ui.set_screen_editing(self.editor.is_some());
         let Some(ed) = self.editor.clone() else { return };
-        let Some(page) = self.pages.get(ed.page) else { return };
+        let Some(page) = self.screens.library.get(ed.page) else { return };
         let avail = crate::lcd_page::available(&self.readings, self.weather.report().is_some());
         let (light, _) = screen_of(&self.page.draft()["lighting"]);
-        let b = crate::screen_edit::boxes(page, ed.chosen, &self.readings, &avail, [light[1], light[2], light[3]], self.light_menu == Some(Ctl::ScrSource), self.pages.len() == 1);
+        let b = crate::screen_edit::boxes(page, ed.chosen, &self.readings, &avail, [light[1], light[2], light[3]], self.light_menu == Some(Ctl::ScrSource));
         self.ui.set_ed_title(format!("Editing {}", page.name).into());
         self.ui.set_ed_grid(ed.grid);
         self.ui.set_ed_piece_title(b.piece_title.into());
@@ -3179,29 +3224,6 @@ fn card_lines(p: &crate::lcd_page::Page, n: usize, on: bool, paused: bool, shown
     (first, if n == 1 { String::new() } else { comes_in_words(p.comes_in).to_string() })
 }
 
-/// Page `i` moved to place `j` in the playlist; the place of the page that
-/// was at `shown` now, or None if nothing moved.
-fn move_page(pages: &mut Vec<crate::lcd_page::Page>, i: usize, j: usize, shown: usize) -> Option<usize> {
-    if i >= pages.len() || j >= pages.len() || i == j {
-        return None;
-    }
-    let p = pages.remove(i);
-    pages.insert(j, p);
-    Some(if shown == i {
-        j
-    } else if i < shown && shown <= j {
-        shown - 1
-    } else if j <= shown && shown < i {
-        shown + 1
-    } else {
-        shown
-    })
-}
-
-/// The screen's pages as Ectodeck's settings keep them.
-fn pages_json(pages: &[crate::lcd_page::Page]) -> serde_json::Value {
-    serde_json::Value::Array(pages.iter().map(|p| p.to_json()).collect())
-}
 
 /// The colours used lately, newest first, as the picker lists them.
 fn recent_colors() -> Vec<[u8; 3]> {
@@ -3316,26 +3338,6 @@ pub fn sync_cells(model: &VecModel<Cell>, rows: Vec<Cell>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_page_dragged_to_another_place_keeps_the_playing_page_playing() {
-        let ids = |v: &[crate::lcd_page::Page]| v.iter().map(|p| p.id.clone()).collect::<Vec<_>>();
-        let three = || vec![crate::lcd_page::Page::stats(), crate::lcd_page::Page::clock(), crate::lcd_page::Page::weather()];
-        let mut v = three();
-        // Stats (playing) dragged to the end: still playing, now third
-        assert_eq!(move_page(&mut v, 0, 2, 0), Some(2));
-        assert_eq!(ids(&v), ["clock", "weather", "stats"]);
-        // Weather dragged to the top while Clock plays: Clock moves down one
-        let mut v = three();
-        assert_eq!(move_page(&mut v, 2, 0, 1), Some(2));
-        assert_eq!(ids(&v), ["weather", "stats", "clock"]);
-        // Clock dragged past Weather while Stats plays: Stats stays first
-        let mut v = three();
-        assert_eq!(move_page(&mut v, 1, 2, 0), Some(0));
-        // dropped where it was, or off the list: nothing moves
-        assert_eq!(move_page(&mut v, 1, 1, 0), None);
-        assert_eq!(move_page(&mut v, 4, 0, 0), None);
-    }
 
     #[test]
     fn a_card_says_what_its_page_is_doing() {
