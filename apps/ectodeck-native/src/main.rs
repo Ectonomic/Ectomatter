@@ -535,6 +535,14 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         let (x, y) = (xy.next().unwrap_or(0.0), xy.next().unwrap_or(0.0));
         let position = LogicalPosition::new(x, y);
         window.dispatch_event(WindowEvent::PointerMoved { position });
+        // ECTODECK_NATIVE_SETTLE: the pointer rests a frame before each press, as a hand
+        // does, so what shows only under the pointer (a block's buttons) is there to press
+        if std::env::var_os("ECTODECK_NATIVE_SETTLE").is_some() {
+            front.act();
+            window.draw_if_needed(|r| {
+                r.render(&mut pic.ui, w as usize);
+            });
+        }
         front.pressed_at(x, y);
         window.dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Left });
         // ECTODECK_NATIVE_MIDCLICK: the page refreshed between the press and the

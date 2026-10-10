@@ -211,6 +211,25 @@ export struct PlPage {
     removable: bool,
 }
 
+// one turn of the playlist on the strip under the screen: its block's left
+// edge and width (as wide as its time, the strip fitted to its width), its
+// page's name and picture (none when the block is too narrow), whether the
+// screen shows it, whether it is being carried, its time in words, and how it
+// comes in after the turn before it (0 Wipe, 1 Dissolve, 2 Type, 3 Cut)
+export struct PlBlock {
+    key: int,
+    x: length,
+    w: length,
+    name: string,
+    pic: image,
+    pic-w: length,
+    field: color,
+    on: bool,
+    away: bool,
+    secs: string,
+    way: int,
+}
+
 // a page that can be added to the playlist: its name, what it shows, its
 // picture, and whether it is selected
 export struct LibCard {
@@ -2467,7 +2486,7 @@ component PlCard inherits Rectangle {
             vertical-alignment: center;
             overflow: elide;
         }
-        Text {
+        if root.p.line1 != "": Text {
             height: 18px;
             text: root.p.line1;
             font-family: "Geist";
@@ -2530,184 +2549,182 @@ component CardIcon inherits Rectangle {
     }
 }
 
-// the Screen tab's playlist: the pages Ectodeck plays on the screen, in turn,
-// one card each; select a card to play the page now, drag a card to move the
-// page; then game-helper's launches breaking in
-component PlaylistBox inherits PageBox {
-    in property <[PlPage]> pages;
-    in property <bool> announce;
-    callback announce-toggled();
-    // a page opened in the page editor, shown now, moved, taken off; a page added
-    callback edit(int);
-    callback show(int);
-    callback moved(int, int);
-    callback remove(int);
-    callback add();
-    title: "Playlist";
-    property <length> list-top: 92px;
-    property <length> pitch: 96px + 8px;
-    property <length> add-top: list-top + root.pages.length * pitch;
-    property <length> foot-top: add-top + 40px + 16px;
-    // a card being dragged: which, how far from where it was pressed, and where it will land
-    property <int> drag-i: -1;
-    property <length> drag-dy: 0;
-    property <int> drag-t: max(0, min(root.pages.length - 1, round((root.drag-i * pitch + root.drag-dy) / pitch)));
+// how a turn comes in, as its mark on the strip shows it: a column sweeping
+// across what is already there, cells changing, a letter with the cursor
+// after it, a plain edge
+component WayGlyph inherits Rectangle {
+    in property <int> way;
+    in property <color> ink;
+    width: 12px;
+    height: 12px;
+    if root.way == 0: Rectangle {
+        x: 0;
+        y: 0;
+        width: 12px;
+        height: 12px;
+        Rectangle {
+            x: 1px;
+            y: 1.5px;
+            width: 10px;
+            height: 9px;
+            border-radius: 1.6px;
+            border-width: 1.2px;
+            border-color: root.ink;
+        }
+        Rectangle {
+            x: 1.6px;
+            y: 2.1px;
+            width: 4.2px;
+            height: 7.8px;
+            border-radius: 0.6px;
+            background: root.ink;
+            opacity: 0.45;
+        }
+        Rectangle {
+            x: 5.7px;
+            y: 2.2px;
+            width: 1.4px;
+            height: 7.6px;
+            background: root.ink;
+        }
+    }
+    if root.way == 1: Rectangle {
+        x: 0;
+        y: 0;
+        width: 12px;
+        height: 12px;
+        Rectangle { x: 1px; y: 1px; width: 4.4px; height: 4.4px; border-radius: 0.8px; background: root.ink; }
+        Rectangle { x: 6.6px; y: 6.6px; width: 4.4px; height: 4.4px; border-radius: 0.8px; background: root.ink; }
+        Rectangle { x: 6.6px; y: 1px; width: 4.4px; height: 4.4px; border-radius: 0.8px; background: root.ink; opacity: 0.35; }
+        Rectangle { x: 1px; y: 6.6px; width: 4.4px; height: 4.4px; border-radius: 0.8px; background: root.ink; opacity: 0.35; }
+    }
+    if root.way == 2: Path {
+        x: 0;
+        y: 0;
+        width: 12px;
+        height: 12px;
+        viewbox-width: 12;
+        viewbox-height: 12;
+        commands: "M1.5 2h6M4.5 2v7.5M8.5 10h2.5";
+        fill: transparent;
+        stroke: root.ink;
+        stroke-width: 1.4px;
+        stroke-line-cap: round;
+    }
+    if root.way == 3: Rectangle {
+        x: 5.2px;
+        y: 1px;
+        width: 1.6px;
+        height: 10px;
+        border-radius: 0.8px;
+        background: root.ink;
+    }
+}
+
+// Edit or Remove on a turn's block: a small line glyph on the block's dark backing
+component StripIcon inherits Rectangle {
+    in property <string> commands;
+    callback clicked;
+    width: 22px;
+    height: 22px;
+    border-radius: 5px;
+    background: ta.pressed ? Ink.pick : ta.has-hover ? Ink.hover-box : transparent;
+    Path {
+        x: 4.5px;
+        y: 4.5px;
+        width: 13px;
+        height: 13px;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: root.commands;
+        fill: transparent;
+        stroke: ta.has-hover ? Ink.bright : Ink.soft;
+        stroke-width: 1.8px;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Pause, at the start of the strip it stops; Play while it is stopped
+component PlayButton inherits Rectangle {
+    in property <bool> paused;
+    callback clicked;
+    width: 36px;
+    height: 36px;
+    border-radius: 9px;
+    background: ta.pressed ? Ink.pick : ta.has-hover ? Ink.hover-box : Ink.box;
+    if !root.paused: Rectangle {
+        x: 12px;
+        y: 11.5px;
+        width: 4px;
+        height: 13px;
+        border-radius: 1px;
+        background: Ink.bright;
+    }
+    if !root.paused: Rectangle {
+        x: 20px;
+        y: 11.5px;
+        width: 4px;
+        height: 13px;
+        border-radius: 1px;
+        background: Ink.bright;
+    }
+    if root.paused: Path {
+        x: 11px;
+        y: 11px;
+        width: 14px;
+        height: 14px;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: "M8 5.5v13a1 1 0 0 0 1.5.9l10-6.5a1 1 0 0 0 0-1.7l-10-6.6A1 1 0 0 0 8 5.5z";
+        fill: Ink.bright;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// a turn's block on the strip: its page's name, and its picture in a bay of
+// the screen's own background when the block has room for it; the turn on the
+// screen now a step lighter; lifted, the block being carried
+component StripBlock inherits Rectangle {
+    in property <PlBlock> b;
+    in property <bool> hovered;
+    in property <bool> lifted;
+    border-radius: 8px;
+    clip: true;
+    background: root.lifted ? Ink.hover-box : root.b.on ? (root.hovered ? Ink.pick-hover : Ink.pick) : (root.hovered ? Ink.hover-box : Ink.box);
+    animate background { duration: 120ms; }
     Text {
-        x: 16px;
-        y: 42px;
-        width: parent.width - 32px;
-        text: "Pages play from the top down, then start again. Select a page to show that page now; drag a page to reorder the playlist.";
+        x: 8px;
+        y: 8px;
+        width: parent.width - 16px;
+        height: 18px;
+        text: root.b.name;
         font-family: "Geist";
         font-size: 12.5px;
-        color: Ink.quiet;
-        wrap: word-wrap;
+        font-weight: 600;
+        color: root.b.on || root.lifted ? Ink.bright : Ink.dim;
+        vertical-alignment: center;
+        overflow: elide;
     }
-    // where the card being dragged will land
-    if root.drag-i >= 0: Rectangle {
-        x: 16px;
-        y: list-top + root.drag-t * pitch;
-        width: parent.width - 32px;
-        height: 96px;
-        border-radius: 10px;
-        border-width: 1px;
-        border-color: Ink.line;
-    }
-    for p[i] in root.pages: Rectangle {
-        // (the others make way for the card being dragged, which stays in its place, unseen)
-        property <length> shift: root.drag-i < 0 || root.drag-i == i ? 0
-            : root.drag-i < i && i <= root.drag-t ? -pitch
-            : root.drag-t <= i && i < root.drag-i ? pitch
-            : 0;
-        property <bool> dragged;
-        x: 16px;
-        y: list-top + i * pitch + self.shift;
-        animate y { duration: 160ms; easing: ease-out; }
-        width: parent.width - 32px;
-        height: 96px;
-        opacity: root.drag-i == i ? 0 : 1;
-        PlCard {
-            width: parent.width;
-            height: parent.height;
-            p: p;
-            hovered: ta.has-hover && root.drag-i < 0;
+    if root.b.pic-w > 0: Rectangle {
+        x: 8px;
+        y: 32px;
+        width: root.b.pic-w + 4px;
+        height: root.b.pic-w / 5 + 4px;
+        border-radius: 4px;
+        background: root.b.field;
+        Image {
+            x: 2px;
+            y: 2px;
+            width: root.b.pic-w;
+            height: root.b.pic-w / 5;
+            source: root.b.pic;
         }
-        ta := TouchArea {
-            mouse-cursor: root.drag-i == i ? MouseCursor.grabbing : MouseCursor.grab;
-            pointer-event(e) => {
-                if (e.kind == PointerEventKind.down) {
-                    parent.dragged = false;
-                }
-                if (e.kind == PointerEventKind.up && root.drag-i == i) {
-                    if (root.drag-t != i) {
-                        root.moved(i, root.drag-t);
-                    }
-                    root.drag-i = -1;
-                    root.drag-dy = 0;
-                }
-            }
-            // (this card stays where it was while its lifted picture follows the pointer, so
-            // the pointer is measured from where it was pressed with nothing moving under it)
-            moved => {
-                if (self.pressed) {
-                    if (root.drag-i < 0 && abs(self.mouse-y - self.pressed-y) > 4px) {
-                        root.drag-i = i;
-                        parent.dragged = true;
-                    }
-                    if (root.drag-i == i) {
-                        root.drag-dy = self.mouse-y - self.pressed-y;
-                    }
-                }
-            }
-            clicked => {
-                if (!parent.dragged) {
-                    root.show(i);
-                }
-            }
-            // Edit and Remove, over the picture's corner, while the pointer is over the card
-            if self.has-hover && root.drag-i < 0: Rectangle {
-                x: parent.width - 14px - self.width;
-                y: 14px;
-                width: 2px + 28px + (p.removable ? 30px : 0) + 2px;
-                height: 32px;
-                border-radius: 9px;
-                background: #131316e0;
-                CardIcon {
-                    x: 2px;
-                    y: 2px;
-                    commands: "M4 20h4L19 9l-4-4L4 16z";
-                    clicked => { root.edit(i); }
-                }
-                if p.removable: CardIcon {
-                    x: 32px;
-                    y: 2px;
-                    commands: "M6 6l12 12M18 6L6 18";
-                    clicked => { root.remove(i); }
-                }
-            }
-        }
-    }
-    // the card being dragged, lifted, under the pointer
-    if root.drag-i >= 0: PlCard {
-        x: 16px;
-        y: list-top + root.drag-i * pitch + root.drag-dy;
-        width: parent.width - 32px;
-        height: 96px;
-        p: root.pages[root.drag-i];
-        lifted: true;
-        drop-shadow-blur: 28px;
-        drop-shadow-offset-y: 10px;
-        drop-shadow-color: #0000008c;
-    }
-    // a page added at the end
-    Rectangle {
-        x: 16px;
-        y: add-top;
-        width: parent.width - 32px;
-        height: 40px;
-        border-radius: 10px;
-        background: add-ta.pressed ? Ink.pick : add-ta.has-hover ? Ink.hover-well : transparent;
-        border-width: 1px;
-        border-color: add-ta.has-hover ? #4a4a52 : Ink.line;
-        Text {
-            width: parent.width;
-            height: parent.height;
-            text: "+ Add a page";
-            font-family: "Geist";
-            font-size: 13px;
-            color: add-ta.has-hover ? Ink.bright : Ink.soft;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
-        add-ta := TouchArea {
-            mouse-cursor: pointer;
-            clicked => { root.add(); }
-        }
-    }
-    Rectangle {
-        x: 16px;
-        y: foot-top;
-        width: parent.width - 32px;
-        height: 1px;
-        background: Ink.line;
-    }
-    // game-helper's launches and exits, and whether they break in
-    CheckBox {
-        x: 16px;
-        y: foot-top + 14px;
-        width: parent.width - 32px;
-        text: "Game launches break in";
-        on: root.announce;
-        clicked => { root.announce-toggled(); }
-    }
-    Text {
-        x: 16px + 27px;
-        y: foot-top + 14px + 26px;
-        width: parent.width - 32px - 27px;
-        text: "From game-helper, when a game starts or closes. Then the playlist carries on.";
-        font-family: "Geist";
-        font-size: 12.5px;
-        color: Ink.quiet;
-        wrap: word-wrap;
     }
 }
 
@@ -3355,11 +3372,58 @@ export component AppWindow inherits Window {
     // keyboard's screen isn't there); whether launches break in; and the
     // closed box's height
     in property <image> lcd-big;
-    in property <[PlPage]> pl-pages;
     in property <int> lcd-state;
-    in property <bool> lcd-announce: true;
     in property <length> closed-h;
+    // the closed box laid out in three columns, across the Library's width
+    in property <bool> closed-wide;
     callback lcd-pause();
+    // the playlist's strip under the screen: each turn's block; the room a
+    // carried screen will land in (no width, none); blocks following an edge
+    // being dragged at once; one turn only; a script's screen showing, which
+    // the strip waits for, and what the strip says about it
+    in property <[PlBlock]> pl-blocks;
+    in property <length> pl-slot-x;
+    in property <length> pl-slot-w;
+    in property <bool> pl-live;
+    in property <bool> pl-single;
+    in property <bool> pl-dim;
+    in property <string> pl-script;
+    // the playhead: shown or not, in the mark (the turn coming in) or the
+    // block; where it stands while still, and while it moves, when on
+    // animation-tick()'s clock its part of the turn began and how long it lasts
+    in property <bool> pl-head;
+    in property <bool> pl-in;
+    in property <bool> pl-moving;
+    in property <float> pl-p0;
+    in property <duration> pl-t0;
+    in property <duration> pl-len: 1ms;
+    out property <duration> pl-tick: animation-tick();
+    property <float> pl-p: root.pl-moving ? clamp((animation-tick() - root.pl-t0) / root.pl-len, 0, 1) : root.pl-p0;
+    // the turn whose edge is being dragged, and the turn whose mark has its menu open
+    in-out property <int> pl-sizing: -1;
+    in property <int> pl-menu: -1;
+    // a screen carried to the strip, from the strip or the Library: where the
+    // pointer holds it (in the Screen tab's box), how it looks, how wide, and
+    // whether it is settling into its room
+    in-out property <bool> carry-on;
+    in-out property <length> carry-x;
+    in-out property <length> carry-y;
+    in-out property <length> carry-gx;
+    in-out property <length> carry-gy;
+    in-out property <bool> carry-settle;
+    in property <PlBlock> carry-block;
+    in property <length> carry-w: 190px;
+    callback pl-carry-start(int, int);
+    callback pl-carry-move(length, bool);
+    callback pl-carry-drop();
+    callback pl-carry-cancel();
+    callback pl-size(int, length);
+    callback pl-size-done();
+    callback pl-mark(int, length, length, length);
+    callback pl-back();
+    // the Library: every screen, its card, and a screen opened in the editor
+    in property <[PlPage]> lib-pages;
+    callback lib-edit(int);
     // the page editor: whether a page is being edited, the toolbar's words,
     // the grid on or off, the pieces over the screen, and its three boxes
     in property <bool> screen-editing;
@@ -3375,8 +3439,8 @@ export component AppWindow inherits Window {
     in property <[Cell]> ed-page-cells;
     in property <length> ed-page-h;
     callback screen-edit(int);
-    // the playlist: a page shown now, moved earlier or later, taken off; the
-    // sheet of pages to add, a page selected on it, added, the sheet closed
+    // the playlist: a turn shown now, taken off; the sheet of pages to add to
+    // the Library, a page selected on it, added, the sheet closed
     callback page-show(int);
     callback page-moved(int, int);
     callback page-remove(int);
@@ -3395,7 +3459,6 @@ export component AppWindow inherits Window {
     callback piece-moved(int, int, int);
     // what the screen is doing now, shown beside Pause
     in property <string> screen-status;
-    callback lcd-announce-toggled();
     // the chosen key, and its two layers
     in property <bool> key-open;
     // where the chosen key's editor is in the window, which a press on keeps the key chosen
@@ -3537,7 +3600,13 @@ export component AppWindow inherits Window {
     // the bay the screen sits in (the screen and its gutter), and the box's gray round the
     // bay, above and below it as at its sides
     property <length> bay-pad: 16px;
-    property <length> lcd-box-h: lcd-h + 2 * kb-pad-y + 2 * bay-pad;
+    property <length> lcd-box-h: lcd-h + 2 * kb-pad-y + 2 * bay-pad + (root.screen-editing ? 0 : strip-row-h);
+    // the strip's row: its label over it, then the strip, 76 high
+    property <length> strip-row-h: 116px;
+    // under the box: the Library, its cards two to a row, then When Ectodeck is closed
+    property <int> shelf-rows: ceil(root.lib-pages.length / 2);
+    property <length> shelf-h: 72px + shelf-rows * 104px - 8px + 16px;
+    property <length> closed-w: root.closed-wide ? under-w : 320px;
     // the screen's own background, which its bay is
     in property <color> lcd-field: #0a0908;
     property <length> under-top: root.tab == 3 ? head-end + lcd-box-h + 18px : head-end + board-h + 2 * kb-pad-y + 18px;
@@ -3582,14 +3651,6 @@ export component AppWindow inherits Window {
     property <length> lrow1: max(lr1 == 1 ? root.set-h : 0, lr2 == 1 ? root.place-h : 0);
     property <length> lrow2: lr2 == 2 ? root.place-h : 0;
     property <length> light-h: lrow0 + (lrows > 1 ? 12px + lrow1 : 0) + (lrows > 2 ? 12px + lrow2 : 0);
-    // Screen: the playlist (540 wide) and what shows when Ectodeck is closed
-    // (320), side by side while they fit, as tall as each other
-    property <length> pl-w: 540px;
-    // the playlist's height: its title and line, a card for each page, Add a page, the game launches
-    property <length> pl-need: 92px + root.pl-pages.length * 104px + 40px + 16px + 14px + 26px + 36px + 16px;
-    property <bool> sfits: pl-w + 12px + 320px <= under-w;
-    property <length> srow0: sfits ? min(band-max, max(band-min, max(pl-need, root.closed-h))) : max(band-min, pl-need);
-    property <length> srow1: root.closed-h;
     // editing a page: its three boxes (320 wide), as many to a row as fit,
     // each row as tall as the tallest box needs
     property <int> ed-n: under-w >= 3 * 320px + 24px ? 3 : under-w >= 2 * 320px + 12px ? 2 : 1;
@@ -3598,7 +3659,7 @@ export component AppWindow inherits Window {
     property <length> ed-row: ed-rows == 1 ? min(band-max, max(band-min, ed-need)) : max(band-min, ed-need);
     property <length> ed-h: ed-rows * ed-row + (ed-rows - 1) * 12px;
     property <length> tab-h: root.tab == 0 ? (second-fits ? keys-h : keys-h + 12px + second-h)
-        : root.tab == 1 ? light-h : root.tab == 3 ? (root.screen-editing ? ed-h : sfits ? srow0 : srow0 + 12px + srow1) : root.tile-height;
+        : root.tab == 1 ? light-h : root.tab == 3 ? (root.screen-editing ? ed-h : shelf-h + 12px + root.closed-h) : root.tile-height;
     property <length> under-board: 18px + max(anchor.preferred-height, tab-h);
     property <length> page-h: root.tab == 2 ? 12px + head-h + 6px + 24px + root.tile-height + 40px : root.tab == 3 ? under-top - 18px + under-board + 24px : board-top + board-h + kb-pad-y + under-board + 24px;
     // the page's scrollbar, as WebKit drew it: over the whole window, when the page is longer than it
@@ -3836,34 +3897,13 @@ export component AppWindow inherits Window {
                                 }
                             }
                         }
-                        if root.tab == 3 && !root.screen-editing: HorizontalLayout {
+                        if root.tab == 3 && !root.screen-editing && root.screen-status != "": Text {
                             horizontal-stretch: 0;
-                            spacing: 8px;
-                            if root.lcd-state == 0: Rectangle {
-                                width: 6px;
-                                Rectangle {
-                                    y: (parent.height - 6px) / 2;
-                                    width: 6px;
-                                    height: 6px;
-                                    border-radius: 3px;
-                                    background: Ink.good;
-                                    opacity: 0.55 + 0.45 * cos(animation-tick() / 1600ms * 360deg);
-                                }
-                            }
-                            Text {
-                                text: root.screen-status;
-                                font-family: "Geist";
-                                font-size: 12.5px;
-                                color: Ink.soft;
-                                vertical-alignment: center;
-                            }
-                        }
-                        if root.tab == 3 && !root.screen-editing && root.lcd-state <= 1: VerticalLayout {
-                            alignment: center;
-                            WordButton {
-                                text: root.lcd-state == 1 ? "Play" : "Pause";
-                                clicked => { root.lcd-pause(); }
-                            }
+                            text: root.screen-status;
+                            font-family: "Geist";
+                            font-size: 12.5px;
+                            color: Ink.soft;
+                            vertical-alignment: center;
                         }
                     }
                 }
@@ -3999,13 +4039,54 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
-                // Screen: the screen in its dark box, as large as it stays; under it the
-                // playlist and what the screen shows when Ectodeck is closed
-                if root.tab == 3: Rectangle {
+                // Screen: the screen in its dark box, as large as it stays, and the
+                // playlist's strip under it in the same box; under the box the Library,
+                // then what the screen shows when Ectodeck is closed. (All in one
+                // part of the window, so a screen carried from the Library knows
+                // where the strip is.)
+                if root.tab == 3: stage := Rectangle {
                     x: pws-x;
                     y: head-end;
                     width: pws-w;
                     height: lcd-box-h;
+                    // the bay's left edge, which the strip's row lines up with, and the row's top
+                    property <length> bay-x: (self.width - lcd-w) / 2 - kb-pad-y;
+                    property <length> row-y: bay-pad + lcd-h + 2 * kb-pad-y;
+                    // the Library's top left in the box's own terms
+                    property <length> lib-x: under-x - pws-x;
+                    property <length> lib-y: lcd-box-h + 18px;
+                    // a screen carried to `wx`, `wy` in the window: where the pointer holds
+                    // it here, and where that is over the strip (near it, it can land)
+                    function carry-to(wx: length, wy: length) {
+                        root.carry-x = wx - self.absolute-position.x;
+                        root.carry-y = wy - self.absolute-position.y;
+                        root.pl-carry-move(wx - strip.absolute-position.x,
+                            wx > strip.absolute-position.x - 40px && wx < strip.absolute-position.x + strip.width + 40px
+                            && wy > strip.absolute-position.y - 70px && wy < strip.absolute-position.y + strip.height + 70px);
+                    }
+                    // let go: over the strip, the carried screen settles into its room and
+                    // then takes its place; away from it, nothing changes
+                    function drop-carry() {
+                        if (root.pl-slot-w > 0) {
+                            root.carry-settle = true;
+                            root.carry-x = strip.x + root.pl-slot-x + root.carry-gx;
+                            root.carry-y = strip.y + root.carry-gy;
+                            settle.running = true;
+                        } else {
+                            root.carry-on = false;
+                            root.pl-carry-drop();
+                        }
+                    }
+                    settle := Timer {
+                        interval: 160ms;
+                        running: false;
+                        triggered => {
+                            self.running = false;
+                            root.carry-settle = false;
+                            root.carry-on = false;
+                            root.pl-carry-drop();
+                        }
+                    }
                     border-radius: 12px;
                     background: Ink.well;
                     // the bay the screen is set into, between plain walls: the screen's own
@@ -4117,42 +4198,396 @@ export component AppWindow inherits Window {
                             }
                         }
                     }
-                }
-                if root.tab == 3 && root.boot == 0 && !root.screen-editing: ScrollBox {
-                    x: under-x;
-                    y: under-top;
-                    width: pl-w;
-                    height: srow0;
-                    need: pl-need;
-                    PlaylistBox {
-                    width: parent.width;
-                    height: max(pl-need, srow0);
-                    fill: transparent;
-                    pages: root.pl-pages;
-                    announce: root.lcd-announce;
-                    announce-toggled => { root.lcd-announce-toggled(); }
-                    edit(i) => { root.screen-edit(i); }
-                    show(i) => { root.page-show(i); }
-                    moved(i, j) => { root.page-moved(i, j); }
-                    remove(i) => { root.page-remove(i); }
-                    add => { root.lib-open-at(); }
+                    // ---------------------------------------------------- the playlist's strip
+                    // under the screen, lined up with the bay: its name, Pause, the strip
+                    // itself (one round of the playlist, left to right, each turn as wide
+                    // as its time), and the round starting again after it
+                    Text {
+                        visible: !root.screen-editing;
+                        x: parent.bay-x;
+                        y: parent.row-y + 11px;
+                        height: 18px;
+                        text: "Playlist";
+                        font-family: "Geist";
+                        font-size: 12.5px;
+                        font-weight: 600;
+                        color: Ink.soft;
+                        vertical-alignment: center;
                     }
-                }
-                if root.tab == 3 && root.boot == 0 && !root.screen-editing: ScrollBox {
-                    x: under-x + (sfits ? pl-w + 12px : 0);
-                    y: under-top + (sfits ? 0 : srow0 + 12px);
-                    width: 320px;
-                    height: sfits ? srow0 : srow1;
-                    need: root.closed-h;
-                    PageBox {
-                        width: parent.width;
-                        height: max(root.closed-h, sfits ? srow0 : srow1);
+                    PlayButton {
+                        visible: !root.screen-editing;
+                        x: parent.bay-x;
+                        y: parent.row-y + 60px;
+                        paused: root.lcd-state == 1;
+                        clicked => { root.lcd-pause(); }
+                    }
+                    Path {
+                        visible: !root.screen-editing && !root.pl-single && root.pl-sizing < 0;
+                        x: parent.bay-x + lcd-w + 2 * kb-pad-y - 20px;
+                        y: parent.row-y + 68px;
+                        width: 20px;
+                        height: 20px;
+                        viewbox-width: 24;
+                        viewbox-height: 24;
+                        commands: "M20 12a8 8 0 1 1-2.6-5.9M20 4v4.5h-4.5";
                         fill: transparent;
+                        stroke: Ink.quiet;
+                        stroke-width: 1.8px;
+                        stroke-line-cap: round;
+                    }
+                    strip := Rectangle {
+                        visible: !root.screen-editing;
+                        x: parent.bay-x + 46px;
+                        y: parent.row-y + 40px;
+                        width: 834px;
+                        height: 76px;
+                        // where a carried screen will land: the turns either side make room for it
+                        if root.pl-slot-w > 0: Rectangle {
+                            x: root.pl-slot-x;
+                            width: root.pl-slot-w;
+                            height: 76px;
+                            animate x, width { duration: 250ms; easing: ease; }
+                            border-radius: 8px;
+                            border-width: 1px;
+                            border-color: Ink.pick-hover;
+                            background: #1a1a1e;
+                        }
+                        // the mark before each turn: how it comes in; select it to choose another way
+                        for b[i] in root.pl-blocks: Rectangle {
+                            x: b.x - 18px;
+                            width: 18px;
+                            height: 76px;
+                            animate x { duration: root.pl-live ? 0ms : 250ms; easing: ease; }
+                            visible: !root.pl-single;
+                            opacity: b.away ? 0 : root.pl-dim ? 0.3 : 1;
+                            border-radius: 6px;
+                            background: (mta.has-hover && !root.carry-on) || root.pl-menu == i ? Ink.hover-well : transparent;
+                            WayGlyph {
+                                x: 3px;
+                                y: 32px;
+                                way: b.way;
+                                ink: (mta.has-hover && !root.carry-on) || root.pl-menu == i ? Ink.bright : Ink.soft;
+                            }
+                            mta := TouchArea {
+                                enabled: !b.away && !root.pl-dim && !root.carry-on;
+                                mouse-cursor: pointer;
+                                clicked => { root.pl-mark(i, self.absolute-position.x, self.absolute-position.y, self.height); }
+                            }
+                        }
+                        // the turns
+                        for b[i] in root.pl-blocks: blk := Rectangle {
+                            x: b.x;
+                            width: b.w;
+                            height: 76px;
+                            animate x, width { duration: root.pl-live ? 0ms : 250ms; easing: ease; }
+                            property <bool> hov: bta.has-hover && !root.carry-on && root.pl-sizing < 0 && !root.pl-dim;
+                            StripBlock {
+                                width: parent.width;
+                                height: parent.height;
+                                b: b;
+                                hovered: blk.hov;
+                                opacity: b.away ? 0 : root.pl-dim ? 0.3 : 1;
+                            }
+                            // select to show the turn now; drag along the strip to move it
+                            bta := TouchArea {
+                                enabled: !root.pl-dim;
+                                mouse-cursor: root.carry-on ? MouseCursor.grabbing : MouseCursor.grab;
+                                property <bool> far;
+                                pointer-event(e) => {
+                                    if (e.kind == PointerEventKind.down) {
+                                        self.far = false;
+                                    }
+                                    if (e.kind == PointerEventKind.up) {
+                                        if (root.carry-on) {
+                                            stage.drop-carry();
+                                        } else if (!self.far) {
+                                            root.page-show(i);
+                                        }
+                                    }
+                                    if (e.kind == PointerEventKind.cancel && root.carry-on) {
+                                        root.carry-on = false;
+                                        root.pl-carry-cancel();
+                                    }
+                                }
+                                moved => {
+                                    if (self.pressed) {
+                                        if (!root.carry-on && !self.far && (abs(self.mouse-x - self.pressed-x) > 4px || abs(self.mouse-y - self.pressed-y) > 4px)) {
+                                            self.far = true;
+                                            root.carry-gx = min(self.pressed-x, 60px);
+                                            root.carry-gy = self.pressed-y;
+                                            root.carry-settle = false;
+                                            root.carry-on = true;
+                                            root.pl-carry-start(0, i);
+                                        }
+                                        if (root.carry-on) {
+                                            stage.carry-to(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                                        }
+                                    }
+                                }
+                                // (inside the block's TouchArea, so the block keeps the pointer while it is on them)
+                                // Edit and Remove, at the block's corner while the pointer is on it
+                                if blk.hov: Rectangle {
+                                    x: parent.width - 6px - self.width;
+                                    y: 6px;
+                                    width: 2px + 22px + (root.pl-single ? 0 : 23px) + 2px;
+                                    height: 26px;
+                                    border-radius: 7px;
+                                    background: #131316eb;
+                                    StripIcon {
+                                        x: 2px;
+                                        y: 2px;
+                                        commands: "M4 20h4L19 9l-4-4L4 16z";
+                                        clicked => { root.screen-edit(i); }
+                                    }
+                                    if !root.pl-single: StripIcon {
+                                        x: 25px;
+                                        y: 2px;
+                                        commands: "M6 6l12 12M18 6L6 18";
+                                        clicked => { root.page-remove(i); }
+                                    }
+                                }
+                                // the right edge: drag it to make the turn longer or shorter
+                                if !root.pl-single && !b.away && !root.pl-dim: Rectangle {
+                                    x: parent.width - 10px;
+                                    width: 10px;
+                                    height: 76px;
+                                    Rectangle {
+                                        x: 4px;
+                                        y: 27px;
+                                        width: 2px;
+                                        height: 22px;
+                                        border-radius: 1px;
+                                        background: Ink.dim;
+                                        opacity: blk.hov || root.pl-sizing == i ? 0.75 : 0;
+                                        animate opacity { duration: 120ms; }
+                                    }
+                                    gta := TouchArea {
+                                        enabled: !root.carry-on;
+                                        mouse-cursor: MouseCursor.ew-resize;
+                                            // (measured in the window: the edge moves with the drag)
+                                        property <length> from;
+                                        pointer-event(e) => {
+                                            if (e.kind == PointerEventKind.down) {
+                                                self.from = self.absolute-position.x + self.mouse-x;
+                                            }
+                                            if ((e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) && root.pl-sizing == i) {
+                                                root.pl-sizing = -1;
+                                                root.pl-size-done();
+                                            }
+                                        }
+                                        moved => {
+                                            if (self.pressed) {
+                                                root.pl-sizing = i;
+                                                root.pl-size(i, self.absolute-position.x + self.mouse-x - self.from);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            // its time, over it while the pointer is on it or its edge is dragged
+                            if (blk.hov || root.pl-sizing == i) && !b.away: Rectangle {
+                                x: (parent.width - self.width) / 2;
+                                y: -27px;
+                                width: secs-text.preferred-width + 14px;
+                                height: 20px;
+                                border-radius: 6px;
+                                background: Ink.pop;
+                                secs-text := Text {
+                                    x: 7px;
+                                    height: parent.height;
+                                    text: b.secs;
+                                    font-family: "Geist";
+                                    font-size: 12px;
+                                    color: Ink.bright;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            // the playhead: through the mark while the turn comes in, then along the block
+                            if b.on && root.pl-head && !b.away: Rectangle {
+                                x: (root.pl-in ? -18px + 18px * root.pl-p : parent.width * root.pl-p) - 1px;
+                                y: -8px;
+                                width: 2px;
+                                height: 92px;
+                                border-radius: 1px;
+                                background: Ink.bright;
+                                opacity: root.carry-on ? 0.3 : 1;
+                                Rectangle {
+                                    x: -4px;
+                                    y: -4px;
+                                    width: 10px;
+                                    height: 10px;
+                                    border-radius: 5px;
+                                    background: Ink.bright;
+                                }
+                            }
+                        }
+                        // a script's screen on the keyboard: the strip waits, and says so
+                        if root.pl-dim: Rectangle {
+                            property <length> tw: pill-text.preferred-width;
+                            property <length> bw: back-text.preferred-width + 20px;
+                            x: (parent.width - self.width) / 2;
+                            y: 20px;
+                            width: 14px + self.tw + 12px + self.bw + 4px;
+                            height: 36px;
+                            border-radius: 9px;
+                            background: Ink.pop;
+                            drop-shadow-blur: 24px;
+                            drop-shadow-offset-y: 8px;
+                            drop-shadow-color: #00000059;
+                            pill-text := Text {
+                                x: 14px;
+                                height: parent.height;
+                                text: root.pl-script;
+                                font-family: "Geist";
+                                font-size: 13px;
+                                color: Ink.bright;
+                                vertical-alignment: center;
+                            }
+                            Rectangle {
+                                x: 14px + parent.tw + 12px;
+                                y: 4px;
+                                width: parent.bw;
+                                height: 28px;
+                                border-radius: 7px;
+                                background: back-ta.pressed ? Ink.pick : back-ta.has-hover ? Ink.pick-hover : Ink.hover-box;
+                                back-text := Text {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    text: "Back to the playlist";
+                                    font-family: "Geist";
+                                    font-size: 13px;
+                                    color: Ink.bright;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                                back-ta := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.pl-back(); }
+                                }
+                            }
+                        }
+                    }
+
+                    // ---------------------------------------------------- the Library
+                    // every screen there is, two to a row; drag one onto the strip to play it
+                    if root.boot == 0: PageBox {
+                        visible: !root.screen-editing;
+                        x: parent.lib-x;
+                        y: parent.lib-y;
+                        width: under-w;
+                        height: shelf-h;
+                        title: "Library";
+                        BoxLink {
+                            x: parent.width - 10px - self.width;
+                            y: 12px;
+                            text: "+ New screen";
+                            clicked => { root.lib-open-at(); }
+                        }
+                        Text {
+                            x: 16px;
+                            y: 40px;
+                            width: parent.width - 32px;
+                            height: 18px;
+                            text: "Drag a screen onto the playlist to add the screen to what the keyboard shows.";
+                            font-family: "Geist";
+                            font-size: 12.5px;
+                            color: Ink.quiet;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                        for c[k] in root.lib-pages: Rectangle {
+                            property <length> cw: (parent.width - 32px - 8px) / 2;
+                            x: 16px + mod(k, 2) * (self.cw + 8px);
+                            y: 72px + floor(k / 2) * 104px;
+                            width: self.cw;
+                            height: 96px;
+                            PlCard {
+                                width: parent.width;
+                                height: parent.height;
+                                p: c;
+                                hovered: cta.has-hover && !root.carry-on;
+                            }
+                            cta := TouchArea {
+                                mouse-cursor: root.carry-on ? MouseCursor.grabbing : MouseCursor.grab;
+                                property <bool> far;
+                                pointer-event(e) => {
+                                    if (e.kind == PointerEventKind.down) {
+                                        self.far = false;
+                                    }
+                                    if (e.kind == PointerEventKind.up && root.carry-on) {
+                                        stage.drop-carry();
+                                    }
+                                    if (e.kind == PointerEventKind.cancel && root.carry-on) {
+                                        root.carry-on = false;
+                                        root.pl-carry-cancel();
+                                    }
+                                }
+                                moved => {
+                                    if (self.pressed) {
+                                        if (!root.carry-on && !self.far && (abs(self.mouse-x - self.pressed-x) > 4px || abs(self.mouse-y - self.pressed-y) > 4px)) {
+                                            self.far = true;
+                                            root.carry-gx = 40px;
+                                            root.carry-gy = 34px;
+                                            root.carry-settle = false;
+                                            root.carry-on = true;
+                                            root.pl-carry-start(1, k);
+                                        }
+                                        if (root.carry-on) {
+                                            stage.carry-to(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                                        }
+                                    }
+                                }
+                                // Edit, over the picture's corner, while the pointer is over the card
+                                if self.has-hover && !root.carry-on: Rectangle {
+                                    x: parent.width - 14px - self.width;
+                                    y: 14px;
+                                    width: 2px + 28px + 2px;
+                                    height: 32px;
+                                    border-radius: 9px;
+                                    background: #131316e0;
+                                    CardIcon {
+                                        x: 2px;
+                                        y: 2px;
+                                        commands: "M4 20h4L19 9l-4-4L4 16z";
+                                        clicked => { root.lib-edit(k); }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ---------------------------------------------------- when Ectodeck is closed
+                    if root.boot == 0: PageBox {
+                        visible: !root.screen-editing;
+                        x: parent.lib-x;
+                        y: parent.lib-y + shelf-h + 12px;
+                        width: closed-w;
+                        height: root.closed-h;
                         title: "When Ectodeck is closed";
                         for c in root.cells: CellView {
                             c: c;
                             pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
                             slide(id, v) => { root.cell-slide(id, v); }
+                        }
+                    }
+
+                    // ---------------------------------------------------- the screen carried
+                    // the block it becomes, under the pointer; as wide as its room on the strip
+                    if root.carry-on: Rectangle {
+                        x: root.carry-x - root.carry-gx;
+                        y: root.carry-y - root.carry-gy;
+                        animate x, y { duration: root.carry-settle ? 150ms : 0ms; easing: ease; }
+                        width: root.carry-w;
+                        animate width { duration: 200ms; easing: ease; }
+                        height: 76px;
+                        drop-shadow-blur: root.carry-settle ? 0 : 28px;
+                        drop-shadow-offset-y: root.carry-settle ? 0 : 12px;
+                        drop-shadow-color: #0000008c;
+                        StripBlock {
+                            width: parent.width;
+                            height: parent.height;
+                            b: root.carry-block;
+                            lifted: true;
                         }
                     }
                 }
@@ -4560,7 +4995,7 @@ export component AppWindow inherits Window {
             Text {
                 x: 20px;
                 y: 20px;
-                text: "Add a page";
+                text: "New screen";
                 font-family: "Geist";
                 font-size: 16px;
                 font-weight: 600;
@@ -4570,7 +5005,7 @@ export component AppWindow inherits Window {
                 x: 20px;
                 y: 20px + 26px;
                 width: parent.width - 40px;
-                text: "Select a page to add to the end of the playlist.";
+                text: "Select a screen to add to the Library.";
                 font-family: "Geist";
                 font-size: 13px;
                 color: Ink.quiet;

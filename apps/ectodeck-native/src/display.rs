@@ -196,6 +196,55 @@ pub fn closed(page: &Page, w: f32) -> Tiles {
     Tiles { cells: c, height: y - 8.0 + 16.0 }
 }
 
+/// The same box laid out across the Library's width, `w`: the screen light,
+/// how bright, and the keyboard's own screens, side by side.
+pub fn closed_wide(page: &Page, w: f32) -> Tiles {
+    let mut c = Vec::new();
+    let l = &page.draft()["lighting"];
+    c.push(text_cell(style::END_R, w - 16.0 - 150.0, 14.0, 150.0, 22.0, &page.profile_name(page.editing)));
+    let lc = &l["lcd"]["color"];
+    let b = |v: &Value| v.as_u64().unwrap_or(0).min(255) as u8;
+    let rgb = [b(&lc["color"][0]), b(&lc["color"][1]), b(&lc["color"][2])];
+    // three columns, 1.15 to 1 to 1.25, 32 apart
+    let inner = w - 32.0;
+    let unit = (inner - 64.0) / 3.4;
+    let (x1, w1) = (16.0, unit * 1.15);
+    let (x2, w2) = (x1 + w1 + 32.0, unit);
+    let (x3, w3) = (x2 + w2 + 32.0, unit * 1.25);
+    let (head, row) = (48.0, 74.0);
+    c.push(text_cell(style::PROP, x1, head, w1, 20.0, "Default screen light"));
+    let step = 34.0;
+    let preset = LIGHTS.iter().position(|p| *p == rgb);
+    for (i, p) in LIGHTS.iter().enumerate() {
+        let col = slint::Color::from_rgb_u8(p[0], p[1], p[2]);
+        c.push(Cell { color: col, on: preset == Some(i), id: id(Ctl::LcdPreset), index: i as i32, ..cell(kind::COLOR_DOT, x1 - 2.0 + i as f32 * step, row, 28.0, 28.0) });
+    }
+    let own = preset.is_none();
+    let col = slint::Color::from_rgb_u8(rgb[0], rgb[1], rgb[2]);
+    c.push(Cell { color: col, on: own, style: if own { 0 } else { 1 }, id: id(Ctl::LcdColor), ..cell(kind::COLOR_DOT, x1 - 2.0 + LIGHTS.len() as f32 * step, row, 28.0, 28.0) });
+    let br = lc["brightness"].as_f64().unwrap_or(255.0);
+    c.push(text_cell(style::PROP, x2, head, w2 - 60.0, 20.0, "Brightness"));
+    let v = format!("{}%", (br / 2.55).round());
+    let pw = crate::text::width(500, 11.5, &v) + 16.0;
+    c.push(Cell { text: v.into(), ..cell(kind::PILL, x2 + w2 - pw, head, pw, 20.0) });
+    c.push(Cell { value: (br / 255.0) as f32, color: col, id: id(Ctl::LcdBrightness), ..cell(kind::FILLED, x2, row + 4.0, w2, 20.0) });
+    c.push(text_cell(style::NOTE, x3, head, w3, 20.0, "The Z10 shows its own screens:"));
+    let apps = l["lcd"]["apps"].as_u64().unwrap_or(0);
+    // (not EVGA Precision X1's stats: EVGA makes no graphics cards now, so nothing sends them)
+    let shown: Vec<(usize, &(u64, &str))> = LCD_APPS.iter().enumerate().filter(|(_, (bit, _))| *bit != 0x02).collect();
+    for (k, (i, (bit, n))) in shown.iter().enumerate() {
+        let (cx, cy) = (x3 + (k % 2) as f32 * (w3 / 2.0), row + 2.0 + (k / 2) as f32 * 28.0);
+        c.push(Cell { on: apps & bit != 0, id: id(Ctl::LcdApp), index: *i as i32, text: (*n).into(), ..cell(kind::CHECKBOX, cx, cy, w3 / 2.0 - 8.0, 20.0) });
+    }
+    let rows = shown.len().div_ceil(2) as f32;
+    Tiles { cells: c, height: row + 2.0 + rows * 28.0 - 8.0 + 22.0 }
+}
+
+/// Whether the closed box fits across a Library `w` wide.
+pub fn closed_fits_wide(w: f32) -> bool {
+    w >= 880.0
+}
+
 /// Use a piece of the tab. `on` is a checkbox's new state; `index` which box.
 pub fn act(page: &mut Page, c: Ctl, index: usize, value: f32, text: Option<&str>) {
     let n = page.editing;

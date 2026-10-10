@@ -84,11 +84,25 @@ pub enum Ask {
     HoverSettle,
     /// the pointer onto (true) or off a key on the keyboard's picture
     KeyHover(i32, bool),
-    /// the Screen tab: Pause or Play; game launches breaking in, or not; time
-    /// for the playlist's picture of a launch to move on
+    /// the Screen tab: Pause or Play; time for the readings to be read again
     LcdPause,
-    LcdAnnounce,
     LcdTick,
+    /// the playlist's strip: a screen picked up from the strip (0, a turn) or
+    /// the Library (1, a page); carried to a place over the strip (or away
+    /// from it, false); let go, settled into its room; put back
+    CarryStart(i32, i32),
+    CarryMove(f32, bool),
+    CarryDrop,
+    CarryCancel,
+    /// a turn's right edge dragged so far, and let go
+    SizeTurn(i32, f32),
+    SizeDone,
+    /// a turn's mark selected, its menu of ways in to open under it
+    WayMenu(i32, f32, f32, f32),
+    /// a script's screen ended, the playlist back on the screen
+    PlBack,
+    /// a page of the Library opened in the editor
+    LibEdit(i32),
     /// the page editor: open on the playlist's page, close; add a piece (0
     /// words, 1 a reading, 2 a bar, 3 a clock); the grid on or off; a piece
     /// chosen (-1 none); a piece dragged to a row and a column
@@ -442,6 +456,19 @@ pub struct Front {
     pages_changed: Option<Instant>,
     /// editing: the playlist's turn that showed before, which shows again after
     edit_from: usize,
+    /// the strip: each turn's block, a screen being carried to it, a turn's
+    /// edge being dragged (the turn, its time when taken, the strip's scale
+    /// then), the menu of ways in open on a mark; the strip's scale and the
+    /// blocks shown (without a carried one's room), as last laid out; each
+    /// turn's picture, by its key, and what it was drawn from
+    blocks: Rc<VecModel<crate::PlBlock>>,
+    carry: Option<Carry>,
+    sizing: Option<(usize, u32, f64)>,
+    way_menu: Option<usize>,
+    strip_pps: f64,
+    strip_spans: Vec<(f64, f64)>,
+    strip_thumbs: HashMap<u64, (PicKey, slint::Image)>,
+    carry_thumb: Option<(PicKey, slint::Image)>,
     /// the page being edited, the piece chosen; this computer's readings,
     /// read here for the editor's picture once a second, and when last
     editor: Option<crate::screen_edit::Editor>,
@@ -520,7 +547,15 @@ impl Front {
         on!(on_screen_grid, Ask::EditGrid);
         on!(on_piece_chosen, |i| Ask::PieceChosen(i));
         on!(on_piece_moved, |i, r, c| Ask::PieceMoved(i, r, c));
-        on!(on_lcd_announce_toggled, Ask::LcdAnnounce);
+        on!(on_pl_carry_start, |from, i| Ask::CarryStart(from, i));
+        on!(on_pl_carry_move, |x, near| Ask::CarryMove(x, near));
+        on!(on_pl_carry_drop, Ask::CarryDrop);
+        on!(on_pl_carry_cancel, Ask::CarryCancel);
+        on!(on_pl_size, |i, dx| Ask::SizeTurn(i, dx));
+        on!(on_pl_size_done, Ask::SizeDone);
+        on!(on_pl_mark, |i, x, y, h| Ask::WayMenu(i, x, y, h));
+        on!(on_pl_back, Ask::PlBack);
+        on!(on_lib_edit, |k| Ask::LibEdit(k));
         on!(on_page_show, |i| Ask::PageShow(i));
         on!(on_page_moved, |i, j| Ask::PageMove(i, j));
         on!(on_page_remove, |i| Ask::PageRemove(i));
@@ -636,6 +671,14 @@ impl Front {
             screens_saved: crate::lcd_page::Screens::default(),
             pages_changed: None,
             edit_from: 0,
+            blocks: Rc::new(VecModel::default()),
+            carry: None,
+            sizing: None,
+            way_menu: None,
+            strip_pps: 0.0,
+            strip_spans: Vec::new(),
+            strip_thumbs: HashMap::new(),
+            carry_thumb: None,
             editor: None,
             reader: None,
             readings: crate::lcd_page::Readings::default(),
@@ -654,7 +697,7 @@ impl Front {
         f.ui.set_pk_presets(ModelRc::new(VecModel::from(PRESETS.iter().map(|c| color(*c)).collect::<Vec<_>>())));
         f.ui.set_cells(ModelRc::from(f.cells.clone()));
         f.ui.set_place_cells(ModelRc::from(f.place_cells.clone()));
-        f.ui.set_lcd_announce(f.settings.on("devices.z10.screen.announce"));
+        f.ui.set_pl_blocks(ModelRc::from(f.blocks.clone()));
         f.poll_lcd();
         if controlled {
             f.ask_kb(device::Ask::State);
@@ -1016,15 +1059,10 @@ impl Front {
                 Ask::LibAdd => {
                     let key = self.lib_pick.map(|k| crate::lcd_page::TEMPLATES[k].0);
                     if let Some(p) = key.and_then(|k| crate::lcd_page::Page::template(k, &self.screens.library)) {
-                        let id = p.id.clone();
                         self.screens.library.push(p);
-                        let at = self.screens.add_turn(usize::MAX, &id);
                         self.lib_open = false;
                         self.pages_edited();
-                        // the page added, on the screen now; a blank one opens to be made
-                        if let Some(pl) = &self.player {
-                            pl.tell(crate::lcd_player::Control::Show(at));
-                        }
+                        // a blank one opens to be made
                         if key == Some("blank") {
                             self.edit_page(self.screens.library.len() - 1);
                         }
@@ -1037,16 +1075,74 @@ impl Front {
                         pl.tell(crate::lcd_player::Control::Paused(self.lcd_paused));
                     }
                 }
-                Ask::LcdAnnounce => {
-                    let on = !self.settings.on("devices.z10.screen.announce");
-                    if let Err(e) = self.settings.set("devices.z10.screen.announce", serde_json::json!(on)) {
-                        self.status(format!("The setting was not saved: {e}"), 2);
-                    }
-                    self.ui.set_lcd_announce(on);
-                    if let Some(pl) = &self.player {
-                        pl.tell(crate::lcd_player::Control::Announce(on));
+                Ask::CarryStart(from, i) => {
+                    let i = i.max(0) as usize;
+                    self.close_menu();
+                    self.carry = if from == 0 {
+                        let w = self.blocks.row_data(i).map_or(190.0, |b| b.w as f64);
+                        self.screens.playlist.get(i).map(|e| Carry { from_strip: true, index: i, page: e.page.clone(), secs: e.secs, slot: Some(i), home: Some(i), w })
+                    } else {
+                        self.screens.library.get(i).map(|p| Carry { from_strip: false, index: i, page: p.id.clone(), secs: crate::lcd_page::SECS.2, slot: None, home: None, w: 190.0 })
+                    };
+                }
+                Ask::CarryMove(x, near) => {
+                    changed = false;
+                    let spans = self.strip_spans.clone();
+                    if let Some(c) = &mut self.carry {
+                        let slot = if near { Some(slot_at(&spans, x as f64)) } else { c.home };
+                        if slot != c.slot {
+                            c.slot = slot;
+                            changed = true;
+                        }
                     }
                 }
+                Ask::CarryDrop => {
+                    if let Some(c) = self.carry.take() {
+                        if let Some(at) = c.slot {
+                            let shown = self.lcd.page;
+                            let playing = self.screens.playlist.get(shown).map(|e| e.key);
+                            let moved = if c.from_strip {
+                                at != c.index && self.screens.move_turn(c.index, at).is_some()
+                            } else {
+                                self.screens.add_turn(at, &c.page);
+                                true
+                            };
+                            if moved {
+                                self.pages_edited();
+                                self.keep_playing(playing, shown);
+                            }
+                        }
+                    }
+                }
+                Ask::CarryCancel => self.carry = None,
+                Ask::SizeTurn(i, dx) => {
+                    let i = i.max(0) as usize;
+                    if self.sizing.is_none_or(|s| s.0 != i) {
+                        self.close_menu();
+                        self.sizing = self.screens.playlist.get(i).map(|e| (i, e.secs, self.strip_pps));
+                    }
+                    if let Some((i, from, pps)) = self.sizing {
+                        let secs = (from as f64 + dx as f64 / pps.max(1e-6)).round().clamp(crate::lcd_page::SECS.0 as f64, crate::lcd_page::SECS.1 as f64) as u32;
+                        if let Some(e) = self.screens.playlist.get_mut(i) {
+                            if e.secs != secs {
+                                e.secs = secs;
+                                self.pages_edited();
+                            }
+                        }
+                    }
+                    self.ui.set_pl_live(true);
+                }
+                Ask::SizeDone => {
+                    self.sizing = None;
+                    self.ui.set_pl_live(false);
+                }
+                Ask::WayMenu(i, x, y, h) => self.open_way_menu(i.max(0) as usize, (x, y, h)),
+                Ask::PlBack => {
+                    if let Some(pl) = &self.player {
+                        pl.tell(crate::lcd_player::Control::EndSequence);
+                    }
+                }
+                Ask::LibEdit(k) => self.edit_page(k.max(0) as usize),
                 Ask::LcdTick => {
                     // the readings again each second: for the page being edited (its
                     // picture and its boxes), or the playlist's pictures of its pages
@@ -2016,10 +2112,11 @@ impl Front {
     }
 
     fn close_menu(&mut self) {
-        if self.bind_menu.take().is_some() || self.light_menu.take().is_some() {
+        if self.bind_menu.take().is_some() || self.light_menu.take().is_some() || self.way_menu.take().is_some() {
             self.ui.set_menu_open(false);
             self.ui.set_menu_search(true);
             self.ui.set_menu_w(300.0);
+            self.ui.set_pl_menu(-1);
         }
         if self.menu.take().is_some() {
             self.ui.set_menu_open(false);
@@ -2038,12 +2135,13 @@ impl Front {
                 self.close_place_menu();
             }
         }
-        if self.bind_menu.is_some() || self.light_menu.is_some() {
+        if self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() {
             let (mx, my, mw, mh) = (self.ui.get_menu_x(), self.ui.get_menu_y(), self.ui.get_menu_width(), self.ui.get_menu_height());
             if !(x >= mx && x < mx + mw && y >= my && y < my + mh) {
-                // a press on the dropdown the menu hangs from shuts it, and its click must not open it again
+                // a press on the dropdown (or the mark) the menu hangs from shuts it, and its click must not open it again
                 let (ax, ay, ah) = (self.ui.get_menu_ax(), self.ui.get_menu_ay(), self.ui.get_menu_ah());
-                if self.light_menu.is_some() && x >= ax && x < ax + self.ui.get_menu_w() && y >= ay && y < ay + ah {
+                let aw = if self.way_menu.is_some() { 18.0 } else { self.ui.get_menu_w() };
+                if (self.light_menu.is_some() || self.way_menu.is_some()) && x >= ax && x < ax + aw && y >= ay && y < ay + ah {
                     self.shut = Some(((ax, ay), Instant::now()));
                 }
                 self.close_menu();
@@ -2082,7 +2180,7 @@ impl Front {
         if self.page.view != View::Keys || self.page.sel.is_none() || self.ui.get_place() != "z10" || y < 36.0 {
             return;
         }
-        if self.menu.is_some() || self.bind_menu.is_some() || self.light_menu.is_some() || self.pick.is_some() || self.place_menu {
+        if self.menu.is_some() || self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pick.is_some() || self.place_menu {
             return;
         }
         let inside = |x0: f32, y0: f32, w: f32, h: f32| x >= x0 && x < x0 + w && y >= y0 && y < y0 + h;
@@ -2152,6 +2250,21 @@ impl Front {
             if let Some((v, _)) = i.checked_sub(1).and_then(|k| crate::display::BIND_CHOICES[s].get(k)) {
                 self.set_slider_bind(s, v);
             }
+            return;
+        }
+        // how a turn comes in, from the menu on its mark
+        if let Some(t) = self.way_menu.take() {
+            self.ui.set_menu_open(false);
+            self.ui.set_menu_search(true);
+            self.ui.set_menu_w(300.0);
+            self.ui.set_pl_menu(-1);
+            if let (Some(way), Some(e)) = (i.checked_sub(1).and_then(|k| crate::lcd_page::TRANSITIONS.get(k)), self.screens.playlist.get_mut(t)) {
+                if e.comes_in != *way {
+                    e.comes_in = *way;
+                    self.pages_edited();
+                }
+            }
+            self.refresh();
             return;
         }
         let Some(m) = &mut self.menu else { return };
@@ -2554,7 +2667,10 @@ impl Front {
             self.ui.set_settings_h(h);
             self.show_cells(cells);
         } else if loaded && self.page.view == View::Screen {
-            let t = crate::display::closed(&self.page, 320.0);
+            let w = self.ui.get_under_w();
+            let wide = crate::display::closed_fits_wide(w);
+            let t = if wide { crate::display::closed_wide(&self.page, w) } else { crate::display::closed(&self.page, 320.0) };
+            self.ui.set_closed_wide(wide);
             self.ui.set_closed_h(t.height);
             self.show_cells(t.cells);
             self.refresh_editor();
@@ -2744,6 +2860,43 @@ impl Front {
         self.light_menu = Some(c);
     }
 
+    /// A turn's mark selected: the ways in, under it, the turn's own ticked.
+    fn open_way_menu(&mut self, i: usize, anchor: (f32, f32, f32)) {
+        if let Some((at, when)) = self.shut.take() {
+            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
+                return;
+            }
+        }
+        let Some(e) = self.screens.playlist.get(i) else { return };
+        let name = self.screens.page_of(e).map_or("The screen".to_string(), |p| p.name.clone());
+        let mut rows = vec![MenuRow { kind: 1, label: format!("How {name} comes in").into(), tag: "".into(), tick: false, sub: "".into() }];
+        for t in crate::lcd_page::TRANSITIONS {
+            rows.push(MenuRow { kind: 0, label: t.name().into(), tag: "".into(), tick: t == e.comes_in, sub: "".into() });
+        }
+        self.close_menu();
+        self.close_picker();
+        let list: f32 = rows.iter().map(|r| if r.kind == 1 { 28.0 } else { 33.0 }).sum();
+        let h = 6.0 + list + 6.0;
+        self.ui.set_menu_search(false);
+        self.ui.set_menu_back(false);
+        self.ui.set_menu_natural(h);
+        self.ui.set_menu_w(200.0);
+        self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
+        let (ax, ay, ah) = anchor;
+        let win = self.ui.get_window_height();
+        let (below, above) = (win - ay - ah - 14.0, ay - 70.0);
+        let down = h <= below || below >= h.min(260.0) || below >= above;
+        let room = if down { below } else { above };
+        self.ui.set_menu_ax(ax);
+        self.ui.set_menu_ay(ay);
+        self.ui.set_menu_ah(ah);
+        self.ui.set_menu_top(if down { ay + ah + 6.0 } else { ay - 6.0 - h.min(room) });
+        self.ui.set_menu_max(if h > room { room } else { win * 0.7 });
+        self.ui.set_menu_open(true);
+        self.way_menu = Some(i);
+        self.ui.set_pl_menu(i as i32);
+    }
+
     fn open_bind_menu(&mut self, i: usize, anchor: (f32, f32, f32)) {
         self.close_menu();
         let name = if i == 0 { "dimmer" } else { "volume" };
@@ -2930,6 +3083,8 @@ impl Front {
             if let Some(pl) = &self.player {
                 pl.tell(crate::lcd_player::Control::Show(at));
             }
+            // (marked at once, not a moment later when the player says so)
+            self.lcd.page = at;
         }
     }
 
@@ -3006,6 +3161,7 @@ impl Front {
             self.page_from = Instant::now();
         }
         self.lcd = n;
+        self.set_playhead();
         if self.page.view == View::Screen && self.ui.get_place() == "z10" {
             if state_changed {
                 self.refresh();
@@ -3013,6 +3169,24 @@ impl Front {
                 self.draw_screen();
             }
         }
+    }
+
+    /// The playhead, where the player last said the playlist stands: moving
+    /// on its own from there while the playlist plays, still while it is
+    /// paused; not shown for a single turn, while a script's screen shows or
+    /// while a page is edited.
+    fn set_playhead(&mut self) {
+        use crate::lcd_player::State;
+        let n = &self.lcd;
+        let shown = self.controlled && self.editor.is_none() && n.sequence.is_none() && matches!(n.state, State::Playing | State::Paused) && self.screens.playlist.len() > 1;
+        let len = n.length.max(0.001);
+        let tick = self.ui.get_pl_tick();
+        self.ui.set_pl_head(shown);
+        self.ui.set_pl_in(n.turning);
+        self.ui.set_pl_len((len * 1000.0).round().max(1.0) as i64);
+        self.ui.set_pl_t0(tick - (n.elapsed * 1000.0).round() as i64);
+        self.ui.set_pl_moving(shown && n.state == State::Playing);
+        self.ui.set_pl_p0((n.elapsed / len).clamp(0.0, 1.0) as f32);
     }
 
     /// Ectodeck closing: the screen handed back to the keyboard's own screens.
@@ -3039,27 +3213,24 @@ impl Front {
         }
     }
 
-    /// What the screen is doing now, said beside Pause on the Screen tab.
+    /// What the screen is doing when the strip can't show it, said on the
+    /// line over the screen: another program has it, or it isn't there.
     fn screen_status(&self) -> String {
         use crate::lcd_player::State;
-        let i = self.shown_page();
-        let played = self.screens.played();
-        let name = |k: usize| played.get(k).map_or("", |p| p.name.as_str());
         match (self.lcd.state, self.lcd.sequence) {
             (_, _) if !self.controlled => "Ectodeck leaves this keyboard to other programs.".into(),
             (State::Other, _) => "Another program is using the screen. Ectodeck plays it once that stops.".into(),
             (State::Missing, _) => "Ectodeck can’t reach the keyboard’s screen.".into(),
-            (_, Some("launch")) => "A game is starting".into(),
-            (_, Some(_)) => "A game just closed".into(),
-            (State::Paused, _) => format!("Paused on {}", name(i)),
-            (State::Playing, None) if played.len() > 1 && self.editor.is_none() => format!("Now playing {}, then {}", name(i), name((i + 1) % played.len())),
-            (State::Playing, None) => format!("Now playing {}", name(i)),
+            // (the strip shows what plays, paused or not, and a script's screen)
+            _ => String::new(),
         }
     }
 
-    /// The playlist's pages, each with its picture (the page the screen shows
-    /// as the keyboard shows it, the rest as they read now), and the sheet of
-    /// pages to add. `profile` is the profile's screen light.
+    /// The playlist's strip (each turn's block, at its place: room made for a
+    /// screen being carried, the strip fitted to its width unless an edge is
+    /// being dragged), the Library's cards, the screen carried, and the sheet
+    /// of pages to add. The turn on the screen shows what the keyboard shows;
+    /// the rest show what they read now. `profile` is the profile's screen light.
     fn refresh_playlist(&mut self, profile: [u8; 3], level: u8) {
         use crate::lcd_player::State;
         let played = self.screens.played();
@@ -3068,38 +3239,125 @@ impl Front {
         let px = |w: f32| (w * sc).round() as u32;
         let lv = level as f32 / 255.0;
         let shown = self.shown_page();
-        self.pl_thumbs.resize(n, None);
-        let paused = self.lcd.state == State::Paused;
-        // the page on the screen is marked while Ectodeck plays the screen, playing or paused
-        let marked = self.controlled && matches!(self.lcd.state, State::Playing | State::Paused);
-        let mut rows_out = Vec::with_capacity(n);
+        // the turn on the screen is marked while Ectodeck plays the screen, playing or paused
+        let marked = self.controlled && self.editor.is_none() && matches!(self.lcd.state, State::Playing | State::Paused);
+        let live_rows = self.lcd.sequence.is_none() && !self.lcd.rows.is_empty();
+        // the turns shown and the room, in order: (the turn, or None for the room; its time)
+        let carried = self.carry.as_ref().filter(|c| c.from_strip).map(|c| c.index);
+        let mut items: Vec<(Option<usize>, f64)> = (0..n).filter(|i| Some(*i) != carried).map(|i| (Some(i), played[i].secs as f64)).collect();
+        if let Some(at) = self.carry.as_ref().and_then(|c| c.slot) {
+            items.insert(at.min(items.len()), (None, self.carry.as_ref().map_or(8.0, |c| c.secs as f64)));
+        }
+        let (pps, spans) = lay_strip(&items.iter().map(|x| x.1).collect::<Vec<_>>(), self.sizing.map(|s| s.2));
+        self.strip_pps = pps;
+        let room = items.iter().zip(&spans).find(|(it, _)| it.0.is_none()).map(|(_, sp)| *sp);
+        self.ui.set_pl_slot_x(room.map_or(0.0, |r| r.0) as f32);
+        self.ui.set_pl_slot_w(room.map_or(0.0, |r| r.1) as f32);
+        self.strip_spans = items.iter().zip(&spans).filter(|(it, _)| it.0.is_some()).map(|(_, sp)| *sp).collect();
+        let mut place: Vec<Option<(f64, f64)>> = vec![None; n];
+        for (it, sp) in items.iter().zip(&spans) {
+            if let Some(i) = it.0 {
+                place[i] = Some(*sp);
+            }
+        }
+        let old: HashMap<i32, (f32, f32)> = (0..self.blocks.row_count()).filter_map(|i| self.blocks.row_data(i)).map(|b| (b.key, (b.x, b.w))).collect();
+        let mut rows = Vec::with_capacity(n);
+        let mut keep = std::collections::HashSet::new();
         for (i, p) in played.iter().enumerate() {
-            let rows = if i == shown && self.lcd.sequence.is_none() && !self.lcd.rows.is_empty() { self.lcd.rows.clone() } else { crate::lcd_page::render(p, &self.readings) };
+            let e = &self.screens.playlist[i];
+            let key = e.key as i32;
+            keep.insert(e.key);
+            // (a turn being carried keeps its place, unseen, until it lands)
+            let (x, w) = place[i].map(|(x, w)| (x as f32, w as f32)).or(old.get(&key).copied()).unwrap_or((0.0, 0.0));
+            let pic_w = (w - 20.0).min(160.0).floor();
+            let pic_w = if pic_w >= 44.0 { pic_w } else { 0.0 };
             let rgb = crate::z10::as_lit(p.light.unwrap_or(profile));
-            let key: PicKey = (rows, rgb, level, px(320.0));
-            let pic = match &self.pl_thumbs[i] {
-                Some((k, img)) if *k == key => img.clone(),
+            let (pic, field) = if pic_w > 0.0 {
+                let rows_now = if i == shown && marked && live_rows { self.lcd.rows.clone() } else { crate::lcd_page::render(p, &self.readings) };
+                let k: PicKey = (rows_now, rgb, level, px(pic_w));
+                let img = match self.strip_thumbs.get(&e.key) {
+                    Some((had, img)) if *had == k => img.clone(),
+                    _ => {
+                        let img = crate::lcd_draw::picture(&k.0, k.1, lv, px(pic_w), px(pic_w / 5.0));
+                        self.strip_thumbs.insert(e.key, (k, img.clone()));
+                        img
+                    }
+                };
+                (img, crate::lcd_draw::field(rgb, lv, px(pic_w)))
+            } else {
+                (slint::Image::default(), slint::Color::default())
+            };
+            rows.push(crate::PlBlock {
+                key,
+                x,
+                w,
+                name: p.name.as_str().into(),
+                pic,
+                pic_w,
+                field,
+                on: marked && i == shown,
+                away: place[i].is_none(),
+                secs: if n == 1 { "Shows all the time".into() } else { format!("{} s", e.secs).into() },
+                way: crate::lcd_page::TRANSITIONS.iter().position(|t| *t == e.comes_in).unwrap_or(0) as i32,
+            });
+        }
+        self.strip_thumbs.retain(|k, _| keep.contains(k));
+        sync_blocks(&self.blocks, rows);
+        self.ui.set_pl_single(n == 1);
+        // a script's screen on the keyboard: the strip waits
+        let script = match self.lcd.sequence {
+            Some("launch") => "A game is starting",
+            Some(_) => "A game just closed",
+            None => "",
+        };
+        self.ui.set_pl_dim(!script.is_empty() && self.controlled);
+        self.ui.set_pl_script(script.into());
+        // the screen carried: the block it becomes, as wide as its room
+        if let Some(c) = &self.carry {
+            let w = room.map_or(c.w, |r| r.1) as f32;
+            self.ui.set_carry_w(w);
+            if let Some(p) = self.screens.library.iter().find(|p| p.id == c.page) {
+                let rgb = crate::z10::as_lit(p.light.unwrap_or(profile));
+                let pic_w = (w - 20.0).min(160.0).floor().max(44.0);
+                let k: PicKey = (crate::lcd_page::render(p, &self.readings), rgb, level, px(pic_w));
+                let img = match &self.carry_thumb {
+                    Some((had, img)) if *had == k => img.clone(),
+                    _ => {
+                        let img = crate::lcd_draw::picture(&k.0, k.1, lv, px(pic_w), px(pic_w / 5.0));
+                        self.carry_thumb = Some((k, img.clone()));
+                        img
+                    }
+                };
+                self.ui.set_carry_block(crate::PlBlock { key: -1, x: 0.0, w, name: p.name.as_str().into(), pic: img, pic_w, field: crate::lcd_draw::field(rgb, lv, px(pic_w)), on: false, away: false, secs: "".into(), way: 0 });
+            }
+        }
+        // the Library: every page, its picture two pixels to a dot
+        self.pl_thumbs.resize(self.screens.library.len(), None);
+        let mut cards = Vec::with_capacity(self.screens.library.len());
+        for (k, p) in self.screens.library.iter().enumerate() {
+            let rgb = crate::z10::as_lit(p.light.unwrap_or(profile));
+            let key: PicKey = (crate::lcd_page::render(p, &self.readings), rgb, level, px(320.0));
+            let pic = match &self.pl_thumbs[k] {
+                Some((had, img)) if *had == key => img.clone(),
                 _ => {
                     let img = crate::lcd_draw::picture(&key.0, key.1, lv, px(320.0), px(64.0));
-                    self.pl_thumbs[i] = Some((key, img.clone()));
+                    self.pl_thumbs[k] = Some((key, img.clone()));
                     img
                 }
             };
-            let on = marked && i == shown;
-            let (line1, line2) = card_lines(p, n, on, paused, self.page_from.elapsed().as_secs_f64());
-            rows_out.push(crate::PlPage {
+            cards.push(crate::PlPage {
                 name: p.name.as_str().into(),
-                line1: line1.into(),
-                line2: line2.into(),
+                line1: "".into(),
+                line2: "".into(),
                 pic,
                 field: crate::lcd_draw::field(rgb, lv, px(320.0)),
-                on,
-                now: on,
-                paused: on && paused,
-                removable: n > 1,
+                on: false,
+                now: false,
+                paused: false,
+                removable: false,
             });
         }
-        show_rows(self.ui.get_pl_pages(), |m| self.ui.set_pl_pages(m), rows_out);
+        show_rows(self.ui.get_lib_pages(), |m| self.ui.set_lib_pages(m), cards);
         // the sheet of pages to add
         self.ui.set_lib_open(self.lib_open);
         if self.lib_open {
@@ -3110,7 +3368,7 @@ impl Front {
                 .map(|(k, (key, name, note))| {
                     let page = crate::lcd_page::Page::template(key, &[]).expect("a page of the list");
                     let rows = crate::lcd_page::render(&page, &self.readings);
-                    let note = if *key == "weather" && !weather { "Needs a place in Ectodeck’s Settings. Until then, the page says “Weather unavailable”." } else { note };
+                    let note = if *key == "weather" && !weather { "Needs a place in Ectodeck’s Settings. Until then, the screen says “Weather unavailable”." } else { note };
                     crate::LibCard { name: (*name).into(), note: note.into(), pic: crate::lcd_draw::picture(&rows, crate::z10::as_lit(profile), lv, px(185.0), px(37.0)), on: self.lib_pick == Some(k) }
                 })
                 .collect();
@@ -3197,31 +3455,78 @@ impl Front {
 /// brightness, and its width in pixels.
 type PicKey = (Vec<String>, [u8; 3], u8, u32);
 
-/// How the playlist says a page comes in after the one before it.
-/// How a page comes in, as its card says.
-fn comes_in_words(t: crate::lcd_page::Transition) -> &'static str {
-    use crate::lcd_page::Transition;
-    match t {
-        Transition::Wipe => "Wipes in",
-        Transition::Dissolve => "Dissolves in",
-        Transition::Type => "Types in",
-        Transition::Cut => "Cuts in",
-    }
+/// A screen carried to the strip: from the strip (turn `index`) or the
+/// Library (page `index`); its page and time; where it would land among the
+/// turns that stay (None, nowhere: let go, nothing changes); where a turn
+/// carried from the strip goes back to when the pointer leaves the strip; its
+/// width while it is not over the strip.
+#[derive(Clone, Debug)]
+struct Carry {
+    from_strip: bool,
+    index: usize,
+    page: String,
+    secs: u32,
+    slot: Option<usize>,
+    home: Option<usize>,
+    w: f64,
 }
 
-/// A playlist card's two lines under its name, for page `p` of `n`: on the
-/// page on the screen (`on`), the time left in whole seconds, `shown_for`
-/// seconds after it came on, or that the screen is paused on it; on the
-/// others, how long it shows; then how it comes in, unless it is the only page.
-fn card_lines(p: &crate::lcd_page::Page, n: usize, on: bool, paused: bool, shown_for: f64) -> (String, String) {
-    let first = match (on, paused, n) {
-        (true, true, _) => "Paused on this page".to_string(),
-        (true, false, 1) => "Playing, all the time".to_string(),
-        (true, false, _) => format!("Playing, {} s left", (p.secs as f64 - shown_for).ceil().max(1.0) as u32),
-        (false, _, 1) => "Shows all the time".to_string(),
-        (false, _, _) => format!("{} s on screen", p.secs),
-    };
-    (first, if n == 1 { String::new() } else { comes_in_words(p.comes_in).to_string() })
+/// The strip's width, and the room before each turn for its mark.
+const STRIP_W: f64 = 834.0;
+const MARK_W: f64 = 18.0;
+
+/// Each turn's left edge and width on the strip, at one scale (pixels a
+/// second) that fits them all with a mark's room before each; `fixed` keeps
+/// a scale instead (while an edge is dragged: the strip refits once it is
+/// let go).
+fn lay_strip(secs: &[f64], fixed: Option<f64>) -> (f64, Vec<(f64, f64)>) {
+    let total = secs.iter().sum::<f64>().max(1.0);
+    let pps = fixed.unwrap_or((STRIP_W - MARK_W * secs.len() as f64) / total);
+    let mut x = MARK_W;
+    let spans = secs
+        .iter()
+        .map(|s| {
+            let at = (x, s * pps);
+            x += s * pps + MARK_W;
+            at
+        })
+        .collect();
+    (pps, spans)
+}
+
+/// Where a screen carried over the strip at `x` lands among the turns shown
+/// (`spans`, left edges and widths, without its room): before the first whose
+/// middle is right of the pointer. (Measured on the strip as shown, room and
+/// all, so the room stays put under a pointer that stays put.)
+fn slot_at(spans: &[(f64, f64)], x: f64) -> usize {
+    spans.iter().position(|(l, w)| x < l + w / 2.0).unwrap_or(spans.len())
+}
+
+/// Bring the strip's blocks to `rows`: the same turns at the start and the
+/// end keep their blocks (their places updated, so they glide), and only
+/// those between are taken out and put in. A block is its turn's by its key.
+fn sync_blocks(model: &VecModel<crate::PlBlock>, rows: Vec<crate::PlBlock>) {
+    let old: Vec<crate::PlBlock> = (0..model.row_count()).filter_map(|i| model.row_data(i)).collect();
+    let (n, m) = (old.len(), rows.len());
+    let mut head = 0;
+    while head < n && head < m && old[head].key == rows[head].key {
+        head += 1;
+    }
+    let mut tail = 0;
+    while tail < n - head && tail < m - head && old[n - 1 - tail].key == rows[m - 1 - tail].key {
+        tail += 1;
+    }
+    for i in (head..n - tail).rev() {
+        model.remove(i);
+    }
+    for (k, b) in rows[head..m - tail].iter().enumerate() {
+        model.insert(head + k, b.clone());
+    }
+    for i in (0..head).chain(m - tail..m) {
+        if model.row_data(i).as_ref() != Some(&rows[i]) {
+            model.set_row_data(i, rows[i].clone());
+        }
+    }
 }
 
 
@@ -3340,14 +3645,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_card_says_what_its_page_is_doing() {
-        let p = crate::lcd_page::Page::stats();
-        assert_eq!(card_lines(&p, 3, true, false, 0.2), ("Playing, 8 s left".into(), "Wipes in".into()));
-        assert_eq!(card_lines(&p, 3, true, false, 7.5).0, "Playing, 1 s left");
-        assert_eq!(card_lines(&p, 3, true, false, 9.0).0, "Playing, 1 s left", "never 0 s or less");
-        assert_eq!(card_lines(&p, 3, true, true, 3.0).0, "Paused on this page");
-        assert_eq!(card_lines(&p, 3, false, false, 0.0).0, "8 s on screen");
-        assert_eq!(card_lines(&p, 1, true, false, 0.0), ("Playing, all the time".into(), String::new()));
-        assert_eq!(card_lines(&p, 1, false, false, 0.0), ("Shows all the time".into(), String::new()));
+    fn the_strip_fits_each_turn_to_its_time() {
+        // three eight-second turns across 834 px, 18 before each
+        let (pps, spans) = lay_strip(&[8.0, 8.0, 8.0], None);
+        assert!((pps - (834.0 - 54.0) / 24.0).abs() < 1e-9);
+        assert_eq!(spans[0].0, 18.0);
+        let end = spans[2].0 + spans[2].1;
+        assert!((end - 834.0).abs() < 1e-9, "the last ends at the strip's end: {end}");
+        // twice the time, twice as wide
+        let (_, spans) = lay_strip(&[4.0, 8.0], None);
+        assert!((spans[1].1 - 2.0 * spans[0].1).abs() < 1e-9);
+        // an edge dragged keeps the scale: the strip runs long until let go
+        let (_, spans) = lay_strip(&[8.0, 20.0, 8.0], Some(pps));
+        assert!(spans[2].0 + spans[2].1 > 834.0);
+    }
+
+    #[test]
+    fn a_carried_screen_lands_where_the_pointer_is() {
+        let (_, spans) = lay_strip(&[8.0, 8.0, 8.0], None);
+        let mid = |i: usize| spans[i].0 + spans[i].1 / 2.0;
+        assert_eq!(slot_at(&spans, 2.0), 0, "before the first turn's middle: first");
+        assert_eq!(slot_at(&spans, mid(0) + 1.0), 1);
+        assert_eq!(slot_at(&spans, mid(1) - 1.0), 1);
+        assert_eq!(slot_at(&spans, mid(2) + 1.0), 3, "past the last turn's middle: last");
+        assert_eq!(slot_at(&[], 400.0), 0);
     }
 }

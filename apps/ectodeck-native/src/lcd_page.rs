@@ -264,7 +264,7 @@ pub const TEMPLATES: [(&str, &str, &str); 4] = [
     ("stats", "Stats", "CPU, GPU, RAM and VRAM, every second."),
     ("clock", "Clock", "The time and the date, in the middle of the screen."),
     ("weather", "Weather", "The temperature and the sky outside, for the place in Ectodeck’s Settings."),
-    ("blank", "Blank", "An empty page for your own text, readings and clocks."),
+    ("blank", "Blank", "An empty screen for your own text, readings and clocks."),
 ];
 
 impl Page {

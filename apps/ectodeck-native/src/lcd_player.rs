@@ -220,8 +220,6 @@ impl Session {
 
 /// What Ectodeck asks of the player.
 pub enum Control {
-    /// whether game-helper's launches and exits break in
-    Announce(bool),
     /// hold the screen as it is, or carry on
     Paused(bool),
     /// stop, and hand the screen back to the keyboard's own screens (or, with
@@ -608,12 +606,6 @@ impl Player {
                 // what Ectodeck asks
                 while let Ok(c) = heard.try_recv() {
                     match c {
-                        Control::Announce(on) => {
-                            core.announce = on;
-                            if !on && core.playing_sequence() {
-                                core.drop_sequence();
-                            }
-                        }
                         Control::Paused(p) => core.pause(p, start.elapsed().as_secs_f64()),
                         Control::EndSequence => {
                             if core.playing_sequence() {
