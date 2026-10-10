@@ -101,8 +101,8 @@ pub enum Ask {
     /// the playlist: a page shown now, moved earlier or later, taken off;
     /// the sheet of pages to add opened, a page on it selected, added, closed
     PageShow(i32),
-    PageUp(i32),
-    PageDown(i32),
+    /// a page moved from one place in the playlist to another
+    PageMove(i32, i32),
     PageRemove(i32),
     LibOpen,
     LibPick(i32),
@@ -426,15 +426,14 @@ pub struct Front {
     pub player: Option<crate::lcd_player::Player>,
     lcd: crate::lcd_player::News,
     lcd_paused: bool,
-    launch_frames: Vec<(Vec<String>, u32)>,
-    launch_at: (usize, Instant),
+    /// when the page on the screen came on, for its time left
+    page_from: Instant,
     lcd_drawn: Option<(Vec<String>, [u8; 3], u8, u32)>,
     /// each playlist page's picture, and what it was drawn from
     pl_thumbs: Vec<Option<(PicKey, slint::Image)>>,
     /// the sheet of pages to add: open, and the page selected on it
     lib_open: bool,
     lib_pick: Option<usize>,
-    launch_drawn: Option<(usize, [u8; 3], u8, u32)>,
     /// the screen's pages (the same on every profile), as last noted for
     /// undo and as last saved, and when they last changed
     pages: Vec<crate::lcd_page::Page>,
@@ -521,8 +520,7 @@ impl Front {
         on!(on_piece_moved, |i, r, c| Ask::PieceMoved(i, r, c));
         on!(on_lcd_announce_toggled, Ask::LcdAnnounce);
         on!(on_page_show, |i| Ask::PageShow(i));
-        on!(on_page_up, |i| Ask::PageUp(i));
-        on!(on_page_down, |i| Ask::PageDown(i));
+        on!(on_page_moved, |i, j| Ask::PageMove(i, j));
         on!(on_page_remove, |i| Ask::PageRemove(i));
         on!(on_lib_open_at, Ask::LibOpen);
         on!(on_lib_pick, |i| Ask::LibPick(i));
@@ -626,13 +624,11 @@ impl Front {
             player: None,
             lcd: crate::lcd_player::News { rows: Vec::new(), sequence: None, state: crate::lcd_player::State::Missing, page: 0 },
             lcd_paused: false,
-            launch_frames: launch_frames(),
-            launch_at: (0, Instant::now()),
+            page_from: Instant::now(),
             lcd_drawn: None,
             pl_thumbs: Vec::new(),
             lib_open: false,
             lib_pick: None,
-            launch_drawn: None,
             pages: Vec::new(),
             pages_noted: Vec::new(),
             pages_saved: Vec::new(),
@@ -976,12 +972,17 @@ impl Front {
                         pl.tell(crate::lcd_player::Control::Show(i.max(0) as usize));
                     }
                 }
-                Ask::PageUp(i) | Ask::PageDown(i) => {
-                    let i = i.max(0) as usize;
-                    let j = if matches!(ask, Ask::PageUp(_)) { i.checked_sub(1) } else { Some(i + 1) };
-                    if let Some(j) = j.filter(|j| *j < self.pages.len() && i < self.pages.len()) {
-                        self.pages.swap(i, j);
+                Ask::PageMove(i, j) => {
+                    let (i, j) = (i.max(0) as usize, j.max(0) as usize);
+                    let shown = self.shown_page();
+                    if let Some(now) = move_page(&mut self.pages, i, j, shown) {
                         self.pages_edited();
+                        // the page on the screen stays on, at its new place
+                        if now != shown {
+                            if let Some(pl) = &self.player {
+                                pl.tell(crate::lcd_player::Control::Show(now));
+                            }
+                        }
                     }
                 }
                 Ask::PageRemove(i) => {
@@ -1032,16 +1033,6 @@ impl Front {
                     }
                 }
                 Ask::LcdTick => {
-                    // the playlist's picture of a launch, frame by frame, round and round
-                    if self.page.view == View::Screen && self.ui.get_place() == "z10" && !self.launch_frames.is_empty() {
-                        let (i, since) = self.launch_at;
-                        // a pause at the end before it plays again, as the mock had
-                        let ms = self.launch_frames[i].1 as u128 + if i + 1 == self.launch_frames.len() { 2500 } else { 0 };
-                        if since.elapsed().as_millis() >= ms {
-                            self.launch_at = ((i + 1) % self.launch_frames.len(), Instant::now());
-                            self.draw_screen();
-                        }
-                    }
                     // the readings again each second: for the page being edited (its
                     // picture and its boxes), or the playlist's pictures of its pages
                     let on_screen = self.page.view == View::Screen && self.ui.get_place() == "z10";
@@ -2967,6 +2958,10 @@ impl Front {
     /// The player said what the screen shows now.
     pub fn screen_news(&mut self, n: crate::lcd_player::News) {
         let state_changed = n.state != self.lcd.state || n.sequence != self.lcd.sequence || n.page != self.lcd.page;
+        // a page coming on, or playing again after a pause, has its whole time
+        if n.page != self.lcd.page || (n.state == crate::lcd_player::State::Playing && self.lcd.state != crate::lcd_player::State::Playing) {
+            self.page_from = Instant::now();
+        }
         self.lcd = n;
         if self.page.view == View::Screen && self.ui.get_place() == "z10" {
             if state_changed {
@@ -3022,28 +3017,37 @@ impl Front {
         let sc = self.scale.max(1.0);
         let px = |w: f32| (w * sc).round() as u32;
         let lv = level as f32 / 255.0;
-        let live = self.lcd.state == State::Playing && self.lcd.sequence.is_none();
         let shown = self.shown_page();
         self.pl_thumbs.resize(n, None);
+        let paused = self.lcd.state == State::Paused;
+        // the page on the screen is marked while Ectodeck plays the screen, playing or paused
+        let marked = self.controlled && matches!(self.lcd.state, State::Playing | State::Paused);
         let mut rows_out = Vec::with_capacity(n);
         for (i, p) in self.pages.iter().enumerate() {
             let rows = if i == shown && self.lcd.sequence.is_none() && !self.lcd.rows.is_empty() { self.lcd.rows.clone() } else { crate::lcd_page::render(p, &self.readings) };
-            let key: PicKey = (rows, crate::z10::as_lit(p.light.unwrap_or(profile)), level, px(150.0));
-            let thumb = match &self.pl_thumbs[i] {
+            let rgb = crate::z10::as_lit(p.light.unwrap_or(profile));
+            let key: PicKey = (rows, rgb, level, px(320.0));
+            let pic = match &self.pl_thumbs[i] {
                 Some((k, img)) if *k == key => img.clone(),
                 _ => {
-                    let img = crate::lcd_draw::picture(&key.0, key.1, lv, px(150.0), px(30.0));
+                    let img = crate::lcd_draw::picture(&key.0, key.1, lv, px(320.0), px(64.0));
                     self.pl_thumbs[i] = Some((key, img.clone()));
                     img
                 }
             };
-            let next = &self.pages[(i + 1) % n];
-            let note = if n == 1 {
-                "Shows all the time".to_string()
-            } else {
-                format!("{} s, then {} {}", p.secs, comes_in_words(next.comes_in), next.name)
-            };
-            rows_out.push(crate::PlPage { name: p.name.as_str().into(), note: note.into(), thumb, n: i as i32 + 1, on: i == shown, live: i == shown && live, first: i == 0, last: i + 1 == n, only: n == 1 });
+            let on = marked && i == shown;
+            let (line1, line2) = card_lines(p, n, on, paused, self.page_from.elapsed().as_secs_f64());
+            rows_out.push(crate::PlPage {
+                name: p.name.as_str().into(),
+                line1: line1.into(),
+                line2: line2.into(),
+                pic,
+                field: crate::lcd_draw::field(rgb, lv, px(320.0)),
+                on,
+                now: on,
+                paused: on && paused,
+                removable: n > 1,
+            });
         }
         show_rows(self.ui.get_pl_pages(), |m| self.ui.set_pl_pages(m), rows_out);
         // the sheet of pages to add
@@ -3100,14 +3104,6 @@ impl Front {
             self.lcd_drawn = Some(key);
         }
         self.refresh_playlist([light[1], light[2], light[3]], level);
-        let i = self.launch_at.0;
-        let key = (i, rgb, level, px(150.0));
-        if self.launch_drawn != Some(key) {
-            if let Some((rows, _)) = self.launch_frames.get(i) {
-                self.ui.set_lcd_launch(crate::lcd_draw::picture(rows, rgb, level as f32 / 255.0, px(150.0), px(30.0)));
-            }
-            self.launch_drawn = Some(key);
-        }
     }
 
 }
@@ -3152,32 +3148,54 @@ impl Front {
 type PicKey = (Vec<String>, [u8; 3], u8, u32);
 
 /// How the playlist says a page comes in after the one before it.
+/// How a page comes in, as its card says.
 fn comes_in_words(t: crate::lcd_page::Transition) -> &'static str {
     use crate::lcd_page::Transition;
     match t {
-        Transition::Wipe => "wipes to",
-        Transition::Dissolve => "dissolves to",
-        Transition::Type => "types in",
-        Transition::Cut => "cuts to",
+        Transition::Wipe => "Wipes in",
+        Transition::Dissolve => "Dissolves in",
+        Transition::Type => "Types in",
+        Transition::Cut => "Cuts in",
     }
+}
+
+/// A playlist card's two lines under its name, for page `p` of `n`: on the
+/// page on the screen (`on`), the time left in whole seconds, `shown_for`
+/// seconds after it came on, or that the screen is paused on it; on the
+/// others, how long it shows; then how it comes in, unless it is the only page.
+fn card_lines(p: &crate::lcd_page::Page, n: usize, on: bool, paused: bool, shown_for: f64) -> (String, String) {
+    let first = match (on, paused, n) {
+        (true, true, _) => "Paused on this page".to_string(),
+        (true, false, 1) => "Playing, all the time".to_string(),
+        (true, false, _) => format!("Playing, {} s left", (p.secs as f64 - shown_for).ceil().max(1.0) as u32),
+        (false, _, 1) => "Shows all the time".to_string(),
+        (false, _, _) => format!("{} s on screen", p.secs),
+    };
+    (first, if n == 1 { String::new() } else { comes_in_words(p.comes_in).to_string() })
+}
+
+/// Page `i` moved to place `j` in the playlist; the place of the page that
+/// was at `shown` now, or None if nothing moved.
+fn move_page(pages: &mut Vec<crate::lcd_page::Page>, i: usize, j: usize, shown: usize) -> Option<usize> {
+    if i >= pages.len() || j >= pages.len() || i == j {
+        return None;
+    }
+    let p = pages.remove(i);
+    pages.insert(j, p);
+    Some(if shown == i {
+        j
+    } else if i < shown && shown <= j {
+        shown - 1
+    } else if j <= shown && shown < i {
+        shown + 1
+    } else {
+        shown
+    })
 }
 
 /// The screen's pages as Ectodeck's settings keep them.
 fn pages_json(pages: &[crate::lcd_page::Page]) -> serde_json::Value {
     serde_json::Value::Array(pages.iter().map(|p| p.to_json()).collect())
-}
-
-/// The launch sequence the playlist plays as its picture: the frames Grant
-/// approved for game-helper's launches (DEEPDRIVER II), each with its time.
-fn launch_frames() -> Vec<(Vec<String>, u32)> {
-    let v: serde_json::Value = serde_json::from_str(include_str!("../data/lcd-launch.json")).unwrap_or_default();
-    v.as_array()
-        .map(|a| {
-            a.iter()
-                .map(|f| (f["r"].as_array().map(|r| r.iter().map(|x| x.as_str().unwrap_or("").to_string()).collect()).unwrap_or_default(), f["ms"].as_u64().unwrap_or(40) as u32))
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 /// The colours used lately, newest first, as the picker lists them.
@@ -3287,5 +3305,42 @@ pub fn sync_cells(model: &VecModel<Cell>, rows: Vec<Cell>) {
         if model.row_data(i).as_ref() != Some(&rows[i]) {
             model.set_row_data(i, rows[i].clone());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_page_dragged_to_another_place_keeps_the_playing_page_playing() {
+        let ids = |v: &[crate::lcd_page::Page]| v.iter().map(|p| p.id.clone()).collect::<Vec<_>>();
+        let three = || vec![crate::lcd_page::Page::stats(), crate::lcd_page::Page::clock(), crate::lcd_page::Page::weather()];
+        let mut v = three();
+        // Stats (playing) dragged to the end: still playing, now third
+        assert_eq!(move_page(&mut v, 0, 2, 0), Some(2));
+        assert_eq!(ids(&v), ["clock", "weather", "stats"]);
+        // Weather dragged to the top while Clock plays: Clock moves down one
+        let mut v = three();
+        assert_eq!(move_page(&mut v, 2, 0, 1), Some(2));
+        assert_eq!(ids(&v), ["weather", "stats", "clock"]);
+        // Clock dragged past Weather while Stats plays: Stats stays first
+        let mut v = three();
+        assert_eq!(move_page(&mut v, 1, 2, 0), Some(0));
+        // dropped where it was, or off the list: nothing moves
+        assert_eq!(move_page(&mut v, 1, 1, 0), None);
+        assert_eq!(move_page(&mut v, 4, 0, 0), None);
+    }
+
+    #[test]
+    fn a_card_says_what_its_page_is_doing() {
+        let p = crate::lcd_page::Page::stats();
+        assert_eq!(card_lines(&p, 3, true, false, 0.2), ("Playing, 8 s left".into(), "Wipes in".into()));
+        assert_eq!(card_lines(&p, 3, true, false, 7.5).0, "Playing, 1 s left");
+        assert_eq!(card_lines(&p, 3, true, false, 9.0).0, "Playing, 1 s left", "never 0 s or less");
+        assert_eq!(card_lines(&p, 3, true, true, 3.0).0, "Paused on this page");
+        assert_eq!(card_lines(&p, 3, false, false, 0.0).0, "8 s on screen");
+        assert_eq!(card_lines(&p, 1, true, false, 0.0), ("Playing, all the time".into(), String::new()));
+        assert_eq!(card_lines(&p, 1, false, false, 0.0), ("Shows all the time".into(), String::new()));
     }
 }

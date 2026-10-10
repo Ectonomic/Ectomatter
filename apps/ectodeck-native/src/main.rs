@@ -553,7 +553,10 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
             let f = k as f32 / 8.0;
             window.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(x0 + (x1 - x0) * f, y0 + (y1 - y0) * f) });
         }
-        window.dispatch_event(WindowEvent::PointerReleased { position: to, button: PointerEventButton::Left });
+        // ECTODECK_NATIVE_DRAG_HOLD: still held at the second point, to see the drag under way
+        if std::env::var_os("ECTODECK_NATIVE_DRAG_HOLD").is_none() {
+            window.dispatch_event(WindowEvent::PointerReleased { position: to, button: PointerEventButton::Left });
+        }
         front.act();
         window.draw_if_needed(|r| {
             r.render(&mut pic.ui, w as usize);

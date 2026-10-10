@@ -197,14 +197,18 @@ export struct EdPiece {
 // it is first, last or the only page
 export struct PlPage {
     name: string,
-    note: string,
-    thumb: image,
-    n: int,
+    // how long it shows (or, on the page playing, the time left) and how it comes in
+    line1: string,
+    line2: string,
+    // the screen's picture of it, and the screen's own background round it
+    pic: image,
+    field: color,
+    // the page on the keyboard's screen now; its first line says so; paused there
     on: bool,
-    live: bool,
-    first: bool,
-    last: bool,
-    only: bool,
+    now: bool,
+    paused: bool,
+    // whether it can be taken off (not the last page)
+    removable: bool,
 }
 
 // a page that can be added to the playlist: its name, what it shows, its
@@ -2417,183 +2421,248 @@ component GameBox inherits PageBox {
     }
 }
 
-// the Screen tab's playlist: the pages Ectodeck plays on the screen, in turn
-// (Stats alone, for now), and game-helper's launches breaking in
-// a small square button with a line glyph, on a well
-component IconButton inherits Rectangle {
+// one page of the playlist, as a card: its words on the left, the screen's
+// picture of it on the right in a bay of the screen's own color; the page on
+// the screen now marked by the active profile's bar, half the card's height
+component PlCard inherits Rectangle {
+    in property <PlPage> p;
+    in property <bool> hovered;
+    // (lifted: the card being dragged)
+    in property <bool> lifted;
+    border-radius: 10px;
+    background: root.lifted ? Ink.hover-box : root.hovered ? Ink.hover-well : Ink.well;
+    clip: true;
+    bar := Rectangle {
+        x: 8px;
+        y: parent.height / 4;
+        width: 4px;
+        height: parent.height / 2;
+        border-radius: 2px;
+        background: Ink.bright;
+        opacity: 0;
+    }
+    // in turn: the bar leaving fades out quickly, and only then does the next card's fade in
+    states [
+        playing when root.p.on: {
+            bar.opacity: 1;
+            in {
+                animate bar.opacity { duration: 260ms; delay: 180ms; easing: ease-out; }
+            }
+            out {
+                animate bar.opacity { duration: 180ms; easing: ease-in; }
+            }
+        }
+    ]
+    VerticalLayout {
+        x: 20px;
+        width: parent.width - 20px - 14px - bay.width - 12px;
+        alignment: center;
+        Text {
+            height: 20px;
+            text: root.p.name;
+            font-family: "Geist";
+            font-size: 13.5px;
+            font-weight: 600;
+            color: root.p.on ? Ink.bright : Ink.dim;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        Text {
+            height: 18px;
+            text: root.p.line1;
+            font-family: "Geist";
+            font-size: 12.5px;
+            color: root.p.now && !root.p.paused ? Ink.dim : root.p.on ? Ink.soft : Ink.quiet;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        if root.p.line2 != "": Text {
+            height: 18px;
+            text: root.p.line2;
+            font-family: "Geist";
+            font-size: 12.5px;
+            color: root.p.on ? Ink.soft : Ink.quiet;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+    // the picture, two pixels to a dot, in a bay: a 6px gutter of the screen's own background, rounded
+    bay := Rectangle {
+        x: parent.width - 12px - self.width;
+        y: (parent.height - self.height) / 2;
+        width: 320px + 12px;
+        height: 64px + 12px;
+        border-radius: 7px;
+        background: root.p.field;
+        Image {
+            x: 6px;
+            y: 6px;
+            width: 320px;
+            height: 64px;
+            source: root.p.pic;
+        }
+    }
+}
+
+// Edit or Remove on a playlist card: a line glyph on the card's dark backing
+component CardIcon inherits Rectangle {
     in property <string> commands;
-    in property <bool> enabled: true;
     callback clicked;
-    width: 26px;
-    height: 26px;
-    border-radius: 6px;
-    background: !root.enabled ? transparent : ta.pressed ? Ink.pick : ta.has-hover ? Ink.hover-box : transparent;
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    background: ta.pressed ? Ink.pick : ta.has-hover ? Ink.hover-box : transparent;
     Path {
-        x: 6px;
-        y: 6px;
-        width: 14px;
-        height: 14px;
-        viewbox-width: 16;
-        viewbox-height: 16;
+        x: 6.5px;
+        y: 6.5px;
+        width: 15px;
+        height: 15px;
+        viewbox-width: 24;
+        viewbox-height: 24;
         commands: root.commands;
         fill: transparent;
-        stroke: !root.enabled ? #3a3a41 : ta.has-hover ? Ink.bright : Ink.soft;
-        stroke-width: 1.4px;
-        stroke-line-cap: LineCap.round;
+        stroke: ta.has-hover ? Ink.bright : Ink.soft;
+        stroke-width: 1.8px;
     }
     ta := TouchArea {
-        enabled: root.enabled;
-        mouse-cursor: root.enabled ? MouseCursor.pointer : MouseCursor.default;
+        mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
 }
 
+// the Screen tab's playlist: the pages Ectodeck plays on the screen, in turn,
+// one card each; select a card to play the page now, drag a card to move the
+// page; then game-helper's launches breaking in
 component PlaylistBox inherits PageBox {
     in property <[PlPage]> pages;
-    in property <image> launch;
     in property <bool> announce;
     callback announce-toggled();
     // a page opened in the page editor, shown now, moved, taken off; a page added
     callback edit(int);
     callback show(int);
-    callback up(int);
-    callback down(int);
+    callback moved(int, int);
     callback remove(int);
     callback add();
     title: "Playlist";
-    property <length> list-top: 70px;
-    property <length> add-top: list-top + root.pages.length * 60px;
-    property <length> foot-top: add-top + 40px + 14px;
+    property <length> list-top: 92px;
+    property <length> pitch: 96px + 8px;
+    property <length> add-top: list-top + root.pages.length * pitch;
+    property <length> foot-top: add-top + 40px + 16px;
+    // a card being dragged: which, how far from where it was pressed, and where it will land
+    property <int> drag-i: -1;
+    property <length> drag-dy: 0;
+    property <int> drag-t: max(0, min(root.pages.length - 1, round((root.drag-i * pitch + root.drag-dy) / pitch)));
     Text {
         x: 16px;
         y: 42px;
         width: parent.width - 32px;
-        text: "Pages play in this order, then start again. Select a page’s picture to show the page now.";
+        text: "Pages play from the top down, then start again. Select a page to show that page now; drag a page to reorder the playlist.";
         font-family: "Geist";
         font-size: 12.5px;
         color: Ink.quiet;
         wrap: word-wrap;
     }
-    // each page: its picture, its place in the order, its name and what comes next
-    for p[i] in root.pages: Rectangle {
-        x: 10px;
-        y: list-top + i * 60px;
-        width: parent.width - 20px;
-        height: 54px;
+    // where the card being dragged will land
+    if root.drag-i >= 0: Rectangle {
+        x: 16px;
+        y: list-top + root.drag-t * pitch;
+        width: parent.width - 32px;
+        height: 96px;
         border-radius: 10px;
-        background: Ink.well;
-        Rectangle {
-            x: 10px;
-            y: (parent.height - 30px) / 2;
-            width: 150px;
-            height: 30px;
-            border-radius: 3px;
-            clip: true;
-            Image {
-                width: parent.width;
-                height: parent.height;
-                source: p.thumb;
+        border-width: 1px;
+        border-color: Ink.line;
+    }
+    for p[i] in root.pages: Rectangle {
+        // (the others make way for the card being dragged, which stays in its place, unseen)
+        property <length> shift: root.drag-i < 0 || root.drag-i == i ? 0
+            : root.drag-i < i && i <= root.drag-t ? -pitch
+            : root.drag-t <= i && i < root.drag-i ? pitch
+            : 0;
+        property <bool> dragged;
+        x: 16px;
+        y: list-top + i * pitch + self.shift;
+        animate y { duration: 160ms; easing: ease-out; }
+        width: parent.width - 32px;
+        height: 96px;
+        opacity: root.drag-i == i ? 0 : 1;
+        PlCard {
+            width: parent.width;
+            height: parent.height;
+            p: p;
+            hovered: ta.has-hover && root.drag-i < 0;
+        }
+        ta := TouchArea {
+            mouse-cursor: root.drag-i == i ? MouseCursor.grabbing : MouseCursor.grab;
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.down) {
+                    parent.dragged = false;
+                }
+                if (e.kind == PointerEventKind.up && root.drag-i == i) {
+                    if (root.drag-t != i) {
+                        root.moved(i, root.drag-t);
+                    }
+                    root.drag-i = -1;
+                    root.drag-dy = 0;
+                }
             }
-            // (a ring while the pointer is over it: selecting it shows the page)
-            Rectangle {
-                border-radius: 3px;
-                border-width: pic-ta.has-hover ? 1px : 0;
-                border-color: #ffffff80;
+            // (this card stays where it was while its lifted picture follows the pointer, so
+            // the pointer is measured from where it was pressed with nothing moving under it)
+            moved => {
+                if (self.pressed) {
+                    if (root.drag-i < 0 && abs(self.mouse-y - self.pressed-y) > 4px) {
+                        root.drag-i = i;
+                        parent.dragged = true;
+                    }
+                    if (root.drag-i == i) {
+                        root.drag-dy = self.mouse-y - self.pressed-y;
+                    }
+                }
             }
-            pic-ta := TouchArea {
-                mouse-cursor: pointer;
-                clicked => { root.show(i); }
+            clicked => {
+                if (!parent.dragged) {
+                    root.show(i);
+                }
+            }
+            // Edit and Remove, over the picture's corner, while the pointer is over the card
+            if self.has-hover && root.drag-i < 0: Rectangle {
+                x: parent.width - 14px - self.width;
+                y: 14px;
+                width: 2px + 28px + (p.removable ? 30px : 0) + 2px;
+                height: 32px;
+                border-radius: 9px;
+                background: #131316e0;
+                CardIcon {
+                    x: 2px;
+                    y: 2px;
+                    commands: "M4 20h4L19 9l-4-4L4 16z";
+                    clicked => { root.edit(i); }
+                }
+                if p.removable: CardIcon {
+                    x: 32px;
+                    y: 2px;
+                    commands: "M6 6l12 12M18 6L6 18";
+                    clicked => { root.remove(i); }
+                }
             }
         }
-        Rectangle {
-            x: 172px;
-            y: (parent.height - 20px) / 2;
-            width: 20px;
-            height: 20px;
-            border-radius: 10px;
-            background: Ink.pick;
-            Text {
-                width: parent.width;
-                height: parent.height;
-                text: p.n;
-                font-family: "Geist";
-                font-size: 11px;
-                color: Ink.soft;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-        }
-        // the page the screen shows: a dot before its name, breathing while it plays
-        if p.on: Rectangle {
-            x: 202px;
-            y: 9px + 6px;
-            width: 6px;
-            height: 6px;
-            border-radius: 3px;
-            background: p.live ? Ink.good : Ink.quiet;
-            opacity: p.live ? 0.55 + 0.45 * cos(animation-tick() / 1600ms * 360deg) : 1;
-        }
-        Text {
-            x: p.on ? 214px : 202px;
-            y: 9px;
-            height: 18px;
-            width: parent.width - self.x - 152px;
-            text: p.name;
-            font-family: "Geist";
-            font-size: 13px;
-            font-weight: 500;
-            color: Ink.ink;
-            vertical-alignment: center;
-            overflow: elide;
-        }
-        Text {
-            x: 202px;
-            y: 27px;
-            height: 18px;
-            width: parent.width - 202px - 152px;
-            text: p.note;
-            font-family: "Geist";
-            font-size: 12px;
-            color: Ink.quiet;
-            vertical-alignment: center;
-            overflow: elide;
-        }
-        // earlier, later, off the playlist, and the page editor
-        IconButton {
-            x: parent.width - 148px;
-            y: (parent.height - 26px) / 2;
-            commands: "M4 10 L8 6 L12 10";
-            enabled: !p.first;
-            clicked => { root.up(i); }
-        }
-        IconButton {
-            x: parent.width - 120px;
-            y: (parent.height - 26px) / 2;
-            commands: "M4 6 L8 10 L12 6";
-            enabled: !p.last;
-            clicked => { root.down(i); }
-        }
-        IconButton {
-            x: parent.width - 92px;
-            y: (parent.height - 26px) / 2;
-            commands: "M4.5 4.5 L11.5 11.5 M11.5 4.5 L4.5 11.5";
-            enabled: !p.only;
-            clicked => { root.remove(i); }
-        }
-        WordButton {
-            x: parent.width - self.width - 10px;
-            y: (parent.height - self.height) / 2;
-            text: "Edit";
-            fill: Ink.hover-well;
-            fill-hover: Ink.pick;
-            clicked => { root.edit(i); }
-        }
+    }
+    // the card being dragged, lifted, under the pointer
+    if root.drag-i >= 0: PlCard {
+        x: 16px;
+        y: list-top + root.drag-i * pitch + root.drag-dy;
+        width: parent.width - 32px;
+        height: 96px;
+        p: root.pages[root.drag-i];
+        lifted: true;
+        drop-shadow-blur: 28px;
+        drop-shadow-offset-y: 10px;
+        drop-shadow-color: #0000008c;
     }
     // a page added at the end
     Rectangle {
-        x: 10px;
+        x: 16px;
         y: add-top;
-        width: parent.width - 20px;
+        width: parent.width - 32px;
         height: 40px;
         border-radius: 10px;
         background: add-ta.pressed ? Ink.pick : add-ta.has-hover ? Ink.hover-well : transparent;
@@ -2602,11 +2671,10 @@ component PlaylistBox inherits PageBox {
         Text {
             width: parent.width;
             height: parent.height;
-            text: "+  Add a page";
+            text: "+ Add a page";
             font-family: "Geist";
             font-size: 13px;
-            font-weight: 500;
-            color: add-ta.has-hover ? Ink.bright : Ink.dim;
+            color: add-ta.has-hover ? Ink.bright : Ink.soft;
             horizontal-alignment: center;
             vertical-alignment: center;
         }
@@ -2622,32 +2690,19 @@ component PlaylistBox inherits PageBox {
         height: 1px;
         background: Ink.line;
     }
-    // game-helper's launches and exits: what they show, and whether they break in
-    Rectangle {
-        x: 20px;
-        y: foot-top + 16px;
-        width: 150px;
-        height: 30px;
-        border-radius: 3px;
-        clip: true;
-        Image {
-            width: parent.width;
-            height: parent.height;
-            source: root.launch;
-        }
-    }
+    // game-helper's launches and exits, and whether they break in
     CheckBox {
-        x: 186px;
-        y: foot-top + 12px;
-        width: parent.width - 202px;
+        x: 16px;
+        y: foot-top + 14px;
+        width: parent.width - 32px;
         text: "Game launches break in";
         on: root.announce;
         clicked => { root.announce-toggled(); }
     }
     Text {
-        x: 213px;
-        y: foot-top + 42px;
-        width: parent.width - 229px;
+        x: 16px + 27px;
+        y: foot-top + 14px + 26px;
+        width: parent.width - 32px - 27px;
         text: "From game-helper, when a game starts or closes. Then the playlist carries on.";
         font-family: "Geist";
         font-size: 12.5px;
@@ -3301,7 +3356,6 @@ export component AppWindow inherits Window {
     // closed box's height
     in property <image> lcd-big;
     in property <[PlPage]> pl-pages;
-    in property <image> lcd-launch;
     in property <int> lcd-state;
     in property <bool> lcd-announce: true;
     in property <length> closed-h;
@@ -3324,8 +3378,7 @@ export component AppWindow inherits Window {
     // the playlist: a page shown now, moved earlier or later, taken off; the
     // sheet of pages to add, a page selected on it, added, the sheet closed
     callback page-show(int);
-    callback page-up(int);
-    callback page-down(int);
+    callback page-moved(int, int);
     callback page-remove(int);
     in property <bool> lib-open;
     in property <[LibCard]> lib-cards;
@@ -3529,7 +3582,8 @@ export component AppWindow inherits Window {
     // Screen: the playlist (540 wide) and what shows when Ectodeck is closed
     // (320), side by side while they fit, as tall as each other
     property <length> pl-w: 540px;
-    property <length> pl-need: 70px + root.pl-pages.length * 60px + 40px + 14px + 96px;
+    // the playlist's height: its title and line, a card for each page, Add a page, the game launches
+    property <length> pl-need: 92px + root.pl-pages.length * 104px + 40px + 16px + 14px + 26px + 36px + 16px;
     property <bool> sfits: pl-w + 12px + 320px <= under-w;
     property <length> srow0: sfits ? min(band-max, max(band-min, max(pl-need, root.closed-h))) : max(band-min, pl-need);
     property <length> srow1: root.closed-h;
@@ -4069,13 +4123,11 @@ export component AppWindow inherits Window {
                     height: max(pl-need, srow0);
                     fill: transparent;
                     pages: root.pl-pages;
-                    launch: root.lcd-launch;
                     announce: root.lcd-announce;
                     announce-toggled => { root.lcd-announce-toggled(); }
                     edit(i) => { root.screen-edit(i); }
                     show(i) => { root.page-show(i); }
-                    up(i) => { root.page-up(i); }
-                    down(i) => { root.page-down(i); }
+                    moved(i, j) => { root.page-moved(i, j); }
                     remove(i) => { root.page-remove(i); }
                     add => { root.lib-open-at(); }
                     }
