@@ -3534,7 +3534,10 @@ export component AppWindow inherits Window {
     // the Screen tab's screen: a fixed size, in the middle of its dark box
     property <length> lcd-w: 860px;
     property <length> lcd-h: 172px;
-    property <length> lcd-box-h: lcd-h + 2 * kb-pad-y;
+    // the bay the screen sits in (the screen and its gutter), and the box's gray round the
+    // bay, above and below it as at its sides
+    property <length> bay-pad: 16px;
+    property <length> lcd-box-h: lcd-h + 2 * kb-pad-y + 2 * bay-pad;
     // the screen's own background, which its bay is
     in property <color> lcd-field: #0a0908;
     property <length> under-top: root.tab == 3 ? head-end + lcd-box-h + 18px : head-end + board-h + 2 * kb-pad-y + 18px;
@@ -4010,22 +4013,25 @@ export component AppWindow inherits Window {
                     // shaded as a step down into it
                     Rectangle {
                         x: (parent.width - lcd-w) / 2 - kb-pad-y;
+                        y: bay-pad;
                         width: lcd-w + 2 * kb-pad-y;
-                        height: parent.height;
+                        height: lcd-h + 2 * kb-pad-y;
                         border-radius: 10px;
                         background: root.lcd-field;
                         animate background { duration: 450ms; easing: ease; }
                         border-width: 1px;
                         border-color: #0000008c;
                         clip: true;
+                        // (at the top: an element placed nowhere sits in the middle)
                         Rectangle {
+                            y: 0;
                             height: 14px;
                             background: @linear-gradient(180deg, #00000073 0%, #00000000 100%);
                         }
                     }
                     Rectangle {
                         x: (parent.width - lcd-w) / 2;
-                        y: kb-pad-y;
+                        y: bay-pad + kb-pad-y;
                         width: lcd-w;
                         height: lcd-h;
                         border-radius: 4px;
