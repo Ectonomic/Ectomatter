@@ -681,6 +681,11 @@ impl Front {
 
     /// The keyboard answered.
     pub fn heard(&mut self, h: device::Heard) {
+        // a save or a switch of profile has the keyboard apply a stored profile again,
+        // its screen's light and screens too: what Ectodeck last sent is no longer there
+        if matches!(h, device::Heard::Saved(..) | device::Heard::KeysSaved(..) | device::Heard::Active(..)) {
+            self.screen_sent = None;
+        }
         match h {
             device::Heard::State(Ok(dev)) => {
                 self.failed_at = None;

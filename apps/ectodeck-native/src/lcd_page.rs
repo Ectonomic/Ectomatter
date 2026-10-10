@@ -258,10 +258,10 @@ fn middle(row: u8, kind: Kind) -> Piece {
 /// The pages that can be added to the playlist: what each is called, and
 /// what it shows.
 pub const TEMPLATES: [(&str, &str, &str); 4] = [
-    ("blank", "Blank", "An empty page for your own text, readings and clocks."),
     ("stats", "Stats", "CPU, GPU, RAM and VRAM, every second."),
     ("clock", "Clock", "The time and the date, in the middle of the screen."),
     ("weather", "Weather", "The temperature and the sky outside, for the place in Ectodeck’s Settings."),
+    ("blank", "Blank", "An empty page for your own text, readings and clocks."),
 ];
 
 impl Page {
@@ -625,7 +625,7 @@ mod tests {
         assert_eq!((one.id.as_str(), one.name.as_str()), ("custom", "Custom"));
         let two = Page::template("blank", &[one.clone()]).unwrap();
         assert_eq!((two.id.as_str(), two.name.as_str()), ("custom-2", "Custom 2"));
-        assert_eq!(TEMPLATES[0].0, "blank", "Blank first in Add a page");
+        assert_eq!(TEMPLATES[TEMPLATES.len() - 1].0, "blank", "Blank last in Add a page");
     }
 
     use super::*;

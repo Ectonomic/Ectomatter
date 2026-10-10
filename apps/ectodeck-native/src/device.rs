@@ -107,8 +107,20 @@ pub fn start(backups: PathBuf, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
                     Heard::Done
                 }
                 Ask::Screen(light, apps) => {
-                    let _ = kb.set_lcd_light(light[0], [light[1], light[2], light[3]]);
-                    let _ = kb.set_lcd_apps(apps);
+                    // each until the keyboard says it took it: an answer can be lost to the
+                    // screen's own frames going to it at the same moment
+                    for _ in 0..4 {
+                        if kb.set_lcd_light(light[0], [light[1], light[2], light[3]]).unwrap_or(false) {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(15));
+                    }
+                    for _ in 0..4 {
+                        if kb.set_lcd_apps(apps).unwrap_or(false) {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(15));
+                    }
                     Heard::Done
                 }
                 Ask::WriteMacro(n, body) => {
