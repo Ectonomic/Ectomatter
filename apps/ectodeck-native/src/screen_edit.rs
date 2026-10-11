@@ -128,7 +128,7 @@ pub fn boxes(page: &Page, chosen: Option<usize>, r: &Readings, avail: &[Source],
 
     // the page
     let mut s = Stack::new(BOX_W);
-    s.head("Screen light", None);
+    s.head("Backlight", None);
     let own = page.light;
     let mut x = 16.0;
     s.cells.push(Cell { color: dot(profile_light), on: own.is_none(), id: id(Ctl::ScrLight), index: 0, ..cell(kind::COLOR_DOT, x - 2.0, s.y, 28.0, 28.0) });
@@ -138,8 +138,8 @@ pub fn boxes(page: &Page, chosen: Option<usize>, r: &Readings, avail: &[Source],
     }
     s.y += 28.0 + 12.0;
     s.note(&match own {
-        None => "The first color is the profile’s screen light, which this page uses now.".to_string(),
-        Some(_) => format!("{} uses this light. Select the first color to use the profile’s screen light again.", page.name),
+        None => "The first color is the profile’s default backlight, which this layout uses now.".to_string(),
+        Some(_) => format!("{} uses this color. Select the first color to use the profile’s default backlight again.", page.name),
     });
     let page_h = s.height();
     Boxes { piece_title, piece: piece_cells, piece_h, place: place_cells, place_h, page_title: page.name.clone(), page: s.cells, page_h }

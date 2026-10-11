@@ -278,7 +278,7 @@ pub const TEMPLATES: [(&str, &str, &str); 4] = [
     ("stats", "Stats", "CPU, GPU, RAM and VRAM, every second."),
     ("clock", "Clock", "The time and the date, in the middle of the screen."),
     ("weather", "Weather", "The temperature and the sky outside, for the place in Ectodeck’s Settings."),
-    ("blank", "Blank", "An empty screen for your own text, readings and clocks."),
+    ("blank", "Blank", "An empty screen layout for your own text, readings and clocks."),
 ];
 
 impl Page {
@@ -396,7 +396,7 @@ impl Page {
         let computer = !shown.is_empty() && shown.iter().all(|w| ["CPU", "GPU", "RAM", "VRAM"].contains(&w.as_str()));
         let list = if computer { format!("{list}, every second") } else { list };
         match (said.is_empty(), list.is_empty()) {
-            (true, true) => "An empty screen.".into(),
+            (true, true) => "An empty screen layout.".into(),
             (false, true) => format!("{words}."),
             (false, false) if own => format!("{words}, with {list}."),
             _ => {
@@ -1105,7 +1105,7 @@ mod tests {
         // a second Clock, as its kind made it
         assert_eq!(Page::template("clock", &[Page::clock()]).unwrap().about(), "The time and the date.");
         let mut own = Page::blank();
-        assert_eq!(own.about(), "An empty screen.");
+        assert_eq!(own.about(), "An empty screen layout.");
         own.pieces.push(words(1, 4, "NO MEETINGS"));
         own.pieces.push(words(2, 7, "TODAY"));
         assert_eq!(own.about(), "Says “NO MEETINGS TODAY”.");

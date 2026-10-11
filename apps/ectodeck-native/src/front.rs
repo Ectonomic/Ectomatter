@@ -1950,7 +1950,7 @@ impl Front {
                 ed.chosen = ed.chosen.filter(|i| self.screens.library.get(ed.page).is_some_and(|p| *i < p.pieces.len()));
             }
             self.pages_edited();
-            self.status(if redo { "Did again the last change to the screen’s page" } else { "Undid the last change to the screen’s page" }, 0);
+            self.status(if redo { "Did again the last change on the Screen tab" } else { "Undid the last change on the Screen tab" }, 0);
             self.refresh();
             return;
         }
@@ -2525,7 +2525,7 @@ impl Front {
                 View::Lighting => "Choose a lighting effect for this profile, then set the colors, speed and zones below.",
                 View::Display => "Check the keyboard’s connection and which features the installed firmware supports.",
                 View::Screen if self.editor.is_some() => "Select a piece on the screen to change what the piece shows and where the piece sits.",
-                View::Screen => "Choose what the keyboard’s screen shows while Ectodeck is open and when Ectodeck is closed.",
+                View::Screen => "Choose what the keyboard’s screen shows while Ectodeck is running, and when it isn’t.",
             }
             .into(),
         );
@@ -2762,9 +2762,10 @@ impl Front {
             self.ui.set_settings_h(h);
             self.show_cells(cells);
         } else if loaded && self.page.view == View::Screen {
-            // (as wide as Profiles, over it)
-            let t = crate::display::defaults(&self.page, 240.0);
+            // (as wide as Profiles, under it: the default backlight, then the status screen)
+            let (t, first) = crate::display::defaults(&self.page, 240.0);
             self.ui.set_defaults_h(t.height);
+            self.ui.set_backlight_h(first);
             self.show_cells(t.cells);
             self.refresh_editor();
             self.draw_screen();
@@ -3305,7 +3306,7 @@ impl Front {
                 self.status("Saved", 1);
                 self.ui.set_undo_shown(!self.undo.is_empty());
             }
-            Err(e) => self.status(format!("The screen’s pages were not saved: {e}"), 2),
+            Err(e) => self.status(format!("The screen layouts and playlists were not saved: {e}"), 2),
         }
         self.pages_changed = None;
     }

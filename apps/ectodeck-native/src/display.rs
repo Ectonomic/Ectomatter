@@ -9,7 +9,7 @@ use crate::lighting::{cell, id, kind, style, text_cell, Ctl};
 use crate::z10::Page;
 use crate::Cell;
 
-pub const LCD_APPS: [(u64, &str); 5] = [(0x20, "Clock"), (0x04, "Profile number"), (0x08, "Keyboard mode"), (0x01, "Rollover setting"), (0x02, "EVGA Precision X1 stats")];
+pub const LCD_APPS: [(u64, &str); 5] = [(0x20, "Time"), (0x04, "Profile number"), (0x08, "Game mode"), (0x01, "Key rollover"), (0x02, "EVGA Precision X1 stats")];
 pub const GAME_KEYS: [(u64, &str); 7] = [(0x40, "Windows key"), (0x01, "Alt+Tab"), (0x08, "Alt+F4"), (0x04, "Ctrl+Esc"), (0x02, "Tab"), (0x10, "Left Shift"), (0x20, "Menu key")];
 
 /// What each slider can control. "own" is what the keyboard does by itself.
@@ -148,13 +148,15 @@ pub fn tiles(fw: &Value, connected: Option<bool>) -> Tiles {
 /// The screen light's ready colors: white first, the keyboard's own default.
 pub const LIGHTS: [[u8; 3]; 7] = [[0xff, 0xff, 0xff], [0xff, 0x20, 0x00], [0xff, 0x8a, 0x00], [0xff, 0xd0, 0x00], [0x3b, 0xdc, 0x6b], [0x3f, 0xa9, 0xff], [0xb0, 0x6b, 0xff]];
 
-/// The Screen tab's Screen defaults box, `w` wide, under Profiles, for the
-/// profile being edited: its screen light (the ready colors, or one of its
-/// own from the picker), which any screen without a light of its own uses,
-/// how bright, and which of the keyboard's built-in screens show while
-/// Ectodeck is closed. Each setting's name sits over its control, under the
-/// box's heading (drawn by the page, as the Profiles box's is).
-pub fn defaults(page: &Page, w: f32) -> Tiles {
+/// The Screen tab's two boxes under Profiles, `w` wide, for the profile being
+/// edited: its default backlight (the ready colors, or one of its own from the
+/// picker, and how bright), which the screen uses while Ectodeck isn't running
+/// and for any screen layout without a set color; then, 18 under it, the items
+/// on the keyboard's status screen, which shows while Ectodeck isn't running.
+/// The cells, in the two boxes' own terms (the first box's corner); their
+/// headings are drawn by the page, as the Profiles box's is. The height of
+/// both, and of the first.
+pub fn defaults(page: &Page, w: f32) -> (Tiles, f32) {
     let mut c = Vec::new();
     let l = &page.draft()["lighting"];
     let x = 16.0;
@@ -162,28 +164,33 @@ pub fn defaults(page: &Page, w: f32) -> Tiles {
     let lc = &l["lcd"]["color"];
     let b = |v: &Value| v.as_u64().unwrap_or(0).min(255) as u8;
     let rgb = [b(&lc["color"][0]), b(&lc["color"][1]), b(&lc["color"][2])];
-    c.push(text_cell(style::SMALL, x, 38.0, inner, 18.0, "Screen light"));
     // the dots 20 across and 26 apart, each in a cell with room for its ring
     let (dot, step, ring) = (20.0, 26.0, 3.5);
     let preset = LIGHTS.iter().position(|p| *p == rgb);
     for (i, p) in LIGHTS.iter().enumerate() {
         let col = slint::Color::from_rgb_u8(p[0], p[1], p[2]);
-        c.push(Cell { color: col, on: preset == Some(i), id: id(Ctl::LcdPreset), index: i as i32, ..cell(kind::COLOR_DOT, x - ring + i as f32 * step, 65.0 - ring, dot + 2.0 * ring, dot + 2.0 * ring) });
+        c.push(Cell { color: col, on: preset == Some(i), id: id(Ctl::LcdPreset), index: i as i32, ..cell(kind::COLOR_DOT, x - ring + i as f32 * step, 38.0 - ring, dot + 2.0 * ring, dot + 2.0 * ring) });
     }
     // a color of its own: shown as itself once chosen, otherwise a dot to choose one
     let own = preset.is_none();
     let col = slint::Color::from_rgb_u8(rgb[0], rgb[1], rgb[2]);
-    c.push(Cell { color: col, on: own, style: if own { 0 } else { 1 }, id: id(Ctl::LcdColor), ..cell(kind::COLOR_DOT, x - ring + LIGHTS.len() as f32 * step, 65.0 - ring, dot + 2.0 * ring, dot + 2.0 * ring) });
+    c.push(Cell { color: col, on: own, style: if own { 0 } else { 1 }, id: id(Ctl::LcdColor), ..cell(kind::COLOR_DOT, x - ring + LIGHTS.len() as f32 * step, 38.0 - ring, dot + 2.0 * ring, dot + 2.0 * ring) });
     let br = lc["brightness"].as_f64().unwrap_or(255.0);
-    c.push(text_cell(style::SMALL, x, 99.0, inner - 60.0, 20.0, "Brightness"));
+    c.push(text_cell(style::SMALL, x, 72.0, inner - 60.0, 20.0, "Brightness"));
     let v = format!("{}%", (br / 2.55).round());
     let pw = crate::text::width(400, 12.0, &v) + 14.0;
-    c.push(Cell { text: v.into(), style: 2, ..cell(kind::PILL, w - 16.0 - pw, 99.0, pw, 20.0) });
-    c.push(Cell { value: (br / 255.0) as f32, color: col, style: 1, id: id(Ctl::LcdBrightness), ..cell(kind::FILLED, x, 121.0, inner, 20.0) });
-    c.push(Cell { color: slint::Color::from_rgb_u8(0x2b, 0x2b, 0x30), ..cell(kind::BOX, x, 152.0, inner, 1.0) });
-    c.push(text_cell(style::SMALL, x, 167.0, inner, 18.0, "Built-in screens"));
-    let mut y = 190.0;
-    for line in crate::text::wrap(400, 12.0, "The keyboard shows these while Ectodeck is closed.", inner) {
+    c.push(Cell { text: v.into(), style: 2, ..cell(kind::PILL, w - 16.0 - pw, 72.0, pw, 20.0) });
+    c.push(Cell { value: (br / 255.0) as f32, color: col, style: 1, id: id(Ctl::LcdBrightness), ..cell(kind::FILLED, x, 94.0, inner, 20.0) });
+    let mut y = 128.0;
+    for line in crate::text::wrap(400, 12.0, "The color the LCD backlight uses when Ectodeck isn’t running, and for any screen layout without a set color.", inner) {
+        c.push(text_cell(style::CREDIT, x, y, inner, 17.0, &line));
+        y += 17.0;
+    }
+    let first = y + 16.0;
+    // the status screen's box
+    let top = first + 18.0;
+    let mut y = top + 38.0;
+    for line in crate::text::wrap(400, 12.0, "What the keyboard shows when Ectodeck isn’t running.", inner) {
         c.push(text_cell(style::CREDIT, x, y, inner, 17.0, &line));
         y += 17.0;
     }
@@ -194,7 +201,7 @@ pub fn defaults(page: &Page, w: f32) -> Tiles {
         c.push(Cell { on: apps & bit != 0, id: id(Ctl::LcdApp), index: i as i32, text: (*n).into(), ..cell(kind::CHECKBOX, x, y, inner, 20.0) });
         y += 30.0;
     }
-    Tiles { cells: c, height: y - 30.0 + 20.0 + 16.0 }
+    (Tiles { cells: c, height: y - 30.0 + 20.0 + 16.0 }, first)
 }
 
 /// Use a piece of the tab. `on` is a checkbox's new state; `index` which box.

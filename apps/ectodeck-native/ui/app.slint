@@ -3303,10 +3303,12 @@ export component AppWindow inherits Window {
     // picture of Stats; the launch sequence's picture beside its checkbox; what
     // is playing (0 playing, 1 paused, 2 another program has the screen, 3 the
     // keyboard's screen isn't there); whether launches break in; and the
-    // Screen defaults box's height
+    // height of the two boxes under Profiles together, and of the first
+    // (the default backlight; the status screen's box under it)
     in property <image> lcd-big;
     in property <int> lcd-state;
     in property <length> defaults-h;
+    in property <length> backlight-h;
     callback lcd-pause();
     // the playlist's panel: the playlist's name, and the width its chooser
     // takes; the chooser's menu open; the name being changed in place, and
@@ -3542,10 +3544,10 @@ export component AppWindow inherits Window {
     property <length> board-top: head-end + kb-pad-y;
     // under the keyboard: the anchoring column (the profiles, what goes with
     // them), and beside it the tab's boxes
-    // the Screen tab, in two columns: Profiles at the top of the left one, Screen defaults
-    // under them; in the right one the screen's box, the playlist's panel attached under
-    // it, and the Library. The box is as tall as leaves the panel's foot level with the
-    // Profiles box's.
+    // the Screen tab, in two columns: Profiles at the top of the left one, the default
+    // backlight and the status screen under them; in the right one the screen's box, the
+    // playlist's panel attached under it, and Layouts. The box is as tall as leaves the
+    // panel's foot level with the Profiles box's.
     property <length> pl-panel-h: 70px;
     property <length> stage-h: anchor.preferred-height - pl-panel-h;
     // the bay the screen sits in (the screen and its gutter), and the box's gray round the
@@ -4608,14 +4610,14 @@ export component AppWindow inherits Window {
                         y: stage-h + pl-panel-h + 18px;
                         width: under-w;
                         height: shelf-h;
-                        title: "Library";
+                        title: "Layouts";
                         // how the Library is used, at the end of its title's line
                         Text {
                             x: 96px;
                             y: 14px;
                             width: parent.width - 16px - self.x;
                             height: 22px;
-                            text: "Drag a screen onto the playlist to add the screen to what the keyboard shows.";
+                            text: "Drag a screen layout onto the playlist to add the layout to what the keyboard shows.";
                             font-family: "Geist";
                             font-size: 12.5px;
                             color: Ink.quiet;
@@ -4745,7 +4747,7 @@ export component AppWindow inherits Window {
                             new-text := Text {
                                 x: (parent.width - parent.words-w) / 2 + 19px;
                                 height: parent.height;
-                                text: "New screen";
+                                text: "New screen layout";
                                 font-family: "Geist";
                                 font-size: 13px;
                                 font-weight: 500;
@@ -4786,22 +4788,40 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
-                // Screen defaults, under Profiles in the left column: the profile's screen light
-                // and how bright, which any screen without a light of its own uses, and the
-                // keyboard's built-in screens for while Ectodeck is closed. In the Profiles box's
-                // own shade, under a heading as the Profiles box's.
+                // under Profiles in the left column, two boxes of the profile's: its default
+                // backlight and how bright, which the screen uses while Ectodeck isn't running
+                // and for any screen layout without a set color; and the items on the keyboard's
+                // status screen, which shows while Ectodeck isn't running. Each in the Profiles
+                // box's own shade, under a heading as the Profiles box's; the cells laid out in
+                // the first box's terms, across both.
                 if root.tab == 3 && root.boot == 0: Rectangle {
                     x: pws-x;
                     y: head-end + anchor.preferred-height + 18px;
                     width: anchor-w;
                     height: root.defaults-h;
-                    border-radius: 12px;
-                    background: Ink.well;
-                    AnchorHead {
-                        x: 8px;
-                        y: 4px;
-                        width: parent.width - 16px;
-                        text: "SCREEN DEFAULTS";
+                    Rectangle {
+                        y: 0;
+                        height: root.backlight-h;
+                        border-radius: 12px;
+                        background: Ink.well;
+                        AnchorHead {
+                            x: 8px;
+                            y: 4px;
+                            width: parent.width - 16px;
+                            text: "DEFAULT BACKLIGHT";
+                        }
+                    }
+                    Rectangle {
+                        y: root.backlight-h + 18px;
+                        height: root.defaults-h - root.backlight-h - 18px;
+                        border-radius: 12px;
+                        background: Ink.well;
+                        AnchorHead {
+                            x: 8px;
+                            y: 4px;
+                            width: parent.width - 16px;
+                            text: "STATUS SCREEN";
+                        }
                     }
                     for c in root.cells: CellView {
                         c: c;
@@ -5214,7 +5234,7 @@ export component AppWindow inherits Window {
             Text {
                 x: 20px;
                 y: 20px;
-                text: "New screen";
+                text: "New screen layout";
                 font-family: "Geist";
                 font-size: 16px;
                 font-weight: 600;
@@ -5224,7 +5244,7 @@ export component AppWindow inherits Window {
                 x: 20px;
                 y: 20px + 26px;
                 width: parent.width - 40px;
-                text: "Select a screen to add to the Library.";
+                text: "Select a screen layout to add to Layouts.";
                 font-family: "Geist";
                 font-size: 13px;
                 color: Ink.quiet;
