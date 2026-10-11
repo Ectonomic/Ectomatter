@@ -4298,26 +4298,15 @@ export component AppWindow inherits Window {
                             y: -16px;
                             width: root.pl-track-w;
                             height: 16px + pl-panel-h;
-                            // where a carried layout will land: an empty turn in the well's charcoal (as
-                            // the holding bar), the others making room
+                            // where a carried layout will land: one empty bar in the well's charcoal (as
+                            // the holding bar), the turn's whole room, the others making room
                             if root.pl-slot-w > 0: Rectangle {
                                 x: root.pl-slot-x - root.pl-pre;
                                 y: 32px;
-                                width: root.pl-way-w;
-                                height: 24px;
-                                animate x { duration: 250ms; easing: ease; }
-                                border-top-left-radius: 5px;
-                                border-bottom-left-radius: 5px;
-                                background: Ink.well;
-                            }
-                            if root.pl-slot-w > 0: Rectangle {
-                                x: root.pl-slot-x;
-                                y: 32px;
-                                width: root.pl-slot-w;
+                                width: root.pl-pre + root.pl-slot-w;
                                 height: 24px;
                                 animate x, width { duration: 250ms; easing: ease; }
-                                border-top-right-radius: 5px;
-                                border-bottom-right-radius: 5px;
+                                border-radius: 5px;
                                 background: Ink.well;
                             }
                             // the empty holding bar, at the strip's end: a turn's room, in the well's own
