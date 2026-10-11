@@ -3553,10 +3553,10 @@ export component AppWindow inherits Window {
     out property <length> lcd-h: floor(min(stage-h - 2 * bay-pad - 2 * kb-pad-y, (under-w - 2 * bay-pad - 2 * kb-pad-y) / 5) / 1px) * 1px;
     out property <length> lcd-w: lcd-h * 5;
     // under the panel: the Library, its cards two to a row while each has room for its
-    // picture and its words, otherwise one
+    // picture and its words, otherwise one; after them, an empty block for a new screen
     out property <bool> shelf-two: (under-w - 32px - 8px) / 2 >= 454px;
-    property <int> shelf-rows: shelf-two ? ceil(root.lib-pages.length / 2) : root.lib-pages.length;
-    property <length> shelf-h: 72px + shelf-rows * 104px - 8px + 16px;
+    property <int> shelf-rows: shelf-two ? ceil((root.lib-pages.length + 1) / 2) : root.lib-pages.length + 1;
+    property <length> shelf-h: 48px + shelf-rows * 104px - 8px + 16px;
     // the screen's own background, which its bay is
     in property <color> lcd-field: #0a0908;
     // (on the Screen tab, what is under the screen's box and its panel: the Library, or
@@ -4597,7 +4597,8 @@ export component AppWindow inherits Window {
 
                     // ---------------------------------------------------- the Library
                     // every screen there is, two to a row; drag one onto the playlist to play it,
-                    // or put it on the playlist's end from its card
+                    // or put it on the playlist's end from its card; an empty block after them
+                    // for a new one
                     if root.boot == 0: PageBox {
                         visible: !root.screen-editing;
                         x: 0;
@@ -4605,28 +4606,24 @@ export component AppWindow inherits Window {
                         width: under-w;
                         height: shelf-h;
                         title: "Library";
-                        BoxLink {
-                            x: parent.width - 10px - self.width;
-                            y: 12px;
-                            text: "+ New screen";
-                            clicked => { root.lib-open-at(); }
-                        }
+                        // how the Library is used, at the end of its title's line
                         Text {
-                            x: 16px;
-                            y: 40px;
-                            width: parent.width - 32px;
-                            height: 18px;
+                            x: 96px;
+                            y: 14px;
+                            width: parent.width - 16px - self.x;
+                            height: 22px;
                             text: "Drag a screen onto the playlist to add the screen to what the keyboard shows.";
                             font-family: "Geist";
                             font-size: 12.5px;
                             color: Ink.quiet;
+                            horizontal-alignment: right;
                             vertical-alignment: center;
                             overflow: elide;
                         }
                         for c[k] in root.lib-pages: Rectangle {
                             property <length> cw: shelf-two ? (parent.width - 32px - 8px) / 2 : parent.width - 32px;
                             x: 16px + (shelf-two ? mod(k, 2) * (self.cw + 8px) : 0);
-                            y: 72px + (shelf-two ? floor(k / 2) : k) * 104px;
+                            y: 48px + (shelf-two ? floor(k / 2) : k) * 104px;
                             width: self.cw;
                             height: 96px;
                             PlCard {
@@ -4715,6 +4712,49 @@ export component AppWindow inherits Window {
                                         clicked => { root.lib-edit(k); }
                                     }
                                 }
+                            }
+                        }
+                        // a new screen: an empty block after the last, drawn as the app draws a
+                        // place to add something (the color dot's own "+")
+                        Rectangle {
+                            property <int> k: root.lib-pages.length;
+                            property <length> cw: shelf-two ? (parent.width - 32px - 8px) / 2 : parent.width - 32px;
+                            x: 16px + (shelf-two ? mod(self.k, 2) * (self.cw + 8px) : 0);
+                            y: 48px + (shelf-two ? floor(self.k / 2) : self.k) * 104px;
+                            width: self.cw;
+                            height: 96px;
+                            border-radius: 10px;
+                            background: new-ta.pressed ? Ink.pick : new-ta.has-hover ? Ink.hover-box : transparent;
+                            border-width: 1px;
+                            border-color: new-ta.has-hover ? #8a8a94 : #4a4a52;
+                            animate background, border-color { duration: 120ms; }
+                            property <length> words-w: 12px + 7px + new-text.preferred-width;
+                            Path {
+                                x: (parent.width - parent.words-w) / 2;
+                                y: (parent.height - 12px) / 2;
+                                width: 12px;
+                                height: 12px;
+                                viewbox-width: 12;
+                                viewbox-height: 12;
+                                commands: "M6 2v8M2 6h8";
+                                fill: transparent;
+                                stroke: new-ta.has-hover ? Ink.bright : Ink.soft;
+                                stroke-width: 1.6px;
+                                stroke-line-cap: round;
+                            }
+                            new-text := Text {
+                                x: (parent.width - parent.words-w) / 2 + 19px;
+                                height: parent.height;
+                                text: "New screen";
+                                font-family: "Geist";
+                                font-size: 13px;
+                                font-weight: 500;
+                                color: new-ta.has-hover ? Ink.bright : Ink.soft;
+                                vertical-alignment: center;
+                            }
+                            new-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.lib-open-at(); }
                             }
                         }
                     }
