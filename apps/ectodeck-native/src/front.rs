@@ -379,6 +379,8 @@ pub struct Front {
     paint: [u8; 3],
     previewing: bool,
     preview_asked: bool,
+    /// the draft changed while a preview was asked for: sent once it is answered
+    preview_again: bool,
     icons: Option<(f32, Vec<slint::Image>)>,
     cells: Rc<VecModel<Cell>>,
     /// the Where and when box's pieces; the areas chosen for each profile's
@@ -637,6 +639,7 @@ impl Front {
             paint: lighting::PRESETS[0],
             previewing: false,
             preview_asked: false,
+            preview_again: false,
             icons: None,
             cells: Rc::new(VecModel::default()),
             place_cells: Rc::new(VecModel::default()),
@@ -826,6 +829,10 @@ impl Front {
                         self.previewing = false;
                         self.status(format!("Preview unavailable: {e}"), 2);
                     }
+                }
+                // what changed while this one was on its way, now (still previewing)
+                if std::mem::take(&mut self.preview_again) {
+                    self.push_preview();
                 }
                 return;
             }
@@ -1615,7 +1622,12 @@ impl Front {
     }
 
     fn push_preview(&mut self) {
-        if !self.previewing || self.page.dev.is_none() || self.preview_asked || self.kb.is_none() {
+        if !self.previewing || self.page.dev.is_none() || self.kb.is_none() {
+            return;
+        }
+        // one asked for at a time; a change made meanwhile goes once it is answered
+        if self.preview_asked {
+            self.preview_again = true;
             return;
         }
         let mut body = self.page.preview_body();
