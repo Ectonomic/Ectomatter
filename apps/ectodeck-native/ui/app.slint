@@ -3336,6 +3336,8 @@ export component AppWindow inherits Window {
     in property <length> pl-slot-w;
     in property <bool> pl-live;
     in property <bool> pl-single;
+    // no turns at all: the screen shows blank until a layout is dragged in
+    in property <bool> pl-empty;
     in property <bool> pl-dim;
     in property <string> pl-script;
     // the playhead: shown or not, on the way bar (the turn coming in) or the
@@ -3568,7 +3570,7 @@ export component AppWindow inherits Window {
     property <length> under-top: root.tab == 3 ? head-end + stage-h + (root.screen-editing ? 0 : pl-panel-h) + 18px : head-end + board-h + 2 * kb-pad-y + 18px;
     // the playlist's name changed in place: where its field is in the window, so a press
     // away from it keeps the name
-    out property <length> pl-rename-wx: rail-w + under-x + 50px;
+    out property <length> pl-rename-wx: rail-w + under-x + 16px;
     out property <length> pl-rename-wy: bar + 56px + flick.content-y + head-end + stage-h + 14px;
     property <length> anchor-w: 240px;
     property <length> under-x: pws-x + anchor-w + 16px;
@@ -4177,8 +4179,9 @@ export component AppWindow inherits Window {
                         background: Ink.box;
                         border-bottom-left-radius: 12px;
                         border-bottom-right-radius: 12px;
+                        // Pause, at the playlist's right end, after the round's start again
                         PlayButton {
-                            x: 16px;
+                            x: parent.width - 16px - self.width;
                             y: 14px;
                             paused: root.lcd-state == 1;
                             clicked => { root.lcd-pause(); }
@@ -4186,7 +4189,7 @@ export component AppWindow inherits Window {
                         // which playlist the profile plays: select it to choose another, or to
                         // make, rename or delete one
                         if !root.pl-renaming: Rectangle {
-                            x: 50px;
+                            x: 16px;
                             y: 14px;
                             width: root.pl-chooser-w;
                             height: 28px;
@@ -4226,7 +4229,7 @@ export component AppWindow inherits Window {
                         // the playlist's name changed in place: Enter, the tick or a press away keeps
                         // it, Escape lets it go
                         if root.pl-renaming: Rectangle {
-                            x: 50px;
+                            x: 16px;
                             y: 14px;
                             width: 195px;
                             height: 28px;
@@ -4290,10 +4293,10 @@ export component AppWindow inherits Window {
                                 }
                             }
                         }
-                        // the round starting again, after the strip
+                        // the round starting again, after the strip (before Pause)
                         Path {
-                            visible: !root.pl-single && root.pl-sizing < 0;
-                            x: parent.width - 36px;
+                            visible: !root.pl-single && !root.pl-empty && root.pl-sizing < 0;
+                            x: parent.width - 16px - 28px - 8px - 20px;
                             y: 18px;
                             width: 20px;
                             height: 20px;
@@ -4336,6 +4339,17 @@ export component AppWindow inherits Window {
                                 border-bottom-right-radius: 5px;
                                 border-width: 1px;
                                 border-color: Ink.quiet;
+                            }
+                            // an empty playlist: how to fill it, where its turns would be
+                            if root.pl-empty && root.pl-slot-w <= 0: Text {
+                                x: 0;
+                                y: 31px;
+                                height: 18px;
+                                text: "Drag a screen layout here from Layouts to play it.";
+                                font-family: "Geist";
+                                font-size: 12.5px;
+                                color: Ink.quiet;
+                                vertical-alignment: center;
                             }
                             for b[i] in root.pl-blocks: turn := Rectangle {
                                 x: b.x - root.pl-pre;
@@ -4453,7 +4467,7 @@ export component AppWindow inherits Window {
                                         property <bool> buttons: root.pl-sizing != i;
                                         x: root.pl-pre + (b.w - self.width) / 2;
                                         y: 0;
-                                        width: 8px + secs-text.preferred-width + 5px + (self.buttons ? 1px + 20px + (root.pl-single ? 0 : 21px) : 0) + 2px;
+                                        width: 8px + secs-text.preferred-width + 5px + (self.buttons ? 1px + 20px + 21px : 0) + 2px;
                                         height: 24px;
                                         border-radius: 7px;
                                         background: Ink.pop;
@@ -4475,7 +4489,7 @@ export component AppWindow inherits Window {
                                             commands: "M4 20h4L19 9l-4-4L4 16z";
                                             clicked => { root.screen-edit(i); }
                                         }
-                                        if tb.buttons && !root.pl-single: StripIcon {
+                                        if tb.buttons: StripIcon {
                                             x: 8px + secs-text.preferred-width + 5px + 1px + 21px;
                                             y: 2px;
                                             commands: "M6 6l12 12M18 6L6 18";

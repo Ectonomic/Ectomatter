@@ -565,9 +565,10 @@ impl Screens {
             .map(|a| {
                 a.iter()
                     .filter_map(|v| {
+                        // (an empty playlist is kept: its profile's screen shows blank)
                         let turns = turns_of(v.get("turns"));
                         let id = v["id"].as_str()?;
-                        (!turns.is_empty()).then(|| Playlist { id: id.into(), name: v["name"].as_str().unwrap_or("Playlist").into(), turns })
+                        Some(Playlist { id: id.into(), name: v["name"].as_str().unwrap_or("Playlist").into(), turns })
                     })
                     .collect()
             })
@@ -670,10 +671,11 @@ impl Screens {
         Some(to)
     }
 
-    /// Turn `i` taken off the playlist, never the last.
+    /// Turn `i` taken off the playlist, the last one too: an empty playlist's
+    /// screen shows blank until a layout is added.
     pub fn remove_turn(&mut self, p: u8, i: usize) -> bool {
         let turns = self.turns_mut(p);
-        if turns.len() > 1 && i < turns.len() {
+        if i < turns.len() {
             turns.remove(i);
             return true;
         }
@@ -1100,6 +1102,12 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_playlist_shows_a_blank_screen() {
+        // (what the player is given for an empty playlist: every cell clear)
+        assert!(render(&Page::blank(), &readings()).iter().all(|row| row.trim().is_empty()));
+    }
+
+    #[test]
     fn a_card_says_what_its_page_shows() {
         assert_eq!(Page::stats().about(), "CPU, GPU, RAM and VRAM, every second.");
         // a second Clock, as its kind made it
@@ -1133,7 +1141,12 @@ mod tests {
         assert_eq!(s.move_turn(1, 2, 0), Some(0));
         assert_eq!(pages(&s), ["stats", "stats", "clock"]);
         assert!(s.remove_turn(1, 0) && s.remove_turn(1, 0));
-        assert!(!s.remove_turn(1, 0), "never the last turn");
         assert_eq!(s.turns(1).len(), 1);
+        // the last one too, and the empty playlist kept through a save
+        assert!(s.remove_turn(1, 0));
+        assert!(s.turns(1).is_empty() && !s.remove_turn(1, 0));
+        let v = s.to_json();
+        let back = Screens::of(Some(&v["pages"]), Some(&v["playlists"]), Some(&v["plays"]), None);
+        assert!(back.turns(1).is_empty() && back.playlists.len() == s.playlists.len());
     }
 }

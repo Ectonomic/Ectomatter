@@ -1067,7 +1067,7 @@ impl Front {
                     let i = i.max(0) as usize;
                     let shown = self.lcd.page;
                     let playing = self.screens.turns(self.page.editing).get(shown).map(|e| e.key);
-                    // (never the last turn: the screen always has one to play)
+                    // (the last one too: the screen shows blank until a layout is added)
                     if self.screens.remove_turn(self.page.editing, i) {
                         self.pages_edited();
                         self.keep_playing(playing, shown);
@@ -3229,6 +3229,8 @@ impl Front {
             Some(p) => vec![p.clone()],
             None => self.screens.played(self.page.editing),
         };
+        // an empty playlist: the screen blank, in the profile's default backlight
+        let pages = if pages.is_empty() { vec![crate::lcd_page::Page::blank()] } else { pages };
         if let Some(pl) = &self.player {
             pl.tell(crate::lcd_player::Control::Pages(pages));
         }
@@ -3419,14 +3421,14 @@ impl Front {
         let shown = self.shown_page();
         // the turn on the screen is marked while Ectodeck plays the screen, playing or paused
         let marked = self.controlled && self.editor.is_none() && matches!(self.lcd.state, State::Playing | State::Paused);
-        // the panel's head: Pause, then the playlist's name in its chooser (as wide as the
-        // name needs, to 200) or the field it is renamed in; the strip after them, to 46
-        // short of the panel's end, where the round starts again
+        // the panel's head: the playlist's name in its chooser (as wide as the name needs,
+        // to 200) or the field it is renamed in; the strip after it, to 82 short of the
+        // panel's end, where the round starts again and then Pause
         let under_w = self.ui.get_under_w() as f64;
         let name = self.screens.playlist(who).name.clone();
         let chooser = (crate::text::width(500, 13.0, &name) as f64 + 33.0).min(200.0).ceil();
-        let track_x = 16.0 + 28.0 + 6.0 + if self.pl_renaming { 195.0 } else { chooser } + 14.0;
-        let track_w = (under_w - 46.0 - track_x).max(120.0);
+        let track_x = 16.0 + if self.pl_renaming { 195.0 } else { chooser } + 14.0;
+        let track_w = (under_w - 82.0 - track_x).max(120.0);
         self.ui.set_pl_name(name.as_str().into());
         self.ui.set_pl_chooser_w(chooser as f32);
         self.ui.set_pl_track_x(track_x as f32);
@@ -3472,6 +3474,7 @@ impl Front {
         }
         sync_blocks(&self.blocks, rows);
         self.ui.set_pl_single(n == 1);
+        self.ui.set_pl_empty(n == 0);
         // a script's screen on the keyboard: the strip waits
         let script = match self.lcd.sequence {
             Some("launch") => "A game is starting",
