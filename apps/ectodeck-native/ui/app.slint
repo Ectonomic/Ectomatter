@@ -4298,7 +4298,8 @@ export component AppWindow inherits Window {
                             y: -16px;
                             width: root.pl-track-w;
                             height: 16px + pl-panel-h;
-                            // where a carried screen will land: a hollow turn, the others making room
+                            // where a carried layout will land: an empty turn in the well's charcoal (as
+                            // the holding bar), the others making room
                             if root.pl-slot-w > 0: Rectangle {
                                 x: root.pl-slot-x - root.pl-pre;
                                 y: 32px;
@@ -4307,8 +4308,7 @@ export component AppWindow inherits Window {
                                 animate x { duration: 250ms; easing: ease; }
                                 border-top-left-radius: 5px;
                                 border-bottom-left-radius: 5px;
-                                border-width: 1px;
-                                border-color: Ink.quiet;
+                                background: Ink.well;
                             }
                             if root.pl-slot-w > 0: Rectangle {
                                 x: root.pl-slot-x;
@@ -4318,8 +4318,7 @@ export component AppWindow inherits Window {
                                 animate x, width { duration: 250ms; easing: ease; }
                                 border-top-right-radius: 5px;
                                 border-bottom-right-radius: 5px;
-                                border-width: 1px;
-                                border-color: Ink.quiet;
+                                background: Ink.well;
                             }
                             // the empty holding bar, at the strip's end: a turn's room, in the well's own
                             // shade, with a "+": select it for a menu of the layouts to add. The whole
