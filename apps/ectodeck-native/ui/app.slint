@@ -2513,32 +2513,6 @@ component PlCard inherits Rectangle {
     }
 }
 
-// Edit or Remove on a playlist card: a line glyph on the card's dark backing
-component CardIcon inherits Rectangle {
-    in property <string> commands;
-    callback clicked;
-    width: 28px;
-    height: 28px;
-    border-radius: 7px;
-    background: ta.pressed ? Ink.pick : ta.has-hover ? Ink.hover-box : transparent;
-    Path {
-        x: 6.5px;
-        y: 6.5px;
-        width: 15px;
-        height: 15px;
-        viewbox-width: 24;
-        viewbox-height: 24;
-        commands: root.commands;
-        fill: transparent;
-        stroke: ta.has-hover ? Ink.bright : Ink.soft;
-        stroke-width: 1.8px;
-    }
-    ta := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-}
-
 // how a turn comes in, as its way bar on the strip shows it: a column sweeping
 // across what is already there, cells changing, a letter with the cursor
 // after it, a plain edge
@@ -4666,8 +4640,10 @@ export component AppWindow inherits Window {
                                 p: c;
                                 hovered: cta.has-hover && !root.carry-on;
                             }
+                            // the whole card a button: select it to edit the layout; press and drag it
+                            // to carry it onto the playlist
                             cta := TouchArea {
-                                mouse-cursor: root.carry-on ? MouseCursor.grabbing : MouseCursor.grab;
+                                mouse-cursor: root.carry-on ? MouseCursor.grabbing : MouseCursor.pointer;
                                 property <bool> far;
                                 pointer-event(e) => {
                                     if (e.kind == PointerEventKind.down) {
@@ -4675,6 +4651,8 @@ export component AppWindow inherits Window {
                                     }
                                     if (e.kind == PointerEventKind.up && root.carry-on) {
                                         stage.drop-carry();
+                                    } else if (e.kind == PointerEventKind.up && !self.far && e.button == PointerEventButton.left) {
+                                        root.lib-edit(k);
                                     }
                                     if (e.kind == PointerEventKind.cancel && root.carry-on) {
                                         root.carry-on = false;
@@ -4696,20 +4674,19 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                 }
-                                // Edit, at the middle of the card's right edge while the pointer is on it
-                                if self.has-hover && !root.carry-on: Rectangle {
-                                    x: parent.width - 14px - self.width;
-                                    y: (parent.height - self.height) / 2;
-                                    width: 2px + 28px + 2px;
-                                    height: 32px;
-                                    border-radius: 9px;
-                                    background: #131316e0;
-                                    CardIcon {
-                                        x: 2px;
-                                        y: 2px;
-                                        commands: "M4 20h4L19 9l-4-4L4 16z";
-                                        clicked => { root.lib-edit(k); }
-                                    }
+                                // the pencil, at the middle of the card's right edge while the pointer is on
+                                // it: what selecting the card does
+                                if self.has-hover && !root.carry-on: Path {
+                                    x: parent.width - 30px - 7.5px;
+                                    y: (parent.height - 15px) / 2;
+                                    width: 15px;
+                                    height: 15px;
+                                    viewbox-width: 24;
+                                    viewbox-height: 24;
+                                    commands: "M4 20h4L19 9l-4-4L4 16z";
+                                    fill: transparent;
+                                    stroke: Ink.soft;
+                                    stroke-width: 1.8px;
                                 }
                             }
                         }
