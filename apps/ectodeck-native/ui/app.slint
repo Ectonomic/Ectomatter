@@ -3316,6 +3316,9 @@ export component AppWindow inherits Window {
     // strip while the playlist is empty; no width while a carried layout's room shows instead)
     in property <length> pl-hold-x;
     in property <length> pl-hold-w;
+    // select the holding bar for a menu of the layouts to add; that menu open
+    callback pl-hold-menu(length, length, length);
+    in property <bool> pl-adding;
     in property <bool> pl-dim;
     in property <string> pl-script;
     // the playhead: shown or not, on the way bar (the turn coming in) or the
@@ -4319,7 +4322,8 @@ export component AppWindow inherits Window {
                                 border-color: Ink.quiet;
                             }
                             // the empty holding bar, at the strip's end: a turn's room, in the well's own
-                            // shade; the whole strip while the playlist is empty, saying how to fill it
+                            // shade, with a "+": select it for a menu of the layouts to add. The whole
+                            // strip while the playlist is empty, saying how to fill it.
                             if root.pl-hold-w > 0: Rectangle {
                                 x: root.pl-hold-x;
                                 y: 32px;
@@ -4327,17 +4331,37 @@ export component AppWindow inherits Window {
                                 height: 24px;
                                 animate x, width { duration: root.pl-live ? 0ms : 250ms; easing: ease; }
                                 border-radius: 5px;
-                                background: Ink.well;
+                                property <bool> lit: (hold-ta.has-hover || root.pl-adding) && !root.carry-on;
+                                background: hold-ta.pressed ? Ink.pick : self.lit ? Ink.hover-well : Ink.well;
+                                animate background { duration: 120ms; }
+                                Path {
+                                    x: root.pl-empty ? 10px : (parent.width - 12px) / 2;
+                                    y: 6px;
+                                    width: 12px;
+                                    height: 12px;
+                                    viewbox-width: 12;
+                                    viewbox-height: 12;
+                                    commands: "M6 2v8M2 6h8";
+                                    fill: transparent;
+                                    stroke: parent.lit ? Ink.bright : Ink.soft;
+                                    stroke-width: 1.6px;
+                                    stroke-line-cap: round;
+                                }
                                 if root.pl-empty: Text {
-                                    x: 10px;
-                                    width: parent.width - 20px;
+                                    x: 28px;
+                                    width: parent.width - 38px;
                                     height: parent.height;
-                                    text: "Drag a screen layout here from Layouts to play it.";
+                                    text: "Add a screen layout, or drag one here from Layouts.";
                                     font-family: "Geist";
                                     font-size: 12.5px;
-                                    color: Ink.quiet;
+                                    color: parent.lit ? Ink.dim : Ink.quiet;
                                     vertical-alignment: center;
                                     overflow: elide;
+                                }
+                                hold-ta := TouchArea {
+                                    enabled: !root.carry-on;
+                                    mouse-cursor: pointer;
+                                    clicked => { root.pl-hold-menu(self.absolute-position.x, self.absolute-position.y, self.height); }
                                 }
                             }
                             for b[i] in root.pl-blocks: turn := Rectangle {

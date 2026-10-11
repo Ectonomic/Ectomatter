@@ -103,6 +103,8 @@ pub enum Ask {
     /// changed in place, kept (true) or let go, as typed
     PlChoose(f32, f32, f32),
     PlRenameDone(bool, String),
+    /// the playlist's holding bar selected: the layouts to add, in a menu under it
+    PlHoldMenu(f32, f32, f32),
     /// a script's screen ended, the playlist back on the screen
     PlBack,
     /// a page of the Library opened in the editor
@@ -476,9 +478,11 @@ pub struct Front {
     strip_pps: f64,
     strip_way: f64,
     strip_spans: Vec<(f64, f64)>,
-    /// the panel's menu of playlists open; the playlist's name being changed in place
+    /// the panel's menu of playlists open; the playlist's name being changed in place; the
+    /// holding bar's menu of layouts to add open
     pl_menu: bool,
     pl_renaming: bool,
+    add_menu: bool,
     /// the page being edited, the piece chosen; this computer's readings,
     /// read here for the editor's picture once a second, and when last
     editor: Option<crate::screen_edit::Editor>,
@@ -566,6 +570,7 @@ impl Front {
         on!(on_pl_mark, |i, x, y, h| Ask::WayMenu(i, x, y, h));
         on!(on_pl_choose, |x, y, h| Ask::PlChoose(x, y, h));
         on!(on_pl_rename_done, |keep, t| Ask::PlRenameDone(keep, t.to_string()));
+        on!(on_pl_hold_menu, |x, y, h| Ask::PlHoldMenu(x, y, h));
         on!(on_pl_back, Ask::PlBack);
         on!(on_lib_edit, |k| Ask::LibEdit(k));
         on!(on_page_show, |i| Ask::PageShow(i));
@@ -694,6 +699,7 @@ impl Front {
             strip_spans: Vec::new(),
             pl_menu: false,
             pl_renaming: false,
+            add_menu: false,
             editor: None,
             reader: None,
             readings: crate::lcd_page::Readings::default(),
@@ -1164,6 +1170,7 @@ impl Front {
                 }
                 Ask::WayMenu(i, x, y, h) => self.open_way_menu(i.max(0) as usize, (x, y, h)),
                 Ask::PlChoose(x, y, h) => self.open_pl_menu((x, y, h)),
+                Ask::PlHoldMenu(x, y, h) => self.open_add_menu((x, y, h)),
                 Ask::PlRenameDone(keep, t) => self.end_rename(keep, &t),
                 Ask::PlBack => {
                     if let Some(pl) = &self.player {
@@ -2145,12 +2152,13 @@ impl Front {
     }
 
     fn close_menu(&mut self) {
-        if self.bind_menu.take().is_some() || self.light_menu.take().is_some() || self.way_menu.take().is_some() || std::mem::take(&mut self.pl_menu) {
+        if self.bind_menu.take().is_some() || self.light_menu.take().is_some() || self.way_menu.take().is_some() || std::mem::take(&mut self.pl_menu) || std::mem::take(&mut self.add_menu) {
             self.ui.set_menu_open(false);
             self.ui.set_menu_search(true);
             self.ui.set_menu_w(300.0);
             self.ui.set_pl_menu(-1);
             self.ui.set_pl_choosing(false);
+            self.ui.set_pl_adding(false);
         }
         if self.menu.take().is_some() {
             self.ui.set_menu_open(false);
@@ -2177,13 +2185,21 @@ impl Front {
                 self.end_rename(true, &typed);
             }
         }
-        if self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pl_menu {
+        if self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pl_menu || self.add_menu {
             let (mx, my, mw, mh) = (self.ui.get_menu_x(), self.ui.get_menu_y(), self.ui.get_menu_width(), self.ui.get_menu_height());
             if !(x >= mx && x < mx + mw && y >= my && y < my + mh) {
-                // a press on the dropdown (or the way bar) the menu hangs from shuts it, and its click must not open it again
+                // a press on the dropdown (or the bar) the menu hangs from shuts it, and its click must not open it again
                 let (ax, ay, ah) = (self.ui.get_menu_ax(), self.ui.get_menu_ay(), self.ui.get_menu_ah());
-                let aw = if self.way_menu.is_some() { self.strip_way as f32 } else if self.pl_menu { self.ui.get_pl_chooser_w() } else { self.ui.get_menu_w() };
-                if (self.light_menu.is_some() || self.way_menu.is_some() || self.pl_menu) && x >= ax && x < ax + aw && y >= ay && y < ay + ah {
+                let aw = if self.way_menu.is_some() {
+                    self.strip_way as f32
+                } else if self.pl_menu {
+                    self.ui.get_pl_chooser_w()
+                } else if self.add_menu {
+                    self.ui.get_pl_hold_w()
+                } else {
+                    self.ui.get_menu_w()
+                };
+                if (self.light_menu.is_some() || self.way_menu.is_some() || self.pl_menu || self.add_menu) && x >= ax && x < ax + aw && y >= ay && y < ay + ah {
                     self.shut = Some(((ax, ay), Instant::now()));
                 }
                 self.close_menu();
@@ -2328,6 +2344,21 @@ impl Front {
                     }
                 }
                 _ => {}
+            }
+            self.refresh();
+            return;
+        }
+        // the holding bar's menu: a layout put on the end of the playlist
+        if self.add_menu {
+            self.close_menu();
+            if let Some(id) = i.checked_sub(1).and_then(|k| self.screens.library.get(k)).map(|p| p.id.clone()) {
+                let n = self.page.editing;
+                let shown = self.lcd.page;
+                let playing = self.screens.turns(n).get(shown).map(|e| e.key);
+                let end = self.screens.turns(n).len();
+                self.screens.add_turn(n, end, &id);
+                self.pages_edited();
+                self.keep_playing(playing, shown);
             }
             self.refresh();
             return;
@@ -3034,6 +3065,45 @@ impl Front {
         self.ui.set_menu_open(true);
         self.pl_menu = true;
         self.ui.set_pl_choosing(true);
+    }
+
+    /// The playlist's holding bar selected: under it, every screen layout,
+    /// to put one on the end of the playlist.
+    fn open_add_menu(&mut self, anchor: (f32, f32, f32)) {
+        if let Some((at, when)) = self.shut.take() {
+            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
+                return;
+            }
+        }
+        let row = |kind: i32, label: &str| MenuRow { kind, label: label.into(), tag: "".into(), tick: false, sub: "".into() };
+        let mut rows = vec![row(1, "Add a screen layout")];
+        for p in &self.screens.library {
+            rows.push(row(0, &p.name));
+        }
+        self.close_menu();
+        self.close_picker();
+        let list: f32 = rows.iter().map(|r| if r.kind == 1 { 28.0 } else { 33.0 }).sum();
+        let h = 6.0 + list + 6.0;
+        // (as wide as the longest name needs, to 300)
+        let w = rows.iter().map(|r| crate::text::width(400, 13.5, &r.label) + 64.0).fold(200.0f32, f32::max).min(300.0).ceil();
+        self.ui.set_menu_search(false);
+        self.ui.set_menu_back(false);
+        self.ui.set_menu_natural(h);
+        self.ui.set_menu_w(w);
+        self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
+        let (ax, ay, ah) = anchor;
+        let win = self.ui.get_window_height();
+        let (below, above) = (win - ay - ah - 14.0, ay - 70.0);
+        let down = h <= below || below >= h.min(260.0) || below >= above;
+        let room = if down { below } else { above };
+        self.ui.set_menu_ax(ax);
+        self.ui.set_menu_ay(ay);
+        self.ui.set_menu_ah(ah);
+        self.ui.set_menu_top(if down { ay + ah + 6.0 } else { ay - 6.0 - h.min(room) });
+        self.ui.set_menu_max(if h > room { room } else { win * 0.7 });
+        self.ui.set_menu_open(true);
+        self.add_menu = true;
+        self.ui.set_pl_adding(true);
     }
 
     /// The playlist's name changed in place, kept or let go; then the
