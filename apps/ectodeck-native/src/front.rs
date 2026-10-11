@@ -456,6 +456,8 @@ pub struct Front {
     pages_changed: Option<Instant>,
     /// editing: the playlist's turn that showed before, which shows again after
     edit_from: usize,
+    /// the profile whose playlist the player was last given: the one the page shows
+    played_by: u8,
     /// the strip: each turn's block, a screen being carried to it, a turn's
     /// edge being dragged (the turn, its time when taken, the strip's scale
     /// then), the menu of ways in open on a mark; the strip's scale and the
@@ -671,6 +673,7 @@ impl Front {
             screens_saved: crate::lcd_page::Screens::default(),
             pages_changed: None,
             edit_from: 0,
+            played_by: 0,
             blocks: Rc::new(VecModel::default()),
             carry: None,
             sizing: None,
@@ -686,7 +689,12 @@ impl Front {
             source_menu: Vec::new(),
             ed_models: [Rc::new(VecModel::default()), Rc::new(VecModel::default()), Rc::new(VecModel::default())],
         };
-        f.screens = crate::lcd_page::Screens::of(f.settings.get("devices.z10.screen.pages").as_ref(), f.settings.get("devices.z10.screen.playlist").as_ref());
+        f.screens = crate::lcd_page::Screens::of(
+            f.settings.get("devices.z10.screen.pages").as_ref(),
+            f.settings.get("devices.z10.screen.playlists").as_ref(),
+            f.settings.get("devices.z10.screen.plays").as_ref(),
+            f.settings.get("devices.z10.screen.playlist").as_ref(),
+        );
         f.screens_noted = f.screens.clone();
         f.screens_saved = f.screens.clone();
         f.ui.set_ed_piece_cells(ModelRc::from(f.ed_models[0].clone()));
@@ -981,7 +989,7 @@ impl Front {
                 }
                 Ask::EditPage(i) => {
                     // a turn's page, from the playlist
-                    if let Some(k) = self.screens.playlist.get(i.max(0) as usize).and_then(|e| self.screens.index_of(&e.page)) {
+                    if let Some(k) = self.screens.turns(self.page.editing).get(i.max(0) as usize).and_then(|e| self.screens.index_of(&e.page)) {
                         self.edit_page(k);
                     }
                 }
@@ -991,7 +999,7 @@ impl Front {
                     self.save_pages();
                     self.tell_page();
                     if let Some(pl) = &self.player {
-                        pl.tell(crate::lcd_player::Control::Show(self.edit_from.min(self.screens.playlist.len().saturating_sub(1))));
+                        pl.tell(crate::lcd_player::Control::Show(self.edit_from.min(self.screens.turns(self.page.editing).len().saturating_sub(1))));
                         pl.tell(crate::lcd_player::Control::Hold(None));
                     }
                 }
@@ -1033,8 +1041,8 @@ impl Front {
                 Ask::PageMove(i, j) => {
                     let (i, j) = (i.max(0) as usize, j.max(0) as usize);
                     let shown = self.lcd.page;
-                    let playing = self.screens.playlist.get(shown).map(|e| e.key);
-                    if i != j && self.screens.move_turn(i, j).is_some() {
+                    let playing = self.screens.turns(self.page.editing).get(shown).map(|e| e.key);
+                    if i != j && self.screens.move_turn(self.page.editing, i, j).is_some() {
                         self.pages_edited();
                         self.keep_playing(playing, shown);
                     }
@@ -1042,9 +1050,9 @@ impl Front {
                 Ask::PageRemove(i) => {
                     let i = i.max(0) as usize;
                     let shown = self.lcd.page;
-                    let playing = self.screens.playlist.get(shown).map(|e| e.key);
+                    let playing = self.screens.turns(self.page.editing).get(shown).map(|e| e.key);
                     // (never the last turn: the screen always has one to play)
-                    if self.screens.remove_turn(i) {
+                    if self.screens.remove_turn(self.page.editing, i) {
                         self.pages_edited();
                         self.keep_playing(playing, shown);
                     }
@@ -1080,7 +1088,7 @@ impl Front {
                     self.close_menu();
                     self.carry = if from == 0 {
                         let w = self.blocks.row_data(i).map_or(190.0, |b| b.w as f64);
-                        self.screens.playlist.get(i).map(|e| Carry { from_strip: true, index: i, page: e.page.clone(), secs: e.secs, slot: Some(i), home: Some(i), w })
+                        self.screens.turns(self.page.editing).get(i).map(|e| Carry { from_strip: true, index: i, page: e.page.clone(), secs: e.secs, slot: Some(i), home: Some(i), w })
                     } else {
                         self.screens.library.get(i).map(|p| Carry { from_strip: false, index: i, page: p.id.clone(), secs: crate::lcd_page::SECS.2, slot: None, home: None, w: 190.0 })
                     };
@@ -1100,11 +1108,11 @@ impl Front {
                     if let Some(c) = self.carry.take() {
                         if let Some(at) = c.slot {
                             let shown = self.lcd.page;
-                            let playing = self.screens.playlist.get(shown).map(|e| e.key);
+                            let playing = self.screens.turns(self.page.editing).get(shown).map(|e| e.key);
                             let moved = if c.from_strip {
-                                at != c.index && self.screens.move_turn(c.index, at).is_some()
+                                at != c.index && self.screens.move_turn(self.page.editing, c.index, at).is_some()
                             } else {
-                                self.screens.add_turn(at, &c.page);
+                                self.screens.add_turn(self.page.editing, at, &c.page);
                                 true
                             };
                             if moved {
@@ -1119,11 +1127,11 @@ impl Front {
                     let i = i.max(0) as usize;
                     if self.sizing.is_none_or(|s| s.0 != i) {
                         self.close_menu();
-                        self.sizing = self.screens.playlist.get(i).map(|e| (i, e.secs, self.strip_pps));
+                        self.sizing = self.screens.turns(self.page.editing).get(i).map(|e| (i, e.secs, self.strip_pps));
                     }
                     if let Some((i, from, pps)) = self.sizing {
                         let secs = (from as f64 + dx as f64 / pps.max(1e-6)).round().clamp(crate::lcd_page::SECS.0 as f64, crate::lcd_page::SECS.1 as f64) as u32;
-                        if let Some(e) = self.screens.playlist.get_mut(i) {
+                        if let Some(e) = self.screens.turns_mut(self.page.editing).get_mut(i) {
                             if e.secs != secs {
                                 e.secs = secs;
                                 self.pages_edited();
@@ -2258,7 +2266,7 @@ impl Front {
             self.ui.set_menu_search(true);
             self.ui.set_menu_w(300.0);
             self.ui.set_pl_menu(-1);
-            if let (Some(way), Some(e)) = (i.checked_sub(1).and_then(|k| crate::lcd_page::TRANSITIONS.get(k)), self.screens.playlist.get_mut(t)) {
+            if let (Some(way), Some(e)) = (i.checked_sub(1).and_then(|k| crate::lcd_page::TRANSITIONS.get(k)), self.screens.turns_mut(self.page.editing).get_mut(t)) {
                 if e.comes_in != *way {
                     e.comes_in = *way;
                     self.pages_edited();
@@ -2388,6 +2396,7 @@ impl Front {
     /// Draw the page from the page's state.
     pub fn refresh(&mut self) {
         self.note_changes();
+        self.follow_profile();
         let ui = &self.ui;
         let p = &self.page;
         ui.set_tab(match p.view {
@@ -2867,7 +2876,7 @@ impl Front {
                 return;
             }
         }
-        let Some(e) = self.screens.playlist.get(i) else { return };
+        let Some(e) = self.screens.turns(self.page.editing).get(i) else { return };
         let name = self.screens.page_of(e).map_or("The screen".to_string(), |p| p.name.clone());
         let mut rows = vec![MenuRow { kind: 1, label: format!("How {name} comes in").into(), tag: "".into(), tick: false, sub: "".into() }];
         for t in crate::lcd_page::TRANSITIONS {
@@ -3067,18 +3076,36 @@ impl Front {
     fn tell_page(&mut self) {
         let pages = match self.editor.as_ref().and_then(|ed| self.screens.library.get(ed.page)) {
             Some(p) => vec![p.clone()],
-            None => self.screens.played(),
+            None => self.screens.played(self.page.editing),
         };
         if let Some(pl) = &self.player {
             pl.tell(crate::lcd_player::Control::Pages(pages));
         }
     }
 
+    /// The screen plays the playlist of the profile the page shows, as it
+    /// shows that profile's screen light: when another profile is chosen, in
+    /// Ectodeck or on the keyboard, the screen plays that profile's playlist
+    /// from its first turn. (Not while a page is edited: the keyboard stays
+    /// on that page.)
+    fn follow_profile(&mut self) {
+        let a = self.page.editing;
+        if a == self.played_by || self.editor.is_some() {
+            return;
+        }
+        self.played_by = a;
+        self.tell_page();
+        if let Some(pl) = &self.player {
+            pl.tell(crate::lcd_player::Control::Show(0));
+        }
+        self.lcd.page = 0;
+    }
+
     /// After the playlist changed: the turn that was playing (by its key)
     /// goes on playing where it now is; taken off, the turn now in its place.
     fn keep_playing(&mut self, playing: Option<u64>, was: usize) {
-        let now = playing.and_then(|k| self.screens.playlist.iter().position(|e| e.key == k));
-        let at = now.unwrap_or(was.min(self.screens.playlist.len().saturating_sub(1)));
+        let now = playing.and_then(|k| self.screens.turns(self.page.editing).iter().position(|e| e.key == k));
+        let at = now.unwrap_or(was.min(self.screens.turns(self.page.editing).len().saturating_sub(1)));
         if now != Some(was) {
             if let Some(pl) = &self.player {
                 pl.tell(crate::lcd_player::Control::Show(at));
@@ -3106,7 +3133,11 @@ impl Front {
             return;
         }
         let v = self.screens.to_json();
-        let saved = self.settings.set("devices.z10.screen.pages", v["pages"].clone()).and_then(|_| self.settings.set("devices.z10.screen.playlist", v["playlist"].clone()));
+        let saved = self
+            .settings
+            .set("devices.z10.screen.pages", v["pages"].clone())
+            .and_then(|_| self.settings.set("devices.z10.screen.playlists", v["playlists"].clone()))
+            .and_then(|_| self.settings.set("devices.z10.screen.plays", v["plays"].clone()));
         match saved {
             Ok(()) => {
                 self.screens_saved = self.screens.clone();
@@ -3144,7 +3175,7 @@ impl Front {
     fn shown(&self) -> Option<&crate::lcd_page::Page> {
         match &self.editor {
             Some(ed) => self.screens.library.get(ed.page),
-            None => self.screens.playlist.get(self.lcd.page).and_then(|e| self.screens.page_of(e)),
+            None => self.screens.turns(self.page.editing).get(self.lcd.page).and_then(|e| self.screens.page_of(e)),
         }
     }
 
@@ -3178,7 +3209,7 @@ impl Front {
     fn set_playhead(&mut self) {
         use crate::lcd_player::State;
         let n = &self.lcd;
-        let shown = self.controlled && self.editor.is_none() && n.sequence.is_none() && matches!(n.state, State::Playing | State::Paused) && self.screens.playlist.len() > 1;
+        let shown = self.controlled && self.editor.is_none() && n.sequence.is_none() && matches!(n.state, State::Playing | State::Paused) && self.screens.turns(self.page.editing).len() > 1;
         let len = n.length.max(0.001);
         let tick = self.ui.get_pl_tick();
         self.ui.set_pl_head(shown);
@@ -3233,7 +3264,7 @@ impl Front {
     /// the rest show what they read now. `profile` is the profile's screen light.
     fn refresh_playlist(&mut self, profile: [u8; 3], level: u8) {
         use crate::lcd_player::State;
-        let played = self.screens.played();
+        let played = self.screens.played(self.page.editing);
         let n = played.len();
         let sc = self.scale.max(1.0);
         let px = |w: f32| (w * sc).round() as u32;
@@ -3264,7 +3295,7 @@ impl Front {
         let mut rows = Vec::with_capacity(n);
         let mut keep = std::collections::HashSet::new();
         for (i, p) in played.iter().enumerate() {
-            let e = &self.screens.playlist[i];
+            let e = &self.screens.turns(self.page.editing)[i];
             let key = e.key as i32;
             keep.insert(e.key);
             // (a turn being carried keeps its place, unseen, until it lands)
