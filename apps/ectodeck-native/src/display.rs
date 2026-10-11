@@ -172,8 +172,10 @@ pub fn defaults(page: &Page, w: f32) -> (Tiles, f32) {
     let pw = crate::text::width(400, 12.0, &v) + 14.0;
     c.push(Cell { text: v.into(), style: 2, ..cell(kind::PILL, w - 16.0 - pw, 38.0, pw, 20.0) });
     c.push(Cell { value: (br / 255.0) as f32, color: col, style: 1, id: id(Ctl::LcdBrightness), ..cell(kind::FILLED, x, 60.0, inner, 20.0) });
-    // then the colors: the dots 20 across and 26 apart, each in a cell with room for its ring
-    let (dot, step, ring) = (20.0, 26.0, 3.5);
+    // then the colors: the dots 20 across, spread evenly from the box's inner edge to the
+    // other (as the slider runs), each in a cell with room for its ring
+    let (dot, ring) = (20.0, 3.5);
+    let step = (inner - dot) / LIGHTS.len() as f32;
     let preset = LIGHTS.iter().position(|p| *p == rgb);
     for (i, p) in LIGHTS.iter().enumerate() {
         let col = slint::Color::from_rgb_u8(p[0], p[1], p[2]);
