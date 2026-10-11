@@ -211,23 +211,21 @@ export struct PlPage {
     removable: bool,
 }
 
-// one turn of the playlist on the strip under the screen: its block's left
-// edge and width (as wide as its time, the strip fitted to its width), its
-// page's name and picture (none when the block is too narrow), whether the
-// screen shows it, whether it is being carried, its time in words, and how it
-// comes in after the turn before it (0 Wipe, 1 Dissolve, 2 Type, 3 Cut)
+// one turn of the playlist on its panel: its screen's bar's left edge and
+// length (as long as its time, the strip fitted to its width), its page's
+// name, whether the screen shows it, whether it is being carried, its time in
+// words, and how it comes in after the turn before it (0 Wipe, 1 Dissolve,
+// 2 Type, 3 Cut), by number and by name
 export struct PlBlock {
     key: int,
     x: length,
     w: length,
     name: string,
-    pic: image,
-    pic-w: length,
-    field: color,
     on: bool,
     away: bool,
     secs: string,
     way: int,
+    way-name: string,
 }
 
 // a page that can be added to the playlist: its name, what it shows, its
@@ -1337,29 +1335,31 @@ component CellView inherits Rectangle {
     }
     // ---- the Lighting page's own pieces, in the shades of its boxes
     // a value in a small well; style 1, a warning's tag, outlined in amber
+    // (style 2: on a well, a step lighter than it)
     if root.c.kind == 40: Rectangle {
         border-radius: root.c.style == 1 ? 4px : 6px;
-        background: root.c.style == 1 ? transparent : Ink.well;
+        background: root.c.style == 1 ? transparent : root.c.style == 2 ? Ink.hover-box : Ink.well;
         border-width: root.c.style == 1 ? 1px : 0;
         border-color: #f0b35a73;
         Text {
             text: root.c.text;
             font-family: "Geist";
-            font-size: root.c.style == 1 ? 11px : 11.5px;
-            font-weight: root.c.style == 1 ? 400 : 500;
-            color: root.c.style == 1 ? Ink.warn : Ink.dim;
+            font-size: root.c.style == 1 ? 11px : root.c.style == 2 ? 12px : 11.5px;
+            font-weight: root.c.style == 1 || root.c.style == 2 ? 400 : 500;
+            color: root.c.style == 1 ? Ink.warn : root.c.style == 2 ? Ink.bright : Ink.dim;
             horizontal-alignment: center;
             vertical-alignment: center;
         }
     }
     // a slider on a well, filled to its place in its color; the knob follows the pointer while held
+    // (style 1: in a box of the well's own shade, the track a step lighter than it)
     if root.c.kind == 41: filled := Rectangle {
         property <float> at: fdrag.pressed ? max(0, min(1, (fdrag.mouse-x - 9px) / (self.width - 18px))) : root.c.value;
         Rectangle {
             y: 7px;
             height: 6px;
             border-radius: 3px;
-            background: Ink.well;
+            background: root.c.style == 1 ? Ink.hover-box : Ink.well;
             clip: true;
             Rectangle {
                 x: 0;
@@ -1376,7 +1376,7 @@ component CellView inherits Rectangle {
             width: self.d + 6px;
             height: self.d + 6px;
             border-radius: self.width / 2;
-            background: Ink.box;
+            background: root.c.style == 1 ? Ink.well : Ink.box;
             drop-shadow-blur: 6px;
             drop-shadow-offset-y: 2px;
             drop-shadow-color: #000000aa;
@@ -1405,23 +1405,26 @@ component CellView inherits Rectangle {
         }
     }
     // a color's dot, ringed while the picker is open on it; style 1 opens the picker for any color
-    if root.c.kind == 42: Rectangle {
-        border-radius: 14px;
-        border-width: root.c.on ? 2px : 0;
-        border-color: Ink.dim;
+    // (in a cell under 28 across, as a narrow box has them: the dot 20 across, its ring a
+    // hairline of the brightest ink, kept apart from it by the box's own shade)
+    if root.c.kind == 42: dotcell := Rectangle {
+        property <bool> small: root.width < 28px;
+        border-radius: self.width / 2;
+        border-width: root.c.on ? (self.small ? 1.5px : 2px) : 0;
+        border-color: self.small ? Ink.bright : Ink.dim;
         Rectangle {
-            property <length> d: dot-ta.has-hover ? 26px : 24px;
+            property <length> d: dotcell.small ? (dot-ta.has-hover ? 22px : 20px) : dot-ta.has-hover ? 26px : 24px;
             x: (parent.width - self.d) / 2;
             y: (parent.height - self.d) / 2;
             width: self.d;
             height: self.d;
             border-radius: self.d / 2;
             background: root.c.style == 1 ? (dot-ta.has-hover ? Ink.hover-box : transparent) : root.c.color;
-            border-width: 1px;
+            border-width: root.c.style == 1 || !dotcell.small ? 1px : 0;
             border-color: root.c.style == 1 ? (dot-ta.has-hover ? #8a8a94 : #4a4a52) : #ffffff2a;
             if root.c.style == 1: Path {
-                width: 12px;
-                height: 12px;
+                width: dotcell.small ? 10px : 12px;
+                height: dotcell.small ? 10px : 12px;
                 viewbox-width: 12;
                 viewbox-height: 12;
                 commands: "M6 1.5v9M1.5 6h9";
@@ -2446,80 +2449,63 @@ component GameBox inherits PageBox {
 component PlCard inherits Rectangle {
     in property <PlPage> p;
     in property <bool> hovered;
-    // (lifted: the card being dragged)
-    in property <bool> lifted;
     border-radius: 10px;
-    background: root.lifted ? Ink.hover-box : root.hovered ? Ink.hover-well : Ink.well;
-    clip: true;
-    bar := Rectangle {
-        x: 8px;
-        y: parent.height / 4;
-        width: 4px;
-        height: parent.height / 2;
-        border-radius: 2px;
-        background: Ink.bright;
-        opacity: 0;
-    }
-    // in turn: the bar leaving fades out quickly, and only then does the next card's fade in
-    states [
-        playing when root.p.on: {
-            bar.opacity: 1;
-            in {
-                animate bar.opacity { duration: 260ms; delay: 180ms; easing: ease-out; }
-            }
-            out {
-                animate bar.opacity { duration: 180ms; easing: ease-in; }
-            }
-        }
-    ]
-    VerticalLayout {
-        x: 20px;
-        width: parent.width - 20px - 14px - bay.width - 12px;
-        alignment: center;
-        Text {
-            height: 20px;
-            text: root.p.name;
-            font-family: "Geist";
-            font-size: 13.5px;
-            font-weight: 600;
-            color: root.p.on ? Ink.bright : Ink.dim;
-            vertical-alignment: center;
-            overflow: elide;
-        }
-        if root.p.line1 != "": Text {
-            height: 18px;
-            text: root.p.line1;
-            font-family: "Geist";
-            font-size: 12.5px;
-            color: root.p.now && !root.p.paused ? Ink.dim : root.p.on ? Ink.soft : Ink.quiet;
-            vertical-alignment: center;
-            overflow: elide;
-        }
-        if root.p.line2 != "": Text {
-            height: 18px;
-            text: root.p.line2;
-            font-family: "Geist";
-            font-size: 12.5px;
-            color: root.p.on ? Ink.soft : Ink.quiet;
-            vertical-alignment: center;
-            overflow: elide;
-        }
-    }
-    // the picture, two pixels to a dot, in a bay: a 6px gutter of the screen's own background, rounded
-    bay := Rectangle {
-        x: parent.width - 12px - self.width;
+    background: root.hovered ? Ink.hover-well : Ink.well;
+    animate background { duration: 120ms; }
+    // the picture first, two pixels to a dot, in a bay: a 6px gutter of the screen's own background, rounded
+    Rectangle {
+        x: 12px;
         y: (parent.height - self.height) / 2;
-        width: 320px + 12px;
-        height: 64px + 12px;
+        width: 260px + 12px;
+        height: 52px + 12px;
         border-radius: 7px;
         background: root.p.field;
         Image {
             x: 6px;
             y: 6px;
-            width: 320px;
-            height: 64px;
+            width: 260px;
+            height: 52px;
             source: root.p.pic;
         }
+    }
+    // then its name, and at most two lines on what it shows (fitted by the page), the three
+    // in the card's middle
+    property <int> lines: root.p.line2 != "" ? 2 : root.p.line1 != "" ? 1 : 0;
+    property <length> words-y: (root.height - 20px - (root.lines > 0 ? 2px + root.lines * 17px : 0)) / 2;
+    Text {
+        x: 300px;
+        y: root.words-y;
+        width: root.width - 314px;
+        height: 20px;
+        text: root.p.name;
+        font-family: "Geist";
+        font-size: 13.5px;
+        font-weight: 600;
+        color: Ink.bright;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    if root.p.line1 != "": Text {
+        x: 300px;
+        y: root.words-y + 22px;
+        width: root.width - 314px;
+        height: 17px;
+        text: root.p.line1;
+        font-family: "Geist";
+        font-size: 12.5px;
+        color: Ink.soft;
+        vertical-alignment: center;
+    }
+    if root.p.line2 != "": Text {
+        x: 300px;
+        y: root.words-y + 39px;
+        width: root.width - 314px;
+        height: 17px;
+        text: root.p.line2;
+        font-family: "Geist";
+        font-size: 12.5px;
+        color: Ink.soft;
+        vertical-alignment: center;
     }
 }
 
@@ -2549,7 +2535,7 @@ component CardIcon inherits Rectangle {
     }
 }
 
-// how a turn comes in, as its mark on the strip shows it: a column sweeping
+// how a turn comes in, as its way bar on the strip shows it: a column sweeping
 // across what is already there, cells changing, a letter with the cursor
 // after it, a plain edge
 component WayGlyph inherits Rectangle {
@@ -2621,19 +2607,19 @@ component WayGlyph inherits Rectangle {
     }
 }
 
-// Edit or Remove on a turn's block: a small line glyph on the block's dark backing
+// Edit or Remove among a turn's time and buttons: a small line glyph on their dark backing
 component StripIcon inherits Rectangle {
     in property <string> commands;
     callback clicked;
-    width: 22px;
-    height: 22px;
+    width: 20px;
+    height: 20px;
     border-radius: 5px;
     background: ta.pressed ? Ink.pick : ta.has-hover ? Ink.hover-box : transparent;
     Path {
-        x: 4.5px;
-        y: 4.5px;
-        width: 13px;
-        height: 13px;
+        x: 4px;
+        y: 4px;
+        width: 12px;
+        height: 12px;
         viewbox-width: 24;
         viewbox-height: 24;
         commands: root.commands;
@@ -2647,84 +2633,28 @@ component StripIcon inherits Rectangle {
     }
 }
 
-// Pause, at the start of the strip it stops; Play while it is stopped
+// Pause, at the head of the playlist's panel; Play while the playlist is paused
 component PlayButton inherits Rectangle {
     in property <bool> paused;
     callback clicked;
-    width: 36px;
-    height: 36px;
-    border-radius: 9px;
-    background: ta.pressed ? Ink.pick : ta.has-hover ? Ink.hover-box : Ink.box;
-    if !root.paused: Rectangle {
-        x: 12px;
-        y: 11.5px;
-        width: 4px;
-        height: 13px;
-        border-radius: 1px;
-        background: Ink.bright;
-    }
-    if !root.paused: Rectangle {
-        x: 20px;
-        y: 11.5px;
-        width: 4px;
-        height: 13px;
-        border-radius: 1px;
-        background: Ink.bright;
-    }
-    if root.paused: Path {
-        x: 11px;
-        y: 11px;
-        width: 14px;
-        height: 14px;
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    background: ta.pressed ? Ink.pick-hover : ta.has-hover ? Ink.pick : Ink.hover-box;
+    Path {
+        x: 8px;
+        y: 8px;
+        width: 12px;
+        height: 12px;
         viewbox-width: 24;
         viewbox-height: 24;
-        commands: "M8 5.5v13a1 1 0 0 0 1.5.9l10-6.5a1 1 0 0 0 0-1.7l-10-6.6A1 1 0 0 0 8 5.5z";
+        commands: root.paused ? "M8 5.5v13a1 1 0 0 0 1.5.9l10-6.5a1 1 0 0 0 0-1.7l-10-6.6A1 1 0 0 0 8 5.5z"
+            : "M7 5h2a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM15 5h2a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z";
         fill: Ink.bright;
     }
     ta := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
-    }
-}
-
-// a turn's block on the strip: its page's name, and its picture in a bay of
-// the screen's own background when the block has room for it; the turn on the
-// screen now a step lighter; lifted, the block being carried
-component StripBlock inherits Rectangle {
-    in property <PlBlock> b;
-    in property <bool> hovered;
-    in property <bool> lifted;
-    border-radius: 8px;
-    clip: true;
-    background: root.lifted ? Ink.hover-box : root.b.on ? (root.hovered ? Ink.pick-hover : Ink.pick) : (root.hovered ? Ink.hover-box : Ink.box);
-    animate background { duration: 120ms; }
-    Text {
-        x: 8px;
-        y: 8px;
-        width: parent.width - 16px;
-        height: 18px;
-        text: root.b.name;
-        font-family: "Geist";
-        font-size: 12.5px;
-        font-weight: 600;
-        color: root.b.on || root.lifted ? Ink.bright : Ink.dim;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-    if root.b.pic-w > 0: Rectangle {
-        x: 8px;
-        y: 32px;
-        width: root.b.pic-w + 4px;
-        height: root.b.pic-w / 5 + 4px;
-        border-radius: 4px;
-        background: root.b.field;
-        Image {
-            x: 2px;
-            y: 2px;
-            width: root.b.pic-w;
-            height: root.b.pic-w / 5;
-            source: root.b.pic;
-        }
     }
 }
 
@@ -3370,17 +3300,31 @@ export component AppWindow inherits Window {
     // picture of Stats; the launch sequence's picture beside its checkbox; what
     // is playing (0 playing, 1 paused, 2 another program has the screen, 3 the
     // keyboard's screen isn't there); whether launches break in; and the
-    // closed box's height
+    // Screen defaults box's height
     in property <image> lcd-big;
     in property <int> lcd-state;
-    in property <length> closed-h;
-    // the closed box laid out in three columns, across the Library's width
-    in property <bool> closed-wide;
+    in property <length> defaults-h;
     callback lcd-pause();
-    // the playlist's strip under the screen: each turn's block; the room a
-    // carried screen will land in (no width, none); blocks following an edge
-    // being dragged at once; one turn only; a script's screen showing, which
-    // the strip waits for, and what the strip says about it
+    // the playlist's panel: the playlist's name, and the width its chooser
+    // takes; the chooser's menu open; the name being changed in place, and
+    // the name as typed so far; where the strip starts in the panel and how
+    // wide it is, and how long each turn's way bar is (the page measures and
+    // lays out all four)
+    in property <string> pl-name;
+    in property <length> pl-chooser-w: 80px;
+    in property <bool> pl-choosing;
+    in property <bool> pl-renaming;
+    in-out property <string> pl-rename-text;
+    in property <length> pl-track-x: 140px;
+    in property <length> pl-track-w: 600px;
+    in property <length> pl-way-w: 26px;
+    property <length> pl-pre: root.pl-way-w + 1px;
+    callback pl-choose(length, length, length);
+    callback pl-rename-done(bool, string);
+    // the strip: each turn; the room a carried screen will land in (no width,
+    // none); turns following an edge being dragged at once; one turn only; a
+    // script's screen showing, which the strip waits for, and what the strip
+    // says about it
     in property <[PlBlock]> pl-blocks;
     in property <length> pl-slot-x;
     in property <length> pl-slot-w;
@@ -3388,8 +3332,8 @@ export component AppWindow inherits Window {
     in property <bool> pl-single;
     in property <bool> pl-dim;
     in property <string> pl-script;
-    // the playhead: shown or not, in the mark (the turn coming in) or the
-    // block; where it stands while still, and while it moves, when on
+    // the playhead: shown or not, on the way bar (the turn coming in) or the
+    // screen's bar; where it stands while still, and while it moves, when on
     // animation-tick()'s clock its part of the turn began and how long it lasts
     in property <bool> pl-head;
     in property <bool> pl-in;
@@ -3403,7 +3347,7 @@ export component AppWindow inherits Window {
     in-out property <int> pl-sizing: -1;
     in property <int> pl-menu: -1;
     // a screen carried to the strip, from the strip or the Library: where the
-    // pointer holds it (in the Screen tab's box), how it looks, how wide, and
+    // pointer holds it (in the Screen tab's right column), its name, and
     // whether it is settling into its room
     in-out property <bool> carry-on;
     in-out property <length> carry-x;
@@ -3411,8 +3355,7 @@ export component AppWindow inherits Window {
     in-out property <length> carry-gx;
     in-out property <length> carry-gy;
     in-out property <bool> carry-settle;
-    in property <PlBlock> carry-block;
-    in property <length> carry-w: 190px;
+    in property <string> carry-name;
     callback pl-carry-start(int, int);
     callback pl-carry-move(length, bool);
     callback pl-carry-drop();
@@ -3421,8 +3364,10 @@ export component AppWindow inherits Window {
     callback pl-size-done();
     callback pl-mark(int, length, length, length);
     callback pl-back();
-    // the Library: every screen, its card, and a screen opened in the editor
+    // the Library: every screen, its card; a screen put on the end of the
+    // playlist the panel shows, or opened in the editor
     in property <[PlPage]> lib-pages;
+    callback lib-add-to(int);
     callback lib-edit(int);
     // the page editor: whether a page is being edited, the toolbar's words,
     // the grid on or off, the pieces over the screen, and its three boxes
@@ -3594,22 +3539,33 @@ export component AppWindow inherits Window {
     property <length> board-top: head-end + kb-pad-y;
     // under the keyboard: the anchoring column (the profiles, what goes with
     // them), and beside it the tab's boxes
-    // the Screen tab's screen: a fixed size, in the middle of its dark box
-    property <length> lcd-w: 860px;
-    property <length> lcd-h: 172px;
+    // the Screen tab, in two columns: Profiles at the top of the left one, Screen defaults
+    // under them; in the right one the screen's box, the playlist's panel attached under
+    // it, and the Library. The box is as tall as leaves the panel's foot level with the
+    // Profiles box's.
+    property <length> pl-panel-h: 70px;
+    property <length> stage-h: anchor.preferred-height - pl-panel-h;
     // the bay the screen sits in (the screen and its gutter), and the box's gray round the
     // bay, above and below it as at its sides
     property <length> bay-pad: 16px;
-    property <length> lcd-box-h: lcd-h + 2 * kb-pad-y + 2 * bay-pad + (root.screen-editing ? 0 : strip-row-h);
-    // the strip's row: its label over it, then the strip, 76 high
-    property <length> strip-row-h: 116px;
-    // under the box: the Library, its cards two to a row, then When Ectodeck is closed
-    property <int> shelf-rows: ceil(root.lib-pages.length / 2);
+    // the screen as large as its box leaves it, the gutter and the padding kept, in whole
+    // pixels (the page draws its picture at this size)
+    out property <length> lcd-h: floor(min(stage-h - 2 * bay-pad - 2 * kb-pad-y, (under-w - 2 * bay-pad - 2 * kb-pad-y) / 5) / 1px) * 1px;
+    out property <length> lcd-w: lcd-h * 5;
+    // under the panel: the Library, its cards two to a row while each has room for its
+    // picture and its words, otherwise one
+    out property <bool> shelf-two: (under-w - 32px - 8px) / 2 >= 454px;
+    property <int> shelf-rows: shelf-two ? ceil(root.lib-pages.length / 2) : root.lib-pages.length;
     property <length> shelf-h: 72px + shelf-rows * 104px - 8px + 16px;
-    property <length> closed-w: root.closed-wide ? under-w : 320px;
     // the screen's own background, which its bay is
     in property <color> lcd-field: #0a0908;
-    property <length> under-top: root.tab == 3 ? head-end + lcd-box-h + 18px : head-end + board-h + 2 * kb-pad-y + 18px;
+    // (on the Screen tab, what is under the screen's box and its panel: the Library, or
+    // the page editor's boxes)
+    property <length> under-top: root.tab == 3 ? head-end + stage-h + (root.screen-editing ? 0 : pl-panel-h) + 18px : head-end + board-h + 2 * kb-pad-y + 18px;
+    // the playlist's name changed in place: where its field is in the window, so a press
+    // away from it keeps the name
+    out property <length> pl-rename-wx: rail-w + under-x + 50px;
+    out property <length> pl-rename-wy: bar + 56px + flick.content-y + head-end + stage-h + 14px;
     property <length> anchor-w: 240px;
     property <length> under-x: pws-x + anchor-w + 16px;
     out property <length> under-w: pws-w - anchor-w - 16px;
@@ -3656,12 +3612,14 @@ export component AppWindow inherits Window {
     property <int> ed-n: under-w >= 3 * 320px + 24px ? 3 : under-w >= 2 * 320px + 12px ? 2 : 1;
     property <int> ed-rows: ed-n == 3 ? 1 : ed-n == 2 ? 2 : 3;
     property <length> ed-need: max(root.ed-piece-h, max(root.ed-place-h, root.ed-page-h));
-    property <length> ed-row: ed-rows == 1 ? min(band-max, max(band-min, ed-need)) : max(band-min, ed-need);
+    property <length> ed-row: max(ed-need, ed-rows == 1 ? root.defaults-h + pl-panel-h : 0);
     property <length> ed-h: ed-rows * ed-row + (ed-rows - 1) * 12px;
     property <length> tab-h: root.tab == 0 ? (second-fits ? keys-h : keys-h + 12px + second-h)
-        : root.tab == 1 ? light-h : root.tab == 3 ? (root.screen-editing ? ed-h : shelf-h + 12px + root.closed-h) : root.tile-height;
+        : root.tab == 1 ? light-h : root.tab == 3 ? (root.screen-editing ? ed-h : shelf-h) : root.tile-height;
     property <length> under-board: 18px + max(anchor.preferred-height, tab-h);
-    property <length> page-h: root.tab == 2 ? 12px + head-h + 6px + 24px + root.tile-height + 40px : root.tab == 3 ? under-top - 18px + under-board + 24px : board-top + board-h + kb-pad-y + under-board + 24px;
+    property <length> page-h: root.tab == 2 ? 12px + head-h + 6px + 24px + root.tile-height + 40px
+        : root.tab == 3 ? max(head-end + anchor.preferred-height + 18px + root.defaults-h, under-top + tab-h) + 24px
+        : board-top + board-h + kb-pad-y + under-board + 24px;
     // the page's scrollbar, as WebKit drew it: over the whole window, when the page is longer than it
     property <length> doc-h: bar + 56px + page-h;
 
@@ -3912,7 +3870,7 @@ export component AppWindow inherits Window {
                 anchor := AnchorColumn {
                     visible: root.boot == 0 && root.tab != 2;
                     x: pws-x;
-                    y: under-top;
+                    y: root.tab == 3 ? head-end : under-top;
                     width: anchor-w;
                     profiles: root.profiles;
                     choose(n) => { root.choose-profile(n); }
@@ -4039,38 +3997,30 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
-                // Screen: the screen in its dark box, as large as it stays, and the
-                // playlist's strip under it in the same box; under the box the Library,
-                // then what the screen shows when Ectodeck is closed. (All in one
-                // part of the window, so a screen carried from the Library knows
-                // where the strip is.)
+                // Screen, the right column: the screen in its dark box, the playlist's panel
+                // attached under the box, and the Library under the panel. (All in one part of
+                // the window, so a screen carried from the Library knows where the panel is.)
                 if root.tab == 3: stage := Rectangle {
-                    x: pws-x;
+                    x: under-x;
                     y: head-end;
-                    width: pws-w;
-                    height: lcd-box-h;
-                    // the bay's left edge, which the strip's row lines up with, and the row's top
-                    property <length> bay-x: (self.width - lcd-w) / 2 - kb-pad-y;
-                    property <length> row-y: bay-pad + lcd-h + 2 * kb-pad-y;
-                    // the Library's top left in the box's own terms
-                    property <length> lib-x: under-x - pws-x;
-                    property <length> lib-y: lcd-box-h + 18px;
-                    // a screen carried to `wx`, `wy` in the window: where the pointer holds
-                    // it here, and where that is over the strip (near it, it can land)
+                    width: under-w;
+                    height: stage-h + pl-panel-h + 18px + shelf-h;
+                    // a screen carried to `wx`, `wy` in the window: where the pointer holds it
+                    // here, and where that is along the strip (anywhere over the panel, it can land)
                     function carry-to(wx: length, wy: length) {
                         root.carry-x = wx - self.absolute-position.x;
                         root.carry-y = wy - self.absolute-position.y;
                         root.pl-carry-move(wx - strip.absolute-position.x,
-                            wx > strip.absolute-position.x - 40px && wx < strip.absolute-position.x + strip.width + 40px
-                            && wy > strip.absolute-position.y - 70px && wy < strip.absolute-position.y + strip.height + 70px);
+                            wx > panel.absolute-position.x && wx < panel.absolute-position.x + panel.width
+                            && wy > panel.absolute-position.y - 20px && wy < panel.absolute-position.y + panel.height + 40px);
                     }
-                    // let go: over the strip, the carried screen settles into its room and
-                    // then takes its place; away from it, nothing changes
+                    // let go: over the panel, the carried name settles into its room and then
+                    // the screen takes its place; away from it, nothing changes
                     function drop-carry() {
                         if (root.pl-slot-w > 0) {
                             root.carry-settle = true;
-                            root.carry-x = strip.x + root.pl-slot-x + root.carry-gx;
-                            root.carry-y = strip.y + root.carry-gy;
+                            root.carry-x = panel.x + strip.x + root.pl-slot-x + root.carry-gx;
+                            root.carry-y = panel.y + strip.y + 26px + root.carry-gy;
                             settle.running = true;
                         } else {
                             root.carry-on = false;
@@ -4087,393 +4037,571 @@ export component AppWindow inherits Window {
                             root.pl-carry-drop();
                         }
                     }
-                    border-radius: 12px;
-                    background: Ink.well;
-                    // the bay the screen is set into, between plain walls: the screen's own
-                    // background color, its corners rounded inside the box's, its top edge
-                    // shaded as a step down into it
+                    // the panel's gray behind the box's lower corners, where the two meet
                     Rectangle {
-                        x: (parent.width - lcd-w) / 2 - kb-pad-y;
-                        y: bay-pad;
-                        width: lcd-w + 2 * kb-pad-y;
-                        height: lcd-h + 2 * kb-pad-y;
-                        border-radius: 10px;
-                        background: root.lcd-field;
-                        animate background { duration: 450ms; easing: ease; }
-                        border-width: 1px;
-                        border-color: #0000008c;
-                        clip: true;
-                        // (at the top: an element placed nowhere sits in the middle)
+                        visible: !root.screen-editing;
+                        y: stage-h - 12px;
+                        height: 24px;
+                        background: Ink.box;
+                    }
+                    // the screen's box
+                    Rectangle {
+                        y: 0;
+                        height: stage-h;
+                        border-radius: 12px;
+                        background: Ink.well;
+                        // the bay the screen is set into, between plain walls: the screen's own
+                        // background color, its corners rounded inside the box's, its top edge
+                        // shaded as a step down into it
                         Rectangle {
-                            y: 0;
-                            height: 14px;
-                            background: @linear-gradient(180deg, #00000073 0%, #00000000 100%);
-                        }
-                    }
-                    Rectangle {
-                        x: (parent.width - lcd-w) / 2;
-                        y: bay-pad + kb-pad-y;
-                        width: lcd-w;
-                        height: lcd-h;
-                        border-radius: 4px;
-                        clip: true;
-                        Image {
-                            width: parent.width;
-                            height: parent.height;
-                            source: root.lcd-big;
-                        }
-                        // editing: a press away from every piece lets the chosen one go
-                        if root.screen-editing: TouchArea {
-                            // (on the press itself: a drag let go here is no press away)
-                            pointer-event(e) => {
-                                if (e.kind == PointerEventKind.down) {
-                                    root.piece-chosen(-1);
-                                }
-                            }
-                        }
-                        // the screen's 20 by 4 cells
-                        if root.screen-editing && root.ed-grid: Rectangle {
-                            for k in 19: Rectangle {
-                                x: (k + 1) * parent.width / 20 - 0.5px;
-                                width: 1px;
-                                background: #ffffff1c;
-                            }
-                            for k in 3: Rectangle {
-                                y: (k + 1) * parent.height / 4 - 0.5px;
-                                height: 1px;
-                                background: #ffffff1c;
-                            }
-                        }
-                        // each piece outlined; the chosen one in amber, named; a
-                        // piece dragged follows the pointer cell by cell
-                        if root.screen-editing: Rectangle {
-                            property <length> cw: parent.width / 20;
-                            property <length> ch: parent.height / 4;
-                            for p[i] in root.ed-pieces: Rectangle {
-                                // how many cells across and down the piece has been dragged
-                                property <int> dc: 0;
-                                property <int> dr: 0;
-                                property <int> at-col: max(0, min(20 - p.width, p.col + dc));
-                                property <int> at-row: max(0, min(3, p.row + dr));
-                                // (the drag ends once the page has the piece where it was dropped)
-                                property <int> home: p.row * 100 + p.col;
-                                changed home => {
-                                    self.dc = 0;
-                                    self.dr = 0;
-                                }
-                                x: at-col * cw + 1px;
-                                y: at-row * ch + 1px;
-                                width: p.width * cw - 2px;
-                                height: ch - 2px;
-                                border-radius: 3px;
-                                border-width: p.on || drag.pressed ? 2px : 1px;
-                                border-color: p.on || drag.pressed ? Ink.warn : drag.has-hover ? #ffffff80 : #ffffff33;
-                                background: p.on ? #f0b35a1a : drag.has-hover ? #ffffff0d : transparent;
-                                drag := TouchArea {
-                                    mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.pointer;
-                                    // the pointer measured from where it was pressed on the screen:
-                                    // the outline moves with the drag, so how far it has moved
-                                    // already is added back, or the piece snaps to and fro
-                                    moved => {
-                                        parent.dc = round((self.mouse-x - self.pressed-x + (parent.at-col - p.col) * cw) / cw);
-                                        parent.dr = round((self.mouse-y - self.pressed-y + (parent.at-row - p.row) * ch) / ch);
-                                    }
-                                    pointer-event(e) => {
-                                        if (e.kind == PointerEventKind.down) {
-                                            parent.dc = 0;
-                                            parent.dr = 0;
-                                        }
-                                        if (e.kind == PointerEventKind.up) {
-                                            if (parent.at-col != p.col || parent.at-row != p.row) {
-                                                // stays where it was dropped until the page has it there
-                                                root.piece-moved(i, parent.at-row, parent.at-col);
-                                            } else {
-                                                parent.dc = 0;
-                                                parent.dr = 0;
-                                                root.piece-chosen(i);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    // ---------------------------------------------------- the playlist's strip
-                    // under the screen, lined up with the bay: its name, Pause, the strip
-                    // itself (one round of the playlist, left to right, each turn as wide
-                    // as its time), and the round starting again after it
-                    Text {
-                        visible: !root.screen-editing;
-                        x: parent.bay-x;
-                        y: parent.row-y + 11px;
-                        height: 18px;
-                        text: "Playlist";
-                        font-family: "Geist";
-                        font-size: 12.5px;
-                        font-weight: 600;
-                        color: Ink.soft;
-                        vertical-alignment: center;
-                    }
-                    PlayButton {
-                        visible: !root.screen-editing;
-                        x: parent.bay-x;
-                        y: parent.row-y + 60px;
-                        paused: root.lcd-state == 1;
-                        clicked => { root.lcd-pause(); }
-                    }
-                    Path {
-                        visible: !root.screen-editing && !root.pl-single && root.pl-sizing < 0;
-                        x: parent.bay-x + lcd-w + 2 * kb-pad-y - 20px;
-                        y: parent.row-y + 68px;
-                        width: 20px;
-                        height: 20px;
-                        viewbox-width: 24;
-                        viewbox-height: 24;
-                        commands: "M20 12a8 8 0 1 1-2.6-5.9M20 4v4.5h-4.5";
-                        fill: transparent;
-                        stroke: Ink.quiet;
-                        stroke-width: 1.8px;
-                        stroke-line-cap: round;
-                    }
-                    strip := Rectangle {
-                        visible: !root.screen-editing;
-                        x: parent.bay-x + 46px;
-                        y: parent.row-y + 40px;
-                        width: 834px;
-                        height: 76px;
-                        // where a carried screen will land: the turns either side make room for it
-                        if root.pl-slot-w > 0: Rectangle {
-                            x: root.pl-slot-x;
-                            width: root.pl-slot-w;
-                            height: 76px;
-                            animate x, width { duration: 250ms; easing: ease; }
-                            border-radius: 8px;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            width: lcd-w + 2 * kb-pad-y;
+                            height: lcd-h + 2 * kb-pad-y;
+                            border-radius: 10px;
+                            background: root.lcd-field;
+                            animate background { duration: 450ms; easing: ease; }
                             border-width: 1px;
-                            border-color: Ink.pick-hover;
-                            background: #1a1a1e;
-                        }
-                        // the mark before each turn: how it comes in; select it to choose another way
-                        for b[i] in root.pl-blocks: Rectangle {
-                            x: b.x - 18px;
-                            width: 18px;
-                            height: 76px;
-                            animate x { duration: root.pl-live ? 0ms : 250ms; easing: ease; }
-                            visible: !root.pl-single;
-                            opacity: b.away ? 0 : root.pl-dim ? 0.3 : 1;
-                            border-radius: 6px;
-                            background: (mta.has-hover && !root.carry-on) || root.pl-menu == i ? Ink.hover-well : transparent;
-                            WayGlyph {
-                                x: 3px;
-                                y: 32px;
-                                way: b.way;
-                                ink: (mta.has-hover && !root.carry-on) || root.pl-menu == i ? Ink.bright : Ink.soft;
-                            }
-                            mta := TouchArea {
-                                enabled: !b.away && !root.pl-dim && !root.carry-on;
-                                mouse-cursor: pointer;
-                                clicked => { root.pl-mark(i, self.absolute-position.x, self.absolute-position.y, self.height); }
+                            border-color: #0000008c;
+                            clip: true;
+                            // (at the top: an element placed nowhere sits in the middle)
+                            Rectangle {
+                                y: 0;
+                                height: 14px;
+                                background: @linear-gradient(180deg, #00000073 0%, #00000000 100%);
                             }
                         }
-                        // the turns
-                        for b[i] in root.pl-blocks: blk := Rectangle {
-                            x: b.x;
-                            width: b.w;
-                            height: 76px;
-                            animate x, width { duration: root.pl-live ? 0ms : 250ms; easing: ease; }
-                            property <bool> hov: bta.has-hover && !root.carry-on && root.pl-sizing < 0 && !root.pl-dim;
-                            StripBlock {
+                        Rectangle {
+                            x: (parent.width - lcd-w) / 2;
+                            y: (parent.height - lcd-h) / 2;
+                            width: lcd-w;
+                            height: lcd-h;
+                            border-radius: 4px;
+                            clip: true;
+                            Image {
                                 width: parent.width;
                                 height: parent.height;
-                                b: b;
-                                hovered: blk.hov;
-                                opacity: b.away ? 0 : root.pl-dim ? 0.3 : 1;
+                                source: root.lcd-big;
                             }
-                            // select to show the turn now; drag along the strip to move it
-                            bta := TouchArea {
-                                enabled: !root.pl-dim;
-                                mouse-cursor: root.carry-on ? MouseCursor.grabbing : MouseCursor.grab;
-                                property <bool> far;
+                            // editing: a press away from every piece lets the chosen one go
+                            if root.screen-editing: TouchArea {
+                                // (on the press itself: a drag let go here is no press away)
                                 pointer-event(e) => {
                                     if (e.kind == PointerEventKind.down) {
-                                        self.far = false;
-                                    }
-                                    if (e.kind == PointerEventKind.up) {
-                                        if (root.carry-on) {
-                                            stage.drop-carry();
-                                        } else if (!self.far) {
-                                            root.page-show(i);
-                                        }
-                                    }
-                                    if (e.kind == PointerEventKind.cancel && root.carry-on) {
-                                        root.carry-on = false;
-                                        root.pl-carry-cancel();
+                                        root.piece-chosen(-1);
                                     }
                                 }
-                                moved => {
-                                    if (self.pressed) {
-                                        if (!root.carry-on && !self.far && (abs(self.mouse-x - self.pressed-x) > 4px || abs(self.mouse-y - self.pressed-y) > 4px)) {
-                                            self.far = true;
-                                            root.carry-gx = min(self.pressed-x, 60px);
-                                            root.carry-gy = self.pressed-y;
-                                            root.carry-settle = false;
-                                            root.carry-on = true;
-                                            root.pl-carry-start(0, i);
-                                        }
-                                        if (root.carry-on) {
-                                            stage.carry-to(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
-                                        }
-                                    }
+                            }
+                            // the screen's 20 by 4 cells
+                            if root.screen-editing && root.ed-grid: Rectangle {
+                                for k in 19: Rectangle {
+                                    x: (k + 1) * parent.width / 20 - 0.5px;
+                                    width: 1px;
+                                    background: #ffffff1c;
                                 }
-                                // (inside the block's TouchArea, so the block keeps the pointer while it is on them)
-                                // Edit and Remove, at the block's corner while the pointer is on it
-                                if blk.hov: Rectangle {
-                                    x: parent.width - 6px - self.width;
-                                    y: 6px;
-                                    width: 2px + 22px + (root.pl-single ? 0 : 23px) + 2px;
-                                    height: 26px;
-                                    border-radius: 7px;
-                                    background: #131316eb;
-                                    StripIcon {
-                                        x: 2px;
-                                        y: 2px;
-                                        commands: "M4 20h4L19 9l-4-4L4 16z";
-                                        clicked => { root.screen-edit(i); }
-                                    }
-                                    if !root.pl-single: StripIcon {
-                                        x: 25px;
-                                        y: 2px;
-                                        commands: "M6 6l12 12M18 6L6 18";
-                                        clicked => { root.page-remove(i); }
-                                    }
+                                for k in 3: Rectangle {
+                                    y: (k + 1) * parent.height / 4 - 0.5px;
+                                    height: 1px;
+                                    background: #ffffff1c;
                                 }
-                                // the right edge: drag it to make the turn longer or shorter
-                                if !root.pl-single && !b.away && !root.pl-dim: Rectangle {
-                                    x: parent.width - 10px;
-                                    width: 10px;
-                                    height: 76px;
-                                    Rectangle {
-                                        x: 4px;
-                                        y: 27px;
-                                        width: 2px;
-                                        height: 22px;
-                                        border-radius: 1px;
-                                        background: Ink.dim;
-                                        opacity: blk.hov || root.pl-sizing == i ? 0.75 : 0;
-                                        animate opacity { duration: 120ms; }
+                            }
+                            // each piece outlined; the chosen one in amber, named; a
+                            // piece dragged follows the pointer cell by cell
+                            if root.screen-editing: Rectangle {
+                                property <length> cw: parent.width / 20;
+                                property <length> ch: parent.height / 4;
+                                for p[i] in root.ed-pieces: Rectangle {
+                                    // how many cells across and down the piece has been dragged
+                                    property <int> dc: 0;
+                                    property <int> dr: 0;
+                                    property <int> at-col: max(0, min(20 - p.width, p.col + dc));
+                                    property <int> at-row: max(0, min(3, p.row + dr));
+                                    // (the drag ends once the page has the piece where it was dropped)
+                                    property <int> home: p.row * 100 + p.col;
+                                    changed home => {
+                                        self.dc = 0;
+                                        self.dr = 0;
                                     }
-                                    gta := TouchArea {
-                                        enabled: !root.carry-on;
-                                        mouse-cursor: MouseCursor.ew-resize;
-                                            // (measured in the window: the edge moves with the drag)
-                                        property <length> from;
+                                    x: at-col * cw + 1px;
+                                    y: at-row * ch + 1px;
+                                    width: p.width * cw - 2px;
+                                    height: ch - 2px;
+                                    border-radius: 3px;
+                                    border-width: p.on || drag.pressed ? 2px : 1px;
+                                    border-color: p.on || drag.pressed ? Ink.warn : drag.has-hover ? #ffffff80 : #ffffff33;
+                                    background: p.on ? #f0b35a1a : drag.has-hover ? #ffffff0d : transparent;
+                                    drag := TouchArea {
+                                        mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.pointer;
+                                        // the pointer measured from where it was pressed on the screen:
+                                        // the outline moves with the drag, so how far it has moved
+                                        // already is added back, or the piece snaps to and fro
+                                        moved => {
+                                            parent.dc = round((self.mouse-x - self.pressed-x + (parent.at-col - p.col) * cw) / cw);
+                                            parent.dr = round((self.mouse-y - self.pressed-y + (parent.at-row - p.row) * ch) / ch);
+                                        }
                                         pointer-event(e) => {
                                             if (e.kind == PointerEventKind.down) {
-                                                self.from = self.absolute-position.x + self.mouse-x;
+                                                parent.dc = 0;
+                                                parent.dr = 0;
                                             }
-                                            if ((e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) && root.pl-sizing == i) {
-                                                root.pl-sizing = -1;
-                                                root.pl-size-done();
-                                            }
-                                        }
-                                        moved => {
-                                            if (self.pressed) {
-                                                root.pl-sizing = i;
-                                                root.pl-size(i, self.absolute-position.x + self.mouse-x - self.from);
+                                            if (e.kind == PointerEventKind.up) {
+                                                if (parent.at-col != p.col || parent.at-row != p.row) {
+                                                    // stays where it was dropped until the page has it there
+                                                    root.piece-moved(i, parent.at-row, parent.at-col);
+                                                } else {
+                                                    parent.dc = 0;
+                                                    parent.dr = 0;
+                                                    root.piece-chosen(i);
+                                                }
                                             }
                                         }
                                     }
-                                }
-                            }
-                            // its time, over it while the pointer is on it or its edge is dragged
-                            if (blk.hov || root.pl-sizing == i) && !b.away: Rectangle {
-                                x: (parent.width - self.width) / 2;
-                                y: -27px;
-                                width: secs-text.preferred-width + 14px;
-                                height: 20px;
-                                border-radius: 6px;
-                                background: Ink.pop;
-                                secs-text := Text {
-                                    x: 7px;
-                                    height: parent.height;
-                                    text: b.secs;
-                                    font-family: "Geist";
-                                    font-size: 12px;
-                                    color: Ink.bright;
-                                    vertical-alignment: center;
-                                }
-                            }
-                            // the playhead: through the mark while the turn comes in, then along the block
-                            if b.on && root.pl-head && !b.away: Rectangle {
-                                x: (root.pl-in ? -18px + 18px * root.pl-p : parent.width * root.pl-p) - 1px;
-                                y: -8px;
-                                width: 2px;
-                                height: 92px;
-                                border-radius: 1px;
-                                background: Ink.bright;
-                                opacity: root.carry-on ? 0.3 : 1;
-                                Rectangle {
-                                    x: -4px;
-                                    y: -4px;
-                                    width: 10px;
-                                    height: 10px;
-                                    border-radius: 5px;
-                                    background: Ink.bright;
                                 }
                             }
                         }
-                        // a script's screen on the keyboard: the strip waits, and says so
-                        if root.pl-dim: Rectangle {
-                            property <length> tw: pill-text.preferred-width;
-                            property <length> bw: back-text.preferred-width + 20px;
-                            x: (parent.width - self.width) / 2;
-                            y: 20px;
-                            width: 14px + self.tw + 12px + self.bw + 4px;
-                            height: 36px;
-                            border-radius: 9px;
-                            background: Ink.pop;
-                            drop-shadow-blur: 24px;
-                            drop-shadow-offset-y: 8px;
-                            drop-shadow-color: #00000059;
-                            pill-text := Text {
-                                x: 14px;
+                    }
+
+                    // ---------------------------------------------------- the playlist's panel
+                    // attached under the screen's box, as wide as the box, in the boxes' gray (over
+                    // the box's foot, so what opens from the panel rises over the box). One row:
+                    // Pause, which playlist, then one round of it, left to right, each turn as long
+                    // as its time, and the round starting again after it.
+                    panel := Rectangle {
+                        visible: !root.screen-editing;
+                        y: stage-h;
+                        height: pl-panel-h;
+                        background: Ink.box;
+                        border-bottom-left-radius: 12px;
+                        border-bottom-right-radius: 12px;
+                        PlayButton {
+                            x: 16px;
+                            y: 14px;
+                            paused: root.lcd-state == 1;
+                            clicked => { root.lcd-pause(); }
+                        }
+                        // which playlist the profile plays: select it to choose another, or to
+                        // make, rename or delete one
+                        if !root.pl-renaming: Rectangle {
+                            x: 50px;
+                            y: 14px;
+                            width: root.pl-chooser-w;
+                            height: 28px;
+                            border-radius: 7px;
+                            background: cho-ta.has-hover || root.pl-choosing ? Ink.hover-box : transparent;
+                            Text {
+                                x: 8px;
+                                width: parent.width - 33px;
                                 height: parent.height;
-                                text: root.pl-script;
+                                text: root.pl-name;
                                 font-family: "Geist";
                                 font-size: 13px;
+                                font-weight: 500;
                                 color: Ink.bright;
                                 vertical-alignment: center;
+                                overflow: elide;
+                            }
+                            Path {
+                                x: parent.width - 18px;
+                                y: 9px;
+                                width: 10px;
+                                height: 10px;
+                                viewbox-width: 10;
+                                viewbox-height: 10;
+                                commands: "M2 3.5l3 3 3-3";
+                                fill: transparent;
+                                stroke: Ink.soft;
+                                stroke-width: 1.5px;
+                                stroke-line-cap: round;
+                                stroke-line-join: round;
+                            }
+                            cho-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.pl-choose(self.absolute-position.x, self.absolute-position.y, self.height); }
+                            }
+                        }
+                        // the playlist's name changed in place: Enter, the tick or a press away keeps
+                        // it, Escape lets it go
+                        if root.pl-renaming: Rectangle {
+                            x: 50px;
+                            y: 14px;
+                            width: 195px;
+                            height: 28px;
+                            border-radius: 7px;
+                            background: Ink.well;
+                            border-width: 1px;
+                            border-color: #4a4a52;
+                            TouchArea {
+                                mouse-cursor: text;
+                                clicked => { ren-in.focus(); }
+                            }
+                            ren-in := TextInput {
+                                x: 10px;
+                                width: 160px;
+                                height: parent.height;
+                                text <=> root.pl-rename-text;
+                                font-family: "Geist";
+                                font-size: 13px;
+                                font-weight: 500;
+                                color: Ink.bright;
+                                vertical-alignment: center;
+                                single-line: true;
+                                init => {
+                                    self.focus();
+                                    self.select-all();
+                                }
+                                changed has-focus => { Typing.on = self.has-focus; }
+                                accepted => { root.pl-rename-done(true, self.text); }
+                                key-pressed(e) => {
+                                    if (e.text == Key.Escape) {
+                                        root.pl-rename-done(false, self.text);
+                                        return accept;
+                                    }
+                                    reject
+                                }
                             }
                             Rectangle {
-                                x: 14px + parent.tw + 12px;
-                                y: 4px;
-                                width: parent.bw;
-                                height: 28px;
-                                border-radius: 7px;
-                                background: back-ta.pressed ? Ink.pick : back-ta.has-hover ? Ink.pick-hover : Ink.hover-box;
-                                back-text := Text {
+                                x: 170px;
+                                y: 3px;
+                                width: 22px;
+                                height: 22px;
+                                border-radius: 5px;
+                                background: ok-ta.has-hover ? Ink.hover-box : transparent;
+                                Path {
+                                    x: 4.5px;
+                                    y: 4.5px;
+                                    width: 13px;
+                                    height: 13px;
+                                    viewbox-width: 24;
+                                    viewbox-height: 24;
+                                    commands: "M5 12.5l4.5 4.5L19 7.5";
+                                    fill: transparent;
+                                    stroke: ok-ta.has-hover ? Ink.bright : Ink.dim;
+                                    stroke-width: 2px;
+                                    stroke-line-cap: round;
+                                    stroke-line-join: round;
+                                }
+                                ok-ta := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.pl-rename-done(true, ren-in.text); }
+                                }
+                            }
+                        }
+                        // the round starting again, after the strip
+                        Path {
+                            visible: !root.pl-single && root.pl-sizing < 0;
+                            x: parent.width - 36px;
+                            y: 18px;
+                            width: 20px;
+                            height: 20px;
+                            viewbox-width: 24;
+                            viewbox-height: 24;
+                            commands: "M20 12a8 8 0 1 1-2.6-5.9M20 4v4.5h-4.5";
+                            fill: transparent;
+                            stroke: Ink.quiet;
+                            stroke-width: 1.8px;
+                            stroke-line-cap: round;
+                            stroke-line-join: round;
+                        }
+                        // the strip: every turn one piece, its way bar then its screen's bar, the
+                        // screen's name under both. (16 above the bars' row as well, for a turn's time
+                        // and buttons, which rise over the screen's box.)
+                        strip := Rectangle {
+                            x: root.pl-track-x;
+                            y: 4px - 16px;
+                            width: root.pl-track-w;
+                            height: 16px + 56px;
+                            // where a carried screen will land: a hollow turn, the others making room
+                            if root.pl-slot-w > 0: Rectangle {
+                                x: root.pl-slot-x - root.pl-pre;
+                                y: 31px;
+                                width: root.pl-way-w;
+                                height: 18px;
+                                animate x { duration: 250ms; easing: ease; }
+                                border-top-left-radius: 5px;
+                                border-bottom-left-radius: 5px;
+                                border-width: 1px;
+                                border-color: Ink.quiet;
+                            }
+                            if root.pl-slot-w > 0: Rectangle {
+                                x: root.pl-slot-x;
+                                y: 31px;
+                                width: root.pl-slot-w;
+                                height: 18px;
+                                animate x, width { duration: 250ms; easing: ease; }
+                                border-top-right-radius: 5px;
+                                border-bottom-right-radius: 5px;
+                                border-width: 1px;
+                                border-color: Ink.quiet;
+                            }
+                            for b[i] in root.pl-blocks: turn := Rectangle {
+                                x: b.x - root.pl-pre;
+                                width: root.pl-pre + b.w;
+                                animate x, width { duration: root.pl-live ? 0ms : 250ms; easing: ease; }
+                                opacity: b.away ? 0 : root.pl-dim ? 0.3 : 1;
+                                animate opacity { duration: 120ms; }
+                                // the pointer on the screen's part or on the way bar: each lights the
+                                // other a step, so the two read as one; the way bar lit while its menu
+                                // is open or the screen is coming in
+                                property <bool> hov: sta.has-hover && !root.carry-on && root.pl-sizing < 0 && !root.pl-dim;
+                                property <bool> way-hov: wta.has-hover && !root.carry-on && root.pl-sizing < 0 && !root.pl-dim;
+                                property <bool> lit: root.pl-menu == i || (b.on && root.pl-head && root.pl-in);
+                                // how the screen comes in: the turn's start
+                                if !root.pl-single: Rectangle {
+                                    x: 0;
+                                    y: 31px;
+                                    width: root.pl-way-w;
+                                    height: 18px;
+                                    border-top-left-radius: 5px;
+                                    border-bottom-left-radius: 5px;
+                                    background: turn.lit ? Ink.pick-hover : turn.way-hov || turn.hov ? Ink.pick : Ink.hover-box;
+                                    animate background { duration: 120ms; }
+                                    WayGlyph {
+                                        x: (parent.width - 12px) / 2;
+                                        y: 3px;
+                                        way: b.way;
+                                        ink: turn.lit || turn.way-hov ? Ink.bright : turn.hov ? Ink.dim : Ink.soft;
+                                    }
+                                }
+                                // the screen's bar, a hairline after its way in
+                                Rectangle {
+                                    x: root.pl-pre;
+                                    y: 31px;
+                                    width: b.w;
+                                    height: 18px;
+                                    border-top-right-radius: 5px;
+                                    border-bottom-right-radius: 5px;
+                                    background: b.on ? (turn.hov || turn.way-hov ? #5c5c66 : #52525b) : (turn.hov || turn.way-hov ? Ink.pick-hover : Ink.pick);
+                                    animate background { duration: 120ms; }
+                                }
+                                // its name, under the whole turn
+                                Text {
+                                    x: 0;
+                                    y: 54px;
                                     width: parent.width;
+                                    height: 16px;
+                                    text: b.name;
+                                    font-family: "Geist";
+                                    font-size: 12px;
+                                    font-weight: b.on ? 600 : 400;
+                                    color: b.on ? Ink.bright : turn.hov ? Ink.dim : Ink.soft;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                                // the playhead: across the way bar while the screen comes in, then along
+                                // the screen's bar (under the turn's time and buttons)
+                                if b.on && root.pl-head && !b.away: Rectangle {
+                                    x: (root.pl-in ? root.pl-pre * root.pl-p : root.pl-pre + b.w * root.pl-p) - 1px;
+                                    y: 25px;
+                                    width: 2px;
+                                    height: 30px;
+                                    border-radius: 1px;
+                                    background: Ink.bright;
+                                    opacity: root.carry-on ? 0.3 : 1;
+                                    Rectangle {
+                                        x: -4px;
+                                        y: -4px;
+                                        width: 10px;
+                                        height: 10px;
+                                        border-radius: 5px;
+                                        background: Ink.bright;
+                                    }
+                                }
+                                // select the turn to show it now; drag it along the strip to move it
+                                sta := TouchArea {
+                                    enabled: !b.away && !root.pl-dim;
+                                    mouse-cursor: root.carry-on ? MouseCursor.grabbing : MouseCursor.grab;
+                                    property <bool> far;
+                                    pointer-event(e) => {
+                                        if (e.kind == PointerEventKind.down) {
+                                            self.far = false;
+                                        }
+                                        if (e.kind == PointerEventKind.up) {
+                                            if (root.carry-on) {
+                                                stage.drop-carry();
+                                            } else if (!self.far) {
+                                                root.page-show(i);
+                                            }
+                                        }
+                                        if (e.kind == PointerEventKind.cancel && root.carry-on) {
+                                            root.carry-on = false;
+                                            root.pl-carry-cancel();
+                                        }
+                                    }
+                                    moved => {
+                                        if (self.pressed) {
+                                            if (!root.carry-on && !self.far && (abs(self.mouse-x - self.pressed-x) > 4px || abs(self.mouse-y - self.pressed-y) > 4px)) {
+                                                self.far = true;
+                                                root.carry-gx = 18px;
+                                                root.carry-gy = 14px;
+                                                root.carry-settle = false;
+                                                root.carry-on = true;
+                                                root.pl-carry-start(0, i);
+                                            }
+                                            if (root.carry-on) {
+                                                stage.carry-to(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                                            }
+                                        }
+                                    }
+                                    // its time, then Edit and Remove, over its bar while the pointer is on
+                                    // the turn; only the time while its end is dragged. (Inside the turn's
+                                    // TouchArea, so the turn keeps the pointer while it is on them.)
+                                    if (turn.hov || root.pl-sizing == i) && !b.away: tb := Rectangle {
+                                        property <bool> buttons: root.pl-sizing != i;
+                                        x: root.pl-pre + (b.w - self.width) / 2;
+                                        y: 0;
+                                        width: 8px + secs-text.preferred-width + 5px + (self.buttons ? 1px + 20px + (root.pl-single ? 0 : 21px) : 0) + 2px;
+                                        height: 24px;
+                                        border-radius: 7px;
+                                        background: Ink.pop;
+                                        drop-shadow-blur: 16px;
+                                        drop-shadow-offset-y: 6px;
+                                        drop-shadow-color: #00000059;
+                                        secs-text := Text {
+                                            x: 8px;
+                                            height: parent.height;
+                                            text: b.secs;
+                                            font-family: "Geist";
+                                            font-size: 12px;
+                                            color: Ink.bright;
+                                            vertical-alignment: center;
+                                        }
+                                        if tb.buttons: StripIcon {
+                                            x: 8px + secs-text.preferred-width + 5px + 1px;
+                                            y: 2px;
+                                            commands: "M4 20h4L19 9l-4-4L4 16z";
+                                            clicked => { root.screen-edit(i); }
+                                        }
+                                        if tb.buttons && !root.pl-single: StripIcon {
+                                            x: 8px + secs-text.preferred-width + 5px + 1px + 21px;
+                                            y: 2px;
+                                            commands: "M6 6l12 12M18 6L6 18";
+                                            clicked => { root.page-remove(i); }
+                                        }
+                                    }
+                                    // the bar's right end: drag it to make the turn longer or shorter
+                                    if !root.pl-single && !b.away && !root.pl-dim: Rectangle {
+                                        x: parent.width - 10px;
+                                        y: 31px;
+                                        width: 10px;
+                                        height: 18px;
+                                        Rectangle {
+                                            x: 4px;
+                                            y: 4px;
+                                            width: 2px;
+                                            height: 10px;
+                                            border-radius: 1px;
+                                            background: Ink.bright;
+                                            opacity: turn.hov || root.pl-sizing == i ? 0.8 : 0;
+                                            animate opacity { duration: 120ms; }
+                                        }
+                                        TouchArea {
+                                            enabled: !root.carry-on;
+                                            mouse-cursor: MouseCursor.ew-resize;
+                                            // (measured in the window: the end moves with the drag)
+                                            property <length> from;
+                                            pointer-event(e) => {
+                                                if (e.kind == PointerEventKind.down) {
+                                                    self.from = self.absolute-position.x + self.mouse-x;
+                                                }
+                                                if ((e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) && root.pl-sizing == i) {
+                                                    root.pl-sizing = -1;
+                                                    root.pl-size-done();
+                                                }
+                                            }
+                                            moved => {
+                                                if (self.pressed) {
+                                                    root.pl-sizing = i;
+                                                    root.pl-size(i, self.absolute-position.x + self.mouse-x - self.from);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                // the way bar: select it to choose how the screen comes in
+                                wta := TouchArea {
+                                    visible: !root.pl-single;
+                                    enabled: !b.away && !root.pl-dim && !root.carry-on;
+                                    x: 0;
+                                    y: 16px;
+                                    width: root.pl-way-w;
+                                    height: 38px;
+                                    mouse-cursor: pointer;
+                                    clicked => { root.pl-mark(i, self.absolute-position.x, self.absolute-position.y + 15px, 18px); }
+                                }
+                                // its name over it while the pointer is on it (not while its menu is open)
+                                if turn.way-hov && root.pl-menu != i && !root.pl-single: Rectangle {
+                                    x: (root.pl-way-w - self.width) / 2;
+                                    y: 4px;
+                                    width: wn-text.preferred-width + 14px;
+                                    height: 20px;
+                                    border-radius: 6px;
+                                    background: Ink.pop;
+                                    wn-text := Text {
+                                        x: 7px;
+                                        height: parent.height;
+                                        text: b.way-name;
+                                        font-family: "Geist";
+                                        font-size: 12px;
+                                        color: Ink.bright;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                            // a script's screen on the keyboard: the strip waits, and says so
+                            if root.pl-dim: Rectangle {
+                                property <length> tw: pill-text.preferred-width;
+                                property <length> bw: back-text.preferred-width + 20px;
+                                x: (parent.width - self.width) / 2;
+                                y: 26px;
+                                width: 14px + self.tw + 12px + self.bw + 4px;
+                                height: 36px;
+                                border-radius: 9px;
+                                background: Ink.pop;
+                                drop-shadow-blur: 24px;
+                                drop-shadow-offset-y: 8px;
+                                drop-shadow-color: #00000059;
+                                pill-text := Text {
+                                    x: 14px;
                                     height: parent.height;
-                                    text: "Back to the playlist";
+                                    text: root.pl-script;
                                     font-family: "Geist";
                                     font-size: 13px;
                                     color: Ink.bright;
-                                    horizontal-alignment: center;
                                     vertical-alignment: center;
                                 }
-                                back-ta := TouchArea {
-                                    mouse-cursor: pointer;
-                                    clicked => { root.pl-back(); }
+                                Rectangle {
+                                    x: 14px + parent.tw + 12px;
+                                    y: 4px;
+                                    width: parent.bw;
+                                    height: 28px;
+                                    border-radius: 7px;
+                                    background: back-ta.pressed ? Ink.pick : back-ta.has-hover ? Ink.pick-hover : Ink.hover-box;
+                                    back-text := Text {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        text: "Back to the playlist";
+                                        font-family: "Geist";
+                                        font-size: 13px;
+                                        color: Ink.bright;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                    back-ta := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.pl-back(); }
+                                    }
                                 }
                             }
                         }
                     }
 
                     // ---------------------------------------------------- the Library
-                    // every screen there is, two to a row; drag one onto the strip to play it
+                    // every screen there is, two to a row; drag one onto the playlist to play it,
+                    // or put it on the playlist's end from its card
                     if root.boot == 0: PageBox {
                         visible: !root.screen-editing;
-                        x: parent.lib-x;
-                        y: parent.lib-y;
+                        x: 0;
+                        y: stage-h + pl-panel-h + 18px;
                         width: under-w;
                         height: shelf-h;
                         title: "Library";
@@ -4496,9 +4624,9 @@ export component AppWindow inherits Window {
                             overflow: elide;
                         }
                         for c[k] in root.lib-pages: Rectangle {
-                            property <length> cw: (parent.width - 32px - 8px) / 2;
-                            x: 16px + mod(k, 2) * (self.cw + 8px);
-                            y: 72px + floor(k / 2) * 104px;
+                            property <length> cw: shelf-two ? (parent.width - 32px - 8px) / 2 : parent.width - 32px;
+                            x: 16px + (shelf-two ? mod(k, 2) * (self.cw + 8px) : 0);
+                            y: 72px + (shelf-two ? floor(k / 2) : k) * 104px;
                             width: self.cw;
                             height: 96px;
                             PlCard {
@@ -4526,8 +4654,8 @@ export component AppWindow inherits Window {
                                     if (self.pressed) {
                                         if (!root.carry-on && !self.far && (abs(self.mouse-x - self.pressed-x) > 4px || abs(self.mouse-y - self.pressed-y) > 4px)) {
                                             self.far = true;
-                                            root.carry-gx = 40px;
-                                            root.carry-gy = 34px;
+                                            root.carry-gx = 18px;
+                                            root.carry-gy = 14px;
                                             root.carry-settle = false;
                                             root.carry-on = true;
                                             root.pl-carry-start(1, k);
@@ -4537,16 +4665,51 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                 }
-                                // Edit, over the picture's corner, while the pointer is over the card
+                                // Add to the playlist and Edit, at the card's corner while the pointer is on it
                                 if self.has-hover && !root.carry-on: Rectangle {
                                     x: parent.width - 14px - self.width;
                                     y: 14px;
-                                    width: 2px + 28px + 2px;
+                                    width: 2px + add.width + 28px + 2px;
                                     height: 32px;
                                     border-radius: 9px;
                                     background: #131316e0;
-                                    CardIcon {
+                                    add := Rectangle {
                                         x: 2px;
+                                        y: 2px;
+                                        width: 7px + 12px + 5px + add-text.preferred-width + 9px;
+                                        height: 28px;
+                                        border-radius: 7px;
+                                        background: add-ta.pressed ? Ink.pick : add-ta.has-hover ? Ink.hover-box : transparent;
+                                        Path {
+                                            x: 7px;
+                                            y: 8px;
+                                            width: 12px;
+                                            height: 12px;
+                                            viewbox-width: 12;
+                                            viewbox-height: 12;
+                                            commands: "M6 2v8M2 6h8";
+                                            fill: transparent;
+                                            stroke: add-ta.has-hover ? Ink.bright : Ink.soft;
+                                            stroke-width: 1.6px;
+                                            stroke-line-cap: round;
+                                        }
+                                        add-text := Text {
+                                            x: 24px;
+                                            height: parent.height;
+                                            text: "Add to " + root.pl-name;
+                                            font-family: "Geist";
+                                            font-size: 12.5px;
+                                            font-weight: 500;
+                                            color: add-ta.has-hover ? Ink.bright : Ink.soft;
+                                            vertical-alignment: center;
+                                        }
+                                        add-ta := TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => { root.lib-add-to(k); }
+                                        }
+                                    }
+                                    CardIcon {
+                                        x: 2px + add.width;
                                         y: 2px;
                                         commands: "M4 20h4L19 9l-4-4L4 16z";
                                         clicked => { root.lib-edit(k); }
@@ -4556,39 +4719,54 @@ export component AppWindow inherits Window {
                         }
                     }
 
-                    // ---------------------------------------------------- when Ectodeck is closed
-                    if root.boot == 0: PageBox {
-                        visible: !root.screen-editing;
-                        x: parent.lib-x;
-                        y: parent.lib-y + shelf-h + 12px;
-                        width: closed-w;
-                        height: root.closed-h;
-                        title: "When Ectodeck is closed";
-                        for c in root.cells: CellView {
-                            c: c;
-                            pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
-                            slide(id, v) => { root.cell-slide(id, v); }
-                        }
-                    }
-
                     // ---------------------------------------------------- the screen carried
-                    // the block it becomes, under the pointer; as wide as its room on the strip
+                    // its name, under the pointer; let go over the panel, it settles into its room
                     if root.carry-on: Rectangle {
                         x: root.carry-x - root.carry-gx;
                         y: root.carry-y - root.carry-gy;
                         animate x, y { duration: root.carry-settle ? 150ms : 0ms; easing: ease; }
-                        width: root.carry-w;
-                        animate width { duration: 200ms; easing: ease; }
-                        height: 76px;
-                        drop-shadow-blur: root.carry-settle ? 0 : 28px;
-                        drop-shadow-offset-y: root.carry-settle ? 0 : 12px;
+                        width: chip-text.preferred-width + 24px;
+                        height: 28px;
+                        border-radius: 8px;
+                        background: Ink.hover-box;
+                        opacity: root.carry-settle ? 0 : 1;
+                        animate opacity { duration: 150ms; easing: ease; }
+                        drop-shadow-blur: 30px;
+                        drop-shadow-offset-y: 12px;
                         drop-shadow-color: #0000008c;
-                        StripBlock {
-                            width: parent.width;
+                        chip-text := Text {
+                            x: 12px;
                             height: parent.height;
-                            b: root.carry-block;
-                            lifted: true;
+                            text: root.carry-name;
+                            font-family: "Geist";
+                            font-size: 12.5px;
+                            font-weight: 600;
+                            color: Ink.bright;
+                            vertical-alignment: center;
                         }
+                    }
+                }
+                // Screen defaults, under Profiles in the left column: the profile's screen light
+                // and how bright, which any screen without a light of its own uses, and the
+                // keyboard's built-in screens for while Ectodeck is closed. In the Profiles box's
+                // own shade, under a heading as the Profiles box's.
+                if root.tab == 3 && root.boot == 0: Rectangle {
+                    x: pws-x;
+                    y: head-end + anchor.preferred-height + 18px;
+                    width: anchor-w;
+                    height: root.defaults-h;
+                    border-radius: 12px;
+                    background: Ink.well;
+                    AnchorHead {
+                        x: 8px;
+                        y: 4px;
+                        width: parent.width - 16px;
+                        text: "SCREEN DEFAULTS";
+                    }
+                    for c in root.cells: CellView {
+                        c: c;
+                        pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
+                        slide(id, v) => { root.cell-slide(id, v); }
                     }
                 }
                 // the page editor's box 1 of 3: the piece chosen

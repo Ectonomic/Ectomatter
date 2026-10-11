@@ -97,6 +97,20 @@ impl Source {
         }
     }
 
+    /// What it is a reading of, as a card's line on a page says it.
+    pub fn phrase(self) -> &'static str {
+        match self {
+            Source::CpuTemp | Source::CpuLoad | Source::CpuClock => "CPU",
+            Source::GpuTemp | Source::GpuLoad | Source::GpuClock => "GPU",
+            Source::Memory => "RAM",
+            Source::VideoMemory => "VRAM",
+            Source::Date => "the date",
+            Source::Profile => "the active profile",
+            Source::OutsideTemp => "the temperature outside",
+            Source::Sky => "the sky outside",
+        }
+    }
+
     /// The group it sits in on the menu of readings.
     pub fn group(self) -> &'static str {
         match self {
@@ -343,6 +357,53 @@ impl Page {
             p.name = format!("Custom {n}");
         }
         Some(p)
+    }
+
+    /// What the page shows, in a line for its card in the Library. A page as
+    /// its kind makes it says what that kind shows; a page of one's own says
+    /// its words, then what else it shows; any other page changed since,
+    /// what it reads now, by what each reading is of (CPU, GPU, RAM, VRAM).
+    pub fn about(&self) -> String {
+        let base = self.id.rsplit_once('-').filter(|(_, n)| n.parse::<u32>().is_ok()).map_or(self.id.as_str(), |(b, _)| b);
+        let own = base == "custom";
+        if Page::template(base, &[]).is_some_and(|t| t.pieces == self.pieces) {
+            match base {
+                "stats" => return "CPU, GPU, RAM and VRAM, every second.".into(),
+                "clock" => return "The time and the date.".into(),
+                "weather" => return "The temperature and the sky outside.".into(),
+                _ => {}
+            }
+        }
+        let said: Vec<&str> = self.pieces.iter().filter_map(|p| if let Kind::Text(t) = &p.kind { Some(t.trim()).filter(|t| !t.is_empty()) } else { None }).collect();
+        let mut shown: Vec<String> = Vec::new();
+        for p in &self.pieces {
+            let what = match &p.kind {
+                Kind::Text(_) => continue,
+                Kind::Data(s, _) | Kind::Bar(s) => s.phrase().to_string(),
+                Kind::Clock(_) => "the time".to_string(),
+            };
+            if !shown.contains(&what) {
+                shown.push(what);
+            }
+        }
+        let list = match shown.len() {
+            0 => String::new(),
+            1 => shown[0].clone(),
+            n => format!("{} and {}", shown[..n - 1].join(", "), shown[n - 1]),
+        };
+        let words = format!("Says “{}”", said.join(" "));
+        // (the computer's readings come every second)
+        let computer = !shown.is_empty() && shown.iter().all(|w| ["CPU", "GPU", "RAM", "VRAM"].contains(&w.as_str()));
+        let list = if computer { format!("{list}, every second") } else { list };
+        match (said.is_empty(), list.is_empty()) {
+            (true, true) => "An empty screen.".into(),
+            (false, true) => format!("{words}."),
+            (false, false) if own => format!("{words}, with {list}."),
+            _ => {
+                let mut c = list.chars();
+                c.next().map_or(String::new(), |f| f.to_uppercase().chain(c).collect::<String>() + ".")
+            }
+        }
     }
 
     /// The page as the Library keeps it: what it shows, not how it plays.
@@ -1036,6 +1097,28 @@ mod tests {
         // a playlist the settings name but don't hold is played as the first
         let s = Screens::of(Some(&json!([Page::stats().to_json()])), None, Some(&json!({ "3": "gone" })), None);
         assert_eq!(s.of_profile(3), 0);
+    }
+
+    #[test]
+    fn a_card_says_what_its_page_shows() {
+        assert_eq!(Page::stats().about(), "CPU, GPU, RAM and VRAM, every second.");
+        // a second Clock, as its kind made it
+        assert_eq!(Page::template("clock", &[Page::clock()]).unwrap().about(), "The time and the date.");
+        let mut own = Page::blank();
+        assert_eq!(own.about(), "An empty screen.");
+        own.pieces.push(words(1, 4, "NO MEETINGS"));
+        own.pieces.push(words(2, 7, "TODAY"));
+        assert_eq!(own.about(), "Says “NO MEETINGS TODAY”.");
+        own.pieces.push(middle(3, Kind::Clock(false)));
+        assert_eq!(own.about(), "Says “NO MEETINGS TODAY”, with the time.");
+        // Stats changed: what it reads now, its labels left out
+        let mut s = Page::stats();
+        s.pieces[1].gap = 2;
+        assert_eq!(s.about(), "CPU, GPU, RAM and VRAM, every second.");
+        s.pieces.retain(|p| matches!(p.kind, Kind::Text(_) | Kind::Data(Source::CpuTemp | Source::GpuLoad, _)));
+        assert_eq!(s.about(), "CPU and GPU, every second.");
+        s.pieces.push(middle(3, Kind::Clock(false)));
+        assert_eq!(s.about(), "CPU, GPU and the time.");
     }
 
     #[test]
