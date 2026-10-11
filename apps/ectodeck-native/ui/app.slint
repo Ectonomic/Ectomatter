@@ -3338,6 +3338,10 @@ export component AppWindow inherits Window {
     in property <bool> pl-single;
     // no turns at all: the screen shows blank until a layout is dragged in
     in property <bool> pl-empty;
+    // the empty holding bar at the strip's end, for a layout to be dragged to (the whole
+    // strip while the playlist is empty; no width while a carried layout's room shows instead)
+    in property <length> pl-hold-x;
+    in property <length> pl-hold-w;
     in property <bool> pl-dim;
     in property <string> pl-script;
     // the playhead: shown or not, on the way bar (the turn coming in) or the
@@ -3549,7 +3553,7 @@ export component AppWindow inherits Window {
     // backlight and the status screen under them; in the right one the screen's box, the
     // playlist's panel attached under it, and Layouts. The box is as tall as leaves the
     // panel's foot level with the Profiles box's.
-    property <length> pl-panel-h: 70px;
+    property <length> pl-panel-h: 56px;
     property <length> stage-h: anchor.preferred-height - pl-panel-h;
     // the bay the screen sits in (the screen and its gutter), and the box's gray round the
     // bay, above and below it as at its sides
@@ -4026,7 +4030,7 @@ export component AppWindow inherits Window {
                         if (root.pl-slot-w > 0) {
                             root.carry-settle = true;
                             root.carry-x = panel.x + strip.x + root.pl-slot-x + root.carry-gx;
-                            root.carry-y = panel.y + strip.y + 26px + root.carry-gy;
+                            root.carry-y = panel.y + strip.y + 30px + root.carry-gy;
                             settle.running = true;
                         } else {
                             root.carry-on = false;
@@ -4309,20 +4313,20 @@ export component AppWindow inherits Window {
                             stroke-line-cap: round;
                             stroke-line-join: round;
                         }
-                        // the strip: every turn one piece, its way bar then its screen's bar, the
-                        // screen's name under both. (16 above the bars' row as well, for a turn's time
-                        // and buttons, which rise over the screen's box.)
+                        // the strip: every turn one piece, its way bar then its screen's bar with the
+                        // screen's name on it; then an empty bar to add to. (16 above the bars' row
+                        // as well, for a turn's time and buttons, which rise over the screen's box.)
                         strip := Rectangle {
                             x: root.pl-track-x;
-                            y: 4px - 16px;
+                            y: -16px;
                             width: root.pl-track-w;
-                            height: 16px + 56px;
+                            height: 16px + pl-panel-h;
                             // where a carried screen will land: a hollow turn, the others making room
                             if root.pl-slot-w > 0: Rectangle {
                                 x: root.pl-slot-x - root.pl-pre;
-                                y: 31px;
+                                y: 32px;
                                 width: root.pl-way-w;
-                                height: 18px;
+                                height: 24px;
                                 animate x { duration: 250ms; easing: ease; }
                                 border-top-left-radius: 5px;
                                 border-bottom-left-radius: 5px;
@@ -4331,25 +4335,36 @@ export component AppWindow inherits Window {
                             }
                             if root.pl-slot-w > 0: Rectangle {
                                 x: root.pl-slot-x;
-                                y: 31px;
+                                y: 32px;
                                 width: root.pl-slot-w;
-                                height: 18px;
+                                height: 24px;
                                 animate x, width { duration: 250ms; easing: ease; }
                                 border-top-right-radius: 5px;
                                 border-bottom-right-radius: 5px;
                                 border-width: 1px;
                                 border-color: Ink.quiet;
                             }
-                            // an empty playlist: how to fill it, where its turns would be
-                            if root.pl-empty && root.pl-slot-w <= 0: Text {
-                                x: 0;
-                                y: 31px;
-                                height: 18px;
-                                text: "Drag a screen layout here from Layouts to play it.";
-                                font-family: "Geist";
-                                font-size: 12.5px;
-                                color: Ink.quiet;
-                                vertical-alignment: center;
+                            // the empty holding bar, at the strip's end: a turn's room, in the well's own
+                            // shade; the whole strip while the playlist is empty, saying how to fill it
+                            if root.pl-hold-w > 0: Rectangle {
+                                x: root.pl-hold-x;
+                                y: 32px;
+                                width: root.pl-hold-w;
+                                height: 24px;
+                                animate x, width { duration: root.pl-live ? 0ms : 250ms; easing: ease; }
+                                border-radius: 5px;
+                                background: Ink.well;
+                                if root.pl-empty: Text {
+                                    x: 10px;
+                                    width: parent.width - 20px;
+                                    height: parent.height;
+                                    text: "Drag a screen layout here from Layouts to play it.";
+                                    font-family: "Geist";
+                                    font-size: 12.5px;
+                                    color: Ink.quiet;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
                             }
                             for b[i] in root.pl-blocks: turn := Rectangle {
                                 x: b.x - root.pl-pre;
@@ -4367,9 +4382,9 @@ export component AppWindow inherits Window {
                                 // only one, when nothing comes in after it, but still to be chosen)
                                 Rectangle {
                                     x: 0;
-                                    y: 31px;
+                                    y: 32px;
                                     width: root.pl-way-w;
-                                    height: 18px;
+                                    height: 24px;
                                     opacity: root.pl-single && !(turn.way-hov || turn.hov || turn.lit) ? 0.45 : 1;
                                     animate opacity { duration: 120ms; }
                                     border-top-left-radius: 5px;
@@ -4378,43 +4393,42 @@ export component AppWindow inherits Window {
                                     animate background { duration: 120ms; }
                                     WayGlyph {
                                         x: (parent.width - 12px) / 2;
-                                        y: 3px;
+                                        y: 6px;
                                         way: b.way;
                                         ink: turn.lit || turn.way-hov ? Ink.bright : turn.hov ? Ink.dim : Ink.soft;
                                     }
                                 }
-                                // the screen's bar, a hairline after its way in
+                                // the screen's bar, a hairline after its way in, the screen's name on it
+                                // (none on a bar too short for a letter or two)
                                 Rectangle {
                                     x: root.pl-pre;
-                                    y: 31px;
+                                    y: 32px;
                                     width: b.w;
-                                    height: 18px;
+                                    height: 24px;
                                     border-top-right-radius: 5px;
                                     border-bottom-right-radius: 5px;
                                     background: b.on ? (turn.hov || turn.way-hov ? #5c5c66 : #52525b) : (turn.hov || turn.way-hov ? Ink.pick-hover : Ink.pick);
                                     animate background { duration: 120ms; }
-                                }
-                                // its name, under the whole turn
-                                Text {
-                                    x: 0;
-                                    y: 54px;
-                                    width: parent.width;
-                                    height: 16px;
-                                    text: b.name;
-                                    font-family: "Geist";
-                                    font-size: 12px;
-                                    font-weight: b.on ? 600 : 400;
-                                    color: b.on ? Ink.bright : turn.hov ? Ink.dim : Ink.soft;
-                                    vertical-alignment: center;
-                                    overflow: elide;
+                                    if b.w >= 28px: Text {
+                                        x: 8px;
+                                        width: parent.width - 18px;
+                                        height: parent.height;
+                                        text: b.name;
+                                        font-family: "Geist";
+                                        font-size: 12px;
+                                        font-weight: b.on ? 600 : 400;
+                                        color: b.on ? Ink.bright : turn.hov ? Ink.dim : Ink.soft;
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                    }
                                 }
                                 // the playhead: across the way bar while the screen comes in, then along
                                 // the screen's bar (under the turn's time and buttons)
                                 if b.on && root.pl-head && !b.away: Rectangle {
                                     x: (root.pl-in ? root.pl-pre * root.pl-p : root.pl-pre + b.w * root.pl-p) - 1px;
-                                    y: 25px;
+                                    y: 26px;
                                     width: 2px;
-                                    height: 30px;
+                                    height: 36px;
                                     border-radius: 1px;
                                     background: Ink.bright;
                                     opacity: root.carry-on ? 0.3 : 1;
@@ -4502,12 +4516,12 @@ export component AppWindow inherits Window {
                                     // the bar's right end: drag it to make the turn longer or shorter
                                     if !root.pl-single && !b.away && !root.pl-dim: Rectangle {
                                         x: parent.width - 10px;
-                                        y: 31px;
+                                        y: 32px;
                                         width: 10px;
-                                        height: 18px;
+                                        height: 24px;
                                         Rectangle {
                                             x: 4px;
-                                            y: 4px;
+                                            y: 7px;
                                             width: 2px;
                                             height: 10px;
                                             border-radius: 1px;
@@ -4544,9 +4558,9 @@ export component AppWindow inherits Window {
                                     x: 0;
                                     y: 16px;
                                     width: root.pl-way-w;
-                                    height: 38px;
+                                    height: 40px;
                                     mouse-cursor: pointer;
-                                    clicked => { root.pl-mark(i, self.absolute-position.x, self.absolute-position.y + 15px, 18px); }
+                                    clicked => { root.pl-mark(i, self.absolute-position.x, self.absolute-position.y + 16px, 24px); }
                                 }
                                 // its name over it while the pointer is on it (not while its menu is open)
                                 if turn.way-hov && root.pl-menu != i: Rectangle {

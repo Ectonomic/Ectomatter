@@ -3447,10 +3447,22 @@ impl Front {
         if let Some(at) = self.carry.as_ref().and_then(|c| c.slot) {
             items.insert(at.min(items.len()), (None, self.carry.as_ref().map_or(8.0, |c| c.secs as f64)));
         }
-        let (pps, way, spans) = lay_strip(&items.iter().map(|x| x.1).collect::<Vec<_>>(), self.sizing.map(|s| (s.2, self.strip_way)), track_w);
+        // the empty holding bar at the end, its room kept from the turns' own; the whole strip
+        // while the playlist is empty (and none while a carried layout's room takes its place)
+        let hold = if n > 0 { HOLD_W } else { 0.0 };
+        let fit_w = if n > 0 { track_w - HOLD_W - BETWEEN } else { track_w };
+        let (pps, way, spans) = lay_strip(&items.iter().map(|x| x.1).collect::<Vec<_>>(), self.sizing.map(|s| (s.2, self.strip_way)), fit_w);
         self.strip_pps = pps;
         self.strip_way = way;
         self.ui.set_pl_way_w(way as f32);
+        let end = spans.last().map_or(0.0, |(x, w)| x + w);
+        let (hold_x, hold_w) = match (n, items.is_empty()) {
+            (0, true) => (0.0, track_w - BETWEEN),
+            (0, false) => (0.0, 0.0),
+            _ => (end + BETWEEN, hold),
+        };
+        self.ui.set_pl_hold_x(hold_x as f32);
+        self.ui.set_pl_hold_w(hold_w as f32);
         let room = items.iter().zip(&spans).find(|(it, _)| it.0.is_none()).map(|(_, sp)| *sp);
         self.ui.set_pl_slot_x(room.map_or(0.0, |r| r.0) as f32);
         self.ui.set_pl_slot_w(room.map_or(0.0, |r| r.1) as f32);
@@ -3637,10 +3649,12 @@ struct Carry {
 }
 
 /// A turn's way bar: as long as the strip has room for, between these; the
-/// hairline joining it to its screen's bar; the room between one turn and the next.
+/// hairline joining it to its screen's bar; the room between one turn and the
+/// next; and the empty holding bar's length, at the strip's end.
 const WAY_W: (f64, f64) = (18.0, 26.0);
 const JOIN: f64 = 1.0;
 const BETWEEN: f64 = 6.0;
+const HOLD_W: f64 = 72.0;
 
 /// The turns laid out across a strip `width` long: each its way bar, the
 /// hairline, then its screen's bar as long as its time, at one scale (pixels
