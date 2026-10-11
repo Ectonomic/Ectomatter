@@ -103,8 +103,6 @@ pub enum Ask {
     /// changed in place, kept (true) or let go, as typed
     PlChoose(f32, f32, f32),
     PlRenameDone(bool, String),
-    /// a page of the Library put on the end of the playlist the panel shows
-    LibAddTo(i32),
     /// a script's screen ended, the playlist back on the screen
     PlBack,
     /// a page of the Library opened in the editor
@@ -568,7 +566,6 @@ impl Front {
         on!(on_pl_mark, |i, x, y, h| Ask::WayMenu(i, x, y, h));
         on!(on_pl_choose, |x, y, h| Ask::PlChoose(x, y, h));
         on!(on_pl_rename_done, |keep, t| Ask::PlRenameDone(keep, t.to_string()));
-        on!(on_lib_add_to, |k| Ask::LibAddTo(k));
         on!(on_pl_back, Ask::PlBack);
         on!(on_lib_edit, |k| Ask::LibEdit(k));
         on!(on_page_show, |i| Ask::PageShow(i));
@@ -1168,17 +1165,6 @@ impl Front {
                 Ask::WayMenu(i, x, y, h) => self.open_way_menu(i.max(0) as usize, (x, y, h)),
                 Ask::PlChoose(x, y, h) => self.open_pl_menu((x, y, h)),
                 Ask::PlRenameDone(keep, t) => self.end_rename(keep, &t),
-                Ask::LibAddTo(k) => {
-                    if let Some(id) = self.screens.library.get(k.max(0) as usize).map(|p| p.id.clone()) {
-                        let n = self.page.editing;
-                        let shown = self.lcd.page;
-                        let playing = self.screens.turns(n).get(shown).map(|e| e.key);
-                        let end = self.screens.turns(n).len();
-                        self.screens.add_turn(n, end, &id);
-                        self.pages_edited();
-                        self.keep_playing(playing, shown);
-                    }
-                }
                 Ask::PlBack => {
                     if let Some(pl) = &self.player {
                         pl.tell(crate::lcd_player::Control::EndSequence);
@@ -3497,7 +3483,8 @@ impl Front {
         // the Library: every page, its picture two pixels to a dot, its name, and what it
         // shows in at most two lines of its card's room
         let card_w = if self.ui.get_shelf_two() { (under_w - 32.0 - 8.0) / 2.0 } else { under_w - 32.0 };
-        let words_w = (card_w - 314.0).max(60.0) as f32;
+        // (the words end short of the card's right edge, where Edit shows under the pointer)
+        let words_w = (card_w - 358.0).max(60.0) as f32;
         self.pl_thumbs.resize(self.screens.library.len(), None);
         let mut cards = Vec::with_capacity(self.screens.library.len());
         for (k, p) in self.screens.library.iter().enumerate() {

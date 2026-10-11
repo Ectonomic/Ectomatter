@@ -2472,13 +2472,14 @@ component PlCard inherits Rectangle {
         }
     }
     // then its name, and at most two lines on what it shows (fitted by the page), the three
-    // in the card's middle
+    // in the card's middle; room kept at the card's right for Edit, which the pointer shows there
     property <int> lines: root.p.line2 != "" ? 2 : root.p.line1 != "" ? 1 : 0;
+    property <length> words-w: root.width - 358px;
     property <length> words-y: (root.height - 20px - (root.lines > 0 ? 2px + root.lines * 17px : 0)) / 2;
     Text {
         x: 300px;
         y: root.words-y;
-        width: root.width - 314px;
+        width: root.words-w;
         height: 20px;
         text: root.p.name;
         font-family: "Geist";
@@ -2491,7 +2492,7 @@ component PlCard inherits Rectangle {
     if root.p.line1 != "": Text {
         x: 300px;
         y: root.words-y + 22px;
-        width: root.width - 314px;
+        width: root.words-w;
         height: 17px;
         text: root.p.line1;
         font-family: "Geist";
@@ -2502,7 +2503,7 @@ component PlCard inherits Rectangle {
     if root.p.line2 != "": Text {
         x: 300px;
         y: root.words-y + 39px;
-        width: root.width - 314px;
+        width: root.words-w;
         height: 17px;
         text: root.p.line2;
         font-family: "Geist";
@@ -3369,10 +3370,8 @@ export component AppWindow inherits Window {
     callback pl-size-done();
     callback pl-mark(int, length, length, length);
     callback pl-back();
-    // the Library: every screen, its card; a screen put on the end of the
-    // playlist the panel shows, or opened in the editor
+    // Layouts: every screen layout, its card; one opened in the editor
     in property <[PlPage]> lib-pages;
-    callback lib-add-to(int);
     callback lib-edit(int);
     // the page editor: whether a page is being edited, the toolbar's words,
     // the grid on or off, the pieces over the screen, and its three boxes
@@ -4667,51 +4666,16 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                 }
-                                // Add to the playlist and Edit, at the card's corner while the pointer is on it
+                                // Edit, at the middle of the card's right edge while the pointer is on it
                                 if self.has-hover && !root.carry-on: Rectangle {
                                     x: parent.width - 14px - self.width;
-                                    y: 14px;
-                                    width: 2px + add.width + 28px + 2px;
+                                    y: (parent.height - self.height) / 2;
+                                    width: 2px + 28px + 2px;
                                     height: 32px;
                                     border-radius: 9px;
                                     background: #131316e0;
-                                    add := Rectangle {
-                                        x: 2px;
-                                        y: 2px;
-                                        width: 7px + 12px + 5px + add-text.preferred-width + 9px;
-                                        height: 28px;
-                                        border-radius: 7px;
-                                        background: add-ta.pressed ? Ink.pick : add-ta.has-hover ? Ink.hover-box : transparent;
-                                        Path {
-                                            x: 7px;
-                                            y: 8px;
-                                            width: 12px;
-                                            height: 12px;
-                                            viewbox-width: 12;
-                                            viewbox-height: 12;
-                                            commands: "M6 2v8M2 6h8";
-                                            fill: transparent;
-                                            stroke: add-ta.has-hover ? Ink.bright : Ink.soft;
-                                            stroke-width: 1.6px;
-                                            stroke-line-cap: round;
-                                        }
-                                        add-text := Text {
-                                            x: 24px;
-                                            height: parent.height;
-                                            text: "Add to " + root.pl-name;
-                                            font-family: "Geist";
-                                            font-size: 12.5px;
-                                            font-weight: 500;
-                                            color: add-ta.has-hover ? Ink.bright : Ink.soft;
-                                            vertical-alignment: center;
-                                        }
-                                        add-ta := TouchArea {
-                                            mouse-cursor: pointer;
-                                            clicked => { root.lib-add-to(k); }
-                                        }
-                                    }
                                     CardIcon {
-                                        x: 2px + add.width;
+                                        x: 2px;
                                         y: 2px;
                                         commands: "M4 20h4L19 9l-4-4L4 16z";
                                         clicked => { root.lib-edit(k); }
