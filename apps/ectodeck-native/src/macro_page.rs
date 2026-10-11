@@ -851,7 +851,8 @@ impl MacroPage {
                     self.finish_save();
                 }
             }
-            device::Heard::KeysSaved(p, Ok(prof)) => {
+            device::Heard::KeysSaved(p, Ok(mut prof)) => {
+                crate::z10::lit_screen(&mut prof);
                 if let Some(dev) = &mut page.dev {
                     dev["profiles"][p.to_string()] = prof;
                 }

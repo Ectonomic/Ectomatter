@@ -385,6 +385,18 @@ pub fn hex(c: [f64; 3]) -> String {
     format!("#{:02x}{:02x}{:02x}", c[0] as u8, c[1] as u8, c[2] as u8)
 }
 
+/// A screen light of black leaves the keyboard's screen unlit, so nothing on
+/// it can be read. A profile the keyboard holds with black (as profiles set
+/// to Off elsewhere can be) is taken with white, the keyboard's own default
+/// screen light, which saving the profile then stores.
+pub fn lit_screen(p: &mut Value) {
+    if let Some(c) = p.pointer_mut("/lighting/lcd/color/color") {
+        if c.as_array().is_some_and(|a| !a.is_empty() && a.iter().all(|v| v.as_u64() == Some(0))) {
+            *c = json!([255, 255, 255]);
+        }
+    }
+}
+
 /// A profile as the page edits it: its name, lighting and both layers.
 fn pick(p: &Value) -> Value {
     json!({ "name": p["name"], "lighting": p["lighting"], "keys": p["keys"], "fnkeys": p["fnkeys"] })
@@ -548,7 +560,12 @@ impl Page {
     }
 
     /// The keyboard's state has come: keep it, and start a draft of each profile.
-    pub fn loaded(&mut self, dev: Value) {
+    pub fn loaded(&mut self, mut dev: Value) {
+        for n in PROFILE_NUMBERS {
+            if let Some(p) = dev.pointer_mut(&format!("/profiles/{n}")) {
+                lit_screen(p);
+            }
+        }
         for n in PROFILE_NUMBERS {
             self.drafts.entry(n).or_insert_with(|| pick(&dev["profiles"][n.to_string()]));
         }
@@ -573,7 +590,8 @@ impl Page {
 
     /// A profile saved and read back: what the keyboard holds now, and the
     /// draft too unless it changed while it was saving (`replace` false).
-    pub fn saved_profile(&mut self, n: u8, p: Value, replace: bool) {
+    pub fn saved_profile(&mut self, n: u8, mut p: Value, replace: bool) {
+        lit_screen(&mut p);
         if let Some(dev) = &mut self.dev {
             dev["profiles"][n.to_string()] = p.clone();
         }
@@ -1253,6 +1271,22 @@ mod saving_tests {
         assert_eq!(at(&mut p, 3000.0), [0.0, 255.0, 0.0, 1.0]);
         assert_eq!(at(&mut p, 7500.0), [255.0, 255.0, 255.0, 1.0]);
         assert_eq!(at(&mut p, 9000.0), [255.0, 0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn a_screen_light_of_black_comes_as_white() {
+        let mut p = Page::new();
+        let lcd = |rgb: [u8; 3]| json!({ "color": { "brightness": 255, "color": rgb }, "apps": 47 });
+        let prof = |rgb: [u8; 3]| json!({ "name": "P", "lighting": { "mode": "off", "lcd": lcd(rgb) }, "keys": [], "fnkeys": [] });
+        p.loaded(json!({ "active": 1, "profiles": { "1": prof([0, 0, 0]), "2": prof([255, 32, 0]) } }));
+        // the unlit screen light shows and plays white, and is saved as white; a chosen light stays
+        assert_eq!(p.drafts[&1]["lighting"]["lcd"]["color"]["color"], json!([255, 255, 255]));
+        assert!(!p.is_dirty(1));
+        assert_eq!(p.save_body_of(1)["lighting"]["lcd"]["color"]["color"], json!([255, 255, 255]));
+        assert_eq!(p.drafts[&2]["lighting"]["lcd"]["color"]["color"], json!([255, 32, 0]));
+        // and read back after a save
+        p.saved_profile(1, prof([0, 0, 0]), true);
+        assert_eq!(p.drafts[&1]["lighting"]["lcd"]["color"]["color"], json!([255, 255, 255]));
     }
 
     #[test]
