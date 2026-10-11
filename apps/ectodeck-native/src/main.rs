@@ -137,8 +137,36 @@ const GROUND: [u8; 3] = [0x13, 0x13, 0x16];
 /// light is drawn at the web design's brightness, as approved in WebKit; going
 /// above the desktop's white by the screen's headroom looked overdone.
 const LIGHT_GAIN: f32 = 1.0;
-/// how far in from the window's edge a press resizes it
-const EDGE: f64 = 6.0;
+/// Where a press resizes a window: GRAB past its visible edge (the window's
+/// surface is that much larger on every side, clear, and the compositor is
+/// told where the window itself is, so its shadow and its placement go by
+/// the window), and EDGE in from it; each corner takes CORNER of both edges
+/// next to it, so a corner is as easy to find as an edge.
+const GRAB: u32 = 10;
+const EDGE: f64 = 3.0;
+const CORNER: f64 = 20.0;
+
+/// A window's clear margin round its visible edge, a side at a time, in
+/// logical pixels: none while it is maximized or fills the screen, and none
+/// on a side it is tiled against, where the margin would cover its
+/// neighbor's edge.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Margins {
+    l: u32,
+    t: u32,
+    r: u32,
+    b: u32,
+}
+
+impl Margins {
+    fn of(c: &WindowConfigure) -> Margins {
+        if c.is_maximized() || c.is_fullscreen() {
+            return Margins::default();
+        }
+        let m = |tiled: bool| if tiled { 0 } else { GRAB };
+        Margins { l: m(c.is_tiled_left()), t: m(c.is_tiled_top()), r: m(c.is_tiled_right()), b: m(c.is_tiled_bottom()) }
+    }
+}
 
 /// Slint, told to draw into our own buffers and to keep time by our clock.
 /// Each window it is asked for is kept, in order, for the window to draw.
@@ -1015,8 +1043,9 @@ struct App {
     copy_source: Option<CopyPasteSource>,
     key_serial: u32,
     cursor: Option<CursorIcon>,
-    /// the window's size in logical pixels, and the buffer's scale
+    /// the window's size in logical pixels, the clear margin round it, and the buffer's scale
     size: (u32, u32),
+    margins: Margins,
     scale: u32,
     configured: bool,
     maximized: bool,
@@ -1152,6 +1181,7 @@ struct SubWin {
     window: Window,
     slint: Rc<MinimalSoftwareWindow>,
     size: (u32, u32),
+    margins: Margins,
     scale: u32,
     configured: bool,
     maximized: bool,
@@ -1311,6 +1341,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         key_serial: 0,
         cursor: None,
         size: SIZE,
+        margins: Margins::default(),
         scale: 1,
         configured: false,
         maximized: false,
@@ -1582,7 +1613,7 @@ impl App {
         window.set_app_id("com.ectonomic.ectodeck");
         window.set_min_size(Some(min));
         window.commit();
-        SubWin { window, slint, size, scale: 1, configured: false, maximized: false, frame_pending: false, hidden: false, full: true, buffers: Vec::new(), px: Vec::new(), at: (0.0, 0.0) }
+        SubWin { window, slint, size, margins: Margins::default(), scale: 1, configured: false, maximized: false, frame_pending: false, hidden: false, full: true, buffers: Vec::new(), px: Vec::new(), at: (0.0, 0.0) }
     }
 
     /// Show a window of its own again, as it was.
@@ -1711,21 +1742,32 @@ impl App {
         let Some((dx, dy, dw, dh)) = dirty else { return };
         mw.full = false;
         let changed = [(dx.max(0) as usize, dy.max(0) as usize, dw.max(0) as usize, dh.max(0) as usize)];
-        let (i, todo) = free_buffer(&mut mw.buffers, &mut self.pool, (w, h), w * 4, wl_shm::Format::Argb8888, &changed);
+        let s = mw.scale as usize;
+        let m = mw.margins;
+        let (ml, mt) = (m.l as usize * s, m.t as usize * s);
+        let (bw, bh) = (w + ml + m.r as usize * s, h + mt + m.b as usize * s);
+        let (i, todo, fresh) = free_buffer(&mut mw.buffers, &mut self.pool, (w, h), (bw, bh), bw * 4, wl_shm::Format::Argb8888, &changed);
         let canvas = mw.buffers[i].0.canvas(&mut self.pool).unwrap();
+        if fresh {
+            canvas.fill(0);
+        }
         // the compositor's ARGB, which little-endian memory holds as B, G, R, A;
-        // only what is out of date in this buffer
+        // only what is out of date in this buffer, inside the window's clear margin
         for &(x, y, rw, rh) in &todo {
             let (x1, y1) = ((x + rw).min(w), (y + rh).min(h));
             for row in y.min(y1)..y1 {
                 let (a, b) = (row * w + x.min(x1), row * w + x1);
-                for (d, p) in canvas[a * 4..b * 4].chunks_exact_mut(4).zip(&mw.px[a..b]) {
+                let at = (row + mt) * bw + ml + x.min(x1);
+                for (d, p) in canvas[at * 4..(at + b - a) * 4].chunks_exact_mut(4).zip(&mw.px[a..b]) {
                     d.copy_from_slice(&[p.blue, p.green, p.red, p.alpha]);
                 }
             }
         }
         let surface = mw.window.wl_surface();
-        surface.damage_buffer(dx, dy, dw, dh);
+        if fresh {
+            surface.damage_buffer(0, 0, bw as i32, bh as i32);
+        }
+        surface.damage_buffer(dx + ml as i32, dy + mt as i32, dw, dh);
         surface.set_buffer_scale(mw.scale as i32);
         surface.frame(&self.qh, surface.clone());
         mw.buffers[i].0.attach_to(surface).unwrap();
@@ -1747,7 +1789,9 @@ impl App {
     /// The pointer over a window of its own.
     fn sub_pointer(&mut self, which: usize, e: &PointerEvent) {
         let Some(mw) = &mut self.subs[which] else { return };
-        let (x, y) = e.position;
+        // (the surface's corner is the margin's; the window's own starts past it)
+        let (sx, sy) = e.position;
+        let (x, y) = (sx - mw.margins.l as f64, sy - mw.margins.t as f64);
         mw.at = (x, y);
         let position = LogicalPosition::new(x as f32, y as f32);
         match e.kind {
@@ -1760,7 +1804,7 @@ impl App {
             PointerEventKind::Press { button: b, serial, .. } => {
                 self.press = serial;
                 if b == 0x110 {
-                    if let (Some(edge), Some(seat)) = (edge(mw.size, mw.maximized, x, y), &self.seat) {
+                    if let (Some(edge), Some(seat)) = (edge(mw.size, mw.margins, mw.maximized, sx, sy), &self.seat) {
                         mw.window.resize(seat, serial, edge);
                         return;
                     }
@@ -1779,7 +1823,7 @@ impl App {
                 delta_y: -vertical.absolute as f32,
             }),
         }
-        let icon = edge_cursor(edge(mw.size, mw.maximized, x, y)).unwrap_or(cursor_icon(mw.slint.pointer()));
+        let icon = edge_cursor(edge(mw.size, mw.margins, mw.maximized, sx, sy)).unwrap_or(cursor_icon(mw.slint.pointer()));
         self.set_cursor(icon);
     }
 
@@ -2130,22 +2174,33 @@ impl App {
         self.present(&dirty);
     }
 
-    /// Hand the picture to the compositor.
+    /// Hand the picture to the compositor, inside the window's clear margin.
     fn present(&mut self, dirty: &[(usize, usize, usize, usize)]) {
         let (w, h) = (self.pic.w, self.pic.h);
-        let (i, todo) = free_buffer(&mut self.buffers, &mut self.pool, (w, h), w * 8, wl_shm::Format::Abgr16161616, dirty);
+        let s = self.scale as usize;
+        let m = self.margins;
+        let (ml, mt) = (m.l as usize * s, m.t as usize * s);
+        let (bw, bh) = (w + ml + m.r as usize * s, h + mt + m.b as usize * s);
+        let (i, todo, fresh) = free_buffer(&mut self.buffers, &mut self.pool, (w, h), (bw, bh), bw * 8, wl_shm::Format::Abgr16161616, dirty);
         let canvas = self.buffers[i].0.canvas(&mut self.pool).unwrap();
+        if fresh {
+            canvas.fill(0);
+        }
         let src: &[u8] = bytemuck::cast_slice(&self.pic.out);
         for &(x, y, rw, rh) in &todo {
             let (x1, y1) = ((x + rw).min(w), (y + rh).min(h));
             for row in y.min(y1)..y1 {
                 let (a, b) = ((row * w + x.min(x1)) * 8, (row * w + x1) * 8);
-                canvas[a..b].copy_from_slice(&src[a..b]);
+                let at = ((row + mt) * bw + ml + x.min(x1)) * 8;
+                canvas[at..at + (b - a)].copy_from_slice(&src[a..b]);
             }
         }
         let surface = self.window.wl_surface();
+        if fresh {
+            surface.damage_buffer(0, 0, bw as i32, bh as i32);
+        }
         for &(x, y, dw, dh) in dirty {
-            surface.damage_buffer(x as i32, y as i32, dw as i32, dh as i32);
+            surface.damage_buffer((x + ml) as i32, (y + mt) as i32, dw as i32, dh as i32);
         }
         surface.set_buffer_scale(self.scale as i32);
         surface.frame(&self.qh, surface.clone());
@@ -2170,9 +2225,9 @@ impl App {
         }
     }
 
-    /// The window's edge under the pointer, which a press resizes from.
+    /// The window's edge under the pointer at `x`, `y` on its surface, which a press resizes from.
     fn edge(&self, x: f64, y: f64) -> Option<ResizeEdge> {
-        edge(self.size, self.maximized, x, y)
+        edge(self.size, self.margins, self.maximized, x, y)
     }
 
     /// A key on the keyboard, pressed or let go.
@@ -2289,7 +2344,14 @@ impl WindowHandler for App {
             }
             mw.maximized = configure.is_maximized();
             let maximized = mw.maximized;
-            window.xdg_surface().set_window_geometry(0, 0, w as i32, h as i32);
+            // (a new margin: every buffer drawn anew, its margin cleared)
+            let m = Margins::of(&configure);
+            if m != mw.margins {
+                mw.margins = m;
+                mw.buffers.clear();
+                mw.full = true;
+            }
+            window.xdg_surface().set_window_geometry(m.l as i32, m.t as i32, w as i32, h as i32);
             mw.configured = true;
             // the page laid out again for the window's width: the macro's chain wraps at it
             if which == MACROS {
@@ -2316,7 +2378,14 @@ impl WindowHandler for App {
             self.maximized = maximized;
             self.front.ui.set_is_maximized(maximized);
         }
-        window.xdg_surface().set_window_geometry(0, 0, w as i32, h as i32);
+        // (a new margin: every buffer drawn anew, its margin cleared)
+        let m = Margins::of(&configure);
+        if m != self.margins {
+            self.margins = m;
+            self.buffers.clear();
+            self.full = true;
+        }
+        window.xdg_surface().set_window_geometry(m.l as i32, m.t as i32, w as i32, h as i32);
         self.configured = true;
         self.draw();
     }
@@ -2400,7 +2469,9 @@ impl PointerHandler for App {
             if &e.surface != self.window.wl_surface() {
                 continue;
             }
-            let (x, y) = e.position;
+            // (the surface's corner is the margin's; the window's own starts past it)
+            let (sx, sy) = e.position;
+            let (x, y) = (sx - self.margins.l as f64, sy - self.margins.t as f64);
             self.at = (x, y);
             let position = LogicalPosition::new(x as f32, y as f32);
             let button = |b: u32| match b {
@@ -2423,7 +2494,7 @@ impl PointerHandler for App {
                 PointerEventKind::Press { button: b, serial, .. } => {
                     self.press = serial;
                     if b == BTN_LEFT {
-                        if let (Some(edge), Some(seat)) = (self.edge(x, y), &self.seat) {
+                        if let (Some(edge), Some(seat)) = (self.edge(sx, sy), &self.seat) {
                             self.window.resize(seat, serial, edge);
                             continue;
                         }
@@ -2443,7 +2514,7 @@ impl PointerHandler for App {
                 }
             }
             // the cursor: resizing at the edges, the hand over what can be clicked
-            let icon = match self.edge(x, y) {
+            let icon = match self.edge(sx, sy) {
                 Some(ResizeEdge::TopLeft) => CursorIcon::NwResize,
                 Some(ResizeEdge::TopRight) => CursorIcon::NeResize,
                 Some(ResizeEdge::BottomLeft) => CursorIcon::SwResize,
@@ -2664,13 +2735,19 @@ delegate_xdg_shell!(App);
 delegate_xdg_window!(App);
 delegate_registry!(App);
 
-/// A window's edge under the pointer, which a press resizes from.
-fn edge(size: (u32, u32), maximized: bool, x: f64, y: f64) -> Option<ResizeEdge> {
+/// A window's edge under the pointer at `x`, `y` on its surface (its clear
+/// margin `m` round the window), which a press resizes from: anywhere in the
+/// margin, or EDGE in from the window's edge; a corner along CORNER of each
+/// edge from it.
+fn edge(size: (u32, u32), m: Margins, maximized: bool, x: f64, y: f64) -> Option<ResizeEdge> {
     if maximized {
         return None;
     }
     let (w, h) = (size.0 as f64, size.1 as f64);
+    let (x, y) = (x - m.l as f64, y - m.t as f64);
     let (l, r, t, b) = (x < EDGE, x > w - EDGE, y < EDGE, y > h - EDGE);
+    let (l, r) = (l || ((t || b) && x < CORNER), r || ((t || b) && x > w - CORNER));
+    let (t, b) = (t || ((l || r) && y < CORNER), b || ((l || r) && y > h - CORNER));
     Some(match (l, r, t, b) {
         (true, _, true, _) => ResizeEdge::TopLeft,
         (_, true, true, _) => ResizeEdge::TopRight,
@@ -2744,18 +2821,20 @@ fn lab_device(board: Option<&Board>) -> lab::LabDevice {
 /// A rectangle of a picture, in its pixels: x, y, width, height.
 type Rect = (usize, usize, usize, usize);
 
-/// A free buffer of the pool for a picture `w` by `h` (made if none is
-/// free), and what of it is out of date: this frame's changes, and those of
-/// the frames drawn into the window's other buffers since it was last drawn
-/// into (all of it, if it is new). Only that much is copied into it.
-fn free_buffer(buffers: &mut Vec<(Buffer, Vec<Rect>)>, pool: &mut SlotPool, (w, h): (usize, usize), stride: usize, format: wl_shm::Format, dirty: &[Rect]) -> (usize, Vec<Rect>) {
-    buffers.retain(|(b, _)| b.height() as usize == h && b.stride() as usize == stride);
-    let i = match buffers.iter().position(|(b, _)| b.canvas(pool).is_some()) {
-        Some(i) => i,
+/// A free buffer of the pool `bw` by `bh` for a picture `w` by `h` inside
+/// the window's margin (made if none is free), what of the picture in it is
+/// out of date: this frame's changes, and those of the frames drawn into the
+/// window's other buffers since it was last drawn into (all of it, if it is
+/// new), which is all that is copied into it; and whether it is new, its
+/// margin still to be cleared.
+fn free_buffer(buffers: &mut Vec<(Buffer, Vec<Rect>)>, pool: &mut SlotPool, (w, h): (usize, usize), (bw, bh): (usize, usize), stride: usize, format: wl_shm::Format, dirty: &[Rect]) -> (usize, Vec<Rect>, bool) {
+    buffers.retain(|(b, _)| b.height() as usize == bh && b.stride() as usize == stride);
+    let (i, fresh) = match buffers.iter().position(|(b, _)| b.canvas(pool).is_some()) {
+        Some(i) => (i, false),
         None => {
-            let (b, _) = pool.create_buffer(w as i32, h as i32, stride as i32, format).expect("a buffer");
+            let (b, _) = pool.create_buffer(bw as i32, bh as i32, stride as i32, format).expect("a buffer");
             buffers.push((b, vec![(0, 0, w, h)]));
-            buffers.len() - 1
+            (buffers.len() - 1, true)
         }
     };
     let mut todo = std::mem::take(&mut buffers[i].1);
@@ -2768,7 +2847,7 @@ fn free_buffer(buffers: &mut Vec<(Buffer, Vec<Rect>)>, pool: &mut SlotPool, (w, 
             }
         }
     }
-    (i, todo)
+    (i, todo, fresh)
 }
 
 /// The keyboard lit: each part of its light at the core's brightness for it,
@@ -2847,5 +2926,34 @@ fn light_into(px: &mut Vec<f32>, board: &Board, lights: &[Light], locks: u8, cei
                 px[d + 3] = 1.0;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod edge_tests {
+    use super::*;
+
+    /// The window's edges, past it and just inside it; its corners along
+    /// both edges next to them; none while maximized, and no margin on a
+    /// tiled side.
+    #[test]
+    fn a_window_resizes_from_round_its_edge() {
+        let m = Margins { l: GRAB, t: GRAB, r: GRAB, b: GRAB };
+        let at = |x: f64, y: f64| edge((1440, 1028), m, false, x, y);
+        // (the surface's corner is 10 above and left of the window's)
+        assert_eq!(at(2.0, 500.0), Some(ResizeEdge::Left), "in the margin, outside the window");
+        assert_eq!(at(11.0, 500.0), Some(ResizeEdge::Left), "just inside the window's edge");
+        assert_eq!(at(14.0, 500.0), None, "the window itself");
+        assert_eq!(at(1455.0, 500.0), Some(ResizeEdge::Right));
+        assert_eq!(at(700.0, 1045.0), Some(ResizeEdge::Bottom));
+        // a corner along both edges next to it, not only where they meet
+        assert_eq!(at(25.0, 3.0), Some(ResizeEdge::TopLeft), "on the top edge, near the left");
+        assert_eq!(at(4.0, 26.0), Some(ResizeEdge::TopLeft), "on the left edge, near the top");
+        assert_eq!(at(45.0, 3.0), Some(ResizeEdge::Top), "further along the top edge");
+        assert_eq!(at(1440.0, 1040.0), Some(ResizeEdge::BottomRight));
+        assert_eq!(edge((1440, 1028), m, true, 2.0, 500.0), None, "maximized");
+        let tiled = Margins { l: 0, ..m };
+        assert_eq!(edge((1440, 1028), tiled, false, 2.0, 500.0), Some(ResizeEdge::Left), "tiled: the window's own edge");
+        assert_eq!(edge((1440, 1028), tiled, false, 5.0, 500.0), None);
     }
 }
