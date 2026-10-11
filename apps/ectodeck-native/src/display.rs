@@ -164,44 +164,45 @@ pub fn defaults(page: &Page, w: f32) -> (Tiles, f32) {
     let lc = &l["lcd"]["color"];
     let b = |v: &Value| v.as_u64().unwrap_or(0).min(255) as u8;
     let rgb = [b(&lc["color"][0]), b(&lc["color"][1]), b(&lc["color"][2])];
-    // the dots 20 across and 26 apart, each in a cell with room for its ring
+    let col = slint::Color::from_rgb_u8(rgb[0], rgb[1], rgb[2]);
+    // how bright first, its value at the right; the slider under it
+    let br = lc["brightness"].as_f64().unwrap_or(255.0);
+    c.push(text_cell(style::SMALL, x, 38.0, inner - 60.0, 20.0, "Brightness"));
+    let v = format!("{}%", (br / 2.55).round());
+    let pw = crate::text::width(400, 12.0, &v) + 14.0;
+    c.push(Cell { text: v.into(), style: 2, ..cell(kind::PILL, w - 16.0 - pw, 38.0, pw, 20.0) });
+    c.push(Cell { value: (br / 255.0) as f32, color: col, style: 1, id: id(Ctl::LcdBrightness), ..cell(kind::FILLED, x, 60.0, inner, 20.0) });
+    // then the colors: the dots 20 across and 26 apart, each in a cell with room for its ring
     let (dot, step, ring) = (20.0, 26.0, 3.5);
     let preset = LIGHTS.iter().position(|p| *p == rgb);
     for (i, p) in LIGHTS.iter().enumerate() {
         let col = slint::Color::from_rgb_u8(p[0], p[1], p[2]);
-        c.push(Cell { color: col, on: preset == Some(i), id: id(Ctl::LcdPreset), index: i as i32, ..cell(kind::COLOR_DOT, x - ring + i as f32 * step, 38.0 - ring, dot + 2.0 * ring, dot + 2.0 * ring) });
+        c.push(Cell { color: col, on: preset == Some(i), id: id(Ctl::LcdPreset), index: i as i32, ..cell(kind::COLOR_DOT, x - ring + i as f32 * step, 94.0 - ring, dot + 2.0 * ring, dot + 2.0 * ring) });
     }
     // a color of its own: shown as itself once chosen, otherwise a dot to choose one
     let own = preset.is_none();
-    let col = slint::Color::from_rgb_u8(rgb[0], rgb[1], rgb[2]);
-    c.push(Cell { color: col, on: own, style: if own { 0 } else { 1 }, id: id(Ctl::LcdColor), ..cell(kind::COLOR_DOT, x - ring + LIGHTS.len() as f32 * step, 38.0 - ring, dot + 2.0 * ring, dot + 2.0 * ring) });
-    let br = lc["brightness"].as_f64().unwrap_or(255.0);
-    c.push(text_cell(style::SMALL, x, 72.0, inner - 60.0, 20.0, "Brightness"));
-    let v = format!("{}%", (br / 2.55).round());
-    let pw = crate::text::width(400, 12.0, &v) + 14.0;
-    c.push(Cell { text: v.into(), style: 2, ..cell(kind::PILL, w - 16.0 - pw, 72.0, pw, 20.0) });
-    c.push(Cell { value: (br / 255.0) as f32, color: col, style: 1, id: id(Ctl::LcdBrightness), ..cell(kind::FILLED, x, 94.0, inner, 20.0) });
+    c.push(Cell { color: col, on: own, style: if own { 0 } else { 1 }, id: id(Ctl::LcdColor), ..cell(kind::COLOR_DOT, x - ring + LIGHTS.len() as f32 * step, 94.0 - ring, dot + 2.0 * ring, dot + 2.0 * ring) });
     let mut y = 128.0;
     for line in crate::text::wrap(400, 12.0, "The color the LCD backlight uses when Ectodeck isn’t running, and for any screen layout without a set color.", inner) {
         c.push(text_cell(style::CREDIT, x, y, inner, 17.0, &line));
         y += 17.0;
     }
     let first = y + 16.0;
-    // the status screen's box
+    // the status screen's box: its items, then what it is
     let top = first + 18.0;
     let mut y = top + 38.0;
-    for line in crate::text::wrap(400, 12.0, "What the keyboard shows when Ectodeck isn’t running.", inner) {
-        c.push(text_cell(style::CREDIT, x, y, inner, 17.0, &line));
-        y += 17.0;
-    }
-    y += 10.0;
     let apps = l["lcd"]["apps"].as_u64().unwrap_or(0);
     // (not EVGA Precision X1's stats: EVGA makes no graphics cards now, so nothing sends them)
     for (i, (bit, n)) in LCD_APPS.iter().enumerate().filter(|(_, (bit, _))| *bit != 0x02) {
         c.push(Cell { on: apps & bit != 0, id: id(Ctl::LcdApp), index: i as i32, text: (*n).into(), ..cell(kind::CHECKBOX, x, y, inner, 20.0) });
         y += 30.0;
     }
-    (Tiles { cells: c, height: y - 30.0 + 20.0 + 16.0 }, first)
+    let mut y = y - 30.0 + 20.0 + 14.0;
+    for line in crate::text::wrap(400, 12.0, "What the keyboard shows when Ectodeck isn’t running.", inner) {
+        c.push(text_cell(style::CREDIT, x, y, inner, 17.0, &line));
+        y += 17.0;
+    }
+    (Tiles { cells: c, height: y + 16.0 }, first)
 }
 
 /// Use a piece of the tab. `on` is a checkbox's new state; `index` which box.

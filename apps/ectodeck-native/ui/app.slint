@@ -4363,12 +4363,15 @@ export component AppWindow inherits Window {
                                 property <bool> hov: sta.has-hover && !root.carry-on && root.pl-sizing < 0 && !root.pl-dim;
                                 property <bool> way-hov: wta.has-hover && !root.carry-on && root.pl-sizing < 0 && !root.pl-dim;
                                 property <bool> lit: root.pl-menu == i || (b.on && root.pl-head && root.pl-in);
-                                // how the screen comes in: the turn's start
-                                if !root.pl-single: Rectangle {
+                                // how the screen comes in: the turn's start (grayed while the turn is the
+                                // only one, when nothing comes in after it, but still to be chosen)
+                                Rectangle {
                                     x: 0;
                                     y: 31px;
                                     width: root.pl-way-w;
                                     height: 18px;
+                                    opacity: root.pl-single && !(turn.way-hov || turn.hov || turn.lit) ? 0.45 : 1;
+                                    animate opacity { duration: 120ms; }
                                     border-top-left-radius: 5px;
                                     border-bottom-left-radius: 5px;
                                     background: turn.lit ? Ink.pick-hover : turn.way-hov || turn.hov ? Ink.pick : Ink.hover-box;
@@ -4537,7 +4540,6 @@ export component AppWindow inherits Window {
                                 }
                                 // the way bar: select it to choose how the screen comes in
                                 wta := TouchArea {
-                                    visible: !root.pl-single;
                                     enabled: !b.away && !root.pl-dim && !root.carry-on;
                                     x: 0;
                                     y: 16px;
@@ -4547,7 +4549,7 @@ export component AppWindow inherits Window {
                                     clicked => { root.pl-mark(i, self.absolute-position.x, self.absolute-position.y + 15px, 18px); }
                                 }
                                 // its name over it while the pointer is on it (not while its menu is open)
-                                if turn.way-hov && root.pl-menu != i && !root.pl-single: Rectangle {
+                                if turn.way-hov && root.pl-menu != i: Rectangle {
                                     x: (root.pl-way-w - self.width) / 2;
                                     y: 4px;
                                     width: wn-text.preferred-width + 14px;

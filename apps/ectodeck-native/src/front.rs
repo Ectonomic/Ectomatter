@@ -2953,6 +2953,14 @@ impl Front {
         for t in crate::lcd_page::TRANSITIONS {
             rows.push(MenuRow { kind: 0, label: t.name().into(), tag: "".into(), tick: t == e.comes_in, sub: "".into() });
         }
+        // the only turn: nothing comes in after it, so its way in waits for another
+        // (the menu as wide as the line, which doesn't wrap)
+        let mut w = 200.0f32;
+        if self.screens.turns(self.page.editing).len() == 1 {
+            let note = "Plays once the playlist has a second layout.";
+            w = w.max(crate::text::width(400, 13.0, note) + 34.0).ceil();
+            rows.push(MenuRow { kind: 3, label: note.into(), tag: "".into(), tick: false, sub: "".into() });
+        }
         self.close_menu();
         self.close_picker();
         let list: f32 = rows.iter().map(|r| if r.kind == 1 { 28.0 } else { 33.0 }).sum();
@@ -2960,7 +2968,7 @@ impl Front {
         self.ui.set_menu_search(false);
         self.ui.set_menu_back(false);
         self.ui.set_menu_natural(h);
-        self.ui.set_menu_w(200.0);
+        self.ui.set_menu_w(w);
         self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
         let (ax, ay, ah) = anchor;
         let win = self.ui.get_window_height();
