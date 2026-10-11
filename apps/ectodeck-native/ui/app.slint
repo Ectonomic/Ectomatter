@@ -4714,8 +4714,7 @@ export component AppWindow inherits Window {
                                 }
                             }
                         }
-                        // a new screen: an empty block after the last, drawn as the app draws a
-                        // place to add something (the color dot's own "+")
+                        // a new screen: an empty block after the last, in the cards' own shade
                         Rectangle {
                             property <int> k: root.lib-pages.length;
                             property <length> cw: shelf-two ? (parent.width - 32px - 8px) / 2 : parent.width - 32px;
@@ -4724,10 +4723,8 @@ export component AppWindow inherits Window {
                             width: self.cw;
                             height: 96px;
                             border-radius: 10px;
-                            background: new-ta.pressed ? Ink.pick : new-ta.has-hover ? Ink.hover-box : transparent;
-                            border-width: 1px;
-                            border-color: new-ta.has-hover ? #8a8a94 : #4a4a52;
-                            animate background, border-color { duration: 120ms; }
+                            background: new-ta.pressed ? Ink.pick : new-ta.has-hover ? Ink.hover-well : Ink.well;
+                            animate background { duration: 120ms; }
                             property <length> words-w: 12px + 7px + new-text.preferred-width;
                             Path {
                                 x: (parent.width - parent.words-w) / 2;
