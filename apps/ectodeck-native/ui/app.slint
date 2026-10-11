@@ -250,8 +250,11 @@ component WinButton inherits Rectangle {
     in property <string> commands;
     in property <length> size: 14px;
     in property <bool> danger;
+    // (the close button, at the window's corner: rounded as the window is)
+    in property <length> corner;
     callback clicked;
     width: 40px;
+    border-top-right-radius: root.corner;
     background: ta.has-hover ? (root.danger ? #dc2626 : #2e2e2e) : transparent;
     Path {
         width: root.size;
@@ -5130,6 +5133,7 @@ export component AppWindow inherits Window {
             }
             WinButton {
                 danger: true;
+                corner: root.radius;
                 commands: "M3.5 3.5l9 9M12.5 3.5l-9 9";
                 clicked => { root.close-window(); }
             }
@@ -5887,6 +5891,7 @@ export component MacroWindow inherits Window {
             }
             WinButton {
                 danger: true;
+                corner: root.radius;
                 commands: "M3.5 3.5l9 9M12.5 3.5l-9 9";
                 clicked => { root.close-window(); }
             }
@@ -6704,6 +6709,7 @@ export component LabWindow inherits Window {
             }
             WinButton {
                 danger: true;
+                corner: root.radius;
                 commands: "M3.5 3.5l9 9M12.5 3.5l-9 9";
                 clicked => { root.close-window(); }
             }
