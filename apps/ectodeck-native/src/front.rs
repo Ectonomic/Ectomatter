@@ -3612,8 +3612,11 @@ impl Front {
 
     /// The editor window's asks, carried out on the layouts and the screen.
     pub fn act_layouts(&mut self) -> Vec<WindowAsk> {
+        if self.layouts.is_none() {
+            return Vec::new();
+        }
         let avail = crate::lcd_page::available(&self.readings, self.weather.report().is_some());
-        let (light, _) = screen_of(&self.page.draft()["lighting"]);
+        let light = self.layouts_light();
         let Some(l) = &mut self.layouts else { return Vec::new() };
         let mut cx = crate::layout_page::Cx { screens: &mut self.screens, editor: &mut self.editor, readings: &self.readings, avail: &avail, light };
         let out = l.act(&mut cx);
@@ -3641,11 +3644,23 @@ impl Front {
 
     /// The editor's window shown as the layouts are now (each second too, for its readings).
     pub fn show_layouts(&mut self) {
+        if self.layouts.is_none() {
+            return;
+        }
         let avail = crate::lcd_page::available(&self.readings, self.weather.report().is_some());
-        let (light, _) = screen_of(&self.page.draft()["lighting"]);
+        let light = self.layouts_light();
         let Some(l) = &mut self.layouts else { return };
         let cx = crate::layout_page::Cx { screens: &mut self.screens, editor: &mut self.editor, readings: &self.readings, avail: &avail, light };
         l.show(&cx);
+    }
+
+    /// The default backlight of the profile shown, for the editor's window: its
+    /// brightness and color (until the keyboard's state has come, the screen's white).
+    fn layouts_light(&self) -> [u8; 4] {
+        if self.page.dev.is_none() {
+            return [255, 255, 255, 255];
+        }
+        screen_of(&self.page.draft()["lighting"]).0
     }
 
     /// Whether words are being typed in the editor's window (its name, a Text block's words).
