@@ -27,6 +27,7 @@ mod front;
 mod kde_output;
 mod shadow;
 mod lab;
+mod layout_page;
 mod lcd_anim;
 mod lcd_draw;
 mod lcd_page;
@@ -128,9 +129,13 @@ const MACRO_MIN_SIZE: (u32, u32) = (900, 420);
 /// the Key lab's
 const LAB_SIZE: (u32, u32) = (1280, 800);
 const LAB_MIN_SIZE: (u32, u32) = (1080, 680);
+/// the screen layout editor's, as the main window's (its screen at the size the Screen tab's is)
+const LAYOUT_SIZE: (u32, u32) = (1440, 1028);
+const LAYOUT_MIN_SIZE: (u32, u32) = (1200, 760);
 /// the windows of their own beside the main one, by their place in App's `subs`
 const MACROS: usize = 0;
 const LAB: usize = 1;
+const LAYOUTS: usize = 2;
 /// the ground the keyboard sits on: its box's (Ink.well)
 const GROUND: [u8; 3] = [0x13, 0x13, 0x16];
 /// How much brighter than the page's colours the keys' light is drawn. The
@@ -548,6 +553,10 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     if let Some(n) = std::env::var("ECTODECK_NATIVE_MACROS").ok().and_then(|v| v.parse::<u32>().ok()) {
         return snap_macros(front, made, n, path);
     }
+    // ECTODECK_NATIVE_LAYOUTS=N: the screen layout editor's window instead, open on layout N
+    if let Some(n) = std::env::var("ECTODECK_NATIVE_LAYOUTS").ok().and_then(|v| v.parse::<usize>().ok()) {
+        return snap_layouts(front, made, n, path);
+    }
     // ECTODECK_NATIVE_LAB: the Key lab's window instead
     if std::env::var_os("ECTODECK_NATIVE_LAB").is_some() {
         return snap_lab(front, made, reference, path);
@@ -870,6 +879,104 @@ fn snap_macros(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>
     eprintln!("saved {path}: {w}x{h}");
 }
 
+/// The screen layout editor's window without a window: one frame, saved as a
+/// PNG, after the clicks, typing and drag the snapshot's settings ask for
+/// (ECTODECK_NATIVE_CLICKS, ECTODECK_NATIVE_TYPE, ECTODECK_NATIVE_CLICKS_AFTER,
+/// ECTODECK_NATIVE_DELETE for the Delete key, ECTODECK_NATIVE_DRAG_DROP with
+/// ECTODECK_NATIVE_DRAG_HOLD to keep it held, ECTODECK_NATIVE_HOVER), and with
+/// ECTODECK_NATIVE_CLOSE, closed.
+fn snap_layouts(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>, n: usize, path: &str) {
+    let (w, h) = std::env::var("ECTODECK_NATIVE_SIZE")
+        .ok()
+        .and_then(|s| s.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
+        .unwrap_or(LAYOUT_SIZE);
+    let ui = LayoutWindow::new().unwrap();
+    let _ = slint::ComponentHandle::window(&ui);
+    let window = made.borrow().last().cloned().unwrap();
+    slint::ComponentHandle::show(&ui).unwrap();
+    window.set_size(PhysicalSize::new(w, h));
+    front.layouts = Some(layout_page::LayoutPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false)));
+    let mut px = vec![PremultipliedRgbaColor::default(); (w * h) as usize];
+    let draw = |px: &mut Vec<PremultipliedRgbaColor>| {
+        window.draw_if_needed(|r| {
+            r.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
+            r.render(px, w as usize);
+        });
+    };
+    draw(&mut px);
+    front.open_layouts(n);
+    window.request_redraw();
+    draw(&mut px);
+    let clicks = |front: &mut Front, px: &mut Vec<PremultipliedRgbaColor>, list: &str| {
+        for click in list.split(';').filter(|c| !c.is_empty()) {
+            let mut xy = click.split(',').map(|v| v.trim().parse::<f32>().unwrap_or(0.0));
+            let (x, y) = (xy.next().unwrap_or(0.0), xy.next().unwrap_or(0.0));
+            let position = LogicalPosition::new(x, y);
+            window.dispatch_event(WindowEvent::PointerMoved { position });
+            if let Some(l) = &mut front.layouts {
+                l.pressed_at(x, y);
+            }
+            window.dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Left });
+            window.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
+            front.act_layouts();
+            window.request_redraw();
+            draw(px);
+        }
+    };
+    clicks(&mut front, &mut px, &std::env::var("ECTODECK_NATIVE_CLICKS").unwrap_or_default());
+    for c in std::env::var("ECTODECK_NATIVE_TYPE").unwrap_or_default().chars() {
+        let text: SharedString = if c == '\n' { Key::Return.into() } else { c.to_string().into() };
+        window.dispatch_event(WindowEvent::KeyPressed { text: text.clone() });
+        window.dispatch_event(WindowEvent::KeyReleased { text });
+        slint::platform::update_timers_and_animations();
+        front.act_layouts();
+    }
+    clicks(&mut front, &mut px, &std::env::var("ECTODECK_NATIVE_CLICKS_AFTER").unwrap_or_default());
+    if std::env::var_os("ECTODECK_NATIVE_DELETE").is_some() && !front.typing_in_layouts() {
+        if let Some(l) = &front.layouts {
+            l.delete_key();
+        }
+        front.act_layouts();
+    }
+    // a press at the first point, moved to the second in steps, let go there
+    // unless ECTODECK_NATIVE_DRAG_HOLD
+    let drag: Vec<f32> = std::env::var("ECTODECK_NATIVE_DRAG_DROP").unwrap_or_default().split([',', ';']).filter_map(|v| v.trim().parse().ok()).collect();
+    if let [x0, y0, x1, y1] = drag[..] {
+        let at = |t: f32| LogicalPosition::new(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t);
+        window.dispatch_event(WindowEvent::PointerMoved { position: at(0.0) });
+        if let Some(l) = &mut front.layouts {
+            l.pressed_at(x0, y0);
+        }
+        window.dispatch_event(WindowEvent::PointerPressed { position: at(0.0), button: PointerEventButton::Left });
+        for k in 1..=10 {
+            window.dispatch_event(WindowEvent::PointerMoved { position: at(k as f32 / 10.0) });
+            front.act_layouts();
+            window.request_redraw();
+            draw(&mut px);
+        }
+        if std::env::var_os("ECTODECK_NATIVE_DRAG_HOLD").is_none() {
+            window.dispatch_event(WindowEvent::PointerReleased { position: at(1.0), button: PointerEventButton::Left });
+        }
+    }
+    if let Ok(at) = std::env::var("ECTODECK_NATIVE_HOVER") {
+        let mut xy = at.split(',').map(|v| v.trim().parse::<f32>().unwrap_or(0.0));
+        window.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(xy.next().unwrap_or(0.0), xy.next().unwrap_or(0.0)) });
+    }
+    front.act_layouts();
+    window.request_redraw();
+    draw(&mut px);
+    let mut pix = Pixmap::new(w, h).unwrap();
+    for (d, p) in pix.pixels_mut().iter_mut().zip(&px) {
+        *d = resvg::tiny_skia::PremultipliedColorU8::from_rgba(p.red, p.green, p.blue, p.alpha).unwrap_or(resvg::tiny_skia::PremultipliedColorU8::TRANSPARENT);
+    }
+    pix.save_png(path).unwrap();
+    eprintln!("saved {path}: {w}x{h}");
+    // ECTODECK_NATIVE_CLOSE: the window closed after the picture, which saves the layouts
+    if std::env::var_os("ECTODECK_NATIVE_CLOSE").is_some() {
+        front.layouts_closed();
+    }
+}
+
 /// The Key lab's window without a window: one frame, saved as a PNG,
 /// its readout from the keyboard lit as the snapshot's state has it.
 fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>, reference: f64, path: &str) {
@@ -1114,7 +1221,7 @@ struct App {
     made: Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>,
     /// the windows of their own beside the main one (the Macro Editor's, the
     /// Key lab's), once opened, and which of them has the keyboard's focus
-    subs: [Option<SubWin>; 2],
+    subs: [Option<SubWin>; 3],
     keys_on: Option<usize>,
     /// the keys held down as the keyboard last said, for Ctrl+Shift+K
     mods: Modifiers,
@@ -1384,7 +1491,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         tray: None,
         tray_connected: false,
         made,
-        subs: [None, None],
+        subs: [None, None, None],
         keys_on: None,
         mods: Modifiers::default(),
         light: lit_by,
@@ -1513,6 +1620,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         app.draw();
         app.draw_sub(MACROS);
         app.draw_sub(LAB);
+        app.draw_sub(LAYOUTS);
         // ECTODECK_NATIVE_FPS: frames a second and the slowest, to check smoothness without slowing it
         if let Some((since, n, slow)) = &mut fps {
             if app.frames > before {
@@ -1573,9 +1681,10 @@ impl App {
                 WindowAsk::Close => self.hide(),
                 WindowAsk::OpenMacros(n) => self.open_macros(*n),
                 WindowAsk::OpenLab => self.open_lab(),
+                WindowAsk::OpenLayouts(i) => self.open_layouts(*i),
             }
         }
-        let asks = [(MACROS, self.front.act_macros()), (LAB, self.front.act_lab())];
+        let asks = [(MACROS, self.front.act_macros()), (LAB, self.front.act_lab()), (LAYOUTS, self.front.act_layouts())];
         for (which, asks) in asks {
             for ask in asks {
                 let Some(sw) = &mut self.subs[which] else { break };
@@ -1597,7 +1706,7 @@ impl App {
                         }
                     }
                     WindowAsk::Close => self.hide_sub(which),
-                    WindowAsk::OpenMacros(_) | WindowAsk::OpenLab => {}
+                    WindowAsk::OpenMacros(_) | WindowAsk::OpenLab | WindowAsk::OpenLayouts(_) => {}
                 }
             }
         }
@@ -1641,6 +1750,20 @@ impl App {
         if let Some(m) = &mut self.front.macros {
             m.open(&self.front.page, (n > 0).then_some(n));
         }
+    }
+
+    /// Open the screen layout editor's window, made the first time, on layout `i` of the Library.
+    fn open_layouts(&mut self, i: usize) {
+        if self.front.layouts.is_none() {
+            let ui = LayoutWindow::new().unwrap();
+            let _ = slint::ComponentHandle::window(&ui);
+            slint::ComponentHandle::show(&ui).unwrap();
+            self.front.layouts = Some(layout_page::LayoutPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false)));
+            self.subs[LAYOUTS] = Some(self.make_sub("EVGA Z10 RGB / Screen layouts", LAYOUT_SIZE, LAYOUT_MIN_SIZE));
+        } else {
+            self.show_sub(LAYOUTS);
+        }
+        self.front.open_layouts(i);
     }
 
     /// The light the keyboard is lit by: the Key lab's, if it has tuned
@@ -1701,6 +1824,10 @@ impl App {
         }
         if which == LAB {
             self.front.ui.set_lab_open(false);
+        }
+        // the screen layout editor closed: the keyboard's screen plays the playlist again
+        if which == LAYOUTS {
+            self.front.layouts_closed();
         }
         let Some(sw) = &mut self.subs[which] else { return };
         sw.window.wl_surface().attach(None, 0, 0);
@@ -1775,7 +1902,7 @@ impl App {
         mw.frame_pending = true;
         if let Some(dir) = &self.dump {
             let rgba: Vec<u8> = mw.px.iter().flat_map(|p| [p.red, p.green, p.blue, p.alpha]).collect();
-            let name = if which == MACROS { "macros" } else { "lab" };
+            let name = ["macros", "lab", "layouts"][which];
             let _ = std::fs::write(dir.join(format!("{name}.raw")), rgba);
             let _ = std::fs::write(dir.join(format!("{name}.txt")), format!("{w} {h}\n"));
         }
@@ -1812,6 +1939,11 @@ impl App {
                 if which == MACROS {
                     if let Some(m) = &mut self.front.macros {
                         m.pressed_at(x as f32, y as f32);
+                    }
+                }
+                if which == LAYOUTS {
+                    if let Some(l) = &mut self.front.layouts {
+                        l.pressed_at(x as f32, y as f32);
                     }
                 }
                 mw.slint.dispatch_event(WindowEvent::PointerPressed { position, button: pointer_button(b) });
@@ -2252,6 +2384,12 @@ impl App {
             self.front.asks.borrow_mut().push(front::Ask::Undo(self.mods.shift || matches!(e.keysym, Keysym::y | Keysym::Y)));
             return;
         }
+        if self.keys_on == Some(LAYOUTS) && down && matches!(e.keysym, Keysym::Delete) && !self.front.typing_in_layouts() {
+            if let Some(l) = &self.front.layouts {
+                l.delete_key();
+            }
+            return;
+        }
         if let Some(which) = self.keys_on {
             if let (Some(sw), Some(text)) = (&self.subs[which], key_text(e)) {
                 sw.slint.dispatch_event(if down { WindowEvent::KeyPressed { text } } else { WindowEvent::KeyReleased { text } });
@@ -2362,6 +2500,11 @@ impl WindowHandler for App {
                     m.ui.set_is_maximized(maximized);
                     m.refresh(&self.front.page);
                 }
+            } else if which == LAYOUTS {
+                if let Some(l) = &mut self.front.layouts {
+                    l.ui.set_is_maximized(maximized);
+                }
+                self.front.show_layouts();
             } else if let Some(l) = &mut self.front.lab {
                 l.ui.set_is_maximized(maximized);
                 l.refresh();

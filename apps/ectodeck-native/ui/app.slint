@@ -181,17 +181,6 @@ export struct Cell {
     style: int,
 }
 
-// a row in a menu: 0 a choice, 1 a heading, 2 a rule, 3 a note
-// a piece of a page being edited, as the screen outlines it: its row, first
-// column and width in cells, whether chosen, and its name
-export struct EdPiece {
-    row: int,
-    col: int,
-    width: int,
-    on: bool,
-    name: string,
-}
-
 // a page in the Screen tab's playlist: its name, what it does next, its
 // picture, its place in the order, whether the screen shows it, and whether
 // it is first, last or the only page
@@ -228,15 +217,8 @@ export struct PlBlock {
     way-name: string,
 }
 
-// a page that can be added to the playlist: its name, what it shows, its
-// picture, and whether it is selected
-export struct LibCard {
-    name: string,
-    note: string,
-    pic: image,
-    on: bool,
-}
-
+// a row in a menu: 0 a choice, 1 a heading, 2 a rule, 3 a note, 4 a choice
+// in red (one that deletes), 5 a choice that can't be made now
 export struct MenuRow {
     kind: int,
     label: string,
@@ -3451,42 +3433,17 @@ export component AppWindow inherits Window {
     callback pl-size-done();
     callback pl-mark(int, length, length, length);
     callback pl-back();
-    // Layouts: every screen layout, its card; one opened in the editor
+    // Layouts: every screen layout, its card, one opened in the layout
+    // editor's window, a new one made there
     in property <[PlPage]> lib-pages;
     callback lib-edit(int);
-    // the page editor: whether a page is being edited, the toolbar's words,
-    // the grid on or off, the pieces over the screen, and its three boxes
-    in property <bool> screen-editing;
-    in property <string> ed-title;
-    in property <bool> ed-grid;
-    in property <[EdPiece]> ed-pieces;
-    in property <string> ed-piece-title;
-    in property <[Cell]> ed-piece-cells;
-    in property <length> ed-piece-h;
-    in property <[Cell]> ed-place-cells;
-    in property <length> ed-place-h;
-    in property <string> ed-page-title;
-    in property <[Cell]> ed-page-cells;
-    in property <length> ed-page-h;
+    callback lib-new();
+    // the playlist: a turn's layout opened in the layout editor, the turn
+    // shown now, moved, taken off
     callback screen-edit(int);
-    // the playlist: a turn shown now, taken off; the sheet of pages to add to
-    // the Library, a page selected on it, added, the sheet closed
     callback page-show(int);
     callback page-moved(int, int);
     callback page-remove(int);
-    in property <bool> lib-open;
-    in property <[LibCard]> lib-cards;
-    in property <string> lib-add-text: "Add";
-    in property <bool> lib-can-add;
-    callback lib-open-at();
-    callback lib-pick(int);
-    callback lib-add();
-    callback lib-close();
-    callback screen-done();
-    callback screen-add(int);
-    callback screen-grid();
-    callback piece-chosen(int);
-    callback piece-moved(int, int, int);
     // what the screen is doing now, shown beside Pause
     in property <string> screen-status;
     // the chosen key, and its two layers
@@ -3629,17 +3586,16 @@ export component AppWindow inherits Window {
     // backlight at the row's right end (it lights both); the box holding the screen and,
     // under it, the playlist on the first tab, or on the second the chooser of the layout
     // the keyboard keeps, with Layouts joined to the box's foot. The box is as tall as
-    // Profiles. (`stage-h` is the screen's part of the box, and the whole box while a page
-    // is edited.)
+    // Profiles. (`stage-h` is the screen's part of the box.)
     property <length> pl-panel-h: 56px;
     property <length> stage-h: anchor.preferred-height - pl-panel-h;
-    property <length> tabs-h: root.screen-editing ? 0 : 36px;
+    property <length> tabs-h: 36px;
     // the box: as tall as Profiles, less whatever a narrow window takes off the screen's
     // height, so the row under the screen keeps its margin
     property <length> lcd-short: stage-h - 2 * bay-pad - 2 * kb-pad-y - lcd-h;
-    property <length> box-h: root.screen-editing ? stage-h : anchor.preferred-height - lcd-short;
+    property <length> box-h: anchor.preferred-height - lcd-short;
     // Layouts, joined to the box's foot: on the second tab only once the keyboard can keep a layout
-    property <bool> shelf-on: !root.screen-editing && (!root.screen-closed || root.ob-ready);
+    property <bool> shelf-on: !root.screen-closed || root.ob-ready;
     // the row under the screen in the box: the bay 16 in from the box's top, its gutter round the screen
     property <length> band-y: tabs-h + bay-pad + lcd-h + 2 * kb-pad-y;
     // the bay the screen sits in (the screen and its gutter), and the box's gray round the
@@ -3656,9 +3612,8 @@ export component AppWindow inherits Window {
     property <length> shelf-h: 48px + shelf-rows * 104px - 8px + 16px;
     // the screen's own background, which its bay is
     in property <color> lcd-field: #0a0908;
-    // (on the Screen tab, what is under the screen's box and its panel: the Library, or
-    // the page editor's boxes)
-    property <length> under-top: root.tab == 3 ? head-end + (root.screen-editing ? stage-h + 18px : tabs-h + box-h) : head-end + board-h + 2 * kb-pad-y + 18px;
+    // (on the Screen tab, what is under the screen's box and its panel: the Library)
+    property <length> under-top: root.tab == 3 ? head-end + tabs-h + box-h : head-end + board-h + 2 * kb-pad-y + 18px;
     // the playlist's name changed in place: where its field is in the window, so a press
     // away from it keeps the name
     out property <length> pl-rename-wx: rail-w + under-x + 16px;
@@ -3704,15 +3659,8 @@ export component AppWindow inherits Window {
     property <length> lrow1: max(lr1 == 1 ? root.set-h : 0, lr2 == 1 ? root.place-h : 0);
     property <length> lrow2: lr2 == 2 ? root.place-h : 0;
     property <length> light-h: lrow0 + (lrows > 1 ? 12px + lrow1 : 0) + (lrows > 2 ? 12px + lrow2 : 0);
-    // editing a page: its three boxes (320 wide), as many to a row as fit,
-    // each row as tall as the tallest box needs
-    property <int> ed-n: under-w >= 3 * 320px + 24px ? 3 : under-w >= 2 * 320px + 12px ? 2 : 1;
-    property <int> ed-rows: ed-n == 3 ? 1 : ed-n == 2 ? 2 : 3;
-    property <length> ed-need: max(root.ed-piece-h, max(root.ed-place-h, root.ed-page-h));
-    property <length> ed-row: ed-need;
-    property <length> ed-h: ed-rows * ed-row + (ed-rows - 1) * 12px;
     property <length> tab-h: root.tab == 0 ? (second-fits ? keys-h : keys-h + 12px + second-h)
-        : root.tab == 1 ? light-h : root.tab == 3 ? (root.screen-editing ? ed-h : shelf-on ? shelf-h : 0) : root.tile-height;
+        : root.tab == 1 ? light-h : root.tab == 3 ? (shelf-on ? shelf-h : 0) : root.tile-height;
     property <length> under-board: 18px + max(anchor.preferred-height, tab-h);
     property <length> page-h: root.tab == 2 ? 12px + head-h + 6px + 24px + root.tile-height + 40px
         : root.tab == 3 ? max(head-end + anchor.preferred-height, under-top + tab-h) + 24px
@@ -3802,15 +3750,6 @@ export component AppWindow inherits Window {
                     }
                     if root.boot == 0: HorizontalLayout {
                         spacing: 16px;
-                        // editing a page: which, before what to do
-                        if root.tab == 3 && root.screen-editing: Text {
-                            text: root.ed-title;
-                            font-family: "Geist";
-                            font-size: 13.5px;
-                            font-weight: 600;
-                            color: Ink.ink;
-                            vertical-alignment: center;
-                        }
                         Text {
                             text: root.hint;
                             font-family: "Geist";
@@ -3881,78 +3820,7 @@ export component AppWindow inherits Window {
                         // on Screen, what it is doing now, a dot that breathes while
                         // Ectodeck plays it; then Pause, which holds the screen as it
                         // is, and Play, which carries on
-                        // editing a page: a new piece of each kind, the grid, and Done
-                        if root.tab == 3 && root.screen-editing: HorizontalLayout {
-                            horizontal-stretch: 0;
-                            spacing: 8px;
-                            Text {
-                                text: "Add";
-                                font-family: "Geist";
-                                font-size: 12.5px;
-                                color: Ink.quiet;
-                                vertical-alignment: center;
-                            }
-                            for w[k] in ["Text", "Data", "Bar", "Clock"]: VerticalLayout {
-                                alignment: center;
-                                WordButton {
-                                    text: w;
-                                    clicked => { root.screen-add(k); }
-                                }
-                            }
-                            Rectangle {
-                                width: 1px;
-                                Rectangle {
-                                    y: (parent.height - 20px) / 2;
-                                    height: 20px;
-                                    background: Ink.line;
-                                }
-                            }
-                            Rectangle {
-                                width: 28px + grid-words.preferred-width;
-                                Rectangle {
-                                    x: 0;
-                                    y: (parent.height - 18px) / 2;
-                                    width: 18px;
-                                    height: 18px;
-                                    border-radius: 5px;
-                                    background: root.ed-grid ? (grid-ta.has-hover ? Ink.bright : Ink.dim) : grid-ta.has-hover ? Ink.hover-box : Ink.well;
-                                    border-width: root.ed-grid ? 0 : 1px;
-                                    border-color: grid-ta.has-hover ? #6a6a74 : #4a4a52;
-                                    if root.ed-grid: Path {
-                                        width: 18px;
-                                        height: 18px;
-                                        viewbox-width: 18;
-                                        viewbox-height: 18;
-                                        commands: "M5.2 9.3 L7.9 11.9 L12.9 6.4";
-                                        fill: transparent;
-                                        stroke: Ink.base;
-                                        stroke-width: 2px;
-                                    }
-                                }
-                                grid-words := Text {
-                                    x: 28px;
-                                    text: "Grid";
-                                    font-family: "Geist";
-                                    font-size: 13px;
-                                    color: grid-ta.has-hover ? Ink.bright : Ink.dim;
-                                    vertical-alignment: center;
-                                }
-                                grid-ta := TouchArea {
-                                    mouse-cursor: pointer;
-                                    clicked => { root.screen-grid(); }
-                                }
-                            }
-                            VerticalLayout {
-                                alignment: center;
-                                WordButton {
-                                    text: "Done";
-                                    fill: Ink.pick;
-                                    fill-hover: Ink.pick-hover;
-                                    clicked => { root.screen-done(); }
-                                }
-                            }
-                        }
-                        if root.tab == 3 && !root.screen-editing && root.screen-status != "": Text {
+                        if root.tab == 3 && root.screen-status != "": Text {
                             horizontal-stretch: 0;
                             text: root.screen-status;
                             font-family: "Geist";
@@ -4102,7 +3970,7 @@ export component AppWindow inherits Window {
                     x: under-x;
                     y: head-end;
                     width: under-w;
-                    height: root.screen-editing ? stage-h : tabs-h + box-h + (shelf-on ? shelf-h : 0);
+                    height: tabs-h + box-h + (shelf-on ? shelf-h : 0);
                     // a screen carried to `wx`, `wy` in the window: where the pointer holds it
                     // here, and where that is along the strip (anywhere over the panel, it can land);
                     // on the second tab, whether it is over the screen, where it lands there
@@ -4143,7 +4011,7 @@ export component AppWindow inherits Window {
                         }
                     }
                     // the screen's two states, as folder tabs on the box's top
-                    if !root.screen-editing: HorizontalLayout {
+                    HorizontalLayout {
                         x: 0;
                         y: 0;
                         height: tabs-h;
@@ -4179,14 +4047,14 @@ export component AppWindow inherits Window {
                         y: tabs-h;
                         height: box-h;
                         border-radius: 12px;
-                        border-top-left-radius: !root.screen-editing && !root.screen-closed ? 0 : 12px;
+                        border-top-left-radius: !root.screen-closed ? 0 : 12px;
                         background: Ink.well;
                         // the bay the screen is set into, between plain walls: the screen's own
                         // background color, its corners rounded inside the box's, its top edge
                         // shaded as a step down into it
                         screen-bay := Rectangle {
                             x: (parent.width - self.width) / 2;
-                            y: root.screen-editing ? (parent.height - self.height) / 2 : bay-pad;
+                            y: bay-pad;
                             width: lcd-w + 2 * kb-pad-y;
                             height: lcd-h + 2 * kb-pad-y;
                             border-radius: 10px;
@@ -4214,7 +4082,7 @@ export component AppWindow inherits Window {
                         }
                         Rectangle {
                             x: (parent.width - lcd-w) / 2;
-                            y: root.screen-editing ? (parent.height - lcd-h) / 2 : bay-pad + kb-pad-y;
+                            y: bay-pad + kb-pad-y;
                             width: lcd-w;
                             height: lcd-h;
                             border-radius: 4px;
@@ -4223,81 +4091,6 @@ export component AppWindow inherits Window {
                                 width: parent.width;
                                 height: parent.height;
                                 source: root.lcd-big;
-                            }
-                            // editing: a press away from every piece lets the chosen one go
-                            if root.screen-editing: TouchArea {
-                                // (on the press itself: a drag let go here is no press away)
-                                pointer-event(e) => {
-                                    if (e.kind == PointerEventKind.down) {
-                                        root.piece-chosen(-1);
-                                    }
-                                }
-                            }
-                            // the screen's 20 by 4 cells
-                            if root.screen-editing && root.ed-grid: Rectangle {
-                                for k in 19: Rectangle {
-                                    x: (k + 1) * parent.width / 20 - 0.5px;
-                                    width: 1px;
-                                    background: #ffffff1c;
-                                }
-                                for k in 3: Rectangle {
-                                    y: (k + 1) * parent.height / 4 - 0.5px;
-                                    height: 1px;
-                                    background: #ffffff1c;
-                                }
-                            }
-                            // each piece outlined; the chosen one in amber, named; a
-                            // piece dragged follows the pointer cell by cell
-                            if root.screen-editing: Rectangle {
-                                property <length> cw: parent.width / 20;
-                                property <length> ch: parent.height / 4;
-                                for p[i] in root.ed-pieces: Rectangle {
-                                    // how many cells across and down the piece has been dragged
-                                    property <int> dc: 0;
-                                    property <int> dr: 0;
-                                    property <int> at-col: max(0, min(20 - p.width, p.col + dc));
-                                    property <int> at-row: max(0, min(3, p.row + dr));
-                                    // (the drag ends once the page has the piece where it was dropped)
-                                    property <int> home: p.row * 100 + p.col;
-                                    changed home => {
-                                        self.dc = 0;
-                                        self.dr = 0;
-                                    }
-                                    x: at-col * cw + 1px;
-                                    y: at-row * ch + 1px;
-                                    width: p.width * cw - 2px;
-                                    height: ch - 2px;
-                                    border-radius: 3px;
-                                    border-width: p.on || drag.pressed ? 2px : 1px;
-                                    border-color: p.on || drag.pressed ? Ink.warn : drag.has-hover ? #ffffff80 : #ffffff33;
-                                    background: p.on ? #f0b35a1a : drag.has-hover ? #ffffff0d : transparent;
-                                    drag := TouchArea {
-                                        mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.pointer;
-                                        // the pointer measured from where it was pressed on the screen:
-                                        // the outline moves with the drag, so how far it has moved
-                                        // already is added back, or the piece snaps to and fro
-                                        moved => {
-                                            parent.dc = round((self.mouse-x - self.pressed-x + (parent.at-col - p.col) * cw) / cw);
-                                            parent.dr = round((self.mouse-y - self.pressed-y + (parent.at-row - p.row) * ch) / ch);
-                                        }
-                                        pointer-event(e) => {
-                                            if (e.kind == PointerEventKind.down) {
-                                                parent.dc = 0;
-                                                parent.dr = 0;
-                                            }
-                                            if (e.kind == PointerEventKind.up) {
-                                                if (parent.at-col != p.col || parent.at-row != p.row) {
-                                                    // stays where it was dropped until the page has it there
-                                                    root.piece-moved(i, parent.at-row, parent.at-col);
-                                                } else {
-                                                    parent.dc = 0;
-                                                    parent.dr = 0;
-                                                    root.piece-chosen(i);
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
                             }
                         }
                     }
@@ -4308,7 +4101,7 @@ export component AppWindow inherits Window {
                     // Pause, which playlist, then one round of it, left to right, each turn as long
                     // as its time, and the round starting again after it.
                     panel := Rectangle {
-                        visible: !root.screen-editing && !root.screen-closed;
+                        visible: !root.screen-closed;
                         y: band-y;
                         height: pl-panel-h;
                         // Pause, at the playlist's right end, after the round's start again
@@ -4771,7 +4564,7 @@ export component AppWindow inherits Window {
                     // the second tab's row under the screen, where the first has the playlist: the
                     // chooser of the layout the profile keeps on the keyboard, and the line beside
                     // it; on a keyboard without build 5, what the keyboard needs instead
-                    if !root.screen-editing && root.screen-closed: Rectangle {
+                    if root.screen-closed: Rectangle {
                         y: band-y;
                         height: pl-panel-h;
                         if root.ob-ready: Rectangle {
@@ -4982,14 +4775,14 @@ export component AppWindow inherits Window {
                             }
                             new-ta := TouchArea {
                                 mouse-cursor: pointer;
-                                clicked => { root.lib-open-at(); }
+                                clicked => { root.lib-new(); }
                             }
                         }
                     }
 
                     // the pieces round the box, in the column's terms: the default backlight at the
                     // tabs' row's right end, and the line on a layout's own color before it
-                    if root.boot == 0 && !root.screen-editing: Rectangle {
+                    if root.boot == 0: Rectangle {
                         for c in root.cells: CellView {
                             c: c;
                             pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
@@ -5021,66 +4814,6 @@ export component AppWindow inherits Window {
                             font-weight: 600;
                             color: Ink.bright;
                             vertical-alignment: center;
-                        }
-                    }
-                }
-                // the page editor's box 1 of 3: the piece chosen
-                if root.tab == 3 && root.boot == 0 && root.screen-editing: ScrollBox {
-                    x: under-x + mod(0, ed-n) * 332px;
-                    y: under-top + floor(0 / ed-n) * (ed-row + 12px);
-                    width: 320px;
-                    height: ed-row;
-                    need: root.ed-piece-h;
-                    PageBox {
-                        width: parent.width;
-                        height: max(root.ed-piece-h, ed-row);
-                        fill: transparent;
-                        title: root.ed-piece-title;
-                        for c in root.ed-piece-cells: CellView {
-                            c: c;
-                            pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
-                            slide(id, v) => { root.cell-slide(id, v); }
-                            typed(id, t) => { root.cell-typed(id, t); }
-                        }
-                    }
-                }
-                // the page editor's box 2 of 3: where the piece sits
-                if root.tab == 3 && root.boot == 0 && root.screen-editing: ScrollBox {
-                    x: under-x + mod(1, ed-n) * 332px;
-                    y: under-top + floor(1 / ed-n) * (ed-row + 12px);
-                    width: 320px;
-                    height: ed-row;
-                    need: root.ed-place-h;
-                    PageBox {
-                        width: parent.width;
-                        height: max(root.ed-place-h, ed-row);
-                        fill: transparent;
-                        title: "Place";
-                        for c in root.ed-place-cells: CellView {
-                            c: c;
-                            pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
-                            slide(id, v) => { root.cell-slide(id, v); }
-                            typed(id, t) => { root.cell-typed(id, t); }
-                        }
-                    }
-                }
-                // the page editor's box 3 of 3: the page
-                if root.tab == 3 && root.boot == 0 && root.screen-editing: ScrollBox {
-                    x: under-x + mod(2, ed-n) * 332px;
-                    y: under-top + floor(2 / ed-n) * (ed-row + 12px);
-                    width: 320px;
-                    height: ed-row;
-                    need: root.ed-page-h;
-                    PageBox {
-                        width: parent.width;
-                        height: max(root.ed-page-h, ed-row);
-                        fill: transparent;
-                        title: root.ed-page-title;
-                        for c in root.ed-page-cells: CellView {
-                            c: c;
-                            pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
-                            slide(id, v) => { root.cell-slide(id, v); }
-                            typed(id, t) => { root.cell-typed(id, t); }
                         }
                     }
                 }
@@ -5398,114 +5131,6 @@ export component AppWindow inherits Window {
             open: root.rail-open;
             reveal: root.reveal;
             clicked => { root.rail("settings"); }
-        }
-    }
-
-    // the pages that can be added to the playlist, on a sheet over the window:
-    // a picture and a line for each; select one, then add it
-    if root.lib-open: Rectangle {
-        y: bar;
-        height: root.height - bar;
-        background: #0a0c0f9e;
-        border-bottom-left-radius: root.radius;
-        border-bottom-right-radius: root.radius;
-        TouchArea {
-            clicked => { root.lib-close(); }
-        }
-        Rectangle {
-            property <length> card-w: (self.width - 40px - 2 * 12px) / 3;
-            // three to a row, as many rows as the pages take
-            property <int> card-rows: ceil(root.lib-cards.length / 3);
-            width: min(680px, parent.width - 32px);
-            height: 20px + 26px + 22px + 24px + card-rows * card-w * 0.7 + (card-rows - 1) * 12px + 24px + 32px + 20px;
-            border-radius: 12px;
-            background: Ink.box;
-            border-width: 1px;
-            border-color: Ink.line;
-            drop-shadow-blur: 60px;
-            drop-shadow-offset-y: 24px;
-            drop-shadow-color: #000000cc;
-            TouchArea { }
-            Text {
-                x: 20px;
-                y: 20px;
-                text: "New screen layout";
-                font-family: "Geist";
-                font-size: 16px;
-                font-weight: 600;
-                color: Ink.ink;
-            }
-            Text {
-                x: 20px;
-                y: 20px + 26px;
-                width: parent.width - 40px;
-                text: "Select a screen layout to add to Layouts.";
-                font-family: "Geist";
-                font-size: 13px;
-                color: Ink.quiet;
-            }
-            for c[i] in root.lib-cards: Rectangle {
-                x: 20px + mod(i, 3) * (card-w + 12px);
-                y: 20px + 26px + 22px + 24px + floor(i / 3) * (card-w * 0.7 + 12px);
-                width: card-w;
-                height: card-w * 0.7;
-                border-radius: 10px;
-                background: c.on ? (card-ta.has-hover ? Ink.pick-hover : Ink.pick) : card-ta.has-hover ? Ink.hover-well : Ink.well;
-                Rectangle {
-                    x: 10px;
-                    y: 10px;
-                    width: parent.width - 20px;
-                    height: (parent.width - 20px) / 5;
-                    border-radius: 3px;
-                    clip: true;
-                    Image {
-                        width: parent.width;
-                        height: parent.height;
-                        source: c.pic;
-                    }
-                }
-                Text {
-                    x: 12px;
-                    y: 10px + (parent.width - 20px) / 5 + 10px;
-                    text: c.name;
-                    font-family: "Geist";
-                    font-size: 13px;
-                    font-weight: 600;
-                    color: c.on || card-ta.has-hover ? Ink.bright : Ink.ink;
-                }
-                Text {
-                    x: 12px;
-                    y: 10px + (parent.width - 20px) / 5 + 30px;
-                    width: parent.width - 24px;
-                    text: c.note;
-                    font-family: "Geist";
-                    font-size: 12px;
-                    color: Ink.soft;
-                    wrap: word-wrap;
-                }
-                card-ta := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => { root.lib-pick(i); }
-                }
-            }
-            HorizontalLayout {
-                x: 20px;
-                y: parent.height - 20px - 32px;
-                width: parent.width - 40px;
-                height: 32px;
-                spacing: 8px;
-                alignment: end;
-                VerticalLayout {
-                    alignment: center;
-                    WordButton { text: "Cancel"; clicked => { root.lib-close(); } }
-                }
-                WordButton {
-                    primary: true;
-                    text: root.lib-add-text;
-                    enabled: root.lib-can-add;
-                    clicked => { root.lib-add(); }
-                }
-            }
         }
     }
 
@@ -6632,6 +6257,1215 @@ export component MacroWindow inherits Window {
                 }
             }
         }
+    }
+}
+
+// ------------------------------------------------------------------ the screen layout editor
+// A layout in the editor's list: its name, the line saying what it shows, whether open.
+export struct LayoutRow {
+    name: string,
+    about: string,
+    on: bool,
+}
+
+// A block on the editor's screen: its first cell and its size in cells, whether
+// selected, whether an effect; the free run its ends can reach in its row (the first
+// column, and the column after the last), so a handle stops at its neighbors; and the
+// fewest cells it shows its whole self in, so a handle stops there too.
+export struct EdBlock {
+    row: int,
+    col: int,
+    width: int,
+    height: int,
+    on: bool,
+    fx: bool,
+    lo: int,
+    hi: int,
+    least: int,
+}
+
+// A kind of block's glyph, 12 across: 0 Text, 1 Data, 2 Bar, 3 Effect.
+component BlockGlyph inherits Rectangle {
+    in property <int> which;
+    in property <color> tint;
+    width: 12px;
+    height: 12px;
+    if root.which == 0: Path {
+        width: 12px;
+        height: 12px;
+        viewbox-width: 12;
+        viewbox-height: 12;
+        commands: "M2 2.5h8M6 2.5V10";
+        fill: transparent;
+        stroke: root.tint;
+        stroke-width: 1.5px;
+        stroke-line-cap: round;
+    }
+    if root.which == 1: Path {
+        width: 12px;
+        height: 12px;
+        viewbox-width: 12;
+        viewbox-height: 12;
+        commands: "M1.6 9.2a4.4 4.4 0 1 1 8.8 0M6 9.2l2.3-3";
+        fill: transparent;
+        stroke: root.tint;
+        stroke-width: 1.35px;
+        stroke-line-cap: round;
+    }
+    if root.which == 2: Rectangle {
+        Path {
+            width: 12px;
+            height: 12px;
+            viewbox-width: 12;
+            viewbox-height: 12;
+            commands: "M2.5 3.4h7a1.5 1.5 0 0 1 1.5 1.5v2.2a1.5 1.5 0 0 1-1.5 1.5h-7a1.5 1.5 0 0 1-1.5-1.5v-2.2a1.5 1.5 0 0 1 1.5-1.5z";
+            fill: transparent;
+            stroke: root.tint;
+            stroke-width: 1.2px;
+        }
+        Rectangle {
+            x: 2.5px;
+            y: 4.9px;
+            width: 4.2px;
+            height: 2.2px;
+            border-radius: 0.5px;
+            background: root.tint;
+        }
+    }
+    if root.which == 3: Path {
+        width: 12px;
+        height: 12px;
+        viewbox-width: 12;
+        viewbox-height: 12;
+        commands: "M6 1.2l1.15 3.65L10.8 6 7.15 7.15 6 10.8 4.85 7.15 1.2 6l3.65-1.15z";
+        fill: root.tint;
+    }
+}
+
+// A kind of block in the bar over the screen, as a layout's bar on the playlist:
+// selected, it goes into the first free cells that fit it; pressed and dragged, it
+// is carried to the screen (where it is in the window, as it moves and as it is let go).
+component BlockChip inherits Rectangle {
+    in property <string> text;
+    in property <int> which;
+    in property <bool> lit;
+    callback add();
+    callback carry(length, length);
+    callback drop(length, length);
+    callback cancel();
+    width: 88px;
+    height: 24px;
+    border-radius: 5px;
+    background: root.lit ? #52525b : ta.has-hover ? Ink.pick-hover : Ink.pick;
+    property <bool> far;
+    BlockGlyph {
+        x: 9px;
+        y: 6px;
+        which: root.which;
+        tint: root.lit || ta.has-hover ? Ink.bright : Ink.soft;
+    }
+    Text {
+        x: 28px;
+        height: parent.height;
+        text: root.text;
+        font-family: "Geist";
+        font-size: 12px;
+        color: root.lit || ta.has-hover ? Ink.bright : Ink.dim;
+        vertical-alignment: center;
+    }
+    ta := TouchArea {
+        mouse-cursor: root.far ? MouseCursor.grabbing : MouseCursor.grab;
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                root.far = false;
+            }
+            if (e.kind == PointerEventKind.up) {
+                if (root.far) {
+                    root.far = false;
+                    root.drop(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                } else if (e.button == PointerEventButton.left) {
+                    root.add();
+                }
+            }
+            if (e.kind == PointerEventKind.cancel && root.far) {
+                root.far = false;
+                root.cancel();
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                if (!root.far && (abs(self.mouse-x - self.pressed-x) > 4px || abs(self.mouse-y - self.pressed-y) > 4px)) {
+                    root.far = true;
+                }
+                if (root.far) {
+                    root.carry(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                }
+            }
+        }
+    }
+}
+
+// A layout in the editor's list, as a macro in the Macro Editor's: chosen, its
+// row lit, with a bar at its left.
+component LayoutListRow inherits Rectangle {
+    in property <LayoutRow> r;
+    callback clicked;
+    height: 52px;
+    border-radius: 8px;
+    background: root.r.on ? #2a2a2a : ta.has-hover ? Ink.shade1 : transparent;
+    if root.r.on: Rectangle {
+        x: 0;
+        y: 12px;
+        width: 4px;
+        height: 28px;
+        border-radius: 2px;
+        background: Ink.bright;
+    }
+    Text {
+        x: 20px;
+        y: 8px;
+        width: parent.width - 32px;
+        height: 18px;
+        text: root.r.name;
+        font-family: "Geist";
+        font-size: 13px;
+        font-weight: 500;
+        color: root.r.on || ta.has-hover ? Ink.bright : Ink.dim;
+        overflow: elide;
+        vertical-alignment: center;
+    }
+    Text {
+        x: 20px;
+        y: 26px;
+        width: parent.width - 32px;
+        height: 17px;
+        text: root.r.about;
+        font-family: "Geist";
+        font-size: 11.5px;
+        color: Ink.quiet;
+        overflow: elide;
+        vertical-alignment: center;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// The screen layout editor, a window of its own as the Macro Editor is: the
+// layouts down its left; the one open, its name and its menu; the bar of blocks
+// joined to the top of the screen's box, with the layout's backlight and the grid
+// at its end; the screen, its blocks outlined; under it, the box of the block
+// selected. Changes save as they are made.
+export component LayoutWindow inherits Window {
+    in property <bool> is-maximized;
+    in property <image> mark;
+    in property <[LayoutRow]> rows;
+    in-out property <length> list-scroll;
+    // the layout open (none once every layout is deleted): its name, changed in place;
+    // deleting it asks first, in the header's place
+    in property <bool> has-layout: true;
+    in property <string> name;
+    in property <bool> editing-name;
+    in-out property <string> name-text;
+    in property <bool> confirm-open;
+    in property <string> confirm-text;
+    // the screen: its picture and the background round it, its blocks, its grid; a block
+    // on its way in from the bar (the cells it would take), and its name under the pointer
+    in property <image> picture;
+    in property <color> field: #0a0908;
+    in property <[EdBlock]> blocks;
+    // the line in the bar after the blocks: how to add one, or that there's no room
+    in property <string> bar-hint: "Drag a block onto the screen.";
+    // counted up each time the layout has taken a block's move or new ends, so the
+    // block dragged lets go of the drag even when nothing changed
+    in property <int> settled;
+    in property <bool> grid;
+    in property <bool> ghost-on;
+    in property <EdBlock> ghost;
+    in property <bool> carry-on;
+    in property <string> carry-name;
+    in property <int> carry-kind;
+    in property <length> carry-x;
+    in property <length> carry-y;
+    in property <int> lit-chip: -1;
+    // the layout's backlight: its own color, or the profile's default (whose color the
+    // switch's dot shows); the color and its code; the picker open on it
+    in property <bool> own-light;
+    in property <color> default-light;
+    in property <color> own-color;
+    in property <string> own-hex;
+    in property <bool> picking;
+    // the box under the screen: 0 nothing selected, 1 text, 2 data, 3 bar; its title and
+    // its cells; whether the layout has blocks yet
+    in property <int> box-kind;
+    in property <string> box-title;
+    in property <[Cell]> box-cells;
+    in property <length> box-h;
+    in property <bool> has-blocks;
+    // the open menu
+    in property <bool> menu-open;
+    in property <length> menu-ax;
+    in property <length> menu-w: 248px;
+    in property <[MenuRow]> menu-rows;
+    in property <length> menu-top;
+    in property <length> menu-max;
+    in property <length> menu-natural;
+    out property <length> menu-x: menu.x;
+    out property <length> menu-y: menu.y;
+    out property <length> menu-width: menu.width;
+    out property <length> menu-height: menu.height;
+    out property <length> window-height: root.height;
+    out property <length> window-width: root.width;
+    // the color picker
+    in property <bool> picker-open;
+    in property <length> picker-x;
+    in property <length> picker-top;
+    in property <length> picker-height: 415px;
+    in property <float> pk-hue;
+    in property <float> pk-sat;
+    in property <float> pk-val;
+    in property <color> pk-now;
+    in property <color> pk-pure;
+    in property <image> pk-sv-img;
+    in property <image> pk-hue-img;
+    in-out property <string> pk-hex;
+    in-out property <string> pk-r;
+    in-out property <string> pk-g;
+    in-out property <string> pk-b;
+    in-out property <string> pk-h;
+    in-out property <string> pk-s;
+    in-out property <string> pk-v;
+    in property <[color]> pk-presets;
+    in property <[color]> pk-recent;
+    // where the screen's cells are in the window, for a block carried from the bar
+    out property <length> cells-x: lcd.absolute-position.x;
+    out property <length> cells-y: lcd.absolute-position.y;
+    out property <length> cell-w: lcd.width / 20;
+    out property <length> cell-h: lcd.height / 4;
+
+    callback minimise();
+    callback maximise();
+    callback close-window();
+    callback drag();
+    callback choose(int);
+    callback new-layout();
+    callback rename();
+    callback name-done(string);
+    callback name-cancel();
+    callback more(length, length, length);
+    callback confirm-yes();
+    callback confirm-no();
+    callback block-chosen(int);
+    callback block-moved(int, int, int);
+    callback block-sized(int, int, int, int, int);
+    callback block-remove();
+    callback chip-add(int);
+    callback chip-carry(int, length, length);
+    callback chip-drop(int, length, length);
+    callback chip-cancel();
+    callback light-own(bool);
+    callback light-color(length, length, length);
+    callback grid-toggle();
+    callback cell-pick(int, int, length, length, length);
+    callback cell-slide(int, float);
+    callback cell-typed(int, string);
+    callback menu-chose(int);
+    callback menu-dismiss();
+    callback pk-sv(float, float);
+    callback pk-hue-at(float);
+    callback pk-field(int, string);
+    callback pk-well(color);
+    callback pk-enter();
+    callback pk-dismiss();
+
+    background: transparent;
+    default-font-family: "Geist";
+    property <length> radius: root.is-maximized ? 0 : 10px;
+    property <length> main-w: root.width - 290px;
+    property <length> rig-w: main-w - 36px;
+
+    // the title bar: the mark, the wordmark, and where this window is
+    Rectangle {
+        y: 0;
+        height: 36px;
+        background: #262626;
+        border-top-left-radius: root.radius;
+        border-top-right-radius: root.radius;
+        TouchArea {
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
+                    root.drag();
+                }
+            }
+            double-clicked => { root.maximise(); }
+        }
+        Image {
+            x: 12px;
+            y: 10px;
+            width: 16px;
+            height: 16px;
+            source: root.mark;
+        }
+        Text {
+            x: 35px;
+            height: 36px;
+            text: "Ectodeck";
+            font-weight: 600;
+            font-size: 13.5px;
+            letter-spacing: -0.54px;
+            color: #f5f5f5;
+            vertical-alignment: center;
+        }
+        HorizontalLayout {
+            x: 114px;
+            y: 0;
+            width: self.preferred-width;
+            height: 36px;
+            spacing: 6px;
+            Text { text: "EVGA Z10 RGB"; font-size: 13px; color: Ink.dim; vertical-alignment: center; }
+            Text { text: "/"; font-size: 13px; color: #525252; vertical-alignment: center; }
+            Text { text: "Screen layouts"; font-size: 13px; color: Ink.dim; vertical-alignment: center; }
+        }
+        HorizontalLayout {
+            x: parent.width - 120px;
+            width: 120px;
+            WinButton {
+                commands: "M3 8h10";
+                clicked => { root.minimise(); }
+            }
+            WinButton {
+                size: 12px;
+                commands: "M3.5 2.5h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z";
+                clicked => { root.maximise(); }
+            }
+            WinButton {
+                danger: true;
+                corner: root.radius;
+                commands: "M3.5 3.5l9 9M12.5 3.5l-9 9";
+                clicked => { root.close-window(); }
+            }
+        }
+    }
+
+    // the layouts
+    Rectangle {
+        x: 0;
+        y: 36px;
+        width: 290px;
+        height: root.height - 36px;
+        background: #1c1c1c;
+        border-bottom-left-radius: root.radius;
+        Text {
+            x: 18px;
+            y: 14px;
+            height: 28px;
+            text: "All layouts";
+            font-size: 13.5px;
+            font-weight: 500;
+            color: Ink.bright;
+            vertical-alignment: center;
+        }
+        TextButton {
+            x: parent.width - 12px - self.width;
+            y: 14px;
+            text: "+ New";
+            clicked => { root.new-layout(); }
+        }
+        Flickable {
+            x: 8px;
+            y: 52px;
+            width: 274px;
+            height: parent.height - 52px - 10px;
+            content-height: root.rows.length * 54px;
+            content-y <=> root.list-scroll;
+            mouse-drag-pan-enabled: false;
+            for r[i] in root.rows: LayoutListRow {
+                y: i * 54px;
+                width: parent.width;
+                r: r;
+                clicked => { root.choose(i); }
+            }
+        }
+    }
+
+    // the layout open
+    Rectangle {
+        x: 290px;
+        y: 36px;
+        width: main-w;
+        height: root.height - 36px;
+        background: Ink.base;
+        border-bottom-right-radius: root.radius;
+        // its name, a pencil to change it, and its menu; asking before it is deleted, in their place
+        if !root.confirm-open: Rectangle {
+            visible: root.has-layout;
+            x: 18px;
+            y: 0;
+            width: parent.width - 36px;
+            height: 56px;
+            if !root.editing-name: name-t := Text {
+                x: 0;
+                height: parent.height;
+                text: root.name;
+                font-size: 14px;
+                font-weight: 600;
+                color: Ink.bright;
+                vertical-alignment: center;
+                overflow: elide;
+                TouchArea {
+                    mouse-cursor: text;
+                    clicked => { root.rename(); }
+                }
+            }
+            if !root.editing-name: Rectangle {
+                x: min(name-w.preferred-width, parent.width - 80px) + 9px;
+                width: 13px;
+                Path {
+                    y: 21.5px;
+                    width: 13px;
+                    height: 13px;
+                    viewbox-width: 24;
+                    viewbox-height: 24;
+                    commands: "M4 20h4L19 9l-4-4L4 16z";
+                    fill: transparent;
+                    stroke: pen-ta.has-hover ? Ink.soft : Ink.quiet;
+                    stroke-width: 1.8px;
+                    stroke-line-join: round;
+                }
+                pen-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.rename(); }
+                }
+            }
+            // (the name's width, for the pencil after it)
+            name-w := Text {
+                visible: false;
+                text: root.name;
+                font-size: 14px;
+                font-weight: 600;
+            }
+            if root.editing-name: Rectangle {
+                x: 0;
+                y: 13px;
+                width: 320px;
+                height: 30px;
+                border-radius: 8px;
+                background: Ink.shade1;
+                TextInput {
+                    x: 8px;
+                    width: parent.width - 16px;
+                    height: parent.height;
+                    text <=> root.name-text;
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: Ink.ink;
+                    vertical-alignment: center;
+                    single-line: true;
+                    init => {
+                        self.focus();
+                        self.select-all();
+                    }
+                    accepted => { root.name-done(self.text); }
+                    key-pressed(e) => {
+                        if (e.text == Key.Escape) {
+                            root.name-cancel();
+                            return accept;
+                        }
+                        reject
+                    }
+                    changed has-focus => {
+                        Typing.on = self.has-focus;
+                        if (!self.has-focus) {
+                            root.name-done(self.text);
+                        }
+                    }
+                }
+            }
+            Rectangle {
+                x: parent.width - 30px;
+                y: 14px;
+                width: 30px;
+                height: 28px;
+                border-radius: 7px;
+                background: more-ta.has-hover ? Ink.hover-box : transparent;
+                Text { text: "···"; font-size: 16px; letter-spacing: 1px; color: Ink.soft; }
+                more-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.more(self.absolute-position.x, self.absolute-position.y, self.height); }
+                }
+            }
+        }
+        if root.confirm-open: HorizontalLayout {
+            x: 18px;
+            y: 0;
+            width: parent.width - 36px;
+            height: 56px;
+            spacing: 10px;
+            alignment: start;
+            Text {
+                text: root.confirm-text;
+                font-size: 13px;
+                color: Ink.dim;
+                vertical-alignment: center;
+            }
+            VerticalLayout {
+                alignment: center;
+                WordButton {
+                    text: "Keep";
+                    clicked => { root.confirm-no(); }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: del-t.preferred-width + 24px;
+                    height: 28px;
+                    border-radius: 7px;
+                    background: del-ta.has-hover ? #74302a : #5c2420;
+                    del-t := Text { text: "Delete"; font-size: 13px; color: #fecaca; }
+                    del-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.confirm-yes(); }
+                    }
+                }
+            }
+        }
+
+        // the bar of blocks, joined to the top of the screen's box, as the playlist's panel
+        // is to its foot; the layout's backlight and the grid at its end
+        Rectangle {
+            visible: root.has-layout;
+            x: 18px;
+            y: 56px;
+            width: rig-w;
+            height: 56px;
+            border-top-left-radius: 12px;
+            border-top-right-radius: 12px;
+            background: Ink.box;
+            for name[k] in ["Text", "Data", "Bar"]: BlockChip {
+                x: 16px + k * 94px;
+                y: 16px;
+                text: name;
+                which: k;
+                lit: root.lit-chip == k;
+                add => { root.chip-add(k); }
+                carry(x, y) => { root.chip-carry(k, x, y); }
+                drop(x, y) => { root.chip-drop(k, x, y); }
+                cancel => { root.chip-cancel(); }
+            }
+            // (whole or not at all: in a narrow window it steps aside for the backlight)
+            Text {
+                x: 16px + 3 * 94px + 10px;
+                y: 16px;
+                width: light-row.x - self.x - 16px;
+                height: 24px;
+                visible: self.preferred-width <= self.width;
+                text: root.bar-hint;
+                font-size: 12.5px;
+                color: Ink.quiet;
+                vertical-alignment: center;
+            }
+            // the layout's backlight: Default (the profile's, whose color the dot shows), or a
+            // color of the layout's own, as its dot and its code, which open the picker
+            light-row := HorizontalLayout {
+                x: parent.width - 108px - self.width;
+                y: 14px;
+                width: self.preferred-width;
+                height: 28px;
+                spacing: 0;
+                Text {
+                    text: "Backlight";
+                    font-size: 12.5px;
+                    color: Ink.soft;
+                    vertical-alignment: center;
+                }
+                Rectangle { width: 10px; }
+                Rectangle {
+                    width: def-l.preferred-width + own-l.preferred-width + 22px + 22px + 9px + 7px + 6px;
+                    border-radius: 7px;
+                    background: Ink.well;
+                    def-b := Rectangle {
+                        x: 2px;
+                        y: 2px;
+                        width: def-l.preferred-width + 22px + 9px + 7px;
+                        height: 24px;
+                        border-radius: 5px;
+                        background: !root.own-light ? Ink.pick : def-ta.has-hover ? Ink.hover-well : transparent;
+                        Rectangle {
+                            x: 11px;
+                            y: 7.5px;
+                            width: 9px;
+                            height: 9px;
+                            border-radius: 4.5px;
+                            background: root.default-light;
+                            border-width: 1px;
+                            border-color: #0000001f;
+                        }
+                        def-l := Text {
+                            x: 11px + 9px + 7px;
+                            height: parent.height;
+                            text: "Default";
+                            font-size: 12.5px;
+                            color: !root.own-light ? Ink.bright : Ink.soft;
+                            vertical-alignment: center;
+                        }
+                        def-ta := TouchArea {
+                            enabled: root.own-light;
+                            mouse-cursor: root.own-light ? MouseCursor.pointer : MouseCursor.default;
+                            clicked => { root.light-own(false); }
+                        }
+                    }
+                    Rectangle {
+                        x: def-b.x + def-b.width + 2px;
+                        y: 2px;
+                        width: own-l.preferred-width + 22px;
+                        height: 24px;
+                        border-radius: 5px;
+                        background: root.own-light ? Ink.pick : own-ta.has-hover ? Ink.hover-well : transparent;
+                        own-l := Text {
+                            x: 11px;
+                            height: parent.height;
+                            text: "Own color";
+                            font-size: 12.5px;
+                            color: root.own-light ? Ink.bright : Ink.soft;
+                            vertical-alignment: center;
+                        }
+                        own-ta := TouchArea {
+                            enabled: !root.own-light;
+                            mouse-cursor: !root.own-light ? MouseCursor.pointer : MouseCursor.default;
+                            clicked => { root.light-own(true); }
+                        }
+                    }
+                }
+                if root.own-light: Rectangle { width: 10px; }
+                if root.own-light: Rectangle {
+                    width: hex-t.preferred-width + 4px + 20px + 8px + 9px;
+                    border-radius: 7px;
+                    background: col-ta.has-hover || root.picking ? Ink.hover-box : transparent;
+                    Rectangle {
+                        x: 4px;
+                        y: 4px;
+                        width: 20px;
+                        height: 20px;
+                        border-radius: 10px;
+                        background: root.own-color;
+                        border-width: 1px;
+                        border-color: #ffffff2a;
+                    }
+                    hex-t := Text {
+                        x: 32px;
+                        height: parent.height;
+                        text: root.own-hex;
+                        font-size: 13px;
+                        color: Ink.bright;
+                        vertical-alignment: center;
+                    }
+                    col-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.light-color(self.absolute-position.x, self.absolute-position.y, self.height); }
+                    }
+                }
+            }
+            // a hairline, then Grid: only the editor's view
+            Rectangle {
+                x: parent.width - 92px;
+                y: 18px;
+                width: 1px;
+                height: 20px;
+                background: Ink.line;
+            }
+            Rectangle {
+                x: parent.width - 16px - self.width;
+                y: 14px;
+                width: 28px + grid-t.preferred-width;
+                height: 28px;
+                Rectangle {
+                    x: 0;
+                    y: 5px;
+                    width: 18px;
+                    height: 18px;
+                    border-radius: 5px;
+                    background: root.grid ? (grid-ta.has-hover ? Ink.bright : Ink.dim) : grid-ta.has-hover ? Ink.hover-box : Ink.well;
+                    border-width: root.grid ? 0 : 1px;
+                    border-color: grid-ta.has-hover ? #6a6a74 : #4a4a52;
+                    if root.grid: Path {
+                        width: 18px;
+                        height: 18px;
+                        viewbox-width: 18;
+                        viewbox-height: 18;
+                        commands: "M5.2 9.3 L7.9 11.9 L12.9 6.4";
+                        fill: transparent;
+                        stroke: Ink.base;
+                        stroke-width: 2px;
+                    }
+                }
+                grid-t := Text {
+                    x: 28px;
+                    height: parent.height;
+                    text: "Grid";
+                    font-size: 13px;
+                    color: grid-ta.has-hover ? Ink.bright : Ink.dim;
+                    vertical-alignment: center;
+                }
+                grid-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.grid-toggle(); }
+                }
+            }
+        }
+        // the bar's gray behind the box's top corners, where the two meet
+        Rectangle {
+            visible: root.has-layout;
+            x: 18px;
+            y: 56px + 44px;
+            width: rig-w;
+            height: 24px;
+            background: Ink.box;
+        }
+        // the screen's box, and the bay the screen is set into, as on the Screen tab
+        Rectangle {
+            visible: root.has-layout;
+            x: 18px;
+            y: 56px + 56px;
+            width: rig-w;
+            height: 236px;
+            border-radius: 12px;
+            background: Ink.well;
+            bay := Rectangle {
+                x: (parent.width - 828px) / 2;
+                y: 16px;
+                width: 828px;
+                height: 204px;
+                border-radius: 10px;
+                background: root.field;
+                border-width: 1px;
+                border-color: #0000008c;
+                Rectangle {
+                    y: 0;
+                    height: 14px;
+                    background: @linear-gradient(180deg, #00000073 0%, #00000000 100%);
+                }
+                lcd := Rectangle {
+                    x: 24px;
+                    y: 24px;
+                    width: 780px;
+                    height: 156px;
+                    Rectangle {
+                        border-radius: 4px;
+                        clip: true;
+                        Image {
+                            width: parent.width;
+                            height: parent.height;
+                            source: root.picture;
+                        }
+                    }
+                    // a press away from every block lets the selected one go
+                    TouchArea {
+                        pointer-event(e) => {
+                            if (e.kind == PointerEventKind.down) {
+                                root.block-chosen(-1);
+                            }
+                        }
+                    }
+                    // the screen's 20 by 4 cells
+                    if root.grid: Rectangle {
+                        for k in 19: Rectangle {
+                            x: (k + 1) * parent.width / 20 - 0.5px;
+                            width: 1px;
+                            background: #ffffff1c;
+                        }
+                        for k in 3: Rectangle {
+                            y: (k + 1) * parent.height / 4 - 0.5px;
+                            height: 1px;
+                            background: #ffffff1c;
+                        }
+                    }
+                    // a block on its way in: the cells it would take
+                    if root.ghost-on: Rectangle {
+                        x: root.ghost.col * parent.width / 20 + 1px;
+                        y: root.ghost.row * parent.height / 4 + 1px;
+                        width: root.ghost.width * parent.width / 20 - 2px;
+                        height: root.ghost.height * parent.height / 4 - 2px;
+                        border-radius: 3px;
+                        border-width: 1.5px;
+                        border-color: #ffffffb0;
+                        background: root.field.with-alpha(0.5);
+                    }
+                    // each block outlined; the one selected in amber, a handle on each end
+                    // and its × on its corner. Dragged, a block follows the pointer cell by
+                    // cell; a handle dragged takes its end along, as far as the free run
+                    // (and the screen) let it
+                    for b[i] in root.blocks: blk := Rectangle {
+                        property <length> cw: parent.width / 20;
+                        property <length> ch: parent.height / 4;
+                        // a move: how many cells across and down; a handle: how far each end
+                        property <int> dc: 0;
+                        property <int> dr: 0;
+                        property <int> dl: 0;
+                        property <int> dw: 0;
+                        property <bool> sizing: false;
+                        property <int> at-col: max(0, min(20 - b.width, b.col + dc));
+                        property <int> at-row: max(0, min(4 - b.height, b.row + dr));
+                        // (the left end moves, the right stays; within the free run, and no
+                        // narrower than the block's words or reading)
+                        property <int> l-col: max(b.lo, min(b.col + b.width - max(1, b.least), b.col + dl));
+                        property <int> r-end: max(l-col + max(1, b.least), min(b.hi, b.col + b.width + dw));
+                        property <int> show-col: sizing ? l-col : at-col;
+                        property <int> show-w: sizing ? r-end - l-col : b.width;
+                        property <int> home: b.row * 10000 + b.col * 100 + b.width;
+                        property <int> settled: root.settled;
+                        changed home => { self.rest(); }
+                        changed settled => { self.rest(); }
+                        function rest() {
+                            self.dc = 0;
+                            self.dr = 0;
+                            self.dl = 0;
+                            self.dw = 0;
+                            self.sizing = false;
+                        }
+                        // an end let go: the block's new cells, or, back where it started, as it was
+                        function let-go() {
+                            if (self.l-col != b.col || self.r-end != b.col + b.width) {
+                                root.block-sized(i, b.row, self.l-col, self.r-end - self.l-col, b.height);
+                            } else {
+                                self.rest();
+                            }
+                        }
+                        x: show-col * cw;
+                        y: at-row * ch;
+                        width: show-w * cw;
+                        height: b.height * ch;
+                        z: b.on ? 2 : b.fx ? 0 : 1;
+                        // (the outline a pixel in from the block's cells, as the grid's lines are between them)
+                        Rectangle {
+                            x: 1px;
+                            y: 1px;
+                            width: parent.width - 2px;
+                            height: parent.height - 2px;
+                            border-radius: 3px;
+                            border-width: b.on || move-ta.pressed ? 2px : 1px;
+                            border-color: b.on || move-ta.pressed ? Ink.warn : move-ta.has-hover ? #ffffff80 : #ffffff33;
+                            background: b.on && !b.fx ? #f0b35a1a : move-ta.has-hover && !b.on ? #ffffff0d : transparent;
+                        }
+                        move-ta := TouchArea {
+                            mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.pointer;
+                            // the pointer measured from where it was pressed: the outline moves
+                            // with the drag, so how far it has moved already is added back
+                            moved => {
+                                parent.dc = round((self.mouse-x - self.pressed-x + (parent.at-col - b.col) * cw) / cw);
+                                parent.dr = round((self.mouse-y - self.pressed-y + (parent.at-row - b.row) * ch) / ch);
+                            }
+                            pointer-event(e) => {
+                                if (e.kind == PointerEventKind.down) {
+                                    parent.dc = 0;
+                                    parent.dr = 0;
+                                }
+                                if (e.kind == PointerEventKind.up) {
+                                    if (parent.at-col != b.col || parent.at-row != b.row) {
+                                        root.block-moved(i, parent.at-row, parent.at-col);
+                                    } else {
+                                        parent.rest();
+                                        root.block-chosen(i);
+                                    }
+                                }
+                            }
+                        }
+                        // the handles, on the selected block's ends: an amber pill ringed in the
+                        // screen's background, over the outline's end (with room round it to press)
+                        if b.on: Rectangle {
+                            x: -1px - 2px - 4px;
+                            y: (parent.height - 14px) / 2 - 2px - 4px;
+                            width: 18px;
+                            height: 26px;
+                            Rectangle {
+                                x: 4px;
+                                y: 4px;
+                                width: 10px;
+                                height: 18px;
+                                border-radius: 5px;
+                                background: root.field;
+                                Rectangle {
+                                    x: 2px;
+                                    y: 2px;
+                                    width: 6px;
+                                    height: 14px;
+                                    border-radius: 3px;
+                                    background: Ink.warn;
+                                }
+                            }
+                            // (the handle moves with its end, so how far it has moved already is
+                            // added back, as for the block itself)
+                            TouchArea {
+                                mouse-cursor: MouseCursor.ew-resize;
+                                moved => {
+                                    blk.sizing = true;
+                                    blk.dl = round((self.mouse-x - self.pressed-x + (blk.l-col - b.col) * blk.cw) / blk.cw);
+                                }
+                                pointer-event(e) => {
+                                    if (e.kind == PointerEventKind.up && blk.sizing) {
+                                        blk.let-go();
+                                    }
+                                }
+                            }
+                        }
+                        if b.on: Rectangle {
+                            x: parent.width - 5px - 2px - 4px;
+                            y: (parent.height - 14px) / 2 - 2px - 4px;
+                            width: 18px;
+                            height: 26px;
+                            Rectangle {
+                                x: 4px;
+                                y: 4px;
+                                width: 10px;
+                                height: 18px;
+                                border-radius: 5px;
+                                background: root.field;
+                                Rectangle {
+                                    x: 2px;
+                                    y: 2px;
+                                    width: 6px;
+                                    height: 14px;
+                                    border-radius: 3px;
+                                    background: Ink.warn;
+                                }
+                            }
+                            TouchArea {
+                                mouse-cursor: MouseCursor.ew-resize;
+                                moved => {
+                                    blk.sizing = true;
+                                    blk.dw = round((self.mouse-x - self.pressed-x + (blk.r-end - b.col - b.width) * blk.cw) / blk.cw);
+                                }
+                                pointer-event(e) => {
+                                    if (e.kind == PointerEventKind.up && blk.sizing) {
+                                        blk.let-go();
+                                    }
+                                }
+                            }
+                        }
+                        // its ×, on the corner (it steps aside while an end is dragged)
+                        if b.on && !blk.sizing: Rectangle {
+                            x: parent.width - 8px - 2px - 2px;
+                            y: -8px - 2px - 2px;
+                            width: 24px;
+                            height: 24px;
+                            Rectangle {
+                                x: 2px;
+                                y: 2px;
+                                width: 20px;
+                                height: 20px;
+                                border-radius: 10px;
+                                background: root.field;
+                                Rectangle {
+                                    x: 2px;
+                                    y: 2px;
+                                    width: 16px;
+                                    height: 16px;
+                                    border-radius: 8px;
+                                    background: x-ta.has-hover ? #f7c47a : Ink.warn;
+                                    Path {
+                                        width: 8px;
+                                        height: 8px;
+                                        viewbox-width: 10;
+                                        viewbox-height: 10;
+                                        commands: "M2 2l6 6M8 2L2 8";
+                                        fill: transparent;
+                                        stroke: #18181b;
+                                        stroke-width: 1.8px;
+                                        stroke-line-cap: round;
+                                    }
+                                }
+                            }
+                            x-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.block-remove(); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // the box under the screen: the block selected, named for its kind
+        Rectangle {
+            visible: root.has-layout;
+            x: 18px;
+            y: 56px + 56px + 236px + 18px;
+            width: (rig-w - 12px) / 2;
+            height: root.box-h;
+            border-radius: 12px;
+            background: Ink.box;
+            Text {
+                x: 16px;
+                y: 14px;
+                height: 22px;
+                text: root.box-title;
+                font-size: 13.5px;
+                font-weight: 600;
+                color: Ink.bright;
+                vertical-alignment: center;
+            }
+            if root.box-kind != 0: TextButton {
+                x: parent.width - 10px - self.width;
+                y: 11px;
+                text: "Remove";
+                clicked => { root.block-remove(); }
+            }
+            // nothing selected: what each block is for
+            if root.box-kind == 0: Rectangle {
+                if root.has-blocks: Text {
+                    x: 16px;
+                    y: 46px;
+                    height: 18px;
+                    text: "Select a block on the screen to change the block.";
+                    font-size: 12.5px;
+                    color: Ink.quiet;
+                }
+                for g[k] in [
+                    { name: "Text", says: "Words you type, like a label or a greeting." },
+                    { name: "Data", says: "A reading, such as the time, the date or the CPU temperature." },
+                    { name: "Bar", says: "A bar that fills as a reading rises." },
+                ]: Rectangle {
+                    x: 16px;
+                    y: (root.has-blocks ? 78px : 50px) + k * 29px;
+                    width: parent.width - 32px;
+                    height: 18px;
+                    BlockGlyph {
+                        x: 0;
+                        y: 3px;
+                        which: k;
+                        tint: Ink.soft;
+                    }
+                    Text {
+                        x: 22px;
+                        height: parent.height;
+                        text: g.name;
+                        font-size: 12.5px;
+                        font-weight: 500;
+                        color: Ink.dim;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        x: 22px + 58px;
+                        width: parent.width - self.x;
+                        height: parent.height;
+                        text: g.says;
+                        font-size: 12.5px;
+                        color: Ink.quiet;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+            }
+            for c in root.box-cells: CellView {
+                c: c;
+                pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
+                slide(id, v) => { root.cell-slide(id, v); }
+                typed(id, t) => { root.cell-typed(id, t); }
+            }
+        }
+
+        // no layout left to open: what the keyboard shows meanwhile, and a new one
+        if !root.has-layout: VerticalLayout {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2 - 40px;
+            width: 420px;
+            height: self.preferred-height;
+            spacing: 8px;
+            Text {
+                text: "No screen layouts";
+                font-size: 14px;
+                font-weight: 600;
+                color: Ink.bright;
+                horizontal-alignment: center;
+            }
+            Text {
+                text: "The keyboard’s screen stays blank until a playlist has a layout to show.";
+                font-size: 13px;
+                color: Ink.soft;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+            Rectangle { height: 8px; }
+            HorizontalLayout {
+                alignment: center;
+                WordButton {
+                    primary: true;
+                    text: "New layout";
+                    clicked => { root.new-layout(); }
+                }
+            }
+        }
+    }
+
+    // a block carried from the bar: its name, under the pointer
+    if root.carry-on: Rectangle {
+        x: root.carry-x + 16px;
+        y: root.carry-y + 12px;
+        width: carry-t.preferred-width + 12px + 10px + 12px + 7px;
+        height: 28px;
+        border-radius: 8px;
+        background: Ink.hover-box;
+        drop-shadow-blur: 30px;
+        drop-shadow-offset-y: 12px;
+        drop-shadow-color: #0000008c;
+        BlockGlyph {
+            x: 10px;
+            y: 8px;
+            which: root.carry-kind;
+            tint: Ink.dim;
+        }
+        carry-t := Text {
+            x: 10px + 12px + 7px;
+            height: parent.height;
+            text: root.carry-name;
+            font-size: 12.5px;
+            font-weight: 600;
+            color: Ink.bright;
+            vertical-alignment: center;
+        }
+    }
+
+    // the open menu, over everything
+    menu := Menu {
+        visible: root.menu-open;
+        x: max(8px, min(root.menu-ax, root.width - root.menu-w - 8px));
+        width: root.menu-w;
+        height: min(root.menu-natural, min(root.menu-max, root.height - root.menu-top - 8px));
+        y: root.menu-top;
+        rows: root.menu-rows;
+        search: false;
+        chose(i) => { root.menu-chose(i); }
+        dismiss => { root.menu-dismiss(); }
+    }
+
+    Picker {
+        visible: root.picker-open;
+        x: max(8px, min(root.picker-x, root.width - 264px - 8px));
+        y: root.picker-top;
+        height: root.picker-height;
+        hue: root.pk-hue;
+        sat: root.pk-sat;
+        val: root.pk-val;
+        now: root.pk-now;
+        pure: root.pk-pure;
+        sv-img: root.pk-sv-img;
+        hue-img: root.pk-hue-img;
+        t-hex <=> root.pk-hex;
+        t-r <=> root.pk-r;
+        t-g <=> root.pk-g;
+        t-b <=> root.pk-b;
+        t-h <=> root.pk-h;
+        t-s <=> root.pk-s;
+        t-v <=> root.pk-v;
+        presets: root.pk-presets;
+        recent: root.pk-recent;
+        sv(x, y) => { root.pk-sv(x, y); }
+        hue-at(x) => { root.pk-hue-at(x); }
+        field(i, t) => { root.pk-field(i, t); }
+        well(c) => { root.pk-well(c); }
+        enter => { root.pk-enter(); }
+        dismiss => { root.pk-dismiss(); }
     }
 }
 

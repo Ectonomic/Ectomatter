@@ -111,27 +111,17 @@ pub enum Ask {
     ScreenState,
     /// the onboard layout's chooser selected, where it is in the window
     ObChoose(f32, f32, f32),
-    /// a page of the Library opened in the editor
+    /// a layout of the Library opened in the screen layout editor; a turn's
+    /// layout, from the playlist
     LibEdit(i32),
-    /// the page editor: open on the playlist's page, close; add a piece (0
-    /// words, 1 a reading, 2 a bar, 3 a clock); the grid on or off; a piece
-    /// chosen (-1 none); a piece dragged to a row and a column
     EditPage(i32),
-    EditDone,
-    AddPiece(i32),
-    EditGrid,
-    PieceChosen(i32),
-    PieceMoved(i32, i32, i32),
-    /// the playlist: a page shown now, moved earlier or later, taken off;
-    /// the sheet of pages to add opened, a page on it selected, added, closed
+    /// the playlist: a page shown now, moved earlier or later, taken off; a
+    /// new screen layout made (blank, and opened in the editor)
     PageShow(i32),
     /// a page moved from one place in the playlist to another
     PageMove(i32, i32),
     PageRemove(i32),
-    LibOpen,
-    LibPick(i32),
-    LibAdd,
-    LibClose,
+    LibNew,
 }
 
 /// The colour picker, open on a swatch: what it sets, the colour it opened
@@ -145,7 +135,7 @@ struct Pick {
     anchor: (f32, f32, f32),
 }
 
-const PRESETS: [[u8; 3]; 9] = [[255, 255, 255], [255, 0, 0], [255, 96, 0], [255, 200, 0], [0, 255, 0], [0, 255, 200], [0, 120, 255], [120, 0, 255], [255, 0, 180]];
+pub(crate) const PRESETS: [[u8; 3]; 9] = [[255, 255, 255], [255, 0, 0], [255, 96, 0], [255, 200, 0], [0, 255, 0], [0, 255, 200], [0, 120, 255], [120, 0, 255], [255, 0, 180]];
 
 pub(crate) fn rgb2hsv([r, g, b]: [u8; 3]) -> [f32; 3] {
     let (r, g, b) = (r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0);
@@ -213,6 +203,8 @@ pub enum WindowAsk {
     OpenMacros(u32),
     /// open the Key lab's window
     OpenLab,
+    /// open the screen layout editor's window, on this layout of the Library
+    OpenLayouts(usize),
 }
 
 /// The Plays menu: the six choices, a rule between those that start with the
@@ -467,8 +459,10 @@ pub struct Front {
     /// each playlist page's picture, and what it was drawn from
     pl_thumbs: Vec<Option<(PicKey, slint::Image)>>,
     /// the sheet of pages to add: open, and the page selected on it
-    lib_open: bool,
-    lib_pick: Option<usize>,
+    /// window asks made while a menu's choice was carried out
+    pending_window: Vec<WindowAsk>,
+    /// the screen layout editor's window, made the first time it opens
+    pub layouts: Option<crate::layout_page::LayoutPage>,
     /// the screen's Library and playlist (the same on every profile), as
     /// last noted for undo and as last saved, and when they last changed
     screens: crate::lcd_page::Screens,
@@ -477,6 +471,9 @@ pub struct Front {
     pages_changed: Option<Instant>,
     /// editing: the playlist's turn that showed before, which shows again after
     edit_from: usize,
+    /// the screen layout editor's window is open (with a layout open in it, or
+    /// none, once every layout is deleted)
+    layouts_shown: bool,
     /// the profile whose playlist the player was last given: the one the page shows
     played_by: u8,
     /// the strip: each turn, a screen being carried to it, a turn's end
@@ -502,9 +499,6 @@ pub struct Front {
     reader: Option<crate::lcd_stats::Stats>,
     readings: crate::lcd_page::Readings,
     read_at: Option<Instant>,
-    /// the menu of readings open: the reading each of its rows stands for
-    source_menu: Vec<Option<crate::lcd_page::Source>>,
-    ed_models: [Rc<VecModel<Cell>>; 3],
 }
 
 /// A profile's colour sample: how many colours, and the colours.
@@ -569,11 +563,6 @@ impl Front {
         on!(on_key_hovered, |p, on| Ask::KeyHover(p, on));
         on!(on_lcd_pause, Ask::LcdPause);
         on!(on_screen_edit, |i| Ask::EditPage(i));
-        on!(on_screen_done, Ask::EditDone);
-        on!(on_screen_add, |i| Ask::AddPiece(i));
-        on!(on_screen_grid, Ask::EditGrid);
-        on!(on_piece_chosen, |i| Ask::PieceChosen(i));
-        on!(on_piece_moved, |i, r, c| Ask::PieceMoved(i, r, c));
         on!(on_pl_carry_start, |from, i| Ask::CarryStart(from, i));
         on!(on_pl_carry_move, |x, near| Ask::CarryMove(x, near));
         on!(on_pl_carry_drop, Ask::CarryDrop);
@@ -591,10 +580,7 @@ impl Front {
         on!(on_page_show, |i| Ask::PageShow(i));
         on!(on_page_moved, |i, j| Ask::PageMove(i, j));
         on!(on_page_remove, |i| Ask::PageRemove(i));
-        on!(on_lib_open_at, Ask::LibOpen);
-        on!(on_lib_pick, |i| Ask::LibPick(i));
-        on!(on_lib_add, Ask::LibAdd);
-        on!(on_lib_close, Ask::LibClose);
+        on!(on_lib_new, Ask::LibNew);
         let (ftx, frx) = mpsc::channel();
         let page = Page::new();
         ui.set_units(page.view_box.2 as f32);
@@ -701,13 +687,14 @@ impl Front {
             page_from: Instant::now(),
             lcd_drawn: None,
             pl_thumbs: Vec::new(),
-            lib_open: false,
-            lib_pick: None,
+            pending_window: Vec::new(),
+            layouts: None,
             screens: crate::lcd_page::Screens::default(),
             screens_noted: crate::lcd_page::Screens::default(),
             screens_saved: crate::lcd_page::Screens::default(),
             pages_changed: None,
             edit_from: 0,
+            layouts_shown: false,
             played_by: 0,
             blocks: Rc::new(VecModel::default()),
             carry: None,
@@ -723,8 +710,6 @@ impl Front {
             reader: None,
             readings: crate::lcd_page::Readings::default(),
             read_at: None,
-            source_menu: Vec::new(),
-            ed_models: [Rc::new(VecModel::default()), Rc::new(VecModel::default()), Rc::new(VecModel::default())],
         };
         f.screens = crate::lcd_page::Screens::of(
             f.settings.get("devices.z10.screen.pages").as_ref(),
@@ -735,9 +720,6 @@ impl Front {
         .with_onboard(f.settings.get("devices.z10.screen.onboard").as_ref());
         f.screens_noted = f.screens.clone();
         f.screens_saved = f.screens.clone();
-        f.ui.set_ed_piece_cells(ModelRc::from(f.ed_models[0].clone()));
-        f.ui.set_ed_place_cells(ModelRc::from(f.ed_models[1].clone()));
-        f.ui.set_ed_page_cells(ModelRc::from(f.ed_models[2].clone()));
         f.weather.set_place(weather_place(&f.settings));
         f.ui.set_overlays(ModelRc::from(f.overlay_model.clone()));
         f.ui.set_pk_presets(ModelRc::new(VecModel::from(PRESETS.iter().map(|c| color(*c)).collect::<Vec<_>>())));
@@ -1030,50 +1012,10 @@ impl Front {
                     self.push_preview();
                 }
                 Ask::EditPage(i) => {
-                    // a turn's page, from the playlist
+                    // a turn's layout, from the playlist
                     if let Some(k) = self.screens.turns(self.page.editing).get(i.max(0) as usize).and_then(|e| self.screens.index_of(&e.page)) {
-                        self.edit_page(k);
+                        window.push(WindowAsk::OpenLayouts(k));
                     }
-                }
-                Ask::EditDone => {
-                    self.close_menu();
-                    self.editor = None;
-                    self.save_pages();
-                    self.tell_page();
-                    if let Some(pl) = &self.player {
-                        pl.tell(crate::lcd_player::Control::Show(self.edit_from.min(self.screens.turns(self.page.editing).len().saturating_sub(1))));
-                        pl.tell(crate::lcd_player::Control::Hold(None));
-                    }
-                }
-                Ask::AddPiece(what) => {
-                    let first = crate::lcd_page::available(&self.readings, self.weather.report().is_some()).first().copied().unwrap_or(crate::lcd_page::Source::CpuLoad);
-                    if let Some(ed) = &mut self.editor {
-                        if let Some(p) = self.screens.library.get_mut(ed.page) {
-                            crate::screen_edit::add(p, ed, what.clamp(0, 3) as usize, first);
-                        }
-                    }
-                    self.pages_edited();
-                }
-                Ask::EditGrid => {
-                    if let Some(ed) = &mut self.editor {
-                        ed.grid = !ed.grid;
-                        crate::uistate::set("screen_grid", serde_json::json!(ed.grid));
-                    }
-                }
-                Ask::PieceChosen(i) => {
-                    self.close_menu();
-                    if let Some(ed) = &mut self.editor {
-                        ed.chosen = usize::try_from(i).ok();
-                    }
-                }
-                Ask::PieceMoved(i, row, col) => {
-                    if let Some(ed) = &mut self.editor {
-                        if let Some(p) = self.screens.library.get_mut(ed.page) {
-                            crate::screen_edit::move_to(p, i.max(0) as usize, row, col);
-                            ed.chosen = Some(i.max(0) as usize);
-                        }
-                    }
-                    self.pages_edited();
                 }
                 Ask::PageShow(i) => {
                     if let Some(pl) = &self.player {
@@ -1099,26 +1041,13 @@ impl Front {
                         self.keep_playing(playing, shown);
                     }
                 }
-                Ask::LibOpen => {
+                // a new screen layout: a blank one, straight into the editor
+                Ask::LibNew => {
                     self.close_menu();
-                    self.lib_open = true;
-                    self.lib_pick = None;
-                    self.read_now();
+                    let i = self.screens.new_page();
+                    self.pages_edited();
+                    window.push(WindowAsk::OpenLayouts(i));
                 }
-                Ask::LibPick(i) => self.lib_pick = usize::try_from(i).ok().filter(|i| *i < crate::lcd_page::TEMPLATES.len()),
-                Ask::LibAdd => {
-                    let key = self.lib_pick.map(|k| crate::lcd_page::TEMPLATES[k].0);
-                    if let Some(p) = key.and_then(|k| crate::lcd_page::Page::template(k, &self.screens.library)) {
-                        self.screens.library.push(p);
-                        self.lib_open = false;
-                        self.pages_edited();
-                        // a blank one opens to be made
-                        if key == Some("blank") {
-                            self.edit_page(self.screens.library.len() - 1);
-                        }
-                    }
-                }
-                Ask::LibClose => self.lib_open = false,
                 Ask::LcdPause => {
                     self.lcd_paused = !self.lcd_paused;
                     if let Some(pl) = &self.player {
@@ -1215,7 +1144,7 @@ impl Front {
                 // (the screen drawn again, as the state now open shows it)
                 Ask::ScreenState => self.lcd_drawn = None,
                 Ask::ObChoose(x, y, h) => self.open_ob_menu((x, y, h)),
-                Ask::LibEdit(k) => self.edit_page(k.max(0) as usize),
+                Ask::LibEdit(k) => window.push(WindowAsk::OpenLayouts(k.max(0) as usize)),
                 Ask::LcdTick => {
                     // the readings again each second: for the page being edited (its
                     // picture and its boxes), or the playlist's pictures of its pages
@@ -1321,14 +1250,6 @@ impl Front {
                 }
                 Ask::CellTyped(id, t) => match lighting::ctl(id) {
                     Ctl::Name => crate::display::act(&mut self.page, Ctl::Name, 0, 0.0, Some(&t)),
-                    Ctl::ScrText => {
-                        if let Some(ed) = &mut self.editor {
-                            if let Some(p) = self.screens.library.get_mut(ed.page) {
-                                crate::screen_edit::act(p, ed, Ctl::ScrText, 0, Some(&t));
-                            }
-                        }
-                        self.pages_edited();
-                    }
                     Ctl::Place => {
                         // searched once typing pauses, as the web page did
                         self.place_text = t;
@@ -1487,6 +1408,8 @@ impl Front {
         if any {
             self.refresh();
         }
+        // (asked for away from an ask: the onboard chooser's Edit)
+        window.extend(self.pending_window.drain(..));
         window
     }
 
@@ -1675,17 +1598,8 @@ impl Front {
                 self.open_picker(c, index, _anchor);
                 return;
             }
-            Ctl::Start | Ctl::Stop | Ctl::Submode | Ctl::Plays | Ctl::ScrSource => {
+            Ctl::Start | Ctl::Stop | Ctl::Submode | Ctl::Plays => {
                 self.open_light_menu(c, _anchor);
-                return;
-            }
-            Ctl::ScrUnits | Ctl::ScrHours | Ctl::ScrWidth | Ctl::ScrAlign | Ctl::ScrRemove | Ctl::ScrLight => {
-                if let Some(ed) = &mut self.editor {
-                    if let Some(p) = self.screens.library.get_mut(ed.page) {
-                        crate::screen_edit::act(p, ed, c, index, None);
-                    }
-                }
-                self.pages_edited();
                 return;
             }
             Ctl::WhereMode | Ctl::WhereAll | Ctl::Zone => {
@@ -2312,17 +2226,6 @@ impl Front {
             self.ui.set_menu_open(false);
             self.ui.set_menu_search(true);
             self.ui.set_menu_w(300.0);
-            // a reading for the piece chosen in the page editor
-            if c == Ctl::ScrSource {
-                if let (Some(Some(src)), Some(ed)) = (self.source_menu.get(i).copied(), &self.editor) {
-                    if let Some(p) = self.screens.library.get_mut(ed.page) {
-                        crate::screen_edit::set_source(p, ed, src);
-                    }
-                    self.pages_edited();
-                }
-                self.refresh();
-                return;
-            }
             let index = if c == Ctl::Submode { i.min(2) } else { i };
             // Plays: its rows, a rule between the two halves (and, for a pair it
             // has no name for, that one after another rule, which changes nothing)
@@ -2369,7 +2272,7 @@ impl Front {
                 }
                 k if k == 3 + count => {
                     if let Some(at) = self.screens.onboard_of(n).and_then(|p| self.screens.index_of(&p.id)) {
-                        self.edit_page(at);
+                        self.pending_window.push(WindowAsk::OpenLayouts(at));
                     }
                 }
                 _ => {}
@@ -2609,7 +2512,6 @@ impl Front {
                 View::Keys => "Select a key on the keyboard or in the Key library to change what a key does.",
                 View::Lighting => "Choose a lighting effect for this profile, then set the colors, speed and zones below.",
                 View::Display => "Check the keyboard’s connection and which features the installed firmware supports.",
-                View::Screen if self.editor.is_some() => "Select a piece on the screen to change what the piece shows and where the piece sits.",
                 View::Screen => "Choose what the keyboard’s screen shows while Ectodeck is running, and when it isn’t.",
             }
             .into(),
@@ -3025,17 +2927,6 @@ impl Front {
         }
         let rows: Vec<MenuRow> = if c == Ctl::Plays {
             plays_rows(&self.page)
-        } else if c == Ctl::ScrSource {
-            let Some(piece) = self.editor.as_ref().and_then(|ed| self.screens.library.get(ed.page)?.pieces.get(ed.chosen?)) else { return };
-            let (current, bars) = match piece.kind {
-                crate::lcd_page::Kind::Data(s, _) => (s, false),
-                crate::lcd_page::Kind::Bar(s) => (s, true),
-                _ => return,
-            };
-            let avail = crate::lcd_page::available(&self.readings, self.weather.report().is_some());
-            let rows = crate::screen_edit::source_menu(current, bars, &avail, &self.readings);
-            self.source_menu = rows.iter().map(|r| r.4).collect();
-            rows.into_iter().map(|(kind, label, tag, tick, _)| MenuRow { kind, label: label.into(), tag: tag.into(), tick, sub: "".into() }).collect()
         } else {
             let Some((list, chosen)) = lighting::choices(&self.page, c) else { return };
             list.iter().enumerate().map(|(j, label)| MenuRow { kind: 0, label: (*label).into(), tag: "".into(), tick: j == chosen, sub: "".into() }).collect()
@@ -3673,21 +3564,93 @@ impl Front {
         }
     }
 
-    /// Page `i` of the Library opened in the editor, the keyboard's screen
-    /// held on it.
-    fn edit_page(&mut self, i: usize) {
-        let i = i.min(self.screens.library.len().saturating_sub(1));
+    /// The screen layout editor's window opened on layout `i` of the Library (the window
+    /// itself made by the window's side): the keyboard shows the layout and stays on it
+    /// while the layout is edited.
+    pub fn open_layouts(&mut self, i: usize) {
         self.close_menu();
-        if self.editor.is_none() {
+        if !self.layouts_shown {
             self.edit_from = self.lcd.page;
+            self.layouts_shown = true;
         }
-        self.editor = Some(crate::screen_edit::Editor { page: i, chosen: None, grid: crate::uistate::get("screen_grid").and_then(|v| v.as_bool()).unwrap_or(true) });
+        let i = i.min(self.screens.library.len().saturating_sub(1));
+        let grid = self.editor.as_ref().map(|e| e.grid).unwrap_or_else(|| crate::uistate::get("screen_grid").and_then(|v| v.as_bool()).unwrap_or(true));
+        self.editor = (!self.screens.library.is_empty()).then_some(crate::screen_edit::Editor { page: i, chosen: None, grid });
         self.read_now();
-        // the keyboard shows the page being edited, and stays on it
+        self.hold_edited();
+        self.show_layouts();
+        if let Some(l) = &self.layouts {
+            l.reveal(i);
+        }
+        self.refresh();
+    }
+
+    /// The keyboard's screen while the editor is open: the layout open, and the screen
+    /// held on it.
+    fn hold_edited(&mut self) {
         self.tell_page();
-        if let Some(pl) = &self.player {
+        if let (Some(pl), true) = (&self.player, self.editor.is_some()) {
             pl.tell(crate::lcd_player::Control::Hold(Some(0)));
         }
+    }
+
+    /// The editor's window closed: the layouts saved, and the screen plays the playlist
+    /// again, from the turn it was on.
+    pub fn layouts_closed(&mut self) {
+        if !std::mem::take(&mut self.layouts_shown) {
+            return;
+        }
+        self.editor = None;
+        self.save_pages();
+        self.tell_page();
+        if let Some(pl) = &self.player {
+            pl.tell(crate::lcd_player::Control::Show(self.edit_from.min(self.screens.turns(self.page.editing).len().saturating_sub(1))));
+            pl.tell(crate::lcd_player::Control::Hold(None));
+        }
+        self.refresh();
+    }
+
+    /// The editor window's asks, carried out on the layouts and the screen.
+    pub fn act_layouts(&mut self) -> Vec<WindowAsk> {
+        let avail = crate::lcd_page::available(&self.readings, self.weather.report().is_some());
+        let (light, _) = screen_of(&self.page.draft()["lighting"]);
+        let Some(l) = &mut self.layouts else { return Vec::new() };
+        let mut cx = crate::layout_page::Cx { screens: &mut self.screens, editor: &mut self.editor, readings: &self.readings, avail: &avail, light };
+        let out = l.act(&mut cx);
+        l.show(&cx);
+        if out.closed {
+            self.layouts_closed();
+        } else {
+            if out.edited {
+                self.pages_edited();
+            }
+            if out.opened {
+                if let Some(i) = self.editor.as_ref().map(|e| e.page) {
+                    if let Some(l) = &self.layouts {
+                        l.reveal(i);
+                    }
+                }
+                self.hold_edited();
+            }
+            if out.edited || out.opened {
+                self.refresh();
+            }
+        }
+        out.window
+    }
+
+    /// The editor's window shown as the layouts are now (each second too, for its readings).
+    pub fn show_layouts(&mut self) {
+        let avail = crate::lcd_page::available(&self.readings, self.weather.report().is_some());
+        let (light, _) = screen_of(&self.page.draft()["lighting"]);
+        let Some(l) = &mut self.layouts else { return };
+        let cx = crate::layout_page::Cx { screens: &mut self.screens, editor: &mut self.editor, readings: &self.readings, avail: &avail, light };
+        l.show(&cx);
+    }
+
+    /// Whether words are being typed in the editor's window (its name, a Text block's words).
+    pub fn typing_in_layouts(&self) -> bool {
+        self.layouts.as_ref().is_some_and(|l| slint::ComponentHandle::global::<crate::Typing>(&l.ui).get_on())
     }
 
     /// What the screen is doing when the strip can't show it, said on the
@@ -3824,25 +3787,6 @@ impl Front {
             });
         }
         show_rows(self.ui.get_lib_pages(), |m| self.ui.set_lib_pages(m), cards);
-        // the sheet of pages to add
-        self.ui.set_lib_open(self.lib_open);
-        if self.lib_open {
-            let weather = self.weather.report().is_some();
-            let cards: Vec<crate::LibCard> = crate::lcd_page::TEMPLATES
-                .iter()
-                .enumerate()
-                .map(|(k, (key, name, note))| {
-                    let page = crate::lcd_page::Page::template(key, &[]).expect("a page of the list");
-                    let rows = crate::lcd_page::render(&page, &self.readings);
-                    let note = if *key == "weather" && !weather { "Needs a place in Ectodeck’s Settings. Until then, the screen says “Weather unavailable”." } else { note };
-                    crate::LibCard { name: (*name).into(), note: note.into(), pic: crate::lcd_draw::picture(&rows, crate::z10::as_lit(profile), lv, px(185.0), px(37.0)), on: self.lib_pick == Some(k) }
-                })
-                .collect();
-            show_rows(self.ui.get_lib_cards(), |m| self.ui.set_lib_cards(m), cards);
-            let pick = self.lib_pick.map(|k| crate::lcd_page::TEMPLATES[k].1);
-            self.ui.set_lib_add_text(pick.map_or("Add".to_string(), |p| format!("Add {p}")).into());
-            self.ui.set_lib_can_add(pick.is_some());
-        }
     }
 
     /// The screen drawn large, the playlist's picture of Stats, and its
@@ -3906,40 +3850,12 @@ impl Front {
         self.refresh_playlist([light[1], light[2], light[3]], light[0]);
     }
 
-}
-
-impl Front {
-    /// The page editor's boxes, its pieces over the screen, and its toolbar's words.
+    /// The layout editor's window follows what the main window changes (the
+    /// profile's default backlight, the layouts).
     fn refresh_editor(&mut self) {
-        self.ui.set_screen_editing(self.editor.is_some());
-        let Some(ed) = self.editor.clone() else { return };
-        let Some(page) = self.screens.library.get(ed.page) else { return };
-        let avail = crate::lcd_page::available(&self.readings, self.weather.report().is_some());
-        let (light, _) = screen_of(&self.page.draft()["lighting"]);
-        let b = crate::screen_edit::boxes(page, ed.chosen, &self.readings, &avail, [light[1], light[2], light[3]], self.light_menu == Some(Ctl::ScrSource));
-        self.ui.set_ed_title(format!("Editing {}", page.name).into());
-        self.ui.set_ed_grid(ed.grid);
-        self.ui.set_ed_piece_title(b.piece_title.into());
-        self.ui.set_ed_piece_h(b.piece_h);
-        self.ui.set_ed_place_h(b.place_h);
-        self.ui.set_ed_page_title(b.page_title.into());
-        self.ui.set_ed_page_h(b.page_h);
-        sync_cells(&self.ed_models[0], b.piece);
-        sync_cells(&self.ed_models[1], b.place);
-        sync_cells(&self.ed_models[2], b.page);
-        // each piece outlined where it lands on the screen
-        let spans = crate::lcd_page::spans(page, &self.readings);
-        let pieces: Vec<crate::EdPiece> = page
-            .pieces
-            .iter()
-            .zip(spans)
-            .enumerate()
-            .map(|(i, (p, (row, start, len)))| {
-                let col = start.min(19);
-                crate::EdPiece { row: row as i32, col: col as i32, width: len.clamp(1, 20 - col) as i32, on: ed.chosen == Some(i), name: p.name().into() }
-            })
-            .collect();
-        show_rows(self.ui.get_ed_pieces(), |m| self.ui.set_ed_pieces(m), pieces);
+        if self.layouts_shown {
+            self.show_layouts();
+        }
     }
 }
 
@@ -4047,11 +3963,11 @@ fn sync_blocks(model: &VecModel<crate::PlBlock>, rows: Vec<crate::PlBlock>) {
 
 
 /// The colours used lately, newest first, as the picker lists them.
-fn recent_colors() -> Vec<[u8; 3]> {
+pub(crate) fn recent_colors() -> Vec<[u8; 3]> {
     crate::uistate::get("recent_colours").and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default()
 }
 
-fn keep_recent(c: [u8; 3]) {
+pub(crate) fn keep_recent(c: [u8; 3]) {
     let mut list = vec![c];
     list.extend(recent_colors().into_iter().filter(|r| *r != c));
     list.truncate(9);

@@ -1,15 +1,14 @@
-//! The Screen tab's page editor: the boxes under the screen while a page is
-//! edited (the piece chosen, where it sits, the page), what each of their
-//! controls does to the page, and a new piece's first place.
+//! The screen layout editor's model: the layout open, the block selected,
+//! the box of the block's settings under the screen (one for each kind of
+//! block, Align first, two settings to a row), what each of its controls does
+//! to the layout, and where a new or moved block goes. The window itself is
+//! layout_page.rs.
 
 use crate::lcd_page::{Kind, Page, Piece, Readings, Source, COLS, ROWS};
-use crate::lighting::{cell, id, kind, Ctl, Stack};
+use crate::lighting::{cell, id, kind, style, text_cell, Ctl};
 use crate::Cell;
 
-/// Every box is this wide, as the When-closed box is.
-pub const BOX_W: f32 = 320.0;
-
-/// What is being edited: which page of the Library, the piece chosen, and
+/// What is being edited: which page of the Library, the block chosen, and
 /// whether the screen shows its grid of cells.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Editor {
@@ -18,26 +17,31 @@ pub struct Editor {
     pub grid: bool,
 }
 
-pub struct Boxes {
-    pub piece_title: String,
-    pub piece: Vec<Cell>,
-    pub piece_h: f32,
-    pub place: Vec<Cell>,
-    pub place_h: f32,
-    pub page_title: String,
-    pub page: Vec<Cell>,
-    pub page_h: f32,
+/// What a Data block shows, as the menu lists it: a reading, or the time
+/// (which a page keeps as a clock).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Shows {
+    Reading(Source),
+    Time,
 }
 
-fn dot(c: [u8; 3]) -> slint::Color {
-    slint::Color::from_rgb_u8(c[0], c[1], c[2])
+/// The kind of block a piece is, as the editor names it: 1 Text, 2 Data, 3 Bar
+/// (0 is nothing selected). The time is a Data block.
+pub fn block_kind(k: &Kind) -> i32 {
+    match k {
+        Kind::Text(_) => 1,
+        Kind::Data(..) | Kind::Clock(_) => 2,
+        Kind::Bar(_) => 3,
+    }
 }
 
-/// A number with a button either side to make it less or more.
-fn stepper(s: &mut Stack, c: Ctl, x: f32, value: &str) {
-    s.cells.push(Cell { text: "−".into(), id: id(c), index: 0, ..cell(kind::GHOST, x, s.y, 34.0, 30.0) });
-    s.cells.push(Cell { text: value.into(), ..cell(kind::PILL, x + 42.0, s.y + 5.0, 40.0, 20.0) });
-    s.cells.push(Cell { text: "+".into(), id: id(c), index: 1, ..cell(kind::GHOST, x + 90.0, s.y, 34.0, 30.0) });
+/// The box under the screen: its kind (as [block_kind]), its title, its
+/// cells in its own terms, and its height.
+pub struct BlockBox {
+    pub kind: i32,
+    pub title: String,
+    pub cells: Vec<Cell>,
+    pub h: f32,
 }
 
 /// What a piece looks like now, for its box.
@@ -47,134 +51,193 @@ fn looks(p: &Piece, r: &Readings) -> String {
     if row.ends_with(" unavailable") || row.is_empty() { "Unavailable".into() } else { row.trim().to_string() }
 }
 
-/// The boxes for the page, with the piece chosen. `avail` is what this
-/// computer can read; `profile_light` the profile's screen light. (How long
-/// a page shows and how it comes in belong to its turns on the playlist's
-/// strip, not to the page.)
-pub fn boxes(page: &Page, chosen: Option<usize>, r: &Readings, avail: &[Source], profile_light: [u8; 3], menu_open: bool) -> Boxes {
-    let piece = chosen.and_then(|i| page.pieces.get(i));
-    // the piece
-    let mut s = Stack::new(BOX_W);
-    let piece_title = match piece {
-        None => {
-            s.note(&format!("Select a piece of {} on the screen to change the piece, or add a piece with the buttons above.", page.name));
-            "Nothing selected".to_string()
-        }
-        Some(p) => {
-            s.link_right(Ctl::ScrRemove, "Remove", 13.0, "");
-            s.y += 4.0;
-            match &p.kind {
-                Kind::Text(t) => {
-                    s.head("Says", None);
-                    s.cells.push(Cell { text: t.as_str().into(), style: 7, id: id(Ctl::ScrText), ..cell(kind::FIELD, 16.0, s.y, s.inner(), 34.0) });
-                    s.y += 34.0 + 10.0;
-                    s.note("Letters, numbers and most symbols show as typed. Other characters show as a question mark.");
-                }
-                Kind::Data(src, f) => {
-                    s.head("Shows", None);
-                    s.dropdown(Ctl::ScrSource, src.name(), menu_open);
-                    s.gap(14.0);
-                    if avail.contains(src) {
-                        s.head("From", None);
-                        s.y -= 6.0;
-                        s.note(src.from());
-                    } else {
-                        s.note(&format!("Ectodeck can’t read the {} on this computer, so the row shows “unavailable”.", src.name().to_lowercase()));
-                    }
-                    s.gap(14.0);
-                    s.head("Looks like", Some(&looks(p, r)));
-                    if src.is_temperature() {
-                        s.gap(4.0);
-                        s.head("Units", None);
-                        s.switch(Ctl::ScrUnits, &[("°C", ""), ("°F", "")], if *f { 1 } else { 0 });
-                    }
-                }
-                Kind::Bar(src) => {
-                    s.head("Shows", None);
-                    s.dropdown(Ctl::ScrSource, src.name(), menu_open);
-                    s.gap(14.0);
-                    s.head("Looks like", Some(&looks(p, r)));
-                    s.note("The bar fills as the reading rises. A wider bar shows smaller changes.");
-                }
-                Kind::Clock(twelve) => {
-                    s.head("Hours", None);
-                    s.switch(Ctl::ScrHours, &[("24-hour", ""), ("12-hour", "")], if *twelve { 1 } else { 0 });
-                    s.gap(14.0);
-                    s.head("Looks like", Some(&looks(p, r)));
-                }
-            }
-            p.name()
-        }
-    };
-    let piece_h = s.height();
-    let piece_cells = s.cells;
-
-    // where it sits
-    let mut s = Stack::new(BOX_W);
-    match piece {
-        None => s.note("Drag a piece on the screen to move the piece. Select a piece to change the width and alignment."),
-        Some(p) => {
-            s.note("Drag on the screen to move the piece.");
-            s.gap(4.0);
-            s.head("Width", None);
-            stepper(&mut s, Ctl::ScrWidth, 16.0, &p.width.to_string());
-            s.y += 30.0 + 16.0;
-            s.head("Align", None);
-            s.switch(Ctl::ScrAlign, &[("Left", ""), ("Center", ""), ("Right", "")], if p.center { 1 } else if p.right { 2 } else { 0 });
-        }
-    }
-    let place_h = s.height();
-    let place_cells = s.cells;
-
-    // the page
-    let mut s = Stack::new(BOX_W);
-    s.head("Backlight", None);
-    let own = page.light;
-    let mut x = 16.0;
-    s.cells.push(Cell { color: dot(profile_light), on: own.is_none(), id: id(Ctl::ScrLight), index: 0, ..cell(kind::COLOR_DOT, x - 2.0, s.y, 28.0, 28.0) });
-    x += 46.0;
-    for (i, l) in crate::display::LIGHTS.iter().enumerate() {
-        s.cells.push(Cell { color: dot(*l), on: own == Some(*l), id: id(Ctl::ScrLight), index: i as i32 + 1, ..cell(kind::COLOR_DOT, x - 2.0 + i as f32 * 32.0, s.y, 28.0, 28.0) });
-    }
-    s.y += 28.0 + 12.0;
-    s.note(&match own {
-        None => "The first color is the profile’s default backlight, which this layout uses now.".to_string(),
-        Some(_) => format!("{} uses this color. Select the first color to use the profile’s default backlight again.", page.name),
-    });
-    let page_h = s.height();
-    Boxes { piece_title, piece: piece_cells, piece_h, place: place_cells, place_h, page_title: page.name.clone(), page: s.cells, page_h }
+/// The box's groups, laid out two to a row: each a setting's name (with its
+/// value in a small well, for Looks like) over its control, or a note alone.
+struct Grid {
+    w: f32,
+    y: f32,
+    col: usize,
+    row_h: f32,
+    cells: Vec<Cell>,
 }
 
-/// The menu of readings for a piece: each group's heading, then its
-/// readings, each with what it reads now. The rows, and the reading each
-/// row stands for.
-pub fn source_menu(current: Source, bars: bool, avail: &[Source], r: &Readings) -> Vec<(i32, String, String, bool, Option<Source>)> {
+impl Grid {
+    fn new(w: f32) -> Grid {
+        // under the title's line
+        Grid { w, y: 50.0, col: 0, row_h: 0.0, cells: Vec::new() }
+    }
+    fn col_w(&self) -> f32 {
+        (self.w - 32.0 - 16.0) / 2.0
+    }
+    fn x(&self) -> f32 {
+        16.0 + self.col as f32 * (self.col_w() + 16.0)
+    }
+    /// the group ends: the next goes beside it, or on a new row
+    fn done(&mut self, h: f32) {
+        self.row_h = self.row_h.max(h);
+        if self.col == 0 {
+            self.col = 1;
+        } else {
+            self.col = 0;
+            self.y += self.row_h + 14.0;
+            self.row_h = 0.0;
+        }
+    }
+    fn head(&mut self, label: &str, value: Option<&str>) -> f32 {
+        let (x, w) = (self.x(), self.col_w());
+        self.cells.push(text_cell(style::PROP, x, self.y, w, 20.0, label));
+        if let Some(v) = value {
+            let vw = (crate::text::width(500, 11.5, v) + 16.0).min(w - crate::text::width(400, 12.5, label) - 12.0);
+            self.cells.push(Cell { text: v.into(), ..cell(kind::PILL, x + w - vw, self.y, vw, 20.0) });
+        }
+        26.0
+    }
+    fn switch(&mut self, label: &str, c: Ctl, opts: &[&str], chosen: usize) {
+        let top = self.head(label, None);
+        let (x, w, y) = (self.x(), self.col_w(), self.y + top);
+        self.cells.push(Cell { style: 1, ..cell(kind::SEG, x, y, w, 34.0) });
+        let n = opts.len() as f32;
+        let each = (w - 6.0 - 2.0 * (n - 1.0)) / n;
+        for (j, name) in opts.iter().enumerate() {
+            self.cells.push(Cell { text: (*name).into(), on: j == chosen, id: id(c), index: j as i32, ..cell(kind::CHOICE, x + 3.0 + j as f32 * (each + 2.0), y + 3.0, each, 28.0) });
+        }
+        self.done(top + 34.0);
+    }
+    fn dropdown(&mut self, label: &str, c: Ctl, shown: &str, open: bool) {
+        let top = self.head(label, None);
+        self.cells.push(Cell { text: shown.into(), on: open, id: id(c), ..cell(kind::DROP, self.x(), self.y + top, self.col_w(), 34.0) });
+        self.done(top + 34.0);
+    }
+    fn field(&mut self, label: &str, c: Ctl, words: &str) {
+        let top = self.head(label, None);
+        self.cells.push(Cell { text: words.into(), style: 7, id: id(c), ..cell(kind::FIELD, self.x(), self.y + top, self.col_w(), 34.0) });
+        self.done(top + 34.0);
+    }
+    fn value(&mut self, label: &str, v: &str) {
+        let h = self.head(label, Some(v));
+        self.done(h - 6.0);
+    }
+    fn note(&mut self, label: Option<&str>, s: &str) {
+        let top = label.map_or(0.0, |l| self.head(l, None));
+        let (x, w) = (self.x(), self.col_w());
+        let lines = crate::text::wrap(400, 12.5, s, w);
+        for (k, line) in lines.iter().enumerate() {
+            self.cells.push(text_cell(style::NOTE, x, self.y + top + k as f32 * 18.0, w, 18.0, line));
+        }
+        self.done(top + lines.len() as f32 * 18.0);
+    }
+    fn height(mut self) -> (Vec<Cell>, f32) {
+        if self.col == 1 {
+            self.y += self.row_h + 14.0;
+        }
+        (self.cells, self.y - 14.0 + 18.0)
+    }
+}
+
+/// How a block is dragged, at the foot of every box with blocks on the screen.
+const DRAG: &str = "Drag the block on the screen to move the block, or drag either end to change the block’s width.";
+
+/// The box of the block chosen, `w` wide: for Text, Data and Bar their own
+/// settings; with nothing chosen, the window draws what each block is for.
+/// `avail` is what this computer can read; `menu_open`, the Shows menu.
+pub fn block_box(page: &Page, chosen: Option<usize>, r: &Readings, avail: &[Source], menu_open: bool, w: f32) -> BlockBox {
+    let Some(p) = chosen.and_then(|i| page.pieces.get(i)) else {
+        // (its legend has the four lines, and the line on selecting once there are blocks)
+        let h = if page.pieces.is_empty() { 50.0 + 3.0 * 29.0 + 18.0 - 11.0 + 18.0 } else { 78.0 + 3.0 * 29.0 - 11.0 + 18.0 };
+        return BlockBox { kind: 0, title: "Nothing selected".into(), cells: Vec::new(), h };
+    };
+    let mut g = Grid::new(w);
+    let align = if p.center { 1 } else if p.right { 2 } else { 0 };
+    match &p.kind {
+        Kind::Text(t) => {
+            g.switch("Align", Ctl::ScrAlign, &["Left", "Center", "Right"], align);
+            g.field("Says", Ctl::ScrText, t);
+            g.note(None, "Letters, numbers and most symbols show as typed. Other characters show as a question mark.");
+            g.note(None, DRAG);
+        }
+        Kind::Data(src, f) => {
+            g.switch("Align", Ctl::ScrAlign, &["Left", "Center", "Right"], align);
+            if src.is_temperature() {
+                g.switch("Units", Ctl::ScrUnits, &["°C", "°F"], if *f { 1 } else { 0 });
+            } else {
+                g.done(0.0);
+            }
+            g.dropdown("Shows", Ctl::ScrSource, src.name(), menu_open);
+            g.value("Looks like", &looks(p, r));
+            if avail.contains(src) {
+                g.note(Some("From"), src.from());
+            } else {
+                g.note(Some("From"), &format!("Ectodeck can’t read the {} on this computer, so the block says “unavailable”.", src.name().to_lowercase()));
+            }
+            g.note(None, DRAG);
+        }
+        Kind::Clock(twelve) => {
+            g.switch("Align", Ctl::ScrAlign, &["Left", "Center", "Right"], align);
+            g.switch("Hours", Ctl::ScrHours, &["24-hour", "12-hour"], if *twelve { 1 } else { 0 });
+            g.dropdown("Shows", Ctl::ScrSource, "Time", menu_open);
+            g.value("Looks like", &looks(p, r));
+            g.note(Some("From"), "This computer’s clock");
+            g.note(None, DRAG);
+        }
+        Kind::Bar(src) => {
+            g.dropdown("Shows", Ctl::ScrSource, src.name(), menu_open);
+            g.value("Looks like", &looks(p, r));
+            g.note(None, "The bar fills as the reading rises. A wider bar shows smaller changes.");
+            g.note(None, DRAG);
+        }
+    }
+    let (cells, h) = g.height();
+    let title = ["", "Text", "Data", "Bar"][block_kind(&p.kind) as usize].to_string();
+    BlockBox { kind: block_kind(&p.kind), title, cells, h }
+}
+
+/// The menu of what a block can show: each group's heading, then its
+/// readings, each with what it reads now. A bar shows only what fills one;
+/// a Data block can show the time too, in the group the date is in. The
+/// rows, and what each row stands for.
+pub fn source_menu(current: Shows, bars: bool, avail: &[Source], r: &Readings) -> Vec<(i32, String, String, bool, Option<Shows>)> {
     let mut rows = Vec::new();
     let mut group = "";
     // each group once, in the menu's order
-    let order = ["Processor", "Graphics", "Memory", "Keyboard", "More"];
-    let mut listed: Vec<Source> = avail.iter().copied().filter(|s| !bars || s.barred()).collect();
-    listed.sort_by_key(|s| order.iter().position(|g| *g == s.group()));
+    let order = ["Processor", "Graphics", "Memory", "Time and date", "Keyboard", "More"];
+    let mut listed: Vec<Shows> = avail.iter().copied().filter(|s| !bars || s.barred()).map(Shows::Reading).collect();
+    if !bars {
+        listed.push(Shows::Time);
+    }
+    let group_of = |s: &Shows| match s {
+        Shows::Time => "Time and date",
+        Shows::Reading(s) => s.group(),
+    };
+    // (the time before the date)
+    listed.sort_by_key(|s| (order.iter().position(|g| *g == group_of(s)), !matches!(s, Shows::Time)));
     for s in listed {
-        if s.group() != group {
+        if group_of(&s) != group {
             if !group.is_empty() {
                 rows.push((2, String::new(), String::new(), false, None));
             }
-            group = s.group();
+            group = group_of(&s);
             rows.push((1, group.to_string(), String::new(), false, None));
         }
-        let p = Piece { kind: if bars { Kind::Bar(s) } else { Kind::Data(s, false) }, row: 0, col: 0, width: if bars { 10 } else { 1 }, right: false, center: false, gap: 0 };
-        rows.push((0, s.name().to_string(), looks(&p, r), s == current, Some(s)));
+        let (name, p) = match s {
+            Shows::Time => ("Time".to_string(), Piece { kind: Kind::Clock(false), row: 0, col: 0, width: 5, right: false, center: false, gap: 0 }),
+            Shows::Reading(src) => (src.name().to_string(), Piece { kind: if bars { Kind::Bar(src) } else { Kind::Data(src, false) }, row: 0, col: 0, width: if bars { 10 } else { 1 }, right: false, center: false, gap: 0 }),
+        };
+        rows.push((0, name, looks(&p, r), s == current, Some(s)));
     }
     rows
 }
 
-/// Use a control of the boxes on the page.
-pub fn act(page: &mut Page, ed: &mut Editor, c: Ctl, index: usize, words: Option<&str>) {
-    if c == Ctl::ScrLight {
-        page.light = if index == 0 { None } else { crate::display::LIGHTS.get(index - 1).copied() };
-        return;
+/// What the chosen piece shows, as the menu lists it.
+pub fn shows_of(p: &Piece) -> Option<Shows> {
+    match p.kind {
+        Kind::Data(s, _) | Kind::Bar(s) => Some(Shows::Reading(s)),
+        Kind::Clock(_) => Some(Shows::Time),
+        Kind::Text(_) => None,
     }
+}
+
+/// Use a control of the box on the page.
+pub fn act(page: &mut Page, ed: &mut Editor, c: Ctl, index: usize, words: Option<&str>) {
     let Some(i) = ed.chosen.filter(|i| *i < page.pieces.len()) else { return };
     if c == Ctl::ScrRemove {
         page.pieces.remove(i);
@@ -194,7 +257,6 @@ pub fn act(page: &mut Page, ed: &mut Editor, c: Ctl, index: usize, words: Option
             }
         }
         Ctl::ScrHours => p.kind = Kind::Clock(index == 1),
-        Ctl::ScrWidth => p.width = if index == 0 { p.width.saturating_sub(1).max(1) } else { (p.width + 1).min(COLS) },
         Ctl::ScrAlign => {
             p.center = index == 1;
             p.right = index == 2;
@@ -203,39 +265,134 @@ pub fn act(page: &mut Page, ed: &mut Editor, c: Ctl, index: usize, words: Option
     }
 }
 
-/// The reading chosen from the menu, for the piece chosen.
-pub fn set_source(page: &mut Page, ed: &Editor, s: Source) {
+/// What the chosen piece shows, chosen from the menu: a Data block can turn
+/// into the time and back.
+pub fn set_shows(page: &mut Page, ed: &Editor, s: Shows) {
     let Some(p) = ed.chosen.and_then(|i| page.pieces.get_mut(i)) else { return };
-    p.kind = match p.kind {
-        Kind::Data(_, f) => Kind::Data(s, f && s.is_temperature()),
-        Kind::Bar(_) => Kind::Bar(s),
-        ref k => k.clone(),
+    p.kind = match (&p.kind, s) {
+        (Kind::Bar(_), Shows::Reading(src)) => Kind::Bar(src),
+        (Kind::Data(_, f), Shows::Reading(src)) => Kind::Data(src, *f && src.is_temperature()),
+        (Kind::Clock(_), Shows::Reading(src)) => Kind::Data(src, false),
+        (Kind::Data(..), Shows::Time) => Kind::Clock(false),
+        (k, _) => k.clone(),
     };
 }
 
-/// A piece moved on the screen to a cell.
-pub fn move_to(page: &mut Page, i: usize, row: i32, col: i32) {
-    if let Some(p) = page.pieces.get_mut(i) {
-        p.row = row.clamp(0, ROWS as i32 - 1) as u8;
-        p.col = col.clamp(0, COLS as i32 - p.width.min(COLS) as i32) as u8;
+/// A piece moved on the screen to start at a cell: into the free cells there (see
+/// [fit]), as wide as it was or as the run lets it be; where it doesn't fit, it stays.
+/// `least` is the fewest cells it shows its whole self in (see [crate::lcd_page::least]).
+pub fn move_to(page: &mut Page, i: usize, row: i32, col: i32, least: u8) {
+    let Some(p) = page.pieces.get(i) else { return };
+    let (row, col) = (row.clamp(0, ROWS as i32 - 1) as u8, col.clamp(0, COLS as i32 - 1) as u8);
+    if let Some((row, col, width)) = fit(page, row, col, p.width, least.min(p.width), Some(i)) {
+        let p = &mut page.pieces[i];
+        (p.row, p.col, p.width) = (row, col, width);
     }
 }
 
-/// A new piece, `what` 0 words, 1 a reading, 2 a bar, 3 a clock, put in the
-/// first run of empty cells it fits, and chosen. `first` is a reading this
-/// computer has.
-pub fn add(page: &mut Page, ed: &mut Editor, what: usize, first: Source) {
-    let (kind, width, right) = match what {
+/// A piece's ends moved: it starts at `col` and is `width` cells, within the
+/// free run of its row (see [free_run]), and no narrower than `least`.
+pub fn size_to(page: &mut Page, i: usize, col: i32, width: i32, least: u8) {
+    let Some((lo, hi)) = free_run(page, i) else { return };
+    let least = (least as i32).clamp(1, (hi - lo) as i32);
+    let col = col.clamp(lo as i32, hi as i32 - least);
+    let width = width.clamp(least, hi as i32 - col);
+    if let Some(p) = page.pieces.get_mut(i) {
+        p.col = col as u8;
+        p.width = width as u8;
+    }
+}
+
+/// The run of cells piece `i`'s ends can reach in its row: from the end of
+/// the piece before it (or the screen's edge) to the start of the piece after
+/// it (or the edge), as the first column and the column after the last.
+pub fn free_run(page: &Page, i: usize) -> Option<(u8, u8)> {
+    let p = page.pieces.get(i)?;
+    let (start, end) = (p.col, p.col + p.width);
+    let others = page.pieces.iter().enumerate().filter(|(k, q)| *k != i && q.row == p.row);
+    let lo = others.clone().filter(|(_, q)| q.col + q.width <= start).map(|(_, q)| q.col + q.width).max().unwrap_or(0);
+    let hi = others.filter(|(_, q)| q.col >= end).map(|(_, q)| q.col).min().unwrap_or(COLS);
+    Some((lo.min(start), hi.max(end)))
+}
+
+/// A new block: `what` 0 Text, 1 Data, 2 Bar, at `at` (its row, first column and width,
+/// from [fit]), or else in the first free cells it fits (see [first_room]); chosen.
+/// `first` is a reading this computer has, which a new Data block shows. Whether there
+/// was room for it.
+pub fn add(page: &mut Page, ed: &mut Editor, what: usize, first: Source, r: &Readings, at: Option<(u8, u8, u8)>) -> bool {
+    let (kind, width, right) = new_block(what, first);
+    let mut p = Piece { kind, row: 0, col: 0, width, right, center: false, gap: 1 };
+    let Some((row, col, width)) = at.or_else(|| first_room(page, width, crate::lcd_page::least(&p, r))) else { return false };
+    (p.row, p.col, p.width) = (row, col, width);
+    page.pieces.push(p);
+    ed.chosen = Some(page.pieces.len() - 1);
+    true
+}
+
+/// A new block of a kind, as it starts: its kind, width, and whether set against its right edge.
+pub fn new_block(what: usize, first: Source) -> (Kind, u8, bool) {
+    match what {
         0 => (Kind::Text("TEXT".into()), 4, false),
         1 => (Kind::Data(first, false), 7, true),
-        2 => (Kind::Bar(if first.barred() { first } else { Source::CpuLoad }), 10, false),
-        _ => (Kind::Clock(false), 5, false),
-    };
-    let taken = |row: u8, col: u8| page.pieces.iter().any(|p| p.row == row && col >= p.col && col < p.col + p.width);
-    let spot = (0..ROWS).find_map(|row| (0..=COLS - width).find(|&c| (c..c + width).all(|k| !taken(row, k))).map(|c| (row, c)));
-    let (row, col) = spot.unwrap_or((0, 0));
-    page.pieces.push(Piece { kind, row, col, width, right, center: false, gap: 1 });
-    ed.chosen = Some(page.pieces.len() - 1);
+        _ => (Kind::Bar(if first.barred() { first } else { Source::CpuLoad }), 10, false),
+    }
+}
+
+/// The free cells round cell `col` of `row`, which no block but `skip` (one being moved)
+/// takes: the first column and the column after the last. None where a block takes the cell.
+pub fn run_at(page: &Page, row: u8, col: u8, skip: Option<usize>) -> Option<(u8, u8)> {
+    let others = page.pieces.iter().enumerate().filter(|(k, p)| Some(*k) != skip && p.row == row);
+    if others.clone().any(|(_, p)| col >= p.col && col < p.col + p.width) {
+        return None;
+    }
+    let lo = others.clone().filter(|(_, p)| p.col + p.width <= col).map(|(_, p)| p.col + p.width).max().unwrap_or(0);
+    let hi = others.filter(|(_, p)| p.col > col).map(|(_, p)| p.col).min().unwrap_or(COLS);
+    Some((lo, hi))
+}
+
+/// Where a block `width` cells wide that shows its whole self in `least` lands when it is
+/// put at cell (`row`, `col`): in the free cells there, starting at that cell or as near
+/// it as they let it fit, and no wider than they are, as its row, first column and
+/// width. None over another block, or where the free cells are fewer than `least`:
+/// blocks never cover each other.
+pub fn fit(page: &Page, row: u8, col: u8, width: u8, least: u8, skip: Option<usize>) -> Option<(u8, u8, u8)> {
+    let (lo, hi) = run_at(page, row, col, skip)?;
+    let room = hi - lo;
+    let least = least.max(1);
+    if room < least {
+        return None;
+    }
+    let width = width.clamp(least, room);
+    Some((row, col.min(hi - width).max(lo), width))
+}
+
+/// The first free cells a new block fits in, row by row: a run as wide as `width`, or
+/// else the first with at least `least` cells, the block narrowed to it. None when no
+/// run has room.
+pub fn first_room(page: &Page, width: u8, least: u8) -> Option<(u8, u8, u8)> {
+    let runs: Vec<(u8, u8, u8)> = (0..ROWS)
+        .flat_map(|row| {
+            let mut runs = Vec::new();
+            let mut col = 0;
+            while col < COLS {
+                match run_at(page, row, col, None) {
+                    Some((lo, hi)) => {
+                        runs.push((row, lo, hi));
+                        col = hi;
+                    }
+                    None => col += 1,
+                }
+            }
+            runs
+        })
+        .collect();
+    let fits = |w: u8| runs.iter().find(|(_, lo, hi)| hi - lo >= w).map(|&(row, lo, hi)| (row, lo, width.min(hi - lo)));
+    fits(width).or_else(|| fits(least.max(1)))
+}
+
+/// Whether any row has `cells` free cells in a run, room for another block.
+pub fn has_room(page: &Page, cells: u8) -> bool {
+    first_room(page, cells, cells).is_some()
 }
 
 #[cfg(test)]
@@ -246,51 +403,106 @@ mod tests {
     fn the_keyboard_s_own_readings_have_a_group_of_their_own() {
         use crate::lcd_page::{available, Readings, Source};
         let r = Readings { profile: Some("DEFAULT 1".into()), profile_number: Some(1), ..Default::default() };
-        let rows = source_menu(Source::Profile, false, &available(&r, false), &r);
-        let at = rows.iter().position(|row| row.0 == 1 && row.1 == "Keyboard").expect("a Keyboard group");
-        let names: Vec<&str> = rows[at + 1..].iter().take_while(|row| row.0 == 0).map(|row| row.1.as_str()).collect();
-        assert_eq!(names, ["Active profile", "Profile number"]);
-        // game mode and key rollover join them once the keyboard can say them (build 5)
+        let names_in = |rows: &[(i32, String, String, bool, Option<Shows>)], group: &str| -> Vec<String> {
+            let at = rows.iter().position(|row| row.0 == 1 && row.1 == group).expect(group);
+            rows[at + 1..].iter().take_while(|row| row.0 == 0).map(|row| row.1.clone()).collect()
+        };
+        let rows = source_menu(Shows::Reading(Source::Profile), false, &available(&r, false), &r);
+        assert_eq!(names_in(&rows, "Keyboard"), ["Active profile", "Profile number"]);
+        // the time is a reading, in a group with the date
+        assert_eq!(names_in(&rows, "Time and date"), ["Time", "Date"]);
+        // game mode and key rollover join the keyboard's once the keyboard can say them (build 5)
         let r = Readings { mode: Some("PC MODE".into()), rollover: Some("6 KEY".into()), ..r };
-        let rows = source_menu(Source::Profile, false, &available(&r, false), &r);
-        let at = rows.iter().position(|row| row.0 == 1 && row.1 == "Keyboard").unwrap();
-        let names: Vec<&str> = rows[at + 1..].iter().take_while(|row| row.0 == 0).map(|row| row.1.as_str()).collect();
-        assert_eq!(names, ["Active profile", "Profile number", "Game mode", "Key rollover"]);
+        let rows = source_menu(Shows::Reading(Source::Profile), false, &available(&r, false), &r);
+        assert_eq!(names_in(&rows, "Keyboard"), ["Active profile", "Profile number", "Game mode", "Key rollover"]);
+        // a bar shows only what fills one: no time
+        let bars = source_menu(Shows::Reading(Source::CpuLoad), true, &available(&r, false), &r);
+        assert!(!bars.iter().any(|row| row.4 == Some(Shows::Time)));
     }
 
     #[test]
-    fn a_new_piece_goes_where_there_is_room_and_is_chosen() {
+    fn a_new_block_goes_into_free_cells_and_never_over_another() {
+        let r = Readings { cpu_temp: Some(45.0), ..Default::default() };
         let mut p = Page::stats();
         let mut ed = Editor { page: 0, chosen: None, grid: true };
-        // Stats has no run of five empty cells: the clock starts at the top left
-        add(&mut p, &mut ed, 3, Source::CpuTemp);
-        assert_eq!(ed.chosen, Some(12));
+        // Stats has no three free cells in a row: no block fits
+        assert!(!add(&mut p, &mut ed, 0, Source::CpuTemp, &r, None));
+        assert_eq!((p.pieces.len(), ed.chosen), (12, None));
+        assert!(!has_room(&p, 3) && has_room(&p, 1));
         let mut empty = Page { pieces: Vec::new(), ..Page::stats() };
-        add(&mut empty, &mut ed, 1, Source::GpuTemp);
-        assert_eq!((empty.pieces[0].row, empty.pieces[0].col), (0, 0));
-        add(&mut empty, &mut ed, 0, Source::GpuTemp);
+        assert!(add(&mut empty, &mut ed, 1, Source::GpuTemp, &r, None));
+        assert_eq!((empty.pieces[0].row, empty.pieces[0].col, empty.pieces[0].width), (0, 0, 7));
+        assert!(add(&mut empty, &mut ed, 0, Source::GpuTemp, &r, None));
         assert_eq!((empty.pieces[1].row, empty.pieces[1].col), (0, 7));
+        // put at a cell: from that cell, or as near it as the free cells let it fit
+        assert_eq!(fit(&empty, 2, 15, 10, 3, None), Some((2, 10, 10)));
+        assert_eq!(fit(&empty, 0, 12, 7, 3, None), Some((0, 12, 7)));
+        // narrowed to the free cells, but never past what it shows; over a block, nowhere
+        assert_eq!(fit(&empty, 0, 11, 10, 3, None), Some((0, 11, 9)));
+        assert_eq!(fit(&Page::stats(), 0, 3, 7, 3, None), None, "one free cell between CPU and its temperature");
+        assert_eq!(fit(&empty, 0, 2, 7, 3, None), None);
+        // the first room a block can have: a run as wide as it, or else narrowed to one
+        let mut row = Page { pieces: Vec::new(), ..Page::stats() };
+        for r in 0..4 {
+            row.pieces.push(Piece { kind: Kind::Text("X".into()), row: r, col: 0, width: 16, right: false, center: false, gap: 1 });
+        }
+        assert_eq!(first_room(&row, 7, 3), Some((0, 16, 4)));
+        assert_eq!(first_room(&row, 7, 5), None);
     }
 
     #[test]
-    fn the_controls_change_the_chosen_piece() {
+    fn a_block_s_ends_stop_at_its_neighbors() {
+        let p = Page::stats();
+        // CPU's temperature, cells 4 to 6: the word CPU ends at 3, its load starts at 8
+        assert_eq!(free_run(&p, 1), Some((3, 8)));
+        let mut q = p.clone();
+        size_to(&mut q, 1, 0, 20, 3);
+        assert_eq!((q.pieces[1].col, q.pieces[1].width), (3, 5));
+        // no narrower than what it shows: 45° takes three cells
+        size_to(&mut q, 1, 5, 1, 3);
+        assert_eq!((q.pieces[1].col, q.pieces[1].width), (5, 3));
+    }
+
+    #[test]
+    fn the_controls_change_the_chosen_block() {
         let mut p = Page::stats();
         let mut ed = Editor { page: 0, chosen: Some(1), grid: true };
         act(&mut p, &mut ed, Ctl::ScrUnits, 1, None);
         assert_eq!(p.pieces[1].kind, Kind::Data(Source::CpuTemp, true));
-        act(&mut p, &mut ed, Ctl::ScrWidth, 0, None);
         act(&mut p, &mut ed, Ctl::ScrAlign, 1, None);
         assert!(p.pieces[1].center && !p.pieces[1].right);
-        act(&mut p, &mut ed, Ctl::ScrAlign, 0, None);
-        let q = &p.pieces[1];
-        assert_eq!((q.row, q.col, q.width, q.right, q.center), (0, 4, 2, false, false));
-        set_source(&mut p, &ed, Source::GpuLoad);
+        set_shows(&mut p, &ed, Shows::Reading(Source::GpuLoad));
         assert_eq!(p.pieces[1].kind, Kind::Data(Source::GpuLoad, false), "°F goes with a reading that isn't a temperature");
-        move_to(&mut p, 1, 9, 25);
-        assert_eq!((p.pieces[1].row, p.pieces[1].col), (3, 18));
-        act(&mut p, &mut ed, Ctl::ScrLight, 2, None);
-        assert_eq!(p.light, Some(crate::display::LIGHTS[1]));
+        // a Data block turns into the time, and back
+        set_shows(&mut p, &ed, Shows::Time);
+        assert_eq!(p.pieces[1].kind, Kind::Clock(false));
+        act(&mut p, &mut ed, Ctl::ScrHours, 1, None);
+        assert_eq!(p.pieces[1].kind, Kind::Clock(true));
+        set_shows(&mut p, &ed, Shows::Reading(Source::Date));
+        assert_eq!(p.pieces[1].kind, Kind::Data(Source::Date, false));
+        // moved into free cells; onto another block, it stays
+        move_to(&mut p, 1, 0, 3, 3);
+        assert_eq!((p.pieces[1].row, p.pieces[1].col, p.pieces[1].width), (0, 3, 3));
+        move_to(&mut p, 1, 1, 0, 3);
+        assert_eq!((p.pieces[1].row, p.pieces[1].col), (0, 3), "the word GPU takes that cell");
         act(&mut p, &mut ed, Ctl::ScrRemove, 0, None);
         assert_eq!((p.pieces.len(), ed.chosen), (11, None));
+    }
+
+    #[test]
+    fn each_kind_of_block_has_its_own_box() {
+        let r = Readings::default();
+        let p = Page::stats();
+        let b = block_box(&p, Some(1), &r, &[Source::CpuTemp], false, 551.0);
+        assert_eq!((b.kind, b.title.as_str()), (2, "Data"));
+        // Align first, at the top left; then Units beside it
+        let first = b.cells.iter().find(|c| c.kind == kind::CHOICE).unwrap();
+        assert_eq!(first.text.as_str(), "Left");
+        assert!(b.cells.iter().any(|c| c.text.as_str() == "Units"));
+        let b = block_box(&p, Some(0), &r, &[], false, 551.0);
+        assert_eq!(b.title, "Text");
+        assert!(b.cells.iter().any(|c| c.kind == kind::FIELD && c.text.as_str() == "CPU"));
+        let none = block_box(&p, None, &r, &[], false, 551.0);
+        assert_eq!((none.kind, none.title.as_str()), (0, "Nothing selected"));
     }
 }

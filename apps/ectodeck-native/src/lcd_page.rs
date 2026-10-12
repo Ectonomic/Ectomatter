@@ -135,7 +135,8 @@ impl Source {
             Source::GpuTemp | Source::GpuLoad | Source::GpuClock | Source::VideoMemory => "Graphics",
             Source::Memory => "Memory",
             Source::Profile | Source::ProfileNumber | Source::GameMode | Source::KeyRollover => "Keyboard",
-            Source::Date | Source::OutsideTemp | Source::Sky => "More",
+            Source::Date => "Time and date",
+            Source::OutsideTemp | Source::Sky => "More",
         }
     }
 
@@ -216,17 +217,6 @@ pub struct Piece {
     pub gap: u8,
 }
 
-impl Piece {
-    pub fn name(&self) -> String {
-        match &self.kind {
-            Kind::Text(t) => if t.trim().is_empty() { "Words".into() } else { format!("“{}”", t.trim()) },
-            Kind::Data(s, _) => s.name().into(),
-            Kind::Bar(s) => format!("{} bar", s.name()),
-            Kind::Clock(_) => "Clock".into(),
-        }
-    }
-}
-
 /// How a page comes onto the screen after the one before it: a column of #
 /// sweeping across (as a game's launch begins), its cells changing in a
 /// random order, its words typed in, or at once.
@@ -273,6 +263,9 @@ pub struct Page {
     pub name: String,
     /// the screen's light while this page shows; None, the profile's
     pub light: Option<[u8; 3]>,
+    /// the page's own light, kept while the page follows the profile's, for
+    /// when it has its own again
+    pub kept_light: Option<[u8; 3]>,
     pub pieces: Vec<Piece>,
     /// as played: how long it shows before the next page, and how it comes
     /// onto the screen after the page before it (each turn of the playlist
@@ -294,15 +287,6 @@ fn middle(row: u8, kind: Kind) -> Piece {
     Piece { kind, row, col: 0, width: COLS, right: false, center: true, gap: 1 }
 }
 
-/// The pages that can be added to the playlist: what each is called, and
-/// what it shows.
-pub const TEMPLATES: [(&str, &str, &str); 4] = [
-    ("stats", "Stats", "CPU, GPU, RAM and VRAM, every second."),
-    ("clock", "Clock", "The time and the date, in the middle of the screen."),
-    ("weather", "Weather", "The temperature and the sky outside, for the place in Ectodeck’s Settings."),
-    ("blank", "Blank", "An empty screen layout for your own text, readings and clocks."),
-];
-
 impl Page {
     /// The Stats page as Grant laid it out for the z10-lcd service.
     pub fn stats() -> Page {
@@ -310,6 +294,7 @@ impl Page {
             id: "stats".into(),
             name: "Stats".into(),
             light: None,
+            kept_light: None,
             secs: SECS.2,
             comes_in: Transition::Wipe,
             pieces: vec![
@@ -331,7 +316,7 @@ impl Page {
 
     /// A page with nothing on it yet, to be made in the editor.
     pub fn blank() -> Page {
-        Page { id: "custom".into(), name: "Custom".into(), light: None, secs: SECS.2, comes_in: Transition::Wipe, pieces: Vec::new() }
+        Page { id: "custom".into(), name: "Custom".into(), light: None, kept_light: None, secs: SECS.2, comes_in: Transition::Wipe, pieces: Vec::new() }
     }
 
     /// The time on the second row and the date on the third, in the middle.
@@ -340,6 +325,7 @@ impl Page {
             id: "clock".into(),
             name: "Clock".into(),
             light: None,
+            kept_light: None,
             secs: SECS.2,
             comes_in: Transition::Wipe,
             pieces: vec![middle(1, Kind::Clock(false)), middle(2, Kind::Data(Source::Date, false))],
@@ -352,14 +338,15 @@ impl Page {
             id: "weather".into(),
             name: "Weather".into(),
             light: None,
+            kept_light: None,
             secs: SECS.2,
             comes_in: Transition::Wipe,
             pieces: vec![middle(1, Kind::Data(Source::OutsideTemp, false)), middle(2, Kind::Data(Source::Sky, false))],
         }
     }
 
-    /// A page of one of the TEMPLATES, by its key, with an id no page in
-    /// `taken` has (a second Clock is clock-2).
+    /// A layout as Ectodeck ships it (stats, clock, weather, or blank), by its
+    /// key, with an id no layout in `taken` has (a second Clock is clock-2).
     pub fn template(key: &str, taken: &[Page]) -> Option<Page> {
         let mut p = match key {
             "blank" => Page::blank(),
@@ -464,6 +451,9 @@ impl Page {
         if let Some(l) = self.light {
             v["light"] = json!(l);
         }
+        if let Some(l) = self.kept_light {
+            v["kept_light"] = json!(l);
+        }
         v
     }
 
@@ -491,17 +481,21 @@ impl Page {
                 })
             })
             .collect();
-        let light = v["light"].as_array().filter(|a| a.len() == 3).map(|a| std::array::from_fn(|i| b(&a[i]).unwrap_or(0)));
+        let rgb_of = |k: &str| v[k].as_array().filter(|a| a.len() == 3).map(|a| std::array::from_fn(|i| b(&a[i]).unwrap_or(0)));
+        let (light, kept_light) = (rgb_of("light"), rgb_of("kept_light"));
         let secs = v["secs"].as_u64().map_or(SECS.2, |n| (n as u32).clamp(SECS.0, SECS.1));
         let comes_in = v["comes_in"].as_str().and_then(Transition::from_key).unwrap_or(Transition::Wipe);
-        Some(Page { id: v["id"].as_str()?.into(), name: v["name"].as_str().unwrap_or("Page").into(), light, pieces, secs, comes_in })
+        Some(Page { id: v["id"].as_str()?.into(), name: v["name"].as_str().unwrap_or("Page").into(), light, kept_light, pieces, secs, comes_in })
     }
 }
 
-/// The pages kept in Ectodeck's settings, or Stats as it ships.
+/// The pages kept in Ectodeck's settings, or Stats as it ships when none were
+/// ever kept (a Library emptied by deleting its layouts stays empty).
 pub fn pages_of(v: Option<&Value>) -> Vec<Page> {
-    let pages: Vec<Page> = v.and_then(|v| v.as_array()).map(|a| a.iter().filter_map(Page::from_json).collect()).unwrap_or_default();
-    if pages.is_empty() { vec![Page::stats()] } else { pages }
+    match v.and_then(|v| v.as_array()) {
+        Some(a) => a.iter().filter_map(Page::from_json).collect(),
+        None => vec![Page::stats()],
+    }
 }
 
 /// One turn of the playlist: a screen of the Library, how long it shows,
@@ -761,6 +755,64 @@ impl Screens {
         id
     }
 
+    /// A new blank layout at the Library's end, and its place: Custom, or
+    /// Custom 2 and on while a layout has that name.
+    pub fn new_page(&mut self) -> usize {
+        let mut p = Page::template("blank", &self.library).expect("a blank layout");
+        let mut k = 1;
+        p.name = "Custom".into();
+        while self.library.iter().any(|q| q.name == p.name) {
+            k += 1;
+            p.name = format!("Custom {k}");
+        }
+        self.library.push(p);
+        self.library.len() - 1
+    }
+
+    /// Layout `i` copied, the copy after it and named with the next free
+    /// number (Stats 2), and the copy's place.
+    pub fn duplicate_page(&mut self, i: usize) -> Option<usize> {
+        let from = self.library.get(i)?.clone();
+        let base = from.id.rsplit_once('-').filter(|(_, n)| n.parse::<u32>().is_ok()).map_or(from.id.as_str(), |(b, _)| b).to_string();
+        let mut n = 2;
+        while self.library.iter().any(|q| q.id == format!("{base}-{n}")) {
+            n += 1;
+        }
+        let mut k = 2;
+        while self.library.iter().any(|q| q.name == format!("{} {k}", from.name)) {
+            k += 1;
+        }
+        let copy = Page { id: format!("{base}-{n}"), name: format!("{} {k}", from.name), ..from };
+        self.library.insert(i + 1, copy);
+        Some(i + 1)
+    }
+
+    /// Layout `i` renamed: trimmed, at most 40 characters, never to nothing.
+    pub fn rename_page(&mut self, i: usize, name: &str) {
+        let name: String = name.trim().chars().take(40).collect();
+        if let (false, Some(p)) = (name.is_empty(), self.library.get_mut(i)) {
+            p.name = name;
+        }
+    }
+
+    /// Layout `i` deleted: it comes off every playlist, and a profile that
+    /// kept it on the keyboard keeps the screen off. Whether it was there.
+    pub fn delete_page(&mut self, i: usize) -> bool {
+        if i >= self.library.len() {
+            return false;
+        }
+        let id = self.library.remove(i).id;
+        for l in &mut self.playlists {
+            l.turns.retain(|e| e.page != id);
+        }
+        for kept in self.onboard.values_mut() {
+            if *kept == id {
+                *kept = "off".into();
+            }
+        }
+        true
+    }
+
     pub fn rename(&mut self, id: &str, name: &str) {
         let name: String = name.trim().chars().take(40).collect();
         if let (false, Some(l)) = (name.is_empty(), self.playlists.iter_mut().find(|l| l.id == id)) {
@@ -883,6 +935,16 @@ pub fn bar(share: f64, width: u8) -> String {
     let inner = width.saturating_sub(2) as usize;
     let fill = ((inner as f64) * share).round() as usize;
     format!("[{}{}]", "#".repeat(fill.min(inner)), ".".repeat(inner - fill.min(inner)))
+}
+
+/// The fewest cells a piece shows its whole self in now: its words or its reading, as
+/// long as they are (a reading that can't be had, one), and a bar three, its ends and a
+/// cell to fill.
+pub fn least(p: &Piece, r: &Readings) -> u8 {
+    match &p.kind {
+        Kind::Bar(_) => 3,
+        _ => show(p, r).map_or(1, |s| s.chars().count().clamp(1, COLS as usize) as u8),
+    }
 }
 
 /// What one piece shows; Err with what it reads from when that can't be had.
@@ -1132,6 +1194,37 @@ mod tests {
     }
 
     #[test]
+    fn layouts_are_made_copied_renamed_and_deleted() {
+        let mut s = Screens::of(Some(&json!([Page::stats().to_json(), Page::clock().to_json()])), None, None, None);
+        let i = s.new_page();
+        assert_eq!((s.library[i].name.as_str(), s.library[i].pieces.len()), ("Custom", 0));
+        let c = s.duplicate_page(0).unwrap();
+        assert_eq!((c, s.library[c].id.as_str(), s.library[c].name.as_str()), (1, "stats-2", "Stats 2"));
+        s.rename_page(c, "  My stats  ");
+        assert_eq!(s.library[c].name, "My stats");
+        s.rename_page(c, "   ");
+        assert_eq!(s.library[c].name, "My stats");
+        // Stats, deleted, comes off the playlist; a profile keeping Clock on the keyboard, once Clock goes, keeps the screen off
+        s.add_turn(1, 0, "stats");
+        s.keep_onboard(2, Some("clock"));
+        let stats = s.index_of("stats").unwrap();
+        assert!(s.delete_page(stats));
+        assert!(s.turns(1).iter().all(|e| e.page != "stats"));
+        let clock = s.index_of("clock").unwrap();
+        assert!(s.delete_page(clock));
+        assert_eq!(s.onboard.get(&2).map(|v| v.as_str()), Some("off"));
+        assert!(s.onboard_of(1).is_none());
+        assert!(!s.delete_page(99));
+        // a new layout takes the first Custom name no layout has
+        s.rename_page(s.index_of("custom").unwrap(), "Mine");
+        let j = s.new_page();
+        assert_eq!((s.library[j].id.as_str(), s.library[j].name.as_str()), ("custom-2", "Custom"));
+        // every layout deleted, the Library stays empty when read back
+        while s.delete_page(0) {}
+        assert!(Screens::from_json(&s.to_json()).library.is_empty());
+    }
+
+    #[test]
     fn each_profile_keeps_a_layout_on_the_keyboard() {
         let mut s = Screens::of(Some(&json!([Page::stats().to_json(), Page::clock().to_json()])), None, None, None);
         // given none, a profile keeps the Clock layout
@@ -1170,7 +1263,6 @@ mod tests {
         assert_eq!((one.id.as_str(), one.name.as_str()), ("custom", "Custom"));
         let two = Page::template("blank", &[one.clone()]).unwrap();
         assert_eq!((two.id.as_str(), two.name.as_str()), ("custom-2", "Custom 2"));
-        assert_eq!(TEMPLATES[TEMPLATES.len() - 1].0, "blank", "Blank last in Add a page");
     }
 
     use super::*;
@@ -1197,6 +1289,7 @@ mod tests {
         assert_eq!(Page::from_json(&p.to_json()), Some(p.clone()));
         assert_eq!(pages_of(None), vec![p.clone()]);
         assert_eq!(pages_of(Some(&json!([p.to_json()]))), vec![p]);
+        assert!(pages_of(Some(&json!([]))).is_empty(), "a Library emptied by its owner stays empty");
     }
 
     #[test]
@@ -1241,6 +1334,7 @@ mod tests {
             id: "x".into(),
             name: "X".into(),
             light: None,
+            kept_light: None,
             secs: SECS.2,
             comes_in: Transition::Wipe,
             pieces: vec![
