@@ -1871,6 +1871,8 @@ impl App {
         self.window.wl_surface().attach(None, 0, 0);
         self.window.commit();
         self.hidden = true;
+        // (out of sight, the screen plays again rather than show the keyboard's own)
+        self.front.set_hidden(true);
         self.configured = false;
         self.frame_pending = false;
         self.buffers.clear();
@@ -1884,6 +1886,7 @@ impl App {
         }
         eprintln!("ectodeck-native: shown again from the tray");
         self.hidden = false;
+        self.front.set_hidden(false);
         self.full = true;
         self.window.commit();
     }

@@ -918,12 +918,13 @@ fn lay_out(page: &Page, r: &Readings) -> (Vec<String>, Vec<(u8, usize, usize)>) 
 /// on the computer drives the screen (read from Z10_RGB_117.bin, its rows in the factory
 /// order): the profile's number and up to ten characters of its name; key rollover at the
 /// left ("6 KEY", or "N KEY") and the mode at the right ("PC MODE", or "GAME MODE"); an
-/// empty row; then the date and the time the computer last sent, which stays blank until
-/// one is sent. `apps` is the profile's mask of what it shows (0x04 the profile, 0x01 the
+/// empty row; then the date and time, while the computer sends them (`clock`, as
+/// [clock_now] gives it): the keyboard keeps no time itself, and the row is blank until
+/// one comes. `apps` is the profile's mask of what it shows (0x04 the profile, 0x01 the
 /// rollover, 0x08 the mode, 0x20 the clock), and a part switched off is left blank, as the
 /// keyboard leaves it. Ectodeck can read neither the rollover nor the mode, so they show
-/// as the keyboard starts up, and it never sends the time, so the clock's row is blank.
-pub fn status_rows(apps: u64, profile: u8, name: &str) -> Vec<String> {
+/// as the keyboard starts up.
+pub fn status_rows(apps: u64, profile: u8, name: &str, clock: Option<(u16, [u8; 5])>) -> Vec<String> {
     let mut rows = vec![String::new(); 4];
     if apps & 0x04 != 0 {
         let name: String = ectotype_core::lcd::lcd_text(name).chars().take(10).collect();
@@ -934,7 +935,20 @@ pub fn status_rows(apps: u64, profile: u8, name: &str) -> Vec<String> {
     if apps & 0x09 != 0 {
         rows[1] = format!("{rollover:<5}{mode:>15}").trim_end().to_string();
     }
+    // (24-hour, as EVGA's software sends it, two digits to each part but the year)
+    if let (true, Some((y, [mo, d, h, mi, s]))) = (apps & 0x20 != 0, clock) {
+        rows[3] = format!("{y:04}/{mo:02}/{d:02}  {h:02}:{mi:02}:{s:02}");
+    }
     rows
+}
+
+/// The local date and time as the keyboard's clock is set: the year, then the month
+/// (1 to 12), the day, the hour (0 to 23), the minute and the second.
+pub fn clock_now() -> (u16, [u8; 5]) {
+    let mut t: libc::tm = unsafe { std::mem::zeroed() };
+    let secs = unsafe { libc::time(std::ptr::null_mut()) };
+    unsafe { libc::localtime_r(&secs, &mut t) };
+    ((t.tm_year + 1900) as u16, [(t.tm_mon + 1) as u8, t.tm_mday as u8, t.tm_hour as u8, t.tm_min as u8, t.tm_sec as u8])
 }
 
 /// The readings this computer can give, for the menu of readings.
@@ -959,10 +973,13 @@ mod tests {
     #[test]
     fn the_status_screen_is_drawn_as_the_firmware_draws_it() {
         // everything the keyboard can show (0x2f), as it comes from the factory
-        assert_eq!(status_rows(0x2f, 1, "DEFAULT 1"), vec!["PROFILE 1:DEFAULT 1", "6 KEY        PC MODE", "", ""]);
+        assert_eq!(status_rows(0x2f, 1, "DEFAULT 1", None), vec!["PROFILE 1:DEFAULT 1", "6 KEY        PC MODE", "", ""]);
+        // the clock, once the computer sends the time
+        let t = Some((2026, [10, 12, 0, 5, 9]));
+        assert_eq!(status_rows(0x2f, 1, "DEFAULT 1", t)[3], "2026/10/12  00:05:09");
         // the mode alone keeps its place at the right; a name longer than ten is cut
-        assert_eq!(status_rows(0x0c, 3, "Afternoon games"), vec!["PROFILE 3:Afternoon ", "             PC MODE", "", ""]);
-        assert_eq!(status_rows(0x01, 2, "x"), vec!["", "6 KEY", "", ""]);
+        assert_eq!(status_rows(0x0c, 3, "Afternoon games", t), vec!["PROFILE 3:Afternoon ", "             PC MODE", "", ""]);
+        assert_eq!(status_rows(0x01, 2, "x", None), vec!["", "6 KEY", "", ""]);
     }
 
     #[test]

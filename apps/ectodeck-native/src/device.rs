@@ -33,6 +33,11 @@ pub enum Ask {
     /// the screen as a profile being edited has it, shown now without saving:
     /// its light (brightness, red, green, blue) and its built-in screens
     Screen([u8; 4], u8),
+    /// the clock on the keyboard's status screen: the time to show (the year, then the
+    /// month, day, hour, minute and second), or none; with none, the profile's parts of
+    /// the status screen (`u8`) are shown again, so each row is drawn afresh after the
+    /// clock goes (the keyboard blanks the bottom row as it takes the clock off)
+    Clock(Option<(u16, [u8; 5])>, u8),
 }
 
 pub enum Heard {
@@ -57,6 +62,8 @@ pub fn start(backups: PathBuf, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
         let kb = Keyboard::new(Conn::hid(), Some(backups));
         let mut queue: std::collections::VecDeque<Ask> = std::collections::VecDeque::new();
         let mut handed_back = false;
+        // (the first time the clock is set, said in the log, as whether the keyboard took it)
+        let mut clock_said = false;
         loop {
             // Everything asked for so far: a slider reading goes first, so the
             // knobs keep up while the lighting streams, and of several previews
@@ -76,10 +83,13 @@ pub fn start(backups: PathBuf, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
             }
             let last_preview = queue.iter().rposition(|a| matches!(a, Ask::Preview(_)));
             let last_screen = queue.iter().rposition(|a| matches!(a, Ask::Screen(..)));
+            let last_clock = queue.iter().rposition(|a| matches!(a, Ask::Clock(..)));
             let mut k = 0;
             queue.retain(|a| {
-                // only the newest preview and the newest screen are worth sending
-                let keep = (!matches!(a, Ask::Preview(_)) || Some(k) == last_preview) && (!matches!(a, Ask::Screen(..)) || Some(k) == last_screen);
+                // only the newest preview, the newest screen and the newest time are worth sending
+                let keep = (!matches!(a, Ask::Preview(_)) || Some(k) == last_preview)
+                    && (!matches!(a, Ask::Screen(..)) || Some(k) == last_screen)
+                    && (!matches!(a, Ask::Clock(..)) || Some(k) == last_clock);
                 k += 1;
                 keep
             });
@@ -121,6 +131,20 @@ pub fn start(backups: PathBuf, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
                         }
                         std::thread::sleep(std::time::Duration::from_millis(15));
                     }
+                    Heard::Done
+                }
+                Ask::Clock(Some((year, time)), _) => {
+                    let took = kb.set_time(year, time);
+                    if !clock_said {
+                        clock_said = true;
+                        eprintln!("ectodeck-native: the keyboard's clock set: {}", match took { Ok(true) => "taken".to_string(), Ok(false) => "refused".to_string(), Err(e) => e.to_string() });
+                    }
+                    Heard::Done
+                }
+                Ask::Clock(None, apps) => {
+                    let took = kb.clear_time();
+                    let _ = kb.set_lcd_apps(apps);
+                    eprintln!("ectodeck-native: the keyboard's clock taken off: {}", match took { Ok(true) => "taken".to_string(), Ok(false) => "refused".to_string(), Err(e) => e.to_string() });
                     Heard::Done
                 }
                 Ask::WriteMacro(n, body) => {

@@ -367,6 +367,15 @@ pub struct Front {
     /// when the keyboard could not be read, to try again
     failed_at: Option<Instant>,
     controlled: bool,
+    /// the window closed into the tray, out of sight
+    hidden: bool,
+    /// the player told to stand aside, the keyboard showing its own status screen for the
+    /// Screen tab's picture of it (see [Front::status_showing])
+    aside: bool,
+    /// the time last sent to the keyboard's clock, while it shows its status screen; and
+    /// whether any was sent, so the clock is taken off again on quitting
+    clock_sent: Option<(u16, [u8; 5])>,
+    clock_fed: bool,
     /// the knobs, the display and its glass, over the keyboard
     pub overlays: Overlays,
     sliders_asked: bool,
@@ -636,6 +645,10 @@ impl Front {
             rebindings: crate::uistate::get("show_rebindings").and_then(|v| v.as_bool()).unwrap_or(true),
             failed_at: None,
             controlled,
+            hidden: false,
+            aside: false,
+            clock_sent: None,
+            clock_fed: false,
             overlays: Overlays::new(),
             sliders_asked: false,
             active_asked: false,
@@ -1184,6 +1197,7 @@ impl Front {
                 Ask::ScreenState => self.lcd_drawn = None,
                 Ask::LibEdit(k) => self.edit_page(k.max(0) as usize),
                 Ask::LcdTick => {
+                    self.feed_clock();
                     // the readings again each second: for the page being edited (its
                     // picture and its boxes), or the playlist's pictures of its pages
                     let on_screen = self.page.view == View::Screen && self.ui.get_place() == "z10";
@@ -2505,6 +2519,7 @@ impl Front {
     pub fn refresh(&mut self) {
         self.note_changes();
         self.follow_profile();
+        self.sync_aside();
         let ui = &self.ui;
         let p = &self.page;
         ui.set_tab(match p.view {
@@ -2816,10 +2831,11 @@ impl Front {
             self.ui.set_tile_height(t.height);
             self.show_cells(t.cells);
         }
-        // the screen as the profile being edited has it, on the keyboard now
+        // the screen as the profile being edited has it, on the keyboard now (its own
+        // status screen in the default backlight, whatever the playlist plays)
         if loaded && self.controlled {
             let mut want = screen_of(&self.page.draft()["lighting"]);
-            if self.player.is_some() {
+            if self.player.is_some() && !self.aside {
                 let l = self.page_light([want.0[1], want.0[2], want.0[3]]);
                 want.0[1..4].copy_from_slice(&l);
             }
@@ -3466,8 +3482,73 @@ impl Front {
         self.ui.set_pl_p0((n.elapsed / len).clamp(0.0, 1.0) as f32);
     }
 
-    /// Ectodeck closing: the screen handed back to the keyboard's own screens.
+    /// Whether the keyboard shows its own status screen for the page: while the Screen
+    /// tab is open on it, in sight, and no page is edited, on a keyboard Ectodeck controls.
+    /// Then the playlist stands aside, as it does for good once Ectodeck quits.
+    fn status_showing(&self) -> bool {
+        self.controlled
+            && self.page.dev.is_some()
+            && !self.hidden
+            && self.editor.is_none()
+            && self.ui.get_place() == "z10"
+            && self.page.view == View::Screen
+            && self.ui.get_screen_closed()
+    }
+
+    /// The player told whether to stand aside, as the page now has it.
+    fn sync_aside(&mut self) {
+        let aside = self.status_showing();
+        if aside == self.aside {
+            return;
+        }
+        self.aside = aside;
+        // (the clock sent at once, not at the next second)
+        self.clock_sent = None;
+        if let Some(pl) = &self.player {
+            pl.tell(crate::lcd_player::Control::Aside(aside));
+        }
+    }
+
+    /// The window closed into the tray, or shown again.
+    pub fn set_hidden(&mut self, hidden: bool) {
+        self.hidden = hidden;
+        self.sync_aside();
+    }
+
+    /// The keyboard's clock, while it shows its status screen with the time on: the time
+    /// as each second comes, as EVGA's Unleash sends it, since the keyboard keeps none
+    /// itself; the picture's clock with it.
+    fn feed_clock(&mut self) {
+        if !self.aside || self.kb.is_none() {
+            return;
+        }
+        let apps = self.page.draft()["lighting"]["lcd"]["apps"].as_u64().unwrap_or(0);
+        if apps & 0x20 == 0 {
+            self.clock_sent = None;
+            return;
+        }
+        let now = crate::lcd_page::clock_now();
+        if self.clock_sent == Some(now) {
+            return;
+        }
+        self.clock_sent = Some(now);
+        self.clock_fed = true;
+        self.ask_kb(device::Ask::Clock(Some(now), 0));
+        if self.page.view == View::Screen && self.ui.get_place() == "z10" {
+            self.draw_screen();
+        }
+    }
+
+    /// Ectodeck closing: the screen handed back to the keyboard's own screens, without
+    /// a clock, as EVGA's Unleash leaves it on closing (the keyboard keeps no time, so a
+    /// clock left on it would stand still).
     pub fn quit_screen(&mut self) {
+        if self.clock_fed {
+            if let Some(d) = &self.page.dev {
+                let saved = screen_of(&d["profiles"][self.page.active().to_string()]["lighting"]);
+                self.ask_kb(device::Ask::Clock(None, saved.1));
+            }
+        }
         if let Some(p) = self.player.take() {
             p.quit(true);
         }
@@ -3674,7 +3755,8 @@ impl Front {
             Some(p) => crate::lcd_page::render(p, &self.readings),
             None if closed => {
                 let d = self.page.draft();
-                crate::lcd_page::status_rows(d["lighting"]["lcd"]["apps"].as_u64().unwrap_or(0), self.page.editing, d["name"].as_str().unwrap_or(""))
+                let clock = if self.aside { self.clock_sent } else { None };
+                crate::lcd_page::status_rows(d["lighting"]["lcd"]["apps"].as_u64().unwrap_or(0), self.page.editing, d["name"].as_str().unwrap_or(""), clock)
             }
             None => self.lcd.rows.clone(),
         };

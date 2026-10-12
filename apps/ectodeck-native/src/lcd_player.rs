@@ -3,8 +3,9 @@
 //! in when its note changes. The loop is z10lcd.py's main loop, carried over
 //! step for step (see [Core::tick]), so the keyboard shows the same frames at
 //! the same moments; what Ectodeck adds sits around it: a pause, whether
-//! launches break in, standing aside while the old service still runs, and
-//! handing the screen back to the keyboard's own screens on quitting.
+//! launches break in, standing aside while the old service still runs or while
+//! the Screen tab shows the keyboard's own status screen, and handing the screen
+//! back to the keyboard's own screens on quitting.
 //!
 //! Each frame sent is also written to `$XDG_RUNTIME_DIR/z10-lcd/frame`, as the
 //! service wrote it: the keyboard will not read its screen back, so that file
@@ -233,6 +234,9 @@ pub enum Control {
     Hold(Option<usize>),
     /// end the launch or exit sequence playing, back to the playlist
     EndSequence,
+    /// leave the screen to the keyboard's own status screen, for the Screen tab's
+    /// picture of it, or (false) take it back (see [Core::stand_aside])
+    Aside(bool),
     /// what a page may show besides the computer's readings: the profile the
     /// keyboard is using, and the weather outside (°C, the sky in words)
     Context(Option<String>, Option<(f64, String)>),
@@ -299,6 +303,8 @@ pub struct Core {
     turn_len: f64,
     /// paused: how long the page had shown, which it carries on from
     held: Option<f64>,
+    /// standing aside: the keyboard shows its own status screen, and nothing is drawn
+    pub aside: bool,
 }
 
 impl Core {
@@ -329,6 +335,7 @@ impl Core {
             turn_from: 0.0,
             turn_len: 0.0,
             held: None,
+            aside: false,
         }
     }
 
@@ -366,6 +373,10 @@ impl Core {
     /// One turn of the loop at `now` (seconds); false when the next turn
     /// should come at once, without the usual 10 ms sleep.
     pub fn tick(&mut self, now: f64) -> bool {
+        // (standing aside, the keyboard's own screen shows: nothing is drawn)
+        if self.aside {
+            return true;
+        }
         let (sig, ev) = read_event(&self.event);
         if sig != self.last_sig {
             self.last_sig = sig;
@@ -480,6 +491,10 @@ impl Core {
             return;
         }
         self.paused = paused;
+        // (standing aside, the page's time is already held)
+        if self.aside {
+            return;
+        }
         if paused {
             self.held = self.page_since.map(|t| now - t);
         } else {
@@ -518,6 +533,35 @@ impl Core {
                 self.hold = false;
                 self.page_since = None;
             }
+        }
+    }
+
+    /// Leave the screen to the keyboard's own status screen: the screen blanked, then
+    /// handed back, so no row the status screen leaves empty keeps a page's words. Or
+    /// (false) take it back, the page drawn again at once. The page keeps the time it had
+    /// shown, as through a pause; a sequence playing ends, and a game's note that comes
+    /// meanwhile is past by then, so no sequence plays late.
+    pub fn stand_aside(&mut self, aside: bool, now: f64) {
+        if aside == self.aside {
+            return;
+        }
+        self.aside = aside;
+        if aside {
+            if !self.paused {
+                self.held = self.page_since.map(|t| now - t);
+            }
+            self.drop_sequence();
+            self.between.clear();
+            self.hand_back(true);
+        } else {
+            if !self.paused {
+                if let Some(h) = self.held.take() {
+                    self.page_since = Some(now - h);
+                }
+            }
+            self.last_sig = read_event(&self.event).0;
+            self.forget_shown();
+            self.redraw = true;
         }
     }
 
@@ -618,6 +662,12 @@ impl Player {
                             shared.lock().unwrap().0 = pages;
                         }
                         Control::Show(i) => core.show(i),
+                        Control::Aside(a) => {
+                            if a != core.aside {
+                                eprintln!("ectodeck-native: the screen {}", if a { "left to the keyboard's own status screen" } else { "taken back for the playlist" });
+                            }
+                            core.stand_aside(a, start.elapsed().as_secs_f64());
+                        }
                         Control::Hold(i) => core.hold_on(i),
                         Control::Context(profile, outside) => {
                             let mut s = shared.lock().unwrap();
@@ -810,6 +860,32 @@ mod tests {
         core.show(0);
         run(&mut core, &clock, 34.1, 34.2);
         assert_eq!(sent.lock().unwrap().last().unwrap().1[0], "PAGE A");
+    }
+
+    #[test]
+    fn standing_aside_the_keyboard_has_its_screen_and_the_page_waits() {
+        use crate::lcd_page::Transition;
+        let (mut core, sent, clock) = two_pages(Transition::Cut);
+        // A shows for a second, then the keyboard's own screen for nine
+        run(&mut core, &clock, 0.0, 1.0);
+        let before = sent.lock().unwrap().len();
+        core.stand_aside(true, 1.0);
+        run(&mut core, &clock, 1.0, 10.0);
+        {
+            // the screen blanked, then handed back, and nothing drawn after
+            let s = sent.lock().unwrap();
+            assert_eq!(s.len(), before + 2, "{:?}", &s[before..]);
+            assert!(s[before..].iter().all(|(_, r)| r.iter().all(|row| row.is_empty())));
+        }
+        // back: A at once, with the two seconds it had left, then B
+        core.stand_aside(false, 10.0);
+        run(&mut core, &clock, 10.0, 10.05);
+        assert_eq!(sent.lock().unwrap().last().unwrap().1[0], "PAGE A");
+        run(&mut core, &clock, 10.05, 11.9);
+        assert!(first_at(&sent, "PAGE B").is_none());
+        run(&mut core, &clock, 11.9, 12.5);
+        let b = first_at(&sent, "PAGE B").expect("B after A's three seconds in all");
+        assert!((b - 12.0).abs() < 0.05, "B at {b}");
     }
 
     #[test]
