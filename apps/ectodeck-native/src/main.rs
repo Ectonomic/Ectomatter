@@ -68,7 +68,7 @@ use kde_output::client::kde_output_device_v2::{self, KdeOutputDeviceV2};
 use picture::{Lit, Picture};
 use resvg::tiny_skia::{Pixmap, Transform};
 use resvg::usvg;
-use adapter::{Pointer, SoftWindow as MinimalSoftwareWindow};
+use adapter::SoftWindow as MinimalSoftwareWindow;
 use slint::platform::software_renderer::{PremultipliedRgbaColor, RepaintBufferType};
 use slint::platform::{Key, PointerEventButton, WindowAdapter, WindowEvent};
 use slint::{LogicalPosition, PhysicalSize, SharedString};
@@ -956,13 +956,23 @@ fn snap_layouts(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow
         }
         if std::env::var_os("ECTODECK_NATIVE_DRAG_HOLD").is_none() {
             window.dispatch_event(WindowEvent::PointerReleased { position: at(1.0), button: PointerEventButton::Left });
+            // (as the window does: the cursor asked for again the moment the press lets go)
+            window.dispatch_event(WindowEvent::PointerMoved { position: at(1.0) });
         }
     }
+    let mut rest_at = drag.get(2..4).map(|xy| LogicalPosition::new(xy[0], xy[1]));
     if let Ok(at) = std::env::var("ECTODECK_NATIVE_HOVER") {
         let mut xy = at.split(',').map(|v| v.trim().parse::<f32>().unwrap_or(0.0));
-        window.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(xy.next().unwrap_or(0.0), xy.next().unwrap_or(0.0)) });
+        let position = LogicalPosition::new(xy.next().unwrap_or(0.0), xy.next().unwrap_or(0.0));
+        window.dispatch_event(WindowEvent::PointerMoved { position });
+        rest_at = Some(position);
     }
     front.act_layouts();
+    // (as the window does: changed under a resting pointer, what is under it asked for again)
+    if let (true, Some(position), None) = (front.layouts_rehover(), rest_at, std::env::var_os("ECTODECK_NATIVE_DRAG_HOLD")) {
+        window.dispatch_event(WindowEvent::PointerMoved { position });
+    }
+    eprintln!("the cursor: {:?}", window.pointer());
     window.request_redraw();
     draw(&mut px);
     let mut pix = Pixmap::new(w, h).unwrap();
@@ -1298,6 +1308,9 @@ struct SubWin {
     buffers: Vec<(Buffer, Vec<Rect>)>,
     px: Vec<PremultipliedRgbaColor>,
     at: (f64, f64),
+    /// the pointer is over the window, and a button is held down on it
+    inside: bool,
+    held: bool,
 }
 
 /// A screen's levels as KWin describes them: its white and its peak, in nits.
@@ -1685,6 +1698,14 @@ impl App {
             }
         }
         let asks = [(MACROS, self.front.act_macros()), (LAB, self.front.act_lab()), (LAYOUTS, self.front.act_layouts())];
+        // the editor's window changed under a resting pointer (a block dropped or deleted
+        // where it is): what is under the pointer now shows its hover and its cursor. Not
+        // while a button is held, as a drag's own moves keep it up to date then
+        if self.front.layouts_rehover() {
+            if let Some(sw) = self.subs[LAYOUTS].as_ref().filter(|sw| sw.inside && !sw.held && !sw.hidden) {
+                sw.slint.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(sw.at.0 as f32, sw.at.1 as f32) });
+            }
+        }
         for (which, asks) in asks {
             for ask in asks {
                 let Some(sw) = &mut self.subs[which] else { break };
@@ -1696,6 +1717,7 @@ impl App {
                         let position = LogicalPosition::new(sw.at.0 as f32, sw.at.1 as f32);
                         sw.slint.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
                         sw.slint.dispatch_event(WindowEvent::PointerExited);
+                        (sw.held, sw.inside) = (false, false);
                     }
                     WindowAsk::Minimise => sw.window.set_minimized(),
                     WindowAsk::Maximise => {
@@ -1722,7 +1744,7 @@ impl App {
         window.set_app_id("com.ectonomic.ectodeck");
         window.set_min_size(Some(min));
         window.commit();
-        SubWin { window, slint, size, margins: Margins::default(), scale: 1, configured: false, maximized: false, frame_pending: false, hidden: false, full: true, buffers: Vec::new(), px: Vec::new(), at: (0.0, 0.0) }
+        SubWin { window, slint, size, margins: Margins::default(), scale: 1, configured: false, maximized: false, frame_pending: false, hidden: false, full: true, buffers: Vec::new(), px: Vec::new(), at: (0.0, 0.0), inside: false, held: false }
     }
 
     /// Show a window of its own again, as it was.
@@ -1924,12 +1946,17 @@ impl App {
         match e.kind {
             PointerEventKind::Enter { .. } => {
                 self.cursor = None;
+                mw.inside = true;
                 mw.slint.dispatch_event(WindowEvent::PointerMoved { position });
             }
-            PointerEventKind::Leave { .. } => mw.slint.dispatch_event(WindowEvent::PointerExited),
+            PointerEventKind::Leave { .. } => {
+                mw.inside = false;
+                mw.slint.dispatch_event(WindowEvent::PointerExited);
+            }
             PointerEventKind::Motion { .. } => mw.slint.dispatch_event(WindowEvent::PointerMoved { position }),
             PointerEventKind::Press { button: b, serial, .. } => {
                 self.press = serial;
+                mw.held = true;
                 if b == 0x110 {
                     if let (Some(edge), Some(seat)) = (edge(mw.size, mw.margins, mw.maximized, sx, sy), &self.seat) {
                         mw.window.resize(seat, serial, edge);
@@ -1948,14 +1975,20 @@ impl App {
                 }
                 mw.slint.dispatch_event(WindowEvent::PointerPressed { position, button: pointer_button(b) });
             }
-            PointerEventKind::Release { button: b, .. } => mw.slint.dispatch_event(WindowEvent::PointerReleased { position, button: pointer_button(b) }),
+            PointerEventKind::Release { button: b, .. } => {
+                mw.held = false;
+                mw.slint.dispatch_event(WindowEvent::PointerReleased { position, button: pointer_button(b) });
+                // (Slint asks for the cursor again only when the pointer next moves: told
+                // now, the hand that was dragging shows what is under it the moment it lets go)
+                mw.slint.dispatch_event(WindowEvent::PointerMoved { position });
+            }
             PointerEventKind::Axis { horizontal, vertical, .. } => mw.slint.dispatch_event(WindowEvent::PointerScrolled {
                 position,
                 delta_x: -horizontal.absolute as f32,
                 delta_y: -vertical.absolute as f32,
             }),
         }
-        let icon = edge_cursor(edge(mw.size, mw.margins, mw.maximized, sx, sy)).unwrap_or(cursor_icon(mw.slint.pointer()));
+        let icon = edge_cursor(edge(mw.size, mw.margins, mw.maximized, sx, sy)).unwrap_or(mw.slint.pointer());
         self.set_cursor(icon);
     }
 
@@ -2650,6 +2683,8 @@ impl PointerHandler for App {
                 }
                 PointerEventKind::Release { button: b, .. } => {
                     self.slint.dispatch_event(WindowEvent::PointerReleased { position, button: button(b) });
+                    // (the cursor asked for again at once: see sub_pointer)
+                    self.slint.dispatch_event(WindowEvent::PointerMoved { position });
                 }
                 PointerEventKind::Axis { horizontal, vertical, .. } => {
                     self.slint.dispatch_event(WindowEvent::PointerScrolled {
@@ -2669,7 +2704,7 @@ impl PointerHandler for App {
                 Some(ResizeEdge::Right) => CursorIcon::EResize,
                 Some(ResizeEdge::Top) => CursorIcon::NResize,
                 Some(ResizeEdge::Bottom) => CursorIcon::SResize,
-                _ => cursor_icon(self.slint.pointer()),
+                _ => self.slint.pointer(),
             };
             self.set_cursor(icon);
         }
@@ -2929,17 +2964,6 @@ fn edge_cursor(e: Option<ResizeEdge>) -> Option<CursorIcon> {
         ResizeEdge::Bottom => CursorIcon::SResize,
         _ => return None,
     })
-}
-
-/// The compositor's cursor for the one Slint asked for.
-fn cursor_icon(p: Pointer) -> CursorIcon {
-    match p {
-        Pointer::Hand => CursorIcon::Pointer,
-        Pointer::Text => CursorIcon::Text,
-        Pointer::Grab => CursorIcon::Grab,
-        Pointer::Grabbing => CursorIcon::Grabbing,
-        Pointer::Default => CursorIcon::Default,
-    }
 }
 
 /// The device the Key lab tunes, as the shown core describes it: its

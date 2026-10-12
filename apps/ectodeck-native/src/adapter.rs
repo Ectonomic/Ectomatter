@@ -1,8 +1,8 @@
 //! Slint's software window, as MinimalSoftwareWindow is, that also keeps the
 //! mouse cursor Slint asks for: the one of the area under the pointer, so the
-//! hand shows exactly over what can be clicked. Slint hands the cursor to a
-//! window only through its internal adapter hook, which this pins to Slint
-//! 1.18.1.
+//! hand shows exactly over what can be clicked, and the resize arrows over what
+//! is dragged to a size. Slint hands the cursor to a window only through its
+//! internal adapter hook, which this pins to Slint 1.18.1.
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -13,16 +13,7 @@ use i_slint_core::window::WindowAdapterInternal;
 use slint::platform::software_renderer::{RepaintBufferType, SoftwareRenderer};
 use slint::platform::{Renderer, WindowAdapter, WindowEvent};
 use slint::{PhysicalSize, Window, WindowSize};
-
-/// The cursors the page uses.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Pointer {
-    Default,
-    Hand,
-    Text,
-    Grab,
-    Grabbing,
-}
+use smithay_client_toolkit::seat::pointer::CursorIcon;
 
 pub struct SoftWindow {
     window: Window,
@@ -58,14 +49,41 @@ impl SoftWindow {
         self.window.set_size(size);
     }
 
-    /// The cursor for where the pointer is.
-    pub fn pointer(&self) -> Pointer {
-        match &*self.cursor.borrow() {
-            MouseCursorInner::BuiltIn(BuiltInMouseCursor::Pointer) => Pointer::Hand,
-            MouseCursorInner::BuiltIn(BuiltInMouseCursor::Text) => Pointer::Text,
-            MouseCursorInner::BuiltIn(BuiltInMouseCursor::Grab) => Pointer::Grab,
-            MouseCursorInner::BuiltIn(BuiltInMouseCursor::Grabbing) => Pointer::Grabbing,
-            _ => Pointer::Default,
+    /// The cursor for where the pointer is, as the compositor names it: every one
+    /// of Slint's own cursors has the same name there (one drawn from an image, and
+    /// none at all, show as the default arrow).
+    pub fn pointer(&self) -> CursorIcon {
+        use BuiltInMouseCursor as B;
+        let MouseCursorInner::BuiltIn(c) = &*self.cursor.borrow() else { return CursorIcon::Default };
+        match c {
+            B::Help => CursorIcon::Help,
+            B::Pointer => CursorIcon::Pointer,
+            B::Progress => CursorIcon::Progress,
+            B::Wait => CursorIcon::Wait,
+            B::Crosshair => CursorIcon::Crosshair,
+            B::Text => CursorIcon::Text,
+            B::Alias => CursorIcon::Alias,
+            B::Copy => CursorIcon::Copy,
+            B::Move => CursorIcon::Move,
+            B::NoDrop => CursorIcon::NoDrop,
+            B::NotAllowed => CursorIcon::NotAllowed,
+            B::Grab => CursorIcon::Grab,
+            B::Grabbing => CursorIcon::Grabbing,
+            B::ColResize => CursorIcon::ColResize,
+            B::RowResize => CursorIcon::RowResize,
+            B::NResize => CursorIcon::NResize,
+            B::EResize => CursorIcon::EResize,
+            B::SResize => CursorIcon::SResize,
+            B::WResize => CursorIcon::WResize,
+            B::NeResize => CursorIcon::NeResize,
+            B::NwResize => CursorIcon::NwResize,
+            B::SeResize => CursorIcon::SeResize,
+            B::SwResize => CursorIcon::SwResize,
+            B::EwResize => CursorIcon::EwResize,
+            B::NsResize => CursorIcon::NsResize,
+            B::NeswResize => CursorIcon::NeswResize,
+            B::NwseResize => CursorIcon::NwseResize,
+            _ => CursorIcon::Default,
         }
     }
 }

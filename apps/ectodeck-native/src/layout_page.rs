@@ -108,6 +108,9 @@ pub struct LayoutPage {
     blocks: Rc<VecModel<EdBlock>>,
     cells: Rc<VecModel<Cell>>,
     drawn: Option<(Vec<String>, [u8; 3], u8, u32)>,
+    /// the window changed under a resting pointer: what is under it now (its hover
+    /// and its cursor) is asked for again, as if the pointer had moved
+    rehover: bool,
 }
 
 fn row(kind: i32, label: &str, tick: bool, sub: &str) -> MenuRow {
@@ -167,7 +170,12 @@ impl LayoutPage {
         ui.set_rows(ModelRc::from(rows.clone()));
         ui.set_blocks(ModelRc::from(blocks.clone()));
         ui.set_box_cells(ModelRc::from(cells.clone()));
-        LayoutPage { ui, asks, menu: None, renaming: false, confirm: false, carry: None, pick: None, shut: None, rows, blocks, cells, drawn: None }
+        LayoutPage { ui, asks, menu: None, renaming: false, confirm: false, carry: None, pick: None, shut: None, rows, blocks, cells, drawn: None, rehover: false }
+    }
+
+    /// Whether the window has changed since the pointer last moved over it (see `rehover`).
+    pub fn take_rehover(&mut self) -> bool {
+        std::mem::take(&mut self.rehover)
     }
 
     /// The Delete key, while no words are being typed: the block selected goes.
@@ -189,6 +197,7 @@ impl LayoutPage {
     pub fn act(&mut self, cx: &mut Cx) -> Outcome {
         let mut out = Outcome::default();
         let asks: Vec<Ask> = self.asks.borrow_mut().drain(..).collect();
+        self.rehover |= !asks.is_empty();
         for a in asks {
             match a {
                 Ask::Move => out.window.push(WindowAsk::Move),

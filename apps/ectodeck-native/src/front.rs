@@ -3663,6 +3663,12 @@ impl Front {
         screen_of(&self.page.draft()["lighting"]).0
     }
 
+    /// Whether the editor's window changed under the pointer since it last moved (a block
+    /// dropped or deleted where it rests), so what is under it is asked for again.
+    pub fn layouts_rehover(&mut self) -> bool {
+        self.layouts.as_mut().is_some_and(|l| l.take_rehover())
+    }
+
     /// Whether words are being typed in the editor's window (its name, a Text block's words).
     pub fn typing_in_layouts(&self) -> bool {
         self.layouts.as_ref().is_some_and(|l| slint::ComponentHandle::global::<crate::Typing>(&l.ui).get_on())

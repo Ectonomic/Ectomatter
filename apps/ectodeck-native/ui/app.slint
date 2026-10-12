@@ -4375,7 +4375,7 @@ export component AppWindow inherits Window {
                                 // select the turn to show it now; drag it along the strip to move it
                                 sta := TouchArea {
                                     enabled: !b.away && !root.pl-dim;
-                                    mouse-cursor: root.carry-on ? MouseCursor.grabbing : MouseCursor.grab;
+                                    mouse-cursor: root.carry-on ? MouseCursor.grabbing : MouseCursor.pointer;
                                     property <bool> far;
                                     pointer-event(e) => {
                                         if (e.kind == PointerEventKind.down) {
@@ -6374,7 +6374,8 @@ component BlockChip inherits Rectangle {
         vertical-alignment: center;
     }
     ta := TouchArea {
-        mouse-cursor: root.far ? MouseCursor.grabbing : MouseCursor.grab;
+        // the finger, as on anything that can be selected; the closed hand once it is carried
+        mouse-cursor: root.far ? MouseCursor.grabbing : MouseCursor.pointer;
         pointer-event(e) => {
             if (e.kind == PointerEventKind.down) {
                 root.far = false;
@@ -7105,6 +7106,8 @@ export component LayoutWindow inherits Window {
                         property <int> dl: 0;
                         property <int> dw: 0;
                         property <bool> sizing: false;
+                        // carried by the pointer (past a few pixels from where it was pressed)
+                        property <bool> moving: false;
                         property <int> at-col: max(0, min(20 - b.width, b.col + dc));
                         property <int> at-row: max(0, min(4 - b.height, b.row + dr));
                         // (the left end moves, the right stays; within the free run, and no
@@ -7123,6 +7126,7 @@ export component LayoutWindow inherits Window {
                             self.dl = 0;
                             self.dw = 0;
                             self.sizing = false;
+                            self.moving = false;
                         }
                         // an end let go: the block's new cells, or, back where it started, as it was
                         function let-go() {
@@ -7148,11 +7152,17 @@ export component LayoutWindow inherits Window {
                             border-color: b.on || move-ta.pressed ? Ink.warn : move-ta.has-hover ? #ffffff80 : #ffffff33;
                             background: b.on && !b.fx ? #f0b35a1a : move-ta.has-hover && !b.on ? #ffffff0d : transparent;
                         }
+                        // the finger, as on anything that can be selected; the closed hand only
+                        // once the block is carried, and the finger again as it is let go
                         move-ta := TouchArea {
-                            mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.pointer;
+                            mouse-cursor: parent.moving ? MouseCursor.grabbing : MouseCursor.pointer;
                             // the pointer measured from where it was pressed: the outline moves
                             // with the drag, so how far it has moved already is added back
                             moved => {
+                                if (abs(self.mouse-x - self.pressed-x + (parent.at-col - b.col) * cw) > 3px
+                                    || abs(self.mouse-y - self.pressed-y + (parent.at-row - b.row) * ch) > 3px) {
+                                    parent.moving = true;
+                                }
                                 parent.dc = round((self.mouse-x - self.pressed-x + (parent.at-col - b.col) * cw) / cw);
                                 parent.dr = round((self.mouse-y - self.pressed-y + (parent.at-row - b.row) * ch) / ch);
                             }
@@ -7160,8 +7170,10 @@ export component LayoutWindow inherits Window {
                                 if (e.kind == PointerEventKind.down) {
                                     parent.dc = 0;
                                     parent.dr = 0;
+                                    parent.moving = false;
                                 }
                                 if (e.kind == PointerEventKind.up) {
+                                    parent.moving = false;
                                     if (parent.at-col != b.col || parent.at-row != b.row) {
                                         root.block-moved(i, parent.at-row, parent.at-col);
                                     } else {
