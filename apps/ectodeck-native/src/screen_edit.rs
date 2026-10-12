@@ -44,8 +44,11 @@ pub struct BlockBox {
     pub h: f32,
 }
 
-/// What a piece looks like now, for its box.
+/// What a piece looks like now, for its box: words whole, however its block shows them.
 fn looks(p: &Piece, r: &Readings) -> String {
+    if crate::lcd_page::is_words(&p.kind) {
+        return crate::lcd_page::says(p, r).map_or("Unavailable".into(), |s| s.trim().to_string());
+    }
     let page = Page { pieces: vec![Piece { row: 0, col: 0, gap: 0, ..p.clone() }], ..Page::stats() };
     let row = crate::lcd_page::render(&page, r).remove(0);
     if row.ends_with(" unavailable") || row.is_empty() { "Unavailable".into() } else { row.trim().to_string() }
@@ -134,8 +137,11 @@ impl Grid {
     }
 }
 
-/// How a block is dragged, at the foot of every box with blocks on the screen.
-const DRAG: &str = "Drag the block on the screen to move the block, or drag either end to change the block’s width.";
+/// How a block is dragged, at the foot of every box with blocks on the screen (the handle
+/// changes a one-row block's width, and a taller one's rows too).
+const DRAG: &str = "Drag the block on the screen to move the block, or drag the handle on the block’s corner to change the block’s size.";
+/// What words do that don't fit their block, as the Text box and a word reading's box set it.
+const FIT: [&str; 2] = ["Cut off", "Scroll"];
 
 /// The box of the block chosen, `w` wide: for Text, Data and Bar their own
 /// settings; with nothing chosen, the window draws what each block is for.
@@ -151,6 +157,7 @@ pub fn block_box(page: &Page, chosen: Option<usize>, r: &Readings, avail: &[Sour
     match &p.kind {
         Kind::Text(t) => {
             g.switch("Align", Ctl::ScrAlign, &["Left", "Center", "Right"], align);
+            g.switch("When the words don't fit", Ctl::ScrFit, &FIT, p.scroll as usize);
             g.field("Says", Ctl::ScrText, t);
             g.note(None, "Letters, numbers and most symbols show as typed. Other characters show as a question mark.");
             g.note(None, DRAG);
@@ -159,6 +166,8 @@ pub fn block_box(page: &Page, chosen: Option<usize>, r: &Readings, avail: &[Sour
             g.switch("Align", Ctl::ScrAlign, &["Left", "Center", "Right"], align);
             if src.is_temperature() {
                 g.switch("Units", Ctl::ScrUnits, &["°C", "°F"], if *f { 1 } else { 0 });
+            } else if src.is_words() {
+                g.switch("When the words don't fit", Ctl::ScrFit, &FIT, p.scroll as usize);
             } else {
                 g.done(0.0);
             }
@@ -219,8 +228,8 @@ pub fn source_menu(current: Shows, bars: bool, avail: &[Source], r: &Readings) -
             rows.push((1, group.to_string(), String::new(), false, None));
         }
         let (name, p) = match s {
-            Shows::Time => ("Time".to_string(), Piece { kind: Kind::Clock(false), row: 0, col: 0, width: 5, right: false, center: false, gap: 0 }),
-            Shows::Reading(src) => (src.name().to_string(), Piece { kind: if bars { Kind::Bar(src) } else { Kind::Data(src, false) }, row: 0, col: 0, width: if bars { 10 } else { 1 }, right: false, center: false, gap: 0 }),
+            Shows::Time => ("Time".to_string(), Piece { kind: Kind::Clock(false), row: 0, col: 0, width: 5, right: false, center: false, gap: 0, height: 1, scroll: true }),
+            Shows::Reading(src) => (src.name().to_string(), Piece { kind: if bars { Kind::Bar(src) } else { Kind::Data(src, false) }, row: 0, col: 0, width: if bars { 10 } else { 1 }, right: false, center: false, gap: 0, height: 1, scroll: true }),
         };
         rows.push((0, name, looks(&p, r), s == current, Some(s)));
     }
@@ -247,10 +256,12 @@ pub fn act(page: &mut Page, ed: &mut Editor, c: Ctl, index: usize, words: Option
     let p = &mut page.pieces[i];
     match c {
         Ctl::ScrText => {
+            // (a whole screen's worth, since words that don't fit can scroll)
             if let Some(t) = words {
-                p.kind = Kind::Text(t.chars().take(COLS as usize).collect());
+                p.kind = Kind::Text(t.chars().take((COLS * ROWS) as usize).collect());
             }
         }
+        Ctl::ScrFit => p.scroll = index == 1,
         Ctl::ScrUnits => {
             if let Kind::Data(s, _) = p.kind {
                 p.kind = Kind::Data(s, index == 1);
@@ -276,44 +287,70 @@ pub fn set_shows(page: &mut Page, ed: &Editor, s: Shows) {
         (Kind::Data(..), Shows::Time) => Kind::Clock(false),
         (k, _) => k.clone(),
     };
+    // (a reading that isn't words is one row)
+    if !crate::lcd_page::is_words(&p.kind) {
+        p.height = 1;
+    }
 }
 
-/// A piece moved on the screen to start at a cell: into the free cells there (see
-/// [fit]), as wide as it was or as the run lets it be; where it doesn't fit, it stays.
-/// `least` is the fewest cells it shows its whole self in (see [crate::lcd_page::least]).
+/// Whether piece `q` takes a cell of `row`.
+fn covers(q: &Piece, row: u8) -> bool {
+    q.row <= row && row < q.row + q.height.max(1)
+}
+
+/// A piece moved on the screen to start at a cell: into the free cells there in every
+/// row it takes (see [fit]), as wide as it was or as they let it be; where it doesn't
+/// fit, it stays. `least` is the fewest cells it shows its whole self in (see
+/// [crate::lcd_page::least]).
 pub fn move_to(page: &mut Page, i: usize, row: i32, col: i32, least: u8) {
     let Some(p) = page.pieces.get(i) else { return };
-    let (row, col) = (row.clamp(0, ROWS as i32 - 1) as u8, col.clamp(0, COLS as i32 - 1) as u8);
-    if let Some((row, col, width)) = fit(page, row, col, p.width, least.min(p.width), Some(i)) {
+    let h = p.height.clamp(1, ROWS);
+    let (row, col) = (row.clamp(0, (ROWS - h) as i32) as u8, col.clamp(0, COLS as i32 - 1) as u8);
+    if let Some((row, col, width)) = fit(page, row, col, p.width, h, least.min(p.width), Some(i)) {
         let p = &mut page.pieces[i];
         (p.row, p.col, p.width) = (row, col, width);
     }
 }
 
-/// A piece's ends moved: it starts at `col` and is `width` cells, within the
-/// free run of its row (see [free_run]), and no narrower than `least`.
-pub fn size_to(page: &mut Page, i: usize, col: i32, width: i32, least: u8) {
-    let Some((lo, hi)) = free_run(page, i) else { return };
-    let least = (least as i32).clamp(1, (hi - lo) as i32);
-    let col = col.clamp(lo as i32, hi as i32 - least);
-    let width = width.clamp(least, hi as i32 - col);
-    if let Some(p) = page.pieces.get_mut(i) {
-        p.col = col as u8;
-        p.width = width as u8;
-    }
+/// A piece's corner moved: `width` cells wide and `height` rows tall from its first cell,
+/// as far as the free cells to its right and below it let it (see [room]), and no
+/// narrower than `least`. A piece that isn't words stays one row.
+pub fn size_to(page: &mut Page, i: usize, width: i32, height: i32, least: u8) {
+    let ends = room(page, i, least);
+    let Some(p) = page.pieces.get(i) else { return };
+    let tallest = ends.iter().take_while(|e| e.is_some()).count().max(1);
+    let h = height.clamp(1, tallest as i32) as usize;
+    let Some(end) = ends[h - 1] else { return };
+    let most = end as i32 - p.col as i32;
+    let w = width.clamp((least.max(1) as i32).min(most), most);
+    let p = &mut page.pieces[i];
+    (p.width, p.height) = (w as u8, h as u8);
 }
 
-/// The run of cells piece `i`'s ends can reach in its row: from the end of
-/// the piece before it (or the screen's edge) to the start of the piece after
-/// it (or the edge), as the first column and the column after the last.
-pub fn free_run(page: &Page, i: usize) -> Option<(u8, u8)> {
-    let p = page.pieces.get(i)?;
-    let (start, end) = (p.col, p.col + p.width);
-    let others = page.pieces.iter().enumerate().filter(|(k, q)| *k != i && q.row == p.row);
-    let lo = others.clone().filter(|(_, q)| q.col + q.width <= start).map(|(_, q)| q.col + q.width).max().unwrap_or(0);
-    let hi = others.filter(|(_, q)| q.col >= end).map(|(_, q)| q.col).min().unwrap_or(COLS);
-    Some((lo.min(start), hi.max(end)))
+/// How far piece `i`'s corner can reach: for each height from one row to four, the column
+/// after the last free cell to its right in every row that height takes; None from the
+/// first height that can't be had (the screen's foot, a block below it leaving fewer than
+/// `least` cells, or any height past one row for a piece that isn't words).
+pub fn room(page: &Page, i: usize, least: u8) -> [Option<u8>; ROWS as usize] {
+    let mut ends = [None; ROWS as usize];
+    let Some(p) = page.pieces.get(i) else { return ends };
+    let most = if crate::lcd_page::is_words(&p.kind) { ROWS - p.row } else { 1 };
+    let mut end = COLS;
+    for h in 1..=most {
+        // the free cells from its first column on, in the row this height adds
+        let Some((_, hi)) = run_at(page, p.row + h - 1, p.col, Some(i)) else { break };
+        end = end.min(hi);
+        if end < p.col + least.max(1).min(COLS - p.col) {
+            break;
+        }
+        ends[h as usize - 1] = Some(end);
+    }
+    ends
 }
+
+/// The fewest free cells a new block starts in: a bar's two ends and a cell to fill, and
+/// room for words to start. (A block on the screen can be made narrower.)
+pub const NEW_LEAST: u8 = 3;
 
 /// A new block: `what` 0 Text, 1 Data, 2 Bar, at `at` (its row, first column and width,
 /// from [fit]), or else in the first free cells it fits (see [first_room]); chosen.
@@ -321,8 +358,9 @@ pub fn free_run(page: &Page, i: usize) -> Option<(u8, u8)> {
 /// was room for it.
 pub fn add(page: &mut Page, ed: &mut Editor, what: usize, first: Source, r: &Readings, at: Option<(u8, u8, u8)>) -> bool {
     let (kind, width, right) = new_block(what, first);
-    let mut p = Piece { kind, row: 0, col: 0, width, right, center: false, gap: 1 };
-    let Some((row, col, width)) = at.or_else(|| first_room(page, width, crate::lcd_page::least(&p, r))) else { return false };
+    let mut p = Piece { kind, row: 0, col: 0, width, right, center: false, gap: 1, height: 1, scroll: true };
+    let least = crate::lcd_page::least(&p, r).max(NEW_LEAST).min(width);
+    let Some((row, col, width)) = at.or_else(|| first_room(page, width, least)) else { return false };
     (p.row, p.col, p.width) = (row, col, width);
     page.pieces.push(p);
     ed.chosen = Some(page.pieces.len() - 1);
@@ -341,7 +379,7 @@ pub fn new_block(what: usize, first: Source) -> (Kind, u8, bool) {
 /// The free cells round cell `col` of `row`, which no block but `skip` (one being moved)
 /// takes: the first column and the column after the last. None where a block takes the cell.
 pub fn run_at(page: &Page, row: u8, col: u8, skip: Option<usize>) -> Option<(u8, u8)> {
-    let others = page.pieces.iter().enumerate().filter(|(k, p)| Some(*k) != skip && p.row == row);
+    let others = page.pieces.iter().enumerate().filter(|(k, p)| Some(*k) != skip && covers(p, row));
     if others.clone().any(|(_, p)| col >= p.col && col < p.col + p.width) {
         return None;
     }
@@ -350,13 +388,21 @@ pub fn run_at(page: &Page, row: u8, col: u8, skip: Option<usize>) -> Option<(u8,
     Some((lo, hi))
 }
 
-/// Where a block `width` cells wide that shows its whole self in `least` lands when it is
-/// put at cell (`row`, `col`): in the free cells there, starting at that cell or as near
-/// it as they let it fit, and no wider than they are, as its row, first column and
-/// width. None over another block, or where the free cells are fewer than `least`:
-/// blocks never cover each other.
-pub fn fit(page: &Page, row: u8, col: u8, width: u8, least: u8, skip: Option<usize>) -> Option<(u8, u8, u8)> {
-    let (lo, hi) = run_at(page, row, col, skip)?;
+/// Where a block `width` cells wide and `height` rows tall, that shows its whole self in
+/// `least`, lands when it is put at cell (`row`, `col`): in the cells free round that cell
+/// in every row it takes, starting at that cell or as near it as they let it fit, and no
+/// wider than they are, as its row, first column and width. None over another block, past
+/// the screen's foot, or where the free cells are fewer than `least`: blocks never cover
+/// each other.
+pub fn fit(page: &Page, row: u8, col: u8, width: u8, height: u8, least: u8, skip: Option<usize>) -> Option<(u8, u8, u8)> {
+    let (mut lo, mut hi) = (0, COLS);
+    for r in row..row + height.max(1) {
+        if r >= ROWS {
+            return None;
+        }
+        let (a, b) = run_at(page, r, col, skip)?;
+        (lo, hi) = (lo.max(a), hi.min(b));
+    }
     let room = hi - lo;
     let least = least.max(1);
     if room < least {
@@ -435,32 +481,59 @@ mod tests {
         assert!(add(&mut empty, &mut ed, 0, Source::GpuTemp, &r, None));
         assert_eq!((empty.pieces[1].row, empty.pieces[1].col), (0, 7));
         // put at a cell: from that cell, or as near it as the free cells let it fit
-        assert_eq!(fit(&empty, 2, 15, 10, 3, None), Some((2, 10, 10)));
-        assert_eq!(fit(&empty, 0, 12, 7, 3, None), Some((0, 12, 7)));
+        assert_eq!(fit(&empty, 2, 15, 10, 1, 3, None), Some((2, 10, 10)));
+        assert_eq!(fit(&empty, 0, 12, 7, 1, 3, None), Some((0, 12, 7)));
         // narrowed to the free cells, but never past what it shows; over a block, nowhere
-        assert_eq!(fit(&empty, 0, 11, 10, 3, None), Some((0, 11, 9)));
-        assert_eq!(fit(&Page::stats(), 0, 3, 7, 3, None), None, "one free cell between CPU and its temperature");
-        assert_eq!(fit(&empty, 0, 2, 7, 3, None), None);
+        assert_eq!(fit(&empty, 0, 11, 10, 1, 3, None), Some((0, 11, 9)));
+        assert_eq!(fit(&Page::stats(), 0, 3, 7, 1, 3, None), None, "one free cell between CPU and its temperature");
+        assert_eq!(fit(&empty, 0, 2, 7, 1, 3, None), None);
+        // a block two rows tall needs the cells free in both: the Data block on row 0 is in the way
+        assert_eq!(fit(&empty, 0, 12, 7, 2, 3, None), Some((0, 12, 7)));
+        assert_eq!(fit(&empty, 0, 3, 4, 2, 3, None), None);
+        assert_eq!(fit(&empty, 3, 0, 4, 2, 3, None), None, "past the screen's foot");
         // the first room a block can have: a run as wide as it, or else narrowed to one
         let mut row = Page { pieces: Vec::new(), ..Page::stats() };
         for r in 0..4 {
-            row.pieces.push(Piece { kind: Kind::Text("X".into()), row: r, col: 0, width: 16, right: false, center: false, gap: 1 });
+            row.pieces.push(Piece { kind: Kind::Text("X".into()), row: r, col: 0, width: 16, right: false, center: false, gap: 1, height: 1, scroll: true });
         }
         assert_eq!(first_room(&row, 7, 3), Some((0, 16, 4)));
         assert_eq!(first_room(&row, 7, 5), None);
     }
 
     #[test]
-    fn a_block_s_ends_stop_at_its_neighbors() {
+    fn a_block_s_corner_stops_at_its_neighbors() {
         let p = Page::stats();
-        // CPU's temperature, cells 4 to 6: the word CPU ends at 3, its load starts at 8
-        assert_eq!(free_run(&p, 1), Some((3, 8)));
+        // CPU's temperature, cells 4 to 6: its load starts at 8, and a reading stays one row
+        assert_eq!(room(&p, 1, 3), [Some(8), None, None, None]);
         let mut q = p.clone();
-        size_to(&mut q, 1, 0, 20, 3);
-        assert_eq!((q.pieces[1].col, q.pieces[1].width), (3, 5));
+        size_to(&mut q, 1, 20, 4, 3);
+        assert_eq!((q.pieces[1].col, q.pieces[1].width, q.pieces[1].height), (4, 4, 1));
         // no narrower than what it shows: 45° takes three cells
-        size_to(&mut q, 1, 5, 1, 3);
-        assert_eq!((q.pieces[1].col, q.pieces[1].width), (5, 3));
+        size_to(&mut q, 1, 1, 1, 3);
+        assert_eq!(q.pieces[1].width, 3);
+        // words take more rows, as far as the free cells below them go
+        let mut w = Page { pieces: vec![Piece { kind: Kind::Data(Source::Sky, false), row: 0, col: 0, width: 6, right: false, center: false, gap: 1, height: 1, scroll: true }], ..Page::stats() };
+        w.pieces.push(Piece { kind: Kind::Data(Source::CpuTemp, false), row: 2, col: 3, width: 3, right: true, center: false, gap: 1, height: 1, scroll: true });
+        assert_eq!(room(&w, 0, 1), [Some(20), Some(20), Some(3), Some(3)]);
+        size_to(&mut w, 0, 10, 4, 1);
+        assert_eq!((w.pieces[0].width, w.pieces[0].height), (3, 4), "four rows tall, so only as wide as the cells beside the reading below");
+        size_to(&mut w, 0, 10, 2, 1);
+        assert_eq!((w.pieces[0].width, w.pieces[0].height), (10, 2));
+        // a reading is never made taller
+        let mut one = w.clone();
+        size_to(&mut one, 1, 3, 3, 3);
+        assert_eq!(one.pieces[1].height, 1);
+        // a reading that isn't words, chosen for words that took two rows, goes back to one
+        let mut ed = Editor { page: 0, chosen: Some(0), grid: true };
+        set_shows(&mut w, &ed, Shows::Reading(Source::CpuLoad));
+        assert_eq!(w.pieces[0].height, 1);
+        // Text holds a whole screen's worth, and keeps what its words do when they don't fit
+        let mut t = Page { pieces: vec![Piece { kind: Kind::Text(String::new()), row: 0, col: 0, width: 4, right: false, center: false, gap: 1, height: 1, scroll: true }], ..Page::stats() };
+        ed.chosen = Some(0);
+        act(&mut t, &mut ed, Ctl::ScrText, 0, Some(&"x".repeat(100)));
+        assert_eq!(t.pieces[0].kind, Kind::Text("x".repeat(80)));
+        act(&mut t, &mut ed, Ctl::ScrFit, 0, None);
+        assert!(!t.pieces[0].scroll, "Cut off");
     }
 
     #[test]

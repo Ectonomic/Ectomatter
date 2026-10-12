@@ -56,14 +56,15 @@ pub enum Ctl {
     LcdPreset,
     /// when the effect plays: one of PLAYS, a start and a stop together
     Plays,
-    /// the screen's page editor: a piece's words, its reading (the menu),
-    /// °C or °F, a 24- or 12-hour clock, its width (0 less, 1 more), its
-    /// alignment, taking it off (it moves by dragging); the page's screen light
+    /// the screen's layout editor: a block's words, its reading (the menu),
+    /// °C or °F, a 24- or 12-hour clock, what its words do when they don't fit
+    /// (0 Cut off, 1 Scroll), its alignment, taking it off (it moves and sizes
+    /// by dragging); the layout's screen light
     ScrText,
     ScrSource,
     ScrUnits,
     ScrHours,
-    ScrWidth,
+    ScrFit,
     ScrAlign,
     ScrRemove,
     ScrLight,
@@ -109,7 +110,7 @@ const CTLS: [Ctl; 43] = [
     Ctl::ScrSource,
     Ctl::ScrUnits,
     Ctl::ScrHours,
-    Ctl::ScrWidth,
+    Ctl::ScrFit,
     Ctl::ScrAlign,
     Ctl::ScrRemove,
     Ctl::ScrLight,

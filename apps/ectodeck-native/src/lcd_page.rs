@@ -155,6 +155,12 @@ impl Source {
     }
 
     /// Whether a temperature, which can be shown in °C or °F.
+    /// Whether the reading is words (the weather, the active profile's name), which
+    /// carry on to the next row, scroll or are cut off, as Text does.
+    pub fn is_words(self) -> bool {
+        matches!(self, Source::Sky | Source::Profile)
+    }
+
     pub fn is_temperature(self) -> bool {
         matches!(self, Source::CpuTemp | Source::GpuTemp | Source::OutsideTemp)
     }
@@ -215,6 +221,12 @@ pub struct Piece {
     pub center: bool,
     /// the spaces kept after the piece before it, when that piece runs long
     pub gap: u8,
+    /// how many rows it takes, from `row` down: more than one only for words (see
+    /// [is_words]), which carry on to the next row where a row ends
+    pub height: u8,
+    /// words that don't fit even in all its rows: scrolled through it (left on one row,
+    /// up a row at a time on more), or else cut off at its end
+    pub scroll: bool,
 }
 
 /// How a page comes onto the screen after the one before it: a column of #
@@ -275,16 +287,16 @@ pub struct Page {
 }
 
 fn words(row: u8, col: u8, t: &str) -> Piece {
-    Piece { kind: Kind::Text(t.into()), row, col, width: t.chars().count() as u8, right: false, center: false, gap: 1 }
+    Piece { kind: Kind::Text(t.into()), row, col, width: t.chars().count() as u8, right: false, center: false, gap: 1, height: 1, scroll: true }
 }
 
 fn reading(row: u8, col: u8, width: u8, s: Source, gap: u8) -> Piece {
-    Piece { kind: Kind::Data(s, false), row, col, width, right: true, center: false, gap }
+    Piece { kind: Kind::Data(s, false), row, col, width, right: true, center: false, gap, height: 1, scroll: true }
 }
 
 /// A piece across the whole of a row, in its middle.
 fn middle(row: u8, kind: Kind) -> Piece {
-    Piece { kind, row, col: 0, width: COLS, right: false, center: true, gap: 1 }
+    Piece { kind, row, col: 0, width: COLS, right: false, center: true, gap: 1, height: 1, scroll: true }
 }
 
 impl Page {
@@ -425,6 +437,12 @@ impl Page {
                 if p.center {
                     v["center"] = json!(true);
                 }
+                if p.height > 1 {
+                    v["height"] = json!(p.height);
+                }
+                if !p.scroll {
+                    v["scroll"] = json!(false);
+                }
                 match &p.kind {
                     Kind::Text(t) => {
                         v["type"] = json!("text");
@@ -470,14 +488,19 @@ impl Page {
                     "clock" => Kind::Clock(p["twelve"].as_bool().unwrap_or(false)),
                     _ => return None,
                 };
+                let row = b(&p["row"])?.min(ROWS - 1);
+                // (only words take more than one row, and never past the screen's foot)
+                let height = if is_words(&kind) { b(&p["height"]).unwrap_or(1).clamp(1, ROWS - row) } else { 1 };
                 Some(Piece {
                     kind,
-                    row: b(&p["row"])?.min(ROWS - 1),
+                    row,
                     col: b(&p["col"])?.min(COLS - 1),
                     width: b(&p["width"])?.clamp(1, COLS),
                     right: p["right"].as_bool().unwrap_or(false),
                     center: p["center"].as_bool().unwrap_or(false),
                     gap: b(&p["gap"]).unwrap_or(1).min(1),
+                    height,
+                    scroll: p["scroll"].as_bool().unwrap_or(true),
                 })
             })
             .collect();
@@ -942,9 +965,28 @@ pub fn bar(share: f64, width: u8) -> String {
 /// cell to fill.
 pub fn least(p: &Piece, r: &Readings) -> u8 {
     match &p.kind {
+        // (words fit any width: they carry on, scroll or are cut off)
+        k if is_words(k) => 1,
         Kind::Bar(_) => 3,
         _ => show(p, r).map_or(1, |s| s.chars().count().clamp(1, COLS as usize) as u8),
     }
+}
+
+/// Whether a piece shows words, which carry on to the next row where a row ends, and
+/// scroll or are cut off when they don't fit, rather than run long: Text, and the
+/// readings that are words.
+pub fn is_words(kind: &Kind) -> bool {
+    match kind {
+        Kind::Text(_) => true,
+        Kind::Data(s, _) => s.is_words(),
+        _ => false,
+    }
+}
+
+/// What a piece says now, whole (its words, or its reading as it reads), or None when it
+/// can't be read.
+pub fn says(p: &Piece, r: &Readings) -> Option<String> {
+    show(p, r).ok()
 }
 
 /// What one piece shows; Err with what it reads from when that can't be had.
@@ -966,9 +1008,115 @@ fn show(p: &Piece, r: &Readings) -> Result<String, &'static str> {
     }
 }
 
-/// The page's four rows, with these readings.
+/// The page's four rows, with these readings, as the page comes in (words that scroll
+/// at their start).
 pub fn render(page: &Page, r: &Readings) -> Vec<String> {
-    lay_out(page, r).0
+    render_at(page, r, 0.0)
+}
+
+/// The page's four rows `t` seconds after it came in: words that scroll have moved on.
+pub fn render_at(page: &Page, r: &Readings, t: f64) -> Vec<String> {
+    lay_out(page, r, t).0
+}
+
+/// Whether the page has words that scroll now (more than fit their block, with Scroll
+/// chosen), so its rows change between readings.
+pub fn moving(page: &Page, r: &Readings) -> bool {
+    page.pieces.iter().filter(|p| is_words(&p.kind) && p.scroll).any(|p| {
+        show(p, r).is_ok_and(|s| if p.height <= 1 { s.chars().count() > p.width as usize } else { wrap(&s, p.width as usize).len() > p.height as usize })
+    })
+}
+
+/// Words set in a width: at its left, in its middle (any odd space after) or at its right.
+fn align(s: &str, w: usize, center: bool, right: bool) -> String {
+    if center {
+        format!("{s:^w$}")
+    } else if right {
+        format!("{s:>w$}")
+    } else {
+        format!("{s:<w$}")
+    }
+}
+
+/// Words carried on to the next row where a row of `w` cells ends: each row breaks at the
+/// last space that fits, and only a word longer than the whole width breaks at its edge.
+fn wrap(s: &str, w: usize) -> Vec<String> {
+    let w = w.max(1);
+    let mut lines = Vec::new();
+    let mut cur = String::new();
+    for word in s.split(' ') {
+        let mut word: Vec<char> = word.chars().collect();
+        while word.len() > w {
+            if !cur.is_empty() {
+                lines.push(std::mem::take(&mut cur));
+            }
+            lines.push(word.drain(..w).collect());
+        }
+        let word: String = word.into_iter().collect();
+        if cur.is_empty() {
+            cur = word;
+        } else if cur.chars().count() + 1 + word.chars().count() <= w {
+            cur.push(' ');
+            cur.push_str(&word);
+        } else {
+            lines.push(std::mem::replace(&mut cur, word));
+        }
+    }
+    if !cur.is_empty() {
+        lines.push(cur);
+    }
+    lines
+}
+
+/// Words longer than a row of `w` cells, `t` seconds in: still at their start for a moment,
+/// then moving left a cell at a time at a reading pace, three spaces before they start again.
+fn sideways(s: &str, w: usize, t: f64) -> String {
+    let (gap, hold, step) = (3usize, 1.2, 0.25);
+    let ch: Vec<char> = s.chars().collect();
+    let pass = ch.len() + gap;
+    let k = t.max(0.0) % (hold + pass as f64 * step);
+    let off = if k < hold { 0 } else { (((k - hold) / step) as usize).min(pass - 1) };
+    let tape: Vec<char> = ch.iter().copied().chain(std::iter::repeat_n(' ', gap)).chain(ch.iter().copied()).collect();
+    let shown: String = tape.iter().skip(off).take(w).collect();
+    format!("{shown:<w$}")
+}
+
+/// Rows of words too many for `h` rows, `t` seconds in: the first `h` for a moment, then
+/// moving up a row at a time, one blank row before they start again.
+fn rolled(lines: &[String], h: usize, t: f64) -> Vec<String> {
+    let (gap, hold, step) = (1usize, 3.0, 2.0);
+    let pass = lines.len() + gap;
+    let k = t.max(0.0) % (hold + pass as f64 * step);
+    let off = if k < hold { 0 } else { ((((k - hold) / step) as usize) + 1).min(pass) };
+    lines.iter().cloned().chain(std::iter::repeat_n(String::new(), gap)).chain(lines.iter().cloned()).skip(off).take(h).collect()
+}
+
+/// A piece of words in its own cells, `t` seconds in: a row of exactly its width for each
+/// of its rows. On one row, the words as aligned, or when longer, scrolled through it
+/// (Scroll) or cut at its end (Cut off); on more, carried on to the next row where a row
+/// ends, and when they still don't fit, moved up a row at a time (Scroll) or stopped
+/// after its last row (Cut off).
+fn word_rows(p: &Piece, s: &str, t: f64) -> Vec<String> {
+    let (w, h) = (p.width as usize, p.height.max(1) as usize);
+    if h == 1 {
+        let n = s.chars().count();
+        return vec![if n <= w {
+            align(s, w, p.center, p.right)
+        } else if p.scroll {
+            sideways(s, w, t)
+        } else {
+            s.chars().take(w).collect()
+        }];
+    }
+    let lines = wrap(s, w);
+    let shown = if lines.len() <= h {
+        lines
+    } else if p.scroll {
+        rolled(&lines, h, t)
+    } else {
+        lines[..h].to_vec()
+    };
+    (0..h).map(|k| align(shown.get(k).map_or("", |l| l.as_str()), w, p.center, p.right)).collect()
 }
 
 /// Whether the keyboard can draw a piece by itself, with no program on the computer to
@@ -1058,20 +1206,30 @@ impl Gaps {
 /// Where each piece lands, in the page's order: its row, the cell it starts
 /// at and how many it takes (a long reading runs past its width and pushes
 /// the rest of its row along). A row said to be unavailable keeps its
-/// pieces where they were put.
+/// pieces where they were put, as words always are.
 pub fn spans(page: &Page, r: &Readings) -> Vec<(u8, usize, usize)> {
-    lay_out(page, r).1
+    lay_out(page, r, 0.0).1
 }
 
-fn lay_out(page: &Page, r: &Readings) -> (Vec<String>, Vec<(u8, usize, usize)>) {
+/// The rows, and where each piece lands, `t` seconds in. A row holds its one-row pieces,
+/// left to right, a reading that runs long pushing the ones after it along; and the rows
+/// of any taller piece of words passing through it, which keeps its cells (a reading
+/// pushed up to one stops at its edge).
+fn lay_out(page: &Page, r: &Readings, t: f64) -> (Vec<String>, Vec<(u8, usize, usize)>) {
     let mut said: Vec<&'static str> = Vec::new();
     let mut spans: Vec<(u8, usize, usize)> = page.pieces.iter().map(|p| (p.row, p.col as usize, p.width as usize)).collect();
+    let tall = |p: &Piece| is_words(&p.kind) && p.height > 1;
+    // the taller pieces' own rows, or what they read from when they can't be read
+    let walls: Vec<(&Piece, Result<Vec<String>, &'static str>)> = page.pieces.iter().filter(|p| tall(p)).map(|p| (p, show(p, r).map(|s| word_rows(p, &s, t)))).collect();
     let rows = (0..ROWS)
         .map(|row| {
-            let mut pieces: Vec<(usize, &Piece)> = page.pieces.iter().enumerate().filter(|(_, p)| p.row == row).collect();
+            let mut pieces: Vec<(usize, &Piece)> = page.pieces.iter().enumerate().filter(|(_, p)| p.row == row && !tall(p)).collect();
             pieces.sort_by_key(|(_, p)| p.col);
+            let through: Vec<&(&Piece, Result<Vec<String>, &'static str>)> = walls.iter().filter(|(p, _)| p.row <= row && row < p.row + p.height).collect();
             let shown: Vec<Result<String, &'static str>> = pieces.iter().map(|(_, p)| show(p, r)).collect();
-            let failed: Vec<&'static str> = shown.iter().filter_map(|s| s.as_ref().err().copied()).collect();
+            // (a taller piece that can't be read says so on its top row)
+            let failed: Vec<&'static str> = shown.iter().filter_map(|s| s.as_ref().err().copied()).chain(through.iter().filter(|(p, _)| p.row == row).filter_map(|(_, w)| w.as_ref().err().copied())).collect();
+            let mut out = String::new();
             if !failed.is_empty() {
                 let new = failed.iter().any(|f| !said.contains(f));
                 for f in &failed {
@@ -1079,39 +1237,58 @@ fn lay_out(page: &Page, r: &Readings) -> (Vec<String>, Vec<(u8, usize, usize)>) 
                         said.push(f);
                     }
                 }
-                if !new {
-                    return String::new();
+                if new {
+                    // the row's own first words, or what it read
+                    let label = pieces.iter().find_map(|(_, p)| match &p.kind {
+                        Kind::Text(t) if !t.trim().is_empty() => Some(ectotype_core::lcd::lcd_text(t.trim())),
+                        _ => None,
+                    });
+                    let label = label.unwrap_or_else(|| {
+                        pieces
+                            .iter()
+                            .map(|(_, p)| *p)
+                            .chain(through.iter().filter(|(p, w)| p.row == row && w.is_err()).map(|(p, _)| *p))
+                            .find_map(|p| match &p.kind {
+                                Kind::Data(s, _) | Kind::Bar(s) => Some(s.short().to_string()),
+                                _ => None,
+                            })
+                            .unwrap_or_default()
+                    });
+                    out = format!("{label} unavailable");
                 }
-                // the row's own first words, or what it read
-                let label = pieces.iter().find_map(|(_, p)| match &p.kind {
-                    Kind::Text(t) if !t.trim().is_empty() => Some(ectotype_core::lcd::lcd_text(t.trim())),
-                    _ => None,
-                });
-                let label = label.unwrap_or_else(|| {
-                    pieces
-                        .iter()
-                        .find_map(|(_, p)| match &p.kind {
-                            Kind::Data(s, _) | Kind::Bar(s) => Some(s.short().to_string()),
-                            _ => None,
-                        })
-                        .unwrap_or_default()
-                });
-                return format!("{label} unavailable");
+            } else {
+                let mut cursor = 0usize;
+                for (k, ((i, p), s)) in pieces.iter().zip(&shown).enumerate() {
+                    let s = s.as_ref().unwrap();
+                    let (c, w) = (p.col as usize, p.width as usize);
+                    let text = if is_words(&p.kind) { word_rows(p, s, t).swap_remove(0) } else { align(s, w, p.center, p.right) };
+                    let start = if k == 0 { c } else { c.max(cursor + p.gap as usize) };
+                    // (the taller piece to its right, which it stops at)
+                    let limit = through.iter().map(|(q, _)| q.col as usize).filter(|&a| a >= c).min().unwrap_or(usize::MAX);
+                    if start >= limit {
+                        continue;
+                    }
+                    let text: String = text.chars().take(limit - start).collect();
+                    out.push_str(&" ".repeat(start.saturating_sub(cursor)));
+                    let len = text.chars().count();
+                    spans[*i] = (row, start, len);
+                    cursor = start + len;
+                    out.push_str(&text);
+                }
             }
-            let mut out = String::new();
-            let mut cursor = 0usize;
-            for (k, ((i, p), s)) in pieces.iter().zip(&shown).enumerate() {
-                let s = s.as_ref().unwrap();
-                let w = p.width as usize;
-                let start = if k == 0 { p.col as usize } else { (p.col as usize).max(cursor + p.gap as usize) };
-                out.push_str(&" ".repeat(start.saturating_sub(cursor)));
-                let text = if p.center { format!("{s:^w$}") } else if p.right { format!("{s:>w$}") } else { format!("{s:<w$}") };
-                let len = text.chars().count();
-                spans[*i] = (row, start, len);
-                cursor = start + len;
-                out.push_str(&text);
+            // the taller pieces' rows, over the cells they keep
+            let mut cells: Vec<char> = out.chars().collect();
+            for (p, w) in &through {
+                if let Ok(rows) = w {
+                    let a = p.col as usize;
+                    let line: Vec<char> = rows[(row - p.row) as usize].chars().collect();
+                    if cells.len() < a + line.len() {
+                        cells.resize(a + line.len(), ' ');
+                    }
+                    cells[a..a + line.len()].copy_from_slice(&line);
+                }
             }
-            out.trim_end().to_string()
+            cells.into_iter().collect::<String>().trim_end().to_string()
         })
         .collect();
     (rows, spans)
@@ -1169,6 +1346,63 @@ pub fn available(r: &Readings, weather: bool) -> Vec<Source> {
 mod tests {
 
     #[test]
+    fn words_carry_on_to_the_next_row_and_scroll_or_stop_when_they_still_dont_fit() {
+        let r = readings();
+        let raid = "Raid at 9 tonight. Bring potions and the good snacks.";
+        let block = |row: u8, height: u8, scroll: bool| Page { pieces: vec![Piece { height, scroll, ..words(row, 0, raid) }], ..Page::blank() };
+        let w20 = |mut p: Page| {
+            p.pieces[0].width = 20;
+            p
+        };
+        // a row breaks at the last space that fits; three rows hold all of these words
+        assert_eq!(render(&w20(block(1, 3, true)), &r), ["", "Raid at 9 tonight.", "Bring potions and", "the good snacks."]);
+        assert!(!moving(&w20(block(1, 3, true)), &r), "words that fit stay still");
+        // two rows, Scroll: the first two rows for three seconds, then up a row every two
+        let two = w20(block(1, 2, true));
+        assert!(moving(&two, &r));
+        assert_eq!(render_at(&two, &r, 2.9)[1..3], ["Raid at 9 tonight.", "Bring potions and"]);
+        assert_eq!(render_at(&two, &r, 3.5)[1..3], ["Bring potions and", "the good snacks."]);
+        assert_eq!(render_at(&two, &r, 5.5)[1..3], ["the good snacks.", ""]);
+        assert_eq!(render_at(&two, &r, 7.5)[1..3], ["", "Raid at 9 tonight."]);
+        // and round again, back where they started
+        assert_eq!(render_at(&two, &r, 11.0 + 1.0)[1..3], ["Raid at 9 tonight.", "Bring potions and"]);
+        // two rows, Cut off: the words stop after the last row
+        assert_eq!(render_at(&w20(block(1, 2, false)), &r, 30.0)[1..3], ["Raid at 9 tonight.", "Bring potions and"]);
+        // one row, Scroll: still for a moment, then a cell to the left every quarter second
+        let one = w20(block(0, 1, true));
+        assert_eq!(render_at(&one, &r, 1.0)[0], "Raid at 9 tonight. B");
+        assert_eq!(render_at(&one, &r, 1.2 + 0.25 * 5.0 + 0.01)[0], "at 9 tonight. Bring");
+        // one row, Cut off: up to the block's end
+        assert_eq!(render_at(&w20(block(0, 1, false)), &r, 9.0)[0], "Raid at 9 tonight. B");
+        // a word longer than the whole block breaks at its edge
+        let mut long = Page { pieces: vec![Piece { height: 2, ..words(0, 0, "Supercalifragilistic") }], ..Page::blank() };
+        long.pieces[0].width = 8;
+        assert_eq!(render(&long, &r)[..2], ["Supercal", "ifragili"]);
+    }
+
+    #[test]
+    fn a_taller_block_keeps_its_cells_and_a_long_reading_stops_at_its_edge() {
+        let mut r = readings();
+        r.cpu_temp = Some(105.0);
+        // the temperature, three cells for four characters, before a two-row block of words
+        let mut p = Page { pieces: vec![reading(0, 0, 3, Source::CpuTemp, 1), Piece { height: 2, ..words(0, 3, "AB CD") }], ..Page::blank() };
+        p.pieces[1].width = 2;
+        let rows = render(&p, &r);
+        assert_eq!(&rows[0], "105AB", "the reading stops where the taller block begins");
+        assert_eq!(&rows[1], "   CD");
+        assert_eq!(spans(&p, &r)[1], (0, 3, 2), "the taller block holds its place");
+        // kept and read back with its rows and its choice for words that don't fit
+        let mut q = p.clone();
+        q.pieces[1].scroll = false;
+        let back = Page::from_json(&q.to_json()).unwrap();
+        assert_eq!((back.pieces[1].height, back.pieces[1].scroll), (2, false));
+        // a reading is never more than one row
+        let mut v = q.to_json();
+        v["pieces"][0]["height"] = json!(3);
+        assert_eq!(Page::from_json(&v).unwrap().pieces[0].height, 1);
+    }
+
+    #[test]
     fn the_keyboard_draws_what_it_can_and_leaves_the_rest_blank() {
         let r = readings();
         // Stats: its words stay, its readings go
@@ -1183,13 +1417,13 @@ mod tests {
         // the weather, and a bar: named as what they are
         assert_eq!(Gaps::of(&Page::weather()).line().unwrap(), "Weather readings need Ectodeck, so the keyboard leaves them blank.");
         let mut barred = Page::blank();
-        barred.pieces.push(Piece { kind: Kind::Bar(Source::CpuLoad), row: 0, col: 0, width: 10, right: false, center: false, gap: 1 });
+        barred.pieces.push(Piece { kind: Kind::Bar(Source::CpuLoad), row: 0, col: 0, width: 10, right: false, center: false, gap: 1, height: 1, scroll: true });
         assert_eq!(Gaps::of(&barred).line().unwrap(), "Bars need Ectodeck, so the keyboard leaves them blank.");
         assert_eq!(Gaps::of(&barred).tag(), "Bars stay blank");
         // what the keyboard knows of itself: until it can say them, its mode and rollover as it starts up
         let mut own = Page::blank();
-        own.pieces.push(Piece { kind: Kind::Data(Source::GameMode, false), row: 0, col: 0, width: 9, right: false, center: false, gap: 1 });
-        own.pieces.push(Piece { kind: Kind::Data(Source::KeyRollover, false), row: 1, col: 0, width: 5, right: false, center: false, gap: 1 });
+        own.pieces.push(Piece { kind: Kind::Data(Source::GameMode, false), row: 0, col: 0, width: 9, right: false, center: false, gap: 1, height: 1, scroll: true });
+        own.pieces.push(Piece { kind: Kind::Data(Source::KeyRollover, false), row: 1, col: 0, width: 5, right: false, center: false, gap: 1, height: 1, scroll: true });
         assert_eq!(render_onboard(&own, &r)[..2], ["PC MODE", "6 KEY"]);
     }
 
@@ -1338,12 +1572,12 @@ mod tests {
             secs: SECS.2,
             comes_in: Transition::Wipe,
             pieces: vec![
-                Piece { kind: Kind::Clock(false), row: 0, col: 0, width: 5, right: false, center: false, gap: 1 },
-                Piece { kind: Kind::Data(Source::Date, false), row: 0, col: 9, width: 11, right: true, center: false, gap: 1 },
-                Piece { kind: Kind::Bar(Source::CpuLoad), row: 1, col: 0, width: 12, right: false, center: false, gap: 1 },
-                Piece { kind: Kind::Data(Source::CpuTemp, true), row: 2, col: 0, width: 4, right: false, center: false, gap: 1 },
-                Piece { kind: Kind::Clock(true), row: 3, col: 0, width: 8, right: false, center: false, gap: 1 },
-                Piece { kind: Kind::Data(Source::Profile, false), row: 3, col: 10, width: 10, right: true, center: false, gap: 1 },
+                Piece { kind: Kind::Clock(false), row: 0, col: 0, width: 5, right: false, center: false, gap: 1, height: 1, scroll: true },
+                Piece { kind: Kind::Data(Source::Date, false), row: 0, col: 9, width: 11, right: true, center: false, gap: 1, height: 1, scroll: true },
+                Piece { kind: Kind::Bar(Source::CpuLoad), row: 1, col: 0, width: 12, right: false, center: false, gap: 1, height: 1, scroll: true },
+                Piece { kind: Kind::Data(Source::CpuTemp, true), row: 2, col: 0, width: 4, right: false, center: false, gap: 1, height: 1, scroll: true },
+                Piece { kind: Kind::Clock(true), row: 3, col: 0, width: 8, right: false, center: false, gap: 1, height: 1, scroll: true },
+                Piece { kind: Kind::Data(Source::Profile, false), row: 3, col: 10, width: 10, right: true, center: false, gap: 1, height: 1, scroll: true },
             ],
         };
         let rows = render(&p, &r);

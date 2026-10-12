@@ -34,7 +34,8 @@ pub enum Ask {
     ConfirmNo,
     Chosen(i32),
     Moved(i32, i32, i32),
-    Sized(i32, i32, i32, i32, i32),
+    /// a block's corner let go: the block, its width and its rows
+    Sized(i32, i32, i32),
     Remove,
     ChipAdd(i32),
     ChipCarry(i32, f32, f32),
@@ -78,6 +79,8 @@ pub struct Cx<'a> {
     pub avail: &'a [Source],
     /// the profile's default backlight: brightness, red, green, blue
     pub light: [u8; 4],
+    /// seconds since the layout open came up, which its scrolling words are timed from
+    pub t: f64,
 }
 
 /// What came of the window's asks.
@@ -144,7 +147,7 @@ impl LayoutPage {
         on!(on_confirm_no, Ask::ConfirmNo);
         on!(on_block_chosen, |i| Ask::Chosen(i));
         on!(on_block_moved, |i, r, c| Ask::Moved(i, r, c));
-        on!(on_block_sized, |i, r, c, w, h| Ask::Sized(i, r, c, w, h));
+        on!(on_block_sized, |i, w, h| Ask::Sized(i, w, h));
         on!(on_block_remove, Ask::Remove);
         on!(on_chip_add, |k| Ask::ChipAdd(k));
         on!(on_chip_carry, |k, x, y| Ask::ChipCarry(k, x, y));
@@ -278,12 +281,12 @@ impl LayoutPage {
                     // the drag let go, even where the layout keeps the block as it was
                     self.ui.set_settled(self.ui.get_settled().wrapping_add(1));
                 }
-                Ask::Sized(i, _r, c, w, _h) => {
+                Ask::Sized(i, w, h) => {
                     if let Some(ed) = cx.editor.as_ref() {
                         if let Some(p) = cx.screens.library.get_mut(ed.page) {
                             let i = i.max(0) as usize;
                             let least = p.pieces.get(i).map_or(1, |q| crate::lcd_page::least(q, cx.readings));
-                            screen_edit::size_to(p, i, c, w, least);
+                            screen_edit::size_to(p, i, w, h, least);
                             out.edited = true;
                         }
                     }
@@ -361,7 +364,7 @@ impl LayoutPage {
                     let c = ctl(id);
                     match c {
                         Ctl::ScrSource => self.open_shows(cx, (x, y, h)),
-                        Ctl::ScrAlign | Ctl::ScrUnits | Ctl::ScrHours => {
+                        Ctl::ScrAlign | Ctl::ScrUnits | Ctl::ScrHours | Ctl::ScrFit => {
                             if let Some(ed) = cx.editor.as_mut() {
                                 if let Some(p) = cx.screens.library.get_mut(ed.page) {
                                     screen_edit::act(p, ed, c, index.max(0) as usize, None);
@@ -477,9 +480,9 @@ impl LayoutPage {
         let page = LayoutPage::page(cx)?;
         let first = cx.avail.first().copied().unwrap_or(Source::CpuTemp);
         let (k, width, right) = screen_edit::new_block(kind, first);
-        let least = crate::lcd_page::least(&crate::lcd_page::Piece { kind: k, row: 0, col: 0, width, right, center: false, gap: 1 }, cx.readings);
+        let least = crate::lcd_page::least(&crate::lcd_page::Piece { kind: k, row: 0, col: 0, width, right, center: false, gap: 1, height: 1, scroll: true }, cx.readings).max(screen_edit::NEW_LEAST).min(width);
         let (row, col) = (((y - sy) / ch).floor().clamp(0.0, 3.0) as u8, ((x - sx) / cw).floor().clamp(0.0, 19.0) as u8);
-        screen_edit::fit(page, row, col, width, least, None)
+        screen_edit::fit(page, row, col, width, 1, least, None)
     }
 
     fn close_menu(&mut self) {
@@ -698,10 +701,10 @@ impl LayoutPage {
         if let Some((kind, Some((r, c, width)))) = self.carry {
             let first = cx.avail.first().copied().unwrap_or(Source::CpuTemp);
             let (k, _, right) = screen_edit::new_block(kind, first);
-            shown.pieces.push(crate::lcd_page::Piece { kind: k, row: r, col: c, width, right, center: false, gap: 1 });
+            shown.pieces.push(crate::lcd_page::Piece { kind: k, row: r, col: c, width, right, center: false, gap: 1, height: 1, scroll: true });
         }
         // each block outlined where it lands (a reading that runs long pushes the rest of
-        // its row along), with the free run its ends can reach
+        // its row along), with how far its corner can reach at each height it can have
         let spans = crate::lcd_page::spans(&shown, cx.readings);
         let outline = |(row, start, len): (u8, usize, usize)| {
             let col = start.min(COLS as usize - 1);
@@ -714,10 +717,21 @@ impl LayoutPage {
             .enumerate()
             .map(|(i, (p, sp))| {
                 let (row, col, width) = outline(sp);
-                let (lo, hi) = screen_edit::free_run(page, i).unwrap_or((p.col, p.col + p.width));
-                let (lo, hi) = (lo.min(col as u8), hi.max((col + width) as u8));
-                let least = (crate::lcd_page::least(p, cx.readings) as usize).min(width) as i32;
-                EdBlock { row: row as i32, col: col as i32, width: width as i32, height: 1, on: ed.chosen == Some(i), fx: false, lo: lo as i32, hi: hi as i32, least }
+                let least = crate::lcd_page::least(p, cx.readings);
+                // (the corner never pulls a block in past where it lands)
+                let ends: Vec<i32> = screen_edit::room(page, i, least).iter().map_while(|e| *e).map(|e| (e as i32).max((col + width) as i32)).collect();
+                let least = (least as usize).min(width) as i32;
+                EdBlock {
+                    row: row as i32,
+                    col: col as i32,
+                    width: width as i32,
+                    height: p.height.max(1) as i32,
+                    on: ed.chosen == Some(i),
+                    fx: false,
+                    tall: crate::lcd_page::is_words(&p.kind),
+                    least,
+                    ends: ModelRc::new(VecModel::from(ends)),
+                }
             })
             .collect();
         crate::front::set_rows(&self.blocks, blocks);
@@ -726,7 +740,7 @@ impl LayoutPage {
             Some((kind, Some(_))) => {
                 let (row, col, width) = outline(spans.last().copied().unwrap_or_default());
                 self.ui.set_ghost_on(true);
-                self.ui.set_ghost(EdBlock { row: row as i32, col: col as i32, width: width as i32, height: 1, on: false, fx: false, lo: 0, hi: 20, least: 1 });
+                self.ui.set_ghost(EdBlock { row: row as i32, col: col as i32, width: width as i32, height: 1, on: false, fx: false, tall: false, least: 1, ends: ModelRc::default() });
                 self.ui.set_lit_chip(kind as i32);
             }
             Some((kind, None)) => {
@@ -738,7 +752,7 @@ impl LayoutPage {
                 self.ui.set_lit_chip(-1);
             }
         }
-        let rows = crate::lcd_page::render(&shown, cx.readings);
+        let rows = crate::lcd_page::render_at(&shown, cx.readings, cx.t);
         self.draw(&rows, page.light.unwrap_or(default), cx.light[0]);
         // the box of the block selected
         let rig_w = self.ui.get_window_width() - 290.0 - 36.0;
@@ -748,8 +762,8 @@ impl LayoutPage {
         self.ui.set_box_title(b.title.into());
         self.ui.set_box_h(b.h);
         self.ui.set_has_blocks(!page.pieces.is_empty());
-        // (three free cells in a row, the least a block takes: a bar's ends and a cell to fill)
-        self.ui.set_bar_hint(if screen_edit::has_room(page, 3) { "Drag a block onto the screen." } else { "No room for another block. Narrow a block or remove one." }.into());
+        // (room for the least a new block starts in)
+        self.ui.set_bar_hint(if screen_edit::has_room(page, screen_edit::NEW_LEAST) { "Drag a block onto the screen." } else { "No room for another block. Narrow a block or remove one." }.into());
         crate::front::set_rows(&self.cells, b.cells);
     }
 

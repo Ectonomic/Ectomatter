@@ -6269,9 +6269,10 @@ export struct LayoutRow {
 }
 
 // A block on the editor's screen: its first cell and its size in cells, whether
-// selected, whether an effect; the free run its ends can reach in its row (the first
-// column, and the column after the last), so a handle stops at its neighbors; and the
-// fewest cells it shows its whole self in, so a handle stops there too.
+// selected, whether an effect; whether it shows words, which can take more rows; the
+// fewest cells it shows its whole self in; and how far its corner can reach, as the
+// column after its last free cell for each height it can have from one row on (so the
+// corner stops at its neighbors, the screen's edges and its least).
 export struct EdBlock {
     row: int,
     col: int,
@@ -6279,9 +6280,9 @@ export struct EdBlock {
     height: int,
     on: bool,
     fx: bool,
-    lo: int,
-    hi: int,
+    tall: bool,
     least: int,
+    ends: [int],
 }
 
 // A kind of block's glyph, 12 across: 0 Text, 1 Data, 2 Bar, 3 Effect.
@@ -6559,7 +6560,7 @@ export component LayoutWindow inherits Window {
     callback confirm-no();
     callback block-chosen(int);
     callback block-moved(int, int, int);
-    callback block-sized(int, int, int, int, int);
+    callback block-sized(int, int, int);
     callback block-remove();
     callback chip-add(int);
     callback chip-carry(int, length, length);
@@ -7093,53 +7094,58 @@ export component LayoutWindow inherits Window {
                         border-color: #ffffffb0;
                         background: root.field.with-alpha(0.5);
                     }
-                    // each block outlined; the one selected in amber, a handle on each end
-                    // and its × on its corner. Dragged, a block follows the pointer cell by
-                    // cell; a handle dragged takes its end along, as far as the free run
-                    // (and the screen) let it
+                    // each block outlined; the one selected in amber, with a corner glyph on its
+                    // bottom right corner to size it and a ring × on its top right corner to
+                    // remove it, both centered on the outline's line. Dragged, a block follows
+                    // the pointer cell by cell; its corner dragged takes the block wider or
+                    // narrower (and words taller or shorter), as far as the free cells and the
+                    // screen let it
                     for b[i] in root.blocks: blk := Rectangle {
                         property <length> cw: parent.width / 20;
                         property <length> ch: parent.height / 4;
-                        // a move: how many cells across and down; a handle: how far each end
+                        // a move: how many cells across and down; the corner: how many cells
+                        // wider and rows taller
                         property <int> dc: 0;
                         property <int> dr: 0;
-                        property <int> dl: 0;
                         property <int> dw: 0;
+                        property <int> dh: 0;
                         property <bool> sizing: false;
                         // carried by the pointer (past a few pixels from where it was pressed)
                         property <bool> moving: false;
                         property <int> at-col: max(0, min(20 - b.width, b.col + dc));
                         property <int> at-row: max(0, min(4 - b.height, b.row + dr));
-                        // (the left end moves, the right stays; within the free run, and no
-                        // narrower than the block's words or reading)
-                        property <int> l-col: max(b.lo, min(b.col + b.width - max(1, b.least), b.col + dl));
-                        property <int> r-end: max(l-col + max(1, b.least), min(b.hi, b.col + b.width + dw));
-                        property <int> show-col: sizing ? l-col : at-col;
-                        property <int> show-w: sizing ? r-end - l-col : b.width;
-                        property <int> home: b.row * 10000 + b.col * 100 + b.width;
+                        // (the corner: as tall as asked within the rows the block can have, then
+                        // as wide as that height's free cells let it, and no narrower than its
+                        // reading)
+                        property <int> s-h: max(1, min(b.ends.length, b.height + dh));
+                        property <int> s-end: max(b.col + max(1, b.least), min(b.ends[s-h - 1], b.col + b.width + dw));
+                        property <int> show-w: sizing ? s-end - b.col : b.width;
+                        property <int> show-h: sizing ? s-h : b.height;
+                        property <int> home: b.row * 10000 + b.col * 100 + b.width * 4 + b.height;
                         property <int> settled: root.settled;
                         changed home => { self.rest(); }
                         changed settled => { self.rest(); }
                         function rest() {
                             self.dc = 0;
                             self.dr = 0;
-                            self.dl = 0;
                             self.dw = 0;
+                            self.dh = 0;
                             self.sizing = false;
                             self.moving = false;
                         }
-                        // an end let go: the block's new cells, or, back where it started, as it was
+                        // the corner let go: the block's new size, or, back where it started, as it was
                         function let-go() {
-                            if (self.l-col != b.col || self.r-end != b.col + b.width) {
-                                root.block-sized(i, b.row, self.l-col, self.r-end - self.l-col, b.height);
+                            if (self.show-w != b.width || self.show-h != b.height) {
+                                root.block-sized(i, self.show-w, self.show-h);
                             } else {
                                 self.rest();
                             }
                         }
-                        x: show-col * cw;
+                        // (sizing never moves the block's first cell)
+                        x: at-col * cw;
                         y: at-row * ch;
                         width: show-w * cw;
-                        height: b.height * ch;
+                        height: show-h * ch;
                         z: b.on ? 2 : b.fx ? 0 : 1;
                         // (the outline a pixel in from the block's cells, as the grid's lines are between them)
                         Rectangle {
@@ -7183,36 +7189,44 @@ export component LayoutWindow inherits Window {
                                 }
                             }
                         }
-                        // the handles, on the selected block's ends: an amber pill ringed in the
-                        // screen's background, over the outline's end (with room round it to press)
+                        // the corner glyph: an L of twice the outline's weight on the outline's own
+                        // line round the bottom right corner (the line's middle is 2 px in from the
+                        // block's edge), drawn as two bars so it lands on the line's own pixels:
+                        // square where they meet, rounded at their far ends. With room round it to
+                        // press
                         if b.on: Rectangle {
-                            x: -1px - 2px - 4px;
-                            y: (parent.height - 14px) / 2 - 2px - 4px;
-                            width: 18px;
-                            height: 26px;
+                            x: parent.width - 2px - 12px;
+                            y: parent.height - 2px - 12px;
+                            width: 24px;
+                            height: 24px;
+                            property <color> ink: corner-ta.has-hover || corner-ta.pressed ? #f7c47a : Ink.warn;
+                            // (the corner's middle, at 12 in the box, on the line's middle)
                             Rectangle {
-                                x: 4px;
-                                y: 4px;
-                                width: 10px;
-                                height: 18px;
-                                border-radius: 5px;
-                                background: root.field;
-                                Rectangle {
-                                    x: 2px;
-                                    y: 2px;
-                                    width: 6px;
-                                    height: 14px;
-                                    border-radius: 3px;
-                                    background: Ink.warn;
-                                }
+                                x: 12px - 14px;
+                                y: 12px - 2px;
+                                width: 16px;
+                                height: 4px;
+                                border-top-left-radius: 2px;
+                                border-bottom-left-radius: 2px;
+                                background: parent.ink;
                             }
-                            // (the handle moves with its end, so how far it has moved already is
+                            Rectangle {
+                                x: 12px - 2px;
+                                y: 12px - 14px;
+                                width: 4px;
+                                height: 16px;
+                                border-top-left-radius: 2px;
+                                border-top-right-radius: 2px;
+                                background: parent.ink;
+                            }
+                            // (the corner moves with the size, so how far it has moved already is
                             // added back, as for the block itself)
-                            TouchArea {
-                                mouse-cursor: MouseCursor.ew-resize;
+                            corner-ta := TouchArea {
+                                mouse-cursor: b.tall ? MouseCursor.nwse-resize : MouseCursor.ew-resize;
                                 moved => {
                                     blk.sizing = true;
-                                    blk.dl = round((self.mouse-x - self.pressed-x + (blk.l-col - b.col) * blk.cw) / blk.cw);
+                                    blk.dw = round((self.mouse-x - self.pressed-x + (blk.show-w - b.width) * blk.cw) / blk.cw);
+                                    blk.dh = round((self.mouse-y - self.pressed-y + (blk.show-h - b.height) * blk.ch) / blk.ch);
                                 }
                                 pointer-event(e) => {
                                     if (e.kind == PointerEventKind.up && blk.sizing) {
@@ -7221,71 +7235,33 @@ export component LayoutWindow inherits Window {
                                 }
                             }
                         }
-                        if b.on: Rectangle {
-                            x: parent.width - 5px - 2px - 4px;
-                            y: (parent.height - 14px) / 2 - 2px - 4px;
-                            width: 18px;
-                            height: 26px;
-                            Rectangle {
-                                x: 4px;
-                                y: 4px;
-                                width: 10px;
-                                height: 18px;
-                                border-radius: 5px;
-                                background: root.field;
-                                Rectangle {
-                                    x: 2px;
-                                    y: 2px;
-                                    width: 6px;
-                                    height: 14px;
-                                    border-radius: 3px;
-                                    background: Ink.warn;
-                                }
-                            }
-                            TouchArea {
-                                mouse-cursor: MouseCursor.ew-resize;
-                                moved => {
-                                    blk.sizing = true;
-                                    blk.dw = round((self.mouse-x - self.pressed-x + (blk.r-end - b.col - b.width) * blk.cw) / blk.cw);
-                                }
-                                pointer-event(e) => {
-                                    if (e.kind == PointerEventKind.up && blk.sizing) {
-                                        blk.let-go();
-                                    }
-                                }
-                            }
-                        }
-                        // its ×, on the corner (it steps aside while an end is dragged)
+                        // its ×: a ring of the outline's weight round the screen's dark, centered on
+                        // the outline's top right corner and filled with amber under the pointer (it
+                        // steps aside while the corner is dragged)
                         if b.on && !blk.sizing: Rectangle {
-                            x: parent.width - 8px - 2px - 2px;
-                            y: -8px - 2px - 2px;
+                            x: parent.width - 2px - 12px;
+                            y: 2px - 12px;
                             width: 24px;
                             height: 24px;
                             Rectangle {
-                                x: 2px;
-                                y: 2px;
-                                width: 20px;
-                                height: 20px;
-                                border-radius: 10px;
-                                background: root.field;
-                                Rectangle {
-                                    x: 2px;
-                                    y: 2px;
-                                    width: 16px;
-                                    height: 16px;
-                                    border-radius: 8px;
-                                    background: x-ta.has-hover ? #f7c47a : Ink.warn;
-                                    Path {
-                                        width: 8px;
-                                        height: 8px;
-                                        viewbox-width: 10;
-                                        viewbox-height: 10;
-                                        commands: "M2 2l6 6M8 2L2 8";
-                                        fill: transparent;
-                                        stroke: #18181b;
-                                        stroke-width: 1.8px;
-                                        stroke-line-cap: round;
-                                    }
+                                x: 4px;
+                                y: 4px;
+                                width: 16px;
+                                height: 16px;
+                                border-radius: 8px;
+                                background: x-ta.has-hover ? Ink.warn : root.field;
+                                border-width: 2px;
+                                border-color: Ink.warn;
+                                Path {
+                                    width: 7px;
+                                    height: 7px;
+                                    viewbox-width: 10;
+                                    viewbox-height: 10;
+                                    commands: "M1.5 1.5l7 7M8.5 1.5l-7 7";
+                                    fill: transparent;
+                                    stroke: x-ta.has-hover ? #18181b : Ink.warn;
+                                    stroke-width: 1.6px;
+                                    stroke-line-cap: round;
                                 }
                             }
                             x-ta := TouchArea {

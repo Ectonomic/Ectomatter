@@ -474,6 +474,9 @@ pub struct Front {
     /// the screen layout editor's window is open (with a layout open in it, or
     /// none, once every layout is deleted)
     layouts_shown: bool,
+    /// the layout open in the editor, and when it came up: its scrolling words are timed
+    /// from then, in the editor's picture and the Screen tab's
+    edit_clock: Option<(String, Instant)>,
     /// the profile whose playlist the player was last given: the one the page shows
     played_by: u8,
     /// the strip: each turn, a screen being carried to it, a turn's end
@@ -695,6 +698,7 @@ impl Front {
             pages_changed: None,
             edit_from: 0,
             layouts_shown: false,
+            edit_clock: None,
             played_by: 0,
             blocks: Rc::new(VecModel::default()),
             carry: None,
@@ -1154,6 +1158,11 @@ impl Front {
                         if self.editor.is_some() {
                             self.refresh_editor();
                         }
+                        self.draw_screen();
+                    } else if self.edit_moving() {
+                        // words scrolling in the layout being edited: its pictures move on
+                        // between readings (drawn again only when a row has changed)
+                        self.refresh_editor();
                         self.draw_screen();
                     }
                     continue;
@@ -3617,8 +3626,9 @@ impl Front {
         }
         let avail = crate::lcd_page::available(&self.readings, self.weather.report().is_some());
         let light = self.layouts_light();
+        let t = self.edit_t();
         let Some(l) = &mut self.layouts else { return Vec::new() };
-        let mut cx = crate::layout_page::Cx { screens: &mut self.screens, editor: &mut self.editor, readings: &self.readings, avail: &avail, light };
+        let mut cx = crate::layout_page::Cx { screens: &mut self.screens, editor: &mut self.editor, readings: &self.readings, avail: &avail, light, t };
         let out = l.act(&mut cx);
         l.show(&cx);
         if out.closed {
@@ -3649,9 +3659,29 @@ impl Front {
         }
         let avail = crate::lcd_page::available(&self.readings, self.weather.report().is_some());
         let light = self.layouts_light();
+        let t = self.edit_t();
         let Some(l) = &mut self.layouts else { return };
-        let cx = crate::layout_page::Cx { screens: &mut self.screens, editor: &mut self.editor, readings: &self.readings, avail: &avail, light };
+        let cx = crate::layout_page::Cx { screens: &mut self.screens, editor: &mut self.editor, readings: &self.readings, avail: &avail, light, t };
         l.show(&cx);
+    }
+
+    /// Seconds since the layout open in the editor came up (another layout opened starts
+    /// the count again), which its scrolling words are timed from.
+    fn edit_t(&mut self) -> f64 {
+        let Some(id) = self.editor.as_ref().and_then(|ed| self.screens.library.get(ed.page)).map(|p| p.id.clone()) else {
+            self.edit_clock = None;
+            return 0.0;
+        };
+        if self.edit_clock.as_ref().is_none_or(|(open, _)| *open != id) {
+            self.edit_clock = Some((id, Instant::now()));
+        }
+        self.edit_clock.as_ref().map_or(0.0, |(_, since)| since.elapsed().as_secs_f64())
+    }
+
+    /// Whether the layout open in the editor has words scrolling now, so its pictures
+    /// change between readings.
+    fn edit_moving(&self) -> bool {
+        self.editor.as_ref().and_then(|ed| self.screens.library.get(ed.page)).is_some_and(|p| crate::lcd_page::moving(p, &self.readings))
     }
 
     /// The default backlight of the profile shown, for the editor's window: its
@@ -3846,8 +3876,9 @@ impl Front {
         let sc = self.scale.max(1.0);
         let px = |w: f32| (w * sc).round() as u32;
         // editing: the page as edited, read here; otherwise what the keyboard shows
+        let t = self.edit_t();
         let rows = match self.editor.as_ref().and_then(|ed| self.screens.library.get(ed.page)) {
-            Some(p) => crate::lcd_page::render(p, &self.readings),
+            Some(p) => crate::lcd_page::render_at(p, &self.readings, t),
             None => match &onboard {
                 Some(Some(p)) => crate::lcd_page::render_onboard(p, &self.onboard_readings()),
                 Some(None) => vec![String::new(); 4],

@@ -924,8 +924,9 @@ fn snap_layouts(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow
         }
     };
     clicks(&mut front, &mut px, &std::env::var("ECTODECK_NATIVE_CLICKS").unwrap_or_default());
+    // (\n is Return, and \u{8} Backspace)
     for c in std::env::var("ECTODECK_NATIVE_TYPE").unwrap_or_default().chars() {
-        let text: SharedString = if c == '\n' { Key::Return.into() } else { c.to_string().into() };
+        let text: SharedString = if c == '\n' { Key::Return.into() } else if c == '\u{8}' { Key::Backspace.into() } else { c.to_string().into() };
         window.dispatch_event(WindowEvent::KeyPressed { text: text.clone() });
         window.dispatch_event(WindowEvent::KeyReleased { text });
         slint::platform::update_timers_and_animations();

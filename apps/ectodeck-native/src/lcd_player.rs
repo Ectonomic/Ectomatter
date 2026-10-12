@@ -13,7 +13,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -22,6 +22,8 @@ use crate::lcd_stats::Stats;
 
 /// seconds between readings of the Stats page
 const INTERVAL: f64 = 1.0;
+/// how often the page is drawn while it has words scrolling: a cell of their way
+const STEP: f64 = 0.25;
 
 pub fn runtime_dir() -> PathBuf {
     std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(format!("/run/user/{}", unsafe { libc::getuid() })))
@@ -306,6 +308,9 @@ pub struct Core {
     held: Option<f64>,
     /// standing aside: the keyboard shows its own status screen, and nothing is drawn
     pub aside: bool,
+    /// the page showing has words scrolling (`stats` says so as it draws), so it is drawn
+    /// a cell's step at a time rather than once a second
+    pub moving: Arc<AtomicBool>,
 }
 
 impl Core {
@@ -337,7 +342,14 @@ impl Core {
             turn_len: 0.0,
             held: None,
             aside: false,
+            moving: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// When the page showing is drawn next: at once a second, or while its words scroll,
+    /// as each cell of their way comes.
+    fn next_draw(&self, now: f64) -> f64 {
+        now + if self.moving.load(Ordering::Relaxed) { STEP } else { INTERVAL }
     }
 
     fn push(&mut self, rows: Vec<String>, now: f64) {
@@ -424,7 +436,7 @@ impl Core {
             self.redraw = false;
             let rows = (self.stats)();
             self.push(rows, now);
-            self.stats_at = now + INTERVAL;
+            self.stats_at = self.next_draw(now);
             if self.page_since.is_none() {
                 self.page_since = Some(now);
             }
@@ -456,7 +468,7 @@ impl Core {
         self.page_since = None;
         if frames.is_empty() {
             self.push(new, now);
-            self.stats_at = now + INTERVAL;
+            self.stats_at = self.next_draw(now);
             self.page_since = Some(now);
         } else {
             self.turn_from = now;
@@ -627,16 +639,30 @@ impl Player {
             // the pages, the one showing, and what they may show besides the computer's readings
             let shared = Arc::new(Mutex::new((vec![crate::lcd_page::Page::stats()], None::<(u8, String)>, None::<(f64, String)>)));
             let current = Arc::new(AtomicUsize::new(0));
-            let (reader, page, at) = (stats.clone(), shared.clone(), current.clone());
+            let moving = Arc::new(AtomicBool::new(false));
+            let (reader, page, at, moves) = (stats.clone(), shared.clone(), current.clone(), moving.clone());
+            // the computer read once a second, however often the page is drawn; and the page
+            // showing, and when it came on, which its scrolling words are timed from
+            let kept: Mutex<(Option<(Instant, crate::lcd_page::Readings)>, Option<(usize, String, Instant)>)> = Mutex::new((None, None));
             let ask: Ask<Vec<String>> = Arc::new(move || {
-                let mut r = reader.lock().unwrap().read();
+                let mut k = kept.lock().unwrap();
+                if k.0.as_ref().is_none_or(|(t, _)| t.elapsed() >= Duration::from_millis(990)) {
+                    k.0 = Some((Instant::now(), reader.lock().unwrap().read()));
+                }
+                let mut r = k.0.as_ref().unwrap().1.clone();
                 let p = page.lock().unwrap();
                 r.now = Some(crate::lcd_page::Moment::now());
                 r.profile = p.1.as_ref().map(|(_, name)| name.clone());
                 r.profile_number = p.1.as_ref().map(|(n, _)| *n);
                 r.outside = p.2.clone();
                 let i = at.load(Ordering::Relaxed);
-                p.0.get(i).or(p.0.first()).map_or_else(Vec::new, |page| crate::lcd_page::render(page, &r))
+                let Some(page) = p.0.get(i).or(p.0.first()) else { return Vec::new() };
+                if k.1.as_ref().is_none_or(|(j, id, _)| *j != i || *id != page.id) {
+                    k.1 = Some((i, page.id.clone(), Instant::now()));
+                }
+                let t = k.1.as_ref().map_or(0.0, |(_, _, since)| since.elapsed().as_secs_f64());
+                moves.store(crate::lcd_page::moving(page, &r), Ordering::Relaxed);
+                crate::lcd_page::render_at(page, &r, t)
             });
             let seeds = Box::new(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64));
             let mut core = Core::new(Box::new(Hidraw::default()), ask, runtime_dir().join("z10-lcd/session"), seeds);
@@ -645,6 +671,7 @@ impl Player {
             core.announce = announce;
             core.paused = paused;
             core.current = current;
+            core.moving = moving;
             let start = Instant::now();
             let (mut other, mut other_at) = (other_running(), Instant::now());
             let mut told: Option<(State, Option<&'static str>, usize, bool)> = None;
@@ -800,6 +827,27 @@ mod tests {
 
     fn first_at(sent: &Arc<Mutex<Vec<(f64, Vec<String>)>>>, row0: &str) -> Option<f64> {
         sent.lock().unwrap().iter().find(|(_, r)| r[0] == row0).map(|(t, _)| *t)
+    }
+
+    #[test]
+    fn words_scrolling_are_drawn_a_quarter_second_at_a_time() {
+        // a page whose rows change every tenth of a second (as scrolling words do, at whatever
+        // moment it is drawn): drawn once a second while still, four times a second while moving
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let clock = Arc::new(Mutex::new(0.0));
+        let c = clock.clone();
+        let ask: Ask<Vec<String>> = Arc::new(move || vec![format!("{:.1}", *c.lock().unwrap())]);
+        let note = std::env::temp_dir().join(format!("ectodeck-moving-{}", std::process::id()));
+        let _ = std::fs::remove_file(&note);
+        let mut core = Core::new(Box::new(Kept(sent.clone(), clock.clone())), ask, note, Box::new(|| 7));
+        core.set_playlist(vec![(60.0, crate::lcd_page::Transition::Cut)]);
+        run(&mut core, &clock, 0.0, 3.0);
+        let still = sent.lock().unwrap().len();
+        assert!((3..=4).contains(&still), "once a second while still: {still}");
+        core.moving.store(true, Ordering::Relaxed);
+        run(&mut core, &clock, 3.0, 5.0);
+        let moving = sent.lock().unwrap().len() - still;
+        assert!((7..=9).contains(&moving), "every quarter second while moving: {moving}");
     }
 
     #[test]
