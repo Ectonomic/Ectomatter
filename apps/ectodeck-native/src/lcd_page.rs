@@ -39,11 +39,16 @@ pub enum Source {
     VideoMemory,
     Date,
     Profile,
+    /// what the keyboard knows about itself: the active profile's number, its mode
+    /// (PC, game or LCD) and its key rollover (the last two read from firmware build 5 on)
+    ProfileNumber,
+    GameMode,
+    KeyRollover,
     OutsideTemp,
     Sky,
 }
 
-pub const SOURCES: [Source; 12] = [
+pub const SOURCES: [Source; 15] = [
     Source::CpuTemp,
     Source::CpuLoad,
     Source::CpuClock,
@@ -54,6 +59,9 @@ pub const SOURCES: [Source; 12] = [
     Source::VideoMemory,
     Source::Date,
     Source::Profile,
+    Source::ProfileNumber,
+    Source::GameMode,
+    Source::KeyRollover,
     Source::OutsideTemp,
     Source::Sky,
 ];
@@ -71,6 +79,9 @@ impl Source {
             Source::VideoMemory => "video-memory",
             Source::Date => "date",
             Source::Profile => "profile",
+            Source::ProfileNumber => "profile-number",
+            Source::GameMode => "game-mode",
+            Source::KeyRollover => "key-rollover",
             Source::OutsideTemp => "outside-temp",
             Source::Sky => "sky",
         }
@@ -92,6 +103,9 @@ impl Source {
             Source::VideoMemory => "Video memory used",
             Source::Date => "Date",
             Source::Profile => "Active profile",
+            Source::ProfileNumber => "Profile number",
+            Source::GameMode => "Game mode",
+            Source::KeyRollover => "Key rollover",
             Source::OutsideTemp => "Outside temperature",
             Source::Sky => "Weather",
         }
@@ -106,6 +120,9 @@ impl Source {
             Source::VideoMemory => "VRAM",
             Source::Date => "the date",
             Source::Profile => "the active profile",
+            Source::ProfileNumber => "the profile’s number",
+            Source::GameMode => "game mode",
+            Source::KeyRollover => "key rollover",
             Source::OutsideTemp => "the temperature outside",
             Source::Sky => "the sky outside",
         }
@@ -117,7 +134,8 @@ impl Source {
             Source::CpuTemp | Source::CpuLoad | Source::CpuClock => "Processor",
             Source::GpuTemp | Source::GpuLoad | Source::GpuClock | Source::VideoMemory => "Graphics",
             Source::Memory => "Memory",
-            Source::Date | Source::Profile | Source::OutsideTemp | Source::Sky => "More",
+            Source::Profile | Source::ProfileNumber | Source::GameMode | Source::KeyRollover => "Keyboard",
+            Source::Date | Source::OutsideTemp | Source::Sky => "More",
         }
     }
 
@@ -129,7 +147,8 @@ impl Source {
             Source::CpuClock => "This computer (/sys)",
             Source::GpuTemp | Source::GpuLoad | Source::GpuClock | Source::VideoMemory => "NVIDIA’s driver (NVML)",
             Source::Date => "This computer’s clock",
-            Source::Profile => "The profile the keyboard is using",
+            Source::Profile | Source::ProfileNumber => "The profile the keyboard is using",
+            Source::GameMode | Source::KeyRollover => "The keyboard, with Ectodeck’s firmware build 5 or later",
             Source::OutsideTemp | Source::Sky => "Open-Meteo, for the place in Ectodeck’s settings",
         }
     }
@@ -152,7 +171,8 @@ impl Source {
             Source::GpuTemp | Source::GpuLoad | Source::GpuClock | Source::VideoMemory => Some("gpu"),
             Source::Memory => Some("memory"),
             Source::OutsideTemp | Source::Sky => Some("weather"),
-            Source::CpuLoad | Source::Date | Source::Profile => None,
+            Source::GameMode | Source::KeyRollover => Some("keyboard"),
+            Source::CpuLoad | Source::Date | Source::Profile | Source::ProfileNumber => None,
         }
     }
 
@@ -164,7 +184,9 @@ impl Source {
             Source::Memory => "RAM",
             Source::VideoMemory => "VRAM",
             Source::Date => "Date",
-            Source::Profile => "Profile",
+            Source::Profile | Source::ProfileNumber => "Profile",
+            Source::GameMode => "Mode",
+            Source::KeyRollover => "Rollover",
             Source::OutsideTemp | Source::Sky => "Weather",
         }
     }
@@ -547,6 +569,9 @@ pub struct Screens {
     pub library: Vec<Page>,
     pub playlists: Vec<Playlist>,
     pub plays: std::collections::BTreeMap<u8, String>,
+    /// the layout each profile keeps on the keyboard, its onboard layout, by its id, or
+    /// "off" for the screen off; a profile given none keeps the Clock layout
+    pub onboard: std::collections::BTreeMap<u8, String>,
 }
 
 impl Screens {
@@ -599,21 +624,45 @@ impl Screens {
                     .collect()
             })
             .unwrap_or_default();
-        Screens { library, playlists: lists, plays }
+        Screens { library, playlists: lists, plays, onboard: Default::default() }
+    }
+
+    /// The onboard layouts, from Ectodeck's settings: each profile's, by its number.
+    pub fn with_onboard(mut self, onboard: Option<&Value>) -> Screens {
+        self.onboard = onboard
+            .and_then(|v| v.as_object())
+            .map(|o| o.iter().filter_map(|(k, v)| Some((k.parse::<u8>().ok().filter(|n| PROFILES.contains(n))?, v.as_str()?.to_string()))).collect())
+            .unwrap_or_default();
+        self
+    }
+
+    /// The layout profile `p` keeps on the keyboard: None for the screen off, and for a
+    /// layout no longer in the Library (deleted, its profile's screen goes off).
+    pub fn onboard_of(&self, p: u8) -> Option<&Page> {
+        let id = self.onboard.get(&p).map_or("clock", |id| id.as_str());
+        self.library.iter().find(|pg| pg.id == id)
+    }
+
+    /// Profile `p` keeps layout `id` on the keyboard from now on, or (None) the screen off.
+    pub fn keep_onboard(&mut self, p: u8, id: Option<&str>) {
+        let id = id.filter(|i| self.library.iter().any(|pg| pg.id == *i)).unwrap_or("off");
+        self.onboard.insert(p, id.to_string());
     }
 
     /// All of it, as one value: for the settings, and for undoing a change.
     pub fn to_json(&self) -> Value {
         let plays: serde_json::Map<String, Value> = self.plays.iter().map(|(n, id)| (n.to_string(), json!(id))).collect();
+        let onboard: serde_json::Map<String, Value> = self.onboard.iter().map(|(n, id)| (n.to_string(), json!(id))).collect();
         json!({
             "pages": self.library.iter().map(|p| p.to_json()).collect::<Vec<_>>(),
             "playlists": self.playlists.iter().map(|l| l.to_json()).collect::<Vec<_>>(),
             "plays": plays,
+            "onboard": onboard,
         })
     }
 
     pub fn from_json(v: &Value) -> Screens {
-        Screens::of(v.get("pages"), v.get("playlists"), v.get("plays"), v.get("playlist"))
+        Screens::of(v.get("pages"), v.get("playlists"), v.get("plays"), v.get("playlist")).with_onboard(v.get("onboard"))
     }
 
     /// Which playlist profile `p` plays, by its place.
@@ -766,6 +815,11 @@ pub struct Readings {
     pub gpu: Option<GpuReading>,
     pub now: Option<Moment>,
     pub profile: Option<String>,
+    /// the active profile's number; the keyboard's mode and key rollover, in its own words
+    /// ("PC MODE", "6 KEY"), once its firmware can say them
+    pub profile_number: Option<u8>,
+    pub mode: Option<String>,
+    pub rollover: Option<String>,
     /// °C, and the sky in words
     pub outside: Option<(f64, String)>,
 }
@@ -802,6 +856,9 @@ fn text_of(s: Source, f: bool, r: &Readings) -> Option<String> {
             format!("{} {} {}", DAYS[m.weekday as usize % 7], MONTHS[m.month as usize % 12], m.day)
         }
         Source::Profile => ectotype_core::lcd::lcd_text(r.profile.as_deref()?),
+        Source::ProfileNumber => r.profile_number?.to_string(),
+        Source::GameMode => r.mode.clone()?,
+        Source::KeyRollover => r.rollover.clone()?,
         Source::OutsideTemp => format!("{:.0}°", deg(r.outside.as_ref()?.0)),
         Source::Sky => ectotype_core::lcd::lcd_text(&r.outside.as_ref()?.1),
     })
@@ -850,6 +907,90 @@ fn show(p: &Piece, r: &Readings) -> Result<String, &'static str> {
 /// The page's four rows, with these readings.
 pub fn render(page: &Page, r: &Readings) -> Vec<String> {
     lay_out(page, r).0
+}
+
+/// Whether the keyboard can draw a piece by itself, with no program on the computer to
+/// send it (with Ectodeck's firmware build 5): words, the time and the date, and what the
+/// keyboard knows about itself. The computer's readings, and bars of them, it can't.
+pub fn onboard_can(kind: &Kind) -> bool {
+    match kind {
+        Kind::Text(_) | Kind::Clock(_) => true,
+        Kind::Data(s, _) => matches!(s, Source::Date | Source::Profile | Source::ProfileNumber | Source::GameMode | Source::KeyRollover),
+        Kind::Bar(_) => false,
+    }
+}
+
+/// The page as the keyboard draws it by itself, as its onboard layout: the pieces it
+/// can't draw left out, their cells blank. Until the keyboard can say them, its mode and
+/// key rollover show as it starts up.
+pub fn render_onboard(page: &Page, r: &Readings) -> Vec<String> {
+    let mut r = r.clone();
+    r.mode.get_or_insert_with(|| "PC MODE".into());
+    r.rollover.get_or_insert_with(|| "6 KEY".into());
+    let kept = Page { pieces: page.pieces.iter().filter(|p| onboard_can(&p.kind)).cloned().collect(), ..page.clone() };
+    render(&kept, &r)
+}
+
+/// What of a page the keyboard can't draw by itself: the readings, by what they read
+/// ("CPU", "GPU", "memory", "weather"), and whether it has bars.
+#[derive(Debug, Default, PartialEq)]
+pub struct Gaps {
+    pub readings: Vec<&'static str>,
+    pub bars: bool,
+}
+
+impl Gaps {
+    pub fn of(page: &Page) -> Gaps {
+        let mut g = Gaps::default();
+        for p in &page.pieces {
+            match &p.kind {
+                Kind::Bar(_) => g.bars = true,
+                Kind::Data(s, _) if !onboard_can(&p.kind) => {
+                    let what = match s {
+                        Source::CpuTemp | Source::CpuLoad | Source::CpuClock => "CPU",
+                        Source::GpuTemp | Source::GpuLoad | Source::GpuClock => "GPU",
+                        Source::Memory | Source::VideoMemory => "memory",
+                        _ => "weather",
+                    };
+                    if !g.readings.contains(&what) {
+                        g.readings.push(what);
+                    }
+                }
+                _ => {}
+            }
+        }
+        g
+    }
+
+    /// The line under the screen while the page is the onboard layout: what the keyboard
+    /// leaves blank, and why. None when it leaves nothing out.
+    pub fn line(&self) -> Option<String> {
+        let what = match self.readings.len() {
+            0 => String::new(),
+            1 => self.readings[0].to_string(),
+            n => format!("{} and {}", self.readings[..n - 1].join(", "), self.readings[n - 1]),
+        };
+        let parts = match (what.is_empty(), self.bars) {
+            (true, false) => return None,
+            (true, true) => "Bars".to_string(),
+            (false, false) => format!("{what} readings"),
+            (false, true) => format!("{what} readings and bars"),
+        };
+        // (a sentence starts with a capital: "Weather readings", "CPU readings")
+        let mut c = parts.chars();
+        let parts = c.next().map_or(String::new(), |f| f.to_uppercase().chain(c).collect());
+        Some(format!("{parts} need Ectodeck, so the keyboard leaves them blank."))
+    }
+
+    /// The page's note in the menu of onboard layouts, before it is chosen.
+    pub fn tag(&self) -> &'static str {
+        match (self.readings.is_empty(), self.bars) {
+            (true, false) => "",
+            (true, true) => "Bars stay blank",
+            (false, false) => "Readings stay blank",
+            (false, true) => "Readings and bars stay blank",
+        }
+    }
 }
 
 /// Where each piece lands, in the page's order: its row, the cell it starts
@@ -942,14 +1083,6 @@ pub fn status_rows(apps: u64, profile: u8, name: &str, clock: Option<(u16, [u8; 
     rows
 }
 
-/// The local date and time as the keyboard's clock is set: the year, then the month
-/// (1 to 12), the day, the hour (0 to 23), the minute and the second.
-pub fn clock_now() -> (u16, [u8; 5]) {
-    let mut t: libc::tm = unsafe { std::mem::zeroed() };
-    let secs = unsafe { libc::time(std::ptr::null_mut()) };
-    unsafe { libc::localtime_r(&secs, &mut t) };
-    ((t.tm_year + 1900) as u16, [(t.tm_mon + 1) as u8, t.tm_mday as u8, t.tm_hour as u8, t.tm_min as u8, t.tm_sec as u8])
-}
 
 /// The readings this computer can give, for the menu of readings.
 pub fn available(r: &Readings, weather: bool) -> Vec<Source> {
@@ -960,6 +1093,9 @@ pub fn available(r: &Readings, weather: bool) -> Vec<Source> {
             Source::CpuTemp => r.cpu_temp.is_some(),
             Source::CpuClock => r.cpu_ghz.is_some(),
             Source::CpuLoad | Source::Date | Source::Profile => true,
+            Source::ProfileNumber => r.profile_number.is_some(),
+            Source::GameMode => r.mode.is_some(),
+            Source::KeyRollover => r.rollover.is_some(),
             Source::GpuTemp | Source::GpuLoad | Source::GpuClock | Source::VideoMemory => r.gpu.is_some(),
             Source::Memory => r.ram.is_some(),
             Source::OutsideTemp | Source::Sky => weather,
@@ -969,6 +1105,51 @@ pub fn available(r: &Readings, weather: bool) -> Vec<Source> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_keyboard_draws_what_it_can_and_leaves_the_rest_blank() {
+        let r = readings();
+        // Stats: its words stay, its readings go
+        assert_eq!(render_onboard(&Page::stats(), &r), vec!["CPU", "GPU", "RAM", "VRAM"]);
+        let g = Gaps::of(&Page::stats());
+        assert_eq!(g.line().unwrap(), "CPU, GPU and memory readings need Ectodeck, so the keyboard leaves them blank.");
+        assert_eq!(g.tag(), "Readings stay blank");
+        // the Clock layout, the time and the date, it draws whole
+        let clock = Page::clock();
+        assert_eq!(render_onboard(&clock, &r), render(&clock, &r));
+        assert_eq!((Gaps::of(&clock).line(), Gaps::of(&clock).tag()), (None, ""));
+        // the weather, and a bar: named as what they are
+        assert_eq!(Gaps::of(&Page::weather()).line().unwrap(), "Weather readings need Ectodeck, so the keyboard leaves them blank.");
+        let mut barred = Page::blank();
+        barred.pieces.push(Piece { kind: Kind::Bar(Source::CpuLoad), row: 0, col: 0, width: 10, right: false, center: false, gap: 1 });
+        assert_eq!(Gaps::of(&barred).line().unwrap(), "Bars need Ectodeck, so the keyboard leaves them blank.");
+        assert_eq!(Gaps::of(&barred).tag(), "Bars stay blank");
+        // what the keyboard knows of itself: until it can say them, its mode and rollover as it starts up
+        let mut own = Page::blank();
+        own.pieces.push(Piece { kind: Kind::Data(Source::GameMode, false), row: 0, col: 0, width: 9, right: false, center: false, gap: 1 });
+        own.pieces.push(Piece { kind: Kind::Data(Source::KeyRollover, false), row: 1, col: 0, width: 5, right: false, center: false, gap: 1 });
+        assert_eq!(render_onboard(&own, &r)[..2], ["PC MODE", "6 KEY"]);
+    }
+
+    #[test]
+    fn each_profile_keeps_a_layout_on_the_keyboard() {
+        let mut s = Screens::of(Some(&json!([Page::stats().to_json(), Page::clock().to_json()])), None, None, None);
+        // given none, a profile keeps the Clock layout
+        assert_eq!(s.onboard_of(1).map(|p| p.id.as_str()), Some("clock"));
+        s.keep_onboard(2, Some("stats"));
+        s.keep_onboard(3, None);
+        // a layout not in the Library is the screen off
+        s.keep_onboard(4, Some("gone"));
+        assert_eq!(s.onboard_of(2).map(|p| p.id.as_str()), Some("stats"));
+        assert!(s.onboard_of(3).is_none() && s.onboard_of(4).is_none());
+        // kept with the rest of the screens, and read back
+        let back = Screens::from_json(&s.to_json());
+        assert_eq!(back.onboard, s.onboard);
+        // a layout deleted from the Library takes its profiles' screens off
+        let mut gone = back.clone();
+        gone.library.retain(|p| p.id != "stats");
+        assert!(gone.onboard_of(2).is_none());
+    }
 
     #[test]
     fn the_status_screen_is_drawn_as_the_firmware_draws_it() {
@@ -1003,6 +1184,9 @@ mod tests {
             gpu: Some((45, 12, 1837, 13.13, 31.84)),
             now: Some(Moment { hour: 21, minute: 5, weekday: 5, day: 9, month: 9 }),
             profile: Some("DEFAULT 1".into()),
+            profile_number: Some(1),
+            mode: None,
+            rollover: None,
             outside: None,
         }
     }

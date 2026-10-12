@@ -152,7 +152,7 @@ pub fn source_menu(current: Source, bars: bool, avail: &[Source], r: &Readings) 
     let mut rows = Vec::new();
     let mut group = "";
     // each group once, in the menu's order
-    let order = ["Processor", "Graphics", "Memory", "More"];
+    let order = ["Processor", "Graphics", "Memory", "Keyboard", "More"];
     let mut listed: Vec<Source> = avail.iter().copied().filter(|s| !bars || s.barred()).collect();
     listed.sort_by_key(|s| order.iter().position(|g| *g == s.group()));
     for s in listed {
@@ -241,6 +241,22 @@ pub fn add(page: &mut Page, ed: &mut Editor, what: usize, first: Source) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_keyboard_s_own_readings_have_a_group_of_their_own() {
+        use crate::lcd_page::{available, Readings, Source};
+        let r = Readings { profile: Some("DEFAULT 1".into()), profile_number: Some(1), ..Default::default() };
+        let rows = source_menu(Source::Profile, false, &available(&r, false), &r);
+        let at = rows.iter().position(|row| row.0 == 1 && row.1 == "Keyboard").expect("a Keyboard group");
+        let names: Vec<&str> = rows[at + 1..].iter().take_while(|row| row.0 == 0).map(|row| row.1.as_str()).collect();
+        assert_eq!(names, ["Active profile", "Profile number"]);
+        // game mode and key rollover join them once the keyboard can say them (build 5)
+        let r = Readings { mode: Some("PC MODE".into()), rollover: Some("6 KEY".into()), ..r };
+        let rows = source_menu(Source::Profile, false, &available(&r, false), &r);
+        let at = rows.iter().position(|row| row.0 == 1 && row.1 == "Keyboard").unwrap();
+        let names: Vec<&str> = rows[at + 1..].iter().take_while(|row| row.0 == 0).map(|row| row.1.as_str()).collect();
+        assert_eq!(names, ["Active profile", "Profile number", "Game mode", "Key rollover"]);
+    }
 
     #[test]
     fn a_new_piece_goes_where_there_is_room_and_is_chosen() {

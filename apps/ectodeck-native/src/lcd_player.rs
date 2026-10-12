@@ -238,8 +238,9 @@ pub enum Control {
     /// picture of it, or (false) take it back (see [Core::stand_aside])
     Aside(bool),
     /// what a page may show besides the computer's readings: the profile the
-    /// keyboard is using, and the weather outside (°C, the sky in words)
-    Context(Option<String>, Option<(f64, String)>),
+    /// keyboard is using (its number and name), and the weather outside (°C, the
+    /// sky in words)
+    Context(Option<(u8, String)>, Option<(f64, String)>),
 }
 
 /// What the player tells Ectodeck: what the screen shows, and why.
@@ -624,14 +625,15 @@ impl Player {
             // primed, as the service primed it: the first reading of the load is 0
             stats.lock().unwrap().cpu_load();
             // the pages, the one showing, and what they may show besides the computer's readings
-            let shared = Arc::new(Mutex::new((vec![crate::lcd_page::Page::stats()], None::<String>, None::<(f64, String)>)));
+            let shared = Arc::new(Mutex::new((vec![crate::lcd_page::Page::stats()], None::<(u8, String)>, None::<(f64, String)>)));
             let current = Arc::new(AtomicUsize::new(0));
             let (reader, page, at) = (stats.clone(), shared.clone(), current.clone());
             let ask: Ask<Vec<String>> = Arc::new(move || {
                 let mut r = reader.lock().unwrap().read();
                 let p = page.lock().unwrap();
                 r.now = Some(crate::lcd_page::Moment::now());
-                r.profile = p.1.clone();
+                r.profile = p.1.as_ref().map(|(_, name)| name.clone());
+                r.profile_number = p.1.as_ref().map(|(n, _)| *n);
                 r.outside = p.2.clone();
                 let i = at.load(Ordering::Relaxed);
                 p.0.get(i).or(p.0.first()).map_or_else(Vec::new, |page| crate::lcd_page::render(page, &r))

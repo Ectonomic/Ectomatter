@@ -109,6 +109,8 @@ pub enum Ask {
     PlBack,
     /// the Screen tab's other state opened: while Ectodeck runs, or when it is closed
     ScreenState,
+    /// the onboard layout's chooser selected, where it is in the window
+    ObChoose(f32, f32, f32),
     /// a page of the Library opened in the editor
     LibEdit(i32),
     /// the page editor: open on the playlist's page, close; add a piece (0
@@ -372,10 +374,10 @@ pub struct Front {
     /// the player told to stand aside, the keyboard showing its own status screen for the
     /// Screen tab's picture of it (see [Front::status_showing])
     aside: bool,
-    /// the time last sent to the keyboard's clock, while it shows its status screen; and
-    /// whether any was sent, so the clock is taken off again on quitting
-    clock_sent: Option<(u16, [u8; 5])>,
-    clock_fed: bool,
+    /// the onboard layout's chooser open; on the second tab, a layout carried over the
+    /// screen, by its id, which the picture shows before it is let go
+    ob_menu: bool,
+    ob_over: Option<String>,
     /// the knobs, the display and its glass, over the keyboard
     pub overlays: Overlays,
     sliders_asked: bool,
@@ -584,6 +586,7 @@ impl Front {
         on!(on_pl_hold_menu, |x, y, h| Ask::PlHoldMenu(x, y, h));
         on!(on_pl_back, Ask::PlBack);
         on!(on_screen_state, Ask::ScreenState);
+        on!(on_ob_choose, |x, y, h| Ask::ObChoose(x, y, h));
         on!(on_lib_edit, |k| Ask::LibEdit(k));
         on!(on_page_show, |i| Ask::PageShow(i));
         on!(on_page_moved, |i, j| Ask::PageMove(i, j));
@@ -647,8 +650,8 @@ impl Front {
             controlled,
             hidden: false,
             aside: false,
-            clock_sent: None,
-            clock_fed: false,
+            ob_menu: false,
+            ob_over: None,
             overlays: Overlays::new(),
             sliders_asked: false,
             active_asked: false,
@@ -728,7 +731,8 @@ impl Front {
             f.settings.get("devices.z10.screen.playlists").as_ref(),
             f.settings.get("devices.z10.screen.plays").as_ref(),
             f.settings.get("devices.z10.screen.playlist").as_ref(),
-        );
+        )
+        .with_onboard(f.settings.get("devices.z10.screen.onboard").as_ref());
         f.screens_noted = f.screens.clone();
         f.screens_saved = f.screens.clone();
         f.ui.set_ed_piece_cells(ModelRc::from(f.ed_models[0].clone()));
@@ -1136,7 +1140,16 @@ impl Front {
                 Ask::CarryMove(x, near) => {
                     changed = false;
                     let spans = self.strip_spans.clone();
-                    if let Some(c) = &mut self.carry {
+                    // on the second tab the screen is where a layout lands: over the screen, the
+                    // picture shows the layout as the keyboard would show it
+                    if self.ui.get_screen_closed() {
+                        let over = if near { self.carry.as_ref().map(|c| c.page.clone()) } else { None };
+                        if over != self.ob_over {
+                            self.ob_over = over;
+                            self.lcd_drawn = None;
+                            changed = true;
+                        }
+                    } else if let Some(c) = &mut self.carry {
                         let slot = if near { Some(slot_at(&spans, x as f64)) } else { c.home };
                         if slot != c.slot {
                             c.slot = slot;
@@ -1146,7 +1159,10 @@ impl Front {
                 }
                 Ask::CarryDrop => {
                     if let Some(c) = self.carry.take() {
-                        if let Some(at) = c.slot {
+                        if let Some(id) = self.ob_over.take() {
+                            self.screens.keep_onboard(self.page.editing, Some(&id));
+                            self.pages_edited();
+                        } else if let Some(at) = c.slot {
                             let shown = self.lcd.page;
                             let playing = self.screens.turns(self.page.editing).get(shown).map(|e| e.key);
                             let moved = if c.from_strip {
@@ -1162,7 +1178,10 @@ impl Front {
                         }
                     }
                 }
-                Ask::CarryCancel => self.carry = None,
+                Ask::CarryCancel => {
+                    self.carry = None;
+                    self.ob_over = None;
+                }
                 Ask::SizeTurn(i, dx) => {
                     let i = i.max(0) as usize;
                     if self.sizing.is_none_or(|s| s.0 != i) {
@@ -1195,9 +1214,9 @@ impl Front {
                 }
                 // (the screen drawn again, as the state now open shows it)
                 Ask::ScreenState => self.lcd_drawn = None,
+                Ask::ObChoose(x, y, h) => self.open_ob_menu((x, y, h)),
                 Ask::LibEdit(k) => self.edit_page(k.max(0) as usize),
                 Ask::LcdTick => {
-                    self.feed_clock();
                     // the readings again each second: for the page being edited (its
                     // picture and its boxes), or the playlist's pictures of its pages
                     let on_screen = self.page.view == View::Screen && self.ui.get_place() == "z10";
@@ -2171,13 +2190,14 @@ impl Front {
     }
 
     fn close_menu(&mut self) {
-        if self.bind_menu.take().is_some() || self.light_menu.take().is_some() || self.way_menu.take().is_some() || std::mem::take(&mut self.pl_menu) || std::mem::take(&mut self.add_menu) {
+        if self.bind_menu.take().is_some() || self.light_menu.take().is_some() || self.way_menu.take().is_some() || std::mem::take(&mut self.pl_menu) || std::mem::take(&mut self.add_menu) || std::mem::take(&mut self.ob_menu) {
             self.ui.set_menu_open(false);
             self.ui.set_menu_search(true);
             self.ui.set_menu_w(300.0);
             self.ui.set_pl_menu(-1);
             self.ui.set_pl_choosing(false);
             self.ui.set_pl_adding(false);
+            self.ui.set_ob_choosing(false);
         }
         if self.menu.take().is_some() {
             self.ui.set_menu_open(false);
@@ -2204,7 +2224,7 @@ impl Front {
                 self.end_rename(true, &typed);
             }
         }
-        if self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pl_menu || self.add_menu {
+        if self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pl_menu || self.add_menu || self.ob_menu {
             let (mx, my, mw, mh) = (self.ui.get_menu_x(), self.ui.get_menu_y(), self.ui.get_menu_width(), self.ui.get_menu_height());
             if !(x >= mx && x < mx + mw && y >= my && y < my + mh) {
                 // a press on the dropdown (or the bar) the menu hangs from shuts it, and its click must not open it again
@@ -2215,10 +2235,12 @@ impl Front {
                     self.ui.get_pl_chooser_w()
                 } else if self.add_menu {
                     self.ui.get_pl_hold_w()
+                } else if self.ob_menu {
+                    self.ui.get_ob_chooser_w()
                 } else {
                     self.ui.get_menu_w()
                 };
-                if (self.light_menu.is_some() || self.way_menu.is_some() || self.pl_menu || self.add_menu) && x >= ax && x < ax + aw && y >= ay && y < ay + ah {
+                if (self.light_menu.is_some() || self.way_menu.is_some() || self.pl_menu || self.add_menu || self.ob_menu) && x >= ax && x < ax + aw && y >= ay && y < ay + ah {
                     self.shut = Some(((ax, ay), Instant::now()));
                 }
                 self.close_menu();
@@ -2327,6 +2349,32 @@ impl Front {
             if let Some((v, _)) = i.checked_sub(1).and_then(|k| crate::display::BIND_CHOICES[s].get(k)) {
                 self.set_slider_bind(s, v);
             }
+            return;
+        }
+        // the onboard layout's chooser: the screen off, a layout for the keyboard to keep, or
+        // the one it keeps opened in the editor
+        if self.ob_menu {
+            self.close_menu();
+            let n = self.page.editing;
+            let count = self.screens.library.len();
+            match i {
+                1 => {
+                    self.screens.keep_onboard(n, None);
+                    self.pages_edited();
+                }
+                k if (2..2 + count).contains(&k) => {
+                    let id = self.screens.library[k - 2].id.clone();
+                    self.screens.keep_onboard(n, Some(&id));
+                    self.pages_edited();
+                }
+                k if k == 3 + count => {
+                    if let Some(at) = self.screens.onboard_of(n).and_then(|p| self.screens.index_of(&p.id)) {
+                        self.edit_page(at);
+                    }
+                }
+                _ => {}
+            }
+            self.refresh();
             return;
         }
         // the panel's menu: another playlist for the profile, a new one, this one
@@ -2799,25 +2847,23 @@ impl Front {
             self.ui.set_settings_h(h);
             self.show_cells(cells);
         } else if loaded && self.page.view == View::Screen {
-            // round the screen's box: the default backlight at the right end of the tabs'
-            // row, and while the closed tab is open, the status screen's items in the row
-            // under the screen, across the screen's own text (the box's walls: 16 round the
-            // bay, the bay's gutter 24 round the screen); none while a page is edited
+            // the default backlight at the right end of the tabs' row, with, while the layout
+            // the screen shows has a color of its own, a line saying so: the playing layout on
+            // the first tab, the onboard layout on the second; none while a page is edited
             let cells = if self.editor.is_some() {
                 Vec::new()
             } else {
                 let w = self.ui.get_under_w();
-                let closed = self.ui.get_screen_closed();
-                let own = if closed { None } else { self.shown().and_then(|p| p.light.map(|l| (p.name.clone(), l))) };
-                let (lw, lh) = (self.ui.get_lcd_w(), self.ui.get_lcd_h());
-                let row = closed.then(|| ((w - lw) / 2.0, lw, 36.0 + 16.0 + lh + 48.0 + 14.0));
+                let page = if self.ui.get_screen_closed() { if self.onboard_ready() { self.ob_page() } else { None } } else { self.shown() };
+                let own = page.and_then(|p| p.light.map(|l| (p.name.clone(), l)));
                 let picking = self.pick.as_ref().is_some_and(|p| p.ctl == Ctl::LcdColor);
                 // the room the two tabs leave on their row: each tab its words and 18 either side, 4
                 // between them, the open second tab's foot, then a gap (the names as app.slint has them)
-                let tabs: f32 = ["While Ectodeck runs", "When Ectodeck is closed"].iter().map(|t| crate::text::width(500, 13.0, t) + 36.0).sum();
-                crate::display::screen_cells(&self.page, w, tabs + 4.0 + 10.0 + 24.0, own.as_ref().map(|(n, l)| (n.as_str(), *l)), row, picking)
+                let tabs: f32 = ["Playlist", "Onboard layout"].iter().map(|t| crate::text::width(500, 13.0, t) + 36.0).sum();
+                crate::display::screen_cells(&self.page, w, tabs + 4.0 + 10.0 + 24.0, own.as_ref().map(|(n, l)| (n.as_str(), *l)), picking)
             };
             self.show_cells(cells);
+            self.refresh_onboard();
             self.refresh_editor();
             self.draw_screen();
         } else if loaded && self.page.view == View::Display {
@@ -2838,6 +2884,17 @@ impl Front {
             if self.player.is_some() && !self.aside {
                 let l = self.page_light([want.0[1], want.0[2], want.0[3]]);
                 want.0[1..4].copy_from_slice(&l);
+            } else if self.aside && self.onboard_ready() {
+                // the keyboard by itself, as it lights its onboard layout: in the layout's own
+                // color, or with the screen off, no light
+                match self.screens.onboard_of(self.page.editing) {
+                    Some(p) => {
+                        if let Some(l) = p.light {
+                            want.0[1..4].copy_from_slice(&l);
+                        }
+                    }
+                    None => want.0[0] = 0,
+                }
             }
             if self.screen_sent != Some(want) {
                 self.screen_sent = Some(want);
@@ -3100,6 +3157,100 @@ impl Front {
         self.ui.set_menu_open(true);
         self.pl_menu = true;
         self.ui.set_pl_choosing(true);
+    }
+
+    /// The onboard layout's chooser selected: under it, the screen off and every screen
+    /// layout, each that the keyboard can't show whole saying what stays blank, then the
+    /// layout kept, to edit.
+    fn open_ob_menu(&mut self, anchor: (f32, f32, f32)) {
+        if let Some((at, when)) = self.shut.take() {
+            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
+                return;
+            }
+        }
+        let n = self.page.editing;
+        let kept = self.screens.onboard_of(n).map(|p| (p.id.clone(), p.name.clone()));
+        let row = |kind: i32, label: String, tick: bool, sub: &str| MenuRow { kind, label: label.into(), tag: "".into(), tick, sub: sub.into() };
+        let mut rows = vec![row(1, format!("{}’s onboard layout", self.page.profile_name(n)), false, "")];
+        rows.push(row(0, "Screen off".into(), kept.is_none(), ""));
+        for p in &self.screens.library {
+            rows.push(row(0, p.name.clone(), kept.as_ref().is_some_and(|(id, _)| *id == p.id), crate::lcd_page::Gaps::of(p).tag()));
+        }
+        rows.push(row(2, String::new(), false, ""));
+        match &kept {
+            Some((_, name)) => rows.push(row(0, format!("Edit {name}"), false, "")),
+            None => rows.push(row(5, "Edit".into(), false, "")),
+        }
+        self.close_menu();
+        self.close_picker();
+        let list: f32 = rows.iter().map(|r| match r.kind { 1 => 28.0, 2 => 11.0, _ => 33.0 }).sum();
+        let h = 6.0 + list + 6.0;
+        // (as wide as the longest row needs, its note too, from 248 to 340)
+        let w = rows.iter().map(|r| crate::text::width(400, 13.5, &r.label) + if r.sub.is_empty() { 0.0 } else { crate::text::width(400, 12.0, &r.sub) + 8.0 } + 64.0).fold(248.0f32, f32::max).min(340.0).ceil();
+        self.ui.set_menu_search(false);
+        self.ui.set_menu_back(false);
+        self.ui.set_menu_natural(h);
+        self.ui.set_menu_w(w);
+        self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
+        let (ax, ay, ah) = anchor;
+        let win = self.ui.get_window_height();
+        let (below, above) = (win - ay - ah - 14.0, ay - 70.0);
+        let down = h <= below || below >= h.min(260.0) || below >= above;
+        let room = if down { below } else { above };
+        self.ui.set_menu_ax(ax);
+        self.ui.set_menu_ay(ay);
+        self.ui.set_menu_ah(ah);
+        self.ui.set_menu_top(if down { ay + ah + 6.0 } else { ay - 6.0 - h.min(room) });
+        self.ui.set_menu_max(if h > room { room } else { win * 0.7 });
+        self.ui.set_menu_open(true);
+        self.ob_menu = true;
+        self.ui.set_ob_choosing(true);
+    }
+
+    /// Whether the keyboard can keep an onboard layout: from build 5 of Ectodeck's
+    /// firmware on (or, for the window's pictures of the tab, ECTODECK_NATIVE_ONBOARD).
+    fn onboard_ready(&self) -> bool {
+        crate::display::has(&self.firmware(), "screen.onboard") || std::env::var_os("ECTODECK_NATIVE_ONBOARD").is_some()
+    }
+
+    /// What the keyboard knows by itself, for the picture of its onboard layout: the time
+    /// (its own clock, which Ectodeck sets from this computer's), and the name and number
+    /// of the profile the tab shows; the rest as read here.
+    fn onboard_readings(&self) -> crate::lcd_page::Readings {
+        let mut r = self.readings.clone();
+        r.now = Some(crate::lcd_page::Moment::now());
+        if self.page.dev.is_some() {
+            r.profile = Some(self.page.profile_name(self.page.editing));
+            r.profile_number = Some(self.page.editing);
+        }
+        r
+    }
+
+    /// The layout the second tab's picture shows: one carried over the screen, before it
+    /// is let go, or else the one the profile keeps on the keyboard; None for the screen off.
+    fn ob_page(&self) -> Option<&crate::lcd_page::Page> {
+        match &self.ob_over {
+            Some(id) => self.screens.library.iter().find(|p| &p.id == id),
+            None => self.screens.onboard_of(self.page.editing),
+        }
+    }
+
+    /// The second tab's row under the screen: the chooser, named for the layout the
+    /// profile keeps on the keyboard and as wide as that name, and the line beside it,
+    /// which says what stays blank, if anything; on a keyboard without build 5 the row
+    /// says what the keyboard needs instead.
+    fn refresh_onboard(&mut self) {
+        self.ui.set_ob_ready(self.onboard_ready());
+        let kept = self.screens.onboard_of(self.page.editing);
+        let name = kept.map_or_else(|| "Screen off".to_string(), |p| p.name.clone());
+        let say = match kept {
+            None => "The screen and its backlight stay off while Ectodeck isn’t running.".to_string(),
+            Some(p) => crate::lcd_page::Gaps::of(p).line().unwrap_or_else(|| "While this tab is open, the keyboard shows this layout instead of the playlist.".to_string()),
+        };
+        self.ui.set_ob_chooser_w((crate::text::width(500, 13.0, &name) as f64 + 33.0).min(240.0).ceil() as f32);
+        self.ui.set_ob_name(name.into());
+        self.ui.set_ob_say(say.into());
+        self.ui.set_ob_over(self.ob_over.is_some());
     }
 
     /// The playlist's holding bar selected: under it, every screen layout,
@@ -3380,7 +3531,7 @@ impl Front {
     /// What a page may show besides the computer's readings, to the player:
     /// the profile the keyboard is using, and the weather outside.
     fn tell_context(&mut self) {
-        let profile = self.page.dev.as_ref().map(|_| self.page.profile_name(self.page.active()));
+        let profile = self.page.dev.as_ref().map(|_| (self.page.active(), self.page.profile_name(self.page.active())));
         let outside = self.weather.report().map(|r| (r.temperature as f64, crate::ecto_settings::sky(r.code)));
         if let Some(pl) = &self.player {
             pl.tell(crate::lcd_player::Control::Context(profile, outside));
@@ -3399,7 +3550,8 @@ impl Front {
             .settings
             .set("devices.z10.screen.pages", v["pages"].clone())
             .and_then(|_| self.settings.set("devices.z10.screen.playlists", v["playlists"].clone()))
-            .and_then(|_| self.settings.set("devices.z10.screen.plays", v["plays"].clone()));
+            .and_then(|_| self.settings.set("devices.z10.screen.plays", v["plays"].clone()))
+            .and_then(|_| self.settings.set("devices.z10.screen.onboard", v["onboard"].clone()));
         match saved {
             Ok(()) => {
                 self.screens_saved = self.screens.clone();
@@ -3421,6 +3573,7 @@ impl Front {
         }).read();
         r.now = Some(crate::lcd_page::Moment::now());
         r.profile = self.page.dev.as_ref().map(|_| self.page.profile_name(self.page.active()));
+        r.profile_number = self.page.dev.as_ref().map(|_| self.page.active());
         r.outside = self.weather.report().map(|w| (w.temperature as f64, crate::ecto_settings::sky(w.code)));
         self.readings = r;
         self.read_at = Some(Instant::now());
@@ -3502,8 +3655,6 @@ impl Front {
             return;
         }
         self.aside = aside;
-        // (the clock sent at once, not at the next second)
-        self.clock_sent = None;
         if let Some(pl) = &self.player {
             pl.tell(crate::lcd_player::Control::Aside(aside));
         }
@@ -3515,40 +3666,8 @@ impl Front {
         self.sync_aside();
     }
 
-    /// The keyboard's clock, while it shows its status screen with the time on: the time
-    /// as each second comes, as EVGA's Unleash sends it, since the keyboard keeps none
-    /// itself; the picture's clock with it.
-    fn feed_clock(&mut self) {
-        if !self.aside || self.kb.is_none() {
-            return;
-        }
-        let apps = self.page.draft()["lighting"]["lcd"]["apps"].as_u64().unwrap_or(0);
-        if apps & 0x20 == 0 {
-            self.clock_sent = None;
-            return;
-        }
-        let now = crate::lcd_page::clock_now();
-        if self.clock_sent == Some(now) {
-            return;
-        }
-        self.clock_sent = Some(now);
-        self.clock_fed = true;
-        self.ask_kb(device::Ask::Clock(Some(now), 0));
-        if self.page.view == View::Screen && self.ui.get_place() == "z10" {
-            self.draw_screen();
-        }
-    }
-
-    /// Ectodeck closing: the screen handed back to the keyboard's own screens, without
-    /// a clock, as EVGA's Unleash leaves it on closing (the keyboard keeps no time, so a
-    /// clock left on it would stand still).
+    /// Ectodeck closing: the screen handed back to the keyboard's own screens.
     pub fn quit_screen(&mut self) {
-        if self.clock_fed {
-            if let Some(d) = &self.page.dev {
-                let saved = screen_of(&d["profiles"][self.page.active().to_string()]["lighting"]);
-                self.ask_kb(device::Ask::Clock(None, saved.1));
-            }
-        }
         if let Some(p) = self.player.take() {
             p.quit(true);
         }
@@ -3742,23 +3861,38 @@ impl Front {
             return;
         }
         let (light, _) = screen_of(&self.page.draft()["lighting"]);
-        // the tab for when Ectodeck is closed: the keyboard's own status screen, in the
-        // default backlight, whatever the playlist plays
+        // the second tab: what the keyboard shows by itself, whatever the playlist plays. Its
+        // onboard layout, from build 5 of its firmware on (Some, or Some(None) for the screen
+        // off); before that, EVGA's status screen, in the default backlight
         let closed = self.ui.get_screen_closed() && self.editor.is_none();
+        let onboard = (closed && self.onboard_ready()).then(|| self.ob_page().cloned());
         let profile = [light[1], light[2], light[3]];
-        // the light as the keyboard's screen shows it, bled as its backlight bleeds
-        let (level, rgb) = (light[0], crate::z10::as_lit(if closed { profile } else { self.page_light(profile) }));
+        let lit = match &onboard {
+            Some(Some(p)) => p.light.unwrap_or(profile),
+            // (no light at all)
+            Some(None) => [0, 0, 0],
+            None if closed => profile,
+            None => self.page_light(profile),
+        };
+        // the light as the keyboard's screen shows it, bled as its backlight bleeds (and none
+        // with the screen off)
+        let level = if matches!(onboard, Some(None)) { 0 } else { light[0] };
+        let rgb = crate::z10::as_lit(lit);
         let sc = self.scale.max(1.0);
         let px = |w: f32| (w * sc).round() as u32;
         // editing: the page as edited, read here; otherwise what the keyboard shows
         let rows = match self.editor.as_ref().and_then(|ed| self.screens.library.get(ed.page)) {
             Some(p) => crate::lcd_page::render(p, &self.readings),
-            None if closed => {
-                let d = self.page.draft();
-                let clock = if self.aside { self.clock_sent } else { None };
-                crate::lcd_page::status_rows(d["lighting"]["lcd"]["apps"].as_u64().unwrap_or(0), self.page.editing, d["name"].as_str().unwrap_or(""), clock)
-            }
-            None => self.lcd.rows.clone(),
+            None => match &onboard {
+                Some(Some(p)) => crate::lcd_page::render_onboard(p, &self.onboard_readings()),
+                Some(None) => vec![String::new(); 4],
+                // (nothing sends the keyboard the time, so its clock's row is blank)
+                None if closed => {
+                    let d = self.page.draft();
+                    crate::lcd_page::status_rows(d["lighting"]["lcd"]["apps"].as_u64().unwrap_or(0), self.page.editing, d["name"].as_str().unwrap_or(""), None)
+                }
+                None => self.lcd.rows.clone(),
+            },
         };
         // (as large as its box leaves it)
         let (lw, lh) = (self.ui.get_lcd_w(), self.ui.get_lcd_h());
@@ -3769,7 +3903,7 @@ impl Front {
             self.ui.set_lcd_field(crate::lcd_draw::field(rgb, lv, px(lw)));
             self.lcd_drawn = Some(key);
         }
-        self.refresh_playlist([light[1], light[2], light[3]], level);
+        self.refresh_playlist([light[1], light[2], light[3]], light[0]);
     }
 
 }

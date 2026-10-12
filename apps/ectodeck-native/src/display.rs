@@ -1,7 +1,7 @@
 //! The Z10's Settings tab: the keyboard (its connection, its firmware and
 //! what that adds, its model), the same on every profile. What the sliders
 //! control and the keys game mode blocks are on Keys; the screen's light and
-//! the status screen it shows by itself are on Screen (see [screen_cells]).
+//! what the keyboard shows on it by itself are on Screen (see [screen_cells]).
 
 use serde_json::{json, Value};
 
@@ -155,11 +155,7 @@ pub const LIGHTS: [[u8; 3]; 7] = [[0xff, 0xff, 0xff], [0xff, 0x20, 0x00], [0xff,
 /// the color picker (`picking` while it is open on it), then how bright, on the app's
 /// slider with its value. Before it, while a layout with a light of its own plays (`own`,
 /// its name and its light), a line saying so.
-/// While the tab for when Ectodeck is closed is open (`closed`: the x and the width of
-/// the screen's own text, and the y of the row under the screen), the status screen's
-/// four items in that row, spread across the screen's text in the order of the rows they
-/// fill, and under them what that screen is.
-pub fn screen_cells(page: &Page, w: f32, from: f32, own: Option<(&str, [u8; 3])>, closed: Option<(f32, f32, f32)>, picking: bool) -> Vec<Cell> {
+pub fn screen_cells(page: &Page, w: f32, from: f32, own: Option<(&str, [u8; 3])>, picking: bool) -> Vec<Cell> {
     let mut c = Vec::new();
     let l = &page.draft()["lighting"];
     let lc = &l["lcd"]["color"];
@@ -214,23 +210,6 @@ pub fn screen_cells(page: &Page, w: f32, from: f32, own: Option<(&str, [u8; 3])>
             c.push(text_cell(style::NOTE, x, 8.0, sw + 2.0, 20.0, &s));
             c.push(Cell { color: slint::Color::from_rgb_u8(light[0], light[1], light[2]), ..cell(kind::BOX, x - 16.0, 13.5, 9.0, 9.0) });
         }
-    }
-    if let Some((tx, tw, y)) = closed {
-        let apps = l["lcd"]["apps"].as_u64().unwrap_or(0);
-        // the profile, key rollover, the mode, the clock: the order of the rows they fill
-        // (not EVGA Precision X1's stats, which the firmware never draws)
-        let order = [1usize, 3, 2, 0];
-        // (spread by the words' own widths, so the last one's words end where the screen's text does)
-        let widths: Vec<f32> = order.iter().map(|&i| 28.0 + crate::text::width(400, 13.0, LCD_APPS[i].1)).collect();
-        let gap = ((tw - widths.iter().sum::<f32>()) / (order.len() - 1) as f32).max(16.0);
-        let mut x = tx;
-        for (k, &i) in order.iter().enumerate() {
-            let (bit, n) = LCD_APPS[i];
-            c.push(Cell { on: apps & bit != 0, id: id(Ctl::LcdApp), index: i as i32, text: n.into(), ..cell(kind::CHECKBOX, x, y, widths[k] + 2.0, 20.0) });
-            x += widths[k] + gap;
-        }
-        // (its cell to the box's inner edge, so a screen narrower than the note doesn't cut it short)
-        c.push(text_cell(style::NOTE, tx, y + 38.0, w - tx - 16.0, 18.0, "The keyboard’s native layout, built into its firmware, so its parts can only be switched on or off."));
     }
     c
 }
