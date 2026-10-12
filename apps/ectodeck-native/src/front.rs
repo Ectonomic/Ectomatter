@@ -107,6 +107,8 @@ pub enum Ask {
     PlHoldMenu(f32, f32, f32),
     /// a script's screen ended, the playlist back on the screen
     PlBack,
+    /// the Screen tab's other state opened: while Ectodeck runs, or when it is closed
+    ScreenState,
     /// a page of the Library opened in the editor
     LibEdit(i32),
     /// the page editor: open on the playlist's page, close; add a piece (0
@@ -572,6 +574,7 @@ impl Front {
         on!(on_pl_rename_done, |keep, t| Ask::PlRenameDone(keep, t.to_string()));
         on!(on_pl_hold_menu, |x, y, h| Ask::PlHoldMenu(x, y, h));
         on!(on_pl_back, Ask::PlBack);
+        on!(on_screen_state, Ask::ScreenState);
         on!(on_lib_edit, |k| Ask::LibEdit(k));
         on!(on_page_show, |i| Ask::PageShow(i));
         on!(on_page_moved, |i, j| Ask::PageMove(i, j));
@@ -1177,6 +1180,8 @@ impl Front {
                         pl.tell(crate::lcd_player::Control::EndSequence);
                     }
                 }
+                // (the screen drawn again, as the state now open shows it)
+                Ask::ScreenState => self.lcd_drawn = None,
                 Ask::LibEdit(k) => self.edit_page(k.max(0) as usize),
                 Ask::LcdTick => {
                     // the readings again each second: for the page being edited (its
@@ -2779,11 +2784,25 @@ impl Front {
             self.ui.set_settings_h(h);
             self.show_cells(cells);
         } else if loaded && self.page.view == View::Screen {
-            // (as wide as Profiles, under it: the default backlight, then the status screen)
-            let (t, first) = crate::display::defaults(&self.page, 240.0);
-            self.ui.set_defaults_h(t.height);
-            self.ui.set_backlight_h(first);
-            self.show_cells(t.cells);
+            // round the screen's box: the default backlight at the right end of the tabs'
+            // row, and while the closed tab is open, the status screen's items in the row
+            // under the screen, across the screen's own text (the box's walls: 16 round the
+            // bay, the bay's gutter 24 round the screen); none while a page is edited
+            let cells = if self.editor.is_some() {
+                Vec::new()
+            } else {
+                let w = self.ui.get_under_w();
+                let closed = self.ui.get_screen_closed();
+                let own = if closed { None } else { self.shown().and_then(|p| p.light.map(|l| (p.name.clone(), l))) };
+                let (lw, lh) = (self.ui.get_lcd_w(), self.ui.get_lcd_h());
+                let row = closed.then(|| ((w - lw) / 2.0, lw, 36.0 + 16.0 + lh + 48.0 + 14.0));
+                let picking = self.pick.as_ref().is_some_and(|p| p.ctl == Ctl::LcdColor);
+                // the room the two tabs leave on their row: each tab its words and 18 either side, 4
+                // between them, the open second tab's foot, then a gap (the names as app.slint has them)
+                let tabs: f32 = ["While Ectodeck runs", "When Ectodeck is closed"].iter().map(|t| crate::text::width(500, 13.0, t) + 36.0).sum();
+                crate::display::screen_cells(&self.page, w, tabs + 4.0 + 10.0 + 24.0, own.as_ref().map(|(n, l)| (n.as_str(), *l)), row, picking)
+            };
+            self.show_cells(cells);
             self.refresh_editor();
             self.draw_screen();
         } else if loaded && self.page.view == View::Display {
@@ -3642,13 +3661,21 @@ impl Front {
             return;
         }
         let (light, _) = screen_of(&self.page.draft()["lighting"]);
+        // the tab for when Ectodeck is closed: the keyboard's own status screen, in the
+        // default backlight, whatever the playlist plays
+        let closed = self.ui.get_screen_closed() && self.editor.is_none();
+        let profile = [light[1], light[2], light[3]];
         // the light as the keyboard's screen shows it, bled as its backlight bleeds
-        let (level, rgb) = (light[0], crate::z10::as_lit(self.page_light([light[1], light[2], light[3]])));
+        let (level, rgb) = (light[0], crate::z10::as_lit(if closed { profile } else { self.page_light(profile) }));
         let sc = self.scale.max(1.0);
         let px = |w: f32| (w * sc).round() as u32;
         // editing: the page as edited, read here; otherwise what the keyboard shows
         let rows = match self.editor.as_ref().and_then(|ed| self.screens.library.get(ed.page)) {
             Some(p) => crate::lcd_page::render(p, &self.readings),
+            None if closed => {
+                let d = self.page.draft();
+                crate::lcd_page::status_rows(d["lighting"]["lcd"]["apps"].as_u64().unwrap_or(0), self.page.editing, d["name"].as_str().unwrap_or(""))
+            }
             None => self.lcd.rows.clone(),
         };
         // (as large as its box leaves it)

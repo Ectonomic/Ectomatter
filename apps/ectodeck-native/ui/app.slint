@@ -1355,14 +1355,15 @@ component CellView inherits Rectangle {
         }
     }
     // a slider on a well, filled to its place in its color; the knob follows the pointer while held
-    // (style 1: in a box of the well's own shade, the track a step lighter than it)
+    // (style 1: in a box of the well's own shade, the track a step lighter than it; style 2: the
+    // same track on the page itself, the knob ringed in the page's shade)
     if root.c.kind == 41: filled := Rectangle {
         property <float> at: fdrag.pressed ? max(0, min(1, (fdrag.mouse-x - 9px) / (self.width - 18px))) : root.c.value;
         Rectangle {
             y: 7px;
             height: 6px;
             border-radius: 3px;
-            background: root.c.style == 1 ? Ink.hover-box : Ink.well;
+            background: root.c.style >= 1 ? Ink.hover-box : Ink.well;
             clip: true;
             Rectangle {
                 x: 0;
@@ -1379,7 +1380,7 @@ component CellView inherits Rectangle {
             width: self.d + 6px;
             height: self.d + 6px;
             border-radius: self.width / 2;
-            background: root.c.style == 1 ? Ink.well : Ink.box;
+            background: root.c.style == 2 ? Ink.base : root.c.style == 1 ? Ink.well : Ink.box;
             drop-shadow-blur: 6px;
             drop-shadow-offset-y: 2px;
             drop-shadow-color: #000000aa;
@@ -1410,7 +1411,7 @@ component CellView inherits Rectangle {
     // a color's dot, ringed while the picker is open on it; style 1 opens the picker for any color
     // (in a cell under 28 across, as a narrow box has them: the dot 20 across, its ring a
     // hairline of the brightest ink, kept apart from it by the box's own shade)
-    if root.c.kind == 42: dotcell := Rectangle {
+    if root.c.kind == 42 && root.c.style != 2: dotcell := Rectangle {
         property <bool> small: root.width < 28px;
         border-radius: self.width / 2;
         border-width: root.c.on ? (self.small ? 1.5px : 2px) : 0;
@@ -1437,6 +1438,35 @@ component CellView inherits Rectangle {
             }
         }
         dot-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+        }
+    }
+    // style 2: a color's dot and its code as one button, lit under the pointer and while the
+    // picker is open on it (the screen's default backlight, on the page itself)
+    if root.c.kind == 42 && root.c.style == 2: Rectangle {
+        border-radius: 7px;
+        background: code-ta.has-hover || root.c.on ? Ink.hover-box : transparent;
+        Rectangle {
+            x: 4px;
+            y: (parent.height - self.height) / 2;
+            width: 20px;
+            height: 20px;
+            border-radius: 10px;
+            background: root.c.color;
+            border-width: 1px;
+            border-color: #ffffff2a;
+        }
+        Text {
+            x: 32px;
+            width: parent.width - 32px;
+            text: root.c.text;
+            font-family: "Geist";
+            font-size: 13px;
+            color: Ink.bright;
+            vertical-alignment: center;
+        }
+        code-ta := TouchArea {
             mouse-cursor: pointer;
             clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
         }
@@ -1701,10 +1731,11 @@ component Well inherits Rectangle {
     callback clicked;
     width: 23.56px;
     height: 23.56px;
-    border-radius: 5px;
+    // round, as every color dot in the app is
+    border-radius: self.width / 2;
     background: root.c;
     Rectangle {
-        border-radius: 5px;
+        border-radius: self.width / 2;
         border-width: 1px;
         border-color: ta.has-hover ? #ffffff99 : #ffffff24;
     }
@@ -2079,6 +2110,62 @@ component EffectGrid inherits PageBox {
             mouse-cursor: pointer;
             clicked => { root.chose(i); }
         }
+    }
+}
+
+// One of the screen's two states, as a folder tab on the top of the screen's box, as wide
+// as its name: open, in the box's charcoal and running on into it, its feet curving into
+// the box's top edge (the left one not on the first tab, which sits on the box's square
+// corner); shut, its name quieter on the page, lit a little under the pointer.
+component StateTab inherits Rectangle {
+    in property <string> text;
+    in property <bool> open;
+    in property <bool> first;
+    callback clicked;
+    width: words.preferred-width + 36px;
+    height: 36px;
+    if root.open && !root.first: Rectangle {
+        x: -10px;
+        y: parent.height - 10px;
+        width: 10px;
+        height: 10px;
+        background: Ink.well;
+        Rectangle {
+            background: Ink.base;
+            border-bottom-right-radius: 10px;
+        }
+    }
+    if root.open: Rectangle {
+        x: parent.width;
+        y: parent.height - 10px;
+        width: 10px;
+        height: 10px;
+        background: Ink.well;
+        Rectangle {
+            background: Ink.base;
+            border-bottom-left-radius: 10px;
+        }
+    }
+    Rectangle {
+        border-top-left-radius: 10px;
+        border-top-right-radius: 10px;
+        background: root.open ? Ink.well : tab-ta.has-hover ? Ink.box : transparent;
+    }
+    words := Text {
+        x: 18px;
+        height: parent.height;
+        text: root.text;
+        font-family: "Geist";
+        font-size: 13px;
+        font-weight: 500;
+        color: root.open ? Ink.bright : tab-ta.has-hover ? Ink.dim : Ink.soft;
+        vertical-alignment: center;
+    }
+    // the open tab is already chosen: only the other one answers the pointer
+    tab-ta := TouchArea {
+        enabled: !root.open;
+        mouse-cursor: root.open ? MouseCursor.default : MouseCursor.pointer;
+        clicked => { root.clicked(); }
     }
 }
 
@@ -3277,13 +3364,14 @@ export component AppWindow inherits Window {
     // the Screen tab: the screen as it is now, drawn large and as the playlist's
     // picture of Stats; the launch sequence's picture beside its checkbox; what
     // is playing (0 playing, 1 paused, 2 another program has the screen, 3 the
-    // keyboard's screen isn't there); whether launches break in; and the
-    // height of the two boxes under Profiles together, and of the first
-    // (the default backlight; the status screen's box under it)
+    // keyboard's screen isn't there); whether launches break in; and which of
+    // the screen's two states its box has open: while Ectodeck runs (playing
+    // the profile's playlist), or when it is closed (the keyboard's own status
+    // screen), told to the page as it changes
     in property <image> lcd-big;
     in property <int> lcd-state;
-    in property <length> defaults-h;
-    in property <length> backlight-h;
+    in-out property <bool> screen-closed: false;
+    callback screen-state();
     callback lcd-pause();
     // the playlist's panel: the playlist's name, and the width its chooser
     // takes; the chooser's menu open; the name being changed in place, and
@@ -3526,12 +3614,22 @@ export component AppWindow inherits Window {
     property <length> board-top: head-end + kb-pad-y;
     // under the keyboard: the anchoring column (the profiles, what goes with
     // them), and beside it the tab's boxes
-    // the Screen tab, in two columns: Profiles at the top of the left one, the default
-    // backlight and the status screen under them; in the right one the screen's box, the
-    // playlist's panel attached under it, and Layouts. The box is as tall as leaves the
-    // panel's foot level with the Profiles box's.
+    // the Screen tab, in two columns: Profiles alone in the left one; in the right one
+    // the screen's two states as folder tabs on a row over the screen's box, the default
+    // backlight at the row's right end (it lights both); the box holding the screen and,
+    // under it, the playlist while Ectodeck runs (Layouts joined to the box's foot), or the
+    // status screen's items when it is closed. The box is as tall as Profiles; with the
+    // closed tab's note under its items, a row taller. (`stage-h` is the screen's part of
+    // the box, and the whole box while a page is edited.)
     property <length> pl-panel-h: 56px;
     property <length> stage-h: anchor.preferred-height - pl-panel-h;
+    property <length> tabs-h: root.screen-editing ? 0 : 36px;
+    // the box: as tall as Profiles (on the closed tab, 18 more for the note), less whatever a
+    // narrow window takes off the screen's height, so the row under the screen keeps its margin
+    property <length> lcd-short: stage-h - 2 * bay-pad - 2 * kb-pad-y - lcd-h;
+    property <length> box-h: root.screen-editing ? stage-h : anchor.preferred-height - lcd-short + (root.screen-closed ? 18px : 0);
+    // the row under the screen in the box: the bay 16 in from the box's top, its gutter round the screen
+    property <length> band-y: tabs-h + bay-pad + lcd-h + 2 * kb-pad-y;
     // the bay the screen sits in (the screen and its gutter), and the box's gray round the
     // bay, above and below it as at its sides
     property <length> bay-pad: 16px;
@@ -3548,11 +3646,11 @@ export component AppWindow inherits Window {
     in property <color> lcd-field: #0a0908;
     // (on the Screen tab, what is under the screen's box and its panel: the Library, or
     // the page editor's boxes)
-    property <length> under-top: root.tab == 3 ? head-end + stage-h + (root.screen-editing ? 0 : pl-panel-h) + 18px : head-end + board-h + 2 * kb-pad-y + 18px;
+    property <length> under-top: root.tab == 3 ? head-end + (root.screen-editing ? stage-h + 18px : tabs-h + box-h) : head-end + board-h + 2 * kb-pad-y + 18px;
     // the playlist's name changed in place: where its field is in the window, so a press
     // away from it keeps the name
     out property <length> pl-rename-wx: rail-w + under-x + 16px;
-    out property <length> pl-rename-wy: bar + 56px + flick.content-y + head-end + stage-h + 14px;
+    out property <length> pl-rename-wy: bar + 56px + flick.content-y + head-end + band-y + 14px;
     property <length> anchor-w: 240px;
     property <length> under-x: pws-x + anchor-w + 16px;
     out property <length> under-w: pws-w - anchor-w - 16px;
@@ -3599,13 +3697,13 @@ export component AppWindow inherits Window {
     property <int> ed-n: under-w >= 3 * 320px + 24px ? 3 : under-w >= 2 * 320px + 12px ? 2 : 1;
     property <int> ed-rows: ed-n == 3 ? 1 : ed-n == 2 ? 2 : 3;
     property <length> ed-need: max(root.ed-piece-h, max(root.ed-place-h, root.ed-page-h));
-    property <length> ed-row: max(ed-need, ed-rows == 1 ? root.defaults-h + pl-panel-h : 0);
+    property <length> ed-row: ed-need;
     property <length> ed-h: ed-rows * ed-row + (ed-rows - 1) * 12px;
     property <length> tab-h: root.tab == 0 ? (second-fits ? keys-h : keys-h + 12px + second-h)
-        : root.tab == 1 ? light-h : root.tab == 3 ? (root.screen-editing ? ed-h : shelf-h) : root.tile-height;
+        : root.tab == 1 ? light-h : root.tab == 3 ? (root.screen-editing ? ed-h : root.screen-closed ? 0 : shelf-h) : root.tile-height;
     property <length> under-board: 18px + max(anchor.preferred-height, tab-h);
     property <length> page-h: root.tab == 2 ? 12px + head-h + 6px + 24px + root.tile-height + 40px
-        : root.tab == 3 ? max(head-end + anchor.preferred-height + 18px + root.defaults-h, under-top + tab-h) + 24px
+        : root.tab == 3 ? max(head-end + anchor.preferred-height, under-top + tab-h) + 24px
         : board-top + board-h + kb-pad-y + under-board + 24px;
     // the page's scrollbar, as WebKit drew it: over the whole window, when the page is longer than it
     property <length> doc-h: bar + 56px + page-h;
@@ -3984,14 +4082,15 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
-                // Screen, the right column: the screen in its dark box, the playlist's panel
-                // attached under the box, and the Library under the panel. (All in one part of
-                // the window, so a screen carried from the Library knows where the panel is.)
+                // Screen, the right column: the tabs of the screen's two states over its dark box,
+                // the playlist's panel in the box under the screen, and the Library joined to the
+                // box's foot. (All in one part of the window, so a screen carried from the Library
+                // knows where the panel is.)
                 if root.tab == 3: stage := Rectangle {
                     x: under-x;
                     y: head-end;
                     width: under-w;
-                    height: stage-h + pl-panel-h + 18px + shelf-h;
+                    height: root.screen-editing ? stage-h : tabs-h + box-h + (root.screen-closed ? 0 : shelf-h);
                     // a screen carried to `wx`, `wy` in the window: where the pointer holds it
                     // here, and where that is along the strip (anywhere over the panel, it can land)
                     function carry-to(wx: length, wy: length) {
@@ -4024,25 +4123,51 @@ export component AppWindow inherits Window {
                             root.pl-carry-drop();
                         }
                     }
-                    // the panel's gray behind the box's lower corners, where the two meet
+                    // the screen's two states, as folder tabs on the box's top
+                    if !root.screen-editing: HorizontalLayout {
+                        x: 0;
+                        y: 0;
+                        height: tabs-h;
+                        spacing: 4px;
+                        alignment: start;
+                        StateTab {
+                            text: "While Ectodeck runs";
+                            open: !root.screen-closed;
+                            first: true;
+                            clicked => {
+                                root.screen-closed = false;
+                                root.screen-state();
+                            }
+                        }
+                        StateTab {
+                            text: "When Ectodeck is closed";
+                            open: root.screen-closed;
+                            clicked => {
+                                root.screen-closed = true;
+                                root.screen-state();
+                            }
+                        }
+                    }
+                    // Layouts' gray behind the box's lower corners, where the two meet
                     Rectangle {
-                        visible: !root.screen-editing;
-                        y: stage-h - 12px;
+                        visible: !root.screen-editing && !root.screen-closed;
+                        y: tabs-h + box-h - 12px;
                         height: 24px;
                         background: Ink.box;
                     }
-                    // the screen's box
+                    // the screen's box (square at its top left under the first tab, open)
                     Rectangle {
-                        y: 0;
-                        height: stage-h;
+                        y: tabs-h;
+                        height: box-h;
                         border-radius: 12px;
+                        border-top-left-radius: !root.screen-editing && !root.screen-closed ? 0 : 12px;
                         background: Ink.well;
                         // the bay the screen is set into, between plain walls: the screen's own
                         // background color, its corners rounded inside the box's, its top edge
                         // shaded as a step down into it
                         Rectangle {
                             x: (parent.width - self.width) / 2;
-                            y: (parent.height - self.height) / 2;
+                            y: root.screen-editing ? (parent.height - self.height) / 2 : bay-pad;
                             width: lcd-w + 2 * kb-pad-y;
                             height: lcd-h + 2 * kb-pad-y;
                             border-radius: 10px;
@@ -4060,7 +4185,7 @@ export component AppWindow inherits Window {
                         }
                         Rectangle {
                             x: (parent.width - lcd-w) / 2;
-                            y: (parent.height - lcd-h) / 2;
+                            y: root.screen-editing ? (parent.height - lcd-h) / 2 : bay-pad + kb-pad-y;
                             width: lcd-w;
                             height: lcd-h;
                             border-radius: 4px;
@@ -4154,12 +4279,9 @@ export component AppWindow inherits Window {
                     // Pause, which playlist, then one round of it, left to right, each turn as long
                     // as its time, and the round starting again after it.
                     panel := Rectangle {
-                        visible: !root.screen-editing;
-                        y: stage-h;
+                        visible: !root.screen-editing && !root.screen-closed;
+                        y: band-y;
                         height: pl-panel-h;
-                        background: Ink.box;
-                        border-bottom-left-radius: 12px;
-                        border-bottom-right-radius: 12px;
                         // Pause, at the playlist's right end, after the round's start again
                         PlayButton {
                             x: parent.width - 16px - self.width;
@@ -4175,7 +4297,7 @@ export component AppWindow inherits Window {
                             width: root.pl-chooser-w;
                             height: 28px;
                             border-radius: 7px;
-                            background: cho-ta.has-hover || root.pl-choosing ? Ink.hover-box : transparent;
+                            background: cho-ta.has-hover || root.pl-choosing ? Ink.hover-well : transparent;
                             Text {
                                 x: 8px;
                                 width: parent.width - 33px;
@@ -4215,7 +4337,7 @@ export component AppWindow inherits Window {
                             width: 195px;
                             height: 28px;
                             border-radius: 7px;
-                            background: Ink.well;
+                            background: Ink.box;
                             border-width: 1px;
                             border-color: #4a4a52;
                             TouchArea {
@@ -4253,7 +4375,7 @@ export component AppWindow inherits Window {
                                 width: 22px;
                                 height: 22px;
                                 border-radius: 5px;
-                                background: ok-ta.has-hover ? Ink.hover-box : transparent;
+                                background: ok-ta.has-hover ? Ink.hover-well : transparent;
                                 Path {
                                     x: 4.5px;
                                     y: 4.5px;
@@ -4298,8 +4420,9 @@ export component AppWindow inherits Window {
                             y: -16px;
                             width: root.pl-track-w;
                             height: 16px + pl-panel-h;
-                            // where a carried layout will land: one empty bar in the well's charcoal (as
-                            // the holding bar), the turn's whole room, the others making room
+                            // where a carried layout will land: one empty bar in the box's shade (as the
+                            // holding bar; the screen's charcoal wouldn't show on the box's), the turn's
+                            // whole room, the others making room
                             if root.pl-slot-w > 0: Rectangle {
                                 x: root.pl-slot-x - root.pl-pre;
                                 y: 32px;
@@ -4307,11 +4430,11 @@ export component AppWindow inherits Window {
                                 height: 24px;
                                 animate x, width { duration: 250ms; easing: ease; }
                                 border-radius: 5px;
-                                background: Ink.well;
+                                background: Ink.box;
                             }
-                            // the empty holding bar, at the strip's end: a turn's room, in the well's own
-                            // shade, with a "+": select it for a menu of the layouts to add. The whole
-                            // strip while the playlist is empty, saying how to fill it.
+                            // the empty holding bar, at the strip's end: a turn's room, a step lighter than
+                            // the screen's charcoal it sits on, with a "+": select it for a menu of the
+                            // layouts to add. The whole strip while the playlist is empty, saying how to fill it.
                             if root.pl-hold-w > 0: Rectangle {
                                 x: root.pl-hold-x;
                                 y: 32px;
@@ -4320,7 +4443,7 @@ export component AppWindow inherits Window {
                                 animate x, width { duration: root.pl-live ? 0ms : 250ms; easing: ease; }
                                 border-radius: 5px;
                                 property <bool> lit: (hold-ta.has-hover || root.pl-adding) && !root.carry-on;
-                                background: hold-ta.pressed ? Ink.pick : self.lit ? Ink.hover-well : Ink.well;
+                                background: hold-ta.pressed ? Ink.pick : self.lit ? Ink.hover-box : Ink.box;
                                 animate background { duration: 120ms; }
                                 Path {
                                     x: root.pl-empty ? 10px : (parent.width - 12px) / 2;
@@ -4620,11 +4743,13 @@ export component AppWindow inherits Window {
                     // or put it on the playlist's end from its card; an empty block after them
                     // for a new one
                     if root.boot == 0: PageBox {
-                        visible: !root.screen-editing;
+                        visible: !root.screen-editing && !root.screen-closed;
                         x: 0;
-                        y: stage-h + pl-panel-h + 18px;
+                        y: tabs-h + box-h;
                         width: under-w;
                         height: shelf-h;
+                        border-top-left-radius: 0;
+                        border-top-right-radius: 0;
                         title: "Layouts";
                         // how the Library is used, at the end of its title's line
                         Text {
@@ -4744,6 +4869,16 @@ export component AppWindow inherits Window {
                         }
                     }
 
+                    // the pieces round the box, in the column's terms: the default backlight at the
+                    // tabs' row's right end; on the closed tab, the status screen's items and its note
+                    if root.boot == 0 && !root.screen-editing: Rectangle {
+                        for c in root.cells: CellView {
+                            c: c;
+                            pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
+                            slide(id, v) => { root.cell-slide(id, v); }
+                        }
+                    }
+
                     // ---------------------------------------------------- the screen carried
                     // its name, under the pointer; let go over the panel, it settles into its room
                     if root.carry-on: Rectangle {
@@ -4769,47 +4904,6 @@ export component AppWindow inherits Window {
                             color: Ink.bright;
                             vertical-alignment: center;
                         }
-                    }
-                }
-                // under Profiles in the left column, two boxes of the profile's: its default
-                // backlight and how bright, which the screen uses while Ectodeck isn't running
-                // and for any screen layout without a set color; and the items on the keyboard's
-                // status screen, which shows while Ectodeck isn't running. Each in the Profiles
-                // box's own shade, under a heading as the Profiles box's; the cells laid out in
-                // the first box's terms, across both.
-                if root.tab == 3 && root.boot == 0: Rectangle {
-                    x: pws-x;
-                    y: head-end + anchor.preferred-height + 18px;
-                    width: anchor-w;
-                    height: root.defaults-h;
-                    Rectangle {
-                        y: 0;
-                        height: root.backlight-h;
-                        border-radius: 12px;
-                        background: Ink.well;
-                        AnchorHead {
-                            x: 8px;
-                            y: 4px;
-                            width: parent.width - 16px;
-                            text: "DEFAULT BACKLIGHT";
-                        }
-                    }
-                    Rectangle {
-                        y: root.backlight-h + 18px;
-                        height: root.defaults-h - root.backlight-h - 18px;
-                        border-radius: 12px;
-                        background: Ink.well;
-                        AnchorHead {
-                            x: 8px;
-                            y: 4px;
-                            width: parent.width - 16px;
-                            text: "STATUS SCREEN";
-                        }
-                    }
-                    for c in root.cells: CellView {
-                        c: c;
-                        pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
-                        slide(id, v) => { root.cell-slide(id, v); }
                     }
                 }
                 // the page editor's box 1 of 3: the piece chosen

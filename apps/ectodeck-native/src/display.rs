@@ -1,7 +1,7 @@
 //! The Z10's Settings tab: the keyboard (its connection, its firmware and
 //! what that adds, its model), the same on every profile. What the sliders
 //! control and the keys game mode blocks are on Keys; the screen's light and
-//! the screens it shows by itself are on Screen (see [closed]).
+//! the status screen it shows by itself are on Screen (see [screen_cells]).
 
 use serde_json::{json, Value};
 
@@ -148,63 +148,91 @@ pub fn tiles(fw: &Value, connected: Option<bool>) -> Tiles {
 /// The screen light's ready colors: white first, the keyboard's own default.
 pub const LIGHTS: [[u8; 3]; 7] = [[0xff, 0xff, 0xff], [0xff, 0x20, 0x00], [0xff, 0x8a, 0x00], [0xff, 0xd0, 0x00], [0x3b, 0xdc, 0x6b], [0x3f, 0xa9, 0xff], [0xb0, 0x6b, 0xff]];
 
-/// The Screen tab's two boxes under Profiles, `w` wide, for the profile being
-/// edited: its default backlight (the ready colors, or one of its own from the
-/// picker, and how bright), which the screen uses while Ectodeck isn't running
-/// and for any screen layout without a set color; then, 18 under it, the items
-/// on the keyboard's status screen, which shows while Ectodeck isn't running.
-/// The cells, in the two boxes' own terms (the first box's corner); their
-/// headings are drawn by the page, as the Profiles box's is. The height of
-/// both, and of the first.
-pub fn defaults(page: &Page, w: f32) -> (Tiles, f32) {
+/// The Screen tab's pieces round the screen's box, for the profile being edited, in the
+/// right column's terms (its top left), `w` wide. On the tabs' row (36 tall), at its right
+/// end, in the room the tabs leave from `from`, the default backlight, which lights the
+/// screen in both its states: its color as its dot and its code, one button that opens
+/// the color picker (`picking` while it is open on it), then how bright, on the app's
+/// slider with its value. Before it, while a layout with a light of its own plays (`own`,
+/// its name and its light), a line saying so.
+/// While the tab for when Ectodeck is closed is open (`closed`: the x and the width of
+/// the screen's own text, and the y of the row under the screen), the status screen's
+/// four items in that row, spread across the screen's text in the order of the rows they
+/// fill, and under them what that screen is.
+pub fn screen_cells(page: &Page, w: f32, from: f32, own: Option<(&str, [u8; 3])>, closed: Option<(f32, f32, f32)>, picking: bool) -> Vec<Cell> {
     let mut c = Vec::new();
     let l = &page.draft()["lighting"];
-    let x = 16.0;
-    let inner = w - 32.0;
     let lc = &l["lcd"]["color"];
     let b = |v: &Value| v.as_u64().unwrap_or(0).min(255) as u8;
     let rgb = [b(&lc["color"][0]), b(&lc["color"][1]), b(&lc["color"][2])];
     let col = slint::Color::from_rgb_u8(rgb[0], rgb[1], rgb[2]);
-    // how bright first, its value at the right; the slider under it
     let br = lc["brightness"].as_f64().unwrap_or(255.0);
-    c.push(text_cell(style::SMALL, x, 38.0, inner - 60.0, 20.0, "Brightness"));
+    // from the row's right end leftward: how bright, the slider, its name; the color (its dot
+    // and its code, one button), the name of both. (Each text's cell runs 2 past its words,
+    // into the gap after them, so the gaps are the words' own.)
+    let t = |s: &str| crate::text::width(400, 12.5, s);
     let v = format!("{}%", (br / 2.55).round());
-    let pw = crate::text::width(400, 12.0, &v) + 14.0;
-    c.push(Cell { text: v.into(), style: 2, ..cell(kind::PILL, w - 16.0 - pw, 38.0, pw, 20.0) });
-    c.push(Cell { value: (br / 255.0) as f32, color: col, style: 1, id: id(Ctl::LcdBrightness), ..cell(kind::FILLED, x, 60.0, inner, 20.0) });
-    // then the colors: the dots 20 across, spread evenly from the box's inner edge to the
-    // other (as the slider runs), each in a cell with room for its ring
-    let (dot, ring) = (20.0, 3.5);
-    let step = (inner - dot) / LIGHTS.len() as f32;
-    let preset = LIGHTS.iter().position(|p| *p == rgb);
-    for (i, p) in LIGHTS.iter().enumerate() {
-        let col = slint::Color::from_rgb_u8(p[0], p[1], p[2]);
-        c.push(Cell { color: col, on: preset == Some(i), id: id(Ctl::LcdPreset), index: i as i32, ..cell(kind::COLOR_DOT, x - ring + i as f32 * step, 94.0 - ring, dot + 2.0 * ring, dot + 2.0 * ring) });
+    // (the pill as wide at every value as at 100%, so the slider never shifts under the pointer)
+    let pw = crate::text::width(400, 12.0, "100%") + 14.0;
+    let hex = crate::lighting::hex_of(rgb);
+    let cw = 4.0 + 20.0 + 8.0 + crate::text::width(400, 13.0, &hex) + 9.0;
+    // In a window too narrow for all of it beside the tabs (which end at `from`), the slider
+    // shortens, to 72 at the least, then the words go: Brightness's first (the slider and its
+    // value still read as how bright), then the default backlight's; the slider takes back
+    // what a word leaves, to 120. Reckoned with the widest color code, so a color picked
+    // never moves it.
+    let widest = 4.0 + 20.0 + 8.0 + crate::text::width(400, 13.0, "#") + 6.0 * "0123456789ABCDEF".chars().map(|d| crate::text::width(400, 13.0, &d.to_string())).fold(0.0, f32::max) + 9.0;
+    let (bw, lw) = (t("Brightness"), t("Default backlight"));
+    let room = w - from - pw - 12.0 - 22.0 - widest;
+    let (with_bright, with_name) = if 72.0 + 10.0 + bw + 10.0 + lw <= room { (true, true) } else if 72.0 + 10.0 + lw <= room { (false, true) } else { (false, false) };
+    let sl = (room - if with_bright { 10.0 + bw } else { 0.0 } - if with_name { 10.0 + lw } else { 0.0 }).clamp(72.0, 120.0);
+    let mut x = w - pw;
+    c.push(Cell { text: v.into(), style: 2, ..cell(kind::PILL, x, 8.0, pw, 20.0) });
+    x -= 12.0 + sl;
+    c.push(Cell { value: (br / 255.0) as f32, color: col, style: 2, id: id(Ctl::LcdBrightness), ..cell(kind::FILLED, x, 8.0, sl, 20.0) });
+    if with_bright {
+        x -= 10.0 + bw;
+        c.push(text_cell(style::SMALL, x, 8.0, bw + 2.0, 20.0, "Brightness"));
     }
-    // a color of its own: shown as itself once chosen, otherwise a dot to choose one
-    let own = preset.is_none();
-    c.push(Cell { color: col, on: own, style: if own { 0 } else { 1 }, id: id(Ctl::LcdColor), ..cell(kind::COLOR_DOT, x - ring + LIGHTS.len() as f32 * step, 94.0 - ring, dot + 2.0 * ring, dot + 2.0 * ring) });
-    let mut y = 128.0;
-    for line in crate::text::wrap(400, 12.0, "The color the LCD backlight uses when Ectodeck isn’t running, and for any screen layout without a set color.", inner) {
-        c.push(text_cell(style::CREDIT, x, y, inner, 17.0, &line));
-        y += 17.0;
+    x -= 22.0 + cw;
+    c.push(Cell { color: col, on: picking, style: 2, text: hex.into(), id: id(Ctl::LcdColor), ..cell(kind::COLOR_DOT, x, 4.0, cw, 28.0) });
+    if with_name {
+        x -= 10.0 + lw;
+        c.push(text_cell(style::SMALL, x, 8.0, lw + 2.0, 20.0, "Default backlight"));
     }
-    let first = y + 16.0;
-    // the status screen's box: its items, then what it is
-    let top = first + 18.0;
-    let mut y = top + 38.0;
-    let apps = l["lcd"]["apps"].as_u64().unwrap_or(0);
-    // (not EVGA Precision X1's stats: EVGA makes no graphics cards now, so nothing sends them)
-    for (i, (bit, n)) in LCD_APPS.iter().enumerate().filter(|(_, (bit, _))| *bit != 0x02) {
-        c.push(Cell { on: apps & bit != 0, id: id(Ctl::LcdApp), index: i as i32, text: (*n).into(), ..cell(kind::CHECKBOX, x, y, inner, 20.0) });
-        y += 30.0;
+    // while a layout with a color of its own plays, a line saying so, in what room the tabs
+    // leave: the layout's name cut short to fit, or the line not there where not even a
+    // letter of the name fits (the default backlight never moves for it)
+    if let Some((name, light)) = own {
+        let tail = " has its own color";
+        let most = x - 20.0 - from - 16.0 - t(tail);
+        let least = name.chars().next().map_or(f32::MAX, |f| t(&format!("{f}…")));
+        if most >= least {
+            let s = format!("{}{tail}", crate::text::elide(name, most, 400, 12.5));
+            let sw = t(&s);
+            x -= 20.0 + sw;
+            c.push(text_cell(style::NOTE, x, 8.0, sw + 2.0, 20.0, &s));
+            c.push(Cell { color: slint::Color::from_rgb_u8(light[0], light[1], light[2]), ..cell(kind::BOX, x - 16.0, 13.5, 9.0, 9.0) });
+        }
     }
-    let mut y = y - 30.0 + 20.0 + 14.0;
-    for line in crate::text::wrap(400, 12.0, "What the keyboard shows when Ectodeck isn’t running.", inner) {
-        c.push(text_cell(style::CREDIT, x, y, inner, 17.0, &line));
-        y += 17.0;
+    if let Some((tx, tw, y)) = closed {
+        let apps = l["lcd"]["apps"].as_u64().unwrap_or(0);
+        // the profile, key rollover, the mode, the clock: the order of the rows they fill
+        // (not EVGA Precision X1's stats, which the firmware never draws)
+        let order = [1usize, 3, 2, 0];
+        // (spread by the words' own widths, so the last one's words end where the screen's text does)
+        let widths: Vec<f32> = order.iter().map(|&i| 28.0 + crate::text::width(400, 13.0, LCD_APPS[i].1)).collect();
+        let gap = ((tw - widths.iter().sum::<f32>()) / (order.len() - 1) as f32).max(16.0);
+        let mut x = tx;
+        for (k, &i) in order.iter().enumerate() {
+            let (bit, n) = LCD_APPS[i];
+            c.push(Cell { on: apps & bit != 0, id: id(Ctl::LcdApp), index: i as i32, text: n.into(), ..cell(kind::CHECKBOX, x, y, widths[k] + 2.0, 20.0) });
+            x += widths[k] + gap;
+        }
+        // (its cell to the box's inner edge, so a screen narrower than the note doesn't cut it short)
+        c.push(text_cell(style::NOTE, tx, y + 38.0, w - tx - 16.0, 18.0, "The keyboard’s native layout, built into its firmware, so its parts can only be switched on or off."));
     }
-    (Tiles { cells: c, height: y + 16.0 }, first)
+    c
 }
 
 /// Use a piece of the tab. `on` is a checkbox's new state; `index` which box.

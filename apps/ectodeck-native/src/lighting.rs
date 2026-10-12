@@ -258,7 +258,7 @@ const DOWN: &str = "M12 4v15M7 14l5 5 5-5";
 const LEFT: &str = "M20 12H5M10 7l-5 5 5 5";
 const RIGHT: &str = "M4 12h15M14 7l5 5-5 5";
 
-fn hex_of(c: [u8; 3]) -> String {
+pub(crate) fn hex_of(c: [u8; 3]) -> String {
     format!("#{:02X}{:02X}{:02X}", c[0], c[1], c[2])
 }
 fn color(c: [u8; 3]) -> slint::Color {

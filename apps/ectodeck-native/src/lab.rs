@@ -32,7 +32,7 @@ use slint::{Model, ModelRc, VecModel};
 use crate::front::WindowAsk;
 use crate::lighting::{cell, kind, style, text_cell};
 use crate::setups::{self, Setup};
-use crate::text;
+use crate::text::{self, elide};
 use crate::{Cell, LabRow, LabWindow, Sketch};
 use ectodeck_draw::hdr::sim::{key_light, Caps, Physics, Switch};
 use ectodeck_draw::hdr::{CapShape, KeyGeometry};
@@ -3465,18 +3465,6 @@ fn value_note(path: (&str, &str), v: &Value, of_key: bool) -> Option<String> {
             if section.is_empty() { format!("{}: {value}", PARAMS[i].label) } else { format!("{section} › {}: {value}", PARAMS[i].label) }
         }
     })
-}
-
-/// Words cut to `most` wide, set at `weight` and `size`, an ellipsis where they were cut.
-fn elide(s: &str, most: f32, weight: u16, size: f32) -> String {
-    if text::width(weight, size, s) <= most {
-        return s.to_string();
-    }
-    let mut out: String = s.to_string();
-    while !out.is_empty() && text::width(weight, size, &format!("{}…", out.trim_end())) > most {
-        out.pop();
-    }
-    format!("{}…", out.trim_end())
 }
 
 /// A core's file with a light saved into it: each of its values that

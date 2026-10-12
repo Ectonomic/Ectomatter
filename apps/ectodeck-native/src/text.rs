@@ -43,6 +43,18 @@ fn shaped(weight: u16, size: f32, s: &str) -> f32 {
     adv as f32 * size / face.units_per_em() as f32
 }
 
+/// Words cut to `most` wide, set at `weight` and `size`, an ellipsis where they were cut.
+pub fn elide(s: &str, most: f32, weight: u16, size: f32) -> String {
+    if width(weight, size, s) <= most {
+        return s.to_string();
+    }
+    let mut out: String = s.to_string();
+    while !out.is_empty() && width(weight, size, &format!("{}…", out.trim_end())) > most {
+        out.pop();
+    }
+    format!("{}…", out.trim_end())
+}
+
 /// How wide `s` is in Geist at this weight and size, in pixels.
 pub fn width(weight: u16, size: f32, s: &str) -> f32 {
     let key = (weight, size.to_bits(), s.to_string());
