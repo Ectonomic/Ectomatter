@@ -1223,8 +1223,8 @@ pub fn moving(page: &Page, r: &Readings) -> bool {
 }
 
 /// How often the page's picture changes between readings, in seconds: an effect's step (a
-/// tenth of a second at most, its shortest step if shorter), a quarter for words scrolling a
-/// cell at a time; None while it holds still.
+/// tenth of a second at most, its shortest step if shorter), or the step of words scrolling a
+/// cell at a time (see [SCROLL_STEP]); None while it holds still.
 pub fn pace(page: &Page, r: &Readings) -> Option<f64> {
     let steps = page.pieces.iter().filter_map(|p| if let Kind::Effect { speed, .. } = p.kind { Some(crate::lcd_fx::period(speed)) } else { None });
     if let Some(shortest) = steps.reduce(f64::min) {
@@ -1234,8 +1234,13 @@ pub fn pace(page: &Page, r: &Readings) -> Option<f64> {
         .iter()
         .filter(|p| is_words(&p.kind) && p.scroll)
         .any(|p| show(p, r).is_ok_and(|s| if p.height <= 1 { s.chars().count() > p.width as usize } else { wrap(&s, p.width as usize).len() > p.height as usize }))
-        .then_some(0.25)
+        .then_some(SCROLL_STEP)
 }
+
+/// How long words scrolling sideways hold each cell, in seconds: a little longer than the
+/// 0.3 at which Grant found words on the keyboard's screen still legible, its liquid crystal
+/// being slow to change (2026-10-13).
+pub const SCROLL_STEP: f64 = 0.35;
 
 /// Words set in a width: at its left, in its middle (any odd space after) or at its right.
 fn align(s: &str, w: usize, center: bool, right: bool) -> String {
@@ -1281,7 +1286,7 @@ fn wrap(s: &str, w: usize) -> Vec<String> {
 /// Words longer than a row of `w` cells, `t` seconds in: still at their start for a moment,
 /// then moving left a cell at a time at a reading pace, three spaces before they start again.
 fn sideways(s: &str, w: usize, t: f64) -> String {
-    let (gap, hold, step) = (3usize, 1.2, 0.25);
+    let (gap, hold, step) = (3usize, 1.2, SCROLL_STEP);
     let ch: Vec<char> = s.chars().collect();
     let pass = ch.len() + gap;
     let k = t.max(0.0) % (hold + pass as f64 * step);
@@ -1640,10 +1645,10 @@ mod tests {
         assert_eq!(render_at(&two, &r, 11.0 + 1.0)[1..3], ["Raid at 9 tonight.", "Bring potions and"]);
         // two rows, Cut off: the words stop after the last row
         assert_eq!(render_at(&w20(block(1, 2, false)), &r, 30.0)[1..3], ["Raid at 9 tonight.", "Bring potions and"]);
-        // one row, Scroll: still for a moment, then a cell to the left every quarter second
+        // one row, Scroll: still for a moment, then a cell to the left every step
         let one = w20(block(0, 1, true));
         assert_eq!(render_at(&one, &r, 1.0)[0], "Raid at 9 tonight. B");
-        assert_eq!(render_at(&one, &r, 1.2 + 0.25 * 5.0 + 0.01)[0], "at 9 tonight. Bring");
+        assert_eq!(render_at(&one, &r, 1.2 + SCROLL_STEP * 5.0 + 0.01)[0], "at 9 tonight. Bring");
         // one row, Cut off: up to the block's end
         assert_eq!(render_at(&w20(block(0, 1, false)), &r, 9.0)[0], "Raid at 9 tonight. B");
         // a word longer than the whole block breaks at its edge

@@ -183,7 +183,9 @@ pub fn fit(rows: &[String]) -> Vec<String> {
 
 /// The frames that carry the screen from the page shown (`old`) to the next
 /// (`new`), as `how` brings a page in, built as the launch sequence builds
-/// its own: the wipe a column of # sweeping left to right (25 ms a column),
+/// its own: the wipe the new page sweeping in from the left over the old, a
+/// column every 25 ms (with no # at its edge: the keyboard's screen is too slow
+/// to show a cell that changes again so soon, so it showed only in Ectodeck),
 /// the dissolve the cells changing in a random order over 16 frames (35 ms
 /// each), Type the screen cleared and the page's words typed in row by row
 /// behind a cursor (30 ms a letter). Cut has none: the page shows at once.
@@ -196,15 +198,9 @@ pub fn page_turn(old: &[String], new: &[String], how: crate::lcd_page::Transitio
     match how {
         Transition::Cut => {}
         Transition::Wipe => {
-            for x in -1..W as i32 {
-                let rows = old
-                    .iter()
-                    .zip(&new)
-                    .map(|(o, n)| {
-                        let mark = if x >= 0 { "#" } else { "" };
-                        cell(&format!("{}{mark}{}", slice(n, 0, x.max(0) as usize), slice(o, (x + 1) as usize, usize::MAX)))
-                    })
-                    .collect();
+            // (the old page first, then a column more of the new one each frame)
+            for x in 0..W {
+                let rows = old.iter().zip(&new).map(|(o, n)| cell(&format!("{}{}", slice(n, 0, x), slice(o, x, usize::MAX)))).collect();
                 add(rows, 25);
             }
         }
@@ -511,14 +507,14 @@ mod tests {
         let new = rows(&["", "       21:05", "     Fri Oct 9", ""]);
         // Cut: no frames between, the page shows at once
         assert!(page_turn(&old, &new, Transition::Cut, 1).is_empty());
-        // Wipe: the old page first, then a column of # sweeping across with the new page behind it
+        // Wipe: the old page first, then the new page sweeping in from the left a column a frame
         let w = page_turn(&old, &new, Transition::Wipe, 1);
-        assert_eq!(w.len(), 21);
+        assert_eq!(w.len(), 20);
         assert_eq!(w[0].rows, fit(&old));
-        assert_eq!(w[1].rows[0], format!("#{}", &fit(&old)[0][1..]));
-        assert_eq!(w[8].rows[1], format!("       #{}", slice(&fit(&old)[1], 8, 20)));
-        assert_eq!(w[20].rows[1], format!("       21:05       #"));
-        assert!(w.iter().all(|f| f.ms == 25));
+        assert_eq!(w[1].rows[0], format!(" {}", &fit(&old)[0][1..]));
+        assert_eq!(w[8].rows[1], format!("       2{}", slice(&fit(&old)[1], 8, 20)));
+        assert_eq!(w[19].rows[1], format!("{}{}", slice(&fit(&new)[1], 0, 19), slice(&fit(&old)[1], 19, 20)));
+        assert!(w.iter().all(|f| f.ms == 25 && f.rows.iter().all(|r| !r.contains('#'))));
         // Dissolve: each frame closer to the new page, every cell either the old or the new
         let d = page_turn(&old, &new, Transition::Dissolve, 7);
         // (at most 15: the sixteenth step is the page itself)

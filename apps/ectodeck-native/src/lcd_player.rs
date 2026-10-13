@@ -928,17 +928,27 @@ mod tests {
         // every second the page shows is read again
         assert!(sent.lock().unwrap().iter().any(|(t, r)| r[0] == "PAGE B" && *t > b + 0.9));
 
-        // Wipe: 21 frames of 25 ms between, then B, its five seconds from then
-        let (mut core, sent, clock) = two_pages(Transition::Wipe);
-        run(&mut core, &clock, 0.0, 9.0);
-        let wipe: Vec<f64> = sent.lock().unwrap().iter().filter(|(t, r)| *t < 5.0 && r[0].contains('#')).map(|(t, _)| *t).collect();
-        assert_eq!(wipe.len(), 20, "the frames with a # in them (the first is A as it was)");
-        assert!((wipe[0] - 3.0).abs() < 0.05);
-        let b = first_at(&sent, "PAGE B").unwrap();
+        // Wipe: 20 frames of 25 ms between (A as it was, then B a column more each), then B,
+        // its five seconds from then
+        let (mut core, _sent, clock) = two_pages(Transition::Wipe);
+        // (when each wipe began and B's page came on, as the player says where it stands)
+        let (mut t, mut began, mut on, mut again) = (0.0, None, None, None);
+        while t < 9.0 {
+            *clock.lock().unwrap() = t;
+            core.tick(t);
+            match (core.standing(t).0, began, on) {
+                (true, None, _) => began = Some(t),
+                (false, Some(_), None) => on = Some(t),
+                (true, Some(_), Some(_)) if again.is_none() => again = Some(t),
+                _ => {}
+            }
+            t += 0.01;
+        }
+        let (began, on, again) = (began.expect("B's wipe"), on.expect("B on"), again.expect("A's wipe"));
+        assert!((began - 3.0).abs() < 0.05, "B's wipe at {began}");
         // (each 25 ms frame waits for the loop's next 10 ms turn, as the service's did: about 30 ms)
-        assert!(b > 3.0 + 21.0 * 0.025 && b < 3.0 + 21.0 * 0.031, "B at {b}");
-        let back = sent.lock().unwrap().iter().filter(|(t, r)| *t > b && r[0].contains('#')).map(|(t, _)| *t).next().unwrap();
-        assert!((back - (b + 5.0)).abs() < 0.05, "A comes in again at {back}");
+        assert!(on - began > 19.0 * 0.025 && on - began < 20.0 * 0.031, "the wipe took {}", on - began);
+        assert!((again - (on + 5.0)).abs() < 0.08, "A comes in again at {again}, B on at {on}");
     }
 
     #[test]
@@ -984,8 +994,8 @@ mod tests {
         run(&mut core, &clock, 0.0, 1.0);
         // a step on, a second into A: B's wipe at once, then B with its whole five seconds
         core.step(1, 1.0);
+        assert!(core.standing(1.0).0, "B's wipe at once");
         run(&mut core, &clock, 1.0, 2.0);
-        assert!(sent.lock().unwrap().iter().any(|(t, r)| *t >= 1.0 && *t < 1.05 && r[0].contains('#')), "B's wipe at once");
         let b = first_at(&sent, "PAGE B").expect("B");
         assert!(b < 1.7, "B at {b}");
         run(&mut core, &clock, 2.0, b + 4.9);
@@ -1078,7 +1088,7 @@ mod tests {
         // B coming in: the wipe's frames, from when they began
         run(&mut core, &clock, 2.0, 3.2);
         let (turning, elapsed, length) = core.standing(3.2);
-        assert!(turning && elapsed > 0.1 && elapsed < 0.25 && (length - 21.0 * 0.025).abs() < 1e-9, "{turning} {elapsed} {length}");
+        assert!(turning && elapsed > 0.1 && elapsed < 0.25 && (length - 20.0 * 0.025).abs() < 1e-9, "{turning} {elapsed} {length}");
         // B showing, for its five seconds
         run(&mut core, &clock, 3.2, 4.5);
         let (turning, _, length) = core.standing(4.5);
