@@ -237,6 +237,22 @@ pub const MODS: [(u32, &str); 8] = [
 ];
 const MOD_SHORT: [(u32, &str); 8] = [(1, "Ctrl"), (2, "Shift"), (4, "Alt"), (8, "Super"), (16, "Ctrl"), (32, "Shift"), (64, "Alt"), (128, "Super")];
 
+/// The screen's jobs a key can have, each a key code the USB standard reserves: no key is
+/// meant to send one and Linux never turns one into a key press, so Ectodeck hears them from
+/// the keyboard's own reports (see crate::screen_keys). These four step through the layouts
+/// of the playlist playing and through the playlists; each of the seven after them plays one
+/// playlist, as Ectodeck's settings say which.
+pub const NEXT_LAYOUT: u32 = 0xA5;
+pub const PREV_LAYOUT: u32 = 0xA6;
+pub const NEXT_PLAYLIST: u32 = 0xA7;
+pub const PREV_PLAYLIST: u32 = 0xA8;
+pub const PLAY_CODES: std::ops::RangeInclusive<u32> = 0xA9..=0xAF;
+
+/// The screen job a key has: its code, when the key sends one reserved code alone.
+pub fn screen_job(d: [u32; 4]) -> Option<u32> {
+    (d[0] == 0 && d[1] == 0 && d[3] == 0 && (NEXT_LAYOUT..=*PLAY_CODES.end()).contains(&d[2])).then_some(d[2])
+}
+
 const CONSUMER: [(u32, &str); 18] = [
     (181, "Next track"),
     (182, "Previous track"),
@@ -409,6 +425,7 @@ pub fn is_nothing(d: [u32; 4]) -> bool {
 /// What kind of action a key has, as its tag in the action button.
 pub fn kind_of(d: [u32; 4]) -> &'static str {
     match d[0] {
+        0 if screen_job(d).is_some() => "Screen",
         0 if d[1] != 0 || d[2] != 0 => "Key",
         0 => "",
         2 => "Media",
@@ -435,6 +452,10 @@ pub struct Groups {
     pub media: Vec<Action>,
     pub mouse: Vec<Action>,
     pub profiles: Vec<Action>,
+    /// the screen's jobs: stepping through the layouts, and through the playlists (the
+    /// action menu adds a job for each playlist after these)
+    pub layouts: Vec<Action>,
+    pub playlists: Vec<Action>,
     pub board: Vec<Action>,
 }
 
@@ -469,6 +490,9 @@ pub struct Page {
     pub custom: Vec<[u8; 3]>,
     /// Reactive's "Preview with pretend typing"
     pub demo: bool,
+    /// the playlists keys can play, by the reserved code each one's keys send (see
+    /// PLAY_CODES), and their names; a code with none plays a playlist since deleted
+    pub playlist_keys: std::collections::BTreeMap<u32, String>,
     /// each lit key's colour and light at the last frame, before the LEDs' lean: what streams to the keyboard
     pub last_colors: HashMap<u32, [f64; 4]>,
     rng: u64,
@@ -554,6 +578,7 @@ impl Page {
             dimmer: None,
             custom: vec![[0; 3]; 116],
             demo: false,
+            playlist_keys: Default::default(),
             last_colors: HashMap::new(),
             rng: 0x9e3779b97f4a7c15,
         }
@@ -626,6 +651,7 @@ impl Page {
     pub fn describe(&self, d: [u32; 4]) -> String {
         let [f, a, b, c] = d;
         match f {
+            0 if screen_job(d).is_some() => self.screen_job_name(b),
             0 => {
                 let mut parts: Vec<String> = MODS.iter().filter(|(m, _)| a & m != 0).map(|(_, n)| n.to_string()).collect();
                 parts.extend([b, c].into_iter().filter(|h| *h != 0).map(|h| hid_name(h).unwrap_or(format!("Key {h}"))));
@@ -650,10 +676,42 @@ impl Page {
         }
     }
 
+    /// The codes that play one playlist each (see PLAY_CODES) that some key sends, on any
+    /// profile, on either layer.
+    pub fn sent_codes(&self) -> HashSet<u32> {
+        self.drafts
+            .values()
+            .flat_map(|d| ["keys", "fnkeys"].map(|l| d[l].as_array().cloned().unwrap_or_default()))
+            .flatten()
+            .filter_map(|k| screen_job(def_of(&k)))
+            .filter(|c| PLAY_CODES.contains(c))
+            .collect()
+    }
+
+    /// A screen job, by its code, as the action menu names it.
+    pub fn screen_job_name(&self, code: u32) -> String {
+        match code {
+            NEXT_LAYOUT => "Next screen layout".into(),
+            PREV_LAYOUT => "Previous screen layout".into(),
+            NEXT_PLAYLIST => "Next playlist".into(),
+            PREV_PLAYLIST => "Previous playlist".into(),
+            c => self.playlist_keys.get(&c).map_or("Play a deleted playlist".into(), |n| format!("Play {n}")),
+        }
+    }
+
     /// A remapped key's new meaning, printed on it like a second legend.
     pub fn short_label(&self, d: [u32; 4], macro_names: &[String]) -> String {
         let [f, a, b, c] = d;
         match f {
+            // (a key that plays one playlist is printed with the playlist's name, as one that
+            // switches to a profile is with the profile's)
+            0 if screen_job(d).is_some() => match b {
+                NEXT_LAYOUT => "NEXT".into(),
+                PREV_LAYOUT => "PREV".into(),
+                NEXT_PLAYLIST => "PL+".into(),
+                PREV_PLAYLIST => "PL-".into(),
+                c => self.playlist_keys.get(&c).cloned().unwrap_or("PLAY".into()),
+            },
             0 => {
                 let mut parts: Vec<String> = Vec::new();
                 for (m, n) in MOD_SHORT {
@@ -790,7 +848,17 @@ impl Page {
             Action { label: "Fn".into(), def: [4, 0, 0, 0], tag: "Keyboard" },
             Action { label: "Game mode toggle".into(), def: [5, 0, 0, 0], tag: "Keyboard" },
         ];
-        Groups { macros: macros.into_iter().map(|(_, a)| a).collect(), keys: keys.chain(mods).collect(), media, mouse, profiles, board }
+        let screen = |codes: [u32; 2]| codes.map(|c| Action { label: self.screen_job_name(c), def: [0, 0, c, 0], tag: "Screen" }).to_vec();
+        Groups {
+            macros: macros.into_iter().map(|(_, a)| a).collect(),
+            keys: keys.chain(mods).collect(),
+            media,
+            mouse,
+            profiles,
+            layouts: screen([NEXT_LAYOUT, PREV_LAYOUT]),
+            playlists: screen([NEXT_PLAYLIST, PREV_PLAYLIST]),
+            board,
+        }
     }
 
     /// The names of the macros on the board's first layer, so each one's
@@ -1308,6 +1376,24 @@ mod saving_tests {
         p.saved_profile(1, read_back, false);
         assert_eq!(p.drafts[&1]["name"], "Games");
         assert!(p.is_dirty(1), "the newer change still saves");
+    }
+
+    #[test]
+    fn a_key_with_a_screen_job_says_so_and_prints_it() {
+        let mut p = page();
+        p.playlist_keys.insert(0xA9, "Quiet".into());
+        assert_eq!(kind_of([0, 0, NEXT_LAYOUT, 0]), "Screen");
+        assert_eq!(kind_of([0, 0, 0xAF, 0]), "Screen");
+        // (with a modifier, or past the reserved run, it's a key like any other)
+        assert_eq!(kind_of([0, 1, NEXT_LAYOUT, 0]), "Key");
+        assert_eq!(kind_of([0, 0, 0xB0, 0]), "Key");
+        let says: Vec<(String, String)> = [NEXT_LAYOUT, PREV_LAYOUT, NEXT_PLAYLIST, PREV_PLAYLIST, 0xA9, 0xAA].iter().map(|c| (p.describe([0, 0, *c, 0]), p.short_label([0, 0, *c, 0], &[]))).collect();
+        let want = [("Next screen layout", "NEXT"), ("Previous screen layout", "PREV"), ("Next playlist", "PL+"), ("Previous playlist", "PL-"), ("Play Quiet", "Quiet"), ("Play a deleted playlist", "PLAY")];
+        assert_eq!(says, want.map(|(a, b)| (a.to_string(), b.to_string())));
+        let g = p.groups();
+        assert_eq!(g.layouts.iter().chain(&g.playlists).map(|a| a.label.as_str()).collect::<Vec<_>>(), ["Next screen layout", "Previous screen layout", "Next playlist", "Previous playlist"]);
+        // and none of the codes is a key in the menu's list of keys
+        assert!(g.keys.iter().all(|a| screen_job(a.def).is_none()));
     }
 
     #[test]

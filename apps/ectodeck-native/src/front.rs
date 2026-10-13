@@ -274,9 +274,17 @@ fn plays_rows(page: &Page) -> Vec<MenuRow> {
 const LAYERS: [(&str, &str); 2] = [("keys", "When pressed"), ("fnkeys", "When Fn is held")];
 
 /// The action menu's pages under "Other": each one's title and its list.
-const PAGES: [&str; 5] = ["A key", "A media key", "A mouse button", "Switch profile", "Keyboard function"];
-/// the action menu's page of macros, opened from the key's Macro switch
-const MACRO_PAGE: usize = 5;
+const PAGES: [&str; 7] = ["A key", "A media key", "A mouse button", "Switch profile", "Switch screen layout", "Switch playlist", "Keyboard function"];
+/// the pages of the screen's jobs among them, and the page of macros, opened from the key's
+/// Macro switch
+const LAYOUT_PAGE: usize = 4;
+const PLAYLIST_PAGE: usize = 5;
+const MACRO_PAGE: usize = 7;
+
+/// The page of the action menu a screen job is on.
+fn screen_page(code: u32) -> usize {
+    if code >= z10::NEXT_PLAYLIST { PLAYLIST_PAGE } else { LAYOUT_PAGE }
+}
 
 /// The Key library's groups after the sliders and the buttons, and the keys in each by their ids.
 const LIB_GROUPS: [&str; 7] = ["Macro keys", "F-keys", "Number row", "Letters and symbols", "Modifiers and space", "Navigation", "Number pad"];
@@ -344,10 +352,13 @@ fn lib_cap(id: &str, name: &str) -> String {
     name.split_whitespace().next().unwrap_or(name).chars().take(4).collect()
 }
 
+#[derive(Clone)]
 enum Choice {
     Nothing,
     Set([u32; 4]),
     Page(usize),
+    /// the job that plays this playlist, by its id (its code found when it is given)
+    Play(String),
 }
 
 struct Menu {
@@ -407,6 +418,9 @@ pub struct Front {
     /// the player told to stand aside, the keyboard showing its own status screen for the
     /// Screen tab's picture of it (see [Front::status_showing])
     aside: bool,
+    /// the playlist each code a key may play one with plays (see z10::PLAY_CODES), by its
+    /// id, as Ectodeck's settings keep it
+    keyed: std::collections::BTreeMap<u32, String>,
     /// the onboard layout's chooser open; on the second tab, a layout carried over the
     /// screen, by its id, which the picture shows before it is let go
     ob_menu: bool,
@@ -701,6 +715,7 @@ impl Front {
             controlled,
             hidden: false,
             aside: false,
+            keyed: Default::default(),
             ob_menu: false,
             ob_over: None,
             overlays: Overlays::new(),
@@ -792,6 +807,12 @@ impl Front {
             f.settings.get("devices.z10.screen.playlist").as_ref(),
         )
         .with_onboard(f.settings.get("devices.z10.screen.onboard").as_ref());
+        f.keyed = f
+            .settings
+            .get("devices.z10.screen.keyed")
+            .and_then(|v| v.as_object().cloned())
+            .map(|m| m.iter().filter_map(|(c, id)| Some((c.parse::<u32>().ok().filter(|c| z10::PLAY_CODES.contains(c))?, id.as_str()?.to_string()))).collect())
+            .unwrap_or_default();
         f.screens_noted = f.screens.clone();
         f.screens_saved = f.screens.clone();
         f.weather.set_place(weather_place(&f.settings));
@@ -1319,14 +1340,16 @@ impl Front {
                     crate::display::act(&mut self.page, Ctl::GameKey, i as usize, if on { 0.0 } else { 1.0 }, None);
                 }
                 Ask::Kind(i, x, y, h) => {
-                    // the parts of the switch, as the menu's pages are; Nothing at once
+                    // the parts of the switch, as the menu's pages are; Nothing at once (and
+                    // Screen opens the page of the key's own screen job, if it has one)
                     match i {
-                        6 => {
+                        7 => {
                             self.close_menu();
                             self.assign(self.layer, [0, 0, 0, 0]);
                         }
                         _ => {
-                            let page = [0, 1, 2, MACRO_PAGE, 3, 4][i.clamp(0, 5) as usize];
+                            let screen = self.page.sel.and_then(|pos| z10::screen_job(self.page.def(LAYERS[self.layer].0, pos))).map_or(LAYOUT_PAGE, screen_page);
+                            let page = [0, 1, 2, MACRO_PAGE, 3, screen, 6][i.clamp(0, 6) as usize];
                             self.open_menu_on(self.layer, (x, y, h), Some(page));
                         }
                     }
@@ -1436,7 +1459,7 @@ impl Front {
                     self.build_menu();
                 }
                 Ask::MenuEnter => {
-                    let first = self.menu.as_ref().and_then(|m| m.choices.iter().position(|c| matches!(c, Choice::Set(_) | Choice::Page(_))));
+                    let first = self.menu.as_ref().and_then(|m| m.choices.iter().position(|c| matches!(c, Choice::Set(_) | Choice::Page(_) | Choice::Play(_))));
                     if let Some(i) = first {
                         self.menu_chose(i);
                     }
@@ -2176,7 +2199,8 @@ impl Front {
             "Mouse" => Some(2),
             "Macro" => Some(MACRO_PAGE),
             "Profile" => Some(3),
-            "Keyboard" => Some(4),
+            "Screen" => z10::screen_job(d).map(screen_page),
+            "Keyboard" => Some(6),
             _ => None,
         });
         self.open_menu_on(layer, anchor, page);
@@ -2570,7 +2594,113 @@ impl Front {
                 self.ui.set_menu_query("".into());
                 self.build_menu();
             }
+            Some(Choice::Play(id)) => {
+                let (layer, pos, id) = (m.layer, m.pos, id.clone());
+                self.close_menu();
+                if let Some(code) = self.play_code(&id) {
+                    if self.page.sel == Some(pos) {
+                        self.page.set_def(LAYERS[layer].0, pos, [0, 0, code, 0]);
+                    }
+                }
+            }
             _ => {}
+        }
+    }
+
+    /// The code a key plays playlist `id` with (see screen_keys::code_for), kept in Ectodeck's
+    /// settings once the playlist has one; None while every code is some key's.
+    fn play_code(&mut self, id: &str) -> Option<u32> {
+        let lists = &self.screens.playlists;
+        let code = crate::screen_keys::code_for(id, &self.keyed, &self.page.sent_codes(), |p| lists.iter().any(|l| l.id == p))?;
+        if self.keyed.get(&code).map(String::as_str) != Some(id) {
+            self.keyed.insert(code, id.to_string());
+            let kept: serde_json::Map<String, serde_json::Value> = self.keyed.iter().map(|(c, id)| (c.to_string(), serde_json::json!(id))).collect();
+            if let Err(e) = self.settings.set("devices.z10.screen.keyed", serde_json::Value::Object(kept)) {
+                self.status(format!("The key's playlist was not saved: {e}"), 2);
+            }
+            self.sync_playlist_keys();
+        }
+        Some(code)
+    }
+
+    /// The keyboard page's names for the playlists keys can play, by their codes (a code whose
+    /// playlist was deleted left out).
+    fn sync_playlist_keys(&mut self) {
+        let lists = &self.screens.playlists;
+        self.page.playlist_keys = self.keyed.iter().filter_map(|(c, id)| Some((*c, lists.iter().find(|l| &l.id == id)?.name.clone()))).collect();
+    }
+
+    /// The jobs that each play one playlist, as the action menu lists them: each one's row
+    /// (its definition, for its tick, while the playlist has a code), what choosing it does,
+    /// and its row's kind: 5, a job no key can be given now, while every code is some key's.
+    fn play_jobs(&self) -> Vec<(Action, Choice, i32)> {
+        let sent = self.page.sent_codes();
+        let lists = &self.screens.playlists;
+        lists
+            .iter()
+            .map(|l| {
+                let code = self.keyed.iter().find(|(_, id)| **id == l.id).map(|(c, _)| *c);
+                let can = code.is_some() || crate::screen_keys::code_for(&l.id, &self.keyed, &sent, |p| lists.iter().any(|x| x.id == p)).is_some();
+                let a = Action { label: format!("Play {}", l.name), def: code.map_or([u32::MAX; 4], |c| [0, 0, c, 0]), tag: "Screen" };
+                if can { (a, Choice::Play(l.id.clone()), 0) } else { (a, Choice::Nothing, 5) }
+            })
+            .collect()
+    }
+
+    /// A key with a screen job pressed (its code, see z10::screen_job), as the keyboard's own
+    /// reports tell of it: Record takes it as the key's job; else, while Ectodeck plays the
+    /// screen, the job is done for the profile whose playlist plays. Nothing while a layout is
+    /// open in the Screen Editor, the Onboard layout tab has the screen, or another program's
+    /// screen shows (as a game's launch).
+    pub fn screen_key(&mut self, code: u32) {
+        if let Some((layer, _)) = self.listening {
+            self.assign(layer, [0, 0, code, 0]);
+            return;
+        }
+        if !self.controlled || self.editor.is_some() || self.aside || self.lcd.sequence.is_some() {
+            return;
+        }
+        if code == z10::NEXT_LAYOUT || code == z10::PREV_LAYOUT {
+            if let Some(pl) = &self.player {
+                pl.tell(crate::lcd_player::Control::Step(if code == z10::NEXT_LAYOUT { 1 } else { -1 }));
+            }
+            return;
+        }
+        let n = self.page.editing;
+        let count = self.screens.playlists.len();
+        let mine = self.screens.of_profile(n);
+        let to = match code {
+            z10::NEXT_PLAYLIST => (count > 1).then(|| (mine + 1) % count),
+            z10::PREV_PLAYLIST => (count > 1).then(|| (mine + count - 1) % count),
+            c => self.keyed.get(&c).and_then(|id| self.screens.playlists.iter().position(|l| &l.id == id)).filter(|k| *k != mine),
+        };
+        if let Some(k) = to {
+            let id = self.screens.playlists[k].id.clone();
+            self.screens.choose(n, &id);
+            self.pages_edited();
+            if let Some(pl) = &self.player {
+                pl.tell(crate::lcd_player::Control::Begin);
+            }
+            self.lcd.page = 0;
+            // (the playhead as the new playlist has it: none with one layout)
+            self.set_playhead();
+            self.refresh();
+        }
+    }
+
+    /// What a key with screen job `code` does, as the note under its job says it, naming the
+    /// playlist its profile plays.
+    fn screen_note(&self, code: u32) -> String {
+        let pl = &self.screens.playlist(self.page.editing).name;
+        match code {
+            z10::NEXT_LAYOUT => format!("Shows the next layout in {pl} while Ectodeck is running."),
+            z10::PREV_LAYOUT => format!("Shows the previous layout in {pl} while Ectodeck is running."),
+            z10::NEXT_PLAYLIST => format!("Plays the playlist after {pl} while Ectodeck is running."),
+            z10::PREV_PLAYLIST => format!("Plays the playlist before {pl} while Ectodeck is running."),
+            c => match self.page.playlist_keys.get(&c) {
+                Some(name) => format!("Plays {name} while Ectodeck is running."),
+                None => "The playlist this key played was deleted, so the key does nothing until you give it another job.".into(),
+            },
         }
     }
 
@@ -2578,16 +2708,20 @@ impl Front {
         let Some(m) = &self.menu else { return };
         let def = self.page.def(LAYERS[m.layer].0, m.pos);
         let g = self.page.groups();
-        let lists: [&Vec<Action>; 5] = [&g.keys, &g.media, &g.mouse, &g.profiles, &g.board];
+        let lists: [&Vec<Action>; 7] = [&g.keys, &g.media, &g.mouse, &g.profiles, &g.layouts, &g.playlists, &g.board];
         let mut rows: Vec<MenuRow> = Vec::new();
         let mut choices: Vec<Choice> = Vec::new();
         let row = |kind: i32, label: &str, tag: &str, tick: bool| MenuRow { kind, label: label.into(), tag: tag.into(), tick, sub: "".into() };
         let q = m.query.trim().to_lowercase();
+        // each job as a row: what choosing it does, and the row's kind (0, or 5 for one that
+        // can't be given now)
+        let set = |list: &[Action]| list.iter().map(|a| (a.clone(), Choice::Set(a.def), 0)).collect::<Vec<_>>();
+        let plays = self.play_jobs();
         // a searchable list, as pickList draws it
-        let mut pick = |rows: &mut Vec<MenuRow>, choices: &mut Vec<Choice>, groups: &[(&str, Vec<&Action>)]| {
+        let pick = |rows: &mut Vec<MenuRow>, choices: &mut Vec<Choice>, groups: &[(&str, Vec<(Action, Choice, i32)>)]| {
             let mut n = 0;
             for (head, items) in groups {
-                let hit: Vec<&&Action> = items.iter().filter(|a| q.is_empty() || a.label.to_lowercase().contains(&q) || a.tag.to_lowercase().contains(&q)).collect();
+                let hit: Vec<&(Action, Choice, i32)> = items.iter().filter(|(a, ..)| q.is_empty() || a.label.to_lowercase().contains(&q) || a.tag.to_lowercase().contains(&q)).collect();
                 if hit.is_empty() {
                     continue;
                 }
@@ -2595,10 +2729,10 @@ impl Front {
                     rows.push(row(1, head, "", false));
                     choices.push(Choice::Nothing);
                 }
-                for a in hit.into_iter().take(if q.is_empty() { 400 } else { 60 }) {
+                for (a, c, kind) in hit.into_iter().take(if q.is_empty() { 400 } else { 60 }) {
                     n += 1;
-                    rows.push(row(0, &a.label, if q.is_empty() { "" } else { a.tag }, a.def == def));
-                    choices.push(Choice::Set(a.def));
+                    rows.push(row(*kind, &a.label, if q.is_empty() { "" } else { a.tag }, a.def == def));
+                    choices.push(c.clone());
                 }
             }
             if n == 0 {
@@ -2614,19 +2748,29 @@ impl Front {
                     rows.push(row(3, "No macros yet. Make one in the Macro Editor.", "", false));
                     choices.push(Choice::Nothing);
                 } else {
-                    pick(&mut rows, &mut choices, &[("Macros", g.macros.iter().collect())]);
+                    pick(&mut rows, &mut choices, &[("Macros", set(&g.macros))]);
                 }
             }
             Some(p) => {
                 let title = PAGES[p];
                 let what = title.trim_start_matches("A ").trim_start_matches("An ").to_lowercase();
                 placeholder = format!("Search {what}s");
-                pick(&mut rows, &mut choices, &[(title, lists[p].iter().collect())]);
+                // (the playlists' own jobs after stepping through them)
+                let mut items = set(lists[p]);
+                if p == PLAYLIST_PAGE {
+                    items.extend(plays.iter().cloned());
+                }
+                pick(&mut rows, &mut choices, &[(title, items)]);
+                if p == PLAYLIST_PAGE && q.is_empty() && plays.iter().any(|(.., kind)| *kind == 5) {
+                    rows.push(row(3, "Keys already play seven playlists, the most they can. Give one of those keys a different job to make room.", "", false));
+                    choices.push(Choice::Nothing);
+                }
             }
             None => {
                 placeholder = "Search keys, media, macros".to_string();
                 if !q.is_empty() {
-                    let all: Vec<&Action> = g.macros.iter().chain(&g.keys).chain(&g.media).chain(&g.mouse).chain(&g.profiles).chain(&g.board).collect();
+                    let mut all = set(&g.macros.iter().chain(&g.keys).chain(&g.media).chain(&g.mouse).chain(&g.profiles).chain(&g.layouts).chain(&g.playlists).chain(&g.board).cloned().collect::<Vec<_>>());
+                    all.extend(plays.iter().cloned());
                     pick(&mut rows, &mut choices, &[("", all)]);
                 } else {
                     if !g.macros.is_empty() {
@@ -2643,7 +2787,12 @@ impl Front {
                     choices.push(Choice::Nothing);
                     let kind = z10::kind_of(def);
                     for (p, title) in PAGES.iter().enumerate() {
-                        let tick = lists[p].first().is_some_and(|a| a.tag == kind) && def[0] != 3;
+                        // (the screen's two pages each ticked for their own jobs)
+                        let tick = if p == LAYOUT_PAGE || p == PLAYLIST_PAGE {
+                            z10::screen_job(def).is_some_and(|c| screen_page(c) == p)
+                        } else {
+                            lists[p].first().is_some_and(|a| a.tag == kind) && def[0] != 3
+                        };
                         rows.push(row(0, &format!("{title} ›"), "", tick));
                         choices.push(Choice::Page(p));
                     }
@@ -2674,6 +2823,7 @@ impl Front {
     /// Draw the page from the page's state.
     pub fn refresh(&mut self) {
         self.note_changes();
+        self.sync_playlist_keys();
         self.follow_profile();
         self.sync_aside();
         let ui = &self.ui;
@@ -2804,12 +2954,18 @@ impl Front {
                 "Mouse" => 2,
                 "Macro" => 3,
                 "Profile" => 4,
-                "Keyboard" => 5,
-                _ => 6,
+                "Screen" => 5,
+                "Keyboard" => 6,
+                _ => 7,
             });
             ui.set_key_job(job.into());
             ui.set_key_listening(self.listening.is_some_and(|(l, _)| l == self.layer));
-            ui.set_key_note((if fn_unset { "On the Function layer this key does what it does on Base, until you choose a job here." } else { "" }).into());
+            let note = if fn_unset {
+                "On the Function layer this key does what it does on Base, until you choose a job here.".to_string()
+            } else {
+                z10::screen_job(d).map_or(String::new(), |c| self.screen_note(c))
+            };
+            ui.set_key_note(note.into());
         }
         // the Key library: each group, open or closed, its keys as they are on the layer shown
         if loaded && p.view == View::Keys {

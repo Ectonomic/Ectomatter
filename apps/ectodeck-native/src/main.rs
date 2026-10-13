@@ -44,6 +44,7 @@ mod overlays;
 mod picker;
 mod picture;
 mod screen_edit;
+mod screen_keys;
 mod screens;
 mod sensors;
 mod settings;
@@ -674,6 +675,12 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         let (code, down) = (k.trim_end_matches(['+', '-']).parse().unwrap_or(0), k.ends_with('+'));
         front.typed(code, down);
         front.watched(ectotype_core::watch::Watched::Key(code as u16, down));
+        front.refresh();
+    }
+    // ECTODECK_NATIVE_SCREEN_KEYS="167,169": keys with screen jobs pressed, by their codes, as
+    // the keyboard's reports would tell of them
+    for code in std::env::var("ECTODECK_NATIVE_SCREEN_KEYS").unwrap_or_default().split(',').filter_map(|c| c.trim().parse::<u32>().ok()) {
+        front.screen_key(code);
         front.refresh();
     }
     // ECTODECK_NATIVE_SLIDERS='{"dimmer":64,...}': a reading of the sliders, as the keyboard sends one
@@ -1455,6 +1462,19 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
             .unwrap();
         ectotype_core::watch::start(move |w| {
             let _ = watch_tx.send(w);
+        });
+        // the keys with a screen job, from the keyboard's own reports (see screen_keys)
+        let (screen_tx, screen_rx) = calloop::channel::channel::<u32>();
+        event_loop
+            .handle()
+            .insert_source(screen_rx, |e, _, app: &mut App| {
+                if let calloop::channel::Event::Msg(code) = e {
+                    app.front.screen_key(code);
+                }
+            })
+            .unwrap();
+        screen_keys::start(move |code| {
+            let _ = screen_tx.send(code);
         });
         device::start(data_dir().join("backups"), heard_tx)
     });

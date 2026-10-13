@@ -227,6 +227,12 @@ pub enum Control {
     Pages(Vec<crate::lcd_page::Page>),
     /// show this page now, as it is, and carry on from it
     Show(usize),
+    /// a key's press: the layout so many on (or, below 0, back) comes in now, with its way
+    /// in (see [Core::step])
+    Step(i32),
+    /// the playlist's first layout comes in now with its way in, as after another playlist
+    /// is chosen by a key (see [Core::begin])
+    Begin,
     /// stay on this page, which is being edited; None carries on
     Hold(Option<usize>),
     /// end the launch or exit sequence playing, back to the playlist
@@ -432,13 +438,18 @@ impl Core {
             }
         } else if self.turn_due(now) {
             self.turn(now);
-        } else if (now >= self.stats_at && !self.paused) || self.redraw {
+        } else if (now >= self.stats_at && (!self.paused || self.page_since.is_none())) || self.redraw {
+            // (paused, the page is drawn once as it comes on, then held)
             self.redraw = false;
             let rows = (self.stats)();
             self.push(rows, now);
             self.stats_at = self.next_draw(now);
             if self.page_since.is_none() {
                 self.page_since = Some(now);
+                // (a page that comes on while the playlist is paused has its whole time once it plays)
+                if self.paused && self.held.is_none() {
+                    self.held = Some(0.0);
+                }
             }
         }
         true
@@ -459,13 +470,22 @@ impl Core {
     /// then the page itself.
     fn turn(&mut self, now: f64) {
         let n = self.playlist.len();
-        let next = (self.page() + 1) % n;
+        self.come_in((self.page() + 1) % n, now);
+    }
+
+    /// Page `to` comes in now, as its turn would bring it: the frames of its way in from the
+    /// page shown, then the page itself, with its whole time (paused, from when the
+    /// playlist plays again).
+    fn come_in(&mut self, to: usize, now: f64) {
         let old = self.shown.clone().unwrap_or_default();
-        self.current.store(next, Ordering::Relaxed);
+        self.current.store(to, Ordering::Relaxed);
         let new = (self.stats)();
         let seed = (self.seeds)();
-        let frames = crate::lcd_anim::page_turn(&old, &new, self.playlist[next].1, seed);
+        let frames = crate::lcd_anim::page_turn(&old, &new, self.playlist[to].1, seed);
         self.page_since = None;
+        if self.paused {
+            self.held = Some(0.0);
+        }
         if frames.is_empty() {
             self.push(new, now);
             self.stats_at = self.next_draw(now);
@@ -476,6 +496,27 @@ impl Core {
             self.between = frames.into();
             self.frame_until = now;
         }
+    }
+
+    /// A key's press: the page `d` on (or, below 0, back), going round at the ends, comes in
+    /// now with its own way in, as if its turn had come early, and has its whole time; a
+    /// paused playlist stays paused on it. Nothing while a sequence plays, the page is held
+    /// for the editor, the screen is left to the keyboard, or the playlist has one page.
+    pub fn step(&mut self, d: i32, now: f64) {
+        let n = self.playlist.len();
+        if n < 2 || self.hold || self.aside || self.playing_sequence() {
+            return;
+        }
+        self.come_in((self.page() as i64 + d as i64).rem_euclid(n as i64) as usize, now);
+    }
+
+    /// The playlist's first page comes in now with its own way in, as after a key chooses
+    /// another playlist (the same holds as for [Core::step], but one page is enough).
+    pub fn begin(&mut self, now: f64) {
+        if self.playlist.is_empty() || self.hold || self.aside || self.playing_sequence() {
+            return;
+        }
+        self.come_in(0, now);
     }
 
     /// Where the playlist stands at `now`: whether a page is coming in, how
@@ -702,6 +743,8 @@ impl Player {
                             shared.lock().unwrap().0 = pages;
                         }
                         Control::Show(i) => core.show(i),
+                        Control::Step(d) => core.step(d, start.elapsed().as_secs_f64()),
+                        Control::Begin => core.begin(start.elapsed().as_secs_f64()),
                         Control::Aside(a) => {
                             if a != core.aside {
                                 eprintln!("ectodeck-native: the screen {}", if a { "left to the keyboard's own status screen" } else { "taken back for the playlist" });
@@ -931,6 +974,47 @@ mod tests {
         core.show(0);
         run(&mut core, &clock, 34.1, 34.2);
         assert_eq!(sent.lock().unwrap().last().unwrap().1[0], "PAGE A");
+    }
+
+    #[test]
+    fn a_key_steps_the_playlist_with_each_layout_s_own_way_in() {
+        use crate::lcd_page::Transition;
+        // A for 3 s, B for 5 s coming in with a wipe
+        let (mut core, sent, clock) = two_pages(Transition::Wipe);
+        run(&mut core, &clock, 0.0, 1.0);
+        // a step on, a second into A: B's wipe at once, then B with its whole five seconds
+        core.step(1, 1.0);
+        run(&mut core, &clock, 1.0, 2.0);
+        assert!(sent.lock().unwrap().iter().any(|(t, r)| *t >= 1.0 && *t < 1.05 && r[0].contains('#')), "B's wipe at once");
+        let b = first_at(&sent, "PAGE B").expect("B");
+        assert!(b < 1.7, "B at {b}");
+        run(&mut core, &clock, 2.0, b + 4.9);
+        assert!(!sent.lock().unwrap().iter().any(|(t, r)| *t > b && r[0] == "PAGE A"), "A came back before B's five seconds");
+        // a step on from the last goes round to the first, and back from the first to the last
+        core.step(1, b + 4.9);
+        run(&mut core, &clock, b + 4.9, b + 5.0);
+        assert_eq!(core.page(), 0);
+        core.step(-1, b + 5.0);
+        assert_eq!(core.page(), 1);
+        // paused, a step shows the layout and stays paused on it, its time still to come
+        run(&mut core, &clock, b + 5.0, b + 6.0);
+        core.pause(true, b + 6.0);
+        core.step(1, b + 6.0);
+        run(&mut core, &clock, b + 6.0, b + 20.0);
+        assert_eq!(sent.lock().unwrap().last().unwrap().1[0], "PAGE A", "A drawn while paused");
+        assert_eq!(core.page(), 0);
+        assert!(core.standing(b + 20.0).1 < 0.01, "A's time waits for Play");
+        core.pause(false, b + 20.0);
+        run(&mut core, &clock, b + 20.0, b + 22.9);
+        assert_eq!(core.page(), 0, "A has its whole three seconds once it plays");
+        // held for the editor, or with one page, a step does nothing
+        core.hold_on(Some(0));
+        core.step(1, b + 23.0);
+        assert_eq!(core.page(), 0);
+        core.hold_on(None);
+        core.set_playlist(vec![(3.0, Transition::Cut)], b + 23.0);
+        core.step(1, b + 23.0);
+        assert_eq!(core.page(), 0);
     }
 
     #[test]
