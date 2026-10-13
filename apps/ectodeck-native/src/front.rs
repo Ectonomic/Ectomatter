@@ -43,6 +43,8 @@ pub enum Ask {
     Rail(String),
     /// the Macro Editor, on the macro of this layer of the chosen key, or -1
     MacroEditor(i32),
+    /// the Screen Editor, on the layout the screen shows
+    ScreenEditor,
     /// time to read the sliders again, and the display's text
     PollSliders,
     PollLcd,
@@ -544,6 +546,7 @@ impl Front {
         on!(on_go, |p| Ask::Go(p.to_string()));
         on!(on_rail, |p| Ask::Rail(p.to_string()));
         on!(on_macro_editor, |l| Ask::MacroEditor(l));
+        on!(on_screen_editor, Ask::ScreenEditor);
         on!(on_effect, |i| Ask::Effect(i));
         on!(on_cell_pick, |id, i, x, y, h| Ask::CellPick(id, i, x, y, h));
         on!(on_cell_slide, |id, v| Ask::CellSlide(id, v));
@@ -1412,6 +1415,12 @@ impl Front {
                         _ => 0,
                     };
                     window.push(WindowAsk::OpenMacros(n));
+                }
+                Ask::ScreenEditor => {
+                    self.close_menu();
+                    // (on the layout the keyboard's screen shows now, or else the first)
+                    let i = self.shown().and_then(|p| self.screens.index_of(&p.id)).unwrap_or(0);
+                    window.push(WindowAsk::OpenLayouts(i));
                 }
             }
             any |= changed;

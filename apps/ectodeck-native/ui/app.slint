@@ -3547,6 +3547,7 @@ export component AppWindow inherits Window {
     callback listen(int);
     callback reset-key();
     callback macro-editor(int);  // the layer whose macro to open, or -1
+    callback screen-editor();
     callback menu-chose(int);
     callback menu-typed(string);
     callback menu-enter();
@@ -4989,10 +4990,16 @@ export component AppWindow inherits Window {
                             clicked => { root.undo(false); }
                         }
                     }
-                    // the Macro Editor and the Key lab, at the bar's end
+                    // the Screen Editor, the Macro Editor and the Key lab, at the bar's end
                     HorizontalLayout {
                         horizontal-stretch: 0;
                         spacing: 8px;
+                        // (the keyboard's screen: a wide frame with its rows of words)
+                        BarButton {
+                            commands: "M2.6 3.4h10.8a1.6 1.6 0 0 1 1.6 1.6v6a1.6 1.6 0 0 1-1.6 1.6H2.6A1.6 1.6 0 0 1 1 11V5a1.6 1.6 0 0 1 1.6-1.6zM4 6.2h8M4 8h6M4 9.8h7";
+                            text: "Screen Editor";
+                            clicked => { root.screen-editor(); }
+                        }
                         BarButton {
                             commands: "M3.1 4h9.8a1.6 1.6 0 0 1 1.6 1.6v5.3a1.6 1.6 0 0 1-1.6 1.6H3.1a1.6 1.6 0 0 1-1.6-1.6V5.6a1.6 1.6 0 0 1 1.6-1.6zM4 7h1M7 7h1M10 7h2M4.5 9.8h7";
                             text: "Macro Editor";
