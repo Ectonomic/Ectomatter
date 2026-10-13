@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
-use crate::front::{color, hsv2rgb, hue_bar, keep_recent, recent_colors, rgb2hsv, sv_square, WindowAsk, PRESETS};
+use crate::front::{color, hsv2rgb, hue_bar, keep_recent, new_rows, recent_colors, rgb2hsv, sv_square, NewFrom, WindowAsk, PRESETS};
 use crate::lcd_page::{Page, Readings, Screens, Source, COLS};
 use crate::lighting::{ctl, Ctl};
 use crate::screen_edit::{self, Editor, Shows};
@@ -25,7 +25,8 @@ pub enum Ask {
     Maximise,
     Close,
     Choose(i32),
-    New,
+    /// + New (or the empty window's New layout): where the button is, and its width
+    New(f32, f32, f32, f32),
     Rename,
     NameDone(String),
     NameCancel,
@@ -56,10 +57,12 @@ pub enum Ask {
     PkDismiss,
 }
 
-/// The menu open: the layout's (Duplicate, Delete), or what a block shows.
+/// The menu open: the layout's (Duplicate, Delete), what a block shows, or + New's (From
+/// scratch, or a copy of a layout: what each row makes).
 enum Menu {
     More,
     Shows(Vec<Option<Shows>>),
+    New(Vec<Option<NewFrom>>),
 }
 
 /// The color picker, open on the layout's own color: the color it opened
@@ -142,7 +145,7 @@ impl LayoutPage {
         on!(on_maximise, Ask::Maximise);
         on!(on_close_window, Ask::Close);
         on!(on_choose, |i| Ask::Choose(i));
-        on!(on_new_layout, Ask::New);
+        on!(on_new_layout, |x, y, w, h| Ask::New(x, y, w, h));
         on!(on_rename, Ask::Rename);
         on!(on_name_done, |t| Ask::NameDone(t.to_string()));
         on!(on_name_cancel, Ask::NameCancel);
@@ -223,7 +226,9 @@ impl LayoutPage {
                     LayoutPage::open(cx, i.max(0) as usize);
                     out.opened = true;
                 }
-                Ask::New => {
+                // (with no layout to copy, a blank one at once)
+                Ask::New(x, y, w, h) if !cx.screens.library.is_empty() => self.open_new((x, y, h), w, cx),
+                Ask::New(..) => {
                     self.settle();
                     let i = cx.screens.new_page();
                     LayoutPage::open(cx, i);
@@ -409,6 +414,20 @@ impl LayoutPage {
                                 self.confirm = true;
                             }
                         }
+                        Some(Menu::New(made)) => {
+                            self.ui.set_menu_open(false);
+                            let at = match made.get(i).cloned().flatten() {
+                                Some(NewFrom::Scratch) => Some(cx.screens.new_page()),
+                                Some(NewFrom::Copy(id)) => cx.screens.index_of(&id).and_then(|k| cx.screens.duplicate_page(k)),
+                                None => None,
+                            };
+                            if let Some(at) = at {
+                                self.settle();
+                                LayoutPage::open(cx, at);
+                                out.edited = true;
+                                out.opened = true;
+                            }
+                        }
                         Some(Menu::Shows(choices)) => {
                             self.ui.set_menu_open(false);
                             if let (Some(Some(s)), Some(ed)) = (choices.get(i).copied(), cx.editor.as_ref()) {
@@ -531,6 +550,18 @@ impl LayoutPage {
         // (its right edge at the button's)
         self.place_menu(rows, w, (anchor.0 + 30.0 - w, anchor.1, anchor.2));
         self.menu = Some(Menu::More);
+    }
+
+    /// + New: From scratch, or a copy of a layout, its right edge at the button's (`bw` wide).
+    fn open_new(&mut self, anchor: (f32, f32, f32), bw: f32, cx: &Cx) {
+        if self.just_shut(anchor) {
+            return;
+        }
+        self.close_picker();
+        let (rows, made) = new_rows(&cx.screens.library);
+        let w = rows.iter().map(|r| crate::text::width(400, 13.5, &r.label) + 64.0).fold(200.0f32, f32::max).min(320.0).ceil();
+        self.place_menu(rows, w, (anchor.0 + bw - w, anchor.1, anchor.2));
+        self.menu = Some(Menu::New(made));
     }
 
     /// Shows, in the box of a Data block or a bar: what it can show, each with what it reads now.

@@ -3447,7 +3447,8 @@ export component AppWindow inherits Window {
     in property <[PlPage]> lib-pages;
     // a layout's card selected or right-clicked: its menu, where the pointer is
     callback lib-menu(int, length, length);
-    callback lib-new();
+    // New screen layout selected: its menu, where the pointer is
+    callback lib-new(length, length);
     // are you sure, before a layout is deleted, as the Macro Editor asks: the question,
     // what goes with the layout, and the button's words
     in property <bool> confirm-open;
@@ -4796,7 +4797,7 @@ export component AppWindow inherits Window {
                             }
                             new-ta := TouchArea {
                                 mouse-cursor: pointer;
-                                clicked => { root.lib-new(); }
+                                clicked => { root.lib-new(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y); }
                             }
                         }
                     }
@@ -6644,7 +6645,9 @@ export component LayoutWindow inherits Window {
     callback close-window();
     callback drag();
     callback choose(int);
-    callback new-layout();
+    // + New (or the empty window's New layout): its menu, hung from the button (where it is
+    // and how wide)
+    callback new-layout(length, length, length, length);
     callback rename();
     callback name-done(string);
     callback name-cancel();
@@ -6772,7 +6775,7 @@ export component LayoutWindow inherits Window {
             x: parent.width - 12px - self.width;
             y: 14px;
             text: "+ New";
-            clicked => { root.new-layout(); }
+            clicked => { root.new-layout(self.absolute-position.x, self.absolute-position.y, self.width, self.height); }
         }
         Flickable {
             x: 8px;
@@ -7487,7 +7490,7 @@ export component LayoutWindow inherits Window {
                 WordButton {
                     primary: true;
                     text: "New layout";
-                    clicked => { root.new-layout(); }
+                    clicked => { root.new-layout(self.absolute-position.x, self.absolute-position.y, self.width, self.height); }
                 }
             }
         }

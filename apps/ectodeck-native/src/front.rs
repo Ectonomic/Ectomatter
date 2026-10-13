@@ -18,6 +18,28 @@ use crate::overlays::Overlays;
 use crate::z10::{self, Action, Page, View};
 use crate::{AppWindow, Cell, CheckItem, EffectItem, KeyItem, LayerItem, LibGroup, LibRow, MenuRow, ProfileItem};
 
+/// What a row of the New screen layout menu makes: a blank layout, or a copy of the
+/// layout with this id.
+#[derive(Clone, Debug, PartialEq)]
+pub enum NewFrom {
+    Scratch,
+    Copy(String),
+}
+
+/// The New screen layout menu, in either window: From scratch, then under a heading every
+/// layout there is, to start from a copy of it; and what each row makes (None for the
+/// rule and the heading).
+pub fn new_rows(library: &[crate::lcd_page::Page]) -> (Vec<MenuRow>, Vec<Option<NewFrom>>) {
+    let row = |kind: i32, label: &str| MenuRow { kind, label: label.into(), tag: "".into(), tick: false, sub: "".into() };
+    let mut rows = vec![row(0, "From scratch"), row(2, ""), row(1, "Duplicate a layout")];
+    let mut made = vec![Some(NewFrom::Scratch), None, None];
+    for p in library {
+        rows.push(row(0, &p.name));
+        made.push(Some(NewFrom::Copy(p.id.clone())));
+    }
+    (rows, made)
+}
+
 /// What the page asked for, done once its event has been handled.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Ask {
@@ -126,7 +148,8 @@ pub enum Ask {
     /// a page moved from one place in the playlist to another
     PageMove(i32, i32),
     PageRemove(i32),
-    LibNew,
+    /// "New screen layout" selected, where the pointer was
+    LibNew(f32, f32),
 }
 
 /// The colour picker, open on a swatch: what it sets, the colour it opened
@@ -501,6 +524,8 @@ pub struct Front {
     pl_menu: bool,
     pl_renaming: bool,
     add_menu: bool,
+    /// "New screen layout"'s menu: what each row makes
+    new_menu: Option<Vec<Option<NewFrom>>>,
     /// a layout card's own menu, the card selected or right-clicked: the layout's place in
     /// the Library; and the card whose menu a press just closed, so its click closes it
     lib_menu: Option<usize>,
@@ -597,7 +622,7 @@ impl Front {
         on!(on_page_show, |i| Ask::PageShow(i));
         on!(on_page_moved, |i, j| Ask::PageMove(i, j));
         on!(on_page_remove, |i| Ask::PageRemove(i));
-        on!(on_lib_new, Ask::LibNew);
+        on!(on_lib_new, |x, y| Ask::LibNew(x, y));
         let (ftx, frx) = mpsc::channel();
         let page = Page::new();
         ui.set_units(page.view_box.2 as f32);
@@ -724,6 +749,7 @@ impl Front {
             pl_menu: false,
             pl_renaming: false,
             add_menu: false,
+            new_menu: None,
             lib_menu: None,
             card_shut: None,
             deleting: None,
@@ -1063,7 +1089,9 @@ impl Front {
                     }
                 }
                 // a new screen layout: a blank one, straight into the editor
-                Ask::LibNew => {
+                // (with no layout to copy, a blank one at once)
+                Ask::LibNew(x, y) if !self.screens.library.is_empty() => self.open_new_menu((x, y)),
+                Ask::LibNew(..) => {
                     self.close_menu();
                     let i = self.screens.new_page();
                     self.pages_edited();
@@ -2150,7 +2178,7 @@ impl Front {
     }
 
     fn close_menu(&mut self) {
-        if self.bind_menu.take().is_some() || self.light_menu.take().is_some() || self.way_menu.take().is_some() || std::mem::take(&mut self.pl_menu) || std::mem::take(&mut self.add_menu) || std::mem::take(&mut self.ob_menu) || self.lib_menu.take().is_some() {
+        if self.bind_menu.take().is_some() || self.light_menu.take().is_some() || self.way_menu.take().is_some() || std::mem::take(&mut self.pl_menu) || std::mem::take(&mut self.add_menu) || std::mem::take(&mut self.ob_menu) || self.lib_menu.take().is_some() || self.new_menu.take().is_some() {
             self.ui.set_menu_open(false);
             self.ui.set_menu_search(true);
             self.ui.set_menu_w(300.0);
@@ -2186,12 +2214,13 @@ impl Front {
                 self.end_rename(true, &typed);
             }
         }
-        if self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pl_menu || self.add_menu || self.ob_menu || self.lib_menu.is_some() {
+        if self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pl_menu || self.add_menu || self.ob_menu || self.lib_menu.is_some() || self.new_menu.is_some() {
             let (mx, my, mw, mh) = (self.ui.get_menu_x(), self.ui.get_menu_y(), self.ui.get_menu_width(), self.ui.get_menu_height());
             if !(x >= mx && x < mx + mw && y >= my && y < my + mh) {
                 // (a card's menu shut by a press: if the press is on the same card, its click
-                // closes the menu rather than opening it again)
-                if let Some(k) = self.lib_menu {
+                // closes the menu rather than opening it again; New screen layout's place is
+                // after the last card's)
+                if let Some(k) = self.lib_menu.or(self.new_menu.as_ref().map(|_| self.screens.library.len())) {
                     self.card_shut = Some((k, Instant::now()));
                 }
                 // a press on the dropdown (or the bar) the menu hangs from shuts it, and its click must not open it again
@@ -2371,6 +2400,21 @@ impl Front {
             self.refresh();
             return;
         }
+        // New screen layout's menu: a blank layout, or a copy of one, opened in the editor
+        if let Some(made) = self.new_menu.clone() {
+            self.close_menu();
+            let at = match made.get(i).cloned().flatten() {
+                Some(NewFrom::Scratch) => Some(self.screens.new_page()),
+                Some(NewFrom::Copy(id)) => self.screens.index_of(&id).and_then(|k| self.copy_layout(k)),
+                None => None,
+            };
+            if let Some(at) = at {
+                self.pages_edited();
+                self.pending_window.push(WindowAsk::OpenLayouts(at));
+            }
+            self.refresh();
+            return;
+        }
         // a layout card's menu: edit it, add it to the playlist (or keep it on the keyboard, on
         // the Onboard layout tab), copy it, or delete it once asked (Undo puts it back)
         if let Some(k) = self.lib_menu {
@@ -2392,7 +2436,7 @@ impl Front {
                     self.keep_playing(playing, shown);
                 }
                 2 => {
-                    if self.screens.duplicate_page(k).is_some() {
+                    if self.copy_layout(k).is_some() {
                         self.pages_edited();
                     }
                 }
@@ -3225,6 +3269,46 @@ impl Front {
         self.ui.set_ob_name(name.into());
         self.ui.set_ob_say(say.into());
         self.ui.set_ob_over(self.ob_over.is_some());
+    }
+
+    /// "New screen layout" selected, at the pointer: From scratch, or a copy of a layout.
+    fn open_new_menu(&mut self, (x, y): (f32, f32)) {
+        if self.card_shut.take().is_some_and(|(j, when)| j == self.screens.library.len() && when.elapsed() < Duration::from_millis(800)) {
+            return;
+        }
+        let (rows, made) = new_rows(&self.screens.library);
+        self.close_menu();
+        self.close_picker();
+        // (nothing in it is ticked)
+        self.ui.set_menu_marks(false);
+        let list: f32 = rows.iter().map(|r| match r.kind { 1 => 28.0, 2 => 11.0, _ => 33.0 }).sum();
+        let h = 6.0 + list + 6.0;
+        let w = rows.iter().map(|r| crate::text::width(400, 13.5, &r.label) + 64.0).fold(200.0f32, f32::max).min(320.0).ceil();
+        self.ui.set_menu_search(false);
+        self.ui.set_menu_back(false);
+        self.ui.set_menu_natural(h);
+        self.ui.set_menu_w(w);
+        self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
+        let win = self.ui.get_window_height();
+        let down = h <= win - y - 14.0;
+        self.ui.set_menu_ax(x);
+        self.ui.set_menu_ay(y);
+        self.ui.set_menu_ah(0.0);
+        self.ui.set_menu_top(if down { y + 2.0 } else { (y - 2.0 - h).max(14.0) });
+        self.ui.set_menu_max(win * 0.7);
+        self.ui.set_menu_open(true);
+        self.new_menu = Some(made);
+    }
+
+    /// Layout `k` copied (the copy after it); the editor's window, open on a later layout,
+    /// stays on that layout. The copy's place.
+    fn copy_layout(&mut self, k: usize) -> Option<usize> {
+        let at = self.screens.duplicate_page(k)?;
+        if let Some(ed) = self.editor.as_mut().filter(|ed| ed.page >= at) {
+            ed.page += 1;
+        }
+        self.refresh_editor();
+        Some(at)
     }
 
     /// Layout `k`'s Delete chosen from its card's menu: first the question, over the window,
