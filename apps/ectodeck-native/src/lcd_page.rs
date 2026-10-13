@@ -1101,7 +1101,7 @@ fn text_of(s: Source, f: bool, date: DateFormat, r: &Readings) -> Option<String>
             format!("{used:.1} / {total:.1} GB")
         }
         Source::VideoMemory => {
-            let g = r.gpu?;
+            let g = r.gpu.filter(|g| g.4 > 0.0)?;
             format!("{:.1} / {:.1} GB", g.3, g.4)
         }
         Source::Date => date.write(r.now.as_ref()?),
@@ -1122,7 +1122,7 @@ fn share_of(s: Source, r: &Readings) -> Option<f64> {
         Source::GpuTemp => r.gpu?.0 as f64 / 100.0,
         Source::GpuLoad => r.gpu?.1 as f64 / 100.0,
         Source::Memory => r.ram.map(|(u, t)| if t > 0.0 { u / t } else { 0.0 })?,
-        Source::VideoMemory => r.gpu.map(|g| if g.4 > 0.0 { g.3 / g.4 } else { 0.0 })?,
+        Source::VideoMemory => r.gpu.filter(|g| g.4 > 0.0).map(|g| g.3 / g.4)?,
         _ => return None,
     }
     .clamp(0.0, 1.0))
@@ -1592,7 +1592,9 @@ pub fn available(r: &Readings, weather: bool) -> Vec<Source> {
             Source::ProfileNumber => r.profile_number.is_some(),
             Source::GameMode => r.mode.is_some(),
             Source::KeyRollover => r.rollover.is_some(),
-            Source::GpuTemp | Source::GpuLoad | Source::GpuClock | Source::VideoMemory => r.gpu.is_some(),
+            Source::GpuTemp | Source::GpuLoad | Source::GpuClock => r.gpu.is_some(),
+            // (Intel's driver doesn't report it)
+            Source::VideoMemory => r.gpu.is_some_and(|g| g.4 > 0.0),
             Source::Memory => r.ram.is_some(),
             Source::OutsideTemp | Source::Sky => weather,
         })
@@ -1781,6 +1783,18 @@ mod tests {
         assert_eq!(Gaps::of(&p).line().unwrap(), "Rain needs Ectodeck, so the keyboard leaves it blank.");
         assert_eq!(Gaps::of(&p).tag(), "Rain stays blank");
         assert_eq!(p.about(), "The time, over rain.");
+    }
+
+    #[test]
+    fn a_card_whose_driver_reports_no_video_memory_leaves_it_out() {
+        // (Intel's xe driver: temperature, load and clock, and 0 of 0 for video memory)
+        let r = Readings { gpu: Some((56, 3, 0, 0.0, 0.0)), ..Readings::default() };
+        let avail = available(&r, false);
+        assert!(avail.contains(&Source::GpuTemp) && !avail.contains(&Source::VideoMemory));
+        let vram = Piece { kind: Kind::Data(Source::VideoMemory, false), row: 0, col: 0, width: 14, right: false, center: false, gap: 1, height: 1, scroll: true, date_format: DateFormat::Short };
+        assert_eq!(says(&vram, &r), None);
+        let nvidia = Readings { gpu: Some((45, 12, 1837, 13.1, 31.8)), ..Readings::default() };
+        assert!(available(&nvidia, false).contains(&Source::VideoMemory));
     }
 
     #[test]

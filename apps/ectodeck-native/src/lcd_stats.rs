@@ -1,50 +1,71 @@
 //! The Stats page: the computer's processor, graphics card and memory, in
 //! the four rows Grant laid out for the z10-lcd service, read and written as
 //! z10lcd.py reads and writes them, so the keyboard shows the same
-//! characters. The processor and memory come from the kernel (k10temp's
-//! Tctl, each core's clock, /proc), the graphics card from NVIDIA's driver
-//! (NVML, opened when first needed). Everything is read under `root`, which
-//! is `/` but for tests, which hand in a made-up computer.
+//! characters. The processor and memory come from the kernel (the CPU
+//! sensor chosen, by default k10temp's Tctl; each core's clock, averaged or
+//! the fastest; /proc), the graphics card chosen from its driver (NVIDIA's
+//! NVML, opened when first needed, or Linux's amdgpu and xe files; see
+//! [crate::sensors]). Everything is read under `root`, which is `/` but for
+//! tests, which hand in a made-up computer.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// One reading of the graphics card: temperature, load, core clock, video
-/// memory used and in all (GiB).
+/// memory used and in all (GiB; 0 of 0 from a card whose driver doesn't say).
 pub type GpuReading = (u32, u32, u32, f64, f64);
 
 pub trait Gpu: Send {
     fn read(&mut self) -> Result<GpuReading, String>;
+    /// Each of these cards' temperature now, for the Settings to show beside its name.
+    fn temps(&mut self, cards: &[crate::sensors::Card]) -> Vec<Option<u32>> {
+        vec![None; cards.len()]
+    }
 }
 
 pub struct Stats {
     root: PathBuf,
-    k10: Option<PathBuf>,
+    /// the CPU sensor chosen, as it was found for that choice
+    cpu: Option<(Option<(String, String)>, Option<crate::sensors::CpuSensor>)>,
     prev: Option<(u64, u64)>,
     gpu: Box<dyn Gpu>,
 }
 
 impl Stats {
     pub fn new(root: impl Into<PathBuf>, gpu: Box<dyn Gpu>) -> Stats {
-        let root = root.into();
-        let k10 = hwmon(&root, "k10temp");
-        Stats { root, k10, prev: None, gpu }
+        Stats { root: root.into(), cpu: None, prev: None, gpu }
     }
 
-    /// This computer, its graphics card through NVML.
+    /// This computer, its graphics card the one chosen.
     pub fn here() -> Stats {
-        Stats::new("/", Box::new(Nvml::default()))
+        Stats::new("/", Box::new(Cards::new("/")))
     }
 
     fn at(&self, p: &str) -> PathBuf {
         self.root.join(p.trim_start_matches('/'))
     }
 
-    fn cpu_temp(&self) -> Option<f64> {
-        let k = self.k10.as_ref()?;
-        let v: i64 = std::fs::read_to_string(k.join("temp1_input")).ok()?.trim().parse().ok()?;
-        Some(v as f64 / 1000.0)
+    /// The chosen sensor's temperature; looked for again when the choice changes, or when
+    /// it can't be read (a sensor gone stays unavailable until another is chosen).
+    fn cpu_temp(&mut self) -> Option<f64> {
+        let want = crate::sensors::choice().cpu;
+        if self.cpu.as_ref().is_none_or(|(w, _)| *w != want) {
+            let all = crate::sensors::cpu_sensors(&self.root);
+            let found = crate::sensors::Choice { cpu: want.clone(), ..Default::default() }.cpu_sensor(&all).cloned();
+            self.cpu = Some((want, found));
+        }
+        let v = self.cpu.as_ref()?.1.as_ref()?.read();
+        if v.is_none() {
+            self.cpu = None;
+        }
+        v
     }
 
+    /// Each card's temperature now, for the Settings.
+    pub fn card_temps(&mut self, cards: &[crate::sensors::Card]) -> Vec<Option<u32>> {
+        self.gpu.temps(cards)
+    }
+
+    /// Every core's clock, averaged, or the fastest one's, as chosen.
     fn cpu_ghz(&self) -> Option<f64> {
         let mut fs = Vec::new();
         for e in std::fs::read_dir(self.at("/sys/devices/system/cpu")).ok()?.flatten() {
@@ -57,6 +78,9 @@ impl Stats {
         }
         if fs.is_empty() {
             return None;
+        }
+        if crate::sensors::choice().fastest {
+            return fs.iter().max().map(|f| *f as f64 / 1e6);
         }
         Some(fs.iter().sum::<u64>() as f64 / fs.len() as f64 / 1e6)
     }
@@ -101,43 +125,77 @@ impl Stats {
     }
 }
 
-/// The hwmon device of a name, under root.
-fn hwmon(root: &Path, name: &str) -> Option<PathBuf> {
-    let dir = root.join("sys/class/hwmon");
-    let mut all: Vec<PathBuf> = std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).collect();
-    all.sort();
-    all.into_iter().find(|h| std::fs::read_to_string(h.join("name")).is_ok_and(|n| n.trim() == name))
+/// The graphics card chosen (see [crate::sensors]): an NVIDIA card through NVML, an AMD
+/// or Intel card through Linux's own files. The cards are looked for again every half minute.
+pub struct Cards {
+    root: PathBuf,
+    nvml: Nvml,
+    sysfs: crate::sensors::Sysfs,
+    found: Option<(std::time::Instant, Vec<crate::sensors::Card>)>,
+}
+
+impl Cards {
+    pub fn new(root: impl Into<PathBuf>) -> Cards {
+        Cards { root: root.into(), nvml: Nvml::default(), sysfs: Default::default(), found: None }
+    }
+}
+
+impl Gpu for Cards {
+    fn read(&mut self) -> Result<GpuReading, String> {
+        if self.found.as_ref().is_none_or(|(at, _)| at.elapsed().as_secs() >= 30) {
+            self.found = Some((std::time::Instant::now(), crate::sensors::cards(&self.root)));
+        }
+        let card = crate::sensors::choice().card(&self.found.as_ref().unwrap().1).cloned().ok_or("no graphics card")?;
+        match card.vendor {
+            crate::sensors::Vendor::Nvidia => self.nvml.read_at(Some(&card.pci)),
+            _ => self.sysfs.read(&card).ok_or_else(|| format!("{} can't be read", card.name)),
+        }
+    }
+
+    fn temps(&mut self, cards: &[crate::sensors::Card]) -> Vec<Option<u32>> {
+        cards
+            .iter()
+            .map(|c| match c.vendor {
+                crate::sensors::Vendor::Nvidia => self.nvml.read_at(Some(&c.pci)).ok().map(|r| r.0),
+                // (a reading of its own, so the chosen card's load keeps its count)
+                _ => crate::sensors::Sysfs::default().read(c).map(|r| r.0),
+            })
+            .collect()
+    }
 }
 
 // ------------------------------------------------------------------ NVIDIA's driver
 
 type NvmlFn0 = unsafe extern "C" fn() -> i32;
 type NvmlHandle = unsafe extern "C" fn(u32, *mut *mut libc::c_void) -> i32;
+type NvmlBus = unsafe extern "C" fn(*const libc::c_char, *mut *mut libc::c_void) -> i32;
 type NvmlU32 = unsafe extern "C" fn(*mut libc::c_void, u32, *mut u32) -> i32;
 type NvmlUtil = unsafe extern "C" fn(*mut libc::c_void, *mut [u32; 2]) -> i32;
 type NvmlMem = unsafe extern "C" fn(*mut libc::c_void, *mut [u64; 3]) -> i32;
 
 struct NvmlLib {
     handle: NvmlHandle,
+    by_bus: NvmlBus,
     temp: NvmlU32,
     clock: NvmlU32,
     util: NvmlUtil,
     mem: NvmlMem,
 }
 
-/// The first graphics card, through NVML, opened when first read and again
-/// after a failure.
+/// An NVIDIA card through NVML (the first, or one by its PCI address), opened when first
+/// read and again after a failure.
 #[derive(Default)]
 pub struct Nvml {
     lib: Option<NvmlLib>,
-    dev: Option<usize>,
+    /// the card open: the PCI address it was asked by (None, the first), and NVML's handle
+    dev: Option<(Option<String>, usize)>,
 }
 
 // (the device handle is NVML's own and used only from the thread that holds this)
 unsafe impl Send for Nvml {}
 
 impl Nvml {
-    fn open(&mut self) -> Result<(), String> {
+    fn open(&mut self, bus: Option<&str>) -> Result<(), String> {
         if self.lib.is_none() {
             unsafe {
                 let h = libc::dlopen(c"libnvidia-ml.so.1".as_ptr(), libc::RTLD_NOW);
@@ -146,7 +204,7 @@ impl Nvml {
                 }
                 let sym = |n: &std::ffi::CStr| libc::dlsym(h, n.as_ptr());
                 let init = sym(c"nvmlInit_v2");
-                let names = [c"nvmlDeviceGetHandleByIndex_v2", c"nvmlDeviceGetTemperature", c"nvmlDeviceGetClockInfo", c"nvmlDeviceGetUtilizationRates", c"nvmlDeviceGetMemoryInfo"];
+                let names = [c"nvmlDeviceGetHandleByIndex_v2", c"nvmlDeviceGetTemperature", c"nvmlDeviceGetClockInfo", c"nvmlDeviceGetUtilizationRates", c"nvmlDeviceGetMemoryInfo", c"nvmlDeviceGetHandleByPciBusId_v2"];
                 let ptrs: Vec<*mut libc::c_void> = names.iter().map(|n| sym(n)).collect();
                 if init.is_null() || ptrs.iter().any(|p| p.is_null()) {
                     return Err("NVML is missing a function".into());
@@ -160,25 +218,32 @@ impl Nvml {
                     clock: std::mem::transmute::<*mut libc::c_void, NvmlU32>(ptrs[2]),
                     util: std::mem::transmute::<*mut libc::c_void, NvmlUtil>(ptrs[3]),
                     mem: std::mem::transmute::<*mut libc::c_void, NvmlMem>(ptrs[4]),
+                    by_bus: std::mem::transmute::<*mut libc::c_void, NvmlBus>(ptrs[5]),
                 });
             }
         }
         let lib = self.lib.as_ref().unwrap();
         let mut d: *mut libc::c_void = std::ptr::null_mut();
-        if unsafe { (lib.handle)(0, &mut d) } != 0 {
-            return Err("no GPU 0".into());
+        let rc = match bus {
+            Some(b) => {
+                let b = std::ffi::CString::new(b).map_err(|_| "a PCI address with a nul in it")?;
+                unsafe { (lib.by_bus)(b.as_ptr(), &mut d) }
+            }
+            None => unsafe { (lib.handle)(0, &mut d) },
+        };
+        if rc != 0 {
+            return Err(format!("no NVIDIA card at {}", bus.unwrap_or("0")));
         }
-        self.dev = Some(d as usize);
+        self.dev = Some((bus.map(String::from), d as usize));
         Ok(())
     }
-}
 
-impl Gpu for Nvml {
-    fn read(&mut self) -> Result<GpuReading, String> {
-        if self.dev.is_none() {
-            self.open()?;
+    /// The card at a PCI address (None, the first), read now.
+    pub fn read_at(&mut self, bus: Option<&str>) -> Result<GpuReading, String> {
+        if self.dev.as_ref().is_none_or(|(b, _)| b.as_deref() != bus) {
+            self.open(bus)?;
         }
-        let (lib, d) = (self.lib.as_ref().unwrap(), self.dev.unwrap() as *mut libc::c_void);
+        let (lib, d) = (self.lib.as_ref().unwrap(), self.dev.as_ref().unwrap().1 as *mut libc::c_void);
         let (mut t, mut clk, mut u, mut m) = (0u32, 0u32, [0u32; 2], [0u64; 3]);
         // temperature of the GPU die (sensor 0), the graphics clock (clock 0)
         let rc = unsafe {
@@ -200,9 +265,16 @@ impl Gpu for Nvml {
     }
 }
 
+impl Gpu for Nvml {
+    fn read(&mut self) -> Result<GpuReading, String> {
+        self.read_at(None)
+    }
+}
+
 #[cfg(test)]
 pub mod tests {
     use super::*;
+    use std::path::Path;
 
     pub struct FakeGpu(pub Vec<Result<GpuReading, String>>);
     impl Gpu for FakeGpu {

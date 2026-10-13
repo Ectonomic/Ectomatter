@@ -1569,6 +1569,18 @@ component CellView inherits Rectangle {
             clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
         }
     }
+    // a link in a sentence: its words brighter than the note round them, which select it
+    if root.c.kind == 18: Text {
+        text: root.c.text;
+        font-family: "Geist";
+        font-size: 12.5px;
+        color: il-ta.has-hover ? #ffffff : Ink.bright;
+        vertical-alignment: center;
+        il-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+        }
+    }
     // a quiet link: Reset (with its icon), Select all, Scatter colors
     if root.c.kind == 47: Rectangle {
         border-radius: 6px;

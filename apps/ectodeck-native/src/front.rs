@@ -18,6 +18,14 @@ use crate::overlays::Overlays;
 use crate::z10::{self, Action, Page, View};
 use crate::{AppWindow, Cell, CheckItem, EffectItem, KeyItem, LayerItem, LibGroup, LibRow, MenuRow, ProfileItem};
 
+/// What a row of the Sensors card's menus chooses: a CPU sensor by its driver and label, or
+/// a graphics card by its PCI address and name.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SensorPick {
+    Cpu(String, String),
+    Card(String, String),
+}
+
 /// What a row of the New screen layout menu makes: a blank layout, or a copy of the
 /// layout with this id.
 #[derive(Clone, Debug, PartialEq)]
@@ -233,6 +241,9 @@ pub enum WindowAsk {
     OpenLab,
     /// open the screen layout editor's window, on this layout of the Library
     OpenLayouts(usize),
+    /// bring the main window forward on Ectodeck's Settings (from the screen editor's
+    /// From line, which links to where its sensor is chosen)
+    ShowSettings,
 }
 
 /// The Plays menu: the six choices, a rule between those that start with the
@@ -526,6 +537,12 @@ pub struct Front {
     add_menu: bool,
     /// "New screen layout"'s menu: what each row makes
     new_menu: Option<Vec<Option<NewFrom>>>,
+    /// the Sensors card's menus: what each row chooses (a CPU sensor by its driver and
+    /// label, a card by its PCI address and name); and what the card shows, read once a second
+    sensor_menu: Option<Vec<Option<SensorPick>>>,
+    sensors_seen: Option<(Instant, crate::ecto_settings::Sensors)>,
+    /// where the readings with a choice come from, for the editor, as last looked at
+    from_seen: Option<(Instant, crate::sensors::Choice, crate::screen_edit::From)>,
     /// a layout card's own menu, the card selected or right-clicked: the layout's place in
     /// the Library; and the card whose menu a press just closed, so its click closes it
     lib_menu: Option<usize>,
@@ -548,6 +565,8 @@ fn swatch(cols: &[[f64; 3]]) -> (i32, [Color; 4]) {
 
 impl Front {
     pub fn new(ui: AppWindow, kb: Option<mpsc::Sender<device::Ask>>, controlled: bool, settings: crate::settings::Settings) -> Front {
+        // (where the screen's readings come from, as last chosen)
+        crate::sensors::choose(crate::sensors::Choice::of(&settings.all()["sensors"]));
         let asks = Rc::new(RefCell::new(Vec::new()));
         macro_rules! on {
             ($set:ident, |$($p:ident),*| $ask:expr) => {{
@@ -750,6 +769,9 @@ impl Front {
             pl_renaming: false,
             add_menu: false,
             new_menu: None,
+            sensor_menu: None,
+            sensors_seen: None,
+            from_seen: None,
             lib_menu: None,
             card_shut: None,
             deleting: None,
@@ -1219,6 +1241,10 @@ impl Front {
                         // between readings (drawn again only when a row has changed)
                         self.refresh_editor();
                         self.draw_screen();
+                    }
+                    // the Sensors card's readings, once a second while Settings is open
+                    if self.ui.get_place() == "settings" && self.sensors_seen.as_ref().is_some_and(|(t, _)| t.elapsed() >= Duration::from_secs(1)) {
+                        self.refresh();
                     }
                     continue;
                 }
@@ -1694,6 +1720,15 @@ impl Front {
             Ctl::SliderBind => {
                 self.open_bind_menu(index, _anchor);
                 return;
+            }
+            Ctl::CpuSensor | Ctl::GpuCard => {
+                self.open_sensor_menu(c, _anchor);
+                return;
+            }
+            Ctl::CpuClock => {
+                let mut ch = crate::sensors::choice();
+                ch.fastest = index == 1;
+                self.keep_sensors(ch);
             }
             Ctl::Control | Ctl::Temperature | Ctl::Wind | Ctl::HdrMode => {
                 let Some(v) = crate::ecto_settings::choice(c, index) else { return };
@@ -2178,7 +2213,7 @@ impl Front {
     }
 
     fn close_menu(&mut self) {
-        if self.bind_menu.take().is_some() || self.light_menu.take().is_some() || self.way_menu.take().is_some() || std::mem::take(&mut self.pl_menu) || std::mem::take(&mut self.add_menu) || std::mem::take(&mut self.ob_menu) || self.lib_menu.take().is_some() || self.new_menu.take().is_some() {
+        if self.bind_menu.take().is_some() || self.light_menu.take().is_some() || self.way_menu.take().is_some() || std::mem::take(&mut self.pl_menu) || std::mem::take(&mut self.add_menu) || std::mem::take(&mut self.ob_menu) || self.lib_menu.take().is_some() || self.new_menu.take().is_some() || self.sensor_menu.take().is_some() {
             self.ui.set_menu_open(false);
             self.ui.set_menu_search(true);
             self.ui.set_menu_w(300.0);
@@ -2214,7 +2249,7 @@ impl Front {
                 self.end_rename(true, &typed);
             }
         }
-        if self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pl_menu || self.add_menu || self.ob_menu || self.lib_menu.is_some() || self.new_menu.is_some() {
+        if self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pl_menu || self.add_menu || self.ob_menu || self.lib_menu.is_some() || self.new_menu.is_some() || self.sensor_menu.is_some() {
             let (mx, my, mw, mh) = (self.ui.get_menu_x(), self.ui.get_menu_y(), self.ui.get_menu_width(), self.ui.get_menu_height());
             if !(x >= mx && x < mx + mw && y >= my && y < my + mh) {
                 // (a card's menu shut by a press: if the press is on the same card, its click
@@ -2236,7 +2271,7 @@ impl Front {
                 } else {
                     self.ui.get_menu_w()
                 };
-                if (self.light_menu.is_some() || self.way_menu.is_some() || self.pl_menu || self.add_menu || self.ob_menu) && x >= ax && x < ax + aw && y >= ay && y < ay + ah {
+                if (self.light_menu.is_some() || self.way_menu.is_some() || self.pl_menu || self.add_menu || self.ob_menu || self.sensor_menu.is_some()) && x >= ax && x < ax + aw && y >= ay && y < ay + ah {
                     self.shut = Some(((ax, ay), Instant::now()));
                 }
                 self.close_menu();
@@ -2397,6 +2432,19 @@ impl Front {
                 }
                 _ => {}
             }
+            self.refresh();
+            return;
+        }
+        // the Sensors card's menus: the sensor or the card chosen
+        if let Some(picks) = self.sensor_menu.clone() {
+            self.close_menu();
+            let mut ch = crate::sensors::choice();
+            match picks.get(i).cloned().flatten() {
+                Some(SensorPick::Cpu(d, l)) => ch.cpu = Some((d, l)),
+                Some(SensorPick::Card(p, n)) => ch.card = Some((p, n)),
+                None => return,
+            }
+            self.keep_sensors(ch);
             self.refresh();
             return;
         }
@@ -2863,7 +2911,12 @@ impl Front {
                 self.dev_status = Some((Instant::now(), crate::devices::z10()));
             }
             let dc = self.dev_status.as_ref().map(|(_, v)| v.clone()).unwrap_or_default();
+            if self.sensors_seen.as_ref().is_none_or(|(t, _)| t.elapsed() >= Duration::from_secs(1)) {
+                let v = self.sensors_view();
+                self.sensors_seen = Some((Instant::now(), v));
+            }
             let st = crate::ecto_settings::State {
+                sensors: self.sensors_seen.as_ref().map(|(_, v)| v.clone()),
                 status: dc,
                 control: self.controlled,
                 settings: self.settings.all(),
@@ -3309,6 +3362,116 @@ impl Front {
         }
         self.refresh_editor();
         Some(at)
+    }
+
+    /// Where the readings with a choice of source come from now, for the editor's From
+    /// line: the CPU sensor's and the card's names, looked for again every two seconds.
+    fn reading_from(&mut self) -> crate::screen_edit::From {
+        let ch = crate::sensors::choice();
+        if self.from_seen.as_ref().is_none_or(|(t, c, _)| t.elapsed() >= Duration::from_secs(2) || *c != ch) {
+            let root = std::path::Path::new("/");
+            let all = crate::sensors::cpu_sensors(root);
+            let sensor = ch.cpu_sensor(&all).map(|s| {
+                let part = if s.own { crate::sensors::cpu_name(root) } else { crate::sensors::board_name(root).unwrap_or_else(|| "the motherboard".into()) };
+                format!("{}, on the {part}", s.label)
+            });
+            let card = ch.card(&crate::sensors::cards(root)).map(|c| c.shown());
+            self.from_seen = Some((Instant::now(), ch.clone(), crate::screen_edit::From { sensor, fastest: ch.fastest, card }));
+        }
+        self.from_seen.as_ref().unwrap().2.clone()
+    }
+
+    /// What the Sensors card shows: the sensors that read the processor and the graphics
+    /// cards on this computer, each read now, and the choices.
+    fn sensors_view(&mut self) -> crate::ecto_settings::Sensors {
+        let root = std::path::Path::new("/");
+        let cpu = crate::sensors::cpu_sensors(root).into_iter().map(|s| (s.read(), s)).map(|(t, s)| (s, t)).collect();
+        let cards = crate::sensors::cards(root);
+        let temps = self.reader.get_or_insert_with(crate::lcd_stats::Stats::here).card_temps(&cards);
+        crate::ecto_settings::Sensors {
+            cpu,
+            cpu_name: crate::sensors::cpu_name(root),
+            board: crate::sensors::board_name(root),
+            cores: crate::sensors::cpu_cores(root),
+            cards: cards.into_iter().zip(temps).collect(),
+            choice: crate::sensors::choice(),
+        }
+    }
+
+    /// A Sensors choice made: kept in the settings, and read from at once.
+    fn keep_sensors(&mut self, ch: crate::sensors::Choice) {
+        if let Err(e) = self.settings.set("sensors", ch.to_json()) {
+            self.status(format!("The sensor choice was not saved: {e}"), 2);
+            return;
+        }
+        crate::sensors::choose(ch);
+        self.sensors_seen = None;
+        // (the editor's and the playlist's pictures read again)
+        self.read_at = None;
+    }
+
+    /// The Sensors card's menus, under their dropdown: every sensor that reads the
+    /// processor, under the part it belongs to, or every graphics card; each with its
+    /// reading now, the one chosen ticked.
+    fn open_sensor_menu(&mut self, c: Ctl, anchor: (f32, f32, f32)) {
+        if let Some((at, when)) = self.shut.take() {
+            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
+                return;
+            }
+        }
+        let v = self.sensors_view();
+        let row = |kind: i32, label: String, tick: bool, sub: String| MenuRow { kind, label: label.into(), tag: "".into(), tick, sub: sub.into() };
+        let (mut rows, mut picks): (Vec<MenuRow>, Vec<Option<SensorPick>>) = (Vec::new(), Vec::new());
+        if c == Ctl::CpuSensor {
+            let all: Vec<crate::sensors::CpuSensor> = v.cpu.iter().map(|(s, _)| s.clone()).collect();
+            let chosen = v.choice.cpu_sensor(&all).cloned();
+            for (own, head) in [(true, v.cpu_name.clone()), (false, v.board.clone().unwrap_or_else(|| "The motherboard".into()))] {
+                let group: Vec<&(crate::sensors::CpuSensor, Option<f64>)> = v.cpu.iter().filter(|(s, _)| s.own == own).collect();
+                if group.is_empty() {
+                    continue;
+                }
+                rows.push(row(1, head, false, String::new()));
+                picks.push(None);
+                for (s, t) in group {
+                    rows.push(row(0, s.label.clone(), chosen.as_ref() == Some(s), t.map_or(String::new(), |t| format!("{}°", t.round()))));
+                    picks.push(Some(SensorPick::Cpu(s.driver.clone(), s.label.clone())));
+                }
+            }
+        } else {
+            let all: Vec<crate::sensors::Card> = v.cards.iter().map(|(k, _)| k.clone()).collect();
+            let chosen = v.choice.card(&all).cloned();
+            for (k, t) in &v.cards {
+                rows.push(row(0, k.shown(), chosen.as_ref() == Some(k), t.map_or(String::new(), |t| format!("{t}°"))));
+                picks.push(Some(SensorPick::Card(k.pci.clone(), k.name.clone())));
+            }
+        }
+        if rows.is_empty() {
+            return;
+        }
+        self.close_menu();
+        self.close_picker();
+        self.ui.set_menu_marks(true);
+        let list: f32 = rows.iter().map(|r| if r.kind == 1 { 28.0 } else { 33.0 }).sum();
+        let h = 6.0 + list + 6.0;
+        self.ui.set_menu_search(false);
+        self.ui.set_menu_back(false);
+        self.ui.set_menu_natural(h);
+        // (as wide as its dropdown, or as its longest name and reading need)
+        let w = rows.iter().map(|r| crate::text::width(400, 13.5, &r.label) + crate::text::width(400, 12.0, &r.sub) + 76.0).fold(300.0f32, f32::max).min(460.0).ceil();
+        self.ui.set_menu_w(w);
+        self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
+        let (ax, ay, ah) = anchor;
+        let win = self.ui.get_window_height();
+        let (below, above) = (win - ay - ah - 14.0, ay - 70.0);
+        let down = h <= below || below >= above;
+        let room = if down { below } else { above };
+        self.ui.set_menu_ax(ax);
+        self.ui.set_menu_ay(ay);
+        self.ui.set_menu_ah(ah);
+        self.ui.set_menu_top(if down { ay + ah + 6.0 } else { ay - 6.0 - h.min(room) });
+        self.ui.set_menu_max(if h > room { room } else { win * 0.7 });
+        self.ui.set_menu_open(true);
+        self.sensor_menu = Some(picks);
     }
 
     /// Layout `k`'s Delete chosen from its card's menu: first the question, over the window,
@@ -3856,9 +4019,9 @@ impl Front {
         let avail = crate::lcd_page::available(&self.readings, self.weather.report().is_some());
         let light = self.layouts_light();
         let t = self.edit_t();
-        let (onboard, profiles) = (self.onboard_ready(), crate::lcd_page::PROFILES.map(|n| self.page.profile_name(n)));
+        let (onboard, profiles, from) = (self.onboard_ready(), crate::lcd_page::PROFILES.map(|n| self.page.profile_name(n)), self.reading_from());
         let Some(l) = &mut self.layouts else { return Vec::new() };
-        let mut cx = crate::layout_page::Cx { screens: &mut self.screens, editor: &mut self.editor, readings: &self.readings, avail: &avail, light, t, onboard, profiles };
+        let mut cx = crate::layout_page::Cx { screens: &mut self.screens, editor: &mut self.editor, readings: &self.readings, avail: &avail, light, t, onboard, profiles, from };
         let out = l.act(&mut cx);
         l.show(&cx);
         if out.closed {
@@ -3890,9 +4053,9 @@ impl Front {
         let avail = crate::lcd_page::available(&self.readings, self.weather.report().is_some());
         let light = self.layouts_light();
         let t = self.edit_t();
-        let (onboard, profiles) = (self.onboard_ready(), crate::lcd_page::PROFILES.map(|n| self.page.profile_name(n)));
+        let (onboard, profiles, from) = (self.onboard_ready(), crate::lcd_page::PROFILES.map(|n| self.page.profile_name(n)), self.reading_from());
         let Some(l) = &mut self.layouts else { return };
-        let cx = crate::layout_page::Cx { screens: &mut self.screens, editor: &mut self.editor, readings: &self.readings, avail: &avail, light, t, onboard, profiles };
+        let cx = crate::layout_page::Cx { screens: &mut self.screens, editor: &mut self.editor, readings: &self.readings, avail: &avail, light, t, onboard, profiles, from };
         l.show(&cx);
     }
 

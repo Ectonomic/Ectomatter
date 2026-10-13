@@ -56,6 +56,16 @@ pub struct BlockBox {
     pub h: f32,
 }
 
+/// Where the readings with a choice of source come from now, for the From line: the CPU
+/// sensor's name ("Tctl, on the AMD Ryzen 9 9950X3D"), whether the clock is the fastest
+/// core's rather than the average, and the graphics card's name.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct From {
+    pub sensor: Option<String>,
+    pub fastest: bool,
+    pub card: Option<String>,
+}
+
 /// What a piece looks like now, for its box: words and readings whole, however its block
 /// shows them.
 fn looks(p: &Piece, r: &Readings) -> String {
@@ -141,6 +151,27 @@ impl Grid {
         self.cells.push(text_cell(style::END_R, x + w - rw, y + 7.0, rw, 20.0, ends.1));
         self.done(top + 34.0);
     }
+    /// a note naming where a reading comes from, ending in a link to where that is chosen:
+    /// `s` holds `link` once
+    fn note_link(&mut self, label: Option<&str>, s: &str, link: &str, c: Ctl) {
+        let top = label.map_or(0.0, |l| self.head(l, None));
+        let (x, w) = (self.x(), self.col_w());
+        let lines = crate::text::wrap(400, 12.5, s, w);
+        for (k, line) in lines.iter().enumerate() {
+            let y = self.y + top + k as f32 * 18.0;
+            match line.find(link) {
+                Some(at) => {
+                    let (before, after) = (&line[..at], &line[at + link.len()..]);
+                    let (bw, lw) = (crate::text::width(400, 12.5, before), crate::text::width(400, 12.5, link).ceil() + 1.0);
+                    self.cells.push(text_cell(style::NOTE, x, y, bw + 1.0, 18.0, before));
+                    self.cells.push(Cell { text: link.into(), id: id(c), ..cell(kind::INLINE_LINK, x + bw, y, lw, 18.0) });
+                    self.cells.push(text_cell(style::NOTE, x + bw + lw, y, (w - bw - lw).max(1.0), 18.0, after));
+                }
+                None => self.cells.push(text_cell(style::NOTE, x, y, w, 18.0, line)),
+            }
+        }
+        self.done(top + lines.len() as f32 * 18.0);
+    }
     fn value(&mut self, label: &str, v: &str) {
         let h = self.head(label, Some(v));
         self.done(h - 6.0);
@@ -171,8 +202,10 @@ const FIT: [&str; 2] = ["Cut off", "Scroll"];
 /// The box of the block chosen, `w` wide: for Text, Data and Bar their own
 /// settings; with nothing chosen, the window draws what each block is for.
 /// `avail` is what this computer can read; `open`, the dropdown whose menu is open (Shows,
-/// or the date's Format).
-pub fn block_box(page: &Page, chosen: Option<usize>, r: &Readings, avail: &[Source], open: Option<Ctl>, w: f32) -> BlockBox {
+/// or the date's Format); `from`, where the readings with a choice of source come from now
+/// (the CPU sensor's name, how the clock is counted, the graphics card's name), which the
+/// From line names and links to Settings for.
+pub fn block_box(page: &Page, chosen: Option<usize>, r: &Readings, avail: &[Source], open: Option<Ctl>, from: &From, w: f32) -> BlockBox {
     let Some(p) = chosen.and_then(|i| page.pieces.get(i)) else {
         // (its legend has the four lines, and the line on selecting once there are blocks)
         let h = if page.pieces.is_empty() { 50.0 + 3.0 * 29.0 + 18.0 - 11.0 + 18.0 } else { 78.0 + 3.0 * 29.0 - 11.0 + 18.0 };
@@ -202,7 +235,15 @@ pub fn block_box(page: &Page, chosen: Option<usize>, r: &Readings, avail: &[Sour
             }
             g.dropdown("Shows", Ctl::ScrSource, src.name(), open == Some(Ctl::ScrSource));
             g.value("Looks like", &looks(p, r));
-            if avail.contains(src) {
+            let chosen = match src {
+                Source::CpuTemp => from.sensor.as_ref().map(|s| format!("{s}. Choose another sensor in Settings.")),
+                Source::CpuClock => Some(format!("{}. Choose another in Settings.", if from.fastest { "The fastest core’s clock" } else { "The average of every core’s clock" })),
+                Source::GpuTemp | Source::GpuLoad | Source::GpuClock | Source::VideoMemory => from.card.as_ref().map(|c| format!("The {c}. Choose another card in Settings.")),
+                _ => None,
+            };
+            if let (true, Some(line)) = (avail.contains(src), &chosen) {
+                g.note_link(Some("From"), line, "Settings", Ctl::OpenSettings);
+            } else if avail.contains(src) {
                 g.note(Some("From"), src.from());
             } else {
                 g.note(Some("From"), &format!("Ectodeck can’t read the {} on this computer, so the block says “unavailable”.", src.name().to_lowercase()));
@@ -706,16 +747,16 @@ mod tests {
     fn each_kind_of_block_has_its_own_box() {
         let r = Readings::default();
         let p = Page::stats();
-        let b = block_box(&p, Some(1), &r, &[Source::CpuTemp], None, 551.0);
+        let b = block_box(&p, Some(1), &r, &[Source::CpuTemp], None, &From::default(), 551.0);
         assert_eq!((b.kind, b.title.as_str()), (2, "Data"));
         // Align first, at the top left; then Units beside it
         let first = b.cells.iter().find(|c| c.kind == kind::CHOICE).unwrap();
         assert_eq!(first.text.as_str(), "Left");
         assert!(b.cells.iter().any(|c| c.text.as_str() == "Units"));
-        let b = block_box(&p, Some(0), &r, &[], None, 551.0);
+        let b = block_box(&p, Some(0), &r, &[], None, &From::default(), 551.0);
         assert_eq!(b.title, "Text");
         assert!(b.cells.iter().any(|c| c.kind == kind::FIELD && c.text.as_str() == "CPU"));
-        let none = block_box(&p, None, &r, &[], None, 551.0);
+        let none = block_box(&p, None, &r, &[], None, &From::default(), 551.0);
         assert_eq!((none.kind, none.title.as_str()), (0, "Nothing selected"));
     }
 }

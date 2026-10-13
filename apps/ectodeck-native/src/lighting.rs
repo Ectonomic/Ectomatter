@@ -72,9 +72,16 @@ pub enum Ctl {
     ScrFormat,
     /// how fast an effect moves
     ScrSpeed,
+    /// where the screen's readings come from: the CPU sensor (its menu), the clock
+    /// averaged or the fastest core's, the graphics card (its menu)
+    CpuSensor,
+    CpuClock,
+    GpuCard,
+    /// a link to Ectodeck's Settings, from the screen editor
+    OpenSettings,
 }
 
-const CTLS: [Ctl; 45] = [
+const CTLS: [Ctl; 49] = [
     Ctl::None,
     Ctl::Color,
     Ctl::Colors,
@@ -120,6 +127,10 @@ const CTLS: [Ctl; 45] = [
     Ctl::ScrLight,
     Ctl::ScrFormat,
     Ctl::ScrSpeed,
+    Ctl::CpuSensor,
+    Ctl::CpuClock,
+    Ctl::GpuCard,
+    Ctl::OpenSettings,
 ];
 
 pub fn ctl(id: i32) -> Ctl {
@@ -152,6 +163,8 @@ pub mod kind {
     pub const BOX: i32 = 16;
     /// a place that tells the page when the pointer is over it
     pub const ZONE: i32 = 17;
+    /// a link in a sentence, its words brighter than the note round them
+    pub const INLINE_LINK: i32 = 18;
     // the Lighting page's own pieces, in the shades of its boxes:
     // a value in a small well; a slider filled to its place; a color's dot;
     // a piece of a run of colors; a switch's choice; an area's chip; a

@@ -29,7 +29,47 @@ const PAD_X: f32 = 24.0;
 const LABEL_W: f32 = 132.0;
 const CTRL: f32 = 148.0;
 
+/// The Sensors card: the sensors that read the processor, each with its reading now, the
+/// processor's and the motherboard's names, its cores, the graphics cards with their
+/// temperatures, and the choices.
+#[derive(Clone)]
+pub struct Sensors {
+    pub cpu: Vec<(crate::sensors::CpuSensor, Option<f64>)>,
+    pub cpu_name: String,
+    pub board: Option<String>,
+    pub cores: Option<u32>,
+    pub cards: Vec<(crate::sensors::Card, Option<u32>)>,
+    pub choice: crate::sensors::Choice,
+}
+
+impl Sensors {
+    /// A sensor's name as the card and the editor say it: "Tctl, AMD Ryzen 9 9950X3D".
+    pub fn name(&self, s: &crate::sensors::CpuSensor) -> String {
+        format!("{}, {}", s.label, if s.own { self.cpu_name.clone() } else { self.board.clone().unwrap_or_else(|| "the motherboard".into()) })
+    }
+
+    /// The note under the CPU temperature: what the processor's own sensors are, or where
+    /// the motherboard's reads.
+    pub fn cpu_note(&self, chosen: &crate::sensors::CpuSensor) -> String {
+        if !chosen.own {
+            return format!("{} is the motherboard’s own reading, from its sensor chip ({}).", chosen.label, chosen.driver);
+        }
+        let dies: Vec<String> = self.cpu.iter().map(|(s, _)| s).filter(|s| s.own && s.label.starts_with("Tccd")).map(|s| s.label.clone()).collect();
+        let count = ["one", "two", "three", "four", "five", "six", "seven", "eight"].get(dies.len().wrapping_sub(1)).copied().unwrap_or("its");
+        match chosen.label.as_str() {
+            "Tctl" if dies.is_empty() => "Tctl is the temperature the processor reports for cooling.".into(),
+            "Tctl" if dies.len() == 1 => format!("Tctl is the temperature the processor reports for cooling. {} is its core die.", dies[0]),
+            "Tctl" => format!("Tctl is the temperature the processor reports for cooling. {} are its {count} core dies.", crate::sensors::and_list(&dies)),
+            l if l.starts_with("Tccd") => format!("{l} is one of the processor’s core dies. Tctl is the temperature it reports for cooling."),
+            "Package id 0" => "Package id 0 is the temperature of the whole processor. Each Core is one of its cores.".into(),
+            l if l.starts_with("Core") => format!("{l} is one of the processor’s cores. Package id 0 is the whole processor."),
+            l => format!("{l} is read by the processor’s own driver ({}).", chosen.driver),
+        }
+    }
+}
+
 pub struct State<'a> {
+    pub sensors: Option<Sensors>,
     pub status: Value,
     pub control: bool,
     pub settings: Value,
@@ -224,6 +264,70 @@ pub fn page(s: &State) -> (Vec<Cell>, f32) {
         }
         c.next(cy - c.y);
     });
+
+    // where the screen's readings come from, where there is more than one source
+    if let Some(v) = &s.sensors {
+        section(&mut cells, &mut y, "Sensors", |c| {
+            let cx = X0 + PAD_X + CTRL;
+            // a dropdown with what its choice reads now at its right, before its chevron
+            let drop = |c: &mut Card, ctl: Ctl, words: &str, reading: Option<String>| {
+                c.cells.push(Cell { text: words.into(), id: id(ctl), ..cell(kind::DROP, cx, c.y, 300.0, 34.0) });
+                if let Some(r) = reading {
+                    let w = text::width(400, 12.5, &r).ceil() + 2.0;
+                    c.cells.push(Cell { color: slint::Color::from_rgb_u8(0xa1, 0xa1, 0xaa), ..text_cell(style::NOTE_IN, cx + 300.0 - 36.0 - w, c.y, w, 34.0, &r) });
+                }
+            };
+            let none = |c: &mut Card| c.cells.push(Cell { text: "None found".into(), style: 2, ..cell(kind::FIELD, cx, c.y, 300.0, 34.0) });
+            let deg = |t: f64| format!("{}°", t.round());
+            c.label("CPU temperature");
+            let mut ny = c.y + 34.0 + 7.0;
+            match (v.choice.cpu_sensor(&v.cpu.iter().map(|(s, _)| s.clone()).collect::<Vec<_>>()), &v.choice.cpu) {
+                (Some(s), _) => {
+                    let reading = v.cpu.iter().find(|(o, _)| o == s).and_then(|(_, t)| t.map(deg));
+                    drop(c, Ctl::CpuSensor, &v.name(&s), reading);
+                    c.note(&mut ny, &v.cpu_note(&s), 640.0);
+                }
+                (None, Some((_, label))) if !v.cpu.is_empty() => {
+                    drop(c, Ctl::CpuSensor, &format!("{label}, not found"), None);
+                    c.note(&mut ny, &format!("{label} is no longer on this computer, so screen layouts show the CPU temperature as unavailable until another sensor is chosen."), 640.0);
+                }
+                _ => {
+                    none(c);
+                    c.note(&mut ny, "Linux reports no temperature sensor for this processor, so screen layouts can’t show the CPU temperature.", 640.0);
+                }
+            }
+            c.next(ny - c.y - 0.125);
+            c.label("CPU clock");
+            c.seg(c.y, Ctl::CpuClock, &[("average", "Average of all cores"), ("fastest", "Fastest core")], if v.choice.fastest { "fastest" } else { "average" });
+            let mut ny = c.y + 36.0 + 7.0;
+            match v.cores {
+                Some(n) if n > 1 => c.note(&mut ny, &format!("Each of the processor’s {n} cores runs at its own clock."), 640.0),
+                _ => c.note(&mut ny, "Each of the processor’s cores runs at its own clock.", 640.0),
+            }
+            c.next(ny - c.y - 0.125);
+            c.label("Graphics card");
+            let mut ny = c.y + 34.0 + 7.0;
+            let cards: Vec<crate::sensors::Card> = v.cards.iter().map(|(k, _)| k.clone()).collect();
+            match (v.choice.card(&cards), &v.choice.card) {
+                (Some(k), _) => {
+                    let temp = v.cards.iter().find(|(o, _)| o == k).and_then(|(_, t)| t.map(|t| format!("{t}°")));
+                    drop(c, Ctl::GpuCard, &k.shown(), temp);
+                    c.note(&mut ny, crate::sensors::reports(k), 640.0);
+                }
+                (None, Some((_, name))) if !cards.is_empty() => {
+                    drop(c, Ctl::GpuCard, &format!("{name}, not found"), None);
+                    c.note(&mut ny, &format!("The {name} is no longer in this computer, so screen layouts show GPU readings as unavailable until another card is chosen."), 640.0);
+                }
+                _ => {
+                    none(c);
+                    c.note(&mut ny, "Linux reports no graphics card Ectodeck can read, so screen layouts can’t show GPU readings.", 640.0);
+                }
+            }
+            ny += 10.0;
+            c.note(&mut ny, "Screen layouts show these readings. CPU load and memory in use come from Linux (/proc), and the weather from the Weather settings above.", 640.0);
+            c.next(ny - c.y - 0.125);
+        });
+    }
 
     // the HDR interface
     let hdr = &s.settings["hdr"];

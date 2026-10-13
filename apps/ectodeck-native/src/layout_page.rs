@@ -93,6 +93,8 @@ pub struct Cx<'a> {
     /// itself (its onboard layouts), and the profiles' names
     pub onboard: bool,
     pub profiles: [String; 5],
+    /// where the readings with a choice of source come from now, for the From line
+    pub from: screen_edit::From,
 }
 
 /// What came of the window's asks.
@@ -391,6 +393,7 @@ impl LayoutPage {
                     let c = ctl(id);
                     match c {
                         Ctl::ScrSource => self.open_shows(cx, (x, y, h)),
+                        Ctl::OpenSettings => out.window.push(WindowAsk::ShowSettings),
                         Ctl::ScrFormat => self.open_formats(cx, (x, y, h)),
                         Ctl::ScrAlign | Ctl::ScrUnits | Ctl::ScrHours | Ctl::ScrFit => {
                             if let Some(ed) = cx.editor.as_mut() {
@@ -867,7 +870,7 @@ impl LayoutPage {
             Some(Menu::Formats(_)) => Some(Ctl::ScrFormat),
             _ => None,
         };
-        let b = screen_edit::block_box(page, ed.chosen, cx.readings, cx.avail, open, (rig_w - 12.0) / 2.0);
+        let b = screen_edit::block_box(page, ed.chosen, cx.readings, cx.avail, open, &cx.from, (rig_w - 12.0) / 2.0);
         self.ui.set_box_kind(b.kind);
         self.ui.set_box_title(b.title.into());
         self.ui.set_box_h(b.h);

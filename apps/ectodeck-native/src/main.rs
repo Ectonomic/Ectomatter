@@ -45,6 +45,7 @@ mod picker;
 mod picture;
 mod screen_edit;
 mod screens;
+mod sensors;
 mod settings;
 mod setups;
 mod text;
@@ -88,8 +89,9 @@ use smithay_client_toolkit::data_device_manager::{
 };
 use smithay_client_toolkit::reexports::client::protocol::{wl_data_device::WlDataDevice, wl_data_device_manager::DndAction, wl_data_source::WlDataSource};
 use smithay_client_toolkit::{
+    activation::{ActivationHandler, ActivationState, RequestData},
     compositor::{CompositorHandler, CompositorState},
-    delegate_compositor, delegate_data_device, delegate_keyboard, delegate_output, delegate_pointer, delegate_registry, delegate_seat, delegate_shm,
+    delegate_activation, delegate_compositor, delegate_data_device, delegate_keyboard, delegate_output, delegate_pointer, delegate_registry, delegate_seat, delegate_shm,
     delegate_xdg_shell, delegate_xdg_window,
     output::{OutputHandler, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
@@ -550,6 +552,8 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     }
     if let Ok(place) = std::env::var("ECTODECK_NATIVE_PLACE") {
         front.ui.set_place(place.into());
+        // (the place's own cells built, so clicks land on them)
+        front.refresh();
     }
     // ECTODECK_NATIVE_MACROS=N: the Macro Editor's window instead, open on macro N
     if let Some(n) = std::env::var("ECTODECK_NATIVE_MACROS").ok().and_then(|v| v.parse::<u32>().ok()) {
@@ -1187,6 +1191,9 @@ struct App {
     quitting: Option<Instant>,
     /// the last button press, which a move or a resize is started from
     press: u32,
+    /// the compositor's window activation (none on one without it), with which a press in
+    /// another of Ectodeck's windows brings the main one forward
+    activation: Option<ActivationState>,
     at: (f64, f64),
     ready: bool,
     failed: Option<String>,
@@ -1484,6 +1491,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         exit: false,
         quitting: None,
         press: 0,
+        activation: ActivationState::bind(&globals, &qh).ok(),
         at: (0.0, 0.0),
         ready: false,
         failed: None,
@@ -1710,6 +1718,7 @@ impl App {
                 WindowAsk::OpenMacros(n) => self.open_macros(*n),
                 WindowAsk::OpenLab => self.open_lab(),
                 WindowAsk::OpenLayouts(i) => self.open_layouts(*i),
+                WindowAsk::ShowSettings => self.show_settings(None),
             }
         }
         let asks = [(MACROS, self.front.act_macros()), (LAB, self.front.act_lab()), (LAYOUTS, self.front.act_layouts())];
@@ -1743,6 +1752,10 @@ impl App {
                         }
                     }
                     WindowAsk::Close => self.hide_sub(which),
+                    WindowAsk::ShowSettings => {
+                        let from = sw.window.wl_surface().clone();
+                        self.show_settings(Some(from));
+                    }
                     WindowAsk::OpenMacros(_) | WindowAsk::OpenLab | WindowAsk::OpenLayouts(_) => {}
                 }
             }
@@ -2037,6 +2050,19 @@ impl App {
         use smithay_client_toolkit::reexports::client::Proxy;
         let output = self.outputs.outputs().find(|o| o.id().protocol_id() == id)?;
         self.outputs.info(&output)?.name
+    }
+
+    /// The main window on Ectodeck's Settings, shown again if it was closed to the tray, and
+    /// brought forward with the press just made in another of Ectodeck's windows (`from`),
+    /// as the compositor lets a window be raised only with a press.
+    fn show_settings(&mut self, from: Option<wl_surface::WlSurface>) {
+        self.front.ui.set_place("settings".into());
+        self.front.refresh();
+        self.show();
+        self.full = true;
+        if let (Some(a), Some(seat), Some(surface)) = (&self.activation, &self.seat, from) {
+            a.request_token(&self.qh, RequestData { app_id: Some("com.ectonomic.ectodeck".into()), seat_and_serial: Some((seat.clone(), self.press)), surface: Some(surface) });
+        }
     }
 
     /// Close the window into the tray: without its buffer the window is
@@ -2930,6 +2956,17 @@ impl DataSourceHandler for App {
 delegate_xdg_shell!(App);
 delegate_xdg_window!(App);
 delegate_registry!(App);
+delegate_activation!(App);
+
+impl ActivationHandler for App {
+    type RequestData = RequestData;
+    /// The token a press in another window was given: the main window comes forward with it.
+    fn new_token(&mut self, token: String, _: &RequestData) {
+        if let Some(a) = &self.activation {
+            a.activate::<App>(self.window.wl_surface(), token);
+        }
+    }
+}
 
 /// A window's edge under the pointer at `x`, `y` on its surface (its clear
 /// margin `m` round the window), which a press resizes from: anywhere in the
