@@ -376,10 +376,12 @@ pub struct Page {
     /// when it has its own again
     pub kept_light: Option<[u8; 3]>,
     pub pieces: Vec<Piece>,
-    /// as played: how long it shows before the next page, and how it comes
-    /// onto the screen after the page before it (each turn of the playlist
-    /// says, see [Entry]; a page in the Library alone keeps a new page's)
+    /// as played: how long it shows before the next page, or whether it stays
+    /// until the layouts are switched, and how it comes onto the screen after
+    /// the page before it (each turn of the playlist says, see [Entry]; a page
+    /// in the Library alone keeps a new page's)
     pub secs: u32,
+    pub stays: bool,
     pub comes_in: Transition,
 }
 
@@ -405,6 +407,7 @@ impl Page {
             light: None,
             kept_light: None,
             secs: SECS.2,
+            stays: false,
             comes_in: Transition::Wipe,
             pieces: vec![
                 words(0, 0, "CPU"),
@@ -425,7 +428,7 @@ impl Page {
 
     /// A page with nothing on it yet, to be made in the editor.
     pub fn blank() -> Page {
-        Page { id: "custom".into(), name: "Custom".into(), light: None, kept_light: None, secs: SECS.2, comes_in: Transition::Wipe, pieces: Vec::new() }
+        Page { id: "custom".into(), name: "Custom".into(), light: None, kept_light: None, secs: SECS.2, stays: false, comes_in: Transition::Wipe, pieces: Vec::new() }
     }
 
     /// The time on the second row and the date on the third, in the middle.
@@ -436,6 +439,7 @@ impl Page {
             light: None,
             kept_light: None,
             secs: SECS.2,
+            stays: false,
             comes_in: Transition::Wipe,
             pieces: vec![middle(1, Kind::Clock(false)), middle(2, Kind::Data(Source::Date, false))],
         }
@@ -449,6 +453,7 @@ impl Page {
             light: None,
             kept_light: None,
             secs: SECS.2,
+            stays: false,
             comes_in: Transition::Wipe,
             pieces: vec![middle(1, Kind::Data(Source::OutsideTemp, false)), middle(2, Kind::Data(Source::Sky, false))],
         }
@@ -638,7 +643,7 @@ impl Page {
         let (light, kept_light) = (rgb_of("light"), rgb_of("kept_light"));
         let secs = v["secs"].as_u64().map_or(SECS.2, |n| (n as u32).clamp(SECS.0, SECS.1));
         let comes_in = v["comes_in"].as_str().and_then(Transition::from_key).unwrap_or(Transition::Wipe);
-        Some(Page { id: v["id"].as_str()?.into(), name: v["name"].as_str().unwrap_or("Page").into(), light, kept_light, pieces, secs, comes_in })
+        Some(Page { id: v["id"].as_str()?.into(), name: v["name"].as_str().unwrap_or("Page").into(), light, kept_light, pieces, secs, stays: false, comes_in })
     }
 }
 
@@ -653,20 +658,22 @@ pub fn pages_of(v: Option<&Value>) -> Vec<Page> {
 
 /// One turn of the playlist: a screen of the Library, how long it shows,
 /// and how it comes in after the one before it. The same screen can have
-/// more than one turn. `key` tells turns apart while Ectodeck runs (it is
-/// not kept), so a turn's block on the strip stays the same block when
-/// others move.
+/// more than one turn. A turn that `stays` shows until the layouts are
+/// switched, and keeps its seconds for when it is timed again. `key` tells
+/// turns apart while Ectodeck runs (it is not kept), so a turn's block on
+/// the strip stays the same block when others move.
 #[derive(Clone, Debug)]
 pub struct Entry {
     pub page: String,
     pub secs: u32,
+    pub stays: bool,
     pub comes_in: Transition,
     pub key: u64,
 }
 
 impl PartialEq for Entry {
     fn eq(&self, o: &Entry) -> bool {
-        (&self.page, self.secs, self.comes_in) == (&o.page, o.secs, o.comes_in)
+        (&self.page, self.secs, self.stays, self.comes_in) == (&o.page, o.secs, o.stays, o.comes_in)
     }
 }
 
@@ -693,17 +700,21 @@ fn new_key() -> u64 {
 
 impl Entry {
     pub fn new(page: &str, secs: u32, comes_in: Transition) -> Entry {
-        Entry { page: page.into(), secs: secs.clamp(SECS.0, SECS.1), comes_in, key: new_key() }
+        Entry { page: page.into(), secs: secs.clamp(SECS.0, SECS.1), stays: false, comes_in, key: new_key() }
     }
 
     pub fn to_json(&self) -> Value {
-        json!({ "page": self.page, "secs": self.secs, "comes_in": self.comes_in.key() })
+        let mut v = json!({ "page": self.page, "secs": self.secs, "comes_in": self.comes_in.key() });
+        if self.stays {
+            v["stays"] = json!(true);
+        }
+        v
     }
 
     pub fn from_json(v: &Value) -> Option<Entry> {
         let secs = v["secs"].as_u64().map_or(SECS.2, |n| (n as u32).clamp(SECS.0, SECS.1));
         let comes_in = v["comes_in"].as_str().and_then(Transition::from_key).unwrap_or(Transition::Wipe);
-        Some(Entry::new(v["page"].as_str()?, secs, comes_in))
+        Some(Entry { stays: v["stays"].as_bool().unwrap_or(false), ..Entry::new(v["page"].as_str()?, secs, comes_in) })
     }
 }
 
@@ -859,7 +870,7 @@ impl Screens {
     /// The pages profile `p`'s playlist plays, in turn: each turn's page,
     /// with the turn's time and way in.
     pub fn played(&self, p: u8) -> Vec<Page> {
-        self.turns(p).iter().filter_map(|e| self.page_of(e).map(|pg| Page { secs: e.secs, comes_in: e.comes_in, ..pg.clone() })).collect()
+        self.turns(p).iter().filter_map(|e| self.page_of(e).map(|pg| Page { secs: e.secs, stays: e.stays, comes_in: e.comes_in, ..pg.clone() })).collect()
     }
 
     pub fn page_of(&self, e: &Entry) -> Option<&Page> {
@@ -1950,6 +1961,7 @@ mod tests {
             light: None,
             kept_light: None,
             secs: SECS.2,
+            stays: false,
             comes_in: Transition::Wipe,
             pieces: vec![
                 Piece { kind: Kind::Clock(false), row: 0, col: 0, width: 5, right: false, center: false, gap: 1, height: 1, scroll: true, date_format: DateFormat::Short },
@@ -1988,6 +2000,12 @@ mod tests {
         let back = Screens::from_json(&s.to_json());
         assert_eq!(back, s);
         assert_eq!(back.played(1).iter().map(|p| (p.id.as_str(), p.secs, p.comes_in)).collect::<Vec<_>>(), vec![("stats", SECS.2, Transition::Wipe), ("clock", 15, Transition::Dissolve)]);
+        // a turn that stays until the layouts are switched keeps that, and its seconds for later
+        s.turns_mut(1)[1].stays = true;
+        let back = Screens::from_json(&s.to_json());
+        assert_eq!(back, s);
+        assert_eq!(back.played(1).iter().map(|p| (p.stays, p.secs)).collect::<Vec<_>>(), vec![(false, SECS.2), (true, 15)]);
+        assert!(back.to_json()["playlists"][0]["turns"][0].get("stays").is_none(), "a timed turn is kept as before");
         // a page in the Library keeps what it shows; its turns keep how it plays
         assert!(p.to_json().get("secs").is_none());
         // and a second Clock is told apart from the first

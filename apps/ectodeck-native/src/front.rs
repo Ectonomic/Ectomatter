@@ -136,6 +136,8 @@ pub enum Ask {
     SizeDone,
     /// a turn's way bar selected, its menu of ways in to open under it
     WayMenu(i32, f32, f32, f32),
+    /// a turn's time selected, its menu of times to open under it (the time's place and size)
+    PlTime(i32, f32, f32, f32, f32),
     /// the panel's playlist selected, its menu to open under it; its name
     /// changed in place, kept (true) or let go, as typed
     PlChoose(f32, f32, f32),
@@ -520,13 +522,14 @@ pub struct Front {
     played_by: u8,
     /// the strip: each turn, a screen being carried to it, a turn's end
     /// being dragged (the turn, its time when taken, the strip's scale then),
-    /// the menu of ways in open on a way bar; the strip's scale, its way
-    /// bars' length and the turns shown (without a carried one's room), as
-    /// last laid out
+    /// the menu of ways in open on a way bar, the menu of times open on a
+    /// turn's time; the strip's scale, its way bars' length and the turns
+    /// shown (without a carried one's room), as last laid out
     blocks: Rc<VecModel<crate::PlBlock>>,
     carry: Option<Carry>,
     sizing: Option<(usize, u32, f64)>,
     way_menu: Option<usize>,
+    time_menu: Option<TimeMenu>,
     strip_pps: f64,
     strip_way: f64,
     strip_spans: Vec<(f64, f64)>,
@@ -629,6 +632,7 @@ impl Front {
         on!(on_pl_size, |i, dx| Ask::SizeTurn(i, dx));
         on!(on_pl_size_done, Ask::SizeDone);
         on!(on_pl_mark, |i, x, y, h| Ask::WayMenu(i, x, y, h));
+        on!(on_pl_time, |i, x, y, w, h| Ask::PlTime(i, x, y, w, h));
         on!(on_pl_choose, |x, y, h| Ask::PlChoose(x, y, h));
         on!(on_pl_rename_done, |keep, t| Ask::PlRenameDone(keep, t.to_string()));
         on!(on_pl_hold_menu, |x, y, h| Ask::PlHoldMenu(x, y, h));
@@ -762,6 +766,7 @@ impl Front {
             carry: None,
             sizing: None,
             way_menu: None,
+            time_menu: None,
             strip_pps: 0.0,
             strip_way: WAY_W.1,
             strip_spans: Vec::new(),
@@ -1188,11 +1193,12 @@ impl Front {
                         self.close_menu();
                         self.sizing = self.screens.turns(self.page.editing).get(i).map(|e| (i, e.secs, self.strip_pps));
                     }
+                    // (a turn that stayed until the layouts were switched is timed from the drag on)
                     if let Some((i, from, pps)) = self.sizing {
                         let secs = (from as f64 + dx as f64 / pps.max(1e-6)).round().clamp(crate::lcd_page::SECS.0 as f64, crate::lcd_page::SECS.1 as f64) as u32;
                         if let Some(e) = self.screens.turns_mut(self.page.editing).get_mut(i) {
-                            if e.secs != secs {
-                                e.secs = secs;
+                            if e.secs != secs || e.stays {
+                                (e.secs, e.stays) = (secs, false);
                                 self.pages_edited();
                             }
                         }
@@ -1204,6 +1210,7 @@ impl Front {
                     self.ui.set_pl_live(false);
                 }
                 Ask::WayMenu(i, x, y, h) => self.open_way_menu(i.max(0) as usize, (x, y, h)),
+                Ask::PlTime(i, x, y, w, h) => self.open_time_menu(i.max(0) as usize, (x, y, h), w),
                 Ask::PlChoose(x, y, h) => self.open_pl_menu((x, y, h)),
                 Ask::PlHoldMenu(x, y, h) => self.open_add_menu((x, y, h)),
                 Ask::PlRenameDone(keep, t) => self.end_rename(keep, &t),
@@ -2213,11 +2220,12 @@ impl Front {
     }
 
     fn close_menu(&mut self) {
-        if self.bind_menu.take().is_some() || self.light_menu.take().is_some() || self.way_menu.take().is_some() || std::mem::take(&mut self.pl_menu) || std::mem::take(&mut self.add_menu) || std::mem::take(&mut self.ob_menu) || self.lib_menu.take().is_some() || self.new_menu.take().is_some() || self.sensor_menu.take().is_some() {
+        if self.bind_menu.take().is_some() || self.light_menu.take().is_some() || self.way_menu.take().is_some() || self.time_menu.take().is_some() || std::mem::take(&mut self.pl_menu) || std::mem::take(&mut self.add_menu) || std::mem::take(&mut self.ob_menu) || self.lib_menu.take().is_some() || self.new_menu.take().is_some() || self.sensor_menu.take().is_some() {
             self.ui.set_menu_open(false);
             self.ui.set_menu_search(true);
             self.ui.set_menu_w(300.0);
             self.ui.set_pl_menu(-1);
+            self.ui.set_pl_timing(-1);
             self.ui.set_pl_choosing(false);
             self.ui.set_pl_adding(false);
             self.ui.set_ob_choosing(false);
@@ -2249,7 +2257,7 @@ impl Front {
                 self.end_rename(true, &typed);
             }
         }
-        if self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pl_menu || self.add_menu || self.ob_menu || self.lib_menu.is_some() || self.new_menu.is_some() || self.sensor_menu.is_some() {
+        if self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.time_menu.is_some() || self.pl_menu || self.add_menu || self.ob_menu || self.lib_menu.is_some() || self.new_menu.is_some() || self.sensor_menu.is_some() {
             let (mx, my, mw, mh) = (self.ui.get_menu_x(), self.ui.get_menu_y(), self.ui.get_menu_width(), self.ui.get_menu_height());
             if !(x >= mx && x < mx + mw && y >= my && y < my + mh) {
                 // (a card's menu shut by a press: if the press is on the same card, its click
@@ -2262,6 +2270,8 @@ impl Front {
                 let (ax, ay, ah) = (self.ui.get_menu_ax(), self.ui.get_menu_ay(), self.ui.get_menu_ah());
                 let aw = if self.way_menu.is_some() {
                     self.strip_way as f32
+                } else if let Some(t) = &self.time_menu {
+                    t.aw
                 } else if self.pl_menu {
                     self.ui.get_pl_chooser_w()
                 } else if self.add_menu {
@@ -2271,7 +2281,7 @@ impl Front {
                 } else {
                     self.ui.get_menu_w()
                 };
-                if (self.light_menu.is_some() || self.way_menu.is_some() || self.pl_menu || self.add_menu || self.ob_menu || self.sensor_menu.is_some()) && x >= ax && x < ax + aw && y >= ay && y < ay + ah {
+                if (self.light_menu.is_some() || self.way_menu.is_some() || self.time_menu.is_some() || self.pl_menu || self.add_menu || self.ob_menu || self.sensor_menu.is_some()) && x >= ax && x < ax + aw && y >= ay && y < ay + ah {
                     self.shut = Some(((ax, ay), Instant::now()));
                 }
                 self.close_menu();
@@ -2505,6 +2515,25 @@ impl Front {
                 self.screens.add_turn(n, end, &id);
                 self.pages_edited();
                 self.keep_playing(playing, shown);
+            }
+            self.refresh();
+            return;
+        }
+        // how long a turn shows, from the menu on its time
+        if let Some(t) = self.time_menu.take() {
+            self.ui.set_menu_open(false);
+            self.ui.set_menu_search(true);
+            self.ui.set_menu_w(300.0);
+            self.ui.set_pl_timing(-1);
+            if let (Some(pick), Some(e)) = (i.checked_sub(1).and_then(|k| t.picks.get(k)), self.screens.turns_mut(self.page.editing).get_mut(t.turn)) {
+                let (secs, stays) = match pick {
+                    Some(secs) => (*secs, false),
+                    None => (e.secs, true),
+                };
+                if (e.secs, e.stays) != (secs, stays) {
+                    (e.secs, e.stays) = (secs, stays);
+                    self.pages_edited();
+                }
             }
             self.refresh();
             return;
@@ -3178,6 +3207,58 @@ impl Front {
         self.ui.set_menu_open(true);
         self.way_menu = Some(i);
         self.ui.set_pl_menu(i as i32);
+    }
+
+    /// A turn's time selected: under it, the times a turn often has, its own among them, and
+    /// staying until the layouts are switched; the turn's own ticked.
+    fn open_time_menu(&mut self, i: usize, anchor: (f32, f32, f32), aw: f32) {
+        if let Some((at, when)) = self.shut.take() {
+            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
+                return;
+            }
+        }
+        let Some(e) = self.screens.turns(self.page.editing).get(i) else { return };
+        let name = self.screens.page_of(e).map_or("The screen".to_string(), |p| p.name.clone());
+        let mut secs: Vec<u32> = TIMES.to_vec();
+        if !secs.contains(&e.secs) {
+            secs.push(e.secs);
+            secs.sort();
+        }
+        let mut picks: Vec<Option<u32>> = secs.into_iter().map(Some).collect();
+        picks.push(None);
+        let row = |kind: i32, label: String, tick: bool| MenuRow { kind, label: label.into(), tag: "".into(), tick, sub: "".into() };
+        let mut rows = vec![row(1, format!("How long {name} shows"), false)];
+        for p in &picks {
+            rows.push(match p {
+                Some(s) => row(0, format!("{s} seconds"), !e.stays && e.secs == *s),
+                None => row(0, STAYS.into(), e.stays),
+            });
+        }
+        self.close_menu();
+        self.close_picker();
+        self.ui.set_menu_marks(true);
+        let list: f32 = rows.iter().map(|r| if r.kind == 1 { 28.0 } else { 33.0 }).sum();
+        let h = 6.0 + list + 6.0;
+        // (as wide as the longest line needs)
+        let w = rows.iter().map(|r| crate::text::width(if r.kind == 1 { 500 } else { 400 }, 13.5, &r.label) + 58.0).fold(200.0f32, f32::max).ceil();
+        self.ui.set_menu_search(false);
+        self.ui.set_menu_back(false);
+        self.ui.set_menu_natural(h);
+        self.ui.set_menu_w(w);
+        self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
+        let (ax, ay, ah) = anchor;
+        let win = self.ui.get_window_height();
+        let (below, above) = (win - ay - ah - 14.0, ay - 70.0);
+        let down = h <= below || below >= h.min(260.0) || below >= above;
+        let room = if down { below } else { above };
+        self.ui.set_menu_ax(ax);
+        self.ui.set_menu_ay(ay);
+        self.ui.set_menu_ah(ah);
+        self.ui.set_menu_top(if down { ay + ah + 6.0 } else { ay - 6.0 - h.min(room) });
+        self.ui.set_menu_max(if h > room { room } else { win * 0.7 });
+        self.ui.set_menu_open(true);
+        self.time_menu = Some(TimeMenu { turn: i, aw, picks });
+        self.ui.set_pl_timing(i as i32);
     }
 
     /// The panel's playlist selected: under it, every playlist (the one the
@@ -3917,14 +3998,17 @@ impl Front {
         use crate::lcd_player::State;
         let n = &self.lcd;
         let shown = self.controlled && self.editor.is_none() && n.sequence.is_none() && matches!(n.state, State::Playing | State::Paused) && self.screens.turns(self.page.editing).len() > 1;
-        let len = n.length.max(0.001);
+        // a turn that stays until the layouts are switched has no end to come to: the
+        // playhead stands at its bar's end, by its infinity mark
+        let stays = !n.turning && n.length.is_infinite();
+        let len = if stays { 1.0 } else { n.length.max(0.001) };
         let tick = self.ui.get_pl_tick();
         self.ui.set_pl_head(shown);
         self.ui.set_pl_in(n.turning);
         self.ui.set_pl_len((len * 1000.0).round().max(1.0) as i64);
-        self.ui.set_pl_t0(tick - (n.elapsed * 1000.0).round() as i64);
-        self.ui.set_pl_moving(shown && n.state == State::Playing);
-        self.ui.set_pl_p0((n.elapsed / len).clamp(0.0, 1.0) as f32);
+        self.ui.set_pl_t0(tick - (n.elapsed.min(len) * 1000.0).round() as i64);
+        self.ui.set_pl_moving(shown && n.state == State::Playing && !stays);
+        self.ui.set_pl_p0(if stays { 1.0 } else { (n.elapsed / len).clamp(0.0, 1.0) as f32 });
     }
 
     /// Whether the keyboard shows its own status screen for the page: while the Screen
@@ -4184,7 +4268,14 @@ impl Front {
                 name: p.name.as_str().into(),
                 on: marked && i == shown,
                 away: place[i].is_none(),
-                secs: if n == 1 { "Shows all the time".into() } else { format!("{} s", e.secs).into() },
+                secs: if n == 1 {
+                    "Shows all the time".into()
+                } else if e.stays {
+                    STAYS.into()
+                } else {
+                    format!("{} s", e.secs).into()
+                },
+                stays: e.stays,
                 way: crate::lcd_page::TRANSITIONS.iter().position(|t| *t == e.comes_in).unwrap_or(0) as i32,
                 way_name: e.comes_in.name().into(),
             });
@@ -4327,6 +4418,22 @@ struct Carry {
     slot: Option<usize>,
     home: Option<usize>,
 }
+
+/// The menu of times open on a turn's time: the turn, how wide the time it hangs from is,
+/// and what each row after the heading gives the turn (its seconds, or None: it stays
+/// until the layouts are switched).
+#[derive(Clone, Debug)]
+struct TimeMenu {
+    turn: usize,
+    aw: f32,
+    picks: Vec<Option<u32>>,
+}
+
+/// The times a turn often has, in its menu of times (a turn's own, dragged to another,
+/// joins them in order), and the choice to stay until the layouts are switched, as the
+/// menu and the turn's time say it.
+const TIMES: [u32; 5] = [5, 8, 15, 30, 60];
+const STAYS: &str = "Until you switch layouts";
 
 /// A turn's way bar: as long as the strip has room for, between these; the
 /// hairline joining it to its screen's bar; the room between one turn and the

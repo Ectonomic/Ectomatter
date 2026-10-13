@@ -203,8 +203,9 @@ export struct PlPage {
 // one turn of the playlist on its panel: its screen's bar's left edge and
 // length (as long as its time, the strip fitted to its width), its page's
 // name, whether the screen shows it, whether it is being carried, its time in
-// words, and how it comes in after the turn before it (0 Wipe, 1 Dissolve,
-// 2 Type, 3 Cut), by number and by name
+// words, whether it stays until the layouts are switched, and how it comes in
+// after the turn before it (0 Wipe, 1 Dissolve, 2 Type, 3 Cut), by number and
+// by name
 export struct PlBlock {
     key: int,
     x: length,
@@ -213,6 +214,7 @@ export struct PlBlock {
     on: bool,
     away: bool,
     secs: string,
+    stays: bool,
     way: int,
     way-name: string,
 }
@@ -3445,9 +3447,11 @@ export component AppWindow inherits Window {
     in property <duration> pl-len: 1ms;
     out property <duration> pl-tick: animation-tick();
     property <float> pl-p: root.pl-moving ? clamp((animation-tick() - root.pl-t0) / root.pl-len, 0, 1) : root.pl-p0;
-    // the turn whose edge is being dragged, and the turn whose mark has its menu open
+    // the turn whose edge is being dragged, the turn whose mark has its menu open, and
+    // the turn whose time has its menu open
     in-out property <int> pl-sizing: -1;
     in property <int> pl-menu: -1;
+    in property <int> pl-timing: -1;
     // a screen carried to the strip, from the strip or the Library: where the
     // pointer holds it (in the Screen tab's right column), its name, and
     // whether it is settling into its room
@@ -3465,6 +3469,8 @@ export component AppWindow inherits Window {
     callback pl-size(int, length);
     callback pl-size-done();
     callback pl-mark(int, length, length, length);
+    // a turn's time selected: its menu of times, under the time (its place and size)
+    callback pl-time(int, length, length, length, length);
     callback pl-back();
     // Layouts: every screen layout, its card, one opened in the layout
     // editor's window, a new one made there
@@ -4388,7 +4394,7 @@ export component AppWindow inherits Window {
                                     animate background { duration: 120ms; }
                                     if b.w >= 28px: Text {
                                         x: 8px;
-                                        width: parent.width - 18px;
+                                        width: parent.width - (b.stays && !root.pl-single ? 38px : 18px);
                                         height: parent.height;
                                         text: b.name;
                                         font-family: "Geist";
@@ -4397,6 +4403,22 @@ export component AppWindow inherits Window {
                                         color: b.on ? Ink.bright : turn.hov ? Ink.dim : Ink.soft;
                                         vertical-alignment: center;
                                         overflow: elide;
+                                    }
+                                    // a turn that stays until the layouts are switched: the infinity
+                                    // mark at its end, short of the end's handle
+                                    if b.stays && !root.pl-single && b.w >= 34px: Path {
+                                        x: parent.width - 10px - 18px;
+                                        y: 8px;
+                                        width: 17.6px;
+                                        height: 8px;
+                                        viewbox-x: 1;
+                                        viewbox-y: 7;
+                                        viewbox-width: 22;
+                                        viewbox-height: 10;
+                                        commands: "M12 12c-2-2.67-4-4-6-4a4 4 0 1 0 0 8c2 0 4-1.33 6-4Zm0 0c2 2.67 4 4 6 4a4 4 0 0 0 0-8c-2 0-4 1.33-6 4Z";
+                                        fill: transparent;
+                                        stroke: b.on ? Ink.bright : turn.hov ? Ink.dim : Ink.soft;
+                                        stroke-width: 1.5px;
                                     }
                                 }
                                 // the playhead: across the way bar while the screen comes in, then along
@@ -4455,36 +4477,64 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                     // its time, then Edit and Remove, over its bar while the pointer is on
-                                    // the turn; only the time while its end is dragged. (Inside the turn's
-                                    // TouchArea, so the turn keeps the pointer while it is on them.)
-                                    if (turn.hov || root.pl-sizing == i) && !b.away: tb := Rectangle {
+                                    // the turn or its time's menu is open; only the time while its end is
+                                    // dragged. The time opens its menu of times while there are other turns.
+                                    // (Inside the turn's TouchArea, so the turn keeps the pointer while it
+                                    // is on them.)
+                                    if (turn.hov || root.pl-sizing == i || root.pl-timing == i) && !b.away: tb := Rectangle {
                                         property <bool> buttons: root.pl-sizing != i;
+                                        property <bool> times: self.buttons && !root.pl-single;
                                         x: root.pl-pre + (b.w - self.width) / 2;
                                         y: 0;
-                                        width: 8px + secs-text.preferred-width + 5px + (self.buttons ? 1px + 20px + 21px : 0) + 2px;
+                                        width: 2px + time-button.width + (self.buttons ? 1px + 20px + 21px : 0) + 2px;
                                         height: 24px;
                                         border-radius: 7px;
                                         background: Ink.pop;
                                         drop-shadow-blur: 16px;
                                         drop-shadow-offset-y: 6px;
                                         drop-shadow-color: #00000059;
-                                        secs-text := Text {
-                                            x: 8px;
-                                            height: parent.height;
-                                            text: b.secs;
-                                            font-family: "Geist";
-                                            font-size: 12px;
-                                            color: Ink.bright;
-                                            vertical-alignment: center;
+                                        time-button := Rectangle {
+                                            x: 2px;
+                                            y: 2px;
+                                            width: 6px + secs-text.preferred-width + (tb.times ? 3px + 10px + 5px : 6px);
+                                            height: 20px;
+                                            border-radius: 5px;
+                                            background: !tb.times ? transparent : time-ta.pressed || root.pl-timing == i ? Ink.pick : time-ta.has-hover ? Ink.hover-box : transparent;
+                                            secs-text := Text {
+                                                x: 6px;
+                                                height: parent.height;
+                                                text: b.secs;
+                                                font-family: "Geist";
+                                                font-size: 12px;
+                                                color: Ink.bright;
+                                                vertical-alignment: center;
+                                            }
+                                            if tb.times: Path {
+                                                x: 6px + secs-text.preferred-width + 3px;
+                                                y: 5px;
+                                                width: 10px;
+                                                height: 10px;
+                                                viewbox-width: 24;
+                                                viewbox-height: 24;
+                                                commands: "M6 9l6 6 6-6";
+                                                fill: transparent;
+                                                stroke: time-ta.has-hover || root.pl-timing == i ? Ink.bright : Ink.soft;
+                                                stroke-width: 2px;
+                                            }
+                                            time-ta := TouchArea {
+                                                enabled: tb.times;
+                                                mouse-cursor: tb.times ? MouseCursor.pointer : MouseCursor.default;
+                                                clicked => { root.pl-time(i, self.absolute-position.x, self.absolute-position.y, self.width, self.height); }
+                                            }
                                         }
                                         if tb.buttons: StripIcon {
-                                            x: 8px + secs-text.preferred-width + 5px + 1px;
+                                            x: 2px + time-button.width + 1px;
                                             y: 2px;
                                             commands: "M4 20h4L19 9l-4-4L4 16z";
                                             clicked => { root.screen-edit(i); }
                                         }
                                         if tb.buttons: StripIcon {
-                                            x: 8px + secs-text.preferred-width + 5px + 1px + 21px;
+                                            x: 2px + time-button.width + 1px + 21px;
                                             y: 2px;
                                             commands: "M6 6l12 12M18 6L6 18";
                                             clicked => { root.page-remove(i); }

@@ -287,8 +287,9 @@ pub struct Core {
     pub pushed: Option<Vec<String>>,
     /// the page changed: show it at the next turn, paused or not
     pub redraw: bool,
-    /// the playlist: each page's seconds and how it comes in, in order; the
-    /// page showing, which `stats` reads; staying on it while it is edited
+    /// the playlist: each page's seconds (infinite for a page that stays until
+    /// the layouts are switched) and how it comes in, in order; the page
+    /// showing, which `stats` reads; staying on it while it is edited
     pub playlist: Vec<(f64, crate::lcd_page::Transition)>,
     pub current: Arc<AtomicUsize>,
     pub hold: bool,
@@ -517,10 +518,21 @@ impl Core {
         }
     }
 
-    /// The pages to play, and how long each shows and comes in.
-    pub fn set_playlist(&mut self, list: Vec<(f64, crate::lcd_page::Transition)>) {
+    /// The pages to play, and how long each shows and comes in. The page showing, timed
+    /// again after it stayed, has its whole time from `now` (and doesn't turn the moment
+    /// it is timed, however long it stayed).
+    pub fn set_playlist(&mut self, list: Vec<(f64, crate::lcd_page::Transition)>, now: f64) {
         if self.page() >= list.len() {
             self.current.store(0, Ordering::Relaxed);
+        }
+        let i = self.page();
+        if self.playlist.get(i).is_some_and(|p| p.0.is_infinite()) && list.get(i).is_some_and(|p| p.0.is_finite()) {
+            if self.page_since.is_some() {
+                self.page_since = Some(now);
+            }
+            if self.held.is_some() {
+                self.held = Some(0.0);
+            }
         }
         self.playlist = list;
         self.redraw = true;
@@ -673,7 +685,7 @@ impl Player {
             core.pace = pace;
             let start = Instant::now();
             let (mut other, mut other_at) = (other_running(), Instant::now());
-            let mut told: Option<(State, Option<&'static str>, usize, bool)> = None;
+            let mut told: Option<(State, Option<&'static str>, usize, bool, u64)> = None;
             loop {
                 // what Ectodeck asks
                 while let Ok(c) = heard.try_recv() {
@@ -686,7 +698,7 @@ impl Player {
                             }
                         }
                         Control::Pages(pages) => {
-                            core.set_playlist(pages.iter().map(|p| (p.secs as f64, p.comes_in)).collect());
+                            core.set_playlist(pages.iter().map(|p| (if p.stays { f64::INFINITY } else { p.secs as f64 }, p.comes_in)).collect(), start.elapsed().as_secs_f64());
                             shared.lock().unwrap().0 = pages;
                         }
                         Control::Show(i) => core.show(i),
@@ -728,7 +740,9 @@ impl Player {
                 let (sequence, page) = (core.sequence(), core.page());
                 let (turning, elapsed, length) = core.standing(start.elapsed().as_secs_f64());
                 // (said again as the page comes on after coming in, so the time it shows from is right)
-                let now_told = (state, sequence, page, turning);
+                // (and again when the page's time is changed while it shows, or it is made to stay
+                // or timed again, so the playhead keeps to it)
+                let now_told = (state, sequence, page, turning, length.to_bits());
                 if let Some(rows) = core.pushed.take() {
                     news(News { rows, sequence, state, page, turning, elapsed, length });
                     told = Some(now_told);
@@ -812,7 +826,7 @@ mod tests {
         let _ = std::fs::remove_file(&note);
         let mut core = Core::new(Box::new(Kept(sent.clone(), clock.clone())), ask, note, Box::new(|| 7));
         core.current = current;
-        core.set_playlist(vec![(3.0, crate::lcd_page::Transition::Wipe), (5.0, how)]);
+        core.set_playlist(vec![(3.0, crate::lcd_page::Transition::Wipe), (5.0, how)], 0.0);
         (core, sent, clock)
     }
 
@@ -841,7 +855,7 @@ mod tests {
         let note = std::env::temp_dir().join(format!("ectodeck-moving-{}", std::process::id()));
         let _ = std::fs::remove_file(&note);
         let mut core = Core::new(Box::new(Kept(sent.clone(), clock.clone())), ask, note, Box::new(|| 7));
-        core.set_playlist(vec![(60.0, crate::lcd_page::Transition::Cut)]);
+        core.set_playlist(vec![(60.0, crate::lcd_page::Transition::Cut)], 0.0);
         run(&mut core, &clock, 0.0, 3.0);
         let still = sent.lock().unwrap().len();
         assert!((3..=4).contains(&still), "once a second while still: {still}");
@@ -917,6 +931,31 @@ mod tests {
         core.show(0);
         run(&mut core, &clock, 34.1, 34.2);
         assert_eq!(sent.lock().unwrap().last().unwrap().1[0], "PAGE A");
+    }
+
+    #[test]
+    fn a_page_that_stays_shows_until_the_layouts_are_switched() {
+        use crate::lcd_page::Transition;
+        let (mut core, sent, clock) = two_pages(Transition::Cut);
+        // A stays: a minute on, B never comes in, and the playlist says A's time has no end
+        core.set_playlist(vec![(f64::INFINITY, Transition::Cut), (5.0, Transition::Cut)], 0.0);
+        run(&mut core, &clock, 0.0, 60.0);
+        assert!(first_at(&sent, "PAGE B").is_none(), "B came in");
+        let (turning, elapsed, length) = core.standing(60.0);
+        assert!(!turning && length.is_infinite() && elapsed > 59.0, "{turning} {elapsed} {length}");
+        // switched to B, B has its five seconds, and A stays again when it comes back
+        core.show(1);
+        run(&mut core, &clock, 60.0, 80.0);
+        let b = first_at(&sent, "PAGE B").expect("B on switching");
+        assert!(b < 60.05, "B at {b}");
+        let back = sent.lock().unwrap().iter().find(|(t, r)| *t > b && r[0] == "PAGE A").map(|(t, _)| *t).expect("A again");
+        assert!((back - (b + 5.0)).abs() < 0.05, "A again at {back}");
+        // A timed again after staying a while: its three seconds from then, not at once
+        core.set_playlist(vec![(3.0, Transition::Cut), (5.0, Transition::Cut)], 80.0);
+        run(&mut core, &clock, 80.0, 82.9);
+        assert!(!sent.lock().unwrap().iter().any(|(t, r)| *t > 80.0 && r[0] == "PAGE B"), "B came in at once");
+        run(&mut core, &clock, 82.9, 83.5);
+        assert!(sent.lock().unwrap().iter().any(|(t, r)| *t > 82.9 && r[0] == "PAGE B"), "B after A's three seconds");
     }
 
     #[test]
