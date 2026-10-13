@@ -596,7 +596,9 @@ impl Screens {
     /// turns of pages that are there), and the playlist each profile plays.
     /// Kept before there were playlists, the playlist was one list of turns
     /// (`playlist`), and before that the pages were the playlist, each with
-    /// its own time and way in; either becomes Default, played by every profile.
+    /// its own time and way in; either becomes Playlist 1, played by every profile.
+    /// (The first playlist was called Default until Grant found the word clashed with
+    /// the default backlight beside it: one still so named takes Playlist 1's name.)
     pub fn of(pages: Option<&Value>, playlists: Option<&Value>, plays: Option<&Value>, playlist: Option<&Value>) -> Screens {
         let library = pages_of(pages);
         let turns_of = |v: Option<&Value>| -> Vec<Entry> {
@@ -627,7 +629,15 @@ impl Screens {
                     })
                     .collect();
             }
-            lists.push(Playlist { id: "default".into(), name: "Default".into(), turns });
+            lists.push(Playlist { id: "default".into(), name: "Playlist 1".into(), turns });
+        }
+        // (the first playlist still under its old name, Default: the first Playlist name free)
+        if let Some(k) = lists.iter().position(|l| l.id == "default" && l.name == "Default") {
+            let mut n = 1;
+            while lists.iter().any(|l| l.name == format!("Playlist {n}")) {
+                n += 1;
+            }
+            lists[k].name = format!("Playlist {n}");
         }
         let plays = plays
             .and_then(|v| v.as_object())
@@ -1617,14 +1627,23 @@ mod tests {
     }
 
     #[test]
-    fn what_was_kept_before_becomes_default_for_every_profile() {
+    fn what_was_kept_before_becomes_playlist_1_for_every_profile() {
         // pages kept before the Library: each with its own time and way in
         let mut old = Page::stats().to_json();
         old["secs"] = json!(12);
         old["comes_in"] = json!("type");
         let s = Screens::of(Some(&json!([old, Page::clock().to_json()])), None, None, None);
         assert_eq!(s.library.len(), 2);
-        assert_eq!((s.playlists.len(), s.playlists[0].name.as_str()), (1, "Default"));
+        assert_eq!((s.playlists.len(), s.playlists[0].name.as_str()), (1, "Playlist 1"));
+        // one kept as Default, Ectodeck's old name for it, takes the new one (a name of the
+        // person's own stays); beside a Playlist 1 already, the next number free
+        let kept = |name: &str, other: &str| {
+            let lists = json!([{ "id": "default", "name": name, "turns": [] }, { "id": "playlist-2", "name": other, "turns": [] }]);
+            Screens::of(Some(&json!([Page::stats().to_json()])), Some(&lists), None, None).playlists[0].name.clone()
+        };
+        assert_eq!(kept("Default", "Games"), "Playlist 1");
+        assert_eq!(kept("Default", "Playlist 1"), "Playlist 2");
+        assert_eq!(kept("Mornings", "Games"), "Mornings");
         assert_eq!(s.turns(3), &vec![Entry::new("stats", 12, Transition::Type), Entry::new("clock", SECS.2, Transition::Wipe)]);
         // the one playlist kept before there were several
         let s = Screens::of(Some(&json!([Page::stats().to_json(), Page::clock().to_json()])), None, None, Some(&json!([{ "page": "clock", "secs": 5 }])));
