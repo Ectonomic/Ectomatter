@@ -3440,6 +3440,8 @@ export component AppWindow inherits Window {
     // editor's window, a new one made there
     in property <[PlPage]> lib-pages;
     callback lib-edit(int);
+    // a layout's card right-clicked: its menu, where the pointer is
+    callback lib-menu(int, length, length);
     callback lib-new();
     // the playlist: a turn's layout opened in the layout editor, the turn
     // shown now, moved, taken off
@@ -4697,14 +4699,19 @@ export component AppWindow inherits Window {
                             cta := TouchArea {
                                 mouse-cursor: root.carry-on ? MouseCursor.grabbing : MouseCursor.pointer;
                                 property <bool> far;
+                                // (pressed with the right button: its menu, never a carry)
+                                property <bool> right;
                                 pointer-event(e) => {
                                     if (e.kind == PointerEventKind.down) {
                                         self.far = false;
+                                        self.right = e.button == PointerEventButton.right;
                                     }
                                     if (e.kind == PointerEventKind.up && root.carry-on) {
                                         stage.drop-carry();
                                     } else if (e.kind == PointerEventKind.up && !self.far && e.button == PointerEventButton.left) {
                                         root.lib-edit(k);
+                                    } else if (e.kind == PointerEventKind.up && e.button == PointerEventButton.right) {
+                                        root.lib-menu(k, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
                                     }
                                     if (e.kind == PointerEventKind.cancel && root.carry-on) {
                                         root.carry-on = false;
@@ -4712,7 +4719,7 @@ export component AppWindow inherits Window {
                                     }
                                 }
                                 moved => {
-                                    if (self.pressed) {
+                                    if (self.pressed && !self.right) {
                                         if (!root.carry-on && !self.far && (abs(self.mouse-x - self.pressed-x) > 4px || abs(self.mouse-y - self.pressed-y) > 4px)) {
                                             self.far = true;
                                             root.carry-gx = 18px;

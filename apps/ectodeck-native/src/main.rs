@@ -596,6 +596,18 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
             r.render(&mut pic.ui, w as usize);
         });
     }
+    // ECTODECK_NATIVE_RCLICK="x,y": a click with the right button, after the others
+    if let Some((x, y)) = std::env::var("ECTODECK_NATIVE_RCLICK").ok().and_then(|s| s.split_once(',').and_then(|(a, b)| Some((a.trim().parse::<f32>().ok()?, b.trim().parse::<f32>().ok()?)))) {
+        let position = LogicalPosition::new(x, y);
+        window.dispatch_event(WindowEvent::PointerMoved { position });
+        front.pressed_at(x, y);
+        window.dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Right });
+        window.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Right });
+        front.act();
+        window.draw_if_needed(|r| {
+            r.render(&mut pic.ui, w as usize);
+        });
+    }
     // ECTODECK_NATIVE_DRAG_DROP="x0,y0;x1,y1": pressed at the first point, dragged to the second, let go
     let drag: Vec<f32> = std::env::var("ECTODECK_NATIVE_DRAG_DROP").unwrap_or_default().split([',', ';']).filter_map(|v| v.trim().parse().ok()).collect();
     if let [x0, y0, x1, y1] = drag[..] {

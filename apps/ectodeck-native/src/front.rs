@@ -45,6 +45,8 @@ pub enum Ask {
     MacroEditor(i32),
     /// the Screen Editor, on the layout the screen shows
     ScreenEditor,
+    /// a layout card's menu, right-clicked: the layout, and where the pointer was
+    LibMenu(i32, f32, f32),
     /// time to read the sliders again, and the display's text
     PollSliders,
     PollLcd,
@@ -498,6 +500,8 @@ pub struct Front {
     pl_menu: bool,
     pl_renaming: bool,
     add_menu: bool,
+    /// a layout card's own menu, right-clicked: the layout's place in the Library
+    lib_menu: Option<usize>,
     /// the page being edited, the piece chosen; this computer's readings,
     /// read here for the editor's picture once a second, and when last
     editor: Option<crate::screen_edit::Editor>,
@@ -583,6 +587,7 @@ impl Front {
         on!(on_screen_state, Ask::ScreenState);
         on!(on_ob_choose, |x, y, h| Ask::ObChoose(x, y, h));
         on!(on_lib_edit, |k| Ask::LibEdit(k));
+        on!(on_lib_menu, |k, x, y| Ask::LibMenu(k, x, y));
         on!(on_page_show, |i| Ask::PageShow(i));
         on!(on_page_moved, |i, j| Ask::PageMove(i, j));
         on!(on_page_remove, |i| Ask::PageRemove(i));
@@ -713,6 +718,7 @@ impl Front {
             pl_menu: false,
             pl_renaming: false,
             add_menu: false,
+            lib_menu: None,
             editor: None,
             reader: None,
             readings: crate::lcd_page::Readings::default(),
@@ -1152,6 +1158,7 @@ impl Front {
                 Ask::ScreenState => self.lcd_drawn = None,
                 Ask::ObChoose(x, y, h) => self.open_ob_menu((x, y, h)),
                 Ask::LibEdit(k) => window.push(WindowAsk::OpenLayouts(k.max(0) as usize)),
+                Ask::LibMenu(k, x, y) => self.open_lib_menu(k.max(0) as usize, (x, y)),
                 Ask::LcdTick => {
                     // the readings again each second: for the page being edited (its
                     // picture and its boxes), or the playlist's pictures of its pages
@@ -2124,7 +2131,7 @@ impl Front {
     }
 
     fn close_menu(&mut self) {
-        if self.bind_menu.take().is_some() || self.light_menu.take().is_some() || self.way_menu.take().is_some() || std::mem::take(&mut self.pl_menu) || std::mem::take(&mut self.add_menu) || std::mem::take(&mut self.ob_menu) {
+        if self.bind_menu.take().is_some() || self.light_menu.take().is_some() || self.way_menu.take().is_some() || std::mem::take(&mut self.pl_menu) || std::mem::take(&mut self.add_menu) || std::mem::take(&mut self.ob_menu) || self.lib_menu.take().is_some() {
             self.ui.set_menu_open(false);
             self.ui.set_menu_search(true);
             self.ui.set_menu_w(300.0);
@@ -2158,7 +2165,7 @@ impl Front {
                 self.end_rename(true, &typed);
             }
         }
-        if self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pl_menu || self.add_menu || self.ob_menu {
+        if self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pl_menu || self.add_menu || self.ob_menu || self.lib_menu.is_some() {
             let (mx, my, mw, mh) = (self.ui.get_menu_x(), self.ui.get_menu_y(), self.ui.get_menu_width(), self.ui.get_menu_height());
             if !(x >= mx && x < mx + mw && y >= my && y < my + mh) {
                 // a press on the dropdown (or the bar) the menu hangs from shuts it, and its click must not open it again
@@ -2331,6 +2338,52 @@ impl Front {
                     if self.screens.delete(&id) {
                         self.pages_edited();
                         self.play_from_start();
+                    }
+                }
+                _ => {}
+            }
+            self.refresh();
+            return;
+        }
+        // a layout card's menu: edit it, add it to the playlist (or keep it on the keyboard, on
+        // the Onboard layout tab), copy it, or delete it (Undo puts it back)
+        if let Some(k) = self.lib_menu {
+            self.close_menu();
+            let Some(id) = self.screens.library.get(k).map(|p| p.id.clone()) else { return };
+            let n = self.page.editing;
+            match i {
+                0 => self.pending_window.push(WindowAsk::OpenLayouts(k)),
+                1 if self.ui.get_screen_closed() => {
+                    self.screens.keep_onboard(n, Some(&id));
+                    self.pages_edited();
+                }
+                1 => {
+                    let shown = self.lcd.page;
+                    let playing = self.screens.turns(n).get(shown).map(|e| e.key);
+                    let end = self.screens.turns(n).len();
+                    self.screens.add_turn(n, end, &id);
+                    self.pages_edited();
+                    self.keep_playing(playing, shown);
+                }
+                2 => {
+                    if self.screens.duplicate_page(k).is_some() {
+                        self.pages_edited();
+                    }
+                }
+                4 => {
+                    if self.screens.delete_page(k) {
+                        // (the editor's window, open on a later layout or on this one, follows)
+                        if let Some(ed) = &mut self.editor {
+                            if ed.page > k || (ed.page == k && ed.page >= self.screens.library.len()) {
+                                ed.page = ed.page.saturating_sub(1);
+                            }
+                            ed.chosen = None;
+                            if self.screens.library.is_empty() {
+                                self.editor = None;
+                            }
+                        }
+                        self.pages_edited();
+                        self.refresh_editor();
                     }
                 }
                 _ => {}
@@ -3165,6 +3218,40 @@ impl Front {
 
     /// The playlist's holding bar selected: under it, every screen layout,
     /// to put one on the end of the playlist.
+    /// A layout card's own menu, right-clicked, at the pointer: Edit, Add to the playlist
+    /// (on the Onboard layout tab, Keep on the keyboard), Duplicate, and Delete.
+    fn open_lib_menu(&mut self, k: usize, at: (f32, f32)) {
+        let Some(name) = self.screens.library.get(k).map(|p| p.name.clone()) else { return };
+        let row = |kind: i32, label: String| MenuRow { kind, label: label.into(), tag: "".into(), tick: false, sub: "".into() };
+        let second = if self.ui.get_screen_closed() {
+            format!("Keep {name} on the keyboard")
+        } else {
+            format!("Add {name} to {}", self.screens.playlist(self.page.editing).name)
+        };
+        let rows = vec![row(0, format!("Edit {name}")), row(0, second), row(0, format!("Duplicate {name}")), row(2, String::new()), row(4, format!("Delete {name}"))];
+        self.close_menu();
+        self.close_picker();
+        let list: f32 = rows.iter().map(|r| if r.kind == 2 { 11.0 } else { 33.0 }).sum();
+        let h = 6.0 + list + 6.0;
+        let w = rows.iter().map(|r| crate::text::width(400, 13.5, &r.label) + 64.0).fold(200.0f32, f32::max).min(320.0).ceil();
+        self.ui.set_menu_search(false);
+        self.ui.set_menu_back(false);
+        self.ui.set_menu_natural(h);
+        self.ui.set_menu_w(w);
+        self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
+        // (from the pointer, down when it fits, else up)
+        let (x, y) = at;
+        let win = self.ui.get_window_height();
+        let down = h <= win - y - 14.0;
+        self.ui.set_menu_ax(x);
+        self.ui.set_menu_ay(y);
+        self.ui.set_menu_ah(0.0);
+        self.ui.set_menu_top(if down { y + 2.0 } else { (y - 2.0 - h).max(14.0) });
+        self.ui.set_menu_max(win * 0.7);
+        self.ui.set_menu_open(true);
+        self.lib_menu = Some(k);
+    }
+
     fn open_add_menu(&mut self, anchor: (f32, f32, f32)) {
         if let Some((at, when)) = self.shut.take() {
             if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
