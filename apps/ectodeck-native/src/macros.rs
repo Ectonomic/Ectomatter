@@ -552,10 +552,14 @@ pub fn clock(s: f64) -> String {
     format!("{}:{:04.1}", (s / 60.0).floor(), s % 60.0)
 }
 
-pub fn profiles_text(ps: &[u8]) -> String {
-    match ps.len() {
-        5 => "All profiles".into(),
-        1 => format!("Profile {}", ps[0]),
-        _ => format!("Profiles {} and {}", ps[..ps.len() - 1].iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", "), ps[ps.len() - 1]),
+/// The profiles a key does something on, by their names (`name` gives each one's), as a
+/// phrase in a sentence: "all profiles", "Games", or "Games, Work and Profile 3".
+pub fn profiles_text(ps: &[u8], name: impl Fn(u8) -> String) -> String {
+    let names: Vec<String> = ps.iter().map(|p| name(*p)).collect();
+    match names.len() {
+        5 => "all profiles".into(),
+        0 => String::new(),
+        1 => names[0].clone(),
+        n => format!("{} and {}", names[..n - 1].join(", "), names[n - 1]),
     }
 }

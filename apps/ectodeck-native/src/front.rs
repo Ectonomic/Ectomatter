@@ -867,14 +867,14 @@ impl Front {
                     if (1..=5).contains(&n) && n != self.page.active() {
                         self.page.set_active(n);
                         self.page.choose(n);
-                        self.status(format!("The keyboard switched to profile {n}."), 0);
+                        self.status(format!("The keyboard switched to {}.", self.page.profile_name(n)), 0);
                     }
                 }
             }
             device::Heard::Active(n, r) => match r {
                 Ok(active) => {
                     self.page.set_active(active.unwrap_or(n));
-                    self.status(format!("Profile {n} is now active on the keyboard."), 1);
+                    self.status(format!("{} is now active on the keyboard.", self.page.profile_name(n)), 1);
                 }
                 Err(e) => self.status(format!("The keyboard did not switch profiles: {e}"), 2),
             },
@@ -1210,6 +1210,8 @@ impl Front {
                 Ask::Rename(t) => crate::display::act(&mut self.page, Ctl::Name, 0, 0.0, Some(&t)),
                 Ask::Layer(i) => {
                     self.layer = i.clamp(0, 1) as usize;
+                    // (the keyboard picture shows the layer open)
+                    self.page.fn_layer = self.layer == 1;
                     self.listening = None;
                     self.close_menu();
                     // the sliders are no part of the Function layer
@@ -3022,12 +3024,9 @@ impl Front {
         let row = |kind: i32, label: String, tick: bool, sub: String| MenuRow { kind, label: label.into(), tag: "".into(), tick, sub: sub.into() };
         let mut rows = vec![row(1, format!("{} plays", self.page.profile_name(n)), false, String::new())];
         for (k, l) in self.screens.playlists.iter().enumerate() {
-            let by = self.screens.profiles_of(&l.id);
-            let by = match by.len() {
-                0 => "No profile".to_string(),
-                1 => format!("Profile {}", by[0]),
-                _ => format!("Profiles {}", by.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", ")),
-            };
+            // (which profiles play it, by their names)
+            let by: Vec<String> = self.screens.profiles_of(&l.id).iter().map(|p| self.page.profile_name(*p)).collect();
+            let by = if by.is_empty() { "No profile".to_string() } else { by.join(", ") };
             rows.push(row(0, l.name.clone(), k == mine, by));
         }
         let name = self.screens.playlists[mine].name.clone();
@@ -3042,7 +3041,9 @@ impl Front {
         self.ui.set_menu_search(false);
         self.ui.set_menu_back(false);
         self.ui.set_menu_natural(h);
-        self.ui.set_menu_w(248.0);
+        // (wide enough for the profiles' names beside each playlist's, up to a point)
+        let widest = rows.iter().filter(|r| r.kind == 0).map(|r| crate::text::width(400, 13.5, &r.label) + if r.sub.is_empty() { 0.0 } else { 12.0 + crate::text::width(400, 12.0, &r.sub) }).fold(0.0, f32::max);
+        self.ui.set_menu_w((widest + 74.0).clamp(248.0, 360.0));
         self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
         let (ax, ay, ah) = anchor;
         let win = self.ui.get_window_height();

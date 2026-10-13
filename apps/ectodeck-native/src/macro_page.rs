@@ -686,7 +686,7 @@ impl MacroPage {
                         .iter()
                         .map(|(layer, pos, ps)| {
                             let key = page.key(*pos).map(|k| page.key_label(k)).unwrap_or_else(|| format!("Key {pos}"));
-                            format!("{}{key} ({})", if layer == "fnkeys" { "Fn + " } else { "" }, macros::profiles_text(ps).to_lowercase())
+                            format!("{}{key} ({})", if layer == "fnkeys" { "Fn + " } else { "" }, macros::profiles_text(ps, |n| page.profile_name(n)))
                         })
                         .collect();
                     format!("{} will do nothing until you give {} something else.", list.join(", "), if places.len() == 1 { "it" } else { "them" })

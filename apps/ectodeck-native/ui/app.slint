@@ -755,12 +755,15 @@ component Menu inherits Rectangle {
                         vertical-alignment: center;
                         overflow: elide;
                     }
+                    // (what a row says on its right never crowds out its own name)
                     if row.sub != "": Text {
+                        max-width: root.width * 0.55;
                         text: row.sub;
                         font-family: "Geist";
                         font-size: 12px;
                         color: Ink.quiet;
                         vertical-alignment: center;
+                        overflow: elide;
                     }
                 }
                 item := TouchArea {

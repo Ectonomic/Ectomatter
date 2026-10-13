@@ -452,6 +452,9 @@ pub struct Page {
     pub editing: u8,
     pub view: View,
     pub sel: Option<u32>,
+    /// the Keys tab is on its Function layer: the keyboard picture shows what the keys do
+    /// with Fn held there (on other tabs, what they do pressed alone)
+    pub fn_layer: bool,
     pub busy: bool,
     stars: HashMap<u32, (f64, [f64; 3])>,
     flashes: HashMap<u32, (f64, [f64; 3])>,
@@ -541,6 +544,7 @@ impl Page {
             editing: 1,
             view: View::Keys,
             sel: None,
+            fn_layer: false,
             busy: false,
             stars: HashMap::new(),
             flashes: HashMap::new(),
@@ -638,7 +642,7 @@ impl Page {
             7 => "Left click".into(),
             8 => "Right click".into(),
             9 => "Middle click".into(),
-            17..=21 => format!("Switch to profile {}", f - 16),
+            17..=21 => format!("Switch to {}", self.profile_name((f - 16) as u8)),
             22 => "Next profile".into(),
             23 => "Previous profile".into(),
             255 => "Disabled".into(),
@@ -664,6 +668,8 @@ impl Page {
                 if parts.is_empty() { "Nothing".into() } else { parts.join("+") }
             }
             3 => distinct_part(&self.macro_name(a).unwrap_or(format!("Macro {a}")), macro_names),
+            // (a key that switches to a profile is printed with the profile's name)
+            17..=21 => self.profile_name((f - 16) as u8),
             255 => "Off".into(),
             _ => self.describe(d),
         }
@@ -774,7 +780,7 @@ impl Page {
             .collect();
         let profiles = PROFILE_NUMBERS
             .iter()
-            .map(|n| Action { label: format!("Switch to profile {n}"), def: [16 + *n as u32, 0, 0, 0], tag: "Profile" })
+            .map(|n| Action { label: format!("Switch to {}", self.profile_name(*n)), def: [16 + *n as u32, 0, 0, 0], tag: "Profile" })
             .chain([
                 Action { label: "Next profile".into(), def: [22, 0, 0, 0], tag: "Profile" },
                 Action { label: "Previous profile".into(), def: [23, 0, 0, 0], tag: "Profile" },
@@ -810,12 +816,14 @@ impl Page {
     /// What each key prints as its new meaning, where it has one: on the Keys
     /// view, a key set to something other than its factory action.
     pub fn remap(&self, pos: u32, names: &[String]) -> Option<String> {
-        // (on every tab that shows the keyboard, not only Keys)
+        // (on every tab that shows the keyboard, not only Keys; the Function layer's, while
+        // the Keys tab has it open)
         if self.dev.is_none() {
             return None;
         }
-        let d = self.def("keys", pos);
-        (d != self.factory("keys", pos)).then(|| self.short_label(d, names))
+        let layer = if self.fn_layer && self.view == View::Keys { "fnkeys" } else { "keys" };
+        let d = self.def(layer, pos);
+        (d != self.factory(layer, pos)).then(|| self.short_label(d, names))
     }
 
     /// The name, effect and small colour sample of each profile's button.
@@ -824,8 +832,9 @@ impl Page {
         EFFECTS.iter().find(|(m, _)| *m == mode).map_or(mode, |(_, name)| name.to_string())
     }
 
+    /// A profile's name, or "Profile 2" while it has the name it came with (or none yet).
     pub fn profile_name(&self, n: u8) -> String {
-        let name = self.drafts[&n]["name"].as_str().unwrap_or("");
+        let name = self.drafts.get(&n).and_then(|d| d["name"].as_str()).unwrap_or("");
         if name.is_empty() || name.to_uppercase().starts_with("DEFAULT") { format!("Profile {n}") } else { name.to_string() }
     }
 
@@ -1299,5 +1308,19 @@ mod saving_tests {
         p.saved_profile(1, read_back, false);
         assert_eq!(p.drafts[&1]["name"], "Games");
         assert!(p.is_dirty(1), "the newer change still saves");
+    }
+
+    #[test]
+    fn a_profile_is_called_by_its_name_wherever_a_key_switches_to_it() {
+        let mut p = page();
+        p.drafts.get_mut(&1).unwrap()["name"] = json!("Games");
+        // the actions a key can be given, and what a key given one says it does
+        let labels: Vec<String> = p.groups().profiles.iter().map(|a| a.label.clone()).collect();
+        assert_eq!(labels[..2], ["Switch to Games", "Switch to Profile 2"], "a profile still named as it came, by its number");
+        assert_eq!(p.describe([17, 0, 0, 0]), "Switch to Games");
+        assert_eq!(p.short_label([17, 0, 0, 0], &[]), "Games", "printed on the key");
+        // and where a macro is used
+        assert_eq!(crate::macros::profiles_text(&[1, 2], |n| p.profile_name(n)), "Games and Profile 2");
+        assert_eq!(crate::macros::profiles_text(&[1, 2, 3, 4, 5], |n| p.profile_name(n)), "all profiles");
     }
 }
