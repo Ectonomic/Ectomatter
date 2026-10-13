@@ -3948,7 +3948,11 @@ fn lay_strip(secs: &[f64], fixed: Option<(f64, f64)>, width: f64) -> (f64, f64, 
     let total = secs.iter().sum::<f64>().max(1.0);
     let way = fixed.map_or(((width - 24.0 * n) / n - JOIN - BETWEEN).floor().clamp(WAY_W.0, WAY_W.1), |f| f.1);
     let (pre, per) = (way + JOIN, way + JOIN + BETWEEN);
-    let pps = fixed.map_or(((width - per * n) / total).max(0.05), |f| f.0);
+    let fit = ((width - per * n) / total).max(0.05);
+    // (while an end is dragged, the scale it began with holds, so the end follows the
+    // pointer; but the strip never runs past its room: there, it is fitted again, every
+    // turn narrower, and the time still follows the pointer)
+    let pps = fixed.map_or(fit, |f| f.0.min(fit));
     let mut x = pre;
     let spans = secs
         .iter()
@@ -4146,10 +4150,15 @@ mod tests {
         // many turns: shorter way bars, never under 18
         let (_, short, _) = lay_strip(&[8.0; 30], None, 888.0);
         assert_eq!(short, 18.0);
-        // an end dragged keeps the scale and the way bars: the strip runs long until let go
+        // an end dragged keeps the scale and the way bars while the strip has room
         let (_, kept, spans) = lay_strip(&[8.0, 20.0, 8.0], Some((pps, way)), 888.0);
         assert_eq!(kept, 26.0);
         assert!((spans[1].1 - 20.0 * pps).abs() < 1e-9);
+        // and past the strip's room, it is fitted again: it never runs out of its box
+        let (narrower, _, spans) = lay_strip(&[8.0, 60.0, 8.0], Some((pps, way)), 888.0);
+        assert!(narrower < pps);
+        let end = spans[2].0 + spans[2].1;
+        assert!((end - 882.0).abs() < 1e-9, "ends where a fitted strip ends: {end}");
     }
 
     #[test]
