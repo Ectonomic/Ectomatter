@@ -501,6 +501,8 @@ impl LayoutPage {
         let h = 6.0 + list + 6.0;
         self.ui.set_menu_natural(h);
         self.ui.set_menu_w(w);
+        // (a column for ticks only when something in the menu is ticked)
+        self.ui.set_menu_marks(rows.iter().any(|r| r.tick));
         self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
         let (ax, ay, ah) = anchor;
         let win = self.ui.get_window_height();

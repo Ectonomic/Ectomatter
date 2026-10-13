@@ -538,6 +538,8 @@ component ScrollBar inherits Rectangle {
 // lifts off by shade and shadow, without an edge.
 component Menu inherits Rectangle {
     in property <[MenuRow]> rows;
+    // whether its rows keep a column for a tick: none in a menu that never ticks what is chosen
+    in property <bool> marks: true;
     in property <string> placeholder;
     in property <bool> back;
     in property <bool> search: true;
@@ -648,7 +650,8 @@ component Menu inherits Rectangle {
                     y: 5px;
                     width: parent.width - 8px;
                     height: 1px;
-                    background: Ink.line;
+                    // (the app's line is too near the menu's own gray to be seen on it)
+                    background: #ffffff17;
                 }
                 if row.kind == 3: Text {
                     x: 10px;
@@ -719,11 +722,12 @@ component Menu inherits Rectangle {
                 }
                 if row.kind == 0 || row.kind == 4 || row.kind == 5: HorizontalLayout {
                     opacity: row.kind == 5 ? 0.35 : 1;
-                    padding-left: 10px;
+                    padding-left: root.marks ? 10px : 12px;
                     padding-right: 10px;
-                    spacing: 8px;
+                    spacing: root.marks ? 8px : 0;
+                    // (a column for ticks only in a menu that ticks what is chosen)
                     Text {
-                        width: 14px;
+                        width: root.marks ? 14px : 0;
                         text: row.tick ? "✓" : "";
                         font-family: "Geist";
                         font-size: 13.5px;
@@ -2806,6 +2810,8 @@ component KeyDetail inherits PageBox {
     in property <string> job;
     in property <bool> listening;
     in property <bool> menu-open;
+    // whether the open menu keeps a column for ticks (not when nothing in it is ticked)
+    in property <bool> menu-marks: true;
     in property <string> note;
     callback done();
     callback reset();
@@ -3464,6 +3470,8 @@ export component AppWindow inherits Window {
     in property <string> reset-label;
     // the open menu, and the button it hangs from
     in property <bool> menu-open;
+    // whether the open menu keeps a column for ticks (not when nothing in it is ticked)
+    in property <bool> menu-marks: true;
     in property <length> menu-ax;
     in property <length> menu-ay;
     in property <length> menu-ah;
@@ -4997,20 +5005,20 @@ export component AppWindow inherits Window {
                             clicked => { root.undo(false); }
                         }
                     }
-                    // the Screen Editor, the Macro Editor and the Key lab, at the bar's end
+                    // the Macro Editor, the Screen Editor and the Key lab, at the bar's end
                     HorizontalLayout {
                         horizontal-stretch: 0;
                         spacing: 8px;
+                        BarButton {
+                            commands: "M3.1 4h9.8a1.6 1.6 0 0 1 1.6 1.6v5.3a1.6 1.6 0 0 1-1.6 1.6H3.1a1.6 1.6 0 0 1-1.6-1.6V5.6a1.6 1.6 0 0 1 1.6-1.6zM4 7h1M7 7h1M10 7h2M4.5 9.8h7";
+                            text: "Macro Editor";
+                            clicked => { root.macro-editor(-1); }
+                        }
                         // (the keyboard's screen: a wide frame with its rows of words)
                         BarButton {
                             commands: "M2.6 3.4h10.8a1.6 1.6 0 0 1 1.6 1.6v6a1.6 1.6 0 0 1-1.6 1.6H2.6A1.6 1.6 0 0 1 1 11V5a1.6 1.6 0 0 1 1.6-1.6zM4 6.2h8M4 8h6M4 9.8h7";
                             text: "Screen Editor";
                             clicked => { root.screen-editor(); }
-                        }
-                        BarButton {
-                            commands: "M3.1 4h9.8a1.6 1.6 0 0 1 1.6 1.6v5.3a1.6 1.6 0 0 1-1.6 1.6H3.1a1.6 1.6 0 0 1-1.6-1.6V5.6a1.6 1.6 0 0 1 1.6-1.6zM4 7h1M7 7h1M10 7h2M4.5 9.8h7";
-                            text: "Macro Editor";
-                            clicked => { root.macro-editor(-1); }
                         }
                         BarButton {
                             // a flask drawn for this size, its lines on the pixel grid
@@ -5212,6 +5220,7 @@ export component AppWindow inherits Window {
 
     // the open menu, over everything
     menu := Menu {
+        marks: root.menu-marks;
         visible: root.menu-open;
         x: max(8px, min(root.menu-ax, root.width - root.menu-w - 8px));
         width: root.menu-w;
@@ -5297,7 +5306,7 @@ component MacroRow inherits Rectangle {
     callback menu(length, length);
     height: 53px;
     border-radius: 10px;
-    background: root.m.current ? Ink.shade2 : ta.has-hover ? Ink.shade1 : transparent;
+    background: root.m.current ? (ta.has-hover ? Ink.pick-hover : Ink.pick) : ta.has-hover ? Ink.hover-box : transparent;
     MacroIcon {
         x: 11.5px;
         y: 19px;
@@ -5625,6 +5634,8 @@ export component MacroWindow inherits Window {
     in property <bool> can-save;
     // the open menu
     in property <bool> menu-open;
+    // whether the open menu keeps a column for ticks (not when nothing in it is ticked)
+    in property <bool> menu-marks: true;
     in property <length> menu-ax;
     in property <length> menu-w: 220px;
     in property <[MenuRow]> menu-rows;
@@ -5696,7 +5707,7 @@ export component MacroWindow inherits Window {
     Rectangle {
         y: 0;
         height: 36px;
-        background: #262626;
+        background: Ink.title;
         border-top-left-radius: root.radius;
         border-top-right-radius: root.radius;
         TouchArea {
@@ -5721,7 +5732,7 @@ export component MacroWindow inherits Window {
             font-weight: 600;
             font-size: 13.5px;
             letter-spacing: -0.54px;
-            color: #f5f5f5;
+            color: Ink.bright;
             vertical-alignment: center;
         }
         HorizontalLayout {
@@ -5731,7 +5742,7 @@ export component MacroWindow inherits Window {
             height: 36px;
             spacing: 6px;
             Text { text: "EVGA Z10 RGB"; font-size: 13px; color: Ink.dim; vertical-alignment: center; }
-            Text { text: "/"; font-size: 13px; color: #525252; vertical-alignment: center; }
+            Text { text: "/"; font-size: 13px; color: #4a4a52; vertical-alignment: center; }
             Text { text: "Macro Editor"; font-size: 13px; color: Ink.dim; vertical-alignment: center; }
         }
         HorizontalLayout {
@@ -5761,7 +5772,7 @@ export component MacroWindow inherits Window {
         y: 36px;
         width: 290px;
         height: root.height - 36px;
-        background: #1c1c1c;
+        background: Ink.box;
         border-bottom-left-radius: root.radius;
         HorizontalLayout {
             x: 18px;
@@ -5770,7 +5781,7 @@ export component MacroWindow inherits Window {
             height: 56px;
             spacing: 8px;
             Text { text: "All macros"; font-size: 13px; font-weight: 500; color: Ink.soft; vertical-alignment: center; }
-            Text { text: root.slots-text; font-size: 12px; color: #737373; vertical-alignment: center; }
+            Text { text: root.slots-text; font-size: 12px; color: Ink.quiet; vertical-alignment: center; }
             Rectangle { horizontal-stretch: 1; }
             TextButton {
                 y: 14px;
@@ -5803,7 +5814,7 @@ export component MacroWindow inherits Window {
             content: root.items.length * 55px;
             offset: -root.lib-scroll;
             framed: false;
-            thumb-color: #525252;
+            thumb-color: #4a4a52;
             scroll-to(o) => { root.lib-scroll = -o; }
         }
     }
@@ -6014,7 +6025,7 @@ export component MacroWindow inherits Window {
                 content: chain-flick.content-height;
                 offset: -chain-flick.content-y;
                 framed: false;
-                thumb-color: #525252;
+                thumb-color: #4a4a52;
                 scroll-to(o) => { chain-flick.content-y = -o; }
             }
             // the tools
@@ -6067,7 +6078,7 @@ export component MacroWindow inherits Window {
                 Rectangle {
                     width: rec-row.preferred-width;
                     border-radius: 8px;
-                    background: root.recording ? #e23b3b33 : rec-ta.has-hover && root.can-record ? #3d3d3d : #333333;
+                    background: root.recording ? #e23b3b33 : rec-ta.has-hover && root.can-record ? Ink.pick-hover : Ink.pick;
                     opacity: root.recording || root.can-record ? 1 : 0.35;
                     rec-row := HorizontalLayout {
                         padding-left: 10px;
@@ -6210,6 +6221,7 @@ export component MacroWindow inherits Window {
 
     // the open menu, over everything
     menu := Menu {
+        marks: root.menu-marks;
         visible: root.menu-open;
         x: max(8px, min(root.menu-ax, root.width - root.menu-w - 8px));
         width: root.menu-w;
@@ -6431,7 +6443,7 @@ component LayoutListRow inherits Rectangle {
     callback clicked;
     height: 52px;
     border-radius: 8px;
-    background: root.r.on ? #2a2a2a : ta.has-hover ? Ink.shade1 : transparent;
+    background: root.r.on ? (ta.has-hover ? Ink.pick-hover : Ink.pick) : ta.has-hover ? Ink.hover-box : transparent;
     if root.r.on: Rectangle {
         x: 0;
         y: 12px;
@@ -6524,6 +6536,8 @@ export component LayoutWindow inherits Window {
     in property <bool> has-blocks;
     // the open menu
     in property <bool> menu-open;
+    // whether the open menu keeps a column for ticks (not when nothing in it is ticked)
+    in property <bool> menu-marks: true;
     in property <length> menu-ax;
     in property <length> menu-w: 248px;
     in property <[MenuRow]> menu-rows;
@@ -6615,7 +6629,7 @@ export component LayoutWindow inherits Window {
     Rectangle {
         y: 0;
         height: 36px;
-        background: #262626;
+        background: Ink.title;
         border-top-left-radius: root.radius;
         border-top-right-radius: root.radius;
         TouchArea {
@@ -6640,7 +6654,7 @@ export component LayoutWindow inherits Window {
             font-weight: 600;
             font-size: 13.5px;
             letter-spacing: -0.54px;
-            color: #f5f5f5;
+            color: Ink.bright;
             vertical-alignment: center;
         }
         HorizontalLayout {
@@ -6650,7 +6664,7 @@ export component LayoutWindow inherits Window {
             height: 36px;
             spacing: 6px;
             Text { text: "EVGA Z10 RGB"; font-size: 13px; color: Ink.dim; vertical-alignment: center; }
-            Text { text: "/"; font-size: 13px; color: #525252; vertical-alignment: center; }
+            Text { text: "/"; font-size: 13px; color: #4a4a52; vertical-alignment: center; }
             Text { text: "Screen layouts"; font-size: 13px; color: Ink.dim; vertical-alignment: center; }
         }
         HorizontalLayout {
@@ -6680,7 +6694,7 @@ export component LayoutWindow inherits Window {
         y: 36px;
         width: 290px;
         height: root.height - 36px;
-        background: #1c1c1c;
+        background: Ink.box;
         border-bottom-left-radius: root.radius;
         Text {
             x: 18px;
@@ -7445,6 +7459,7 @@ export component LayoutWindow inherits Window {
 
     // the open menu, over everything
     menu := Menu {
+        marks: root.menu-marks;
         visible: root.menu-open;
         x: max(8px, min(root.menu-ax, root.width - root.menu-w - 8px));
         width: root.menu-w;

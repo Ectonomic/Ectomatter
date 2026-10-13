@@ -2144,6 +2144,8 @@ impl Front {
             self.ui.set_menu_open(false);
             self.ui.invoke_blur_menu();
         }
+        // (the next menu keeps a column for ticks, unless it has none)
+        self.ui.set_menu_marks(true);
     }
 
     /// A press somewhere in the window, in its logical pixels: a press away
@@ -3231,6 +3233,8 @@ impl Front {
         let rows = vec![row(0, format!("Edit {name}")), row(0, second), row(0, format!("Duplicate {name}")), row(2, String::new()), row(4, format!("Delete {name}"))];
         self.close_menu();
         self.close_picker();
+        // (nothing in it is ticked)
+        self.ui.set_menu_marks(false);
         let list: f32 = rows.iter().map(|r| if r.kind == 2 { 11.0 } else { 33.0 }).sum();
         let h = 6.0 + list + 6.0;
         let w = rows.iter().map(|r| crate::text::width(400, 13.5, &r.label) + 64.0).fold(200.0f32, f32::max).min(320.0).ceil();
@@ -3265,6 +3269,7 @@ impl Front {
         }
         self.close_menu();
         self.close_picker();
+        self.ui.set_menu_marks(false);
         let list: f32 = rows.iter().map(|r| if r.kind == 1 { 28.0 } else { 33.0 }).sum();
         let h = 6.0 + list + 6.0;
         // (as wide as the longest name needs, to 300)
