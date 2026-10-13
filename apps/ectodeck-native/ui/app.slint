@@ -6589,6 +6589,13 @@ export component LayoutWindow inherits Window {
     property <length> radius: root.is-maximized ? 0 : 10px;
     property <length> main-w: root.width - 290px;
     property <length> rig-w: main-w - 36px;
+    // the screen holds the keyboard when a block on it is pressed, so a field in the box
+    // lets go of it (and the window no longer counts as typing)
+    keys := FocusScope { width: 0; height: 0; }
+    function take-keys() {
+        keys.focus();
+        Typing.on = false;
+    }
 
     // the title bar: the mark, the wordmark, and where this window is
     Rectangle {
@@ -7065,10 +7072,12 @@ export component LayoutWindow inherits Window {
                             source: root.picture;
                         }
                     }
-                    // a press away from every block lets the selected one go
+                    // a press away from every block lets the selected one go (and takes the
+                        // keyboard from any field in the box, so Delete is the screen's again)
                     TouchArea {
                         pointer-event(e) => {
                             if (e.kind == PointerEventKind.down) {
+                                root.take-keys();
                                 root.block-chosen(-1);
                             }
                         }
@@ -7177,6 +7186,9 @@ export component LayoutWindow inherits Window {
                             }
                             pointer-event(e) => {
                                 if (e.kind == PointerEventKind.down) {
+                                    // (the keyboard is the screen's while a block is pressed: Delete
+                                    // removes the block rather than a letter in the box's field)
+                                    root.take-keys();
                                     parent.dc = 0;
                                     parent.dr = 0;
                                     parent.moving = false;

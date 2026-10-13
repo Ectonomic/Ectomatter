@@ -234,6 +234,7 @@ impl LayoutPage {
                     }
                 }
                 Ask::NameDone(t) => {
+                    self.ui.global::<crate::Typing>().set_on(false);
                     if std::mem::take(&mut self.renaming) {
                         if let Some(ed) = cx.editor.as_ref() {
                             cx.screens.rename_page(ed.page, &t);
@@ -241,7 +242,11 @@ impl LayoutPage {
                         }
                     }
                 }
-                Ask::NameCancel => self.renaming = false,
+                Ask::NameCancel => {
+                    self.renaming = false;
+                    // (the name's field goes with its focus, which then never says it went)
+                    self.ui.global::<crate::Typing>().set_on(false);
+                }
                 Ask::More(x, y, h) => self.open_more((x, y, h), cx),
                 Ask::ConfirmNo => self.confirm = false,
                 Ask::ConfirmYes => {
