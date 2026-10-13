@@ -3228,13 +3228,12 @@ impl Front {
     }
 
     /// Layout `k`'s Delete chosen from its card's menu: first the question, over the window,
-    /// saying what goes with the layout and the way back.
+    /// saying what goes with the layout.
     fn ask_delete(&mut self, k: usize) {
         let Some(page) = self.screens.library.get(k) else { return };
         let says = self.screens.delete_says(k, self.onboard_ready(), |n| self.page.profile_name(n));
         self.ui.set_confirm_title(format!("Delete {}?", page.name).into());
         self.ui.set_confirm_body(says.into());
-        self.ui.set_confirm_body2(format!("Undo brings {} back.", page.name).into());
         self.ui.set_confirm_do("Delete layout".into());
         self.deleting = Some(page.id.clone());
         self.ui.set_confirm_open(true);

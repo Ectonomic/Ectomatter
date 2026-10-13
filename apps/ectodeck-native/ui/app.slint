@@ -3449,11 +3449,10 @@ export component AppWindow inherits Window {
     callback lib-menu(int, length, length);
     callback lib-new();
     // are you sure, before a layout is deleted, as the Macro Editor asks: the question,
-    // what goes with the layout, the way back, and the button's words
+    // what goes with the layout, and the button's words
     in property <bool> confirm-open;
     in property <string> confirm-title;
     in property <string> confirm-body;
-    in property <string> confirm-body2;
     in property <string> confirm-do;
     callback confirm-yes();
     callback confirm-no();
@@ -5311,7 +5310,6 @@ export component AppWindow inherits Window {
                 spacing: 10px;
                 Text { text: root.confirm-title; font-family: "Geist"; font-size: 16px; font-weight: 600; color: Ink.ink; wrap: word-wrap; }
                 Text { text: root.confirm-body; font-family: "Geist"; font-size: 13.5px; color: Ink.dim; wrap: word-wrap; }
-                Text { text: root.confirm-body2; font-family: "Geist"; font-size: 13.5px; color: Ink.dim; wrap: word-wrap; }
                 HorizontalLayout {
                     padding-top: 8px;
                     spacing: 8px;
