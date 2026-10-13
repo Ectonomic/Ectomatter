@@ -1345,9 +1345,12 @@ component CellView inherits Rectangle {
     }
     // a slider on a well, filled to its place in its color; the knob follows the pointer while held
     // (style 1: in a box of the well's own shade, the track a step lighter than it; style 2: the
-    // same track on the page itself, the knob ringed in the page's shade)
+    // same track on the page itself, the knob ringed in the page's shade; style 3: the lighter
+    // track in a box's shade; style 4: as 3, with a notch at its middle, its default, which holds
+    // the knob as it passes)
     if root.c.kind == 41: filled := Rectangle {
-        property <float> at: fdrag.pressed ? max(0, min(1, (fdrag.mouse-x - 9px) / (self.width - 18px))) : root.c.value;
+        property <float> held: max(0, min(1, (fdrag.mouse-x - 9px) / (self.width - 18px)));
+        property <float> at: fdrag.pressed ? (root.c.style == 4 && abs(self.held - 0.5) <= 0.04 ? 0.5 : self.held) : root.c.value;
         Rectangle {
             y: 7px;
             height: 6px;
@@ -1360,6 +1363,15 @@ component CellView inherits Rectangle {
                 border-radius: 3px;
                 background: root.c.color;
             }
+        }
+        // the notch: a short line across the track at its middle, under the knob
+        if root.c.style == 4: Rectangle {
+            x: 9px + 0.5 * (parent.width - 18px) - 1px;
+            y: 3px;
+            width: 2px;
+            height: 14px;
+            border-radius: 1px;
+            background: Ink.quiet;
         }
         // the knob, ringed in the box's color
         Rectangle {

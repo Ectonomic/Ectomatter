@@ -141,13 +141,14 @@ impl Grid {
         self.done(top + 34.0);
     }
     /// a slider, as the Lighting tab's speed is, filled to `frac`, the words for its two
-    /// ends beside it, and what it is set to in a small well at its name's right
-    fn slider(&mut self, label: &str, c: Ctl, frac: f32, ends: (&str, &str), value: Option<&str>) {
+    /// ends beside it, and what it is set to in a small well at its name's right; `notch`, a
+    /// notch at its middle, its default, which holds the knob as it passes
+    fn slider(&mut self, label: &str, c: Ctl, frac: f32, ends: (&str, &str), value: Option<&str>, notch: bool) {
         let top = self.head(label, value);
         let (x, w, y) = (self.x(), self.col_w(), self.y + top);
         let (lw, rw) = (crate::text::width(400, 11.0, ends.0).ceil(), crate::text::width(400, 11.0, ends.1).ceil());
         self.cells.push(text_cell(style::END_L, x, y + 7.0, lw, 20.0, ends.0));
-        self.cells.push(Cell { value: frac, color: slint::Color::from_rgb_u8(0xa1, 0xa1, 0xaa), id: id(c), style: 3, ..cell(kind::FILLED, x + lw + 10.0, y + 7.0, w - lw - rw - 20.0, 20.0) });
+        self.cells.push(Cell { value: frac, color: slint::Color::from_rgb_u8(0xa1, 0xa1, 0xaa), id: id(c), style: if notch { 4 } else { 3 }, ..cell(kind::FILLED, x + lw + 10.0, y + 7.0, w - lw - rw - 20.0, 20.0) });
         self.cells.push(text_cell(style::END_R, x + w - rw, y + 7.0, rw, 20.0, ends.1));
         self.done(top + 34.0);
     }
@@ -265,7 +266,7 @@ pub fn block_box(page: &Page, chosen: Option<usize>, r: &Readings, avail: &[Sour
                 g.field("Word", Ctl::ScrText, word);
             }
             // (what a step takes, to find on the keyboard the fastest its screen shows)
-            g.slider("Speed", Ctl::ScrSpeed, *speed as f32 / 100.0, ("Slow", "Fast"), Some(&format!("{:.2} s a step", crate::lcd_fx::period(*speed))));
+            g.slider("Speed", Ctl::ScrSpeed, *speed as f32 / 100.0, ("Slow", "Fast"), Some(&format!("{:.2} s a step", crate::lcd_fx::period(*speed))), true);
             g.note(None, UNDER);
         }
         Kind::Bar(src) => {
@@ -378,10 +379,16 @@ pub fn act(page: &mut Page, ed: &mut Editor, c: Ctl, index: usize, words: Option
     }
 }
 
-/// The chosen effect's speed, from its slider (0 slow to 1 fast).
+/// The speed a new effect starts at: the slider's middle, where its notch is, a step every
+/// 0.32 s, just inside what the keyboard's screen shows words clearly at (Grant: 0.3 s is the
+/// very edge, 2026-10-13).
+pub const SPEED: u8 = 50;
+
+/// The chosen effect's speed, from its slider (0 slow to 1 fast); near the notch, the notch.
 pub fn set_speed(page: &mut Page, ed: &Editor, v: f32) {
     if let Some(Kind::Effect { speed, .. }) = ed.chosen.and_then(|i| page.pieces.get_mut(i)).map(|p| &mut p.kind) {
-        *speed = (v.clamp(0.0, 1.0) * 100.0).round() as u8;
+        let s = (v.clamp(0.0, 1.0) * 100.0).round() as u8;
+        *speed = if s.abs_diff(SPEED) <= 4 { SPEED } else { s };
     }
 }
 
@@ -499,7 +506,7 @@ pub fn new_block(what: usize, first: Source) -> (Kind, u8, bool) {
         0 => (Kind::Text("TEXT".into()), 4, false),
         1 => (Kind::Data(first, false), 7, true),
         2 => (Kind::Bar(if first.barred() { first } else { Source::CpuLoad }), 10, false),
-        _ => (Kind::Effect { fx: crate::lcd_page::Fx::Rain, speed: 50, word: "EVGA".into() }, COLS, false),
+        _ => (Kind::Effect { fx: crate::lcd_page::Fx::Rain, speed: SPEED, word: "EVGA".into() }, COLS, false),
     }
 }
 
