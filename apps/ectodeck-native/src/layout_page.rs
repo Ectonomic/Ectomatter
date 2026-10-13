@@ -891,13 +891,13 @@ impl LayoutPage {
             let key = (rgb, cx.light[0], w, word.clone());
             if self.stills.as_ref().is_none_or(|(k, _)| *k != key) {
                 // (each as the mock's tiles stand still: four seconds in)
-                let sample = crate::lcd_fx::sample_sound(40.0);
+                let sample = crate::lcd_fx::Live::sample();
                 let pics = crate::lcd_fx::FXS.iter().map(|f| crate::lcd_draw::picture(&rows_of(crate::lcd_fx::frame(*f, 40.0, &word, &sample)), rgb, lv, w, h)).collect();
                 self.stills = Some((key, pics));
             }
             let stills = &self.stills.as_ref().unwrap().1;
-            let sound = if *fx == crate::lcd_page::Fx::Spectrum { crate::sound::held(crate::lcd_fx::period(*speed)) } else { [0.0; 20] };
-            let moving = crate::lcd_draw::picture(&rows_of(crate::lcd_fx::frame(*fx, crate::lcd_fx::tenths(*fx, cx.t, *speed), &word, &sound)), rgb, lv, w, h);
+            let live = crate::lcd_fx::live(*fx, *speed, cx.readings.cpu_load);
+            let moving = crate::lcd_draw::picture(&rows_of(crate::lcd_fx::frame(*fx, crate::lcd_fx::tenths(*fx, cx.t, *speed), &word, &live)), rgb, lv, w, h);
             let tiles: Vec<crate::FxTile> = crate::lcd_fx::FXS
                 .iter()
                 .enumerate()

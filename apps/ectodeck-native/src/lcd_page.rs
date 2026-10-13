@@ -517,7 +517,7 @@ impl Page {
         let mut effects: Vec<String> = Vec::new();
         for p in &self.pieces {
             if let Kind::Effect { fx, .. } = &p.kind {
-                let name = fx.name().to_lowercase();
+                let name = fx.said().to_string();
                 if !effects.contains(&name) {
                     effects.push(name);
                 }
@@ -609,8 +609,9 @@ impl Page {
                     "data" => Kind::Data(Source::from_key(p["source"].as_str()?)?, p["fahrenheit"].as_bool().unwrap_or(false)),
                     "bar" => Kind::Bar(Source::from_key(p["source"].as_str()?)?),
                     "clock" => Kind::Clock(p["twelve"].as_bool().unwrap_or(false)),
+                    // (an effect no longer offered, as Life, reads as Rain: the block keeps its place)
                     "effect" => Kind::Effect {
-                        fx: Fx::from_key(p["effect"].as_str()?)?,
+                        fx: Fx::from_key(p["effect"].as_str().unwrap_or("")).unwrap_or(Fx::Rain),
                         speed: b(&p["speed"]).unwrap_or(50).min(100),
                         word: p["word"].as_str().unwrap_or("EVGA").chars().take(COLS as usize).collect(),
                     },
@@ -1465,8 +1466,7 @@ fn lay_out(page: &Page, r: &Readings, t: f64) -> (Vec<String>, Vec<(u8, usize, u
     let mut behind = vec![vec![' '; COLS as usize]; ROWS as usize];
     for p in page.pieces.iter().filter(|p| effect(p)) {
         if let Kind::Effect { fx, speed, word } = &p.kind {
-            let sound = if *fx == Fx::Spectrum { crate::sound::held(crate::lcd_fx::period(*speed)) } else { [0.0; 20] };
-            let f = crate::lcd_fx::frame(*fx, crate::lcd_fx::tenths(*fx, t, *speed), &ectotype_core::lcd::lcd_text(word), &sound);
+            let f = crate::lcd_fx::frame(*fx, crate::lcd_fx::tenths(*fx, t, *speed), &ectotype_core::lcd::lcd_text(word), &crate::lcd_fx::live(*fx, *speed, r.cpu_load));
             for row in p.row..(p.row + p.height.max(1)).min(ROWS) {
                 for c in p.col..(p.col + p.width).min(COLS) {
                     behind[row as usize][c as usize] = f[row as usize][c as usize];
@@ -1765,7 +1765,7 @@ mod tests {
         let time = Piece { kind: Kind::Clock(false), row: 1, col: 7, width: 5, right: false, center: false, gap: 1, height: 1, scroll: true, date_format: DateFormat::Short };
         let p = Page { pieces: vec![rain.clone(), time], ..Page::blank() };
         let rows = render_at(&p, &r, 4.0);
-        let fx: Vec<String> = crate::lcd_fx::frame(Fx::Rain, crate::lcd_fx::tenths(Fx::Rain, 4.0, 50), "", &[0.0; 20]).iter().map(|row| row.iter().collect()).collect();
+        let fx: Vec<String> = crate::lcd_fx::frame(Fx::Rain, crate::lcd_fx::tenths(Fx::Rain, 4.0, 50), "", &crate::lcd_fx::Live::quiet()).iter().map(|row| row.iter().collect()).collect();
         // the time covers the rain in its own five cells, and the rain falls round it
         assert_eq!(&rows[1].chars().skip(7).take(5).collect::<String>(), "04:40");
         for (k, row) in rows.iter().enumerate() {
