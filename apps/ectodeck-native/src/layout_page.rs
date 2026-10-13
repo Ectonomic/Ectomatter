@@ -892,7 +892,7 @@ impl LayoutPage {
             if self.stills.as_ref().is_none_or(|(k, _)| *k != key) {
                 // (each as the mock's tiles stand still: four seconds in)
                 let sample = crate::lcd_fx::Live::sample();
-                let pics = crate::lcd_fx::FXS.iter().map(|f| crate::lcd_draw::picture(&rows_of(crate::lcd_fx::frame(*f, 40.0, &word, &sample)), rgb, lv, w, h)).collect();
+                let pics = crate::lcd_fx::FXS.iter().map(|f| crate::lcd_draw::picture(&rows_of(crate::lcd_fx::frame(*f, crate::lcd_fx::still(*f), &word, &sample)), rgb, lv, w, h)).collect();
                 self.stills = Some((key, pics));
             }
             let stills = &self.stills.as_ref().unwrap().1;

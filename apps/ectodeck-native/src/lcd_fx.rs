@@ -32,11 +32,12 @@ pub enum Fx {
     Tetris,
     Snake,
     Highway,
+    Invaders,
     Bounce,
 }
 
 /// The effects, in the tiles' order.
-pub const FXS: [Fx; 15] = [
+pub const FXS: [Fx; 16] = [
     Fx::Rain,
     Fx::Snow,
     Fx::Stars,
@@ -51,6 +52,7 @@ pub const FXS: [Fx; 15] = [
     Fx::Tetris,
     Fx::Snake,
     Fx::Highway,
+    Fx::Invaders,
     Fx::Bounce,
 ];
 
@@ -71,6 +73,7 @@ impl Fx {
             Fx::Tetris => "tetris",
             Fx::Snake => "snake",
             Fx::Highway => "highway",
+            Fx::Invaders => "invaders",
             Fx::Bounce => "bounce",
         }
     }
@@ -95,6 +98,7 @@ impl Fx {
             Fx::Tetris => "Tetris",
             Fx::Snake => "Snake",
             Fx::Highway => "Highway",
+            Fx::Invaders => "Space Invaders",
             Fx::Bounce => "Bounce",
         }
     }
@@ -117,6 +121,7 @@ impl Fx {
             Fx::Tetris => "Tetris",
             Fx::Snake => "Snake",
             Fx::Highway => "a highway",
+            Fx::Invaders => "Space Invaders",
             Fx::Bounce => "a bouncing word",
         }
     }
@@ -152,12 +157,22 @@ fn per_step(fx: Fx) -> f64 {
         Fx::Fire => 0.5,
         Fx::Plasma => 1.75,
         // (a game's move, a rocket's stage, a column of the trace: one a step)
-        Fx::Fireworks | Fx::Heartbeat | Fx::Tetris | Fx::Snake | Fx::Highway => 1.0,
+        Fx::Fireworks | Fx::Heartbeat | Fx::Tetris | Fx::Snake | Fx::Highway | Fx::Invaders => 1.0,
         // (the bubbles: half a step a tenth)
         Fx::Aquarium => 2.0,
         Fx::Pong => 1.2,
         Fx::Bounce => 2.0,
         Fx::Spectrum => 1.0,
+    }
+}
+
+/// The moment an effect's tile pictures it at while it isn't chosen, in the tenths the effects
+/// count in: four seconds in, for most, and for Space Invaders the first shot climbing at
+/// the wave.
+pub fn still(fx: Fx) -> f64 {
+    match fx {
+        Fx::Invaders => 1.0,
+        _ => 40.0,
     }
 }
 
@@ -302,6 +317,7 @@ pub fn frame(fx: Fx, t: f64, word: &str, live: &Live) -> [[char; W]; H] {
         Fx::Tetris => played(&TETRIS, k, Tetris::new, Tetris::step).draw(&mut g),
         Fx::Snake => played(&SNAKE, k, Snake::new, Snake::step).draw(&mut g),
         Fx::Highway => highway(k, &mut g),
+        Fx::Invaders => played(&INVADERS, k, Invaders::new, Invaders::step).draw(&mut g),
         Fx::Spectrum => {
             for c in 0..W {
                 let lv = live.sound[c].max(0.0) as f64;
@@ -474,6 +490,7 @@ const ROUND: u64 = 600;
 thread_local! {
     static TETRIS: RefCell<Option<(u64, u64, Tetris)>> = const { RefCell::new(None) };
     static SNAKE: RefCell<Option<(u64, u64, Snake)>> = const { RefCell::new(None) };
+    static INVADERS: RefCell<Option<(u64, u64, Invaders)>> = const { RefCell::new(None) };
 }
 
 /// A game played to step `k`: carried on from where this thread last played it, when that is
@@ -730,6 +747,208 @@ impl Snake {
     }
 }
 
+/// Space Invaders on the screen: two rows of six invaders march from side to side together, a
+/// row down at each end and quicker the fewer are left, dropping a bomb now and then; the cannon
+/// on the bottom row goes to the nearest, fires one shot at a time and keeps out from under the
+/// bombs. A wave shot down, the next marches in; a wave that lands, or the cannon hit three
+/// times, and the game starts again. (Every place is a row and a column on the screen.)
+#[derive(Clone)]
+struct Invaders {
+    /// the invaders standing, two rows of six a column apart, and where the first one's place is
+    alive: [[bool; 6]; 2],
+    y: i32,
+    x: i32,
+    dir: i32,
+    /// steps until the invaders march again, and how often they have (they look one way, then
+    /// the other, at each march)
+    wait: u64,
+    marched: u64,
+    /// the cannon's shot, and the steps before it can fire again once its shot is gone
+    shot: Option<(i32, i32)>,
+    cool: u8,
+    bombs: Vec<(i32, i32)>,
+    /// an invader or the cannon hit, shown a step
+    boom: Option<(i32, i32)>,
+    cannon: i32,
+    hits: u8,
+    /// steps the cannon stays gone after a hit, the sky stays empty after a wave, and a lost
+    /// game stays on the screen
+    gone: u8,
+    rest: u8,
+    over: u8,
+    dice: Dice,
+}
+
+impl Invaders {
+    fn new(seed: u64) -> Invaders {
+        let mut g = Invaders { alive: [[true; 6]; 2], y: 0, x: 0, dir: 1, wait: 0, marched: 0, shot: None, cool: 0, bombs: Vec::new(), boom: None, cannon: 10, hits: 0, gone: 0, rest: 0, over: 0, dice: Dice::new(seed) };
+        g.wave();
+        g
+    }
+
+    /// A new wave across the top, starting somewhere along it, marching the longer way first.
+    fn wave(&mut self) {
+        let x = self.dice.below(9) as i32;
+        (self.alive, self.y, self.x, self.dir, self.wait) = ([[true; 6]; 2], 0, x, if x > 4 { -1 } else { 1 }, 0);
+    }
+
+    /// Where each invader standing is.
+    fn standing(&self) -> impl Iterator<Item = (i32, i32)> + '_ {
+        (0..2).flat_map(move |r| (0..6).filter(move |&i| self.alive[r][i]).map(move |i| (self.y + r as i32, self.x + 2 * i as i32)))
+    }
+
+    /// Where each invader will be when a shot fired now reaches its row (none on the cannon's
+    /// row): the shot climbs a row a step and the invaders march every so often, so the cannon
+    /// fires ahead of them (counting no turn at the end; there a shot may miss).
+    fn ahead(&self) -> Vec<(i32, i32)> {
+        let every = (self.standing().count() as i64 / 4).max(1) + 1;
+        let marches = |d: i64| if (self.wait as i64) >= d { 0 } else { 1 + (d - 1 - self.wait as i64) / every };
+        self.standing().filter(|(r, _)| *r < 3).map(|(r, c)| (r, c + self.dir * marches(2 - r as i64) as i32)).collect()
+    }
+
+    /// The invader at `at` shot down, if one stands there.
+    fn hit(&mut self, at: (i32, i32)) -> bool {
+        let (r, d) = (at.0 - self.y, at.1 - self.x);
+        if !(0..2).contains(&r) || !(0..12).contains(&d) || d % 2 != 0 || !self.alive[r as usize][(d / 2) as usize] {
+            return false;
+        }
+        self.alive[r as usize][(d / 2) as usize] = false;
+        self.boom = Some(at);
+        true
+    }
+
+    /// The game lost: the cannon blown up, and the screen as it is for a few steps.
+    fn lose(&mut self) {
+        (self.boom, self.gone, self.over, self.shot) = (Some((3, self.cannon)), u8::MAX, 4, None);
+        self.bombs.clear();
+    }
+
+    /// A step. False once a lost game has had its few steps on the screen: the invaders landed,
+    /// or the cannon was hit three times.
+    fn step(&mut self) -> bool {
+        if self.over > 0 {
+            self.over -= 1;
+            self.boom = None;
+            return self.over > 0;
+        }
+        self.boom = None;
+        if self.rest > 0 {
+            self.rest -= 1;
+            if self.rest == 0 {
+                self.wave();
+            }
+            return true;
+        }
+        // the cannon: out of the way of a bomb about to land, else a column toward where the
+        // nearest invader of the front row will be (the row that would land first)
+        let ahead = self.ahead();
+        if self.gone > 0 {
+            self.gone -= 1;
+        } else {
+            let front = ahead.iter().map(|(r, _)| *r).max().unwrap_or(0);
+            let near = ahead.iter().filter(|(r, c)| *r == front && (0..W as i32).contains(c)).map(|(_, c)| *c).min_by_key(|c| (c - self.cannon).abs());
+            let want = near.map_or(0, |c| (c - self.cannon).signum());
+            let safe = |c: i32| (0..W as i32).contains(&c) && !self.bombs.contains(&(2, c));
+            if let Some(d) = [want, 0, -want, 1, -1].into_iter().find(|d| safe(self.cannon + d)) {
+                self.cannon += d;
+            }
+        }
+        // its shot a row up, into an invader or off the top; a new one a step or three after
+        // it's gone, with an invader coming over the cannon
+        if let Some((r, c)) = self.shot.take() {
+            if r > 0 && !self.hit((r - 1, c)) {
+                self.shot = Some((r - 1, c));
+            } else {
+                self.cool = 1 + self.dice.below(3) as u8;
+            }
+        } else if self.cool > 0 {
+            self.cool -= 1;
+        } else if self.gone == 0 && ahead.iter().any(|(_, c)| *c == self.cannon) {
+            if self.hit((2, self.cannon)) {
+                self.cool = 1 + self.dice.below(3) as u8;
+            } else {
+                self.shot = Some((2, self.cannon));
+            }
+        }
+        // the bombs a row down, one landing on the cannon
+        let mut falling = Vec::new();
+        for (r, c) in std::mem::take(&mut self.bombs) {
+            if r + 1 == 3 && c == self.cannon && self.gone == 0 {
+                self.boom = Some((3, c));
+                (self.hits, self.gone) = (self.hits + 1, 3);
+                if self.hits >= 3 {
+                    self.lose();
+                    return true;
+                }
+            } else if r + 1 <= 3 {
+                falling.push((r + 1, c));
+            }
+        }
+        self.bombs = falling;
+        // the invaders march: along, or a row down at the end (landing, the game is lost);
+        // with twelve standing, every fourth step, and every other step with seven or fewer
+        if self.wait > 0 {
+            self.wait -= 1;
+        } else if self.standing().next().is_some() {
+            let cols: Vec<i32> = self.standing().map(|(_, c)| c).collect();
+            let (lo, hi) = (cols.iter().min().copied().unwrap_or(0), cols.iter().max().copied().unwrap_or(0));
+            if (self.dir > 0 && hi + 1 >= W as i32) || (self.dir < 0 && lo == 0) {
+                (self.dir, self.y) = (-self.dir, self.y + 1);
+                if self.standing().any(|(r, _)| r >= 3) {
+                    self.lose();
+                    return true;
+                }
+            } else {
+                self.x += self.dir;
+            }
+            self.marched += 1;
+            self.wait = (cols.len() as u64 / 4).max(1);
+            if let Some(s) = self.shot {
+                if self.hit(s) {
+                    (self.shot, self.cool) = (None, 1 + self.dice.below(3) as u8);
+                }
+            }
+        }
+        // now and then a bomb from the lowest invader of a column, two at most at a time (none
+        // from right over the cannon's row, too near to get out of the way)
+        if self.bombs.len() < 2 && self.dice.below(4) == 0 {
+            let lows: Vec<(i32, i32)> = (0..6).filter_map(|i| (0..2).rev().find(|&r| self.alive[r][i]).map(|r| (self.y + r as i32, self.x + 2 * i as i32))).filter(|(r, _)| *r < 2).collect();
+            if !lows.is_empty() {
+                let (r, c) = lows[self.dice.below(lows.len() as u64) as usize];
+                self.bombs.push((r + 1, c));
+            }
+        }
+        // the wave shot down: the sky empty a few steps, then the next
+        if self.standing().next().is_none() {
+            (self.rest, self.shot) = (4, None);
+            self.bombs.clear();
+        }
+        true
+    }
+
+    fn draw(&self, g: &mut [[char; W]; H]) {
+        // (the back row and the front, each in its two looks)
+        const LOOKS: [[char; 2]; 2] = [['Y', 'T'], ['M', 'W']];
+        for (r, i) in (0..2).flat_map(|r| (0..6).map(move |i| (r, i))) {
+            if self.alive[r][i] {
+                put(g, self.y + r as i32, self.x + 2 * i as i32, LOOKS[r][(self.marched % 2) as usize]);
+            }
+        }
+        for &(r, c) in &self.bombs {
+            put(g, r, c, '!');
+        }
+        if let Some((r, c)) = self.shot {
+            put(g, r, c, '|');
+        }
+        if self.gone == 0 {
+            put(g, 3, self.cannon, 'A');
+        }
+        if let Some((r, c)) = self.boom {
+            put(g, r, c, '*');
+        }
+    }
+}
+
 // ------------------------------------------------------------------ the heartbeat
 
 /// The heartbeat as the tiles show it standing still, and as it starts: two beats.
@@ -917,6 +1136,41 @@ mod tests {
     }
 
     #[test]
+    fn the_invaders_march_quicker_as_they_fall_and_waves_are_shot_down() {
+        let mut g = Invaders::new(7);
+        let (mut waves, mut games, mut marches) = (0, 0, 0);
+        for _ in 0..3000 {
+            // (a shot is never inside an invader)
+            assert!(g.shot.is_none_or(|s| !g.standing().any(|at| at == s)));
+            let (before, marched) = (g.standing().count(), g.marched);
+            if !g.step() {
+                games += 1;
+                g = Invaders::new(games);
+                continue;
+            }
+            // after each march, a wait as long as a quarter of the invaders standing then (one
+            // may have been shot down in the step, before the march or after it)
+            if g.marched > marched {
+                marches += 1;
+                let after = g.standing().count();
+                assert!((after..=before).any(|n| g.wait == (n as u64 / 4).max(1)), "{before} to {after} standing, wait {}", g.wait);
+            }
+            if before > 0 && g.standing().count() == 0 {
+                waves += 1;
+            }
+        }
+        // (the cannon wins most waves; now and then the invaders land)
+        assert!(waves >= 30 && games * 5 <= waves, "{waves} waves shot down and {games} games lost in 3000 steps");
+        assert!(marches > 300, "{marches} marches");
+        // the screen: the cannon on the bottom row, and both rows of invaders at the start;
+        // the tile's picture, the first shot climbing at the whole wave
+        let r = rows(frame(Fx::Invaders, 0.0, "", &Live::quiet()));
+        assert!(r[3].contains('A') && r[0].contains('Y') && r[1].contains('M'), "{r:?}");
+        let r = rows(frame(Fx::Invaders, still(Fx::Invaders), "", &Live::quiet()));
+        assert!(r[0].matches('T').count() == 6 && r[1].matches('W').count() == 6 && r[2].contains('|') && r[3].contains('A'), "{r:?}");
+    }
+
+    #[test]
     fn the_car_always_goes_round_the_traffic() {
         for k in 0..5000 {
             let lane = car_lane(k);
@@ -941,3 +1195,4 @@ mod tests {
         assert_eq!((beats(0.0), beats(100.0)), (10, 20));
     }
 }
+
