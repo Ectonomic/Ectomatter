@@ -3772,8 +3772,9 @@ impl Front {
         let avail = crate::lcd_page::available(&self.readings, self.weather.report().is_some());
         let light = self.layouts_light();
         let t = self.edit_t();
+        let (onboard, profiles) = (self.onboard_ready(), crate::lcd_page::PROFILES.map(|n| self.page.profile_name(n)));
         let Some(l) = &mut self.layouts else { return Vec::new() };
-        let mut cx = crate::layout_page::Cx { screens: &mut self.screens, editor: &mut self.editor, readings: &self.readings, avail: &avail, light, t };
+        let mut cx = crate::layout_page::Cx { screens: &mut self.screens, editor: &mut self.editor, readings: &self.readings, avail: &avail, light, t, onboard, profiles };
         let out = l.act(&mut cx);
         l.show(&cx);
         if out.closed {
@@ -3805,8 +3806,9 @@ impl Front {
         let avail = crate::lcd_page::available(&self.readings, self.weather.report().is_some());
         let light = self.layouts_light();
         let t = self.edit_t();
+        let (onboard, profiles) = (self.onboard_ready(), crate::lcd_page::PROFILES.map(|n| self.page.profile_name(n)));
         let Some(l) = &mut self.layouts else { return };
-        let cx = crate::layout_page::Cx { screens: &mut self.screens, editor: &mut self.editor, readings: &self.readings, avail: &avail, light, t };
+        let cx = crate::layout_page::Cx { screens: &mut self.screens, editor: &mut self.editor, readings: &self.readings, avail: &avail, light, t, onboard, profiles };
         l.show(&cx);
     }
 

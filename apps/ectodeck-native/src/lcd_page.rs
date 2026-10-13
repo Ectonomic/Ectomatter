@@ -540,6 +540,12 @@ impl PartialEq for Entry {
     }
 }
 
+/// A name as typed, kept: trimmed, at most 40 characters, and no space left at the end
+/// where the 40 cut it.
+fn named(typed: &str) -> String {
+    typed.trim().chars().take(40).collect::<String>().trim_end().to_string()
+}
+
 /// Names in a sentence, as the macros' profiles are: "A", "A and B", "A, B and C".
 fn and_list(names: &[String]) -> String {
     match names {
@@ -831,7 +837,7 @@ impl Screens {
 
     /// Layout `i` renamed: trimmed, at most 40 characters, never to nothing.
     pub fn rename_page(&mut self, i: usize, name: &str) {
-        let name: String = name.trim().chars().take(40).collect();
+        let name = named(name);
         if let (false, Some(p)) = (name.is_empty(), self.library.get_mut(i)) {
             p.name = name;
         }
@@ -881,7 +887,7 @@ impl Screens {
     }
 
     pub fn rename(&mut self, id: &str, name: &str) {
-        let name: String = name.trim().chars().take(40).collect();
+        let name = named(name);
         if let (false, Some(l)) = (name.is_empty(), self.playlists.iter_mut().find(|l| l.id == id)) {
             l.name = name;
         }
@@ -1482,6 +1488,10 @@ mod tests {
         assert_eq!(s.library[c].name, "My stats");
         s.rename_page(c, "   ");
         assert_eq!(s.library[c].name, "My stats");
+        // cut at 40 characters, a name ends on its last word, not a space
+        s.rename_page(c, "Stats for the long raid nights with the guild");
+        assert_eq!(s.library[c].name, "Stats for the long raid nights with the");
+        s.rename_page(c, "My stats");
         // Stats, deleted, comes off the playlist; a profile keeping Clock on the keyboard, once Clock goes, keeps the screen off
         s.add_turn(1, 0, "stats");
         s.keep_onboard(2, Some("clock"));

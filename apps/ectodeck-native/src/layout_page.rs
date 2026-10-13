@@ -81,6 +81,10 @@ pub struct Cx<'a> {
     pub light: [u8; 4],
     /// seconds since the layout open came up, which its scrolling words are timed from
     pub t: f64,
+    /// for what deleting a layout takes with it: whether the keyboard keeps a layout by
+    /// itself (its onboard layouts), and the profiles' names
+    pub onboard: bool,
+    pub profiles: [String; 5],
 }
 
 /// What came of the window's asks.
@@ -695,7 +699,8 @@ impl LayoutPage {
         };
         let ed = ed.unwrap();
         self.ui.set_name(page.name.as_str().into());
-        self.ui.set_confirm_text(format!("Delete {}? {} also comes off every playlist.", page.name, page.name).into());
+        let says = cx.screens.delete_says(ed.page, cx.onboard, |n| cx.profiles[n as usize - 1].clone());
+        self.ui.set_confirm_text(format!("Delete {}? {says}", page.name).into());
         self.ui.set_grid(ed.grid);
         self.ui.set_own_light(page.light.is_some());
         let own = page.light.unwrap_or(default);

@@ -6905,11 +6905,13 @@ export component LayoutWindow inherits Window {
             height: 56px;
             spacing: 10px;
             alignment: start;
+            // (a long answer wraps, the buttons kept beside it)
             Text {
                 text: root.confirm-text;
                 font-size: 13px;
                 color: Ink.dim;
                 vertical-alignment: center;
+                wrap: word-wrap;
             }
             VerticalLayout {
                 alignment: center;
