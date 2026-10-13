@@ -68,17 +68,19 @@ impl Fx {
     }
 }
 
-/// The shortest time a cell of the keyboard's screen can hold a character and still show it
-/// clearly: its liquid crystal is slow, so a character changed again sooner shows faded or
-/// not at all (Grant, watching the effects on the keyboard, 2026-10-13: Bounce, a cell every
-/// 0.2 s, was at the edge, and Pong's ball, a cell every 0.12 s, barely showed). An effect
-/// steps no more often than this, at its fastest.
-pub const STEP: f64 = 0.4;
+/// The Speed slider's ends, in seconds a step: Slow, two seconds; Fast, a twentieth. The
+/// keyboard's screen is slow (its liquid crystal: a cell changed again within about a
+/// quarter second shows faded or not at all, as Grant saw on 2026-10-13, Bounce at a cell
+/// every 0.2 s at the edge and Pong's ball every 0.12 s barely showing), and Fast reaches well
+/// past that so the limit can be found on the keyboard itself; Fast comes down to the limit
+/// once it is.
+pub const SLOWEST: f64 = 2.0;
+pub const FASTEST: f64 = 0.05;
 
-/// How long an effect holds each step at `speed`, 0 slow to 100 fast: [STEP] at the
-/// fastest, three times that at the slowest.
+/// How long an effect holds each step at `speed`, 0 slow to 100 fast: between the two ends
+/// by ratio, so each notch of the slider changes it by the same share.
 pub fn period(speed: u8) -> f64 {
-    STEP * 3f64.powf((100 - speed.min(100)) as f64 / 100.0)
+    SLOWEST * (FASTEST / SLOWEST).powf(speed.min(100) as f64 / 100.0)
 }
 
 /// How far an effect's own clock (the mock's tenths of a second) goes in one step: as far as
@@ -372,7 +374,7 @@ mod tests {
     #[test]
     fn no_cell_changes_faster_than_the_screen_shows() {
         // every effect at its fastest, looked at every hundredth of a second for half a
-        // minute: each cell holds what it shows at least a step
+        // minute: each cell holds what it shows at least a step, however short a step is
         let quiet = [0.0; W];
         for fx in FXS.into_iter().filter(|f| *f != Fx::Spectrum) {
             let mut last: Option<[[char; W]; H]> = None;
@@ -386,7 +388,7 @@ mod tests {
                         for c in 0..W {
                             if f[r][c] != l[r][c] {
                                 // (looked at every hundredth, a change is seen up to a hundredth late)
-                                assert!(secs - since[r][c] >= STEP - 0.0101, "{fx:?}: cell {r},{c} changed {:.2} s after its last change", secs - since[r][c]);
+                                assert!(secs - since[r][c] >= period(100) - 0.0101, "{fx:?}: cell {r},{c} changed {:.2} s after its last change", secs - since[r][c]);
                                 since[r][c] = secs;
                                 changes += 1;
                             }
@@ -397,7 +399,8 @@ mod tests {
             }
             assert!(changes > 0, "{fx:?} never moved");
         }
-        // the slowest takes three times as long a step
-        assert!((period(100) - STEP).abs() < 1e-9 && (period(0) - 3.0 * STEP).abs() < 1e-9);
+        // the slider's ends, and its middle between them by ratio
+        assert!((period(100) - FASTEST).abs() < 1e-9 && (period(0) - SLOWEST).abs() < 1e-9);
+        assert!((period(50) - (FASTEST * SLOWEST).sqrt()).abs() < 1e-9);
     }
 }

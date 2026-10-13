@@ -41,7 +41,7 @@ pub fn bands() -> [f32; 20] {
 
 /// What a Spectrum stepping every `period` seconds shows: the loudest each band was during
 /// the last step, changed only once a step, as the screen can show (see
-/// [crate::lcd_fx::STEP]).
+/// [crate::lcd_fx::period]).
 pub fn held(period: f64) -> [f32; 20] {
     static HELD: OnceLock<Mutex<(Option<Instant>, [f32; 20], [f32; 20])>> = OnceLock::new();
     let now = bands();

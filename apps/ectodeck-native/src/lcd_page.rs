@@ -1210,11 +1210,13 @@ pub fn moving(page: &Page, r: &Readings) -> bool {
     pace(page, r).is_some()
 }
 
-/// How often the page's picture changes between readings, in seconds: an effect's tenth of
-/// a second, a quarter for words scrolling a cell at a time; None while it holds still.
+/// How often the page's picture changes between readings, in seconds: an effect's step (a
+/// tenth of a second at most, its shortest step if shorter), a quarter for words scrolling a
+/// cell at a time; None while it holds still.
 pub fn pace(page: &Page, r: &Readings) -> Option<f64> {
-    if page.pieces.iter().any(|p| matches!(p.kind, Kind::Effect { .. })) {
-        return Some(0.1);
+    let steps = page.pieces.iter().filter_map(|p| if let Kind::Effect { speed, .. } = p.kind { Some(crate::lcd_fx::period(speed)) } else { None });
+    if let Some(shortest) = steps.reduce(f64::min) {
+        return Some(shortest.min(0.1));
     }
     page.pieces
         .iter()

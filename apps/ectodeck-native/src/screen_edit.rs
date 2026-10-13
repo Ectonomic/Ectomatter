@@ -141,9 +141,9 @@ impl Grid {
         self.done(top + 34.0);
     }
     /// a slider, as the Lighting tab's speed is, filled to `frac`, the words for its two
-    /// ends beside it
-    fn slider(&mut self, label: &str, c: Ctl, frac: f32, ends: (&str, &str)) {
-        let top = self.head(label, None);
+    /// ends beside it, and what it is set to in a small well at its name's right
+    fn slider(&mut self, label: &str, c: Ctl, frac: f32, ends: (&str, &str), value: Option<&str>) {
+        let top = self.head(label, value);
         let (x, w, y) = (self.x(), self.col_w(), self.y + top);
         let (lw, rw) = (crate::text::width(400, 11.0, ends.0).ceil(), crate::text::width(400, 11.0, ends.1).ceil());
         self.cells.push(text_cell(style::END_L, x, y + 7.0, lw, 20.0, ends.0));
@@ -264,7 +264,8 @@ pub fn block_box(page: &Page, chosen: Option<usize>, r: &Readings, avail: &[Sour
             if *fx == crate::lcd_page::Fx::Bounce {
                 g.field("Word", Ctl::ScrText, word);
             }
-            g.slider("Speed", Ctl::ScrSpeed, *speed as f32 / 100.0, ("Slow", "Fast"));
+            // (what a step takes, to find on the keyboard the fastest its screen shows)
+            g.slider("Speed", Ctl::ScrSpeed, *speed as f32 / 100.0, ("Slow", "Fast"), Some(&format!("{:.2} s a step", crate::lcd_fx::period(*speed))));
             g.note(None, UNDER);
         }
         Kind::Bar(src) => {
