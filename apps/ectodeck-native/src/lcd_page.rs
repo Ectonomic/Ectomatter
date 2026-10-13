@@ -209,6 +209,96 @@ pub enum Kind {
     Clock(bool),
 }
 
+/// How a Data block showing the date writes it: written out, from the weekday alone to the
+/// whole date, or set in numbers, US or day first. Short (Tue Oct 13) is how the date read
+/// before there were formats, so a new date block starts with it and the layouts made
+/// before don't change.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DateFormat {
+    /// Tue Oct 13
+    #[default]
+    Short,
+    /// Tuesday, October 13
+    Long,
+    /// October 13, 2026
+    Full,
+    /// Oct 13
+    MonthDay,
+    /// 13 Oct 2026
+    DayMonthYear,
+    /// Tuesday
+    Weekday,
+    /// 10/13/2026
+    Numbers,
+    /// 10/13
+    NumbersShort,
+    /// 13/10/2026
+    DayFirst,
+    /// 2026-10-13
+    Iso,
+}
+
+/// The date's formats as its menu lists them: written out, then in numbers.
+pub const DATE_FORMATS: [DateFormat; 10] = [
+    DateFormat::Short,
+    DateFormat::Long,
+    DateFormat::Full,
+    DateFormat::MonthDay,
+    DateFormat::DayMonthYear,
+    DateFormat::Weekday,
+    DateFormat::Numbers,
+    DateFormat::NumbersShort,
+    DateFormat::DayFirst,
+    DateFormat::Iso,
+];
+
+impl DateFormat {
+    pub fn key(self) -> &'static str {
+        match self {
+            DateFormat::Short => "short",
+            DateFormat::Long => "long",
+            DateFormat::Full => "full",
+            DateFormat::MonthDay => "month-day",
+            DateFormat::DayMonthYear => "day-month-year",
+            DateFormat::Weekday => "weekday",
+            DateFormat::Numbers => "numbers",
+            DateFormat::NumbersShort => "numbers-short",
+            DateFormat::DayFirst => "day-first",
+            DateFormat::Iso => "iso",
+        }
+    }
+
+    pub fn from_key(k: &str) -> Option<DateFormat> {
+        DATE_FORMATS.into_iter().find(|f| f.key() == k)
+    }
+
+    /// Whether it is set in numbers rather than written out.
+    pub fn in_numbers(self) -> bool {
+        matches!(self, DateFormat::Numbers | DateFormat::NumbersShort | DateFormat::DayFirst | DateFormat::Iso)
+    }
+
+    /// The date at `m`, written this way.
+    pub fn write(self, m: &Moment) -> String {
+        const DAYS: [&str; 7] = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+        const MONTHS: [&str; 12] = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+        let (weekday, month) = (DAYS[m.weekday as usize % 7], MONTHS[m.month as usize % 12]);
+        let short = |s: &str| s.chars().take(3).collect::<String>();
+        let (d, n, y) = (m.day, m.month % 12 + 1, m.year);
+        match self {
+            DateFormat::Short => format!("{} {} {d}", short(weekday), short(month)),
+            DateFormat::Long => format!("{weekday}, {month} {d}"),
+            DateFormat::Full => format!("{month} {d}, {y}"),
+            DateFormat::MonthDay => format!("{} {d}", short(month)),
+            DateFormat::DayMonthYear => format!("{d} {} {y}", short(month)),
+            DateFormat::Weekday => weekday.to_string(),
+            DateFormat::Numbers => format!("{n}/{d}/{y}"),
+            DateFormat::NumbersShort => format!("{n}/{d}"),
+            DateFormat::DayFirst => format!("{d}/{n}/{y}"),
+            DateFormat::Iso => format!("{y}-{n:02}-{d:02}"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Piece {
     pub kind: Kind,
@@ -221,12 +311,14 @@ pub struct Piece {
     pub center: bool,
     /// the spaces kept after the piece before it, when that piece runs long
     pub gap: u8,
-    /// how many rows it takes, from `row` down: more than one only for words (see
-    /// [is_words]), which carry on to the next row where a row ends
+    /// how many rows it takes, from `row` down: words and readings carry on to the next
+    /// row where a row ends, and a bar is drawn thicker (see [block_rows])
     pub height: u8,
     /// words that don't fit even in all its rows: scrolled through it (left on one row,
     /// up a row at a time on more), or else cut off at its end
     pub scroll: bool,
+    /// how a block showing the date writes it
+    pub date_format: DateFormat,
 }
 
 /// How a page comes onto the screen after the one before it: a column of #
@@ -287,16 +379,16 @@ pub struct Page {
 }
 
 fn words(row: u8, col: u8, t: &str) -> Piece {
-    Piece { kind: Kind::Text(t.into()), row, col, width: t.chars().count() as u8, right: false, center: false, gap: 1, height: 1, scroll: true }
+    Piece { kind: Kind::Text(t.into()), row, col, width: t.chars().count() as u8, right: false, center: false, gap: 1, height: 1, scroll: true, date_format: DateFormat::Short }
 }
 
 fn reading(row: u8, col: u8, width: u8, s: Source, gap: u8) -> Piece {
-    Piece { kind: Kind::Data(s, false), row, col, width, right: true, center: false, gap, height: 1, scroll: true }
+    Piece { kind: Kind::Data(s, false), row, col, width, right: true, center: false, gap, height: 1, scroll: true, date_format: DateFormat::Short }
 }
 
 /// A piece across the whole of a row, in its middle.
 fn middle(row: u8, kind: Kind) -> Piece {
-    Piece { kind, row, col: 0, width: COLS, right: false, center: true, gap: 1, height: 1, scroll: true }
+    Piece { kind, row, col: 0, width: COLS, right: false, center: true, gap: 1, height: 1, scroll: true, date_format: DateFormat::Short }
 }
 
 impl Page {
@@ -452,6 +544,9 @@ impl Page {
                         v["type"] = json!("data");
                         v["source"] = json!(s.key());
                         v["fahrenheit"] = json!(f);
+                        if *s == Source::Date && p.date_format != DateFormat::Short {
+                            v["format"] = json!(p.date_format.key());
+                        }
                     }
                     Kind::Bar(s) => {
                         v["type"] = json!("bar");
@@ -489,8 +584,8 @@ impl Page {
                     _ => return None,
                 };
                 let row = b(&p["row"])?.min(ROWS - 1);
-                // (only words take more than one row, and never past the screen's foot)
-                let height = if is_words(&kind) { b(&p["height"]).unwrap_or(1).clamp(1, ROWS - row) } else { 1 };
+                // (never past the screen's foot)
+                let height = b(&p["height"]).unwrap_or(1).clamp(1, ROWS - row);
                 Some(Piece {
                     kind,
                     row,
@@ -501,6 +596,7 @@ impl Page {
                     gap: b(&p["gap"]).unwrap_or(1).min(1),
                     height,
                     scroll: p["scroll"].as_bool().unwrap_or(true),
+                    date_format: p["format"].as_str().and_then(DateFormat::from_key).unwrap_or_default(),
                 })
             })
             .collect();
@@ -916,6 +1012,7 @@ pub struct Moment {
     pub day: u32,
     /// 0 is January
     pub month: u32,
+    pub year: i32,
 }
 
 impl Moment {
@@ -923,7 +1020,7 @@ impl Moment {
         let mut t: libc::tm = unsafe { std::mem::zeroed() };
         let secs = unsafe { libc::time(std::ptr::null_mut()) };
         unsafe { libc::localtime_r(&secs, &mut t) };
-        Moment { hour: t.tm_hour as u32, minute: t.tm_min as u32, weekday: t.tm_wday as u32, day: t.tm_mday as u32, month: t.tm_mon as u32 }
+        Moment { hour: t.tm_hour as u32, minute: t.tm_min as u32, weekday: t.tm_wday as u32, day: t.tm_mday as u32, month: t.tm_mon as u32, year: t.tm_year + 1900 }
     }
 }
 
@@ -953,8 +1050,8 @@ fn fahrenheit(c: f64) -> f64 {
     c * 9.0 / 5.0 + 32.0
 }
 
-/// A reading as the piece shows it, or None when it can't be had.
-fn text_of(s: Source, f: bool, r: &Readings) -> Option<String> {
+/// A reading as the piece shows it (the date as `date` writes it), or None when it can't be had.
+fn text_of(s: Source, f: bool, date: DateFormat, r: &Readings) -> Option<String> {
     let deg = |c: f64| if f { fahrenheit(c) } else { c };
     Some(match s {
         Source::CpuTemp => format!("{:>2.0}°", deg(r.cpu_temp?)),
@@ -974,12 +1071,7 @@ fn text_of(s: Source, f: bool, r: &Readings) -> Option<String> {
             let g = r.gpu?;
             format!("{:.1} / {:.1} GB", g.3, g.4)
         }
-        Source::Date => {
-            let m = r.now?;
-            const DAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-            const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-            format!("{} {} {}", DAYS[m.weekday as usize % 7], MONTHS[m.month as usize % 12], m.day)
-        }
+        Source::Date => date.write(r.now.as_ref()?),
         Source::Profile => ectotype_core::lcd::lcd_text(r.profile.as_deref()?),
         Source::ProfileNumber => r.profile_number?.to_string(),
         Source::GameMode => r.mode.clone()?,
@@ -1010,14 +1102,21 @@ pub fn bar(share: f64, width: u8) -> String {
     format!("[{}{}]", "#".repeat(fill.min(inner)), ".".repeat(inner - fill.min(inner)))
 }
 
-/// The fewest cells a piece shows its whole self in now: its words or its reading, as
-/// long as they are (a reading that can't be had, one), and a bar three, its ends and a
-/// cell to fill.
+/// The fewest cells a piece shows its whole self in now, at its own height (see [least_at]).
 pub fn least(p: &Piece, r: &Readings) -> u8 {
+    least_at(p, r, p.height)
+}
+
+/// The fewest cells a piece can be, `height` rows tall: words any width (they carry on,
+/// scroll or are cut off); a bar three, its ends and a cell to fill; a reading on one row
+/// as long as it is (a reading that can't be had, one), and on more rows any width, as
+/// small as its maker likes (it carries on to the next row, and what still doesn't fit
+/// stops after the last).
+pub fn least_at(p: &Piece, r: &Readings, height: u8) -> u8 {
     match &p.kind {
-        // (words fit any width: they carry on, scroll or are cut off)
         k if is_words(k) => 1,
         Kind::Bar(_) => 3,
+        _ if height > 1 => 1,
         _ => show(p, r).map_or(1, |s| s.chars().count().clamp(1, COLS as usize) as u8),
     }
 }
@@ -1044,7 +1143,7 @@ fn show(p: &Piece, r: &Readings) -> Result<String, &'static str> {
     let fail = |s: Source| s.reads_from().unwrap_or("");
     match &p.kind {
         Kind::Text(t) => Ok(ectotype_core::lcd::lcd_text(t)),
-        Kind::Data(s, f) => text_of(*s, *f, r).ok_or(fail(*s)),
+        Kind::Data(s, f) => text_of(*s, *f, p.date_format, r).ok_or(fail(*s)),
         Kind::Bar(s) => share_of(*s, r).map(|v| bar(v, p.width)).ok_or(fail(*s)),
         Kind::Clock(twelve) => {
             let m = r.now.ok_or("")?;
@@ -1169,6 +1268,23 @@ fn word_rows(p: &Piece, s: &str, t: f64) -> Vec<String> {
     (0..h).map(|k| align(shown.get(k).map_or("", |l| l.as_str()), w, p.center, p.right)).collect()
 }
 
+/// A taller piece in its own cells, `t` seconds in: a row of exactly its width for each of
+/// its rows. Words as [word_rows] sets them; a bar the same bar on every row, drawn
+/// thicker; a reading carried on to the next row where a row ends, at a space when it has
+/// one and otherwise at the block's edge, and stopped after the last row (a reading never
+/// scrolls), each row aligned as the block is.
+fn block_rows(p: &Piece, s: &str, t: f64) -> Vec<String> {
+    let (w, h) = (p.width as usize, p.height.max(1) as usize);
+    match &p.kind {
+        k if is_words(k) => word_rows(p, s, t),
+        Kind::Bar(_) => vec![align(s, w, p.center, p.right); h],
+        _ => {
+            let lines = wrap(s.trim(), w);
+            (0..h).map(|k| align(lines.get(k).map_or("", |l| l.as_str()), w, p.center, p.right)).collect()
+        }
+    }
+}
+
 /// Whether the keyboard can draw a piece by itself, with no program on the computer to
 /// send it (with Ectodeck's firmware build 5): words, the time and the date, and what the
 /// keyboard knows about itself. The computer's readings, and bars of them, it can't.
@@ -1268,9 +1384,9 @@ pub fn spans(page: &Page, r: &Readings) -> Vec<(u8, usize, usize)> {
 fn lay_out(page: &Page, r: &Readings, t: f64) -> (Vec<String>, Vec<(u8, usize, usize)>) {
     let mut said: Vec<&'static str> = Vec::new();
     let mut spans: Vec<(u8, usize, usize)> = page.pieces.iter().map(|p| (p.row, p.col as usize, p.width as usize)).collect();
-    let tall = |p: &Piece| is_words(&p.kind) && p.height > 1;
+    let tall = |p: &Piece| p.height > 1;
     // the taller pieces' own rows, or what they read from when they can't be read
-    let walls: Vec<(&Piece, Result<Vec<String>, &'static str>)> = page.pieces.iter().filter(|p| tall(p)).map(|p| (p, show(p, r).map(|s| word_rows(p, &s, t)))).collect();
+    let walls: Vec<(&Piece, Result<Vec<String>, &'static str>)> = page.pieces.iter().filter(|p| tall(p)).map(|p| (p, show(p, r).map(|s| block_rows(p, &s, t)))).collect();
     let rows = (0..ROWS)
         .map(|row| {
             let mut pieces: Vec<(usize, &Piece)> = page.pieces.iter().enumerate().filter(|(_, p)| p.row == row && !tall(p)).collect();
@@ -1446,10 +1562,12 @@ mod tests {
         q.pieces[1].scroll = false;
         let back = Page::from_json(&q.to_json()).unwrap();
         assert_eq!((back.pieces[1].height, back.pieces[1].scroll), (2, false));
-        // a reading is never more than one row
+        // a reading takes more rows too, never past the screen's foot
         let mut v = q.to_json();
         v["pieces"][0]["height"] = json!(3);
-        assert_eq!(Page::from_json(&v).unwrap().pieces[0].height, 1);
+        assert_eq!(Page::from_json(&v).unwrap().pieces[0].height, 3);
+        v["pieces"][0]["row"] = json!(2);
+        assert_eq!(Page::from_json(&v).unwrap().pieces[0].height, 2);
     }
 
     #[test]
@@ -1467,13 +1585,13 @@ mod tests {
         // the weather, and a bar: named as what they are
         assert_eq!(Gaps::of(&Page::weather()).line().unwrap(), "Weather readings need Ectodeck, so the keyboard leaves them blank.");
         let mut barred = Page::blank();
-        barred.pieces.push(Piece { kind: Kind::Bar(Source::CpuLoad), row: 0, col: 0, width: 10, right: false, center: false, gap: 1, height: 1, scroll: true });
+        barred.pieces.push(Piece { kind: Kind::Bar(Source::CpuLoad), row: 0, col: 0, width: 10, right: false, center: false, gap: 1, height: 1, scroll: true, date_format: DateFormat::Short });
         assert_eq!(Gaps::of(&barred).line().unwrap(), "Bars need Ectodeck, so the keyboard leaves them blank.");
         assert_eq!(Gaps::of(&barred).tag(), "Bars stay blank");
         // what the keyboard knows of itself: until it can say them, its mode and rollover as it starts up
         let mut own = Page::blank();
-        own.pieces.push(Piece { kind: Kind::Data(Source::GameMode, false), row: 0, col: 0, width: 9, right: false, center: false, gap: 1, height: 1, scroll: true });
-        own.pieces.push(Piece { kind: Kind::Data(Source::KeyRollover, false), row: 1, col: 0, width: 5, right: false, center: false, gap: 1, height: 1, scroll: true });
+        own.pieces.push(Piece { kind: Kind::Data(Source::GameMode, false), row: 0, col: 0, width: 9, right: false, center: false, gap: 1, height: 1, scroll: true, date_format: DateFormat::Short });
+        own.pieces.push(Piece { kind: Kind::Data(Source::KeyRollover, false), row: 1, col: 0, width: 5, right: false, center: false, gap: 1, height: 1, scroll: true, date_format: DateFormat::Short });
         assert_eq!(render_onboard(&own, &r)[..2], ["PC MODE", "6 KEY"]);
     }
 
@@ -1510,6 +1628,55 @@ mod tests {
         // every layout deleted, the Library stays empty when read back
         while s.delete_page(0) {}
         assert!(Screens::from_json(&s.to_json()).library.is_empty());
+    }
+
+    #[test]
+    fn readings_and_bars_take_more_rows() {
+        let at = |h: u32, m: u32| Moment { hour: h, minute: m, weekday: 2, day: 13, month: 9, year: 2026 };
+        let r = Readings { cpu_ghz: Some(4.286), ram: Some((22.5, 60.2)), cpu_load: 60.0, now: Some(at(2, 36)), ..Readings::default() };
+        let piece = |kind: Kind, row: u8, col: u8, width: u8, height: u8| Piece { kind, row, col, width, right: true, center: false, gap: 1, height, scroll: true, date_format: DateFormat::Short };
+        // the CPU clock, which has no space, breaks at the block's edge; the memory at its space
+        let p = Page { pieces: vec![piece(Kind::Data(Source::CpuClock, false), 0, 4, 4, 2), piece(Kind::Data(Source::Memory, false), 2, 4, 7, 2)], ..Page::blank() };
+        assert_eq!(render(&p, &r), vec!["    4286", "     MHz", "     22.5 /", "    60.2 GB"]);
+        // the date written out and the 12-hour time, on two rows each, centered
+        let mut date = piece(Kind::Data(Source::Date, false), 1, 2, 10, 2);
+        date.date_format = DateFormat::Long;
+        let mut time = piece(Kind::Clock(true), 1, 14, 4, 2);
+        (date.center, time.center) = (true, true);
+        let p = Page { pieces: vec![date, time], ..Page::blank() };
+        assert_eq!(render(&p, &r), vec!["", "   Tuesday,   2:36", "  October 13   AM", ""]);
+        // a bar two rows tall is the same bar on each, drawn thicker
+        let mut bar = piece(Kind::Bar(Source::CpuLoad), 0, 0, 7, 2);
+        bar.right = false;
+        let p = Page { pieces: vec![bar], ..Page::blank() };
+        assert_eq!(render(&p, &r), vec!["[###..]", "[###..]", "", ""]);
+        // a reading that doesn't fit even in all its rows stops after the last of them
+        let p = Page { pieces: vec![piece(Kind::Data(Source::Memory, false), 0, 0, 4, 2)], ..Page::blank() };
+        assert_eq!(render(&p, &r), vec!["22.5", "   /", "", ""]);
+        // on one row, as narrow as its reading; on more, as narrow as its maker likes
+        let clock = piece(Kind::Data(Source::CpuClock, false), 0, 0, 4, 1);
+        assert_eq!((least_at(&clock, &r, 1), least_at(&clock, &r, 2)), (7, 1));
+        // kept as it was made
+        let mut m = Page { pieces: vec![piece(Kind::Data(Source::Memory, false), 1, 0, 7, 3), piece(Kind::Bar(Source::CpuLoad), 0, 8, 10, 2)], ..Page::blank() };
+        m.pieces[0].date_format = DateFormat::Iso;
+        let back = Page::from_json(&m.to_json()).unwrap();
+        assert_eq!((back.pieces[0].height, back.pieces[1].height), (3, 2));
+    }
+
+    #[test]
+    fn the_date_has_formats() {
+        let m = Moment { hour: 2, minute: 36, weekday: 2, day: 13, month: 9, year: 2026 };
+        let written: Vec<String> = DATE_FORMATS.iter().map(|f| f.write(&m)).collect();
+        assert_eq!(written, ["Tue Oct 13", "Tuesday, October 13", "October 13, 2026", "Oct 13", "13 Oct 2026", "Tuesday", "10/13/2026", "10/13", "13/10/2026", "2026-10-13"]);
+        assert_eq!(DateFormat::Iso.write(&Moment { day: 5, month: 0, ..m }), "2026-01-05");
+        // a date block made before there were formats reads as it did; a chosen one is kept
+        let mut p = Page { pieces: vec![Piece { kind: Kind::Data(Source::Date, false), row: 0, col: 0, width: 10, right: false, center: false, gap: 1, height: 1, scroll: true, date_format: DateFormat::Short }], ..Page::blank() };
+        assert!(p.to_json()["pieces"][0].get("format").is_none());
+        p.pieces[0].date_format = DateFormat::DayFirst;
+        assert_eq!(p.to_json()["pieces"][0]["format"], "day-first");
+        assert_eq!(Page::from_json(&p.to_json()).unwrap().pieces[0].date_format, DateFormat::DayFirst);
+        let r = Readings { now: Some(m), ..Readings::default() };
+        assert_eq!(render(&p, &r)[0], "13/10/2026");
     }
 
     #[test]
@@ -1585,7 +1752,7 @@ mod tests {
             cpu_ghz: Some(4.36875),
             ram: Some((25.1, 60.2)),
             gpu: Some((45, 12, 1837, 13.13, 31.84)),
-            now: Some(Moment { hour: 21, minute: 5, weekday: 5, day: 9, month: 9 }),
+            now: Some(Moment { hour: 21, minute: 5, weekday: 5, day: 9, month: 9, year: 2026 }),
             profile: Some("DEFAULT 1".into()),
             profile_number: Some(1),
             mode: None,
@@ -1649,12 +1816,12 @@ mod tests {
             secs: SECS.2,
             comes_in: Transition::Wipe,
             pieces: vec![
-                Piece { kind: Kind::Clock(false), row: 0, col: 0, width: 5, right: false, center: false, gap: 1, height: 1, scroll: true },
-                Piece { kind: Kind::Data(Source::Date, false), row: 0, col: 9, width: 11, right: true, center: false, gap: 1, height: 1, scroll: true },
-                Piece { kind: Kind::Bar(Source::CpuLoad), row: 1, col: 0, width: 12, right: false, center: false, gap: 1, height: 1, scroll: true },
-                Piece { kind: Kind::Data(Source::CpuTemp, true), row: 2, col: 0, width: 4, right: false, center: false, gap: 1, height: 1, scroll: true },
-                Piece { kind: Kind::Clock(true), row: 3, col: 0, width: 8, right: false, center: false, gap: 1, height: 1, scroll: true },
-                Piece { kind: Kind::Data(Source::Profile, false), row: 3, col: 10, width: 10, right: true, center: false, gap: 1, height: 1, scroll: true },
+                Piece { kind: Kind::Clock(false), row: 0, col: 0, width: 5, right: false, center: false, gap: 1, height: 1, scroll: true, date_format: DateFormat::Short },
+                Piece { kind: Kind::Data(Source::Date, false), row: 0, col: 9, width: 11, right: true, center: false, gap: 1, height: 1, scroll: true, date_format: DateFormat::Short },
+                Piece { kind: Kind::Bar(Source::CpuLoad), row: 1, col: 0, width: 12, right: false, center: false, gap: 1, height: 1, scroll: true, date_format: DateFormat::Short },
+                Piece { kind: Kind::Data(Source::CpuTemp, true), row: 2, col: 0, width: 4, right: false, center: false, gap: 1, height: 1, scroll: true, date_format: DateFormat::Short },
+                Piece { kind: Kind::Clock(true), row: 3, col: 0, width: 8, right: false, center: false, gap: 1, height: 1, scroll: true, date_format: DateFormat::Short },
+                Piece { kind: Kind::Data(Source::Profile, false), row: 3, col: 10, width: 10, right: true, center: false, gap: 1, height: 1, scroll: true, date_format: DateFormat::Short },
             ],
         };
         let rows = render(&p, &r);

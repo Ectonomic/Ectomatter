@@ -6361,10 +6361,10 @@ export struct LayoutRow {
 }
 
 // A block on the editor's screen: its first cell and its size in cells, whether
-// selected, whether an effect; whether it shows words, which can take more rows; the
-// fewest cells it shows its whole self in; and how far its corner can reach, as the
-// column after its last free cell for each height it can have from one row on (so the
-// corner stops at its neighbors, the screen's edges and its least).
+// selected, whether an effect; whether its corner can change its rows; and for each
+// height it can have from one row on, the nearest column its corner may pull it in to
+// (as narrow as it can be there) and how far its corner can reach (the column after its
+// last free cell), so the corner stops at its neighbors and the screen's edges.
 export struct EdBlock {
     row: int,
     col: int,
@@ -6373,7 +6373,7 @@ export struct EdBlock {
     on: bool,
     fx: bool,
     tall: bool,
-    least: int,
+    lows: [int],
     ends: [int],
 }
 
@@ -7222,10 +7222,10 @@ export component LayoutWindow inherits Window {
                         property <int> at-col: max(0, min(20 - b.width, b.col + dc));
                         property <int> at-row: max(0, min(4 - b.height, b.row + dr));
                         // (the corner: as tall as asked within the rows the block can have, then
-                        // as wide as that height's free cells let it, and no narrower than its
-                        // reading)
+                        // as wide as that height's free cells let it, and no narrower than the
+                        // block can be at that height)
                         property <int> s-h: max(1, min(b.ends.length, b.height + dh));
-                        property <int> s-end: max(b.col + max(1, b.least), min(b.ends[s-h - 1], b.col + b.width + dw));
+                        property <int> s-end: max(b.lows[s-h - 1], min(b.ends[s-h - 1], b.col + b.width + dw));
                         property <int> show-w: sizing ? s-end - b.col : b.width;
                         property <int> show-h: sizing ? s-h : b.height;
                         property <int> home: b.row * 10000 + b.col * 100 + b.width * 4 + b.height;

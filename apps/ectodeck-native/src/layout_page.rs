@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::front::{color, hsv2rgb, hue_bar, keep_recent, new_rows, recent_colors, rgb2hsv, sv_square, NewFrom, WindowAsk, PRESETS};
-use crate::lcd_page::{Page, Readings, Screens, Source, COLS};
+use crate::lcd_page::{DateFormat, Page, Readings, Screens, Source, COLS};
 use crate::lighting::{ctl, Ctl};
 use crate::screen_edit::{self, Editor, Shows};
 use crate::{Cell, EdBlock, LayoutRow, LayoutWindow, MenuRow};
@@ -57,11 +57,12 @@ pub enum Ask {
     PkDismiss,
 }
 
-/// The menu open: the layout's (Duplicate, Delete), what a block shows, or + New's (From
-/// scratch, or a copy of a layout: what each row makes).
+/// The menu open: the layout's (Duplicate, Delete), what a block shows, how a date block
+/// writes the date, or + New's (From scratch, or a copy of a layout: what each row makes).
 enum Menu {
     More,
     Shows(Vec<Option<Shows>>),
+    Formats(Vec<Option<DateFormat>>),
     New(Vec<Option<NewFrom>>),
 }
 
@@ -299,8 +300,9 @@ impl LayoutPage {
                     if let Some(ed) = cx.editor.as_ref() {
                         if let Some(p) = cx.screens.library.get_mut(ed.page) {
                             let i = i.max(0) as usize;
-                            let least = p.pieces.get(i).map_or(1, |q| crate::lcd_page::least(q, cx.readings));
-                            screen_edit::size_to(p, i, w, h, least);
+                            // (how narrow it can be at each height it can have)
+                            let q = p.pieces.get(i).cloned();
+                            screen_edit::size_to(p, i, w, h, |rows| q.as_ref().map_or(1, |q| crate::lcd_page::least_at(q, cx.readings, rows)));
                             out.edited = true;
                         }
                     }
@@ -378,6 +380,7 @@ impl LayoutPage {
                     let c = ctl(id);
                     match c {
                         Ctl::ScrSource => self.open_shows(cx, (x, y, h)),
+                        Ctl::ScrFormat => self.open_formats(cx, (x, y, h)),
                         Ctl::ScrAlign | Ctl::ScrUnits | Ctl::ScrHours | Ctl::ScrFit => {
                             if let Some(ed) = cx.editor.as_mut() {
                                 if let Some(p) = cx.screens.library.get_mut(ed.page) {
@@ -426,6 +429,15 @@ impl LayoutPage {
                                 LayoutPage::open(cx, at);
                                 out.edited = true;
                                 out.opened = true;
+                            }
+                        }
+                        Some(Menu::Formats(choices)) => {
+                            self.ui.set_menu_open(false);
+                            if let (Some(Some(f)), Some(ed)) = (choices.get(i).copied(), cx.editor.as_ref()) {
+                                if let Some(p) = cx.screens.library.get_mut(ed.page).and_then(|pg| pg.pieces.get_mut(ed.chosen?)) {
+                                    p.date_format = f;
+                                    out.edited = true;
+                                }
                             }
                         }
                         Some(Menu::Shows(choices)) => {
@@ -508,7 +520,7 @@ impl LayoutPage {
         let page = LayoutPage::page(cx)?;
         let first = cx.avail.first().copied().unwrap_or(Source::CpuTemp);
         let (k, width, right) = screen_edit::new_block(kind, first);
-        let least = crate::lcd_page::least(&crate::lcd_page::Piece { kind: k, row: 0, col: 0, width, right, center: false, gap: 1, height: 1, scroll: true }, cx.readings).max(screen_edit::NEW_LEAST).min(width);
+        let least = crate::lcd_page::least(&crate::lcd_page::Piece { kind: k, row: 0, col: 0, width, right, center: false, gap: 1, height: 1, scroll: true, date_format: Default::default() }, cx.readings).max(screen_edit::NEW_LEAST).min(width);
         let (row, col) = (((y - sy) / ch).floor().clamp(0.0, 3.0) as u8, ((x - sx) / cw).floor().clamp(0.0, 19.0) as u8);
         screen_edit::fit(page, row, col, width, 1, least, None)
     }
@@ -564,6 +576,20 @@ impl LayoutPage {
         self.menu = Some(Menu::New(made));
     }
 
+    /// Format, in the box of a Data block showing the date: each format as the date reads today.
+    fn open_formats(&mut self, cx: &Cx, anchor: (f32, f32, f32)) {
+        if self.just_shut(anchor) {
+            return;
+        }
+        let Some(piece) = cx.editor.as_ref().and_then(|e| cx.screens.library.get(e.page)?.pieces.get(e.chosen?)) else { return };
+        self.close_picker();
+        let listed = screen_edit::format_menu(piece.date_format, cx.readings);
+        let rows: Vec<MenuRow> = listed.iter().map(|(k, label, sub, tick, _)| row(*k, label, *tick, sub)).collect();
+        let choices = listed.into_iter().map(|r| r.4).collect();
+        self.place_menu(rows, 250.0, anchor);
+        self.menu = Some(Menu::Formats(choices));
+    }
+
     /// Shows, in the box of a Data block or a bar: what it can show, each with what it reads now.
     fn open_shows(&mut self, cx: &Cx, anchor: (f32, f32, f32)) {
         if self.just_shut(anchor) {
@@ -573,7 +599,7 @@ impl LayoutPage {
         let Some(current) = screen_edit::shows_of(piece) else { return };
         let bars = matches!(piece.kind, crate::lcd_page::Kind::Bar(_));
         self.close_picker();
-        let listed = screen_edit::source_menu(current, bars, cx.avail, cx.readings);
+        let listed = screen_edit::source_menu(current, bars, piece.date_format, cx.avail, cx.readings);
         let rows: Vec<MenuRow> = listed.iter().map(|(k, label, sub, tick, _)| row(*k, label, *tick, sub)).collect();
         let choices = listed.into_iter().map(|r| r.4).collect();
         self.place_menu(rows, 330.0, anchor);
@@ -744,7 +770,7 @@ impl LayoutPage {
         if let Some((kind, Some((r, c, width)))) = self.carry {
             let first = cx.avail.first().copied().unwrap_or(Source::CpuTemp);
             let (k, _, right) = screen_edit::new_block(kind, first);
-            shown.pieces.push(crate::lcd_page::Piece { kind: k, row: r, col: c, width, right, center: false, gap: 1, height: 1, scroll: true });
+            shown.pieces.push(crate::lcd_page::Piece { kind: k, row: r, col: c, width, right, center: false, gap: 1, height: 1, scroll: true, date_format: Default::default() });
         }
         // each block outlined where it lands (a reading that runs long pushes the rest of
         // its row along), with how far its corner can reach at each height it can have
@@ -760,10 +786,13 @@ impl LayoutPage {
             .enumerate()
             .map(|(i, (p, sp))| {
                 let (row, col, width) = outline(sp);
-                let least = crate::lcd_page::least(p, cx.readings);
-                // (the corner never pulls a block in past where it lands)
-                let ends: Vec<i32> = screen_edit::room(page, i, least).iter().map_while(|e| *e).map(|e| (e as i32).max((col + width) as i32)).collect();
-                let least = (least as usize).min(width) as i32;
+                let least = |h| crate::lcd_page::least_at(p, cx.readings, h);
+                // for each height it can have: how far its corner reaches, and how near it may
+                // pull the block in, on one row never past where the block lands (a reading
+                // that runs long), on more rows as narrow as the block can be there
+                let reach: Vec<u8> = screen_edit::room(page, i, least).iter().map_while(|e| *e).collect();
+                let ends: Vec<i32> = reach.iter().enumerate().map(|(k, e)| if k == 0 { (*e as i32).max((col + width) as i32) } else { *e as i32 }).collect();
+                let lows: Vec<i32> = (1..=reach.len() as u8).map(|h| (col + if h == 1 { (screen_edit::floor(p, 1, least) as usize).min(width) } else { screen_edit::floor(p, h, least) as usize }) as i32).collect();
                 EdBlock {
                     row: row as i32,
                     col: col as i32,
@@ -771,8 +800,9 @@ impl LayoutPage {
                     height: p.height.max(1) as i32,
                     on: ed.chosen == Some(i),
                     fx: false,
-                    tall: crate::lcd_page::is_words(&p.kind),
-                    least,
+                    // (taller or shorter from its corner, where there is room for that)
+                    tall: reach.len() > 1 || p.height > 1,
+                    lows: ModelRc::new(VecModel::from(lows)),
                     ends: ModelRc::new(VecModel::from(ends)),
                 }
             })
@@ -783,7 +813,7 @@ impl LayoutPage {
             Some((kind, Some(_))) => {
                 let (row, col, width) = outline(spans.last().copied().unwrap_or_default());
                 self.ui.set_ghost_on(true);
-                self.ui.set_ghost(EdBlock { row: row as i32, col: col as i32, width: width as i32, height: 1, on: false, fx: false, tall: false, least: 1, ends: ModelRc::default() });
+                self.ui.set_ghost(EdBlock { row: row as i32, col: col as i32, width: width as i32, height: 1, on: false, fx: false, tall: false, lows: ModelRc::default(), ends: ModelRc::default() });
                 self.ui.set_lit_chip(kind as i32);
             }
             Some((kind, None)) => {
@@ -799,8 +829,12 @@ impl LayoutPage {
         self.draw(&rows, page.light.unwrap_or(default), cx.light[0]);
         // the box of the block selected
         let rig_w = self.ui.get_window_width() - 290.0 - 36.0;
-        let menu_open = matches!(self.menu, Some(Menu::Shows(_)));
-        let b = screen_edit::block_box(page, ed.chosen, cx.readings, cx.avail, menu_open, (rig_w - 12.0) / 2.0);
+        let open = match self.menu {
+            Some(Menu::Shows(_)) => Some(Ctl::ScrSource),
+            Some(Menu::Formats(_)) => Some(Ctl::ScrFormat),
+            _ => None,
+        };
+        let b = screen_edit::block_box(page, ed.chosen, cx.readings, cx.avail, open, (rig_w - 12.0) / 2.0);
         self.ui.set_box_kind(b.kind);
         self.ui.set_box_title(b.title.into());
         self.ui.set_box_h(b.h);

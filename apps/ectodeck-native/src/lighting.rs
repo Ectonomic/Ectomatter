@@ -68,9 +68,11 @@ pub enum Ctl {
     ScrAlign,
     ScrRemove,
     ScrLight,
+    /// how a block showing the date writes it (the menu)
+    ScrFormat,
 }
 
-const CTLS: [Ctl; 43] = [
+const CTLS: [Ctl; 44] = [
     Ctl::None,
     Ctl::Color,
     Ctl::Colors,
@@ -114,6 +116,7 @@ const CTLS: [Ctl; 43] = [
     Ctl::ScrAlign,
     Ctl::ScrRemove,
     Ctl::ScrLight,
+    Ctl::ScrFormat,
 ];
 
 pub fn ctl(id: i32) -> Ctl {
