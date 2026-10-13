@@ -896,8 +896,8 @@ impl LayoutPage {
                 self.stills = Some((key, pics));
             }
             let stills = &self.stills.as_ref().unwrap().1;
-            let sound = if *fx == crate::lcd_page::Fx::Spectrum { crate::sound::bands() } else { [0.0; 20] };
-            let moving = crate::lcd_draw::picture(&rows_of(crate::lcd_fx::frame(*fx, crate::lcd_fx::tenths(cx.t, *speed), &word, &sound)), rgb, lv, w, h);
+            let sound = if *fx == crate::lcd_page::Fx::Spectrum { crate::sound::held(crate::lcd_fx::period(*speed)) } else { [0.0; 20] };
+            let moving = crate::lcd_draw::picture(&rows_of(crate::lcd_fx::frame(*fx, crate::lcd_fx::tenths(*fx, cx.t, *speed), &word, &sound)), rgb, lv, w, h);
             let tiles: Vec<crate::FxTile> = crate::lcd_fx::FXS
                 .iter()
                 .enumerate()

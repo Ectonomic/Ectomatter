@@ -68,10 +68,47 @@ impl Fx {
     }
 }
 
-/// An effect's moment: `secs` since its layout came on, at `speed` (0 slow to 100 fast; 50
-/// plays it as the mock does), in the tenths of a second the effects count in.
-pub fn tenths(secs: f64, speed: u8) -> f64 {
-    secs.max(0.0) * 10.0 * 2f64.powf((speed.min(100) as f64 - 50.0) / 50.0 * 1.5)
+/// The shortest time a cell of the keyboard's screen can hold a character and still show it
+/// clearly: its liquid crystal is slow, so a character changed again sooner shows faded or
+/// not at all (Grant, watching the effects on the keyboard, 2026-10-13: Bounce, a cell every
+/// 0.2 s, was at the edge, and Pong's ball, a cell every 0.12 s, barely showed). An effect
+/// steps no more often than this, at its fastest.
+pub const STEP: f64 = 0.4;
+
+/// How long an effect holds each step at `speed`, 0 slow to 100 fast: [STEP] at the
+/// fastest, three times that at the slowest.
+pub fn period(speed: u8) -> f64 {
+    STEP * 3f64.powf((100 - speed.min(100)) as f64 / 100.0)
+}
+
+/// How far an effect's own clock (the mock's tenths of a second) goes in one step: as far as
+/// moves its quickest part about one notch (a drop a third of a row, a star or the ball a
+/// cell, a flame a shade), so it moves as the mock drew it, only never faster than the
+/// screen shows. (Spectrum steps with the sound instead: see [crate::sound::held].)
+fn per_step(fx: Fx) -> f64 {
+    match fx {
+        // the quickest drop or star: 1.7 a tenth
+        Fx::Rain | Fx::Stars => 1.0 / 1.7,
+        Fx::Snow => 1.0 / 0.35,
+        // the quickest column's head: 0.75 a tenth
+        Fx::Code => 1.0 / 0.75,
+        // a shade about every half a tenth, where its waves move fastest
+        Fx::Fire => 0.5,
+        Fx::Plasma => 1.75,
+        // a generation every 3 tenths
+        Fx::Life => 3.0,
+        // (the bubbles: half a step a tenth)
+        Fx::Aquarium => 2.0,
+        Fx::Pong => 1.2,
+        Fx::Bounce => 2.0,
+        Fx::Spectrum => 1.0,
+    }
+}
+
+/// An effect's moment `secs` after its layout came on, at `speed`, in the tenths the
+/// effects count in: whole steps only, so no cell changes more than once a step.
+pub fn tenths(fx: Fx, secs: f64, speed: u8) -> f64 {
+    (secs.max(0.0) / period(speed)).floor() * per_step(fx)
 }
 
 /// The mock's noise: for each `i` a number from 0 to 1, always the same one.
@@ -329,8 +366,38 @@ mod tests {
         assert!(r.iter().any(|row| row.contains("EVGA")));
         let whole = rows(frame(Fx::Bounce, 7.0, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", &[0.0; W]));
         assert!(whole.iter().any(|row| row == "ABCDEFGHIJKLMNOPQRST"), "a word as wide as the screen stays put, cut to twenty");
-        assert_eq!(tenths(2.0, 50), 20.0);
-        assert!(tenths(2.0, 0) < 20.0 && tenths(2.0, 100) > 20.0);
         assert_eq!(Fx::from_key("stars"), Some(Fx::Stars));
+    }
+
+    #[test]
+    fn no_cell_changes_faster_than_the_screen_shows() {
+        // every effect at its fastest, looked at every hundredth of a second for half a
+        // minute: each cell holds what it shows at least a step
+        let quiet = [0.0; W];
+        for fx in FXS.into_iter().filter(|f| *f != Fx::Spectrum) {
+            let mut last: Option<[[char; W]; H]> = None;
+            let mut since = [[f64::NEG_INFINITY; W]; H];
+            let mut changes = 0;
+            for k in 0..3000 {
+                let secs = k as f64 / 100.0;
+                let f = frame(fx, tenths(fx, secs, 100), "EVGA", &quiet);
+                if let Some(l) = last {
+                    for r in 0..H {
+                        for c in 0..W {
+                            if f[r][c] != l[r][c] {
+                                // (looked at every hundredth, a change is seen up to a hundredth late)
+                                assert!(secs - since[r][c] >= STEP - 0.0101, "{fx:?}: cell {r},{c} changed {:.2} s after its last change", secs - since[r][c]);
+                                since[r][c] = secs;
+                                changes += 1;
+                            }
+                        }
+                    }
+                }
+                last = Some(f);
+            }
+            assert!(changes > 0, "{fx:?} never moved");
+        }
+        // the slowest takes three times as long a step
+        assert!((period(100) - STEP).abs() < 1e-9 && (period(0) - 3.0 * STEP).abs() < 1e-9);
     }
 }

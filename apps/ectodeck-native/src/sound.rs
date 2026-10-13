@@ -39,6 +39,22 @@ pub fn bands() -> [f32; 20] {
     e.bands
 }
 
+/// What a Spectrum stepping every `period` seconds shows: the loudest each band was during
+/// the last step, changed only once a step, as the screen can show (see
+/// [crate::lcd_fx::STEP]).
+pub fn held(period: f64) -> [f32; 20] {
+    static HELD: OnceLock<Mutex<(Option<Instant>, [f32; 20], [f32; 20])>> = OnceLock::new();
+    let now = bands();
+    let mut h = HELD.get_or_init(|| Mutex::new((None, [0.0; 20], [0.0; 20]))).lock().unwrap();
+    for (peak, level) in h.2.iter_mut().zip(now) {
+        *peak = peak.max(level);
+    }
+    if h.0.is_none_or(|since| since.elapsed().as_secs_f64() >= period) {
+        (h.0, h.1, h.2) = (Some(Instant::now()), h.2, [0.0; 20]);
+    }
+    h.1
+}
+
 /// Listen until nothing has asked for a while, or the sound can no longer be read.
 fn listen(ear: &Mutex<Ear>) {
     let child = Command::new("parec")

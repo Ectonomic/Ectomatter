@@ -30,18 +30,15 @@ pub fn runtime_dir() -> PathBuf {
 // ------------------------------------------------------------------ the keyboard's screen
 
 /// Report 10 as the service built it: `0a ea 02 <cmd> 00 00 00 <checksum>` and
-/// eighty Windows-1252 characters, four rows of twenty. `cmd` 1 draws them;
-/// 0 hands the screen back to the keyboard's own screens.
+/// eighty Windows-1252 characters, four rows of twenty, each as the keyboard's
+/// table has it (the full block 0xDB, which lights the whole cell). `cmd` 1 draws
+/// them; 0 hands the screen back to the keyboard's own screens.
 pub fn frame(rows: &[String], cmd: u8) -> [u8; 88] {
     let mut text = Vec::with_capacity(80);
     for i in 0..4 {
         let r: Vec<char> = rows.get(i).map_or("", |s| s.as_str()).chars().take(20).collect();
         for k in 0..20 {
-            let c = r.get(k).copied().unwrap_or(' ');
-            text.push(match c as u32 {
-                0..=0x7f | 0xa0..=0xff => c as u32 as u8,
-                _ => b'?',
-            });
+            text.push(ectotype_core::lcd::cp1252(r.get(k).copied().unwrap_or(' ')));
         }
     }
     let mut buf = [0u8; 88];
@@ -782,6 +779,8 @@ mod tests {
         assert_eq!(f[8 + 6], 0xB0);
         assert_eq!(f[8..88].iter().fold(0u8, |a, b| a.wrapping_add(*b)).wrapping_add(f[7]), 0);
         assert_eq!(frame(&[], 0)[3], 0);
+        // the full block Fire and Spectrum draw with: the code the keyboard lights a whole cell for
+        assert_eq!(frame(&["█▀".into()], 1)[8..10], [0xDB, b'?']);
     }
 
     /// A screen that keeps what it is sent, and when.
