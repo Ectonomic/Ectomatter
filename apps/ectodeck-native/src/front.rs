@@ -4431,6 +4431,7 @@ impl Front {
                 } else {
                     format!("{} s", e.secs).into()
                 },
+                time: if n > 1 && !e.stays { format!("{} s", e.secs).into() } else { "".into() },
                 stays: e.stays,
                 way: crate::lcd_page::TRANSITIONS.iter().position(|t| *t == e.comes_in).unwrap_or(0) as i32,
                 way_name: e.comes_in.name().into(),

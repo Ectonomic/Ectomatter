@@ -203,9 +203,10 @@ export struct PlPage {
 // one turn of the playlist on its panel: its screen's bar's left edge and
 // length (as long as its time, the strip fitted to its width), its page's
 // name, whether the screen shows it, whether it is being carried, its time in
-// words, whether it stays until the layouts are switched, and how it comes in
-// after the turn before it (0 Wipe, 1 Dissolve, 2 Type, 3 Cut), by number and
-// by name
+// words (for its tag) and as its bar's end shows it (none while it's the only
+// turn or it stays), whether it stays until the layouts are switched, and how
+// it comes in after the turn before it (0 Wipe, 1 Dissolve, 2 Type, 3 Cut), by
+// number and by name
 export struct PlBlock {
     key: int,
     x: length,
@@ -214,6 +215,7 @@ export struct PlBlock {
     on: bool,
     away: bool,
     secs: string,
+    time: string,
     stays: bool,
     way: int,
     way-name: string,
@@ -4393,33 +4395,48 @@ export component AppWindow inherits Window {
                                     border-bottom-right-radius: 5px;
                                     background: b.on ? (turn.hov || turn.way-hov ? #5c5c66 : #52525b) : (turn.hov || turn.way-hov ? Ink.pick-hover : Ink.pick);
                                     animate background { duration: 120ms; }
-                                    if b.w >= 28px: Text {
-                                        x: 8px;
-                                        width: parent.width - (b.stays && !root.pl-single ? 38px : 18px);
-                                        height: parent.height;
-                                        text: b.name;
-                                        font-family: "Geist";
-                                        font-size: 12px;
-                                        font-weight: b.on ? 600 : 400;
-                                        color: b.on ? Ink.bright : turn.hov ? Ink.dim : Ink.soft;
-                                        vertical-alignment: center;
-                                        overflow: elide;
-                                    }
-                                    // a turn that stays until the layouts are switched: the infinity
-                                    // mark at its end, short of the end's handle
-                                    if b.stays && !root.pl-single && b.w >= 34px: Path {
-                                        x: parent.width - 10px - 18px;
-                                        y: 8px;
-                                        width: 17.6px;
-                                        height: 8px;
-                                        viewbox-x: 1;
-                                        viewbox-y: 7;
-                                        viewbox-width: 22;
-                                        viewbox-height: 10;
-                                        commands: "M12 12c-2-2.67-4-4-6-4a4 4 0 1 0 0 8c2 0 4-1.33 6-4Zm0 0c2 2.67 4 4 6 4a4 4 0 0 0 0-8c-2 0-4 1.33-6 4Z";
-                                        fill: transparent;
-                                        stroke: b.on ? Ink.bright : turn.hov ? Ink.dim : Ink.soft;
-                                        stroke-width: 1.5px;
+                                    // its name, then its time at its end, short of the end's handle: its
+                                    // seconds, or the infinity mark for a turn that stays until the layouts
+                                    // are switched (the time left off a bar too short to keep some of the
+                                    // name beside it, and both off one too short for a letter or two)
+                                    if b.w >= 28px: HorizontalLayout {
+                                        padding-left: 8px;
+                                        padding-right: 10px;
+                                        spacing: 8px;
+                                        Text {
+                                            min-width: 0px;
+                                            horizontal-stretch: 1;
+                                            text: b.name;
+                                            font-family: "Geist";
+                                            font-size: 12px;
+                                            font-weight: b.on ? 600 : 400;
+                                            color: b.on ? Ink.bright : turn.hov ? Ink.dim : Ink.soft;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                        }
+                                        if b.time != "" && b.w >= 64px: Text {
+                                            text: b.time;
+                                            font-family: "Geist";
+                                            font-size: 11px;
+                                            color: b.on ? Ink.dim : turn.hov ? Ink.soft : Ink.quiet;
+                                            vertical-alignment: center;
+                                        }
+                                        if b.stays && !root.pl-single && b.w >= 34px: Rectangle {
+                                            width: 17.6px;
+                                            Path {
+                                                y: (parent.height - 8px) / 2;
+                                                width: 17.6px;
+                                                height: 8px;
+                                                viewbox-x: 1;
+                                                viewbox-y: 7;
+                                                viewbox-width: 22;
+                                                viewbox-height: 10;
+                                                commands: "M12 12c-2-2.67-4-4-6-4a4 4 0 1 0 0 8c2 0 4-1.33 6-4Zm0 0c2 2.67 4 4 6 4a4 4 0 0 0 0-8c-2 0-4 1.33-6 4Z";
+                                                fill: transparent;
+                                                stroke: b.on ? Ink.dim : turn.hov ? Ink.soft : Ink.quiet;
+                                                stroke-width: 1.5px;
+                                            }
+                                        }
                                     }
                                 }
                                 // the playhead: across the way bar while the screen comes in, then along
@@ -6652,6 +6669,13 @@ export component LayoutWindow inherits Window {
     in property <image> picture;
     in property <color> field: #0a0908;
     in property <[EdBlock]> blocks;
+    // the block selected (-1, none); its corner being dragged and how many cells wider and
+    // rows taller so far; and whether it is being carried (its corner and × step aside)
+    in property <int> sel-block: -1;
+    in-out property <bool> corner-on;
+    in-out property <int> corner-dw;
+    in-out property <int> corner-dh;
+    in-out property <bool> sel-moving;
     // the line in the bar after the blocks: how to add one, or that there's no room
     in property <string> bar-hint: "Drag a block onto the screen.";
     // counted up each time the layout has taken a block's move or new ends, so the
@@ -7287,22 +7311,20 @@ export component LayoutWindow inherits Window {
                         border-color: #ffffffb0;
                         background: root.field.with-alpha(0.5);
                     }
-                    // each block outlined; the one selected in amber, with a corner glyph on its
-                    // bottom right corner to size it and a ring × on its top right corner to
-                    // remove it, both centered on the outline's line. Dragged, a block follows
-                    // the pointer cell by cell; its corner dragged takes the block wider or
-                    // narrower (and words taller or shorter), as far as the free cells and the
-                    // screen let it
+                    // each block outlined; the one selected in amber (its corner glyph and × over
+                    // every block, below). Dragged, a block follows the pointer cell by cell; its
+                    // corner dragged takes the block wider or narrower (and words taller or
+                    // shorter), as far as the free cells and the screen let it
                     for b[i] in root.blocks: blk := Rectangle {
                         property <length> cw: parent.width / 20;
                         property <length> ch: parent.height / 4;
-                        // a move: how many cells across and down; the corner: how many cells
-                        // wider and rows taller
+                        // a move: how many cells across and down; the corner (the selected block's,
+                        // dragged): how many cells wider and rows taller
                         property <int> dc: 0;
                         property <int> dr: 0;
-                        property <int> dw: 0;
-                        property <int> dh: 0;
-                        property <bool> sizing: false;
+                        property <int> dw: b.on ? root.corner-dw : 0;
+                        property <int> dh: b.on ? root.corner-dh : 0;
+                        property <bool> sizing: b.on && root.corner-on;
                         // carried by the pointer (past a few pixels from where it was pressed)
                         property <bool> moving: false;
                         property <int> at-col: max(0, min(20 - b.width, b.col + dc));
@@ -7321,17 +7343,9 @@ export component LayoutWindow inherits Window {
                         function rest() {
                             self.dc = 0;
                             self.dr = 0;
-                            self.dw = 0;
-                            self.dh = 0;
-                            self.sizing = false;
                             self.moving = false;
-                        }
-                        // the corner let go: the block's new size, or, back where it started, as it was
-                        function let-go() {
-                            if (self.show-w != b.width || self.show-h != b.height) {
-                                root.block-sized(i, self.show-w, self.show-h);
-                            } else {
-                                self.rest();
+                            if (b.on) {
+                                root.sel-moving = false;
                             }
                         }
                         // (sizing never moves the block's first cell)
@@ -7366,6 +7380,9 @@ export component LayoutWindow inherits Window {
                                 }
                                 parent.dc = round((self.mouse-x - self.pressed-x + (parent.at-col - b.col) * cw) / cw);
                                 parent.dr = round((self.mouse-y - self.pressed-y + (parent.at-row - b.row) * ch) / ch);
+                                if (b.on) {
+                                    root.sel-moving = parent.moving;
+                                }
                             }
                             pointer-event(e) => {
                                 if (e.kind == PointerEventKind.down) {
@@ -7378,6 +7395,7 @@ export component LayoutWindow inherits Window {
                                 }
                                 if (e.kind == PointerEventKind.up) {
                                     parent.moving = false;
+                                    root.sel-moving = false;
                                     if (parent.at-col != b.col || parent.at-row != b.row) {
                                         root.block-moved(i, parent.at-row, parent.at-col);
                                     } else {
@@ -7387,12 +7405,56 @@ export component LayoutWindow inherits Window {
                                 }
                             }
                         }
+                    }
+                    // the selected block's outline, corner glyph and × over every block: an effect
+                    // stays behind the blocks on it, selected too, so they can still be selected,
+                    // and its corner and × are still there to use (they step aside while the block
+                    // is carried, and the × while the corner is dragged)
+                    if root.sel-block >= 0 && root.sel-block < root.blocks.length && !root.sel-moving: sel := Rectangle {
+                        property <EdBlock> sb: root.blocks[root.sel-block];
+                        property <length> cw: parent.width / 20;
+                        property <length> ch: parent.height / 4;
+                        property <int> s-h: max(1, min(sb.ends.length, sb.height + root.corner-dh));
+                        property <int> s-end: max(sb.lows[s-h - 1], min(sb.ends[s-h - 1], sb.col + sb.width + root.corner-dw));
+                        property <int> show-w: root.corner-on ? s-end - sb.col : sb.width;
+                        property <int> show-h: root.corner-on ? s-h : sb.height;
+                        property <int> home: sb.row * 10000 + sb.col * 100 + sb.width * 4 + sb.height;
+                        property <int> settled: root.settled;
+                        changed home => { self.rest(); }
+                        changed settled => { self.rest(); }
+                        function rest() {
+                            root.corner-on = false;
+                            root.corner-dw = 0;
+                            root.corner-dh = 0;
+                        }
+                        // the corner let go: the block's new size, or, back where it started, as it was
+                        function let-go() {
+                            if (self.show-w != sb.width || self.show-h != sb.height) {
+                                root.block-sized(root.sel-block, self.show-w, self.show-h);
+                            } else {
+                                self.rest();
+                            }
+                        }
+                        x: sb.col * cw;
+                        y: sb.row * ch;
+                        width: show-w * cw;
+                        height: show-h * ch;
+                        z: 3;
+                        Rectangle {
+                            x: 1px;
+                            y: 1px;
+                            width: parent.width - 2px;
+                            height: parent.height - 2px;
+                            border-radius: 3px;
+                            border-width: 2px;
+                            border-color: Ink.warn;
+                        }
                         // the corner glyph: an L of twice the outline's weight on the outline's own
                         // line round the bottom right corner (the line's middle is 2 px in from the
                         // block's edge), drawn as two bars so it lands on the line's own pixels:
                         // square where they meet, rounded at their far ends. With room round it to
                         // press
-                        if b.on: Rectangle {
+                        Rectangle {
                             x: parent.width - 2px - 12px;
                             y: parent.height - 2px - 12px;
                             width: 24px;
@@ -7420,15 +7482,15 @@ export component LayoutWindow inherits Window {
                             // (the corner moves with the size, so how far it has moved already is
                             // added back, as for the block itself)
                             corner-ta := TouchArea {
-                                mouse-cursor: b.tall ? MouseCursor.nwse-resize : MouseCursor.ew-resize;
+                                mouse-cursor: sel.sb.tall ? MouseCursor.nwse-resize : MouseCursor.ew-resize;
                                 moved => {
-                                    blk.sizing = true;
-                                    blk.dw = round((self.mouse-x - self.pressed-x + (blk.show-w - b.width) * blk.cw) / blk.cw);
-                                    blk.dh = round((self.mouse-y - self.pressed-y + (blk.show-h - b.height) * blk.ch) / blk.ch);
+                                    root.corner-on = true;
+                                    root.corner-dw = round((self.mouse-x - self.pressed-x + (sel.show-w - sel.sb.width) * sel.cw) / sel.cw);
+                                    root.corner-dh = round((self.mouse-y - self.pressed-y + (sel.show-h - sel.sb.height) * sel.ch) / sel.ch);
                                 }
                                 pointer-event(e) => {
-                                    if (e.kind == PointerEventKind.up && blk.sizing) {
-                                        blk.let-go();
+                                    if (e.kind == PointerEventKind.up && root.corner-on) {
+                                        sel.let-go();
                                     }
                                 }
                             }
@@ -7436,7 +7498,7 @@ export component LayoutWindow inherits Window {
                         // its ×: a ring of the outline's weight round the screen's dark, centered on
                         // the outline's top right corner and filled with amber under the pointer (it
                         // steps aside while the corner is dragged)
-                        if b.on && !blk.sizing: Rectangle {
+                        if !root.corner-on: Rectangle {
                             x: parent.width - 2px - 12px;
                             y: 2px - 12px;
                             width: 24px;

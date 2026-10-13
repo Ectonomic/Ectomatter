@@ -843,6 +843,8 @@ impl LayoutPage {
                 }
             })
             .collect();
+        // (the selected block's corner and × are drawn over every block, from its place here)
+        self.ui.set_sel_block(blocks.iter().position(|b| b.on).map_or(-1, |i| i as i32));
         crate::front::set_rows(&self.blocks, blocks);
         // the cells the carried block would take
         match self.carry {
