@@ -115,9 +115,7 @@ pub enum Ask {
     ScreenState,
     /// the onboard layout's chooser selected, where it is in the window
     ObChoose(f32, f32, f32),
-    /// a layout of the Library opened in the screen layout editor; a turn's
-    /// layout, from the playlist
-    LibEdit(i32),
+    /// a turn's layout, from the playlist, opened in the screen layout editor
     EditPage(i32),
     /// the playlist: a page shown now, moved earlier or later, taken off; a
     /// new screen layout made (blank, and opened in the editor)
@@ -500,8 +498,10 @@ pub struct Front {
     pl_menu: bool,
     pl_renaming: bool,
     add_menu: bool,
-    /// a layout card's own menu, right-clicked: the layout's place in the Library
+    /// a layout card's own menu, the card selected or right-clicked: the layout's place in
+    /// the Library; and the card whose menu a press just closed, so its click closes it
     lib_menu: Option<usize>,
+    card_shut: Option<(usize, Instant)>,
     /// the page being edited, the piece chosen; this computer's readings,
     /// read here for the editor's picture once a second, and when last
     editor: Option<crate::screen_edit::Editor>,
@@ -586,7 +586,6 @@ impl Front {
         on!(on_pl_back, Ask::PlBack);
         on!(on_screen_state, Ask::ScreenState);
         on!(on_ob_choose, |x, y, h| Ask::ObChoose(x, y, h));
-        on!(on_lib_edit, |k| Ask::LibEdit(k));
         on!(on_lib_menu, |k, x, y| Ask::LibMenu(k, x, y));
         on!(on_page_show, |i| Ask::PageShow(i));
         on!(on_page_moved, |i, j| Ask::PageMove(i, j));
@@ -719,6 +718,7 @@ impl Front {
             pl_renaming: false,
             add_menu: false,
             lib_menu: None,
+            card_shut: None,
             editor: None,
             reader: None,
             readings: crate::lcd_page::Readings::default(),
@@ -1157,7 +1157,6 @@ impl Front {
                 // (the screen drawn again, as the state now open shows it)
                 Ask::ScreenState => self.lcd_drawn = None,
                 Ask::ObChoose(x, y, h) => self.open_ob_menu((x, y, h)),
-                Ask::LibEdit(k) => window.push(WindowAsk::OpenLayouts(k.max(0) as usize)),
                 Ask::LibMenu(k, x, y) => self.open_lib_menu(k.max(0) as usize, (x, y)),
                 Ask::LcdTick => {
                     // the readings again each second: for the page being edited (its
@@ -2170,6 +2169,11 @@ impl Front {
         if self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pl_menu || self.add_menu || self.ob_menu || self.lib_menu.is_some() {
             let (mx, my, mw, mh) = (self.ui.get_menu_x(), self.ui.get_menu_y(), self.ui.get_menu_width(), self.ui.get_menu_height());
             if !(x >= mx && x < mx + mw && y >= my && y < my + mh) {
+                // (a card's menu shut by a press: if the press is on the same card, its click
+                // closes the menu rather than opening it again)
+                if let Some(k) = self.lib_menu {
+                    self.card_shut = Some((k, Instant::now()));
+                }
                 // a press on the dropdown (or the bar) the menu hangs from shuts it, and its click must not open it again
                 let (ax, ay, ah) = (self.ui.get_menu_ax(), self.ui.get_menu_ay(), self.ui.get_menu_ah());
                 let aw = if self.way_menu.is_some() {
@@ -3223,6 +3227,9 @@ impl Front {
     /// A layout card's own menu, right-clicked, at the pointer: Edit, Add to the playlist
     /// (on the Onboard layout tab, Keep on the keyboard), Duplicate, and Delete.
     fn open_lib_menu(&mut self, k: usize, at: (f32, f32)) {
+        if self.card_shut.take().is_some_and(|(j, when)| j == k && when.elapsed() < Duration::from_millis(800)) {
+            return;
+        }
         let Some(name) = self.screens.library.get(k).map(|p| p.name.clone()) else { return };
         let row = |kind: i32, label: String| MenuRow { kind, label: label.into(), tag: "".into(), tick: false, sub: "".into() };
         let second = if self.ui.get_screen_closed() {

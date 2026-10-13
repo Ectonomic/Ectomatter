@@ -3445,7 +3445,6 @@ export component AppWindow inherits Window {
     // Layouts: every screen layout, its card, one opened in the layout
     // editor's window, a new one made there
     in property <[PlPage]> lib-pages;
-    callback lib-edit(int);
     // a layout's card right-clicked: its menu, where the pointer is
     callback lib-menu(int, length, length);
     callback lib-new();
@@ -4702,8 +4701,8 @@ export component AppWindow inherits Window {
                                 p: c;
                                 hovered: cta.has-hover && !root.carry-on;
                             }
-                            // the whole card a button: select it to edit the layout; press and drag it
-                            // to carry it onto the playlist
+                            // the whole card a button: select it (or right-click it) for its menu, Edit
+                            // first; press and drag it to carry it onto the playlist
                             cta := TouchArea {
                                 mouse-cursor: root.carry-on ? MouseCursor.grabbing : MouseCursor.pointer;
                                 property <bool> far;
@@ -4716,9 +4715,7 @@ export component AppWindow inherits Window {
                                     }
                                     if (e.kind == PointerEventKind.up && root.carry-on) {
                                         stage.drop-carry();
-                                    } else if (e.kind == PointerEventKind.up && !self.far && e.button == PointerEventButton.left) {
-                                        root.lib-edit(k);
-                                    } else if (e.kind == PointerEventKind.up && e.button == PointerEventButton.right) {
+                                    } else if (e.kind == PointerEventKind.up && !self.far && (e.button == PointerEventButton.left || e.button == PointerEventButton.right)) {
                                         root.lib-menu(k, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
                                     }
                                     if (e.kind == PointerEventKind.cancel && root.carry-on) {
@@ -4741,19 +4738,16 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                 }
-                                // the pencil, at the middle of the card's right edge while the pointer is on
-                                // it: what selecting the card does
-                                if self.has-hover && !root.carry-on: Path {
-                                    x: parent.width - 30px - 7.5px;
-                                    y: (parent.height - 15px) / 2;
-                                    width: 15px;
-                                    height: 15px;
-                                    viewbox-width: 24;
-                                    viewbox-height: 24;
-                                    commands: "M4 20h4L19 9l-4-4L4 16z";
-                                    fill: transparent;
-                                    stroke: Ink.soft;
-                                    stroke-width: 1.8px;
+                                // the menu's "···", at the middle of the card's right edge while the pointer
+                                // is on it: what selecting the card opens
+                                if self.has-hover && !root.carry-on: Text {
+                                    x: parent.width - 30px - self.preferred-width / 2;
+                                    y: (parent.height - self.preferred-height) / 2;
+                                    text: "···";
+                                    font-family: "Geist";
+                                    font-size: 16px;
+                                    letter-spacing: 1px;
+                                    color: Ink.soft;
                                 }
                             }
                         }
