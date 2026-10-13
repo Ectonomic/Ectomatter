@@ -47,6 +47,9 @@ pub enum Ask {
     ScreenEditor,
     /// a layout card's menu, right-clicked: the layout, and where the pointer was
     LibMenu(i32, f32, f32),
+    /// the question before a layout is deleted, answered Delete or Cancel
+    ConfirmYes,
+    ConfirmNo,
     /// time to read the sliders again, and the display's text
     PollSliders,
     PollLcd,
@@ -502,6 +505,8 @@ pub struct Front {
     /// the Library; and the card whose menu a press just closed, so its click closes it
     lib_menu: Option<usize>,
     card_shut: Option<(usize, Instant)>,
+    /// the layout asked about before it is deleted, by its id
+    deleting: Option<String>,
     /// the page being edited, the piece chosen; this computer's readings,
     /// read here for the editor's picture once a second, and when last
     editor: Option<crate::screen_edit::Editor>,
@@ -587,6 +592,8 @@ impl Front {
         on!(on_screen_state, Ask::ScreenState);
         on!(on_ob_choose, |x, y, h| Ask::ObChoose(x, y, h));
         on!(on_lib_menu, |k, x, y| Ask::LibMenu(k, x, y));
+        on!(on_confirm_yes, Ask::ConfirmYes);
+        on!(on_confirm_no, Ask::ConfirmNo);
         on!(on_page_show, |i| Ask::PageShow(i));
         on!(on_page_moved, |i, j| Ask::PageMove(i, j));
         on!(on_page_remove, |i| Ask::PageRemove(i));
@@ -719,6 +726,7 @@ impl Front {
             add_menu: false,
             lib_menu: None,
             card_shut: None,
+            deleting: None,
             editor: None,
             reader: None,
             readings: crate::lcd_page::Readings::default(),
@@ -1158,6 +1166,16 @@ impl Front {
                 Ask::ScreenState => self.lcd_drawn = None,
                 Ask::ObChoose(x, y, h) => self.open_ob_menu((x, y, h)),
                 Ask::LibMenu(k, x, y) => self.open_lib_menu(k.max(0) as usize, (x, y)),
+                Ask::ConfirmYes => {
+                    if let Some(k) = self.deleting.take().and_then(|id| self.screens.index_of(&id)) {
+                        self.delete_layout(k);
+                    }
+                    self.ui.set_confirm_open(false);
+                }
+                Ask::ConfirmNo => {
+                    self.deleting = None;
+                    self.ui.set_confirm_open(false);
+                }
                 Ask::LcdTick => {
                     // the readings again each second: for the page being edited (its
                     // picture and its boxes), or the playlist's pictures of its pages
@@ -1322,7 +1340,9 @@ impl Front {
                         self.ui.set_undo_shown(false);
                     }
                 }
-                Ask::Undo(redo) => self.undo(redo),
+                // (not while the window asks before deleting a layout)
+                Ask::Undo(redo) if self.deleting.is_none() => self.undo(redo),
+                Ask::Undo(_) => {}
                 Ask::Key(pos) => self.select_key(pos as u32),
                 Ask::ShowRebindings => {
                     self.rebindings = !self.rebindings;
@@ -2352,7 +2372,7 @@ impl Front {
             return;
         }
         // a layout card's menu: edit it, add it to the playlist (or keep it on the keyboard, on
-        // the Onboard layout tab), copy it, or delete it (Undo puts it back)
+        // the Onboard layout tab), copy it, or delete it once asked (Undo puts it back)
         if let Some(k) = self.lib_menu {
             self.close_menu();
             let Some(id) = self.screens.library.get(k).map(|p| p.id.clone()) else { return };
@@ -2376,22 +2396,7 @@ impl Front {
                         self.pages_edited();
                     }
                 }
-                4 => {
-                    if self.screens.delete_page(k) {
-                        // (the editor's window, open on a later layout or on this one, follows)
-                        if let Some(ed) = &mut self.editor {
-                            if ed.page > k || (ed.page == k && ed.page >= self.screens.library.len()) {
-                                ed.page = ed.page.saturating_sub(1);
-                            }
-                            ed.chosen = None;
-                            if self.screens.library.is_empty() {
-                                self.editor = None;
-                            }
-                        }
-                        self.pages_edited();
-                        self.refresh_editor();
-                    }
-                }
+                4 => self.ask_delete(k),
                 _ => {}
             }
             self.refresh();
@@ -3222,6 +3227,38 @@ impl Front {
         self.ui.set_ob_over(self.ob_over.is_some());
     }
 
+    /// Layout `k`'s Delete chosen from its card's menu: first the question, over the window,
+    /// saying what goes with the layout and the way back.
+    fn ask_delete(&mut self, k: usize) {
+        let Some(page) = self.screens.library.get(k) else { return };
+        let says = self.screens.delete_says(k, self.onboard_ready(), |n| self.page.profile_name(n));
+        self.ui.set_confirm_title(format!("Delete {}?", page.name).into());
+        self.ui.set_confirm_body(says.into());
+        self.ui.set_confirm_body2(format!("Undo brings {} back.", page.name).into());
+        self.ui.set_confirm_do("Delete layout".into());
+        self.deleting = Some(page.id.clone());
+        self.ui.set_confirm_open(true);
+    }
+
+    /// Layout `k` deleted, Delete answered: it comes off the playlists (and the keyboard),
+    /// and the editor's window, open on a later layout or on this one, follows.
+    fn delete_layout(&mut self, k: usize) {
+        if !self.screens.delete_page(k) {
+            return;
+        }
+        if let Some(ed) = &mut self.editor {
+            if ed.page > k || (ed.page == k && ed.page >= self.screens.library.len()) {
+                ed.page = ed.page.saturating_sub(1);
+            }
+            ed.chosen = None;
+            if self.screens.library.is_empty() {
+                self.editor = None;
+            }
+        }
+        self.pages_edited();
+        self.refresh_editor();
+    }
+
     /// The playlist's holding bar selected: under it, every screen layout,
     /// to put one on the end of the playlist.
     /// A layout card's own menu, right-clicked, at the pointer: Edit, Add to the playlist
@@ -3237,7 +3274,7 @@ impl Front {
         } else {
             format!("Add {name} to {}", self.screens.playlist(self.page.editing).name)
         };
-        let rows = vec![row(0, format!("Edit {name}")), row(0, second), row(0, format!("Duplicate {name}")), row(2, String::new()), row(4, format!("Delete {name}"))];
+        let rows = vec![row(0, format!("Edit {name}")), row(0, second), row(0, format!("Duplicate {name}")), row(2, String::new()), row(4, format!("Delete {name}…"))];
         self.close_menu();
         self.close_picker();
         // (nothing in it is ticked)
@@ -3947,6 +3984,11 @@ impl Front {
             });
         }
         show_rows(self.ui.get_lib_pages(), |m| self.ui.set_lib_pages(m), cards);
+        // the layout asked about gone another way (from the editor's window): no question left
+        if self.deleting.as_ref().is_some_and(|id| self.screens.index_of(id).is_none()) {
+            self.deleting = None;
+            self.ui.set_confirm_open(false);
+        }
     }
 
     /// The screen drawn large, the playlist's picture of Stats, and its

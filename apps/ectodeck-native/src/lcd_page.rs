@@ -540,6 +540,15 @@ impl PartialEq for Entry {
     }
 }
 
+/// Names in a sentence, as the macros' profiles are: "A", "A and B", "A, B and C".
+fn and_list(names: &[String]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
 /// A key no other turn has.
 fn new_key() -> u64 {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -844,6 +853,31 @@ impl Screens {
             }
         }
         true
+    }
+
+    /// What deleting layout `i` takes with it, for the question asked first: the
+    /// playlists that play it, by name, and (where the keyboard keeps a layout by itself,
+    /// `onboard`) the profiles that keep it, named by `name`, whose onboard layout becomes
+    /// Screen off; or that nothing plays it.
+    pub fn delete_says(&self, i: usize, onboard: bool, name: impl Fn(u8) -> String) -> String {
+        let Some(page) = self.library.get(i) else { return String::new() };
+        let lists: Vec<String> = self.playlists.iter().filter(|l| l.turns.iter().any(|e| e.page == page.id)).map(|l| l.name.clone()).collect();
+        let kept: Vec<u8> = PROFILES.into_iter().filter(|p| onboard && self.onboard_of(*p).is_some_and(|k| k.id == page.id)).collect();
+        let mut says = Vec::new();
+        if !lists.is_empty() {
+            let count = ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine"].get(lists.len() - 1).map_or_else(|| lists.len().to_string(), |w| w.to_string());
+            says.push(format!("{} comes off {count} {}: {}.", page.name, if lists.len() == 1 { "playlist" } else { "playlists" }, and_list(&lists)));
+        }
+        match kept.len() {
+            0 => {}
+            1 => says.push(format!("The onboard layout for {} becomes Screen off.", name(kept[0]))),
+            5 => says.push("The onboard layouts for all profiles become Screen off.".into()),
+            _ => says.push(format!("The onboard layouts for {} become Screen off.", and_list(&kept.iter().map(|p| name(*p)).collect::<Vec<_>>()))),
+        }
+        if says.is_empty() {
+            says.push(if onboard { format!("No playlist plays {0}, and no profile keeps {0} on the keyboard.", page.name) } else { format!("No playlist plays {}.", page.name) });
+        }
+        says.join(" ")
     }
 
     pub fn rename(&mut self, id: &str, name: &str) {
@@ -1466,6 +1500,29 @@ mod tests {
         // every layout deleted, the Library stays empty when read back
         while s.delete_page(0) {}
         assert!(Screens::from_json(&s.to_json()).library.is_empty());
+    }
+
+    #[test]
+    fn deleting_a_layout_says_what_goes_with_it() {
+        let mut s = Screens::of(Some(&json!([Page::stats().to_json(), Page::clock().to_json()])), None, None, None);
+        let name = |p: u8| ["Games", "Late night work", "Profile 3", "Profile 4", "Profile 5"][p as usize - 1].to_string();
+        let (stats, clock) = (s.index_of("stats").unwrap(), s.index_of("clock").unwrap());
+        // Playlist 1 plays both; a new playlist, named Games, plays Stats too
+        let games = s.new_playlist(2);
+        s.rename(&games, "Games");
+        assert_eq!(s.delete_says(stats, false, name), "Stats comes off two playlists: Playlist 1 and Games.");
+        assert_eq!(s.delete_says(clock, false, name), "Clock comes off one playlist: Playlist 1.");
+        // where the keyboard keeps a layout by itself, each profile given none keeps Clock
+        assert_eq!(s.delete_says(clock, true, name), "Clock comes off one playlist: Playlist 1. The onboard layouts for all profiles become Screen off.");
+        s.keep_onboard(1, Some("stats"));
+        s.keep_onboard(3, None);
+        assert_eq!(s.delete_says(stats, true, name), "Stats comes off two playlists: Playlist 1 and Games. The onboard layout for Games becomes Screen off.");
+        assert_eq!(s.delete_says(clock, true, name), "Clock comes off one playlist: Playlist 1. The onboard layouts for Late night work, Profile 4 and Profile 5 become Screen off.");
+        // a layout nothing plays
+        let i = s.new_page();
+        assert_eq!(s.delete_says(i, false, name), "No playlist plays Custom.");
+        assert_eq!(s.delete_says(i, true, name), "No playlist plays Custom, and no profile keeps Custom on the keyboard.");
+        assert_eq!(s.delete_says(99, true, name), "");
     }
 
     #[test]

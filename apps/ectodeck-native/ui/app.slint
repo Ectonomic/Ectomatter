@@ -3445,9 +3445,18 @@ export component AppWindow inherits Window {
     // Layouts: every screen layout, its card, one opened in the layout
     // editor's window, a new one made there
     in property <[PlPage]> lib-pages;
-    // a layout's card right-clicked: its menu, where the pointer is
+    // a layout's card selected or right-clicked: its menu, where the pointer is
     callback lib-menu(int, length, length);
     callback lib-new();
+    // are you sure, before a layout is deleted, as the Macro Editor asks: the question,
+    // what goes with the layout, the way back, and the button's words
+    in property <bool> confirm-open;
+    in property <string> confirm-title;
+    in property <string> confirm-body;
+    in property <string> confirm-body2;
+    in property <string> confirm-do;
+    callback confirm-yes();
+    callback confirm-no();
     // the playlist: a turn's layout opened in the layout editor, the turn
     // shown now, moved, taken off
     callback screen-edit(int);
@@ -5262,6 +5271,67 @@ export component AppWindow inherits Window {
     // the menu's height as its rows lay out, which the window works out: Slint
     // lays a list's rows out only as it draws them
     in property <length> menu-natural;
+
+    // are you sure: a scrim over the window, and the question on it, as in the Macro
+    // Editor; Escape is Cancel
+    if root.confirm-open: Rectangle {
+        background: #0a0c0f9e;
+        border-radius: root.radius;
+        TouchArea {
+            clicked => { root.confirm-no(); }
+        }
+        FocusScope {
+            width: 0;
+            height: 0;
+            init => { self.focus(); }
+            key-pressed(e) => {
+                if (e.text == Key.Escape) {
+                    root.confirm-no();
+                    return accept;
+                }
+                reject
+            }
+        }
+        Rectangle {
+            width: min(440px, parent.width - 32px);
+            height: dlg.preferred-height + 40px;
+            border-radius: 12px;
+            background: Ink.shade2;
+            border-width: 1px;
+            border-color: Ink.line;
+            drop-shadow-blur: 60px;
+            drop-shadow-offset-y: 24px;
+            drop-shadow-color: #000000cc;
+            TouchArea { }
+            dlg := VerticalLayout {
+                x: 20px;
+                y: 20px;
+                width: parent.width - 40px;
+                height: self.preferred-height;
+                spacing: 10px;
+                Text { text: root.confirm-title; font-family: "Geist"; font-size: 16px; font-weight: 600; color: Ink.ink; wrap: word-wrap; }
+                Text { text: root.confirm-body; font-family: "Geist"; font-size: 13.5px; color: Ink.dim; wrap: word-wrap; }
+                Text { text: root.confirm-body2; font-family: "Geist"; font-size: 13.5px; color: Ink.dim; wrap: word-wrap; }
+                HorizontalLayout {
+                    padding-top: 8px;
+                    spacing: 8px;
+                    alignment: end;
+                    WordButton { text: "Cancel"; clicked => { root.confirm-no(); } }
+                    Rectangle {
+                        width: del.preferred-width + 28px;
+                        height: 30px;
+                        border-radius: 7px;
+                        background: del-ta.has-hover ? #e25f5b : #d9534f;
+                        del := Text { text: root.confirm-do; font-family: "Geist"; font-size: 13px; font-weight: 600; color: #ffffff; }
+                        del-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.confirm-yes(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------- the Macro Editor
