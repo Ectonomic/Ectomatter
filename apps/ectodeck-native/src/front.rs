@@ -3192,7 +3192,7 @@ impl Front {
         let mut rows = vec![row(1, format!("{}’s onboard layout", self.page.profile_name(n)), false, "")];
         rows.push(row(0, "Screen off".into(), kept.is_none(), ""));
         for p in &self.screens.library {
-            rows.push(row(0, p.name.clone(), kept.as_ref().is_some_and(|(id, _)| *id == p.id), crate::lcd_page::Gaps::of(p).tag()));
+            rows.push(row(0, p.name.clone(), kept.as_ref().is_some_and(|(id, _)| *id == p.id), &crate::lcd_page::Gaps::of(p).tag()));
         }
         rows.push(row(2, String::new(), false, ""));
         match &kept {

@@ -13,7 +13,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -22,8 +22,6 @@ use crate::lcd_stats::Stats;
 
 /// seconds between readings of the Stats page
 const INTERVAL: f64 = 1.0;
-/// how often the page is drawn while it has words scrolling: a cell of their way
-const STEP: f64 = 0.25;
 
 pub fn runtime_dir() -> PathBuf {
     std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(format!("/run/user/{}", unsafe { libc::getuid() })))
@@ -308,9 +306,10 @@ pub struct Core {
     held: Option<f64>,
     /// standing aside: the keyboard shows its own status screen, and nothing is drawn
     pub aside: bool,
-    /// the page showing has words scrolling (`stats` says so as it draws), so it is drawn
-    /// a cell's step at a time rather than once a second
-    pub moving: Arc<AtomicBool>,
+    /// how often the page showing changes between readings, in milliseconds (`stats` says
+    /// so as it draws, see [crate::lcd_page::pace]): an effect every tenth of a second, words
+    /// scrolling a cell's step at a time; 0 while it holds still, drawn once a second
+    pub pace: Arc<AtomicU32>,
 }
 
 impl Core {
@@ -342,14 +341,17 @@ impl Core {
             turn_len: 0.0,
             held: None,
             aside: false,
-            moving: Arc::new(AtomicBool::new(false)),
+            pace: Arc::new(AtomicU32::new(0)),
         }
     }
 
-    /// When the page showing is drawn next: at once a second, or while its words scroll,
-    /// as each cell of their way comes.
+    /// When the page showing is drawn next: once a second, or while it moves (an effect,
+    /// words scrolling), as its next step comes.
     fn next_draw(&self, now: f64) -> f64 {
-        now + if self.moving.load(Ordering::Relaxed) { STEP } else { INTERVAL }
+        now + match self.pace.load(Ordering::Relaxed) {
+            0 => INTERVAL,
+            ms => ms as f64 / 1000.0,
+        }
     }
 
     fn push(&mut self, rows: Vec<String>, now: f64) {
@@ -639,8 +641,8 @@ impl Player {
             // the pages, the one showing, and what they may show besides the computer's readings
             let shared = Arc::new(Mutex::new((vec![crate::lcd_page::Page::stats()], None::<(u8, String)>, None::<(f64, String)>)));
             let current = Arc::new(AtomicUsize::new(0));
-            let moving = Arc::new(AtomicBool::new(false));
-            let (reader, page, at, moves) = (stats.clone(), shared.clone(), current.clone(), moving.clone());
+            let pace = Arc::new(AtomicU32::new(0));
+            let (reader, page, at, moves) = (stats.clone(), shared.clone(), current.clone(), pace.clone());
             // the computer read once a second, however often the page is drawn; and the page
             // showing, and when it came on, which its scrolling words are timed from
             let kept: Mutex<(Option<(Instant, crate::lcd_page::Readings)>, Option<(usize, String, Instant)>)> = Mutex::new((None, None));
@@ -661,7 +663,7 @@ impl Player {
                     k.1 = Some((i, page.id.clone(), Instant::now()));
                 }
                 let t = k.1.as_ref().map_or(0.0, |(_, _, since)| since.elapsed().as_secs_f64());
-                moves.store(crate::lcd_page::moving(page, &r), Ordering::Relaxed);
+                moves.store(crate::lcd_page::pace(page, &r).map_or(0, |s| (s * 1000.0).round() as u32), Ordering::Relaxed);
                 crate::lcd_page::render_at(page, &r, t)
             });
             let seeds = Box::new(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64));
@@ -671,7 +673,7 @@ impl Player {
             core.announce = announce;
             core.paused = paused;
             core.current = current;
-            core.moving = moving;
+            core.pace = pace;
             let start = Instant::now();
             let (mut other, mut other_at) = (other_running(), Instant::now());
             let mut told: Option<(State, Option<&'static str>, usize, bool)> = None;
@@ -844,10 +846,16 @@ mod tests {
         run(&mut core, &clock, 0.0, 3.0);
         let still = sent.lock().unwrap().len();
         assert!((3..=4).contains(&still), "once a second while still: {still}");
-        core.moving.store(true, Ordering::Relaxed);
+        core.pace.store(250, Ordering::Relaxed);
         run(&mut core, &clock, 3.0, 5.0);
         let moving = sent.lock().unwrap().len() - still;
         assert!((7..=9).contains(&moving), "every quarter second while moving: {moving}");
+        // an effect: every tenth of a second
+        core.pace.store(100, Ordering::Relaxed);
+        let before = sent.lock().unwrap().len();
+        run(&mut core, &clock, 5.0, 6.0);
+        let effect = sent.lock().unwrap().len() - before;
+        assert!((9..=11).contains(&effect), "every tenth of a second with an effect: {effect}");
     }
 
     #[test]

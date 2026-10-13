@@ -6365,6 +6365,14 @@ export struct LayoutRow {
 // height it can have from one row on, the nearest column its corner may pull it in to
 // (as narrow as it can be there) and how far its corner can reach (the column after its
 // last free cell), so the corner stops at its neighbors and the screen's edges.
+// An effect's tile in the Effect box: its name, its picture on the screen, and whether
+// it is the one chosen (lit, and its picture moving).
+export struct FxTile {
+    name: string,
+    pic: image,
+    on: bool,
+}
+
 export struct EdBlock {
     row: int,
     col: int,
@@ -6577,6 +6585,9 @@ export component LayoutWindow inherits Window {
     in property <bool> grid;
     in property <bool> ghost-on;
     in property <EdBlock> ghost;
+    // an effect selected: the effects, as tiles in its box
+    in property <[FxTile]> fx-tiles;
+    callback fx-chose(int);
     in property <bool> carry-on;
     in property <string> carry-name;
     in property <int> carry-kind;
@@ -6950,7 +6961,7 @@ export component LayoutWindow inherits Window {
             border-top-left-radius: 12px;
             border-top-right-radius: 12px;
             background: Ink.box;
-            for name[k] in ["Text", "Data", "Bar"]: BlockChip {
+            for name[k] in ["Text", "Data", "Bar", "Effect"]: BlockChip {
                 x: 16px + k * 94px;
                 y: 16px;
                 text: name;
@@ -6963,7 +6974,7 @@ export component LayoutWindow inherits Window {
             }
             // (whole or not at all: in a narrow window it steps aside for the backlight)
             Text {
-                x: 16px + 3 * 94px + 10px;
+                x: 16px + 4 * 94px + 10px;
                 y: 16px;
                 width: light-row.x - self.x - 16px;
                 height: 24px;
@@ -7253,7 +7264,9 @@ export component LayoutWindow inherits Window {
                         y: at-row * ch;
                         width: show-w * cw;
                         height: show-h * ch;
-                        z: b.on ? 2 : b.fx ? 0 : 1;
+                        // (an effect stays behind the other blocks, selected too, so the blocks on
+                        // it can still be selected)
+                        z: b.fx ? 0 : b.on ? 2 : 1;
                         // (the outline a pixel in from the block's cells, as the grid's lines are between them)
                         Rectangle {
                             x: 1px;
@@ -7452,6 +7465,55 @@ export component LayoutWindow inherits Window {
                         color: Ink.quiet;
                         vertical-alignment: center;
                         overflow: elide;
+                    }
+                }
+            }
+            // an effect selected: the effects as tiles, four to a row, built as the Lighting
+            // tab's Effect grid is: each a well with its picture under a film and its name, the
+            // chosen one lit and only its picture moving
+            if root.box-kind == 4: Rectangle {
+                property <length> tw: (self.width - 32px - 24px) / 4;
+                for t[k] in root.fx-tiles: Rectangle {
+                    x: 16px + mod(k, 4) * (parent.tw + 8px);
+                    y: 50px + floor(k / 4) * (76px + 8px);
+                    width: parent.tw;
+                    height: 76px;
+                    border-radius: 10px;
+                    background: t.on ? (tile-ta.has-hover ? Ink.pick-hover : Ink.pick) : tile-ta.has-hover ? Ink.hover-box : Ink.well;
+                    Rectangle {
+                        x: 6px;
+                        y: 6px;
+                        width: parent.width - 12px;
+                        height: 40px;
+                        border-radius: 6px;
+                        clip: true;
+                        background: #0c0e10;
+                        // (the screen's own shape, across the tile and in its middle)
+                        Image {
+                            width: parent.width;
+                            height: parent.width / 5;
+                            source: t.pic;
+                            image-fit: fill;
+                        }
+                        // the film every picture sits under
+                        Rectangle {
+                            background: Ink.pick.with-alpha(0.35);
+                        }
+                    }
+                    Text {
+                        y: 53px;
+                        height: 15px;
+                        width: parent.width;
+                        text: t.name;
+                        font-size: 12px;
+                        font-weight: t.on ? 500 : 400;
+                        color: t.on || tile-ta.has-hover ? Ink.bright : Ink.soft;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    tile-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.fx-chose(k); }
                     }
                 }
             }

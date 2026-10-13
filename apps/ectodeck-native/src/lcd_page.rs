@@ -199,6 +199,8 @@ impl Source {
     }
 }
 
+pub use crate::lcd_fx::Fx;
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Kind {
     Text(String),
@@ -207,6 +209,9 @@ pub enum Kind {
     Bar(Source),
     /// the time; on a 12-hour clock rather than a 24-hour one
     Clock(bool),
+    /// a moving pattern behind the other blocks (see [crate::lcd_fx]): which, how fast (0
+    /// slow to 100 fast), and the word Bounce bounces
+    Effect { fx: Fx, speed: u8, word: String },
 }
 
 /// How a Data block showing the date writes it: written out, from the weekday alone to the
@@ -491,7 +496,7 @@ impl Page {
         let mut shown: Vec<String> = Vec::new();
         for p in &self.pieces {
             let what = match &p.kind {
-                Kind::Text(_) => continue,
+                Kind::Text(_) | Kind::Effect { .. } => continue,
                 Kind::Data(s, _) | Kind::Bar(s) => s.phrase().to_string(),
                 Kind::Clock(_) => "the time".to_string(),
             };
@@ -508,14 +513,31 @@ impl Page {
         // (the computer's readings come every second)
         let computer = !shown.is_empty() && shown.iter().all(|w| ["CPU", "GPU", "RAM", "VRAM"].contains(&w.as_str()));
         let list = if computer { format!("{list}, every second") } else { list };
-        match (said.is_empty(), list.is_empty()) {
-            (true, true) => "An empty screen layout.".into(),
-            (false, true) => format!("{words}."),
-            (false, false) if own => format!("{words}, with {list}."),
-            _ => {
-                let mut c = list.chars();
-                c.next().map_or(String::new(), |f| f.to_uppercase().chain(c).collect::<String>() + ".")
+        // (and the effects it shows behind them: "The time, over rain.")
+        let mut effects: Vec<String> = Vec::new();
+        for p in &self.pieces {
+            if let Kind::Effect { fx, .. } = &p.kind {
+                let name = fx.name().to_lowercase();
+                if !effects.contains(&name) {
+                    effects.push(name);
+                }
             }
+        }
+        let capital = |s: &str| {
+            let mut c = s.chars();
+            c.next().map_or(String::new(), |f| f.to_uppercase().chain(c).collect::<String>())
+        };
+        let said = match (said.is_empty(), list.is_empty()) {
+            (true, true) => String::new(),
+            (false, true) => words,
+            (false, false) if own => format!("{words}, with {list}"),
+            _ => capital(&list),
+        };
+        match (said.is_empty(), effects.is_empty()) {
+            (true, true) => "An empty screen layout.".into(),
+            (true, false) => format!("{}.", capital(&and_list(&effects))),
+            (false, true) => format!("{said}."),
+            (false, false) => format!("{said}, over {}.", and_list(&effects)),
         }
     }
 
@@ -556,6 +578,12 @@ impl Page {
                         v["type"] = json!("clock");
                         v["twelve"] = json!(twelve);
                     }
+                    Kind::Effect { fx, speed, word } => {
+                        v["type"] = json!("effect");
+                        v["effect"] = json!(fx.key());
+                        v["speed"] = json!(speed);
+                        v["word"] = json!(word);
+                    }
                 }
                 v
             })
@@ -581,6 +609,11 @@ impl Page {
                     "data" => Kind::Data(Source::from_key(p["source"].as_str()?)?, p["fahrenheit"].as_bool().unwrap_or(false)),
                     "bar" => Kind::Bar(Source::from_key(p["source"].as_str()?)?),
                     "clock" => Kind::Clock(p["twelve"].as_bool().unwrap_or(false)),
+                    "effect" => Kind::Effect {
+                        fx: Fx::from_key(p["effect"].as_str()?)?,
+                        speed: b(&p["speed"]).unwrap_or(50).min(100),
+                        word: p["word"].as_str().unwrap_or("EVGA").chars().take(COLS as usize).collect(),
+                    },
                     _ => return None,
                 };
                 let row = b(&p["row"])?.min(ROWS - 1);
@@ -1108,13 +1141,14 @@ pub fn least(p: &Piece, r: &Readings) -> u8 {
 }
 
 /// The fewest cells a piece can be, `height` rows tall: words any width (they carry on,
-/// scroll or are cut off); a bar three, its ends and a cell to fill; a reading on one row
+/// scroll or are cut off), and an effect; a bar three, its ends and a cell to fill; a reading on one row
 /// as long as it is (a reading that can't be had, one), and on more rows any width, as
 /// small as its maker likes (it carries on to the next row, and what still doesn't fit
 /// stops after the last).
 pub fn least_at(p: &Piece, r: &Readings, height: u8) -> u8 {
     match &p.kind {
         k if is_words(k) => 1,
+        Kind::Effect { .. } => 1,
         Kind::Bar(_) => 3,
         _ if height > 1 => 1,
         _ => show(p, r).map_or(1, |s| s.chars().count().clamp(1, COLS as usize) as u8),
@@ -1145,6 +1179,8 @@ fn show(p: &Piece, r: &Readings) -> Result<String, &'static str> {
         Kind::Text(t) => Ok(ectotype_core::lcd::lcd_text(t)),
         Kind::Data(s, f) => text_of(*s, *f, p.date_format, r).ok_or(fail(*s)),
         Kind::Bar(s) => share_of(*s, r).map(|v| bar(v, p.width)).ok_or(fail(*s)),
+        // (an effect draws its pattern, not words: see [lay_out])
+        Kind::Effect { .. } => Ok(String::new()),
         Kind::Clock(twelve) => {
             let m = r.now.ok_or("")?;
             Ok(if *twelve {
@@ -1168,12 +1204,23 @@ pub fn render_at(page: &Page, r: &Readings, t: f64) -> Vec<String> {
     lay_out(page, r, t).0
 }
 
-/// Whether the page has words that scroll now (more than fit their block, with Scroll
-/// chosen), so its rows change between readings.
+/// Whether the page's rows change between readings: an effect on it, or words that scroll
+/// now (more than fit their block, with Scroll chosen).
 pub fn moving(page: &Page, r: &Readings) -> bool {
-    page.pieces.iter().filter(|p| is_words(&p.kind) && p.scroll).any(|p| {
-        show(p, r).is_ok_and(|s| if p.height <= 1 { s.chars().count() > p.width as usize } else { wrap(&s, p.width as usize).len() > p.height as usize })
-    })
+    pace(page, r).is_some()
+}
+
+/// How often the page's picture changes between readings, in seconds: an effect's tenth of
+/// a second, a quarter for words scrolling a cell at a time; None while it holds still.
+pub fn pace(page: &Page, r: &Readings) -> Option<f64> {
+    if page.pieces.iter().any(|p| matches!(p.kind, Kind::Effect { .. })) {
+        return Some(0.1);
+    }
+    page.pieces
+        .iter()
+        .filter(|p| is_words(&p.kind) && p.scroll)
+        .any(|p| show(p, r).is_ok_and(|s| if p.height <= 1 { s.chars().count() > p.width as usize } else { wrap(&s, p.width as usize).len() > p.height as usize }))
+        .then_some(0.25)
 }
 
 /// Words set in a width: at its left, in its middle (any odd space after) or at its right.
@@ -1292,7 +1339,7 @@ pub fn onboard_can(kind: &Kind) -> bool {
     match kind {
         Kind::Text(_) | Kind::Clock(_) => true,
         Kind::Data(s, _) => matches!(s, Source::Date | Source::Profile | Source::ProfileNumber | Source::GameMode | Source::KeyRollover),
-        Kind::Bar(_) => false,
+        Kind::Bar(_) | Kind::Effect { .. } => false,
     }
 }
 
@@ -1313,6 +1360,8 @@ pub fn render_onboard(page: &Page, r: &Readings) -> Vec<String> {
 pub struct Gaps {
     pub readings: Vec<&'static str>,
     pub bars: bool,
+    /// the effects, by name
+    pub effects: Vec<&'static str>,
 }
 
 impl Gaps {
@@ -1321,6 +1370,11 @@ impl Gaps {
         for p in &page.pieces {
             match &p.kind {
                 Kind::Bar(_) => g.bars = true,
+                Kind::Effect { fx, .. } => {
+                    if !g.effects.contains(&fx.name()) {
+                        g.effects.push(fx.name());
+                    }
+                }
                 Kind::Data(s, _) if !onboard_can(&p.kind) => {
                     let what = match s {
                         Source::CpuTemp | Source::CpuLoad | Source::CpuClock => "CPU",
@@ -1341,31 +1395,47 @@ impl Gaps {
     /// The line under the screen while the page is the onboard layout: what the keyboard
     /// leaves blank, and why. None when it leaves nothing out.
     pub fn line(&self) -> Option<String> {
-        let what = match self.readings.len() {
-            0 => String::new(),
-            1 => self.readings[0].to_string(),
-            n => format!("{} and {}", self.readings[..n - 1].join(", "), self.readings[n - 1]),
-        };
-        let parts = match (what.is_empty(), self.bars) {
-            (true, false) => return None,
-            (true, true) => "Bars".to_string(),
-            (false, false) => format!("{what} readings"),
-            (false, true) => format!("{what} readings and bars"),
-        };
+        let (parts, one) = self.parts();
+        if parts.is_empty() {
+            return None;
+        }
         // (a sentence starts with a capital: "Weather readings", "CPU readings")
-        let mut c = parts.chars();
-        let parts = c.next().map_or(String::new(), |f| f.to_uppercase().chain(c).collect());
-        Some(format!("{parts} need Ectodeck, so the keyboard leaves them blank."))
+        let mut c = and_list(&parts).chars().collect::<Vec<_>>().into_iter();
+        let list: String = c.next().map_or(String::new(), |f| f.to_uppercase().chain(c).collect());
+        Some(if one { format!("{list} needs Ectodeck, so the keyboard leaves it blank.") } else { format!("{list} need Ectodeck, so the keyboard leaves them blank.") })
     }
 
     /// The page's note in the menu of onboard layouts, before it is chosen.
-    pub fn tag(&self) -> &'static str {
-        match (self.readings.is_empty(), self.bars) {
-            (true, false) => "",
-            (true, true) => "Bars stay blank",
-            (false, false) => "Readings stay blank",
-            (false, true) => "Readings and bars stay blank",
+    pub fn tag(&self) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        if !self.readings.is_empty() {
+            parts.push("Readings".into());
         }
+        if self.bars {
+            parts.push(if parts.is_empty() { "Bars" } else { "bars" }.into());
+        }
+        parts.extend(self.effects.iter().map(|e| e.to_string()));
+        match parts.len() {
+            0 => String::new(),
+            1 if self.readings.is_empty() && !self.bars => format!("{} stays blank", parts[0]),
+            _ => format!("{} stay blank", and_list(&parts)),
+        }
+    }
+
+    /// What the keyboard leaves blank, as a sentence names them ("CPU readings", "bars",
+    /// "Rain"), and whether that is one thing (an effect, which takes "needs" and "it").
+    fn parts(&self) -> (Vec<String>, bool) {
+        let mut parts = Vec::new();
+        if !self.readings.is_empty() {
+            let what: Vec<String> = self.readings.iter().map(|r| r.to_string()).collect();
+            parts.push(format!("{} readings", and_list(&what)));
+        }
+        if self.bars {
+            parts.push("bars".to_string());
+        }
+        parts.extend(self.effects.iter().map(|e| e.to_string()));
+        let one = parts.len() == 1 && self.readings.is_empty() && !self.bars;
+        (parts, one)
     }
 }
 
@@ -1384,18 +1454,34 @@ pub fn spans(page: &Page, r: &Readings) -> Vec<(u8, usize, usize)> {
 fn lay_out(page: &Page, r: &Readings, t: f64) -> (Vec<String>, Vec<(u8, usize, usize)>) {
     let mut said: Vec<&'static str> = Vec::new();
     let mut spans: Vec<(u8, usize, usize)> = page.pieces.iter().map(|p| (p.row, p.col as usize, p.width as usize)).collect();
-    let tall = |p: &Piece| p.height > 1;
+    let effect = |p: &Piece| matches!(p.kind, Kind::Effect { .. });
+    let tall = |p: &Piece| p.height > 1 && !effect(p);
     // the taller pieces' own rows, or what they read from when they can't be read
     let walls: Vec<(&Piece, Result<Vec<String>, &'static str>)> = page.pieces.iter().filter(|p| tall(p)).map(|p| (p, show(p, r).map(|s| block_rows(p, &s, t)))).collect();
+    // the effects, behind every other block: each fills its own cells from its pattern at
+    // its moment, and the other blocks cover it in theirs
+    let mut behind = vec![vec![' '; COLS as usize]; ROWS as usize];
+    for p in page.pieces.iter().filter(|p| effect(p)) {
+        if let Kind::Effect { fx, speed, word } = &p.kind {
+            let sound = if *fx == Fx::Spectrum { crate::sound::bands() } else { [0.0; 20] };
+            let f = crate::lcd_fx::frame(*fx, crate::lcd_fx::tenths(t, *speed), &ectotype_core::lcd::lcd_text(word), &sound);
+            for row in p.row..(p.row + p.height.max(1)).min(ROWS) {
+                for c in p.col..(p.col + p.width).min(COLS) {
+                    behind[row as usize][c as usize] = f[row as usize][c as usize];
+                }
+            }
+        }
+    }
     let rows = (0..ROWS)
         .map(|row| {
-            let mut pieces: Vec<(usize, &Piece)> = page.pieces.iter().enumerate().filter(|(_, p)| p.row == row && !tall(p)).collect();
+            let mut pieces: Vec<(usize, &Piece)> = page.pieces.iter().enumerate().filter(|(_, p)| p.row == row && !tall(p) && !effect(p)).collect();
             pieces.sort_by_key(|(_, p)| p.col);
             let through: Vec<&(&Piece, Result<Vec<String>, &'static str>)> = walls.iter().filter(|(p, _)| p.row <= row && row < p.row + p.height).collect();
             let shown: Vec<Result<String, &'static str>> = pieces.iter().map(|(_, p)| show(p, r)).collect();
             // (a taller piece that can't be read says so on its top row)
             let failed: Vec<&'static str> = shown.iter().filter_map(|s| s.as_ref().err().copied()).chain(through.iter().filter(|(p, _)| p.row == row).filter_map(|(_, w)| w.as_ref().err().copied())).collect();
-            let mut out = String::new();
+            // (each piece's words where they start in the row; between them the effects show)
+            let mut drawn: Vec<(usize, String)> = Vec::new();
             if !failed.is_empty() {
                 let new = failed.iter().any(|f| !said.contains(f));
                 for f in &failed {
@@ -1420,7 +1506,7 @@ fn lay_out(page: &Page, r: &Readings, t: f64) -> (Vec<String>, Vec<(u8, usize, u
                             })
                             .unwrap_or_default()
                     });
-                    out = format!("{label} unavailable");
+                    drawn.push((0, format!("{label} unavailable")));
                 }
             } else {
                 let mut cursor = 0usize;
@@ -1435,23 +1521,28 @@ fn lay_out(page: &Page, r: &Readings, t: f64) -> (Vec<String>, Vec<(u8, usize, u
                         continue;
                     }
                     let text: String = text.chars().take(limit - start).collect();
-                    out.push_str(&" ".repeat(start.saturating_sub(cursor)));
                     let len = text.chars().count();
                     spans[*i] = (row, start, len);
                     cursor = start + len;
-                    out.push_str(&text);
+                    drawn.push((start, text));
                 }
             }
-            // the taller pieces' rows, over the cells they keep
-            let mut cells: Vec<char> = out.chars().collect();
+            // over the effects, the row's pieces, then the taller pieces' rows over the cells
+            // they keep
+            let mut cells: Vec<char> = behind[row as usize].clone();
+            let mut put = |at: usize, line: &str| {
+                let line: Vec<char> = line.chars().collect();
+                if cells.len() < at + line.len() {
+                    cells.resize(at + line.len(), ' ');
+                }
+                cells[at..at + line.len()].copy_from_slice(&line);
+            };
+            for (at, text) in &drawn {
+                put(*at, text);
+            }
             for (p, w) in &through {
                 if let Ok(rows) = w {
-                    let a = p.col as usize;
-                    let line: Vec<char> = rows[(row - p.row) as usize].chars().collect();
-                    if cells.len() < a + line.len() {
-                        cells.resize(a + line.len(), ' ');
-                    }
-                    cells[a..a + line.len()].copy_from_slice(&line);
+                    put(p.col as usize, &rows[(row - p.row) as usize]);
                 }
             }
             cells.into_iter().collect::<String>().trim_end().to_string()
@@ -1581,7 +1672,7 @@ mod tests {
         // the Clock layout, the time and the date, it draws whole
         let clock = Page::clock();
         assert_eq!(render_onboard(&clock, &r), render(&clock, &r));
-        assert_eq!((Gaps::of(&clock).line(), Gaps::of(&clock).tag()), (None, ""));
+        assert_eq!((Gaps::of(&clock).line(), Gaps::of(&clock).tag()), (None, String::new()));
         // the weather, and a bar: named as what they are
         assert_eq!(Gaps::of(&Page::weather()).line().unwrap(), "Weather readings need Ectodeck, so the keyboard leaves them blank.");
         let mut barred = Page::blank();
@@ -1661,6 +1752,35 @@ mod tests {
         m.pieces[0].date_format = DateFormat::Iso;
         let back = Page::from_json(&m.to_json()).unwrap();
         assert_eq!((back.pieces[0].height, back.pieces[1].height), (3, 2));
+    }
+
+    #[test]
+    fn an_effect_lies_behind_the_other_blocks() {
+        let r = Readings { now: Some(Moment { hour: 4, minute: 40, weekday: 2, day: 13, month: 9, year: 2026 }), ..Readings::default() };
+        let rain = Piece { kind: Kind::Effect { fx: Fx::Rain, speed: 50, word: String::new() }, row: 0, col: 0, width: 20, right: false, center: false, gap: 1, height: 4, scroll: true, date_format: DateFormat::Short };
+        let time = Piece { kind: Kind::Clock(false), row: 1, col: 7, width: 5, right: false, center: false, gap: 1, height: 1, scroll: true, date_format: DateFormat::Short };
+        let p = Page { pieces: vec![rain.clone(), time], ..Page::blank() };
+        let rows = render_at(&p, &r, 4.0);
+        let fx: Vec<String> = crate::lcd_fx::frame(Fx::Rain, crate::lcd_fx::tenths(4.0, 50), "", &[0.0; 20]).iter().map(|row| row.iter().collect()).collect();
+        // the time covers the rain in its own five cells, and the rain falls round it
+        assert_eq!(&rows[1].chars().skip(7).take(5).collect::<String>(), "04:40");
+        for (k, row) in rows.iter().enumerate() {
+            let mine: Vec<char> = format!("{row:<20}").chars().collect();
+            let theirs: Vec<char> = fx[k].chars().collect();
+            for c in 0..20 {
+                if !(k == 1 && (7..12).contains(&c)) {
+                    assert_eq!(mine[c], theirs[c], "row {k}, cell {c}");
+                }
+            }
+        }
+        // it moves, so the screen is drawn every tenth of a second, and it is kept as it was made
+        assert_eq!(pace(&p, &r), Some(0.1));
+        let back = Page::from_json(&p.to_json()).unwrap();
+        assert_eq!(back.pieces[0], rain);
+        // the keyboard can't draw it by itself, and says so by its name
+        assert_eq!(Gaps::of(&p).line().unwrap(), "Rain needs Ectodeck, so the keyboard leaves it blank.");
+        assert_eq!(Gaps::of(&p).tag(), "Rain stays blank");
+        assert_eq!(p.about(), "The time, over rain.");
     }
 
     #[test]

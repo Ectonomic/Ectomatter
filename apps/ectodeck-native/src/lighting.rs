@@ -70,9 +70,11 @@ pub enum Ctl {
     ScrLight,
     /// how a block showing the date writes it (the menu)
     ScrFormat,
+    /// how fast an effect moves
+    ScrSpeed,
 }
 
-const CTLS: [Ctl; 44] = [
+const CTLS: [Ctl; 45] = [
     Ctl::None,
     Ctl::Color,
     Ctl::Colors,
@@ -117,6 +119,7 @@ const CTLS: [Ctl; 44] = [
     Ctl::ScrRemove,
     Ctl::ScrLight,
     Ctl::ScrFormat,
+    Ctl::ScrSpeed,
 ];
 
 pub fn ctl(id: i32) -> Ctl {

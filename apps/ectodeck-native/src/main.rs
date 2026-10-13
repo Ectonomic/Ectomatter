@@ -26,10 +26,12 @@ mod ecto_settings;
 mod front;
 mod kde_output;
 mod shadow;
+mod sound;
 mod lab;
 mod layout_page;
 mod lcd_anim;
 mod lcd_draw;
+mod lcd_fx;
 mod lcd_page;
 #[cfg(test)]
 mod lcd_parity;

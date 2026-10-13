@@ -25,15 +25,27 @@ pub enum Shows {
     Time,
 }
 
-/// The kind of block a piece is, as the editor names it: 1 Text, 2 Data, 3 Bar
+/// The kind of block a piece is, as the editor names it: 1 Text, 2 Data, 3 Bar, 4 Effect
 /// (0 is nothing selected). The time is a Data block.
 pub fn block_kind(k: &Kind) -> i32 {
     match k {
         Kind::Text(_) => 1,
         Kind::Data(..) | Kind::Clock(_) => 2,
         Kind::Bar(_) => 3,
+        Kind::Effect { .. } => 4,
     }
 }
+
+/// Whether a piece is an effect, which lies behind the other blocks: effects take cells
+/// only from each other, and every other block can sit on one.
+pub fn behind(p: &Piece) -> bool {
+    matches!(p.kind, Kind::Effect { .. })
+}
+
+/// How tall the effects' tiles are in the Effect box, four to a row, for the groups under them.
+pub const TILES_H: f32 = 3.0 * 76.0 + 2.0 * 8.0;
+/// What the Effect box says under its tiles.
+const UNDER: &str = "Blocks placed on the effect cover the effect in their own cells. Drag the handle on the effect’s corner to change how much of the screen the effect fills.";
 
 /// The box under the screen: its kind (as [block_kind]), its title, its
 /// cells in its own terms, and its height.
@@ -118,6 +130,17 @@ impl Grid {
         self.cells.push(Cell { text: words.into(), style: 7, id: id(c), ..cell(kind::FIELD, self.x(), self.y + top, self.col_w(), 34.0) });
         self.done(top + 34.0);
     }
+    /// a slider, as the Lighting tab's speed is, filled to `frac`, the words for its two
+    /// ends beside it
+    fn slider(&mut self, label: &str, c: Ctl, frac: f32, ends: (&str, &str)) {
+        let top = self.head(label, None);
+        let (x, w, y) = (self.x(), self.col_w(), self.y + top);
+        let (lw, rw) = (crate::text::width(400, 11.0, ends.0).ceil(), crate::text::width(400, 11.0, ends.1).ceil());
+        self.cells.push(text_cell(style::END_L, x, y + 7.0, lw, 20.0, ends.0));
+        self.cells.push(Cell { value: frac, color: slint::Color::from_rgb_u8(0xa1, 0xa1, 0xaa), id: id(c), style: 3, ..cell(kind::FILLED, x + lw + 10.0, y + 7.0, w - lw - rw - 20.0, 20.0) });
+        self.cells.push(text_cell(style::END_R, x + w - rw, y + 7.0, rw, 20.0, ends.1));
+        self.done(top + 34.0);
+    }
     fn value(&mut self, label: &str, v: &str) {
         let h = self.head(label, Some(v));
         self.done(h - 6.0);
@@ -194,6 +217,15 @@ pub fn block_box(page: &Page, chosen: Option<usize>, r: &Readings, avail: &[Sour
             g.note(Some("From"), "This computer’s clock");
             g.note(None, DRAG);
         }
+        Kind::Effect { fx, speed, word } => {
+            // (under the effects' tiles, which the window draws)
+            g.y += TILES_H + 14.0;
+            if *fx == crate::lcd_page::Fx::Bounce {
+                g.field("Word", Ctl::ScrText, word);
+            }
+            g.slider("Speed", Ctl::ScrSpeed, *speed as f32 / 100.0, ("Slow", "Fast"));
+            g.note(None, UNDER);
+        }
         Kind::Bar(src) => {
             g.dropdown("Shows", Ctl::ScrSource, src.name(), open == Some(Ctl::ScrSource));
             g.value("Looks like", &looks(p, r));
@@ -202,7 +234,7 @@ pub fn block_box(page: &Page, chosen: Option<usize>, r: &Readings, avail: &[Sour
         }
     }
     let (cells, h) = g.height();
-    let title = ["", "Text", "Data", "Bar"][block_kind(&p.kind) as usize].to_string();
+    let title = ["", "Text", "Data", "Bar", "Effect"][block_kind(&p.kind) as usize].to_string();
     BlockBox { kind: block_kind(&p.kind), title, cells, h }
 }
 
@@ -268,7 +300,7 @@ pub fn shows_of(p: &Piece) -> Option<Shows> {
     match p.kind {
         Kind::Data(s, _) | Kind::Bar(s) => Some(Shows::Reading(s)),
         Kind::Clock(_) => Some(Shows::Time),
-        Kind::Text(_) => None,
+        Kind::Text(_) | Kind::Effect { .. } => None,
     }
 }
 
@@ -282,12 +314,13 @@ pub fn act(page: &mut Page, ed: &mut Editor, c: Ctl, index: usize, words: Option
     }
     let p = &mut page.pieces[i];
     match c {
-        Ctl::ScrText => {
+        Ctl::ScrText => match (&mut p.kind, words) {
+            // (Bounce's word, as wide as the screen)
+            (Kind::Effect { word, .. }, Some(t)) => *word = t.chars().take(COLS as usize).collect(),
             // (a whole screen's worth, since words that don't fit can scroll)
-            if let Some(t) = words {
-                p.kind = Kind::Text(t.chars().take((COLS * ROWS) as usize).collect());
-            }
-        }
+            (_, Some(t)) => p.kind = Kind::Text(t.chars().take((COLS * ROWS) as usize).collect()),
+            _ => {}
+        },
         Ctl::ScrFit => p.scroll = index == 1,
         Ctl::ScrUnits => {
             if let Kind::Data(s, _) = p.kind {
@@ -300,6 +333,20 @@ pub fn act(page: &mut Page, ed: &mut Editor, c: Ctl, index: usize, words: Option
             p.right = index == 2;
         }
         _ => {}
+    }
+}
+
+/// The chosen effect's speed, from its slider (0 slow to 1 fast).
+pub fn set_speed(page: &mut Page, ed: &Editor, v: f32) {
+    if let Some(Kind::Effect { speed, .. }) = ed.chosen.and_then(|i| page.pieces.get_mut(i)).map(|p| &mut p.kind) {
+        *speed = (v.clamp(0.0, 1.0) * 100.0).round() as u8;
+    }
+}
+
+/// The chosen effect becomes another, from its tile; its speed and word stay.
+pub fn set_fx(page: &mut Page, ed: &Editor, to: crate::lcd_page::Fx) {
+    if let Some(Kind::Effect { fx, .. }) = ed.chosen.and_then(|i| page.pieces.get_mut(i)).map(|p| &mut p.kind) {
+        *fx = to;
     }
 }
 
@@ -382,34 +429,68 @@ pub fn room(page: &Page, i: usize, least: impl Fn(u8) -> u8) -> [Option<u8>; ROW
 /// room for words to start. (A block on the screen can be made narrower.)
 pub const NEW_LEAST: u8 = 3;
 
-/// A new block: `what` 0 Text, 1 Data, 2 Bar, at `at` (its row, first column and width,
-/// from [fit]), or else in the first free cells it fits (see [first_room]); chosen.
-/// `first` is a reading this computer has, which a new Data block shows. Whether there
-/// was room for it.
-pub fn add(page: &mut Page, ed: &mut Editor, what: usize, first: Source, r: &Readings, at: Option<(u8, u8, u8)>) -> bool {
+/// A new block: `what` 0 Text, 1 Data, 2 Bar, 3 Effect, at `at` (its row, first column,
+/// width and height, from [fit] or [effect_spot]), or else in the first free cells it fits
+/// (see [first_room]; an effect, the whole screen or what other effects leave of it);
+/// chosen. `first` is a reading this computer has, which a new Data block shows. Whether
+/// there was room for it.
+pub fn add(page: &mut Page, ed: &mut Editor, what: usize, first: Source, r: &Readings, at: Option<(u8, u8, u8, u8)>) -> bool {
     let (kind, width, right) = new_block(what, first);
     let mut p = Piece { kind, row: 0, col: 0, width, right, center: false, gap: 1, height: 1, scroll: true, date_format: Default::default() };
-    let least = crate::lcd_page::least(&p, r).max(NEW_LEAST).min(width);
-    let Some((row, col, width)) = at.or_else(|| first_room(page, width, least)) else { return false };
-    (p.row, p.col, p.width) = (row, col, width);
+    let at = if what == 3 {
+        at.or_else(|| effect_spot(page, None))
+    } else {
+        let least = crate::lcd_page::least(&p, r).max(NEW_LEAST).min(width);
+        at.or_else(|| first_room(page, width, least).map(|(row, col, w)| (row, col, w, 1)))
+    };
+    let Some((row, col, width, height)) = at else { return false };
+    (p.row, p.col, p.width, p.height) = (row, col, width, height);
     page.pieces.push(p);
     ed.chosen = Some(page.pieces.len() - 1);
     true
 }
 
-/// A new block of a kind, as it starts: its kind, width, and whether set against its right edge.
+/// A new block of a kind, as it starts: its kind, width, and whether set against its right
+/// edge. An effect starts as Rain, across the screen.
 pub fn new_block(what: usize, first: Source) -> (Kind, u8, bool) {
     match what {
         0 => (Kind::Text("TEXT".into()), 4, false),
         1 => (Kind::Data(first, false), 7, true),
-        _ => (Kind::Bar(if first.barred() { first } else { Source::CpuLoad }), 10, false),
+        2 => (Kind::Bar(if first.barred() { first } else { Source::CpuLoad }), 10, false),
+        _ => (Kind::Effect { fx: crate::lcd_page::Fx::Rain, speed: 50, word: "EVGA".into() }, COLS, false),
     }
+}
+
+/// Where a new effect goes, put at cell (`row`, `col`), or added with no cell (None): the
+/// whole screen while no other effect is on it; else the cells round that one (or the first
+/// free) that no effect takes, as wide as their run in its row and as many rows as that run
+/// stays free, as its row, first column, width and height. None on another effect, or when
+/// effects fill the screen.
+pub fn effect_spot(page: &Page, at: Option<(u8, u8)>) -> Option<(u8, u8, u8, u8)> {
+    let effects: Vec<&Piece> = page.pieces.iter().filter(|p| behind(p)).collect();
+    if effects.is_empty() {
+        return Some((0, 0, COLS, ROWS));
+    }
+    let free = |row: u8, col: u8| !effects.iter().any(|q| covers(q, row) && col >= q.col && col < q.col + q.width);
+    let (row, col) = match at {
+        Some(rc) => Some(rc).filter(|&(r, c)| free(r, c))?,
+        None => (0..ROWS).flat_map(|r| (0..COLS).map(move |c| (r, c))).find(|&(r, c)| free(r, c))?,
+    };
+    let lo = (0..=col).rev().take_while(|&c| free(row, c)).last()?;
+    let hi = (col..COLS).take_while(|&c| free(row, c)).last()? + 1;
+    let whole = |r: u8| (lo..hi).all(|c| free(r, c));
+    let top = (0..=row).rev().take_while(|&r| whole(r)).last()?;
+    let bottom = (row..ROWS).take_while(|&r| whole(r)).last()?;
+    Some((top, lo, hi - lo, bottom - top + 1))
 }
 
 /// The free cells round cell `col` of `row`, which no block but `skip` (one being moved)
 /// takes: the first column and the column after the last. None where a block takes the cell.
+/// Effects lie behind the other blocks: for an effect (`skip` one) only effects take cells,
+/// and for any other block only the other blocks do.
 pub fn run_at(page: &Page, row: u8, col: u8, skip: Option<usize>) -> Option<(u8, u8)> {
-    let others = page.pieces.iter().enumerate().filter(|(k, p)| Some(*k) != skip && covers(p, row));
+    let layer = skip.and_then(|i| page.pieces.get(i)).is_some_and(behind);
+    let others = page.pieces.iter().enumerate().filter(|(k, p)| Some(*k) != skip && behind(p) == layer && covers(p, row));
     if others.clone().any(|(_, p)| col >= p.col && col < p.col + p.width) {
         return None;
     }
@@ -528,6 +609,28 @@ mod tests {
         }
         assert_eq!(first_room(&row, 7, 3), Some((0, 16, 4)));
         assert_eq!(first_room(&row, 7, 5), None);
+    }
+
+    #[test]
+    fn effects_lie_behind_the_blocks_and_never_overlap_each_other() {
+        let r = Readings::default();
+        let mut p = Page::stats();
+        let mut ed = Editor { page: 0, chosen: None, grid: true };
+        // dropped on a full screen of blocks, an effect fills the whole screen behind them
+        assert!(add(&mut p, &mut ed, 3, Source::CpuTemp, &r, None));
+        let fx = p.pieces.len() - 1;
+        assert_eq!((p.pieces[fx].row, p.pieces[fx].col, p.pieces[fx].width, p.pieces[fx].height), (0, 0, 20, 4));
+        // another can't go on it
+        assert_eq!(effect_spot(&p, None), None);
+        assert!(!add(&mut p, &mut ed, 3, Source::CpuTemp, &r, None));
+        // cut to the left half, it leaves the right half to a second effect
+        ed.chosen = Some(fx);
+        size_to(&mut p, fx, 10, 4, |_| 1);
+        assert_eq!((p.pieces[fx].width, p.pieces[fx].height), (10, 4), "the blocks on it don't stop its corner");
+        assert_eq!(effect_spot(&p, Some((2, 15))), Some((0, 10, 10, 4)));
+        assert_eq!(effect_spot(&p, Some((2, 5))), None, "on the first effect");
+        // and the blocks on an effect still take their cells only from each other
+        assert_eq!(run_at(&p, 0, 3, None), Some((3, 4)), "the cell between CPU and its temperature");
     }
 
     #[test]

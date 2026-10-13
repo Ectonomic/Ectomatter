@@ -46,6 +46,10 @@ pub enum Ask {
     LightColor(f32, f32, f32),
     Grid,
     CellPick(i32, i32, f32, f32, f32),
+    /// a slider in the box moved: an effect's speed
+    CellSlide(i32, f32),
+    /// an effect's tile chosen
+    FxChose(i32),
     CellTyped(i32, String),
     MenuChose(i32),
     MenuDismiss,
@@ -110,8 +114,12 @@ pub struct LayoutPage {
     renaming: bool,
     confirm: bool,
     /// a block carried from the bar: its kind, and where it would land (its row, first
-    /// column and width; none away from the screen and over other blocks)
-    carry: Option<(usize, Option<(u8, u8, u8)>)>,
+    /// column, width and height; none away from the screen and over other blocks)
+    carry: Option<(usize, Option<(u8, u8, u8, u8)>)>,
+    /// the effects' tiles in the Effect box, and the still pictures of the ones not chosen
+    /// as last drawn: for the light, the size and Bounce's word they were drawn for
+    tiles: Rc<VecModel<crate::FxTile>>,
+    stills: Option<(([u8; 3], u8, u32, String), Vec<slint::Image>)>,
     pick: Option<Pick>,
     /// a menu or the picker a press just closed, so its button's click doesn't open it again
     shut: Option<((f32, f32), Instant)>,
@@ -164,6 +172,8 @@ impl LayoutPage {
         on!(on_light_own, |on| Ask::LightOwn(on));
         on!(on_light_color, |x, y, h| Ask::LightColor(x, y, h));
         on!(on_grid_toggle, Ask::Grid);
+        on!(on_cell_slide, |id, v| Ask::CellSlide(id, v));
+        on!(on_fx_chose, |k| Ask::FxChose(k));
         on!(on_cell_pick, |id, i, x, y, h| Ask::CellPick(id, i, x, y, h));
         on!(on_cell_typed, |id, t| Ask::CellTyped(id, t.to_string()));
         on!(on_menu_chose, |i| Ask::MenuChose(i));
@@ -174,14 +184,15 @@ impl LayoutPage {
         on!(on_pk_well, |c| Ask::PkWell(c));
         on!(on_pk_enter, Ask::PkEnter);
         on!(on_pk_dismiss, Ask::PkDismiss);
-        ui.on_cell_slide(|_, _| {});
         ui.set_mark(mark);
         ui.set_pk_presets(ModelRc::new(VecModel::from(PRESETS.iter().map(|c| color(*c)).collect::<Vec<_>>())));
         let (rows, blocks, cells) = (Rc::new(VecModel::default()), Rc::new(VecModel::default()), Rc::new(VecModel::default()));
         ui.set_rows(ModelRc::from(rows.clone()));
         ui.set_blocks(ModelRc::from(blocks.clone()));
         ui.set_box_cells(ModelRc::from(cells.clone()));
-        LayoutPage { ui, asks, menu: None, renaming: false, confirm: false, carry: None, pick: None, shut: None, rows, blocks, cells, drawn: None, rehover: false }
+        let tiles = Rc::new(VecModel::default());
+        ui.set_fx_tiles(ModelRc::from(tiles.clone()));
+        LayoutPage { ui, asks, menu: None, renaming: false, confirm: false, carry: None, tiles, stills: None, pick: None, shut: None, rows, blocks, cells, drawn: None, rehover: false }
     }
 
     /// Whether the window has changed since the pointer last moved over it (see `rehover`).
@@ -320,23 +331,23 @@ impl LayoutPage {
                     let first = cx.avail.first().copied().unwrap_or(Source::CpuTemp);
                     if let Some(ed) = cx.editor.as_mut() {
                         if let Some(p) = cx.screens.library.get_mut(ed.page) {
-                            out.edited |= screen_edit::add(p, ed, k.clamp(0, 2) as usize, first, cx.readings, None);
+                            out.edited |= screen_edit::add(p, ed, k.clamp(0, 3) as usize, first, cx.readings, None);
                         }
                     }
                 }
                 Ask::ChipCarry(k, x, y) => {
-                    let kind = k.clamp(0, 2) as usize;
+                    let kind = k.clamp(0, 3) as usize;
                     let at = self.landing_at(cx, kind, x, y);
                     self.carry = Some((kind, at));
                     self.ui.set_carry_on(true);
                     self.ui.set_carry_kind(k);
-                    self.ui.set_carry_name(["Text", "Data", "Bar"][kind].into());
+                    self.ui.set_carry_name(["Text", "Data", "Bar", "Effect"][kind].into());
                     self.ui.set_carry_x(x);
                     self.ui.set_carry_y(y);
                     self.drawn = None;
                 }
                 Ask::ChipDrop(k, x, y) => {
-                    let kind = k.clamp(0, 2) as usize;
+                    let kind = k.clamp(0, 3) as usize;
                     let at = self.landing_at(cx, kind, x, y);
                     self.carry = None;
                     self.ui.set_carry_on(false);
@@ -390,6 +401,24 @@ impl LayoutPage {
                             }
                         }
                         _ => {}
+                    }
+                }
+                Ask::CellSlide(id, v) => {
+                    if ctl(id) == Ctl::ScrSpeed {
+                        if let Some(ed) = cx.editor.as_ref() {
+                            if let Some(p) = cx.screens.library.get_mut(ed.page) {
+                                screen_edit::set_speed(p, ed, v);
+                                out.edited = true;
+                            }
+                        }
+                    }
+                }
+                Ask::FxChose(k) => {
+                    if let (Some(fx), Some(ed)) = (crate::lcd_fx::FXS.get(k.max(0) as usize).copied(), cx.editor.as_ref()) {
+                        if let Some(p) = cx.screens.library.get_mut(ed.page) {
+                            screen_edit::set_fx(p, ed, fx);
+                            out.edited = true;
+                        }
                     }
                 }
                 Ask::CellTyped(id, t) => {
@@ -512,7 +541,7 @@ impl LayoutPage {
     /// Where a new block of `kind` carried to `x`, `y` in the window would land: in the
     /// free cells under the pointer (see [screen_edit::fit]); None away from the screen and
     /// over other blocks.
-    fn landing_at(&self, cx: &Cx, kind: usize, x: f32, y: f32) -> Option<(u8, u8, u8)> {
+    fn landing_at(&self, cx: &Cx, kind: usize, x: f32, y: f32) -> Option<(u8, u8, u8, u8)> {
         let (sx, sy, cw, ch) = (self.ui.get_cells_x(), self.ui.get_cells_y(), self.ui.get_cell_w(), self.ui.get_cell_h());
         if x < sx || y < sy || x >= sx + cw * 20.0 || y >= sy + ch * 4.0 {
             return None;
@@ -522,7 +551,11 @@ impl LayoutPage {
         let (k, width, right) = screen_edit::new_block(kind, first);
         let least = crate::lcd_page::least(&crate::lcd_page::Piece { kind: k, row: 0, col: 0, width, right, center: false, gap: 1, height: 1, scroll: true, date_format: Default::default() }, cx.readings).max(screen_edit::NEW_LEAST).min(width);
         let (row, col) = (((y - sy) / ch).floor().clamp(0.0, 3.0) as u8, ((x - sx) / cw).floor().clamp(0.0, 19.0) as u8);
-        screen_edit::fit(page, row, col, width, 1, least, None)
+        // (an effect: the whole screen, or what other effects leave round the cell)
+        if kind == 3 {
+            return screen_edit::effect_spot(page, Some((row, col)));
+        }
+        screen_edit::fit(page, row, col, width, 1, least, None).map(|(r, c, w)| (r, c, w, 1))
     }
 
     fn close_menu(&mut self) {
@@ -767,10 +800,10 @@ impl LayoutPage {
         // a block carried from the bar is drawn on the screen where it would land, with
         // what it would say there
         let mut shown = page.clone();
-        if let Some((kind, Some((r, c, width)))) = self.carry {
+        if let Some((kind, Some((r, c, width, height)))) = self.carry {
             let first = cx.avail.first().copied().unwrap_or(Source::CpuTemp);
             let (k, _, right) = screen_edit::new_block(kind, first);
-            shown.pieces.push(crate::lcd_page::Piece { kind: k, row: r, col: c, width, right, center: false, gap: 1, height: 1, scroll: true, date_format: Default::default() });
+            shown.pieces.push(crate::lcd_page::Piece { kind: k, row: r, col: c, width, right, center: false, gap: 1, height, scroll: true, date_format: Default::default() });
         }
         // each block outlined where it lands (a reading that runs long pushes the rest of
         // its row along), with how far its corner can reach at each height it can have
@@ -799,7 +832,7 @@ impl LayoutPage {
                     width: width as i32,
                     height: p.height.max(1) as i32,
                     on: ed.chosen == Some(i),
-                    fx: false,
+                    fx: screen_edit::behind(p),
                     // (taller or shorter from its corner, where there is room for that)
                     tall: reach.len() > 1 || p.height > 1,
                     lows: ModelRc::new(VecModel::from(lows)),
@@ -810,10 +843,10 @@ impl LayoutPage {
         crate::front::set_rows(&self.blocks, blocks);
         // the cells the carried block would take
         match self.carry {
-            Some((kind, Some(_))) => {
+            Some((kind, Some((_, _, _, height)))) => {
                 let (row, col, width) = outline(spans.last().copied().unwrap_or_default());
                 self.ui.set_ghost_on(true);
-                self.ui.set_ghost(EdBlock { row: row as i32, col: col as i32, width: width as i32, height: 1, on: false, fx: false, tall: false, lows: ModelRc::default(), ends: ModelRc::default() });
+                self.ui.set_ghost(EdBlock { row: row as i32, col: col as i32, width: width as i32, height: height as i32, on: false, fx: kind == 3, tall: false, lows: ModelRc::default(), ends: ModelRc::default() });
                 self.ui.set_lit_chip(kind as i32);
             }
             Some((kind, None)) => {
@@ -842,6 +875,33 @@ impl LayoutPage {
         // (room for the least a new block starts in)
         self.ui.set_bar_hint(if screen_edit::has_room(page, screen_edit::NEW_LEAST) { "Drag a block onto the screen." } else { "No room for another block. Narrow a block or remove one." }.into());
         crate::front::set_rows(&self.cells, b.cells);
+        // an effect selected: the effects' tiles, its own lit and moving
+        let chosen = ed.chosen.and_then(|i| page.pieces.get(i));
+        if let Some(crate::lcd_page::Kind::Effect { fx, speed, word }) = chosen.map(|p| &p.kind) {
+            let tile_w = (((rig_w - 12.0) / 2.0 - 32.0 - 24.0) / 4.0 - 12.0).max(20.0);
+            let sc = self.scale().max(1.0);
+            let (w, h) = ((tile_w * sc).round() as u32, (tile_w / 5.0 * sc).round() as u32);
+            let rgb = crate::z10::as_lit(page.light.unwrap_or(default));
+            let lv = cx.light[0] as f32 / 255.0;
+            let word = ectotype_core::lcd::lcd_text(word);
+            let rows_of = |f: [[char; 20]; 4]| -> Vec<String> { f.iter().map(|r| r.iter().collect()).collect() };
+            let key = (rgb, cx.light[0], w, word.clone());
+            if self.stills.as_ref().is_none_or(|(k, _)| *k != key) {
+                // (each as the mock's tiles stand still: four seconds in)
+                let sample = crate::lcd_fx::sample_sound(40.0);
+                let pics = crate::lcd_fx::FXS.iter().map(|f| crate::lcd_draw::picture(&rows_of(crate::lcd_fx::frame(*f, 40.0, &word, &sample)), rgb, lv, w, h)).collect();
+                self.stills = Some((key, pics));
+            }
+            let stills = &self.stills.as_ref().unwrap().1;
+            let sound = if *fx == crate::lcd_page::Fx::Spectrum { crate::sound::bands() } else { [0.0; 20] };
+            let moving = crate::lcd_draw::picture(&rows_of(crate::lcd_fx::frame(*fx, crate::lcd_fx::tenths(cx.t, *speed), &word, &sound)), rgb, lv, w, h);
+            let tiles: Vec<crate::FxTile> = crate::lcd_fx::FXS
+                .iter()
+                .enumerate()
+                .map(|(k, f)| crate::FxTile { name: f.name().into(), pic: if f == fx { moving.clone() } else { stills[k].clone() }, on: f == fx })
+                .collect();
+            crate::front::set_rows(&self.tiles, tiles);
+        }
     }
 
     /// The screen's picture, as the keyboard shows it, drawn at the window's own pixels.
