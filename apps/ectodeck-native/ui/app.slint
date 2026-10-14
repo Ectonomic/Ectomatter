@@ -198,6 +198,10 @@ export struct PlPage {
     paused: bool,
     // whether it can be taken off (not the last page)
     removable: bool,
+    // in the Library: the place its card shows in (another's place while the Library makes
+    // room for a layout carried along it), and whether it is the one carried
+    at: int,
+    carried: bool,
 }
 
 // one turn of the playlist on its panel: its screen's bar's left edge and
@@ -3457,7 +3461,8 @@ export component AppWindow inherits Window {
     in property <int> pl-timing: -1;
     // a screen carried to the strip, from the strip or the Library: where the
     // pointer holds it (in the Screen tab's right column), its name, and
-    // whether it is settling into its room
+    // whether it is settling into its room; and, for a layout carried along the
+    // Library, the place it lands in there (-1 while it isn't over the Library)
     in-out property <bool> carry-on;
     in-out property <length> carry-x;
     in-out property <length> carry-y;
@@ -3465,8 +3470,10 @@ export component AppWindow inherits Window {
     in-out property <length> carry-gy;
     in-out property <bool> carry-settle;
     in property <string> carry-name;
+    in property <int> lib-gap: -1;
     callback pl-carry-start(int, int);
-    callback pl-carry-move(length, bool);
+    // where along the strip it is, whether over the panel, and the Library's place under it
+    callback pl-carry-move(length, bool, int);
     callback pl-carry-drop();
     callback pl-carry-cancel();
     callback pl-size(int, length);
@@ -4028,27 +4035,44 @@ export component AppWindow inherits Window {
                     height: tabs-h + box-h + (shelf-on ? shelf-h : 0);
                     // a screen carried to `wx`, `wy` in the window: where the pointer holds it
                     // here, and where that is along the strip (anywhere over the panel, it can land);
-                    // on the second tab, whether it is over the screen, where it lands there
+                    // on the second tab, whether it is over the screen, where it lands there; and
+                    // on either, the place in the Library under it
                     function carry-to(wx: length, wy: length) {
                         root.carry-x = wx - self.absolute-position.x;
                         root.carry-y = wy - self.absolute-position.y;
                         if (root.screen-closed) {
                             root.pl-carry-move(0,
                                 wx > screen-bay.absolute-position.x && wx < screen-bay.absolute-position.x + screen-bay.width
-                                && wy > screen-bay.absolute-position.y && wy < screen-bay.absolute-position.y + screen-bay.height);
+                                && wy > screen-bay.absolute-position.y && wy < screen-bay.absolute-position.y + screen-bay.height,
+                                self.shelf-at(root.carry-x, root.carry-y));
                         } else {
                             root.pl-carry-move(wx - strip.absolute-position.x,
                                 wx > panel.absolute-position.x && wx < panel.absolute-position.x + panel.width
-                                && wy > panel.absolute-position.y - 20px && wy < panel.absolute-position.y + panel.height + 40px);
+                                && wy > panel.absolute-position.y - 20px && wy < panel.absolute-position.y + panel.height + 40px,
+                                self.shelf-at(root.carry-x, root.carry-y));
                         }
                     }
+                    // the Library's place at `lx`, `ly` here, counted as its cards are laid (two to a
+                    // row, or one), past its last card the last; -1 off the Library
+                    function shelf-at(lx: length, ly: length) -> int {
+                        if (!shelf-on || lx < 0 || lx > under-w || ly < tabs-h + box-h || ly > tabs-h + box-h + shelf-h) {
+                            return -1;
+                        }
+                        return max(0, floor((ly - tabs-h - box-h - 48px + 4px) / 104px)) * (shelf-two ? 2 : 1) + (shelf-two && lx > under-w / 2 ? 1 : 0);
+                    }
                     // let go: over the panel, the carried name settles into its room and then
-                    // the screen takes its place; away from it, nothing changes
+                    // the screen takes its place; over the Library, into its card's place, where
+                    // the card's own name sits; away from both, nothing changes
                     function drop-carry() {
                         if (root.pl-slot-w > 0) {
                             root.carry-settle = true;
                             root.carry-x = panel.x + strip.x + root.pl-slot-x + root.carry-gx;
                             root.carry-y = panel.y + strip.y + 30px + root.carry-gy;
+                            settle.running = true;
+                        } else if (root.lib-gap >= 0) {
+                            root.carry-settle = true;
+                            root.carry-x = 16px + (shelf-two ? mod(root.lib-gap, 2) * ((under-w - 40px) / 2 + 8px) : 0) + 288px + root.carry-gx;
+                            root.carry-y = tabs-h + box-h + 48px + (shelf-two ? floor(root.lib-gap / 2) : root.lib-gap) * 104px + 16px + root.carry-gy;
                             settle.running = true;
                         } else {
                             root.carry-on = false;
@@ -4782,7 +4806,7 @@ export component AppWindow inherits Window {
                             y: 14px;
                             width: parent.width - 16px - self.x;
                             height: 22px;
-                            text: root.screen-closed ? "Drag a screen layout onto the screen to save the layout on the keyboard." : "Drag a screen layout onto the playlist to add the layout to what the keyboard shows.";
+                            text: root.screen-closed ? "Drag a screen layout onto the screen to save the layout on the keyboard, or to another place in Layouts to move the layout." : "Drag a screen layout onto the playlist to add the layout to what the keyboard shows, or to another place in Layouts to move the layout.";
                             font-family: "Geist";
                             font-size: 12.5px;
                             color: Ink.quiet;
@@ -4790,10 +4814,14 @@ export component AppWindow inherits Window {
                             vertical-alignment: center;
                             overflow: elide;
                         }
+                        // each card in its place: while a layout is carried along the Library, the
+                        // others make room where it will land, and it is left out of its own
                         for c[k] in root.lib-pages: Rectangle {
                             property <length> cw: shelf-two ? (parent.width - 32px - 8px) / 2 : parent.width - 32px;
-                            x: 16px + (shelf-two ? mod(k, 2) * (self.cw + 8px) : 0);
-                            y: 48px + (shelf-two ? floor(k / 2) : k) * 104px;
+                            x: 16px + (shelf-two ? mod(c.at, 2) * (self.cw + 8px) : 0);
+                            y: 48px + (shelf-two ? floor(c.at / 2) : c.at) * 104px;
+                            animate x, y { duration: root.carry-on ? 250ms : 0ms; easing: ease; }
+                            opacity: c.carried ? 0 : 1;
                             width: self.cw;
                             height: 96px;
                             PlCard {

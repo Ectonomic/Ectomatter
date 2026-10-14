@@ -1091,6 +1091,18 @@ impl Screens {
         Some(i + 1)
     }
 
+    /// Layout `i` moved to place `to` in the Library (counted among the others), and its
+    /// place now: the playlists and the onboard layouts keep it, since they name it by its id.
+    pub fn move_page(&mut self, i: usize, to: usize) -> Option<usize> {
+        if i >= self.library.len() {
+            return None;
+        }
+        let p = self.library.remove(i);
+        let to = to.min(self.library.len());
+        self.library.insert(to, p);
+        Some(to)
+    }
+
     /// Layout `i` renamed: trimmed, at most 40 characters, never to nothing.
     pub fn rename_page(&mut self, i: usize, name: &str) {
         let name = named(name);
@@ -2226,6 +2238,23 @@ mod tests {
         assert_eq!(s.about(), "CPU and GPU, every second.");
         s.pieces.push(middle(3, Kind::Clock(false)));
         assert_eq!(s.about(), "CPU, GPU and the time.");
+    }
+
+    #[test]
+    fn a_layout_moves_to_another_place_in_the_library_and_keeps_its_turns() {
+        let mut s = Screens::of(None, None, None, None);
+        let ids = |s: &Screens| s.library.iter().map(|p| p.id.clone()).collect::<Vec<_>>();
+        // Weather to the end, Music to the start: the rest in their order
+        assert_eq!(s.move_page(2, 99), Some(BUILT_INS.len() - 1));
+        assert_eq!(s.move_page(BUILT_INS.len() - 2, 0), Some(0));
+        let mut want: Vec<String> = BUILT_INS.iter().map(|k| k.to_string()).filter(|k| k != "weather" && k != "music").collect();
+        want.insert(0, "music".into());
+        want.push("weather".into());
+        assert_eq!(ids(&s), want);
+        // Playlist 1 still plays the same layouts, and the order is kept through a save
+        assert_eq!(s.turns(1).iter().map(|e| e.page.as_str()).collect::<Vec<_>>(), ["stats", "clock", "weather"]);
+        assert_eq!(ids(&Screens::from_json(&s.to_json())), want);
+        assert_eq!(s.move_page(99, 0), None);
     }
 
     #[test]

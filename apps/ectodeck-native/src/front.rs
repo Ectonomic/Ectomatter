@@ -139,7 +139,7 @@ pub enum Ask {
     /// the Library (1, a page); carried to a place over the strip (or away
     /// from it, false); let go, settled into its room; put back
     CarryStart(i32, i32),
-    CarryMove(f32, bool),
+    CarryMove(f32, bool, i32),
     CarryDrop,
     CarryCancel,
     /// a turn's right edge dragged so far, and let go
@@ -651,7 +651,7 @@ impl Front {
         on!(on_lcd_pause, Ask::LcdPause);
         on!(on_screen_edit, |i| Ask::EditPage(i));
         on!(on_pl_carry_start, |from, i| Ask::CarryStart(from, i));
-        on!(on_pl_carry_move, |x, near| Ask::CarryMove(x, near));
+        on!(on_pl_carry_move, |x, near, shelf| Ask::CarryMove(x, near, shelf));
         on!(on_pl_carry_drop, Ask::CarryDrop);
         on!(on_pl_carry_cancel, Ask::CarryCancel);
         on!(on_pl_size, |i, dx| Ask::SizeTurn(i, dx));
@@ -1167,17 +1167,27 @@ impl Front {
                     let i = i.max(0) as usize;
                     self.close_menu();
                     self.carry = if from == 0 {
-                        self.screens.turns(self.page.editing).get(i).map(|e| Carry { from_strip: true, index: i, page: e.page.clone(), secs: e.secs, slot: Some(i), home: Some(i) })
+                        self.screens.turns(self.page.editing).get(i).map(|e| Carry { from_strip: true, index: i, page: e.page.clone(), secs: e.secs, slot: Some(i), home: Some(i), shelf: None })
                     } else {
-                        self.screens.library.get(i).map(|p| Carry { from_strip: false, index: i, page: p.id.clone(), secs: crate::lcd_page::SECS.2, slot: None, home: None })
+                        self.screens.library.get(i).map(|p| Carry { from_strip: false, index: i, page: p.id.clone(), secs: crate::lcd_page::SECS.2, slot: None, home: None, shelf: None })
                     };
                     if let Some(p) = self.carry.as_ref().and_then(|c| self.screens.library.iter().find(|p| p.id == c.page)) {
                         self.ui.set_carry_name(p.name.as_str().into());
                     }
                 }
-                Ask::CarryMove(x, near) => {
+                Ask::CarryMove(x, near, shelf) => {
                     changed = false;
                     let spans = self.strip_spans.clone();
+                    // a layout carried along the Library: the place there it lands in, past the
+                    // last card the last
+                    let n = self.screens.library.len();
+                    if let Some(c) = self.carry.as_mut().filter(|c| !c.from_strip) {
+                        let at = usize::try_from(shelf).ok().filter(|_| n > 0).map(|s| s.min(n - 1));
+                        if at != c.shelf {
+                            c.shelf = at;
+                            changed = true;
+                        }
+                    }
                     // on the second tab the screen is where a layout lands: over the screen, the
                     // picture shows the layout as the keyboard would show it
                     if self.ui.get_screen_closed() {
@@ -1197,7 +1207,11 @@ impl Front {
                 }
                 Ask::CarryDrop => {
                     if let Some(c) = self.carry.take() {
-                        if let Some(id) = self.ob_over.take() {
+                        if let Some(to) = c.shelf {
+                            if to != c.index {
+                                self.move_layout(c.index, to);
+                            }
+                        } else if let Some(id) = self.ob_over.take() {
                             self.screens.keep_onboard(self.page.editing, Some(&id));
                             self.pages_edited();
                         } else if let Some(at) = c.slot {
@@ -3605,6 +3619,26 @@ impl Front {
         self.new_menu = Some(made);
     }
 
+    /// Layout `i` moved to place `to` in the Library; the editor's window stays on the layout
+    /// it is open on, and each card keeps its picture.
+    fn move_layout(&mut self, i: usize, to: usize) {
+        let Some(to) = self.screens.move_page(i, to) else { return };
+        if let Some(ed) = self.editor.as_mut() {
+            ed.page = match ed.page {
+                p if p == i => to,
+                p if i < p && to >= p => p - 1,
+                p if i > p && to <= p => p + 1,
+                p => p,
+            };
+        }
+        if i < self.pl_thumbs.len() {
+            let pic = self.pl_thumbs.remove(i);
+            self.pl_thumbs.insert(to.min(self.pl_thumbs.len()), pic);
+        }
+        self.pages_edited();
+        self.refresh_editor();
+    }
+
     /// Layout `k` copied (the copy after it); the editor's window, open on a later layout,
     /// stays on that layout. The copy's place.
     fn copy_layout(&mut self, k: usize) -> Option<usize> {
@@ -4486,6 +4520,10 @@ impl Front {
         // (the words end short of the card's right edge, where Edit shows under the pointer)
         let words_w = (card_w - 358.0).max(60.0) as f32;
         self.pl_thumbs.resize(self.screens.library.len(), None);
+        // (a layout carried along the Library: the others make room where it will land)
+        let along = self.carry.as_ref().filter(|c| !c.from_strip).and_then(|c| Some((c.index, c.shelf?)));
+        let places = shelf_places(self.screens.library.len(), along);
+        self.ui.set_lib_gap(along.map_or(-1, |(_, to)| to as i32));
         let mut cards = Vec::with_capacity(self.screens.library.len());
         for (k, p) in self.screens.library.iter().enumerate() {
             let rgb = crate::z10::as_lit(p.light.unwrap_or(profile));
@@ -4509,6 +4547,8 @@ impl Front {
                 now: false,
                 paused: false,
                 removable: false,
+                at: places[k] as i32,
+                carried: along.is_some_and(|(from, _)| from == k),
             });
         }
         show_rows(self.ui.get_lib_pages(), |m| self.ui.set_lib_pages(m), cards);
@@ -4606,6 +4646,24 @@ struct Carry {
     secs: u32,
     slot: Option<usize>,
     home: Option<usize>,
+    /// carried from the Library, while it is over the Library: the place there it lands in
+    shelf: Option<usize>,
+}
+
+/// The place each of the Library's `n` cards shows in: its own, or, while the layout at
+/// `from` is carried along the Library to land at `to` (`along`), the others moved out of
+/// the way so the place it will land in is free (the carried one keeps its own place, left
+/// out of the picture).
+fn shelf_places(n: usize, along: Option<(usize, usize)>) -> Vec<usize> {
+    (0..n)
+        .map(|k| match along {
+            Some((from, to)) if k != from => {
+                let without = if k < from { k } else { k - 1 };
+                if without >= to { without + 1 } else { without }
+            }
+            _ => k,
+        })
+        .collect()
 }
 
 /// The menu of times open on a turn's time: the turn, how wide the time it hangs from is,
@@ -4900,6 +4958,25 @@ mod tests {
         for p in crate::lcd_page::Screens::of(None, None, None, None).library {
             let (a, b) = two_lines(&p.about(), 155.0);
             assert!(!b.ends_with('…'), "{}: {a} / {b}", p.name);
+        }
+    }
+
+    #[test]
+    fn a_layout_carried_along_the_library_has_the_others_make_room() {
+        assert_eq!(shelf_places(4, None), [0, 1, 2, 3]);
+        // the second to the end: the third and fourth move up a place, the end left free
+        assert_eq!(shelf_places(4, Some((1, 3))), [0, 1, 1, 2]);
+        // the last to the start: the rest move down a place
+        assert_eq!(shelf_places(4, Some((3, 0))), [1, 2, 3, 3]);
+        // over its own place: nothing moves
+        assert_eq!(shelf_places(4, Some((2, 2))), [0, 1, 2, 3]);
+        // and every place but the one it lands in is taken once
+        for from in 0..5 {
+            for to in 0..5 {
+                let mut taken: Vec<usize> = shelf_places(5, Some((from, to))).into_iter().enumerate().filter(|(k, _)| *k != from).map(|(_, p)| p).collect();
+                taken.sort();
+                assert_eq!(taken, (0..5).filter(|p| *p != to).collect::<Vec<_>>(), "{from} to {to}");
+            }
         }
     }
 }
