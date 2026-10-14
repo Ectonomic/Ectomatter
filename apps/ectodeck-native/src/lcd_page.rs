@@ -510,14 +510,12 @@ impl Page {
             "stats" => return Some(Page::stats()),
             "clock" => return Some(Page::clock()),
             "weather" => return Some(Page::weather()),
+            // (the date written short, Wed Oct 14, as the longest dates written out run past
+            // the screen's 20 cells; the sky in 15, as wide as every sky but the three longest,
+            // Freezing drizzle, Heavy snow showers and Thunderstorm with hail, which scroll)
             "today" => (
                 "Today",
-                vec![
-                    Piece { date_format: DateFormat::Long, ..middle(0, Kind::Data(Source::Date, false)) },
-                    middle(1, Kind::Clock(true)),
-                    block(3, 0, 4, Kind::Data(Source::OutsideTemp, true)),
-                    reading(3, 8, 12, Source::Sky, 1),
-                ],
+                vec![middle(0, Kind::Data(Source::Date, false)), middle(1, Kind::Clock(true)), block(3, 0, 4, Kind::Data(Source::OutsideTemp, true)), reading(3, 5, 15, Source::Sky, 1)],
             ),
             "gaming" => (
                 "Gaming",
@@ -2289,7 +2287,7 @@ mod tests {
         let rows = |key: &str| render(&Page::built_in(key).unwrap(), &r);
         assert_eq!(rows("gaming"), ["GPU 45° [#.........]", "CPU 64° [##........]", "VRAM  13.1 / 31.8 GB", "9:05 PM    Fri Oct 9"]);
         // (no place for the weather yet: the row says so)
-        assert_eq!(rows("today"), [" Friday, October 9", "      9:05 PM", "", "Weather unavailable"]);
+        assert_eq!(rows("today"), ["     Fri Oct 9", "      9:05 PM", "", "Weather unavailable"]);
         // and with one, in °F, the time on a 12-hour clock
         let mut out = r.clone();
         out.outside = Some((19.0, "Clear".into()));
@@ -2301,6 +2299,9 @@ mod tests {
         // the heartbeat between the CPU's readings
         let beat = rows("heartbeat");
         assert_eq!([beat[0].as_str(), beat[3].as_str()], ["CPU              64°", "Load             15%"]);
+        // the sky beside the temperature as wide as every sky but the three longest
+        out.outside = Some((-1.0, "Partly cloudy".into()));
+        assert_eq!(render(&Page::built_in("today").unwrap(), &out)[3], "30°    Partly cloudy");
     }
 
     #[test]
