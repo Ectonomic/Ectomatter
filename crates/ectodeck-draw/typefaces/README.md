@@ -1,6 +1,6 @@
 # Ectodeck's typefaces for legends
 
-The faces keyboards are printed in, built into Ectodeck so a setup's legends look the same on any computer. Each is under a licence that lets Ectodeck carry it: the SIL Open Font License 1.1 (`OFL.txt`, with each font's own copyright in the font) or MIT (`OpenGorton-LICENSE.txt`). Each is cut to the letters keyboards print, a variable font keeping all its weights; Audiowide and Orbitron, whose licences reserve their names, are carried as they come.
+The faces keyboards are printed in, built into Ectodeck so a setup's legends look the same on any computer. Each is under a license that lets Ectodeck carry it: the SIL Open Font License 1.1 (`OFL.txt`, with each font's own copyright in the font) or MIT (`OpenGorton-LICENSE.txt`). Each is cut to the letters keyboards print, a variable font keeping all its weights; Audiowide and Orbitron, whose licenses reserve their names, are carried as they come.
 
 - `BrunoAce-Regular.ttf`: wide and technical. https://github.com/googlefonts/Bruno-ace, OFL-1.1.
 - `Audiowide-Regular.ttf`: rounded and technical, a slashed zero. https://github.com/googlefonts/audiowide, OFL-1.1, Reserved Font Name "Audiowide".

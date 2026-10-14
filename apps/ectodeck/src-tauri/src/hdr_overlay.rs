@@ -29,7 +29,7 @@ pub fn spike(window: &tauri::WebviewWindow, x: f64, y: f64, w: f64, h: f64, peak
         .run_on_main_thread(move || {
             let r = (|| {
                 let gtk_window = win.gtk_window().map_err(|e| e.to_string())?;
-                let gdk_window = gtk_window.window().ok_or("the window is not realised")?;
+                let gdk_window = gtk_window.window().ok_or("the window is not realized")?;
                 let display = gdk_window.display();
                 let d: *mut gtk::gdk::ffi::GdkDisplay = display.to_glib_none().0;
                 let s: *mut gtk::gdk::ffi::GdkWindow = gdk_window.to_glib_none().0;
@@ -124,7 +124,7 @@ fn run(display: usize, parent_ptr: usize, x: f64, y: f64, w: f64, h: f64, peak: 
     let mut st = St::default();
     queue.roundtrip(&mut st).map_err(|e| e.to_string())?;
     let (Some(compositor), Some(subc), Some(shm), Some(cm)) = (st.compositor.clone(), st.sub.clone(), st.shm.clone(), st.cm.clone()) else {
-        return Err("the compositor lacks sub-surfaces, shared memory or colour management".into());
+        return Err("the compositor lacks sub-surfaces, shared memory or color management".into());
     };
     let parent_id = unsafe { ObjectId::from_ptr(wl_surface::WlSurface::interface(), parent_ptr as *mut _) }.map_err(|e| format!("{e:?}"))?;
     let parent = wl_surface::WlSurface::from_id(&conn, parent_id).map_err(|e| format!("{e:?}"))?;

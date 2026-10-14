@@ -6,11 +6,11 @@
 //! never changes is drawn once for the keyboard's size. The keys' light is
 //! the light simulation's (see sim.rs): each key's LED followed through the
 //! keyboard's shape, what it lights kept for each LED on its own, so it is
-//! filled with the keys' colours each time the lighting changes. Light is
+//! filled with the keys' colors each time the lighting changes. Light is
 //! added in linear light, and the lit legends go brighter than the desktop's white.
 //!
 //! The picture comes out as the HDR layer wants it: PQ, BT.2020, 16 bits a
-//! channel, premultiplied. SDR colours are decoded as KWin decodes the page's
+//! channel, premultiplied. SDR colors are decoded as KWin decodes the page's
 //! own (gamma 2.2 at the reference white), so the keyboard meets the page
 //! round it without a seam.
 
@@ -23,7 +23,7 @@ use serde_json::Value;
 #[path = "sim.rs"]
 pub mod sim;
 
-use sim::{At, Coloured, Snapshot};
+use sim::{At, Colored, Snapshot};
 
 
 /// A cap as the art draws it, for choosing it in the Key lab: its
@@ -94,7 +94,7 @@ fn bump_box(bump: Bump, face: [f32; 4]) -> Option<([f32; 4], f32, f32)> {
     Some(([x, y, x + bw, y + bh], bh / 2.0, 0.0269 * th))
 }
 
-/// A bump as the art draws one, in the art's units, on a top of this colour
+/// A bump as the art draws one, in the art's units, on a top of this color
 /// (sRGB): its shadow, blurred, then the bump as much lighter than the top
 /// as the art's is, and the light along its top lighter still.
 fn bump_svg(bump: Bump, face: [f32; 4], top: [u8; 3]) -> Option<String> {
@@ -125,7 +125,7 @@ fn bump_svg(bump: Bump, face: [f32; 4], top: [u8; 3]) -> Option<String> {
 /// linear light, without any bump (as the board's base has them where the
 /// art draws none), and how much lighter or darker the bump makes each, as
 /// a share of it: so a bump shows as the art draws one on a black top, and
-/// on a top of any colour as light and shade on that colour.
+/// on a top of any color as light and shade on that color.
 #[derive(Clone, Debug, PartialEq)]
 struct Patch {
     x: usize,
@@ -142,7 +142,7 @@ impl Patch {
     }
 }
 
-/// A key in section, north to south, as the art has it, in millimetres, for
+/// A key in section, north to south, as the art has it, in millimeters, for
 /// the Key lab to draw: its foot and its face's inset from it; the deck
 /// between its well's north wall and its foot; the key south of it (the gap
 /// to its foot, and that foot); north of its well, the chassis to the next
@@ -165,7 +165,7 @@ pub fn control_id(c: &Value) -> String {
     c["id"].as_str().map(str::to_string).or_else(|| c["pos"].as_u64().map(|p| p.to_string())).unwrap_or_default()
 }
 
-/// One key's light, as the page has it: its colour (sRGB) and how strongly it
+/// One key's light, as the page has it: its color (sRGB) and how strongly it
 /// is lit (0 to 1), and whether the key is remapped, which puts the second
 /// function at the foot of its cap aside for the new meaning the page prints there.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -178,7 +178,7 @@ pub struct Light {
 
 impl Light {
     /// How much light its LED gives off, 0 to 1: how strongly it is lit, times
-    /// its colour's own brightness in linear light, so a key lit black is a
+    /// its color's own brightness in linear light, so a key lit black is a
     /// key with its LED off.
     pub fn shine(&self) -> f32 {
         self.strength.clamp(0.0, 1.0) * lin(self.rgb.iter().copied().max().unwrap_or(0))
@@ -211,7 +211,7 @@ struct KeyArt {
     /// the row of the legend's box where its second function begins, if it has
     /// one: a line of its own at the foot of the cap, like the PF1 under 1
     second: Option<u32>,
-    /// the grey its legend is printed in, in sRGB's encoding
+    /// the gray its legend is printed in, in sRGB's encoding
     print: [f32; 3],
     /// its control's id, what its cap has printed on it (as the core gives
     /// it), its legend and second function as the art draws them, and the
@@ -229,11 +229,11 @@ struct KeyArt {
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Model {
     /// the light each LED gives off at full white, in lumens, and how many
-    /// of the art's units make a millimetre: what make the simulation's light
+    /// of the art's units make a millimeter: what make the simulation's light
     /// its nits (see gain)
     lumens: f32,
     scale: f32,
-    /// how a lit key's legend looks with its LED off, as a share of the grey
+    /// how a lit key's legend looks with its LED off, as a share of the gray
     /// the art prints it in: a backlit legend with no light behind it is dark
     legend_unlit: f32,
     /// the display: its lit dots, its unlit dots, the ground between them, in
@@ -262,7 +262,7 @@ impl Model {
     }
 }
 
-/// A colour as the core writes it, "#rrggbb".
+/// A color as the core writes it, "#rrggbb".
 fn hex(s: &str) -> Option<[u8; 3]> {
     let s = s.strip_prefix('#').filter(|s| s.len() == 6)?;
     let c = |i: usize| u8::from_str_radix(&s[i..i + 2], 16).ok();
@@ -280,7 +280,7 @@ pub struct Lcd {
 }
 
 /// The brightest of each part of the light on the keyboard, in nits, and the
-/// brightest the lit keys' colour shows cleanly, before the screen clips it.
+/// brightest the lit keys' color shows cleanly, before the screen clips it.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Peaks {
     pub legend: f32,
@@ -339,7 +339,7 @@ pub struct Board {
     pub(crate) art_scale: f32,
     pub(crate) art_offset: (f32, f32),
     /// the lock lights, and their light: the window at its brightest and the
-    /// light out of its edges, in nits, and its colour (sRGB)
+    /// light out of its edges, in nits, and its color (sRGB)
     indicators: Vec<Indicator>,
     indicator_light: (f32, f32, [u8; 3]),
     /// the board with none of the keys' light, in linear light, opaque: the
@@ -376,16 +376,16 @@ pub struct Board {
     cap_of: Vec<u16>,
     reads_for: Option<(usize, usize)>,
     /// how much of each pixel its cap's face covers, and each cap's plastic
-    /// where its colours are its own (see Plastic)
+    /// where its colors are its own (see Plastic)
     face_cover: Vec<f32>,
     plastics: Vec<Option<Plastic>>,
     /// how much of each pixel the art's ink on a cap's face covers: the
     /// print that is no lit legend (MACRO 3 under E2's, the media keys' signs)
     ink: Vec<f32>,
     /// each cap's homing bump as the light asks, and whether its plastic has
-    /// a colour of its own; the face's box of a cap the art draws one on,
+    /// a color of its own; the face's box of a cap the art draws one on,
     /// without it (sRGB); and each cap's top drawn anew where its bump is
-    /// other than the art's, or is on a top of a colour of its own
+    /// other than the art's, or is on a top of a color of its own
     bumps: Vec<(Bump, bool)>,
     bump_plain: Vec<Option<Vec<[f32; 3]>>>,
     patches: Vec<Option<Patch>>,
@@ -434,9 +434,9 @@ fn cap_map(w: u32, h: u32, ka: f32, (ox, oy): (f32, f32), feet: &[([f32; 4], f32
     map
 }
 
-/// The caps' colours as the art draws them: black plastic (the "Black" a
-/// cap's colour is measured from, so a black cap is the art's own), and
-/// clear plastic, which tints nothing. A colour is what the plastic looks
+/// The caps' colors as the art draws them: black plastic (the "Black" a
+/// cap's color is measured from, so a black cap is the art's own), and
+/// clear plastic, which tints nothing. A color is what the plastic looks
 /// like on the cap's top, in the room's light, as sRGB.
 pub const CAP_BLACK: [u8; 3] = [0x2a, 0x2a, 0x2a];
 pub const CAP_CLEAR: [u8; 3] = [0xff, 0xff, 0xff];
@@ -449,7 +449,7 @@ const TOP_THROUGH: f32 = 0.05;
 /// The share of the light falling on them that white opaque sides give back.
 const WHITE_GIVES: f32 = 0.85;
 /// The ink a pale cap is printed in, where the art prints a light ink on its
-/// black caps; a top paler than INK_TURNS (its colour's luminance in linear
+/// black caps; a top paler than INK_TURNS (its color's luminance in linear
 /// light) takes it, a darker one keeps the art's light ink.
 const DARK_INK: [u8; 3] = [0x30, 0x30, 0x30];
 const INK_TURNS: f32 = 0.2;
@@ -459,10 +459,10 @@ const INK_TURNS: f32 = 0.2;
 const INK_SPAN: f32 = 0.05;
 const INK_FROM: f32 = 0.15;
 
-/// A cap's plastic where the light gives it colours of its own: what the
+/// A cap's plastic where the light gives it colors of its own: what the
 /// art's black cap gains in linear light to look as the plastic does, on
 /// its top, its sides, and (on a pudding cap) the part of its sides its
-/// top's colour comes down; what more of the light on the top's back an
+/// top's color comes down; what more of the light on the top's back an
 /// opaque top lets through, for each channel, as a share of a legend's;
 /// how much more light its opaque sides give back; and the tint its
 /// translucent sides and top give the light through them.
@@ -475,7 +475,7 @@ struct Plastic {
     reflect: [f32; 3],
     tint: [f32; 3],
     top_tint: [f32; 3],
-    /// the colour the art's ink on its face prints in, none the art's own
+    /// the color the art's ink on its face prints in, none the art's own
     ink: Option<[f32; 3]>,
 }
 
@@ -486,11 +486,11 @@ impl Plastic {
         self.top == none && self.side == none && self.band == none && self.through == none && self.reflect == once && self.tint == once && self.top_tint == once && self.ink.is_none()
     }
 
-    /// A cap's plastic from its caps' values ("colour" its top's, "sides"
+    /// A cap's plastic from its caps' values ("color" its top's, "sides"
     /// its sides'), none where it gives neither and the cap is the art's.
     fn of(caps: &Value, p: &sim::Physics) -> Option<Plastic> {
-        let colour = |k: &str| caps[k].as_str().and_then(hex);
-        let (top, sides) = (colour("colour"), colour("sides"));
+        let color = |k: &str| caps[k].as_str().and_then(hex);
+        let (top, sides) = (color("color"), color("sides"));
         if top.is_none() && sides.is_none() {
             return None;
         }
@@ -542,7 +542,7 @@ fn plastics(light: &Value, ids: &[String]) -> Vec<Option<Plastic>> {
         .collect()
 }
 
-/// Milky plastic's own colour, sRGB-encoded: the grey the art prints the
+/// Milky plastic's own color, sRGB-encoded: the gray the art prints the
 /// legends in (the same plastic), a little warm, as milky white is.
 const MILKY_WHITE: [f32; 3] = [0x9e as f32 / 255.0, 0x9b as f32 / 255.0, 0x93 as f32 / 255.0];
 
@@ -621,14 +621,14 @@ struct Indicator {
     spill: Shape,
 }
 
-/// The keys' light for one picture: the simulation's, in the keys' colours,
+/// The keys' light for one picture: the simulation's, in the keys' colors,
 /// made its nits by `gain`; with every key alike, the simulation's white
-/// light in their colour, or else each key's own in its colour, added up.
+/// light in their color, or else each key's own in its color, added up.
 struct KeysLight<'a> {
     snap: &'a Snapshot,
     gain: f32,
     alike: Option<[f32; 3]>,
-    coloured: Option<Coloured>,
+    colored: Option<Colored>,
     /// each cap's, by the simulation's order of them: how much more of its
     /// sides' light its band takes, where the black of its top comes down
     /// them (none where it does not); and how its translucent top glows
@@ -649,7 +649,7 @@ impl KeysLight<'_> {
     }
 
     fn at(&self, a: &At) -> [f32; 3] {
-        match (self.alike, &self.coloured) {
+        match (self.alike, &self.colored) {
             (Some(c), _) => {
                 let v = self.snap.white(a) * self.gain;
                 c.map(|c| c * v)
@@ -660,26 +660,26 @@ impl KeysLight<'_> {
     }
 }
 
-/// sRGB (as the page's colours are) to linear light, as KWin decodes the page: gamma 2.2.
+/// sRGB (as the page's colors are) to linear light, as KWin decodes the page: gamma 2.2.
 fn lin(v: u8) -> f32 {
     (v as f32 / 255.0).powf(2.2)
 }
 
-/// A key's light: its LEDs' colour in linear light, as strongly as the key is
-/// lit. An LED gives off as much light as its colour has: white (all three of
+/// A key's light: its LEDs' color in linear light, as strongly as the key is
+/// lit. An LED gives off as much light as its color has: white (all three of
 /// its dies full) the most, a red about a third of that; so a part's nits are
-/// a key lit white at full, and a colour shows its own share of them. What
+/// a key lit white at full, and a color shows its own share of them. What
 /// is brighter than the screen shows is drawn at the most it shows, in its
-/// own colour (within_peak): a saturated red's channel reaches the screen's
+/// own color (within_peak): a saturated red's channel reaches the screen's
 /// peak well before its luminance does.
-fn key_colour(l: &Light) -> [f32; 3] {
+fn key_color(l: &Light) -> [f32; 3] {
     let c = [lin(l.rgb[0]), lin(l.rgb[1]), lin(l.rgb[2])];
     c.map(|v| v * l.strength.clamp(0.0, 1.0))
 }
 
-/// A colour in linear light at a luminance of 1, for a light whose nits are
-/// its own whatever its colour (the lock lights).
-fn unit_colour(rgb: [u8; 3]) -> [f32; 3] {
+/// A color in linear light at a luminance of 1, for a light whose nits are
+/// its own whatever its color (the lock lights).
+fn unit_color(rgb: [u8; 3]) -> [f32; 3] {
     let c = [lin(rgb[0]), lin(rgb[1]), lin(rgb[2])];
     let y = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
     if y <= 0.0 { [0.0; 3] } else { c.map(|v| v / y) }
@@ -688,12 +688,12 @@ fn unit_colour(rgb: [u8; 3]) -> [f32; 3] {
 /// BT.709's linear light as BT.2020's, the screen's channels.
 const TO_BT2020: [[f32; 3]; 3] = [[0.6274, 0.3293, 0.0433], [0.0691, 0.9195, 0.0114], [0.0164, 0.0880, 0.8956]];
 
-/// A colour's brightest channel as the screen has it (BT.2020).
+/// A color's brightest channel as the screen has it (BT.2020).
 fn widest_channel(c: [f32; 3]) -> f32 {
     TO_BT2020.iter().map(|r| r[0] * c[0] + r[1] * c[1] + r[2] * c[2]).fold(0.0f32, f32::max)
 }
 
-/// How bright a key's colour goes, in the SDR white's units, before one of
+/// How bright a key's color goes, in the SDR white's units, before one of
 /// its channels, as the screen has them, reaches `ceiling`.
 fn clean_limit(l: &Light, ceiling: f32) -> f32 {
     let c = [lin(l.rgb[0]), lin(l.rgb[1]), lin(l.rgb[2])];
@@ -706,7 +706,7 @@ fn clean_limit(l: &Light, ceiling: f32) -> f32 {
 /// as the screen can show it, its peak `ceiling` times the white: as asked
 /// while its brightest channel, as the screen has it, is under 80% of the
 /// peak; past that easing off toward the peak, never reaching it, its other
-/// channels going down with it, so the pixel keeps its own colour.
+/// channels going down with it, so the pixel keeps its own color.
 fn within_peak(px: &mut [f32], ceiling: f32) {
     let a = px[3];
     if a <= 0.0 || ceiling <= 0.0 {
@@ -1119,10 +1119,10 @@ impl Board {
                 Some(Indicator { bit, window, lit, spill: Shape { x: sx, y: sy, w: sw, h: sh, cover } })
             })
             .collect();
-        let rgb = ll["colour"].as_str().and_then(hex).unwrap_or([255; 3]);
+        let rgb = ll["color"].as_str().and_then(hex).unwrap_or([255; 3]);
         let indicator_light = (num(&ll["brightness"], 300.0).max(0.0), num(&ll["spill"]["brightness"], 6.0).max(0.0), rgb);
         // the board with none of the keys' light: the body and its print (over
-        // the ground's colour, sRGB-encoded) in linear light under the caps'
+        // the ground's color, sRGB-encoded) in linear light under the caps'
         // shadows (the room's light, which the LEDs' light is not under), the caps over it
         let dec = |v: f32| v.max(0.0).powf(2.2);
         let base: Vec<f32> = (0..(w * h) as usize)
@@ -1267,12 +1267,12 @@ impl Board {
             let shape = &self.cap_shapes[cap];
             let own = sim::key_light(light, &light["keys"][shape.id.as_str()]);
             let want = if shape.button { Bump::None } else { own["caps"]["bump"].as_str().and_then(Bump::named).unwrap_or(shape.bump) };
-            let coloured = self.plastics.get(cap).copied().flatten().is_some_and(|p| !p.is_art());
-            if (want, coloured) != self.bumps[cap] {
+            let colored = self.plastics.get(cap).copied().flatten().is_some_and(|p| !p.is_art());
+            if (want, colored) != self.bumps[cap] {
                 // (the art's own bump on its own top as the art draws it)
-                let art = want == shape.bump && (want == Bump::None || !coloured);
+                let art = want == shape.bump && (want == Bump::None || !colored);
                 self.patches[cap] = if art { None } else { self.patch(cap, want) };
-                self.bumps[cap] = (want, coloured);
+                self.bumps[cap] = (want, colored);
                 changed = true;
             }
         }
@@ -1281,7 +1281,7 @@ impl Board {
 
     /// A cap's top drawn anew with this bump: from its face's box as the art
     /// draws it (without the art's bump), the bump drawn on it as the art
-    /// draws its own, in the top's colour there.
+    /// draws its own, in the top's color there.
     fn patch(&self, cap: usize, bump: Bump) -> Option<Patch> {
         let shape = &self.cap_shapes[cap];
         let (x, y, pw, ph) = face_box(shape.face, self.art_scale, self.art_offset, (self.w, self.h));
@@ -1301,7 +1301,7 @@ impl Board {
         for (d, c) in pix.data_mut().chunks_exact_mut(4).zip(&start) {
             d.copy_from_slice(&[(c[0] * 255.0).round() as u8, (c[1] * 255.0).round() as u8, (c[2] * 255.0).round() as u8, 255]);
         }
-        // (the top's colour where the bump stands, as the art's own bump takes its key's)
+        // (the top's color where the bump stands, as the art's own bump takes its key's)
         if let Some(([bx0, by0, bx1, by1], ..)) = bump_box(bump, shape.face) {
             let (cx, cy) = ((self.art_offset.0 + self.art_scale * (bx0 + bx1) / 2.0) as usize, (self.art_offset.1 + self.art_scale * (by0 + by1) / 2.0) as usize);
             let c = start[cy.saturating_sub(y).min(ph - 1) * pw + cx.saturating_sub(x).min(pw - 1)];
@@ -1644,7 +1644,7 @@ impl Board {
     }
 
     /// A key in section, north to south, as the art has it (see
-    /// KeyGeometry), at `mm` of the art's units to the millimetre; none for a
+    /// KeyGeometry), at `mm` of the art's units to the millimeter; none for a
     /// control that is not a cap.
     pub fn key_geometry(&self, id: &str, mm: f32) -> Option<KeyGeometry> {
         let f = self.cap_shapes.iter().find(|c| c.id == id)?.foot;
@@ -1778,7 +1778,7 @@ impl Board {
     /// The simulation follows each LED's light as shares of all of it, over
     /// the art's units: a place's light is its luminance for an LED giving off
     /// a lumen, in the art's square units. The LEDs' lumens, and the art's
-    /// units to the metre, make it cd/m², nits: that and nothing else. What
+    /// units to the meter, make it cd/m², nits: that and nothing else. What
     /// the screen cannot show is kept to its peak spot by spot (within_peak).
     fn gain(&self, white: f32) -> f32 {
         let per_m = self.model.scale * 1000.0;
@@ -1788,12 +1788,12 @@ impl Board {
     /// The brightest light on the keyboard with these lights, in nits, with
     /// the SDR white at `white` nits and Peak nits at `ceiling` times it: the
     /// legends', the deck's, the skirts', the chassis's (as if every key were
-    /// lit as the brightest is), and the brightest the lit keys' colour shows
+    /// lit as the brightest is), and the brightest the lit keys' color shows
     /// cleanly, before the screen clips one of its channels.
     pub fn peaks(&self, lights: &[Light], white: f32, ceiling: f32) -> Peaks {
         let lit: Vec<&Light> = lights.iter().filter(|l| self.keys.iter().any(|k| k.pos == l.pos)).collect();
-        // the brightest key's light: how strongly it is lit, by how much light its colour has
-        let strongest = lit.iter().map(|l| { let c = key_colour(l); 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2] }).fold(0.0f32, f32::max) * white;
+        // the brightest key's light: how strongly it is lit, by how much light its color has
+        let strongest = lit.iter().map(|l| { let c = key_color(l); 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2] }).fold(0.0f32, f32::max) * white;
         let clean = lit.iter().map(|l| clean_limit(l, ceiling) * l.strength.clamp(0.0, 1.0)).fold(0.0f32, f32::max);
         let g = self.gain(white) * strongest;
         let m = self.most;
@@ -1807,11 +1807,11 @@ impl Board {
 
     /// The picture with this light: premultiplied linear RGBA, the SDR white
     /// at 1.0 (`white` nits). The keys' light is the simulation's, in their
-    /// colours, as strongly as each is lit: through the legends, on the
+    /// colors, as strongly as each is lit: through the legends, on the
     /// deck, the chassis and the caps' skirts; every part as bright as the
     /// LEDs' lumens make it. What is brighter than the screen shows, Peak
     /// nits (`ceiling` times the white), is drawn at the most it shows, each
-    /// pixel in its own colour (within_peak); nothing else holds it back. The
+    /// pixel in its own color (within_peak); nothing else holds it back. The
     /// caps' shadows are the room's light blocked, so the LEDs' light is not
     /// under them.
     pub fn compose(&self, lights: &[Light], locks: u8, white: f32, ceiling: f32) -> Vec<f32> {
@@ -1828,12 +1828,12 @@ impl Board {
             out.clear();
             out.resize(w * h * 4, 0.0);
         }
-        // the keys' light in their colours, made once for every band
+        // the keys' light in their colors, made once for every band
         let keys = self.sim.as_deref().map(|snap| {
-            let colour = |pos: u32| lights.iter().find(|l| l.pos == pos).map_or([0.0; 3], key_colour);
-            let colours: Vec<[f32; 3]> = snap.keys.iter().map(|&p| colour(p)).collect();
-            let alike = colours.first().copied().filter(|c| colours.iter().all(|o| o == c));
-            let coloured = alike.is_none().then(|| snap.lit(&colours));
+            let color = |pos: u32| lights.iter().find(|l| l.pos == pos).map_or([0.0; 3], key_color);
+            let colors: Vec<[f32; 3]> = snap.keys.iter().map(|&p| color(p)).collect();
+            let alike = colors.first().copied().filter(|c| colors.iter().all(|o| o == c));
+            let colored = alike.is_none().then(|| snap.lit(&colors));
             // Where the black of a cap's top comes down its sides, the light
             // through them keeps to the band below it: the simulation's cells
             // are coarser than the band, so the band takes all of a side's
@@ -1845,7 +1845,7 @@ impl Board {
             let top_glow = physics.clone().map(|p| if p.tops > 0.0 { p.tops / p.legends.max(0.01) } else { 0.0 }).collect();
             let highest = physics.clone().map(|p| p.top).fold(0.0f32, f32::max);
             let top_lit = physics.map(|p| p.top < highest - 0.01).collect();
-            KeysLight { snap, gain: self.gain(white), alike, coloured, to_band, top_glow, top_lit }
+            KeysLight { snap, gain: self.gain(white), alike, colored, to_band, top_glow, top_lit }
         });
         let keys = keys.as_ref();
         // in bands of rows, one a thread: every step below is the pixel's own.
@@ -1881,8 +1881,8 @@ impl Board {
                 None => px[..3].copy_from_slice(&self.base[j * 3..j * 3 + 3]),
             }
             px[3] = 1.0;
-            // a cap of a colour of its own: its plastic over the art's black,
-            // on its face and its sides (on a pudding cap, the top's colour
+            // a cap of a color of its own: its plastic over the art's black,
+            // on its face and its sides (on a pudding cap, the top's color
             // down the sides above the milky band)
             let plastic = self.plastics.get(self.cap_of[j] as usize).copied().flatten();
             if let Some(pl) = plastic {
@@ -1920,7 +1920,7 @@ impl Board {
                     px[c] += e[c] * a;
                 }
             }
-            // a pale opaque top: the light on its back it lets through, in its colour
+            // a pale opaque top: the light on its back it lets through, in its color
             if let (3, Some(pl)) = (r.code, plastic) {
                 if a > 0.0 && pl.through.iter().any(|t| *t > 0.0) {
                     let e = k.at(&r.at(fw, cw));
@@ -1936,7 +1936,7 @@ impl Board {
                 3 if a > 0.0 && top_glow > 0.0 => a * top_glow,
                 _ => continue,
             };
-            // through a cap's coloured plastic, tinted; off its pale opaque sides, more of it
+            // through a cap's colored plastic, tinted; off its pale opaque sides, more of it
             let tint = match (r.code, plastic) {
                 (2, Some(pl)) if to_band > 0.0 || pl.tint != [1.0; 3] => pl.tint,
                 (2, Some(pl)) => pl.reflect,
@@ -2042,7 +2042,7 @@ impl Board {
                 });
             }
         }
-        // Each lit legend: its own look, dark with its LED off (the art's grey
+        // Each lit legend: its own look, dark with its LED off (the art's gray
         // dimmed by the core's unlit share), which shows less as the light
         // behind it outshines it; and the light through it, the brightest
         // thing on the keyboard. A remapped key's without its second function.
@@ -2076,7 +2076,7 @@ impl Board {
         // the lock lights that are on, as the keyboard's own are: each window
         // lit by its LED, and a little of its light out of its edges
         let (nits, spill, rgb) = self.indicator_light;
-        let lamp = unit_colour(rgb);
+        let lamp = unit_color(rgb);
         let top = |n: f32| (n / white.max(1.0)).min(ceiling);
         for ind in &self.indicators {
             if locks & (1 << ind.bit) == 0 {
@@ -2094,14 +2094,14 @@ impl Board {
                 });
             }
         }
-        // what the screen cannot show, at the most it shows, each pixel in its own colour
+        // what the screen cannot show, at the most it shows, each pixel in its own color
         for px in out.chunks_exact_mut(4) {
             within_peak(px, ceiling);
         }
     }
 }
 
-/// The first fill colour in a piece: the grey a legend is printed in.
+/// The first fill color in a piece: the gray a legend is printed in.
 fn first_fill(node: &usvg::Node) -> Option<[u8; 3]> {
     match node {
         usvg::Node::Path(p) => match p.fill()?.paint() {
@@ -2180,7 +2180,7 @@ impl Encoder {
         self.straight([px[0] * r, px[1] * r, px[2] * r], a)
     }
 
-    /// One pixel given as its colour in linear light (SDR white 1.0, BT.709)
+    /// One pixel given as its color in linear light (SDR white 1.0, BT.709)
     /// and how much of it there is, to premultiplied PQ, BT.2020, as the
     /// channels of ABGR16161616
     pub fn straight(&self, c: [f32; 3], a: f32) -> [u16; 4] {
@@ -2272,7 +2272,7 @@ mod tests {
 
     /// The board lit by a simulation run to `photons` from each LED.
     /// How long a frame takes to compose, as a lighting effect plays (every
-    /// key its own colour) and with the keys all one colour; and its parts.
+    /// key its own color) and with the keys all one color; and its parts.
     #[test]
     #[ignore]
     fn how_long_a_frame_takes() {
@@ -2309,9 +2309,9 @@ mod tests {
         let scene = Scene::of(&pb);
         pb.set_sim(Arc::new(Simulator::settle(&scene, &pb.setup(&light), 2000)));
         time("compose, pudding caps, every key its own color", &mut |i| pb.compose_into(&mut out, &rainbow(i), 0, 254.0, 4.0));
-        let colours: Vec<[f32; 3]> = snap.keys.iter().map(|&p| key_colour(&rainbow(1).into_iter().find(|l| l.pos == p).unwrap())).collect();
-        time("  of which the coloured light maps", &mut |_| {
-            let _ = snap.lit(&colours);
+        let colors: Vec<[f32; 3]> = snap.keys.iter().map(|&p| key_color(&rainbow(1).into_iter().find(|l| l.pos == p).unwrap())).collect();
+        time("  of which the colored light maps", &mut |_| {
+            let _ = snap.lit(&colors);
         });
     }
 
@@ -2660,12 +2660,12 @@ mod tests {
         }
     }
 
-    /// A cap's colour is its own: black as the art draws it is the art; a
+    /// A cap's color is its own: black as the art draws it is the art; a
     /// white top comes out pale on that key alone, its sides pale too on a
     /// shine-through cap; and lit, a white top lets a little of the light
-    /// through, in the light's colour.
+    /// through, in the light's color.
     #[test]
-    fn a_cap_s_colour_is_its_own() {
+    fn a_cap_s_color_is_its_own() {
         let (_t, d, mut b) = lit_board(2000);
         let face_middle = |b: &Board, id: &str| {
             let c = b.cap_shapes.iter().find(|c| c.id == id).unwrap();
@@ -2676,11 +2676,11 @@ mod tests {
         let lights = white(&b);
         let plain = b.compose(&lights, 0, 200.0, 4.0);
         let mut light = d["light"].clone();
-        light["caps"]["colour"] = serde_json::json!("#2A2A2A");
+        light["caps"]["color"] = serde_json::json!("#2A2A2A");
         b.set_light(&light);
         assert_eq!(b.compose(&lights, 0, 200.0, 4.0), plain, "black is the art's");
-        light["keys"] = serde_json::json!({ "esc": { "caps": { "colour": "#E6E6E6" } } });
-        light["caps"].as_object_mut().unwrap().remove("colour");
+        light["keys"] = serde_json::json!({ "esc": { "caps": { "color": "#E6E6E6" } } });
+        light["caps"].as_object_mut().unwrap().remove("color");
         assert!(b.set_light(&light), "a new color changes the picture");
         let lit = b.compose(&lights, 0, 200.0, 4.0);
         let (e, two) = (face_middle(&b, "esc"), face_middle(&b, "2"));
@@ -2739,7 +2739,7 @@ mod tests {
         let others = b.cap_shapes.iter().position(|c| c.id == "h").map(|_| face_px("h")).unwrap();
         assert_eq!(at(&moved, others.0 + 5, others.1 + 5), at(&plain, others.0 + 5, others.1 + 5), "the other keys as they were");
         // on a white top, a bar as light and shade on the white: it shows
-        light["keys"] = serde_json::json!({ "g": { "caps": { "colour": "#CCCCCC" } } });
+        light["keys"] = serde_json::json!({ "g": { "caps": { "color": "#CCCCCC" } } });
         b.set_light(&light);
         let white = b.compose(&[], 0, 200.0, 4.0);
         light["keys"]["g"]["caps"]["bump"] = serde_json::json!("bar");
@@ -2765,7 +2765,7 @@ mod tests {
         let t = std::time::Instant::now();
         let frame = b.compose(&lights, 0, 254.0, 1000.0 / 254.0);
         let composed = t.elapsed();
-        // every key its own colour, the slower way
+        // every key its own color, the slower way
         let rainbow: Vec<Light> = b.keys.iter().enumerate().map(|(i, k)| Light { pos: k.pos, rgb: [(i * 37 % 256) as u8, (i * 91 % 256) as u8, (i * 53 % 256) as u8], strength: 1.0, remapped: false }).collect();
         let t = std::time::Instant::now();
         let _ = b.compose(&rainbow, 0, 254.0, 1000.0 / 254.0);
@@ -2826,13 +2826,13 @@ mod tests {
                 worst = worst.min(e / a.min(c).max(1e-6));
             }
         }
-        eprintln!("the darkest face edge against the darker of its neighbours: {worst:.3}");
+        eprintln!("the darkest face edge against the darker of its neighbors: {worst:.3}");
         assert!(worst > 0.6, "a dark line at a face's edge: {worst}");
     }
 
     /// The screen's peak holds back only what passes it: three times the
     /// LEDs' lumens make the deck three times as bright, while no pixel's
-    /// channel goes past the peak, and a legend held at it keeps its colour.
+    /// channel goes past the peak, and a legend held at it keeps its color.
     #[test]
     fn the_screen_s_peak_holds_back_only_what_passes_it() {
         let (_, device, mut b) = board();
@@ -2854,7 +2854,7 @@ mod tests {
         assert!((d3 / d1 - 3.0).abs() < 0.05, "the deck three times as bright: {}", d3 / d1);
         let widest = |f: &[f32], j: usize| widest_channel([f[j * 4], f[j * 4 + 1], f[j * 4 + 2]].map(|v| v / f[j * 4 + 3].max(1e-9)));
         assert!((0..n).filter(|&j| three[j * 4 + 3] > 0.0).all(|j| widest(&three, j) <= ceiling * 1.0001), "no pixel past the peak");
-        // the brightest pixel held back: its colour as at a third of the light
+        // the brightest pixel held back: its color as at a third of the light
         let j = (0..n).filter(|&j| one[j * 4 + 3] > 0.99).max_by(|&x, &y| widest(&three, x).total_cmp(&widest(&three, y))).unwrap();
         let hue = |f: &[f32]| [f[j * 4 + 1] / f[j * 4], f[j * 4 + 2] / f[j * 4].max(1e-9)];
         eprintln!("the brightest pixel: {:.3} of the peak, its color {:?} against {:?}", widest(&three, j) / ceiling, hue(&three), hue(&one));
@@ -2949,7 +2949,7 @@ mod tests {
         assert!((p.legend - 600.0).abs() < 1.0 && p.deck > 0.0 && p.chassis > 0.0 && p.skirt > 0.0);
     }
 
-    /// A key lit black is a key with its LED off: its legend shows the grey
+    /// A key lit black is a key with its LED off: its legend shows the gray
     /// it is printed in, as dim as LED off has it, as an unlit key's does.
     #[test]
     fn a_key_lit_black_looks_as_its_led_off() {

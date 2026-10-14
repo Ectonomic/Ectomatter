@@ -19,8 +19,8 @@ use crate::{Cell, MacroItem, MacroWindow, MenuRow};
 #[derive(Clone, Debug, PartialEq)]
 pub enum Ask {
     Move,
-    Minimise,
-    Maximise,
+    Minimize,
+    Maximize,
     Close,
     Choose(i32),
     RowMenu(i32, f32, f32),
@@ -133,8 +133,8 @@ impl MacroPage {
             }};
         }
         on!(on_drag, Ask::Move);
-        on!(on_minimise, Ask::Minimise);
-        on!(on_maximise, Ask::Maximise);
+        on!(on_minimize, Ask::Minimize);
+        on!(on_maximize, Ask::Maximize);
         on!(on_close_window, Ask::Close);
         on!(on_choose, |n| Ask::Choose(n));
         on!(on_row_menu, |n, x, y| Ask::RowMenu(n, x, y));
@@ -208,13 +208,13 @@ impl MacroPage {
         }
         let mut changed = false;
         for ask in asks {
-            if self.ed.busy && !matches!(ask, Ask::Move | Ask::Minimise | Ask::Maximise | Ask::Close | Ask::RecTick) {
+            if self.ed.busy && !matches!(ask, Ask::Move | Ask::Minimize | Ask::Maximize | Ask::Close | Ask::RecTick) {
                 continue;
             }
             match ask {
                 Ask::Move => window.push(WindowAsk::Move),
-                Ask::Minimise => window.push(WindowAsk::Minimise),
-                Ask::Maximise => window.push(WindowAsk::Maximise),
+                Ask::Minimize => window.push(WindowAsk::Minimize),
+                Ask::Maximize => window.push(WindowAsk::Maximize),
                 Ask::Close => {
                     if self.ed.rec.is_some() {
                         self.stop_recording(page, false, None);

@@ -81,7 +81,7 @@
 
   // The tray lists the devices, so one is a click away without opening the
   // window first. It is told again whenever a device's connection changes,
-  // since a device that is not plugged in is greyed there.
+  // since a device that is not plugged in is grayed there.
   const tellTray = () => window.__api('/api/tray', {
     devices: devices.map(d => ({ id: d.id, name: d.name, connected: !conn.classList.contains('off') })),
   }).catch(() => {});

@@ -2,7 +2,7 @@
 //! the light's values as the simulation holds them, with each of its
 //! sliders' places round it and the line that joins each slider to the part
 //! it changes. Drawn as an SVG and drawn by resvg, since the window's
-//! renderer fills a path with a plain colour only; its words are the lab's
+//! renderer fills a path with a plain color only; its words are the lab's
 //! own text, over it.
 //!
 //! LED, Keycaps and Wells show one slice through the number row's 2 key,
@@ -26,7 +26,7 @@ use super::{ends, get, PARAMS};
 use ectodeck_draw::hdr::KeyGeometry;
 use crate::text;
 
-// the lab's own colours
+// the lab's own colors
 const PLOT: &str = "#131316";
 const TILE: &str = "#1f1f23";
 const AMBER: &str = "#f0b35a";
@@ -38,10 +38,10 @@ const DOT: &str = "#d4d4d8";
 const DIMENSION: &str = "#b0b0b8";
 const CASING: &str = "#131316";
 
-/// the plate under the deck, in millimetres
+/// the plate under the deck, in millimeters
 const PLATE: f64 = 1.5;
 
-/// The key the stage draws, in section north to south, in millimetres, as
+/// The key the stage draws, in section north to south, in millimeters, as
 /// the device's art has it (see KeyGeometry): its foot and its face's inset
 /// from it; the deck between its well's north wall and its foot; the gap to
 /// the key south of it and that key's foot; north of its well, the chassis
@@ -129,13 +129,13 @@ impl Lens {
 }
 
 /// A word on the stage, `x` where it starts and `y` its baseline, in the
-/// stage's pixels, 11.5px in its own colour.
+/// stage's pixels, 11.5px in its own color.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Word {
     pub x: f32,
     pub y: f32,
     pub text: String,
-    pub colour: [u8; 3],
+    pub color: [u8; 3],
 }
 
 /// Where a slider stands: which, on which side, its line's height on the stage.
@@ -169,7 +169,7 @@ pub fn choice_y(k: usize) -> f32 {
 
 /// The values the drawing is drawn from, as the simulation holds them (no
 /// switch or skirt's foot above the cap's top, no switch wider than fits in
-/// a cap, no LED outside its switch): lengths in millimetres, the LED's
+/// a cap, no LED outside its switch): lengths in millimeters, the LED's
 /// place in the art's units too; and the key drawn, as the art has it.
 #[derive(Clone, Copy, Debug)]
 pub struct Values {
@@ -203,7 +203,7 @@ pub struct Values {
     lcd_dot: f64,
     lcd_glass: f64,
     nits: f64,
-    /// the art's units to the millimetre, and the key drawn; where its
+    /// the art's units to the millimeter, and the key drawn; where its
     /// switch sits, mm east and north of its middle; whether it has an LED
     /// of its own; and whether it is a button, a moulded block standing on
     /// the chassis, not a cap over a switch in a well
@@ -212,8 +212,8 @@ pub struct Values {
     place: (f64, f64),
     lit: bool,
     solid: bool,
-    /// the caps' colours, their tops' and their sides' (see cap_colours)
-    colours: [[u8; 3]; 2],
+    /// the caps' colors, their tops' and their sides' (see cap_colors)
+    colors: [[u8; 3]; 2],
     /// the homing bump on the key drawn
     pub bump: ectodeck_draw::hdr::Bump,
 }
@@ -265,7 +265,7 @@ impl Values {
             place: (raw(light, ("place", "east")), raw(light, ("place", "north"))),
             lit: true,
             solid: false,
-            colours: super::cap_colours(light),
+            colors: super::cap_colors(light),
             bump: ectodeck_draw::hdr::Bump::None,
         }
     }
@@ -338,13 +338,13 @@ impl Svg {
         self.path(d, fill, "none", 1.0, 1.0);
     }
 
-    fn stroke(&mut self, d: &str, colour: &str, sw: f64) {
-        self.path(d, "none", colour, sw, 1.0);
+    fn stroke(&mut self, d: &str, color: &str, sw: f64) {
+        self.path(d, "none", color, sw, 1.0);
     }
 
     /// a measurement: a dark casing under it, so it reads over anything
-    fn mark(&mut self, d: &str, colour: &str) {
-        let _ = write!(self.marks, r#"<path d="{d}" fill="none" stroke="{CASING}" stroke-width="3.4" stroke-linecap="round"/><path d="{d}" fill="none" stroke="{colour}" stroke-width="1" stroke-linecap="round"/>"#);
+    fn mark(&mut self, d: &str, color: &str) {
+        let _ = write!(self.marks, r#"<path d="{d}" fill="none" stroke="{CASING}" stroke-width="3.4" stroke-linecap="round"/><path d="{d}" fill="none" stroke="{color}" stroke-width="1" stroke-linecap="round"/>"#);
     }
 
     fn gradient(&mut self, kind: &str, at: String, stops: &[(f64, &str, f64)]) -> String {
@@ -370,9 +370,9 @@ impl Svg {
     }
 
     /// a word, its baseline at `y`, starting at `x` (`anchor` 0), or ending at it (1)
-    fn text(&mut self, x: f64, y: f64, s: &str, colour: [u8; 3], anchor: f64) {
+    fn text(&mut self, x: f64, y: f64, s: &str, color: [u8; 3], anchor: f64) {
         let x = x - text::width(400, 11.5, s) as f64 * anchor;
-        self.words.push(Word { x: x as f32, y: y as f32, text: s.to_string(), colour });
+        self.words.push(Word { x: x as f32, y: y as f32, text: s.to_string(), color });
     }
 }
 
@@ -449,14 +449,14 @@ fn rounded(x0: f64, y0: f64, x1: f64, y1: f64, r: f64) -> String {
 /// A path the light takes, as strong as the share of it that goes that way.
 fn ray(s: &mut Svg, pts: &[Pt], share: f64, grow: f64, white: bool) {
     let sw = (0.7 + 2.0 * share) * grow.min(1.25);
-    let (colour, op) = if white { (WHITE, 1.0) } else { (AMBER, 0.35 + 0.6 * share) };
-    s.path(&poly(pts, false), "none", colour, sw, op);
+    let (color, op) = if white { (WHITE, 1.0) } else { (AMBER, 0.35 + 0.6 * share) };
+    s.path(&poly(pts, false), "none", color, sw, op);
     let ((x0, y0), (x1, y1)) = (pts[pts.len() - 2], pts[pts.len() - 1]);
     let a = (y1 - y0).atan2(x1 - x0);
     let head = (4.5 + 2.5 * share) * grow.min(1.4);
     let l = (x1 - head * (a - 0.42).cos(), y1 - head * (a - 0.42).sin());
     let r = (x1 - head * (a + 0.42).cos(), y1 - head * (a + 0.42).sin());
-    s.path(&poly(&[l, (x1, y1), r], true), colour, "none", 1.0, op);
+    s.path(&poly(&[l, (x1, y1), r], true), color, "none", 1.0, op);
 }
 
 /// A slider's place on the drawing: its anchor, and how its line comes in.
@@ -486,15 +486,15 @@ impl Label {
     }
 }
 
-/// The slice, in millimetres: x north to south from the main well's north
+/// The slice, in millimeters: x north to south from the main well's north
 /// wall, z up from the deck.
 struct Slice {
     v: Values,
     foot0: f64,
     foot1: f64,
-    /// the cap's middle, and the switch's centre, north of it as far as it sits
+    /// the cap's middle, and the switch's center, north of it as far as it sits
     mid: f64,
-    centre: f64,
+    center: f64,
     /// the W key's foot
     w0: f64,
     led: f64,
@@ -511,16 +511,16 @@ impl Slice {
     fn of(v: &Values) -> Slice {
         let (foot0, foot1) = (v.g.deck_n, v.g.deck_n + v.g.foot);
         let mid = (foot0 + foot1) / 2.0;
-        let centre = mid - v.place.1;
+        let center = mid - v.place.1;
         let span = v.top - v.foot;
         let mut sl = Slice {
             v: *v,
             foot0,
             foot1,
             mid,
-            centre,
+            center,
             w0: foot1 + v.g.gap_s,
-            led: centre - v.north,
+            led: center - v.north,
             wall_t: (span * 0.25 + 0.2).min(1.15),
             top_t: (span * 0.3).min(1.25),
             hollow: !v.solid && span > 1.6,
@@ -530,8 +530,8 @@ impl Slice {
         // the switch as wide as asked, as far as it fits in the cap at its
         // top, and its LED inside it as drawn
         let (inner, inner_s) = (sl.skirt_x(true, v.switch_top, true), sl.skirt_x(false, v.switch_top, true));
-        let half = if sl.hollow { (v.switch_width / 2.0).min(centre - inner - 0.25).min(inner_s - centre - 0.25) } else { v.switch_width / 2.0 };
-        (sl.hx0, sl.hx1) = (centre - half, centre + half);
+        let half = if sl.hollow { (v.switch_width / 2.0).min(center - inner - 0.25).min(inner_s - center - 0.25) } else { v.switch_width / 2.0 };
+        (sl.hx0, sl.hx1) = (center - half, center + half);
         sl.led = sl.led.clamp(sl.hx0, sl.hx1);
         sl
     }
@@ -590,7 +590,7 @@ impl Slice {
     }
 }
 
-/// The part of the slice a section shows, in millimetres, widened about its
+/// The part of the slice a section shows, in millimeters, widened about its
 /// middle to the panel's shape (`aspect`, width over height) so the drawing fills it.
 fn frame_of(v: &Values, sl: &Slice, lens: Lens, aspect: f64) -> (f64, f64, f64, f64) {
     // (a button, low on the chassis, to a scale of its own)
@@ -689,11 +689,11 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
     // the caps: in the LED's drawing only the 2 key's top, its skirt cut away to show the switch
     let (a0, a1) = (sl.foot0 + v.g.inset, sl.foot1 - v.g.inset);
     let under = tz - sl.top_t;
-    // the caps in their plastic's colours, where they have their own: black
+    // the caps in their plastic's colors, where they have their own: black
     // as the drawing draws it; a shine-through cap's sides in theirs, and on
-    // pudding caps the top's colour as far down the sides as it comes
+    // pudding caps the top's color as far down the sides as it comes
     let paint = |c: [u8; 3]| if c == ectodeck_draw::hdr::CAP_BLACK || !on(Lens::Caps) { None } else { Some(format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2])) };
-    let [top_paint, side_paint] = v.colours.map(paint);
+    let [top_paint, side_paint] = v.colors.map(paint);
     if on(Lens::Led) {
         s.path(&poly(&[p(a0, tz), p(a1, tz), p(a1, under), p(a0, under)], true), fill(Lens::Caps), line(Lens::Caps), 1.0, 1.0);
         for x in [a0, a1] {
@@ -743,11 +743,11 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
     // light behind it lets (in the LED's drawing all of them, the second
     // function too; in the caps' the first)
     let face: Vec<f64> = (0..=200).map(|i| a0 + (a1 - a0) * i as f64 / 200.0).collect();
-    let light: Vec<f64> = face.iter().map(|&x| v.on_top(x - sl.centre)).collect();
+    let light: Vec<f64> = face.iter().map(|&x| v.on_top(x - sl.center)).collect();
     let most = light.iter().cloned().fold(0.0, f64::max).max(1e-12);
     for (at, wide) in v.g.legends(on(Lens::Led)) {
         let mid = sl.mid + at;
-        let bright = v.on_top(mid - sl.centre) / most;
+        let bright = v.on_top(mid - sl.center) / most;
         let (lx0, lx1) = (mid - wide / 2.0, mid + wide / 2.0);
         s.path(&poly(&[p(lx0, tz), p(lx1, tz), p(lx1, under), p(lx0, under)], true), AMBER, "none", 1.0, 0.2 + 0.78 * bright);
         if lens == Lens::Caps {
@@ -787,10 +787,10 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
                 _ => s.text(end, base - tall - 7.0, "over its two legends", FAINT_WORD, anchor),
             }
             labels.push(Label { drop: true, ..Label::new(false, (x1, base - tall), "LED output") });
-            // the switch's centre line, and the LED north of it
-            s.stroke(&poly(&[p(sl.centre, 0.15), p(sl.centre, hz + 0.6)], false), "#5c5c66", 1.0);
+            // the switch's center line, and the LED north of it
+            s.stroke(&poly(&[p(sl.center, 0.15), p(sl.center, hz + 0.6)], false), "#5c5c66", 1.0);
             let y_nc = if hz > 2.6 { hz - 0.6 } else { hz + 0.7 };
-            marks.push(Mark::Across { x0: px(sl.led), x1: px(sl.centre), y: pz(y_nc), i: slider("North of center") });
+            marks.push(Mark::Across { x0: px(sl.led), x1: px(sl.center), y: pz(y_nc), i: slider("North of center") });
             labels.push(Label::new(true, p(sl.led, hz), "North of center"));
             // the LED's own color, on the LED
             labels.push(Label::of(false, p(sl.led + 0.4, hz * 0.5), ("switches", "bleed")));
@@ -821,7 +821,7 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
             let mut ups = Vec::new();
             if rise > 1.6 {
                 let up = 2.4f64.min(rise * 0.4);
-                for x in [sl.hx0 + 1.1, sl.centre + 2.4, sl.hx1 - 1.0] {
+                for x in [sl.hx0 + 1.1, sl.center + 2.4, sl.hx1 - 1.0] {
                     if (x - sl.led).abs() > wide * 0.5 + 0.9 {
                         ray(&mut s, &[p(x, hz + 0.25), p(x + 0.1, hz + up)], top_share, grow, white("Scattered"));
                         ups.push((x, up));
@@ -854,7 +854,7 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
                 let out = 1.6f64.min(v.foot.max(0.6) * 0.4);
                 ray(&mut s, &[p(sl.hx1 + 0.15, out), p(sl.foot1 + 0.95, out * 0.15)], v.scatter * v.sides, grow, false);
             }
-            // the skirts: the top's colour down Colour down the sides, and below
+            // the skirts: the top's color down Color down the sides, and below
             // it their translucent plastic, as white as it is milky, glowing with
             // the light it lets through; and the top beside its legends
             let clear_to = v.foot + (1.0 - v.black) * (tz - v.foot);
@@ -862,7 +862,7 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
                 let op = |share: f64| 0.12 + 0.7 * share.clamp(0.0, 1.0);
                 for north in [true, false] {
                     let band = [p(sl.skirt_x(north, v.foot, false), v.foot), p(sl.skirt_x(north, clear_to, false), clear_to), p(sl.skirt_x(north, clear_to, true), clear_to), p(sl.skirt_x(north, v.foot, true), v.foot)];
-                    let tinted = side_paint.clone().filter(|_| v.caps != Caps::ShineThrough && v.colours[1] != ectodeck_draw::hdr::CAP_CLEAR);
+                    let tinted = side_paint.clone().filter(|_| v.caps != Caps::ShineThrough && v.colors[1] != ectodeck_draw::hdr::CAP_CLEAR);
                     let milky = if white("Haze") { WHITE } else { tinted.as_deref().unwrap_or("#d8d2c6") };
                     s.path(&poly(&band, true), milky, "none", 1.0, if v.skirts > 0.0 { 0.08 + 0.55 * v.milky } else { 0.0 });
                     let lit = if white("Wall opacity") { WHITE } else { AMBER };
@@ -886,7 +886,7 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
                 labels.push(Label::new(true, p(sl.skirt_x(true, milky_z, false), milky_z), "Haze"));
             }
             if !shine && !translucent {
-                // Colour down the sides measured beside the south skirt
+                // Color down the sides measured beside the south skirt
                 let bx = (sl.foot1 + 1.0).min(x_hi - 0.4);
                 marks.push(Mark::Height { x: px(bx), y0: pz(clear_to), y1: pz(tz), i: slider("Color down the sides") });
                 labels.push(Label::new(false, p(bx, (clear_to + tz) / 2.0), "Color down the sides"));
@@ -900,7 +900,7 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
                 // bounced inside the cap: off its inner wall, up to the back of its top
                 let mid_z = (hz.max(v.foot) + under) / 2.0;
                 let inner = sl.skirt_x(false, mid_z, true);
-                ray(&mut s, &[p(sl.hx1 - 0.6, hz + 0.2), p(inner, mid_z), p(sl.centre + 2.2, under - 0.35)], v.cap_in, grow, white("Inside reflection"));
+                ray(&mut s, &[p(sl.hx1 - 0.6, hz + 0.2), p(inner, mid_z), p(sl.center + 2.2, under - 0.35)], v.cap_in, grow, white("Inside reflection"));
             }
             // Inside's line comes in under the skirt's foot, as the light does, to the wall just above it
             // (a button is solid: nothing inside it)
@@ -975,7 +975,7 @@ fn slice(v: &Values, lens: Lens, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, 
     (s, labels, frame)
 }
 
-/// A colour `t` of the way from `a` to `b`.
+/// A color `t` of the way from `a` to `b`.
 fn mix(a: &str, b: &str, t: f64) -> String {
     let ch = |s: &str, i: usize| u8::from_str_radix(&s[i..i + 2], 16).unwrap_or(0) as f64;
     let t = t.clamp(0.0, 1.0);
@@ -1081,7 +1081,7 @@ fn drawn(v: &Values, lens: Lens, w: f64, h: f64, hot: Option<usize>, set: Option
 }
 
 /// Where each slider of a section stands on a stage `w` by `h`, from these
-/// values: on its side, level with what it names where its neighbours let
+/// values: on its side, level with what it names where its neighbors let
 /// it, in the order of what they name, so no two lines cross; on the left,
 /// under the section's `choices`. A section's sliders are placed once, as
 /// it opens, and stay put while its values change; only the drawing and the
@@ -1203,9 +1203,9 @@ pub fn stage(v: &Values, lens: Lens, w: f32, h: f32, places: &[Place], hot: Opti
     svg += "</svg>";
     // (the slices are seen from the side, north to south; the legends from above)
     if !matches!(lens, Lens::Display | Lens::Legends) {
-        s.words.push(Word { x: (px0 + 16.0) as f32, y: (py0 + ph - 12.0) as f32, text: "North".into(), colour: QUIET_WORD });
+        s.words.push(Word { x: (px0 + 16.0) as f32, y: (py0 + ph - 12.0) as f32, text: "North".into(), color: QUIET_WORD });
         let south = text::width(400, 11.5, "South") as f64;
-        s.words.push(Word { x: (px0 + pw - 16.0 - south) as f32, y: (py0 + ph - 12.0) as f32, text: "South".into(), colour: QUIET_WORD });
+        s.words.push(Word { x: (px0 + pw - 16.0 - south) as f32, y: (py0 + ph - 12.0) as f32, text: "South".into(), color: QUIET_WORD });
     }
     Stage { w, h, svg, words: s.words, extras }
 }
@@ -1220,9 +1220,9 @@ pub struct Printed {
     pub foot: (f64, f64),
     pub face: [f64; 4],
     pub print: ectodeck_draw::print::Print,
-    /// the colours its top and the top of its sides are seen in from above,
+    /// the colors its top and the top of its sides are seen in from above,
     /// none where they are the art's black
-    pub colours: Option<[[u8; 3]; 2]>,
+    pub colors: Option<[[u8; 3]; 2]>,
 }
 
 /// The legends' drawing: how they are set, how the core's art prints them,
@@ -1255,7 +1255,7 @@ fn svg_path(p: &resvg::tiny_skia::Path) -> String {
 }
 
 /// Where the legends' drawing has its key, in the panel: its pixels to the
-/// millimetre, and its foot's top left corner.
+/// millimeter, and its foot's top left corner.
 fn key_at(set: &Legends, pw: f64, ph: f64) -> (f64, f64, f64) {
     let key = &set.key;
     let k = ((pw - 140.0) / key.foot.0).min((ph * if set.others.is_empty() { 0.8 } else { 0.52 }) / key.foot.1).min(26.0);
@@ -1263,7 +1263,7 @@ fn key_at(set: &Legends, pw: f64, ph: f64) -> (f64, f64, f64) {
 }
 
 /// Where the legends' drawing on a stage `w` by `h` has its key's top, on
-/// the stage: its left and top, and its pixels to the millimetre.
+/// the stage: its left and top, and its pixels to the millimeter.
 pub fn legend_face(set: &Legends, w: f32, h: f32) -> (f32, f32, f32) {
     let (px0, py0, pw, ph) = panel(w as f64, h as f64);
     let (k, x, y) = key_at(set, pw, ph);
@@ -1271,7 +1271,7 @@ pub fn legend_face(set: &Legends, w: f32, h: f32) -> (f32, f32, f32) {
 }
 
 /// A key's print set as the section says, on its top at (`x`, `y`) `k`
-/// pixels to the millimetre: its inks drawn in the light's amber (a glow
+/// pixels to the millimeter: its inks drawn in the light's amber (a glow
 /// under them), and its lines and the box its inks cover.
 fn print_on(s: &mut Svg, set: &Legends, key: &Printed, x: f64, y: f64, k: f64) -> ectodeck_draw::print::Set {
     let face = [(x + key.face[0] * k) as f32, (y + key.face[1] * k) as f32, (x + key.face[2] * k) as f32, (y + key.face[3] * k) as f32];
@@ -1300,9 +1300,9 @@ fn print_on(s: &mut Svg, set: &Legends, key: &Printed, x: f64, y: f64, k: f64) -
 fn cap_from_above(s: &mut Svg, key: &Printed, x: f64, y: f64, k: f64, big: bool) {
     let (w, d) = (key.foot.0 * k, key.foot.1 * k);
     let r = (1.6 * k).min(10.0);
-    // (in its own colours, the sides a shade darker than they are, as they face the room's light less)
+    // (in its own colors, the sides a shade darker than they are, as they face the room's light less)
     let hex = |c: [u8; 3]| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
-    let (sides, top) = key.colours.map_or(("#24242a".to_string(), "#2a2a30".to_string()), |[t, s]| (mix(&hex(s), "#000000", 0.25), hex(t)));
+    let (sides, top) = key.colors.map_or(("#24242a".to_string(), "#2a2a30".to_string()), |[t, s]| (mix(&hex(s), "#000000", 0.25), hex(t)));
     s.path(&rounded(x, y, x + w, y + d, r), &sides, if big { "#5c5c66" } else { "#45454d" }, 1.0, 1.0);
     let [a0, b0, a1, b1] = key.face;
     s.path(&rounded(x + a0 * k, y + b0 * k, x + a1 * k, y + b1 * k, (r - 2.0).max(1.0)), &top, "#3a3a41", 1.0, 1.0);
@@ -1409,9 +1409,9 @@ pub fn face_list(core: &(String, u16), others: &[(String, Vec<u16>)], added: &[S
         let _ = write!(svg, r##"<text x="{:.1}" y="{:.1}" font-family="'{}'" font-weight="{weight}" font-size="13" fill="{AMBER}" text-anchor="end" opacity="0.9">ESC  Q  2 @  ENTER</text>"##, wf - 20.0, y + 22.0, xml(family));
     };
     // (the box to find one by name above them, the page's own)
-    let mut words = vec![Word { x: 20.0, y: 58.0, text: "This keyboard's own".into(), colour: QUIET_WORD }];
+    let mut words = vec![Word { x: 20.0, y: 58.0, text: "This keyboard's own".into(), color: QUIET_WORD }];
     row(&mut svg, 66.0, &core.0, core.1, current == 0);
-    words.push(Word { x: 20.0, y: 124.0, text: if others.len() == total { format!("In Ectodeck, {total}") } else { format!("In Ectodeck, {} found", others.len()) }, colour: QUIET_WORD });
+    words.push(Word { x: 20.0, y: 124.0, text: if others.len() == total { format!("In Ectodeck, {total}") } else { format!("In Ectodeck, {} found", others.len()) }, color: QUIET_WORD });
     for (i, (family, weights)) in others.iter().skip(first).take(rows).enumerate() {
         let weight = weights.iter().copied().min_by_key(|w| (*w as i32 - 600).abs()).unwrap_or(400);
         let y = 132.0 + i as f64 * 34.0;
@@ -1419,7 +1419,7 @@ pub fn face_list(core: &(String, u16), others: &[(String, Vec<u16>)], added: &[S
         // (after its name, set in itself)
         if added.contains(family) {
             let name = ectodeck_draw::print::text_width(&ectodeck_draw::print::faces(), family, weight, family, 15.0).unwrap_or(120.0) as f64;
-            words.push(Word { x: (20.0 + name + 10.0) as f32, y: (y + 22.0) as f32, text: "Added".into(), colour: QUIET_WORD });
+            words.push(Word { x: (20.0 + name + 10.0) as f32, y: (y + 22.0) as f32, text: "Added".into(), color: QUIET_WORD });
         }
     }
     svg += "</svg>";
@@ -1442,7 +1442,7 @@ pub fn pixels_set(st: &Stage, scale: f32) -> slint::SharedPixelBuffer<slint::Rgb
 }
 
 /// Where the switch pad has the key: its cap's middle on the pad, and the
-/// pad's pixels to the millimetre.
+/// pad's pixels to the millimeter.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PadMap {
     pub x: f32,
@@ -1453,7 +1453,7 @@ pub struct PadMap {
 /// One key from above, for moving its switch: its cap's foot and face as
 /// big as the art has them (`size`, mm across and north to south), a mark
 /// at its middle, its switch's housing where it sits and its LED north of
-/// the housing's centre, north up; the housing white while it is moved.
+/// the housing's center, north up; the housing white while it is moved.
 pub fn from_above(v: &Values, size: (f64, f64), w: f32, h: f32, hot: bool) -> (Stage, PadMap) {
     let (wf, hf) = (w as f64, h as f64);
     let (fw, fd) = (size.0.max(1.0), size.1.max(1.0));
@@ -1481,7 +1481,7 @@ pub fn from_above(v: &Values, size: (f64, f64), w: f32, h: f32, hot: bool) -> (S
     let _ = write!(svg, r##"<path d="{}" fill="#1f1f23" fill-opacity="0.9" stroke="{}" stroke-width="{}"/>"##, rounded(sx - half, sy - half, sx + half, sy + half, (1.2 * k).min(4.0)), if hot { WHITE } else { "#a1a1aa" }, if hot { 1.5 } else { 1.2 });
     let _ = write!(svg, r#"<circle cx="{sx:.1}" cy="{:.1}" r="3.2" fill="{AMBER}"/>"#, sy - v.north * k);
     svg += "</svg>";
-    let words = vec![Word { x: 12.0, y: 16.0, text: "North".into(), colour: QUIET_WORD }];
+    let words = vec![Word { x: 12.0, y: 16.0, text: "North".into(), color: QUIET_WORD }];
     (Stage { w, h, svg, words, extras: Vec::new() }, PadMap { x: cx as f32, y: cy as f32, k: k as f32 })
 }
 

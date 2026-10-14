@@ -23,7 +23,7 @@
 //! simulation runs, so its picture comes clear as it goes.
 //!
 //! What each place shows from above is kept for each LED on its own, so the
-//! keys can be any colours, lit and dimmed at will, without simulating again:
+//! keys can be any colors, lit and dimmed at will, without simulating again:
 //! the deck, the chassis, a cap's skirt (its outside, as the slope of its band
 //! shows it from above), and the back of a cap's top, which a legend lets its
 //! share of through. Everything is in the art's units, whatever size the
@@ -190,7 +190,7 @@ impl Setup {
 /// The share of the light that falls on a switch's black housing that it gives back.
 const HOUSING: f32 = 0.05;
 /// How far round a cap milky plastic carries the light it scatters before it
-/// leaves, in millimetres: the spread of where it comes out, each way round
+/// leaves, in millimeters: the spread of where it comes out, each way round
 /// the cap's foot from where it went in. The more milky the plastic, the
 /// sooner it turns a photon out of it, so the less far it carries it: a
 /// little haze carries light a long way, as clear plastic guides it (MILKY
@@ -200,7 +200,7 @@ pub const MILKY: f32 = 20.0;
 const MILKY_NEAR: f32 = 3.0;
 /// How far from a wall light that clear plastic takes in under a cap's
 /// black top still gets into the wall, and down it to the skirt below the
-/// black, in millimetres: the top and the sides are one piece of plastic,
+/// black, in millimeters: the top and the sides are one piece of plastic,
 /// which carries light as clear plastic does; further in, the black takes it.
 const CLEAR_REACH: f32 = 2.0;
 
@@ -210,15 +210,15 @@ pub fn milky_spread(milky: f32) -> f32 {
 }
 
 /// The keyboard's physical make, from the core's light: its switches, caps
-/// and wells, heights and widths in millimetres (heights above the deck),
+/// and wells, heights and widths in millimeters (heights above the deck),
 /// shares from 0 to 1. (The core names them as the Key lab does: the caps'
 /// foot and top, the wells' depth.)
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Physics {
-    /// how many of the art's units make a millimetre, as the core's light
+    /// how many of the art's units make a millimeter, as the core's light
     /// says (its "scale"): the art is in its own units, the core's lengths in mm
     pub units_per_mm: f32,
-    /// where the LED sits, north of its switch's centre in the art's units
+    /// where the LED sits, north of its switch's center in the art's units
     /// (the core says it in mm; south below 0; held inside the switch); and
     /// where the switch sits under its cap, mm east and north of the cap's
     /// middle (a key's own "place")
@@ -230,7 +230,7 @@ pub struct Physics {
     /// the switch's housing: black with the LED through a slot in it, or clear
     pub switch: Switch,
     /// the switch's housing: how high its top is, where the beam leaves it,
-    /// and how wide it is, a square round the switch's centre (at most 14
+    /// and how wide it is, a square round the switch's center (at most 14
     /// mm, as fits inside a cap)
     pub switch_top: f32,
     pub switch_width: f32,
@@ -331,13 +331,13 @@ impl Physics {
         Physics { lumens: 0.0, ..*self } == Physics { lumens: 0.0, ..*o }
     }
 
-    /// How far the switch's edge is from its centre, in the art's units:
-    /// the furthest an LED can sit from the centre, inside the switch.
+    /// How far the switch's edge is from its center, in the art's units:
+    /// the furthest an LED can sit from the center, inside the switch.
     pub fn switch_edge(&self) -> f32 {
         self.switch_width * self.units_per_mm / 2.0
     }
 
-    /// Where an LED sits, `north` of its key's centre in the art's units, as
+    /// Where an LED sits, `north` of its key's center in the art's units, as
     /// the simulation holds it: inside its switch, at most at its edge.
     pub fn held_north(&self, north: f32) -> f32 {
         north.clamp(-self.switch_edge(), self.switch_edge())
@@ -535,14 +535,14 @@ pub struct At {
     pub coarse: [(usize, f32); 4],
 }
 
-/// The keys' light in their colours, as Snapshot::lit adds it up: on the
+/// The keys' light in their colors, as Snapshot::lit adds it up: on the
 /// fine grid, and on the coarse grid's maps, a channel each.
-pub struct Coloured {
+pub struct Colored {
     pub fine: [Vec<f32>; 3],
     pub coarse: [[Vec<f32>; 3]; MAPS],
 }
 
-impl Coloured {
+impl Colored {
     /// the light at a place, its red, green and blue (as Snapshot::white has it)
     pub fn at(&self, a: &At) -> [f32; 3] {
         let maps = &self.coarse[a.code as usize];
@@ -592,7 +592,7 @@ impl Boxed {
         self.add_into_rows(map, gw, 0, k);
     }
 
-    /// add it in a colour `c` into the rows from `y0` on of a map of the
+    /// add it in a color `c` into the rows from `y0` on of a map of the
     /// whole grid a channel, `band` being as many of them as they hold;
     /// a channel of none left as it is
     pub fn add_rgb_into_rows(&self, band: &mut [&mut [f32]; 3], gw: usize, y0: usize, c: [f32; 3]) {
@@ -753,14 +753,14 @@ impl Scene {
         self.fine.at(x, y).is_some_and(|(i, j)| self.surface[j * self.fine.w + i] != Surface::None)
     }
 
-    /// Where a key's switch's centre is: its foot's middle, or as far east
+    /// Where a key's switch's center is: its foot's middle, or as far east
     /// and north of it as the key's own physics has its switch.
     fn switch_at(&self, k: usize, p: &Physics) -> (f32, f32) {
         let (x, y) = self.keys[k].1;
         (x + p.place[0] * p.units_per_mm, y - p.place[1] * p.units_per_mm)
     }
 
-    /// Where a key's LED sits: north of its switch's centre, inside the switch.
+    /// Where a key's LED sits: north of its switch's center, inside the switch.
     fn led_at(&self, k: usize, p: &Physics) -> (f32, f32) {
         let (x, y) = self.switch_at(k, p);
         (x, y - p.held_led())
@@ -838,7 +838,7 @@ fn parallel(x0: f32, y0: f32, x1: f32, y1: f32, h: f32) -> f32 {
 }
 
 /// A switch's clear housing, glowing with its LED's scattered light: a box
-/// `half` either side of the switch's centre `c`, from the deck up to the
+/// `half` either side of the switch's center `c`, from the deck up to the
 /// switch's top `h`, its top giving off its share of the light and its sides
 /// theirs, each as a matte surface does, and each brightest by the LED and
 /// fading away from it as the light carries through the plastic (to about a
@@ -986,7 +986,7 @@ impl Housing {
 
 /// The light straight from an LED and its housing on the back of its cap's
 /// top, `along` (the art's units) from over the LED toward the foot of the
-/// cap (back toward its top below 0), the LED `north` of the key's centre
+/// cap (back toward its top below 0), the LED `north` of the key's center
 /// (held inside its switch): what a legend there shows of it, for an LED of
 /// unit power, before the light bounced inside the cap. For the Lighting
 /// lab's curve.
@@ -1436,13 +1436,13 @@ impl Snapshot {
         direct + a.coarse.iter().map(|(i, w)| map[*i] * w).sum::<f32>()
     }
 
-    /// The light the keys show, each in its own colour (linear, in the
+    /// The light the keys show, each in its own color (linear, in the
     /// keys' order), added up.
     ///
-    /// Each key's boxes on the grids in its colour, added up, a map a
+    /// Each key's boxes on the grids in its color, added up, a map a
     /// channel: in bands of rows of all the maps at once, shared among a
     /// thread a core, each box's cells read once for all three channels.
-    pub fn lit(&self, colours: &[[f32; 3]]) -> Coloured {
+    pub fn lit(&self, colors: &[[f32; 3]]) -> Colored {
         const ROWS: usize = 16;
         let new = |g: &Grid| -> [Vec<f32>; 3] { std::array::from_fn(|_| vec![0f32; g.w * g.h]) };
         let (mut fine, mut coarse): ([Vec<f32>; 3], [[Vec<f32>; 3]; MAPS]) = (new(&self.fine), std::array::from_fn(|_| new(&self.coarse)));
@@ -1465,7 +1465,7 @@ impl Snapshot {
             for share in bands.chunks_mut(per) {
                 sc.spawn(move || {
                     for (m, gw, y0, band) in share.iter_mut() {
-                        for (k, c) in colours.iter().enumerate() {
+                        for (k, c) in colors.iter().enumerate() {
                             let bx = match m {
                                 None => &self.direct[k],
                                 Some(m) => &self.bounced[k][*m],
@@ -1476,7 +1476,7 @@ impl Snapshot {
                 });
             }
         });
-        Coloured { fine, coarse }
+        Colored { fine, coarse }
     }
 }
 
@@ -2145,18 +2145,18 @@ mod tests {
         (b, scene, Physics::from(&device["light"]))
     }
 
-    /// The keys' light in their colours, added up in one pass of all three
+    /// The keys' light in their colors, added up in one pass of all three
     /// channels, is the light each channel's own pass makes: every value alike.
     #[test]
-    fn the_coloured_light_is_each_channel_s_own() {
+    fn the_colored_light_is_each_channel_s_own() {
         let (_b, scene, p) = scene();
         let snap = Simulator::settle(&scene, &Setup::alike(p), 2000);
-        let colours: Vec<[f32; 3]> = (0..snap.keys.len()).map(|i| [((i * 37) % 7) as f32 / 6.0, ((i * 11) % 5) as f32 / 4.0, if i % 3 == 0 { 0.0 } else { 0.5 }]).collect();
-        let lit = snap.lit(&colours);
+        let colors: Vec<[f32; 3]> = (0..snap.keys.len()).map(|i| [((i * 37) % 7) as f32 / 6.0, ((i * 11) % 5) as f32 / 4.0, if i % 3 == 0 { 0.0 } else { 0.5 }]).collect();
+        let lit = snap.lit(&colors);
         // each channel on its own, a key at a time, over the whole grid
         let one = |g: &Grid, c: usize, boxes: Vec<&Boxed>| {
             let mut map = vec![0f32; g.w * g.h];
-            for (bx, col) in boxes.into_iter().zip(&colours) {
+            for (bx, col) in boxes.into_iter().zip(&colors) {
                 if col[c] > 0.0 {
                     bx.add_into_rows(&mut map, g.w, 0, col[c]);
                 }
@@ -2266,7 +2266,7 @@ mod tests {
         assert!(!scene.in_well(x, y) && scene.in_well(w[0] + r, w[3] - r) && scene.in_well(w[0] + 0.5, w[3] - r - 1.0), "in the corner's square, out of its round");
         let (fx, fy) = scene.fine.at(x, y).unwrap();
         assert_eq!(scene.surface[fy * scene.fine.w + fx], Surface::Chassis);
-        // a ray along the deck toward the corner, a millimetre up, meets its round wall
+        // a ray along the deck toward the corner, a millimeter up, meets its round wall
         let ss = Stoods::of(&scene, &Setup::alike(Physics::from(&serde_json::json!({ "scale": 1.38 }))));
         let (cx, cy) = (w[0] + r, w[3] - r);
         let from = [cx + 5.0, cy - 5.0, 1.0];
@@ -2276,7 +2276,7 @@ mod tests {
         assert!(matches!(hit, Some((t, Struck::Wall)) if (t - want).abs() < 0.05), "the corner's round: {hit:?}, {want}");
     }
 
-    /// An LED stays inside its switch: it sits as far north of centre as
+    /// An LED stays inside its switch: it sits as far north of center as
     /// asked up to the switch's edge and no further, in the light on its
     /// cap's top too.
     #[test]
@@ -2490,7 +2490,7 @@ mod tests {
             light["keys"][id.as_str()] = serde_json::json!({ "caps": { "kind": "shine-through", "foot": 2.0, "top": 4.0 } });
         }
         let setup = Setup::from(&light, &ids);
-        // a ray along the chassis, a millimetre up, into the media key's west side
+        // a ray along the chassis, a millimeter up, into the media key's west side
         let ss = Stoods::of(&scene, &setup);
         let f = scene.caps[stop].foot;
         let (y, z) = ((f[1] + f[3]) / 2.0, 3.0);

@@ -1,5 +1,5 @@
 //! Ectodeck in the system tray, as the web app had it: Open Ectodeck, each
-//! device (greyed out while it is not connected), and Quit. A click on the
+//! device (grayed out while it is not connected), and Quit. A click on the
 //! icon opens the window; closing the window leaves Ectodeck in the tray.
 
 use ksni::blocking::TrayMethods;

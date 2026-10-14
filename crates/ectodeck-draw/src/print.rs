@@ -29,7 +29,7 @@ const WORD_INSET: f32 = 0.852;
 const FOOT: (f32, f32) = (1.050, 0.311);
 /// A legend in the middle of its cap sits this share of its first line's
 /// capitals above the middle.
-const CENTRE_RISE: f32 = 0.166;
+const CENTER_RISE: f32 = 0.166;
 /// A sign printed larger than its kind sits lower on its line, by this share
 /// of its kind's capitals.
 const MARK_DROP: f32 = 0.0729;
@@ -120,7 +120,7 @@ impl Run {
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct Print {
     pub runs: Vec<Run>,
-    pub centred: bool,
+    pub centered: bool,
 }
 
 impl Print {
@@ -140,7 +140,7 @@ impl Print {
                 (icon.is_some() || !text.trim().is_empty()).then(|| Run { text, icon, role, scale: r["scale"].as_f64().unwrap_or(1.0) as f32 })
             })
             .collect();
-        (!runs.is_empty()).then(|| Print { runs, centred: control["centred"].as_bool() == Some(true) })
+        (!runs.is_empty()).then(|| Print { runs, centered: control["centered"].as_bool() == Some(true) })
     }
 
     /// The print with a key's own text in place of its parts, as a light's
@@ -176,7 +176,7 @@ impl Print {
                 None => runs.extend(self.runs.iter().filter(|r| r.role == role).cloned()),
             }
         }
-        Print { runs, centred: self.centred || image("main").is_some() }
+        Print { runs, centered: self.centered || image("main").is_some() }
     }
 
     /// A part of the print as words: its runs', a line each (an icon by its
@@ -394,9 +394,9 @@ fn image(name: &str) -> Option<Icon> {
 type Contour = Vec<(char, Vec<(f32, f32)>)>;
 
 /// A picture's file (SVG) as one outline, as a legend is one ink: its
-/// shapes, filled and stroked, in one colour, fitted to a 24-unit square
+/// shapes, filled and stroked, in one color, fitted to a 24-unit square
 /// and in its middle. Only shapes are kept: text not turned into outlines,
-/// pictures within it and its colours are left out. Each shape's holes stay
+/// pictures within it and its colors are left out. Each shape's holes stay
 /// holes (its outlines wound as filling them all as one needs: outer ones
 /// one way, the holes in them the other).
 pub fn image_from_svg(svg: &str) -> Result<String, String> {
@@ -924,7 +924,7 @@ fn lay_run(db: &fontdb::Database, run: &Run, cap: f32, face: fontdb::ID, weight:
 }
 
 /// A key's print set in a style, on its cap's top `face` (in the art's
-/// units, `per_mm` of them to the millimetre): its inks in the art's units.
+/// units, `per_mm` of them to the millimeter): its inks in the art's units.
 pub fn set(db: &fontdb::Database, print: &Print, style: &Style, own: &Own, face: [f32; 4], per_mm: f32) -> Set {
     let Some(id) = query(db, &style.typeface, style.weight).or_else(|| query(db, &own.style.typeface, own.style.weight)) else { return Set::default() };
     let symbols = (!own.symbols.is_empty()).then(|| query(db, &own.symbols, 700)).flatten();
@@ -984,14 +984,14 @@ pub fn set(db: &fontdb::Database, print: &Print, style: &Style, own: &Own, face:
     let second_base = seconds.first().map(|&i| fh - (FOOT.0 + FOOT.1 * laid[i].cap));
     // a legend the core prints in the middle of its cap, there at the top;
     // in the middle, all of it there; at the top left, all at the top
-    let centre_of = |top: f32, foot: f32| fh / 2.0 - CENTRE_RISE * first_cap - (top + foot) / 2.0;
+    let center_of = |top: f32, foot: f32| fh / 2.0 - CENTER_RISE * first_cap - (top + foot) / 2.0;
     // a key whose own legend is a picture has it in the middle, however the rest are placed
     let place = if print.runs.iter().any(|r| r.role == Role::Main && r.icon.as_deref().is_some_and(|i| i.starts_with(IMAGE))) { Place::Middle } else { style.place };
     let (main_shift, second_shift) = match (place, bases.first(), bases.last()) {
-        (Place::Printed, Some(&b0), Some(&bn)) if print.centred => (centre_of(b0 - first_cap, bn), 0.0),
+        (Place::Printed, Some(&b0), Some(&bn)) if print.centered => (center_of(b0 - first_cap, bn), 0.0),
         (Place::Middle, Some(&b0), Some(&bn)) => {
             let foot = second_base.unwrap_or(bn).max(bn);
-            let d = centre_of(b0 - first_cap, foot);
+            let d = center_of(b0 - first_cap, foot);
             (d, d)
         }
         _ => (0.0, 0.0),
@@ -1070,13 +1070,13 @@ mod tests {
     }
 
     /// The core's print reads as it is written: its 110 printed keys, each
-    /// part its own, its seven centred, its own typeface and sizes.
+    /// part its own, its seven centered, its own typeface and sizes.
     #[test]
     fn the_core_s_print_reads() {
         let d = device();
         let prints: Vec<(String, Print)> = d["controls"].as_array().unwrap().iter().filter_map(|c| Some((c["id"].as_str()?.to_string(), Print::of(c)?))).collect();
         assert_eq!(prints.len(), 110);
-        assert_eq!(prints.iter().filter(|(_, p)| p.centred).count(), 7);
+        assert_eq!(prints.iter().filter(|(_, p)| p.centered).count(), 7);
         let two = &prints.iter().find(|(id, _)| id == "2").unwrap().1;
         assert_eq!(two.runs.iter().map(|r| (r.text.as_str(), r.role)).collect::<Vec<_>>(), [("2", Role::Main), ("@", Role::Shift), ("PF2", Role::Second)]);
         let f1 = &prints.iter().find(|(id, _)| id == "f1").unwrap().1;
@@ -1111,7 +1111,7 @@ mod tests {
         let f1 = Print::of(&control("f1")).unwrap();
         assert_eq!(f1.text_of(Role::Second), "[mute]", "an icon by its name");
         assert!(f1.with_text(&serde_json::json!({ "main": "F1" }), &icons).runs.iter().any(|r| r.icon.as_deref() == Some("mute")), "an icon kept where no text takes its place");
-        assert!(caps.with_text(&serde_json::json!({ "main": "⇪" }), &icons).centred, "a centered key stays centered");
+        assert!(caps.with_text(&serde_json::json!({ "main": "⇪" }), &icons).centered, "a centered key stays centered");
         // the core's icon by its name, as the text box shows it, is the icon; a name it has none of, words
         let muted = f1.with_text(&serde_json::json!({ "second": "[mute]" }), &icons);
         assert_eq!(muted, f1, "[mute] the icon, as printed");
@@ -1120,7 +1120,7 @@ mod tests {
     }
 
     /// Each part of a legend sizes and moves on its own: the bottom legend
-    /// at half its size, the main legend raised a millimetre, the rest where
+    /// at half its size, the main legend raised a millimeter, the rest where
     /// it was; with no part's values, the legend as it was.
     #[test]
     fn a_legend_s_parts_size_and_move_on_their_own() {
@@ -1139,7 +1139,7 @@ mod tests {
         let tall = |s: &Set, r: Role| s.bounds_of(r).map(|b| b.3 - b.1).unwrap();
         assert!((tall(&moved, Role::Second) / tall(&plain, Role::Second) - 0.5).abs() < 0.02, "the bottom legend half as tall");
         let (was, now) = (plain.bounds_of(Role::Main).unwrap(), moved.bounds_of(Role::Main).unwrap());
-        assert!((was.1 - now.1 - 1.0).abs() < 1e-3 && (was.0 - now.0).abs() < 1e-3, "the main legend a millimetre up, no further across");
+        assert!((was.1 - now.1 - 1.0).abs() < 1e-3 && (was.0 - now.0).abs() < 1e-3, "the main legend a millimeter up, no further across");
         assert_eq!(tall(&moved, Role::Main), tall(&plain, Role::Main), "the main legend its own size");
     }
 
@@ -1204,7 +1204,7 @@ mod tests {
         }
         let own = Own::of(&device()).unwrap();
         let ink = |style: &Style, text: &str| {
-            let print = Print { runs: vec![Run { text: text.into(), icon: None, role: Role::Main, scale: 1.0 }], centred: false };
+            let print = Print { runs: vec![Run { text: text.into(), icon: None, role: Role::Main, scale: 1.0 }], centered: false };
             let set = set(&db, &print, style, &own, [0.0, 0.0, 18.0, 18.0], 1.0);
             set.inks.iter().map(|i| i.path.len()).sum::<usize>()
         };
@@ -1216,7 +1216,7 @@ mod tests {
     /// A picture of the person's own becomes one outline on a 24-unit
     /// square: a ring drawn with even-odd filling keeps its hole when its
     /// outline is filled as legends are, a stroked line comes as its
-    /// outline, and its colours go; and more than the file may hold is refused.
+    /// outline, and its colors go; and more than the file may hold is refused.
     #[test]
     fn a_picture_s_shapes_keep_their_holes() {
         let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">

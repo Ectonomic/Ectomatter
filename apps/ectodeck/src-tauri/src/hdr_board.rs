@@ -21,9 +21,9 @@ use serde::Deserialize;
 pub struct Layout {
     pub win_w: u32,
     pub win_h: u32,
-    /// the window's corner radius; 0 when maximised
+    /// the window's corner radius; 0 when maximized
     pub radius: f64,
-    /// the ground's colour, as the page's CSS has it (#rrggbb)
+    /// the ground's color, as the page's CSS has it (#rrggbb)
     pub base: String,
     /// the board's rect, or none when the keyboard page isn't showing
     pub board: Option<[f64; 4]>,
@@ -153,7 +153,7 @@ mod imp {
                             SHOWINGS.fetch_add(1, Ordering::SeqCst);
                         });
                     }
-                    let gdk_window = gtk_window.window().ok_or("the window is not realised")?;
+                    let gdk_window = gtk_window.window().ok_or("the window is not realized")?;
                     let display = gdk_window.display();
                     let d: *mut gtk::gdk::ffi::GdkDisplay = display.to_glib_none().0;
                     let s: *mut gtk::gdk::ffi::GdkWindow = gdk_window.to_glib_none().0;
@@ -260,7 +260,7 @@ mod imp {
         let mut st = St::default();
         queue.roundtrip(&mut st).map_err(|e| e.to_string())?;
         let (Some(compositor), Some(subc), Some(shm), Some(cm)) = (st.compositor.clone(), st.sub.clone(), st.shm.clone(), st.cm.clone()) else {
-            return Err("the compositor lacks sub-surfaces, shared memory or colour management".into());
+            return Err("the compositor lacks sub-surfaces, shared memory or color management".into());
         };
         let parent_id = unsafe { ObjectId::from_ptr(wl_surface::WlSurface::interface(), parent_ptr as *mut _) }.map_err(|e| format!("{e:?}"))?;
         let parent = wl_surface::WlSurface::from_id(&conn, parent_id).map_err(|e| format!("{e:?}"))?;
@@ -290,7 +290,7 @@ mod imp {
         let enc = crate::hdr_draw::Encoder::new(reference);
         let mut layout: Option<Layout> = None;
         let mut lights: Vec<crate::hdr_draw::Light> = Vec::new();
-        // the keyboard's pictures, made again only when its size or the ground's colour changes
+        // the keyboard's pictures, made again only when its size or the ground's color changes
         let mut board: Option<((u32, u32, String), crate::hdr_draw::Board)> = None;
         let mut back_pic: Option<Shown> = None;
         let mut showing = false;

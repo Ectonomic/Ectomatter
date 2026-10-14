@@ -17,7 +17,7 @@ use crate::Cell;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Ctl {
     None,
-    /// a colour: the effect's one colour, one of its list, the colour between pulses, the paint
+    /// a color: the effect's one color, one of its list, the color between pulses, the paint
     Color,
     Colors,
     Background,
@@ -159,7 +159,7 @@ pub mod kind {
     pub const DEVICE: i32 = 12;
     pub const WBOX: i32 = 13;
     pub const DOT: i32 = 14;
-    /// a box in its colour, rounded at its ends
+    /// a box in its color, rounded at its ends
     pub const BOX: i32 = 16;
     /// a place that tells the page when the pointer is over it
     pub const ZONE: i32 = 17;
@@ -199,11 +199,11 @@ pub mod style {
     pub const FACT: i32 = 12;
     pub const FACT_VALUE: i32 = 13;
     pub const CREDIT: i32 = 14;
-    /// a note in its own colour (the Key lab's menus), and a menu's
-    /// words in their own colour
+    /// a note in its own color (the Key lab's menus), and a menu's
+    /// words in their own color
     pub const NOTE_IN: i32 = 19;
     pub const WORDS_IN: i32 = 20;
-    /// the Key lab's small words in their own colour, and its
+    /// the Key lab's small words in their own color, and its
     /// stronger ones (a reading's number, the name of what its line tells of)
     pub const SMALL_IN: i32 = 21;
     pub const LABEL_IN: i32 = 22;
@@ -732,7 +732,7 @@ pub fn act(page: &mut Page, c: Ctl, index: usize, value: f32) {
     }
 }
 
-/// Set a colour the picker chose: the effect's colour, one of its list, the colour between pulses.
+/// Set a color the picker chose: the effect's color, one of its list, the color between pulses.
 pub fn set_color(page: &mut Page, c: Ctl, index: usize, rgb: [u8; 3]) {
     let n = page.editing;
     let Some(d) = page.drafts.get_mut(&n) else { return };
@@ -747,7 +747,7 @@ pub fn set_color(page: &mut Page, c: Ctl, index: usize, rgb: [u8; 3]) {
     }
 }
 
-/// The colour a swatch shows now.
+/// The color a swatch shows now.
 pub fn color_of(page: &Page, c: Ctl, index: usize, paint: [u8; 3]) -> [u8; 3] {
     let l = &page.draft()["lighting"];
     let e = &l[l["mode"].as_str().unwrap_or("off")];
@@ -775,7 +775,7 @@ pub fn icon(mode: &str, scale: f32) -> slint::Image {
         let v = u32::from_str_radix(&s, 16).unwrap_or(0);
         [((v >> 16) & 255) as f32, ((v >> 8) & 255) as f32, (v & 255) as f32]
     };
-    // an even run of colours, as a CSS gradient with no stops given lays them
+    // an even run of colors, as a CSS gradient with no stops given lays them
     let run = |cols: &[&str], t: f32| -> [f32; 3] {
         let c: Vec<[f32; 3]> = cols.iter().map(|s| hex(s)).collect();
         let x = t.clamp(0.0, 1.0) * (c.len() - 1) as f32;

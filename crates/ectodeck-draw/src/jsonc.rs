@@ -48,9 +48,39 @@ pub fn strip(text: &str) -> String {
     String::from_utf8(out).unwrap_or_default()
 }
 
-/// The text read, comments and all.
+/// The text read, comments and all, each key that was once spelled the British way under
+/// its name now (see [american]).
 pub fn parse(text: &str) -> Result<Value, String> {
-    serde_json::from_str(&strip(text)).map_err(|e| e.to_string())
+    serde_json::from_str(&strip(&american(text))).map_err(|e| e.to_string())
+}
+
+/// Keys Ectodeck's files once spelled the British way, and their names now (Grant: "Never
+/// Colour - Use Color", 2026-10-14). A file kept before reads as if written with the names
+/// now, and is saved with them.
+const RENAMED: [(&str, &str); 2] = [("colour", "color"), ("centred", "centered")];
+
+/// The text with each key in [RENAMED] under its name now, wherever it is a key (a string
+/// with a colon after it, outside a comment), and everything else as it was.
+pub fn american(text: &str) -> String {
+    let clean = strip(text);
+    let mut found: Vec<(usize, &str, &str)> = Vec::new();
+    for (old, new) in RENAMED {
+        let quoted = format!("\"{old}\"");
+        let mut from = 0;
+        while let Some(i) = clean[from..].find(&quoted).map(|i| from + i) {
+            from = i + quoted.len();
+            if clean[from..].trim_start().starts_with(':') {
+                found.push((i + 1, old, new));
+            }
+        }
+    }
+    // (from the end, so each place found is still where it was)
+    found.sort_by_key(|f| std::cmp::Reverse(f.0));
+    let mut out = text.to_string();
+    for (at, old, new) in found {
+        out.replace_range(at..at + old.len(), new);
+    }
+    out
 }
 
 /// Where a member of an object is in the text: its key's start, and its value's start and end.
@@ -201,6 +231,7 @@ fn line_end(t: &str, at: usize) -> usize {
 /// after the object's last member, on a line of its own where the object
 /// has its members on lines of their own.
 pub fn set(text: &str, path: &[&str], v: &Value) -> Result<String, String> {
+    let text = &american(text);
     let clean = strip(text);
     // the deepest object on the way that is there, the rest made in it
     let mut at = path.len().checked_sub(1).ok_or("no path")?;
@@ -248,6 +279,7 @@ pub fn set(text: &str, path: &[&str], v: &Value) -> Result<String, String> {
 /// object it leaves with nothing in it is `{}`.
 pub fn remove(text: &str, path: &[&str]) -> Result<String, String> {
     let (name, parent) = path.split_last().ok_or("no path")?;
+    let text = &american(text);
     let clean = strip(text);
     let obj = object_at(&clean, parent)?;
     let Some(i) = obj.members.iter().position(|(n, _)| n == name) else { return Ok(text.to_string()) };
@@ -282,9 +314,10 @@ pub fn remove(text: &str, path: &[&str]) -> Result<String, String> {
 /// one added, each one `to` does not have taken out, and the rest of the
 /// text left as it was. Numbers are the same where their values are (14 and 14.0).
 pub fn update(text: &str, at: &[&str], to: &Value) -> Result<String, String> {
-    let now = parse(text)?;
+    let text = american(text);
+    let now = parse(&text)?;
     let was = at.iter().fold(&now, |v, name| &v[*name]);
-    let mut out = text.to_string();
+    let mut out = text;
     let mut path: Vec<String> = at.iter().map(|s| s.to_string()).collect();
     update_in(&mut out, &mut path, was, to)?;
     Ok(out)
@@ -336,7 +369,7 @@ mod tests {
   "name": "Z", // its name
   "url": "http://example.com/a//b", /* not a comment inside a string */
   "light": {
-    "scale": 1.38,       // the drawing's units to the millimetre
+    "scale": 1.38,       // the drawing's units to the millimeter
     "caps": {
       "kind": "pudding",  // its kind
       "top": 14           //   and its height
@@ -400,7 +433,7 @@ mod tests {
         assert_eq!(parse(&t).unwrap()["light"], to);
         assert!(t.contains(r#""top": 12           //   and its height"#) && t.contains(r#""display": { "lit": 45 },"#), "{t}");
         assert!(!t.contains("12.0"));
-        assert!(t.contains("\"scale\": 1.38,       // the drawing's units to the millimetre"), "{t}");
+        assert!(t.contains("\"scale\": 1.38,       // the drawing's units to the millimeter"), "{t}");
         to.as_object_mut().unwrap().remove("keys");
         to["display"]["dot"] = json!(0.84);
         assert_eq!(update(&t, &["light"], &to).unwrap(), FILE.replace("\"top\": 14 ", "\"top\": 12 "));
@@ -423,5 +456,19 @@ mod tests {
         assert!(t.contains("    }\n  }\n}") && parse(&t).is_ok(), "{t}");
         let t = remove(&remove(FILE, &["light", "caps", "top"]).unwrap(), &["light", "caps", "kind"]).unwrap();
         assert!(t.contains(r#""caps": {},"#) && parse(&t).is_ok(), "{t}");
+    }
+
+    #[test]
+    fn a_file_kept_with_british_keys_reads_and_saves_with_the_american_ones() {
+        let t = "{\n  \"caps\": { \"colour\": \"#CCCCCC\" },  // \"colour\": as a comment says it\n  \"name\": \"colour\",\n  \"centred\": true\n}\n";
+        let v = parse(t).unwrap();
+        assert_eq!((&v["caps"]["color"], v["caps"].get("colour")), (&serde_json::json!("#CCCCCC"), None));
+        assert_eq!(v["centered"], serde_json::json!(true));
+        assert_eq!(v["name"], serde_json::json!("colour"), "a value is left as it is");
+        // saved: under the name now, in its place, the comment as it was written
+        let saved = set(t, &["caps", "color"], &serde_json::json!("#E6E6E6")).unwrap();
+        assert_eq!(saved, "{\n  \"caps\": { \"color\": \"#E6E6E6\" },  // \"colour\": as a comment says it\n  \"name\": \"colour\",\n  \"centered\": true\n}\n");
+        assert_eq!(update(t, &[], &v).unwrap(), american(t), "nothing changed: only the names");
+        assert_eq!(remove(t, &["centered"]).unwrap(), "{\n  \"caps\": { \"color\": \"#CCCCCC\" },  // \"colour\": as a comment says it\n  \"name\": \"colour\"\n}\n");
     }
 }

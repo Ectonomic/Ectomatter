@@ -45,6 +45,6 @@ The committed vectors are synthetic. Vectors made from a real keyboard's
 backups go in `parity/private/`, which is not committed, and are checked too
 when present.
 
-## Licence
+## License
 
 MIT.

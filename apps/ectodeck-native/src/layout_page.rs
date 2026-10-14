@@ -21,8 +21,8 @@ use crate::{Cell, EdBlock, LayoutRow, LayoutWindow, MenuRow};
 
 pub enum Ask {
     Move,
-    Minimise,
-    Maximise,
+    Minimize,
+    Maximize,
     Close,
     Choose(i32),
     /// + New (or the empty window's New layout): where the button is, and its width
@@ -153,8 +153,8 @@ impl LayoutPage {
             }};
         }
         on!(on_drag, Ask::Move);
-        on!(on_minimise, Ask::Minimise);
-        on!(on_maximise, Ask::Maximise);
+        on!(on_minimize, Ask::Minimize);
+        on!(on_maximize, Ask::Maximize);
         on!(on_close_window, Ask::Close);
         on!(on_choose, |i| Ask::Choose(i));
         on!(on_new_layout, |x, y, w, h| Ask::New(x, y, w, h));
@@ -226,8 +226,8 @@ impl LayoutPage {
         for a in asks {
             match a {
                 Ask::Move => out.window.push(WindowAsk::Move),
-                Ask::Minimise => out.window.push(WindowAsk::Minimise),
-                Ask::Maximise => out.window.push(WindowAsk::Maximise),
+                Ask::Minimize => out.window.push(WindowAsk::Minimize),
+                Ask::Maximize => out.window.push(WindowAsk::Maximize),
                 Ask::Close => {
                     self.close_menu();
                     self.close_picker();

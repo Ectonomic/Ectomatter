@@ -1,15 +1,15 @@
 """Ectodeck's own typefaces for legends: the faces keyboards are printed in,
-each under a licence that lets Ectodeck carry it (SIL Open Font License or
+each under a license that lets Ectodeck carry it (SIL Open Font License or
 MIT), so a setup looks the same on any computer.
 
   typefaces.py SOURCES    writes crates/ectodeck-draw/typefaces/ from the
                           font files in SOURCES (as downloaded from their
-                          projects, named below), with their licences and a README
+                          projects, named below), with their licenses and a README
 
 A font is cut to the letters keyboards print (Latin, Greek and Cyrillic,
 punctuation, currency, arrows; for the Japanese and Korean faces, the kana,
 the jamo and the words on those keyboards' keys), a variable font keeping
-every weight and only its default on any other axis; a font whose licence
+every weight and only its default on any other axis; a font whose license
 reserves its name (Audiowide, Orbitron) is carried as it comes.
 """
 import io
@@ -23,7 +23,7 @@ from fontTools.varLib import instancer
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'crates/ectodeck-draw/typefaces'
 
-# (file written, source file, cut to these letters or None to carry it as it comes, look, project, licence)
+# (file written, source file, cut to these letters or None to carry it as it comes, look, project, license)
 LATIN = [(0x20, 0x52F), (0x1E00, 0x1EFF), (0x2000, 0x206F), (0x20A0, 0x20CF), (0x2100, 0x21FF)]
 # the kana, and the words on a Japanese keyboard's keys
 JAPANESE = [(0x20, 0x7E), (0xA5, 0xA5), (0x3000, 0x30FF), (0xFF01, 0xFF5E)] + [(ord(c), ord(c)) for c in '半角全漢字変換無英数']
@@ -88,17 +88,17 @@ def main(sources):
         else:
             cut(src, keep, OUT / file)
     # the OFL once, after every OFL font's own copyright
-    ofl = [TTFont(OUT / file)['name'].getDebugName(0) for file, _, _, _, _, licence in FACES if licence.startswith('OFL')]
+    ofl = [TTFont(OUT / file)['name'].getDebugName(0) for file, _, _, _, _, license in FACES if license.startswith('OFL')]
     body = (Path(sources) / 'OFL.txt').read_text()
     body = body[body.index('This Font Software is licensed'):]
     (OUT / 'OFL.txt').write_text('\n'.join(dict.fromkeys(ofl)) + '\n\n' + body)
     (OUT / 'OpenGorton-LICENSE.txt').write_bytes((Path(sources) / 'OpenGorton-LICENSE.txt').read_bytes())
-    lines = [f'- `{file}`: {look}. {project}, {licence}.' for file, _, _, look, project, licence in FACES]
+    lines = [f'- `{file}`: {look}. {project}, {license}.' for file, _, _, look, project, license in FACES]
     (OUT / 'README.md').write_text(
         '# Ectodeck\'s typefaces for legends\n\n'
         'The faces keyboards are printed in, built into Ectodeck so a setup\'s legends look the same on any computer. '
-        'Each is under a licence that lets Ectodeck carry it: the SIL Open Font License 1.1 (`OFL.txt`, with each font\'s own copyright in the font) or MIT (`OpenGorton-LICENSE.txt`). '
-        'Each is cut to the letters keyboards print, a variable font keeping all its weights; Audiowide and Orbitron, whose licences reserve their names, are carried as they come.\n\n'
+        'Each is under a license that lets Ectodeck carry it: the SIL Open Font License 1.1 (`OFL.txt`, with each font\'s own copyright in the font) or MIT (`OpenGorton-LICENSE.txt`). '
+        'Each is cut to the letters keyboards print, a variable font keeping all its weights; Audiowide and Orbitron, whose licenses reserve their names, are carried as they come.\n\n'
         + '\n'.join(lines) + '\n\nBuilt by `tools/typefaces.py`.\n')
     print('typefaces written:', sorted(p.name for p in OUT.iterdir()))
 

@@ -52,7 +52,7 @@ button:disabled { opacity: .35; cursor: default; }
 .board .art.base { z-index: -2; }
 /* A key is a button laid over its cap in the drawing: it takes the pointer,
    shows when it is chosen or pressed, and prints a new meaning. Its light and
-   legend are shapes cut from the drawing's pieces, filled with its colour
+   legend are shapes cut from the drawing's pieces, filled with its color
    (--c) and faded by its light (--a). */
 .key {
   position: absolute; border-radius: 0.24cqw; border: 0; padding: 0; cursor: pointer;
@@ -65,13 +65,13 @@ button:disabled { opacity: .35; cursor: default; }
   background: var(--c, transparent); opacity: var(--a, 0);
 }
 .key .lit.under { z-index: -1; }
-/* A lit legend is the colour of its light, as strongly as the key is lit,
-   over the grey it is printed in. */
+/* A lit legend is the color of its light, as strongly as the key is lit,
+   over the gray it is printed in. */
 .key .lit.legend {
   opacity: 1;
   background: color-mix(in srgb, var(--c, var(--print)) calc(var(--a, 0) * 100%), var(--print));
 }
-/* A modified key is marked by a short grey line along its cap's front edge,
+/* A modified key is marked by a short gray line along its cap's front edge,
    and its new meaning is printed in white (below), with the key's own legend
    stepped back behind it. */
 .key.has-remap::after { content: ''; position: absolute; left: 32%; right: 32%; bottom: 0.2cqw; height: 2px; border-radius: 1px;
@@ -79,7 +79,7 @@ button:disabled { opacity: .35; cursor: default; }
 .key.has-remap .lit.legend { opacity: .35; }
 /* The new meaning is printed where a second legend goes, at the bottom of
    the cap, in the same capitals and size as the key's own, in white rather
-   than the backlight's colour, so a changed key reads as changed. */
+   than the backlight's color, so a changed key reads as changed. */
 .key .remap {
   position: absolute; z-index: 1; left: 0.5cqw; right: 0.5cqw; bottom: 0.66cqw;
   font: 600 0.78cqw/1.02 'Barlow Semi Condensed', sans-serif; letter-spacing: .01em;
@@ -181,7 +181,7 @@ section.panel { padding: 18px 0 4px; }
 .swatch-in { position: relative; display: block; width: 38px; height: 38px; padding: 0; border: 0; border-radius: 9px; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(255,255,255,.18); }
 .swatch-in:hover { box-shadow: inset 0 0 0 1px rgba(255,255,255,.4); }
 
-/* the colour picker (colorPicker in app.js) */
+/* the color picker (colorPicker in app.js) */
 .menu.picker { padding: 12px; display: grid; gap: 10px; overflow-x: hidden; }
 .pk-sv { position: relative; height: 160px; border-radius: 8px; cursor: crosshair; touch-action: none; }
 .pk-dot { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; box-shadow: 0 0 0 2px #fff, 0 0 0 3px rgba(0,0,0,.4); pointer-events: none; }
@@ -228,7 +228,7 @@ input[type=checkbox] { accent-color: var(--ink); width: 16px; height: 16px; }
 @keyframes pulse { 50% { opacity: .25; } }
 @media (prefers-reduced-motion: reduce) { .livedot::before { animation: none; } }
 
-/* painting per-key colours */
+/* painting per-key colors */
 .board.painting .key { cursor: crosshair; }
 .paintbar { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 18px; }
 .paintbar .swatch-in { width: 44px; height: 44px; }
@@ -264,7 +264,7 @@ input[type=checkbox] { accent-color: var(--ink); width: 16px; height: 16px; }
 .page { max-width: 1320px; margin: 0 auto; padding: 22px 28px 40px; }
 
 /* the profile window: Lighting, Keys and Settings */
-.pws { border: 1px solid var(--line); border-radius: 12px; background: #1f2429; }   /* the grey the keyboard sits on, kept from the original editor */
+.pws { border: 1px solid var(--line); border-radius: 12px; background: #1f2429; }   /* the gray the keyboard sits on, kept from the original editor */
 .pws-head { display: flex; align-items: center; gap: 10px; min-height: 64px;  /* the height the profile tabs need once loaded, so the board does not move */ padding: 8px 14px; border-bottom: 1px solid #2e2e2e; }
 .pws-head .profiles { display: flex; gap: 4px; overflow-x: auto; }
 .profiles button {
@@ -403,7 +403,7 @@ input[type=checkbox] { accent-color: var(--ink); width: 16px; height: 16px; }
 .cn.plain { cursor: default; }
 .cn.plain:hover::before { background: #4a4a4a; }
 /* The plus is drawn, not typed: a font's "+" sits where its designer put it
-   in the line, off the circle's centre, so two bars are laid on the circle's
+   in the line, off the circle's center, so two bars are laid on the circle's
    exact middle instead. */
 .cn .plus { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 20px; height: 20px; border-radius: 50%; z-index: 2; font-size: 0; color: transparent;
   background: linear-gradient(#171717, #171717) center / 10px 2px no-repeat, linear-gradient(#171717, #171717) center / 2px 10px no-repeat, #e5e5e5; }

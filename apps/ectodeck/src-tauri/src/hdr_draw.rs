@@ -5,12 +5,12 @@
 //! caps, the light on each cap, the glow round each legend, and the legends.
 //! What never changes is drawn once for the keyboard's size; each key's light
 //! is a shape cut from its own pieces, drawn once too, and filled with the
-//! key's colour each time the lighting changes. Light is added in linear light,
+//! key's color each time the lighting changes. Light is added in linear light,
 //! and the light pieces and the lit legends go brighter than the desktop's
 //! white, up to the glow's brightness.
 //!
 //! The picture comes out as the HDR layer wants it: PQ, BT.2020, 16 bits a
-//! channel, premultiplied. SDR colours are decoded as KWin decodes the page's
+//! channel, premultiplied. SDR colors are decoded as KWin decodes the page's
 //! own (gamma 2.2 at the reference white), so the keyboard meets the page
 //! round it without a seam.
 
@@ -18,7 +18,7 @@ use resvg::tiny_skia::{Pixmap, Transform};
 use resvg::usvg::{self, Tree};
 use serde_json::Value;
 
-/// One key's light, as the page has it: its colour (sRGB) and how strongly it
+/// One key's light, as the page has it: its color (sRGB) and how strongly it
 /// is lit (0 to 1), and whether the key is remapped, which steps its legend back.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Light {
@@ -45,7 +45,7 @@ struct KeyArt {
     cap: Option<Shape>,
     glow: Option<Shape>,
     legend: Option<Shape>,
-    /// the grey its legend is printed in, in linear light
+    /// the gray its legend is printed in, in linear light
     print: [f32; 3],
 }
 
@@ -53,14 +53,14 @@ struct KeyArt {
 pub struct Board {
     pub w: u32,
     pub h: u32,
-    /// the body and its print over the ground's colour: opaque, linear RGB
+    /// the body and its print over the ground's color: opaque, linear RGB
     under: Vec<f32>,
     /// the caps and the legends of unlit keys: premultiplied linear RGBA
     caps: Vec<f32>,
     keys: Vec<KeyArt>,
 }
 
-/// sRGB (as the page's colours are) to linear light, as KWin decodes the page: gamma 2.2.
+/// sRGB (as the page's colors are) to linear light, as KWin decodes the page: gamma 2.2.
 fn lin(v: u8) -> f32 {
     (v as f32 / 255.0).powf(2.2)
 }
@@ -173,7 +173,7 @@ impl Board {
             px[3] = 1.0;
         }
         let light = |pos: u32| lights.iter().find(|l| l.pos == pos);
-        // lay a colour over the picture through a shape, `alpha` its strength
+        // lay a color over the picture through a shape, `alpha` its strength
         let over = |out: &mut [f32], s: &Shape, col: [f32; 3], alpha: f32| {
             if alpha <= 0.0 {
                 return;
@@ -200,12 +200,12 @@ impl Board {
                 }
             }
         };
-        let glow_colour = |l: &Light| [lin(l.rgb[0]) * gain, lin(l.rgb[1]) * gain, lin(l.rgb[2]) * gain];
+        let glow_color = |l: &Light| [lin(l.rgb[0]) * gain, lin(l.rgb[1]) * gain, lin(l.rgb[2]) * gain];
 
         // the light each key throws on the deck
         for key in &self.keys {
             if let (Some(l), Some(s)) = (light(key.pos), &key.under) {
-                over(&mut out, s, glow_colour(l), l.strength);
+                over(&mut out, s, glow_color(l), l.strength);
             }
         }
         // the caps over it
@@ -225,15 +225,15 @@ impl Board {
             let strength = l.map_or(0.0, |l| l.strength);
             if let Some(l) = l {
                 if let Some(s) = &key.cap {
-                    over(&mut out, s, glow_colour(l), l.strength);
+                    over(&mut out, s, glow_color(l), l.strength);
                 }
                 if let Some(s) = &key.glow {
-                    over(&mut out, s, glow_colour(l), l.strength);
+                    over(&mut out, s, glow_color(l), l.strength);
                 }
             }
             if let Some(s) = &key.legend {
-                // printed grey where it is unlit, the key's light as strongly as it is lit
-                let g = l.map_or([0.0; 3], glow_colour);
+                // printed gray where it is unlit, the key's light as strongly as it is lit
+                let g = l.map_or([0.0; 3], glow_color);
                 let col = [
                     key.print[0] * (1.0 - strength) + g[0] * strength,
                     key.print[1] * (1.0 - strength) + g[1] * strength,
@@ -247,7 +247,7 @@ impl Board {
     }
 }
 
-/// The first fill colour in a piece: the grey a legend is printed in.
+/// The first fill color in a piece: the gray a legend is printed in.
 fn first_fill(node: &usvg::Node) -> Option<[u8; 3]> {
     match node {
         usvg::Node::Path(p) => match p.fill()?.paint() {

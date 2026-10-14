@@ -14,8 +14,8 @@ body[data-place="z10"] #device { display: block; }
 
 /* ------------------------------------------------ the rail, opening into a blade */
 /* The rail and the home take the shades the approved mock showed. The mock was
-   judged in Chrome while Chrome labelled its colours for KWin, which decoded them
-   brighter in the darkest greys than every other app: #161616 and #1a1a1a there
+   judged in Chrome while Chrome labeled its colors for KWin, which decoded them
+   brighter in the darkest grays than every other app: #161616 and #1a1a1a there
    looked like #1c1c1c and #202020 do here, in Ectodeck, in other apps and on
    Windows. Judge these shades outside Chrome, or allow for that difference. */
 .mrail { position: sticky; top: 36px; z-index: 25; flex: none; height: calc(100vh - 36px); width: 60px; background: #1c1c1c;

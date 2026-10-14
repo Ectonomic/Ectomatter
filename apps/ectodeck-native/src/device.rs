@@ -20,7 +20,7 @@ pub enum Ask {
     ReadActive,
     /// where both sliders are, on firmware that can say
     Sliders,
-    /// show a preview on the keyboard: an effect, each key's colour, or stop
+    /// show a preview on the keyboard: an effect, each key's color, or stop
     Preview(Value),
     /// hold the dimmer at a level, or give it back to the slider
     Dimmer(Option<u8>),

@@ -1,6 +1,6 @@
 //! How bright each screen can go above its white, for Settings › HDR.
 //!
-//! On Linux this asks the compositor through the Wayland colour-management
+//! On Linux this asks the compositor through the Wayland color-management
 //! protocol for each screen's own image description, whose luminances give
 //! the screen's reference white (the desktop's white) and the peak it can
 //! reach. The room between them is what HDR lighting uses: a screen in HDR

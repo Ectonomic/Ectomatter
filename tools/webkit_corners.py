@@ -3,7 +3,7 @@ frameless window needs to be for its rounded corners to show.
 
 Loads the page in a WebKit view with a transparent background and the app's
 'framed' look switched on, takes WebKit's own snapshot with transparency, and
-reports how opaque the corner and centre pixels are.
+reports how opaque the corner and center pixels are.
 
     python3 tools/webkit_corners.py <url> <out.png>
 """

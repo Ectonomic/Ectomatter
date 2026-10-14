@@ -65,8 +65,8 @@ pub enum Ask {
     /// the rebindings shown on the keyboard, or not
     ShowRebindings,
     Move,
-    Minimise,
-    Maximise,
+    Minimize,
+    Maximize,
     Close,
     View(i32),
     Profile(i32),
@@ -98,7 +98,7 @@ pub enum Ask {
     Effect(i32),
     CellPick(i32, i32, f32, f32, f32),
     CellSlide(i32, f32),
-    /// time to send the preview again: the effect every two seconds, streamed colours 14 times a second
+    /// time to send the preview again: the effect every two seconds, streamed colors 14 times a second
     PreviewTick,
     StreamTick,
     /// time to save what has changed, once it has stopped changing
@@ -173,8 +173,8 @@ pub enum Ask {
     LibNew(f32, f32),
 }
 
-/// The colour picker, open on a swatch: what it sets, the colour it opened
-/// on, and the colour now, as hue (0 to 360), saturation and brightness (0 to 1).
+/// The color picker, open on a swatch: what it sets, the color it opened
+/// on, and the color now, as hue (0 to 360), saturation and brightness (0 to 1).
 struct Pick {
     ctl: Ctl,
     index: usize,
@@ -205,7 +205,7 @@ pub(crate) fn hsv2rgb([h, s, v]: [f32; 3]) -> [u8; 3] {
     [f(5.0), f(3.0), f(1.0)]
 }
 
-/// A rounded box's picture: `f` gives each pixel's colour from its place (0 to 1 across and down).
+/// A rounded box's picture: `f` gives each pixel's color from its place (0 to 1 across and down).
 fn rounded(w: u32, h: u32, r: f32, f: impl Fn(f32, f32) -> [f32; 3]) -> slint::Image {
     let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(w, h);
     let (fw, fh) = (w as f32, h as f32);
@@ -245,8 +245,8 @@ pub(crate) fn color([r, g, b]: [u8; 3]) -> slint::Color {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WindowAsk {
     Move,
-    Minimise,
-    Maximise,
+    Minimize,
+    Maximize,
     Close,
     /// open the Macro Editor's window, on this macro (0: as it was)
     OpenMacros(u32),
@@ -445,7 +445,7 @@ pub struct Front {
     /// sliders are moved, so a knob reaches both ends when its slider does
     slider_ends: [[f64; 2]; 2],
     _timers: Vec<slint::Timer>,
-    /// the Lighting page: the colour Per key paints with, whether the keyboard
+    /// the Lighting page: the color Per key paints with, whether the keyboard
     /// is being sent the preview, and the pieces of the tile as last laid out
     paint: [u8; 3],
     previewing: bool,
@@ -585,7 +585,7 @@ pub struct Front {
     read_at: Option<Instant>,
 }
 
-/// A profile's colour sample: how many colours, and the colours.
+/// A profile's color sample: how many colors, and the colors.
 fn swatch(cols: &[[f64; 3]]) -> (i32, [Color; 4]) {
     let c = |i: usize| cols.get(i).or(cols.last()).map_or(Color::from_rgb_u8(0, 0, 0), |v| Color::from_rgb_u8(v[0] as u8, v[1] as u8, v[2] as u8));
     (cols.len().clamp(1, 4) as i32, [c(0), c(1), c(2), c(3)])
@@ -607,8 +607,8 @@ impl Front {
             }};
         }
         on!(on_drag, Ask::Move);
-        on!(on_minimise, Ask::Minimise);
-        on!(on_maximise, Ask::Maximise);
+        on!(on_minimize, Ask::Minimize);
+        on!(on_maximize, Ask::Maximize);
         on!(on_close_window, Ask::Close);
         on!(on_view_changed, |i| Ask::View(i));
         on!(on_choose_profile, |n| Ask::Profile(n));
@@ -1084,8 +1084,8 @@ impl Front {
             let mut changed = true;
             match ask {
                 Ask::Move => window.push(WindowAsk::Move),
-                Ask::Minimise => window.push(WindowAsk::Minimise),
-                Ask::Maximise => window.push(WindowAsk::Maximise),
+                Ask::Minimize => window.push(WindowAsk::Minimize),
+                Ask::Maximize => window.push(WindowAsk::Maximize),
                 Ask::Close => window.push(WindowAsk::Close),
                 Ask::View(i) => {
                     // still reading the keyboard
@@ -1733,7 +1733,7 @@ impl Front {
         self.ask_kb(device::Ask::Preview(body));
     }
 
-    /// A piece of the tile used: a swatch opens the colour picker, the rest change the draft.
+    /// A piece of the tile used: a swatch opens the color picker, the rest change the draft.
     fn cell_pick(&mut self, c: Ctl, index: usize, _anchor: (f32, f32, f32)) {
         match c {
             Ctl::Color | Ctl::Colors | Ctl::Background | Ctl::Paint | Ctl::LcdColor => {
@@ -1825,7 +1825,7 @@ impl Front {
         self.push_preview();
     }
 
-    // ------------------------------------------------------------ the colour picker
+    // ------------------------------------------------------------ the color picker
 
     fn open_picker(&mut self, c: Ctl, index: usize, anchor: (f32, f32, f32)) {
         // the second click on the swatch whose picker a press just closed
@@ -1857,14 +1857,14 @@ impl Front {
         if let Some(p) = self.pick.take() {
             self.ui.set_picker_open(false);
             self.ui.invoke_blur_picker();
-            // the colour the picker is closed on joins the recent ones
+            // the color the picker is closed on joins the recent ones
             if p.rgb != p.start {
                 keep_recent(p.rgb);
             }
         }
     }
 
-    /// Show the colour everywhere but the field being typed in.
+    /// Show the color everywhere but the field being typed in.
     fn show_pick(&mut self, skip: Option<i32>) {
         let Some(p) = &self.pick else { return };
         let [h, sv, v] = p.hsv;
@@ -1900,7 +1900,7 @@ impl Front {
         }
     }
 
-    /// A new colour in the picker: shown, and set where the picker was opened.
+    /// A new color in the picker: shown, and set where the picker was opened.
     fn pick_set(&mut self, hsv: [f32; 3], rgb: Option<[u8; 3]>, skip: Option<i32>) {
         let Some(p) = &mut self.pick else { return };
         p.hsv = hsv;
@@ -2350,7 +2350,7 @@ impl Front {
 
     /// A press anywhere on the page lets the chosen key go, but on the
     /// keyboard (a key there is chosen instead, and the chassis lets it go
-    /// itself), on the chosen key's editor, in an open menu or the colour
+    /// itself), on the chosen key's editor, in an open menu or the color
     /// picker, or on the title bar, which only moves the window.
     fn let_key_go(&mut self, x: f32, y: f32) {
         if self.page.view != View::Keys || self.page.sel.is_none() || self.ui.get_place() != "z10" || y < 36.0 {
@@ -4713,16 +4713,16 @@ fn sync_blocks(model: &VecModel<crate::PlBlock>, rows: Vec<crate::PlBlock>) {
 }
 
 
-/// The colours used lately, newest first, as the picker lists them.
+/// The colors used lately, newest first, as the picker lists them.
 pub(crate) fn recent_colors() -> Vec<[u8; 3]> {
-    crate::uistate::get("recent_colours").and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default()
+    crate::uistate::get("recent_colors").and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default()
 }
 
 pub(crate) fn keep_recent(c: [u8; 3]) {
     let mut list = vec![c];
     list.extend(recent_colors().into_iter().filter(|r| *r != c));
     list.truncate(9);
-    crate::uistate::set("recent_colours", serde_json::json!(list));
+    crate::uistate::set("recent_colors", serde_json::json!(list));
 }
 
 /// Set the computer's output or microphone volume, 0 to 1, exactly where the
@@ -4746,7 +4746,7 @@ fn weather_place(settings: &crate::settings::Settings) -> Option<ectodeck_weathe
 }
 
 impl Front {
-    /// How much brighter than the page's colours the keys' light is drawn:
+    /// How much brighter than the page's colors the keys' light is drawn:
     /// the design's brightness, unless Settings › HDR lets it go to a peak.
     pub fn light_gain(&self, reference: f64) -> f32 {
         let hdr = self.settings.get("hdr").unwrap_or_default();

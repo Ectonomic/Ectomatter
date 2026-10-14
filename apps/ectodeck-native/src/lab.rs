@@ -41,8 +41,8 @@ use ectodeck_draw::jsonc;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Ask {
     Move,
-    Minimise,
-    Maximise,
+    Minimize,
+    Maximize,
     Close,
     Slide(i32, f32),
     Typed(i32, String),
@@ -96,9 +96,9 @@ pub enum Ask {
     /// the legend dragged on the drawing: where its middle goes on the key's
     /// top, across and down, as shares of it
     MoveLegend(f32, f32),
-    /// the caps' colour: the picker opened on their tops' (0) or their
+    /// the caps' color: the picker opened on their tops' (0) or their
     /// sides' (1), or shut (-1); and the picker used, as the main window's is
-    Colour(i32),
+    Color(i32),
     PkSv(f32, f32),
     PkHue(f32),
     PkField(i32, String),
@@ -107,10 +107,10 @@ pub enum Ask {
     PkDismiss,
 }
 
-/// The colour picker, open on a part of the caps: which (0 their tops, 1
-/// their sides), the colour it opened on, and the colour now, as hue (0 to
+/// The color picker, open on a part of the caps: which (0 their tops, 1
+/// their sides), the color it opened on, and the color now, as hue (0 to
 /// 360), saturation and brightness (0 to 1).
-struct ColourPick {
+struct ColorPick {
     part: usize,
     start: [u8; 3],
     hsv: [f32; 3],
@@ -124,18 +124,18 @@ enum Unit {
     Nits,
     /// light given off, in lumens
     Lumens,
-    /// how far north of its switch's middle the LED sits, in millimetres,
+    /// how far north of its switch's middle the LED sits, in millimeters,
     /// below 0 south
     North,
-    /// a height or a width, in millimetres
+    /// a height or a width, in millimeters
     Mm,
-    /// how far something carries, in millimetres, on a scale of ratios like a length's
+    /// how far something carries, in millimeters, on a scale of ratios like a length's
     Reach,
     /// a part of the whole, as a percentage
     Fraction,
     /// a plain number, as a beam's power
     Number,
-    /// a key's switch's place under its cap, in millimetres east or north of
+    /// a key's switch's place under its cap, in millimeters east or north of
     /// its middle (the path says which), below 0 west or south
     Place,
     /// a size as a share of another's, as a percentage, past 100% too
@@ -444,7 +444,7 @@ fn reads(p: &Param, v: f64) -> (String, String) {
 /// What is on the keyboard now, in nits, and how far its light's simulation has got.
 #[derive(Clone, Copy, Default, PartialEq)]
 pub struct Readout {
-    /// the brightest legend, and how bright the lit keys' colour shows before
+    /// the brightest legend, and how bright the lit keys' color shows before
     /// the screen clips one of its channels
     pub legend: f64,
     pub reach: f64,
@@ -542,7 +542,7 @@ const LEGENDS: usize = 2;
 const TYPEFACE: i32 = 980;
 const FACE: i32 = 990;
 const FIND: i32 = 985;
-/// the caps' colour: its row, its tops' button and its sides', and the page
+/// the caps' color: its row, its tops' button and its sides', and the page
 /// round the open picker, which shuts it
 /// the Legends section's part the sliders act on, and its options
 const PART: i32 = 1600;
@@ -553,16 +553,16 @@ const PART_NAMES: [&str; 4] = ["Whole", "Main", "Shifted", "Bottom"];
 const PART_PARAMS: [usize; 9] = [32, 33, 34, 35, 36, 37, 38, 39, 40];
 /// the button that puts the section on screen back as Default has it
 const SECTION_DEFAULT: i32 = 1610;
-const COLOUR: i32 = 1500;
-const COLOUR_TOP: i32 = 1501;
-const COLOUR_SIDES: i32 = 1502;
+const COLOR: i32 = 1500;
+const COLOR_TOP: i32 = 1501;
+const COLOR_SIDES: i32 = 1502;
 const PICK_SHUT: i32 = 1503;
-/// where each part's colour is kept in the light
-const COLOUR_PATHS: [(&str, &str); 2] = [("caps", "colour"), ("caps", "sides")];
-/// the colours a cap is offered first, and their names: black as the drawing
-/// has it, white, and colours caps are often made in; clear plastic tints
+/// where each part's color is kept in the light
+const COLOR_PATHS: [(&str, &str); 2] = [("caps", "color"), ("caps", "sides")];
+/// the colors a cap is offered first, and their names: black as the drawing
+/// has it, white, and colors caps are often made in; clear plastic tints
 /// nothing
-const CAP_COLOURS: [([u8; 3], &str); 9] = [
+const CAP_COLORS: [([u8; 3], &str); 9] = [
     (ectodeck_draw::hdr::CAP_BLACK, "Black"),
     ([0xcc, 0xcc, 0xcc], "White"),
     ([0x8a, 0x8a, 0x8a], "Gray"),
@@ -574,7 +574,7 @@ const CAP_COLOURS: [([u8; 3], &str); 9] = [
     (ectodeck_draw::hdr::CAP_CLEAR, "Clear"),
 ];
 
-/// A colour as the light writes it, "#rrggbb".
+/// A color as the light writes it, "#rrggbb".
 fn rgb_of(v: &Value) -> Option<[u8; 3]> {
     let s = v.as_str()?.strip_prefix('#').filter(|s| s.len() == 6)?;
     let c = |i: usize| u8::from_str_radix(&s[i..i + 2], 16).ok();
@@ -585,24 +585,24 @@ fn hex_of([r, g, b]: [u8; 3]) -> String {
     format!("#{r:02X}{g:02X}{b:02X}")
 }
 
-/// A colour's name: one of the offered ones', or its code.
-fn colour_name(c: [u8; 3]) -> String {
-    CAP_COLOURS.iter().find(|(o, _)| *o == c).map_or_else(|| hex_of(c), |(_, n)| n.to_string())
+/// A color's name: one of the offered ones', or its code.
+fn color_name(c: [u8; 3]) -> String {
+    CAP_COLORS.iter().find(|(o, _)| *o == c).map_or_else(|| hex_of(c), |(_, n)| n.to_string())
 }
 
-/// What colour a light's caps are, their tops and their sides, where it
+/// What color a light's caps are, their tops and their sides, where it
 /// says none: black tops, clear on translucent caps; sides as the top on
 /// shine-through caps, whose plastic is all one, and clear below the top's
-/// colour on pudding caps.
-fn cap_colours(light: &Value) -> [[u8; 3]; 2] {
+/// color on pudding caps.
+fn cap_colors(light: &Value) -> [[u8; 3]; 2] {
     let kind = Physics::from(light).caps;
-    let top = rgb_of(&light["caps"]["colour"]).unwrap_or(if kind == Caps::Translucent { ectodeck_draw::hdr::CAP_CLEAR } else { ectodeck_draw::hdr::CAP_BLACK });
+    let top = rgb_of(&light["caps"]["color"]).unwrap_or(if kind == Caps::Translucent { ectodeck_draw::hdr::CAP_CLEAR } else { ectodeck_draw::hdr::CAP_BLACK });
     let sides = rgb_of(&light["caps"]["sides"]).unwrap_or(if kind == Caps::ShineThrough { top } else { ectodeck_draw::hdr::CAP_CLEAR });
     [top, sides]
 }
 
-/// What each part's colour button tells of under the drawing, by the caps' kind.
-fn colour_note(part: usize, kind: Caps) -> &'static str {
+/// What each part's color button tells of under the drawing, by the caps' kind.
+fn color_note(part: usize, kind: Caps) -> &'static str {
     match (part, kind) {
         (0, Caps::Translucent) => "The color of the clear plastic on each cap's top. Light coming up through it takes on its color; Clear leaves the light as it is.",
         (0, _) => "The color of each cap's top, as it looks in the room's light. A pale top lets a little of the key's light through around the legend, tinted by the plastic. A black top lets none through.",
@@ -652,8 +652,8 @@ impl LabDevice {
 
 pub struct LabPage {
     pub ui: LabWindow,
-    /// the colour picker, where it is open on the caps' colour
-    pick: Option<ColourPick>,
+    /// the color picker, where it is open on the caps' color
+    pick: Option<ColorPick>,
     /// the device tuned
     device: LabDevice,
     asks: Rc<RefCell<Vec<Ask>>>,
@@ -996,8 +996,8 @@ impl LabPage {
             }};
         }
         on!(on_drag, Ask::Move);
-        on!(on_minimise, Ask::Minimise);
-        on!(on_maximise, Ask::Maximise);
+        on!(on_minimize, Ask::Minimize);
+        on!(on_maximize, Ask::Maximize);
         on!(on_close_window, Ask::Close);
         on!(on_slide, |id, v| Ask::Slide(id, v));
         on!(on_entered, |id, t| Ask::Typed(id, t.to_string()));
@@ -1020,9 +1020,9 @@ impl LabPage {
             id if (GLYPH_ICON..GLYPH_SHUT).contains(&id) => Ask::GlyphIcon(id - GLYPH_ICON),
             GLYPH_SHUT => Ask::GlyphsFor(-1),
             FACE => Ask::Face(index),
-            COLOUR_TOP => Ask::Colour(0),
-            COLOUR_SIDES => Ask::Colour(1),
-            PICK_SHUT => Ask::Colour(-1),
+            COLOR_TOP => Ask::Color(0),
+            COLOR_SIDES => Ask::Color(1),
+            PICK_SHUT => Ask::Color(-1),
             PART => Ask::Part(index),
             SECTION_DEFAULT => Ask::SectionDefault,
             _ => Ask::Choose(id - CHOICE, index),
@@ -1166,7 +1166,7 @@ impl LabPage {
         }
     }
 
-    /// How many of the art's units make a millimetre, as the core's light says.
+    /// How many of the art's units make a millimeter, as the core's light says.
     fn mm(&self) -> f64 {
         Physics::from(&self.light).units_per_mm as f64
     }
@@ -1180,11 +1180,11 @@ impl LabPage {
         }
         for ask in asks {
             // the picker shuts when anything but itself is used
-            if self.pick.is_some() && !matches!(ask, Ask::Colour(_) | Ask::PkSv(..) | Ask::PkHue(_) | Ask::PkField(..) | Ask::PkWell(_) | Ask::PkEnter | Ask::Hover(..) | Ask::Rest | Ask::Focus(..) | Ask::Move) {
+            if self.pick.is_some() && !matches!(ask, Ask::Color(_) | Ask::PkSv(..) | Ask::PkHue(_) | Ask::PkField(..) | Ask::PkWell(_) | Ask::PkEnter | Ask::Hover(..) | Ask::Rest | Ask::Focus(..) | Ask::Move) {
                 self.close_pick();
             }
             match ask {
-                Ask::Colour(part) => {
+                Ask::Color(part) => {
                     let open = self.pick.as_ref().map(|p| p.part as i32);
                     self.close_pick();
                     if part >= 0 && open != Some(part) {
@@ -1208,12 +1208,12 @@ impl LabPage {
                 }
                 Ask::PkEnter | Ask::PkDismiss => self.close_pick(),
                 Ask::Move => window.push(WindowAsk::Move),
-                Ask::Minimise => window.push(WindowAsk::Minimise),
-                Ask::Maximise => window.push(WindowAsk::Maximise),
+                Ask::Minimize => window.push(WindowAsk::Minimize),
+                Ask::Maximize => window.push(WindowAsk::Maximize),
                 Ask::Close => window.push(WindowAsk::Close),
                 Ask::Slide(id, f) => {
                     if let Some(p) = PARAMS.get(id.max(0) as usize) {
-                        // North of centre's slider runs north to south, as the drawing does
+                        // North of center's slider runs north to south, as the drawing does
                         let f = if p.unit == Unit::North { 1.0 - f } else { f };
                         let v = self.at_along(id.max(0) as usize, f as f64);
                         if get(&self.work(), p.path) != Some(v) {
@@ -1387,7 +1387,7 @@ impl LabPage {
                     // what the mark gives back: the switch's place, both ways; a choice's kind; a slider's value
                     let (paths, what) = match id {
                         PAD => (vec![PARAMS[PLACE_E].path, PARAMS[PLACE_N].path], "Switch's place"),
-                        COLOUR => (COLOUR_PATHS.to_vec(), "Color"),
+                        COLOR => (COLOR_PATHS.to_vec(), "Color"),
                         TYPEFACE => (vec![("legends", "typeface"), ("legends", "weight")], "Typeface"),
                         id if (TEXT..TEXT + 3).contains(&id) => (vec![("legends", ectodeck_draw::print::TEXTS[(id - TEXT) as usize].0), ("legends", IMAGE_KEYS[(id - TEXT) as usize])], TEXT_NAMES[(id - TEXT) as usize].0),
                         id if (CHOICE..CHOICE + CHOICES.len() as i32).contains(&id) => (vec![CHOSEN[(id - CHOICE) as usize][0]], CHOICES[(id - CHOICE) as usize].label),
@@ -1409,7 +1409,7 @@ impl LabPage {
                 // a value of the setup's own given back: it takes the core's again
                 Ask::Follow(id) if self.setup.is_some() => {
                     let (paths, what) = match id {
-                        COLOUR => (COLOUR_PATHS.to_vec(), "Color"),
+                        COLOR => (COLOR_PATHS.to_vec(), "Color"),
                         TYPEFACE => (vec![("legends", "typeface"), ("legends", "weight")], "Typeface"),
                         id if (TEXT..TEXT + 3).contains(&id) => (vec![("legends", ectodeck_draw::print::TEXTS[(id - TEXT) as usize].0), ("legends", IMAGE_KEYS[(id - TEXT) as usize])], TEXT_NAMES[(id - TEXT) as usize].0),
                         id if (CHOICE..CHOICE + CHOICES.len() as i32).contains(&id) => (vec![CHOSEN[(id - CHOICE) as usize][0]], CHOICES[(id - CHOICE) as usize].label),
@@ -1514,7 +1514,7 @@ impl LabPage {
                     }
                     self.faces_open = !self.faces_open;
                     self.face_query.clear();
-                    self.face_first = self.face_centred();
+                    self.face_first = self.face_centered();
                 }
                 Ask::Face(i) => {
                     if let Some((family, weights)) = self.face_list().get(i.max(0) as usize).cloned() {
@@ -1600,15 +1600,15 @@ impl LabPage {
         let print = cap.print.as_ref()?.with_text(&own, &icons);
         let f = cap.foot;
         let rel = |v: f32, from: f32| ((v - from) / mm) as f64;
-        // its colours from above: its top, and the top of its sides (a pudding
-        // cap's are its top's colour down them; a translucent cap's its sides')
+        // its colors from above: its top, and the top of its sides (a pudding
+        // cap's are its top's color down them; a translucent cap's its sides')
         let work = self.work();
         let light = ectodeck_draw::hdr::sim::key_light(&work, &work["keys"][id]);
-        let [top, sides] = cap_colours(&light);
+        let [top, sides] = cap_colors(&light);
         let upper = if Physics::from(&light).caps == Caps::Pudding { top } else { sides };
         let black = ectodeck_draw::hdr::CAP_BLACK;
-        let colours = (top != black || upper != black).then_some([top, upper]).filter(|_| rgb_of(&light["caps"]["colour"]).is_some() || rgb_of(&light["caps"]["sides"]).is_some());
-        Some(drawing::Printed { foot: (rel(f[2], f[0]), rel(f[3], f[1])), face: [rel(cap.face[0], f[0]), rel(cap.face[1], f[1]), rel(cap.face[2], f[0]), rel(cap.face[3], f[1])], print, colours })
+        let colors = (top != black || upper != black).then_some([top, upper]).filter(|_| rgb_of(&light["caps"]["color"]).is_some() || rgb_of(&light["caps"]["sides"]).is_some());
+        Some(drawing::Printed { foot: (rel(f[2], f[0]), rel(f[3], f[1])), face: [rel(cap.face[0], f[0]), rel(cap.face[1], f[1]), rel(cap.face[2], f[0]), rel(cap.face[3], f[1])], print, colors })
     }
 
     /// Keys of other kinds than the key drawn, to show one look covers the
@@ -1681,7 +1681,7 @@ impl LabPage {
 
     /// The first of Ectodeck's typefaces to show, to have the one the
     /// legends are set in in view.
-    fn face_centred(&self) -> usize {
+    fn face_centered(&self) -> usize {
         let list = self.face_list();
         let family = self.style().map(|s| s.typeface).unwrap_or_default();
         let current = list.iter().position(|(n, _)| *n == family).unwrap_or(0);
@@ -1822,7 +1822,7 @@ impl LabPage {
 
     /// The values the section on screen shows: its sliders' and its choices',
     /// and what else is set on it (the typeface, each part's size and moves,
-    /// the caps' colours; for one key, its text and its switch's place).
+    /// the caps' colors; for one key, its text and its switch's place).
     fn section_paths(&self) -> Vec<(&'static str, &'static str)> {
         let s = self.section;
         let mut paths: Vec<(&'static str, &'static str)> = SECTIONS[s].2.iter().map(|&i| PARAMS[i].path).collect();
@@ -1838,7 +1838,7 @@ impl LabPage {
                 }
             }
             1 => {
-                paths.extend(COLOUR_PATHS);
+                paths.extend(COLOR_PATHS);
                 // (a key's homing bump with it)
                 paths.extend(CHOSEN[BUMP].iter().copied());
             }
@@ -1904,7 +1904,7 @@ impl LabPage {
         ectodeck_draw::hdr::Bump::ALL.iter().position(|&b| b == bump).unwrap_or(0)
     }
 
-    /// The chosen key's cap, in millimetres across and north to south.
+    /// The chosen key's cap, in millimeters across and north to south.
     fn key_size(&self) -> Option<(f64, f64)> {
         let mm = self.mm();
         self.key().map(|k| ((k.foot[2] - k.foot[0]) as f64 / mm, (k.foot[3] - k.foot[1]) as f64 / mm))
@@ -2156,8 +2156,8 @@ impl LabPage {
 
     /// The glyphs' list, open under the box it was opened from: every
     /// glyph a key's text can take, each telling of itself under the pointer.
-    /// Where the caps' colour buttons are on the page, their tops' and their sides'.
-    fn colour_buttons(&self) -> [(f32, f32, f32, f32); 2] {
+    /// Where the caps' color buttons are on the page, their tops' and their sides'.
+    fn color_buttons(&self) -> [(f32, f32, f32, f32); 2] {
         let (_, _, sw, _) = self.sizes();
         let cx = 24.0 + drawing::column_x(true, sw);
         let y = HEAD_H + drawing::choice_y(self.choices().len()) + 32.0;
@@ -2165,11 +2165,11 @@ impl LabPage {
         [(cx + 3.0, y, bw, 30.0), (cx + 3.0 + bw + 2.0, y, bw, 30.0)]
     }
 
-    /// Open the colour picker on a part of the caps, under its button.
+    /// Open the color picker on a part of the caps, under its button.
     fn open_pick(&mut self, part: usize) {
-        let rgb = cap_colours(&self.work())[part];
-        self.pick = Some(ColourPick { part, start: rgb, hsv: crate::front::rgb2hsv(rgb), rgb });
-        let (bx, by, _, bh) = self.colour_buttons()[part];
+        let rgb = cap_colors(&self.work())[part];
+        self.pick = Some(ColorPick { part, start: rgb, hsv: crate::front::rgb2hsv(rgb), rgb });
+        let (bx, by, _, bh) = self.color_buttons()[part];
         let (_, h, _, _) = self.sizes();
         let ph = self.ui.get_picker_height();
         let top = if by + bh + 6.0 + ph <= h - 8.0 { by + bh + 6.0 } else { (by - 6.0 - ph).max(8.0) };
@@ -2177,28 +2177,28 @@ impl LabPage {
         self.ui.set_picker_top(top);
         let scale = slint::ComponentHandle::window(&self.ui).scale_factor();
         self.ui.set_pk_hue_img(crate::front::hue_bar(scale));
-        self.ui.set_pk_presets(ModelRc::new(VecModel::from(CAP_COLOURS.iter().map(|(c, _)| crate::front::color(*c)).collect::<Vec<_>>())));
-        let recent: Vec<[u8; 3]> = crate::uistate::get("recent_cap_colours").and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
+        self.ui.set_pk_presets(ModelRc::new(VecModel::from(CAP_COLORS.iter().map(|(c, _)| crate::front::color(*c)).collect::<Vec<_>>())));
+        let recent: Vec<[u8; 3]> = crate::uistate::get("recent_cap_colors").and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
         self.ui.set_pk_recent(ModelRc::new(VecModel::from(recent.iter().map(|c| crate::front::color(*c)).collect::<Vec<_>>())));
         self.show_pick(None);
         self.ui.set_picker_open(true);
     }
 
-    /// Shut the colour picker; the colour it shut on joins the recent ones.
+    /// Shut the color picker; the color it shut on joins the recent ones.
     fn close_pick(&mut self) {
         if let Some(p) = self.pick.take() {
             self.ui.set_picker_open(false);
             if p.rgb != p.start {
                 let mut list = vec![p.rgb];
-                let old: Vec<[u8; 3]> = crate::uistate::get("recent_cap_colours").and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
+                let old: Vec<[u8; 3]> = crate::uistate::get("recent_cap_colors").and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
                 list.extend(old.into_iter().filter(|c| *c != p.rgb));
                 list.truncate(9);
-                crate::uistate::set("recent_cap_colours", json!(list));
+                crate::uistate::set("recent_cap_colors", json!(list));
             }
         }
     }
 
-    /// Show the picker's colour everywhere but the field being typed in.
+    /// Show the picker's color everywhere but the field being typed in.
     fn show_pick(&self, skip: Option<i32>) {
         let Some(p) = &self.pick else { return };
         let ([h, sv, v], rgb) = (p.hsv, p.rgb);
@@ -2218,8 +2218,8 @@ impl LabPage {
         }
     }
 
-    /// A new colour in the picker: shown, and given to the part of the caps
-    /// it is open on; the colour they have where nothing says one taken out.
+    /// A new color in the picker: shown, and given to the part of the caps
+    /// it is open on; the color they have where nothing says one taken out.
     fn pick_set(&mut self, hsv: [f32; 3], rgb: Option<[u8; 3]>) {
         self.pick_set_skip(hsv, rgb, None);
     }
@@ -2229,14 +2229,14 @@ impl LabPage {
         p.hsv = hsv;
         p.rgb = rgb.unwrap_or_else(|| crate::front::hsv2rgb(hsv));
         let (part, rgb) = (p.part, p.rgb);
-        let path = COLOUR_PATHS[part];
-        if cap_colours(&self.work())[part] != rgb || !at(&self.work(), path).is_null() {
-            self.remember([COLOUR_TOP, COLOUR_SIDES][part]);
+        let path = COLOR_PATHS[part];
+        if cap_colors(&self.work())[part] != rgb || !at(&self.work(), path).is_null() {
+            self.remember([COLOR_TOP, COLOR_SIDES][part]);
             self.put(path, json!(hex_of(rgb)));
-            // the colour the caps take where nothing says one: nothing to keep
+            // the color the caps take where nothing says one: nothing to keep
             let mut bare = self.work();
             bare["caps"].as_object_mut().map(|c| c.remove(path.1));
-            if cap_colours(&bare)[part] == rgb {
+            if cap_colors(&bare)[part] == rgb {
                 match self.key().map(|k| k.id.clone()) {
                     Some(id) => own_take(&mut self.light, &id, path),
                     None => {
@@ -2467,9 +2467,9 @@ impl LabPage {
             return top;
         }
         let (_, h, _, _) = self.sizes();
-        let colour = |c: [u8; 3]| slint::Color::from_rgb_u8(c[0], c[1], c[2]);
+        let color = |c: [u8; 3]| slint::Color::from_rgb_u8(c[0], c[1], c[2]);
         let (quiet, faint, dim, bright) = ([0x9a, 0x9a, 0x9a], [0x5a, 0x5a, 0x5a], [0xd4, 0xd4, 0xd4], [0xf5, 0xf5, 0xf5]);
-        let words = |x: f32, y: f32, s: &str, c: [u8; 3]| Cell { color: colour(c), ..text_cell(style::WORDS_IN, x, y, text::width(400, 13.5, s) + 2.0, 20.0, s) };
+        let words = |x: f32, y: f32, s: &str, c: [u8; 3]| Cell { color: color(c), ..text_cell(style::WORDS_IN, x, y, text::width(400, 13.5, s) + 2.0, 20.0, s) };
         let mw = 380.0;
         let (mx, my) = (x.min(w - 24.0 - mw), 59.0);
         // anywhere else on the page shuts it
@@ -2490,7 +2490,7 @@ impl LabPage {
             let name = elide(name, SETUP_W, 400, 13.5);
             items.push(words(mx + 20.0, my + y + 8.0, &name, if in_use { bright } else if can { dim } else { faint }));
             for (k, line) in lines.iter().enumerate() {
-                items.push(Cell { color: colour(if can { quiet } else { faint }), ..text_cell(style::NOTE_IN, mx + 20.0, my + y + 27.0 + 18.0 * k as f32, mw - 40.0, 18.0, line) });
+                items.push(Cell { color: color(if can { quiet } else { faint }), ..text_cell(style::NOTE_IN, mx + 20.0, my + y + 27.0 + 18.0 * k as f32, mw - 40.0, 18.0, line) });
             }
             if can && !naming {
                 items.push(Cell { id: SETUP, index, ..cell(kind::LINK, mx + 8.0, my + y, mw - 16.0, h) });
@@ -2500,16 +2500,16 @@ impl LabPage {
         let mut y = 8.0;
         y += row(&mut items, y, 10, DEFAULT, "The standard lighting for this keyboard.", self.setup.is_none());
         y += 10.0;
-        items.push(Cell { color: colour([0xa3, 0xa3, 0xa3]), ..text_cell(style::LABEL_IN, mx + 20.0, my + y, 200.0, 18.0, "Custom") });
+        items.push(Cell { color: color([0xa3, 0xa3, 0xa3]), ..text_cell(style::LABEL_IN, mx + 20.0, my + y, 200.0, 18.0, "Custom") });
         y += 20.0;
         for line in wrap_after("For a keyboard you've changed, such as new keycaps.", mw - 40.0, mw - 40.0) {
-            items.push(Cell { color: colour(quiet), ..text_cell(style::NOTE_IN, mx + 20.0, my + y, mw - 40.0, 18.0, &line) });
+            items.push(Cell { color: color(quiet), ..text_cell(style::NOTE_IN, mx + 20.0, my + y, mw - 40.0, 18.0, &line) });
             y += 18.0;
         }
         y += 6.0;
         if self.setups.is_empty() {
             for line in wrap_after("None yet. Choose Save as a new setup to make one.", mw - 40.0, mw - 40.0) {
-                items.push(Cell { color: colour(dim), ..text_cell(style::NOTE_IN, mx + 20.0, my + y + 4.0, mw - 40.0, 18.0, &line) });
+                items.push(Cell { color: color(dim), ..text_cell(style::NOTE_IN, mx + 20.0, my + y + 4.0, mw - 40.0, 18.0, &line) });
                 y += 18.0;
             }
             y += 12.0;
@@ -2525,7 +2525,7 @@ impl LabPage {
             y += 8.0;
         }
         y += 6.0;
-        items.push(Cell { color: colour([0x3a, 0x3a, 0x3a]), ..cell(kind::BOX, mx + 8.0, my + y, mw - 16.0, 1.0) });
+        items.push(Cell { color: color([0x3a, 0x3a, 0x3a]), ..cell(kind::BOX, mx + 8.0, my + y, mw - 16.0, 1.0) });
         y += 7.0;
         let action = |items: &mut Vec<Cell>, y: f32, index: i32, s: &str| {
             items.push(words(mx + 20.0, my + y + 8.0, s, dim));
@@ -2796,7 +2796,7 @@ impl LabPage {
         .clamp(0.0, 1.0)
     }
 
-    /// Where a value's knob sits on its track: North of centre's runs north
+    /// Where a value's knob sits on its track: North of center's runs north
     /// to south, as the drawing does.
     fn knob(&self, i: usize, v: f64) -> f64 {
         let f = self.along(i, v);
@@ -2896,12 +2896,12 @@ impl LabPage {
                 (p.label.into(), back)
             }
             Some(i) if i == PAD => ("Switch's place".into(), PAD_NOTE.into()),
-            Some(i) if i == COLOUR_TOP || i == COLOUR_SIDES => {
-                let part = (i - COLOUR_TOP) as usize;
-                let c = cap_colours(&self.work())[part];
-                (format!("{}: {}", ["Top color", "Side color"][part], colour_name(c)), colour_note(part, Physics::from(&self.work()).caps).into())
+            Some(i) if i == COLOR_TOP || i == COLOR_SIDES => {
+                let part = (i - COLOR_TOP) as usize;
+                let c = cap_colors(&self.work())[part];
+                (format!("{}: {}", ["Top color", "Side color"][part], color_name(c)), color_note(part, Physics::from(&self.work()).caps).into())
             }
-            Some(i) if i == COLOUR => match self.key().filter(|_| COLOUR_PATHS.iter().any(|&p| self.owns(p))) {
+            Some(i) if i == COLOR => match self.key().filter(|_| COLOR_PATHS.iter().any(|&p| self.owns(p))) {
                 Some(k) => ("Color".into(), format!("The color of the caps' tops and sides. This is {}'s own color; the dot before the name gives it back to all keys.", k.label)),
                 None => ("Color".into(), "The color of the caps' tops and sides. Choose a key above to give one cap a color of its own, as on a set with a few white keys.".into()),
             },
@@ -2927,7 +2927,7 @@ impl LabPage {
     }
 
     /// What holds the legends back, if anything: the screen, past the most
-    /// it shows in their colour.
+    /// it shows in their color.
     fn legend_note(&self) -> Option<String> {
         let r = self.readout;
         if r.legend > r.reach + 0.5 && r.reach > 0.0 {
@@ -2942,8 +2942,8 @@ impl LabPage {
     #[allow(clippy::type_complexity)]
     fn layout(&self) -> (Vec<Cell>, (Vec<Sketch>, Vec<Cell>, Vec<LabRow>), Vec<Cell>, Vec<Cell>) {
         let (w, _, sw, sh) = self.sizes();
-        let colour = |c: [u8; 3]| slint::Color::from_rgb_u8(c[0], c[1], c[2]);
-        let in_colour = |st: i32, x: f32, y: f32, ww: f32, hh: f32, s: &str, c: [u8; 3]| Cell { color: colour(c), ..text_cell(st, x, y, ww, hh, s) };
+        let color = |c: [u8; 3]| slint::Color::from_rgb_u8(c[0], c[1], c[2]);
+        let in_color = |st: i32, x: f32, y: f32, ww: f32, hh: f32, s: &str, c: [u8; 3]| Cell { color: color(c), ..text_cell(st, x, y, ww, hh, s) };
         // the head: the title and what the lab is, and the sections
         let mut cells = vec![text_cell(style::TITLE, 24.0, 14.0, 300.0, 29.0, "Key lab")];
         let mut bx = 0.0;
@@ -2997,9 +2997,9 @@ impl LabPage {
         if let Some((st, image)) = &self.drawn {
             sketches.push(Sketch { x: sx, y: sy, w: st.w, h: st.h, image: image.clone() });
             for word in &st.words {
-                // a word's baseline where the stage has it, in Geist's 11.5px line centred in its box
+                // a word's baseline where the stage has it, in Geist's 11.5px line centered in its box
                 let top = sy + word.y - 1.005 * 11.5 - (16.0 - 1.3 * 11.5) / 2.0;
-                over.push(in_colour(style::SMALL_IN, sx + word.x, top, text::width(400, 11.5, &word.text) + 2.0, 16.0, &word.text, word.colour));
+                over.push(in_color(style::SMALL_IN, sx + word.x, top, text::width(400, 11.5, &word.text) + 2.0, 16.0, &word.text, word.color));
             }
         }
         // the section's choices, at the top of its left column, over the stage:
@@ -3048,22 +3048,22 @@ impl LabPage {
                 }
             }
         }
-        // the caps' colour, under the section's choices: a button for their
-        // tops and one for their sides, each in its colour, opening the picker
+        // the caps' color, under the section's choices: a button for their
+        // tops and one for their sides, each in its color, opening the picker
         if self.section == 1 {
             let y = sy + drawing::choice_y(self.choices().len());
-            over.push(Cell { id: COLOUR, ..cell(kind::ZONE, cx - 10.0, y - 7.0, drawing::CTRL_W + 20.0, drawing::CHOICE_H) });
+            over.push(Cell { id: COLOR, ..cell(kind::ZONE, cx - 10.0, y - 7.0, drawing::CTRL_W + 20.0, drawing::CHOICE_H) });
             over.push(text_cell(style::LABEL, cx, y, drawing::CTRL_W, 26.0, "Color"));
-            if COLOUR_PATHS.iter().any(|&p| self.owns(p)) {
-                own_mark(&mut over, cx, y, COLOUR);
+            if COLOR_PATHS.iter().any(|&p| self.owns(p)) {
+                own_mark(&mut over, cx, y, COLOR);
             }
-            let colours = cap_colours(&work);
-            let buttons = self.colour_buttons();
+            let colors = cap_colors(&work);
+            let buttons = self.color_buttons();
             over.push(cell(kind::SEG, cx, y + 30.0, buttons[1].0 + buttons[1].2 + 3.0 - cx, 34.0));
             for (part, (bx, by, bw, bh)) in buttons.into_iter().enumerate() {
-                let [r, g, b] = colours[part];
+                let [r, g, b] = colors[part];
                 let open = self.pick.as_ref().is_some_and(|p| p.part == part);
-                over.push(Cell { text: ["Top", "Sides"][part].into(), color: slint::Color::from_rgb_u8(r, g, b), on: open, id: [COLOUR_TOP, COLOUR_SIDES][part], style: 32, ..cell(kind::SEG_BUTTON, bx, by, bw, bh) });
+                over.push(Cell { text: ["Top", "Sides"][part].into(), color: slint::Color::from_rgb_u8(r, g, b), on: open, id: [COLOR_TOP, COLOR_SIDES][part], style: 32, ..cell(kind::SEG_BUTTON, bx, by, bw, bh) });
             }
         }
         // which part of the legend the sliders act on, at the top of the right
@@ -3156,7 +3156,7 @@ impl LabPage {
             sketches.push(Sketch { x: px, y: py, w: st.w, h: st.h, image: image.clone() });
             for word in &st.words {
                 let top = py + word.y - 1.005 * 11.5 - (16.0 - 1.3 * 11.5) / 2.0;
-                over.push(in_colour(style::SMALL_IN, px + word.x, top, text::width(400, 11.5, &word.text) + 2.0, 16.0, &word.text, word.colour));
+                over.push(in_color(style::SMALL_IN, px + word.x, top, text::width(400, 11.5, &word.text) + 2.0, 16.0, &word.text, word.color));
             }
             over.push(Cell { id: PAD, ..cell(18, px, py, pw, ph) });
             if self.owns(PARAMS[PLACE_E].path) || self.owns(PARAMS[PLACE_N].path) {
@@ -3176,7 +3176,7 @@ impl LabPage {
             sketches.push(Sketch { x: fx, y: fy, w: st.w, h: st.h, image: image.clone() });
             for word in &st.words {
                 let top = fy + word.y - 1.005 * 11.5 - (16.0 - 1.3 * 11.5) / 2.0;
-                over.push(in_colour(style::SMALL_IN, fx + word.x, top, text::width(400, 11.5, &word.text) + 2.0, 16.0, &word.text, word.colour));
+                over.push(in_color(style::SMALL_IN, fx + word.x, top, text::width(400, 11.5, &word.text) + 2.0, 16.0, &word.text, word.color));
             }
             let (first, rows) = (self.face_first, self.face_rows());
             over.push(Cell { id: FIND, style: 2, text: self.face_query.clone().into(), ..cell(kind::FIELD, fx + 12.0, fy + 12.0, fw - 24.0, 34.0) });
@@ -3223,7 +3223,7 @@ impl LabPage {
         let (name, note) = self.told();
         let hy = sy + sh + 10.0;
         let nw = text::width(500, 12.5, &name) + 2.0;
-        cells.push(in_colour(style::LABEL_IN, 24.0, hy, nw, 18.0, &name, [0xe5, 0xe5, 0xe5]));
+        cells.push(in_color(style::LABEL_IN, 24.0, hy, nw, 18.0, &name, [0xe5, 0xe5, 0xe5]));
         let first = (w - 48.0 - nw - 6.0).max(100.0);
         // (two lines of it, the second ending in an ellipsis where it goes on)
         let lines = wrap_after(&note, first, w - 48.0);
@@ -3275,19 +3275,19 @@ impl LabPage {
     /// The readout laid out, saying less as `level` rises; and where it ends.
     fn readout_at(&self, level: u8) -> (Vec<Cell>, f32) {
         let r = self.readout;
-        let colour = |c: [u8; 3]| slint::Color::from_rgb_u8(c[0], c[1], c[2]);
-        let in_colour = |st: i32, x: f32, s: &str, c: [u8; 3]| {
+        let color = |c: [u8; 3]| slint::Color::from_rgb_u8(c[0], c[1], c[2]);
+        let in_color = |st: i32, x: f32, s: &str, c: [u8; 3]| {
             let wgt = if st == style::LABEL_IN { 500 } else { 400 };
-            Cell { color: colour(c), ..text_cell(st, x, 23.0, text::width(wgt, 12.5, s) + 2.0, 18.0, s) }
+            Cell { color: color(c), ..text_cell(st, x, 23.0, text::width(wgt, 12.5, s) + 2.0, 18.0, s) }
         };
         let clearing = r.photons > 0 && !r.settled;
-        let value_colour = if clearing { [0x7c, 0x7c, 0x7c] } else { [0xe5, 0xe5, 0xe5] };
+        let value_color = if clearing { [0x7c, 0x7c, 0x7c] } else { [0xe5, 0xe5, 0xe5] };
         let nits = |v: f64| if v < 10.0 { format!("{v:.1}") } else { format!("{v:.0}") };
         let mut out = Vec::new();
         let mut x = 24.0;
         if level < 2 {
             let head = "Brightest now";
-            out.push(in_colour(style::LABEL_IN, x, head, [0xa3, 0xa3, 0xa3]));
+            out.push(in_color(style::LABEL_IN, x, head, [0xa3, 0xa3, 0xa3]));
             x += text::width(500, 12.5, head) + 12.0;
         }
         let held = self.legend_note().is_some();
@@ -3296,7 +3296,7 @@ impl LabPage {
             let x0 = *x;
             out.push(text_cell(style::NOTE, *x, 23.0, text::width(400, 12.5, label) + 2.0, 18.0, label));
             *x += text::width(400, 12.5, label) + 6.0;
-            out.push(in_colour(style::LABEL_IN, *x, value, c));
+            out.push(in_color(style::LABEL_IN, *x, value, c));
             *x += text::width(500, 12.5, value);
             out.insert(out.len() - 2, Cell { id, ..cell(kind::ZONE, x0 - 4.0, 16.0, *x - x0 + 8.0, 32.0) });
             *x += 14.0;
@@ -3305,17 +3305,17 @@ impl LabPage {
             if k == 4 && level >= 4 {
                 continue;
             }
-            let c = if k == 0 && held { [0xf0, 0xb3, 0x5a] } else { value_colour };
+            let c = if k == 0 && held { [0xf0, 0xb3, 0x5a] } else { value_color };
             item(&mut out, &mut x, READING + k as i32, label, value, c);
         }
         let sep = |out: &mut Vec<Cell>, x: &mut f32| {
             *x += 2.0;
-            out.push(Cell { color: colour([0x3a, 0x3a, 0x3a]), ..cell(kind::BOX, *x, 25.0, 1.0, 14.0) });
+            out.push(Cell { color: color([0x3a, 0x3a, 0x3a]), ..cell(kind::BOX, *x, 25.0, 1.0, 14.0) });
             *x += 15.0;
         };
         sep(&mut out, &mut x);
         if level < 3 {
-            item(&mut out, &mut x, READING + 5, "Desktop white", &format!("{} nits", nits(r.white)), value_colour);
+            item(&mut out, &mut x, READING + 5, "Desktop white", &format!("{} nits", nits(r.white)), value_color);
             sep(&mut out, &mut x);
         }
         let photons = if level == 0 { format!(", {} photons", text::thousands(r.photons as u64)) } else { String::new() };
@@ -3442,7 +3442,7 @@ fn value_note(path: (&str, &str), v: &Value, of_key: bool) -> Option<String> {
     Some(match path {
         ("switches", "kind") => format!("{} › Switch: {}", SECTIONS[0].0, option(0, &["led-slot", "clear-top", "clear"])),
         ("caps", "kind") => format!("Keycaps: {}", option(1, &["shine-through", "pudding", "translucent"])),
-        ("caps", part @ ("colour" | "sides")) => format!("Keycaps › {}: {}", if part == "colour" { "Top color" } else { "Side color" }, rgb_of(v).map_or_else(gone, colour_name)),
+        ("caps", part @ ("color" | "sides")) => format!("Keycaps › {}: {}", if part == "color" { "Top color" } else { "Side color" }, rgb_of(v).map_or_else(gone, color_name)),
         ("legends", "place") => format!("Legends › Placement: {}", option(2, &PLACES)),
         ("caps", "bump") => format!("Keycaps › Homing bump: {}", option(BUMP, &["none", "bar", "dot"])),
         ("legends", "weight") => {
@@ -3550,18 +3550,18 @@ mod tests {
         }
     }
 
-    /// The caps' colours where the light gives none: black tops (clear on
+    /// The caps' colors where the light gives none: black tops (clear on
     /// translucent caps), and sides as the top on shine-through caps, clear
-    /// on pudding caps; a colour given is kept, and named as offered.
+    /// on pudding caps; a color given is kept, and named as offered.
     #[test]
-    fn the_caps_colours_follow_their_kind() {
+    fn the_caps_colors_follow_their_kind() {
         let (black, clear, white) = (ectodeck_draw::hdr::CAP_BLACK, ectodeck_draw::hdr::CAP_CLEAR, [0xcc, 0xcc, 0xcc]);
-        assert_eq!(cap_colours(&json!({ "caps": { "kind": "shine-through" } })), [black, black]);
-        assert_eq!(cap_colours(&json!({ "caps": { "kind": "shine-through", "colour": "#CCCCCC" } })), [white, white], "one plastic all over");
-        assert_eq!(cap_colours(&json!({ "caps": { "kind": "pudding", "colour": "#CCCCCC" } })), [white, clear], "a white top over clear sides");
-        assert_eq!(cap_colours(&json!({ "caps": { "kind": "translucent" } })), [clear, clear]);
-        assert_eq!((colour_name(white), colour_name([0x12, 0x34, 0x56])), ("White".to_string(), "#123456".to_string()));
-        assert_eq!(value_note(("caps", "colour"), &json!("#CCCCCC"), false).unwrap(), "Keycaps › Top color: White");
+        assert_eq!(cap_colors(&json!({ "caps": { "kind": "shine-through" } })), [black, black]);
+        assert_eq!(cap_colors(&json!({ "caps": { "kind": "shine-through", "color": "#CCCCCC" } })), [white, white], "one plastic all over");
+        assert_eq!(cap_colors(&json!({ "caps": { "kind": "pudding", "color": "#CCCCCC" } })), [white, clear], "a white top over clear sides");
+        assert_eq!(cap_colors(&json!({ "caps": { "kind": "translucent" } })), [clear, clear]);
+        assert_eq!((color_name(white), color_name([0x12, 0x34, 0x56])), ("White".to_string(), "#123456".to_string()));
+        assert_eq!(value_note(("caps", "color"), &json!("#CCCCCC"), false).unwrap(), "Keycaps › Top color: White");
     }
 
     /// The notes beside a setup file's values say them as the lab does.
@@ -3681,7 +3681,7 @@ mod tests {
         assert_eq!((light["caps"]["kind"].clone(), Physics::from(&light).skirts), (json!("shine-through"), 0.0));
         choose(&mut light, 1, 1);
         assert_eq!((get(&light, ("caps", "opacity")), get(&light, ("caps", "black"))), (Some(0.55), Some(0.3)), "back to pudding as it was tuned");
-        // the LED's place in millimetres, and its side
+        // the LED's place in millimeters, and its side
         assert_eq!(reads(&PARAMS[0], 5.08), ("5.08".into(), "mm north".into()));
         assert_eq!(reads(&PARAMS[0], -2.0), ("2".into(), "mm south".into()));
         assert_eq!(Physics::from(&json!({ "scale": 1.38, "switches": { "led": 5.08 } })).led, (5.08f64 * 1.38) as f32, "in the art's units, as the simulation has it");

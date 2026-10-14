@@ -28,7 +28,7 @@ pub struct Picture {
     /// what the hole shows before the keyboard is drawn: the ground it sits on
     ground: [f32; 3],
     /// the app's ground, laid under the page from a corner to the window's
-    /// far corner, which is rounded: where it starts, its radius, its colour
+    /// far corner, which is rounded: where it starts, its radius, its color
     page_ground: Ground,
     /// where the keyboard goes, the picture it was drawn as, and that picture
     /// at the hole's size (itself, or stretched while the right size is drawn)
@@ -191,7 +191,7 @@ fn encode_row(
         };
         [mix(p.red, under[0]), mix(p.green, under[1]), mix(p.blue, under[2]), oa]
     };
-    // most of the page is long runs of one colour: encode each run once
+    // most of the page is long runs of one color: encode each run once
     let mut last: Option<((u32, bool), [u16; 4])> = None;
     for x in x0..x1 {
         let p = ui[y * stride + x];

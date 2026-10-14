@@ -2,7 +2,7 @@
 // and the Z10's page, as the web app showed them before the HDR work began
 // (commit cd9ea82: window.css, shell.css, style.css, and device.css over it).
 // The device's page: the keyboard in a dark box of its own, the tab's boxes
-// under it, flat greys told apart by shade with no outlines or dividing
+// under it, flat grays told apart by shade with no outlines or dividing
 // lines, and a chosen item shown lighter, as in the rail.
 //
 // The keyboard is not drawn here. The page leaves a hole where it goes, and
@@ -22,7 +22,7 @@ import "fonts/Geist-600.ttf";
 // The window's shades, darkest to lightest: the frame (title bar, rail),
 // the page, the boxes on it. Wells (fields, tracks, tiles, the profiles'
 // panel) sit darker than the box they are in. Every control has four
-// states, each a step apart and none the colour behind it: at rest, under
+// states, each a step apart and none the color behind it: at rest, under
 // the pointer (in a well, on a box), chosen, chosen under the pointer.
 // whether a box in the main window is being typed in: Ctrl+Z is then the box's own
 export global Typing {
@@ -60,7 +60,7 @@ global Ink {
 
 // how many clickable things the pointer is over: the window shows the hand
 // while it is over any. Each counts itself in and out as it is pointed at,
-// so the order two neighbours hear the pointer in does not matter.
+// so the order two neighbors hear the pointer in does not matter.
 
 // a profile's button in the panel's head
 export struct ProfileItem {
@@ -72,7 +72,7 @@ export struct ProfileItem {
     dirty: bool,
     // how many of its settings differ from what the keyboard holds
     unsaved: int,
-    // its colour sample: one colour, or up to four across it
+    // its color sample: one color, or up to four across it
     colors: int,
     c1: color,
     c2: color,
@@ -159,7 +159,7 @@ export struct CheckItem {
     on: bool,
 }
 
-// a piece of the Lighting page's tile, placed by the window: text, a colour
+// a piece of the Lighting page's tile, placed by the window: text, a color
 // swatch, a checkbox, a slider, a switch and its buttons, an area chip, a
 // button, the reset at the foot
 export struct Cell {
@@ -231,7 +231,7 @@ export struct MenuRow {
     sub: string,
 }
 
-// one of the window's own buttons: minimise, maximise, close
+// one of the window's own buttons: minimize, maximize, close
 component WinButton inherits Rectangle {
     in property <string> commands;
     in property <length> size: 14px;
@@ -337,7 +337,7 @@ component Tab inherits Rectangle {
     }
 }
 
-// a button with words: filled grey (the page's ghost buttons, which here have
+// a button with words: filled gray (the page's ghost buttons, which here have
 // no outline) or primary (ink), 13px, radius 8, a pixel down under a press
 component WordButton inherits Rectangle {
     in property <string> text;
@@ -457,7 +457,7 @@ component KeyBox inherits Rectangle {
         horizontal-alignment: center;
         overflow: elide;
     }
-    // a changed key is marked by a short grey line along its cap's front edge
+    // a changed key is marked by a short gray line along its cap's front edge
     if root.k.remap != "": Rectangle {
         x: parent.width * 0.32;
         width: parent.width * 0.36;
@@ -837,8 +837,8 @@ component CellView inherits Rectangle {
         font-family: "Geist";
         // 0 a row's name, 1 a heading, 2 a note, 3 an empty tile's words, 4 a slider's value, 5 a value,
         // 6 a list's item, 7 the page's title, 8 a device's name, 9 its state, 10 the temperature,
-        // 11 the weather's words, 12 a fact, 13 its value, 14 the credit, 19 a note in its own colour,
-        // 20 a menu's words in their own colour, 21 a small word in its own colour, 22 a stronger word in its own colour
+        // 11 the weather's words, 12 a fact, 13 its value, 14 the credit, 19 a note in its own color,
+        // 20 a menu's words in their own color, 21 a small word in its own color, 22 a stronger word in its own color
         font-size: root.c.style == 1 ? 13px : root.c.style == 2 || root.c.style == 19 ? 12.5px : root.c.style == 3 ? 14px : root.c.style == 4 ? 13px
             : root.c.style == 7 ? 20px : root.c.style == 8 ? 14.5px : root.c.style == 9 || root.c.style == 22 ? 12.5px : root.c.style == 10 ? 22px
             : root.c.style == 12 || root.c.style == 13 ? 13px : root.c.style == 14 ? 12px : root.c.style == 21 ? 11.5px : 13.5px;
@@ -850,7 +850,7 @@ component CellView inherits Rectangle {
         horizontal-alignment: root.c.style == 4 ? right : left;
         vertical-alignment: center;
     }
-    // a colour: a swatch that opens the colour picker
+    // a color: a swatch that opens the color picker
     if root.c.kind == 1: Rectangle {
         border-radius: 8px;
         background: root.c.color;
@@ -937,7 +937,7 @@ component CellView inherits Rectangle {
         border-radius: 10px;
         background: Ink.well;
     }
-    // a box in its colour, rounded at its ends: a mark on a track, a rule between readings
+    // a box in its color, rounded at its ends: a mark on a track, a rule between readings
     if root.c.kind == 16: Rectangle {
         border-radius: min(self.width, self.height) / 2;
         background: root.c.color;
@@ -1260,7 +1260,7 @@ component CellView inherits Rectangle {
             : root.c.kind == 5 ? (b.has-hover ? Ink.hover-well : transparent)
             : root.c.kind == 8 ? (b.has-hover && root.c.style != 29 ? #ffffff0f : transparent)
             : (b.has-hover ? Ink.pick : Ink.hover-box);
-        // style 32: a colour's button, its colour in a small square before its words
+        // style 32: a color's button, its color in a small square before its words
         if root.c.style == 32: Rectangle {
             x: 9px;
             y: (parent.height - 16px) / 2;
@@ -1693,7 +1693,7 @@ component CellView inherits Rectangle {
     }
 }
 
-// a number or code in the colour picker, its name under it
+// a number or code in the color picker, its name under it
 component PickField inherits VerticalLayout {
     in-out property <string> value;
     in property <string> label;
@@ -1742,7 +1742,7 @@ component PickField inherits VerticalLayout {
     }
 }
 
-// a colour to pick in one click: a preset, or one used lately
+// a color to pick in one click: a preset, or one used lately
 component Well inherits Rectangle {
     in property <color> c;
     callback clicked;
@@ -1762,10 +1762,10 @@ component Well inherits Rectangle {
     }
 }
 
-// the colour picker every swatch opens, laid out as design tools lay theirs:
+// the color picker every swatch opens, laid out as design tools lay theirs:
 // saturation across and brightness down for the chosen hue, the hue under it,
-// the colour as a hex code, as red, green and blue, and as hue, saturation and
-// brightness, then preset colours and the ones used lately
+// the color as a hex code, as red, green and blue, and as hue, saturation and
+// brightness, then preset colors and the ones used lately
 component Picker inherits Rectangle {
     in property <float> hue;
     in property <float> sat;
@@ -1887,7 +1887,7 @@ component Picker inherits Rectangle {
             }
         }
     }
-    // the colour as numbers
+    // the color as numbers
     HorizontalLayout {
         x: 6px;
         y: 6px + 160px + 10px + 12px + 10px;
@@ -1909,7 +1909,7 @@ component Picker inherits Rectangle {
         PickField { label: "S%"; which: 5; value <=> root.t-s; edited(i, t) => { root.field(i, t); } enter => { root.enter(); } dismiss => { root.dismiss(); } }
         PickField { label: "B%"; which: 6; value <=> root.t-v; edited(i, t) => { root.field(i, t); } enter => { root.enter(); } dismiss => { root.dismiss(); } }
     }
-    // preset colours, then the ones used lately
+    // preset colors, then the ones used lately
     Text {
         x: 6px;
         y: 308px;
@@ -3550,8 +3550,8 @@ export component AppWindow inherits Window {
     // the rail's width, for the window to know when it has settled
     out property <length> rail-width: rail-w;
 
-    callback minimise();
-    callback maximise();
+    callback minimize();
+    callback maximize();
     callback close-window();
     callback drag();
     callback go(string);
@@ -5167,7 +5167,7 @@ export component AppWindow inherits Window {
                     root.drag();
                 }
             }
-            double-clicked => { root.maximise(); }
+            double-clicked => { root.maximize(); }
         }
         Image {
             x: 12px;
@@ -5192,12 +5192,12 @@ export component AppWindow inherits Window {
             width: 120px;
             WinButton {
                 commands: "M3 8h10";
-                clicked => { root.minimise(); }
+                clicked => { root.minimize(); }
             }
             WinButton {
                 size: 12px;
                 commands: "M3.5 2.5h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z";
-                clicked => { root.maximise(); }
+                clicked => { root.maximize(); }
             }
             WinButton {
                 danger: true;
@@ -5254,7 +5254,7 @@ export component AppWindow inherits Window {
         }
     }
 
-    // the colour picker, hung from the swatch that opened it
+    // the color picker, hung from the swatch that opened it
     in property <bool> picker-open;
     in property <length> picker-x;
     in property <length> picker-top;
@@ -5441,7 +5441,7 @@ export struct MacroItem {
     dirty: bool,
 }
 
-// a small icon from the editor's set, drawn in its colour
+// a small icon from the editor's set, drawn in its color
 component MacroIcon inherits Path {
     in property <int> which;   // 0 keys, 1 clock, 2 gear, 3 pen
     viewbox-width: 16;
@@ -5816,8 +5816,8 @@ export component MacroWindow inherits Window {
     in property <string> confirm-body;
     in property <string> confirm-body2;
 
-    callback minimise();
-    callback maximise();
+    callback minimize();
+    callback maximize();
     callback close-window();
     callback drag();
     callback choose(int);
@@ -5871,7 +5871,7 @@ export component MacroWindow inherits Window {
                     root.drag();
                 }
             }
-            double-clicked => { root.maximise(); }
+            double-clicked => { root.maximize(); }
         }
         Image {
             x: 12px;
@@ -5905,12 +5905,12 @@ export component MacroWindow inherits Window {
             width: 120px;
             WinButton {
                 commands: "M3 8h10";
-                clicked => { root.minimise(); }
+                clicked => { root.minimize(); }
             }
             WinButton {
                 size: 12px;
                 commands: "M3.5 2.5h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z";
-                clicked => { root.maximise(); }
+                clicked => { root.maximize(); }
             }
             WinButton {
                 danger: true;
@@ -6750,8 +6750,8 @@ export component LayoutWindow inherits Window {
     out property <length> cell-w: lcd.width / 20;
     out property <length> cell-h: lcd.height / 4;
 
-    callback minimise();
-    callback maximise();
+    callback minimize();
+    callback maximize();
     callback close-window();
     callback drag();
     callback choose(int);
@@ -6813,7 +6813,7 @@ export component LayoutWindow inherits Window {
                     root.drag();
                 }
             }
-            double-clicked => { root.maximise(); }
+            double-clicked => { root.maximize(); }
         }
         Image {
             x: 12px;
@@ -6847,12 +6847,12 @@ export component LayoutWindow inherits Window {
             width: 120px;
             WinButton {
                 commands: "M3 8h10";
-                clicked => { root.minimise(); }
+                clicked => { root.minimize(); }
             }
             WinButton {
                 size: 12px;
                 commands: "M3.5 2.5h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z";
-                clicked => { root.maximise(); }
+                clicked => { root.maximize(); }
             }
             WinButton {
                 danger: true;
@@ -7883,7 +7883,7 @@ component LabControl inherits Rectangle {
             border-radius: 1px;
             background: #8a8a94;
         }
-        // its reset, at the end of its track: the arrow alone, as grey as the
+        // its reset, at the end of its track: the arrow alone, as gray as the
         // track while the value is the saved one, brighter once it differs,
         // and brighter still under the pointer; a click puts the value back
         Path {
@@ -7946,8 +7946,8 @@ export component LabWindow inherits Window {
     out property <length> window-width: root.width;
     out property <length> window-height: root.height;
 
-    callback minimise();
-    callback maximise();
+    callback minimize();
+    callback maximize();
     callback close-window();
     callback drag();
     callback slide(int, float);
@@ -7968,7 +7968,7 @@ export component LabWindow inherits Window {
     in property <length> list-w;
     in property <length> list-h;
     callback list-scroll(float);
-    // the colour picker, as the main window's, hung from the cap colour's button that opened it
+    // the color picker, as the main window's, hung from the cap color's button that opened it
     in property <bool> picker-open;
     in property <length> picker-x;
     in property <length> picker-top;
@@ -8013,7 +8013,7 @@ export component LabWindow inherits Window {
                     root.drag();
                 }
             }
-            double-clicked => { root.maximise(); }
+            double-clicked => { root.maximize(); }
         }
         Image {
             x: 12px;
@@ -8047,12 +8047,12 @@ export component LabWindow inherits Window {
             width: 120px;
             WinButton {
                 commands: "M3 8h10";
-                clicked => { root.minimise(); }
+                clicked => { root.minimize(); }
             }
             WinButton {
                 size: 12px;
                 commands: "M3.5 2.5h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z";
-                clicked => { root.maximise(); }
+                clicked => { root.maximize(); }
             }
             WinButton {
                 danger: true;

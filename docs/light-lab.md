@@ -1,6 +1,6 @@
 # The Key lab and the light model
 
-2026-10-03. Approved, and built in this order: the boundary, then one key's own setup. 2026-10-04: the light description written to be read, its values named as the lab names them (the core protocol's draft 6). 2026-10-06: custom setups beside Default, the core's own setup, kept in Ectodeck's own data (section 4). 2026-10-07: a key's legend typed, keyboard glyphs included, and moved anywhere on its key; the caps' colours; each part of a legend sized and placed on its own, and a section's Reset (section 2).
+2026-10-03. Approved, and built in this order: the boundary, then one key's own setup. 2026-10-04: the light description written to be read, its values named as the lab names them (the core protocol's draft 6). 2026-10-06: custom setups beside Default, the core's own setup, kept in Ectodeck's own data (section 4). 2026-10-07: a key's legend typed, keyboard glyphs included, and moved anywhere on its key; the caps' colors; each part of a legend sized and placed on its own, and a section's Reset (section 2).
 
 The Key lab is Ectodeck's, not a device's. It is built to tune any peripheral's light, and the Z10 is only the first device it tunes. This sets out where the boundary runs, so the lab never carries a device and a core never carries the lab.
 
@@ -30,7 +30,7 @@ A device's parts are what its description has: keys with LEDs under caps, wells 
 
 | Part | What it is | Its values | Its sections in the lab |
 |---|---|---|---|
-| keys | A switch with its LED, under a cap | the switch's kind, beam, LED place, housing; the cap's kind, plastic and its colours (its top's and its sides'), how far down the top's colour comes, milkiness, heights and surfaces; one key's own of any of these, and where its switch sits | LEDs, Keycaps |
+| keys | A switch with its LED, under a cap | the switch's kind, beam, LED place, housing; the cap's kind, plastic and its colors (its top's and its sides'), how far down the top's color comes, milkiness, heights and surfaces; one key's own of any of these, and where its switch sits | LEDs, Keycaps |
 | legends | What each key's cap has printed on it, which its light comes through | the typeface and its weight, where on the cap it starts and how far it is moved from there, how tall its letters and its words are; one key's own of any of these, and its own words | Legends |
 | buttons | A moulded block with no light of its own, standing in the keys' light | how high it stands, and what its outside gives back | Keycaps, for one button |
 | body | The deck in the wells and the chassis round them | how much each gives back; the wells' depth | Wells |
@@ -41,13 +41,13 @@ A key's legend can be typed: its own legend, its shifted sign and its second fun
 
 Legends are set only in typefaces Ectodeck carries, so a setup looks the same on any computer. Its own library (`crates/ectodeck-draw/typefaces`, each under the SIL Open Font License or MIT) holds the faces keyboards are printed in: Orbitron (the Z10's default, the open look-alike of its own Conthrax, which may not be shipped in an app), Bruno Ace, Audiowide, Michroma and Saira (the squared, Eurostile looks of gaming keyboards), Rajdhani, Barlow (DIN), Arimo (Helvetica and Arial), Inter (laptops' clean modern look), Nunito (VAG Rounded), Jost (Futura), Open Gorton (the engraved classic), JetBrains Mono, Courier Prime (the typewriter), and Noto Sans JP and KR for Japanese and Korean keyboards' kana, jamo and key words, which also fill in for a typeface that lacks them, as Arimo does Greek and Cyrillic. A variable typeface offers every weight it spans. "Add a typeface…" at the foot of the list copies a .ttf or .otf file into Ectodeck's data (`typefaces/`), for a keyboard's own face, such as Conthrax, that Ectodeck may not carry. The typefaces installed on the computer are not listed; one a setup already names is copied in once when Ectodeck starts. A legend moves anywhere on its key, from where its place sets it: by the Left–right and Up–down sliders, or by dragging it on the drawing. Each part of it (Main, Shifted, Bottom) also has a size and a place of its own, chosen in the Legends section's Adjust row: a keypad's arrows smaller than its numbers, or a period raised to the top of its cap.
 
-A key's legend can also be a picture of the person's own: "Choose a picture…" under the glyph list opens the desktop's file picker (through the desktop portal) for an SVG file, and the picture takes the place of that part's text, lit as a legend is, in one colour. Ectodeck keeps a clean copy beside the setups (`light/<core>/images/`, named in the setup by its file's name), so the key keeps its picture if the file moves.
+A key's legend can also be a picture of the person's own: "Choose a picture…" under the glyph list opens the desktop's file picker (through the desktop portal) for an SVG file, and the picture takes the place of that part's text, lit as a legend is, in one color. Ectodeck keeps a clean copy beside the setups (`light/<core>/images/`, named in the setup by its file's name), so the key keeps its picture if the file moves.
 
-A key's homing bump, the raised bar or dot that lets a typist find their place by touch, is the Keycaps section's to choose for one key: None, Bar or Dot. Each key starts with the bump the core's drawing gives it (the Z10's F and J a bar, its keypad 5 a dot); the engine takes the drawing's bump away cleanly and draws one as the drawing does on any cap, in the cap's colours.
+A key's homing bump, the raised bar or dot that lets a typist find their place by touch, is the Keycaps section's to choose for one key: None, Bar or Dot. Each key starts with the bump the core's drawing gives it (the Z10's F and J a bar, its keypad 5 a dot); the engine takes the drawing's bump away cleanly and draws one as the drawing does on any cap, in the cap's colors.
 
 Each section has a Reset button while a setup of the person's own is tuned: it puts the section's settings back as Default has them (keys with settings of their own keep them), or, with one key chosen, takes out that key's own settings in the section. Default itself has none; Revert gives back its last save.
 
-A cap's colours are its plastic's, its top's and its sides', any colour, for all keys or one key: a white top among black caps, say. The engine lights them as plastic, not paint: a pale opaque top lets a little of the key's light through round its legend, tinted by its colour; light through coloured clear plastic takes its colour; and what is printed on a pale top reads in dark ink, the art's own print and Ectodeck's labels for a key's new action alike. With no colours given, the caps are the art's black, exactly as before.
+A cap's colors are its plastic's, its top's and its sides', any color, for all keys or one key: a white top among black caps, say. The engine lights them as plastic, not paint: a pale opaque top lets a little of the key's light through round its legend, tinted by its color; light through colored clear plastic takes its color; and what is printed on a pale top reads in dark ink, the art's own print and Ectodeck's labels for a key's new action alike. With no colors given, the caps are the art's black, exactly as before.
 
 Windows are the Z10's lock lights today, and the logos, light bars and rings of mice and headsets later. The lab has no section for them yet, so they keep the values the core gives; one comes with the first device whose windows need tuning. Any further kind enters the model the same way, with the first core that needs it. A part's place and shape always come from the core's art, so the lab's drawings come from the device too.
 
@@ -55,9 +55,9 @@ Windows are the Z10's lock lights today, and the logos, light bars and rings of 
 
 The `light` section of a core's device description, `cores/<core>/device.json` (JSON with comments), written into the core protocol as its own section. It holds:
 
-- how many of the art's units make a millimetre (`scale`, 1.38 for the Z10);
+- how many of the art's units make a millimeter (`scale`, 1.38 for the Z10);
 - the typical key the lab draws when no key is chosen (the Z10's 2 key);
-- each part's values, in sections named as the lab's are (`switches`, `caps`, `legends`, `wells`, `display`), each value named for its slider or choice (`milky` is the lab's Haze), every length in millimetres;
+- each part's values, in sections named as the lab's are (`switches`, `caps`, `legends`, `wells`, `display`), each value named for its slider or choice (`milky` is the lab's Haze), every length in millimeters;
 - the art pieces its parts use (the Z10's wells are `mask_1`);
 - under `keys`, a key's own values, by the control's stable id (`esc`, `space`, `keypad-plus`), so they stay on the right key across versions of the core.
 
@@ -111,7 +111,7 @@ Each setup is a file in Ectodeck's own data, `light/<core>/<id>.json` (JSON with
 
 - **`crates/ectodeck-draw`** loses its built-in Z10 (`z10::SVG`, `z10::DEVICE`). The board and the simulation are built from any core's art and light description. The parts are types of their own, and every key's value can be its own.
 - **`apps/ectodeck-native`** loads a core's art and light description by the core's id from its folder, not from a fixed path, and hands the lab a device: its name, its parts, its art and its light description. Save writes into the core it came from.
-- **`cores/evga-z10`** gains its typical key and its art's millimetre in its `light` section.
+- **`cores/evga-z10`** gains its typical key and its art's millimeter in its `light` section.
 - **`docs/core-protocol.md`** gains the light section, as draft 5.
 
 ## 7. Order of work

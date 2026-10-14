@@ -61,9 +61,9 @@ pub struct Overlays {
 
 /// The display's panel, for the HDR picture: where it goes in the board's
 /// pixels, and, a pixel at a time, how much of it lit dots and unlit dots
-/// cover (the rest is the ground between them), with the backlight's colour
+/// cover (the rest is the ground between them), with the backlight's color
 /// (sRGB, 0 to 1). With nothing driving it, it is dark: `dark` holds its
-/// unlit colours in linear light, which only the room's light shows.
+/// unlit colors in linear light, which only the room's light shows.
 pub struct Panel {
     pub x: i32,
     pub y: i32,
@@ -245,7 +245,7 @@ impl Overlays {
                 }
             }
         }
-        // unlit, with nothing driving it: its own dark colours, which only the room's light shows
+        // unlit, with nothing driving it: its own dark colors, which only the room's light shows
         let shade = |c: [f32; 3], d: [f32; 3], a: f32| [0, 1, 2].map(|i| (c[i] * (1.0 - a) + d[i] * a) / 255.0);
         let dark = if live {
             Vec::new()

@@ -4,9 +4,9 @@ glyph list was made with, so a key's typed legend draws the same, and the list
 still shows every glyph, on a computer that has none of those fonts.
 
   glyph_fonts.py      writes crates/ectodeck-draw/fonts/: the three fonts,
-                      their licences and a README
+                      their licenses and a README
 
-Each font is renamed: DejaVu's licence asks it of a changed font, and Noto is
+Each font is renamed: DejaVu's license asks it of a changed font, and Noto is
 Google's trademark. Ectodeck reaches them after the computer's own fonts, so
 where those have a glyph, they still draw it.
 """
@@ -31,7 +31,7 @@ NOTO_COPYRIGHT = 'Copyright 2022 The Noto Project Authors (https://github.com/no
 BLOCKS = [(0x2190, 0x21FF), (0x2200, 0x22FF), (0x2300, 0x23FF), (0x2400, 0x243F), (0x25A0, 0x25FF),
           (0x2600, 0x26FF), (0x27F0, 0x27FF), (0x2900, 0x297F), (0x2B00, 0x2BFF), (0x1F507, 0x1F50A), (0x1F568, 0x1F56A), (0x1F81C, 0x1F81F), (0x1F845, 0x1F845), (0xA6, 0xA6)]
 
-# (file, family, style, PostScript name, source, its name and version, licence)
+# (file, family, style, PostScript name, source, its name and version, license)
 FONTS = [
     ('KeyGlyphs-Bold.ttf', 'Ectodeck Key Glyphs', 'Bold', 'EctodeckKeyGlyphs-Bold',
      Path('/usr/share/fonts/dejavu-sans-fonts/DejaVuSans-Bold.ttf'), 'DejaVu Sans Bold 2.37', 'DejaVu-LICENSE.txt'),
@@ -77,7 +77,7 @@ def main():
     ofl = OFL.read_text().split('\n')
     body = '\n'.join(ofl[next(i for i, l in enumerate(ofl) if 'This Font Software is licensed' in l):])
     (OUT / 'Noto-OFL.txt').write_text(NOTO_COPYRIGHT + '\n\n' + body)
-    lines = [f'- `{file}`: {family}, the glyphs of {origin}, {counts[file]} of them, under {"the Bitstream Vera and Arev licences" if lic.startswith("DejaVu") else "the SIL Open Font License 1.1"} (`{lic}`).'
+    lines = [f'- `{file}`: {family}, the glyphs of {origin}, {counts[file]} of them, under {"the Bitstream Vera and Arev licenses" if lic.startswith("DejaVu") else "the SIL Open Font License 1.1"} (`{lic}`).'
              for file, family, style, ps, source, origin, lic in FONTS]
     (OUT / 'README.md').write_text(
         '# Ectodeck\'s fonts for a keyboard\'s glyphs\n\n'
@@ -86,7 +86,7 @@ def main():
         'Ectodeck builds them in, so a typed legend draws the same, and the Key lab\'s glyph list still shows every glyph, on a computer that has none of the fonts they were cut from. '
         'The legends reach them after a core\'s own symbols font, and the lab\'s text after the computer\'s own fonts.\n\n'
         + '\n'.join(lines) + '\n\n'
-        'Each is cut from its font and renamed, as DejaVu\'s licence asks of a changed font and as Google\'s trademark on Noto asks. '
+        'Each is cut from its font and renamed, as DejaVu\'s license asks of a changed font and as Google\'s trademark on Noto asks. '
         'Built by `tools/glyph_fonts.py`.\n')
     print('fonts written:', counts)
 

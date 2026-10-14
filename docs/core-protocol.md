@@ -1,6 +1,6 @@
 # Ectodeck core protocol
 
-Draft 8, 2026-10-07. Draft 8 lets the device's print name one of the frontend's own typefaces, with the typeface its drawing is in and signs to set as others (section 4, the device's print), and lets the light give a key's legend words of its own, move a legend anywhere on its cap, give the caps colours of their own, and put homing bumps on any key or take them off (section 4, the device's light). Draft 7, 2026-10-06, added what is printed on each control as words (section 4, the device's print), so the frontend can set a device's legends anew in another typeface, size or place. Draft 6, 2026-10-04, writes a device's description to be read by people as well as programs (section 4): each control is tied to the drawing by one number, its other pieces following by rule; the light's values are named as the Key lab names them, every length in millimetres; and the lock lights are described. Draft 5, 2026-10-03, added the device's light (section 4), the description Ectodeck's Key lab tunes and draws the device's light from. Draft 4, 2026-09-29, was for review before anything was built on it. Draft 3 took in the review of the M3 plugin's author. Draft 4 replaces the device picture with one drawing in named, numbered pieces (section 4, the device's art), so a core brings its own art and the frontend draws it with nothing added by hand. It adds a layout to the shared settings language (section 6, Layout), so a core arranges its settings without drawing them, and lets a core's files carry comments.
+Draft 8, 2026-10-07. Draft 8 lets the device's print name one of the frontend's own typefaces, with the typeface its drawing is in and signs to set as others (section 4, the device's print), and lets the light give a key's legend words of its own, move a legend anywhere on its cap, give the caps colors of their own, and put homing bumps on any key or take them off (section 4, the device's light). Draft 7, 2026-10-06, added what is printed on each control as words (section 4, the device's print), so the frontend can set a device's legends anew in another typeface, size or place. Draft 6, 2026-10-04, writes a device's description to be read by people as well as programs (section 4): each control is tied to the drawing by one number, its other pieces following by rule; the light's values are named as the Key lab names them, every length in millimeters; and the lock lights are described. Draft 5, 2026-10-03, added the device's light (section 4), the description Ectodeck's Key lab tunes and draws the device's light from. Draft 4, 2026-09-29, was for review before anything was built on it. Draft 3 took in the review of the M3 plugin's author. Draft 4 replaces the device picture with one drawing in named, numbered pieces (section 4, the device's art), so a core brings its own art and the frontend draws it with nothing added by hand. It adds a layout to the shared settings language (section 6, Layout), so a core arranges its settings without drawing them, and lets a core's files carry comments.
 
 Ectodeck is one app for every device on a desk. It follows the model RetroArch made work for emulators: one frontend, and the engines that know each device brought in as **cores**. The frontend owns the windows, the tray, profiles, and every feature that spans devices. A core owns the truth about the devices it handles: how to find them, what they can do, and how to talk to them.
 
@@ -16,7 +16,7 @@ This document is the contract between the two.
 
 ## 2. Principles
 
-1. **Cores are separate programs.** A core that crashes takes nothing else down, a core can be written in any language, and a core keeps its own licence. OpenRGB is GPL and Ectodeck's own deck code comes from OpenDeck, which is GPL; neither changes the frontend's licence, because nothing is linked together.
+1. **Cores are separate programs.** A core that crashes takes nothing else down, a core can be written in any language, and a core keeps its own license. OpenRGB is GPL and Ectodeck's own deck code comes from OpenDeck, which is GPL; neither changes the frontend's license, because nothing is linked together.
 2. **The device is the truth.** When a device stores settings in its own memory, as the Z10 does, the core reads them from the device every time and the frontend never keeps a second copy that can drift. When a device keeps nothing, as the M3 does, the frontend stores its settings and hands them to the core.
 3. **The frontend draws everything.** A core never draws interface. It describes what a device can do in data, and the frontend presents it with its own controls. This is what keeps the app coherent as cores are added, and it is the deliberate difference from RetroArch, where every core's options pile into one long menu.
 4. **Nothing is written to a device without a reason the user can see.** A preview is shown without storing anything. A save writes, then reads back to confirm. Before a core first writes to a device's memory in a session, it hands the frontend a backup.
@@ -36,7 +36,7 @@ The manifest:
   "name": "EVGA Z10 RGB",
   "version": "1.0.0",
   "protocol": 1,
-  "licence": "MIT",
+  "license": "MIT",
   "run": {
     "linux-x86_64": "bin/evga-z10",
     "windows-x86_64": "bin/evga-z10.exe",
@@ -95,7 +95,7 @@ Errors use JSON-RPC's error object, with a `message` written for the person usin
 ```
 
 - **art** is the device's drawing, one SVG file shipped in the core's folder. The frontend draws the device from it and nothing else (see the device's art, below).
-- **firmware** says whether the device runs its maker's firmware (`"kind": "retail"`), Ectodeck's custom firmware (`"custom"`, with its build), or neither (`"unknown"`). **features** lists what the custom build adds, such as `sliders.read`; a core offers a custom feature, and accepts its methods, only when the device's build has it, so a device on retail firmware is never sent a command it does not know. **later** names features of newer builds, for the frontend to mention. The frontend keeps custom features apart from everything else, labelled as needing Ectodeck's firmware.
+- **firmware** says whether the device runs its maker's firmware (`"kind": "retail"`), Ectodeck's custom firmware (`"custom"`, with its build), or neither (`"unknown"`). **features** lists what the custom build adds, such as `sliders.read`; a core offers a custom feature, and accepts its methods, only when the device's build has it, so a device on retail firmware is never sent a command it does not know. **later** names features of newer builds, for the frontend to mention. The frontend keeps custom features apart from everything else, labeled as needing Ectodeck's firmware.
 - **controls** lists every part of the device a capability can refer to, and which pieces of the drawing belong to it. Controls have stable ids, so settings stay attached to the right key across versions of a core; an id is a word a person can read, such as `esc`, `f1` or `keypad-plus`, and names the control everywhere else in the description. `label` is the control's name in the interface; `short`, where a control has one, is a shorter name for where room is tight, as on the Key lab's map of the keys. What is printed on a control is in the drawing, and as words in its `print` (the device's print, below). A core may give a control fields of its own, as the Z10 core gives each key its `pos`, its place in the keyboard's own reports.
 - **screens** lists the device's displays and the pieces of the drawing that show them. The displays capability refers to a screen by its id, as it does to a control. A key with its own small screen, as on a Stream Deck, is a control that also names its `screen`.
 - **layout** arranges the device's settings on the frontend's pages (section 6, Layout).
@@ -103,19 +103,19 @@ Errors use JSON-RPC's error object, with a `message` written for the person usin
 
 ### The device's art
 
-A core brings its own art, and the frontend draws it exactly as it is. Everything that makes up the look, shading, chrome, print and glass included, is drawn in the SVG, so what a core's artist draws in Inkscape or any other editor is what the app shows. The frontend adds only what changes while the app runs: each light's colour, a pressed control, the live picture on a screen, and its own interface over the drawing, such as a selection outline or the name of a key's new assignment.
+A core brings its own art, and the frontend draws it exactly as it is. Everything that makes up the look, shading, chrome, print and glass included, is drawn in the SVG, so what a core's artist draws in Inkscape or any other editor is what the app shows. The frontend adds only what changes while the app runs: each light's color, a pressed control, the live picture on a screen, and its own interface over the drawing, such as a selection outline or the name of a key's new assignment.
 
-**Pieces.** The drawing is broken into pieces. Each piece is a group or shape whose `id` is its kind and a number, such as `control_12`. The number only tells pieces of the same kind apart: each kind counts from 1 on its own, so a keyboard with 104 controls still has `body_1`. How finely to break the drawing up is the artist's choice, with one rule: anything that changes on its own needs a piece of its own. A key that takes its own colour needs its own illumination, a key that presses needs its own control, and a legend that lights with its key needs its own legend.
+**Pieces.** The drawing is broken into pieces. Each piece is a group or shape whose `id` is its kind and a number, such as `control_12`. The number only tells pieces of the same kind apart: each kind counts from 1 on its own, so a keyboard with 104 controls still has `body_1`. How finely to break the drawing up is the artist's choice, with one rule: anything that changes on its own needs a piece of its own. A key that takes its own color needs its own illumination, a key that presses needs its own control, and a legend that lights with its key needs its own legend.
 
 The kinds, in the order they usually sit from the bottom of the drawing to the top. The drawing itself decides: pieces are drawn in the order they come in the file, as SVG always is, and a kind can sit at more than one depth. The Z10 has light under its caps (thrown on the deck) and over them (on each cap's top, and round each legend).
 
 | Kind | What it is | What the frontend does with it |
 |---|---|---|
 | `body` | The shell of the device, with its shading and chrome | Draws it as it is |
-| `illumination` | The light a control throws, drawn in white at the strength it has at full light, with any blur in the drawing | Sets its colour (`fill` and `color`) to the control's, and fades it by how strongly the control is lit |
+| `illumination` | The light a control throws, drawn in white at the strength it has at full light, with any blur in the drawing | Sets its color (`fill` and `color`) to the control's, and fades it by how strongly the control is lit |
 | `mask` | Where an illumination may show, such as the wells a row of keys sits in: a `<clipPath>`, which the illuminations use in the drawing (`clip-path="url(#mask_1)"`), so the drawing looks right in any editor | Nothing more; it is part of the drawing |
 | `control` | A key, button, dial or slider, with its shading | Draws it as it is; nudges it down and darkens it while it is pressed |
-| `legend` | What is printed, on the body or on a control, in its colour when unlit | Draws it as it is; one tied to a control takes on the control's colour as strongly as the control is lit, and moves with it when pressed |
+| `legend` | What is printed, on the body or on a control, in its color when unlit | Draws it as it is; one tied to a control takes on the control's color as strongly as the control is lit, and moves with it when pressed |
 | `screen` | Where a display sits | Shows the display's live picture inside it |
 | `overlay` | Anything in front of everything else, such as the glass over a screen and its glare | Draws it as it is |
 
@@ -133,9 +133,9 @@ The kinds, in the order they usually sit from the bottom of the drawing to the t
 
 What is printed on each control, as words, for the frontend to set a device's legends anew: in another typeface, larger or smaller, or elsewhere on the cap (the Key lab's Legends section). The drawing keeps the legends as outlines, which draw alike everywhere; the print says what they say and how the drawing sets them.
 
-- Each control's **print** lists its legend's parts in order, each its words (`text`) or one of the device's icons (`icon`): its own legend, the default, its shifted sign beside it (`"role": "shift"`) and its second function at its foot (`"role": "second"`). A sign the cap prints larger than the rest of its kind says how much (`"scale": 1.22`). A control whose cap prints its legend in the middle rather than at the top says `"centred": true`.
-- The description's **print** says how the device's legends are printed: the `typeface` and `weight` they are printed in, shipped in the core's folder (`fonts`) or one of the frontend's own (Ectodeck's are listed in `crates/ectodeck-draw/typefaces/README.md`), and a typeface for the signs it lacks (`symbols`, in `fonts`); where the drawing has its legends in another typeface (a device's own may be one no frontend may carry), that one as `art`, `typeface` and `weight`, in `fonts`, with the sizes the drawing has them at (`letters`, `words`, `inset`) where those are not the device's own, so the drawing's legends are kept only where they are asked for as drawn; signs the typeface draws otherwise than the device prints them, each to set as another of its signs (`swap`: Orbitron's zero is slashed, its O is a plain zero); how tall a legend of one letter or sign is (`letters`) and a legend of words (`words`), a capital's height in millimetres as the device itself prints them (the Z10's are measured from photographs of it; a key whose words are printed smaller, such as the Z10's navigation keys, says so in the light's `keys`); how far down from the top edge of a cap's top a one-letter legend starts (`inset`, in mm); and the `icons`, each drawn on a 24-unit square (`fill` and `stroke` path data, the stroke's `width`), `size` times as tall as its part's capitals would be and `drop` times them below its line.
-- With the drawing's own typeface (its `art`, or the print's where it has none), sizes and place, the frontend draws the drawing's legends as they are. Otherwise it sets each control's print anew: its own legend at the top of the cap with its shifted sign beside it, words of more than one line one under the other, its second function at the foot, a centred control's legend in the middle; a word too long for its cap set smaller, the control's other words with it.
+- Each control's **print** lists its legend's parts in order, each its words (`text`) or one of the device's icons (`icon`): its own legend, the default, its shifted sign beside it (`"role": "shift"`) and its second function at its foot (`"role": "second"`). A sign the cap prints larger than the rest of its kind says how much (`"scale": 1.22`). A control whose cap prints its legend in the middle rather than at the top says `"centered": true`.
+- The description's **print** says how the device's legends are printed: the `typeface` and `weight` they are printed in, shipped in the core's folder (`fonts`) or one of the frontend's own (Ectodeck's are listed in `crates/ectodeck-draw/typefaces/README.md`), and a typeface for the signs it lacks (`symbols`, in `fonts`); where the drawing has its legends in another typeface (a device's own may be one no frontend may carry), that one as `art`, `typeface` and `weight`, in `fonts`, with the sizes the drawing has them at (`letters`, `words`, `inset`) where those are not the device's own, so the drawing's legends are kept only where they are asked for as drawn; signs the typeface draws otherwise than the device prints them, each to set as another of its signs (`swap`: Orbitron's zero is slashed, its O is a plain zero); how tall a legend of one letter or sign is (`letters`) and a legend of words (`words`), a capital's height in millimeters as the device itself prints them (the Z10's are measured from photographs of it; a key whose words are printed smaller, such as the Z10's navigation keys, says so in the light's `keys`); how far down from the top edge of a cap's top a one-letter legend starts (`inset`, in mm); and the `icons`, each drawn on a 24-unit square (`fill` and `stroke` path data, the stroke's `width`), `size` times as tall as its part's capitals would be and `drop` times them below its line.
+- With the drawing's own typeface (its `art`, or the print's where it has none), sizes and place, the frontend draws the drawing's legends as they are. Otherwise it sets each control's print anew: its own legend at the top of the cap with its shifted sign beside it, words of more than one line one under the other, its second function at the foot, a centered control's legend in the middle; a word too long for its cap set smaller, the control's other words with it.
 
 ```jsonc
 "print": {
@@ -148,7 +148,7 @@ What is printed on each control, as words, for the frontend to set a device's le
 },
 "controls": [
   { "id": "2", "label": "2", "pos": 24, "art": 25, "print": [{ "text": "2" }, { "text": "@", "role": "shift" }, { "text": "PF2", "role": "second" }] },
-  { "id": "backspace", "label": "Backspace", "pos": 35, "art": 36, "centred": true, "print": [{ "text": "BACKSPACE" }] }
+  { "id": "backspace", "label": "Backspace", "pos": 35, "art": 36, "centered": true, "print": [{ "text": "BACKSPACE" }] }
 ]
 ```
 
@@ -158,7 +158,7 @@ How the device's light gets out, for the frontend to draw it as light: the `ligh
 
 ```jsonc
 "light": {
-  "scale": 1.38,       // the drawing's units to the millimetre
+  "scale": 1.38,       // the drawing's units to the millimeter
   "typical": "2",      // the key the Key lab draws for all keys
   "switches": { "kind": "led-slot", "top": 5.7, "width": 12, "led": 5.08, "lumens": 0.745, "beam": 3 },
   "caps": { "kind": "shine-through", "foot": 5, "top": 14, "inside": 0.5, "outside": 0.18 },
@@ -172,21 +172,21 @@ How the device's light gets out, for the frontend to draw it as light: the `ligh
 }
 ```
 
-- **scale** is how many of the drawing's units make a millimetre. Positions come from the drawing in its own units; every length in the description is in millimetres, every brightness in nits and the LEDs' light in lumens. Every surface is as bright as the light that reaches it makes it, from the LEDs' lumens: nothing is scaled to fit.
+- **scale** is how many of the drawing's units make a millimeter. Positions come from the drawing in its own units; every length in the description is in millimeters, every brightness in nits and the LEDs' light in lumens. Every surface is as bright as the light that reaches it makes it, from the LEDs' lumens: nothing is scaled to fit.
 - **typical** is the control the Key lab draws in section when no key is chosen, by its id: a key as most of the device's are.
 - **switches** is the switch under each key: its housing's `kind` (`led-slot`, black with its LED through a slot in its top; `clear-top`; or `clear`), its `top` above the deck and its `width`, where its LED sits (`led`, north of the switch's middle, south below 0), the light it gives off at full white (`lumens`), how tight the LED's `beam` is, and how a clear housing glows (`scattered`, `sides`, `glow`).
-- **caps** is the cap over it: its `kind` (`shine-through`, `pudding` or `translucent`), its skirt's `foot` and its `top` above the deck, how opaque its walls' plastic is (`opacity`, 0 letting the light inside through, 1 opaque; a translucent cap's top too), how far down a pudding cap's sides its top's colour comes (`black`, named for the black tops most pudding caps have), its homing bump (`bump`: `none`, `bar` or `dot`; where none is given, the bump the drawing gives the key), the plastic's colours as sRGB (`colour`, its top's, black where none is given; `sides`, its sides', the top's on a shine-through cap and clear on a pudding cap's sides or a translucent cap where none is given), how `milky` the plastic is (its haze: the share of the light it takes in that it scatters and spreads a little way, the less far the milkier it is, 0 clear to 1 milky white; the rest goes straight through), and the shares of the light its `inside` and `outside` reflect.
-- **legends**, **wells** and **display** are the legends' `opacity` (how much of the light behind them they hold back, 0 letting it all through, 1 as dark as the cap's black), how a legend looks with its LED off (`unlit`, a share of the drawing's grey) and how they are set where it differs from the device's print (`typeface` and `weight`; `place`, `printed` (where the device prints each, its centred keys in the middle; the default), `top` (at the top on every key), `middle` or `topleft`; `letters`, `words` and `inset`, as the print's; and how far a legend is moved from where its place sets it, `across` to the right and `down`, in millimetres, to the left and up below 0; and each part's own, its own legend's, its shifted sign's and its second function's, `main_`, `shift_` and `second_` before `size` (how tall its capitals are, in millimetres, in place of `letters` or `words`, which it follows where none is given), `across` and `down` (moved on from where the rest puts it): a keypad's arrows smaller than its numbers, say); the wells (the mask piece of the drawing that holds them, their `depth`, and the shares of the light the `deck` and the `chassis` reflect); and the display's backlit dots, in nits, with how much of its cell a dot fills and how strongly the glass shows its sheen.
+- **caps** is the cap over it: its `kind` (`shine-through`, `pudding` or `translucent`), its skirt's `foot` and its `top` above the deck, how opaque its walls' plastic is (`opacity`, 0 letting the light inside through, 1 opaque; a translucent cap's top too), how far down a pudding cap's sides its top's color comes (`black`, named for the black tops most pudding caps have), its homing bump (`bump`: `none`, `bar` or `dot`; where none is given, the bump the drawing gives the key), the plastic's colors as sRGB (`color`, its top's, black where none is given; `sides`, its sides', the top's on a shine-through cap and clear on a pudding cap's sides or a translucent cap where none is given), how `milky` the plastic is (its haze: the share of the light it takes in that it scatters and spreads a little way, the less far the milkier it is, 0 clear to 1 milky white; the rest goes straight through), and the shares of the light its `inside` and `outside` reflect.
+- **legends**, **wells** and **display** are the legends' `opacity` (how much of the light behind them they hold back, 0 letting it all through, 1 as dark as the cap's black), how a legend looks with its LED off (`unlit`, a share of the drawing's gray) and how they are set where it differs from the device's print (`typeface` and `weight`; `place`, `printed` (where the device prints each, its centered keys in the middle; the default), `top` (at the top on every key), `middle` or `topleft`; `letters`, `words` and `inset`, as the print's; and how far a legend is moved from where its place sets it, `across` to the right and `down`, in millimeters, to the left and up below 0; and each part's own, its own legend's, its shifted sign's and its second function's, `main_`, `shift_` and `second_` before `size` (how tall its capitals are, in millimeters, in place of `letters` or `words`, which it follows where none is given), `across` and `down` (moved on from where the rest puts it): a keypad's arrows smaller than its numbers, say); the wells (the mask piece of the drawing that holds them, their `depth`, and the shares of the light the `deck` and the `chassis` reflect); and the display's backlit dots, in nits, with how much of its cell a dot fills and how strongly the glass shows its sheen.
 - Each value is one of the Key lab's sliders or choices, named for it: `inside` is the lab's Inside reflection, and `milky` its Haze. The Z10's file says what each one is in a comment beside it.
 - **keys** holds a key's own values, where they differ from all keys', by the control's id. An entry takes any of the sections above that belong to a key, `switches`, `caps` and `legends`, and only what differs: a stock cap among pudding caps, say. It can also say where the key's switch sits under its cap: **place**, how far east and north of the cap's middle, as on a long key whose switch is off its middle. The LED goes with its switch. A key's own `legends` can also give its legend words of its own, each part in place of the print's: `main` (its own legend, a line break between its lines), `shift` and `second`, an empty one taking that part away; a cap that prints ⌘ where the device prints Win, say. A line that is one of the print's `icons` by its name in brackets (`[mute]`) is that icon. A part can instead be a picture of the person's own, `main_image`, `shift_image` or `second_image`, by the name of an SVG file the frontend keeps beside the person's setups (an artisan cap's logo); a key whose own legend is a picture has it in the middle of its cap. A key with nothing of its own has no entry.
 - A button with no light of its own stands in the keys' light too: the drawing shows it as a block (its control's first piece, with no shadow drawn under it as a cap has; its face the next piece where that lies inside it). Its entry in **keys** says where it stands and how high, its caps' `foot` and `top`, as the Z10's G/PC and media keys stand on its chassis.
 
-The lock lights, small windows with an LED behind each, are the description's `lock_lights`: the piece of the drawing for each of `num`, `caps` and `scroll`, their `colour` and `brightness`, how far from the LED a window stays bright (`spread`), how lit its corners stay (`floor`), and the little light out of its edges (`spill`, its brightness and how far it reaches).
+The lock lights, small windows with an LED behind each, are the description's `lock_lights`: the piece of the drawing for each of `num`, `caps` and `scroll`, their `color` and `brightness`, how far from the LED a window stays bright (`spread`), how lit its corners stay (`floor`), and the little light out of its edges (`spill`, its brightness and how far it reaches).
 
 ```jsonc
 "lock_lights": {
   "num": "num-lock-light", "caps": "caps-lock-light", "scroll": "scroll-lock-light",
-  "colour": "#ff6000",
+  "color": "#ff6000",
   "brightness": 300,
   "spread": 1.45,
   "floor": 0.5,
@@ -235,7 +235,7 @@ An **action** is one of a fixed set the frontend knows how to present: a key (`{
 - `record` means the core can record from the device itself. `macros/record/start` takes the device's input for the recording alone (so its keys reach nothing else), `macros/record/status` reports progress, and `macros/record/stop` returns the steps. A device without `record` can still have macros; the frontend records them from the system's keyboard.
 - A device with `"stored": "host"` gets its macros played by the frontend when its controls send input.
 
-### lighting: effects, previews and live colour
+### lighting: effects, previews and live color
 
 ```json
 "lighting": {
@@ -255,7 +255,7 @@ An **action** is one of a fixed set the frontend knows how to present: a key (`{
 - Effects are the device's own built-in animations, each with parameters in the shared settings language (section 6), so the frontend builds every effect's editor from data.
 - `lighting/get` and `lighting/set` read and write the stored lighting of a profile.
 - `preview` means the device can show an effect without storing it. `lighting/preview {device, effect, params}` starts or updates a preview, and `lighting/preview/stop` hands the lighting back to the stored profile. The core runs whatever loop the device needs (the Z10 needs a frame every 40 ms) and stops by itself if the frontend stops refreshing.
-- `direct` means the frontend can set every lit control's colour itself, up to `rate` times a second, with `lighting/direct {device, colors}`. This is what makes lighting that spans the whole desk possible: the frontend draws one effect across every device and streams each its part.
+- `direct` means the frontend can set every lit control's color itself, up to `rate` times a second, with `lighting/direct {device, colors}`. This is what makes lighting that spans the whole desk possible: the frontend draws one effect across every device and streams each its part.
 
 ### displays: screens and image keys
 
@@ -275,7 +275,7 @@ A core draws its own displays. The M3 is a whole screen with magnetic keys over 
 
 **Frames travel on their own channel.** Text displays send their rows in the feed's notifications. Image frames are too large for the message line (60 frames a second of JPEG is several megabytes a second), so `display/feed/start` and `display/preview/start` answer with a frame channel: a local socket (a named pipe on Windows) on which each frame arrives as a small header (`type`, `width`, `height`, `length`) and then its bytes. A frame is whatever the core already makes, JPEG or PNG, as its header says; the M3 core already compresses every frame it sends the deck as a JPEG, so the feed costs it nothing extra.
 
-**What a display can show is a catalogue.** An image display lists the content it accepts in its description:
+**What a display can show is a catalog.** An image display lists the content it accepts in its description:
 
 ```json
 { "control": "panel", "kind": "image", "width": 854, "height": 480, "windows": [...],
@@ -290,7 +290,7 @@ A core draws its own displays. The M3 is a whole screen with magnetic keys over 
   } }
 ```
 
-Each background carries its own settings in the shared settings language, and the catalogue can change: when you add a shader file of your own, the core sends `display/catalog/changed` and the frontend reads the list again.
+Each background carries its own settings in the shared settings language, and the catalog can change: when you add a shader file of your own, the core sends `display/catalog/changed` and the frontend reads the list again.
 
 ### input: presses, turns and slides
 
@@ -312,7 +312,7 @@ A core acts on its own input first and tells the frontend second. A press has to
 
 ### settings: everything else a device has
 
-Device settings that belong to no capability, such as the Z10's game-mode keys or its display's backlight colour, described in the shared settings language (section 6): `settings/get` and `settings/set`.
+Device settings that belong to no capability, such as the Z10's game-mode keys or its display's backlight color, described in the shared settings language (section 6): `settings/get` and `settings/set`.
 
 ### status
 
@@ -333,8 +333,8 @@ Every parameter or setting a core offers is described with one of a small set of
 | `number` | a slider for fractions, with `min`, `max`, `step` | A background's intensity, 0 to 1 |
 | `duration` | a slider in seconds, stored in milliseconds | Wave speed |
 | `choice` | a segmented control or menu, with `options` | Wave direction |
-| `color` | a colour swatch | Static colour |
-| `colors` | a row of swatches, up to `max` | Wave colours |
+| `color` | a color swatch | Static color |
+| `colors` | a row of swatches, up to `max` | Wave colors |
 | `text` | a text field, with `max` length | Profile name |
 | `place` | a search for a place by name, stored as its name with its latitude and longitude | The city a weather background shows |
 | `image` | a picture you choose | A background photo |
@@ -351,7 +351,7 @@ The device description carries the layout, written out or as the name of a file 
 "layout": {
   "lighting": {
     "wave": [
-      { "section": "Colours", "show": ["colors"] },
+      { "section": "Colors", "show": ["colors"] },
       { "section": "Motion", "show": [{ "row": ["speed", "direction"] }, "zone"] }
     ]
   },
@@ -369,7 +369,7 @@ The device description carries the layout, written out or as the name of a file 
 - **when** is a condition, on a setting or a whole section: every setting it names must have the value given, or one of the values in a list (`{"effect": ["wave", "ripple"]}`). `{"feature": ...}` holds when the device's firmware has that feature (section 4). A setting hidden by its condition keeps its value.
 - A setting the layout does not place is drawn after the placed ones on its page, in the order the core listed it, so a missing or out-of-date layout never hides anything. A layout is optional.
 
-The layout is the whole of it: headings, order, rows and conditions. Sizes, colours, spacing and styles stay the frontend's, so every core looks like the rest of the app.
+The layout is the whole of it: headings, order, rows and conditions. Sizes, colors, spacing and styles stay the frontend's, so every core looks like the rest of the app.
 
 ## 7. What the frontend adds across every device
 
@@ -412,6 +412,6 @@ The M3 as its core will describe it: 15 keys in three rows of five; three dials 
 
 ## 10. Open questions
 
-Settled in review: recording on Windows uses the system's keyboard hook, as Unleash does, and holds keys back from other apps while recording (only Ctrl+Alt+Del and Windows+L cannot be held); cores draw their own displays and the frontend gets live feeds and previews (section 5, displays); cores will be offered from a catalogue later, signed so a core's source is known before it runs.
+Settled in review: recording on Windows uses the system's keyboard hook, as Unleash does, and holds keys back from other apps while recording (only Ctrl+Alt+Del and Windows+L cannot be held); cores draw their own displays and the frontend gets live feeds and previews (section 5, displays); cores will be offered from a catalog later, signed so a core's source is known before it runs.
 
 1. **System permissions.** Each system asks once before an app may do certain things: on macOS, Input Monitoring (to read a keyboard's presses, which recording needs) and Accessibility (to send keystrokes, which shortcut actions need); on Linux, a rule installed once with admin rights so the app can reach the devices without running as administrator; on Windows, usually nothing. A core reports that it needs one (`device/status` with `"needs": "input-monitoring"`), and the frontend explains the step in plain words at the moment it is needed. What a core does for itself, such as capturing sound or using the network, is declared in its manifest's `uses` instead (section 3). The exact list grows as cores find what they need.

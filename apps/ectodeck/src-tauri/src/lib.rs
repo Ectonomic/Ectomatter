@@ -358,7 +358,7 @@ fn show_main(app: &AppHandle) {
 }
 
 /// A device in the tray's list, which sits under Ectodeck itself: its page is
-/// one click away, and one that is not plugged in is greyed rather than
+/// one click away, and one that is not plugged in is grayed rather than
 /// dropped, so the list keeps still.
 #[derive(serde::Deserialize)]
 pub struct TrayDevice {

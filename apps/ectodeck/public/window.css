@@ -1,7 +1,7 @@
 /* Ectodeck's window, drawn as the MagTran app draws its own: frameless, with
    rounded corners, and a title bar carrying the mark and the wordmark. Nothing
    outlines the window or underlines the title bar: its change of shade is its
-   edge. Maximised, it squares off to fill the screen. */
+   edge. Maximized, it squares off to fill the screen. */
 @font-face { font-family: 'Geist'; src: url('fonts/Geist-Variable-latin.woff2') format('woff2'); font-weight: 100 900; font-display: swap; }
 
 /* The root's background is a transparent image, not merely transparent: with

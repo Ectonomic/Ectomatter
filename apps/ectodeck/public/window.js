@@ -1,7 +1,7 @@
 'use strict';
 /* The window's own controls, since Ectodeck draws its title bar itself:
-   minimise, maximise, close (which keeps Ectodeck in the tray), resizing
-   from the edges, and squaring the corners off when maximised. */
+   minimize, maximize, close (which keeps Ectodeck in the tray), resizing
+   from the edges, and squaring the corners off when maximized. */
 
 (() => {
   const T = window.__TAURI__;

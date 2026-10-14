@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 /// The Z10's core: its folder among Ectodeck's cores.
 pub const CORE: &str = "evga-z10";
 
-/// drawn gap between neighbouring keys, in the drawing's units
+/// drawn gap between neighboring keys, in the drawing's units
 pub const GAP: f64 = 3.0;
 
 pub const PROFILE_NUMBERS: [u8; 5] = [1, 2, 3, 4, 5];
@@ -271,7 +271,7 @@ const CONSUMER: [(u32, &str); 18] = [
     (549, "Web forward"),
     (550, "Web stop"),
     (551, "Web refresh"),
-    (554, "Web favourites"),
+    (554, "Web favorites"),
 ];
 
 pub const EFFECTS: [(&str, &str); 9] = [
@@ -486,14 +486,14 @@ pub struct Page {
     /// 2 Scroll Lock), and its dimmer's level, 0 to 255, once the firmware says
     pub locks: u8,
     pub dimmer: Option<u8>,
-    /// the colours the profile being edited paints its keys with, one a key
+    /// the colors the profile being edited paints its keys with, one a key
     pub custom: Vec<[u8; 3]>,
     /// Reactive's "Preview with pretend typing"
     pub demo: bool,
     /// the playlists keys can play, by the reserved code each one's keys send (see
     /// PLAY_CODES), and their names; a code with none plays a playlist since deleted
     pub playlist_keys: std::collections::BTreeMap<u32, String>,
-    /// each lit key's colour and light at the last frame, before the LEDs' lean: what streams to the keyboard
+    /// each lit key's color and light at the last frame, before the LEDs' lean: what streams to the keyboard
     pub last_colors: HashMap<u32, [f64; 4]>,
     rng: u64,
 }
@@ -894,7 +894,7 @@ impl Page {
         (d != self.factory(layer, pos)).then(|| self.short_label(d, names))
     }
 
-    /// The name, effect and small colour sample of each profile's button.
+    /// The name, effect and small color sample of each profile's button.
     pub fn profile_effect(&self, n: u8) -> String {
         let mode = self.drafts[&n]["lighting"]["mode"].as_str().unwrap_or("").to_string();
         EFFECTS.iter().find(|(m, _)| *m == mode).map_or(mode, |(_, name)| name.to_string())
@@ -906,7 +906,7 @@ impl Page {
         if name.is_empty() || name.to_uppercase().starts_with("DEFAULT") { format!("Profile {n}") } else { name.to_string() }
     }
 
-    /// The profile's colours for its swatch: one colour, or up to four for a gradient.
+    /// The profile's colors for its swatch: one color, or up to four for a gradient.
     pub fn profile_swatch(&self, n: u8) -> Vec<[f64; 3]> {
         let l = &self.drafts[&n]["lighting"];
         match l["mode"].as_str().unwrap_or("") {
@@ -971,7 +971,7 @@ impl Page {
             self.flash(pos, t);
         }
         let colors = if mode == "custom" {
-            // each key its own colour, lit wherever it has one
+            // each key its own color, lit wherever it has one
             self.layout.iter().filter(|k| k.led).map(|k| {
                 let c = self.custom.get(k.pos as usize).copied().unwrap_or([0; 3]);
                 (k.pos, [c[0] as f64, c[1] as f64, c[2] as f64, if c.iter().any(|v| *v > 0) { 1.0 } else { 0.0 }])
@@ -986,7 +986,7 @@ impl Page {
             .filter(|k| k.led)
             .filter_map(|k| {
                 let v = colors.get(&k.pos)?;
-                // the dimmer scales every key's light inside the keyboard, as colour x level / 256
+                // the dimmer scales every key's light inside the keyboard, as color x level / 256
                 let dim = self.dimmer.map_or(1.0, |d| d as f64 / 256.0);
                 Some(Light { pos: k.pos, rgb: led_look([v[0], v[1], v[2]]), strength: ((v[3] * dim * 1000.0).round() / 1000.0) as f32, remapped: self.remap(k.pos, &names).is_some() })
             })
@@ -1138,7 +1138,7 @@ impl Page {
     }
 
     /// What the keyboard is sent to show the draft while the Lighting page is
-    /// open: each key's colour for Per key, Stars and Reactive (which the
+    /// open: each key's color for Per key, Stars and Reactive (which the
     /// keyboard cannot play from a preset), or the effect itself.
     pub fn preview_body(&self) -> Value {
         let l = &self.draft()["lighting"];
@@ -1153,7 +1153,7 @@ impl Page {
         matches!(self.draft()["lighting"]["mode"].as_str(), Some("stars") | Some("trigger"))
     }
 
-    /// Each key's colour as the screen shows it this frame, for the keyboard.
+    /// Each key's color as the screen shows it this frame, for the keyboard.
     pub fn streamed(&self) -> Vec<[u8; 3]> {
         (0..116u32).map(|i| self.last_colors.get(&i).map_or([0; 3], |v| [0, 1, 2].map(|j| (v[j] * v[3]).round().clamp(0.0, 255.0) as u8))).collect()
     }
@@ -1268,7 +1268,7 @@ fn mix(a: [f64; 3], b: [f64; 3], t: f64) -> [f64; 3] {
     [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
 }
 
-/// a loop of colours, `u` in [0, 1) around it
+/// a loop of colors, `u` in [0, 1) around it
 fn ramp(colors: &[[f64; 3]], u: f64) -> [f64; 3] {
     let n = colors.len();
     if n == 0 {
@@ -1279,9 +1279,9 @@ fn ramp(colors: &[[f64; 3]], u: f64) -> [f64; 3] {
     mix(colors[i], colors[(i + 1) % n], x - i as f64)
 }
 
-/// The Z10's LEDs do not show a pure colour: each channel spills into
+/// The Z10's LEDs do not show a pure color: each channel spills into
 /// another (red and blue into green, green into blue, 0x60 of each at full),
-/// so the keyboard on screen shows a colour as the keys do.
+/// so the keyboard on screen shows a color as the keys do.
 fn led_look(c: [f64; 3]) -> [u8; 3] {
     bleed(c, f64::from_bits(KEYS_BLEED.load(std::sync::atomic::Ordering::Relaxed)))
 }

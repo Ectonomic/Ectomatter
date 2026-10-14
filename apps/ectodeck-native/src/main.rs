@@ -5,7 +5,7 @@
 //! ectodeck-draw and lit in linear light, brighter than the desktop's white
 //! where it glows. The page leaves a hole where the keyboard goes; the two
 //! meet in one picture, in linear light, which goes to the compositor as PQ
-//! with BT.2020 primaries, 16 bits a channel. The page's colours are decoded
+//! with BT.2020 primaries, 16 bits a channel. The page's colors are decoded
 //! as KWin decodes every SDR app's (gamma 2.2 at the reference white), so the
 //! page looks as the web app did and only the light goes above it.
 //!
@@ -143,7 +143,7 @@ const LAB: usize = 1;
 const LAYOUTS: usize = 2;
 /// the ground the keyboard sits on: its box's (Ink.well)
 const GROUND: [u8; 3] = [0x13, 0x13, 0x16];
-/// How much brighter than the page's colours the keys' light is drawn. The
+/// How much brighter than the page's colors the keys' light is drawn. The
 /// light is drawn at the web design's brightness, as approved in WebKit; going
 /// above the desktop's white by the screen's headroom looked overdone.
 const LIGHT_GAIN: f32 = 1.0;
@@ -748,7 +748,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         }
     }
     eprintln!("the cursor: {:?}", window.pointer());
-    // (the caps' colours, for what is printed over the keys)
+    // (the caps' colors, for what is printed over the keys)
     let in_use = device_in_use(&front.settings)["light"].clone();
     front.light_caps(&in_use);
     front.refresh();
@@ -1204,7 +1204,7 @@ struct App {
     at: (f64, f64),
     ready: bool,
     failed: Option<String>,
-    /// colour management: the picture's description on the surface, each
+    /// color management: the picture's description on the surface, each
     /// screen's levels as KWin describes them, the screen the window is on,
     /// and the levels the picture is drawn for (the desktop's white, the light's top)
     cm: WpColorManagerV1,
@@ -1716,7 +1716,7 @@ impl App {
         let asks = self.front.act();
         for ask in &asks {
             match ask {
-                WindowAsk::Move if !asks.contains(&WindowAsk::Maximise) => {
+                WindowAsk::Move if !asks.contains(&WindowAsk::Maximize) => {
                     if let Some(seat) = &self.seat {
                         self.window.move_(seat, self.press);
                     }
@@ -1726,8 +1726,8 @@ impl App {
                     self.slint.dispatch_event(WindowEvent::PointerExited);
                 }
                 WindowAsk::Move => {}
-                WindowAsk::Minimise => self.window.set_minimized(),
-                WindowAsk::Maximise => {
+                WindowAsk::Minimize => self.window.set_minimized(),
+                WindowAsk::Maximize => {
                     if self.maximized {
                         self.window.unset_maximized()
                     } else {
@@ -1763,8 +1763,8 @@ impl App {
                         sw.slint.dispatch_event(WindowEvent::PointerExited);
                         (sw.held, sw.inside) = (false, false);
                     }
-                    WindowAsk::Minimise => sw.window.set_minimized(),
-                    WindowAsk::Maximise => {
+                    WindowAsk::Minimize => sw.window.set_minimized(),
+                    WindowAsk::Maximize => {
                         if sw.maximized {
                             sw.window.unset_maximized()
                         } else {
@@ -2275,7 +2275,7 @@ impl App {
                     self.want = Some(want);
                 }
                 self.readout_at = None;
-                // (the caps' colours, for what is printed over the keys)
+                // (the caps' colors, for what is printed over the keys)
                 relit_caps = true;
             }
         }
@@ -3136,12 +3136,12 @@ fn light_into(px: &mut Vec<f32>, board: &Board, lights: &[Light], locks: u8, cei
     board.compose_into(px, lights, locks, reference as f32, ceiling);
     // The display, lit from behind as an LCD is: its lit dots, its unlit dots
     // and the ground between them each at the core's nits for them, in the
-    // backlight's colour, under the glass. With nothing driving it, it is dark.
+    // backlight's color, under the glass. With nothing driving it, it is dark.
     if let Some(p) = panel {
         let (w, h) = (board.w as i32, board.h as i32);
         let lcd = board.lcd();
         let white = reference as f32;
-        // the backlight is an LED: as much light as its colour has, white the most
+        // the backlight is an LED: as much light as its color has, white the most
         let unit = p.backlight.map(|v| v.max(0.0).powf(2.2));
         let nits = |n: f32| (n / white).min(ceiling);
         let (lit, unlit, field) = (nits(lcd.lit), nits(lcd.unlit), nits(lcd.field));

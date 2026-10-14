@@ -61,7 +61,7 @@ const FULLNAME = {
 // layout.json say where the keys are, for the buttons laid over it, and where
 // the display and the sliders sit, in the drawing's own units (the pixel space
 // of EVGA's top-down photo, which the drawing was traced over).
-const GAP = 3;                       // drawn gap between neighbouring keys
+const GAP = 3;                       // drawn gap between neighboring keys
 let SPACE, GLASS;
 
 // The keys EVGA's layout leaves out: the mode button at the far left of the
@@ -93,7 +93,7 @@ for (let i = 13; i <= 24; i++) HID[91 + i] = 'F' + i;
 const MODS = [[1, 'Left Ctrl'], [2, 'Left Shift'], [4, 'Left Alt'], [8, 'Left Super'], [16, 'Right Ctrl'], [32, 'Right Shift'], [64, 'Right Alt'], [128, 'Right Super']];
 const CONSUMER = { 181: 'Next track', 182: 'Previous track', 183: 'Stop', 205: 'Play/pause', 226: 'Mute',
   233: 'Volume up', 234: 'Volume down', 387: 'Media player', 394: 'Mail', 402: 'Calculator', 404: 'My computer',
-  545: 'Web search', 547: 'Web home', 548: 'Web back', 549: 'Web forward', 550: 'Web stop', 551: 'Web refresh', 554: 'Web favourites' };
+  545: 'Web search', 547: 'Web home', 548: 'Web back', 549: 'Web forward', 550: 'Web stop', 551: 'Web refresh', 554: 'Web favorites' };
 // In a macro the keyboard numbers the modifiers 112 to 119, which collides with
 // F21..F24 in the table above, so macros get their own list.
 const MACRO_KEYS = {};
@@ -183,7 +183,7 @@ function loadCustom(key) {
 }
 function saveCustom() {
   try { localStorage.setItem('z10:custom:' + S.editing, JSON.stringify(customColors())); }
-  catch (e) { /* not fatal, the colours just will not survive a reload */ }
+  catch (e) { /* not fatal, the colors just will not survive a reload */ }
 }
 
 function setLive(on) { $('#live').hidden = !on; }
@@ -193,7 +193,7 @@ function setLive(on) { $('#live').hidden = !on; }
 // of its cell. That is the panel the z10-lcd work measured off the keyboard, and
 // the font is the Adafruit GFX classic 5x7 the keyboard's controller uses.
 // It is a positive display: the backlight shines through every pixel that is
-// off, and a pixel that is on blocks it, so text reads dark on the lit colour.
+// off, and a pixel that is on blocks it, so text reads dark on the lit color.
 const LCD = { cols: 20, rows: 4, cw: 8, ch: 8 };
 const PW = LCD.cols * LCD.cw, PH = LCD.rows * LCD.ch;
 
@@ -233,7 +233,7 @@ function panelBits(rows) {
 // finer picture to fit turned the pixel grid into uneven stripes, most of all
 // in WebKit and at the smaller sizes a desktop window shows the keyboard at.
 // Drawing into a canvas in the page instead left the element compositing at
-// the wrong scale. The picture is rebuilt when the text, the backlight colour
+// the wrong scale. The picture is rebuilt when the text, the backlight color
 // or the panel's size changes.
 const PITCH = 4;           // pixels per LCD pixel before the panel has a size
 
@@ -251,7 +251,7 @@ function drawPanel() {
   const ctx = cv.getContext('2d');
   const back = S.lcdLive ? (S.lcdColor || [90, 90, 90]) : null;
   // The panel is negative: the field stays dark and only the pixels that are on
-  // light up in the backlight colour, so the text glows out of black.
+  // light up in the backlight color, so the text glows out of black.
   ctx.fillStyle = back ? shade(back, 0.05) : '#080a0c';
   ctx.fillRect(0, 0, cv.width, cv.height);
   // it sits behind glass, so even a lit pixel is well short of full brightness
@@ -438,7 +438,7 @@ for (const ev of ['pointerdown', 'keydown', 'focus'])
   }, true);
 
 // Stars and Reactive have no preview frame the keyboard understands (Unleash
-// shows neither live), so the keyboard gets each key's colour from the same
+// shows neither live), so the keyboard gets each key's color from the same
 // animation that draws the keyboard on screen, about 14 times a second.
 const STREAMED = ['stars', 'trigger'];
 function streamedColors() {
@@ -513,7 +513,7 @@ async function refresh() {
     S.dev = await api('/api/state');
   } catch (e) {
     const boot = $('#boot');
-    // switched off in Ectodeck's Settings: not a fault, so no warning colour
+    // switched off in Ectodeck's Settings: not a fault, so no warning color
     if (/not to control/.test(e.message)) {
       $('#devline').textContent = 'Not controlled by Ectodeck';
       $('#conn').classList.replace('wait', 'free');
@@ -688,7 +688,7 @@ function posForEvent(e) {
 // unlit keys, the glass), which WebKit draws once. Each piece that takes a
 // key's light (the light it throws on the deck, the light on its cap, the glow
 // round its legend, and the legend itself) is a shape cut from its piece, filled
-// with the key's colour and faded by its light (--c and --a on the key), so the
+// with the key's color and faded by its light (--c and --a on the key), so the
 // lighting loop costs what it always has.
 const SVGNS = 'http://www.w3.org/2000/svg', INKNS = 'http://www.inkscape.org/namespaces/inkscape';
 const ART = { ready: false };
@@ -857,7 +857,7 @@ function zoneSet(zone) {
 
 // ---------------------------------------------------------------- preview
 const mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
-function ramp(colors, u) { // u in [0,1) around a loop of colours
+function ramp(colors, u) { // u in [0,1) around a loop of colors
   const n = colors.length, x = ((u % 1) + 1) % 1 * n, i = Math.floor(x);
   return mix(colors[i], colors[(i + 1) % n], x - i);
 }
@@ -902,11 +902,11 @@ function effectColors(L, t) {
   return out;
 }
 
-// The Z10's LEDs do not show a pure colour: sent FF0000, a key looks like
+// The Z10's LEDs do not show a pure color: sent FF0000, a key looks like
 // FF6000 (orange); sent 0000FF, like 0060FF; sent 00FF00, like 00FF60. The
-// keyboard on screen shows a colour as the keys do, so each channel spills
+// keyboard on screen shows a color as the keys do, so each channel spills
 // into another in proportion: red and blue into green, and green into blue,
-// 0x60 of each at full. The colours chosen and sent are left as
+// 0x60 of each at full. The colors chosen and sent are left as
 // they are. The screen's backlight leans the same way.
 const LED_SPILL = { redToGreen: 0x60 / 0xff, blueToGreen: 0x60 / 0xff, greenToBlue: 0x60 / 0xff };
 const ledLook = ([r, g, b]) => [
@@ -1016,8 +1016,8 @@ function renderAll() {
   renderProfiles(); renderBoardLabels(); renderView(); renderActions();
 }
 
-// A small colour sample for a profile button. Every mode is handled, including
-// per key, which has no stored colour list of its own.
+// A small color sample for a profile button. Every mode is handled, including
+// per key, which has no stored color list of its own.
 function profileSwatch(n, L) {
   if (L.mode === 'off') return '#000';
   if (L.mode === 'static') return hex(L.static.color);
@@ -1125,14 +1125,14 @@ function renderLighting() {
   const e = L[L.mode], fx = EFFECTS.find(x => x.mode === L.mode);
   const look = [], when = [];
 
-  // colours
+  // colors
   const swatches = list => el('div', { class: 'swatches' }, list.map(c => colorInput(c.color, v => change(() => { c.color = v; }))));
-  if (L.mode === 'static') look.push(lrow('Colour', colorInput(e.color, c => change(() => { e.color = c; }))));
-  if (L.mode === 'breathing') look.push(lrow('Colours', swatches(e.colors), 'Breathes in the first colour, then the second.'));
-  if (['pulse', 'wave', 'trigger', 'spiral'].includes(L.mode)) look.push(lrow('Colours', swatches(e.colors.slice(0, 7)),
-    L.mode === 'trigger' ? 'Each key press takes the next colour.' : 'Runs through these colours in order.'));
+  if (L.mode === 'static') look.push(lrow('Color', colorInput(e.color, c => change(() => { e.color = c; }))));
+  if (L.mode === 'breathing') look.push(lrow('Colors', swatches(e.colors), 'Breathes in the first color, then the second.'));
+  if (['pulse', 'wave', 'trigger', 'spiral'].includes(L.mode)) look.push(lrow('Colors', swatches(e.colors.slice(0, 7)),
+    L.mode === 'trigger' ? 'Each key press takes the next color.' : 'Runs through these colors in order.'));
   if ('random' in e && L.mode !== 'trigger') look.push(lrow('Order', el('label', { class: 'check' },
-    el('input', { type: 'checkbox', checked: !!e.random, onchange: ev => change(() => { e.random = ev.target.checked ? 1 : 0; }) }), 'Random colours')));
+    el('input', { type: 'checkbox', checked: !!e.random, onchange: ev => change(() => { e.random = ev.target.checked ? 1 : 0; }) }), 'Random colors')));
   if (L.mode === 'pulse') look.push(lrow('Between pulses', colorInput(e.background.color, v => change(() => { e.background.color = v; }))));
 
   // brightness
@@ -1157,7 +1157,7 @@ function renderLighting() {
   when.push(lrow('Starts', seg([[0, 'With the profile'], [1, 'On a key press']], e.start, v => change(() => { e.start = v; }, true))));
   when.push(lrow('Stops', seg([[0, 'Never'], [1, 'On key press'], [2, 'On key release']], e.stop, v => change(() => { e.stop = v; }, true))));
 
-  box.append(el('div', { class: 'lpanel' }, lcol(fx.speed ? 'Colour and motion' : 'Colour', ...look), lcol('Where and when', ...when),
+  box.append(el('div', { class: 'lpanel' }, lcol(fx.speed ? 'Color and motion' : 'Color', ...look), lcol('Where and when', ...when),
     el('div', { class: 'lfoot' }, el('button', { class: 'tb', onclick: () => change(d => { d.lighting[L.mode] = clone(saved(254).lighting[L.mode]); }, true) }, `Reset ${fx.name.toLowerCase()} to factory settings`))));
 }
 
@@ -1166,7 +1166,7 @@ function renderCustom(box) {
   const act = (label, fn) => el('button', { class: 'ghost', onclick: () => { fn(); saveCustom(); startPreview(); renderView(); } }, label);
   box.append(el('div', { class: 'lpanel' },
     lcol('Painting',
-      lrow('Colour', el('div', { class: 'row' }, colorInput(unhex(S.paint), c => { S.paint = hex(c); }),
+      lrow('Color', el('div', { class: 'row' }, colorInput(unhex(S.paint), c => { S.paint = hex(c); }),
         el('span', { class: 'note' }, 'Click keys on the keyboard to paint them.'))),
       lrow('Every key', el('div', { class: 'row' },
         act('Fill', () => { const c = unhex(S.paint); for (const k of S.layout) if (k.led) cols[k.pos] = [...c]; }),
@@ -1174,7 +1174,7 @@ function renderCustom(box) {
         act('Clear', () => { for (const k of S.layout) cols[k.pos] = [0, 0, 0]; })))),
     lcol('How it shows',
       el('p', { class: 'note' }, 'The spacebar, the mode button and the media keys have no light, so they stay dark.'),
-      el('p', { class: 'note' }, 'The keyboard can’t store colours per key, so they show only while Ectodeck is open. The profile saves with its backlight off.'))));
+      el('p', { class: 'note' }, 'The keyboard can’t store colors per key, so they show only while Ectodeck is open. The profile saves with its backlight off.'))));
 }
 
 function effectIcon(mode) {
@@ -1191,18 +1191,18 @@ function field(label, ...kids) {
   const note = typeof kids[kids.length - 1] === 'string' ? kids.pop() : null;
   return el('div', { class: 'field' }, label ? el('span', { class: 'lab' }, label) : null, ...kids, note ? el('span', { class: 'note' }, note) : null);
 }
-// A colour swatch that opens Ectodeck's colour picker.
+// A color swatch that opens Ectodeck's color picker.
 function colorInput(c, on) {
-  const sw = el('button', { type: 'button', class: 'swatch-in', 'aria-label': `Colour ${hex(c)}`, 'aria-haspopup': 'dialog', style: `background:${hex(c)}`,
-    onclick: e => colorPicker(e.currentTarget, c, v => { sw.style.background = hex(v); sw.setAttribute('aria-label', `Colour ${hex(v)}`); on(v); }) });
+  const sw = el('button', { type: 'button', class: 'swatch-in', 'aria-label': `Color ${hex(c)}`, 'aria-haspopup': 'dialog', style: `background:${hex(c)}`,
+    onclick: e => colorPicker(e.currentTarget, c, v => { sw.style.background = hex(v); sw.setAttribute('aria-label', `Color ${hex(v)}`); on(v); }) });
   return sw;
 }
 
-// ---------------------------------------------------------------- colour picker
-// The picker every colour opens, laid out as design tools lay theirs: a square
+// ---------------------------------------------------------------- color picker
+// The picker every color opens, laid out as design tools lay theirs: a square
 // of saturation across and brightness down for the chosen hue, the hue below
-// it, the colour as a hex code, as red, green and blue from 0 to 255, and as
-// hue, saturation and brightness, then preset colours and the ones used
+// it, the color as a hex code, as red, green and blue from 0 to 255, and as
+// hue, saturation and brightness, then preset colors and the ones used
 // lately. The keyboard follows as it changes.
 const rgb2hsv = ([r, g, b]) => {
   r /= 255; g /= 255; b /= 255;
@@ -1216,10 +1216,11 @@ const hsv2rgb = ([h, s, v]) => {
   return [f(5), f(3), f(1)];
 };
 const PRESETS = [[255, 255, 255], [255, 0, 0], [255, 96, 0], [255, 200, 0], [0, 255, 0], [0, 255, 200], [0, 120, 255], [120, 0, 255], [255, 0, 180]];
-const recentColors = () => { try { return JSON.parse(localStorage.getItem('ectodeck:recent-colours') || '[]'); } catch (e) { return []; } };
+// (kept under the British spelling before 2026-10-14: read there until set again)
+const recentColors = () => { try { return JSON.parse(localStorage.getItem('ectodeck:recent-colors') || localStorage.getItem('ectodeck:recent-colours') || '[]'); } catch (e) { return []; } };
 function keepRecent(c) {
   const list = [c, ...recentColors().filter(r => hex(r) !== hex(c))].slice(0, 9);
-  try { localStorage.setItem('ectodeck:recent-colours', JSON.stringify(list)); } catch (e) { /* not fatal */ }
+  try { localStorage.setItem('ectodeck:recent-colors', JSON.stringify(list)); } catch (e) { /* not fatal */ }
 }
 
 function colorPicker(anchor, start, on) {
@@ -1242,7 +1243,7 @@ function colorPicker(anchor, start, on) {
       recent.length ? el('div', { class: 'pk-lab' }, 'Recent') : null,
       recent.length ? el('div', { class: 'pk-wells' }, recent.map(c => well(c, 'Recent'))) : null);
 
-    // show the colour everywhere but the field being typed in
+    // show the color everywhere but the field being typed in
     const show = skip => {
       const [h, s, v] = hsv;
       sv.style.background = `linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, hsl(${h} 100% 50%))`;
@@ -1255,7 +1256,7 @@ function colorPicker(anchor, start, on) {
       if (skip !== sIn) sIn.value = Math.round(s * 100);
       if (skip !== vIn) vIn.value = Math.round(v * 100);
     };
-    // the keyboard is sent the colour at most once a frame while dragging
+    // the keyboard is sent the color at most once a frame while dragging
     const set = (nhsv, nrgb, skip) => {
       hsv = nhsv; rgb = nrgb || hsv2rgb(hsv); show(skip);
       if (!wait) wait = requestAnimationFrame(() => { wait = 0; on([...rgb]); });
@@ -1287,7 +1288,7 @@ function colorPicker(anchor, start, on) {
       f.addEventListener('blur', () => { show(); });
     }
     show();
-  // the colour the picker is closed on joins the recent ones
+  // the color the picker is closed on joins the recent ones
   }, { width: 264, onDismiss: () => { if (hex(rgb) !== hex(start)) keepRecent(rgb); } });
 }
 function rangeField(label, min, max, val, fmt, on) {
@@ -1643,7 +1644,7 @@ function renderDisplay() {
     lcol('Profile',
       lrow('Name', el('input', { class: 'namefield', type: 'text', maxlength: 60, value: draft().name ?? saved(S.editing).name, 'aria-label': 'Profile name',
         oninput: e => change(d => { d.name = e.target.value; }) }), 'Stored on the keyboard with this profile.'),
-      lrow('Screen colour', colorInput(lc.color, v => change(() => { lc.color = v; }, true))),
+      lrow('Screen color', colorInput(lc.color, v => change(() => { lc.color = v; }, true))),
       lslider('Brightness', 0, 255, lc.brightness, v => `${Math.round(v / 2.55)}%`, v => change(() => { lc.brightness = v; }))),
     lcol('Built-in screens',
       checks(LCD_APPS, bit => !!(L.lcd.apps & bit), (bit, on) => change(() => { L.lcd.apps = on ? L.lcd.apps | bit : L.lcd.apps & ~bit; })),
