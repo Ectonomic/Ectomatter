@@ -331,8 +331,8 @@ pub fn source_menu(current: Shows, bars: bool, date: DateFormat, avail: &[Source
             rows.push((1, group.to_string(), String::new(), false, None));
         }
         let (name, p) = match s {
-            Shows::Time => ("Time".to_string(), Piece { kind: Kind::Clock(false), row: 0, col: 0, width: 5, right: false, center: false, gap: 0, height: 1, scroll: true, date_format: Default::default() }),
-            Shows::Reading(src) => (src.name().to_string(), Piece { kind: if bars { Kind::Bar(src) } else { Kind::Data(src, false) }, row: 0, col: 0, width: if bars { 10 } else { 1 }, right: false, center: false, gap: 0, height: 1, scroll: true, date_format: date }),
+            Shows::Time => ("Time".to_string(), Piece { kind: Kind::Clock(true), row: 0, col: 0, width: 8, right: false, center: false, gap: 0, height: 1, scroll: true, date_format: Default::default() }),
+            Shows::Reading(src) => (src.name().to_string(), Piece { kind: if bars { Kind::Bar(src) } else { Kind::Data(src, src.starts_in_fahrenheit()) }, row: 0, col: 0, width: if bars { 10 } else { 1 }, right: false, center: false, gap: 0, height: 1, scroll: true, date_format: date }),
         };
         rows.push((0, name, looks(&p, r), s == current, Some(s)));
     }
@@ -401,14 +401,19 @@ pub fn set_fx(page: &mut Page, ed: &Editor, to: crate::lcd_page::Fx) {
 }
 
 /// What the chosen piece shows, chosen from the menu: a Data block can turn
-/// into the time and back.
+/// into the time (on a 12-hour clock) and back. A temperature keeps the unit chosen for it
+/// when it turns into another of its kind (the CPU's into the GPU's); any other reading
+/// starts in its own (see [Source::starts_in_fahrenheit]).
 pub fn set_shows(page: &mut Page, ed: &Editor, s: Shows) {
     let Some(p) = ed.chosen.and_then(|i| page.pieces.get_mut(i)) else { return };
     p.kind = match (&p.kind, s) {
         (Kind::Bar(_), Shows::Reading(src)) => Kind::Bar(src),
-        (Kind::Data(_, f), Shows::Reading(src)) => Kind::Data(src, *f && src.is_temperature()),
-        (Kind::Clock(_), Shows::Reading(src)) => Kind::Data(src, false),
-        (Kind::Data(..), Shows::Time) => Kind::Clock(false),
+        (Kind::Data(was, f), Shows::Reading(src)) => {
+            let alike = was.is_temperature() && src.is_temperature() && was.starts_in_fahrenheit() == src.starts_in_fahrenheit();
+            Kind::Data(src, if alike { *f } else { src.starts_in_fahrenheit() })
+        }
+        (Kind::Clock(_), Shows::Reading(src)) => Kind::Data(src, src.starts_in_fahrenheit()),
+        (Kind::Data(..), Shows::Time) => Kind::Clock(true),
         (k, _) => k.clone(),
     };
 }
@@ -505,7 +510,7 @@ pub fn add(page: &mut Page, ed: &mut Editor, what: usize, first: Source, r: &Rea
 pub fn new_block(what: usize, first: Source) -> (Kind, u8, bool) {
     match what {
         0 => (Kind::Text("TEXT".into()), 4, false),
-        1 => (Kind::Data(first, false), 7, true),
+        1 => (Kind::Data(first, first.starts_in_fahrenheit()), 7, true),
         2 => (Kind::Bar(if first.barred() { first } else { Source::CpuLoad }), 10, false),
         _ => (Kind::Effect { fx: crate::lcd_page::Fx::Rain, speed: SPEED, word: "EVGA".into() }, COLS, false),
     }
@@ -734,13 +739,22 @@ mod tests {
         assert_eq!(p.pieces[1].kind, Kind::Data(Source::CpuTemp, true));
         act(&mut p, &mut ed, Ctl::ScrAlign, 1, None);
         assert!(p.pieces[1].center && !p.pieces[1].right);
+        // a temperature keeps its unit as another of its kind; the weather starts in °F, and
+        // a reading that isn't a temperature drops it
+        set_shows(&mut p, &ed, Shows::Reading(Source::GpuTemp));
+        assert_eq!(p.pieces[1].kind, Kind::Data(Source::GpuTemp, true));
+        act(&mut p, &mut ed, Ctl::ScrUnits, 0, None);
+        set_shows(&mut p, &ed, Shows::Reading(Source::OutsideTemp));
+        assert_eq!(p.pieces[1].kind, Kind::Data(Source::OutsideTemp, true), "the weather in °F");
+        set_shows(&mut p, &ed, Shows::Reading(Source::CpuTemp));
+        assert_eq!(p.pieces[1].kind, Kind::Data(Source::CpuTemp, false), "the CPU in °C");
         set_shows(&mut p, &ed, Shows::Reading(Source::GpuLoad));
         assert_eq!(p.pieces[1].kind, Kind::Data(Source::GpuLoad, false), "°F goes with a reading that isn't a temperature");
-        // a Data block turns into the time, and back
+        // a Data block turns into the time, on a 12-hour clock, and back
         set_shows(&mut p, &ed, Shows::Time);
-        assert_eq!(p.pieces[1].kind, Kind::Clock(false));
-        act(&mut p, &mut ed, Ctl::ScrHours, 1, None);
         assert_eq!(p.pieces[1].kind, Kind::Clock(true));
+        act(&mut p, &mut ed, Ctl::ScrHours, 0, None);
+        assert_eq!(p.pieces[1].kind, Kind::Clock(false), "24-hour");
         set_shows(&mut p, &ed, Shows::Reading(Source::Date));
         assert_eq!(p.pieces[1].kind, Kind::Data(Source::Date, false));
         // moved into free cells; onto another block, it stays

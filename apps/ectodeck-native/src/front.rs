@@ -4883,14 +4883,14 @@ mod tests {
         assert_eq!(rows.len(), 3 + crate::lcd_page::BUILT_INS.len());
         assert!(!labels(&rows).contains(&(1, "Add a ready-made layout".to_string())));
         assert_eq!(made[3], Some(NewFrom::Copy("stats".into())));
-        // Rain and Highway deleted: both offered back under their own heading, as named
-        for id in ["rain", "highway"] {
+        // Rain and Music deleted: both offered back under their own heading, as named
+        for id in ["rain", "music"] {
             s.delete_page(s.index_of(id).unwrap());
         }
         let (rows, made) = new_rows(&s.library);
         let n = rows.len();
-        assert_eq!(labels(&rows)[n - 4..], [(2, String::new()), (1, "Add a ready-made layout".to_string()), (0, "Rain".to_string()), (0, "Highway".to_string())]);
-        assert_eq!(made[n - 4..], [None, None, Some(NewFrom::Ready("rain".into())), Some(NewFrom::Ready("highway".into()))]);
+        assert_eq!(labels(&rows)[n - 4..], [(2, String::new()), (1, "Add a ready-made layout".to_string()), (0, "Rain".to_string()), (0, "Music".to_string())]);
+        assert_eq!(made[n - 4..], [None, None, Some(NewFrom::Ready("rain".into())), Some(NewFrom::Ready("music".into()))]);
     }
 
     #[test]

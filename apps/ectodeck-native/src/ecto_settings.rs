@@ -206,7 +206,7 @@ pub fn page(s: &State) -> (Vec<Cell>, f32) {
                         "ms" => format!("{} m/s", (k / 3.6).round()),
                         _ => format!("{} km/h", k.round()),
                     };
-                    let clock = |secs: f32| format!("{:02}:{:02}", (secs / 3600.0).floor() as i32, ((secs % 3600.0) / 60.0).floor() as i32);
+                    let clock = |secs: f32| crate::lcd_page::twelve_hour((secs / 3600.0).floor().clamp(0.0, 23.0) as u32, ((secs % 3600.0) / 60.0).floor() as u32);
                     let facts = [("Cloud", format!("{}%", (r.cloud * 100.0).round())), ("Wind", wind(r.wind_speed)), ("Sunrise", clock(r.sunrise)), ("Sunset", clock(r.sunset))];
                     // two to a line, the first column as wide as its widest
                     let col0 = facts.iter().step_by(2).map(|(k, v)| text::width(400, 13.0, &format!("{k} ")) + text::width(500, 13.0, v)).fold(0.0f32, f32::max);

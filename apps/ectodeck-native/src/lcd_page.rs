@@ -165,6 +165,13 @@ impl Source {
         matches!(self, Source::CpuTemp | Source::GpuTemp | Source::OutsideTemp)
     }
 
+    /// Whether a new block of this reading shows it in °F: the weather, as Americans read
+    /// it; the computer's temperatures stay in °C, as their makers and every reading of them
+    /// give them.
+    pub fn starts_in_fahrenheit(self) -> bool {
+        self == Source::OutsideTemp
+    }
+
     /// Whether a bar can show it: a share of something.
     pub fn barred(self) -> bool {
         matches!(self, Source::CpuTemp | Source::CpuLoad | Source::GpuTemp | Source::GpuLoad | Source::Memory | Source::VideoMemory)
@@ -409,25 +416,12 @@ fn behind(row: u8, height: u8, fx: Fx, speed: u8) -> Piece {
     Piece { height, ..block(row, 0, COLS, Kind::Effect { fx, speed, word: "EVGA".into() }) }
 }
 
-/// One part of the computer, the CPU or the GPU, a reading to a row: its temperature, its
-/// load with a bar under it, and its clock.
-fn part(name: &str, temp: Source, load: Source, clock: Source) -> Vec<Piece> {
-    vec![
-        words(0, 0, name),
-        reading(0, 15, 5, temp, 1),
-        words(1, 0, "Load"),
-        reading(1, 14, 6, load, 1),
-        block(2, 0, COLS, Kind::Bar(load)),
-        words(3, 0, "Clock"),
-        reading(3, 11, 9, clock, 1),
-    ]
-}
-
 /// The layouts Ectodeck ships, by key, in the order a new Library has them: the three
 /// Playlist 1 plays, the time with the weather, the computer's readings, the keyboard's
-/// profile, then the effects to look at.
-pub const BUILT_INS: [&str; 17] =
-    ["stats", "clock", "weather", "today", "cpu", "gpu", "memory", "gaming", "heartbeat", "profile", "rain", "starfield", "campfire", "aquarium", "music", "arcade", "highway"];
+/// profile, then the effects to look at. Each is set as Americans read them: the time on a
+/// 12-hour clock and the weather in °F (the computer's temperatures stay in °C, as their
+/// makers and every reading of them give them).
+pub const BUILT_INS: [&str; 12] = ["stats", "clock", "weather", "today", "gaming", "heartbeat", "profile", "rain", "starfield", "campfire", "aquarium", "music"];
 
 /// What a layout Ectodeck ships shows, for its card while it is as it shipped: in two lines
 /// of a card's words at the window's first size (1440 wide), each line kept short to fit.
@@ -437,9 +431,6 @@ fn shipped_line(key: &str) -> Option<&'static str> {
         "clock" => "The time and the date.",
         "weather" => "The temperature and the sky outside.",
         "today" => "The date, the time and the weather outside.",
-        "cpu" => "CPU temperature, load and clock, every second.",
-        "gpu" => "GPU temperature, load and clock, every second.",
-        "memory" => "RAM and VRAM in use, each with a bar.",
         "gaming" => "GPU and CPU temperature and load, VRAM, the time.",
         "heartbeat" => "A heartbeat that races as the CPU works harder.",
         "profile" => "The profile in use, by name and number.",
@@ -448,8 +439,6 @@ fn shipped_line(key: &str) -> Option<&'static str> {
         "campfire" => "Flames flickering up the screen.",
         "aquarium" => "Fish swimming by, with bubbles rising.",
         "music" => "Bars that rise and fall with the computer’s sound.",
-        "arcade" => "Space Invaders, playing itself.",
-        "highway" => "A car weaving through two lanes of traffic.",
         _ => return None,
     })
 }
@@ -497,7 +486,7 @@ impl Page {
             secs: SECS.2,
             stays: false,
             comes_in: Transition::Wipe,
-            pieces: vec![middle(1, Kind::Clock(false)), middle(2, Kind::Data(Source::Date, false))],
+            pieces: vec![middle(1, Kind::Clock(true)), middle(2, Kind::Data(Source::Date, false))],
         }
     }
 
@@ -511,7 +500,7 @@ impl Page {
             secs: SECS.2,
             stays: false,
             comes_in: Transition::Wipe,
-            pieces: vec![middle(1, Kind::Data(Source::OutsideTemp, false)), middle(2, Kind::Data(Source::Sky, false))],
+            pieces: vec![middle(1, Kind::Data(Source::OutsideTemp, true)), middle(2, Kind::Data(Source::Sky, false))],
         }
     }
 
@@ -525,22 +514,9 @@ impl Page {
                 "Today",
                 vec![
                     Piece { date_format: DateFormat::Long, ..middle(0, Kind::Data(Source::Date, false)) },
-                    middle(1, Kind::Clock(false)),
-                    block(3, 0, 4, Kind::Data(Source::OutsideTemp, false)),
+                    middle(1, Kind::Clock(true)),
+                    block(3, 0, 4, Kind::Data(Source::OutsideTemp, true)),
                     reading(3, 8, 12, Source::Sky, 1),
-                ],
-            ),
-            "cpu" => ("CPU", part("CPU", Source::CpuTemp, Source::CpuLoad, Source::CpuClock)),
-            "gpu" => ("GPU", part("GPU", Source::GpuTemp, Source::GpuLoad, Source::GpuClock)),
-            "memory" => (
-                "Memory",
-                vec![
-                    words(0, 0, "RAM"),
-                    reading(0, 4, 16, Source::Memory, 1),
-                    block(1, 0, COLS, Kind::Bar(Source::Memory)),
-                    words(2, 0, "VRAM"),
-                    reading(2, 5, 15, Source::VideoMemory, 1),
-                    block(3, 0, COLS, Kind::Bar(Source::VideoMemory)),
                 ],
             ),
             "gaming" => (
@@ -554,7 +530,8 @@ impl Page {
                     block(1, 8, 12, Kind::Bar(Source::CpuLoad)),
                     words(2, 0, "VRAM"),
                     reading(2, 5, 15, Source::VideoMemory, 1),
-                    block(3, 0, 5, Kind::Clock(false)),
+                    // (as wide as 12:59 PM)
+                    block(3, 0, 8, Kind::Clock(true)),
                     reading(3, 10, 10, Source::Date, 1),
                 ],
             ),
@@ -569,8 +546,6 @@ impl Page {
             "campfire" => ("Campfire", vec![behind(0, ROWS, Fx::Fire, 100)]),
             "aquarium" => ("Aquarium", vec![behind(0, ROWS, Fx::Aquarium, 40)]),
             "music" => ("Music", vec![behind(0, ROWS, Fx::Spectrum, 100)]),
-            "arcade" => ("Arcade", vec![behind(0, ROWS, Fx::Invaders, 50)]),
-            "highway" => ("Highway", vec![behind(0, ROWS, Fx::Highway, 50)]),
             _ => return None,
         };
         Some(Page { id: key.into(), name: name.into(), pieces, ..Page::blank() })
@@ -1337,14 +1312,15 @@ fn show(p: &Piece, r: &Readings) -> Result<String, &'static str> {
         Kind::Effect { .. } => Ok(String::new()),
         Kind::Clock(twelve) => {
             let m = r.now.ok_or("")?;
-            Ok(if *twelve {
-                let h = if m.hour % 12 == 0 { 12 } else { m.hour % 12 };
-                format!("{h}:{:02} {}", m.minute, if m.hour < 12 { "AM" } else { "PM" })
-            } else {
-                format!("{:02}:{:02}", m.hour, m.minute)
-            })
+            Ok(if *twelve { twelve_hour(m.hour, m.minute) } else { format!("{:02}:{:02}", m.hour, m.minute) })
         }
     }
+}
+
+/// A time of day on a 12-hour clock, as Americans write it: 9:05 PM, 12:30 AM.
+pub fn twelve_hour(hour: u32, minute: u32) -> String {
+    let h = if hour % 12 == 0 { 12 } else { hour % 12 };
+    format!("{h}:{minute:02} {}", if hour < 12 { "AM" } else { "PM" })
 }
 
 /// The page's four rows, with these readings, as the page comes in (words that scroll
@@ -2140,9 +2116,10 @@ mod tests {
     #[test]
     fn the_clock_and_the_weather_sit_in_the_middle() {
         let mut r = readings();
-        assert_eq!(render(&Page::clock(), &r), vec!["", "       21:05", "     Fri Oct 9", ""]);
+        // (as Americans read them: a 12-hour clock, the weather in °F)
+        assert_eq!(render(&Page::clock(), &r), vec!["", "      9:05 PM", "     Fri Oct 9", ""]);
         r.outside = Some((21.6, "Partly cloudy".into()));
-        assert_eq!(render(&Page::weather(), &r), vec!["", "        22°", "   Partly cloudy", ""]);
+        assert_eq!(render(&Page::weather(), &r), vec!["", "        71°", "   Partly cloudy", ""]);
         // with no weather to show, the screen says so plainly
         r.outside = None;
         assert_eq!(render(&Page::weather(), &r), vec!["", "Weather unavailable", "", ""]);
@@ -2310,12 +2287,16 @@ mod tests {
     fn the_readings_layouts_read_as_designed() {
         let r = readings();
         let rows = |key: &str| render(&Page::built_in(key).unwrap(), &r);
-        assert_eq!(rows("cpu"), ["CPU              64°", "Load             15%", "[###...............]", "Clock        4369MHz"]);
-        assert_eq!(rows("gpu"), ["GPU              45°", "Load             12%", "[##................]", "Clock        1837MHz"]);
-        assert_eq!(rows("memory"), ["RAM   25.1 / 60.2 GB", "[########..........]", "VRAM  13.1 / 31.8 GB", "[#######...........]"]);
-        assert_eq!(rows("gaming"), ["GPU 45° [#.........]", "CPU 64° [##........]", "VRAM  13.1 / 31.8 GB", "21:05      Fri Oct 9"]);
+        assert_eq!(rows("gaming"), ["GPU 45° [#.........]", "CPU 64° [##........]", "VRAM  13.1 / 31.8 GB", "9:05 PM    Fri Oct 9"]);
         // (no place for the weather yet: the row says so)
-        assert_eq!(rows("today"), [" Friday, October 9", "       21:05", "", "Weather unavailable"]);
+        assert_eq!(rows("today"), [" Friday, October 9", "      9:05 PM", "", "Weather unavailable"]);
+        // and with one, in °F, the time on a 12-hour clock
+        let mut out = r.clone();
+        out.outside = Some((19.0, "Clear".into()));
+        let rows = |key: &str| render(&Page::built_in(key).unwrap(), &out);
+        assert_eq!(rows("today")[3], "66°            Clear");
+        assert_eq!(rows("weather")[1..3], ["        66°", "       Clear"]);
+        assert_eq!(rows("clock")[1], "      9:05 PM");
         assert_eq!(rows("profile"), ["", "     DEFAULT 1", "     Profile 1", ""]);
         // the heartbeat between the CPU's readings
         let beat = rows("heartbeat");
@@ -2325,16 +2306,12 @@ mod tests {
     #[test]
     fn a_card_pictures_an_effect_at_the_moment_its_tile_does() {
         let r = readings();
-        for key in ["rain", "starfield", "campfire", "aquarium", "music", "arcade", "highway"] {
+        for key in ["rain", "starfield", "campfire", "aquarium", "music"] {
             let p = Page::built_in(key).unwrap();
             let Kind::Effect { fx, .. } = p.pieces[0].kind else { panic!("{key} is an effect") };
             let tile: Vec<String> = crate::lcd_fx::frame(fx, crate::lcd_fx::still(fx), "EVGA", &crate::lcd_fx::Live::sample()).iter().map(|row| row.iter().collect::<String>().trim_end().to_string()).collect();
             assert_eq!(render_still(&p, &r), tile, "{key}");
         }
-        // Highway: traffic on the road, not the empty road it starts on
-        let hw = Page::built_in("highway").unwrap();
-        let ink = |rows: &[String]| rows.iter().map(|row| row.chars().filter(|c| !c.is_whitespace()).count()).sum::<usize>();
-        assert!(ink(&render_still(&hw, &r)) > ink(&render(&hw, &r)));
         // and words as the page comes in
         assert_eq!(render_still(&Page::stats(), &r), render(&Page::stats(), &r));
     }
@@ -2355,7 +2332,7 @@ mod tests {
         let mine = Page { id: "custom".into(), name: "Raid night".into(), pieces: vec![words(1, 0, "RAID AT 9")], ..Page::blank() };
         let kept = json!([Page::stats().to_json(), mine.to_json(), Page::clock().to_json()]);
         let mut old = Screens::of(Some(&kept), None, None, None);
-        assert_eq!(old.give_built_ins(None), 15);
+        assert_eq!(old.give_built_ins(None), BUILT_INS.len() - 2);
         let ids: Vec<&str> = old.library.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids[..3], ["stats", "custom", "clock"]);
         assert_eq!(ids[3..], BUILT_INS.iter().copied().filter(|k| !["stats", "clock"].contains(k)).collect::<Vec<_>>());
@@ -2367,9 +2344,9 @@ mod tests {
         assert_eq!(missing_built_ins(&old.library), ["weather", "rain"]);
         // and a layout Ectodeck ships later is given once too
         let mut later = Screens::of(Some(&kept), None, None, None);
-        let had: Vec<&str> = BUILT_INS.iter().copied().filter(|k| *k != "highway").collect();
+        let had: Vec<&str> = BUILT_INS.iter().copied().filter(|k| *k != "music").collect();
         assert_eq!(later.give_built_ins(Some(&json!(had))), 1);
-        assert_eq!(later.library.last().map(|p| p.id.as_str()), Some("highway"));
+        assert_eq!(later.library.last().map(|p| p.id.as_str()), Some("music"));
         // a deleted one put back as it shipped, at the Library's end
         let at = old.add_built_in("rain").unwrap();
         assert_eq!((at, &old.library[at]), (old.library.len() - 1, &Page::built_in("rain").unwrap()));
