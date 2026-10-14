@@ -62,7 +62,8 @@ pub enum Ask {
 }
 
 /// The menu open: the layout's (Duplicate, Delete), what a block shows, how a date block
-/// writes the date, or + New's (From scratch, or a copy of a layout: what each row makes).
+/// writes the date, or + New's (From scratch, a copy of a layout, or a ready-made one put
+/// back: what each row makes).
 enum Menu {
     More,
     Shows(Vec<Option<Shows>>),
@@ -454,6 +455,7 @@ impl LayoutPage {
                             let at = match made.get(i).cloned().flatten() {
                                 Some(NewFrom::Scratch) => Some(cx.screens.new_page()),
                                 Some(NewFrom::Copy(id)) => cx.screens.index_of(&id).and_then(|k| cx.screens.duplicate_page(k)),
+                                Some(NewFrom::Ready(key)) => cx.screens.add_built_in(&key),
                                 None => None,
                             };
                             if let Some(at) = at {
@@ -600,7 +602,8 @@ impl LayoutPage {
         self.menu = Some(Menu::More);
     }
 
-    /// + New: From scratch, or a copy of a layout, its right edge at the button's (`bw` wide).
+    /// + New: From scratch, a copy of a layout, or a ready-made one put back, its right edge
+    /// at the button's (`bw` wide).
     fn open_new(&mut self, anchor: (f32, f32, f32), bw: f32, cx: &Cx) {
         if self.just_shut(anchor) {
             return;

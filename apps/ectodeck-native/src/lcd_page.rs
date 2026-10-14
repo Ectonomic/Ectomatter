@@ -398,6 +398,62 @@ fn middle(row: u8, kind: Kind) -> Piece {
     Piece { kind, row, col: 0, width: COLS, right: false, center: true, gap: 1, height: 1, scroll: true, date_format: DateFormat::Short }
 }
 
+/// A piece set at the left of its width, a row high.
+fn block(row: u8, col: u8, width: u8, kind: Kind) -> Piece {
+    Piece { kind, row, col, width, right: false, center: false, gap: 1, height: 1, scroll: true, date_format: DateFormat::Short }
+}
+
+/// An effect across whole rows, `height` of them from `row` down, at `speed`, with the word
+/// a new Effect block has.
+fn behind(row: u8, height: u8, fx: Fx, speed: u8) -> Piece {
+    Piece { height, ..block(row, 0, COLS, Kind::Effect { fx, speed, word: "EVGA".into() }) }
+}
+
+/// One part of the computer, the CPU or the GPU, a reading to a row: its temperature, its
+/// load with a bar under it, and its clock.
+fn part(name: &str, temp: Source, load: Source, clock: Source) -> Vec<Piece> {
+    vec![
+        words(0, 0, name),
+        reading(0, 15, 5, temp, 1),
+        words(1, 0, "Load"),
+        reading(1, 14, 6, load, 1),
+        block(2, 0, COLS, Kind::Bar(load)),
+        words(3, 0, "Clock"),
+        reading(3, 11, 9, clock, 1),
+    ]
+}
+
+/// The layouts Ectodeck ships, by key, in the order a new Library has them: the three
+/// Playlist 1 plays, the time with the weather, the computer's readings, the keyboard's
+/// profile, then the effects to look at.
+pub const BUILT_INS: [&str; 17] =
+    ["stats", "clock", "weather", "today", "cpu", "gpu", "memory", "gaming", "heartbeat", "profile", "rain", "starfield", "campfire", "aquarium", "music", "arcade", "highway"];
+
+/// What a layout Ectodeck ships shows, for its card while it is as it shipped: in two lines
+/// of a card's words at the window's first size (1440 wide), each line kept short to fit.
+fn shipped_line(key: &str) -> Option<&'static str> {
+    Some(match key {
+        "stats" => "CPU, GPU, RAM and VRAM, every second.",
+        "clock" => "The time and the date.",
+        "weather" => "The temperature and the sky outside.",
+        "today" => "The date, the time and the weather outside.",
+        "cpu" => "CPU temperature, load and clock, every second.",
+        "gpu" => "GPU temperature, load and clock, every second.",
+        "memory" => "RAM and VRAM in use, each with a bar.",
+        "gaming" => "GPU and CPU temperature and load, VRAM, the time.",
+        "heartbeat" => "A heartbeat that races as the CPU works harder.",
+        "profile" => "The profile in use, by name and number.",
+        "rain" => "Rain falling, splashing where it lands.",
+        "starfield" => "Stars streaming past, the nearest ones fastest.",
+        "campfire" => "Flames flickering up the screen.",
+        "aquarium" => "Fish swimming by, with bubbles rising.",
+        "music" => "Bars that rise and fall with the computer’s sound.",
+        "arcade" => "Space Invaders, playing itself.",
+        "highway" => "A car weaving through two lanes of traffic.",
+        _ => return None,
+    })
+}
+
 impl Page {
     /// The Stats page as Grant laid it out for the z10-lcd service.
     pub fn stats() -> Page {
@@ -459,16 +515,71 @@ impl Page {
         }
     }
 
-    /// A layout as Ectodeck ships it (stats, clock, weather, or blank), by its
-    /// key, with an id no layout in `taken` has (a second Clock is clock-2).
-    pub fn template(key: &str, taken: &[Page]) -> Option<Page> {
-        let mut p = match key {
-            "blank" => Page::blank(),
-            "stats" => Page::stats(),
-            "clock" => Page::clock(),
-            "weather" => Page::weather(),
+    /// A layout Ectodeck ships (see [BUILT_INS]), by its key, as it ships.
+    pub fn built_in(key: &str) -> Option<Page> {
+        let (name, pieces) = match key {
+            "stats" => return Some(Page::stats()),
+            "clock" => return Some(Page::clock()),
+            "weather" => return Some(Page::weather()),
+            "today" => (
+                "Today",
+                vec![
+                    Piece { date_format: DateFormat::Long, ..middle(0, Kind::Data(Source::Date, false)) },
+                    middle(1, Kind::Clock(false)),
+                    block(3, 0, 4, Kind::Data(Source::OutsideTemp, false)),
+                    reading(3, 8, 12, Source::Sky, 1),
+                ],
+            ),
+            "cpu" => ("CPU", part("CPU", Source::CpuTemp, Source::CpuLoad, Source::CpuClock)),
+            "gpu" => ("GPU", part("GPU", Source::GpuTemp, Source::GpuLoad, Source::GpuClock)),
+            "memory" => (
+                "Memory",
+                vec![
+                    words(0, 0, "RAM"),
+                    reading(0, 4, 16, Source::Memory, 1),
+                    block(1, 0, COLS, Kind::Bar(Source::Memory)),
+                    words(2, 0, "VRAM"),
+                    reading(2, 5, 15, Source::VideoMemory, 1),
+                    block(3, 0, COLS, Kind::Bar(Source::VideoMemory)),
+                ],
+            ),
+            "gaming" => (
+                "Gaming",
+                vec![
+                    words(0, 0, "GPU"),
+                    block(0, 4, 3, Kind::Data(Source::GpuTemp, false)),
+                    block(0, 8, 12, Kind::Bar(Source::GpuLoad)),
+                    words(1, 0, "CPU"),
+                    block(1, 4, 3, Kind::Data(Source::CpuTemp, false)),
+                    block(1, 8, 12, Kind::Bar(Source::CpuLoad)),
+                    words(2, 0, "VRAM"),
+                    reading(2, 5, 15, Source::VideoMemory, 1),
+                    block(3, 0, 5, Kind::Clock(false)),
+                    reading(3, 10, 10, Source::Date, 1),
+                ],
+            ),
+            "heartbeat" => (
+                "Heartbeat",
+                vec![words(0, 0, "CPU"), reading(0, 15, 5, Source::CpuTemp, 1), behind(1, 2, Fx::Heartbeat, 50), words(3, 0, "Load"), reading(3, 14, 6, Source::CpuLoad, 1)],
+            ),
+            "profile" => ("Profile", vec![middle(1, Kind::Data(Source::Profile, false)), words(2, 5, "Profile"), block(2, 13, 2, Kind::Data(Source::ProfileNumber, false))]),
+            // (the effects alone, across the whole screen)
+            "rain" => ("Rain", vec![behind(0, ROWS, Fx::Rain, 40)]),
+            "starfield" => ("Starfield", vec![behind(0, ROWS, Fx::Stars, 40)]),
+            "campfire" => ("Campfire", vec![behind(0, ROWS, Fx::Fire, 100)]),
+            "aquarium" => ("Aquarium", vec![behind(0, ROWS, Fx::Aquarium, 40)]),
+            "music" => ("Music", vec![behind(0, ROWS, Fx::Spectrum, 100)]),
+            "arcade" => ("Arcade", vec![behind(0, ROWS, Fx::Invaders, 50)]),
+            "highway" => ("Highway", vec![behind(0, ROWS, Fx::Highway, 50)]),
             _ => return None,
         };
+        Some(Page { id: key.into(), name: name.into(), pieces, ..Page::blank() })
+    }
+
+    /// A layout as Ectodeck ships it (one of [BUILT_INS], or blank), by its key, with an id
+    /// no layout in `taken` has (a second Clock is clock-2).
+    pub fn template(key: &str, taken: &[Page]) -> Option<Page> {
+        let mut p = if key == "blank" { Page::blank() } else { Page::built_in(key)? };
         let base = p.id.clone();
         let mut n = 1;
         while taken.iter().any(|q| q.id == p.id) {
@@ -489,13 +600,8 @@ impl Page {
     pub fn about(&self) -> String {
         let base = self.id.rsplit_once('-').filter(|(_, n)| n.parse::<u32>().is_ok()).map_or(self.id.as_str(), |(b, _)| b);
         let own = base == "custom";
-        if Page::template(base, &[]).is_some_and(|t| t.pieces == self.pieces) {
-            match base {
-                "stats" => return "CPU, GPU, RAM and VRAM, every second.".into(),
-                "clock" => return "The time and the date.".into(),
-                "weather" => return "The temperature and the sky outside.".into(),
-                _ => {}
-            }
+        if let Some(line) = shipped_line(base).filter(|_| Page::built_in(base).is_some_and(|t| t.pieces == self.pieces)) {
+            return line.into();
         }
         let said: Vec<&str> = self.pieces.iter().filter_map(|p| if let Kind::Text(t) = &p.kind { Some(t.trim()).filter(|t| !t.is_empty()) } else { None }).collect();
         let mut shown: Vec<String> = Vec::new();
@@ -647,13 +753,19 @@ impl Page {
     }
 }
 
-/// The pages kept in Ectodeck's settings, or Stats as it ships when none were
+/// The pages kept in Ectodeck's settings, or every layout Ectodeck ships when none were
 /// ever kept (a Library emptied by deleting its layouts stays empty).
 pub fn pages_of(v: Option<&Value>) -> Vec<Page> {
     match v.and_then(|v| v.as_array()) {
         Some(a) => a.iter().filter_map(Page::from_json).collect(),
-        None => vec![Page::stats()],
+        None => BUILT_INS.iter().filter_map(|k| Page::built_in(k)).collect(),
     }
+}
+
+/// The layouts Ectodeck ships that aren't in `library` (deleted), by key, in the order a
+/// new Library has them.
+pub fn missing_built_ins(library: &[Page]) -> Vec<&'static str> {
+    BUILT_INS.iter().copied().filter(|k| !library.iter().any(|p| p.id == *k)).collect()
 }
 
 /// One turn of the playlist: a screen of the Library, how long it shows,
@@ -755,6 +867,8 @@ impl Screens {
     /// its own time and way in; either becomes Playlist 1, played by every profile.
     /// (The first playlist was called Default until Grant found the word clashed with
     /// the default backlight beside it: one still so named takes Playlist 1's name.)
+    /// With nothing kept, the Library is new: every layout Ectodeck ships, and Playlist 1
+    /// playing Stats, Clock and Weather.
     pub fn of(pages: Option<&Value>, playlists: Option<&Value>, plays: Option<&Value>, playlist: Option<&Value>) -> Screens {
         let library = pages_of(pages);
         let turns_of = |v: Option<&Value>| -> Vec<Entry> {
@@ -775,7 +889,10 @@ impl Screens {
             .unwrap_or_default();
         if lists.is_empty() {
             let mut turns = turns_of(playlist);
-            if turns.is_empty() {
+            if turns.is_empty() && pages.is_none() {
+                // (a new Library: Playlist 1 plays Stats, Clock and Weather)
+                turns = ["stats", "clock", "weather"].iter().map(|id| Entry::new(id, SECS.2, Transition::Wipe)).collect();
+            } else if turns.is_empty() {
                 let old: Vec<Value> = pages.and_then(|v| v.as_array()).cloned().unwrap_or_default();
                 turns = library
                     .iter()
@@ -942,6 +1059,31 @@ impl Screens {
         self.playlists.push(Playlist { id: id.clone(), name: format!("Playlist {n}"), turns: vec![Entry::new(&first, SECS.2, Transition::Wipe)] });
         self.plays.insert(p, id.clone());
         id
+    }
+
+    /// The layouts Ectodeck ships that this Library was never given, put at its end in the
+    /// order a new Library has them, and how many: `given` is the keys of those it was given,
+    /// as the settings keep them, so a layout deleted after it was given stays deleted (a
+    /// Library kept before they were kept is given each one it lacks). A layout whose id the
+    /// Library already has isn't put there again.
+    pub fn give_built_ins(&mut self, given: Option<&Value>) -> usize {
+        let given: Vec<&str> = given.and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|k| k.as_str()).collect()).unwrap_or_default();
+        let mut added = 0;
+        for key in BUILT_INS.iter().filter(|k| !given.contains(k)) {
+            if let Some(p) = Page::built_in(key).filter(|p| !self.library.iter().any(|q| q.id == p.id)) {
+                self.library.push(p);
+                added += 1;
+            }
+        }
+        added
+    }
+
+    /// Layout `key`, one Ectodeck ships, put back at the Library's end as it shipped, and
+    /// its place.
+    pub fn add_built_in(&mut self, key: &str) -> Option<usize> {
+        let p = Page::template(key, &self.library).filter(|_| key != "blank")?;
+        self.library.push(p);
+        Some(self.library.len() - 1)
     }
 
     /// A new blank layout at the Library's end, and its place: Custom, or
@@ -1213,7 +1355,15 @@ pub fn render(page: &Page, r: &Readings) -> Vec<String> {
 
 /// The page's four rows `t` seconds after it came in: words that scroll have moved on.
 pub fn render_at(page: &Page, r: &Readings, t: f64) -> Vec<String> {
-    lay_out(page, r, t).0
+    lay_out(page, r, t, false).0
+}
+
+/// The page's four rows as its card in the Library pictures them: as the page comes in,
+/// but each effect at the moment its tile pictures it (see [crate::lcd_fx::still]), fed the
+/// tiles' sample sound and heartbeat, so the picture holds still and shows the effect well
+/// (Highway with traffic on the road, not the empty road it starts on).
+pub fn render_still(page: &Page, r: &Readings) -> Vec<String> {
+    lay_out(page, r, 0.0, true).0
 }
 
 /// Whether the page's rows change between readings: an effect on it, or words that scroll
@@ -1463,14 +1613,14 @@ impl Gaps {
 /// the rest of its row along). A row said to be unavailable keeps its
 /// pieces where they were put, as words always are.
 pub fn spans(page: &Page, r: &Readings) -> Vec<(u8, usize, usize)> {
-    lay_out(page, r, 0.0).1
+    lay_out(page, r, 0.0, false).1
 }
 
 /// The rows, and where each piece lands, `t` seconds in. A row holds its one-row pieces,
 /// left to right, a reading that runs long pushing the ones after it along; and the rows
 /// of any taller piece of words passing through it, which keeps its cells (a reading
 /// pushed up to one stops at its edge).
-fn lay_out(page: &Page, r: &Readings, t: f64) -> (Vec<String>, Vec<(u8, usize, usize)>) {
+fn lay_out(page: &Page, r: &Readings, t: f64, still: bool) -> (Vec<String>, Vec<(u8, usize, usize)>) {
     let mut said: Vec<&'static str> = Vec::new();
     let mut spans: Vec<(u8, usize, usize)> = page.pieces.iter().map(|p| (p.row, p.col as usize, p.width as usize)).collect();
     let effect = |p: &Piece| matches!(p.kind, Kind::Effect { .. });
@@ -1482,7 +1632,8 @@ fn lay_out(page: &Page, r: &Readings, t: f64) -> (Vec<String>, Vec<(u8, usize, u
     let mut behind = vec![vec![' '; COLS as usize]; ROWS as usize];
     for p in page.pieces.iter().filter(|p| effect(p)) {
         if let Kind::Effect { fx, speed, word } = &p.kind {
-            let f = crate::lcd_fx::frame(*fx, crate::lcd_fx::tenths(*fx, t, *speed), &ectotype_core::lcd::lcd_text(word), &crate::lcd_fx::live(*fx, *speed, r.cpu_load));
+            let (at, live) = if still { (crate::lcd_fx::still(*fx), crate::lcd_fx::Live::sample()) } else { (crate::lcd_fx::tenths(*fx, t, *speed), crate::lcd_fx::live(*fx, *speed, r.cpu_load)) };
+            let f = crate::lcd_fx::frame(*fx, at, &ectotype_core::lcd::lcd_text(word), &live);
             for row in p.row..(p.row + p.height.max(1)).min(ROWS) {
                 for c in p.col..(p.col + p.width).min(COLS) {
                     behind[row as usize][c as usize] = f[row as usize][c as usize];
@@ -1917,7 +2068,7 @@ mod tests {
     fn the_stats_page_keeps_its_place_through_json() {
         let p = Page::stats();
         assert_eq!(Page::from_json(&p.to_json()), Some(p.clone()));
-        assert_eq!(pages_of(None), vec![p.clone()]);
+        assert_eq!(pages_of(None).first(), Some(&p), "a new Library starts with Stats");
         assert_eq!(pages_of(Some(&json!([p.to_json()]))), vec![p]);
         assert!(pages_of(Some(&json!([]))).is_empty(), "a Library emptied by its owner stays empty");
     }
@@ -2016,7 +2167,7 @@ mod tests {
         // and a second Clock is told apart from the first
         let q = Page::template("clock", &[p]).unwrap();
         assert_eq!(q.id, "clock-2");
-        assert!(Page::template("rain", &[]).is_none());
+        assert!(Page::template("snow", &[]).is_none(), "an effect with no layout of its own");
     }
 
     #[test]
@@ -2121,5 +2272,108 @@ mod tests {
         let v = s.to_json();
         let back = Screens::of(Some(&v["pages"]), Some(&v["playlists"]), Some(&v["plays"]), None);
         assert!(back.turns(1).is_empty() && back.playlists.len() == s.playlists.len());
+    }
+
+    #[test]
+    fn each_layout_ectodeck_ships_fits_the_screen_keeps_through_json_and_says_what_it_shows() {
+        let r = readings();
+        for key in BUILT_INS {
+            let p = Page::built_in(key).unwrap();
+            assert_eq!((p.id.as_str(), p.light, p.secs, p.comes_in), (key, None, SECS.2, Transition::Wipe));
+            assert_eq!(Page::from_json(&p.to_json()), Some(p.clone()), "{key}, kept and read back");
+            assert_eq!(Page::template(key, &[]), Some(p.clone()));
+            // every block inside the screen, and none over another (an effect is behind them)
+            let cells = |q: &Piece| (q.row..q.row + q.height).flat_map(move |row| (q.col..q.col + q.width).map(move |c| (row, c))).collect::<Vec<_>>();
+            let mut taken = Vec::new();
+            for q in &p.pieces {
+                assert!(q.row + q.height <= ROWS && q.col + q.width <= COLS, "{key}: a block past the screen");
+                if !matches!(q.kind, Kind::Effect { .. }) {
+                    for cell in cells(q) {
+                        assert!(!taken.contains(&cell), "{key}: two blocks at {cell:?}");
+                        taken.push(cell);
+                    }
+                }
+            }
+            // its card's line, the same for a copy, and once changed what it shows now
+            assert_eq!(p.about(), shipped_line(key).unwrap());
+            assert_eq!(Page::template(key, std::slice::from_ref(&p)).unwrap().about(), p.about());
+            let mut changed = p.clone();
+            changed.pieces.pop();
+            assert_ne!(changed.about(), p.about(), "{key}, changed");
+            // and it draws: no row past the screen's width
+            assert!(render(&p, &r).iter().all(|row| row.chars().count() <= COLS as usize));
+        }
+        assert!(Page::built_in("blank").is_none() && Page::built_in("snow").is_none());
+    }
+
+    #[test]
+    fn the_readings_layouts_read_as_designed() {
+        let r = readings();
+        let rows = |key: &str| render(&Page::built_in(key).unwrap(), &r);
+        assert_eq!(rows("cpu"), ["CPU              64°", "Load             15%", "[###...............]", "Clock        4369MHz"]);
+        assert_eq!(rows("gpu"), ["GPU              45°", "Load             12%", "[##................]", "Clock        1837MHz"]);
+        assert_eq!(rows("memory"), ["RAM   25.1 / 60.2 GB", "[########..........]", "VRAM  13.1 / 31.8 GB", "[#######...........]"]);
+        assert_eq!(rows("gaming"), ["GPU 45° [#.........]", "CPU 64° [##........]", "VRAM  13.1 / 31.8 GB", "21:05      Fri Oct 9"]);
+        // (no place for the weather yet: the row says so)
+        assert_eq!(rows("today"), [" Friday, October 9", "       21:05", "", "Weather unavailable"]);
+        assert_eq!(rows("profile"), ["", "     DEFAULT 1", "     Profile 1", ""]);
+        // the heartbeat between the CPU's readings
+        let beat = rows("heartbeat");
+        assert_eq!([beat[0].as_str(), beat[3].as_str()], ["CPU              64°", "Load             15%"]);
+    }
+
+    #[test]
+    fn a_card_pictures_an_effect_at_the_moment_its_tile_does() {
+        let r = readings();
+        for key in ["rain", "starfield", "campfire", "aquarium", "music", "arcade", "highway"] {
+            let p = Page::built_in(key).unwrap();
+            let Kind::Effect { fx, .. } = p.pieces[0].kind else { panic!("{key} is an effect") };
+            let tile: Vec<String> = crate::lcd_fx::frame(fx, crate::lcd_fx::still(fx), "EVGA", &crate::lcd_fx::Live::sample()).iter().map(|row| row.iter().collect::<String>().trim_end().to_string()).collect();
+            assert_eq!(render_still(&p, &r), tile, "{key}");
+        }
+        // Highway: traffic on the road, not the empty road it starts on
+        let hw = Page::built_in("highway").unwrap();
+        let ink = |rows: &[String]| rows.iter().map(|row| row.chars().filter(|c| !c.is_whitespace()).count()).sum::<usize>();
+        assert!(ink(&render_still(&hw, &r)) > ink(&render(&hw, &r)));
+        // and words as the page comes in
+        assert_eq!(render_still(&Page::stats(), &r), render(&Page::stats(), &r));
+    }
+
+    #[test]
+    fn a_new_library_has_every_layout_and_a_kept_one_is_given_each_new_one_once() {
+        // nothing kept: every layout Ectodeck ships, Playlist 1 playing Stats, Clock and Weather,
+        // and each profile keeping Clock on the keyboard
+        let s = Screens::of(None, None, None, None);
+        assert_eq!(s.library.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), BUILT_INS);
+        assert_eq!(s.turns(1).iter().map(|e| (e.page.as_str(), e.secs)).collect::<Vec<_>>(), [("stats", 8), ("clock", 8), ("weather", 8)]);
+        assert_eq!(s.onboard_of(3).map(|p| p.id.as_str()), Some("clock"));
+        let mut again = s.clone();
+        assert_eq!(again.give_built_ins(None), 0);
+        assert_eq!(again, s);
+        // a Library kept before: its own layouts stay where they were, each one it lacks after
+        // them, and its playlist as it was
+        let mine = Page { id: "custom".into(), name: "Raid night".into(), pieces: vec![words(1, 0, "RAID AT 9")], ..Page::blank() };
+        let kept = json!([Page::stats().to_json(), mine.to_json(), Page::clock().to_json()]);
+        let mut old = Screens::of(Some(&kept), None, None, None);
+        assert_eq!(old.give_built_ins(None), 15);
+        let ids: Vec<&str> = old.library.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids[..3], ["stats", "custom", "clock"]);
+        assert_eq!(ids[3..], BUILT_INS.iter().copied().filter(|k| !["stats", "clock"].contains(k)).collect::<Vec<_>>());
+        assert_eq!(old.turns(1).iter().map(|e| e.page.as_str()).collect::<Vec<_>>(), ["stats", "custom", "clock"]);
+        // once given, a layout deleted stays deleted
+        old.delete_page(old.index_of("rain").unwrap());
+        old.delete_page(old.index_of("weather").unwrap());
+        assert_eq!(old.give_built_ins(Some(&json!(BUILT_INS))), 0);
+        assert_eq!(missing_built_ins(&old.library), ["weather", "rain"]);
+        // and a layout Ectodeck ships later is given once too
+        let mut later = Screens::of(Some(&kept), None, None, None);
+        let had: Vec<&str> = BUILT_INS.iter().copied().filter(|k| *k != "highway").collect();
+        assert_eq!(later.give_built_ins(Some(&json!(had))), 1);
+        assert_eq!(later.library.last().map(|p| p.id.as_str()), Some("highway"));
+        // a deleted one put back as it shipped, at the Library's end
+        let at = old.add_built_in("rain").unwrap();
+        assert_eq!((at, &old.library[at]), (old.library.len() - 1, &Page::built_in("rain").unwrap()));
+        assert_eq!(missing_built_ins(&old.library), ["weather"]);
+        assert!(old.add_built_in("blank").is_none() && old.add_built_in("snow").is_none());
     }
 }

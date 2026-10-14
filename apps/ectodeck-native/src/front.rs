@@ -26,17 +26,19 @@ pub enum SensorPick {
     Card(String, String),
 }
 
-/// What a row of the New screen layout menu makes: a blank layout, or a copy of the
-/// layout with this id.
+/// What a row of the New screen layout menu makes: a blank layout, a copy of the layout
+/// with this id, or the layout Ectodeck ships with this key, as it shipped.
 #[derive(Clone, Debug, PartialEq)]
 pub enum NewFrom {
     Scratch,
     Copy(String),
+    Ready(String),
 }
 
 /// The New screen layout menu, in either window: From scratch, then under a heading every
-/// layout there is, to start from a copy of it; and what each row makes (None for the
-/// rule and the heading).
+/// layout there is, to start from a copy of it, then under another each layout Ectodeck
+/// ships that was deleted, to put back as it shipped; and what each row makes (None for the
+/// rules and the headings).
 pub fn new_rows(library: &[crate::lcd_page::Page]) -> (Vec<MenuRow>, Vec<Option<NewFrom>>) {
     let row = |kind: i32, label: &str| MenuRow { kind, label: label.into(), tag: "".into(), tick: false, sub: "".into() };
     let mut rows = vec![row(0, "From scratch"), row(2, ""), row(1, "Duplicate a layout")];
@@ -44,6 +46,15 @@ pub fn new_rows(library: &[crate::lcd_page::Page]) -> (Vec<MenuRow>, Vec<Option<
     for p in library {
         rows.push(row(0, &p.name));
         made.push(Some(NewFrom::Copy(p.id.clone())));
+    }
+    let gone: Vec<crate::lcd_page::Page> = crate::lcd_page::missing_built_ins(library).into_iter().filter_map(crate::lcd_page::Page::built_in).collect();
+    if !gone.is_empty() {
+        rows.extend([row(2, ""), row(1, "Add a ready-made layout")]);
+        made.extend([None, None]);
+        for p in gone {
+            rows.push(row(0, &p.name));
+            made.push(Some(NewFrom::Ready(p.id)));
+        }
     }
     (rows, made)
 }
@@ -807,6 +818,7 @@ impl Front {
             f.settings.get("devices.z10.screen.playlist").as_ref(),
         )
         .with_onboard(f.settings.get("devices.z10.screen.onboard").as_ref());
+        f.give_built_ins();
         f.keyed = f
             .settings
             .get("devices.z10.screen.keyed")
@@ -2482,12 +2494,14 @@ impl Front {
             self.refresh();
             return;
         }
-        // New screen layout's menu: a blank layout, or a copy of one, opened in the editor
+        // New screen layout's menu: a blank layout, a copy of one, or one Ectodeck ships put
+        // back, opened in the editor
         if let Some(made) = self.new_menu.clone() {
             self.close_menu();
             let at = match made.get(i).cloned().flatten() {
                 Some(NewFrom::Scratch) => Some(self.screens.new_page()),
                 Some(NewFrom::Copy(id)) => self.screens.index_of(&id).and_then(|k| self.copy_layout(k)),
+                Some(NewFrom::Ready(key)) => self.screens.add_built_in(&key),
                 None => None,
             };
             if let Some(at) = at {
@@ -3561,7 +3575,8 @@ impl Front {
         self.ui.set_ob_over(self.ob_over.is_some());
     }
 
-    /// "New screen layout" selected, at the pointer: From scratch, or a copy of a layout.
+    /// "New screen layout" selected, at the pointer: From scratch, a copy of a layout, or a
+    /// ready-made one put back.
     fn open_new_menu(&mut self, (x, y): (f32, f32)) {
         if self.card_shut.take().is_some_and(|(j, when)| j == self.screens.library.len() && when.elapsed() < Duration::from_millis(800)) {
             return;
@@ -4067,6 +4082,23 @@ impl Front {
         }
     }
 
+    /// The layouts Ectodeck ships that the Library was never given, put at its end once and
+    /// saved, with the list of those given, so a layout deleted after stays deleted (and a
+    /// layout Ectodeck ships later is given once too).
+    fn give_built_ins(&mut self) {
+        let given = self.settings.get("devices.z10.screen.built_ins");
+        let all = serde_json::json!(crate::lcd_page::BUILT_INS);
+        if given.as_ref() == Some(&all) {
+            return;
+        }
+        let added = self.screens.give_built_ins(given.as_ref());
+        // (the layouts first, so the list never names layouts the Library wasn't saved with)
+        let saved = if added > 0 { self.settings.set("devices.z10.screen.pages", self.screens.to_json()["pages"].clone()) } else { Ok(()) };
+        if let Err(e) = saved.and_then(|_| self.settings.set("devices.z10.screen.built_ins", all)) {
+            eprintln!("ectodeck-native: the new screen layouts were not saved: {e}");
+        }
+    }
+
     /// The Library and the playlist into Ectodeck's settings, if they
     /// changed since last saved.
     fn save_pages(&mut self) {
@@ -4457,7 +4489,7 @@ impl Front {
         let mut cards = Vec::with_capacity(self.screens.library.len());
         for (k, p) in self.screens.library.iter().enumerate() {
             let rgb = crate::z10::as_lit(p.light.unwrap_or(profile));
-            let key: PicKey = (crate::lcd_page::render(p, &self.readings), rgb, level, px(260.0));
+            let key: PicKey = (crate::lcd_page::render_still(p, &self.readings), rgb, level, px(260.0));
             let pic = match &self.pl_thumbs[k] {
                 Some((had, img)) if *had == key => img.clone(),
                 _ => {
@@ -4840,5 +4872,34 @@ mod tests {
         assert_eq!(slot_at(&spans, mid(1) - 1.0), 1);
         assert_eq!(slot_at(&spans, mid(2) + 1.0), 3, "past the last turn's middle: last");
         assert_eq!(slot_at(&[], 400.0), 0);
+    }
+
+    #[test]
+    fn new_screen_layout_offers_each_deleted_ready_made_layout_back() {
+        let mut s = crate::lcd_page::Screens::of(None, None, None, None);
+        let labels = |rows: &[MenuRow]| rows.iter().map(|r| (r.kind, r.label.to_string())).collect::<Vec<_>>();
+        // every layout Ectodeck ships in the Library: From scratch, then a copy of any of them
+        let (rows, made) = new_rows(&s.library);
+        assert_eq!(rows.len(), 3 + crate::lcd_page::BUILT_INS.len());
+        assert!(!labels(&rows).contains(&(1, "Add a ready-made layout".to_string())));
+        assert_eq!(made[3], Some(NewFrom::Copy("stats".into())));
+        // Rain and Highway deleted: both offered back under their own heading, as named
+        for id in ["rain", "highway"] {
+            s.delete_page(s.index_of(id).unwrap());
+        }
+        let (rows, made) = new_rows(&s.library);
+        let n = rows.len();
+        assert_eq!(labels(&rows)[n - 4..], [(2, String::new()), (1, "Add a ready-made layout".to_string()), (0, "Rain".to_string()), (0, "Highway".to_string())]);
+        assert_eq!(made[n - 4..], [None, None, Some(NewFrom::Ready("rain".into())), Some(NewFrom::Ready("highway".into()))]);
+    }
+
+    #[test]
+    fn each_ready_made_layout_says_what_it_shows_in_two_lines_of_its_card() {
+        // (a card's words in two columns of cards at the window's first size, 1440 wide: about
+        // 159 px, so a little less)
+        for p in crate::lcd_page::Screens::of(None, None, None, None).library {
+            let (a, b) = two_lines(&p.about(), 155.0);
+            assert!(!b.ends_with('…'), "{}: {a} / {b}", p.name);
+        }
     }
 }
