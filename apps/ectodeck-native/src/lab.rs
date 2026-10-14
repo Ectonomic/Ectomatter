@@ -203,8 +203,8 @@ const PARAMS: [Param; 43] = [
     Param { path: ("legends", "second_size"), label: "Bottom size", lo: 1.0, hi: 6.0, step: 0.1, unit: Unit::Mm, def: 0.0, note: "How tall the bottom legend is, measured on its capitals, as on number pads that print their arrows smaller than the numbers. Until you set it, it is as tall as Letter size or Word size makes it." },
     Param { path: ("legends", "second_across"), label: "Bottom left–right", lo: -10.0, hi: 10.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Moves the bottom legend left or right, leaving the rest of the legend where it is. Drag the bottom legend on the drawing to move it there." },
     Param { path: ("legends", "second_down"), label: "Bottom up–down", lo: -10.0, hi: 10.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Moves the bottom legend up or down, leaving the rest of the legend where it is. Drag the bottom legend on the drawing to move it there." },
-    Param { path: ("switches", "bleed"), label: "Color bleed", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: crate::z10::BLEED, note: "How much of each LED's red and blue shows as green, and its green as blue, as on the Z10's own LEDs. Raise it until a red key on screen matches a red key on the keyboard." },
-    Param { path: ("display", "bleed"), label: "Color bleed", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: crate::z10::BLEED, note: "How much of the backlight's red and blue shows as green, and its green as blue. Raise it until the screen in Ectodeck matches the color of the keyboard's screen." },
+    Param { path: ("switches", "bleed"), label: "Color drift", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: crate::z10::BLEED, note: "How far each LED's light drifts from the color it's set to, as the Z10's own LEDs do: red toward orange, green toward teal, blue toward cyan. Raise it until a red key here matches a red key on your keyboard." },
+    Param { path: ("display", "bleed"), label: "Color drift", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: crate::z10::BLEED, note: "How far the screen's backlight drifts from the color it's set to, as the keys' LEDs do. Raise it until the screen here matches the screen on your keyboard." },
 ];
 
 /// What each end of a share's slider stands for, in the words under its
@@ -221,7 +221,7 @@ fn ends(path: (&str, &str)) -> Option<(&'static str, &'static str)> {
         ("caps", "milky") => ("Clear", "Milky white"),
         ("display", "dot") => ("Pinpoints", "Touching"),
         ("display", "glass") => ("None", "As drawn"),
-        ("switches", "bleed") | ("display", "bleed") => ("None", "All"),
+        ("switches", "bleed") | ("display", "bleed") => ("None", "Strong"),
         _ => return None,
     })
 }

@@ -479,7 +479,7 @@ impl Label {
     }
 
     /// One for the slider of the core's value at `path`, where two sliders
-    /// share a name (each section's Color bleed).
+    /// share a name (each section's Color drift).
     fn of(left: bool, at: Pt, path: (&str, &str)) -> Label {
         let i = PARAMS.iter().position(|p| p.path == path).expect("one of the lab's sliders");
         Label { i, left, at, flat: false, drop: false, elbow: None }
