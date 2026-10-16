@@ -120,7 +120,7 @@ pub fn and_list(names: &[String]) -> String {
 }
 
 /// A maker as people say it: Micro-Star International Co., Ltd. is MSI.
-fn short_vendor(v: &str) -> String {
+pub fn short_vendor(v: &str) -> String {
     let l = v.to_lowercase();
     for (k, s) in [("micro-star", "MSI"), ("asustek", "ASUS"), ("gigabyte", "Gigabyte"), ("asrock", "ASRock"), ("nvidia", "NVIDIA"), ("advanced micro devices", "AMD"), ("intel", "Intel"), ("dell", "Dell"), ("lenovo", "Lenovo"), ("hewlett", "HP"), ("biostar", "Biostar")] {
         if l.contains(k) {

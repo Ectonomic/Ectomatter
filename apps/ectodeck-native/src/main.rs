@@ -46,6 +46,8 @@ mod picture;
 mod screen_edit;
 mod screen_keys;
 mod screens;
+mod sensor_list;
+mod sensor_read;
 mod sensors;
 mod settings;
 mod setups;
