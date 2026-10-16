@@ -40,7 +40,8 @@ fn the_stats_page_reads_alike() {
             Ok((g[0].as_u64().unwrap() as u32, g[1].as_u64().unwrap() as u32, g[2].as_u64().unwrap() as u32, g[3].as_f64().unwrap(), g[4].as_f64().unwrap()))
         };
         let mut s = Stats::new(&dir, Box::new(FakeGpu(vec![gpu])));
-        s.cpu_load();
+        s.setup = Some(Default::default());
+        s.prime();
         computer(&dir, c["temp"].as_i64().unwrap(), &freqs, stat(1), mem);
         // read once, then shown by the Stats page as it ships and as it comes
         // back from Ectodeck's settings: both as the service wrote it

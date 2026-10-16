@@ -5,7 +5,10 @@
 
 use serde_json::{json, Value};
 
+use std::collections::{BTreeSet, HashMap};
+
 use crate::lighting::{cell, id, kind, style, text_cell, Ctl};
+use crate::sensor_list::{Catalog, Device, Part, Run, Sensor, Val};
 use crate::text;
 use crate::Cell;
 
@@ -29,43 +32,29 @@ const PAD_X: f32 = 24.0;
 const LABEL_W: f32 = 132.0;
 const CTRL: f32 = 148.0;
 
-/// The Sensors card: the sensors that read the processor, each with its reading now, the
-/// processor's and the motherboard's names, its cores, the graphics cards with their
-/// temperatures, and the choices.
+/// What the Sensors box shows: the computer's sensors as last listed, each one's reading
+/// now, the choices, the tab open, the folded runs opened (by device and run), and the
+/// sensor being renamed with what is typed so far.
 #[derive(Clone)]
 pub struct Sensors {
-    pub cpu: Vec<(crate::sensors::CpuSensor, Option<f64>)>,
-    pub cpu_name: String,
-    pub board: Option<String>,
-    pub cores: Option<u32>,
-    pub cards: Vec<(crate::sensors::Card, Option<u32>)>,
-    pub choice: crate::sensors::Choice,
+    pub cat: Catalog,
+    pub setup: crate::sensors::Setup,
+    pub values: HashMap<String, Val>,
+    pub tab: Part,
+    pub open: BTreeSet<(String, Run)>,
+    pub renaming: Option<(String, String)>,
 }
 
-impl Sensors {
-    /// A sensor's name as the card and the editor say it: "Tctl, AMD Ryzen 9 9950X3D".
-    pub fn name(&self, s: &crate::sensors::CpuSensor) -> String {
-        format!("{}, {}", s.label, if s.own { self.cpu_name.clone() } else { self.board.clone().unwrap_or_else(|| "the motherboard".into()) })
-    }
-
-    /// The note under the CPU temperature: what the processor's own sensors are, or where
-    /// the motherboard's reads.
-    pub fn cpu_note(&self, chosen: &crate::sensors::CpuSensor) -> String {
-        if !chosen.own {
-            return format!("{} is the motherboard’s own reading, from its sensor chip ({}).", chosen.label, chosen.driver);
-        }
-        let dies: Vec<String> = self.cpu.iter().map(|(s, _)| s).filter(|s| s.own && s.label.starts_with("Tccd")).map(|s| s.label.clone()).collect();
-        let count = ["one", "two", "three", "four", "five", "six", "seven", "eight"].get(dies.len().wrapping_sub(1)).copied().unwrap_or("its");
-        match chosen.label.as_str() {
-            "Tctl" if dies.is_empty() => "Tctl is the temperature the processor reports for cooling.".into(),
-            "Tctl" if dies.len() == 1 => format!("Tctl is the temperature the processor reports for cooling. {} is its core die.", dies[0]),
-            "Tctl" => format!("Tctl is the temperature the processor reports for cooling. {} are its {count} core dies.", crate::sensors::and_list(&dies)),
-            l if l.starts_with("Tccd") => format!("{l} is one of the processor’s core dies. Tctl is the temperature it reports for cooling."),
-            "Package id 0" => "Package id 0 is the temperature of the whole processor. Each Core is one of its cores.".into(),
-            l if l.starts_with("Core") => format!("{l} is one of the processor’s cores. Package id 0 is the whole processor."),
-            l => format!("{l} is read by the processor’s own driver ({}).", chosen.driver),
-        }
-    }
+/// What the Sensors box's pieces stand for, by their places: each tab's part, each
+/// checkbox's sensor, each folded run's device and run, each Make main's card; and where
+/// the box's heading is on the page.
+#[derive(Clone, Debug, Default)]
+pub struct SensorMap {
+    pub tabs: Vec<Part>,
+    pub chips: Vec<String>,
+    pub runs: Vec<(String, Run)>,
+    pub mains: Vec<String>,
+    pub top: f32,
 }
 
 pub struct State<'a> {
@@ -132,7 +121,285 @@ fn section(cells: &mut Vec<Cell>, y: &mut f32, title: &str, fill: impl FnOnce(&m
     *y += h + 14.0;
 }
 
-pub fn page(s: &State) -> (Vec<Cell>, f32) {
+/// The rows on a tab, in their order: on a tab of one device, its readings by kind; the
+/// kinds a part's readings are set out in.
+fn row_order(p: Part) -> &'static [&'static str] {
+    match p {
+        Part::Memory => &["In use", "Temperature"],
+        Part::Motherboard => &["Temperature", "Fan", "Voltage", "Power", "Current"],
+        Part::Battery => &["Charge", "Power"],
+        Part::Laptop => &["Fan", "Temperature", "Voltage", "Power", "Current"],
+        _ => &["Temperature", "Load", "Clock", "In use", "Fan", "Voltage", "Power", "Current", "Charge"],
+    }
+}
+
+/// The row a run of like readings folds into, on a tab of one device.
+fn run_row(r: Run) -> &'static str {
+    match r {
+        Run::Volts => "Voltage",
+        Run::Temps => "Temperature",
+        // (each core's load or clock, by what its readings are)
+        Run::Cores => "",
+    }
+}
+
+/// A row on a tab: its name (a kind of reading, or a device), what sits under the name (a
+/// card's Main card or Make main, the word for it), its sensors, its folded runs, and its
+/// lines under it.
+struct Row<'a> {
+    name: String,
+    card: Option<(&'a Device, bool)>,
+    inside: Option<String>,
+    items: Vec<&'a Sensor>,
+    runs: Vec<(Run, Vec<&'a Sensor>)>,
+    notes: Vec<String>,
+    /// the device its runs are kept open by
+    key: String,
+}
+
+/// Ectodeck's Settings' Sensors box: a tab for each part of the computer (the Screen tab's
+/// own tabs), the open one's device and where its readings come from, then its rows, each
+/// sensor a checkbox with its name, its driver's name and its reading, three to a line; long
+/// runs of like readings folded into one line that opens; and at its foot what checking does.
+fn sensors_box(cells: &mut Vec<Cell>, y: &mut f32, v: &Sensors, map: &mut SensorMap) {
+    *y += 20.0;
+    map.top = *y;
+    cells.push(text_cell(style::HEAD, X0, *y, W, 18.0, "Sensors"));
+    *y += 18.0 + 8.0;
+    let parts = v.cat.parts();
+    let tab = if parts.contains(&v.tab) { v.tab } else { parts.first().copied().unwrap_or(Part::Processor) };
+    // the tabs, each as wide as its name; an amber dot on a part whose readings can't come in
+    let mut tx = X0;
+    for (i, p) in parts.iter().enumerate() {
+        let bad = v.cat.missing.iter().any(|(m, _)| m == p);
+        let w = text::width(500, 13.0, p.name()).ceil() + 36.0 + if bad { 13.0 } else { 0.0 };
+        cells.push(Cell { text: p.name().into(), on: *p == tab, style: (i == 0) as i32 + if bad { 2 } else { 0 }, id: id(Ctl::SensorTab), index: i as i32, ..cell(kind::TAB, tx, *y, w, 36.0) });
+        map.tabs.push(*p);
+        tx += w + 4.0;
+    }
+    *y += 36.0;
+    let top = *y;
+    let (bx, bw) = (X0 + PAD_X, W - 2.0 * PAD_X);
+    let (cx, cw) = (bx + CTRL, bw - CTRL);
+    let mut out: Vec<Cell> = Vec::new();
+    let mut cy = top + 16.0;
+    let main = v.setup.main_card(&v.cat).map(|d| d.key.clone());
+    let checked = v.setup.checked_in(&v.cat);
+    let mut devices: Vec<&Device> = v.cat.devices.iter().filter(|d| d.part == tab).collect();
+    // (the main card first)
+    devices.sort_by_key(|d| Some(&d.key) != main.as_ref());
+    // the device the tab shows, and where its readings come from
+    if !tab.by_device() {
+        if let Some(d) = devices.first() {
+            let nw = text::width(500, 13.5, &d.name).ceil() + 2.0;
+            out.push(text_cell(39, bx, cy, nw, 22.0, &d.name));
+            if !d.src.is_empty() && !v.cat.missing.iter().any(|(p, _)| *p == tab) {
+                out.push(Cell { y: cy + 1.0, ..text_cell(style::NOTE, bx + nw + 10.0, cy, bw - nw - 10.0, 22.0, &d.src) });
+            }
+            cy += 22.0 + 8.0;
+        }
+    }
+    // a source that can't be read, said in amber
+    if let Some((_, why)) = v.cat.missing.iter().find(|(p, _)| *p == tab) {
+        cy += 6.0;
+        let lines = text::wrap(400, 13.0, why, bw - 14.0);
+        out.push(Cell { style: 3, ..cell(kind::DOT, bx, cy + 6.5, 6.0, 6.0) });
+        for (k, l) in lines.iter().enumerate() {
+            out.push(text_cell(style::FACT, bx + 14.0, cy + k as f32 * 19.0, bw - 14.0, 19.0, l));
+        }
+        cy += lines.len() as f32 * 19.0 + 10.0;
+    }
+    // the rows: on Graphics, Drives and Network each device, elsewhere each kind of reading
+    let mut rows: Vec<Row> = Vec::new();
+    let odd_notes = |items: &[&Sensor]| -> Vec<String> {
+        items
+            .iter()
+            .filter_map(|s| {
+                let x = v.values.get(&s.id)?;
+                crate::sensor_read::odd(s.what, *x).then(|| format!("{} reads {}: probably no sensor is connected to it.", v.setup.names.get(&s.id).unwrap_or(&s.name), crate::sensor_read::shown(s.what, tab, *x)))
+            })
+            .collect()
+    };
+    fn runs_of<'a>(all: &[&'a Sensor]) -> Vec<(Run, Vec<&'a Sensor>)> {
+        let mut runs: Vec<(Run, Vec<&Sensor>)> = Vec::new();
+        for s in all {
+            if let Some(r) = s.run {
+                match runs.iter_mut().find(|(x, _)| *x == r) {
+                    Some((_, v)) => v.push(s),
+                    None => runs.push((r, vec![s])),
+                }
+            }
+        }
+        runs
+    }
+    if tab.by_device() {
+        for d in &devices {
+            let all: Vec<&Sensor> = d.sensors.iter().collect();
+            let items: Vec<&Sensor> = all.iter().copied().filter(|s| s.run.is_none()).collect();
+            let mut notes = odd_notes(&items);
+            notes.extend(d.note.clone());
+            let is_main = main.as_ref() == Some(&d.key);
+            rows.push(Row { name: d.name.clone(), card: d.card.as_ref().map(|_| (*d, is_main)), inside: d.inside.clone(), runs: runs_of(&all), items, notes, key: d.key.clone() });
+        }
+    } else if let Some(d) = devices.first() {
+        for name in row_order(tab) {
+            let items: Vec<&Sensor> = d.sensors.iter().filter(|s| s.run.is_none() && s.what.row() == *name).collect();
+            // (each core's readings fold under the row of what they read; the others under their own)
+            let runs: Vec<(Run, Vec<&Sensor>)> = runs_of(&d.sensors.iter().filter(|s| s.run.is_some_and(|r| if r == Run::Cores { s.what.row() == *name } else { run_row(r) == *name })).collect::<Vec<_>>());
+            if items.is_empty() && runs.is_empty() {
+                continue;
+            }
+            let mut notes = odd_notes(&items);
+            for (_, rs) in &runs {
+                notes.extend(odd_notes(rs));
+            }
+            // (each row's runs opened by themselves: the processor's loads apart from its clocks)
+            rows.push(Row { name: name.to_string(), card: None, inside: None, items, runs, notes, key: format!("{}#{name}", d.key) });
+        }
+    }
+    let col = (cw - 2.0 * 8.0) / 3.0;
+    let sub_col = (cw - 12.0 - 3.0 * 6.0) / 4.0;
+    for (k, r) in rows.iter().enumerate() {
+        let ry = cy;
+        if k > 0 {
+            out.push(Cell { color: slint::Color::from_rgb_u8(0x2b, 0x2b, 0x30), ..cell(kind::BOX, bx, ry, bw, 1.0) });
+        }
+        // the row's name, and under a card's its Main card or Make main (a model's code too
+        // long for the column broken after a hyphen: WDS200T1X0E- / 00AFY0)
+        let broken: Vec<String> = r.name.split(' ').map(|w| if text::width(400, 13.5, w) > CTRL - 12.0 { w.replacen('-', "- ", 1) } else { w.to_string() }).collect();
+        let lines = text::wrap(400, 13.5, &broken.join(" "), CTRL - 12.0);
+        for (i, l) in lines.iter().enumerate() {
+            out.push(text_cell(style::LABEL, bx, ry + 6.0 + i as f32 * 18.0, CTRL - 12.0, 18.0, l));
+        }
+        let mut left_h = 6.0 + lines.len() as f32 * 18.0;
+        if r.card.is_some() || r.inside.is_some() {
+            let sy = ry + left_h + 4.0;
+            let mut sx = bx;
+            if let Some((d, is_main)) = r.card {
+                if is_main {
+                    let w = text::width(400, 11.5, "Main card").ceil() + 14.0;
+                    out.push(Cell { text: "Main card".into(), style: 3, ..cell(kind::PILL, sx, sy + 1.0, w, 20.0) });
+                    sx += w + 6.0;
+                } else {
+                    let w = text::width(400, 12.0, "Make main").ceil() + 16.0;
+                    out.push(Cell { text: "Make main".into(), style: 33, id: id(Ctl::MakeMain), index: map.mains.len() as i32, ..cell(kind::GHOST, sx, sy, w, 22.0) });
+                    map.mains.push(d.key.clone());
+                    sx += w + 6.0;
+                }
+            }
+            if let Some(i) = &r.inside {
+                out.push(text_cell(style::CREDIT, sx, sy, CTRL - (sx - bx), 22.0, i));
+            }
+            left_h += 4.0 + 22.0;
+        }
+        // its sensors, three to a line, then its folded runs; a renamed sensor, or one whose
+        // name and driver's name run long together, takes two places
+        let mut place = (0usize, 0usize);
+        let mut at = |span: usize| -> (f32, f32, f32) {
+            if place.1 + span > 3 {
+                place = (place.0 + 1, 0);
+            }
+            let p = (cx + place.1 as f32 * (col + 8.0), ry + 6.0 + place.0 as f32 * 30.0, span as f32 * col + (span - 1) as f32 * 8.0);
+            place.1 += span;
+            p
+        };
+        for s in &r.items {
+            let given = v.setup.names.get(&s.id);
+            let wide = given.is_some() || s.orig.as_ref().is_some_and(|o| s.name.chars().count() + o.chars().count() > 20);
+            let (x, sy, w) = at(if wide { 2 } else { 1 });
+            chip(&mut out, v, &checked, tab, s, (x, sy, w), map);
+        }
+        for (run, items) in &r.runs {
+            let (x, sy, w) = at(1);
+            let open = v.open.contains(&(r.key.clone(), *run));
+            let n = items.iter().filter(|s| checked.contains(&s.id)).count();
+            let name = format!("{} ({})", run.name(), items.len());
+            let said = if n > 0 { format!("{n} checked") } else { String::new() };
+            out.push(Cell { text: name.into(), lines: said.into(), style: if open { 3 } else { 2 }, value: w, id: id(Ctl::SensorRun), index: map.runs.len() as i32, ..cell(kind::SENSOR, x, sy, w, 30.0) });
+            map.runs.push((r.key.clone(), *run));
+        }
+        let used = if r.items.is_empty() && r.runs.is_empty() { 0 } else { place.0 + 1 };
+        let mut right = 6.0 + used as f32 * 30.0;
+        // a run opened: its readings four to a line in a well
+        for (run, items) in &r.runs {
+            if !v.open.contains(&(r.key.clone(), *run)) {
+                continue;
+            }
+            let wy = ry + right + 2.0;
+            let lines = items.len().div_ceil(4);
+            let h = 12.0 + lines as f32 * 30.0;
+            out.push(Cell { style: 1, ..cell(kind::WBOX, cx, wy, cw, h) });
+            for (i, s) in items.iter().enumerate() {
+                chip(&mut out, v, &checked, tab, s, (cx + 6.0 + (i % 4) as f32 * (sub_col + 6.0), wy + 6.0 + (i / 4) as f32 * 30.0, sub_col), map);
+            }
+            right += 2.0 + h + 2.0;
+        }
+        // the lines under it
+        for n in &r.notes {
+            right += 2.0;
+            for l in text::wrap(400, 12.0, n, cw - 16.0) {
+                out.push(text_cell(style::CREDIT, cx + 8.0, ry + right, cw - 16.0, 17.0, &l));
+                right += 17.0;
+            }
+            right += 2.0;
+        }
+        cy = ry + left_h.max(right) + 6.0;
+    }
+    // the foot: what checking does, and how many are checked
+    let all: Vec<&Sensor> = v.cat.devices.iter().flat_map(|d| d.sensors.iter()).collect();
+    let on = all.iter().filter(|s| checked.contains(&s.id)).count();
+    let count = format!("{on} of {} checked", all.len());
+    let count_w = text::width(400, 12.5, &count).ceil() + 2.0;
+    cy += 8.0;
+    out.push(Cell { color: slint::Color::from_rgb_u8(0x2b, 0x2b, 0x30), ..cell(kind::BOX, bx, cy, bw, 1.0) });
+    cy += 12.0;
+    let lines = text::wrap(400, 12.5, "The sensors checked here are the readings you can add to a screen layout. Ectodeck checked the usual ones for you.", bw - count_w - 16.0);
+    for (i, l) in lines.iter().enumerate() {
+        out.push(text_cell(style::NOTE, bx, cy + i as f32 * 18.0, bw - count_w - 16.0, 18.0, l));
+    }
+    out.push(text_cell(style::NOTE, bx + bw - count_w, cy, count_w, 18.0, &count));
+    cy += lines.len() as f32 * 18.0 + 14.0;
+    let h = cy - top;
+    cells.push(Cell { style: if parts.first() == Some(&tab) { 2 } else { 0 }, ..cell(kind::TILE, X0, top, W, h) });
+    cells.extend(out);
+    *y = top + h + 14.0;
+}
+
+/// A sensor's checkbox: its name (or the one given it), its driver's name in gray, its
+/// reading at its right (amber when it can't be right), a pencil under the pointer; or, as
+/// it is renamed, a line to type its new name in.
+fn chip(out: &mut Vec<Cell>, v: &Sensors, checked: &BTreeSet<String>, part: Part, s: &Sensor, (x, y, w): (f32, f32, f32), map: &mut SensorMap) {
+    let given = v.setup.names.get(&s.id);
+    let name = given.cloned().unwrap_or_else(|| s.name.clone());
+    // (a renamed sensor keeps its own name beside the one given it)
+    let orig = if given.is_some() { s.orig.clone().or(Some(s.name.clone())) } else { s.orig.clone() };
+    let reading = v.values.get(&s.id).map(|x| crate::sensor_read::shown(s.what, part, *x)).unwrap_or_default();
+    let odd = v.values.get(&s.id).is_some_and(|x| crate::sensor_read::odd(s.what, *x));
+    let on = checked.contains(&s.id);
+    let index = map.chips.len() as i32;
+    map.chips.push(s.id.clone());
+    let editing = v.renaming.as_ref().filter(|(id, _)| *id == s.id);
+    // the name's room: the chip less its checkbox, its driver's name and its reading (the
+    // window takes the pencil's place from it while the pencil shows)
+    let orig_w = orig.as_ref().map_or(0.0, |o| text::width(400, 11.5, o).ceil() + 8.0);
+    let room = (w - 8.0 - 15.0 - 8.0 - orig_w - 8.0 - text::width(400, 12.5, &reading).ceil() - 8.0).max(24.0);
+    out.push(Cell {
+        text: name.into(),
+        fill: orig.unwrap_or_default().into(),
+        lines: reading.into(),
+        on,
+        value: room,
+        style: if editing.is_some() { 4 } else if odd { 1 } else { 0 },
+        id: id(Ctl::Sensor),
+        index,
+        ..cell(kind::SENSOR, x, y, w, 30.0)
+    });
+    if let Some((_, typed)) = editing {
+        out.push(Cell { text: typed.into(), style: 7, id: id(Ctl::SensorName), index, ..cell(kind::FIELD, x + 31.0, y + 3.0, w - 31.0 - 8.0, 24.0) });
+    }
+}
+
+pub fn page(s: &State) -> (Vec<Cell>, f32, SensorMap) {
     let mut cells = vec![text_cell(style::TITLE, X0, 34.0, W, 29.0, "Settings")];
     let mut y = 34.0 + 29.0 + 6.0 - 14.0;
     y += 14.0;
@@ -265,68 +532,10 @@ pub fn page(s: &State) -> (Vec<Cell>, f32) {
         c.next(cy - c.y);
     });
 
-    // where the screen's readings come from, where there is more than one source
+    // every sensor on the computer, a tab for each part, and which the screen's layouts can show
+    let mut map = SensorMap::default();
     if let Some(v) = &s.sensors {
-        section(&mut cells, &mut y, "Sensors", |c| {
-            let cx = X0 + PAD_X + CTRL;
-            // a dropdown with what its choice reads now at its right, before its chevron
-            let drop = |c: &mut Card, ctl: Ctl, words: &str, reading: Option<String>| {
-                c.cells.push(Cell { text: words.into(), id: id(ctl), ..cell(kind::DROP, cx, c.y, 300.0, 34.0) });
-                if let Some(r) = reading {
-                    let w = text::width(400, 12.5, &r).ceil() + 2.0;
-                    c.cells.push(Cell { color: slint::Color::from_rgb_u8(0xa1, 0xa1, 0xaa), ..text_cell(style::NOTE_IN, cx + 300.0 - 36.0 - w, c.y, w, 34.0, &r) });
-                }
-            };
-            let none = |c: &mut Card| c.cells.push(Cell { text: "None found".into(), style: 2, ..cell(kind::FIELD, cx, c.y, 300.0, 34.0) });
-            let deg = |t: f64| format!("{}°", t.round());
-            c.label("CPU temperature");
-            let mut ny = c.y + 34.0 + 7.0;
-            match (v.choice.cpu_sensor(&v.cpu.iter().map(|(s, _)| s.clone()).collect::<Vec<_>>()), &v.choice.cpu) {
-                (Some(s), _) => {
-                    let reading = v.cpu.iter().find(|(o, _)| o == s).and_then(|(_, t)| t.map(deg));
-                    drop(c, Ctl::CpuSensor, &v.name(&s), reading);
-                    c.note(&mut ny, &v.cpu_note(&s), 640.0);
-                }
-                (None, Some((_, label))) if !v.cpu.is_empty() => {
-                    drop(c, Ctl::CpuSensor, &format!("{label}, not found"), None);
-                    c.note(&mut ny, &format!("{label} is no longer on this computer, so screen layouts show the CPU temperature as unavailable until another sensor is chosen."), 640.0);
-                }
-                _ => {
-                    none(c);
-                    c.note(&mut ny, "Linux reports no temperature sensor for this processor, so screen layouts can’t show the CPU temperature.", 640.0);
-                }
-            }
-            c.next(ny - c.y - 0.125);
-            c.label("CPU clock");
-            c.seg(c.y, Ctl::CpuClock, &[("average", "Average of all cores"), ("fastest", "Fastest core")], if v.choice.fastest { "fastest" } else { "average" });
-            let mut ny = c.y + 36.0 + 7.0;
-            match v.cores {
-                Some(n) if n > 1 => c.note(&mut ny, &format!("Each of the processor’s {n} cores runs at its own clock."), 640.0),
-                _ => c.note(&mut ny, "Each of the processor’s cores runs at its own clock.", 640.0),
-            }
-            c.next(ny - c.y - 0.125);
-            c.label("Graphics card");
-            let mut ny = c.y + 34.0 + 7.0;
-            let cards: Vec<crate::sensors::Card> = v.cards.iter().map(|(k, _)| k.clone()).collect();
-            match (v.choice.card(&cards), &v.choice.card) {
-                (Some(k), _) => {
-                    let temp = v.cards.iter().find(|(o, _)| o == k).and_then(|(_, t)| t.map(|t| format!("{t}°")));
-                    drop(c, Ctl::GpuCard, &k.shown(), temp);
-                    c.note(&mut ny, crate::sensors::reports(k), 640.0);
-                }
-                (None, Some((_, name))) if !cards.is_empty() => {
-                    drop(c, Ctl::GpuCard, &format!("{name}, not found"), None);
-                    c.note(&mut ny, &format!("The {name} is no longer in this computer, so screen layouts show GPU readings as unavailable until another card is chosen."), 640.0);
-                }
-                _ => {
-                    none(c);
-                    c.note(&mut ny, "Linux reports no graphics card Ectodeck can read, so screen layouts can’t show GPU readings.", 640.0);
-                }
-            }
-            ny += 10.0;
-            c.note(&mut ny, "Screen layouts show these readings. CPU load and memory in use come from Linux (/proc), and the weather from the Weather settings above.", 640.0);
-            c.next(ny - c.y - 0.125);
-        });
+        sensors_box(&mut cells, &mut y, v, &mut map);
     }
 
     // the HDR interface
@@ -349,7 +558,7 @@ pub fn page(s: &State) -> (Vec<Cell>, f32) {
         c.next(34.0);
     });
 
-    (cells, y - 14.0 + 40.0)
+    (cells, y - 14.0 + 40.0, map)
 }
 
 /// Nits for a place along the Peak nits slider; `None` at its left end, the design's brightness.

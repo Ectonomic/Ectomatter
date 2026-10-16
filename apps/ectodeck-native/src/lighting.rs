@@ -72,16 +72,20 @@ pub enum Ctl {
     ScrFormat,
     /// how fast an effect moves
     ScrSpeed,
-    /// where the screen's readings come from: the CPU sensor (its menu), the clock
-    /// averaged or the fastest core's, the graphics card (its menu)
-    CpuSensor,
-    CpuClock,
-    GpuCard,
+    /// the Sensors box in Settings: a tab, by its place; a sensor checked or unchecked, and
+    /// its pencil (which the window gives the id after the sensor's), by the sensor's place;
+    /// a folded run opened or shut; a card made the main card; a sensor's new name typed
+    SensorTab,
+    Sensor,
+    SensorPencil,
+    SensorRun,
+    MakeMain,
+    SensorName,
     /// a link to Ectodeck's Settings, from the screen editor
     OpenSettings,
 }
 
-const CTLS: [Ctl; 49] = [
+const CTLS: [Ctl; 52] = [
     Ctl::None,
     Ctl::Color,
     Ctl::Colors,
@@ -127,9 +131,12 @@ const CTLS: [Ctl; 49] = [
     Ctl::ScrLight,
     Ctl::ScrFormat,
     Ctl::ScrSpeed,
-    Ctl::CpuSensor,
-    Ctl::CpuClock,
-    Ctl::GpuCard,
+    Ctl::SensorTab,
+    Ctl::Sensor,
+    Ctl::SensorPencil,
+    Ctl::SensorRun,
+    Ctl::MakeMain,
+    Ctl::SensorName,
     Ctl::OpenSettings,
 ];
 
@@ -180,6 +187,10 @@ pub mod kind {
     pub const CHECKBOX: i32 = 48;
     /// a thing the firmware adds, a tick before it
     pub const TICKED: i32 = 49;
+    /// the Sensors box's: a tab (the Screen tab's own); a sensor's checkbox, its names and
+    /// its reading, or a folded run of them
+    pub const TAB: i32 = 50;
+    pub const SENSOR: i32 = 51;
 }
 /// the text styles
 #[allow(dead_code)]

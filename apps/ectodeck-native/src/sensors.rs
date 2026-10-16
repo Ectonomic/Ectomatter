@@ -1,83 +1,21 @@
-//! Where the screen's readings come from where there is more than one source: the sensors
-//! that read the processor's temperature, how its clock is counted, and the graphics cards,
-//! found on this computer; and the choice of each, kept in Ectodeck's settings ("sensors")
-//! and shared with every reader of the screen's readings.
+//! Which of the computer's sensors (see [crate::sensor_list]) the screen's layouts can show,
+//! as Ectodeck's settings keep it ("sensors"): the sensors checked in Settings, the names
+//! given them, and the main card, the card the ready-made layouts' GPU readings come from.
+//! Until a sensor is first checked or unchecked, the usual ones are: those the ready-made
+//! layouts show. Every reader of the screen's readings goes by the same choices, and knows
+//! each sensor a layout shows by a number of its own ([Source::Sensor]), as this keeps it.
 //!
-//! A CPU sensor is every temperature from the processor's own driver (k10temp on AMD,
-//! coretemp on Intel), then the motherboard chip's temperatures labeled CPU, kept by driver
-//! and label (an hwmon's number can change between boots). A card is kept by its PCI address
-//! and name. Everything is read under `root`, which is `/` but for tests.
+//! Here too: the processor's, the motherboard's and the graphics cards' names, found on
+//! this computer under `root` (`/` but for tests).
 
-use std::path::{Path, PathBuf};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::path::Path;
 use std::sync::{Mutex, OnceLock};
-use std::time::Instant;
 
 use serde_json::{json, Value};
 
-/// A sensor that reads the processor's temperature.
-#[derive(Clone, Debug, PartialEq)]
-pub struct CpuSensor {
-    /// the hwmon's name: k10temp, coretemp, or the motherboard chip's (nct6687)
-    pub driver: String,
-    pub label: String,
-    /// from the processor's own driver, rather than the motherboard's
-    pub own: bool,
-    pub input: PathBuf,
-}
-
-impl CpuSensor {
-    /// Its reading now, in °C.
-    pub fn read(&self) -> Option<f64> {
-        let v: i64 = std::fs::read_to_string(&self.input).ok()?.trim().parse().ok()?;
-        Some(v as f64 / 1000.0)
-    }
-}
-
-const OWN: [&str; 3] = ["k10temp", "zenpower", "coretemp"];
-
-/// The hwmon devices under `root`, in their numbers' order: each one's directory and name.
-fn hwmons(root: &Path) -> Vec<(PathBuf, String)> {
-    let Ok(rd) = std::fs::read_dir(root.join("sys/class/hwmon")) else { return Vec::new() };
-    let mut all: Vec<(u32, PathBuf)> = rd.flatten().filter_map(|e| Some((e.file_name().to_str()?.strip_prefix("hwmon")?.parse().ok()?, e.path()))).collect();
-    all.sort();
-    all.into_iter().filter_map(|(_, p)| Some((p.clone(), std::fs::read_to_string(p.join("name")).ok()?.trim().to_string()))).collect()
-}
-
-/// An hwmon's temperatures: each one's label (or `temp1` and so on, where it has none) and
-/// the file it reads from, in their numbers' order.
-fn temps(h: &Path) -> Vec<(String, PathBuf)> {
-    let Ok(rd) = std::fs::read_dir(h) else { return Vec::new() };
-    let mut all: Vec<(u32, PathBuf)> = rd
-        .flatten()
-        .filter_map(|e| {
-            let n = e.file_name().to_str()?.strip_prefix("temp")?.strip_suffix("_input")?.parse().ok()?;
-            Some((n, e.path()))
-        })
-        .collect();
-    all.sort();
-    all.into_iter()
-        .map(|(n, p)| (std::fs::read_to_string(h.join(format!("temp{n}_label"))).map_or_else(|_| format!("temp{n}"), |l| l.trim().to_string()), p))
-        .collect()
-}
-
-/// Every sensor that reads the processor: its own driver's first, then the motherboard's.
-pub fn cpu_sensors(root: &Path) -> Vec<CpuSensor> {
-    let mut own = Vec::new();
-    let mut board = Vec::new();
-    for (h, name) in hwmons(root) {
-        if OWN.contains(&name.as_str()) {
-            own.extend(temps(&h).into_iter().map(|(label, input)| CpuSensor { driver: name.clone(), label, own: true, input }));
-            continue;
-        }
-        // (a motherboard's sensor chip sits on the platform bus, as no card or drive does)
-        let on_board = std::fs::canonicalize(h.join("device")).is_ok_and(|d| d.to_string_lossy().contains("/platform/")) && name != "acpitz";
-        if on_board {
-            board.extend(temps(&h).into_iter().filter(|(l, _)| l.to_uppercase().contains("CPU")).map(|(label, input)| CpuSensor { driver: name.clone(), label, own: false, input }));
-        }
-    }
-    own.extend(board);
-    own
-}
+use crate::lcd_page::Source;
+use crate::sensor_list::{Catalog, Device, Part, What};
 
 /// The processor's name, as its sensors' heading: "AMD Ryzen 9 9950X3D".
 pub fn cpu_name(root: &Path) -> String {
@@ -92,12 +30,6 @@ pub fn cpu_name(root: &Path) -> String {
     // ("16-Core", "Eight-Core" and the clock Intel adds: "@ 3.60GHz")
     let words: Vec<&str> = name.split_whitespace().filter(|w| !w.ends_with("-Core") && !w.starts_with('@') && !w.ends_with("GHz")).collect();
     words.join(" ")
-}
-
-/// How many cores the processor has (not threads), as Linux counts them.
-pub fn cpu_cores(root: &Path) -> Option<u32> {
-    let info = std::fs::read_to_string(root.join("proc/cpuinfo")).ok()?;
-    info.lines().find_map(|l| l.split_once(':').filter(|(k, _)| k.trim() == "cpu cores").and_then(|(_, v)| v.trim().parse().ok()))
 }
 
 /// The motherboard's name, as its sensors' heading: "MSI MEG X670E ACE".
@@ -148,14 +80,6 @@ pub struct Card {
     pub vendor: Vendor,
     /// the graphics in the processor, rather than a card of its own
     pub integrated: bool,
-    dir: PathBuf,
-}
-
-impl Card {
-    /// Its name as its menu lists it: the graphics in a processor say so.
-    pub fn shown(&self) -> String {
-        if self.integrated { format!("{}, in the processor", self.name) } else { self.name.clone() }
-    }
 }
 
 /// The graphics cards Ectodeck can read, in their PCI addresses' order.
@@ -189,7 +113,7 @@ pub fn cards(root: &Path) -> Vec<Card> {
                 Vendor::Intel => pci.ends_with(":00:02.0"),
                 Vendor::Nvidia => false,
             };
-            Some(Card { pci, name: format!("{maker} {model}"), vendor, integrated, dir })
+            Some(Card { pci, name: format!("{maker} {model}"), vendor, integrated })
         })
         .collect();
     all.sort_by(|a, b| a.pci.cmp(&b.pci));
@@ -211,188 +135,325 @@ fn pci_name(ids: &str, vendor: u32, device: u32) -> Option<String> {
     })
 }
 
-/// What a card's readings come from, for its note: everything but video memory from
-/// Intel's driver, which doesn't report it.
-pub fn reports(c: &Card) -> &'static str {
-    match c.vendor {
-        Vendor::Nvidia => "Temperature, load, clock and video memory, from NVIDIA’s driver.",
-        Vendor::Amd => "Temperature, load, clock and video memory, from Linux’s amdgpu driver.",
-        Vendor::Intel => "Temperature, load and clock, from Linux’s xe driver, which doesn’t report video memory.",
-    }
-}
-
-/// An AMD or Intel card read from Linux's own files (an NVIDIA card is NVML's): its
-/// temperature, load and clock, and its video memory (none from Intel's driver, given as
-/// 0 of 0). Intel's load is worked out from how long it was idle since the last reading,
-/// so the first reading's is 0.
-#[derive(Default)]
-pub struct Sysfs {
-    idle: Option<(u64, Instant)>,
-}
-
-impl Sysfs {
-    pub fn read(&mut self, c: &Card) -> Option<crate::lcd_stats::GpuReading> {
-        let num = |f: &Path| std::fs::read_to_string(f).ok()?.trim().parse::<u64>().ok();
-        let hw = std::fs::read_dir(c.dir.join("hwmon")).ok()?.flatten().map(|e| e.path()).next()?;
-        let t = temps(&hw);
-        let temp_of = |want: &str| t.iter().find(|(l, _)| l == want).or(t.first()).and_then(|(_, p)| num(p)).map(|v| (v / 1000) as u32);
-        let gib = (1u64 << 30) as f64;
-        match c.vendor {
-            Vendor::Amd => {
-                let temp = temp_of("edge")?;
-                let load = num(&c.dir.join("gpu_busy_percent")).unwrap_or(0) as u32;
-                let clock = num(&hw.join("freq1_input")).map_or(0, |hz| (hz / 1_000_000) as u32);
-                let (used, total) = (num(&c.dir.join("mem_info_vram_used")).unwrap_or(0), num(&c.dir.join("mem_info_vram_total")).unwrap_or(0));
-                Some((temp, load, clock, used as f64 / gib, total as f64 / gib))
-            }
-            Vendor::Intel => {
-                let temp = temp_of("pkg")?;
-                let gt = c.dir.join("tile0/gt0");
-                let clock = num(&gt.join("freq0/act_freq")).unwrap_or(0) as u32;
-                let idle = num(&gt.join("gtidle/idle_residency_ms"));
-                let load = match (idle, self.idle) {
-                    (Some(now), Some((was, at))) => {
-                        let ms = at.elapsed().as_secs_f64() * 1000.0;
-                        if ms > 0.0 { (100.0 * (1.0 - (now.saturating_sub(was)) as f64 / ms)).clamp(0.0, 100.0).round() as u32 } else { 0 }
-                    }
-                    _ => 0,
-                };
-                self.idle = idle.map(|v| (v, Instant::now()));
-                Some((temp, load, clock, 0.0, 0.0))
-            }
-            Vendor::Nvidia => None,
-        }
-    }
-}
-
 // ------------------------------------------------------------------ the choices
 
-/// The choices, as Ectodeck's settings keep them: the CPU sensor by its driver and label,
-/// the clock as the average of all cores or the fastest core's, the card by its PCI address
-/// and name. None is the default: what Ectodeck read before there was a choice.
+/// Which sensors the screen's layouts can show.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Choice {
+pub struct Setup {
+    /// the sensors checked, by id; None until one is first checked or unchecked, when the
+    /// usual ones are, and those carried over from the Sensors card before (`also`)
+    pub checked: Option<BTreeSet<String>>,
+    pub also: BTreeSet<String>,
+    /// the names given in Settings, by id
+    pub names: BTreeMap<String, String>,
+    /// the card made main (or chosen on the Sensors card before), by its PCI address and
+    /// name; while it isn't in the computer, or none was made main, the card by the rule
+    pub main: Option<(String, String)>,
+    /// the devices listed so far, so a card that comes in as the main card has its usual
+    /// sensors checked
+    pub seen: BTreeSet<String>,
+}
+
+/// The Sensors card's choices before there was a library: the CPU sensor by its driver and
+/// label, whether the clock was the fastest core's, and the card by its PCI address and name.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Before {
     pub cpu: Option<(String, String)>,
     pub fastest: bool,
     pub card: Option<(String, String)>,
 }
 
-impl Choice {
-    pub fn of(v: &Value) -> Choice {
+impl Setup {
+    /// The choices as the settings keep them, and the Sensors card's choices where they are
+    /// still kept as it kept them.
+    pub fn of(v: &Value) -> (Setup, Option<Before>) {
+        let ids = |v: &Value| -> BTreeSet<String> { v.as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default() };
         let pair = |o: &Value, a: &str, b: &str| Some((o[a].as_str()?.to_string(), o[b].as_str()?.to_string()));
-        Choice { cpu: pair(&v["cpu_temp"], "driver", "label"), fastest: v["cpu_clock"].as_str() == Some("fastest"), card: pair(&v["card"], "pci", "name") }
+        // (the Sensors card always kept how the clock was counted)
+        if v.get("cpu_clock").is_some() {
+            let before = Before { cpu: pair(&v["cpu_temp"], "driver", "label"), fastest: v["cpu_clock"].as_str() == Some("fastest"), card: pair(&v["card"], "pci", "name") };
+            return (Setup::default(), Some(before));
+        }
+        let names = v["names"].as_object().map(|m| m.iter().filter_map(|(k, n)| Some((k.clone(), n.as_str()?.to_string()))).collect()).unwrap_or_default();
+        let setup = Setup { checked: v["checked"].is_array().then(|| ids(&v["checked"])), also: ids(&v["also"]), names, main: pair(&v["main"], "pci", "name"), seen: ids(&v["seen"]) };
+        (setup, None)
     }
 
     pub fn to_json(&self) -> Value {
-        let mut v = json!({ "cpu_clock": if self.fastest { "fastest" } else { "average" } });
-        if let Some((d, l)) = &self.cpu {
-            v["cpu_temp"] = json!({ "driver": d, "label": l });
+        let mut v = json!({ "names": self.names, "seen": self.seen });
+        if let Some(c) = &self.checked {
+            v["checked"] = json!(c);
         }
-        if let Some((p, n)) = &self.card {
-            v["card"] = json!({ "pci": p, "name": n });
+        if !self.also.is_empty() {
+            v["also"] = json!(self.also);
+        }
+        if let Some((p, n)) = &self.main {
+            v["main"] = json!({ "pci": p, "name": n });
         }
         v
     }
 
-    /// The sensor the CPU temperature comes from: the one chosen, while it is there (one
-    /// gone shows as unavailable until another is chosen); or by default Tctl, on Intel
-    /// Package id 0, else the processor's first.
-    pub fn cpu_sensor<'a>(&self, all: &'a [CpuSensor]) -> Option<&'a CpuSensor> {
-        match &self.cpu {
-            Some((d, l)) => all.iter().find(|s| s.driver == *d && s.label == *l),
-            None => all.iter().find(|s| s.own && (s.label == "Tctl" || s.label == "Package id 0")).or(all.iter().find(|s| s.own)).or(all.first()),
+    /// The Sensors card's choices carried over, on a computer listed as `cat`: the CPU
+    /// sensor chosen and the clock chosen are checked, and the card chosen is the main card.
+    /// What the layouts showing the CPU temperature or clock read from where those weren't
+    /// the usual ones, to show the same: each with the sensor it now shows.
+    pub fn carry(&mut self, b: &Before, cat: &Catalog) -> Vec<(Source, String)> {
+        let mut shows = Vec::new();
+        if let Some((driver, label)) = &b.cpu {
+            let id = cat.devices.iter().flat_map(|d| d.sensors.iter()).find(|s| s.id.starts_with(&format!("{driver}@")) && s.id.ends_with(&format!("/temp/{label}"))).map(|s| s.id.clone());
+            if let Some(id) = id.filter(|id| cat.cpu_temp().is_none_or(|u| u.id != *id)) {
+                self.also.insert(id.clone());
+                shows.push((Source::CpuTemp, id));
+            }
+        }
+        if b.fastest {
+            self.also.insert("cpu/clock/fastest".into());
+            shows.push((Source::CpuClock, "cpu/clock/fastest".into()));
+        }
+        self.main = b.card.clone();
+        shows
+    }
+
+    /// The main card on a computer listed as `cat`: the one made main while it is in it (by its
+    /// address, or by its name where its address changed), else the card by the rule.
+    pub fn main_card<'a>(&self, cat: &'a Catalog) -> Option<&'a Device> {
+        let cards = cat.cards();
+        let made = self.main.as_ref().and_then(|(p, n)| {
+            let is = |d: &&Device, by_pci: bool| d.card.as_ref().is_some_and(|c| c.name == *n && (!by_pci || c.pci == *p));
+            cards.iter().find(|d| is(d, true)).or(cards.iter().find(|d| is(d, false))).copied()
+        });
+        made.or(cat.main_by_rule())
+    }
+
+    /// The sensors the ready-made layouts show, on a computer listed as `cat`: the
+    /// processor's temperature, load and average clock, the memory in use, and the main
+    /// card's temperature, load, clock and video memory.
+    pub fn usual(&self, cat: &Catalog) -> Vec<String> {
+        let mut all: Vec<String> = cat.devices.iter().filter(|d| d.card.is_none()).flat_map(|d| d.sensors.iter()).filter(|s| s.usual).map(|s| s.id.clone()).collect();
+        if let Some(m) = self.main_card(cat) {
+            all.extend(m.sensors.iter().filter(|s| s.usual).map(|s| s.id.clone()));
+        }
+        all
+    }
+
+    /// The sensors checked now, on a computer listed as `cat`.
+    pub fn checked_in(&self, cat: &Catalog) -> BTreeSet<String> {
+        match &self.checked {
+            Some(c) => c.clone(),
+            None => self.usual(cat).into_iter().chain(self.also.iter().cloned()).collect(),
         }
     }
 
-    /// The card the GPU readings come from: the one chosen (by its address, or its name
-    /// where its address changed), while it is there; or by default the first NVIDIA card,
-    /// else the first other.
-    pub fn card<'a>(&self, all: &'a [Card]) -> Option<&'a Card> {
-        match &self.card {
-            Some((p, n)) => all.iter().find(|c| c.pci == *p && c.name == *n).or(all.iter().find(|c| c.name == *n)),
-            None => all.iter().find(|c| c.vendor == Vendor::Nvidia).or(all.first()),
+    /// A computer listed: a card that has come in as the main card has its usual sensors
+    /// checked, and each device is seen. Whether that changed anything to keep.
+    pub fn settle(&mut self, cat: &Catalog) -> bool {
+        let mut changed = false;
+        if let Some(m) = self.main_card(cat).filter(|m| !self.seen.contains(&m.key)) {
+            let usual: Vec<String> = m.sensors.iter().filter(|s| s.usual).map(|s| s.id.clone()).collect();
+            if let Some(c) = &mut self.checked {
+                c.extend(usual);
+                changed = true;
+            }
+        }
+        for d in &cat.devices {
+            changed |= self.seen.insert(d.key.clone());
+        }
+        changed
+    }
+
+    /// A sensor checked or unchecked in Settings.
+    pub fn check(&mut self, cat: &Catalog, id: &str, on: bool) {
+        let mut c = self.checked_in(cat);
+        if on {
+            c.insert(id.to_string());
+        } else {
+            c.remove(id);
+        }
+        self.checked = Some(c);
+    }
+
+    /// A card made the main card, its usual sensors checked (the card main before keeps its own).
+    pub fn make_main(&mut self, cat: &Catalog, key: &str) {
+        let Some(d) = cat.device(key) else { return };
+        let Some(c) = &d.card else { return };
+        let mut checked = self.checked_in(cat);
+        checked.extend(d.sensors.iter().filter(|s| s.usual).map(|s| s.id.clone()));
+        self.checked = Some(checked);
+        self.main = Some((c.pci.clone(), c.name.clone()));
+    }
+
+    /// A sensor's name given in Settings: none (an empty name, or the sensor's own) takes it back.
+    pub fn rename(&mut self, cat: &Catalog, id: &str, name: &str) {
+        let name = name.trim();
+        let own = cat.sensor(id).map(|(_, s)| s.name.as_str());
+        if name.is_empty() || Some(name) == own {
+            self.names.remove(id);
+        } else {
+            self.names.insert(id.to_string(), name.to_string());
         }
     }
 }
 
-static CHOICE: OnceLock<Mutex<Choice>> = OnceLock::new();
+static SETUP: OnceLock<Mutex<Setup>> = OnceLock::new();
 
 /// The choices every reader of the screen's readings goes by now.
-pub fn choice() -> Choice {
-    CHOICE.get_or_init(Default::default).lock().unwrap().clone()
+pub fn setup() -> Setup {
+    SETUP.get_or_init(Default::default).lock().unwrap().clone()
 }
 
-/// The choices from now on, from Ectodeck's settings.
-pub fn choose(c: Choice) {
-    *CHOICE.get_or_init(Default::default).lock().unwrap() = c;
+/// The choices from now on.
+pub fn set_up(s: Setup) {
+    *SETUP.get_or_init(Default::default).lock().unwrap() = s;
+}
+
+// ------------------------------------------------------------------ the sensors layouts show
+
+/// What a layout knows of a sensor it shows, from the last list of the computer's sensors:
+/// what it reads, the part it is in, and its name as the editor says it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Known {
+    pub what: What,
+    pub part: Part,
+    pub name: String,
+    /// its device's name, and its device's key
+    pub device: String,
+    pub key: String,
+}
+
+#[derive(Default)]
+struct Book {
+    ids: Vec<String>,
+    known: HashMap<u16, Known>,
+}
+
+static BOOK: OnceLock<Mutex<Book>> = OnceLock::new();
+
+fn book() -> std::sync::MutexGuard<'static, Book> {
+    BOOK.get_or_init(Default::default).lock().unwrap()
+}
+
+/// The number a layout knows a sensor by, for as long as Ectodeck runs.
+pub fn number(id: &str) -> u16 {
+    let mut b = book();
+    match b.ids.iter().position(|x| x == id) {
+        Some(i) => i as u16,
+        None => {
+            b.ids.push(id.to_string());
+            (b.ids.len() - 1) as u16
+        }
+    }
+}
+
+/// The sensor a layout knows by this number.
+pub fn id_of(n: u16) -> String {
+    book().ids.get(n as usize).cloned().unwrap_or_default()
+}
+
+/// What is known of the sensor a layout knows by this number (nothing for a sensor not on
+/// this computer, or before its sensors are first listed).
+pub fn known(n: u16) -> Option<Known> {
+    book().known.get(&n).cloned()
+}
+
+/// The computer's sensors listed: each one's name, as given or its own, and what it reads.
+pub fn remember(cat: &Catalog, setup: &Setup) {
+    for d in &cat.devices {
+        for s in &d.sensors {
+            let n = number(&s.id);
+            let k = Known { what: s.what, part: d.part, name: s.menu_name(setup.names.get(&s.id).map(String::as_str)), device: d.name.clone(), key: d.key.clone() };
+            book().known.insert(n, k);
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sensor_list::tests::{computer, nvidia, temp_dir};
+    use crate::sensor_list::catalog;
 
-    /// A made-up computer: an AMD processor's k10temp, a motherboard chip, a drive, and two
-    /// cards (an NVIDIA card, and the graphics in the processor).
-    fn computer(dir: &Path) {
-        let hw = |n: u32, name: &str, dev: &str, t: &[(&str, i64)]| {
-            let h = dir.join(format!("sys/class/hwmon/hwmon{n}"));
-            std::fs::create_dir_all(&h).unwrap();
-            std::fs::write(h.join("name"), format!("{name}\n")).unwrap();
-            let d = dir.join(dev);
-            std::fs::create_dir_all(&d).unwrap();
-            std::os::unix::fs::symlink(&d, h.join("device")).unwrap();
-            for (k, (label, v)) in t.iter().enumerate() {
-                std::fs::write(h.join(format!("temp{}_input", k + 1)), format!("{v}\n")).unwrap();
-                std::fs::write(h.join(format!("temp{}_label", k + 1)), format!("{label}\n")).unwrap();
-            }
-        };
-        hw(4, "k10temp", "sys/devices/pci0000:00/0000:00:18.3", &[("Tctl", 63000), ("Tccd1", 54000), ("Tccd2", 57000)]);
-        hw(12, "nct6687", "sys/devices/platform/nct6687.2592", &[("CPU", 63500), ("System", 40000), ("CPU Socket", 46000)]);
-        hw(0, "nvme", "sys/devices/pci0000:00/0000:00:01.2/0000:02:00.0/nvme/nvme0", &[("Composite", 48000)]);
-        std::fs::create_dir_all(dir.join("proc")).unwrap();
-        std::fs::write(dir.join("proc/cpuinfo"), "processor\t: 0\nmodel name\t: AMD Ryzen 9 9950X3D 16-Core Processor\ncpu cores\t: 16\n").unwrap();
-        std::fs::create_dir_all(dir.join("sys/class/dmi/id")).unwrap();
-        std::fs::write(dir.join("sys/class/dmi/id/board_vendor"), "Micro-Star International Co., Ltd.\n").unwrap();
-        std::fs::write(dir.join("sys/class/dmi/id/board_name"), "MEG X670E ACE (MS-7D69)\n").unwrap();
-        let card = |path: &str, v: &str, d: &str| {
-            let real = dir.join("sys/devices").join(path);
-            std::fs::create_dir_all(&real).unwrap();
-            for (f, s) in [("class", "0x030000"), ("vendor", v), ("device", d)] {
-                std::fs::write(real.join(f), format!("{s}\n")).unwrap();
-            }
-            let at = dir.join("sys/bus/pci/devices");
-            std::fs::create_dir_all(&at).unwrap();
-            std::os::unix::fs::symlink(&real, at.join(path.rsplit('/').next().unwrap())).unwrap();
-        };
-        card("pci0000:00/0000:00:01.1/0000:01:00.0", "0x10de", "0x2b85");
-        card("pci0000:00/0000:00:08.1/0000:18:00.0", "0x1002", "0x13c0");
-        std::fs::create_dir_all(dir.join("usr/share/hwdata")).unwrap();
-        std::fs::write(dir.join("usr/share/hwdata/pci.ids"), "1002  Advanced Micro Devices, Inc. [AMD/ATI]\n\t13c0  Granite Ridge [Radeon Graphics]\n10de  NVIDIA Corporation\n# Overclocked\n\t2b85  GB202 [GeForce RTX 5090]\n").unwrap();
+    #[test]
+    fn the_usual_sensors_checked_until_one_is_and_the_main_card_by_the_rule() {
+        let dir = temp_dir("setup");
+        computer(&dir);
+        let cat = catalog(&dir, &mut nvidia());
+        let (mut s, before) = Setup::of(&Value::Null);
+        assert!(before.is_none());
+        let usual: Vec<&str> = ["k10temp@0000:00:18.3/temp/Tctl", "cpu/load", "cpu/clock/average", "memory/used", "card@0000:01:00.0/temperature", "card@0000:01:00.0/load", "card@0000:01:00.0/clock", "card@0000:01:00.0/video-memory"].into();
+        assert_eq!(s.checked_in(&cat), usual.iter().map(|x| x.to_string()).collect());
+        assert_eq!(s.main_card(&cat).map(|d| d.name.as_str()), Some("RTX 5090"));
+        // a sensor checked: from then on, the ones checked
+        s.check(&cat, "nct6687@nct6687.2592/fan/Pump Fan", true);
+        s.rename(&cat, "nct6687@nct6687.2592/fan/Pump Fan", " Radiator pump ");
+        assert!(s.checked_in(&cat).contains("nct6687@nct6687.2592/fan/Pump Fan"));
+        assert_eq!(s.names.get("nct6687@nct6687.2592/fan/Pump Fan").map(String::as_str), Some("Radiator pump"));
+        // the Arc made main: its usual sensors checked, the RTX 5090 keeps its own
+        s.make_main(&cat, "card@0000:16:00.0");
+        let c = s.checked_in(&cat);
+        assert!(c.contains("card@0000:16:00.0/temperature") && c.contains("card@0000:16:00.0/load") && c.contains("card@0000:01:00.0/temperature"));
+        assert_eq!(s.main_card(&cat).map(|d| d.name.as_str()), Some("Arc Pro B50"));
+        // kept and read back as it was
+        assert_eq!(Setup::of(&s.to_json()), (s.clone(), None));
+        // a name taken back by giving it nothing
+        s.rename(&cat, "nct6687@nct6687.2592/fan/Pump Fan", "");
+        assert!(s.names.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn the_processor_s_sensors_its_own_first_then_the_motherboard_s() {
-        let dir = std::env::temp_dir().join(format!("ectodeck-sensors-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+    fn a_card_that_comes_in_as_the_main_card_has_its_usual_sensors_checked() {
+        let dir = temp_dir("setup-new-card");
         computer(&dir);
-        let all = cpu_sensors(&dir);
-        let names: Vec<(&str, &str, bool)> = all.iter().map(|s| (s.driver.as_str(), s.label.as_str(), s.own)).collect();
-        assert_eq!(names, [("k10temp", "Tctl", true), ("k10temp", "Tccd1", true), ("k10temp", "Tccd2", true), ("nct6687", "CPU", false), ("nct6687", "CPU Socket", false)]);
-        assert_eq!(all[3].read(), Some(63.5));
-        assert_eq!((cpu_name(&dir), cpu_cores(&dir), board_name(&dir)), ("AMD Ryzen 9 9950X3D".into(), Some(16), Some("MSI MEG X670E ACE".into())));
-        // by default Tctl; chosen, kept by driver and label; gone, none until another is chosen
-        let mut c = Choice::default();
-        assert_eq!(c.cpu_sensor(&all).map(|s| s.label.as_str()), Some("Tctl"));
-        c.cpu = Some(("nct6687".into(), "CPU Socket".into()));
-        assert_eq!(c.cpu_sensor(&all).map(|s| s.read()), Some(Some(46.0)));
-        assert_eq!(Choice::of(&c.to_json()), c);
-        c.cpu = Some(("it87".into(), "CPU".into()));
-        assert!(c.cpu_sensor(&all).is_none());
-        // the cards, named as people say them; the NVIDIA card by default
-        let cards = cards(&dir);
-        let shown: Vec<String> = cards.iter().map(|c| c.shown()).collect();
-        assert_eq!(shown, ["NVIDIA GeForce RTX 5090", "AMD Radeon Graphics, in the processor"]);
-        assert_eq!(Choice::default().card(&cards).map(|c| c.pci.as_str()), Some("0000:01:00.0"));
+        // the computer before the RTX 5090 was in it: the Arc is the main card
+        std::fs::remove_file(dir.join("sys/bus/pci/devices/0000:01:00.0")).unwrap();
+        let before = catalog(&dir, &mut nvidia());
+        let mut s = Setup::default();
+        s.settle(&before);
+        s.check(&before, "nct6687@nct6687.2592/fan/Pump Fan", true);
+        assert_eq!(s.main_card(&before).map(|d| d.name.as_str()), Some("Arc Pro B50"));
+        // then the RTX 5090 put in: main by the rule, its usual sensors checked; nothing else new checked
+        std::os::unix::fs::symlink(dir.join("sys/devices/pci0000:00/0000:00:01.1/0000:01:00.0"), dir.join("sys/bus/pci/devices/0000:01:00.0")).unwrap();
+        let after = catalog(&dir, &mut nvidia());
+        assert!(s.settle(&after));
+        let c = s.checked_in(&after);
+        assert!(c.contains("card@0000:01:00.0/temperature") && c.contains("card@0000:01:00.0/video-memory"));
+        assert!(!c.contains("card@0000:01:00.0/power"));
+        // and a second look changes nothing
+        assert!(!s.settle(&after));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_sensors_card_s_choices_carried_over() {
+        let dir = temp_dir("setup-before");
+        computer(&dir);
+        let cat = catalog(&dir, &mut nvidia());
+        let old = json!({ "cpu_temp": { "driver": "nct6687", "label": "CPU" }, "cpu_clock": "fastest", "card": { "pci": "0000:18:00.0", "name": "AMD Radeon Graphics" } });
+        let (mut s, before) = Setup::of(&old);
+        let shows = s.carry(&before.unwrap(), &cat);
+        assert_eq!(shows, [(Source::CpuTemp, "nct6687@nct6687.2592/temp/CPU".to_string()), (Source::CpuClock, "cpu/clock/fastest".to_string())]);
+        let c = s.checked_in(&cat);
+        assert!(c.contains("nct6687@nct6687.2592/temp/CPU") && c.contains("cpu/clock/fastest") && c.contains("k10temp@0000:00:18.3/temp/Tctl"));
+        assert_eq!(s.main_card(&cat).map(|d| d.name.as_str()), Some("Radeon Graphics"));
+        // Tctl and the average, as they were by default: nothing for a layout to change
+        let (mut s, before) = Setup::of(&json!({ "cpu_temp": { "driver": "k10temp", "label": "Tctl" }, "cpu_clock": "average" }));
+        assert!(s.carry(&before.unwrap(), &cat).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_layout_knows_a_sensor_by_its_number() {
+        let dir = temp_dir("setup-known");
+        computer(&dir);
+        let cat = catalog(&dir, &mut nvidia());
+        let n = number("k10temp@0000:00:18.3/temp/Tccd1");
+        assert_eq!(number("k10temp@0000:00:18.3/temp/Tccd1"), n);
+        assert_eq!(id_of(n), "k10temp@0000:00:18.3/temp/Tccd1");
+        let mut s = Setup::default();
+        s.names.insert("k10temp@0000:00:18.3/temp/Tccd1".into(), "Hot die".into());
+        remember(&cat, &s);
+        let k = known(n).unwrap();
+        assert_eq!((k.name.as_str(), k.what, k.part, k.device.as_str()), ("Hot die", What::Temperature, Part::Processor, "AMD Ryzen 9 9950X3D"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

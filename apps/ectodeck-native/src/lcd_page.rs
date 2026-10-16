@@ -21,7 +21,8 @@
 
 use serde_json::{json, Value};
 
-use crate::lcd_stats::GpuReading;
+use crate::lcd_stats::Gpu;
+use crate::sensor_list::{Val, What};
 
 pub const COLS: u8 = 20;
 pub const ROWS: u8 = 4;
@@ -46,6 +47,9 @@ pub enum Source {
     KeyRollover,
     OutsideTemp,
     Sky,
+    /// one of the computer's sensors checked in Settings, by the number [crate::sensors]
+    /// knows it by (kept in a layout by its id)
+    Sensor(u16),
 }
 
 pub const SOURCES: [Source; 15] = [
@@ -84,11 +88,20 @@ impl Source {
             Source::KeyRollover => "key-rollover",
             Source::OutsideTemp => "outside-temp",
             Source::Sky => "sky",
+            Source::Sensor(_) => "sensor",
         }
     }
 
     fn from_key(k: &str) -> Option<Source> {
         SOURCES.iter().copied().find(|s| s.key() == k)
+    }
+
+    /// What a saved block shows: a reading by its key, or a sensor by its id.
+    fn of_json(p: &Value) -> Option<Source> {
+        match p["source"].as_str()? {
+            "sensor" => Some(Source::Sensor(crate::sensors::number(p["sensor"].as_str()?))),
+            k => Source::from_key(k),
+        }
     }
 
     pub fn name(self) -> &'static str {
@@ -108,11 +121,23 @@ impl Source {
             Source::KeyRollover => "Key rollover",
             Source::OutsideTemp => "Outside temperature",
             Source::Sky => "Weather",
+            Source::Sensor(_) => "Sensor",
+        }
+    }
+
+    /// Its name as the editor says it: a sensor's as given in Settings, or its own.
+    pub fn title(self) -> String {
+        match self {
+            Source::Sensor(n) => crate::sensors::known(n).map_or_else(|| sensor_label(n), |k| k.name),
+            s => s.name().to_string(),
         }
     }
 
     /// What it is a reading of, as a card's line on a page says it.
-    pub fn phrase(self) -> &'static str {
+    pub fn phrase(self) -> String {
+        if let Source::Sensor(n) = self {
+            return crate::sensors::known(n).map_or_else(|| sensor_label(n), |k| k.name);
+        }
         match self {
             Source::CpuTemp | Source::CpuLoad | Source::CpuClock => "CPU",
             Source::GpuTemp | Source::GpuLoad | Source::GpuClock => "GPU",
@@ -125,7 +150,9 @@ impl Source {
             Source::KeyRollover => "key rollover",
             Source::OutsideTemp => "the temperature outside",
             Source::Sky => "the sky outside",
+            Source::Sensor(_) => "a sensor",
         }
+        .to_string()
     }
 
     /// The group it sits in on the menu of readings.
@@ -137,6 +164,7 @@ impl Source {
             Source::Profile | Source::ProfileNumber | Source::GameMode | Source::KeyRollover => "Keyboard",
             Source::Date => "Time and date",
             Source::OutsideTemp | Source::Sky => "More",
+            Source::Sensor(_) => "Sensors",
         }
     }
 
@@ -151,6 +179,7 @@ impl Source {
             Source::Profile | Source::ProfileNumber => "The profile the keyboard is using",
             Source::GameMode | Source::KeyRollover => "The keyboard, with Ectodeck’s firmware build 5 or later",
             Source::OutsideTemp | Source::Sky => "Open-Meteo, for the place in Ectodeck’s settings",
+            Source::Sensor(_) => "One of this computer’s sensors",
         }
     }
 
@@ -162,7 +191,10 @@ impl Source {
     }
 
     pub fn is_temperature(self) -> bool {
-        matches!(self, Source::CpuTemp | Source::GpuTemp | Source::OutsideTemp)
+        match self {
+            Source::Sensor(n) => crate::sensors::known(n).is_some_and(|k| k.what == What::Temperature),
+            s => matches!(s, Source::CpuTemp | Source::GpuTemp | Source::OutsideTemp),
+        }
     }
 
     /// Whether a new block of this reading shows it in °F: the weather, as Americans read
@@ -174,7 +206,10 @@ impl Source {
 
     /// Whether a bar can show it: a share of something.
     pub fn barred(self) -> bool {
-        matches!(self, Source::CpuTemp | Source::CpuLoad | Source::GpuTemp | Source::GpuLoad | Source::Memory | Source::VideoMemory)
+        match self {
+            Source::Sensor(n) => crate::sensors::known(n).is_some_and(|k| matches!(k.what, What::Temperature | What::Load | What::Charge | What::FanShare | What::InUse)),
+            s => matches!(s, Source::CpuTemp | Source::CpuLoad | Source::GpuTemp | Source::GpuLoad | Source::Memory | Source::VideoMemory),
+        }
     }
 
     /// What it reads from: when that can't be read, every reading from it
@@ -186,6 +221,8 @@ impl Source {
             Source::Memory => Some("memory"),
             Source::OutsideTemp | Source::Sky => Some("weather"),
             Source::GameMode | Source::KeyRollover => Some("keyboard"),
+            // (a sensor's part: its readings said unavailable once)
+            Source::Sensor(n) => Some(crate::sensors::known(n).map_or("Sensor", |k| k.part.short())),
             Source::CpuLoad | Source::Date | Source::Profile | Source::ProfileNumber => None,
         }
     }
@@ -202,8 +239,15 @@ impl Source {
             Source::GameMode => "Mode",
             Source::KeyRollover => "Rollover",
             Source::OutsideTemp | Source::Sky => "Weather",
+            Source::Sensor(n) => crate::sensors::known(n).map_or("Sensor", |k| k.part.short()),
         }
     }
+}
+
+/// A sensor not on this computer, or not listed yet, by the label its id ends with ("Pump Fan").
+fn sensor_label(n: u16) -> String {
+    let id = crate::sensors::id_of(n);
+    id.rsplit('/').next().unwrap_or("Sensor").to_string()
 }
 
 pub use crate::lcd_fx::Fx;
@@ -649,6 +693,9 @@ impl Page {
                     Kind::Data(s, f) => {
                         v["type"] = json!("data");
                         v["source"] = json!(s.key());
+                        if let Source::Sensor(n) = s {
+                            v["sensor"] = json!(crate::sensors::id_of(*n));
+                        }
                         v["fahrenheit"] = json!(f);
                         if *s == Source::Date && p.date_format != DateFormat::Short {
                             v["format"] = json!(p.date_format.key());
@@ -657,6 +704,9 @@ impl Page {
                     Kind::Bar(s) => {
                         v["type"] = json!("bar");
                         v["source"] = json!(s.key());
+                        if let Source::Sensor(n) = s {
+                            v["sensor"] = json!(crate::sensors::id_of(*n));
+                        }
                     }
                     Kind::Clock(twelve) => {
                         v["type"] = json!("clock");
@@ -690,8 +740,8 @@ impl Page {
             .filter_map(|p| {
                 let kind = match p["type"].as_str()? {
                     "text" => Kind::Text(p["text"].as_str().unwrap_or("").into()),
-                    "data" => Kind::Data(Source::from_key(p["source"].as_str()?)?, p["fahrenheit"].as_bool().unwrap_or(false)),
-                    "bar" => Kind::Bar(Source::from_key(p["source"].as_str()?)?),
+                    "data" => Kind::Data(Source::of_json(p)?, p["fahrenheit"].as_bool().unwrap_or(false)),
+                    "bar" => Kind::Bar(Source::of_json(p)?),
                     "clock" => Kind::Clock(p["twelve"].as_bool().unwrap_or(false)),
                     // (an effect no longer offered, as Life, reads as Rain: the block keeps its place)
                     "effect" => Kind::Effect {
@@ -1202,11 +1252,12 @@ pub struct Readings {
     /// °C
     pub cpu_temp: Option<f64>,
     /// percent
-    pub cpu_load: f64,
+    pub cpu_load: Option<f64>,
     pub cpu_ghz: Option<f64>,
     /// used and in all, GiB
     pub ram: Option<(f64, f64)>,
-    pub gpu: Option<GpuReading>,
+    /// the main card's
+    pub gpu: Option<Gpu>,
     pub now: Option<Moment>,
     pub profile: Option<String>,
     /// the active profile's number; the keyboard's mode and key rollover, in its own words
@@ -1216,6 +1267,8 @@ pub struct Readings {
     pub rollover: Option<String>,
     /// °C, and the sky in words
     pub outside: Option<(f64, String)>,
+    /// each checked sensor's reading, by the number a layout knows it by, and what it reads
+    pub sensors: std::collections::HashMap<u16, (What, Val)>,
 }
 
 fn fahrenheit(c: f64) -> f64 {
@@ -1227,21 +1280,21 @@ fn text_of(s: Source, f: bool, date: DateFormat, r: &Readings) -> Option<String>
     let deg = |c: f64| if f { fahrenheit(c) } else { c };
     Some(match s {
         Source::CpuTemp => format!("{:>2.0}°", deg(r.cpu_temp?)),
-        Source::CpuLoad => format!("{:>3.0}%", r.cpu_load),
+        Source::CpuLoad => format!("{:>3.0}%", r.cpu_load?),
         Source::CpuClock => format!("{:>4.0}MHz", r.cpu_ghz? * 1000.0),
         Source::GpuTemp => {
-            let t = r.gpu?.0;
+            let t = r.gpu?.temp?;
             if f { format!("{:>2.0}°", fahrenheit(t as f64)) } else { format!("{t:>2}°") }
         }
-        Source::GpuLoad => format!("{:>3}%", r.gpu?.1),
-        Source::GpuClock => format!("{:>4}MHz", r.gpu?.2),
+        Source::GpuLoad => format!("{:>3}%", r.gpu?.load?),
+        Source::GpuClock => format!("{:>4}MHz", r.gpu?.clock?),
         Source::Memory => {
             let (used, total) = r.ram?;
             format!("{used:.1} / {total:.1} GB")
         }
         Source::VideoMemory => {
-            let g = r.gpu.filter(|g| g.4 > 0.0)?;
-            format!("{:.1} / {:.1} GB", g.3, g.4)
+            let (used, total) = r.gpu?.vram.filter(|v| v.1 > 0.0)?;
+            format!("{used:.1} / {total:.1} GB")
         }
         Source::Date => date.write(r.now.as_ref()?),
         Source::Profile => ectotype_core::lcd::lcd_text(r.profile.as_deref()?),
@@ -1250,6 +1303,10 @@ fn text_of(s: Source, f: bool, date: DateFormat, r: &Readings) -> Option<String>
         Source::KeyRollover => r.rollover.clone()?,
         Source::OutsideTemp => format!("{:.0}°", deg(r.outside.as_ref()?.0)),
         Source::Sky => ectotype_core::lcd::lcd_text(&r.outside.as_ref()?.1),
+        Source::Sensor(n) => {
+            let (what, v) = r.sensors.get(&n)?;
+            crate::sensor_read::on_screen(*what, *v, f)
+        }
     })
 }
 
@@ -1257,11 +1314,15 @@ fn text_of(s: Source, f: bool, date: DateFormat, r: &Readings) -> Option<String>
 fn share_of(s: Source, r: &Readings) -> Option<f64> {
     Some(match s {
         Source::CpuTemp => r.cpu_temp? / 100.0,
-        Source::CpuLoad => r.cpu_load / 100.0,
-        Source::GpuTemp => r.gpu?.0 as f64 / 100.0,
-        Source::GpuLoad => r.gpu?.1 as f64 / 100.0,
+        Source::CpuLoad => r.cpu_load? / 100.0,
+        Source::GpuTemp => r.gpu?.temp? as f64 / 100.0,
+        Source::GpuLoad => r.gpu?.load? as f64 / 100.0,
         Source::Memory => r.ram.map(|(u, t)| if t > 0.0 { u / t } else { 0.0 })?,
-        Source::VideoMemory => r.gpu.filter(|g| g.4 > 0.0).map(|g| g.3 / g.4)?,
+        Source::VideoMemory => r.gpu?.vram.filter(|v| v.1 > 0.0).map(|(u, t)| u / t)?,
+        Source::Sensor(n) => {
+            let (what, v) = r.sensors.get(&n)?;
+            crate::sensor_read::share(*what, *v)?
+        }
         _ => return None,
     }
     .clamp(0.0, 1.0))
@@ -1618,7 +1679,7 @@ fn lay_out(page: &Page, r: &Readings, t: f64, still: bool) -> (Vec<String>, Vec<
     let mut behind = vec![vec![' '; COLS as usize]; ROWS as usize];
     for p in page.pieces.iter().filter(|p| effect(p)) {
         if let Kind::Effect { fx, speed, word } = &p.kind {
-            let (at, live) = if still { (crate::lcd_fx::still(*fx), crate::lcd_fx::Live::sample()) } else { (crate::lcd_fx::tenths(*fx, t, *speed), crate::lcd_fx::live(*fx, *speed, r.cpu_load)) };
+            let (at, live) = if still { (crate::lcd_fx::still(*fx), crate::lcd_fx::Live::sample()) } else { (crate::lcd_fx::tenths(*fx, t, *speed), crate::lcd_fx::live(*fx, *speed, r.cpu_load.unwrap_or(0.0))) };
             let f = crate::lcd_fx::frame(*fx, at, &ectotype_core::lcd::lcd_text(word), &live);
             for row in p.row..(p.row + p.height.max(1)).min(ROWS) {
                 for c in p.col..(p.col + p.width).min(COLS) {
@@ -1743,15 +1804,19 @@ pub fn available(r: &Readings, weather: bool) -> Vec<Source> {
         .filter(|s| match s {
             Source::CpuTemp => r.cpu_temp.is_some(),
             Source::CpuClock => r.cpu_ghz.is_some(),
-            Source::CpuLoad | Source::Date | Source::Profile => true,
+            Source::CpuLoad => r.cpu_load.is_some(),
+            Source::Date | Source::Profile => true,
             Source::ProfileNumber => r.profile_number.is_some(),
             Source::GameMode => r.mode.is_some(),
             Source::KeyRollover => r.rollover.is_some(),
-            Source::GpuTemp | Source::GpuLoad | Source::GpuClock => r.gpu.is_some(),
+            Source::GpuTemp => r.gpu.is_some_and(|g| g.temp.is_some()),
+            Source::GpuLoad => r.gpu.is_some_and(|g| g.load.is_some()),
+            Source::GpuClock => r.gpu.is_some_and(|g| g.clock.is_some()),
             // (Intel's driver doesn't report it)
-            Source::VideoMemory => r.gpu.is_some_and(|g| g.4 > 0.0),
+            Source::VideoMemory => r.gpu.is_some_and(|g| g.vram.is_some_and(|v| v.1 > 0.0)),
             Source::Memory => r.ram.is_some(),
             Source::OutsideTemp | Source::Sky => weather,
+            Source::Sensor(n) => r.sensors.contains_key(n),
         })
         .collect()
 }
@@ -1881,7 +1946,7 @@ mod tests {
     #[test]
     fn readings_and_bars_take_more_rows() {
         let at = |h: u32, m: u32| Moment { hour: h, minute: m, weekday: 2, day: 13, month: 9, year: 2026 };
-        let r = Readings { cpu_ghz: Some(4.286), ram: Some((22.5, 60.2)), cpu_load: 60.0, now: Some(at(2, 36)), ..Readings::default() };
+        let r = Readings { cpu_ghz: Some(4.286), ram: Some((22.5, 60.2)), cpu_load: Some(60.0), now: Some(at(2, 36)), ..Readings::default() };
         let piece = |kind: Kind, row: u8, col: u8, width: u8, height: u8| Piece { kind, row, col, width, right: true, center: false, gap: 1, height, scroll: true, date_format: DateFormat::Short };
         // the CPU clock, which has no space, breaks at the block's edge; the memory at its space
         let p = Page { pieces: vec![piece(Kind::Data(Source::CpuClock, false), 0, 4, 4, 2), piece(Kind::Data(Source::Memory, false), 2, 4, 7, 2)], ..Page::blank() };
@@ -1943,12 +2008,12 @@ mod tests {
     #[test]
     fn a_card_whose_driver_reports_no_video_memory_leaves_it_out() {
         // (Intel's xe driver: temperature, load and clock, and 0 of 0 for video memory)
-        let r = Readings { gpu: Some((56, 3, 0, 0.0, 0.0)), ..Readings::default() };
+        let r = Readings { gpu: Some(Gpu::of(56, 3, 0, 0.0, 0.0)), ..Readings::default() };
         let avail = available(&r, false);
         assert!(avail.contains(&Source::GpuTemp) && !avail.contains(&Source::VideoMemory));
         let vram = Piece { kind: Kind::Data(Source::VideoMemory, false), row: 0, col: 0, width: 14, right: false, center: false, gap: 1, height: 1, scroll: true, date_format: DateFormat::Short };
         assert_eq!(says(&vram, &r), None);
-        let nvidia = Readings { gpu: Some((45, 12, 1837, 13.1, 31.8)), ..Readings::default() };
+        let nvidia = Readings { gpu: Some(Gpu::of(45, 12, 1837, 13.1, 31.8)), ..Readings::default() };
         assert!(available(&nvidia, false).contains(&Source::VideoMemory));
     }
 
@@ -2037,16 +2102,17 @@ mod tests {
     fn readings() -> Readings {
         Readings {
             cpu_temp: Some(64.5),
-            cpu_load: 15.0,
+            cpu_load: Some(15.0),
             cpu_ghz: Some(4.36875),
             ram: Some((25.1, 60.2)),
-            gpu: Some((45, 12, 1837, 13.13, 31.84)),
+            gpu: Some(Gpu::of(45, 12, 1837, 13.13, 31.84)),
             now: Some(Moment { hour: 21, minute: 5, weekday: 5, day: 9, month: 9, year: 2026 }),
             profile: Some("DEFAULT 1".into()),
             profile_number: Some(1),
             mode: None,
             rollover: None,
             outside: None,
+            sensors: Default::default(),
         }
     }
 
@@ -2060,11 +2126,37 @@ mod tests {
     }
 
     #[test]
+    fn a_block_shows_a_sensor_kept_by_its_id() {
+        use crate::sensor_list::{Val, What};
+        let dir = crate::sensor_list::tests::temp_dir("page-sensor");
+        crate::sensor_list::tests::computer(&dir);
+        let cat = crate::sensor_list::catalog(&dir, &mut crate::sensor_list::tests::nvidia());
+        crate::sensors::remember(&cat, &Default::default());
+        let pump = Source::Sensor(crate::sensors::number("nct6687@nct6687.2592/fan/Pump Fan"));
+        let piece = |kind: Kind, row: u8| Piece { kind, row, col: 0, width: 7, right: false, center: false, gap: 1, height: 1, scroll: true, date_format: Default::default() };
+        let page = Page { pieces: vec![piece(Kind::Text("PUMP".into()), 0), piece(Kind::Data(pump, false), 1)], ..Page::stats() };
+        // kept by its id, and read back as the same sensor
+        let saved = page.to_json();
+        assert_eq!(saved["pieces"][1]["sensor"], json!("nct6687@nct6687.2592/fan/Pump Fan"));
+        assert_eq!(Page::from_json(&saved).map(|p| p.pieces), Some(page.pieces.clone()));
+        // its reading as the screen writes it; unchecked or gone, its row says its part is unavailable
+        let mut r = readings();
+        if let Source::Sensor(n) = pump {
+            r.sensors.insert(n, (What::Fan, Val::One(2836.0)));
+        }
+        assert_eq!(render(&page, &r)[1].trim_end(), "2836RPM");
+        r.sensors.clear();
+        assert_eq!(render(&page, &r)[1].trim_end(), "Board unavailable");
+        assert_eq!(pump.title(), "Pump Fan");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_long_reading_pushes_its_row_along() {
         let mut r = readings();
         r.cpu_temp = Some(105.25);
-        r.cpu_load = 100.0;
-        r.gpu = Some((101, 100, 210, 0.04999, 8.0));
+        r.cpu_load = Some(100.0);
+        r.gpu = Some(Gpu::of(101, 100, 210, 0.04999, 8.0));
         let rows = render(&Page::stats(), &r);
         assert_eq!(rows[0], "CPU 105° 100% 4369MHz");
         assert_eq!(rows[1], "GPU 101° 100%  210MHz");

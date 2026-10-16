@@ -170,7 +170,8 @@ export struct Cell {
     h: length,
     text: string,
     // an icon drawn in place of its words, on a 24-unit square: its filled
-    // shapes and its lines (2 units wide), as SVG path data
+    // shapes and its lines (2 units wide), as SVG path data (a sensor's cell,
+    // kind 51, carries its driver's name and its reading in them)
     fill: string,
     lines: string,
     color: color,
@@ -641,7 +642,7 @@ component Menu inherits Rectangle {
         list := VerticalLayout {
             for row[i] in root.rows: Rectangle {
                 height: row.kind == 1 ? 28px : row.kind == 2 ? 11px : 33px;
-                background: (row.kind == 0 || row.kind == 4) && item.has-hover ? #ffffff12 : transparent;
+                background: (row.kind == 0 || row.kind == 4 || row.kind == 7) && item.has-hover ? #ffffff12 : transparent;
                 border-radius: 7px;
                 if row.kind == 1: Text {
                     x: 10px;
@@ -668,6 +669,16 @@ component Menu inherits Rectangle {
                     font-family: "Geist";
                     font-size: 13px;
                     color: Ink.quiet;
+                    vertical-alignment: center;
+                }
+                // a way to somewhere else to find more (Settings' Sensors box), under the choices
+                if row.kind == 7: Text {
+                    x: root.marks ? 32px : 12px;
+                    height: parent.height;
+                    text: row.label;
+                    font-family: "Geist";
+                    font-size: 13px;
+                    color: item.has-hover ? Ink.dim : Ink.soft;
                     vertical-alignment: center;
                 }
                 // a choice with a number to type beside it: its label chooses, the field sets
@@ -779,7 +790,7 @@ component Menu inherits Rectangle {
                     }
                 }
                 item := TouchArea {
-                    enabled: row.kind == 0 || row.kind == 4;
+                    enabled: row.kind == 0 || row.kind == 4 || row.kind == 7;
                     mouse-cursor: pointer;
                     clicked => { root.chose(i); }
                 }
@@ -826,10 +837,11 @@ component CellView inherits Rectangle {
         width: parent.width;
         text: root.c.text;
         font-family: "Geist";
-        font-size: root.c.style == 33 ? 10.5px : root.c.style == 34 ? 12px : root.c.style == 35 ? 12.5px : root.c.style == 38 ? 13.5px : 11px;
-        font-weight: root.c.style == 33 || root.c.style == 38 ? 600 : root.c.style == 34 ? 500 : 400;
+        // (39: the device a Sensors tab shows, on its first line)
+        font-size: root.c.style == 33 ? 10.5px : root.c.style == 34 ? 12px : root.c.style == 35 ? 12.5px : root.c.style == 38 || root.c.style == 39 ? 13.5px : 11px;
+        font-weight: root.c.style == 33 || root.c.style == 38 ? 600 : root.c.style == 34 || root.c.style == 39 ? 500 : 400;
         letter-spacing: root.c.style == 33 ? 0.95px : 0;
-        color: root.c.style == 38 ? Ink.bright : root.c.style == 35 || root.c.style == 34 ? Ink.dim : Ink.quiet;
+        color: root.c.style == 38 || root.c.style == 39 ? Ink.bright : root.c.style == 35 || root.c.style == 34 ? Ink.dim : Ink.quiet;
         horizontal-alignment: root.c.style == 37 ? right : left;
         vertical-alignment: center;
     }
@@ -968,8 +980,10 @@ component CellView inherits Rectangle {
     // a tile, under the pieces on it
     // (style 27: a panel over the page, raised off it; 28: the page behind one,
     // dimmed; 30: the row of a menu that is in use)
+    // (style 2: the Sensors box with its first tab open, square under that tab)
     if root.c.kind == 9: Rectangle {
         border-radius: root.c.style == 30 ? 7px : root.c.style == 1 ? 12px : 14px;
+        border-top-left-radius: root.c.style == 2 ? 0 : root.c.style == 30 ? 7px : root.c.style == 1 ? 12px : 14px;
         background: root.c.style == 27 ? Ink.pop : root.c.style == 28 ? #131316b8 : root.c.style == 30 ? Ink.shade4 : Ink.shade1;
         border-width: root.c.style == 27 ? 1px : 0;
         border-color: #3a3a41;
@@ -998,10 +1012,176 @@ component CellView inherits Rectangle {
         border-radius: 3.5px;
         background: root.c.style == 1 ? Ink.good : root.c.style == 2 ? Ink.bad : root.c.style == 3 ? Ink.warn : #5c5c66;
     }
+    // a tab of the Sensors box, as the Screen tab's own: rounded above, the open one in the
+    // box's color and running on into it on its feet (none on the first's left, where the
+    // box's corner is square), the others the page's own until the pointer is on them; an
+    // amber dot after a part's name when its readings can't come in (style 1: the first
+    // tab, 2: with its dot, 3: both)
+    if root.c.kind == 50: tab := Rectangle {
+        property <bool> first: root.c.style == 1 || root.c.style == 3;
+        if root.c.on && !tab.first: Rectangle {
+            x: -10px;
+            y: parent.height - 10px;
+            width: 10px;
+            height: 10px;
+            background: Ink.box;
+            Rectangle {
+                background: Ink.base;
+                border-bottom-right-radius: 10px;
+            }
+        }
+        if root.c.on: Rectangle {
+            x: parent.width;
+            y: parent.height - 10px;
+            width: 10px;
+            height: 10px;
+            background: Ink.box;
+            Rectangle {
+                background: Ink.base;
+                border-bottom-left-radius: 10px;
+            }
+        }
+        Rectangle {
+            border-top-left-radius: 10px;
+            border-top-right-radius: 10px;
+            background: root.c.on || tab-ta.has-hover ? Ink.box : transparent;
+        }
+        tab-words := Text {
+            x: 18px;
+            height: parent.height;
+            text: root.c.text;
+            font-family: "Geist";
+            font-size: 13px;
+            font-weight: 500;
+            color: root.c.on ? Ink.bright : tab-ta.has-hover ? Ink.dim : Ink.soft;
+            vertical-alignment: center;
+        }
+        if root.c.style >= 2: Rectangle {
+            x: tab-words.x + tab-words.width + 7px;
+            y: (parent.height - 6px) / 2;
+            width: 6px;
+            height: 6px;
+            border-radius: 3px;
+            background: Ink.warn;
+        }
+        // (the open tab is already chosen: only the others answer the pointer)
+        tab-ta := TouchArea {
+            enabled: !root.c.on;
+            mouse-cursor: root.c.on ? MouseCursor.default : MouseCursor.pointer;
+            clicked => { root.pick(root.c.id, root.c.index, 0, 0, 0); }
+        }
+    }
+    // a sensor in the Sensors box: its checkbox, its name (as wide as `value` allows), its
+    // driver's name in gray (`fill`), its reading at its right (`lines`), and under the
+    // pointer a pencil to rename it, whose click is the next control's; or a run of like
+    // readings folded into one line, a chevron for its checkbox, how many are checked at its
+    // right (style 0: a sensor, 1: one whose reading can't be right, its reading amber, 2: a
+    // run, 3: a run opened, 4: a sensor being renamed, its line to type in over it)
+    if root.c.kind == 51: chip := Rectangle {
+        property <bool> run: root.c.style == 2 || root.c.style == 3;
+        property <bool> hot: (chip-ta.has-hover || pen-ta.has-hover) && root.c.style != 4;
+        border-radius: 7px;
+        background: self.hot ? Ink.hover-well : transparent;
+        chip-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.pick(root.c.id, root.c.index, 0, 0, 0); }
+        }
+        if !chip.run: Rectangle {
+            x: 8px;
+            y: (parent.height - 15px) / 2;
+            width: 15px;
+            height: 15px;
+            border-radius: 4.5px;
+            background: root.c.on ? (chip.hot ? Ink.bright : Ink.dim) : chip.hot ? Ink.hover-box : Ink.well;
+            border-width: root.c.on ? 0 : 1px;
+            border-color: #4a4a52;
+            if root.c.on: Path {
+                width: 15px;
+                height: 15px;
+                viewbox-width: 18;
+                viewbox-height: 18;
+                commands: "M5.2 9.3 L7.9 11.9 L12.9 6.4";
+                fill: transparent;
+                stroke: Ink.base;
+                stroke-width: 2.2px;
+            }
+        }
+        if chip.run: Path {
+            x: 10px;
+            y: (parent.height - 10px) / 2;
+            width: 10px;
+            height: 10px;
+            viewbox-width: 10;
+            viewbox-height: 10;
+            commands: root.c.style == 3 ? "M2 3.5l3 3 3-3" : "M3.5 2l3 3-3 3";
+            fill: transparent;
+            stroke: Ink.soft;
+            stroke-width: 1.4px;
+        }
+        chip-name := Text {
+            x: 31px;
+            width: root.c.style == 4 ? 0 : min(self.preferred-width, root.c.value * 1px - (chip.hot && !chip.run ? 30px : 0));
+            height: parent.height;
+            text: root.c.text;
+            font-family: "Geist";
+            font-size: 12.5px;
+            color: root.c.on || (chip.run && chip.hot) ? Ink.bright : Ink.dim;
+            vertical-alignment: center;
+            overflow: elide;
+            visible: root.c.style != 4;
+        }
+        if root.c.fill != "" && root.c.style != 4: Text {
+            x: chip-name.x + chip-name.width + 8px;
+            height: parent.height;
+            text: root.c.fill;
+            font-family: "Geist";
+            font-size: 11.5px;
+            color: Ink.quiet;
+            vertical-alignment: center;
+        }
+        chip-val := Text {
+            x: parent.width - 8px - self.width - (chip.hot && !chip.run ? 30px : 0);
+            height: parent.height;
+            text: root.c.lines;
+            font-family: "Geist";
+            font-size: 12.5px;
+            color: root.c.style == 1 ? Ink.warn : chip.run ? Ink.quiet : root.c.on ? Ink.dim : Ink.soft;
+            vertical-alignment: center;
+            visible: root.c.style != 4;
+        }
+        Rectangle {
+            x: parent.width - 8px - 22px;
+            y: (parent.height - 20px) / 2;
+            width: 22px;
+            height: 20px;
+            border-radius: 5px;
+            visible: chip.hot && !chip.run;
+            background: pen-ta.has-hover ? Ink.pick : transparent;
+            Path {
+                width: 12px;
+                height: 12px;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                commands: "M4 20h4L19 9l-4-4L4 16z";
+                fill: transparent;
+                stroke: pen-ta.has-hover ? Ink.bright : Ink.soft;
+                stroke-width: 1.8px;
+                stroke-line-join: round;
+            }
+            pen-ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.pick(root.c.id + 1, root.c.index, 0, 0, 0); }
+            }
+        }
+    }
     // a line to type in: the profile's name, or the weather's place
+    // (style 7: a sensor's new name, typed on its chip: Enter, or leaving it, gives it,
+    // Escape takes it back)
     if root.c.kind == 10: Rectangle {
-        border-radius: 8px;
-        background: Ink.well;
+        border-radius: root.c.style == 7 ? 6px : 8px;
+        background: root.c.style == 7 ? Ink.base : Ink.well;
+        border-width: root.c.style == 7 ? 1px : 0;
+        border-color: #4a4a52;
         if root.c.style == 2 && input.text == "": Text {
             x: 10px;
             height: parent.height;
@@ -1126,42 +1306,45 @@ component CellView inherits Rectangle {
         input := TextInput {
             visible: root.c.style != 6;
             enabled: root.c.style != 6;
-            x: root.c.style == 1 ? 11px : 10px;
+            x: root.c.style == 1 ? 11px : root.c.style == 7 ? 8px : 10px;
             y: root.c.style == 5 ? 8px : 0;
-            width: parent.width - 2 * self.x - (root.c.style >= 4 ? 30px : 0);
+            width: parent.width - 2 * self.x - (root.c.style >= 4 && root.c.style <= 6 ? 30px : 0);
             height: root.c.style == 5 ? parent.height - 16px : parent.height;
             text: root.c.text;
             font-family: "Geist";
-            font-size: 13.5px;
-            color: root.c.style == 1 ? Ink.bright : Ink.ink;
+            font-size: root.c.style == 7 ? 12.5px : 13.5px;
+            color: root.c.style == 1 || root.c.style == 7 ? Ink.bright : Ink.ink;
             vertical-alignment: root.c.style == 5 ? top : center;
             single-line: root.c.style != 5;
             edited => { root.typed(root.c.id, self.text); }
             changed has-focus => {
                 Typing.on = self.has-focus;
-                if (root.c.style >= 4) {
+                if (root.c.style >= 4 && root.c.style <= 6) {
                     root.focused(root.c.id, self.has-focus);
                 }
+                if (root.c.style == 7 && !self.has-focus) {
+                    root.pick(root.c.id, 1, 0, 0, 0);
+                }
             }
-            // (style 3, a name to give: it takes the keys as it shows, all of
+            // (style 3, a name to give, and 7: it takes the keys as it shows, all of
             // it chosen; Enter gives it, Escape cancels)
             init => {
-                if (root.c.style == 3) {
+                if (root.c.style == 3 || root.c.style == 7) {
                     self.focus();
                     self.select-all();
                 }
             }
             accepted => {
-                if (root.c.style == 3) {
+                if (root.c.style == 3 || root.c.style == 7) {
                     root.pick(root.c.id, 1, 0, 0, 0);
                 }
             }
             key-pressed(e) => {
-                if (root.c.style == 3 && e.text == Key.Escape) {
+                if ((root.c.style == 3 || root.c.style == 7) && e.text == Key.Escape) {
                     root.pick(root.c.id, 2, 0, 0, 0);
                     return accept;
                 }
-                if (root.c.style >= 4 && e.text == Key.Escape) {
+                if (root.c.style >= 4 && root.c.style <= 6 && e.text == Key.Escape) {
                     self.clear-focus();
                     return accept;
                 }
@@ -1255,9 +1438,10 @@ component CellView inherits Rectangle {
     // a switch's choice, an area chip, a button, the reset: words on a shade
     // (style 24: it opens a list, a chevron after its words; 25: a key on the
     // Key lab's map, its words small; 26: not to be chosen here, its words
-    // faint; 29: the page round a menu, which shuts it, with no shade or hand)
+    // faint; 29: the page round a menu, which shuts it, with no shade or hand; 33: a small
+    // button, as a card's Make main)
     if root.c.kind >= 5 && root.c.kind <= 8: Rectangle {
-        border-radius: root.c.style == 25 ? 4px : root.c.kind == 5 ? 7px : root.c.kind == 8 ? 6px : 8px;
+        border-radius: root.c.style == 25 ? 4px : root.c.kind == 5 ? 7px : root.c.kind == 8 || root.c.style == 33 ? 6px : 8px;
         background: root.c.on ? (b.has-hover ? Ink.pick-hover : Ink.pick)
             : root.c.style == 26 ? transparent
             : root.c.style == 31 ? (b.has-hover ? Ink.pick : Ink.hover-box)
@@ -1305,9 +1489,9 @@ component CellView inherits Rectangle {
             y: (parent.height - self.height) / 2 + (b.pressed && (root.c.kind == 7 || root.c.kind == 8) ? 1px : 0);
             text: root.c.text;
             font-family: "Geist";
-            font-size: root.c.style == 25 ? 10.5px : root.c.style == 31 ? 17px : root.c.kind == 8 ? 12.5px : 13px;
-            font-weight: root.c.kind >= 7 ? 500 : 400;
-            color: root.c.on ? Ink.bright : root.c.style == 26 ? #5a5a60 : root.c.kind == 8 ? (b.has-hover ? Ink.ink : Ink.quiet) : root.c.kind == 7 ? Ink.ink : b.has-hover ? #ffffff : Ink.dim;
+            font-size: root.c.style == 25 ? 10.5px : root.c.style == 31 ? 17px : root.c.style == 33 ? 12px : root.c.kind == 8 ? 12.5px : 13px;
+            font-weight: root.c.kind >= 7 && root.c.style != 33 ? 500 : 400;
+            color: root.c.on ? Ink.bright : root.c.style == 26 ? #5a5a60 : root.c.style == 33 ? (b.has-hover ? Ink.bright : Ink.dim) : root.c.kind == 8 ? (b.has-hover ? Ink.ink : Ink.quiet) : root.c.kind == 7 ? Ink.ink : b.has-hover ? #ffffff : Ink.dim;
         }
         if root.c.style == 24 || root.c.style == 32: Path {
             x: parent.width - 19px;
@@ -1335,18 +1519,18 @@ component CellView inherits Rectangle {
     }
     // ---- the Lighting page's own pieces, in the shades of its boxes
     // a value in a small well; style 1, a warning's tag, outlined in amber
-    // (style 2: on a well, a step lighter than it)
+    // (style 2: on a well, a step lighter than it; 3: a card's Main card, on the box)
     if root.c.kind == 40: Rectangle {
         border-radius: root.c.style == 1 ? 4px : 6px;
-        background: root.c.style == 1 ? transparent : root.c.style == 2 ? Ink.hover-box : Ink.well;
+        background: root.c.style == 1 ? transparent : root.c.style == 2 ? Ink.hover-box : root.c.style == 3 ? Ink.pick : Ink.well;
         border-width: root.c.style == 1 ? 1px : 0;
         border-color: #f0b35a73;
         Text {
             text: root.c.text;
             font-family: "Geist";
             font-size: root.c.style == 1 ? 11px : root.c.style == 2 ? 12px : 11.5px;
-            font-weight: root.c.style == 1 || root.c.style == 2 ? 400 : 500;
-            color: root.c.style == 1 ? Ink.warn : root.c.style == 2 ? Ink.bright : Ink.dim;
+            font-weight: root.c.style == 1 || root.c.style == 2 || root.c.style == 3 ? 400 : 500;
+            color: root.c.style == 1 ? Ink.warn : root.c.style == 2 || root.c.style == 3 ? Ink.bright : Ink.dim;
             horizontal-alignment: center;
             vertical-alignment: center;
         }
@@ -3383,6 +3567,13 @@ export component AppWindow inherits Window {
     in property <length> tile-height;
     in property <length> settings-h;
     out property <length> settings-scroll: set-flick.content-y;
+    // Settings scrolled to a place on its page (its Sensors box), as far as it scrolls
+    in property <length> settings-goto: -1px;
+    changed settings-goto => {
+        if (root.settings-goto >= 0) {
+            set-flick.content-y = -min(root.settings-goto, max(0px, root.settings-h - set-flick.height));
+        }
+    }
     // the keyboard is showing the page's preview
     in property <bool> live;
     // the Screen tab: the screen as it is now, drawn large and as the playlist's
@@ -3495,6 +3686,8 @@ export component AppWindow inherits Window {
     in property <string> confirm-title;
     in property <string> confirm-body;
     in property <string> confirm-do;
+    // (the button that answers no: Cancel, or Keep before a sensor is unchecked)
+    in property <string> confirm-keep: "Cancel";
     callback confirm-yes();
     callback confirm-no();
     // the playlist: a turn's layout opened in the layout editor, the turn
@@ -5438,7 +5631,7 @@ export component AppWindow inherits Window {
                     padding-top: 8px;
                     spacing: 8px;
                     alignment: end;
-                    WordButton { text: "Cancel"; clicked => { root.confirm-no(); } }
+                    WordButton { text: root.confirm-keep; clicked => { root.confirm-no(); } }
                     Rectangle {
                         width: del.preferred-width + 28px;
                         height: 30px;

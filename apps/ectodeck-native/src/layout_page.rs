@@ -94,8 +94,10 @@ pub struct Cx<'a> {
     /// itself (its onboard layouts), and the profiles' names
     pub onboard: bool,
     pub profiles: [String; 5],
-    /// where the readings with a choice of source come from now, for the From line
+    /// where the chosen block's reading comes from now, for its From line
     pub from: screen_edit::From,
+    /// the computer's readings the Shows menu lists, by device
+    pub groups: Vec<(String, Vec<(String, Source)>)>,
 }
 
 /// What came of the window's asks.
@@ -476,7 +478,9 @@ impl LayoutPage {
                         }
                         Some(Menu::Shows(choices)) => {
                             self.ui.set_menu_open(false);
-                            if let (Some(Some(s)), Some(ed)) = (choices.get(i).copied(), cx.editor.as_ref()) {
+                            if choices.get(i).copied().flatten() == Some(screen_edit::Shows::MoreSensors) {
+                                out.window.push(WindowAsk::ShowSettings);
+                            } else if let (Some(Some(s)), Some(ed)) = (choices.get(i).copied(), cx.editor.as_ref()) {
                                 if let Some(p) = cx.screens.library.get_mut(ed.page) {
                                     screen_edit::set_shows(p, ed, s);
                                     out.edited = true;
@@ -638,7 +642,7 @@ impl LayoutPage {
         let Some(current) = screen_edit::shows_of(piece) else { return };
         let bars = matches!(piece.kind, crate::lcd_page::Kind::Bar(_));
         self.close_picker();
-        let listed = screen_edit::source_menu(current, bars, piece.date_format, cx.avail, cx.readings);
+        let listed = screen_edit::source_menu(current, bars, piece.date_format, &cx.groups, cx.avail, cx.readings);
         let rows: Vec<MenuRow> = listed.iter().map(|(k, label, sub, tick, _)| row(*k, label, *tick, sub)).collect();
         let choices = listed.into_iter().map(|r| r.4).collect();
         self.place_menu(rows, 330.0, anchor);
@@ -901,7 +905,7 @@ impl LayoutPage {
                 self.stills = Some((key, pics));
             }
             let stills = &self.stills.as_ref().unwrap().1;
-            let live = crate::lcd_fx::live(*fx, *speed, cx.readings.cpu_load);
+            let live = crate::lcd_fx::live(*fx, *speed, cx.readings.cpu_load.unwrap_or(0.0));
             let moving = crate::lcd_draw::picture(&rows_of(crate::lcd_fx::frame(*fx, crate::lcd_fx::tenths(*fx, cx.t, *speed), &word, &live)), rgb, lv, w, h);
             let tiles: Vec<crate::FxTile> = crate::lcd_fx::FXS
                 .iter()

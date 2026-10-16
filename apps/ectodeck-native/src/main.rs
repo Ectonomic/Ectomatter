@@ -554,9 +554,14 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         front.screen_news(lcd_player::News { rows, sequence, state, page, turning, elapsed, length });
     }
     if let Ok(place) = std::env::var("ECTODECK_NATIVE_PLACE") {
-        front.ui.set_place(place.into());
-        // (the place's own cells built, so clicks land on them)
-        front.refresh();
+        // ("sensors": Settings, at its Sensors box, as the screen editor's links open it)
+        if place == "sensors" {
+            front.show_sensors();
+        } else {
+            front.ui.set_place(place.into());
+            // (the place's own cells built, so clicks land on them)
+            front.refresh();
+        }
     }
     // ECTODECK_NATIVE_MACROS=N: the Macro Editor's window instead, open on macro N
     if let Some(n) = std::env::var("ECTODECK_NATIVE_MACROS").ok().and_then(|v| v.parse::<u32>().ok()) {
@@ -1750,7 +1755,10 @@ impl App {
                 WindowAsk::OpenMacros(n) => self.open_macros(*n),
                 WindowAsk::OpenLab => self.open_lab(),
                 WindowAsk::OpenLayouts(i) => self.open_layouts(*i),
-                WindowAsk::ShowSettings => self.show_settings(None),
+                WindowAsk::ShowSettings => {
+                    self.show_settings(None);
+                    self.front.show_sensors();
+                }
             }
         }
         let asks = [(MACROS, self.front.act_macros()), (LAB, self.front.act_lab()), (LAYOUTS, self.front.act_layouts())];
@@ -1787,6 +1795,7 @@ impl App {
                     WindowAsk::ShowSettings => {
                         let from = sw.window.wl_surface().clone();
                         self.show_settings(Some(from));
+                        self.front.show_sensors();
                     }
                     WindowAsk::OpenMacros(_) | WindowAsk::OpenLab | WindowAsk::OpenLayouts(_) => {}
                 }

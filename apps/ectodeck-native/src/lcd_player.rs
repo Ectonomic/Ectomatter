@@ -687,7 +687,7 @@ impl Player {
         std::thread::spawn(move || {
             let stats = Arc::new(Mutex::new(Stats::here()));
             // primed, as the service primed it: the first reading of the load is 0
-            stats.lock().unwrap().cpu_load();
+            stats.lock().unwrap().prime();
             // the pages, the one showing, and what they may show besides the computer's readings
             let shared = Arc::new(Mutex::new((vec![crate::lcd_page::Page::stats()], None::<(u8, String)>, None::<(f64, String)>)));
             let current = Arc::new(AtomicUsize::new(0));

@@ -33,11 +33,6 @@ impl Reader {
         Reader { root: root.into(), nv, counts: HashMap::new(), stat: HashMap::new() }
     }
 
-    /// This computer's sensors, read through NVIDIA's own driver.
-    pub fn here() -> Reader {
-        Reader::new("/", Box::new(Nvml::default()))
-    }
-
     pub fn nvidia(&mut self) -> &mut dyn Nvidia {
         self.nv.as_mut()
     }
@@ -226,11 +221,6 @@ pub fn share(what: What, v: Val) -> Option<f64> {
 /// motherboard's input with no sensor on it reads (193°).
 pub fn odd(what: What, v: Val) -> bool {
     what == What::Temperature && !(-20.0..=120.0).contains(&v.one())
-}
-
-/// Whether a sensor can show as a bar.
-pub fn barred(s: &Sensor) -> bool {
-    matches!(s.what, What::Temperature | What::Load | What::Charge | What::FanShare | What::InUse)
 }
 
 // ------------------------------------------------------------------ NVIDIA's driver
@@ -458,7 +448,7 @@ mod here {
     #[test]
     #[ignore]
     fn this_computer() {
-        let mut r = super::Reader::here();
+        let mut r = super::Reader::new("/", Box::new(super::Nvml::default()));
         let cat = crate::sensor_list::catalog(std::path::Path::new("/"), r.nvidia());
         let all: Vec<&crate::sensor_list::Sensor> = cat.devices.iter().flat_map(|d| d.sensors.iter()).collect();
         r.read(&all);

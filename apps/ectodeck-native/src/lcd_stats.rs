@@ -1,120 +1,110 @@
 //! The Stats page: the computer's processor, graphics card and memory, in
 //! the four rows Grant laid out for the z10-lcd service, read and written as
 //! z10lcd.py reads and writes them, so the keyboard shows the same
-//! characters. The processor and memory come from the kernel (the CPU
-//! sensor chosen, by default k10temp's Tctl; each core's clock, averaged or
-//! the fastest; /proc), the graphics card chosen from its driver (NVIDIA's
-//! NVML, opened when first needed, or Linux's amdgpu and xe files; see
-//! [crate::sensors]). Everything is read under `root`, which is `/` but for
-//! tests, which hand in a made-up computer.
+//! characters; and every other reading a page shows of the computer. The
+//! readings are the sensors checked in Settings (see [crate::sensors]): the
+//! processor's own temperature (Tctl by default), its load and its average
+//! clock, the memory in use, the main card's temperature, load, clock and
+//! video memory, and each other sensor checked, each read as
+//! [crate::sensor_read] reads it. A reading unchecked can't be had, as one the
+//! computer doesn't have. Everything is read under `root`, which is `/` but
+//! for tests, which hand in a made-up computer.
 
 use std::path::PathBuf;
+#[cfg(test)]
+use std::path::Path;
+use std::time::Instant;
 
-/// One reading of the graphics card: temperature, load, core clock, video
-/// memory used and in all (GiB; 0 of 0 from a card whose driver doesn't say).
-pub type GpuReading = (u32, u32, u32, f64, f64);
+use crate::sensor_list::{Catalog, Nvidia, Sensor, Val};
 
-pub trait Gpu: Send {
-    fn read(&mut self) -> Result<GpuReading, String>;
-    /// Each of these cards' temperature now, for the Settings to show beside its name.
-    fn temps(&mut self, cards: &[crate::sensors::Card]) -> Vec<Option<u32>> {
-        vec![None; cards.len()]
+/// One reading of the main card: its temperature, load, core clock, and its video memory
+/// used and in all (GiB), each where its driver reports it and it is checked.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Gpu {
+    pub temp: Option<u32>,
+    pub load: Option<u32>,
+    pub clock: Option<u32>,
+    pub vram: Option<(f64, f64)>,
+}
+
+#[cfg(test)]
+impl Gpu {
+    /// A card reporting all four (none of its video memory where it says 0 of 0).
+    pub fn of(temp: u32, load: u32, clock: u32, used: f64, total: f64) -> Gpu {
+        Gpu { temp: Some(temp), load: Some(load), clock: Some(clock), vram: (total > 0.0).then_some((used, total)) }
     }
 }
 
 pub struct Stats {
     root: PathBuf,
-    /// the CPU sensor chosen, as it was found for that choice
-    cpu: Option<(Option<(String, String)>, Option<crate::sensors::CpuSensor>)>,
-    prev: Option<(u64, u64)>,
-    gpu: Box<dyn Gpu>,
+    reader: crate::sensor_read::Reader,
+    /// the computer's sensors, listed again every half minute
+    listed: Option<(Instant, Catalog)>,
+    /// the choices read by, where they aren't Ectodeck's own (a test's)
+    pub setup: Option<crate::sensors::Setup>,
 }
 
 impl Stats {
-    pub fn new(root: impl Into<PathBuf>, gpu: Box<dyn Gpu>) -> Stats {
-        Stats { root: root.into(), cpu: None, prev: None, gpu }
+    pub fn new(root: impl Into<PathBuf>, nv: Box<dyn Nvidia>) -> Stats {
+        let root = root.into();
+        Stats { reader: crate::sensor_read::Reader::new(root.clone(), nv), root, listed: None, setup: None }
     }
 
-    /// This computer, its graphics card the one chosen.
+    /// This computer, its NVIDIA cards read through NVIDIA's driver.
     pub fn here() -> Stats {
-        Stats::new("/", Box::new(Cards::new("/")))
+        Stats::new("/", Box::new(crate::sensor_read::Nvml::default()))
     }
 
-    fn at(&self, p: &str) -> PathBuf {
-        self.root.join(p.trim_start_matches('/'))
-    }
-
-    /// The chosen sensor's temperature; looked for again when the choice changes, or when
-    /// it can't be read (a sensor gone stays unavailable until another is chosen).
-    fn cpu_temp(&mut self) -> Option<f64> {
-        let want = crate::sensors::choice().cpu;
-        if self.cpu.as_ref().is_none_or(|(w, _)| *w != want) {
-            let all = crate::sensors::cpu_sensors(&self.root);
-            let found = crate::sensors::Choice { cpu: want.clone(), ..Default::default() }.cpu_sensor(&all).cloned();
-            self.cpu = Some((want, found));
+    /// The computer's sensors as last listed (again when half a minute old).
+    pub fn catalog(&mut self) -> &Catalog {
+        if self.listed.as_ref().is_none_or(|(at, _)| at.elapsed().as_secs() >= 30) {
+            let cat = crate::sensor_list::catalog(&self.root, self.reader.nvidia());
+            crate::sensors::remember(&cat, &self.setup.clone().unwrap_or_else(crate::sensors::setup));
+            self.listed = Some((Instant::now(), cat));
         }
-        let v = self.cpu.as_ref()?.1.as_ref()?.read();
-        if v.is_none() {
-            self.cpu = None;
-        }
-        v
+        &self.listed.as_ref().unwrap().1
     }
 
-    /// Each card's temperature now, for the Settings.
-    pub fn card_temps(&mut self, cards: &[crate::sensors::Card]) -> Vec<Option<u32>> {
-        self.gpu.temps(cards)
+    /// A reading once, so the next one's load is what the processor did since (the first
+    /// reading of a load is 0), as the service did before it showed a page.
+    pub fn prime(&mut self) {
+        self.read();
     }
 
-    /// Every core's clock, averaged, or the fastest one's, as chosen.
-    fn cpu_ghz(&self) -> Option<f64> {
-        let mut fs = Vec::new();
-        for e in std::fs::read_dir(self.at("/sys/devices/system/cpu")).ok()?.flatten() {
-            let name = e.file_name().to_string_lossy().into_owned();
-            if name.len() > 3 && name.starts_with("cpu") && name.as_bytes()[3].is_ascii_digit() {
-                if let Some(v) = std::fs::read_to_string(e.path().join("cpufreq/scaling_cur_freq")).ok().and_then(|s| s.trim().parse::<u64>().ok()) {
-                    fs.push(v);
-                }
-            }
-        }
-        if fs.is_empty() {
-            return None;
-        }
-        if crate::sensors::choice().fastest {
-            return fs.iter().max().map(|f| *f as f64 / 1e6);
-        }
-        Some(fs.iter().sum::<u64>() as f64 / fs.len() as f64 / 1e6)
+    /// Every sensor on the computer read now, checked or not, by id, for the Sensors box.
+    pub fn read_all(&mut self) -> std::collections::HashMap<String, Val> {
+        self.catalog();
+        let cat = &self.listed.as_ref().unwrap().1;
+        let all: Vec<&Sensor> = cat.devices.iter().flat_map(|d| d.sensors.iter()).collect();
+        self.reader.read(&all)
     }
 
-    /// The processor's load since the last reading, in percent; 0 the first time.
-    pub fn cpu_load(&mut self) -> f64 {
-        let Ok(s) = std::fs::read_to_string(self.at("/proc/stat")) else { return 0.0 };
-        let v: Vec<u64> = s.lines().next().unwrap_or("").split_whitespace().skip(1).filter_map(|x| x.parse().ok()).collect();
-        if v.len() < 5 {
-            return 0.0;
-        }
-        let (idle, total) = (v[3] + v[4], v.iter().sum::<u64>());
-        let Some((pi, pt)) = self.prev.replace((idle, total)) else { return 0.0 };
-        let (di, dt) = (idle as i64 - pi as i64, total as i64 - pt as i64);
-        if dt != 0 { 100.0 * (1.0 - di as f64 / dt as f64) } else { 0.0 }
-    }
-
-    fn ram_gib(&self) -> Option<(f64, f64)> {
-        let s = std::fs::read_to_string(self.at("/proc/meminfo")).ok()?;
-        let field = |k: &str| -> Option<u64> {
-            s.lines().find_map(|l| l.split_once(':').filter(|(n, _)| *n == k).and_then(|(_, v)| v.split_whitespace().next()?.parse::<u64>().ok()))
-        };
-        let (total, avail) = (field("MemTotal")? * 1024, field("MemAvailable")? * 1024);
-        Some(((total - avail) as f64 / (1u64 << 30) as f64, total as f64 / (1u64 << 30) as f64))
-    }
-
-    /// Everything the computer reads now, for a page (the time, the profile
-    /// and the weather are the page's player's to add).
+    /// Everything the computer reads now, for a page (the time, the profile and the
+    /// weather are the page's player's to add): every sensor checked, as Settings has it.
     pub fn read(&mut self) -> crate::lcd_page::Readings {
-        // in the order the service read them
-        let (cpu_temp, cpu_load, cpu_ghz) = (self.cpu_temp(), self.cpu_load(), self.cpu_ghz());
-        let ram = self.ram_gib();
-        let gpu = self.gpu.read().ok();
-        crate::lcd_page::Readings { cpu_temp, cpu_load, cpu_ghz, ram, gpu, ..Default::default() }
+        self.catalog();
+        let setup = self.setup.clone().unwrap_or_else(crate::sensors::setup);
+        let cat = &self.listed.as_ref().unwrap().1;
+        let checked = setup.checked_in(cat);
+        let want: Vec<&Sensor> = cat.devices.iter().flat_map(|d| d.sensors.iter()).filter(|s| checked.contains(&s.id)).collect();
+        let v = self.reader.read(&want);
+        let one = |id: &str| v.get(id).map(|x| x.one());
+        let cpu_temp = cat.cpu_temp().and_then(|s| one(&s.id));
+        let ram = match v.get("memory/used") {
+            Some(Val::Of(u, t)) => Some((*u, *t)),
+            _ => None,
+        };
+        let gpu = setup.main_card(cat).map(|d| {
+            let at = |k: &str| v.get(&format!("{}/{k}", d.key)).copied();
+            let n = |k: &str| at(k).map(|x| x.one().round().max(0.0) as u32);
+            let vram = match at("video-memory") {
+                Some(Val::Of(u, t)) if t > 0.0 => Some((u, t)),
+                _ => None,
+            };
+            Gpu { temp: n("temperature"), load: n("load"), clock: n("clock"), vram }
+        });
+        let sensors = want.iter().filter_map(|s| Some((crate::sensors::number(&s.id), (s.what, *v.get(&s.id)?)))).collect();
+        crate::lcd_page::Readings { cpu_temp, cpu_load: one("cpu/load"), cpu_ghz: one("cpu/clock/average").map(|mhz| mhz / 1000.0), ram, gpu, sensors, ..Default::default() }
     }
 
     /// The Stats page's four rows, as the service wrote them. A reading that
@@ -125,170 +115,44 @@ impl Stats {
     }
 }
 
-/// The graphics card chosen (see [crate::sensors]): an NVIDIA card through NVML, an AMD
-/// or Intel card through Linux's own files. The cards are looked for again every half minute.
-pub struct Cards {
-    root: PathBuf,
-    nvml: Nvml,
-    sysfs: crate::sensors::Sysfs,
-    found: Option<(std::time::Instant, Vec<crate::sensors::Card>)>,
-}
-
-impl Cards {
-    pub fn new(root: impl Into<PathBuf>) -> Cards {
-        Cards { root: root.into(), nvml: Nvml::default(), sysfs: Default::default(), found: None }
-    }
-}
-
-impl Gpu for Cards {
-    fn read(&mut self) -> Result<GpuReading, String> {
-        if self.found.as_ref().is_none_or(|(at, _)| at.elapsed().as_secs() >= 30) {
-            self.found = Some((std::time::Instant::now(), crate::sensors::cards(&self.root)));
-        }
-        let card = crate::sensors::choice().card(&self.found.as_ref().unwrap().1).cloned().ok_or("no graphics card")?;
-        match card.vendor {
-            crate::sensors::Vendor::Nvidia => self.nvml.read_at(Some(&card.pci)),
-            _ => self.sysfs.read(&card).ok_or_else(|| format!("{} can't be read", card.name)),
-        }
-    }
-
-    fn temps(&mut self, cards: &[crate::sensors::Card]) -> Vec<Option<u32>> {
-        cards
-            .iter()
-            .map(|c| match c.vendor {
-                crate::sensors::Vendor::Nvidia => self.nvml.read_at(Some(&c.pci)).ok().map(|r| r.0),
-                // (a reading of its own, so the chosen card's load keeps its count)
-                _ => crate::sensors::Sysfs::default().read(c).map(|r| r.0),
-            })
-            .collect()
-    }
-}
-
-// ------------------------------------------------------------------ NVIDIA's driver
-
-type NvmlFn0 = unsafe extern "C" fn() -> i32;
-type NvmlHandle = unsafe extern "C" fn(u32, *mut *mut libc::c_void) -> i32;
-type NvmlBus = unsafe extern "C" fn(*const libc::c_char, *mut *mut libc::c_void) -> i32;
-type NvmlU32 = unsafe extern "C" fn(*mut libc::c_void, u32, *mut u32) -> i32;
-type NvmlUtil = unsafe extern "C" fn(*mut libc::c_void, *mut [u32; 2]) -> i32;
-type NvmlMem = unsafe extern "C" fn(*mut libc::c_void, *mut [u64; 3]) -> i32;
-
-struct NvmlLib {
-    handle: NvmlHandle,
-    by_bus: NvmlBus,
-    temp: NvmlU32,
-    clock: NvmlU32,
-    util: NvmlUtil,
-    mem: NvmlMem,
-}
-
-/// An NVIDIA card through NVML (the first, or one by its PCI address), opened when first
-/// read and again after a failure.
-#[derive(Default)]
-pub struct Nvml {
-    lib: Option<NvmlLib>,
-    /// the card open: the PCI address it was asked by (None, the first), and NVML's handle
-    dev: Option<(Option<String>, usize)>,
-}
-
-// (the device handle is NVML's own and used only from the thread that holds this)
-unsafe impl Send for Nvml {}
-
-impl Nvml {
-    fn open(&mut self, bus: Option<&str>) -> Result<(), String> {
-        if self.lib.is_none() {
-            unsafe {
-                let h = libc::dlopen(c"libnvidia-ml.so.1".as_ptr(), libc::RTLD_NOW);
-                if h.is_null() {
-                    return Err("no NVML".into());
-                }
-                let sym = |n: &std::ffi::CStr| libc::dlsym(h, n.as_ptr());
-                let init = sym(c"nvmlInit_v2");
-                let names = [c"nvmlDeviceGetHandleByIndex_v2", c"nvmlDeviceGetTemperature", c"nvmlDeviceGetClockInfo", c"nvmlDeviceGetUtilizationRates", c"nvmlDeviceGetMemoryInfo", c"nvmlDeviceGetHandleByPciBusId_v2"];
-                let ptrs: Vec<*mut libc::c_void> = names.iter().map(|n| sym(n)).collect();
-                if init.is_null() || ptrs.iter().any(|p| p.is_null()) {
-                    return Err("NVML is missing a function".into());
-                }
-                if std::mem::transmute::<*mut libc::c_void, NvmlFn0>(init)() != 0 {
-                    return Err("nvmlInit failed".into());
-                }
-                self.lib = Some(NvmlLib {
-                    handle: std::mem::transmute::<*mut libc::c_void, NvmlHandle>(ptrs[0]),
-                    temp: std::mem::transmute::<*mut libc::c_void, NvmlU32>(ptrs[1]),
-                    clock: std::mem::transmute::<*mut libc::c_void, NvmlU32>(ptrs[2]),
-                    util: std::mem::transmute::<*mut libc::c_void, NvmlUtil>(ptrs[3]),
-                    mem: std::mem::transmute::<*mut libc::c_void, NvmlMem>(ptrs[4]),
-                    by_bus: std::mem::transmute::<*mut libc::c_void, NvmlBus>(ptrs[5]),
-                });
-            }
-        }
-        let lib = self.lib.as_ref().unwrap();
-        let mut d: *mut libc::c_void = std::ptr::null_mut();
-        let rc = match bus {
-            Some(b) => {
-                let b = std::ffi::CString::new(b).map_err(|_| "a PCI address with a nul in it")?;
-                unsafe { (lib.by_bus)(b.as_ptr(), &mut d) }
-            }
-            None => unsafe { (lib.handle)(0, &mut d) },
-        };
-        if rc != 0 {
-            return Err(format!("no NVIDIA card at {}", bus.unwrap_or("0")));
-        }
-        self.dev = Some((bus.map(String::from), d as usize));
-        Ok(())
-    }
-
-    /// The card at a PCI address (None, the first), read now.
-    pub fn read_at(&mut self, bus: Option<&str>) -> Result<GpuReading, String> {
-        if self.dev.as_ref().is_none_or(|(b, _)| b.as_deref() != bus) {
-            self.open(bus)?;
-        }
-        let (lib, d) = (self.lib.as_ref().unwrap(), self.dev.as_ref().unwrap().1 as *mut libc::c_void);
-        let (mut t, mut clk, mut u, mut m) = (0u32, 0u32, [0u32; 2], [0u64; 3]);
-        // temperature of the GPU die (sensor 0), the graphics clock (clock 0)
-        let rc = unsafe {
-            let a = (lib.temp)(d, 0, &mut t);
-            if a != 0 { a } else {
-                let b = (lib.clock)(d, 0, &mut clk);
-                if b != 0 { b } else {
-                    let c = (lib.util)(d, &mut u);
-                    if c != 0 { c } else { (lib.mem)(d, &mut m) }
-                }
-            }
-        };
-        if rc != 0 {
-            self.dev = None;
-            return Err(format!("NVML error {rc}"));
-        }
-        let gib = (1u64 << 30) as f64;
-        Ok((t, u[0], clk, m[2] as f64 / gib, m[0] as f64 / gib))
-    }
-}
-
-impl Gpu for Nvml {
-    fn read(&mut self) -> Result<GpuReading, String> {
-        self.read_at(None)
-    }
-}
-
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use std::path::Path;
+    use crate::sensor_list::tests::{nvidia, temp_dir, FakeNvidia};
+    use crate::sensor_list::{Nv, Probe};
 
-    pub struct FakeGpu(pub Vec<Result<GpuReading, String>>);
-    impl Gpu for FakeGpu {
-        fn read(&mut self) -> Result<GpuReading, String> {
-            if self.0.len() > 1 { self.0.remove(0) } else { self.0[0].clone() }
+    /// NVIDIA's driver with one card, at 0000:01:00.0, reading as given: its temperature,
+    /// load, clock, and video memory used and in all (none in all: none reported); or not
+    /// loaded.
+    pub struct FakeGpu(pub Vec<Result<(u32, u32, u32, f64, f64), String>>);
+
+    impl Nvidia for FakeGpu {
+        fn probe(&mut self, pci: &str) -> Option<Probe> {
+            (pci == "0000:01:00.0" && self.0.first()?.is_ok()).then(|| Probe { has: vec![Nv::Temp, Nv::Load, Nv::Clock, Nv::Vram], vram: 0.0 })
+        }
+        fn read(&mut self, pci: &str, what: Nv) -> Option<Val> {
+            let (t, l, c, u, all) = self.0.first()?.clone().ok().filter(|_| pci == "0000:01:00.0")?;
+            Some(match what {
+                Nv::Temp => Val::One(t as f64),
+                Nv::Load => Val::One(l as f64),
+                Nv::Clock => Val::One(c as f64),
+                Nv::Vram => Val::Of(u, all),
+                _ => return None,
+            })
         }
     }
 
-    /// A made-up computer: k10temp, four cores, /proc/stat and /proc/meminfo.
+    /// A made-up computer as the z10-lcd service read one: k10temp's temperature (its only
+    /// one, unlabeled), its threads' clocks, /proc/stat and /proc/meminfo, and an NVIDIA card
+    /// (read through [FakeGpu]). Made again over itself, its files are written anew.
     pub fn computer(dir: &Path, temp: i64, freqs: &[u64], stat: [u64; 8], mem: (u64, u64)) {
         let h = dir.join("sys/class/hwmon/hwmon3");
         std::fs::create_dir_all(&h).unwrap();
         std::fs::write(h.join("name"), "k10temp\n").unwrap();
         std::fs::write(h.join("temp1_input"), format!("{temp}\n")).unwrap();
+        let dev = dir.join("sys/devices/pci0000:00/0000:00:18.3");
+        std::fs::create_dir_all(&dev).unwrap();
+        let _ = std::os::unix::fs::symlink(&dev, h.join("device"));
         let other = dir.join("sys/class/hwmon/hwmon0");
         std::fs::create_dir_all(&other).unwrap();
         std::fs::write(other.join("name"), "nvme\n").unwrap();
@@ -302,17 +166,49 @@ pub mod tests {
         let s: Vec<String> = stat.iter().map(|v| v.to_string()).collect();
         std::fs::write(dir.join("proc/stat"), format!("cpu  {}\ncpu0 1 2 3 4\n", s.join(" "))).unwrap();
         std::fs::write(dir.join("proc/meminfo"), format!("MemTotal:       {} kB\nMemFree:        1 kB\nMemAvailable:   {} kB\n", mem.0, mem.1)).unwrap();
+        let card = dir.join("sys/devices/pci0000:00/0000:00:01.1/0000:01:00.0");
+        std::fs::create_dir_all(&card).unwrap();
+        for (f, v) in [("class", "0x030000"), ("vendor", "0x10de"), ("device", "0x2b85")] {
+            std::fs::write(card.join(f), format!("{v}\n")).unwrap();
+        }
+        std::fs::create_dir_all(dir.join("sys/bus/pci/devices")).unwrap();
+        let _ = std::os::unix::fs::symlink(&card, dir.join("sys/bus/pci/devices/0000:01:00.0"));
+        std::fs::create_dir_all(dir.join("usr/share/hwdata")).unwrap();
+        std::fs::write(dir.join("usr/share/hwdata/pci.ids"), "10de  NVIDIA Corporation\n\t2b85  GB202 [GeForce RTX 5090]\n").unwrap();
     }
 
     #[test]
     fn the_rows_as_the_service_wrote_them() {
-        let dir = std::env::temp_dir().join(format!("ectodeck-stats-{}", std::process::id()));
-        computer(&dir, 64500, &[4365000, 4400000, 4300000, 4410000], [100, 0, 50, 800, 50, 0, 0, 0], (63119752, 36839852));
-        let mut s = Stats::new(&dir, Box::new(FakeGpu(vec![Ok((45, 12, 1837, 13.13, 31.84))])));
-        let rows = s.rows();
-        assert_eq!(rows, vec!["CPU 64°   0% 4369MHz", "GPU 45°  12% 1837MHz", "RAM   25.1 / 60.2 GB", "VRAM  13.1 / 31.8 GB"]);
-        let mut s = Stats::new(&dir, Box::new(FakeGpu(vec![Err("no".into())])));
-        assert_eq!(s.rows()[1..], ["GPU unavailable".to_string(), "RAM   25.1 / 60.2 GB".into(), String::new()]);
-        std::fs::remove_dir_all(&dir).ok();
+        let dir = temp_dir("stats");
+        crate::sensor_list::tests::computer(&dir);
+        std::fs::write(dir.join("proc/stat"), "cpu  100 0 50 800 50 0 0 0 0 0\n").unwrap();
+        let mut s = Stats::new(&dir, Box::new(nvidia()));
+        s.setup = Some(Default::default());
+        s.prime();
+        std::fs::write(dir.join("proc/stat"), "cpu  150 0 100 850 50 0 0 0 0 0\n").unwrap();
+        // (the made-up computer's four cores at 5.4 to 5.7 GHz, their second threads asleep at 624 MHz)
+        assert_eq!(s.rows(), vec!["CPU 66°  67% 3087MHz", "GPU 43°   6% 1882MHz", "RAM   33.4 / 60.2 GB", "VRAM   4.8 / 31.8 GB"]);
+        // NVIDIA's driver not loaded: the main card can't be read, and its row says so
+        let mut s = Stats::new(&dir, Box::new(FakeNvidia(Vec::new())));
+        s.setup = Some(Default::default());
+        assert_eq!(s.rows()[1..], ["GPU unavailable".to_string(), "RAM   33.4 / 60.2 GB".into(), String::new()]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_reading_unchecked_is_unavailable_and_a_sensor_checked_is_read() {
+        let dir = temp_dir("stats-checked");
+        crate::sensor_list::tests::computer(&dir);
+        let mut s = Stats::new(&dir, Box::new(nvidia()));
+        let cat = s.catalog().clone();
+        let mut setup = crate::sensors::Setup::default();
+        setup.check(&cat, "card@0000:01:00.0/temperature", false);
+        setup.check(&cat, "nct6687@nct6687.2592/fan/Pump Fan", true);
+        s.setup = Some(setup);
+        let r = s.read();
+        assert_eq!(r.gpu.map(|g| (g.temp, g.load)), Some((None, Some(6))));
+        let pump = crate::sensors::number("nct6687@nct6687.2592/fan/Pump Fan");
+        assert_eq!(r.sensors.get(&pump), Some(&(crate::sensor_list::What::Fan, Val::One(2836.0))));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

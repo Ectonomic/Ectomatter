@@ -128,7 +128,7 @@ impl What {
 }
 
 /// A run of like readings that its row keeps folded into one line until it is opened.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Run {
     /// a reading for each of the processor's cores
     Cores,
@@ -207,6 +207,8 @@ pub struct Sensor {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CardOf {
     pub pci: String,
+    /// its name, as Linux's list of PCI devices gives it: "NVIDIA GeForce RTX 5090"
+    pub name: String,
     pub vendor: Vendor,
     /// the graphics in the processor, rather than a card of its own
     pub integrated: bool,
@@ -313,6 +315,18 @@ impl Val {
 pub trait Nvidia: Send {
     fn probe(&mut self, pci: &str) -> Option<Probe>;
     fn read(&mut self, pci: &str, what: Nv) -> Option<Val>;
+}
+
+/// No NVIDIA driver to ask, for a list made from Linux's own files alone.
+pub struct NoNvidia;
+
+impl Nvidia for NoNvidia {
+    fn probe(&mut self, _: &str) -> Option<Probe> {
+        None
+    }
+    fn read(&mut self, _: &str, _: Nv) -> Option<Val> {
+        None
+    }
 }
 
 // ------------------------------------------------------------------ reading Linux's files
@@ -779,7 +793,7 @@ fn card(root: &Path, c: &crate::sensors::Card, hw: Option<&(PathBuf, String)>, n
         full: if c.integrated { format!("{}, in the processor", c.name) } else { c.name.clone() },
         src: src.into(),
         inside: c.integrated.then(|| "in the CPU".to_string()),
-        card: Some(CardOf { pci: c.pci.clone(), vendor: c.vendor, integrated: c.integrated, vram }),
+        card: Some(CardOf { pci: c.pci.clone(), name: c.name.clone(), vendor: c.vendor, integrated: c.integrated, vram }),
         sensors,
         note,
     }

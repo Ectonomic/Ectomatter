@@ -4,6 +4,7 @@
 //! to the layout, and where a new or moved block goes. The window itself is
 //! layout_page.rs.
 
+use crate::sensor_list::{Catalog, Part, What};
 use crate::lcd_page::{DateFormat, Kind, Page, Piece, Readings, Source, COLS, ROWS};
 use crate::lighting::{cell, id, kind, style, text_cell, Ctl};
 use crate::Cell;
@@ -23,6 +24,8 @@ pub struct Editor {
 pub enum Shows {
     Reading(Source),
     Time,
+    /// "Add more sensors in Settings": Settings, at its Sensors box
+    MoreSensors,
 }
 
 /// The kind of block a piece is, as the editor names it: 1 Text, 2 Data, 3 Bar, 4 Effect
@@ -57,14 +60,153 @@ pub struct BlockBox {
     pub h: f32,
 }
 
-/// Where the readings with a choice of source come from now, for the From line: the CPU
-/// sensor's name ("Tctl, on the AMD Ryzen 9 9950X3D"), whether the clock is the fastest
-/// core's rather than the average, and the graphics card's name.
+/// Where the chosen block's reading comes from, for its From line, as [from_line] says it:
+/// the line, and the words in it that link to Settings' Sensors box. None says what the
+/// reading's source says of itself.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct From {
-    pub sensor: Option<String>,
-    pub fastest: bool,
-    pub card: Option<String>,
+    pub line: Option<(String, &'static str)>,
+}
+
+/// A label of a driver's own that says nothing a person reads: temp1, fan2.
+fn bare(label: &str) -> bool {
+    let l = label.trim_end_matches(|c: char| c.is_ascii_digit());
+    l.len() < label.len() && ["temp", "fan", "in", "power", "curr", "energy", "freq"].contains(&l)
+}
+
+/// The From line of a block showing one of the computer's readings: where it comes from
+/// and the driver's own name for it, ending in a link to Settings' Sensors box (to add more
+/// sensors, or to change the main card); or, for one unchecked there, that it is. None for a
+/// reading not of the computer, or one this computer doesn't have.
+pub fn from_line(src: Source, cat: &Catalog, setup: &crate::sensors::Setup) -> Option<(String, &'static str)> {
+    let more = "Add more sensors";
+    let main = setup.main_card(cat);
+    // the sensor it reads, by id
+    let id = match src {
+        Source::CpuTemp => cat.cpu_temp().map(|s| s.id.clone()),
+        Source::CpuLoad => Some("cpu/load".to_string()),
+        Source::CpuClock => Some("cpu/clock/average".to_string()),
+        Source::Memory => Some("memory/used".to_string()),
+        Source::GpuTemp | Source::GpuLoad | Source::GpuClock | Source::VideoMemory => {
+            let k = ["temperature", "load", "clock", "video-memory"][[Source::GpuTemp, Source::GpuLoad, Source::GpuClock, Source::VideoMemory].iter().position(|s| *s == src).unwrap()];
+            let d = main?;
+            // (a reading the main card's driver doesn't report: the card's note says why)
+            if cat.sensor(&format!("{}/{k}", d.key)).is_none() {
+                return Some((format!("The main card, now the {}, doesn’t report this. Change the main card in Settings.", d.card.as_ref()?.name), "Change the main card"));
+            }
+            Some(format!("{}/{k}", d.key))
+        }
+        Source::Sensor(n) => Some(crate::sensors::id_of(n)),
+        _ => None,
+    }?;
+    let (d, s) = cat.sensor(&id)?;
+    if !setup.checked_in(cat).contains(&id) {
+        return Some(("Unchecked in Settings, so the block says “unavailable”. Check it in Settings.".into(), "Check it"));
+    }
+    if matches!(src, Source::GpuTemp | Source::GpuLoad | Source::GpuClock | Source::VideoMemory) {
+        return Some((format!("The main card, now the {}. Change the main card in Settings.", d.card.as_ref()?.name), "Change the main card"));
+    }
+    // the driver's own name for it, where it has one worth saying
+    let label = s.orig.clone().or_else(|| id.rsplit('/').next().filter(|l| id.matches('/').count() >= 2 && !bare(l) && id.contains('@')).map(String::from));
+    let with = |w: String| match &label {
+        Some(l) => format!("{w}, {l}."),
+        None => format!("{w}."),
+    };
+    let line = match d.part {
+        Part::Processor if s.what == What::Temperature => with("The processor’s own sensor".into()),
+        Part::Processor => "The processor, from Linux.".into(),
+        Part::Graphics if label.is_some() => with(format!("The {}’s own sensor", d.card.as_ref().map_or(d.name.as_str(), |c| c.name.as_str()))),
+        Part::Graphics => format!("The {}, {}.", d.card.as_ref().map_or(d.name.as_str(), |c| c.name.as_str()), lower_first(&d.src)),
+        Part::Memory if s.what == What::InUse => "This computer’s memory, from Linux.".into(),
+        Part::Memory => format!("{}’s own sensor.", s.name),
+        Part::Motherboard => with("The motherboard’s sensor chip".into()),
+        Part::Drives | Part::Network => with(format!("The {}’s own sensor", d.name)),
+        Part::Battery => "The battery.".into(),
+        Part::Laptop => with("The laptop’s own controller".into()),
+        _ => with(format!("The {}", d.name)),
+    };
+    Some((format!("{line} {more} in Settings."), more))
+}
+
+/// A sensor as a question about it says it: the readings the ready-made layouts show by
+/// what they are ("the processor’s temperature", "the main card’s load"), any other by its
+/// name in the editor.
+pub fn sensor_phrase(id: &str, cat: &Catalog, setup: &crate::sensors::Setup) -> String {
+    if cat.cpu_temp().is_some_and(|s| s.id == id) {
+        return "the processor’s temperature".into();
+    }
+    match id {
+        "cpu/load" => return "the processor’s load".into(),
+        "cpu/clock/average" => return "the processor’s clock".into(),
+        "memory/used" => return "the memory in use".into(),
+        _ => {}
+    }
+    if let Some(m) = setup.main_card(cat) {
+        for (k, w) in [("temperature", "temperature"), ("load", "load"), ("clock", "clock"), ("video-memory", "video memory")] {
+            if id == format!("{}/{k}", m.key) {
+                return format!("the main card’s {w}");
+            }
+        }
+    }
+    cat.sensor(id).map_or_else(|| id.to_string(), |(_, s)| s.menu_name(setup.names.get(id).map(String::as_str)))
+}
+
+/// "From NVIDIA’s driver" as it runs on in a sentence: "from NVIDIA’s driver".
+fn lower_first(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map_or(String::new(), |f| f.to_lowercase().collect::<String>() + c.as_str())
+}
+
+/// The computer's readings a block can show, as the Shows menu lists them: each device with
+/// a sensor checked in Settings, under its heading (the main card says it is), each of its
+/// checked sensors by its name; the readings the ready-made layouts show as they show them,
+/// so a block of the main card's follows whichever card is main.
+pub fn computer_groups(cat: &Catalog, setup: &crate::sensors::Setup) -> Vec<(String, Vec<(String, Source)>)> {
+    let checked = setup.checked_in(cat);
+    let main = setup.main_card(cat).map(|d| d.key.clone());
+    let usual_cpu = cat.cpu_temp().map(|s| s.id.clone());
+    let mut devices: Vec<&crate::sensor_list::Device> = cat.devices.iter().collect();
+    // (in the tabs' order, the main card first among the cards)
+    devices.sort_by_key(|d| (d.part, Some(&d.key) != main.as_ref()));
+    let mut out = Vec::new();
+    for d in devices {
+        let is_main = main.as_ref() == Some(&d.key);
+        let items: Vec<(String, Source)> = d
+            .sensors
+            .iter()
+            .filter(|s| checked.contains(&s.id))
+            .map(|s| {
+                let k = s.id.rsplit('/').next().unwrap_or("");
+                let usual = match s.id.as_str() {
+                    _ if Some(&s.id) == usual_cpu.as_ref() => Some(Source::CpuTemp),
+                    "cpu/load" => Some(Source::CpuLoad),
+                    "cpu/clock/average" => Some(Source::CpuClock),
+                    "memory/used" => Some(Source::Memory),
+                    _ if is_main && s.usual => [("temperature", Source::GpuTemp), ("load", Source::GpuLoad), ("clock", Source::GpuClock), ("video-memory", Source::VideoMemory)].into_iter().find(|(x, _)| *x == k).map(|(_, v)| v),
+                    _ => None,
+                };
+                match usual {
+                    Some(Source::CpuLoad) => ("Load".to_string(), Source::CpuLoad),
+                    Some(Source::CpuClock) => ("Clock".to_string(), Source::CpuClock),
+                    Some(Source::Memory) => ("Memory in use".to_string(), Source::Memory),
+                    Some(u) => (s.name.clone(), u),
+                    None => (s.menu_name(setup.names.get(&s.id).map(String::as_str)), Source::Sensor(crate::sensors::number(&s.id))),
+                }
+            })
+            .collect();
+        if items.is_empty() {
+            continue;
+        }
+        let head = match d.part {
+            // (the processor by its model, its maker left off, as the cards are)
+            Part::Processor => d.name.strip_prefix("AMD ").or_else(|| d.name.strip_prefix("Intel ")).unwrap_or(&d.name).to_string(),
+            Part::Memory => "Memory".into(),
+            _ if is_main => format!("{}, the main card", d.name),
+            _ => d.name.clone(),
+        };
+        out.push((head, items));
+    }
+    out
 }
 
 /// What a piece looks like now, for its box: words and readings whole, however its block
@@ -154,11 +296,13 @@ impl Grid {
         self.done(top + 34.0);
     }
     /// a note naming where a reading comes from, ending in a link to where that is chosen:
-    /// `s` holds `link` once
+    /// `s` holds `link` once, its words kept on one line
     fn note_link(&mut self, label: Option<&str>, s: &str, link: &str, c: Ctl) {
         let top = label.map_or(0.0, |l| self.head(l, None));
         let (x, w) = (self.x(), self.col_w());
-        let lines = crate::text::wrap(400, 12.5, s, w);
+        let held = link.replace(' ', "\u{a0}");
+        let lines = crate::text::wrap(400, 12.5, &s.replace(link, &held), w);
+        let lines: Vec<String> = lines.iter().map(|l| l.replace(&held, link)).collect();
         for (k, line) in lines.iter().enumerate() {
             let y = self.y + top + k as f32 * 18.0;
             match line.find(link) {
@@ -235,20 +379,12 @@ pub fn block_box(page: &Page, chosen: Option<usize>, r: &Readings, avail: &[Sour
             } else {
                 g.done(0.0);
             }
-            g.dropdown("Shows", Ctl::ScrSource, src.name(), open == Some(Ctl::ScrSource));
+            g.dropdown("Shows", Ctl::ScrSource, &src.title(), open == Some(Ctl::ScrSource));
             g.value("Looks like", &looks(p, r));
-            let chosen = match src {
-                Source::CpuTemp => from.sensor.as_ref().map(|s| format!("{s}. Choose another sensor in Settings.")),
-                Source::CpuClock => Some(format!("{}. Choose another in Settings.", if from.fastest { "The fastest core’s clock" } else { "The average of every core’s clock" })),
-                Source::GpuTemp | Source::GpuLoad | Source::GpuClock | Source::VideoMemory => from.card.as_ref().map(|c| format!("The {c}. Choose another card in Settings.")),
-                _ => None,
-            };
-            if let (true, Some(line)) = (avail.contains(src), &chosen) {
-                g.note_link(Some("From"), line, "Settings", Ctl::OpenSettings);
-            } else if avail.contains(src) {
-                g.note(Some("From"), src.from());
-            } else {
-                g.note(Some("From"), &format!("Ectodeck can’t read the {} on this computer, so the block says “unavailable”.", src.name().to_lowercase()));
+            match &from.line {
+                Some((line, link)) => g.note_link(Some("From"), line, link, Ctl::OpenSettings),
+                None if avail.contains(src) => g.note(Some("From"), src.from()),
+                None => g.note(Some("From"), &format!("Ectodeck can’t read the {} on this computer, so the block says “unavailable”.", src.title().to_lowercase())),
             }
             g.note(None, DRAG);
         }
@@ -271,7 +407,7 @@ pub fn block_box(page: &Page, chosen: Option<usize>, r: &Readings, avail: &[Sour
             g.note(None, UNDER);
         }
         Kind::Bar(src) => {
-            g.dropdown("Shows", Ctl::ScrSource, src.name(), open == Some(Ctl::ScrSource));
+            g.dropdown("Shows", Ctl::ScrSource, &src.title(), open == Some(Ctl::ScrSource));
             g.value("Looks like", &looks(p, r));
             g.note(None, "The bar fills as the reading rises. A wider bar shows smaller changes.");
             g.note(None, DRAG);
@@ -303,40 +439,85 @@ pub fn format_menu(current: DateFormat, r: &Readings) -> Vec<(i32, String, Strin
     rows
 }
 
-/// The menu of what a block can show: each group's heading, then its
-/// readings, each with what it reads now. A bar shows only what fills one;
-/// a Data block can show the time too, in the group the date is in (the date as the block
-/// writes it, `date`). The rows, and what each row stands for.
-pub fn source_menu(current: Shows, bars: bool, date: DateFormat, avail: &[Source], r: &Readings) -> Vec<(i32, String, String, bool, Option<Shows>)> {
+/// The menu of what a block can show: first the computer's readings, the sensors checked
+/// in Settings under the devices they read (`groups`, see [computer_groups]); then the
+/// others this computer can read (`avail`) under their groups' headings; each with what it
+/// reads now; last, the way to Settings for more. A bar shows only what fills one; a Data
+/// block can show the time too, in the group the date is in (the date as the block writes
+/// it, `date`). The rows, and what each row stands for.
+pub fn source_menu(current: Shows, bars: bool, date: DateFormat, groups: &[(String, Vec<(String, Source)>)], avail: &[Source], r: &Readings) -> Vec<(i32, String, String, bool, Option<Shows>)> {
     let mut rows = Vec::new();
-    let mut group = "";
-    // each group once, in the menu's order
-    let order = ["Processor", "Graphics", "Memory", "Time and date", "Keyboard", "More"];
-    let mut listed: Vec<Shows> = avail.iter().copied().filter(|s| !bars || s.barred()).map(Shows::Reading).collect();
+    let piece = |s: Shows| match s {
+        Shows::Reading(src) => Piece { kind: if bars { Kind::Bar(src) } else { Kind::Data(src, src.starts_in_fahrenheit()) }, row: 0, col: 0, width: if bars { 10 } else { 1 }, right: false, center: false, gap: 0, height: 1, scroll: true, date_format: date },
+        _ => Piece { kind: Kind::Clock(true), row: 0, col: 0, width: 8, right: false, center: false, gap: 0, height: 1, scroll: true, date_format: Default::default() },
+    };
+    let head = |rows: &mut Vec<(i32, String, String, bool, Option<Shows>)>, h: &str| {
+        if !rows.is_empty() {
+            rows.push((2, String::new(), String::new(), false, None));
+        }
+        rows.push((1, h.to_string(), String::new(), false, None));
+    };
+    for (h, items) in groups {
+        let items: Vec<&(String, Source)> = items.iter().filter(|(_, s)| !bars || s.barred()).collect();
+        if items.is_empty() {
+            continue;
+        }
+        head(&mut rows, h);
+        for (name, src) in items {
+            let s = Shows::Reading(*src);
+            rows.push((0, name.clone(), reading_now(*src, r).unwrap_or_else(|| "Unavailable".into()), s == current, Some(s)));
+        }
+    }
+    // the others, each group once, in the menu's order
+    let order = ["Time and date", "Keyboard", "More"];
+    let mut listed: Vec<Shows> = avail.iter().copied().filter(|s| order.contains(&s.group()) && (!bars || s.barred())).map(Shows::Reading).collect();
     if !bars {
         listed.push(Shows::Time);
     }
     let group_of = |s: &Shows| match s {
-        Shows::Time => "Time and date",
         Shows::Reading(s) => s.group(),
+        _ => "Time and date",
     };
     // (the time before the date)
     listed.sort_by_key(|s| (order.iter().position(|g| *g == group_of(s)), !matches!(s, Shows::Time)));
+    let mut group = "";
     for s in listed {
         if group_of(&s) != group {
-            if !group.is_empty() {
-                rows.push((2, String::new(), String::new(), false, None));
-            }
             group = group_of(&s);
-            rows.push((1, group.to_string(), String::new(), false, None));
+            head(&mut rows, group);
         }
-        let (name, p) = match s {
-            Shows::Time => ("Time".to_string(), Piece { kind: Kind::Clock(true), row: 0, col: 0, width: 8, right: false, center: false, gap: 0, height: 1, scroll: true, date_format: Default::default() }),
-            Shows::Reading(src) => (src.name().to_string(), Piece { kind: if bars { Kind::Bar(src) } else { Kind::Data(src, src.starts_in_fahrenheit()) }, row: 0, col: 0, width: if bars { 10 } else { 1 }, right: false, center: false, gap: 0, height: 1, scroll: true, date_format: date }),
+        let name = match s {
+            Shows::Reading(src) => src.title(),
+            _ => "Time".to_string(),
         };
-        rows.push((0, name, looks(&p, r), s == current, Some(s)));
+        rows.push((0, name, looks(&piece(s), r), s == current, Some(s)));
     }
+    rows.push((2, String::new(), String::new(), false, None));
+    rows.push((7, "Add more sensors in Settings".into(), String::new(), false, Some(Shows::MoreSensors)));
     rows
+}
+
+/// One of the computer's readings now, as Settings' Sensors box writes it, for the Shows
+/// menu: "66°", "4.7 GHz", "1882 MHz", "33.4 / 60.2 GB", "2,836 RPM".
+fn reading_now(src: Source, r: &Readings) -> Option<String> {
+    use crate::sensor_list::Val;
+    let shown = |what: What, part: Part, v: Val| crate::sensor_read::shown(what, part, v);
+    let g = r.gpu;
+    Some(match src {
+        Source::CpuTemp => shown(What::Temperature, Part::Processor, Val::One(r.cpu_temp?)),
+        Source::CpuLoad => shown(What::Load, Part::Processor, Val::One(r.cpu_load?)),
+        Source::CpuClock => shown(What::Clock, Part::Processor, Val::One(r.cpu_ghz? * 1000.0)),
+        Source::Memory => shown(What::InUse, Part::Memory, Val::Of(r.ram?.0, r.ram?.1)),
+        Source::GpuTemp => shown(What::Temperature, Part::Graphics, Val::One(g?.temp? as f64)),
+        Source::GpuLoad => shown(What::Load, Part::Graphics, Val::One(g?.load? as f64)),
+        Source::GpuClock => shown(What::Clock, Part::Graphics, Val::One(g?.clock? as f64)),
+        Source::VideoMemory => shown(What::InUse, Part::Graphics, Val::Of(g?.vram?.0, g?.vram?.1)),
+        Source::Sensor(n) => {
+            let (what, v) = r.sensors.get(&n)?;
+            shown(*what, crate::sensors::known(n).map_or(Part::Other, |k| k.part), *v)
+        }
+        _ => return None,
+    })
 }
 
 /// What the chosen piece shows, as the menu lists it.
@@ -619,16 +800,16 @@ mod tests {
             let at = rows.iter().position(|row| row.0 == 1 && row.1 == group).expect(group);
             rows[at + 1..].iter().take_while(|row| row.0 == 0).map(|row| row.1.clone()).collect()
         };
-        let rows = source_menu(Shows::Reading(Source::Profile), false, DateFormat::Short, &available(&r, false), &r);
+        let rows = source_menu(Shows::Reading(Source::Profile), false, DateFormat::Short, &[], &available(&r, false), &r);
         assert_eq!(names_in(&rows, "Keyboard"), ["Active profile", "Profile number"]);
         // the time is a reading, in a group with the date
         assert_eq!(names_in(&rows, "Time and date"), ["Time", "Date"]);
         // game mode and key rollover join the keyboard's once the keyboard can say them (build 5)
         let r = Readings { mode: Some("PC MODE".into()), rollover: Some("6 KEY".into()), ..r };
-        let rows = source_menu(Shows::Reading(Source::Profile), false, DateFormat::Short, &available(&r, false), &r);
+        let rows = source_menu(Shows::Reading(Source::Profile), false, DateFormat::Short, &[], &available(&r, false), &r);
         assert_eq!(names_in(&rows, "Keyboard"), ["Active profile", "Profile number", "Game mode", "Key rollover"]);
         // a bar shows only what fills one: no time
-        let bars = source_menu(Shows::Reading(Source::CpuLoad), true, DateFormat::Short, &available(&r, false), &r);
+        let bars = source_menu(Shows::Reading(Source::CpuLoad), true, DateFormat::Short, &[], &available(&r, false), &r);
         assert!(!bars.iter().any(|row| row.4 == Some(Shows::Time)));
     }
 
