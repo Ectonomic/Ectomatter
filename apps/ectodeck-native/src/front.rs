@@ -1635,15 +1635,32 @@ impl Front {
         window
     }
 
-    /// The display's text: the keyboard will not read its display back, so the
-    /// z10-lcd service writes each frame it sends to a file; if nothing has
-    /// written it for ten seconds, the panel is drawn unlit rather than stale.
+    /// The display's text from the file another program's frames are written to: the
+    /// keyboard will not read its display back, so the z10-lcd service writes each frame it
+    /// sends there; if nothing has written it for ten seconds, the panel is drawn unlit rather
+    /// than stale. (While Ectodeck's own player drives the screen, the picture follows each
+    /// frame as the player sends it instead: see [Front::screen_news].)
     fn poll_lcd(&mut self) {
+        if self.player_drives() {
+            return;
+        }
         let dir = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir);
         let f = dir.join("z10-lcd/frame");
         let fresh = std::fs::metadata(&f).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|a| a.as_secs() < 10);
-        let rows: Vec<String> = std::fs::read_to_string(&f).map(|s| s.split('\n').take(4).map(|r| format!("{:<20}", r.chars().take(20).collect::<String>())).collect()).unwrap_or_default();
-        let lcd = (fresh && !rows.is_empty(), rows, self.page.lcd_color());
+        let rows: Vec<String> = std::fs::read_to_string(&f).map(|s| s.split('\n').map(String::from).collect()).unwrap_or_default();
+        self.show_lcd(fresh, &rows);
+    }
+
+    /// Whether Ectodeck's own player is what the keyboard's screen shows now.
+    fn player_drives(&self) -> bool {
+        self.controlled && matches!(self.lcd.state, crate::lcd_player::State::Playing | crate::lcd_player::State::Paused)
+    }
+
+    /// The display in the picture of the keyboard showing `rows` (unlit unless `live`),
+    /// in the screen's light, drawn again only when that changes.
+    fn show_lcd(&mut self, live: bool, rows: &[String]) {
+        let rows: Vec<String> = rows.iter().take(4).map(|r| format!("{:<20}", r.chars().take(20).collect::<String>())).collect();
+        let lcd = (live && !rows.is_empty(), rows, self.page.lcd_color());
         if lcd != self.overlays.lcd {
             self.overlays.lcd = lcd;
             self.show_overlays();
@@ -4202,6 +4219,12 @@ impl Front {
             self.page_from = Instant::now();
         }
         self.lcd = n;
+        // the picture of the keyboard shows each frame as the keyboard gets it (it read the
+        // frames' file every two seconds, so it ran up to two seconds behind, Grant saw)
+        if self.player_drives() {
+            let rows = self.lcd.rows.clone();
+            self.show_lcd(true, &rows);
+        }
         self.set_playhead();
         if self.page.view == View::Screen && self.ui.get_place() == "z10" {
             if state_changed {
