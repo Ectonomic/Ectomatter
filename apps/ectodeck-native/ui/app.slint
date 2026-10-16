@@ -4487,7 +4487,8 @@ export component AppWindow inherits Window {
                                 // it lands: switched off then, the drag would end under the hand)
                                 sta := TouchArea {
                                     enabled: (!b.away || root.carry-on) && !root.pl-dim;
-                                    mouse-cursor: root.carry-on ? MouseCursor.grabbing : MouseCursor.pointer;
+                                    // (the open hand at rest, as a turn is there to be carried; Grant, 2026-10-16)
+                                    mouse-cursor: root.carry-on ? MouseCursor.grabbing : MouseCursor.grab;
                                     property <bool> far;
                                     pointer-event(e) => {
                                         if (e.kind == PointerEventKind.down) {
