@@ -4483,8 +4483,10 @@ export component AppWindow inherits Window {
                                     }
                                 }
                                 // select the turn to show it now; drag it along the strip to move it
+                                // (the turn carried keeps the press it was carried with, unseen, until
+                                // it lands: switched off then, the drag would end under the hand)
                                 sta := TouchArea {
-                                    enabled: !b.away && !root.pl-dim;
+                                    enabled: (!b.away || root.carry-on) && !root.pl-dim;
                                     mouse-cursor: root.carry-on ? MouseCursor.grabbing : MouseCursor.pointer;
                                     property <bool> far;
                                     pointer-event(e) => {

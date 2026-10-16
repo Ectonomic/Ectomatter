@@ -616,14 +616,24 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         });
     }
     // ECTODECK_NATIVE_DRAG_DROP="x0,y0;x1,y1": pressed at the first point, dragged to the second, let go
+    // (ECTODECK_NATIVE_DRAG_LIVE: the window acting on each move and drawn after it, as it is under
+    // a hand, so what a move changes is there for the next)
     let drag: Vec<f32> = std::env::var("ECTODECK_NATIVE_DRAG_DROP").unwrap_or_default().split([',', ';']).filter_map(|v| v.trim().parse().ok()).collect();
     if let [x0, y0, x1, y1] = drag[..] {
         let (from, to) = (LogicalPosition::new(x0, y0), LogicalPosition::new(x1, y1));
+        let live = std::env::var_os("ECTODECK_NATIVE_DRAG_LIVE").is_some();
         window.dispatch_event(WindowEvent::PointerMoved { position: from });
         window.dispatch_event(WindowEvent::PointerPressed { position: from, button: PointerEventButton::Left });
         for k in 1..=8 {
             let f = k as f32 / 8.0;
             window.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(x0 + (x1 - x0) * f, y0 + (y1 - y0) * f) });
+            if live {
+                slint::platform::update_timers_and_animations();
+                front.act();
+                window.draw_if_needed(|r| {
+                    r.render(&mut pic.ui, w as usize);
+                });
+            }
         }
         // ECTODECK_NATIVE_DRAG_HOLD: still held at the second point, to see the drag under way
         if std::env::var_os("ECTODECK_NATIVE_DRAG_HOLD").is_none() {
