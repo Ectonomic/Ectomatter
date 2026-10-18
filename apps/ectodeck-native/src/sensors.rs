@@ -218,9 +218,11 @@ impl Setup {
     /// address, or by its name where its address changed), else the card by the rule.
     pub fn main_card<'a>(&self, cat: &'a Catalog) -> Option<&'a Device> {
         let cards = cat.cards();
+        // (by its place first: a card's name changes when Linux's list of devices is updated)
         let made = self.main.as_ref().and_then(|(p, n)| {
-            let is = |d: &&Device, by_pci: bool| d.card.as_ref().is_some_and(|c| c.name == *n && (!by_pci || c.pci == *p));
-            cards.iter().find(|d| is(d, true)).or(cards.iter().find(|d| is(d, false))).copied()
+            let at = |d: &&&Device| d.card.as_ref().is_some_and(|c| c.pci == *p);
+            let named = |d: &&&Device| d.card.as_ref().is_some_and(|c| c.name == *n);
+            cards.iter().find(at).or(cards.iter().find(named)).copied()
         });
         made.or(cat.main_by_rule())
     }
@@ -392,6 +394,11 @@ mod tests {
         let c = s.checked_in(&cat);
         assert!(c.contains("card@0000:16:00.0/temperature") && c.contains("card@0000:16:00.0/load") && c.contains("card@0000:01:00.0/temperature"));
         assert_eq!(s.main_card(&cat).map(|d| d.name.as_str()), Some("Arc Pro B50"));
+        // still the main card when Linux's list of devices names it anew
+        let kept = s.main.clone();
+        s.main = Some(("0000:16:00.0".into(), "Intel Battlemage G21".into()));
+        assert_eq!(s.main_card(&cat).map(|d| d.name.as_str()), Some("Arc Pro B50"));
+        s.main = kept;
         // kept and read back as it was
         assert_eq!(Setup::of(&s.to_json()), (s.clone(), None));
         // a name taken back by giving it nothing

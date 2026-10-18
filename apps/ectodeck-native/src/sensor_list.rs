@@ -675,7 +675,11 @@ fn card(root: &Path, c: &crate::sensors::Card, hw: Option<&(PathBuf, String)>, n
         sensors.push(Sensor { id: id(k), name: name.into(), orig: orig.map(String::from), what, run: None, usual, how });
     };
     let dir = root.join("sys/bus/pci/devices").join(&c.pci);
+    // (a card no driver runs, as one given over to a virtual machine, has nothing to read)
+    let driven = dir.join("driver").exists();
+    let undriven = || Some("No Linux driver is running this card, so it can’t be read.".to_string());
     match c.vendor {
+        _ if !driven => note = undriven(),
         Vendor::Nvidia => match nv.probe(&c.pci) {
             Some(p) => {
                 vram = p.vram;
@@ -799,7 +803,9 @@ fn card(root: &Path, c: &crate::sensors::Card, hw: Option<&(PathBuf, String)>, n
     }
 }
 
-/// A battery's charge and the power going out of it.
+/// A battery's charge and the power going out of it. A battery Linux says powers a device of
+/// its own rather than the computer (a game controller's, a mouse's: its scope is Device) is
+/// that device's, named as the device names itself.
 fn battery(dir: &Path) -> Option<Device> {
     if words(&dir.join("type")).as_deref() != Some("Battery") {
         return None;
@@ -809,6 +815,20 @@ fn battery(dir: &Path) -> Option<Device> {
     let mut sensors = Vec::new();
     if num(&dir.join("capacity")).is_some() {
         sensors.push(Sensor { id: format!("{key}/charge"), name: "Charge".into(), orig: None, what: What::Charge, run: None, usual: false, how: How::Charge(dir.join("capacity")) });
+    }
+    if words(&dir.join("scope")).as_deref() == Some("Device") {
+        // (the device's own name: the nearest "product" up its path, as USB gives it)
+        let mut at = std::fs::canonicalize(dir.join("device")).ok();
+        let mut product = words(&dir.join("model_name"));
+        while product.is_none() {
+            let Some(p) = at.as_mut() else { break };
+            if !p.pop() {
+                break;
+            }
+            product = words(&p.join("product"));
+        }
+        let name = product.unwrap_or_else(|| "A device’s battery".into());
+        return (!sensors.is_empty()).then(|| Device { key, part: Part::Other, full: name.clone(), name, src: "From the device’s own battery".into(), inside: None, card: None, sensors, note: None });
     }
     if num(&dir.join("power_now")).is_some() || num(&dir.join("current_now")).is_some() {
         sensors.push(Sensor { id: format!("{key}/power"), name: "Going out".into(), orig: None, what: What::Power, run: None, usual: false, how: How::Out(dir.to_path_buf()) });
@@ -1089,6 +1109,9 @@ pub mod tests {
             let at = dir.join("sys/bus/pci/devices");
             std::fs::create_dir_all(&at).unwrap();
             std::os::unix::fs::symlink(dir.join("sys/devices").join(path), at.join(path.rsplit('/').next().unwrap())).unwrap();
+            // (a driver running it)
+            std::fs::create_dir_all(dir.join("sys/bus/pci/drivers/gpu")).unwrap();
+            std::os::unix::fs::symlink(dir.join("sys/bus/pci/drivers/gpu"), dir.join("sys/devices").join(path).join("driver")).unwrap();
         };
         card("pci0000:00/0000:00:01.1/0000:01:00.0", "0x10de", "0x2b85");
         let arc = "pci0000:00/0000:00:02.2/0000:16:00.0";
@@ -1190,6 +1213,32 @@ pub mod tests {
         assert_eq!((c1.menu_name(None), c1.menu_name(Some("Hot die"))), ("Chiplet 1 temperature".to_string(), "Hot die".to_string()));
         let (_, pump) = cat.sensor("nct6687@nct6687.2592/fan/Pump Fan").unwrap();
         assert_eq!(pump.menu_name(None), "Pump Fan");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_controller_s_battery_is_its_own_and_a_card_no_driver_runs_says_so() {
+        let dir = temp_dir("list-controller");
+        computer(&dir);
+        // a game controller's battery, which powers the controller, not the computer
+        let usb = dir.join("sys/devices/pci0000:00/0000:00:08.1/0000:18:00.3/usb5/5-2");
+        std::fs::create_dir_all(usb.join("5-2:1.3/0003:054C:0CE6.004D")).unwrap();
+        std::fs::write(usb.join("product"), "DualSense Wireless Controller\n").unwrap();
+        let bat = dir.join("sys/class/power_supply/ps-controller-battery-48:18:8d:ca:8e:0c");
+        std::fs::create_dir_all(&bat).unwrap();
+        for (f, v) in [("type", "Battery"), ("scope", "Device"), ("capacity", "85"), ("status", "Discharging")] {
+            std::fs::write(bat.join(f), format!("{v}\n")).unwrap();
+        }
+        std::os::unix::fs::symlink(usb.join("5-2:1.3/0003:054C:0CE6.004D"), bat.join("device")).unwrap();
+        // and the Arc given over to a virtual machine: no driver of Linux's runs it
+        std::fs::remove_file(dir.join("sys/devices/pci0000:00/0000:00:02.2/0000:16:00.0/driver")).unwrap();
+        let cat = catalog(&dir, &mut nvidia());
+        assert!(!cat.parts().contains(&Part::Battery));
+        let pad = cat.devices.iter().find(|d| d.key.starts_with("battery@")).unwrap();
+        assert_eq!((pad.part, pad.name.as_str(), names(pad)), (Part::Other, "DualSense Wireless Controller", vec![("Charge".to_string(), None)]));
+        let arc = cat.device("card@0000:16:00.0").unwrap();
+        assert!(arc.sensors.is_empty());
+        assert_eq!(arc.note.as_deref(), Some("No Linux driver is running this card, so it can’t be read."));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -191,6 +191,8 @@ pub mod kind {
     /// its reading, or a folded run of them
     pub const TAB: i32 = 50;
     pub const SENSOR: i32 = 51;
+    /// words that say more under the pointer: a device's whole name, and where its readings come from
+    pub const TIP: i32 = 52;
 }
 /// the text styles
 #[allow(dead_code)]

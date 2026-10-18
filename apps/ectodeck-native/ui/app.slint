@@ -1071,6 +1071,42 @@ component CellView inherits Rectangle {
             clicked => { root.pick(root.c.id, root.c.index, 0, 0, 0); }
         }
     }
+    // over a device's name in the Sensors box: under the pointer, a while after it comes to
+    // rest, its whole name where the row's is shorter (`text`), and where its readings come
+    // from (`fill`), in a box like the app's menus
+    if root.c.kind == 52: Rectangle {
+        Tooltip {
+            Rectangle {
+                border-radius: 8px;
+                background: Ink.hover-box;
+                border-width: 1px;
+                border-color: #3a3a41;
+                drop-shadow-blur: 16px;
+                drop-shadow-offset-y: 4px;
+                drop-shadow-color: #00000080;
+                VerticalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    padding-top: 7px;
+                    padding-bottom: 7px;
+                    spacing: 2px;
+                    if root.c.text != "": Text {
+                        text: root.c.text;
+                        font-family: "Geist";
+                        font-size: 12.5px;
+                        font-weight: 500;
+                        color: Ink.bright;
+                    }
+                    Text {
+                        text: root.c.fill;
+                        font-family: "Geist";
+                        font-size: 12px;
+                        color: Ink.soft;
+                    }
+                }
+            }
+        }
+    }
     // a sensor in the Sensors box: its checkbox, its name (as wide as `value` allows), its
     // driver's name in gray (`fill`), its reading at its right (`lines`), and under the
     // pointer a pencil to rename it, whose click is the next control's; or a run of like

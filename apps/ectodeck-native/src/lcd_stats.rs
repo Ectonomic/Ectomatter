@@ -173,6 +173,8 @@ pub mod tests {
         }
         std::fs::create_dir_all(dir.join("sys/bus/pci/devices")).unwrap();
         let _ = std::os::unix::fs::symlink(&card, dir.join("sys/bus/pci/devices/0000:01:00.0"));
+        std::fs::create_dir_all(dir.join("sys/bus/pci/drivers/nvidia")).unwrap();
+        let _ = std::os::unix::fs::symlink(dir.join("sys/bus/pci/drivers/nvidia"), card.join("driver"));
         std::fs::create_dir_all(dir.join("usr/share/hwdata")).unwrap();
         std::fs::write(dir.join("usr/share/hwdata/pci.ids"), "10de  NVIDIA Corporation\n\t2b85  GB202 [GeForce RTX 5090]\n").unwrap();
     }

@@ -155,6 +155,9 @@ struct Row<'a> {
     notes: Vec<String>,
     /// the device its runs are kept open by
     key: String,
+    /// what the row's name says under the pointer, for a device: its whole name where the
+    /// row's is shorter, and where its readings come from
+    tip: Option<(String, String)>,
 }
 
 /// Ectodeck's Settings' Sensors box: a tab for each part of the computer (the Screen tab's
@@ -239,7 +242,8 @@ fn sensors_box(cells: &mut Vec<Cell>, y: &mut f32, v: &Sensors, map: &mut Sensor
             let mut notes = odd_notes(&items);
             notes.extend(d.note.clone());
             let is_main = main.as_ref() == Some(&d.key);
-            rows.push(Row { name: d.name.clone(), card: d.card.as_ref().map(|_| (*d, is_main)), inside: d.inside.clone(), runs: runs_of(&all), items, notes, key: d.key.clone() });
+            let tip = Some((if d.full != d.name { d.full.clone() } else { String::new() }, d.src.clone()));
+            rows.push(Row { name: d.name.clone(), card: d.card.as_ref().map(|_| (*d, is_main)), inside: d.inside.clone(), runs: runs_of(&all), items, notes, key: d.key.clone(), tip });
         }
     } else if let Some(d) = devices.first() {
         for name in row_order(tab) {
@@ -254,7 +258,7 @@ fn sensors_box(cells: &mut Vec<Cell>, y: &mut f32, v: &Sensors, map: &mut Sensor
                 notes.extend(odd_notes(rs));
             }
             // (each row's runs opened by themselves: the processor's loads apart from its clocks)
-            rows.push(Row { name: name.to_string(), card: None, inside: None, items, runs, notes, key: format!("{}#{name}", d.key) });
+            rows.push(Row { name: name.to_string(), card: None, inside: None, items, runs, notes, key: format!("{}#{name}", d.key), tip: None });
         }
     }
     let col = (cw - 2.0 * 8.0) / 3.0;
@@ -270,6 +274,10 @@ fn sensors_box(cells: &mut Vec<Cell>, y: &mut f32, v: &Sensors, map: &mut Sensor
         let lines = text::wrap(400, 13.5, &broken.join(" "), CTRL - 12.0);
         for (i, l) in lines.iter().enumerate() {
             out.push(text_cell(style::LABEL, bx, ry + 6.0 + i as f32 * 18.0, CTRL - 12.0, 18.0, l));
+        }
+        if let Some((full, src)) = &r.tip {
+            let w = lines.iter().map(|l| text::width(400, 13.5, l).ceil()).fold(0.0f32, f32::max);
+            out.push(Cell { text: full.into(), fill: src.into(), ..cell(kind::TIP, bx, ry + 6.0, w, lines.len() as f32 * 18.0) });
         }
         let mut left_h = 6.0 + lines.len() as f32 * 18.0;
         if r.card.is_some() || r.inside.is_some() {
