@@ -20,6 +20,7 @@ mod adapter;
 mod clipboard;
 mod core_host;
 mod cores;
+mod desk;
 mod device;
 mod display;
 mod devices;
@@ -148,6 +149,8 @@ const LAB: usize = 1;
 const LAYOUTS: usize = 2;
 /// the ground the keyboard sits on: its box's (Ink.well)
 const GROUND: [u8; 3] = [0x13, 0x13, 0x16];
+/// the ground it sits on on Home's desk: the app's own (Ink.base)
+const HOME_GROUND: [u8; 3] = [0x18, 0x18, 0x1b];
 /// How much brighter than the page's colors the keys' light is drawn. The
 /// light is drawn at the web design's brightness, as approved in WebKit; going
 /// above the desktop's white by the screen's headroom looked overdone.
@@ -301,7 +304,10 @@ mod kept_tests {
 /// it takes a third of a second, and the window keeps drawing meanwhile. Its
 /// legends are set as the light in use asks before it is handed over, so a
 /// keyboard drawn anew never shows the drawing's own legends first.
-fn board_builder(done: calloop::channel::Sender<Board>) -> std::sync::mpsc::Sender<(u32, u32, serde_json::Value, f32)> {
+///
+/// One builds the keyboard for its page, on its box's ground; another for
+/// Home's desk, on the app's ground (`home`), each telling which it built.
+fn board_builder(done: calloop::channel::Sender<(bool, Board)>, home: bool) -> std::sync::mpsc::Sender<(u32, u32, serde_json::Value, f32)> {
     let (ask, asked) = std::sync::mpsc::channel::<(u32, u32, serde_json::Value, f32)>();
     std::thread::spawn(move || {
         let tree = cores::shown().tree();
@@ -312,12 +318,12 @@ fn board_builder(done: calloop::channel::Sender<Board>) -> std::sync::mpsc::Send
                 size = s;
             }
             let t = Instant::now();
-            match Board::new(&tree, &device, GROUND, size.0, size.1) {
+            match Board::new(&tree, &device, if home { HOME_GROUND } else { GROUND }, size.0, size.1) {
                 Ok(mut b) => {
                     b.set_legends_from(&size.2);
                     b.lay_shadow(&stage_shadow(size.3), STAGE_SHADOW_OPACITY);
-                    eprintln!("ectodeck-native: keyboard drawn at {}x{} in {:?}", size.0, size.1, t.elapsed());
-                    if done.send(b).is_err() {
+                    eprintln!("ectodeck-native: keyboard drawn at {}x{} in {:?}{}", size.0, size.1, t.elapsed(), if home { ", for Home" } else { "" });
+                    if done.send((home, b)).is_err() {
                         return;
                     }
                 }
@@ -389,8 +395,8 @@ fn tenth(nits: f32) -> f64 {
 
 /// The keyboard drawn at a size and lit by its light simulated to the end,
 /// here and now: for a snapshot, which has no window to wait in.
-fn settled(tree: &usvg::Tree, device: &serde_json::Value, w: u32, h: u32) -> Board {
-    let mut board = Board::new(tree, device, GROUND, w, h).unwrap();
+fn settled(tree: &usvg::Tree, device: &serde_json::Value, ground: [u8; 3], w: u32, h: u32) -> Board {
+    let mut board = Board::new(tree, device, ground, w, h).unwrap();
     let snap = Simulator::settle(&Scene::of(&board), &board.setup(&device["light"]), sim::SETTLED);
     board.set_sim(std::sync::Arc::new(snap));
     board
@@ -615,6 +621,12 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
             front.ui.set_place(place.into());
             // (the place's own cells built, so clicks land on them)
             front.refresh();
+            // ECTODECK_NATIVE_DESK=edit: Home's desk in edit mode, its dots shown, before the clicks
+            if std::env::var("ECTODECK_NATIVE_DESK").is_ok_and(|v| v == "edit") {
+                front.desk.set_editing(true);
+                front.desk.tick(Instant::now() + Duration::from_secs(1));
+                front.refresh();
+            }
         }
     }
     // ECTODECK_NATIVE_MACROS=N: the Macro Editor's window instead, open on macro N
@@ -663,6 +675,13 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         window.draw_if_needed(|r| {
             r.render(&mut pic.ui, w as usize);
         });
+    }
+    // ECTODECK_NATIVE_WHEEL="x,y,dy": the wheel turned there, after the clicks
+    if let Some(v) = std::env::var("ECTODECK_NATIVE_WHEEL").ok().map(|v| v.split(',').filter_map(|t| t.trim().parse::<f32>().ok()).collect::<Vec<_>>()).filter(|v| v.len() == 3) {
+        let position = LogicalPosition::new(v[0], v[1]);
+        window.dispatch_event(WindowEvent::PointerMoved { position });
+        window.dispatch_event(WindowEvent::PointerScrolled { position, delta_x: 0.0, delta_y: v[2] });
+        front.act();
     }
     // ECTODECK_NATIVE_RCLICK="x,y": a click with the right button, after the others
     if let Some((x, y)) = std::env::var("ECTODECK_NATIVE_RCLICK").ok().and_then(|s| s.split_once(',').and_then(|(a, b)| Some((a.trim().parse::<f32>().ok()?, b.trim().parse::<f32>().ok()?)))) {
@@ -770,6 +789,8 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     if let Ok(at) = std::env::var("ECTODECK_NATIVE_HOVER") {
         let mut xy = at.split(',').map(|v| v.trim().parse::<f32>().unwrap_or(0.0));
         window.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(xy.next().unwrap_or(0.0), xy.next().unwrap_or(0.0)) });
+        // (what the pointer's being there asks, done, as the window does at once)
+        front.act();
     }
     // ECTODECK_NATIVE_DRAG="x,y;x,y": a press dragged from the first point to the
     // second in 30 steps, each step timed as the window would handle it
@@ -785,7 +806,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
             let rect = board_rect(&front.ui, 1.0);
             let tree = cores::shown().tree();
             let device = device_in_use(&front.settings);
-            let board = (rect.2 > 0).then(|| settled(&tree, &device, rect.2 as u32, rect.3 as u32));
+            let board = (rect.2 > 0).then(|| settled(&tree, &device, GROUND, rect.2 as u32, rect.3 as u32));
             for k in 1..=30 {
                 let t0 = Instant::now();
                 window.dispatch_event(WindowEvent::PointerMoved { position: at(k as f32 / 30.0) });
@@ -840,7 +861,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         let tree = cores::shown().tree();
         let device = device_in_use(&front.settings);
         let t = Instant::now();
-        let mut board = settled(&tree, &device, rect.2 as u32, rect.3 as u32);
+        let mut board = settled(&tree, &device, GROUND, rect.2 as u32, rect.3 as u32);
         // its shadow, as the window lays it
         board.lay_shadow(&stage_shadow(1.0), STAGE_SHADOW_OPACITY);
         if let Some(s) = &board.cast {
@@ -891,6 +912,35 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
             (w, h) = (nw, nh);
         }
     }
+    // Home's desk: the keyboard on it drawn for its place there, on the app's ground
+    if let Some([x, y, kw, kh]) = front.desk_keyboard() {
+        let (bw, bh) = (kw.round().max(1.0) as u32, kh.round().max(1.0) as u32);
+        let tree = cores::shown().tree();
+        let device = device_in_use(&front.settings);
+        let mut board = settled(&tree, &device, HOME_GROUND, bw, bh);
+        board.lay_shadow(&stage_shadow(1.0), STAGE_SHADOW_OPACITY);
+        if let Some(s) = &board.cast {
+            front.ui.set_desk_kb_shadow(shadow_image(s, board.w, board.h));
+            front.ui.set_desk_kb_shadow_m(s.margin as f32);
+        }
+        front.board_size(bw, bh, 1.0);
+        front.ui.set_desk_kb_k(1.0);
+        let on = front.desk_keyboard_on();
+        let lights = if on { front.lights().unwrap_or_default() } else { Vec::new() };
+        let gain = front.light_gain(reference).max(gain);
+        let lit = light(&board, &lights, front.page.locks, gain, reference, front.overlays.panel_for(board.w, board.lcd().dot));
+        let lit = Rc::new(Lit { px: lit, w: bw as usize, h: bh as usize });
+        pic.set_keyboard((x.round() as i32, y.round() as i32, bw as usize, bh as usize), Some(&lit));
+        pic.set_keyboard_ground(Some(Rc::new(board.ground_share())), if on { 1.0 } else { 0.5 });
+        front.ui.set_board_ready(true);
+        eprintln!("Home's keyboard drawn at {bw}x{bh}, at {x},{y}");
+    }
+    pic.set_decor(front.desk_decor(1.0));
+    window.request_redraw();
+    window.draw_if_needed(|r| {
+        r.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
+        r.render(&mut pic.ui, w as usize);
+    });
     let t = Instant::now();
     pic.encode_all();
     eprintln!("frame encoded in {:?}", t.elapsed());
@@ -1099,7 +1149,7 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
         .unwrap_or(LAB_SIZE);
     let device = device_in_use(&front.settings);
     let tree = cores::shown().tree();
-    let board = settled(&tree, &device, 1264, 506);
+    let board = settled(&tree, &device, GROUND, 1264, 506);
     let ui = LabWindow::new().unwrap();
     let _ = slint::ComponentHandle::window(&ui);
     let window = made.borrow().last().cloned().unwrap();
@@ -1319,6 +1369,14 @@ struct App {
     effect_due: Instant,
     asked: Option<(u32, u32)>,
     build: std::sync::mpsc::Sender<(u32, u32, serde_json::Value, f32)>,
+    /// the keyboard drawn for Home's desk, on its ground: the size last asked
+    /// for, its builder, and how much of the ground shows in each of its pixels;
+    /// and whether the picture shown is it
+    home_board: Option<Board>,
+    home_asked: Option<(u32, u32)>,
+    home_build: std::sync::mpsc::Sender<(u32, u32, serde_json::Value, f32)>,
+    home_share: Option<Rc<Vec<f32>>>,
+    lit_home: bool,
     /// SteelSeries' core (kept so it keeps running; the mouse has no page yet)
     _mouse: Option<core_host::Core>,
     /// legends to set as the light asks, away from the window
@@ -1485,8 +1543,9 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
     let desc = describe(&cm, &qh, reference, screens::screens().iter().filter_map(|s| s["peak"].as_f64()).fold(reference, f64::max), false, ());
     let cm_surface = cm.get_surface(window.wl_surface(), &qh, ());
 
-    let (built_tx, built_rx) = calloop::channel::channel::<Board>();
-    let build = board_builder(built_tx);
+    let (built_tx, built_rx) = calloop::channel::channel::<(bool, Board)>();
+    let build = board_builder(built_tx.clone(), false);
+    let home_build = board_builder(built_tx, true);
     // the legends, set anew as the Key lab asks
     let (legends_tx, legends_rx) = calloop::channel::channel::<ectodeck_draw::hdr::Legends>();
     let set_legends = legends_builder(legends_tx);
@@ -1501,8 +1560,8 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
     event_loop
         .handle()
         .insert_source(built_rx, |e, _, app: &mut App| {
-            if let calloop::channel::Event::Msg(board) = e {
-                app.built(board);
+            if let calloop::channel::Event::Msg((home, board)) = e {
+                app.built(home, board);
             }
         })
         .unwrap();
@@ -1640,6 +1699,11 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         effect_due: Instant::now(),
         asked: None,
         build,
+        home_board: None,
+        home_asked: None,
+        home_build,
+        home_share: None,
+        lit_home: false,
         _mouse: mouse,
         set_legends,
         full: true,
@@ -2224,16 +2288,22 @@ impl App {
         self.window.commit();
     }
 
-    /// The keyboard came back drawn at a size: light it, by the Key lab's
-    /// light if it has tuned one.
-    fn built(&mut self, mut board: Board) {
-        // its shadow round it, on the box it sits in
+    /// The keyboard came back drawn at a size, for its page or (`home`) for
+    /// Home's desk: light it, by the Key lab's light if it has tuned one.
+    fn built(&mut self, home: bool, mut board: Board) {
+        // its shadow round it, on the box it sits in or on the desk
         if let Some(s) = &board.cast {
-            self.front.ui.set_board_shadow(shadow_image(s, board.w, board.h));
-            self.front.ui.set_board_shadow_margin(s.margin as f32 / self.scale as f32);
+            let (img, m) = (shadow_image(s, board.w, board.h), s.margin as f32 / self.scale as f32);
+            if home {
+                self.front.ui.set_desk_kb_shadow(img);
+                self.front.ui.set_desk_kb_shadow_m(m);
+            } else {
+                self.front.ui.set_board_shadow(img);
+                self.front.ui.set_board_shadow_margin(m);
+            }
         }
         // the Key lab, open before the device was first drawn, takes its caps
-        if let Some(l) = self.front.lab.as_mut().filter(|l| !l.has_caps()) {
+        if let Some(l) = self.front.lab.as_mut().filter(|l| !l.has_caps() && !home) {
             l.set_caps(lab_device(Some(&board)).caps);
         }
         if let Some(l) = &self.light {
@@ -2272,23 +2342,56 @@ impl App {
             }
         }
         self.want = Some(want);
-        let lit = light(&board, &self.lights, self.front.page.locks, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
-        self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
-        self.board = Some(board);
+        if home {
+            self.home_share = Some(Rc::new(board.ground_share()));
+            self.home_board = Some(board);
+        } else {
+            self.board = Some(board);
+        }
+        self.relight();
         self.full = true;
         self.draw();
     }
 
+    /// Whether the picture the window shows is Home's keyboard: Home is up
+    /// with a keyboard on its desk.
+    fn shows_home(&self) -> bool {
+        self.front.desk_keyboard().is_some()
+    }
+
+    /// The keyboard the window shows lit again: the page's, or Home's on the
+    /// desk (dark while it isn't plugged in).
+    fn relight(&mut self) {
+        let home = self.shows_home();
+        let board = if home { self.home_board.as_ref() } else { self.board.as_ref() };
+        let Some(b) = board else {
+            if home {
+                self.lit = None;
+                self.lit_home = true;
+            }
+            return;
+        };
+        let lights = if home && !self.front.desk_keyboard_on() { &[][..] } else { &self.lights[..] };
+        let px = light(b, lights, self.front.page.locks, self.gain, self.pic.reference(), self.front.overlays.panel_for(b.w, b.lcd().dot));
+        self.lit = Some(Rc::new(Lit { px, w: b.w as usize, h: b.h as usize }));
+        self.lit_home = home;
+    }
+
     /// Legends set as the light asks: put them on the keyboard, and light it again.
     fn legends_ready(&mut self, legends: ectodeck_draw::hdr::Legends) {
-        let Some(board) = &mut self.board else { return };
-        board.set_legends(legends);
-        // (the light may have changed again while they were set)
-        if let Some(ask) = board.legends_for(&self.light.clone().unwrap_or_else(|| cores::shown().device_now()["light"].clone())) {
-            let _ = self.set_legends.send(ask);
+        // (set for one size: the keyboard of that size takes them)
+        let light = self.light.clone().unwrap_or_else(|| cores::shown().device_now()["light"].clone());
+        let mut legends = Some(legends);
+        for board in [self.board.as_mut(), self.home_board.as_mut()].into_iter().flatten() {
+            if legends.as_ref().is_some_and(|l| board.takes(l)) {
+                board.set_legends(legends.take().unwrap());
+                // (the light may have changed again while they were set)
+                if let Some(ask) = board.legends_for(&light) {
+                    let _ = self.set_legends.send(ask);
+                }
+            }
         }
-        let lit = light(board, &self.lights, self.front.page.locks, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
-        self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
+        self.relight();
         self.full = true;
         self.draw();
     }
@@ -2297,20 +2400,26 @@ impl App {
     fn sim_ready(&mut self) {
         let Some(s) = &self.sim else { return };
         let version = s.version();
-        let (Some(snap), Some(board)) = (s.latest(), &mut self.board) else { return };
-        if version == self.sim_seen {
+        let Some(snap) = s.latest() else { return };
+        if version == self.sim_seen || (self.board.is_none() && self.home_board.is_none()) {
             return;
         }
         self.sim_seen = version;
-        if !Kept::takes(self.want.as_ref(), board.sim(), &snap) {
+        // (each keyboard, the page's and the desk's, lit by the same simulation)
+        let mut taken = false;
+        for board in [self.board.as_mut(), self.home_board.as_mut()].into_iter().flatten() {
+            if Kept::takes(self.want.as_ref(), board.sim(), &snap) {
+                board.set_sim(snap.clone());
+                taken = true;
+            }
+        }
+        if !taken {
             return;
         }
         if snap.settled {
             self.kept.keep(snap.clone());
         }
-        board.set_sim(snap);
-        let lit = light(board, &self.lights, self.front.page.locks, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
-        self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
+        self.relight();
         self.readout_at = None;
         self.readout();
         self.draw();
@@ -2329,10 +2438,7 @@ impl App {
         let g = self.front.light_gain(self.pic.reference());
         if (g - self.gain).abs() > 1e-3 {
             self.gain = g;
-            if let Some(board) = &self.board {
-                let lit = light(board, &self.lights, self.front.page.locks, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
-                self.lit = Some(Rc::new(Lit { px: lit, w: board.w as usize, h: board.h as usize }));
-            }
+            self.relight();
         }
         if let Some(t) = &self.tray {
             let on = self.front.ui.get_conn_state() == 1;
@@ -2349,10 +2455,23 @@ impl App {
             self.pic.resize(w, h);
             self.full = true;
         }
-        // the knobs and the display's glass for the keyboard's size on the page,
-        // before the page is drawn, so they move with it in the same frame
-        let rect = board_rect(&self.front.ui, self.scale as f32);
-        self.front.board_size(rect.2 as u32, rect.3 as u32, self.scale as f32);
+        // where the keyboard shows: in its page's box, or on Home's desk (nothing
+        // there till Home's keyboard is drawn)
+        let s = self.scale as f32;
+        let home = self.front.desk_keyboard();
+        let rect = match home {
+            Some([x, y, kw, kh]) if self.home_board.is_some() => ((x * s).round() as i32, (y * s).round() as i32, (kw * s).round().max(1.0) as usize, (kh * s).round().max(1.0) as usize),
+            Some(_) => (0, 0, 0, 0),
+            None => board_rect(&self.front.ui, s),
+        };
+        // the knobs and the display's glass for the keyboard's size as drawn,
+        // before the page is drawn, so they move with it in the same frame; on
+        // the desk, shown at its size there
+        let drawn = home.and_then(|_| self.home_board.as_ref().map(|b| (b.w, b.h))).unwrap_or((rect.2 as u32, rect.3 as u32));
+        self.front.board_size(drawn.0, drawn.1, s);
+        if home.is_some() && drawn.0 > 0 {
+            self.front.ui.set_desk_kb_k(rect.2 as f32 / drawn.0 as f32);
+        }
         // the Key lab's tuning, when it has changed
         let mut relit = false;
         let mut relit_caps = false;
@@ -2361,21 +2480,31 @@ impl App {
             if rev != self.light_rev {
                 self.light_rev = rev;
                 self.light = Some(lab.shown().clone());
-                if let (Some(b), Some(l)) = (&mut self.board, &self.light) {
-                    // the keys drawn again only if their picture changes now; how
-                    // the light falls shows with the simulation's next picture,
-                    // or at once from a picture kept of it
-                    relit = b.set_light(l);
-                    // the legends, as the light asks for them, when they are set
-                    if let Some(ask) = b.legends_for(l) {
-                        let _ = self.set_legends.send(ask);
+                // (both keyboards, the page's and the desk's)
+                if let Some(l) = &self.light {
+                    for b in [self.board.as_mut(), self.home_board.as_mut()].into_iter().flatten() {
+                        // the keys drawn again only if their picture changes now; how
+                        // the light falls shows with the simulation's next picture,
+                        // or at once from a picture kept of it
+                        relit |= b.set_light(l);
+                        // the legends, as the light asks for them, when they are set
+                        if let Some(ask) = b.legends_for(l) {
+                            let _ = self.set_legends.send(ask);
+                        }
                     }
-                    let want = b.setup(l);
-                    self.kept.pinned = Some(b.setup(lab.saved()));
+                }
+                let setups = match (self.board.as_ref().or(self.home_board.as_ref()), &self.light) {
+                    (Some(b), Some(l)) => Some((b.setup(l), b.setup(lab.saved()))),
+                    _ => None,
+                };
+                if let Some((want, pinned)) = setups {
+                    self.kept.pinned = Some(pinned);
                     let changed = self.want.as_ref().is_none_or(|w| !w.same_paths(&want));
                     if changed {
                         if let Some(snap) = self.kept.get(&want) {
-                            b.set_sim(snap);
+                            for b in [self.board.as_mut(), self.home_board.as_mut()].into_iter().flatten() {
+                                b.set_sim(snap.clone());
+                            }
                             relit = true;
                             if let Some(s) = &self.sim {
                                 s.rest();
@@ -2397,7 +2526,7 @@ impl App {
             self.front.refresh();
         }
         // the keys' light, or the display's text, when it has changed
-        if let Some(b) = &self.board {
+        if let Some(b) = if home.is_some() { self.home_board.as_ref() } else { self.board.as_ref() } {
             let _ = self.front.overlays.panel_for(b.w, b.lcd().dot);
             // the glass's sheen as the core sets it
             let glass = b.lcd().glass;
@@ -2419,21 +2548,31 @@ impl App {
         // the last frame's picture, kept until the picture shows the new one
         let mut shown_before = None;
         // the area the pointer is over on the Lighting page: the rest of the keyboard dims
-        let dim = self.board.as_ref().and_then(|b| self.front.dim_rects(b.w));
+        let dim = if home.is_none() { self.board.as_ref().and_then(|b| self.front.dim_rects(b.w)) } else { None };
         let dim_moved = dim != self.dim;
-        if lights.is_some() || panel_moved || dim_moved {
+        // (Home's keyboard, or the page's again, in place of the other)
+        let switched = self.lit_home != home.is_some();
+        if lights.is_some() || panel_moved || dim_moved || switched {
             if let Some(l) = lights {
                 self.lights = l;
             }
             self.dim = dim;
-            if let Some(board) = &self.board {
-                let mut px = std::mem::take(&mut self.spare);
-                light_into(&mut px, board, &self.lights, self.front.page.locks, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
-                if let Some(rects) = &self.dim {
-                    dim_around(&mut px, board.w as usize, rects, board.chassis());
+            let on_home = home.is_some();
+            match if on_home { self.home_board.as_ref() } else { self.board.as_ref() } {
+                Some(board) => {
+                    let mut px = std::mem::take(&mut self.spare);
+                    // (a keyboard not plugged in shows dark on the desk)
+                    let lights = if on_home && !self.front.desk_keyboard_on() { &[][..] } else { &self.lights[..] };
+                    light_into(&mut px, board, lights, self.front.page.locks, self.gain, self.pic.reference(), self.front.overlays.panel_for(board.w, board.lcd().dot));
+                    if let Some(rects) = &self.dim {
+                        dim_around(&mut px, board.w as usize, rects, board.chassis());
+                    }
+                    shown_before = self.lit.replace(Rc::new(Lit { px, w: board.w as usize, h: board.h as usize }));
                 }
-                shown_before = self.lit.replace(Rc::new(Lit { px, w: board.w as usize, h: board.h as usize }));
+                None if on_home => shown_before = self.lit.take(),
+                None => {}
             }
+            self.lit_home = on_home;
             self.readout();
         }
         let full = self.full;
@@ -2470,6 +2609,16 @@ impl App {
             self.asked = Some(want);
             let _ = self.build.send((want.0, want.1, self.light_now(), self.scale as f32));
         }
+        // Home's keyboard, drawn for its size on the desk once the desk has
+        // settled, no larger than the page's (closer, its last picture stretched)
+        if let Some([_, _, kw, kh]) = home.filter(|_| self.front.desk_settled()) {
+            let hw = (kw * s).min(want.0.max(1) as f32).round().max(1.0) as u32;
+            let hh = (hw as f32 * kh / kw.max(1.0)).round().max(1.0) as u32;
+            if self.home_board.as_ref().map(|b| (b.w, b.h)) != Some((hw, hh)) && self.home_asked != Some((hw, hh)) {
+                self.home_asked = Some((hw, hh));
+                let _ = self.home_build.send((hw, hh, self.light_now(), s));
+            }
+        }
         self.front.board_size(rect.2 as u32, rect.3 as u32, self.scale as f32);
         self.front.ui.set_board_ready(self.lit.is_some());
         let before = self.pic.keyboard_rect();
@@ -2477,6 +2626,16 @@ impl App {
             for r in [before, rect] {
                 dirty.push((r.0.max(0) as usize, r.1.max(0) as usize, r.2, r.3));
             }
+        }
+        // what Home's desk lays on the ground (its dots, the highlight under a
+        // device), and the keyboard on it: how much of the ground shows through
+        // it, and dimmed while it isn't plugged in
+        if let Some(r) = self.pic.set_decor(self.front.desk_decor(s)) {
+            dirty.push(r);
+        }
+        let (share, kdim) = if home.is_some() { (self.home_share.clone(), if self.front.desk_keyboard_on() { 1.0 } else { 0.5 }) } else { (None, 1.0) };
+        if self.pic.set_keyboard_ground(share, kdim) && rect.2 > 0 {
+            dirty.push((rect.0.max(0) as usize, rect.1.max(0) as usize, rect.2, rect.3));
         }
         // the last frame's picture taken back, now nothing shows it, for the next
         if let Some(old) = shown_before {
@@ -2609,6 +2768,18 @@ impl App {
         // Escape lets the page's chosen key or button go, unless a box is being typed in
         if down && e.keysym == Keysym::Escape && !self.front.typing() && self.front.escape() {
             return;
+        }
+        // Ctrl and plus, minus or 0 zoom Home's desk in edit mode
+        if down && self.mods.ctrl && !self.front.typing() {
+            let how = match e.keysym {
+                Keysym::equal | Keysym::plus | Keysym::KP_Add => Some(1),
+                Keysym::minus | Keysym::KP_Subtract => Some(-1),
+                Keysym::_0 | Keysym::KP_0 => Some(2),
+                _ => None,
+            };
+            if how.is_some_and(|how| self.front.desk_zoom_key(how)) {
+                return;
+            }
         }
         if let Some(text) = key_text(e) {
             self.slint.dispatch_event(if down { WindowEvent::KeyPressed { text } } else { WindowEvent::KeyReleased { text } });

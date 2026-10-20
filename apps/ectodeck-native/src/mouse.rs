@@ -27,12 +27,14 @@ pub enum Ask {
 
 /// What the page hears: everything the core says of the mouse, a change it
 /// refused, a light's effect the mouse has taken (what the light plays from
-/// that moment), or the page's picture drawn in layers for a scale.
+/// that moment), or the mouse's picture drawn in layers, for its page or for
+/// Home's desk.
 pub enum Heard {
     State(Value),
     Failed(String),
     Played(String, Value, Instant),
-    Drawn(f32, Box<crate::mouse_art::Layers>),
+    /// (the mouse's width in pixels it was drawn at, and the window's scale then)
+    Drawn(u32, f32, Box<crate::mouse_art::Layers>),
 }
 
 /// Start the mouse's thread, with SteelSeries' core.

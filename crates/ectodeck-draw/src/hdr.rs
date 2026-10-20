@@ -959,6 +959,26 @@ impl Board {
         &self.chassis
     }
 
+    /// How much of the ground under the board shows in each of its pixels, 0
+    /// to 1: where the keyboard leaves it open, less what its shadow takes
+    /// (in linear light, as lay_shadow darkens it). A page that lays the board
+    /// on a ground of its own (dots on it, a highlight) adds that ground's
+    /// difference from the board's, times this, and the keyboard stays whole
+    /// over it.
+    pub fn ground_share(&self) -> Vec<f32> {
+        let (w, h) = (self.w as usize, self.h as usize);
+        let mut out = vec![0f32; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let j = y * w + x;
+                let open = 1.0 - self.chassis[j].clamp(0.0, 1.0);
+                let s = self.cast.as_ref().map_or(0.0, |c| c.dark[(y + c.margin as usize) * c.w as usize + x + c.margin as usize]);
+                out[j] = open * (1.0 - s).powf(2.2);
+            }
+        }
+        out
+    }
+
     /// Draw what never changes, and find each key's cap, for a board `w` x
     /// `h` pixels: the drawing fitted into it, keeping its proportions. The
     /// keys' light comes from the simulation (see set_sim); till then the
@@ -1480,8 +1500,13 @@ impl Board {
     /// Put legends set for this keyboard on it: each key's as asked, the
     /// art's own where it asked for none. (Legends set for another size are
     /// left out.)
+    /// Whether legends were set for this keyboard (its size, where it has the art, its keys).
+    pub fn takes(&self, legends: &Legends) -> bool {
+        legends.at == (self.w, self.h, self.art_scale, self.art_offset) && legends.keys.len() == self.keys.len()
+    }
+
     pub fn set_legends(&mut self, legends: Legends) {
-        if legends.at != (self.w, self.h, self.art_scale, self.art_offset) || legends.keys.len() != self.keys.len() {
+        if !self.takes(&legends) {
             return;
         }
         for (k, (wanted, set)) in self.keys.iter_mut().zip(legends.keys) {
@@ -2419,6 +2444,40 @@ mod tests {
         assert!(below > 0.3, "{below:.3} just below the device");
         assert!(below > above, "it falls down: {below:.3} below, {above:.3} above");
         assert!(s.dark[(s.h as usize - 1) * cw + x] < 0.02, "it fades out before the canvas's edge");
+    }
+
+    /// The ground's share of each pixel says how the picture changes with
+    /// the ground: the board drawn on another ground is the first, plus that
+    /// ground's difference times the share, shadow and all, exactly but on the
+    /// keyboard's antialiased edge (drawn over its ground in sRGB's encoding),
+    /// where it is near: within two and a half times the ground's difference,
+    /// a level or two for the faint grounds a page lays (dots, a highlight).
+    #[test]
+    fn a_board_takes_another_ground_by_its_share() {
+        let (tree, device, mut a) = board();
+        let mut b = Board::new(&tree, &device, [0x60, 0x30, 0x10], a.w, a.h).unwrap();
+        let layers = [ShadowLayer { down: 8.0, blur: 22.0, strength: 0.6 }, ShadowLayer { down: 2.0, blur: 7.0, strength: 0.35 }];
+        a.lay_shadow(&layers, 0.5);
+        b.lay_shadow(&layers, 0.5);
+        let (pa, pb) = (a.compose(&[], 0, 254.0, 4.0), b.compose(&[], 0, 254.0, 4.0));
+        let share = a.ground_share();
+        let lin = |c: u8| (c as f32 / 255.0).powf(2.2);
+        let diff = [lin(0x60) - lin(0x20), lin(0x30) - lin(0x20), lin(0x10) - lin(0x20)];
+        let (mut worst, mut edge) = (0f32, 0f32);
+        for (j, s) in share.iter().enumerate() {
+            let on_edge = a.chassis[j] > 0.0 && a.chassis[j] < 1.0;
+            for c in 0..3 {
+                let e = (pb[j * 4 + c] - (pa[j * 4 + c] + diff[c] * s)).abs();
+                if on_edge {
+                    edge = edge.max(e / diff[c].abs());
+                } else {
+                    worst = worst.max(e);
+                }
+            }
+        }
+        assert!(worst < 1e-3, "{worst} off at worst off the edge");
+        assert!(edge < 2.5, "on the edge, off by {edge} of the ground's difference");
+        assert!(share.iter().any(|s| *s > 0.99) && share.iter().any(|s| *s == 0.0), "open ground and covered keyboard both");
     }
 
     /// The board lit by a simulation run to `photons` from each LED.

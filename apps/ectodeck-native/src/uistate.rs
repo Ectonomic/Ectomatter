@@ -34,8 +34,8 @@ pub fn get(key: &str) -> Option<Value> {
 }
 
 pub fn set(key: &str, value: Value) {
-    // offscreen checks leave what the window remembers alone
-    if std::env::args().any(|a| a == "--snapshot") {
+    // offscreen checks, and the tests, leave what the window remembers alone
+    if cfg!(test) || std::env::args().any(|a| a == "--snapshot") {
         return;
     }
     let mut m = all();

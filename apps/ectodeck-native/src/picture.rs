@@ -14,6 +14,77 @@ pub struct Lit {
     pub h: usize,
 }
 
+/// What a page lays on the app's ground, under the page and the keyboard:
+/// dots, as Home's desk shows them while it is arranged, and soft
+/// highlights under what the pointer is over. All in the buffer's pixels.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Decor {
+    pub dots: Option<Dots>,
+    pub plates: Vec<Plate>,
+}
+
+/// A dot every `step` pixels from `(ox, oy)`, `r` round, white at `alpha`
+/// over the ground, only inside `bounds` and outside each of `holes`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Dots {
+    pub ox: f32,
+    pub oy: f32,
+    pub step: f32,
+    pub r: f32,
+    pub alpha: f32,
+    pub bounds: [f32; 4],
+    pub holes: Vec<[f32; 4]>,
+}
+
+/// A box with rounded corners, white at `alpha` over the ground.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Plate {
+    pub rect: [f32; 4],
+    pub radius: f32,
+    pub alpha: f32,
+}
+
+impl Decor {
+    /// The box all of it lies in, or none.
+    fn extent(&self) -> Option<[f32; 4]> {
+        let boxes = self.dots.iter().map(|d| d.bounds).chain(self.plates.iter().map(|p| p.rect));
+        boxes.reduce(|a, b| [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])])
+    }
+
+    /// How much white it lays over a pixel's ground, in sRGB's encoding, 0 to 1.
+    fn white_at(&self, px: f32, py: f32) -> f32 {
+        let mut a = 0f32;
+        for p in &self.plates {
+            let [x0, y0, x1, y1] = p.rect;
+            let r = p.radius.min((x1 - x0) / 2.0).min((y1 - y0) / 2.0).max(0.0);
+            let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
+            let (qx, qy) = ((px - cx).abs() - ((x1 - x0) / 2.0 - r), (py - cy).abs() - ((y1 - y0) / 2.0 - r));
+            let d = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt() + qx.max(qy).min(0.0) - r;
+            let c = (0.5 - d).clamp(0.0, 1.0);
+            a += (1.0 - a) * c * p.alpha;
+        }
+        if let Some(d) = &self.dots {
+            let (lx, ly) = (d.ox + ((px - d.ox) / d.step).round() * d.step, d.oy + ((py - d.oy) / d.step).round() * d.step);
+            let [b0, b1, b2, b3] = d.bounds;
+            if lx >= b0 && lx <= b2 && ly >= b1 && ly <= b3 && !d.holes.iter().any(|h| lx >= h[0] && lx <= h[2] && ly >= h[1] && ly <= h[3]) {
+                let dist = ((px - lx).powi(2) + (py - ly).powi(2)).sqrt();
+                let c = (d.r + 0.5 - dist).clamp(0.0, 1.0);
+                a += (1.0 - a) * c * d.alpha;
+            }
+        }
+        a
+    }
+
+    /// Whether anything of it can fall on row `y` (at its pixels' middle).
+    fn on_row(&self, py: f32) -> bool {
+        self.plates.iter().any(|p| py >= p.rect[1] - 1.0 && py <= p.rect[3] + 1.0)
+            || self.dots.as_ref().is_some_and(|d| {
+                let ly = d.oy + ((py - d.oy) / d.step).round() * d.step;
+                (py - ly).abs() <= d.r + 1.0 && py >= d.bounds[1] - d.r - 1.0 && py <= d.bounds[3] + d.r + 1.0
+            })
+    }
+}
+
 pub struct Picture {
     pub w: usize,
     pub h: usize,
@@ -35,6 +106,13 @@ pub struct Picture {
     rect: (i32, i32, usize, usize),
     src: Option<Rc<Lit>>,
     shown: Option<Rc<Lit>>,
+    /// what is laid on the ground; how much of the ground shows in each of the
+    /// keyboard's pixels (as its picture was drawn, see Board::ground_share), for
+    /// what is laid on the ground to reach under it; and how strongly the
+    /// keyboard shows (1, or less for one not plugged in)
+    decor: Decor,
+    share: Option<Rc<Vec<f32>>>,
+    dim: f32,
 }
 
 impl Picture {
@@ -45,7 +123,7 @@ impl Picture {
         }
         let ground = [lin[ground[0] as usize], lin[ground[1] as usize], lin[ground[2] as usize]];
         let page_ground = Ground { x: 0, y: 0, radius: 0.0, rgb: [0.0; 3] };
-        Picture { w: 0, h: 0, ui: Vec::new(), out: Vec::new(), enc: Encoder::new(reference), reference, lin, ground, page_ground, rect: (0, 0, 0, 0), src: None, shown: None }
+        Picture { w: 0, h: 0, ui: Vec::new(), out: Vec::new(), enc: Encoder::new(reference), reference, lin, ground, page_ground, rect: (0, 0, 0, 0), src: None, shown: None, decor: Decor::default(), share: None, dim: 1.0 }
     }
 
     /// Lay the app's ground under the page; true if it changed.
@@ -99,6 +177,37 @@ impl Picture {
         true
     }
 
+    /// Lay `decor` on the ground; the box to draw again, if it changed.
+    pub fn set_decor(&mut self, decor: Decor) -> Option<(usize, usize, usize, usize)> {
+        if decor == self.decor {
+            return None;
+        }
+        let both = [self.decor.extent(), decor.extent()].into_iter().flatten().reduce(|a, b| [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]);
+        self.decor = decor;
+        // (a pixel past each side, for the dots' and the corners' soft edges)
+        both.map(|[x0, y0, x1, y1]| {
+            let (x0, y0) = ((x0 - 2.0).max(0.0) as usize, (y0 - 2.0).max(0.0) as usize);
+            let (x1, y1) = (((x1 + 2.0).max(0.0) as usize).max(x0), ((y1 + 2.0).max(0.0) as usize).max(y0));
+            (x0, y0, x1 - x0, y1 - y0)
+        })
+    }
+
+    /// How much of the ground shows in each of the keyboard's pixels, and how
+    /// strongly the keyboard shows; true if either changed.
+    pub fn set_keyboard_ground(&mut self, share: Option<Rc<Vec<f32>>>, dim: f32) -> bool {
+        let same = match (&self.share, &share) {
+            (Some(a), Some(b)) => Rc::ptr_eq(a, b),
+            (None, None) => true,
+            _ => false,
+        };
+        if same && (dim - self.dim).abs() < 1e-4 {
+            return false;
+        }
+        self.share = share;
+        self.dim = dim;
+        true
+    }
+
     pub fn encode_all(&mut self) {
         self.encode(0, 0, self.w, self.h);
     }
@@ -113,9 +222,13 @@ impl Picture {
         let rows = y1 - y0;
         let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(12);
         let band = rows.div_ceil(threads).max(24);
-        let Picture { w: stride, h: height, ui, out, enc, lin, ground, page_ground, rect, shown, .. } = self;
-        let (stride, height, ui, enc, lin, ground, rect, shown) = (*stride, *height, &*ui, &*enc, &*lin, *ground, *rect, shown.as_deref());
+        let Picture { w: stride, h: height, ui, out, enc, lin, ground, page_ground, rect, shown, decor, share, dim, .. } = self;
+        let (stride, height, ui, enc, lin, ground, rect, shown, decor, dim) = (*stride, *height, &*ui, &*enc, &*lin, *ground, *rect, shown.as_deref(), &*decor, *dim);
         let page_ground = &*page_ground;
+        // (the ground's share reaches under the keyboard only as its picture was
+        // drawn, not while a picture of another size is stretched to its place)
+        let share = share.as_deref().map(|v| v.as_slice()).filter(|v| shown.is_some_and(|l| l.w * l.h == v.len() && (l.w, l.h) == (rect.2, rect.3)));
+        let kb = KbGround { share, dim };
         // the rows being encoded, split in bands, one to a thread
         let out = &mut out[y0 * stride..y1 * stride];
         std::thread::scope(|s| {
@@ -123,12 +236,20 @@ impl Picture {
                 let top = y0 + i * band;
                 s.spawn(move || {
                     for (r, row) in chunk.chunks_mut(stride).enumerate() {
-                        encode_row(row, top + r, x0, x1, (stride, height), ui, enc, lin, ground, page_ground, rect, shown);
+                        encode_row(row, top + r, x0, x1, (stride, height), ui, enc, lin, ground, page_ground, rect, shown, decor, kb);
                     }
                 });
             }
         });
     }
+}
+
+/// The keyboard on the ground: how much of the ground shows in each of its
+/// pixels, and how strongly it shows.
+#[derive(Clone, Copy)]
+struct KbGround<'a> {
+    share: Option<&'a [f32]>,
+    dim: f32,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -145,9 +266,25 @@ fn encode_row(
     page_ground: &Ground,
     rect: (i32, i32, usize, usize),
     kb: Option<&Lit>,
+    decor: &Decor,
+    kbg: KbGround,
 ) {
     let (kx, ky, kw, kh) = rect;
     let g = page_ground;
+    // the ground with what is laid on it, where anything is: white over it, mixed
+    // in sRGB's encoding as the page's colors are
+    let py = y as f32 + 0.5;
+    let decorated = decor.on_row(py);
+    let laid = |x: usize| -> Option<[f32; 3]> {
+        if !decorated {
+            return None;
+        }
+        let a = decor.white_at(x as f32 + 0.5, py);
+        (a > 0.0).then(|| g.rgb.map(|c| {
+            let e = c.max(0.0).powf(1.0 / 2.2);
+            (e + a * (1.0 - e)).powf(2.2)
+        }))
+    };
     // how much of a pixel the app's ground covers: all of it, but at its rounded corner
     let (cx, cy) = (stride as f32 - g.radius, height as f32 - g.radius);
     let cover = |x: usize| -> f32 {
@@ -199,6 +336,12 @@ fn encode_row(
         if !inside {
             // the page over the app's ground, where the page is not opaque
             let c = if p.alpha == 255 { 1.0 } else { cover(x) };
+            if c > 0.0 && p.alpha < 255 {
+                if let Some(gd) = laid(x) {
+                    row[x] = enc.pixel(over(p, gd, c));
+                    continue;
+                }
+            }
             if c > 0.0 && c < 1.0 {
                 row[x] = enc.pixel(over(p, g.rgb, c));
                 continue;
@@ -215,7 +358,7 @@ fn encode_row(
             continue;
         }
         // the page over the keyboard
-        let (k, ka) = match kb {
+        let (mut k, ka) = match kb {
             Some(l) => {
                 let i = (((y as i32 - ky) as usize) * l.w + (x as i32 - kx) as usize) * 4;
                 let a = l.px[i + 3];
@@ -228,6 +371,24 @@ fn encode_row(
             }
             None => (ground, 1.0),
         };
+        // what is laid on the ground, reaching under the keyboard as far as the
+        // ground shows there; and the keyboard dimmed over its ground
+        if let (Some(share), Some(l)) = (kbg.share, kb) {
+            let j = ((y as i32 - ky) as usize) * l.w + (x as i32 - kx) as usize;
+            let s = share[j];
+            let gd = laid(x).unwrap_or(g.rgb);
+            if gd != g.rgb {
+                for c in 0..3 {
+                    k[c] += (gd[c] - g.rgb[c]) * s;
+                }
+            }
+            if kbg.dim < 1.0 {
+                for c in 0..3 {
+                    let under = gd[c] * s;
+                    k[c] = under + kbg.dim * (k[c] - under);
+                }
+            }
+        }
         row[x] = if p.alpha == 0 { enc.straight(k, ka) } else { enc.pixel(over(p, k, ka)) };
     }
 }
@@ -262,4 +423,33 @@ fn stretch(l: &Lit, w: usize, h: usize) -> Lit {
         }
     }
     Lit { px, w, h }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Dots laid on the ground come out whole and lighter than it, only where
+    /// their bounds let them, and not in a hole; a highlight lifts the ground
+    /// under it, rounded at its corners.
+    #[test]
+    fn the_ground_takes_dots_and_a_highlight() {
+        let mut p = Picture::new(254.0, [0x18, 0x18, 0x1b]);
+        p.resize(120, 80);
+        p.set_ground(0, 0, 0.0, [0x18, 0x18, 0x1b]);
+        p.set_decor(Decor {
+            dots: Some(Dots { ox: 10.0, oy: 10.0, step: 20.0, r: 1.25, alpha: 0.3, bounds: [16.0, 16.0, 104.0, 64.0], holes: vec![[45.0, 45.0, 55.0, 55.0]] }),
+            plates: vec![Plate { rect: [0.0, 0.0, 30.0, 12.0], radius: 6.0, alpha: 0.2 }],
+        });
+        p.encode_all();
+        let at = |x: usize, y: usize| p.out[y * 120 + x][0];
+        let ground = at(40, 40);
+        assert!(at(30, 30) > ground, "a dot inside the bounds");
+        assert_eq!(at(10, 30), at(11, 39), "none outside them (10 is before 16)");
+        assert!(at(10, 30) <= ground + 1);
+        assert_eq!(at(50, 50), ground, "none in the hole");
+        assert!(at(30, 30) > at(31, 31) && at(31, 31) >= ground, "soft at its edge");
+        assert!(at(15, 6) > ground, "the highlight lifts the ground");
+        assert_eq!(at(0, 0), at(119, 79), "but not at its rounded corner");
+    }
 }

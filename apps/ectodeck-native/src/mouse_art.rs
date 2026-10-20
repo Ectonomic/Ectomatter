@@ -87,6 +87,7 @@ impl Layers {
 
     /// The whole picture as one, as the page puts it together: the lights
     /// in their colors and the button `chosen` (1 to 8) picked out.
+    #[cfg(test)]
     pub fn flat(&self, lit: [Lit; 2], chosen: Option<u8>) -> Pixmap {
         let mut out = self.base.clone();
         if let Some(p) = chosen.and_then(|n| self.chosen.get((n as usize).wrapping_sub(1))) {

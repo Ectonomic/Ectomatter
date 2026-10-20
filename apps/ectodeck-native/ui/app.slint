@@ -258,6 +258,22 @@ export struct MousePatch {
     h: length,
 }
 
+// a device on Home's desk: which picture (0 the keyboard, which the window
+// draws in its place, 1 the mouse), its name and what is said under it, where
+// it is on the desk and its size, whether it is plugged in, and whether the
+// pointer is over it
+export struct DeskItem {
+    kind: int,
+    name: string,
+    sub: string,
+    x: length,
+    y: length,
+    w: length,
+    h: length,
+    off: bool,
+    hover: bool,
+}
+
 // a row in a menu: 0 a choice, 1 a heading, 2 a rule, 3 a note, 4 a choice
 // in red (one that deletes), 5 a choice that can't be made now
 export struct MenuRow {
@@ -3588,6 +3604,80 @@ component AnchorColumn inherits VerticalLayout {
     }
 }
 
+// The mouse's picture in its layers, as mouse_art draws them: the mouse over
+// its shadow, the chosen button picked out and the one under the pointer a
+// shade lighter, then each light's groups in its color of the moment (the
+// drawing's order: what lies under the buttons, then what lies over them).
+// Drawn for one size and shown `k` times it; its lights shown, or not.
+component MouseLayers inherits Rectangle {
+    in property <image> base;
+    in property <float> k: 1;
+    in property <bool> lit: true;
+    in property <MousePatch> picked;
+    in property <bool> picked-shown;
+    in property <MousePatch> over;
+    in property <bool> over-shown;
+    in property <MousePatch> logo-under;
+    in property <MousePatch> wheel-under;
+    in property <MousePatch> logo;
+    in property <MousePatch> wheel;
+    in property <color> logo-tint;
+    in property <color> wheel-tint;
+    Image {
+        width: parent.width;
+        height: parent.height;
+        source: root.base;
+    }
+    if root.picked-shown: Image {
+        x: root.picked.x * root.k;
+        y: root.picked.y * root.k;
+        width: root.picked.w * root.k;
+        height: root.picked.h * root.k;
+        source: root.picked.img;
+    }
+    if root.over-shown: Image {
+        x: root.over.x * root.k;
+        y: root.over.y * root.k;
+        width: root.over.w * root.k;
+        height: root.over.h * root.k;
+        source: root.over.img;
+        colorize: #ffffff14;
+    }
+    if root.lit: Image {
+        x: root.logo-under.x * root.k;
+        y: root.logo-under.y * root.k;
+        width: root.logo-under.w * root.k;
+        height: root.logo-under.h * root.k;
+        source: root.logo-under.img;
+        colorize: root.logo-tint;
+    }
+    if root.lit: Image {
+        x: root.wheel-under.x * root.k;
+        y: root.wheel-under.y * root.k;
+        width: root.wheel-under.w * root.k;
+        height: root.wheel-under.h * root.k;
+        source: root.wheel-under.img;
+        colorize: root.wheel-tint;
+    }
+    if root.lit: Image {
+        x: root.logo.x * root.k;
+        y: root.logo.y * root.k;
+        width: root.logo.w * root.k;
+        height: root.logo.h * root.k;
+        source: root.logo.img;
+        colorize: root.logo-tint;
+    }
+    if root.lit: Image {
+        x: root.wheel.x * root.k;
+        y: root.wheel.y * root.k;
+        width: root.wheel.w * root.k;
+        height: root.wheel.h * root.k;
+        source: root.wheel.img;
+        colorize: root.wheel-tint;
+    }
+    @children
+}
+
 export component AppWindow inherits Window {
     in property <bool> is-maximized;
     in property <image> mark;
@@ -3891,6 +3981,42 @@ export component AppWindow inherits Window {
     in property <[EffectItem]> mouse-effects;
     in property <bool> mouse-effect-moves;
     in property <length> mouse-cells-h;
+    // Home's desk: its devices, edit mode, the desk moving round or a device
+    // carried, the zoom's words, and the empty desk's words ("" with devices on it)
+    in property <[DeskItem]> desk-items;
+    in property <bool> desk-editing;
+    in property <bool> desk-panning;
+    in property <bool> desk-carrying;
+    in property <string> desk-zoom;
+    in property <string> desk-empty;
+    // the keyboard on the desk (the window draws it in its place): its shadow
+    // round it, and how many times its drawn size it shows (its knobs and glass
+    // scale by that)
+    in property <image> desk-kb-shadow;
+    in property <length> desk-kb-shadow-m;
+    in property <float> desk-kb-k: 1;
+    // the mouse on the desk: its picture's layers as drawn for it, the shadow's
+    // margin at that size, and how many times that size it shows
+    in property <image> desk-mouse-picture;
+    in property <length> desk-mouse-m;
+    in property <float> desk-mouse-k: 1;
+    in property <MousePatch> desk-mouse-logo-under;
+    in property <MousePatch> desk-mouse-wheel-under;
+    in property <MousePatch> desk-mouse-logo;
+    in property <MousePatch> desk-mouse-wheel;
+    // where the desk is in the window, and its room
+    out property <length> desk-x: rail-w;
+    out property <length> desk-y: bar;
+    out property <length> desk-w: content-w;
+    out property <length> desk-h: root.height - bar;
+    callback desk-press(int, length, length);
+    callback desk-move(length, length);
+    callback desk-release();
+    callback desk-wheel(length, length, length);
+    callback desk-hover(int, bool);
+    callback desk-arrange();
+    callback desk-done();
+    callback desk-zoom-step(int);
     // the room the page's boxes have across
     out property <length> mouse-w: pws-w;
     // whether a button is chosen; with none, what the All buttons box says
@@ -4101,21 +4227,288 @@ export component AppWindow inherits Window {
         width: content-w;
         height: root.height - bar;
 
-        // the home: each device as its glyph and its name, nothing else
+        // Home: the devices on a desk, each as its page draws it, to scale, its
+        // name under it. Day to day the desk fits the window and a device opens
+        // its page; Arrange shows the dots, the desk zooms and pans, and the
+        // devices move onto the dots. (The window lays the dots and the
+        // highlight under a device on the ground, and draws the keyboard.)
         if root.place == "home": Rectangle {
-            Tile {
-                x: 40px;
-                y: 34px;
-                glyph: root.keyboard-tile;
-                name: "EVGA Z10 RGB";
-                clicked => { root.go("z10"); }
+            desk-ta := TouchArea {
+                mouse-cursor: root.desk-panning ? MouseCursor.grabbing : MouseCursor.default;
+                pointer-event(e) => {
+                    if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                        root.desk-press(-1, self.mouse-x, self.mouse-y);
+                    }
+                    if (e.button == PointerEventButton.left && e.kind == PointerEventKind.up) {
+                        root.desk-release();
+                    }
+                }
+                moved => { root.desk-move(self.mouse-x, self.mouse-y); }
+                scroll-event(e) => {
+                    if (root.desk-editing) {
+                        root.desk-wheel(self.mouse-x, self.mouse-y, e.delta-y);
+                        return accept;
+                    }
+                    return reject;
+                }
+                for d[i] in root.desk-items: Rectangle {
+                    x: d.x;
+                    y: d.y;
+                    width: d.w;
+                    height: d.h;
+                    // the keyboard: its shadow round its place, its knobs and the display's glass over it
+                    if d.kind == 0: Image {
+                        x: -root.desk-kb-shadow-m * root.desk-kb-k;
+                        y: -root.desk-kb-shadow-m * root.desk-kb-k;
+                        width: parent.width + 2 * root.desk-kb-shadow-m * root.desk-kb-k;
+                        height: parent.height + 2 * root.desk-kb-shadow-m * root.desk-kb-k;
+                        source: root.desk-kb-shadow;
+                    }
+                    if d.kind == 0: Rectangle {
+                        for o in root.overlays: Image {
+                            visible: root.board-ready;
+                            property <float> along: o.frac;
+                            animate along { duration: root.knob-glide; easing: linear; }
+                            x: (o.x + self.along * o.travel) * root.desk-kb-k;
+                            y: o.y * root.desk-kb-k;
+                            opacity: o.opacity * (d.off ? 0.5 : 1);
+                            width: o.w * root.desk-kb-k;
+                            height: o.h * root.desk-kb-k;
+                            source: o.image;
+                            image-fit: fill;
+                        }
+                    }
+                    // the mouse, in its layers, its lights dark while it isn't plugged in
+                    if d.kind == 1: MouseLayers {
+                        x: -root.desk-mouse-m * root.desk-mouse-k;
+                        y: -root.desk-mouse-m * root.desk-mouse-k;
+                        width: parent.width + 2 * root.desk-mouse-m * root.desk-mouse-k;
+                        height: parent.height + 2 * root.desk-mouse-m * root.desk-mouse-k;
+                        k: root.desk-mouse-k;
+                        opacity: d.off ? 0.5 : 1;
+                        lit: !d.off;
+                        base: root.desk-mouse-picture;
+                        logo-under: root.desk-mouse-logo-under;
+                        wheel-under: root.desk-mouse-wheel-under;
+                        logo: root.desk-mouse-logo;
+                        wheel: root.desk-mouse-wheel;
+                        logo-tint: root.mouse-logo-tint;
+                        wheel-tint: root.mouse-wheel-tint;
+                    }
+                    // in edit mode, a thin ring round the device the pointer is over
+                    if root.desk-editing && d.hover && !root.desk-carrying: Rectangle {
+                        x: -16px;
+                        y: -16px;
+                        width: parent.width + 32px;
+                        height: parent.height + 16px + 58px;
+                        border-radius: 16px;
+                        border-width: 1px;
+                        border-color: #ffffff1c;
+                    }
+                    // its name under it, and under that whether it is plugged in
+                    VerticalLayout {
+                        x: (parent.width - self.preferred-width) / 2;
+                        y: parent.height + 16px;
+                        width: self.preferred-width;
+                        spacing: 2px;
+                        HorizontalLayout {
+                            alignment: center;
+                            spacing: 8px;
+                            Rectangle {
+                                width: 7px;
+                                Rectangle {
+                                    y: (parent.height - 7px) / 2;
+                                    width: 7px;
+                                    height: 7px;
+                                    border-radius: 3.5px;
+                                    background: d.off ? Ink.bad : Ink.good;
+                                }
+                            }
+                            Text {
+                                text: d.name;
+                                font-family: "Geist";
+                                font-size: 13.5px;
+                                font-weight: 500;
+                                color: d.hover ? Ink.bright : Ink.dim;
+                                height: 18px;
+                                vertical-alignment: center;
+                            }
+                        }
+                        if d.sub != "": Text {
+                            text: d.sub;
+                            font-family: "Geist";
+                            font-size: 12px;
+                            color: Ink.quiet;
+                            horizontal-alignment: center;
+                        }
+                    }
+                    // a press: outside edit mode, a click opens its page; in edit mode it carries it
+                    TouchArea {
+                        y: 0;
+                        height: parent.height + 16px + 40px;
+                        mouse-cursor: root.desk-editing ? (root.desk-carrying ? MouseCursor.grabbing : MouseCursor.grab) : MouseCursor.pointer;
+                        changed has-hover => { root.desk-hover(i, self.has-hover); }
+                        pointer-event(e) => {
+                            if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                                root.desk-press(i, d.x + self.mouse-x, d.y + self.mouse-y);
+                            }
+                            if (e.button == PointerEventButton.left && e.kind == PointerEventKind.up) {
+                                root.desk-release();
+                            }
+                        }
+                        moved => { root.desk-move(d.x + self.mouse-x, d.y + self.mouse-y); }
+                    }
+                }
             }
-            if root.mouse-known: Tile {
-                x: 40px + 260px + 24px;
-                y: 34px;
-                glyph: root.mouse-tile;
-                name: "SteelSeries Sensei 310";
-                clicked => { root.go("mouse"); }
+            // day to day: the tab's words at the top left, Arrange at the top right
+            if !root.desk-editing && root.desk-empty == "": Text {
+                x: 24px;
+                y: 12px;
+                height: 36px;
+                text: "Select a device to change it.";
+                font-family: "Geist";
+                font-size: 12.5px;
+                color: Ink.quiet;
+                vertical-alignment: center;
+            }
+            if !root.desk-editing && root.desk-empty == "": Rectangle {
+                x: parent.width - self.width - 24px;
+                y: 17px;
+                height: 26px;
+                width: arrange-row.preferred-width;
+                border-radius: 6px;
+                background: arrange-ta.has-hover ? Ink.hover-box : transparent;
+                arrange-row := HorizontalLayout {
+                    padding-left: 9px;
+                    padding-right: 9px;
+                    spacing: 7px;
+                    Path {
+                        y: 6px;
+                        width: 14px;
+                        height: 14px;
+                        viewbox-width: 14;
+                        viewbox-height: 14;
+                        commands: "M7 1.5v11M1.5 7h11M7 1.5 5.4 3.1M7 1.5l1.6 1.6M7 12.5l-1.6-1.6M7 12.5l1.6-1.6M1.5 7l1.6-1.6M1.5 7l1.6 1.6M12.5 7l-1.6-1.6M12.5 7l-1.6 1.6";
+                        fill: transparent;
+                        stroke: arrange-ta.has-hover ? Ink.bright : Ink.soft;
+                        stroke-width: 1.5px;
+                        stroke-line-cap: LineCap.round;
+                    }
+                    Text {
+                        text: "Arrange";
+                        font-family: "Geist";
+                        font-size: 12.5px;
+                        font-weight: 500;
+                        color: arrange-ta.has-hover ? Ink.bright : Ink.soft;
+                        vertical-alignment: center;
+                    }
+                }
+                arrange-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.desk-arrange(); }
+                }
+            }
+            // edit mode: what to do and Done, on a bar of its own over the dots
+            if root.desk-editing: Rectangle {
+                x: (parent.width - self.width) / 2;
+                y: 14px;
+                width: mode-row.preferred-width;
+                height: 40px;
+                border-radius: 10px;
+                background: Ink.box;
+                border-width: 1px;
+                border-color: Ink.line;
+                drop-shadow-blur: 28px;
+                drop-shadow-offset-y: 10px;
+                drop-shadow-color: #00000070;
+                mode-row := HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 6px;
+                    spacing: 14px;
+                    alignment: start;
+                    Text {
+                        text: "Drag a device to where it sits on your desk.";
+                        font-family: "Geist";
+                        font-size: 12.5px;
+                        color: Ink.soft;
+                        vertical-alignment: center;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        WordButton {
+                            text: "Done";
+                            height: 28px;
+                            fill: Ink.hover-box;
+                            fill-hover: Ink.pick;
+                            clicked => { root.desk-done(); }
+                        }
+                    }
+                }
+            }
+            // edit mode: zoom, at the bottom right
+            if root.desk-editing: Rectangle {
+                x: parent.width - self.width - 24px;
+                y: parent.height - self.height - 24px;
+                width: zoom-row.preferred-width;
+                height: 36px;
+                border-radius: 10px;
+                background: Ink.box;
+                border-width: 1px;
+                border-color: Ink.line;
+                drop-shadow-blur: 22px;
+                drop-shadow-offset-y: 8px;
+                drop-shadow-color: #00000060;
+                zoom-row := HorizontalLayout {
+                    padding: 4px;
+                    spacing: 2px;
+                    for z[j] in [{ t: "", how: -1 }, { t: root.desk-zoom, how: 0 }, { t: "", how: 1 }, { t: "Fit", how: 2 }]: Rectangle {
+                        width: z.how == 0 ? 52px : z.how == 2 ? fit-t.preferred-width + 16px : 28px;
+                        height: 28px;
+                        border-radius: 7px;
+                        background: zt.has-hover ? Ink.hover-box : transparent;
+                        if z.how == -1 || z.how == 1: Path {
+                            x: 8px;
+                            y: 8px;
+                            width: 12px;
+                            height: 12px;
+                            viewbox-width: 12;
+                            viewbox-height: 12;
+                            commands: z.how == 1 ? "M2 6h8M6 2v8" : "M2 6h8";
+                            fill: transparent;
+                            stroke: zt.has-hover ? Ink.bright : Ink.soft;
+                            stroke-width: 1.6px;
+                            stroke-line-cap: LineCap.round;
+                        }
+                        fit-t := Text {
+                            visible: z.how == 0 || z.how == 2;
+                            width: parent.width;
+                            height: parent.height;
+                            text: z.t;
+                            font-family: "Geist";
+                            font-size: 12.5px;
+                            font-weight: 500;
+                            color: zt.has-hover ? Ink.bright : Ink.soft;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        zt := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.desk-zoom-step(z.how); }
+                        }
+                    }
+                }
+            }
+            // before anything is plugged in: which devices Ectodeck works with
+            if root.desk-empty != "": Text {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: min(480px, parent.width - 48px);
+                text: root.desk-empty;
+                font-family: "Geist";
+                font-size: 14px;
+                color: Ink.soft;
+                horizontal-alignment: center;
+                wrap: word-wrap;
             }
         }
 
@@ -4156,63 +4549,22 @@ export component AppWindow inherits Window {
                         x: parent.width / 2 - 600px;
                         width: 1092px;
                         height: parent.height;
-                        pic := Rectangle {
+                        pic := MouseLayers {
                             x: 480px - root.mouse-pic-m;
                             y: 30px - root.mouse-pic-m;
                             width: 240px + 2 * root.mouse-pic-m;
                             height: 410px + 2 * root.mouse-pic-m;
-                            Image {
-                                width: parent.width;
-                                height: parent.height;
-                                source: root.mouse-picture;
-                            }
-                            if root.mouse-picked-shown: Image {
-                                x: root.mouse-picked.x;
-                                y: root.mouse-picked.y;
-                                width: root.mouse-picked.w;
-                                height: root.mouse-picked.h;
-                                source: root.mouse-picked.img;
-                            }
-                            if root.mouse-over-shown: Image {
-                                x: root.mouse-over.x;
-                                y: root.mouse-over.y;
-                                width: root.mouse-over.w;
-                                height: root.mouse-over.h;
-                                source: root.mouse-over.img;
-                                colorize: #ffffff14;
-                            }
-                            Image {
-                                x: root.mouse-logo-under.x;
-                                y: root.mouse-logo-under.y;
-                                width: root.mouse-logo-under.w;
-                                height: root.mouse-logo-under.h;
-                                source: root.mouse-logo-under.img;
-                                colorize: root.mouse-logo-tint;
-                            }
-                            Image {
-                                x: root.mouse-wheel-under.x;
-                                y: root.mouse-wheel-under.y;
-                                width: root.mouse-wheel-under.w;
-                                height: root.mouse-wheel-under.h;
-                                source: root.mouse-wheel-under.img;
-                                colorize: root.mouse-wheel-tint;
-                            }
-                            Image {
-                                x: root.mouse-logo.x;
-                                y: root.mouse-logo.y;
-                                width: root.mouse-logo.w;
-                                height: root.mouse-logo.h;
-                                source: root.mouse-logo.img;
-                                colorize: root.mouse-logo-tint;
-                            }
-                            Image {
-                                x: root.mouse-wheel.x;
-                                y: root.mouse-wheel.y;
-                                width: root.mouse-wheel.w;
-                                height: root.mouse-wheel.h;
-                                source: root.mouse-wheel.img;
-                                colorize: root.mouse-wheel-tint;
-                            }
+                            base: root.mouse-picture;
+                            picked: root.mouse-picked;
+                            picked-shown: root.mouse-picked-shown;
+                            over: root.mouse-over;
+                            over-shown: root.mouse-over-shown;
+                            logo-under: root.mouse-logo-under;
+                            wheel-under: root.mouse-wheel-under;
+                            logo: root.mouse-logo;
+                            wheel: root.mouse-wheel;
+                            logo-tint: root.mouse-logo-tint;
+                            wheel-tint: root.mouse-wheel-tint;
                             // a click on a button (or, on Lighting, a light) chooses it
                             pic-ta := TouchArea {
                                 mouse-cursor: root.mouse-pic-hand ? pointer : default;

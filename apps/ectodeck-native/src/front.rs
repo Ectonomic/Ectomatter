@@ -16,15 +16,33 @@ use crate::device;
 use crate::lighting::{self, Ctl};
 use crate::overlays::Overlays;
 use crate::z10::{self, Action, Page, View};
-use crate::{AppWindow, Cell, CheckItem, EffectItem, KeyItem, LayerItem, LibGroup, LibRow, MenuRow, MousePatch, ProfileItem};
+use crate::{AppWindow, Cell, CheckItem, DeskItem, EffectItem, KeyItem, LayerItem, LibGroup, LibRow, MenuRow, MousePatch, ProfileItem};
 
 /// The mouse's picture as the page shows it: its layers (for what is where
 /// on it), and each piece as the page takes it.
 struct MouseImages {
     layers: crate::mouse_art::Layers,
+    base: slint::Image,
     lights: Vec<MousePatch>,
     chosen: Vec<MousePatch>,
     shapes: Vec<MousePatch>,
+}
+
+/// The mouse's layers as the page takes them, drawn at `scale`.
+fn mouse_images(l: crate::mouse_art::Layers, scale: f32) -> MouseImages {
+    let image = |px: &resvg::tiny_skia::Pixmap| {
+        let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(px.width(), px.height());
+        buf.make_mut_bytes().copy_from_slice(px.data());
+        slint::Image::from_rgba8_premultiplied(buf)
+    };
+    let patch = |p: &crate::mouse_art::Patch| MousePatch { img: image(&p.px), x: p.x as f32 / scale, y: p.y as f32 / scale, w: p.px.width() as f32 / scale, h: p.px.height() as f32 / scale };
+    MouseImages {
+        base: image(&l.base),
+        lights: l.lights.iter().map(patch).collect(),
+        chosen: l.chosen.iter().map(patch).collect(),
+        shapes: l.shapes.iter().map(patch).collect(),
+        layers: l,
+    }
 }
 
 /// What a row of the New screen layout menu makes: a blank layout, a copy of the layout
@@ -79,6 +97,19 @@ pub enum Ask {
     MousePicClicked(f32, f32),
     MouseCallHover(i32, bool),
     MouseFrame,
+    /// Home's desk: a press on a device (or, -1, the empty desk), the pointer
+    /// moved pressed, let go, the wheel, the pointer over a device or off it,
+    /// Arrange, Done, a zoom control (-1 out, 0 to 100%, 1 in, 2 the fit), and
+    /// the next frame of its easing
+    DeskPress(i32, f32, f32),
+    DeskMove(f32, f32),
+    DeskRelease,
+    DeskWheel(f32, f32, f32),
+    DeskHover(i32, bool),
+    DeskArrange,
+    DeskDone,
+    DeskZoom(i32),
+    DeskTick,
     /// the rebindings shown on the keyboard, or not
     ShowRebindings,
     Move,
@@ -500,6 +531,12 @@ pub struct Front {
     mouse_shows: (Option<u8>, Option<u8>),
     /// the lights' effects played on the picture, 30 frames a second, while they move
     mouse_frames: Option<slint::Timer>,
+    /// Home's desk, its easing's frames while it eases, and the mouse's picture
+    /// drawn for its size on the desk (its width in pixels), and the size being drawn
+    pub desk: crate::desk::Desk,
+    desk_frames: Option<slint::Timer>,
+    desk_mouse: Option<(u32, MouseImages)>,
+    desk_mouse_drawing: Option<u32>,
     pick: Option<Pick>,
     overlay_model: Rc<VecModel<crate::Overlay>>,
     /// what each slider controls, which slider's menu is open, and what the
@@ -671,6 +708,14 @@ impl Front {
         on!(on_mouse_pic_moved, |x, y, over| Ask::MousePicMoved(x, y, over));
         on!(on_mouse_pic_clicked, |x, y| Ask::MousePicClicked(x, y));
         on!(on_mouse_call_hover, |i, on| Ask::MouseCallHover(i, on));
+        on!(on_desk_press, |i, x, y| Ask::DeskPress(i, x, y));
+        on!(on_desk_move, |x, y| Ask::DeskMove(x, y));
+        on!(on_desk_release, Ask::DeskRelease);
+        on!(on_desk_wheel, |x, y, dy| Ask::DeskWheel(x, y, dy));
+        on!(on_desk_hover, |i, on| Ask::DeskHover(i, on));
+        on!(on_desk_arrange, Ask::DeskArrange);
+        on!(on_desk_done, Ask::DeskDone);
+        on!(on_desk_zoom_step, |how| Ask::DeskZoom(how));
         on!(on_mouse_effect, |i| Ask::MouseEffect(i));
         on!(on_rail, |p| Ask::Rail(p.to_string()));
         on!(on_macro_editor, |l| Ask::MacroEditor(l));
@@ -751,6 +796,10 @@ impl Front {
             mouse_hover: None,
             mouse_shows: (None, None),
             mouse_frames: None,
+            desk: crate::desk::Desk::new(),
+            desk_frames: None,
+            desk_mouse: None,
+            desk_mouse_drawing: None,
             ui,
             page,
             kb,
@@ -1057,7 +1106,9 @@ impl Front {
     pub fn waiting(&self) -> Option<Duration> {
         // (and, while the desktop's file picker is open, often enough to take its answer)
         let picking = self.picking.as_ref().map(|_| Duration::from_millis(100));
-        [self.failed_at.map(|t| Duration::from_secs(3).saturating_sub(t.elapsed()) + Duration::from_millis(10)), picking].into_iter().flatten().min()
+        // (and when Home's desk will have settled, for its keyboard to be drawn for its size)
+        let desk = (self.ui.get_place() == "home" && !self.desk_settled()).then(|| Duration::from_millis(150).saturating_sub(self.desk.changed.elapsed()) + Duration::from_millis(10));
+        [self.failed_at.map(|t| Duration::from_secs(3).saturating_sub(t.elapsed()) + Duration::from_millis(10)), picking, desk].into_iter().flatten().min()
     }
 
     /// The place search: once typing has paused, the places matching it,
@@ -1255,11 +1306,70 @@ impl Front {
                 }
                 Ask::MouseFrame => {
                     changed = false;
-                    if self.ui.get_place() == "mouse" && self.mouse.tab < 2 {
+                    if self.mouse_pictured() {
                         self.show_mouse_lights();
                     } else {
                         self.mouse_frames = None;
                     }
+                }
+                Ask::DeskPress(i, x, y) => {
+                    changed = false;
+                    self.desk.press(usize::try_from(i).ok(), (x, y));
+                    self.show_desk();
+                }
+                Ask::DeskMove(x, y) => {
+                    changed = false;
+                    if self.desk.moved((x, y)) {
+                        self.show_desk();
+                    }
+                }
+                Ask::DeskRelease => {
+                    changed = false;
+                    if let Some(place) = self.desk.release().and_then(|i| self.desk.items.get(i)).map(|it| it.place.clone()) {
+                        self.close_menu();
+                        self.ui.set_place(place.into());
+                        changed = true;
+                    }
+                    self.show_desk();
+                }
+                Ask::DeskWheel(x, y, dy) => {
+                    changed = false;
+                    if self.desk.wheel((x, y), dy) {
+                        self.show_desk();
+                    }
+                }
+                Ask::DeskHover(i, on) => {
+                    changed = false;
+                    let i = usize::try_from(i).ok();
+                    if on {
+                        self.desk.hover = i;
+                    } else if self.desk.hover == i {
+                        self.desk.hover = None;
+                    }
+                    self.show_desk();
+                }
+                Ask::DeskArrange => {
+                    changed = false;
+                    self.desk.set_editing(true);
+                    self.desk_frames_run();
+                    self.show_desk();
+                }
+                Ask::DeskDone => {
+                    changed = false;
+                    self.desk.set_editing(false);
+                    self.desk_frames_run();
+                    self.show_desk();
+                }
+                Ask::DeskZoom(how) => {
+                    changed = false;
+                    self.desk.zoom_step(how);
+                    self.desk_frames_run();
+                }
+                Ask::DeskTick => {
+                    changed = false;
+                    self.desk.tick(Instant::now());
+                    self.show_desk();
+                    self.desk_frames_run();
                 }
                 Ask::CellPick(id, i, x, y, h) => self.cell_pick(lighting::ctl(id), i.max(0) as usize, (x, y, h)),
                 Ask::CellSlide(id, v) => {
@@ -1452,6 +1562,10 @@ impl Front {
                     self.ui.set_confirm_open(false);
                 }
                 Ask::LcdTick => {
+                    // (on Home, the mouse's picture drawn for its size on the desk once it settles)
+                    if self.ui.get_place() == "home" {
+                        self.desk_mouse_want();
+                    }
                     // the readings again each second: for the page being edited (its
                     // picture and its boxes), or the playlist's pictures of its pages
                     let on_screen = self.page.view == View::Screen && self.ui.get_place() == "z10";
@@ -2709,6 +2823,13 @@ impl Front {
     /// Escape, with nothing being typed: the page's chosen thing let go, if
     /// it has one (false when it has none, for Escape to go on to the page).
     pub fn escape(&mut self) -> bool {
+        // (on Home, Escape leaves edit mode, as Done does)
+        if self.ui.get_place() == "home" && self.desk.editing {
+            self.desk.set_editing(false);
+            self.desk_frames_run();
+            self.show_desk();
+            return true;
+        }
         if self.chosen_keeps().is_none() || self.menu.is_some() || self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pick.is_some() || self.place_menu {
             return false;
         }
@@ -3443,6 +3564,10 @@ impl Front {
         if loaded && self.page.view == View::Lighting && self.ui.get_place() == "z10" {
             self.refresh_lighting();
         }
+        self.desk_meet();
+        if self.ui.get_place() == "home" {
+            self.show_desk();
+        }
         if self.ui.get_place() == "mouse" {
             self.refresh_mouse();
         } else if self.ui.get_place() == "settings" {
@@ -3555,8 +3680,8 @@ impl Front {
                 self.mouse_frames_run();
                 return;
             }
-            Heard::Drawn(scale, l) => {
-                self.mouse_drawn(scale, *l);
+            Heard::Drawn(w, scale, l) => {
+                self.mouse_drawn(w, scale, *l);
                 return;
             }
         }
@@ -3569,58 +3694,65 @@ impl Front {
         self.refresh();
     }
 
-    /// The mouse's picture in layers for the window's scale, unless it is
-    /// drawn or being drawn: on a thread of its own, or here when the page
-    /// has no mouse's thread to hear it back from (a snapshot).
+    /// The mouse's picture in layers for its page at the window's scale,
+    /// unless it is drawn or being drawn.
     fn mouse_draw(&mut self) {
         let scale = self.scale;
         if self.mouse_layers.as_ref().is_some_and(|(s, _)| *s == scale) || self.mouse_drawing == Some(scale) {
             return;
         }
         self.mouse_drawing = Some(scale);
+        self.mouse_draw_at((240.0 * scale).round() as u32);
+    }
+
+    /// The mouse's picture in layers, the mouse `w` pixels wide: on a thread of
+    /// its own, or here when the page has no mouse's thread to hear it back
+    /// from (a snapshot).
+    fn mouse_draw_at(&mut self, w: u32) {
+        let scale = self.scale;
         let draw = move || {
             let art = std::fs::read_to_string(crate::cores::dir().join("steelseries/art/sensei-310.svg")).map_err(|e| e.to_string())?;
-            crate::mouse_art::layers(&art, (240.0 * scale).round() as u32, &crate::stage_shadow(scale), crate::STAGE_SHADOW_OPACITY)
+            crate::mouse_art::layers(&art, w, &crate::stage_shadow(scale), crate::STAGE_SHADOW_OPACITY)
         };
         match self.mouse.tell.clone() {
             Some(tell) => {
                 std::thread::spawn(move || match draw() {
                     Ok(l) => {
-                        let _ = tell.send(crate::mouse::Heard::Drawn(scale, Box::new(l)));
+                        let _ = tell.send(crate::mouse::Heard::Drawn(w, scale, Box::new(l)));
                     }
                     Err(e) => eprintln!("ectodeck-native: the mouse's picture: {e}"),
                 });
             }
             None => match draw() {
-                Ok(l) => self.mouse_drawn(scale, l),
+                Ok(l) => self.mouse_drawn(w, scale, l),
                 Err(e) => eprintln!("ectodeck-native: the mouse's picture: {e}"),
             },
         }
     }
 
-    /// The mouse's picture drawn: its layers put on the page.
-    fn mouse_drawn(&mut self, scale: f32, l: crate::mouse_art::Layers) {
-        if self.mouse_drawing == Some(scale) {
+    /// The mouse's picture drawn, `w` pixels wide: its layers put on its page,
+    /// or on the desk, whichever it was drawn for.
+    fn mouse_drawn(&mut self, w: u32, scale: f32, l: crate::mouse_art::Layers) {
+        let page = (240.0 * scale).round() as u32;
+        if w == page && self.mouse_drawing == Some(scale) {
             self.mouse_drawing = None;
+        }
+        if self.desk_mouse_drawing == Some(w) {
+            self.desk_mouse_drawing = None;
         }
         // (drawn for a scale the window has left: drawn again for this one)
         if scale != self.scale {
             self.mouse_draw();
             return;
         }
-        let image = |px: &resvg::tiny_skia::Pixmap| {
-            let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(px.width(), px.height());
-            buf.make_mut_bytes().copy_from_slice(px.data());
-            slint::Image::from_rgba8_premultiplied(buf)
-        };
-        let patch = |p: &crate::mouse_art::Patch| MousePatch { img: image(&p.px), x: p.x as f32 / scale, y: p.y as f32 / scale, w: p.px.width() as f32 / scale, h: p.px.height() as f32 / scale };
-        let imgs = MouseImages {
-            lights: l.lights.iter().map(patch).collect(),
-            chosen: l.chosen.iter().map(patch).collect(),
-            shapes: l.shapes.iter().map(patch).collect(),
-            layers: l,
-        };
-        self.ui.set_mouse_picture(image(&imgs.layers.base));
+        let for_desk = w != page;
+        let imgs = mouse_images(l, scale);
+        if for_desk {
+            self.desk_mouse = Some((w, imgs));
+            self.show_desk_mouse();
+            return;
+        }
+        self.ui.set_mouse_picture(imgs.base.clone());
         self.ui.set_mouse_pic_m(imgs.layers.margin as f32 / scale);
         // (in the drawing's order: see mouse_art::GROUPS)
         self.ui.set_mouse_logo_under(imgs.lights[0].clone());
@@ -3632,6 +3764,7 @@ impl Front {
         self.mouse_shows = (Some(0), Some(0));
         self.show_mouse_picked();
         self.show_mouse_lights();
+        self.show_desk_mouse();
     }
 
     /// The chosen button picked out on the picture, and the one under the
@@ -3671,7 +3804,7 @@ impl Front {
     /// The lights' effects played on the picture, 30 frames a second, while
     /// the picture shows and an effect moves.
     fn mouse_frames_run(&mut self) {
-        let want = self.ui.get_place() == "mouse" && self.mouse.tab < 2 && self.mouse.moving();
+        let want = self.mouse_pictured() && self.mouse.moving();
         if want == self.mouse_frames.is_some() {
             return;
         }
@@ -3705,6 +3838,180 @@ impl Front {
         }
         let m = ui.get_mouse_pic_m();
         self.mouse_pic_at(x - (x0 + w / 2.0 - 600.0 + 480.0 - m), y - (sy + 30.0 - m))
+    }
+
+    /// Whether the mouse's picture shows: on its page's Buttons or Lighting,
+    /// or on Home's desk.
+    fn mouse_pictured(&self) -> bool {
+        match self.ui.get_place().as_str() {
+            "mouse" => self.mouse.tab < 2,
+            "home" => self.desk.items.iter().any(|i| i.id == "mouse"),
+            _ => false,
+        }
+    }
+
+    // ------------------------------------------------------------ Home's desk
+
+    /// The devices Ectodeck knows, on the desk: those it has read or met, and
+    /// those it has kept a place for; each at its size, and whether it is
+    /// plugged in.
+    fn desk_meet(&mut self) {
+        let kept: Vec<String> = crate::desk::Desk::saved().into_iter().map(|(id, _, _)| id).collect();
+        if self.page.dev.is_some() || kept.iter().any(|k| k == "z10") {
+            let core = crate::cores::shown();
+            let size = crate::desk::size_of(&core.art, core.device["light"]["scale"].as_f64().unwrap_or(1.38) as f32);
+            // (not yet known to be plugged in, it is drawn as plugged in: only a keyboard gone shows dimmed)
+            self.desk.meet("z10", core.name(), "z10", size, self.ui.get_conn_state() != 2);
+        }
+        if self.mouse.known() || kept.iter().any(|k| k == "mouse") {
+            let dev = &self.mouse.state["device"];
+            let v = crate::mouse_art::VIEW;
+            let per = dev["scale"].as_f64().unwrap_or(520.0 / 125.1) as f32;
+            let size = (v.2 / per * crate::desk::PER_MM, v.3 / per * crate::desk::PER_MM);
+            let name = dev["name"].as_str().unwrap_or("SteelSeries Sensei 310").to_string();
+            self.desk.meet("mouse", &name, "mouse", size, self.mouse.present() || self.mouse.state.is_null());
+        }
+    }
+
+    /// The desk as it is now: its devices where the view puts them, edit
+    /// mode's parts, and the mouse's picture.
+    fn show_desk(&mut self) {
+        let ui = &self.ui;
+        self.desk.resize(ui.get_desk_w(), ui.get_desk_h());
+        let d = &self.desk;
+        let items: Vec<DeskItem> = d
+            .items
+            .iter()
+            .enumerate()
+            .map(|(i, it)| {
+                let [x, y, w, h] = d.screen(i);
+                DeskItem { kind: if it.id == "z10" { 0 } else { 1 }, name: it.name.as_str().into(), sub: if it.connected { "".into() } else { "Not connected".into() }, x, y, w, h, off: !it.connected, hover: d.hover == Some(i) }
+            })
+            .collect();
+        show_rows(ui.get_desk_items(), |r| ui.set_desk_items(r), items);
+        ui.set_desk_editing(d.editing);
+        ui.set_desk_panning(d.panning());
+        ui.set_desk_carrying(d.carrying());
+        ui.set_desk_zoom(d.zoom_text().into());
+        ui.set_desk_empty(if d.items.is_empty() { crate::desk::works_with().into() } else { "".into() });
+        self.show_desk_mouse();
+        // (the mouse's lights, and their effects playing, on the desk too)
+        self.show_mouse_lights();
+        self.mouse_frames_run();
+    }
+
+    /// The mouse on the desk: its picture as drawn for its size there, or its
+    /// page's shown at that size while that one is drawn.
+    fn show_desk_mouse(&mut self) {
+        let Some(i) = self.desk.items.iter().position(|it| it.id == "mouse") else { return };
+        let shown = self.desk.screen(i)[2];
+        let scale = self.scale;
+        let imgs = match (&self.desk_mouse, &self.mouse_layers) {
+            (Some((w, imgs)), _) => Some((*w as f32 / scale, imgs)),
+            (None, Some((_, imgs))) => Some((240.0, imgs)),
+            _ => None,
+        };
+        if let Some((drawn, imgs)) = imgs {
+            let ui = &self.ui;
+            ui.set_desk_mouse_picture(imgs.base.clone());
+            ui.set_desk_mouse_m(imgs.layers.margin as f32 / scale);
+            ui.set_desk_mouse_k(shown / drawn);
+            ui.set_desk_mouse_logo_under(imgs.lights[0].clone());
+            ui.set_desk_mouse_wheel_under(imgs.lights[1].clone());
+            ui.set_desk_mouse_logo(imgs.lights[2].clone());
+            ui.set_desk_mouse_wheel(imgs.lights[3].clone());
+        }
+    }
+
+    /// Once the desk has settled, the mouse's picture drawn for its size on
+    /// it (to the nearest four pixels), unless it is drawn or being drawn.
+    fn desk_mouse_want(&mut self) {
+        let Some(i) = self.desk.items.iter().position(|it| it.id == "mouse") else { return };
+        if !self.desk_settled() || self.mouse_layers.is_none() {
+            return;
+        }
+        let w = ((self.desk.screen(i)[2] * self.scale / 4.0).round() * 4.0).clamp(32.0, 1600.0) as u32;
+        let page = (240.0 * self.scale).round() as u32;
+        if w == page {
+            if self.desk_mouse.take().is_some() {
+                self.show_desk_mouse();
+            }
+            return;
+        }
+        if self.desk_mouse.as_ref().is_some_and(|(dw, _)| *dw == w) || self.desk_mouse_drawing == Some(w) {
+            return;
+        }
+        self.desk_mouse_drawing = Some(w);
+        self.mouse_draw_at(w);
+    }
+
+    /// The desk's easing and fading, a frame each sixtieth of a second while they go on.
+    fn desk_frames_run(&mut self) {
+        let want = self.desk.animating();
+        if want == self.desk_frames.is_some() {
+            return;
+        }
+        self.desk_frames = want.then(|| {
+            let t = slint::Timer::default();
+            let asks = self.asks.clone();
+            t.start(slint::TimerMode::Repeated, Duration::from_millis(16), move || asks.borrow_mut().push(Ask::DeskTick));
+            t
+        });
+    }
+
+    /// Whether the desk has come to rest: nothing easing or carried, and the
+    /// view the same for a moment, so pictures drawn for its sizes are worth drawing.
+    pub fn desk_settled(&self) -> bool {
+        !self.desk.animating() && !self.desk.panning() && !self.desk.carrying() && self.desk.changed.elapsed() >= Duration::from_millis(150)
+    }
+
+    /// Where the keyboard is on Home's desk, in the window's logical pixels, while Home shows it.
+    pub fn desk_keyboard(&self) -> Option<[f32; 4]> {
+        if self.ui.get_place() != "home" {
+            return None;
+        }
+        let i = self.desk.items.iter().position(|it| it.id == "z10")?;
+        let [x, y, w, h] = self.desk.screen(i);
+        Some([self.ui.get_desk_x() + x, self.ui.get_desk_y() + y, w, h])
+    }
+
+    /// Whether the keyboard on the desk is plugged in.
+    pub fn desk_keyboard_on(&self) -> bool {
+        self.desk.items.iter().find(|it| it.id == "z10").is_none_or(|it| it.connected)
+    }
+
+    /// What the desk lays on the window's ground, in the buffer's pixels, while Home shows.
+    pub fn desk_decor(&self, scale: f32) -> crate::picture::Decor {
+        if self.ui.get_place() != "home" {
+            return crate::picture::Decor::default();
+        }
+        let d = &self.desk;
+        // each device's name, under it, for the dots to leave clear
+        let names: Vec<[f32; 4]> = d
+            .items
+            .iter()
+            .enumerate()
+            .map(|(i, it)| {
+                let [x, y, w, h] = d.screen(i);
+                let nw = crate::text::width(500, 13.5, &it.name) + 15.0;
+                let sw = if it.connected { 0.0 } else { crate::text::width(400, 12.0, "Not connected") };
+                let half = nw.max(sw) / 2.0;
+                let top = y + h + crate::desk::NAME_GAP;
+                [x + w / 2.0 - half, top, x + w / 2.0 + half, top + if it.connected { 18.0 } else { 38.0 }]
+            })
+            .collect();
+        d.decor((self.ui.get_desk_x(), self.ui.get_desk_y()), scale, &names)
+    }
+
+    /// Ctrl with plus, minus or 0 on Home in edit mode: zoom in, out, or to the
+    /// fit (`how` as the zoom controls have it); false anywhere else.
+    pub fn desk_zoom_key(&mut self, how: i32) -> bool {
+        if self.ui.get_place() != "home" || !self.desk.editing {
+            return false;
+        }
+        self.desk.zoom_step(how);
+        self.desk_frames_run();
+        true
     }
 
     /// The mouse's page, as it is now: its tab, its picture, its list and its boxes.
