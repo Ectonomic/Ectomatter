@@ -1,0 +1,63 @@
+/// How Ectodeck and a core talk, as a WebAssembly component: what a core may
+/// call in Ectodeck (its imports) and what Ectodeck calls in a core (its
+/// exports). The core protocol (docs/core-protocol.md) says what the calls
+/// carry; this says how they are made.
+///
+/// A core reaches nothing but what is here and the WebAssembly system
+/// interface Ectodeck gives it: the clocks, and its own folder of files,
+/// seen as /data.
+package ectodeck:core@2.0.0;
+
+/// The USB devices a core's manifest matches, and no others.
+interface usb {
+    record device-info {
+        vendor: u16,
+        product: u16,
+        /// the USB interface, or -1 where the system doesn't say
+        %interface: s32,
+        usage-page: u16,
+        usage: u16,
+        /// where the system has the device, to show to the person
+        path: string,
+    }
+
+    /// One of the device's HID collections, opened.
+    resource hid-device {
+        /// Send a feature report; its first byte is its id.
+        send-feature: func(report: list<u8>) -> result<_, string>;
+        /// Read feature report `report-id`, `len` bytes counting the id.
+        get-feature: func(report-id: u8, len: u32) -> result<list<u8>, string>;
+        /// Send an output report; its first byte is its id. Gives the bytes sent.
+        write: func(report: list<u8>) -> result<u32, string>;
+        /// Read an input report, waiting up to `timeout-ms` (0 returns at once).
+        read: func(timeout-ms: u32) -> result<list<u8>, string>;
+    }
+
+    /// The matched devices plugged in now, each HID collection once.
+    devices: func() -> list<device-info>;
+    /// Open one of them.
+    open: func(device: device-info) -> result<hid-device, string>;
+}
+
+/// Ectodeck itself.
+interface host {
+    /// Tell Ectodeck something, unasked: a protocol notification such as
+    /// device/added or input/down, its params as JSON.
+    notify: func(method: string, params: string);
+    /// Call the core's `timer` export with `tag` in `ms` milliseconds. A
+    /// timer asked for again with the same tag replaces the first.
+    after: func(ms: u32, tag: u32);
+    /// A line for Ectodeck's log.
+    log: func(line: string);
+}
+
+world core {
+    import usb;
+    import host;
+
+    /// A protocol request: its method, and its params as JSON. Gives the
+    /// result as JSON, or a message for the person using Ectodeck.
+    export call: func(method: string, params: string) -> result<string, string>;
+    /// A timer the core asked for with `after` has come round.
+    export timer: func(tag: u32);
+}

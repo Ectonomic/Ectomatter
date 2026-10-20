@@ -18,6 +18,7 @@
 
 mod adapter;
 mod clipboard;
+mod core_host;
 mod cores;
 mod device;
 mod display;
@@ -230,6 +231,10 @@ fn config_dir() -> PathBuf {
 }
 fn data_dir() -> PathBuf {
     std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/share")).join("com.ectonomic.ectodeck")
+}
+/// A core's own folder of files, which the core sees as /data.
+fn core_data(id: &str) -> PathBuf {
+    data_dir().join("cores").join(id)
 }
 
 /// How bright the desktop's white is and how far the keyboard's light may go
@@ -473,9 +478,12 @@ fn main() {
     ectodeck_draw::print::warm();
     // `--read-state FILE`: read the keyboard's state once, for the snapshots, and stop
     if let Some(path) = args.iter().position(|a| a == "--read-state").and_then(|i| args.get(i + 1)) {
-        let kb = ectotype_core::Keyboard::new(ectotype_core::Conn::hid(), None);
-        let state = kb.state();
-        kb.release();
+        let kb = device::z10(&cores::dir().join(z10::CORE), core_data(z10::CORE));
+        let state = kb.as_ref().map_err(|e| e.clone()).and_then(|k| {
+            let s = k.call("state", &serde_json::Value::Null);
+            let _ = k.call("release", &serde_json::Value::Null);
+            s
+        });
         match state {
             Ok(s) => std::fs::write(path, serde_json::to_vec(&s).unwrap()).unwrap(),
             Err(e) => eprintln!("ectodeck-native: the keyboard could not be read: {e}"),
@@ -1493,7 +1501,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         screen_keys::start(move |code| {
             let _ = screen_tx.send(code);
         });
-        device::start(data_dir().join("backups"), heard_tx)
+        device::start(cores::dir().join(z10::CORE), core_data(z10::CORE), heard_tx)
     });
 
     // the keyboard lit by the light setup in use, if it is one of the person's own

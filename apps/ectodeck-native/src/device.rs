@@ -1,12 +1,12 @@
-//! The keyboard, on a thread of its own. Ectodeck's core does the talking,
-//! which takes seconds for a whole read, and the window keeps drawing
-//! meanwhile: the page asks, and hears back through the event loop.
+//! The keyboard, on a thread of its own. The Z10's core does the talking
+//! (cores/evga-z10, run as a module by core_host.rs), which takes seconds for
+//! a whole read, and the window keeps drawing meanwhile: the page asks, and
+//! hears back through the event loop.
 
 use std::path::PathBuf;
 use std::sync::mpsc;
 
-use ectotype_core::{Conn, Keyboard};
-use serde_json::Value;
+use serde_json::{Value, json};
 use smithay_client_toolkit::reexports::calloop::channel::Sender;
 
 pub enum Ask {
@@ -49,12 +49,33 @@ pub enum Heard {
     Done,
 }
 
-/// Start the keyboard's thread. `backups` is where the first write of a
-/// session saves what it replaces, as the web app's does.
-pub fn start(backups: PathBuf, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
+/// The Z10's core, started: its manifest and module in `dir`, its own files
+/// (where the first write of a session saves what it replaces) in `data`.
+pub fn z10(dir: &std::path::Path, data: PathBuf) -> Result<crate::core_host::Core, String> {
+    crate::core_host::Core::start(dir, data, Box::new(crate::core_host::Hidapi::new()))
+}
+
+/// The keyboard, as the page asks of it: each ask a call to the Z10's core.
+struct Kb(Result<crate::core_host::Core, String>);
+
+impl Kb {
+    fn call(&self, method: &str, params: Value) -> Result<Value, String> {
+        self.0.as_ref().map_err(|e| e.clone())?.call(method, &params)
+    }
+    fn flag(&self, method: &str, params: Value) -> Result<bool, String> {
+        self.call(method, params).map(|v| v.as_bool().unwrap_or(false))
+    }
+    fn profile(&self, method: &str, params: Value) -> Result<Option<u8>, String> {
+        self.call(method, params).map(|v| v.as_u64().map(|n| n as u8))
+    }
+}
+
+/// Start the keyboard's thread, with the Z10's core in `dir` and its own
+/// files in `data`.
+pub fn start(dir: PathBuf, data: PathBuf, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
     let (ask, asked) = mpsc::channel::<Ask>();
     std::thread::spawn(move || {
-        let kb = Keyboard::new(Conn::hid(), Some(backups));
+        let kb = Kb(z10(&dir, data));
         let mut queue: std::collections::VecDeque<Ask> = std::collections::VecDeque::new();
         let mut handed_back = false;
         loop {
@@ -86,37 +107,37 @@ pub fn start(backups: PathBuf, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
             let Some(a) = queue.pop_front() else { continue };
             let heard = match a {
                 Ask::State => {
-                    let state = kb.state();
+                    let state = kb.call("state", Value::Null);
                     // The first time the keyboard is read, its lighting is handed back to
                     // its stored profile: a run of Ectodeck stopped short (killed, or
                     // crashed) while the Lighting page streamed a preview leaves it
                     // waiting for frames that never come.
                     if state.is_ok() && !handed_back {
                         handed_back = true;
-                        let _ = kb.hand_back();
+                        let _ = kb.call("hand_back", Value::Null);
                     }
-                    Heard::State(state.map_err(|e| e.to_string()))
+                    Heard::State(state)
                 }
-                Ask::Save(n, body) => Heard::Saved(n, kb.save(n, &body).map_err(|e| e.to_string())),
-                Ask::Activate(n) => Heard::Active(n, kb.activate(n).map_err(|e| e.to_string())),
-                Ask::ReadActive => Heard::ActiveNow(kb.active().map_err(|e| e.to_string())),
-                Ask::Sliders => Heard::Sliders(kb.sliders().map_err(|e| e.to_string())),
-                Ask::Preview(body) => Heard::Preview(kb.preview(&body).map_err(|e| e.to_string())),
+                Ask::Save(n, body) => Heard::Saved(n, kb.call("save", json!({ "n": n, "body": body }))),
+                Ask::Activate(n) => Heard::Active(n, kb.profile("activate", json!({ "n": n }))),
+                Ask::ReadActive => Heard::ActiveNow(kb.profile("active", Value::Null)),
+                Ask::Sliders => Heard::Sliders(kb.call("sliders", Value::Null)),
+                Ask::Preview(body) => Heard::Preview(kb.call("preview", body)),
                 Ask::Dimmer(level) => {
-                    let _ = kb.set_dimmer(level);
+                    let _ = kb.call("set_dimmer", json!({ "level": level }));
                     Heard::Done
                 }
                 Ask::Screen(light, apps) => {
                     // each until the keyboard says it took it: an answer can be lost to the
                     // screen's own frames going to it at the same moment
                     for _ in 0..4 {
-                        if kb.set_lcd_light(light[0], [light[1], light[2], light[3]]).unwrap_or(false) {
+                        if kb.flag("set_lcd_light", json!({ "brightness": light[0], "rgb": [light[1], light[2], light[3]] })).unwrap_or(false) {
                             break;
                         }
                         std::thread::sleep(std::time::Duration::from_millis(15));
                     }
                     for _ in 0..4 {
-                        if kb.set_lcd_apps(apps).unwrap_or(false) {
+                        if kb.flag("set_lcd_apps", json!({ "apps": apps })).unwrap_or(false) {
                             break;
                         }
                         std::thread::sleep(std::time::Duration::from_millis(15));
@@ -125,11 +146,11 @@ pub fn start(backups: PathBuf, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
                 }
                 Ask::WriteMacro(n, body) => {
                     let delete = body.get("delete").is_some();
-                    Heard::Macros(delete, kb.write_macro(n, &body).map_err(|e| e.to_string()))
+                    Heard::Macros(delete, kb.call("write_macro", json!({ "index": n, "body": body })))
                 }
-                Ask::SaveKeys(n, body) => Heard::KeysSaved(n, kb.save(n, &body).map_err(|e| e.to_string())),
+                Ask::SaveKeys(n, body) => Heard::KeysSaved(n, kb.call("save", json!({ "n": n, "body": body }))),
                 Ask::Modes(quiet, keep) => {
-                    let _ = kb.set_modes(quiet, keep);
+                    let _ = kb.call("set_modes", json!({ "quiet_volume": quiet, "keep_dimmer": keep }));
                     Heard::Done
                 }
             };
@@ -137,7 +158,7 @@ pub fn start(backups: PathBuf, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
                 break;
             }
         }
-        kb.release();
+        let _ = kb.call("release", Value::Null);
     });
     ask
 }

@@ -1,6 +1,6 @@
 # Ectodeck core protocol
 
-Draft 8, 2026-10-07. Draft 8 lets the device's print name one of the frontend's own typefaces, with the typeface its drawing is in and signs to set as others (section 4, the device's print), and lets the light give a key's legend words of its own, move a legend anywhere on its cap, give the caps colors of their own, and put homing bumps on any key or take them off (section 4, the device's light). Draft 7, 2026-10-06, added what is printed on each control as words (section 4, the device's print), so the frontend can set a device's legends anew in another typeface, size or place. Draft 6, 2026-10-04, writes a device's description to be read by people as well as programs (section 4): each control is tied to the drawing by one number, its other pieces following by rule; the light's values are named as the Key lab names them, every length in millimeters; and the lock lights are described. Draft 5, 2026-10-03, added the device's light (section 4), the description Ectodeck's Key lab tunes and draws the device's light from. Draft 4, 2026-09-29, was for review before anything was built on it. Draft 3 took in the review of the M3 plugin's author. Draft 4 replaces the device picture with one drawing in named, numbered pieces (section 4, the device's art), so a core brings its own art and the frontend draws it with nothing added by hand. It adds a layout to the shared settings language (section 6, Layout), so a core arranges its settings without drawing them, and lets a core's files carry comments.
+Draft 9, 2026-10-19. Draft 9 runs each core inside the frontend as a WebAssembly component: one module for every system, reaching only the devices its manifest names, through connections the frontend lends it (section 3, and the interface in `wit/core.wit`). The messages are the same; they pass as calls into the module instead of lines over its input and output. Draft 8, 2026-10-07, lets the device's print name one of the frontend's own typefaces, with the typeface its drawing is in and signs to set as others (section 4, the device's print), and lets the light give a key's legend words of its own, move a legend anywhere on its cap, give the caps colors of their own, and put homing bumps on any key or take them off (section 4, the device's light). Draft 7, 2026-10-06, added what is printed on each control as words (section 4, the device's print), so the frontend can set a device's legends anew in another typeface, size or place. Draft 6, 2026-10-04, writes a device's description to be read by people as well as programs (section 4): each control is tied to the drawing by one number, its other pieces following by rule; the light's values are named as the Key lab names them, every length in millimeters; and the lock lights are described. Draft 5, 2026-10-03, added the device's light (section 4), the description Ectodeck's Key lab tunes and draws the device's light from. Draft 4, 2026-09-29, was for review before anything was built on it. Draft 3 took in the review of the M3 plugin's author. Draft 4 replaces the device picture with one drawing in named, numbered pieces (section 4, the device's art), so a core brings its own art and the frontend draws it with nothing added by hand. It adds a layout to the shared settings language (section 6, Layout), so a core arranges its settings without drawing them, and lets a core's files carry comments.
 
 Ectodeck is one app for every device on a desk. It follows the model RetroArch made work for emulators: one frontend, and the engines that know each device brought in as **cores**. The frontend owns the windows, the tray, profiles, and every feature that spans devices. A core owns the truth about the devices it handles: how to find them, what they can do, and how to talk to them.
 
@@ -9,14 +9,14 @@ This document is the contract between the two.
 ## 1. Words
 
 - **Frontend.** The Ectodeck app itself: the interface, and the features that work across every device.
-- **Core.** A separate program that handles one family of devices, such as the EVGA Z10, the MagTran M3, SteelSeries mice or everything OpenRGB drives.
+- **Core.** A package that handles one family of devices: a WebAssembly module, with its art and its device files, such as the EVGA Z10, the MagTran M3, SteelSeries mice or everything OpenRGB drives.
 - **Device.** One physical thing a core has found and connected to.
 - **Control.** One part of a device that you press, turn, slide or look at: a key, a dial, a slider, a screen.
 - **Capability.** One kind of thing a device can do, such as reassigning keys, lighting or showing images. The frontend has one screen per capability, so every device that offers a capability is edited the same way.
 
 ## 2. Principles
 
-1. **Cores are separate programs.** A core that crashes takes nothing else down, a core can be written in any language, and a core keeps its own license. OpenRGB is GPL and Ectodeck's own deck code comes from OpenDeck, which is GPL; neither changes the frontend's license, because nothing is linked together.
+1. **Cores are sandboxed modules.** Each core runs inside the frontend as a WebAssembly component, on a thread of its own. A core that fails takes nothing else down: its failure stops at the module. A core reaches nothing but what the frontend lends it, and the frontend lends it only the devices its manifest names. One module runs on every system, so a core's author writes nothing for Windows, macOS or Linux; the frontend's connections do that once. A core can be written in any language that builds a WebAssembly component, and keeps its own license. (Open question: whether a GPL core, such as one built from OpenDeck's deck code, run this way leaves the frontend's license alone, as a separate program did.)
 2. **The device is the truth.** When a device stores settings in its own memory, as the Z10 does, the core reads them from the device every time and the frontend never keeps a second copy that can drift. When a device keeps nothing, as the M3 does, the frontend stores its settings and hands them to the core.
 3. **The frontend draws everything.** A core never draws interface. It describes what a device can do in data, and the frontend presents it with its own controls. This is what keeps the app coherent as cores are added, and it is the deliberate difference from RetroArch, where every core's options pile into one long menu.
 4. **Nothing is written to a device without a reason the user can see.** A preview is shown without storing anything. A save writes, then reads back to confirm. Before a core first writes to a device's memory in a session, it hands the frontend a backup.
@@ -26,7 +26,7 @@ This document is the contract between the two.
 
 ### A core on disk
 
-Each core is a folder with a manifest, `core.json`. Every file of data in a core's folder is JSON, with comments allowed (`//` to the end of a line, and `/* */`), so a core's files can explain themselves; the messages between a core and the frontend are the same JSON without comments (Messages, below).
+Each core is a folder with a manifest, `core.json`, and the module it names. Every file of data in a core's folder is JSON, with comments allowed (`//` to the end of a line, and `/* */`), so a core's files can explain themselves; the messages between a core and the frontend are the same JSON without comments (Messages, below).
 
 The manifest:
 
@@ -35,25 +35,22 @@ The manifest:
   "id": "evga-z10",
   "name": "EVGA Z10 RGB",
   "version": "1.0.0",
-  "protocol": 1,
+  "protocol": 2,
+  "ectodeck": "0.1.0",
+  "module": "core.wasm",
   "license": "MIT",
-  "run": {
-    "linux-x86_64": "bin/evga-z10",
-    "windows-x86_64": "bin/evga-z10.exe",
-    "macos-aarch64": "bin/evga-z10"
-  },
   "matches": [{ "usb": { "vendor": "3842", "product": "2611", "usagePage": "0008", "usage": "004B" } }],
   "uses": []
 }
 ```
 
-`matches` lets the frontend start a core only when one of its devices is plugged in, the way RetroArch picks a core for a file. A device often shows several interfaces and only one of them is the one the core talks to (the Z10's is the LED-indicator collection, usage page 0x08; the M3's is usage page 0xFFA0, usage 1), so a match may name an `interface`, a `usagePage` and a `usage` as well as the vendor and product.
+`module` is the core's code, built for `wasm32-wasip2`; `ectodeck` is the oldest frontend it runs on. `matches` is also the whole of what the core may open: the frontend lists and opens for it the devices these name, and no others. `matches` lets the frontend start a core only when one of its devices is plugged in, the way RetroArch picks a core for a file. A device often shows several interfaces and only one of them is the one the core talks to (the Z10's is the LED-indicator collection, usage page 0x08; the M3's is usage page 0xFFA0, usage 1), so a match may name an `interface`, a `usagePage` and a `usage` as well as the vendor and product.
 
 `uses` lists what a core does for itself beyond talking to its devices, so the frontend can tell you before the core first runs: `"sound-capture"` (reading what your computer is playing, which the M3's music backgrounds do) and `"network"` (the M3's weather backgrounds fetch forecasts and alerts). A core that finds its devices another way, such as the OpenRGB core, which asks the OpenRGB server, declares `{ "always": true }` instead.
 
 ### Messages
 
-The frontend starts the core and they talk over the core's standard input and output, one JSON-RPC 2.0 message per line. Requests get a response; notifications do not.
+The frontend loads the core's module and they talk through the interface in `wit/core.wit`. A request is a call to the module's `call` export, with the method and its params as JSON, and the module gives back the result as JSON or a message for the person; these are JSON-RPC 2.0's requests and responses, without the envelope. A notification from the core is a call to the frontend's `notify`. The module asks for its own timers (`after`, answered by its `timer` export), since it has no threads, and reaches devices through `usb`: the HID collections its manifest matches, each opened through the frontend. It also has the WebAssembly system interface's clocks, and its own folder of files, seen as `/data`. The exchanges below are written as the JSON-RPC messages the calls carry.
 
 The first exchange is `initialize`:
 

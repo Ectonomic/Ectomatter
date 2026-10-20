@@ -5,3 +5,6 @@ __pycache__/
 
 # screenshots of the original editor holding a real keyboard's profiles and macros
 /docs/baseline/
+
+# each core's WebAssembly module, built by tools/build-cores.sh
+/cores/*/core.wasm

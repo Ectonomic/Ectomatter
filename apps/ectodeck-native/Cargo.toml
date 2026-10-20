@@ -10,6 +10,11 @@ bytemuck = "1"
 ectodeck-draw = { path = "../../crates/ectodeck-draw" }
 ectodeck-weather = { version = "0.1.0", path = "../../crates/ectodeck-weather" }
 ectotype-core = { version = "0.1.0", path = "../../crates/ectotype-core" }
+# the USB devices cores reach, each through Ectodeck (core_host.rs)
+hidapi = "2.6"
+# cores run as WebAssembly components (core_host.rs, the interface in wit/core.wit)
+wasmtime = "=49.0.2"
+wasmtime-wasi = "=49.0.2"
 ksni = { version = "0.3", default-features = false, features = ["blocking", "async-io"] }
 # the desktop portal's file picker (picker.rs), the same zbus the tray uses
 zbus = { version = "5.19", default-features = false, features = ["async-io", "blocking-api"] }
@@ -30,6 +35,10 @@ bitflags = "2"
 libc = "0.2"
 # game names folded to plain letters for the screen, as the z10-lcd service did (NFKD)
 unicode-normalization = "0.1"
+
+[dev-dependencies]
+# the parity vectors the Z10 module is checked against are gzipped
+flate2 = "1"
 
 [build-dependencies]
 slint-build = "1.18.1"
