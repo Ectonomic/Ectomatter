@@ -3565,6 +3565,7 @@ impl Front {
             self.refresh_lighting();
         }
         self.desk_meet();
+        self.desk.resize(self.ui.get_desk_w(), self.ui.get_desk_h());
         if self.ui.get_place() == "home" {
             self.show_desk();
         }
@@ -3861,7 +3862,7 @@ impl Front {
             let core = crate::cores::shown();
             let size = crate::desk::size_of(&core.art, core.device["light"]["scale"].as_f64().unwrap_or(1.38) as f32);
             // (not yet known to be plugged in, it is drawn as plugged in: only a keyboard gone shows dimmed)
-            self.desk.meet("z10", core.name(), "z10", size, self.ui.get_conn_state() != 2);
+            self.desk.meet("z10", core.name(), "z10", size, self.ui.get_conn_state() != 2, true);
         }
         if self.mouse.known() || kept.iter().any(|k| k == "mouse") {
             let dev = &self.mouse.state["device"];
@@ -3869,7 +3870,7 @@ impl Front {
             let per = dev["scale"].as_f64().unwrap_or(520.0 / 125.1) as f32;
             let size = (v.2 / per * crate::desk::PER_MM, v.3 / per * crate::desk::PER_MM);
             let name = dev["name"].as_str().unwrap_or("SteelSeries Sensei 310").to_string();
-            self.desk.meet("mouse", &name, "mouse", size, self.mouse.present() || self.mouse.state.is_null());
+            self.desk.meet("mouse", &name, "mouse", size, self.mouse.present() || self.mouse.state.is_null(), false);
         }
     }
 
@@ -3973,6 +3974,14 @@ impl Front {
         let i = self.desk.items.iter().position(|it| it.id == "z10")?;
         let [x, y, w, h] = self.desk.screen(i);
         Some([self.ui.get_desk_x() + x, self.ui.get_desk_y() + y, w, h])
+    }
+
+    /// The keyboard's size on Home's desk as the view has it, in logical
+    /// pixels, whatever shows: for its picture to be drawn ahead of Home's opening.
+    pub fn desk_keyboard_size(&self) -> Option<(f32, f32)> {
+        let i = self.desk.items.iter().position(|it| it.id == "z10")?;
+        let [_, _, w, h] = self.desk.screen(i);
+        (self.desk.size.0 > 0.0).then_some((w, h))
     }
 
     /// Whether the keyboard on the desk is plugged in.

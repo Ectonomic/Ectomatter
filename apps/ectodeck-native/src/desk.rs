@@ -105,8 +105,9 @@ impl Desk {
     }
 
     /// A device Ectodeck knows: put on the desk where it was kept, or, seen
-    /// for the first time, to the right of the others; or brought up to date.
-    pub fn meet(&mut self, id: &str, name: &str, place: &str, (w, h): (f32, f32), connected: bool) {
+    /// for the first time, beside the others (a keyboard, `left`, to their
+    /// left; anything else to their right); or brought up to date.
+    pub fn meet(&mut self, id: &str, name: &str, place: &str, (w, h): (f32, f32), connected: bool, left: bool) {
         if let Some(it) = self.items.iter_mut().find(|i| i.id == id) {
             let resized = (it.w, it.h) != (w, h);
             (it.name, it.w, it.h, it.connected) = (name.to_string(), w, h, connected);
@@ -117,13 +118,16 @@ impl Desk {
         }
         let (x, y) = match Desk::saved().into_iter().find(|(s, _, _)| s == id) {
             Some((_, x, y)) => (x, y),
-            // (seen for the first time: to the right of the others, its middle
-            // level with theirs, on the dots)
+            // (seen for the first time: beside the others, its middle level with
+            // theirs, on the dots)
+            None if self.items.is_empty() => (0.0, 0.0),
             None => {
-                let right = self.items.iter().map(|i| i.x + i.w).fold(f32::NAN, f32::max);
+                let leftmost = self.items.iter().map(|i| i.x).fold(f32::INFINITY, f32::min);
+                let right = self.items.iter().map(|i| i.x + i.w).fold(f32::NEG_INFINITY, f32::max);
                 let top = self.items.iter().map(|i| i.y).fold(f32::INFINITY, f32::min);
                 let bottom = self.items.iter().map(|i| i.y + i.h).fold(f32::NEG_INFINITY, f32::max);
-                if right.is_nan() { (0.0, 0.0) } else { (snap(right + GAP), snap((top + bottom) / 2.0 - h / 2.0)) }
+                let x = if left { snap(leftmost - GAP - w) } else { snap(right + GAP) };
+                (x, snap((top + bottom) / 2.0 - h / 2.0))
             }
         };
         self.items.push(Item { id: id.into(), name: name.into(), place: place.into(), w, h, x, y, connected });
@@ -424,6 +428,27 @@ mod tests {
         ];
         d.fit();
         d
+    }
+
+    /// Met in either order, a keyboard sits left of a mouse, level with it.
+    #[test]
+    fn a_keyboard_goes_left_of_a_mouse() {
+        for kb_first in [true, false] {
+            let mut d = Desk::new();
+            d.size = (1380.0, 992.0);
+            let kb = |d: &mut Desk| d.meet("kb-test", "A keyboard", "z10", (760.0, 304.0), true, true);
+            let mouse = |d: &mut Desk| d.meet("mouse-test", "A mouse", "mouse", (118.0, 202.0), true, false);
+            if kb_first {
+                kb(&mut d);
+                mouse(&mut d);
+            } else {
+                mouse(&mut d);
+                kb(&mut d);
+            }
+            let (k, m) = (d.items.iter().find(|i| i.id == "kb-test").unwrap(), d.items.iter().find(|i| i.id == "mouse-test").unwrap());
+            assert!(k.x + k.w < m.x, "keyboard first {kb_first}: the keyboard ({}) left of the mouse ({})", k.x, m.x);
+            assert!(((k.y + k.h / 2.0) - (m.y + m.h / 2.0)).abs() <= SNAP, "level");
+        }
     }
 
     /// At the fit the devices fill the window as far as its room allows, and

@@ -2353,6 +2353,21 @@ impl App {
         self.draw();
     }
 
+    /// Home's keyboard, drawn for its size on the desk once the desk has
+    /// settled, ahead of Home's opening too, no larger than its page's (closer,
+    /// its last picture is stretched).
+    fn ask_home_board(&mut self) {
+        let Some((kw, kh)) = self.front.desk_keyboard_size().filter(|_| self.front.desk_settled()) else { return };
+        let s = self.scale as f32;
+        let page = (self.front.ui.get_board_width() * s).round().max(1.0);
+        let hw = (kw * s).min(page).round().max(1.0) as u32;
+        let hh = (hw as f32 * kh / kw.max(1.0)).round().max(1.0) as u32;
+        if self.home_board.as_ref().map(|b| (b.w, b.h)) != Some((hw, hh)) && self.home_asked != Some((hw, hh)) {
+            self.home_asked = Some((hw, hh));
+            let _ = self.home_build.send((hw, hh, self.light_now(), s));
+        }
+    }
+
     /// Whether the picture the window shows is Home's keyboard: Home is up
     /// with a keyboard on its desk.
     fn shows_home(&self) -> bool {
@@ -2447,6 +2462,9 @@ impl App {
                 t.connected(on);
             }
         }
+        // (asked for whether or not this frame is drawn: a window out of sight
+        // gets no frames, and the keyboard should be ready when Home opens)
+        self.ask_home_board();
         if self.hidden || !self.configured || self.frame_pending {
             return;
         }
@@ -2609,17 +2627,8 @@ impl App {
             self.asked = Some(want);
             let _ = self.build.send((want.0, want.1, self.light_now(), self.scale as f32));
         }
-        // Home's keyboard, drawn for its size on the desk once the desk has
-        // settled, no larger than the page's (closer, its last picture stretched)
-        if let Some([_, _, kw, kh]) = home.filter(|_| self.front.desk_settled()) {
-            let hw = (kw * s).min(want.0.max(1) as f32).round().max(1.0) as u32;
-            let hh = (hw as f32 * kh / kw.max(1.0)).round().max(1.0) as u32;
-            if self.home_board.as_ref().map(|b| (b.w, b.h)) != Some((hw, hh)) && self.home_asked != Some((hw, hh)) {
-                self.home_asked = Some((hw, hh));
-                let _ = self.home_build.send((hw, hh, self.light_now(), s));
-            }
-        }
-        self.front.board_size(rect.2 as u32, rect.3 as u32, self.scale as f32);
+        // (the knobs and glass for the keyboard as drawn, as above)
+        self.front.board_size(drawn.0, drawn.1, s);
         self.front.ui.set_board_ready(self.lit.is_some());
         let before = self.pic.keyboard_rect();
         if self.pic.set_keyboard(rect, self.lit.as_ref()) {
