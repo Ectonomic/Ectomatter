@@ -62,6 +62,7 @@ pub enum Ask {
     MouseKind(i32, f32, f32, f32),
     MouseJob(f32, f32, f32),
     MouseReset,
+    MouseResetAll,
     MouseEffect(i32),
     /// the rebindings shown on the keyboard, or not
     ShowRebindings,
@@ -643,6 +644,7 @@ impl Front {
         on!(on_mouse_kind_picked, |i, x, y, h| Ask::MouseKind(i, x, y, h));
         on!(on_mouse_job_clicked, |x, y, h| Ask::MouseJob(x, y, h));
         on!(on_mouse_reset, Ask::MouseReset);
+        on!(on_mouse_reset_all, Ask::MouseResetAll);
         on!(on_mouse_effect, |i| Ask::MouseEffect(i));
         on!(on_rail, |p| Ask::Rail(p.to_string()));
         on!(on_macro_editor, |l| Ask::MacroEditor(l));
@@ -1146,7 +1148,9 @@ impl Front {
                     if self.mouse.tab == 1 {
                         self.mouse.light = (i.max(0) as usize).min(1);
                     } else {
-                        self.mouse.button = (i.max(0) as usize).min(7);
+                        // selecting the chosen button again lets it go
+                        let b = (i.max(0) as usize).min(7);
+                        self.mouse.button = (self.mouse.button != Some(b)).then_some(b);
                     }
                 }
                 Ask::MouseKind(i, x, y, h) => {
@@ -1155,22 +1159,29 @@ impl Front {
                     if choices.len() == 1 {
                         // a kind with one job: that job, at once
                         self.close_menu();
-                        let b = self.mouse.button;
-                        self.mouse.set_job(b, choices[0].1.clone());
+                        if let Some(b) = self.mouse.button {
+                            self.mouse.set_job(b, choices[0].1.clone());
+                        }
                     } else {
                         self.open_mouse_menu(k, (x, y, h));
                     }
                 }
                 Ask::MouseJob(x, y, h) => {
-                    let k = crate::mouse::kind_of(&self.mouse.job(self.mouse.button));
-                    self.open_mouse_menu(k, (x, y, h));
+                    if let Some(b) = self.mouse.button {
+                        let k = crate::mouse::kind_of(&self.mouse.job(b));
+                        self.open_mouse_menu(k, (x, y, h));
+                    }
                 }
                 Ask::MouseReset => {
-                    let b = self.mouse.button;
-                    let f = self.mouse.factory(b);
-                    if !f.is_null() {
-                        self.mouse.state["keys"]["base"][crate::mouse::BUTTONS[b].0] = f;
-                        self.mouse.send(crate::mouse::Ask::ResetKey(crate::mouse::BUTTONS[b].0.into()));
+                    if let Some(b) = self.mouse.button {
+                        self.mouse.reset_job(b);
+                    }
+                }
+                Ask::MouseResetAll => {
+                    for b in 0..crate::mouse::BUTTONS.len() {
+                        if self.mouse.rebound(b) {
+                            self.mouse.reset_job(b);
+                        }
                     }
                 }
                 Ask::MouseEffect(i) => {
@@ -2477,7 +2488,7 @@ impl Front {
     /// from the open menu closes it, and a press on the button it hangs from
     /// keeps that button's click from opening it again.
     pub fn pressed_at(&mut self, x: f32, y: f32) {
-        self.let_key_go(x, y);
+        self.let_chosen_go(x, y);
         if self.place_menu {
             let (mx, my, mw, mh) = (self.ui.get_menu_x(), self.ui.get_menu_y(), self.ui.get_menu_width(), self.ui.get_menu_height());
             if !(x >= mx && x < mx + mw && y >= my && y < my + mh) {
@@ -2547,35 +2558,94 @@ impl Front {
         self.close_menu();
     }
 
-    /// A press anywhere on the page lets the chosen key go, but on the
-    /// keyboard (a key there is chosen instead, and the chassis lets it go
-    /// itself), on the chosen key's editor, in an open menu or the color
-    /// picker, or on the title bar, which only moves the window.
-    fn let_key_go(&mut self, x: f32, y: f32) {
-        if self.page.view != View::Keys || self.page.sel.is_none() || self.ui.get_place() != "z10" || y < 36.0 {
+    /// The rule for whatever a page has chosen (a key on the keyboard, a
+    /// button on the mouse), the same on every page: selecting it again lets
+    /// it go, Escape lets it go, and so does a press anywhere off it. A press
+    /// keeps it chosen only on what chooses (where a press chooses another,
+    /// or the same one again) and on its editor; a press while a menu or the
+    /// color picker is open only closes that; one on the title bar only moves
+    /// the window.
+    fn let_chosen_go(&mut self, x: f32, y: f32) {
+        if y < 36.0 || self.menu.is_some() || self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pick.is_some() || self.place_menu {
             return;
         }
-        if self.menu.is_some() || self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pick.is_some() || self.place_menu {
+        let Some(keeps) = self.chosen_keeps() else { return };
+        if keeps.iter().any(|&(x0, y0, w, h)| x >= x0 && x < x0 + w && y >= y0 && y < y0 + h) {
             return;
         }
-        let inside = |x0: f32, y0: f32, w: f32, h: f32| x >= x0 && x < x0 + w && y >= y0 && y < y0 + h;
-        let ui = &self.ui;
-        let board = ui.get_board_shown() && inside(ui.get_board_x(), ui.get_board_y(), ui.get_board_width(), ui.get_board_height());
-        let editor = ui.get_key_open() && inside(ui.get_key_tile_x(), ui.get_key_tile_y(), ui.get_key_tile_w(), ui.get_key_tile_h());
-        if board || editor {
-            return;
-        }
-        self.page.sel = None;
-        self.listening = None;
-        self.close_menu();
+        self.let_chosen_go_now();
         self.refresh();
+    }
+
+    /// Where a press keeps the page's chosen thing chosen, in the window's
+    /// logical pixels; none when nothing is chosen.
+    fn chosen_keeps(&self) -> Option<Vec<(f32, f32, f32, f32)>> {
+        let ui = &self.ui;
+        match ui.get_place().as_str() {
+            // the keyboard (a key there is chosen instead, and the chassis
+            // lets it go itself) and the key's editor
+            "z10" if self.page.view == View::Keys && self.page.sel.is_some() => {
+                let mut k = Vec::new();
+                if ui.get_board_shown() {
+                    k.push((ui.get_board_x(), ui.get_board_y(), ui.get_board_width(), ui.get_board_height()));
+                }
+                if ui.get_key_open() {
+                    k.push((ui.get_key_tile_x(), ui.get_key_tile_y(), ui.get_key_tile_w(), ui.get_key_tile_h()));
+                }
+                Some(k)
+            }
+            // each button's words beside the picture (inside the stage, which
+            // clips them), the list and the button's Key detail box
+            "mouse" if self.mouse.tab == 0 && self.mouse.button.is_some() => {
+                let (x0, y0, w) = (ui.get_mouse_wx(), ui.get_mouse_wy(), ui.get_mouse_w());
+                let (sy, sh) = (y0 + ui.get_mouse_stage_y(), ui.get_mouse_stage_height());
+                let canvas = x0 + w / 2.0 - 600.0;
+                let mut k: Vec<(f32, f32, f32, f32)> = crate::mouse::CALLS
+                    .iter()
+                    .map(|(left, top, _)| {
+                        let (lx, ly) = (canvas + if *left { 220.0 } else { 780.0 }, sy + top);
+                        let (a, b) = (lx.max(x0), (lx + 200.0).min(x0 + w));
+                        let (c, d) = (ly.max(sy), (ly + 40.0).min(sy + sh));
+                        (a, c, (b - a).max(0.0), (d - c).max(0.0))
+                    })
+                    .collect();
+                let (ly, lh) = (y0 + ui.get_mouse_low_top(), ui.get_mouse_low_height());
+                k.push((x0, ly, 260.0, lh));
+                k.push((x0 + 272.0, ly, w - 272.0, lh));
+                Some(k)
+            }
+            _ => None,
+        }
+    }
+
+    /// The page's chosen thing let go.
+    fn let_chosen_go_now(&mut self) {
+        match self.ui.get_place().as_str() {
+            "z10" => {
+                self.page.sel = None;
+                self.listening = None;
+            }
+            "mouse" => self.mouse.button = None,
+            _ => {}
+        }
+        self.close_menu();
+    }
+
+    /// Escape, with nothing being typed: the page's chosen thing let go, if
+    /// it has one (false when it has none, for Escape to go on to the page).
+    pub fn escape(&mut self) -> bool {
+        if self.chosen_keeps().is_none() || self.menu.is_some() || self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pick.is_some() || self.place_menu {
+            return false;
+        }
+        self.let_chosen_go_now();
+        self.refresh();
+        true
     }
 
     fn menu_chose(&mut self, i: usize) {
         if let Some(k) = self.mouse.menu {
             self.close_menu();
-            if let Some((_, a)) = crate::mouse::choices(k).get(i) {
-                let b = self.mouse.button;
+            if let (Some((_, a)), Some(b)) = (crate::mouse::choices(k).get(i), self.mouse.button) {
                 self.mouse.set_job(b, a.clone());
             }
             self.refresh();
@@ -3417,7 +3487,7 @@ impl Front {
         ui.set_mouse_hint(m.hint().into());
         ui.set_mouse_status(m.failed.clone().unwrap_or_default().into());
         // the picture: drawn again only when what it shows changes
-        let chosen = (m.tab == 0).then_some(m.button as u8 + 1);
+        let chosen = m.button.filter(|_| m.tab == 0).map(|b| b as u8 + 1);
         let (logo, wheel) = (m.lit("logo"), m.lit("wheel"));
         let key = format!("{logo:?} {wheel:?} {chosen:?}");
         if self.mouse_pic.as_ref() != Some(&(key.clone(), self.scale)) {
@@ -3438,17 +3508,24 @@ impl Front {
         ui.set_mouse_line_on(on_line.into());
         ui.set_mouse_dot_on(on_dot.into());
         ui.set_mouse_rows(ModelRc::new(VecModel::from(m.rows())));
-        let (cap, title, factory, state, rebound, kind, note) = m.detail();
-        ui.set_mouse_cap(cap.into());
-        ui.set_mouse_title(title.into());
-        ui.set_mouse_factory(factory.into());
-        ui.set_mouse_state(state.into());
-        ui.set_mouse_rebound(rebound);
-        ui.set_mouse_kind(kind as i32);
-        ui.set_mouse_kinds(ModelRc::new(VecModel::from(KINDS.iter().map(|(n, _)| SharedString::from(*n)).collect::<Vec<_>>())));
-        ui.set_mouse_kind_icons(ModelRc::new(VecModel::from(KINDS.iter().map(|(_, i)| SharedString::from(*i)).collect::<Vec<_>>())));
-        ui.set_mouse_job(crate::mouse::job_label(&m.job(m.button)).into());
-        ui.set_mouse_note(note.into());
+        ui.set_mouse_chosen(m.button.is_some());
+        if let Some(b) = m.button {
+            let (cap, title, factory, state, rebound, kind, note) = m.detail(b);
+            ui.set_mouse_cap(cap.into());
+            ui.set_mouse_title(title.into());
+            ui.set_mouse_factory(factory.into());
+            ui.set_mouse_state(state.into());
+            ui.set_mouse_rebound(rebound);
+            ui.set_mouse_kind(kind as i32);
+            ui.set_mouse_kinds(ModelRc::new(VecModel::from(KINDS.iter().map(|(n, _)| SharedString::from(*n)).collect::<Vec<_>>())));
+            ui.set_mouse_kind_icons(ModelRc::new(VecModel::from(KINDS.iter().map(|(_, i)| SharedString::from(*i)).collect::<Vec<_>>())));
+            ui.set_mouse_job(crate::mouse::job_label(&m.job(b)).into());
+            ui.set_mouse_note(note.into());
+        } else {
+            let (note, any) = m.all_buttons();
+            ui.set_mouse_all_note(note.into());
+            ui.set_mouse_any_rebound(any);
+        }
         // the effects' tiles, their pictures the keyboard's own
         if self.mouse_icons.as_ref().map(|(s, _)| *s) != Some(self.scale) {
             let icons = ["off", "static", "breathing", "wave"].iter().map(|e| lighting::icon(e, self.scale)).collect();
@@ -3479,7 +3556,8 @@ impl Front {
         }
         self.close_menu();
         self.close_picker();
-        let now = self.mouse.job(self.mouse.button);
+        let Some(b) = self.mouse.button else { return };
+        let now = self.mouse.job(b);
         let rows: Vec<MenuRow> = crate::mouse::choices(kind).iter().map(|(label, a)| MenuRow { kind: 0, label: label.as_str().into(), tag: "".into(), tick: *a == now, sub: "".into() }).collect();
         let h = 6.0 + rows.len() as f32 * 33.0 + 6.0;
         self.ui.set_menu_search(false);

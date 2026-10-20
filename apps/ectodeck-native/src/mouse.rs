@@ -124,7 +124,7 @@ pub const BUTTONS: [(&str, &str, &str); 8] = [
 /// Each button's callout on the stage, in the mock's own canvas (1092 by 470,
 /// the mouse at 480, 30, 240 by 410): its side, how far down its words are,
 /// and the line from them to its dot on the button.
-const CALLS: [(bool, f32, &[(f32, f32)]); 8] = [
+pub const CALLS: [(bool, f32, &[(f32, f32)]); 8] = [
     (true, 70.0, &[(424.0, 96.0), (538.0, 96.0), (552.0, 110.0)]),
     (false, 70.0, &[(776.0, 96.0), (662.0, 96.0), (648.0, 110.0)]),
     (true, 128.0, &[(424.0, 154.0), (565.0, 154.0), (599.0, 118.0)]),
@@ -249,7 +249,9 @@ pub struct Page {
     pub ask: Option<mpsc::Sender<Ask>>,
     pub state: Value,
     pub tab: usize,
-    pub button: usize,
+    /// the chosen button, if any: none until one is selected, and none again
+    /// once it is let go (see Front::let_chosen_go)
+    pub button: Option<usize>,
     pub light: usize,
     pub same_wheel: bool,
     /// the kind of job whose menu is open
@@ -260,7 +262,7 @@ pub struct Page {
 impl Page {
     pub fn new() -> Page {
         let same_wheel = crate::uistate::get("mouse_same_wheel").and_then(|v| v.as_bool()).unwrap_or(true);
-        Page { ask: None, state: Value::Null, tab: 0, button: 0, light: 0, same_wheel, menu: None, failed: None }
+        Page { ask: None, state: Value::Null, tab: 0, button: None, light: 0, same_wheel, menu: None, failed: None }
     }
 
     /// Whether Ectodeck has met the mouse: it is plugged in, or the core
@@ -288,7 +290,7 @@ impl Page {
         self.state["keys"]["factory"][BUTTONS[i].0].clone()
     }
 
-    fn rebound(&self, i: usize) -> bool {
+    pub fn rebound(&self, i: usize) -> bool {
         let (j, f) = (self.job(i), self.factory(i));
         !f.is_null() && j != f
     }
@@ -322,6 +324,15 @@ impl Page {
         }
     }
 
+    /// A button given back the job it had from the factory.
+    pub fn reset_job(&mut self, i: usize) {
+        let f = self.factory(i);
+        if !f.is_null() {
+            self.state["keys"]["base"][BUTTONS[i].0] = f;
+            self.send(Ask::ResetKey(BUTTONS[i].0.into()));
+        }
+    }
+
     pub fn set_job(&mut self, i: usize, a: Value) {
         self.state["keys"]["base"][BUTTONS[i].0] = a.clone();
         self.send(Ask::Key(BUTTONS[i].0.into(), a));
@@ -338,6 +349,7 @@ impl Page {
 
     pub fn hint(&self) -> &'static str {
         match self.tab {
+            0 if self.button.is_some() => "Escape clears the choice.",
             0 => "Select a button on the mouse or in the list, then choose its new job.",
             1 => "Choose a light, then its effect and its color.",
             2 => "Set the two sensitivities the CPI button switches between, and how often the mouse reports.",
@@ -364,7 +376,7 @@ impl Page {
         BUTTONS
             .iter()
             .enumerate()
-            .map(|(i, (_, name, _))| MouseRow { name: (*name).into(), job: job_label(&self.job(i)).into(), chosen: i == self.button, rebound: self.rebound(i), swatch: color([0; 3]), swatched: false })
+            .map(|(i, (_, name, _))| MouseRow { name: (*name).into(), job: job_label(&self.job(i)).into(), chosen: Some(i) == self.button, rebound: self.rebound(i), swatch: color([0; 3]), swatched: false })
             .collect()
     }
 
@@ -375,7 +387,7 @@ impl Page {
             .enumerate()
             .map(|(i, (_, name, _))| {
                 let (left, top, _) = CALLS[i];
-                MouseCall { name: (*name).into(), job: job_label(&self.job(i)).into(), left, top, chosen: i == self.button, rebound: self.rebound(i) }
+                MouseCall { name: (*name).into(), job: job_label(&self.job(i)).into(), left, top, chosen: Some(i) == self.button, rebound: self.rebound(i) }
             })
             .collect()
     }
@@ -384,7 +396,7 @@ impl Page {
     pub fn lines(&self) -> (String, String, String, String) {
         let (mut lines, mut dots, mut on_line, mut on_dot) = (String::new(), String::new(), String::new(), String::new());
         for (i, (_, _, pts)) in CALLS.iter().enumerate() {
-            let (l, d) = if i == self.button { (&mut on_line, &mut on_dot) } else { (&mut lines, &mut dots) };
+            let (l, d) = if Some(i) == self.button { (&mut on_line, &mut on_dot) } else { (&mut lines, &mut dots) };
             for (k, (x, y)) in pts.iter().enumerate() {
                 l.push_str(&format!("{}{x} {y} ", if k == 0 { "M" } else { "L" }));
             }
@@ -396,8 +408,7 @@ impl Page {
 
     /// The Key detail box for the chosen button: its cap, its factory job,
     /// what it does now, and its kind.
-    pub fn detail(&self) -> (String, String, String, String, bool, usize, String) {
-        let i = self.button;
+    pub fn detail(&self, i: usize) -> (String, String, String, String, bool, usize, String) {
         let (job, factory) = (self.job(i), self.factory(i));
         let rebound = self.rebound(i);
         let state = if rebound { format!("Now {}", job_label(&job)) } else { "As it came from the factory".into() };
@@ -407,6 +418,18 @@ impl Page {
             String::new()
         };
         (BUTTONS[i].2.into(), BUTTONS[i].1.into(), format!("From the factory: {}", job_label(&factory)), state, rebound, kind_of(&job), note)
+    }
+
+    /// With no button chosen, the box for every button: what it says, and
+    /// whether any button does something other than the factory's job.
+    pub fn all_buttons(&self) -> (String, bool) {
+        let n = (0..BUTTONS.len()).filter(|&i| self.rebound(i)).count();
+        let note = match n {
+            0 => "Every button does what it did from the factory.".to_string(),
+            1 => "One button has a new job, shown in amber. Back to factory gives it its old one.".to_string(),
+            n => format!("{n} buttons have new jobs, shown in amber. Back to factory gives every one its old job."),
+        };
+        (note, n > 0)
     }
 
     // ------------------------------------------------------------ Lighting, Performance, Settings

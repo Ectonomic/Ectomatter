@@ -2605,6 +2605,10 @@ impl App {
             self.front.refresh();
             return;
         }
+        // Escape lets the page's chosen key or button go, unless a box is being typed in
+        if down && e.keysym == Keysym::Escape && !self.front.typing() && self.front.escape() {
+            return;
+        }
         if let Some(text) = key_text(e) {
             self.slint.dispatch_event(if down { WindowEvent::KeyPressed { text } } else { WindowEvent::KeyReleased { text } });
         }

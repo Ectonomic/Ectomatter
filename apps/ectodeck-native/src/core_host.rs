@@ -808,6 +808,27 @@ mod tests {
         }
     }
 
+    /// A breath goes from dark up to its color and back down to dark, and a
+    /// color shift comes back round to red, as each cycle ends on its first
+    /// color: the mouse jumps from the last stop to the first.
+    #[test]
+    fn a_cycle_ends_where_it_starts() {
+        let (core, sent, data) = mouse_core("cycle");
+        let at = sent.lock().unwrap().len();
+        core.call("lighting/set", &serde_json::json!({ "device": "sensei310-1", "light": "logo", "effect": "breathing", "params": { "color": "#FF0000" } })).unwrap();
+        core.call("lighting/set", &serde_json::json!({ "device": "sensei310-1", "light": "wheel", "effect": "colorshift", "params": {} })).unwrap();
+        let all = sent.lock().unwrap()[at..].to_vec();
+        let _ = std::fs::remove_dir_all(&data);
+        // (after the 3 bytes and the 26-byte header, the first color, then each stop's color and step)
+        let stops = |r: &Vec<u8>| r[32..].chunks_exact(4).map(|c| ([c[0], c[1], c[2]], c[3])).collect::<Vec<_>>();
+        let breath = &all[0].2;
+        assert_eq!(breath[3 + 25], 3, "three stops");
+        assert_eq!(stops(breath), [([0, 0, 0], 0), ([0xff, 0, 0], 127), ([0, 0, 0], 128)], "dark, red, dark again");
+        let shift = &all[1].2;
+        assert_eq!(stops(shift).len(), 7, "the wheel's six colors and red again");
+        assert_eq!(stops(shift).last(), Some(&([0xff, 0, 0], 42)), "red again at the end");
+    }
+
     /// A fake Z10 that answers as a recorded exchange did, taking `delay`
     /// over each answer as a keyboard takes time, and keeps the preview's
     /// frames (reports 6 and 7) with when each was sent.

@@ -35,6 +35,9 @@ global Ink {
     out property <color> base: #18181b;
     out property <color> box: #1f1f23;
     out property <color> well: #131316;
+    // the mouse's stage, as its approved mock has it: lighter than the keyboard's
+    // well, as a black mouse needs
+    out property <color> stage: #1b1b1f;
     out property <color> hover-well: #24242a;
     out property <color> hover-box: #2a2a30;
     out property <color> pick: #36363d;
@@ -3862,6 +3865,25 @@ export component AppWindow inherits Window {
     in property <length> mouse-cells-h;
     // the room the page's boxes have across
     out property <length> mouse-w: pws-w;
+    // whether a button is chosen; with none, what the All buttons box says
+    // and whether any button can go back to the factory's job
+    in property <bool> mouse-chosen;
+    in property <string> mouse-all-note;
+    in property <bool> mouse-any-rebound;
+    callback mouse-reset-all();
+    // the page's rows, and where they are in the window, for a press off the
+    // chosen button to let it go: the page's column, its top as scrolled,
+    // the stage's and the low row's
+    property <length> mouse-stage-h: 470px;
+    property <length> mouse-low-y: head-end + (root.mouse-tab < 2 ? mouse-stage-h + 14px : 0);
+    // (on Buttons, room for all eight in the list: each row 48 and 2 between, under its heading)
+    property <length> mouse-low-h: root.mouse-tab == 0 ? 40px + 8 * 50px + 8px : max(root.mouse-cells-h, 330px);
+    out property <length> mouse-wx: rail-w + pws-x;
+    out property <length> mouse-wy: bar + 56px + mouse-flick.content-y;
+    out property <length> mouse-stage-y: head-end;
+    out property <length> mouse-stage-height: mouse-stage-h;
+    out property <length> mouse-low-top: mouse-low-y;
+    out property <length> mouse-low-height: mouse-low-h;
     callback mouse-tab-chosen(int);
     callback mouse-row(int);
     callback mouse-kind-picked(int, length, length, length);
@@ -4072,11 +4094,11 @@ export component AppWindow inherits Window {
         // the mouse's page, from the keyboard page's own parts: its bar, then
         // the tab's words, the mouse's picture (on Buttons with each button's
         // job beside it), and the tab's boxes
-        if root.place == "mouse": Rectangle {
-            property <length> stage-h: 470px;
-            property <length> low-y: head-end + (root.mouse-tab < 2 ? stage-h + 14px : 0);
-            // (on Buttons, room for all eight in the list: each row 48 and 2 between, under its heading)
-            property <length> low-h: root.mouse-tab == 0 ? 40px + 8 * 50px + 8px : max(root.mouse-cells-h, 330px);
+        Rectangle {
+            visible: root.place == "mouse";
+            property <length> stage-h: mouse-stage-h;
+            property <length> low-y: mouse-low-y;
+            property <length> low-h: mouse-low-h;
             mouse-flick := Flickable {
                 y: 56px;
                 height: parent.height - 56px;
@@ -4092,14 +4114,14 @@ export component AppWindow inherits Window {
                     color: Ink.quiet;
                     vertical-alignment: center;
                 }
-                // the stage: the mouse on the box's own shade, as the keyboard sits
+                // the stage: the mouse on its own shade, as its mock has it
                 if root.mouse-tab < 2: Rectangle {
                     x: pws-x;
                     y: head-end;
                     width: pws-w;
                     height: stage-h;
                     border-radius: 12px;
-                    background: Ink.well;
+                    background: Ink.stage;
                     clip: true;
                     // the mock's own canvas, the mouse's middle at 600 of its 1092
                     Rectangle {
@@ -4249,8 +4271,36 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
+                // Buttons, no button chosen: every button at once, where the
+                // chosen one's box goes and in its shade
+                if root.mouse-tab == 0 && !root.mouse-chosen: PageBox {
+                    x: pws-x + 260px + 12px;
+                    y: low-y;
+                    width: pws-w - 272px;
+                    height: low-h;
+                    title: "All buttons";
+                    Text {
+                        x: 16px;
+                        y: 46px;
+                        width: parent.width - 32px - (root.mouse-any-rebound ? all-reset.width + 16px : 0);
+                        text: root.mouse-all-note;
+                        font-family: "Geist";
+                        font-size: 12.5px;
+                        color: Ink.quiet;
+                        wrap: word-wrap;
+                    }
+                    all-reset := WordButton {
+                        visible: root.mouse-any-rebound;
+                        x: parent.width - self.width - 16px;
+                        y: 40px;
+                        text: "Back to factory";
+                        fill: Ink.hover-box;
+                        fill-hover: Ink.pick;
+                        clicked => { root.mouse-reset-all(); }
+                    }
+                }
                 // Buttons: the chosen button's job, as a key's on the keyboard's Keys tab
-                if root.mouse-tab == 0: KeyDetail {
+                if root.mouse-tab == 0 && root.mouse-chosen: KeyDetail {
                     x: pws-x + 260px + 12px;
                     y: low-y;
                     width: pws-w - 272px;
@@ -5972,6 +6022,15 @@ export component AppWindow inherits Window {
         content: flick.content-height;
         offset: -flick.content-y;
         scroll-to(o) => { flick.content-y = -o; }
+    }
+    if root.place == "mouse": ScrollBar {
+        x: root.width - 12px;
+        y: bar + 56px + 2px;
+        height: root.height - bar - 56px - 2px - root.bar-foot;
+        view: mouse-flick.height;
+        content: mouse-flick.content-height;
+        offset: -mouse-flick.content-y;
+        scroll-to(o) => { mouse-flick.content-y = -o; }
     }
     if root.place == "settings": ScrollBar {
         x: root.width - 12px;
