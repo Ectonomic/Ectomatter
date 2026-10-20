@@ -1774,6 +1774,8 @@ impl Front {
             return;
         }
         let mut body = self.page.preview_body();
+        // the screen's clock, so the keys show the moment of the effect it draws
+        body["t"] = serde_json::json!(self.t0.elapsed().as_millis() as u64);
         body["tab"] = serde_json::json!("native");
         body["claim"] = serde_json::json!(true);
         self.preview_asked = true;

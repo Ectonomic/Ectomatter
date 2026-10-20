@@ -1,9 +1,11 @@
 //! Cores, run inside Ectodeck as WebAssembly components (the interface is
 //! wit/core.wit). Each core runs on a thread of its own, where its calls and
-//! its timers take turns. A core reaches the USB devices its manifest
+//! its timers take turns; in the middle of a long call, the core can take the
+//! calls waiting that it can answer at once (a preview), so they don't wait. A core reaches the USB devices its manifest
 //! (core.json) matches, and no others, through the connection Ectodeck lends
 //! it; and the clocks and its own folder, seen as /data. Nothing else.
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -146,7 +148,8 @@ impl Match {
 }
 
 /// What a core's thread holds: the system interface it is given, its
-/// connection, what it may open, and the timers it has asked for.
+/// connection, what it may open, the timers it has asked for, and the calls
+/// for it.
 struct Run {
     wasi: WasiCtx,
     table: ResourceTable,
@@ -154,7 +157,18 @@ struct Run {
     matches: Vec<Match>,
     timers: Vec<(Instant, u32)>,
     id: String,
+    asked: Inbox,
+    /// calls that came in during a long call, in order
+    held: VecDeque<Ask>,
+    /// calls the core took with take-waiting, until it answers them
+    taken: Vec<(u32, Tell)>,
+    next_id: u32,
 }
+
+type Tell = mpsc::Sender<Result<String, String>>;
+
+/// The calls for a core, as its thread and (in a long call) the core reach them.
+type Inbox = std::sync::Arc<std::sync::Mutex<mpsc::Receiver<Ask>>>;
 
 impl WasiView for Run {
     fn ctx(&mut self) -> WasiCtxView<'_> {
@@ -220,6 +234,40 @@ impl ectodeck::core::host::Host for Run {
     fn log(&mut self, line: String) {
         eprintln!("ectodeck-native: {}: {line}", self.id);
     }
+    fn take_waiting(&mut self, methods: Vec<String>) -> Vec<ectodeck::core::host::Waiting> {
+        while let Ok(a) = self.asked.lock().unwrap_or_else(|p| p.into_inner()).try_recv() {
+            self.held.push_back(a);
+        }
+        let mut out = Vec::new();
+        let mut kept = VecDeque::new();
+        for a in self.held.drain(..) {
+            match a {
+                Ask::Call(method, params, tell) if methods.contains(&method) => {
+                    self.next_id = self.next_id.wrapping_add(1);
+                    self.taken.push((self.next_id, tell));
+                    out.push(ectodeck::core::host::Waiting { id: self.next_id, method, params });
+                }
+                other => kept.push_back(other),
+            }
+        }
+        self.held = kept;
+        out
+    }
+    fn answer(&mut self, id: u32, reply: Result<String, String>) {
+        if let Some(i) = self.taken.iter().position(|(t, _)| *t == id) {
+            let _ = self.taken.remove(i).1.send(reply);
+        }
+    }
+}
+
+impl Run {
+    /// After each call into the core: a call it took and never answered
+    /// hears so, rather than waiting forever.
+    fn unanswered(&mut self) {
+        for (_, tell) in self.taken.drain(..) {
+            let _ = tell.send(Err(format!("the {} core took a call and never answered it", self.id)));
+        }
+    }
 }
 
 /// A core's manifest, as Ectodeck reads it.
@@ -252,6 +300,8 @@ enum Ask {
 }
 
 /// A running core: its calls go to its thread and wait there for the answer.
+/// A copy reaches the same core, from another thread.
+#[derive(Clone)]
 pub struct Core {
     pub id: String,
     ask: mpsc::Sender<Ask>,
@@ -292,14 +342,14 @@ struct Live {
     core: World,
 }
 
-fn make(engine: &Engine, component: &Component, m: &Manifest, data: &Path, usb: Box<dyn Usb>) -> Result<Live, String> {
+fn make(engine: &Engine, component: &Component, m: &Manifest, data: &Path, usb: Box<dyn Usb>, asked: Inbox) -> Result<Live, String> {
     std::fs::create_dir_all(data).map_err(|e| format!("{}: {e}", data.display()))?;
     let wasi = WasiCtxBuilder::new()
         .inherit_stderr()
         .preopened_dir(data, "/data", FsPerms::ReadWrite)
         .map_err(|e| format!("{}: {e}", data.display()))?
         .build();
-    let run = Run { wasi, table: ResourceTable::new(), usb, matches: m.matches.clone(), timers: Vec::new(), id: m.id.clone() };
+    let run = Run { wasi, table: ResourceTable::new(), usb, matches: m.matches.clone(), timers: Vec::new(), id: m.id.clone(), asked, held: VecDeque::new(), taken: Vec::new(), next_id: 0 };
     let mut linker = Linker::<Run>::new(engine);
     wasmtime_wasi::p2::add_to_linker_sync(&mut linker).map_err(|e| e.to_string())?;
     World::add_to_linker::<_, HasSelf<_>>(&mut linker, |r| r).map_err(|e| e.to_string())?;
@@ -311,38 +361,49 @@ fn make(engine: &Engine, component: &Component, m: &Manifest, data: &Path, usb: 
 fn run(m: Manifest, data: PathBuf, usb: Box<dyn Usb>, asked: mpsc::Receiver<Ask>) {
     let t0 = Instant::now();
     let engine = Engine::default();
+    let inbox: Inbox = std::sync::Arc::new(std::sync::Mutex::new(asked));
     let made = Component::from_file(&engine, &m.module)
         .map_err(|e| format!("the {} core's module ({}) would not load: {e}", m.id, m.module.display()))
-        .and_then(|c| make(&engine, &c, &m, &data, usb));
+        .and_then(|c| make(&engine, &c, &m, &data, usb, inbox.clone()));
+    let asked = inbox;
     eprintln!("ectodeck-native: the {} core ({} {}) made ready in {} ms", m.id, m.name, m.version, t0.elapsed().as_millis());
     let mut live = match made {
         Ok(l) => l,
         Err(e) => {
             eprintln!("ectodeck-native: {e}");
             // every call hears why
-            while let Ok(Ask::Call(_, _, tell)) = asked.recv() {
+            while let Ok(Ask::Call(_, _, tell)) = asked.lock().unwrap_or_else(|p| p.into_inner()).recv() {
                 let _ = tell.send(Err(e.clone()));
             }
             return;
         }
     };
     loop {
+        // a call held from during the last, or the next to come in before
         // the next timer due, if any
-        let due = live.store.data().timers.iter().map(|&(at, _)| at).min();
-        let a = match due {
-            Some(at) => match asked.recv_timeout(at.saturating_duration_since(Instant::now())) {
-                Ok(a) => Some(a),
-                Err(mpsc::RecvTimeoutError::Timeout) => None,
-                Err(mpsc::RecvTimeoutError::Disconnected) => break,
-            },
-            None => match asked.recv() {
-                Ok(a) => Some(a),
-                Err(_) => break,
-            },
+        let held = live.store.data_mut().held.pop_front();
+        let a = match held {
+            Some(a) => Some(a),
+            None => {
+                let due = live.store.data().timers.iter().map(|&(at, _)| at).min();
+                let inbox = asked.lock().unwrap_or_else(|p| p.into_inner());
+                match due {
+                    Some(at) => match inbox.recv_timeout(at.saturating_duration_since(Instant::now())) {
+                        Ok(a) => Some(a),
+                        Err(mpsc::RecvTimeoutError::Timeout) => None,
+                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    },
+                    None => match inbox.recv() {
+                        Ok(a) => Some(a),
+                        Err(_) => break,
+                    },
+                }
+            }
         };
         if let Some(Ask::Call(method, params, tell)) = a {
             let t = Instant::now();
             let r = live.core.call_call(&mut live.store, &method, &params).unwrap_or_else(|trap| Err(format!("the {} core failed: {trap}", m.id)));
+            live.store.data_mut().unanswered();
             slow(&m.id, &method, t);
             let _ = tell.send(r);
         }
@@ -353,6 +414,7 @@ fn run(m: Manifest, data: PathBuf, usb: Box<dyn Usb>, asked: mpsc::Receiver<Ask>
             if let Err(trap) = live.core.call_timer(&mut live.store, tag) {
                 eprintln!("ectodeck-native: the {} core failed on its timer: {trap}", m.id);
             }
+            live.store.data_mut().unanswered();
             slow(&m.id, &format!("timer {tag}"), t);
         }
     }
@@ -444,6 +506,27 @@ mod tests {
         }
     }
 
+    /// The original editor's exchange less the reads it repeated: it read
+    /// each stored macro twice in a row (once for its settings, again for its
+    /// steps), and the Z10's code reads each once. Every report written stays.
+    fn reads_once(log: &Log) {
+        let mut l = log.lock().unwrap();
+        let mut out = VecDeque::new();
+        let mut seen = std::collections::HashSet::new();
+        while let Some((kind, b)) = l.pop_front() {
+            if kind == "set" && b[0] == 9 {
+                if b[3] != 1 || b[4] == 0 {
+                    seen.clear();
+                } else if !seen.insert(b[4]) {
+                    l.pop_front(); // and its answer
+                    continue;
+                }
+            }
+            out.push_back((kind, b));
+        }
+        *l = out;
+    }
+
     fn core_dir() -> PathBuf {
         let dir = crate::cores::dir().join("evga-z10");
         assert!(dir.join("core.wasm").exists(), "the Z10's module isn't built: run tools/build-cores.sh");
@@ -473,6 +556,7 @@ mod tests {
             for c in v["device"]["editor"].as_array().unwrap() {
                 let name = format!("{}: {}", f.file_name().unwrap().to_string_lossy(), c["name"].as_str().unwrap());
                 let log: Log = Arc::new(Mutex::new(c["log"].as_array().unwrap().iter().map(|e| (e[0].as_str().unwrap().to_string(), unhex(e[1].as_str().unwrap()))).collect()));
+                reads_once(&log);
                 let wrong = Arc::new(Mutex::new(None));
                 let hid = Replay { log: log.clone(), wrong: wrong.clone() };
                 let core = Core::start(&core_dir(), data.clone(), Box::new(One(Some(Box::new(hid))))).unwrap();
@@ -539,13 +623,93 @@ mod tests {
         }
     }
 
+    /// A fake Z10 that answers as a recorded exchange did, taking `delay`
+    /// over each answer as a keyboard takes time, and keeps the preview's
+    /// frames (reports 6 and 7) with when each was sent.
+    struct Recorded {
+        answers: std::collections::HashMap<Vec<u8>, Vec<u8>>,
+        pending: Option<Vec<u8>>,
+        delay: Duration,
+        frames: Arc<Mutex<Vec<(Instant, Vec<u8>)>>>,
+    }
+
+    impl Hid for Recorded {
+        fn send_feature(&mut self, report: &[u8]) -> Result<(), String> {
+            if report[0] == 6 || report[0] == 7 {
+                self.frames.lock().unwrap().push((Instant::now(), report.to_vec()));
+            } else {
+                self.pending = Some(self.answers.get(report).cloned().ok_or("a report the recording never sent")?);
+            }
+            Ok(())
+        }
+        fn get_feature(&mut self, _: u8, _: usize) -> Result<Vec<u8>, String> {
+            std::thread::sleep(self.delay);
+            self.pending.clone().ok_or_else(|| "nothing asked".to_string())
+        }
+        fn write(&mut self, _: &[u8]) -> Result<usize, String> {
+            Ok(0)
+        }
+        fn read(&mut self, _: u32) -> Result<Vec<u8>, String> {
+            Ok(Vec::new())
+        }
+    }
+
+    /// A preview asked for in the middle of a whole read (which takes a
+    /// keyboard over half a second) reaches the keys between two of the
+    /// read's exchanges, not after the read; it shows the moment of the
+    /// effect the screen asked for; and the read gives what it gave alone.
+    #[test]
+    fn a_preview_goes_out_during_a_whole_read() {
+        let root = crate::cores::dir().join("../parity");
+        let mut text = String::new();
+        flate2::read::GzDecoder::new(std::fs::File::open(root.join("vectors.json.gz")).unwrap()).read_to_string(&mut text).unwrap();
+        let v: Value = serde_json::from_str(&text).unwrap();
+        let case = v["device"]["editor"].as_array().unwrap().iter().find(|c| c["name"] == "state").unwrap().clone();
+        let log: Log = Arc::new(Mutex::new(case["log"].as_array().unwrap().iter().map(|e| (e[0].as_str().unwrap().to_string(), unhex(e[1].as_str().unwrap()))).collect()));
+        reads_once(&log);
+        let entries: Vec<_> = log.lock().unwrap().iter().cloned().collect();
+        let answers = entries.chunks(2).map(|p| (p[0].1.clone(), p[1].1.clone())).collect();
+        let frames = Arc::new(Mutex::new(Vec::new()));
+        let fake = Recorded { answers, pending: None, delay: Duration::from_millis(20), frames: frames.clone() };
+        let data = std::env::temp_dir().join(format!("ectodeck-core-during-{}", std::process::id()));
+        let core = Core::start(&core_dir(), data.clone(), Box::new(One(Some(Box::new(fake))))).unwrap();
+        core.call("initialize", &serde_json::json!({ "backups": false })).unwrap();
+        let reader = core.clone();
+        let read = std::thread::spawn(move || {
+            let t = Instant::now();
+            (reader.call("state", &Value::Null), t.elapsed())
+        });
+        std::thread::sleep(Duration::from_millis(100));
+        let asked = Instant::now();
+        let wave = serde_json::json!({ "mode": "wave", "wave": { "cycle": 1000 } });
+        core.call("preview", &serde_json::json!({ "lighting": wave, "tab": "test", "t": 5000 })).unwrap();
+        let answered = asked.elapsed();
+        let (state, took) = read.join().unwrap();
+        core.call("preview", &serde_json::json!({ "stop": true, "tab": "test" })).unwrap();
+        let _ = std::fs::remove_dir_all(&data);
+        let f = frames.lock().unwrap().clone();
+        let first = f.iter().find(|(_, b)| b[0] == 7 && b[3] == 1).expect("a wave frame");
+        let late = first.0 - asked;
+        let phase = u16::from_le_bytes([first.1[7], first.1[8]]);
+        eprintln!("the read took {took:?}; the preview was answered in {answered:?}, and its first frame went out {late:?} after it was asked, at {phase} ms into the cycle");
+        assert!(took > Duration::from_millis(400), "the read took {took:?}, too quick to test with");
+        assert!(first.0 < asked + took, "the first frame waited for the read");
+        assert!(late < Duration::from_millis(60), "the first frame went out {late:?} after it was asked");
+        assert!(answered < Duration::from_millis(60), "the preview was answered {answered:?} after it was asked");
+        assert!(phase < 60, "the frame is {phase} ms into the cycle, where the screen was at 0");
+        let mut state = state.unwrap();
+        state["live"] = case["result"]["live"].clone();
+        assert_eq!(state, case["result"]);
+    }
+
     /// A fake Z10 that keeps every report sent to it, answering reads as
     /// `Clock` does.
-    struct Sent(Arc<Mutex<Vec<Vec<u8>>>>, Clock);
+    struct Sent(Arc<Mutex<Vec<Vec<u8>>>>, Clock, Arc<Mutex<Vec<Instant>>>);
 
     impl Hid for Sent {
         fn send_feature(&mut self, report: &[u8]) -> Result<(), String> {
             self.0.lock().unwrap().push(report.to_vec());
+            self.2.lock().unwrap().push(Instant::now());
             self.1.send_feature(report)
         }
         fn get_feature(&mut self, report_id: u8, len: usize) -> Result<Vec<u8>, String> {
@@ -561,23 +725,35 @@ mod tests {
 
     /// Off previewed after Wave: the keys stay in the preview, every one
     /// black, and the frame that leaves the preview (which showed the stored
-    /// lighting) is not sent again after the switch.
+    /// lighting) is not sent again after the switch. The switch goes out at
+    /// once, not at the next beat.
     #[test]
     fn off_previews_every_key_black() {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let data = std::env::temp_dir().join(format!("ectodeck-core-off-{}", std::process::id()));
-        let fake = Sent(sent.clone(), Clock(Arc::new(Mutex::new(Vec::new())), Vec::new()));
+        let when = Arc::new(Mutex::new(Vec::new()));
+        let fake = Sent(sent.clone(), Clock(Arc::new(Mutex::new(Vec::new())), Vec::new()), when.clone());
         let core = Core::start(&core_dir(), data.clone(), Box::new(One(Some(Box::new(fake))))).unwrap();
         core.call("initialize", &serde_json::json!({ "backups": false })).unwrap();
         let wave = serde_json::json!({ "mode": "wave", "wave": { "cycle": 1000 } });
         core.call("preview", &serde_json::json!({ "lighting": wave, "tab": "test" })).unwrap();
         std::thread::sleep(Duration::from_millis(200));
+        // just after a beat, so the next is most of a beat away
+        let n = sent.lock().unwrap().len();
+        while sent.lock().unwrap().len() == n {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        std::thread::sleep(Duration::from_millis(3));
         let before = sent.lock().unwrap().len();
+        let asked = Instant::now();
         let r = core.call("preview", &serde_json::json!({ "lighting": { "mode": "off" }, "tab": "test" })).unwrap();
         std::thread::sleep(Duration::from_millis(300));
         let after: Vec<Vec<u8>> = sent.lock().unwrap()[before..].to_vec();
+        let switched = when.lock().unwrap()[before] - asked;
         let _ = std::fs::remove_dir_all(&data);
         assert_eq!(r["mode"], "keys");
+        eprintln!("the switch to Off went out {switched:?} after it was asked");
+        assert!(switched < Duration::from_millis(25), "the switch went out {switched:?} after it was asked");
         // the switch: leave the effect, then nothing but black keys
         assert_eq!(after[0][..4], [6, 0xEA, 0x02, 0], "stop the key stream first");
         assert_eq!(after[1][..4], [7, 0xEA, 0x02, 0], "leave the effect");

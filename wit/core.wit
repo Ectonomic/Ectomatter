@@ -49,6 +49,21 @@ interface host {
     after: func(ms: u32, tag: u32);
     /// A line for Ectodeck's log.
     log: func(line: string);
+
+    /// A call Ectodeck has waiting for the core.
+    record waiting {
+        id: u32,
+        method: string,
+        params: string,
+    }
+    /// In the middle of a long call (a whole read, a save), the calls waiting
+    /// among `methods`: ones the core can answer at once without leaving
+    /// what it is doing, such as a preview, so they don't wait for the long
+    /// call to end. The core answers each with `answer` before the long call
+    /// returns; Ectodeck keeps the rest until then.
+    take-waiting: func(methods: list<string>) -> list<waiting>;
+    /// The answer to a call taken with `take-waiting`, as `call` would give it.
+    answer: func(id: u32, reply: result<string, string>);
 }
 
 world core {

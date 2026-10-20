@@ -56,6 +56,7 @@ pub fn z10(dir: &std::path::Path, data: PathBuf) -> Result<crate::core_host::Cor
 }
 
 /// The keyboard, as the page asks of it: each ask a call to the Z10's core.
+#[derive(Clone)]
 struct Kb(Result<crate::core_host::Core, String>);
 
 impl Kb {
@@ -71,16 +72,47 @@ impl Kb {
 }
 
 /// Start the keyboard's thread, with the Z10's core in `dir` and its own
-/// files in `data`.
+/// files in `data`. Previews take a thread of their own to the core, so one
+/// never waits behind a whole read or a save: the core takes it between that
+/// job's exchanges with the keyboard, and the keys keep up with the page.
 pub fn start(dir: PathBuf, data: PathBuf, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
     let (ask, asked) = mpsc::channel::<Ask>();
+    let kb = Kb(z10(&dir, data));
+    let (look, looks) = mpsc::channel::<Value>();
+    let (work, asked_work) = mpsc::channel::<Ask>();
+    let (quick, told) = (kb.clone(), tell.clone());
+    let previews = std::thread::spawn(move || {
+        while let Ok(mut body) = looks.recv() {
+            // of several, only the newest is worth sending
+            while let Ok(b) = looks.try_recv() {
+                body = b;
+            }
+            if told.send(Heard::Preview(quick.call("preview", body))).is_err() {
+                break;
+            }
+        }
+    });
     std::thread::spawn(move || {
-        let kb = Kb(z10(&dir, data));
+        for a in asked {
+            let gone = match a {
+                Ask::Preview(body) => look.send(body).is_err(),
+                other => work.send(other).is_err(),
+            };
+            if gone {
+                break;
+            }
+        }
+        // the last preview (a stop, as the window closes) before the keyboard is let go
+        drop(look);
+        let _ = previews.join();
+    });
+    let asked = asked_work;
+    std::thread::spawn(move || {
         let mut queue: std::collections::VecDeque<Ask> = std::collections::VecDeque::new();
         let mut handed_back = false;
         loop {
             // Everything asked for so far: a slider reading goes first, so the
-            // knobs keep up while the lighting streams, and of several previews
+            // knobs keep up while the lighting streams, and of several screens
             // only the newest is sent (the older ones are already out of date).
             if queue.is_empty() {
                 match asked.recv() {
@@ -95,12 +127,10 @@ pub fn start(dir: PathBuf, data: PathBuf, tell: Sender<Heard>) -> mpsc::Sender<A
                 let a = queue.remove(i).unwrap();
                 queue.push_front(a);
             }
-            let last_preview = queue.iter().rposition(|a| matches!(a, Ask::Preview(_)));
             let last_screen = queue.iter().rposition(|a| matches!(a, Ask::Screen(..)));
             let mut k = 0;
             queue.retain(|a| {
-                // only the newest preview and the newest screen are worth sending
-                let keep = (!matches!(a, Ask::Preview(_)) || Some(k) == last_preview) && (!matches!(a, Ask::Screen(..)) || Some(k) == last_screen);
+                let keep = !matches!(a, Ask::Screen(..)) || Some(k) == last_screen;
                 k += 1;
                 keep
             });
@@ -122,7 +152,8 @@ pub fn start(dir: PathBuf, data: PathBuf, tell: Sender<Heard>) -> mpsc::Sender<A
                 Ask::Activate(n) => Heard::Active(n, kb.profile("activate", json!({ "n": n }))),
                 Ask::ReadActive => Heard::ActiveNow(kb.profile("active", Value::Null)),
                 Ask::Sliders => Heard::Sliders(kb.call("sliders", Value::Null)),
-                Ask::Preview(body) => Heard::Preview(kb.call("preview", body)),
+                // previews go on a thread of their own (above)
+                Ask::Preview(_) => continue,
                 Ask::Dimmer(level) => {
                     let _ = kb.call("set_dimmer", json!({ "level": level }));
                     Heard::Done
