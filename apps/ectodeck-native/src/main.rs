@@ -1563,6 +1563,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
     let mouse = core_host::Core::start(&cores::dir().join("steelseries"), core_data("steelseries"), Box::new(core_host::Hidapi::new()))
         .map_err(|e| eprintln!("ectodeck-native: SteelSeries' core: {e}"))
         .ok();
+    // (the page's picture comes back the same way, drawn on a thread of its own)
     let mouse_ask = mouse.clone().map(|m| {
         let (heard_tx, heard_rx) = calloop::channel::channel::<mouse::Heard>();
         event_loop
@@ -1573,7 +1574,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
                 }
             })
             .unwrap();
-        mouse::start(m, heard_tx)
+        (mouse::start(m, heard_tx.clone()), heard_tx)
     });
 
     // the keyboard lit by the light setup in use, if it is one of the person's own
@@ -1626,7 +1627,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         slint,
         front: {
             let mut f = Front::new(ui, kb, controlled, settings);
-            f.mouse.ask = mouse_ask;
+            (f.mouse.ask, f.mouse.tell) = mouse_ask.unzip();
             f
         },
         pic: Picture::new(reference, GROUND),

@@ -229,8 +229,6 @@ export struct PlBlock {
     way-name: string,
 }
 
-// a row in a menu: 0 a choice, 1 a heading, 2 a rule, 3 a note, 4 a choice
-// in red (one that deletes), 5 a choice that can't be made now
 // a row of the mouse page's list: a button and its job, or a light, its effect and its color
 export struct MouseRow {
     name: string,
@@ -250,7 +248,18 @@ export struct MouseCall {
     chosen: bool,
     rebound: bool,
 }
+// a piece of the mouse's picture, placed on it: where its corner is from the
+// picture's, and its size
+export struct MousePatch {
+    img: image,
+    x: length,
+    y: length,
+    w: length,
+    h: length,
+}
 
+// a row in a menu: 0 a choice, 1 a heading, 2 a rule, 3 a note, 4 a choice
+// in red (one that deletes), 5 a choice that can't be made now
 export struct MenuRow {
     kind: int,
     label: string,
@@ -3836,9 +3845,28 @@ export component AppWindow inherits Window {
     in property <int> mouse-tab;
     in property <string> mouse-hint;
     in property <string> mouse-status;
-    // its picture, and how far the picture's shadow reaches past the mouse
+    // its picture, and how far the picture's shadow reaches past the mouse;
+    // over it, the chosen button picked out and the one under the pointer a
+    // shade lighter, then each light's mask in the light's color of the moment
     in property <image> mouse-picture;
     in property <length> mouse-pic-m;
+    in property <MousePatch> mouse-picked;
+    in property <bool> mouse-picked-shown;
+    in property <MousePatch> mouse-over;
+    in property <bool> mouse-over-shown;
+    // (each light in two layers, as the drawing has it: what lies under the
+    // buttons, then what lies over everything)
+    in property <MousePatch> mouse-logo-under;
+    in property <MousePatch> mouse-wheel-under;
+    in property <MousePatch> mouse-logo;
+    in property <MousePatch> mouse-wheel;
+    in property <color> mouse-logo-tint;
+    in property <color> mouse-wheel-tint;
+    // the hand over the picture, over something a click there chooses
+    in property <bool> mouse-pic-hand;
+    callback mouse-pic-moved(length, length, bool);
+    callback mouse-pic-clicked(length, length);
+    callback mouse-call-hover(int, bool);
     // each button's words beside the picture, and their lines and dots (the chosen button's apart)
     in property <[MouseCall]> mouse-calls;
     in property <string> mouse-lines;
@@ -4128,12 +4156,71 @@ export component AppWindow inherits Window {
                         x: parent.width / 2 - 600px;
                         width: 1092px;
                         height: parent.height;
-                        Image {
+                        pic := Rectangle {
                             x: 480px - root.mouse-pic-m;
                             y: 30px - root.mouse-pic-m;
                             width: 240px + 2 * root.mouse-pic-m;
                             height: 410px + 2 * root.mouse-pic-m;
-                            source: root.mouse-picture;
+                            Image {
+                                width: parent.width;
+                                height: parent.height;
+                                source: root.mouse-picture;
+                            }
+                            if root.mouse-picked-shown: Image {
+                                x: root.mouse-picked.x;
+                                y: root.mouse-picked.y;
+                                width: root.mouse-picked.w;
+                                height: root.mouse-picked.h;
+                                source: root.mouse-picked.img;
+                            }
+                            if root.mouse-over-shown: Image {
+                                x: root.mouse-over.x;
+                                y: root.mouse-over.y;
+                                width: root.mouse-over.w;
+                                height: root.mouse-over.h;
+                                source: root.mouse-over.img;
+                                colorize: #ffffff14;
+                            }
+                            Image {
+                                x: root.mouse-logo-under.x;
+                                y: root.mouse-logo-under.y;
+                                width: root.mouse-logo-under.w;
+                                height: root.mouse-logo-under.h;
+                                source: root.mouse-logo-under.img;
+                                colorize: root.mouse-logo-tint;
+                            }
+                            Image {
+                                x: root.mouse-wheel-under.x;
+                                y: root.mouse-wheel-under.y;
+                                width: root.mouse-wheel-under.w;
+                                height: root.mouse-wheel-under.h;
+                                source: root.mouse-wheel-under.img;
+                                colorize: root.mouse-wheel-tint;
+                            }
+                            Image {
+                                x: root.mouse-logo.x;
+                                y: root.mouse-logo.y;
+                                width: root.mouse-logo.w;
+                                height: root.mouse-logo.h;
+                                source: root.mouse-logo.img;
+                                colorize: root.mouse-logo-tint;
+                            }
+                            Image {
+                                x: root.mouse-wheel.x;
+                                y: root.mouse-wheel.y;
+                                width: root.mouse-wheel.w;
+                                height: root.mouse-wheel.h;
+                                source: root.mouse-wheel.img;
+                                colorize: root.mouse-wheel-tint;
+                            }
+                            // a click on a button (or, on Lighting, a light) chooses it
+                            pic-ta := TouchArea {
+                                mouse-cursor: root.mouse-pic-hand ? pointer : default;
+                                changed mouse-x => { root.mouse-pic-moved(self.mouse-x, self.mouse-y, self.has-hover); }
+                                changed mouse-y => { root.mouse-pic-moved(self.mouse-x, self.mouse-y, self.has-hover); }
+                                changed has-hover => { root.mouse-pic-moved(self.mouse-x, self.mouse-y, self.has-hover); }
+                                clicked => { root.mouse-pic-clicked(self.mouse-x, self.mouse-y); }
+                            }
                         }
                         if root.mouse-tab == 0: Rectangle {
                             Path {
@@ -4209,6 +4296,7 @@ export component AppWindow inherits Window {
                                 }
                                 TouchArea {
                                     mouse-cursor: pointer;
+                                    changed has-hover => { root.mouse-call-hover(i, self.has-hover); }
                                     clicked => { root.mouse-row(i); }
                                 }
                             }

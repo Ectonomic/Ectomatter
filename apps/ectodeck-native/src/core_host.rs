@@ -815,8 +815,14 @@ mod tests {
     fn a_cycle_ends_where_it_starts() {
         let (core, sent, data) = mouse_core("cycle");
         let at = sent.lock().unwrap().len();
-        core.call("lighting/set", &serde_json::json!({ "device": "sensei310-1", "light": "logo", "effect": "breathing", "params": { "color": "#FF0000" } })).unwrap();
+        let set = core.call("lighting/set", &serde_json::json!({ "device": "sensei310-1", "light": "logo", "effect": "breathing", "params": { "color": "#FF0000" } })).unwrap();
         core.call("lighting/set", &serde_json::json!({ "device": "sensei310-1", "light": "wheel", "effect": "colorshift", "params": {} })).unwrap();
+        // what the light plays, as sent: told back for the page to play it on the drawing
+        let told = serde_json::json!({ "ms": 3000, "held": false, "stops": [{ "at": 0, "color": "#000000" }, { "at": 127, "color": "#FF0000" }, { "at": 255, "color": "#000000" }] });
+        assert_eq!(set["plays"], told, "lighting/set says what the light plays");
+        let got = core.call("lighting/get", &serde_json::json!({ "device": "sensei310-1" })).unwrap();
+        assert_eq!(got["logo"]["plays"], told, "and lighting/get");
+        assert_eq!(got["wheel"]["plays"]["stops"].as_array().map(|a| a.len()), Some(7));
         let all = sent.lock().unwrap()[at..].to_vec();
         let _ = std::fs::remove_dir_all(&data);
         // (after the 3 bytes and the 26-byte header, the first color, then each stop's color and step)

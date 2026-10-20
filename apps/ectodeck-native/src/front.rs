@@ -16,7 +16,16 @@ use crate::device;
 use crate::lighting::{self, Ctl};
 use crate::overlays::Overlays;
 use crate::z10::{self, Action, Page, View};
-use crate::{AppWindow, Cell, CheckItem, EffectItem, KeyItem, LayerItem, LibGroup, LibRow, MenuRow, ProfileItem};
+use crate::{AppWindow, Cell, CheckItem, EffectItem, KeyItem, LayerItem, LibGroup, LibRow, MenuRow, MousePatch, ProfileItem};
+
+/// The mouse's picture as the page shows it: its layers (for what is where
+/// on it), and each piece as the page takes it.
+struct MouseImages {
+    layers: crate::mouse_art::Layers,
+    lights: Vec<MousePatch>,
+    chosen: Vec<MousePatch>,
+    shapes: Vec<MousePatch>,
+}
 
 /// What a row of the New screen layout menu makes: a blank layout, a copy of the layout
 /// with this id, or the layout Ectodeck ships with this key, as it shipped.
@@ -56,7 +65,9 @@ pub fn new_rows(library: &[crate::lcd_page::Page]) -> (Vec<MenuRow>, Vec<Option<
 pub enum Ask {
     /// the mouse's page: a tab, a button or light from its list or its picture,
     /// a kind of job (and where its switch is), the job's menu opened, the
-    /// button back to its factory job, an effect
+    /// button back to its factory job, an effect; the pointer on the picture
+    /// (where, and whether over it) and a click there, the pointer on a
+    /// button's words, and the next frame of the lights' effects
     MouseTab(i32),
     MouseRow(i32),
     MouseKind(i32, f32, f32, f32),
@@ -64,6 +75,10 @@ pub enum Ask {
     MouseReset,
     MouseResetAll,
     MouseEffect(i32),
+    MousePicMoved(f32, f32, bool),
+    MousePicClicked(f32, f32),
+    MouseCallHover(i32, bool),
+    MouseFrame,
     /// the rebindings shown on the keyboard, or not
     ShowRebindings,
     Move,
@@ -471,12 +486,20 @@ pub struct Front {
     chip_left: Option<(usize, Instant)>,
     key_left: Option<(u32, Instant)>,
     pub scale: f32,
-    /// the mouse's page, and its picture as last drawn (for what, at what scale)
+    /// the mouse's page
     pub mouse: crate::mouse::Page,
-    mouse_pic: Option<(String, f32)>,
     /// what the system says of the mouse, looked at every two seconds, as the keyboard's
     mouse_status: Option<(Instant, serde_json::Value)>,
     mouse_icons: Option<(f32, Vec<slint::Image>)>,
+    /// the mouse's picture in layers, for a scale, and the scale being drawn
+    mouse_layers: Option<(f32, MouseImages)>,
+    mouse_drawing: Option<f32>,
+    /// the button under the pointer, on the picture or on its words
+    mouse_hover: Option<u8>,
+    /// the chosen and hovered buttons the picture shows now
+    mouse_shows: (Option<u8>, Option<u8>),
+    /// the lights' effects played on the picture, 30 frames a second, while they move
+    mouse_frames: Option<slint::Timer>,
     pick: Option<Pick>,
     overlay_model: Rc<VecModel<crate::Overlay>>,
     /// what each slider controls, which slider's menu is open, and what the
@@ -645,6 +668,9 @@ impl Front {
         on!(on_mouse_job_clicked, |x, y, h| Ask::MouseJob(x, y, h));
         on!(on_mouse_reset, Ask::MouseReset);
         on!(on_mouse_reset_all, Ask::MouseResetAll);
+        on!(on_mouse_pic_moved, |x, y, over| Ask::MousePicMoved(x, y, over));
+        on!(on_mouse_pic_clicked, |x, y| Ask::MousePicClicked(x, y));
+        on!(on_mouse_call_hover, |i, on| Ask::MouseCallHover(i, on));
         on!(on_mouse_effect, |i| Ask::MouseEffect(i));
         on!(on_rail, |p| Ask::Rail(p.to_string()));
         on!(on_macro_editor, |l| Ask::MacroEditor(l));
@@ -718,9 +744,13 @@ impl Front {
         let slider_ends = crate::uistate::get("slider_ends").and_then(|v| serde_json::from_value(v).ok()).unwrap_or([[400.0, 3700.0], [400.0, 3700.0]]);
         let mut f = Front {
             mouse: crate::mouse::Page::new(),
-            mouse_pic: None,
             mouse_status: None,
             mouse_icons: None,
+            mouse_layers: None,
+            mouse_drawing: None,
+            mouse_hover: None,
+            mouse_shows: (None, None),
+            mouse_frames: None,
             ui,
             page,
             kb,
@@ -1188,6 +1218,47 @@ impl Front {
                     if let Some((e, _)) = crate::mouse::EFFECTS.get(i.max(0) as usize) {
                         let old = self.mouse.light_of(self.mouse.light_name());
                         self.mouse.set_light(crate::mouse::with_effect(&old, e));
+                    }
+                }
+                Ask::MousePicMoved(x, y, over) => {
+                    changed = false;
+                    let (button, light) = if over { self.mouse_pic_at(x, y) } else { (None, None) };
+                    self.ui.set_mouse_pic_hand(button.is_some() || light.is_some());
+                    if button != self.mouse_hover {
+                        self.mouse_hover = button;
+                        self.show_mouse_picked();
+                    }
+                }
+                Ask::MousePicClicked(x, y) => match self.mouse_pic_at(x, y) {
+                    (Some(b), _) => {
+                        self.close_menu();
+                        self.close_picker();
+                        let b = b as usize - 1;
+                        self.mouse.button = (self.mouse.button != Some(b)).then_some(b);
+                    }
+                    (_, Some(l)) => {
+                        self.close_menu();
+                        self.close_picker();
+                        self.mouse.light = l;
+                    }
+                    _ => changed = false,
+                },
+                Ask::MouseCallHover(i, on) => {
+                    changed = false;
+                    let b = Some(i.clamp(0, 7) as u8 + 1);
+                    if on {
+                        self.mouse_hover = b;
+                    } else if self.mouse_hover == b {
+                        self.mouse_hover = None;
+                    }
+                    self.show_mouse_picked();
+                }
+                Ask::MouseFrame => {
+                    changed = false;
+                    if self.ui.get_place() == "mouse" && self.mouse.tab < 2 {
+                        self.show_mouse_lights();
+                    } else {
+                        self.mouse_frames = None;
                     }
                 }
                 Ask::CellPick(id, i, x, y, h) => self.cell_pick(lighting::ctl(id), i.max(0) as usize, (x, y, h)),
@@ -2573,6 +2644,10 @@ impl Front {
         if keeps.iter().any(|&(x0, y0, w, h)| x >= x0 && x < x0 + w && y >= y0 && y < y0 + h) {
             return;
         }
+        // (a button on the mouse's picture chooses too)
+        if self.ui.get_place() == "mouse" && self.mouse_pic_at_window(x, y).0.is_some() {
+            return;
+        }
         self.let_chosen_go_now();
         self.refresh();
     }
@@ -3466,16 +3541,170 @@ impl Front {
 
     /// What the mouse's core says, from the mouse's thread.
     pub fn mouse_heard(&mut self, h: crate::mouse::Heard) {
+        use crate::mouse::Heard;
         match h {
-            crate::mouse::Heard::State(v) => {
-                self.mouse.state = v;
+            Heard::State(v) => {
+                self.mouse.heard_state(v);
                 self.mouse.failed = None;
             }
-            crate::mouse::Heard::Failed(e) => self.mouse.failed = Some(e),
+            Heard::Failed(e) => self.mouse.failed = Some(e),
+            // the picture plays the light's effect from the moment the mouse took it
+            Heard::Played(light, v, at) => {
+                self.mouse.played(&light, &v, at);
+                self.show_mouse_lights();
+                self.mouse_frames_run();
+                return;
+            }
+            Heard::Drawn(scale, l) => {
+                self.mouse_drawn(scale, *l);
+                return;
+            }
         }
         self.ui.set_mouse_known(self.mouse.known());
         self.ui.set_mouse_conn(if !self.mouse.known() { 0 } else if self.mouse.present() { 1 } else { 2 });
+        // the picture drawn ahead of the page's being opened
+        if self.mouse.known() {
+            self.mouse_draw();
+        }
         self.refresh();
+    }
+
+    /// The mouse's picture in layers for the window's scale, unless it is
+    /// drawn or being drawn: on a thread of its own, or here when the page
+    /// has no mouse's thread to hear it back from (a snapshot).
+    fn mouse_draw(&mut self) {
+        let scale = self.scale;
+        if self.mouse_layers.as_ref().is_some_and(|(s, _)| *s == scale) || self.mouse_drawing == Some(scale) {
+            return;
+        }
+        self.mouse_drawing = Some(scale);
+        let draw = move || {
+            let art = std::fs::read_to_string(crate::cores::dir().join("steelseries/art/sensei-310.svg")).map_err(|e| e.to_string())?;
+            crate::mouse_art::layers(&art, (240.0 * scale).round() as u32, &crate::stage_shadow(scale), crate::STAGE_SHADOW_OPACITY)
+        };
+        match self.mouse.tell.clone() {
+            Some(tell) => {
+                std::thread::spawn(move || match draw() {
+                    Ok(l) => {
+                        let _ = tell.send(crate::mouse::Heard::Drawn(scale, Box::new(l)));
+                    }
+                    Err(e) => eprintln!("ectodeck-native: the mouse's picture: {e}"),
+                });
+            }
+            None => match draw() {
+                Ok(l) => self.mouse_drawn(scale, l),
+                Err(e) => eprintln!("ectodeck-native: the mouse's picture: {e}"),
+            },
+        }
+    }
+
+    /// The mouse's picture drawn: its layers put on the page.
+    fn mouse_drawn(&mut self, scale: f32, l: crate::mouse_art::Layers) {
+        if self.mouse_drawing == Some(scale) {
+            self.mouse_drawing = None;
+        }
+        // (drawn for a scale the window has left: drawn again for this one)
+        if scale != self.scale {
+            self.mouse_draw();
+            return;
+        }
+        let image = |px: &resvg::tiny_skia::Pixmap| {
+            let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(px.width(), px.height());
+            buf.make_mut_bytes().copy_from_slice(px.data());
+            slint::Image::from_rgba8_premultiplied(buf)
+        };
+        let patch = |p: &crate::mouse_art::Patch| MousePatch { img: image(&p.px), x: p.x as f32 / scale, y: p.y as f32 / scale, w: p.px.width() as f32 / scale, h: p.px.height() as f32 / scale };
+        let imgs = MouseImages {
+            lights: l.lights.iter().map(patch).collect(),
+            chosen: l.chosen.iter().map(patch).collect(),
+            shapes: l.shapes.iter().map(patch).collect(),
+            layers: l,
+        };
+        self.ui.set_mouse_picture(image(&imgs.layers.base));
+        self.ui.set_mouse_pic_m(imgs.layers.margin as f32 / scale);
+        // (in the drawing's order: see mouse_art::GROUPS)
+        self.ui.set_mouse_logo_under(imgs.lights[0].clone());
+        self.ui.set_mouse_wheel_under(imgs.lights[1].clone());
+        self.ui.set_mouse_logo(imgs.lights[2].clone());
+        self.ui.set_mouse_wheel(imgs.lights[3].clone());
+        self.mouse_layers = Some((scale, imgs));
+        // (what the picture shows, shown again on the new layers)
+        self.mouse_shows = (Some(0), Some(0));
+        self.show_mouse_picked();
+        self.show_mouse_lights();
+    }
+
+    /// The chosen button picked out on the picture, and the one under the
+    /// pointer a shade lighter, on Buttons.
+    fn show_mouse_picked(&mut self) {
+        let chosen = self.mouse.button.filter(|_| self.mouse.tab == 0).map(|b| b as u8 + 1);
+        let hover = self.mouse_hover.filter(|h| self.mouse.tab == 0 && Some(*h) != chosen);
+        let Some((_, imgs)) = &self.mouse_layers else { return };
+        if self.mouse_shows == (chosen, hover) {
+            return;
+        }
+        self.mouse_shows = (chosen, hover);
+        if let Some(p) = chosen.and_then(|n| imgs.chosen.get(n as usize - 1)) {
+            self.ui.set_mouse_picked(p.clone());
+        }
+        self.ui.set_mouse_picked_shown(chosen.is_some());
+        if let Some(p) = hover.and_then(|n| imgs.shapes.get(n as usize - 1)) {
+            self.ui.set_mouse_over(p.clone());
+        }
+        self.ui.set_mouse_over_shown(hover.is_some());
+    }
+
+    /// Each light on the picture in its color of the moment, as the mouse shows it.
+    fn show_mouse_lights(&self) {
+        let now = Instant::now();
+        for i in 0..2 {
+            let (c, k) = crate::mouse_art::level(self.mouse.color_at(i, now));
+            let tint = Color::from_argb_u8((k * 255.0).round() as u8, c[0], c[1], c[2]);
+            if i == 0 {
+                self.ui.set_mouse_logo_tint(tint);
+            } else {
+                self.ui.set_mouse_wheel_tint(tint);
+            }
+        }
+    }
+
+    /// The lights' effects played on the picture, 30 frames a second, while
+    /// the picture shows and an effect moves.
+    fn mouse_frames_run(&mut self) {
+        let want = self.ui.get_place() == "mouse" && self.mouse.tab < 2 && self.mouse.moving();
+        if want == self.mouse_frames.is_some() {
+            return;
+        }
+        self.mouse_frames = want.then(|| {
+            let t = slint::Timer::default();
+            let asks = self.asks.clone();
+            t.start(slint::TimerMode::Repeated, Duration::from_millis(33), move || asks.borrow_mut().push(Ask::MouseFrame));
+            t
+        });
+    }
+
+    /// What is on the mouse's picture at a point on it (in its logical
+    /// pixels): the button there, on Buttons, or the light, on Lighting.
+    fn mouse_pic_at(&self, x: f32, y: f32) -> (Option<u8>, Option<usize>) {
+        let Some((scale, imgs)) = &self.mouse_layers else { return (None, None) };
+        let (px, py) = (x * scale, y * scale);
+        match self.mouse.tab {
+            0 => (imgs.layers.button_at(px, py), None),
+            1 => (None, imgs.layers.light_at(px, py)),
+            _ => (None, None),
+        }
+    }
+
+    /// The same at a point in the window, inside the stage, which clips the picture.
+    fn mouse_pic_at_window(&self, x: f32, y: f32) -> (Option<u8>, Option<usize>) {
+        let ui = &self.ui;
+        let (x0, y0, w) = (ui.get_mouse_wx(), ui.get_mouse_wy(), ui.get_mouse_w());
+        let (sy, sh) = (y0 + ui.get_mouse_stage_y(), ui.get_mouse_stage_height());
+        if x < x0 || x >= x0 + w || y < sy || y >= sy + sh {
+            return (None, None);
+        }
+        let m = ui.get_mouse_pic_m();
+        self.mouse_pic_at(x - (x0 + w / 2.0 - 600.0 + 480.0 - m), y - (sy + 30.0 - m))
     }
 
     /// The mouse's page, as it is now: its tab, its picture, its list and its boxes.
@@ -3486,28 +3715,15 @@ impl Front {
         ui.set_mouse_tab(m.tab as i32);
         ui.set_mouse_hint(m.hint().into());
         ui.set_mouse_status(m.failed.clone().unwrap_or_default().into());
-        // the picture: drawn again only when what it shows changes
-        let chosen = m.button.filter(|_| m.tab == 0).map(|b| b as u8 + 1);
-        let (logo, wheel) = (m.lit("logo"), m.lit("wheel"));
-        let key = format!("{logo:?} {wheel:?} {chosen:?}");
-        if self.mouse_pic.as_ref() != Some(&(key.clone(), self.scale)) {
-            let art = std::fs::read_to_string(crate::cores::dir().join("steelseries/art/sensei-310.svg")).unwrap_or_default();
-            let layers = crate::stage_shadow(self.scale);
-            if let Ok((pix, margin)) = crate::mouse_art::picture(&art, (240.0 * self.scale).round() as u32, logo, wheel, chosen, &layers, crate::STAGE_SHADOW_OPACITY) {
-                let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(pix.width(), pix.height());
-                buf.make_mut_bytes().copy_from_slice(pix.data());
-                ui.set_mouse_picture(slint::Image::from_rgba8_premultiplied(buf));
-                ui.set_mouse_pic_m(margin as f32 / self.scale);
-                self.mouse_pic = Some((key, self.scale));
-            }
-        }
-        ui.set_mouse_calls(ModelRc::new(VecModel::from(m.calls())));
+        // (each list kept, its rows changed in place: a list made anew would
+        // drop a press the pointer is in the middle of)
+        show_rows(ui.get_mouse_calls(), |r| ui.set_mouse_calls(r), m.calls());
         let (lines, dots, on_line, on_dot) = m.lines();
         ui.set_mouse_lines(lines.into());
         ui.set_mouse_dots(dots.into());
         ui.set_mouse_line_on(on_line.into());
         ui.set_mouse_dot_on(on_dot.into());
-        ui.set_mouse_rows(ModelRc::new(VecModel::from(m.rows())));
+        show_rows(ui.get_mouse_rows(), |r| ui.set_mouse_rows(r), m.rows());
         ui.set_mouse_chosen(m.button.is_some());
         if let Some(b) = m.button {
             let (cap, title, factory, state, rebound, kind, note) = m.detail(b);
@@ -3517,8 +3733,8 @@ impl Front {
             ui.set_mouse_state(state.into());
             ui.set_mouse_rebound(rebound);
             ui.set_mouse_kind(kind as i32);
-            ui.set_mouse_kinds(ModelRc::new(VecModel::from(KINDS.iter().map(|(n, _)| SharedString::from(*n)).collect::<Vec<_>>())));
-            ui.set_mouse_kind_icons(ModelRc::new(VecModel::from(KINDS.iter().map(|(_, i)| SharedString::from(*i)).collect::<Vec<_>>())));
+            show_rows(ui.get_mouse_kinds(), |r| ui.set_mouse_kinds(r), KINDS.iter().map(|(n, _)| SharedString::from(*n)).collect());
+            show_rows(ui.get_mouse_kind_icons(), |r| ui.set_mouse_kind_icons(r), KINDS.iter().map(|(_, i)| SharedString::from(*i)).collect());
             ui.set_mouse_job(crate::mouse::job_label(&m.job(b)).into());
             ui.set_mouse_note(note.into());
         } else {
@@ -3540,11 +3756,16 @@ impl Front {
             .map(|(i, ((_, name), icon))| EffectItem { name: (*name).into(), icon: icon.clone(), on: i == fx, motion: match i { 2 => 1, 3 => 3, _ => 0 } })
             .collect();
         self.ui.set_mouse_effect_moves(effects.iter().any(|e| e.on && e.motion != 0));
-        self.ui.set_mouse_effects(ModelRc::new(VecModel::from(effects)));
+        show_rows(self.ui.get_mouse_effects(), |r| self.ui.set_mouse_effects(r), effects);
         let w = self.ui.get_mouse_w() - if self.mouse.tab == 1 { 564.0 } else { 0.0 };
         let (cells, h) = self.mouse.cells(w);
         self.ui.set_mouse_cells_h(h);
         self.show_cells(cells);
+        // the picture: its layers, the buttons it picks out, its lights now, and their effects playing
+        self.mouse_draw();
+        self.show_mouse_picked();
+        self.show_mouse_lights();
+        self.mouse_frames_run();
     }
 
     /// The chosen button's jobs of one kind, under the Key detail box's menu field.

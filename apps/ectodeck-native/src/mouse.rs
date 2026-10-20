@@ -6,7 +6,7 @@
 //! mouse is set to after each change and whenever the mouse comes or goes.
 
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use smithay_client_toolkit::reexports::calloop::channel::Sender;
@@ -25,10 +25,14 @@ pub enum Ask {
     Setting(String, u64),
 }
 
-/// What the page hears: everything the core says of the mouse, or a change it refused.
+/// What the page hears: everything the core says of the mouse, a change it
+/// refused, a light's effect the mouse has taken (what the light plays from
+/// that moment), or the page's picture drawn in layers for a scale.
 pub enum Heard {
     State(Value),
     Failed(String),
+    Played(String, Value, Instant),
+    Drawn(f32, Box<crate::mouse_art::Layers>),
 }
 
 /// Start the mouse's thread, with SteelSeries' core.
@@ -87,10 +91,13 @@ pub fn start(core: Core, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
                     }
                     for a in newest {
                         let r = match a {
-                            Ask::Key(control, action) => core.call("keys/set", &json!({ "device": DEVICE, "layer": "base", "control": control, "action": action })),
-                            Ask::ResetKey(control) => core.call("keys/reset", &json!({ "device": DEVICE, "control": control })),
-                            Ask::Light(light, l) => core.call("lighting/set", &json!({ "device": DEVICE, "light": light, "effect": l["effect"], "params": l["params"] })),
-                            Ask::Setting(setting, v) => core.call("settings/set", &json!({ "device": DEVICE, "id": setting, "value": v })),
+                            Ask::Key(control, action) => core.call("keys/set", &json!({ "device": DEVICE, "layer": "base", "control": control, "action": action })).map(|_| ()),
+                            Ask::ResetKey(control) => core.call("keys/reset", &json!({ "device": DEVICE, "control": control })).map(|_| ()),
+                            // (the moment the mouse takes an effect is when it starts its cycle)
+                            Ask::Light(light, l) => core.call("lighting/set", &json!({ "device": DEVICE, "light": light, "effect": l["effect"], "params": l["params"] })).map(|v| {
+                                let _ = tell.send(Heard::Played(light, v["plays"].clone(), Instant::now()));
+                            }),
+                            Ask::Setting(setting, v) => core.call("settings/set", &json!({ "device": DEVICE, "id": setting, "value": v })).map(|_| ()),
                         };
                         if let Err(e) = r {
                             let _ = tell.send(Heard::Failed(e));
@@ -257,12 +264,89 @@ pub struct Page {
     /// the kind of job whose menu is open
     pub menu: Option<usize>,
     pub failed: Option<String>,
+    /// what each light (the logo, the wheel) plays, and from when
+    pub plays: [Option<(Plays, Instant)>; 2],
+    /// where the picture's layers go once drawn, off the page's thread
+    pub tell: Option<Sender<Heard>>,
+}
+
+/// The lights, as the core names them, in the page's order.
+pub const LIGHTS: [&str; 2] = ["logo", "wheel"];
+
+/// What a light plays, as the core says the mouse runs it: one color held,
+/// or colors at points through a cycle (0 to 255), blended straight from
+/// each to the next, `ms` long and round again.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Plays {
+    ms: u64,
+    held: bool,
+    stops: Vec<(f32, [u8; 3])>,
+}
+
+impl Plays {
+    pub fn of(v: &Value) -> Option<Plays> {
+        let stops: Vec<(f32, [u8; 3])> = v["stops"].as_array()?.iter().filter_map(|s| Some((s["at"].as_f64()? as f32, rgb(&s["color"])?))).collect();
+        (!stops.is_empty()).then(|| Plays { ms: v["ms"].as_u64().unwrap_or(1000).max(1), held: v["held"].as_bool().unwrap_or(true), stops })
+    }
+
+    pub fn moves(&self) -> bool {
+        !self.held && self.stops.len() > 1
+    }
+
+    /// The light's color `since` the cycle began.
+    pub fn at(&self, since: Duration) -> [u8; 3] {
+        let first = self.stops[0].1;
+        if !self.moves() {
+            return first;
+        }
+        let pos = (since.as_millis() as u64 % self.ms) as f32 / self.ms as f32 * 255.0;
+        for w in self.stops.windows(2) {
+            let ((a, ca), (b, cb)) = (w[0], w[1]);
+            if pos >= a && pos < b {
+                let t = (pos - a) / (b - a);
+                return [0, 1, 2].map(|i| (ca[i] as f32 + (cb[i] as f32 - ca[i] as f32) * t).round() as u8);
+            }
+        }
+        self.stops[self.stops.len() - 1].1
+    }
 }
 
 impl Page {
     pub fn new() -> Page {
         let same_wheel = crate::uistate::get("mouse_same_wheel").and_then(|v| v.as_bool()).unwrap_or(true);
-        Page { ask: None, state: Value::Null, tab: 0, button: None, light: 0, same_wheel, menu: None, failed: None }
+        Page { ask: None, state: Value::Null, tab: 0, button: None, light: 0, same_wheel, menu: None, failed: None, plays: [None, None], tell: None }
+    }
+
+    /// What the core says of the mouse: what each light plays is kept with
+    /// when it began, unless the light plays something new.
+    pub fn heard_state(&mut self, v: Value) {
+        for (i, l) in LIGHTS.iter().enumerate() {
+            let now = Plays::of(&v["lighting"][l]["plays"]);
+            if now.as_ref() != self.plays[i].as_ref().map(|(p, _)| p) {
+                self.plays[i] = now.map(|p| (p, Instant::now()));
+            }
+        }
+        self.state = v;
+    }
+
+    /// A light's effect taken by the mouse at `at`: the light plays it from then.
+    pub fn played(&mut self, light: &str, v: &Value, at: Instant) {
+        if let (Some(i), Some(p)) = (LIGHTS.iter().position(|l| *l == light), Plays::of(v)) {
+            self.plays[i] = Some((p, at));
+        }
+    }
+
+    /// A light's color at `now`, as the mouse shows it; black for off.
+    pub fn color_at(&self, i: usize, now: Instant) -> [u8; 3] {
+        match &self.plays[i] {
+            Some((p, from)) => p.at(now.saturating_duration_since(*from)),
+            None => self.lit(LIGHTS[i]).unwrap_or([0; 3]),
+        }
+    }
+
+    /// Whether a light's effect moves, so the picture is drawn again as it plays.
+    pub fn moving(&self) -> bool {
+        self.plays.iter().flatten().any(|(p, _)| p.moves())
     }
 
     /// Whether Ectodeck has met the mouse: it is plugged in, or the core
@@ -460,7 +544,7 @@ impl Page {
             "off" => s.note("The light stays dark."),
             "static" => s.note("One color, steady."),
             "breathing" => s.note("The color fades in and out."),
-            _ => s.note("Red, green and blue in turn."),
+            _ => s.note("Every color in turn, round the color wheel."),
         }
         if e == "static" || e == "breathing" {
             s.gap(14.0);
@@ -616,5 +700,31 @@ mod tests {
         }
         assert_eq!(job_label(&json!({ "key": "PageDown" })), "Page Down");
         assert_eq!(job_label(&json!({ "key": 104 })), "F13");
+    }
+
+    /// A light's cycle played as the core says the mouse runs it: a breath
+    /// dark at its start and end and its color halfway, halfway up a quarter
+    /// of the way in; a color shift yellow a sixth of the way round and red
+    /// again at the end; one color held, held.
+    #[test]
+    fn a_cycle_plays_as_the_mouse_runs_it() {
+        let ms = Duration::from_millis;
+        let breath = Plays::of(&json!({ "ms": 3000, "held": false, "stops": [{ "at": 0, "color": "#000000" }, { "at": 127, "color": "#FF1000" }, { "at": 255, "color": "#000000" }] })).unwrap();
+        assert!(breath.moves());
+        assert_eq!(breath.at(ms(0)), [0, 0, 0]);
+        assert_eq!(breath.at(ms(1494)), [255, 16, 0], "its color at stop 127");
+        let quarter = breath.at(ms(750));
+        assert!((quarter[0] as i32 - 128).abs() <= 2, "halfway up a quarter in: {quarter:?}");
+        assert!(breath.at(ms(2999))[0] < 4, "dark again at the end");
+        assert_eq!(breath.at(ms(3000)), [0, 0, 0], "and round again");
+        let shift = Plays::of(&json!({ "ms": 6000, "held": false, "stops": [
+            { "at": 0, "color": "#FF0000" }, { "at": 43, "color": "#FFFF00" }, { "at": 85, "color": "#00FF00" }, { "at": 128, "color": "#00FFFF" },
+            { "at": 170, "color": "#0000FF" }, { "at": 213, "color": "#FF00FF" }, { "at": 255, "color": "#FF0000" } ] })).unwrap();
+        assert_eq!(shift.at(ms(1012)), [255, 255, 0], "yellow at stop 43");
+        let end = shift.at(ms(5990));
+        assert!(end[0] == 255 && end[2] < 10, "nearly red again at the end: {end:?}");
+        let held = Plays::of(&json!({ "ms": 1000, "held": true, "stops": [{ "at": 0, "color": "#402000" }] })).unwrap();
+        assert!(!held.moves());
+        assert_eq!(held.at(ms(12345)), [0x40, 0x20, 0]);
     }
 }
