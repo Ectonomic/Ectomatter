@@ -54,6 +54,15 @@ pub fn new_rows(library: &[crate::lcd_page::Page]) -> (Vec<MenuRow>, Vec<Option<
 /// What the page asked for, done once its event has been handled.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Ask {
+    /// the mouse's page: a tab, a button or light from its list or its picture,
+    /// a kind of job (and where its switch is), the job's menu opened, the
+    /// button back to its factory job, an effect
+    MouseTab(i32),
+    MouseRow(i32),
+    MouseKind(i32, f32, f32, f32),
+    MouseJob(f32, f32, f32),
+    MouseReset,
+    MouseEffect(i32),
     /// the rebindings shown on the keyboard, or not
     ShowRebindings,
     Move,
@@ -461,6 +470,12 @@ pub struct Front {
     chip_left: Option<(usize, Instant)>,
     key_left: Option<(u32, Instant)>,
     pub scale: f32,
+    /// the mouse's page, and its picture as last drawn (for what, at what scale)
+    pub mouse: crate::mouse::Page,
+    mouse_pic: Option<(String, f32)>,
+    /// what the system says of the mouse, looked at every two seconds, as the keyboard's
+    mouse_status: Option<(Instant, serde_json::Value)>,
+    mouse_icons: Option<(f32, Vec<slint::Image>)>,
     pick: Option<Pick>,
     overlay_model: Rc<VecModel<crate::Overlay>>,
     /// what each slider controls, which slider's menu is open, and what the
@@ -623,6 +638,12 @@ impl Front {
         on!(on_menu_dismiss, Ask::MenuDismiss);
         on!(on_menu_back_to, Ask::MenuBack);
         on!(on_go, |p| Ask::Go(p.to_string()));
+        on!(on_mouse_tab_chosen, |i| Ask::MouseTab(i));
+        on!(on_mouse_row, |i| Ask::MouseRow(i));
+        on!(on_mouse_kind_picked, |i, x, y, h| Ask::MouseKind(i, x, y, h));
+        on!(on_mouse_job_clicked, |x, y, h| Ask::MouseJob(x, y, h));
+        on!(on_mouse_reset, Ask::MouseReset);
+        on!(on_mouse_effect, |i| Ask::MouseEffect(i));
         on!(on_rail, |p| Ask::Rail(p.to_string()));
         on!(on_macro_editor, |l| Ask::MacroEditor(l));
         on!(on_screen_editor, Ask::ScreenEditor);
@@ -694,6 +715,10 @@ impl Front {
             .collect();
         let slider_ends = crate::uistate::get("slider_ends").and_then(|v| serde_json::from_value(v).ok()).unwrap_or([[400.0, 3700.0], [400.0, 3700.0]]);
         let mut f = Front {
+            mouse: crate::mouse::Page::new(),
+            mouse_pic: None,
+            mouse_status: None,
+            mouse_icons: None,
             ui,
             page,
             kb,
@@ -1110,9 +1135,64 @@ impl Front {
                     }
                     self.push_preview();
                 }
+                Ask::MouseTab(i) => {
+                    self.close_menu();
+                    self.close_picker();
+                    self.mouse.tab = i.clamp(0, 3) as usize;
+                }
+                Ask::MouseRow(i) => {
+                    self.close_menu();
+                    self.close_picker();
+                    if self.mouse.tab == 1 {
+                        self.mouse.light = (i.max(0) as usize).min(1);
+                    } else {
+                        self.mouse.button = (i.max(0) as usize).min(7);
+                    }
+                }
+                Ask::MouseKind(i, x, y, h) => {
+                    let k = i.max(0) as usize;
+                    let choices = crate::mouse::choices(k);
+                    if choices.len() == 1 {
+                        // a kind with one job: that job, at once
+                        self.close_menu();
+                        let b = self.mouse.button;
+                        self.mouse.set_job(b, choices[0].1.clone());
+                    } else {
+                        self.open_mouse_menu(k, (x, y, h));
+                    }
+                }
+                Ask::MouseJob(x, y, h) => {
+                    let k = crate::mouse::kind_of(&self.mouse.job(self.mouse.button));
+                    self.open_mouse_menu(k, (x, y, h));
+                }
+                Ask::MouseReset => {
+                    let b = self.mouse.button;
+                    let f = self.mouse.factory(b);
+                    if !f.is_null() {
+                        self.mouse.state["keys"]["base"][crate::mouse::BUTTONS[b].0] = f;
+                        self.mouse.send(crate::mouse::Ask::ResetKey(crate::mouse::BUTTONS[b].0.into()));
+                    }
+                }
+                Ask::MouseEffect(i) => {
+                    if let Some((e, _)) = crate::mouse::EFFECTS.get(i.max(0) as usize) {
+                        let old = self.mouse.light_of(self.mouse.light_name());
+                        self.mouse.set_light(crate::mouse::with_effect(&old, e));
+                    }
+                }
                 Ask::CellPick(id, i, x, y, h) => self.cell_pick(lighting::ctl(id), i.max(0) as usize, (x, y, h)),
                 Ask::CellSlide(id, v) => {
                     match lighting::ctl(id) {
+                        c @ (Ctl::MouseCpi1 | Ctl::MouseCpi2) => {
+                            let cpi = 100 + (v.clamp(0.0, 1.0) * 119.0).round() as u64 * 100;
+                            self.mouse.set_setting(if c == Ctl::MouseCpi1 { "cpi1" } else { "cpi2" }, cpi);
+                        }
+                        Ctl::MouseSpeed => {
+                            // quick at the right
+                            let ms = (30000.0 - v.clamp(0.0, 1.0) * (30000.0 - 500.0)).round() / 100.0 * 100.0;
+                            let mut l = self.mouse.light_of(self.mouse.light_name());
+                            l["params"]["speed"] = serde_json::json!(ms as u64);
+                            self.mouse.set_light(l);
+                        }
                         Ctl::PeakNits => {
                             let nits = crate::ecto_settings::peak_at(v, self.levels.0, self.levels.1);
                             self.settings.set_soon("hdr.glow_limit", nits.map_or(serde_json::Value::Null, |n| serde_json::json!(n)));
@@ -1785,7 +1865,25 @@ impl Front {
     /// A piece of the tile used: a swatch opens the color picker, the rest change the draft.
     fn cell_pick(&mut self, c: Ctl, index: usize, _anchor: (f32, f32, f32)) {
         match c {
-            Ctl::Color | Ctl::Colors | Ctl::Background | Ctl::Paint | Ctl::LcdColor => {
+            Ctl::MousePolling => {
+                if let Some(r) = [125u64, 250, 500, 1000].get(index) {
+                    self.mouse.set_setting("polling", *r);
+                }
+                self.refresh();
+                return;
+            }
+            Ctl::MouseSameWheel => {
+                self.mouse.same_wheel = index % 2 == 1;
+                crate::uistate::set("mouse_same_wheel", serde_json::json!(self.mouse.same_wheel));
+                if self.mouse.same_wheel {
+                    let l = self.mouse.light_of("logo");
+                    self.mouse.state["lighting"]["wheel"] = l.clone();
+                    self.mouse.send(crate::mouse::Ask::Light("wheel".into(), l));
+                }
+                self.refresh();
+                return;
+            }
+            Ctl::Color | Ctl::Colors | Ctl::Background | Ctl::Paint | Ctl::LcdColor | Ctl::MouseColor => {
                 self.open_picker(c, index, _anchor);
                 return;
             }
@@ -1923,7 +2021,11 @@ impl Front {
         }
         self.close_menu();
         self.close_picker();
-        let rgb = lighting::color_of(&self.page, c, index, self.paint);
+        let rgb = if c == Ctl::MouseColor {
+            crate::mouse::rgb(&self.mouse.light_of(self.mouse.light_name())["params"]["color"]).unwrap_or([0xff, 0x10, 0x00])
+        } else {
+            lighting::color_of(&self.page, c, index, self.paint)
+        };
         self.pick = Some(Pick { ctl: c, index, start: rgb, hsv: rgb2hsv(rgb), rgb, anchor });
         let recent = recent_colors();
         self.ui.set_pk_recent(ModelRc::new(VecModel::from(recent.iter().map(|c| color(*c)).collect::<Vec<_>>())));
@@ -1995,6 +2097,11 @@ impl Front {
         let (c, index, rgb) = (p.ctl, p.index, p.rgb);
         if c == Ctl::Paint {
             self.paint = rgb;
+        } else if c == Ctl::MouseColor {
+            let mut l = self.mouse.light_of(self.mouse.light_name());
+            l["params"]["color"] = serde_json::json!(lighting::hex_of(rgb));
+            self.mouse.set_light(l);
+            self.refresh();
         } else {
             lighting::set_color(&mut self.page, c, index, rgb);
         }
@@ -2357,6 +2464,11 @@ impl Front {
             self.ui.set_menu_open(false);
             self.ui.invoke_blur_menu();
         }
+        if self.mouse.menu.take().is_some() {
+            self.ui.set_menu_open(false);
+            self.ui.set_menu_w(300.0);
+            self.ui.set_mouse_menu_open(false);
+        }
         // (the next menu keeps a column for ticks, unless it has none)
         self.ui.set_menu_marks(true);
     }
@@ -2460,6 +2572,15 @@ impl Front {
     }
 
     fn menu_chose(&mut self, i: usize) {
+        if let Some(k) = self.mouse.menu {
+            self.close_menu();
+            if let Some((_, a)) = crate::mouse::choices(k).get(i) {
+                let b = self.mouse.button;
+                self.mouse.set_job(b, a.clone());
+            }
+            self.refresh();
+            return;
+        }
         if self.place_menu {
             self.close_place_menu();
             if let Some(p) = self.found.get(i).cloned() {
@@ -3177,7 +3298,9 @@ impl Front {
         if loaded && self.page.view == View::Lighting && self.ui.get_place() == "z10" {
             self.refresh_lighting();
         }
-        if self.ui.get_place() == "settings" {
+        if self.ui.get_place() == "mouse" {
+            self.refresh_mouse();
+        } else if self.ui.get_place() == "settings" {
             // what the kernel says of the keyboard, looked at every two seconds (it
             // scans every process), not at every step of a slider
             if self.dev_status.as_ref().is_none_or(|(t, _)| t.elapsed() > Duration::from_secs(2)) {
@@ -3195,6 +3318,12 @@ impl Front {
                 top_peak: self.levels.1,
                 reference: self.levels.0,
                 place_text: &self.place_text,
+                mouse: self.mouse.known().then(|| {
+                    if self.mouse_status.as_ref().is_none_or(|(t, _)| t.elapsed() > Duration::from_secs(2)) {
+                        self.mouse_status = Some((Instant::now(), crate::devices::sensei310()));
+                    }
+                    (self.mouse_status.as_ref().map(|(_, v)| v.clone()).unwrap_or_default(), self.mouse.present())
+                }),
             };
             let (cells, h, map) = crate::ecto_settings::page(&st);
             self.sensor_map = map;
@@ -3263,6 +3392,114 @@ impl Front {
         if let Some(m) = &mut self.macros {
             m.refresh(&self.page);
         }
+    }
+
+    /// What the mouse's core says, from the mouse's thread.
+    pub fn mouse_heard(&mut self, h: crate::mouse::Heard) {
+        match h {
+            crate::mouse::Heard::State(v) => {
+                self.mouse.state = v;
+                self.mouse.failed = None;
+            }
+            crate::mouse::Heard::Failed(e) => self.mouse.failed = Some(e),
+        }
+        self.ui.set_mouse_known(self.mouse.known());
+        self.ui.set_mouse_conn(if !self.mouse.known() { 0 } else if self.mouse.present() { 1 } else { 2 });
+        self.refresh();
+    }
+
+    /// The mouse's page, as it is now: its tab, its picture, its list and its boxes.
+    fn refresh_mouse(&mut self) {
+        use crate::mouse::KINDS;
+        let ui = &self.ui;
+        let m = &self.mouse;
+        ui.set_mouse_tab(m.tab as i32);
+        ui.set_mouse_hint(m.hint().into());
+        ui.set_mouse_status(m.failed.clone().unwrap_or_default().into());
+        // the picture: drawn again only when what it shows changes
+        let chosen = (m.tab == 0).then_some(m.button as u8 + 1);
+        let (logo, wheel) = (m.lit("logo"), m.lit("wheel"));
+        let key = format!("{logo:?} {wheel:?} {chosen:?}");
+        if self.mouse_pic.as_ref() != Some(&(key.clone(), self.scale)) {
+            let art = std::fs::read_to_string(crate::cores::dir().join("steelseries/art/sensei-310.svg")).unwrap_or_default();
+            let layers = crate::stage_shadow(self.scale);
+            if let Ok((pix, margin)) = crate::mouse_art::picture(&art, (240.0 * self.scale).round() as u32, logo, wheel, chosen, &layers, crate::STAGE_SHADOW_OPACITY) {
+                let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(pix.width(), pix.height());
+                buf.make_mut_bytes().copy_from_slice(pix.data());
+                ui.set_mouse_picture(slint::Image::from_rgba8_premultiplied(buf));
+                ui.set_mouse_pic_m(margin as f32 / self.scale);
+                self.mouse_pic = Some((key, self.scale));
+            }
+        }
+        ui.set_mouse_calls(ModelRc::new(VecModel::from(m.calls())));
+        let (lines, dots, on_line, on_dot) = m.lines();
+        ui.set_mouse_lines(lines.into());
+        ui.set_mouse_dots(dots.into());
+        ui.set_mouse_line_on(on_line.into());
+        ui.set_mouse_dot_on(on_dot.into());
+        ui.set_mouse_rows(ModelRc::new(VecModel::from(m.rows())));
+        let (cap, title, factory, state, rebound, kind, note) = m.detail();
+        ui.set_mouse_cap(cap.into());
+        ui.set_mouse_title(title.into());
+        ui.set_mouse_factory(factory.into());
+        ui.set_mouse_state(state.into());
+        ui.set_mouse_rebound(rebound);
+        ui.set_mouse_kind(kind as i32);
+        ui.set_mouse_kinds(ModelRc::new(VecModel::from(KINDS.iter().map(|(n, _)| SharedString::from(*n)).collect::<Vec<_>>())));
+        ui.set_mouse_kind_icons(ModelRc::new(VecModel::from(KINDS.iter().map(|(_, i)| SharedString::from(*i)).collect::<Vec<_>>())));
+        ui.set_mouse_job(crate::mouse::job_label(&m.job(m.button)).into());
+        ui.set_mouse_note(note.into());
+        // the effects' tiles, their pictures the keyboard's own
+        if self.mouse_icons.as_ref().map(|(s, _)| *s) != Some(self.scale) {
+            let icons = ["off", "static", "breathing", "wave"].iter().map(|e| lighting::icon(e, self.scale)).collect();
+            self.mouse_icons = Some((self.scale, icons));
+        }
+        let icons = &self.mouse_icons.as_ref().unwrap().1;
+        let fx = self.mouse.effect();
+        let effects: Vec<EffectItem> = crate::mouse::EFFECTS
+            .iter()
+            .zip(icons)
+            .enumerate()
+            .map(|(i, ((_, name), icon))| EffectItem { name: (*name).into(), icon: icon.clone(), on: i == fx, motion: match i { 2 => 1, 3 => 3, _ => 0 } })
+            .collect();
+        self.ui.set_mouse_effect_moves(effects.iter().any(|e| e.on && e.motion != 0));
+        self.ui.set_mouse_effects(ModelRc::new(VecModel::from(effects)));
+        let w = self.ui.get_mouse_w() - if self.mouse.tab == 1 { 564.0 } else { 0.0 };
+        let (cells, h) = self.mouse.cells(w);
+        self.ui.set_mouse_cells_h(h);
+        self.show_cells(cells);
+    }
+
+    /// The chosen button's jobs of one kind, under the Key detail box's menu field.
+    fn open_mouse_menu(&mut self, kind: usize, anchor: (f32, f32, f32)) {
+        if let Some((at, when)) = self.shut.take() {
+            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
+                return;
+            }
+        }
+        self.close_menu();
+        self.close_picker();
+        let now = self.mouse.job(self.mouse.button);
+        let rows: Vec<MenuRow> = crate::mouse::choices(kind).iter().map(|(label, a)| MenuRow { kind: 0, label: label.as_str().into(), tag: "".into(), tick: *a == now, sub: "".into() }).collect();
+        let h = 6.0 + rows.len() as f32 * 33.0 + 6.0;
+        self.ui.set_menu_search(false);
+        self.ui.set_menu_back(false);
+        self.ui.set_menu_natural(h);
+        self.ui.set_menu_w(260.0);
+        self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
+        let (ax, ay, ah) = anchor;
+        let win = self.ui.get_window_height();
+        let (below, above) = (win - ay - ah - 14.0, ay - 70.0);
+        let down = h <= below || below >= h.min(260.0) || below >= above;
+        let room = if down { below } else { above };
+        self.ui.set_menu_ax(ax);
+        self.ui.set_menu_ay(ay);
+        self.ui.set_menu_ah(ah);
+        self.ui.set_menu_top(if down { ay + ah + 6.0 } else { ay - 6.0 - h.min(room) });
+        self.ui.set_menu_max(if h > room { room } else { win * 0.7 });
+        self.ui.set_menu_open(true);
+        self.ui.set_mouse_menu_open(true);
+        self.mouse.menu = Some(kind);
     }
 
     /// The Lighting page's effects and its tile, laid out for the draft. The

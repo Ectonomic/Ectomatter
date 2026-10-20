@@ -67,6 +67,8 @@ pub struct State<'a> {
     pub top_peak: f64,
     pub reference: f64,
     pub place_text: &'a str,
+    /// the mouse, once Ectodeck has met it: what the system says of it, and whether it is plugged in
+    pub mouse: Option<(Value, bool)>,
 }
 
 struct Card {
@@ -442,6 +444,24 @@ pub fn page(s: &State) -> (Vec<Cell>, f32, SensorMap) {
             let mut ny = c.y + 34.0 + 7.0;
             c.note(&mut ny, "Two programs sending lighting at once make the keys flicker. Close the other program, or turn Live lighting off here.", 664.0);
             c.next(ny - c.y);
+        }
+        // the mouse, once met: how it is, and who else has it open
+        if let Some((m, present)) = &s.mouse {
+            c.y += 10.0;
+            c.cells.push(Cell { color: slint::Color::from_rgb_u8(0x2b, 0x2b, 0x30), ..cell(kind::BOX, X0 + PAD_X, c.y, 664.0 + CTRL, 1.0) });
+            c.y += 24.0;
+            c.cells.push(Cell { style: 1, ..cell(kind::DEVICE, X0 + PAD_X, c.y, 48.0, 48.0) });
+            c.cells.push(text_cell(style::NAME, X0 + PAD_X + 62.0, c.y + 3.0, 600.0, 21.0, "SteelSeries Sensei 310"));
+            c.cells.push(text_cell(style::SMALL, X0 + PAD_X + 62.0, c.y + 27.0, 600.0, 17.0, if *present { "Connected" } else { "Not connected" }));
+            c.y += 48.0 + 18.0;
+            let holders: Vec<String> = m["holders"].as_array().map(|a| a.iter().filter_map(|h| h["name"].as_str().map(String::from)).collect()).unwrap_or_default();
+            if !holders.is_empty() {
+                c.label("Also open in");
+                c.cells.push(text_cell(style::VALUE_BRIGHT, X0 + PAD_X + CTRL, c.y, 600.0, 34.0, &holders.join(", ")));
+                let mut ny = c.y + 34.0 + 7.0;
+                c.note(&mut ny, "Programs that both set the mouse undo each other's changes: whichever sets its lights or buttons last wins. Ectodeck changes the mouse only when you do, here.", 664.0);
+                c.next(ny - c.y);
+            }
         }
     });
 

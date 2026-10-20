@@ -228,6 +228,26 @@ export struct PlBlock {
 
 // a row in a menu: 0 a choice, 1 a heading, 2 a rule, 3 a note, 4 a choice
 // in red (one that deletes), 5 a choice that can't be made now
+// a row of the mouse page's list: a button and its job, or a light, its effect and its color
+export struct MouseRow {
+    name: string,
+    job: string,
+    chosen: bool,
+    // a job other than the factory's
+    rebound: bool,
+    swatch: color,
+    swatched: bool,
+}
+// a button's words beside the mouse's picture: its name, its job, which side, how far down
+export struct MouseCall {
+    name: string,
+    job: string,
+    left: bool,
+    top: length,
+    chosen: bool,
+    rebound: bool,
+}
+
 export struct MenuRow {
     kind: int,
     label: string,
@@ -826,6 +846,7 @@ component CellView inherits Rectangle {
     // a pad pressed or dragged on: where, as a share of it across and down
     callback pad(int, float, float);
     in property <image> glyph;
+    in property <image> glyph2;
     x: root.c.x;
     y: root.c.y;
     width: root.c.w;
@@ -991,14 +1012,14 @@ component CellView inherits Rectangle {
         drop-shadow-offset-y: root.c.style == 27 ? 10px : 0;
         drop-shadow-color: root.c.style == 27 ? #00000099 : transparent;
     }
-    // a device's glyph on its square
+    // a device's glyph on its square (style 1: the second device's, the mouse)
     if root.c.kind == 12: Rectangle {
         border-radius: 10px;
         background: Ink.well;
         Image {
             width: 30px;
             height: 30px;
-            source: root.glyph;
+            source: root.c.style == 1 ? root.glyph2 : root.glyph;
             colorize: Ink.soft;
         }
     }
@@ -3052,6 +3073,13 @@ component DropField inherits Rectangle {
 // the layer shown: a kind (Key, Media, Mouse, Macro, Profile, Keyboard,
 // Nothing), the job itself, or Record to take the next key pressed.
 component KeyDetail inherits PageBox {
+    // the kinds of job, and their glyphs on the switch's 24 grid (the keyboard's, unless a device has its own)
+    in property <[string]> kinds: ["Key", "Media", "Mouse", "Macro", "Profile", "Screen", "Keyboard", "Nothing"];
+    // (Screen's is the Screen Editor button's glyph, drawn on this switch's 24 grid)
+    in property <[string]> kind-icons: ["M4 5h16v14H4zM9 10h6M12 10v5", "M5 6l8 6-8 6zM15 6v12M19 6v12", "M7 3.5h10v17H7zM12 7v3", "M4 7h10M4 12h16M4 17h7", "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z", "M3.9 5.1h16.2a2.4 2.4 0 0 1 2.4 2.4v9a2.4 2.4 0 0 1-2.4 2.4H3.9A2.4 2.4 0 0 1 1.5 16.5V7.5a2.4 2.4 0 0 1 2.4-2.4zM6 9.3h12M6 12h9M6 14.7h10.5", "M3 7h18v10H3zM7 11h1M11 11h1M15 11h1M8 14h8", "M4 12a8 8 0 1 0 16 0a8 8 0 1 0-16 0M6.5 17.5l11-11"];
+    // whether a job can be taken from a key pressed, and whether the box closes
+    in property <bool> recordable: true;
+    in property <bool> closable: true;
     in property <string> cap;
     in property <string> factory;
     in property <string> state;
@@ -3070,7 +3098,7 @@ component KeyDetail inherits PageBox {
     callback kind-picked(int, length, length, length);
     callback job-clicked(length, length, length);
     callback record();
-    BoxLink {
+    if root.closable: BoxLink {
         x: parent.width - self.width - 10px;
         y: 12px;
         text: "Done";
@@ -3148,22 +3176,21 @@ component KeyDetail inherits PageBox {
         y: 148px;
         width: parent.width - 32px;
         tall: true;
-        options: ["Key", "Media", "Mouse", "Macro", "Profile", "Screen", "Keyboard", "Nothing"];
-        // (Screen's is the Screen Editor button's glyph, drawn on this switch's 24 grid)
-        icons: ["M4 5h16v14H4zM9 10h6M12 10v5", "M5 6l8 6-8 6zM15 6v12M19 6v12", "M7 3.5h10v17H7zM12 7v3", "M4 7h10M4 12h16M4 17h7", "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z", "M3.9 5.1h16.2a2.4 2.4 0 0 1 2.4 2.4v9a2.4 2.4 0 0 1-2.4 2.4H3.9A2.4 2.4 0 0 1 1.5 16.5V7.5a2.4 2.4 0 0 1 2.4-2.4zM6 9.3h12M6 12h9M6 14.7h10.5", "M3 7h18v10H3zM7 11h1M11 11h1M15 11h1M8 14h8", "M4 12a8 8 0 1 0 16 0a8 8 0 1 0-16 0M6.5 17.5l11-11"];
+        options: root.kinds;
+        icons: root.kind-icons;
         chosen: root.kind;
         picked(i, x, y, h) => { root.kind-picked(i, x, y, h); }
     }
     DropField {
         x: 16px;
         y: 208px;
-        width: parent.width - 32px - 104px;
+        width: parent.width - 32px - (root.recordable ? 104px : 0);
         text: root.job;
         open: root.menu-open;
         clicked(x, y, h) => { root.job-clicked(x, y, h); }
     }
     // Record: takes the next key pressed on the Z10
-    Rectangle {
+    if root.recordable: Rectangle {
         x: parent.width - 16px - 96px;
         y: 208px;
         width: 96px;
@@ -3555,6 +3582,12 @@ export component AppWindow inherits Window {
     in property <image> home-glyph;
     in property <image> keyboard-glyph;
     in property <image> keyboard-tile;
+    // the mouse (SteelSeries' core): its glyphs, whether Ectodeck has met it, and
+    // whether it is plugged in (1) or not (2)
+    in property <image> mouse-glyph;
+    in property <image> mouse-tile;
+    in property <bool> mouse-known;
+    in property <int> mouse-conn;
     in property <image> settings-glyph;
     // the Key lab's flask, and whether its window is open
     in property <bool> lab-open;
@@ -3796,6 +3829,45 @@ export component AppWindow inherits Window {
     callback drag();
     callback go(string);
     callback rail(string);
+    // the mouse's page: its tab, the words over its picture, what went wrong
+    in property <int> mouse-tab;
+    in property <string> mouse-hint;
+    in property <string> mouse-status;
+    // its picture, and how far the picture's shadow reaches past the mouse
+    in property <image> mouse-picture;
+    in property <length> mouse-pic-m;
+    // each button's words beside the picture, and their lines and dots (the chosen button's apart)
+    in property <[MouseCall]> mouse-calls;
+    in property <string> mouse-lines;
+    in property <string> mouse-dots;
+    in property <string> mouse-line-on;
+    in property <string> mouse-dot-on;
+    // the list beside the boxes: the buttons, or the lights
+    in property <[MouseRow]> mouse-rows;
+    // the chosen button's Key detail box
+    in property <string> mouse-cap;
+    in property <string> mouse-title;
+    in property <string> mouse-factory;
+    in property <string> mouse-state;
+    in property <bool> mouse-rebound;
+    in property <int> mouse-kind;
+    in property <[string]> mouse-kinds;
+    in property <[string]> mouse-kind-icons;
+    in property <string> mouse-job;
+    in property <bool> mouse-menu-open;
+    in property <string> mouse-note;
+    // the chosen light's effects, and the boxes built as cells
+    in property <[EffectItem]> mouse-effects;
+    in property <bool> mouse-effect-moves;
+    in property <length> mouse-cells-h;
+    // the room the page's boxes have across
+    out property <length> mouse-w: pws-w;
+    callback mouse-tab-chosen(int);
+    callback mouse-row(int);
+    callback mouse-kind-picked(int, length, length, length);
+    callback mouse-job-clicked(length, length, length);
+    callback mouse-reset();
+    callback mouse-effect(int);
     callback view-changed(int);
     callback choose-profile(int);
     callback key-clicked(int);
@@ -3988,6 +4060,312 @@ export component AppWindow inherits Window {
                 name: "EVGA Z10 RGB";
                 clicked => { root.go("z10"); }
             }
+            if root.mouse-known: Tile {
+                x: 40px + 260px + 24px;
+                y: 34px;
+                glyph: root.mouse-tile;
+                name: "SteelSeries Sensei 310";
+                clicked => { root.go("mouse"); }
+            }
+        }
+
+        // the mouse's page, from the keyboard page's own parts: its bar, then
+        // the tab's words, the mouse's picture (on Buttons with each button's
+        // job beside it), and the tab's boxes
+        if root.place == "mouse": Rectangle {
+            property <length> stage-h: 470px;
+            property <length> low-y: head-end + (root.mouse-tab < 2 ? stage-h + 14px : 0);
+            // (on Buttons, room for all eight in the list: each row 48 and 2 between, under its heading)
+            property <length> low-h: root.mouse-tab == 0 ? 40px + 8 * 50px + 8px : max(root.mouse-cells-h, 330px);
+            mouse-flick := Flickable {
+                y: 56px;
+                height: parent.height - 56px;
+                content-height: low-y + (root.mouse-tab < 2 ? low-h : root.mouse-cells-h) + 24px;
+                mouse-drag-pan-enabled: false;
+                Text {
+                    x: pws-x;
+                    y: 12px;
+                    height: 36px;
+                    text: root.mouse-hint;
+                    font-family: "Geist";
+                    font-size: 12.5px;
+                    color: Ink.quiet;
+                    vertical-alignment: center;
+                }
+                // the stage: the mouse on the box's own shade, as the keyboard sits
+                if root.mouse-tab < 2: Rectangle {
+                    x: pws-x;
+                    y: head-end;
+                    width: pws-w;
+                    height: stage-h;
+                    border-radius: 12px;
+                    background: Ink.well;
+                    clip: true;
+                    // the mock's own canvas, the mouse's middle at 600 of its 1092
+                    Rectangle {
+                        x: parent.width / 2 - 600px;
+                        width: 1092px;
+                        height: parent.height;
+                        Image {
+                            x: 480px - root.mouse-pic-m;
+                            y: 30px - root.mouse-pic-m;
+                            width: 240px + 2 * root.mouse-pic-m;
+                            height: 410px + 2 * root.mouse-pic-m;
+                            source: root.mouse-picture;
+                        }
+                        if root.mouse-tab == 0: Rectangle {
+                            Path {
+                                width: 1092px;
+                                height: 470px;
+                                viewbox-width: 1092;
+                                viewbox-height: 470;
+                                commands: root.mouse-lines;
+                                stroke: #4a4a52;
+                                stroke-width: 1px;
+                                fill: transparent;
+                            }
+                            Path {
+                                width: 1092px;
+                                height: 470px;
+                                viewbox-width: 1092;
+                                viewbox-height: 470;
+                                commands: root.mouse-dots;
+                                fill: #4a4a52;
+                            }
+                            Path {
+                                width: 1092px;
+                                height: 470px;
+                                viewbox-width: 1092;
+                                viewbox-height: 470;
+                                commands: root.mouse-line-on;
+                                stroke: Ink.dim;
+                                stroke-width: 1px;
+                                fill: transparent;
+                            }
+                            Path {
+                                width: 1092px;
+                                height: 470px;
+                                viewbox-width: 1092;
+                                viewbox-height: 470;
+                                commands: root.mouse-dot-on;
+                                fill: Ink.dim;
+                            }
+                            for c[i] in root.mouse-calls: Rectangle {
+                                x: c.left ? 220px : 780px;
+                                y: c.top;
+                                width: 200px;
+                                height: 40px;
+                                Text {
+                                    y: 0;
+                                    width: parent.width;
+                                    height: 16px;
+                                    text: c.name;
+                                    font-family: "Geist";
+                                    font-size: 11px;
+                                    letter-spacing: 0.2px;
+                                    color: Ink.quiet;
+                                    horizontal-alignment: c.left ? right : left;
+                                }
+                                Rectangle {
+                                    x: c.left ? parent.width - self.width : 0;
+                                    y: 17px;
+                                    width: job-t.preferred-width + (c.chosen ? 16px : 0);
+                                    height: 22px;
+                                    border-radius: 6px;
+                                    background: c.chosen ? Ink.pick : transparent;
+                                    border-width: c.chosen ? 1px : 0;
+                                    border-color: #ffffff40;
+                                    job-t := Text {
+                                        x: c.chosen ? 8px : 0;
+                                        height: parent.height;
+                                        text: c.job;
+                                        font-family: "Geist";
+                                        font-size: 12.5px;
+                                        color: c.rebound ? Ink.warn : c.chosen ? Ink.bright : Ink.dim;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.mouse-row(i); }
+                                }
+                            }
+                        }
+                    }
+                }
+                // the list beside the boxes: the buttons, or the lights, as the profiles are listed
+                if root.mouse-tab < 2: Rectangle {
+                    x: pws-x;
+                    y: low-y;
+                    width: root.mouse-tab == 0 ? 260px : 240px;
+                    height: low-h;
+                    border-radius: 12px;
+                    background: Ink.box;
+                    AnchorHead {
+                        x: 16px;
+                        y: 8px;
+                        text: root.mouse-tab == 0 ? "BUTTONS" : "LIGHTS";
+                    }
+                    VerticalLayout {
+                        x: 8px;
+                        y: 40px;
+                        width: parent.width - 16px;
+                        height: parent.height - 48px;
+                        spacing: 2px;
+                        alignment: start;
+                        for r[i] in root.mouse-rows: AnchorRow {
+                            chosen: r.chosen;
+                            clicked => { root.mouse-row(i); }
+                            Text {
+                                x: 12px;
+                                y: 7px;
+                                width: parent.width - 24px - (r.swatched ? 24px : 0);
+                                text: r.name;
+                                font-family: "Geist";
+                                font-size: 13.5px;
+                                color: Ink.bright;
+                                overflow: elide;
+                            }
+                            Text {
+                                x: 12px;
+                                y: 25px;
+                                width: parent.width - 24px - (r.swatched ? 24px : 0);
+                                text: r.job;
+                                font-family: "Geist";
+                                font-size: 12px;
+                                color: r.rebound ? Ink.warn : r.chosen ? Ink.soft : Ink.quiet;
+                                overflow: elide;
+                            }
+                            if r.swatched: Rectangle {
+                                x: parent.width - 12px - 14px;
+                                y: (parent.height - 14px) / 2;
+                                width: 14px;
+                                height: 14px;
+                                border-radius: 4px;
+                                background: r.swatch;
+                                border-width: 1px;
+                                border-color: #ffffff2e;
+                            }
+                        }
+                    }
+                }
+                // Buttons: the chosen button's job, as a key's on the keyboard's Keys tab
+                if root.mouse-tab == 0: KeyDetail {
+                    x: pws-x + 260px + 12px;
+                    y: low-y;
+                    width: pws-w - 272px;
+                    height: low-h;
+                    title: root.mouse-title;
+                    cap: root.mouse-cap;
+                    factory: root.mouse-factory;
+                    state: root.mouse-state;
+                    rebound: root.mouse-rebound;
+                    layer-rebound: false;
+                    layer-title: "When pressed";
+                    kinds: root.mouse-kinds;
+                    kind-icons: root.mouse-kind-icons;
+                    kind: root.mouse-kind;
+                    job: root.mouse-job;
+                    listening: false;
+                    recordable: false;
+                    closable: false;
+                    menu-open: root.mouse-menu-open;
+                    note: root.mouse-note;
+                    reset => { root.mouse-reset(); }
+                    kind-picked(i, x, y, h) => { root.mouse-kind-picked(i, x, y, h); }
+                    job-clicked(x, y, h) => { root.mouse-job-clicked(x, y, h); }
+                }
+                // Lighting: the chosen light's effect, as the keyboard's
+                if root.mouse-tab == 1: EffectGrid {
+                    x: pws-x + 240px + 12px;
+                    y: low-y;
+                    width: 300px;
+                    height: low-h;
+                    effects: root.mouse-effects;
+                    moving: root.mouse-effect-moves;
+                    chose(i) => { root.mouse-effect(i); }
+                }
+                // the boxes built as cells: the effect's settings, Performance, Settings
+                if root.mouse-tab >= 1: Rectangle {
+                    x: pws-x + (root.mouse-tab == 1 ? 240px + 12px + 300px + 12px : 0);
+                    y: low-y;
+                    width: root.mouse-w - (root.mouse-tab == 1 ? 564px : 0);
+                    height: root.mouse-cells-h;
+                    for c in root.cells: CellView {
+                        c: c;
+                        glyph: root.mouse-tile;
+                        pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
+                        slide(id, v) => { root.cell-slide(id, v); }
+                        typed(id, t) => { root.cell-typed(id, t); }
+                    }
+                }
+            }
+            // the mouse's own bar: its name, its tabs, and what went wrong
+            Rectangle {
+                y: 0;
+                height: 56px;
+                background: Ink.base;
+                HorizontalLayout {
+                    padding-left: 28px;
+                    padding-right: 28px;
+                    spacing: 28px;
+                    HorizontalLayout {
+                        horizontal-stretch: 0;
+                        spacing: 10px;
+                        Rectangle {
+                            width: 7px;
+                            Rectangle {
+                                y: (parent.height - 7px) / 2;
+                                width: 7px;
+                                height: 7px;
+                                border-radius: 3.5px;
+                                background: root.mouse-conn == 1 ? Ink.good : root.mouse-conn == 2 ? Ink.bad : #5c5c5c;
+                            }
+                        }
+                        Text {
+                            text: "SteelSeries Sensei 310";
+                            font-family: "Geist";
+                            font-size: 17px;
+                            font-weight: 600;
+                            letter-spacing: 0.17px;
+                            color: Ink.ink;
+                            vertical-alignment: center;
+                        }
+                    }
+                    HorizontalLayout {
+                        horizontal-stretch: 0;
+                        spacing: 2px;
+                        for name[i] in ["Buttons", "Lighting", "Performance", "Settings"]: Rectangle {
+                            width: mt.width;
+                            mt := Tab {
+                                text: name;
+                                selected: root.mouse-tab == i;
+                                clicked => { root.mouse-tab-chosen(i); }
+                            }
+                            if root.mouse-tab == i: Rectangle {
+                                y: parent.height - 2px;
+                                height: 2px;
+                                background: Ink.ink;
+                            }
+                        }
+                    }
+                    Text {
+                        horizontal-stretch: 1;
+                        text: root.mouse-status;
+                        font-family: "Geist";
+                        font-size: 12.5px;
+                        color: Ink.bad;
+                        horizontal-alignment: right;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+                Rectangle {
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: Ink.line;
+                }
+            }
         }
         // Ectodeck's own settings, as the window lays them out
         set-flick := Flickable {
@@ -3997,6 +4375,7 @@ export component AppWindow inherits Window {
             for c in root.cells: CellView {
                 c: c;
                 glyph: root.keyboard-tile;
+                glyph2: root.mouse-tile;
                 pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
                 slide(id, v) => { root.cell-slide(id, v); }
                 typed(id, t) => { root.cell-typed(id, t); }
@@ -5520,6 +5899,17 @@ export component AppWindow inherits Window {
             open: root.rail-open;
             reveal: root.reveal;
             clicked => { root.rail("z10"); }
+        }
+        if root.mouse-known: RailItem {
+            x: 10px;
+            y: 10px + 40px + 4px + 8px + 4px + 40px + 4px;
+            width: rail-w - 20px;
+            glyph: root.mouse-glyph;
+            name: "SteelSeries Sensei 310";
+            on: root.place == "mouse";
+            open: root.rail-open;
+            reveal: root.reveal;
+            clicked => { root.rail("mouse"); }
         }
         r-settings := RailItem {
             x: 10px;

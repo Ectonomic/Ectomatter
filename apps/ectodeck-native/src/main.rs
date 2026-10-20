@@ -41,6 +41,8 @@ mod lcd_stats;
 mod lighting;
 mod macro_page;
 mod macros;
+mod mouse;
+mod mouse_art;
 mod overlays;
 mod picker;
 mod picture;
@@ -536,6 +538,8 @@ fn main() {
     ui.set_keyboard_glyph(glyph(include_str!("../ui/glyphs/keyboard.svg"), 22, true));
     ui.set_settings_glyph(glyph(include_str!("../ui/glyphs/settings.svg"), 22, true));
     ui.set_keyboard_tile(glyph(include_str!("../ui/glyphs/keyboard.svg"), 88, true));
+    ui.set_mouse_glyph(glyph(include_str!("../ui/glyphs/mouse.svg"), 22, true));
+    ui.set_mouse_tile(glyph(include_str!("../ui/glyphs/mouse.svg"), 88, true));
     ui.set_rail_open(uistate::get("rail_open").and_then(|v| v.as_bool()).unwrap_or(false));
     slint::ComponentHandle::show(&ui).unwrap();
 
@@ -594,6 +598,14 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
             _ => (false, 3.0, 8.0),
         };
         front.screen_news(lcd_player::News { rows, sequence, state, page, turning, elapsed, length });
+    }
+    // ECTODECK_NATIVE_MOUSE=FILE: the mouse as its core last told it (what the mouse's
+    // thread hears), and ECTODECK_NATIVE_MOUSE_TAB=N its page's tab
+    if let Some(v) = std::env::var("ECTODECK_NATIVE_MOUSE").ok().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()) {
+        front.mouse_heard(mouse::Heard::State(v));
+    }
+    if let Some(t) = std::env::var("ECTODECK_NATIVE_MOUSE_TAB").ok().and_then(|t| t.parse().ok()) {
+        front.mouse.tab = t;
     }
     if let Ok(place) = std::env::var("ECTODECK_NATIVE_PLACE") {
         // ("sensors": Settings, at its Sensors box, as the screen editor's links open it)
@@ -1546,23 +1558,23 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         device::start(cores::dir().join(z10::CORE), core_data(z10::CORE), heard_tx)
     });
 
-    // SteelSeries' core, for the Sensei 310: it meets the mouse and announces
-    // it, and writes nothing to it until the mouse has a page to change it from
+    // SteelSeries' core, for the Sensei 310, and the mouse's page's thread on it:
+    // it meets the mouse, and writes to it only what the page changes
     let mouse = core_host::Core::start(&cores::dir().join("steelseries"), core_data("steelseries"), Box::new(core_host::Hidapi::new()))
         .map_err(|e| eprintln!("ectodeck-native: SteelSeries' core: {e}"))
         .ok();
-    if let Some(m) = mouse.clone() {
-        std::thread::spawn(move || match m.call("initialize", &serde_json::json!({ "protocol": 2 })) {
-            Ok(_) => {
-                for (method, p) in m.told() {
-                    if method == "device/added" {
-                        eprintln!("ectodeck-native: {} met, firmware {}", p["name"].as_str().unwrap_or("a mouse"), p["firmware"]["version"].as_str().unwrap_or("unknown"));
-                    }
+    let mouse_ask = mouse.clone().map(|m| {
+        let (heard_tx, heard_rx) = calloop::channel::channel::<mouse::Heard>();
+        event_loop
+            .handle()
+            .insert_source(heard_rx, |e, _, app: &mut App| {
+                if let calloop::channel::Event::Msg(h) = e {
+                    app.front.mouse_heard(h);
                 }
-            }
-            Err(e) => eprintln!("ectodeck-native: SteelSeries' core: {e}"),
-        });
-    }
+            })
+            .unwrap();
+        mouse::start(m, heard_tx)
+    });
 
     // the keyboard lit by the light setup in use, if it is one of the person's own
     let lit_by = setups::in_use(&settings, &cores::shown().id).map(|s| setups::merged(&cores::shown().device_now()["light"], &s.changes));
@@ -1612,7 +1624,11 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         panel_rev: 0,
         levels: (reference, reference * gain as f64),
         slint,
-        front: Front::new(ui, kb, controlled, settings),
+        front: {
+            let mut f = Front::new(ui, kb, controlled, settings);
+            f.mouse.ask = mouse_ask;
+            f
+        },
         pic: Picture::new(reference, GROUND),
         gain,
         board: None,

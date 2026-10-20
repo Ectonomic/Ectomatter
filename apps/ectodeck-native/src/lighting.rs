@@ -83,9 +83,17 @@ pub enum Ctl {
     SensorName,
     /// a link to Ectodeck's Settings, from the screen editor
     OpenSettings,
+    /// the mouse's page: a light's color and speed, the wheel copying the
+    /// logo, the two sensitivities, the polling rate
+    MouseColor,
+    MouseSpeed,
+    MouseSameWheel,
+    MouseCpi1,
+    MouseCpi2,
+    MousePolling,
 }
 
-const CTLS: [Ctl; 52] = [
+const CTLS: [Ctl; 58] = [
     Ctl::None,
     Ctl::Color,
     Ctl::Colors,
@@ -138,6 +146,12 @@ const CTLS: [Ctl; 52] = [
     Ctl::MakeMain,
     Ctl::SensorName,
     Ctl::OpenSettings,
+    Ctl::MouseColor,
+    Ctl::MouseSpeed,
+    Ctl::MouseSameWheel,
+    Ctl::MouseCpi1,
+    Ctl::MouseCpi2,
+    Ctl::MousePolling,
 ];
 
 pub fn ctl(id: i32) -> Ctl {

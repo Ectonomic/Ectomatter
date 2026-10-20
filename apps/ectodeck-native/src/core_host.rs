@@ -685,6 +685,64 @@ mod tests {
         (core, sent, data)
     }
 
+    /// The mouse as its page's thread hears it, from the core on the fake
+    /// mouse, saved where MOUSE_STATE_OUT says (for snapshots of the page).
+    #[test]
+    fn the_mouse_as_its_page_hears_it() {
+        let Ok(out) = std::env::var("MOUSE_STATE_OUT") else { return };
+        let (core, _, data) = mouse_core("state");
+        let device = core.told().into_iter().find(|(m, _)| m == "device/added").map(|(_, p)| p).unwrap();
+        let d = serde_json::json!({ "device": "sensei310-1" });
+        let state = serde_json::json!({
+            "present": true,
+            "device": device,
+            "keys": core.call("keys/get", &d).unwrap(),
+            "lighting": core.call("lighting/get", &d).unwrap(),
+            "settings": core.call("settings/get", &d).unwrap(),
+        });
+        std::fs::write(out, serde_json::to_string_pretty(&state).unwrap()).unwrap();
+        let _ = std::fs::remove_dir_all(&data);
+    }
+
+    /// On the real mouse, when MOUSE_LIVE is set: the first preset set to 900
+    /// CPI, read back by the settings read, then set back to what it was, which
+    /// the mouse then keeps. (Leaves the mouse as it found it.)
+    #[test]
+    fn the_real_mouse_takes_a_change() {
+        if std::env::var("MOUSE_LIVE").is_err() {
+            return;
+        }
+        let data = std::env::temp_dir().join(format!("ectodeck-mouse-live-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data);
+        let core = Core::start(&crate::cores::dir().join("steelseries"), data.clone(), Box::new(Hidapi::new())).unwrap();
+        core.call("initialize", &serde_json::json!({ "protocol": 2 })).unwrap();
+        let d = serde_json::json!({ "device": "sensei310-1" });
+        let was = core.call("settings/get", &d).unwrap()["values"]["cpi1"].as_u64().unwrap();
+        eprintln!("the first preset was {was} CPI");
+        let read = || -> u64 {
+            // the mouse's own answer, through a core met anew (its record kept apart)
+            let d2 = std::env::temp_dir().join(format!("ectodeck-mouse-read-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&d2);
+            let c = Core::start(&crate::cores::dir().join("steelseries"), d2.clone(), Box::new(Hidapi::new())).unwrap();
+            c.call("initialize", &serde_json::json!({ "protocol": 2 })).unwrap();
+            let v = c.call("settings/get", &serde_json::json!({ "device": "sensei310-1" })).unwrap()["values"]["cpi1"].as_u64().unwrap();
+            let _ = std::fs::remove_dir_all(&d2);
+            v
+        };
+        core.call("settings/set", &serde_json::json!({ "device": "sensei310-1", "id": "cpi1", "value": 900 })).unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        let now = read();
+        eprintln!("the mouse says {now} CPI after the change");
+        core.call("settings/set", &serde_json::json!({ "device": "sensei310-1", "id": "cpi1", "value": was })).unwrap();
+        std::thread::sleep(Duration::from_millis(1800));
+        let _ = core.call("settings/get", &d);
+        let back = read();
+        eprintln!("and {back} CPI once set back");
+        let _ = std::fs::remove_dir_all(&data);
+        assert_eq!(now, 900);
+        assert_eq!(back, was);
+    }
+
     /// Meeting the mouse asks it two questions and writes nothing: the core
     /// knows its presets and lights' colors from its answer, and announces it.
     #[test]

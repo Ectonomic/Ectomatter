@@ -862,6 +862,32 @@ pub struct Shadow {
 }
 
 impl Shadow {
+    /// The shadow of a thing that covers `cover` (a `w` by `h` canvas, 0 to
+    /// 1 a pixel), drawn at `opacity`: soft layers of it, each a blurred copy
+    /// of its outline moved down, laid over the last, as a page's own shadows
+    /// are drawn.
+    pub fn of(cover: &[f32], w: usize, h: usize, layers: &[ShadowLayer], opacity: f32) -> Shadow {
+        let m = Shadow::reach(layers) as usize;
+        let (cw, ch) = (w + 2 * m, h + 2 * m);
+        let mut light = vec![1f32; cw * ch];
+        for l in layers {
+            let mut outline = vec![0f32; cw * ch];
+            let dy = l.down.round() as isize;
+            for y in 0..h {
+                let ty = (y + m) as isize + dy;
+                if ty < 0 || ty as usize >= ch {
+                    continue;
+                }
+                outline[ty as usize * cw + m..ty as usize * cw + m + w].copy_from_slice(&cover[y * w..(y + 1) * w]);
+            }
+            for (v, b) in light.iter_mut().zip(gaussian(&outline, cw, ch, l.blur / 2.0)) {
+                *v *= 1.0 - l.strength * b.clamp(0.0, 1.0);
+            }
+        }
+        let dark = light.iter().map(|v| (1.0 - v) * opacity.clamp(0.0, 1.0)).collect();
+        Shadow { margin: m as u32, w: cw as u32, h: ch as u32, dark }
+    }
+
     /// The canvas's pixels a shadow of these layers can reach past the board.
     pub fn reach(layers: &[ShadowLayer]) -> u32 {
         layers.iter().map(|l| (l.down.abs() + 1.5 * l.blur).ceil() as u32).max().unwrap_or(0)
@@ -906,25 +932,9 @@ impl Board {
     /// whole shadow is drawn at `opacity` (1 as its layers make it).
     pub fn lay_shadow(&mut self, layers: &[ShadowLayer], opacity: f32) {
         let (w, h) = (self.w as usize, self.h as usize);
-        let m = Shadow::reach(layers) as usize;
-        let (cw, ch) = (w + 2 * m, h + 2 * m);
-        let mut light = vec![1f32; cw * ch];
-        for l in layers {
-            let mut outline = vec![0f32; cw * ch];
-            let dy = l.down.round() as isize;
-            for y in 0..h {
-                let ty = (y + m) as isize + dy;
-                if ty < 0 || ty as usize >= ch {
-                    continue;
-                }
-                let row = &self.chassis[y * w..(y + 1) * w];
-                outline[ty as usize * cw + m..ty as usize * cw + m + w].copy_from_slice(row);
-            }
-            for (v, b) in light.iter_mut().zip(gaussian(&outline, cw, ch, l.blur / 2.0)) {
-                *v *= 1.0 - l.strength * b.clamp(0.0, 1.0);
-            }
-        }
-        let dark: Vec<f32> = light.iter().map(|v| (1.0 - v) * opacity.clamp(0.0, 1.0)).collect();
+        let s = Shadow::of(&self.chassis, w, h, layers, opacity);
+        let (m, cw) = (s.margin as usize, s.w as usize);
+        let dark = s.dark;
         // under the board: its ground darkened as black over it in sRGB's
         // encoding (a share `s` of the light gone is (1 - s)^2.2 in linear)
         for y in 0..h {
@@ -941,7 +951,7 @@ impl Board {
                 }
             }
         }
-        self.cast = Some(Shadow { margin: m as u32, w: cw as u32, h: ch as u32, dark });
+        self.cast = Some(Shadow { dark, ..s });
     }
 
     /// How much of each pixel the keyboard itself covers (not the page round it), 0 to 1.
