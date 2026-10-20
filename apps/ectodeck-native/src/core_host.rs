@@ -341,16 +341,29 @@ fn run(m: Manifest, data: PathBuf, usb: Box<dyn Usb>, asked: mpsc::Receiver<Ask>
             },
         };
         if let Some(Ask::Call(method, params, tell)) = a {
+            let t = Instant::now();
             let r = live.core.call_call(&mut live.store, &method, &params).unwrap_or_else(|trap| Err(format!("the {} core failed: {trap}", m.id)));
+            slow(&m.id, &method, t);
             let _ = tell.send(r);
         }
         let now = Instant::now();
         while let Some(i) = live.store.data().timers.iter().position(|&(at, _)| at <= now) {
             let (_, tag) = live.store.data_mut().timers.remove(i);
+            let t = Instant::now();
             if let Err(trap) = live.core.call_timer(&mut live.store, tag) {
                 eprintln!("ectodeck-native: the {} core failed on its timer: {trap}", m.id);
             }
+            slow(&m.id, &format!("timer {tag}"), t);
         }
+    }
+}
+
+/// A line for the log when a call kept the core's thread past a few of the
+/// preview's beats: everything else the core does waited for it.
+fn slow(id: &str, what: &str, since: Instant) {
+    let ms = since.elapsed().as_millis();
+    if ms > 200 {
+        eprintln!("ectodeck-native: the {id} core took {ms} ms on {what}");
     }
 }
 
@@ -523,6 +536,57 @@ mod tests {
         }
         fn read(&mut self, _: u32) -> Result<Vec<u8>, String> {
             Ok(Vec::new())
+        }
+    }
+
+    /// A fake Z10 that keeps every report sent to it, answering reads as
+    /// `Clock` does.
+    struct Sent(Arc<Mutex<Vec<Vec<u8>>>>, Clock);
+
+    impl Hid for Sent {
+        fn send_feature(&mut self, report: &[u8]) -> Result<(), String> {
+            self.0.lock().unwrap().push(report.to_vec());
+            self.1.send_feature(report)
+        }
+        fn get_feature(&mut self, report_id: u8, len: usize) -> Result<Vec<u8>, String> {
+            self.1.get_feature(report_id, len)
+        }
+        fn write(&mut self, r: &[u8]) -> Result<usize, String> {
+            self.1.write(r)
+        }
+        fn read(&mut self, t: u32) -> Result<Vec<u8>, String> {
+            self.1.read(t)
+        }
+    }
+
+    /// Off previewed after Wave: the keys stay in the preview, every one
+    /// black, and the frame that leaves the preview (which showed the stored
+    /// lighting) is not sent again after the switch.
+    #[test]
+    fn off_previews_every_key_black() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let data = std::env::temp_dir().join(format!("ectodeck-core-off-{}", std::process::id()));
+        let fake = Sent(sent.clone(), Clock(Arc::new(Mutex::new(Vec::new())), Vec::new()));
+        let core = Core::start(&core_dir(), data.clone(), Box::new(One(Some(Box::new(fake))))).unwrap();
+        core.call("initialize", &serde_json::json!({ "backups": false })).unwrap();
+        let wave = serde_json::json!({ "mode": "wave", "wave": { "cycle": 1000 } });
+        core.call("preview", &serde_json::json!({ "lighting": wave, "tab": "test" })).unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        let before = sent.lock().unwrap().len();
+        let r = core.call("preview", &serde_json::json!({ "lighting": { "mode": "off" }, "tab": "test" })).unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        let after: Vec<Vec<u8>> = sent.lock().unwrap()[before..].to_vec();
+        let _ = std::fs::remove_dir_all(&data);
+        assert_eq!(r["mode"], "keys");
+        // the switch: leave the effect, then nothing but black keys
+        assert_eq!(after[0][..4], [6, 0xEA, 0x02, 0], "stop the key stream first");
+        assert_eq!(after[1][..4], [7, 0xEA, 0x02, 0], "leave the effect");
+        let keys = &after[2..];
+        assert!(keys.len() > 4, "{} frames of keys in 300 ms", keys.len());
+        for k in keys {
+            assert_eq!(k[..4], [6, 0xEA, 0x02, 1], "a key frame");
+            assert_eq!(k.len(), 8 + 4 * ectotype_core::protocol::NKEYS);
+            assert!(k[8..].chunks(4).all(|c| c[1..] == [0, 0, 0]), "every key black");
         }
     }
 
