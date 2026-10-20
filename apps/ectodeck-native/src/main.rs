@@ -313,7 +313,7 @@ fn board_builder(done: calloop::channel::Sender<Board>) -> std::sync::mpsc::Send
             match Board::new(&tree, &device, GROUND, size.0, size.1) {
                 Ok(mut b) => {
                     b.set_legends_from(&size.2);
-                    b.lay_shadow(&stage_shadow(size.3));
+                    b.lay_shadow(&stage_shadow(size.3), STAGE_SHADOW_OPACITY);
                     eprintln!("ectodeck-native: keyboard drawn at {}x{} in {:?}", size.0, size.1, t.elapsed());
                     if done.send(b).is_err() {
                         return;
@@ -326,10 +326,15 @@ fn board_builder(done: calloop::channel::Sender<Board>) -> std::sync::mpsc::Send
     ask
 }
 
+/// How dark the device's shadow on its stage is drawn, as a whole: half its
+/// layers' own (Grant's 50%, 2026-10-20)
+const STAGE_SHADOW_OPACITY: f32 = 0.5;
+
 /// The shadow a device casts on its stage, for a window `scale` pixels to the
 /// page's: two soft layers, a wide one and a close one (as approved in the
 /// mouse's mock, mock/sensei-310-contrast.html: CSS drop shadows of 0 8px
-/// 22px at 60% black and 0 2px 7px at 35%).
+/// 22px at 60% black and 0 2px 7px at 35%), the whole drawn at
+/// STAGE_SHADOW_OPACITY.
 fn stage_shadow(scale: f32) -> [ectodeck_draw::hdr::ShadowLayer; 2] {
     use ectodeck_draw::hdr::ShadowLayer;
     [
@@ -825,7 +830,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         let t = Instant::now();
         let mut board = settled(&tree, &device, rect.2 as u32, rect.3 as u32);
         // its shadow, as the window lays it
-        board.lay_shadow(&stage_shadow(1.0));
+        board.lay_shadow(&stage_shadow(1.0), STAGE_SHADOW_OPACITY);
         if let Some(s) = &board.cast {
             front.ui.set_board_shadow(shadow_image(s, board.w, board.h));
             front.ui.set_board_shadow_margin(s.margin as f32);

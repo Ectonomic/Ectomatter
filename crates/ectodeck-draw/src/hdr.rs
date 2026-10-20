@@ -902,8 +902,9 @@ impl Board {
     /// body, as the page's own shadows are drawn (each a blurred copy of the
     /// body's outline, moved down, laid over the last). The part under the
     /// board darkens its ground (never the body); the rest, round it, is
-    /// kept in `cast` for the page to draw on what the board sits in.
-    pub fn lay_shadow(&mut self, layers: &[ShadowLayer]) {
+    /// kept in `cast` for the page to draw on what the board sits in. The
+    /// whole shadow is drawn at `opacity` (1 as its layers make it).
+    pub fn lay_shadow(&mut self, layers: &[ShadowLayer], opacity: f32) {
         let (w, h) = (self.w as usize, self.h as usize);
         let m = Shadow::reach(layers) as usize;
         let (cw, ch) = (w + 2 * m, h + 2 * m);
@@ -923,7 +924,7 @@ impl Board {
                 *v *= 1.0 - l.strength * b.clamp(0.0, 1.0);
             }
         }
-        let dark: Vec<f32> = light.iter().map(|v| 1.0 - v).collect();
+        let dark: Vec<f32> = light.iter().map(|v| (1.0 - v) * opacity.clamp(0.0, 1.0)).collect();
         // under the board: its ground darkened as black over it in sRGB's
         // encoding (a share `s` of the light gone is (1 - s)^2.2 in linear)
         for y in 0..h {
@@ -2388,7 +2389,7 @@ mod tests {
         let (_, _, mut b) = board();
         let before = b.base.clone();
         let layers = [ShadowLayer { down: 8.0, blur: 22.0, strength: 0.6 }, ShadowLayer { down: 2.0, blur: 7.0, strength: 0.35 }];
-        b.lay_shadow(&layers);
+        b.lay_shadow(&layers, 1.0);
         let (w, h) = (b.w as usize, b.h as usize);
         for j in 0..w * h {
             if b.chassis[j] >= 1.0 {
