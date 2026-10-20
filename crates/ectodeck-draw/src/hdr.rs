@@ -346,6 +346,10 @@ pub struct Board {
     /// body under the caps' shadows and the caps over it (it never changes,
     /// so a picture starts from it)
     base: Vec<f32>,
+    /// the ground the board is drawn on, in linear light
+    ground: [f32; 3],
+    /// the shadow the device casts on the stage, once laid (`lay_shadow`)
+    pub cast: Option<Shadow>,
     /// the simulation's latest picture of the keys' light, and its brightest on each part
     sim: Option<Arc<Snapshot>>,
     most: Most,
@@ -836,7 +840,109 @@ fn find_clip<'a>(g: &'a usvg::Group, id: &str) -> Option<(&'a usvg::Group, &'a u
     })
 }
 
+/// One layer of the soft shadow a device casts on the stage it sits on, in
+/// the board's pixels: how far down it falls, how soft it is (as CSS's blur
+/// radius: twice the spread of its Gaussian), and how dark at its darkest.
+#[derive(Clone, Copy, Debug)]
+pub struct ShadowLayer {
+    pub down: f32,
+    pub blur: f32,
+    pub strength: f32,
+}
+
+/// A device's shadow, over the board and round it: on a canvas `margin`
+/// pixels wider than the board at each side, how much of the stage's light
+/// each pixel loses (0 to 1), as black laid over it would take, mixed in
+/// sRGB's encoding as the page's colors are.
+pub struct Shadow {
+    pub margin: u32,
+    pub w: u32,
+    pub h: u32,
+    pub dark: Vec<f32>,
+}
+
+impl Shadow {
+    /// The canvas's pixels a shadow of these layers can reach past the board.
+    pub fn reach(layers: &[ShadowLayer]) -> u32 {
+        layers.iter().map(|l| (l.down.abs() + 1.5 * l.blur).ceil() as u32).max().unwrap_or(0)
+    }
+}
+
+/// `a` (a `w` by `h` canvas) blurred by a Gaussian of spread `sigma`, across and down.
+fn gaussian(a: &[f32], w: usize, h: usize, sigma: f32) -> Vec<f32> {
+    if sigma < 0.3 {
+        return a.to_vec();
+    }
+    let r = (3.0 * sigma).ceil() as isize;
+    let k: Vec<f32> = (-r..=r).map(|i| (-(i * i) as f32 / (2.0 * sigma * sigma)).exp()).collect();
+    let sum: f32 = k.iter().sum();
+    let k: Vec<f32> = k.iter().map(|v| v / sum).collect();
+    let pass = |src: &[f32], along: bool| -> Vec<f32> {
+        let mut out = vec![0f32; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let mut v = 0.0;
+                for (t, kv) in k.iter().enumerate() {
+                    let d = t as isize - r;
+                    let (sx, sy) = if along { (x as isize + d, y as isize) } else { (x as isize, y as isize + d) };
+                    if sx >= 0 && sy >= 0 && (sx as usize) < w && (sy as usize) < h {
+                        v += kv * src[sy as usize * w + sx as usize];
+                    }
+                }
+                out[y * w + x] = v;
+            }
+        }
+        out
+    };
+    pass(&pass(a, true), false)
+}
+
 impl Board {
+    /// Cast the device's shadow on the stage: soft layers of it under the
+    /// body, as the page's own shadows are drawn (each a blurred copy of the
+    /// body's outline, moved down, laid over the last). The part under the
+    /// board darkens its ground (never the body); the rest, round it, is
+    /// kept in `cast` for the page to draw on what the board sits in.
+    pub fn lay_shadow(&mut self, layers: &[ShadowLayer]) {
+        let (w, h) = (self.w as usize, self.h as usize);
+        let m = Shadow::reach(layers) as usize;
+        let (cw, ch) = (w + 2 * m, h + 2 * m);
+        let mut light = vec![1f32; cw * ch];
+        for l in layers {
+            let mut outline = vec![0f32; cw * ch];
+            let dy = l.down.round() as isize;
+            for y in 0..h {
+                let ty = (y + m) as isize + dy;
+                if ty < 0 || ty as usize >= ch {
+                    continue;
+                }
+                let row = &self.chassis[y * w..(y + 1) * w];
+                outline[ty as usize * cw + m..ty as usize * cw + m + w].copy_from_slice(row);
+            }
+            for (v, b) in light.iter_mut().zip(gaussian(&outline, cw, ch, l.blur / 2.0)) {
+                *v *= 1.0 - l.strength * b.clamp(0.0, 1.0);
+            }
+        }
+        let dark: Vec<f32> = light.iter().map(|v| 1.0 - v).collect();
+        // under the board: its ground darkened as black over it in sRGB's
+        // encoding (a share `s` of the light gone is (1 - s)^2.2 in linear)
+        for y in 0..h {
+            for x in 0..w {
+                let j = y * w + x;
+                let open = 1.0 - self.chassis[j].clamp(0.0, 1.0);
+                let s = dark[(y + m) * cw + x + m];
+                if open <= 0.0 || s <= 0.0 {
+                    continue;
+                }
+                let lose = 1.0 - (1.0 - s).powf(2.2);
+                for c in 0..3 {
+                    self.base[j * 3 + c] -= self.ground[c] * open * lose;
+                }
+            }
+        }
+        self.cast = Some(Shadow { margin: m as u32, w: cw as u32, h: ch as u32, dark });
+    }
+
     /// How much of each pixel the keyboard itself covers (not the page round it), 0 to 1.
     pub fn chassis(&self) -> &[f32] {
         &self.chassis
@@ -847,6 +953,7 @@ impl Board {
     /// keys' light comes from the simulation (see set_sim); till then the
     /// keys are dark.
     pub fn new(tree: &Tree, device: &Value, base: [u8; 3], w: u32, h: u32) -> Result<Board, String> {
+        let ground = base.map(|c| (c as f32 / 255.0).powf(2.2));
         let size = tree.size();
         let k = (w as f32 / size.width()).min(h as f32 / size.height());
         let (tx, ty) = ((w as f32 - size.width() * k) / 2.0, (h as f32 - size.height() * k) / 2.0);
@@ -1215,6 +1322,8 @@ impl Board {
             indicators,
             indicator_light,
             base,
+            ground,
+            cast: None,
             sim: None,
             most: Most::default(),
             reads: Vec::new(),
@@ -2268,6 +2377,37 @@ mod tests {
         }
         let b = Board::new(&tree, &device, [0x20, 0x20, 0x20], 1264, 506).unwrap();
         (tree, device, b)
+    }
+
+    /// The shadow a device casts: the ground under it darkens and the body
+    /// never does; it is darkest just outside the body's edge below, falls
+    /// further down than up, and fades to nothing at the canvas's edge; and
+    /// over the board, `cast` holds what the board itself has.
+    #[test]
+    fn a_device_casts_a_soft_shadow_below_it() {
+        let (_, _, mut b) = board();
+        let before = b.base.clone();
+        let layers = [ShadowLayer { down: 8.0, blur: 22.0, strength: 0.6 }, ShadowLayer { down: 2.0, blur: 7.0, strength: 0.35 }];
+        b.lay_shadow(&layers);
+        let (w, h) = (b.w as usize, b.h as usize);
+        for j in 0..w * h {
+            if b.chassis[j] >= 1.0 {
+                assert_eq!(b.base[j * 3..j * 3 + 3], before[j * 3..j * 3 + 3], "the body is never shaded");
+            }
+            assert!(b.base[j * 3] <= before[j * 3] + 1e-6, "a shadow only darkens");
+        }
+        let s = b.cast.as_ref().unwrap();
+        let (m, cw) = (s.margin as usize, s.w as usize);
+        assert_eq!((s.w as usize, s.h as usize), (w + 2 * m, h + 2 * m));
+        // down the board's middle: the bottom of the body, and just past it
+        let x = m + w / 2;
+        let bottom = (0..h).rev().find(|&y| b.chassis[y * w + w / 2] >= 0.5).unwrap();
+        let below = s.dark[(m + bottom + 3) * cw + x];
+        let top = (0..h).find(|&y| b.chassis[y * w + w / 2] >= 0.5).unwrap();
+        let above = s.dark[(m + top).saturating_sub(3) * cw + x];
+        assert!(below > 0.3, "{below:.3} just below the device");
+        assert!(below > above, "it falls down: {below:.3} below, {above:.3} above");
+        assert!(s.dark[(s.h as usize - 1) * cw + x] < 0.02, "it fades out before the canvas's edge");
     }
 
     /// The board lit by a simulation run to `photons` from each LED.

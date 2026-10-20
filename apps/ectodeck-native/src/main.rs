@@ -299,8 +299,8 @@ mod kept_tests {
 /// it takes a third of a second, and the window keeps drawing meanwhile. Its
 /// legends are set as the light in use asks before it is handed over, so a
 /// keyboard drawn anew never shows the drawing's own legends first.
-fn board_builder(done: calloop::channel::Sender<Board>) -> std::sync::mpsc::Sender<(u32, u32, serde_json::Value)> {
-    let (ask, asked) = std::sync::mpsc::channel::<(u32, u32, serde_json::Value)>();
+fn board_builder(done: calloop::channel::Sender<Board>) -> std::sync::mpsc::Sender<(u32, u32, serde_json::Value, f32)> {
+    let (ask, asked) = std::sync::mpsc::channel::<(u32, u32, serde_json::Value, f32)>();
     std::thread::spawn(move || {
         let tree = cores::shown().tree();
         let device: serde_json::Value = cores::shown().device_now();
@@ -313,6 +313,7 @@ fn board_builder(done: calloop::channel::Sender<Board>) -> std::sync::mpsc::Send
             match Board::new(&tree, &device, GROUND, size.0, size.1) {
                 Ok(mut b) => {
                     b.set_legends_from(&size.2);
+                    b.lay_shadow(&stage_shadow(size.3));
                     eprintln!("ectodeck-native: keyboard drawn at {}x{} in {:?}", size.0, size.1, t.elapsed());
                     if done.send(b).is_err() {
                         return;
@@ -323,6 +324,34 @@ fn board_builder(done: calloop::channel::Sender<Board>) -> std::sync::mpsc::Send
         }
     });
     ask
+}
+
+/// The shadow a device casts on its stage, for a window `scale` pixels to the
+/// page's: two soft layers, a wide one and a close one (as approved in the
+/// mouse's mock, mock/sensei-310-contrast.html: CSS drop shadows of 0 8px
+/// 22px at 60% black and 0 2px 7px at 35%).
+fn stage_shadow(scale: f32) -> [ectodeck_draw::hdr::ShadowLayer; 2] {
+    use ectodeck_draw::hdr::ShadowLayer;
+    [
+        ShadowLayer { down: 8.0 * scale, blur: 22.0 * scale, strength: 0.6 },
+        ShadowLayer { down: 2.0 * scale, blur: 7.0 * scale, strength: 0.35 },
+    ]
+}
+
+/// The part of a device's shadow round its picture, as the page draws it:
+/// black, as dark as the shadow, and clear over the picture itself (which
+/// has that part of the shadow in it).
+fn shadow_image(s: &ectodeck_draw::hdr::Shadow, w: u32, h: u32) -> slint::Image {
+    let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(s.w, s.h);
+    let m = s.margin;
+    for (j, px) in buf.make_mut_slice().iter_mut().enumerate() {
+        let (x, y) = (j as u32 % s.w, j as u32 / s.w);
+        let over = x >= m && x < m + w && y >= m && y < m + h;
+        let a = if over { 0 } else { (s.dark[j] * 255.0).round().clamp(0.0, 255.0) as u8 };
+        // premultiplied: black is all zeros but its alpha
+        *px = slint::Rgba8Pixel { r: 0, g: 0, b: 0, a };
+    }
+    slint::Image::from_rgba8_premultiplied(buf)
 }
 
 /// Set the legends a light asks for, away from the window's thread: setting
@@ -794,7 +823,13 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         let tree = cores::shown().tree();
         let device = device_in_use(&front.settings);
         let t = Instant::now();
-        let board = settled(&tree, &device, rect.2 as u32, rect.3 as u32);
+        let mut board = settled(&tree, &device, rect.2 as u32, rect.3 as u32);
+        // its shadow, as the window lays it
+        board.lay_shadow(&stage_shadow(1.0));
+        if let Some(s) = &board.cast {
+            front.ui.set_board_shadow(shadow_image(s, board.w, board.h));
+            front.ui.set_board_shadow_margin(s.margin as f32);
+        }
         eprintln!("keyboard drawn and its light simulated in {:?}", t.elapsed());
         let lights = front.lights().unwrap_or_default();
         let gain = front.light_gain(reference).max(gain);
@@ -1266,7 +1301,7 @@ struct App {
     /// Performance asks for
     effect_due: Instant,
     asked: Option<(u32, u32)>,
-    build: std::sync::mpsc::Sender<(u32, u32, serde_json::Value)>,
+    build: std::sync::mpsc::Sender<(u32, u32, serde_json::Value, f32)>,
     /// legends to set as the light asks, away from the window
     set_legends: std::sync::mpsc::Sender<ectodeck_draw::hdr::LegendsAsk>,
     /// the whole window needs drawing again, not only what Slint changed
@@ -2149,6 +2184,11 @@ impl App {
     /// The keyboard came back drawn at a size: light it, by the Key lab's
     /// light if it has tuned one.
     fn built(&mut self, mut board: Board) {
+        // its shadow round it, on the box it sits in
+        if let Some(s) = &board.cast {
+            self.front.ui.set_board_shadow(shadow_image(s, board.w, board.h));
+            self.front.ui.set_board_shadow_margin(s.margin as f32 / self.scale as f32);
+        }
         // the Key lab, open before the device was first drawn, takes its caps
         if let Some(l) = self.front.lab.as_mut().filter(|l| !l.has_caps()) {
             l.set_caps(lab_device(Some(&board)).caps);
@@ -2385,7 +2425,7 @@ impl App {
         let want = ((ui.get_board_width() * s).round().max(1.0) as u32, (ui.get_board_height() * s).round().max(1.0) as u32);
         if want.0 > 1 && self.board.as_ref().map(|b| (b.w, b.h)) != Some(want) && self.asked != Some(want) {
             self.asked = Some(want);
-            let _ = self.build.send((want.0, want.1, self.light_now()));
+            let _ = self.build.send((want.0, want.1, self.light_now(), self.scale as f32));
         }
         self.front.board_size(rect.2 as u32, rect.3 as u32, self.scale as f32);
         self.front.ui.set_board_ready(self.lit.is_some());

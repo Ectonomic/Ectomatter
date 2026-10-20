@@ -3620,6 +3620,10 @@ export component AppWindow inherits Window {
     // Ectodeck plays, or (screen-closed) the onboard layout, which the keyboard
     // shows by itself, told to the page as it changes
     in property <image> lcd-big;
+    // the device's shadow on its box, round the device (the part under it is
+    // in the device's own picture), and how far past the device it reaches
+    in property <image> board-shadow;
+    in property <length> board-shadow-margin;
     in property <int> lcd-state;
     in-out property <bool> screen-closed: false;
     callback screen-state();
@@ -5246,6 +5250,22 @@ export component AppWindow inherits Window {
                     width: kb-pad-x;
                     height: board-h;
                     background: Ink.well;
+                }
+                // the device's shadow on the box, kept inside the box's corners
+                if root.tab < 2: Rectangle {
+                    x: pws-x;
+                    y: board-top - kb-pad-y;
+                    width: pws-w;
+                    height: board-h + 2 * kb-pad-y;
+                    border-radius: 12px;
+                    clip: true;
+                    Image {
+                        x: kb-pad-x - root.board-shadow-margin;
+                        y: kb-pad-y - root.board-shadow-margin;
+                        width: board-w + 2 * root.board-shadow-margin;
+                        height: board-h + 2 * root.board-shadow-margin;
+                        source: root.board-shadow;
+                    }
                 }
                 // the keys, over the keyboard's hole: a click on the keyboard away
                 // from every key lets the chosen one go; then what is drawn over it
