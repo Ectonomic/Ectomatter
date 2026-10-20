@@ -163,7 +163,12 @@ struct Run {
     /// calls the core took with take-waiting, until it answers them
     taken: Vec<(u32, Tell)>,
     next_id: u32,
+    /// what the core has told unasked (device/added and the like), until read
+    told: Told,
 }
+
+/// A core's notices, as its thread keeps them and its handle reads them.
+type Told = std::sync::Arc<std::sync::Mutex<Vec<(String, Value)>>>;
 
 type Tell = mpsc::Sender<Result<String, String>>;
 
@@ -223,9 +228,10 @@ impl ectodeck::core::usb::HostHidDevice for Run {
 }
 
 impl ectodeck::core::host::Host for Run {
-    fn notify(&mut self, method: String, _params: String) {
-        // nothing listens yet: the Z10's page asks for everything it shows
+    fn notify(&mut self, method: String, params: String) {
         eprintln!("ectodeck-native: {} told {method}", self.id);
+        let p = serde_json::from_str(&params).unwrap_or(Value::Null);
+        self.told.lock().unwrap_or_else(|p| p.into_inner()).push((method, p));
     }
     fn after(&mut self, ms: u32, tag: u32) {
         self.timers.retain(|&(_, t)| t != tag);
@@ -305,6 +311,7 @@ enum Ask {
 pub struct Core {
     pub id: String,
     ask: mpsc::Sender<Ask>,
+    told: Told,
 }
 
 impl Core {
@@ -315,12 +322,19 @@ impl Core {
         let manifest = Manifest::read(dir)?;
         let id = manifest.id.clone();
         let (ask, asked) = mpsc::channel::<Ask>();
+        let told: Told = Default::default();
         let name = format!("core {id}");
+        let t = told.clone();
         std::thread::Builder::new()
             .name(name)
-            .spawn(move || run(manifest, data, usb, asked))
+            .spawn(move || run(manifest, data, usb, asked, t))
             .map_err(|e| e.to_string())?;
-        Ok(Core { id, ask })
+        Ok(Core { id, ask, told })
+    }
+
+    /// What the core has told since this was last asked, oldest first.
+    pub fn told(&self) -> Vec<(String, Value)> {
+        std::mem::take(&mut *self.told.lock().unwrap_or_else(|p| p.into_inner()))
     }
 
     /// Call `method` with `params`, and wait for the core's answer.
@@ -342,14 +356,14 @@ struct Live {
     core: World,
 }
 
-fn make(engine: &Engine, component: &Component, m: &Manifest, data: &Path, usb: Box<dyn Usb>, asked: Inbox) -> Result<Live, String> {
+fn make(engine: &Engine, component: &Component, m: &Manifest, data: &Path, usb: Box<dyn Usb>, asked: Inbox, told: Told) -> Result<Live, String> {
     std::fs::create_dir_all(data).map_err(|e| format!("{}: {e}", data.display()))?;
     let wasi = WasiCtxBuilder::new()
         .inherit_stderr()
         .preopened_dir(data, "/data", FsPerms::ReadWrite)
         .map_err(|e| format!("{}: {e}", data.display()))?
         .build();
-    let run = Run { wasi, table: ResourceTable::new(), usb, matches: m.matches.clone(), timers: Vec::new(), id: m.id.clone(), asked, held: VecDeque::new(), taken: Vec::new(), next_id: 0 };
+    let run = Run { wasi, table: ResourceTable::new(), usb, matches: m.matches.clone(), timers: Vec::new(), id: m.id.clone(), asked, held: VecDeque::new(), taken: Vec::new(), next_id: 0, told };
     let mut linker = Linker::<Run>::new(engine);
     wasmtime_wasi::p2::add_to_linker_sync(&mut linker).map_err(|e| e.to_string())?;
     World::add_to_linker::<_, HasSelf<_>>(&mut linker, |r| r).map_err(|e| e.to_string())?;
@@ -358,13 +372,13 @@ fn make(engine: &Engine, component: &Component, m: &Manifest, data: &Path, usb: 
     Ok(Live { store, core })
 }
 
-fn run(m: Manifest, data: PathBuf, usb: Box<dyn Usb>, asked: mpsc::Receiver<Ask>) {
+fn run(m: Manifest, data: PathBuf, usb: Box<dyn Usb>, asked: mpsc::Receiver<Ask>, told: Told) {
     let t0 = Instant::now();
     let engine = Engine::default();
     let inbox: Inbox = std::sync::Arc::new(std::sync::Mutex::new(asked));
     let made = Component::from_file(&engine, &m.module)
         .map_err(|e| format!("the {} core's module ({}) would not load: {e}", m.id, m.module.display()))
-        .and_then(|c| make(&engine, &c, &m, &data, usb, inbox.clone()));
+        .and_then(|c| make(&engine, &c, &m, &data, usb, inbox.clone(), told));
     let asked = inbox;
     eprintln!("ectodeck-native: the {} core ({} {}) made ready in {} ms", m.id, m.name, m.version, t0.elapsed().as_millis());
     let mut live = match made {
@@ -620,6 +634,119 @@ mod tests {
         }
         fn read(&mut self, _: u32) -> Result<Vec<u8>, String> {
             Ok(Vec::new())
+        }
+    }
+
+    /// A fake Sensei 310: it keeps every report sent to it, with when, and
+    /// answers the firmware and settings questions as Grant's mouse did
+    /// (firmware 24 01, presets 800 and 1600 with the first in use, both
+    /// lights #FF1000).
+    struct FakeMouse {
+        sent: Arc<Mutex<Vec<(Instant, bool, Vec<u8>)>>>,
+        waiting: VecDeque<Vec<u8>>,
+    }
+
+    const MOUSE_SETTINGS: [u8; 12] = [0x01, 0x01, 0x07, 0x00, 0x0f, 0x00, 0xff, 0x10, 0x00, 0xff, 0x10, 0x00];
+
+    impl Hid for FakeMouse {
+        fn send_feature(&mut self, report: &[u8]) -> Result<(), String> {
+            self.sent.lock().unwrap().push((Instant::now(), true, report.to_vec()));
+            Ok(())
+        }
+        fn get_feature(&mut self, _: u8, _: usize) -> Result<Vec<u8>, String> {
+            Err("the mouse is asked by output reports".into())
+        }
+        fn write(&mut self, report: &[u8]) -> Result<usize, String> {
+            self.sent.lock().unwrap().push((Instant::now(), false, report.to_vec()));
+            let mut answer = vec![0u8; 64];
+            match report.get(1) {
+                Some(0x90) => answer[..2].copy_from_slice(&[0x24, 0x01]),
+                Some(0x92) => answer[..12].copy_from_slice(&MOUSE_SETTINGS),
+                _ => return Ok(report.len()),
+            }
+            self.waiting.push_back(answer);
+            Ok(report.len())
+        }
+        fn read(&mut self, _: u32) -> Result<Vec<u8>, String> {
+            Ok(self.waiting.pop_front().unwrap_or_default())
+        }
+    }
+
+    /// SteelSeries' core, started on a fake Sensei 310 with a folder of its own.
+    fn mouse_core(name: &str) -> (Core, Arc<Mutex<Vec<(Instant, bool, Vec<u8>)>>>, PathBuf) {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let fake = FakeMouse { sent: sent.clone(), waiting: VecDeque::new() };
+        let data = std::env::temp_dir().join(format!("ectodeck-mouse-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data);
+        let dir = crate::cores::dir().join("steelseries");
+        assert!(dir.join("core.wasm").exists(), "the SteelSeries module isn't built: run tools/build-cores.sh");
+        let core = Core::start(&dir, data.clone(), Box::new(One(Some(Box::new(fake))))).unwrap();
+        core.call("initialize", &serde_json::json!({ "protocol": 2 })).unwrap();
+        (core, sent, data)
+    }
+
+    /// Meeting the mouse asks it two questions and writes nothing: the core
+    /// knows its presets and lights' colors from its answer, and announces it.
+    #[test]
+    fn meeting_the_mouse_writes_nothing() {
+        let (core, sent, data) = mouse_core("meet");
+        let told = core.told();
+        let added = told.iter().find(|(m, _)| m == "device/added").map(|(_, p)| p.clone()).expect("device/added");
+        assert_eq!(added["firmware"]["version"], "36.1");
+        assert_eq!(added["controls"].as_array().unwrap().len(), 8);
+        let s = core.call("settings/get", &serde_json::json!({ "device": "sensei310-1" })).unwrap();
+        assert_eq!((s["values"]["cpi1"].as_u64(), s["values"]["cpi2"].as_u64()), (Some(800), Some(1600)));
+        assert_eq!((s["known"]["cpi1"].as_bool(), s["known"]["polling"].as_bool()), (Some(true), Some(false)));
+        let l = core.call("lighting/get", &serde_json::json!({ "device": "sensei310-1" })).unwrap();
+        assert_eq!(l["logo"]["params"]["color"], "#FF1000");
+        core.call("shutdown", &Value::Null).unwrap();
+        let sent: Vec<Vec<u8>> = sent.lock().unwrap().iter().map(|(_, _, b)| b.clone()).collect();
+        let _ = std::fs::remove_dir_all(&data);
+        assert_eq!(sent.len(), 2, "only the two questions: {sent:02x?}");
+        assert_eq!(sent[0], [0x00, 0x90, 0x00], "the firmware's version");
+        assert_eq!(sent[1][..2], [0x00, 0x92], "the settings read");
+    }
+
+    /// A change goes to the mouse at once, as rivalcfg sends it, 50 ms after
+    /// the command before at the soonest; once changes stop, it is kept in
+    /// the mouse's memory, once.
+    #[test]
+    fn a_change_is_sent_then_kept_once() {
+        let (core, sent, data) = mouse_core("change");
+        let at = sent.lock().unwrap().len();
+        let d = serde_json::json!({ "device": "sensei310-1" });
+        core.call("settings/set", &serde_json::json!({ "device": "sensei310-1", "id": "cpi1", "value": 1200 })).unwrap();
+        core.call("settings/set", &serde_json::json!({ "device": "sensei310-1", "id": "polling", "value": 500 })).unwrap();
+        core.call("lighting/set", &serde_json::json!({ "device": "sensei310-1", "light": "logo", "effect": "static", "params": { "color": "#FF0000" } })).unwrap();
+        core.call("keys/set", &serde_json::json!({ "device": "sensei310-1", "layer": "base", "control": "right-side-front", "action": { "key": "F13" } })).unwrap();
+        let soon = sent.lock().unwrap().len();
+        std::thread::sleep(Duration::from_millis(1800));
+        // (a call, so the core's thread has run its timer)
+        let _ = core.call("settings/get", &d);
+        let all = sent.lock().unwrap()[at..].to_vec();
+        let _ = std::fs::remove_dir_all(&data);
+        let b: Vec<&Vec<u8>> = all.iter().map(|(_, _, b)| b).collect();
+        assert_eq!(soon - at, 4, "each change sent at once, nothing kept yet: {b:02x?}");
+        assert_eq!(*b[0], [0x00, 0x53, 0x00, 0x01, 0x0b, 0x00, 0x42], "preset 1 at 1200 CPI");
+        assert_eq!(*b[1], [0x00, 0x54, 0x00, 0x02], "500 Hz");
+        // the logo held red: a 26-byte header (light 0, a second's cycle, held, one stop), the color, the stop
+        let mut light = vec![0x00, 0x5b, 0x00, 0x00, 0xe8, 0x03];
+        light.extend([0u8; 14]);
+        light.push(0x01);
+        light.extend([0u8; 7]);
+        light.push(0x01);
+        light.extend([0xff, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00]);
+        assert_eq!(*b[2], light, "the logo held red");
+        assert!(all[2].1, "a light's effect is a feature report");
+        assert_eq!(b[3][..3], [0x00, 0x31, 0x00], "the buttons");
+        assert_eq!(b[3].len(), 3 + 8 * 5);
+        assert_eq!(b[3][3 + 6 * 5..3 + 6 * 5 + 2], [0x51, 0x68], "button 7 sends F13");
+        assert_eq!(b[3][3 + 5 * 5..3 + 5 * 5 + 2], [0x51, 0x4e], "button 6 still Page Down");
+        assert_eq!(b[3][3 + 7 * 5], 0x30, "button 8 still switches sensitivity");
+        assert_eq!(b.iter().filter(|r| r[..2] == [0x00, 0x59]).count(), 1, "kept once");
+        assert_eq!(*b[4], [0x00, 0x59, 0x00], "kept after the changes");
+        for w in all.windows(2) {
+            assert!(w[1].0 - w[0].0 >= Duration::from_millis(49), "commands 50 ms apart");
         }
     }
 

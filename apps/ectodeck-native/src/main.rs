@@ -1307,6 +1307,8 @@ struct App {
     effect_due: Instant,
     asked: Option<(u32, u32)>,
     build: std::sync::mpsc::Sender<(u32, u32, serde_json::Value, f32)>,
+    /// SteelSeries' core (kept so it keeps running; the mouse has no page yet)
+    _mouse: Option<core_host::Core>,
     /// legends to set as the light asks, away from the window
     set_legends: std::sync::mpsc::Sender<ectodeck_draw::hdr::LegendsAsk>,
     /// the whole window needs drawing again, not only what Slint changed
@@ -1544,6 +1546,24 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         device::start(cores::dir().join(z10::CORE), core_data(z10::CORE), heard_tx)
     });
 
+    // SteelSeries' core, for the Sensei 310: it meets the mouse and announces
+    // it, and writes nothing to it until the mouse has a page to change it from
+    let mouse = core_host::Core::start(&cores::dir().join("steelseries"), core_data("steelseries"), Box::new(core_host::Hidapi::new()))
+        .map_err(|e| eprintln!("ectodeck-native: SteelSeries' core: {e}"))
+        .ok();
+    if let Some(m) = mouse.clone() {
+        std::thread::spawn(move || match m.call("initialize", &serde_json::json!({ "protocol": 2 })) {
+            Ok(_) => {
+                for (method, p) in m.told() {
+                    if method == "device/added" {
+                        eprintln!("ectodeck-native: {} met, firmware {}", p["name"].as_str().unwrap_or("a mouse"), p["firmware"]["version"].as_str().unwrap_or("unknown"));
+                    }
+                }
+            }
+            Err(e) => eprintln!("ectodeck-native: SteelSeries' core: {e}"),
+        });
+    }
+
     // the keyboard lit by the light setup in use, if it is one of the person's own
     let lit_by = setups::in_use(&settings, &cores::shown().id).map(|s| setups::merged(&cores::shown().device_now()["light"], &s.changes));
     let mut app = App {
@@ -1603,6 +1623,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         effect_due: Instant::now(),
         asked: None,
         build,
+        _mouse: mouse,
         set_legends,
         full: true,
         dump: std::env::var_os("ECTODECK_NATIVE_DUMP").map(Into::into),
