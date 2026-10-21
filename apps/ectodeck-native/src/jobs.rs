@@ -119,12 +119,14 @@ impl Job {
 
 /// The names the jobs' words use: the keyboard's profiles (by their numbers,
 /// 1 to 5), the mouse's (by their ids), and Ectodeck's macros (by their
-/// numbers), as the pages last said them.
+/// numbers), as the pages last said them; and the devices as they sit on
+/// Home's desk, left to right (KEYBOARD, MOUSE), which their jobs are listed in.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Names {
     pub keyboard: Vec<(u8, String)>,
     pub mouse: Vec<(String, String)>,
     pub macros: Vec<(u32, String)>,
+    pub order: Vec<&'static str>,
 }
 
 impl Names {
@@ -163,14 +165,23 @@ impl Names {
     /// macros.
     pub fn for_device(&self, device: &str) -> Vec<(String, Job)> {
         let mut out: Vec<Job> = Vec::new();
-        if device != KEYBOARD && !self.keyboard.is_empty() {
-            out.extend(self.keyboard.iter().map(|(n, _)| Job::KeyboardProfile(Jump::To(*n as u32))));
-            out.extend([Job::KeyboardProfile(Jump::Next), Job::KeyboardProfile(Jump::Previous)]);
-            out.extend([crate::z10::NEXT_LAYOUT, crate::z10::PREV_LAYOUT, crate::z10::NEXT_PLAYLIST, crate::z10::PREV_PLAYLIST].map(Job::Screen));
+        // (each other device's, as they sit on the desk)
+        let mut order: Vec<&str> = self.order.clone();
+        for d in [KEYBOARD, MOUSE] {
+            if !order.contains(&d) {
+                order.push(d);
+            }
         }
-        if device != MOUSE && !self.mouse.is_empty() {
-            out.extend(self.mouse.iter().map(|(id, _)| Job::MouseProfile(To::Id(id.clone()))));
-            out.extend([Job::MouseProfile(To::Next), Job::MouseProfile(To::Previous)]);
+        for d in order {
+            if d == KEYBOARD && device != KEYBOARD && !self.keyboard.is_empty() {
+                out.extend(self.keyboard.iter().map(|(n, _)| Job::KeyboardProfile(Jump::To(*n as u32))));
+                out.extend([Job::KeyboardProfile(Jump::Next), Job::KeyboardProfile(Jump::Previous)]);
+                out.extend([crate::z10::NEXT_LAYOUT, crate::z10::PREV_LAYOUT, crate::z10::NEXT_PLAYLIST, crate::z10::PREV_PLAYLIST].map(Job::Screen));
+            }
+            if d == MOUSE && device != MOUSE && !self.mouse.is_empty() {
+                out.extend(self.mouse.iter().map(|(id, _)| Job::MouseProfile(To::Id(id.clone()))));
+                out.extend([Job::MouseProfile(To::Next), Job::MouseProfile(To::Previous)]);
+            }
         }
         if device == KEYBOARD {
             out.extend(self.macros.iter().map(|(n, _)| Job::Macro { n: *n, plays: Plays::Once }));
@@ -218,7 +229,7 @@ mod tests {
     /// the keyboard the mouse's and Ectodeck's macros; each in words.
     #[test]
     fn a_device_is_offered_the_others_jobs() {
-        let names = Names { keyboard: vec![(1, "Work".into()), (2, "Profile 2".into())], mouse: vec![("pa".into(), "Games".into())], macros: vec![(1, "Copy".into())] };
+        let names = Names { keyboard: vec![(1, "Work".into()), (2, "Profile 2".into())], mouse: vec![("pa".into(), "Games".into())], macros: vec![(1, "Copy".into())], order: vec![MOUSE, KEYBOARD] };
         let mouse: Vec<String> = names.for_device(MOUSE).into_iter().map(|(w, _)| w).collect();
         assert_eq!(mouse[..3], ["Keyboard: Work", "Keyboard: Profile 2", "Keyboard: next profile"]);
         assert!(mouse.iter().all(|w| !w.starts_with("Mouse")), "none of its own");

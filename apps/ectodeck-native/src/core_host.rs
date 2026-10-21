@@ -989,6 +989,41 @@ mod tests {
         assert_eq!(s[1], crate::lcd_player::frame(&[], 0).to_vec(), "handed back as the player did");
     }
 
+    /// A key with modifiers held goes on a button as libratbag puts it there
+    /// (its steelseries driver: 0x51, the modifiers' usages in order, then
+    /// the key), so Grant's own desktop bindings, set by game-helper through
+    /// ratbagctl, are the bytes Ectodeck sends for them too.
+    #[test]
+    fn a_shortcut_goes_on_a_button_as_libratbag_writes_it() {
+        let (core, sent, data) = mouse_core("chord");
+        let d = "sensei310-1";
+        for (control, action) in [
+            ("left-side-back", serde_json::json!({ "shortcut": ["LeftCtrl", "LeftShift", "Tab"] })),
+            ("left-side-front", serde_json::json!({ "shortcut": ["LeftCtrl", "T"] })),
+            ("right-side-back", serde_json::json!({ "key": "F5" })),
+            ("right-side-front", serde_json::json!({ "shortcut": ["LeftCtrl", "W"] })),
+            ("cpi", serde_json::json!({ "shortcut": ["LeftMeta", "W"] })),
+        ] {
+            core.call("keys/set", &serde_json::json!({ "device": d, "layer": "base", "control": control, "action": action })).unwrap();
+        }
+        let buttons = sent.lock().unwrap().iter().rev().find(|(_, _, b)| b[..2] == [0x00, 0x31]).map(|(_, _, b)| b.clone()).expect("the buttons sent");
+        let want: [[u8; 5]; 8] = [
+            [1, 0, 0, 0, 0],
+            [2, 0, 0, 0, 0],
+            [3, 0, 0, 0, 0],
+            [0x51, 0xE0, 0xE1, 0x2B, 0],
+            [0x51, 0xE0, 0x17, 0, 0],
+            [0x51, 0x3E, 0, 0, 0],
+            [0x51, 0xE0, 0x1A, 0, 0],
+            [0x51, 0xE3, 0x1A, 0, 0],
+        ];
+        assert_eq!(buttons[3..3 + 40], want.concat(), "each button as libratbag writes it");
+        // more than three modifiers, or two keys, the mouse can't hold
+        assert!(core.call("keys/set", &serde_json::json!({ "device": d, "layer": "base", "control": "cpi", "action": { "shortcut": ["LeftCtrl", "LeftShift", "LeftAlt", "LeftMeta", "A"] } })).is_err());
+        assert!(core.call("keys/set", &serde_json::json!({ "device": d, "layer": "base", "control": "cpi", "action": { "shortcut": ["A", "B"] } })).is_err());
+        let _ = std::fs::remove_dir_all(&data);
+    }
+
     /// The mouse as its page's thread hears it, from the core on the fake
     /// mouse, saved where MOUSE_STATE_OUT says (for snapshots of the page).
     #[test]

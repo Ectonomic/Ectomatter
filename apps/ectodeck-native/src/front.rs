@@ -352,7 +352,7 @@ pub enum WindowAsk {
     MacroPlays(u32, ectodeck_protocol::Plays),
     /// one of Ectodeck's macros deleted: the controls that ran it do nothing now
     MacroGone(u32),
-    /// open the Key lab's window
+    /// open the lab's window
     OpenLab,
     /// open the screen layout editor's window, on this layout of the Library
     OpenLayouts(usize),
@@ -605,7 +605,7 @@ pub struct Front {
     mouse_hdr: Option<(f32, crate::mouse_art::Hdr)>,
     mouse_lit: Option<Rc<crate::picture::Lit>>,
     mouse_part: (usize, usize, usize, usize),
-    /// the light the mouse is lit by while the Key lab tunes it (none: as its
+    /// the light the mouse is lit by while the lab tunes it (none: as its
     /// core's file has it), and the drawing's pixels to a millimeter
     mouse_light: Option<serde_json::Value>,
     mouse_px_mm: f32,
@@ -675,7 +675,7 @@ pub struct Front {
     pub restart: Option<String>,
     /// the Macro Editor's window, once it has been opened
     pub macros: Option<crate::macro_page::MacroPage>,
-    /// the Key lab's window, once it has been opened
+    /// the lab's window, once it has been opened
     pub lab: Option<crate::lab::LabPage>,
     /// the keys whose caps have tops pale enough that a new meaning printed
     /// on them reads in dark ink, by their place in the keyboard's reports
@@ -1385,7 +1385,10 @@ impl Front {
                     self.close_menu();
                     self.close_picker();
                     if self.mouse.tab == 1 {
-                        self.mouse.light = (i.max(0) as usize).min(1);
+                        // (the rows in the core's order, as the lights are on the mouse)
+                        if let Some((l, ..)) = self.mouse.light_order().get(i.max(0) as usize) {
+                            self.mouse.light = *l;
+                        }
                     } else {
                         // selecting the chosen button again lets it go
                         let b = (i.max(0) as usize).min(7);
@@ -2040,7 +2043,7 @@ impl Front {
                     self.ui.set_place(place.into());
                 }
                 // the item already chosen opens the rail into its blade, or closes it
-                // the Key lab is a window of its own, not a place in this one
+                // the lab is a window of its own, not a place in this one
                 Ask::Rail(place) if place == "lab" => {
                     self.close_menu();
                     window.push(WindowAsk::OpenLab);
@@ -2116,7 +2119,7 @@ impl Front {
         self.pale = controls.iter().filter_map(|c| Some((c["id"].as_str()?, c["pos"].as_u64()? as u32))).filter(|(id, _)| ectodeck_draw::hdr::pale_top(light, id)).map(|(_, pos)| pos).collect();
     }
 
-    /// Do what the Key lab asked; what only its window can do is handed back.
+    /// Do what the lab asked; what only its window can do is handed back.
     /// (The picker's answer for a typeface, not a part's picture.)
     pub fn act_lab(&mut self) -> Vec<WindowAsk> {
         let Some(l) = &mut self.lab else { return Vec::new() };
@@ -4332,7 +4335,44 @@ impl Front {
         let all = crate::library::all();
         let mut macros: Vec<(u32, String)> = all.as_object().map(|m| m.iter().filter_map(|(n, v)| Some((n.parse().ok()?, v["name"].as_str().filter(|s| !s.is_empty()).map_or_else(|| format!("Macro {n}"), String::from)))).collect()).unwrap_or_default();
         macros.sort();
-        crate::jobs::Names { keyboard, mouse, macros }
+        // (the devices' jobs as they sit on the desk)
+        let order = self.desk.order().iter().filter_map(|id| match id.as_str() {
+            "z10" => Some(crate::jobs::KEYBOARD),
+            "mouse" => Some(crate::jobs::MOUSE),
+            _ => None,
+        }).collect();
+        crate::jobs::Names { keyboard, mouse, macros, order }
+    }
+
+    /// The devices Ectodeck shows, as they sit on Home's desk (left to right),
+    /// then any not on it yet: each one's place, its name, what sort it is,
+    /// and whether it is plugged in. The keyboard is always among them, the
+    /// mouse once Ectodeck has met it.
+    pub fn devices_in_order(&self) -> Vec<(String, String, String, bool)> {
+        let kb = || ("z10".to_string(), crate::cores::shown().name().to_string(), "keyboard".to_string(), self.ui.get_conn_state() == 1);
+        let mouse = || {
+            let name = self.mouse.state["device"]["name"].as_str().unwrap_or("SteelSeries Sensei 310").to_string();
+            ("mouse".to_string(), name, "mouse".to_string(), self.mouse.present())
+        };
+        let mut out: Vec<(String, String, String, bool)> = Vec::new();
+        for id in self.desk.order().iter().map(String::as_str).chain(["z10", "mouse"]) {
+            if out.iter().any(|d| d.0 == id) {
+                continue;
+            }
+            match id {
+                "z10" => out.push(kb()),
+                "mouse" if self.mouse.known() => out.push(mouse()),
+                _ => {}
+            }
+        }
+        out
+    }
+
+    /// The rail's devices, as they sit on Home's desk.
+    fn show_rail(&self) {
+        let ui = &self.ui;
+        let rows: Vec<crate::RailDevice> = self.devices_in_order().into_iter().map(|(place, name, kind, _)| crate::RailDevice { place: place.into(), name: name.into(), kind: kind.into() }).collect();
+        show_rows(ui.get_rail_devices(), |r| ui.set_rail_devices(r), rows);
     }
 
     /// What the mouse's core says, from the mouse's thread.
@@ -4363,6 +4403,7 @@ impl Front {
             }
         }
         self.ui.set_mouse_known(self.mouse.known());
+        self.show_rail();
         self.ui.set_mouse_conn(if !self.mouse.known() { 0 } else if self.mouse.present() { 1 } else { 2 });
         // the picture drawn ahead of the page's being opened
         if self.mouse.known() {
@@ -4509,13 +4550,13 @@ impl Front {
         }
     }
 
-    /// How the mouse's lights are made: as the Key lab tunes them, or as its
+    /// How the mouse's lights are made: as the lab tunes them, or as its
     /// core's light file has them.
     pub fn mouse_light_model(&self) -> serde_json::Value {
         self.mouse_light.clone().unwrap_or_else(|| crate::mouse::light_model(&self.mouse.state["device"]))
     }
 
-    /// The mouse lit as the Key lab tunes it: its lamps made again for that.
+    /// The mouse lit as the lab tunes it: its lamps made again for that.
     pub fn set_mouse_light(&mut self, light: serde_json::Value) {
         self.mouse_light = Some(light);
         if let Some((scale, imgs)) = &self.mouse_layers {
@@ -4574,20 +4615,21 @@ impl Front {
         })
     }
 
-    /// The mouse's lights as the Key lab chooses them, one at a time: each
+    /// The mouse's lights as the lab chooses them, one at a time: each
     /// where its window is on the drawing, by its id and name. None before
     /// the mouse's picture is drawn.
     pub fn mouse_lab_parts(&self) -> Option<Vec<ectodeck_draw::hdr::CapShape>> {
         let (scale, imgs) = self.mouse_layers.as_ref()?;
         let boxes = crate::mouse_art::light_boxes(&imgs.layers, (240.0 * scale).round() as u32);
-        let names = self.mouse.state["device"]["capabilities"]["lighting"]["lights"].as_array().cloned().unwrap_or_default();
+        // (in the core's order, as the lights are on the mouse)
         Some(
-            crate::mouse_art::LIGHT_IDS
-                .iter()
-                .zip(boxes)
-                .map(|(id, b)| {
-                    let label = names.iter().find(|l| l["id"] == *id).and_then(|l| l["label"].as_str().map(String::from)).unwrap_or_else(|| id.to_string());
-                    ectodeck_draw::hdr::CapShape { id: id.to_string(), label, short: None, foot: b, lit: true, legend: false, button: false, face: b, print: None, bump: Default::default() }
+            self.mouse
+                .light_order()
+                .into_iter()
+                .filter_map(|(i, id, label)| {
+                    let b = *boxes.get(crate::mouse_art::LIGHT_IDS.iter().position(|l| *l == id)?)?;
+                    let _ = i;
+                    Some(ectodeck_draw::hdr::CapShape { id: id.to_string(), label, short: None, foot: b, lit: true, legend: false, button: false, face: b, print: None, bump: Default::default() })
                 })
                 .collect(),
         )
@@ -4758,6 +4800,7 @@ impl Front {
         ui.set_desk_pad_pictured(chosen.is_some_and(|p| p.picture.is_some()));
         ui.set_desk_pad_note(self.pad_note.as_str().into());
         ui.set_desk_editing(d.editing);
+        self.show_rail();
         ui.set_desk_panning(d.panning());
         ui.set_desk_carrying(d.carrying());
         ui.set_desk_zoom(d.zoom_text().into());

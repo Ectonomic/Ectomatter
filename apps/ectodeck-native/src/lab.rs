@@ -1,4 +1,5 @@
-//! The Key lab: a developer's window for tuning how a device is lit,
+//! The lab, named for the device it tunes (the Keyboard lab, the Mouse lab):
+//! a developer's window for tuning how a device is lit,
 //! whichever device it is: it knows none, and works from what the device's
 //! core describes (see LabDevice). The light is simulated (see
 //! ectodeck_draw's sim): each LED followed through the device's shape. The
@@ -644,6 +645,9 @@ const HELP_H: f32 = 44.0;
 /// in section as the art has it; and the key drawn for all keys.
 pub struct LabDevice {
     pub name: String,
+    /// what sort of device it is, as its core says (`keyboard`, `mouse`), for
+    /// the lab's own name: the Keyboard lab, the Mouse lab
+    pub kind: String,
     /// its core's id, which the person's own setups of its light are kept under
     pub core: String,
     pub path: std::path::PathBuf,
@@ -663,7 +667,22 @@ pub struct LabDevice {
     pub print: Value,
 }
 
+/// The lab's name for a device of `kind`, as its core says what sort it is:
+/// the Keyboard lab, the Mouse lab, a Deck lab; the Device lab where it says none.
+pub fn lab_name(kind: &str) -> String {
+    let mut c = kind.trim().chars();
+    match c.next() {
+        Some(f) => format!("{}{} lab", f.to_uppercase(), c.as_str().to_lowercase()),
+        None => "Device lab".into(),
+    }
+}
+
 impl LabDevice {
+    /// The lab's name for this device: Keyboard lab, Mouse lab.
+    pub fn lab(&self) -> String {
+        lab_name(&self.kind)
+    }
+
     /// A cap's section, by its control's id.
     fn geometry(&self, id: &str) -> Option<&KeyGeometry> {
         self.caps.iter().find(|(c, _)| c.id == id).and_then(|(_, g)| g.as_ref())
@@ -1012,6 +1031,7 @@ impl LabPage {
     pub fn new(ui: LabWindow, mark: slint::Image, light: Value, device: LabDevice, setup: Option<String>) -> LabPage {
         let asks = Rc::new(RefCell::new(Vec::new()));
         ui.set_device_name(device.name.as_str().into());
+        ui.set_lab_name(device.lab().into());
         macro_rules! on {
             ($set:ident, |$($p:ident),*| $ask:expr) => {{
                 let a = asks.clone();
@@ -2009,7 +2029,7 @@ impl LabPage {
         if let Some(id) = self.setup.clone() {
             let name = self.setup_name();
             let s = Setup { id, name: name.clone(), changes: self.changes_of(&self.light) };
-            self.status = match setups::write(&self.device.core, &self.device.name, &s, &|path, v| self.file_note(path, v)) {
+            self.status = match setups::write(&self.device.core, &self.device.name, &self.device.lab(), &s, &|path, v| self.file_note(path, v)) {
                 Ok(()) => {
                     self.saved = self.light.clone();
                     self.setups = setups::list(&self.device.core);
@@ -2441,12 +2461,12 @@ impl LabPage {
         let id = setups::id_for(&name, &ids);
         let result = match self.menu {
             // the light as it is, changes and all: the setup it came from stays as saved
-            Menu::New => setups::write(&core, &self.device.name, &Setup { id: id.clone(), name: name.clone(), changes: self.changes_of(&self.light) }, &|path, v| self.file_note(path, v)),
+            Menu::New => setups::write(&core, &self.device.name, &self.device.lab(), &Setup { id: id.clone(), name: name.clone(), changes: self.changes_of(&self.light) }, &|path, v| self.file_note(path, v)),
             // the one in use, its saved changes under its new name (its file named anew with it)
             _ => {
                 let was = self.setups.iter().find(|s| Some(&s.id) == self.setup.as_ref()).cloned();
                 match was {
-                    Some(was) => setups::write(&core, &self.device.name, &Setup { id: id.clone(), name: name.clone(), changes: was.changes.clone() }, &|path, v| self.file_note(path, v)).and_then(|_| if was.id != id { setups::remove(&core, &was.id) } else { Ok(()) }),
+                    Some(was) => setups::write(&core, &self.device.name, &self.device.lab(), &Setup { id: id.clone(), name: name.clone(), changes: was.changes.clone() }, &|path, v| self.file_note(path, v)).and_then(|_| if was.id != id { setups::remove(&core, &was.id) } else { Ok(()) }),
                     None => Err("it is not there".into()),
                 }
             }
@@ -2988,7 +3008,7 @@ impl LabPage {
         let color = |c: [u8; 3]| slint::Color::from_rgb_u8(c[0], c[1], c[2]);
         let in_color = |st: i32, x: f32, y: f32, ww: f32, hh: f32, s: &str, c: [u8; 3]| Cell { color: color(c), ..text_cell(st, x, y, ww, hh, s) };
         // the head: the title and what the lab is, and the sections
-        let mut cells = vec![text_cell(style::TITLE, 24.0, 14.0, 300.0, 29.0, "Key lab")];
+        let mut cells = vec![text_cell(style::TITLE, 24.0, 14.0, 300.0, 29.0, &self.device.lab())];
         let mut bx = 0.0;
         let mut tabs = Vec::new();
         for i in self.sections() {

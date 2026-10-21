@@ -114,7 +114,7 @@ export struct Overlay {
     // a knob: how far its track runs, and how far along it the slider is (0 to 1)
     travel: length,
     frac: float,
-    // how strongly it shows: the display's glass as the Key lab sets its sheen
+    // how strongly it shows: the display's glass as the lab sets its sheen
     opacity: float,
 }
 
@@ -262,6 +262,14 @@ export struct MousePatch {
 // draws in its place, 1 the mouse), its name and what is said under it, where
 // it is on the desk and its size, whether it is plugged in, and whether the
 // pointer is over it
+// a device in the rail, as it sits on Home's desk: its place (its page), its
+// name, and what sort it is, for its glyph
+export struct RailDevice {
+    place: string,
+    name: string,
+    kind: string,
+}
+
 export struct DeskItem {
     kind: int,
     name: string,
@@ -1453,7 +1461,7 @@ component CellView inherits Rectangle {
             }
         }
     }
-    // a number to type, as the Key lab's values are: Enter or leaving the
+    // a number to type, as the lab's values are: Enter or leaving the
     // box sets it, Escape puts it back as it was; set elsewhere (its slider),
     // the box follows unless it is being typed in
     if root.c.kind == 15: Rectangle {
@@ -1538,7 +1546,7 @@ component CellView inherits Rectangle {
     }
     // a switch's choice, an area chip, a button, the reset: words on a shade
     // (style 24: it opens a list, a chevron after its words; 25: a key on the
-    // Key lab's map, its words small; 26: not to be chosen here, its words
+    // lab's map, its words small; 26: not to be chosen here, its words
     // faint; 29: the page round a menu, which shuts it, with no shade or hand; 33: a small
     // button, as a card's Make main)
     if root.c.kind >= 5 && root.c.kind <= 8: Rectangle {
@@ -3793,9 +3801,11 @@ export component AppWindow inherits Window {
     in property <image> mouse-glyph;
     in property <image> mouse-tile;
     in property <bool> mouse-known;
+    // the devices in the rail, as they sit on Home's desk, left to right
+    in property <[RailDevice]> rail-devices;
     in property <int> mouse-conn;
     in property <image> settings-glyph;
-    // the Key lab's flask, and whether its window is open
+    // the lab's flask, and whether its window is open
     in property <bool> lab-open;
     in property <int> tab: 0;
     in-out property <string> place: "home";
@@ -5330,7 +5340,7 @@ export component AppWindow inherits Window {
                             clicked => { root.mouse-undo(); }
                         }
                     }
-                    // the Macro Editor, on Ectodeck's own macros, and the Key lab, on the
+                    // the Macro Editor, on Ectodeck's own macros, and the lab, on the
                     // mouse's lights, at the bar's end
                     HorizontalLayout {
                         horizontal-stretch: 0;
@@ -6750,7 +6760,7 @@ export component AppWindow inherits Window {
                             clicked => { root.undo(false); }
                         }
                     }
-                    // the Macro Editor, the Screen Editor and the Key lab, at the bar's end
+                    // the Macro Editor, the Screen Editor and the lab, at the bar's end
                     HorizontalLayout {
                         horizontal-stretch: 0;
                         spacing: 8px;
@@ -6880,27 +6890,17 @@ export component AppWindow inherits Window {
             reveal: root.reveal;
             clicked => { root.rail("home"); }
         }
-        r-z10 := RailItem {
+        // (the devices, as they sit on Home's desk, left to right)
+        for d[i] in root.rail-devices: RailItem {
             x: 10px;
-            y: 10px + 40px + 4px + 8px + 4px;
+            y: 10px + 40px + 4px + 8px + 4px + i * (40px + 4px);
             width: rail-w - 20px;
-            glyph: root.keyboard-glyph;
-            name: "EVGA Z10 RGB";
-            on: root.place == "z10";
+            glyph: d.kind == "mouse" ? root.mouse-glyph : root.keyboard-glyph;
+            name: d.name;
+            on: root.place == d.place;
             open: root.rail-open;
             reveal: root.reveal;
-            clicked => { root.rail("z10"); }
-        }
-        if root.mouse-known: RailItem {
-            x: 10px;
-            y: 10px + 40px + 4px + 8px + 4px + 40px + 4px;
-            width: rail-w - 20px;
-            glyph: root.mouse-glyph;
-            name: "SteelSeries Sensei 310";
-            on: root.place == "mouse";
-            open: root.rail-open;
-            reveal: root.reveal;
-            clicked => { root.rail("mouse"); }
+            clicked => { root.rail(d.place); }
         }
         r-settings := RailItem {
             x: 10px;
@@ -9465,7 +9465,7 @@ export component LayoutWindow inherits Window {
     }
 }
 
-// The stage of the Key lab: a section's drawing of the key, with the
+// The stage of the lab: a section's drawing of the key, with the
 // line from each slider to its part, drawn in Rust at the window's own pixels;
 // its words are cells over it.
 export struct Sketch {
@@ -9476,7 +9476,7 @@ export struct Sketch {
     image: image,
 }
 
-// One of the Key lab's sliders, where it stands beside the drawing: its
+// One of the lab's sliders, where it stands beside the drawing: its
 // name, its box and unit (a derived one, as a beam's angle, quieter), its
 // knob along its track, where it was saved, if it has moved from there,
 // whether its value is other than the saved one, which its reset puts back,
@@ -9499,7 +9499,7 @@ export struct LabRow {
     high: string,
 }
 
-// A slider of the Key lab: the whole row tells the page when the
+// A slider of the lab: the whole row tells the page when the
 // pointer is over it, so its line and its part light up whether the pointer
 // is on its name, its box or its track.
 component LabControl inherits Rectangle {
@@ -9610,7 +9610,7 @@ component LabControl inherits Rectangle {
     }
 }
 
-// The Key lab: a developer's window for tuning how the Z10's keys are
+// The lab: a developer's window for tuning how the Z10's keys are
 // lit, beside the main window so the keyboard stays in view as it changes.
 // Landscape, one section at a time: its drawing in the middle, its sliders
 // round it, the line under it saying what the slider under the pointer does,
@@ -9619,6 +9619,8 @@ export component LabWindow inherits Window {
     in property <bool> is-maximized;
     // the device the lab tunes, for its title bar
     in property <string> device-name: "EVGA Z10 RGB";
+    // the lab's name for the device: its kind's (Keyboard lab, Mouse lab)
+    in property <string> lab-name: "Keyboard lab";
     in property <image> mark;
     in property <[Cell]> cells;
     in property <[Sketch]> sketches;
@@ -9740,7 +9742,7 @@ export component LabWindow inherits Window {
             spacing: 6px;
             Text { text: root.device-name; font-size: 13px; color: Ink.dim; vertical-alignment: center; }
             Text { text: "/"; font-size: 13px; color: #4a4a52; vertical-alignment: center; }
-            Text { text: "Key lab"; font-size: 13px; color: Ink.dim; vertical-alignment: center; }
+            Text { text: root.lab-name; font-size: 13px; color: Ink.dim; vertical-alignment: center; }
         }
         HorizontalLayout {
             x: parent.width - 120px;

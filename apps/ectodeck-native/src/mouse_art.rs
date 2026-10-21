@@ -37,8 +37,21 @@ const SURFACES: [&[&str]; 8] = [
 /// so a light dimmed shows as the drawing does with its groups faded.
 const GROUPS: [(usize, &str); 4] = [(0, "illumination_9"), (1, "illumination_3"), (0, "illumination_209"), (1, "illumination_203")];
 
+/// The drawing's own glow round the logo on the palm, drawn before the light
+/// was simulated: no part of the logo's window. In HDR the lamp's halo is the
+/// glow (as much as the light's `halo` says, none at 0%).
+const GLOW: &str = "illumination_9";
+
 /// How a light shows: its color, or off.
 pub type Lit = Option<[u8; 3]>;
+
+/// The mouse's colors as it shows, lightened so its black matches the
+/// keyboard's beside it (Grant, 2026-10-21): the keyboard's plastic comes out
+/// at about 40 of 255 on the desk (its plate, its caps), lit by the keys' room
+/// light, where the drawing's own colors brought the mouse's buttons to 30.
+/// The drawing and what is measured from it stay as drawn: the light goes on
+/// as the picture is made for the screen (unlit, loose).
+const BLACK_LIFT: f32 = 1.33;
 
 /// A piece of the picture, and where its top left corner is on the whole
 /// picture, in pixels.
@@ -163,7 +176,7 @@ impl Hdr {
     pub fn new(l: &Layers, light: &serde_json::Value, px_mm: f32) -> Hdr {
         let lamps = (0..2)
             .map(|li| {
-                let ps: Vec<&Patch> = l.lights.iter().zip(GROUPS).filter(|(_, (g, _))| *g == li).map(|(p, _)| p).collect();
+                let ps: Vec<&Patch> = l.lights.iter().zip(GROUPS).filter(|(_, (g, id))| *g == li && *id != GLOW).map(|(p, _)| p).collect();
                 let x0 = ps.iter().map(|p| p.x).min().unwrap_or(0);
                 let y0 = ps.iter().map(|p| p.y).min().unwrap_or(0);
                 let x1 = ps.iter().map(|p| p.x + p.px.width()).max().unwrap_or(1);
@@ -265,7 +278,8 @@ fn unlit(l: &Layers, stage: [u8; 3], chosen: Option<u8>, hover: Option<u8>) -> V
         .chunks_exact(4)
         .map(|p| {
             let a = p[3] as f32 / 255.0;
-            [p[0] as f32 / 255.0 + st[0] * (1.0 - a), p[1] as f32 / 255.0 + st[1] * (1.0 - a), p[2] as f32 / 255.0 + st[2] * (1.0 - a)]
+            let c = |v: u8| (v as f32 / 255.0 * BLACK_LIFT).min(a);
+            [c(p[0]) + st[0] * (1.0 - a), c(p[1]) + st[1] * (1.0 - a), c(p[2]) + st[2] * (1.0 - a)]
         })
         .collect();
     let mut lay = |p: &Patch, f: &dyn Fn(&[u8]) -> ([f32; 3], f32)| {
@@ -283,7 +297,11 @@ fn unlit(l: &Layers, stage: [u8; 3], chosen: Option<u8>, hover: Option<u8>) -> V
         }
     };
     if let Some(p) = chosen.and_then(|n| l.chosen.get((n as usize).wrapping_sub(1))) {
-        lay(p, &|px| ([px[0] as f32 / 255.0, px[1] as f32 / 255.0, px[2] as f32 / 255.0], px[3] as f32 / 255.0));
+        lay(p, &|px| {
+            let a = px[3] as f32 / 255.0;
+            let c = |v: u8| (v as f32 / 255.0 * BLACK_LIFT).min(a);
+            ([c(px[0]), c(px[1]), c(px[2])], a)
+        });
     }
     if let Some(p) = hover.and_then(|n| l.shapes.get((n as usize).wrapping_sub(1))) {
         lay(p, &|px| {
@@ -316,10 +334,11 @@ fn loose(l: &Layers, dim: f32) -> Vec<f32> {
             continue;
         }
         let k = 1.0 - (1.0 - a).powf(2.2);
-        // (its straight color, from the page's premultiplied, before the dimming)
+        // (its straight color, from the page's premultiplied, before the
+        // dimming; lightened to the keyboard's black, see BLACK_LIFT)
         let pa = p[3] as f32 / 255.0;
         for c in &p[..3] {
-            out.push((*c as f32 / 255.0 / pa).min(1.0).powf(2.2) * k);
+            out.push((*c as f32 / 255.0 / pa * BLACK_LIFT).min(1.0).powf(2.2) * k);
         }
         out.push(k);
     }
@@ -681,6 +700,119 @@ mod hdr_tests {
             assert!((got - m.lumens * (m.through + m.halo)).abs() < 0.02 * m.lumens, "{} gives off what its LED lets out", LIGHT_IDS[i]);
             assert!(lamp.peak() > 100.0, "{} lit brighter than the page's white", LIGHT_IDS[i]);
         }
+    }
+}
+
+#[cfg(test)]
+mod halo_tests {
+    use super::*;
+
+    /// At a halo of 0% the logo's light stays on its window: none lands on the
+    /// palm round it. (Its window is the lit logo, not the drawing's own glow.)
+    #[test]
+    fn no_halo_lights_nothing_past_the_window() {
+        let art = std::fs::read_to_string(crate::cores::dir().join("steelseries/art/sensei-310.svg")).unwrap();
+        let l = layers(&art, 240, &[ectodeck_draw::hdr::ShadowLayer { down: 8.0, blur: 22.0, strength: 0.6 }], 0.5).unwrap();
+        let light = serde_json::json!({ "window": { "halo": 0.0 } });
+        let hdr = Hdr::new(&l, &light, px_mm(240, 520.0 / 125.1));
+        let logo = &hdr.lamps[0];
+        // the lit logo's own coverage, where light may be
+        let ps: Vec<&Patch> = l.lights.iter().zip(GROUPS).filter(|(_, (g, id))| *g == 0 && *id != GLOW).map(|(p, _)| p).collect();
+        let on_window = |x: i32, y: i32| ps.iter().any(|p| {
+            let (lx, ly) = (x - p.x as i32, y - p.y as i32);
+            lx >= 0 && ly >= 0 && p.px.pixel(lx as u32, ly as u32).is_some_and(|c| c.alpha() > 0)
+        });
+        let mut past = 0;
+        for y in 0..logo.h {
+            for x in 0..logo.w {
+                if logo.at(x, y) > 0.0 && !on_window(logo.x + x as i32, logo.y + y as i32) {
+                    past += 1;
+                }
+            }
+        }
+        assert_eq!(past, 0, "{past} pixels lit past the logo's window");
+        assert!(logo.peak() > 100.0, "the logo itself lit");
+    }
+}
+
+#[cfg(test)]
+mod halo_fit {
+    use super::*;
+    use ectodeck_draw::hdr::lamp::{Lamp, Make};
+
+    /// The logo's window from the groups `ids`, as Hdr::new makes it.
+    fn lamp(l: &Layers, ids: &[&str], px_mm: f32, make: &Make) -> Lamp {
+        let ps: Vec<&Patch> = l.lights.iter().zip(GROUPS).filter(|(_, (_, g))| ids.contains(g)).map(|(p, _)| p).collect();
+        let x0 = ps.iter().map(|p| p.x).min().unwrap();
+        let y0 = ps.iter().map(|p| p.y).min().unwrap();
+        let x1 = ps.iter().map(|p| p.x + p.px.width()).max().unwrap();
+        let y1 = ps.iter().map(|p| p.y + p.px.height()).max().unwrap();
+        let (w, h) = ((x1 - x0) as usize, (y1 - y0) as usize);
+        let mut cover = vec![0f32; w * h];
+        for p in &ps {
+            let pw = p.px.width() as usize;
+            for (i, px) in p.px.data().chunks_exact(4).enumerate() {
+                let a = px[3] as f32 / 255.0;
+                let j = (i / pw + (p.y - y0) as usize) * w + i % pw + (p.x - x0) as usize;
+                cover[j] = 1.0 - (1.0 - cover[j]) * (1.0 - a);
+            }
+        }
+        Lamp::new(&cover, w, h, x0 as i32, y0 as i32, px_mm, make)
+    }
+
+    /// The logo's light as the drawing's own glow made it (its glow group in
+    /// the window), against the logo's window alone with a halo of its own:
+    /// the make that comes closest, over the mouse's shell.
+    #[test]
+    #[ignore]
+    fn fit_the_logo_halo() {
+        let art = std::fs::read_to_string(crate::cores::dir().join("steelseries/art/sensei-310.svg")).unwrap();
+        let l = layers(&art, 240, &[ectodeck_draw::hdr::ShadowLayer { down: 8.0, blur: 22.0, strength: 0.6 }], 0.5).unwrap();
+        let px_mm = px_mm(240, 520.0 / 125.1);
+        let was = Make::DEFAULT;
+        let old = lamp(&l, &["illumination_9", "illumination_209"], px_mm, &was);
+        let bw = l.base.width() as usize;
+        let field = |lp: &Lamp| -> std::collections::HashMap<(i32, i32), f32> {
+            let mut m = std::collections::HashMap::new();
+            for y in 0..lp.h {
+                for x in 0..lp.w {
+                    let (gx, gy) = (lp.x + x as i32, lp.y + y as i32);
+                    let on = l.body.get(gy as usize * bw + gx as usize).copied().unwrap_or(0.0);
+                    let v = lp.at(x, y) * on;
+                    if v > 0.0 {
+                        m.insert((gx, gy), v);
+                    }
+                }
+            }
+            m
+        };
+        let o = field(&old);
+        let total: f32 = o.values().map(|v| v * v).sum();
+        let mut best = (f32::MAX, Make::DEFAULT);
+        for t in 0..=10 {
+            for h in 0..=20 {
+                for r in [1.0f32, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 8.0] {
+                    let make = Make { through: 0.25 + t as f32 * 0.025, halo: h as f32 * 0.02, reach: r, ..was };
+                    let n = field(&lamp(&l, &["illumination_209"], px_mm, &make));
+                    let mut err = 0f32;
+                    for (k, v) in &o {
+                        err += (v - n.get(k).copied().unwrap_or(0.0)).powi(2);
+                    }
+                    for (k, v) in &n {
+                        if !o.contains_key(k) {
+                            err += v * v;
+                        }
+                    }
+                    if err < best.0 {
+                        best = (err, make);
+                    }
+                }
+            }
+        }
+        let (err, m) = best;
+        let n = field(&lamp(&l, &["illumination_209"], px_mm, &m));
+        let peak = |f: &std::collections::HashMap<(i32, i32), f32>| f.values().copied().fold(0.0, f32::max);
+        eprintln!("old: peak {:.0} nits; best: through {:.3}, halo {:.2}, reach {:.1}: peak {:.0} nits, error {:.1}% of the old light", peak(&o), m.through, m.halo, m.reach, peak(&n), 100.0 * (err / total).sqrt());
     }
 }
 

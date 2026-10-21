@@ -1280,7 +1280,7 @@ fn led_look(c: [f64; 3]) -> [u8; 3] {
 
 /// How far a color bleeds, as a share of each channel at full: the core's
 /// light says (switches.bleed for the keys' LEDs, display.bleed for the
-/// screen's backlight; the Key lab tunes both), 0x60 of each until it does.
+/// screen's backlight; the lab tunes both), 0x60 of each until it does.
 pub const BLEED: f64 = 0x60 as f64 / 255.0;
 // (BLEED's bits, as an atomic starts from a constant)
 static KEYS_BLEED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0x3FD8_1818_1818_1818);

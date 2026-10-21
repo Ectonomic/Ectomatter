@@ -221,11 +221,11 @@ pub mod style {
     pub const FACT: i32 = 12;
     pub const FACT_VALUE: i32 = 13;
     pub const CREDIT: i32 = 14;
-    /// a note in its own color (the Key lab's menus), and a menu's
+    /// a note in its own color (the lab's menus), and a menu's
     /// words in their own color
     pub const NOTE_IN: i32 = 19;
     pub const WORDS_IN: i32 = 20;
-    /// the Key lab's small words in their own color, and its
+    /// the lab's small words in their own color, and its
     /// stronger ones (a reading's number, the name of what its line tells of)
     pub const SMALL_IN: i32 = 21;
     pub const LABEL_IN: i32 = 22;

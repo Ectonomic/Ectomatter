@@ -269,7 +269,7 @@ fn usage_of(k: &Value) -> Option<u32> {
 pub fn kind_of(a: &Value) -> usize {
     if a.get("mouse").is_some() {
         0
-    } else if a.get("key").is_some() {
+    } else if a.get("key").is_some() || a.get("shortcut").is_some() {
         1
     } else if a.get("media").is_some() {
         2
@@ -296,6 +296,11 @@ pub fn job_label_with(a: &Value, names: &crate::jobs::Names) -> String {
     match kind_of(a) {
         DEVICES_KIND => crate::jobs::Job::read(a).map_or("Another device's job".into(), |j| names.of(&j)),
         0 => a["mouse"].as_u64().and_then(|n| MOUSE_JOBS.get(n as usize - 1)).map_or("A mouse button".into(), |s| s.to_string()),
+        // (a key with modifiers held as the keyboard's page says one: Left Ctrl + T)
+        1 if a.get("shortcut").is_some() => {
+            let keys: Option<Vec<String>> = a["shortcut"].as_array().map(|l| l.iter().map(|k| usage_of(k).map_or_else(|| k.as_str().unwrap_or("?").to_string(), key_label)).collect());
+            keys.filter(|k| !k.is_empty()).map_or("A shortcut".into(), |k| k.join(" + "))
+        }
         1 => usage_of(&a["key"]).map_or("A key".into(), key_label),
         2 => MEDIA.iter().find(|(n, _)| a["media"] == *n).map_or("A media key".into(), |(_, l)| l.to_string()),
         MACRO_KIND => {
@@ -672,6 +677,28 @@ impl Page {
         if self.light == 0 { "logo" } else { "wheel" }
     }
 
+    /// The lights in the order the core lists them (as they are on the
+    /// mouse, front to back), each by its place in LIGHTS, its id and its
+    /// name; in LIGHTS' order where the core says nothing of them.
+    pub fn light_order(&self) -> Vec<(usize, &'static str, String)> {
+        let listed = self.state["device"]["capabilities"]["lighting"]["lights"].as_array().cloned().unwrap_or_default();
+        let mut out: Vec<(usize, &'static str, String)> = listed
+            .iter()
+            .filter_map(|l| {
+                let i = LIGHTS.iter().position(|id| l["id"] == *id)?;
+                Some((i, LIGHTS[i], l["label"].as_str().unwrap_or(LIGHTS[i]).to_string()))
+            })
+            .collect();
+        for (i, id) in LIGHTS.iter().enumerate() {
+            if !out.iter().any(|(j, ..)| *j == i) {
+                let mut c = id.chars();
+                let name = c.next().map_or_else(String::new, |f| f.to_uppercase().collect::<String>() + c.as_str());
+                out.push((i, id, name));
+            }
+        }
+        out
+    }
+
     pub fn light_of(&self, l: &str) -> Value {
         self.state["lighting"][l].clone()
     }
@@ -826,13 +853,13 @@ impl Page {
     /// Lighting each light, its effect and its color.
     pub fn rows(&self) -> Vec<MouseRow> {
         if self.tab == 1 {
-            return [("logo", "Logo"), ("wheel", "Wheel")]
-                .iter()
-                .enumerate()
-                .map(|(i, (id, name))| {
+            return self
+                .light_order()
+                .into_iter()
+                .map(|(i, id, name)| {
                     let l = self.light_of(id);
                     let lit = self.lit(id);
-                    MouseRow { name: (*name).into(), job: self.effect_label(l["effect"].as_str().unwrap_or("static")).into(), chosen: i == self.light, rebound: false, swatch: color(lit.unwrap_or([0x2a, 0x2a, 0x30])), swatched: true }
+                    MouseRow { name: name.into(), job: self.effect_label(l["effect"].as_str().unwrap_or("static")).into(), chosen: i == self.light, rebound: false, swatch: color(lit.unwrap_or([0x2a, 0x2a, 0x30])), swatched: true }
                 })
                 .collect();
         }

@@ -64,34 +64,35 @@ pub fn in_use(settings: &crate::settings::Settings, core: &str) -> Option<Setup>
 }
 
 /// The words beside a value in a setup's file, by the value's path from
-/// the light down: its name and its value as the Key lab shows them.
+/// the light down: its name and its value as the lab shows them.
 pub type Note<'a> = &'a dyn Fn(&[String], &Value) -> Option<String>;
 
 /// Write a setup's file, by way of a temporary one so a crash mid-write
-/// never leaves half a file. `device` is what the core calls its device.
-pub fn write(core: &str, device: &str, s: &Setup, note: Note) -> Result<(), String> {
+/// never leaves half a file. `device` is what the core calls its device,
+/// and `lab` the lab's name for it (the Keyboard lab).
+pub fn write(core: &str, device: &str, lab: &str, s: &Setup, note: Note) -> Result<(), String> {
     let folder = dir(core);
     std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
     let path = folder.join(format!("{}.json", s.id));
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, file_text(device, s, note)).and_then(|_| std::fs::rename(&tmp, &path)).map_err(|e| e.to_string())
+    std::fs::write(&tmp, file_text(device, lab, s, note)).and_then(|_| std::fs::rename(&tmp, &path)).map_err(|e| e.to_string())
 }
 
 /// A setup's file as a person reads it: what it is and how it works, at
 /// its head; then its name, and each value it changes on a line of its
 /// own with its name and its value in the lab beside it.
-fn file_text(device: &str, s: &Setup, note: Note) -> String {
+fn file_text(device: &str, lab: &str, s: &Setup, note: Note) -> String {
     let name = &s.name;
     let mut out = vec![format!("// {name}: a custom light setup for the {device}."), "//".to_string()];
-    out.extend(comment(&format!("The Key lab writes this file each time you save {name}. The file holds only the settings {name} changes from Default; every setting not listed here uses Default's value. The note beside each value names the setting as the Key lab does, for example \"Keycaps › Haze: 80%\"."), ""));
+    out.extend(comment(&format!("The {lab} writes this file each time you save {name}. The file holds only the settings {name} changes from Default; every setting not listed here uses Default's value. The note beside each value names the setting as the {lab} does, for example \"Keycaps › Haze: 80%\"."), ""));
     out.push("//".into());
-    out.extend(comment(&format!("You can edit values here by hand; the changes apply the next time Ectodeck starts. Percentages are written from 0 to 1 (80% is 0.8), and lengths in millimeters. To switch back to Default, or to rename or delete {name}, use the setup menu at the top of the Key lab."), ""));
+    out.extend(comment(&format!("You can edit values here by hand; the changes apply the next time Ectodeck starts. Percentages are written from 0 to 1 (80% is 0.8), and lengths in millimeters. To switch back to Default, or to rename or delete {name}, use the setup menu at the top of the {lab}."), ""));
     out.push("{".into());
     match s.changes.as_object().filter(|o| !o.is_empty()) {
         None => {
             out.push(format!("  \"name\": {},  // the name shown in the setup menu", json!(name)));
             out.push(String::new());
-            out.extend(comment(&format!("{name} has no changes from Default yet, so the keyboard looks the same as with Default. Change a setting in the Key lab and press Save to {name}; the change is written here."), "  "));
+            out.extend(comment(&format!("{name} has no changes from Default yet, so the {device} looks the same as with Default. Change a setting in the {lab} and press Save to {name}; the change is written here."), "  "));
             out.push("  \"light\": {}".into());
         }
         Some(_) => {
@@ -261,7 +262,7 @@ pub fn import_image(core: &str, from: &Path) -> Result<String, String> {
     let folder = images_dir(core);
     std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
     let stem = from.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-    let svg = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">\n<!-- {stem}: a picture put on a key by Ectodeck's Key lab, its shapes only -->\n<path d=\"{d}\"/>\n</svg>\n");
+    let svg = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">\n<!-- {stem}: a picture put on a key by Ectodeck's Keyboard lab, its shapes only -->\n<path d=\"{d}\"/>\n</svg>\n");
     let mut taken: Vec<String> = Vec::new();
     for e in std::fs::read_dir(&folder).into_iter().flatten().flatten() {
         let name = e.file_name().to_string_lossy().to_string();
@@ -312,13 +313,13 @@ mod tests {
         let ch = json!({ "caps": { "kind": "pudding", "opacity": 0.8 }, "keys": { "space": { "caps": { "kind": "shine-through" } }, "w": null } });
         let note = |path: &[String], v: &Value| Some(format!("{} is {}", path.join("."), v));
         let s = Setup { id: "pudding-caps".into(), name: "Pudding caps".into(), changes: ch.clone() };
-        let text = file_text("EVGA Z10 RGB", &s, &note);
+        let text = file_text("EVGA Z10 RGB", "Keyboard lab", &s, &note);
         let read = jsonc::parse(&text).unwrap();
         assert_eq!((read["name"].as_str(), &read["light"]), (Some("Pudding caps"), &ch));
         assert!(text.contains("\n      \"kind\": \"pudding\",  // caps.kind is \"pudding\"\n      \"opacity\": 0.8      // caps.opacity is 0.8\n"), "a value a line, the notes in one column:\n{text}");
         assert!(text.contains("\n      \"w\": null   // keys.w is null\n"), "{text}");
         assert!(text.lines().all(|l| l.chars().count() <= 80 || !l.trim_start().starts_with("//")), "comments within 80 columns");
-        let empty = file_text("EVGA Z10 RGB", &Setup { id: "studio".into(), name: "Studio".into(), changes: json!({}) }, &note);
+        let empty = file_text("EVGA Z10 RGB", "Keyboard lab", &Setup { id: "studio".into(), name: "Studio".into(), changes: json!({}) }, &note);
         assert_eq!(jsonc::parse(&empty).unwrap()["light"], json!({}));
         assert!(empty.starts_with("// Studio: a custom light setup for the EVGA Z10 RGB.\n") && empty.contains("Studio has no changes from Default yet"), "{empty}");
     }

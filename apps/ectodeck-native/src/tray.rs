@@ -14,7 +14,9 @@ pub enum TrayAsk {
 
 struct Tray {
     tell: Sender<TrayAsk>,
-    connected: bool,
+    /// the devices, as they sit on Home's desk: each one's place, its name,
+    /// and whether it is plugged in
+    devices: Vec<(String, String, bool)>,
     icon: Vec<ksni::Icon>,
 }
 
@@ -36,18 +38,23 @@ impl ksni::Tray for Tray {
     }
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
         use ksni::menu::StandardItem;
-        let label = if self.connected { "EVGA Z10 RGB".to_string() } else { "EVGA Z10 RGB (not connected)".to_string() };
-        vec![
-            StandardItem { label: "Open Ectodeck".into(), activate: Box::new(|t: &mut Self| { let _ = t.tell.send(TrayAsk::Open); }), ..Default::default() }.into(),
-            StandardItem {
-                label,
-                enabled: self.connected,
-                activate: Box::new(|t: &mut Self| { let _ = t.tell.send(TrayAsk::Device("z10".into())); }),
-                ..Default::default()
-            }
-            .into(),
-            StandardItem { label: "Quit Ectodeck".into(), activate: Box::new(|t: &mut Self| { let _ = t.tell.send(TrayAsk::Quit); }), ..Default::default() }.into(),
-        ]
+        let mut items: Vec<ksni::MenuItem<Self>> = vec![StandardItem { label: "Open Ectodeck".into(), activate: Box::new(|t: &mut Self| { let _ = t.tell.send(TrayAsk::Open); }), ..Default::default() }.into()];
+        for (place, name, on) in &self.devices {
+            let place = place.clone();
+            items.push(
+                StandardItem {
+                    label: if *on { name.clone() } else { format!("{name} (not connected)") },
+                    enabled: *on,
+                    activate: Box::new(move |t: &mut Self| {
+                        let _ = t.tell.send(TrayAsk::Device(place.clone()));
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+            );
+        }
+        items.push(StandardItem { label: "Quit Ectodeck".into(), activate: Box::new(|t: &mut Self| { let _ = t.tell.send(TrayAsk::Quit); }), ..Default::default() }.into());
+        items
     }
 }
 
@@ -79,14 +86,14 @@ fn icon() -> Vec<ksni::Icon> {
 pub struct Handle(ksni::blocking::Handle<Tray>);
 
 impl Handle {
-    /// Whether the keyboard is there, for its entry.
-    pub fn connected(&self, on: bool) {
-        self.0.update(|t| t.connected = on);
+    /// The devices, as they sit on Home's desk, each with whether it is there, for their entries.
+    pub fn devices(&self, devices: Vec<(String, String, bool)>) {
+        self.0.update(|t| t.devices = devices);
     }
 }
 
 pub fn start(tell: Sender<TrayAsk>) -> Option<Handle> {
-    match (Tray { tell, connected: false, icon: icon() }).spawn() {
+    match (Tray { tell, devices: Vec::new(), icon: icon() }).spawn() {
         Ok(h) => Some(Handle(h)),
         Err(e) => {
             eprintln!("ectodeck-native: no tray: {e}");

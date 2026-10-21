@@ -30,7 +30,7 @@ unused flash; flashing EVGA's own file puts everything back.
 | A slider set aside because the other took its job gets it back when the other gives it up | `286e082` | (no slider jobs) |
 | The sliders' positions shown live on the picture of the keyboard and in their boxes | `ef08dae` | None |
 | The keyboard drawn in HDR and lit the way its LEDs light it, through the caps, with the light simulated | `e4b9e9a` | A flat picture of the keyboard |
-| The Key lab: set up the caps (shine-through, pudding or translucent), the legends (typeface, weight, size and place, for every key or one), and the LEDs, and save them as setups | `e9805b2` | None |
+| The Keyboard lab (the Key lab until 2026-10-21): set up the caps (shine-through, pudding or translucent), the legends (typeface, weight, size and place, for every key or one), and the LEDs, and save them as setups | `e9805b2` | None |
 | Changes to a profile can be undone (Ctrl+Z) and done again | `3834c40` | No undo |
 | The screen shows the computer's processor, graphics card and memory, live, from Ectodeck itself | `fc4b2b0` | Nothing writes to the screen; only EVGA Precision X1, a separate program for EVGA's graphics cards, could fill it |
 | A game's launch and exit play on the screen, with game-helper's steps as they happen | `d6d93a0` | None |

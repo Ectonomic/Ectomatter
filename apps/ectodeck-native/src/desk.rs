@@ -311,6 +311,15 @@ impl Desk {
         })
     }
 
+    /// The devices as they sit on the desk, left to right by their middles
+    /// (and top to bottom where two line up): the order every list of them
+    /// in Ectodeck follows.
+    pub fn order(&self) -> Vec<String> {
+        let mut at: Vec<(f32, f32, &str)> = self.items.iter().map(|i| (i.x + i.w / 2.0, i.y + i.h / 2.0, i.id.as_str())).collect();
+        at.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+        at.into_iter().map(|(_, _, id)| id.to_string()).collect()
+    }
+
     /// Whether a place is kept for a device, met this run or not.
     pub fn keeps(&self, id: &str) -> bool {
         self.kept.iter().any(|(k, _, _)| k == id)
@@ -367,7 +376,10 @@ impl Desk {
             return;
         }
         self.size = (w, h);
-        if !self.editing {
+        if self.editing {
+            // (the dots lined up with the window as it is now, the short way)
+            self.ease_to(self.aligned(self.view));
+        } else {
             self.fit();
         }
     }
@@ -379,8 +391,15 @@ impl Desk {
     }
 
     /// Every device as large as the window allows, in the middle, the dots
-    /// lined up the same distance from each edge.
+    /// lined up the same distance from each edge, as Arrange shows them.
     pub fn fitted(&self) -> View {
+        self.aligned(self.fitted_free())
+    }
+
+    /// Every device as large as the window allows, in the middle, exactly:
+    /// day to day, with no dots to line up, the desk follows the window
+    /// smoothly as it is sized, never a dot at a time.
+    pub fn fitted_free(&self) -> View {
         let (w, h) = self.size;
         if self.items.is_empty() || w <= 0.0 || h <= 0.0 {
             return View { z: 1.0, px: w / 2.0, py: h / 2.0 };
@@ -394,14 +413,25 @@ impl Desk {
         let (bw, bh) = ((x1 - x0).max(1.0), (y1 - y0).max(1.0));
         let z = ((w - 2.0 * PAD) / bw).min((h - 2.0 * PAD - BELOW) / bh).clamp(ZOOM.0, ZOOM.1);
         let (px, py) = ((w - bw * z) / 2.0 - x0 * z, (h - bh * z - BELOW) / 2.0 - y0 * z);
-        let s = Desk::step(z) * z;
-        let mx = (w - ((w - 2.0 * EDGE) / s).floor() * s) / 2.0;
-        let my = (h - ((h - 2.0 * EDGE) / s).floor() * s) / 2.0;
-        View { z, px: mx + ((px - mx) / s).round() * s, py: my + ((py - my) / s).round() * s }
+        View { z, px, py }
     }
 
+    /// A view moved the least it takes for the dots to line up the same
+    /// distance from each edge of the window (under half a dot each way).
+    fn aligned(&self, v: View) -> View {
+        let (w, h) = self.size;
+        if w <= 0.0 || h <= 0.0 {
+            return v;
+        }
+        let s = Desk::step(v.z) * v.z;
+        let mx = (w - ((w - 2.0 * EDGE) / s).floor() * s) / 2.0;
+        let my = (h - ((h - 2.0 * EDGE) / s).floor() * s) / 2.0;
+        View { z: v.z, px: mx + ((v.px - mx) / s).round() * s, py: my + ((v.py - my) / s).round() * s }
+    }
+
+    /// The fit: day to day exactly, in Arrange with the dots lined up.
     pub fn fit(&mut self) {
-        self.set_view(self.fitted());
+        self.set_view(if self.editing { self.fitted() } else { self.fitted_free() });
     }
 
     fn set_view(&mut self, v: View) {
@@ -459,9 +489,8 @@ impl Desk {
         self.pad_chosen = None;
         self.pad_hover = None;
         self.fade = Some((Instant::now(), self.dots, if on { 1.0 } else { 0.0 }));
-        if !on {
-            self.ease_to(self.fitted());
-        }
+        // (in, the dots lined up as they come, the short way; out, the exact fit)
+        self.ease_to(if on { self.aligned(self.view) } else { self.fitted_free() });
     }
 
     pub fn animating(&self) -> bool {
@@ -792,6 +821,38 @@ mod tests {
         d
     }
 
+    /// Sized a pixel at a time, day to day, the desk follows the window
+    /// smoothly: the keyboard never moves more than a pixel or so a step,
+    /// where lining the dots up made it jump a dot at a time.
+    #[test]
+    fn sizing_the_window_moves_the_desk_smoothly() {
+        let mut d = desk();
+        let mut last = d.screen(0);
+        let mut worst = 0f32;
+        for w in 1380..1500 {
+            d.resize(w as f32, 992.0);
+            let now = d.screen(0);
+            worst = worst.max((now[0] - last[0]).abs()).max((now[1] - last[1]).abs());
+            last = now;
+        }
+        assert!(worst < 1.5, "the keyboard jumped {worst} pixels in one step");
+        // in Arrange the dots line up, the desk eased there the short way
+        d.set_editing(true);
+        d.tick(Instant::now() + EASE + FADE);
+        assert_eq!(d.view, d.fitted(), "lined up with the dots");
+        assert!((d.view.px - d.fitted_free().px).abs() <= SNAP * d.view.z / 2.0 + 1e-3);
+    }
+
+    /// Every list of the devices follows the desk, left to right: the mouse
+    /// put left of the keyboard comes first.
+    #[test]
+    fn the_devices_are_listed_as_they_sit() {
+        let mut d = desk();
+        assert_eq!(d.order(), ["z10", "mouse"]);
+        d.items[1].x = -400.0;
+        assert_eq!(d.order(), ["mouse", "z10"]);
+    }
+
     /// Each device comes back where it was kept, whichever is met first: the
     /// one met first, kept again, doesn't lose the other's place.
     #[test]
@@ -841,7 +902,7 @@ mod tests {
     #[test]
     fn the_fit_lines_the_dots_up_evenly() {
         let d = desk();
-        let v = d.view;
+        let v = d.fitted();
         assert!((v.z - 1.16).abs() < 0.01, "{}", v.z);
         let s = SNAP * v.z;
         let first = |o: f32| o - ((o - EDGE) / s).floor() * s;
@@ -1043,7 +1104,7 @@ mod tests {
         assert_ne!((it.x, it.y), (864.0, 72.0));
         d.set_editing(false);
         d.tick(Instant::now() + EASE + FADE);
-        assert_eq!(d.view, d.fitted(), "back to the fit");
+        assert_eq!(d.view, d.fitted_free(), "back to the fit");
         assert_eq!(d.dots, 0.0, "the dots put away");
     }
 }
