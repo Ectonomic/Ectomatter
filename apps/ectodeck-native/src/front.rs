@@ -527,7 +527,7 @@ pub struct Front {
     lib_rows: HashMap<String, Rc<VecModel<LibRow>>>,
     /// the mouse's Key library on Buttons, as the keyboard's: the groups
     /// closed (none until it is first shown, then all of them where the whole
-    /// list is longer than its box, as the keyboard's 116 keys are), what is
+    /// list runs past 600 high, as the keyboard's 116 keys do), what is
     /// searched for, the button whose group was last opened to show it, and
     /// each group's rows, kept to change in place
     mouse_lib_shut: Option<std::collections::HashSet<String>>,
@@ -5278,7 +5278,10 @@ impl Front {
         let q = self.mouse_lib_query.trim().to_lowercase();
         let all = m.lib_list("");
         let list = m.lib_list(&q);
-        // (a heading 30 high and a row 34, under the tab and the find box, as the Keys tab has them)
+        // (its groups start open for a mouse's few buttons, scrolling in their
+        // box, and shut where the whole list runs past 600 high, as the
+        // keyboard's 116 keys do: a heading 30 high and a row 34, under the tab
+        // and the find box)
         let need = 50.0 + 60.0 + 10.0 + all.iter().map(|(_, n, _)| 30.0 + 34.0 * *n as f32).sum::<f32>();
         if self.mouse_lib_shut.is_none() && !all.is_empty() {
             self.mouse_lib_shut = Some(if need > 600.0 { all.iter().map(|(g, ..)| g.clone()).collect() } else { Default::default() });
@@ -5322,7 +5325,6 @@ impl Front {
             }
         }
         show_rows(ui.get_mouse_lib_groups(), |r| ui.set_mouse_lib_groups(r), groups);
-        ui.set_mouse_lib_need(need);
         ui.set_mouse_chosen(m.button.is_some());
         if let Some(b) = m.button {
             let (cap, title, factory, state, rebound, kind, note) = m.detail(b);

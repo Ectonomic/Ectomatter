@@ -4125,12 +4125,10 @@ export component AppWindow inherits Window {
     in property <[MouseRow]> mouse-rows;
     // Buttons: the Key library, as the keyboard's Keys tab has it: the mouse's
     // layers, its buttons in the groups its core gives them, what is typed to
-    // find one, how tall the list is with all it holds, and a button newly
-    // chosen (on the picture, say) scrolled to
+    // find one, and a button newly chosen (on the picture, say) scrolled to
     in property <[LayerTab]> mouse-layers;
     in property <[LibGroup]> mouse-lib-groups;
     in-out property <string> mouse-lib-query;
-    in property <length> mouse-lib-need;
     in property <length> mouse-lib-reveal-y;
     in property <int> mouse-lib-reveal-n;
     callback mouse-lib-toggle(string);
@@ -4222,9 +4220,15 @@ export component AppWindow inherits Window {
     // the stage's and the low row's
     property <length> mouse-stage-h: 470px;
     property <length> mouse-low-y: head-end + (root.mouse-tab < 2 ? mouse-stage-h + 14px : 0);
-    // (on Buttons, room for the whole list, up to a height past which it
-    // scrolls inside its box, as the Key library does on the Keys tab)
-    property <length> mouse-low-h: root.mouse-tab == 0 ? min(600px, max(330px, root.mouse-lib-need)) : max(root.mouse-cells-h, 330px);
+    // (on Buttons, the boxes in the row as tall as each other, as the Keys
+    // tab has them: at least the Profiles box, at most the room under the
+    // stage in the window (so they never run off its foot), between those as
+    // tall as the chosen button's box needs, the same whether one is chosen
+    // or not so the row stays put; the Key library scrolls inside its box)
+    property <length> mouse-band-min: root.mouse-profiles-shown ? root.mouse-profiles.length * 50px + 92px : 0;
+    property <length> mouse-band-max: max(mouse-band-min, mouse-flick.height - mouse-low-y - 24px);
+    property <length> mouse-second-need: root.mouse-chosen && root.mouse-note != "" ? 320px : 270px;
+    property <length> mouse-low-h: root.mouse-tab == 0 ? min(mouse-band-max, max(mouse-band-min, mouse-second-need)) : max(root.mouse-cells-h, 330px);
     // the list's width: the Key library's on Buttons, the lights' list on Lighting
     property <length> mouse-list-w: root.mouse-tab == 0 ? 440px : 240px;
     out property <length> mouse-wx: rail-w + pws-x;
