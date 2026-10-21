@@ -632,6 +632,16 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     if let Some(v) = std::env::var("ECTODECK_NATIVE_LIBRARY").ok().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) {
         library::seed(&v);
     }
+    // ECTODECK_NATIVE_PADS=FILE: the pads on Home's desk, as window.json keeps them
+    // (kept nowhere), and ECTODECK_NATIVE_PAD_PICTURE=FILE the picture "Choose a
+    // picture…" takes, as if chosen in the desktop's file picker
+    if let Some(v) = std::env::var("ECTODECK_NATIVE_PADS").ok().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) {
+        front.desk.pads = desk::pads_of(&v);
+        // (fitted again with them, as the window fits the pads it reads as it
+        // starts, and their pictures read, at once offscreen)
+        front.desk.fit();
+        front.poll_pads();
+    }
     // ECTODECK_NATIVE_MOUSE=FILE: the mouse as its core last told it (what the mouse's
     // thread hears), and ECTODECK_NATIVE_MOUSE_TAB=N its page's tab
     if let Some(v) = std::env::var("ECTODECK_NATIVE_MOUSE").ok().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()) {
@@ -794,6 +804,21 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         front.pressed_at(x, y);
         window.dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Left });
         window.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
+        front.act();
+        window.draw_if_needed(|r| {
+            r.render(&mut pic.ui, w as usize);
+        });
+    }
+    // ECTODECK_NATIVE_ESCAPE=N: Escape pressed N times after those clicks; ECTODECK_NATIVE_DELETE:
+    // then the Delete key
+    let escapes = std::env::var("ECTODECK_NATIVE_ESCAPE").ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
+    let delete = std::env::var_os("ECTODECK_NATIVE_DELETE").is_some();
+    for k in 0..escapes + delete as u32 {
+        if k < escapes {
+            front.escape();
+        } else {
+            front.desk_delete_key();
+        }
         front.act();
         window.draw_if_needed(|r| {
             r.render(&mut pic.ui, w as usize);
@@ -2957,6 +2982,10 @@ impl App {
         }
         // Escape lets the page's chosen key or button go, unless a box is being typed in
         if down && e.keysym == Keysym::Escape && !self.front.typing() && self.front.escape() {
+            return;
+        }
+        // Delete or Backspace takes the pad chosen on Home's desk off it
+        if down && matches!(e.keysym, Keysym::Delete | Keysym::BackSpace) && !self.front.typing() && self.front.desk_delete_key() {
             return;
         }
         // Ctrl and plus, minus or 0 zoom Home's desk in edit mode

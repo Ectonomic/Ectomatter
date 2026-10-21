@@ -87,9 +87,11 @@ pub enum Ctl {
     MouseSameWheel,
     /// a setting a core described (described.rs): which one the piece's id says
     Described,
+    /// the color of the pad chosen on Home's desk
+    DeskPad,
 }
 
-const CTLS: [Ctl; 54] = [
+const CTLS: [Ctl; 55] = [
     Ctl::None,
     Ctl::Color,
     Ctl::Colors,
@@ -144,6 +146,7 @@ const CTLS: [Ctl; 54] = [
     Ctl::OpenSettings,
     Ctl::MouseSameWheel,
     Ctl::Described,
+    Ctl::DeskPad,
 ];
 
 pub fn ctl(id: i32) -> Ctl {

@@ -17,7 +17,7 @@ use crate::lighting::{self, Ctl};
 use crate::overlays::Overlays;
 use crate::z10::{self, Entry, Page, View};
 use ectodeck_protocol::Action;
-use crate::{AppWindow, Cell, CheckItem, DeskItem, EffectItem, KeyItem, LayerItem, LibGroup, LibRow, MenuRow, MousePatch, ProfileItem};
+use crate::{AppWindow, Cell, CheckItem, DeskItem, DeskPad, EffectItem, KeyItem, LayerItem, LibGroup, LibRow, MenuRow, MousePatch, ProfileItem};
 
 /// The mouse's picture as the page shows it: its layers (for what is where
 /// on it), and each piece as the page takes it.
@@ -138,6 +138,16 @@ pub enum Ask {
     DeskDone,
     DeskZoom(i32),
     DeskTick,
+    /// a pad on the desk: the pointer over one or off it; a press on the
+    /// chosen one's edges (1 left, 2 top, 4 right, 8 bottom, together at a
+    /// corner) and where; its Color, where that is; a picture for it, from
+    /// the desktop's file picker; its picture taken off; the pad taken off
+    DeskPadHover(i32, bool),
+    DeskPadEdges(i32, f32, f32),
+    DeskPadColor(f32, f32, f32),
+    DeskPadPicture,
+    DeskPadNoPicture,
+    DeskPadDelete,
     /// the desk's light: its menu, on Home; the next of its frames
     DeskLightMenu(f32, f32, f32),
     DeskLightFrame,
@@ -250,6 +260,13 @@ pub enum Ask {
     PageRemove(i32),
     /// "New screen layout" selected, where the pointer was
     LibNew(f32, f32),
+}
+
+/// A picture asked for a pad on the desk: the desktop's file picker open for
+/// it, then the file chosen being read (and kept in Ectodeck's data).
+enum PadAsk {
+    Picking(mpsc::Receiver<Option<std::path::PathBuf>>),
+    Reading(mpsc::Receiver<Result<(std::path::PathBuf, crate::picture::Photo), String>>),
 }
 
 /// The color picker, open on a swatch: what it sets, the color it opened
@@ -603,6 +620,18 @@ pub struct Front {
     desk_frames: Option<slint::Timer>,
     desk_mouse: Option<(u32, MouseImages)>,
     desk_mouse_drawing: Option<u32>,
+    /// the pads' pictures as read, by their files; those being read, and
+    /// those that couldn't be (each pad shows its color for those); the
+    /// picture asked for a pad (the one at that place in the pads, in that
+    /// box then); what the desk says of one that couldn't be used
+    pad_photos: HashMap<String, std::sync::Arc<crate::picture::Photo>>,
+    pad_reading: Vec<(String, mpsc::Receiver<Result<crate::picture::Photo, String>>)>,
+    pad_unread: std::collections::HashSet<String>,
+    pad_asked: Option<(usize, [f32; 4], PadAsk)>,
+    pad_note: String,
+    /// whether the press now shut the color picker (a press that shuts it
+    /// does nothing else on the desk)
+    press_shut: bool,
     pick: Option<Pick>,
     overlay_model: Rc<VecModel<crate::Overlay>>,
     /// what each slider controls, which slider's menu is open, and what the
@@ -804,6 +833,12 @@ impl Front {
         on!(on_desk_arrange, Ask::DeskArrange);
         on!(on_desk_done, Ask::DeskDone);
         on!(on_desk_zoom_step, |how| Ask::DeskZoom(how));
+        on!(on_desk_pad_hover, |i, on| Ask::DeskPadHover(i, on));
+        on!(on_desk_pad_edges, |e, x, y| Ask::DeskPadEdges(e, x, y));
+        on!(on_desk_pad_color, |x, y, h| Ask::DeskPadColor(x, y, h));
+        on!(on_desk_pad_picture, Ask::DeskPadPicture);
+        on!(on_desk_pad_no_picture, Ask::DeskPadNoPicture);
+        on!(on_desk_pad_delete, Ask::DeskPadDelete);
         on!(on_desk_light_menu, |x, y, h| Ask::DeskLightMenu(x, y, h));
         on!(on_mouse_effect, |i| Ask::MouseEffect(i));
         on!(on_rail, |p| Ask::Rail(p.to_string()));
@@ -902,6 +937,12 @@ impl Front {
             desk_frames: None,
             desk_mouse: None,
             desk_mouse_drawing: None,
+            pad_photos: HashMap::new(),
+            pad_reading: Vec::new(),
+            pad_unread: Default::default(),
+            pad_asked: None,
+            pad_note: String::new(),
+            press_shut: false,
             ui,
             page,
             kb,
@@ -1218,7 +1259,7 @@ impl Front {
 
     pub fn waiting(&self) -> Option<Duration> {
         // (and, while the desktop's file picker is open, often enough to take its answer)
-        let picking = self.picking.as_ref().map(|_| Duration::from_millis(100));
+        let picking = (self.picking.is_some() || self.pad_asked.is_some() || !self.pad_reading.is_empty()).then(|| Duration::from_millis(100));
         // (and when Home's desk will have settled, for its keyboard to be drawn for its size)
         let desk = (self.ui.get_place() == "home" && !self.desk_settled()).then(|| Duration::from_millis(150).saturating_sub(self.desk.changed.elapsed()) + Duration::from_millis(10));
         [self.failed_at.map(|t| Duration::from_secs(3).saturating_sub(t.elapsed()) + Duration::from_millis(10)), picking, desk].into_iter().flatten().min()
@@ -1299,6 +1340,7 @@ impl Front {
     /// Do what the page asked; what only the window can do is handed back.
     pub fn act(&mut self) -> Vec<WindowAsk> {
         self.search_places();
+        self.poll_pads();
         self.settings.flush(false);
         let asks: Vec<Ask> = self.asks.borrow_mut().drain(..).collect();
         let mut window = Vec::new();
@@ -1458,7 +1500,10 @@ impl Front {
                 }
                 Ask::DeskPress(i, x, y) => {
                     changed = false;
-                    self.desk.press(usize::try_from(i).ok(), (x, y));
+                    // (a press that shut the color picker does nothing else)
+                    if !(self.press_shut && i < 0) {
+                        self.desk.press(usize::try_from(i).ok(), (x, y));
+                    }
                     self.show_desk();
                 }
                 Ask::DeskPan(x, y) => {
@@ -1524,6 +1569,46 @@ impl Front {
                     self.desk.tick(Instant::now());
                     self.show_desk();
                     self.desk_frames_run();
+                }
+                Ask::DeskPadHover(i, on) => {
+                    changed = false;
+                    let i = usize::try_from(i).ok();
+                    if on {
+                        self.desk.pad_hover = i;
+                    } else if self.desk.pad_hover == i {
+                        self.desk.pad_hover = None;
+                    }
+                    self.show_desk();
+                }
+                Ask::DeskPadEdges(e, x, y) => {
+                    changed = false;
+                    self.desk.press_edges([e & 1 != 0, e & 2 != 0, e & 4 != 0, e & 8 != 0], (x, y));
+                    self.show_desk();
+                }
+                Ask::DeskPadColor(x, y, h) => {
+                    changed = false;
+                    if self.desk.pad_chosen.is_some() {
+                        self.open_picker(Ctl::DeskPad, None, 0, (x, y, h));
+                    }
+                }
+                Ask::DeskPadPicture => {
+                    changed = false;
+                    self.ask_pad_picture();
+                }
+                Ask::DeskPadNoPicture => {
+                    changed = false;
+                    if let Some((i, b)) = self.desk.chosen_box() {
+                        self.desk.set_pad_picture(i, b, None);
+                        self.pad_note.clear();
+                        self.show_desk();
+                    }
+                }
+                Ask::DeskPadDelete => {
+                    changed = false;
+                    self.close_picker();
+                    self.desk.delete_pad();
+                    self.pad_note.clear();
+                    self.show_desk();
                 }
                 Ask::CellPick(id, i, x, y, h) => match crate::described::piece_of(id) {
                     Some(piece) => self.described_pick(piece, i.max(0) as usize, (x, y, h)),
@@ -2389,6 +2474,7 @@ impl Front {
         self.close_picker();
         let rgb = match piece.and_then(|p| self.mouse.described(p)) {
             Some((_, d, v)) => crate::described::color_at(&d, &v, index).unwrap_or([0xff, 0, 0]),
+            None if c == Ctl::DeskPad => self.desk.pad_chosen.and_then(|i| self.desk.pads.get(i)).map_or(crate::desk::PAD_COLOR, |p| p.color),
             None => lighting::color_of(&self.page, c, index, self.paint),
         };
         self.pick = Some(Pick { ctl: c, piece, index, start: rgb, hsv: rgb2hsv(rgb), rgb, anchor });
@@ -2411,6 +2497,10 @@ impl Front {
         if let Some(p) = self.pick.take() {
             self.ui.set_picker_open(false);
             self.ui.invoke_blur_picker();
+            // (a pad's color, changed as the picker moved, kept as it closes)
+            if p.ctl == Ctl::DeskPad && p.rgb != p.start {
+                self.desk.save_pads();
+            }
             // the color the picker is closed on joins the recent ones
             if p.rgb != p.start {
                 keep_recent(p.rgb);
@@ -2462,6 +2552,9 @@ impl Front {
         let (c, piece, index, rgb) = (p.ctl, p.piece, p.index, p.rgb);
         if c == Ctl::Paint {
             self.paint = rgb;
+        } else if c == Ctl::DeskPad {
+            self.desk.set_pad_color(rgb);
+            self.show_desk();
         } else if let Some(piece) = piece {
             if let Some((_, d, v)) = self.mouse.described(piece) {
                 self.mouse.set_described(piece, crate::described::with_color(&d, &v, index, rgb));
@@ -2842,6 +2935,7 @@ impl Front {
     /// from the open menu closes it, and a press on the button it hangs from
     /// keeps that button's click from opening it again.
     pub fn pressed_at(&mut self, x: f32, y: f32) {
+        self.press_shut = false;
         self.let_chosen_go(x, y);
         if self.place_menu {
             let (mx, my, mw, mh) = (self.ui.get_menu_x(), self.ui.get_menu_y(), self.ui.get_menu_width(), self.ui.get_menu_height());
@@ -2894,10 +2988,13 @@ impl Front {
             let (px, py, ph) = (self.ui.get_picker_x().max(8.0).min(self.ui.get_window_width() - 272.0), self.ui.get_picker_top(), self.ui.get_picker_height());
             if !(x >= px && x < px + 264.0 && y >= py && y < py + ph) {
                 let (ax, ay, ah) = self.pick.as_ref().unwrap().anchor;
-                if x >= ax && x < ax + 34.0 && y >= ay && y < ay + ah {
+                // (a swatch is 34 wide; a pad's Color button, its swatch and its word)
+                let aw = if self.pick.as_ref().is_some_and(|p| p.ctl == Ctl::DeskPad) { crate::text::width(500, 13.0, "Color") + 42.0 } else { 34.0 };
+                if x >= ax && x < ax + aw && y >= ay && y < ay + ah {
                     self.shut = Some(((ax, ay), Instant::now()));
                 }
                 self.close_picker();
+                self.press_shut = true;
             }
         }
         let Some(m) = &self.menu else { return };
@@ -2973,6 +3070,10 @@ impl Front {
                 k.push((x0 + 272.0, ly, w - 272.0, lh));
                 Some(k)
             }
+            // a pad on Home's desk: the whole desk (where a press chooses
+            // another, carries, or draws, and on the empty desk or a device
+            // lets it go itself), its bar and its zoom over it
+            "home" if self.desk.pad_chosen.is_some() => Some(vec![(ui.get_desk_x(), ui.get_desk_y(), ui.get_desk_w(), ui.get_desk_h())]),
             _ => None,
         }
     }
@@ -2985,6 +3086,10 @@ impl Front {
                 self.listening = None;
             }
             "mouse" => self.mouse.button = None,
+            "home" => {
+                self.desk.pad_chosen = None;
+                self.show_desk();
+            }
             _ => {}
         }
         self.close_menu();
@@ -2993,7 +3098,16 @@ impl Front {
     /// Escape, with nothing being typed: the page's chosen thing let go, if
     /// it has one (false when it has none, for Escape to go on to the page).
     pub fn escape(&mut self) -> bool {
-        // (on Home, Escape leaves edit mode, as Done does)
+        // (on Home, Escape shuts the color picker open on a pad, then lets the
+        // chosen pad go, and then leaves edit mode, as Done does)
+        if self.ui.get_place() == "home" && self.pick.is_some() {
+            self.close_picker();
+            return true;
+        }
+        if self.ui.get_place() == "home" && self.desk.pad_chosen.is_some() {
+            self.let_chosen_go_now();
+            return true;
+        }
         if self.ui.get_place() == "home" && self.desk.editing {
             self.desk.set_editing(false);
             self.desk_frames_run();
@@ -4612,6 +4726,7 @@ impl Front {
     fn show_desk(&mut self) {
         let ui = &self.ui;
         self.desk.resize(ui.get_desk_w(), ui.get_desk_h());
+        let names = self.desk_names();
         let d = &self.desk;
         let items: Vec<DeskItem> = d
             .items
@@ -4619,10 +4734,26 @@ impl Front {
             .enumerate()
             .map(|(i, it)| {
                 let [x, y, w, h] = d.screen(i);
-                DeskItem { kind: if it.id == "z10" { 0 } else { 1 }, name: it.name.as_str().into(), sub: if it.connected { "".into() } else { "Not connected".into() }, x, y, w, h, off: !it.connected, hover: d.hover == Some(i) }
+                let backed = d.name_backed(names[i]);
+                DeskItem { kind: if it.id == "z10" { 0 } else { 1 }, name: it.name.as_str().into(), sub: if it.connected { "".into() } else { "Not connected".into() }, x, y, w, h, off: !it.connected, hover: d.hover == Some(i), backed }
             })
             .collect();
         show_rows(ui.get_desk_items(), |r| ui.set_desk_items(r), items);
+        let r = crate::desk::PAD_RADIUS * d.view.z;
+        let pads: Vec<DeskPad> = d.pads_shown().into_iter().map(|([x, y, w, h], chosen, hover, drawing)| DeskPad { x, y, w, h, r, chosen, hover, drawing }).collect();
+        show_rows(ui.get_desk_pads(), |r| ui.set_desk_pads(r), pads);
+        // (what the desk said of a picture is said while its pad is chosen)
+        if d.pad_chosen.is_none() {
+            self.pad_note.clear();
+        }
+        let d = &self.desk;
+        let chosen = d.pad_chosen.and_then(|i| d.pads.get(i));
+        ui.set_desk_pad_chosen(d.pad_chosen.filter(|_| chosen.is_some()).map_or(-1, |i| i as i32));
+        if let Some(p) = chosen {
+            ui.set_desk_pad_rgb(color(p.color));
+        }
+        ui.set_desk_pad_pictured(chosen.is_some_and(|p| p.picture.is_some()));
+        ui.set_desk_pad_note(self.pad_note.as_str().into());
         ui.set_desk_editing(d.editing);
         ui.set_desk_panning(d.panning());
         ui.set_desk_carrying(d.carrying());
@@ -4729,8 +4860,15 @@ impl Front {
         }
         let d = &self.desk;
         // each device's name, under it, for the dots to leave clear
-        let names: Vec<[f32; 4]> = d
-            .items
+        let names = self.desk_names();
+        d.decor((self.ui.get_desk_x(), self.ui.get_desk_y()), scale, &names, &|path| self.pad_photos.get(path).cloned())
+    }
+
+    /// Where each device's name is on the desk's room, under it (its words
+    /// and, for one not plugged in, the line under them), in logical pixels.
+    fn desk_names(&self) -> Vec<[f32; 4]> {
+        let d = &self.desk;
+        d.items
             .iter()
             .enumerate()
             .map(|(i, it)| {
@@ -4741,8 +4879,132 @@ impl Front {
                 let top = y + h + crate::desk::NAME_GAP;
                 [x + w / 2.0 - half, top, x + w / 2.0 + half, top + if it.connected { 18.0 } else { 38.0 }]
             })
-            .collect();
-        d.decor((self.ui.get_desk_x(), self.ui.get_desk_y()), scale, &names)
+            .collect()
+    }
+
+    /// The pads' pictures: each one not read yet, read away from the window's
+    /// thread (at once, offscreen), and kept once read for the desk to show;
+    /// and the picture asked for a pad, once the desktop's file picker
+    /// answers and the file chosen is read, put on the pad.
+    pub fn poll_pads(&mut self) {
+        let offscreen = crate::desk::offscreen();
+        // (a picture no pad shows any more let go of)
+        let pads = &self.desk.pads;
+        self.pad_photos.retain(|k, _| pads.iter().any(|p| p.picture.as_deref() == Some(k.as_str())));
+        let mut wanted: Vec<String> = Vec::new();
+        for p in self.desk.pads.iter().filter_map(|p| p.picture.clone()) {
+            if !self.pad_photos.contains_key(&p) && !self.pad_unread.contains(&p) && !self.pad_reading.iter().any(|(r, _)| *r == p) && !wanted.contains(&p) {
+                wanted.push(p);
+            }
+        }
+        for path in wanted {
+            let (tx, rx) = mpsc::channel();
+            let p = path.clone();
+            let read = move || {
+                let _ = tx.send(crate::desk::photo_of(std::path::Path::new(&p)));
+            };
+            if offscreen {
+                read();
+            } else {
+                std::thread::spawn(read);
+            }
+            self.pad_reading.push((path, rx));
+        }
+        let (reading, photos, unread) = (&mut self.pad_reading, &mut self.pad_photos, &mut self.pad_unread);
+        reading.retain(|(path, rx)| match rx.try_recv() {
+            Ok(Ok(photo)) => {
+                photos.insert(path.clone(), std::sync::Arc::new(photo));
+                false
+            }
+            Ok(Err(e)) => {
+                eprintln!("ectodeck-native: a pad's picture, {path}: {e}");
+                unread.insert(path.clone());
+                false
+            }
+            Err(mpsc::TryRecvError::Empty) => true,
+            Err(mpsc::TryRecvError::Disconnected) => false,
+        });
+        let Some((i, was, ask)) = self.pad_asked.take() else { return };
+        match ask {
+            PadAsk::Picking(rx) => match rx.try_recv() {
+                Ok(Some(path)) => {
+                    let (tx, rx) = mpsc::channel();
+                    let read = move || {
+                        let _ = tx.send(crate::desk::import_picture(&path));
+                    };
+                    if offscreen {
+                        read();
+                    } else {
+                        std::thread::spawn(read);
+                    }
+                    self.pad_asked = Some((i, was, PadAsk::Reading(rx)));
+                    // (read now, offscreen)
+                    if offscreen {
+                        self.poll_pads();
+                    }
+                }
+                Ok(None) | Err(mpsc::TryRecvError::Disconnected) => {}
+                Err(mpsc::TryRecvError::Empty) => self.pad_asked = Some((i, was, PadAsk::Picking(rx))),
+            },
+            PadAsk::Reading(rx) => match rx.try_recv() {
+                Ok(Ok((path, photo))) => {
+                    let key = path.to_string_lossy().to_string();
+                    self.pad_unread.remove(&key);
+                    self.pad_photos.insert(key.clone(), std::sync::Arc::new(photo));
+                    // (a pad deleted or moved while its picture was chosen takes
+                    // none, and the copy kept for it goes)
+                    if self.desk.set_pad_picture(i, was, Some(key.clone())) {
+                        self.pad_note.clear();
+                    } else {
+                        self.desk.forget_picture(Some(key));
+                    }
+                    self.show_desk();
+                }
+                Ok(Err(why)) => {
+                    self.pad_note = why;
+                    self.show_desk();
+                }
+                Err(mpsc::TryRecvError::Empty) => self.pad_asked = Some((i, was, PadAsk::Reading(rx))),
+                Err(mpsc::TryRecvError::Disconnected) => {}
+            },
+        }
+    }
+
+    /// A picture asked for the chosen pad: the desktop's own file picker
+    /// (offscreen, ECTODECK_NATIVE_PAD_PICTURE's file, as if chosen there).
+    fn ask_pad_picture(&mut self) {
+        let Some((i, b)) = self.desk.chosen_box() else { return };
+        if matches!(self.pad_asked, Some((_, _, PadAsk::Picking(_)))) {
+            return;
+        }
+        self.close_picker();
+        self.pad_note.clear();
+        let rx = match std::env::var_os("ECTODECK_NATIVE_PAD_PICTURE").filter(|_| crate::desk::offscreen()) {
+            Some(f) => {
+                let (tx, rx) = mpsc::channel();
+                let _ = tx.send(Some(std::path::PathBuf::from(f)));
+                rx
+            }
+            None => crate::picker::open_file("Choose a picture for the pad", "Pictures", &["*.png", "*.jpg", "*.jpeg", "*.webp", "*.gif", "*.svg", "*.PNG", "*.JPG", "*.JPEG", "*.WEBP", "*.GIF", "*.SVG"]),
+        };
+        self.pad_asked = Some((i, b, PadAsk::Picking(rx)));
+        // (offscreen, the answer taken at once: a snapshot has no later turn to take it on)
+        if crate::desk::offscreen() {
+            self.poll_pads();
+        }
+        self.show_desk();
+    }
+
+    /// Delete or Backspace on Home in edit mode: the chosen pad taken off the
+    /// desk; false where no pad is chosen (or the color picker is open on it).
+    pub fn desk_delete_key(&mut self) -> bool {
+        if self.ui.get_place() != "home" || !self.desk.editing || self.desk.pad_chosen.is_none() || self.pick.is_some() {
+            return false;
+        }
+        self.desk.delete_pad();
+        self.pad_note.clear();
+        self.show_desk();
+        true
     }
 
     /// Ctrl with plus, minus or 0 on Home in edit mode: zoom in, out, or to the

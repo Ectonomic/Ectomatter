@@ -272,6 +272,22 @@ export struct DeskItem {
     h: length,
     off: bool,
     hover: bool,
+    // its name lies over a pad it could be lost on (a picture, or a light color)
+    backed: bool,
+}
+
+// a pad drawn on Home's desk (the window draws it on the ground): its box on
+// the desk and its corners' radius, whether it's chosen, whether the pointer
+// is over it, and whether it's the one being drawn
+export struct DeskPad {
+    x: length,
+    y: length,
+    w: length,
+    h: length,
+    r: length,
+    chosen: bool,
+    hover: bool,
+    drawing: bool,
 }
 
 // a row in a menu: 0 a choice, 1 a heading, 2 a rule, 3 a note, 4 a choice
@@ -3739,6 +3755,33 @@ component MouseLayers inherits Rectangle {
     @children
 }
 
+// a grip on the chosen pad's edge or corner, which sizes the pad: the edges
+// it moves (1 left, 2 top, 4 right, 8 bottom, two together at a corner), and
+// where the pad is on the desk, for its presses to say where they are there
+component PadGrip inherits TouchArea {
+    in property <int> edges;
+    in property <length> ox;
+    in property <length> oy;
+    callback grip(int, length, length);
+    callback pan(length, length);
+    callback drag(length, length);
+    callback let-go();
+    mouse-cursor: root.edges == 1 ? MouseCursor.w-resize : root.edges == 2 ? MouseCursor.n-resize : root.edges == 4 ? MouseCursor.e-resize : root.edges == 8 ? MouseCursor.s-resize
+        : root.edges == 3 ? MouseCursor.nw-resize : root.edges == 6 ? MouseCursor.ne-resize : root.edges == 12 ? MouseCursor.se-resize : MouseCursor.sw-resize;
+    pointer-event(e) => {
+        if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+            root.grip(root.edges, root.ox + self.x + self.mouse-x, root.oy + self.y + self.mouse-y);
+        }
+        if (e.button == PointerEventButton.middle && e.kind == PointerEventKind.down) {
+            root.pan(root.ox + self.x + self.mouse-x, root.oy + self.y + self.mouse-y);
+        }
+        if ((e.button == PointerEventButton.left || e.button == PointerEventButton.middle) && e.kind == PointerEventKind.up) {
+            root.let-go();
+        }
+    }
+    moved => { root.drag(root.ox + self.x + self.mouse-x, root.oy + self.y + self.mouse-y); }
+}
+
 export component AppWindow inherits Window {
     in property <bool> is-maximized;
     in property <image> mark;
@@ -4078,6 +4121,20 @@ export component AppWindow inherits Window {
     in property <bool> desk-carrying;
     in property <string> desk-zoom;
     in property <string> desk-empty;
+    // the pads drawn on the desk, the chosen one's place in them (-1, none),
+    // its color, whether it has a picture, and what the desk says of the
+    // picture last chosen for one, when it couldn't be used
+    in property <[DeskPad]> desk-pads;
+    in property <int> desk-pad-chosen: -1;
+    in property <color> desk-pad-rgb;
+    in property <bool> desk-pad-pictured;
+    in property <string> desk-pad-note;
+    callback desk-pad-hover(int, bool);
+    callback desk-pad-edges(int, length, length);
+    callback desk-pad-color(length, length, length);
+    callback desk-pad-picture();
+    callback desk-pad-no-picture();
+    callback desk-pad-delete();
     // the keyboard on the desk (the window draws it in its place): its shadow
     // round it, and how many times its drawn size it shows (its knobs and glass
     // scale by that)
@@ -4325,9 +4382,13 @@ export component AppWindow inherits Window {
         // highlight under a device on the ground, and draws the keyboard.)
         if root.place == "home": Rectangle {
             desk-ta := TouchArea {
-                mouse-cursor: root.desk-panning ? MouseCursor.grabbing : MouseCursor.default;
+                // (in edit mode a drag on the empty desk draws a pad)
+                mouse-cursor: root.desk-panning ? MouseCursor.grabbing : root.desk-editing ? MouseCursor.crosshair : MouseCursor.default;
                 // (in edit mode a drag with the middle button moves around the desk)
                 pointer-event(e) => {
+                    if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                        root.desk-press(-1, self.mouse-x, self.mouse-y);
+                    }
                     if (e.button == PointerEventButton.middle && e.kind == PointerEventKind.down) {
                         root.desk-pan(self.mouse-x, self.mouse-y);
                     }
@@ -4342,6 +4403,146 @@ export component AppWindow inherits Window {
                         return accept;
                     }
                     return reject;
+                }
+                // the pads, under the devices (the window draws them on the ground):
+                // in edit mode, a ring round the one chosen or being drawn, and a
+                // fainter one round the one the pointer is over; a drag on one
+                // carries it, and the chosen one's edges and corners size it
+                for p[j] in root.desk-pads: Rectangle {
+                    x: p.x;
+                    y: p.y;
+                    width: p.w;
+                    height: p.h;
+                    if root.desk-editing && (p.chosen || (p.hover && !root.desk-carrying)): Rectangle {
+                        border-radius: p.r;
+                        border-width: p.chosen ? 1.5px : 1px;
+                        border-color: p.chosen ? #ffffffe0 : #ffffff40;
+                    }
+                    if root.desk-editing && !p.drawing: TouchArea {
+                        mouse-cursor: root.desk-carrying ? MouseCursor.grabbing : MouseCursor.grab;
+                        changed has-hover => { root.desk-pad-hover(j, self.has-hover); }
+                        pointer-event(e) => {
+                            if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                                root.desk-press(-1, p.x + self.mouse-x, p.y + self.mouse-y);
+                            }
+                            if (e.button == PointerEventButton.middle && e.kind == PointerEventKind.down) {
+                                root.desk-pan(p.x + self.mouse-x, p.y + self.mouse-y);
+                            }
+                            if ((e.button == PointerEventButton.left || e.button == PointerEventButton.middle) && e.kind == PointerEventKind.up) {
+                                root.desk-release();
+                            }
+                        }
+                        moved => { root.desk-move(p.x + self.mouse-x, p.y + self.mouse-y); }
+                    }
+                    // (each its own element, placed as the pad's size has it: not
+                    // a list made from its size, which a drag would make anew, and
+                    // the grip held with it)
+                    if root.desk-editing && p.chosen && !p.drawing: Rectangle {
+                        PadGrip {
+                            x: -5px;
+                            y: 7px;
+                            width: 10px;
+                            height: p.h - 14px;
+                            edges: 1;
+                            ox: p.x;
+                            oy: p.y;
+                            grip(e, x, y) => { root.desk-pad-edges(e, x, y); }
+                            pan(x, y) => { root.desk-pan(x, y); }
+                            drag(x, y) => { root.desk-move(x, y); }
+                            let-go => { root.desk-release(); }
+                        }
+                        PadGrip {
+                            x: p.w - 5px;
+                            y: 7px;
+                            width: 10px;
+                            height: p.h - 14px;
+                            edges: 4;
+                            ox: p.x;
+                            oy: p.y;
+                            grip(e, x, y) => { root.desk-pad-edges(e, x, y); }
+                            pan(x, y) => { root.desk-pan(x, y); }
+                            drag(x, y) => { root.desk-move(x, y); }
+                            let-go => { root.desk-release(); }
+                        }
+                        PadGrip {
+                            x: 7px;
+                            y: -5px;
+                            width: p.w - 14px;
+                            height: 10px;
+                            edges: 2;
+                            ox: p.x;
+                            oy: p.y;
+                            grip(e, x, y) => { root.desk-pad-edges(e, x, y); }
+                            pan(x, y) => { root.desk-pan(x, y); }
+                            drag(x, y) => { root.desk-move(x, y); }
+                            let-go => { root.desk-release(); }
+                        }
+                        PadGrip {
+                            x: 7px;
+                            y: p.h - 5px;
+                            width: p.w - 14px;
+                            height: 10px;
+                            edges: 8;
+                            ox: p.x;
+                            oy: p.y;
+                            grip(e, x, y) => { root.desk-pad-edges(e, x, y); }
+                            pan(x, y) => { root.desk-pan(x, y); }
+                            drag(x, y) => { root.desk-move(x, y); }
+                            let-go => { root.desk-release(); }
+                        }
+                        PadGrip {
+                            x: -7px;
+                            y: -7px;
+                            width: 14px;
+                            height: 14px;
+                            edges: 3;
+                            ox: p.x;
+                            oy: p.y;
+                            grip(e, x, y) => { root.desk-pad-edges(e, x, y); }
+                            pan(x, y) => { root.desk-pan(x, y); }
+                            drag(x, y) => { root.desk-move(x, y); }
+                            let-go => { root.desk-release(); }
+                        }
+                        PadGrip {
+                            x: p.w - 7px;
+                            y: -7px;
+                            width: 14px;
+                            height: 14px;
+                            edges: 6;
+                            ox: p.x;
+                            oy: p.y;
+                            grip(e, x, y) => { root.desk-pad-edges(e, x, y); }
+                            pan(x, y) => { root.desk-pan(x, y); }
+                            drag(x, y) => { root.desk-move(x, y); }
+                            let-go => { root.desk-release(); }
+                        }
+                        PadGrip {
+                            x: p.w - 7px;
+                            y: p.h - 7px;
+                            width: 14px;
+                            height: 14px;
+                            edges: 12;
+                            ox: p.x;
+                            oy: p.y;
+                            grip(e, x, y) => { root.desk-pad-edges(e, x, y); }
+                            pan(x, y) => { root.desk-pan(x, y); }
+                            drag(x, y) => { root.desk-move(x, y); }
+                            let-go => { root.desk-release(); }
+                        }
+                        PadGrip {
+                            x: -7px;
+                            y: p.h - 7px;
+                            width: 14px;
+                            height: 14px;
+                            edges: 9;
+                            ox: p.x;
+                            oy: p.y;
+                            grip(e, x, y) => { root.desk-pad-edges(e, x, y); }
+                            pan(x, y) => { root.desk-pan(x, y); }
+                            drag(x, y) => { root.desk-move(x, y); }
+                            let-go => { root.desk-release(); }
+                        }
+                    }
                 }
                 for d[i] in root.desk-items: Rectangle {
                     x: d.x;
@@ -4399,8 +4600,18 @@ export component AppWindow inherits Window {
                         border-width: 1px;
                         border-color: #ffffff1c;
                     }
+                    // over a pad it could be lost on, its name on a backing of the
+                    // app's own ground
+                    if d.backed: Rectangle {
+                        x: (parent.width - name-col.preferred-width) / 2 - 10px;
+                        y: parent.height + 16px - 5px;
+                        width: name-col.preferred-width + 20px;
+                        height: name-col.preferred-height + 10px;
+                        border-radius: 8px;
+                        background: #18181bd9;
+                    }
                     // its name under it, and under that whether it is plugged in
-                    VerticalLayout {
+                    name-col := VerticalLayout {
                         x: (parent.width - self.preferred-width) / 2;
                         y: parent.height + 16px;
                         width: self.preferred-width;
@@ -4567,18 +4778,102 @@ export component AppWindow inherits Window {
                 drop-shadow-blur: 28px;
                 drop-shadow-offset-y: 10px;
                 drop-shadow-color: #00000070;
+                // (a press on the bar is the bar's, not the desk's under it)
+                TouchArea {}
                 mode-row := HorizontalLayout {
-                    padding-left: 16px;
+                    padding-left: root.desk-pad-chosen >= 0 ? 6px : 16px;
                     padding-right: 6px;
-                    spacing: 14px;
+                    spacing: root.desk-pad-chosen >= 0 ? 6px : 14px;
                     alignment: start;
-                    Text {
-                        text: "Drag a device to where it sits on your desk.";
+                    if root.desk-pad-chosen < 0: Text {
+                        text: "Drag a device to where it sits on your desk, or drag across the empty desk to draw a pad.";
                         font-family: "Geist";
                         font-size: 12.5px;
                         color: Ink.soft;
                         vertical-alignment: center;
                     }
+                    // a pad chosen: its color, its picture, and taking it off the desk
+                    if root.desk-pad-chosen >= 0: VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            height: 28px;
+                            width: color-row.preferred-width;
+                            border-radius: 8px;
+                            background: color-ta.has-hover ? Ink.pick : Ink.hover-box;
+                            color-row := HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 12px;
+                                spacing: 8px;
+                                Rectangle {
+                                    width: 14px;
+                                    Rectangle {
+                                        y: (parent.height - 14px) / 2;
+                                        width: 14px;
+                                        height: 14px;
+                                        border-radius: 4px;
+                                        background: root.desk-pad-rgb;
+                                        border-width: 1px;
+                                        border-color: #ffffff2e;
+                                    }
+                                }
+                                Text {
+                                    text: "Color";
+                                    font-family: "Geist";
+                                    font-size: 13px;
+                                    font-weight: 500;
+                                    color: Ink.ink;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            color-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.desk-pad-color(self.absolute-position.x, self.absolute-position.y, self.height); }
+                            }
+                        }
+                    }
+                    if root.desk-pad-chosen >= 0: VerticalLayout {
+                        alignment: center;
+                        WordButton {
+                            text: "Choose a picture…";
+                            height: 28px;
+                            fill: Ink.hover-box;
+                            fill-hover: Ink.pick;
+                            clicked => { root.desk-pad-picture(); }
+                        }
+                    }
+                    if root.desk-pad-chosen >= 0 && root.desk-pad-pictured: VerticalLayout {
+                        alignment: center;
+                        WordButton {
+                            text: "Remove picture";
+                            height: 28px;
+                            fill: Ink.hover-box;
+                            fill-hover: Ink.pick;
+                            clicked => { root.desk-pad-no-picture(); }
+                        }
+                    }
+                    if root.desk-pad-chosen >= 0: VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: pad-del-t.preferred-width + 24px;
+                            height: 28px;
+                            border-radius: 7px;
+                            background: pad-del-ta.has-hover ? #74302a : #5c2420;
+                            pad-del-t := Text { text: "Delete pad"; font-family: "Geist"; font-size: 13px; font-weight: 500; color: #fecaca; }
+                            pad-del-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.desk-pad-delete(); }
+                            }
+                        }
+                    }
+                    if root.desk-pad-chosen >= 0 && root.desk-pad-note != "": Text {
+                        text: root.desk-pad-note;
+                        font-family: "Geist";
+                        font-size: 12.5px;
+                        color: Ink.bad;
+                        vertical-alignment: center;
+                    }
+                    // (a gap before Done, as wide as the bar's own spacing)
+                    if root.desk-pad-chosen >= 0: Rectangle { width: 8px; }
                     VerticalLayout {
                         alignment: center;
                         WordButton {
@@ -4604,6 +4899,7 @@ export component AppWindow inherits Window {
                 drop-shadow-blur: 22px;
                 drop-shadow-offset-y: 8px;
                 drop-shadow-color: #00000060;
+                TouchArea {}
                 zoom-row := HorizontalLayout {
                     padding: 4px;
                     spacing: 2px;

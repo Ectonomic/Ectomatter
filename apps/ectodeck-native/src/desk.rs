@@ -5,9 +5,13 @@
 //! fits the window and nothing on it moves. Where each device sits is kept
 //! in the window's state ("desk"), in the desk's own units.
 
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::picture::{Decor, Dots, Plate};
+use serde_json::{Value, json};
+
+use crate::picture::{Decor, Dots, PadLaid, Photo, Plate};
 
 /// The desk's units: at 100% a logical pixel; the Z10's 470 mm are 760 of them.
 pub const PER_MM: f32 = 760.0 / 470.0;
@@ -61,6 +65,132 @@ enum Drag {
     Pan { at: (f32, f32), from: View },
     /// a device: which, from where, its place then, and whether it has moved yet
     Item { i: usize, at: (f32, f32), from: (f32, f32), moved: bool },
+    /// a pad drawn on the empty desk, in edit mode: from the dot it began at
+    /// to the dot the pointer is nearest now, in the desk's units
+    Draw { from: (f32, f32), to: (f32, f32) },
+    /// a pad carried, in edit mode: which, from where, its place then,
+    /// whether it has moved yet, and whether it was chosen before the press
+    Pad { i: usize, at: (f32, f32), from: (f32, f32), moved: bool, was: bool },
+    /// the chosen pad sized by its edges, in edit mode: which, from where, its
+    /// box then, and which of its edges move (left, top, right, bottom)
+    Size { i: usize, at: (f32, f32), from: [f32; 4], edges: [bool; 4] },
+}
+
+/// A pad drawn on the desk, under the devices, as a desk mat or a mousepad
+/// is: its place and size in the desk's units, its color, and a picture of
+/// the person's own on it, filling it, if it has one.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Pad {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub color: [u8; 3],
+    pub picture: Option<String>,
+}
+
+/// A pad's color when it's drawn: a shade lighter than the desk, as a dark mat is.
+pub const PAD_COLOR: [u8; 3] = [0x25, 0x25, 0x2b];
+/// A pad's corners' radius, in the desk's units (about 5 mm).
+pub const PAD_RADIUS: f32 = 8.0;
+/// A pad's least size each way, in the desk's units: two dots apart.
+const PAD_LEAST: f32 = 2.0 * SNAP;
+/// The longest side a pad's picture is kept at, in its pixels: enough for a
+/// desk mat across a large screen.
+const PICTURE_SIDE: f32 = 2048.0;
+/// The largest picture file a pad takes.
+const PICTURE_BYTES: u64 = 64 << 20;
+
+/// The pads as the window's state keeps them.
+pub fn pads_of(v: &Value) -> Vec<Pad> {
+    v.as_array().map_or(Vec::new(), |a| {
+        a.iter()
+            .filter_map(|p| {
+                let c = p["color"].as_str().and_then(|c| u32::from_str_radix(c.trim_start_matches('#'), 16).ok()).unwrap_or(0x25252b);
+                let (w, h) = (p["w"].as_f64()? as f32, p["h"].as_f64()? as f32);
+                (w > 0.0 && h > 0.0).then(|| Pad { x: p["x"].as_f64().unwrap_or(0.0) as f32, y: p["y"].as_f64().unwrap_or(0.0) as f32, w, h, color: [(c >> 16) as u8, (c >> 8) as u8, c as u8], picture: p["picture"].as_str().filter(|s| !s.is_empty()).map(String::from) })
+            })
+            .collect()
+    })
+}
+
+/// The pads as the window's state keeps them: each one's place and size in
+/// the desk's units, its color as a hex code, and its picture's file.
+pub fn pads_value(pads: &[Pad]) -> Value {
+    Value::Array(pads.iter().map(|p| json!({ "x": p.x, "y": p.y, "w": p.w, "h": p.h, "color": format!("#{:02X}{:02X}{:02X}", p.color[0], p.color[1], p.color[2]), "picture": p.picture })).collect())
+}
+
+/// Where Ectodeck keeps the pictures put on pads.
+fn pictures_dir() -> PathBuf {
+    crate::data_dir().join("desk")
+}
+
+/// Whether this run is an offscreen check (`--snapshot`).
+pub fn offscreen() -> bool {
+    std::env::args().any(|a| a == "--snapshot")
+}
+
+/// Whether this run is an offscreen check, or a test, which keep nothing.
+fn keeps_nothing() -> bool {
+    cfg!(test) || offscreen()
+}
+
+/// A picture chosen for a pad, read and kept in Ectodeck's own data (so the
+/// pad keeps it if the file is moved or deleted): the copy's path, and the
+/// picture. One already kept is kept once. An offscreen check keeps nothing
+/// and uses the file where it is.
+pub fn import_picture(from: &Path) -> Result<(PathBuf, Photo), String> {
+    let meta = std::fs::metadata(from).map_err(|_| "That file can't be read.".to_string())?;
+    if meta.len() > PICTURE_BYTES {
+        return Err("That picture is larger than 64 MB.".into());
+    }
+    let photo = photo_of(from)?;
+    if keeps_nothing() {
+        return Ok((from.to_path_buf(), photo));
+    }
+    let bytes = std::fs::read(from).map_err(|_| "That file can't be read.".to_string())?;
+    // (named by what is in it, so the same picture chosen twice is kept once)
+    let hash = bytes.iter().fold(0xcbf29ce484222325u64, |h, b| (h ^ *b as u64).wrapping_mul(0x100000001b3));
+    let ext = from.extension().map(|e| e.to_string_lossy().to_lowercase()).filter(|e| e.chars().all(|c| c.is_ascii_alphanumeric())).unwrap_or_else(|| "png".into());
+    let dir = pictures_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let to = dir.join(format!("pad-{hash:016x}.{ext}"));
+    if !to.exists() {
+        std::fs::write(&to, &bytes).map_err(|e| e.to_string())?;
+    }
+    Ok((to, photo))
+}
+
+/// A pad's picture, read from its file: a PNG, JPEG, GIF (its first frame),
+/// WebP or SVG picture, at its own size, or smaller to fit PICTURE_SIDE (an
+/// SVG picture, which has no pixels of its own, at that).
+pub fn photo_of(path: &Path) -> Result<Photo, String> {
+    use resvg::usvg;
+    let refused = || "That file isn't a picture Ectodeck can show. Choose a PNG, JPEG, WebP, GIF or SVG picture.".to_string();
+    let href = path.to_string_lossy().replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;");
+    let opt = usvg::Options::default();
+    // (its own size first, as the picture's file says it)
+    let probe = format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><image href="{href}"/></svg>"#);
+    let tree = usvg::Tree::from_str(&probe, &opt).map_err(|_| refused())?;
+    fn first(g: &usvg::Group) -> Option<usvg::Size> {
+        g.children().iter().find_map(|n| match n {
+            usvg::Node::Image(i) => Some(i.size()),
+            usvg::Node::Group(g) => first(g),
+            _ => None,
+        })
+    }
+    let size = first(tree.root()).ok_or_else(refused)?;
+    let (iw, ih) = (size.width(), size.height());
+    let vector = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("svg") || e.eq_ignore_ascii_case("svgz"));
+    let k = PICTURE_SIDE / iw.max(ih);
+    let k = if vector { k } else { k.min(1.0) };
+    let (w, h) = ((iw * k).round().max(1.0) as u32, (ih * k).round().max(1.0) as u32);
+    let svg = format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}"><image href="{href}" width="{w}" height="{h}" preserveAspectRatio="none"/></svg>"#);
+    let tree = usvg::Tree::from_str(&svg, &opt).map_err(|_| refused())?;
+    let mut pm = resvg::tiny_skia::Pixmap::new(w, h).ok_or_else(refused)?;
+    resvg::render(&tree, resvg::tiny_skia::Transform::identity(), &mut pm.as_mut());
+    let px: Vec<[u8; 4]> = pm.data().chunks_exact(4).map(|c| [c[0], c[1], c[2], c[3]]).collect();
+    Ok(Photo::new(w as usize, h as usize, px))
 }
 
 pub struct Desk {
@@ -81,6 +211,11 @@ pub struct Desk {
     /// where each device Ectodeck has seen sits, as kept between runs: its id
     /// and its place (one not met yet this run keeps its place too)
     kept: Vec<(String, f32, f32)>,
+    /// the pads on the desk, kept between runs, the one chosen in edit mode,
+    /// and the one the pointer is over
+    pub pads: Vec<Pad>,
+    pub pad_chosen: Option<usize>,
+    pub pad_hover: Option<usize>,
 }
 
 impl Default for Desk {
@@ -93,7 +228,79 @@ impl Desk {
     pub fn new() -> Desk {
         // (the tests start from a desk nothing was kept for)
         let kept = if cfg!(test) { Vec::new() } else { Desk::saved() };
-        Desk { items: Vec::new(), editing: false, view: View { z: 1.0, px: 0.0, py: 0.0 }, size: (0.0, 0.0), hover: None, pressed: None, drag: None, ease: None, dots: 0.0, fade: None, changed: Instant::now(), kept }
+        let pads = if cfg!(test) { Vec::new() } else { pads_of(&crate::uistate::get("desk_pads").unwrap_or_default()) };
+        Desk { items: Vec::new(), editing: false, view: View { z: 1.0, px: 0.0, py: 0.0 }, size: (0.0, 0.0), hover: None, pressed: None, drag: None, ease: None, dots: 0.0, fade: None, changed: Instant::now(), kept, pads, pad_chosen: None, pad_hover: None }
+    }
+
+    /// The pads kept as they are now.
+    pub fn save_pads(&self) {
+        crate::uistate::set("desk_pads", pads_value(&self.pads));
+    }
+
+    /// A picture no pad shows any more taken out of Ectodeck's data (only one
+    /// Ectodeck kept there itself).
+    pub fn forget_picture(&self, picture: Option<String>) {
+        let Some(path) = picture else { return };
+        if keeps_nothing() || self.pads.iter().any(|p| p.picture.as_deref() == Some(path.as_str())) {
+            return;
+        }
+        let path = PathBuf::from(path);
+        if path.parent() == Some(pictures_dir().as_path()) && path.file_name().is_some_and(|n| n.to_string_lossy().starts_with("pad-")) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    /// The chosen pad's color, kept once it's settled (the picker keeps it as it closes).
+    pub fn set_pad_color(&mut self, rgb: [u8; 3]) {
+        if let Some(p) = self.pad_chosen.and_then(|i| self.pads.get_mut(i)) {
+            p.color = rgb;
+        }
+    }
+
+    /// A picture put on a pad (the one at `i`, if it's still there and in the
+    /// same place as `was`), or taken off it; kept.
+    pub fn set_pad_picture(&mut self, i: usize, was: [f32; 4], picture: Option<String>) -> bool {
+        let Some(p) = self.pads.get_mut(i).filter(|p| [p.x, p.y, p.w, p.h] == was) else { return false };
+        let old = std::mem::replace(&mut p.picture, picture);
+        self.save_pads();
+        self.forget_picture(old);
+        true
+    }
+
+    /// A point on the desk's room in the window (its logical pixels) in the
+    /// desk's own units.
+    fn on_desk(&self, at: (f32, f32)) -> (f32, f32) {
+        ((at.0 - self.view.px) / self.view.z, (at.1 - self.view.py) / self.view.z)
+    }
+
+    /// The pad at a point of the desk's room in the window, the top one.
+    pub fn pad_at(&self, at: (f32, f32)) -> Option<usize> {
+        let (x, y) = self.on_desk(at);
+        self.pads.iter().rposition(|p| x >= p.x && x < p.x + p.w && y >= p.y && y < p.y + p.h)
+    }
+
+    /// A pad on the desk's room, in its logical pixels: x, y, width, height.
+    pub fn pad_screen(&self, p: &Pad) -> [f32; 4] {
+        let v = self.view;
+        [v.px + p.x * v.z, v.py + p.y * v.z, p.w * v.z, p.h * v.z]
+    }
+
+    /// The chosen pad's box, in the desk's units, for a picture asked for it.
+    pub fn chosen_box(&self) -> Option<(usize, [f32; 4])> {
+        let i = self.pad_chosen?;
+        let p = self.pads.get(i)?;
+        Some((i, [p.x, p.y, p.w, p.h]))
+    }
+
+    /// The pad being drawn, as it is now, in the desk's units.
+    pub fn drawing(&self) -> Option<Pad> {
+        match self.drag {
+            Some(Drag::Draw { from, to }) => {
+                let (x0, y0, x1, y1) = (from.0.min(to.0), from.1.min(to.1), from.0.max(to.0), from.1.max(to.1));
+                Some(Pad { x: x0, y: y0, w: x1 - x0, h: y1 - y0, color: PAD_COLOR, picture: None })
+            }
+            _ => None,
+        }
     }
 
     /// Where the window's state keeps each device: its id and its place.
@@ -178,10 +385,12 @@ impl Desk {
         if self.items.is_empty() || w <= 0.0 || h <= 0.0 {
             return View { z: 1.0, px: w / 2.0, py: h / 2.0 };
         }
-        let x0 = self.items.iter().map(|i| i.x).fold(f32::INFINITY, f32::min);
-        let y0 = self.items.iter().map(|i| i.y).fold(f32::INFINITY, f32::min);
-        let x1 = self.items.iter().map(|i| i.x + i.w).fold(f32::NEG_INFINITY, f32::max);
-        let y1 = self.items.iter().map(|i| i.y + i.h).fold(f32::NEG_INFINITY, f32::max);
+        // (the devices and the pads under them, all of it)
+        let boxes: Vec<[f32; 4]> = self.items.iter().map(|i| [i.x, i.y, i.x + i.w, i.y + i.h]).chain(self.pads.iter().map(|p| [p.x, p.y, p.x + p.w, p.y + p.h])).collect();
+        let x0 = boxes.iter().map(|b| b[0]).fold(f32::INFINITY, f32::min);
+        let y0 = boxes.iter().map(|b| b[1]).fold(f32::INFINITY, f32::min);
+        let x1 = boxes.iter().map(|b| b[2]).fold(f32::NEG_INFINITY, f32::max);
+        let y1 = boxes.iter().map(|b| b[3]).fold(f32::NEG_INFINITY, f32::max);
         let (bw, bh) = ((x1 - x0).max(1.0), (y1 - y0).max(1.0));
         let z = ((w - 2.0 * PAD) / bw).min((h - 2.0 * PAD - BELOW) / bh).clamp(ZOOM.0, ZOOM.1);
         let (px, py) = ((w - bw * z) / 2.0 - x0 * z, (h - bh * z - BELOW) / 2.0 - y0 * z);
@@ -247,6 +456,8 @@ impl Desk {
         self.editing = on;
         self.drag = None;
         self.pressed = None;
+        self.pad_chosen = None;
+        self.pad_hover = None;
         self.fade = Some((Instant::now(), self.dots, if on { 1.0 } else { 0.0 }));
         if !on {
             self.ease_to(self.fitted());
@@ -296,6 +507,29 @@ impl Desk {
         let i = i.filter(|i| *i < self.items.len());
         self.pressed = i;
         self.drag = i.map(|i| Drag::Item { i, at, from: (self.items[i].x, self.items[i].y), moved: false });
+        // in edit mode, a press on a device lets the chosen pad go; one on the
+        // empty desk: on a pad, it's carried; off one, a pad is drawn from the
+        // nearest dot
+        if i.is_some() && self.editing {
+            self.pad_chosen = None;
+        }
+        if i.is_none() && self.editing {
+            self.drag = Some(match self.pad_at(at) {
+                Some(k) => Drag::Pad { i: k, at, from: (self.pads[k].x, self.pads[k].y), moved: false, was: self.pad_chosen == Some(k) },
+                None => {
+                    let (x, y) = self.on_desk(at);
+                    Drag::Draw { from: (snap(x), snap(y)), to: (snap(x), snap(y)) }
+                }
+            });
+        }
+    }
+
+    /// A press on the chosen pad's edges (left, top, right, bottom: those
+    /// that move), in edit mode: its drag sizes it.
+    pub fn press_edges(&mut self, edges: [bool; 4], at: (f32, f32)) {
+        let Some((i, b)) = self.chosen_box().filter(|_| self.editing && edges.iter().any(|e| *e)) else { return };
+        self.pressed = None;
+        self.drag = Some(Drag::Size { i, at, from: b, edges });
     }
 
     /// The middle button pressed on the desk, on a device or not: in edit
@@ -335,16 +569,75 @@ impl Desk {
                 // (lifted as it is carried, so the desk changes on its first move)
                 true
             }
+            Some(Drag::Draw { to: end, .. }) => {
+                let v = self.view;
+                let (x, y) = (snap((to.0 - v.px) / v.z), snap((to.1 - v.py) / v.z));
+                let changed = *end != (x, y);
+                *end = (x, y);
+                changed
+            }
+            Some(Drag::Pad { i, at, from, moved, .. }) => {
+                let (dx, dy) = (to.0 - at.0, to.1 - at.1);
+                if !*moved && dx.abs() + dy.abs() < 5.0 {
+                    return false;
+                }
+                *moved = true;
+                let (i, x, y) = (*i, snap(from.0 + dx / z), snap(from.1 + dy / z));
+                if let Some(p) = self.pads.get_mut(i) {
+                    (p.x, p.y) = (x, y);
+                }
+                self.pad_chosen = Some(i);
+                true
+            }
+            Some(Drag::Size { i, at, from, edges }) => {
+                let (dx, dy) = ((to.0 - at.0) / z, (to.1 - at.1) / z);
+                let [x, y, w, h] = *from;
+                // each edge that moves, onto the dots, the pad kept two dots across
+                let x0 = if edges[0] { snap(x + dx).min(x + w - PAD_LEAST) } else { x };
+                let y0 = if edges[1] { snap(y + dy).min(y + h - PAD_LEAST) } else { y };
+                let x1 = if edges[2] { snap(x + w + dx).max(x + PAD_LEAST) } else { x + w };
+                let y1 = if edges[3] { snap(y + h + dy).max(y + PAD_LEAST) } else { y + h };
+                let Some(p) = self.pads.get_mut(*i) else { return false };
+                let changed = [p.x, p.y, p.w, p.h] != [x0, y0, x1 - x0, y1 - y0];
+                (p.x, p.y, p.w, p.h) = (x0, y0, x1 - x0, y1 - y0);
+                changed
+            }
             None => false,
         }
     }
 
     /// The press let go: the device clicked, if it was a click (outside edit mode).
     pub fn release(&mut self) -> Option<usize> {
+        let drawn = self.drawing();
         let clicked = match self.drag.take() {
             Some(Drag::Item { i, moved: false, .. }) if !self.editing => Some(i),
             Some(Drag::Item { moved: true, .. }) if self.editing => {
                 self.save();
+                None
+            }
+            // a pad drawn at least two dots each way, chosen; a click on the
+            // empty desk lets the chosen one go
+            Some(Drag::Draw { .. }) => {
+                match drawn.filter(|p| p.w >= PAD_LEAST && p.h >= PAD_LEAST) {
+                    Some(p) => {
+                        self.pads.push(p);
+                        self.pad_chosen = Some(self.pads.len() - 1);
+                        self.save_pads();
+                    }
+                    None => self.pad_chosen = None,
+                }
+                None
+            }
+            // a pad carried, chosen; one clicked, chosen, or let go if it was
+            Some(Drag::Pad { i, moved, was, .. }) => {
+                self.pad_chosen = if !moved && was { None } else { Some(i) };
+                if moved {
+                    self.save_pads();
+                }
+                None
+            }
+            Some(Drag::Size { .. }) => {
+                self.save_pads();
                 None
             }
             _ => None,
@@ -353,12 +646,47 @@ impl Desk {
         clicked
     }
 
+    /// The chosen pad taken off the desk.
+    pub fn delete_pad(&mut self) {
+        if let Some(i) = self.pad_chosen.take().filter(|i| *i < self.pads.len()) {
+            let gone = self.pads.remove(i);
+            self.pad_hover = None;
+            self.save_pads();
+            self.forget_picture(gone.picture);
+        }
+    }
+
+
     pub fn panning(&self) -> bool {
         matches!(self.drag, Some(Drag::Pan { .. }))
     }
 
     pub fn carrying(&self) -> bool {
-        matches!(self.drag, Some(Drag::Item { moved: true, .. })) && self.editing
+        matches!(self.drag, Some(Drag::Item { moved: true, .. }) | Some(Drag::Pad { moved: true, .. })) && self.editing
+    }
+
+    /// Whether a device's name (its box on the desk's room, as x0, y0, x1, y1)
+    /// lies over a pad it could be lost on: one with a picture, or one light
+    /// enough that the name's gray loses its contrast there.
+    pub fn name_backed(&self, [x0, y0, x1, y1]: [f32; 4]) -> bool {
+        self.pads.iter().any(|p| {
+            let [px, py, pw, ph] = self.pad_screen(p);
+            let over = x1 > px && x0 < px + pw && y1 > py && y0 < py + ph;
+            let lin = |c: u8| (c as f32 / 255.0).powf(2.2);
+            let light = 0.2126 * lin(p.color[0]) + 0.7152 * lin(p.color[1]) + 0.0722 * lin(p.color[2]) > 0.1;
+            over && (p.picture.is_some() || light)
+        })
+    }
+
+    /// The pads on the desk's room, in its logical pixels, for their rings
+    /// and their presses: each one's box, whether it's chosen, whether the
+    /// pointer is over it, and whether it's the one being drawn.
+    pub fn pads_shown(&self) -> Vec<([f32; 4], bool, bool, bool)> {
+        let mut out: Vec<([f32; 4], bool, bool, bool)> = self.pads.iter().enumerate().map(|(i, p)| (self.pad_screen(p), self.pad_chosen == Some(i), self.pad_hover == Some(i), false)).collect();
+        if let Some(p) = self.drawing() {
+            out.push((self.pad_screen(&p), true, false, true));
+        }
+        out
     }
 
     pub fn zoom_text(&self) -> String {
@@ -366,13 +694,23 @@ impl Desk {
     }
 
     /// What the desk lays on the window's ground, in the buffer's pixels: the
-    /// dots while they show (none under a device's name, `names`), and the
-    /// highlight under the device the pointer is over, outside edit mode.
-    /// `at` is where the desk is in the window, in logical pixels.
-    pub fn decor(&self, at: (f32, f32), scale: f32, names: &[[f32; 4]]) -> crate::picture::Decor {
+    /// pads, each with its picture as `pictures` has it read, the dots while
+    /// they show (none under a device's name, `names`), and the highlight
+    /// under the device the pointer is over, outside edit mode. `at` is where
+    /// the desk is in the window, in logical pixels.
+    pub fn decor(&self, at: (f32, f32), scale: f32, names: &[[f32; 4]], pictures: &dyn Fn(&str) -> Option<Arc<Photo>>) -> crate::picture::Decor {
         let (w, h) = self.size;
         let v = self.view;
         let s = |p: f32| p * scale;
+        let room = [s(at.0), s(at.1), s(at.0 + w), s(at.1 + h)];
+        let pads = if self.items.is_empty() { Vec::new() } else { self.pads.iter().cloned().chain(self.drawing()).collect() };
+        let pads = pads
+            .iter()
+            .map(|p| {
+                let [x, y, pw, ph] = self.pad_screen(p);
+                PadLaid { rect: [s(at.0 + x), s(at.1 + y), s(at.0 + x + pw), s(at.1 + y + ph)], radius: s(PAD_RADIUS * v.z), color: p.color, picture: p.picture.as_deref().and_then(pictures), bounds: room }
+            })
+            .collect();
         let dots = (self.dots > 0.0 && !self.items.is_empty()).then(|| Dots {
             ox: s(at.0 + v.px),
             oy: s(at.1 + v.py),
@@ -390,7 +728,7 @@ impl Desk {
             }
             _ => Vec::new(),
         };
-        Decor { dots, plates }
+        Decor { pads, dots, plates }
     }
 }
 
@@ -512,6 +850,138 @@ mod tests {
         let b = d.size.1 - (t + ((d.size.1 - EDGE - t) / s).floor() * s);
         assert!((l - r).abs() < 0.01 && (t - b).abs() < 0.01, "left {l} right {r} top {t} bottom {b}");
         assert!(l >= EDGE && t >= EDGE);
+    }
+
+    /// In edit mode a drag on the empty desk draws a pad on the dots, chosen
+    /// once drawn; a drag on it carries it; one too small to be a pad is a
+    /// click that lets the chosen one go; outside edit mode nothing is drawn.
+    #[test]
+    fn a_pad_is_drawn_on_the_empty_desk() {
+        let mut d = desk();
+        d.press(None, (20.0, 600.0));
+        d.moved((420.0, 900.0));
+        d.release();
+        assert!(d.pads.is_empty(), "outside edit mode");
+        d.set_editing(true);
+        let z = d.view.z;
+        d.press(None, (20.0, 600.0));
+        d.moved((420.0, 900.0));
+        assert!(d.drawing().is_some_and(|p| p.w > 0.0));
+        d.release();
+        assert_eq!((d.pads.len(), d.pad_chosen), (1, Some(0)));
+        let p = d.pads[0].clone();
+        assert!([p.x, p.y, p.w, p.h].iter().all(|v| (v / SNAP).fract() == 0.0), "on the dots: {p:?}");
+        assert!((p.w - 400.0 / z).abs() <= SNAP, "as wide as drawn");
+        // carried by a drag on it
+        let [sx, sy, ..] = d.pad_screen(&p);
+        d.press(None, (sx + 10.0, sy + 10.0));
+        d.moved((sx + 10.0 + 3.0 * SNAP * z, sy + 10.0));
+        d.release();
+        assert_eq!((d.pads.len(), d.pads[0].x), (1, p.x + 3.0 * SNAP));
+        assert_eq!(d.pad_chosen, Some(0), "still chosen, carried");
+        // chosen again, it lets go; a third time it's chosen
+        let [sx, sy, ..] = d.pad_screen(&d.pads[0].clone());
+        d.press(None, (sx + 10.0, sy + 10.0));
+        d.release();
+        assert_eq!(d.pad_chosen, None, "chosen again, let go");
+        d.press(None, (sx + 10.0, sy + 10.0));
+        d.release();
+        assert_eq!(d.pad_chosen, Some(0));
+        // a click on the empty desk lets it go, and so does a press on a device
+        d.press(None, (1300.0, 60.0));
+        d.release();
+        assert_eq!(d.pad_chosen, None);
+        d.pad_chosen = Some(0);
+        d.press(Some(0), (100.0, 100.0));
+        d.release();
+        assert_eq!(d.pad_chosen, None, "a device pressed");
+        d.pad_chosen = Some(0);
+        d.delete_pad();
+        assert!(d.pads.is_empty() && d.pad_chosen.is_none());
+    }
+
+    /// The chosen pad is sized by its edges, onto the dots, never less than
+    /// two dots across; outside edit mode its edges size nothing.
+    #[test]
+    fn a_pad_is_sized_by_its_edges() {
+        let mut d = desk();
+        d.pads.push(Pad { x: 96.0, y: 96.0, w: 240.0, h: 120.0, color: PAD_COLOR, picture: None });
+        d.pad_chosen = Some(0);
+        d.press_edges([false, false, true, false], (0.0, 0.0));
+        assert!(!d.moved((500.0, 0.0)), "outside edit mode");
+        d.release();
+        d.set_editing(true);
+        d.pad_chosen = Some(0);
+        let z = d.view.z;
+        // the right edge out three dots
+        d.press_edges([false, false, true, false], (0.0, 0.0));
+        assert!(d.moved((3.0 * SNAP * z + 2.0, 0.0)));
+        d.release();
+        assert_eq!([d.pads[0].x, d.pads[0].w], [96.0, 240.0 + 3.0 * SNAP]);
+        // the top left corner in, as far as it goes: two dots across, two down
+        d.press_edges([true, true, false, false], (0.0, 0.0));
+        d.moved((5000.0, 5000.0));
+        d.release();
+        let p = &d.pads[0];
+        assert_eq!([p.x + p.w, p.y + p.h, p.w, p.h], [96.0 + 240.0 + 3.0 * SNAP, 216.0, PAD_LEAST, PAD_LEAST]);
+        assert_eq!(d.pad_chosen, Some(0), "still chosen");
+    }
+
+    /// The pads are kept as the window's state keeps them, and read back the
+    /// same; one with no size is no pad.
+    #[test]
+    fn the_pads_are_kept_and_read_back() {
+        let pads = vec![
+            Pad { x: -48.0, y: 24.0, w: 960.0, h: 432.0, color: [0x12, 0x34, 0x56], picture: Some("/data/pad-1.png".into()) },
+            Pad { x: 864.0, y: 48.0, w: 240.0, h: 288.0, color: PAD_COLOR, picture: None },
+        ];
+        let v = pads_value(&pads);
+        assert_eq!(v[0]["color"], "#123456");
+        assert_eq!(pads_of(&v), pads);
+        assert_eq!(pads_of(&json!([{ "x": 0, "y": 0, "w": 0, "h": 48 }])), Vec::new());
+    }
+
+    /// The desk fits its pads in as well as its devices; the pads lie on the
+    /// ground, within the desk's room, the one being drawn with them.
+    #[test]
+    fn the_desk_fits_its_pads_in() {
+        let mut d = desk();
+        let before = d.fitted();
+        d.pads.push(Pad { x: -480.0, y: -48.0, w: 2400.0, h: 600.0, color: PAD_COLOR, picture: None });
+        let after = d.fitted();
+        assert!(after.z < before.z, "zoomed out to show it whole");
+        d.fit();
+        let [x, y, w, h] = d.pad_screen(&d.pads[0]);
+        assert!(x >= 0.0 && y >= 0.0 && x + w <= d.size.0 && y + h <= d.size.1, "on the window: {x} {y} {w} {h}");
+        let decor = d.decor((72.0, 36.0), 2.0, &[], &|_| None);
+        assert_eq!(decor.pads.len(), 1);
+        assert_eq!(decor.pads[0].bounds, [144.0, 72.0, 144.0 + 2.0 * d.size.0, 72.0 + 2.0 * d.size.1]);
+        assert!((decor.pads[0].rect[0] - 2.0 * (72.0 + x)).abs() < 1e-3);
+        d.set_editing(true);
+        d.press(None, (60.0, 60.0));
+        d.moved((400.0, 300.0));
+        assert_eq!(d.decor((0.0, 0.0), 1.0, &[], &|_| None).pads.len(), 2, "the one being drawn too");
+        assert_eq!(d.pads_shown().iter().filter(|p| p.3).count(), 1);
+    }
+
+    /// A picture file is read for a pad at its own size, its colors as they
+    /// are; a file that's no picture is refused in words.
+    #[test]
+    fn a_pad_reads_its_picture() {
+        let dir = std::env::temp_dir().join(format!("ectodeck-pad-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut pm = resvg::tiny_skia::Pixmap::new(40, 20).unwrap();
+        pm.fill(resvg::tiny_skia::Color::from_rgba8(200, 40, 10, 255));
+        let png = dir.join("mat & pad.png");
+        pm.save_png(&png).unwrap();
+        let photo = photo_of(&png).unwrap();
+        assert_eq!(photo.size(), (40, 20));
+        let bad = dir.join("not.png");
+        std::fs::write(&bad, b"no picture here").unwrap();
+        assert!(photo_of(&bad).unwrap_err().contains("isn't a picture"));
+        let (kept, _) = import_picture(&png).unwrap();
+        assert_eq!(kept, png, "a test keeps nothing");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// Outside edit mode nothing moves: no zoom, no pan, no device; a press
