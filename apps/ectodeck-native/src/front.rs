@@ -364,29 +364,6 @@ pub enum WindowAsk {
     ShowSettings,
 }
 
-/// The Plays menu: the six choices, a rule between those that start with the
-/// profile and those that start on a key press, and a pair stored that is
-/// none of them, after its own rule, ticked, so it is never hidden.
-fn plays_rows(page: &Page) -> Vec<MenuRow> {
-    let l = &page.draft()["lighting"]["keys"];
-    let e = &l["effects"][l["effect"].as_str().unwrap_or("off")];
-    let (start, stop) = (e["start"].as_u64().unwrap_or(0), e["stop"].as_u64().unwrap_or(0));
-    let at = lighting::plays_of(start, stop);
-    let rule = || MenuRow { kind: 2, label: "".into(), tag: "".into(), tick: false, sub: "".into() };
-    let mut rows = Vec::new();
-    for (j, (label, _, _)) in lighting::PLAYS.iter().enumerate() {
-        if j == 3 {
-            rows.push(rule());
-        }
-        rows.push(MenuRow { kind: 0, label: (*label).into(), tag: "".into(), tick: at == Some(j), sub: "".into() });
-    }
-    if at.is_none() {
-        rows.push(rule());
-        rows.push(MenuRow { kind: 0, label: lighting::plays_label(start, stop).into(), tag: "".into(), tick: true, sub: "".into() });
-    }
-    rows
-}
-
 const LAYERS: [(&str, &str); 2] = [("base", "When pressed"), ("fn", "When Fn is held")];
 
 /// The action menu's pages under "Other": each one's title and its list.
@@ -564,14 +541,16 @@ pub struct Front {
     preview_asked: bool,
     /// the draft changed while a preview was asked for: sent once it is answered
     preview_again: bool,
-    icons: Option<(f32, Vec<slint::Image>)>,
+    /// the effects' tiles' pictures, for the scale and the effects they were drawn for
+    icons: Option<(f32, Vec<String>, Vec<slint::Image>)>,
     cells: Rc<VecModel<Cell>>,
-    /// the Where and when box's pieces; the areas chosen for each profile's
-    /// effects, kept while the whole keyboard is lit; the dropdown open; the
-    /// area the pointer is over, which the keyboard shows
+    /// the Where and when box's pieces; the zones chosen for each profile's
+    /// effects, kept while the whole keyboard is lit; the setting whose menu
+    /// is open (by its place in the effect's settings); the zone the pointer
+    /// is over, which the keyboard shows
     place_cells: Rc<VecModel<Cell>>,
     areas: HashMap<(u8, String), u64>,
-    light_menu: Option<Ctl>,
+    light_menu: Option<usize>,
     pub hover_area: Option<usize>,
     /// the key the pointer is over on the keyboard's picture
     picture_key: Option<u32>,
@@ -1138,6 +1117,10 @@ impl Front {
             self.screen_sent = None;
         }
         match h {
+            device::Heard::Described(d) => {
+                self.page.desc = d;
+                self.icons = None;
+            }
             device::Heard::State(Ok(dev)) => {
                 self.failed_at = None;
                 self.page.loaded(dev);
@@ -1378,8 +1361,8 @@ impl Front {
                     }
                 }
                 Ask::Effect(i) => {
-                    if let (Some((mode, _)), Some(d)) = (z10::EFFECTS.get(i as usize), self.page.drafts.get_mut(&self.page.editing)) {
-                        d["lighting"]["keys"]["effect"] = serde_json::json!(mode);
+                    if let Some(id) = self.page.effects().get(i.max(0) as usize).and_then(|e| e["id"].as_str().map(String::from)) {
+                        self.page.set_effect(&id);
                     }
                     self.push_preview();
                 }
@@ -1626,13 +1609,20 @@ impl Front {
                     self.show_desk();
                 }
                 Ask::CellPick(id, i, x, y, h) => match crate::described::piece_of(id) {
+                    Some(piece) if self.on_keyboard() => self.kb_described_pick(piece, i.max(0) as usize, (x, y, h)),
                     Some(piece) => self.described_pick(piece, i.max(0) as usize, (x, y, h)),
                     None => self.cell_pick(lighting::ctl(id), i.max(0) as usize, (x, y, h)),
                 },
                 // (a setting a core described: the value its slider stands for)
                 Ask::CellSlide(id, v) if crate::described::piece_of(id).is_some() => {
                     let piece = crate::described::piece_of(id).unwrap();
-                    if let Some((sid, d, _)) = self.mouse.described(piece) {
+                    if self.on_keyboard() {
+                        if let Some((sid, d, _)) = self.page.described(piece) {
+                            let nv = crate::described::slid_kept(&sid, &d, v);
+                            self.page.change_settings(|e| crate::described::keep(e, &sid, &d, &nv));
+                            self.push_preview();
+                        }
+                    } else if let Some((sid, d, _)) = self.mouse.described(piece) {
                         self.mouse.set_described(piece, crate::described::slid(&sid, &d, v));
                     }
                 }
@@ -1643,7 +1633,7 @@ impl Front {
                             self.settings.set_soon("hdr.glow_limit", nits.map_or(serde_json::Value::Null, |n| serde_json::json!(n)));
                         }
                         Ctl::LcdBrightness => crate::display::act(&mut self.page, Ctl::LcdBrightness, 0, v, None),
-                        c => lighting::act(&mut self.page, c, 0, v),
+                        _ => {}
                     }
                     self.push_preview();
                 }
@@ -2337,6 +2327,50 @@ impl Front {
         self.refresh();
     }
 
+    /// Whether the keyboard's page is the one showing, whose Lighting boxes
+    /// are drawn from its description.
+    fn on_keyboard(&self) -> bool {
+        self.ui.get_place() == "z10"
+    }
+
+    /// A piece of the keyboard's Lighting boxes, drawn from its description,
+    /// used: a color opens the color picker, a menu choice its menu, the
+    /// zones their switch or a zone, and a choice or a checkbox takes its
+    /// new value.
+    fn kb_described_pick(&mut self, piece: crate::described::Piece, index: usize, anchor: (f32, f32, f32)) {
+        let Some((id, d, e)) = self.page.described(piece) else { return };
+        match d["type"].as_str().unwrap_or("") {
+            "color" | "colors" => {
+                self.open_picker(Ctl::Described, Some(piece), index, anchor);
+                return;
+            }
+            "choice" if d["menu"] == true => {
+                self.open_light_menu(piece, anchor);
+                return;
+            }
+            "zones" => {
+                let light = self.page.keys_light();
+                let areas = self.areas.entry((self.page.editing, self.page.effect_id())).or_insert(crate::described::all_zones(&light));
+                let z = crate::described::zones_picked(&light, crate::described::kept(&e, &id, &d).as_u64().unwrap_or(0), index, areas);
+                self.page.change_settings(|e| crate::described::keep(e, &id, &d, &serde_json::json!(z)));
+            }
+            _ => {
+                if let Some(v) = crate::described::picked(&d, &crate::described::kept(&e, &id, &d), index) {
+                    self.page.change_settings(|e| crate::described::keep(e, &id, &d, &v));
+                }
+            }
+        }
+        self.push_preview();
+    }
+
+    /// On Some zones, a zone turned on or off from the keyboard's picture, as its chip does.
+    fn kb_zone(&mut self, zone: usize) {
+        let effect = self.page.effect_desc(&self.page.effect_id());
+        if let Some(k) = crate::described::params(&effect).iter().position(|(_, d)| d["type"] == "zones") {
+            self.kb_described_pick(crate::described::Piece::Effect(k), zone, (0.0, 0.0, 0.0));
+        }
+    }
+
     /// A piece of the tile used: a swatch opens the color picker, the rest change the draft.
     fn cell_pick(&mut self, c: Ctl, index: usize, _anchor: (f32, f32, f32)) {
         match c {
@@ -2349,19 +2383,11 @@ impl Front {
                 self.refresh();
                 return;
             }
-            Ctl::Color | Ctl::Colors | Ctl::Background | Ctl::Paint | Ctl::LcdColor => {
+            Ctl::Paint | Ctl::LcdColor => {
                 self.open_picker(c, None, index, _anchor);
                 return;
             }
-            Ctl::Start | Ctl::Stop | Ctl::Submode | Ctl::Plays => {
-                self.open_light_menu(c, _anchor);
-                return;
-            }
-            Ctl::WhereMode | Ctl::WhereAll | Ctl::Zone => {
-                let mode = self.page.draft()["lighting"]["keys"]["effect"].as_str().unwrap_or("off").to_string();
-                let areas = self.areas.entry((self.page.editing, mode)).or_insert(lighting::ALL_AREAS);
-                lighting::place(&mut self.page, c, index, areas);
-            }
+            Ctl::Reset => self.page.reset_effect(),
             Ctl::Preset => {
                 if let Some(c) = lighting::PRESETS.get(index) {
                     self.paint = *c;
@@ -2369,7 +2395,6 @@ impl Front {
             }
             // a checkbox: which box, and the state it is turned to
             Ctl::Demo => self.page.demo = index % 2 == 1,
-            Ctl::Random => lighting::act(&mut self.page, c, 0, (index % 2) as f32),
             Ctl::LcdApp | Ctl::GameKey => crate::display::act(&mut self.page, c, index / 2, (index % 2) as f32, None),
             Ctl::LcdPreset => crate::display::act(&mut self.page, c, index, 0.0, None),
             Ctl::SliderBind => {
@@ -2451,7 +2476,7 @@ impl Front {
             }
             Ctl::Fill | Ctl::Scatter | Ctl::Clear => {
                 // Fill paints an area (the whole keyboard, or one of the others); the rest every key
-                let area = if c == Ctl::Fill { lighting::ZONES.get(index).map_or(0x80, |z| z.0) as u8 } else { 0x80 };
+                let area = if c == Ctl::Fill { crate::described::zone_bit(&self.page.keys_light(), index).unwrap_or(0x80) as u8 } else { 0x80 };
                 let within = self.page.zone_set(area);
                 let leds: Vec<u32> = self.page.layout.iter().filter(|k| k.led && within.as_ref().is_none_or(|w| w.contains(&k.pos))).map(|k| k.pos).collect();
                 let mut seed = self.t0.elapsed().as_nanos() as u64 | 1;
@@ -2471,7 +2496,7 @@ impl Front {
                 }
                 lighting::save_custom(self.page.editing, &self.page.custom);
             }
-            _ => lighting::act(&mut self.page, c, index, 0.0),
+            _ => {}
         }
         self.push_preview();
     }
@@ -2487,10 +2512,18 @@ impl Front {
         }
         self.close_menu();
         self.close_picker();
-        let rgb = match piece.and_then(|p| self.mouse.described(p)) {
+        let described = match piece {
+            Some(p) if self.on_keyboard() => self.page.described(p).map(|(id, d, e)| {
+                let v = crate::described::kept(&e, &id, &d);
+                (id, d, v)
+            }),
+            Some(p) => self.mouse.described(p),
+            None => None,
+        };
+        let rgb = match described {
             Some((_, d, v)) => crate::described::color_at(&d, &v, index).unwrap_or([0xff, 0, 0]),
             None if c == Ctl::DeskPad => self.desk.pad_chosen.and_then(|i| self.desk.pads.get(i)).map_or(crate::desk::PAD_COLOR, |p| p.color),
-            None => lighting::color_of(&self.page, c, index, self.paint),
+            None => lighting::color_of(&self.page, c, self.paint),
         };
         self.pick = Some(Pick { ctl: c, piece, index, start: rgb, hsv: rgb2hsv(rgb), rgb, anchor });
         let recent = recent_colors();
@@ -2570,13 +2603,17 @@ impl Front {
         } else if c == Ctl::DeskPad {
             self.desk.set_pad_color(rgb);
             self.show_desk();
+        } else if let Some(piece) = piece.filter(|_| self.on_keyboard()) {
+            if let Some((id, d, _)) = self.page.described(piece) {
+                self.page.change_settings(|e| crate::described::keep_color(e, &id, &d, index, rgb));
+            }
         } else if let Some(piece) = piece {
             if let Some((_, d, v)) = self.mouse.described(piece) {
                 self.mouse.set_described(piece, crate::described::with_color(&d, &v, index, rgb));
             }
             self.refresh();
         } else {
-            lighting::set_color(&mut self.page, c, index, rgb);
+            lighting::set_color(&mut self.page, c, rgb);
         }
         self.show_pick(skip);
         self.push_preview();
@@ -2762,8 +2799,8 @@ impl Front {
         }
         let now = self.t0.elapsed().as_secs_f64() * 1000.0;
         if self.page.view == View::Lighting {
-            // Per key: a click paints the key
-            if self.page.draft()["lighting"]["keys"]["effect"] == "custom" {
+            // painting key by key: a click paints the key
+            if self.page.effect_desc(&self.page.effect_id())["paint"] == true {
                 let Some(k) = self.page.key(pos).cloned() else { return };
                 if !k.led {
                     self.status(format!("{} has no light behind it.", self.page.key_label(&k)), 0);
@@ -2779,7 +2816,7 @@ impl Front {
             // on Some areas, a key in an area turns that area on or off, as its chip does
             if self.some_areas() {
                 if let Some(i) = self.area_of(pos) {
-                    self.cell_pick(Ctl::Zone, i, (0.0, 0.0, 0.0));
+                    self.kb_zone(i);
                     return;
                 }
             }
@@ -3221,26 +3258,17 @@ impl Front {
             }
             return;
         }
-        if let Some(c) = self.light_menu.take() {
+        if let Some(k) = self.light_menu.take() {
             self.ui.set_menu_open(false);
             self.ui.set_menu_search(true);
             self.ui.set_menu_w(300.0);
-            let index = if c == Ctl::Submode { i.min(2) } else { i };
-            // Plays: its rows, a rule between the two halves (and, for a pair it
-            // has no name for, that one after another rule, which changes nothing)
-            let index = if c == Ctl::Plays {
-                match plays_rows(&self.page).get(i).filter(|r| r.kind == 0).and_then(|r| lighting::PLAYS.iter().position(|p| p.0 == r.label.as_str())) {
-                    Some(k) => k,
-                    None => {
-                        self.refresh();
-                        return;
-                    }
+            // (a rule, or the value no option has, after a rule of its own, changes nothing)
+            if let Some((id, d, _)) = self.page.described(crate::described::Piece::Effect(k)) {
+                if let Some(v) = crate::described::menu_pick(&d, i) {
+                    self.page.change_settings(|e| crate::described::keep(e, &id, &d, &v));
+                    self.push_preview();
                 }
-            } else {
-                index
-            };
-            lighting::act(&mut self.page, c, index, 0.0);
-            self.push_preview();
+            }
             self.refresh();
             return;
         }
@@ -3859,6 +3887,8 @@ impl Front {
         let (x0, y0, _, _) = p.view_box;
         let zoned = self.area_keys();
         let some = self.some_areas();
+        // (painting key by key: a click on a lit key paints it)
+        let painting = p.drafts.contains_key(&p.editing) && p.effect_desc(&p.effect_id())["paint"] == true;
         let names = p.board_macro_names();
         let keys: Vec<KeyItem> = p
             .layout
@@ -3879,7 +3909,7 @@ impl Front {
                 // one, or on Some areas, turning its area on or off
                 clickable: match p.view {
                     View::Keys => true,
-                    View::Lighting if p.drafts.get(&p.editing).is_some_and(|d| d["lighting"]["keys"]["effect"] == "custom") => k.led,
+                    View::Lighting if painting => k.led,
                     View::Lighting => some && self.area_of(k.pos).is_some(),
                     _ => false,
                 },
@@ -5414,55 +5444,69 @@ impl Front {
     /// The Lighting page's effects and its tile, laid out for the draft. The
     /// pieces are changed in place, so one being used is never rebuilt under
     /// the pointer.
+    /// The Lighting page, drawn from the keyboard's description: the effects'
+    /// tiles, and the chosen effect's boxes.
     fn refresh_lighting(&mut self) {
-        let mode = self.page.draft()["lighting"]["keys"]["effect"].as_str().unwrap_or("off").to_string();
+        let mode = self.page.effect_id();
+        let effects = self.page.effects();
+        let ids: Vec<String> = effects.iter().map(|e| e["id"].as_str().unwrap_or("").to_string()).collect();
         let scale = self.scale;
-        if self.icons.as_ref().map(|(s, _)| *s) != Some(scale) {
-            self.icons = Some((scale, z10::EFFECTS.iter().map(|(m, _)| lighting::icon(m, scale)).collect()));
+        if self.icons.as_ref().map(|(s, i, _)| (*s, i)) != Some((scale, &ids)) {
+            self.icons = Some((scale, ids.clone(), ids.iter().map(|id| lighting::icon(crate::described::tile(id).0, scale)).collect()));
         }
-        let icons = &self.icons.as_ref().unwrap().1;
-        let effects: Vec<EffectItem> = z10::EFFECTS
+        let icons = &self.icons.as_ref().unwrap().2;
+        let tiles: Vec<EffectItem> = effects
             .iter()
             .zip(icons)
-            .map(|((m, name), icon)| EffectItem {
-                name: (*name).into(),
-                icon: icon.clone(),
-                on: *m == mode,
-                motion: match *m {
-                    "breathing" => 1,
-                    "pulse" => 2,
-                    "wave" => 3,
-                    "stars" => 4,
-                    "trigger" => 5,
-                    _ => 0,
-                },
+            .map(|(e, icon)| {
+                let id = e["id"].as_str().unwrap_or("");
+                EffectItem { name: e["label"].as_str().unwrap_or(id).into(), icon: icon.clone(), on: id == mode, motion: crate::described::tile(id).1 }
             })
             .collect();
-        self.ui.set_effect_moves(effects.iter().any(|e| e.on && e.motion != 0));
-        show_rows(self.ui.get_effects(), |m| self.ui.set_effects(m), effects);
-        let open = self.pick.as_ref().map(|p| (p.ctl, p.index));
-        let b = lighting::boxes(&self.page, self.paint, self.page.demo, open, self.light_menu, self.picture_area());
+        self.ui.set_effect_moves(tiles.iter().any(|e| e.on && e.motion != 0));
+        show_rows(self.ui.get_effects(), |m| self.ui.set_effects(m), tiles);
+        let profile = self.page.profile_name(self.page.editing);
+        let look = crate::described::Look {
+            kind: "keyboard",
+            profile: &profile,
+            open: self.pick.as_ref().and_then(|p| match p.piece {
+                Some(crate::described::Piece::Effect(k)) => Some((k, p.index)),
+                _ => None,
+            }),
+            painting: self.pick.as_ref().is_some_and(|p| p.ctl == Ctl::Paint),
+            menu: self.light_menu,
+            hot: self.picture_area(),
+            demo: self.page.demo,
+            paint: self.paint,
+        };
+        let b = crate::described::boxes(&self.page.keys_light(), &self.page.effect_desc(&mode), &self.page.effect_settings(), &look);
         self.ui.set_light_kind(b.kind);
         self.ui.set_light_title(b.title.into());
+        self.ui.set_place_title(b.place_title.into());
         self.ui.set_set_h(b.set_h);
         self.ui.set_place_h(b.place_h);
         self.show_cells(b.set);
         sync_cells(&self.place_cells, b.place);
     }
 
-    /// Whether the Lighting page lights some areas of the keyboard, not all of it.
+    /// Whether the Lighting page lights some zones of the keyboard, not all of
+    /// it: the effect's zones setting, if it has one, on Some zones.
     fn some_areas(&self) -> bool {
         let p = &self.page;
         // (nothing to say before the keyboard's profiles are read)
-        let Some(d) = p.drafts.get(&p.editing) else { return false };
-        let l = &d["lighting"]["keys"];
-        let mode = l["effect"].as_str().unwrap_or("off");
-        p.view == View::Lighting && mode != "off" && mode != "custom" && l["effects"][mode]["zone"].as_u64().unwrap_or(0x80) & 0x80 == 0
+        if p.view != View::Lighting || !p.drafts.contains_key(&p.editing) {
+            return false;
+        }
+        let e = p.effect_desc(&p.effect_id());
+        let light = p.keys_light();
+        crate::described::params(&e).iter().find(|(_, d)| d["type"] == "zones").is_some_and(|(id, d)| !crate::described::whole(&light, crate::described::kept(&p.effect_settings(), id, d).as_u64().unwrap_or(0)))
     }
 
-    /// The area a key is in, by its place in ZONES.
+    /// The zone a key is in, by its place in the keys' light's zones (never the whole keyboard).
     fn area_of(&self, pos: u32) -> Option<usize> {
-        (1..lighting::ZONES.len()).find(|&i| self.page.zone_set(lighting::ZONES[i].0 as u8).is_some_and(|keys| keys.contains(&pos)))
+        let light = self.page.keys_light();
+        let n = light["zones"].as_array().map_or(0, |z| z.len());
+        (0..n).filter(|&i| light["zones"][i]["whole"] != true).find(|&i| crate::described::zone_bit(&light, i).is_some_and(|bit| self.page.zone_set(bit as u8).is_some_and(|keys| keys.contains(&pos))))
     }
 
     /// On Some areas, the area the pointer is over on the keyboard's picture.
@@ -5480,7 +5524,7 @@ impl Front {
         if p.view != View::Lighting {
             return None;
         }
-        let bit = lighting::ZONES.get(self.hover_area.or_else(|| self.picture_area())?)?.0 as u8;
+        let bit = crate::described::zone_bit(&p.keys_light(), self.hover_area.or_else(|| self.picture_area())?)? as u8;
         Some(p.zone_set(bit).unwrap_or_else(|| p.layout.iter().filter(|k| k.led).map(|k| k.pos).collect()))
     }
 
@@ -5517,25 +5561,23 @@ impl Front {
     // ------------------------------------------------------------ the sliders' jobs
 
     /// A dropdown on the Lighting page opened: its choices, under it, as wide as it is.
-    fn open_light_menu(&mut self, c: Ctl, anchor: (f32, f32, f32)) {
+    fn open_light_menu(&mut self, piece: crate::described::Piece, anchor: (f32, f32, f32)) {
         if let Some((at, when)) = self.shut.take() {
             if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
                 return;
             }
         }
-        let rows: Vec<MenuRow> = if c == Ctl::Plays {
-            plays_rows(&self.page)
-        } else {
-            let Some((list, chosen)) = lighting::choices(&self.page, c) else { return };
-            list.iter().enumerate().map(|(j, label)| MenuRow { kind: 0, label: (*label).into(), tag: "".into(), tick: j == chosen, sub: "".into() }).collect()
-        };
+        let crate::described::Piece::Effect(k) = piece else { return };
+        let Some((id, d, e)) = self.page.described(piece) else { return };
+        let rows: Vec<MenuRow> = crate::described::menu_rows(&d, &crate::described::kept(&e, &id, &d)).into_iter().map(|(kind, label, tick)| MenuRow { kind, label: label.into(), tag: "".into(), tick, sub: "".into() }).collect();
+        let in_place = crate::described::in_place_box(&self.page.effect_desc(&self.page.effect_id()), &id);
         self.close_menu();
         self.close_picker();
         let h = 6.0 + rows.iter().map(|r| if r.kind == 2 { 11.0 } else { 33.0 }).sum::<f32>() + 6.0;
         self.ui.set_menu_search(false);
         self.ui.set_menu_back(false);
         self.ui.set_menu_natural(h);
-        let w = if c == Ctl::Submode { lighting::SET_W } else { lighting::PLACE_W } - 32.0;
+        let w = if in_place { crate::described::PLACE_W } else { crate::described::SET_W } - 32.0;
         self.ui.set_menu_w(w);
         self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
         let (ax, ay, ah) = anchor;
@@ -5549,7 +5591,7 @@ impl Front {
         self.ui.set_menu_top(if down { ay + ah + 6.0 } else { ay - 6.0 - h.min(room) });
         self.ui.set_menu_max(if h > room { room } else { win * 0.7 });
         self.ui.set_menu_open(true);
-        self.light_menu = Some(c);
+        self.light_menu = Some(k);
     }
 
     /// A turn's mark selected: the ways in, under it, the turn's own ticked.

@@ -3842,6 +3842,8 @@ export component AppWindow inherits Window {
     in property <bool> effect-moves;
     in property <int> light-kind;
     in property <string> light-title;
+    // the title of the box of where and when the effect plays, from the keyboard's description
+    in property <string> place-title;
     in property <length> set-h;
     in property <length> place-h;
     in property <[Cell]> place-cells;
@@ -5628,7 +5630,7 @@ export component AppWindow inherits Window {
                         width: parent.width;
                         height: max(root.place-h, lr2 == 0 ? lrow0 : lr2 == 1 ? lrow1 : lrow2);
                         fill: transparent;
-                        title: "Zones and timing";
+                        title: root.place-title;
                         for c in root.place-cells: CellView {
                             c: c;
                             pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }

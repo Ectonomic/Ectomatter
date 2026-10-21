@@ -1,36 +1,28 @@
-//! The Lighting page: beside the effects (which the page draws itself), a
-//! box of the chosen effect's settings, in groups (Color, Motion), and a box
-//! of where and when it plays; or, painting key by key, the brush.
+//! The pieces the app's boxes are built of (a box's stack, its kinds of
+//! pieces and words), what each piece does when used, and the Lighting
+//! page's own: the effects' small pictures, the brush's ready colors and
+//! the colors it painted, and the screen light's color. The Lighting page's
+//! boxes are drawn from the keyboard's description (described.rs).
 //!
-//! Each box is a fixed width, so its pieces are placed here from its own top
+//! Each box is a fixed width, so its pieces are placed from its own top
 //! left, and the page places the boxes and wraps them: so chips wrap and
 //! notes run on as they should, and a slider being dragged is never rebuilt
 //! under the pointer.
 
-use serde_json::{json, Value};
+use serde_json::json;
 
 use crate::text;
-use crate::z10::{Page, EFFECTS};
+use crate::z10::Page;
 use crate::Cell;
 
 /// What a piece of the tile does when used.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Ctl {
     None,
-    /// a color: the effect's one color, one of its list, the color between pulses, the paint
-    Color,
-    Colors,
-    Background,
+    /// the brush's color, from the picker
     Paint,
-    Random,
-    Brightness,
-    Speed,
-    Direction,
-    Submode,
+    /// Reactive's pretend typing; an effect's settings put back as the factory has them
     Demo,
-    Zone,
-    Start,
-    Stop,
     Reset,
     Fill,
     Scatter,
@@ -47,15 +39,10 @@ pub enum Ctl {
     HdrMode,
     PeakNits,
     Place,
-    /// Where: the whole keyboard (0) or some areas (1); every area at once
-    WhereMode,
-    WhereAll,
     /// one of the brush's ready colors
     Preset,
     /// one of the screen light's ready colors
     LcdPreset,
-    /// when the effect plays: one of PLAYS, a start and a stop together
-    Plays,
     /// the screen's layout editor: a block's words, its reading (the menu),
     /// °C or °F, a 24- or 12-hour clock, what its words do when they don't fit
     /// (0 Cut off, 1 Scroll), its alignment, taking it off (it moves and sizes
@@ -91,21 +78,10 @@ pub enum Ctl {
     DeskPad,
 }
 
-const CTLS: [Ctl; 55] = [
+const CTLS: [Ctl; 41] = [
     Ctl::None,
-    Ctl::Color,
-    Ctl::Colors,
-    Ctl::Background,
     Ctl::Paint,
-    Ctl::Random,
-    Ctl::Brightness,
-    Ctl::Speed,
-    Ctl::Direction,
-    Ctl::Submode,
     Ctl::Demo,
-    Ctl::Zone,
-    Ctl::Start,
-    Ctl::Stop,
     Ctl::Reset,
     Ctl::Fill,
     Ctl::Scatter,
@@ -122,11 +98,8 @@ const CTLS: [Ctl; 55] = [
     Ctl::HdrMode,
     Ctl::PeakNits,
     Ctl::Place,
-    Ctl::WhereMode,
-    Ctl::WhereAll,
     Ctl::Preset,
     Ctl::LcdPreset,
-    Ctl::Plays,
     Ctl::ScrText,
     Ctl::ScrSource,
     Ctl::ScrUnits,
@@ -242,19 +215,6 @@ pub mod style {
     pub const BOX_TITLE: i32 = 38;
 }
 
-/// the effects' speeds: stored as a cycle time, the slider runs slow to fast, as EVGA's does
-fn speed(mode: &str) -> Option<(f64, f64, &'static str)> {
-    Some(match mode {
-        "breathing" | "spiral" | "wave" => (1000.0, 5000.0, "cycle"),
-        "pulse" => (6000.0, 10000.0, "cycle"),
-        "stars" => (500.0, 4000.0, "cycle"),
-        "trigger" => (50.0, 1000.0, "shift"),
-        _ => return None,
-    })
-}
-
-pub const ZONES: [(u64, &str); 6] = [(0x80, "Whole keyboard"), (0x02, "F-keys"), (0x04, "Number row"), (0x10, "WASD"), (0x08, "Arrows"), (0x01, "Numpad")];
-
 pub(crate) fn cell(kind: i32, x: f32, y: f32, w: f32, h: f32) -> Cell {
     Cell { kind, x, y, w, h, text: "".into(), fill: "".into(), lines: "".into(), color: slint::Color::from_rgb_u8(0, 0, 0), on: false, value: 0.0, id: 0, index: 0, style: 0 }
 }
@@ -271,28 +231,10 @@ pub fn save_custom(n: u8, cols: &[[u8; 3]]) {
     crate::uistate::set(&format!("custom:{n}"), json!(cols));
 }
 
-/// The Lighting page's boxes beside the effects: the chosen effect's
-/// settings, and where and when it plays (or, painting key by key, the
-/// brush). Each box is a fixed width, so its pieces are placed here, from
-/// its own top left; the page places the boxes and wraps them.
-pub struct Boxes {
-    /// 0 an effect's settings, 1 the keys dark, 2 painting key by key
-    pub kind: i32,
-    pub title: String,
-    pub set: Vec<Cell>,
-    pub set_h: f32,
-    pub place: Vec<Cell>,
-    pub place_h: f32,
-}
-
-pub const SET_W: f32 = 360.0;
-pub const PLACE_W: f32 = 320.0;
-/// every area at once, when Some areas is first chosen
-pub const ALL_AREAS: u64 = 0x1F;
 /// the brush's ready colors; black turns a key off
 pub const PRESETS: [[u8; 3]; 9] = [[0xff, 0x08, 0x00], [0xff, 0x80, 0x00], [0xff, 0xd0, 0x00], [0x3b, 0xdc, 0x6b], [0x3f, 0xa9, 0xff], [0x6a, 0x3b, 0xff], [0xff, 0x3b, 0xd2], [0xff, 0xff, 0xff], [0, 0, 0]];
 
-const RESET_ICON: &str = "M4 12a8 8 0 1 0 2.4-5.7M4 4v4h4";
+pub(crate) const RESET_ICON: &str = "M4 12a8 8 0 1 0 2.4-5.7M4 4v4h4";
 const CW: &str = "M20 12a8 8 0 1 1-2.6-5.9M20 4v5h-5";
 const CCW: &str = "M4 12a8 8 0 1 0 2.6-5.9M4 4v5h5";
 const UP: &str = "M12 20V5M7 10l5-5 5 5";
@@ -300,14 +242,24 @@ const DOWN: &str = "M12 4v15M7 14l5 5 5-5";
 const LEFT: &str = "M20 12H5M10 7l-5 5 5 5";
 const RIGHT: &str = "M4 12h15M14 7l5 5-5 5";
 
+/// The drawing of an icon a choice's option names, for its switch.
+pub(crate) fn icon_path(name: &str) -> &'static str {
+    match name {
+        "clockwise" => CW,
+        "counterclockwise" => CCW,
+        "up" => UP,
+        "down" => DOWN,
+        "left" => LEFT,
+        "right" => RIGHT,
+        _ => "",
+    }
+}
+
 pub(crate) fn hex_of(c: [u8; 3]) -> String {
     format!("#{:02X}{:02X}{:02X}", c[0], c[1], c[2])
 }
 fn color(c: [u8; 3]) -> slint::Color {
     slint::Color::from_rgb_u8(c[0], c[1], c[2])
-}
-fn rgb3(v: &Value) -> [u8; 3] {
-    [v[0].as_u64().unwrap_or(0) as u8, v[1].as_u64().unwrap_or(0) as u8, v[2].as_u64().unwrap_or(0) as u8]
 }
 
 /// A box's pieces, top to bottom, 16 in from its sides.
@@ -359,10 +311,6 @@ impl Stack {
         self.y += 20.0 + 8.0;
     }
     /// a slider, filled to its place in `fill`, its ends named under it
-    pub(crate) fn slider(&mut self, c: Ctl, frac: f32, fill: slint::Color, ends: Option<(&str, &str)>) {
-        self.slider_at(id(c), frac, fill, ends);
-    }
-    /// the same, for a piece known by its id (a setting a core described)
     pub(crate) fn slider_at(&mut self, id: i32, frac: f32, fill: slint::Color, ends: Option<(&str, &str)>) {
         self.cells.push(Cell { value: frac, color: fill, id, ..cell(kind::FILLED, 16.0, self.y, self.inner(), 20.0) });
         self.y += 20.0;
@@ -385,9 +333,6 @@ impl Stack {
         self.y += 10.0 + 12.0;
     }
     /// colors as dots, 8 apart, wrapping; the one the picker is open on ringed
-    pub(crate) fn dots(&mut self, c: Ctl, cols: &[[u8; 3]], open: Option<usize>, code: bool) {
-        self.dots_at(id(c), cols, open, code);
-    }
     pub(crate) fn dots_at(&mut self, id: i32, cols: &[[u8; 3]], open: Option<usize>, code: bool) {
         let (mut x, mut y) = (16.0f32, self.y);
         for (j, col) in cols.iter().enumerate() {
@@ -404,9 +349,6 @@ impl Stack {
         self.y = y + 28.0;
     }
     /// a switch across the box: each choice its share, with its icon if it has one
-    pub(crate) fn switch(&mut self, c: Ctl, opts: &[(&str, &str)], chosen: usize) {
-        self.switch_at(id(c), opts, chosen);
-    }
     pub(crate) fn switch_at(&mut self, id: i32, opts: &[(&str, &str)], chosen: usize) {
         self.cells.push(Cell { style: 1, ..cell(kind::SEG, 16.0, self.y, self.inner(), 34.0) });
         let n = opts.len() as f32;
@@ -430,14 +372,18 @@ impl Stack {
         self.cells.push(Cell { on, id, text: label.into(), ..cell(kind::CHECKBOX, 16.0, self.y, 28.0 + text::width(400, 13.0, label), 20.0) });
         self.y += 20.0;
     }
-    pub(crate) fn dropdown(&mut self, c: Ctl, shown: &str, open: bool) {
-        self.cells.push(Cell { text: shown.into(), on: open, id: id(c), ..cell(kind::DROP, 16.0, self.y, self.inner(), 34.0) });
+    /// a dropdown showing the choice it is on
+    pub(crate) fn dropdown_at(&mut self, id: i32, shown: &str, open: bool) {
+        self.cells.push(Cell { text: shown.into(), on: open, id, ..cell(kind::DROP, 16.0, self.y, self.inner(), 34.0) });
         self.y += 34.0;
     }
-    /// areas as chips, 6 apart, wrapping, a chosen one ticked; `index` is each
-    /// one's place in ZONES. Faded (style 2) while the whole keyboard is lit;
-    /// `hot` is the one the pointer is over on the keyboard's picture.
+    /// zones as chips, 6 apart, wrapping, a chosen one ticked; `index` is each
+    /// one's place in the light's zones. Faded (style 2) while the whole
+    /// keyboard is lit; `hot` is the one the pointer is over on the keyboard's picture.
     pub(crate) fn chips(&mut self, c: Ctl, chips: &[(usize, &str, bool)], faded: bool, hot: Option<usize>) {
+        self.chips_at(id(c), chips, faded, hot);
+    }
+    pub(crate) fn chips_at(&mut self, id: i32, chips: &[(usize, &str, bool)], faded: bool, hot: Option<usize>) {
         let (mut x, mut y) = (0.0f32, self.y);
         for (index, name, on) in chips {
             let w = text::width(400, 12.5, name) + 24.0 + if *on { 14.0 } else { 0.0 };
@@ -446,7 +392,7 @@ impl Stack {
                 y += 34.0;
             }
             let hot = if hot == Some(*index) { 1.0 } else { 0.0 };
-            self.cells.push(Cell { text: (*name).into(), on: *on, style: if faded { 2 } else { 1 }, value: hot, id: id(c), index: *index as i32, ..cell(kind::AREA, 16.0 + x, y, w, 28.0) });
+            self.cells.push(Cell { text: (*name).into(), on: *on, style: if faded { 2 } else { 1 }, value: hot, id, index: *index as i32, ..cell(kind::AREA, 16.0 + x, y, w, 28.0) });
             x += w + 6.0;
         }
         self.y = y + 28.0;
@@ -461,338 +407,21 @@ impl Stack {
     }
 }
 
-/// The boxes for the profile being edited. `open` is the swatch the color
-/// picker is open on, `menu` the dropdown open.
-pub fn boxes(page: &Page, paint: [u8; 3], demo: bool, open: Option<(Ctl, usize)>, menu: Option<Ctl>, hot_area: Option<usize>) -> Boxes {
-    let l = &page.draft()["lighting"];
-    let mode = l["keys"]["effect"].as_str().unwrap_or("off").to_string();
-    let title = EFFECTS.iter().find(|(m, _)| *m == mode).map_or(mode.clone(), |(_, n)| n.to_string());
-    let profile = page.profile_name(page.editing);
-    if mode == "off" {
-        let mut s = Stack::new(SET_W);
-        s.note(&format!("The keys stay dark on {profile}. Choose an effect to light them."));
-        return Boxes { kind: 1, title, set_h: s.height(), set: s.cells, place: Vec::new(), place_h: 0.0 };
-    }
-    if mode == "custom" {
-        let mut s = Stack::new(SET_W);
-        s.group("Color");
-        let mut cols: Vec<[u8; 3]> = PRESETS.to_vec();
-        let chosen = PRESETS.iter().position(|c| *c == paint);
-        if chosen.is_none() {
-            cols.push(paint);
-        }
-        let at = chosen.unwrap_or(PRESETS.len());
-        // (a little closer than the effects' colors, so the ready ones and "+" share a line)
-        let (mut x, mut y) = (16.0f32, s.y);
-        for (j, col) in cols.iter().enumerate() {
-            if x > 16.0 && x + 28.0 > SET_W - 16.0 {
-                x = 16.0;
-                y += 36.0;
-            }
-            s.cells.push(Cell { color: color(*col), on: j == at, id: id(Ctl::Preset), index: j as i32, ..cell(kind::COLOR_DOT, x, y, 28.0, 28.0) });
-            x += 33.0;
-        }
-        // any other color, from the picker
-        if x + 28.0 > SET_W - 16.0 {
-            x = 16.0;
-            y += 36.0;
-        }
-        s.cells.push(Cell { style: 1, on: open.map(|o| o.0) == Some(Ctl::Paint), id: id(Ctl::Paint), ..cell(kind::COLOR_DOT, x, y, 28.0, 28.0) });
-        s.y = y + 28.0;
-        s.group("Fill a zone");
-        let chips: Vec<(usize, &str, bool)> = ZONES.iter().enumerate().map(|(i, (_, n))| (i, *n, false)).collect();
-        s.chips(Ctl::Fill, &chips, false, None);
-        s.gap(10.0);
-        let row = s.y;
-        let w1 = text::width(500, 12.5, "Scatter colors") + 18.0;
-        s.cells.push(Cell { text: "Scatter colors".into(), id: id(Ctl::Scatter), ..cell(kind::QUIET, 8.0, row, w1, 24.0) });
-        s.cells.push(Cell { text: "Clear every key".into(), id: id(Ctl::Clear), ..cell(kind::QUIET, 8.0 + w1 + 4.0, row, text::width(500, 12.5, "Clear every key") + 18.0, 24.0) });
-        s.y = row + 24.0 + 12.0;
-        s.note("Select keys on the keyboard to paint them. Black turns a key off. The keyboard can’t store a color for each key, so they show only while Ectodeck is open.");
-        return Boxes { kind: 2, title: "Brush".into(), set_h: s.height(), set: s.cells, place: Vec::new(), place_h: 0.0 };
-    }
-
-    let e = &l["keys"]["effects"][mode.as_str()];
-    let int = |k: &str| e[k].as_i64().unwrap_or(0);
-    let mut s = Stack::new(SET_W);
-    // the reset, at the top right, level with the title
-    s.link_right(Ctl::Reset, "Reset", 13.0, RESET_ICON);
-    s.y -= 6.0;
-    s.note(match mode.as_str() {
-        "static" => "One color on every key.",
-        "breathing" => "The keys fade in and out, a color each breath.",
-        "pulse" => "The keys jump from one color to the next, in turn.",
-        "spiral" => "Colors turn around the keyboard like a pinwheel.",
-        "wave" => "Colors roll across the keyboard.",
-        "stars" => "Keys twinkle on at random.",
-        "trigger" => "A key lights when you press it, then fades.",
-        _ => "",
-    });
-    s.gap(4.0);
-    let picking = |c: Ctl| open.filter(|o| o.0 == c).map(|o| o.1);
-    let list = |n: usize| -> Vec<[u8; 3]> { e["colors"].as_array().map(|a| a.iter().take(n).map(|c| rgb3(&c["color"])).collect()).unwrap_or_default() };
-    let mut first = [255u8, 255, 255];
-    if mode != "stars" {
-        s.group("Color");
-        match mode.as_str() {
-            "static" => {
-                first = rgb3(&e["color"]);
-                s.dots(Ctl::Color, &[first], picking(Ctl::Color), true);
-            }
-            _ => {
-                let cols = list(if mode == "breathing" { 2 } else { 7 });
-                first = cols.first().copied().unwrap_or(first);
-                s.strip(&cols);
-                s.dots(Ctl::Colors, &cols, picking(Ctl::Colors), false);
-            }
-        }
-        if e.get("random").is_some() && mode != "trigger" {
-            s.gap(14.0);
-            s.check(Ctl::Random, e["random"].as_u64().unwrap_or(0) != 0, "In a random order");
-        }
-        s.gap(16.0);
-    } else {
-        s.group("Color");
-    }
-    let bri = if mode == "static" || mode == "stars" { e["brightness"].as_f64() } else { e["colors"][0]["brightness"].as_f64() }.unwrap_or(255.0);
-    s.head("Brightness", Some(&format!("{}%", (bri / 2.55).round())));
-    s.slider(Ctl::Brightness, (bri / 255.0) as f32, color(first), None);
-    if let Some((lo, hi, key)) = speed(&mode) {
-        s.group("Motion");
-        let stored = e[key].as_f64().unwrap_or(lo).clamp(lo, hi);
-        // the slider runs slow to fast: right is faster
-        let frac = ((hi - stored) / (hi - lo)) as f32;
-        s.head("Speed", Some(&format!("{:.1} s", stored / 1000.0)));
-        s.slider(Ctl::Speed, frac, slint::Color::from_rgb_u8(0xd4, 0xd4, 0xd8), Some(("Slow", "Fast")));
-        if mode == "spiral" {
-            s.gap(16.0);
-            s.head("Direction", None);
-            let d = if int("direction") > 1 { 0 } else { int("direction") } as usize;
-            s.switch(Ctl::Direction, &[("Clockwise", CW), ("Counterclockwise", CCW)], d);
-        }
-        if mode == "wave" {
-            s.gap(16.0);
-            s.head("Direction", None);
-            // stored 0 up, 1 down, 2 right, 3 left; shown up, down, left, right
-            let d = match int("direction") {
-                1 => 1,
-                3 => 2,
-                2 => 3,
-                _ => 0,
-            };
-            s.switch(Ctl::Direction, &[("Up", UP), ("Down", DOWN), ("Left", LEFT), ("Right", RIGHT)], d);
-        }
-        if mode == "trigger" {
-            s.gap(16.0);
-            s.head("Lights up", None);
-            let sub = if int("submode") > 2 { 0 } else { int("submode") } as usize;
-            s.dropdown(Ctl::Submode, SUBMODES[sub], menu == Some(Ctl::Submode));
-            s.gap(14.0);
-            s.check(Ctl::Demo, demo, "Preview with pretend typing");
-        }
-    }
-
-    // where and when: the whole keyboard or some areas, the areas as chips
-    // (faded on the whole keyboard, where picking one lights only that), and
-    // when it plays, one choice for the keyboard's start and stop together.
-    // Everything sits where it always does, so nothing moves as it changes.
-    let mut p = Stack::new(PLACE_W);
-    p.y = 46.0;
-    let zone = e["zone"].as_u64().unwrap_or(0x80);
-    let whole = zone & 0x80 != 0;
-    p.switch(Ctl::WhereMode, &[("Whole keyboard", ""), ("Some zones", "")], if whole { 0 } else { 1 });
-    p.gap(14.0);
-    let picks = if whole { 0 } else { zone & ALL_AREAS };
-    let chips: Vec<(usize, &str, bool)> = ZONES.iter().enumerate().skip(1).map(|(i, (bit, name))| (i, *name, picks & bit != 0)).collect();
-    p.chips(Ctl::Zone, &chips, whole, hot_area);
-    p.gap(8.0);
-    p.note(if whole {
-        "Every key lights. Pick a zone to light only that."
-    } else if picks != 0 {
-        "Pick zones here or on the keyboard."
-    } else {
-        "Nothing lights until you pick a zone."
-    });
-    p.y = p.y.max(182.0) + 14.0;
-    p.cells.push(Cell { color: slint::Color::from_rgb_u8(0x2b, 0x2b, 0x30), ..cell(kind::BOX, 16.0, p.y, p.inner(), 1.0) });
-    p.y += 14.0;
-    p.cells.push(text_cell(style::PROP, 16.0, p.y, p.inner(), 20.0, "Plays"));
-    p.y += 24.0;
-    let (start, stop) = (int("start").max(0) as u64, int("stop").max(0) as u64);
-    p.dropdown(Ctl::Plays, &plays_label(start, stop), menu == Some(Ctl::Plays));
-    p.y += 10.0;
-    Boxes { kind: 0, title, set_h: s.height(), set: s.cells, place_h: p.height(), place: p.cells }
-}
-
-/// When an effect plays, as one choice: what it is called, and the
-/// keyboard's start (0 with the profile, 1 on a key press) and stop (0 never,
-/// 1 on a key press, 2 on key release), EVGA's LedStartMode and LedStopMode.
-pub const PLAYS: [(&str, u64, u64); 6] = [
-    ("All the time", 0, 0),
-    ("Until you press a key", 0, 1),
-    ("Until you let go of a key", 0, 2),
-    ("From your first key press", 1, 0),
-    ("While you hold a key", 1, 2),
-    ("From one key press to the next", 1, 1),
-];
-
-/// Which of PLAYS a stored start and stop are, if either is one the keyboard knows.
-pub fn plays_of(start: u64, stop: u64) -> Option<usize> {
-    PLAYS.iter().position(|(_, a, b)| *a == start && *b == stop)
-}
-
-/// What Plays shows: its choice, or what is stored if it is none of them.
-pub fn plays_label(start: u64, stop: u64) -> String {
-    plays_of(start, stop).map_or_else(|| format!("Something else (start {start}, stop {stop})"), |i| PLAYS[i].0.to_string())
-}
-
-/// The choices the dropdowns list, in the order the keyboard numbers them.
-pub const STARTS: [&str; 2] = ["With the profile", "On a key press"];
-pub const STOPS: [&str; 3] = ["Never", "On the next key press", "On key release"];
-pub const SUBMODES: [&str; 3] = ["Each key you type", "One key", "The key and the keys around it"];
-
-/// The choices for a dropdown, and the one chosen.
-pub fn choices(page: &Page, c: Ctl) -> Option<(&'static [&'static str], usize)> {
-    let l = &page.draft()["lighting"]["keys"];
-    let e = &l["effects"][l["effect"].as_str().unwrap_or("off")];
-    let int = |k: &str| e[k].as_i64().unwrap_or(0).max(0) as usize;
-    match c {
-        Ctl::Start => Some((&STARTS[..], int("start").min(1))),
-        Ctl::Stop => Some((&STOPS[..], int("stop").min(2))),
-        Ctl::Submode => Some((&SUBMODES[..], if int("submode") > 2 { 0 } else { int("submode") })),
-        _ => None,
-    }
-}
-
-/// Where the effect plays: the whole keyboard or some areas, an area in or
-/// out, or every area. `areas` keeps the areas chosen while the whole
-/// keyboard is lit, so choosing Some areas again brings them back.
-pub fn place(page: &mut Page, c: Ctl, index: usize, areas: &mut u64) {
+/// Set the screen light's color the picker chose.
+pub fn set_color(page: &mut Page, c: Ctl, rgb: [u8; 3]) {
     let n = page.editing;
     let Some(d) = page.drafts.get_mut(&n) else { return };
-    let mode = d["lighting"]["keys"]["effect"].as_str().unwrap_or("off").to_string();
-    let e = &mut d["lighting"]["keys"]["effects"][mode.as_str()];
-    let zone = e["zone"].as_u64().unwrap_or(0x80);
-    let z = match c {
-        Ctl::WhereMode if index == 0 => {
-            if zone & 0x80 == 0 {
-                *areas = zone & ALL_AREAS;
-            }
-            0x80
-        }
-        Ctl::WhereMode => {
-            if zone & 0x80 == 0 {
-                zone
-            } else {
-                *areas
-            }
-        }
-        Ctl::WhereAll => ALL_AREAS,
-        Ctl::Zone => {
-            let bit = ZONES.get(index).map_or(0, |z| z.0) & ALL_AREAS;
-            // on the whole keyboard, an area picked is the only one lit
-            if zone & 0x80 != 0 { bit } else { zone ^ bit }
-        }
-        _ => return,
-    };
-    if z & 0x80 == 0 {
-        *areas = z;
-    }
-    e["zone"] = json!(z);
-}
-
-/// Use a piece of the tile. `value` is a slider's place (0 to 1) or a
-/// checkbox's state; `index` which swatch, chip or button.
-pub fn act(page: &mut Page, c: Ctl, index: usize, value: f32) {
-    let n = page.editing;
-    let Some(d) = page.drafts.get_mut(&n) else { return };
-    let mode = d["lighting"]["keys"]["effect"].as_str().unwrap_or("off").to_string();
-    let e = &mut d["lighting"]["keys"]["effects"][mode.as_str()];
-    match c {
-        Ctl::Random => e["random"] = json!(if value > 0.5 { 1 } else { 0 }),
-        Ctl::Brightness => {
-            let v = (value.clamp(0.0, 1.0) * 255.0).round() as u64;
-            if mode == "static" || mode == "stars" {
-                e["brightness"] = json!(v);
-            } else {
-                if let Some(a) = e["colors"].as_array_mut() {
-                    for c in a {
-                        c["brightness"] = json!(v);
-                    }
-                }
-                if e.get("background").is_some() {
-                    e["background"]["brightness"] = json!(v);
-                }
-            }
-        }
-        Ctl::Speed => {
-            if let Some((lo, hi, key)) = speed(&mode) {
-                let v = lo + value.clamp(0.0, 1.0) as f64 * (hi - lo);
-                e[key] = json!((lo + hi - v).round() as u64);
-            }
-        }
-        Ctl::Direction => {
-            let opts: &[i64] = if mode == "wave" { &[0, 1, 3, 2] } else { &[0, 1] };
-            if let Some(v) = opts.get(index) {
-                e["direction"] = json!(v);
-            }
-        }
-        Ctl::Submode => e["submode"] = json!(index.min(2)),
-        Ctl::Start => e["start"] = json!(index.min(1)),
-        Ctl::Stop => e["stop"] = json!(index.min(2)),
-        Ctl::Plays => {
-            if let Some((_, a, b)) = PLAYS.get(index) {
-                e["start"] = json!(a);
-                e["stop"] = json!(b);
-            }
-        }
-        Ctl::Zone => {
-            let bit = ZONES.get(index).map_or(0x80, |z| z.0);
-            if bit == 0x80 {
-                e["zone"] = json!(0x80);
-            } else {
-                let z = e["zone"].as_u64().unwrap_or(0x80);
-                let mut z = if z & 0x80 != 0 { 0 } else { z };
-                z ^= bit;
-                e["zone"] = json!(if z == 0 { 0x80 } else { z });
-            }
-        }
-        Ctl::Reset => {
-            let fac = page.dev.as_ref().map(|dev| dev["factory"]["lighting"]["keys"]["effects"][mode.as_str()].clone()).unwrap_or(Value::Null);
-            if let Some(d) = page.drafts.get_mut(&n) {
-                d["lighting"]["keys"]["effects"][mode.as_str()] = fac;
-            }
-        }
-        _ => {}
+    if c == Ctl::LcdColor {
+        d["lighting"]["screen"]["color"]["color"] = json!(rgb);
     }
 }
 
-/// Set a color the picker chose: the effect's color, one of its list, the color between pulses.
-pub fn set_color(page: &mut Page, c: Ctl, index: usize, rgb: [u8; 3]) {
-    let n = page.editing;
-    let Some(d) = page.drafts.get_mut(&n) else { return };
-    let mode = d["lighting"]["keys"]["effect"].as_str().unwrap_or("off").to_string();
-    let e = &mut d["lighting"]["keys"]["effects"][mode.as_str()];
-    match c {
-        Ctl::Color => e["color"] = json!(rgb),
-        Ctl::Colors => e["colors"][index]["color"] = json!(rgb),
-        Ctl::Background => e["background"]["color"] = json!(rgb),
-        Ctl::LcdColor => d["lighting"]["screen"]["color"]["color"] = json!(rgb),
-        _ => {}
+/// The color a swatch shows now: the screen light's, or the brush's.
+pub fn color_of(page: &Page, c: Ctl, paint: [u8; 3]) -> [u8; 3] {
+    if c != Ctl::LcdColor {
+        return paint;
     }
-}
-
-/// The color a swatch shows now.
-pub fn color_of(page: &Page, c: Ctl, index: usize, paint: [u8; 3]) -> [u8; 3] {
-    let l = &page.draft()["lighting"];
-    let e = &l["keys"]["effects"][l["keys"]["effect"].as_str().unwrap_or("off")];
-    let v = match c {
-        Ctl::Color => &e["color"],
-        Ctl::Colors => &e["colors"][index]["color"],
-        Ctl::Background => &e["background"]["color"],
-        Ctl::LcdColor => &l["screen"]["color"]["color"],
-        _ => return paint,
-    };
+    let v = &page.draft()["lighting"]["screen"]["color"]["color"];
     [v[0].as_u64().unwrap_or(0) as u8, v[1].as_u64().unwrap_or(0) as u8, v[2].as_u64().unwrap_or(0) as u8]
 }
 
@@ -884,79 +513,4 @@ pub fn icon(mode: &str, scale: f32) -> slint::Image {
         *p = slint::Rgba8Pixel { r: (c[0] * a).round() as u8, g: (c[1] * a).round() as u8, b: (c[2] * a).round() as u8, a: (a * 255.0).round() as u8 };
     }
     slint::Image::from_rgba8_premultiplied(buf)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn page_with(zone: u64) -> Page {
-        let mut p = Page::new();
-        p.editing = 1;
-        p.drafts.insert(1, json!({ "lighting": { "keys": { "effect": "spiral", "effects": { "spiral": { "zone": zone } } } } }));
-        p
-    }
-    fn zone(p: &Page) -> u64 {
-        p.drafts[&1]["lighting"]["keys"]["effects"]["spiral"]["zone"].as_u64().unwrap()
-    }
-
-    #[test]
-    fn some_areas_remembers_its_areas_and_never_snaps_back() {
-        let mut p = page_with(0x80);
-        let mut areas = ALL_AREAS;
-        // Some areas, first time: every area
-        place(&mut p, Ctl::WhereMode, 1, &mut areas);
-        assert_eq!(zone(&p), ALL_AREAS);
-        // every area taken out, one by one: nothing lit, and still Some areas
-        for i in 1..ZONES.len() {
-            place(&mut p, Ctl::Zone, i, &mut areas);
-        }
-        assert_eq!(zone(&p), 0, "no areas chosen lights nothing; it is not the whole keyboard");
-        // two put back, then the whole keyboard, then Some areas again: the two come back
-        place(&mut p, Ctl::Zone, 1, &mut areas);
-        place(&mut p, Ctl::Zone, 3, &mut areas);
-        let two = ZONES[1].0 | ZONES[3].0;
-        assert_eq!(zone(&p), two);
-        place(&mut p, Ctl::WhereMode, 0, &mut areas);
-        assert_eq!(zone(&p), 0x80);
-        place(&mut p, Ctl::WhereMode, 1, &mut areas);
-        assert_eq!(zone(&p), two);
-        place(&mut p, Ctl::WhereAll, 0, &mut areas);
-        assert_eq!(zone(&p), ALL_AREAS);
-    }
-
-    #[test]
-    fn an_area_picked_on_the_whole_keyboard_is_the_only_one_lit() {
-        let mut p = page_with(0x80);
-        let mut areas = ALL_AREAS;
-        place(&mut p, Ctl::Zone, 3, &mut areas);
-        assert_eq!(zone(&p), ZONES[3].0, "WASD alone, and Some areas");
-        // then another added, and the first taken out again
-        place(&mut p, Ctl::Zone, 1, &mut areas);
-        assert_eq!(zone(&p), ZONES[3].0 | ZONES[1].0);
-        place(&mut p, Ctl::Zone, 3, &mut areas);
-        assert_eq!(zone(&p), ZONES[1].0);
-        // the whole keyboard and back keeps it
-        place(&mut p, Ctl::WhereMode, 0, &mut areas);
-        place(&mut p, Ctl::WhereMode, 1, &mut areas);
-        assert_eq!(zone(&p), ZONES[1].0);
-    }
-
-    #[test]
-    fn plays_is_the_keyboards_start_and_stop_both_ways() {
-        // the six, each the pair EVGA's LedStartMode and LedStopMode name
-        let want = [(0, 0), (0, 1), (0, 2), (1, 0), (1, 2), (1, 1)];
-        for (i, (start, stop)) in want.iter().enumerate() {
-            let mut p = page_with(0x80);
-            act(&mut p, Ctl::Plays, i, 0.0);
-            let e = &p.drafts[&1]["lighting"]["keys"]["effects"]["spiral"];
-            assert_eq!((e["start"].as_u64().unwrap(), e["stop"].as_u64().unwrap()), (*start, *stop), "{}", PLAYS[i].0);
-            assert_eq!(plays_of(*start, *stop), Some(i));
-            assert_eq!(plays_label(*start, *stop), PLAYS[i].0);
-        }
-        // every pair the keyboard knows has a name; one it doesn't is said as it is
-        assert_eq!(plays_label(0, 0), "All the time");
-        assert_eq!(plays_of(2, 0), None);
-        assert_eq!(plays_label(3, 0), "Something else (start 3, stop 0)");
-    }
 }

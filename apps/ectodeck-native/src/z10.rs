@@ -210,17 +210,6 @@ pub fn screen_slot(code: u32) -> Action {
     Action::Host(code - NEXT_LAYOUT)
 }
 
-pub const EFFECTS: [(&str, &str); 9] = [
-    ("off", "Off"),
-    ("static", "Static"),
-    ("breathing", "Breathing"),
-    ("pulse", "Pulse"),
-    ("spiral", "Spiral"),
-    ("wave", "Wave"),
-    ("stars", "Stars"),
-    ("trigger", "Reactive"),
-    ("custom", "Per key"),
-];
 
 /// The action "Press a key" gives a key: the modifiers held (by their bits,
 /// as `evdev_to_hid` gives them) and the key pressed, if one was.
@@ -458,6 +447,9 @@ pub struct Page {
     pub job_prints: std::collections::BTreeMap<u32, String>,
     /// each lit key's color and light at the last frame, before the LEDs' lean: what streams to the keyboard
     pub last_colors: HashMap<u32, [f64; 4]>,
+    /// what the keyboard's core says of it (`device/describe`): its
+    /// capabilities, the keys' effects the Lighting page is drawn from among them
+    pub desc: Value,
     rng: u64,
 }
 
@@ -550,6 +542,7 @@ impl Page {
             job_keys: Default::default(),
             job_prints: Default::default(),
             last_colors: HashMap::new(),
+            desc: Value::Null,
             rng: 0x9e3779b97f4a7c15,
         }
     }
@@ -888,7 +881,78 @@ impl Page {
     /// The name, effect and small color sample of each profile's button.
     pub fn profile_effect(&self, n: u8) -> String {
         let mode = effect(&self.drafts[&n]["lighting"]).to_string();
-        EFFECTS.iter().find(|(m, _)| *m == mode).map_or(mode, |(_, name)| name.to_string())
+        self.effect_desc(&mode)["label"].as_str().map_or(mode, String::from)
+    }
+
+    // ------------------------------------------------------------ the keys' effects, as the core describes them
+
+    /// The keys' light as the keyboard's core describes it: its zones.
+    pub fn keys_light(&self) -> Value {
+        self.desc["capabilities"]["lighting"]["lights"].as_array().and_then(|l| l.iter().find(|l| l["id"] == "keys")).cloned().unwrap_or(Value::Null)
+    }
+
+    /// The keys' effects, as the core describes them, in the order the page shows them.
+    pub fn effects(&self) -> Vec<Value> {
+        self.desc["capabilities"]["lighting"]["effects"].as_array().cloned().unwrap_or_default()
+    }
+
+    /// An effect's description, by its id, with its layout from the
+    /// description's (`layout.lighting`, by effect), for the page to draw it in.
+    pub fn effect_desc(&self, id: &str) -> Value {
+        let mut e = self.effects().into_iter().find(|e| e["id"] == id).unwrap_or(Value::Null);
+        if let Some(layout) = self.desc["layout"]["lighting"].get(id).filter(|_| e.is_object()) {
+            e["layout"] = layout.clone();
+        }
+        e
+    }
+
+    /// Where a profile keeps the keys' effect, and an effect's own settings.
+    fn kept(&self, what: &str, effect: &str) -> String {
+        self.desc["capabilities"]["lighting"]["kept"]["keys"][what].as_str().unwrap_or_default().replace("{effect}", effect)
+    }
+
+    /// The keys' effect on the profile being edited, by its id.
+    pub fn effect_id(&self) -> String {
+        crate::described::read_at(self.draft(), &self.kept("effect", "")).and_then(Value::as_str).unwrap_or("off").to_string()
+    }
+
+    /// The effect in use's own settings, on the profile being edited.
+    pub fn effect_settings(&self) -> Value {
+        crate::described::read_at(self.draft(), &self.kept("settings", &self.effect_id())).cloned().unwrap_or(Value::Null)
+    }
+
+    /// One of the effect in use's settings, by its piece, as drawn from the
+    /// description: its id and description, and the effect's own settings.
+    pub fn described(&self, piece: crate::described::Piece) -> Option<(String, Value, Value)> {
+        let crate::described::Piece::Effect(k) = piece else { return None };
+        let (id, d) = crate::described::params(&self.effect_desc(&self.effect_id())).get(k)?.clone();
+        Some((id, d, self.effect_settings()))
+    }
+
+    /// The keys' effect chosen, on the profile being edited.
+    pub fn set_effect(&mut self, id: &str) {
+        let at = self.kept("effect", "");
+        if let Some(d) = self.drafts.get_mut(&self.editing) {
+            crate::described::write_at(d, &at, &json!(id));
+        }
+    }
+
+    /// The effect in use's own settings changed, on the profile being edited.
+    pub fn change_settings(&mut self, f: impl FnOnce(&mut Value)) {
+        let at = self.kept("settings", &self.effect_id());
+        let Some(d) = self.drafts.get_mut(&self.editing) else { return };
+        let mut e = crate::described::read_at(d, &at).cloned().unwrap_or(Value::Null);
+        f(&mut e);
+        crate::described::write_at(d, &at, &e);
+    }
+
+    /// The effect in use's own settings put back as the keyboard came from the factory.
+    pub fn reset_effect(&mut self) {
+        let at = self.kept("settings", &self.effect_id());
+        let factory = self.dev.as_ref().and_then(|dev| crate::described::read_at(&dev["factory"], &at)).cloned().unwrap_or(Value::Null);
+        if let Some(d) = self.drafts.get_mut(&self.editing) {
+            crate::described::write_at(d, &at, &factory);
+        }
     }
 
     /// A profile's name, or "Profile 2" while it has the name it came with (or none yet).

@@ -49,6 +49,31 @@ pub trait Hid: Send {
 /// A device a core has open: its collection, behind the core's handle.
 pub struct Lent(Box<dyn Hid>);
 
+/// A computer with no devices, for asking a core what it says of itself
+/// without it reaching any.
+pub struct NoDevices;
+
+impl Usb for NoDevices {
+    fn devices(&mut self) -> Vec<DeviceInfo> {
+        Vec::new()
+    }
+    fn open(&mut self, _: &DeviceInfo) -> Result<Box<dyn Hid>, String> {
+        Err("no device".into())
+    }
+}
+
+/// What the core in `dir` says of itself (`device/describe`), asked with no
+/// devices to reach and its files in a folder of its own, gone after: for a
+/// window drawn offscreen, which never reaches a device.
+pub fn describe(dir: &Path) -> Option<Value> {
+    let data = std::env::temp_dir().join(format!("ectodeck-describe-{}", std::process::id()));
+    let core = Core::start(dir, data.clone(), Box::new(NoDevices)).ok()?;
+    let d = core.call("device/describe", &Value::Null).ok();
+    let _ = core.call("shutdown", &Value::Null);
+    let _ = std::fs::remove_dir_all(&data);
+    d
+}
+
 /// The devices on this computer, over hidapi.
 pub struct Hidapi(Option<hidapi::HidApi>);
 

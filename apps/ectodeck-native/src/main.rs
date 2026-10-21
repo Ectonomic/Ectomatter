@@ -643,6 +643,8 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         front.desk.fit();
         front.poll_pads();
     }
+    // what the keyboard's core says of it, the Lighting page's effects among it
+    front.page.desc = core_host::describe(&cores::dir().join(z10::CORE)).unwrap_or_default();
     // ECTODECK_NATIVE_LIGHT_AT=ms: the keys' light at that moment of its effect
     front.light_at = std::env::var("ECTODECK_NATIVE_LIGHT_AT").ok().and_then(|v| v.parse().ok());
     // ECTODECK_NATIVE_MOUSE=FILE: the mouse as its core last told it (what the mouse's

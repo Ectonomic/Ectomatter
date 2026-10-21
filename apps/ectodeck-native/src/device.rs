@@ -52,6 +52,8 @@ pub enum Heard {
     /// a key pressed (true) or let go on the keyboard, as its core tells it
     /// (`input/down`, `input/up`): what it sent, and for a key on a host slot the slot
     Input(Value, bool),
+    /// what the keyboard's core says of it (`device/describe`), as it starts
+    Described(Value),
     Done,
 }
 
@@ -99,6 +101,10 @@ pub fn start(z10: Result<crate::core_host::Core, String>, tell: Sender<Heard>, t
     let (ask, asked) = mpsc::channel::<Ask>();
     let kb = Kb(z10);
     if let Ok(core) = &kb.0 {
+        // (what the Lighting page is drawn from: no device is asked, so it comes at once)
+        if let Ok(d) = core.call("device/describe", &Value::Null) {
+            let _ = tell.send(Heard::Described(d));
+        }
         // (woken by each notice, on the core's thread, which mustn't wait)
         let (wake, woken) = mpsc::channel::<()>();
         let wake = std::sync::Mutex::new(wake);
