@@ -1111,6 +1111,30 @@ mod tests {
         assert_eq!(sent[1][..2], [0x00, 0x92], "the settings read");
     }
 
+    /// The mouse says its lights' colors and nothing more of them: a light's
+    /// effect is known once Ectodeck sets it, each light by itself. Met again
+    /// showing another color than Ectodeck set (something else changed it),
+    /// it is the color the mouse says, and only that is known again.
+    #[test]
+    fn a_light_is_known_once_ectodeck_sets_it() {
+        let (core, _sent, data) = mouse_core("known");
+        let d = serde_json::json!({ "device": "sensei310-1" });
+        assert_eq!(core.call("lighting/get", &d).unwrap()["known"], serde_json::json!({ "logo": "colors", "wheel": "colors" }));
+        core.call("lighting/set", &serde_json::json!({ "device": "sensei310-1", "light": "logo", "effect": "static", "params": { "color": "#00FF00" } })).unwrap();
+        assert_eq!(core.call("lighting/get", &d).unwrap()["known"], serde_json::json!({ "logo": true, "wheel": "colors" }));
+        core.call("shutdown", &Value::Null).unwrap();
+        drop(core);
+        // met again, the mouse saying #FF1000, not the green Ectodeck set
+        let fake = FakeMouse { sent: Arc::new(Mutex::new(Vec::new())), waiting: VecDeque::new() };
+        let core = Core::start(&crate::cores::dir().join("steelseries"), data.clone(), Box::new(One(Some(Box::new(fake))))).unwrap();
+        core.call("initialize", &serde_json::json!({ "protocol": 3 })).unwrap();
+        let l = core.call("lighting/get", &d).unwrap();
+        core.call("shutdown", &Value::Null).unwrap();
+        let _ = std::fs::remove_dir_all(&data);
+        assert_eq!((l["logo"]["params"]["color"].as_str(), l["known"]["logo"].as_str()), (Some("#FF1000"), Some("colors")));
+        assert_eq!(l["known"]["wheel"], "colors");
+    }
+
     /// A change goes to the mouse at once, as rivalcfg sends it, 50 ms after
     /// the command before at the soonest; once changes stop, it is kept in
     /// the mouse's memory, once.

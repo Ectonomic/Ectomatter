@@ -1423,8 +1423,10 @@ impl Front {
                     }
                 }
                 Ask::MouseResetAll => {
+                    // (every button, while the mouse can't say what they do)
+                    let all = !self.mouse.buttons_known();
                     for b in 0..crate::mouse::BUTTONS.len() {
-                        if self.mouse.rebound(b) {
+                        if all || self.mouse.rebound(b) {
                             self.mouse.reset_job(b);
                         }
                     }
@@ -5146,6 +5148,7 @@ impl Front {
             self.mouse_icons = Some((self.scale, icons));
         }
         let fx = self.mouse.effect();
+        let known = self.mouse.light_known(self.mouse.light_name());
         let effects: Vec<EffectItem> = self
             .mouse
             .effects()
@@ -5154,7 +5157,7 @@ impl Front {
             .map(|(i, e)| {
                 let (tile, motion) = crate::mouse::tile_of(e["id"].as_str().unwrap_or(""));
                 let icon = self.mouse_icons.as_ref().unwrap().1[["off", "static", "breathing", "wave"].iter().position(|t| *t == tile).unwrap_or(1)].clone();
-                EffectItem { name: e["label"].as_str().unwrap_or("").into(), icon, on: i == fx, motion }
+                EffectItem { name: e["label"].as_str().unwrap_or("").into(), icon, on: i == fx && known, motion }
             })
             .collect();
         self.ui.set_mouse_effect_moves(effects.iter().any(|e| e.on && e.motion != 0));

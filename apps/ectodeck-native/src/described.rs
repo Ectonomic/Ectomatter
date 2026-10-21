@@ -328,7 +328,9 @@ pub fn draw_section(s: &mut Stack, desc: &Value, sec: &Section, values: &Value, 
                 }
                 let w = options(d);
                 let opts: Vec<(&str, &str)> = w.iter().map(|w| (w.as_str(), "")).collect();
-                s.switch_at(at, &opts, chosen(d, v));
+                // (one the device can't tell back: none chosen until one is)
+                let unknown = known[id].as_bool() == Some(false);
+                s.switch_at(at, &opts, if unknown { usize::MAX } else { chosen(d, v) });
                 last_switch = true;
             }
             "bool" => s.check_at(at, v.as_bool().unwrap_or(false), &words),
@@ -344,7 +346,12 @@ pub fn draw_section(s: &mut Stack, desc: &Value, sec: &Section, values: &Value, 
         let id = d["id"].as_str().unwrap_or("");
         if known[id].as_bool() == Some(false) {
             s.gap(6.0);
-            s.note(&format!("The {kind} can’t tell Ectodeck its {}. Until you set one here, this shows the factory’s.", label(id, d).to_lowercase()));
+            let name = label(id, d).to_lowercase();
+            if d["type"] == "choice" {
+                s.note(&format!("The {kind} can’t tell Ectodeck its {name}. Choose one to set it."));
+            } else {
+                s.note(&format!("The {kind} can’t tell Ectodeck its {name}. Until you set it here, this shows the factory’s."));
+            }
         }
     }
 }

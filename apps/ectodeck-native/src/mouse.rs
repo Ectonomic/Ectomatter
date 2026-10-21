@@ -520,15 +520,42 @@ impl Page {
         }
     }
 
-    /// Everything the mouse is set to now, as a profile holds it.
+    /// Everything the mouse is set to now, as a profile holds it: what the
+    /// mouse can't say and Ectodeck hasn't set left out, so putting the
+    /// profile on the mouse never writes a guess.
     pub fn body_now(&self) -> Value {
-        let lights: serde_json::Map<String, Value> = LIGHTS.iter().map(|l| (l.to_string(), json!({ "effect": self.state["lighting"][l]["effect"], "params": self.state["lighting"][l]["params"] }))).collect();
-        let v = &self.state["settings"]["values"];
-        json!({
-            "keys": { "base": self.state["keys"]["layers"]["base"] },
-            "lighting": lights,
-            "settings": { "cpi1": v["cpi1"], "cpi2": v["cpi2"], "polling": v["polling"] },
-        })
+        let lights: serde_json::Map<String, Value> = LIGHTS
+            .iter()
+            .filter(|l| self.light_known(l))
+            .map(|l| (l.to_string(), json!({ "effect": self.state["lighting"][l]["effect"], "params": self.state["lighting"][l]["params"] })))
+            .collect();
+        let (v, known) = (&self.state["settings"]["values"], &self.state["settings"]["known"]);
+        let settings: serde_json::Map<String, Value> = ["cpi1", "cpi2", "polling"].iter().filter(|id| known[**id].as_bool() != Some(false)).map(|id| (id.to_string(), v[*id].clone())).collect();
+        let mut body = json!({ "lighting": lights, "settings": settings });
+        if self.buttons_known() {
+            body["keys"] = json!({ "base": self.state["keys"]["layers"]["base"] });
+        }
+        body
+    }
+
+    /// Whether Ectodeck knows what the mouse's buttons do. The mouse can't
+    /// say, so not until Ectodeck has set them.
+    pub fn buttons_known(&self) -> bool {
+        self.state["keys"]["known"].as_bool() != Some(false)
+    }
+
+    /// Whether a button's job is known: Ectodeck has set the mouse's
+    /// buttons, or the profile in use keeps a job for it.
+    pub fn job_known(&self, i: usize) -> bool {
+        self.buttons_known() || self.profiles.as_ref().is_some_and(|p| !p.current().body["keys"]["base"][BUTTONS[i].0].is_null())
+    }
+
+    /// Whether a light's effect is known. The mouse says only its color, so
+    /// not until Ectodeck has set it.
+    pub fn light_known(&self, id: &str) -> bool {
+        let k = &self.state["lighting"]["known"];
+        let k = if k.is_object() { &k[id] } else { k };
+        k.is_null() || k.as_bool() == Some(true)
     }
 
     /// A profile put on the mouse: shown as it is at once, and sent whole (a
@@ -658,7 +685,8 @@ impl Page {
             .map(|(i, pr)| crate::ProfileItem {
                 n: i as i32,
                 name: pr.name.as_str().into(),
-                sub: self.effect_label(pr.body["lighting"]["logo"]["effect"].as_str().unwrap_or("static")).into(),
+                // (one that doesn't set the logo leaves it as it is when it's put on)
+                sub: pr.body["lighting"]["logo"]["effect"].as_str().map_or("Logo left as it is".to_string(), |e| self.effect_label(e)).into(),
                 active: i == p.active,
                 current: i == p.active,
                 ..Default::default()
@@ -725,7 +753,16 @@ impl Page {
 
     pub fn rebound(&self, i: usize) -> bool {
         let (j, f) = (self.job(i), self.factory(i));
-        !f.is_null() && j != f
+        self.job_known(i) && !f.is_null() && j != f
+    }
+
+    /// A button's job in words: "Not known" while it isn't.
+    fn job_words(&self, i: usize) -> String {
+        if self.job_known(i) {
+            job_label_with(&self.job(i), &self.names)
+        } else {
+            "Not known".into()
+        }
     }
 
     pub fn light_name(&self) -> &'static str {
@@ -772,6 +809,7 @@ impl Page {
     pub fn set_light(&mut self, l: Value) {
         let name = self.light_name();
         self.state["lighting"][name] = l.clone();
+        self.light_now_known(name);
         self.send(Ask::Light(name.into(), l.clone()));
         let kept = json!({ "effect": l["effect"], "params": l["params"] });
         let wheel_too = name == "logo" && self.same_wheel;
@@ -783,14 +821,26 @@ impl Page {
         });
         if wheel_too {
             self.state["lighting"]["wheel"] = l.clone();
+            self.light_now_known("wheel");
             self.send(Ask::Light("wheel".into(), l));
         }
+    }
+
+    /// A light set by Ectodeck: its effect known from now, as the core will say.
+    fn light_now_known(&mut self, id: &str) {
+        let k = &mut self.state["lighting"]["known"];
+        if !k.is_object() {
+            let was = k.clone();
+            *k = json!({ "logo": was, "wheel": was });
+        }
+        k[id] = json!(true);
     }
 
     /// The wheel set as the logo is (Same on the wheel), on the mouse and in the profile.
     pub fn copy_logo_to_wheel(&mut self) {
         let l = self.light_of("logo");
         self.state["lighting"]["wheel"] = l.clone();
+        self.light_now_known("wheel");
         let kept = json!({ "effect": l["effect"], "params": l["params"] });
         self.keep_in_profile(|b| b["lighting"]["wheel"] = kept);
         self.send(Ask::Light("wheel".into(), l));
@@ -800,6 +850,7 @@ impl Page {
     pub fn reset_job(&mut self, i: usize) {
         let f = self.factory(i);
         if !f.is_null() {
+            self.knowing_buttons();
             self.state["keys"]["layers"]["base"][BUTTONS[i].0] = f.clone();
             self.keep_in_profile(|b| b["keys"]["base"][BUTTONS[i].0] = f);
             self.send(Ask::ResetKey(BUTTONS[i].0.into()));
@@ -807,10 +858,29 @@ impl Page {
     }
 
     pub fn set_job(&mut self, i: usize, a: Value) {
+        self.knowing_buttons();
         let on_mouse = for_mouse(i, &a);
         self.state["keys"]["layers"]["base"][BUTTONS[i].0] = on_mouse.clone();
         self.keep_in_profile(|b| b["keys"]["base"][BUTTONS[i].0] = a);
         self.send(Ask::Key(BUTTONS[i].0.into(), on_mouse));
+    }
+
+    /// Before a button is set while the mouse's buttons aren't known: the
+    /// mouse takes all eight at once, so the others go on it as the core
+    /// keeps them (their factory jobs, on a mouse Ectodeck hasn't set), and
+    /// are known, and kept in the profile in use, from then.
+    fn knowing_buttons(&mut self) {
+        if self.buttons_known() {
+            return;
+        }
+        let base = self.state["keys"]["layers"]["base"].clone();
+        let kept: Vec<(usize, Value)> = (0..BUTTONS.len()).filter(|&j| !self.job_known(j)).map(|j| (j, base[BUTTONS[j].0].clone())).collect();
+        self.keep_in_profile(|b| {
+            for (j, a) in kept {
+                b["keys"]["base"][BUTTONS[j].0] = a;
+            }
+        });
+        self.state["keys"]["known"] = json!(true);
     }
 
     /// The lights in streamed colors (logo and wheel, "#RRGGBB"), which the
@@ -914,14 +984,15 @@ impl Page {
                 .map(|(i, id, name)| {
                     let l = self.light_of(id);
                     let lit = self.lit(id);
-                    MouseRow { name: name.into(), job: self.effect_label(l["effect"].as_str().unwrap_or("static")).into(), chosen: i == self.light, rebound: false, swatch: color(lit.unwrap_or([0x2a, 0x2a, 0x30])), swatched: true }
+                    let effect = if self.light_known(id) { self.effect_label(l["effect"].as_str().unwrap_or("static")) } else { "Not known".into() };
+                    MouseRow { name: name.into(), job: effect.into(), chosen: i == self.light, rebound: false, swatch: color(lit.unwrap_or([0x2a, 0x2a, 0x30])), swatched: true }
                 })
                 .collect();
         }
         BUTTONS
             .iter()
             .enumerate()
-            .map(|(i, (_, name, _))| MouseRow { name: (*name).into(), job: job_label_with(&self.job(i), &self.names).into(), chosen: Some(i) == self.button, rebound: self.rebound(i), swatch: color([0; 3]), swatched: false })
+            .map(|(i, (_, name, _))| MouseRow { name: (*name).into(), job: self.job_words(i).into(), chosen: Some(i) == self.button, rebound: self.rebound(i), swatch: color([0; 3]), swatched: false })
             .collect()
     }
 
@@ -932,7 +1003,7 @@ impl Page {
             .enumerate()
             .map(|(i, (_, name, _))| {
                 let (left, top, _) = CALLS[i];
-                MouseCall { name: (*name).into(), job: job_label_with(&self.job(i), &self.names).into(), left, top, chosen: Some(i) == self.button, rebound: self.rebound(i) }
+                MouseCall { name: (*name).into(), job: self.job_words(i).into(), left, top, chosen: Some(i) == self.button, rebound: self.rebound(i) }
             })
             .collect()
     }
@@ -956,9 +1027,17 @@ impl Page {
     pub fn detail(&self, i: usize) -> (String, String, String, String, bool, usize, String) {
         let (job, factory) = (self.job(i), self.factory(i));
         let rebound = self.rebound(i);
-        let state = if rebound { format!("Now {}", job_label_with(&job, &self.names)) } else { "As it came from the factory".into() };
+        let state = if !self.job_known(i) {
+            "Not known".into()
+        } else if rebound {
+            format!("Now {}", job_label_with(&job, &self.names))
+        } else {
+            "As it came from the factory".into()
+        };
         // (a macro, or another device's job, is Ectodeck's to do: the mouse keeps only a sign for it)
-        let note = if kind_of(&job) == DEVICES_KIND {
+        let note = if !self.job_known(i) {
+            "The mouse can’t tell Ectodeck what this button does. Giving it a job sets all eight buttons, and the others get their factory jobs.".into()
+        } else if kind_of(&job) == DEVICES_KIND {
             "Ectodeck does this while it’s running. With Ectodeck closed, this button does nothing.".into()
         } else if kind_of(&job) == MACRO_KIND {
             if held_by_mouse(&job).is_some() {
@@ -968,8 +1047,6 @@ impl Page {
             } else {
                 "The macro this button ran was deleted. Choose another job for it.".into()
             }
-        } else if self.state["keys"]["known"].as_bool() == Some(false) {
-            "The mouse can’t tell Ectodeck what its buttons do. Until you set one here, this shows what it did from the factory.".into()
         } else {
             String::new()
         };
@@ -979,6 +1056,10 @@ impl Page {
     /// With no button chosen, the box for every button: what it says, and
     /// whether any button does something other than the factory's job.
     pub fn all_buttons(&self) -> (String, bool) {
+        // (Back to factory sets them all, as giving one a job would)
+        if !self.buttons_known() {
+            return ("The mouse can’t tell Ectodeck what its buttons do. Giving one a job sets all eight, and the others get their factory jobs.".into(), true);
+        }
         let n = (0..BUTTONS.len()).filter(|&i| self.rebound(i)).count();
         let note = match n {
             0 => "Every button does what it did from the factory.".to_string(),
@@ -1012,6 +1093,11 @@ impl Page {
     /// description of the effect; `open` is the color the picker is open on.
     fn light_cells(&self, w: f32, open: Option<(usize, usize)>) -> (Vec<Cell>, f32) {
         let l = self.light_of(self.light_name());
+        if !self.light_known(self.light_name()) {
+            let mut s = Stack::new(w);
+            s.note("The mouse can’t tell Ectodeck this light’s effect, only its color. Choose an effect to set it.");
+            return boxed(s, 0.0, 0.0, "Not known");
+        }
         let e = self.effect_desc(l["effect"].as_str().unwrap_or("static"));
         let mut s = Stack::new(w);
         crate::described::draw_effect(&mut s, &e, &l["params"], open);
@@ -1190,6 +1276,41 @@ mod tests {
         }
         assert_eq!(job_label(&json!({ "key": "PageDown" })), "Page Down");
         assert_eq!(job_label(&json!({ "key": 104 })), "F13");
+    }
+
+    /// A mouse that can't say what it's set to: a profile made from it
+    /// leaves out what isn't known, so putting the profile on never writes a
+    /// guess; its buttons, and the effect it can't say, show as not known;
+    /// and a job given to one button sets all eight, so the others are kept
+    /// in the profile, as the mouse has them from then.
+    #[test]
+    fn what_the_mouse_cant_say_is_never_written_as_a_guess() {
+        let mut p = Page::new();
+        let base: serde_json::Map<String, Value> = BUTTONS.iter().map(|(id, _, _)| (id.to_string(), json!({ "mouse": 1 }))).collect();
+        p.state = json!({
+            "present": true,
+            "keys": { "layers": { "base": base }, "factory": { "base": base }, "known": false },
+            "lighting": { "logo": { "effect": "static", "params": { "color": "#FF1000" } }, "wheel": { "effect": "breathing", "params": {} }, "known": { "logo": "colors", "wheel": true } },
+            "settings": { "values": { "cpi1": 800, "cpi2": 1600, "polling": 1000 }, "known": { "cpi1": true, "cpi2": true, "polling": false } },
+        });
+        let body = p.body_now();
+        assert!(body.get("keys").is_none(), "{body}");
+        assert_eq!(body["lighting"].as_object().unwrap().keys().collect::<Vec<_>>(), ["wheel"]);
+        assert_eq!(body["settings"], json!({ "cpi1": 800, "cpi2": 1600 }));
+        assert!(p.rows().iter().all(|r| r.job == "Not known" && !r.rebound));
+        assert_eq!(p.detail(3).3, "Not known");
+        assert!(p.all_buttons().1, "Back to factory offered: it sets them all");
+        p.tab = 1;
+        let lights: Vec<String> = p.rows().iter().map(|r| r.job.to_string()).collect();
+        assert!(lights.contains(&"Not known".to_string()) && lights.iter().any(|l| l != "Not known"), "{lights:?}");
+        // a job given to one button: all eight kept in the profile, known from now
+        p.tab = 0;
+        p.profiles = Some(crate::profiles::Store::first(None, body));
+        p.set_job(3, json!({ "key": "F5" }));
+        let kept = &p.profiles.as_ref().unwrap().current().body["keys"]["base"];
+        assert_eq!(kept.as_object().unwrap().len(), BUTTONS.len());
+        assert_eq!(kept[BUTTONS[3].0], json!({ "key": "F5" }));
+        assert!(p.buttons_known() && p.rows().iter().all(|r| r.job != "Not known"));
     }
 
     /// A macro's new way of playing reaches every button that runs it, on
