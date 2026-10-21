@@ -130,6 +130,23 @@ fn the_screen_plays_alike() {
             assert!((w.0 - g.0).abs() < 1e-6 && w.1 == g.1, "{}: frame {i} differs: service {w:?}, Ectodeck {g:?}", run["name"]);
         }
         assert_eq!(want.len(), got.len(), "{}: frame counts differ", run["name"]);
+        // and each goes to the keyboard as the service sent it: the Z10's core
+        // builds the same report, byte for byte
+        for (_, rows) in &got {
+            let r: Vec<&str> = rows.iter().map(String::as_str).collect();
+            assert_eq!(ectotype_core::lcd::lcd_frame(&r), crate::lcd_player::frame(rows, 1).to_vec(), "{}: {rows:?}", run["name"]);
+        }
         std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
+/// The Stats page's rows, as the service drew them on each computer, go to
+/// the keyboard as the service sent them: the Z10's core builds the same report.
+#[test]
+fn the_core_sends_the_stats_page_alike() {
+    for case in fixture()["stats"].as_array().unwrap() {
+        let rows = strings(&case["rows"]);
+        let r: Vec<&str> = rows.iter().map(String::as_str).collect();
+        assert_eq!(ectotype_core::lcd::lcd_frame(&r), crate::lcd_player::frame(&rows, 1).to_vec(), "{rows:?}");
     }
 }

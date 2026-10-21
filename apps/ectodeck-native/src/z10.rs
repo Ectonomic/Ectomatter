@@ -1075,24 +1075,22 @@ impl Page {
         out
     }
 
-    /// A key typed on the keyboard: where it is on the board.
-    /// Where a key the keyboard sent (a kernel key code) sits on the board:
-    /// the key that sends it now, in the active profile as the keyboard has it
-    /// saved, one that sends only it before one that sends more with it (C
-    /// before Ctrl+C); failing that, one that sends it with Fn held. A key
-    /// whose meaning is a macro, Fn or nothing sends no code of its own.
-    pub fn pos_for(&self, code: u32) -> Option<u32> {
+    /// Where a key the keyboard sent sits on the board (what it sent, as the
+    /// keyboard's core tells it: a key, a modifier among them, a media key or
+    /// a host slot): the key that sends it now, in the active profile as the
+    /// keyboard has it saved, one that sends only it before one that sends
+    /// more with it (C before Ctrl+C); failing that, one that sends it with Fn
+    /// held. A key whose meaning is a macro, Fn or nothing sends nothing of
+    /// its own.
+    pub fn pos_for(&self, sent: &Action) -> Option<u32> {
         let profile = &self.dev.as_ref()?["profiles"][self.active().to_string()];
-        let key = evdev_to_hid(code);
-        let media = ectotype_core::recorder::key_media(code as u16);
-        // how closely a key's meaning sends the code: 2 only it, 1 it among more, 0 not at all
-        let sends = |a: &Action| match (a, key) {
-            // a modifier typed: a key that is that modifier alone
-            (Action::Key(u), Some((mods, 0))) if hid::is_modifier(*u) => u32::from(1u32 << (u - hid::FIRST_MODIFIER) == mods) * 2,
-            (Action::Key(u), Some((_, h))) => u32::from(*u as u32 == h) * 2,
+        // how closely a key's meaning sends it: 2 only it, 1 it among more, 0 not at all
+        let sends = |a: &Action| match (a, sent) {
+            (Action::Key(u), Action::Key(s)) => u32::from(u == s) * 2,
             // (a key among more: with a modifier, or beside another key)
-            (Action::Shortcut(codes), Some((_, h))) if h != 0 && codes.iter().any(|u| *u as u32 == h) => 1,
-            (Action::Media(c), _) => u32::from(media == Some(*c)) * 2,
+            (Action::Shortcut(codes), Action::Key(s)) if !hid::is_modifier(*s) && codes.contains(s) => 1,
+            (Action::Media(c), Action::Media(s)) => u32::from(c == s) * 2,
+            (Action::Host(n), Action::Host(s)) => u32::from(n == s) * 2,
             _ => 0,
         };
         ["base", "fn"].iter().find_map(|layer| {

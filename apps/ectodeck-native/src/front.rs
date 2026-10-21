@@ -9,7 +9,6 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use ectodeck_draw::hdr::Light;
-use ectotype_core::watch::Watched;
 use slint::{Color, Model, ModelRc, SharedString, VecModel};
 
 use crate::device;
@@ -1186,6 +1185,10 @@ impl Front {
                 }
             }
             device::Heard::Done => return,
+            device::Heard::Input(p, down) => {
+                self.keyboard_input(&p, down);
+                return;
+            }
             h @ (device::Heard::Macros(..) | device::Heard::KeysSaved(..)) => {
                 if let Some(m) = &mut self.macros {
                     m.heard(&mut self.page, h);
@@ -2815,33 +2818,33 @@ impl Front {
     /// a key on the board goes down and comes up with the real one (lighting
     /// its Reactive effect as it goes down), the lock lights follow the
     /// keyboard's, and a keyboard gone lets every key go.
-    pub fn watched(&mut self, w: Watched) {
-        match w {
-            Watched::Key(code, down) => {
-                let Some(pos) = self.page.pos_for(code as u32).filter(|p| self.page.key(*p).is_some()) else { return };
-                if down {
-                    if self.page.pressed.insert(pos) {
-                        let now = self.t0.elapsed().as_secs_f64() * 1000.0;
-                        self.page.flash(pos, now);
-                        self.refresh();
-                    }
-                } else if self.page.pressed.remove(&pos) {
-                    self.refresh();
-                }
+    /// A key pressed or let go on the keyboard, as its core tells it: one on
+    /// a host slot does its job; each shows on the keyboard's picture, at the
+    /// key that sends what it sent.
+    pub fn keyboard_input(&mut self, p: &serde_json::Value, down: bool) {
+        if let Some(n) = p["host"].as_u64() {
+            self.screen_key_event(z10::NEXT_LAYOUT + n as u32, down);
+        }
+        let Some(sent) = Action::read(&p["sends"]) else { return };
+        let Some(pos) = self.page.pos_for(&sent).filter(|p| self.page.key(*p).is_some()) else { return };
+        if down {
+            if self.page.pressed.insert(pos) {
+                let now = self.t0.elapsed().as_secs_f64() * 1000.0;
+                self.page.flash(pos, now);
+                self.refresh();
             }
-            Watched::Locks(bits) => {
-                if self.page.locks != bits {
-                    self.page.locks = bits;
-                    // the keyboard is lit again with them
-                    self.last_lights = None;
-                }
-            }
-            Watched::Gone => {
-                if !self.page.pressed.is_empty() {
-                    self.page.pressed.clear();
-                    self.refresh();
-                }
-            }
+        } else if self.page.pressed.remove(&pos) {
+            self.refresh();
+        }
+    }
+
+    /// The computer's lock lights now (bit 0 Num Lock, 1 Caps Lock, 2 Scroll
+    /// Lock), as the keyboard shows them.
+    pub fn locks(&mut self, bits: u8) {
+        if self.page.locks != bits {
+            self.page.locks = bits;
+            // the keyboard is lit again with them
+            self.last_lights = None;
         }
     }
 

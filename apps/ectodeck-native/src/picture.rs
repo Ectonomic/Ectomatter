@@ -133,12 +133,6 @@ pub struct Plate {
 }
 
 impl Decor {
-    /// The box all of it lies in, or none.
-    fn extent(&self) -> Option<[f32; 4]> {
-        let boxes = self.dots.iter().map(|d| d.bounds).chain(self.plates.iter().map(|p| p.rect)).chain(self.pads.iter().map(|p| p.rect));
-        boxes.reduce(|a, b| [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])])
-    }
-
     /// The ground at a pixel with the pads on it, in sRGB's encoding (0 to
     /// 1), from the ground's own (`ground`); none where no pad is.
     fn padded(&self, px: f32, py: f32, ground: [f32; 3]) -> Option<[f32; 3]> {

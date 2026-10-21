@@ -7,13 +7,16 @@
 //! the Screen tab shows the keyboard's own status screen, and handing the screen
 //! back to the keyboard's own screens on quitting.
 //!
-//! Each frame sent is also written to `$XDG_RUNTIME_DIR/z10-lcd/frame`, as the
-//! service wrote it: the keyboard will not read its screen back, so that file
-//! is how anything else knows what it shows.
+//! Each frame goes to the keyboard through its core (`displays/show`), which
+//! sends it between its other exchanges with the keyboard, so a frame never
+//! meets the editor's own on the way. Each is also written to
+//! `$XDG_RUNTIME_DIR/z10-lcd/frame`, as the service wrote it: the keyboard
+//! will not read its screen back, so that file is how anything else knows
+//! what it shows.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -32,7 +35,10 @@ pub fn runtime_dir() -> PathBuf {
 /// Report 10 as the service built it: `0a ea 02 <cmd> 00 00 00 <checksum>` and
 /// eighty Windows-1252 characters, four rows of twenty, each as the keyboard's
 /// table has it (the full block 0xDB, which lights the whole cell). `cmd` 1 draws
-/// them; 0 hands the screen back to the keyboard's own screens.
+/// them; 0 hands the screen back to the keyboard's own screens. (Kept as the
+/// service's own, which the Z10's core is checked against: the core builds
+/// the frames sent now.)
+#[cfg(test)]
 pub fn frame(rows: &[String], cmd: u8) -> [u8; 88] {
     let mut text = Vec::with_capacity(80);
     for i in 0..4 {
@@ -55,51 +61,37 @@ pub trait Sink: Send {
     fn send(&mut self, rows: &[String], cmd: u8) -> Result<(), ()>;
 }
 
-/// The Z10's screen: the hidraw node of its display (the one whose report
-/// descriptor has report 10), written with a feature report, opened for each
-/// frame as the service did.
-#[derive(Default)]
-pub struct Hidraw {
-    dev: Option<PathBuf>,
+/// The Z10's screen, through the keyboard's core: each frame a call to it,
+/// `displays/show` with the rows, and handing the screen back
+/// `displays/hand-back`. The screen is there while the core says the
+/// keyboard is (`there`, kept by the keyboard's thread from the core's
+/// `device/added` and `device/removed`); a frame that doesn't go is tried
+/// again a moment later.
+pub struct CoreSink {
+    core: Option<crate::core_host::Core>,
+    there: Arc<AtomicBool>,
+    failed: Option<Instant>,
 }
 
-impl Hidraw {
-    fn look() -> Option<PathBuf> {
-        let mut nodes: Vec<PathBuf> = std::fs::read_dir("/sys/class/hidraw").ok()?.flatten().map(|e| e.path()).collect();
-        nodes.sort();
-        nodes.into_iter().find_map(|h| {
-            let uevent = std::fs::read_to_string(h.join("device/uevent")).ok()?;
-            if !uevent.contains("HID_ID=0003:00003842:00002611") {
-                return None;
-            }
-            let d = std::fs::read(h.join("device/report_descriptor")).ok()?;
-            let name = h.file_name()?.to_owned();
-            d.windows(2).any(|w| w == [0x85, 0x0a]).then(|| PathBuf::from("/dev").join(name))
-        })
+/// After a frame doesn't go, how long before the next is tried.
+const RETRY: Duration = Duration::from_secs(2);
+
+impl CoreSink {
+    pub fn new(core: Option<crate::core_host::Core>, there: Arc<AtomicBool>) -> CoreSink {
+        CoreSink { core, there, failed: None }
     }
 }
 
-impl Sink for Hidraw {
+impl Sink for CoreSink {
     fn find(&mut self) -> bool {
-        if self.dev.is_none() {
-            self.dev = Hidraw::look();
-        }
-        self.dev.is_some()
+        self.core.is_some() && self.there.load(Ordering::Relaxed) && self.failed.is_none_or(|t| t.elapsed() >= RETRY)
     }
 
     fn send(&mut self, rows: &[String], cmd: u8) -> Result<(), ()> {
-        use std::os::fd::AsRawFd;
-        let Some(dev) = &self.dev else { return Err(()) };
-        let f = std::fs::OpenOptions::new().read(true).write(true).open(dev).map_err(|_| ())?;
-        let mut buf = frame(rows, cmd);
-        // HIDIOCSFEATURE(88)
-        let req = (3u64 << 30) | (88u64 << 16) | ((b'H' as u64) << 8) | 0x06;
-        let rc = unsafe { libc::ioctl(f.as_raw_fd(), req as _, buf.as_mut_ptr()) };
-        if rc < 0 {
-            self.dev = None;
-            return Err(());
-        }
-        Ok(())
+        let Some(core) = &self.core else { return Err(()) };
+        let r = if cmd == 0 { core.call("displays/hand-back", &serde_json::json!({ "control": "lcd" })) } else { core.call("displays/show", &serde_json::json!({ "control": "lcd", "rows": rows })) };
+        self.failed = r.is_err().then(Instant::now);
+        r.map(|_| ()).map_err(|_| ())
     }
 }
 
@@ -682,7 +674,7 @@ pub struct Player {
 
 impl Player {
     /// Start playing; each frame sent, and each change of state, goes to `news`.
-    pub fn start(news: impl Fn(News) + Send + 'static, announce: bool, paused: bool) -> Player {
+    pub fn start(news: impl Fn(News) + Send + 'static, announce: bool, paused: bool, screen: Box<dyn Sink>) -> Player {
         let (tell, heard) = mpsc::channel::<Control>();
         std::thread::spawn(move || {
             let stats = Arc::new(Mutex::new(Stats::here()));
@@ -717,7 +709,7 @@ impl Player {
                 crate::lcd_page::render_at(page, &r, t)
             });
             let seeds = Box::new(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64));
-            let mut core = Core::new(Box::new(Hidraw::default()), ask, runtime_dir().join("z10-lcd/session"), seeds);
+            let mut core = Core::new(screen, ask, runtime_dir().join("z10-lcd/session"), seeds);
             core.frame_file = Some(runtime_dir().join("z10-lcd/frame"));
             core.trace = std::env::var_os("Z10_LCD_TRACE").map(PathBuf::from);
             core.announce = announce;

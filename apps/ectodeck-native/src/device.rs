@@ -2,7 +2,8 @@
 //! (cores/evga-z10, run as a module by core_host.rs), in the core protocol's
 //! calls and shared shapes (docs/core-protocol.md); a whole read takes
 //! seconds, and the window keeps drawing meanwhile: the page asks, and hears
-//! back through the event loop.
+//! back through the event loop. What the core tells unasked, each key's
+//! press as it hears the keyboard's own reports, goes to the page at once.
 
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -48,6 +49,9 @@ pub enum Heard {
     /// every macro, after one was written; whether it was a delete
     Macros(bool, Result<Value, String>),
     KeysSaved(u8, Result<Value, String>),
+    /// a key pressed (true) or let go on the keyboard, as its core tells it
+    /// (`input/down`, `input/up`): what it sent, and for a key on a host slot the slot
+    Input(Value, bool),
     Done,
 }
 
@@ -84,13 +88,45 @@ impl Kb {
     }
 }
 
-/// Start the keyboard's thread, with the Z10's core in `dir` and its own
-/// files in `data`. Previews take a thread of their own to the core, so one
-/// never waits behind a whole read or a save: the core takes it between that
-/// job's exchanges with the keyboard, and the keys keep up with the page.
-pub fn start(dir: PathBuf, data: PathBuf, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
+/// Start the keyboard's thread, on the Z10's core (`z10`). Previews take a
+/// thread of their own to the core, so one never waits behind a whole read or
+/// a save: the core takes it between that job's exchanges with the keyboard,
+/// and the keys keep up with the page. The core listens to the keyboard's
+/// keys for as long as Ectodeck runs, every press told, for the keyboard's
+/// picture as well as for the keys given a host slot; and whether the
+/// keyboard is plugged in, as it tells, is kept in `there`.
+pub fn start(z10: Result<crate::core_host::Core, String>, tell: Sender<Heard>, there: std::sync::Arc<std::sync::atomic::AtomicBool>) -> mpsc::Sender<Ask> {
     let (ask, asked) = mpsc::channel::<Ask>();
-    let kb = Kb(z10(&dir, data));
+    let kb = Kb(z10);
+    if let Ok(core) = &kb.0 {
+        // (woken by each notice, on the core's thread, which mustn't wait)
+        let (wake, woken) = mpsc::channel::<()>();
+        let wake = std::sync::Mutex::new(wake);
+        core.on_told(move || {
+            let _ = wake.lock().map(|w| w.send(()));
+        });
+        let (c, told) = (core.clone(), tell.clone());
+        std::thread::spawn(move || {
+            while woken.recv().is_ok() {
+                while woken.try_recv().is_ok() {}
+                for (method, p) in c.told() {
+                    match method.as_str() {
+                        "device/added" => there.store(true, std::sync::atomic::Ordering::Relaxed),
+                        "device/removed" => there.store(false, std::sync::atomic::Ordering::Relaxed),
+                        "input/down" | "input/up" => {
+                            if told.send(Heard::Input(p, method == "input/down")).is_err() {
+                                return;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        });
+        if let Err(e) = core.call("input/watch", &json!({ "all": true })) {
+            eprintln!("ectodeck-native: the keyboard's keys won't be heard: {e}");
+        }
+    }
     let (look, looks) = mpsc::channel::<Value>();
     let (work, asked_work) = mpsc::channel::<Ask>();
     let (quick, told) = (kb.clone(), tell.clone());

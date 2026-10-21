@@ -45,6 +45,7 @@ mod lcd_player;
 mod lcd_stats;
 mod library;
 mod lighting;
+mod locks;
 mod macro_page;
 mod macros;
 mod mouse;
@@ -735,8 +736,11 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         front.act();
     }
     if let Some(code) = std::env::var("ECTODECK_NATIVE_KEY_CODE").ok().and_then(|v| v.parse::<u32>().ok()) {
-        front.screen_key_event(code, true);
-        front.screen_key_event(code, false);
+        // (as the keyboard's core tells it: the key's host slot, by its code)
+        let slot = code.saturating_sub(z10::NEXT_LAYOUT);
+        for down in [true, false] {
+            front.heard(device::Heard::Input(serde_json::json!({ "device": "z10", "host": slot, "sends": { "host": slot } }), down));
+        }
         front.act();
     }
     // ECTODECK_NATIVE_WHEEL="x,y,dy": the wheel turned there, after the clicks
@@ -838,11 +842,15 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         }
     }
     // keys typed on the keyboard, as Linux key codes: "29+" down, "29-" up
-    // keys as the keyboard sends them: into the window, and as its own devices tell of them
+    // keys as the keyboard sends them: into the window, and as its core tells of them
     for k in std::env::var("ECTODECK_NATIVE_EVDEV").unwrap_or_default().split(',').filter(|k| !k.is_empty()) {
         let (code, down) = (k.trim_end_matches(['+', '-']).parse().unwrap_or(0), k.ends_with('+'));
         front.typed(code, down);
-        front.watched(ectotype_core::watch::Watched::Key(code as u16, down));
+        // (what the key sent, as its core reads it from the keyboard's report)
+        if let Some((mods, hid)) = z10::evdev_to_hid(code) {
+            let usage = if hid != 0 { hid as u8 } else { ectodeck_protocol::keys::FIRST_MODIFIER + mods.trailing_zeros() as u8 };
+            front.heard(device::Heard::Input(serde_json::json!({ "device": "z10", "sends": ectodeck_protocol::Action::Key(usage).write() }), down));
+        }
         front.refresh();
     }
     // ECTODECK_NATIVE_SCREEN_KEYS="167,169": keys with screen jobs pressed, by their codes, as
@@ -861,7 +869,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     }
     // ECTODECK_NATIVE_LOCKS=N: the keyboard's lock lights (1 Num Lock, 2 Caps Lock, 4 Scroll Lock)
     if let Some(bits) = std::env::var("ECTODECK_NATIVE_LOCKS").ok().and_then(|v| v.parse::<u8>().ok()) {
-        front.watched(ectotype_core::watch::Watched::Locks(bits));
+        front.locks(bits);
     }
     // the pointer, where it was last left
     if let Ok(at) = std::env::var("ECTODECK_NATIVE_HOVER") {
@@ -1739,9 +1747,15 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         })
         .unwrap();
 
-    // the keyboard, unless Ectodeck is set to leave it to other programs
+    // the keyboard, unless Ectodeck is set to leave it to other programs: its
+    // core, which the keyboard's thread and the screen's player both talk
+    // through, and which hears its keys (each press told, whichever window
+    // has the keyboard)
     let controlled = settings.on("devices.z10.control");
-    let kb = controlled.then(|| {
+    let z10_core = controlled.then(|| device::z10(&cores::dir().join(z10::CORE), core_data(z10::CORE)));
+    // (whether the keyboard is plugged in, as its core tells, for the screen's player)
+    let z10_there = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let kb = z10_core.clone().map(|core| {
         let (heard_tx, heard_rx) = calloop::channel::channel::<device::Heard>();
         event_loop
             .handle()
@@ -1751,33 +1765,20 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
                 }
             })
             .unwrap();
-        // the keyboard's keys and lock lights, from its own devices, whichever window has it
-        let (watch_tx, watch_rx) = calloop::channel::channel::<ectotype_core::watch::Watched>();
+        // the computer's lock lights, as the keyboard shows them
+        let (locks_tx, locks_rx) = calloop::channel::channel::<u8>();
         event_loop
             .handle()
-            .insert_source(watch_rx, |e, _, app: &mut App| {
-                if let calloop::channel::Event::Msg(w) = e {
-                    app.front.watched(w);
+            .insert_source(locks_rx, |e, _, app: &mut App| {
+                if let calloop::channel::Event::Msg(bits) = e {
+                    app.front.locks(bits);
                 }
             })
             .unwrap();
-        ectotype_core::watch::start(move |w| {
-            let _ = watch_tx.send(w);
+        locks::start(move |bits| {
+            let _ = locks_tx.send(bits);
         });
-        // the keys with a screen job, from the keyboard's own reports (see screen_keys)
-        let (screen_tx, screen_rx) = calloop::channel::channel::<(u32, bool)>();
-        event_loop
-            .handle()
-            .insert_source(screen_rx, |e, _, app: &mut App| {
-                if let calloop::channel::Event::Msg((code, down)) = e {
-                    app.front.screen_key_event(code, down);
-                }
-            })
-            .unwrap();
-        screen_keys::start(move |code, down| {
-            let _ = screen_tx.send((code, down));
-        });
-        device::start(cores::dir().join(z10::CORE), core_data(z10::CORE), heard_tx)
+        device::start(core, heard_tx, z10_there.clone())
     });
 
     // SteelSeries' core, for the Sensei 310, and the mouse's page's thread on it:
@@ -1901,12 +1902,15 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
                 }
             })
             .unwrap();
+        // (each frame through the Z10's core, which sends it between its other exchanges)
+        let screen = lcd_player::CoreSink::new(z10_core.clone().and_then(Result::ok), z10_there.clone());
         let p = lcd_player::Player::start(
             move |n| {
                 let _ = news_tx.send(n);
             },
             app.front.settings.on("devices.z10.screen.announce"),
             false,
+            Box::new(screen),
         );
         app.front.set_player(p);
     }

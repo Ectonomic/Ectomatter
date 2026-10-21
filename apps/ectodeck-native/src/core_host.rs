@@ -852,6 +852,143 @@ mod tests {
         let _ = std::fs::remove_dir_all(&data);
     }
 
+    /// One of the fake Z10's interfaces as its key reports are read: each
+    /// report once, and an error once the keyboard is unplugged.
+    struct Ear(Arc<Mutex<VecDeque<Vec<u8>>>>, Arc<std::sync::atomic::AtomicBool>);
+
+    impl Hid for Ear {
+        fn send_feature(&mut self, _: &[u8]) -> Result<(), String> {
+            Err("nothing is sent where the keys are read".into())
+        }
+        fn get_feature(&mut self, _: u8, _: usize) -> Result<Vec<u8>, String> {
+            Err("nothing is asked where the keys are read".into())
+        }
+        fn write(&mut self, _: &[u8]) -> Result<usize, String> {
+            Err("nothing is sent where the keys are read".into())
+        }
+        fn read(&mut self, _: u32) -> Result<Vec<u8>, String> {
+            if self.1.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err("unplugged".into());
+            }
+            Ok(self.0.lock().unwrap().pop_front().unwrap_or_default())
+        }
+    }
+
+    /// A computer with a fake Z10 on all three of its interfaces, as hidapi
+    /// lists them: one entry for each collection, an interface's collections
+    /// sharing its path. The editor's collection keeps every report sent to
+    /// it; each interface opened anew gives its key reports.
+    struct Z10Whole {
+        editor: Option<Box<dyn Hid>>,
+        reports: [Arc<Mutex<VecDeque<Vec<u8>>>>; 3],
+        gone: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl Usb for Z10Whole {
+        fn devices(&mut self) -> Vec<DeviceInfo> {
+            if self.gone.load(std::sync::atomic::Ordering::Relaxed) {
+                return Vec::new();
+            }
+            let d = |interface: i32, usage_page: u16, usage: u16| DeviceInfo { vendor: 0x3842, product: 0x2611, interface, usage_page, usage, path: format!("kb{interface}") };
+            vec![d(0, 0x01, 0x06), d(1, 0x01, 0x02), d(1, 0x0C, 0x01), d(1, 0x08, 0x4B), d(2, 0x01, 0x06), d(2, 0x08, 0x4B)]
+        }
+        fn open(&mut self, d: &DeviceInfo) -> Result<Box<dyn Hid>, String> {
+            if (d.interface, d.usage_page) == (1, 0x08) {
+                return self.editor.take().ok_or_else(|| "the editor's collection opened twice".to_string());
+            }
+            if (d.interface, d.usage_page) == (2, 0x08) {
+                return Err("the ten-key interface's indicators were opened for commands".into());
+            }
+            let i = d.interface as usize;
+            Ok(Box::new(Ear(self.reports[i].clone(), self.gone.clone())))
+        }
+    }
+
+    /// Asked to watch, the Z10's core hears the keyboard's own key reports: a
+    /// key on a host slot, pressed and let go, by its slot; every other key,
+    /// a modifier and a media key only while every press is watched, each by
+    /// what it sent; and, unplugged, everything held let go. Nothing is ever
+    /// sent to the keyboard for it.
+    #[test]
+    fn the_z10_core_hears_its_keys() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let editor = Sent(sent.clone(), Clock(Arc::new(Mutex::new(Vec::new())), Vec::new()), Arc::new(Mutex::new(Vec::new())));
+        let reports: [Arc<Mutex<VecDeque<Vec<u8>>>>; 3] = Default::default();
+        let gone = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let usb = Z10Whole { editor: Some(Box::new(editor)), reports: reports.clone(), gone: gone.clone() };
+        let data = std::env::temp_dir().join(format!("ectodeck-core-keys-{}", std::process::id()));
+        let core = Core::start(&core_dir(), data.clone(), Box::new(usb)).unwrap();
+        core.call("initialize", &serde_json::json!({ "backups": false })).unwrap();
+        assert_eq!(core.call("input/watch", &serde_json::json!({ "all": false })).unwrap()["listening"], true);
+        let heard = |n: usize| {
+            let mut got: Vec<(String, Value)> = Vec::new();
+            for _ in 0..100 {
+                std::thread::sleep(Duration::from_millis(10));
+                got.extend(core.told().into_iter().filter(|(m, _)| m.starts_with("input/")));
+                if got.len() >= n {
+                    break;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(60));
+            got.extend(core.told().into_iter().filter(|(m, _)| m.starts_with("input/")));
+            got.into_iter().map(|(m, p)| (m, p["sends"].clone())).collect::<Vec<_>>()
+        };
+        let push = |i: usize, r: Vec<u8>| reports[i].lock().unwrap().push_back(r);
+        let ten = |keys: &[u8]| {
+            let mut r = vec![0x10, 0, 0];
+            r.extend(keys);
+            r.resize(13, 0);
+            r
+        };
+        let ev = |m: &str, v: Value| (m.to_string(), v);
+        // a key on host slot 2 (the code 0xA7), with a letter beside it, then
+        // both let go: the slot alone is told, the letter unwatched
+        push(2, ten(&[0x04, 0xA7]));
+        push(2, ten(&[0x04]));
+        push(2, ten(&[]));
+        assert_eq!(heard(2), [ev("input/down", serde_json::json!({ "host": 2 })), ev("input/up", serde_json::json!({ "host": 2 }))]);
+        // every press, watched: Left Shift and A on the boot report, then a
+        // media key; each in the order it came, and let go the same way
+        core.call("input/watch", &serde_json::json!({ "all": true })).unwrap();
+        push(0, vec![0x02, 0, 0x04, 0, 0, 0, 0, 0]);
+        push(1, vec![0x02, 0xE9, 0x00]);
+        assert_eq!(heard(3), [ev("input/down", serde_json::json!({ "key": "LeftShift" })), ev("input/down", serde_json::json!({ "key": "A" })), ev("input/down", serde_json::json!({ "media": "VolumeUp" }))]);
+        push(0, vec![0; 8]);
+        push(1, vec![0x02, 0, 0]);
+        assert_eq!(heard(3), [ev("input/up", serde_json::json!({ "key": "LeftShift" })), ev("input/up", serde_json::json!({ "key": "A" })), ev("input/up", serde_json::json!({ "media": "VolumeUp" }))]);
+        // a key pressed and let go between two listens is told both ways
+        push(0, vec![0, 0, 0x05, 0, 0, 0, 0, 0]);
+        push(0, vec![0; 8]);
+        assert_eq!(heard(2), [ev("input/down", serde_json::json!({ "key": "B" })), ev("input/up", serde_json::json!({ "key": "B" }))]);
+        // unplugged with a key held: it is let go
+        push(2, ten(&[0x06]));
+        assert_eq!(heard(1), [ev("input/down", serde_json::json!({ "key": "C" }))]);
+        gone.store(true, std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(heard(1), [ev("input/up", serde_json::json!({ "key": "C" }))]);
+        assert!(sent.lock().unwrap().is_empty(), "nothing sent to the keyboard");
+        let _ = std::fs::remove_dir_all(&data);
+    }
+
+    /// The display's rows go to the keyboard as the screen player sent them
+    /// itself (report 10, byte for byte), and handing the screen back sends
+    /// the player's own last frame (its fourth byte 0).
+    #[test]
+    fn the_z10_core_shows_what_the_player_sent() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let editor = Sent(sent.clone(), Clock(Arc::new(Mutex::new(Vec::new())), Vec::new()), Arc::new(Mutex::new(Vec::new())));
+        let data = std::env::temp_dir().join(format!("ectodeck-core-lcd-{}", std::process::id()));
+        let core = Core::start(&core_dir(), data.clone(), Box::new(One(Some(Box::new(editor))))).unwrap();
+        core.call("initialize", &serde_json::json!({ "backups": false })).unwrap();
+        let rows: Vec<String> = ["CPU  40\u{b0}C   5%", "GPU  38C   2%", "\u{2588}\u{2588}\u{2588} RAM 8.1/31 GB", "VRAM 2.0/31 GB      x"].map(String::from).to_vec();
+        core.call("displays/show", &serde_json::json!({ "rows": rows })).unwrap();
+        core.call("displays/hand-back", &Value::Null).unwrap();
+        let _ = std::fs::remove_dir_all(&data);
+        let s = sent.lock().unwrap();
+        assert_eq!(s.len(), 2);
+        assert_eq!(s[0], crate::lcd_player::frame(&rows, 1).to_vec(), "the rows as the player sent them");
+        assert_eq!(s[1], crate::lcd_player::frame(&[], 0).to_vec(), "handed back as the player did");
+    }
+
     /// The mouse as its page's thread hears it, from the core on the fake
     /// mouse, saved where MOUSE_STATE_OUT says (for snapshots of the page).
     #[test]
