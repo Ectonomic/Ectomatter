@@ -4563,7 +4563,9 @@ impl Front {
     fn mouse_draw_at(&mut self, w: u32) {
         let scale = self.scale;
         let draw = move || {
-            let art = std::fs::read_to_string(crate::cores::dir().join("steelseries/art/sensei-310.svg")).map_err(|e| e.to_string())?;
+            // (ECTODECK_NATIVE_MOUSE_ART: another copy of the drawing, to try a change to it offscreen)
+            let path = std::env::var_os("ECTODECK_NATIVE_MOUSE_ART").map(std::path::PathBuf::from).unwrap_or_else(|| crate::cores::dir().join("steelseries/art/sensei-310.svg"));
+            let art = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
             crate::mouse_art::layers(&art, w, &crate::stage_shadow(scale), crate::STAGE_SHADOW_OPACITY)
         };
         match self.mouse.tell.clone() {
