@@ -511,6 +511,10 @@ const TABS: i32 = 900;
 /// the key's own, and the switch pad
 const SCOPE: i32 = 940;
 const MAP: i32 = 950;
+/// At most this many parts are named in the head, each a choice of its own,
+/// as a mouse's lights are; with more (a keyboard's keys), one button opens
+/// the map to choose one
+const NAMED: usize = 4;
 const OWN: i32 = 960;
 const PAD: i32 = 970;
 /// a slider's reset: this, plus its slider's id
@@ -1610,6 +1614,8 @@ impl LabPage {
                     self.picking = false;
                 }
                 Ask::Scope(_) => self.picking = !self.picking,
+                // (a part named in the head, selected again, lets go: back to all of them)
+                Ask::Key(i) if self.named() && self.scope == Some(i.max(0) as usize) => self.scope = None,
                 Ask::Key(i) => {
                     if let Some(lit) = self.device.caps.get(i.max(0) as usize).map(|(c, _)| c.lit) {
                         self.scope = Some(i as usize);
@@ -1773,6 +1779,12 @@ impl LabPage {
     /// The key whose own setup the page shows, if one is chosen.
     fn key(&self) -> Option<&CapShape> {
         self.scope.and_then(|i| self.device.caps.get(i)).map(|(c, _)| c)
+    }
+
+    /// Whether the parts are few enough to be named in the head, each a choice
+    /// of its own, rather than chosen on the map.
+    fn named(&self) -> bool {
+        self.device.caps.len() <= NAMED
     }
 
     /// What the parts the page tunes one at a time are called: a keyboard's
@@ -3045,12 +3057,20 @@ impl LabPage {
         }
         let tabs_w = bx - 2.0 + 6.0;
         let tx = w - 24.0 - tabs_w;
-        // the keys tuned, before the sections: all of them, or one, which opens the map to choose it
+        // the keys tuned, before the sections: all of them, or one. A few parts are
+        // each named there; more have one button, which opens the map to choose one
         let (many, single) = self.parts();
-        let (all_words, one_words) = (format!("All {many}"), format!("One {single}"));
-        let one = self.key().map_or_else(|| one_words.clone(), |k| k.label.clone());
-        let (aw, kw) = (text::width(400, 13.0, &all_words) + 24.0, text::width(400, 13.0, &one) + 24.0 + 16.0);
-        let scope_w = aw + 2.0 + kw + 6.0;
+        let all_words = format!("All {many}");
+        let aw = text::width(400, 13.0, &all_words) + 24.0;
+        let named = self.named();
+        let ones: Vec<(String, f32)> = if named {
+            self.device.caps.iter().map(|(c, _)| (c.label.clone(), text::width(400, 13.0, &c.label) + 24.0)).collect()
+        } else {
+            let one = self.key().map_or_else(|| format!("One {single}"), |k| k.label.clone());
+            let kw = text::width(400, 13.0, &one) + 24.0 + 16.0;
+            vec![(one, kw)]
+        };
+        let scope_w = aw + ones.iter().map(|(_, ow)| 2.0 + ow).sum::<f32>() + 6.0;
         let qx = tx - 12.0 - scope_w;
         // the light setup tuned, before the keys: the core's, or one of the
         // person's own, which opens the menu of them
@@ -3067,7 +3087,19 @@ impl LabPage {
         cells.push(Cell { text: setup.into(), on: self.menu != Menu::Shut, id: SETUP, index: 0, style: 24, ..cell(kind::SEG_BUTTON, ux + 3.0, 20.0, uw, 30.0) });
         cells.push(cell(kind::SEG, qx, 17.0, scope_w, 36.0));
         cells.push(Cell { text: all_words.as_str().into(), on: self.scope.is_none() && !self.picking, id: SCOPE, index: 0, ..cell(kind::SEG_BUTTON, qx + 3.0, 20.0, aw, 30.0) });
-        cells.push(Cell { text: one.into(), on: self.scope.is_some() || self.picking, id: SCOPE, index: 1, style: 24, ..cell(kind::SEG_BUTTON, qx + 3.0 + aw + 2.0, 20.0, kw, 30.0) });
+        let mut ox = qx + 3.0 + aw + 2.0;
+        for (i, (one, ow)) in ones.into_iter().enumerate() {
+            if named {
+                cells.push(Cell { text: one.into(), on: self.scope == Some(i), id: MAP, index: i as i32, ..cell(kind::SEG_BUTTON, ox, 20.0, ow, 30.0) });
+                // (one with a setup of its own marked, as the map marks it)
+                if self.light["keys"][self.device.caps[i].0.id.as_str()].is_object() {
+                    cells.push(Cell { style: 3, ..cell(kind::DOT, ox + ow - 10.0, 24.5, 6.0, 6.0) });
+                }
+            } else {
+                cells.push(Cell { text: one.into(), on: self.scope.is_some() || self.picking, id: SCOPE, index: 1, style: 24, ..cell(kind::SEG_BUTTON, ox, 20.0, ow, 30.0) });
+            }
+            ox += ow + 2.0;
+        }
         cells.push(cell(kind::SEG, tx, 17.0, tabs_w, 36.0));
         for (i, title, x, bw) in tabs {
             // (for one key, the sections that are every key's are not to be chosen)
