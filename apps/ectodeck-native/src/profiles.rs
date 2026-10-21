@@ -18,12 +18,14 @@ pub struct Profile {
     pub id: String,
     pub name: String,
     pub body: Value,
+    /// the apps it's in use with, while one of them is in front (see front_app.rs)
+    pub apps: Vec<String>,
 }
 
 impl Profile {
     /// A new profile, with an id no other has.
     pub fn new(name: impl Into<String>, body: Value) -> Profile {
-        Profile { id: new_id(), name: name.into(), body }
+        Profile { id: new_id(), name: name.into(), body, apps: Vec::new() }
     }
 }
 
@@ -65,7 +67,8 @@ impl Store {
                 let name = body.as_object_mut().and_then(|o| o.remove("name")).and_then(|n| n.as_str().map(String::from)).unwrap_or_default();
                 // (a profile kept before profiles had ids takes one now)
                 let id = body.as_object_mut().and_then(|o| o.remove("id")).and_then(|n| n.as_str().map(String::from)).unwrap_or_else(new_id);
-                Profile { id, name, body }
+                let apps = body.as_object_mut().and_then(|o| o.remove("apps")).and_then(|a| a.as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())).unwrap_or_default();
+                Profile { id, name, body, apps }
             })
             .collect();
         if list.is_empty() {
@@ -73,6 +76,13 @@ impl Store {
         }
         let active = (v["active"].as_u64().unwrap_or(0) as usize).min(list.len() - 1);
         Some(Store { path, list, active })
+    }
+
+    /// Profiles as a file keeps them, kept nowhere from now (a snapshot's).
+    pub fn read_only(path: PathBuf) -> Option<Store> {
+        let mut s = Store::load(Some(path))?;
+        s.path = None;
+        Some(s)
     }
 
     /// The first time: what the device is set to now, as Profile 1.
@@ -92,6 +102,9 @@ impl Store {
                 let mut v = p.body.clone();
                 v["name"] = json!(p.name);
                 v["id"] = json!(p.id);
+                if !p.apps.is_empty() {
+                    v["apps"] = json!(p.apps);
+                }
                 v
             })
             .collect();
@@ -167,6 +180,28 @@ impl Store {
         self.save();
     }
 
+    /// A profile tied to an app, or no longer: in use while the app is in
+    /// front. An app is tied to one profile at a time, the last it was tied to.
+    pub fn tie(&mut self, i: usize, app: &str, on: bool) {
+        for (k, p) in self.list.iter_mut().enumerate() {
+            if k != i && on {
+                p.apps.retain(|a| a != app);
+            }
+        }
+        if let Some(p) = self.list.get_mut(i) {
+            p.apps.retain(|a| a != app);
+            if on {
+                p.apps.push(app.to_string());
+            }
+        }
+        self.save();
+    }
+
+    /// The profile tied to an app, if one is.
+    pub fn for_app(&self, app: &str) -> Option<usize> {
+        self.list.iter().position(|p| p.apps.iter().any(|a| a == app))
+    }
+
     /// Choose the profile in use.
     pub fn choose(&mut self, i: usize) {
         if i < self.list.len() {
@@ -207,6 +242,12 @@ mod tests {
         // (each its own id, kept, and none of it in what goes to the device)
         assert_eq!(back.list.iter().map(|p| &p.id).collect::<Vec<_>>(), s.list.iter().map(|p| &p.id).collect::<Vec<_>>());
         assert!(s.list[1].id != s.list[2].id && back.list[0].body.get("id").is_none());
+        // an app tied to one profile at a time, kept with it
+        s.tie(1, "steam", true);
+        s.tie(2, "steam", true);
+        assert_eq!((s.for_app("steam"), Store::load(kept(&dir)).unwrap().for_app("steam")), (Some(2), Some(2)));
+        s.tie(2, "steam", false);
+        assert_eq!(s.for_app("steam"), None);
         s.choose(1);
         let gone = s.delete().unwrap();
         assert_eq!((gone.0, gone.1.name.as_str(), s.active, s.current().name.as_str()), (1, "Games", 0, "Profile 1"), "the one above in use");

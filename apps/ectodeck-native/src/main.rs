@@ -27,6 +27,7 @@ mod display;
 mod devices;
 mod ecto_settings;
 mod front;
+mod front_app;
 mod jobs;
 mod kde_output;
 mod shadow;
@@ -574,6 +575,15 @@ fn main() {
     run(window, made, ui, settings, reference, gain);
 }
 
+/// The apps a snapshot's setting names come to the front, in order, as KWin
+/// tells it: each `class,desktop`, apart by semicolons.
+fn front_apps_told(front: &mut Front, var: &str) {
+    for f in std::env::var(var).unwrap_or_default().split(';').filter(|f| !f.is_empty()) {
+        let (class, desktop) = f.split_once(',').unwrap_or((f, ""));
+        front.front_app(front_app::Front { class: class.into(), title: String::new(), desktop: desktop.into() });
+    }
+}
+
 /// One frame without a window, saved for checking.
 fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>, ui: AppWindow, reference: f64, gain: f32, path: &str) {
     let (mut w, mut h) = std::env::var("ECTODECK_NATIVE_SIZE")
@@ -663,6 +673,12 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     window.draw_if_needed(|r| {
         r.render(&mut pic.ui, w as usize);
     });
+    // ECTODECK_NATIVE_PROFILES=FILE: the mouse's profiles as that file keeps them (kept nowhere)
+    if let Some(s) = std::env::var_os("ECTODECK_NATIVE_PROFILES").and_then(|p| profiles::Store::read_only(p.into())) {
+        front.mouse.profiles = Some(s);
+    }
+    // ECTODECK_NATIVE_FRONT=class,desktop;...: apps come to the front, in order, as KWin tells it
+    front_apps_told(&mut front, "ECTODECK_NATIVE_FRONT");
     for click in std::env::var("ECTODECK_NATIVE_CLICKS").unwrap_or_default().split(';').filter(|c| !c.is_empty()) {
         let mut xy = click.split(',').map(|v| v.trim().parse::<f32>().unwrap_or(0.0));
         let (x, y) = (xy.next().unwrap_or(0.0), xy.next().unwrap_or(0.0));
@@ -692,6 +708,8 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
             r.render(&mut pic.ui, w as usize);
         });
     }
+    // ECTODECK_NATIVE_FRONT_AFTER: the same, after the clicks
+    front_apps_told(&mut front, "ECTODECK_NATIVE_FRONT_AFTER");
     // ECTODECK_NATIVE_HEAR=control: a mouse button heard pressed and let go, as its core tells
     // it; ECTODECK_NATIVE_KEY_CODE=code: a keyboard key with that host code heard so (after
     // the clicks, each job Ectodeck does said in the log)
@@ -1867,6 +1885,17 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         libc::signal(libc::SIGTERM, on_term as *const () as libc::sighandler_t);
         libc::signal(libc::SIGINT, on_term as *const () as libc::sighandler_t);
     }
+    // the app in front, as KWin tells it, for the profiles that follow one
+    let (front_tx, front_rx) = calloop::channel::channel::<front_app::Front>();
+    event_loop
+        .handle()
+        .insert_source(front_rx, |e, _, app: &mut App| {
+            if let calloop::channel::Event::Msg(f) = e {
+                app.front.front_app(f);
+            }
+        })
+        .unwrap();
+    let front_bus = front_app::start(front_tx);
     let (tray_tx, tray_rx) = calloop::channel::channel::<tray::TrayAsk>();
     app.tray = tray::start(tray_tx);
     event_loop
@@ -1918,6 +1947,10 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         // quitting: what changed is saved first, for up to four seconds
         if let Some(t) = app.quitting {
             if app.front.flush() || t.elapsed() > Duration::from_secs(4) {
+                // (KWin no longer told to tell a closed Ectodeck)
+                if let Some(c) = &front_bus {
+                    front_app::stop(c);
+                }
                 app.exit = true;
                 break;
             }

@@ -119,6 +119,8 @@ pub enum Ask {
     MouseProfileRename(String),
     MouseProfileNew,
     MouseProfileMenu(f32, f32, f32),
+    /// the menu on the keyboard's profile being edited
+    KbProfileMenu(f32, f32, f32),
     MouseUndo,
     /// the Macro Editor, from the mouse's bar: on Ectodeck's own macros
     MouseMacroEditor,
@@ -596,6 +598,16 @@ pub struct Front {
     bind_menu: Option<(usize, (f32, f32, f32))>,
     /// the menu on the mouse's profile in use is open
     profile_menu: bool,
+    /// the menu on the keyboard's profile, and the menu of apps a profile is
+    /// tied to (which device, 0 the keyboard and 1 the mouse; which profile:
+    /// the keyboard's by its number, the mouse's by its place; where it hangs)
+    kb_profile_menu: bool,
+    apps_menu: Option<(usize, usize, (f32, f32, f32))>,
+    /// the apps seen in front (see front_app.rs), and for each device the
+    /// profile chosen by hand, which it goes back to once an app it followed
+    /// leaves the front (0 the keyboard's by its number, 1 the mouse's by its place)
+    front_apps: crate::front_app::Seen,
+    follow_back: [Option<usize>; 2],
     /// Ectodeck's macros played, for the controls given one (made when first needed)
     typist: Option<crate::typist::Player>,
     /// a slider set to Nothing because the other took its job: the job it had
@@ -767,6 +779,7 @@ impl Front {
         on!(on_mouse_profile_rename, |t| Ask::MouseProfileRename(t.to_string()));
         on!(on_mouse_profile_new, Ask::MouseProfileNew);
         on!(on_mouse_profile_menu, |x, y, h| Ask::MouseProfileMenu(x, y, h));
+        on!(on_kb_profile_menu, |x, y, h| Ask::KbProfileMenu(x, y, h));
         on!(on_mouse_undo, Ask::MouseUndo);
         on!(on_mouse_macro_editor, Ask::MouseMacroEditor);
         on!(on_desk_press, |i, x, y| Ask::DeskPress(i, x, y));
@@ -926,6 +939,10 @@ impl Front {
             bind: crate::uistate::get("slider_bind").and_then(|v| serde_json::from_value(v).ok()).unwrap_or(["own".into(), "own".into()]),
             bind_menu: None,
             profile_menu: false,
+            kb_profile_menu: false,
+            apps_menu: None,
+            front_apps: crate::front_app::Seen::load(),
+            follow_back: [None, None],
             typist: None,
             idled: crate::uistate::get("slider_idled").and_then(|v| serde_json::from_value(v).ok()).unwrap_or([None, None]),
             last_sliders: None,
@@ -1340,6 +1357,8 @@ impl Front {
                     self.close_menu();
                     self.ui.set_mouse_renaming(false);
                     self.mouse.choose_profile(i.max(0) as usize);
+                    // (chosen by hand: the one to come back to)
+                    self.follow_back[1] = None;
                     // (what the mouse plays, new, on its picture)
                     self.show_mouse_lights();
                 }
@@ -1835,7 +1854,11 @@ impl Front {
                         self.push_preview();
                     }
                 }
-                Ask::Profile(n) => self.choose_profile(n as u8),
+                Ask::Profile(n) => {
+                    self.choose_profile(n as u8);
+                    self.follow_back[0] = None;
+                }
+                Ask::KbProfileMenu(x, y, h) => self.open_kb_profile_menu((x, y, h)),
                 Ask::AutoSave => {
                     changed = false;
                     self.auto_save();
@@ -2776,7 +2799,7 @@ impl Front {
             self.ui.set_menu_open(false);
             self.ui.invoke_blur_menu();
         }
-        if self.mouse.menu.take().is_some() || std::mem::take(&mut self.profile_menu) {
+        if self.mouse.menu.take().is_some() || std::mem::take(&mut self.profile_menu) || std::mem::take(&mut self.kb_profile_menu) || self.apps_menu.take().is_some() {
             self.ui.set_menu_open(false);
             self.ui.set_menu_w(300.0);
             self.ui.set_mouse_menu_open(false);
@@ -2868,7 +2891,7 @@ impl Front {
     /// the window.
     fn let_chosen_go(&mut self, x: f32, y: f32) {
         // (a press while any menu is open is the menu's: it chooses there, or shuts it)
-        if y < 36.0 || self.ui.get_menu_open() || self.menu.is_some() || self.mouse.menu.is_some() || self.profile_menu || self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pick.is_some() || self.place_menu {
+        if y < 36.0 || self.ui.get_menu_open() || self.menu.is_some() || self.mouse.menu.is_some() || self.profile_menu || self.kb_profile_menu || self.apps_menu.is_some() || self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pick.is_some() || self.place_menu {
             return;
         }
         let Some(keeps) = self.chosen_keeps() else { return };
@@ -2957,6 +2980,7 @@ impl Front {
 
     fn menu_chose(&mut self, i: usize) {
         if self.profile_menu {
+            let anchor = (self.ui.get_menu_ax(), self.ui.get_menu_ay(), self.ui.get_menu_ah());
             self.close_menu();
             match i {
                 // Duplicate: a copy, its name open to change
@@ -2964,13 +2988,49 @@ impl Front {
                     self.mouse.duplicate_profile();
                     self.ui.set_mouse_renaming(true);
                 }
+                // Use with an app: the apps it can follow
+                1 => {
+                    if let Some(at) = self.mouse.profiles.as_ref().map(|s| s.active) {
+                        self.open_apps_menu(1, at, anchor);
+                        return;
+                    }
+                }
                 // Delete, unless it's the only one (that row is dimmed)
-                2 if self.mouse.profiles.as_ref().is_some_and(|p| p.list.len() > 1) => {
+                3 if self.mouse.profiles.as_ref().is_some_and(|p| p.list.len() > 1) => {
                     self.mouse.delete_profile();
                     self.show_mouse_lights();
                 }
                 _ => {}
             }
+            self.refresh();
+            return;
+        }
+        if self.kb_profile_menu {
+            let anchor = (self.ui.get_menu_ax(), self.ui.get_menu_ay(), self.ui.get_menu_ah());
+            self.close_menu();
+            if i == 0 {
+                self.open_apps_menu(0, self.page.editing as usize, anchor);
+                return;
+            }
+            self.refresh();
+            return;
+        }
+        if let Some((device, profile, anchor)) = self.apps_menu {
+            // (an app ticked or not, the menu open again for the next)
+            let tied = self.tied_apps(device, profile);
+            let mut apps: Vec<String> = self.front_apps.list.iter().map(|a| a.id.clone()).collect();
+            for t in &tied {
+                if !apps.contains(t) {
+                    apps.push(t.clone());
+                }
+            }
+            if let Some(app) = i.checked_sub(1).and_then(|k| apps.get(k)).cloned() {
+                self.tie_app(device, profile, &app, !tied.contains(&app));
+                self.open_apps_menu(device, profile, anchor);
+                self.refresh();
+                return;
+            }
+            self.close_menu();
             self.refresh();
             return;
         }
@@ -3596,7 +3656,8 @@ impl Front {
                     ProfileItem {
                         n: n as i32,
                         name: p.profile_name(n).into(),
-                        sub: p.profile_effect(n).into(),
+                        // (a profile tied to apps says so under its name)
+                        sub: self.with_apps(&self.tied_apps(0, n as usize)).unwrap_or_else(|| p.profile_effect(n)).into(),
                         active: n == p.active(),
                         current: n == p.editing,
                         dirty: p.is_dirty(n),
@@ -4671,7 +4732,16 @@ impl Front {
         ui.set_mouse_hint(m.hint().into());
         ui.set_mouse_status(m.failed.clone().unwrap_or_default().into());
         // the profiles, and what was last done to them, with Undo for a moment
-        show_rows(ui.get_mouse_profiles(), |r| ui.set_mouse_profiles(r), m.profile_items());
+        // (a profile tied to apps says so under its name)
+        let mut items = m.profile_items();
+        if let Some(store) = &m.profiles {
+            for (it, p) in items.iter_mut().zip(&store.list) {
+                if let Some(w) = self.with_apps(&p.apps) {
+                    it.sub = w.into();
+                }
+            }
+        }
+        show_rows(ui.get_mouse_profiles(), |r| ui.set_mouse_profiles(r), items);
         ui.set_mouse_profiles_shown(m.profiles.is_some());
         ui.set_mouse_said(m.said_now().into());
         ui.set_mouse_undo_shown(m.undo_shown());
@@ -4751,15 +4821,22 @@ impl Front {
         self.close_picker();
         let only = self.mouse.profiles.as_ref().is_none_or(|p| p.list.len() < 2);
         let row = |kind: i32, label: &str| MenuRow { kind, label: label.into(), tag: "".into(), tick: false, sub: "".into() };
-        let mut rows = vec![row(0, "Duplicate"), row(2, ""), row(if only { 5 } else { 4 }, "Delete")];
+        let mut rows = vec![row(0, "Duplicate"), row(0, "Use with an app…"), row(2, ""), row(if only { 5 } else { 4 }, "Delete")];
         if only {
             rows.push(row(3, "Your only profile can’t be deleted."));
         }
-        let h = 6.0 + rows.iter().map(|r| match r.kind { 2 => 11.0, _ => 33.0 }).sum::<f32>() + 6.0;
+        self.hang_menu(rows, 220.0, anchor);
+        self.profile_menu = true;
+    }
+
+    /// A small menu of `rows`, `w` wide, open from `anchor`: under it where
+    /// it fits, over it where there's more room there.
+    fn hang_menu(&mut self, rows: Vec<MenuRow>, w: f32, anchor: (f32, f32, f32)) {
+        let h = 6.0 + rows.iter().map(|r| match r.kind { 1 => 28.0, 2 => 11.0, _ => 33.0 }).sum::<f32>() + 6.0;
         self.ui.set_menu_search(false);
         self.ui.set_menu_back(false);
         self.ui.set_menu_natural(h);
-        self.ui.set_menu_w(220.0);
+        self.ui.set_menu_w(w);
         self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
         let (ax, ay, ah) = anchor;
         let win = self.ui.get_window_height();
@@ -4768,10 +4845,154 @@ impl Front {
         self.ui.set_menu_ax(ax);
         self.ui.set_menu_ay(ay);
         self.ui.set_menu_ah(ah);
-        self.ui.set_menu_top(if down { ay + ah + 6.0 } else { ay - 6.0 - h });
-        self.ui.set_menu_max(win * 0.7);
+        self.ui.set_menu_top(if down { ay + ah + 6.0 } else { ay - 6.0 - h.min(above) });
+        self.ui.set_menu_max(if down { below.max(win * 0.3) } else { above });
         self.ui.set_menu_open(true);
-        self.profile_menu = true;
+    }
+
+    /// The menu on the keyboard's profile being edited: Use with an app.
+    fn open_kb_profile_menu(&mut self, anchor: (f32, f32, f32)) {
+        if let Some((at, when)) = self.shut.take() {
+            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
+                return;
+            }
+        }
+        self.close_menu();
+        self.close_picker();
+        let row = |kind: i32, label: &str| MenuRow { kind, label: label.into(), tag: "".into(), tick: false, sub: "".into() };
+        self.hang_menu(vec![row(0, "Use with an app…")], 220.0, anchor);
+        self.kb_profile_menu = true;
+    }
+
+    /// The apps a profile can be tied to (the keyboard's, `device` 0, by its
+    /// number; the mouse's, 1, by its place): those seen in front, newest
+    /// first, and any it's tied to that aren't, each ticked if it is.
+    fn open_apps_menu(&mut self, device: usize, profile: usize, anchor: (f32, f32, f32)) {
+        self.close_menu();
+        let tied = self.tied_apps(device, profile);
+        let mut apps: Vec<(String, String)> = self.front_apps.list.iter().map(|a| (a.id.clone(), a.name.clone())).collect();
+        for t in &tied {
+            if !apps.iter().any(|(id, _)| id == t) {
+                apps.push((t.clone(), self.front_apps.name(t)));
+            }
+        }
+        let mut rows = vec![MenuRow { kind: 1, label: "Use it while one of these is in front".into(), tag: "".into(), tick: false, sub: "".into() }];
+        rows.extend(apps.iter().map(|(id, name)| MenuRow { kind: 0, label: name.as_str().into(), tag: "".into(), tick: tied.contains(id), sub: "".into() }));
+        if apps.is_empty() {
+            rows.push(MenuRow { kind: 3, label: "Apps show here once they’ve been in front while Ectodeck is running.".into(), tag: "".into(), tick: false, sub: "".into() });
+        }
+        self.hang_menu(rows, 300.0, anchor);
+        self.apps_menu = Some((device, profile, anchor));
+    }
+
+    /// The apps a profile is tied to: the keyboard's (`device` 0, by its
+    /// number) as Ectodeck's settings keep them, the mouse's (1, by its place)
+    /// with it.
+    fn tied_apps(&self, device: usize, profile: usize) -> Vec<String> {
+        if device == 1 {
+            return self.mouse.profiles.as_ref().and_then(|s| s.list.get(profile)).map(|p| p.apps.clone()).unwrap_or_default();
+        }
+        self.settings
+            .get("devices.z10.profile_apps")
+            .and_then(|v| v[profile.to_string()].as_array().cloned())
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .unwrap_or_default()
+    }
+
+    /// The keyboard's profile tied to an app, if one is.
+    fn kb_profile_for(&self, app: &str) -> Option<u8> {
+        z10::PROFILE_NUMBERS.iter().copied().find(|&n| self.tied_apps(0, n as usize).iter().any(|a| a == app))
+    }
+
+    /// A profile tied to an app, or no longer; an app is tied to one of a
+    /// device's profiles at a time, the last it was tied to.
+    fn tie_app(&mut self, device: usize, profile: usize, app: &str, on: bool) {
+        if device == 1 {
+            if let Some(s) = &mut self.mouse.profiles {
+                s.tie(profile, app, on);
+            }
+            return;
+        }
+        let mut all = self.settings.get("devices.z10.profile_apps").filter(|v| v.is_object()).unwrap_or_else(|| serde_json::json!({}));
+        for n in z10::PROFILE_NUMBERS {
+            let key = n.to_string();
+            let mut list: Vec<String> = all[&key].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
+            list.retain(|a| a != app);
+            if on && n as usize == profile {
+                list.push(app.to_string());
+            }
+            all[&key] = serde_json::json!(list);
+        }
+        if let Err(e) = self.settings.set("devices.z10.profile_apps", all) {
+            self.status(format!("The profile's apps were not saved: {e}"), 2);
+        }
+    }
+
+    /// The words under a profile's name for the apps it's tied to: "With
+    /// Steam", or with how many more.
+    fn with_apps(&self, apps: &[String]) -> Option<String> {
+        let first = self.front_apps.name(apps.first()?);
+        Some(match apps.len() {
+            1 => format!("With {first}"),
+            n => format!("With {first} and {} more", n - 1),
+        })
+    }
+
+    /// An app come to the front, as KWin says (see front_app.rs): each device
+    /// switches to its profile tied to the app; once an app it followed
+    /// leaves the front, back to the profile chosen by hand. Ectodeck's own
+    /// windows change nothing, so a profile can be changed with Ectodeck in front.
+    pub fn front_app(&mut self, f: crate::front_app::Front) {
+        let seen = self.front_apps.saw(&f);
+        if f.is_ectodeck() {
+            return;
+        }
+        let app = f.app();
+        let mut changed = false;
+        // the mouse
+        if let Some(store) = &self.mouse.profiles {
+            let (active, count) = (store.active, store.list.len());
+            match store.for_app(&app) {
+                Some(i) if i != active => {
+                    self.follow_back[1].get_or_insert(active);
+                    self.mouse.choose_profile(i);
+                    eprintln!("ectodeck-native: the mouse follows {app}");
+                    changed = true;
+                }
+                Some(_) => {}
+                None => {
+                    if let Some(back) = self.follow_back[1].take().filter(|b| *b < count && *b != active) {
+                        self.mouse.choose_profile(back);
+                        changed = true;
+                    }
+                }
+            }
+        }
+        // the keyboard
+        if self.page.dev.is_some() {
+            let active = self.page.active();
+            match self.kb_profile_for(&app) {
+                Some(n) if n != active => {
+                    self.follow_back[0].get_or_insert(active as usize);
+                    self.choose_profile(n);
+                    eprintln!("ectodeck-native: the keyboard follows {app}");
+                    changed = true;
+                }
+                Some(_) => {}
+                None => {
+                    if let Some(back) = self.follow_back[0].take().filter(|b| *b as u8 != active) {
+                        self.choose_profile(back as u8);
+                        changed = true;
+                    }
+                }
+            }
+        }
+        if changed {
+            self.show_mouse_lights();
+        }
+        if changed || seen {
+            self.refresh();
+        }
     }
 
     /// The chosen button's jobs of one kind, under the Key detail box's menu field.

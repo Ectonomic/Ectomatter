@@ -115,15 +115,6 @@ impl Job {
         }
     }
 
-    /// Which device it acts on, by the id its profiles are kept by: none for
-    /// Ectodeck's own (a macro).
-    pub fn device(&self) -> Option<&'static str> {
-        match self {
-            Job::KeyboardProfile(_) | Job::Screen(_) => Some(KEYBOARD),
-            Job::MouseProfile(_) => Some(MOUSE),
-            Job::Macro { .. } => None,
-        }
-    }
 }
 
 /// The names the jobs' words use: the keyboard's profiles (by their numbers,

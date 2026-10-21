@@ -3456,6 +3456,9 @@ component AnchorHead inherits Text {
 component AnchorColumn inherits VerticalLayout {
     in property <[ProfileItem]> profiles;
     in property <bool> kept;
+    // the menu on the profile being edited, as profiles Ectodeck keeps have, for a
+    // device that keeps its own (no New profile row for it)
+    in property <bool> has-menu: false;
     callback choose(int);
     callback rename(string);
     callback add();
@@ -3491,7 +3494,7 @@ component AnchorColumn inherits VerticalLayout {
                 }
                 if !(p.current && root.renaming): VerticalLayout {
                     x: 20px;
-                    width: parent.width - 20px - (root.kept && p.current ? 62px : 34px);
+                    width: parent.width - 20px - ((root.kept || root.has-menu) && p.current ? 62px : 34px);
                     alignment: center;
                     Text {
                         text: p.name;
@@ -3581,7 +3584,7 @@ component AnchorColumn inherits VerticalLayout {
                 }
                 // the pencil, on the profile being edited
                 if p.current && !root.renaming: Rectangle {
-                    x: parent.width - (root.kept ? 60px : 32px);
+                    x: parent.width - (root.kept || root.has-menu ? 60px : 32px);
                     y: (parent.height - 26px) / 2;
                     width: 26px;
                     height: 26px;
@@ -3604,8 +3607,8 @@ component AnchorColumn inherits VerticalLayout {
                         clicked => { root.renaming = true; }
                     }
                 }
-                // and its menu: Duplicate, Delete
-                if root.kept && p.current && !root.renaming: Rectangle {
+                // and its menu: Duplicate, Use with an app, Delete
+                if (root.kept || root.has-menu) && p.current && !root.renaming: Rectangle {
                     x: parent.width - 32px;
                     y: (parent.height - 26px) / 2;
                     width: 26px;
@@ -4015,6 +4018,8 @@ export component AppWindow inherits Window {
     callback mouse-profile-rename(string);
     callback mouse-profile-new();
     callback mouse-profile-menu(length, length, length);
+    // the menu on the keyboard's profile being edited
+    callback kb-profile-menu(length, length, length);
     callback mouse-undo();
     // its picture, and how far the picture's shadow reaches past the mouse;
     // over it, the chosen button picked out and the one under the pointer a
@@ -5149,8 +5154,10 @@ export component AppWindow inherits Window {
                     y: root.tab == 3 ? head-end : under-top;
                     width: anchor-w;
                     profiles: root.profiles;
+                    has-menu: true;
                     choose(n) => { root.choose-profile(n); }
                     rename(t) => { root.rename-profile(t); }
+                    menu(x, y, h) => { root.kb-profile-menu(x, y, h); }
                 }
 
                 // Keys: the Key library, and beside it Game mode, or the chosen key or slider
