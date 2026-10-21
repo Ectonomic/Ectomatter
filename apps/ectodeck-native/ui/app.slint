@@ -2495,10 +2495,14 @@ component StateTab inherits Rectangle {
 // others; the others dark, curving into the box where they meet it, a half
 // step lighter under the pointer and never as light as the open one. Each its
 // key (a blank cap for the layer with nothing held, Fn for Function) and its
-// name. A device with one layer has one tab, the box's heading.
+// name. A device with one layer has one tab, the box's heading. Tabs for
+// what has no key of its own (the Macro Editor's libraries) go without caps,
+// and where they sit against something square, their outer corners too.
 component LayerSwitch inherits Rectangle {
     in property <int> layer;
     in property <[LayerTab]> layers: [{ name: "Base", cap: "" }, { name: "Function", cap: "Fn" }];
+    in property <bool> caps: true;
+    in property <length> corner: 12px;
     callback chosen(int);
     height: 50px;
     // the pointer over a tab that is not open
@@ -2507,8 +2511,8 @@ component LayerSwitch inherits Rectangle {
     property <color> shut: root.shut-hover ? #1a1a1e : Ink.well;
     // behind them all, the dark tabs' color, which shows round the open tab's inner corners
     Rectangle {
-        border-top-left-radius: 12px;
-        border-top-right-radius: 12px;
+        border-top-left-radius: root.corner;
+        border-top-right-radius: root.corner;
         background: root.shut;
     }
     for l[i] in root.layers: t := Rectangle {
@@ -2527,14 +2531,14 @@ component LayerSwitch inherits Rectangle {
             background: Ink.box;
         }
         Rectangle {
-            border-top-left-radius: t.first ? 12px : t.open ? 10px : 0;
-            border-top-right-radius: t.last ? 12px : t.open ? 10px : 0;
+            border-top-left-radius: t.first ? root.corner : t.open ? 10px : 0;
+            border-top-right-radius: t.last ? root.corner : t.open ? 10px : 0;
             border-bottom-left-radius: !t.open && root.layer == i - 1 ? 10px : 0;
             border-bottom-right-radius: !t.open && root.layer == i + 1 ? 10px : 0;
             background: t.open ? Ink.box : root.shut;
         }
         // the layer's key, a small cap
-        Rectangle {
+        if root.caps: Rectangle {
             x: 16px;
             y: (parent.height - 24px) / 2;
             width: 30px;
@@ -2562,9 +2566,11 @@ component LayerSwitch inherits Rectangle {
             }
         }
         Text {
-            x: 56px;
+            x: root.caps ? 56px : 16px;
+            width: parent.width - self.x - 12px;
             height: parent.height;
             text: l.name;
+            overflow: elide;
             font-family: "Geist";
             // (the size and weight of the boxes' titles)
             font-size: 13.5px;
@@ -7626,6 +7632,10 @@ export component MacroWindow inherits Window {
     callback maximize();
     callback close-window();
     callback drag();
+    // the libraries, as tabs at the list's top, and the one shown
+    in property <[LayerTab]> libs;
+    in property <int> lib-shown;
+    callback lib-chosen(int);
     // a macro by its library and number, and a new one in a library
     callback choose(int, int);
     callback new-in(int);
@@ -7728,9 +7738,10 @@ export component MacroWindow inherits Window {
         }
     }
 
-    // the macros: Ectodeck's own, then each device's that keeps macros in its
-    // own memory, a section each, with its heading, where its macros are kept
-    // and who plays them, and a way to make a new one there
+    // the macros: a tab for each library, Ectodeck's own, then each device's
+    // that keeps macros in its own memory; under it, where the shown one's
+    // macros are kept and who plays them, a way to make a new one there, and
+    // its macros
     Rectangle {
         x: 0;
         y: 36px;
@@ -7738,7 +7749,17 @@ export component MacroWindow inherits Window {
         height: root.height - 36px;
         background: Ink.box;
         border-bottom-left-radius: root.radius;
-        property <length> head-h: 8px;
+        property <length> head-h: 50px + 8px;
+        LayerSwitch {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            layers: root.libs;
+            layer: root.lib-shown;
+            caps: false;
+            corner: 0;
+            chosen(i) => { root.lib-chosen(i); }
+        }
         Flickable {
             x: 10px;
             y: parent.head-h;
@@ -7758,8 +7779,10 @@ export component MacroWindow inherits Window {
                     menu(x, y) => { root.row-menu(m.lib, m.n, x, y); }
                 }
                 // a section's heading: as the mouse's page heads its lists
+                // (a heading with no name, where the tab above names the library:
+                // its note beside the New button, from the top)
                 if m.kind == 1: Rectangle {
-                    Text {
+                    if m.name != "": Text {
                         x: 12px;
                         y: 0;
                         height: 30px;
@@ -7784,7 +7807,7 @@ export component MacroWindow inherits Window {
                     // macros start below the last)
                     Text {
                         x: 12px;
-                        y: 30px;
+                        y: m.name == "" ? 7px : 30px;
                         text: m.sub;
                         font-size: 12px;
                         color: Ink.quiet;

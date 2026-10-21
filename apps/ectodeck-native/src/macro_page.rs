@@ -14,7 +14,7 @@ use crate::device;
 use crate::front::WindowAsk;
 use crate::macros::{self, hit, piece, Draft, Editor, Lib, Plays, Recording, Timing, MEDIA, PLAYS, ROOM};
 use crate::z10::Page;
-use crate::{Cell, MacroItem, MacroWindow, MenuRow};
+use crate::{Cell, LayerTab, MacroItem, MacroWindow, MenuRow};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Ask {
@@ -22,6 +22,9 @@ pub enum Ask {
     Minimize,
     Maximize,
     Close,
+    /// a library's tab chosen (by its place among the tabs: 0 Ectodeck's,
+    /// then the keyboard's), which then shows
+    Lib(i32),
     /// a macro chosen, its menu opened, a new one made: in a library (0 the
     /// keyboard's, 1 Ectodeck's), which then shows
     Choose(i32, i32),
@@ -114,12 +117,27 @@ pub struct MacroPage {
     saving: Option<Saving>,
     chain: Rc<VecModel<Cell>>,
     items: Rc<VecModel<MacroItem>>,
+    /// the libraries' tabs
+    libs: Rc<VecModel<LayerTab>>,
     fake_rec: bool,
     /// the chosen macro is to be scrolled into view in the list
     scroll_to: bool,
     /// whether a mouse is known that keeps one of Ectodeck's macros in its own
     /// memory when the macro is a shortcut (mouse.rs's held_by_mouse)
     pub mouse_holds: bool,
+}
+
+/// A heading's note in lines: the first short of the New button beside it,
+/// the rest the list's width.
+fn note_lines(note: &str) -> Vec<String> {
+    let first = crate::text::wrap(400, 12.0, note, NOTE_W - NEW_W);
+    let Some(head) = first.first().cloned() else { return Vec::new() };
+    let rest = note.get(head.len()..).unwrap_or("").trim_start();
+    let mut lines = vec![head];
+    if !rest.is_empty() {
+        lines.extend(crate::text::wrap(400, 12.0, rest, NOTE_W));
+    }
+    lines
 }
 
 /// A library by the number the list gives it: 0 the keyboard's, 1 Ectodeck's.
@@ -131,19 +149,20 @@ fn lib_of(l: i32) -> Lib {
     }
 }
 
-/// The keyboard whose memory keeps its macros, by the name its section has.
+/// The keyboard whose memory keeps its macros, by the name its tab has.
 const KEYBOARD: &str = "EVGA Z10 RGB";
 
-/// The list's measures: a section's heading, a line of its note (Geist at
-/// 12px), the room under the note, a macro's row, and the room between sections.
-const HEAD_H: f32 = 30.0;
+/// The list's measures: where the library's note starts (beside its New
+/// button, which takes this much of its first line), a line of the note
+/// (Geist at 12px) and its width, the room under it, and a macro's row.
+const NOTE_TOP: f32 = 7.0;
+const NEW_W: f32 = 64.0;
 const NOTE_LINE: f32 = 15.6;
 const NOTE_W: f32 = 254.0;
 const UNDER_NOTE: f32 = 8.0;
 const ROW_H: f32 = 55.0;
-const BETWEEN: f32 = 18.0;
-/// where the list starts in its column, below the window's bar
-const LIST_TOP: f32 = 36.0 + 8.0;
+/// where the list starts in its column, below the window's bar and the libraries' tabs
+const LIST_TOP: f32 = 36.0 + 50.0 + 8.0;
 
 fn row(kind: i32, label: &str, tick: bool) -> MenuRow {
     MenuRow { kind, label: label.into(), tag: "".into(), tick, sub: "".into() }
@@ -166,6 +185,7 @@ impl MacroPage {
         on!(on_minimize, Ask::Minimize);
         on!(on_maximize, Ask::Maximize);
         on!(on_close_window, Ask::Close);
+        on!(on_lib_chosen, |i| Ask::Lib(i));
         on!(on_choose, |l, n| Ask::Choose(l, n));
         on!(on_row_menu, |l, n, x, y| Ask::RowMenu(l, n, x, y));
         on!(on_new_in, |l| Ask::NewIn(l));
@@ -193,8 +213,10 @@ impl MacroPage {
         ui.set_mark(mark);
         let chain = Rc::new(VecModel::default());
         let items = Rc::new(VecModel::default());
+        let libs = Rc::new(VecModel::default());
         ui.set_chain(ModelRc::from(chain.clone()));
         ui.set_items(ModelRc::from(items.clone()));
+        ui.set_libs(ModelRc::from(libs.clone()));
         MacroPage {
             ui,
             ed: Editor::new(Lib::Keyboard),
@@ -209,6 +231,7 @@ impl MacroPage {
             saving: None,
             chain,
             items,
+            libs,
             fake_rec: false,
             scroll_to: false,
             mouse_holds: false,
@@ -251,6 +274,17 @@ impl MacroPage {
         }
         let mut changed = false;
         for ask in asks {
+            // (a library's tab shows that library, unless a macro is being recorded
+            // or saved; the keyboard's shows while it is still being read)
+            if let Ask::Lib(i) = ask {
+                let lib = if i <= 0 { Lib::Ectodeck } else { Lib::Keyboard };
+                if self.ed.lib != lib {
+                    self.show_lib(lib);
+                    self.ui.set_lib_scroll(0.0);
+                    self.scroll_to = true;
+                }
+                continue;
+            }
             // (a macro or a New in the library not shown shows it first, unless one
             // is being recorded or saved; then it waits)
             let mut switched = false;
@@ -272,6 +306,7 @@ impl MacroPage {
                 continue;
             }
             match ask {
+                Ask::Lib(_) => {}
                 Ask::Move => window.push(WindowAsk::Move),
                 Ask::Minimize => window.push(WindowAsk::Minimize),
                 Ask::Maximize => window.push(WindowAsk::Maximize),
@@ -999,72 +1034,59 @@ impl MacroPage {
 
     // ------------------------------------------------------------ the page's models
 
-    /// The list: Ectodeck's macros, then those of the keyboard, which keeps
-    /// its own, each under a heading saying where they're kept and who plays
-    /// them, with a way to make a new one there. The keyboard's shows once it
-    /// has been read, or while its library is open and being read.
+    /// The list: the shown library's macros (its tab, above, names it), under
+    /// a note saying where they're kept and who plays them, beside a way to
+    /// make a new one there. The keyboard's waits while it is being read.
     fn sections(&self, page: &Page) -> Vec<MacroItem> {
-        let shown = self.ed.lib;
-        let still = self.ed.rec.is_some() || self.ed.busy;
-        let mut out = Vec::new();
-        let mut y = 0.0;
-        for lib in [Lib::Ectodeck, Lib::Keyboard] {
-            let ed = if shown == lib { &self.ed } else { &self.other };
-            let read = lib == Lib::Ectodeck || page.dev.is_some();
-            if !read && shown != lib {
-                continue;
-            }
-            let count = ed.macros_count(page);
-            let (title, note) = match lib {
-                Lib::Ectodeck if self.mouse_holds => ("ECTODECK".to_string(), format!("Kept in Ectodeck. Shortcuts on your mouse play even with Ectodeck closed. {count} saved.")),
-                Lib::Ectodeck => ("ECTODECK".to_string(), format!("Kept in Ectodeck, so they play while Ectodeck is running. {count} saved.")),
-                Lib::Keyboard if !read => (KEYBOARD.to_uppercase(), "Reading the keyboard…".to_string()),
-                Lib::Keyboard => (KEYBOARD.to_uppercase(), format!("Kept on the keyboard, so they play even with Ectodeck closed. {count} of {} slots used.", ed.room().unwrap_or(0))),
-            };
-            let note = crate::text::wrap(400, 12.0, &note, NOTE_W);
-            if !out.is_empty() {
-                y += BETWEEN;
-            }
-            let h = HEAD_H + note.len() as f32 * NOTE_LINE + UNDER_NOTE;
-            let l = if lib == Lib::Keyboard { 0 } else { 1 };
+        let (lib, ed) = (self.ed.lib, &self.ed);
+        let still = ed.rec.is_some() || ed.busy;
+        let read = lib == Lib::Ectodeck || page.dev.is_some();
+        let count = ed.macros_count(page);
+        let note = match lib {
+            Lib::Ectodeck if self.mouse_holds => format!("Kept in Ectodeck. Shortcuts on your mouse play even with Ectodeck closed. {count} saved."),
+            Lib::Ectodeck => format!("Kept in Ectodeck, so they play while Ectodeck is running. {count} saved."),
+            Lib::Keyboard if !read => "Reading the keyboard…".to_string(),
+            Lib::Keyboard => format!("Kept on the keyboard, so they play even with Ectodeck closed. {count} of {} slots used.", ed.room().unwrap_or(0)),
+        };
+        let note = note_lines(&note);
+        let l = if lib == Lib::Keyboard { 0 } else { 1 };
+        let h = NOTE_TOP + note.len() as f32 * NOTE_LINE + UNDER_NOTE;
+        let mut out = vec![MacroItem {
+            kind: 1,
+            lib: l,
+            n: 0,
+            name: "".into(),
+            sub: note.join("\n").into(),
+            timed: false,
+            current: false,
+            dirty: false,
+            can_new: read && !still && !ed.free_slots(page).is_empty(),
+            y: 0.0,
+            h,
+        }];
+        if !read {
+            return out;
+        }
+        let mut y = h;
+        for n in ed.list(page) {
+            let d = ed.drafts.get(&n);
+            let m = ed.saved(page, n);
+            let steps = d.map(Editor::effective).unwrap_or_else(|| m.as_ref().and_then(|m| m["steps"].as_array().cloned()).unwrap_or_default());
+            let name = d.map(|d| d.name.clone()).or_else(|| m.as_ref().and_then(|m| m["name"].as_str().map(String::from))).filter(|s| !s.is_empty()).unwrap_or(format!("Macro {n}"));
             out.push(MacroItem {
-                kind: 1,
+                kind: 0,
                 lib: l,
-                n: 0,
-                name: title.into(),
-                sub: note.join("\n").into(),
-                timed: false,
-                current: false,
-                dirty: false,
-                can_new: read && !still && !ed.free_slots(page).is_empty(),
+                n: n as i32,
+                name: name.into(),
+                sub: if d.is_some_and(|d| d.is_new) { "Not saved yet".into() } else { macros::describe(&steps).into() },
+                timed: steps.iter().any(|s| s["after"].as_u64().unwrap_or(0) > 0),
+                current: ed.current == Some(n),
+                dirty: ed.dirty(page, n),
+                can_new: false,
                 y,
-                h,
+                h: ROW_H,
             });
-            y += h;
-            if !read {
-                continue;
-            }
-            for n in ed.list(page) {
-                let d = ed.drafts.get(&n);
-                let m = ed.saved(page, n);
-                let steps = d.map(Editor::effective).unwrap_or_else(|| m.as_ref().and_then(|m| m["steps"].as_array().cloned()).unwrap_or_default());
-                let name = d.map(|d| d.name.clone()).or_else(|| m.as_ref().and_then(|m| m["name"].as_str().map(String::from))).filter(|s| !s.is_empty()).unwrap_or(format!("Macro {n}"));
-                out.push(MacroItem {
-                    kind: 0,
-                    lib: l,
-                    n: n as i32,
-                    name: name.into(),
-                    sub: if d.is_some_and(|d| d.is_new) { "Not saved yet".into() } else { macros::describe(&steps).into() },
-                    timed: steps.iter().any(|s| s["after"].as_u64().unwrap_or(0) > 0),
-                    // (only the shown library's open macro is open)
-                    current: shown == lib && ed.current == Some(n),
-                    dirty: ed.dirty(page, n),
-                    can_new: false,
-                    y,
-                    h: ROW_H,
-                });
-                y += ROW_H;
-            }
+            y += ROW_H;
         }
         out
     }
@@ -1077,6 +1099,14 @@ impl MacroPage {
         if read {
             self.ed.settle(page);
         }
+        // the libraries' tabs: Ectodeck's, and the keyboard's once it has been
+        // read (or while it shows, being read)
+        let mut libs = vec![LayerTab { name: "Ectodeck".into(), cap: "".into() }];
+        if page.dev.is_some() || keyboard {
+            libs.push(LayerTab { name: KEYBOARD.into(), cap: "".into() });
+        }
+        crate::front::set_rows(&self.libs, libs);
+        self.ui.set_lib_shown(if keyboard { 1 } else { 0 });
         let items = self.sections(page);
         let end = items.last().map_or(0.0, |m| m.y + m.h);
         // the chosen one brought into view, as the web page scrolled it to the
@@ -1211,12 +1241,14 @@ mod tests {
         }
     }
 
-    /// The list is Ectodeck's macros, then the keyboard's, each under its
-    /// heading. A macro in the library not shown opens in its own library
-    /// (not put away, though it was the last one open there), as New there
-    /// makes one there; while one is recorded or saved, the other library waits.
+    /// Each library is a tab, Ectodeck's then the keyboard's, and the list
+    /// holds the shown one's macros under its note. A tab chosen shows its
+    /// library, the macro last open there still open; a macro chosen again is
+    /// put away; New makes one in the library shown; while one is recorded or
+    /// saved, the other tab waits; with no keyboard read, Ectodeck's tab is
+    /// alone, unless the keyboard's shows, being read.
     #[test]
-    fn each_library_is_a_section_and_its_macros_open_in_it() {
+    fn each_library_is_a_tab_and_its_macros_open_in_it() {
         let _one = crate::library::TESTS.lock().unwrap_or_else(|p| p.into_inner());
         let _ = slint::platform::set_platform(Box::new(Nowhere));
         let step = |k: &str, down: bool| json!({ "key": k, "down": down, "after": 0 });
@@ -1225,51 +1257,60 @@ mod tests {
         page.dev = Some(json!({ "macros": { "2": { "name": "The keyboard's", "steps": [step("B", true), step("B", false)] } } }));
         let mut mp = MacroPage::new(MacroWindow::new().unwrap(), slint::Image::default());
         mp.open(&page, Lib::Keyboard, Some(2));
+        let tabs = |mp: &MacroPage| mp.libs.iter().map(|t| t.name.to_string()).collect::<Vec<_>>();
         let rows = |mp: &MacroPage| mp.items.iter().map(|m| (m.kind, m.lib, m.n, m.current)).collect::<Vec<_>>();
-        let heads: Vec<(i32, String)> = mp.items.iter().filter(|m| m.kind == 1).map(|m| (m.lib, m.name.to_string())).collect();
-        assert_eq!(heads, [(1, "ECTODECK".to_string()), (0, "EVGA Z10 RGB".to_string())]);
-        assert!(rows(&mp).contains(&(0, 0, 2, true)) && rows(&mp).contains(&(0, 1, 77, false)), "{:?}", rows(&mp));
-        // each row sits below the one before it
+        assert_eq!(tabs(&mp), ["Ectodeck", "EVGA Z10 RGB"]);
+        assert_eq!(mp.ui.get_lib_shown(), 1);
+        // the keyboard's alone: its note, under no name (its tab names it), then its macros
+        assert_eq!(rows(&mp), [(1, 0, 0, false), (0, 0, 2, true)]);
+        let head = mp.items.row_data(0).unwrap();
+        assert!(head.name.is_empty() && head.sub.starts_with("Kept on the keyboard"), "{}", head.sub);
         let ys: Vec<f32> = mp.items.iter().map(|m| m.y).collect();
         assert!(ys.windows(2).all(|w| w[1] > w[0]), "{ys:?}");
         assert_eq!(mp.ui.get_items_h(), mp.items.iter().last().map_or(0.0, |m| m.y + m.h));
 
-        // Ectodeck's, from the keyboard's: it opens there
+        // Ectodeck's tab: its macros alone, and one chosen opens there
+        mp.ui.invoke_lib_chosen(0);
+        mp.act(&mut page, &|_| {});
+        assert_eq!((mp.ed.lib, mp.ui.get_lib_shown()), (Lib::Ectodeck, 0));
+        assert!(rows(&mp).contains(&(0, 1, 77, false)) && rows(&mp).iter().all(|r| r.1 == 1), "{:?}", rows(&mp));
         mp.ui.invoke_choose(1, 77);
         mp.act(&mut page, &|_| {});
         assert_eq!((mp.ed.lib, mp.ed.current), (Lib::Ectodeck, Some(77)));
-        assert!(rows(&mp).contains(&(0, 1, 77, true)) && rows(&mp).contains(&(0, 0, 2, false)), "{:?}", rows(&mp));
-        // and back: the keyboard's opens, though it was the one open there
-        mp.ui.invoke_choose(0, 2);
+        // back to the keyboard's tab: its macro still open there
+        mp.ui.invoke_lib_chosen(1);
         mp.act(&mut page, &|_| {});
         assert_eq!((mp.ed.lib, mp.ed.current), (Lib::Keyboard, Some(2)));
-        // chosen again where it shows, it's put away, as before
+        // chosen again, it's put away, as before
         mp.ui.invoke_choose(0, 2);
         mp.act(&mut page, &|_| {});
         assert_ne!(mp.ed.current, Some(2));
 
-        // New in Ectodeck's section makes one there
+        // New on Ectodeck's tab makes one there
+        mp.ui.invoke_lib_chosen(0);
+        mp.act(&mut page, &|_| {});
         mp.ui.invoke_new_in(1);
         mp.act(&mut page, &|_| {});
         assert_eq!(mp.ed.lib, Lib::Ectodeck);
         let n = mp.ed.current.unwrap();
         assert!(mp.items.iter().any(|m| m.kind == 0 && m.lib == 1 && m.n == n as i32 && m.current && m.sub == "Not saved yet"));
 
-        // while one is being saved, the other library waits
+        // while one is being saved, the other tab waits
         mp.ed.busy = true;
         mp.refresh(&page);
         assert!(mp.items.iter().filter(|m| m.kind == 1).all(|m| !m.can_new));
-        mp.ui.invoke_choose(0, 2);
+        mp.ui.invoke_lib_chosen(1);
         mp.act(&mut page, &|_| {});
         assert_eq!(mp.ed.lib, Lib::Ectodeck);
         mp.ed.busy = false;
 
-        // no keyboard read: Ectodeck's alone, unless the keyboard's is open
+        // no keyboard read: Ectodeck's tab alone, unless the keyboard's shows, being read
         page.dev = None;
         mp.refresh(&page);
-        assert!(mp.items.iter().all(|m| m.lib == 1), "{:?}", rows(&mp));
+        assert_eq!(tabs(&mp), ["Ectodeck"]);
         mp.open(&page, Lib::Keyboard, None);
-        let last = mp.items.iter().last().unwrap();
-        assert_eq!((last.kind, last.lib, last.sub.as_str(), last.can_new), (1, 0, "Reading the keyboard…", false));
+        assert_eq!(tabs(&mp), ["Ectodeck", "EVGA Z10 RGB"]);
+        let head = mp.items.row_data(0).unwrap();
+        assert_eq!((mp.items.row_count(), head.kind, head.lib, head.sub.as_str(), head.can_new), (1, 1, 0, "Reading the keyboard…", false));
     }
 }
