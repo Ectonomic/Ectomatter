@@ -7363,11 +7363,27 @@ component ChainPiece inherits Rectangle {
             padding-left: 11px;
             padding-right: 11px;
             spacing: 6px;
+            // (a media key's note; a job's mark, on a device or the screen, or
+            // another macro played; a key's step has none)
             if root.c.style == 1: Text {
                 text: "♫";
                 font-family: "Geist";
                 font-size: 12px;
                 color: root.c.on ? #171717 : #9fc2ea;
+                vertical-alignment: center;
+            }
+            if root.c.style == 2: Text {
+                text: "◆";
+                font-family: "Geist";
+                font-size: 12px;
+                color: root.c.on ? #171717 : Ink.warn;
+                vertical-alignment: center;
+            }
+            if root.c.style == 3: Text {
+                text: "▶";
+                font-family: "Geist";
+                font-size: 12px;
+                color: root.c.on ? #171717 : Ink.good;
                 vertical-alignment: center;
             }
             Text {
@@ -7378,7 +7394,8 @@ component ChainPiece inherits Rectangle {
                 color: root.c.on ? #171717 : Ink.ink;
                 vertical-alignment: center;
             }
-            Text {
+            // (which way a key goes; a job goes no way)
+            if root.c.style < 2: Text {
                 text: root.c.value > 0.5 ? "↓" : "↑";
                 font-family: "Geist";
                 font-size: 12.5px;
@@ -7581,6 +7598,9 @@ export component MacroWindow inherits Window {
     in property <bool> can-key;
     in property <bool> can-media;
     in property <bool> can-wait;
+    // Ectodeck's own macros' actions and other macros: shown for its library alone
+    in property <bool> jobs-shown;
+    in property <bool> can-jobs;
     in property <bool> can-record;
     in property <string> meter-text;
     in property <bool> meter-warn;
@@ -8089,6 +8109,8 @@ export component MacroWindow inherits Window {
                 TextButton { y: 1px; text: "+ Key"; opacity: root.can-key ? 1 : 0.35; clicked => { if (root.can-key) { root.tool(2, self.absolute-position.x, self.absolute-position.y, self.height); } } }
                 TextButton { y: 1px; text: "+ Media key"; opacity: root.can-media ? 1 : 0.35; clicked => { if (root.can-media) { root.tool(3, self.absolute-position.x, self.absolute-position.y, self.height); } } }
                 TextButton { y: 1px; text: "+ Wait"; opacity: root.can-wait ? 1 : 0.35; clicked => { if (root.can-wait) { root.tool(4, self.absolute-position.x, self.absolute-position.y, self.height); } } }
+                if root.jobs-shown: TextButton { y: 1px; text: "+ Action"; opacity: root.can-jobs ? 1 : 0.35; clicked => { if (root.can-jobs) { root.tool(6, self.absolute-position.x, self.absolute-position.y, self.height); } } }
+                if root.jobs-shown: TextButton { y: 1px; text: "+ Macro"; opacity: root.can-jobs ? 1 : 0.35; clicked => { if (root.can-jobs) { root.tool(7, self.absolute-position.x, self.absolute-position.y, self.height); } } }
                 Rectangle { horizontal-stretch: 1; }
                 Text {
                     text: root.meter-text;

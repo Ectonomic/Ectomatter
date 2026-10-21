@@ -684,8 +684,10 @@ mod tests {
 mod hdr_tests {
     use super::*;
 
-    /// Each light's window lit as its LED makes it: brightest over the LED,
-    /// all its light inside the mouse, and as much as the LED's lumens make.
+    /// Each light's window lit as its LED makes it, with the light the lab has
+    /// tuned (light.json): lit, all its light inside the mouse, and as much as
+    /// the LED's lumens make. How bright is the person's call: a wheel dimmed
+    /// in the lab glows under the page's white.
     #[test]
     fn the_lights_are_as_bright_as_their_leds_make_them() {
         let art = std::fs::read_to_string(crate::cores::dir().join("steelseries/art/sensei-310.svg")).unwrap();
@@ -698,7 +700,7 @@ mod hdr_tests {
             let got = lamp.lumens(px_mm);
             eprintln!("{}: peak {:.0} nits at full white, {got:.4} lumens of {:.4}", LIGHT_IDS[i], lamp.peak(), m.lumens * (m.through + m.halo));
             assert!((got - m.lumens * (m.through + m.halo)).abs() < 0.02 * m.lumens, "{} gives off what its LED lets out", LIGHT_IDS[i]);
-            assert!(lamp.peak() > 100.0, "{} lit brighter than the page's white", LIGHT_IDS[i]);
+            assert!(lamp.peak() > 0.0, "{} lit", LIGHT_IDS[i]);
         }
     }
 }

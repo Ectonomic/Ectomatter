@@ -3,6 +3,10 @@
 //! macro as a chain of steps, recorded from the keyboard or built by hand. A
 //! step is the core protocol's {key|media, down, after}: a key or media key,
 //! by its name, going down or up, then how long to wait before the next step.
+//! One of Ectodeck's own macros can also do one of Ectodeck's jobs as a step,
+//! {job, after}: a device's profile switched, a screen job, or another of its
+//! macros played (Grant: "build it into the macro editor instead to allow
+//! adding actions and other macros").
 
 use std::collections::HashMap;
 
@@ -53,6 +57,72 @@ pub use crate::z10::step_name;
 fn is_media(st: &Value) -> bool {
     st.get("media").is_some()
 }
+
+/// A step that does one of Ectodeck's jobs (jobs.rs), by its id.
+pub fn is_job(st: &Value) -> bool {
+    st.get("job").is_some()
+}
+
+pub fn job_of(st: &Value) -> Option<crate::jobs::Job> {
+    st.get("job").and_then(Value::as_str).and_then(crate::jobs::Job::of)
+}
+
+/// A step in words: its key's or media key's name, or its job's, as the
+/// jobs' names say it now.
+pub fn step_words(st: &Value, names: &crate::jobs::Names) -> String {
+    match job_of(st) {
+        Some(j) => names.of(&j),
+        None if is_job(st) => "An action Ectodeck no longer knows".into(),
+        None => step_name(st),
+    }
+}
+
+/// A step that plays another of Ectodeck's macros, and which.
+pub fn macro_of(st: &Value) -> Option<u32> {
+    match job_of(st) {
+        Some(crate::jobs::Job::Macro { n, .. }) => Some(n),
+        _ => None,
+    }
+}
+
+/// Whether Ectodeck's macro `n` plays `target` among its steps, itself or
+/// through the macros it plays (`seen` keeps a loop from going round).
+pub fn plays_macro(n: u32, target: u32, seen: &mut Vec<u32>) -> bool {
+    if n == target {
+        return true;
+    }
+    if seen.contains(&n) {
+        return false;
+    }
+    seen.push(n);
+    let Some(m) = crate::library::get(n) else { return false };
+    m["steps"].as_array().is_some_and(|st| st.iter().filter_map(macro_of).any(|k| plays_macro(k, target, seen)))
+}
+
+/// A macro's steps as Ectodeck's player plays them: each other macro it plays
+/// put in its place, as deep as they go, its wait after carried onto the last
+/// of what it put in; one that would play a macro already being played (a
+/// macro playing itself, directly or through others) is left out where it
+/// would be. What is left is keys, waits and jobs.
+pub fn flatten(steps: &[Value], playing: &mut Vec<u32>) -> Vec<Value> {
+    let mut out = Vec::new();
+    for st in steps {
+        let Some(n) = macro_of(st) else {
+            out.push(st.clone());
+            continue;
+        };
+        let Some(m) = crate::library::get(n).filter(|_| !playing.contains(&n)) else { continue };
+        playing.push(n);
+        let at = out.len();
+        out.extend(flatten(m["steps"].as_array().map_or(&[][..], |v| v.as_slice()), playing));
+        playing.pop();
+        if delay(st) > 0 && out.len() > at {
+            let last = out.len() - 1;
+            out[last]["after"] = json!(delay(&out[last]) + delay(st));
+        }
+    }
+    out
+}
 fn step_key(st: &Value) -> String {
     if is_media(st) { format!("m{}", st["media"]) } else { format!("k{}", st["key"]) }
 }
@@ -66,7 +136,9 @@ pub fn bytes(steps: &[Value]) -> usize {
     steps.iter().map(|s| if is_media(s) { 3 } else { 1 } + 3).sum()
 }
 
-pub fn describe(steps: &[Value]) -> String {
+/// A macro in a few words: the keys it presses together, then each job it
+/// does, in order, and whether it waits between its steps.
+pub fn describe(steps: &[Value], names: &crate::jobs::Names) -> String {
     if steps.is_empty() {
         return "No steps yet".into();
     }
@@ -77,7 +149,12 @@ pub fn describe(steps: &[Value]) -> String {
             held.push(n);
         }
     }
-    held.join(" + ") + if steps.iter().any(|s| delay(s) > 0) { ", with timing" } else { "" }
+    let mut parts: Vec<String> = Vec::new();
+    if !held.is_empty() {
+        parts.push(held.join(" + "));
+    }
+    parts.extend(steps.iter().filter(|s| is_job(s)).map(|s| step_words(s, names)));
+    parts.join(", ") + if steps.iter().any(|s| delay(s) > 0) { ", with timing" } else { "" }
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -144,6 +221,9 @@ pub struct Editor {
     /// last said, and the names of those profiles by their places
     pub elsewhere: Vec<Elsewhere>,
     pub names: Vec<String>,
+    /// the words Ectodeck's jobs are said by (the devices' profiles, its
+    /// macros), as the page last said them, for the steps that do one
+    pub jobs: crate::jobs::Names,
     pub drafts: HashMap<u32, Draft>,
     pub current: Option<u32>,
     pub sel_step: Option<usize>,
@@ -161,6 +241,7 @@ impl Editor {
             lib,
             elsewhere: Vec::new(),
             names: Vec::new(),
+            jobs: crate::jobs::Names::default(),
             drafts: HashMap::new(),
             current: None,
             sel_step: None,
@@ -393,6 +474,12 @@ impl Editor {
         self.insert_at(page, vec![a, b]);
     }
 
+    /// One of Ectodeck's jobs added as a step, by its id: done once, as the
+    /// macro reaches it.
+    pub fn insert_job(&mut self, page: &Page, id: &str) {
+        self.insert_at(page, vec![json!({ "job": id, "after": 0 })]);
+    }
+
     pub fn insert_wait(&mut self, page: &Page) {
         let ins = self.ins;
         let Some(n) = self.current else { return };
@@ -549,11 +636,22 @@ pub fn chain(ed: &Editor, d: &Draft, locked: bool, width: f32) -> (Vec<Cell>, f3
         *x += c.w;
         cells.push(c);
     };
+    // (a key's step has its name and which way it goes; a media key's, a
+    // note before it; a job's, its own mark and no way to go: 2 a job on a
+    // device or the screen, 3 another macro played)
     let step = |st: &Value, i: usize, on: bool, id: i32| -> Cell {
         let media = is_media(st);
-        let name = step_name(st);
-        let w = 11.0 + if media { text::width(400, 12.0, "♫") + 6.0 } else { 0.0 } + text::width(500, 13.0, &name) + 6.0 + text::width(500, 12.5, if down(st) { "↓" } else { "↑" }) + 11.0;
-        Cell { kind: piece::STEP, text: name.into(), on, value: if down(st) { 1.0 } else { 0.0 }, style: if media { 1 } else { 0 }, id, index: i as i32, ..cell(0, 0.0, 0.0, w, line) }
+        let name = step_words(st, &ed.jobs);
+        let style = if macro_of(st).is_some() { 3 } else if is_job(st) { 2 } else if media { 1 } else { 0 };
+        let mark = match style {
+            1 => text::width(400, 12.0, "♫") + 6.0,
+            2 => text::width(400, 12.0, "◆") + 6.0,
+            3 => text::width(400, 12.0, "▶") + 6.0,
+            _ => 0.0,
+        };
+        let way = if style >= 2 { 0.0 } else { 6.0 + text::width(500, 12.5, if down(st) { "↓" } else { "↑" }) };
+        let w = 11.0 + mark + text::width(500, 13.0, &name) + way + 11.0;
+        Cell { kind: piece::STEP, text: name.into(), on, value: if down(st) { 1.0 } else { 0.0 }, style, id, index: i as i32, ..cell(0, 0.0, 0.0, w, line) }
     };
     let wait = |ms: u64, i: usize, editing: bool, id: i32| -> Cell {
         if editing {
@@ -630,5 +728,48 @@ pub fn profiles_text(ps: &[u8], name: impl Fn(u8) -> String) -> String {
         0 => String::new(),
         1 => names[0].clone(),
         n => format!("{} and {}", names[..n - 1].join(", "), names[n - 1]),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A macro with keys and jobs in a few words: the keys it presses
+    /// together, then each job, as the devices' profiles are called now.
+    #[test]
+    fn a_macro_with_jobs_says_them() {
+        let names = crate::jobs::Names { keyboard: vec![(2, "FPS Gaming".into())], mouse: vec![("pa".into(), "Gaming".into())], ..Default::default() };
+        let k = |key: &str, down: bool| json!({ "key": key, "down": down, "after": 0 });
+        let steps = vec![k("LeftCtrl", true), k("T", true), k("T", false), k("LeftCtrl", false), json!({ "job": "keyboard-profile:2", "after": 0 }), json!({ "job": "mouse-profile:pa", "after": 0 })];
+        assert_eq!(describe(&steps, &names), "Left Ctrl + T, Keyboard: FPS Gaming, Mouse: Gaming");
+        assert_eq!(describe(&steps[4..], &names), "Keyboard: FPS Gaming, Mouse: Gaming");
+        assert_eq!(step_words(&json!({ "job": "mouse-profile:gone" }), &names), "Mouse: a deleted profile");
+        assert_eq!(step_words(&json!({ "job": "nonsense" }), &names), "An action Ectodeck no longer knows");
+    }
+
+    /// The macros a macro plays are put in their places for the player, as
+    /// deep as they go, each one's wait carried onto what it put in; one
+    /// that would play a macro already playing (itself, directly or through
+    /// another) is left out, and nothing loops.
+    #[test]
+    fn a_macro_plays_the_macros_in_it_but_never_itself() {
+        let _one = crate::library::TESTS.lock().unwrap_or_else(|p| p.into_inner());
+        let k = |key: &str, down: bool| json!({ "key": key, "down": down, "after": 0 });
+        let m = |n: u32, after: u64| json!({ "job": format!("macro:{n}:once"), "after": after });
+        crate::library::set(61, "A", vec![k("A", true), k("A", false)]);
+        crate::library::set(62, "A then a profile", vec![m(61, 30), json!({ "job": "keyboard-profile:2", "after": 0 })]);
+        crate::library::set(63, "Itself", vec![m(63, 0), k("C", true), k("C", false)]);
+        crate::library::set(64, "One way round", vec![m(65, 0)]);
+        crate::library::set(65, "The other way", vec![m(64, 0), k("B", true), k("B", false)]);
+        let flat = |n: u32| flatten(crate::library::get(n).unwrap()["steps"].as_array().unwrap(), &mut vec![n]);
+        assert_eq!(flat(62), [k("A", true), json!({ "key": "A", "down": false, "after": 30 }), json!({ "job": "keyboard-profile:2", "after": 0 })]);
+        assert_eq!(flat(63), [k("C", true), k("C", false)], "it never plays itself");
+        assert_eq!(flat(64), [k("B", true), k("B", false)], "nor round through another");
+        assert!(plays_macro(62, 61, &mut Vec::new()) && !plays_macro(61, 62, &mut Vec::new()));
+        assert!(plays_macro(64, 65, &mut Vec::new()) && plays_macro(65, 64, &mut Vec::new()));
+        for n in 61..=65 {
+            crate::library::delete(n);
+        }
     }
 }

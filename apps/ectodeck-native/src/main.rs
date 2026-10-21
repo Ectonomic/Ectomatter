@@ -673,7 +673,11 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         }
     }
     // ECTODECK_NATIVE_MACROS=N: the Macro Editor's window instead, open on macro N
+    // (with the mouse's profiles ECTODECK_NATIVE_PROFILES names, for its actions)
     if let Some(n) = std::env::var("ECTODECK_NATIVE_MACROS").ok().and_then(|v| v.parse::<u32>().ok()) {
+        if let Some(s) = std::env::var_os("ECTODECK_NATIVE_PROFILES").and_then(|p| profiles::Store::read_only(p.into())) {
+            front.mouse.profiles = Some(s);
+        }
         return snap_macros(front, made, n, path);
     }
     // ECTODECK_NATIVE_LAYOUTS=N: the screen layout editor's window instead, open on layout N
@@ -1912,6 +1916,18 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         want: None,
         kept: Kept::default(),
     };
+    // the jobs Ectodeck's macros do as steps (a profile switched, a screen
+    // job), done here as their player reaches them on its own thread
+    let (jobs_tx, jobs_rx) = calloop::channel::channel::<String>();
+    event_loop
+        .handle()
+        .insert_source(jobs_rx, |e, _, app: &mut App| {
+            if let calloop::channel::Event::Msg(id) = e {
+                app.front.macro_job(&id);
+            }
+        })
+        .unwrap();
+    app.front.macro_jobs = Some(jobs_tx);
     // the tray, which the window closes into
     // the screen, played by Ectodeck while it controls the keyboard
     if controlled {

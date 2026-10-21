@@ -673,8 +673,10 @@ pub struct Front {
     /// leaves the front (0 the keyboard's by its number, 1 the mouse's by its place)
     front_apps: crate::front_app::Seen,
     follow_back: [Option<usize>; 2],
-    /// Ectodeck's macros played, for the controls given one (made when first needed)
+    /// Ectodeck's macros played, for the controls given one (made when first
+    /// needed), and where its steps' jobs come back to be done (main.rs)
     typist: Option<crate::typist::Player>,
+    pub macro_jobs: Option<smithay_client_toolkit::reexports::calloop::channel::Sender<String>>,
     /// a slider set to Nothing because the other took its job: the job it had
     idled: [Option<String>; 2],
     last_sliders: Option<serde_json::Value>,
@@ -1040,6 +1042,7 @@ impl Front {
             front_apps: crate::front_app::Seen::load(),
             follow_back: [None, None],
             typist: None,
+            macro_jobs: None,
             idled: crate::uistate::get("slider_idled").and_then(|v| serde_json::from_value(v).ok()).unwrap_or([None, None]),
             last_sliders: None,
             held: None,
@@ -4319,8 +4322,12 @@ impl Front {
     /// Where Ectodeck's macros run, for the Macro Editor's library of them:
     /// each mouse profile's buttons given one, and how each plays there.
     pub fn macros_elsewhere(&mut self) {
+        // (the words the steps that do a job say it by: the devices' profiles, the macros)
+        let jobs = self.job_names();
         let Some(m) = &mut self.macros else { return };
         m.mouse_holds = self.mouse.profiles.is_some();
+        m.ed.jobs = jobs.clone();
+        m.other.jobs = jobs;
         let (mut runs, mut names) = (Vec::new(), Vec::new());
         if let Some(store) = &self.mouse.profiles {
             for (pi, p) in store.list.iter().enumerate() {
@@ -4434,13 +4441,24 @@ impl Front {
             self.run_job(&j, down);
             return;
         };
-        let player = self.typist.get_or_insert_with(crate::typist::Player::start);
+        let jobs = self.macro_jobs.clone();
+        let player = self.typist.get_or_insert_with(|| crate::typist::Player::start(jobs));
         if !down {
             player.up(control);
             return;
         }
+        // (the macros it plays put in their places: the player plays keys, waits and jobs)
         if let Some(m) = crate::library::get(n) {
-            player.down(control, m["steps"].as_array().cloned().unwrap_or_default(), plays);
+            let steps = crate::macros::flatten(m["steps"].as_array().map_or(&[][..], |v| v.as_slice()), &mut vec![n]);
+            player.down(control, steps, plays);
+        }
+    }
+
+    /// A job one of Ectodeck's macros does as a step, by its id, as its
+    /// player reaches it: done as a control given the job would do it.
+    pub fn macro_job(&mut self, id: &str) {
+        if let Some(j) = crate::jobs::Job::of(id).filter(|j| !matches!(j, crate::jobs::Job::Macro { .. })) {
+            self.run_job(&j, true);
         }
     }
 

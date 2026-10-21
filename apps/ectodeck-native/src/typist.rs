@@ -3,6 +3,8 @@
 //! they were typed, for a device that can't play macros itself, as the
 //! Sensei 310's buttons can't. A macro plays on a thread of its own, its
 //! waits as its steps say, and whatever it holds down is let go when it stops.
+//! A step that does one of Ectodeck's jobs (a profile switched, a screen job)
+//! is handed to the window, which does it, as the macro reaches it.
 
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -179,12 +181,19 @@ pub struct Player {
 }
 
 impl Player {
-    /// The player, with its keyboard made when it first plays.
-    pub fn start() -> Player {
+    /// The player, with its keyboard made when it first plays, and where it
+    /// hands the jobs its macros' steps do (their ids, jobs.rs).
+    pub fn start(jobs: Option<smithay_client_toolkit::reexports::calloop::channel::Sender<String>>) -> Player {
         let (tell, told) = mpsc::channel::<Cmd>();
         std::thread::Builder::new()
             .name("macros".into())
-            .spawn(move || play(told, Keyboard::new))
+            .spawn(move || {
+                play(told, Keyboard::new, |id: &str| {
+                    if let Some(j) = &jobs {
+                        let _ = j.send(id.to_string());
+                    }
+                })
+            })
             .expect("the macro player's thread");
         Player { tell }
     }
@@ -216,8 +225,9 @@ struct Playing {
     holds: bool,
 }
 
-/// The player's thread: one macro at a time, the newest press taking over.
-fn play<K: Keys>(told: mpsc::Receiver<Cmd>, make: impl Fn() -> Result<K, String>) {
+/// The player's thread: one macro at a time, the newest press taking over;
+/// each job a step does handed on (`jobs`, its id) as the macro reaches it.
+fn play<K: Keys>(told: mpsc::Receiver<Cmd>, make: impl Fn() -> Result<K, String>, jobs: impl Fn(&str)) {
     let mut kb: Option<K> = None;
     let mut now: Option<Playing> = None;
     loop {
@@ -242,7 +252,9 @@ fn play<K: Keys>(told: mpsc::Receiver<Cmd>, make: impl Fn() -> Result<K, String>
                 if again || steps.is_empty() {
                     continue;
                 }
-                if kb.is_none() {
+                // (the keyboard made for a macro that types: one that only does
+                // jobs plays without it)
+                if kb.is_none() && steps.iter().any(|s| code_of(s).is_some()) {
                     match make() {
                         Ok(k) => kb = Some(k),
                         Err(e) => {
@@ -270,13 +282,14 @@ fn play<K: Keys>(told: mpsc::Receiver<Cmd>, make: impl Fn() -> Result<K, String>
         }
         // the steps due now
         let Some(p) = &mut now else { continue };
-        let Some(k) = &kb else { continue };
         while Instant::now() >= p.until {
             let Some(step) = p.steps.get(p.at).cloned() else {
                 // a pass done: again, or the end
                 p.left = p.left.map(|l| l - 1);
                 if p.left == Some(0) {
-                    let_go(k, &p.held);
+                    if let Some(k) = &kb {
+                        let_go(k, &p.held);
+                    }
                     now = None;
                     break;
                 }
@@ -289,7 +302,9 @@ fn play<K: Keys>(told: mpsc::Receiver<Cmd>, make: impl Fn() -> Result<K, String>
             };
             p.at += 1;
             let wait = step.get("wait").and_then(Value::as_u64).unwrap_or(0) + step.get("after").and_then(Value::as_u64).unwrap_or(0);
-            if let Some(code) = code_of(&step) {
+            if let Some(id) = step.get("job").and_then(Value::as_str) {
+                jobs(id);
+            } else if let (Some(code), Some(k)) = (code_of(&step), &kb) {
                 let down = step["down"].as_bool().unwrap_or(false);
                 if k.key(code, down).is_ok() {
                     if down {
@@ -354,15 +369,62 @@ mod tests {
     /// The player on a test keyboard: what to tell it, what it typed, and
     /// whether it stopped once there was nothing more to tell it.
     fn player() -> (mpsc::Sender<Cmd>, Typed, mpsc::Receiver<()>) {
+        let (tell, typed, stopped, _) = player_with_jobs();
+        (tell, typed, stopped)
+    }
+
+    /// The same, with the jobs its steps hand on, in order.
+    #[allow(clippy::type_complexity)]
+    fn player_with_jobs() -> (mpsc::Sender<Cmd>, Typed, mpsc::Receiver<()>, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
         let typed = Typed::default();
+        let jobs = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let (tell, told) = mpsc::channel();
         let (done, stopped) = mpsc::channel();
-        let t = typed.clone();
+        let (t, j) = (typed.clone(), jobs.clone());
         std::thread::spawn(move || {
-            play(told, move || Ok(t.clone()));
+            play(told, move || Ok(t.clone()), move |id: &str| j.lock().unwrap().push(id.to_string()));
             let _ = done.send(());
         });
-        (tell, typed, stopped)
+        (tell, typed, stopped, jobs)
+    }
+
+    /// A step that does one of Ectodeck's jobs is handed on as the macro
+    /// reaches it, between the keys around it, and types nothing.
+    #[test]
+    fn a_macros_jobs_are_handed_on_in_order() {
+        let (tell, typed, stopped, jobs) = player_with_jobs();
+        let steps = vec![
+            json!({ "job": "keyboard-profile:2", "after": 0 }),
+            json!({ "key": "A", "down": true, "after": 0 }),
+            json!({ "key": "A", "down": false, "after": 150 }),
+            json!({ "job": "mouse-profile:pq", "after": 0 }),
+        ];
+        tell.send(Cmd::Down("b".into(), steps, Plays::Once)).unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        assert_eq!(*jobs.lock().unwrap(), ["keyboard-profile:2"], "the second job waits for the wait before it");
+        assert_eq!(typed.now(), [(30, true), (30, false)]);
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(*jobs.lock().unwrap(), ["keyboard-profile:2", "mouse-profile:pq"]);
+        drop(tell);
+        stopped.recv_timeout(Duration::from_secs(2)).expect("the player stops");
+    }
+
+    /// A macro that only does jobs plays where Ectodeck can't type (no
+    /// keyboard can be made), as it types nothing; one that types waits for
+    /// the keyboard, as before.
+    #[test]
+    fn a_macro_of_jobs_alone_needs_no_keyboard() {
+        let jobs = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (tell, told) = mpsc::channel();
+        let j = jobs.clone();
+        let t = std::thread::spawn(move || play::<Typed>(told, || Err("no keyboard here".into()), move |id: &str| j.lock().unwrap().push(id.to_string())));
+        tell.send(Cmd::Down("a".into(), vec![json!({ "job": "keyboard-profile:2", "after": 0 }), json!({ "job": "mouse-profile:pq", "after": 0 })], Plays::Once)).unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        tell.send(Cmd::Down("b".into(), vec![json!({ "job": "keyboard-profile:3", "after": 0 }), json!({ "key": "A", "down": true, "after": 0 })], Plays::Once)).unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        assert_eq!(*jobs.lock().unwrap(), ["keyboard-profile:2", "mouse-profile:pq"]);
+        drop(tell);
+        t.join().unwrap();
     }
 
     /// Each way a macro plays: once, a number of times, while its control is
@@ -422,7 +484,7 @@ mod tests {
         // the shift is never let go by the steps: the player lets go of it
         let (tell, told) = mpsc::channel();
         let made = std::sync::Mutex::new(Some(kb));
-        let t = std::thread::spawn(move || play(told, || made.lock().unwrap().take().ok_or_else(|| "made once".to_string())));
+        let t = std::thread::spawn(move || play(told, || made.lock().unwrap().take().ok_or_else(|| "made once".to_string()), |_: &str| {}));
         tell.send(Cmd::Down("test".into(), steps, Plays::Times(2))).unwrap();
         std::thread::sleep(Duration::from_millis(200));
         // (read while the keyboard still exists)

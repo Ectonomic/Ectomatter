@@ -62,6 +62,9 @@ enum Kind {
     Plays,
     Macro,
     Libs,
+    /// one of Ectodeck's jobs for a step: a device's profile or a screen job,
+    /// or (`macros`) another of its macros; added, or in place of step `change`
+    Jobs { macros: bool, change: Option<usize> },
 }
 
 #[derive(Clone)]
@@ -80,6 +83,10 @@ enum Pick {
     Duplicate,
     Delete,
     Lib(Lib),
+    /// a job for a step, by its id; and a step's job to change (the menu of
+    /// macros, or of the devices' jobs)
+    Job(String),
+    ChangeJob(usize, bool),
 }
 
 struct Menu {
@@ -400,6 +407,8 @@ impl MacroPage {
                     }
                     2 | 3 => self.open_menu(page, Kind::Keys { media: k == 3, change: None }, (x, y, h), 260.0, 0.0, false),
                     4 => self.ed.insert_wait(page),
+                    // (an action, or another macro: Ectodeck's own macros only)
+                    6 | 7 if self.ed.lib == Lib::Ectodeck => self.open_menu(page, Kind::Jobs { macros: k == 7, change: None }, (x, y, h), 280.0, 0.0, false),
                     5 => {
                         if self.ed.rec.is_some() {
                             self.stop_recording(page, true, None);
@@ -622,11 +631,98 @@ impl MacroPage {
                     picks.push(p);
                 }
             }
+            Kind::Step(i) if d.steps.get(i).is_some_and(macros::is_job) => {
+                let st = &d.steps[i];
+                let other = macros::macro_of(st).is_some();
+                rows.push(row(1, &macros::step_words(st, &self.ed.jobs), false));
+                picks.push(Pick::Nothing);
+                rows.push(row(0, if other { "Change macro ›" } else { "Change action ›" }, false));
+                picks.push(Pick::ChangeJob(i, other));
+                rows.push(row(2, "", false));
+                picks.push(Pick::Nothing);
+                rows.push(row(4, "Remove", false));
+                picks.push(Pick::Remove(i));
+            }
+            Kind::Jobs { macros: true, change } => {
+                // Ectodeck's other macros, none that plays this one (it would play itself)
+                let current = change.and_then(|i| d.steps.get(i)).and_then(macros::macro_of);
+                rows.push(row(1, "Ectodeck’s macros", false));
+                picks.push(Pick::Nothing);
+                let mut any = false;
+                for (m, name) in &self.ed.jobs.macros {
+                    if *m == n || macros::plays_macro(*m, n, &mut Vec::new()) {
+                        continue;
+                    }
+                    any = true;
+                    let j = crate::jobs::Job::Macro { n: *m, plays: ectodeck_protocol::Plays::Once };
+                    rows.push(row(0, name, current == Some(*m)));
+                    picks.push(Pick::Job(j.id()));
+                }
+                if !any {
+                    rows.push(row(3, "No other macros yet.", false));
+                    picks.push(Pick::Nothing);
+                }
+            }
+            Kind::Jobs { macros: false, change } => {
+                // each device's jobs, as they sit on the desk: its profiles, the
+                // next and the one before, and the keyboard's screen jobs
+                use crate::jobs::{Job, To};
+                use ectodeck_protocol::Jump;
+                let current = change.and_then(|i| d.steps.get(i)).and_then(macros::job_of);
+                let names = &self.ed.jobs;
+                let mut order: Vec<&str> = names.order.clone();
+                for dev in [crate::jobs::KEYBOARD, crate::jobs::MOUSE] {
+                    if !order.contains(&dev) {
+                        order.push(dev);
+                    }
+                }
+                let push = |rows: &mut Vec<MenuRow>, picks: &mut Vec<Pick>, label: &str, j: Job| {
+                    rows.push(row(0, label, current.as_ref() == Some(&j)));
+                    picks.push(Pick::Job(j.id()));
+                };
+                for dev in order {
+                    if dev == crate::jobs::KEYBOARD && !names.keyboard.is_empty() {
+                        if !rows.is_empty() {
+                            rows.push(row(2, "", false));
+                            picks.push(Pick::Nothing);
+                        }
+                        rows.push(row(1, "Keyboard", false));
+                        picks.push(Pick::Nothing);
+                        for (k, name) in &names.keyboard {
+                            push(&mut rows, &mut picks, name, Job::KeyboardProfile(Jump::To(*k as u32)));
+                        }
+                        push(&mut rows, &mut picks, "Next profile", Job::KeyboardProfile(Jump::Next));
+                        push(&mut rows, &mut picks, "Previous profile", Job::KeyboardProfile(Jump::Previous));
+                        for code in [crate::z10::NEXT_LAYOUT, crate::z10::PREV_LAYOUT, crate::z10::NEXT_PLAYLIST, crate::z10::PREV_PLAYLIST] {
+                            let j = Job::Screen(code);
+                            let words = names.of(&j);
+                            push(&mut rows, &mut picks, &words, j);
+                        }
+                    }
+                    if dev == crate::jobs::MOUSE && !names.mouse.is_empty() {
+                        if !rows.is_empty() {
+                            rows.push(row(2, "", false));
+                            picks.push(Pick::Nothing);
+                        }
+                        rows.push(row(1, "Mouse", false));
+                        picks.push(Pick::Nothing);
+                        for (id, name) in &names.mouse {
+                            push(&mut rows, &mut picks, name, Job::MouseProfile(To::Id(id.clone())));
+                        }
+                        push(&mut rows, &mut picks, "Next profile", Job::MouseProfile(To::Next));
+                        push(&mut rows, &mut picks, "Previous profile", Job::MouseProfile(To::Previous));
+                    }
+                }
+                if rows.is_empty() {
+                    rows.push(row(3, "No device is here to act on.", false));
+                    picks.push(Pick::Nothing);
+                }
+            }
             Kind::Step(i) => {
                 let Some(st) = d.steps.get(i) else { return };
                 let down = st["down"].as_bool().unwrap_or(false);
                 let media = st.get("media").is_some();
-                rows.push(row(1, &macros::step_name(st), false));
+                rows.push(row(1, &macros::step_words(st, &self.ed.jobs), false));
                 picks.push(Pick::Nothing);
                 rows.push(row(0, "Press ↓", down));
                 picks.push(Pick::Down(i, true));
@@ -796,6 +892,29 @@ impl MacroPage {
                 if let Some(d) = self.current_draft(page) {
                     d.plays = Some((macros::with_count(v, count), count));
                 }
+            }
+            Pick::Job(id) => {
+                let change = match m.kind {
+                    Kind::Jobs { change, .. } => change,
+                    _ => None,
+                };
+                self.close_menu(false);
+                match change {
+                    Some(i) => {
+                        if let Some(st) = self.current_draft(page).and_then(|d| d.steps.get_mut(i)) {
+                            st["job"] = json!(id);
+                        }
+                    }
+                    None => self.ed.insert_job(page, &id),
+                }
+            }
+            Pick::ChangeJob(i, macros) => {
+                // the next menu hangs from the same place
+                self.menu.take();
+                self.menu = Some(Menu { kind: Kind::Jobs { macros, change: Some(i) }, anchor, width: 280.0, right: 0.0, let_go, query: String::new(), picks: Vec::new() });
+                self.ui.set_menu_query("".into());
+                self.build_menu(page);
+                self.place_menu();
             }
             Pick::Lib(lib) => {
                 self.close_menu(false);
@@ -1124,7 +1243,7 @@ impl MacroPage {
                 lib: l,
                 n: n as i32,
                 name: name.into(),
-                sub: if d.is_some_and(|d| d.is_new) { "Not saved yet".into() } else { macros::describe(&steps).into() },
+                sub: if d.is_some_and(|d| d.is_new) { "Not saved yet".into() } else { macros::describe(&steps, &ed.jobs).into() },
                 timed: steps.iter().any(|s| s["after"].as_u64().unwrap_or(0) > 0),
                 current: ed.current == Some(n),
                 dirty: ed.dirty(page, n),
@@ -1205,12 +1324,15 @@ impl MacroPage {
         ui.set_chain_h(h);
         ui.set_chain_empty(if eff.is_empty() && live == 0 { if rec { 2 } else { 1 } } else { 0 });
         // (a recording is typed on the keyboard, for either library, while there's one)
+        // (Ectodeck's own macros also take actions and other macros)
         let hint = if rec {
             "Type the keys on your Z10. Press Stop to finish."
-        } else if page.dev.is_some() {
+        } else if page.dev.is_some() && keyboard {
             "Press Record and type the keys on your Z10, or add keys, media keys and waits with the buttons below."
+        } else if page.dev.is_some() {
+            "Press Record and type the keys on your Z10, or add keys, media keys, waits, actions and other macros with the buttons below."
         } else {
-            "Add keys, media keys and waits with the buttons below."
+            "Add keys, media keys, waits, actions and other macros with the buttons below."
         };
         let lines: Vec<SharedString> = crate::text::wrap(400, 13.0, hint, 440.0).into_iter().map(Into::into).collect();
         ui.set_empty_lines(ModelRc::new(VecModel::from(lines)));
@@ -1232,6 +1354,8 @@ impl MacroPage {
         ui.set_can_key(!off && left >= 8);
         ui.set_can_media(!off && left >= 12);
         ui.set_can_wait(!off && !d.steps.is_empty());
+        ui.set_jobs_shown(!keyboard);
+        ui.set_can_jobs(!off);
         ui.set_can_record(!locked && left >= 4 && page.dev.is_some());
         if let Some(r) = &ed.rec {
             ui.set_rec_clock(macros::clock(r.elapsed).into());
@@ -1278,6 +1402,75 @@ mod tests {
     impl slint::platform::Platform for Nowhere {
         fn create_window_adapter(&self) -> Result<Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
             Ok(slint::platform::software_renderer::MinimalSoftwareWindow::new(slint::platform::software_renderer::RepaintBufferType::NewBuffer))
+        }
+    }
+
+    /// One of Ectodeck's macros takes actions and other macros as steps:
+    /// + Action lists each device's profiles and the screen's jobs, + Macro
+    /// the other macros (not this one, nor one that plays it), each chosen
+    /// goes in as a step, the chain shows them as jobs, and a job's step has
+    /// its own menu. The keyboard's macros, which it plays itself, offer neither.
+    #[test]
+    fn ectodecks_macros_take_actions_and_other_macros() {
+        let _one = crate::library::TESTS.lock().unwrap_or_else(|p| p.into_inner());
+        let _ = slint::platform::set_platform(Box::new(Nowhere));
+        crate::library::set(81, "Gaming on", vec![]);
+        crate::library::set(82, "Plays it", vec![json!({ "job": "macro:81:once", "after": 0 })]);
+        crate::library::set(83, "Another", vec![json!({ "key": "A", "down": true, "after": 0 }), json!({ "key": "A", "down": false, "after": 0 })]);
+        let mut page = Page::new();
+        page.dev = Some(json!({ "macros": {} }));
+        let mut mp = MacroPage::new(MacroWindow::new().unwrap(), slint::Image::default());
+        let names = crate::jobs::Names {
+            keyboard: vec![(1, "Studio".into()), (2, "FPS Gaming".into())],
+            mouse: vec![("pa".into(), "Studio".into()), ("pb".into(), "Gaming".into())],
+            macros: vec![(81, "Gaming on".into()), (82, "Plays it".into()), (83, "Another".into())],
+            order: vec![crate::jobs::KEYBOARD, crate::jobs::MOUSE],
+        };
+        mp.ed.jobs = names.clone();
+        mp.other.jobs = names;
+        mp.open(&page, Lib::Ectodeck, Some(81));
+        assert!(mp.ui.get_jobs_shown() && mp.ui.get_can_jobs());
+        let menu = |mp: &MacroPage| mp.ui.get_menu_rows().iter().map(|r| (r.kind, r.label.to_string())).collect::<Vec<_>>();
+        let choose = |mp: &mut MacroPage, page: &mut Page, label: &str, after: usize| {
+            let i = mp.ui.get_menu_rows().iter().enumerate().skip(after).find(|(_, r)| r.label == label).map(|(i, _)| i).unwrap();
+            mp.ui.invoke_menu_chose(i as i32);
+            mp.act(page, &|_| {});
+        };
+        // + Action: the keyboard's profiles and screen jobs, then the mouse's
+        mp.ui.invoke_tool(6, 0.0, 0.0, 30.0);
+        mp.act(&mut page, &|_| {});
+        let rows = menu(&mp);
+        assert_eq!(rows[..5], [(1, "Keyboard".into()), (0, "Studio".into()), (0, "FPS Gaming".into()), (0, "Next profile".into()), (0, "Previous profile".into())]);
+        let mouse = rows.iter().position(|r| *r == (1, "Mouse".to_string())).unwrap();
+        assert!(rows[..mouse].contains(&(0, "Screen: next layout".to_string())));
+        assert_eq!(rows[mouse + 1..mouse + 3], [(0, "Studio".into()), (0, "Gaming".into())]);
+        choose(&mut mp, &mut page, "FPS Gaming", 0);
+        mp.ui.invoke_tool(6, 0.0, 0.0, 30.0);
+        mp.act(&mut page, &|_| {});
+        choose(&mut mp, &mut page, "Gaming", mouse);
+        let steps = mp.ed.drafts[&81].steps.clone();
+        assert_eq!(steps, [json!({ "job": "keyboard-profile:2", "after": 0 }), json!({ "job": "mouse-profile:pb", "after": 0 })]);
+        // the chain shows them as jobs, in their words
+        let chips: Vec<(i32, String)> = mp.chain.iter().filter(|c| c.kind == piece::STEP).map(|c| (c.style, c.text.to_string())).collect();
+        assert_eq!(chips, [(2, "Keyboard: FPS Gaming".into()), (2, "Mouse: Gaming".into())]);
+        // + Macro: the other macros, not this one nor the one that plays it
+        mp.ui.invoke_tool(7, 0.0, 0.0, 30.0);
+        mp.act(&mut page, &|_| {});
+        assert_eq!(menu(&mp), [(1, "Ectodeck’s macros".to_string()), (0, "Another".to_string())]);
+        choose(&mut mp, &mut page, "Another", 0);
+        assert_eq!(mp.ed.drafts[&81].steps.last(), Some(&json!({ "job": "macro:83:once", "after": 0 })));
+        // a job's step has its own menu: change it, or take it out
+        mp.ui.invoke_chain_click(hit::STEP, 0, 0.0, 0.0, 29.0);
+        mp.act(&mut page, &|_| {});
+        assert_eq!(menu(&mp), [(1, "Keyboard: FPS Gaming".into()), (0, "Change action ›".into()), (2, "".into()), (4, "Remove".into())]);
+        choose(&mut mp, &mut page, "Change action ›", 0);
+        choose(&mut mp, &mut page, "Studio", 0);
+        assert_eq!(mp.ed.drafts[&81].steps[0], json!({ "job": "keyboard-profile:1", "after": 0 }));
+        // the keyboard's macros, which it plays itself, offer neither
+        mp.open(&page, Lib::Keyboard, None);
+        assert!(!mp.ui.get_jobs_shown());
+        for n in 81..=83 {
+            crate::library::delete(n);
         }
     }
 
