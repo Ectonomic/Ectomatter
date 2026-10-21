@@ -919,6 +919,13 @@ mod tests {
         let added = told.iter().find(|(m, _)| m == "device/added").map(|(_, p)| p.clone()).expect("device/added");
         assert_eq!(added["firmware"]["version"], "36.1");
         assert_eq!(added["controls"].as_array().unwrap().len(), 8);
+        // (what the frontend draws the mouse's settings from)
+        assert_eq!(added["kind"], "mouse");
+        assert_eq!(added["layout"]["device"][0]["show"], serde_json::json!(["cpi1", "cpi2"]));
+        assert_eq!(added["capabilities"]["lighting"]["effects"][3]["start"]["colors"], serde_json::json!(["#FF0000", "#00FF00", "#0000FF"]));
+        if let Ok(out) = std::env::var("ECTODECK_DESCRIPTION_OUT") {
+            std::fs::write(out, serde_json::to_vec_pretty(&added).unwrap()).unwrap();
+        }
         let s = core.call("settings/get", &serde_json::json!({ "device": "sensei310-1" })).unwrap();
         assert_eq!((s["values"]["cpi1"].as_u64(), s["values"]["cpi2"].as_u64()), (Some(800), Some(1600)));
         assert_eq!((s["known"]["cpi1"].as_bool(), s["known"]["polling"].as_bool()), (Some(true), Some(false)));

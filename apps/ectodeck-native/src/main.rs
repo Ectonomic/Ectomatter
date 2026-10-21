@@ -20,6 +20,7 @@ mod adapter;
 mod clipboard;
 mod core_host;
 mod cores;
+mod described;
 mod desk;
 mod device;
 mod display;

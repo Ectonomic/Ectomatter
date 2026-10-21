@@ -83,19 +83,13 @@ pub enum Ctl {
     SensorName,
     /// a link to Ectodeck's Settings, from the screen editor
     OpenSettings,
-    /// the mouse's page: a light's color and speed, the wheel copying the
-    /// logo, the two sensitivities, the polling rate
-    MouseColor,
-    /// one of a Color shift's colors
-    MouseColors,
-    MouseSpeed,
+    /// the mouse's page: the wheel copying the logo
     MouseSameWheel,
-    MouseCpi1,
-    MouseCpi2,
-    MousePolling,
+    /// a setting a core described (described.rs): which one the piece's id says
+    Described,
 }
 
-const CTLS: [Ctl; 59] = [
+const CTLS: [Ctl; 54] = [
     Ctl::None,
     Ctl::Color,
     Ctl::Colors,
@@ -148,13 +142,8 @@ const CTLS: [Ctl; 59] = [
     Ctl::MakeMain,
     Ctl::SensorName,
     Ctl::OpenSettings,
-    Ctl::MouseColor,
-    Ctl::MouseColors,
-    Ctl::MouseSpeed,
     Ctl::MouseSameWheel,
-    Ctl::MouseCpi1,
-    Ctl::MouseCpi2,
-    Ctl::MousePolling,
+    Ctl::Described,
 ];
 
 pub fn ctl(id: i32) -> Ctl {
@@ -368,7 +357,11 @@ impl Stack {
     }
     /// a slider, filled to its place in `fill`, its ends named under it
     pub(crate) fn slider(&mut self, c: Ctl, frac: f32, fill: slint::Color, ends: Option<(&str, &str)>) {
-        self.cells.push(Cell { value: frac, color: fill, id: id(c), ..cell(kind::FILLED, 16.0, self.y, self.inner(), 20.0) });
+        self.slider_at(id(c), frac, fill, ends);
+    }
+    /// the same, for a piece known by its id (a setting a core described)
+    pub(crate) fn slider_at(&mut self, id: i32, frac: f32, fill: slint::Color, ends: Option<(&str, &str)>) {
+        self.cells.push(Cell { value: frac, color: fill, id, ..cell(kind::FILLED, 16.0, self.y, self.inner(), 20.0) });
         self.y += 20.0;
         if let Some((l, r)) = ends {
             self.y += 4.0;
@@ -390,13 +383,16 @@ impl Stack {
     }
     /// colors as dots, 8 apart, wrapping; the one the picker is open on ringed
     pub(crate) fn dots(&mut self, c: Ctl, cols: &[[u8; 3]], open: Option<usize>, code: bool) {
+        self.dots_at(id(c), cols, open, code);
+    }
+    pub(crate) fn dots_at(&mut self, id: i32, cols: &[[u8; 3]], open: Option<usize>, code: bool) {
         let (mut x, mut y) = (16.0f32, self.y);
         for (j, col) in cols.iter().enumerate() {
             if x > 16.0 && x + 28.0 > self.w - 16.0 {
                 x = 16.0;
                 y += 36.0;
             }
-            self.cells.push(Cell { color: color(*col), on: open == Some(j), id: id(c), index: j as i32, ..cell(kind::COLOR_DOT, x, y, 28.0, 28.0) });
+            self.cells.push(Cell { color: color(*col), on: open == Some(j), id, index: j as i32, ..cell(kind::COLOR_DOT, x, y, 28.0, 28.0) });
             x += 36.0;
         }
         if code && cols.len() == 1 {
@@ -406,6 +402,9 @@ impl Stack {
     }
     /// a switch across the box: each choice its share, with its icon if it has one
     pub(crate) fn switch(&mut self, c: Ctl, opts: &[(&str, &str)], chosen: usize) {
+        self.switch_at(id(c), opts, chosen);
+    }
+    pub(crate) fn switch_at(&mut self, id: i32, opts: &[(&str, &str)], chosen: usize) {
         self.cells.push(Cell { style: 1, ..cell(kind::SEG, 16.0, self.y, self.inner(), 34.0) });
         let n = opts.len() as f32;
         let each = (self.inner() - 6.0 - 2.0 * (n - 1.0)) / n;
@@ -414,7 +413,7 @@ impl Stack {
                 text: (*name).into(),
                 lines: (*icon).into(),
                 on: j == chosen,
-                id: id(c),
+                id,
                 index: j as i32,
                 ..cell(kind::CHOICE, 16.0 + 3.0 + j as f32 * (each + 2.0), self.y + 3.0, each, 28.0)
             });
@@ -422,7 +421,10 @@ impl Stack {
         self.y += 34.0;
     }
     pub(crate) fn check(&mut self, c: Ctl, on: bool, label: &str) {
-        self.cells.push(Cell { on, id: id(c), text: label.into(), ..cell(kind::CHECKBOX, 16.0, self.y, 28.0 + text::width(400, 13.0, label), 20.0) });
+        self.check_at(id(c), on, label);
+    }
+    pub(crate) fn check_at(&mut self, id: i32, on: bool, label: &str) {
+        self.cells.push(Cell { on, id, text: label.into(), ..cell(kind::CHECKBOX, 16.0, self.y, 28.0 + text::width(400, 13.0, label), 20.0) });
         self.y += 20.0;
     }
     pub(crate) fn dropdown(&mut self, c: Ctl, shown: &str, open: bool) {

@@ -22,7 +22,7 @@ pub enum Ask {
     Key(String, Value),
     ResetKey(String),
     Light(String, Value),
-    Setting(String, u64),
+    Setting(String, Value),
     /// a whole profile put on the mouse (the core's profiles/apply)
     Apply(Value),
     /// the core told something (a button pressed): look now
@@ -568,7 +568,7 @@ impl Page {
             .map(|(i, pr)| crate::ProfileItem {
                 n: i as i32,
                 name: pr.name.as_str().into(),
-                sub: effect_name(pr.body["lighting"]["logo"]["effect"].as_str().unwrap_or("static")).into(),
+                sub: self.effect_label(pr.body["lighting"]["logo"]["effect"].as_str().unwrap_or("static")).into(),
                 active: i == p.active,
                 current: i == p.active,
                 ..Default::default()
@@ -642,8 +642,8 @@ impl Page {
         let v = self.light_of(l);
         match v["effect"].as_str() {
             Some("off") => None,
-            Some("colorshift") => Some(shift_colors(&v)[0]),
-            _ => Some(rgb(&v["params"]["color"]).unwrap_or([0xff, 0x10, 0x00])),
+            Some("colorshift") => Some(crate::described::value_of(&v["params"], "colors", &self.param_desc(&v, "colors")).get(0).and_then(rgb).unwrap_or([0xff, 0, 0])),
+            _ => Some(rgb(crate::described::value_of(&v["params"], "color", &self.param_desc(&v, "color"))).unwrap_or([0xff, 0x10, 0x00])),
         }
     }
 
@@ -692,14 +692,72 @@ impl Page {
         self.send(Ask::Key(BUTTONS[i].0.into(), on_mouse));
     }
 
-    pub fn setting(&self, id: &str) -> u64 {
-        self.state["settings"]["values"][id].as_u64().unwrap_or(0)
+    pub fn set_setting(&mut self, id: &str, v: Value) {
+        self.state["settings"]["values"][id] = v.clone();
+        self.keep_in_profile(|b| b["settings"][id] = v.clone());
+        self.send(Ask::Setting(id.into(), v));
     }
 
-    pub fn set_setting(&mut self, id: &str, v: u64) {
-        self.state["settings"]["values"][id] = json!(v);
-        self.keep_in_profile(|b| b["settings"][id] = json!(v));
-        self.send(Ask::Setting(id.into(), v));
+    // ------------------------------------------------------------ what the core describes
+
+    /// The effects the core offers the lights, as it describes them (before
+    /// it has, the mouse's own four, by name).
+    pub fn effects(&self) -> Vec<Value> {
+        self.state["device"]["capabilities"]["lighting"]["effects"]
+            .as_array()
+            .filter(|a| !a.is_empty())
+            .cloned()
+            .unwrap_or_else(|| EFFECTS.iter().map(|(id, label)| json!({ "id": id, "label": label })).collect())
+    }
+
+    /// One effect, as the core describes it.
+    pub fn effect_desc(&self, e: &str) -> Value {
+        self.effects().into_iter().find(|d| d["id"] == e).unwrap_or_else(|| json!({ "id": e, "label": e }))
+    }
+
+    pub fn effect_label(&self, e: &str) -> String {
+        self.effect_desc(e)["label"].as_str().unwrap_or(e).to_string()
+    }
+
+    /// A setting of the effect a light plays, as the core describes it.
+    fn param_desc(&self, l: &Value, id: &str) -> Value {
+        self.effect_desc(l["effect"].as_str().unwrap_or("static"))["params"][id].clone()
+    }
+
+    /// A setting the page drew from the core's description, by its piece: one
+    /// of the chosen light's effect's, or one of the mouse's own; its id,
+    /// description and value now.
+    pub fn described(&self, piece: crate::described::Piece) -> Option<(String, Value, Value)> {
+        match piece {
+            crate::described::Piece::Effect(k) => {
+                let l = self.light_of(self.light_name());
+                let e = self.effect_desc(l["effect"].as_str().unwrap_or("static"));
+                let (id, d) = crate::described::params(&e).get(k).cloned()?;
+                let v = crate::described::value_of(&l["params"], &id, &d).clone();
+                Some((id, d, v))
+            }
+            crate::described::Piece::Setting(k) => {
+                let (id, d) = crate::described::setting(&self.state["device"], k)?;
+                let v = crate::described::value_of(&self.state["settings"]["values"], &id, &d).clone();
+                Some((id, d, v))
+            }
+        }
+    }
+
+    /// One of those settings given a new value: on the chosen light, or the mouse.
+    pub fn set_described(&mut self, piece: crate::described::Piece, v: Value) {
+        let Some((id, ..)) = self.described(piece) else { return };
+        match piece {
+            crate::described::Piece::Effect(_) => {
+                let mut l = self.light_of(self.light_name());
+                if !l["params"].is_object() {
+                    l["params"] = json!({});
+                }
+                l["params"][&id] = v;
+                self.set_light(l);
+            }
+            crate::described::Piece::Setting(_) => self.set_setting(&id, v),
+        }
     }
 
     pub fn hint(&self) -> &'static str {
@@ -724,7 +782,7 @@ impl Page {
                 .map(|(i, (id, name))| {
                     let l = self.light_of(id);
                     let lit = self.lit(id);
-                    MouseRow { name: (*name).into(), job: effect_name(l["effect"].as_str().unwrap_or("static")).into(), chosen: i == self.light, rebound: false, swatch: color(lit.unwrap_or([0x2a, 0x2a, 0x30])), swatched: true }
+                    MouseRow { name: (*name).into(), job: self.effect_label(l["effect"].as_str().unwrap_or("static")).into(), chosen: i == self.light, rebound: false, swatch: color(lit.unwrap_or([0x2a, 0x2a, 0x30])), swatched: true }
                 })
                 .collect();
         }
@@ -796,57 +854,31 @@ impl Page {
 
     // ------------------------------------------------------------ Lighting, Performance, Settings
 
-    /// The chosen light's effect, by its place in EFFECTS.
+    /// The chosen light's effect, by its place in the core's list.
     pub fn effect(&self) -> usize {
         let e = self.light_of(self.light_name())["effect"].as_str().unwrap_or("static").to_string();
-        EFFECTS.iter().position(|(id, _)| *id == e).unwrap_or(1)
+        self.effects().iter().position(|d| d["id"] == e.as_str()).unwrap_or(1)
     }
 
     /// The boxes under the picture as cells: on Lighting, the chosen effect's
     /// settings; on Performance, the sensitivities and the polling rate; on
     /// Settings, the card. `w` is the room across.
-    pub fn cells(&self, w: f32) -> (Vec<Cell>, f32) {
+    pub fn cells(&self, w: f32, open: Option<(usize, usize)>) -> (Vec<Cell>, f32) {
         match self.tab {
-            1 => self.light_cells(w),
+            1 => self.light_cells(w, open),
             2 => self.performance_cells(w),
             3 => self.settings_cells(w),
             _ => (Vec::new(), 0.0),
         }
     }
 
-    fn light_cells(&self, w: f32) -> (Vec<Cell>, f32) {
+    /// The chosen light's effect's settings, drawn from the core's
+    /// description of the effect; `open` is the color the picker is open on.
+    fn light_cells(&self, w: f32, open: Option<(usize, usize)>) -> (Vec<Cell>, f32) {
         let l = self.light_of(self.light_name());
-        let e = l["effect"].as_str().unwrap_or("static");
+        let e = self.effect_desc(l["effect"].as_str().unwrap_or("static"));
         let mut s = Stack::new(w);
-        match e {
-            "off" => s.note("The light stays dark."),
-            "static" => s.note("One color, steady."),
-            "breathing" => s.note("The color fades in and out."),
-            _ => s.note("The colors below play in turn, each blending into the next."),
-        }
-        if e == "static" || e == "breathing" {
-            s.gap(14.0);
-            s.cells.push(text_cell(style::GROUP, 16.0, s.y, s.inner(), 14.0, "COLOR"));
-            s.gap(14.0 + 10.0);
-            let c = rgb(&l["params"]["color"]).unwrap_or([0xff, 0x10, 0x00]);
-            s.dots(Ctl::MouseColor, &[c], None, true);
-        }
-        if e == "colorshift" {
-            // its colors as dots you can change, over the strip they blend along
-            s.gap(14.0);
-            s.cells.push(text_cell(style::GROUP, 16.0, s.y, s.inner(), 14.0, "COLORS"));
-            s.gap(14.0 + 10.0);
-            let cols = shift_colors(&l);
-            s.strip(&cols);
-            s.dots(Ctl::MouseColors, &cols, None, false);
-        }
-        if e == "breathing" || e == "colorshift" {
-            let ms = l["params"]["speed"].as_u64().unwrap_or(if e == "breathing" { 3000 } else if l["params"]["colors"].is_array() { 1000 } else { 5000 }) as f32;
-            s.gap(18.0);
-            s.head("Speed", Some(&format!("{:.1} s a cycle", ms / 1000.0)));
-            // quick at the left, as the keyboard's speed sliders run
-            s.slider(Ctl::MouseSpeed, 1.0 - (ms - 500.0) / (30000.0 - 500.0), color([0xa1, 0xa1, 0xaa]), Some(("Slow", "Fast")));
-        }
+        crate::described::draw_effect(&mut s, &e, &l["params"], open);
         if self.light == 0 {
             s.gap(22.0);
             s.check(Ctl::MouseSameWheel, self.same_wheel, "Same on the wheel");
@@ -857,43 +889,39 @@ impl Page {
                 s.y += 18.0;
             }
         }
-        boxed(s, 0.0, 0.0, effect_name(e))
+        boxed(s, 0.0, 0.0, e["label"].as_str().unwrap_or(""))
     }
 
+    /// The mouse's own settings, a box for each of the sections the core's
+    /// layout gives them, side by side (the last of two as wide as a switch
+    /// needs), drawn from its description.
     fn performance_cells(&self, w: f32) -> (Vec<Cell>, f32) {
-        let poll_w = 420.0f32.min(w * 0.42);
-        let cpi_w = w - poll_w - 12.0;
-        let mut a = Stack::new(cpi_w);
-        for (k, id) in ["cpi1", "cpi2"].iter().enumerate() {
-            let v = self.setting(id).max(100);
-            if k > 0 {
-                a.gap(22.0);
+        let desc = &self.state["device"];
+        let (values, known) = (&self.state["settings"]["values"], &self.state["settings"]["known"]);
+        let secs = crate::described::sections(desc, values);
+        let n = secs.len().max(1);
+        let widths: Vec<f32> = if n == 2 {
+            let last = 420.0f32.min(w * 0.42);
+            vec![w - last - 12.0, last]
+        } else {
+            vec![(w - 12.0 * (n - 1) as f32) / n as f32; n]
+        };
+        let (mut cells, mut h, mut x) = (Vec::new(), 0.0f32, 0.0f32);
+        for (sec, sw) in secs.iter().zip(widths) {
+            let mut s = Stack::new(sw);
+            crate::described::draw_section(&mut s, desc, sec, values, known);
+            // (the mouse's own word on which of its sensitivities was in use)
+            let has_cpi = sec.items.iter().any(|&k| crate::described::setting(desc, k).is_some_and(|(id, _)| id == "cpi1"));
+            if let Some(p) = self.state["settings"]["active"].as_u64().filter(|_| has_cpi) {
+                s.gap(6.0);
+                s.note(&format!("When Ectodeck last asked, the mouse was using the {}.", if p == 1 { "first" } else { "second" }));
             }
-            a.head(if k == 0 { "First" } else { "Second" }, Some(&format!("{v} CPI")));
-            a.slider(if k == 0 { Ctl::MouseCpi1 } else { Ctl::MouseCpi2 }, (v as f32 - 100.0) / 11900.0, color([0xa1, 0xa1, 0xaa]), None);
+            let (more, bh) = boxed(s, x, 0.0, &sec.title);
+            cells.extend(more);
+            h = h.max(bh);
+            x += sw + 12.0;
         }
-        a.gap(18.0);
-        a.note("From 100 to 12,000 CPI, in steps of 100. The CPI button behind the wheel switches between the two.");
-        if let Some(p) = self.state["settings"]["active"].as_u64() {
-            a.gap(6.0);
-            a.note(&format!("When Ectodeck last asked, the mouse was using the {}.", if p == 1 { "first" } else { "second" }));
-        }
-        let (mut cells, ha) = boxed(a, 0.0, 0.0, "Sensitivity");
-        let mut b = Stack::new(poll_w);
-        let rates = [125u64, 250, 500, 1000];
-        let now = self.setting("polling");
-        let names: Vec<String> = rates.iter().map(|r| format!("{r} Hz")).collect();
-        let opts: Vec<(&str, &str)> = names.iter().map(|n| (n.as_str(), "")).collect();
-        b.switch(Ctl::MousePolling, &opts, rates.iter().position(|r| *r == now).unwrap_or(3));
-        b.gap(12.0);
-        b.note("How many times a second the mouse tells the computer where it is. 1000 Hz follows your hand most closely.");
-        if self.state["settings"]["known"]["polling"].as_bool() == Some(false) {
-            b.gap(6.0);
-            b.note("The mouse can’t tell Ectodeck its polling rate. Until you set one here, this shows the factory’s.");
-        }
-        let (more, hb) = boxed(b, cpi_w + 12.0, 0.0, "Polling rate");
-        cells.extend(more);
-        (cells, ha.max(hb))
+        (cells, h)
     }
 
     fn settings_cells(&self, w: f32) -> (Vec<Cell>, f32) {
@@ -929,61 +957,19 @@ impl Page {
     }
 }
 
-/// The mouse's effects, as the core offers them, with the tile picture each borrows
-/// from the keyboard's effects.
+/// The mouse's effects by name, before the core has described them.
 pub const EFFECTS: [(&str, &str); 4] = [("off", "Off"), ("static", "Static"), ("breathing", "Breathing"), ("colorshift", "Color shift")];
 
-pub fn effect_name(e: &str) -> &'static str {
-    EFFECTS.iter().find(|(id, _)| *id == e).map_or("Static", |(_, n)| n)
-}
-
-/// A light set to effect `e`, keeping the color and speed it had; Color shift
-/// chosen for the first time starts as SteelSeries GG's own, red, green and
-/// blue, a second around.
-pub fn with_effect(old: &Value, e: &str) -> Value {
-    let mut params = old["params"].clone();
-    if !params.is_object() {
-        params = json!({});
+/// The tile an effect's picture borrows from the keyboard's effects, and how
+/// it moves (1 a breath, 3 a wave); an effect the app has no picture for
+/// shows Static's.
+pub fn tile_of(e: &str) -> (&'static str, i32) {
+    match e {
+        "off" => ("off", 0),
+        "breathing" => ("breathing", 1),
+        "colorshift" => ("wave", 3),
+        _ => ("static", 0),
     }
-    if params.get("color").is_none() {
-        params["color"] = json!("#FF1000");
-    }
-    if e == "colorshift" && !params["colors"].is_array() {
-        params["colors"] = json!(GG_SHIFT);
-        params["speed"] = json!(1000);
-    }
-    json!({ "effect": e, "params": params })
-}
-
-/// SteelSeries GG's Color shift for the mouse: red, green and blue.
-const GG_SHIFT: [&str; 3] = ["#FF0000", "#00FF00", "#0000FF"];
-
-/// The colors a light set to Color shift plays before it was given colors of
-/// its own: round the color wheel, as the core plays it then.
-const WHEEL: [&str; 6] = ["#FF0000", "#FFFF00", "#00FF00", "#00FFFF", "#0000FF", "#FF00FF"];
-
-/// A Color shift's colors, in order.
-pub fn shift_colors(l: &Value) -> Vec<[u8; 3]> {
-    match l["params"]["colors"].as_array() {
-        Some(a) if !a.is_empty() => a.iter().map(|c| rgb(c).unwrap_or([0; 3])).collect(),
-        _ => WHEEL.iter().map(|c| rgb(&json!(c)).unwrap()).collect(),
-    }
-}
-
-/// A Color shift with one of its colors changed: a light that went round the
-/// color wheel takes the wheel's colors, and its speed, as its own first.
-pub fn with_shift_color(l: &Value, i: usize, c: [u8; 3]) -> Value {
-    let mut l = l.clone();
-    if !l["params"]["colors"].is_array() {
-        l["params"]["colors"] = json!(WHEEL);
-        if l["params"]["speed"].is_null() {
-            l["params"]["speed"] = json!(5000);
-        }
-    }
-    if let Some(slot) = l["params"]["colors"].get_mut(i) {
-        *slot = json!(crate::lighting::hex_of(c).to_uppercase());
-    }
-    l
 }
 
 /// A stack laid out as a box: its tile under it at `x`, `y`, its title, its pieces moved there.

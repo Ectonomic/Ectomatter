@@ -236,6 +236,8 @@ pub enum Ask {
 /// on, and the color now, as hue (0 to 360), saturation and brightness (0 to 1).
 struct Pick {
     ctl: Ctl,
+    /// for a setting a core described (Ctl::Described): which
+    piece: Option<crate::described::Piece>,
     index: usize,
     start: [u8; 3],
     hsv: [f32; 3],
@@ -1324,9 +1326,9 @@ impl Front {
                     window.push(WindowAsk::OpenMacros(crate::macros::Lib::Ectodeck, n));
                 }
                 Ask::MouseEffect(i) => {
-                    if let Some((e, _)) = crate::mouse::EFFECTS.get(i.max(0) as usize) {
+                    if let Some(e) = self.mouse.effects().get(i.max(0) as usize) {
                         let old = self.mouse.light_of(self.mouse.light_name());
-                        self.mouse.set_light(crate::mouse::with_effect(&old, e));
+                        self.mouse.set_light(crate::described::with_effect(&old, e));
                     }
                 }
                 Ask::MousePicMoved(x, y, over) => {
@@ -1434,20 +1436,19 @@ impl Front {
                     self.show_desk();
                     self.desk_frames_run();
                 }
-                Ask::CellPick(id, i, x, y, h) => self.cell_pick(lighting::ctl(id), i.max(0) as usize, (x, y, h)),
+                Ask::CellPick(id, i, x, y, h) => match crate::described::piece_of(id) {
+                    Some(piece) => self.described_pick(piece, i.max(0) as usize, (x, y, h)),
+                    None => self.cell_pick(lighting::ctl(id), i.max(0) as usize, (x, y, h)),
+                },
+                // (a setting a core described: the value its slider stands for)
+                Ask::CellSlide(id, v) if crate::described::piece_of(id).is_some() => {
+                    let piece = crate::described::piece_of(id).unwrap();
+                    if let Some((sid, d, _)) = self.mouse.described(piece) {
+                        self.mouse.set_described(piece, crate::described::slid(&sid, &d, v));
+                    }
+                }
                 Ask::CellSlide(id, v) => {
                     match lighting::ctl(id) {
-                        c @ (Ctl::MouseCpi1 | Ctl::MouseCpi2) => {
-                            let cpi = 100 + (v.clamp(0.0, 1.0) * 119.0).round() as u64 * 100;
-                            self.mouse.set_setting(if c == Ctl::MouseCpi1 { "cpi1" } else { "cpi2" }, cpi);
-                        }
-                        Ctl::MouseSpeed => {
-                            // quick at the right
-                            let ms = (30000.0 - v.clamp(0.0, 1.0) * (30000.0 - 500.0)).round() / 100.0 * 100.0;
-                            let mut l = self.mouse.light_of(self.mouse.light_name());
-                            l["params"]["speed"] = serde_json::json!(ms as u64);
-                            self.mouse.set_light(l);
-                        }
                         Ctl::PeakNits => {
                             let nits = crate::ecto_settings::peak_at(v, self.levels.0, self.levels.1);
                             self.settings.set_soon("hdr.glow_limit", nits.map_or(serde_json::Value::Null, |n| serde_json::json!(n)));
@@ -2129,16 +2130,23 @@ impl Front {
         self.ask_kb(device::Ask::Preview(body));
     }
 
+    /// A piece of a setting a core described used: a color opens the color
+    /// picker, a choice or a switch takes its new value.
+    fn described_pick(&mut self, piece: crate::described::Piece, index: usize, anchor: (f32, f32, f32)) {
+        let Some((_, d, v)) = self.mouse.described(piece) else { return };
+        if crate::described::color_at(&d, &v, index).is_some() {
+            self.open_picker(Ctl::Described, Some(piece), index, anchor);
+            return;
+        }
+        if let Some(nv) = crate::described::picked(&d, &v, index) {
+            self.mouse.set_described(piece, nv);
+        }
+        self.refresh();
+    }
+
     /// A piece of the tile used: a swatch opens the color picker, the rest change the draft.
     fn cell_pick(&mut self, c: Ctl, index: usize, _anchor: (f32, f32, f32)) {
         match c {
-            Ctl::MousePolling => {
-                if let Some(r) = [125u64, 250, 500, 1000].get(index) {
-                    self.mouse.set_setting("polling", *r);
-                }
-                self.refresh();
-                return;
-            }
             Ctl::MouseSameWheel => {
                 self.mouse.same_wheel = index % 2 == 1;
                 crate::uistate::set("mouse_same_wheel", serde_json::json!(self.mouse.same_wheel));
@@ -2148,8 +2156,8 @@ impl Front {
                 self.refresh();
                 return;
             }
-            Ctl::Color | Ctl::Colors | Ctl::Background | Ctl::Paint | Ctl::LcdColor | Ctl::MouseColor | Ctl::MouseColors => {
-                self.open_picker(c, index, _anchor);
+            Ctl::Color | Ctl::Colors | Ctl::Background | Ctl::Paint | Ctl::LcdColor => {
+                self.open_picker(c, None, index, _anchor);
                 return;
             }
             Ctl::Start | Ctl::Stop | Ctl::Submode | Ctl::Plays => {
@@ -2277,7 +2285,7 @@ impl Front {
 
     // ------------------------------------------------------------ the color picker
 
-    fn open_picker(&mut self, c: Ctl, index: usize, anchor: (f32, f32, f32)) {
+    fn open_picker(&mut self, c: Ctl, piece: Option<crate::described::Piece>, index: usize, anchor: (f32, f32, f32)) {
         // the second click on the swatch whose picker a press just closed
         if let Some((at, when)) = self.shut.take() {
             if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
@@ -2286,14 +2294,11 @@ impl Front {
         }
         self.close_menu();
         self.close_picker();
-        let rgb = if c == Ctl::MouseColor {
-            crate::mouse::rgb(&self.mouse.light_of(self.mouse.light_name())["params"]["color"]).unwrap_or([0xff, 0x10, 0x00])
-        } else if c == Ctl::MouseColors {
-            crate::mouse::shift_colors(&self.mouse.light_of(self.mouse.light_name())).get(index).copied().unwrap_or([0xff, 0, 0])
-        } else {
-            lighting::color_of(&self.page, c, index, self.paint)
+        let rgb = match piece.and_then(|p| self.mouse.described(p)) {
+            Some((_, d, v)) => crate::described::color_at(&d, &v, index).unwrap_or([0xff, 0, 0]),
+            None => lighting::color_of(&self.page, c, index, self.paint),
         };
-        self.pick = Some(Pick { ctl: c, index, start: rgb, hsv: rgb2hsv(rgb), rgb, anchor });
+        self.pick = Some(Pick { ctl: c, piece, index, start: rgb, hsv: rgb2hsv(rgb), rgb, anchor });
         let recent = recent_colors();
         self.ui.set_pk_recent(ModelRc::new(VecModel::from(recent.iter().map(|c| color(*c)).collect::<Vec<_>>())));
         // under the swatch when it fits there, or when there is a fair amount of room there anyway; over it when below is cramped
@@ -2361,17 +2366,13 @@ impl Front {
         let Some(p) = &mut self.pick else { return };
         p.hsv = hsv;
         p.rgb = rgb.unwrap_or_else(|| hsv2rgb(hsv));
-        let (c, index, rgb) = (p.ctl, p.index, p.rgb);
+        let (c, piece, index, rgb) = (p.ctl, p.piece, p.index, p.rgb);
         if c == Ctl::Paint {
             self.paint = rgb;
-        } else if c == Ctl::MouseColor {
-            let mut l = self.mouse.light_of(self.mouse.light_name());
-            l["params"]["color"] = serde_json::json!(lighting::hex_of(rgb));
-            self.mouse.set_light(l);
-            self.refresh();
-        } else if c == Ctl::MouseColors {
-            let l = crate::mouse::with_shift_color(&self.mouse.light_of(self.mouse.light_name()), index, rgb);
-            self.mouse.set_light(l);
+        } else if let Some(piece) = piece {
+            if let Some((_, d, v)) = self.mouse.described(piece) {
+                self.mouse.set_described(piece, crate::described::with_color(&d, &v, index, rgb));
+            }
             self.refresh();
         } else {
             lighting::set_color(&mut self.page, c, index, rgb);
@@ -4241,20 +4242,29 @@ impl Front {
             let icons = ["off", "static", "breathing", "wave"].iter().map(|e| lighting::icon(e, self.scale)).collect();
             self.mouse_icons = Some((self.scale, icons));
         }
-        let icons = &self.mouse_icons.as_ref().unwrap().1;
         let fx = self.mouse.effect();
-        let effects: Vec<EffectItem> = crate::mouse::EFFECTS
+        let effects: Vec<EffectItem> = self
+            .mouse
+            .effects()
             .iter()
-            .zip(icons)
             .enumerate()
-            .map(|(i, ((_, name), icon))| EffectItem { name: (*name).into(), icon: icon.clone(), on: i == fx, motion: match i { 2 => 1, 3 => 3, _ => 0 } })
+            .map(|(i, e)| {
+                let (tile, motion) = crate::mouse::tile_of(e["id"].as_str().unwrap_or(""));
+                let icon = self.mouse_icons.as_ref().unwrap().1[["off", "static", "breathing", "wave"].iter().position(|t| *t == tile).unwrap_or(1)].clone();
+                EffectItem { name: e["label"].as_str().unwrap_or("").into(), icon, on: i == fx, motion }
+            })
             .collect();
         self.ui.set_mouse_effect_moves(effects.iter().any(|e| e.on && e.motion != 0));
         show_rows(self.ui.get_mouse_effects(), |r| self.ui.set_mouse_effects(r), effects);
         // (the Profiles box first in the row, on each tab whose settings belong to a profile)
         let profiles_w = if self.mouse.tab < 3 && self.mouse.profiles.is_some() { 252.0 } else { 0.0 };
         let w = self.ui.get_mouse_w() - if self.mouse.tab == 1 { 564.0 } else { 0.0 } - profiles_w;
-        let (cells, h) = self.mouse.cells(w);
+        // (the color the picker is open on, ringed)
+        let open = self.pick.as_ref().and_then(|p| match p.piece {
+            Some(crate::described::Piece::Effect(k)) => Some((k, p.index)),
+            _ => None,
+        });
+        let (cells, h) = self.mouse.cells(w, open);
         self.ui.set_mouse_cells_h(h);
         self.show_cells(cells);
         // the picture: its layers, the buttons it picks out, its lights now, and their effects playing
