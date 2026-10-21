@@ -116,7 +116,34 @@ pub struct Recording {
     pub elapsed: f64,
 }
 
+/// Which macros an editor shows: the keyboard's, kept in its own memory (100
+/// of them, which its keys play themselves), or Ectodeck's (library.rs), as
+/// many as you want, which Ectodeck plays for a control given one, as the
+/// mouse's buttons can be.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Lib {
+    Keyboard,
+    Ectodeck,
+}
+
+/// Where one of Ectodeck's macros runs: a profile of a device's, by its place
+/// in the device's list, the control (its words, as the macro's delete
+/// question names it), and how it plays there.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Elsewhere {
+    pub profile: u8,
+    pub control: String,
+    pub at: u32,
+    pub n: u32,
+    pub plays: How,
+}
+
 pub struct Editor {
+    pub lib: Lib,
+    /// where Ectodeck's macros run (the mouse's profiles' buttons), as the page
+    /// last said, and the names of those profiles by their places
+    pub elsewhere: Vec<Elsewhere>,
+    pub names: Vec<String>,
     pub drafts: HashMap<u32, Draft>,
     pub current: Option<u32>,
     pub sel_step: Option<usize>,
@@ -129,8 +156,11 @@ pub struct Editor {
 }
 
 impl Editor {
-    pub fn new() -> Editor {
+    pub fn new(lib: Lib) -> Editor {
         Editor {
+            lib,
+            elsewhere: Vec::new(),
+            names: Vec::new(),
             drafts: HashMap::new(),
             current: None,
             sel_step: None,
@@ -143,27 +173,42 @@ impl Editor {
         }
     }
 
-    fn macros(page: &Page) -> Value {
-        page.dev.as_ref().map_or(Value::Null, |d| d["macros"].clone())
+    fn macros(&self, page: &Page) -> Value {
+        match self.lib {
+            Lib::Keyboard => page.dev.as_ref().map_or(Value::Null, |d| d["macros"].clone()),
+            Lib::Ectodeck => crate::library::all(),
+        }
     }
 
-    pub fn saved(page: &Page, n: u32) -> Option<Value> {
-        let m = &page.dev.as_ref()?["macros"][n.to_string()];
-        m.is_object().then(|| m.clone())
+    pub fn saved(&self, page: &Page, n: u32) -> Option<Value> {
+        let m = match self.lib {
+            Lib::Keyboard => page.dev.as_ref()?["macros"][n.to_string()].clone(),
+            Lib::Ectodeck => crate::library::get(n)?,
+        };
+        m.is_object().then_some(m)
     }
 
-    pub fn macros_count(page: &Page) -> usize {
-        Self::macros(page).as_object().map_or(0, |m| m.len())
+    pub fn macros_count(&self, page: &Page) -> usize {
+        self.macros(page).as_object().map_or(0, |m| m.len())
+    }
+
+    /// How many macros the library holds, or none for no limit.
+    pub fn room(&self) -> Option<u32> {
+        (self.lib == Lib::Keyboard).then_some(100)
     }
 
     pub fn free_slots(&self, page: &Page) -> Vec<u32> {
-        (1..=100).filter(|i| Self::saved(page, *i).is_none() && !self.drafts.contains_key(i)).collect()
+        match self.lib {
+            Lib::Keyboard => (1..=100).filter(|i| self.saved(page, *i).is_none() && !self.drafts.contains_key(i)).collect(),
+            // (as many as there are drafts, and one more: there's no limit)
+            Lib::Ectodeck => crate::library::free(self.drafts.len() + 1).into_iter().filter(|i| !self.drafts.contains_key(i)).collect(),
+        }
     }
 
-    /// The draft of a macro, made from the keyboard's copy the first time.
+    /// The draft of a macro, made from the library's copy the first time.
     pub fn draft(&mut self, page: &Page, n: u32) -> Option<&mut Draft> {
         if !self.drafts.contains_key(&n) {
-            let m = Self::saved(page, n)?;
+            let m = self.saved(page, n)?;
             self.drafts.insert(
                 n,
                 Draft {
@@ -202,13 +247,17 @@ impl Editor {
         if d.is_new {
             return !Self::pristine(d);
         }
-        let Some(m) = Self::saved(page, n) else { return false };
+        let Some(m) = self.saved(page, n) else { return false };
         d.name != m["name"].as_str().unwrap_or("") || Value::Array(Self::effective(d)) != m["steps"] || d.plays.is_some()
     }
 
     /// The ways macro `n` plays on each key that runs it, on any profile and layer,
-    /// with the key's place and layer and the profile.
-    fn runs(page: &Page, n: u32) -> Vec<(u8, &'static str, u32, How)> {
+    /// with the key's place and layer and the profile: the keyboard's keys for
+    /// its own macros, the controls the page said for Ectodeck's.
+    fn runs(&self, page: &Page, n: u32) -> Vec<(u8, String, u32, How)> {
+        if self.lib == Lib::Ectodeck {
+            return self.elsewhere.iter().filter(|e| e.n == n).map(|e| (e.profile, e.control.clone(), e.at, e.plays)).collect();
+        }
         let mut out = Vec::new();
         for p in PROFILE_NUMBERS {
             for layer in ["base", "fn"] {
@@ -216,7 +265,7 @@ impl Editor {
                     let v = page.drafts.get(&p).map(|d| &d["keys"][layer][page.id(pos)]);
                     if let Some(Action::Macro { n: m, plays }) = v.and_then(Action::read) {
                         if m == n {
-                            out.push((p, layer, pos, plays));
+                            out.push((p, layer.to_string(), pos, plays));
                         }
                     }
                 }
@@ -226,19 +275,19 @@ impl Editor {
     }
 
     /// Where a macro is assigned, one entry per key and layer, with its profiles.
-    pub fn places(page: &Page, n: u32) -> Vec<(String, u32, Vec<u8>)> {
+    pub fn places(&self, page: &Page, n: u32) -> Vec<(String, u32, Vec<u8>)> {
         let mut out: Vec<(String, u32, Vec<u8>)> = Vec::new();
-        for (p, layer, pos, _) in Self::runs(page, n) {
-            match out.iter_mut().find(|(l, q, _)| l == layer && *q == pos) {
+        for (p, layer, pos, _) in self.runs(page, n) {
+            match out.iter_mut().find(|(l, q, _)| *l == layer && *q == pos) {
                 Some(e) => e.2.push(p),
-                None => out.push((layer.into(), pos, vec![p])),
+                None => out.push((layer, pos, vec![p])),
             }
         }
         out
     }
 
-    pub fn plays_of(page: &Page, n: u32) -> Option<Plays> {
-        let all: Vec<How> = Self::runs(page, n).into_iter().map(|r| r.3).collect();
+    pub fn plays_of(&self, page: &Page, n: u32) -> Option<Plays> {
+        let all: Vec<How> = self.runs(page, n).into_iter().map(|r| r.3).collect();
         let first = *all.first()?;
         // (a number of times is the same way only at the same number)
         if all.iter().any(|h| !same_choice(*h, first) || matches!((h, first), (How::Times(a), How::Times(b)) if *a != b)) {
@@ -252,7 +301,7 @@ impl Editor {
     }
 
     fn new_name(&self, page: &Page) -> String {
-        let used: Vec<String> = Self::macros(page).as_object().map(|m| m.values().filter_map(|v| v["name"].as_str().map(String::from)).collect()).unwrap_or_default();
+        let used: Vec<String> = self.macros(page).as_object().map(|m| m.values().filter_map(|v| v["name"].as_str().map(String::from)).collect()).unwrap_or_default();
         let mut k = 1;
         loop {
             let n = format!("New Macro {k}");
@@ -276,7 +325,7 @@ impl Editor {
 
     /// Make sure a macro is chosen: with none, the blank one.
     pub fn settle(&mut self, page: &Page) {
-        let ok = self.current.is_some_and(|n| Self::saved(page, n).is_some() || self.drafts.contains_key(&n));
+        let ok = self.current.is_some_and(|n| self.saved(page, n).is_some() || self.drafts.contains_key(&n));
         if !ok {
             self.current = self.starter(page);
         }
@@ -303,7 +352,7 @@ impl Editor {
 
     /// The library: every saved macro, then the new ones something was put in.
     pub fn list(&self, page: &Page) -> Vec<u32> {
-        let mut saved: Vec<u32> = Self::macros(page).as_object().map(|m| m.keys().filter_map(|k| k.parse().ok()).collect()).unwrap_or_default();
+        let mut saved: Vec<u32> = self.macros(page).as_object().map(|m| m.keys().filter_map(|k| k.parse().ok()).collect()).unwrap_or_default();
         saved.sort();
         let mut drafts: Vec<u32> = self.drafts.iter().filter(|(_, d)| d.is_new && !(d.starter && Self::pristine(d))).map(|(n, _)| *n).collect();
         drafts.sort();
@@ -430,7 +479,7 @@ impl Editor {
 
     pub fn duplicate(&mut self, page: &Page) -> Result<(), String> {
         let Some(n) = self.current else { return Ok(()) };
-        let Some(k) = self.free_slots(page).first().copied() else { return Err("All 100 macro slots are full.".into()) };
+        let Some(k) = self.free_slots(page).first().copied() else { return Err("All 100 of the keyboard's macro slots are full.".into()) };
         let Some(d) = self.draft(page, n).cloned() else { return Ok(()) };
         self.drafts.insert(k, Draft { name: format!("Copy of {}", d.name).chars().take(50).collect(), blank_name: None, steps: Self::effective(&d), is_new: true, starter: false, timing: Timing::Keep, same: 20, plays: None });
         self.current = Some(k);

@@ -25,6 +25,8 @@ pub enum Ask {
     Setting(String, u64),
     /// a whole profile put on the mouse (the core's profiles/apply)
     Apply(Value),
+    /// the core told something (a button pressed): look now
+    Nudge,
 }
 
 /// What the page hears: everything the core says of the mouse, a change it
@@ -37,11 +39,18 @@ pub enum Heard {
     Played(String, Value, Instant),
     /// (the mouse's width in pixels it was drawn at, and the window's scale then)
     Drawn(u32, f32, Box<crate::mouse_art::Layers>),
+    /// a button given one of Ectodeck's jobs pressed (true) or let go
+    Input(String, bool),
 }
 
 /// Start the mouse's thread, with SteelSeries' core.
 pub fn start(core: Core, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
     let (ask, asked) = mpsc::channel::<Ask>();
+    // (a button pressed is told at once, not at the next look)
+    let nudge = std::sync::Mutex::new(ask.clone());
+    core.on_told(move || {
+        let _ = nudge.lock().map(|n| n.send(Ask::Nudge));
+    });
     std::thread::spawn(move || {
         if let Err(e) = core.call("initialize", &json!({ "protocol": 3 })) {
             let _ = tell.send(Heard::Failed(e));
@@ -69,6 +78,10 @@ pub fn start(core: Core, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
                         device = p;
                     }
                     "device/removed" => present = false,
+                    "input/down" | "input/up" => {
+                        let control = p["control"].as_str().unwrap_or_default().to_string();
+                        let _ = tell.send(Heard::Input(control, method == "input/down"));
+                    }
                     _ => {}
                 }
             }
@@ -91,6 +104,7 @@ pub fn start(core: Core, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
                         Ask::Light(l, _) => format!("light {l}"),
                         Ask::Setting(s, _) => format!("setting {s}"),
                         Ask::Apply(_) => "profile".into(),
+                        Ask::Nudge => "nudge".into(),
                     };
                     let mut newest: Vec<Ask> = Vec::new();
                     for a in all {
@@ -106,6 +120,8 @@ pub fn start(core: Core, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
                                 let _ = tell.send(Heard::Played(light, v["plays"].clone(), Instant::now()));
                             }),
                             Ask::Setting(setting, v) => core.call("settings/set", &json!({ "device": DEVICE, "id": setting, "value": v })).map(|_| ()),
+                            // (what the core told is read at the top of the loop)
+                            Ask::Nudge => Ok(()),
                             Ask::Apply(mut body) => {
                                 body["device"] = json!(DEVICE);
                                 core.call("profiles/apply", &body).map(|v| {
@@ -163,14 +179,20 @@ pub const CALLS: [(bool, f32, &[(f32, f32)]); 8] = [
 /// The kinds of job a button can have, as the Key detail box's switch shows
 /// them, each drawn on its 24 grid (the Key, Media, Mouse and Nothing glyphs
 /// as the keyboard's own).
-pub const KINDS: [(&str, &str); 6] = [
+pub const KINDS: [(&str, &str); 7] = [
     ("Mouse", "M7 3.5h10v17H7zM12 7v3"),
     ("Key", "M4 5h16v14H4zM9 10h6M12 10v5"),
     ("Media", "M5 6l8 6-8 6zM15 6v12M19 6v12"),
+    // (one of Ectodeck's macros, which Ectodeck plays: the keyboard's Macro glyph)
+    ("Macro", "M4 7h10M4 12h16M4 17h7"),
     ("Scroll", "M12 4v16M8 8l4-4 4 4M8 16l4 4 4-4"),
     ("Sensitivity", "M4 17a8 8 0 1 1 16 0M12 17l4.5-5"),
     ("Nothing", "M4 12a8 8 0 1 0 16 0a8 8 0 1 0-16 0M6.5 17.5l11-11"),
 ];
+
+/// The place in KINDS of the macros' kind, and of nothing's.
+pub const MACRO_KIND: usize = 3;
+pub const NOTHING_KIND: usize = 6;
 
 const MOUSE_JOBS: [&str; 8] = ["Left click", "Right click", "Middle click", "Back", "Forward", "Button 6", "Button 7", "Button 8"];
 const MEDIA: [(&str, &str); 6] = [("PlayPause", "Play or pause"), ("Next", "Next track"), ("Previous", "Previous track"), ("VolumeUp", "Volume up"), ("VolumeDown", "Volume down"), ("Mute", "Mute")];
@@ -233,12 +255,14 @@ pub fn kind_of(a: &Value) -> usize {
         1
     } else if a.get("media").is_some() {
         2
+    } else if a.get("macro").is_some() {
+        MACRO_KIND
     } else if a.get("scroll").is_some() {
-        3
-    } else if a.get("sensitivity").is_some() {
         4
-    } else {
+    } else if a.get("sensitivity").is_some() {
         5
+    } else {
+        NOTHING_KIND
     }
 }
 
@@ -248,8 +272,15 @@ pub fn job_label(a: &Value) -> String {
         0 => a["mouse"].as_u64().and_then(|n| MOUSE_JOBS.get(n as usize - 1)).map_or("A mouse button".into(), |s| s.to_string()),
         1 => usage_of(&a["key"]).map_or("A key".into(), key_label),
         2 => MEDIA.iter().find(|(n, _)| a["media"] == *n).map_or("A media key".into(), |(_, l)| l.to_string()),
-        3 => if a["scroll"] == "down" { "Scroll down".into() } else { "Scroll up".into() },
-        4 => "Switch sensitivity".into(),
+        MACRO_KIND => {
+            let n = a["macro"].as_u64().unwrap_or(0) as u32;
+            match crate::library::get(n) {
+                Some(m) => m["name"].as_str().filter(|s| !s.is_empty()).map_or(format!("Macro {n}"), String::from),
+                None => "Deleted macro".into(),
+            }
+        }
+        4 => if a["scroll"] == "down" { "Scroll down".into() } else { "Scroll up".into() },
+        5 => "Switch sensitivity".into(),
         _ => "Nothing".into(),
     }
 }
@@ -260,10 +291,46 @@ pub fn choices(kind: usize) -> Vec<(String, Value)> {
         0 => MOUSE_JOBS.iter().enumerate().map(|(i, l)| (l.to_string(), json!({ "mouse": i + 1 }))).collect(),
         1 => keys().into_iter().map(|(u, n)| (key_label(u), json!({ "key": n }))).collect(),
         2 => MEDIA.iter().map(|(n, l)| (l.to_string(), json!({ "media": n }))).collect(),
-        3 => vec![("Scroll up".into(), json!({ "scroll": "up" })), ("Scroll down".into(), json!({ "scroll": "down" }))],
-        4 => vec![("Switch sensitivity".into(), json!({ "sensitivity": "switch" }))],
+        // Ectodeck's macros, each played once a press unless the Macro Editor says otherwise
+        MACRO_KIND => {
+            let all = crate::library::all();
+            let mut v: Vec<(u32, String)> = all.as_object().map(|m| m.iter().filter_map(|(n, v)| Some((n.parse().ok()?, v["name"].as_str().unwrap_or("").to_string()))).collect()).unwrap_or_default();
+            v.sort();
+            v.into_iter().map(|(n, name)| (if name.is_empty() { format!("Macro {n}") } else { name }, json!({ "macro": n, "plays": "once" }))).collect()
+        }
+        4 => vec![("Scroll up".into(), json!({ "scroll": "up" })), ("Scroll down".into(), json!({ "scroll": "down" }))],
+        5 => vec![("Switch sensitivity".into(), json!({ "sensitivity": "switch" }))],
         _ => vec![("Nothing".into(), json!({ "off": true }))],
     }
+}
+
+/// A button's job as the mouse is given it: one Ectodeck does (a macro) is
+/// the button's own host slot, which the mouse's core listens for; the
+/// profile keeps the job itself.
+pub fn for_mouse(i: usize, a: &Value) -> Value {
+    if a.get("macro").is_some() { json!({ "host": i }) } else { a.clone() }
+}
+
+/// Each button that runs Ectodeck's macro `n`, on every profile, given `to`
+/// instead, and the profiles kept. Back come the buttons changed on the
+/// profile in use, which is the one on the mouse.
+pub fn rewrite_macro(store: &mut crate::profiles::Store, n: u32, to: &Value) -> Vec<usize> {
+    let (active, mut in_use, mut changed) = (store.active, Vec::new(), false);
+    for (pi, p) in store.list.iter_mut().enumerate() {
+        for (bi, (id, ..)) in BUTTONS.iter().enumerate() {
+            if matches!(ectodeck_protocol::Action::read(&p.body["keys"]["base"][*id]), Some(ectodeck_protocol::Action::Macro { n: m, .. }) if m == n) {
+                p.body["keys"]["base"][*id] = to.clone();
+                changed = true;
+                if pi == active {
+                    in_use.push(bi);
+                }
+            }
+        }
+    }
+    if changed {
+        store.save();
+    }
+    in_use
 }
 
 // ---------------------------------------------------------------- the page
@@ -374,8 +441,18 @@ impl Page {
         })
     }
 
-    /// A profile put on the mouse: shown as it is at once, and sent whole.
+    /// A profile put on the mouse: shown as it is at once, and sent whole (a
+    /// macro's button as its host slot, see for_mouse).
     fn put_on(&mut self, body: &Value) {
+        let mut body = body.clone();
+        if let Some(base) = body["keys"]["base"].as_object_mut() {
+            for (id, a) in base.iter_mut() {
+                if let Some(i) = BUTTONS.iter().position(|(b, _, _)| b == id) {
+                    *a = for_mouse(i, a);
+                }
+            }
+        }
+        let body = &body;
         if let Some(base) = body["keys"]["base"].as_object() {
             for (id, a) in base {
                 self.state["keys"]["layers"]["base"][id] = a.clone();
@@ -536,8 +613,11 @@ impl Page {
         }
     }
 
+    /// A button's job: as the profile in use keeps it (a macro is Ectodeck's
+    /// to play, which the mouse knows only as a host slot), or as the mouse says.
     pub fn job(&self, i: usize) -> Value {
-        self.state["keys"]["layers"]["base"][BUTTONS[i].0].clone()
+        let kept = self.profiles.as_ref().map(|p| p.current().body["keys"]["base"][BUTTONS[i].0].clone()).filter(|a| !a.is_null());
+        kept.unwrap_or_else(|| self.state["keys"]["layers"]["base"][BUTTONS[i].0].clone())
     }
 
     pub fn factory(&self, i: usize) -> Value {
@@ -606,10 +686,10 @@ impl Page {
     }
 
     pub fn set_job(&mut self, i: usize, a: Value) {
-        self.state["keys"]["layers"]["base"][BUTTONS[i].0] = a.clone();
-        let kept = a.clone();
-        self.keep_in_profile(|b| b["keys"]["base"][BUTTONS[i].0] = kept);
-        self.send(Ask::Key(BUTTONS[i].0.into(), a));
+        let on_mouse = for_mouse(i, &a);
+        self.state["keys"]["layers"]["base"][BUTTONS[i].0] = on_mouse.clone();
+        self.keep_in_profile(|b| b["keys"]["base"][BUTTONS[i].0] = a);
+        self.send(Ask::Key(BUTTONS[i].0.into(), on_mouse));
     }
 
     pub fn setting(&self, id: &str) -> u64 {
@@ -687,7 +767,14 @@ impl Page {
         let (job, factory) = (self.job(i), self.factory(i));
         let rebound = self.rebound(i);
         let state = if rebound { format!("Now {}", job_label(&job)) } else { "As it came from the factory".into() };
-        let note = if self.state["keys"]["known"].as_bool() == Some(false) {
+        // (a macro is Ectodeck's to play: the mouse keeps only a sign for it)
+        let note = if kind_of(&job) == MACRO_KIND {
+            if crate::library::get(job["macro"].as_u64().unwrap_or(0) as u32).is_some() {
+                "Ectodeck plays this macro while it’s running. With Ectodeck closed, this button does nothing.".into()
+            } else {
+                "The macro this button ran was deleted. Choose another job for it.".into()
+            }
+        } else if self.state["keys"]["known"].as_bool() == Some(false) {
             "The mouse can’t tell Ectodeck what its buttons do. Until you set one here, this shows what it did from the factory.".into()
         } else {
             String::new()
@@ -929,6 +1016,7 @@ mod tests {
     /// Every job a button can be given reads back as itself, in the core's terms and in words.
     #[test]
     fn every_job_reads_back_as_itself() {
+        let _one = crate::library::TESTS.lock().unwrap_or_else(|p| p.into_inner());
         for k in 0..KINDS.len() {
             for (label, a) in choices(k) {
                 assert_eq!(kind_of(&a), k, "{a}");
@@ -937,6 +1025,29 @@ mod tests {
         }
         assert_eq!(job_label(&json!({ "key": "PageDown" })), "Page Down");
         assert_eq!(job_label(&json!({ "key": 104 })), "F13");
+    }
+
+    /// A macro's new way of playing reaches every button that runs it, on
+    /// every profile, and a macro deleted leaves them doing nothing, so the
+    /// next macro given its number isn't run by them; the buttons on the
+    /// profile in use come back, for the mouse.
+    #[test]
+    fn a_macros_buttons_follow_it_on_every_profile() {
+        let body = |left: Value, cpi: Value| json!({ "keys": { "base": { "left": { "mouse": 1 }, "left-side-back": left, "cpi": cpi } } });
+        let mut s = crate::profiles::Store::first(None, body(json!({ "macro": 2, "plays": "once" }), json!({ "sensitivity": "switch" })));
+        s.add(crate::profiles::Profile { name: "Profile 2".into(), body: body(json!({ "macro": 2, "plays": "once" }), json!({ "macro": 5, "plays": "once" })) });
+        s.choose(0);
+        let plays = ectodeck_protocol::Action::Macro { n: 2, plays: ectodeck_protocol::Plays::WhileHeld }.write();
+        assert_eq!(rewrite_macro(&mut s, 2, &plays), [3]);
+        assert_eq!(s.list[1].body["keys"]["base"]["left-side-back"], plays);
+        assert_eq!(s.list[1].body["keys"]["base"]["cpi"]["macro"], 5);
+        let off = json!({ "off": true });
+        assert_eq!(rewrite_macro(&mut s, 2, &off), [3]);
+        for p in &s.list {
+            assert_eq!(p.body["keys"]["base"]["left-side-back"], off);
+            assert_eq!(p.body["keys"]["base"]["left"]["mouse"], 1);
+        }
+        assert!(rewrite_macro(&mut s, 9, &off).is_empty());
     }
 
     /// A light's cycle played as the core says the mouse runs it: a breath

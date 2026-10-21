@@ -12,12 +12,14 @@ use slint::{Model, ModelRc, SharedString, VecModel};
 
 use crate::device;
 use crate::front::WindowAsk;
-use crate::macros::{self, hit, piece, Draft, Editor, Plays, Recording, Timing, MEDIA, PLAYS, ROOM};
+use crate::macros::{self, hit, piece, Draft, Editor, Lib, Plays, Recording, Timing, MEDIA, PLAYS, ROOM};
 use crate::z10::Page;
 use crate::{Cell, MacroItem, MacroWindow, MenuRow};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Ask {
+    /// the library switched to: 0 the keyboard's, 1 Ectodeck's
+    Library(i32),
     Move,
     Minimize,
     Maximize,
@@ -99,7 +101,9 @@ struct Saving {
 
 pub struct MacroPage {
     pub ui: MacroWindow,
+    /// the library shown, and the other one, each with its own drafts
     pub ed: Editor,
+    pub other: Editor,
     asks: Rc<RefCell<Vec<Ask>>>,
     menu: Option<Menu>,
     shut: Option<((f32, f32), Instant, bool)>,
@@ -133,6 +137,7 @@ impl MacroPage {
             }};
         }
         on!(on_drag, Ask::Move);
+        on!(on_library_chosen, |i| Ask::Library(i));
         on!(on_minimize, Ask::Minimize);
         on!(on_maximize, Ask::Maximize);
         on!(on_close_window, Ask::Close);
@@ -167,11 +172,12 @@ impl MacroPage {
         ui.set_items(ModelRc::from(items.clone()));
         MacroPage {
             ui,
-            ed: Editor::new(),
+            ed: Editor::new(Lib::Keyboard),
             asks,
             menu: None,
             shut: None,
             rec: ectotype_core::Recorder::new(),
+            other: Editor::new(Lib::Ectodeck),
             rec_timer: slint::Timer::default(),
             confirm: false,
             status: (String::new(), 0),
@@ -187,9 +193,11 @@ impl MacroPage {
         self.status = (t.into(), kind);
     }
 
-    /// Opened on a macro, or on whatever it last showed.
-    pub fn open(&mut self, page: &Page, n: Option<u32>) {
-        if let Some(n) = n.filter(|n| Editor::saved(page, *n).is_some()) {
+    /// Opened on a library (the keyboard's, or Ectodeck's), on a macro, or
+    /// on whatever it last showed.
+    pub fn open(&mut self, page: &Page, lib: Lib, n: Option<u32>) {
+        self.show_lib(lib);
+        if let Some(n) = n.filter(|n| self.ed.saved(page, *n).is_some()) {
             self.ed.current = Some(n);
             self.ed.sel_step = None;
             self.ed.ins = None;
@@ -198,21 +206,37 @@ impl MacroPage {
         self.refresh(page);
     }
 
+    /// The library shown: its own drafts and choice, kept while the other shows.
+    fn show_lib(&mut self, lib: Lib) {
+        if self.ed.lib != lib && self.ed.rec.is_none() && !self.ed.busy {
+            std::mem::swap(&mut self.ed, &mut self.other);
+            self.close_menu(false);
+            self.status = (String::new(), 0);
+        }
+    }
+
     /// Do what the page asked. Hands back what only the window can do, and
     /// whether the Z10's page changed (a macro saved, a key's plays).
     pub fn act(&mut self, page: &mut Page, kb: &dyn Fn(device::Ask)) -> (Vec<WindowAsk>, bool) {
         let asks: Vec<Ask> = self.asks.borrow_mut().drain(..).collect();
         let mut window = Vec::new();
-        if asks.is_empty() || page.dev.is_none() {
+        if asks.is_empty() {
             return (window, false);
         }
+        // (the keyboard's library waits for the keyboard to be read, all but the
+        // window itself and the way to Ectodeck's; Ectodeck's doesn't wait)
+        let waiting = self.ed.lib == Lib::Keyboard && page.dev.is_none();
         let mut changed = false;
         for ask in asks {
+            if waiting && !matches!(ask, Ask::Move | Ask::Minimize | Ask::Maximize | Ask::Close | Ask::Library(_)) {
+                continue;
+            }
             if self.ed.busy && !matches!(ask, Ask::Move | Ask::Minimize | Ask::Maximize | Ask::Close | Ask::RecTick) {
                 continue;
             }
             match ask {
                 Ask::Move => window.push(WindowAsk::Move),
+                Ask::Library(i) => self.show_lib(if i == 0 { Lib::Keyboard } else { Lib::Ectodeck }),
                 Ask::Minimize => window.push(WindowAsk::Minimize),
                 Ask::Maximize => window.push(WindowAsk::Maximize),
                 Ask::Close => {
@@ -325,7 +349,11 @@ impl MacroPage {
                     }
                 }
                 Ask::Revert => self.ed.revert(page),
-                Ask::Save => self.save(page, kb, &mut changed),
+                Ask::Save => {
+                    if let Some(plays) = self.save(page, kb, &mut changed) {
+                        window.push(plays);
+                    }
+                }
                 Ask::MenuChose(i) => self.menu_chose(page, i.max(0) as usize),
                 Ask::MenuTyped(t) => {
                     if let Some(m) = &mut self.menu {
@@ -350,7 +378,7 @@ impl MacroPage {
                 }
                 Ask::ConfirmYes => {
                     self.confirm = false;
-                    self.delete(page, kb);
+                    window.extend(self.delete(page, kb));
                 }
                 Ask::ConfirmNo => self.confirm = false,
                 Ask::RecTick => self.rec_tick(page),
@@ -370,7 +398,7 @@ impl MacroPage {
     }
 
     fn locked(&self, page: &Page) -> bool {
-        self.ed.current.and_then(|n| Editor::saved(page, n)).is_some_and(|m| m["editable"] == false)
+        self.ed.current.and_then(|n| self.ed.saved(page, n)).is_some_and(|m| m["editable"] == false)
     }
 
     fn current_draft<'a>(&'a mut self, page: &Page) -> Option<&'a mut Draft> {
@@ -472,7 +500,7 @@ impl MacroPage {
         let mut placeholder = String::new();
         let n = self.ed.current.unwrap_or(0);
         let d = self.ed.drafts.get(&n).cloned().or_else(|| {
-            let m = Editor::saved(page, n)?;
+            let m = self.ed.saved(page, n)?;
             Some(Draft { name: m["name"].as_str().unwrap_or("").into(), blank_name: None, steps: m["steps"].as_array().cloned().unwrap_or_default(), is_new: false, starter: false, timing: Timing::Keep, same: 20, plays: None })
         });
         let Some(d) = d else { return };
@@ -552,7 +580,7 @@ impl MacroPage {
                 picks.push(Pick::RecordWaits);
             }
             Kind::Plays => {
-                let cur = d.plays.map(|(m, c)| Plays::One(m, c)).or_else(|| Editor::plays_of(page, n));
+                let cur = d.plays.map(|(m, c)| Plays::One(m, c)).or_else(|| self.ed.plays_of(page, n));
                 rows.push(row(1, "Each time its key is pressed", false));
                 picks.push(Pick::Nothing);
                 for (v, label) in PLAYS {
@@ -561,7 +589,7 @@ impl MacroPage {
                 }
             }
             Kind::Macro => {
-                let saved = Editor::saved(page, n);
+                let saved = self.ed.saved(page, n);
                 let locked = saved.as_ref().is_some_and(|m| m["editable"] == false);
                 rows.push(row(if locked { 5 } else { 0 }, "Rename", false));
                 picks.push(if locked { Pick::Nothing } else { Pick::Rename });
@@ -650,7 +678,7 @@ impl MacroPage {
             Pick::Plays(v) => {
                 self.close_menu(false);
                 let n = self.ed.current.unwrap_or(0);
-                let cur = self.ed.drafts.get(&n).and_then(|d| d.plays).map(|(m, c)| Plays::One(m, c)).or_else(|| Editor::plays_of(page, n));
+                let cur = self.ed.drafts.get(&n).and_then(|d| d.plays).map(|(m, c)| Plays::One(m, c)).or_else(|| self.ed.plays_of(page, n));
                 let count = match cur {
                     Some(Plays::One(_, c)) if c > 1 => c,
                     _ => 3,
@@ -673,28 +701,36 @@ impl MacroPage {
             Pick::Delete => {
                 self.close_menu(false);
                 let n = self.ed.current.unwrap_or(0);
-                if Editor::saved(page, n).is_none() {
+                if self.ed.saved(page, n).is_none() {
                     self.ed.drafts.remove(&n);
                     self.ed.current = None;
                     return;
                 }
                 let name = self.current_draft(page).map(|d| d.name.clone()).unwrap_or_default();
-                let places = Editor::places(page, n);
+                let places = self.ed.places(page, n);
                 let body = if places.is_empty() {
-                    "No key runs this macro.".to_string()
+                    if self.ed.lib == Lib::Keyboard { "No key runs this macro." } else { "Nothing runs this macro." }.to_string()
                 } else {
+                    let names = self.ed.names.clone();
                     let list: Vec<String> = places
                         .iter()
-                        .map(|(layer, pos, ps)| {
-                            let key = page.key(*pos).map(|k| page.key_label(k)).unwrap_or_else(|| format!("Key {pos}"));
-                            format!("{}{key} ({})", if layer == "fn" { "Fn + " } else { "" }, macros::profiles_text(ps, |n| page.profile_name(n)))
+                        .map(|(layer, pos, ps)| match self.ed.lib {
+                            Lib::Keyboard => {
+                                let key = page.key(*pos).map(|k| page.key_label(k)).unwrap_or_else(|| format!("Key {pos}"));
+                                format!("{}{key} ({})", if layer == "fn" { "Fn + " } else { "" }, macros::profiles_text(ps, |n| page.profile_name(n)))
+                            }
+                            // (a device's control, by its words, on its profiles by their names)
+                            Lib::Ectodeck => {
+                                let on: Vec<String> = ps.iter().filter_map(|p| names.get(*p as usize).cloned()).collect();
+                                format!("{layer} ({})", on.join(", "))
+                            }
                         })
                         .collect();
                     format!("{} will do nothing until you give {} something else.", list.join(", "), if places.len() == 1 { "it" } else { "them" })
                 };
                 self.ui.set_confirm_title(format!("Delete {name}?").into());
                 self.ui.set_confirm_body(body.into());
-                self.ui.set_confirm_body2("This removes it from the keyboard and cannot be undone.".into());
+                self.ui.set_confirm_body2(if self.ed.lib == Lib::Keyboard { "This removes it from the keyboard and cannot be undone." } else { "This removes it from Ectodeck and cannot be undone." }.into());
                 self.confirm = true;
             }
         }
@@ -704,12 +740,14 @@ impl MacroPage {
 
     fn start_recording(&mut self, page: &Page) {
         let Some(n) = self.ed.current else { return };
+        let keyboard = self.ed.lib == Lib::Keyboard;
         let Some(d) = self.ed.draft(page, n) else { return };
         if d.timing != Timing::Keep {
             d.steps = Editor::effective(d);
             d.timing = Timing::Keep;
         }
-        let room = ROOM.saturating_sub(macros::bytes(&d.steps));
+        // (Ectodeck's own macros hold any number of steps)
+        let room = if keyboard { ROOM.saturating_sub(macros::bytes(&d.steps)) } else { 1 << 24 };
         self.close_menu(false);
         self.ed.sel_step = None;
         self.ed.edit_wait = None;
@@ -780,15 +818,30 @@ impl MacroPage {
 
     // ------------------------------------------------------------ save, delete
 
-    fn save(&mut self, page: &mut Page, kb: &dyn Fn(device::Ask), changed: &mut bool) {
-        let Some(n) = self.ed.current else { return };
-        let Some(d) = self.ed.draft(page, n).cloned() else { return };
+    /// Save the macro open. Ectodeck's is kept at once, and how it plays goes
+    /// to the controls that run it (handed back for the page to do); the
+    /// keyboard's is written to it, and its keys rewritten for how it plays.
+    fn save(&mut self, page: &mut Page, kb: &dyn Fn(device::Ask), changed: &mut bool) -> Option<WindowAsk> {
+        let n = self.ed.current?;
+        let d = self.ed.draft(page, n).cloned()?;
         let (steps, added) = Editor::to_save(&d);
+        if self.ed.lib == Lib::Ectodeck {
+            let name = if d.name.is_empty() { format!("Macro {n}") } else { d.name.clone() };
+            crate::library::set(n, &name, steps);
+            self.ed.drafts.remove(&n);
+            let mut t = format!("Saved {name}. Ectodeck plays it while it’s running.");
+            if !added.is_empty() {
+                let names: Vec<String> = added.iter().map(macros::step_name).collect();
+                t += &format!(" {} {} let go at the end so nothing stays held down.", names.join(" and "), if added.len() == 1 { "was" } else { "were" });
+            }
+            self.status(t, 1);
+            return d.plays.map(|(how, count)| WindowAsk::MacroPlays(n, macros::with_count(how, count)));
+        }
         if macros::bytes(&steps) > ROOM {
             self.status("This macro is too long for the keyboard. Remove some steps and save again.", 2);
-            return;
+            return None;
         }
-        let m = Editor::saved(page, n).unwrap_or(Value::Null);
+        let m = self.ed.saved(page, n).unwrap_or(Value::Null);
         let name = if d.name.is_empty() { format!("Macro {n}") } else { d.name.clone() };
         self.ed.busy = true;
         self.status(format!("Saving {}…", d.name), 0);
@@ -801,7 +854,7 @@ impl MacroPage {
         let mut profiles = 0;
         if let Some((how, count)) = d.plays {
             let mut by: BTreeMap<u8, Vec<(String, u32)>> = BTreeMap::new();
-            for (layer, pos, ps) in Editor::places(page, n) {
+            for (layer, pos, ps) in self.ed.places(page, n) {
                 for p in ps {
                     by.entry(p).or_default().push((layer.clone(), pos));
                 }
@@ -823,15 +876,26 @@ impl MacroPage {
             *changed = true;
         }
         self.saving = Some(Saving { n, name: d.name.clone(), added, profiles, wrote: false });
+        None
     }
 
-    fn delete(&mut self, page: &Page, kb: &dyn Fn(device::Ask)) {
-        let Some(n) = self.ed.current else { return };
-        let name = self.ed.drafts.get(&n).map(|d| d.name.clone()).or_else(|| Editor::saved(page, n).and_then(|m| m["name"].as_str().map(String::from))).unwrap_or(format!("Macro {n}"));
+    /// Delete the macro open. Ectodeck's goes at once, and the controls that
+    /// ran it are handed back for the page to clear.
+    fn delete(&mut self, page: &Page, kb: &dyn Fn(device::Ask)) -> Option<WindowAsk> {
+        let n = self.ed.current?;
+        let name = self.ed.drafts.get(&n).map(|d| d.name.clone()).or_else(|| self.ed.saved(page, n).and_then(|m| m["name"].as_str().map(String::from))).unwrap_or(format!("Macro {n}"));
+        if self.ed.lib == Lib::Ectodeck {
+            crate::library::delete(n);
+            self.ed.drafts.remove(&n);
+            self.ed.current = None;
+            self.status(format!("Deleted {name}. Any button set to it now does nothing."), 1);
+            return Some(WindowAsk::MacroGone(n));
+        }
         self.ed.busy = true;
         self.status(format!("Deleting {name}…"), 0);
         self.saving = Some(Saving { n, name, added: Vec::new(), profiles: 0, wrote: false });
         kb(device::Ask::WriteMacro(n as u8, json!({ "delete": true })));
+        None
     }
 
     /// The keyboard answered a write; true when the Z10's page should show it.
@@ -899,19 +963,25 @@ impl MacroPage {
 
     pub fn refresh(&mut self, page: &Page) {
         let ui = &self.ui;
-        if page.dev.is_none() {
+        let keyboard = self.ed.lib == Lib::Keyboard;
+        // (the switch between the two libraries, while there's a keyboard to have one)
+        ui.set_library(if keyboard { 0 } else { 1 });
+        ui.set_both_libraries(page.dev.is_some() || keyboard);
+        // (Ectodeck's own macros belong to no one device)
+        ui.set_lib_title(if keyboard { "EVGA Z10 RGB".into() } else { "".into() });
+        if keyboard && page.dev.is_none() {
             ui.set_status_text("Reading the keyboard…".into());
             return;
         }
         self.ed.settle(page);
         let rec = self.ed.rec.is_some();
         let list = self.ed.list(page);
-        let saved_count = Editor::macros_count(page);
+        let saved_count = self.ed.macros_count(page);
         let items: Vec<MacroItem> = list
             .iter()
             .map(|&n| {
                 let d = self.ed.drafts.get(&n);
-                let m = Editor::saved(page, n);
+                let m = self.ed.saved(page, n);
                 let steps = d.map(Editor::effective).unwrap_or_else(|| m.as_ref().and_then(|m| m["steps"].as_array().cloned()).unwrap_or_default());
                 let name = d.map(|d| d.name.clone()).or_else(|| m.as_ref().and_then(|m| m["name"].as_str().map(String::from))).filter(|s| !s.is_empty()).unwrap_or(format!("Macro {n}"));
                 MacroItem {
@@ -927,7 +997,7 @@ impl MacroPage {
         // the chosen one brought into view, as the web page scrolled it to the nearest edge
         if std::mem::take(&mut self.scroll_to) {
             if let Some(i) = items.iter().position(|m| m.current) {
-                let view = self.ui.get_window_height() - 36.0 - 56.0 - 10.0;
+                let view = self.ui.get_window_height() - 36.0 - 100.0 - 10.0;
                 let (top, bottom) = (i as f32 * 55.0, i as f32 * 55.0 + 53.0);
                 let at = -self.ui.get_lib_scroll();
                 if top < at {
@@ -938,7 +1008,10 @@ impl MacroPage {
             }
         }
         crate::front::set_rows(&self.items, items);
-        ui.set_slots_text(format!("{saved_count} of 100 slots").into());
+        ui.set_slots_text(match self.ed.room() {
+            Some(room) => format!("Kept on the keyboard, so they play even with Ectodeck closed. {saved_count} of {room} slots used."),
+            None => format!("Kept in Ectodeck, which plays these for your mouse’s buttons while it’s running. {saved_count} saved."),
+        }.into());
         ui.set_can_new(!self.ed.free_slots(page).is_empty() && !rec);
 
         let Some(n) = self.ed.current else { return };
@@ -957,8 +1030,10 @@ impl MacroPage {
             ("Not saved yet", if dirty { 1 } else { 0 })
         } else if dirty {
             ("Changed, not saved yet", 1)
-        } else {
+        } else if keyboard {
             ("Saved on the keyboard", 0)
+        } else {
+            ("Saved in Ectodeck", 0)
         };
         ui.set_state_text(state.into());
         ui.set_state_kind(kind);
@@ -970,12 +1045,20 @@ impl MacroPage {
         crate::front::sync_cells(&self.chain, cells);
         ui.set_chain_h(h);
         ui.set_chain_empty(if eff.is_empty() && live == 0 { if rec { 2 } else { 1 } } else { 0 });
-        let hint = if rec { "Type the keys on your Z10. Press Stop to finish." } else { "Press Record and type the keys on your Z10, or add keys, media keys and waits with the buttons below." };
+        // (a recording is typed on the keyboard, for either library, while there's one)
+        let hint = if rec {
+            "Type the keys on your Z10. Press Stop to finish."
+        } else if page.dev.is_some() {
+            "Press Record and type the keys on your Z10, or add keys, media keys and waits with the buttons below."
+        } else {
+            "Add keys, media keys and waits with the buttons below."
+        };
         let lines: Vec<SharedString> = crate::text::wrap(400, 13.0, hint, 440.0).into_iter().map(Into::into).collect();
         ui.set_empty_lines(ModelRc::new(VecModel::from(lines)));
 
+        // (the keyboard's macros have room for so many steps; Ectodeck's, any number)
         let used = macros::bytes(&eff) + ed.rec.as_ref().map_or(0, |r| r.used);
-        let left = ROOM as i64 - used as i64;
+        let left = if keyboard { ROOM as i64 - used as i64 } else { i64::MAX };
         let count = eff.len() + eff.iter().filter(|s| s["after"].as_u64().unwrap_or(0) > 0).count();
         let (meter, warn) = if left < 60 {
             (if left < 4 { "Full".to_string() } else { format!("Nearly full: room for about {} more key presses", left / 4) }, true)
@@ -990,14 +1073,14 @@ impl MacroPage {
         ui.set_can_key(!off && left >= 8);
         ui.set_can_media(!off && left >= 12);
         ui.set_can_wait(!off && !d.steps.is_empty());
-        ui.set_can_record(!locked && left >= 4);
+        ui.set_can_record(!locked && left >= 4 && page.dev.is_some());
         if let Some(r) = &ed.rec {
             ui.set_rec_clock(macros::clock(r.elapsed).into());
             ui.set_blink((r.elapsed * 2.0).floor() as i64 % 2 == 0);
         }
 
-        let places = Editor::places(page, n);
-        let plays = d.plays.map(|(m, c)| Plays::One(m, c)).or_else(|| Editor::plays_of(page, n));
+        let places = self.ed.places(page, n);
+        let plays = d.plays.map(|(m, c)| Plays::One(m, c)).or_else(|| self.ed.plays_of(page, n));
         let label = match (places.is_empty(), plays) {
             (true, _) => "Play once".to_string(),
             (_, Some(Plays::Varies)) => "Varies by key".into(),

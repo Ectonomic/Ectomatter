@@ -1229,7 +1229,8 @@ pub fn step_name(s: &Value) -> String {
     let code = k.as_str().and_then(hid::usage).map_or_else(|| u(k), u32::from);
     let name = match u8::try_from(code) {
         Ok(m) if hid::is_modifier(m) => Some(modifier(m, false).to_string()),
-        _ if code > 0 && code < 104 => hid_name(code),
+        // (F13 to F24 by their names too, which Ectodeck's own macros can play)
+        _ if code > 0 && code < 256 => hid_name(code),
         _ => None,
     };
     name.unwrap_or(format!("Code {code}"))

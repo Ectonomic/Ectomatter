@@ -167,8 +167,17 @@ struct Run {
     told: Told,
 }
 
-/// A core's notices, as its thread keeps them and its handle reads them.
-type Told = std::sync::Arc<std::sync::Mutex<Vec<(String, Value)>>>;
+/// A core's notices, as its thread keeps them and its handle reads them, and
+/// what to wake when one comes (Core::on_told): a control pressed can't wait
+/// for its page to look.
+#[derive(Clone, Default)]
+struct Told(std::sync::Arc<std::sync::Mutex<Notices>>);
+
+#[derive(Default)]
+struct Notices {
+    list: Vec<(String, Value)>,
+    wake: Option<Box<dyn Fn() + Send>>,
+}
 
 type Tell = mpsc::Sender<Result<String, String>>;
 
@@ -229,9 +238,16 @@ impl ectodeck::core::usb::HostHidDevice for Run {
 
 impl ectodeck::core::host::Host for Run {
     fn notify(&mut self, method: String, params: String) {
-        eprintln!("ectodeck-native: {} told {method}", self.id);
+        // (a control's every press isn't worth a line)
+        if !method.starts_with("input/") {
+            eprintln!("ectodeck-native: {} told {method}", self.id);
+        }
         let p = serde_json::from_str(&params).unwrap_or(Value::Null);
-        self.told.lock().unwrap_or_else(|p| p.into_inner()).push((method, p));
+        let mut n = self.told.0.lock().unwrap_or_else(|p| p.into_inner());
+        n.list.push((method, p));
+        if let Some(wake) = &n.wake {
+            wake();
+        }
     }
     fn after(&mut self, ms: u32, tag: u32) {
         self.timers.retain(|&(_, t)| t != tag);
@@ -334,7 +350,13 @@ impl Core {
 
     /// What the core has told since this was last asked, oldest first.
     pub fn told(&self) -> Vec<(String, Value)> {
-        std::mem::take(&mut *self.told.lock().unwrap_or_else(|p| p.into_inner()))
+        std::mem::take(&mut self.told.0.lock().unwrap_or_else(|p| p.into_inner()).list)
+    }
+
+    /// Run `wake` as each notice comes, on the core's thread; whoever it wakes
+    /// reads them with `told`.
+    pub fn on_told(&self, wake: impl Fn() + Send + 'static) {
+        self.told.0.lock().unwrap_or_else(|p| p.into_inner()).wake = Some(Box::new(wake));
     }
 
     /// Call `method` with `params`, and wait for the core's answer.
@@ -747,6 +769,87 @@ mod tests {
         let core = Core::start(&dir, data.clone(), Box::new(One(Some(Box::new(fake))))).unwrap();
         core.call("initialize", &serde_json::json!({ "protocol": 3 })).unwrap();
         (core, sent, data)
+    }
+
+    /// The fake mouse's key reports: what it sends as a keyboard, each read once.
+    struct FakeKeys(Arc<Mutex<VecDeque<Vec<u8>>>>);
+
+    impl Hid for FakeKeys {
+        fn send_feature(&mut self, _: &[u8]) -> Result<(), String> {
+            Err("nothing is sent to the mouse's key reports".into())
+        }
+        fn get_feature(&mut self, _: u8, _: usize) -> Result<Vec<u8>, String> {
+            Err("nothing is asked of the mouse's key reports".into())
+        }
+        fn write(&mut self, _: &[u8]) -> Result<usize, String> {
+            Err("nothing is sent to the mouse's key reports".into())
+        }
+        fn read(&mut self, _: u32) -> Result<Vec<u8>, String> {
+            Ok(self.0.lock().unwrap().pop_front().unwrap_or_default())
+        }
+    }
+
+    /// A computer with the fake mouse's command channel and its key reports.
+    struct MouseAndKeys(Option<Box<dyn Hid>>, Option<Box<dyn Hid>>);
+
+    impl Usb for MouseAndKeys {
+        fn devices(&mut self) -> Vec<DeviceInfo> {
+            vec![
+                DeviceInfo { vendor: 0x1038, product: 0x1722, interface: 0, usage_page: 0xFFC0, usage: 1, path: "mouse".into() },
+                DeviceInfo { vendor: 0x1038, product: 0x1722, interface: 2, usage_page: 0x0001, usage: 0x0006, path: "mouse-keys".into() },
+            ]
+        }
+        fn open(&mut self, d: &DeviceInfo) -> Result<Box<dyn Hid>, String> {
+            let which = if d.path == "mouse" { &mut self.0 } else { &mut self.1 };
+            which.take().ok_or_else(|| "opened twice".to_string())
+        }
+    }
+
+    /// A button given one of Ectodeck's host slots sends that slot's reserved
+    /// code, and the core hears it in the mouse's key reports: pressed, then
+    /// let go, each told at once (waking whoever waits for it), by the
+    /// button's id.
+    #[test]
+    fn a_host_slot_button_is_heard_pressed_and_let_go() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let reports = Arc::new(Mutex::new(VecDeque::new()));
+        let usb = MouseAndKeys(Some(Box::new(FakeMouse { sent: sent.clone(), waiting: VecDeque::new() })), Some(Box::new(FakeKeys(reports.clone()))));
+        let data = std::env::temp_dir().join(format!("ectodeck-mouse-host-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data);
+        let core = Core::start(&crate::cores::dir().join("steelseries"), data.clone(), Box::new(usb)).unwrap();
+        core.call("initialize", &serde_json::json!({ "protocol": 3 })).unwrap();
+        let woken = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let w = woken.clone();
+        core.on_told(move || {
+            w.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        });
+        core.call("keys/set", &serde_json::json!({ "device": "sensei310-1", "layer": "base", "control": "right-side-front", "action": { "host": 6 } })).unwrap();
+        let buttons = sent.lock().unwrap().iter().rev().find(|(_, _, b)| b[..2] == [0x00, 0x31]).map(|(_, _, b)| b.clone()).expect("the buttons sent");
+        assert_eq!(buttons[3 + 6 * 5..3 + 6 * 5 + 2], [0x51, 0xAB], "button 7 sends the slot's reserved code");
+        let _ = core.told();
+        let heard = |want: &str| {
+            for _ in 0..50 {
+                std::thread::sleep(Duration::from_millis(10));
+                let _ = core.call("settings/get", &serde_json::json!({ "device": "sensei310-1" }));
+                if let Some((_, p)) = core.told().into_iter().find(|(m, _)| m == want) {
+                    return p;
+                }
+            }
+            panic!("never heard {want}");
+        };
+        reports.lock().unwrap().push_back(vec![1, 0, 0, 0xAB, 0, 0, 0, 0, 0]);
+        let down = heard("input/down");
+        assert_eq!((down["control"].as_str(), down["host"].as_u64()), (Some("right-side-front"), Some(6)));
+        reports.lock().unwrap().push_back(vec![1, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let up = heard("input/up");
+        assert_eq!(up["control"], "right-side-front");
+        assert!(woken.load(std::sync::atomic::Ordering::Relaxed) >= 2, "each told woke the page");
+        // a key the button sends for the computer is no slot's
+        reports.lock().unwrap().push_back(vec![1, 0, 0, 0x04, 0, 0, 0, 0, 0]);
+        std::thread::sleep(Duration::from_millis(60));
+        let _ = core.call("settings/get", &serde_json::json!({ "device": "sensei310-1" }));
+        assert!(core.told().iter().all(|(m, _)| !m.starts_with("input/")));
+        let _ = std::fs::remove_dir_all(&data);
     }
 
     /// The mouse as its page's thread hears it, from the core on the fake

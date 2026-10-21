@@ -105,6 +105,8 @@ pub enum Ask {
     MouseProfileNew,
     MouseProfileMenu(f32, f32, f32),
     MouseUndo,
+    /// the Macro Editor, from the mouse's bar: on Ectodeck's own macros
+    MouseMacroEditor,
     /// Home's desk: a press on a device (or, -1, the empty desk), the pointer
     /// moved pressed, let go, the wheel, the pointer over a device or off it,
     /// Arrange, Done, a zoom control (-1 out, 0 to 100%, 1 in, 2 the fit), and
@@ -305,8 +307,13 @@ pub enum WindowAsk {
     Minimize,
     Maximize,
     Close,
-    /// open the Macro Editor's window, on this macro (0: as it was)
-    OpenMacros(u32),
+    /// open the Macro Editor's window, on a library and on this macro (0: as it was)
+    OpenMacros(crate::macros::Lib, u32),
+    /// how one of Ectodeck's macros plays, set in the Macro Editor, for the
+    /// controls that run it
+    MacroPlays(u32, ectodeck_protocol::Plays),
+    /// one of Ectodeck's macros deleted: the controls that ran it do nothing now
+    MacroGone(u32),
     /// open the Key lab's window
     OpenLab,
     /// open the screen layout editor's window, on this layout of the Library
@@ -554,6 +561,8 @@ pub struct Front {
     bind_menu: Option<(usize, (f32, f32, f32))>,
     /// the menu on the mouse's profile in use is open
     profile_menu: bool,
+    /// Ectodeck's macros played, for the controls given one (made when first needed)
+    typist: Option<crate::typist::Player>,
     /// a slider set to Nothing because the other took its job: the job it had
     idled: [Option<String>; 2],
     last_sliders: Option<serde_json::Value>,
@@ -724,6 +733,7 @@ impl Front {
         on!(on_mouse_profile_new, Ask::MouseProfileNew);
         on!(on_mouse_profile_menu, |x, y, h| Ask::MouseProfileMenu(x, y, h));
         on!(on_mouse_undo, Ask::MouseUndo);
+        on!(on_mouse_macro_editor, Ask::MouseMacroEditor);
         on!(on_desk_press, |i, x, y| Ask::DeskPress(i, x, y));
         on!(on_desk_pan, |x, y| Ask::DeskPan(x, y));
         on!(on_desk_move, |x, y| Ask::DeskMove(x, y));
@@ -874,6 +884,7 @@ impl Front {
             bind: crate::uistate::get("slider_bind").and_then(|v| serde_json::from_value(v).ok()).unwrap_or(["own".into(), "own".into()]),
             bind_menu: None,
             profile_menu: false,
+            typist: None,
             idled: crate::uistate::get("slider_idled").and_then(|v| serde_json::from_value(v).ok()).unwrap_or([None, None]),
             last_sliders: None,
             held: None,
@@ -1302,6 +1313,15 @@ impl Front {
                 Ask::MouseUndo => {
                     self.mouse.undo();
                     self.show_mouse_lights();
+                }
+                Ask::MouseMacroEditor => {
+                    self.close_menu();
+                    // (on the chosen button's macro, when it runs one)
+                    let n = match self.mouse.button.and_then(|i| Action::read(&self.mouse.job(i))) {
+                        Some(Action::Macro { n, .. }) => n,
+                        _ => 0,
+                    };
+                    window.push(WindowAsk::OpenMacros(crate::macros::Lib::Ectodeck, n));
                 }
                 Ask::MouseEffect(i) => {
                     if let Some((e, _)) = crate::mouse::EFFECTS.get(i.max(0) as usize) {
@@ -1888,7 +1908,7 @@ impl Front {
                         },
                         _ => 0,
                     };
-                    window.push(WindowAsk::OpenMacros(n));
+                    window.push(WindowAsk::OpenMacros(crate::macros::Lib::Keyboard, n));
                 }
                 Ask::ScreenEditor => {
                     self.close_menu();
@@ -1959,6 +1979,11 @@ impl Front {
 
     /// Do what the Macro Editor's page asked; what only its window can do is handed back.
     pub fn act_macros(&mut self) -> Vec<WindowAsk> {
+        if self.macros.is_none() {
+            return Vec::new();
+        }
+        // (where Ectodeck's macros run, as the mouse's profiles say now)
+        self.macros_elsewhere();
         let Some(m) = &mut self.macros else { return Vec::new() };
         let kb = self.kb.clone();
         let tell = move |a: device::Ask| {
@@ -3739,8 +3764,72 @@ impl Front {
             self.overlays.lcd.2 = back;
             self.show_overlays();
         }        // the Macro Editor shows the same keyboard: its macros, and the keys they are on
+        if self.macros.is_some() {
+            self.macros_elsewhere();
+        }
         if let Some(m) = &mut self.macros {
             m.refresh(&self.page);
+        }
+    }
+
+    /// Where Ectodeck's macros run, for the Macro Editor's library of them:
+    /// each mouse profile's buttons given one, and how each plays there.
+    pub fn macros_elsewhere(&mut self) {
+        let Some(m) = &mut self.macros else { return };
+        let (mut runs, mut names) = (Vec::new(), Vec::new());
+        if let Some(store) = &self.mouse.profiles {
+            for (pi, p) in store.list.iter().enumerate() {
+                names.push(p.name.clone());
+                for (bi, (id, label, _)) in crate::mouse::BUTTONS.iter().enumerate() {
+                    if let Some(Action::Macro { n, plays }) = Action::read(&p.body["keys"]["base"][*id]) {
+                        runs.push(crate::macros::Elsewhere { profile: pi as u8, control: format!("The mouse’s {}", label.to_lowercase()), at: bi as u32, n, plays });
+                    }
+                }
+            }
+        }
+        for ed in [&mut m.ed, &mut m.other] {
+            if ed.lib == crate::macros::Lib::Ectodeck {
+                ed.elsewhere = runs.clone();
+                ed.names = names.clone();
+            }
+        }
+    }
+
+    /// How one of Ectodeck's macros plays, set in the Macro Editor, on every
+    /// mouse button that runs it, on every profile.
+    pub fn macro_plays(&mut self, n: u32, how: ectodeck_protocol::Plays) {
+        let Some(store) = &mut self.mouse.profiles else { return };
+        // (the mouse knows the buttons only as host slots: nothing to tell it)
+        crate::mouse::rewrite_macro(store, n, &Action::Macro { n, plays: how }.write());
+        self.macros_elsewhere();
+        self.refresh();
+    }
+
+    /// One of Ectodeck's macros deleted: every mouse button that ran it, on
+    /// every profile, does nothing now, as the delete question said, so a new
+    /// macro given its number later isn't run by them unasked.
+    pub fn macro_gone(&mut self, n: u32) {
+        let Some(store) = &mut self.mouse.profiles else { return };
+        let off = serde_json::json!({ "off": true });
+        // (the profile in use is on the mouse: its buttons are told too)
+        for bi in crate::mouse::rewrite_macro(store, n, &off) {
+            self.mouse.set_job(bi, off.clone());
+        }
+        self.macros_elsewhere();
+        self.refresh();
+    }
+
+    /// A control given a job Ectodeck does (`job`), pressed or let go: one of
+    /// Ectodeck's macros played, as its job says it plays.
+    fn play_for(&mut self, control: &str, job: Option<serde_json::Value>, down: bool) {
+        let Some(Action::Macro { n, plays }) = job.as_ref().and_then(Action::read) else { return };
+        let player = self.typist.get_or_insert_with(crate::typist::Player::start);
+        if !down {
+            player.up(control);
+            return;
+        }
+        if let Some(m) = crate::library::get(n) {
+            player.down(control, m["steps"].as_array().cloned().unwrap_or_default(), plays);
         }
     }
 
@@ -3762,6 +3851,12 @@ impl Front {
             }
             Heard::Drawn(w, scale, l) => {
                 self.mouse_drawn(w, scale, *l);
+                return;
+            }
+            // a button given one of Ectodeck's macros: pressed plays it (let go ends
+            // one that plays while it's held)
+            Heard::Input(control, down) => {
+                self.play_for(&format!("mouse/{control}"), crate::mouse::BUTTONS.iter().position(|(b, ..)| *b == control).map(|i| self.mouse.job(i)), down);
                 return;
             }
         }
@@ -4215,7 +4310,12 @@ impl Front {
         self.close_picker();
         let Some(b) = self.mouse.button else { return };
         let now = self.mouse.job(b);
-        let rows: Vec<MenuRow> = crate::mouse::choices(kind).iter().map(|(label, a)| MenuRow { kind: 0, label: label.as_str().into(), tag: "".into(), tick: *a == now, sub: "".into() }).collect();
+        // (a macro ticked whatever it plays as)
+        let same = |a: &serde_json::Value| *a == now || (a.get("macro").is_some() && a["macro"] == now["macro"]);
+        let mut rows: Vec<MenuRow> = crate::mouse::choices(kind).iter().map(|(label, a)| MenuRow { kind: 0, label: label.as_str().into(), tag: "".into(), tick: same(a), sub: "".into() }).collect();
+        if rows.is_empty() && kind == crate::mouse::MACRO_KIND {
+            rows.push(MenuRow { kind: 3, label: "No macros yet. Make one in the Macro Editor.".into(), tag: "".into(), tick: false, sub: "".into() });
+        }
         let h = 6.0 + rows.len() as f32 * 33.0 + 6.0;
         self.ui.set_menu_search(false);
         self.ui.set_menu_back(false);

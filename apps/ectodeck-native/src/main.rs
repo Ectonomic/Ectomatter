@@ -39,6 +39,7 @@ mod lcd_page;
 mod lcd_parity;
 mod lcd_player;
 mod lcd_stats;
+mod library;
 mod lighting;
 mod macro_page;
 mod macros;
@@ -59,6 +60,7 @@ mod setups;
 mod text;
 mod typefaces;
 mod tray;
+mod typist;
 mod uistate;
 mod z10;
 
@@ -613,6 +615,10 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         };
         front.screen_news(lcd_player::News { rows, sequence, state, page, turning, elapsed, length });
     }
+    // ECTODECK_NATIVE_LIBRARY=FILE: Ectodeck's own macros, as macros.json keeps them
+    if let Some(v) = std::env::var("ECTODECK_NATIVE_LIBRARY").ok().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) {
+        library::seed(&v);
+    }
     // ECTODECK_NATIVE_MOUSE=FILE: the mouse as its core last told it (what the mouse's
     // thread hears), and ECTODECK_NATIVE_MOUSE_TAB=N its page's tab
     if let Some(v) = std::env::var("ECTODECK_NATIVE_MOUSE").ok().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()) {
@@ -966,6 +972,16 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     eprintln!("saved {path}: {w}x{h}, keyboard at {rect:?}");
 }
 
+/// Which of the Macro Editor's libraries a snapshot or a startup open is on:
+/// ECTODECK_NATIVE_MACRO_LIB=ectodeck for Ectodeck's own, else the keyboard's.
+fn macro_lib() -> macros::Lib {
+    if std::env::var("ECTODECK_NATIVE_MACRO_LIB").is_ok_and(|v| v == "ectodeck") {
+        macros::Lib::Ectodeck
+    } else {
+        macros::Lib::Keyboard
+    }
+}
+
 /// The Macro Editor's window without a window: one frame, saved as a PNG.
 fn snap_macros(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>, n: u32, path: &str) {
     let (w, h) = std::env::var("ECTODECK_NATIVE_SIZE")
@@ -986,8 +1002,9 @@ fn snap_macros(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>
         });
     };
     draw(&mut px);
+    front.macros_elsewhere();
     if let Some(m) = &mut front.macros {
-        m.open(&front.page, (n > 0).then_some(n));
+        m.open(&front.page, macro_lib(), (n > 0).then_some(n));
     }
     window.request_redraw();
     draw(&mut px);
@@ -1881,9 +1898,10 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
                 app.hide();
             }
         }
-        if let Some(n) = open_macros.filter(|_| app.front.page.dev.is_some()) {
+        // (Ectodeck's own macros don't wait for the keyboard)
+        if let Some(n) = open_macros.filter(|_| macro_lib() == macros::Lib::Ectodeck || app.front.page.dev.is_some()) {
             open_macros = None;
-            app.open_macros(n);
+            app.open_macros(macro_lib(), n);
         }
         if open_lab && app.board.is_some() {
             open_lab = false;
@@ -1954,7 +1972,9 @@ impl App {
                     }
                 }
                 WindowAsk::Close => self.hide(),
-                WindowAsk::OpenMacros(n) => self.open_macros(*n),
+                WindowAsk::OpenMacros(lib, n) => self.open_macros(*lib, *n),
+                WindowAsk::MacroPlays(n, how) => self.front.macro_plays(*n, *how),
+                WindowAsk::MacroGone(n) => self.front.macro_gone(*n),
                 WindowAsk::OpenLab => self.open_lab(),
                 WindowAsk::OpenLayouts(i) => self.open_layouts(*i),
                 WindowAsk::ShowSettings => {
@@ -1999,7 +2019,10 @@ impl App {
                         self.show_settings(Some(from));
                         self.front.show_sensors();
                     }
-                    WindowAsk::OpenMacros(_) | WindowAsk::OpenLab | WindowAsk::OpenLayouts(_) => {}
+                    // (what the Macro Editor's changes mean for the mouse's buttons)
+                    WindowAsk::MacroPlays(n, how) => self.front.macro_plays(n, how),
+                    WindowAsk::MacroGone(n) => self.front.macro_gone(n),
+                    WindowAsk::OpenMacros(..) | WindowAsk::OpenLab | WindowAsk::OpenLayouts(_) => {}
                 }
             }
         }
@@ -2030,18 +2053,19 @@ impl App {
     }
 
     /// Open the Macro Editor's window, made the first time, on a macro.
-    fn open_macros(&mut self, n: u32) {
+    fn open_macros(&mut self, lib: macros::Lib, n: u32) {
         if self.front.macros.is_none() {
             let ui = MacroWindow::new().unwrap();
             let _ = slint::ComponentHandle::window(&ui);
             slint::ComponentHandle::show(&ui).unwrap();
             self.front.macros = Some(macro_page::MacroPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false)));
-            self.subs[MACROS] = Some(self.make_sub("EVGA Z10 RGB / Macro Editor", MACRO_SIZE, MACRO_MIN_SIZE));
+            self.subs[MACROS] = Some(self.make_sub("Macro Editor", MACRO_SIZE, MACRO_MIN_SIZE));
         } else {
             self.show_sub(MACROS);
         }
+        self.front.macros_elsewhere();
         if let Some(m) = &mut self.front.macros {
-            m.open(&self.front.page, (n > 0).then_some(n));
+            m.open(&self.front.page, lib, (n > 0).then_some(n));
         }
     }
 

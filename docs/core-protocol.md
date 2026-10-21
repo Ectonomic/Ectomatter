@@ -299,7 +299,9 @@ Each background carries its own settings in the shared settings language, and th
 
 ### input: presses, turns and slides
 
-Notifications from the core whenever a control is used: `input/down`, `input/up`, `input/turn {ticks}`, `input/slide {value}`, `input/touch {x, y}`. Devices run by the host, such as the M3, depend on these entirely. Devices with their own memory, such as the Z10, send them only for controls assigned to `{"host": ...}`, so a keyboard key can trigger a frontend action without the keyboard losing its own assignments.
+Notifications from the core whenever a control is used: `input/down`, `input/up`, `input/turn {ticks}`, `input/slide {value}`, `input/touch {x, y}`, each with the `device` and the `control`'s id, and for a control on one of its host slots, the slot's number as `host`. Devices run by the host, such as the M3, depend on these entirely. Devices with their own memory, such as the Z10, send them only for controls assigned to `{"host": ...}`, so a keyboard key can trigger a frontend action without the keyboard losing its own assignments.
+
+How a core hears a host slot is its own business. SteelSeries' core gives each of the mouse's buttons one slot, a keyboard usage no key has (`0xA5` and on, reserved by the USB tables; Linux reports it as `KEY_UNKNOWN`, which the desktop's keymaps give no symbol, so no app types anything for it): the mouse sends it from its keyboard interface when the button is pressed, and the core, reading that interface while any button has a slot, tells the frontend which button it was. The mouse itself keeps working without the frontend; a button on a slot then does nothing.
 
 A core acts on its own input first and tells the frontend second. A press has to show on the device within a frame (the M3's backgrounds answer every press with a ripple, a splash or a fish feeding), and a round trip through the frontend would be too slow for that.
 
