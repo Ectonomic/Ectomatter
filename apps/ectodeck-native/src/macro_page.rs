@@ -18,15 +18,15 @@ use crate::{Cell, MacroItem, MacroWindow, MenuRow};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Ask {
-    /// the library switched to: 0 the keyboard's, 1 Ectodeck's
-    Library(i32),
     Move,
     Minimize,
     Maximize,
     Close,
-    Choose(i32),
-    RowMenu(i32, f32, f32),
-    New,
+    /// a macro chosen, its menu opened, a new one made: in a library (0 the
+    /// keyboard's, 1 Ectodeck's), which then shows
+    Choose(i32, i32),
+    RowMenu(i32, i32, f32, f32),
+    NewIn(i32),
     Rename,
     NameDone(String),
     NameCancel,
@@ -117,7 +117,33 @@ pub struct MacroPage {
     fake_rec: bool,
     /// the chosen macro is to be scrolled into view in the list
     scroll_to: bool,
+    /// whether a mouse is known that keeps one of Ectodeck's macros in its own
+    /// memory when the macro is a shortcut (mouse.rs's held_by_mouse)
+    pub mouse_holds: bool,
 }
+
+/// A library by the number the list gives it: 0 the keyboard's, 1 Ectodeck's.
+fn lib_of(l: i32) -> Lib {
+    if l == 0 {
+        Lib::Keyboard
+    } else {
+        Lib::Ectodeck
+    }
+}
+
+/// The keyboard whose memory keeps its macros, by the name its section has.
+const KEYBOARD: &str = "EVGA Z10 RGB";
+
+/// The list's measures: a section's heading, a line of its note (Geist at
+/// 12px), the room under the note, a macro's row, and the room between sections.
+const HEAD_H: f32 = 30.0;
+const NOTE_LINE: f32 = 15.6;
+const NOTE_W: f32 = 254.0;
+const UNDER_NOTE: f32 = 8.0;
+const ROW_H: f32 = 55.0;
+const BETWEEN: f32 = 18.0;
+/// where the list starts in its column, below the window's bar
+const LIST_TOP: f32 = 36.0 + 8.0;
 
 fn row(kind: i32, label: &str, tick: bool) -> MenuRow {
     MenuRow { kind, label: label.into(), tag: "".into(), tick, sub: "".into() }
@@ -137,13 +163,12 @@ impl MacroPage {
             }};
         }
         on!(on_drag, Ask::Move);
-        on!(on_library_chosen, |i| Ask::Library(i));
         on!(on_minimize, Ask::Minimize);
         on!(on_maximize, Ask::Maximize);
         on!(on_close_window, Ask::Close);
-        on!(on_choose, |n| Ask::Choose(n));
-        on!(on_row_menu, |n, x, y| Ask::RowMenu(n, x, y));
-        on!(on_new_macro, Ask::New);
+        on!(on_choose, |l, n| Ask::Choose(l, n));
+        on!(on_row_menu, |l, n, x, y| Ask::RowMenu(l, n, x, y));
+        on!(on_new_in, |l| Ask::NewIn(l));
         on!(on_rename, Ask::Rename);
         on!(on_name_done, |t| Ask::NameDone(t.to_string()));
         on!(on_name_cancel, Ask::NameCancel);
@@ -186,6 +211,7 @@ impl MacroPage {
             items,
             fake_rec: false,
             scroll_to: false,
+            mouse_holds: false,
         }
     }
 
@@ -223,12 +249,23 @@ impl MacroPage {
         if asks.is_empty() {
             return (window, false);
         }
-        // (the keyboard's library waits for the keyboard to be read, all but the
-        // window itself and the way to Ectodeck's; Ectodeck's doesn't wait)
-        let waiting = self.ed.lib == Lib::Keyboard && page.dev.is_none();
         let mut changed = false;
         for ask in asks {
-            if waiting && !matches!(ask, Ask::Move | Ask::Minimize | Ask::Maximize | Ask::Close | Ask::Library(_)) {
+            // (a macro or a New in the library not shown shows it first, unless one
+            // is being recorded or saved; then it waits)
+            let mut switched = false;
+            if let Ask::Choose(l, _) | Ask::RowMenu(l, ..) | Ask::NewIn(l) = ask {
+                let lib = lib_of(l);
+                switched = self.ed.lib != lib;
+                self.show_lib(lib);
+                if self.ed.lib != lib {
+                    continue;
+                }
+            }
+            // (the keyboard's library waits for the keyboard to be read, all but the
+            // window itself; Ectodeck's doesn't wait)
+            let waiting = self.ed.lib == Lib::Keyboard && page.dev.is_none();
+            if waiting && !matches!(ask, Ask::Move | Ask::Minimize | Ask::Maximize | Ask::Close) {
                 continue;
             }
             if self.ed.busy && !matches!(ask, Ask::Move | Ask::Minimize | Ask::Maximize | Ask::Close | Ask::RecTick) {
@@ -236,7 +273,6 @@ impl MacroPage {
             }
             match ask {
                 Ask::Move => window.push(WindowAsk::Move),
-                Ask::Library(i) => self.show_lib(if i == 0 { Lib::Keyboard } else { Lib::Ectodeck }),
                 Ask::Minimize => window.push(WindowAsk::Minimize),
                 Ask::Maximize => window.push(WindowAsk::Maximize),
                 Ask::Close => {
@@ -246,15 +282,16 @@ impl MacroPage {
                     self.close_menu(false);
                     window.push(WindowAsk::Close);
                 }
-                Ask::Choose(n) => {
+                Ask::Choose(_, n) => {
                     let n = n as u32;
                     // choosing the open macro again puts it away, back to the blank one
-                    self.ed.current = if self.ed.current == Some(n) { None } else { Some(n) };
+                    // (one last open in the other library is shown, not open)
+                    self.ed.current = if self.ed.current == Some(n) && !switched { None } else { Some(n) };
                     self.ed.sel_step = None;
                     self.ed.ins = None;
                     self.ed.edit_name = false;
                 }
-                Ask::RowMenu(n, x, y) => {
+                Ask::RowMenu(_, n, x, y) => {
                     if self.ed.rec.is_some() {
                         continue;
                     }
@@ -267,7 +304,7 @@ impl MacroPage {
                     }
                     self.open_menu(page, Kind::Macro, (x, y, 0.0), 220.0, 0.0, false);
                 }
-                Ask::New => {
+                Ask::NewIn(_) => {
                     if self.ed.rec.is_none() {
                         self.ed.new_macro(page);
                         self.scroll_to = true;
@@ -962,44 +999,93 @@ impl MacroPage {
 
     // ------------------------------------------------------------ the page's models
 
-    pub fn refresh(&mut self, page: &Page) {
-        let ui = &self.ui;
-        let keyboard = self.ed.lib == Lib::Keyboard;
-        // (the switch between the two libraries, while there's a keyboard to have one)
-        ui.set_library(if keyboard { 0 } else { 1 });
-        ui.set_both_libraries(page.dev.is_some() || keyboard);
-        // (Ectodeck's own macros belong to no one device)
-        ui.set_lib_title(if keyboard { "EVGA Z10 RGB".into() } else { "".into() });
-        if keyboard && page.dev.is_none() {
-            ui.set_status_text("Reading the keyboard…".into());
-            return;
-        }
-        self.ed.settle(page);
-        let rec = self.ed.rec.is_some();
-        let list = self.ed.list(page);
-        let saved_count = self.ed.macros_count(page);
-        let items: Vec<MacroItem> = list
-            .iter()
-            .map(|&n| {
-                let d = self.ed.drafts.get(&n);
-                let m = self.ed.saved(page, n);
+    /// The list: Ectodeck's macros, then those of the keyboard, which keeps
+    /// its own, each under a heading saying where they're kept and who plays
+    /// them, with a way to make a new one there. The keyboard's shows once it
+    /// has been read, or while its library is open and being read.
+    fn sections(&self, page: &Page) -> Vec<MacroItem> {
+        let shown = self.ed.lib;
+        let still = self.ed.rec.is_some() || self.ed.busy;
+        let mut out = Vec::new();
+        let mut y = 0.0;
+        for lib in [Lib::Ectodeck, Lib::Keyboard] {
+            let ed = if shown == lib { &self.ed } else { &self.other };
+            let read = lib == Lib::Ectodeck || page.dev.is_some();
+            if !read && shown != lib {
+                continue;
+            }
+            let count = ed.macros_count(page);
+            let (title, note) = match lib {
+                Lib::Ectodeck if self.mouse_holds => ("ECTODECK".to_string(), format!("Kept in Ectodeck. Shortcuts on your mouse play even with Ectodeck closed. {count} saved.")),
+                Lib::Ectodeck => ("ECTODECK".to_string(), format!("Kept in Ectodeck, so they play while Ectodeck is running. {count} saved.")),
+                Lib::Keyboard if !read => (KEYBOARD.to_uppercase(), "Reading the keyboard…".to_string()),
+                Lib::Keyboard => (KEYBOARD.to_uppercase(), format!("Kept on the keyboard, so they play even with Ectodeck closed. {count} of {} slots used.", ed.room().unwrap_or(0))),
+            };
+            let note = crate::text::wrap(400, 12.0, &note, NOTE_W);
+            if !out.is_empty() {
+                y += BETWEEN;
+            }
+            let h = HEAD_H + note.len() as f32 * NOTE_LINE + UNDER_NOTE;
+            let l = if lib == Lib::Keyboard { 0 } else { 1 };
+            out.push(MacroItem {
+                kind: 1,
+                lib: l,
+                n: 0,
+                name: title.into(),
+                sub: note.join("\n").into(),
+                timed: false,
+                current: false,
+                dirty: false,
+                can_new: read && !still && !ed.free_slots(page).is_empty(),
+                y,
+                h,
+            });
+            y += h;
+            if !read {
+                continue;
+            }
+            for n in ed.list(page) {
+                let d = ed.drafts.get(&n);
+                let m = ed.saved(page, n);
                 let steps = d.map(Editor::effective).unwrap_or_else(|| m.as_ref().and_then(|m| m["steps"].as_array().cloned()).unwrap_or_default());
                 let name = d.map(|d| d.name.clone()).or_else(|| m.as_ref().and_then(|m| m["name"].as_str().map(String::from))).filter(|s| !s.is_empty()).unwrap_or(format!("Macro {n}"));
-                MacroItem {
+                out.push(MacroItem {
+                    kind: 0,
+                    lib: l,
                     n: n as i32,
                     name: name.into(),
                     sub: if d.is_some_and(|d| d.is_new) { "Not saved yet".into() } else { macros::describe(&steps).into() },
                     timed: steps.iter().any(|s| s["after"].as_u64().unwrap_or(0) > 0),
-                    current: self.ed.current == Some(n),
-                    dirty: self.ed.dirty(page, n),
-                }
-            })
-            .collect();
-        // the chosen one brought into view, as the web page scrolled it to the nearest edge
+                    // (only the shown library's open macro is open)
+                    current: shown == lib && ed.current == Some(n),
+                    dirty: ed.dirty(page, n),
+                    can_new: false,
+                    y,
+                    h: ROW_H,
+                });
+                y += ROW_H;
+            }
+        }
+        out
+    }
+
+    pub fn refresh(&mut self, page: &Page) {
+        let keyboard = self.ed.lib == Lib::Keyboard;
+        // (Ectodeck's own macros belong to no one device)
+        self.ui.set_lib_title(if keyboard { KEYBOARD.into() } else { "".into() });
+        let read = !keyboard || page.dev.is_some();
+        if read {
+            self.ed.settle(page);
+        }
+        let items = self.sections(page);
+        let end = items.last().map_or(0.0, |m| m.y + m.h);
+        // the chosen one brought into view, as the web page scrolled it to the
+        // nearest edge, with its section's heading when it's the first under it
         if std::mem::take(&mut self.scroll_to) {
             if let Some(i) = items.iter().position(|m| m.current) {
-                let view = self.ui.get_window_height() - 36.0 - 100.0 - 10.0;
-                let (top, bottom) = (i as f32 * 55.0, i as f32 * 55.0 + 53.0);
+                let view = self.ui.get_window_height() - LIST_TOP - 10.0;
+                let top = if i > 0 && items[i - 1].kind == 1 { items[i - 1].y } else { items[i].y };
+                let bottom = items[i].y + ROW_H - 2.0;
                 let at = -self.ui.get_lib_scroll();
                 if top < at {
                     self.ui.set_lib_scroll(-top);
@@ -1009,11 +1095,13 @@ impl MacroPage {
             }
         }
         crate::front::set_rows(&self.items, items);
-        ui.set_slots_text(match self.ed.room() {
-            Some(room) => format!("Kept on the keyboard, so they play even with Ectodeck closed. {saved_count} of {room} slots used."),
-            None => format!("Kept in Ectodeck. Shortcuts on your mouse play even with Ectodeck closed. {saved_count} saved."),
-        }.into());
-        ui.set_can_new(!self.ed.free_slots(page).is_empty() && !rec);
+        self.ui.set_items_h(end);
+        let ui = &self.ui;
+        if !read {
+            ui.set_status_text("Reading the keyboard…".into());
+            return;
+        }
+        let rec = self.ed.rec.is_some();
 
         let Some(n) = self.ed.current else { return };
         let locked = self.locked(page);
@@ -1110,3 +1198,78 @@ impl MacroPage {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Slint drawing nowhere, for a window made in a test.
+    struct Nowhere;
+    impl slint::platform::Platform for Nowhere {
+        fn create_window_adapter(&self) -> Result<Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
+            Ok(slint::platform::software_renderer::MinimalSoftwareWindow::new(slint::platform::software_renderer::RepaintBufferType::NewBuffer))
+        }
+    }
+
+    /// The list is Ectodeck's macros, then the keyboard's, each under its
+    /// heading. A macro in the library not shown opens in its own library
+    /// (not put away, though it was the last one open there), as New there
+    /// makes one there; while one is recorded or saved, the other library waits.
+    #[test]
+    fn each_library_is_a_section_and_its_macros_open_in_it() {
+        let _one = crate::library::TESTS.lock().unwrap_or_else(|p| p.into_inner());
+        let _ = slint::platform::set_platform(Box::new(Nowhere));
+        let step = |k: &str, down: bool| json!({ "key": k, "down": down, "after": 0 });
+        crate::library::set(77, "Ectodeck's own", vec![step("A", true), step("A", false)]);
+        let mut page = Page::new();
+        page.dev = Some(json!({ "macros": { "2": { "name": "The keyboard's", "steps": [step("B", true), step("B", false)] } } }));
+        let mut mp = MacroPage::new(MacroWindow::new().unwrap(), slint::Image::default());
+        mp.open(&page, Lib::Keyboard, Some(2));
+        let rows = |mp: &MacroPage| mp.items.iter().map(|m| (m.kind, m.lib, m.n, m.current)).collect::<Vec<_>>();
+        let heads: Vec<(i32, String)> = mp.items.iter().filter(|m| m.kind == 1).map(|m| (m.lib, m.name.to_string())).collect();
+        assert_eq!(heads, [(1, "ECTODECK".to_string()), (0, "EVGA Z10 RGB".to_string())]);
+        assert!(rows(&mp).contains(&(0, 0, 2, true)) && rows(&mp).contains(&(0, 1, 77, false)), "{:?}", rows(&mp));
+        // each row sits below the one before it
+        let ys: Vec<f32> = mp.items.iter().map(|m| m.y).collect();
+        assert!(ys.windows(2).all(|w| w[1] > w[0]), "{ys:?}");
+        assert_eq!(mp.ui.get_items_h(), mp.items.iter().last().map_or(0.0, |m| m.y + m.h));
+
+        // Ectodeck's, from the keyboard's: it opens there
+        mp.ui.invoke_choose(1, 77);
+        mp.act(&mut page, &|_| {});
+        assert_eq!((mp.ed.lib, mp.ed.current), (Lib::Ectodeck, Some(77)));
+        assert!(rows(&mp).contains(&(0, 1, 77, true)) && rows(&mp).contains(&(0, 0, 2, false)), "{:?}", rows(&mp));
+        // and back: the keyboard's opens, though it was the one open there
+        mp.ui.invoke_choose(0, 2);
+        mp.act(&mut page, &|_| {});
+        assert_eq!((mp.ed.lib, mp.ed.current), (Lib::Keyboard, Some(2)));
+        // chosen again where it shows, it's put away, as before
+        mp.ui.invoke_choose(0, 2);
+        mp.act(&mut page, &|_| {});
+        assert_ne!(mp.ed.current, Some(2));
+
+        // New in Ectodeck's section makes one there
+        mp.ui.invoke_new_in(1);
+        mp.act(&mut page, &|_| {});
+        assert_eq!(mp.ed.lib, Lib::Ectodeck);
+        let n = mp.ed.current.unwrap();
+        assert!(mp.items.iter().any(|m| m.kind == 0 && m.lib == 1 && m.n == n as i32 && m.current && m.sub == "Not saved yet"));
+
+        // while one is being saved, the other library waits
+        mp.ed.busy = true;
+        mp.refresh(&page);
+        assert!(mp.items.iter().filter(|m| m.kind == 1).all(|m| !m.can_new));
+        mp.ui.invoke_choose(0, 2);
+        mp.act(&mut page, &|_| {});
+        assert_eq!(mp.ed.lib, Lib::Ectodeck);
+        mp.ed.busy = false;
+
+        // no keyboard read: Ectodeck's alone, unless the keyboard's is open
+        page.dev = None;
+        mp.refresh(&page);
+        assert!(mp.items.iter().all(|m| m.lib == 1), "{:?}", rows(&mp));
+        mp.open(&page, Lib::Keyboard, None);
+        let last = mp.items.iter().last().unwrap();
+        assert_eq!((last.kind, last.lib, last.sub.as_str(), last.can_new), (1, 0, "Reading the keyboard…", false));
+    }
+}

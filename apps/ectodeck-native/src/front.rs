@@ -4181,6 +4181,7 @@ impl Front {
     /// each mouse profile's buttons given one, and how each plays there.
     pub fn macros_elsewhere(&mut self) {
         let Some(m) = &mut self.macros else { return };
+        m.mouse_holds = self.mouse.profiles.is_some();
         let (mut runs, mut names) = (Vec::new(), Vec::new());
         if let Some(store) = &self.mouse.profiles {
             for (pi, p) in store.list.iter().enumerate() {

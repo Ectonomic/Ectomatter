@@ -7102,13 +7102,23 @@ export component AppWindow inherits Window {
 // Revert and Save at the foot.
 
 // a macro in the library
+// a row of the Macro Editor's list: a macro (kind 0), or the heading of a
+// section of them (kind 1): Ectodeck's own, then each device's that keeps
+// macros in its own memory. Each knows its library (0 the keyboard's, 1
+// Ectodeck's) and where it sits in the list; a heading, whether a new one
+// can be made there.
 export struct MacroItem {
+    kind: int,
+    lib: int,
     n: int,
     name: string,
     sub: string,
     timed: bool,
     current: bool,
     dirty: bool,
+    can-new: bool,
+    y: length,
+    h: length,
 }
 
 // a small icon from the editor's set, drawn in its color
@@ -7422,13 +7432,9 @@ export component MacroWindow inherits Window {
     in property <image> mark;
     in property <[MacroItem]> items;
     in-out property <length> lib-scroll;
-    // which library is open (0 the keyboard's, 1 Ectodeck's), whether there's a
-    // keyboard to have both, and the device the open one belongs to, if any
-    in property <int> library;
-    in property <bool> both-libraries;
+    // the device the open macro belongs to, if any, and the list's height
     in property <string> lib-title;
-    in property <string> slots-text;
-    in property <bool> can-new;
+    in property <length> items-h;
     in property <string> macro-name;
     in property <bool> editing-name;
     in-out property <string> name-text;
@@ -7495,10 +7501,10 @@ export component MacroWindow inherits Window {
     callback maximize();
     callback close-window();
     callback drag();
-    callback choose(int);
-    callback library-chosen(int);
-    callback row-menu(int, length, length);
-    callback new-macro();
+    // a macro by its library and number, and a new one in a library
+    callback choose(int, int);
+    callback new-in(int);
+    callback row-menu(int, int, length, length);
     callback rename();
     callback name-done(string);
     callback name-cancel();
@@ -7597,8 +7603,9 @@ export component MacroWindow inherits Window {
         }
     }
 
-    // the library: the keyboard's or Ectodeck's, where it's kept and who runs
-    // what's in it, and the list
+    // the macros: Ectodeck's own, then each device's that keeps macros in its
+    // own memory, a section each, with its heading, where its macros are kept
+    // and who plays them, and a way to make a new one there
     Rectangle {
         x: 0;
         y: 36px;
@@ -7606,57 +7613,59 @@ export component MacroWindow inherits Window {
         height: root.height - 36px;
         background: Ink.box;
         border-bottom-left-radius: root.radius;
-        property <length> head-h: 100px;
-        HorizontalLayout {
-            x: 14px;
-            y: 0;
-            width: parent.width - 26px;
-            height: 56px;
-            spacing: 8px;
-            if root.both-libraries: SegSwitch {
-                y: 11px;
-                horizontal-stretch: 1;
-                options: ["Keyboard", "Ectodeck"];
-                chosen: root.library;
-                picked(i, x, y, h) => { if (i != root.library) { root.library-chosen(i); } }
-            }
-            if !root.both-libraries: HorizontalLayout {
-                padding-left: 4px;
-                horizontal-stretch: 1;
-                Text { text: "Macros"; font-size: 13px; font-weight: 500; color: Ink.soft; vertical-alignment: center; }
-            }
-            TextButton {
-                y: 14px;
-                text: "+ New";
-                opacity: root.can-new ? 1 : 0.35;
-                clicked => { if (root.can-new) { root.new-macro(); } }
-            }
-        }
-        Text {
-            x: 18px;
-            y: 54px;
-            width: parent.width - 36px;
-            height: 36px;
-            text: root.slots-text;
-            font-size: 12px;
-            color: Ink.quiet;
-            wrap: word-wrap;
-            vertical-alignment: top;
-        }
+        property <length> head-h: 8px;
         Flickable {
             x: 10px;
             y: parent.head-h;
             width: parent.width - 20px;
             height: parent.height - parent.head-h - 10px;
-            content-height: root.items.length * 55px;
+            content-height: root.items-h;
             content-y <=> root.lib-scroll;
             mouse-drag-pan-enabled: false;
-            for m[i] in root.items: MacroRow {
-                y: i * 55px;
+            for m[i] in root.items: Rectangle {
+                y: m.y;
                 width: parent.width;
-                m: m;
-                clicked => { root.choose(m.n); }
-                menu(x, y) => { root.row-menu(m.n, x, y); }
+                height: m.h;
+                if m.kind == 0: MacroRow {
+                    width: parent.width;
+                    m: m;
+                    clicked => { root.choose(m.lib, m.n); }
+                    menu(x, y) => { root.row-menu(m.lib, m.n, x, y); }
+                }
+                // a section's heading: as the mouse's page heads its lists
+                if m.kind == 1: Rectangle {
+                    Text {
+                        x: 12px;
+                        y: 0;
+                        height: 30px;
+                        width: parent.width - 84px;
+                        text: m.name;
+                        font-family: "Geist";
+                        font-size: 11px;
+                        font-weight: 600;
+                        letter-spacing: 0.9px;
+                        color: Ink.quiet;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    TextButton {
+                        x: parent.width - self.width - 4px;
+                        y: 1px;
+                        text: "+ New";
+                        opacity: m.can-new ? 1 : 0.35;
+                        clicked => { if (m.can-new) { root.new-in(m.lib); } }
+                    }
+                    // (broken into lines where the page measured them, so the
+                    // macros start below the last)
+                    Text {
+                        x: 12px;
+                        y: 30px;
+                        text: m.sub;
+                        font-size: 12px;
+                        color: Ink.quiet;
+                        vertical-alignment: top;
+                    }
+                }
             }
         }
         ScrollBar {
@@ -7664,7 +7673,7 @@ export component MacroWindow inherits Window {
             y: parent.head-h;
             height: parent.height - parent.head-h - 10px;
             view: parent.height - parent.head-h - 10px;
-            content: root.items.length * 55px;
+            content: root.items-h;
             offset: -root.lib-scroll;
             framed: false;
             thumb-color: #4a4a52;
