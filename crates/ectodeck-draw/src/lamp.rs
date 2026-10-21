@@ -39,7 +39,7 @@ pub struct Make {
 
 impl Make {
     /// A small RGB LED behind a light pipe: what a light the core says nothing of has.
-    pub const DEFAULT: Make = Make { lumens: 0.8, through: 0.5, depth: 8.0, halo: 0.05, reach: 2.0, east: 0.0, north: 0.0 };
+    pub const DEFAULT: Make = Make { lumens: 0.8, through: 0.5, depth: 8.0, halo: 0.01, reach: 2.0, east: 0.0, north: 0.0 };
 
     /// A light's make as the core's light describes it: its own values (its
     /// `window` under `keys`, by its id, where the light keeps each part's

@@ -210,7 +210,7 @@ const PARAMS: [Param; 50] = [
     Param { path: ("window", "lumens"), label: "LED output", lo: 0.01, hi: 5.0, step: 0.01, unit: Unit::Lumens, def: 0.8, note: "How much light the LED gives off at full white, in lumens: about 1 for an RGB LED. Everything it lights, the window and the shell round it, is as bright as this makes it; what is brighter than the screen shows (Peak nits, Settings › HDR) is drawn at the most it shows, in its own color." },
     Param { path: ("window", "through"), label: "Through the window", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.5, note: "The share of the LED's light that comes out through the window's face. The rest is lost inside the mouse. More makes the window brighter for the same LED." },
     Param { path: ("window", "depth"), label: "LED depth", lo: 0.2, hi: 20.0, step: 0.1, unit: Unit::Mm, def: 8.0, note: "How far under the window's face the LED sits. Close under it, the window is brightest over the LED and dims toward its edges; deep under it, as at the end of a light pipe, the light spreads evenly across the window." },
-    Param { path: ("window", "halo"), label: "Halo", lo: 0.0, hi: 0.5, step: 0.01, unit: Unit::Fraction, def: 0.05, note: "The share of the LED's light that gets out round the window's edge, lighting the shell beside it. At 0% the window's edge is crisp; more gives it a soft glow." },
+    Param { path: ("window", "halo"), label: "Halo", lo: 0.0, hi: 0.05, step: 0.001, unit: Unit::Fraction, def: 0.01, note: "The share of the LED's light that gets out round the window's edge, lighting the shell beside it. At 0% the window's edge is crisp; a little gives it a soft glow." },
     Param { path: ("window", "reach"), label: "Halo reach", lo: 0.2, hi: 10.0, step: 0.1, unit: Unit::Reach, def: 2.0, note: "How far the halo carries from the window's edge before it fades to about a third. Short keeps it tight to the edge; long spreads it across the shell." },
     Param { path: ("window", "east"), label: "LED east–west", lo: -20.0, hi: 20.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Where the LED sits under the window, east or west of its middle. The window is brightest over it." },
     Param { path: ("window", "north"), label: "LED north–south", lo: -20.0, hi: 20.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Where the LED sits under the window, north or south of its middle. The window is brightest over it." },
@@ -232,7 +232,7 @@ fn ends(path: (&str, &str)) -> Option<(&'static str, &'static str)> {
         ("display", "glass") => ("None", "As drawn"),
         ("switches", "bleed") | ("display", "bleed") => ("None", "Strong"),
         ("window", "through") => ("None", "All"),
-        ("window", "halo") => ("None", "Half"),
+        ("window", "halo") => ("None", "Strong"),
         _ => return None,
     })
 }
@@ -377,12 +377,19 @@ enum Scale {
     /// in equal steps of ratio, each step the same share longer, so a short
     /// length has as much room as a long one
     Ratio,
+    /// a halo's share, from none: each doubling of it adds about as much glow
+    /// as the last, so each gets about the same room, and a faint halo as
+    /// much as a strong one (1% in the middle of 0 to 5%)
+    Glow,
     /// evenly
     Even,
 }
 
 impl Param {
     fn scale(&self) -> Scale {
+        if self.path == ("window", "halo") {
+            return Scale::Glow;
+        }
         match self.unit {
             Unit::Nits => Scale::Seen,
             Unit::Number | Unit::Reach | Unit::Lumens if self.lo > 0.0 => Scale::Ratio,
@@ -407,6 +414,23 @@ fn pq_nits(signal: f64) -> f64 {
 }
 
 /// A value to three significant figures.
+/// Where a halo's glow scale bends: a fifteenth of its span, so its
+/// track runs over four doublings and a fifth of its span sits in the middle.
+fn glow_knee(lo: f64, hi: f64) -> f64 {
+    ((hi - lo) / 15.0).max(1e-9)
+}
+
+/// Where a value sits along a glow scale, 0 to 1, and the value at a place
+/// along it, to its step.
+fn glow_along(lo: f64, hi: f64, v: f64) -> f64 {
+    let k = glow_knee(lo, hi);
+    (1.0 + (v - lo).max(0.0) / k).ln() / (1.0 + (hi - lo) / k).ln()
+}
+fn glow_at(lo: f64, hi: f64, step: f64, f: f64) -> f64 {
+    let k = glow_knee(lo, hi);
+    (((lo + k * ((1.0 + (hi - lo) / k).powf(f) - 1.0)) / step).round() * step).clamp(lo, hi)
+}
+
 fn sig3(v: f64) -> f64 {
     if v <= 0.0 {
         return 0.0;
@@ -2854,6 +2878,7 @@ impl LabPage {
         match PARAMS[i].scale() {
             Scale::Seen => (pq(v) - pq(lo)) / (pq(hi) - pq(lo)).max(1e-9),
             Scale::Ratio => (v.max(lo) / lo).ln() / (hi / lo).ln(),
+            Scale::Glow => glow_along(lo, hi, v),
             Scale::Even => (v - lo) / (hi - lo),
         }
         .clamp(0.0, 1.0)
@@ -2874,6 +2899,7 @@ impl LabPage {
         match p.scale() {
             Scale::Seen => sig3(pq_nits(pq(lo) + f * (pq(hi) - pq(lo)))).clamp(lo, hi),
             Scale::Ratio => sig3(lo * (hi / lo).powf(f)).clamp(lo, hi),
+            Scale::Glow => glow_at(lo, hi, p.step, f),
             Scale::Even => (((lo + f * (hi - lo)) / p.step).round() * p.step).clamp(lo, hi),
         }
     }
@@ -3581,6 +3607,33 @@ fn saved_into(text: &str, light: &Value, at: &[&str]) -> Result<String, String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A halo's slider gives each doubling about the same room, from none:
+    /// 1% (a Sensei 310's) in the middle of 0 to 5%, 0.1% steps either side of
+    /// it, and nothing past a strong glow.
+    #[test]
+    fn a_halo_gives_each_doubling_the_same_room() {
+        let p = PARAMS.iter().find(|p| p.path == ("window", "halo")).unwrap();
+        assert!(matches!(p.scale(), Scale::Glow));
+        assert_eq!((p.lo, p.hi, p.step, p.def), (0.0, 0.05, 0.001, 0.01));
+        let (lo, hi, step) = (p.lo, p.hi, p.step);
+        assert!((glow_along(lo, hi, 0.01) - 0.5).abs() < 1e-9, "1% in the middle");
+        assert_eq!((glow_along(lo, hi, 0.0), glow_along(lo, hi, 0.05)), (0.0, 1.0));
+        assert!((glow_at(lo, hi, step, 0.5) - 0.01).abs() < 1e-12);
+        assert_eq!((glow_at(lo, hi, step, 0.0), glow_at(lo, hi, step, 1.0)), (0.0, 0.05));
+        // each doubling from 0.5% to 4% about as far along as the last
+        let at = |v: f64| glow_along(lo, hi, v);
+        let gaps: Vec<f64> = [0.005, 0.01, 0.02, 0.04].windows(2).map(|w| at(w[1]) - at(w[0])).collect();
+        assert!(gaps.iter().all(|g| (0.15..0.26).contains(g)), "{gaps:?}");
+        // the steps either side of 1%, a tenth of a percent each
+        let near: Vec<f64> = [0.47, 0.5, 0.53].iter().map(|f| (glow_at(lo, hi, step, *f) * 1000.0).round()).collect();
+        assert_eq!(near, [9.0, 10.0, 11.0]);
+        // and the slider's place for each value it gives is that value's
+        for f in (0..=20).map(|k| k as f64 / 20.0) {
+            let v = glow_at(lo, hi, step, f);
+            assert!((glow_at(lo, hi, step, glow_along(lo, hi, v)) - v).abs() < 1e-12, "{f}");
+        }
+    }
 
     /// A light kept in a file of its own (the mouse's) saves as the whole
     /// file: each value changed in its place, a light's own values added
