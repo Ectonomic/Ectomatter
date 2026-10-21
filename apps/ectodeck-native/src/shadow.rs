@@ -27,9 +27,12 @@ use client::org_kde_kwin_shadow_manager::OrgKdeKwinShadowManager;
 
 /// How far the shadow reaches past the window's left, top, right and bottom
 /// edges (it falls downward), and how far its corner pieces reach into the
-/// window, past its rounded corner.
+/// window: past where the shadow along each edge stops changing, so a side's
+/// one slice meets them without a step. The softer layer sets it: its 18 px
+/// fall and three of its blur's sigmas (72 px) below the top, and 72 px in
+/// from each side. The smallest window, 420 high, has room for two.
 const REACH: [usize; 4] = [64, 48, 64, 80];
-const INNER: usize = 11;
+const INNER: usize = 96;
 /// The window's corners, as Ectodeck draws them.
 const RADIUS: f32 = 10.0;
 /// Its two layers, as the approved mock has them: a tight one that defines
@@ -194,6 +197,45 @@ fn make_pieces(pool: &mut SlotPool) -> Option<Pieces> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Where KWin lays a side piece against a corner piece, the two agree:
+    /// each side is one slice of the picture stretched along its edge, so
+    /// the corner must reach in to where the shadow along that edge no
+    /// longer changes. (Grant, 2026-10-21: "weird shadow coming off the
+    /// edge", a step where the left side met the top-left corner, 11 px
+    /// down, where the softer layer was still building up.)
+    #[test]
+    fn the_pieces_meet_without_a_step() {
+        let (a, w, h) = picture();
+        let [l, t, r, b] = REACH;
+        let (mx, my) = (w / 2, h / 2);
+        let at = |x: usize, y: usize| a[y * w + x];
+        let mut worst = (0.0f32, "");
+        let mut check = |name: &'static str, d: f32| {
+            if d > worst.0 {
+                worst = (d, name);
+            }
+        };
+        for x in 0..l {
+            check("left side, top-left corner", (at(x, my) - at(x, t + INNER - 1)).abs());
+            check("left side, bottom-left corner", (at(x, my) - at(x, h - b - INNER)).abs());
+        }
+        for x in w - r..w {
+            check("right side, top-right corner", (at(x, my) - at(x, t + INNER - 1)).abs());
+            check("right side, bottom-right corner", (at(x, my) - at(x, h - b - INNER)).abs());
+        }
+        for y in 0..t {
+            check("top side, top-left corner", (at(mx, y) - at(l + INNER - 1, y)).abs());
+            check("top side, top-right corner", (at(mx, y) - at(w - r - INNER, y)).abs());
+        }
+        for y in h - b..h {
+            check("bottom side, bottom-left corner", (at(mx, y) - at(l + INNER - 1, y)).abs());
+            check("bottom side, bottom-right corner", (at(mx, y) - at(w - r - INNER, y)).abs());
+        }
+        eprintln!("the worst seam: {} differ by {:.2} levels of 255", worst.1, worst.0 * 255.0);
+        // (under half a level of the pieces' eight bits)
+        assert!(worst.0 < 0.5 / 255.0, "{} differ by {:.1} levels of 255", worst.1, worst.0 * 255.0);
+    }
 
     #[test]
     fn the_shadow_falls_downward_and_fades_out() {
