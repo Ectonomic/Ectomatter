@@ -1,9 +1,11 @@
 //! Home as a desk: each device drawn as its own page draws it, to scale with
 //! the others, its name under it. Selecting one opens its page. Arrange (edit
-//! mode) shows dots, lets the desk zoom and pan, and moves devices onto the
-//! dots; Done fits the desk to the window again. Day to day the desk always
-//! fits the window and nothing on it moves. Where each device sits is kept
-//! in the window's state ("desk"), in the desk's own units.
+//! mode) shows dots, lets the desk zoom and pan (a drag on the empty desk),
+//! and moves devices onto the dots; pads are added at their makers' sizes or
+//! drawn, one at a time, once asked for. Done fits the desk to the window
+//! again. Day to day the desk always fits the window and nothing on it
+//! moves. Where each device sits is kept in the window's state ("desk"), in
+//! the desk's own units.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -46,6 +48,9 @@ pub struct Item {
     pub id: String,
     pub name: String,
     pub place: String,
+    /// what it is, as its core says ("keyboard", "mouse"): a mousepad added
+    /// goes under a mouse
+    pub kind: String,
     pub w: f32,
     pub h: f32,
     pub x: f32,
@@ -63,10 +68,14 @@ pub struct View {
 enum Drag {
     /// the desk moved round, from where the press was and the view then
     Pan { at: (f32, f32), from: View },
+    /// the empty desk pressed, in edit mode: dragged, it moves round the desk
+    /// as Pan does; let go where it was, it's a click, which lets the chosen
+    /// pad go
+    Ground { at: (f32, f32), from: View, moved: bool },
     /// a device: which, from where, its place then, and whether it has moved yet
     Item { i: usize, at: (f32, f32), from: (f32, f32), moved: bool },
-    /// a pad drawn on the empty desk, in edit mode: from the dot it began at
-    /// to the dot the pointer is nearest now, in the desk's units
+    /// a pad drawn, in edit mode, once Draw your own was chosen: from the dot
+    /// it began at to the dot the pointer is nearest now, in the desk's units
     Draw { from: (f32, f32), to: (f32, f32) },
     /// a pad carried, in edit mode: which, from where, its place then,
     /// whether it has moved yet, and whether it was chosen before the press
@@ -95,6 +104,52 @@ pub const PAD_COLOR: [u8; 3] = [0x25, 0x25, 0x2b];
 pub const PAD_RADIUS: f32 = 8.0;
 /// A pad's least size each way, in the desk's units: two dots apart.
 const PAD_LEAST: f32 = 2.0 * SNAP;
+/// The longest side a pad may be given, in millimeters (100 inches).
+const PAD_MOST_MM: f32 = 2540.0;
+
+/// Pads as their makers size them, in millimeters, each with what a menu
+/// calls it and the kind it is: mousepads as SteelSeries' QcK comes (Razer's
+/// Gigantus V2 Large and Logitech's G640 the same, or 10 mm wider), and desk
+/// mats as most come (SteelSeries' QcK XXL and Logitech's G840 the middle one).
+pub const SIZES: [(&str, &str, f32, f32); 6] = [
+    ("Mousepads", "Small", 250.0, 210.0),
+    ("Mousepads", "Medium", 320.0, 270.0),
+    ("Mousepads", "Large", 450.0, 400.0),
+    ("Desk mats", "Extended", 800.0, 300.0),
+    ("Desk mats", "Standard", 900.0, 400.0),
+    ("Desk mats", "Large", 1200.0, 600.0),
+];
+
+/// A length in millimeters as inches, to a tenth, as the menus show sizes.
+pub fn inches(mm: f32) -> String {
+    let s = format!("{:.1}", mm / 25.4);
+    s.strip_suffix(".0").map_or(s.clone(), String::from)
+}
+
+/// A pad's size in words: its width and its depth, in inches.
+pub fn size_words(w_mm: f32, h_mm: f32) -> String {
+    format!("{} × {} in", inches(w_mm), inches(h_mm))
+}
+
+/// Which of SIZES a size is, to the millimeter.
+pub fn standard(w_mm: f32, h_mm: f32) -> Option<usize> {
+    SIZES.iter().position(|s| (s.2 - w_mm).abs() < 1.0 && (s.3 - h_mm).abs() < 1.0)
+}
+
+/// A length as it was typed, in millimeters: inches (a bare number, or
+/// with in or "), or millimeters or centimeters with their own words.
+pub fn typed_mm(t: &str) -> Option<f32> {
+    let t = t.trim().to_lowercase();
+    let (n, per) = if let Some(n) = t.strip_suffix("mm") {
+        (n, 1.0)
+    } else if let Some(n) = t.strip_suffix("cm") {
+        (n, 10.0)
+    } else {
+        (t.trim_end_matches(['"', '″']).trim_end_matches("inches").trim_end_matches("in"), 25.4)
+    };
+    let v: f32 = n.trim().parse().ok()?;
+    (v.is_finite() && v > 0.0).then_some(v * per)
+}
 /// The longest side a pad's picture is kept at, in its pixels: enough for a
 /// desk mat across a large screen.
 const PICTURE_SIDE: f32 = 2048.0;
@@ -216,6 +271,10 @@ pub struct Desk {
     pub pads: Vec<Pad>,
     pub pad_chosen: Option<usize>,
     pub pad_hover: Option<usize>,
+    /// Draw your own chosen, in edit mode: the next drag across the desk
+    /// draws a pad, and then it's off, as a drawing tool goes back to the
+    /// pointer once it has drawn
+    pub draw_tool: bool,
 }
 
 impl Default for Desk {
@@ -229,7 +288,7 @@ impl Desk {
         // (the tests start from a desk nothing was kept for)
         let kept = if cfg!(test) { Vec::new() } else { Desk::saved() };
         let pads = if cfg!(test) { Vec::new() } else { pads_of(&crate::uistate::get("desk_pads").unwrap_or_default()) };
-        Desk { items: Vec::new(), editing: false, view: View { z: 1.0, px: 0.0, py: 0.0 }, size: (0.0, 0.0), hover: None, pressed: None, drag: None, ease: None, dots: 0.0, fade: None, changed: Instant::now(), kept, pads, pad_chosen: None, pad_hover: None }
+        Desk { items: Vec::new(), editing: false, view: View { z: 1.0, px: 0.0, py: 0.0 }, size: (0.0, 0.0), hover: None, pressed: None, drag: None, ease: None, dots: 0.0, fade: None, changed: Instant::now(), kept, pads, pad_chosen: None, pad_hover: None, draw_tool: false }
     }
 
     /// The pads kept as they are now.
@@ -341,10 +400,10 @@ impl Desk {
     /// A device Ectodeck knows: put on the desk where it was kept, or, seen
     /// for the first time, beside the others (a keyboard, `left`, to their
     /// left; anything else to their right); or brought up to date.
-    pub fn meet(&mut self, id: &str, name: &str, place: &str, (w, h): (f32, f32), connected: bool, left: bool) {
+    pub fn meet(&mut self, id: &str, name: &str, place: &str, kind: &str, (w, h): (f32, f32), connected: bool, left: bool) {
         if let Some(it) = self.items.iter_mut().find(|i| i.id == id) {
             let resized = (it.w, it.h) != (w, h);
-            (it.name, it.w, it.h, it.connected) = (name.to_string(), w, h, connected);
+            (it.name, it.kind, it.w, it.h, it.connected) = (name.to_string(), kind.to_string(), w, h, connected);
             if resized && !self.editing {
                 self.fit();
             }
@@ -364,7 +423,7 @@ impl Desk {
                 (x, snap((top + bottom) / 2.0 - h / 2.0))
             }
         };
-        self.items.push(Item { id: id.into(), name: name.into(), place: place.into(), w, h, x, y, connected });
+        self.items.push(Item { id: id.into(), name: name.into(), place: place.into(), kind: kind.into(), w, h, x, y, connected });
         self.save();
         if !self.editing {
             self.fit();
@@ -488,6 +547,7 @@ impl Desk {
         self.pressed = None;
         self.pad_chosen = None;
         self.pad_hover = None;
+        self.draw_tool = false;
         self.fade = Some((Instant::now(), self.dots, if on { 1.0 } else { 0.0 }));
         // (in, the dots lined up as they come, the short way; out, the exact fit)
         self.ease_to(if on { self.aligned(self.view) } else { self.fitted_free() });
@@ -537,18 +597,17 @@ impl Desk {
         self.pressed = i;
         self.drag = i.map(|i| Drag::Item { i, at, from: (self.items[i].x, self.items[i].y), moved: false });
         // in edit mode, a press on a device lets the chosen pad go; one on the
-        // empty desk: on a pad, it's carried; off one, a pad is drawn from the
-        // nearest dot
+        // empty desk: with Draw your own chosen, a pad is drawn from the
+        // nearest dot; else on a pad, it's carried; off one, the desk moves
         if i.is_some() && self.editing {
             self.pad_chosen = None;
         }
         if i.is_none() && self.editing {
+            let (x, y) = self.on_desk(at);
             self.drag = Some(match self.pad_at(at) {
+                _ if self.draw_tool => Drag::Draw { from: (snap(x), snap(y)), to: (snap(x), snap(y)) },
                 Some(k) => Drag::Pad { i: k, at, from: (self.pads[k].x, self.pads[k].y), moved: false, was: self.pad_chosen == Some(k) },
-                None => {
-                    let (x, y) = self.on_desk(at);
-                    Drag::Draw { from: (snap(x), snap(y)), to: (snap(x), snap(y)) }
-                }
+                None => Drag::Ground { at, from: self.view, moved: false },
             });
         }
     }
@@ -576,6 +635,16 @@ impl Desk {
         let z = self.view.z;
         match &mut self.drag {
             Some(Drag::Pan { at, from }) => {
+                let v = View { px: from.px + to.0 - at.0, py: from.py + to.1 - at.1, ..*from };
+                self.ease = None;
+                self.set_view(v);
+                true
+            }
+            Some(Drag::Ground { at, from, moved }) => {
+                if !*moved && (to.0 - at.0).abs() + (to.1 - at.1).abs() < 5.0 {
+                    return false;
+                }
+                *moved = true;
                 let v = View { px: from.px + to.0 - at.0, py: from.py + to.1 - at.1, ..*from };
                 self.ease = None;
                 self.set_view(v);
@@ -644,17 +713,20 @@ impl Desk {
                 self.save();
                 None
             }
-            // a pad drawn at least two dots each way, chosen; a click on the
-            // empty desk lets the chosen one go
+            // a pad drawn at least two dots each way, chosen, and drawing off
+            // (less, nothing drawn, and Draw your own still on)
             Some(Drag::Draw { .. }) => {
-                match drawn.filter(|p| p.w >= PAD_LEAST && p.h >= PAD_LEAST) {
-                    Some(p) => {
-                        self.pads.push(p);
-                        self.pad_chosen = Some(self.pads.len() - 1);
-                        self.save_pads();
-                    }
-                    None => self.pad_chosen = None,
+                if let Some(p) = drawn.filter(|p| p.w >= PAD_LEAST && p.h >= PAD_LEAST) {
+                    self.pads.push(p);
+                    self.pad_chosen = Some(self.pads.len() - 1);
+                    self.draw_tool = false;
+                    self.save_pads();
                 }
+                None
+            }
+            // a click on the empty desk lets the chosen pad go; a drag moved round it
+            Some(Drag::Ground { moved: false, .. }) => {
+                self.pad_chosen = None;
                 None
             }
             // a pad carried, chosen; one clicked, chosen, or let go if it was
@@ -687,7 +759,59 @@ impl Desk {
 
 
     pub fn panning(&self) -> bool {
-        matches!(self.drag, Some(Drag::Pan { .. }))
+        matches!(self.drag, Some(Drag::Pan { .. }) | Some(Drag::Ground { moved: true, .. }))
+    }
+
+    /// A pad added at one of SIZES (by its place there), at its real size,
+    /// chosen: a mousepad under the mouse, a desk mat under every device
+    /// together, on the dots; with no device where it goes, in the middle of
+    /// the view. The view eases to the fit if the pad isn't all in it.
+    pub fn add_pad(&mut self, k: usize) {
+        let Some(&(kind, _, w_mm, h_mm)) = SIZES.get(k) else { return };
+        let (w, h) = (w_mm * PER_MM, h_mm * PER_MM);
+        let under: Vec<&Item> = self.items.iter().filter(|i| kind != "Mousepads" || i.kind == "mouse").collect();
+        let (cx, cy) = if under.is_empty() {
+            self.on_desk((self.size.0 / 2.0, self.size.1 / 2.0))
+        } else {
+            let x0 = under.iter().map(|i| i.x).fold(f32::INFINITY, f32::min);
+            let y0 = under.iter().map(|i| i.y).fold(f32::INFINITY, f32::min);
+            let x1 = under.iter().map(|i| i.x + i.w).fold(f32::NEG_INFINITY, f32::max);
+            let y1 = under.iter().map(|i| i.y + i.h).fold(f32::NEG_INFINITY, f32::max);
+            ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
+        };
+        self.pads.push(Pad { x: snap(cx - w / 2.0), y: snap(cy - h / 2.0), w, h, color: PAD_COLOR, picture: None });
+        self.pad_chosen = Some(self.pads.len() - 1);
+        self.draw_tool = false;
+        self.save_pads();
+        self.show_chosen();
+    }
+
+    /// The view eased to the fit when the chosen pad isn't all in it.
+    fn show_chosen(&mut self) {
+        let Some(p) = self.pad_chosen.and_then(|i| self.pads.get(i)) else { return };
+        let [px, py, pw, ph] = self.pad_screen(p);
+        if px < 0.0 || py < 0.0 || px + pw > self.size.0 || py + ph > self.size.1 {
+            let to = self.fitted();
+            self.ease_to(to);
+        }
+    }
+
+    /// The chosen pad's size, in millimeters.
+    pub fn pad_size_mm(&self) -> Option<(f32, f32)> {
+        let p = self.pads.get(self.pad_chosen?)?;
+        Some((p.w / PER_MM, p.h / PER_MM))
+    }
+
+    /// The chosen pad given a size, in millimeters (either side left as it is
+    /// where it's none), its middle where it was; kept.
+    pub fn set_pad_size(&mut self, w_mm: Option<f32>, h_mm: Option<f32>) {
+        let Some(p) = self.pad_chosen.and_then(|i| self.pads.get_mut(i)) else { return };
+        let side = |mm: Option<f32>, now: f32| mm.map_or(now, |mm| (mm * PER_MM).clamp(PAD_LEAST, PAD_MOST_MM * PER_MM));
+        let (w, h) = (side(w_mm, p.w), side(h_mm, p.h));
+        let (cx, cy) = (p.x + p.w / 2.0, p.y + p.h / 2.0);
+        (p.x, p.y, p.w, p.h) = (cx - w / 2.0, cy - h / 2.0, w, h);
+        self.save_pads();
+        self.show_chosen();
     }
 
     pub fn carrying(&self) -> bool {
@@ -814,8 +938,8 @@ mod tests {
         let mut d = Desk::new();
         d.size = (1380.0, 992.0);
         d.items = vec![
-            Item { id: "z10".into(), name: "EVGA Z10 RGB".into(), place: "z10".into(), w: 760.5, h: 304.6, x: 0.0, y: 0.0, connected: true },
-            Item { id: "mouse".into(), name: "SteelSeries Sensei 310".into(), place: "mouse".into(), w: 118.3, h: 202.3, x: 864.0, y: 72.0, connected: true },
+            Item { id: "z10".into(), name: "EVGA Z10 RGB".into(), place: "z10".into(), kind: "keyboard".into(), w: 760.5, h: 304.6, x: 0.0, y: 0.0, connected: true },
+            Item { id: "mouse".into(), name: "SteelSeries Sensei 310".into(), place: "mouse".into(), kind: "mouse".into(), w: 118.3, h: 202.3, x: 864.0, y: 72.0, connected: true },
         ];
         d.fit();
         d
@@ -861,8 +985,8 @@ mod tests {
             let mut d = Desk::new();
             d.size = (1380.0, 992.0);
             d.kept = vec![("z10".into(), -864.0, 0.0), ("mouse".into(), 0.0, 0.0)];
-            let kb = |d: &mut Desk| d.meet("z10", "EVGA Z10 RGB", "z10", (760.5, 304.6), true, true);
-            let mouse = |d: &mut Desk| d.meet("mouse", "SteelSeries Sensei 310", "mouse", (118.3, 202.3), true, false);
+            let kb = |d: &mut Desk| d.meet("z10", "EVGA Z10 RGB", "z10", "keyboard", (760.5, 304.6), true, true);
+            let mouse = |d: &mut Desk| d.meet("mouse", "SteelSeries Sensei 310", "mouse", "mouse", (118.3, 202.3), true, false);
             if kb_first {
                 kb(&mut d);
                 mouse(&mut d);
@@ -882,8 +1006,8 @@ mod tests {
         for kb_first in [true, false] {
             let mut d = Desk::new();
             d.size = (1380.0, 992.0);
-            let kb = |d: &mut Desk| d.meet("kb-test", "A keyboard", "z10", (760.0, 304.0), true, true);
-            let mouse = |d: &mut Desk| d.meet("mouse-test", "A mouse", "mouse", (118.0, 202.0), true, false);
+            let kb = |d: &mut Desk| d.meet("kb-test", "A keyboard", "z10", "keyboard", (760.0, 304.0), true, true);
+            let mouse = |d: &mut Desk| d.meet("mouse-test", "A mouse", "mouse", "mouse", (118.0, 202.0), true, false);
             if kb_first {
                 kb(&mut d);
                 mouse(&mut d);
@@ -917,7 +1041,7 @@ mod tests {
     /// once drawn; a drag on it carries it; one too small to be a pad is a
     /// click that lets the chosen one go; outside edit mode nothing is drawn.
     #[test]
-    fn a_pad_is_drawn_on_the_empty_desk() {
+    fn a_pad_is_drawn_once_draw_your_own_is_chosen() {
         let mut d = desk();
         d.press(None, (20.0, 600.0));
         d.moved((420.0, 900.0));
@@ -925,11 +1049,25 @@ mod tests {
         assert!(d.pads.is_empty(), "outside edit mode");
         d.set_editing(true);
         let z = d.view.z;
+        // (a drag on the empty desk moves round it, and draws nothing)
+        let v = d.view;
+        d.press(None, (20.0, 600.0));
+        d.moved((420.0, 900.0));
+        assert!(d.drawing().is_none() && d.panning());
+        d.release();
+        assert!(d.pads.is_empty() && d.view != v, "moved round the desk, nothing drawn");
+        d.view = v;
+        // Draw your own: a click draws nothing and leaves it on; a drag draws
+        // one, chosen, and puts it away
+        d.draw_tool = true;
+        d.press(None, (20.0, 600.0));
+        d.release();
+        assert!(d.pads.is_empty() && d.draw_tool, "a click draws nothing");
         d.press(None, (20.0, 600.0));
         d.moved((420.0, 900.0));
         assert!(d.drawing().is_some_and(|p| p.w > 0.0));
         d.release();
-        assert_eq!((d.pads.len(), d.pad_chosen), (1, Some(0)));
+        assert_eq!((d.pads.len(), d.pad_chosen, d.draw_tool), (1, Some(0), false));
         let p = d.pads[0].clone();
         assert!([p.x, p.y, p.w, p.h].iter().all(|v| (v / SNAP).fract() == 0.0), "on the dots: {p:?}");
         assert!((p.w - 400.0 / z).abs() <= SNAP, "as wide as drawn");
@@ -959,6 +1097,62 @@ mod tests {
         d.pad_chosen = Some(0);
         d.delete_pad();
         assert!(d.pads.is_empty() && d.pad_chosen.is_none());
+    }
+
+    /// A pad at a maker's size is that size on the desk, to the millimeter:
+    /// a mousepad under the mouse, a desk mat under every device together,
+    /// chosen; sized again from the menu or typed, its middle stays put, and
+    /// it's never less than two dots across.
+    #[test]
+    fn a_pad_goes_on_at_its_makers_size_where_it_belongs() {
+        let mut d = desk();
+        d.set_editing(true);
+        let mid = |p: &Pad| (p.x + p.w / 2.0, p.y + p.h / 2.0);
+        let large_mousepad = SIZES.iter().position(|s| s.0 == "Mousepads" && s.1 == "Large").unwrap();
+        d.add_pad(large_mousepad);
+        let (p, m) = (d.pads[0].clone(), d.items[1].clone());
+        assert_eq!(d.pad_chosen, Some(0));
+        assert!((p.w / PER_MM - 450.0).abs() < 0.01 && (p.h / PER_MM - 400.0).abs() < 0.01, "{p:?}");
+        let (cx, cy) = mid(&p);
+        assert!((cx - (m.x + m.w / 2.0)).abs() <= SNAP / 2.0 && (cy - (m.y + m.h / 2.0)).abs() <= SNAP / 2.0, "under the mouse");
+        assert!((p.x / SNAP).fract() == 0.0 && (p.y / SNAP).fract() == 0.0, "on the dots");
+        let standard_mat = SIZES.iter().position(|s| s.1 == "Standard").unwrap();
+        d.add_pad(standard_mat);
+        let p = d.pads[1].clone();
+        let (x0, x1) = (d.items[0].x, d.items[1].x + d.items[1].w);
+        let (y0, y1) = (d.items.iter().map(|i| i.y).fold(f32::INFINITY, f32::min), d.items.iter().map(|i| i.y + i.h).fold(f32::NEG_INFINITY, f32::max));
+        assert!((mid(&p).0 - (x0 + x1) / 2.0).abs() <= SNAP / 2.0 && (mid(&p).1 - (y0 + y1) / 2.0).abs() <= SNAP / 2.0, "under both");
+        assert_eq!(standard(p.w / PER_MM, p.h / PER_MM), Some(standard_mat));
+        // sized again: a maker's size, then a width typed, the middle where it was
+        let was = mid(&d.pads[1]);
+        d.set_pad_size(Some(SIZES[0].2), Some(SIZES[0].3));
+        assert_eq!(d.pad_size_mm().map(|(w, h)| (w.round(), h.round())), Some((250.0, 210.0)));
+        d.set_pad_size(typed_mm("30"), None);
+        let (w, h) = d.pad_size_mm().unwrap();
+        assert!((w - 762.0).abs() < 0.01 && (h - 210.0).abs() < 0.01);
+        let now = mid(&d.pads[1]);
+        assert!((now.0 - was.0).abs() < 1e-3 && (now.1 - was.1).abs() < 1e-3, "its middle stays");
+        d.set_pad_size(Some(1.0), None);
+        assert_eq!(d.pads[1].w, PAD_LEAST, "never less than two dots");
+        assert!(d.draw_tool == false);
+    }
+
+    /// Sizes in the menus' words: inches to a tenth, and what's typed read
+    /// as inches unless it says millimeters or centimeters.
+    #[test]
+    fn sizes_read_in_inches() {
+        assert_eq!(size_words(900.0, 400.0), "35.4 × 15.7 in");
+        assert_eq!(inches(762.0), "30");
+        let words: Vec<String> = SIZES.iter().map(|s| size_words(s.2, s.3)).collect();
+        assert_eq!(words, ["9.8 × 8.3 in", "12.6 × 10.6 in", "17.7 × 15.7 in", "31.5 × 11.8 in", "35.4 × 15.7 in", "47.2 × 23.6 in"]);
+        assert_eq!(typed_mm("10"), Some(254.0));
+        assert_eq!(typed_mm(" 12.5 in "), Some(317.5));
+        assert_eq!(typed_mm("10\""), Some(254.0));
+        assert_eq!(typed_mm("900 mm"), Some(900.0));
+        assert_eq!(typed_mm("45cm"), Some(450.0));
+        assert_eq!((typed_mm("wide"), typed_mm("0"), typed_mm("-3")), (None, None, None));
+        assert_eq!(standard(450.2, 399.9), Some(2));
+        assert_eq!(standard(451.5, 400.0), None);
     }
 
     /// The chosen pad is sized by its edges, onto the dots, never less than
@@ -1019,6 +1213,7 @@ mod tests {
         assert_eq!(decor.pads[0].bounds, [144.0, 72.0, 144.0 + 2.0 * d.size.0, 72.0 + 2.0 * d.size.1]);
         assert!((decor.pads[0].rect[0] - 2.0 * (72.0 + x)).abs() < 1e-3);
         d.set_editing(true);
+        d.draw_tool = true;
         d.press(None, (60.0, 60.0));
         d.moved((400.0, 300.0));
         assert_eq!(d.decor((0.0, 0.0), 1.0, &[], &|_| None).pads.len(), 2, "the one being drawn too");
@@ -1085,11 +1280,12 @@ mod tests {
         d.press(None, (40.0, 900.0));
         d.moved((140.0, 860.0));
         d.release();
-        assert_eq!(d.view, v, "the left button on the empty desk doesn't pan");
+        assert!((d.view.px - v.px - 100.0).abs() < 1e-3 && (d.view.py - v.py + 40.0).abs() < 1e-3, "the left button on the empty desk pans, as a trackpad can");
+        let v = d.view;
         d.pan_from((40.0, 900.0));
         d.moved((140.0, 860.0));
         d.release();
-        assert!((d.view.px - v.px - 100.0).abs() < 1e-3 && (d.view.py - v.py + 40.0).abs() < 1e-3, "panned");
+        assert!((d.view.px - v.px - 100.0).abs() < 1e-3 && (d.view.py - v.py + 40.0).abs() < 1e-3, "panned with the middle button");
         let (v, at) = (d.view, (d.items[1].x, d.items[1].y));
         d.pan_from((1000.0, 500.0));
         d.moved((1030.0, 520.0));

@@ -147,6 +147,11 @@ pub enum Ask {
     DeskPadPicture,
     DeskPadNoPicture,
     DeskPadDelete,
+    /// Add pad's menu, where its button is; the chosen pad's Size menu; Draw
+    /// your own put away unused
+    DeskAddPad(f32, f32, f32),
+    DeskPadSize(f32, f32, f32),
+    DeskDrawCancel,
     /// the desk's light: its menu, on Home; the next of its frames
     DeskLightMenu(f32, f32, f32),
     DeskLightFrame,
@@ -164,6 +169,8 @@ pub enum Ask {
     Listen(i32),
     Reset,
     MenuChose(i32),
+    /// a field in the open menu typed in and set, by its row
+    MenuField(i32, String),
     MenuTyped(String),
     MenuEnter,
     MenuDismiss,
@@ -362,6 +369,23 @@ pub enum WindowAsk {
     /// bring the main window forward on Ectodeck's Settings (from the screen editor's
     /// From line, which links to where its sensor is chosen)
     ShowSettings,
+}
+
+/// The pads' menus on Home: Add pad's, and the chosen pad's Size.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum PadMenu {
+    Add,
+    Size,
+}
+
+/// What a row of a pad menu stands for: one of the makers' sizes, Draw your
+/// own, or the chosen pad's width or depth to type.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum PadRow {
+    Size(usize),
+    Draw,
+    Width,
+    Depth,
 }
 
 const LAYERS: [(&str, &str); 2] = [("base", "When pressed"), ("fn", "When Fn is held")];
@@ -584,6 +608,8 @@ pub struct Front {
     desk_light_mouse: (Option<Instant>, [[u8; 3]; 2]),
     desk_colors: (HashMap<u32, [u8; 3]>, [Option<[u8; 3]>; 2]),
     desk_light_menu: bool,
+    /// Add pad's menu open, or the chosen pad's Size menu
+    pad_menu: Option<PadMenu>,
     /// the mouse in HDR on its page: its lamps and unlit picture, for the
     /// layers' scale; the picture lit as it shows now, and the part of the
     /// whole picture the page's hole shows of it (in pixels)
@@ -787,6 +813,7 @@ impl Front {
         on!(on_listen, |l| Ask::Listen(l));
         on!(on_reset_key, Ask::Reset);
         on!(on_menu_chose, |i| Ask::MenuChose(i));
+        on!(on_menu_field, |i, t| Ask::MenuField(i, t.to_string()));
         on!(on_menu_typed, |t| Ask::MenuTyped(t.to_string()));
         on!(on_menu_enter, Ask::MenuEnter);
         on!(on_menu_dismiss, Ask::MenuDismiss);
@@ -823,6 +850,9 @@ impl Front {
         on!(on_desk_pad_picture, Ask::DeskPadPicture);
         on!(on_desk_pad_no_picture, Ask::DeskPadNoPicture);
         on!(on_desk_pad_delete, Ask::DeskPadDelete);
+        on!(on_desk_add_pad, |x, y, h| Ask::DeskAddPad(x, y, h));
+        on!(on_desk_pad_size_menu, |x, y, h| Ask::DeskPadSize(x, y, h));
+        on!(on_desk_draw_cancel, Ask::DeskDrawCancel);
         on!(on_desk_light_menu, |x, y, h| Ask::DeskLightMenu(x, y, h));
         on!(on_mouse_effect, |i| Ask::MouseEffect(i));
         on!(on_rail, |p| Ask::Rail(p.to_string()));
@@ -910,6 +940,7 @@ impl Front {
             desk_light_mouse: (None, [[0; 3]; 2]),
             desk_colors: Default::default(),
             desk_light_menu: false,
+            pad_menu: None,
             mouse_hdr: None,
             mouse_lit: None,
             mouse_part: (0, 0, 0, 0),
@@ -1608,6 +1639,21 @@ impl Front {
                     self.pad_note.clear();
                     self.show_desk();
                 }
+                Ask::DeskAddPad(x, y, h) => {
+                    changed = false;
+                    self.open_pad_menu(PadMenu::Add, (x, y, h));
+                }
+                Ask::DeskPadSize(x, y, h) => {
+                    changed = false;
+                    if self.desk.pad_chosen.is_some() {
+                        self.open_pad_menu(PadMenu::Size, (x, y, h));
+                    }
+                }
+                Ask::DeskDrawCancel => {
+                    changed = false;
+                    self.desk.draw_tool = false;
+                    self.show_desk();
+                }
                 Ask::CellPick(id, i, x, y, h) => match crate::described::piece_of(id) {
                     Some(piece) if self.on_keyboard() => self.kb_described_pick(piece, i.max(0) as usize, (x, y, h)),
                     Some(piece) => self.described_pick(piece, i.max(0) as usize, (x, y, h)),
@@ -2017,6 +2063,7 @@ impl Front {
                     }
                 }
                 Ask::MenuChose(i) => self.menu_chose(i as usize),
+                Ask::MenuField(i, t) => self.menu_field(i.max(0) as usize, &t),
                 Ask::MenuTyped(t) => {
                     if let Some(m) = &mut self.menu {
                         m.query = t;
@@ -2974,7 +3021,7 @@ impl Front {
             self.ui.set_menu_open(false);
             self.ui.invoke_blur_menu();
         }
-        if self.mouse.menu.take().is_some() || std::mem::take(&mut self.profile_menu) || std::mem::take(&mut self.kb_profile_menu) || self.apps_menu.take().is_some() || std::mem::take(&mut self.desk_light_menu) {
+        if self.mouse.menu.take().is_some() || std::mem::take(&mut self.profile_menu) || std::mem::take(&mut self.kb_profile_menu) || self.apps_menu.take().is_some() || std::mem::take(&mut self.desk_light_menu) || self.pad_menu.take().is_some() {
             self.ui.set_menu_open(false);
             self.ui.set_menu_w(300.0);
             self.ui.set_mouse_menu_open(false);
@@ -3070,7 +3117,7 @@ impl Front {
     /// the window.
     fn let_chosen_go(&mut self, x: f32, y: f32) {
         // (a press while any menu is open is the menu's: it chooses there, or shuts it)
-        if y < 36.0 || self.ui.get_menu_open() || self.menu.is_some() || self.mouse.menu.is_some() || self.profile_menu || self.kb_profile_menu || self.apps_menu.is_some() || self.desk_light_menu || self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pick.is_some() || self.place_menu {
+        if y < 36.0 || self.ui.get_menu_open() || self.menu.is_some() || self.mouse.menu.is_some() || self.profile_menu || self.kb_profile_menu || self.apps_menu.is_some() || self.desk_light_menu || self.pad_menu.is_some() || self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pick.is_some() || self.place_menu {
             return;
         }
         let Some(keeps) = self.chosen_keeps() else { return };
@@ -3156,6 +3203,11 @@ impl Front {
             self.close_picker();
             return true;
         }
+        if self.ui.get_place() == "home" && self.desk.draw_tool {
+            self.desk.draw_tool = false;
+            self.show_desk();
+            return true;
+        }
         if self.ui.get_place() == "home" && self.desk.pad_chosen.is_some() {
             self.let_chosen_go_now();
             return true;
@@ -3207,6 +3259,30 @@ impl Front {
                 self.set_desk_light(*e);
             }
             self.refresh();
+            return;
+        }
+        if let Some(which) = self.pad_menu {
+            match self.pad_rows(which).1.get(i).copied().flatten() {
+                Some(PadRow::Size(k)) => {
+                    self.close_menu();
+                    match which {
+                        PadMenu::Add => self.desk.add_pad(k),
+                        PadMenu::Size => {
+                            let (_, _, w, h) = crate::desk::SIZES[k];
+                            self.desk.set_pad_size(Some(w), Some(h));
+                        }
+                    }
+                    self.desk_frames_run();
+                }
+                Some(PadRow::Draw) => {
+                    self.close_menu();
+                    self.desk.draw_tool = true;
+                    self.desk.pad_chosen = None;
+                }
+                // (a heading, the rule, or a field's name: the menu stays)
+                _ => return,
+            }
+            self.show_desk();
             return;
         }
         if self.kb_profile_menu {
@@ -4812,7 +4888,8 @@ impl Front {
             let core = crate::cores::shown();
             let size = crate::desk::size_of(&core.art, core.device["light"]["scale"].as_f64().unwrap_or(1.38) as f32);
             // (not yet known to be plugged in, it is drawn as plugged in: only a keyboard gone shows dimmed)
-            self.desk.meet("z10", core.name(), "z10", size, self.ui.get_conn_state() != 2, true);
+            let kind = core.device["kind"].as_str().unwrap_or("keyboard").to_string();
+            self.desk.meet("z10", core.name(), "z10", &kind, size, self.ui.get_conn_state() != 2, true);
         }
         if self.mouse.known() || self.desk.keeps("mouse") {
             let dev = &self.mouse.state["device"];
@@ -4820,7 +4897,8 @@ impl Front {
             let per = dev["scale"].as_f64().unwrap_or(520.0 / 125.1) as f32;
             let size = (v.2 / per * crate::desk::PER_MM, v.3 / per * crate::desk::PER_MM);
             let name = dev["name"].as_str().unwrap_or("SteelSeries Sensei 310").to_string();
-            self.desk.meet("mouse", &name, "mouse", size, self.mouse.present() || self.mouse.state.is_null(), false);
+            let kind = dev["kind"].as_str().unwrap_or("mouse").to_string();
+            self.desk.meet("mouse", &name, "mouse", &kind, size, self.mouse.present() || self.mouse.state.is_null(), false);
         }
     }
 
@@ -4856,6 +4934,8 @@ impl Front {
             ui.set_desk_pad_rgb(color(p.color));
         }
         ui.set_desk_pad_pictured(chosen.is_some_and(|p| p.picture.is_some()));
+        ui.set_desk_pad_size(chosen.map_or(String::new(), |p| crate::desk::size_words(p.w / crate::desk::PER_MM, p.h / crate::desk::PER_MM)).into());
+        ui.set_desk_drawing(d.editing && d.draw_tool);
         ui.set_desk_pad_note(self.pad_note.as_str().into());
         ui.set_desk_editing(d.editing);
         self.show_rail();
@@ -6340,6 +6420,79 @@ impl Front {
         let rows = crate::desk_light::EFFECTS.iter().map(|(e, _, w)| MenuRow { kind: 0, label: (*w).into(), tag: "".into(), tick: *e == self.desk_light, sub: "".into() }).collect();
         self.hang_menu(rows, 240.0, anchor);
         self.desk_light_menu = true;
+    }
+
+    /// Add pad's menu (the makers' sizes, and Draw your own), or the chosen
+    /// pad's Size menu (the sizes, its own ticked, and a width and depth to
+    /// type), under its button.
+    fn open_pad_menu(&mut self, which: PadMenu, anchor: (f32, f32, f32)) {
+        if let Some((at, when)) = self.shut.take() {
+            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
+                return;
+            }
+        }
+        self.close_menu();
+        self.close_picker();
+        let (rows, _) = self.pad_rows(which);
+        // (Add pad ticks nothing, so it keeps no column for ticks)
+        self.ui.set_menu_marks(which == PadMenu::Size);
+        self.hang_menu(rows, 270.0, anchor);
+        self.pad_menu = Some(which);
+    }
+
+    /// A pad menu's rows, and what each stands for: the sizes under their
+    /// kinds' headings, each with its size in inches; then Draw your own, or
+    /// the chosen pad's width and depth to type.
+    fn pad_rows(&self, which: PadMenu) -> (Vec<MenuRow>, Vec<Option<PadRow>>) {
+        let row = |kind: i32, label: &str, tag: String, tick: bool, sub: &str| MenuRow { kind, label: label.into(), tag: tag.into(), tick, sub: sub.into() };
+        let now = self.desk.pad_size_mm();
+        let at = now.and_then(|(w, h)| crate::desk::standard(w, h));
+        let (mut rows, mut what) = (Vec::new(), Vec::new());
+        let mut kind = "";
+        for (k, (g, label, w, h)) in crate::desk::SIZES.iter().enumerate() {
+            if *g != kind {
+                rows.push(row(1, g, String::new(), false, ""));
+                what.push(None);
+                kind = g;
+            }
+            rows.push(row(0, label, String::new(), which == PadMenu::Size && at == Some(k), &crate::desk::size_words(*w, *h)));
+            what.push(Some(PadRow::Size(k)));
+        }
+        rows.push(row(2, "", String::new(), false, ""));
+        what.push(None);
+        match which {
+            PadMenu::Add => {
+                rows.push(row(0, "Draw your own", String::new(), false, ""));
+                what.push(Some(PadRow::Draw));
+            }
+            PadMenu::Size => {
+                let (w, h) = now.unwrap_or((0.0, 0.0));
+                rows.push(row(1, "Your own size", String::new(), false, ""));
+                what.push(None);
+                rows.push(row(6, "Width", crate::desk::inches(w), false, "in"));
+                what.push(Some(PadRow::Width));
+                rows.push(row(6, "Depth", crate::desk::inches(h), false, "in"));
+                what.push(Some(PadRow::Depth));
+            }
+        }
+        (rows, what)
+    }
+
+    /// A field in the open menu typed in and set: the chosen pad's width or
+    /// depth, in inches (or in mm or cm, said so), the menu staying open for
+    /// the other.
+    fn menu_field(&mut self, i: usize, t: &str) {
+        let Some(which) = self.pad_menu else { return };
+        let mm = crate::desk::typed_mm(t);
+        match (self.pad_rows(which).1.get(i).copied().flatten(), mm) {
+            (Some(PadRow::Width), Some(mm)) => self.desk.set_pad_size(Some(mm), None),
+            (Some(PadRow::Depth), Some(mm)) => self.desk.set_pad_size(None, Some(mm)),
+            _ => {}
+        }
+        // (what it is now, in its rows: a size it took, or what it was, for words it couldn't)
+        let (rows, _) = self.pad_rows(which);
+        self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
+        self.show_desk();
     }
 
     /// The desk's light set to an effect, kept so: its frames from now, or,

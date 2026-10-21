@@ -804,7 +804,7 @@ component Menu inherits Rectangle {
                         }
                     }
                     Text {
-                        text: "ms";
+                        text: row.sub == "" ? "ms" : row.sub;
                         font-family: "Geist";
                         font-size: 13.5px;
                         color: Ink.ink;
@@ -4141,6 +4141,13 @@ export component AppWindow inherits Window {
     in property <color> desk-pad-rgb;
     in property <bool> desk-pad-pictured;
     in property <string> desk-pad-note;
+    // the chosen pad's size in words, and Draw your own chosen (the next drag
+    // across the desk draws a pad)
+    in property <string> desk-pad-size;
+    in property <bool> desk-drawing;
+    callback desk-add-pad(length, length, length);
+    callback desk-pad-size-menu(length, length, length);
+    callback desk-draw-cancel();
     callback desk-pad-hover(int, bool);
     callback desk-pad-edges(int, length, length);
     callback desk-pad-color(length, length, length);
@@ -4252,6 +4259,8 @@ export component AppWindow inherits Window {
     callback menu-enter();
     callback menu-dismiss();
     callback menu-back-to();
+    // a field in the open menu typed in and set, by its row
+    callback menu-field(int, string);
     callback effect(int);
     callback cell-pick(int, int, length, length, length);
     callback cell-slide(int, float);
@@ -4394,8 +4403,9 @@ export component AppWindow inherits Window {
         // highlight under a device on the ground, and draws the keyboard.)
         if root.place == "home": Rectangle {
             desk-ta := TouchArea {
-                // (in edit mode a drag on the empty desk draws a pad)
-                mouse-cursor: root.desk-panning ? MouseCursor.grabbing : root.desk-editing ? MouseCursor.crosshair : MouseCursor.default;
+                // (in edit mode a drag on the empty desk moves round it; with
+                // Draw your own on, it draws a pad)
+                mouse-cursor: root.desk-panning ? MouseCursor.grabbing : root.desk-drawing ? MouseCursor.crosshair : MouseCursor.default;
                 // (in edit mode a drag with the middle button moves around the desk)
                 pointer-event(e) => {
                     if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
@@ -4431,7 +4441,7 @@ export component AppWindow inherits Window {
                         border-color: p.chosen ? #ffffffe0 : #ffffff40;
                     }
                     if root.desk-editing && !p.drawing: TouchArea {
-                        mouse-cursor: root.desk-carrying ? MouseCursor.grabbing : MouseCursor.grab;
+                        mouse-cursor: root.desk-drawing ? MouseCursor.crosshair : root.desk-carrying ? MouseCursor.grabbing : MouseCursor.grab;
                         changed has-hover => { root.desk-pad-hover(j, self.has-hover); }
                         pointer-event(e) => {
                             if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
@@ -4795,16 +4805,77 @@ export component AppWindow inherits Window {
                 mode-row := HorizontalLayout {
                     padding-left: root.desk-pad-chosen >= 0 ? 6px : 16px;
                     padding-right: 6px;
-                    spacing: root.desk-pad-chosen >= 0 ? 6px : 14px;
+                    spacing: root.desk-pad-chosen >= 0 ? 6px : 10px;
                     alignment: start;
                     if root.desk-pad-chosen < 0: Text {
-                        text: "Drag a device to where it sits on your desk, or drag across the empty desk to draw a pad.";
+                        text: root.desk-drawing ? "Drag across the desk to draw your pad." : "Drag a device to where it sits on your desk.";
                         font-family: "Geist";
                         font-size: 12.5px;
                         color: Ink.soft;
                         vertical-alignment: center;
                     }
-                    // a pad chosen: its color, its picture, and taking it off the desk
+                    // (a gap after the words, as wide as the bar's own between buttons)
+                    if root.desk-pad-chosen < 0: Rectangle { width: 4px; }
+                    // nothing chosen: a pad to add, at its maker's size or drawn
+                    if root.desk-pad-chosen < 0 && !root.desk-drawing: VerticalLayout {
+                        alignment: center;
+                        WordButton {
+                            text: "Add pad";
+                            height: 28px;
+                            fill: Ink.hover-box;
+                            fill-hover: Ink.pick;
+                            clicked => { root.desk-add-pad(self.absolute-position.x, self.absolute-position.y, self.height); }
+                        }
+                    }
+                    // drawing: put away unused
+                    if root.desk-pad-chosen < 0 && root.desk-drawing: VerticalLayout {
+                        alignment: center;
+                        WordButton {
+                            text: "Cancel";
+                            height: 28px;
+                            fill: Ink.hover-box;
+                            fill-hover: Ink.pick;
+                            clicked => { root.desk-draw-cancel(); }
+                        }
+                    }
+                    // a pad chosen: its size, its color, its picture, and taking it off the desk
+                    if root.desk-pad-chosen >= 0: VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            height: 28px;
+                            width: size-row.preferred-width;
+                            border-radius: 8px;
+                            background: size-ta.has-hover ? Ink.pick : Ink.hover-box;
+                            size-row := HorizontalLayout {
+                                padding-left: 12px;
+                                padding-right: 10px;
+                                spacing: 8px;
+                                Text {
+                                    text: root.desk-pad-size;
+                                    font-family: "Geist";
+                                    font-size: 13px;
+                                    font-weight: 500;
+                                    color: Ink.ink;
+                                    vertical-alignment: center;
+                                }
+                                Path {
+                                    y: (parent.height - 12px) / 2;
+                                    width: 12px;
+                                    height: 12px;
+                                    viewbox-width: 12;
+                                    viewbox-height: 12;
+                                    commands: "M3 4.5l3 3 3-3";
+                                    fill: transparent;
+                                    stroke: Ink.quiet;
+                                    stroke-width: 1.6px;
+                                }
+                            }
+                            size-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.desk-pad-size-menu(self.absolute-position.x, self.absolute-position.y, self.height); }
+                            }
+                        }
+                    }
                     if root.desk-pad-chosen >= 0: VerticalLayout {
                         alignment: center;
                         Rectangle {
@@ -7003,6 +7074,7 @@ export component AppWindow inherits Window {
         typed(t) => { root.menu-typed(t); }
         enter => { root.menu-enter(); }
         dismiss => { root.menu-dismiss(); }
+        field-done(i, t) => { root.menu-field(i, t); }
     }
     picker := Picker {
         visible: root.picker-open;
