@@ -47,6 +47,7 @@ mod mouse_art;
 mod overlays;
 mod picker;
 mod picture;
+mod profiles;
 mod screen_edit;
 mod screen_keys;
 mod screens;

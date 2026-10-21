@@ -3451,11 +3451,16 @@ component AnchorHead inherits Text {
 // The anchoring column under the keyboard: the profiles (the one the Z10 is
 // running marked by a white bar at its edge, the one being edited lit). The
 // layers are a switch over the Key library; Save and Discard are in the device's bar. Choices go top to bottom: a profile, then a layer, then a key.
+// For a device whose profiles Ectodeck keeps, as many as you want (`kept`),
+// the one in use has a menu beside its pencil and a last row makes a new one.
 component AnchorColumn inherits VerticalLayout {
     in property <[ProfileItem]> profiles;
+    in property <bool> kept;
     callback choose(int);
     callback rename(string);
-    property <bool> renaming;
+    callback add();
+    callback menu(length, length, length);
+    in-out property <bool> renaming;
     spacing: 12px;
     alignment: start;
 
@@ -3486,7 +3491,7 @@ component AnchorColumn inherits VerticalLayout {
                 }
                 if !(p.current && root.renaming): VerticalLayout {
                     x: 20px;
-                    width: parent.width - 20px - 34px;
+                    width: parent.width - 20px - (root.kept && p.current ? 62px : 34px);
                     alignment: center;
                     Text {
                         text: p.name;
@@ -3576,7 +3581,7 @@ component AnchorColumn inherits VerticalLayout {
                 }
                 // the pencil, on the profile being edited
                 if p.current && !root.renaming: Rectangle {
-                    x: parent.width - 32px;
+                    x: parent.width - (root.kept ? 60px : 32px);
                     y: (parent.height - 26px) / 2;
                     width: 26px;
                     height: 26px;
@@ -3597,6 +3602,57 @@ component AnchorColumn inherits VerticalLayout {
                     pen-ta := TouchArea {
                         mouse-cursor: pointer;
                         clicked => { root.renaming = true; }
+                    }
+                }
+                // and its menu: Duplicate, Delete
+                if root.kept && p.current && !root.renaming: Rectangle {
+                    x: parent.width - 32px;
+                    y: (parent.height - 26px) / 2;
+                    width: 26px;
+                    height: 26px;
+                    border-radius: 6px;
+                    background: dots-ta.has-hover ? Ink.pick-hover : transparent;
+                    Path {
+                        x: 6px;
+                        y: 6px;
+                        width: 14px;
+                        height: 14px;
+                        viewbox-width: 14;
+                        viewbox-height: 14;
+                        commands: "M1.7 7a1.3 1.3 0 1 0 2.6 0a1.3 1.3 0 1 0 -2.6 0zM5.7 7a1.3 1.3 0 1 0 2.6 0a1.3 1.3 0 1 0 -2.6 0zM9.7 7a1.3 1.3 0 1 0 2.6 0a1.3 1.3 0 1 0 -2.6 0z";
+                        fill: dots-ta.has-hover ? Ink.bright : Ink.quiet;
+                    }
+                    dots-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.menu(self.absolute-position.x, self.absolute-position.y, self.height); }
+                    }
+                }
+            }
+            // a new profile, last
+            if root.kept: new-row := AnchorRow {
+                chosen: false;
+                clicked => { root.renaming = false; root.add(); }
+                HorizontalLayout {
+                    x: 20px;
+                    spacing: 8px;
+                    alignment: start;
+                    Path {
+                        y: (parent.height - 12px) / 2;
+                        width: 12px;
+                        height: 12px;
+                        viewbox-width: 12;
+                        viewbox-height: 12;
+                        commands: "M6 1.5v9M1.5 6h9";
+                        stroke: new-row.hover ? Ink.bright : Ink.soft;
+                        stroke-width: 1.8px;
+                        fill: transparent;
+                    }
+                    Text {
+                        text: "New profile";
+                        font-family: "Geist";
+                        font-size: 13px;
+                        color: new-row.hover ? Ink.bright : Ink.soft;
+                        vertical-alignment: center;
                     }
                 }
             }
@@ -3935,6 +3991,19 @@ export component AppWindow inherits Window {
     in property <int> mouse-tab;
     in property <string> mouse-hint;
     in property <string> mouse-status;
+    // the mouse's profiles, kept by Ectodeck: the list (once the mouse has been
+    // met), the one in use's name open to change, what was last done to them,
+    // and Undo for a moment after one is deleted
+    in property <[ProfileItem]> mouse-profiles;
+    in property <bool> mouse-profiles-shown;
+    in-out property <bool> mouse-renaming;
+    in property <string> mouse-said;
+    in property <bool> mouse-undo-shown;
+    callback mouse-profile-choose(int);
+    callback mouse-profile-rename(string);
+    callback mouse-profile-new();
+    callback mouse-profile-menu(length, length, length);
+    callback mouse-undo();
     // its picture, and how far the picture's shadow reaches past the mouse;
     // over it, the chosen button picked out and the one under the pointer a
     // shade lighter, then each light's mask in the light's color of the moment
@@ -4526,10 +4595,16 @@ export component AppWindow inherits Window {
             property <length> stage-h: mouse-stage-h;
             property <length> low-y: mouse-low-y;
             property <length> low-h: mouse-low-h;
+            // the Profiles box's room, first in the row on each tab whose settings
+            // belong to a profile, and its height (rows of 50 under its heading,
+            // then the row for a new one)
+            property <length> pro-w: root.mouse-profiles-shown && root.mouse-tab < 3 ? 252px : 0;
+            property <length> pro-y: root.mouse-tab < 2 ? low-y : head-end;
+            property <length> pro-h: root.mouse-profiles.length * 50px + 92px;
             mouse-flick := Flickable {
                 y: 56px;
                 height: parent.height - 56px;
-                content-height: low-y + (root.mouse-tab < 2 ? low-h : root.mouse-cells-h) + 24px;
+                content-height: max(low-y + (root.mouse-tab < 2 ? low-h : root.mouse-cells-h), pro-w > 0 ? pro-y + pro-h : 0) + 24px;
                 mouse-drag-pan-enabled: false;
                 Text {
                     x: pws-x;
@@ -4661,9 +4736,22 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
+                // the profiles, first in the row, as the keyboard's are
+                if pro-w > 0: AnchorColumn {
+                    x: pws-x;
+                    y: pro-y;
+                    width: 240px;
+                    profiles: root.mouse-profiles;
+                    kept: true;
+                    renaming <=> root.mouse-renaming;
+                    choose(n) => { root.mouse-profile-choose(n); }
+                    rename(t) => { root.mouse-profile-rename(t); }
+                    add() => { root.mouse-profile-new(); }
+                    menu(x, y, h) => { root.mouse-profile-menu(x, y, h); }
+                }
                 // the list beside the boxes: the buttons, or the lights, as the profiles are listed
                 if root.mouse-tab < 2: Rectangle {
-                    x: pws-x;
+                    x: pws-x + pro-w;
                     y: low-y;
                     width: root.mouse-tab == 0 ? 260px : 240px;
                     height: low-h;
@@ -4720,9 +4808,9 @@ export component AppWindow inherits Window {
                 // Buttons, no button chosen: every button at once, where the
                 // chosen one's box goes and in its shade
                 if root.mouse-tab == 0 && !root.mouse-chosen: PageBox {
-                    x: pws-x + 260px + 12px;
+                    x: pws-x + pro-w + 260px + 12px;
                     y: low-y;
-                    width: pws-w - 272px;
+                    width: pws-w - pro-w - 272px;
                     height: low-h;
                     title: "All buttons";
                     Text {
@@ -4747,9 +4835,9 @@ export component AppWindow inherits Window {
                 }
                 // Buttons: the chosen button's job, as a key's on the keyboard's Keys tab
                 if root.mouse-tab == 0 && root.mouse-chosen: KeyDetail {
-                    x: pws-x + 260px + 12px;
+                    x: pws-x + pro-w + 260px + 12px;
                     y: low-y;
-                    width: pws-w - 272px;
+                    width: pws-w - pro-w - 272px;
                     height: low-h;
                     title: root.mouse-title;
                     cap: root.mouse-cap;
@@ -4773,7 +4861,7 @@ export component AppWindow inherits Window {
                 }
                 // Lighting: the chosen light's effect, as the keyboard's
                 if root.mouse-tab == 1: EffectGrid {
-                    x: pws-x + 240px + 12px;
+                    x: pws-x + pro-w + 240px + 12px;
                     y: low-y;
                     width: 300px;
                     height: low-h;
@@ -4783,9 +4871,9 @@ export component AppWindow inherits Window {
                 }
                 // the boxes built as cells: the effect's settings, Performance, Settings
                 if root.mouse-tab >= 1: Rectangle {
-                    x: pws-x + (root.mouse-tab == 1 ? 240px + 12px + 300px + 12px : 0);
+                    x: pws-x + pro-w + (root.mouse-tab == 1 ? 240px + 12px + 300px + 12px : 0);
                     y: low-y;
-                    width: root.mouse-w - (root.mouse-tab == 1 ? 564px : 0);
+                    width: root.mouse-w - pro-w - (root.mouse-tab == 1 ? 564px : 0);
                     height: root.mouse-cells-h;
                     for c in root.cells: CellView {
                         c: c;
@@ -4845,15 +4933,25 @@ export component AppWindow inherits Window {
                             }
                         }
                     }
+                    // what went wrong, which stays, or what was last done to the
+                    // profiles, for a moment, with Undo after a delete
                     Text {
                         horizontal-stretch: 1;
-                        text: root.mouse-status;
+                        text: root.mouse-status != "" ? root.mouse-status : root.mouse-said;
                         font-family: "Geist";
                         font-size: 12.5px;
-                        color: Ink.bad;
+                        color: root.mouse-status != "" ? Ink.bad : Ink.quiet;
                         horizontal-alignment: right;
                         vertical-alignment: center;
                         overflow: elide;
+                    }
+                    if root.mouse-status == "" && root.mouse-undo-shown: VerticalLayout {
+                        horizontal-stretch: 0;
+                        alignment: center;
+                        BoxLink {
+                            text: "Undo";
+                            clicked => { root.mouse-undo(); }
+                        }
                     }
                 }
                 Rectangle {

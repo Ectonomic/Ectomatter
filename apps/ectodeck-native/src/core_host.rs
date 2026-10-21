@@ -872,6 +872,43 @@ mod tests {
         }
     }
 
+    /// A whole profile goes to the mouse in order (its buttons in one report,
+    /// each light, both sensitivities, the polling rate) and is kept in its
+    /// memory once; GG's own Color shift plays red, green and blue a second
+    /// around, evenly, back to red; and what the mouse ships as is GG's.
+    #[test]
+    fn a_profile_goes_to_the_mouse_whole_and_is_kept_once() {
+        let (core, sent, data) = mouse_core("apply");
+        let at = sent.lock().unwrap().len();
+        let d = serde_json::json!({ "device": "sensei310-1" });
+        let mut p = core.call("profiles/factory", &d).unwrap();
+        assert_eq!(p["settings"], serde_json::json!({ "cpi1": 800, "cpi2": 1600, "polling": 1000 }));
+        assert_eq!(p["keys"]["base"]["right-side-back"], serde_json::json!({ "key": "PageDown" }));
+        assert_eq!(p["lighting"]["logo"]["params"]["colors"], serde_json::json!(["#FF0000", "#00FF00", "#0000FF"]));
+        p["device"] = serde_json::json!("sensei310-1");
+        p["settings"]["cpi1"] = serde_json::json!(1200);
+        let answer = core.call("profiles/apply", &p).unwrap();
+        let plays = &answer["plays"]["logo"];
+        assert_eq!(plays["ms"], 1000);
+        let stops: Vec<(u64, String)> = plays["stops"].as_array().unwrap().iter().map(|s| (s["at"].as_u64().unwrap(), s["color"].as_str().unwrap().to_string())).collect();
+        assert_eq!(stops, [(0, "#FF0000".into()), (85, "#00FF00".into()), (170, "#0000FF".into()), (255, "#FF0000".into())]);
+        let soon = sent.lock().unwrap().len();
+        std::thread::sleep(Duration::from_millis(1800));
+        let _ = core.call("settings/get", &d);
+        let all: Vec<Vec<u8>> = sent.lock().unwrap()[at..].iter().map(|(_, _, b)| b.clone()).collect();
+        let s = core.call("settings/get", &d).unwrap();
+        let _ = std::fs::remove_dir_all(&data);
+        assert_eq!(soon - at, 6, "buttons, two lights, two presets, polling: {all:02x?}");
+        assert_eq!(all[0][..2], [0x00, 0x31], "the buttons first, in one report");
+        assert_eq!(all[1][..4], [0x00, 0x5b, 0x00, 0x00], "then the logo");
+        assert_eq!(all[2][..4], [0x00, 0x5b, 0x00, 0x01], "then the wheel");
+        assert_eq!(all[3], [0x00, 0x53, 0x00, 0x01, 0x0b, 0x00, 0x42], "the first preset at 1200 CPI");
+        assert_eq!(all[4][..4], [0x00, 0x53, 0x00, 0x02], "the second preset");
+        assert_eq!(all[5], [0x00, 0x54, 0x00, 0x01], "1000 Hz");
+        assert_eq!(all.iter().filter(|r| r[..2] == [0x00, 0x59]).count(), 1, "kept once");
+        assert_eq!(s["values"]["cpi1"], 1200);
+    }
+
     /// A breath goes from dark up to its color and back down to dark, and a
     /// color shift comes back round to red, as each cycle ends on its first
     /// color: the mouse jumps from the last stop to the first.

@@ -98,6 +98,13 @@ pub enum Ask {
     MousePicClicked(f32, f32),
     MouseCallHover(i32, bool),
     MouseFrame,
+    /// the mouse's profiles: one chosen, the one in use renamed, a new one,
+    /// the menu on the one in use, and Undo after one was deleted
+    MouseProfile(i32),
+    MouseProfileRename(String),
+    MouseProfileNew,
+    MouseProfileMenu(f32, f32, f32),
+    MouseUndo,
     /// Home's desk: a press on a device (or, -1, the empty desk), the pointer
     /// moved pressed, let go, the wheel, the pointer over a device or off it,
     /// Arrange, Done, a zoom control (-1 out, 0 to 100%, 1 in, 2 the fit), and
@@ -545,6 +552,8 @@ pub struct Front {
     /// sliders last read and last set
     bind: [String; 2],
     bind_menu: Option<(usize, (f32, f32, f32))>,
+    /// the menu on the mouse's profile in use is open
+    profile_menu: bool,
     /// a slider set to Nothing because the other took its job: the job it had
     idled: [Option<String>; 2],
     last_sliders: Option<serde_json::Value>,
@@ -710,6 +719,11 @@ impl Front {
         on!(on_mouse_pic_moved, |x, y, over| Ask::MousePicMoved(x, y, over));
         on!(on_mouse_pic_clicked, |x, y| Ask::MousePicClicked(x, y));
         on!(on_mouse_call_hover, |i, on| Ask::MouseCallHover(i, on));
+        on!(on_mouse_profile_choose, |i| Ask::MouseProfile(i));
+        on!(on_mouse_profile_rename, |t| Ask::MouseProfileRename(t.to_string()));
+        on!(on_mouse_profile_new, Ask::MouseProfileNew);
+        on!(on_mouse_profile_menu, |x, y, h| Ask::MouseProfileMenu(x, y, h));
+        on!(on_mouse_undo, Ask::MouseUndo);
         on!(on_desk_press, |i, x, y| Ask::DeskPress(i, x, y));
         on!(on_desk_pan, |x, y| Ask::DeskPan(x, y));
         on!(on_desk_move, |x, y| Ask::DeskMove(x, y));
@@ -859,6 +873,7 @@ impl Front {
             overlay_model: Rc::new(VecModel::default()),
             bind: crate::uistate::get("slider_bind").and_then(|v| serde_json::from_value(v).ok()).unwrap_or(["own".into(), "own".into()]),
             bind_menu: None,
+            profile_menu: false,
             idled: crate::uistate::get("slider_idled").and_then(|v| serde_json::from_value(v).ok()).unwrap_or([None, None]),
             last_sliders: None,
             held: None,
@@ -1267,6 +1282,26 @@ impl Front {
                             self.mouse.reset_job(b);
                         }
                     }
+                }
+                Ask::MouseProfile(i) => {
+                    self.close_menu();
+                    self.ui.set_mouse_renaming(false);
+                    self.mouse.choose_profile(i.max(0) as usize);
+                    // (what the mouse plays, new, on its picture)
+                    self.show_mouse_lights();
+                }
+                Ask::MouseProfileRename(t) => self.mouse.rename_profile(&t),
+                Ask::MouseProfileNew => {
+                    self.close_menu();
+                    self.mouse.new_profile();
+                    self.show_mouse_lights();
+                    // (its name opens to change)
+                    self.ui.set_mouse_renaming(true);
+                }
+                Ask::MouseProfileMenu(x, y, h) => self.open_profile_menu((x, y, h)),
+                Ask::MouseUndo => {
+                    self.mouse.undo();
+                    self.show_mouse_lights();
                 }
                 Ask::MouseEffect(i) => {
                     if let Some((e, _)) = crate::mouse::EFFECTS.get(i.max(0) as usize) {
@@ -2083,14 +2118,12 @@ impl Front {
                 self.mouse.same_wheel = index % 2 == 1;
                 crate::uistate::set("mouse_same_wheel", serde_json::json!(self.mouse.same_wheel));
                 if self.mouse.same_wheel {
-                    let l = self.mouse.light_of("logo");
-                    self.mouse.state["lighting"]["wheel"] = l.clone();
-                    self.mouse.send(crate::mouse::Ask::Light("wheel".into(), l));
+                    self.mouse.copy_logo_to_wheel();
                 }
                 self.refresh();
                 return;
             }
-            Ctl::Color | Ctl::Colors | Ctl::Background | Ctl::Paint | Ctl::LcdColor | Ctl::MouseColor => {
+            Ctl::Color | Ctl::Colors | Ctl::Background | Ctl::Paint | Ctl::LcdColor | Ctl::MouseColor | Ctl::MouseColors => {
                 self.open_picker(c, index, _anchor);
                 return;
             }
@@ -2230,6 +2263,8 @@ impl Front {
         self.close_picker();
         let rgb = if c == Ctl::MouseColor {
             crate::mouse::rgb(&self.mouse.light_of(self.mouse.light_name())["params"]["color"]).unwrap_or([0xff, 0x10, 0x00])
+        } else if c == Ctl::MouseColors {
+            crate::mouse::shift_colors(&self.mouse.light_of(self.mouse.light_name())).get(index).copied().unwrap_or([0xff, 0, 0])
         } else {
             lighting::color_of(&self.page, c, index, self.paint)
         };
@@ -2307,6 +2342,10 @@ impl Front {
         } else if c == Ctl::MouseColor {
             let mut l = self.mouse.light_of(self.mouse.light_name());
             l["params"]["color"] = serde_json::json!(lighting::hex_of(rgb));
+            self.mouse.set_light(l);
+            self.refresh();
+        } else if c == Ctl::MouseColors {
+            let l = crate::mouse::with_shift_color(&self.mouse.light_of(self.mouse.light_name()), index, rgb);
             self.mouse.set_light(l);
             self.refresh();
         } else {
@@ -2671,7 +2710,7 @@ impl Front {
             self.ui.set_menu_open(false);
             self.ui.invoke_blur_menu();
         }
-        if self.mouse.menu.take().is_some() {
+        if self.mouse.menu.take().is_some() || std::mem::take(&mut self.profile_menu) {
             self.ui.set_menu_open(false);
             self.ui.set_menu_w(300.0);
             self.ui.set_mouse_menu_open(false);
@@ -2850,6 +2889,24 @@ impl Front {
     }
 
     fn menu_chose(&mut self, i: usize) {
+        if self.profile_menu {
+            self.close_menu();
+            match i {
+                // Duplicate: a copy, its name open to change
+                0 => {
+                    self.mouse.duplicate_profile();
+                    self.ui.set_mouse_renaming(true);
+                }
+                // Delete, unless it's the only one (that row is dimmed)
+                2 if self.mouse.profiles.as_ref().is_some_and(|p| p.list.len() > 1) => {
+                    self.mouse.delete_profile();
+                    self.show_mouse_lights();
+                }
+                _ => {}
+            }
+            self.refresh();
+            return;
+        }
         if let Some(k) = self.mouse.menu {
             self.close_menu();
             if let (Some((_, a)), Some(b)) = (crate::mouse::choices(k).get(i), self.mouse.button) {
@@ -4052,6 +4109,11 @@ impl Front {
         ui.set_mouse_tab(m.tab as i32);
         ui.set_mouse_hint(m.hint().into());
         ui.set_mouse_status(m.failed.clone().unwrap_or_default().into());
+        // the profiles, and what was last done to them, with Undo for a moment
+        show_rows(ui.get_mouse_profiles(), |r| ui.set_mouse_profiles(r), m.profile_items());
+        ui.set_mouse_profiles_shown(m.profiles.is_some());
+        ui.set_mouse_said(m.said_now().into());
+        ui.set_mouse_undo_shown(m.undo_shown());
         // (each list kept, its rows changed in place: a list made anew would
         // drop a press the pointer is in the middle of)
         show_rows(ui.get_mouse_calls(), |r| ui.set_mouse_calls(r), m.calls());
@@ -4094,7 +4156,9 @@ impl Front {
             .collect();
         self.ui.set_mouse_effect_moves(effects.iter().any(|e| e.on && e.motion != 0));
         show_rows(self.ui.get_mouse_effects(), |r| self.ui.set_mouse_effects(r), effects);
-        let w = self.ui.get_mouse_w() - if self.mouse.tab == 1 { 564.0 } else { 0.0 };
+        // (the Profiles box first in the row, on each tab whose settings belong to a profile)
+        let profiles_w = if self.mouse.tab < 3 && self.mouse.profiles.is_some() { 252.0 } else { 0.0 };
+        let w = self.ui.get_mouse_w() - if self.mouse.tab == 1 { 564.0 } else { 0.0 } - profiles_w;
         let (cells, h) = self.mouse.cells(w);
         self.ui.set_mouse_cells_h(h);
         self.show_cells(cells);
@@ -4103,6 +4167,41 @@ impl Front {
         self.show_mouse_picked();
         self.show_mouse_lights();
         self.mouse_frames_run();
+    }
+
+    /// The menu on the mouse's profile in use: Duplicate, and Delete, which
+    /// the only profile can't be.
+    fn open_profile_menu(&mut self, anchor: (f32, f32, f32)) {
+        if let Some((at, when)) = self.shut.take() {
+            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
+                return;
+            }
+        }
+        self.close_menu();
+        self.close_picker();
+        let only = self.mouse.profiles.as_ref().is_none_or(|p| p.list.len() < 2);
+        let row = |kind: i32, label: &str| MenuRow { kind, label: label.into(), tag: "".into(), tick: false, sub: "".into() };
+        let mut rows = vec![row(0, "Duplicate"), row(2, ""), row(if only { 5 } else { 4 }, "Delete")];
+        if only {
+            rows.push(row(3, "Your only profile can’t be deleted."));
+        }
+        let h = 6.0 + rows.iter().map(|r| match r.kind { 2 => 11.0, _ => 33.0 }).sum::<f32>() + 6.0;
+        self.ui.set_menu_search(false);
+        self.ui.set_menu_back(false);
+        self.ui.set_menu_natural(h);
+        self.ui.set_menu_w(220.0);
+        self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
+        let (ax, ay, ah) = anchor;
+        let win = self.ui.get_window_height();
+        let (below, above) = (win - ay - ah - 14.0, ay - 70.0);
+        let down = h <= below || below >= above;
+        self.ui.set_menu_ax(ax);
+        self.ui.set_menu_ay(ay);
+        self.ui.set_menu_ah(ah);
+        self.ui.set_menu_top(if down { ay + ah + 6.0 } else { ay - 6.0 - h });
+        self.ui.set_menu_max(win * 0.7);
+        self.ui.set_menu_open(true);
+        self.profile_menu = true;
     }
 
     /// The chosen button's jobs of one kind, under the Key detail box's menu field.

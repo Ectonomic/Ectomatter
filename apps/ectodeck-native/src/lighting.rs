@@ -86,6 +86,8 @@ pub enum Ctl {
     /// the mouse's page: a light's color and speed, the wheel copying the
     /// logo, the two sensitivities, the polling rate
     MouseColor,
+    /// one of a Color shift's colors
+    MouseColors,
     MouseSpeed,
     MouseSameWheel,
     MouseCpi1,
@@ -93,7 +95,7 @@ pub enum Ctl {
     MousePolling,
 }
 
-const CTLS: [Ctl; 58] = [
+const CTLS: [Ctl; 59] = [
     Ctl::None,
     Ctl::Color,
     Ctl::Colors,
@@ -147,6 +149,7 @@ const CTLS: [Ctl; 58] = [
     Ctl::SensorName,
     Ctl::OpenSettings,
     Ctl::MouseColor,
+    Ctl::MouseColors,
     Ctl::MouseSpeed,
     Ctl::MouseSameWheel,
     Ctl::MouseCpi1,

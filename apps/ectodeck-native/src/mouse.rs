@@ -23,6 +23,8 @@ pub enum Ask {
     ResetKey(String),
     Light(String, Value),
     Setting(String, u64),
+    /// a whole profile put on the mouse (the core's profiles/apply)
+    Apply(Value),
 }
 
 /// What the page hears: everything the core says of the mouse, a change it
@@ -41,9 +43,11 @@ pub enum Heard {
 pub fn start(core: Core, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
     let (ask, asked) = mpsc::channel::<Ask>();
     std::thread::spawn(move || {
-        if let Err(e) = core.call("initialize", &json!({ "protocol": 2 })) {
+        if let Err(e) = core.call("initialize", &json!({ "protocol": 3 })) {
             let _ = tell.send(Heard::Failed(e));
         }
+        // (what the mouse ships as, which a new profile starts as)
+        let factory = core.call("profiles/factory", &json!({ "device": DEVICE })).unwrap_or(Value::Null);
         let (mut present, mut device) = (false, Value::Null);
         let read = |present: bool, device: &Value| {
             let d = json!({ "device": DEVICE });
@@ -53,6 +57,7 @@ pub fn start(core: Core, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
                 "keys": core.call("keys/get", &d).unwrap_or(Value::Null),
                 "lighting": core.call("lighting/get", &d).unwrap_or(Value::Null),
                 "settings": core.call("settings/get", &d).unwrap_or(Value::Null),
+                "factory": factory,
             })
         };
         let mut last = Value::Null;
@@ -85,6 +90,7 @@ pub fn start(core: Core, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
                         Ask::Key(c, _) | Ask::ResetKey(c) => format!("key {c}"),
                         Ask::Light(l, _) => format!("light {l}"),
                         Ask::Setting(s, _) => format!("setting {s}"),
+                        Ask::Apply(_) => "profile".into(),
                     };
                     let mut newest: Vec<Ask> = Vec::new();
                     for a in all {
@@ -100,6 +106,16 @@ pub fn start(core: Core, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
                                 let _ = tell.send(Heard::Played(light, v["plays"].clone(), Instant::now()));
                             }),
                             Ask::Setting(setting, v) => core.call("settings/set", &json!({ "device": DEVICE, "id": setting, "value": v })).map(|_| ()),
+                            Ask::Apply(mut body) => {
+                                body["device"] = json!(DEVICE);
+                                core.call("profiles/apply", &body).map(|v| {
+                                    // (each light from the moment the mouse took the whole)
+                                    let at = Instant::now();
+                                    for l in LIGHTS {
+                                        let _ = tell.send(Heard::Played(l.into(), v["plays"][l].clone(), at));
+                                    }
+                                })
+                            }
                         };
                         if let Err(e) = r {
                             let _ = tell.send(Heard::Failed(e));
@@ -270,7 +286,17 @@ pub struct Page {
     pub plays: [Option<(Plays, Instant)>; 2],
     /// where the picture's layers go once drawn, off the page's thread
     pub tell: Option<Sender<Heard>>,
+    /// the mouse's profiles, kept by Ectodeck (the mouse keeps one setup in its
+    /// memory: the one in use), once the mouse has been met
+    pub profiles: Option<crate::profiles::Store>,
+    /// what was last done to the profiles, for the bar, and a profile deleted
+    /// with when, which Undo puts back for a few seconds
+    pub said: Option<(String, Instant)>,
+    pub gone: Option<((usize, crate::profiles::Profile), Instant)>,
 }
+
+/// How long Undo stays in the bar after a profile is deleted.
+pub const UNDO_FOR: Duration = Duration::from_secs(6);
 
 /// The lights, as the core names them, in the page's order.
 pub const LIGHTS: [&str; 2] = ["logo", "wheel"];
@@ -316,7 +342,7 @@ impl Plays {
 impl Page {
     pub fn new() -> Page {
         let same_wheel = crate::uistate::get("mouse_same_wheel").and_then(|v| v.as_bool()).unwrap_or(true);
-        Page { ask: None, state: Value::Null, tab: 0, button: None, light: 0, same_wheel, menu: None, failed: None, plays: [None, None], tell: None }
+        Page { ask: None, state: Value::Null, tab: 0, button: None, light: 0, same_wheel, menu: None, failed: None, plays: [None, None], tell: None, profiles: None, said: None, gone: None }
     }
 
     /// What the core says of the mouse: what each light plays is kept with
@@ -329,6 +355,148 @@ impl Page {
             }
         }
         self.state = v;
+        // the first time the mouse is met: its profiles as kept, or what it is
+        // set to now as Profile 1
+        if self.profiles.is_none() && self.known() {
+            let path = crate::profiles::path_for("sensei310");
+            self.profiles = Some(crate::profiles::Store::load(path.clone()).unwrap_or_else(|| crate::profiles::Store::first(path, self.body_now())));
+        }
+    }
+
+    /// Everything the mouse is set to now, as a profile holds it.
+    pub fn body_now(&self) -> Value {
+        let lights: serde_json::Map<String, Value> = LIGHTS.iter().map(|l| (l.to_string(), json!({ "effect": self.state["lighting"][l]["effect"], "params": self.state["lighting"][l]["params"] }))).collect();
+        let v = &self.state["settings"]["values"];
+        json!({
+            "keys": { "base": self.state["keys"]["layers"]["base"] },
+            "lighting": lights,
+            "settings": { "cpi1": v["cpi1"], "cpi2": v["cpi2"], "polling": v["polling"] },
+        })
+    }
+
+    /// A profile put on the mouse: shown as it is at once, and sent whole.
+    fn put_on(&mut self, body: &Value) {
+        if let Some(base) = body["keys"]["base"].as_object() {
+            for (id, a) in base {
+                self.state["keys"]["layers"]["base"][id] = a.clone();
+            }
+        }
+        for l in LIGHTS {
+            if body["lighting"][l].is_object() {
+                self.state["lighting"][l]["effect"] = body["lighting"][l]["effect"].clone();
+                self.state["lighting"][l]["params"] = body["lighting"][l]["params"].clone();
+            }
+        }
+        if let Some(set) = body["settings"].as_object() {
+            for (id, v) in set {
+                self.state["settings"]["values"][id] = v.clone();
+            }
+        }
+        self.send(Ask::Apply(body.clone()));
+    }
+
+    /// The profile in use changed as the mouse just was.
+    fn keep_in_profile(&mut self, f: impl FnOnce(&mut Value)) {
+        if let Some(p) = &mut self.profiles {
+            p.change(f);
+        }
+    }
+
+    /// Choose a profile: all of it on the mouse at once.
+    pub fn choose_profile(&mut self, i: usize) {
+        let Some(p) = &mut self.profiles else { return };
+        if i == p.active || i >= p.list.len() {
+            return;
+        }
+        p.choose(i);
+        let (name, body) = (p.current().name.clone(), p.current().body.clone());
+        self.put_on(&body);
+        self.say(format!("{name} is now on the mouse."));
+    }
+
+    /// A new profile, as SteelSeries GG ships the mouse, in use from now.
+    pub fn new_profile(&mut self) {
+        let factory = self.state["factory"].clone();
+        let Some(p) = &mut self.profiles else { return };
+        if !factory.is_object() {
+            return;
+        }
+        let name = p.new_name();
+        p.add(crate::profiles::Profile { name: name.clone(), body: factory.clone() });
+        self.put_on(&factory);
+        self.say(format!("{name} is now on the mouse."));
+    }
+
+    /// A copy of the profile in use, in use from now (the mouse already shows it).
+    pub fn duplicate_profile(&mut self) {
+        if let Some(p) = &mut self.profiles {
+            p.duplicate();
+        }
+    }
+
+    /// The profile in use deleted, at once: the one above it goes on the mouse,
+    /// and Undo puts it back for a few seconds.
+    pub fn delete_profile(&mut self) {
+        let Some(p) = &mut self.profiles else { return };
+        let Some(gone) = p.delete() else { return };
+        let body = p.current().body.clone();
+        let name = gone.1.name.clone();
+        self.gone = Some((gone, Instant::now()));
+        self.put_on(&body);
+        self.say(format!("Deleted {name}."));
+    }
+
+    /// Undo: the profile deleted put back, and on the mouse again.
+    pub fn undo(&mut self) {
+        let Some((gone, at)) = self.gone.take() else { return };
+        if at.elapsed() > UNDO_FOR {
+            return;
+        }
+        let Some(p) = &mut self.profiles else { return };
+        let name = gone.1.name.clone();
+        p.restore(gone);
+        let body = p.current().body.clone();
+        self.put_on(&body);
+        self.say(format!("{name} is back on the mouse."));
+    }
+
+    pub fn rename_profile(&mut self, name: &str) {
+        if let Some(p) = &mut self.profiles {
+            let i = p.active;
+            p.rename(i, name);
+        }
+    }
+
+    /// Whether Undo shows in the bar now.
+    pub fn undo_shown(&self) -> bool {
+        self.gone.as_ref().is_some_and(|(_, at)| at.elapsed() <= UNDO_FOR)
+    }
+
+    fn say(&mut self, what: String) {
+        self.said = Some((what, Instant::now()));
+    }
+
+    /// What the bar says: the last thing done to the profiles, for a few seconds.
+    pub fn said_now(&self) -> String {
+        self.said.as_ref().filter(|(_, at)| at.elapsed() <= UNDO_FOR).map_or(String::new(), |(s, _)| s.clone())
+    }
+
+    /// The profiles as the Profiles box lists them: each one's name and its
+    /// logo's effect, the one in use chosen and marked.
+    pub fn profile_items(&self) -> Vec<crate::ProfileItem> {
+        let Some(p) = &self.profiles else { return Vec::new() };
+        p.list
+            .iter()
+            .enumerate()
+            .map(|(i, pr)| crate::ProfileItem {
+                n: i as i32,
+                name: pr.name.as_str().into(),
+                sub: effect_name(pr.body["lighting"]["logo"]["effect"].as_str().unwrap_or("static")).into(),
+                active: i == p.active,
+                current: i == p.active,
+                ..Default::default()
+            })
+            .collect()
     }
 
     /// A light's effect taken by the mouse at `at`: the light plays it from then.
@@ -355,7 +523,7 @@ impl Page {
     /// keeps a record of it from before (an unplugged mouse stays, marked as
     /// not connected).
     pub fn known(&self) -> bool {
-        self.present() || !self.state["keys"]["base"]["left"].is_null()
+        self.present() || !self.state["keys"]["layers"]["base"]["left"].is_null()
     }
 
     pub fn present(&self) -> bool {
@@ -369,11 +537,11 @@ impl Page {
     }
 
     pub fn job(&self, i: usize) -> Value {
-        self.state["keys"]["base"][BUTTONS[i].0].clone()
+        self.state["keys"]["layers"]["base"][BUTTONS[i].0].clone()
     }
 
     pub fn factory(&self, i: usize) -> Value {
-        self.state["keys"]["factory"][BUTTONS[i].0].clone()
+        self.state["keys"]["factory"]["base"][BUTTONS[i].0].clone()
     }
 
     pub fn rebound(&self, i: usize) -> bool {
@@ -394,7 +562,7 @@ impl Page {
         let v = self.light_of(l);
         match v["effect"].as_str() {
             Some("off") => None,
-            Some("colorshift") => Some([255, 0, 0]),
+            Some("colorshift") => Some(shift_colors(&v)[0]),
             _ => Some(rgb(&v["params"]["color"]).unwrap_or([0xff, 0x10, 0x00])),
         }
     }
@@ -404,23 +572,43 @@ impl Page {
         let name = self.light_name();
         self.state["lighting"][name] = l.clone();
         self.send(Ask::Light(name.into(), l.clone()));
-        if name == "logo" && self.same_wheel {
+        let kept = json!({ "effect": l["effect"], "params": l["params"] });
+        let wheel_too = name == "logo" && self.same_wheel;
+        self.keep_in_profile(|b| {
+            b["lighting"][name] = kept.clone();
+            if wheel_too {
+                b["lighting"]["wheel"] = kept.clone();
+            }
+        });
+        if wheel_too {
             self.state["lighting"]["wheel"] = l.clone();
             self.send(Ask::Light("wheel".into(), l));
         }
+    }
+
+    /// The wheel set as the logo is (Same on the wheel), on the mouse and in the profile.
+    pub fn copy_logo_to_wheel(&mut self) {
+        let l = self.light_of("logo");
+        self.state["lighting"]["wheel"] = l.clone();
+        let kept = json!({ "effect": l["effect"], "params": l["params"] });
+        self.keep_in_profile(|b| b["lighting"]["wheel"] = kept);
+        self.send(Ask::Light("wheel".into(), l));
     }
 
     /// A button given back the job it had from the factory.
     pub fn reset_job(&mut self, i: usize) {
         let f = self.factory(i);
         if !f.is_null() {
-            self.state["keys"]["base"][BUTTONS[i].0] = f;
+            self.state["keys"]["layers"]["base"][BUTTONS[i].0] = f.clone();
+            self.keep_in_profile(|b| b["keys"]["base"][BUTTONS[i].0] = f);
             self.send(Ask::ResetKey(BUTTONS[i].0.into()));
         }
     }
 
     pub fn set_job(&mut self, i: usize, a: Value) {
-        self.state["keys"]["base"][BUTTONS[i].0] = a.clone();
+        self.state["keys"]["layers"]["base"][BUTTONS[i].0] = a.clone();
+        let kept = a.clone();
+        self.keep_in_profile(|b| b["keys"]["base"][BUTTONS[i].0] = kept);
         self.send(Ask::Key(BUTTONS[i].0.into(), a));
     }
 
@@ -430,6 +618,7 @@ impl Page {
 
     pub fn set_setting(&mut self, id: &str, v: u64) {
         self.state["settings"]["values"][id] = json!(v);
+        self.keep_in_profile(|b| b["settings"][id] = json!(v));
         self.send(Ask::Setting(id.into(), v));
     }
 
@@ -546,7 +735,7 @@ impl Page {
             "off" => s.note("The light stays dark."),
             "static" => s.note("One color, steady."),
             "breathing" => s.note("The color fades in and out."),
-            _ => s.note("Every color in turn, round the color wheel."),
+            _ => s.note("The colors below play in turn, each blending into the next."),
         }
         if e == "static" || e == "breathing" {
             s.gap(14.0);
@@ -555,8 +744,17 @@ impl Page {
             let c = rgb(&l["params"]["color"]).unwrap_or([0xff, 0x10, 0x00]);
             s.dots(Ctl::MouseColor, &[c], None, true);
         }
+        if e == "colorshift" {
+            // its colors as dots you can change, over the strip they blend along
+            s.gap(14.0);
+            s.cells.push(text_cell(style::GROUP, 16.0, s.y, s.inner(), 14.0, "COLORS"));
+            s.gap(14.0 + 10.0);
+            let cols = shift_colors(&l);
+            s.strip(&cols);
+            s.dots(Ctl::MouseColors, &cols, None, false);
+        }
         if e == "breathing" || e == "colorshift" {
-            let ms = l["params"]["speed"].as_u64().unwrap_or(if e == "breathing" { 3000 } else { 5000 }) as f32;
+            let ms = l["params"]["speed"].as_u64().unwrap_or(if e == "breathing" { 3000 } else if l["params"]["colors"].is_array() { 1000 } else { 5000 }) as f32;
             s.gap(18.0);
             s.head("Speed", Some(&format!("{:.1} s a cycle", ms / 1000.0)));
             // quick at the left, as the keyboard's speed sliders run
@@ -624,7 +822,7 @@ impl Page {
         let firmware = self.state["device"]["firmware"]["version"].as_str().map_or("Not known yet".to_string(), |v| format!("SteelSeries {v}"));
         let rows: [(&str, String); 3] = [
             ("Firmware", firmware),
-            ("Settings kept", "On the mouse, and in Ectodeck. The mouse tells Ectodeck its two sensitivities and its lights’ colors. Its buttons, effects and polling rate it can’t tell, so Ectodeck keeps its own record of those, and a change made to them in another app won’t show here.".into()),
+            ("Settings kept", "Your profiles are kept in Ectodeck. The one in use is also on the mouse, so the mouse keeps working that way without Ectodeck. A change made to the mouse in another app won’t show here.".into()),
             ("Model", "SteelSeries Sensei 310, USB 1038:1722".into()),
         ];
         for (k, v) in rows {
@@ -652,7 +850,9 @@ pub fn effect_name(e: &str) -> &'static str {
     EFFECTS.iter().find(|(id, _)| *id == e).map_or("Static", |(_, n)| n)
 }
 
-/// A light set to effect `e`, keeping the color and speed it had.
+/// A light set to effect `e`, keeping the color and speed it had; Color shift
+/// chosen for the first time starts as SteelSeries GG's own, red, green and
+/// blue, a second around.
 pub fn with_effect(old: &Value, e: &str) -> Value {
     let mut params = old["params"].clone();
     if !params.is_object() {
@@ -661,7 +861,42 @@ pub fn with_effect(old: &Value, e: &str) -> Value {
     if params.get("color").is_none() {
         params["color"] = json!("#FF1000");
     }
+    if e == "colorshift" && !params["colors"].is_array() {
+        params["colors"] = json!(GG_SHIFT);
+        params["speed"] = json!(1000);
+    }
     json!({ "effect": e, "params": params })
+}
+
+/// SteelSeries GG's Color shift for the mouse: red, green and blue.
+const GG_SHIFT: [&str; 3] = ["#FF0000", "#00FF00", "#0000FF"];
+
+/// The colors a light set to Color shift plays before it was given colors of
+/// its own: round the color wheel, as the core plays it then.
+const WHEEL: [&str; 6] = ["#FF0000", "#FFFF00", "#00FF00", "#00FFFF", "#0000FF", "#FF00FF"];
+
+/// A Color shift's colors, in order.
+pub fn shift_colors(l: &Value) -> Vec<[u8; 3]> {
+    match l["params"]["colors"].as_array() {
+        Some(a) if !a.is_empty() => a.iter().map(|c| rgb(c).unwrap_or([0; 3])).collect(),
+        _ => WHEEL.iter().map(|c| rgb(&json!(c)).unwrap()).collect(),
+    }
+}
+
+/// A Color shift with one of its colors changed: a light that went round the
+/// color wheel takes the wheel's colors, and its speed, as its own first.
+pub fn with_shift_color(l: &Value, i: usize, c: [u8; 3]) -> Value {
+    let mut l = l.clone();
+    if !l["params"]["colors"].is_array() {
+        l["params"]["colors"] = json!(WHEEL);
+        if l["params"]["speed"].is_null() {
+            l["params"]["speed"] = json!(5000);
+        }
+    }
+    if let Some(slot) = l["params"]["colors"].get_mut(i) {
+        *slot = json!(crate::lighting::hex_of(c).to_uppercase());
+    }
+    l
 }
 
 /// A stack laid out as a box: its tile under it at `x`, `y`, its title, its pieces moved there.
