@@ -9,10 +9,10 @@
 //! filled with the keys' colors each time the lighting changes. Light is
 //! added in linear light, and the lit legends go brighter than the desktop's white.
 //!
-//! The picture comes out as the HDR layer wants it: PQ, BT.2020, 16 bits a
-//! channel, premultiplied. SDR colors are decoded as KWin decodes the page's
-//! own (gamma 2.2 at the reference white), so the keyboard meets the page
-//! round it without a seam.
+//! The picture comes out as the HDR layer wants it: PQ with sRGB's own
+//! primaries (BT.709), 16 bits a channel, premultiplied. SDR colors are
+//! decoded as KWin decodes the page's own (gamma 2.2 at the reference white),
+//! so the keyboard meets the page round it without a seam.
 
 use std::sync::Arc;
 
@@ -2323,7 +2323,7 @@ impl Encoder {
     }
 
     /// One pixel: premultiplied linear RGBA (SDR white 1.0, BT.709) to
-    /// premultiplied PQ, BT.2020, as the channels of ABGR16161616
+    /// premultiplied PQ, BT.709, as the channels of ABGR16161616
     pub fn pixel(&self, px: [f32; 4]) -> [u16; 4] {
         let a = px[3];
         if a <= 0.0 {
@@ -2334,10 +2334,12 @@ impl Encoder {
     }
 
     /// One pixel given as its color in linear light (SDR white 1.0, BT.709)
-    /// and how much of it there is, to premultiplied PQ, BT.2020, as the
-    /// channels of ABGR16161616
+    /// and how much of it there is, to premultiplied PQ, BT.709, as the
+    /// channels of ABGR16161616. Each channel is encoded on its own: mixed
+    /// into BT.2020's channels here, a pure color leaked a trace of the
+    /// others on its way back (sRGB's red came back #FF0101 in a
+    /// screenshot), so KWin does that mixing for the screen, exactly.
     pub fn straight(&self, c: [f32; 3], a: f32) -> [u16; 4] {
-        const M: [[f32; 3]; 3] = TO_BT2020;
         if a <= 0.0 {
             return [0; 4];
         }
@@ -2345,8 +2347,7 @@ impl Encoder {
         let mut out = [0u16; 4];
         // rounded by a half added and the rest dropped, as round() does for
         // these (never negative), without the call it makes for each
-        for (o, row) in out.iter_mut().zip(M) {
-            let v = row[0] * c[0] + row[1] * c[1] + row[2] * c[2];
+        for (o, v) in out.iter_mut().zip(c) {
             *o = (self.signal(v * self.reference) * k + 0.5).clamp(0.0, 65535.0) as u16;
         }
         out[3] = (a.min(1.0) * 65535.0 + 0.5) as u16;
@@ -2354,7 +2355,7 @@ impl Encoder {
     }
 
     /// premultiplied linear RGBA (SDR white 1.0, BT.709) to premultiplied
-    /// ABGR16161616, PQ, BT.2020
+    /// ABGR16161616, PQ, BT.709
     pub fn encode(&self, frame: &[f32]) -> Vec<u8> {
         let mut out = Vec::with_capacity(frame.len() * 2);
         for px in frame.chunks_exact(4) {
@@ -3432,5 +3433,25 @@ mod tests {
             check(1e-10 * 2f32.powf(i as f32 / 1_000_000.0 * 46.6));
         }
         assert!(worst.0 < 0.1 * step, "{} nits is {:.3} steps off", worst.1, worst.0 / step);
+    }
+
+    /// sRGB's colors come back out of the picture as they went in, read as a
+    /// screenshot reads them (gamma 2.2 at the white): no trace of another
+    /// channel in a pure one. Mixed into BT.2020's channels, sRGB's red came
+    /// back #FF0101.
+    #[test]
+    fn colors_come_back_as_drawn() {
+        let enc = Encoder::new(254.0);
+        let back = |v: u16| -> u8 {
+            let (m1, m2) = (2610.0 / 16384.0, 2523.0 / 4096.0 * 128.0);
+            let (c1, c2, c3) = (3424.0 / 4096.0, 2413.0 / 4096.0 * 32.0, 2392.0 / 4096.0 * 32.0);
+            let p = (v as f64 / 65535.0).powf(1.0 / m2);
+            let nits = 10000.0 * ((p - c1).max(0.0) / (c2 - c3 * p)).powf(1.0 / m1);
+            ((nits / 254.0).powf(1.0 / 2.2) * 255.0).round() as u8
+        };
+        for c in [[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 255], [0, 0, 0], [1, 1, 1], [0x18, 0x18, 0x1B], [0xC8, 0xF2, 0x2E], [255, 128, 0]] {
+            let px = enc.straight(c.map(|v: u8| (v as f32 / 255.0).powf(2.2)), 1.0);
+            assert_eq!([back(px[0]), back(px[1]), back(px[2])], c, "{c:?} came back from {px:?}");
+        }
     }
 }

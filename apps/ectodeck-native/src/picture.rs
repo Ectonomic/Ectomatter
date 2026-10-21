@@ -1,6 +1,6 @@
 //! The window's picture: the page as Slint drew it, with the keyboard's
 //! picture in the page's hole, met in linear light and encoded as the
-//! compositor is given it: premultiplied PQ with BT.2020 primaries.
+//! compositor is given it: premultiplied PQ with sRGB's primaries (BT.709).
 
 use std::rc::Rc;
 use std::sync::Arc;

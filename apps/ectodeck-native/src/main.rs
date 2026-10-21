@@ -5,9 +5,10 @@
 //! ectodeck-draw and lit in linear light, brighter than the desktop's white
 //! where it glows. The page leaves a hole where the keyboard goes; the two
 //! meet in one picture, in linear light, which goes to the compositor as PQ
-//! with BT.2020 primaries, 16 bits a channel. The page's colors are decoded
-//! as KWin decodes every SDR app's (gamma 2.2 at the reference white), so the
-//! page looks as the web app did and only the light goes above it.
+//! with sRGB's primaries (BT.709), 16 bits a channel. The page's colors are
+//! decoded as KWin decodes every SDR app's (gamma 2.2 at the reference
+//! white), so the page looks as the web app did and only the light goes
+//! above it.
 //!
 //! `ectodeck-native --snapshot FILE` draws one frame at 1440 x 940 without a
 //! window and saves the picture as raw ABGR16161616, for checking. It reads
@@ -1523,6 +1524,11 @@ struct App {
     levels_peak: f64,
     /// KWin takes the mastering display's luminance in a description
     mastering: bool,
+    /// how KWin is asked to bring the picture to a screen or a screenshot: as
+    /// drawn (relative, black to black) where it offers that. Perceptual let it
+    /// squeeze the whole picture to fit the light into a screenshot's range,
+    /// so red came out #ED0000 and white #BFBFBF.
+    intent: wp_color_manager_v1::RenderIntent,
     /// the display's drawing the keyboard was last lit with
     panel_rev: u64,
 
@@ -1673,18 +1679,19 @@ struct ScreenTag(u32);
 #[derive(Clone, Copy)]
 struct PictureTag(f64, f64);
 
-/// The picture's description: PQ with BT.2020 primaries, its white at the
-/// desktop's, and its brightest light no brighter than the screen's peak.
-/// Without that last, KWin takes the picture to reach PQ's 10,000 nits and
-/// tone-maps it down to the screen, which dims every light well below the
-/// nits it was drawn at.
+/// The picture's description: PQ with sRGB's primaries (BT.709, the colors
+/// it is drawn in), its white at the desktop's, and its brightest light no
+/// brighter than the screen's peak. Without that last, KWin takes the picture
+/// to reach PQ's 10,000 nits and, fitting it perceptually (where it offers
+/// nothing better: see App::intent), tone-maps it down to the screen, which
+/// dims every light well below the nits it was drawn at.
 fn describe<U: Send + Sync + 'static>(cm: &WpColorManagerV1, qh: &QueueHandle<App>, reference: f64, peak: f64, mastering: bool, tag: U) -> WpImageDescriptionV1
 where
     App: Dispatch<WpImageDescriptionV1, U>,
 {
     let params = cm.create_parametric_creator(qh, ());
     params.set_tf_named(wp_color_manager_v1::TransferFunction::St2084Pq);
-    params.set_primaries_named(wp_color_manager_v1::Primaries::Bt2020);
+    params.set_primaries_named(wp_color_manager_v1::Primaries::Srgb);
     params.set_luminances(0, 10000, reference.round() as u32);
     let peak = peak.max(reference + 1.0).round() as u32;
     if mastering {
@@ -1850,6 +1857,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         glow_limit: settings.get("hdr.glow_limit").and_then(|v| v.as_f64()),
         levels_peak: 1000.0,
         mastering: false,
+        intent: wp_color_manager_v1::RenderIntent::Perceptual,
         panel_rev: 0,
         levels: (reference, reference * gain as f64),
         slint,
@@ -1968,8 +1976,9 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         eprintln!("ectodeck-native: the compositor refused the HDR picture: {e}");
         return;
     }
-    cm_surface.set_image_description(&desc, wp_color_manager_v1::RenderIntent::Perceptual);
+    cm_surface.set_image_description(&desc, app.intent);
     eprintln!("ectodeck-native: the compositor {} the mastering display's luminance", if app.mastering { "takes" } else { "does not take" });
+    eprintln!("ectodeck-native: the compositor {}", if app.intent == wp_color_manager_v1::RenderIntent::RelativeBpc { "shows the picture's colors as drawn" } else { "fits the picture's colors to each screen (perceptual)" });
     // mapped by a first commit with no buffer; the compositor answers with the size
     app.window.commit();
 
@@ -3320,7 +3329,7 @@ impl Dispatch<WpImageDescriptionV1, PictureTag> for App {
         if let wp_image_description_v1::Event::Ready { .. } | wp_image_description_v1::Event::Ready2 { .. } = e {
             // the description and the pixels drawn for it go to KWin together, on the next frame
             let PictureTag(reference, glow) = *tag;
-            app.cm_surface.set_image_description(desc, wp_color_manager_v1::RenderIntent::Perceptual);
+            app.cm_surface.set_image_description(desc, app.intent);
             app.levels = (reference, glow);
             app.pic.set_reference(reference);
             app.gain = LIGHT_GAIN;
@@ -3425,8 +3434,10 @@ delegate_noop!(App: ignore KdeOutputDeviceModeV2);
 impl Dispatch<WpColorManagerV1, ()> for App {
     fn event(app: &mut Self, _: &WpColorManagerV1, e: wp_color_manager_v1::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
         use smithay_client_toolkit::reexports::client::WEnum;
-        if let wp_color_manager_v1::Event::SupportedFeature { feature: WEnum::Value(wp_color_manager_v1::Feature::SetMasteringDisplayPrimaries) } = e {
-            app.mastering = true;
+        match e {
+            wp_color_manager_v1::Event::SupportedFeature { feature: WEnum::Value(wp_color_manager_v1::Feature::SetMasteringDisplayPrimaries) } => app.mastering = true,
+            wp_color_manager_v1::Event::SupportedIntent { render_intent: WEnum::Value(wp_color_manager_v1::RenderIntent::RelativeBpc) } => app.intent = wp_color_manager_v1::RenderIntent::RelativeBpc,
+            _ => {}
         }
     }
 }
