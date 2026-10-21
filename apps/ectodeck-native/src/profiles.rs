@@ -9,12 +9,30 @@ use std::path::PathBuf;
 
 use serde_json::{json, Value};
 
-/// One profile: its name, and everything it sets on the device, as the
-/// core's `profiles/apply` takes it (`keys`, `lighting`, `settings`).
+/// One profile: an id of its own, which stays whatever it is renamed or
+/// moved to (another device's key that switches to it names it so), its
+/// name, and everything it sets on the device, as the core's
+/// `profiles/apply` takes it (`keys`, `lighting`, `settings`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Profile {
+    pub id: String,
     pub name: String,
     pub body: Value,
+}
+
+impl Profile {
+    /// A new profile, with an id no other has.
+    pub fn new(name: impl Into<String>, body: Value) -> Profile {
+        Profile { id: new_id(), name: name.into(), body }
+    }
+}
+
+/// An id for a new profile: the moment it was made, and a count, so two
+/// made in the same moment differ.
+fn new_id() -> String {
+    static COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_micros());
+    format!("p{t:x}{:x}", COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
 }
 
 /// A device's profiles, and which is in use.
@@ -45,7 +63,9 @@ impl Store {
             .map(|p| {
                 let mut body = p.clone();
                 let name = body.as_object_mut().and_then(|o| o.remove("name")).and_then(|n| n.as_str().map(String::from)).unwrap_or_default();
-                Profile { name, body }
+                // (a profile kept before profiles had ids takes one now)
+                let id = body.as_object_mut().and_then(|o| o.remove("id")).and_then(|n| n.as_str().map(String::from)).unwrap_or_else(new_id);
+                Profile { id, name, body }
             })
             .collect();
         if list.is_empty() {
@@ -57,7 +77,7 @@ impl Store {
 
     /// The first time: what the device is set to now, as Profile 1.
     pub fn first(path: Option<PathBuf>, body: Value) -> Store {
-        let s = Store { path, list: vec![Profile { name: "Profile 1".into(), body }], active: 0 };
+        let s = Store { path, list: vec![Profile::new("Profile 1", body)], active: 0 };
         s.save();
         s
     }
@@ -71,6 +91,7 @@ impl Store {
             .map(|p| {
                 let mut v = p.body.clone();
                 v["name"] = json!(p.name);
+                v["id"] = json!(p.id);
                 v
             })
             .collect();
@@ -105,7 +126,7 @@ impl Store {
     pub fn duplicate(&mut self) -> usize {
         let p = self.current().clone();
         let name = format!("{} copy", p.name);
-        self.list.insert(self.active + 1, Profile { name, body: p.body });
+        self.list.insert(self.active + 1, Profile::new(name, p.body));
         self.active += 1;
         self.save();
         self.active
@@ -174,7 +195,7 @@ mod tests {
         let mut s = Store::first(kept(&dir), json!({ "settings": { "cpi1": 800 } }));
         assert!(s.delete().is_none(), "the only profile stays");
         assert_eq!(s.new_name(), "Profile 2");
-        s.add(Profile { name: s.new_name(), body: json!({ "settings": { "cpi1": 1600 } }) });
+        s.add(Profile::new(s.new_name(), json!({ "settings": { "cpi1": 1600 } })));
         s.rename(1, "Games");
         s.duplicate();
         assert_eq!(s.list.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["Profile 1", "Games", "Games copy"]);
@@ -183,6 +204,9 @@ mod tests {
         assert_eq!(s.new_name(), "Profile 2", "the first number no profile has");
         let back = Store::load(kept(&dir)).unwrap();
         assert_eq!((back.active, back.list.len(), &back.list[2].body["settings"]["cpi1"]), (2, 3, &json!(2400)));
+        // (each its own id, kept, and none of it in what goes to the device)
+        assert_eq!(back.list.iter().map(|p| &p.id).collect::<Vec<_>>(), s.list.iter().map(|p| &p.id).collect::<Vec<_>>());
+        assert!(s.list[1].id != s.list[2].id && back.list[0].body.get("id").is_none());
         s.choose(1);
         let gone = s.delete().unwrap();
         assert_eq!((gone.0, gone.1.name.as_str(), s.active, s.current().name.as_str()), (1, "Games", 0, "Profile 1"), "the one above in use");

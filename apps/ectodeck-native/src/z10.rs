@@ -451,6 +451,11 @@ pub struct Page {
     /// the playlists keys can play, by the reserved code each one's keys send (see
     /// PLAY_CODES), and their names; a code with none plays a playlist since deleted
     pub playlist_keys: std::collections::BTreeMap<u32, String>,
+    /// the codes Ectodeck's own jobs have (see jobs.rs), and each job in words, in full
+    /// and as its key prints it (a profile by its name, as a key switching to one of the
+    /// keyboard's own is printed)
+    pub job_keys: std::collections::BTreeMap<u32, String>,
+    pub job_prints: std::collections::BTreeMap<u32, String>,
     /// each lit key's color and light at the last frame, before the LEDs' lean: what streams to the keyboard
     pub last_colors: HashMap<u32, [f64; 4]>,
     rng: u64,
@@ -542,6 +547,8 @@ impl Page {
             custom: vec![[0; 3]; 116],
             demo: false,
             playlist_keys: Default::default(),
+            job_keys: Default::default(),
+            job_prints: Default::default(),
             last_colors: HashMap::new(),
             rng: 0x9e3779b97f4a7c15,
         }
@@ -667,7 +674,11 @@ impl Page {
             PREV_LAYOUT => "Previous screen layout".into(),
             NEXT_PLAYLIST => "Next playlist".into(),
             PREV_PLAYLIST => "Previous playlist".into(),
-            c => self.playlist_keys.get(&c).map_or("Play a deleted playlist".into(), |n| format!("Play {n}")),
+            c => match self.job_keys.get(&c) {
+                // (a code one of Ectodeck's own jobs has)
+                Some(words) => words.clone(),
+                None => self.playlist_keys.get(&c).map_or("Play a deleted playlist".into(), |n| format!("Play {n}")),
+            },
         }
     }
 
@@ -696,7 +707,8 @@ impl Page {
                 PREV_LAYOUT => "PREV".into(),
                 NEXT_PLAYLIST => "PL+".into(),
                 PREV_PLAYLIST => "PL-".into(),
-                c => self.playlist_keys.get(&c).cloned().unwrap_or("PLAY".into()),
+                // (one of Ectodeck's own jobs printed in its words)
+                c => self.job_prints.get(&c).or_else(|| self.playlist_keys.get(&c)).cloned().unwrap_or("PLAY".into()),
             },
             Action::None => "Nothing".into(),
             Action::Key(u) => keys(&[*u]),

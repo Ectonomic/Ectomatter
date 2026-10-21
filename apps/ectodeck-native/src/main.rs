@@ -27,6 +27,7 @@ mod display;
 mod devices;
 mod ecto_settings;
 mod front;
+mod jobs;
 mod kde_output;
 mod shadow;
 mod sound;
@@ -690,6 +691,19 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         window.draw_if_needed(|r| {
             r.render(&mut pic.ui, w as usize);
         });
+    }
+    // ECTODECK_NATIVE_HEAR=control: a mouse button heard pressed and let go, as its core tells
+    // it; ECTODECK_NATIVE_KEY_CODE=code: a keyboard key with that host code heard so (after
+    // the clicks, each job Ectodeck does said in the log)
+    if let Ok(c) = std::env::var("ECTODECK_NATIVE_HEAR") {
+        front.mouse_heard(mouse::Heard::Input(c.clone(), true));
+        front.mouse_heard(mouse::Heard::Input(c, false));
+        front.act();
+    }
+    if let Some(code) = std::env::var("ECTODECK_NATIVE_KEY_CODE").ok().and_then(|v| v.parse::<u32>().ok()) {
+        front.screen_key_event(code, true);
+        front.screen_key_event(code, false);
+        front.act();
     }
     // ECTODECK_NATIVE_WHEEL="x,y,dy": the wheel turned there, after the clicks
     if let Some(v) = std::env::var("ECTODECK_NATIVE_WHEEL").ok().map(|v| v.split(',').filter_map(|t| t.trim().parse::<f32>().ok()).collect::<Vec<_>>()).filter(|v| v.len() == 3) {
@@ -1702,17 +1716,17 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
             let _ = watch_tx.send(w);
         });
         // the keys with a screen job, from the keyboard's own reports (see screen_keys)
-        let (screen_tx, screen_rx) = calloop::channel::channel::<u32>();
+        let (screen_tx, screen_rx) = calloop::channel::channel::<(u32, bool)>();
         event_loop
             .handle()
             .insert_source(screen_rx, |e, _, app: &mut App| {
-                if let calloop::channel::Event::Msg(code) = e {
-                    app.front.screen_key(code);
+                if let calloop::channel::Event::Msg((code, down)) = e {
+                    app.front.screen_key_event(code, down);
                 }
             })
             .unwrap();
-        screen_keys::start(move |code| {
-            let _ = screen_tx.send(code);
+        screen_keys::start(move |code, down| {
+            let _ = screen_tx.send((code, down));
         });
         device::start(cores::dir().join(z10::CORE), core_data(z10::CORE), heard_tx)
     });

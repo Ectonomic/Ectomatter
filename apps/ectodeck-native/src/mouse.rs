@@ -179,7 +179,7 @@ pub const CALLS: [(bool, f32, &[(f32, f32)]); 8] = [
 /// The kinds of job a button can have, as the Key detail box's switch shows
 /// them, each drawn on its 24 grid (the Key, Media, Mouse and Nothing glyphs
 /// as the keyboard's own).
-pub const KINDS: [(&str, &str); 7] = [
+pub const KINDS: [(&str, &str); 8] = [
     ("Mouse", "M7 3.5h10v17H7zM12 7v3"),
     ("Key", "M4 5h16v14H4zM9 10h6M12 10v5"),
     ("Media", "M5 6l8 6-8 6zM15 6v12M19 6v12"),
@@ -187,12 +187,15 @@ pub const KINDS: [(&str, &str); 7] = [
     ("Macro", "M4 7h10M4 12h16M4 17h7"),
     ("Scroll", "M12 4v16M8 8l4-4 4 4M8 16l4 4 4-4"),
     ("Sensitivity", "M4 17a8 8 0 1 1 16 0M12 17l4.5-5"),
+    // (a job on another device, which Ectodeck does: a keyboard and a mouse)
+    ("Devices", "M2.5 8h12v9h-12zM5.5 11h1M8.5 11h1M11.5 11h1M5.5 14h7M17.5 9.5a2 2 0 0 1 4 0v6a2 2 0 0 1-4 0z"),
     ("Nothing", "M4 12a8 8 0 1 0 16 0a8 8 0 1 0-16 0M6.5 17.5l11-11"),
 ];
 
-/// The place in KINDS of the macros' kind, and of nothing's.
+/// The place in KINDS of the macros' kind, of another device's jobs, and of nothing's.
 pub const MACRO_KIND: usize = 3;
-pub const NOTHING_KIND: usize = 6;
+pub const DEVICES_KIND: usize = 6;
+pub const NOTHING_KIND: usize = 7;
 
 const MOUSE_JOBS: [&str; 8] = ["Left click", "Right click", "Middle click", "Back", "Forward", "Button 6", "Button 7", "Button 8"];
 const MEDIA: [(&str, &str); 6] = [("PlayPause", "Play or pause"), ("Next", "Next track"), ("Previous", "Previous track"), ("VolumeUp", "Volume up"), ("VolumeDown", "Volume down"), ("Mute", "Mute")];
@@ -261,6 +264,8 @@ pub fn kind_of(a: &Value) -> usize {
         4
     } else if a.get("sensitivity").is_some() {
         5
+    } else if a.get("ectodeck").is_some() {
+        DEVICES_KIND
     } else {
         NOTHING_KIND
     }
@@ -268,7 +273,13 @@ pub fn kind_of(a: &Value) -> usize {
 
 /// A job in words.
 pub fn job_label(a: &Value) -> String {
+    job_label_with(a, &crate::jobs::Names::default())
+}
+
+/// A job in words, another device's jobs named as `names` has them.
+pub fn job_label_with(a: &Value, names: &crate::jobs::Names) -> String {
     match kind_of(a) {
+        DEVICES_KIND => crate::jobs::Job::read(a).map_or("Another device's job".into(), |j| names.of(&j)),
         0 => a["mouse"].as_u64().and_then(|n| MOUSE_JOBS.get(n as usize - 1)).map_or("A mouse button".into(), |s| s.to_string()),
         1 => usage_of(&a["key"]).map_or("A key".into(), key_label),
         2 => MEDIA.iter().find(|(n, _)| a["media"] == *n).map_or("A media key".into(), |(_, l)| l.to_string()),
@@ -300,6 +311,8 @@ pub fn choices(kind: usize) -> Vec<(String, Value)> {
         }
         4 => vec![("Scroll up".into(), json!({ "scroll": "up" })), ("Scroll down".into(), json!({ "scroll": "down" }))],
         5 => vec![("Switch sensitivity".into(), json!({ "sensitivity": "switch" }))],
+        // (other devices' jobs, as the page names them: see Page::choices_for)
+        DEVICES_KIND => Vec::new(),
         _ => vec![("Nothing".into(), json!({ "off": true }))],
     }
 }
@@ -308,7 +321,7 @@ pub fn choices(kind: usize) -> Vec<(String, Value)> {
 /// the button's own host slot, which the mouse's core listens for; the
 /// profile keeps the job itself.
 pub fn for_mouse(i: usize, a: &Value) -> Value {
-    if a.get("macro").is_some() { json!({ "host": i }) } else { a.clone() }
+    if a.get("macro").is_some() || a.get("ectodeck").is_some() { json!({ "host": i }) } else { a.clone() }
 }
 
 /// Each button that runs Ectodeck's macro `n`, on every profile, given `to`
@@ -360,6 +373,8 @@ pub struct Page {
     /// with when, which Undo puts back for a few seconds
     pub said: Option<(String, Instant)>,
     pub gone: Option<((usize, crate::profiles::Profile), Instant)>,
+    /// the names other devices' jobs are said by, as the pages last said them
+    pub names: crate::jobs::Names,
 }
 
 /// How long Undo stays in the bar after a profile is deleted.
@@ -409,7 +424,7 @@ impl Plays {
 impl Page {
     pub fn new() -> Page {
         let same_wheel = crate::uistate::get("mouse_same_wheel").and_then(|v| v.as_bool()).unwrap_or(true);
-        Page { ask: None, state: Value::Null, tab: 0, button: None, light: 0, same_wheel, menu: None, failed: None, plays: [None, None], tell: None, profiles: None, said: None, gone: None }
+        Page { ask: None, state: Value::Null, tab: 0, button: None, light: 0, same_wheel, menu: None, failed: None, plays: [None, None], tell: None, profiles: None, said: None, gone: None, names: Default::default() }
     }
 
     /// What the core says of the mouse: what each light plays is kept with
@@ -499,7 +514,7 @@ impl Page {
             return;
         }
         let name = p.new_name();
-        p.add(crate::profiles::Profile { name: name.clone(), body: factory.clone() });
+        p.add(crate::profiles::Profile::new(name.clone(), factory.clone()));
         self.put_on(&factory);
         self.say(format!("{name} is now on the mouse."));
     }
@@ -611,6 +626,15 @@ impl Page {
         if let Some(t) = &self.ask {
             let _ = t.send(a);
         }
+    }
+
+    /// The jobs of a kind for a button, in words and as the profile keeps
+    /// them: another device's, as the pages last named them, or the kind's own.
+    pub fn choices_for(&self, kind: usize) -> Vec<(String, Value)> {
+        if kind == DEVICES_KIND {
+            return self.names.for_device(crate::jobs::MOUSE).into_iter().map(|(w, j)| (w, j.write())).collect();
+        }
+        choices(kind)
     }
 
     /// A button's job: as the profile in use keeps it (a macro is Ectodeck's
@@ -789,7 +813,7 @@ impl Page {
         BUTTONS
             .iter()
             .enumerate()
-            .map(|(i, (_, name, _))| MouseRow { name: (*name).into(), job: job_label(&self.job(i)).into(), chosen: Some(i) == self.button, rebound: self.rebound(i), swatch: color([0; 3]), swatched: false })
+            .map(|(i, (_, name, _))| MouseRow { name: (*name).into(), job: job_label_with(&self.job(i), &self.names).into(), chosen: Some(i) == self.button, rebound: self.rebound(i), swatch: color([0; 3]), swatched: false })
             .collect()
     }
 
@@ -800,7 +824,7 @@ impl Page {
             .enumerate()
             .map(|(i, (_, name, _))| {
                 let (left, top, _) = CALLS[i];
-                MouseCall { name: (*name).into(), job: job_label(&self.job(i)).into(), left, top, chosen: Some(i) == self.button, rebound: self.rebound(i) }
+                MouseCall { name: (*name).into(), job: job_label_with(&self.job(i), &self.names).into(), left, top, chosen: Some(i) == self.button, rebound: self.rebound(i) }
             })
             .collect()
     }
@@ -824,9 +848,11 @@ impl Page {
     pub fn detail(&self, i: usize) -> (String, String, String, String, bool, usize, String) {
         let (job, factory) = (self.job(i), self.factory(i));
         let rebound = self.rebound(i);
-        let state = if rebound { format!("Now {}", job_label(&job)) } else { "As it came from the factory".into() };
-        // (a macro is Ectodeck's to play: the mouse keeps only a sign for it)
-        let note = if kind_of(&job) == MACRO_KIND {
+        let state = if rebound { format!("Now {}", job_label_with(&job, &self.names)) } else { "As it came from the factory".into() };
+        // (a macro, or another device's job, is Ectodeck's to do: the mouse keeps only a sign for it)
+        let note = if kind_of(&job) == DEVICES_KIND {
+            "Ectodeck does this while it’s running. With Ectodeck closed, this button does nothing.".into()
+        } else if kind_of(&job) == MACRO_KIND {
             if crate::library::get(job["macro"].as_u64().unwrap_or(0) as u32).is_some() {
                 "Ectodeck plays this macro while it’s running. With Ectodeck closed, this button does nothing.".into()
             } else {
@@ -1032,7 +1058,7 @@ mod tests {
     fn a_macros_buttons_follow_it_on_every_profile() {
         let body = |left: Value, cpi: Value| json!({ "keys": { "base": { "left": { "mouse": 1 }, "left-side-back": left, "cpi": cpi } } });
         let mut s = crate::profiles::Store::first(None, body(json!({ "macro": 2, "plays": "once" }), json!({ "sensitivity": "switch" })));
-        s.add(crate::profiles::Profile { name: "Profile 2".into(), body: body(json!({ "macro": 2, "plays": "once" }), json!({ "macro": 5, "plays": "once" })) });
+        s.add(crate::profiles::Profile::new("Profile 2", body(json!({ "macro": 2, "plays": "once" }), json!({ "macro": 5, "plays": "once" }))));
         s.choose(0);
         let plays = ectodeck_protocol::Action::Macro { n: 2, plays: ectodeck_protocol::Plays::WhileHeld }.write();
         assert_eq!(rewrite_macro(&mut s, 2, &plays), [3]);

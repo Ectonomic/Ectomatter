@@ -12,8 +12,9 @@ use std::time::Duration;
 use crate::z10::{NEXT_LAYOUT, PLAY_CODES};
 
 /// Hear the keyboard's screen keys, on a thread for each of its two key reports, for as long
-/// as Ectodeck runs: `tell` hears each code as its key goes down (held down, once).
-pub fn start(tell: impl Fn(u32) + Send + Clone + 'static) {
+/// as Ectodeck runs: `tell` hears each code as its key goes down (held down, once), and as
+/// it comes back up.
+pub fn start(tell: impl Fn(u32, bool) + Send + Clone + 'static) {
     for iface in [0u8, 2] {
         let tell = tell.clone();
         std::thread::spawn(move || loop {
@@ -26,7 +27,10 @@ pub fn start(tell: impl Fn(u32) + Send + Clone + 'static) {
                     }
                     let now = codes(iface, &buf[..n]);
                     for c in pressed(&down, &now) {
-                        tell(c);
+                        tell(c, true);
+                    }
+                    for c in pressed(&now, &down) {
+                        tell(c, false);
                     }
                     down = now;
                 }

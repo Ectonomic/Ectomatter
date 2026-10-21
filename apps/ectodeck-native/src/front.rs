@@ -367,8 +367,10 @@ const LAYERS: [(&str, &str); 2] = [("base", "When pressed"), ("fn", "When Fn is 
 
 /// The action menu's pages under "Other": each one's title and its list.
 const PAGES: [&str; 7] = ["A key", "A media key", "A mouse button", "Switch profile", "Switch screen layout", "Switch playlist", "Keyboard function"];
-/// the pages of the screen's jobs among them, and the page of macros, opened from the key's
-/// Macro switch
+/// the pages of profiles and of the screen's jobs among them, and the page of macros,
+/// opened from the key's Macro switch (other devices' profiles, and Ectodeck's own
+/// macros, are on those pages too: see jobs.rs)
+const PROFILE_PAGE: usize = 3;
 const LAYOUT_PAGE: usize = 4;
 const PLAYLIST_PAGE: usize = 5;
 const MACRO_PAGE: usize = 7;
@@ -451,6 +453,8 @@ enum Choice {
     Page(usize),
     /// the job that plays this playlist, by its id (its code found when it is given)
     Play(String),
+    /// one of Ectodeck's own jobs, by its id (see jobs.rs; its code found when it is given)
+    Job(String),
 }
 
 struct Menu {
@@ -1303,7 +1307,7 @@ impl Front {
                 }
                 Ask::MouseKind(i, x, y, h) => {
                     let k = i.max(0) as usize;
-                    let choices = crate::mouse::choices(k);
+                    let choices = self.mouse.choices_for(k);
                     if choices.len() == 1 {
                         // a kind with one job: that job, at once
                         self.close_menu();
@@ -1877,7 +1881,7 @@ impl Front {
                     self.build_menu();
                 }
                 Ask::MenuEnter => {
-                    let first = self.menu.as_ref().and_then(|m| m.choices.iter().position(|c| matches!(c, Choice::Set(_) | Choice::Page(_) | Choice::Play(_))));
+                    let first = self.menu.as_ref().and_then(|m| m.choices.iter().position(|c| matches!(c, Choice::Set(_) | Choice::Page(_) | Choice::Play(_) | Choice::Job(_))));
                     if let Some(i) = first {
                         self.menu_chose(i);
                     }
@@ -2863,7 +2867,8 @@ impl Front {
     /// color picker is open only closes that; one on the title bar only moves
     /// the window.
     fn let_chosen_go(&mut self, x: f32, y: f32) {
-        if y < 36.0 || self.menu.is_some() || self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pick.is_some() || self.place_menu {
+        // (a press while any menu is open is the menu's: it chooses there, or shuts it)
+        if y < 36.0 || self.ui.get_menu_open() || self.menu.is_some() || self.mouse.menu.is_some() || self.profile_menu || self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pick.is_some() || self.place_menu {
             return;
         }
         let Some(keeps) = self.chosen_keeps() else { return };
@@ -2971,7 +2976,7 @@ impl Front {
         }
         if let Some(k) = self.mouse.menu {
             self.close_menu();
-            if let (Some((_, a)), Some(b)) = (crate::mouse::choices(k).get(i), self.mouse.button) {
+            if let (Some((_, a)), Some(b)) = (self.mouse.choices_for(k).get(i), self.mouse.button) {
                 self.mouse.set_job(b, a.clone());
             }
             self.refresh();
@@ -3208,6 +3213,15 @@ impl Front {
                     }
                 }
             }
+            Some(Choice::Job(id)) => {
+                let (layer, pos, id) = (m.layer, m.pos, format!("{}{id}", crate::jobs::ON_KEY));
+                self.close_menu();
+                if let Some(code) = self.play_code(&id) {
+                    if self.page.sel == Some(pos) {
+                        self.page.set_def(LAYERS[layer].0, pos, &z10::screen_slot(code));
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -3216,7 +3230,8 @@ impl Front {
     /// settings once the playlist has one; None while every code is some key's.
     fn play_code(&mut self, id: &str) -> Option<u32> {
         let lists = &self.screens.playlists;
-        let code = crate::screen_keys::code_for(id, &self.keyed, &self.page.sent_codes(), |p| lists.iter().any(|l| l.id == p))?;
+        // (a code kept for one of Ectodeck's jobs is as much in use as a playlist's)
+        let code = crate::screen_keys::code_for(id, &self.keyed, &self.page.sent_codes(), |p| p.starts_with(crate::jobs::ON_KEY) || lists.iter().any(|l| l.id == p))?;
         if self.keyed.get(&code).map(String::as_str) != Some(id) {
             self.keyed.insert(code, id.to_string());
             let kept: serde_json::Map<String, serde_json::Value> = self.keyed.iter().map(|(c, id)| (c.to_string(), serde_json::json!(id))).collect();
@@ -3233,6 +3248,90 @@ impl Front {
     fn sync_playlist_keys(&mut self) {
         let lists = &self.screens.playlists;
         self.page.playlist_keys = self.keyed.iter().filter_map(|(c, id)| Some((*c, lists.iter().find(|l| &l.id == id)?.name.clone()))).collect();
+        // (and the codes Ectodeck's own jobs have, in their words)
+        let names = self.job_names();
+        let jobs: Vec<(u32, Option<crate::jobs::Job>)> = self.keyed.iter().filter_map(|(c, id)| Some((*c, crate::jobs::Job::of(id.strip_prefix(crate::jobs::ON_KEY)?)))).collect();
+        self.page.job_keys = jobs.iter().map(|(c, j)| (*c, j.as_ref().map_or_else(|| "Deleted macro".to_string(), |j| names.of(j)))).collect();
+        self.page.job_prints = jobs
+            .iter()
+            .map(|(c, j)| {
+                let print = match j {
+                    Some(crate::jobs::Job::MouseProfile(crate::jobs::To::Id(id))) => names.mouse.iter().find(|(k, _)| k == id).map_or_else(|| "Deleted".to_string(), |(_, n)| n.clone()),
+                    Some(crate::jobs::Job::Macro { n, .. }) => names.macros.iter().find(|(k, _)| k == n).map_or_else(|| "Deleted".to_string(), |(_, n)| n.clone()),
+                    Some(j) => names.of(j),
+                    None => "Deleted".into(),
+                };
+                (*c, print)
+            })
+            .collect();
+    }
+
+    /// What a key given one of Ectodeck's own jobs (`id`, see jobs.rs) does,
+    /// as the note under its job says it.
+    fn job_note(&self, id: &str) -> String {
+        use crate::jobs::{Job, To};
+        let names = self.job_names();
+        let Some(j) = Job::of(id) else {
+            return "The macro this key played was deleted, so the key does nothing until you give it another job.".into();
+        };
+        match &j {
+            Job::MouseProfile(To::Id(p)) => match names.mouse.iter().find(|(k, _)| k == p) {
+                Some((_, name)) => format!("Switches the mouse to {name} while Ectodeck is running."),
+                None => "The mouse profile this key switched to was deleted, so the key does nothing until you give it another job.".into(),
+            },
+            Job::MouseProfile(To::Next) => "Switches the mouse to its next profile while Ectodeck is running.".into(),
+            Job::MouseProfile(To::Previous) => "Switches the mouse to its previous profile while Ectodeck is running.".into(),
+            Job::Macro { .. } => format!("Ectodeck plays {} while it’s running. With Ectodeck closed, this key does nothing.", names.of(&j)),
+            Job::KeyboardProfile(_) | Job::Screen(_) => format!("{} while Ectodeck is running.", names.of(&j)),
+        }
+    }
+
+    /// The job a key's action is, if it is one of Ectodeck's own (its host
+    /// slot's code kept for one; see jobs.rs).
+    fn key_job(&self, a: &Action) -> Option<crate::jobs::Job> {
+        let code = z10::screen_job(a)?;
+        crate::jobs::Job::of(self.keyed.get(&code)?.strip_prefix(crate::jobs::ON_KEY)?)
+    }
+
+    /// Whether a key's action is one of Ectodeck's own jobs' codes, a job
+    /// deleted since included.
+    fn is_job_key(&self, a: &Action) -> bool {
+        z10::screen_job(a).and_then(|c| self.keyed.get(&c)).is_some_and(|id| id.starts_with(crate::jobs::ON_KEY))
+    }
+
+    /// What kind of job a key has, as its kind switch and the menu's pages
+    /// tell it: one of Ectodeck's own, by what it does (another device's
+    /// profile is a profile, Ectodeck's macro a macro).
+    fn key_tag(&self, a: &Action) -> &'static str {
+        match self.key_job(a) {
+            Some(crate::jobs::Job::MouseProfile(_) | crate::jobs::Job::KeyboardProfile(_)) => "Profile",
+            Some(crate::jobs::Job::Macro { .. }) => "Macro",
+            Some(crate::jobs::Job::Screen(_)) => "Screen",
+            None if self.is_job_key(a) => "Macro",
+            None => z10::kind_of(a),
+        }
+    }
+
+    /// Other devices' jobs, and Ectodeck's own macros, as the action menu
+    /// lists them, those that switch a profile (`profiles`) or the macros:
+    /// each one's row (its definition, for its tick, once it has a code),
+    /// what choosing it does, and its row's kind (5 while every code is
+    /// some key's).
+    fn device_jobs(&self, profiles: bool) -> Vec<(Entry, Choice, i32)> {
+        let sent = self.page.sent_codes();
+        let lists = &self.screens.playlists;
+        self.job_names()
+            .for_device(crate::jobs::KEYBOARD)
+            .into_iter()
+            .filter(|(_, j)| matches!(j, crate::jobs::Job::Macro { .. }) != profiles)
+            .map(|(words, j)| {
+                let id = format!("{}{}", crate::jobs::ON_KEY, j.id());
+                let code = self.keyed.iter().find(|(_, k)| **k == id).map(|(c, _)| *c);
+                let can = code.is_some() || crate::screen_keys::code_for(&id, &self.keyed, &sent, |p| p.starts_with(crate::jobs::ON_KEY) || lists.iter().any(|x| x.id == p)).is_some();
+                let a = Entry { label: words, act: code.map_or(Action::Raw(Vec::new()), z10::screen_slot), tag: if profiles { "Profile" } else { "Macro" } };
+                if can { (a, Choice::Job(j.id()), 0) } else { (a, Choice::Nothing, 5) }
+            })
+            .collect()
     }
 
     /// The jobs that each play one playlist, as the action menu lists them: each one's row
@@ -3258,6 +3357,24 @@ impl Front {
     /// screen, the job is done for the profile whose playlist plays. Nothing while a layout is
     /// open in the Screen Editor, the Onboard layout tab has the screen, or another program's
     /// screen shows (as a game's launch).
+    /// A key with one of the keyboard's host slots pressed (`down`) or let
+    /// go: one given one of Ectodeck's own jobs does it (a macro played as
+    /// long as it says); a screen job is done as its key goes down.
+    pub fn screen_key_event(&mut self, code: u32, down: bool) {
+        let job = self.keyed.get(&code).and_then(|id| id.strip_prefix(crate::jobs::ON_KEY)).and_then(crate::jobs::Job::of);
+        match job {
+            // (Record takes the key as its job, as it takes a screen job's)
+            Some(_) if self.listening.is_some() => {
+                if down {
+                    self.screen_key(code);
+                }
+            }
+            Some(j) => self.play_for(&format!("z10/{code}"), Some(j.write()), down),
+            None if down => self.screen_key(code),
+            None => {}
+        }
+    }
+
     pub fn screen_key(&mut self, code: u32) {
         if let Some((layer, _)) = self.listening {
             self.assign(layer, z10::screen_slot(code));
@@ -3297,6 +3414,10 @@ impl Front {
     /// What a key with screen job `code` does, as the note under its job says it, naming the
     /// playlist its profile plays.
     fn screen_note(&self, code: u32) -> String {
+        // (one of Ectodeck's own jobs)
+        if let Some(id) = self.keyed.get(&code).and_then(|id| id.strip_prefix(crate::jobs::ON_KEY)) {
+            return self.job_note(id);
+        }
         let pl = &self.screens.playlist(self.page.editing).name;
         match code {
             z10::NEXT_LAYOUT => format!("Shows the next layout in {pl} while Ectodeck is running."),
@@ -3323,6 +3444,9 @@ impl Front {
         // can't be given now)
         let set = |list: &[Entry]| list.iter().map(|e| (e.clone(), Choice::Set(e.act.clone()), 0)).collect::<Vec<_>>();
         let plays = self.play_jobs();
+        let (others, own_macros) = (self.device_jobs(true), self.device_jobs(false));
+        let job_key = self.is_job_key(&def);
+        let def_tag = self.key_tag(&def);
         // a searchable list, as pickList draws it
         let pick = |rows: &mut Vec<MenuRow>, choices: &mut Vec<Choice>, groups: &[(&str, Vec<(Entry, Choice, i32)>)]| {
             let mut n = 0;
@@ -3350,23 +3474,29 @@ impl Front {
         match m.page {
             Some(MACRO_PAGE) => {
                 placeholder = "Search macros".to_string();
-                if g.macros.is_empty() {
+                if g.macros.is_empty() && own_macros.is_empty() {
                     rows.push(row(3, "No macros yet. Make one in the Macro Editor.", "", false));
                     choices.push(Choice::Nothing);
                 } else {
-                    pick(&mut rows, &mut choices, &[("Macros", set(&g.macros))]);
+                    // (the keyboard's own, then those Ectodeck plays)
+                    pick(&mut rows, &mut choices, &[("Macros", set(&g.macros)), ("Ectodeck's macros", own_macros.clone())]);
                 }
             }
             Some(p) => {
                 let title = PAGES[p];
                 let what = title.trim_start_matches("A ").trim_start_matches("An ").to_lowercase();
                 placeholder = format!("Search {what}s");
-                // (the playlists' own jobs after stepping through them)
+                // (the playlists' own jobs after stepping through them; other devices'
+                // profiles after the keyboard's, under the devices' names)
                 let mut items = set(lists[p]);
                 if p == PLAYLIST_PAGE {
                     items.extend(plays.iter().cloned());
                 }
-                pick(&mut rows, &mut choices, &[(title, items)]);
+                if p == PROFILE_PAGE {
+                    pick(&mut rows, &mut choices, &[(title, items), ("The mouse", others.clone())]);
+                } else {
+                    pick(&mut rows, &mut choices, &[(title, items)]);
+                }
                 if p == PLAYLIST_PAGE && q.is_empty() && plays.iter().any(|(.., kind)| *kind == 5) {
                     rows.push(row(3, "Keys already play seven playlists, the most they can. Give one of those keys a different job to make room.", "", false));
                     choices.push(Choice::Nothing);
@@ -3377,6 +3507,8 @@ impl Front {
                 if !q.is_empty() {
                     let mut all = set(&g.macros.iter().chain(&g.keys).chain(&g.media).chain(&g.mouse).chain(&g.profiles).chain(&g.layouts).chain(&g.playlists).chain(&g.board).cloned().collect::<Vec<_>>());
                     all.extend(plays.iter().cloned());
+                    all.extend(others.iter().cloned());
+                    all.extend(own_macros.iter().cloned());
                     pick(&mut rows, &mut choices, &[("", all)]);
                 } else {
                     if !g.macros.is_empty() {
@@ -3390,13 +3522,27 @@ impl Front {
                         rows.push(row(2, "", "", false));
                         choices.push(Choice::Nothing);
                     }
+                    // (Ectodeck's own macros after the keyboard's)
+                    if !own_macros.is_empty() {
+                        rows.push(row(1, "Ectodeck's macros", "", false));
+                        choices.push(Choice::Nothing);
+                        for (a, c, kind) in &own_macros {
+                            rows.push(row(*kind, &a.label, "", a.act == def));
+                            choices.push(c.clone());
+                        }
+                        rows.push(row(2, "", "", false));
+                        choices.push(Choice::Nothing);
+                    }
                     rows.push(row(1, "Other", "", false));
                     choices.push(Choice::Nothing);
-                    let kind = z10::kind_of(&def);
+                    let kind = def_tag;
                     for (p, title) in PAGES.iter().enumerate() {
-                        // (the screen's two pages each ticked for their own jobs)
+                        // (the screen's two pages each ticked for their own jobs; another
+                        // device's job's code is no screen job)
                         let tick = if p == LAYOUT_PAGE || p == PLAYLIST_PAGE {
-                            z10::screen_job(&def).is_some_and(|c| screen_page(c) == p)
+                            !job_key && z10::screen_job(&def).is_some_and(|c| screen_page(c) == p)
+                        } else if p == PROFILE_PAGE && job_key {
+                            def_tag == "Profile"
                         } else {
                             lists[p].first().is_some_and(|a| a.tag == kind) && !matches!(def, Action::Macro { .. })
                         };
@@ -3564,7 +3710,7 @@ impl Front {
             ui.set_key_state((if rebound { format!("Rebound on {}.", p.profile_name(p.editing)) } else { "As it came from the factory.".to_string() }).into());
             ui.set_key_rebound(rebound);
             ui.set_layer_rebound(rebound_here);
-            ui.set_key_kind(match z10::kind_of(&d) {
+            ui.set_key_kind(match self.key_tag(&d) {
                 "Key" => 0,
                 "Media" => 1,
                 "Mouse" => 2,
@@ -3824,6 +3970,25 @@ impl Front {
                 }
             }
         }
+        // the keyboard's keys given one, by the codes Ectodeck keeps for its jobs, on its
+        // profiles (named after the mouse's)
+        if self.page.dev.is_some() {
+            let first = names.len();
+            for (k, &p) in z10::PROFILE_NUMBERS.iter().enumerate() {
+                names.push(format!("keyboard’s {}", self.page.profile_name(p)));
+                let Some(d) = self.page.drafts.get(&p) else { continue };
+                for (layer, words) in [("base", ""), ("fn", "Fn + ")] {
+                    for pos in 0..ectotype_core::protocol::NKEYS as u32 {
+                        let Some(code) = Action::read(&d["keys"][layer][self.page.id(pos)]).as_ref().and_then(z10::screen_job) else { continue };
+                        let job = self.keyed.get(&code).and_then(|id| id.strip_prefix(crate::jobs::ON_KEY)).and_then(crate::jobs::Job::of);
+                        if let Some(crate::jobs::Job::Macro { n, plays }) = job {
+                            let key = self.page.key(pos).map(|k| self.page.key_label(k)).unwrap_or_else(|| format!("Key {pos}"));
+                            runs.push(crate::macros::Elsewhere { profile: (first + k) as u8, control: format!("The keyboard’s {words}{key}"), at: 1000 + pos, n, plays });
+                        }
+                    }
+                }
+            }
+        }
         for ed in [&mut m.ed, &mut m.other] {
             if ed.lib == crate::macros::Lib::Ectodeck {
                 ed.elsewhere = runs.clone();
@@ -3835,6 +4000,9 @@ impl Front {
     /// How one of Ectodeck's macros plays, set in the Macro Editor, on every
     /// mouse button that runs it, on every profile.
     pub fn macro_plays(&mut self, n: u32, how: ectodeck_protocol::Plays) {
+        // (the keyboard's keys that run it, kept against their codes)
+        let job = format!("{}{}", crate::jobs::ON_KEY, crate::jobs::Job::Macro { n, plays: how }.id());
+        self.rekey(|id| (matches!(crate::jobs::Job::of(id.strip_prefix(crate::jobs::ON_KEY)?), Some(crate::jobs::Job::Macro { n: m, .. }) if m == n)).then(|| job.clone()));
         let Some(store) = &mut self.mouse.profiles else { return };
         // (the mouse knows the buttons only as host slots: nothing to tell it)
         crate::mouse::rewrite_macro(store, n, &Action::Macro { n, plays: how }.write());
@@ -3842,10 +4010,32 @@ impl Front {
         self.refresh();
     }
 
+    /// Ectodeck's jobs kept against the keyboard's codes, each one `f` gives
+    /// another id changed to it, and kept so.
+    fn rekey(&mut self, f: impl Fn(&str) -> Option<String>) {
+        let mut changed = false;
+        for id in self.keyed.values_mut() {
+            if let Some(new) = f(id) {
+                changed |= *id != new;
+                *id = new;
+            }
+        }
+        if changed {
+            let kept: serde_json::Map<String, serde_json::Value> = self.keyed.iter().map(|(c, id)| (c.to_string(), serde_json::json!(id))).collect();
+            if let Err(e) = self.settings.set("devices.z10.screen.keyed", serde_json::Value::Object(kept)) {
+                self.status(format!("The keys' jobs were not saved: {e}"), 2);
+            }
+            self.sync_playlist_keys();
+        }
+    }
+
     /// One of Ectodeck's macros deleted: every mouse button that ran it, on
     /// every profile, does nothing now, as the delete question said, so a new
     /// macro given its number later isn't run by them unasked.
     pub fn macro_gone(&mut self, n: u32) {
+        // (a key that ran it does nothing now, as a button does)
+        let gone = format!("{}deleted", crate::jobs::ON_KEY);
+        self.rekey(|id| (matches!(crate::jobs::Job::of(id.strip_prefix(crate::jobs::ON_KEY)?), Some(crate::jobs::Job::Macro { n: m, .. }) if m == n)).then(|| gone.clone()));
         let Some(store) = &mut self.mouse.profiles else { return };
         let off = serde_json::json!({ "off": true });
         // (the profile in use is on the mouse: its buttons are told too)
@@ -3859,7 +4049,11 @@ impl Front {
     /// A control given a job Ectodeck does (`job`), pressed or let go: one of
     /// Ectodeck's macros played, as its job says it plays.
     fn play_for(&mut self, control: &str, job: Option<serde_json::Value>, down: bool) {
-        let Some(Action::Macro { n, plays }) = job.as_ref().and_then(Action::read) else { return };
+        let Some(j) = job.as_ref().and_then(crate::jobs::Job::read) else { return };
+        let crate::jobs::Job::Macro { n, plays } = j else {
+            self.run_job(&j, down);
+            return;
+        };
         let player = self.typist.get_or_insert_with(crate::typist::Player::start);
         if !down {
             player.up(control);
@@ -3868,6 +4062,61 @@ impl Front {
         if let Some(m) = crate::library::get(n) {
             player.down(control, m["steps"].as_array().cloned().unwrap_or_default(), plays);
         }
+    }
+
+    /// One of Ectodeck's own jobs, its control pressed (`down`) or let go:
+    /// another device's profile switched, or one of the keyboard's screen
+    /// jobs done, as the control goes down. (A macro plays in play_for.)
+    fn run_job(&mut self, j: &crate::jobs::Job, down: bool) {
+        use crate::jobs::{Job, To};
+        use ectodeck_protocol::Jump;
+        if !down {
+            return;
+        }
+        eprintln!("ectodeck-native: a job: {}", self.job_names().of(j));
+        match j {
+            Job::KeyboardProfile(to) => {
+                if self.page.dev.is_none() {
+                    return;
+                }
+                let now = self.page.active() as usize;
+                let n = match to {
+                    Jump::To(n) => *n as usize,
+                    Jump::Next => z10::PROFILE_NUMBERS[crate::jobs::stepped(now.saturating_sub(1), z10::PROFILE_NUMBERS.len(), true)] as usize,
+                    Jump::Previous => z10::PROFILE_NUMBERS[crate::jobs::stepped(now.saturating_sub(1), z10::PROFILE_NUMBERS.len(), false)] as usize,
+                };
+                if z10::PROFILE_NUMBERS.contains(&(n as u8)) && n != now {
+                    self.choose_profile(n as u8);
+                    self.refresh();
+                }
+            }
+            Job::MouseProfile(to) => {
+                let Some(store) = &self.mouse.profiles else { return };
+                let i = match to {
+                    To::Id(id) => store.list.iter().position(|p| &p.id == id),
+                    To::Next => Some(crate::jobs::stepped(store.active, store.list.len(), true)),
+                    To::Previous => Some(crate::jobs::stepped(store.active, store.list.len(), false)),
+                };
+                if let Some(i) = i {
+                    self.mouse.choose_profile(i);
+                    self.show_mouse_lights();
+                    self.refresh();
+                }
+            }
+            Job::Screen(code) => self.screen_key(*code),
+            Job::Macro { .. } => {}
+        }
+    }
+
+    /// The names other devices' jobs are said by, as the pages have them now:
+    /// the keyboard's profiles, the mouse's, Ectodeck's macros.
+    pub fn job_names(&self) -> crate::jobs::Names {
+        let keyboard = if self.page.dev.is_some() { z10::PROFILE_NUMBERS.iter().map(|&n| (n, self.page.profile_name(n))).collect() } else { Vec::new() };
+        let mouse = self.mouse.profiles.as_ref().map(|s| s.list.iter().map(|p| (p.id.clone(), p.name.clone())).collect()).unwrap_or_default();
+        let all = crate::library::all();
+        let mut macros: Vec<(u32, String)> = all.as_object().map(|m| m.iter().filter_map(|(n, v)| Some((n.parse().ok()?, v["name"].as_str().filter(|s| !s.is_empty()).map_or_else(|| format!("Macro {n}"), String::from)))).collect()).unwrap_or_default();
+        macros.sort();
+        crate::jobs::Names { keyboard, mouse, macros }
     }
 
     /// What the mouse's core says, from the mouse's thread.
@@ -4411,6 +4660,11 @@ impl Front {
     /// The mouse's page, as it is now: its tab, its picture, its list and its boxes.
     fn refresh_mouse(&mut self) {
         use crate::mouse::KINDS;
+        // (other devices' jobs named as their pages have them now)
+        let names = self.job_names();
+        if self.mouse.names != names {
+            self.mouse.names = names;
+        }
         let ui = &self.ui;
         let m = &self.mouse;
         ui.set_mouse_tab(m.tab as i32);
@@ -4441,7 +4695,7 @@ impl Front {
             ui.set_mouse_kind(kind as i32);
             show_rows(ui.get_mouse_kinds(), |r| ui.set_mouse_kinds(r), KINDS.iter().map(|(n, _)| SharedString::from(*n)).collect());
             show_rows(ui.get_mouse_kind_icons(), |r| ui.set_mouse_kind_icons(r), KINDS.iter().map(|(_, i)| SharedString::from(*i)).collect());
-            ui.set_mouse_job(crate::mouse::job_label(&m.job(b)).into());
+            ui.set_mouse_job(crate::mouse::job_label_with(&m.job(b), &m.names).into());
             ui.set_mouse_note(note.into());
         } else {
             let (note, any) = m.all_buttons();
@@ -4533,9 +4787,12 @@ impl Front {
         let now = self.mouse.job(b);
         // (a macro ticked whatever it plays as)
         let same = |a: &serde_json::Value| *a == now || (a.get("macro").is_some() && a["macro"] == now["macro"]);
-        let mut rows: Vec<MenuRow> = crate::mouse::choices(kind).iter().map(|(label, a)| MenuRow { kind: 0, label: label.as_str().into(), tag: "".into(), tick: same(a), sub: "".into() }).collect();
+        let mut rows: Vec<MenuRow> = self.mouse.choices_for(kind).iter().map(|(label, a)| MenuRow { kind: 0, label: label.as_str().into(), tag: "".into(), tick: same(a), sub: "".into() }).collect();
         if rows.is_empty() && kind == crate::mouse::MACRO_KIND {
             rows.push(MenuRow { kind: 3, label: "No macros yet. Make one in the Macro Editor.".into(), tag: "".into(), tick: false, sub: "".into() });
+        }
+        if rows.is_empty() && kind == crate::mouse::DEVICES_KIND {
+            rows.push(MenuRow { kind: 3, label: "Plug in another device to give this button one of its jobs.".into(), tag: "".into(), tick: false, sub: "".into() });
         }
         let h = 6.0 + rows.len() as f32 * 33.0 + 6.0;
         self.ui.set_menu_search(false);
