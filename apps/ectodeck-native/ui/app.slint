@@ -156,6 +156,12 @@ export struct LibGroup {
     open: bool,
     rows: [LibRow],
 }
+// a tab at the top of the Key library: one of the device's layers, its name
+// and the key that brings it (a cap's words; none for the layer with nothing held)
+export struct LayerTab {
+    name: string,
+    cap: string,
+}
 // a checkbox with its words
 export struct CheckItem {
     name: string,
@@ -2483,44 +2489,48 @@ component StateTab inherits Rectangle {
     }
 }
 
-// The layer the Keys tab edits, as two folder tabs across the top of the Key
-// library, each half its width and edge to edge with it: the open one in the
-// box's own color, running on into it, its inner corner rounded against the
-// other; the other dark, curving into the box where they meet, a half step
-// lighter under the pointer and never as light as the open one. Each its key
-// (a blank cap for Base, Fn for Function) and its name.
+// The layer the Keys tab edits, as folder tabs across the top of the Key
+// library, sharing its width and edge to edge with it: the open one in the
+// box's own color, running on into it, its inner corners rounded against the
+// others; the others dark, curving into the box where they meet it, a half
+// step lighter under the pointer and never as light as the open one. Each its
+// key (a blank cap for the layer with nothing held, Fn for Function) and its
+// name. A device with one layer has one tab, the box's heading.
 component LayerSwitch inherits Rectangle {
     in property <int> layer;
+    in property <[LayerTab]> layers: [{ name: "Base", cap: "" }, { name: "Function", cap: "Fn" }];
     callback chosen(int);
     height: 50px;
-    // the pointer over the tab that is not open
+    // the pointer over a tab that is not open
     property <bool> shut-hover;
-    // the dark tab's color, at rest or under the pointer
+    // the dark tabs' color, at rest or under the pointer
     property <color> shut: root.shut-hover ? #1a1a1e : Ink.well;
-    // behind both, the dark tab's color, which shows round the open tab's inner corner
+    // behind them all, the dark tabs' color, which shows round the open tab's inner corners
     Rectangle {
         border-top-left-radius: 12px;
         border-top-right-radius: 12px;
         background: root.shut;
     }
-    for l[i] in [{ name: "Base", cap: "" }, { name: "Function", cap: "Fn" }]: t := Rectangle {
+    for l[i] in root.layers: t := Rectangle {
         property <bool> open: root.layer == i;
-        x: i * root.width / 2;
-        width: root.width / 2;
-        // the dark tab curves into the box where it meets the open one: the box's
+        property <bool> first: i == 0;
+        property <bool> last: i == root.layers.length - 1;
+        x: i * root.width / root.layers.length;
+        width: root.width / root.layers.length;
+        // a dark tab curves into the box where it meets the open one: the box's
         // color in that corner, under the tab's rounded corner
-        if !t.open: Rectangle {
-            x: i == 0 ? parent.width - 10px : 0;
+        if !t.open && (root.layer == i + 1 || root.layer == i - 1): Rectangle {
+            x: root.layer == i + 1 ? parent.width - 10px : 0;
             y: parent.height - 10px;
             width: 10px;
             height: 10px;
             background: Ink.box;
         }
         Rectangle {
-            border-top-left-radius: i == 0 ? 12px : t.open ? 10px : 0;
-            border-top-right-radius: i == 1 ? 12px : t.open ? 10px : 0;
-            border-bottom-left-radius: !t.open && i == 1 ? 10px : 0;
-            border-bottom-right-radius: !t.open && i == 0 ? 10px : 0;
+            border-top-left-radius: t.first ? 12px : t.open ? 10px : 0;
+            border-top-right-radius: t.last ? 12px : t.open ? 10px : 0;
+            border-bottom-left-radius: !t.open && root.layer == i - 1 ? 10px : 0;
+            border-bottom-right-radius: !t.open && root.layer == i + 1 ? 10px : 0;
             background: t.open ? Ink.box : root.shut;
         }
         // the layer's key, a small cap
@@ -2562,7 +2572,7 @@ component LayerSwitch inherits Rectangle {
             color: t.open ? Ink.ink : tab.has-hover ? Ink.dim : Ink.quiet;
             vertical-alignment: center;
         }
-        // the open tab is already chosen: only the other one answers the pointer
+        // the open tab is already chosen: only the others answer the pointer
         tab := TouchArea {
             enabled: !t.open;
             mouse-cursor: t.open ? MouseCursor.default : MouseCursor.pointer;
@@ -2618,15 +2628,19 @@ component KeyLibrary inherits PageBox {
     callback toggle(string);
     callback find(string);
     callback pick(int);
-    // the layer shown, as tabs at the box's top
+    // the layer shown, as tabs at the box's top (the keyboard's two, or the device's own)
     in property <int> layer;
+    in property <[LayerTab]> layers: [{ name: "Base", cap: "" }, { name: "Function", cap: "Fn" }];
     callback layer-chosen(int);
+    // what the find box asks for, in the device's own words
+    in property <string> placeholder: "Find a key or what it does";
     property <length> top: 50px;
     LayerSwitch {
         x: 0;
         y: 0;
         width: parent.width;
         layer: root.layer;
+        layers: root.layers;
         chosen(i) => { root.layer-chosen(i); }
     }
     // find a key, or what it does, under the tabs
@@ -2640,7 +2654,7 @@ component KeyLibrary inherits PageBox {
         if find-in.text == "": Text {
             x: 12px;
             height: parent.height;
-            text: "Find a key or what it does";
+            text: root.placeholder;
             font-family: "Geist";
             font-size: 13px;
             color: Ink.quiet;
@@ -4109,6 +4123,18 @@ export component AppWindow inherits Window {
     in property <string> mouse-dot-on;
     // the list beside the boxes: the buttons, or the lights
     in property <[MouseRow]> mouse-rows;
+    // Buttons: the Key library, as the keyboard's Keys tab has it: the mouse's
+    // layers, its buttons in the groups its core gives them, what is typed to
+    // find one, how tall the list is with all it holds, and a button newly
+    // chosen (on the picture, say) scrolled to
+    in property <[LayerTab]> mouse-layers;
+    in property <[LibGroup]> mouse-lib-groups;
+    in-out property <string> mouse-lib-query;
+    in property <length> mouse-lib-need;
+    in property <length> mouse-lib-reveal-y;
+    in property <int> mouse-lib-reveal-n;
+    callback mouse-lib-toggle(string);
+    callback mouse-lib-find(string);
     // the chosen button's Key detail box
     in property <string> mouse-cap;
     in property <string> mouse-title;
@@ -4196,8 +4222,11 @@ export component AppWindow inherits Window {
     // the stage's and the low row's
     property <length> mouse-stage-h: 470px;
     property <length> mouse-low-y: head-end + (root.mouse-tab < 2 ? mouse-stage-h + 14px : 0);
-    // (on Buttons, room for all eight in the list: each row 48 and 2 between, under its heading)
-    property <length> mouse-low-h: root.mouse-tab == 0 ? 40px + 8 * 50px + 8px : max(root.mouse-cells-h, 330px);
+    // (on Buttons, room for the whole list, up to a height past which it
+    // scrolls inside its box, as the Key library does on the Keys tab)
+    property <length> mouse-low-h: root.mouse-tab == 0 ? min(600px, max(330px, root.mouse-lib-need)) : max(root.mouse-cells-h, 330px);
+    // the list's width: the Key library's on Buttons, the lights' list on Lighting
+    property <length> mouse-list-w: root.mouse-tab == 0 ? 440px : 240px;
     out property <length> mouse-wx: rail-w + pws-x;
     out property <length> mouse-wy: bar + 56px + mouse-flick.content-y;
     out property <length> mouse-stage-y: head-end;
@@ -5209,18 +5238,36 @@ export component AppWindow inherits Window {
                     add() => { root.mouse-profile-new(); }
                     menu(x, y, h) => { root.mouse-profile-menu(x, y, h); }
                 }
-                // the list beside the boxes: the buttons, or the lights, as the profiles are listed
-                if root.mouse-tab < 2: Rectangle {
+                // Buttons: the Key library, as the keyboard's Keys tab has it, its
+                // layer's tab at its top, a find box, and the buttons in their groups
+                if root.mouse-tab == 0: KeyLibrary {
                     x: pws-x + pro-w;
                     y: low-y;
-                    width: root.mouse-tab == 0 ? 260px : 240px;
+                    width: mouse-list-w;
+                    height: low-h;
+                    layer: 0;
+                    layers: root.mouse-layers;
+                    placeholder: "Find a button or what it does";
+                    reveal-y: root.mouse-lib-reveal-y;
+                    reveal-n: root.mouse-lib-reveal-n;
+                    groups: root.mouse-lib-groups;
+                    query <=> root.mouse-lib-query;
+                    toggle(g) => { root.mouse-lib-toggle(g); }
+                    find(t) => { root.mouse-lib-find(t); }
+                    pick(id) => { root.mouse-row(id); }
+                }
+                // Lighting: the lights beside the boxes, as the profiles are listed
+                if root.mouse-tab == 1: Rectangle {
+                    x: pws-x + pro-w;
+                    y: low-y;
+                    width: mouse-list-w;
                     height: low-h;
                     border-radius: 12px;
                     background: Ink.box;
                     AnchorHead {
                         x: 16px;
                         y: 8px;
-                        text: root.mouse-tab == 0 ? "BUTTONS" : "LIGHTS";
+                        text: "LIGHTS";
                     }
                     VerticalLayout {
                         x: 8px;
@@ -5268,9 +5315,9 @@ export component AppWindow inherits Window {
                 // Buttons, no button chosen: every button at once, where the
                 // chosen one's box goes and in its shade
                 if root.mouse-tab == 0 && !root.mouse-chosen: PageBox {
-                    x: pws-x + pro-w + 260px + 12px;
+                    x: pws-x + pro-w + mouse-list-w + 12px;
                     y: low-y;
-                    width: pws-w - pro-w - 272px;
+                    width: pws-w - pro-w - mouse-list-w - 12px;
                     height: low-h;
                     title: "All buttons";
                     Text {
@@ -5295,9 +5342,9 @@ export component AppWindow inherits Window {
                 }
                 // Buttons: the chosen button's job, as a key's on the keyboard's Keys tab
                 if root.mouse-tab == 0 && root.mouse-chosen: KeyDetail {
-                    x: pws-x + pro-w + 260px + 12px;
+                    x: pws-x + pro-w + mouse-list-w + 12px;
                     y: low-y;
-                    width: pws-w - pro-w - 272px;
+                    width: pws-w - pro-w - mouse-list-w - 12px;
                     height: low-h;
                     title: root.mouse-title;
                     cap: root.mouse-cap;

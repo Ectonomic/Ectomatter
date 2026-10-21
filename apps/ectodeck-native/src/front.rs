@@ -16,7 +16,7 @@ use crate::lighting::{self, Ctl};
 use crate::overlays::Overlays;
 use crate::z10::{self, Entry, Page, View};
 use ectodeck_protocol::Action;
-use crate::{AppWindow, Cell, CheckItem, DeskItem, DeskPad, EffectItem, KeyItem, LayerItem, LibGroup, LibRow, MenuRow, MousePatch, ProfileItem};
+use crate::{AppWindow, Cell, CheckItem, DeskItem, DeskPad, EffectItem, KeyItem, LayerItem, LayerTab, LibGroup, LibRow, MenuRow, MousePatch, ProfileItem};
 
 /// The mouse's picture as the page shows it: its layers (for what is where
 /// on it), and each piece as the page takes it.
@@ -103,6 +103,10 @@ pub enum Ask {
     /// button's words, and the next frame of the lights' effects
     MouseTab(i32),
     MouseRow(i32),
+    /// the mouse's Key library on Buttons: a group's heading pressed (it opens
+    /// or closes), and what is typed in its find box
+    MouseLibToggle(String),
+    MouseLibFind(String),
     MouseKind(i32, f32, f32, f32),
     MouseJob(f32, f32, f32),
     MouseReset,
@@ -521,6 +525,15 @@ pub struct Front {
     /// chosen, and after that its heading closes it again
     lib_revealed: Option<i32>,
     lib_rows: HashMap<String, Rc<VecModel<LibRow>>>,
+    /// the mouse's Key library on Buttons, as the keyboard's: the groups
+    /// closed (none until it is first shown, then all of them where the whole
+    /// list is longer than its box, as the keyboard's 116 keys are), what is
+    /// searched for, the button whose group was last opened to show it, and
+    /// each group's rows, kept to change in place
+    mouse_lib_shut: Option<std::collections::HashSet<String>>,
+    mouse_lib_query: String,
+    mouse_lib_revealed: Option<usize>,
+    mouse_lib_rows: HashMap<String, Rc<VecModel<LibRow>>>,
     /// the screen's light and built-in screens the keyboard was last sent (or
     /// had when it was read), so a change to them shows on it at once
     screen_sent: Option<([u8; 4], u8)>,
@@ -821,6 +834,8 @@ impl Front {
         on!(on_go, |p| Ask::Go(p.to_string()));
         on!(on_mouse_tab_chosen, |i| Ask::MouseTab(i));
         on!(on_mouse_row, |i| Ask::MouseRow(i));
+        on!(on_mouse_lib_toggle, |g| Ask::MouseLibToggle(g.to_string()));
+        on!(on_mouse_lib_find, |t| Ask::MouseLibFind(t.to_string()));
         on!(on_mouse_kind_picked, |i, x, y, h| Ask::MouseKind(i, x, y, h));
         on!(on_mouse_job_clicked, |x, y, h| Ask::MouseJob(x, y, h));
         on!(on_mouse_reset, Ask::MouseReset);
@@ -975,6 +990,10 @@ impl Front {
             status_at: None,
             lib_revealed: None,
             lib_rows: HashMap::new(),
+            mouse_lib_shut: None,
+            mouse_lib_query: String::new(),
+            mouse_lib_revealed: None,
+            mouse_lib_rows: HashMap::new(),
             screen_sent: None,
             slider_sel: 0,
             listening: None,
@@ -1416,6 +1435,13 @@ impl Front {
                         self.mouse.button = (self.mouse.button != Some(b)).then_some(b);
                     }
                 }
+                Ask::MouseLibToggle(g) => {
+                    let shut = self.mouse_lib_shut.get_or_insert_with(Default::default);
+                    if !shut.remove(&g) {
+                        shut.insert(g);
+                    }
+                }
+                Ask::MouseLibFind(t) => self.mouse_lib_query = t,
                 Ask::MouseKind(i, x, y, h) => {
                     let k = i.max(0) as usize;
                     let choices = self.mouse.choices_for(k);
@@ -3164,9 +3190,10 @@ impl Front {
                         (a, c, (b - a).max(0.0), (d - c).max(0.0))
                     })
                     .collect();
+                // (the low row right of the Profiles box: the Key library and the Key detail box)
                 let (ly, lh) = (y0 + ui.get_mouse_low_top(), ui.get_mouse_low_height());
-                k.push((x0, ly, 260.0, lh));
-                k.push((x0 + 272.0, ly, w - 272.0, lh));
+                let pro = if self.mouse.profiles.is_some() { 252.0 } else { 0.0 };
+                k.push((x0 + pro, ly, w - pro, lh));
                 Some(k)
             }
             // a pad on Home's desk: the whole desk (where a press chooses
@@ -5240,6 +5267,62 @@ impl Front {
         ui.set_mouse_line_on(on_line.into());
         ui.set_mouse_dot_on(on_dot.into());
         show_rows(ui.get_mouse_rows(), |r| ui.set_mouse_rows(r), m.rows());
+        // Buttons: the Key library, as the Keys tab has it: the layer the page
+        // edits as its tab, then the buttons in their groups
+        let layers: Vec<LayerTab> = m.state["device"]["capabilities"]["keys"]["layers"]
+            .as_array()
+            .and_then(|ls| ls.first())
+            .map(|l| vec![LayerTab { name: l["label"].as_str().unwrap_or("When pressed").into(), cap: "".into() }])
+            .unwrap_or_else(|| vec![LayerTab { name: "When pressed".into(), cap: "".into() }]);
+        show_rows(ui.get_mouse_layers(), |r| ui.set_mouse_layers(r), layers);
+        let q = self.mouse_lib_query.trim().to_lowercase();
+        let all = m.lib_list("");
+        let list = m.lib_list(&q);
+        // (a heading 30 high and a row 34, under the tab and the find box, as the Keys tab has them)
+        let need = 50.0 + 60.0 + 10.0 + all.iter().map(|(_, n, _)| 30.0 + 34.0 * *n as f32).sum::<f32>();
+        if self.mouse_lib_shut.is_none() && !all.is_empty() {
+            self.mouse_lib_shut = Some(if need > 600.0 { all.iter().map(|(g, ..)| g.clone()).collect() } else { Default::default() });
+        }
+        // a button newly chosen (on the picture, say): its group opens to show it, once
+        let newly = m.button.is_some() && m.button != self.mouse_lib_revealed;
+        self.mouse_lib_revealed = m.button;
+        if newly {
+            if let (Some(shut), Some((g, ..))) = (self.mouse_lib_shut.as_mut(), all.iter().find(|(_, _, rows)| rows.iter().any(|r| Some(r.0) == m.button))) {
+                shut.remove(g);
+            }
+        }
+        let shut = self.mouse_lib_shut.clone().unwrap_or_default();
+        let mut groups: Vec<LibGroup> = Vec::new();
+        for (g, total, rows) in list {
+            if rows.is_empty() && !q.is_empty() {
+                continue;
+            }
+            let open = !q.is_empty() || !shut.contains(&g);
+            let rows: Vec<LibRow> = rows
+                .into_iter()
+                .map(|(i, cap, name, job, rebound)| LibRow { id: i as i32, cap: cap.into(), name: name.into(), job: job.into(), rebound, chosen: m.button == Some(i) })
+                .collect();
+            let rebound = rows.iter().filter(|r| r.rebound).count() as i32;
+            let model = self.mouse_lib_rows.entry(g.clone()).or_insert_with(|| Rc::new(VecModel::default())).clone();
+            set_rows(&model, if open { rows } else { Vec::new() });
+            groups.push(LibGroup { name: g.into(), count: total as i32, rebound, open, rows: ModelRc::from(model) });
+        }
+        // (the list scrolled to it, where it is longer than its box)
+        if newly {
+            let mut y = 0.0;
+            for g in &groups {
+                y += 30.0;
+                let rows: Vec<LibRow> = (0..g.rows.row_count()).filter_map(|i| g.rows.row_data(i)).collect();
+                if let Some(i) = rows.iter().position(|r| r.chosen) {
+                    ui.set_mouse_lib_reveal_y(y + i as f32 * 34.0);
+                    ui.set_mouse_lib_reveal_n(ui.get_mouse_lib_reveal_n() + 1);
+                    break;
+                }
+                y += rows.len() as f32 * 34.0;
+            }
+        }
+        show_rows(ui.get_mouse_lib_groups(), |r| ui.set_mouse_lib_groups(r), groups);
+        ui.set_mouse_lib_need(need);
         ui.set_mouse_chosen(m.button.is_some());
         if let Some(b) = m.button {
             let (cap, title, factory, state, rebound, kind, note) = m.detail(b);

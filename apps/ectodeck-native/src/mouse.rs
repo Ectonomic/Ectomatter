@@ -996,6 +996,36 @@ impl Page {
             .collect()
     }
 
+    /// The buttons as the Key library lists them on Buttons, in the groups
+    /// the core gives them (`group` on each control; one group, Buttons,
+    /// where it gives none), each group in the order its first button comes:
+    /// each button's place, its short name for the cap (`short`), its name,
+    /// its job and whether that is a new one. Only those whose name or job
+    /// has what is typed in it (`query`, already lowercased), where something is.
+    pub fn lib_list(&self, query: &str) -> Vec<(String, usize, Vec<(usize, String, String, String, bool)>)> {
+        let controls = self.state["device"]["controls"].as_array();
+        let mut groups: Vec<(String, usize, Vec<(usize, String, String, String, bool)>)> = Vec::new();
+        for (i, (id, name, short)) in BUTTONS.iter().enumerate() {
+            let c = controls.and_then(|cs| cs.iter().find(|c| c["id"].as_str() == Some(id)));
+            let field = |k: &str| c.and_then(|c| c[k].as_str()).filter(|v| !v.is_empty());
+            let group = field("group").unwrap_or("Buttons").to_string();
+            let (cap, name) = (field("short").unwrap_or(short).to_string(), field("label").unwrap_or(name).to_string());
+            let job = self.job_words(i);
+            let at = match groups.iter().position(|(g, ..)| *g == group) {
+                Some(at) => at,
+                None => {
+                    groups.push((group, 0, Vec::new()));
+                    groups.len() - 1
+                }
+            };
+            groups[at].1 += 1;
+            if query.is_empty() || name.to_lowercase().contains(query) || job.to_lowercase().contains(query) {
+                groups[at].2.push((i, cap, name, job, self.rebound(i)));
+            }
+        }
+        groups
+    }
+
     /// Each button's words on the picture, its line and its dot.
     pub fn calls(&self) -> Vec<MouseCall> {
         BUTTONS
@@ -1276,6 +1306,35 @@ mod tests {
         }
         assert_eq!(job_label(&json!({ "key": "PageDown" })), "Page Down");
         assert_eq!(job_label(&json!({ "key": 104 })), "F13");
+    }
+
+    /// The buttons as the Key library lists them: in the groups the core gives
+    /// them, each group where its first button comes, with its short name for
+    /// the cap; one group, Buttons, for a core that gives none; and only those
+    /// whose name or job has what is typed, each group still counting all of
+    /// its buttons.
+    #[test]
+    fn the_buttons_are_listed_in_the_cores_groups() {
+        let mut p = Page::new();
+        let base: serde_json::Map<String, Value> = BUTTONS.iter().map(|(id, _, _)| (id.to_string(), json!({ "mouse": 1 }))).collect();
+        let mut keys = json!({ "layers": { "base": base }, "factory": { "base": base }, "known": true });
+        keys["layers"]["base"]["right-side-back"] = json!({ "key": "F5" });
+        let groups = ["Top", "Top", "Top", "Side", "Side", "Side", "Side", "Top"];
+        let controls: Vec<Value> = BUTTONS.iter().zip(groups).map(|((id, label, _), g)| json!({ "id": id, "label": label, "short": format!("{}!", &id[..2]), "group": g })).collect();
+        p.state = json!({ "present": true, "device": { "controls": controls }, "keys": keys });
+        let list = p.lib_list("");
+        let names: Vec<(&str, usize, Vec<usize>)> = list.iter().map(|(g, n, rows)| (g.as_str(), *n, rows.iter().map(|r| r.0).collect())).collect();
+        assert_eq!(names, [("Top", 4, vec![0, 1, 2, 7]), ("Side", 4, vec![3, 4, 5, 6])]);
+        assert_eq!((list[0].2[0].1.as_str(), list[0].2[0].2.as_str()), ("le!", "Left button"), "the core's short name on the cap");
+        assert!(list[1].2[2].4 && list[1].2[2].3 == "F5", "a new job, as the mouse has it");
+        // what is typed: only the button it finds, its group still counting four
+        let found = p.lib_list("f5");
+        assert_eq!(found.iter().map(|(g, n, rows)| (g.as_str(), *n, rows.len())).collect::<Vec<_>>(), [("Top", 4, 0), ("Side", 4, 1)]);
+        // a core that gives no groups
+        p.state["device"]["controls"] = json!(BUTTONS.iter().map(|(id, label, _)| json!({ "id": id, "label": label })).collect::<Vec<_>>());
+        let one = p.lib_list("");
+        assert_eq!(one.iter().map(|(g, n, _)| (g.as_str(), *n)).collect::<Vec<_>>(), [("Buttons", 8)]);
+        assert_eq!(one[0].2[7].1, "CPI", "the page's own short name where the core gives none");
     }
 
     /// A mouse that can't say what it's set to: a profile made from it
