@@ -22,6 +22,8 @@ use serde_json::Value;
 
 #[path = "sim.rs"]
 pub mod sim;
+#[path = "lamp.rs"]
+pub mod lamp;
 
 use sim::{At, Colored, Snapshot};
 

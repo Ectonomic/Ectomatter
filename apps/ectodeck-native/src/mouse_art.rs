@@ -63,6 +63,9 @@ pub struct Layers {
     pub shapes: Vec<Patch>,
     /// the button, 1 to 8, at each pixel of the whole picture; 0 for none
     hit: Vec<u8>,
+    /// how much of each pixel of the whole picture the mouse itself covers
+    /// (its shadow not), where its lights' light can land
+    pub body: Vec<f32>,
 }
 
 impl Layers {
@@ -108,6 +111,215 @@ impl Layers {
         }
         out
     }
+}
+
+// ---------------------------------------------------------------- in HDR
+
+/// The lights' ids, by their places (0 the logo, 1 the wheel), as the core names them.
+pub const LIGHT_IDS: [&str; 2] = ["logo", "wheel"];
+
+/// The drawing's pixels to a millimeter, for the mouse drawn `w` pixels wide,
+/// the drawing `units_mm` of its units to the millimeter (the core's scale:
+/// the mouse's 520 units long are 125.1 mm).
+pub fn px_mm(w: u32, units_mm: f32) -> f32 {
+    w as f32 / VIEW.2 * units_mm
+}
+
+/// Each light's window on the drawing, in the drawing's own units (x, y,
+/// right, bottom): what its groups cover, for the mouse drawn `w` pixels wide.
+pub fn light_boxes(l: &Layers, w: u32) -> [[f32; 4]; 2] {
+    let k = w as f32 / VIEW.2;
+    let m = l.margin as f32;
+    std::array::from_fn(|li| {
+        let ps: Vec<&Patch> = l.lights.iter().zip(GROUPS).filter(|(_, (g, _))| *g == li).map(|(p, _)| p).collect();
+        let x0 = ps.iter().map(|p| p.x).min().unwrap_or(0) as f32;
+        let y0 = ps.iter().map(|p| p.y).min().unwrap_or(0) as f32;
+        let x1 = ps.iter().map(|p| p.x + p.px.width()).max().unwrap_or(1) as f32;
+        let y1 = ps.iter().map(|p| p.y + p.px.height()).max().unwrap_or(1) as f32;
+        [VIEW.0 + (x0 - m) / k, VIEW.1 + (y0 - m) / k, VIEW.0 + (x1 - m) / k, VIEW.1 + (y1 - m) / k]
+    })
+}
+
+/// The mouse in HDR at one size: each light's lamp (see ectodeck_draw's
+/// lamp), made from its window, its groups' shapes together, as the core's
+/// light says it is made; and the picture without light, as the page shows
+/// the chosen and hovered buttons on it, kept while they stay as they are.
+pub struct Hdr {
+    pub lamps: Vec<ectodeck_draw::hdr::lamp::Lamp>,
+    unlit: Vec<f32>,
+    unlit_for: Option<(Option<u8>, Option<u8>, [u8; 3])>,
+    scratch: Vec<f32>,
+    /// the picture without light on a ground of its own (Home's desk), kept
+    /// for how strongly it shows
+    loose: Vec<f32>,
+    loose_for: Option<u32>,
+}
+
+impl Hdr {
+    pub fn new(l: &Layers, light: &serde_json::Value, px_mm: f32) -> Hdr {
+        let lamps = (0..2)
+            .map(|li| {
+                let ps: Vec<&Patch> = l.lights.iter().zip(GROUPS).filter(|(_, (g, _))| *g == li).map(|(p, _)| p).collect();
+                let x0 = ps.iter().map(|p| p.x).min().unwrap_or(0);
+                let y0 = ps.iter().map(|p| p.y).min().unwrap_or(0);
+                let x1 = ps.iter().map(|p| p.x + p.px.width()).max().unwrap_or(1);
+                let y1 = ps.iter().map(|p| p.y + p.px.height()).max().unwrap_or(1);
+                let (w, h) = ((x1 - x0) as usize, (y1 - y0) as usize);
+                // (the window: what any of its groups covers)
+                let mut cover = vec![0f32; w * h];
+                for p in &ps {
+                    let pw = p.px.width() as usize;
+                    for (i, px) in p.px.data().chunks_exact(4).enumerate() {
+                        let a = px[3] as f32 / 255.0;
+                        let j = (i / pw + (p.y - y0) as usize) * w + i % pw + (p.x - x0) as usize;
+                        cover[j] = 1.0 - (1.0 - cover[j]) * (1.0 - a);
+                    }
+                }
+                ectodeck_draw::hdr::lamp::Lamp::new(&cover, w, h, x0 as i32, y0 as i32, px_mm, &ectodeck_draw::hdr::lamp::Make::of(light, LIGHT_IDS[li]))
+            })
+            .collect();
+        Hdr { lamps, unlit: Vec::new(), unlit_for: None, scratch: Vec::new(), loose: Vec::new(), loose_for: None }
+    }
+
+    /// The picture lit with no ground of its own, as Home's desk lays it on
+    /// whatever lies under it (the desk, the keyboard): the mouse and its
+    /// shadow `dim` as strongly as they show (half, for a mouse not plugged
+    /// in), its lights in `colors`, premultiplied linear light, each pixel's
+    /// coverage made so the window's mixing of it in linear light comes out
+    /// as the page's mixing in sRGB's encoding did (see loose).
+    pub fn on_ground(&mut self, l: &Layers, colors: [Lit; 2], dim: f32, white: f32, ceiling: f32) -> crate::picture::Lit {
+        let (bw, bh) = (l.base.width() as usize, l.base.height() as usize);
+        let key = (dim.clamp(0.0, 1.0) * 1000.0).round() as u32;
+        if self.loose_for != Some(key) {
+            self.loose = loose(l, dim);
+            self.loose_for = Some(key);
+        }
+        let mut px = self.loose.clone();
+        let shell: Vec<f32> = l.body.iter().map(|b| b * dim).collect();
+        for (lamp, c) in self.lamps.iter().zip(colors) {
+            if let Some(rgb) = c {
+                lamp.add_to(&mut px, bw, bh, rgb, 1.0, white, &shell);
+            }
+        }
+        for (lamp, c) in self.lamps.iter().zip(colors) {
+            if c.is_some() {
+                lamp.clip(&mut px, bw, bh, ceiling);
+            }
+        }
+        crate::picture::Lit { px, w: bw, h: bh }
+    }
+
+    /// The picture lit, as the window lays it: the mouse on its stage
+    /// (`stage`, sRGB), the button `chosen` (1 to 8) picked out and the one
+    /// `hover`ed a shade lighter, mixed as the page mixes its colors; then
+    /// each light in its color (none, off), as bright as its LED makes it, in
+    /// linear light with the SDR white of `white` nits at 1.0, and what passes
+    /// `ceiling` times it drawn at the most the screen shows. Only the part
+    /// `(x, y, w, h)` of the whole picture, where the page shows it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn picture(&mut self, l: &Layers, stage: [u8; 3], chosen: Option<u8>, hover: Option<u8>, colors: [Lit; 2], white: f32, ceiling: f32, part: (usize, usize, usize, usize)) -> crate::picture::Lit {
+        let (bw, bh) = (l.base.width() as usize, l.base.height() as usize);
+        if self.unlit_for != Some((chosen, hover, stage)) {
+            self.unlit = unlit(l, stage, chosen, hover);
+            self.unlit_for = Some((chosen, hover, stage));
+        }
+        let px = &mut self.scratch;
+        px.clear();
+        px.extend_from_slice(&self.unlit);
+        for (lamp, c) in self.lamps.iter().zip(colors) {
+            if let Some(rgb) = c {
+                lamp.add_to(px, bw, bh, rgb, 1.0, white, &l.body);
+            }
+        }
+        for (lamp, c) in self.lamps.iter().zip(colors) {
+            if c.is_some() {
+                lamp.clip(px, bw, bh, ceiling);
+            }
+        }
+        // the part the page shows
+        let (x, y, w, h) = part;
+        let (w, h) = (w.min(bw.saturating_sub(x)), h.min(bh.saturating_sub(y)));
+        let mut out = Vec::with_capacity(w * h * 4);
+        for r in y..y + h {
+            out.extend_from_slice(&px[(r * bw + x) * 4..(r * bw + x + w) * 4]);
+        }
+        crate::picture::Lit { px: out, w, h }
+    }
+}
+
+/// The picture with no light: the mouse over its stage, the chosen button
+/// picked out, the hovered one a shade lighter (white at 8%), each laid on in
+/// sRGB's own encoding as the page lays its images, every pixel then a whole
+/// level of it, as the page's are, in linear light (gamma 2.2, as KWin
+/// decodes the page). Opaque, premultiplied.
+fn unlit(l: &Layers, stage: [u8; 3], chosen: Option<u8>, hover: Option<u8>) -> Vec<f32> {
+    let (bw, bh) = (l.base.width() as usize, l.base.height() as usize);
+    let st = stage.map(|c| c as f32 / 255.0);
+    let mut c: Vec<[f32; 3]> = l
+        .base
+        .data()
+        .chunks_exact(4)
+        .map(|p| {
+            let a = p[3] as f32 / 255.0;
+            [p[0] as f32 / 255.0 + st[0] * (1.0 - a), p[1] as f32 / 255.0 + st[1] * (1.0 - a), p[2] as f32 / 255.0 + st[2] * (1.0 - a)]
+        })
+        .collect();
+    let mut lay = |p: &Patch, f: &dyn Fn(&[u8]) -> ([f32; 3], f32)| {
+        let pw = p.px.width() as usize;
+        for (i, px) in p.px.data().chunks_exact(4).enumerate() {
+            let (x, y) = (p.x as usize + i % pw, p.y as usize + i / pw);
+            if x >= bw || y >= bh {
+                continue;
+            }
+            let (col, a) = f(px);
+            let d = &mut c[y * bw + x];
+            for k in 0..3 {
+                d[k] = col[k] + d[k] * (1.0 - a);
+            }
+        }
+    };
+    if let Some(p) = chosen.and_then(|n| l.chosen.get((n as usize).wrapping_sub(1))) {
+        lay(p, &|px| ([px[0] as f32 / 255.0, px[1] as f32 / 255.0, px[2] as f32 / 255.0], px[3] as f32 / 255.0));
+    }
+    if let Some(p) = hover.and_then(|n| l.shapes.get((n as usize).wrapping_sub(1))) {
+        lay(p, &|px| {
+            let a = px[3] as f32 / 255.0 * (0x14 as f32 / 255.0);
+            ([a; 3], a)
+        });
+    }
+    let table: Vec<f32> = (0..256).map(|i| (i as f32 / 255.0).powf(2.2)).collect();
+    let mut out = Vec::with_capacity(bw * bh * 4);
+    for v in c {
+        for k in v {
+            out.push(table[(k * 255.0).round().clamp(0.0, 255.0) as usize]);
+        }
+        out.push(1.0);
+    }
+    out
+}
+
+/// The picture with no light and no ground, `dim` as strongly as it shows,
+/// as Home's desk lays it: premultiplied linear light whose coverage at
+/// each pixel is 1 - (1 - a)^2.2 for the page's own a, so the shadow,
+/// laid over the desk in linear light, darkens it as the page's shadow,
+/// mixed in sRGB's encoding, did.
+fn loose(l: &Layers, dim: f32) -> Vec<f32> {
+    let mut out = Vec::with_capacity(l.base.data().len());
+    for p in l.base.data().chunks_exact(4) {
+        let a = p[3] as f32 / 255.0 * dim;
+        if a <= 0.0 {
+            out.extend_from_slice(&[0.0; 4]);
+            continue;
+        }
+        let k = 1.0 - (1.0 - a).powf(2.2);
+        // (its straight color, from the page's premultiplied, before the dimming)
+        let pa = p[3] as f32 / 255.0;
+        for c in &p[..3] {
+            out.push((*c as f32 / 255.0 / pa).min(1.0).powf(2.2) * k);
+        }
+        out.push(k);
+    }
+    out
 }
 
 /// A light's color as the page lays it through the light's mask: its hue at
@@ -222,7 +434,13 @@ pub fn layers(art: &str, w: u32, shadow: &[ectodeck_draw::hdr::ShadowLayer], opa
         }
     }
     let shapes = shows.iter().map(|a| crop(a, bw, bh, 0, |v| [v, v, v, v])).collect();
-    Ok(Layers { base, margin: m, lights, chosen, shapes, hit })
+    let mut body = vec![0f32; (bw * bh) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            body[((y + m) * bw + x + m) as usize] = cover[(y * w + x) as usize];
+        }
+    }
+    Ok(Layers { base, margin: m, lights, chosen, shapes, hit, body })
 }
 
 /// The part of a `w` by `h` map that isn't 0, as a patch of the whole
@@ -440,7 +658,52 @@ mod tests {
 }
 
 #[cfg(test)]
+mod hdr_tests {
+    use super::*;
+
+    /// Each light's window lit as its LED makes it: brightest over the LED,
+    /// all its light inside the mouse, and as much as the LED's lumens make.
+    #[test]
+    fn the_lights_are_as_bright_as_their_leds_make_them() {
+        let art = std::fs::read_to_string(crate::cores::dir().join("steelseries/art/sensei-310.svg")).unwrap();
+        let l = layers(&art, 240, &[ectodeck_draw::hdr::ShadowLayer { down: 8.0, blur: 22.0, strength: 0.6 }], 0.5).unwrap();
+        let light = crate::mouse::light_model(&serde_json::json!({ "light": "light.json" }));
+        let px_mm = px_mm(240, 520.0 / 125.1);
+        let hdr = Hdr::new(&l, &light, px_mm);
+        for (i, lamp) in hdr.lamps.iter().enumerate() {
+            let m = ectodeck_draw::hdr::lamp::Make::of(&light, LIGHT_IDS[i]);
+            let got = lamp.lumens(px_mm);
+            eprintln!("{}: peak {:.0} nits at full white, {got:.4} lumens of {:.4}", LIGHT_IDS[i], lamp.peak(), m.lumens * (m.through + m.halo));
+            assert!((got - m.lumens * (m.through + m.halo)).abs() < 0.02 * m.lumens, "{} gives off what its LED lets out", LIGHT_IDS[i]);
+            assert!(lamp.peak() > 100.0, "{} lit brighter than the page's white", LIGHT_IDS[i]);
+        }
+    }
+}
+
+#[cfg(test)]
 mod timing {
+    /// How long a frame of the mouse in HDR takes, its lights moving.
+    #[test]
+    #[ignore]
+    fn how_long_a_frame_takes() {
+        let art = std::fs::read_to_string(crate::cores::dir().join("steelseries/art/sensei-310.svg")).unwrap();
+        let layers = [ectodeck_draw::hdr::ShadowLayer { down: 16.0, blur: 44.0, strength: 0.6 }];
+        let light = crate::mouse::light_model(&serde_json::json!({ "light": "light.json" }));
+        for w in [240u32, 480] {
+            let l = super::layers(&art, w, &layers, 0.5).unwrap();
+            let t = std::time::Instant::now();
+            let mut hdr = super::Hdr::new(&l, &light, super::px_mm(w, 520.0 / 125.1));
+            eprintln!("{w} px wide: the lamps in {:?}", t.elapsed());
+            let (bw, bh) = (l.base.width() as usize, l.base.height() as usize);
+            let _ = hdr.picture(&l, [0x1b, 0x1b, 0x1f], None, None, [Some([255, 0, 0]); 2], 254.0, 3.9, (0, 0, bw, bh));
+            let t = std::time::Instant::now();
+            for k in 0..30u8 {
+                let _ = hdr.picture(&l, [0x1b, 0x1b, 0x1f], None, None, [Some([255, k * 8, 0]); 2], 254.0, 3.9, (0, 0, bw, bh));
+            }
+            eprintln!("{w} px wide: a frame in {:?}", t.elapsed() / 30);
+        }
+    }
+
     #[test]
     #[ignore]
     fn how_long_the_layers_take() {

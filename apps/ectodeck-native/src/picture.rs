@@ -115,6 +115,10 @@ pub struct Picture {
     share: Option<Rc<Vec<f32>>>,
     share_shown: Option<Rc<Vec<f32>>>,
     dim: f32,
+    /// the mouse, laid over the keyboard and the ground as its own picture's
+    /// coverage has it: where it goes, and its picture at that size
+    mouse_rect: (i32, i32, usize, usize),
+    mouse: Option<Rc<Lit>>,
 }
 
 impl Picture {
@@ -125,7 +129,7 @@ impl Picture {
         }
         let ground = [lin[ground[0] as usize], lin[ground[1] as usize], lin[ground[2] as usize]];
         let page_ground = Ground { x: 0, y: 0, radius: 0.0, rgb: [0.0; 3] };
-        Picture { w: 0, h: 0, ui: Vec::new(), out: Vec::new(), enc: Encoder::new(reference), reference, lin, ground, page_ground, rect: (0, 0, 0, 0), src: None, shown: None, decor: Decor::default(), share: None, share_shown: None, dim: 1.0 }
+        Picture { w: 0, h: 0, ui: Vec::new(), out: Vec::new(), enc: Encoder::new(reference), reference, lin, ground, page_ground, rect: (0, 0, 0, 0), src: None, shown: None, decor: Decor::default(), share: None, share_shown: None, dim: 1.0, mouse_rect: (0, 0, 0, 0), mouse: None }
     }
 
     /// Lay the app's ground under the page; true if it changed.
@@ -178,6 +182,26 @@ impl Picture {
             self.shown = lit.map(|l| if (l.w, l.h) == (rect.2, rect.3) { l.clone() } else { Rc::new(stretch(l, rect.2, rect.3)) });
             self.fit_share();
         }
+        true
+    }
+
+    pub fn mouse_rect(&self) -> (i32, i32, usize, usize) {
+        self.mouse_rect
+    }
+
+    /// Put the mouse at `rect` as `lit` shows it (a picture of the place's
+    /// size; another is stretched to it); true if what shows there changed.
+    pub fn set_mouse(&mut self, rect: (i32, i32, usize, usize), lit: Option<&Rc<Lit>>) -> bool {
+        let same = match (&self.mouse, lit) {
+            (Some(a), Some(b)) => Rc::ptr_eq(a, b),
+            (None, None) => true,
+            _ => false,
+        };
+        if same && rect == self.mouse_rect {
+            return false;
+        }
+        self.mouse_rect = rect;
+        self.mouse = lit.filter(|_| rect.2 > 0 && rect.3 > 0).map(|l| if (l.w, l.h) == (rect.2, rect.3) { l.clone() } else { Rc::new(stretch(l, rect.2, rect.3)) });
         true
     }
 
@@ -240,11 +264,12 @@ impl Picture {
         let rows = y1 - y0;
         let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(12);
         let band = rows.div_ceil(threads).max(24);
-        let Picture { w: stride, h: height, ui, out, enc, lin, ground, page_ground, rect, shown, decor, share_shown, dim, .. } = self;
+        let Picture { w: stride, h: height, ui, out, enc, lin, ground, page_ground, rect, shown, decor, share_shown, dim, mouse_rect, mouse, .. } = self;
         let (stride, height, ui, enc, lin, ground, rect, shown, decor, dim) = (*stride, *height, &*ui, &*enc, &*lin, *ground, *rect, shown.as_deref(), &*decor, *dim);
         let page_ground = &*page_ground;
         let share = share_shown.as_deref().map(|v| v.as_slice()).filter(|v| shown.is_some() && v.len() == rect.2 * rect.3);
         let kb = KbGround { share, dim };
+        let ms = MouseOver { rect: *mouse_rect, lit: mouse.as_deref() };
         // the rows being encoded, split in bands, one to a thread
         let out = &mut out[y0 * stride..y1 * stride];
         std::thread::scope(|s| {
@@ -252,7 +277,7 @@ impl Picture {
                 let top = y0 + i * band;
                 s.spawn(move || {
                     for (r, row) in chunk.chunks_mut(stride).enumerate() {
-                        encode_row(row, top + r, x0, x1, (stride, height), ui, enc, lin, ground, page_ground, rect, shown, decor, kb);
+                        encode_row(row, top + r, x0, x1, (stride, height), ui, enc, lin, ground, page_ground, rect, shown, decor, kb, ms);
                     }
                 });
             }
@@ -266,6 +291,13 @@ impl Picture {
 struct KbGround<'a> {
     share: Option<&'a [f32]>,
     dim: f32,
+}
+
+/// The mouse over the keyboard and the ground: where, and its picture there.
+#[derive(Clone, Copy)]
+struct MouseOver<'a> {
+    rect: (i32, i32, usize, usize),
+    lit: Option<&'a Lit>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -284,8 +316,11 @@ fn encode_row(
     kb: Option<&Lit>,
     decor: &Decor,
     kbg: KbGround,
+    ms: MouseOver,
 ) {
     let (kx, ky, kw, kh) = rect;
+    let (mx, my, mw, mh) = ms.rect;
+    let mouse_rows = ms.lit.filter(|_| mw > 0 && (y as i32) >= my && (y as i32) < my + mh as i32);
     let g = page_ground;
     // the ground with what is laid on it, where anything is: white over it, mixed
     // in sRGB's encoding as the page's colors are
@@ -351,7 +386,9 @@ fn encode_row(
         // (the keyboard lies on the app's ground: none of it shows past it, under
         // the title bar or the rail, or past the window's rounded corner)
         let kc = if in_rows && (x as i32) >= kx && (x as i32) < kx + kw as i32 { cover(x) } else { 0.0 };
-        if kc <= 0.0 {
+        let mouse = mouse_rows.filter(|_| (x as i32) >= mx && (x as i32) < mx + mw as i32);
+        let mc = if mouse.is_some() { cover(x) } else { 0.0 };
+        if kc <= 0.0 && mc <= 0.0 {
             // the page over the app's ground, where the page is not opaque
             let c = if p.alpha == 255 { 1.0 } else { cover(x) };
             if c > 0.0 && p.alpha < 255 {
@@ -375,7 +412,13 @@ fn encode_row(
             };
             continue;
         }
-        // the page over the keyboard
+        // the page over the keyboard (or, where the keyboard isn't, the ground the mouse lies on)
+        if kc <= 0.0 {
+            let under = laid(x).unwrap_or(g.rgb);
+            let (k, ka) = mouse_over(mouse, mx, my, y, x, mc, under, mc);
+            row[x] = if p.alpha == 0 { enc.straight(k, ka) } else { enc.pixel(over(p, k, ka)) };
+            continue;
+        }
         let (mut k, ka) = match kb {
             Some(l) => {
                 let i = (((y as i32 - ky) as usize) * l.w + (x as i32 - kx) as usize) * 4;
@@ -408,8 +451,25 @@ fn encode_row(
             }
         }
         let ka = ka * kc;
+        let (k, ka) = if mc > 0.0 { mouse_over(mouse, mx, my, y, x, mc, k, ka) } else { (k, ka) };
         row[x] = if p.alpha == 0 { enc.straight(k, ka) } else { enc.pixel(over(p, k, ka)) };
     }
+}
+
+/// The mouse's pixel at `x`, `y` (`mc` of it on the app's ground) laid over
+/// what is under it (`under`, straight linear light, `ua` its alpha): the
+/// mixed color, straight, and its alpha.
+#[allow(clippy::too_many_arguments)]
+fn mouse_over(mouse: Option<&Lit>, mx: i32, my: i32, y: usize, x: usize, mc: f32, under: [f32; 3], ua: f32) -> ([f32; 3], f32) {
+    let Some(l) = mouse else { return (under, ua) };
+    let i = (((y as i32 - my) as usize) * l.w + (x as i32 - mx) as usize) * 4;
+    let ma = l.px[i + 3] * mc;
+    let a = ma + ua * (1.0 - ma);
+    if a <= 0.0 {
+        return ([0.0; 3], 0.0);
+    }
+    let k = [0, 1, 2].map(|c| (l.px[i + c] * mc + under[c] * ua * (1.0 - ma)) / a);
+    (k, a)
 }
 
 #[derive(Clone, Copy, PartialEq)]

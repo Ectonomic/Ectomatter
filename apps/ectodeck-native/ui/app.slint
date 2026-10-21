@@ -3669,6 +3669,8 @@ component MouseLayers inherits Rectangle {
     in property <image> base;
     in property <float> k: 1;
     in property <bool> lit: true;
+    // (false where the window draws the mouse itself, in HDR, under the page)
+    in property <bool> drawn: true;
     in property <MousePatch> picked;
     in property <bool> picked-shown;
     in property <MousePatch> over;
@@ -3679,19 +3681,19 @@ component MouseLayers inherits Rectangle {
     in property <MousePatch> wheel;
     in property <color> logo-tint;
     in property <color> wheel-tint;
-    Image {
+    if root.drawn: Image {
         width: parent.width;
         height: parent.height;
         source: root.base;
     }
-    if root.picked-shown: Image {
+    if root.drawn && root.picked-shown: Image {
         x: root.picked.x * root.k;
         y: root.picked.y * root.k;
         width: root.picked.w * root.k;
         height: root.picked.h * root.k;
         source: root.picked.img;
     }
-    if root.over-shown: Image {
+    if root.drawn && root.over-shown: Image {
         x: root.over.x * root.k;
         y: root.over.y * root.k;
         width: root.over.w * root.k;
@@ -3699,7 +3701,7 @@ component MouseLayers inherits Rectangle {
         source: root.over.img;
         colorize: #ffffff14;
     }
-    if root.lit: Image {
+    if root.drawn && root.lit: Image {
         x: root.logo-under.x * root.k;
         y: root.logo-under.y * root.k;
         width: root.logo-under.w * root.k;
@@ -3707,7 +3709,7 @@ component MouseLayers inherits Rectangle {
         source: root.logo-under.img;
         colorize: root.logo-tint;
     }
-    if root.lit: Image {
+    if root.drawn && root.lit: Image {
         x: root.wheel-under.x * root.k;
         y: root.wheel-under.y * root.k;
         width: root.wheel-under.w * root.k;
@@ -3715,7 +3717,7 @@ component MouseLayers inherits Rectangle {
         source: root.wheel-under.img;
         colorize: root.wheel-tint;
     }
-    if root.lit: Image {
+    if root.drawn && root.lit: Image {
         x: root.logo.x * root.k;
         y: root.logo.y * root.k;
         width: root.logo.w * root.k;
@@ -3723,7 +3725,7 @@ component MouseLayers inherits Rectangle {
         source: root.logo.img;
         colorize: root.logo-tint;
     }
-    if root.lit: Image {
+    if root.drawn && root.lit: Image {
         x: root.wheel.x * root.k;
         y: root.wheel.y * root.k;
         width: root.wheel.w * root.k;
@@ -3963,6 +3965,16 @@ export component AppWindow inherits Window {
     out property <length> window-height: root.height;
     out property <length> window-width: root.width;
 
+    // where the mouse's picture goes on its page, and the stage that clips it,
+    // in the window, for the window to draw the mouse there in HDR; and whether
+    // it has, till when the stage's shade fills the hole
+    out property <bool> mouse-hole-shown: root.place == "mouse" && root.mouse-tab < 2;
+    out property <length> mouse-pic-wx: rail-w + pws-x + pws-w / 2 - 600px + 480px - root.mouse-pic-m;
+    out property <length> mouse-pic-wy: bar + 56px + mouse-flick.content-y + head-end + 30px - root.mouse-pic-m;
+    out property <length> mouse-stage-wx: rail-w + pws-x;
+    out property <length> mouse-stage-wy: bar + 56px + mouse-flick.content-y + head-end;
+    out property <length> mouse-stage-width: pws-w;
+    in property <bool> mouse-hdr-ready;
     // where the keyboard goes, for the window to draw it there, when its page shows
     out property <bool> board-shown: root.place == "z10" && root.tab < 2;
     // the keyboard has been drawn: its knobs and display come with it, never before
@@ -4350,12 +4362,14 @@ export component AppWindow inherits Window {
                             image-fit: fill;
                         }
                     }
-                    // the mouse, in its layers, its lights dark while it isn't plugged in
+                    // the mouse: the window draws it here in HDR, under the page; these
+                    // layers only place it
                     if d.kind == 1: MouseLayers {
                         x: -root.desk-mouse-m * root.desk-mouse-k;
                         y: -root.desk-mouse-m * root.desk-mouse-k;
                         width: parent.width + 2 * root.desk-mouse-m * root.desk-mouse-k;
                         height: parent.height + 2 * root.desk-mouse-m * root.desk-mouse-k;
+                        drawn: false;
                         k: root.desk-mouse-k;
                         opacity: d.off ? 0.5 : 1;
                         lit: !d.off;
@@ -4617,15 +4631,24 @@ export component AppWindow inherits Window {
                     color: Ink.quiet;
                     vertical-alignment: center;
                 }
-                // the stage: the mouse on its own shade, as its mock has it
+                // the stage: the mouse on its own shade, as its mock has it; the
+                // window draws the mouse in the hole the shade leaves, in HDR
                 if root.mouse-tab < 2: Rectangle {
                     x: pws-x;
                     y: head-end;
                     width: pws-w;
                     height: stage-h;
                     border-radius: 12px;
-                    background: Ink.stage;
                     clip: true;
+                    property <length> hx: max(0, self.width / 2 - 600px + 480px - root.mouse-pic-m);
+                    property <length> hy: max(0, 30px - root.mouse-pic-m);
+                    property <length> hx2: min(self.width, self.width / 2 - 600px + 720px + root.mouse-pic-m);
+                    property <length> hy2: min(self.height, 440px + root.mouse-pic-m);
+                    Rectangle { x: 0; y: 0; width: parent.width; height: hy; background: Ink.stage; }
+                    Rectangle { x: 0; y: hy2; width: parent.width; height: parent.height - hy2; background: Ink.stage; }
+                    Rectangle { x: 0; y: hy; width: hx; height: hy2 - hy; background: Ink.stage; }
+                    Rectangle { x: hx2; y: hy; width: parent.width - hx2; height: hy2 - hy; background: Ink.stage; }
+                    if !root.mouse-hdr-ready: Rectangle { x: hx; y: hy; width: hx2 - hx; height: hy2 - hy; background: Ink.stage; }
                     // the mock's own canvas, the mouse's middle at 600 of its 1092
                     Rectangle {
                         x: parent.width / 2 - 600px;
@@ -4636,6 +4659,7 @@ export component AppWindow inherits Window {
                             y: 30px - root.mouse-pic-m;
                             width: 240px + 2 * root.mouse-pic-m;
                             height: 410px + 2 * root.mouse-pic-m;
+                            drawn: false;
                             base: root.mouse-picture;
                             picked: root.mouse-picked;
                             picked-shown: root.mouse-picked-shown;
@@ -4954,13 +4978,22 @@ export component AppWindow inherits Window {
                             clicked => { root.mouse-undo(); }
                         }
                     }
-                    // the Macro Editor, on Ectodeck's own macros, at the bar's end
+                    // the Macro Editor, on Ectodeck's own macros, and the Key lab, on the
+                    // mouse's lights, at the bar's end
                     HorizontalLayout {
                         horizontal-stretch: 0;
+                        spacing: 8px;
                         BarButton {
                             commands: "M3.1 4h9.8a1.6 1.6 0 0 1 1.6 1.6v5.3a1.6 1.6 0 0 1-1.6 1.6H3.1a1.6 1.6 0 0 1-1.6-1.6V5.6a1.6 1.6 0 0 1 1.6-1.6zM4 7h1M7 7h1M10 7h2M4.5 9.8h7";
                             text: "Macro Editor";
                             clicked => { root.mouse-macro-editor(); }
+                        }
+                        BarButton {
+                            // a flask drawn for this size, its lines on the pixel grid
+                            commands: "M5.14 1.14h5.72M6.29 1.14v4.58L2.95 11.93a1.25 1.25 0 0 0 1.1 1.79h7.9a1.25 1.25 0 0 0 1.1-1.79L9.71 5.72V1.14M4.3 10.29h7.4";
+                            round: true;
+                            text: "";
+                            clicked => { root.rail("lab"); }
                         }
                     }
                 }
@@ -9230,6 +9263,8 @@ component LabControl inherits Rectangle {
 // and what is on the keyboard now read out by Save.
 export component LabWindow inherits Window {
     in property <bool> is-maximized;
+    // the device the lab tunes, for its title bar
+    in property <string> device-name: "EVGA Z10 RGB";
     in property <image> mark;
     in property <[Cell]> cells;
     in property <[Sketch]> sketches;
@@ -9349,7 +9384,7 @@ export component LabWindow inherits Window {
             width: self.preferred-width;
             height: 36px;
             spacing: 6px;
-            Text { text: "EVGA Z10 RGB"; font-size: 13px; color: Ink.dim; vertical-alignment: center; }
+            Text { text: root.device-name; font-size: 13px; color: Ink.dim; vertical-alignment: center; }
             Text { text: "/"; font-size: 13px; color: #4a4a52; vertical-alignment: center; }
             Text { text: "Key lab"; font-size: 13px; color: Ink.dim; vertical-alignment: center; }
         }

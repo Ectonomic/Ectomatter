@@ -959,6 +959,15 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         // (what the desk lays on the ground, with no keyboard on it)
         pic.set_decor(front.desk_decor(1.0));
     }
+    // the mouse in its page's hole, or on Home's desk at its size there, lit as the window lights it
+    front.levels.0 = reference;
+    if front.ui.get_place() == "home" {
+        front.ready_desk_mouse();
+    }
+    lay_mouse(&mut pic, &mut front, 1.0);
+    if pic.mouse_rect().2 > 0 {
+        eprintln!("the mouse laid at {:?}", pic.mouse_rect());
+    }
     window.request_redraw();
     window.draw_if_needed(|r| {
         r.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
@@ -1189,8 +1198,16 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
     let window = made.borrow().last().cloned().unwrap();
     slint::ComponentHandle::show(&ui).unwrap();
     window.set_size(PhysicalSize::new(w, h));
-    let setup = setups::in_use(&front.settings, &cores::shown().id).map(|s| s.id);
-    let mut lab = lab::LabPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false), device["light"].clone(), lab_device(Some(&board)), setup);
+    // ECTODECK_NATIVE_LAB=mouse: the lab on the mouse's lights (its picture drawn first)
+    let mouse = std::env::var("ECTODECK_NATIVE_LAB").is_ok_and(|v| v == "mouse");
+    let mut lab = if mouse {
+        front.ready_mouse_picture();
+        let setup = setups::in_use(&front.settings, "steelseries").map(|s| s.id);
+        lab::LabPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false), front.mouse_light_model(), mouse_lab_device(&front).expect("the mouse's picture"), setup)
+    } else {
+        let setup = setups::in_use(&front.settings, &cores::shown().id).map(|s| s.id);
+        lab::LabPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false), device["light"].clone(), lab_device(Some(&board)), setup)
+    };
     let lights = front.lights().unwrap_or_default();
     let gain = front.light_gain(reference);
     let p = board.peaks(&lights, reference as f32, gain);
@@ -1206,6 +1223,7 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
         white: reference,
         photons,
         settled,
+        lights: if mouse { front.mouse_brightest() } else { [0.0; 2] },
     });
     let mut px = vec![PremultipliedRgbaColor::default(); (w * h) as usize];
     let draw = |px: &mut Vec<PremultipliedRgbaColor>| {
@@ -1344,6 +1362,18 @@ fn lay_keyboard(pic: &mut Picture, front: &Front, home_drawn: bool, lit: Option<
         dirty.push((rect.0.max(0) as usize, rect.1.max(0) as usize, rect.2, rect.3));
     }
     dirty
+}
+
+/// The mouse laid in the window's picture in its page's hole, as its HDR
+/// picture shows it now, or taken out where its page doesn't show it. The
+/// window and a snapshot both lay it so. The boxes to draw again.
+fn lay_mouse(pic: &mut Picture, front: &mut Front, s: f32) -> Vec<(usize, usize, usize, usize)> {
+    let (rect, lit) = front.mouse_shown(s);
+    let before = pic.mouse_rect();
+    if !pic.set_mouse(rect, lit.as_ref()) {
+        return Vec::new();
+    }
+    [before, rect].into_iter().filter(|r| r.2 > 0 && r.3 > 0).map(|r| (r.0.max(0) as usize, r.1.max(0) as usize, r.2, r.3)).collect()
 }
 
 /// Where the page's hole for the keyboard is, in the buffer's pixels.
@@ -2090,16 +2120,29 @@ impl App {
         self.light.clone().unwrap_or_else(|| cores::shown().device_now()["light"].clone())
     }
 
-    /// Open the Key lab, made the first time, on the light the keyboard is lit by.
+    /// Open the Key lab, made the first time, on the light the keyboard is
+    /// lit by; or, from the mouse's page, on the mouse's lights (made anew
+    /// when it was open on the other device).
     fn open_lab(&mut self) {
+        let mouse = self.front.ui.get_place() == "mouse";
+        if self.front.lab.as_ref().is_some_and(|l| l.windows() != mouse) {
+            self.front.lab = None;
+            self.subs[LAB] = None;
+        }
         if self.front.lab.is_none() {
-            let light = self.light_now();
+            let (light, device, core, name) = if mouse {
+                let Some(d) = mouse_lab_device(&self.front) else { return };
+                let name = d.name.clone();
+                (self.front.mouse_light_model(), d, "steelseries".to_string(), name)
+            } else {
+                (self.light_now(), lab_device(self.board.as_ref()), cores::shown().id.clone(), cores::shown().name().to_string())
+            };
             let ui = LabWindow::new().unwrap();
             let _ = slint::ComponentHandle::window(&ui);
             slint::ComponentHandle::show(&ui).unwrap();
-            let setup = setups::in_use(&self.front.settings, &cores::shown().id).map(|s| s.id);
-            self.front.lab = Some(lab::LabPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false), light, lab_device(self.board.as_ref()), setup));
-            self.subs[LAB] = Some(self.make_sub(&format!("{} / Key lab", cores::shown().name()), LAB_SIZE, LAB_MIN_SIZE));
+            let setup = setups::in_use(&self.front.settings, &core).map(|s| s.id);
+            self.front.lab = Some(lab::LabPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false), light, device, setup));
+            self.subs[LAB] = Some(self.make_sub(&format!("{name} / Key lab"), LAB_SIZE, LAB_MIN_SIZE));
         } else {
             self.show_sub(LAB);
         }
@@ -2113,7 +2156,17 @@ impl App {
         if self.readout_at.is_some_and(|t| t.elapsed() < Duration::from_millis(250)) {
             return;
         }
-        let (Some(l), Some(b)) = (&mut self.front.lab, &self.board) else { return };
+        // (the mouse's lab: its lights' brightest now)
+        if self.front.lab.as_ref().is_some_and(|l| l.windows()) {
+            self.readout_at = Some(Instant::now());
+            let (lights, reference) = (self.front.mouse_brightest(), self.pic.reference());
+            let peak = (self.gain as f64 * reference).round();
+            if let Some(l) = &mut self.front.lab {
+                l.set_readout(lab::Readout { peak, white: reference.round(), lights, settled: true, ..Default::default() });
+            }
+            return;
+        }
+        let (Some(l), Some(b)) = (self.front.lab.as_mut().filter(|l| !l.windows()), &self.board) else { return };
         self.readout_at = Some(Instant::now());
         let reference = self.pic.reference();
         let p = b.peaks(&self.lights, reference as f32, self.gain);
@@ -2129,6 +2182,7 @@ impl App {
             white: reference.round(),
             photons,
             settled,
+            lights: [0.0; 2],
         });
     }
 
@@ -2380,7 +2434,7 @@ impl App {
             }
         }
         // the Key lab, open before the device was first drawn, takes its caps
-        if let Some(l) = self.front.lab.as_mut().filter(|l| !l.has_caps() && !home) {
+        if let Some(l) = self.front.lab.as_mut().filter(|l| !l.has_caps() && !home && !l.windows()) {
             l.set_caps(lab_device(Some(&board)).caps);
         }
         if let Some(l) = &self.light {
@@ -2568,7 +2622,13 @@ impl App {
         // the Key lab's tuning, when it has changed
         let mut relit = false;
         let mut relit_caps = false;
-        if let Some(lab) = &self.front.lab {
+        // (the mouse takes the lab's tuning of its lights itself)
+        if let Some(l) = self.front.lab.as_ref().filter(|l| l.windows() && (l.rev, l.comparing) != self.light_rev) {
+            self.light_rev = (l.rev, l.comparing);
+            let shown = l.shown().clone();
+            self.front.set_mouse_light(shown);
+        }
+        if let Some(lab) = self.front.lab.as_ref().filter(|l| !l.windows()) {
             let rev = (lab.rev, lab.comparing);
             if rev != self.light_rev {
                 self.light_rev = rev;
@@ -2706,6 +2766,12 @@ impl App {
         // size is drawn), and what Home's desk lays on the ground round it and under it
         let share = if home.is_some() { self.home_share.clone() } else { None };
         dirty.extend(lay_keyboard(&mut self.pic, &self.front, self.home_board.is_some(), self.lit.as_ref(), share, s));
+        // the mouse in its page's hole, lit as it shows now (and the lab tuning it told)
+        let laid = lay_mouse(&mut self.pic, &mut self.front, s);
+        if !laid.is_empty() && self.front.lab.as_ref().is_some_and(|l| l.windows()) {
+            self.readout();
+        }
+        dirty.extend(laid);
         // the last frame's picture taken back, now nothing shows it, for the next
         if let Some(old) = shown_before {
             if let Ok(l) = Rc::try_unwrap(old) {
@@ -3413,7 +3479,31 @@ fn lab_device(board: Option<&Board>) -> lab::LabDevice {
         caps: board.map(|b| b.cap_shapes.iter().map(|c| (c.clone(), b.key_geometry(&c.id, mm))).collect()).unwrap_or_default(),
         typical,
         print: core.device_now()["print"].clone(),
+        windows: false,
+        light_at: &["light"],
     }
+}
+
+/// The mouse as the Key lab tunes it: its lights, each a window of its own,
+/// chosen one at a time where its window is on the drawing; its light kept
+/// in its core's own file. None before its picture is drawn.
+fn mouse_lab_device(front: &Front) -> Option<lab::LabDevice> {
+    let parts = front.mouse_lab_parts()?;
+    let desc = &front.mouse.state["device"];
+    let file = desc["light"].as_str().unwrap_or("light.json");
+    Some(lab::LabDevice {
+        name: desc["name"].as_str().unwrap_or("SteelSeries Sensei 310").to_string(),
+        core: "steelseries".into(),
+        path: cores::dir().join("steelseries").join(file),
+        keys: false,
+        wells: false,
+        screens: false,
+        caps: parts.into_iter().map(|c| (c, None)).collect(),
+        typical: None,
+        print: serde_json::Value::Null,
+        windows: true,
+        light_at: &[],
+    })
 }
 
 /// A rectangle of a picture, in its pixels: x, y, width, height.

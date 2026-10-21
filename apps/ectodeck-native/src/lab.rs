@@ -161,7 +161,7 @@ struct Param {
     note: &'static str,
 }
 
-const PARAMS: [Param; 43] = [
+const PARAMS: [Param; 50] = [
     Param { path: ("switches", "led"), label: "North of center", lo: -7.0, hi: 7.0, step: 0.05, unit: Unit::North, def: 5.08, note: "Where each key's LED sits under its cap, from the switch's center toward the top of the key; below 0, toward the bottom, as on a keyboard whose LEDs face south. It goes as far as the switch's edge, so Switch width sets how far the slider reaches." },
     Param { path: ("switches", "lumens"), label: "LED output", lo: 0.05, hi: 10.0, step: 0.01, unit: Unit::Lumens, def: 1.0, note: "The light each LED gives off at full white, in lumens: about 1 for a keyboard's RGB LED. Everything the LEDs light is as bright as the light that reaches it makes it; what is brighter than the screen shows (Peak nits, Settings › HDR) is drawn at the most it shows, in its own color. A color gives off its own share, as an LED does: a red about a fifth." },
     Param { path: ("switches", "beam"), label: "Beam", lo: 1.0, hi: 200.0, step: 0.5, unit: Unit::Number, def: 24.0, note: "How tight the LED's beam out of the top of the switch is. Higher keeps it to a small bright spot on the legend over the LED; lower spreads it across the cap's top and onto the inside of its skirt." },
@@ -205,6 +205,14 @@ const PARAMS: [Param; 43] = [
     Param { path: ("legends", "second_down"), label: "Bottom up–down", lo: -10.0, hi: 10.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Moves the bottom legend up or down, leaving the rest of the legend where it is. Drag the bottom legend on the drawing to move it there." },
     Param { path: ("switches", "bleed"), label: "Color drift", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: crate::z10::BLEED, note: "How far each LED's light drifts from the color it's set to, as the Z10's own LEDs do: red toward orange, green toward teal, blue toward cyan. Raise it until a red key here matches a red key on your keyboard." },
     Param { path: ("display", "bleed"), label: "Color drift", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: crate::z10::BLEED, note: "How far the screen's backlight drifts from the color it's set to, as the keys' LEDs do. Raise it until the screen here matches the screen on your keyboard." },
+    // a light that is a window of its own, as a mouse's logo is (see ectodeck_draw's lamp)
+    Param { path: ("window", "lumens"), label: "LED output", lo: 0.01, hi: 5.0, step: 0.01, unit: Unit::Lumens, def: 0.8, note: "How much light the LED gives off at full white, in lumens: about 1 for an RGB LED. Everything it lights, the window and the shell round it, is as bright as this makes it; what is brighter than the screen shows (Peak nits, Settings › HDR) is drawn at the most it shows, in its own color." },
+    Param { path: ("window", "through"), label: "Through the window", lo: 0.0, hi: 1.0, step: 0.01, unit: Unit::Fraction, def: 0.5, note: "The share of the LED's light that comes out through the window's face. The rest is lost inside the mouse. More makes the window brighter for the same LED." },
+    Param { path: ("window", "depth"), label: "LED depth", lo: 0.2, hi: 20.0, step: 0.1, unit: Unit::Mm, def: 8.0, note: "How far under the window's face the LED sits. Close under it, the window is brightest over the LED and dims toward its edges; deep under it, as at the end of a light pipe, the light spreads evenly across the window." },
+    Param { path: ("window", "halo"), label: "Halo", lo: 0.0, hi: 0.5, step: 0.01, unit: Unit::Fraction, def: 0.05, note: "The share of the LED's light that gets out round the window's edge, lighting the shell beside it. At 0% the window's edge is crisp; more gives it a soft glow." },
+    Param { path: ("window", "reach"), label: "Halo reach", lo: 0.2, hi: 10.0, step: 0.1, unit: Unit::Reach, def: 2.0, note: "How far the halo carries from the window's edge before it fades to about a third. Short keeps it tight to the edge; long spreads it across the shell." },
+    Param { path: ("window", "east"), label: "LED east–west", lo: -20.0, hi: 20.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Where the LED sits under the window, east or west of its middle. The window is brightest over it." },
+    Param { path: ("window", "north"), label: "LED north–south", lo: -20.0, hi: 20.0, step: 0.1, unit: Unit::Place, def: 0.0, note: "Where the LED sits under the window, north or south of its middle. The window is brightest over it." },
 ];
 
 /// What each end of a share's slider stands for, in the words under its
@@ -222,6 +230,8 @@ fn ends(path: (&str, &str)) -> Option<(&'static str, &'static str)> {
         ("display", "dot") => ("Pinpoints", "Touching"),
         ("display", "glass") => ("None", "As drawn"),
         ("switches", "bleed") | ("display", "bleed") => ("None", "Strong"),
+        ("window", "through") => ("None", "All"),
+        ("window", "halo") => ("None", "Half"),
         _ => return None,
     })
 }
@@ -245,15 +255,16 @@ const CHOICES: [Choice; 5] = [
 const BUMP: usize = 4;
 
 /// The order of the sections on the page's tabs, by their place in SECTIONS.
-const ORDER: [usize; 5] = [LEGENDS, 1, 0, 3, 4];
+const ORDER: [usize; 6] = [LEGENDS, 1, 0, 3, 4, 5];
 
 /// The page's sections: a title, what the part is, its values, and its choices.
-const SECTIONS: [(&str, &str, &[usize], &[usize]); 5] = [
+const SECTIONS: [(&str, &str, &[usize], &[usize]); 6] = [
     ("LEDs", "Each key's LED shines up out of its switch in a beam, onto the back of the legend. In a black housing that is all its light; a clear housing scatters a share of it instead, glowing with it over its top and sides, which lights the legend evenly, the inside of the cap and the deck round the switch.", &[0, 1, 2, 3, 4, 5, 7, 6, 41], &[0]),
     ("Keycaps", "Each cap stands over its switch, its skirt from its foot to its top. Light bounces about inside it; some gets out under the skirt, some through the legend, and some through the plastic where it is translucent and not coated black.", &[8, 9, 10, 22, 23, 24, 11, 12, 13], &[1]),
     ("Legends", "What the light comes through: the print on each cap. Set it as your caps print it: its typeface, how tall its letters are, and where on the cap it sits.", &[27, 28, 29, 30], &[2, 3]),
     ("Wells", "The keys sit in wells in the chassis: the deck at their floor, walled round by the chassis. What each gives back of the light falling on it lights the rest.", &[14, 15, 16], &[]),
     ("Display", "The display's backlit dots, and the glass over them.", &[17, 18, 19, 20, 21, 42], &[]),
+    ("Lights", "Each light is an LED under a window of diffusing plastic, as a mouse's logo is. The LED's light spreads across the back of the window and leaves through its face, brightest over the LED, and a little gets out round its edge onto the shell beside it.", &[43, 44, 45, 46, 47, 48, 49], &[]),
 ];
 
 /// A section's sliders that tune this light: a black housing does not
@@ -458,6 +469,9 @@ pub struct Readout {
     /// the photons the simulation has followed from each LED, and whether that is all it follows
     pub photons: usize,
     pub settled: bool,
+    /// for a device whose lights are windows of their own: each light's
+    /// brightest, in its color now, in the order of its parts (see caps)
+    pub lights: [f64; 2],
 }
 
 /// What the readout's numbers measure, and the simulation's.
@@ -636,6 +650,12 @@ pub struct LabDevice {
     pub keys: bool,
     pub wells: bool,
     pub screens: bool,
+    /// whether its lights are windows of their own, as a mouse's logo is:
+    /// its caps (see caps) are then its lights, chosen one at a time
+    pub windows: bool,
+    /// where in its file (`path`) the light is: under "light" in a
+    /// device's description, or the whole of a light's own file
+    pub light_at: &'static [&'static str],
     pub caps: Vec<(CapShape, Option<KeyGeometry>)>,
     pub typical: Option<String>,
     /// how the core's art prints its legends, as its description has it
@@ -983,8 +1003,15 @@ fn plain(light: Value, print: &Value) -> Value {
 }
 
 impl LabPage {
+    /// Whether the device tuned has lights that are windows of their own
+    /// (a mouse): the window lights it, not the keyboard.
+    pub fn windows(&self) -> bool {
+        self.device.windows
+    }
+
     pub fn new(ui: LabWindow, mark: slint::Image, light: Value, device: LabDevice, setup: Option<String>) -> LabPage {
         let asks = Rc::new(RefCell::new(Vec::new()));
+        ui.set_device_name(device.name.as_str().into());
         macro_rules! on {
             ($set:ident, |$($p:ident),*| $ask:expr) => {{
                 let a = asks.clone();
@@ -1127,7 +1154,7 @@ impl LabPage {
     fn sections(&self) -> Vec<usize> {
         let d = &self.device;
         let printed = d.keys && d.print.is_object() && d.caps.iter().any(|(c, _)| c.print.is_some());
-        let has = [d.keys, d.keys, printed, d.wells, d.screens];
+        let has = [d.keys, d.keys, printed, d.wells, d.screens, d.windows];
         ORDER.iter().copied().filter(|&i| has[i]).collect()
     }
 
@@ -1162,7 +1189,7 @@ impl LabPage {
             }
             Some(k) if k.button => (format!("{0}'s own setup. A button with no light of its own, standing in the keys' light: how high it stands, and what it gives back of the light.", k.label), format!("{0}'s own setup: a button in the keys' light.", k.label)),
             Some(k) if !k.lit => (format!("{0}'s own setup. It has no LED of its own, so only its cap is set here; the rest follows all keys.", k.label), format!("{}'s own setup: its cap; it has no LED of its own.", k.label)),
-            Some(k) => (format!("{0}'s own setup. Changes here are for {0} alone; everything else follows all keys.", k.label), format!("{0}'s own setup: changes here are for {0} alone.", k.label)),
+            Some(k) => (format!("{0}'s own setup. Changes here are for {0} alone; everything else follows all {1}.", k.label, self.parts().0), format!("{0}'s own setup: changes here are for {0} alone.", k.label)),
         }
     }
 
@@ -1403,7 +1430,7 @@ impl LabPage {
                             prune_own(&mut self.light, &k);
                         }
                         self.rev += 1;
-                        self.status = (format!("{what} follows all keys again."), 0);
+                        self.status = (format!("{what} follows all {} again.", self.parts().0), 0);
                     }
                 }
                 // a value of the setup's own given back: it takes the core's again
@@ -1452,7 +1479,7 @@ impl LabPage {
                         self.rev += 1;
                         let name = SECTIONS[self.section].0;
                         self.status = match self.key() {
-                            Some(k) => (format!("{} follows all keys in {name} again. Ctrl+Z undoes it.", k.label), 0),
+                            Some(k) => (format!("{} follows all {} in {name} again. Ctrl+Z undoes it.", k.label, self.parts().0), 0),
                             None => (format!("{name} is back as {DEFAULT} has it. Ctrl+Z undoes it."), 0),
                         };
                     }
@@ -1704,6 +1731,12 @@ impl LabPage {
         self.scope.and_then(|i| self.device.caps.get(i)).map(|(c, _)| c)
     }
 
+    /// What the parts the page tunes one at a time are called: a keyboard's
+    /// keys, or the lights of a device whose lights are windows of their own.
+    fn parts(&self) -> (&'static str, &'static str) {
+        if self.device.windows { ("lights", "light") } else { ("keys", "key") }
+    }
+
     /// The chosen key's own values, by its control's id, as the light has them.
     fn own<'a>(&self, light: &'a Value) -> &'a Value {
         self.key().map_or(&Value::Null, |k| &light["keys"][k.id.as_str()])
@@ -1779,6 +1812,8 @@ impl LabPage {
     fn section_open(&self, i: usize) -> bool {
         match self.key() {
             None => true,
+            // (a light's own setup is all of its window's)
+            Some(_) if self.device.windows => i == 5,
             Some(k) if k.button => i == 1,
             Some(k) => i == 1 || (i == 0 && k.lit) || (i == LEGENDS && k.print.is_some()),
         }
@@ -1789,6 +1824,10 @@ impl LabPage {
     /// legend it does not have, and its switch's place.
     fn sliders(&self) -> Vec<usize> {
         let mut ids = sliders_of(self.section, &self.work());
+        // a light that is a window of its own has its own LED: all of it is its own
+        if self.device.windows {
+            return ids;
+        }
         // a button: how high it stands, and what its outside gives back
         if self.key().is_some_and(|k| k.button) {
             ids.retain(|&i| matches!(PARAMS[i].path, ("caps", "foot" | "top" | "outside")));
@@ -1877,8 +1916,12 @@ impl LabPage {
     fn section_reset_words(&self) -> (String, String) {
         let name = SECTIONS[self.section].0;
         let note = match self.key() {
-            Some(k) => format!("Takes out the {name} settings made for {} alone, so {} follows all keys in {name} again. Ctrl+Z undoes it.", k.label, k.label),
-            None => format!("Puts every {name} setting back as {DEFAULT} has it. Keys with {name} settings of their own keep them; reset each one with One key. Ctrl+Z undoes it."),
+            Some(k) => format!("Takes out the {name} settings made for {} alone, so {} follows all {} in {name} again. Ctrl+Z undoes it.", k.label, k.label, self.parts().0),
+            None => {
+                let (many, one) = self.parts();
+                let many_cap = format!("{}{}", many[..1].to_uppercase(), &many[1..]);
+                format!("Puts every {name} setting back as {DEFAULT} has it. {many_cap} with {name} settings of their own keep them; reset each one with One {one}. Ctrl+Z undoes it.")
+            }
         };
         (format!("Reset {name}"), note)
     }
@@ -1978,7 +2021,7 @@ impl LabPage {
         }
         let path = self.device.path.clone();
         let result = std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|s| {
-            let out = saved_into(&s, &self.light)?;
+            let out = saved_into(&s, &self.light, self.device.light_at)?;
             let tmp = path.with_extension("json.tmp");
             std::fs::write(&tmp, &out).and_then(|_| std::fs::rename(&tmp, &path)).map_err(|e| e.to_string())
         });
@@ -2009,10 +2052,10 @@ impl LabPage {
     fn file_note(&self, path: &[String], v: &Value) -> Option<String> {
         let path: Vec<&str> = path.iter().map(String::as_str).collect();
         match path[..] {
-            ["keys"] => Some("keys with a setup of their own".into()),
+            ["keys"] => Some(format!("{} with a setup of their own", self.parts().0)),
             ["keys", id] => {
                 let name = self.device.caps.iter().find(|(c, _)| c.id == id).map_or_else(|| id.to_string(), |(c, _)| c.label.clone());
-                Some(if v.is_null() { format!("{name}: as all keys, not set apart") } else { name })
+                Some(if v.is_null() { format!("{name}: as all {}, not set apart", self.parts().0) } else { name })
             }
             ["keys", _, a, b] => value_note((a, b), v, true),
             [a, b] => value_note((a, b), v, false),
@@ -2877,7 +2920,7 @@ impl LabPage {
             Some(i) if (0..READING).contains(&i) && self.sliders().contains(&(i as usize)) => {
                 let p = &PARAMS[i as usize];
                 match self.key().filter(|_| self.owns(p.path)) {
-                    Some(k) => (p.label.into(), format!("{} This is {}'s own value; the dot before the name gives the value back to all keys.", p.note, k.label)),
+                    Some(k) => (p.label.into(), format!("{} This is {}'s own value; the dot before the name gives the value back to all {}.", p.note, k.label, self.parts().0)),
                     None if self.key().is_none() && self.owns(p.path) => {
                         let core = at(&self.core_saved, p.path).as_f64().or_else(|| default_of(p.path, &self.device.print)).unwrap_or(p.def);
                         (p.label.into(), format!("Changed from {DEFAULT}'s {}. Select the dot to go back to {}. {}", said(p, core), said(p, core), p.note))
@@ -2890,7 +2933,7 @@ impl LabPage {
                 let was = at(tuned(&self.saved, self.key().map(|k| k.id.as_str())), p.path).as_f64();
                 let back = match (self.key(), was) {
                     (Some(k), Some(v)) => format!("Back to {}, {}'s saved value.", said(p, v), k.label),
-                    (Some(_), None) => "Back to all keys' value, as saved.".into(),
+                    (Some(_), None) => format!("Back to all {}' value, as saved.", self.parts().0),
                     (None, v) => format!("Back to {}, the saved value.", said(p, v.or_else(|| default_of(p.path, &self.device.print)).unwrap_or(p.def))),
                 };
                 (p.label.into(), back)
@@ -2957,8 +3000,10 @@ impl LabPage {
         let tabs_w = bx - 2.0 + 6.0;
         let tx = w - 24.0 - tabs_w;
         // the keys tuned, before the sections: all of them, or one, which opens the map to choose it
-        let one = self.key().map_or_else(|| "One key".to_string(), |k| k.label.clone());
-        let (aw, kw) = (text::width(400, 13.0, "All keys") + 24.0, text::width(400, 13.0, &one) + 24.0 + 16.0);
+        let (many, single) = self.parts();
+        let (all_words, one_words) = (format!("All {many}"), format!("One {single}"));
+        let one = self.key().map_or_else(|| one_words.clone(), |k| k.label.clone());
+        let (aw, kw) = (text::width(400, 13.0, &all_words) + 24.0, text::width(400, 13.0, &one) + 24.0 + 16.0);
         let scope_w = aw + 2.0 + kw + 6.0;
         let qx = tx - 12.0 - scope_w;
         // the light setup tuned, before the keys: the core's, or one of the
@@ -2975,7 +3020,7 @@ impl LabPage {
         cells.push(cell(kind::SEG, ux, 17.0, uw + 6.0, 36.0));
         cells.push(Cell { text: setup.into(), on: self.menu != Menu::Shut, id: SETUP, index: 0, style: 24, ..cell(kind::SEG_BUTTON, ux + 3.0, 20.0, uw, 30.0) });
         cells.push(cell(kind::SEG, qx, 17.0, scope_w, 36.0));
-        cells.push(Cell { text: "All keys".into(), on: self.scope.is_none() && !self.picking, id: SCOPE, index: 0, ..cell(kind::SEG_BUTTON, qx + 3.0, 20.0, aw, 30.0) });
+        cells.push(Cell { text: all_words.as_str().into(), on: self.scope.is_none() && !self.picking, id: SCOPE, index: 0, ..cell(kind::SEG_BUTTON, qx + 3.0, 20.0, aw, 30.0) });
         cells.push(Cell { text: one.into(), on: self.scope.is_some() || self.picking, id: SCOPE, index: 1, style: 24, ..cell(kind::SEG_BUTTON, qx + 3.0 + aw + 2.0, 20.0, kw, 30.0) });
         cells.push(cell(kind::SEG, tx, 17.0, tabs_w, 36.0));
         for (i, title, x, bw) in tabs {
@@ -3195,14 +3240,19 @@ impl LabPage {
                 (x0, y0, x1, y1) = (x0.min(c.foot[0]), y0.min(c.foot[1]), x1.max(c.foot[2]), y1.max(c.foot[3]));
             }
             let (mx, my, mw) = (24.0, HEAD_H + 4.0, w - 48.0);
-            let k = (mw - 48.0) / (x1 - x0);
+            // as wide as the map, or, for parts laid out taller than wide (a
+            // mouse's lights), as tall as the stage leaves it, in its middle
+            let k = ((mw - 48.0) / (x1 - x0)).min((sh - 92.0 - 16.0).max(60.0) / (y1 - y0).max(1.0));
             let map_h = (y1 - y0) * k;
+            let x0 = x0 - ((mw - 48.0) / k - (x1 - x0)) / 2.0;
             // the page behind it dimmed, the map raised over it
             over.push(Cell { style: 28, ..cell(kind::TILE, sx, sy, sw, sh) });
             over.push(Cell { style: 27, ..cell(kind::TILE, mx, my, mw, map_h + 92.0) });
-            over.push(text_cell(style::LABEL, mx + 24.0, my + 18.0, 200.0, 26.0, "Choose a key"));
-            let note = "Changes you make to a chosen key are for it alone. A dot marks a key with its own setup.";
-            over.push(text_cell(style::NOTE, mx + 24.0 + text::width(400, 13.5, "Choose a key") + 14.0, my + 22.0, mw - 200.0, 18.0, note));
+            let one = self.parts().1;
+            let title = format!("Choose a {one}");
+            over.push(text_cell(style::LABEL, mx + 24.0, my + 18.0, 200.0, 26.0, &title));
+            let note = format!("Changes you make to a chosen {one} are for it alone. A dot marks a {one} with its own setup.");
+            over.push(text_cell(style::NOTE, mx + 24.0 + text::width(400, 13.5, &title) + 14.0, my + 22.0, mw - 200.0, 18.0, &note));
             for (i, (c, _)) in self.device.caps.iter().enumerate() {
                 let (mut kx, mut ky) = (mx + 24.0 + (c.foot[0] - x0) * k, my + 64.0 + (c.foot[1] - y0) * k);
                 let (mut kw, mut kh) = ((c.foot[2] - c.foot[0]) * k, (c.foot[3] - c.foot[1]) * k);
@@ -3289,6 +3339,28 @@ impl LabPage {
             let head = "Brightest now";
             out.push(in_color(style::LABEL_IN, x, head, [0xa3, 0xa3, 0xa3]));
             x += text::width(500, 12.5, head) + 12.0;
+        }
+        // (a device whose lights are windows: each light's brightest, then the desktop's white)
+        if self.device.windows {
+            for (k, (c, _)) in self.device.caps.iter().take(2).enumerate() {
+                let value = format!("{} nits", nits(r.lights[k]));
+                let x0 = x;
+                out.push(text_cell(style::NOTE, x, 23.0, text::width(400, 12.5, &c.label) + 2.0, 18.0, &c.label));
+                x += text::width(400, 12.5, &c.label) + 6.0;
+                out.push(in_color(style::LABEL_IN, x, &value, value_color));
+                x += text::width(500, 12.5, &value);
+                out.insert(out.len() - 2, Cell { id: READING + 5, ..cell(kind::ZONE, x0 - 4.0, 16.0, x - x0 + 8.0, 32.0) });
+                x += 14.0;
+            }
+            x += 2.0;
+            out.push(Cell { color: color([0x3a, 0x3a, 0x3a]), ..cell(kind::BOX, x, 25.0, 1.0, 14.0) });
+            x += 15.0;
+            let white = format!("{} nits", nits(r.white));
+            out.push(text_cell(style::NOTE, x, 23.0, text::width(400, 12.5, "Desktop white") + 2.0, 18.0, "Desktop white"));
+            x += text::width(400, 12.5, "Desktop white") + 6.0;
+            out.push(in_color(style::LABEL_IN, x, &white, value_color));
+            x += text::width(500, 12.5, &white);
+            return (out, x);
         }
         let held = self.legend_note().is_some();
         let items: [(&str, String); 5] = [("Legend", nits(r.legend)), ("Deck", nits(r.deck)), ("Skirt", nits(r.skirt)), ("Chassis", nits(r.chassis)), ("Display", format!("{} nits", nits(r.lcd)))];
@@ -3472,14 +3544,15 @@ fn value_note(path: (&str, &str), v: &Value, of_key: bool) -> Option<String> {
 /// light no longer has taken out, and the rest of the file as it was. A light
 /// whose keys have none of their own left leaves the file's keys empty, not
 /// gone, so what the file says of them stays.
-fn saved_into(text: &str, light: &Value) -> Result<String, String> {
+fn saved_into(text: &str, light: &Value, at: &[&str]) -> Result<String, String> {
     let mut light = light.clone();
-    if light.get("keys").is_none() && jsonc::parse(text)?["light"].get("keys").is_some() {
+    let was = jsonc::parse(text)?;
+    if light.get("keys").is_none() && at.iter().fold(&was, |v, k| &v[*k]).get("keys").is_some() {
         light["keys"] = json!({});
     }
-    let out = jsonc::update(text, &["light"], &light)?;
+    let out = jsonc::update(text, at, &light)?;
     // only a file that reads back as the tuning is written
-    if jsonc::update(&out, &["light"], &light)? != out {
+    if jsonc::update(&out, at, &light)? != out {
         return Err("the tuning would not read back".into());
     }
     Ok(out)
@@ -3488,6 +3561,22 @@ fn saved_into(text: &str, light: &Value) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A light kept in a file of its own (the mouse's) saves as the whole
+    /// file: each value changed in its place, a light's own values added
+    /// under its id, and the file's comments kept.
+    #[test]
+    fn a_light_file_of_its_own_saves_whole() {
+        let file = std::fs::read_to_string(crate::cores::dir().join("steelseries/light.json")).unwrap();
+        let mut light = jsonc::parse(&file).unwrap();
+        light["window"]["lumens"] = json!(1.2);
+        light["keys"]["logo"] = json!({ "window": { "depth": 5.0 } });
+        let out = saved_into(&file, &light, &[]).unwrap();
+        assert!(jsonc::same(&jsonc::parse(&out).unwrap()["window"]["lumens"], &json!(1.2)));
+        assert_eq!(jsonc::parse(&out).unwrap()["keys"]["logo"]["window"]["depth"].as_f64(), Some(5.0));
+        assert!(out.contains("// the light each LED gives off at full white, in lumens"), "its comments kept");
+        assert_eq!(saved_into(&out, &light, &[]).unwrap(), out, "saved again, nothing changes");
+    }
 
     /// The Legends section's sliders: Left–right and Up–down wherever the
     /// legend is placed; and the legends' sliders take the core's own print
@@ -3593,7 +3682,7 @@ mod tests {
         light["legends"]["place"] = json!("middle");
         light["legends"]["letters"] = json!(3.8);
         light["keys"]["enter"] = json!({ "legends": { "words": 2.2 } });
-        let out = saved_into(&core, &light).unwrap();
+        let out = saved_into(&core, &light, &["light"]).unwrap();
         let read = jsonc::parse(&out).unwrap();
         assert_eq!(read["light"]["legends"]["typeface"], json!("Montserrat"));
         assert_eq!(read["light"]["legends"]["place"], json!("middle"));
@@ -3798,13 +3887,13 @@ mod tests {
         let mut light = floats(jsonc::parse(&file).unwrap()["light"].clone());
         let button = |top: f64| json!({ "caps": { "kind": "shine-through", "foot": 2.0, "top": top } });
         light["keys"] = json!({ "gpc": button(3.0), "stop": button(6.0), "previous": button(6.0), "play": button(6.0), "next": button(6.0) });
-        let text = saved_into(&file, &light).unwrap();
-        assert_eq!(saved_into(&text, &light).unwrap(), text, "the tuning as the file has it: nothing changes");
+        let text = saved_into(&file, &light, &["light"]).unwrap();
+        assert_eq!(saved_into(&text, &light, &["light"]).unwrap(), text, "the tuning as the file has it: nothing changes");
         let mut tuned = light.clone();
         set(&mut tuned, ("caps", "top"), 12.5);
         set(&mut tuned, ("switches", "led"), -2.0);
         own_put(&mut tuned, "enter", ("place", "north"), json!(-3.0));
-        let out = saved_into(&text, &tuned).unwrap();
+        let out = saved_into(&text, &tuned, &["light"]).unwrap();
         let back = floats(jsonc::parse(&out).unwrap()["light"].clone());
         assert_eq!(back, tuned, "it reads back as tuned");
         let added: Vec<&str> = out.lines().filter(|l| !text.lines().any(|t| t == *l)).collect();
@@ -3814,11 +3903,11 @@ mod tests {
         assert!(out.contains(r#""enter": { "place": { "north": -3 } }"#), "a key's own, on a line of its own");
         assert_eq!(out.lines().count(), text.lines().count() + 1);
         // and back as it was
-        assert_eq!(saved_into(&out, &light).unwrap(), text);
+        assert_eq!(saved_into(&out, &light, &["light"]).unwrap(), text);
         // a key's own given back and none left: its keys empty, what the file says of them kept
         let mut none = light.clone();
         none.as_object_mut().unwrap().remove("keys");
-        let out = saved_into(&text, &none).unwrap();
+        let out = saved_into(&text, &none, &["light"]).unwrap();
         assert!(out.contains("    \"keys\": {}\n  },") && out.contains("    // keys set apart from the rest"), "{out}");
     }
 }

@@ -29,6 +29,21 @@ struct MouseImages {
     shapes: Vec<MousePatch>,
 }
 
+/// The part of the mouse's whole picture its page's hole shows, in pixels:
+/// all of it the stage, which clips it, shows.
+fn mouse_part(ui: &AppWindow, s: f32, l: &crate::mouse_art::Layers) -> (usize, usize, usize, usize) {
+    let (bw, bh) = (l.base.width() as f32, l.base.height() as f32);
+    let (px, py) = ((ui.get_mouse_pic_wx() * s).round(), (ui.get_mouse_pic_wy() * s).round());
+    let (sx, sy) = ((ui.get_mouse_stage_wx() * s).round(), (ui.get_mouse_stage_wy() * s).round());
+    let (sw, sh) = ((ui.get_mouse_stage_width() * s).round(), (ui.get_mouse_stage_height() * s).round());
+    let (x0, y0) = (px.max(sx), py.max(sy));
+    let (x1, y1) = ((px + bw).min(sx + sw), (py + bh).min(sy + sh));
+    if x1 <= x0 || y1 <= y0 {
+        return (0, 0, 0, 0);
+    }
+    ((x0 - px) as usize, (y0 - py) as usize, (x1 - x0) as usize, (y1 - y0) as usize)
+}
+
 /// The mouse's layers as the page takes them, drawn at `scale`.
 fn mouse_images(l: crate::mouse_art::Layers, scale: f32) -> MouseImages {
     let image = |px: &resvg::tiny_skia::Pixmap| {
@@ -549,6 +564,20 @@ pub struct Front {
     mouse_shows: (Option<u8>, Option<u8>),
     /// the lights' effects played on the picture, 30 frames a second, while they move
     mouse_frames: Option<slint::Timer>,
+    /// the mouse in HDR on its page: its lamps and unlit picture, for the
+    /// layers' scale; the picture lit as it shows now, and the part of the
+    /// whole picture the page's hole shows of it (in pixels)
+    mouse_hdr: Option<(f32, crate::mouse_art::Hdr)>,
+    mouse_lit: Option<Rc<crate::picture::Lit>>,
+    mouse_part: (usize, usize, usize, usize),
+    /// the light the mouse is lit by while the Key lab tunes it (none: as its
+    /// core's file has it), and the drawing's pixels to a millimeter
+    mouse_light: Option<serde_json::Value>,
+    mouse_px_mm: f32,
+    /// the mouse in HDR on Home's desk: its lamps for the width its layers
+    /// there were drawn at, and its picture lit as it shows now
+    desk_mouse_hdr: Option<(u32, crate::mouse_art::Hdr)>,
+    desk_mouse_lit: Option<Rc<crate::picture::Lit>>,
     /// Home's desk, its easing's frames while it eases, and the mouse's picture
     /// drawn for its size on the desk (its width in pixels), and the size being drawn
     pub desk: crate::desk::Desk,
@@ -825,6 +854,13 @@ impl Front {
             mouse_hover: None,
             mouse_shows: (None, None),
             mouse_frames: None,
+            mouse_hdr: None,
+            mouse_lit: None,
+            mouse_part: (0, 0, 0, 0),
+            mouse_light: None,
+            mouse_px_mm: 1.0,
+            desk_mouse_hdr: None,
+            desk_mouse_lit: None,
             desk: crate::desk::Desk::new(),
             desk_frames: None,
             desk_mouse: None,
@@ -3926,10 +3962,16 @@ impl Front {
         if for_desk {
             self.desk_mouse = Some((w, imgs));
             self.show_desk_mouse();
+            self.desk_light_up();
             return;
         }
         self.ui.set_mouse_picture(imgs.base.clone());
         self.ui.set_mouse_pic_m(imgs.layers.margin as f32 / scale);
+        // (its lights in HDR, as the core says they are made)
+        let units_mm = self.mouse.state["device"]["scale"].as_f64().map_or(520.0 / 125.1, |v| v as f32);
+        self.mouse_px_mm = crate::mouse_art::px_mm(w, units_mm);
+        self.mouse_hdr = Some((scale, crate::mouse_art::Hdr::new(&imgs.layers, &self.mouse_light_model(), self.mouse_px_mm)));
+        self.mouse_lit = None;
         // (in the drawing's order: see mouse_art::GROUPS)
         self.ui.set_mouse_logo_under(imgs.lights[0].clone());
         self.ui.set_mouse_wheel_under(imgs.lights[1].clone());
@@ -3948,11 +3990,13 @@ impl Front {
     fn show_mouse_picked(&mut self) {
         let chosen = self.mouse.button.filter(|_| self.mouse.tab == 0).map(|b| b as u8 + 1);
         let hover = self.mouse_hover.filter(|h| self.mouse.tab == 0 && Some(*h) != chosen);
-        let Some((_, imgs)) = &self.mouse_layers else { return };
-        if self.mouse_shows == (chosen, hover) {
+        if self.mouse_layers.is_none() || self.mouse_shows == (chosen, hover) {
             return;
         }
         self.mouse_shows = (chosen, hover);
+        // (the HDR picture with them picked out)
+        self.mouse_light_up();
+        let imgs = &self.mouse_layers.as_ref().unwrap().1;
         if let Some(p) = chosen.and_then(|n| imgs.chosen.get(n as usize - 1)) {
             self.ui.set_mouse_picked(p.clone());
         }
@@ -3964,7 +4008,11 @@ impl Front {
     }
 
     /// Each light on the picture in its color of the moment, as the mouse shows it.
-    fn show_mouse_lights(&self) {
+    fn show_mouse_lights(&mut self) {
+        self.mouse_light_up();
+        if self.ui.get_place() == "home" {
+            self.desk_light_up();
+        }
         let now = Instant::now();
         for i in 0..2 {
             let (c, k) = crate::mouse_art::level(self.mouse.color_at(i, now));
@@ -3975,6 +4023,169 @@ impl Front {
                 self.ui.set_mouse_wheel_tint(tint);
             }
         }
+    }
+
+    /// The mouse's picture drawn for the window's scale now, if it isn't (here,
+    /// with no thread to draw it on: a snapshot).
+    pub fn ready_mouse_picture(&mut self) {
+        self.mouse_draw();
+    }
+
+    /// The mouse's picture drawn for its size on Home's desk now, settled or
+    /// not, as the window draws it once the desk settles (a snapshot has no
+    /// moment to wait for that).
+    pub fn ready_desk_mouse(&mut self) {
+        let Some(i) = self.desk.items.iter().position(|it| it.id == "mouse") else { return };
+        self.mouse_draw();
+        let w = ((self.desk.screen(i)[2] * self.scale / 4.0).round() * 4.0).clamp(32.0, 1600.0) as u32;
+        if w != (240.0 * self.scale).round() as u32 && self.desk_mouse.as_ref().is_none_or(|(dw, _)| *dw != w) {
+            self.desk_mouse_drawing = Some(w);
+            self.mouse_draw_at(w);
+        }
+    }
+
+    /// How the mouse's lights are made: as the Key lab tunes them, or as its
+    /// core's light file has them.
+    pub fn mouse_light_model(&self) -> serde_json::Value {
+        self.mouse_light.clone().unwrap_or_else(|| crate::mouse::light_model(&self.mouse.state["device"]))
+    }
+
+    /// The mouse lit as the Key lab tunes it: its lamps made again for that.
+    pub fn set_mouse_light(&mut self, light: serde_json::Value) {
+        self.mouse_light = Some(light);
+        if let Some((scale, imgs)) = &self.mouse_layers {
+            self.mouse_hdr = Some((*scale, crate::mouse_art::Hdr::new(&imgs.layers, &self.mouse_light_model(), self.mouse_px_mm)));
+        }
+        self.desk_mouse_hdr = None;
+        self.mouse_light_up();
+    }
+
+    /// The layers Home's desk shows the mouse in: those drawn for its size
+    /// there, or the page's while those aren't drawn; and their width.
+    fn desk_layers(&self) -> Option<(u32, &crate::mouse_art::Layers)> {
+        match (&self.desk_mouse, &self.mouse_layers) {
+            (Some((w, imgs)), _) => Some((*w, &imgs.layers)),
+            (None, Some((scale, imgs))) => Some(((240.0 * scale).round() as u32, &imgs.layers)),
+            _ => None,
+        }
+    }
+
+    /// The mouse lit in HDR for Home's desk, as it shows now: dark and half
+    /// shown while it isn't plugged in.
+    fn desk_light_up(&mut self) {
+        let Some(item) = self.desk.items.iter().find(|it| it.id == "mouse") else { return };
+        let on = item.connected;
+        let (white, ceiling) = (self.levels.0 as f32, self.light_gain(self.levels.0));
+        let now = Instant::now();
+        let colors = [0, 1].map(|i| self.mouse.lit(crate::mouse::LIGHTS[i]).filter(|_| on).map(|_| self.mouse.color_at(i, now)));
+        let light = self.mouse_light_model();
+        let units_mm = self.mouse.state["device"]["scale"].as_f64().map_or(520.0 / 125.1, |v| v as f32);
+        let Some((w, layers)) = self.desk_layers() else { return };
+        if self.desk_mouse_hdr.as_ref().is_none_or(|(hw, _)| *hw != w) {
+            self.desk_mouse_hdr = Some((w, crate::mouse_art::Hdr::new(layers, &light, crate::mouse_art::px_mm(w, units_mm))));
+        }
+        // (the same layers, borrowed field by field beside the lamps)
+        let layers = match (&self.desk_mouse, &self.mouse_layers) {
+            (Some((_, imgs)), _) | (None, Some((_, imgs))) => &imgs.layers,
+            _ => return,
+        };
+        let Some((_, hdr)) = self.desk_mouse_hdr.as_mut() else { return };
+        let lit = hdr.on_ground(layers, colors, if on { 1.0 } else { 0.5 }, white, ceiling);
+        self.desk_mouse_lit = Some(Rc::new(lit));
+    }
+
+    /// Each of the mouse's lights at its brightest now, in nits: its window
+    /// over its LED in the light's color of the moment, no brighter than the
+    /// screen shows (Peak nits); 0 for a light that's off.
+    pub fn mouse_brightest(&self) -> [f64; 2] {
+        let Some((_, hdr)) = &self.mouse_hdr else { return [0.0; 2] };
+        let now = Instant::now();
+        let most = self.light_gain(self.levels.0) as f64 * self.levels.0;
+        std::array::from_fn(|i| {
+            let Some(c) = self.mouse.lit(crate::mouse::LIGHTS[i]).map(|_| self.mouse.color_at(i, now)) else { return 0.0 };
+            let lin = |v: u8| (v as f64 / 255.0).powf(2.2);
+            let y = 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
+            hdr.lamps.get(i).map_or(0.0, |l| (l.peak() as f64 * y).min(most))
+        })
+    }
+
+    /// The mouse's lights as the Key lab chooses them, one at a time: each
+    /// where its window is on the drawing, by its id and name. None before
+    /// the mouse's picture is drawn.
+    pub fn mouse_lab_parts(&self) -> Option<Vec<ectodeck_draw::hdr::CapShape>> {
+        let (scale, imgs) = self.mouse_layers.as_ref()?;
+        let boxes = crate::mouse_art::light_boxes(&imgs.layers, (240.0 * scale).round() as u32);
+        let names = self.mouse.state["device"]["capabilities"]["lighting"]["lights"].as_array().cloned().unwrap_or_default();
+        Some(
+            crate::mouse_art::LIGHT_IDS
+                .iter()
+                .zip(boxes)
+                .map(|(id, b)| {
+                    let label = names.iter().find(|l| l["id"] == *id).and_then(|l| l["label"].as_str().map(String::from)).unwrap_or_else(|| id.to_string());
+                    ectodeck_draw::hdr::CapShape { id: id.to_string(), label, short: None, foot: b, lit: true, legend: false, button: false, face: b, print: None, bump: Default::default() }
+                })
+                .collect(),
+        )
+    }
+
+    /// The mouse lit in HDR for its page's hole, as it shows now: its chosen
+    /// and hovered buttons, its lights in their colors of the moment, as
+    /// bright as their LEDs make them, up to Peak nits.
+    fn mouse_light_up(&mut self) {
+        let (white, ceiling) = (self.levels.0 as f32, self.light_gain(self.levels.0));
+        let now = Instant::now();
+        let colors = [0, 1].map(|i| self.mouse.lit(crate::mouse::LIGHTS[i]).map(|_| self.mouse.color_at(i, now)));
+        let Some((scale, imgs)) = &self.mouse_layers else { return };
+        let Some((_, hdr)) = self.mouse_hdr.as_mut().filter(|(s, _)| s == scale) else { return };
+        let part = mouse_part(&self.ui, *scale, &imgs.layers);
+        let lit = hdr.picture(&imgs.layers, [0x1b, 0x1b, 0x1f], self.mouse_shows.0, self.mouse_shows.1, colors, white, ceiling, part);
+        self.mouse_lit = Some(Rc::new(lit));
+        self.mouse_part = part;
+        self.ui.set_mouse_hdr_ready(true);
+    }
+
+    /// Where the mouse goes in the window, in its pixels (`s` to a logical
+    /// pixel), and its picture there: on its page, in the stage's hole, while
+    /// the page shows its picture; nothing otherwise. Drawn again first if
+    /// the hole shows another part of it now (the window's width changed).
+    pub fn mouse_shown(&mut self, s: f32) -> ((i32, i32, usize, usize), Option<Rc<crate::picture::Lit>>) {
+        let none = ((0, 0, 0, 0), None);
+        // on Home's desk: where the desk has it, with its shadow round it
+        if self.ui.get_place() == "home" {
+            let Some(i) = self.desk.items.iter().position(|it| it.id == "mouse") else { return none };
+            if self.desk_mouse_lit.is_none() {
+                self.desk_light_up();
+            }
+            let Some((dw, layers)) = self.desk_layers() else { return none };
+            let [x, y, w, h] = self.desk.screen(i);
+            // (its margin at the size it shows: as drawn, scaled as the desk shows it)
+            let k = w / (dw as f32 / self.scale);
+            let m = layers.margin as f32 / self.scale * k;
+            let (px, py) = (((self.ui.get_desk_x() + x - m) * s).round() as i32, ((self.ui.get_desk_y() + y - m) * s).round() as i32);
+            let (pw, ph) = (((w + 2.0 * m) * s).round() as usize, ((h + 2.0 * m) * s).round() as usize);
+            let lit = self.desk_mouse_lit.clone();
+            // (drawn for its size there, as it is: no stretching a pixel or two)
+            let (pw, ph) = match &lit {
+                Some(l) if l.w.abs_diff(pw) <= 4 && l.h.abs_diff(ph) <= 4 && dw == ((w * self.scale / 4.0).round() * 4.0) as u32 => (l.w, l.h),
+                _ => (pw, ph),
+            };
+            return ((px, py, pw, ph), lit);
+        }
+        if !self.ui.get_mouse_hole_shown() {
+            return none;
+        }
+        let Some((scale, imgs)) = &self.mouse_layers else { return none };
+        if (*scale - s).abs() > 1e-3 {
+            // (drawn for another scale: the stage's shade fills the hole till this one's is)
+            self.ui.set_mouse_hdr_ready(false);
+            return none;
+        }
+        let part = mouse_part(&self.ui, *scale, &imgs.layers);
+        if part != self.mouse_part || self.mouse_lit.is_none() {
+            self.mouse_light_up();
+        }
+        let (px, py) = ((self.ui.get_mouse_pic_wx() * s).round() as i32, (self.ui.get_mouse_pic_wy() * s).round() as i32);
+        ((px + part.0 as i32, py + part.1 as i32, part.2, part.3), self.mouse_lit.clone())
     }
 
     /// The lights' effects played on the picture, 30 frames a second, while

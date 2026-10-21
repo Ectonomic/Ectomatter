@@ -960,6 +960,17 @@ impl Page {
 /// The mouse's effects by name, before the core has described them.
 pub const EFFECTS: [(&str, &str); 4] = [("off", "Off"), ("static", "Static"), ("breathing", "Breathing"), ("colorshift", "Color shift")];
 
+/// How the mouse's lights are made, as its core's light says (see
+/// ectodeck_draw's lamp): the file in the core's folder its description
+/// names, or the light the description carries itself; nothing, for a core
+/// that says nothing of it.
+pub fn light_model(desc: &Value) -> Value {
+    match &desc["light"] {
+        Value::String(file) => std::fs::read_to_string(crate::cores::dir().join("steelseries").join(file)).ok().and_then(|t| ectodeck_draw::jsonc::parse(&t).ok()).unwrap_or(Value::Null),
+        v => v.clone(),
+    }
+}
+
 /// The tile an effect's picture borrows from the keyboard's effects, and how
 /// it moves (1 a breath, 3 a wave); an effect the app has no picture for
 /// shows Static's.

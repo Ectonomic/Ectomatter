@@ -112,7 +112,9 @@ const COL: f64 = 20.0;
 const GAP: f64 = 28.0;
 const MARGIN: f64 = 24.0;
 
-/// Which part of the key a section shows: LED, Keycaps, Legends, Wells, Display.
+/// Which part of the key a section shows: LED, Keycaps, Legends, Wells,
+/// Display; or, for a device whose lights are windows of their own (a
+/// mouse's logo), a window and its LED.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Lens {
     Led,
@@ -120,11 +122,12 @@ pub enum Lens {
     Legends,
     Wells,
     Display,
+    Window,
 }
 
 impl Lens {
     pub fn of(section: usize) -> Lens {
-        [Lens::Led, Lens::Caps, Lens::Legends, Lens::Wells, Lens::Display][section.min(4)]
+        [Lens::Led, Lens::Caps, Lens::Legends, Lens::Wells, Lens::Display, Lens::Window][section.min(5)]
     }
 }
 
@@ -216,6 +219,8 @@ pub struct Values {
     colors: [[u8; 3]; 2],
     /// the homing bump on the key drawn
     pub bump: ectodeck_draw::hdr::Bump,
+    /// a window's light, for a device whose lights are windows of their own
+    win: ectodeck_draw::hdr::lamp::Make,
 }
 
 /// A value as the light has it, or what the keyboard takes when it has none.
@@ -267,6 +272,7 @@ impl Values {
             solid: false,
             colors: super::cap_colors(light),
             bump: ectodeck_draw::hdr::Bump::None,
+            win: ectodeck_draw::hdr::lamp::Make::of(light, ""),
         }
     }
 
@@ -1045,6 +1051,83 @@ fn display(v: &Values, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, Vec<Label>
     (s, labels)
 }
 
+/// A window of diffusing plastic in the shell, cut north to south through
+/// its middle, `pw` by `ph`: the shell, the window in it, its face as bright
+/// along it as the LED's light falls on its back, the LED under it at its
+/// depth (moved north or south as it sits), the light fanning up from it to
+/// the window, the halo on the shell beside the window's edges, and each
+/// slider's place.
+fn window(v: &Values, pw: f64, ph: f64, hot: Option<usize>) -> (Svg, Vec<Label>) {
+    let mut s = Svg::new();
+    let m = v.win;
+    // a window 16 mm across, the LED as deep as 20 mm under it at most
+    let across = 16.0;
+    let k = ((pw - 2.0 * MARGIN) * 0.55 / across).min((ph - 150.0) / 24.0).max(2.0);
+    let (cx, face) = (pw / 2.0, 70.0);
+    let shell = 2.2 * k;
+    let (wx0, wx1) = (cx - across / 2.0 * k, cx + across / 2.0 * k);
+    // the shell, its top the window's face, on either side of the window
+    let (sx0, sx1) = (MARGIN, pw - MARGIN);
+    s.fill(&poly(&[(sx0, face), (wx0, face), (wx0, face + shell), (sx0, face + shell)], true), "#2a2a30");
+    s.fill(&poly(&[(wx1, face), (sx1, face), (sx1, face + shell), (wx1, face + shell)], true), "#2a2a30");
+    // the LED, as deep as it sits and as far north (to the left) or south
+    let depth = m.depth.clamp(0.2, 20.0) as f64;
+    let lx = (cx - m.north as f64 * k).clamp(wx0 - 4.0 * k, wx1 + 4.0 * k);
+    let ly = face + depth * k;
+    // the face as bright along it as the light falls on its back
+    let fall = |x: f64| {
+        let r = (x - lx).abs() / k;
+        (depth * depth / (depth * depth + r * r)).powf(1.5)
+    };
+    // (a window letting half of it through or more drawn at its brightest)
+    let shine = (m.through as f64 * 2.0).clamp(0.0, 1.0);
+    let stops: Vec<(f64, &str, f64)> = (0..=10)
+        .map(|i| {
+            let t = i as f64 / 10.0;
+            (t, AMBER, 0.15 + 0.85 * fall(wx0 + (wx1 - wx0) * t) * shine)
+        })
+        .collect();
+    let g = s.linear(wx0, face, wx1, face, &stops);
+    s.fill(&poly(&[(wx0, face), (wx1, face), (wx1, face + shell), (wx0, face + shell)], true), &g);
+    s.stroke(&poly(&[(wx0, face), (wx1, face)], false), "#f0b35a", 1.0);
+    // the halo on the shell's top beside each edge, fading over its reach
+    let reach = (m.reach.clamp(0.2, 10.0) as f64) * k;
+    let halo = (m.halo.clamp(0.0, 0.5) as f64 * 4.0).min(1.0);
+    for (from, to) in [(wx0, wx0 - 2.5 * reach), (wx1, wx1 + 2.5 * reach)] {
+        let g = s.linear(from, face, to, face, &[(0.0, AMBER, 0.75 * halo), (0.4, AMBER, 0.3 * halo), (1.0, AMBER, 0.0)]);
+        let (a, b) = (from.min(to), from.max(to));
+        s.fill(&poly(&[(a, face - 3.0), (b, face - 3.0), (b, face), (a, face)], true), &g);
+    }
+    // the light fanning up from the LED to the window's back
+    let back = face + shell;
+    for i in 0..=6 {
+        let x = wx0 + (wx1 - wx0) * i as f64 / 6.0;
+        ray(&mut s, &[(lx, ly - 5.0), (x, back + 2.0)], fall(x) * 0.6, 1.0, false);
+    }
+    // the LED
+    s.fill(&rounded(lx - 9.0, ly - 5.0, lx + 9.0, ly + 5.0, 2.0), "#e9e9ee");
+    // its depth, measured beside the window
+    let mx = wx1 + 3.0 * k;
+    let c = if hot.is_some_and(|i| PARAMS[i].path == ("window", "depth")) { WHITE } else { DIMENSION };
+    s.mark(&poly(&[(mx, face), (mx, ly)], false), c);
+    for y in [face, ly] {
+        s.mark(&poly(&[(mx - 4.0, y), (mx + 4.0, y)], false), c);
+    }
+    s.text(mx + 8.0, (face + ly) / 2.0 + 4.0, &format!("{depth:.1} mm"), QUIET_WORD, 0.0);
+    s.text(cx, face - 14.0, "Window", QUIET_WORD, 0.5);
+    s.text(lx, ly + 22.0, "LED", QUIET_WORD, 0.5);
+    let labels = vec![
+        Label::of(true, (lx - 9.0, ly), ("window", "lumens")),
+        Label::of(true, (lx, ly + 5.0), ("window", "east")),
+        Label::of(true, (mx, (face + ly) / 2.0), ("window", "depth")),
+        Label { flat: true, ..Label::of(false, ((wx0 + wx1) / 2.0 + 2.0 * k, face), ("window", "through")) },
+        Label { flat: true, ..Label::of(false, (wx1 + reach * 0.5, face - 1.5), ("window", "halo")) },
+        Label { flat: true, ..Label::of(false, (wx1 + reach * 2.2, face - 1.5), ("window", "reach")) },
+        Label::of(false, (lx + 9.0, ly), ("window", "north")),
+    ];
+    (s, labels)
+}
+
 // ---------------------------------------------------------------- the stage
 
 /// The panel the drawing is in, on a stage `w` by `h`: x, y, width, height.
@@ -1058,6 +1141,10 @@ fn drawn(v: &Values, lens: Lens, w: f64, h: f64, hot: Option<usize>, set: Option
     let (mut s, mut labels, frame) = match lens {
         Lens::Display => {
             let (s, l) = display(v, pw, ph, hot);
+            (s, l, None)
+        }
+        Lens::Window => {
+            let (s, l) = window(v, pw, ph, hot);
             (s, l, None)
         }
         Lens::Legends => {
