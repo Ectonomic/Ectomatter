@@ -1337,6 +1337,15 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
         window.request_redraw();
         draw(&mut px);
     }
+    // ECTODECK_NATIVE_ESCAPE=N: Escape pressed N times after the clicks, as the window takes it
+    for _ in 0..std::env::var("ECTODECK_NATIVE_ESCAPE").ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or(0) {
+        if !lab.typing() {
+            lab.escape();
+        }
+        lab.act();
+        window.request_redraw();
+        draw(&mut px);
+    }
     // ECTODECK_NATIVE_TYPE: keys typed into whatever has focus; a newline is
     // Return, a backspace (\u{8}) Backspace
     for ch in std::env::var("ECTODECK_NATIVE_TYPE").unwrap_or_default().chars() {
@@ -2979,6 +2988,15 @@ impl App {
             if let Some(lab) = self.front.lab.as_mut().filter(|l| !l.typing()) {
                 lab.undo(self.mods.shift || matches!(e.keysym, Keysym::y | Keysym::Y));
                 return;
+            }
+        }
+        // Escape in the lab shuts what is open over its page, then lets its
+        // chosen key or light go, unless a box is being typed in
+        if self.keys_on == Some(LAB) && down && e.keysym == Keysym::Escape {
+            if let Some(lab) = self.front.lab.as_mut().filter(|l| !l.typing()) {
+                if lab.escape() {
+                    return;
+                }
             }
         }
         // Ctrl+Z and Ctrl+Shift+Z (or Ctrl+Y) in the main window: undo a change to a profile,

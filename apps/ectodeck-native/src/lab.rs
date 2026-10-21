@@ -67,9 +67,10 @@ pub enum Ask {
     Focus(i32, bool),
     /// the pointer has rested where it is
     Rest,
-    /// the keys the page tunes: all of them (0), or one, whose map it opens (1)
+    /// the keys the page tunes: all of them (0), or one, whose map or list it
+    /// opens (1); a click on the list between its rows (2)
     Scope(i32),
-    /// a key chosen on the map, by its place among the caps
+    /// a key chosen on the map, or a light on the list, by its place among the caps
     Key(i32),
     /// a value of the chosen key's own given back, a slider's or a choice's:
     /// the key takes all keys' again
@@ -507,14 +508,12 @@ const SIM_ABOUT: &str = "The light straight from each LED is worked out exactly 
 const READING: i32 = 100;
 const CHOICE: i32 = 800;
 const TABS: i32 = 900;
-/// the keys tuned (all or one), a key on the map, a value's mark that it is
-/// the key's own, and the switch pad
+/// the keys tuned (all or one), a key on the map or a light on the list, a
+/// value's mark that it is the key's own, and the switch pad
 const SCOPE: i32 = 940;
 const MAP: i32 = 950;
-/// At most this many parts are named in the head, each a choice of its own,
-/// as a mouse's lights are; with more (a keyboard's keys), one button opens
-/// the map to choose one
-const NAMED: usize = 4;
+/// a light's row on the lights' list
+const PART_ROW: f32 = 36.0;
 const OWN: i32 = 960;
 const PAD: i32 = 970;
 /// a slider's reset: this, plus its slider's id
@@ -763,9 +762,12 @@ pub struct LabPage {
     rows: Rc<VecModel<LabRow>>,
     foot: Rc<VecModel<Cell>>,
     /// the cap whose own setup the page shows, if one is chosen (its place
-    /// among the device's caps), and whether the map to choose one is open
+    /// among the device's caps), whether the map or list to choose one is
+    /// open, and the first light the list shows (it turns, for a device
+    /// with more lights than it has room for)
     scope: Option<usize>,
     picking: bool,
+    part_first: usize,
     /// the switch pad as last drawn, where it has the key, and what it was drawn from
     pad: Option<(drawing::Stage, drawing::PadMap, slint::Image)>,
     pad_of: Option<(Value, usize, bool, f32)>,
@@ -1170,6 +1172,7 @@ impl LabPage {
             foot,
             scope: None,
             picking: false,
+            part_first: 0,
             pad: None,
             pad_of: None,
             // (the typefaces and their weights, for the Weight choice from the start)
@@ -1604,6 +1607,12 @@ impl LabPage {
                     }
                     self.faces_open = false;
                 }
+                // (the lights' list turns where it is open; the typefaces' list otherwise)
+                Ask::FacesScroll(dy) if self.listing() => {
+                    let most = self.device.caps.len().saturating_sub(self.part_rows());
+                    let by = (dy / PART_ROW).round() as i64;
+                    self.part_first = (self.part_first as i64 - by).clamp(0, most as i64) as usize;
+                }
                 Ask::FacesScroll(dy) => {
                     let most = self.face_list().len().saturating_sub(1 + self.face_rows());
                     let by = (dy / 34.0).round() as i64;
@@ -1613,9 +1622,22 @@ impl LabPage {
                     self.scope = None;
                     self.picking = false;
                 }
-                Ask::Scope(_) => self.picking = !self.picking,
-                // (a part named in the head, selected again, lets go: back to all of them)
-                Ask::Key(i) if self.named() && self.scope == Some(i.max(0) as usize) => self.scope = None,
+                // (a click on the lights' list between its rows stays on it)
+                Ask::Scope(2) => {}
+                Ask::Scope(_) => {
+                    self.picking = !self.picking;
+                    // (the list opened with the chosen light in view)
+                    if self.listing() {
+                        let rows = self.part_rows();
+                        let most = self.device.caps.len().saturating_sub(rows);
+                        self.part_first = self.scope.map_or(0, |i| i.saturating_sub(rows / 2)).min(most);
+                    }
+                }
+                // (the chosen key or light chosen again lets go: back to all of them)
+                Ask::Key(i) if self.scope == Some(i.max(0) as usize) => {
+                    self.scope = None;
+                    self.picking = false;
+                }
                 Ask::Key(i) => {
                     if let Some(lit) = self.device.caps.get(i.max(0) as usize).map(|(c, _)| c.lit) {
                         self.scope = Some(i as usize);
@@ -1781,10 +1803,59 @@ impl LabPage {
         self.scope.and_then(|i| self.device.caps.get(i)).map(|(c, _)| c)
     }
 
-    /// Whether the parts are few enough to be named in the head, each a choice
-    /// of its own, rather than chosen on the map.
-    fn named(&self) -> bool {
-        self.device.caps.len() <= NAMED
+    /// Whether the map is open: a keyboard's keys, where the art has them,
+    /// over the page.
+    fn mapping(&self) -> bool {
+        self.picking && !self.device.windows
+    }
+
+    /// Whether the lights' list is open: a device's lights by name, under
+    /// their button, as long as its core makes it (a mouse may have a dozen).
+    fn listing(&self) -> bool {
+        self.picking && self.device.windows
+    }
+
+    /// The lights' list, under its button (its left edge at `x`): where it
+    /// is and how wide, how many rows it shows (all of them, or as many as
+    /// the window has room for, turned by the wheel), and its note's lines.
+    fn part_box(&self, x: f32) -> (f32, f32, f32, usize, Vec<String>) {
+        let (w, h, _, _) = self.sizes();
+        let widest = self.device.caps.iter().map(|(c, _)| text::width(400, 13.5, &c.label)).fold(0.0, f32::max);
+        let mw = (widest + 76.0).clamp(260.0, 380.0);
+        let (mx, my) = (x.min(w - 24.0 - mw), 59.0);
+        let note = format!("Changes you make to a chosen {0} are for it alone. A dot marks a {0} with its own setup.", self.parts().1);
+        let lines = wrap_after(&note, mw - 40.0, mw - 40.0);
+        // (the page above the foot, less the list's padding, its rule and its note)
+        let room = h - 36.0 - 64.0 - 16.0 - my - 36.0 - 18.0 * lines.len() as f32;
+        let rows = ((room / PART_ROW).floor().max(1.0) as usize).min(self.device.caps.len());
+        (mx, my, mw, rows, lines)
+    }
+
+    /// How many lights the list has room to show at once.
+    fn part_rows(&self) -> usize {
+        self.part_box(0.0).3
+    }
+
+    /// Escape: shuts what is open over the page (the lights' list or the
+    /// keys' map, the color picker, the setups' menu, the typefaces' list);
+    /// with nothing open, lets the chosen key or light go, back to all of
+    /// them. Whether it did anything.
+    pub fn escape(&mut self) -> bool {
+        if self.picking {
+            self.picking = false;
+        } else if self.pick.is_some() {
+            self.close_pick();
+        } else if matches!(self.menu, Menu::Open | Menu::Delete) {
+            self.menu = Menu::Shut;
+        } else if self.faces_open {
+            self.faces_open = false;
+        } else if self.scope.is_some() {
+            self.scope = None;
+        } else {
+            return false;
+        }
+        self.refresh();
+        true
     }
 
     /// What the parts the page tunes one at a time are called: a keyboard's
@@ -2223,7 +2294,7 @@ impl LabPage {
     /// legend: under the section's choices, each as tall as its lines. None
     /// for all keys, or while the typefaces' list or the keys' map covers them.
     fn text_boxes(&self) -> Vec<(f32, f32, f32, f32)> {
-        if self.section != LEGENDS || self.picking || self.faces_open || !self.key().is_some_and(|k| k.print.is_some()) {
+        if self.section != LEGENDS || self.mapping() || self.faces_open || !self.key().is_some_and(|k| k.print.is_some()) {
             return Vec::new();
         }
         let (_, _, sw, _) = self.sizes();
@@ -2690,12 +2761,68 @@ impl LabPage {
         top
     }
 
+    /// The lights' list, open under its button (from `x`), as the setups'
+    /// menu opens under its own: each light by its name, the chosen one lit,
+    /// those with a setup of their own marked by a dot, and what choosing one
+    /// does. Where a device has more lights than the window has room for, the
+    /// wheel turns the list, a bar at its side showing how far.
+    fn part_list(&self, x: f32, w: f32) -> Vec<Cell> {
+        let mut top = Vec::new();
+        if !self.listing() {
+            return top;
+        }
+        let (_, h, _, _) = self.sizes();
+        let color = |c: [u8; 3]| slint::Color::from_rgb_u8(c[0], c[1], c[2]);
+        let (quiet, dim, bright) = ([0x9a, 0x9a, 0x9a], [0xd4, 0xd4, 0xd4], [0xf5, 0xf5, 0xf5]);
+        let (mx, my, mw, rows, lines) = self.part_box(x);
+        // anywhere else on the page shuts it
+        top.push(Cell { id: SCOPE, index: 1, style: 29, ..cell(kind::LINK, 0.0, 0.0, w, h - 36.0 - 64.0) });
+        let mut items = Vec::new();
+        let mut y = 8.0;
+        for (i, (c, _)) in self.device.caps.iter().enumerate().skip(self.part_first).take(rows) {
+            let chosen = self.scope == Some(i);
+            if chosen {
+                items.push(Cell { style: 30, ..cell(kind::TILE, mx + 8.0, my + y, mw - 16.0, PART_ROW) });
+            }
+            let name = elide(&c.label, mw - 76.0, 400, 13.5);
+            let nw = text::width(400, 13.5, &name) + 2.0;
+            items.push(Cell { color: color(if chosen { bright } else { dim }), ..text_cell(style::WORDS_IN, mx + 20.0, my + y + 8.0, nw, 20.0, &name) });
+            if self.light["keys"][c.id.as_str()].is_object() {
+                items.push(Cell { style: 3, ..cell(kind::DOT, mx + 20.0 + nw + 8.0, my + y + 15.0, 6.0, 6.0) });
+            }
+            items.push(Cell { id: MAP, index: i as i32, ..cell(kind::LINK, mx + 8.0, my + y, mw - 16.0, PART_ROW) });
+            y += PART_ROW;
+        }
+        // (the bar beside the rows, where there are more than show)
+        let all = self.device.caps.len();
+        if rows < all {
+            let track = rows as f32 * PART_ROW;
+            let (bar_h, bar_y) = (track * rows as f32 / all as f32, track * self.part_first as f32 / all as f32);
+            items.push(Cell { color: color([0x5a, 0x5a, 0x5a]), ..cell(kind::BOX, mx + mw - 7.0, my + 8.0 + bar_y, 3.0, bar_h.max(12.0)) });
+        }
+        y += 6.0;
+        items.push(Cell { color: color([0x3a, 0x3a, 0x3a]), ..cell(kind::BOX, mx + 8.0, my + y, mw - 16.0, 1.0) });
+        y += 10.0;
+        for line in &lines {
+            items.push(Cell { color: color(quiet), ..text_cell(style::NOTE_IN, mx + 20.0, my + y, mw - 40.0, 18.0, line) });
+            y += 18.0;
+        }
+        y += 12.0;
+        top.push(Cell { style: 27, ..cell(kind::TILE, mx, my, mw, y) });
+        // (a click on the list between its rows stays on it)
+        top.push(Cell { id: SCOPE, index: 2, style: 29, ..cell(kind::LINK, mx, my, mw, y) });
+        top.extend(items);
+        top
+    }
+
     // ------------------------------------------------------------ the page
 
     pub fn refresh(&mut self) {
         self.draw_stage();
         let (cells, (sketches, over, rows), foot, mut top) = self.layout();
         let (w, _, _, _) = self.sizes();
+        // (where the lights' list hangs: under the button that opens it)
+        let one_x = cells.iter().find(|c| c.id == SCOPE && c.index == 1).map_or(0.0, |c| c.x);
         top.extend(self.glyph_cells(w));
         // anywhere off the open picker shuts it
         if self.pick.is_some() {
@@ -2727,8 +2854,13 @@ impl LabPage {
         } else {
             self.rows.set_vec(rows);
         }
-        // where the typefaces' list turns with the wheel (nowhere while it is shut)
+        // where a list turns with the wheel: the lights' list's rows, or the
+        // typefaces' list (nowhere while both are shut)
         let (lx, ly, lw, lh) = match (&self.face_sketch, self.faces_open && self.section == LEGENDS) {
+            _ if self.listing() => {
+                let (mx, my, mw, rows, _) = self.part_box(one_x);
+                (mx, my + 8.0, mw, rows as f32 * PART_ROW)
+            }
             (Some((_, st, _)), true) => {
                 let (fx, fy, _, _) = self.face_box();
                 (fx, fy, st.w, st.h)
@@ -3057,20 +3189,14 @@ impl LabPage {
         }
         let tabs_w = bx - 2.0 + 6.0;
         let tx = w - 24.0 - tabs_w;
-        // the keys tuned, before the sections: all of them, or one. A few parts are
-        // each named there; more have one button, which opens the map to choose one
+        // the keys tuned, before the sections: all of them, or one, whose button
+        // opens what chooses it: a keyboard's keys on the map, a device's lights
+        // on a list of their names
         let (many, single) = self.parts();
-        let all_words = format!("All {many}");
-        let aw = text::width(400, 13.0, &all_words) + 24.0;
-        let named = self.named();
-        let ones: Vec<(String, f32)> = if named {
-            self.device.caps.iter().map(|(c, _)| (c.label.clone(), text::width(400, 13.0, &c.label) + 24.0)).collect()
-        } else {
-            let one = self.key().map_or_else(|| format!("One {single}"), |k| k.label.clone());
-            let kw = text::width(400, 13.0, &one) + 24.0 + 16.0;
-            vec![(one, kw)]
-        };
-        let scope_w = aw + ones.iter().map(|(_, ow)| 2.0 + ow).sum::<f32>() + 6.0;
+        let (all_words, one_words) = (format!("All {many}"), format!("One {single}"));
+        let one = elide(&self.key().map_or_else(|| one_words.clone(), |k| k.label.clone()), SETUP_W, 400, 13.0);
+        let (aw, kw) = (text::width(400, 13.0, &all_words) + 24.0, text::width(400, 13.0, &one) + 24.0 + 16.0);
+        let scope_w = aw + 2.0 + kw + 6.0;
         let qx = tx - 12.0 - scope_w;
         // the light setup tuned, before the keys: the core's, or one of the
         // person's own, which opens the menu of them
@@ -3087,19 +3213,8 @@ impl LabPage {
         cells.push(Cell { text: setup.into(), on: self.menu != Menu::Shut, id: SETUP, index: 0, style: 24, ..cell(kind::SEG_BUTTON, ux + 3.0, 20.0, uw, 30.0) });
         cells.push(cell(kind::SEG, qx, 17.0, scope_w, 36.0));
         cells.push(Cell { text: all_words.as_str().into(), on: self.scope.is_none() && !self.picking, id: SCOPE, index: 0, ..cell(kind::SEG_BUTTON, qx + 3.0, 20.0, aw, 30.0) });
-        let mut ox = qx + 3.0 + aw + 2.0;
-        for (i, (one, ow)) in ones.into_iter().enumerate() {
-            if named {
-                cells.push(Cell { text: one.into(), on: self.scope == Some(i), id: MAP, index: i as i32, ..cell(kind::SEG_BUTTON, ox, 20.0, ow, 30.0) });
-                // (one with a setup of its own marked, as the map marks it)
-                if self.light["keys"][self.device.caps[i].0.id.as_str()].is_object() {
-                    cells.push(Cell { style: 3, ..cell(kind::DOT, ox + ow - 10.0, 24.5, 6.0, 6.0) });
-                }
-            } else {
-                cells.push(Cell { text: one.into(), on: self.scope.is_some() || self.picking, id: SCOPE, index: 1, style: 24, ..cell(kind::SEG_BUTTON, ox, 20.0, ow, 30.0) });
-            }
-            ox += ow + 2.0;
-        }
+        let one_x = qx + 3.0 + aw + 2.0;
+        cells.push(Cell { text: one.into(), on: self.scope.is_some() || self.picking, id: SCOPE, index: 1, style: 24, ..cell(kind::SEG_BUTTON, one_x, 20.0, kw, 30.0) });
         cells.push(cell(kind::SEG, tx, 17.0, tabs_w, 36.0));
         for (i, title, x, bw) in tabs {
             // (for one key, the sections that are every key's are not to be chosen)
@@ -3192,7 +3307,7 @@ impl LabPage {
         // which part of the legend the sliders act on, at the top of the right
         // column over them: the whole legend, or one of the parts the drawn
         // key's legend has
-        if self.section == LEGENDS && !self.picking && !self.choices().is_empty() {
+        if self.section == LEGENDS && !self.mapping() && !self.choices().is_empty() {
             let (rx, y) = (sx + drawing::column_x(false, sw), sy + drawing::choice_y(0));
             over.push(Cell { id: PART, ..cell(kind::ZONE, rx - 10.0, y - 7.0, drawing::CTRL_W + 20.0, drawing::CHOICE_H) });
             over.push(text_cell(style::LABEL, rx, y, drawing::CTRL_W, 26.0, "Adjust"));
@@ -3209,14 +3324,14 @@ impl LabPage {
             }
         }
         // the legend to drag anywhere on the drawing's key's top
-        if let (LEGENDS, false, false, Some((st, _)), Some(set)) = (self.section, self.picking, self.faces_open, &self.drawn, self.legends()) {
+        if let (LEGENDS, false, false, Some((st, _)), Some(set)) = (self.section, self.mapping(), self.faces_open, &self.drawn, self.legends()) {
             let (fx, fy, k) = drawing::legend_face(&set, st.w, st.h);
             let [a0, b0, a1, b1] = set.key.face;
             over.push(Cell { id: LEGEND_PAD, ..cell(18, sx + fx, sy + fy, (a1 - a0) as f32 * k, (b1 - b0) as f32 * k) });
         }
         // a key's own text: the heading, each part's name beside its box and
         // its mark where the key has text of its own; for all keys, the way there
-        if self.section == LEGENDS && !self.picking && !self.faces_open && !self.choices().is_empty() {
+        if self.section == LEGENDS && !self.mapping() && !self.faces_open && !self.choices().is_empty() {
             let y = sy + drawing::choice_y(3) + self.text_drop();
             over.push(text_cell(style::LABEL, cx, y, drawing::CTRL_W, 26.0, "Text"));
             let boxes = self.text_boxes();
@@ -3236,7 +3351,7 @@ impl LabPage {
         let hot = self.hot();
         let mut rows = Vec::new();
         let ids = self.sliders();
-        for place in self.places.iter().filter(|_| !self.picking) {
+        for place in self.places.iter().filter(|_| !self.mapping()) {
             let i = place.i;
             if !ids.contains(&i) {
                 continue;
@@ -3273,7 +3388,7 @@ impl LabPage {
         }
         // one lit key's switch's place: the key from above, its switch to drag
         // where it sits, and how far that is from the cap's middle each way
-        if let (false, Some((st, _, image))) = (self.picking, &self.pad) {
+        if let (false, Some((st, _, image))) = (self.mapping(), &self.pad) {
             let (px, py, pw, ph) = self.pad_box();
             over.push(text_cell(style::LABEL, px, py - 30.0, pw, 26.0, "Switch's place"));
             sketches.push(Sketch { x: px, y: py, w: st.w, h: st.h, image: image.clone() });
@@ -3312,7 +3427,7 @@ impl LabPage {
         }
         // the map, open to choose a key: every cap where the art has it, the
         // chosen one lit, those with a setup of their own marked
-        if self.picking && !self.device.caps.is_empty() {
+        if self.mapping() && !self.device.caps.is_empty() {
             let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
             for (c, _) in &self.device.caps {
                 (x0, y0, x1, y1) = (x0.min(c.foot[0]), y0.min(c.foot[1]), x1.max(c.foot[2]), y1.max(c.foot[3]));
@@ -3360,7 +3475,9 @@ impl LabPage {
             let line = if k == 1 && lines.len() > 2 { elide(&format!("{line}…"), w - 48.0, 400, 12.5) } else { line.clone() };
             cells.push(text_cell(style::NOTE, x, hy + 18.125 * k as f32, w - 48.0, 18.0, &line));
         }
-        (cells, (sketches, over, rows), self.readout_line(), self.menu_cells(ux, w))
+        let mut top = self.menu_cells(ux, w);
+        top.extend(self.part_list(one_x, w));
+        (cells, (sketches, over, rows), self.readout_line(), top)
     }
 
     /// The foot's readout of what is on the keyboard now, each number with
