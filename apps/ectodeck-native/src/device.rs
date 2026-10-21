@@ -102,8 +102,12 @@ pub fn start(z10: Result<crate::core_host::Core, String>, tell: Sender<Heard>, t
     let kb = Kb(z10);
     if let Ok(core) = &kb.0 {
         // (what the Lighting page is drawn from: no device is asked, so it comes at once)
-        if let Ok(d) = core.call("device/describe", &Value::Null) {
-            let _ = tell.send(Heard::Described(d));
+        match core.call("device/describe", &Value::Null) {
+            Ok(d) => {
+                eprintln!("ectodeck-native: the keyboard's core describes {} lighting effects", d["capabilities"]["lighting"]["effects"].as_array().map_or(0, Vec::len));
+                let _ = tell.send(Heard::Described(d));
+            }
+            Err(e) => eprintln!("ectodeck-native: the keyboard's core didn't describe it, so its Lighting page is empty: {e}"),
         }
         // (woken by each notice, on the core's thread, which mustn't wait)
         let (wake, woken) = mpsc::channel::<()>();
