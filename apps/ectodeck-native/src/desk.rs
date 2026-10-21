@@ -78,6 +78,9 @@ pub struct Desk {
     fade: Option<(Instant, f32, f32)>,
     /// when the view last changed, for pictures drawn for its size to wait till it settles
     pub changed: Instant,
+    /// where each device Ectodeck has seen sits, as kept between runs: its id
+    /// and its place (one not met yet this run keeps its place too)
+    kept: Vec<(String, f32, f32)>,
 }
 
 impl Default for Desk {
@@ -88,19 +91,34 @@ impl Default for Desk {
 
 impl Desk {
     pub fn new() -> Desk {
-        Desk { items: Vec::new(), editing: false, view: View { z: 1.0, px: 0.0, py: 0.0 }, size: (0.0, 0.0), hover: None, pressed: None, drag: None, ease: None, dots: 0.0, fade: None, changed: Instant::now() }
+        // (the tests start from a desk nothing was kept for)
+        let kept = if cfg!(test) { Vec::new() } else { Desk::saved() };
+        Desk { items: Vec::new(), editing: false, view: View { z: 1.0, px: 0.0, py: 0.0 }, size: (0.0, 0.0), hover: None, pressed: None, drag: None, ease: None, dots: 0.0, fade: None, changed: Instant::now(), kept }
     }
 
     /// Where the window's state keeps each device: its id and its place.
-    pub fn saved() -> Vec<(String, f32, f32)> {
+    fn saved() -> Vec<(String, f32, f32)> {
         let v = crate::uistate::get("desk").unwrap_or_default();
         v.as_object().map_or(Vec::new(), |o| {
             o.iter().filter_map(|(id, at)| Some((id.clone(), at[0].as_f64()? as f32, at[1].as_f64()? as f32))).collect()
         })
     }
 
-    fn save(&self) {
-        let o: serde_json::Map<String, serde_json::Value> = self.items.iter().map(|i| (i.id.clone(), serde_json::json!([i.x, i.y]))).collect();
+    /// Whether a place is kept for a device, met this run or not.
+    pub fn keeps(&self, id: &str) -> bool {
+        self.kept.iter().any(|(k, _, _)| k == id)
+    }
+
+    /// Each device's place kept: those on the desk where they are now, and
+    /// every other where it was kept.
+    fn save(&mut self) {
+        for i in &self.items {
+            match self.kept.iter_mut().find(|(k, _, _)| *k == i.id) {
+                Some(k) => (k.1, k.2) = (i.x, i.y),
+                None => self.kept.push((i.id.clone(), i.x, i.y)),
+            }
+        }
+        let o: serde_json::Map<String, serde_json::Value> = self.kept.iter().map(|(id, x, y)| (id.clone(), serde_json::json!([x, y]))).collect();
         crate::uistate::set("desk", serde_json::Value::Object(o));
     }
 
@@ -116,8 +134,8 @@ impl Desk {
             }
             return;
         }
-        let (x, y) = match Desk::saved().into_iter().find(|(s, _, _)| s == id) {
-            Some((_, x, y)) => (x, y),
+        let (x, y) = match self.kept.iter().find(|(s, _, _)| s == id) {
+            Some(&(_, x, y)) => (x, y),
             // (seen for the first time: beside the others, its middle level with
             // theirs, on the dots)
             None if self.items.is_empty() => (0.0, 0.0),
@@ -271,16 +289,22 @@ impl Desk {
         [v.px + it.x * v.z, v.py + it.y * v.z + nudge, it.w * v.z, it.h * v.z]
     }
 
-    /// A press on device `i`, or on the empty desk, at a point of the desk.
-    /// (Outside edit mode a press on a device only shows; let go where it was, it's a click.)
+    /// A press on device `i`, at a point of the desk: in edit mode its drag
+    /// carries it. (Outside edit mode a press on a device only shows; let go
+    /// where it was, it's a click.)
     pub fn press(&mut self, i: Option<usize>, at: (f32, f32)) {
         let i = i.filter(|i| *i < self.items.len());
         self.pressed = i;
-        self.drag = match i {
-            Some(i) => Some(Drag::Item { i, at, from: (self.items[i].x, self.items[i].y), moved: false }),
-            None if self.editing => Some(Drag::Pan { at, from: self.view }),
-            None => None,
-        };
+        self.drag = i.map(|i| Drag::Item { i, at, from: (self.items[i].x, self.items[i].y), moved: false });
+    }
+
+    /// The middle button pressed on the desk, on a device or not: in edit
+    /// mode its drag moves around the desk.
+    pub fn pan_from(&mut self, at: (f32, f32)) {
+        if self.editing {
+            self.pressed = None;
+            self.drag = Some(Drag::Pan { at, from: self.view });
+        }
     }
 
     /// The pointer moved, pressed; true if anything on the desk moved.
@@ -430,6 +454,29 @@ mod tests {
         d
     }
 
+    /// Each device comes back where it was kept, whichever is met first: the
+    /// one met first, kept again, doesn't lose the other's place.
+    #[test]
+    fn each_device_keeps_its_place_whichever_is_met_first() {
+        for kb_first in [true, false] {
+            let mut d = Desk::new();
+            d.size = (1380.0, 992.0);
+            d.kept = vec![("z10".into(), -864.0, 0.0), ("mouse".into(), 0.0, 0.0)];
+            let kb = |d: &mut Desk| d.meet("z10", "EVGA Z10 RGB", "z10", (760.5, 304.6), true, true);
+            let mouse = |d: &mut Desk| d.meet("mouse", "SteelSeries Sensei 310", "mouse", (118.3, 202.3), true, false);
+            if kb_first {
+                kb(&mut d);
+                mouse(&mut d);
+            } else {
+                mouse(&mut d);
+                kb(&mut d);
+            }
+            let at = |id: &str| d.items.iter().find(|i| i.id == id).map(|i| (i.x, i.y)).unwrap();
+            assert_eq!((at("z10"), at("mouse")), ((-864.0, 0.0), (0.0, 0.0)), "keyboard first {kb_first}");
+            assert!(d.keeps("z10") && d.keeps("mouse"));
+        }
+    }
+
     /// Met in either order, a keyboard sits left of a mouse, level with it.
     #[test]
     fn a_keyboard_goes_left_of_a_mouse() {
@@ -477,6 +524,9 @@ mod tests {
         d.press(None, (40.0, 900.0));
         d.moved((140.0, 860.0));
         assert_eq!(d.release(), None);
+        d.pan_from((40.0, 900.0));
+        d.moved((140.0, 860.0));
+        assert_eq!(d.release(), None);
         d.press(Some(1), (1200.0, 500.0));
         d.moved((1260.0, 540.0));
         assert_eq!(d.release(), None, "a drag isn't a click");
@@ -486,8 +536,9 @@ mod tests {
         assert_eq!(d.release(), Some(1), "a click opens the device");
     }
 
-    /// In edit mode the wheel zooms about the pointer, the empty desk pans,
-    /// a device lands on the dots, and Done eases back to the fit.
+    /// In edit mode the wheel zooms about the pointer, a drag with the middle
+    /// button pans (on a device too; the left button on the empty desk
+    /// doesn't), a device lands on the dots, and Done eases back to the fit.
     #[test]
     fn arranging_zooms_pans_and_snaps() {
         let mut d = desk();
@@ -503,7 +554,16 @@ mod tests {
         d.press(None, (40.0, 900.0));
         d.moved((140.0, 860.0));
         d.release();
+        assert_eq!(d.view, v, "the left button on the empty desk doesn't pan");
+        d.pan_from((40.0, 900.0));
+        d.moved((140.0, 860.0));
+        d.release();
         assert!((d.view.px - v.px - 100.0).abs() < 1e-3 && (d.view.py - v.py + 40.0).abs() < 1e-3, "panned");
+        let (v, at) = (d.view, (d.items[1].x, d.items[1].y));
+        d.pan_from((1000.0, 500.0));
+        d.moved((1030.0, 520.0));
+        d.release();
+        assert!(d.view != v && (d.items[1].x, d.items[1].y) == at, "panned from over a device, which stays put");
         d.press(Some(1), (1000.0, 500.0));
         d.moved((930.0, 561.0));
         assert!(d.carrying());

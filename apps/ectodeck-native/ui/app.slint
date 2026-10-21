@@ -4010,6 +4010,7 @@ export component AppWindow inherits Window {
     out property <length> desk-w: content-w;
     out property <length> desk-h: root.height - bar;
     callback desk-press(int, length, length);
+    callback desk-pan(length, length);
     callback desk-move(length, length);
     callback desk-release();
     callback desk-wheel(length, length, length);
@@ -4235,11 +4236,12 @@ export component AppWindow inherits Window {
         if root.place == "home": Rectangle {
             desk-ta := TouchArea {
                 mouse-cursor: root.desk-panning ? MouseCursor.grabbing : MouseCursor.default;
+                // (in edit mode a drag with the middle button moves around the desk)
                 pointer-event(e) => {
-                    if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
-                        root.desk-press(-1, self.mouse-x, self.mouse-y);
+                    if (e.button == PointerEventButton.middle && e.kind == PointerEventKind.down) {
+                        root.desk-pan(self.mouse-x, self.mouse-y);
                     }
-                    if (e.button == PointerEventButton.left && e.kind == PointerEventKind.up) {
+                    if ((e.button == PointerEventButton.left || e.button == PointerEventButton.middle) && e.kind == PointerEventKind.up) {
                         root.desk-release();
                     }
                 }
@@ -4352,7 +4354,11 @@ export component AppWindow inherits Window {
                             if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
                                 root.desk-press(i, d.x + self.mouse-x, d.y + self.mouse-y);
                             }
-                            if (e.button == PointerEventButton.left && e.kind == PointerEventKind.up) {
+                            // (the middle button's drag moves around the desk, over a device too)
+                            if (e.button == PointerEventButton.middle && e.kind == PointerEventKind.down) {
+                                root.desk-pan(d.x + self.mouse-x, d.y + self.mouse-y);
+                            }
+                            if ((e.button == PointerEventButton.left || e.button == PointerEventButton.middle) && e.kind == PointerEventKind.up) {
                                 root.desk-release();
                             }
                         }

@@ -368,19 +368,24 @@ fn shadow_image(s: &ectodeck_draw::hdr::Shadow, w: u32, h: u32) -> slint::Image 
 }
 
 /// Set the legends a light asks for, away from the window's thread: setting
-/// them takes a moment, and only the latest asked matters.
+/// them takes a moment, and only the latest asked for each keyboard matters
+/// (the page's and Home's are asked for one after the other).
 fn legends_builder(done: calloop::channel::Sender<ectodeck_draw::hdr::Legends>) -> std::sync::mpsc::Sender<ectodeck_draw::hdr::LegendsAsk> {
     let (ask, asked) = std::sync::mpsc::channel::<ectodeck_draw::hdr::LegendsAsk>();
     std::thread::spawn(move || {
-        while let Ok(mut a) = asked.recv() {
+        while let Ok(a) = asked.recv() {
+            let mut todo = vec![a];
             while let Ok(later) = asked.try_recv() {
-                a = later;
+                todo.retain(|a| !a.for_same(&later));
+                todo.push(later);
             }
-            let t = Instant::now();
-            let legends = a.set(&ectodeck_draw::print::faces());
-            eprintln!("ectodeck-native: legends set in {:?}", t.elapsed());
-            if done.send(legends).is_err() {
-                return;
+            for a in todo {
+                let t = Instant::now();
+                let legends = a.set(&ectodeck_draw::print::faces());
+                eprintln!("ectodeck-native: legends set in {:?}", t.elapsed());
+                if done.send(legends).is_err() {
+                    return;
+                }
             }
         }
     });
@@ -801,8 +806,14 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
             .collect();
         if let [(x0, y0), (x1, y1)] = pts[..] {
             let at = |t: f32| LogicalPosition::new(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t);
+            // ECTODECK_NATIVE_DRAG_BUTTON=middle or right: the drag made with that button
+            let button = match std::env::var("ECTODECK_NATIVE_DRAG_BUTTON").as_deref() {
+                Ok("middle") => PointerEventButton::Middle,
+                Ok("right") => PointerEventButton::Right,
+                _ => PointerEventButton::Left,
+            };
             window.dispatch_event(WindowEvent::PointerMoved { position: at(0.0) });
-            window.dispatch_event(WindowEvent::PointerPressed { position: at(0.0), button: PointerEventButton::Left });
+            window.dispatch_event(WindowEvent::PointerPressed { position: at(0.0), button });
             let rect = board_rect(&front.ui, 1.0);
             let tree = cores::shown().tree();
             let device = device_in_use(&front.settings);
@@ -826,7 +837,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
                 let t5 = Instant::now();
                 eprintln!("step {k}: event {:?} act {:?} page {:?} lights {:?} keyboard {:?}", t1 - t0, t2 - t1, t3 - t2, t4 - t3, t5 - t4);
             }
-            window.dispatch_event(WindowEvent::PointerReleased { position: at(1.0), button: PointerEventButton::Left });
+            window.dispatch_event(WindowEvent::PointerReleased { position: at(1.0), button });
             front.act();
         }
     }
@@ -877,7 +888,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
             dim_around(&mut lit, board.w as usize, &rects, board.chassis());
         }
         let lit = Rc::new(Lit { px: lit, w: rect.2, h: rect.3 });
-        pic.set_keyboard(rect, Some(&lit));
+        lay_keyboard(&mut pic, &front, false, Some(&lit), None, 1.0);
         front.ui.set_board_ready(true);
         window.request_redraw();
         window.draw_if_needed(|r| {
@@ -899,8 +910,8 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
                 r.render(&mut pic.ui, nw as usize);
             });
             lay_ground(&mut pic, &front.ui, 1.0);
-            pic.set_keyboard(r2, Some(&lit));
-            eprintln!("resized to {nw}x{nh}: keyboard now at {r2:?}, its picture still {}x{}", lit.w, lit.h);
+            lay_keyboard(&mut pic, &front, false, Some(&lit), None, 1.0);
+            eprintln!("resized to {nw}x{nh}: keyboard now at {:?}, its picture still {}x{}", pic.keyboard_rect(), lit.w, lit.h);
             if std::env::var_os("ECTODECK_NATIVE_DEBUG").is_some() {
                 use slint::Model;
                 let m = front.ui.get_overlays();
@@ -912,7 +923,8 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
             (w, h) = (nw, nh);
         }
     }
-    // Home's desk: the keyboard on it drawn for its place there, on the app's ground
+    // Home's desk: the keyboard on it drawn for its place there, on the app's
+    // ground, and laid as the window lays it
     if let Some([x, y, kw, kh]) = front.desk_keyboard() {
         let (bw, bh) = (kw.round().max(1.0) as u32, kh.round().max(1.0) as u32);
         let tree = cores::shown().tree();
@@ -930,12 +942,13 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         let gain = front.light_gain(reference).max(gain);
         let lit = light(&board, &lights, front.page.locks, gain, reference, front.overlays.panel_for(board.w, board.lcd().dot));
         let lit = Rc::new(Lit { px: lit, w: bw as usize, h: bh as usize });
-        pic.set_keyboard((x.round() as i32, y.round() as i32, bw as usize, bh as usize), Some(&lit));
-        pic.set_keyboard_ground(Some(Rc::new(board.ground_share())), if on { 1.0 } else { 0.5 });
+        lay_keyboard(&mut pic, &front, true, Some(&lit), Some(Rc::new(board.ground_share())), 1.0);
         front.ui.set_board_ready(true);
-        eprintln!("Home's keyboard drawn at {bw}x{bh}, at {x},{y}");
+        eprintln!("Home's keyboard drawn at {bw}x{bh}, at {x},{y}; laid at {:?}", pic.keyboard_rect());
+    } else {
+        // (what the desk lays on the ground, with no keyboard on it)
+        pic.set_decor(front.desk_decor(1.0));
     }
-    pic.set_decor(front.desk_decor(1.0));
     window.request_redraw();
     window.draw_if_needed(|r| {
         r.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
@@ -1274,6 +1287,42 @@ fn lay_ground(pic: &mut Picture, ui: &AppWindow, scale: f32) -> bool {
         ui.get_ground_radius() * scale,
         [c.red(), c.green(), c.blue()],
     )
+}
+
+/// Where the keyboard's picture goes, in the buffer's pixels: in its page's
+/// box, or on Home's desk where the desk has it (nothing there till Home's
+/// keyboard is drawn, `home_drawn`).
+fn keyboard_place(front: &Front, home_drawn: bool, s: f32) -> (i32, i32, usize, usize) {
+    match front.desk_keyboard() {
+        Some([x, y, w, h]) if home_drawn => ((x * s).round() as i32, (y * s).round() as i32, (w * s).round().max(1.0) as usize, (h * s).round().max(1.0) as usize),
+        Some(_) => (0, 0, 0, 0),
+        None => board_rect(&front.ui, s),
+    }
+}
+
+/// The keyboard laid in the window's picture where keyboard_place puts it,
+/// as `lit` shows it, and on Home's desk what the desk lays on the ground
+/// round it and under it: how much of the ground shows through the keyboard
+/// (`share`, its picture's) and how strongly the keyboard shows (dimmed while
+/// it isn't plugged in). The window and a snapshot both lay it so. The boxes
+/// to draw again.
+fn lay_keyboard(pic: &mut Picture, front: &Front, home_drawn: bool, lit: Option<&Rc<Lit>>, share: Option<Rc<Vec<f32>>>, s: f32) -> Vec<(usize, usize, usize, usize)> {
+    let rect = keyboard_place(front, home_drawn, s);
+    let mut dirty = Vec::new();
+    let before = pic.keyboard_rect();
+    if pic.set_keyboard(rect, lit) {
+        for r in [before, rect] {
+            dirty.push((r.0.max(0) as usize, r.1.max(0) as usize, r.2, r.3));
+        }
+    }
+    if let Some(r) = pic.set_decor(front.desk_decor(s)) {
+        dirty.push(r);
+    }
+    let (share, dim) = if front.desk_keyboard().is_some() { (share, if front.desk_keyboard_on() { 1.0 } else { 0.5 }) } else { (None, 1.0) };
+    if pic.set_keyboard_ground(share, dim) && rect.2 > 0 {
+        dirty.push((rect.0.max(0) as usize, rect.1.max(0) as usize, rect.2, rect.3));
+    }
+    dirty
 }
 
 /// Where the page's hole for the keyboard is, in the buffer's pixels.
@@ -2360,8 +2409,10 @@ impl App {
         let Some((kw, kh)) = self.front.desk_keyboard_size().filter(|_| self.front.desk_settled()) else { return };
         let s = self.scale as f32;
         let page = (self.front.ui.get_board_width() * s).round().max(1.0);
-        let hw = (kw * s).min(page).round().max(1.0) as u32;
-        let hh = (hw as f32 * kh / kw.max(1.0)).round().max(1.0) as u32;
+        // (its place's size in pixels as keyboard_place rounds it, so the
+        // picture fits it exactly)
+        let (pw, ph) = ((kw * s).round().max(1.0), (kh * s).round().max(1.0));
+        let (hw, hh) = if pw <= page { (pw as u32, ph as u32) } else { (page as u32, (page * kh / kw.max(1.0)).round().max(1.0) as u32) };
         if self.home_board.as_ref().map(|b| (b.w, b.h)) != Some((hw, hh)) && self.home_asked != Some((hw, hh)) {
             self.home_asked = Some((hw, hh));
             let _ = self.home_build.send((hw, hh, self.light_now(), s));
@@ -2396,10 +2447,10 @@ impl App {
     fn legends_ready(&mut self, legends: ectodeck_draw::hdr::Legends) {
         // (set for one size: the keyboard of that size takes them)
         let light = self.light.clone().unwrap_or_else(|| cores::shown().device_now()["light"].clone());
-        let mut legends = Some(legends);
+        // (each that takes them: the page's and Home's may be drawn at one size)
         for board in [self.board.as_mut(), self.home_board.as_mut()].into_iter().flatten() {
-            if legends.as_ref().is_some_and(|l| board.takes(l)) {
-                board.set_legends(legends.take().unwrap());
+            if board.takes(&legends) {
+                board.set_legends(legends.clone());
                 // (the light may have changed again while they were set)
                 if let Some(ask) = board.legends_for(&light) {
                     let _ = self.set_legends.send(ask);
@@ -2477,11 +2528,7 @@ impl App {
         // there till Home's keyboard is drawn)
         let s = self.scale as f32;
         let home = self.front.desk_keyboard();
-        let rect = match home {
-            Some([x, y, kw, kh]) if self.home_board.is_some() => ((x * s).round() as i32, (y * s).round() as i32, (kw * s).round().max(1.0) as usize, (kh * s).round().max(1.0) as usize),
-            Some(_) => (0, 0, 0, 0),
-            None => board_rect(&self.front.ui, s),
-        };
+        let rect = keyboard_place(&self.front, self.home_board.is_some(), s);
         // the knobs and the display's glass for the keyboard's size as drawn,
         // before the page is drawn, so they move with it in the same frame; on
         // the desk, shown at its size there
@@ -2615,13 +2662,9 @@ impl App {
         if lay_ground(&mut self.pic, &self.front.ui, self.scale as f32) {
             self.full = true;
         }
-        // the keyboard: the one drawn at this size, or the last one stretched to
-        // it while this size is drawn
-        let rect = board_rect(&self.front.ui, self.scale as f32);
-        // drawn for the window's size even while another page shows, so the
-        // keyboard is there, whole, the moment its page opens
+        // the page's keyboard drawn for the window's size even while another
+        // page shows, so the keyboard is there, whole, the moment its page opens
         let ui = &self.front.ui;
-        let s = self.scale as f32;
         let want = ((ui.get_board_width() * s).round().max(1.0) as u32, (ui.get_board_height() * s).round().max(1.0) as u32);
         if want.0 > 1 && self.board.as_ref().map(|b| (b.w, b.h)) != Some(want) && self.asked != Some(want) {
             self.asked = Some(want);
@@ -2630,22 +2673,11 @@ impl App {
         // (the knobs and glass for the keyboard as drawn, as above)
         self.front.board_size(drawn.0, drawn.1, s);
         self.front.ui.set_board_ready(self.lit.is_some());
-        let before = self.pic.keyboard_rect();
-        if self.pic.set_keyboard(rect, self.lit.as_ref()) {
-            for r in [before, rect] {
-                dirty.push((r.0.max(0) as usize, r.1.max(0) as usize, r.2, r.3));
-            }
-        }
-        // what Home's desk lays on the ground (its dots, the highlight under a
-        // device), and the keyboard on it: how much of the ground shows through
-        // it, and dimmed while it isn't plugged in
-        if let Some(r) = self.pic.set_decor(self.front.desk_decor(s)) {
-            dirty.push(r);
-        }
-        let (share, kdim) = if home.is_some() { (self.home_share.clone(), if self.front.desk_keyboard_on() { 1.0 } else { 0.5 }) } else { (None, 1.0) };
-        if self.pic.set_keyboard_ground(share, kdim) && rect.2 > 0 {
-            dirty.push((rect.0.max(0) as usize, rect.1.max(0) as usize, rect.2, rect.3));
-        }
+        // the keyboard where it shows, in its page's box or on Home's desk (the
+        // one drawn at its size there, or the last one stretched to it while that
+        // size is drawn), and what Home's desk lays on the ground round it and under it
+        let share = if home.is_some() { self.home_share.clone() } else { None };
+        dirty.extend(lay_keyboard(&mut self.pic, &self.front, self.home_board.is_some(), self.lit.as_ref(), share, s));
         // the last frame's picture taken back, now nothing shows it, for the next
         if let Some(old) = shown_before {
             if let Ok(l) = Rc::try_unwrap(old) {

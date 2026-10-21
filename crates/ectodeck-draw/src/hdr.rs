@@ -767,6 +767,11 @@ pub struct LegendsAsk {
 }
 
 impl LegendsAsk {
+    /// Whether another ask is for the same keyboard (its size, where it has the art).
+    pub fn for_same(&self, other: &LegendsAsk) -> bool {
+        self.at == other.at
+    }
+
     /// Set them, in the typefaces there are.
     pub fn set(self, db: &usvg::fontdb::Database) -> Legends {
         let (_, _, ka, off) = self.at;
@@ -787,6 +792,7 @@ impl LegendsAsk {
 }
 
 /// Legends set for a keyboard, to put on it with Board::set_legends.
+#[derive(Clone)]
 pub struct Legends {
     keys: Vec<(Option<(crate::print::Style, crate::print::Print)>, Option<(Shape, Option<u32>)>)>,
     at: (u32, u32, f32, (f32, f32)),
@@ -1497,14 +1503,14 @@ impl Board {
         Some(LegendsAsk { own: self.own_print.clone()?, keys, per_mm: self.model.scale, at: (self.w, self.h, self.art_scale, self.art_offset) })
     }
 
-    /// Put legends set for this keyboard on it: each key's as asked, the
-    /// art's own where it asked for none. (Legends set for another size are
-    /// left out.)
     /// Whether legends were set for this keyboard (its size, where it has the art, its keys).
     pub fn takes(&self, legends: &Legends) -> bool {
         legends.at == (self.w, self.h, self.art_scale, self.art_offset) && legends.keys.len() == self.keys.len()
     }
 
+    /// Put legends set for this keyboard on it: each key's as asked, the
+    /// art's own where it asked for none. (Legends set for another size are
+    /// left out.)
     pub fn set_legends(&mut self, legends: Legends) {
         if !self.takes(&legends) {
             return;

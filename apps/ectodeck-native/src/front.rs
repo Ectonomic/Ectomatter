@@ -102,6 +102,7 @@ pub enum Ask {
     /// Arrange, Done, a zoom control (-1 out, 0 to 100%, 1 in, 2 the fit), and
     /// the next frame of its easing
     DeskPress(i32, f32, f32),
+    DeskPan(f32, f32),
     DeskMove(f32, f32),
     DeskRelease,
     DeskWheel(f32, f32, f32),
@@ -709,6 +710,7 @@ impl Front {
         on!(on_mouse_pic_clicked, |x, y| Ask::MousePicClicked(x, y));
         on!(on_mouse_call_hover, |i, on| Ask::MouseCallHover(i, on));
         on!(on_desk_press, |i, x, y| Ask::DeskPress(i, x, y));
+        on!(on_desk_pan, |x, y| Ask::DeskPan(x, y));
         on!(on_desk_move, |x, y| Ask::DeskMove(x, y));
         on!(on_desk_release, Ask::DeskRelease);
         on!(on_desk_wheel, |x, y, dy| Ask::DeskWheel(x, y, dy));
@@ -1315,6 +1317,11 @@ impl Front {
                 Ask::DeskPress(i, x, y) => {
                     changed = false;
                     self.desk.press(usize::try_from(i).ok(), (x, y));
+                    self.show_desk();
+                }
+                Ask::DeskPan(x, y) => {
+                    changed = false;
+                    self.desk.pan_from((x, y));
                     self.show_desk();
                 }
                 Ask::DeskMove(x, y) => {
@@ -3857,14 +3864,13 @@ impl Front {
     /// those it has kept a place for; each at its size, and whether it is
     /// plugged in.
     fn desk_meet(&mut self) {
-        let kept: Vec<String> = crate::desk::Desk::saved().into_iter().map(|(id, _, _)| id).collect();
-        if self.page.dev.is_some() || kept.iter().any(|k| k == "z10") {
+        if self.page.dev.is_some() || self.desk.keeps("z10") {
             let core = crate::cores::shown();
             let size = crate::desk::size_of(&core.art, core.device["light"]["scale"].as_f64().unwrap_or(1.38) as f32);
             // (not yet known to be plugged in, it is drawn as plugged in: only a keyboard gone shows dimmed)
             self.desk.meet("z10", core.name(), "z10", size, self.ui.get_conn_state() != 2, true);
         }
-        if self.mouse.known() || kept.iter().any(|k| k == "mouse") {
+        if self.mouse.known() || self.desk.keeps("mouse") {
             let dev = &self.mouse.state["device"];
             let v = crate::mouse_art::VIEW;
             let per = dev["scale"].as_f64().unwrap_or(520.0 / 125.1) as f32;

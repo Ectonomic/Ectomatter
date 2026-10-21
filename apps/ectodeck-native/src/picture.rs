@@ -107,11 +107,13 @@ pub struct Picture {
     src: Option<Rc<Lit>>,
     shown: Option<Rc<Lit>>,
     /// what is laid on the ground; how much of the ground shows in each of the
-    /// keyboard's pixels (as its picture was drawn, see Board::ground_share), for
-    /// what is laid on the ground to reach under it; and how strongly the
-    /// keyboard shows (1, or less for one not plugged in)
+    /// keyboard's pixels (as its picture was drawn, see Board::ground_share),
+    /// and that at the hole's size as the picture shows there, for what is laid
+    /// on the ground to reach under it; and how strongly the keyboard shows (1,
+    /// or less for one not plugged in)
     decor: Decor,
     share: Option<Rc<Vec<f32>>>,
+    share_shown: Option<Rc<Vec<f32>>>,
     dim: f32,
 }
 
@@ -123,7 +125,7 @@ impl Picture {
         }
         let ground = [lin[ground[0] as usize], lin[ground[1] as usize], lin[ground[2] as usize]];
         let page_ground = Ground { x: 0, y: 0, radius: 0.0, rgb: [0.0; 3] };
-        Picture { w: 0, h: 0, ui: Vec::new(), out: Vec::new(), enc: Encoder::new(reference), reference, lin, ground, page_ground, rect: (0, 0, 0, 0), src: None, shown: None, decor: Decor::default(), share: None, dim: 1.0 }
+        Picture { w: 0, h: 0, ui: Vec::new(), out: Vec::new(), enc: Encoder::new(reference), reference, lin, ground, page_ground, rect: (0, 0, 0, 0), src: None, shown: None, decor: Decor::default(), share: None, share_shown: None, dim: 1.0 }
     }
 
     /// Lay the app's ground under the page; true if it changed.
@@ -170,9 +172,11 @@ impl Picture {
         if rect.2 == 0 || rect.3 == 0 {
             self.src = None;
             self.shown = None;
+            self.share_shown = None;
         } else if !same_src || size_changed {
             self.src = lit.cloned();
             self.shown = lit.map(|l| if (l.w, l.h) == (rect.2, rect.3) { l.clone() } else { Rc::new(stretch(l, rect.2, rect.3)) });
+            self.fit_share();
         }
         true
     }
@@ -205,7 +209,21 @@ impl Picture {
         }
         self.share = share;
         self.dim = dim;
+        if !same {
+            self.fit_share();
+        }
         true
+    }
+
+    /// The ground's share at the hole's size, as the keyboard's picture shows
+    /// there: its own, or stretched with the picture (none for another
+    /// picture's, or none given).
+    fn fit_share(&mut self) {
+        let (w, h) = (self.rect.2, self.rect.3);
+        self.share_shown = match (&self.share, &self.src) {
+            (Some(v), Some(l)) if v.len() == l.w * l.h && w > 0 && h > 0 => Some(if (l.w, l.h) == (w, h) { v.clone() } else { Rc::new(stretch_px(v, l.w, l.h, 1, w, h)) }),
+            _ => None,
+        };
     }
 
     pub fn encode_all(&mut self) {
@@ -222,12 +240,10 @@ impl Picture {
         let rows = y1 - y0;
         let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(12);
         let band = rows.div_ceil(threads).max(24);
-        let Picture { w: stride, h: height, ui, out, enc, lin, ground, page_ground, rect, shown, decor, share, dim, .. } = self;
+        let Picture { w: stride, h: height, ui, out, enc, lin, ground, page_ground, rect, shown, decor, share_shown, dim, .. } = self;
         let (stride, height, ui, enc, lin, ground, rect, shown, decor, dim) = (*stride, *height, &*ui, &*enc, &*lin, *ground, *rect, shown.as_deref(), &*decor, *dim);
         let page_ground = &*page_ground;
-        // (the ground's share reaches under the keyboard only as its picture was
-        // drawn, not while a picture of another size is stretched to its place)
-        let share = share.as_deref().map(|v| v.as_slice()).filter(|v| shown.is_some_and(|l| l.w * l.h == v.len() && (l.w, l.h) == (rect.2, rect.3)));
+        let share = share_shown.as_deref().map(|v| v.as_slice()).filter(|v| shown.is_some() && v.len() == rect.2 * rect.3);
         let kb = KbGround { share, dim };
         // the rows being encoded, split in bands, one to a thread
         let out = &mut out[y0 * stride..y1 * stride];
@@ -332,8 +348,10 @@ fn encode_row(
     let mut last: Option<((u32, bool), [u16; 4])> = None;
     for x in x0..x1 {
         let p = ui[y * stride + x];
-        let inside = in_rows && (x as i32) >= kx && (x as i32) < kx + kw as i32;
-        if !inside {
+        // (the keyboard lies on the app's ground: none of it shows past it, under
+        // the title bar or the rail, or past the window's rounded corner)
+        let kc = if in_rows && (x as i32) >= kx && (x as i32) < kx + kw as i32 { cover(x) } else { 0.0 };
+        if kc <= 0.0 {
             // the page over the app's ground, where the page is not opaque
             let c = if p.alpha == 255 { 1.0 } else { cover(x) };
             if c > 0.0 && p.alpha < 255 {
@@ -389,6 +407,7 @@ fn encode_row(
                 }
             }
         }
+        let ka = ka * kc;
         row[x] = if p.alpha == 0 { enc.straight(k, ka) } else { enc.pixel(over(p, k, ka)) };
     }
 }
@@ -404,25 +423,30 @@ struct Ground {
 /// The keyboard stretched to another size, smoothly, to show while it is
 /// drawn again at that size.
 fn stretch(l: &Lit, w: usize, h: usize) -> Lit {
-    let mut px = vec![0f32; w * h * 4];
-    let (sx, sy) = (l.w as f32 / w as f32, l.h as f32 / h as f32);
+    Lit { px: stretch_px(&l.px, l.w, l.h, 4, w, h), w, h }
+}
+
+/// Pixels of `n` channels each, `lw` by `lh`, stretched smoothly to `w` by `h`.
+fn stretch_px(from: &[f32], lw: usize, lh: usize, n: usize, w: usize, h: usize) -> Vec<f32> {
+    let mut px = vec![0f32; w * h * n];
+    let (sx, sy) = (lw as f32 / w as f32, lh as f32 / h as f32);
     for y in 0..h {
-        let fy = ((y as f32 + 0.5) * sy - 0.5).clamp(0.0, (l.h - 1) as f32);
+        let fy = ((y as f32 + 0.5) * sy - 0.5).clamp(0.0, (lh - 1) as f32);
         let (y0, ty) = (fy as usize, fy.fract());
-        let y1 = (y0 + 1).min(l.h - 1);
+        let y1 = (y0 + 1).min(lh - 1);
         for x in 0..w {
-            let fx = ((x as f32 + 0.5) * sx - 0.5).clamp(0.0, (l.w - 1) as f32);
+            let fx = ((x as f32 + 0.5) * sx - 0.5).clamp(0.0, (lw - 1) as f32);
             let (x0, tx) = (fx as usize, fx.fract());
-            let x1 = (x0 + 1).min(l.w - 1);
-            for c in 0..4 {
-                let at = |xx: usize, yy: usize| l.px[(yy * l.w + xx) * 4 + c];
+            let x1 = (x0 + 1).min(lw - 1);
+            for c in 0..n {
+                let at = |xx: usize, yy: usize| from[(yy * lw + xx) * n + c];
                 let top = at(x0, y0) * (1.0 - tx) + at(x1, y0) * tx;
                 let bottom = at(x0, y1) * (1.0 - tx) + at(x1, y1) * tx;
-                px[(y * w + x) * 4 + c] = top * (1.0 - ty) + bottom * ty;
+                px[(y * w + x) * n + c] = top * (1.0 - ty) + bottom * ty;
             }
         }
     }
-    Lit { px, w, h }
+    px
 }
 
 #[cfg(test)]
@@ -451,5 +475,50 @@ mod tests {
         assert!(at(30, 30) > at(31, 31) && at(31, 31) >= ground, "soft at its edge");
         assert!(at(15, 6) > ground, "the highlight lifts the ground");
         assert_eq!(at(0, 0), at(119, 79), "but not at its rounded corner");
+    }
+
+    /// A keyboard all one color, `w` by `h`.
+    fn plain(rgb: [f32; 3], w: usize, h: usize) -> Rc<Lit> {
+        Rc::new(Lit { px: [rgb[0], rgb[1], rgb[2], 1.0].repeat(w * h), w, h })
+    }
+
+    /// The keyboard lies on the app's ground: moved past it (under the title
+    /// bar or the rail, as Home's desk can carry it), none of it shows there.
+    #[test]
+    fn the_keyboard_shows_only_on_the_ground() {
+        let mut p = Picture::new(254.0, [0x18, 0x18, 0x1b]);
+        p.resize(100, 60);
+        p.set_ground(20, 10, 0.0, [0x18, 0x18, 0x1b]);
+        p.set_keyboard((-10, -5, 80, 50), Some(&plain([1.0, 0.0, 0.0], 80, 50)));
+        p.encode_all();
+        let at = |x: usize, y: usize| p.out[y * 100 + x];
+        assert_eq!(at(5, 30)[3], 0, "nothing under the rail");
+        assert_eq!(at(40, 5)[3], 0, "nor under the title bar");
+        assert!(at(40, 30)[0] > at(40, 30)[1] && at(40, 30)[3] > 0, "the keyboard on the ground");
+        assert_eq!(at(80, 30), at(40, 55), "and the ground past it");
+    }
+
+    /// While a picture of another size is stretched to the keyboard's place,
+    /// what is laid on the ground still reaches under it as far as the ground
+    /// shows, and a keyboard not plugged in still shows dimmed.
+    #[test]
+    fn a_stretched_keyboard_keeps_its_ground() {
+        let encoded = |lit: Rc<Lit>, share: f32, dim: f32, plate: bool| {
+            let mut p = Picture::new(254.0, [0x18, 0x18, 0x1b]);
+            p.resize(80, 50);
+            p.set_ground(0, 0, 0.0, [0x18, 0x18, 0x1b]);
+            p.set_keyboard((10, 5, 60, 40), Some(&lit));
+            p.set_keyboard_ground(Some(Rc::new(vec![share; lit.w * lit.h])), dim);
+            if plate {
+                p.set_decor(Decor { dots: None, plates: vec![Plate { rect: [0.0, 0.0, 80.0, 50.0], radius: 0.0, alpha: 0.2 }] });
+            }
+            p.encode_all();
+            p.out[25 * 80 + 40]
+        };
+        let g = (0x18 as f32 / 255.0).powf(2.2);
+        let open = plain([g, g, g * (0x1b as f32 / 0x18 as f32).powf(2.2)], 30, 20);
+        assert!(encoded(open.clone(), 1.0, 1.0, true)[0] > encoded(open, 1.0, 1.0, false)[0], "the highlight under the keyboard's open ground");
+        let body = plain([1.0, 0.0, 0.0], 30, 20);
+        assert!(encoded(body.clone(), 0.0, 0.5, false)[0] < encoded(body, 0.0, 1.0, false)[0], "dimmed, not plugged in");
     }
 }
