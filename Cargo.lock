@@ -1624,6 +1624,7 @@ dependencies = [
  "bitflags 2.13.2",
  "bytemuck",
  "ectodeck-draw",
+ "ectodeck-protocol",
  "ectodeck-weather",
  "ectotype-core",
  "flate2",
@@ -1649,6 +1650,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ectodeck-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "ectodeck-weather"
 version = "0.1.0"
 dependencies = [
@@ -1661,6 +1669,7 @@ dependencies = [
 name = "ectotype-core"
 version = "0.1.0"
 dependencies = [
+ "ectodeck-protocol",
  "flate2",
  "hidapi",
  "libc",

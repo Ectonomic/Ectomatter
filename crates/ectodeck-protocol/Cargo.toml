@@ -1,0 +1,14 @@
+# The words of the core protocol (docs/core-protocol.md) that every core and
+# Ectodeck share: the names of keys, modifiers and media keys, and the
+# actions a control can be given. Cores built for WebAssembly use it too, so
+# it needs nothing but serde_json.
+[package]
+name = "ectodeck-protocol"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/OMGrant/Ectotype"
+description = "The shared names and actions of Ectodeck's core protocol."
+
+[dependencies]
+serde_json = "1"

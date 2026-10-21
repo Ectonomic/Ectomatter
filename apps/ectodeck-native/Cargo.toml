@@ -8,6 +8,8 @@ description = "Ectodeck as a native window: every pixel drawn in Rust, the keybo
 [dependencies]
 bytemuck = "1"
 ectodeck-draw = { path = "../../crates/ectodeck-draw" }
+# the core protocol's shared names and actions
+ectodeck-protocol = { path = "../../crates/ectodeck-protocol" }
 ectodeck-weather = { version = "0.1.0", path = "../../crates/ectodeck-weather" }
 ectotype-core = { version = "0.1.0", path = "../../crates/ectotype-core" }
 # the USB devices cores reach, each through Ectodeck (core_host.rs)

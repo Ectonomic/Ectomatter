@@ -5,6 +5,7 @@
 use std::collections::{HashMap, HashSet};
 
 use ectodeck_draw::hdr::Light;
+use ectodeck_protocol::{keys as hid, media, Action, Jump, Plays};
 use serde_json::{json, Value};
 
 /// The Z10's core: its folder among Ectodeck's cores.
@@ -14,7 +15,6 @@ pub const CORE: &str = "evga-z10";
 pub const GAP: f64 = 3.0;
 
 pub const PROFILE_NUMBERS: [u8; 5] = [1, 2, 3, 4, 5];
-const FACTORY: &str = "254";
 
 /// A key as the page knows it: where it is in the drawing, and whether a
 /// light sits behind it.
@@ -166,56 +166,10 @@ fn full_name(id: &str) -> Option<&'static str> {
     })
 }
 
-/// USB HID keyboard usages, by the names the page shows.
+/// USB HID keyboard usages, by the names the page shows: the core protocol's
+/// words for them (ectodeck_protocol::keys), the modifiers named apart.
 pub fn hid_name(h: u32) -> Option<String> {
-    Some(match h {
-        4..=29 => ((b'A' + (h - 4) as u8) as char).to_string(),
-        30..=38 => (h - 29).to_string(),
-        39 => "0".into(),
-        40 => "Enter".into(),
-        41 => "Escape".into(),
-        42 => "Backspace".into(),
-        43 => "Tab".into(),
-        44 => "Space".into(),
-        45 => "-".into(),
-        46 => "=".into(),
-        47 => "[".into(),
-        48 => "]".into(),
-        49 => "\\".into(),
-        51 => ";".into(),
-        52 => "'".into(),
-        53 => "`".into(),
-        54 => ",".into(),
-        55 => ".".into(),
-        56 => "/".into(),
-        57 => "Caps Lock".into(),
-        58..=69 => format!("F{}", h - 57),
-        70 => "Print Screen".into(),
-        71 => "Scroll Lock".into(),
-        72 => "Pause".into(),
-        73 => "Insert".into(),
-        74 => "Home".into(),
-        75 => "Page Up".into(),
-        76 => "Delete".into(),
-        77 => "End".into(),
-        78 => "Page Down".into(),
-        79 => "Right arrow".into(),
-        80 => "Left arrow".into(),
-        81 => "Down arrow".into(),
-        82 => "Up arrow".into(),
-        83 => "Num Lock".into(),
-        84 => "Keypad /".into(),
-        85 => "Keypad *".into(),
-        86 => "Keypad -".into(),
-        87 => "Keypad +".into(),
-        88 => "Keypad Enter".into(),
-        89..=97 => format!("Keypad {}", h - 88),
-        98 => "Keypad 0".into(),
-        99 => "Keypad .".into(),
-        101 => "Menu".into(),
-        104..=115 => format!("F{}", h - 91),
-        _ => return None,
-    })
+    u8::try_from(h).ok().filter(|u| !hid::is_modifier(*u)).and_then(hid::label)
 }
 
 /// every HID usage the page names, in the order the web app lists them
@@ -225,17 +179,11 @@ fn hid_codes() -> Vec<u32> {
     v
 }
 
-pub const MODS: [(u32, &str); 8] = [
-    (1, "Left Ctrl"),
-    (2, "Left Shift"),
-    (4, "Left Alt"),
-    (8, "Left Super"),
-    (16, "Right Ctrl"),
-    (32, "Right Shift"),
-    (64, "Right Alt"),
-    (128, "Right Super"),
-];
-const MOD_SHORT: [(u32, &str); 8] = [(1, "Ctrl"), (2, "Shift"), (4, "Alt"), (8, "Super"), (16, "Ctrl"), (32, "Shift"), (64, "Alt"), (128, "Super")];
+/// A modifier's words, by its usage: in full ("Left Ctrl"), or short ("Ctrl").
+fn modifier(u: u8, short: bool) -> &'static str {
+    let m = hid::MODIFIERS[(u - hid::FIRST_MODIFIER) as usize];
+    if short { m.2 } else { m.1 }
+}
 
 /// The screen's jobs a key can have, each a key code the USB standard reserves: no key is
 /// meant to send one and Linux never turns one into a key press, so Ectodeck hears them from
@@ -248,31 +196,19 @@ pub const NEXT_PLAYLIST: u32 = 0xA7;
 pub const PREV_PLAYLIST: u32 = 0xA8;
 pub const PLAY_CODES: std::ops::RangeInclusive<u32> = 0xA9..=0xAF;
 
-/// The screen job a key has: its code, when the key sends one reserved code alone.
-pub fn screen_job(d: [u32; 4]) -> Option<u32> {
-    (d[0] == 0 && d[1] == 0 && d[3] == 0 && (NEXT_LAYOUT..=*PLAY_CODES.end()).contains(&d[2])).then_some(d[2])
+/// The screen job a key has: its code, when the key is given one of the
+/// keyboard's host slots (each sends one reserved code alone).
+pub fn screen_job(a: &Action) -> Option<u32> {
+    match a {
+        Action::Host(n) if *n <= *PLAY_CODES.end() - NEXT_LAYOUT => Some(NEXT_LAYOUT + n),
+        _ => None,
+    }
 }
 
-const CONSUMER: [(u32, &str); 18] = [
-    (181, "Next track"),
-    (182, "Previous track"),
-    (183, "Stop"),
-    (205, "Play/pause"),
-    (226, "Mute"),
-    (233, "Volume up"),
-    (234, "Volume down"),
-    (387, "Media player"),
-    (394, "Mail"),
-    (402, "Calculator"),
-    (404, "My computer"),
-    (545, "Web search"),
-    (547, "Web home"),
-    (548, "Web back"),
-    (549, "Web forward"),
-    (550, "Web stop"),
-    (551, "Web refresh"),
-    (554, "Web favorites"),
-];
+/// The host slot a screen job's code is sent from.
+pub fn screen_slot(code: u32) -> Action {
+    Action::Host(code - NEXT_LAYOUT)
+}
 
 pub const EFFECTS: [(&str, &str); 9] = [
     ("off", "Off"),
@@ -285,6 +221,20 @@ pub const EFFECTS: [(&str, &str); 9] = [
     ("trigger", "Reactive"),
     ("custom", "Per key"),
 ];
+
+/// The action "Press a key" gives a key: the modifiers held (by their bits,
+/// as `evdev_to_hid` gives them) and the key pressed, if one was.
+pub fn pressed_action(mods: u32, key: u32) -> Action {
+    let mut codes: Vec<u8> = (0..8).filter(|i| mods & (1 << i) != 0).map(|i| hid::FIRST_MODIFIER + i).collect();
+    if key != 0 {
+        codes.push(key as u8);
+    }
+    match codes.len() {
+        0 => Action::None,
+        1 => Action::Key(codes[0]),
+        _ => Action::Shortcut(codes),
+    }
+}
 
 /// A Linux key code (evdev) as the HID usage the keyboard stores, or as a
 /// modifier's bit: what "Press a key" assigns, and how a key typed on the Z10
@@ -394,8 +344,10 @@ fn u(v: &Value) -> u32 {
 fn rgb(v: &Value) -> [f64; 3] {
     [f(&v[0]), f(&v[1]), f(&v[2])]
 }
-fn def_of(v: &Value) -> [u32; 4] {
-    [u(&v[0]), u(&v[1]), u(&v[2]), u(&v[3])]
+/// An action as a profile holds it, or none (an action Ectodeck can't read,
+/// as no key has).
+fn action_of(v: &Value) -> Action {
+    Action::read(v).unwrap_or(Action::None)
 }
 pub fn hex(c: [f64; 3]) -> String {
     format!("#{:02x}{:02x}{:02x}", c[0] as u8, c[1] as u8, c[2] as u8)
@@ -406,62 +358,68 @@ pub fn hex(c: [f64; 3]) -> String {
 /// to Off elsewhere can be) is taken with white, the keyboard's own default
 /// screen light, which saving the profile then stores.
 pub fn lit_screen(p: &mut Value) {
-    if let Some(c) = p.pointer_mut("/lighting/lcd/color/color") {
+    if let Some(c) = p.pointer_mut("/lighting/screen/color/color") {
         if c.as_array().is_some_and(|a| !a.is_empty() && a.iter().all(|v| v.as_u64() == Some(0))) {
             *c = json!([255, 255, 255]);
         }
     }
 }
 
-/// A profile as the page edits it: its name, lighting and both layers.
+/// A profile as the page edits it: its name, lighting and the keys of both layers.
 fn pick(p: &Value) -> Value {
-    json!({ "name": p["name"], "lighting": p["lighting"], "keys": p["keys"], "fnkeys": p["fnkeys"] })
+    json!({ "name": p["name"], "lighting": p["lighting"], "keys": p["keys"] })
 }
 
-pub fn is_nothing(d: [u32; 4]) -> bool {
-    (d[0] == 0 && d[1] == 0 && d[2] == 0) || d[0] == 255
+/// The keys' effect a profile's lighting is set to.
+fn effect(l: &Value) -> &str {
+    l["keys"]["effect"].as_str().unwrap_or("")
+}
+
+pub fn is_nothing(a: &Action) -> bool {
+    matches!(a, Action::None | Action::Off)
 }
 
 /// What kind of action a key has, as its tag in the action button.
-pub fn kind_of(d: [u32; 4]) -> &'static str {
-    match d[0] {
-        0 if screen_job(d).is_some() => "Screen",
-        0 if d[1] != 0 || d[2] != 0 => "Key",
-        0 => "",
-        2 => "Media",
-        3 => "Macro",
-        4 | 5 => "Keyboard",
-        6..=9 => "Mouse",
-        17..=23 => "Profile",
+pub fn kind_of(a: &Action) -> &'static str {
+    match a {
+        Action::Host(_) if screen_job(a).is_some() => "Screen",
+        Action::Key(_) | Action::Shortcut(_) => "Key",
+        Action::Media(_) => "Media",
+        Action::Macro { .. } => "Macro",
+        Action::Fn | Action::Own(_) => "Keyboard",
+        Action::Mouse(_) | Action::Scroll { .. } => "Mouse",
+        Action::Profile(_) => "Profile",
         _ => "",
     }
 }
 
-/// One entry in the action menu: its label, the definition it sets, its kind.
+/// One entry in the action menu: its label, the action it sets, its kind.
 #[derive(Clone, Debug)]
-pub struct Action {
+pub struct Entry {
     pub label: String,
-    pub def: [u32; 4],
+    pub act: Action,
     pub tag: &'static str,
 }
 
 /// Every action a key can be given, grouped as the action menu shows them.
 pub struct Groups {
-    pub macros: Vec<Action>,
-    pub keys: Vec<Action>,
-    pub media: Vec<Action>,
-    pub mouse: Vec<Action>,
-    pub profiles: Vec<Action>,
+    pub macros: Vec<Entry>,
+    pub keys: Vec<Entry>,
+    pub media: Vec<Entry>,
+    pub mouse: Vec<Entry>,
+    pub profiles: Vec<Entry>,
     /// the screen's jobs: stepping through the layouts, and through the playlists (the
     /// action menu adds a job for each playlist after these)
-    pub layouts: Vec<Action>,
-    pub playlists: Vec<Action>,
-    pub board: Vec<Action>,
+    pub layouts: Vec<Entry>,
+    pub playlists: Vec<Entry>,
+    pub board: Vec<Entry>,
 }
 
 pub struct Page {
     pub layout: Vec<Key>,
     by_pos: HashMap<u32, usize>,
+    /// each key's id in the core's description, by its place in the keyboard's reports
+    ids: HashMap<u32, String>,
     zones: Vec<(u8, Vec<u32>)>,
     /// the drawing's view: its left, top, width and height
     pub view_box: (f64, f64, f64, f64),
@@ -547,6 +505,10 @@ impl Page {
             k.cy = k.y + k.h / 2.0;
         }
         let by_pos = keys.iter().enumerate().map(|(i, k)| (k.pos, i)).collect();
+        let ids = crate::cores::shown().device["controls"]
+            .as_array()
+            .map(|c| c.iter().filter_map(|c| Some((c["pos"].as_u64()? as u32, c["id"].as_str()?.to_string()))).collect())
+            .unwrap_or_default();
         let list = |name: &str| zones[name].as_array().map(|a| a.iter().map(u).collect()).unwrap_or_default();
         let zones = vec![(0x10, list("WASD")), (0x08, list("Arrows")), (0x04, list("Numbers")), (0x02, list("FKeys")), (0x01, list("Numpad"))];
         let (mut x0, mut x1, mut y0, mut y1) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
@@ -559,6 +521,7 @@ impl Page {
         Page {
             layout: keys,
             by_pos,
+            ids,
             zones,
             view_box,
             center: ((x0 + x1) / 2.0, (y0 + y1) / 2.0),
@@ -588,6 +551,11 @@ impl Page {
         self.by_pos.get(&pos).map(|&i| &self.layout[i])
     }
 
+    /// A key's id, by its place in the keyboard's reports.
+    pub fn id(&self, pos: u32) -> &str {
+        self.ids.get(&pos).map_or("", String::as_str)
+    }
+
     /// The keyboard's state has come: keep it, and start a draft of each profile.
     pub fn loaded(&mut self, mut dev: Value) {
         for n in PROFILE_NUMBERS {
@@ -605,6 +573,11 @@ impl Page {
 
     fn saved(&self, n: &str) -> &Value {
         &self.dev.as_ref().expect("loaded")["profiles"][n]
+    }
+
+    /// The keys as the keyboard was made: what each key is reset to.
+    fn factory_keys(&self) -> &Value {
+        &self.dev.as_ref().expect("loaded")["factory"]["keys"]
     }
 
     pub fn draft(&self) -> &Value {
@@ -648,31 +621,30 @@ impl Page {
         self.dev.as_ref()?["macros"][n.to_string()]["name"].as_str().map(String::from)
     }
 
-    pub fn describe(&self, d: [u32; 4]) -> String {
-        let [f, a, b, c] = d;
-        match f {
-            0 if screen_job(d).is_some() => self.screen_job_name(b),
-            0 => {
-                let mut parts: Vec<String> = MODS.iter().filter(|(m, _)| a & m != 0).map(|(_, n)| n.to_string()).collect();
-                parts.extend([b, c].into_iter().filter(|h| *h != 0).map(|h| hid_name(h).unwrap_or(format!("Key {h}"))));
-                if parts.is_empty() { "Nothing".into() } else { parts.join(" + ") }
-            }
-            2 => {
-                let code = a | b << 8;
-                CONSUMER.iter().find(|(c, _)| *c == code).map_or(format!("Media code {code}"), |(_, n)| n.to_string())
-            }
-            3 => format!("Macro: {}", self.macro_name(a).unwrap_or(format!("number {a}"))),
-            4 => "Fn".into(),
-            5 => "Game mode toggle".into(),
-            6 => if a != 0 { "Scroll down".into() } else { "Scroll up".into() },
-            7 => "Left click".into(),
-            8 => "Right click".into(),
-            9 => "Middle click".into(),
-            17..=21 => format!("Switch to {}", self.profile_name((f - 16) as u8)),
-            22 => "Next profile".into(),
-            23 => "Previous profile".into(),
-            255 => "Disabled".into(),
-            _ => format!("Function {f}"),
+    pub fn describe(&self, a: &Action) -> String {
+        // a key's name, or its modifier's in full
+        let key = |u: u8| if hid::is_modifier(u) { modifier(u, false).to_string() } else { hid_name(u as u32).unwrap_or(format!("Key {u}")) };
+        match a {
+            Action::Host(_) if screen_job(a).is_some() => self.screen_job_name(screen_job(a).unwrap()),
+            Action::None => "Nothing".into(),
+            Action::Key(u) => key(*u),
+            Action::Shortcut(codes) => codes.iter().map(|u| key(*u)).collect::<Vec<_>>().join(" + "),
+            Action::Media(code) => media::label(*code).map_or(format!("Media code {code}"), String::from),
+            Action::Macro { n, .. } => format!("Macro: {}", self.macro_name(*n).unwrap_or(format!("number {n}"))),
+            Action::Fn => "Fn".into(),
+            Action::Own(id) => ectotype_core::shared::OWN.iter().find(|(o, _)| o == id).map_or(id.clone(), |(_, l)| l.to_string()),
+            Action::Scroll { up } => if *up { "Scroll up".into() } else { "Scroll down".into() },
+            Action::Mouse(1) => "Left click".into(),
+            Action::Mouse(2) => "Right click".into(),
+            Action::Mouse(3) => "Middle click".into(),
+            Action::Mouse(b) => format!("Mouse button {b}"),
+            Action::Profile(Jump::To(n)) => format!("Switch to {}", self.profile_name(*n as u8)),
+            Action::Profile(Jump::Next) => "Next profile".into(),
+            Action::Profile(Jump::Previous) => "Previous profile".into(),
+            Action::Off => "Disabled".into(),
+            Action::Sensitivity => "Next sensitivity".into(),
+            Action::Host(n) => format!("Ectodeck's job {n}"),
+            Action::Raw(b) => format!("Keyboard code {}", b.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(" ")),
         }
     }
 
@@ -681,9 +653,9 @@ impl Page {
     pub fn sent_codes(&self) -> HashSet<u32> {
         self.drafts
             .values()
-            .flat_map(|d| ["keys", "fnkeys"].map(|l| d[l].as_array().cloned().unwrap_or_default()))
+            .flat_map(|d| ["base", "fn"].map(|l| d["keys"][l].as_object().map(|m| m.values().cloned().collect::<Vec<_>>()).unwrap_or_default()))
             .flatten()
-            .filter_map(|k| screen_job(def_of(&k)))
+            .filter_map(|k| screen_job(&action_of(&k)))
             .filter(|c| PLAY_CODES.contains(c))
             .collect()
     }
@@ -700,36 +672,40 @@ impl Page {
     }
 
     /// A remapped key's new meaning, printed on it like a second legend.
-    pub fn short_label(&self, d: [u32; 4], macro_names: &[String]) -> String {
-        let [f, a, b, c] = d;
-        match f {
+    pub fn short_label(&self, a: &Action, macro_names: &[String]) -> String {
+        // the modifiers short, each once, then the keys, the keypad's as Num
+        let keys = |codes: &[u8]| {
+            let mut parts: Vec<String> = Vec::new();
+            for u in codes.iter().filter(|u| hid::is_modifier(**u)) {
+                let n = modifier(*u, true);
+                if !parts.iter().any(|p| p == n) {
+                    parts.push(n.into());
+                }
+            }
+            parts.extend(codes.iter().filter(|u| !hid::is_modifier(**u)).map(|h| {
+                let n = hid_name(*h as u32).unwrap_or(format!("Key {h}"));
+                n.strip_prefix("Keypad ").map_or(n.clone(), |r| format!("Num {r}"))
+            }));
+            parts.join("+")
+        };
+        match a {
             // (a key that plays one playlist is printed with the playlist's name, as one that
             // switches to a profile is with the profile's)
-            0 if screen_job(d).is_some() => match b {
+            Action::Host(_) if screen_job(a).is_some() => match screen_job(a).unwrap() {
                 NEXT_LAYOUT => "NEXT".into(),
                 PREV_LAYOUT => "PREV".into(),
                 NEXT_PLAYLIST => "PL+".into(),
                 PREV_PLAYLIST => "PL-".into(),
                 c => self.playlist_keys.get(&c).cloned().unwrap_or("PLAY".into()),
             },
-            0 => {
-                let mut parts: Vec<String> = Vec::new();
-                for (m, n) in MOD_SHORT {
-                    if a & m != 0 && !parts.iter().any(|p| p == n) {
-                        parts.push(n.into());
-                    }
-                }
-                parts.extend([b, c].into_iter().filter(|h| *h != 0).map(|h| {
-                    let n = hid_name(h).unwrap_or(format!("Key {h}"));
-                    n.strip_prefix("Keypad ").map_or(n.clone(), |r| format!("Num {r}"))
-                }));
-                if parts.is_empty() { "Nothing".into() } else { parts.join("+") }
-            }
-            3 => distinct_part(&self.macro_name(a).unwrap_or(format!("Macro {a}")), macro_names),
+            Action::None => "Nothing".into(),
+            Action::Key(u) => keys(&[*u]),
+            Action::Shortcut(codes) => keys(codes),
+            Action::Macro { n, .. } => distinct_part(&self.macro_name(*n).unwrap_or(format!("Macro {n}")), macro_names),
             // (a key that switches to a profile is printed with the profile's name)
-            17..=21 => self.profile_name((f - 16) as u8),
-            255 => "Off".into(),
-            _ => self.describe(d),
+            Action::Profile(Jump::To(n)) => self.profile_name(*n as u8),
+            Action::Off => "Off".into(),
+            _ => self.describe(a),
         }
     }
 
@@ -748,51 +724,55 @@ impl Page {
         }
     }
 
-    pub fn def(&self, layer: &str, pos: u32) -> [u32; 4] {
-        def_of(&self.draft()[layer][pos as usize])
+    /// What a key does on a layer ("base", or "fn" with Fn held), in the profile being edited.
+    pub fn def(&self, layer: &str, pos: u32) -> Action {
+        action_of(&self.draft()["keys"][layer][self.id(pos)])
     }
 
-    pub fn factory(&self, layer: &str, pos: u32) -> [u32; 4] {
-        def_of(&self.saved(FACTORY)[layer][pos as usize])
+    /// What a key did as the keyboard was made.
+    pub fn factory(&self, layer: &str, pos: u32) -> Action {
+        action_of(&self.factory_keys()[layer][self.id(pos)])
     }
 
-    pub fn set_def(&mut self, layer: &str, pos: u32, d: [u32; 4]) {
-        let n = self.editing;
+    pub fn set_def(&mut self, layer: &str, pos: u32, a: &Action) {
+        let (n, id) = (self.editing, self.id(pos).to_string());
         if let Some(draft) = self.drafts.get_mut(&n) {
-            draft[layer][pos as usize] = json!(d);
+            draft["keys"][layer][id] = a.write();
         }
     }
 
     pub fn reset_key(&mut self, pos: u32) {
-        for layer in ["keys", "fnkeys"] {
-            let d = self.factory(layer, pos);
-            self.set_def(layer, pos, d);
+        for layer in ["base", "fn"] {
+            let a = self.factory(layer, pos);
+            self.set_def(layer, pos, &a);
         }
     }
 
     /// A macro keeps playing the way it already plays on its other keys.
-    pub fn with_macro_play(&self, d: [u32; 4]) -> [u32; 4] {
-        if d[0] != 3 {
-            return d;
-        }
-        let mut modes = Vec::new();
+    pub fn with_macro_play(&self, a: &Action) -> Action {
+        let Action::Macro { n: which, .. } = a else { return a.clone() };
+        let mut plays = Vec::new();
         for n in PROFILE_NUMBERS {
-            for layer in ["keys", "fnkeys"] {
-                if let Some(a) = self.drafts[&n][layer].as_array() {
-                    for v in a {
-                        let v = def_of(v);
-                        if v[0] == 3 && v[1] == d[1] {
-                            modes.push((v[2], if v[2] == 11 { v[3] } else { 0 }, v[3]));
+            for layer in ["base", "fn"] {
+                if let Some(m) = self.drafts[&n]["keys"][layer].as_object() {
+                    for v in m.values() {
+                        if let Action::Macro { n, plays: p } = action_of(v) {
+                            if n == *which {
+                                plays.push(p);
+                            }
                         }
                     }
                 }
             }
         }
-        let first = modes.first().copied();
-        let varies = modes.iter().any(|m| (m.0, m.1) != first.map_or((0, 0), |f| (f.0, f.1)));
+        // (a number of times is the same way to play whatever the number)
+        let same = |a: &Plays, b: &Plays| std::mem::discriminant(a) == std::mem::discriminant(b) && !matches!((a, b), (Plays::Times(x), Plays::Times(y)) if x != y);
+        let first = plays.first().copied();
+        let varies = plays.iter().any(|p| !first.is_some_and(|f| same(p, &f)));
         match first {
-            Some((mode, _, count)) if !varies => [3, d[1], mode, if mode == 11 { if count == 0 { 2 } else { count } } else { 0 }],
-            _ => [3, d[1], 0, 0],
+            Some(Plays::Times(0)) if !varies => Action::Macro { n: *which, plays: Plays::Times(2) },
+            Some(p) if !varies => Action::Macro { n: *which, plays: p },
+            _ => Action::Macro { n: *which, plays: Plays::Once },
         }
     }
 
@@ -814,11 +794,11 @@ impl Page {
     }
 
     pub fn groups(&self) -> Groups {
-        let keys = hid_codes().into_iter().map(|h| Action { label: hid_name(h).unwrap(), def: [0, 0, h, 0], tag: "Key" });
-        let mods = MODS.iter().map(|(m, n)| Action { label: n.to_string(), def: [0, *m, 0, 0], tag: "Key" });
-        let mut media: Vec<Action> = CONSUMER.iter().map(|(c, n)| Action { label: n.to_string(), def: [2, c & 255, c >> 8, 0], tag: "Media" }).collect();
-        media.sort_by_key(|a| a.def[1] | a.def[2] << 8);
-        let mut macros: Vec<(u32, Action)> = self
+        let keys = hid_codes().into_iter().map(|h| Entry { label: hid_name(h).unwrap(), act: Action::Key(h as u8), tag: "Key" });
+        let mods = (0..8).map(|i| hid::FIRST_MODIFIER + i).map(|u| Entry { label: modifier(u, false).to_string(), act: Action::Key(u), tag: "Key" });
+        let mut media: Vec<Entry> = media::MEDIA.iter().map(|(c, _, n)| Entry { label: n.to_string(), act: Action::Media(*c), tag: "Media" }).collect();
+        media.sort_by_key(|e| if let Action::Media(c) = e.act { c } else { 0 });
+        let mut macros: Vec<(u32, Entry)> = self
             .dev
             .as_ref()
             .and_then(|d| d["macros"].as_object())
@@ -826,29 +806,29 @@ impl Page {
                 m.iter()
                     .filter_map(|(i, v)| {
                         let i: u32 = i.parse().ok()?;
-                        Some((i, Action { label: v["name"].as_str().map_or(format!("Macro {i}"), String::from), def: [3, i, 0, 0], tag: "Macro" }))
+                        Some((i, Entry { label: v["name"].as_str().map_or(format!("Macro {i}"), String::from), act: Action::Macro { n: i, plays: Plays::Once }, tag: "Macro" }))
                     })
                     .collect()
             })
             .unwrap_or_default();
         macros.sort_by_key(|(i, _)| *i);
-        let mouse = [("Left click", [7, 0, 0, 0]), ("Right click", [8, 0, 0, 0]), ("Middle click", [9, 0, 0, 0]), ("Scroll up", [6, 0, 0, 0]), ("Scroll down", [6, 1, 0, 0])]
+        let mouse = [("Left click", Action::Mouse(1)), ("Right click", Action::Mouse(2)), ("Middle click", Action::Mouse(3)), ("Scroll up", Action::Scroll { up: true }), ("Scroll down", Action::Scroll { up: false })]
             .into_iter()
-            .map(|(l, d)| Action { label: l.into(), def: d, tag: "Mouse" })
+            .map(|(l, act)| Entry { label: l.into(), act, tag: "Mouse" })
             .collect();
         let profiles = PROFILE_NUMBERS
             .iter()
-            .map(|n| Action { label: format!("Switch to {}", self.profile_name(*n)), def: [16 + *n as u32, 0, 0, 0], tag: "Profile" })
+            .map(|n| Entry { label: format!("Switch to {}", self.profile_name(*n)), act: Action::Profile(Jump::To(*n as u32)), tag: "Profile" })
             .chain([
-                Action { label: "Next profile".into(), def: [22, 0, 0, 0], tag: "Profile" },
-                Action { label: "Previous profile".into(), def: [23, 0, 0, 0], tag: "Profile" },
+                Entry { label: "Next profile".into(), act: Action::Profile(Jump::Next), tag: "Profile" },
+                Entry { label: "Previous profile".into(), act: Action::Profile(Jump::Previous), tag: "Profile" },
             ])
             .collect();
         let board = vec![
-            Action { label: "Fn".into(), def: [4, 0, 0, 0], tag: "Keyboard" },
-            Action { label: "Game mode toggle".into(), def: [5, 0, 0, 0], tag: "Keyboard" },
+            Entry { label: "Fn".into(), act: Action::Fn, tag: "Keyboard" },
+            Entry { label: "Game mode toggle".into(), act: Action::Own("game-mode".into()), tag: "Keyboard" },
         ];
-        let screen = |codes: [u32; 2]| codes.map(|c| Action { label: self.screen_job_name(c), def: [0, 0, c, 0], tag: "Screen" }).to_vec();
+        let screen = |codes: [u32; 2]| codes.map(|c| Entry { label: self.screen_job_name(c), act: screen_slot(c), tag: "Screen" }).to_vec();
         Groups {
             macros: macros.into_iter().map(|(_, a)| a).collect(),
             keys: keys.chain(mods).collect(),
@@ -869,9 +849,8 @@ impl Page {
             return out;
         }
         for k in &self.layout {
-            let d = self.def("keys", k.pos);
-            if d[0] == 3 {
-                if let Some(n) = self.macro_name(d[1]) {
+            if let Action::Macro { n, .. } = self.def("base", k.pos) {
+                if let Some(n) = self.macro_name(n) {
                     if !out.contains(&n) {
                         out.push(n);
                     }
@@ -889,14 +868,14 @@ impl Page {
         if self.dev.is_none() {
             return None;
         }
-        let layer = if self.fn_layer && self.view == View::Keys { "fnkeys" } else { "keys" };
-        let d = self.def(layer, pos);
-        (d != self.factory(layer, pos)).then(|| self.short_label(d, names))
+        let layer = if self.fn_layer && self.view == View::Keys { "fn" } else { "base" };
+        let a = self.def(layer, pos);
+        (a != self.factory(layer, pos)).then(|| self.short_label(&a, names))
     }
 
     /// The name, effect and small color sample of each profile's button.
     pub fn profile_effect(&self, n: u8) -> String {
-        let mode = self.drafts[&n]["lighting"]["mode"].as_str().unwrap_or("").to_string();
+        let mode = effect(&self.drafts[&n]["lighting"]).to_string();
         EFFECTS.iter().find(|(m, _)| *m == mode).map_or(mode, |(_, name)| name.to_string())
     }
 
@@ -909,11 +888,12 @@ impl Page {
     /// The profile's colors for its swatch: one color, or up to four for a gradient.
     pub fn profile_swatch(&self, n: u8) -> Vec<[f64; 3]> {
         let l = &self.drafts[&n]["lighting"];
-        match l["mode"].as_str().unwrap_or("") {
+        let e = &l["keys"]["effects"];
+        match effect(l) {
             "off" | "custom" => vec![[0.0; 3]],
-            "static" => vec![rgb(&l["static"]["color"])],
+            "static" => vec![rgb(&e["static"]["color"])],
             m => {
-                let cols: Vec<[f64; 3]> = l[m]["colors"].as_array().map(|a| a.iter().take(4).map(|c| rgb(&c["color"])).collect()).unwrap_or_default();
+                let cols: Vec<[f64; 3]> = e[m]["colors"].as_array().map(|a| a.iter().take(4).map(|c| rgb(&c["color"])).collect()).unwrap_or_default();
                 if cols.is_empty() { vec![[136.0; 3], [255.0; 3]] } else { cols }
             }
         }
@@ -943,7 +923,7 @@ impl Page {
     /// Whether the preview moves on its own, and so needs drawing every frame.
     pub fn animated(&self) -> bool {
         let Some(_) = &self.dev else { return false };
-        match self.draft()["lighting"]["mode"].as_str().unwrap_or("") {
+        match effect(&self.draft()["lighting"]) {
             "breathing" | "pulse" | "spiral" | "wave" | "stars" => true,
             "trigger" => !self.flashes.is_empty(),
             _ => false,
@@ -955,8 +935,11 @@ impl Page {
         if self.dev.is_none() {
             return Vec::new();
         }
-        let l = self.draft()["lighting"].clone();
-        let mode = l["mode"].as_str().unwrap_or("off").to_string();
+        let l = self.draft()["lighting"]["keys"]["effects"].clone();
+        let mode = match effect(&self.draft()["lighting"]) {
+            "" => "off".to_string(),
+            m => m.to_string(),
+        };
         if mode == "stars" && self.random() < 0.35 {
             let i = (self.random() * self.layout.len() as f64) as usize % self.layout.len();
             let pos = self.layout[i].pos;
@@ -993,6 +976,8 @@ impl Page {
             .collect()
     }
 
+    /// Each lit key's color and light at time `t` (ms) for an effect, `l` every
+    /// effect's settings as the profile keeps them.
     fn effect_colors(&mut self, l: &Value, mode: &str, t: f64) -> HashMap<u32, [f64; 4]> {
         let e = &l[if mode == "off" { "static" } else { mode }];
         let in_zone = self.zone_set(e["zone"].as_u64().unwrap_or(0x80) as u8);
@@ -1087,30 +1072,32 @@ impl Page {
     pub fn pos_for(&self, code: u32) -> Option<u32> {
         let profile = &self.dev.as_ref()?["profiles"][self.active().to_string()];
         let key = evdev_to_hid(code);
-        let media = ectotype_core::recorder::key_media(code as u16).map(u32::from);
+        let media = ectotype_core::recorder::key_media(code as u16);
         // how closely a key's meaning sends the code: 2 only it, 1 it among more, 0 not at all
-        let sends = |d: [u32; 4]| match d[0] {
-            0 => match key {
-                Some((mods, 0)) => u32::from(d[1] == mods && d[2] == 0) * 2,
-                Some((_, hid)) if d[2] == hid || d[3] == hid => if d[1] == 0 && (d[2] == 0 || d[3] == 0) { 2 } else { 1 },
-                _ => 0,
-            },
-            2 => u32::from(media == Some(d[1] | d[2] << 8)) * 2,
+        let sends = |a: &Action| match (a, key) {
+            // a modifier typed: a key that is that modifier alone
+            (Action::Key(u), Some((mods, 0))) if hid::is_modifier(*u) => u32::from(1u32 << (u - hid::FIRST_MODIFIER) == mods) * 2,
+            (Action::Key(u), Some((_, h))) => u32::from(*u as u32 == h) * 2,
+            // (a key among more: with a modifier, or beside another key)
+            (Action::Shortcut(codes), Some((_, h))) if h != 0 && codes.iter().any(|u| *u as u32 == h) => 1,
+            (Action::Media(c), _) => u32::from(media == Some(*c)) * 2,
             _ => 0,
         };
-        ["keys", "fnkeys"].iter().find_map(|layer| {
-            let keys = profile[*layer].as_array()?;
-            let best = keys.iter().enumerate().map(|(pos, d)| (sends(def_of(d)), pos as u32)).filter(|(m, _)| *m > 0).max_by_key(|(m, pos)| (*m, std::cmp::Reverse(*pos)))?;
+        ["base", "fn"].iter().find_map(|layer| {
+            let best = (0..ectotype_core::protocol::NKEYS as u32)
+                .filter_map(|pos| Some((sends(&action_of(profile["keys"][*layer].get(self.id(pos))?)), pos)))
+                .filter(|(m, _)| *m > 0)
+                .max_by_key(|(m, pos)| (*m, std::cmp::Reverse(*pos)))?;
             Some(best.1)
         })
     }
 
     /// Light a key as pressing it would, for Reactive.
     pub fn flash(&mut self, pos: u32, t: f64) {
-        if self.dev.is_none() || self.draft()["lighting"]["mode"] != "trigger" {
+        if self.dev.is_none() || effect(&self.draft()["lighting"]) != "trigger" {
             return;
         }
-        let e = self.draft()["lighting"]["trigger"].clone();
+        let e = self.draft()["lighting"]["keys"]["effects"]["trigger"].clone();
         let cols: Vec<[f64; 3]> = e["colors"].as_array().map(|a| a.iter().take(7).map(|c| rgb(&c["color"])).collect()).unwrap_or_default();
         if cols.is_empty() {
             return;
@@ -1142,7 +1129,7 @@ impl Page {
     /// keyboard cannot play from a preset), or the effect itself.
     pub fn preview_body(&self) -> Value {
         let l = &self.draft()["lighting"];
-        match l["mode"].as_str().unwrap_or("off") {
+        match effect(l) {
             "custom" => json!({ "colors": (0..116).map(|i| self.custom.get(i).copied().unwrap_or([0; 3])).collect::<Vec<_>>() }),
             "stars" | "trigger" => json!({ "colors": self.streamed() }),
             _ => json!({ "lighting": l }),
@@ -1150,7 +1137,7 @@ impl Page {
     }
 
     pub fn streams(&self) -> bool {
-        matches!(self.draft()["lighting"]["mode"].as_str(), Some("stars") | Some("trigger"))
+        matches!(effect(&self.draft()["lighting"]), "stars" | "trigger")
     }
 
     /// Each key's color as the screen shows it this frame, for the keyboard.
@@ -1164,7 +1151,7 @@ impl Page {
         if self.dev.is_none() {
             return [90.0; 3];
         }
-        let c = &self.draft()["lighting"]["lcd"]["color"];
+        let c = &self.draft()["lighting"]["screen"]["color"];
         let b = f(&c["brightness"]);
         let look = led_look(rgb(&c["color"]));
         look.map(|v| (v as f64 * (0.3 + 0.7 * b / 255.0)).round())
@@ -1189,8 +1176,8 @@ impl Page {
 /// A draft as the keyboard stores it: Per key as the backlight off.
 fn stored_form(d: &Value) -> Value {
     let mut d = d.clone();
-    if d["lighting"]["mode"] == "custom" {
-        d["lighting"]["mode"] = json!("off");
+    if d["lighting"]["keys"]["effect"] == "custom" {
+        d["lighting"]["keys"]["effect"] = json!("off");
     }
     d
 }
@@ -1216,7 +1203,7 @@ fn distinct_part(name: &str, names: &[String]) -> String {
 /// A macro step's key, as the macro list names it.
 pub fn step_name(s: &Value) -> String {
     if let Some(m) = s.get("media") {
-        let m = u(m);
+        let m = m.as_str().and_then(media::code).map_or_else(|| u(m), u32::from);
         let name = match m {
             0xB5 => "Next track",
             0xB6 => "Previous track",
@@ -1238,17 +1225,11 @@ pub fn step_name(s: &Value) -> String {
         };
         return name.into();
     }
-    let code = u(&s["code"]);
-    let name = match code {
-        112 => Some("Left Ctrl".to_string()),
-        113 => Some("Left Shift".into()),
-        114 => Some("Left Alt".into()),
-        115 => Some("Left Super".into()),
-        116 => Some("Right Ctrl".into()),
-        117 => Some("Right Shift".into()),
-        118 => Some("Right Alt".into()),
-        119 => Some("Right Super".into()),
-        c if c > 0 && c < 104 => hid_name(c),
+    let k = &s["key"];
+    let code = k.as_str().and_then(hid::usage).map_or_else(|| u(k), u32::from);
+    let name = match u8::try_from(code) {
+        Ok(m) if hid::is_modifier(m) => Some(modifier(m, false).to_string()),
+        _ if code > 0 && code < 104 => hid_name(code),
         _ => None,
     };
     name.unwrap_or(format!("Code {code}"))
@@ -1317,8 +1298,8 @@ mod saving_tests {
 
     fn page() -> Page {
         let mut p = Page::new();
-        let prof = json!({ "name": "DEFAULT 1", "lighting": { "mode": "off", "static": { "zone": 128 } }, "keys": [], "fnkeys": [] });
-        p.dev = Some(json!({ "active": 1, "profiles": { "1": prof.clone() } }));
+        let prof = json!({ "name": "DEFAULT 1", "lighting": { "keys": { "effect": "off", "effects": { "static": { "zone": 128 } } } }, "keys": { "base": {}, "fn": {} } });
+        p.dev = Some(json!({ "active": 1, "profiles": { "1": prof.clone() }, "factory": { "keys": { "base": {}, "fn": {} } } }));
         p.drafts.insert(1, pick(&prof));
         p.editing = 1;
         p
@@ -1327,11 +1308,11 @@ mod saving_tests {
     #[test]
     fn per_key_is_saved_once_the_keyboard_holds_its_backlight_off() {
         let mut p = page();
-        p.drafts.get_mut(&1).unwrap()["lighting"]["mode"] = json!("custom");
+        p.drafts.get_mut(&1).unwrap()["lighting"]["keys"]["effect"] = json!("custom");
         // the keyboard stores Per key as off, so a draft of Per key over a stored off is saved
         assert!(!p.is_dirty(1));
-        assert_eq!(p.save_body_of(1)["lighting"]["mode"], "off");
-        p.drafts.get_mut(&1).unwrap()["lighting"]["mode"] = json!("static");
+        assert_eq!(p.save_body_of(1)["lighting"]["keys"]["effect"], "off");
+        p.drafts.get_mut(&1).unwrap()["lighting"]["keys"]["effect"] = json!("static");
         assert!(p.is_dirty(1));
     }
 
@@ -1353,24 +1334,24 @@ mod saving_tests {
     #[test]
     fn a_screen_light_of_black_comes_as_white() {
         let mut p = Page::new();
-        let lcd = |rgb: [u8; 3]| json!({ "color": { "brightness": 255, "color": rgb }, "apps": 47 });
-        let prof = |rgb: [u8; 3]| json!({ "name": "P", "lighting": { "mode": "off", "lcd": lcd(rgb) }, "keys": [], "fnkeys": [] });
+        let screen = |rgb: [u8; 3]| json!({ "color": { "brightness": 255, "color": rgb }, "apps": 47 });
+        let prof = |rgb: [u8; 3]| json!({ "name": "P", "lighting": { "keys": { "effect": "off" }, "screen": screen(rgb) }, "keys": { "base": {}, "fn": {} } });
         p.loaded(json!({ "active": 1, "profiles": { "1": prof([0, 0, 0]), "2": prof([255, 32, 0]) } }));
         // the unlit screen light shows and plays white, and is saved as white; a chosen light stays
-        assert_eq!(p.drafts[&1]["lighting"]["lcd"]["color"]["color"], json!([255, 255, 255]));
+        assert_eq!(p.drafts[&1]["lighting"]["screen"]["color"]["color"], json!([255, 255, 255]));
         assert!(!p.is_dirty(1));
-        assert_eq!(p.save_body_of(1)["lighting"]["lcd"]["color"]["color"], json!([255, 255, 255]));
-        assert_eq!(p.drafts[&2]["lighting"]["lcd"]["color"]["color"], json!([255, 32, 0]));
+        assert_eq!(p.save_body_of(1)["lighting"]["screen"]["color"]["color"], json!([255, 255, 255]));
+        assert_eq!(p.drafts[&2]["lighting"]["screen"]["color"]["color"], json!([255, 32, 0]));
         // and read back after a save
         p.saved_profile(1, prof([0, 0, 0]), true);
-        assert_eq!(p.drafts[&1]["lighting"]["lcd"]["color"]["color"], json!([255, 255, 255]));
+        assert_eq!(p.drafts[&1]["lighting"]["screen"]["color"]["color"], json!([255, 255, 255]));
     }
 
     #[test]
     fn a_change_made_while_saving_is_kept() {
         let mut p = page();
-        p.drafts.get_mut(&1).unwrap()["lighting"]["mode"] = json!("static");
-        let read_back = json!({ "name": "DEFAULT 1", "lighting": { "mode": "static", "static": { "zone": 128 } }, "keys": [], "fnkeys": [] });
+        p.drafts.get_mut(&1).unwrap()["lighting"]["keys"]["effect"] = json!("static");
+        let read_back = json!({ "name": "DEFAULT 1", "lighting": { "keys": { "effect": "static", "effects": { "static": { "zone": 128 } } } }, "keys": { "base": {}, "fn": {} } });
         // changed again before the keyboard answered
         p.drafts.get_mut(&1).unwrap()["name"] = json!("Games");
         p.saved_profile(1, read_back, false);
@@ -1382,18 +1363,20 @@ mod saving_tests {
     fn a_key_with_a_screen_job_says_so_and_prints_it() {
         let mut p = page();
         p.playlist_keys.insert(0xA9, "Quiet".into());
-        assert_eq!(kind_of([0, 0, NEXT_LAYOUT, 0]), "Screen");
-        assert_eq!(kind_of([0, 0, 0xAF, 0]), "Screen");
+        // (as the keyboard's core gives each: a host slot, or a key)
+        let of = |d: [u8; 4]| ectotype_core::shared::action_of(d);
+        assert_eq!(kind_of(&of([0, 0, NEXT_LAYOUT as u8, 0])), "Screen");
+        assert_eq!(kind_of(&of([0, 0, 0xAF, 0])), "Screen");
         // (with a modifier, or past the reserved run, it's a key like any other)
-        assert_eq!(kind_of([0, 1, NEXT_LAYOUT, 0]), "Key");
-        assert_eq!(kind_of([0, 0, 0xB0, 0]), "Key");
-        let says: Vec<(String, String)> = [NEXT_LAYOUT, PREV_LAYOUT, NEXT_PLAYLIST, PREV_PLAYLIST, 0xA9, 0xAA].iter().map(|c| (p.describe([0, 0, *c, 0]), p.short_label([0, 0, *c, 0], &[]))).collect();
+        assert_eq!(kind_of(&of([0, 1, NEXT_LAYOUT as u8, 0])), "Key");
+        assert_eq!(kind_of(&of([0, 0, 0xB0, 0])), "Key");
+        let says: Vec<(String, String)> = [NEXT_LAYOUT, PREV_LAYOUT, NEXT_PLAYLIST, PREV_PLAYLIST, 0xA9, 0xAA].iter().map(|c| (p.describe(&screen_slot(*c)), p.short_label(&screen_slot(*c), &[]))).collect();
         let want = [("Next screen layout", "NEXT"), ("Previous screen layout", "PREV"), ("Next playlist", "PL+"), ("Previous playlist", "PL-"), ("Play Quiet", "Quiet"), ("Play a deleted playlist", "PLAY")];
         assert_eq!(says, want.map(|(a, b)| (a.to_string(), b.to_string())));
         let g = p.groups();
         assert_eq!(g.layouts.iter().chain(&g.playlists).map(|a| a.label.as_str()).collect::<Vec<_>>(), ["Next screen layout", "Previous screen layout", "Next playlist", "Previous playlist"]);
         // and none of the codes is a key in the menu's list of keys
-        assert!(g.keys.iter().all(|a| screen_job(a.def).is_none()));
+        assert!(g.keys.iter().all(|e| screen_job(&e.act).is_none()));
     }
 
     #[test]
@@ -1403,8 +1386,8 @@ mod saving_tests {
         // the actions a key can be given, and what a key given one says it does
         let labels: Vec<String> = p.groups().profiles.iter().map(|a| a.label.clone()).collect();
         assert_eq!(labels[..2], ["Switch to Games", "Switch to Profile 2"], "a profile still named as it came, by its number");
-        assert_eq!(p.describe([17, 0, 0, 0]), "Switch to Games");
-        assert_eq!(p.short_label([17, 0, 0, 0], &[]), "Games", "printed on the key");
+        assert_eq!(p.describe(&Action::Profile(Jump::To(1))), "Switch to Games");
+        assert_eq!(p.short_label(&Action::Profile(Jump::To(1)), &[]), "Games", "printed on the key");
         // and where a macro is used
         assert_eq!(crate::macros::profiles_text(&[1, 2], |n| p.profile_name(n)), "Games and Profile 2");
         assert_eq!(crate::macros::profiles_text(&[1, 2, 3, 4, 5], |n| p.profile_name(n)), "all profiles");

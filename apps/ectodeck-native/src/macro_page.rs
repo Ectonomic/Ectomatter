@@ -13,7 +13,7 @@ use slint::{Model, ModelRc, SharedString, VecModel};
 use crate::device;
 use crate::front::WindowAsk;
 use crate::macros::{self, hit, piece, Draft, Editor, Plays, Recording, Timing, MEDIA, PLAYS, ROOM};
-use crate::z10::{hid_name, Page};
+use crate::z10::Page;
 use crate::{Cell, MacroItem, MacroWindow, MenuRow};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -70,7 +70,7 @@ enum Pick {
     Remove(usize),
     Timing(Timing),
     RecordWaits,
-    Plays(u32),
+    Plays(macros::How),
     Rename,
     Duplicate,
     Delete,
@@ -321,7 +321,7 @@ impl MacroPage {
                 Ask::CountDone(t) => {
                     let c: u32 = t.trim().parse().unwrap_or(2);
                     if let Some(d) = self.current_draft(page) {
-                        d.plays = Some((11, c.clamp(2, 255)));
+                        d.plays = Some((macros::How::Times(c.clamp(2, 255)), c.clamp(2, 255)));
                     }
                 }
                 Ask::Revert => self.ed.revert(page),
@@ -505,13 +505,14 @@ impl MacroPage {
             Kind::Keys { media, change } => {
                 search = true;
                 placeholder = if media { "Search media keys" } else { "Search keys" }.into();
-                let current = change.and_then(|i| d.steps.get(i)).map(|st| if media { json!({ "media": st["media"] }) } else { json!({ "code": st["code"] }) });
+                let current = change.and_then(|i| d.steps.get(i)).map(|st| if media { json!({ "media": st["media"] }) } else { json!({ "key": st["key"] }) });
                 let groups: Vec<(&str, Vec<(String, Value)>)> = if media {
-                    vec![("Media keys", MEDIA.iter().map(|(c, n)| (n.to_string(), json!({ "media": c }))).collect())]
+                    vec![("Media keys", MEDIA.iter().map(|(c, n)| (n.to_string(), json!({ "media": ectodeck_protocol::media::name(*c as u16).map_or(json!(c), |m| json!(m)) }))).collect())]
                 } else {
+                    let (mods, keys) = macros::step_keys();
                     vec![
-                        ("Modifiers", (112..=119).map(|c| (macros::key_name(c), json!({ "code": c }))).collect()),
-                        ("Keys", (1..104).filter_map(|c| hid_name(c).map(|n| (n, json!({ "code": c })))).collect()),
+                        ("Modifiers", mods.into_iter().map(|(l, k)| (l, json!({ "key": k }))).collect()),
+                        ("Keys", keys.into_iter().map(|(l, k)| (l, json!({ "key": k }))).collect()),
                     ]
                 };
                 let mut hits = 0;
@@ -555,7 +556,7 @@ impl MacroPage {
                 rows.push(row(1, "Each time its key is pressed", false));
                 picks.push(Pick::Nothing);
                 for (v, label) in PLAYS {
-                    rows.push(row(0, label, matches!(cur, Some(Plays::One(m, _)) if m == v)));
+                    rows.push(row(0, label, matches!(cur, Some(Plays::One(m, _)) if macros::same_choice(m, v))));
                     picks.push(Pick::Plays(v));
                 }
             }
@@ -596,7 +597,7 @@ impl MacroPage {
                 self.close_menu(false);
                 if let Some(st) = self.current_draft(page).and_then(|d| d.steps.get_mut(i)) {
                     if let Some(o) = st.as_object_mut() {
-                        o.remove("code");
+                        o.remove("key");
                         o.remove("media");
                         if let Some(nv) = v.as_object() {
                             for (k, x) in nv {
@@ -655,7 +656,7 @@ impl MacroPage {
                     _ => 3,
                 };
                 if let Some(d) = self.current_draft(page) {
-                    d.plays = Some((v, count));
+                    d.plays = Some((macros::with_count(v, count), count));
                 }
             }
             Pick::Rename => {
@@ -686,7 +687,7 @@ impl MacroPage {
                         .iter()
                         .map(|(layer, pos, ps)| {
                             let key = page.key(*pos).map(|k| page.key_label(k)).unwrap_or_else(|| format!("Key {pos}"));
-                            format!("{}{key} ({})", if layer == "fnkeys" { "Fn + " } else { "" }, macros::profiles_text(ps, |n| page.profile_name(n)))
+                            format!("{}{key} ({})", if layer == "fn" { "Fn + " } else { "" }, macros::profiles_text(ps, |n| page.profile_name(n)))
                         })
                         .collect();
                     format!("{} will do nothing until you give {} something else.", list.join(", "), if places.len() == 1 { "it" } else { "them" })
@@ -737,7 +738,8 @@ impl MacroPage {
         }
         let r = self.rec.status();
         if let Some(rec) = &mut self.ed.rec {
-            rec.steps = r["steps"].as_array().cloned().unwrap_or_default();
+            // (the keyboard's recorder gives its own steps: as the protocol's)
+            rec.steps = ectotype_core::shared::steps_of(&r["steps"].as_array().cloned().unwrap_or_default());
             rec.used = r["used"].as_u64().unwrap_or(0) as usize;
             rec.elapsed = r["elapsed"].as_f64().unwrap_or(0.0);
         }
@@ -753,7 +755,7 @@ impl MacroPage {
         }
         self.rec_timer.stop();
         let r = self.rec.stop(keep);
-        let got = r["steps"].as_array().cloned().unwrap_or_default();
+        let got = ectotype_core::shared::steps_of(&r["steps"].as_array().cloned().unwrap_or_default());
         if !got.is_empty() {
             self.ed.insert_at(page, got.clone());
         }
@@ -792,26 +794,27 @@ impl MacroPage {
         self.status(format!("Saving {}…", d.name), 0);
         kb(device::Ask::WriteMacro(
             n as u8,
-            json!({ "name": name, "steps": steps, "run": m["method"].as_u64().unwrap_or(9), "repeat": m["repeat"].as_u64().unwrap_or(0), "unit": m["unit"].as_u64().unwrap_or(1) }),
+            json!({ "name": name, "steps": steps, "run": m["run"].as_u64().unwrap_or(9), "repeat": m["repeat"].as_u64().unwrap_or(0), "unit": m["unit"].as_u64().unwrap_or(1) }),
         ));
         // how it plays lives on its keys: rewrite those, profile by profile, on
         // top of what each profile has saved, and carry the change into its draft
         let mut profiles = 0;
-        if let Some((mode, count)) = d.plays {
+        if let Some((how, count)) = d.plays {
             let mut by: BTreeMap<u8, Vec<(String, u32)>> = BTreeMap::new();
             for (layer, pos, ps) in Editor::places(page, n) {
                 for p in ps {
                     by.entry(p).or_default().push((layer.clone(), pos));
                 }
             }
-            let v = json!([3, n, mode, if mode == 11 { count } else { 0 }]);
+            let v = ectodeck_protocol::Action::Macro { n, plays: macros::with_count(how, count) }.write();
             for (p, ks) in by {
                 let saved = &page.dev.as_ref().unwrap()["profiles"][p.to_string()];
-                let mut body = json!({ "keys": saved["keys"].clone(), "fnkeys": saved["fnkeys"].clone() });
+                let mut body = json!({ "keys": saved["keys"].clone() });
                 for (layer, pos) in ks {
-                    body[&layer][pos as usize] = v.clone();
+                    let id = page.id(pos).to_string();
+                    body["keys"][&layer][&id] = v.clone();
                     if let Some(dr) = page.drafts.get_mut(&p) {
-                        dr[&layer][pos as usize] = v.clone();
+                        dr["keys"][&layer][&id] = v.clone();
                     }
                 }
                 kb(device::Ask::SaveKeys(p, body));
@@ -915,7 +918,7 @@ impl MacroPage {
                     n: n as i32,
                     name: name.into(),
                     sub: if d.is_some_and(|d| d.is_new) { "Not saved yet".into() } else { macros::describe(&steps).into() },
-                    timed: steps.iter().any(|s| s["delay"].as_u64().unwrap_or(0) > 0),
+                    timed: steps.iter().any(|s| s["after"].as_u64().unwrap_or(0) > 0),
                     current: self.ed.current == Some(n),
                     dirty: self.ed.dirty(page, n),
                 }
@@ -973,7 +976,7 @@ impl MacroPage {
 
         let used = macros::bytes(&eff) + ed.rec.as_ref().map_or(0, |r| r.used);
         let left = ROOM as i64 - used as i64;
-        let count = eff.len() + eff.iter().filter(|s| s["delay"].as_u64().unwrap_or(0) > 0).count();
+        let count = eff.len() + eff.iter().filter(|s| s["after"].as_u64().unwrap_or(0) > 0).count();
         let (meter, warn) = if left < 60 {
             (if left < 4 { "Full".to_string() } else { format!("Nearly full: room for about {} more key presses", left / 4) }, true)
         } else {
@@ -998,13 +1001,13 @@ impl MacroPage {
         let label = match (places.is_empty(), plays) {
             (true, _) => "Play once".to_string(),
             (_, Some(Plays::Varies)) => "Varies by key".into(),
-            (_, Some(Plays::One(m, c))) => format!("{}{}", PLAYS.iter().find(|(v, _)| *v == m).map_or("Play once", |p| p.1), if m == 11 { format!(" ({c} times)") } else { String::new() }),
+            (_, Some(Plays::One(m, c))) => format!("{}{}", PLAYS.iter().find(|(v, _)| macros::same_choice(*v, m)).map_or("Play once", |p| p.1), if matches!(m, macros::How::Times(_)) { format!(" ({c} times)") } else { String::new() }),
             (_, None) => "Play once".into(),
         };
         ui.set_plays_text(label.into());
         ui.set_plays_on(!places.is_empty() && !off);
         match plays {
-            Some(Plays::One(11, c)) if !places.is_empty() => {
+            Some(Plays::One(macros::How::Times(_), c)) if !places.is_empty() => {
                 ui.set_count_shown(true);
                 ui.set_count_text(c.to_string().into());
             }

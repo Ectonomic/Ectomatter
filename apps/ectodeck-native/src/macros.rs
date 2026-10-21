@@ -1,39 +1,51 @@
 //! The Macro Editor, as the web app had it (app.js at cd9ea82, the macros
 //! section): the library of the keyboard's 100 macro slots, and the chosen
 //! macro as a chain of steps, recorded from the keyboard or built by hand. A
-//! step is {code|media, down, delay}: a key or media key going down or up,
-//! then how long to wait before the next step.
+//! step is the core protocol's {key|media, down, after}: a key or media key,
+//! by its name, going down or up, then how long to wait before the next step.
 
 use std::collections::HashMap;
 
+use ectodeck_protocol::{keys as hid, Action};
 use serde_json::{json, Value};
 
 use crate::lighting::cell;
 use crate::text;
-use crate::z10::{hid_name, Page, PROFILE_NUMBERS};
+use crate::z10::{Page, PROFILE_NUMBERS};
 use crate::Cell;
+
+pub use ectodeck_protocol::Plays as How;
 
 /// bytes of steps the keyboard keeps a macro
 pub const ROOM: usize = 967;
-pub const PLAYS: [(u32, &str); 4] = [(0, "Play once"), (11, "Play a number of times"), (12, "Repeat while held"), (8, "Repeat until pressed again")];
+/// The ways a macro plays on its keys, as the Plays menu lists them (a number
+/// of times is one choice, whatever the number).
+pub const PLAYS: [(How, &str); 4] = [(How::Once, "Play once"), (How::Times(2), "Play a number of times"), (How::WhileHeld, "Repeat while held"), (How::UntilPressedAgain, "Repeat until pressed again")];
+
+/// Whether two ways of playing are the same choice in the Plays menu.
+pub fn same_choice(a: How, b: How) -> bool {
+    std::mem::discriminant(&a) == std::mem::discriminant(&b)
+}
+
+/// A way of playing, with `count` its number of times if it plays a number of times.
+pub fn with_count(h: How, count: u32) -> How {
+    match h {
+        How::Times(_) => How::Times(count),
+        h => h,
+    }
+}
 pub const MEDIA: [(u32, &str); 16] = [
     (0xB5, "Next track"), (0xB6, "Previous track"), (0xB7, "Stop"), (0xCD, "Play/pause"), (0xE2, "Mute"), (0xE9, "Volume up"),
     (0xEA, "Volume down"), (0x183, "Media player"), (0x18A, "Mail"), (0x192, "Calculator"), (0x194, "My computer"),
     (0x221, "Browser search"), (0x223, "Browser home"), (0x224, "Browser back"), (0x225, "Browser forward"), (0x227, "Browser refresh"),
 ];
 
-/// A key's name in a macro, which numbers the modifiers 112 to 119.
-pub fn key_name(code: u32) -> String {
-    let m = ["Left Ctrl", "Left Shift", "Left Alt", "Left Super", "Right Ctrl", "Right Shift", "Right Alt", "Right Super"];
-    if (112..=119).contains(&code) {
-        return m[(code - 112) as usize].into();
-    }
-    if code > 0 && code < 104 {
-        if let Some(n) = hid_name(code) {
-            return n;
-        }
-    }
-    format!("Code {code}")
+/// The keys a macro's step can press, by the protocol's names: the modifiers,
+/// then each key the menu lists, as (words for it, the step's key).
+pub fn step_keys() -> (Vec<(String, Value)>, Vec<(String, Value)>) {
+    let mods = hid::MODIFIERS.iter().map(|(name, label, _)| (label.to_string(), json!(name))).collect();
+    let keys = (1u8..104).filter_map(|u| crate::z10::hid_name(u as u32).map(|label| (label, hid::name(u).map_or(json!(u), |n| json!(n))))).collect();
+    (mods, keys)
 }
 
 pub use crate::z10::step_name;
@@ -42,13 +54,13 @@ fn is_media(st: &Value) -> bool {
     st.get("media").is_some()
 }
 fn step_key(st: &Value) -> String {
-    if is_media(st) { format!("m{}", st["media"]) } else { format!("k{}", st["code"]) }
+    if is_media(st) { format!("m{}", st["media"]) } else { format!("k{}", st["key"]) }
 }
 fn down(st: &Value) -> bool {
     st["down"].as_bool().unwrap_or(false)
 }
 fn delay(st: &Value) -> u64 {
-    st["delay"].as_u64().unwrap_or(0)
+    st["after"].as_u64().unwrap_or(0)
 }
 pub fn bytes(steps: &[Value]) -> usize {
     steps.iter().map(|s| if is_media(s) { 3 } else { 1 } + 3).sum()
@@ -85,14 +97,16 @@ pub struct Draft {
     pub starter: bool,
     pub timing: Timing,
     pub same: u64,
-    /// how it plays, set here to be written to its keys: (mode, count)
-    pub plays: Option<(u32, u32)>,
+    /// how it plays, set here to be written to its keys, and the number of
+    /// times it would play a number of times
+    pub plays: Option<(How, u32)>,
 }
 
-/// How a macro plays on its keys: one way, or it varies by key.
+/// How a macro plays on its keys: one way (with the number of times it would
+/// play a number of times), or it varies by key.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Plays {
-    One(u32, u32),
+    One(How, u32),
     Varies,
 }
 
@@ -172,8 +186,8 @@ impl Editor {
         let mut st = d.steps.clone();
         let n = st.len();
         match d.timing {
-            Timing::None => st.iter_mut().for_each(|s| s["delay"] = json!(0)),
-            Timing::Same => st.iter_mut().enumerate().for_each(|(i, s)| s["delay"] = json!(if i + 1 < n { d.same } else { 0 })),
+            Timing::None => st.iter_mut().for_each(|s| s["after"] = json!(0)),
+            Timing::Same => st.iter_mut().enumerate().for_each(|(i, s)| s["after"] = json!(if i + 1 < n { d.same } else { 0 })),
             Timing::Keep => {}
         }
         st
@@ -192,18 +206,17 @@ impl Editor {
         d.name != m["name"].as_str().unwrap_or("") || Value::Array(Self::effective(d)) != m["steps"] || d.plays.is_some()
     }
 
-    /// Where a macro is assigned, one entry per key and layer, with its profiles.
-    pub fn places(page: &Page, n: u32) -> Vec<(String, u32, Vec<u8>)> {
-        let mut out: Vec<(String, u32, Vec<u8>)> = Vec::new();
+    /// The ways macro `n` plays on each key that runs it, on any profile and layer,
+    /// with the key's place and layer and the profile.
+    fn runs(page: &Page, n: u32) -> Vec<(u8, &'static str, u32, How)> {
+        let mut out = Vec::new();
         for p in PROFILE_NUMBERS {
-            for layer in ["keys", "fnkeys"] {
-                if let Some(a) = page.drafts.get(&p).and_then(|d| d[layer].as_array()) {
-                    for (pos, v) in a.iter().enumerate() {
-                        if v[0] == 3 && v[1] == n {
-                            match out.iter_mut().find(|(l, q, _)| l == layer && *q == pos as u32) {
-                                Some(e) => e.2.push(p),
-                                None => out.push((layer.into(), pos as u32, vec![p])),
-                            }
+            for layer in ["base", "fn"] {
+                for pos in 0..ectotype_core::protocol::NKEYS as u32 {
+                    let v = page.drafts.get(&p).map(|d| &d["keys"][layer][page.id(pos)]);
+                    if let Some(Action::Macro { n: m, plays }) = v.and_then(Action::read) {
+                        if m == n {
+                            out.push((p, layer, pos, plays));
                         }
                     }
                 }
@@ -212,23 +225,30 @@ impl Editor {
         out
     }
 
-    pub fn plays_of(page: &Page, n: u32) -> Option<Plays> {
-        let mut modes = Vec::new();
-        for p in PROFILE_NUMBERS {
-            for layer in ["keys", "fnkeys"] {
-                if let Some(a) = page.drafts.get(&p).and_then(|d| d[layer].as_array()) {
-                    for v in a.iter().filter(|v| v[0] == 3 && v[1] == n) {
-                        let (m, c) = (v[2].as_u64().unwrap_or(0) as u32, v[3].as_u64().unwrap_or(0) as u32);
-                        modes.push((m, if m == 11 { c } else { 0 }, c));
-                    }
-                }
+    /// Where a macro is assigned, one entry per key and layer, with its profiles.
+    pub fn places(page: &Page, n: u32) -> Vec<(String, u32, Vec<u8>)> {
+        let mut out: Vec<(String, u32, Vec<u8>)> = Vec::new();
+        for (p, layer, pos, _) in Self::runs(page, n) {
+            match out.iter_mut().find(|(l, q, _)| l == layer && *q == pos) {
+                Some(e) => e.2.push(p),
+                None => out.push((layer.into(), pos, vec![p])),
             }
         }
-        let first = *modes.first()?;
-        if modes.iter().any(|m| (m.0, m.1) != (first.0, first.1)) {
+        out
+    }
+
+    pub fn plays_of(page: &Page, n: u32) -> Option<Plays> {
+        let all: Vec<How> = Self::runs(page, n).into_iter().map(|r| r.3).collect();
+        let first = *all.first()?;
+        // (a number of times is the same way only at the same number)
+        if all.iter().any(|h| !same_choice(*h, first) || matches!((h, first), (How::Times(a), How::Times(b)) if *a != b)) {
             return Some(Plays::Varies);
         }
-        Some(Plays::One(first.0, if first.2 == 0 { 2 } else { first.2 }))
+        let c = match first {
+            How::Times(c) if c != 0 => c,
+            _ => 2,
+        };
+        Some(Plays::One(with_count(first, c), c))
     }
 
     fn new_name(&self, page: &Page) -> String {
@@ -317,10 +337,10 @@ impl Editor {
     pub fn insert_tap(&mut self, page: &Page, v: &Value) {
         let mut a = v.clone();
         a["down"] = json!(true);
-        a["delay"] = json!(0);
+        a["after"] = json!(0);
         let mut b = v.clone();
         b["down"] = json!(false);
-        b["delay"] = json!(0);
+        b["after"] = json!(0);
         self.insert_at(page, vec![a, b]);
     }
 
@@ -335,7 +355,7 @@ impl Editor {
         }
         let i = i - 1;
         if delay(&d.steps[i]) == 0 {
-            d.steps[i]["delay"] = json!(100);
+            d.steps[i]["after"] = json!(100);
         }
         self.edit_wait = Some(i);
     }
@@ -349,7 +369,7 @@ impl Editor {
             Self::bake(d);
             let ms: u64 = v.chars().filter(|c| c.is_ascii_digit()).collect::<String>().parse().unwrap_or(0);
             if let Some(s) = d.steps.get_mut(i) {
-                s["delay"] = json!(ms.min(65535));
+                s["after"] = json!(ms.min(65535));
             }
         }
         self.edit_wait = None;
@@ -434,7 +454,7 @@ impl Editor {
         let added: Vec<Value> = held
             .iter()
             .rev()
-            .map(|h| if is_media(h) { json!({ "media": h["media"], "down": false, "delay": 0 }) } else { json!({ "code": h["code"], "down": false, "delay": 0 }) })
+            .map(|h| if is_media(h) { json!({ "media": h["media"], "down": false, "after": 0 }) } else { json!({ "key": h["key"], "down": false, "after": 0 }) })
             .collect();
         steps.extend(added.iter().cloned());
         (steps, added)

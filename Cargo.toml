@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/ectotype-core", "crates/ectodeck-weather", "crates/ectodeck-draw", "apps/ectodeck/src-tauri", "apps/ectodeck-native"]
+members = ["crates/ectotype-core", "crates/ectodeck-weather", "crates/ectodeck-draw", "crates/ectodeck-protocol", "apps/ectodeck/src-tauri", "apps/ectodeck-native"]
 
 [workspace.package]
 edition = "2024"

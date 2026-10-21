@@ -15,7 +15,8 @@ use slint::{Color, Model, ModelRc, SharedString, VecModel};
 use crate::device;
 use crate::lighting::{self, Ctl};
 use crate::overlays::Overlays;
-use crate::z10::{self, Action, Page, View};
+use crate::z10::{self, Entry, Page, View};
+use ectodeck_protocol::Action;
 use crate::{AppWindow, Cell, CheckItem, DeskItem, EffectItem, KeyItem, LayerItem, LibGroup, LibRow, MenuRow, MousePatch, ProfileItem};
 
 /// The mouse's picture as the page shows it: its layers (for what is where
@@ -312,8 +313,8 @@ pub enum WindowAsk {
 /// profile and those that start on a key press, and a pair stored that is
 /// none of them, after its own rule, ticked, so it is never hidden.
 fn plays_rows(page: &Page) -> Vec<MenuRow> {
-    let l = &page.draft()["lighting"];
-    let e = &l[l["mode"].as_str().unwrap_or("off")];
+    let l = &page.draft()["lighting"]["keys"];
+    let e = &l["effects"][l["effect"].as_str().unwrap_or("off")];
     let (start, stop) = (e["start"].as_u64().unwrap_or(0), e["stop"].as_u64().unwrap_or(0));
     let at = lighting::plays_of(start, stop);
     let rule = || MenuRow { kind: 2, label: "".into(), tag: "".into(), tick: false, sub: "".into() };
@@ -331,7 +332,7 @@ fn plays_rows(page: &Page) -> Vec<MenuRow> {
     rows
 }
 
-const LAYERS: [(&str, &str); 2] = [("keys", "When pressed"), ("fnkeys", "When Fn is held")];
+const LAYERS: [(&str, &str); 2] = [("base", "When pressed"), ("fn", "When Fn is held")];
 
 /// The action menu's pages under "Other": each one's title and its list.
 const PAGES: [&str; 7] = ["A key", "A media key", "A mouse button", "Switch profile", "Switch screen layout", "Switch playlist", "Keyboard function"];
@@ -415,7 +416,7 @@ fn lib_cap(id: &str, name: &str) -> String {
 #[derive(Clone)]
 enum Choice {
     Nothing,
-    Set([u32; 4]),
+    Set(Action),
     Page(usize),
     /// the job that plays this playlist, by its id (its code found when it is given)
     Play(String),
@@ -1013,11 +1014,11 @@ impl Front {
                     Ok(p) => {
                         // changed again while it was saving: the newer draft stays, and saves next
                         let unchanged = sent.as_ref() == self.page.drafts.get(&n);
-                        let was_custom = sent.as_ref().is_some_and(|d| d["lighting"]["mode"] == "custom");
+                        let was_custom = sent.as_ref().is_some_and(|d| d["lighting"]["keys"]["effect"] == "custom");
                         self.page.saved_profile(n, p, unchanged);
                         if unchanged && was_custom {
                             if let Some(d) = self.page.drafts.get_mut(&n) {
-                                d["lighting"]["mode"] = serde_json::json!("custom");
+                                d["lighting"]["keys"]["effect"] = serde_json::json!("custom");
                             }
                         }
                         if let Some(d) = self.page.drafts.get(&n) {
@@ -1216,7 +1217,7 @@ impl Front {
                 }
                 Ask::Effect(i) => {
                     if let (Some((mode, _)), Some(d)) = (z10::EFFECTS.get(i as usize), self.page.drafts.get_mut(&self.page.editing)) {
-                        d["lighting"]["mode"] = serde_json::json!(mode);
+                        d["lighting"]["keys"]["effect"] = serde_json::json!(mode);
                     }
                     self.push_preview();
                 }
@@ -1663,10 +1664,10 @@ impl Front {
                     match i {
                         7 => {
                             self.close_menu();
-                            self.assign(self.layer, [0, 0, 0, 0]);
+                            self.assign(self.layer, Action::None);
                         }
                         _ => {
-                            let screen = self.page.sel.and_then(|pos| z10::screen_job(self.page.def(LAYERS[self.layer].0, pos))).map_or(LAYOUT_PAGE, screen_page);
+                            let screen = self.page.sel.and_then(|pos| z10::screen_job(&self.page.def(LAYERS[self.layer].0, pos))).map_or(LAYOUT_PAGE, screen_page);
                             let page = [0, 1, 2, MACRO_PAGE, 3, screen, 6][i.clamp(0, 6) as usize];
                             self.open_menu_on(self.layer, (x, y, h), Some(page));
                         }
@@ -1846,7 +1847,10 @@ impl Front {
                     }
                     self.close_menu();
                     let n = match (usize::try_from(l).ok().and_then(|l| LAYERS.get(l)), self.page.sel) {
-                        (Some((layer, _)), Some(pos)) => Some(self.page.def(layer, pos)).filter(|d| d[0] == 3).map_or(0, |d| d[1]),
+                        (Some((layer, _)), Some(pos)) => match self.page.def(layer, pos) {
+                            Action::Macro { n, .. } => n,
+                            _ => 0,
+                        },
                         _ => 0,
                     };
                     window.push(WindowAsk::OpenMacros(n));
@@ -2095,7 +2099,7 @@ impl Front {
                 return;
             }
             Ctl::WhereMode | Ctl::WhereAll | Ctl::Zone => {
-                let mode = self.page.draft()["lighting"]["mode"].as_str().unwrap_or("off").to_string();
+                let mode = self.page.draft()["lighting"]["keys"]["effect"].as_str().unwrap_or("off").to_string();
                 let areas = self.areas.entry((self.page.editing, mode)).or_insert(lighting::ALL_AREAS);
                 lighting::place(&mut self.page, c, index, areas);
             }
@@ -2493,7 +2497,7 @@ impl Front {
         let now = self.t0.elapsed().as_secs_f64() * 1000.0;
         if self.page.view == View::Lighting {
             // Per key: a click paints the key
-            if self.page.draft()["lighting"]["mode"] == "custom" {
+            if self.page.draft()["lighting"]["keys"]["effect"] == "custom" {
                 let Some(k) = self.page.key(pos).cloned() else { return };
                 if !k.led {
                     self.status(format!("{} has no light behind it.", self.page.key_label(&k)), 0);
@@ -2541,12 +2545,12 @@ impl Front {
                 if hid == 0 {
                     self.listening = Some((layer, held | mods));
                 } else {
-                    self.assign(layer, [0, held, hid, 0]);
+                    self.assign(layer, z10::pressed_action(held, hid));
                 }
             } else if hid == 0 {
                 // a lone modifier pressed and let go assigns that modifier
                 if held == mods {
-                    self.assign(layer, [0, held, 0, 0]);
+                    self.assign(layer, z10::pressed_action(held, 0));
                 } else {
                     self.listening = Some((layer, held & !mods));
                 }
@@ -2590,10 +2594,10 @@ impl Front {
         }
     }
 
-    fn assign(&mut self, layer: usize, d: [u32; 4]) {
+    fn assign(&mut self, layer: usize, a: Action) {
         self.listening = None;
         if let Some(pos) = self.page.sel {
-            self.page.set_def(LAYERS[layer].0, pos, d);
+            self.page.set_def(LAYERS[layer].0, pos, &a);
         }
         self.refresh();
     }
@@ -2602,13 +2606,13 @@ impl Front {
 
     fn open_menu(&mut self, layer: usize, anchor: (f32, f32, f32)) {
         // the job's own kind of list, or the whole menu for a key that does nothing
-        let page = self.page.sel.map(|pos| self.page.def(LAYERS[layer].0, pos)).and_then(|d| match z10::kind_of(d) {
+        let page = self.page.sel.map(|pos| self.page.def(LAYERS[layer].0, pos)).and_then(|d| match z10::kind_of(&d) {
             "Key" => Some(0),
             "Media" => Some(1),
             "Mouse" => Some(2),
             "Macro" => Some(MACRO_PAGE),
             "Profile" => Some(3),
-            "Screen" => z10::screen_job(d).map(screen_page),
+            "Screen" => z10::screen_job(&d).map(screen_page),
             "Keyboard" => Some(6),
             _ => None,
         });
@@ -3062,12 +3066,12 @@ impl Front {
         let Some(m) = &mut self.menu else { return };
         match m.choices.get(i) {
             Some(Choice::Set(d)) => {
-                let (layer, pos, d) = (m.layer, m.pos, *d);
+                let (layer, pos, d) = (m.layer, m.pos, d.clone());
                 self.close_menu();
                 // a macro keeps playing the way it already plays on its other keys
-                let d = self.page.with_macro_play(d);
+                let d = self.page.with_macro_play(&d);
                 if self.page.sel == Some(pos) {
-                    self.page.set_def(LAYERS[layer].0, pos, d);
+                    self.page.set_def(LAYERS[layer].0, pos, &d);
                 }
             }
             Some(Choice::Page(p)) => {
@@ -3081,7 +3085,7 @@ impl Front {
                 self.close_menu();
                 if let Some(code) = self.play_code(&id) {
                     if self.page.sel == Some(pos) {
-                        self.page.set_def(LAYERS[layer].0, pos, [0, 0, code, 0]);
+                        self.page.set_def(LAYERS[layer].0, pos, &z10::screen_slot(code));
                     }
                 }
             }
@@ -3115,7 +3119,7 @@ impl Front {
     /// The jobs that each play one playlist, as the action menu lists them: each one's row
     /// (its definition, for its tick, while the playlist has a code), what choosing it does,
     /// and its row's kind: 5, a job no key can be given now, while every code is some key's.
-    fn play_jobs(&self) -> Vec<(Action, Choice, i32)> {
+    fn play_jobs(&self) -> Vec<(Entry, Choice, i32)> {
         let sent = self.page.sent_codes();
         let lists = &self.screens.playlists;
         lists
@@ -3123,7 +3127,8 @@ impl Front {
             .map(|l| {
                 let code = self.keyed.iter().find(|(_, id)| **id == l.id).map(|(c, _)| *c);
                 let can = code.is_some() || crate::screen_keys::code_for(&l.id, &self.keyed, &sent, |p| lists.iter().any(|x| x.id == p)).is_some();
-                let a = Action { label: format!("Play {}", l.name), def: code.map_or([u32::MAX; 4], |c| [0, 0, c, 0]), tag: "Screen" };
+                // (a playlist no key plays yet has no job to tick: an empty code matches no key's)
+                let a = Entry { label: format!("Play {}", l.name), act: code.map_or(Action::Raw(Vec::new()), z10::screen_slot), tag: "Screen" };
                 if can { (a, Choice::Play(l.id.clone()), 0) } else { (a, Choice::Nothing, 5) }
             })
             .collect()
@@ -3136,7 +3141,7 @@ impl Front {
     /// screen shows (as a game's launch).
     pub fn screen_key(&mut self, code: u32) {
         if let Some((layer, _)) = self.listening {
-            self.assign(layer, [0, 0, code, 0]);
+            self.assign(layer, z10::screen_slot(code));
             return;
         }
         if !self.controlled || self.editor.is_some() || self.aside || self.lcd.sequence.is_some() {
@@ -3190,20 +3195,20 @@ impl Front {
         let Some(m) = &self.menu else { return };
         let def = self.page.def(LAYERS[m.layer].0, m.pos);
         let g = self.page.groups();
-        let lists: [&Vec<Action>; 7] = [&g.keys, &g.media, &g.mouse, &g.profiles, &g.layouts, &g.playlists, &g.board];
+        let lists: [&Vec<Entry>; 7] = [&g.keys, &g.media, &g.mouse, &g.profiles, &g.layouts, &g.playlists, &g.board];
         let mut rows: Vec<MenuRow> = Vec::new();
         let mut choices: Vec<Choice> = Vec::new();
         let row = |kind: i32, label: &str, tag: &str, tick: bool| MenuRow { kind, label: label.into(), tag: tag.into(), tick, sub: "".into() };
         let q = m.query.trim().to_lowercase();
         // each job as a row: what choosing it does, and the row's kind (0, or 5 for one that
         // can't be given now)
-        let set = |list: &[Action]| list.iter().map(|a| (a.clone(), Choice::Set(a.def), 0)).collect::<Vec<_>>();
+        let set = |list: &[Entry]| list.iter().map(|e| (e.clone(), Choice::Set(e.act.clone()), 0)).collect::<Vec<_>>();
         let plays = self.play_jobs();
         // a searchable list, as pickList draws it
-        let pick = |rows: &mut Vec<MenuRow>, choices: &mut Vec<Choice>, groups: &[(&str, Vec<(Action, Choice, i32)>)]| {
+        let pick = |rows: &mut Vec<MenuRow>, choices: &mut Vec<Choice>, groups: &[(&str, Vec<(Entry, Choice, i32)>)]| {
             let mut n = 0;
             for (head, items) in groups {
-                let hit: Vec<&(Action, Choice, i32)> = items.iter().filter(|(a, ..)| q.is_empty() || a.label.to_lowercase().contains(&q) || a.tag.to_lowercase().contains(&q)).collect();
+                let hit: Vec<&(Entry, Choice, i32)> = items.iter().filter(|(a, ..)| q.is_empty() || a.label.to_lowercase().contains(&q) || a.tag.to_lowercase().contains(&q)).collect();
                 if hit.is_empty() {
                     continue;
                 }
@@ -3213,7 +3218,7 @@ impl Front {
                 }
                 for (a, c, kind) in hit.into_iter().take(if q.is_empty() { 400 } else { 60 }) {
                     n += 1;
-                    rows.push(row(*kind, &a.label, if q.is_empty() { "" } else { a.tag }, a.def == def));
+                    rows.push(row(*kind, &a.label, if q.is_empty() { "" } else { a.tag }, a.act == def));
                     choices.push(c.clone());
                 }
             }
@@ -3259,27 +3264,28 @@ impl Front {
                         rows.push(row(1, "Macros", "", false));
                         choices.push(Choice::Nothing);
                         for a in &g.macros {
-                            rows.push(row(0, &a.label, "", def[0] == 3 && def[1] == a.def[1]));
-                            choices.push(Choice::Set(a.def));
+                            let same = matches!((&def, &a.act), (Action::Macro { n: x, .. }, Action::Macro { n: y, .. }) if x == y);
+                            rows.push(row(0, &a.label, "", same));
+                            choices.push(Choice::Set(a.act.clone()));
                         }
                         rows.push(row(2, "", "", false));
                         choices.push(Choice::Nothing);
                     }
                     rows.push(row(1, "Other", "", false));
                     choices.push(Choice::Nothing);
-                    let kind = z10::kind_of(def);
+                    let kind = z10::kind_of(&def);
                     for (p, title) in PAGES.iter().enumerate() {
                         // (the screen's two pages each ticked for their own jobs)
                         let tick = if p == LAYOUT_PAGE || p == PLAYLIST_PAGE {
-                            z10::screen_job(def).is_some_and(|c| screen_page(c) == p)
+                            z10::screen_job(&def).is_some_and(|c| screen_page(c) == p)
                         } else {
-                            lists[p].first().is_some_and(|a| a.tag == kind) && def[0] != 3
+                            lists[p].first().is_some_and(|a| a.tag == kind) && !matches!(def, Action::Macro { .. })
                         };
                         rows.push(row(0, &format!("{title} ›"), "", tick));
                         choices.push(Choice::Page(p));
                     }
-                    rows.push(row(0, "Nothing", "", z10::is_nothing(def)));
-                    choices.push(Choice::Set([0, 0, 0, 0]));
+                    rows.push(row(0, "Nothing", "", z10::is_nothing(&def)));
+                    choices.push(Choice::Set(Action::None));
                 }
             }
         }
@@ -3380,7 +3386,7 @@ impl Front {
                 // one, or on Some areas, turning its area on or off
                 clickable: match p.view {
                     View::Keys => true,
-                    View::Lighting if p.drafts.get(&p.editing).is_some_and(|d| d["lighting"]["mode"] == "custom") => k.led,
+                    View::Lighting if p.drafts.get(&p.editing).is_some_and(|d| d["lighting"]["keys"]["effect"] == "custom") => k.led,
                     View::Lighting => some && self.area_of(k.pos).is_some(),
                     _ => false,
                 },
@@ -3394,24 +3400,25 @@ impl Front {
         let chosen = if p.view == View::Keys { p.sel.and_then(|pos| p.key(pos).cloned()) } else { None };
         ui.set_key_open(chosen.is_some());
         if let Some(k) = chosen {
-            let fac = p.factory("keys", k.pos);
+            let fac = p.factory("base", k.pos);
             let name = p.key_label(&k);
             ui.set_key_name(name.clone().into());
-            ui.set_key_factory(format!("Factory: {}", if z10::is_nothing(fac) { "does nothing".to_string() } else { p.describe(fac) }).into());
+            ui.set_key_factory(format!("Factory: {}", if z10::is_nothing(&fac) { "does nothing".to_string() } else { p.describe(&fac) }).into());
             ui.set_reset_label(format!("Reset {name} to factory").into());
             let layers: Vec<LayerItem> = LAYERS
                 .iter()
                 .enumerate()
                 .map(|(i, (layer, title))| {
                     let d = p.def(layer, k.pos);
-                    let is_macro = d[0] == 3;
-                    let label = if is_macro { p.macro_label(d[1]) } else if z10::is_nothing(d) { "Nothing".into() } else { p.describe(d) };
-                    let held: Vec<SharedString> = if is_macro { p.macro_keys_held(d[1]).into_iter().map(Into::into).collect() } else { Vec::new() };
+                    let mac = if let Action::Macro { n, .. } = d { Some(n) } else { None };
+                    let label = if let Some(n) = mac { p.macro_label(n) } else if z10::is_nothing(&d) { "Nothing".into() } else { p.describe(&d) };
+                    let held: Vec<SharedString> = mac.map(|n| p.macro_keys_held(n).into_iter().map(Into::into).collect()).unwrap_or_default();
+                    let is_macro = mac.is_some();
                     LayerItem {
                         title: (*title).into(),
-                        kind: z10::kind_of(d).into(),
+                        kind: z10::kind_of(&d).into(),
                         label: label.into(),
-                        nothing: z10::is_nothing(d),
+                        nothing: z10::is_nothing(&d),
                         held: ModelRc::new(VecModel::from(held)),
                         r#macro: is_macro,
                         listening: self.listening.is_some_and(|(l, _)| l == i),
@@ -3424,13 +3431,21 @@ impl Front {
             let d = p.def(layer, k.pos);
             let rebound_here = d != p.factory(layer, k.pos);
             let rebound = rebound_here || p.def(LAYERS[1 - self.layer].0, k.pos) != p.factory(LAYERS[1 - self.layer].0, k.pos);
-            let fn_unset = self.layer == 1 && d == p.def("keys", k.pos);
-            let job = if fn_unset { "Same as on Base".to_string() } else if d[0] == 3 { p.macro_label(d[1]) } else if z10::is_nothing(d) { "Nothing".into() } else { p.describe(d) };
+            let fn_unset = self.layer == 1 && d == p.def("base", k.pos);
+            let job = if fn_unset {
+                "Same as on Base".to_string()
+            } else if let Action::Macro { n, .. } = d {
+                p.macro_label(n)
+            } else if z10::is_nothing(&d) {
+                "Nothing".into()
+            } else {
+                p.describe(&d)
+            };
             ui.set_key_cap(lib_cap(&k.id, &name).into());
             ui.set_key_state((if rebound { format!("Rebound on {}.", p.profile_name(p.editing)) } else { "As it came from the factory.".to_string() }).into());
             ui.set_key_rebound(rebound);
             ui.set_layer_rebound(rebound_here);
-            ui.set_key_kind(match z10::kind_of(d) {
+            ui.set_key_kind(match z10::kind_of(&d) {
                 "Key" => 0,
                 "Media" => 1,
                 "Mouse" => 2,
@@ -3445,7 +3460,7 @@ impl Front {
             let note = if fn_unset {
                 "On the Function layer this key does what it does on Base, until you choose a job here.".to_string()
             } else {
-                z10::screen_job(d).map_or(String::new(), |c| self.screen_note(c))
+                z10::screen_job(&d).map_or(String::new(), |c| self.screen_note(c))
             };
             ui.set_key_note(note.into());
         }
@@ -3506,9 +3521,9 @@ impl Front {
                         let fac = p.factory(layer, k.pos);
                         let re = d != fac;
                         let job = if re {
-                            if d[0] == 3 { p.macro_label(d[1]) } else if z10::is_nothing(d) { "Nothing".into() } else { p.describe(d) }
-                        } else if g == "Buttons" && !z10::is_nothing(fac) && p.describe(fac) != name {
-                            p.describe(fac)
+                            if let Action::Macro { n, .. } = d { p.macro_label(n) } else if z10::is_nothing(&d) { "Nothing".into() } else { p.describe(&d) }
+                        } else if g == "Buttons" && !z10::is_nothing(&fac) && p.describe(&fac) != name {
+                            p.describe(&fac)
                         } else {
                             String::new()
                         };
@@ -4127,7 +4142,7 @@ impl Front {
     /// pieces are changed in place, so one being used is never rebuilt under
     /// the pointer.
     fn refresh_lighting(&mut self) {
-        let mode = self.page.draft()["lighting"]["mode"].as_str().unwrap_or("off").to_string();
+        let mode = self.page.draft()["lighting"]["keys"]["effect"].as_str().unwrap_or("off").to_string();
         let scale = self.scale;
         if self.icons.as_ref().map(|(s, _)| *s) != Some(scale) {
             self.icons = Some((scale, z10::EFFECTS.iter().map(|(m, _)| lighting::icon(m, scale)).collect()));
@@ -4167,9 +4182,9 @@ impl Front {
         let p = &self.page;
         // (nothing to say before the keyboard's profiles are read)
         let Some(d) = p.drafts.get(&p.editing) else { return false };
-        let l = &d["lighting"];
-        let mode = l["mode"].as_str().unwrap_or("off");
-        p.view == View::Lighting && mode != "off" && mode != "custom" && l[mode]["zone"].as_u64().unwrap_or(0x80) & 0x80 == 0
+        let l = &d["lighting"]["keys"];
+        let mode = l["effect"].as_str().unwrap_or("off");
+        p.view == View::Lighting && mode != "off" && mode != "custom" && l["effects"][mode]["zone"].as_u64().unwrap_or(0x80) & 0x80 == 0
     }
 
     /// The area a key is in, by its place in ZONES.
@@ -5556,7 +5571,7 @@ impl Front {
                 // (nothing sends the keyboard the time, so its clock's row is blank)
                 None if closed => {
                     let d = self.page.draft();
-                    crate::lcd_page::status_rows(d["lighting"]["lcd"]["apps"].as_u64().unwrap_or(0), self.page.editing, d["name"].as_str().unwrap_or(""), None)
+                    crate::lcd_page::status_rows(d["lighting"]["screen"]["apps"].as_u64().unwrap_or(0), self.page.editing, d["name"].as_str().unwrap_or(""), None)
                 }
                 None => self.lcd.rows.clone(),
             },
@@ -5788,9 +5803,9 @@ pub fn set_rows<T: Clone + PartialEq + 'static>(model: &VecModel<T>, rows: Vec<T
 
 /// A profile's screen: its light (brightness, red, green, blue) and its built-in screens.
 fn screen_of(l: &serde_json::Value) -> ([u8; 4], u8) {
-    let c = &l["lcd"]["color"];
+    let c = &l["screen"]["color"];
     let b = |v: &serde_json::Value| v.as_u64().unwrap_or(0).min(255) as u8;
-    ([c["brightness"].as_u64().map_or(255, |v| v.min(255) as u8), b(&c["color"][0]), b(&c["color"][1]), b(&c["color"][2])], b(&l["lcd"]["apps"]))
+    ([c["brightness"].as_u64().map_or(255, |v| v.min(255) as u8), b(&c["color"][0]), b(&c["color"][1]), b(&c["color"][2])], b(&l["screen"]["apps"]))
 }
 
 /// Show a list in one of the page's models, in place (see [set_rows]): a list

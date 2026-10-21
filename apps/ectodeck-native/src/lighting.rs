@@ -457,7 +457,7 @@ impl Stack {
 /// picker is open on, `menu` the dropdown open.
 pub fn boxes(page: &Page, paint: [u8; 3], demo: bool, open: Option<(Ctl, usize)>, menu: Option<Ctl>, hot_area: Option<usize>) -> Boxes {
     let l = &page.draft()["lighting"];
-    let mode = l["mode"].as_str().unwrap_or("off").to_string();
+    let mode = l["keys"]["effect"].as_str().unwrap_or("off").to_string();
     let title = EFFECTS.iter().find(|(m, _)| *m == mode).map_or(mode.clone(), |(_, n)| n.to_string());
     let profile = page.profile_name(page.editing);
     if mode == "off" {
@@ -504,7 +504,7 @@ pub fn boxes(page: &Page, paint: [u8; 3], demo: bool, open: Option<(Ctl, usize)>
         return Boxes { kind: 2, title: "Brush".into(), set_h: s.height(), set: s.cells, place: Vec::new(), place_h: 0.0 };
     }
 
-    let e = &l[mode.as_str()];
+    let e = &l["keys"]["effects"][mode.as_str()];
     let int = |k: &str| e[k].as_i64().unwrap_or(0);
     let mut s = Stack::new(SET_W);
     // the reset, at the top right, level with the title
@@ -645,8 +645,8 @@ pub const SUBMODES: [&str; 3] = ["Each key you type", "One key", "The key and th
 
 /// The choices for a dropdown, and the one chosen.
 pub fn choices(page: &Page, c: Ctl) -> Option<(&'static [&'static str], usize)> {
-    let l = &page.draft()["lighting"];
-    let e = &l[l["mode"].as_str().unwrap_or("off")];
+    let l = &page.draft()["lighting"]["keys"];
+    let e = &l["effects"][l["effect"].as_str().unwrap_or("off")];
     let int = |k: &str| e[k].as_i64().unwrap_or(0).max(0) as usize;
     match c {
         Ctl::Start => Some((&STARTS[..], int("start").min(1))),
@@ -662,8 +662,8 @@ pub fn choices(page: &Page, c: Ctl) -> Option<(&'static [&'static str], usize)> 
 pub fn place(page: &mut Page, c: Ctl, index: usize, areas: &mut u64) {
     let n = page.editing;
     let Some(d) = page.drafts.get_mut(&n) else { return };
-    let mode = d["lighting"]["mode"].as_str().unwrap_or("off").to_string();
-    let e = &mut d["lighting"][mode.as_str()];
+    let mode = d["lighting"]["keys"]["effect"].as_str().unwrap_or("off").to_string();
+    let e = &mut d["lighting"]["keys"]["effects"][mode.as_str()];
     let zone = e["zone"].as_u64().unwrap_or(0x80);
     let z = match c {
         Ctl::WhereMode if index == 0 => {
@@ -698,8 +698,8 @@ pub fn place(page: &mut Page, c: Ctl, index: usize, areas: &mut u64) {
 pub fn act(page: &mut Page, c: Ctl, index: usize, value: f32) {
     let n = page.editing;
     let Some(d) = page.drafts.get_mut(&n) else { return };
-    let mode = d["lighting"]["mode"].as_str().unwrap_or("off").to_string();
-    let e = &mut d["lighting"][mode.as_str()];
+    let mode = d["lighting"]["keys"]["effect"].as_str().unwrap_or("off").to_string();
+    let e = &mut d["lighting"]["keys"]["effects"][mode.as_str()];
     match c {
         Ctl::Random => e["random"] = json!(if value > 0.5 { 1 } else { 0 }),
         Ctl::Brightness => {
@@ -750,9 +750,9 @@ pub fn act(page: &mut Page, c: Ctl, index: usize, value: f32) {
             }
         }
         Ctl::Reset => {
-            let fac = page.dev.as_ref().map(|dev| dev["profiles"]["254"]["lighting"][mode.as_str()].clone()).unwrap_or(Value::Null);
+            let fac = page.dev.as_ref().map(|dev| dev["factory"]["lighting"]["keys"]["effects"][mode.as_str()].clone()).unwrap_or(Value::Null);
             if let Some(d) = page.drafts.get_mut(&n) {
-                d["lighting"][mode.as_str()] = fac;
+                d["lighting"]["keys"]["effects"][mode.as_str()] = fac;
             }
         }
         _ => {}
@@ -763,13 +763,13 @@ pub fn act(page: &mut Page, c: Ctl, index: usize, value: f32) {
 pub fn set_color(page: &mut Page, c: Ctl, index: usize, rgb: [u8; 3]) {
     let n = page.editing;
     let Some(d) = page.drafts.get_mut(&n) else { return };
-    let mode = d["lighting"]["mode"].as_str().unwrap_or("off").to_string();
-    let e = &mut d["lighting"][mode.as_str()];
+    let mode = d["lighting"]["keys"]["effect"].as_str().unwrap_or("off").to_string();
+    let e = &mut d["lighting"]["keys"]["effects"][mode.as_str()];
     match c {
         Ctl::Color => e["color"] = json!(rgb),
         Ctl::Colors => e["colors"][index]["color"] = json!(rgb),
         Ctl::Background => e["background"]["color"] = json!(rgb),
-        Ctl::LcdColor => d["lighting"]["lcd"]["color"]["color"] = json!(rgb),
+        Ctl::LcdColor => d["lighting"]["screen"]["color"]["color"] = json!(rgb),
         _ => {}
     }
 }
@@ -777,12 +777,12 @@ pub fn set_color(page: &mut Page, c: Ctl, index: usize, rgb: [u8; 3]) {
 /// The color a swatch shows now.
 pub fn color_of(page: &Page, c: Ctl, index: usize, paint: [u8; 3]) -> [u8; 3] {
     let l = &page.draft()["lighting"];
-    let e = &l[l["mode"].as_str().unwrap_or("off")];
+    let e = &l["keys"]["effects"][l["keys"]["effect"].as_str().unwrap_or("off")];
     let v = match c {
         Ctl::Color => &e["color"],
         Ctl::Colors => &e["colors"][index]["color"],
         Ctl::Background => &e["background"]["color"],
-        Ctl::LcdColor => &l["lcd"]["color"]["color"],
+        Ctl::LcdColor => &l["screen"]["color"]["color"],
         _ => return paint,
     };
     [v[0].as_u64().unwrap_or(0) as u8, v[1].as_u64().unwrap_or(0) as u8, v[2].as_u64().unwrap_or(0) as u8]
@@ -885,11 +885,11 @@ mod tests {
     fn page_with(zone: u64) -> Page {
         let mut p = Page::new();
         p.editing = 1;
-        p.drafts.insert(1, json!({ "lighting": { "mode": "spiral", "spiral": { "zone": zone } } }));
+        p.drafts.insert(1, json!({ "lighting": { "keys": { "effect": "spiral", "effects": { "spiral": { "zone": zone } } } } }));
         p
     }
     fn zone(p: &Page) -> u64 {
-        p.drafts[&1]["lighting"]["spiral"]["zone"].as_u64().unwrap()
+        p.drafts[&1]["lighting"]["keys"]["effects"]["spiral"]["zone"].as_u64().unwrap()
     }
 
     #[test]
@@ -941,7 +941,7 @@ mod tests {
         for (i, (start, stop)) in want.iter().enumerate() {
             let mut p = page_with(0x80);
             act(&mut p, Ctl::Plays, i, 0.0);
-            let e = &p.drafts[&1]["lighting"]["spiral"];
+            let e = &p.drafts[&1]["lighting"]["keys"]["effects"]["spiral"];
             assert_eq!((e["start"].as_u64().unwrap(), e["stop"].as_u64().unwrap()), (*start, *stop), "{}", PLAYS[i].0);
             assert_eq!(plays_of(*start, *stop), Some(i));
             assert_eq!(plays_label(*start, *stop), PLAYS[i].0);

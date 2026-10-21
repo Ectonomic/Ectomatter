@@ -158,7 +158,7 @@ pub const LIGHTS: [[u8; 3]; 7] = [[0xff, 0xff, 0xff], [0xff, 0x20, 0x00], [0xff,
 pub fn screen_cells(page: &Page, w: f32, from: f32, own: Option<(&str, [u8; 3])>, picking: bool) -> Vec<Cell> {
     let mut c = Vec::new();
     let l = &page.draft()["lighting"];
-    let lc = &l["lcd"]["color"];
+    let lc = &l["screen"]["color"];
     let b = |v: &Value| v.as_u64().unwrap_or(0).min(255) as u8;
     let rgb = [b(&lc["color"][0]), b(&lc["color"][1]), b(&lc["color"][2])];
     let col = slint::Color::from_rgb_u8(rgb[0], rgb[1], rgb[2]);
@@ -220,16 +220,16 @@ pub fn act(page: &mut Page, c: Ctl, index: usize, value: f32, text: Option<&str>
     let Some(d) = page.drafts.get_mut(&n) else { return };
     let l = &mut d["lighting"];
     match c {
-        Ctl::LcdBrightness => l["lcd"]["color"]["brightness"] = json!((value.clamp(0.0, 1.0) * 255.0).round() as u64),
+        Ctl::LcdBrightness => l["screen"]["color"]["brightness"] = json!((value.clamp(0.0, 1.0) * 255.0).round() as u64),
         Ctl::LcdPreset => {
             if let Some(c) = LIGHTS.get(index) {
-                l["lcd"]["color"]["color"] = json!(c);
+                l["screen"]["color"]["color"] = json!(c);
             }
         }
         Ctl::LcdApp => {
             let bit = LCD_APPS.get(index).map_or(0, |a| a.0);
-            let apps = l["lcd"]["apps"].as_u64().unwrap_or(0);
-            l["lcd"]["apps"] = json!(if value > 0.5 { apps | bit } else { apps & !bit });
+            let apps = l["screen"]["apps"].as_u64().unwrap_or(0);
+            l["screen"]["apps"] = json!(if value > 0.5 { apps | bit } else { apps & !bit });
         }
         Ctl::GameKey => {
             let bit = GAME_KEYS.get(index).map_or(0, |a| a.0);

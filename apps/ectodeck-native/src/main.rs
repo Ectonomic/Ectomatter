@@ -527,8 +527,8 @@ fn main() {
     if let Some(path) = args.iter().position(|a| a == "--read-state").and_then(|i| args.get(i + 1)) {
         let kb = device::z10(&cores::dir().join(z10::CORE), core_data(z10::CORE));
         let state = kb.as_ref().map_err(|e| e.clone()).and_then(|k| {
-            let s = k.call("state", &serde_json::Value::Null);
-            let _ = k.call("release", &serde_json::Value::Null);
+            let s = k.call("device/read", &serde_json::Value::Null);
+            let _ = k.call("device/release", &serde_json::Value::Null);
             s
         });
         match state {
@@ -579,6 +579,8 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     let mut front = Front::new(ui, None, true, settings::Settings::load(config_dir().join("settings.json")));
     if let Some(state) = std::env::var_os("ECTODECK_NATIVE_STATE") {
         let dev: serde_json::Value = serde_json::from_slice(&std::fs::read(state).expect("the saved state")).expect("the saved state as JSON");
+        // (a state an older Ectodeck saved, in the keyboard code's own shapes, read in the shared ones)
+        let dev = if ectotype_core::shared::is_own_state(&dev) { ectotype_core::shared::read_of_state(&dev) } else { dev };
         front.heard(device::Heard::State(Ok(dev)));
     }
     // the screen as the player would have it: this computer's Stats, or

@@ -551,9 +551,64 @@ mod tests {
         (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
     }
 
+    /// A layer of the keyboard's keys, four bytes each in order, by the keys'
+    /// ids as shared actions (a value that isn't four bytes kept as it is, for
+    /// the core to refuse).
+    fn shared_layer(keys: &Value) -> Value {
+        let keys = keys.as_array().cloned().unwrap_or_default();
+        let m: serde_json::Map<String, Value> = keys
+            .iter()
+            .enumerate()
+            .take(ectotype_core::protocol::NKEYS)
+            .map(|(pos, d)| {
+                let bytes: Option<Vec<u8>> = d.as_array().filter(|a| a.len() == 4).and_then(|a| a.iter().map(|b| b.as_u64().and_then(|b| u8::try_from(b).ok())).collect());
+                let v = bytes.map_or_else(|| d.clone(), |b| ectotype_core::shared::action_of([b[0], b[1], b[2], b[3]]).write());
+                (ectotype_core::shared::control(pos).unwrap().to_string(), v)
+            })
+            .collect();
+        Value::Object(m)
+    }
+
+    /// A profile the original editor read or saved, in the shared shapes.
+    fn shared_profile(p: &Value) -> Value {
+        ectotype_core::shared::profile_of_view(p)
+    }
+
+    /// What the original editor saved, as `profiles/set` takes it: only what it gave.
+    fn shared_save(n: &Value, body: &Value) -> Value {
+        let mut out = serde_json::json!({ "profile": n });
+        if let Some(name) = body.get("name") {
+            out["name"] = name.clone();
+        }
+        if let Some(l) = body.get("lighting") {
+            out["lighting"] = ectotype_core::shared::lighting_of(l);
+        }
+        let mut keys = serde_json::Map::new();
+        for (field, layer) in [("keys", "base"), ("fnkeys", "fn")] {
+            if let Some(k) = body.get(field).filter(|k| !k.is_null()) {
+                keys.insert(layer.into(), shared_layer(k));
+            }
+        }
+        if !keys.is_empty() {
+            out["keys"] = Value::Object(keys);
+        }
+        out
+    }
+
+    /// Every macro as the original editor read them, in the shared shapes.
+    fn shared_macros(m: &Value) -> Value {
+        Value::Object(m.as_object().unwrap().iter().map(|(i, v)| (i.clone(), ectotype_core::shared::macro_of(v))).collect())
+    }
+
+    /// The original editor's whole read of the keyboard, as `device/read` gives it.
+    fn shared_state(s: &Value) -> Value {
+        ectotype_core::shared::read_of_state(s)
+    }
+
     /// Every editor action in ectotype-core's parity vectors (the original
-    /// editor's exchanges with the keyboard), run through the Z10's module:
-    /// the same reports sent byte for byte, the same answers given.
+    /// editor's exchanges with the keyboard), run through the Z10's module in
+    /// the core protocol's shared shapes: the same reports sent byte for byte,
+    /// and the same answers given, in those shapes.
     #[test]
     fn the_z10_module_sends_what_the_original_editor_sent() {
         let root = crate::cores::dir().join("../parity");
@@ -575,18 +630,27 @@ mod tests {
                 let hid = Replay { log: log.clone(), wrong: wrong.clone() };
                 let core = Core::start(&core_dir(), data.clone(), Box::new(One(Some(Box::new(hid))))).unwrap();
                 core.call("initialize", &serde_json::json!({ "backups": false })).unwrap();
-                let got = match c["name"].as_str().unwrap().split(' ').next().unwrap() {
-                    "state" => core.call("state", &Value::Null),
-                    "save" => core.call("save", &serde_json::json!({ "n": c["n"], "body": c["body"] })),
-                    "write_macro" => core.call("write_macro", &serde_json::json!({ "index": c["index"], "body": c["body"] })),
-                    "activate" => core.call("activate", &serde_json::json!({ "n": c["n"] })),
+                let kind = c["name"].as_str().unwrap().split(' ').next().unwrap();
+                let (got, want) = match kind {
+                    "state" => (core.call("device/read", &Value::Null), shared_state(&c["result"])),
+                    "save" => (core.call("profiles/set", &shared_save(&c["n"], &c["body"])), shared_profile(&c["result"])),
+                    "write_macro" if c["body"].get("delete").is_some() => (core.call("macros/delete", &serde_json::json!({ "macro": c["index"] })), shared_macros(&c["result"])),
+                    "write_macro" => {
+                        let mut body = c["body"].clone();
+                        if let Some(steps) = body["steps"].as_array() {
+                            body["steps"] = Value::Array(ectotype_core::shared::steps_of(steps));
+                        }
+                        body["macro"] = c["index"].clone();
+                        (core.call("macros/set", &body), shared_macros(&c["result"]))
+                    }
+                    "activate" => (core.call("profiles/activate", &serde_json::json!({ "profile": c["n"] })), c["result"].clone()),
                     other => panic!("no replay for {other}"),
                 };
                 if c["error"] == true {
                     assert!(got.is_err(), "{name}: should fail");
                 } else {
                     assert_eq!(*wrong.lock().unwrap(), None, "{name}");
-                    assert_eq!(got.unwrap_or_else(|e| panic!("{name}: {e}")), c["result"], "{name}: result");
+                    assert_eq!(got.unwrap_or_else(|e| panic!("{name}: {e}")), want, "{name}: result");
                 }
                 assert!(log.lock().unwrap().is_empty(), "{name}: stopped short of the original");
                 cases += 1;
@@ -681,7 +745,7 @@ mod tests {
         let dir = crate::cores::dir().join("steelseries");
         assert!(dir.join("core.wasm").exists(), "the SteelSeries module isn't built: run tools/build-cores.sh");
         let core = Core::start(&dir, data.clone(), Box::new(One(Some(Box::new(fake))))).unwrap();
-        core.call("initialize", &serde_json::json!({ "protocol": 2 })).unwrap();
+        core.call("initialize", &serde_json::json!({ "protocol": 3 })).unwrap();
         (core, sent, data)
     }
 
@@ -715,7 +779,7 @@ mod tests {
         let data = std::env::temp_dir().join(format!("ectodeck-mouse-live-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&data);
         let core = Core::start(&crate::cores::dir().join("steelseries"), data.clone(), Box::new(Hidapi::new())).unwrap();
-        core.call("initialize", &serde_json::json!({ "protocol": 2 })).unwrap();
+        core.call("initialize", &serde_json::json!({ "protocol": 3 })).unwrap();
         let d = serde_json::json!({ "device": "sensei310-1" });
         let was = core.call("settings/get", &d).unwrap()["values"]["cpi1"].as_u64().unwrap();
         eprintln!("the first preset was {was} CPI");
@@ -724,7 +788,7 @@ mod tests {
             let d2 = std::env::temp_dir().join(format!("ectodeck-mouse-read-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&d2);
             let c = Core::start(&crate::cores::dir().join("steelseries"), d2.clone(), Box::new(Hidapi::new())).unwrap();
-            c.call("initialize", &serde_json::json!({ "protocol": 2 })).unwrap();
+            c.call("initialize", &serde_json::json!({ "protocol": 3 })).unwrap();
             let v = c.call("settings/get", &serde_json::json!({ "device": "sensei310-1" })).unwrap()["values"]["cpi1"].as_u64().unwrap();
             let _ = std::fs::remove_dir_all(&d2);
             v
@@ -889,15 +953,15 @@ mod tests {
         let reader = core.clone();
         let read = std::thread::spawn(move || {
             let t = Instant::now();
-            (reader.call("state", &Value::Null), t.elapsed())
+            (reader.call("device/read", &Value::Null), t.elapsed())
         });
         std::thread::sleep(Duration::from_millis(100));
         let asked = Instant::now();
-        let wave = serde_json::json!({ "mode": "wave", "wave": { "cycle": 1000 } });
-        core.call("preview", &serde_json::json!({ "lighting": wave, "tab": "test", "t": 5000 })).unwrap();
+        let wave = serde_json::json!({ "keys": { "effect": "wave", "effects": { "wave": { "cycle": 1000 } } } });
+        core.call("lighting/preview", &serde_json::json!({ "lighting": wave, "tab": "test", "t": 5000 })).unwrap();
         let answered = asked.elapsed();
         let (state, took) = read.join().unwrap();
-        core.call("preview", &serde_json::json!({ "stop": true, "tab": "test" })).unwrap();
+        core.call("lighting/preview/stop", &serde_json::json!({ "tab": "test" })).unwrap();
         let _ = std::fs::remove_dir_all(&data);
         let f = frames.lock().unwrap().clone();
         let first = f.iter().find(|(_, b)| b[0] == 7 && b[3] == 1).expect("a wave frame");
@@ -911,7 +975,7 @@ mod tests {
         assert!(phase < 60, "the frame is {phase} ms into the cycle, where the screen was at 0");
         let mut state = state.unwrap();
         state["live"] = case["result"]["live"].clone();
-        assert_eq!(state, case["result"]);
+        assert_eq!(state, shared_state(&case["result"]));
     }
 
     /// A fake Z10 that keeps every report sent to it, answering reads as
@@ -947,8 +1011,8 @@ mod tests {
         let fake = Sent(sent.clone(), Clock(Arc::new(Mutex::new(Vec::new())), Vec::new()), when.clone());
         let core = Core::start(&core_dir(), data.clone(), Box::new(One(Some(Box::new(fake))))).unwrap();
         core.call("initialize", &serde_json::json!({ "backups": false })).unwrap();
-        let wave = serde_json::json!({ "mode": "wave", "wave": { "cycle": 1000 } });
-        core.call("preview", &serde_json::json!({ "lighting": wave, "tab": "test" })).unwrap();
+        let wave = serde_json::json!({ "keys": { "effect": "wave", "effects": { "wave": { "cycle": 1000 } } } });
+        core.call("lighting/preview", &serde_json::json!({ "lighting": wave, "tab": "test" })).unwrap();
         std::thread::sleep(Duration::from_millis(200));
         // just after a beat, so the next is most of a beat away
         let n = sent.lock().unwrap().len();
@@ -958,7 +1022,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(3));
         let before = sent.lock().unwrap().len();
         let asked = Instant::now();
-        let r = core.call("preview", &serde_json::json!({ "lighting": { "mode": "off" }, "tab": "test" })).unwrap();
+        let r = core.call("lighting/preview", &serde_json::json!({ "lighting": { "keys": { "effect": "off" } }, "tab": "test" })).unwrap();
         std::thread::sleep(Duration::from_millis(300));
         let after: Vec<Vec<u8>> = sent.lock().unwrap()[before..].to_vec();
         let switched = when.lock().unwrap()[before] - asked;
@@ -988,9 +1052,9 @@ mod tests {
         let core = Core::start(&core_dir(), data.clone(), Box::new(One(Some(Box::new(Clock(frames.clone(), Vec::new())))))).unwrap();
         core.call("initialize", &serde_json::json!({ "backups": false })).unwrap();
         let lighting = serde_json::json!({ "mode": "breathing", "breathing": { "speed": 2, "colors": [{ "brightness": 255, "color": [255, 0, 0] }] } });
-        core.call("preview", &serde_json::json!({ "lighting": lighting, "tab": "test" })).unwrap();
+        core.call("lighting/preview", &serde_json::json!({ "lighting": ectotype_core::shared::lighting_of(&lighting), "tab": "test" })).unwrap();
         std::thread::sleep(Duration::from_millis(2100));
-        core.call("preview", &serde_json::json!({ "stop": true, "tab": "test" })).unwrap();
+        core.call("lighting/preview/stop", &serde_json::json!({ "tab": "test" })).unwrap();
         let spacing = |f: &[Instant]| {
             let gaps: Vec<f64> = f.windows(2).map(|w| (w[1] - w[0]).as_secs_f64() * 1000.0).collect();
             (gaps.iter().sum::<f64>() / gaps.len() as f64, gaps.iter().cloned().fold(0.0, f64::max), gaps.iter().cloned().fold(f64::MAX, f64::min))

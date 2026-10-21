@@ -1,7 +1,8 @@
 //! The keyboard, on a thread of its own. The Z10's core does the talking
-//! (cores/evga-z10, run as a module by core_host.rs), which takes seconds for
-//! a whole read, and the window keeps drawing meanwhile: the page asks, and
-//! hears back through the event loop.
+//! (cores/evga-z10, run as a module by core_host.rs), in the core protocol's
+//! calls and shared shapes (docs/core-protocol.md); a whole read takes
+//! seconds, and the window keeps drawing meanwhile: the page asks, and hears
+//! back through the event loop.
 
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -12,7 +13,7 @@ use smithay_client_toolkit::reexports::calloop::channel::Sender;
 pub enum Ask {
     /// everything the editor shows: firmware, the active profile, every profile and macro
     State,
-    /// save a profile's name, lighting and keys, and read it back
+    /// save a profile's name, lighting and keys (shared shapes), and read it back
     Save(u8, Value),
     /// make a profile the one in use
     Activate(u8),
@@ -20,15 +21,16 @@ pub enum Ask {
     ReadActive,
     /// where both sliders are, on firmware that can say
     Sliders,
-    /// show a preview on the keyboard: an effect, each key's color, or stop
+    /// show a preview on the keyboard: an effect (`lighting`), each key's
+    /// color (`colors`), or stop (`stop`)
     Preview(Value),
     /// hold the dimmer at a level, or give it back to the slider
     Dimmer(Option<u8>),
     /// ask the keyboard to stop doing a slider's job itself: (quiet volume, keep dimmer)
     Modes(bool, bool),
-    /// save or delete a macro: its name, steps and play settings, or `delete: true`
+    /// save or delete a macro: its name, steps (shared) and play settings, or `delete: true`
     WriteMacro(u8, Value),
-    /// save a profile's keys only, to change how a macro plays on them
+    /// save a profile's keys only (`keys`, by layer), to change how a macro plays on them
     SaveKeys(u8, Value),
     /// the screen as a profile being edited has it, shown now without saving:
     /// its light (brightness, red, green, blue) and its built-in screens
@@ -53,6 +55,17 @@ pub enum Heard {
 /// (where the first write of a session saves what it replaces) in `data`.
 pub fn z10(dir: &std::path::Path, data: PathBuf) -> Result<crate::core_host::Core, String> {
     crate::core_host::Core::start(dir, data, Box::new(crate::core_host::Hidapi::new()))
+}
+
+/// What a preview's body asks of the keyboard, as the protocol's call for it.
+fn preview_call(body: &Value) -> &'static str {
+    if body.get("stop").is_some() {
+        "lighting/preview/stop"
+    } else if body.get("colors").is_some() {
+        "lighting/direct"
+    } else {
+        "lighting/preview"
+    }
 }
 
 /// The keyboard, as the page asks of it: each ask a call to the Z10's core.
@@ -87,7 +100,7 @@ pub fn start(dir: PathBuf, data: PathBuf, tell: Sender<Heard>) -> mpsc::Sender<A
             while let Ok(b) = looks.try_recv() {
                 body = b;
             }
-            if told.send(Heard::Preview(quick.call("preview", body))).is_err() {
+            if told.send(Heard::Preview(quick.call(preview_call(&body), body))).is_err() {
                 break;
             }
         }
@@ -137,51 +150,58 @@ pub fn start(dir: PathBuf, data: PathBuf, tell: Sender<Heard>) -> mpsc::Sender<A
             let Some(a) = queue.pop_front() else { continue };
             let heard = match a {
                 Ask::State => {
-                    let state = kb.call("state", Value::Null);
+                    let state = kb.call("device/read", Value::Null);
                     // The first time the keyboard is read, its lighting is handed back to
                     // its stored profile: a run of Ectodeck stopped short (killed, or
                     // crashed) while the Lighting page streamed a preview leaves it
                     // waiting for frames that never come.
                     if state.is_ok() && !handed_back {
                         handed_back = true;
-                        let _ = kb.call("hand_back", Value::Null);
+                        let _ = kb.call("lighting/hand-back", Value::Null);
                     }
                     Heard::State(state)
                 }
-                Ask::Save(n, body) => Heard::Saved(n, kb.call("save", json!({ "n": n, "body": body }))),
-                Ask::Activate(n) => Heard::Active(n, kb.profile("activate", json!({ "n": n }))),
-                Ask::ReadActive => Heard::ActiveNow(kb.profile("active", Value::Null)),
-                Ask::Sliders => Heard::Sliders(kb.call("sliders", Value::Null)),
+                Ask::Save(n, mut body) => {
+                    body["profile"] = json!(n);
+                    Heard::Saved(n, kb.call("profiles/set", body))
+                }
+                Ask::Activate(n) => Heard::Active(n, kb.profile("profiles/activate", json!({ "profile": n }))),
+                Ask::ReadActive => Heard::ActiveNow(kb.profile("profiles/active", Value::Null)),
+                Ask::Sliders => Heard::Sliders(kb.call("input/state", Value::Null)),
                 // previews go on a thread of their own (above)
                 Ask::Preview(_) => continue,
                 Ask::Dimmer(level) => {
-                    let _ = kb.call("set_dimmer", json!({ "level": level }));
+                    let _ = kb.call("settings/set", json!({ "id": "dimmer", "value": level }));
                     Heard::Done
                 }
                 Ask::Screen(light, apps) => {
                     // each until the keyboard says it took it: an answer can be lost to the
                     // screen's own frames going to it at the same moment
                     for _ in 0..4 {
-                        if kb.flag("set_lcd_light", json!({ "brightness": light[0], "rgb": [light[1], light[2], light[3]] })).unwrap_or(false) {
+                        if kb.flag("displays/light", json!({ "brightness": light[0], "rgb": [light[1], light[2], light[3]] })).unwrap_or(false) {
                             break;
                         }
                         std::thread::sleep(std::time::Duration::from_millis(15));
                     }
                     for _ in 0..4 {
-                        if kb.flag("set_lcd_apps", json!({ "apps": apps })).unwrap_or(false) {
+                        if kb.flag("displays/apps", json!({ "apps": apps })).unwrap_or(false) {
                             break;
                         }
                         std::thread::sleep(std::time::Duration::from_millis(15));
                     }
                     Heard::Done
                 }
-                Ask::WriteMacro(n, body) => {
+                Ask::WriteMacro(n, mut body) => {
                     let delete = body.get("delete").is_some();
-                    Heard::Macros(delete, kb.call("write_macro", json!({ "index": n, "body": body })))
+                    body["macro"] = json!(n);
+                    Heard::Macros(delete, kb.call(if delete { "macros/delete" } else { "macros/set" }, body))
                 }
-                Ask::SaveKeys(n, body) => Heard::KeysSaved(n, kb.call("save", json!({ "n": n, "body": body }))),
+                Ask::SaveKeys(n, mut body) => {
+                    body["profile"] = json!(n);
+                    Heard::KeysSaved(n, kb.call("profiles/set", body))
+                }
                 Ask::Modes(quiet, keep) => {
-                    let _ = kb.call("set_modes", json!({ "quiet_volume": quiet, "keep_dimmer": keep }));
+                    let _ = kb.call("settings/set", json!({ "id": "modes", "value": { "quiet_volume": quiet, "keep_dimmer": keep } }));
                     Heard::Done
                 }
             };
@@ -189,7 +209,7 @@ pub fn start(dir: PathBuf, data: PathBuf, tell: Sender<Heard>) -> mpsc::Sender<A
                 break;
             }
         }
-        let _ = kb.call("release", Value::Null);
+        let _ = kb.call("device/release", Value::Null);
     });
     ask
 }
