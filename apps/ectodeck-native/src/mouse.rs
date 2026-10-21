@@ -337,11 +337,66 @@ pub fn choices(kind: usize) -> Vec<(String, Value)> {
     }
 }
 
-/// A button's job as the mouse is given it: one Ectodeck does (a macro) is
-/// the button's own host slot, which the mouse's core listens for; the
-/// profile keeps the job itself.
+/// A button's job as the mouse is given it: one of Ectodeck's macros the
+/// mouse can hold itself (some modifiers and a key, see held_by_mouse) as
+/// those keys, so the button plays it with Ectodeck closed; any other macro,
+/// or another job Ectodeck does, as the button's own host slot, which the
+/// mouse's core listens for. The profile keeps the job itself.
 pub fn for_mouse(i: usize, a: &Value) -> Value {
+    if let Some(keys) = held_by_mouse(a) {
+        return json!({ "shortcut": keys });
+    }
     if a.get("macro").is_some() || a.get("ectodeck").is_some() { json!({ "host": i }) } else { a.clone() }
+}
+
+/// The keys one of Ectodeck's macros on a button (`a`) presses, if the mouse
+/// can hold it in its own memory and play it itself: the macro still kept,
+/// played once a press (or while the button is held), and no more than some
+/// modifiers and one key pressed together (see chord_of).
+pub fn held_by_mouse(a: &Value) -> Option<Vec<String>> {
+    let n = a.get("macro")?.as_u64()? as u32;
+    if !matches!(a["plays"].as_str(), None | Some("once") | Some("while-held")) {
+        return None;
+    }
+    chord_of(&crate::library::get(n)?["steps"])
+}
+
+/// The keys a macro's steps press together, if that's all they do: up to
+/// three modifiers and one key pressed, none twice, each let go, no wait in
+/// it longer than a hand takes between keys of a shortcut (what a mouse's
+/// button keeps, as libratbag writes a one-key macro). The modifiers first,
+/// in their order, then the key, by the protocol's names.
+pub fn chord_of(steps: &Value) -> Option<Vec<String>> {
+    let steps = steps.as_array().filter(|s| !s.is_empty())?;
+    let (mut down, mut up): (Vec<u8>, Vec<u8>) = (Vec::new(), Vec::new());
+    for s in steps {
+        let k = &s["key"];
+        let u = k.as_u64().map(|n| n as u8).or_else(|| k.as_str().and_then(ectodeck_protocol::keys::usage))?;
+        if s["after"].as_u64().unwrap_or(0) > 400 {
+            return None;
+        }
+        if s["down"].as_bool()? {
+            // (a press after a key was let go, or a key pressed twice, is no shortcut)
+            if !up.is_empty() || down.contains(&u) {
+                return None;
+            }
+            down.push(u);
+        } else {
+            if !down.contains(&u) || up.contains(&u) {
+                return None;
+            }
+            up.push(u);
+        }
+    }
+    if up.len() != down.len() {
+        return None;
+    }
+    let (mut mods, keys): (Vec<u8>, Vec<u8>) = down.into_iter().partition(|u| ectodeck_protocol::keys::is_modifier(*u));
+    if keys.len() != 1 || mods.len() > 3 {
+        return None;
+    }
+    mods.sort_unstable();
+    mods.into_iter().chain(keys).map(ectodeck_protocol::keys::name).collect()
 }
 
 /// Each button that runs Ectodeck's macro `n`, on every profile, given `to`
@@ -906,7 +961,9 @@ impl Page {
         let note = if kind_of(&job) == DEVICES_KIND {
             "Ectodeck does this while it’s running. With Ectodeck closed, this button does nothing.".into()
         } else if kind_of(&job) == MACRO_KIND {
-            if crate::library::get(job["macro"].as_u64().unwrap_or(0) as u32).is_some() {
+            if held_by_mouse(&job).is_some() {
+                "The mouse plays this macro itself, so the button works with Ectodeck closed.".into()
+            } else if crate::library::get(job["macro"].as_u64().unwrap_or(0) as u32).is_some() {
                 "Ectodeck plays this macro while it’s running. With Ectodeck closed, this button does nothing.".into()
             } else {
                 "The macro this button ran was deleted. Choose another job for it.".into()
@@ -1088,6 +1145,38 @@ fn color(c: [u8; 3]) -> slint::Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One of Ectodeck's macros that is only a shortcut (some modifiers and a
+    /// key pressed together) goes on a button as those keys, for the mouse to
+    /// play itself with Ectodeck closed; anything more, or played another way,
+    /// stays Ectodeck's to play (the button's host slot). Grant's own: New
+    /// tab, Previous tab.
+    #[test]
+    fn the_mouse_holds_a_macro_that_is_a_shortcut() {
+        let _one = crate::library::TESTS.lock().unwrap_or_else(|p| p.into_inner());
+        let step = |k: &str, down: bool, after: u64| json!({ "key": k, "down": down, "after": after });
+        crate::library::set(91, "New tab", vec![step("LeftCtrl", true, 0), step("T", true, 0), step("T", false, 10), step("LeftCtrl", false, 0)]);
+        crate::library::set(92, "Previous tab", vec![step("LeftCtrl", true, 0), step("LeftShift", true, 0), step("Tab", true, 0), step("Tab", false, 10), step("LeftShift", false, 0), step("LeftCtrl", false, 0)]);
+        crate::library::set(93, "Hi", vec![step("H", true, 0), step("H", false, 0), step("I", true, 0), step("I", false, 0)]);
+        let m = |n: u32, plays: &str| json!({ "macro": n, "plays": plays });
+        assert_eq!(for_mouse(4, &m(91, "once")), json!({ "shortcut": ["LeftCtrl", "T"] }));
+        assert_eq!(for_mouse(3, &m(92, "once")), json!({ "shortcut": ["LeftCtrl", "LeftShift", "Tab"] }));
+        assert_eq!(for_mouse(3, &m(93, "once")), json!({ "host": 3 }), "two keys typed");
+        assert_eq!(for_mouse(4, &m(91, "until-pressed-again")), json!({ "host": 4 }), "played another way");
+        assert_eq!(for_mouse(4, &m(99, "once")), json!({ "host": 4 }), "a macro no longer kept");
+        assert_eq!(for_mouse(5, &json!({ "key": "F5" })), json!({ "key": "F5" }), "a key is a key");
+        // a hand's own recording of Ctrl+W, with the pauses between its keys
+        let rec = vec![step("LeftCtrl", true, 140), step("W", true, 90), step("W", false, 120), step("LeftCtrl", false, 0)];
+        assert_eq!(chord_of(&Value::Array(rec)), Some(vec!["LeftCtrl".to_string(), "W".to_string()]));
+        // a key pressed after another was let go, a long pause, four modifiers, a key never let go: none is one
+        assert_eq!(chord_of(&json!([step("LeftCtrl", true, 0), step("A", true, 0), step("A", false, 0), step("B", true, 0), step("B", false, 0), step("LeftCtrl", false, 0)])), None);
+        assert_eq!(chord_of(&json!([step("LeftCtrl", true, 2000), step("A", true, 0), step("A", false, 0), step("LeftCtrl", false, 0)])), None);
+        assert_eq!(chord_of(&json!([step("LeftCtrl", true, 0), step("LeftShift", true, 0), step("LeftAlt", true, 0), step("LeftMeta", true, 0), step("A", true, 0), step("A", false, 0), step("LeftMeta", false, 0), step("LeftAlt", false, 0), step("LeftShift", false, 0), step("LeftCtrl", false, 0)])), None);
+        assert_eq!(chord_of(&json!([step("LeftCtrl", true, 0), step("A", true, 0), step("A", false, 0)])), None);
+        for n in [91, 92, 93] {
+            crate::library::delete(n);
+        }
+    }
 
     /// Every job a button can be given reads back as itself, in the core's terms and in words.
     #[test]

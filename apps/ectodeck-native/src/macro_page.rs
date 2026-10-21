@@ -829,13 +829,14 @@ impl MacroPage {
             let name = if d.name.is_empty() { format!("Macro {n}") } else { d.name.clone() };
             crate::library::set(n, &name, steps);
             self.ed.drafts.remove(&n);
-            let mut t = format!("Saved {name}. Ectodeck plays it while it’s running.");
+            let mut t = format!("Saved {name}.");
             if !added.is_empty() {
                 let names: Vec<String> = added.iter().map(macros::step_name).collect();
                 t += &format!(" {} {} let go at the end so nothing stays held down.", names.join(" and "), if added.len() == 1 { "was" } else { "were" });
             }
             self.status(t, 1);
-            return d.plays.map(|(how, count)| WindowAsk::MacroPlays(n, macros::with_count(how, count)));
+            // (how it plays, if that changed, else its steps, go to the controls that run it)
+            return Some(d.plays.map_or(WindowAsk::MacroSaved(n), |(how, count)| WindowAsk::MacroPlays(n, macros::with_count(how, count))));
         }
         if macros::bytes(&steps) > ROOM {
             self.status("This macro is too long for the keyboard. Remove some steps and save again.", 2);
@@ -1010,7 +1011,7 @@ impl MacroPage {
         crate::front::set_rows(&self.items, items);
         ui.set_slots_text(match self.ed.room() {
             Some(room) => format!("Kept on the keyboard, so they play even with Ectodeck closed. {saved_count} of {room} slots used."),
-            None => format!("Kept in Ectodeck, which plays these for your mouse’s buttons while it’s running. {saved_count} saved."),
+            None => format!("Kept in Ectodeck. Shortcuts on your mouse play even with Ectodeck closed. {saved_count} saved."),
         }.into());
         ui.set_can_new(!self.ed.free_slots(page).is_empty() && !rec);
 

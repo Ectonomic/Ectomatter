@@ -2091,6 +2091,7 @@ impl App {
                 WindowAsk::OpenMacros(lib, n) => self.open_macros(*lib, *n),
                 WindowAsk::MacroPlays(n, how) => self.front.macro_plays(*n, *how),
                 WindowAsk::MacroGone(n) => self.front.macro_gone(*n),
+                WindowAsk::MacroSaved(n) => self.front.macro_saved(*n),
                 WindowAsk::OpenLab => self.open_lab(),
                 WindowAsk::OpenLayouts(i) => self.open_layouts(*i),
                 WindowAsk::ShowSettings => {
@@ -2138,6 +2139,7 @@ impl App {
                     // (what the Macro Editor's changes mean for the mouse's buttons)
                     WindowAsk::MacroPlays(n, how) => self.front.macro_plays(n, how),
                     WindowAsk::MacroGone(n) => self.front.macro_gone(n),
+                    WindowAsk::MacroSaved(n) => self.front.macro_saved(n),
                     WindowAsk::OpenMacros(..) | WindowAsk::OpenLab | WindowAsk::OpenLayouts(_) => {}
                 }
             }

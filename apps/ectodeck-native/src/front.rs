@@ -352,6 +352,9 @@ pub enum WindowAsk {
     MacroPlays(u32, ectodeck_protocol::Plays),
     /// one of Ectodeck's macros deleted: the controls that ran it do nothing now
     MacroGone(u32),
+    /// one of Ectodeck's macros saved with new steps: the controls that run it
+    /// are told again (a mouse that holds it itself, the macro as it is now)
+    MacroSaved(u32),
     /// open the lab's window
     OpenLab,
     /// open the screen layout editor's window, on this layout of the Library
@@ -4223,8 +4226,26 @@ impl Front {
         let job = format!("{}{}", crate::jobs::ON_KEY, crate::jobs::Job::Macro { n, plays: how }.id());
         self.rekey(|id| (matches!(crate::jobs::Job::of(id.strip_prefix(crate::jobs::ON_KEY)?), Some(crate::jobs::Job::Macro { n: m, .. }) if m == n)).then(|| job.clone()));
         let Some(store) = &mut self.mouse.profiles else { return };
-        // (the mouse knows the buttons only as host slots: nothing to tell it)
-        crate::mouse::rewrite_macro(store, n, &Action::Macro { n, plays: how }.write());
+        let job = Action::Macro { n, plays: how }.write();
+        // (the profile in use is on the mouse: a button that holds the macro
+        // itself, or stops being able to, is told)
+        for bi in crate::mouse::rewrite_macro(store, n, &job) {
+            self.mouse.set_job(bi, job.clone());
+        }
+        self.macros_elsewhere();
+        self.refresh();
+    }
+
+    /// One of Ectodeck's macros saved with new steps: each of the mouse's
+    /// buttons that runs it told again, for the mouse to hold the macro as it
+    /// is now (or to leave it to Ectodeck, if it can't hold it any more).
+    pub fn macro_saved(&mut self, n: u32) {
+        for bi in 0..crate::mouse::BUTTONS.len() {
+            let job = self.mouse.job(bi);
+            if matches!(Action::read(&job), Some(Action::Macro { n: m, .. }) if m == n) {
+                self.mouse.set_job(bi, job);
+            }
+        }
         self.macros_elsewhere();
         self.refresh();
     }
