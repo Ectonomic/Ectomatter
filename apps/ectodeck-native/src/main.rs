@@ -22,6 +22,7 @@ mod core_host;
 mod cores;
 mod described;
 mod desk;
+mod desk_light;
 mod device;
 mod display;
 mod devices;
@@ -710,6 +711,11 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     }
     // ECTODECK_NATIVE_FRONT_AFTER: the same, after the clicks
     front_apps_told(&mut front, "ECTODECK_NATIVE_FRONT_AFTER");
+    // (the desk's light, if it plays, at a moment of its own: ECTODECK_NATIVE_DESK_LIGHT_AT=seconds)
+    if let Some(t) = std::env::var("ECTODECK_NATIVE_DESK_LIGHT_AT").ok().and_then(|v| v.parse::<f64>().ok()) {
+        std::thread::sleep(Duration::from_secs_f64(t));
+    }
+    front.desk_light_now();
     // ECTODECK_NATIVE_HEAR=control: a mouse button heard pressed and let go, as its core tells
     // it; ECTODECK_NATIVE_KEY_CODE=code: a keyboard key with that host code heard so (after
     // the clicks, each job Ectodeck does said in the log)
@@ -1909,6 +1915,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
                         app.front.ui.set_place(d.into());
                     }
                     tray::TrayAsk::Quit => {
+                        app.front.desk_light_quit();
                         app.front.hand_back();
                         app.front.release_sliders();
                         // (once what changed is saved: see the loop)
@@ -1940,6 +1947,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
     let mut open_lab = std::env::var_os("ECTODECK_NATIVE_OPEN_LAB").is_some();
     while !app.exit {
         if TERM.load(std::sync::atomic::Ordering::Relaxed) && app.quitting.is_none() {
+            app.front.desk_light_quit();
             app.front.hand_back();
             app.front.release_sliders();
             app.quitting = Some(Instant::now());

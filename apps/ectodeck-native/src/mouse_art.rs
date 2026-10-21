@@ -118,6 +118,10 @@ impl Layers {
 /// The lights' ids, by their places (0 the logo, 1 the wheel), as the core names them.
 pub const LIGHT_IDS: [&str; 2] = ["logo", "wheel"];
 
+/// Each light's middle on the drawing, in its own units (the logo's ring, the
+/// wheel), for where the light is on Home's desk before its picture is drawn.
+pub const LIGHT_MIDDLES: [(f32, f32); 2] = [(180.5, 482.1), (180.0, 120.0)];
+
 /// The drawing's pixels to a millimeter, for the mouse drawn `w` pixels wide,
 /// the drawing `units_mm` of its units to the millimeter (the core's scale:
 /// the mouse's 520 units long are 125.1 mm).

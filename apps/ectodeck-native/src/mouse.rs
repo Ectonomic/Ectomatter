@@ -23,6 +23,10 @@ pub enum Ask {
     ResetKey(String),
     Light(String, Value),
     Setting(String, Value),
+    /// the lights in colors streamed to them (the desk's light), kept from the
+    /// mouse's memory; and its lights as it keeps them again
+    Direct(Value),
+    HandBack,
     /// a whole profile put on the mouse (the core's profiles/apply)
     Apply(Value),
     /// the core told something (a button pressed): look now
@@ -105,6 +109,8 @@ pub fn start(core: Core, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
                         Ask::Setting(s, _) => format!("setting {s}"),
                         Ask::Apply(_) => "profile".into(),
                         Ask::Nudge => "nudge".into(),
+                        Ask::Direct(_) => "direct".into(),
+                        Ask::HandBack => "hand back".into(),
                     };
                     let mut newest: Vec<Ask> = Vec::new();
                     for a in all {
@@ -122,6 +128,15 @@ pub fn start(core: Core, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
                             Ask::Setting(setting, v) => core.call("settings/set", &json!({ "device": DEVICE, "id": setting, "value": v })).map(|_| ()),
                             // (what the core told is read at the top of the loop)
                             Ask::Nudge => Ok(()),
+                            Ask::Direct(colors) => core.call("lighting/direct", &json!({ "device": DEVICE, "colors": colors })).map(|_| ()),
+                            Ask::HandBack => core.call("lighting/hand-back", &json!({ "device": DEVICE })).map(|v| {
+                                let at = Instant::now();
+                                for l in LIGHTS {
+                                    if v["plays"][l].is_object() {
+                                        let _ = tell.send(Heard::Played(l.into(), v["plays"][l].clone(), at));
+                                    }
+                                }
+                            }),
                             Ask::Apply(mut body) => {
                                 body["device"] = json!(DEVICE);
                                 core.call("profiles/apply", &body).map(|v| {
@@ -714,6 +729,17 @@ impl Page {
         self.state["keys"]["layers"]["base"][BUTTONS[i].0] = on_mouse.clone();
         self.keep_in_profile(|b| b["keys"]["base"][BUTTONS[i].0] = a);
         self.send(Ask::Key(BUTTONS[i].0.into(), on_mouse));
+    }
+
+    /// The lights in streamed colors (logo and wheel, "#RRGGBB"), which the
+    /// mouse's memory never keeps.
+    pub fn direct(&self, colors: Value) {
+        self.send(Ask::Direct(colors));
+    }
+
+    /// The lights as the mouse keeps them again, after streamed colors.
+    pub fn hand_back(&self) {
+        self.send(Ask::HandBack);
     }
 
     pub fn set_setting(&mut self, id: &str, v: Value) {

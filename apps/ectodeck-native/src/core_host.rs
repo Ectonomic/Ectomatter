@@ -1019,6 +1019,31 @@ mod tests {
         assert_eq!(s["values"]["cpi1"], 1200);
     }
 
+    /// Colors streamed to the mouse's lights are shown and never kept in its
+    /// memory: a change made meanwhile is kept only once the lights are
+    /// handed back, which puts them as the mouse keeps them first.
+    #[test]
+    fn streamed_colors_are_never_kept() {
+        let (core, sent, data) = mouse_core("direct");
+        let d = serde_json::json!({ "device": "sensei310-1" });
+        let at = sent.lock().unwrap().len();
+        core.call("lighting/direct", &serde_json::json!({ "device": "sensei310-1", "colors": { "logo": "#00FF00", "wheel": "#0000FF" } })).unwrap();
+        core.call("settings/set", &serde_json::json!({ "device": "sensei310-1", "id": "cpi1", "value": 1200 })).unwrap();
+        std::thread::sleep(Duration::from_millis(1800));
+        let _ = core.call("settings/get", &d);
+        let during: Vec<Vec<u8>> = sent.lock().unwrap()[at..].iter().map(|(_, _, b)| b.clone()).collect();
+        assert_eq!(during.iter().filter(|r| r[..2] == [0x00, 0x5b]).count(), 2, "both lights streamed: {during:02x?}");
+        assert!(during.iter().all(|r| r[..2] != [0x00, 0x59]), "nothing kept while streaming");
+        let back = core.call("lighting/hand-back", &d).unwrap();
+        assert!(back["plays"]["logo"].is_object(), "what the lights play again");
+        std::thread::sleep(Duration::from_millis(1800));
+        let _ = core.call("settings/get", &d);
+        let after: Vec<Vec<u8>> = sent.lock().unwrap()[at + during.len()..].iter().map(|(_, _, b)| b.clone()).collect();
+        let _ = std::fs::remove_dir_all(&data);
+        assert_eq!(after.iter().filter(|r| r[..2] == [0x00, 0x5b]).count(), 2, "the lights as the mouse keeps them: {after:02x?}");
+        assert_eq!(after.iter().filter(|r| r[..2] == [0x00, 0x59]).count(), 1, "and the change kept, once");
+    }
+
     /// A breath goes from dark up to its color and back down to dark, and a
     /// color shift comes back round to red, as each cycle ends on its first
     /// color: the mouse jumps from the last stop to the first.

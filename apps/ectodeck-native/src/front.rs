@@ -138,6 +138,9 @@ pub enum Ask {
     DeskDone,
     DeskZoom(i32),
     DeskTick,
+    /// the desk's light: its menu, on Home; the next of its frames
+    DeskLightMenu(f32, f32, f32),
+    DeskLightFrame,
     /// the rebindings shown on the keyboard, or not
     ShowRebindings,
     Move,
@@ -570,6 +573,16 @@ pub struct Front {
     mouse_shows: (Option<u8>, Option<u8>),
     /// the lights' effects played on the picture, 30 frames a second, while they move
     mouse_frames: Option<slint::Timer>,
+    /// the desk's light (see desk_light.rs): its effect, from when, its
+    /// frames' timer, when each device was last sent its part (the mouse's
+    /// with the colors it was sent), the colors it gives now (each key by its
+    /// place, the mouse's logo and wheel), and whether its menu is open
+    desk_light: crate::desk_light::Effect,
+    desk_light_t0: Instant,
+    desk_light_timer: Option<slint::Timer>,
+    desk_light_mouse: (Option<Instant>, [[u8; 3]; 2]),
+    desk_colors: (HashMap<u32, [u8; 3]>, [Option<[u8; 3]>; 2]),
+    desk_light_menu: bool,
     /// the mouse in HDR on its page: its lamps and unlit picture, for the
     /// layers' scale; the picture lit as it shows now, and the part of the
     /// whole picture the page's hole shows of it (in pixels)
@@ -791,6 +804,7 @@ impl Front {
         on!(on_desk_arrange, Ask::DeskArrange);
         on!(on_desk_done, Ask::DeskDone);
         on!(on_desk_zoom_step, |how| Ask::DeskZoom(how));
+        on!(on_desk_light_menu, |x, y, h| Ask::DeskLightMenu(x, y, h));
         on!(on_mouse_effect, |i| Ask::MouseEffect(i));
         on!(on_rail, |p| Ask::Rail(p.to_string()));
         on!(on_macro_editor, |l| Ask::MacroEditor(l));
@@ -871,6 +885,12 @@ impl Front {
             mouse_hover: None,
             mouse_shows: (None, None),
             mouse_frames: None,
+            desk_light: crate::desk_light::Effect::Off,
+            desk_light_t0: Instant::now(),
+            desk_light_timer: None,
+            desk_light_mouse: (None, [[0; 3]; 2]),
+            desk_colors: Default::default(),
+            desk_light_menu: false,
             mouse_hdr: None,
             mouse_lit: None,
             mouse_part: (0, 0, 0, 0),
@@ -1026,6 +1046,11 @@ impl Front {
         f.screens_noted = f.screens.clone();
         f.screens_saved = f.screens.clone();
         f.weather.set_place(weather_place(&f.settings));
+        // the desk's light, as it was left playing
+        let light = f.settings.get("desk.light").and_then(|v| v.as_str().map(crate::desk_light::Effect::of)).unwrap_or(crate::desk_light::Effect::Off);
+        if light != crate::desk_light::Effect::Off && controlled {
+            f.set_desk_light(light);
+        }
         f.ui.set_overlays(ModelRc::from(f.overlay_model.clone()));
         f.ui.set_pk_presets(ModelRc::new(VecModel::from(PRESETS.iter().map(|c| color(*c)).collect::<Vec<_>>())));
         f.ui.set_cells(ModelRc::from(f.cells.clone()));
@@ -1488,6 +1513,11 @@ impl Front {
                     changed = false;
                     self.desk.zoom_step(how);
                     self.desk_frames_run();
+                }
+                Ask::DeskLightMenu(x, y, h) => self.open_desk_light_menu((x, y, h)),
+                Ask::DeskLightFrame => {
+                    changed = false;
+                    self.desk_light_frame();
                 }
                 Ask::DeskTick => {
                     changed = false;
@@ -2799,7 +2829,7 @@ impl Front {
             self.ui.set_menu_open(false);
             self.ui.invoke_blur_menu();
         }
-        if self.mouse.menu.take().is_some() || std::mem::take(&mut self.profile_menu) || std::mem::take(&mut self.kb_profile_menu) || self.apps_menu.take().is_some() {
+        if self.mouse.menu.take().is_some() || std::mem::take(&mut self.profile_menu) || std::mem::take(&mut self.kb_profile_menu) || self.apps_menu.take().is_some() || std::mem::take(&mut self.desk_light_menu) {
             self.ui.set_menu_open(false);
             self.ui.set_menu_w(300.0);
             self.ui.set_mouse_menu_open(false);
@@ -2891,7 +2921,7 @@ impl Front {
     /// the window.
     fn let_chosen_go(&mut self, x: f32, y: f32) {
         // (a press while any menu is open is the menu's: it chooses there, or shuts it)
-        if y < 36.0 || self.ui.get_menu_open() || self.menu.is_some() || self.mouse.menu.is_some() || self.profile_menu || self.kb_profile_menu || self.apps_menu.is_some() || self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pick.is_some() || self.place_menu {
+        if y < 36.0 || self.ui.get_menu_open() || self.menu.is_some() || self.mouse.menu.is_some() || self.profile_menu || self.kb_profile_menu || self.apps_menu.is_some() || self.desk_light_menu || self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pick.is_some() || self.place_menu {
             return;
         }
         let Some(keeps) = self.chosen_keeps() else { return };
@@ -3001,6 +3031,14 @@ impl Front {
                     self.show_mouse_lights();
                 }
                 _ => {}
+            }
+            self.refresh();
+            return;
+        }
+        if self.desk_light_menu {
+            self.close_menu();
+            if let Some((e, ..)) = crate::desk_light::EFFECTS.get(i) {
+                self.set_desk_light(*e);
             }
             self.refresh();
             return;
@@ -4387,7 +4425,7 @@ impl Front {
         let on = item.connected;
         let (white, ceiling) = (self.levels.0 as f32, self.light_gain(self.levels.0));
         let now = Instant::now();
-        let colors = [0, 1].map(|i| self.mouse.lit(crate::mouse::LIGHTS[i]).filter(|_| on).map(|_| self.mouse.color_at(i, now)));
+        let colors = [0, 1].map(|i| self.mouse_color(i, now).filter(|_| on));
         let light = self.mouse_light_model();
         let units_mm = self.mouse.state["device"]["scale"].as_f64().map_or(520.0 / 125.1, |v| v as f32);
         let Some((w, layers)) = self.desk_layers() else { return };
@@ -4412,7 +4450,7 @@ impl Front {
         let now = Instant::now();
         let most = self.light_gain(self.levels.0) as f64 * self.levels.0;
         std::array::from_fn(|i| {
-            let Some(c) = self.mouse.lit(crate::mouse::LIGHTS[i]).map(|_| self.mouse.color_at(i, now)) else { return 0.0 };
+            let Some(c) = self.mouse_color(i, now) else { return 0.0 };
             let lin = |v: u8| (v as f64 / 255.0).powf(2.2);
             let y = 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
             hdr.lamps.get(i).map_or(0.0, |l| (l.peak() as f64 * y).min(most))
@@ -4444,7 +4482,7 @@ impl Front {
     fn mouse_light_up(&mut self) {
         let (white, ceiling) = (self.levels.0 as f32, self.light_gain(self.levels.0));
         let now = Instant::now();
-        let colors = [0, 1].map(|i| self.mouse.lit(crate::mouse::LIGHTS[i]).map(|_| self.mouse.color_at(i, now)));
+        let colors = [0, 1].map(|i| self.mouse_color(i, now));
         let Some((scale, imgs)) = &self.mouse_layers else { return };
         let Some((_, hdr)) = self.mouse_hdr.as_mut().filter(|(s, _)| s == scale) else { return };
         let part = mouse_part(&self.ui, *scale, &imgs.layers);
@@ -5892,7 +5930,15 @@ impl Front {
     /// The keys' light now, if it has changed since it was last asked for.
     pub fn lights(&mut self) -> Option<Vec<Light>> {
         let t = self.t0.elapsed().as_secs_f64() * 1000.0;
-        let lights = self.page.lights(t);
+        let mut lights = self.page.lights(t);
+        // (the desk's light, while it plays, on each key it lights)
+        if self.desk_light != crate::desk_light::Effect::Off {
+            for l in &mut lights {
+                if let Some(c) = self.desk_colors.0.get(&l.pos) {
+                    (l.rgb, l.strength) = (*c, 1.0);
+                }
+            }
+        }
         if self.last_lights.as_ref() == Some(&lights) {
             return None;
         }
@@ -5901,7 +5947,140 @@ impl Front {
     }
 
     pub fn animated(&self) -> bool {
-        self.page.animated()
+        self.page.animated() || self.desk_light != crate::desk_light::Effect::Off
+    }
+
+    /// Home's Desk light menu: its effects, the one playing ticked.
+    fn open_desk_light_menu(&mut self, anchor: (f32, f32, f32)) {
+        if let Some((at, when)) = self.shut.take() {
+            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
+                return;
+            }
+        }
+        self.close_menu();
+        let rows = crate::desk_light::EFFECTS.iter().map(|(e, _, w)| MenuRow { kind: 0, label: (*w).into(), tag: "".into(), tick: *e == self.desk_light, sub: "".into() }).collect();
+        self.hang_menu(rows, 240.0, anchor);
+        self.desk_light_menu = true;
+    }
+
+    /// The desk's light set to an effect, kept so: its frames from now, or,
+    /// off, each device's own lighting handed back to it.
+    pub fn set_desk_light(&mut self, e: crate::desk_light::Effect) {
+        use crate::desk_light::Effect;
+        let was = self.desk_light;
+        self.desk_light = e;
+        if let Err(err) = self.settings.set("desk.light", serde_json::json!(e.id())) {
+            self.status(format!("The desk's light was not saved: {err}"), 2);
+        }
+        if e == Effect::Off {
+            self.desk_light_timer = None;
+            if was != Effect::Off {
+                self.desk_hand_back();
+            }
+        } else if self.desk_light_timer.is_none() {
+            self.desk_light_t0 = Instant::now();
+            let t = slint::Timer::default();
+            let asks = self.asks.clone();
+            // (the keyboard takes 25 frames a second)
+            t.start(slint::TimerMode::Repeated, Duration::from_millis(40), move || asks.borrow_mut().push(Ask::DeskLightFrame));
+            self.desk_light_timer = Some(t);
+        }
+        self.ui.set_desk_light(e.short().into());
+        self.show_mouse_lights();
+    }
+
+    /// Each device's own lighting again, the desk's light over: the keyboard
+    /// out of its direct colors, the mouse's lights as it keeps them.
+    fn desk_hand_back(&mut self) {
+        self.ask_kb(device::Ask::Preview(serde_json::json!({ "stop": true, "tab": "native", "claim": true })));
+        self.mouse.hand_back();
+        self.desk_colors = Default::default();
+        self.desk_light_mouse = (None, [[0; 3]; 2]);
+        self.last_lights = None;
+    }
+
+    /// The desk's light off for Ectodeck quitting, each device its own again;
+    /// kept as it was, to play again next time.
+    pub fn desk_light_quit(&mut self) {
+        if self.desk_light != crate::desk_light::Effect::Off {
+            self.desk_light_timer = None;
+            self.desk_hand_back();
+        }
+    }
+
+    /// Where each device's lights are on Home's desk, in millimeters: the
+    /// keyboard's keys with LEDs, the mouse's logo and wheel.
+    fn desk_places(&self) -> crate::desk_light::Places {
+        let mut out = crate::desk_light::Places::default();
+        let item = |id: &str| self.desk.items.iter().find(|it| it.id == id).map(|it| [it.x, it.y, it.w, it.h]);
+        if let (Some(r), true) = (item("z10"), self.page.dev.is_some()) {
+            let vb = self.page.view_box;
+            out.keys = self.page.layout.iter().filter(|k| k.led).map(|k| {
+                let (x, y) = crate::desk_light::on_desk(vb, r, k.cx, k.cy);
+                (k.pos, x, y)
+            }).collect();
+        }
+        if let Some(r) = item("mouse") {
+            let v = crate::mouse_art::VIEW;
+            let view = (v.0 as f64, v.1 as f64, v.2 as f64, v.3 as f64);
+            let middles = match &self.mouse_layers {
+                Some((scale, imgs)) => crate::mouse_art::light_boxes(&imgs.layers, (240.0 * scale).round() as u32).map(|b| ((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0)),
+                None => crate::mouse_art::LIGHT_MIDDLES,
+            };
+            out.mouse = crate::mouse_art::LIGHT_IDS.iter().zip(middles).map(|(id, (x, y))| {
+                let (dx, dy) = crate::desk_light::on_desk(view, r, x as f64, y as f64);
+                (*id, dx, dy)
+            }).collect();
+        }
+        out
+    }
+
+    /// The desk's light's next frame: each light's color where it sits, sent
+    /// to its device (the keyboard every frame, but while its Lighting tab
+    /// previews; the mouse as often as it takes two commands, when its colors
+    /// change), and the pictures with it.
+    fn desk_light_frame(&mut self) {
+        let e = self.desk_light;
+        if e == crate::desk_light::Effect::Off {
+            return;
+        }
+        let t = self.desk_light_t0.elapsed().as_secs_f32();
+        let places = self.desk_places();
+        let keys: HashMap<u32, [u8; 3]> = places.keys.iter().map(|(pos, x, y)| (*pos, crate::desk_light::color(e, *x, *y, t))).collect();
+        let mouse = [0, 1].map(|i| places.mouse.iter().find(|(id, ..)| *id == crate::mouse_art::LIGHT_IDS[i]).map(|(_, x, y)| crate::desk_light::color(e, *x, *y, t)));
+        self.desk_colors = (keys, mouse);
+        let previewing = self.ui.get_place() == "z10" && self.page.view == View::Lighting;
+        if self.page.dev.is_some() && !previewing {
+            let colors: Vec<[u8; 3]> = (0..ectotype_core::protocol::NKEYS as u32).map(|p| self.desk_colors.0.get(&p).copied().unwrap_or([0; 3])).collect();
+            self.ask_kb(device::Ask::Preview(serde_json::json!({ "colors": colors, "tab": "native", "claim": true })));
+        }
+        if let (true, Some(logo), Some(wheel)) = (self.mouse.present(), mouse[0], mouse[1]) {
+            let due = self.desk_light_mouse.0.is_none_or(|at| at.elapsed() >= Duration::from_millis(125));
+            if due && self.desk_light_mouse.1 != [logo, wheel] {
+                self.mouse.direct(serde_json::json!({ "logo": lighting::hex_of(logo), "wheel": lighting::hex_of(wheel) }));
+                self.desk_light_mouse = (Some(Instant::now()), [logo, wheel]);
+            }
+        }
+        if self.mouse_pictured() {
+            self.show_mouse_lights();
+        }
+    }
+
+    /// The desk's light's frame now, as its timer would give it (a snapshot
+    /// has no timers).
+    pub fn desk_light_now(&mut self) {
+        self.desk_light_frame();
+    }
+
+    /// A mouse light's color for its picture now: the desk's light's, while
+    /// it plays; else the mouse's own, none while that light is off.
+    fn mouse_color(&self, i: usize, now: Instant) -> Option<[u8; 3]> {
+        if self.desk_light != crate::desk_light::Effect::Off {
+            if let Some(c) = self.desk_colors.1[i] {
+                return Some(c);
+            }
+        }
+        self.mouse.lit(crate::mouse::LIGHTS[i]).map(|_| self.mouse.color_at(i, now))
     }
 
     // ------------------------------------------------------------ the screen

@@ -4020,6 +4020,9 @@ export component AppWindow inherits Window {
     callback mouse-profile-menu(length, length, length);
     // the menu on the keyboard's profile being edited
     callback kb-profile-menu(length, length, length);
+    // the desk's light on Home: what it plays (its short words; none while off), and its menu
+    in property <string> desk-light;
+    callback desk-light-menu(length, length, length);
     callback mouse-undo();
     // its picture, and how far the picture's shadow reaches past the mouse;
     // over it, the chosen button picked out and the one under the pointer a
@@ -4465,6 +4468,54 @@ export component AppWindow inherits Window {
                 font-size: 12.5px;
                 color: Ink.quiet;
                 vertical-alignment: center;
+            }
+            // the desk's light, left of Arrange: one effect across every device on the desk
+            if !root.desk-editing && root.desk-empty == "": Rectangle {
+                x: parent.width - 24px - arrange-measure.preferred-width - 8px - self.width;
+                y: 17px;
+                height: 26px;
+                width: light-row.preferred-width;
+                border-radius: 6px;
+                background: light-ta.has-hover ? Ink.hover-box : transparent;
+                light-row := HorizontalLayout {
+                    padding-left: 9px;
+                    padding-right: 9px;
+                    spacing: 7px;
+                    Path {
+                        y: 6px;
+                        width: 14px;
+                        height: 14px;
+                        viewbox-width: 14;
+                        viewbox-height: 14;
+                        // (a bulb's light: a ring, and its rays)
+                        commands: "M7 4.6a2.4 2.4 0 1 0 0 4.8a2.4 2.4 0 1 0 0-4.8zM7 0.9v1.5M7 11.6v1.5M0.9 7h1.5M11.6 7h1.5M2.7 2.7l1.06 1.06M10.24 10.24l1.06 1.06M2.7 11.3l1.06-1.06M10.24 3.76l1.06-1.06";
+                        fill: transparent;
+                        stroke: root.desk-light != "" ? Ink.bright : light-ta.has-hover ? Ink.bright : Ink.soft;
+                        stroke-width: 1.4px;
+                        stroke-line-cap: LineCap.round;
+                    }
+                    Text {
+                        text: root.desk-light == "" ? "Desk light" : "Desk light: " + root.desk-light;
+                        font-family: "Geist";
+                        font-size: 12.5px;
+                        font-weight: 500;
+                        color: root.desk-light != "" || light-ta.has-hover ? Ink.bright : Ink.soft;
+                        vertical-alignment: center;
+                    }
+                }
+                light-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.desk-light-menu(self.absolute-position.x, self.absolute-position.y, self.height); }
+                }
+            }
+            // (Arrange's width, for the desk light's place beside it)
+            arrange-measure := HorizontalLayout {
+                visible: false;
+                padding-left: 9px;
+                padding-right: 9px;
+                spacing: 7px;
+                Rectangle { width: 14px; }
+                Text { text: "Arrange"; font-family: "Geist"; font-size: 12.5px; font-weight: 500; }
             }
             if !root.desk-editing && root.desk-empty == "": Rectangle {
                 x: parent.width - self.width - 24px;
