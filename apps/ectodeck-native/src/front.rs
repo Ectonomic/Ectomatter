@@ -529,6 +529,9 @@ pub struct Front {
     /// a menu closed by a press on its own button, which that button's click must not open again
     shut: Option<((f32, f32), Instant)>,
     t0: Instant,
+    /// the moment the keys' light is drawn at, in milliseconds, for a snapshot
+    /// to be the same every time (ECTODECK_NATIVE_LIGHT_AT)
+    pub light_at: Option<f64>,
     last_lights: Option<Vec<Light>>,
     /// when the keyboard could not be read, to try again
     failed_at: Option<Instant>,
@@ -967,6 +970,7 @@ impl Front {
             listening: None,
             shut: None,
             t0: Instant::now(),
+            light_at: None,
             last_lights: None,
             pale: Default::default(),
             picking: None,
@@ -6262,7 +6266,7 @@ impl Front {
 
     /// The keys' light now, if it has changed since it was last asked for.
     pub fn lights(&mut self) -> Option<Vec<Light>> {
-        let t = self.t0.elapsed().as_secs_f64() * 1000.0;
+        let t = self.light_at.unwrap_or_else(|| self.t0.elapsed().as_secs_f64() * 1000.0);
         let mut lights = self.page.lights(t);
         // (the desk's light, while it plays, on each key it lights)
         if self.desk_light != crate::desk_light::Effect::Off {

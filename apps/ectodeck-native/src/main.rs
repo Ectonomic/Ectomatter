@@ -643,6 +643,8 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         front.desk.fit();
         front.poll_pads();
     }
+    // ECTODECK_NATIVE_LIGHT_AT=ms: the keys' light at that moment of its effect
+    front.light_at = std::env::var("ECTODECK_NATIVE_LIGHT_AT").ok().and_then(|v| v.parse().ok());
     // ECTODECK_NATIVE_MOUSE=FILE: the mouse as its core last told it (what the mouse's
     // thread hears), and ECTODECK_NATIVE_MOUSE_TAB=N its page's tab
     if let Some(v) = std::env::var("ECTODECK_NATIVE_MOUSE").ok().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()) {
