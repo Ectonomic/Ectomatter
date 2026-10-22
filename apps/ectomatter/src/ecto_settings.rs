@@ -77,20 +77,31 @@ pub struct PackageRow {
     pub removable: bool,
 }
 
+/// A device as Settings' Devices shows it, with its core: how the device is
+/// now (plugged in, opened, who else has it open), what it's called in words
+/// about it ("keyboard"), and the core's row (its switch is the device's).
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeviceRow {
+    pub core: PackageRow,
+    pub kind: String,
+    pub present: bool,
+    /// whether the system lets Ectomatter open it (`None` where it isn't asked)
+    pub reachable: Option<bool>,
+    pub holders: Vec<String>,
+    /// what another program having it open means for it
+    pub holders_note: String,
+}
+
 pub struct State<'a> {
     pub sensors: Option<Sensors>,
-    pub cores: Vec<PackageRow>,
+    pub devices: Vec<DeviceRow>,
     pub plugins: Vec<PackageRow>,
-    pub status: Value,
-    pub control: bool,
     pub settings: Value,
     pub report: Option<ectomatter_weather::Report>,
     pub locale: &'a str,
     pub top_peak: f64,
     pub reference: f64,
     pub place_text: &'a str,
-    /// the mouse, once Ectomatter has met it: what the system says of it, and whether it is plugged in
-    pub mouse: Option<(Value, bool)>,
 }
 
 struct Card {
@@ -436,59 +447,8 @@ pub fn page(s: &State) -> (Vec<Cell>, f32, SensorMap) {
     let mut y = 34.0 + 29.0 + 6.0 - 14.0;
     y += 14.0;
 
-    // each device: its glyph and name with how it is, then its settings
-    let st = &s.status;
-    let present = st["present"].as_bool().unwrap_or(false);
-    let reachable = st["reachable"].as_bool();
-    section(&mut cells, &mut y, "Devices", |c| {
-        let line = if !present { "Not connected" } else if reachable == Some(false) { "Ectomatter can’t open this keyboard" } else if !s.control { "Control is off" } else { "Connected" };
-        c.cells.push(cell(kind::DEVICE, X0 + PAD_X, c.y, 48.0, 48.0));
-        c.cells.push(text_cell(style::NAME, X0 + PAD_X + 62.0, c.y + 3.0, 600.0, 21.0, "EVGA Z10 RGB"));
-        c.cells.push(text_cell(style::SMALL, X0 + PAD_X + 62.0, c.y + 27.0, 600.0, 17.0, line));
-        c.y += 48.0 + 18.0;
-        c.label("Control");
-        let mut ny = c.y + 36.0 + 7.0;
-        c.seg(c.y, Ctl::Control, &[("on", "On"), ("off", "Off")], if s.control { "on" } else { "off" });
-        c.note(&mut ny, "When off, Ectomatter leaves the keyboard to other programs.", 664.0);
-        c.next(ny - c.y - 0.125);
-        c.label("Permission");
-        match reachable {
-            None => c.state(c.y, 0, "Not needed on this system"),
-            Some(_) if !present => c.state(c.y, 0, "Checked when the keyboard is connected"),
-            Some(true) => c.state(c.y, 1, "Granted"),
-            Some(false) => c.state(c.y, 2, "Not granted"),
-        }
-        c.next(34.0);
-        let holders: Vec<String> = st["holders"].as_array().map(|a| a.iter().filter_map(|h| h["name"].as_str().map(String::from)).collect()).unwrap_or_default();
-        if !holders.is_empty() {
-            c.label("Also open in");
-            c.cells.push(text_cell(style::VALUE_BRIGHT, X0 + PAD_X + CTRL, c.y, 600.0, 34.0, &holders.join(", ")));
-            let mut ny = c.y + 34.0 + 7.0;
-            c.note(&mut ny, "Two programs sending lighting at once make the keys flicker. Close the other program, or turn Live lighting off here.", 664.0);
-            c.next(ny - c.y);
-        }
-        // the mouse, once met: how it is, and who else has it open
-        if let Some((m, present)) = &s.mouse {
-            c.y += 10.0;
-            c.cells.push(Cell { color: slint::Color::from_rgb_u8(0x2b, 0x2b, 0x30), ..cell(kind::BOX, X0 + PAD_X, c.y, 664.0 + CTRL, 1.0) });
-            c.y += 24.0;
-            c.cells.push(Cell { style: 1, ..cell(kind::DEVICE, X0 + PAD_X, c.y, 48.0, 48.0) });
-            c.cells.push(text_cell(style::NAME, X0 + PAD_X + 62.0, c.y + 3.0, 600.0, 21.0, "SteelSeries Sensei 310"));
-            c.cells.push(text_cell(style::SMALL, X0 + PAD_X + 62.0, c.y + 27.0, 600.0, 17.0, if *present { "Connected" } else { "Not connected" }));
-            c.y += 48.0 + 18.0;
-            let holders: Vec<String> = m["holders"].as_array().map(|a| a.iter().filter_map(|h| h["name"].as_str().map(String::from)).collect()).unwrap_or_default();
-            if !holders.is_empty() {
-                c.label("Also open in");
-                c.cells.push(text_cell(style::VALUE_BRIGHT, X0 + PAD_X + CTRL, c.y, 600.0, 34.0, &holders.join(", ")));
-                let mut ny = c.y + 34.0 + 7.0;
-                c.note(&mut ny, "Programs that both set the mouse undo each other's changes: whichever sets its lights or buttons last wins. Ectomatter changes the mouse only when you do, here.", 664.0);
-                c.next(ny - c.y);
-            }
-        }
-    });
-
-    // the cores, each for a device or the devices another program drives; then the plugins
-    packages_section(&mut cells, &mut y, "Cores", 0, &s.cores, "Add a core", "Ectomatter checks each core’s GitHub releases for updates once a day.");
+    // each device with its core, then Add a core; then the plugins
+    devices_section(&mut cells, &mut y, &s.devices);
     packages_section(&mut cells, &mut y, "Plugins", 1, &s.plugins, "Add a plugin", "Ectomatter checks each plugin’s GitHub releases for updates once a day.");
 
     // the weather every device shares
@@ -615,7 +575,101 @@ pub fn page(s: &State) -> (Vec<Cell>, f32, SensorMap) {
     (cells, y - 14.0 + 40.0, map)
 }
 
-/// Settings' Cores or Plugins: a row for each package, its glyph on its tile,
+/// Settings' Devices: each device with its core, one after another in one
+/// box: its glyph, its name and how it is; then Control (the core's switch,
+/// on unless turned off), Permission, the programs that also have it open,
+/// and its Core (the version, where it stands, what it's for and what it can
+/// do); then Add a core, and how updates come.
+fn devices_section(cells: &mut Vec<Cell>, y: &mut f32, devices: &[DeviceRow]) {
+    section(cells, y, "Devices", |c| {
+        for (i, d) in devices.iter().enumerate() {
+            let r = &d.core;
+            if i > 0 {
+                c.y += 10.0;
+                c.cells.push(Cell { color: slint::Color::from_rgb_u8(0x2b, 0x2b, 0x30), ..cell(kind::BOX, X0 + PAD_X, c.y, 664.0 + CTRL, 1.0) });
+                c.y += 24.0;
+            }
+            let line = if !r.on {
+                "Control is off".to_string()
+            } else if !d.present {
+                "Not connected".to_string()
+            } else if d.reachable == Some(false) {
+                format!("Ectomatter can’t open this {}", d.kind)
+            } else {
+                "Connected".to_string()
+            };
+            c.cells.push(Cell { style: 2 + r.glyph as i32, ..cell(kind::DEVICE, X0 + PAD_X, c.y, 48.0, 48.0) });
+            c.cells.push(text_cell(style::NAME, X0 + PAD_X + 62.0, c.y + 3.0, 600.0, 21.0, &r.name));
+            c.cells.push(text_cell(style::SMALL, X0 + PAD_X + 62.0, c.y + 27.0, 600.0, 17.0, &line));
+            c.y += 48.0 + 18.0;
+            // (its switch is its core's)
+            c.label("Control");
+            let cx = X0 + PAD_X + CTRL;
+            let mut bx = cx + 3.0;
+            let mut buttons = Vec::new();
+            for (j, name) in ["On", "Off"].iter().enumerate() {
+                let w = text::width(400, 13.0, name) + 24.0;
+                buttons.push(Cell { text: (*name).into(), on: (j == 0) == r.on, id: id(Ctl::PackageOn), index: (r.glyph * 2 + j) as i32, ..cell(kind::SEG_BUTTON, bx, c.y + 3.0, w, 30.0) });
+                bx += w + 2.0;
+            }
+            c.cells.push(cell(kind::SEG, cx, c.y, bx - 2.0 + 3.0 - cx, 36.0));
+            c.cells.extend(buttons);
+            let mut ny = c.y + 36.0 + 7.0;
+            c.note(&mut ny, &format!("When off, Ectomatter leaves the {} to other programs.", d.kind), 664.0);
+            c.next(ny - c.y - 0.125);
+            c.label("Permission");
+            match d.reachable {
+                None => c.state(c.y, 0, "Not needed on this system"),
+                Some(_) if !d.present => c.state(c.y, 0, &format!("Checked when the {} is connected", d.kind)),
+                Some(true) => c.state(c.y, 1, "Granted"),
+                Some(false) => c.state(c.y, 2, "Not granted"),
+            }
+            c.next(34.0);
+            if !d.holders.is_empty() {
+                c.label("Also open in");
+                c.cells.push(text_cell(style::VALUE_BRIGHT, cx, c.y, 600.0, 34.0, &d.holders.join(", ")));
+                let mut ny = c.y + 34.0 + 7.0;
+                c.note(&mut ny, &d.holders_note, 664.0);
+                c.next(ny - c.y);
+            }
+            // its core: the version and where it stands, then its own words and Ectomatter's
+            c.label("Core");
+            let v = format!("{} · {}", r.version, r.status);
+            c.cells.push(text_cell(style::VALUE_BRIGHT, cx, c.y, 600.0, 34.0, &v));
+            if r.removable {
+                let w3 = text::width(500, 12.5, "Remove").ceil() + 18.0;
+                let vx = cx + text::width(400, 13.0, &v).ceil() + 10.0;
+                c.cells.push(Cell { text: "Remove".into(), id: id(Ctl::PackageRemove), index: r.glyph as i32, ..cell(kind::LINK, vx, c.y + 4.0, w3, 26.0) });
+            }
+            let mut ny = c.y + 34.0 + 7.0;
+            c.note(&mut ny, &r.description, 664.0);
+            for words in &r.can {
+                c.note(&mut ny, words, 664.0);
+            }
+            if let Some(w) = &r.warning {
+                ny += 6.0;
+                c.cells.push(Cell { style: 3, ..cell(kind::DOT, cx, ny + 6.0, 7.0, 7.0) });
+                for l in text::wrap(400, 12.5, w, 664.0 - 15.0) {
+                    c.cells.push(Cell { color: slint::Color::from_rgb_u8(0xf0, 0xb3, 0x5a), ..text_cell(style::NOTE_IN, cx + 15.0, ny, 664.0 - 15.0, 18.0, &l) });
+                    ny += 18.125;
+                }
+            }
+            c.next(ny - c.y);
+        }
+        // Add a core, and how updates come
+        c.y += 10.0;
+        let (bx, bw) = (X0 + PAD_X, W - 2.0 * PAD_X);
+        c.cells.push(Cell { color: slint::Color::from_argb_u8(9, 255, 255, 255), ..cell(kind::BOX, bx, c.y, bw, 1.0) });
+        c.y += 16.0;
+        let words = "Add a core";
+        let aw = text::width(500, 13.0, words).ceil() + 12.0 + 14.0 + 7.0 + 12.0;
+        c.cells.push(Cell { text: words.into(), lines: "M8 3v10M3 8h10".into(), style: 35, id: id(Ctl::PackageAdd), index: 0, ..cell(kind::GHOST, bx, c.y, aw, 30.0) });
+        c.cells.push(text_cell(style::NOTE, bx + aw + 14.0, c.y + 6.0, bw - aw - 14.0, 18.0, "Ectomatter checks each core’s GitHub releases for updates once a day."));
+        c.y += 30.0 + 14.0 + 4.0;
+    });
+}
+
+/// Settings' Plugins: a row for each package, its glyph on its tile,
 /// its name, what it's for and what it can do (and what it says is wrong, in
 /// amber), its version and where that stands, and On and Off; then Add (a
 /// core, `add` 0, or a plugin, 1), and how updates come.
@@ -709,5 +763,42 @@ pub fn choice(c: Ctl, index: usize) -> Option<Value> {
         Ctl::Wind => ["kmh", "mph", "ms"].get(index).map(|v| json!(v)),
         Ctl::HdrMode => ["auto", "off"].get(index).map(|v| json!(v)),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(name: &str, glyph: usize, on: bool, removable: bool, status: &str) -> PackageRow {
+        PackageRow { name: name.into(), description: format!("What the {name} is for."), can: vec![format!("Talks to the {name} over USB.")], version: "1.0.0".into(), status: status.into(), on, warning: None, glyph, removable }
+    }
+
+    /// The words on the page, each piece once.
+    fn texts(devices: Vec<DeviceRow>) -> Vec<String> {
+        let s = State { sensors: None, devices, plugins: Vec::new(), settings: Value::Null, report: None, locale: "en-US", top_peak: 1000.0, reference: 254.0, place_text: "" };
+        page(&s).0.into_iter().map(|c| c.text.to_string()).filter(|t| !t.is_empty()).collect()
+    }
+
+    /// Settings' Devices: each core's device with how it is (connected, not
+    /// plugged in, turned off), its switch, its permission, the programs that
+    /// also have it open, and its core, which can be taken out once added.
+    #[test]
+    fn each_device_shows_with_its_core() {
+        let dev = |core, kind: &str, present, reachable, holders: &[&str]| DeviceRow { core, kind: kind.into(), present, reachable, holders: holders.iter().map(|h| h.to_string()).collect(), holders_note: "Another program has it open.".into() };
+        let t = texts(vec![
+            dev(row("EVGA Z10 RGB", 0, true, false, "Comes with Ectomatter"), "keyboard", true, Some(true), &[]),
+            dev(row("SteelSeries Sensei 310", 1, true, false, "Comes with Ectomatter"), "mouse", false, Some(false), &["openrgb"]),
+            dev(row("Logitech G502", 4, false, true, "Added from a file"), "mouse", true, Some(true), &[]),
+        ]);
+        let has = |s: &str| t.iter().any(|x| x == s);
+        assert!(has("Connected") && has("Granted"), "the keyboard as it is");
+        assert!(has("Not connected") && has("Checked when the mouse is connected"), "a mouse not plugged in: its permission waits for it");
+        assert!(has("openrgb") && has("Another program has it open."), "who else has it open, and what that means");
+        assert!(has("Control is off"), "a core turned off says so");
+        assert!(has("1.0.0 · Comes with Ectomatter") && has("1.0.0 · Added from a file"), "each core's version and where it came from");
+        assert_eq!(t.iter().filter(|x| *x == "Remove").count(), 1, "only an added core can be taken out");
+        assert!(has("When off, Ectomatter leaves the keyboard to other programs.") && has("When off, Ectomatter leaves the mouse to other programs."));
+        assert!(has("Add a core") && !has("Cores"), "Add a core under Devices, and no Cores section of its own");
     }
 }

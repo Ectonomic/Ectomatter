@@ -684,8 +684,6 @@ pub struct Front {
     app_sessions: std::collections::HashSet<String>,
     /// an added plugin asked about removing
     removing: Option<String>,
-    /// what the system says of the mouse, looked at every two seconds, as the keyboard's
-    mouse_status: Option<(Instant, serde_json::Value)>,
     mouse_icons: Option<(f32, Vec<slint::Image>)>,
     /// the mouse's picture in layers, for a scale, and the scale being drawn
     mouse_layers: Option<(f32, MouseImages)>,
@@ -807,8 +805,9 @@ pub struct Front {
     /// when the sliders were last read, and the time between readings, smoothed
     last_reading: Option<Instant>,
     reading_gap: f32,
-    /// the keyboard as the kernel last showed it, and when
-    dev_status: Option<(Instant, serde_json::Value)>,
+    /// each core's device as the system last showed it (plugged in, opened,
+    /// who else has it open), and when: looked at every two seconds at most
+    device_status: HashMap<String, (Instant, serde_json::Value)>,
     /// the screen: Ectomatter's player, what it last said, whether it is
     /// paused, the launch the playlist plays as its picture (its frames, the
     /// one showing and since when), and what the pictures were last drawn from
@@ -1084,7 +1083,6 @@ impl Front {
             windows: HashMap::new(),
             app_sessions: Default::default(),
             removing: None,
-            mouse_status: None,
             mouse_icons: None,
             mouse_layers: None,
             mouse_drawing: None,
@@ -1207,7 +1205,7 @@ impl Front {
             lab: None,
             last_reading: None,
             reading_gap: 120.0,
-            dev_status: None,
+            device_status: HashMap::new(),
             player: None,
             lcd: crate::lcd_player::News { rows: Vec::new(), sequence: None, state: crate::lcd_player::State::Missing, page: 0, turning: false, elapsed: 0.0, length: 0.0 },
             lcd_paused: false,
@@ -4616,30 +4614,18 @@ impl Front {
         } else if self.ui.get_place() == "settings" {
             // what the kernel says of the keyboard, looked at every two seconds (it
             // scans every process), not at every step of a slider
-            if self.dev_status.as_ref().is_none_or(|(t, _)| t.elapsed() > Duration::from_secs(2)) {
-                self.dev_status = Some((Instant::now(), crate::devices::z10()));
-            }
-            let dc = self.dev_status.as_ref().map(|(_, v)| v.clone()).unwrap_or_default();
             let sensors = self.sensors_view();
             self.hosted.poll();
             let st = crate::ecto_settings::State {
                 sensors: Some(sensors),
-                cores: self.package_rows(crate::packages::Kind::Core),
+                devices: self.device_rows(),
                 plugins: self.package_rows(crate::packages::Kind::Plugin),
-                status: dc,
-                control: self.controlled,
                 settings: self.settings.all(),
                 report: self.weather.report(),
                 locale: &crate::locale(),
                 top_peak: self.levels.1,
                 reference: self.levels.0,
                 place_text: &self.place_text,
-                mouse: self.mouse.known().then(|| {
-                    if self.mouse_status.as_ref().is_none_or(|(t, _)| t.elapsed() > Duration::from_secs(2)) {
-                        self.mouse_status = Some((Instant::now(), crate::devices::sensei310()));
-                    }
-                    (self.mouse_status.as_ref().map(|(_, v)| v.clone()).unwrap_or_default(), self.mouse.present())
-                }),
             };
             let (cells, h, map) = crate::ecto_settings::page(&st);
             self.sensor_map = map;
@@ -6049,6 +6035,55 @@ impl Front {
             .collect()
     }
 
+    /// Settings' Devices: each core with its device as the system shows it
+    /// (looked at every two seconds at most), what it's called in words about
+    /// it, and what another program having it open means for it.
+    fn device_rows(&mut self) -> Vec<crate::ecto_settings::DeviceRow> {
+        let ids: Vec<(String, Option<(u16, u16)>)> = self.packages.iter().filter(|p| p.kind() == crate::packages::Kind::Core).map(|p| (p.id().to_string(), p.manifest.usb_ids())).collect();
+        let rows = self.package_rows(crate::packages::Kind::Core);
+        rows.into_iter()
+            .zip(ids)
+            .map(|(core, (id, usb))| {
+                let st = match usb {
+                    Some((vendor, product)) => {
+                        if self.device_status.get(&id).is_none_or(|(t, _)| t.elapsed() > Duration::from_secs(2)) {
+                            self.device_status.insert(id.clone(), (Instant::now(), crate::devices::usb(vendor, product)));
+                        }
+                        self.device_status[&id].1.clone()
+                    }
+                    None => serde_json::Value::Null,
+                };
+                let kind = self.device_kind(&id);
+                let holders_note = if kind == "keyboard" {
+                    "Two programs sending lighting at once make the keys flicker. Close the other program, or turn Live lighting off here.".to_string()
+                } else {
+                    format!("Programs that both set the {kind} undo each other’s changes: whichever sets its lights or buttons last wins. Ectomatter changes the {kind} only when you do, here.")
+                };
+                crate::ecto_settings::DeviceRow {
+                    core,
+                    present: st["present"].as_bool().unwrap_or(false),
+                    reachable: st["reachable"].as_bool(),
+                    holders: st["holders"].as_array().map(|a| a.iter().filter_map(|h| h["name"].as_str().map(String::from)).collect()).unwrap_or_default(),
+                    holders_note,
+                    kind,
+                }
+            })
+            .collect()
+    }
+
+    /// What a core's device is called in words about it ("keyboard"), as its
+    /// own description says; the keyboard's and the mouse's before they're met.
+    fn device_kind(&self, id: &str) -> String {
+        let told = if id == crate::z10::CORE {
+            crate::cores::shown().device["kind"].as_str().map(String::from).or(Some("keyboard".into()))
+        } else if id == crate::mouse::CORE {
+            self.mouse.state["device"]["kind"].as_str().map(String::from).or(Some("mouse".into()))
+        } else {
+            self.hosted.devices().into_iter().find(|(p, _)| p == id).and_then(|(_, d)| d["kind"].as_str().map(String::from))
+        };
+        told.unwrap_or_else(|| "device".into())
+    }
+
     /// Add a core or Add a plugin, from Settings: its form.
     fn add_package_form(&mut self, kind: crate::packages::Kind) {
         self.package_form = Some(PackageForm { kind, repo: None, file: None, found: None, why: None, typed_at: None, looked_for: None, looking: None, picking: None, adding: None });
@@ -6087,7 +6122,7 @@ impl Front {
                     can_add = true;
                     if its != f.kind {
                         state = match its {
-                            crate::packages::Kind::Core => format!("{name} is a core, for a device, so it goes under Cores."),
+                            crate::packages::Kind::Core => format!("{name} is a core, for a device, so it goes under Devices."),
                             crate::packages::Kind::Plugin => format!("{name} is a plugin, so it goes under Plugins."),
                         };
                     }

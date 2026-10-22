@@ -7,30 +7,20 @@
 
 use serde_json::{Value, json};
 
-/// The Z10.
-pub fn z10() -> Value {
-    usb(0x3842, 0x2611)
-}
-
-/// The SteelSeries Sensei 310.
-pub fn sensei310() -> Value {
-    usb(0x1038, 0x1722)
-}
-
 /// A USB device by its ids.
 #[cfg(target_os = "linux")]
-fn usb(vid: u16, pid: u16) -> Value {
+pub fn usb(vid: u16, pid: u16) -> Value {
     use std::fs;
     let read = |p: &str| fs::read_to_string(p).map(|s| s.trim().to_string()).unwrap_or_default();
 
-    // plugged in: a USB device with the Z10's ids
+    // plugged in: a USB device with these ids
     let present = fs::read_dir("/sys/bus/usb/devices").into_iter().flatten().flatten().any(|d| {
         let p = d.path();
         read(&format!("{}/idVendor", p.display())) == format!("{vid:04x}")
             && read(&format!("{}/idProduct", p.display())) == format!("{pid:04x}")
     });
 
-    // the keyboard's HID nodes, which are what programs open
+    // the device's HID nodes, which are what programs open
     let id = format!("HID_ID=0003:{:08X}:{:08X}", vid, pid);
     let nodes: Vec<String> = fs::read_dir("/sys/class/hidraw").into_iter().flatten().flatten()
         .filter(|d| read(&format!("{}/device/uevent", d.path().display())).to_uppercase().contains(&id))
@@ -83,6 +73,6 @@ fn program_name(pid: u32) -> String {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn usb(_: u16, _: u16) -> Value {
+pub fn usb(_: u16, _: u16) -> Value {
     json!({ "present": null, "reachable": null, "holders": [] })
 }

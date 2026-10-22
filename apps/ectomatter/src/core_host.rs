@@ -462,6 +462,12 @@ impl Manifest {
     pub fn has_usb(&self) -> bool {
         !self.matches.is_empty()
     }
+
+    /// The USB ids of the first device it reaches, for asking the system how
+    /// that device is (devices.rs).
+    pub fn usb_ids(&self) -> Option<(u16, u16)> {
+        self.matches.first().and_then(|m| Some((m.vendor?, m.product?)))
+    }
 }
 
 enum Ask {

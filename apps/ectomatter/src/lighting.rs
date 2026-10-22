@@ -85,7 +85,7 @@ pub enum Ctl {
     LibScript,
     LibScriptRun,
     LibScriptAdd,
-    /// Settings' Cores and Plugins: a package's On and Off, by its place among the
+    /// Settings' Devices and Plugins: a package's On and Off, by its place among the
     /// packages; Add a core (0) or a plugin (1); Remove on one added
     PackageOn,
     PackageAdd,

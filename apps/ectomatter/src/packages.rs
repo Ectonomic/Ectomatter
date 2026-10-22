@@ -6,7 +6,8 @@
 //! same way (a folder holding its manifest, core.json, the module it names,
 //! and its glyph) and run the same way, but they're kept apart: in
 //! Ectomatter's source (cores/ and plugins/), in its data folder, and in
-//! Settings, where each has its own section. A manifest says which it is
+//! Settings (each core with its device under Devices, the plugins under
+//! Plugins). A manifest says which it is
 //! (its `kind`). Some come with Ectomatter, as it runs from its source; the
 //! rest were added, from their GitHub releases or a file, into Ectomatter's
 //! data folder (added/cores/<id>/<version>/, added/plugins/...), where an
