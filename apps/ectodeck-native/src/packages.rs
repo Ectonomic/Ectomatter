@@ -1,10 +1,16 @@
-//! Ectodeck's packages: each device's core and each plugin, one kind of
-//! package (a folder holding its manifest, core.json, the module it names,
-//! and its glyph), listed together in Settings as Plugins. Some come with
-//! Ectodeck (the source's cores folder, as Ectodeck runs from its source);
-//! the rest were added, from a plugin's GitHub releases or a file, into
-//! Ectodeck's data folder (plugins/<id>/<version>/), where an update lands
-//! too. Where one of each has the same id, the newer version is the one used.
+//! Ectodeck's packages: the cores, each for a device or the devices another
+//! program drives (the keyboard's, the mouse's, OpenRGB's), and the plugins,
+//! which add to Ectodeck's pages (the Monitor Configurator adds a section to
+//! each game's page). Both are packaged the
+//! same way (a folder holding its manifest, core.json, the module it names,
+//! and its glyph) and run the same way, but they're kept apart: in
+//! Ectodeck's source (cores/ and plugins/), in its data folder, and in
+//! Settings, where each has its own section. A manifest says which it is
+//! (its `kind`). Some come with Ectodeck, as it runs from its source; the
+//! rest were added, from their GitHub releases or a file, into Ectodeck's
+//! data folder (added/cores/<id>/<version>/, added/plugins/...), where an
+//! update lands too. Where one of each has the same id, the newer version
+//! is the one used.
 //!
 //! What a package can do on the computer is said in Ectodeck's own words,
 //! from what its manifest declares (its USB devices and its `uses`), never in
@@ -16,13 +22,41 @@ use serde_json::Value;
 
 use crate::core_host::Manifest;
 
-/// Whether a package is a device's core (it reaches USB devices, or finds
-/// its devices through another program, as OpenRGB's does) or a plugin that
-/// only adds to Ectodeck's pages.
+/// Whether a package is a core (for a device, or the devices another program
+/// drives, as OpenRGB's is) or a plugin, which adds to Ectodeck's pages.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
-    Device,
+    Core,
     Plugin,
+}
+
+impl Kind {
+    /// What a manifest says it is: its `kind`, or where it has none, a core
+    /// for a package that reaches devices and a plugin for one that adds to pages.
+    pub fn of(m: &Value) -> Kind {
+        match m["kind"].as_str() {
+            Some("plugin") => Kind::Plugin,
+            Some("core") => Kind::Core,
+            _ if m["adds"].as_array().is_some_and(|a| !a.is_empty()) && m["matches"].as_array().is_none_or(|a| a.is_empty()) => Kind::Plugin,
+            _ => Kind::Core,
+        }
+    }
+
+    /// Its folder's name, in Ectodeck's source and its data folder alike.
+    pub fn folder(self) -> &'static str {
+        match self {
+            Kind::Core => "cores",
+            Kind::Plugin => "plugins",
+        }
+    }
+
+    /// The word for one, as Settings says it.
+    pub fn word(self) -> &'static str {
+        match self {
+            Kind::Core => "core",
+            Kind::Plugin => "plugin",
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -78,11 +112,13 @@ impl Package {
     }
 
     pub fn kind(&self) -> Kind {
-        if self.manifest.has_usb() || self.manifest.all["devices"].is_array() || !self.manifest.uses.network.is_empty() && !self.adds_to_games() {
-            Kind::Device
-        } else {
-            Kind::Plugin
-        }
+        Kind::of(&self.manifest.all)
+    }
+
+    /// Its own folder of files, which it sees as /data: a core's in Ectodeck's
+    /// data folder's cores/, a plugin's in its plugins/.
+    pub fn data(&self) -> PathBuf {
+        crate::data_dir().join(self.kind().folder()).join(self.id())
     }
 
     /// What it can do on the computer, a sentence each, in Ectodeck's words.
@@ -96,7 +132,7 @@ impl Package {
         if self.id() == crate::z10::CORE {
             "devices.z10.control".into()
         } else {
-            format!("plugins.{}.on", self.id())
+            format!("{}.{}.on", self.kind().folder(), self.id())
         }
     }
 }
@@ -117,9 +153,6 @@ pub fn can_words(m: &Value) -> Vec<String> {
     }
     if uses.monitors {
         out.push("Changes your monitors’ settings while a game runs.".into());
-    }
-    if uses.commands {
-        out.push("Runs the commands you type, and nothing else.".into());
     }
     for (address, to) in &uses.network {
         let here = address.starts_with("127.") || address.starts_with("localhost:") || address.starts_with("[::1]");
@@ -150,10 +183,19 @@ pub fn repository_of(s: &str) -> Option<String> {
     (ok(owner) && ok(name)).then(|| format!("{owner}/{name}"))
 }
 
-/// Where packages that were added are kept: one folder for each, a folder
-/// for each version in it.
-pub fn added_dir() -> PathBuf {
-    crate::data_dir().join("plugins")
+/// Where packages of a kind that were added are kept: one folder for each,
+/// a folder for each version in it.
+pub fn added_dir(kind: Kind) -> PathBuf {
+    crate::data_dir().join("added").join(kind.folder())
+}
+
+/// Where the packages of a kind that come with Ectodeck are: the source's own
+/// folders, as Ectodeck runs from its source.
+pub fn builtin_dir(kind: Kind) -> PathBuf {
+    match kind {
+        Kind::Core => crate::cores::dir(),
+        Kind::Plugin => crate::cores::plugins_dir(),
+    }
 }
 
 /// A version as numbers, for comparing: "1.10.0" is after "1.9.2".
@@ -161,10 +203,17 @@ pub fn version_key(v: &str) -> Vec<u64> {
     v.trim_start_matches('v').split(['.', '-', '+']).map(|p| p.parse::<u64>().unwrap_or(0)).collect()
 }
 
-/// Every package: those that come with Ectodeck, then those added, each id
-/// once (the newer version where there are two).
+/// Every package of a kind: those that come with Ectodeck, then those added,
+/// each id once (the newer version where there are two).
+pub fn of(kind: Kind) -> Vec<Package> {
+    all_in(&builtin_dir(kind), &added_dir(kind)).into_iter().filter(|p| p.kind() == kind).collect()
+}
+
+/// Every package: the cores, then the plugins.
 pub fn all() -> Vec<Package> {
-    all_in(&crate::cores::dir(), &added_dir())
+    let mut out = of(Kind::Core);
+    out.extend(of(Kind::Plugin));
+    out
 }
 
 pub fn all_in(builtin: &Path, added: &Path) -> Vec<Package> {
@@ -195,9 +244,35 @@ pub fn all_in(builtin: &Path, added: &Path) -> Vec<Package> {
             }
         }
     }
-    // the devices' cores first, then the plugins, each by name
+    // (the keyboard's and the mouse's cores, which reach their devices themselves, before those through another program; each by name)
     out.sort_by_key(|p| (!p.manifest.has_usb(), p.name().to_lowercase()));
     out
+}
+
+/// Where each package's own files were kept before cores and plugins were
+/// kept apart (every one in the data folder's cores/, the mouse's core as
+/// "steelseries", the Monitor Configurator as "monitors"), moved to where
+/// they're kept now, once.
+pub fn move_old_folders() {
+    let data = crate::data_dir();
+    // (Custom Scripts, a plugin once, is Ectodeck's own now: its empty folder goes)
+    let _ = std::fs::remove_dir(data.join("cores").join("scripts"));
+    let moves = [
+        (data.join("cores").join("steelseries"), data.join("cores").join(crate::mouse::CORE)),
+        (data.join("cores").join("monitors"), data.join("plugins").join("monitor-configurator")),
+    ];
+    for (from, to) in moves {
+        // (a folder already where it goes is taken only if it's empty)
+        if from.is_dir() && (!to.exists() || std::fs::remove_dir(&to).is_ok()) {
+            if let Some(parent) = to.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            match std::fs::rename(&from, &to) {
+                Ok(()) => eprintln!("ectodeck-native: moved {} to {}", from.display(), to.display()),
+                Err(e) => eprintln!("ectodeck-native: couldn’t move {}: {e}", from.display()),
+            }
+        }
+    }
 }
 
 /// A package's manifest read from a package file (an .ectocore, a zip of
@@ -228,8 +303,9 @@ fn package_root<R: std::io::Read + std::io::Seek>(z: &mut zip::ZipArchive<R>) ->
 }
 
 /// A package file put in place, as its version's folder under `into`
-/// (plugins/<id>/<version>/): every file inside the folder, nothing outside
-/// it; the folder marked unfinished until the last file is in. Its manifest.
+/// (<id>/<version>/; by default the added folder of the package's kind,
+/// see install): every file inside the folder, nothing outside it; the
+/// folder marked unfinished until the last file is in. Its manifest.
 pub fn install_file(file: &Path, into: &Path) -> Result<Manifest, String> {
     let f = std::fs::File::open(file).map_err(|e| e.to_string())?;
     let mut z = zip::ZipArchive::new(f).map_err(|_| "That file isn’t a plugin: it isn’t a zip file.".to_string())?;
@@ -274,6 +350,12 @@ pub fn install_file(file: &Path, into: &Path) -> Result<Manifest, String> {
     Ok(manifest)
 }
 
+/// A package file put in place where packages of its kind that were added are kept.
+pub fn install(file: &Path) -> Result<Manifest, String> {
+    let kind = Kind::of(&manifest_in_file(file)?);
+    install_file(file, &added_dir(kind))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -295,17 +377,24 @@ mod tests {
     }
 
     /// Every package with Ectodeck says what it can do in Ectodeck's words:
-    /// the cores their USB devices, the plugins their uses.
+    /// the cores their devices, the plugins their uses; and each kind is in
+    /// its own folder, the cores in cores/ and the plugins in plugins/.
     #[test]
     fn each_package_says_what_it_can_do() {
-        let none = std::env::temp_dir().join(format!("ectodeck-no-plugins-{}", std::process::id()));
-        let all = all_in(&crate::cores::dir(), &none);
-        let can = |id: &str| all.iter().find(|p| p.id() == id).map(|p| p.can()).unwrap_or_default();
-        assert_eq!(can("evga-z10"), vec!["Talks to the EVGA Z10 RGB over USB.".to_string()]);
-        assert_eq!(can("scripts"), vec!["Runs the commands you type, and nothing else.".to_string()]);
-        assert_eq!(can("monitors"), vec!["Changes your monitors’ settings while a game runs.".to_string()]);
-        let kinds: Vec<(&str, Kind)> = all.iter().map(|p| (p.id(), p.kind())).collect();
-        assert!(kinds.contains(&("evga-z10", Kind::Device)) && kinds.contains(&("scripts", Kind::Plugin)) && kinds.contains(&("monitors", Kind::Plugin)));
-        assert!(all.iter().all(|p| p.glyph().is_some()), "each package brings its glyph");
+        let none = std::env::temp_dir().join(format!("ectodeck-no-packages-{}", std::process::id()));
+        let cores = all_in(&builtin_dir(Kind::Core), &none);
+        let plugins = all_in(&builtin_dir(Kind::Plugin), &none);
+        let can = |list: &[Package], id: &str| list.iter().find(|p| p.id() == id).map(|p| p.can()).unwrap_or_default();
+        assert_eq!(can(&cores, "evga-z10"), vec!["Talks to the EVGA Z10 RGB over USB.".to_string()]);
+        assert_eq!(can(&cores, crate::mouse::CORE), vec!["Talks to the SteelSeries Sensei 310 over USB.".to_string()]);
+        assert_eq!(can(&cores, "openrgb"), vec!["Talks to OpenRGB on this computer.".to_string()]);
+        assert_eq!(can(&plugins, "monitor-configurator"), vec!["Changes your monitors’ settings while a game runs.".to_string()]);
+        assert!(cores.iter().all(|p| p.kind() == Kind::Core), "the cores folder holds cores");
+        assert!(plugins.iter().all(|p| p.kind() == Kind::Plugin), "the plugins folder holds plugins");
+        assert_eq!(plugins.iter().map(|p| p.name()).collect::<Vec<_>>(), vec!["Monitor Configurator"]);
+        assert!(cores.iter().chain(&plugins).all(|p| p.glyph().is_some()), "each package brings its glyph");
+        // (where each keeps its own files)
+        assert!(cores[0].data().ends_with(format!("cores/{}", cores[0].id())));
+        assert!(plugins[0].data().ends_with("plugins/monitor-configurator"));
     }
 }

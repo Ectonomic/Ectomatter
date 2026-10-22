@@ -4,10 +4,11 @@
 //! forms that add a game, an app or a script. A game's page holds Ectodeck's
 //! own section, Devices: the profile each device switches to while the game
 //! is in front. Then each plugin's section, drawn from what the plugin says
-//! of it (plugins.rs): its settings as dropdowns, in rows or in a grid (the
-//! Monitors plugin's column for each monitor), and the person's own commands
-//! (the Scripts plugin's), each with Run now. Beside the sections, where
-//! there's room, On this page: each section and what it changes here. The
+//! of it (hosted.rs): its settings as dropdowns, in rows or in a grid (the
+//! Monitor Configurator's column for each monitor). Then Custom Scripts,
+//! Ectodeck's own too: the person's own commands, each with Run now. Before
+//! the sections, where there's room, On this page: each section and what it
+//! changes here, on the left, as a page's way around it. The
 //! pictures (each cover, and a page's picture with its logo laid on it) are
 //! drawn from Steam's files at the size they show, on a thread of their own,
 //! and come in as each is ready.
@@ -247,6 +248,13 @@ const GLYPH: f32 = 36.0;
 const DROP_W: f32 = 300.0;
 /// where a page's boxes start: under the line of words at its top
 const HEAD_END: f32 = 12.0 + 36.0 + 6.0;
+/// On this page: its column on the page's left (it's for getting about the
+/// page), at least and at most this wide, and the room after it before the
+/// sections; it takes what the sections' column leaves, so the sections end
+/// where the game's picture does
+const TOC_W: f32 = 236.0;
+const TOC_W_MAX: f32 = 336.0;
+const TOC_GAP: f32 = 32.0;
 /// the covers: at least this wide, with these gaps across and down
 const COVER_MIN: f32 = 150.0;
 const GAP_X: f32 = 24.0;
@@ -295,6 +303,8 @@ pub struct Games {
     script_at: Vec<u64>,
     toc_at: Vec<f32>,
     jumps: i32,
+    /// where the open page's sections start across: after On this page where it has a column
+    left: f32,
     /// a script taken off a page, which Undo puts back; the scripts being tried now
     script_undo: Option<games::ScriptRemoved>,
     pub trying: HashSet<u64>,
@@ -350,6 +360,7 @@ impl Games {
             script_at: Vec::new(),
             toc_at: Vec::new(),
             jumps: 0,
+            left: X0,
             script_undo: None,
             trying: HashSet::new(),
             pics: HashMap::new(),
@@ -731,7 +742,14 @@ impl Games {
             }
             .into(),
         );
-        let w = (page_w - 2.0 * X0).min(COLUMN).max(400.0);
+        // On this page has a column of its own at the left where the sections still have
+        // room beside it; without, the sections take the page
+        let room = page_w - X0 - 28.0;
+        let toc_w = (room - COLUMN - TOC_GAP).clamp(TOC_W, TOC_W_MAX);
+        let with_toc = room - (toc_w + TOC_GAP) >= 640.0;
+        self.left = if with_toc { X0 + toc_w + TOC_GAP } else { X0 };
+        let w = if with_toc { (page_w - self.left - 28.0).min(COLUMN) } else { (page_w - 2.0 * X0).min(COLUMN).max(400.0) };
+        let x0 = self.left;
         // the game's picture, as wide as the page, with its facts
         let hero = entry.as_ref().and_then(|e| e.art.hero.clone().map(|h| (h, e.art.logo.clone())));
         let mut y = HEAD_END;
@@ -753,7 +771,7 @@ impl Games {
         let mut cells = Vec::new();
         // Devices: a row for each, its glyph and name and its dropdown (in gray what
         // the page follows, in ink what it chose), and under them how the switching goes
-        cells.push(text_cell(style::HEAD, X0 + 2.0, y, w / 2.0, 18.0, "Devices"));
+        cells.push(text_cell(style::HEAD, x0 + 2.0, y, w / 2.0, 18.0, "Devices"));
         if game && !every {
             let n = devices.iter().filter(|d| self.row_value(id, d).1 && self.row_value(id, d).0 != self.row_value(id, d).2).count();
             let state = match n {
@@ -761,12 +779,12 @@ impl Games {
                 n => format!("{n} changed for this game"),
             };
             let sw = crate::text::width(400, 12.5, &state).ceil() + 2.0;
-            cells.push(text_cell(style::NOTE, X0 + w - sw, y, sw, 18.0, &state));
+            cells.push(text_cell(style::NOTE, x0 + w - sw, y, sw, 18.0, &state));
         }
         y += 18.0 + 9.0;
         let box_y = y;
         let mut out = Vec::new();
-        let (lx, cx) = (X0 + PAD_X, X0 + PAD_X + LABEL_W + 24.0);
+        let (lx, cx) = (x0 + PAD_X, x0 + PAD_X + LABEL_W + 24.0);
         let mut ry = box_y + 8.0;
         for (k, d) in devices.iter().enumerate() {
             if k > 0 {
@@ -798,7 +816,7 @@ impl Games {
             out.push(Cell { color: slint::Color::from_argb_u8(9, 255, 255, 255), ..cell(kind::BOX, lx, ry, w - 2.0 * PAD_X, 1.0) });
             let who = if every { "a game".to_string() } else { name.clone() };
             let note = format!("Each device switches when {who} comes to the front, and switches back when another app does.");
-            let nw = w - PAD_X - (cx - X0);
+            let nw = w - PAD_X - (cx - x0);
             let lines = crate::text::wrap(400, 12.5, &note, nw);
             for (i, l) in lines.iter().enumerate() {
                 out.push(text_cell(style::NOTE, cx, ry + 13.0 + i as f32 * 18.0, nw, 18.0, l));
@@ -806,7 +824,7 @@ impl Games {
             ry += 13.0 + lines.len() as f32 * 18.0 + 13.0;
         }
         let box_h = ry + 10.0 - box_y;
-        cells.push(cell(kind::TILE, X0, box_y, w, box_h));
+        cells.push(cell(kind::TILE, x0, box_y, w, box_h));
         cells.extend(out);
         // On this page: Devices first, with the profiles this page switches to
         let devices_top = box_y - 18.0 - 9.0;
@@ -817,17 +835,19 @@ impl Games {
         for sec in self.sections.clone() {
             y += 30.0;
             let top = y;
-            y = self.draw_section(&mut cells, &sec, id, &name, w, y, game, every);
+            y = self.draw_section(&mut cells, &sec, id, w, y, game, every);
             toc.push(self.section_entry(&sec, id, top, game, every));
         }
+        // then Ectodeck's own Custom Scripts
+        y += 30.0;
+        toc.push(self.scripts_entry(id, y, game, every));
+        y = self.draw_scripts(&mut cells, id, &name, w, y, game, every);
         crate::front::sync_cells(&self.cells, cells);
-        // (beside the sections where there's room, and only with more than Devices to list)
-        let tx = X0 + w + 32.0;
-        let room = page_w - tx - 28.0;
-        if toc.len() > 1 && room >= 220.0 {
+        // (in its column at the left, where the page has room for one)
+        if with_toc {
             self.toc_at = toc.iter().map(|t| t.y.max(0.0)).collect();
-            ui.set_gl_toc_x(tx);
-            ui.set_gl_toc_w(room.min(336.0));
+            ui.set_gl_toc_x(X0);
+            ui.set_gl_toc_w(toc_w);
             ui.set_gl_toc_top(devices_top);
             ui.set_gl_toc_foot(if every { self.every_foot().into() } else { "".into() });
             crate::front::set_rows(&self.toc, toc);
@@ -878,21 +898,22 @@ impl Games {
     /// page, how many of its settings the game changes; then its box, its
     /// parts in the order the plugin lays them out. Where the section ends.
     #[allow(clippy::too_many_arguments)]
-    fn draw_section(&mut self, cells: &mut Vec<Cell>, sec: &Section, id: &str, name: &str, w: f32, y: f32, game: bool, every: bool) -> f32 {
+    fn draw_section(&mut self, cells: &mut Vec<Cell>, sec: &Section, id: &str, w: f32, y: f32, game: bool, every: bool) -> f32 {
+        let x0 = self.left;
         let label = sec.desc["label"].as_str().unwrap_or(&sec.name).to_string();
         let lw = crate::text::width(500, 13.0, &label).ceil();
-        cells.push(text_cell(style::HEAD, X0 + 2.0, y, lw + 4.0, 18.0, &label));
-        cells.push(Cell { color: slint::Color::from_rgb_u8(0x74, 0x74, 0x7c), ..text_cell(style::SMALL_IN, X0 + 2.0 + lw + 10.0, y + 1.0, 60.0, 18.0, "Plugin") });
+        cells.push(text_cell(style::HEAD, x0 + 2.0, y, lw + 4.0, 18.0, &label));
+        cells.push(Cell { color: slint::Color::from_rgb_u8(0x74, 0x74, 0x7c), ..text_cell(style::SMALL_IN, x0 + 2.0 + lw + 10.0, y + 1.0, 60.0, 18.0, "Plugin") });
         if game && !every && sec.desc["settings"].as_object().is_some_and(|m| !m.is_empty()) {
             let state = match self.changed_here(sec, id) {
                 0 => "Same as every game".to_string(),
                 n => format!("{n} changed for this game"),
             };
             let sw = crate::text::width(400, 12.5, &state).ceil() + 2.0;
-            cells.push(text_cell(style::NOTE, X0 + w - sw, y, sw, 18.0, &state));
+            cells.push(text_cell(style::NOTE, x0 + w - sw, y, sw, 18.0, &state));
         }
         let box_y = y + 18.0 + 9.0;
-        let (lx, cx) = (X0 + PAD_X, X0 + PAD_X + LABEL_W + 24.0);
+        let (lx, cx) = (x0 + PAD_X, x0 + PAD_X + LABEL_W + 24.0);
         let inner = w - 2.0 * PAD_X;
         let line = |x: f32, y: f32, w: f32| Cell { color: slint::Color::from_argb_u8(9, 255, 255, 255), ..cell(kind::BOX, x, y, w, 1.0) };
         let mut out: Vec<Cell> = Vec::new();
@@ -904,7 +925,7 @@ impl Games {
                 // a column for each, its name and what it is now; a row for each setting
                 let cols = grid["columns"].as_array().cloned().unwrap_or_default();
                 let n = cols.len().max(1) as f32;
-                let cw = ((w - PAD_X - (cx - X0) - 24.0 * (n - 1.0)) / n).floor();
+                let cw = ((w - PAD_X - (cx - x0) - 24.0 * (n - 1.0)) / n).floor();
                 let col_x = |i: usize| cx + i as f32 * (cw + 24.0);
                 ry += 8.0;
                 for (i, c) in cols.iter().enumerate() {
@@ -943,7 +964,7 @@ impl Games {
                     ry += 13.0 + 36.0;
                     rows_drawn += 1;
                     if let Some(note) = part["note"].as_str().filter(|_| show.last() == Some(item)) {
-                        let nw = w - PAD_X - (cx - X0);
+                        let nw = w - PAD_X - (cx - x0);
                         let lines = crate::text::wrap(400, 12.5, note, nw);
                         ry += 8.0;
                         for (k, l) in lines.iter().enumerate() {
@@ -955,14 +976,10 @@ impl Games {
                 }
                 continue;
             }
-            if part["commands"] == true {
-                ry = self.draw_commands(&mut out, id, name, lx, ry + 10.0, inner, part["note"].as_str().unwrap_or(""), every);
-                continue;
-            }
             if part.get("grid").is_none() {
                 if let Some(note) = part["note"].as_str() {
                     // a note alone: under the rows, in the controls' column; with nothing else, across the box
-                    let (nx, nw) = if rows_drawn > 0 { (cx, w - PAD_X - (cx - X0)) } else { (lx, inner) };
+                    let (nx, nw) = if rows_drawn > 0 { (cx, w - PAD_X - (cx - x0)) } else { (lx, inner) };
                     if rows_drawn > 0 {
                         out.push(line(lx, ry, inner));
                     }
@@ -975,7 +992,30 @@ impl Games {
             }
         }
         let box_h = ry + 10.0 - box_y;
-        cells.push(cell(kind::TILE, X0, box_y, w, box_h));
+        cells.push(cell(kind::TILE, x0, box_y, w, box_h));
+        cells.extend(out);
+        box_y + box_h
+    }
+
+    /// Ectodeck's own Custom Scripts: the person's commands for this page, a
+    /// card each, then Add a script and how they run. Where the section ends.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_scripts(&mut self, cells: &mut Vec<Cell>, id: &str, name: &str, w: f32, y: f32, game: bool, every: bool) -> f32 {
+        let x0 = self.left;
+        cells.push(text_cell(style::HEAD, x0 + 2.0, y, w / 2.0, 18.0, "Custom Scripts"));
+        let box_y = y + 18.0 + 9.0;
+        let note = if every {
+            "Scripts for every game run first when a game starts and last when the game quits.".to_string()
+        } else if game {
+            format!("Scripts from Every game run first when {name} starts and last when {name} quits.")
+        } else {
+            format!("Each script runs when {name} starts, and its undo when {name} quits.")
+        };
+        let mut out = Vec::new();
+        let end = self.draw_commands(&mut out, id, name, x0 + PAD_X, box_y + 18.0, w - 2.0 * PAD_X, &note, every);
+        // (16 under Add a script, as the mock's box has)
+        let box_h = end - 12.0 + 16.0 - box_y;
+        cells.push(cell(kind::TILE, x0, box_y, w, box_h));
         cells.extend(out);
         box_y + box_h
     }
@@ -1059,10 +1099,6 @@ impl Games {
     /// On this page's entry for a plugin's section: what it changes here.
     fn section_entry(&self, sec: &Section, id: &str, y: f32, game: bool, every: bool) -> LibToc {
         let mut own: Vec<String> = Vec::new();
-        if sec.desc["layout"].as_array().is_some_and(|l| l.iter().any(|p| p["commands"] == true)) {
-            let mine: Vec<Script> = if every { self.library.scripts(EVERY) } else { self.library.scripts(id) };
-            own.extend(mine.iter().map(|s| if s.name.trim().is_empty() { "A script".to_string() } else { s.name.clone() }));
-        }
         // each setting the page chose itself, by its column's name where it's in a grid
         let columns: Vec<(String, String)> = sec.desc["layout"].as_array().into_iter().flatten().filter_map(|p| p["grid"]["columns"].as_array()).flatten().map(|c| (c["id"].as_str().unwrap_or("").to_string(), c["label"].as_str().unwrap_or("").to_string())).collect();
         if let Some(m) = sec.desc["settings"].as_object() {
@@ -1081,10 +1117,24 @@ impl Games {
             }
         }
         let n = own.len();
-        let commands_only = sec.desc["settings"].as_object().is_none_or(|m| m.is_empty()) && sec.desc["layout"].as_array().is_some_and(|l| l.iter().any(|p| p["commands"] == true));
-        let none = if commands_only { "No scripts" } else { "No changes" };
-        let sub = if n > 3 { format!("{}, and {} more", own[..2].join(", "), n - 2) } else if n > 0 { own.join(", ") } else if every || !game { none.into() } else { "Same as every game".into() };
+        let sub = if n > 3 { format!("{}, and {} more", own[..2].join(", "), n - 2) } else if n > 0 { own.join(", ") } else if every || !game { "No changes".into() } else { "Same as every game".into() };
         LibToc { name: sec.desc["label"].as_str().unwrap_or(&sec.name).into(), sub: sub.as_str().into(), set: n > 0, y: y - 12.0 }
+    }
+
+    /// On this page's entry for Custom Scripts: the page's own scripts by name.
+    fn scripts_entry(&self, id: &str, y: f32, game: bool, every: bool) -> LibToc {
+        let mine: Vec<String> = self.library.scripts(if every { EVERY } else { id }).iter().map(|s| if s.name.trim().is_empty() { "A script".to_string() } else { s.name.clone() }).collect();
+        let n = mine.len();
+        let sub = if n > 3 {
+            format!("{}, and {} more", mine[..2].join(", "), n - 2)
+        } else if n > 0 {
+            mine.join(", ")
+        } else if game && !every && !self.library.scripts(EVERY).is_empty() {
+            "Same as every game".into()
+        } else {
+            "No scripts".into()
+        };
+        LibToc { name: "Custom Scripts".into(), sub: sub.as_str().into(), set: n > 0, y: y - 12.0 }
     }
 
     /// Under Every game's On this page: how many games it's for, and how many

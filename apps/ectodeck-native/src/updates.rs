@@ -138,7 +138,7 @@ fn check_all(tx: &mpsc::Sender<String>) {
         if rec[p.id()]["at"].as_u64().is_some_and(|t| now.saturating_sub(t) < 24 * 60 * 60) {
             continue;
         }
-        let s = check(&p, &repo, &packages::added_dir());
+        let s = check(&p, &repo, &packages::added_dir(p.kind()));
         rec[p.id()] = match &s {
             Status::UpToDate(at) => json!({ "status": "up to date", "at": at }),
             Status::Updated(v) => json!({ "status": "updated", "version": v, "at": now }),
@@ -181,18 +181,19 @@ pub mod tests {
     use super::*;
     use std::io::{Read, Write};
 
-    /// The Scripts plugin as a package file of another version: its folder, zipped.
+    /// The Monitor Configurator as a package file of another version: its
+    /// folder, zipped.
     pub fn package_of(version: &str) -> (Vec<u8>, Vec<u8>) {
-        let dir = crate::cores::dir().join("scripts");
+        let dir = crate::cores::plugins_dir().join("monitor-configurator");
         let manifest = std::fs::read_to_string(dir.join("core.json")).unwrap().replace("\"version\": \"1.0.0\"", &format!("\"version\": \"{version}\""));
         let mut out = std::io::Cursor::new(Vec::new());
         {
             let mut z = zip::ZipWriter::new(&mut out);
             let o = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
-            z.start_file("scripts/core.json", o).unwrap();
+            z.start_file("monitor-configurator/core.json", o).unwrap();
             z.write_all(manifest.as_bytes()).unwrap();
             for f in ["core.wasm", "glyph.svg"] {
-                z.start_file(format!("scripts/{f}"), o).unwrap();
+                z.start_file(format!("monitor-configurator/{f}"), o).unwrap();
                 z.write_all(&std::fs::read(dir.join(f)).unwrap()).unwrap();
             }
             z.finish().unwrap();
@@ -230,21 +231,21 @@ pub mod tests {
     #[test]
     fn a_newer_release_is_put_in_place() {
         let (manifest, package) = package_of("1.0.1");
-        let base = "/test/ectodeck-scripts/releases/latest/download";
-        let at = fake_github(vec![(format!("{base}/core.json"), manifest), (format!("{base}/scripts.ectocore"), package)]);
+        let base = "/test/monitor-configurator/releases/latest/download";
+        let at = fake_github(vec![(format!("{base}/core.json"), manifest), (format!("{base}/monitor-configurator.ectocore"), package)]);
         // (set for this test alone: no other test asks GitHub)
         unsafe { std::env::set_var("ECTODECK_NATIVE_GITHUB", &at) };
         let into = std::env::temp_dir().join(format!("ectodeck-updates-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&into);
-        let p = Package::read(&crate::cores::dir().join("scripts"), false).unwrap();
-        assert_eq!(check(&p, "test/ectodeck-scripts", &into), Status::Updated("1.0.1".into()));
-        assert!(into.join("scripts/1.0.1/core.wasm").is_file() && !into.join("scripts/1.0.1/.unfinished").exists());
-        let all = packages::all_in(&crate::cores::dir(), &into);
-        let used = all.iter().find(|x| x.id() == "scripts").unwrap();
+        let p = Package::read(&crate::cores::plugins_dir().join("monitor-configurator"), false).unwrap();
+        assert_eq!(check(&p, "test/monitor-configurator", &into), Status::Updated("1.0.1".into()));
+        assert!(into.join("monitor-configurator/1.0.1/core.wasm").is_file() && !into.join("monitor-configurator/1.0.1/.unfinished").exists());
+        let all = packages::all_in(&crate::cores::plugins_dir(), &into);
+        let used = all.iter().find(|x| x.id() == "monitor-configurator").unwrap();
         assert_eq!((used.version(), used.added), ("1.0.1", true));
-        assert_eq!(used.repository().as_deref(), Some("test/ectodeck-scripts"), "it knows where its updates come from");
+        assert_eq!(used.repository().as_deref(), Some("test/monitor-configurator"), "it knows where its updates come from");
         // the version it has is up to date
-        assert!(matches!(check(used, "test/ectodeck-scripts", &into), Status::UpToDate(_)));
+        assert!(matches!(check(used, "test/monitor-configurator", &into), Status::UpToDate(_)));
         // a release of nothing Ectodeck knows by that name isn't taken
         assert!(matches!(check(&p, "test/elsewhere", &into), Status::Failed(_)));
         let _ = std::fs::remove_dir_all(&into);

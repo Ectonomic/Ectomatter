@@ -1,9 +1,13 @@
 //! The mouse's page: the SteelSeries Sensei 310, through SteelSeries' core
-//! (cores/steelseries), built from the keyboard page's parts as its mock has
+//! (cores/steelseries-sensei-310), built from the keyboard page's parts as its mock has
 //! it (mock/sensei-310.html): Buttons, Lighting, Performance and Settings.
 //!
 //! The core is asked on a thread of its own, which tells the page what the
 //! mouse is set to after each change and whenever the mouse comes or goes.
+
+
+/// The mouse's core: the SteelSeries Sensei 310's, by its folder's name.
+pub const CORE: &str = "steelseries-sensei-310";
 
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -1218,7 +1222,7 @@ pub const EFFECTS: [(&str, &str); 4] = [("off", "Off"), ("static", "Static"), ("
 /// that says nothing of it.
 pub fn light_model(desc: &Value) -> Value {
     match &desc["light"] {
-        Value::String(file) => std::fs::read_to_string(crate::cores::dir().join("steelseries").join(file)).ok().and_then(|t| ectodeck_draw::jsonc::parse(&t).ok()).unwrap_or(Value::Null),
+        Value::String(file) => std::fs::read_to_string(crate::cores::dir().join(CORE).join(file)).ok().and_then(|t| ectodeck_draw::jsonc::parse(&t).ok()).unwrap_or(Value::Null),
         v => v.clone(),
     }
 }

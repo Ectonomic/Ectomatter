@@ -1,5 +1,5 @@
 //! The mouse's picture for its page: SteelSeries' core's art (Grant's
-//! drawing, cores/steelseries/art/sensei-310.svg), drawn once for a size as
+//! drawing, cores/steelseries-sensei-310/art/sensei-310.svg), drawn once for a size as
 //! layers the page puts together: the mouse with its lights off over the
 //! shadow every device casts on its stage, each light as a mask the page
 //! tints in the light's color of the moment (so an effect plays on the
@@ -587,7 +587,7 @@ mod tests {
     use super::*;
 
     fn art() -> String {
-        std::fs::read_to_string(crate::cores::dir().join("steelseries/art/sensei-310.svg")).unwrap()
+        std::fs::read_to_string(crate::cores::dir().join(crate::mouse::CORE).join("art/sensei-310.svg")).unwrap()
     }
 
     fn shadow() -> [ectodeck_draw::hdr::ShadowLayer; 1] {
@@ -690,7 +690,7 @@ mod hdr_tests {
     /// in the lab glows under the page's white.
     #[test]
     fn the_lights_are_as_bright_as_their_leds_make_them() {
-        let art = std::fs::read_to_string(crate::cores::dir().join("steelseries/art/sensei-310.svg")).unwrap();
+        let art = std::fs::read_to_string(crate::cores::dir().join(crate::mouse::CORE).join("art/sensei-310.svg")).unwrap();
         let l = layers(&art, 240, &[ectodeck_draw::hdr::ShadowLayer { down: 8.0, blur: 22.0, strength: 0.6 }], 0.5).unwrap();
         let light = crate::mouse::light_model(&serde_json::json!({ "light": "light.json" }));
         let px_mm = px_mm(240, 520.0 / 125.1);
@@ -713,7 +713,7 @@ mod halo_tests {
     /// palm round it. (Its window is the lit logo, not the drawing's own glow.)
     #[test]
     fn no_halo_lights_nothing_past_the_window() {
-        let art = std::fs::read_to_string(crate::cores::dir().join("steelseries/art/sensei-310.svg")).unwrap();
+        let art = std::fs::read_to_string(crate::cores::dir().join(crate::mouse::CORE).join("art/sensei-310.svg")).unwrap();
         let l = layers(&art, 240, &[ectodeck_draw::hdr::ShadowLayer { down: 8.0, blur: 22.0, strength: 0.6 }], 0.5).unwrap();
         let light = serde_json::json!({ "window": { "halo": 0.0 } });
         let hdr = Hdr::new(&l, &light, px_mm(240, 520.0 / 125.1));
@@ -768,7 +768,7 @@ mod halo_fit {
     #[test]
     #[ignore]
     fn fit_the_logo_halo() {
-        let art = std::fs::read_to_string(crate::cores::dir().join("steelseries/art/sensei-310.svg")).unwrap();
+        let art = std::fs::read_to_string(crate::cores::dir().join(crate::mouse::CORE).join("art/sensei-310.svg")).unwrap();
         let l = layers(&art, 240, &[ectodeck_draw::hdr::ShadowLayer { down: 8.0, blur: 22.0, strength: 0.6 }], 0.5).unwrap();
         let px_mm = px_mm(240, 520.0 / 125.1);
         let was = Make::DEFAULT;
@@ -824,7 +824,7 @@ mod timing {
     #[test]
     #[ignore]
     fn how_long_a_frame_takes() {
-        let art = std::fs::read_to_string(crate::cores::dir().join("steelseries/art/sensei-310.svg")).unwrap();
+        let art = std::fs::read_to_string(crate::cores::dir().join(crate::mouse::CORE).join("art/sensei-310.svg")).unwrap();
         let layers = [ectodeck_draw::hdr::ShadowLayer { down: 16.0, blur: 44.0, strength: 0.6 }];
         let light = crate::mouse::light_model(&serde_json::json!({ "light": "light.json" }));
         for w in [240u32, 480] {
@@ -845,7 +845,7 @@ mod timing {
     #[test]
     #[ignore]
     fn how_long_the_layers_take() {
-        let art = std::fs::read_to_string(crate::cores::dir().join("steelseries/art/sensei-310.svg")).unwrap();
+        let art = std::fs::read_to_string(crate::cores::dir().join(crate::mouse::CORE).join("art/sensei-310.svg")).unwrap();
         let layers = [ectodeck_draw::hdr::ShadowLayer { down: 16.0, blur: 44.0, strength: 0.6 }, ectodeck_draw::hdr::ShadowLayer { down: 4.0, blur: 14.0, strength: 0.35 }];
         for w in [240u32, 480] {
             let t = std::time::Instant::now();

@@ -58,8 +58,6 @@ pub struct Stream(std::net::TcpStream);
 pub struct Uses {
     /// the monitors: read them, and have Ectodeck change them while a game runs
     pub monitors: bool,
-    /// the commands the person types into its section, which Ectodeck runs
-    pub commands: bool,
     /// the addresses it may connect to, each with what is there ("OpenRGB")
     pub network: Vec<(String, String)>,
     /// anything else it names, as it names it ("sound-capture")
@@ -72,7 +70,6 @@ impl Uses {
         for x in v.as_array().into_iter().flatten() {
             match x {
                 Value::String(s) if s == "monitors" => u.monitors = true,
-                Value::String(s) if s == "commands" => u.commands = true,
                 Value::String(s) => u.other.push(s.clone()),
                 Value::Object(o) => {
                     if let Some(a) = o.get("network").and_then(Value::as_str) {
@@ -920,7 +917,7 @@ mod tests {
         let fake = FakeMouse { sent: sent.clone(), waiting: VecDeque::new() };
         let data = std::env::temp_dir().join(format!("ectodeck-mouse-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&data);
-        let dir = crate::cores::dir().join("steelseries");
+        let dir = crate::cores::dir().join(crate::mouse::CORE);
         assert!(dir.join("core.wasm").exists(), "the SteelSeries module isn't built: run tools/build-cores.sh");
         let core = Core::start(&dir, data.clone(), Box::new(One(Some(Box::new(fake))))).unwrap();
         core.call("initialize", &serde_json::json!({ "protocol": 3 })).unwrap();
@@ -972,7 +969,7 @@ mod tests {
         let usb = MouseAndKeys(Some(Box::new(FakeMouse { sent: sent.clone(), waiting: VecDeque::new() })), Some(Box::new(FakeKeys(reports.clone()))));
         let data = std::env::temp_dir().join(format!("ectodeck-mouse-host-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&data);
-        let core = Core::start(&crate::cores::dir().join("steelseries"), data.clone(), Box::new(usb)).unwrap();
+        let core = Core::start(&crate::cores::dir().join(crate::mouse::CORE), data.clone(), Box::new(usb)).unwrap();
         core.call("initialize", &serde_json::json!({ "protocol": 3 })).unwrap();
         let woken = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let w = woken.clone();
@@ -1209,7 +1206,7 @@ mod tests {
         }
         let data = std::env::temp_dir().join(format!("ectodeck-mouse-live-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&data);
-        let core = Core::start(&crate::cores::dir().join("steelseries"), data.clone(), Box::new(Hidapi::new())).unwrap();
+        let core = Core::start(&crate::cores::dir().join(crate::mouse::CORE), data.clone(), Box::new(Hidapi::new())).unwrap();
         core.call("initialize", &serde_json::json!({ "protocol": 3 })).unwrap();
         let d = serde_json::json!({ "device": "sensei310-1" });
         let was = core.call("settings/get", &d).unwrap()["values"]["cpi1"].as_u64().unwrap();
@@ -1218,7 +1215,7 @@ mod tests {
             // the mouse's own answer, through a core met anew (its record kept apart)
             let d2 = std::env::temp_dir().join(format!("ectodeck-mouse-read-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&d2);
-            let c = Core::start(&crate::cores::dir().join("steelseries"), d2.clone(), Box::new(Hidapi::new())).unwrap();
+            let c = Core::start(&crate::cores::dir().join(crate::mouse::CORE), d2.clone(), Box::new(Hidapi::new())).unwrap();
             c.call("initialize", &serde_json::json!({ "protocol": 3 })).unwrap();
             let v = c.call("settings/get", &serde_json::json!({ "device": "sensei310-1" })).unwrap()["values"]["cpi1"].as_u64().unwrap();
             let _ = std::fs::remove_dir_all(&d2);
@@ -1282,7 +1279,7 @@ mod tests {
         drop(core);
         // met again, the mouse saying #FF1000, not the green Ectodeck set
         let fake = FakeMouse { sent: Arc::new(Mutex::new(Vec::new())), waiting: VecDeque::new() };
-        let core = Core::start(&crate::cores::dir().join("steelseries"), data.clone(), Box::new(One(Some(Box::new(fake))))).unwrap();
+        let core = Core::start(&crate::cores::dir().join(crate::mouse::CORE), data.clone(), Box::new(One(Some(Box::new(fake))))).unwrap();
         core.call("initialize", &serde_json::json!({ "protocol": 3 })).unwrap();
         let l = core.call("lighting/get", &d).unwrap();
         core.call("shutdown", &Value::Null).unwrap();

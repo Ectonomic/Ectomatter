@@ -18,7 +18,7 @@ import "fonts/BarlowSemiCondensed-600.ttf";
 import "fonts/Geist-400.ttf";
 import "fonts/Geist-500.ttf";
 import "fonts/Geist-600.ttf";
-// commands as they are typed, in a typeface whose letters are all one width (the Scripts plugin's section)
+// commands as they are typed, in a typeface whose letters are all one width (Custom Scripts)
 import "../../../crates/ectodeck-draw/typefaces/JetBrainsMono.ttf";
 
 // The window's shades, darkest to lightest: the frame (title bar, rail),
@@ -4146,6 +4146,8 @@ export component AppWindow inherits Window {
     // the form for adding a plugin (gl-modal 4): its GitHub address as typed, the file
     // chosen, what it is once found (its name and version, what it's for, what it can
     // do), and where the looking stands (in red where it went wrong)
+    in property <string> gl-plugin-title;
+    in property <string> gl-plugin-sub;
     in-out property <string> gl-plugin-address;
     in property <string> gl-plugin-file;
     in property <string> gl-plugin-found;
@@ -8114,7 +8116,7 @@ export component AppWindow inherits Window {
                 height: self.preferred-height;
                 spacing: 0;
                 Text {
-                    text: root.gl-modal == 1 ? "Add a game" : root.gl-modal == 3 ? root.gl-script-title : root.gl-modal == 4 ? "Add a plugin" : "Add an app";
+                    text: root.gl-modal == 1 ? "Add a game" : root.gl-modal == 3 ? root.gl-script-title : root.gl-modal == 4 ? root.gl-plugin-title : "Add an app";
                     font-family: "Geist";
                     font-size: 17px;
                     font-weight: 600;
@@ -8123,7 +8125,7 @@ export component AppWindow inherits Window {
                 Rectangle { height: 4px; }
                 Text {
                     text: root.gl-modal == 1 ? "Choose the game’s program. The game joins Games, with a page of its own." : root.gl-modal == 3 ? root.gl-script-sub
-                        : root.gl-modal == 4 ? "From the plugin’s GitHub releases, or from its file. Ectodeck says what the plugin can do before you add it."
+                        : root.gl-modal == 4 ? root.gl-plugin-sub
                         : "Choose an app you’ve had open while Ectodeck was running. The app joins Apps, with a page of its own.";
                     font-family: "Geist";
                     font-size: 13px;
@@ -8231,7 +8233,7 @@ export component AppWindow inherits Window {
                     }
                     Rectangle { height: 7px; }
                     FieldBox {
-                        placeholder: "The plugin’s GitHub address, or its owner/name";
+                        placeholder: "Its GitHub address, or its owner/name";
                         text <=> root.gl-plugin-address;
                         edited => { root.gl-plugin-typed(); }
                         accepted => { if (root.gl-can-add) { root.gl-add-done(); } }
@@ -8276,7 +8278,7 @@ export component AppWindow inherits Window {
                     }
                     Rectangle { height: 6px; }
                     Text {
-                        text: "A plugin’s file ends in .ectocore.";
+                        text: "Its file ends in .ectocore.";
                         font-family: "Geist";
                         font-size: 12.5px;
                         color: Ink.quiet;

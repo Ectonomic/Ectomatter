@@ -1,14 +1,16 @@
-//! The plugins running: each package that adds to a game's page, or brings
-//! devices in through another program (packages.rs), started as a core
-//! (core_host.rs) while it's on. A plugin describes its section of a page in
-//! the shared settings language (game/describe), and says what a game's
+//! The packages Ectodeck runs itself (packages.rs), each started as a core
+//! is (core_host.rs) while it's on, and kept in two lists, as Settings keeps
+//! them: the cores that have no page of their own (OpenRGB's, which tells its
+//! devices as any core does, each with its profiles, for the Library's
+//! Devices), and the plugins. A plugin describes its section of a game's page
+//! in the shared settings language (game/describe), and says what a game's
 //! choices change as the game starts (game/changes); Ectodeck draws the one
-//! and makes the other (putback.rs). A plugin that brings devices in tells
-//! them as a device's core does (device/added), each with its profiles.
+//! and makes the other (putback.rs).
 //!
-//! The device cores that come with Ectodeck, the keyboard's and the mouse's,
-//! are started where their pages are (main.rs); this is for the rest.
+//! The keyboard's and the mouse's cores are started where their pages are
+//! (main.rs); this is for the rest.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -17,31 +19,46 @@ use serde_json::{json, Value};
 use crate::core_host::{Computer, Core, NoDevices};
 use crate::packages::{Kind, Package};
 
-/// A plugin started: its package, its core, what it said last of how it is
-/// (a warning to show beside it, such as a server it can't reach), and the
-/// devices it brought in, each as it told them.
-pub struct Plugin {
+/// A package running: its package, its core, what it said last of how it is
+/// (a warning to show beside it, such as a server it can't reach), and, for
+/// a core, the devices it told, each as it told it.
+pub struct Run {
     pub package: Package,
     pub core: Core,
     pub warning: Option<String>,
     pub devices: Vec<Value>,
     /// its sections, as last described for each page, and when
     described: Vec<(String, Value, Instant)>,
+    /// the folder it was given offscreen or in a test, removed when it stops
+    scratch: Option<PathBuf>,
 }
 
-pub struct Plugins {
-    pub list: Vec<Plugin>,
+impl Drop for Run {
+    fn drop(&mut self) {
+        if let Some(d) = &self.scratch {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
+}
+
+pub struct Hosted {
+    pub cores: Vec<Run>,
+    pub plugins: Vec<Run>,
     computer: Arc<dyn Computer>,
 }
 
 /// Packages Ectodeck starts elsewhere: the keyboard's and the mouse's cores.
-fn started_elsewhere(id: &str) -> bool {
-    id == crate::z10::CORE || id == "steelseries"
+pub fn started_elsewhere(id: &str) -> bool {
+    id == crate::z10::CORE || id == crate::mouse::CORE
 }
 
-impl Plugins {
-    pub fn new(computer: Arc<dyn Computer>) -> Plugins {
-        Plugins { list: Vec::new(), computer }
+impl Hosted {
+    pub fn new(computer: Arc<dyn Computer>) -> Hosted {
+        Hosted { cores: Vec::new(), plugins: Vec::new(), computer }
+    }
+
+    fn all(&self) -> impl Iterator<Item = &Run> {
+        self.cores.iter().chain(self.plugins.iter())
     }
 
     /// Each package that's on and isn't started elsewhere, started (offscreen
@@ -57,44 +74,56 @@ impl Plugins {
     }
 
     pub fn start(&mut self, p: Package) {
-        if self.list.iter().any(|x| x.package.id() == p.id()) {
+        if self.get(p.id()).is_some() {
             return;
         }
-        let data = crate::data_dir().join("cores").join(p.id());
-        // (offscreen, a folder of its own that's gone after, so a check keeps nothing)
-        let data = if crate::desk::offscreen() { std::env::temp_dir().join(format!("ectodeck-plugin-{}-{}", p.id(), std::process::id())) } else { data };
+        let kind = p.kind();
+        // (offscreen or in a test, a folder of its own that's gone after, so a check keeps nothing)
+        let scratch = crate::desk::keeps_nothing().then(|| std::env::temp_dir().join(format!("ectodeck-{}-{}-{}", kind.word(), p.id(), std::process::id())));
+        let data = scratch.clone().unwrap_or_else(|| p.data());
         match Core::start_with(&p.dir, data, Box::new(NoDevices), Some(self.computer.clone())) {
             Ok(core) => {
                 match core.call("initialize", &json!({ "protocol": 4, "frontend": concat!("ectodeck ", env!("CARGO_PKG_VERSION")), "platform": platform() })) {
-                    Ok(_) => eprintln!("ectodeck-native: the {} plugin started", p.id()),
-                    Err(e) => eprintln!("ectodeck-native: the {} plugin: {e}", p.id()),
+                    Ok(_) => eprintln!("ectodeck-native: the {} {} started", p.id(), kind.word()),
+                    Err(e) => eprintln!("ectodeck-native: the {} {}: {e}", p.id(), kind.word()),
                 }
-                self.list.push(Plugin { package: p, core, warning: None, devices: Vec::new(), described: Vec::new() });
+                let run = Run { package: p, core, warning: None, devices: Vec::new(), described: Vec::new(), scratch };
+                match kind {
+                    Kind::Core => self.cores.push(run),
+                    Kind::Plugin => self.plugins.push(run),
+                }
             }
-            Err(e) => eprintln!("ectodeck-native: the {} plugin wouldn’t start: {e}", p.id()),
+            Err(e) => {
+                eprintln!("ectodeck-native: the {} {} wouldn’t start: {e}", p.id(), kind.word());
+                if let Some(d) = scratch {
+                    let _ = std::fs::remove_dir_all(d);
+                }
+            }
         }
     }
 
-    /// A plugin turned off: stopped, its devices gone with it.
+    /// A package turned off: stopped, a core's devices gone with it.
     pub fn stop(&mut self, id: &str) {
-        if let Some(i) = self.list.iter().position(|x| x.package.id() == id) {
-            let p = self.list.remove(i);
-            let _ = p.core.call("shutdown", &Value::Null);
+        for list in [&mut self.cores, &mut self.plugins] {
+            if let Some(i) = list.iter().position(|x| x.package.id() == id) {
+                let p = list.remove(i);
+                let _ = p.core.call("shutdown", &Value::Null);
+            }
         }
     }
 
-    pub fn get(&self, id: &str) -> Option<&Plugin> {
-        self.list.iter().find(|p| p.package.id() == id)
+    pub fn get(&self, id: &str) -> Option<&Run> {
+        self.all().find(|p| p.package.id() == id)
     }
 
-    /// What the plugins told since last asked: their warnings and devices.
-    /// True if anything changed.
+    /// What the packages running told since last asked: their warnings, and
+    /// the cores' devices. True if anything changed.
     pub fn poll(&mut self) -> bool {
         let mut changed = false;
-        for p in &mut self.list {
+        for p in self.cores.iter_mut().chain(self.plugins.iter_mut()) {
             for (method, params) in p.core.told() {
                 match method.as_str() {
-                    "plugin/status" => {
+                    "core/status" | "plugin/status" => {
                         let w = params["warning"].as_str().filter(|w| !w.is_empty()).map(String::from);
                         if w != p.warning {
                             p.warning = w;
@@ -129,7 +158,7 @@ impl Plugins {
     pub fn sections(&mut self, page: &str, name: &str) -> Vec<(String, Value)> {
         let key = format!("{page}\u{0}{name}");
         let mut out = Vec::new();
-        for p in &mut self.list {
+        for p in &mut self.plugins {
             if !p.package.adds_to_games() {
                 continue;
             }
@@ -152,7 +181,7 @@ impl Plugins {
 
     /// Asked again next time, every plugin's sections (a page opened afresh).
     pub fn forget_sections(&mut self) {
-        for p in &mut self.list {
+        for p in &mut self.plugins {
             p.described.clear();
         }
     }
@@ -160,16 +189,14 @@ impl Plugins {
     /// What each plugin changes as a game starts, in Settings' order, each
     /// change checked against what its plugin's manifest allows: `values`
     /// are each plugin's choices for the game (its own over Every game's),
-    /// `commands` the person's commands for it, by id and name.
-    pub fn changes(&self, game: &crate::putback::Game, kind: &str, values: &dyn Fn(&str) -> Value, commands: &[(u64, String, bool)]) -> Vec<(String, Value, String, String)> {
+    pub fn changes(&self, game: &crate::putback::Game, kind: &str, values: &dyn Fn(&str) -> Value) -> Vec<(String, Value, String, String)> {
         let mut out = Vec::new();
-        for p in &self.list {
+        for p in &self.plugins {
             if !p.package.adds_to_games() {
                 continue;
             }
             let uses = &p.package.manifest.uses;
-            let cmds: Vec<Value> = if uses.commands { commands.iter().map(|(id, name, every)| json!({ "id": id, "name": name, "every": every })).collect() } else { Vec::new() };
-            let asked = json!({ "game": { "id": game.id, "name": game.name, "kind": kind }, "values": values(p.package.id()), "commands": cmds });
+            let asked = json!({ "game": { "id": game.id, "name": game.name, "kind": kind }, "values": values(p.package.id()) });
             let answer = match p.core.call("game/changes", &asked) {
                 Ok(a) => a,
                 Err(e) => {
@@ -180,7 +207,7 @@ impl Plugins {
             for c in answer["changes"].as_array().into_iter().flatten() {
                 let what = c["change"].clone();
                 // (a change of a kind its manifest doesn't name is left unmade)
-                let allowed = (what.get("monitor").is_some() && uses.monitors) || (what["command"].is_u64() && uses.commands && commands.iter().any(|(id, _, _)| what["command"] == *id));
+                let allowed = what.get("monitor").is_some() && uses.monitors;
                 if !allowed {
                     eprintln!("ectodeck-native: the {} plugin asked for a change it may not make: {what}", p.package.id());
                     continue;
@@ -192,9 +219,9 @@ impl Plugins {
         out
     }
 
-    /// The devices plugins brought in, each by its plugin and as it told it.
+    /// The devices the cores running here told, each by its core and as it told it.
     pub fn devices(&self) -> Vec<(String, Value)> {
-        self.list.iter().filter(|p| p.package.kind() == Kind::Device).flat_map(|p| p.devices.iter().map(|d| (p.package.id().to_string(), d.clone()))).collect()
+        self.cores.iter().flat_map(|p| p.devices.iter().map(|d| (p.package.id().to_string(), d.clone()))).collect()
     }
 }
 
@@ -223,20 +250,25 @@ mod tests {
         }
     }
 
-    fn plugin(id: &str) -> Plugins {
-        let mut ps = Plugins::new(Arc::new(Desk));
-        let p = crate::packages::Package::read(&crate::cores::dir().join(id), false).unwrap();
-        assert!(p.dir.join("core.wasm").exists(), "the {id} plugin isn't built: run tools/build-cores.sh");
+    /// One package that comes with Ectodeck, started alone.
+    fn hosted(kind: Kind, id: &str) -> Hosted {
+        let mut ps = Hosted::new(Arc::new(Desk));
+        let p = crate::packages::Package::read(&crate::packages::builtin_dir(kind).join(id), false).unwrap();
+        assert!(p.dir.join("core.wasm").exists(), "the {id} {} isn't built: run tools/build-{}.sh", kind.word(), kind.folder());
         ps.start(p);
-        assert_eq!(ps.list.len(), 1, "it started");
+        assert_eq!(ps.cores.len() + ps.plugins.len(), 1, "it started");
         ps
     }
 
-    /// The Monitors plugin's section: a column for each monitor, a cell
+    fn plugin(id: &str) -> Hosted {
+        hosted(Kind::Plugin, id)
+    }
+
+    /// The Monitor Configurator's section: a column for each monitor, a cell
     /// saying why where a monitor can't do something, and the main monitor.
     #[test]
     fn the_monitors_section_has_a_column_for_each() {
-        let mut ps = plugin("monitors");
+        let mut ps = plugin("monitor-configurator");
         let s = &ps.sections("game", "ARC Raiders")[0].1;
         let grid = &s["layout"][0]["grid"];
         let cols: Vec<&str> = grid["columns"].as_array().unwrap().iter().map(|c| c["label"].as_str().unwrap()).collect();
@@ -256,10 +288,10 @@ mod tests {
     /// one the monitor is already at changes nothing.
     #[test]
     fn choices_become_changes() {
-        let ps = plugin("monitors");
+        let ps = plugin("monitor-configurator");
         let g = crate::putback::Game { id: "steam_app_1808500".into(), name: "ARC Raiders".into(), pid: 1, since: 1 };
         let values = |_: &str| json!({ "edid:MSI-3DA4-1/brightness": "100", "edid:WSD-0001-2/brightness": "lowest", "edid:MSI-3DA4-1/refresh": "165", "main": "edid:MSI-3DA4-1" });
-        let c = ps.changes(&g, "game", &values, &[]);
+        let c = ps.changes(&g, "game", &values);
         let whats: Vec<Value> = c.iter().map(|x| x.1.clone()).collect();
         assert_eq!(whats, vec![
             json!({ "monitor": "edid:MSI-3DA4-1", "set": "mode", "to": { "width": 3440, "height": 1440, "refresh": 164990 } }),
@@ -268,7 +300,7 @@ mod tests {
         assert_eq!(c[1].2, "BRIGHTNESS");
         assert_eq!(c[1].3, "the Side 13 2K’s brightness");
         // turning the side monitor off is the last change, and every monitor off leaves the main one on
-        let c = ps.changes(&g, "game", &|_: &str| json!({ "edid:WSD-0001-2/brightness": "off", "edid:MSI-3DA4-1/brightness": "off" }), &[]);
+        let c = ps.changes(&g, "game", &|_: &str| json!({ "edid:WSD-0001-2/brightness": "off", "edid:MSI-3DA4-1/brightness": "off" }));
         assert_eq!(c.iter().map(|x| x.1.clone()).collect::<Vec<_>>(), vec![json!({ "monitor": "edid:WSD-0001-2", "set": "enabled", "to": false })]);
     }
 
@@ -383,7 +415,7 @@ mod tests {
         Some(rx)
     }
 
-    /// The OpenRGB plugin brings everything OpenRGB lights in as one device,
+    /// OpenRGB's core brings everything OpenRGB lights in as one device,
     /// its profiles OpenRGB's; switching loads one, and switching back loads
     /// the one OpenRGB was on before. Run alone, with OpenRGB's own server
     /// off (its port free): `cargo test openrgb -- --ignored`.
@@ -391,7 +423,7 @@ mod tests {
     #[ignore]
     fn openrgb_switches_and_puts_back() {
         let Some(loaded) = fake_openrgb() else { panic!("OpenRGB’s port is taken: its own server is running") };
-        let mut ps = plugin("openrgb");
+        let mut ps = hosted(Kind::Core, "openrgb");
         let mut device = None;
         for _ in 0..100 {
             std::thread::sleep(std::time::Duration::from_millis(50));
@@ -406,8 +438,8 @@ mod tests {
         assert_eq!(d["sub"], "Motherboard, RAM, graphics card, LED strips and mouse");
         let names: Vec<&str> = d["capabilities"]["profiles"]["list"].as_array().unwrap().iter().map(|p| p["name"].as_str().unwrap()).collect();
         assert_eq!(names, vec!["ARC Raiders", "Studio High", "Studio Low", "Deepdriver II"]);
-        assert!(ps.list[0].warning.is_none(), "no warning once it reaches the server");
-        let core = ps.list[0].core.clone();
+        assert!(ps.cores[0].warning.is_none(), "no warning once it reaches the server");
+        let core = ps.cores[0].core.clone();
         core.call("profiles/activate", &json!({ "device": "openrgb", "profile": "ARC Raiders" })).unwrap();
         assert_eq!(loaded.recv_timeout(std::time::Duration::from_secs(3)).unwrap(), "ARC Raiders");
         // a second switch keeps what it was before the first
@@ -427,13 +459,4 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_secs(60));
     }
 
-    /// The Scripts plugin runs Every game's commands first, and may name only
-    /// the commands it was told of.
-    #[test]
-    fn scripts_name_only_the_commands_they_were_told() {
-        let ps = plugin("scripts");
-        let g = crate::putback::Game { id: "steam_app_1808500".into(), name: "ARC Raiders".into(), pid: 1, since: 1 };
-        let c = ps.changes(&g, "game", &|_: &str| json!({}), &[(7, "Mine".into(), false), (3, "Pause the local AI".into(), true)]);
-        assert_eq!(c.iter().map(|x| x.1["command"].as_u64().unwrap()).collect::<Vec<_>>(), vec![3, 7]);
-    }
 }

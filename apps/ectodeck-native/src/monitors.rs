@@ -20,7 +20,7 @@
 //! change it's given (its own file), which is why Ectodeck's record of what
 //! it changed is written first.
 //!
-//! Elsewhere there's no connection yet, and the Monitors plugin says
+//! Elsewhere there's no connection yet, and the Monitor Configurator says
 //! Ectodeck can't reach this computer's monitors.
 
 use serde_json::{json, Value};

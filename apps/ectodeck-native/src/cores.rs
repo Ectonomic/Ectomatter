@@ -58,6 +58,11 @@ pub fn dir() -> PathBuf {
     PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../cores"))
 }
 
+/// Where the plugins are, apart from the cores: the source's own folder.
+pub fn plugins_dir() -> PathBuf {
+    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../plugins"))
+}
+
 /// The core of the device Ectodeck shows, read once. Ectodeck shows one
 /// device so far, the Z10, whose page names its core.
 pub fn shown() -> &'static Core {

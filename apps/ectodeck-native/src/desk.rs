@@ -186,7 +186,7 @@ pub fn offscreen() -> bool {
 }
 
 /// Whether this run is an offscreen check, or a test, which keep nothing.
-fn keeps_nothing() -> bool {
+pub fn keeps_nothing() -> bool {
     cfg!(test) || offscreen()
 }
 

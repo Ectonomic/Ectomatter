@@ -1,8 +1,8 @@
-//! The person's own commands, the Scripts plugin's section: each a command
-//! to run as a game starts and another to undo it as the game quits, the way
-//! Sunshine runs an app's "do" and "undo". The Library keeps them (games.rs);
-//! Ectodeck runs them itself, here, never a plugin, and never as an
-//! administrator: a command that would ask to be one is refused.
+//! Custom Scripts, Ectodeck's own section of a game's page: the person's own
+//! commands, each a command to run as a game starts and another to undo it
+//! as the game quits, the way Sunshine runs an app's "do" and "undo". The
+//! Library keeps them (games.rs); Ectodeck runs them itself, here, and never
+//! as an administrator: a command that would ask to be one is refused.
 //!
 //! A command runs in the system's own shell (sh, or cmd on Windows) in a
 //! process group of its own, so stopping it stops what it started too. It may

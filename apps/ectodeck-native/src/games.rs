@@ -111,8 +111,14 @@ fn kept_at() -> (Option<PathBuf>, Option<PathBuf>) {
 impl Library {
     pub fn load() -> Library {
         let (read, write) = kept_at();
-        let v = read.and_then(|p| std::fs::read(p).ok()).and_then(|b| serde_json::from_slice::<Value>(&b).ok()).filter(|v| v.is_object()).unwrap_or_else(|| json!({}));
-        Library { path: write, v, steam: None }
+        let mut v = read.and_then(|p| std::fs::read(p).ok()).and_then(|b| serde_json::from_slice::<Value>(&b).ok()).filter(|v| v.is_object()).unwrap_or_else(|| json!({}));
+        // (the Monitor Configurator's choices, kept under its old name, "monitors")
+        let renamed = v["plugins"].as_object_mut().is_some_and(|m| !m.contains_key("monitor-configurator") && m.remove("monitors").map(|old| m.insert("monitor-configurator".into(), old)).is_some());
+        let l = Library { path: write, v, steam: None };
+        if renamed {
+            l.save();
+        }
+        l
     }
 
     /// A Library kept nowhere, as given (for the tests).
@@ -857,16 +863,16 @@ mod tests {
     #[test]
     fn a_plugins_choices_follow_every_game_for_games() {
         let mut l = Library::of(json!({}), Some(steam_of(&[(1808500, "ARC Raiders", steam::Kind::Game), (250820, "SteamVR", steam::Kind::App)], &[])));
-        l.set_plugin_value(EVERY, "monitors", "side/brightness", Some(json!("lowest")));
-        l.set_plugin_value(EVERY, "monitors", "main/brightness", Some(json!("100")));
-        l.set_plugin_value("steam_app_1808500", "monitors", "side/brightness", Some(json!("25")));
-        assert_eq!(l.wanted_values("steam_app_1808500", "monitors"), json!({ "side/brightness": "25", "main/brightness": "100" }));
-        l.set_plugin_value("steam_app_250820", "monitors", "side/brightness", Some(json!("off")));
-        assert_eq!(l.wanted_values("steam_app_250820", "monitors"), json!({ "side/brightness": "off" }), "an app follows no Every game");
+        l.set_plugin_value(EVERY, "monitor-configurator", "side/brightness", Some(json!("lowest")));
+        l.set_plugin_value(EVERY, "monitor-configurator", "main/brightness", Some(json!("100")));
+        l.set_plugin_value("steam_app_1808500", "monitor-configurator", "side/brightness", Some(json!("25")));
+        assert_eq!(l.wanted_values("steam_app_1808500", "monitor-configurator"), json!({ "side/brightness": "25", "main/brightness": "100" }));
+        l.set_plugin_value("steam_app_250820", "monitor-configurator", "side/brightness", Some(json!("off")));
+        assert_eq!(l.wanted_values("steam_app_250820", "monitor-configurator"), json!({ "side/brightness": "off" }), "an app follows no Every game");
         // a choice taken back follows Every game's again, and an empty record is taken out
-        l.set_plugin_value("steam_app_1808500", "monitors", "side/brightness", None);
-        assert_eq!(l.wanted_values("steam_app_1808500", "monitors")["side/brightness"], "lowest");
-        assert!(l.v["plugins"]["monitors"].get("steam_app_1808500").is_none());
+        l.set_plugin_value("steam_app_1808500", "monitor-configurator", "side/brightness", None);
+        assert_eq!(l.wanted_values("steam_app_1808500", "monitor-configurator")["side/brightness"], "lowest");
+        assert!(l.v["plugins"]["monitor-configurator"].get("steam_app_1808500").is_none());
         assert!(l.has_own("steam_app_250820") && !l.has_own("steam_app_1808500"));
     }
 

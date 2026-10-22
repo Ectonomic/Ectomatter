@@ -1,7 +1,7 @@
 //! Ectodeck's own Settings, as the web app had them (shell.js at cd9ea82):
 //! each device, whether Ectodeck controls it, whether it may open it and
-//! what else has it open; the plugins, each device's core and each plugin
-//! together, what each can do, its version and whether it's on; the weather
+//! what else has it open; the cores, and then the plugins, each with what it
+//! can do, its version and whether it's on; the weather
 //! every device shares, its place and its units; the HDR interface; and how
 //! often the window draws a lighting effect.
 
@@ -59,12 +59,12 @@ pub struct SensorMap {
     pub top: f32,
 }
 
-/// A package as Settings' Plugins lists it: its name, what it's for in its
-/// own words, what it can do in Ectodeck's, its version and where that
+/// A package as Settings' Cores or Plugins lists it: its name, what it's for
+/// in its own words, what it can do in Ectodeck's, its version and where that
 /// stands, whether it's on, what it says is wrong (a server it can't reach),
-/// and its glyph (its place among the packages' glyphs).
+/// and its place among the packages (for its glyph and its controls).
 #[derive(Clone, Debug, PartialEq)]
-pub struct PluginRow {
+pub struct PackageRow {
     pub name: String,
     pub description: String,
     pub can: Vec<String>,
@@ -79,7 +79,8 @@ pub struct PluginRow {
 
 pub struct State<'a> {
     pub sensors: Option<Sensors>,
-    pub plugins: Vec<PluginRow>,
+    pub cores: Vec<PackageRow>,
+    pub plugins: Vec<PackageRow>,
     pub status: Value,
     pub control: bool,
     pub settings: Value,
@@ -486,8 +487,9 @@ pub fn page(s: &State) -> (Vec<Cell>, f32, SensorMap) {
         }
     });
 
-    // the plugins: each device's core and each plugin, together
-    plugins_section(&mut cells, &mut y, &s.plugins);
+    // the cores, each for a device or the devices another program drives; then the plugins
+    packages_section(&mut cells, &mut y, "Cores", 0, &s.cores, "Add a core", "Ectodeck checks each core’s GitHub releases for updates once a day.");
+    packages_section(&mut cells, &mut y, "Plugins", 1, &s.plugins, "Add a plugin", "Ectodeck checks each plugin’s GitHub releases for updates once a day.");
 
     // the weather every device shares
     let place = &s.settings["weather"]["place"];
@@ -613,13 +615,13 @@ pub fn page(s: &State) -> (Vec<Cell>, f32, SensorMap) {
     (cells, y - 14.0 + 40.0, map)
 }
 
-/// Settings' Plugins: a row for each package, its glyph on its tile, its name,
-/// what it's for and what it can do (and what it says is wrong, in amber),
-/// its version and where that stands, and On and Off; then Add a plugin, and
-/// how updates come.
-fn plugins_section(cells: &mut Vec<Cell>, y: &mut f32, rows: &[PluginRow]) {
+/// Settings' Cores or Plugins: a row for each package, its glyph on its tile,
+/// its name, what it's for and what it can do (and what it says is wrong, in
+/// amber), its version and where that stands, and On and Off; then Add (a
+/// core, `add` 0, or a plugin, 1), and how updates come.
+fn packages_section(cells: &mut Vec<Cell>, y: &mut f32, title: &str, add: i32, rows: &[PackageRow], add_words: &str, note: &str) {
     *y += 20.0;
-    cells.push(text_cell(style::HEAD, X0, *y, W, 18.0, "Plugins"));
+    cells.push(text_cell(style::HEAD, X0, *y, W, 18.0, title));
     *y += 18.0;
     let top = *y + 2.0;
     let (bx, bw) = (X0 + PAD_X, W - 2.0 * PAD_X);
@@ -638,7 +640,7 @@ fn plugins_section(cells: &mut Vec<Cell>, y: &mut f32, rows: &[PluginRow]) {
         out.push(cell(kind::SEG, sx, ry, seg_w, 34.0));
         let mut x = sx + 3.0;
         for (j, ((_, n), w)) in opts.iter().zip(&bws).enumerate() {
-            out.push(Cell { text: (*n).into(), on: (j == 0) == r.on, id: id(Ctl::PluginOn), index: (i * 2 + j) as i32, ..cell(kind::SEG_BUTTON, x, ry + 3.0, *w, 28.0) });
+            out.push(Cell { text: (*n).into(), on: (j == 0) == r.on, id: id(Ctl::PackageOn), index: (r.glyph * 2 + j) as i32, ..cell(kind::SEG_BUTTON, x, ry + 3.0, *w, 28.0) });
             x += w + 2.0;
         }
         // (each line to the right, against the switch)
@@ -649,7 +651,7 @@ fn plugins_section(cells: &mut Vec<Cell>, y: &mut f32, rows: &[PluginRow]) {
         out.push(Cell { color: slint::Color::from_rgb_u8(0xa1, 0xa1, 0xaa), ..text_cell(style::NOTE_IN, right - w2, ry + 19.0, w2, 18.0, &r.status) });
         if r.removable {
             let w3 = text::width(500, 12.5, "Remove").ceil() + 18.0;
-            out.push(Cell { text: "Remove".into(), id: id(Ctl::PluginRemove), index: i as i32, ..cell(kind::LINK, right - w3 + 9.0, ry + 40.0, w3, 26.0) });
+            out.push(Cell { text: "Remove".into(), id: id(Ctl::PackageRemove), index: r.glyph as i32, ..cell(kind::LINK, right - w3 + 9.0, ry + 40.0, w3, 26.0) });
         }
         // its tile, and its words
         out.push(Cell { style: 2 + r.glyph as i32, ..cell(kind::DEVICE, bx, ry, 40.0, 40.0) });
@@ -681,9 +683,9 @@ fn plugins_section(cells: &mut Vec<Cell>, y: &mut f32, rows: &[PluginRow]) {
     // Add a plugin, and how updates come
     out.push(Cell { color: slint::Color::from_argb_u8(9, 255, 255, 255), ..cell(kind::BOX, bx, ry, bw, 1.0) });
     ry += 16.0;
-    let aw = text::width(500, 13.0, "Add a plugin").ceil() + 12.0 + 14.0 + 7.0 + 12.0;
-    out.push(Cell { text: "Add a plugin".into(), lines: "M8 3v10M3 8h10".into(), style: 35, id: id(Ctl::PluginAdd), ..cell(kind::GHOST, bx, ry, aw, 30.0) });
-    out.push(text_cell(style::NOTE, bx + aw + 14.0, ry + 6.0, bw - aw - 14.0, 18.0, "Ectodeck checks each plugin’s GitHub releases for updates once a day."));
+    let aw = text::width(500, 13.0, add_words).ceil() + 12.0 + 14.0 + 7.0 + 12.0;
+    out.push(Cell { text: add_words.into(), lines: "M8 3v10M3 8h10".into(), style: 35, id: id(Ctl::PackageAdd), index: add, ..cell(kind::GHOST, bx, ry, aw, 30.0) });
+    out.push(text_cell(style::NOTE, bx + aw + 14.0, ry + 6.0, bw - aw - 14.0, 18.0, note));
     ry += 30.0 + 18.0;
     let h = ry - *y;
     cells.push(cell(kind::TILE, X0, *y, W, h));

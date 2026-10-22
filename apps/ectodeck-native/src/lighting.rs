@@ -85,11 +85,11 @@ pub enum Ctl {
     LibScript,
     LibScriptRun,
     LibScriptAdd,
-    /// Settings' Plugins: a package's On and Off, by its place in the list; Add a plugin;
-    /// Remove on one added
-    PluginOn,
-    PluginAdd,
-    PluginRemove,
+    /// Settings' Cores and Plugins: a package's On and Off, by its place among the
+    /// packages; Add a core (0) or a plugin (1); Remove on one added
+    PackageOn,
+    PackageAdd,
+    PackageRemove,
 }
 
 const CTLS: [Ctl; 49] = [
@@ -139,9 +139,9 @@ const CTLS: [Ctl; 49] = [
     Ctl::LibScript,
     Ctl::LibScriptRun,
     Ctl::LibScriptAdd,
-    Ctl::PluginOn,
-    Ctl::PluginAdd,
-    Ctl::PluginRemove,
+    Ctl::PackageOn,
+    Ctl::PackageAdd,
+    Ctl::PackageRemove,
 ];
 
 pub fn ctl(id: i32) -> Ctl {

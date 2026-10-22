@@ -1,8 +1,9 @@
 /// How Ectodeck and a core talk, as a WebAssembly component: what a core may
 /// call in Ectodeck (its imports) and what Ectodeck calls in a core (its
 /// exports). The core protocol (docs/core-protocol.md) says what the calls
-/// carry; this says how they are made. A plugin is a core too, one that adds
-/// to Ectodeck's pages rather than bringing a device (section 11).
+/// carry; this says how they are made. A plugin, which adds to Ectodeck's
+/// pages rather than bringing a device, is made the same way, though
+/// Ectodeck keeps plugins and cores apart (section 11).
 ///
 /// A core reaches nothing but what is here and the WebAssembly system
 /// interface Ectodeck gives it: the clocks, and its own folder of files,
@@ -68,8 +69,8 @@ interface host {
     answer: func(id: u32, reply: result<string, string>);
 }
 
-/// The computer beyond its USB devices, as a plugin's manifest's `uses`
-/// allows (docs/core-protocol.md, section 11): a plugin that doesn't name
+/// The computer beyond its USB devices, as a manifest's `uses` allows
+/// (docs/core-protocol.md, sections 3 and 11): a package that doesn't name
 /// one of these hears why it may not.
 interface system {
     /// The monitors connected now, as JSON: a list, each with its `id` (made

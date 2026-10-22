@@ -8,3 +8,4 @@ __pycache__/
 
 # each core's WebAssembly module, built by tools/build-cores.sh
 /cores/*/core.wasm
+/plugins/*/core.wasm

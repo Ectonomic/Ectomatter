@@ -33,6 +33,7 @@ mod front;
 mod front_app;
 mod games;
 mod games_page;
+mod hosted;
 mod jobs;
 mod kde_output;
 mod shadow;
@@ -58,7 +59,6 @@ mod mouse_art;
 mod overlays;
 mod packages;
 mod picker;
-mod plugins;
 mod picture;
 mod profiles;
 mod putback;
@@ -588,6 +588,10 @@ fn main() {
     slint::ComponentHandle::show(&ui).unwrap();
 
     let settings = settings::Settings::load(config_dir().join("settings.json"));
+    // (each package's own files where they're kept now that cores and plugins are apart)
+    if snapshot.is_none() {
+        packages::move_old_folders();
+    }
     let (reference, glow) = levels(&settings);
     let gain = LIGHT_GAIN;
     eprintln!("ectodeck-native: the desktop's white is {reference} nits; the light goes to {glow}");
@@ -1319,7 +1323,7 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
     let mouse = std::env::var("ECTODECK_NATIVE_LAB").is_ok_and(|v| v == "mouse");
     let mut lab = if mouse {
         front.ready_mouse_picture();
-        let setup = setups::in_use(&front.settings, "steelseries").map(|s| s.id);
+        let setup = setups::in_use(&front.settings, mouse::CORE).map(|s| s.id);
         lab::LabPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false), front.mouse_light_model(), mouse_lab_device(&front).expect("the mouse's picture"), setup)
     } else {
         let setup = setups::in_use(&front.settings, &cores::shown().id).map(|s| s.id);
@@ -1608,7 +1612,7 @@ struct App {
     home_build: std::sync::mpsc::Sender<(u32, u32, serde_json::Value, f32)>,
     home_share: Option<Rc<Vec<f32>>>,
     lit_home: bool,
-    /// SteelSeries' core (kept so it keeps running; the mouse has no page yet)
+    /// the Sensei 310's core (kept so it keeps running)
     _mouse: Option<core_host::Core>,
     /// legends to set as the light asks, away from the window
     set_legends: std::sync::mpsc::Sender<ectodeck_draw::hdr::LegendsAsk>,
@@ -1843,11 +1847,13 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         device::start(core, heard_tx, z10_there.clone())
     });
 
-    // SteelSeries' core, for the Sensei 310, and the mouse's page's thread on it:
-    // it meets the mouse, and writes to it only what the page changes
-    let mouse = core_host::Core::start(&cores::dir().join("steelseries"), core_data("steelseries"), Box::new(core_host::Hidapi::new()))
-        .map_err(|e| eprintln!("ectodeck-native: SteelSeries' core: {e}"))
-        .ok();
+    // the SteelSeries Sensei 310's core, and the mouse's page's thread on it:
+    // it meets the mouse, and writes to it only what the page changes; none
+    // while the core is turned off in Settings, which leaves the mouse alone
+    let mouse_on = settings.on(&format!("cores.{}.on", mouse::CORE));
+    let mouse = mouse_on
+        .then(|| core_host::Core::start(&cores::dir().join(mouse::CORE), core_data(mouse::CORE), Box::new(core_host::Hidapi::new())).map_err(|e| eprintln!("ectodeck-native: the Sensei 310's core: {e}")).ok())
+        .flatten();
     // (the page's picture comes back the same way, drawn on a thread of its own)
     let mouse_ask = mouse.clone().map(|m| {
         let (heard_tx, heard_rx) = calloop::channel::channel::<mouse::Heard>();
@@ -2305,7 +2311,7 @@ impl App {
             let (light, device, core, name) = if mouse {
                 let Some(d) = mouse_lab_device(&self.front) else { return };
                 let name = format!("{} / {}", d.name, d.lab());
-                (self.front.mouse_light_model(), d, "steelseries".to_string(), name)
+                (self.front.mouse_light_model(), d, mouse::CORE.to_string(), name)
             } else {
                 let d = lab_device(self.board.as_ref());
                 let name = format!("{} / {}", d.name, d.lab());
@@ -3685,8 +3691,8 @@ fn mouse_lab_device(front: &Front) -> Option<lab::LabDevice> {
     Some(lab::LabDevice {
         name: desc["name"].as_str().unwrap_or("SteelSeries Sensei 310").to_string(),
         kind: desc["kind"].as_str().unwrap_or("mouse").to_string(),
-        core: "steelseries".into(),
-        path: cores::dir().join("steelseries").join(file),
+        core: mouse::CORE.into(),
+        path: cores::dir().join(mouse::CORE).join(file),
         keys: false,
         wells: false,
         screens: false,
