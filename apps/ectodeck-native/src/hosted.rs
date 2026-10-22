@@ -1,11 +1,12 @@
 //! The packages Ectodeck runs itself (packages.rs), each started as a core
 //! is (core_host.rs) while it's on, and kept in two lists, as Settings keeps
-//! them: the cores that have no page of their own (OpenRGB's, which tells its
-//! devices as any core does, each with its profiles, for the Library's
-//! Devices), and the plugins. A plugin describes its section of a game's page
-//! in the shared settings language (game/describe), and says what a game's
-//! choices change as the game starts (game/changes); Ectodeck draws the one
-//! and makes the other (putback.rs).
+//! them: the cores that have no page of their own, and the plugins. A plugin
+//! describes its section of a game's page in the shared settings language
+//! (game/describe), and says what a game's choices change as the game starts
+//! (game/changes); Ectodeck draws the one and makes the other (putback.rs).
+//! A plugin may also bring in what another program drives, as OpenRGB's
+//! does: it tells its devices as a core does, each with its profiles, for
+//! the Library's Devices.
 //!
 //! The keyboard's and the mouse's cores are started where their pages are
 //! (main.rs); this is for the rest.
@@ -117,13 +118,13 @@ impl Hosted {
     }
 
     /// What the packages running told since last asked: their warnings, and
-    /// the cores' devices. True if anything changed.
+    /// the devices they brought in. True if anything changed.
     pub fn poll(&mut self) -> bool {
         let mut changed = false;
         for p in self.cores.iter_mut().chain(self.plugins.iter_mut()) {
             for (method, params) in p.core.told() {
                 match method.as_str() {
-                    "core/status" | "plugin/status" => {
+                    "plugin/status" => {
                         let w = params["warning"].as_str().filter(|w| !w.is_empty()).map(String::from);
                         if w != p.warning {
                             p.warning = w;
@@ -219,9 +220,10 @@ impl Hosted {
         out
     }
 
-    /// The devices the cores running here told, each by its core and as it told it.
+    /// The devices the packages running here told (a plugin's, from the
+    /// program it reaches, as OpenRGB's), each by its package and as it told it.
     pub fn devices(&self) -> Vec<(String, Value)> {
-        self.cores.iter().flat_map(|p| p.devices.iter().map(|d| (p.package.id().to_string(), d.clone()))).collect()
+        self.all().flat_map(|p| p.devices.iter().map(|d| (p.package.id().to_string(), d.clone()))).collect()
     }
 }
 
@@ -415,7 +417,7 @@ mod tests {
         Some(rx)
     }
 
-    /// OpenRGB's core brings everything OpenRGB lights in as one device,
+    /// The OpenRGB plugin brings everything OpenRGB lights in as one device,
     /// its profiles OpenRGB's; switching loads one, and switching back loads
     /// the one OpenRGB was on before. Run alone, with OpenRGB's own server
     /// off (its port free): `cargo test openrgb -- --ignored`.
@@ -423,7 +425,7 @@ mod tests {
     #[ignore]
     fn openrgb_switches_and_puts_back() {
         let Some(loaded) = fake_openrgb() else { panic!("OpenRGB’s port is taken: its own server is running") };
-        let mut ps = hosted(Kind::Core, "openrgb");
+        let mut ps = plugin("openrgb");
         let mut device = None;
         for _ in 0..100 {
             std::thread::sleep(std::time::Duration::from_millis(50));
@@ -438,8 +440,8 @@ mod tests {
         assert_eq!(d["sub"], "Motherboard, RAM, graphics card, LED strips and mouse");
         let names: Vec<&str> = d["capabilities"]["profiles"]["list"].as_array().unwrap().iter().map(|p| p["name"].as_str().unwrap()).collect();
         assert_eq!(names, vec!["ARC Raiders", "Studio High", "Studio Low", "Deepdriver II"]);
-        assert!(ps.cores[0].warning.is_none(), "no warning once it reaches the server");
-        let core = ps.cores[0].core.clone();
+        assert!(ps.plugins[0].warning.is_none(), "no warning once it reaches the server");
+        let core = ps.plugins[0].core.clone();
         core.call("profiles/activate", &json!({ "device": "openrgb", "profile": "ARC Raiders" })).unwrap();
         assert_eq!(loaded.recv_timeout(std::time::Duration::from_secs(3)).unwrap(), "ARC Raiders");
         // a second switch keeps what it was before the first

@@ -5960,9 +5960,10 @@ impl Front {
         out
     }
 
-    /// The devices the cores Ectodeck runs itself told (OpenRGB's), as a Library
-    /// page lists them: each by its own id, its profiles its core's, with its core's glyph.
-    fn core_devices(&self) -> Vec<crate::games_page::Device> {
+    /// The devices the packages Ectodeck runs itself brought in (the OpenRGB
+    /// plugin's), as a Library page lists them: each by its own id, its
+    /// profiles its package's, with its package's glyph.
+    fn hosted_devices(&self) -> Vec<crate::games_page::Device> {
         self.hosted
             .devices()
             .into_iter()
@@ -5981,7 +5982,7 @@ impl Front {
     /// The Library's page as it is now, with each plugin's section for the page open.
     fn show_library(&mut self) {
         let mut devices = self.lib_devices();
-        devices.extend(self.core_devices());
+        devices.extend(self.hosted_devices());
         let sections = match self.games.open.clone() {
             Some(id) => {
                 let kind = if id == crate::games::EVERY { "every" } else if self.games.library.is_game(&id) { "game" } else { "app" };

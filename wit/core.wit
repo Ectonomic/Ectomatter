@@ -2,8 +2,8 @@
 /// call in Ectodeck (its imports) and what Ectodeck calls in a core (its
 /// exports). The core protocol (docs/core-protocol.md) says what the calls
 /// carry; this says how they are made. A plugin, which adds to Ectodeck's
-/// pages rather than bringing a device, is made the same way, though
-/// Ectodeck keeps plugins and cores apart (section 11).
+/// pages or brings in what another program drives, is made the same way,
+/// though Ectodeck keeps plugins and cores apart (section 11).
 ///
 /// A core reaches nothing but what is here and the WebAssembly system
 /// interface Ectodeck gives it: the clocks, and its own folder of files,

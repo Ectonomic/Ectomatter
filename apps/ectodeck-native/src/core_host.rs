@@ -555,7 +555,7 @@ fn run(m: Manifest, data: PathBuf, usb: Box<dyn Usb>, computer: Option<std::sync
         .map_err(|e| format!("the {} core's module ({}) would not load: {e}", m.id, m.module.display()))
         .and_then(|c| make(&engine, &c, &m, &data, usb, computer, inbox.clone(), told));
     let asked = inbox;
-    eprintln!("ectodeck-native: the {} core ({} {}) made ready in {} ms", m.id, m.name, m.version, t0.elapsed().as_millis());
+    eprintln!("ectodeck-native: the {} {} ({} {}) made ready in {} ms", m.id, crate::packages::Kind::of(&m.all).word(), m.name, m.version, t0.elapsed().as_millis());
     let mut live = match made {
         Ok(l) => l,
         Err(e) => {

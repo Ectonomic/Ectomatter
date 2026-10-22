@@ -1,7 +1,8 @@
-//! Ectodeck's packages: the cores, each for a device or the devices another
-//! program drives (the keyboard's, the mouse's, OpenRGB's), and the plugins,
-//! which add to Ectodeck's pages (the Monitor Configurator adds a section to
-//! each game's page). Both are packaged the
+//! Ectodeck's packages: the cores, each for a device Ectodeck talks to
+//! itself (the keyboard's, the mouse's), and the plugins, which add to
+//! Ectodeck's pages (the Monitor Configurator adds a section to each game's
+//! page) or bring in what another program drives (OpenRGB's lighting). Both
+//! are packaged the
 //! same way (a folder holding its manifest, core.json, the module it names,
 //! and its glyph) and run the same way, but they're kept apart: in
 //! Ectodeck's source (cores/ and plugins/), in its data folder, and in
@@ -22,8 +23,9 @@ use serde_json::Value;
 
 use crate::core_host::Manifest;
 
-/// Whether a package is a core (for a device, or the devices another program
-/// drives, as OpenRGB's is) or a plugin, which adds to Ectodeck's pages.
+/// Whether a package is a core, for a device Ectodeck talks to itself, or a
+/// plugin, which adds to Ectodeck's pages or brings in what another program
+/// drives.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Core,
@@ -32,13 +34,14 @@ pub enum Kind {
 
 impl Kind {
     /// What a manifest says it is: its `kind`, or where it has none, a core
-    /// for a package that reaches devices and a plugin for one that adds to pages.
+    /// for a package that names the USB devices it reaches (its `matches`)
+    /// and a plugin for any other.
     pub fn of(m: &Value) -> Kind {
         match m["kind"].as_str() {
             Some("plugin") => Kind::Plugin,
             Some("core") => Kind::Core,
-            _ if m["adds"].as_array().is_some_and(|a| !a.is_empty()) && m["matches"].as_array().is_none_or(|a| a.is_empty()) => Kind::Plugin,
-            _ => Kind::Core,
+            _ if m["matches"].as_array().is_some_and(|a| !a.is_empty()) => Kind::Core,
+            _ => Kind::Plugin,
         }
     }
 
@@ -251,8 +254,8 @@ pub fn all_in(builtin: &Path, added: &Path) -> Vec<Package> {
 
 /// Where each package's own files were kept before cores and plugins were
 /// kept apart (every one in the data folder's cores/, the mouse's core as
-/// "steelseries", the Monitor Configurator as "monitors"), moved to where
-/// they're kept now, once.
+/// "steelseries", the Monitor Configurator as "monitors", OpenRGB's plugin
+/// as "openrgb"), moved to where they're kept now, once.
 pub fn move_old_folders() {
     let data = crate::data_dir();
     // (Custom Scripts, a plugin once, is Ectodeck's own now: its empty folder goes)
@@ -260,6 +263,7 @@ pub fn move_old_folders() {
     let moves = [
         (data.join("cores").join("steelseries"), data.join("cores").join(crate::mouse::CORE)),
         (data.join("cores").join("monitors"), data.join("plugins").join("monitor-configurator")),
+        (data.join("cores").join("openrgb"), data.join("plugins").join("openrgb")),
     ];
     for (from, to) in moves {
         // (a folder already where it goes is taken only if it's empty)
@@ -387,11 +391,11 @@ mod tests {
         let can = |list: &[Package], id: &str| list.iter().find(|p| p.id() == id).map(|p| p.can()).unwrap_or_default();
         assert_eq!(can(&cores, "evga-z10"), vec!["Talks to the EVGA Z10 RGB over USB.".to_string()]);
         assert_eq!(can(&cores, crate::mouse::CORE), vec!["Talks to the SteelSeries Sensei 310 over USB.".to_string()]);
-        assert_eq!(can(&cores, "openrgb"), vec!["Talks to OpenRGB on this computer.".to_string()]);
+        assert_eq!(can(&plugins, "openrgb"), vec!["Talks to OpenRGB on this computer.".to_string()]);
         assert_eq!(can(&plugins, "monitor-configurator"), vec!["Changes your monitors’ settings while a game runs.".to_string()]);
         assert!(cores.iter().all(|p| p.kind() == Kind::Core), "the cores folder holds cores");
         assert!(plugins.iter().all(|p| p.kind() == Kind::Plugin), "the plugins folder holds plugins");
-        assert_eq!(plugins.iter().map(|p| p.name()).collect::<Vec<_>>(), vec!["Monitor Configurator"]);
+        assert_eq!(plugins.iter().map(|p| p.name()).collect::<Vec<_>>(), vec!["Monitor Configurator", "OpenRGB"]);
         assert!(cores.iter().chain(&plugins).all(|p| p.glyph().is_some()), "each package brings its glyph");
         // (where each keeps its own files)
         assert!(cores[0].data().ends_with(format!("cores/{}", cores[0].id())));
