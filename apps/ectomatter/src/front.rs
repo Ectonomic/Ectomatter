@@ -6127,7 +6127,7 @@ impl Front {
     /// own, handed its values.
     fn start_package(&mut self, p: crate::packages::Package) {
         let id = p.id().to_string();
-        self.start_package(p);
+        self.hosted.start(p);
         self.hand_values(Some(&id));
     }
 

@@ -17,6 +17,10 @@
 //! ECTOMATTER_CLICKS says ("x,y;x,y", logical pixels) and types
 //! ECTOMATTER_TYPE, so each state of the page can be checked offscreen.
 
+// A function that can only call itself is a crash waiting for its caller, so
+// it stops the build rather than warning (one slipped through in 1da0b0b).
+#![deny(unconditional_recursion)]
+
 mod adapter;
 mod clipboard;
 mod commands;
