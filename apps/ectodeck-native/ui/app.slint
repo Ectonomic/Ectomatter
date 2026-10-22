@@ -1130,9 +1130,10 @@ component CellView inherits Rectangle {
     if root.c.kind == 12: Rectangle {
         border-radius: 10px;
         background: Ink.well;
+        // (30 on Settings' 48 square, and as much of a smaller one)
         Image {
-            width: 30px;
-            height: 30px;
+            width: floor(parent.width * 0.625 / 1px) * 1px;
+            height: self.width;
             source: root.c.style == 1 ? root.glyph2 : root.glyph;
             colorize: Ink.soft;
         }
@@ -1142,22 +1143,10 @@ component CellView inherits Rectangle {
         border-radius: 10px;
         background: Ink.well;
     }
-    // a state's dot: 0 unknown, 1 good, 2 bad, 3 read from the weather; 4 a
-    // choice made on a Library page, in ink, which selected goes back to what
-    // it followed
+    // a state's dot: 0 unknown, 1 good, 2 bad, 3 read from the weather
     if root.c.kind == 14: Rectangle {
         border-radius: 3.5px;
-        background: root.c.style == 1 ? Ink.good : root.c.style == 2 ? Ink.bad : root.c.style == 3 ? Ink.warn : root.c.style == 4 ? (state-ta.has-hover ? #ffffff : Ink.ink) : #5c5c66;
-        state-ta := TouchArea {
-            // (a little more room than the dot to aim at)
-            x: -5px;
-            y: -5px;
-            width: parent.width + 10px;
-            height: parent.height + 10px;
-            enabled: root.c.style == 4;
-            mouse-cursor: root.c.style == 4 ? MouseCursor.pointer : MouseCursor.default;
-            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
-        }
+        background: root.c.style == 1 ? Ink.good : root.c.style == 2 ? Ink.bad : root.c.style == 3 ? Ink.warn : #5c5c66;
     }
     // a tab of the Sensors box, as the Screen tab's own: rounded above, the open one in the
     // box's color and running on into it on its feet (none on the first's left, where the
@@ -5971,10 +5960,11 @@ export component AppWindow inherits Window {
                         vertical-alignment: center;
                     }
                 }
+                // (a device's glyph at the rail's own size, drawn for it, not a larger one shrunk)
                 for c in root.gl-cells: CellView {
                     c: c;
-                    glyph: root.keyboard-tile;
-                    glyph2: root.mouse-tile;
+                    glyph: root.keyboard-glyph;
+                    glyph2: root.mouse-glyph;
                     pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
                     slide(id, v) => { root.cell-slide(id, v); }
                     typed(id, t) => { root.cell-typed(id, t); }

@@ -2607,12 +2607,7 @@ impl Front {
                 self.refresh();
                 return;
             }
-            Ctl::LibReset => {
-                self.close_menu();
-                self.games.reset_row(index);
-                self.refresh();
-                return;
-            }
+
             Ctl::MouseSameWheel => {
                 self.mouse.same_wheel = index % 2 == 1;
                 crate::uistate::set("mouse_same_wheel", serde_json::json!(self.mouse.same_wheel));
@@ -3242,7 +3237,9 @@ impl Front {
                 self.end_rename(true, &typed);
             }
         }
-        if self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.time_menu.is_some() || self.pl_menu || self.add_menu || self.ob_menu || self.lib_menu.is_some() || self.new_menu.is_some() {
+        // (every menu the window hangs, whatever opened it, by one rule: a press off it shuts
+        // it; the key's menu, which has a find box of its own, is shut below)
+        if self.ui.get_menu_open() && self.menu.is_none() {
             let (mx, my, mw, mh) = (self.ui.get_menu_x(), self.ui.get_menu_y(), self.ui.get_menu_width(), self.ui.get_menu_height());
             if !(x >= mx && x < mx + mw && y >= my && y < my + mh) {
                 // (a card's menu shut by a press: if the press is on the same card, its click
@@ -3266,7 +3263,7 @@ impl Front {
                 } else {
                     self.ui.get_menu_w()
                 };
-                if (self.light_menu.is_some() || self.way_menu.is_some() || self.time_menu.is_some() || self.pl_menu || self.add_menu || self.ob_menu) && x >= ax && x < ax + aw && y >= ay && y < ay + ah {
+                if x >= ax && x < ax + aw && y >= ay && y < ay + ah {
                     self.shut = Some(((ax, ay), Instant::now()));
                 }
                 self.close_menu();
@@ -5743,16 +5740,16 @@ impl Front {
     /// keyboard names them; the mouse's as Ectodeck keeps them).
     fn lib_devices(&self) -> Vec<crate::games_page::Device> {
         let mut out = Vec::new();
-        for (place, name, _, _) in self.devices_in_order() {
+        for (place, name, kind, _) in self.devices_in_order() {
             match place.as_str() {
                 "z10" => {
                     let known = self.page.dev.is_some();
                     let profiles = z10::PROFILE_NUMBERS.iter().map(|n| (n.to_string(), if known { self.page.profile_name(*n) } else { format!("Profile {n}") })).collect();
-                    out.push(crate::games_page::Device { key: "z10".into(), name, profiles });
+                    out.push(crate::games_page::Device { key: "z10".into(), name, kind, profiles });
                 }
                 "mouse" => {
                     if let Some(s) = &self.mouse.profiles {
-                        out.push(crate::games_page::Device { key: "sensei310".into(), name, profiles: s.list.iter().map(|p| (p.id.clone(), p.name.clone())).collect() });
+                        out.push(crate::games_page::Device { key: "sensei310".into(), name, kind, profiles: s.list.iter().map(|p| (p.id.clone(), p.name.clone())).collect() });
                     }
                 }
                 _ => {}

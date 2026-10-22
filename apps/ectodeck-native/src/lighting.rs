@@ -77,13 +77,11 @@ pub enum Ctl {
     /// the color of the pad chosen on Home's desk
     DeskPad,
     /// a game's or app's page in the Library (games_page.rs): a device's
-    /// dropdown, and the dot beside it that goes back to what it follows,
-    /// by the device's row
+    /// dropdown, by the device's row
     LibChoice,
-    LibReset,
 }
 
-const CTLS: [Ctl; 43] = [
+const CTLS: [Ctl; 42] = [
     Ctl::None,
     Ctl::Paint,
     Ctl::Demo,
@@ -126,7 +124,6 @@ const CTLS: [Ctl; 43] = [
     Ctl::Described,
     Ctl::DeskPad,
     Ctl::LibChoice,
-    Ctl::LibReset,
 ];
 
 pub fn ctl(id: i32) -> Ctl {

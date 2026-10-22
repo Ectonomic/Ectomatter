@@ -20,11 +20,13 @@ use crate::lighting::{cell, id, kind, style, text_cell, Ctl};
 use crate::{AppWindow, Cell, LibApp, LibCover, LibFact, MenuRow};
 
 /// A device as a page lists it: its key (as the Library keeps its choices),
-/// its name, and its profiles, each by its id and its name.
+/// its name, what sort it is (for its glyph: "keyboard" or "mouse"), and its
+/// profiles, each by its id and its name.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Device {
     pub key: String,
     pub name: String,
+    pub kind: String,
     pub profiles: Vec<(String, String)>,
 }
 
@@ -189,11 +191,13 @@ fn draw(p: &Pic) -> Option<slint::SharedPixelBuffer<slint::Rgba8Pixel>> {
 }
 
 /// The page's measures: its gutter, a page's column at most, and on a page the
-/// label's room in a row and the dropdowns' width.
+/// label's room in a row (a device's glyph on its square, then its name) and the
+/// dropdowns' width.
 const X0: f32 = 24.0;
 const COLUMN: f32 = 960.0;
 const PAD_X: f32 = 24.0;
-const LABEL_W: f32 = 196.0;
+const LABEL_W: f32 = 236.0;
+const GLYPH: f32 = 36.0;
 const DROP_W: f32 = 300.0;
 /// where a page's boxes start: under the line of words at its top
 const HEAD_END: f32 = 12.0 + 36.0 + 6.0;
@@ -667,8 +671,8 @@ impl Games {
             y += 6.0;
         }
         let mut cells = Vec::new();
-        // Devices: a row for each, its label and its dropdown, a dot where the
-        // page chose for itself, and under them how the switching goes
+        // Devices: a row for each, its glyph and name and its dropdown (in gray what
+        // the page follows, in ink what it chose), and under them how the switching goes
         cells.push(text_cell(style::HEAD, X0 + 2.0, y, w / 2.0, 18.0, "Devices"));
         if game && !every {
             let n = devices.iter().filter(|d| self.row_value(id, d).1 && self.row_value(id, d).0 != self.row_value(id, d).2).count();
@@ -688,11 +692,9 @@ impl Games {
             if k > 0 {
                 out.push(Cell { color: slint::Color::from_argb_u8(9, 255, 255, 255), ..cell(kind::BOX, lx, ry, w - 2.0 * PAD_X, 1.0) });
             }
-            let (c, own, follows) = self.row_value(id, d);
-            out.push(text_cell(style::LABEL, lx, ry + 13.0, LABEL_W, 36.0, &d.name));
-            if own && !every && (c != follows || !game) {
-                out.push(Cell { style: 4, id: id_of(Ctl::LibReset), index: k as i32, ..cell(kind::DOT, lx - 13.0, ry + 13.0 + 15.0, 6.0, 6.0) });
-            }
+            let (c, own, _) = self.row_value(id, d);
+            out.push(Cell { style: (d.kind == "mouse") as i32, ..cell(kind::DEVICE, lx, ry + 13.0, GLYPH, GLYPH) });
+            out.push(text_cell(style::LABEL, lx + GLYPH + 12.0, ry + 13.0, LABEL_W - GLYPH - 12.0, 36.0, &d.name));
             let word = choice_name(&c, d);
             out.push(Cell { text: word.as_str().into(), style: (!own && !every) as i32, on: self.menu == Some(Menu::Device(k)), id: id_of(Ctl::LibChoice), index: k as i32, ..cell(kind::DROP, cx, ry + 13.0, DROP_W, 36.0) });
             ry += 13.0 + 36.0 + 13.0;
@@ -785,8 +787,15 @@ impl Games {
             Menu::Device(k) => {
                 let Some(d) = self.rows.get(*k) else { return Vec::new() };
                 let id = self.open.clone().unwrap_or_default();
-                let (c, _, _) = self.row_value(&id, d);
-                std::iter::once(row("Don’t switch", c == Choice::Stay, String::new())).chain(d.profiles.iter().map(|(r, n)| row(n, c == Choice::Profile(r.clone()), String::new()))).collect()
+                let (c, _, follows) = self.row_value(&id, d);
+                // (on a game's page, what Every game has is said: choosing it follows Every game again)
+                let every = |x: &Choice| if id != EVERY && self.library.is_game(&id) && *x == follows { "Every game’s".to_string() } else { String::new() };
+                std::iter::once(row("Don’t switch", c == Choice::Stay, every(&Choice::Stay)))
+                    .chain(d.profiles.iter().map(|(r, n)| {
+                        let p = Choice::Profile(r.clone());
+                        row(n, c == p, every(&p))
+                    }))
+                    .collect()
             }
         }
     }
@@ -820,12 +829,6 @@ impl Games {
                 self.library.set_choice(&id, &d.key, keep);
             }
         }
-    }
-
-    /// A dot beside a row: back to following Every game (a game's), or to no change (an app's).
-    pub fn reset_row(&mut self, k: usize) {
-        let (Some(d), Some(id)) = (self.rows.get(k).cloned(), self.open.clone()) else { return };
-        self.library.set_choice(&id, &d.key, None);
     }
 
     /// A cover, or a row on the Apps tab, selected: its own page.
