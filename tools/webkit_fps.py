@@ -43,7 +43,7 @@ MEASURE = r"""
 
 
 def main():
-    w = Gtk.Window(title='Ectotype WebKit check')
+    w = Gtk.Window(title='Ectomatter WebKit check')
     w.set_default_size(1400, 1000)
     ucm = WebKit2.UserContentManager()
     ucm.add_script(WebKit2.UserScript(STUB, WebKit2.UserContentInjectedFrames.TOP_FRAME,

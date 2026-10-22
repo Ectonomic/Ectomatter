@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build each plugin's WebAssembly module in plugins/*/module and put it beside the
-# plugin's manifest as the file core.json names (core.wasm). Ectodeck runs the
+# plugin's manifest as the file core.json names (core.wasm). Ectomatter runs the
 # module from there when it runs from its source.
 set -euo pipefail
 cd "$(dirname "$0")/.."

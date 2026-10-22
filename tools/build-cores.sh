@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build each core's WebAssembly module in cores/*/module and put it beside the
-# core's manifest as the file core.json names (core.wasm). Ectodeck runs the
+# core's manifest as the file core.json names (core.wasm). Ectomatter runs the
 # module from there when it runs from its source.
 set -euo pipefail
 cd "$(dirname "$0")/.."

@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Where and when</title>
+<style>
+@font-face { font-family: Geist; src: url(lab-legends/fonts/Geist-400.ttf); font-weight: 400; }
+@font-face { font-family: Geist; src: url(lab-legends/fonts/Geist-500.ttf); font-weight: 500; }
+@font-face { font-family: Geist; src: url(lab-legends/fonts/Geist-600.ttf); font-weight: 600; }
+:root {
+  color-scheme: dark;
+  /* Ectomatter's own ladder (Ink in app.slint) */
+  --frame: #0e0e10; --base: #18181b; --box: #1f1f23; --well: #131316;
+  --hover-well: #24242a; --hover-box: #2a2a30; --pick: #36363d; --pick-hover: #3e3e46;
+  --pop: #27272c; --line: #2b2b30;
+  --ink: #f4f4f5; --dim: #d4d4d8; --soft: #a1a1aa; --quiet: #74747c; --warn: #f0b35a;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--frame); color: var(--dim); font: 15px/1.55 Geist, system-ui, sans-serif; }
+main { max-width: 1520px; margin: 0 auto; padding: 52px 40px 110px; }
+.eyebrow { font-size: 11.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--quiet); margin: 0 0 12px; }
+h1 { font-size: 34px; line-height: 1.15; letter-spacing: -.02em; font-weight: 600; color: var(--ink); margin: 0 0 14px; }
+.deck { font-size: 16.5px; color: var(--soft); max-width: 860px; margin: 0; }
+h2 { font-size: 21px; color: var(--ink); font-weight: 600; letter-spacing: -.01em; margin: 72px 0 8px; }
+h2 + p { margin-top: 0; color: var(--soft); max-width: 880px; }
+
+/* today */
+.today { display: grid; grid-template-columns: 320px 320px minmax(0, 1fr); gap: 22px; margin-top: 22px; align-items: start; }
+.today img { display: block; width: 100%; border-radius: 12px; }
+.today figure { margin: 0; }
+.today figcaption { font-size: 13.5px; color: var(--soft); margin-top: 10px; }
+.today figcaption b { color: var(--ink); font-weight: 500; }
+
+/* the states bar */
+.states { display: flex; flex-wrap: wrap; gap: 6px; margin: 20px 0 14px; align-items: center; }
+.states span { font-size: 12.5px; color: var(--quiet); margin-right: 6px; }
+.states button { font: 500 13px Geist, sans-serif; color: var(--soft); background: var(--box); border: 0; border-radius: 99px; padding: 7px 14px; cursor: pointer; }
+.states button:hover { color: var(--ink); background: var(--hover-box); }
+.states button.on { background: var(--pick); color: var(--ink); }
+.states button.on:hover { background: var(--pick-hover); }
+
+/* the app, at its own size */
+.host { overflow-x: auto; border-radius: 12px; }
+.app { position: relative; width: 1440px; height: 1028px; background: url(where-and-when/frame.png) 0 0 / 1440px 1028px no-repeat; border-radius: 12px; overflow: hidden; }
+.app canvas { position: absolute; left: 84px; top: 146px; width: 1332px; height: 544px; }
+.app canvas.picks { cursor: pointer; }
+
+/* the new box */
+.ww { position: absolute; left: 1024px; top: 707px; width: 320px; height: 296px; background: var(--box); border-radius: 12px; font-family: Geist, sans-serif; user-select: none; }
+.ww .t { position: absolute; left: 16px; top: 14px; font-size: 13.5px; font-weight: 600; color: var(--ink); line-height: 22px; }
+.sw { position: absolute; left: 16px; top: 46px; width: 288px; height: 34px; border-radius: 9px; background: var(--well); padding: 3px; display: flex; gap: 2px; }
+.sw button { flex: 1; border: 0; border-radius: 6px; background: transparent; color: var(--soft); font: 400 12.5px Geist, sans-serif; cursor: pointer; }
+.sw button:hover { background: var(--hover-well); color: var(--ink); }
+.sw button.on { background: var(--pick); color: var(--ink); }
+.sw button.on:hover { background: var(--pick-hover); }
+.chips { position: absolute; left: 16px; top: 94px; width: 288px; display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { height: 28px; border: 0; border-radius: 14px; padding: 0 12px; background: var(--well); color: var(--soft); font: 400 12.5px Geist, sans-serif; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.chip:hover, .chip.hov { background: var(--hover-well); color: var(--ink); }
+.chip.on { background: var(--pick); color: var(--ink); padding-left: 9px; }
+.chip.on:hover, .chip.on.hov { background: var(--pick-hover); }
+.chip svg { width: 12px; height: 12px; display: none; }
+.chip.on svg { display: block; }
+.whole .chip { opacity: .45; }
+.whole .chip:hover, .whole .chip.hov { opacity: 1; }
+.note { position: absolute; left: 16px; top: 164px; width: 288px; font-size: 12.5px; line-height: 17px; color: var(--quiet); }
+.rule { position: absolute; left: 16px; top: 196px; width: 288px; height: 1px; background: var(--line); }
+.lab { position: absolute; left: 16px; top: 210px; font-size: 12.5px; color: var(--dim); line-height: 18px; }
+.dd { position: absolute; left: 16px; top: 234px; width: 288px; height: 34px; border-radius: 8px; border: 0; background: var(--well); color: var(--ink); font: 400 13px Geist, sans-serif; text-align: left; padding: 0 12px; cursor: pointer; }
+.dd:hover, .dd.open { background: var(--hover-box); }
+.dd svg { position: absolute; right: 12px; top: 11px; width: 12px; height: 12px; }
+.menu { position: absolute; left: 1040px; width: 288px; background: var(--pop); border-radius: 10px; padding: 5px; box-shadow: 0 10px 30px rgba(0,0,0,.45); font-family: Geist, sans-serif; display: none; }
+.menu.open { display: block; }
+.menu button { display: flex; align-items: center; width: 100%; height: 32px; border: 0; border-radius: 6px; background: transparent; color: var(--dim); font: 400 13px Geist, sans-serif; text-align: left; padding: 0 10px 0 8px; cursor: pointer; }
+.menu button:hover { background: var(--hover-box); color: var(--ink); }
+.menu button.on { color: var(--ink); }
+.menu button i { width: 22px; font-style: normal; color: var(--ink); }
+.menu .sep { height: 1px; background: var(--line); margin: 4px 6px; }
+
+/* notes under the app */
+.notes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 36px; max-width: 1240px; margin-top: 26px; }
+.notes div { border-top: 1px solid var(--line); padding-top: 12px; font-size: 14.5px; color: var(--soft); }
+.notes b { display: block; color: var(--ink); font-weight: 500; margin-bottom: 3px; }
+table { border-collapse: collapse; width: 100%; max-width: 980px; font-size: 14px; margin-top: 20px; }
+th { text-align: left; color: var(--quiet); font-weight: 500; font-size: 12.5px; padding: 0 16px 9px 0; border-bottom: 1px solid #333; }
+td { padding: 10px 16px 10px 0; border-bottom: 1px solid var(--line); color: var(--soft); vertical-align: top; }
+td:first-child { color: var(--ink); }
+td code { font: 12.5px ui-monospace, monospace; color: var(--dim); }
+.tag { display: inline-block; font-size: 11.5px; color: #131316; background: var(--warn); border-radius: 4px; padding: 0 6px; font-weight: 600; }
+.runner { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 28px; margin-top: 22px; align-items: start; }
+.rbox { position: relative; width: 320px; height: 296px; background: var(--box); border-radius: 12px; font-family: Geist, sans-serif; }
+.rbox .sent { position: absolute; left: 16px; width: 288px; font-size: 13px; color: var(--dim); display: flex; align-items: center; gap: 10px; }
+.rbox .sent .w { width: 46px; }
+.rbox .pill { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; background: var(--well); border-radius: 8px; color: var(--ink); vertical-align: middle; }
+.rbox .pill svg { width: 11px; height: 11px; }
+.runner p { margin: 0 0 12px; color: var(--soft); }
+.runner p b { color: var(--ink); font-weight: 500; }
+@media (max-width: 1100px) { .today, .notes, .runner { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Ectomatter · EVGA Z10 RGB · Lighting</p>
+  <h1>Where and when, redone</h1>
+  <p class="deck">Where the effect lights and when it plays, in one box that fits without scrolling. Areas can be picked on the keyboard itself, and "when" is one choice in plain words instead of two dropdowns you have to add up.</p>
+
+  <h2>Today</h2>
+  <p>Real renders of the current build, with your profiles.</p>
+  <div class="today">
+    <figure><img src="where-and-when/today-whole.png" alt="Today's box, whole keyboard"><figcaption><b>It doesn't fit.</b> Stops sits half under the box's edge, and the line that sums up the two dropdowns is out of sight. You scroll inside a box to finish one setting.</figcaption></figure>
+    <figure><img src="where-and-when/today-menu.png" alt="Today's Starts menu, open"><figcaption><b>Two dropdowns for one idea.</b> Starts and Stops are halves of one question, so you pick both, then read the sentence underneath to learn what you made. Some pairs make little sense together.</figcaption></figure>
+    <figure><img src="where-and-when/today-some-page.png" alt="Today's page with Some areas and all five areas chosen"><figcaption><b>"5 of 5 areas" lights about half the keys.</b> The keyboard has five areas, and letters, modifiers and macro keys sit in none of them. The white chips are the loudest thing on the page, louder than the keyboard they control.</figcaption></figure>
+  </div>
+
+  <h2>The new box</h2>
+  <p>At true size, in the app's own shades. Click anything: the switch, the areas (in the box or on the keyboard), and Plays.</p>
+  <div class="states" id="states"><span>Show</span>
+    <button data-s="whole" class="on">Whole keyboard</button>
+    <button data-s="some">Some areas</button>
+    <button data-s="hover">Pointing at WASD</button>
+    <button data-s="menu">Choosing when it plays</button>
+  </div>
+  <div class="host">
+    <div class="app" id="app">
+      <canvas id="kb" width="1332" height="544"></canvas>
+      <div style="position:absolute;left:1014px;top:700px;width:340px;height:328px;background:var(--base)"></div>
+      <div class="ww whole" id="ww">
+        <div class="t">Where and when</div>
+        <div class="sw"><button data-w="whole" class="on">Whole keyboard</button><button data-w="some">Some areas</button></div>
+        <div class="chips" id="chips"></div>
+        <div class="note" id="note"></div>
+        <div class="rule"></div>
+        <div class="lab">Plays</div>
+        <button class="dd" id="dd"><span id="ddt">All the time</span><svg viewBox="0 0 12 12"><path d="M3 4.5l3 3 3-3" fill="none" stroke="#74747c" stroke-width="1.6"/></svg></button>
+      </div>
+      <div class="menu" id="menu"></div>
+    </div>
+  </div>
+
+  <div class="notes">
+    <div><b>Every control has its four steps</b>Rest, hover, chosen, chosen and hovered, from the app's ladder: the switch and chips sit on the well (#131316), lighten to #24242A, are chosen at #36363D and #3E3E46. No borders, no white fills.</div>
+    <div><b>The keyboard is the map</b>On Some areas, an area on the picture lights up under the pointer and a click turns it on or off, the same as its chip. On Whole keyboard the picture isn't clickable; a chip there still shows where its area is.</div>
+    <div><b>Nothing moves</b>Plays stays where it is whichever way Where is set. On Whole keyboard the areas stay in view, faded, and picking one switches to Some areas with just that area.</div>
+    <div><b>One choice for when</b>The keyboard stores a start and a stop. Plays names the six pairs as what you'd see, so the summary sentence is gone: the choice is the sentence.</div>
+  </div>
+
+  <h2>What Plays stores</h2>
+  <p>Each choice is one start and stop pair the firmware already has (EVGA's LedStartMode and LedStopMode). Nothing new is sent to the keyboard.</p>
+  <table>
+    <tr><th>Plays</th><th>Starts</th><th>Stops</th><th>Seen on the keyboard</th></tr>
+    <tr><td>All the time</td><td>With the profile <code>0</code></td><td>Never <code>0</code></td><td>Yes, it's what every profile does now</td></tr>
+    <tr><td>Until you press a key</td><td>With the profile <code>0</code></td><td>On a key press <code>1</code></td><td><span class="tag">Not yet</span></td></tr>
+    <tr><td>Until you let go of a key</td><td>With the profile <code>0</code></td><td>On key release <code>2</code></td><td><span class="tag">Not yet</span></td></tr>
+    <tr><td>From your first key press</td><td>On a key press <code>1</code></td><td>Never <code>0</code></td><td><span class="tag">Not yet</span></td></tr>
+    <tr><td>While you hold a key</td><td>On a key press <code>1</code></td><td>On key release <code>2</code></td><td><span class="tag">Not yet</span></td></tr>
+    <tr><td>From one key press to the next</td><td>On a key press <code>1</code></td><td>On a key press <code>1</code></td><td><span class="tag">Not yet</span> (whether a third press starts it again)</td></tr>
+  </table>
+
+  <h2>Runner-up: two pickers in a sentence</h2>
+  <div class="runner">
+    <div class="rbox">
+      <div class="t" style="position:absolute;left:16px;top:14px;font-size:13.5px;font-weight:600;color:var(--ink);line-height:22px">Where and when</div>
+      <div class="sw" style="pointer-events:none"><button class="on">Whole keyboard</button><button>Some areas</button></div>
+      <div class="rule"></div>
+      <div class="note" style="top:164px">(the same Where as the chosen design)</div>
+      <div class="sent" style="top:212px"><span class="w">Starts</span><span class="pill">with the profile<svg viewBox="0 0 12 12"><path d="M3 4.5l3 3 3-3" fill="none" stroke="#74747c" stroke-width="1.6"/></svg></span></div>
+      <div class="sent" style="top:250px"><span class="w">Stops</span><span class="pill">never<svg viewBox="0 0 12 12"><path d="M3 4.5l3 3 3-3" fill="none" stroke="#74747c" stroke-width="1.6"/></svg></span></div>
+    </div>
+    <div>
+      <p><b>Why it's close.</b> It shows the keyboard's own two settings as they are, and it fits the box too.</p>
+      <p><b>Why it lost.</b> You still build the outcome from two parts, and a pair like "starts with the profile, stops on key release" reads as a sentence while meaning little. Plays gives you the six outcomes by name.</p>
+      <p>Also tried and dropped: picking areas only on the picture, with no chips. The keyboard is a good map, but nothing in the box would tell you it can be clicked.</p>
+    </div>
+  </div>
+</main>
+<script>
+const AREAS = [['f', 'F-keys'], ['n', 'Number row'], ['w', 'WASD'], ['a', 'Arrows'], ['p', 'Numpad']];
+const PLAYS = ['All the time', 'Until you press a key', 'Until you let go of a key', 'From your first key press', 'While you hold a key', 'From one key press to the next'];
+const S = { whole: true, picks: new Set(['f', 'w', 'a']), hover: null, menu: false, plays: 0 };
+const img = {}, names = ['none', 'whole', ...AREAS.map(a => a[0])];
+let hit = null;
+const load = src => new Promise(r => { const i = new Image(); i.onload = () => r(i); i.src = src; });
+const cv = document.getElementById('kb'), cx = cv.getContext('2d');
+
+function draw() {
+  if (!img.none) return;
+  cx.globalCompositeOperation = 'source-over';
+  cx.drawImage(S.whole ? img.whole : img.none, 0, 0);
+  if (!S.whole) {
+    cx.globalCompositeOperation = 'lighten';
+    for (const k of S.picks) cx.drawImage(img[k], 0, 0);
+    cx.globalCompositeOperation = 'source-over';
+  }
+  if (S.hover) { cx.drawImage(img['dim-' + S.hover], 0, 0); cx.drawImage(img['line-' + S.hover], 0, 0); }
+}
+function render() {
+  const ww = document.getElementById('ww');
+  ww.classList.toggle('whole', S.whole);
+  ww.querySelectorAll('.sw button').forEach(b => b.classList.toggle('on', (b.dataset.w === 'whole') === S.whole));
+  const tick = '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="#f4f4f5" stroke-width="2.6"/></svg>';
+  document.getElementById('chips').innerHTML = AREAS.map(([k, n]) =>
+    `<button class="chip${!S.whole && S.picks.has(k) ? ' on' : ''}${S.hover === k ? ' hov' : ''}" data-k="${k}">${tick}${n}</button>`).join('');
+  document.getElementById('note').textContent = S.whole ? 'Every key lights. Pick an area to light only that.'
+    : S.picks.size ? 'Pick areas here or on the keyboard.' : 'Nothing lights until you pick an area.';
+  document.getElementById('ddt').textContent = PLAYS[S.plays];
+  const dd = document.getElementById('dd'); dd.classList.toggle('open', S.menu);
+  const menu = document.getElementById('menu');
+  menu.classList.toggle('open', S.menu);
+  menu.innerHTML = PLAYS.map((p, i) => (i === 3 ? '<div class="sep"></div>' : '') + `<button data-i="${i}" class="${i === S.plays ? 'on' : ''}"><i>${i === S.plays ? '✓' : ''}</i>${p}</button>`).join('');
+  // it opens over the box, up from the dropdown, as the window's foot is just under it
+  menu.style.top = (707 + 234 - 6 - menu.offsetHeight) + 'px';
+  cv.classList.toggle('picks', false);
+  draw();
+}
+function toggle(k) {
+  if (S.whole) { S.whole = false; S.picks = new Set([k]); }
+  else if (S.picks.has(k)) S.picks.delete(k); else S.picks.add(k);
+  render();
+}
+document.getElementById('ww').addEventListener('click', e => {
+  const sw = e.target.closest('.sw button'); if (sw) { S.whole = sw.dataset.w === 'whole'; if (!S.whole && !S.picks.size) S.picks = new Set(AREAS.map(a => a[0])); S.menu = false; render(); return; }
+  const c = e.target.closest('.chip'); if (c) { S.menu = false; toggle(c.dataset.k); return; }
+  if (e.target.closest('.dd')) { S.menu = !S.menu; render(); }
+});
+document.getElementById('ww').addEventListener('mouseover', e => { const c = e.target.closest('.chip'); const k = c ? c.dataset.k : null; if (k !== S.hover && (k || !hoverFromPicture)) { S.hover = k; draw(); document.querySelectorAll('.chip').forEach(x => x.classList.toggle('hov', x.dataset.k === k)); } });
+document.getElementById('ww').addEventListener('mouseleave', () => { if (!hoverFromPicture) { S.hover = null; draw(); document.querySelectorAll('.chip').forEach(x => x.classList.remove('hov')); } });
+document.getElementById('menu').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { S.plays = +b.dataset.i; S.menu = false; render(); } });
+let hoverFromPicture = false;
+const areaAt = e => {
+  if (!hit) return null;
+  const r = cv.getBoundingClientRect(), x = Math.floor((e.clientX - r.left) * 1332 / r.width), y = Math.floor((e.clientY - r.top) * 544 / r.height);
+  const v = hit[(y * 1332 + x) * 4]; return v ? AREAS[Math.round(v / 40) - 1]?.[0] ?? null : null;
+};
+cv.addEventListener('mousemove', e => {
+  const k = S.whole ? null : areaAt(e);
+  cv.classList.toggle('picks', !!k);
+  hoverFromPicture = !!k;
+  if (k !== S.hover) { S.hover = k; draw(); document.querySelectorAll('.chip').forEach(x => x.classList.toggle('hov', x.dataset.k === k)); }
+});
+cv.addEventListener('mouseleave', () => { hoverFromPicture = false; if (S.hover) { S.hover = null; draw(); document.querySelectorAll('.chip').forEach(x => x.classList.remove('hov')); } });
+cv.addEventListener('click', e => { const k = S.whole ? null : areaAt(e); if (k) toggle(k); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && S.menu) { S.menu = false; render(); } });
+document.getElementById('states').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  document.querySelectorAll('#states button').forEach(x => x.classList.toggle('on', x === b));
+  const s = b.dataset.s;
+  Object.assign(S, { whole: s === 'whole', hover: s === 'hover' ? 'w' : null, menu: s === 'menu', picks: new Set(['f', 'w', 'a']) });
+  if (s === 'menu') S.whole = false;
+  render();
+});
+(async () => {
+  for (const n of names) img[n] = await load(`where-and-when/kb-${n}.png`);
+  for (const [k] of AREAS) { img['dim-' + k] = await load(`where-and-when/dim-${k}.png`); img['line-' + k] = await load(`where-and-when/line-${k}.png`); }
+  const h = await load('where-and-when/hit.png'); const c = document.createElement('canvas'); c.width = 1332; c.height = 544;
+  const g = c.getContext('2d'); g.drawImage(h, 0, 0); hit = g.getImageData(0, 0, 1332, 544).data;
+  render();
+  // where-and-when.html#some opens on that state
+  const b = location.hash && document.querySelector(`#states button[data-s="${location.hash.slice(1)}"]`);
+  if (b) b.click();
+})();
+render();
+</script>
+</body>
+</html>

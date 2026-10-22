@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Weather settings</title>
+<link rel="stylesheet" href="/fonts.css">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/shell.css">
+<style>
+@font-face { font-family: 'Geist'; src: url('/fonts/Geist-Variable-latin.woff2') format('woff2'); font-weight: 100 900; }
+:root { color-scheme: dark; }
+body { margin: 0; background: #101010; color: #f5f5f5; font: 14px/1.5 'Geist', system-ui, sans-serif; }
+main { max-width: 1100px; margin: 0 auto; padding: 44px 32px 90px; }
+h1.t { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.03em; }
+p.lede { color: #a3a3a3; max-width: 900px; margin: 8px 0 30px; }
+.frame { background: #202020; border-radius: 14px; padding: 34px 40px 40px; }
+.frame h1 { margin: 0 0 6px; font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
+.frame h2 { margin: 26px 0 12px; font-size: 13px; font-weight: 500; color: #a3a3a3; }
+ul.notes { margin: 18px 0 0; padding-left: 18px; color: #a3a3a3; max-width: 900px; font-size: 13.5px; }
+ul.notes li { margin: 5px 0; }
+ul.notes b { color: #f5f5f5; font-weight: 500; }
+
+.wcard { grid-template-columns: 1fr; gap: 16px; max-width: 860px; }
+.wcard .lrow { grid-template-columns: 132px minmax(0, 1fr); }
+.where { position: relative; width: 100%; max-width: 380px; }
+.where input { width: 100%; box-sizing: border-box; padding: 8px 11px; border: 0; border-radius: 8px; background: #1c1c1c; color: #f5f5f5; font: inherit; font-size: 13.5px; }
+.where .menu.float { position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 5; }
+.where .mi small { margin-left: auto; color: #8a8a8a; font-size: 12px; }
+.now { display: flex; align-items: baseline; gap: 14px; line-height: 34px; }
+.now b { font-size: 22px; font-weight: 500; letter-spacing: -0.02em; }
+.now span { color: #d4d4d4; font-size: 13.5px; }
+.now small { color: #8a8a8a; font-size: 12.5px; }
+.facts { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: #a3a3a3; }
+.facts b { color: #d4d4d4; font-weight: 500; }
+.uses { display: flex; flex-wrap: wrap; gap: 6px; }
+.uses span { padding: 4px 10px; border-radius: 7px; background: #1c1c1c; color: #d4d4d4; font-size: 12.5px; }
+.credit { font-size: 12px; color: #8a8a8a; }
+.lcdprev { display: block; width: 480px; image-rendering: pixelated; }
+.state { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; color: #d4d4d4; line-height: 34px; }
+.state::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--good); }
+.state.inf::before { background: #f0b35a; }
+.credit a { color: #a3a3a3; }
+</style>
+</head>
+<body>
+<main>
+  <h1 class="t">Weather, once, for every device</h1>
+  <p class="lede">The M3's weather feed moves into Ectomatter itself. One place, chosen once in Settings, and every device reads the same report: the M3's weather backgrounds, the Z10's weather effect and weather data on its screen, and any device added later. Search below: it asks Open-Meteo for real, the same service the M3 uses.</p>
+
+  <div class="frame">
+    <h1>Settings</h1>
+    <h2>Weather</h2>
+    <section class="lpanel devcard wcard">
+      <div class="lcol">
+        <div class="lrow"><span class="lrow-l">Place</span><div class="lrow-c" style="justify-self:stretch">
+          <div class="where"><input id="q" value="Tampa" autocomplete="off" aria-label="Place"><div class="menu float" id="found" hidden></div></div>
+          <span class="note" id="placeline">Tampa, Florida, United States</span>
+        </div></div>
+        <div class="lrow"><span class="lrow-l">Now</span><div class="lrow-c">
+          <div class="now"><b id="temp">…</b><span id="cond"></span><small id="when"></small></div>
+          <div class="facts" id="facts"></div>
+        </div></div>
+        <div class="lrow"><span class="lrow-l">Warnings</span><div class="lrow-c">
+          <span class="state" id="warnsrc"></span>
+          <span class="note" id="warnnote"></span>
+        </div></div>
+        <div class="lrow"><span class="lrow-l">Temperature</span><div class="lrow-c">
+          <div class="seg" role="group" id="tunits"><button data-u="c">Celsius</button><button data-u="f">Fahrenheit</button></div>
+        </div></div>
+        <div class="lrow"><span class="lrow-l">Wind</span><div class="lrow-c">
+          <div class="seg" role="group" id="wunits"><button data-u="kmh">km/h</button><button data-u="mph">mph</button><button data-u="ms">m/s</button></div>
+          <span class="note" id="unitnote"></span>
+        </div></div>
+        <div class="lrow"><span class="lrow-l">Used by</span><div class="lrow-c">
+          <div class="uses"><span>EVGA Z10 RGB: LCD Screen</span><span>MagTran M3: weather backgrounds</span></div>
+          <span class="note">Every device shows the same sky. Change the place here and they all follow.</span>
+        </div></div>
+        <div class="lrow"><span class="lrow-l"></span><div class="lrow-c">
+          <span class="credit">Weather and air from <a href="https://open-meteo.com">Open-Meteo</a> (CC BY 4.0), every 15 minutes. Places from Open-Meteo, and from <a href="https://photon.komoot.io">Photon</a> over OpenStreetMap (ODbL) for names Open-Meteo cannot match. Warnings every 3 minutes from the National Weather Service, Environment and Climate Change Canada, or <a href="https://meteoalarm.org">MeteoAlarm</a> (CC BY 4.0).</span>
+        </div></div>
+      </div>
+    </section>
+  </div>
+
+  <ul class="notes">
+    <li><b>Where it sits:</b> Settings, under Devices. It is Ectomatter's, not one device's, so it belongs to the app level.</li>
+    <li><b>Units</b> default from the computer's region (Fahrenheit and mph in the United States, Celsius with mph in the United Kingdom, metres a second in the Nordic countries), and are chosen once for every device. The M3's shaders read the raw report, so units only change what the Z10 writes.</li>
+    <li><b>Search</b> uses the computer's language: a Russian computer finds Москва, a Japanese one finds 東京都, and each gets its Latin name for the screen.</li>
+    <li><b>Offline,</b> the last report stands, as the M3's feed already does, and the Now line says how old it is.</li>
+    <li><b>Already built:</b> the shared feed (ported from the M3's weather module, its tests passing, plus a place search) runs inside Ectomatter now, and reads the place from Settings. This screen is the only missing part.</li>
+  </ul>
+</main>
+<script>
+(async () => {
+  const WMO = { 0: 'Clear', 1: 'Mostly clear', 2: 'Partly cloudy', 3: 'Overcast', 45: 'Fog', 48: 'Fog', 51: 'Light drizzle', 53: 'Drizzle', 55: 'Heavy drizzle',
+    61: 'Light rain', 63: 'Rain', 65: 'Heavy rain', 71: 'Light snow', 73: 'Snow', 75: 'Heavy snow', 80: 'Showers', 81: 'Showers', 82: 'Heavy showers',
+    95: 'Thunderstorm', 96: 'Thunderstorm with hail', 99: 'Thunderstorm with hail' };
+  const [font, fold] = await Promise.all([fetch('/lcdfont.json').then(r => r.json()), fetch('/lcdfold.json').then(r => r.json())]);
+  // the same defaults as ectomatter_weather::units, from this computer's locale
+  const locale = navigator.language || 'en-US', region = (locale.split(/[-_]/).find((p, i) => i && p.length === 2) || '').toUpperCase();
+  const F = ['US','PR','GU','VI','AS','MP','PW','FM','MH','LR','BS','BZ','KY'], MS = ['NO','SE','FI','IS','RU','BY','UA','KZ','EE','LV'];
+  let tu = F.includes(region) ? 'f' : 'c', wu = F.includes(region) || region === 'GB' ? 'mph' : MS.includes(region) ? 'ms' : 'kmh';
+  const lang = (locale.split(/[-_]/)[0] || 'en').toLowerCase();
+  const METEOALARM = 'AT BA BE BG CY CZ DE DK EE ES FI FR GR HR HU IE IL IS IT LT LU LV MD ME MK MT NL NO PL PT RO RS SE SI SK'.split(' ');
+  let place = { name: 'Tampa', latin: 'Tampa', region: 'Florida', country: 'United States', cc: 'US', lat: 27.94752, lon: -82.45843 }, last = null;
+  const $ = id => document.getElementById(id);
+
+  // the panel, drawn as the app draws it, after the same conversion the core sends with
+  const draws = c => (c >= ' ' && c <= '~') || c === '°' || c === '█';
+  const lcdText = s => [...s].map(c => draws(c) ? c : (fold[c] ?? '?')).join('');
+  const drawLcd = rows => {
+    const cv = $('lcd'), PW = 160, PH = 32, dpr = devicePixelRatio || 1, p = (cv.getBoundingClientRect().width * dpr) / PW;
+    cv.width = Math.round(PW * p); cv.height = Math.round(PH * p);
+    const ctx = cv.getContext('2d'), B = [120, 200, 255], sh = f => `rgb(${B.map(v => Math.round(v * f)).join(',')})`;
+    const lit = new Uint8Array(PW * PH);
+    rows.forEach((row, r) => { const t = lcdText(row).padEnd(20).slice(0, 20);
+      [...t].forEach((ch, c) => { const g = font[ch]; if (!g) return; for (let x = 0; x < 5; x++) for (let y = 0; y < 7; y++) if ((g[x] >> y) & 1) lit[(r * 8 + y) * PW + c * 8 + 1 + x] = 1; }); });
+    ctx.fillStyle = sh(0.05); ctx.fillRect(0, 0, cv.width, cv.height);
+    for (let y = 0; y < PH; y++) for (let x = 0; x < PW; x++) { const on = lit[y * PW + x]; ctx.fillStyle = on ? sh(0.72) : sh(0.1);
+      ctx.shadowColor = sh(0.45); ctx.shadowBlur = on ? p * 0.6 : 0; ctx.fillRect(x * p, y * p, p * 0.84, p * 0.84); }
+  };
+  const warnings = () => {
+    const cc = place.cc.toUpperCase();
+    const src = ['US','PR','GU','VI','AS','MP'].includes(cc) ? 'National Weather Service' : cc === 'CA' ? 'Environment and Climate Change Canada'
+      : METEOALARM.includes(cc) ? 'MeteoAlarm' : null;
+    $('warnsrc').textContent = src || 'Read from the weather';
+    $('warnsrc').classList.toggle('inf', !src);
+    $('warnnote').textContent = src ? 'Official warnings for this place, checked every 3 minutes.'
+      : 'No warning service is wired up for this country yet, so storm-force wind and rain stand in for an official warning. Tornadoes cannot be told from the weather alone.';
+  };
+  const temp = c => tu === 'f' ? c * 9 / 5 + 32 : c;
+  const wind = k => wu === 'mph' ? `${Math.round(k / 1.609)} mph` : wu === 'ms' ? `${Math.round(k / 3.6)} m/s` : `${Math.round(k)} km/h`;
+  const show = () => {
+    for (const [id, v] of [['tunits', tu], ['wunits', wu]]) for (const b of $(id).children) b.setAttribute('aria-pressed', String(b.dataset.u === v));
+    $('unitnote').textContent = `Defaults for ${locale}. Change either and Ectomatter keeps your choice.`;
+    warnings();
+    if (!last) return;
+    const c = last.current;
+    $('temp').textContent = `${Math.round(temp(c.temperature_2m))}°${tu.toUpperCase()}`;
+    $('cond').textContent = WMO[c.weather_code] || `Code ${c.weather_code}`;
+    $('when').textContent = 'Updated just now';
+    $('facts').innerHTML = `<span>Cloud <b>${c.cloud_cover}%</b></span><span>Wind <b>${wind(c.wind_speed_10m)}</b></span><span>Sunrise <b>${last.daily.sunrise[0].slice(11)}</b></span><span>Sunset <b>${last.daily.sunset[0].slice(11)}</b></span>`;
+  };
+  const fetchNow = async () => {
+    $('temp').textContent = '…';
+    last = await (await fetch(`https://api.open-meteo.com/v1/forecast?current=weather_code,cloud_cover,wind_speed_10m,temperature_2m&daily=sunrise,sunset&timezone=auto&forecast_days=1&latitude=${place.lat}&longitude=${place.lon}`)).json();
+    show();
+  };
+  // the search: Open-Meteo in this computer's language, Photon when it finds nothing,
+  // and an English name for any place not written in Latin letters
+  const latin = s => [...s].every(c => c.charCodeAt(0) < 0x250 || (c >= 'Ḁ' && c <= 'ỿ'));
+  const search = async q => {
+    let r = ((await (await fetch(`https://geocoding-api.open-meteo.com/v1/search?count=8&language=${lang}&format=json&name=${encodeURIComponent(q)}`)).json()).results || [])
+      .map(p => ({ id: p.id, name: p.name, latin: p.name, region: p.admin1 || '', country: p.country || '', cc: p.country_code || '', lat: p.latitude, lon: p.longitude }));
+    if (!r.length) {
+      const ph = async l => ((await (await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=8&osm_tag=place&lang=${l}`)).json()).features || [])
+        .map(f => ({ id: -f.properties.osm_id, name: f.properties.name, latin: f.properties.name, region: f.properties.state || '', country: f.properties.country || '', cc: f.properties.countrycode || '', lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0] }));
+      r = await ph(['en', 'de', 'fr'].includes(lang) ? lang : 'default');
+      if (r.some(p => !latin(p.name))) { const en = await ph('en'); for (const p of r) { const e = en.find(e => e.id === p.id); if (e && latin(e.name)) p.latin = e.name; } }
+    }
+    for (const p of r.filter(p => !latin(p.name) && p.id > 0)) {
+      const e = await (await fetch(`https://geocoding-api.open-meteo.com/v1/get?id=${p.id}&language=en`)).json(); if (e.name && latin(e.name)) p.latin = e.name;
+    }
+    return r;
+  };
+  let timer = 0;
+  $('q').addEventListener('input', e => {
+    clearTimeout(timer);
+    const q = e.target.value.trim();
+    if (!q) { $('found').hidden = true; return; }
+    timer = setTimeout(async () => {
+      const list = await search(q);
+      $('found').innerHTML = list.length ? list.map((p, i) => `<button class="mi" data-i="${i}">${p.name}${p.latin !== p.name ? ` <span style="color:#8a8a8a">(${p.latin})</span>` : ''}<small>${[p.region, p.country].filter(Boolean).join(', ')}</small></button>`).join('')
+        : '<div class="mh">No place by that name</div>';
+      $('found').classList.add('shown'); $('found').hidden = false;
+      $('found').onclick = ev => { const b = ev.target.closest('.mi'); if (!b) return; place = list[+b.dataset.i];
+        $('q').value = place.name; $('placeline').textContent = [place.name, place.region, place.country].filter(Boolean).join(', ');
+        $('found').hidden = true; fetchNow(); };
+    }, 300);
+  });
+  $('tunits').onclick = e => { const b = e.target.closest('button'); if (b) { tu = b.dataset.u; show(); } };
+  $('wunits').onclick = e => { const b = e.target.closest('button'); if (b) { wu = b.dataset.u; show(); } };
+  show(); fetchNow();
+})();
+</script>
+</body>
+</html>

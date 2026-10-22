@@ -1,0 +1,2318 @@
+'use strict';
+/* Z10 RGB editor. The server is the keyboard; this page keeps an unsaved draft
+   per profile and renders an on-screen preview of the draft's lighting. */
+
+// ---------------------------------------------------------------- data tables
+// What is printed on each key. `top` is the shifted legend above the main one,
+// `sub` the alternate function printed below, as on the keyboard itself.
+// Each cap's legend. `main` is the key's own legend and `main2` a second line
+// of the same words (PRINT / SCREEN). `top` is the shifted symbol, printed
+// beside the main one, and `sub` is a second function (PF1, HOME), printed at
+// the bottom of the cap.
+const MUTE = Symbol('mute');   // F1's second function, printed as a muted speaker
+const LEGEND = {
+  ESC: 'ESC', PrintScreen: { main: 'PRINT', main2: 'SCREEN' }, ScrollLock: { main: 'SCROLL', main2: 'LOCK' },
+  PauseBreak: { main: 'PAUSE', main2: 'BREAK' },
+  GraveAccent: { top: '~', main: '`' },
+  1: { top: '!', main: '1', sub: 'PF1' }, 2: { top: '@', main: '2', sub: 'PF2' },
+  3: { top: '#', main: '3', sub: 'PF3' }, 4: { top: '$', main: '4', sub: 'PF4' },
+  5: { top: '%', main: '5', sub: 'PF5' }, 6: { top: '^', main: '6' },
+  7: { top: '&', main: '7' }, 8: { top: '*', main: '8' }, 9: { top: '(', main: '9' },
+  0: { top: ')', main: '0' }, Minus: { top: '_', main: '-', sub: 'PF\u2212' }, Equals: { top: '+', main: '=', sub: 'PF+' },
+  Backspace: 'BACKSPACE', Insert: 'INSERT', Home: 'HOME', PageUp: { main: 'PG', main2: 'UP' },
+  Tab: 'TAB', LBracket: { top: '{', main: '[' }, RBracket: { top: '}', main: ']' },
+  BackSlash: { top: '|', main: '\\' },
+  Delete: 'DELETE', End: 'END', PageDown: { main: 'PG', main2: 'DN' },
+  CapsLock: { main: 'CAPS', main2: 'LOCK' }, Semicolon: { top: ':', main: ';' },
+  SingleQuotation: { top: '"', main: "'" }, Enter: 'ENTER',
+  LSHIFT: 'SHIFT', RSHIFT: 'SHIFT', Comma: { top: '<', main: ',' },
+  Period: { top: '>', main: '.' }, Slash: { top: '?', main: '/' },
+  LCONTROL: 'CTRL', RCONTROL: 'CTRL', FN: 'FN', LALT: 'ALT', RALT: 'ALT',
+  WIN: '\u229e', Menu: '\u2261', Space: '',
+  ArrowUp: '\u25b2', ArrowDown: '\u25bc', ArrowLeft: '\u25c0', ArrowRight: '\u25b6',
+  NumLock: { main: 'NUM', main2: 'LOCK' }, KeypadDivide: '/', KeypadMultiply: '*',
+  KeypadMinus: '-', KeypadPlus: '+', KeypadEnter: 'ENTER',
+  Keypad7: { main: '7', sub: 'HOME' }, Keypad8: { main: '8', sub: '\u25b2' },
+  Keypad9: { main: '9', sub: 'PG UP' }, Keypad4: { main: '4', sub: '\u25c0' },
+  Keypad5: '5', Keypad6: { main: '6', sub: '\u25b6' },
+  Keypad1: { main: '1', sub: 'END' }, Keypad2: { main: '2', sub: '\u25bc' },
+  Keypad3: { main: '3', sub: 'PG DN' }, Keypad0: { main: '0', sub: 'INS' },
+  KeypadPeriod: { main: '.', sub: 'DEL' },
+  // the media symbols are printed on the deck below these keys, not on them
+  MultimediaStop: '', MultimediaPreviousTrack: '', MultimediaPlayPause: '', MultimediaNextTrack: '',
+};
+for (let i = 1; i <= 12; i++) LEGEND['F' + i] = 'F' + i;
+LEGEND.F1 = { main: 'F1', sub: MUTE };
+LEGEND.F12 = { main: 'F12', sub: '6/N' };
+
+const FULLNAME = {
+  ESC: 'Escape', GraveAccent: 'Grave accent', LBracket: 'Left bracket', RBracket: 'Right bracket', BackSlash: 'Backslash',
+  SingleQuotation: 'Quote', LSHIFT: 'Left Shift', RSHIFT: 'Right Shift', LCONTROL: 'Left Ctrl', RCONTROL: 'Right Ctrl',
+  LALT: 'Left Alt', RALT: 'Right Alt', FN: 'Fn', WIN: 'Win', GameMode: 'Game mode button',
+  MultimediaStop: 'Media stop', MultimediaPreviousTrack: 'Previous track', MultimediaPlayPause: 'Play/pause',
+  MultimediaNextTrack: 'Next track', KeypadDivide: 'Keypad /', KeypadMultiply: 'Keypad *', KeypadMinus: 'Keypad -',
+  KeypadPlus: 'Keypad +', KeypadEnter: 'Keypad Enter', KeypadPeriod: 'Keypad .', ArrowUp: 'Up arrow',
+  ArrowDown: 'Down arrow', ArrowLeft: 'Left arrow', ArrowRight: 'Right arrow', PrintScreen: 'Print Screen',
+  ScrollLock: 'Scroll Lock', PauseBreak: 'Pause/Break', CapsLock: 'Caps Lock', NumLock: 'Num Lock',
+  PageUp: 'Page Up', PageDown: 'Page Down', Space: 'Space', Menu: 'Menu',
+};
+
+// The board is the Z10 core's drawing (see the art, below). board.json and
+// layout.json say where the keys are, for the buttons laid over it, and where
+// the display and the sliders sit, in the drawing's own units (the pixel space
+// of EVGA's top-down photo, which the drawing was traced over).
+const GAP = 3;                       // drawn gap between neighboring keys
+let SPACE, GLASS;
+
+// The keys EVGA's layout leaves out: the mode button at the far left of the
+// function row, and the four media keys over the numpad. The drawing gives the
+// cap each one shows, so the key is that cap grown by half the gap on each side.
+function extraKeys(g) {
+  const key = (pos, id, [x0, y0, x1, y1]) =>
+    ({ pos, id, x: x0 - GAP / 2, y: y0 - GAP / 2, w: x1 - x0 + GAP, h: y1 - y0 + GAP });
+  return [
+    key(0, 'GameMode', g.gpc),
+    key(17, 'MultimediaStop', g.media[0]),
+    key(18, 'MultimediaPreviousTrack', g.media[1]),
+    key(19, 'MultimediaPlayPause', g.media[2]),
+    key(20, 'MultimediaNextTrack', g.media[3]),
+  ];
+}
+
+// USB HID keyboard usages.
+const HID = { 0: 'None', 40: 'Enter', 41: 'Escape', 42: 'Backspace', 43: 'Tab', 44: 'Space', 45: '-', 46: '=',
+  47: '[', 48: ']', 49: '\\', 51: ';', 52: "'", 53: '`', 54: ',', 55: '.', 56: '/', 57: 'Caps Lock',
+  70: 'Print Screen', 71: 'Scroll Lock', 72: 'Pause', 73: 'Insert', 74: 'Home', 75: 'Page Up', 76: 'Delete',
+  77: 'End', 78: 'Page Down', 79: 'Right arrow', 80: 'Left arrow', 81: 'Down arrow', 82: 'Up arrow', 83: 'Num Lock',
+  84: 'Keypad /', 85: 'Keypad *', 86: 'Keypad -', 87: 'Keypad +', 88: 'Keypad Enter', 99: 'Keypad .', 101: 'Menu' };
+for (let i = 0; i < 26; i++) HID[4 + i] = String.fromCharCode(65 + i);
+for (let i = 1; i <= 9; i++) { HID[29 + i] = String(i); HID[88 + i] = 'Keypad ' + i; }
+HID[39] = '0'; HID[98] = 'Keypad 0';
+for (let i = 1; i <= 12; i++) HID[57 + i] = 'F' + i;
+for (let i = 13; i <= 24; i++) HID[91 + i] = 'F' + i;
+const MODS = [[1, 'Left Ctrl'], [2, 'Left Shift'], [4, 'Left Alt'], [8, 'Left Super'], [16, 'Right Ctrl'], [32, 'Right Shift'], [64, 'Right Alt'], [128, 'Right Super']];
+const CONSUMER = { 181: 'Next track', 182: 'Previous track', 183: 'Stop', 205: 'Play/pause', 226: 'Mute',
+  233: 'Volume up', 234: 'Volume down', 387: 'Media player', 394: 'Mail', 402: 'Calculator', 404: 'My computer',
+  545: 'Web search', 547: 'Web home', 548: 'Web back', 549: 'Web forward', 550: 'Web stop', 551: 'Web refresh', 554: 'Web favorites' };
+// In a macro the keyboard numbers the modifiers 112 to 119, which collides with
+// F21..F24 in the table above, so macros get their own list.
+const MACRO_KEYS = {};
+for (const [h, n] of Object.entries(HID)) if (+h && +h < 104) MACRO_KEYS[+h] = n;
+Object.assign(MACRO_KEYS, { 112: 'Left Ctrl', 113: 'Left Shift', 114: 'Left Alt', 115: 'Left Super',
+  116: 'Right Ctrl', 117: 'Right Shift', 118: 'Right Alt', 119: 'Right Super' });
+
+const CODE_TO_HID = { Enter: 40, Escape: 41, Backspace: 42, Tab: 43, Space: 44, Minus: 45, Equal: 46, BracketLeft: 47,
+  BracketRight: 48, Backslash: 49, Semicolon: 51, Quote: 52, Backquote: 53, Comma: 54, Period: 55, Slash: 56,
+  CapsLock: 57, PrintScreen: 70, ScrollLock: 71, Pause: 72, Insert: 73, Home: 74, PageUp: 75, Delete: 76, End: 77,
+  PageDown: 78, ArrowRight: 79, ArrowLeft: 80, ArrowDown: 81, ArrowUp: 82, NumLock: 83, NumpadDivide: 84,
+  NumpadMultiply: 85, NumpadSubtract: 86, NumpadAdd: 87, NumpadEnter: 88, Numpad0: 98, NumpadDecimal: 99, ContextMenu: 101 };
+for (let i = 0; i < 26; i++) CODE_TO_HID['Key' + String.fromCharCode(65 + i)] = 4 + i;
+for (let i = 1; i <= 9; i++) { CODE_TO_HID['Digit' + i] = 29 + i; CODE_TO_HID['Numpad' + i] = 88 + i; }
+CODE_TO_HID.Digit0 = 39;
+for (let i = 1; i <= 12; i++) CODE_TO_HID['F' + i] = 57 + i;
+for (let i = 13; i <= 24; i++) CODE_TO_HID['F' + i] = 91 + i;
+const CODE_TO_MOD = { ControlLeft: 1, ShiftLeft: 2, AltLeft: 4, MetaLeft: 8, ControlRight: 16, ShiftRight: 32, AltRight: 64, MetaRight: 128 };
+
+const EFFECTS = [
+  { mode: 'off', name: 'Off' },
+  { mode: 'static', name: 'Static' },
+  { mode: 'breathing', name: 'Breathing', speed: [1000, 5000] },
+  { mode: 'pulse', name: 'Pulse', speed: [6000, 10000] },
+  { mode: 'spiral', name: 'Spiral', speed: [1000, 5000] },
+  { mode: 'wave', name: 'Wave', speed: [1000, 5000] },
+  { mode: 'stars', name: 'Stars', speed: [500, 4000] },
+  { mode: 'trigger', name: 'Reactive', speed: [50, 1000], key: 'shift' },
+  { mode: 'custom', name: 'Per key' },
+];
+const ZONES = [[0x80, 'Whole keyboard'], [0x02, 'F-keys'], [0x04, 'Number row'], [0x10, 'WASD'], [0x08, 'Arrows'], [0x01, 'Numpad']];
+const LCD_APPS = [[0x20, 'Clock'], [0x04, 'Profile number'], [0x08, 'Keyboard mode'], [0x01, 'Rollover setting'], [0x02, 'EVGA Precision X1 stats']];
+const GAME_KEYS = [[0x40, 'Windows key'], [0x01, 'Alt+Tab'], [0x08, 'Alt+F4'], [0x04, 'Ctrl+Esc'], [0x02, 'Tab'], [0x10, 'Left Shift'], [0x20, 'Menu key']];
+
+// ---------------------------------------------------------------- state
+const S = {
+  dev: null, layout: [], zones: {}, keys: [], byPos: {},
+  editing: 1, drafts: {}, view: 'keys', sel: null, busy: false,
+  flashes: {}, stars: {}, t0: performance.now(),
+  paint: '#ff2d00', custom: {}, macro: null, mdrafts: {}, previewTimer: null,
+  rec: null, ins: null, selStep: null, editWait: null, menu: null,
+  recordWaits: (() => { try { return localStorage.getItem('z10:recordWaits') !== '0'; } catch (e) { return true; } })(),
+};
+const $ = (s, el = document) => el.querySelector(s);
+const clone = o => JSON.parse(JSON.stringify(o));
+const hex = c => '#' + c.map(v => v.toString(16).padStart(2, '0')).join('');
+const unhex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const draft = () => S.drafts[S.editing];
+const saved = n => S.dev.profiles[n];
+const isDirty = n => JSON.stringify(S.drafts[n]) !== JSON.stringify(pick(saved(n)));
+const pick = p => ({ name: p.name, lighting: p.lighting, keys: p.keys, fnkeys: p.fnkeys });
+
+function el(tag, attrs = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'class') e.className = v;
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+    else if (v === true) e.setAttribute(k, '');
+    else if (v !== false && v != null) e.setAttribute(k, v);
+  }
+  for (const k of kids.flat()) if (k != null && k !== false) e.append(k.nodeType ? k : document.createTextNode(k));
+  return e;
+}
+
+// In the Macro Editor window the messages sit in the workspace's foot, which is
+// rebuilt as the macro changes, so the one element is kept and moved along.
+const STATUS = document.getElementById('status');
+function status(msg, kind = '') {
+  const s = STATUS;
+  s.textContent = msg; s.className = 'status ' + kind;
+}
+
+// ---------------------------------------------------------------- live preview
+// The keyboard shows the effect while the editor sends it frames. Nothing is
+// stored, so leaving without saving gives the profile back untouched.
+
+function customColors(n) {
+  const key = `custom:${n ?? S.editing}`;
+  return S.custom[key] || (S.custom[key] = loadCustom(key));
+}
+function loadCustom(key) {
+  try {
+    const raw = localStorage.getItem('z10:' + key);
+    if (raw) return JSON.parse(raw);
+  } catch (e) { /* private window, or storage cleared */ }
+  return Array.from({ length: 116 }, () => [0, 0, 0]);
+}
+function saveCustom() {
+  try { localStorage.setItem('z10:custom:' + S.editing, JSON.stringify(customColors())); }
+  catch (e) { /* not fatal, the colors just will not survive a reload */ }
+}
+
+function setLive(on) { $('#live').hidden = !on; }
+
+// The display is one continuous grid of 160 x 32 pixels, cut into 20 x 4 cells
+// of 8 x 8 that touch, with each glyph drawn 5 wide and 7 tall in columns 1 to 5
+// of its cell. That is the panel the z10-lcd work measured off the keyboard, and
+// the font is the Adafruit GFX classic 5x7 the keyboard's controller uses.
+// It is a positive display: the backlight shines through every pixel that is
+// off, and a pixel that is on blocks it, so text reads dark on the lit color.
+const LCD = { cols: 20, rows: 4, cw: 8, ch: 8 };
+const PW = LCD.cols * LCD.cw, PH = LCD.rows * LCD.ch;
+
+// The keyboard draws printable ASCII, the degree sign and the solid block as
+// themselves; anything else is spelled in those first, from the same table the
+// core sends with (evga-z10 lcd::lcd_text), so the panel here shows what
+// the keyboard shows.
+const lcdDraws = c => (c >= ' ' && c <= '~') || c === '\u00b0' || c === '\u2588';
+function lcdText(s) {
+  let out = '';
+  for (const c of s) out += lcdDraws(c) ? c : (S.fold?.[c] ?? '?');
+  return out;
+}
+
+function panelBits(rows) {
+  const lit = new Uint8Array(PW * PH);
+  for (let r = 0; r < LCD.rows; r++) {
+    const text = lcdText(rows[r] || '').padEnd(LCD.cols).slice(0, LCD.cols);
+    for (let c = 0; c < LCD.cols; c++) {
+      const ch = text[c];
+      if (ch === '\u2588') {   // the solid block lights the whole cell
+        for (let y = 0; y < LCD.ch; y++) for (let x = 0; x < LCD.cw; x++)
+          lit[(r * LCD.ch + y) * PW + c * LCD.cw + x] = 1;
+        continue;
+      }
+      const g = S.font[ch];
+      if (!g) continue;
+      for (let x = 0; x < 5; x++) for (let y = 0; y < 7; y++)
+        if ((g[x] >> y) & 1) lit[(r * LCD.ch + y) * PW + c * LCD.cw + 1 + x] = 1;
+    }
+  }
+  return lit;
+}
+
+// The panel is drawn offscreen and handed to CSS as an image, at exactly the
+// size it is shown in real screen pixels, so it is never scaled: shrinking a
+// finer picture to fit turned the pixel grid into uneven stripes, most of all
+// in WebKit and at the smaller sizes a desktop window shows the keyboard at.
+// Drawing into a canvas in the page instead left the element compositing at
+// the wrong scale. The picture is rebuilt when the text, the backlight color
+// or the panel's size changes.
+const PITCH = 4;           // pixels per LCD pixel before the panel has a size
+
+function drawPanel() {
+  const panel = document.querySelector('.screen .panel');
+  if (!panel || !S.font) return;
+  const r = panel.getBoundingClientRect(), dpr = devicePixelRatio || 1;
+  const cv = document.createElement('canvas');
+  cv.width = Math.round(r.width * dpr) || PW * PITCH;
+  cv.height = Math.round(r.height * dpr) || PH * PITCH;
+  const cx = cv.width / PW, cy = cv.height / PH;
+  // a gap round each pixel where it is big enough to show one; smaller, the gaps
+  // would beat against the screen's own pixels and stripe the characters
+  const dot = cx >= 2.5 ? 0.84 : 1;
+  const ctx = cv.getContext('2d');
+  const back = S.lcdLive ? (S.lcdColor || [90, 90, 90]) : null;
+  // The panel is negative: the field stays dark and only the pixels that are on
+  // light up in the backlight color, so the text glows out of black.
+  ctx.fillStyle = back ? shade(back, 0.05) : '#080a0c';
+  ctx.fillRect(0, 0, cv.width, cv.height);
+  // it sits behind glass, so even a lit pixel is well short of full brightness
+  const off = back ? shade(back, 0.1) : '#12161a';
+  const on = back ? shade(back, 0.72) : '#2a3138';
+  const lit = S.lcdLive ? panelBits(S.lcdRows || []) : new Uint8Array(PW * PH);
+  for (let y = 0; y < PH; y++) for (let x = 0; x < PW; x++) {
+    const bright = lit[y * PW + x];
+    ctx.fillStyle = bright ? on : off;
+    // a lit pixel blooms a little into the ones around it, as it does on the panel
+    if (bright && back) { ctx.shadowColor = shade(back, 0.45); ctx.shadowBlur = cx * 0.6; }
+    else ctx.shadowBlur = 0;
+    ctx.fillRect(x * cx, y * cy, cx * dot, cy * dot);
+  }
+  ctx.shadowBlur = 0;
+  panel.style.backgroundImage = `url(${cv.toDataURL()})`;
+}
+
+const shade = (c, f) => `rgb(${c.map(v => Math.min(255, Math.round(v * f))).join(',')})`;
+
+// The keyboard will not read its own display back, so the z10-lcd service writes
+// each frame it sends to a file and the server passes it on. If nothing is
+// driving the display, the panel is drawn unlit rather than showing stale text.
+// Where each slider really is, on Ectomatter's firmware from build 2, which
+// reports both sliders' raw readings. A reading becomes a knob position
+// between the lowest and highest readings seen for that slider, which widen
+// as the sliders are moved and are remembered, so the knob reaches both ends
+// of the drawing when the slider reaches both ends of its travel.
+const SLIDER_ENDS = 'ectomatter:z10:slider-ends';
+function sliderEnds() {
+  try { const e = JSON.parse(localStorage.getItem(SLIDER_ENDS)); if (Array.isArray(e) && e.length === 2) return e; } catch (e) { /* none yet */ }
+  return [[400, 3700], [400, 3700]];          // a starting guess, inside both sliders' travel
+}
+function moveKnobs(r) {
+  if (!r || !S.knobs) return;
+  const ends = S.sliderEnds ??= sliderEnds();
+  let wider = false;
+  const fracs = [];
+  [r.dimmer_raw, r.volume_raw].forEach((raw, i) => {
+    const e = ends[i];
+    if (raw < e[0]) { e[0] = raw; wider = true; }
+    if (raw > e[1]) { e[1] = raw; wider = true; }
+    const f = Math.max(0, Math.min(1, (raw - e[0]) / Math.max(1, e[1] - e[0])));
+    fracs[i] = f;
+    const k = S.knobs[i], { x0, W } = S.geom;
+    k.el.style.left = `${(k.x0 + f * k.travel - x0) / W * 100}%`;
+  });
+  if (wider) try { localStorage.setItem(SLIDER_ENDS, JSON.stringify(ends)); } catch (e) { /* not fatal */ }
+  driveSliders(r, fracs);
+}
+// What each slider controls. 'own' is what the keyboard does by itself: the
+// dimmer sets the backlight, the volume slider sends volume keys. Anything
+// else Ectomatter drives from the slider's position, while it is running, so it
+// is the same on every profile.
+const SLIDER_BIND = 'ectomatter:z10:slider-bind';
+const BIND_CHOICES = [
+  [['own', 'Keyboard brightness'], ['output', 'System volume'], ['microphone', 'Microphone volume'], ['none', 'Nothing']],
+  [['own', 'System volume'], ['backlight', 'Keyboard brightness'], ['microphone', 'Microphone volume'], ['none', 'Nothing']],
+];
+// What a slider is really driving. Left on its own job, the dimmer drives the
+// backlight and the volume slider the computer's volume, so those count too:
+// two sliders on one thing would each send it a different position.
+const drives = (i, v) => v === 'own' ? (i === 0 ? 'backlight' : 'output') : v;
+
+function sliderBind() {
+  try { const b = JSON.parse(localStorage.getItem(SLIDER_BIND)); if (Array.isArray(b) && b.length === 2) return b; } catch (e) { /* none yet */ }
+  return ['own', 'own'];
+}
+// From firmware build 3 the keyboard can be asked to stop doing a slider's
+// job by itself, so the two do not fight: no volume keys from the volume
+// slider, and a dimmer level that stays where Ectomatter put it.
+function tellModes() {
+  const b = S.bind ??= sliderBind();
+  const quietVolume = hasFeature('volume.quiet') && b[1] !== 'own';
+  const keepDimmer = hasFeature('dimmer.keep') && b[0] !== 'own';
+  if (!hasFeature('volume.quiet') && !hasFeature('dimmer.keep')) return;
+  api('/api/modes', { quietVolume, keepDimmer }).catch(() => {});
+}
+
+function setSliderBind(i, v) {
+  const b = S.bind ??= sliderBind();
+  const other = 1 - i;
+  b[i] = v;
+  // one job, one slider: taking a job the other one is doing leaves it idle,
+  // rather than the two of them sending it different positions
+  if (v !== 'none' && drives(other, b[other]) === drives(i, v)) b[other] = 'none';
+  try { localStorage.setItem(SLIDER_BIND, JSON.stringify(b)); } catch (e) { /* not fatal */ }
+  holdBacklight();
+  S.sent = [null, null];
+  tellModes();
+  renderView();
+}
+
+// The backlight follows the dimmer inside the keyboard, so taking the dimmer
+// off it means asking the keyboard to hold the backlight where it is. Whoever
+// is driving the backlight sets it from there on; nobody driving it means it
+// stays put.
+function holdBacklight() {
+  const b = S.bind ??= sliderBind();
+  if (b[0] === 'own') { S.heldLevel = null; api('/api/dimmer', { level: null }).catch(() => {}); return; }
+  // held where it is, so nothing jumps; whichever slider drives it, if any,
+  // takes it from there the first time it moves
+  if (S.heldLevel == null) S.heldLevel = S.lastSliders?.dimmer ?? 255;
+  api('/api/dimmer', { level: S.heldLevel }).catch(() => {});
+}
+// Set a target from a slider, but only when the slider has really moved, so
+// opening Ectomatter never throws the volume to wherever the slider sits.
+function driveSliders(r, f) {
+  const b = S.bind ??= sliderBind();
+  const prev = S.lastSliders;
+  S.lastSliders = r;
+  if (!prev) return;
+  const moved = [Math.abs(r.dimmer_raw - prev.dimmer_raw) > 12, Math.abs(r.volume_raw - prev.volume_raw) > 12];
+  S.sent ??= [null, null];
+  const send = (i, target) => {
+    const level = Math.round(f[i] * 100) / 100;
+    if (S.sent[i] === level) return;
+    S.sent[i] = level;
+    if (target === 'backlight') { S.heldLevel = Math.round(level * 255); api('/api/dimmer', { level: S.heldLevel }).catch(() => {}); }
+    else api('/api/audio', { target, level }).catch(() => {});
+  };
+  if (b[0] !== 'own') {
+    // the keyboard lets a held level go when its slider moves; hold it again
+    // being asked to keep a level only stops the slider letting one go; the
+    // level still has to be set, and set again if it was ever let go
+    if (!r.dimmer_held && S.heldLevel != null) api('/api/dimmer', { level: S.heldLevel }).catch(() => {});
+    if (moved[0] && (b[0] === 'output' || b[0] === 'microphone')) send(0, b[0]);
+  }
+  if (moved[1] && (b[1] === 'backlight' || b[1] === 'microphone')) send(1, b[1]);
+}
+
+// asked for ten times a second while the Z10's page shows and its firmware can say
+async function pollSliders() {
+  const on = window.__window === 'main' && document.body.dataset.place === 'z10' && hasFeature('sliders.read');
+  if (on && !document.hidden) {
+    try { moveKnobs(await api('/api/sliders')); } catch (e) { /* a missed reading; the next one will do */ }
+  }
+  setTimeout(pollSliders, on ? 100 : 500);
+}
+
+function pressKey(k) {
+  k.el.classList.add('press');
+  setTimeout(() => k.el.classList.remove('press'), 90);
+}
+
+// The panel is drawn at its shown size, so draw it again when that changes:
+// with the window, and with the page, which narrows as the rail opens. While
+// the rail animates the size changes every frame, so it is drawn once it
+// settles. Hidden, the panel has no size and is left as it was.
+let panelSize = '', panelWait = 0;
+new ResizeObserver(() => {
+  clearTimeout(panelWait);
+  panelWait = setTimeout(() => {
+    const r = document.querySelector('.screen .panel')?.getBoundingClientRect();
+    if (!r || !r.width) return;
+    const k = `${Math.round(r.width * devicePixelRatio)}x${Math.round(r.height * devicePixelRatio)}`;
+    if (k !== panelSize) { panelSize = k; drawPanel(); }
+  }, 60);
+}).observe(document.getElementById('board'));
+
+async function pollLcd() {
+  let lcd;
+  try { lcd = await api('/api/lcd'); } catch (e) { lcd = { live: false, rows: [] }; }
+  S.lcdLive = !!lcd.live;
+  S.lcdRows = lcd.rows || [];
+  drawPanel();
+}
+
+// Only one editor tab drives the preview: the one used last. A tab claims it
+// when it opens and whenever it is clicked, typed in or brought to the front;
+// the server ignores whatever the other tabs send meanwhile.
+const TAB = Math.random().toString(36).slice(2);
+let claim = true;
+function sendPreview(body) {
+  const r = api('/api/preview', { ...body, tab: TAB, claim });
+  claim = false;
+  return r;
+}
+for (const ev of ['pointerdown', 'keydown', 'focus'])
+  addEventListener(ev, () => {
+    if (claim || document.hidden) return;
+    claim = true;
+    if (S.previewTimer) pushPreview();
+  }, true);
+
+// Stars and Reactive have no preview frame the keyboard understands (Unleash
+// shows neither live), so the keyboard gets each key's color from the same
+// animation that draws the keyboard on screen, about 14 times a second.
+const STREAMED = ['stars', 'trigger'];
+function streamedColors() {
+  const c = S.lastColors || {};
+  return Array.from({ length: 116 }, (_, i) => { const v = c[i]; return v ? [0, 1, 2].map(j => Math.round(v[j] * v[3])) : [0, 0, 0]; });
+}
+setInterval(() => {
+  if (!S.dev || S.view !== 'lighting' || !S.previewTimer || !STREAMED.includes(draft().lighting.mode)) return;
+  sendPreview({ colors: streamedColors() }).catch(() => {});
+}, 70);
+
+async function pushPreview() {
+  if (!S.dev || S.view !== 'lighting') return;
+  const L = draft().lighting;
+  const body = L.mode === 'custom' ? { colors: customColors() } : STREAMED.includes(L.mode) ? { colors: streamedColors() } : { lighting: L };
+  try {
+    const r = await sendPreview(body);
+    setLive(r.mode);
+    if (r.error) status(`The keyboard stopped showing the preview: ${r.error}`, 'bad');
+  } catch (e) {
+    setLive(false);
+    stopPreview();
+    status(`Preview unavailable: ${e.message}`, 'bad');
+  }
+}
+
+function startPreview() {
+  claim = true;   // only ever started by opening the page or by using it
+  if (!S.previewTimer) S.previewTimer = setInterval(pushPreview, 2000);
+  pushPreview();
+}
+
+function stopPreview() {
+  if (S.previewTimer) { clearInterval(S.previewTimer); S.previewTimer = null; }
+  setLive(false);
+  sendPreview({ stop: true }).catch(() => {});
+}
+
+// ---------------------------------------------------------------- loading
+// every call goes through bridge.js, which hands it to Ectomatter's core
+const api = (path, body) => window.__api(path, body);
+
+async function load() {
+  const [layout, zones, font, board, fold] = await Promise.all([
+    fetch('layout.json').then(r => r.json()),
+    fetch('zones.json').then(r => r.json()),
+    fetch('lcdfont.json').then(r => r.json()),
+    fetch('board.json').then(r => r.json()),
+    fetch('lcdfold.json').then(r => r.json()).catch(() => ({})),
+  ]);
+  S.fold = fold;
+  const [vx0, vy0, vx1, vy1] = board.view;
+  SPACE = { x0: vx0, y0: vy0, x1: vx1, y1: vy1 };
+  GLASS = board.glass;
+  // The spacebar stands taller than its row and overhangs the front of its
+  // well; the drawing gives how far down it reaches.
+  const space = layout.find(k => k.id === 'Space');
+  if (space) space.h = board.space[3] + GAP / 2 - space.y;
+  S.board = board;
+  S.layout = layout.concat(extraKeys(board));
+  S.font = font;
+  S.zones = { 0x10: zones.WASD, 0x08: zones.Arrows, 0x04: zones.Numbers, 0x02: zones.FKeys, 0x01: zones.Numpad };
+  // the keyboard's drawing, from the Z10 core
+  const art = await api('/api/core-art');
+  artInit(art.svg, art.device);
+  buildBoard();
+  await refresh();
+}
+
+async function refresh() {
+  try {
+    S.dev = await api('/api/state');
+  } catch (e) {
+    const boot = $('#boot');
+    // switched off in Ectomatter's Settings: not a fault, so no warning color
+    if (/not to control/.test(e.message)) {
+      $('#devline').textContent = 'Not controlled by Ectomatter';
+      $('#conn').classList.replace('wait', 'free');
+      boot.replaceChildren(el('div', {}, el('b', {}, 'Control is off'),
+        el('span', {}, 'Ectomatter leaves this keyboard to other programs. '),
+        el('button', { type: 'button', class: 'ghost', 'data-go': 'settings' }, 'Open Settings')));
+      return;
+    }
+    $('#devline').textContent = 'Keyboard not connected';
+    $('#conn').classList.add('off');
+    boot.classList.add('bad');
+    boot.replaceChildren(el('div', {}, el('b', {}, 'The editor cannot reach the keyboard'),
+      el('span', {}, `${e.message}. Check that it is plugged in, then reload this page.`)));
+    return;
+  }
+  $('#boot').remove();
+  document.querySelector('.mboot')?.remove();
+  $('#conn').classList.remove('wait');
+  for (const n of [1, 2, 3, 4, 5]) if (!S.drafts[n]) S.drafts[n] = clone(pick(saved(n)));
+  S.editing = S.dev.active || 1;
+  // printed as EVGA's software prints it: both bytes in decimal, so 0x0111 is v1.17.
+  // EVGA never used a second byte of 100 or more; our own builds of 1.17 report
+  // 171, 172 and so on (0x01AB is v1.171, unofficial build 1).
+  const fw = S.dev.firmware, minor = fw & 0xff;
+  const line = $('#devline');
+  line.textContent = `Connected, firmware v${fw >> 8}.${String(minor).padStart(2, '0')}`;
+  if (minor >= 100) {
+    const build = minor > 170 ? ` ${minor - 170}` : '';
+    line.append(el('span', { class: 'unoff' }, `Unofficial build${build}`));
+    line.title = minor > 170
+      ? `EVGA's firmware v1.${Math.floor(minor / 10)} with our changes, build${build}. EVGA did not make this build.`
+      : 'This number is not one EVGA released, so the keyboard is running modified firmware.';
+  }
+  // what the keyboard's firmware can do beyond EVGA's (see the core's firmware
+  // module); a custom feature is offered only if the core lists it
+  try { S.fw = await api('/api/firmware', { version: S.dev.firmware }); }
+  catch (e) { S.fw = { kind: 'unknown', version: '', build: null, features: [], later: [] }; }
+  buildHidMap();
+  settleWindow();
+  renderAll();
+  tellModes();
+  startHdr();
+  pollSliders();
+  pollLcd();
+  setInterval(pollLcd, 2000);
+  if (S.view === 'lighting') startPreview();
+}
+
+// HDR: on a screen with room above the desktop's white, Ectomatter's own layer
+// under the page draws the whole keyboard as one HDR picture, its light going
+// brighter than white (src-tauri/src/hdr_board.rs, hdr_draw.rs). The page
+// paints the ground round it itself, with a hole where the keyboard is, and
+// keeps only what is interactive or live over it: the keys' buttons (hover,
+// choosing, pressing, remapping), the slider knobs, the display and its glass.
+// It tells the layer where the keyboard is, and each key's light, whenever
+// either changes.
+async function startHdr() {
+  if (window.__window !== 'main' || !window.__TAURI__) return;
+  let conf = {}, screens = [];
+  try { [conf, screens] = await Promise.all([api('/api/settings'), api('/api/screens')]); } catch (e) { return; }
+  if (conf?.hdr?.lighting === 'off' || !screens.some(sc => sc.peak > sc.reference * 1.1)) return;
+  document.documentElement.classList.add('hdr');
+  // how bright the light may go: the Peak nits setting, or the screen's own peak
+  const glow = conf?.hdr?.glow_limit ?? Math.max(...screens.map(sc => sc.peak || 0));
+  const ground = document.body.insertBefore(el('div', { id: 'hdrground', 'aria-hidden': 'true' }), document.body.firstChild);
+  // each lit key: position, red, green, blue, strength, remapped
+  const lights = () => {
+    const out = [];
+    for (const k of S.layout) {
+      if (!k.led) continue;
+      const [r = 0, g = 0, b = 0] = (k.lc || '').match(/\d+/g) || [];
+      out.push(k.pos, +r, +g, +b, +(k.la || 0), k.el?.classList.contains('has-remap') ? 1 : 0);
+    }
+    return out;
+  };
+  let queued = false, why = '';
+  const send = () => {
+    queued = false;
+    const d = devicePixelRatio || 1, root = document.documentElement;
+    const plate = document.querySelector('.board .art.base');
+    const r = plate?.getBoundingClientRect();
+    const onPage = document.body.dataset.place === 'z10' && r && r.width > 0;
+    // the ground, with a hole where the keyboard shows through
+    ground.style.clipPath = onPage
+      ? `path(evenodd, "M0 0H${innerWidth}V${innerHeight}H0Z M${r.left} ${r.top}H${r.right}V${r.bottom}H${r.left}Z")`
+      : 'none';
+    api('/api/hdr-layout', { layout: {
+      win_w: Math.round(innerWidth * d), win_h: Math.round(innerHeight * d),
+      radius: root.classList.contains('maximized') ? 0 : 10 * d,
+      base: getComputedStyle(root).getPropertyValue('--base').trim() || '#202020',
+      board: onPage ? [r.left * d, r.top * d, r.width * d, r.height * d] : null,
+      glow, lights: lights(),
+      why: `${why} place=${document.body.dataset.place} plate=${plate ? Math.round(r.width) + 'x' + Math.round(r.height) : 'none'}`,
+    } }).catch(e => console.warn('HDR layer:', e));
+    why = '';
+  };
+  window.hdrLayout = e => { why += (e?.type || (e ? 'observer' : 'call')) + ' '; if (!queued) { queued = true; requestAnimationFrame(send); } };
+  // the keys' light alone, at most once a frame
+  let lightQueued = false;
+  window.hdrLight = () => {
+    if (lightQueued) return;
+    lightQueued = true;
+    requestAnimationFrame(() => { lightQueued = false; api('/api/hdr-light', { lights: lights() }).catch(e => console.warn('HDR light:', e)); });
+  };
+  addEventListener('resize', window.hdrLayout);
+  // shown again from the tray, the window has a new surface for the layer to build on
+  document.addEventListener('visibilitychange', window.hdrLayout);
+  addEventListener('focus', window.hdrLayout);
+  document.body.addEventListener('scroll', window.hdrLayout, { passive: true });
+  addEventListener('scroll', window.hdrLayout, { passive: true });
+  const board = document.querySelector('.board');
+  if (board) new ResizeObserver(window.hdrLayout).observe(board);
+  new MutationObserver(window.hdrLayout).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+  window.hdrLayout();
+}
+
+// Ectomatter has two windows over this one page: the main window, with Keys,
+// Lighting and Settings, and the Macro Editor. Each shows its own part, and
+// each passes on what it saves so the other stays current.
+function settleWindow() {
+  document.body.classList.add('win-' + window.__window);
+  if (window.__window === 'macros') {
+    document.title = 'EVGA Z10 RGB / Macro Editor';
+    S.view = 'keys'; S.macrosOpen = true;
+    const pickMacro = () => {
+      const n = +(location.hash.split('/')[1] || 0);
+      if (n && S.dev.macros[n]) { S.macro = n; S.selStep = null; S.ins = null; S.scrollToMacro = true; }
+      renderMacros();
+    };
+    pickMacro();
+    addEventListener('hashchange', pickMacro);
+    window.__hear('profiles', profiles => {
+      for (const [n, p] of Object.entries(profiles)) {
+        const clean = S.drafts[n] && !isDirty(+n);
+        S.dev.profiles[n] = p;
+        if (clean) S.drafts[n] = clone(pick(p));
+      }
+      renderMacros();
+    });
+  } else {
+    document.title = 'Ectomatter';
+    window.__prepareMacroEditor();
+    window.__hear('macros', macros => { S.dev.macros = macros; renderAll(); });
+  }
+}
+
+function showBanner(text, bad) {
+  const b = el('p', { class: 'banner' + (bad ? ' bad' : '') }, text);
+  $('.page').prepend(b);
+}
+
+// Browser key code -> key position, from the factory keymap.
+function buildHidMap() {
+  S.hidToPos = {}; S.modToPos = {};
+  saved(254).keys.forEach(([f, a, b], pos) => {
+    if (f !== 0) return;
+    if (b) S.hidToPos[b] = pos; else if (a) S.modToPos[a] = pos;
+  });
+}
+function posForEvent(e) {
+  if (CODE_TO_MOD[e.code]) return S.modToPos[CODE_TO_MOD[e.code]];
+  return S.hidToPos[CODE_TO_HID[e.code]];
+}
+
+// ---------------------------------------------------------------- board
+
+// ---------------------------------------------------------------- the art
+// The keyboard is the Z10 core's own drawing (cores/evga-z10/art/z10.svg),
+// drawn as the core protocol's draft 4 has it: every piece exactly as it is,
+// with Ectomatter adding only what changes. What never changes is shown as
+// pictures of its layers (the body and its print, the caps, the legends of
+// unlit keys, the glass), which WebKit draws once. Each piece that takes a
+// key's light (the light it throws on the deck, the light on its cap, the glow
+// round its legend, and the legend itself) is a shape cut from its piece, filled
+// with the key's color and faded by its light (--c and --a on the key), so the
+// lighting loop costs what it always has.
+const SVGNS = 'http://www.w3.org/2000/svg', INKNS = 'http://www.inkscape.org/namespaces/inkscape';
+const ART = { ready: false };
+
+function artInit(svg, device) {
+  const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
+  const root = doc.documentElement;
+  if (root.nodeName !== 'svg') throw new Error('The Z10 core’s drawing could not be read.');
+  const defs = new Map([...doc.querySelectorAll('defs > [id]')].map(d => [d.id, d]));
+  // every piece measured once, in a hidden copy of the drawing
+  const host = document.createElement('div');
+  host.style.cssText = 'position:absolute;left:-20000px;top:0;visibility:hidden;pointer-events:none';
+  host.append(document.importNode(root, true));
+  document.body.append(host);
+  const live = host.firstElementChild;
+  const bbox = {};
+  for (const e of live.querySelectorAll('[id]')) {
+    // pieces that are drawn (a mask is a definition the drawing applies, not a shape)
+    if (!/^(body|illumination|control|legend|screen|overlay|print)_\d+$/.test(e.id) || typeof e.getBBox !== 'function') continue;
+    const b = e.getBBox();
+    bbox[e.id] = [b.x, b.y, b.width, b.height];
+  }
+  host.remove();
+  Object.assign(ART, { doc, root, defs, bbox, device, ready: true });
+}
+
+// The definitions a piece of markup uses (gradients, filters, clips, masks), and theirs in turn.
+function artDefs(markup) {
+  const want = new Set(), queue = [markup];
+  while (queue.length) {
+    for (const m of queue.pop().matchAll(/url\(#([^)]+)\)/g)) {
+      if (want.has(m[1]) || !ART.defs.has(m[1])) continue;
+      want.add(m[1]);
+      queue.push(new XMLSerializer().serializeToString(ART.defs.get(m[1])));
+    }
+  }
+  return [...want].map(id => new XMLSerializer().serializeToString(ART.defs.get(id))).join('');
+}
+const artURL = text => URL.createObjectURL(new Blob([text], { type: 'image/svg+xml' }));
+
+// A picture of some of the drawing's layers, less any pieces named in `drop`.
+function artLayers(keep, drop = []) {
+  const r = ART.root.cloneNode(true);
+  for (const g of [...r.children]) {
+    if (g.nodeName !== 'g') continue;
+    if (!keep.includes(g.getAttribute('id'))) g.remove();
+  }
+  for (const id of drop) r.querySelector(`[id="${id}"]`)?.remove();
+  return artURL(new XMLSerializer().serializeToString(r));
+}
+
+// One piece on its own, as a picture just big enough for it and its blur.
+function artPiece(id) {
+  const src = ART.doc.querySelector(`[id="${id}"]`);
+  if (!src) return null;
+  const e = src.cloneNode(true);
+  // a <use> of another piece (a legend's glow uses its print) becomes that piece
+  for (const u of [...e.querySelectorAll('use')]) {
+    const ref = ART.doc.querySelector(`[id="${(u.getAttribute('href') || u.getAttributeNS('http://www.w3.org/1999/xlink', 'href')).slice(1)}"]`);
+    if (ref) { const c = ref.cloneNode(true); c.removeAttribute('id'); u.replaceWith(c); }
+  }
+  const markup = new XMLSerializer().serializeToString(e);
+  const defs = artDefs(markup);
+  // room for any blur: three of its standard deviations, and any offset
+  let margin = 0;
+  for (const m of defs.matchAll(/stdDeviation="([\d.]+)"/g)) margin = Math.max(margin, 3 * +m[1]);
+  for (const m of defs.matchAll(/dy="(-?[\d.]+)"/g)) margin += Math.abs(+m[1]);
+  const [x, y, w, h] = ART.bbox[id];
+  const box = [x - margin, y - margin, w + 2 * margin, h + 2 * margin];
+  // its own size in the drawing's units times 20: a piece under a unit across (the I's legend) would
+  // otherwise be an image less than a pixel wide, which WebKit takes as empty; it is vector, and drawn
+  // at whatever size it is shown
+  const text = `<svg xmlns="${SVGNS}" viewBox="${box.join(' ')}" width="${box[2] * 20}" height="${box[3] * 20}" preserveAspectRatio="none">`
+    + `<defs>${defs}</defs>${markup}</svg>`;
+  return { url: artURL(text), box };
+}
+
+// Where a piece sits on a key's button, in the button's own percentages.
+function onKey(k, box) {
+  const kx = k.x + GAP / 2, ky = k.y + GAP / 2, kw = k.w - GAP, kh = k.h - GAP;
+  const [x, y, w, h] = box;
+  return `left:${(x - kx) / kw * 100}%;top:${(y - ky) / kh * 100}%;width:${w / kw * 100}%;height:${h / kh * 100}%`;
+}
+
+// A shape cut from a piece, for a key's light: `kind` is its place in the stack.
+function artLight(k, id, kind) {
+  const p = artPiece(id);
+  if (!p) return null;
+  const s = el('span', { class: 'lit ' + kind, style: onKey(k, p.box) });
+  s.style.webkitMaskImage = s.style.maskImage = `url("${p.url}")`;
+  return s;
+}
+
+function buildBoard() {
+  const board = $('#board');
+  const { x0, y0, x1, y1 } = SPACE;
+  const W = x1 - x0, H = y1 - y0;
+  board.style.aspectRatio = `${W} / ${H}`;
+  board.style.setProperty('--ar', String(W / H));
+  S.geom = { x0, y0, W, H };
+  const at = (x, y, w, h) => `left:${(x - x0) / W * 100}%;top:${(y - y0) / H * 100}%;`
+    + `width:${w / W * 100}%;height:${h / H * 100}%`;
+  const ties = new Map(ART.device.controls.filter(c => c.pos !== undefined).map(c => [c.pos, c]));
+  const sliders = ART.device.controls.filter(c => c.slider !== undefined).sort((a, b) => a.slider - b.slider);
+  const lit = c => !!c?.illumination;
+  const picture = (cls, src) => board.append(el('img', { class: 'art ' + cls, src, alt: '', draggable: 'false' }));
+  // the body and what is printed on it; the caps, less the slider knobs, which
+  // move; the legends of the keys with no light behind them
+  picture('base', artLayers(['body', 'legend-body']));
+  picture('caps', artLayers(['control'], sliders.map(c => `control_${c.control}`)));
+  picture('print', artLayers(['legend'], [...ties.values()].filter(lit).map(c => `legend_${c.legend}`)));
+  for (const k of S.layout) {
+    const b = el('button', {
+      class: 'key' + (k.led ? '' : ' nolight')
+        + (k.id.startsWith('Multimedia') ? ' molded' : ''),
+      'data-pos': k.pos, 'aria-label': FULLNAME[k.id] || k.id,
+      style: `left:${(k.x - x0 + GAP / 2) / W * 100}%;top:${(k.y - y0 + GAP / 2) / H * 100}%;`
+           + `width:${(k.w - GAP) / W * 100}%;height:${(k.h - GAP) / H * 100}%`,
+      onclick: () => selectKey(k.pos),
+    });
+    // the pieces that take this key's light, in the drawing's order: the light
+    // on the deck under the cap, the light on the cap, the glow round the
+    // legend, and the legend
+    const tie = ties.get(k.pos);
+    if (lit(tie)) {
+      const [under, cap, glow] = tie.illumination;
+      for (const [id, kind] of [[`illumination_${under}`, 'under'], [`illumination_${cap}`, 'cap'], [`illumination_${glow}`, 'glow']]) {
+        const s = artLight(k, id, kind);
+        if (s) b.append(s);
+      }
+      const leg = artLight(k, `legend_${tie.legend}`, 'legend');
+      if (leg) {
+        leg.style.setProperty('--print', ART.doc.querySelector(`[id="legend_${tie.legend}"]`).getAttribute('fill') || '#9e9e9e');
+        b.append(leg);
+      }
+    }
+    b.append(el('span', { class: 'remap' }));
+    board.append(b);
+    k.el = b; k.cx = k.x + k.w / 2; k.cy = k.y + k.h / 2;
+    S.byPos[k.pos] = k;
+  }
+  // The two slider knobs, the drawing's own, where the sliders really are (see moveKnobs).
+  S.knobs = S.board.sliders.map(([sx0, , sx1], i) => {
+    const p = artPiece(`control_${sliders[i].control}`);
+    const [kx, ky, kw, kh] = p.box;
+    const k = el('img', { class: 'knob', src: p.url, alt: '', draggable: 'false', 'aria-hidden': 'true', style: at(kx, ky, kw, kh) });
+    board.append(k);
+    return { el: k, x0: sx0, travel: sx1 - sx0 - kw };
+  });
+  // the display, drawn live where the drawing has its screen, under its glass
+  const [gx0, gy0, gx1, gy1] = GLASS;
+  board.append(el('div', { class: 'screen', style: at(gx0, gy0, gx1 - gx0, gy1 - gy0) },
+    el('span', { class: 'panel' })));
+  picture('glass', artLayers(['overlay']));
+  const cx = S.layout.map(k => k.cx), cy = S.layout.map(k => k.cy);
+  S.center = [(Math.min(...cx) + Math.max(...cx)) / 2, (Math.min(...cy) + Math.max(...cy)) / 2];
+  S.span = [Math.max(...cx) - Math.min(...cx), Math.max(...cy) - Math.min(...cy), Math.min(...cx), Math.min(...cy)];
+}
+
+function zoneSet(zone) {
+  if (zone & 0x80) return null; // everything
+  const s = new Set();
+  for (const [bit, list] of Object.entries(S.zones)) if (zone & bit) list.forEach(p => s.add(p));
+  return s;
+}
+
+// ---------------------------------------------------------------- preview
+const mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
+function ramp(colors, u) { // u in [0,1) around a loop of colors
+  const n = colors.length, x = ((u % 1) + 1) % 1 * n, i = Math.floor(x);
+  return mix(colors[i], colors[(i + 1) % n], x - i);
+}
+function effectColors(L, t) {
+  const mode = L.mode, out = {};
+  const e = L[mode === 'off' ? 'static' : mode] || {};
+  const inZone = zoneSet(e.zone ?? 0x80);
+  const cols = (e.colors || []).slice(0, 7).map(c => c.color);
+  const bri = (e.colors?.[0]?.brightness ?? e.brightness ?? 255) / 255;
+  for (const k of S.layout) {
+    if (!k.led) continue;
+    if (inZone && !inZone.has(k.pos)) { out[k.pos] = [0, 0, 0, 0]; continue; }
+    let c = [0, 0, 0], a = 0;
+    if (mode === 'static') { c = e.color; a = e.brightness / 255; }
+    else if (mode === 'breathing') {
+      const u = (t % (2 * e.cycle)) / e.cycle, which = u < 1 ? 0 : 1;
+      c = e.colors[which].color; a = Math.sin(Math.PI * (u % 1)) ** 2 * bri;
+    } else if (mode === 'pulse') {
+      const n = Math.max(1, Math.min(e.count || 7, 7)), step = e.cycle / n;
+      const i = Math.floor(t / step) % n, u = (t % step) / step;
+      c = cols[i] || [255, 255, 255];
+      const on = Math.min(1, u * 6) * Math.min(1, (1 - u) * 6);
+      c = mix(e.background.color, c, on); a = bri;
+    } else if (mode === 'spiral') {
+      const ang = Math.atan2(k.cy - S.center[1], (k.cx - S.center[0]) / 2.2) / (2 * Math.PI);
+      const dir = e.direction === 1 ? -1 : 1;
+      c = ramp(cols.length ? cols : [[255, 0, 0], [0, 255, 0], [0, 0, 255]], ang + dir * t / e.cycle); a = bri;
+    } else if (mode === 'wave') {
+      const d = e.direction > 3 ? 0 : e.direction; // 0 up 1 down 2 right 3 left
+      const along = d >= 2 ? (k.cx - S.span[2]) / S.span[0] : (k.cy - S.span[3]) / S.span[1];
+      const sign = (d === 1 || d === 2) ? -1 : 1;
+      c = ramp(cols, sign * along + t / e.cycle); a = bri;
+    } else if (mode === 'stars') {
+      const s = S.stars[k.pos];
+      if (s) { const u = (t - s.t) / e.cycle; if (u < 1) { c = s.c; a = Math.sin(Math.PI * u) * e.brightness / 255; } else delete S.stars[k.pos]; }
+    } else if (mode === 'trigger') {
+      const f = S.flashes[k.pos];
+      if (f) { const u = (t - f.t) / Math.max(250, e.shift * 3); if (u < 1) { c = f.c; a = (1 - u) * bri; } }
+    }
+    out[k.pos] = [...c, a];
+  }
+  return out;
+}
+
+// The Z10's LEDs do not show a pure color: sent FF0000, a key looks like
+// FF6000 (orange); sent 0000FF, like 0060FF; sent 00FF00, like 00FF60. The
+// keyboard on screen shows a color as the keys do, so each channel spills
+// into another in proportion: red and blue into green, and green into blue,
+// 0x60 of each at full. The colors chosen and sent are left as
+// they are. The screen's backlight leans the same way.
+const LED_SPILL = { redToGreen: 0x60 / 0xff, blueToGreen: 0x60 / 0xff, greenToBlue: 0x60 / 0xff };
+const ledLook = ([r, g, b]) => [
+  r | 0,
+  Math.min(255, g + r * LED_SPILL.redToGreen + b * LED_SPILL.blueToGreen) | 0,
+  Math.min(255, b + g * LED_SPILL.greenToBlue) | 0,
+];
+
+function frame(now) {
+  const t = now - S.t0;
+  if (S.dev) {
+    const L = draft().lighting;
+    if (L.mode === 'stars' && Math.random() < 0.35) {
+      const k = S.layout[Math.floor(Math.random() * S.layout.length)];
+      S.stars[k.pos] ??= { t, c: [0, 1, 2].map(() => 80 + Math.floor(Math.random() * 176)) };
+    }
+    if (S.demoTyping && L.mode === 'trigger' && Math.random() < 0.08) {
+      const k = S.layout[Math.floor(Math.random() * S.layout.length)];
+      flash(k.pos, t);
+    }
+    const colors = L.mode === 'custom'
+      ? Object.fromEntries(customColors().map((c, i) =>
+          [i, S.byPos[i] && S.byPos[i].led ? [...c, Math.max(...c) ? 1 : 0] : [0, 0, 0, 0]]))
+      : effectColors(L, t);
+    S.lastColors = colors;
+    // only a key whose light has changed is touched, so a still effect costs nothing
+    let changed = false;
+    for (const k of S.layout) {
+      const v = colors[k.pos];
+      if (!v) continue;
+      const [lr, lg, lb] = ledLook(v);
+      const c = `rgb(${lr},${lg},${lb})`, a = v[3].toFixed(3);
+      if (c === k.lc && a === k.la) continue;
+      k.lc = c; k.la = a; changed = true;
+      k.el.style.setProperty('--c', c);
+      k.el.style.setProperty('--a', a);
+    }
+    if (changed) window.hdrLight?.();
+  }
+  requestAnimationFrame(frame);
+}
+
+function flash(pos, t = performance.now() - S.t0) {
+  const e = draft().lighting.trigger;
+  const cols = e.colors.slice(0, 7).map(c => c.color);
+  S.flashIdx = ((S.flashIdx ?? -1) + 1) % cols.length;
+  const c = cols[S.flashIdx];
+  const k = S.byPos[pos]; if (!k) return;
+  const hit = (e.submode > 3 ? 0 : e.submode) === 2 ? S.layout.filter(o => Math.abs(o.cx - k.cx) < 34 && Math.abs(o.cy - k.cy) < 34) : [k];
+  for (const o of hit) S.flashes[o.pos] = { t, c };
+}
+
+// ---------------------------------------------------------------- key labels
+function describe(def) {
+  const [f, a, b, c] = def;
+  if (f === 0) {
+    const mods = MODS.filter(([m]) => a & m).map(([, n]) => n);
+    const keys = [b, c].filter(Boolean).map(h => HID[h] || `Key ${h}`);
+    return [...mods, ...keys].join(' + ') || 'Nothing';
+  }
+  if (f === 2) return CONSUMER[a | b << 8] || `Media code ${a | b << 8}`;
+  if (f === 3) return `Macro: ${S.dev.macros[a]?.name || 'number ' + a}`;
+  if (f === 4) return 'Fn';
+  if (f === 5) return 'Game mode toggle';
+  if (f === 6) return a ? 'Scroll down' : 'Scroll up';
+  if (f === 7) return 'Left click';
+  if (f === 8) return 'Right click';
+  if (f === 9) return 'Middle click';
+  if (f >= 17 && f <= 21) return `Switch to profile ${f - 16}`;
+  if (f === 22) return 'Next profile';
+  if (f === 23) return 'Previous profile';
+  if (f === 255) return 'Disabled';
+  return `Function ${f}`;
+}
+// A remapped key's new meaning, printed on it like a second legend. A key
+// shows its own name, a shortcut shows as Ctrl+C, and a macro shows its name
+// without the words it shares with the other macros on the board, so four
+// macros called "KDE Switch Desktop Left" and so on read Left, Right, Up, Down.
+const MOD_SHORT = { 1: 'Ctrl', 2: 'Shift', 4: 'Alt', 8: 'Super', 16: 'Ctrl', 32: 'Shift', 64: 'Alt', 128: 'Super' };
+function shortLabel(def, macroNames = []) {
+  const [f, a, b, c] = def;
+  if (f === 0) {
+    const mods = [...new Set(MODS.filter(([m]) => a & m).map(([m]) => MOD_SHORT[m]))];
+    const keys = [b, c].filter(Boolean).map(h => (HID[h] || `Key ${h}`).replace(/^Keypad /, 'Num '));
+    return [...mods, ...keys].join('+') || 'Nothing';
+  }
+  if (f === 3) return distinctPart(S.dev.macros[a]?.name || `Macro ${a}`, macroNames);
+  if (f === 255) return 'Off';
+  return describe(def);
+}
+// the words at the end of a name that tell it apart from the others
+function distinctPart(name, names) {
+  const w = name.split(/\s+/);
+  let keep = 0;
+  for (const other of names) {
+    if (other === name) continue;
+    const o = other.split(/\s+/);
+    let n = 0;
+    while (n < w.length - 1 && n < o.length && w[n] === o[n]) n++;
+    keep = Math.max(keep, n);
+  }
+  return w.slice(keep).join(' ');
+}
+
+// ---------------------------------------------------------------- render
+function renderAll() {
+  renderProfiles(); renderBoardLabels(); renderView(); renderActions();
+}
+
+// A small color sample for a profile button. Every mode is handled, including
+// per key, which has no stored color list of its own.
+function profileSwatch(n, L) {
+  if (L.mode === 'off') return '#000';
+  if (L.mode === 'static') return hex(L.static.color);
+  if (L.mode === 'custom') {
+    const lit = customColors(n).filter(c => Math.max(...c)).slice(0, 4).map(hex);
+    return lit.length ? `linear-gradient(90deg, ${lit.join(',')})` : '#000';
+  }
+  const e = L[L.mode];
+  const cols = e && e.colors ? e.colors.slice(0, 4).map(c => hex(c.color)) : [];
+  return cols.length ? `linear-gradient(90deg, ${cols.join(',')})` : 'linear-gradient(90deg,#888,#fff)';
+}
+
+function renderProfiles() {
+  const nav = $('#profiles'); nav.replaceChildren();
+  for (const n of [1, 2, 3, 4, 5]) {
+    const L = S.drafts[n].lighting, m = EFFECTS.find(x => x.mode === L.mode);
+    const sw = profileSwatch(n, L);
+    nav.append(el('button', {
+      'aria-current': String(n === S.editing), class: isDirty(n) ? 'dirty' : '',
+      title: isDirty(n) ? 'Unsaved changes' : '', onclick: () => chooseProfile(n),
+      }, el('span', { class: 'swatch', style: `background:${sw}` }),
+    (S.drafts[n].name && !/^DEFAULT/i.test(S.drafts[n].name) ? S.drafts[n].name : `Profile ${n}`),
+    // ", active" keeps its room on every profile, shown only on the one in use,
+    // so the buttons keep their widths as that changes
+    el('span', { class: 'sub' }, m ? m.name : L.mode, el('span', { class: 'act' + (n === S.dev.active ? '' : ' off') }, ', active'))));
+  }
+}
+
+function renderBoardLabels() {
+  const d = draft(), fac = saved(254);
+  const lc = d.lighting.lcd.color;
+  // the screen's backlight leans as the keys' LEDs do (see ledLook)
+  const scaled = ledLook(lc.color).map(v => Math.round(v * (0.3 + 0.7 * lc.brightness / 255)));
+  S.lcdColor = scaled;
+  drawPanel();
+  const layer = 'keys';
+  const macroNames = [...new Set(S.layout.map(k => d[layer][k.pos]).filter(v => v[0] === 3)
+    .map(v => S.dev.macros[v[1]]?.name).filter(Boolean))];
+  for (const k of S.layout) {
+    const def = d[layer][k.pos], changed = JSON.stringify(def) !== JSON.stringify(fac[layer][k.pos]);
+    const show = S.view === 'keys' && changed;
+    k.el.classList.toggle('has-remap', show);
+    k.el.querySelector('.remap').textContent = show ? shortLabel(def, macroNames) : '';
+    k.el.title = `${FULLNAME[k.id] || LEGEND[k.id] || k.id}: ${describe(def)}`;
+    k.el.classList.toggle('sel', S.sel === k.pos && S.view === 'keys');
+  }
+  window.hdrLight?.();
+  $('#boardhint').textContent = '';
+}
+
+function renderActions() {
+  const dirty = isDirty(S.editing);
+  $('#save').disabled = !dirty || S.busy;
+  $('#revert').disabled = !dirty || S.busy;
+  $('#save').textContent = `Save profile ${S.editing}`;
+}
+
+function renderView() {
+  closeMenu();
+  for (const v of ['lighting', 'keys', 'display']) {
+    $('#view-' + v).hidden = v !== S.view;
+    $('#tab-' + v).setAttribute('aria-selected', String(v === S.view));
+  }
+  // the macros sit on the Keys page, under the key settings
+  $('#view-macros').hidden = S.view !== 'keys';
+  ({ lighting: renderLighting, keys: renderKeys, display: renderDisplay })[S.view]();
+  if (S.view === 'keys') renderMacros();
+}
+
+// change helper: mutate the draft, then re-render the chrome (not the open panel)
+function change(fn, rerenderPanel = false) {
+  fn(draft());
+  renderProfiles(); renderActions(); renderBoardLabels();
+  if (rerenderPanel) renderView();
+  if (S.view === 'lighting') startPreview();
+}
+
+// ---------------------------------------------------------------- lighting view
+// A setting on the Lighting and Settings pages: its name in a column of its
+// own, so every control starts on one line, then the control and a short note.
+function lrow(label, ...kids) {
+  const note = typeof kids[kids.length - 1] === 'string' ? kids.pop() : null;
+  return el('div', { class: 'lrow' }, el('span', { class: 'lrow-l' }, label),
+    el('div', { class: 'lrow-c' }, ...kids, note ? el('span', { class: 'note' }, note) : null));
+}
+// a slider with its value beside it
+function lslider(label, min, max, val, fmt, on) {
+  const out = el('span', { class: 'range-val' }, fmt(val));
+  return lrow(label, el('div', { class: 'lslider' },
+    el('input', { type: 'range', min, max, value: val, 'aria-label': label, oninput: e => { const v = +e.target.value; out.textContent = fmt(v); on(v); } }), out));
+}
+const lcol = (title, ...rows) => el('div', { class: 'lcol' }, el('h3', {}, title), ...rows);
+
+function renderLighting() {
+  const L = draft().lighting, box = $('#view-lighting');
+  box.replaceChildren();
+  const row = el('div', { class: 'effects', role: 'group', 'aria-label': 'Effect' });
+  for (const fx of EFFECTS) {
+    row.append(el('button', { 'aria-pressed': String(L.mode === fx.mode), onclick: () => change(d => { d.lighting.mode = fx.mode; }, true) },
+      el('span', { class: 'icon', style: `background:${effectIcon(fx.mode)}` }), el('span', { class: 'name' }, fx.name)));
+  }
+  box.append(row);
+  if (L.mode === 'off') { box.append(el('div', { class: 'lpanel lempty' }, el('p', {}, 'The backlight stays dark while this profile is active.'))); return; }
+  if (L.mode === 'custom') { renderCustom(box); return; }
+  const e = L[L.mode], fx = EFFECTS.find(x => x.mode === L.mode);
+  const look = [], when = [];
+
+  // colors
+  const swatches = list => el('div', { class: 'swatches' }, list.map(c => colorInput(c.color, v => change(() => { c.color = v; }))));
+  if (L.mode === 'static') look.push(lrow('Color', colorInput(e.color, c => change(() => { e.color = c; }))));
+  if (L.mode === 'breathing') look.push(lrow('Colors', swatches(e.colors), 'Breathes in the first color, then the second.'));
+  if (['pulse', 'wave', 'trigger', 'spiral'].includes(L.mode)) look.push(lrow('Colors', swatches(e.colors.slice(0, 7)),
+    L.mode === 'trigger' ? 'Each key press takes the next color.' : 'Runs through these colors in order.'));
+  if ('random' in e && L.mode !== 'trigger') look.push(lrow('Order', el('label', { class: 'check' },
+    el('input', { type: 'checkbox', checked: !!e.random, onchange: ev => change(() => { e.random = ev.target.checked ? 1 : 0; }) }), 'Random colors')));
+  if (L.mode === 'pulse') look.push(lrow('Between pulses', colorInput(e.background.color, v => change(() => { e.background.color = v; }))));
+
+  // brightness
+  const briGet = () => L.mode === 'static' ? e.brightness : L.mode === 'stars' ? e.brightness : e.colors[0].brightness;
+  const briSet = v => { if (L.mode === 'static' || L.mode === 'stars') e.brightness = v; else { e.colors.forEach(c => { c.brightness = v; }); if (e.background) e.background.brightness = v; } };
+  look.push(lslider('Brightness', 0, 255, briGet(), v => `${Math.round(v / 2.55)}%`, v => change(() => briSet(v))));
+
+  // speed: stored as a cycle time; the slider runs slow -> fast like EVGA's
+  if (fx.speed) {
+    const key = fx.key || 'cycle', [lo, hi] = fx.speed;
+    look.push(lslider('Speed', lo, hi, lo + hi - e[key], v => `${((lo + hi - v) / 1000).toFixed(2)} s`,
+      v => change(() => { e[key] = lo + hi - v; })));
+  }
+  if (L.mode === 'spiral') look.push(lrow('Direction', seg([[0, 'Clockwise'], [1, 'Counterclockwise']], e.direction > 1 ? 0 : e.direction, v => change(() => { e.direction = v; }, true))));
+  if (L.mode === 'wave') look.push(lrow('Direction', seg([[0, 'Up'], [1, 'Down'], [3, 'Left'], [2, 'Right']], e.direction > 3 ? 0 : e.direction, v => change(() => { e.direction = v; }, true))));
+  if (L.mode === 'trigger') look.push(lrow('Lights up', seg([[0, 'Each key typed'], [1, 'One key'], [2, '3 by 3 around it']], e.submode > 2 ? 0 : e.submode, v => change(() => { e.submode = v; }, true)),
+    el('label', { class: 'check' }, el('input', { type: 'checkbox', checked: !!S.demoTyping, onchange: ev => { S.demoTyping = ev.target.checked; } }), 'Preview with pretend typing'),
+    'Type, or click keys above, to see it.'));
+
+  // where and when
+  when.push(lrow('Where', zoneChips(e), 'Keys outside these areas stay dark.'));
+  when.push(lrow('Starts', seg([[0, 'With the profile'], [1, 'On a key press']], e.start, v => change(() => { e.start = v; }, true))));
+  when.push(lrow('Stops', seg([[0, 'Never'], [1, 'On key press'], [2, 'On key release']], e.stop, v => change(() => { e.stop = v; }, true))));
+
+  box.append(el('div', { class: 'lpanel' }, lcol(fx.speed ? 'Color and motion' : 'Color', ...look), lcol('Where and when', ...when),
+    el('div', { class: 'lfoot' }, el('button', { class: 'tb', onclick: () => change(d => { d.lighting[L.mode] = clone(saved(254).lighting[L.mode]); }, true) }, `Reset ${fx.name.toLowerCase()} to factory settings`))));
+}
+
+function renderCustom(box) {
+  const cols = customColors();
+  const act = (label, fn) => el('button', { class: 'ghost', onclick: () => { fn(); saveCustom(); startPreview(); renderView(); } }, label);
+  box.append(el('div', { class: 'lpanel' },
+    lcol('Painting',
+      lrow('Color', el('div', { class: 'row' }, colorInput(unhex(S.paint), c => { S.paint = hex(c); }),
+        el('span', { class: 'note' }, 'Click keys on the keyboard to paint them.'))),
+      lrow('Every key', el('div', { class: 'row' },
+        act('Fill', () => { const c = unhex(S.paint); for (const k of S.layout) if (k.led) cols[k.pos] = [...c]; }),
+        act('Scatter', () => { for (const k of S.layout) if (k.led) cols[k.pos] = [Math.random() * 256 | 0, Math.random() * 256 | 0, Math.random() * 256 | 0]; }),
+        act('Clear', () => { for (const k of S.layout) cols[k.pos] = [0, 0, 0]; })))),
+    lcol('How it shows',
+      el('p', { class: 'note' }, 'The spacebar, the mode button and the media keys have no light, so they stay dark.'),
+      el('p', { class: 'note' }, 'The keyboard can’t store colors per key, so they show only while Ectomatter is open. The profile saves with its backlight off.'))));
+}
+
+function effectIcon(mode) {
+  return {
+    off: '#0c0e10', static: '#d8421e', breathing: 'linear-gradient(90deg,#140806,#d8421e,#140806)',
+    pulse: 'repeating-linear-gradient(90deg,#1d6bff 0 10px,#0c0e10 10px 16px)', spiral: 'conic-gradient(from 90deg,#f33,#fd3,#3f6,#3cf,#94f,#f33)',
+    wave: 'linear-gradient(90deg,#f33,#fd3,#3f6,#3cf,#94f)', stars: 'radial-gradient(circle at 20% 40%,#fff 0 2px,transparent 3px),radial-gradient(circle at 60% 70%,#9cf 0 2px,transparent 3px),radial-gradient(circle at 82% 30%,#fc9 0 2px,transparent 3px),#0c0e10',
+    trigger: 'radial-gradient(circle at 50% 50%,#3cf 0 5px,#123 12px,#0c0e10 22px)',
+    custom: 'linear-gradient(135deg,#f33 0 25%,#3cf 25% 50%,#fd3 50% 75%,#8f5 75%)',
+  }[mode];
+}
+
+function field(label, ...kids) {
+  const note = typeof kids[kids.length - 1] === 'string' ? kids.pop() : null;
+  return el('div', { class: 'field' }, label ? el('span', { class: 'lab' }, label) : null, ...kids, note ? el('span', { class: 'note' }, note) : null);
+}
+// A color swatch that opens Ectomatter's color picker.
+function colorInput(c, on) {
+  const sw = el('button', { type: 'button', class: 'swatch-in', 'aria-label': `Color ${hex(c)}`, 'aria-haspopup': 'dialog', style: `background:${hex(c)}`,
+    onclick: e => colorPicker(e.currentTarget, c, v => { sw.style.background = hex(v); sw.setAttribute('aria-label', `Color ${hex(v)}`); on(v); }) });
+  return sw;
+}
+
+// ---------------------------------------------------------------- color picker
+// The picker every color opens, laid out as design tools lay theirs: a square
+// of saturation across and brightness down for the chosen hue, the hue below
+// it, the color as a hex code, as red, green and blue from 0 to 255, and as
+// hue, saturation and brightness, then preset colors and the ones used
+// lately. The keyboard follows as it changes.
+const rgb2hsv = ([r, g, b]) => {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let h = 0;
+  if (d) h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [(h * 60 + 360) % 360, mx ? d / mx : 0, mx];
+};
+const hsv2rgb = ([h, s, v]) => {
+  const f = n => { const k = (n + h / 60) % 6; return Math.round(255 * (v - v * s * Math.max(0, Math.min(k, 4 - k, 1)))); };
+  return [f(5), f(3), f(1)];
+};
+const PRESETS = [[255, 255, 255], [255, 0, 0], [255, 96, 0], [255, 200, 0], [0, 255, 0], [0, 255, 200], [0, 120, 255], [120, 0, 255], [255, 0, 180]];
+// (kept under the British spelling before 2026-10-14: read there until set again)
+const recentColors = () => { try { return JSON.parse(localStorage.getItem('ectomatter:recent-colors') || localStorage.getItem('ectomatter:recent-colours') || '[]'); } catch (e) { return []; } };
+function keepRecent(c) {
+  const list = [c, ...recentColors().filter(r => hex(r) !== hex(c))].slice(0, 9);
+  try { localStorage.setItem('ectomatter:recent-colors', JSON.stringify(list)); } catch (e) { /* not fatal */ }
+}
+
+function colorPicker(anchor, start, on) {
+  let hsv = rgb2hsv(start), rgb = [...start], wait = 0;
+  openMenu(anchor, m => {
+    m.classList.add('picker');
+    const sv = el('div', { class: 'pk-sv' }, el('span', { class: 'pk-dot' }));
+    const hue = el('div', { class: 'pk-hue' }, el('span', { class: 'pk-knob' }));
+    const hexIn = el('input', { class: 'pk-hex', spellcheck: 'false', 'aria-label': 'Hex code', maxlength: '7' });
+    const num = (label, max) => el('input', { type: 'number', min: 0, max, 'aria-label': label });
+    const [rIn, gIn, bIn] = ['Red', 'Green', 'Blue'].map(l => num(l, 255));
+    const hIn = num('Hue', 359), sIn = num('Saturation', 100), vIn = num('Brightness', 100);
+    const cell = (lab, inp) => el('label', { class: 'pk-f' }, inp, el('span', {}, lab));
+    const well = (c, title) => el('button', { type: 'button', class: 'pk-well', title, 'aria-label': `${title} ${hex(c)}`, style: `background:${hex(c)}`, onclick: () => set(rgb2hsv(c), c) });
+    const recent = recentColors();
+    m.append(sv, hue,
+      el('div', { class: 'pk-row' }, cell('Hex', hexIn), cell('R', rIn), cell('G', gIn), cell('B', bIn)),
+      el('div', { class: 'pk-row pk-hsb' }, cell('H°', hIn), cell('S%', sIn), cell('B%', vIn)),
+      el('div', { class: 'pk-lab' }, 'Presets'), el('div', { class: 'pk-wells' }, PRESETS.map(c => well(c, 'Preset'))),
+      recent.length ? el('div', { class: 'pk-lab' }, 'Recent') : null,
+      recent.length ? el('div', { class: 'pk-wells' }, recent.map(c => well(c, 'Recent'))) : null);
+
+    // show the color everywhere but the field being typed in
+    const show = skip => {
+      const [h, s, v] = hsv;
+      sv.style.background = `linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, hsl(${h} 100% 50%))`;
+      sv.firstChild.style.left = `${s * 100}%`; sv.firstChild.style.top = `${(1 - v) * 100}%`;
+      sv.firstChild.style.background = hex(rgb);
+      hue.firstChild.style.left = `${h / 360 * 100}%`;
+      if (skip !== hexIn) hexIn.value = hex(rgb).toUpperCase();
+      [rIn, gIn, bIn].forEach((f, i) => { if (skip !== f) f.value = rgb[i]; });
+      if (skip !== hIn) hIn.value = Math.round(h);
+      if (skip !== sIn) sIn.value = Math.round(s * 100);
+      if (skip !== vIn) vIn.value = Math.round(v * 100);
+    };
+    // the keyboard is sent the color at most once a frame while dragging
+    const set = (nhsv, nrgb, skip) => {
+      hsv = nhsv; rgb = nrgb || hsv2rgb(hsv); show(skip);
+      if (!wait) wait = requestAnimationFrame(() => { wait = 0; on([...rgb]); });
+    };
+    const drag = (area, move) => area.addEventListener('pointerdown', e => {
+      e.preventDefault(); area.setPointerCapture(e.pointerId);
+      const at = ev => { const r = area.getBoundingClientRect(); move(Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width)), Math.max(0, Math.min(1, (ev.clientY - r.top) / r.height))); };
+      at(e);
+      const mv = ev => at(ev), up = () => { area.removeEventListener('pointermove', mv); area.removeEventListener('pointerup', up); };
+      area.addEventListener('pointermove', mv); area.addEventListener('pointerup', up);
+    });
+    drag(sv, (x, y) => set([hsv[0], x, 1 - y]));
+    drag(hue, x => set([Math.min(359.9, x * 360), hsv[1], hsv[2]]));
+    hexIn.addEventListener('input', () => {
+      const t = hexIn.value.trim().replace(/^#/, '');
+      const full = /^[0-9a-f]{3}$/i.test(t) ? t.split('').map(ch => ch + ch).join('') : t;
+      if (/^[0-9a-f]{6}$/i.test(full)) { const c = unhex('#' + full); set(rgb2hsv(c), c, hexIn); }
+    });
+    [rIn, gIn, bIn].forEach((f, i) => f.addEventListener('input', () => {
+      if (f.value === '') return;
+      const c = [...rgb]; c[i] = Math.max(0, Math.min(255, Math.round(+f.value) || 0)); set(rgb2hsv(c), c, f);
+    }));
+    [[hIn, 0, 359, 1], [sIn, 1, 100, 100], [vIn, 2, 100, 100]].forEach(([f, i, max, per]) => f.addEventListener('input', () => {
+      if (f.value === '') return;
+      const n = [...hsv]; n[i] = Math.max(0, Math.min(max, +f.value || 0)) / (per === 1 ? 1 : per); set(n, null, f);
+    }));
+    for (const f of [hexIn, rIn, gIn, bIn, hIn, sIn, vIn]) {
+      f.addEventListener('keydown', e => { if (e.key === 'Enter') { keepRecent(rgb); closeMenu(); } });
+      f.addEventListener('blur', () => { show(); });
+    }
+    show();
+  // the color the picker is closed on joins the recent ones
+  }, { width: 264, onDismiss: () => { if (hex(rgb) !== hex(start)) keepRecent(rgb); } });
+}
+function rangeField(label, min, max, val, fmt, on) {
+  const out = el('span', { class: 'range-val' }, fmt(val));
+  const inp = el('input', { type: 'range', min, max, value: val, 'aria-label': label, oninput: e => { const v = +e.target.value; out.textContent = fmt(v); on(v); } });
+  return el('div', { class: 'field' }, el('span', { class: 'lab' }, label, ' ', out), inp);
+}
+function seg(options, value, on) {
+  return el('div', { class: 'seg', role: 'group' }, options.map(([v, n]) => el('button', { 'aria-pressed': String(v === value), onclick: () => on(v) }, n)));
+}
+function zoneChips(e) {
+  return el('div', { class: 'chips row' }, ZONES.map(([bit, name]) => el('button', {
+    'aria-pressed': String(bit === 0x80 ? !!(e.zone & 0x80) : !(e.zone & 0x80) && !!(e.zone & bit)),
+    onclick: () => change(() => {
+      if (bit === 0x80) e.zone = 0x80;
+      else { let z = e.zone & 0x80 ? 0 : e.zone; z ^= bit; e.zone = z || 0x80; }
+    }, true),
+  }, name)));
+}
+
+// ---------------------------------------------------------------- menus
+// Every drop-down in the editor is one of these: a panel fixed to the screen
+// under the button that opened it, or above it when there is no room below.
+// A click outside it, Escape, or leaving the window closes it, and so does a
+// second click on the button that opened it. Closed any of those ways, without
+// a choice made, its `onDismiss` runs: menus opened from the macro's chain use
+// it to let go of the step or insert point they were opened on.
+function openMenu(anchor, build, { width, align = 'left', onDismiss } = {}) {
+  // This click is the second one on the button whose menu it just closed. Some
+  // buttons are redrawn by their own click (a step, an insert point), so the
+  // same button is also known by where it sits.
+  const shut = S.menuShut, r0 = shut?.rect, r1 = anchor.getBoundingClientRect();
+  const same = shut && (shut.anchor === anchor || (Math.abs(r0.left - r1.left) < 2 && Math.abs(r0.top - r1.top) < 2 && Math.abs(r0.width - r1.width) < 2));
+  if (same && performance.now() - shut.at < 800) { S.menuShut = null; shut.onDismiss?.(); return; }
+  S.menuShut = null;
+  // Opened from the keyboard, the button's second press has no mousedown before
+  // it. A choice in the open menu that opens the next one on the same button
+  // (Insert here, then Key) is not a second press.
+  const fromMenu = S.menu && window.event && S.menu.m.contains(window.event.target);
+  if (S.menu && S.menu.anchor === anchor && !fromMenu) { const d = S.menu.onDismiss; closeMenu(); d?.(); return; }
+  closeMenu();
+  const m = el('div', { class: 'menu float', role: 'menu' });
+  if (width) m.style.width = width + 'px';
+  const render = () => { m.replaceChildren(); build(m, render); };
+  render();
+  document.body.append(m);
+  const r = anchor.getBoundingClientRect(), h = m.offsetHeight, w = m.offsetWidth;
+  // below the button when it fits there, or when there is a fair amount of room
+  // there anyway (the menu then scrolls); above it only when below is cramped
+  const below = innerHeight - r.bottom - 14, above = r.top - 70;
+  const down = h <= below || below >= Math.min(h, 260) || below >= above;
+  const room = down ? below : above;
+  if (h > room) m.style.maxHeight = room + 'px';
+  const top = down ? r.bottom + 6 : r.top - 6 - Math.min(h, room);
+  let left = align === 'right' ? r.right - w : r.left;
+  left = Math.max(8, Math.min(left, innerWidth - w - 8));
+  Object.assign(m.style, { top: top + 'px', left: left + 'px' });
+  const away = e => {
+    if (m.contains(e.target)) return;
+    // pressed on its own button: close now, and let that button's click, which
+    // follows, know not to open it again
+    if (anchor.contains(e.target)) { S.menuShut = { anchor, rect: anchor.getBoundingClientRect(), at: performance.now(), onDismiss }; closeMenu(); return; }
+    closeMenu();
+    // Let go only once this press's click has happened, so a click on another
+    // step or insert point lands on it before the chain is redrawn; a press
+    // that never becomes a click (a drag) lets go a moment later.
+    if (onDismiss) {
+      const run = () => { clearTimeout(t); removeEventListener('click', run, true); onDismiss(); };
+      const t = setTimeout(run, 1000);
+      addEventListener('click', run, true);
+    }
+  };
+  const esc = e => { if (e.key === 'Escape') { e.stopPropagation(); closeMenu(); onDismiss?.(); } };
+  const leave = () => { closeMenu(); onDismiss?.(); };
+  setTimeout(() => { addEventListener('mousedown', away, true); addEventListener('keydown', esc, true); addEventListener('blur', leave); });
+  S.menu = { m, anchor, onDismiss, off: () => { removeEventListener('mousedown', away, true); removeEventListener('keydown', esc, true); removeEventListener('blur', leave); } };
+  m.querySelector('input')?.focus();
+  return m;
+}
+function closeMenu() {
+  if (!S.menu) return;
+  S.menu.off(); S.menu.m.remove(); S.menu = null;
+}
+const mItem = (label, on, { tick = false, sub = '', tag = '', cls = '', disabled = false } = {}) =>
+  el('button', { class: 'mi ' + cls, role: 'menuitem', disabled, onclick: on },
+    el('span', { class: 'tick' }, tick ? '✓' : ''),
+    tag ? el('span', { class: 'mtag' }, tag) : null,
+    el('span', { class: 'ml' }, label), sub ? el('span', { class: 'msub' }, sub) : null);
+const mHead = t => el('div', { class: 'mh' }, t);
+const CHEV = () => { const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); s.setAttribute('viewBox', '0 0 10 6'); s.setAttribute('class', 'chev'); s.innerHTML = '<path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"/>'; return s; };
+
+// A searchable list: type to filter, click to choose. `groups` is
+// [[heading, [[label, value, tag?], ...]], ...].
+function pickList(m, groups, current, on, placeholder) {
+  const q = el('input', { class: 'msearch', type: 'search', placeholder, 'aria-label': placeholder });
+  const list = el('div', { class: 'mlist' });
+  const draw = () => {
+    list.replaceChildren();
+    const t = q.value.trim().toLowerCase();
+    let n = 0;
+    for (const [head, items] of groups) {
+      const hit = items.filter(([label, , tag]) => !t || label.toLowerCase().includes(t) || (tag || '').toLowerCase().includes(t));
+      if (!hit.length) continue;
+      if (head) list.append(mHead(head));
+      for (const [label, v, tag] of hit.slice(0, t ? 60 : 400)) {
+        n++;
+        list.append(mItem(label, () => { closeMenu(); on(v); }, { tick: JSON.stringify(v) === JSON.stringify(current), tag: t ? tag : '' }));
+      }
+    }
+    if (!n) list.append(el('div', { class: 'mempty' }, 'Nothing matches.'));
+  };
+  q.addEventListener('input', draw);
+  q.addEventListener('keydown', e => { if (e.key === 'Enter') list.querySelector('.mi')?.click(); });
+  draw();
+  m.append(q, list);
+}
+
+// ---------------------------------------------------------------- keys view
+function selectKey(pos) {
+  if (S.view === 'lighting' && draft().lighting.mode === 'custom') {
+    if (!S.byPos[pos].led) {
+      status(`${FULLNAME[S.byPos[pos].id] || S.byPos[pos].id} has no light behind it.`);
+      return;
+    }
+    customColors()[pos] = unhex(S.paint);
+    saveCustom(); startPreview();
+    const k = S.byPos[pos];
+    pressKey(k);
+    return;
+  }
+  // On the Lighting page a key is not chosen for editing: clicking it lights
+  // it as pressing it would for Reactive, and otherwise only shows the press.
+  if (S.view === 'lighting') {
+    if (draft().lighting.mode === 'trigger') flash(pos);
+    pressKey(S.byPos[pos]);
+    return;
+  }
+  if (S.view !== 'keys') { S.view = 'keys'; }
+  else if (S.sel === pos) { deselectKey(); return; }     // pressing it again lets it go
+  S.sel = pos;
+  const k = S.byPos[pos];
+  pressKey(k);
+  renderView(); renderBoardLabels();
+}
+
+// Every action a key can be given, grouped for the action menu. A value is the
+// four-byte key definition the keyboard stores.
+function actionGroups() {
+  const keys = Object.entries(HID).filter(([h]) => +h).map(([h, n]) => [n, [0, 0, +h, 0], 'Key']);
+  const mods = MODS.map(([m, n]) => [n, [0, m, 0, 0], 'Key']);
+  const media = Object.entries(CONSUMER).map(([c, n]) => [n, [2, c & 255, c >> 8, 0], 'Media']);
+  const macros = Object.entries(S.dev.macros).map(([i, m]) => [m.name || `Macro ${i}`, [3, +i, 0, 0], 'Macro']);
+  const mouse = [['Left click', [7, 0, 0, 0]], ['Right click', [8, 0, 0, 0]], ['Middle click', [9, 0, 0, 0]], ['Scroll up', [6, 0, 0, 0]], ['Scroll down', [6, 1, 0, 0]]].map(x => [...x, 'Mouse']);
+  const profiles = [1, 2, 3, 4, 5].map(n => [`Switch to profile ${n}`, [16 + n, 0, 0, 0], 'Profile'])
+    .concat([['Next profile', [22, 0, 0, 0], 'Profile'], ['Previous profile', [23, 0, 0, 0], 'Profile']]);
+  const board = [['Fn', [4, 0, 0, 0], 'Keyboard'], ['Game mode toggle', [5, 0, 0, 0], 'Keyboard']];
+  return { macros, keys: keys.concat(mods), media, mouse, profiles, board };
+}
+function kindOf(def) {
+  const f = def[0];
+  if (f === 0) return def[1] || def[2] ? 'Key' : '';
+  return { 2: 'Media', 3: 'Macro', 4: 'Keyboard', 5: 'Keyboard', 6: 'Mouse', 7: 'Mouse', 8: 'Mouse', 9: 'Mouse', 255: '' }[f]
+    || (f >= 17 && f <= 23 ? 'Profile' : '');
+}
+const NOTHING = [0, 0, 0, 0];
+const isNothing = def => (def[0] === 0 && !def[1] && !def[2]) || def[0] === 255;
+
+// The action menu: macros first, then the other kinds, each opening its list,
+// and a search across all of them.
+function actionMenu(anchor, def, on) {
+  let page = null;
+  const G = actionGroups();
+  const pages = { keys: ['A key', G.keys], media: ['A media key', G.media], mouse: ['A mouse button', G.mouse],
+    profiles: ['Switch profile', G.profiles], board: ['Keyboard function', G.board] };
+  openMenu(anchor, (m, again) => {
+    if (page) {
+      m.append(mItem('‹ Back', () => { page = null; again(); }, { cls: 'back' }));
+      pickList(m, [[pages[page][0], pages[page][1]]], def, on, `Search ${pages[page][0].toLowerCase().replace(/^an? /, '')}s`);
+      return;
+    }
+    const q = el('input', { class: 'msearch', type: 'search', placeholder: 'Search keys, media, macros', 'aria-label': 'Search keys, media, macros' });
+    const body = el('div', { class: 'mlist' });
+    const draw = () => {
+      body.replaceChildren();
+      const t = q.value.trim();
+      if (t) {
+        const box = el('div');
+        pickList(box, [['', [...G.macros, ...G.keys, ...G.media, ...G.mouse, ...G.profiles, ...G.board]]], def, on, '');
+        const inp = box.querySelector('input'); inp.value = t; inp.dispatchEvent(new Event('input'));
+        body.append(box.querySelector('.mlist'));
+        return;
+      }
+      if (G.macros.length) {
+        body.append(mHead('Macros'));
+        for (const [label, v] of G.macros) body.append(mItem(label, () => { closeMenu(); on(v); }, { tick: def[0] === 3 && def[1] === v[1] }));
+        body.append(el('hr'));
+      }
+      body.append(mHead('Other'));
+      for (const [key, [label]] of Object.entries(pages)) body.append(mItem(label + ' ›', () => { page = key; again(); }, { tick: kindOf(def) === pages[key][1][0]?.[2] && def[0] !== 3 }));
+      body.append(mItem('Nothing', () => { closeMenu(); on(NOTHING); }, { tick: isNothing(def) }));
+    };
+    q.addEventListener('input', draw);
+    q.addEventListener('keydown', e => { if (e.key === 'Enter') body.querySelector('.mi')?.click(); });
+    draw();
+    m.append(q, body);
+  }, { width: 300 });
+}
+
+// How a macro plays is stored on each key it is assigned to. The editor treats
+// it as one setting of the macro: this reads it back from those keys.
+function macroKeys(n) {
+  const out = [];
+  for (const p of [1, 2, 3, 4, 5]) for (const layer of ['keys', 'fnkeys'])
+    S.drafts[p][layer].forEach((d, pos) => { if (d[0] === 3 && d[1] === n) out.push({ p, layer, pos, def: d }); });
+  return out;
+}
+function macroPlays(n) {
+  const ks = macroKeys(n);
+  if (!ks.length) return null;
+  const modes = new Set(ks.map(k => `${k.def[2]}:${k.def[2] === 11 ? k.def[3] : 0}`));
+  if (modes.size > 1) return 'varies';
+  return { mode: ks[0].def[2], count: ks[0].def[3] || 2 };
+}
+
+function keyLabel(k) {
+  const L = LEGEND[k.id];
+  const main = typeof L === 'string' ? L : L?.main;
+  return FULLNAME[k.id] || (main && main.length > 1 ? main[0] + main.slice(1).toLowerCase() : main) || k.id;
+}
+
+function deselectKey() {
+  if (S.sel == null) return;
+  S.sel = null; closeMenu();
+  renderView(); renderBoardLabels();
+}
+
+function renderKeys() {
+  const box = $('#view-keys'); box.replaceChildren();
+  if (S.sel == null) return;      // nothing chosen: the panel stays away rather than explaining itself
+  const k = S.byPos[S.sel], fac = saved(254).keys[k.pos];
+  box.append(el('div', { class: 'keypanel' },
+    el('div', { class: 'kid' }, el('div', { class: 'kname' }, keyLabel(k)),
+      el('div', { class: 'kfac' }, `Factory: ${isNothing(fac) ? 'does nothing' : describe(fac)}`)),
+    layerEditor('When pressed', 'keys', k),
+    layerEditor('When Fn is held', 'fnkeys', k),
+    el('div', { class: 'kfoot' }, el('button', { class: 'ghost', onclick: () => change(d => {
+      d.keys[k.pos] = clone(saved(254).keys[k.pos]); d.fnkeys[k.pos] = clone(saved(254).fnkeys[k.pos]);
+    }, true) }, `Reset ${keyLabel(k)} to factory`))));
+}
+
+function layerEditor(title, layer, k) {
+  const def = draft()[layer][k.pos];
+  const set = v => {
+    // a macro keeps playing the way it already plays on its other keys
+    if (v[0] === 3) { const pl = macroPlays(v[1]); v = [3, v[1], pl && pl !== 'varies' ? pl.mode : 0, pl && pl !== 'varies' && pl.mode === 11 ? pl.count : 0]; }
+    change(d => { d[layer][k.pos] = v; }, true);
+  };
+  const kind = kindOf(def);
+  const btn = el('button', { class: 'actbtn', 'aria-haspopup': 'menu', onclick: e => actionMenu(e.currentTarget, def, set) },
+    kind ? el('span', { class: 'kind' }, kind) : null,
+    el('span', { class: 'al' + (isNothing(def) ? ' quiet' : '') }, def[0] === 3 ? (S.dev.macros[def[1]]?.name || `Macro ${def[1]}`) : isNothing(def) ? 'Nothing' : describe(def)),
+    CHEV());
+  const cap = el('button', { class: 'tb', onclick: ev => listen(ev.currentTarget, layer, k.pos) }, 'Press a key');
+  const out = el('div', { class: 'layer2' }, el('div', { class: 'lh' }, title), el('div', { class: 'actrow' }, btn, cap));
+  if (def[0] === 3) {
+    const m = S.dev.macros[def[1]];
+    const held = m ? m.steps.filter(s => s.down).map(stepName) : [];
+    out.append(el('div', { class: 'actsub' },
+      held.slice(0, 6).flatMap((n, i) => [i ? el('span', { class: 'plus' }, '+') : null, el('span', { class: 'ev sm' }, n)]),
+      el('a', { class: 'tolink', href: '#', onclick: e => { e.preventDefault(); goMacro(def[1]); } }, 'Edit in Macro Editor ›')));
+  }
+  return out;
+}
+
+// "Press a key to assign": capture the next key combination typed on the page.
+function listen(btn, layer, pos) {
+  if (S.listening) return;
+  S.listening = true;
+  btn.classList.add('listening'); btn.textContent = 'Press a key or combination…';
+  let mods = 0;
+  const done = def => {
+    removeEventListener('keydown', kd, true); removeEventListener('keyup', ku, true);
+    S.listening = false;
+    if (def) change(d => { d[layer][pos] = def; }, true); else renderView();
+  };
+  const kd = e => {
+    e.preventDefault(); e.stopPropagation();
+    if (CODE_TO_MOD[e.code]) { mods |= CODE_TO_MOD[e.code]; return; }
+    const h = CODE_TO_HID[e.code];
+    if (h) done([0, mods, h, 0]);
+  };
+  const ku = e => { // a lone modifier press and release assigns that modifier
+    e.preventDefault();
+    if (CODE_TO_MOD[e.code] && mods === CODE_TO_MOD[e.code]) done([0, mods, 0, 0]);
+    else if (CODE_TO_MOD[e.code]) mods &= ~CODE_TO_MOD[e.code];
+  };
+  addEventListener('keydown', kd, true); addEventListener('keyup', ku, true);
+}
+
+// ---------------------------------------------------------------- display view
+// whether the keyboard's firmware has a custom feature, by its id
+const hasFeature = id => !!S.fw?.features?.some(f => f.id === id);
+
+// The two sliders, and what each one controls. Custom firmware only: EVGA's
+// cannot say where they are.
+function slidersPanel() {
+  const b = S.bind ??= sliderBind();
+  if (!hasFeature('sliders.read')) return null;
+  const row = (i, name) => {
+    const cur = BIND_CHOICES[i].find(([v]) => v === b[i]) || BIND_CHOICES[i][0];
+    const btn = el('button', { class: 'actbtn', type: 'button', 'aria-haspopup': 'menu',
+      onclick: e => openMenu(e.currentTarget, m => {
+        m.append(mHead(`The ${name.toLowerCase()} controls`),
+          ...BIND_CHOICES[i].map(([v, label]) => mItem(label, () => { closeMenu(); setSliderBind(i, v); }, { tick: v === b[i] })));
+      }, { width: 240 }) },
+      el('span', { class: 'al' }, cur[1]));
+    btn.append(CHEV());
+    const notes = [];
+    if (i === 1 && b[1] !== 'own' && !hasFeature('volume.quiet')) notes.push('The keyboard still sends volume keys from this slider as well. Its firmware can be told not to, from build 3.');
+    if (i === 0 && b[0] !== 'own') notes.push(hasFeature('dimmer.keep')
+      ? 'The backlight stays where it was, and follows the volume slider if that is on keyboard brightness.'
+      : 'The backlight stays where it was, though it may flicker as this slider moves. Its firmware can hold it steady, from build 3.');
+    return lrow(name, btn, ...notes);
+  };
+  return el('div', { class: 'lpanel fwpanel' }, lcol('Sliders', row(0, 'Dimmer'), row(1, 'Volume')),
+    lcol('', el('p', { class: 'note' }, 'Move a slider and its knob on the keyboard above moves with it. What each one controls is Ectomatter’s, not the keyboard’s, so it is the same on every profile and works while Ectomatter is open.')));
+}
+
+// Custom firmware: kept apart from everything EVGA's firmware does, and
+// offered only as far as the keyboard's build goes.
+function firmwarePanel() {
+  const fw = S.fw || { kind: 'unknown', features: [], later: [] };
+  const list = items => el('ul', { class: 'fwlist' }, items.map(f => el('li', {}, f.name)));
+  const body = fw.kind === 'custom'
+    ? [lrow('Firmware', el('span', { class: 'fwv' }, `Ectomatter v${fw.version}, build ${fw.build}`)),
+       lrow('Adds', fw.features.length ? list(fw.features) : el('span', { class: 'note' }, 'Nothing Ectomatter controls yet. This build fixes how the volume slider steps.')),
+       fw.later?.length ? lrow('In later builds', list(fw.later.map(f => ({ name: `${f.name} (build ${f.since})` })))) : null]
+    : fw.kind === 'retail'
+      ? [lrow('Firmware', el('span', { class: 'fwv' }, `EVGA v${fw.version}`)),
+         el('p', { class: 'note' }, 'Features that need Ectomatter’s custom firmware show here when the keyboard runs it.')]
+      : [lrow('Firmware', el('span', { class: 'fwv' }, fw.version ? `v${fw.version}` : 'Not known')),
+         el('p', { class: 'note' }, 'This version is neither EVGA’s nor Ectomatter’s, so no custom features are offered.')];
+  return el('div', { class: 'lpanel fwpanel' }, lcol('Custom firmware', ...body.filter(Boolean)));
+}
+
+function renderDisplay() {
+  const box = $('#view-display'); box.replaceChildren();
+  const L = draft().lighting, lc = L.lcd.color;
+  const checks = (list, on, set) => el('div', { class: 'checks' }, list.map(([bit, name]) => el('label', { class: 'check' },
+    el('input', { type: 'checkbox', checked: on(bit), onchange: e => set(bit, e.target.checked) }), name)));
+  const blocked = ~L.game_keys & 0x7f;
+  box.append(el('div', { class: 'lpanel three' },
+    lcol('Profile',
+      lrow('Name', el('input', { class: 'namefield', type: 'text', maxlength: 60, value: draft().name ?? saved(S.editing).name, 'aria-label': 'Profile name',
+        oninput: e => change(d => { d.name = e.target.value; }) }), 'Stored on the keyboard with this profile.'),
+      lrow('Screen color', colorInput(lc.color, v => change(() => { lc.color = v; }, true))),
+      lslider('Brightness', 0, 255, lc.brightness, v => `${Math.round(v / 2.55)}%`, v => change(() => { lc.brightness = v; }))),
+    lcol('Built-in screens',
+      checks(LCD_APPS, bit => !!(L.lcd.apps & bit), (bit, on) => change(() => { L.lcd.apps = on ? L.lcd.apps | bit : L.lcd.apps & ~bit; })),
+      el('p', { class: 'note' }, 'Screens the keyboard shows by itself. The stats service draws over them while it runs.')),
+    lcol('Blocked in game mode',
+      checks(GAME_KEYS, bit => !!(blocked & bit), (bit, on) => change(() => { const b = on ? blocked | bit : blocked & ~bit; L.game_keys = (~b & 0x7f) | 0x80; }, true)),
+      el('p', { class: 'note' }, 'These keys do nothing while game mode is on.'))),
+    slidersPanel(), firmwarePanel());
+}
+
+// ---------------------------------------------------------------- macros
+// A macro workspace on SteelSeries Engine's model: the library on the left,
+// and the chosen macro as a chain of events you record or build by hand.
+// A step is {code|media, down, delay}: a key or media key going down or up,
+// then how long to wait before the next step.
+const MACRO_MEDIA = { 0xB5: 'Next track', 0xB6: 'Previous track', 0xB7: 'Stop', 0xCD: 'Play/pause',
+  0xE2: 'Mute', 0xE9: 'Volume up', 0xEA: 'Volume down', 0x183: 'Media player', 0x18A: 'Mail',
+  0x192: 'Calculator', 0x194: 'My computer', 0x221: 'Browser search', 0x223: 'Browser home',
+  0x224: 'Browser back', 0x225: 'Browser forward', 0x227: 'Browser refresh' };
+const MACRO_ROOM = 967;                    // bytes of steps the keyboard keeps per macro
+const PLAYS = [[0, 'Play once'], [11, 'Play a number of times'], [12, 'Repeat while held'], [8, 'Repeat until pressed again']];
+
+function macroKeyName(code) { return MACRO_KEYS[code] || `Code ${code}`; }
+function stepName(st) {
+  return 'media' in st ? (MACRO_MEDIA[st.media] || `Media ${st.media}`) : macroKeyName(st.code);
+}
+function describeMacro(steps) {
+  if (!steps.length) return 'No steps yet';
+  const held = [...new Set(steps.filter(s => s.down).map(stepName))];
+  return held.join(' + ') + (steps.some(s => s.delay) ? ', with timing' : '');
+}
+const stepBytes = st => ('media' in st ? 3 : 1) + 3;
+const macroBytes = steps => steps.reduce((n, st) => n + stepBytes(st), 0);
+const stepKey = st => ('media' in st ? 'm' : 'k') + (st.media ?? st.code);
+
+function freeSlots() {
+  const out = [];
+  for (let i = 1; i <= 100; i++) if (!S.dev.macros[i] && !S.mdrafts[i]) out.push(i);
+  return out;
+}
+function mdraft(n = S.macro) {
+  if (n == null) return null;
+  if (!S.mdrafts[n]) {
+    const m = S.dev.macros[n];
+    if (!m) return null;
+    S.mdrafts[n] = { name: m.name, steps: clone(m.steps), isNew: false, timing: 'keep', same: 20, plays: null };
+  }
+  return S.mdrafts[n];
+}
+// the steps as they will be saved, with the timing choice applied
+function effective(d) {
+  const st = clone(d.steps);
+  if (d.timing === 'none') st.forEach(s => { s.delay = 0; });
+  if (d.timing === 'same') st.forEach((s, i) => { s.delay = i < st.length - 1 ? d.same : 0; });
+  return st;
+}
+function macroDirty(n) {
+  const d = S.mdrafts[n];
+  if (!d) return false;
+  if (d.isNew) return !pristine(n);
+  const m = S.dev.macros[n];
+  return d.name !== m.name || JSON.stringify(effective(d)) !== JSON.stringify(m.steps) || !!d.plays;
+}
+// where a macro is assigned, one entry per key and layer, with its profiles
+function macroPlaces(n) {
+  const by = {};
+  for (const k of macroKeys(n)) {
+    const id = `${k.layer}:${k.pos}`;
+    (by[id] ||= { layer: k.layer, pos: k.pos, profiles: [] }).profiles.push(k.p);
+  }
+  return Object.values(by);
+}
+const profilesText = ps => ps.length === 5 ? 'All profiles' : ps.length === 1 ? `Profile ${ps[0]}`
+  : `Profiles ${ps.slice(0, -1).join(', ')} and ${ps[ps.length - 1]}`;
+const placeKey = pl => (pl.layer === 'fnkeys' ? 'Fn + ' : '') + keyLabel(S.byPos[pl.pos]);
+
+function goMacro(n) {
+  closeMenu();
+  // the Macro Editor is its own window
+  if (window.__window === 'main') { window.__openMacroEditor(n); return; }
+  S.view = 'keys'; S.macro = n; S.selStep = null; S.ins = null; S.scrollToMacro = true; S.macrosOpen = true;
+  renderView();
+}
+function goKey(pl) {
+  S.sel = pl.pos;
+  S.view = 'keys';
+  if (pl.profiles[0] !== S.editing) chooseProfile(pl.profiles[0]);
+  renderView(); renderBoardLabels(); stopPreview();
+  $('#board').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// The Macro Editor folds down to its head row when it is not in use. It opens
+// when asked, and by itself when a key's macro is opened, a new one is started
+// or a recording runs. Whether it was left open is remembered in this browser.
+function macrosOpen() {
+  if (S.rec || S.macrosOpen) return true;
+  if (S.macrosOpen === false) return false;
+  try { return localStorage.getItem('z10:macros-open') === '1'; } catch (e) { return false; }
+}
+function setMacrosOpen(on) {
+  S.macrosOpen = on;
+  try { localStorage.setItem('z10:macros-open', on ? '1' : '0'); } catch (e) { /* not fatal */ }
+  // only the fold changes, so it can animate and nothing else on the page moves
+  const box = $('#view-macros');
+  box.classList.toggle('collapsed', !on);
+  box.querySelector('.sec-head')?.setAttribute('aria-expanded', String(on));
+  const fold = box.querySelector('.fold'); if (fold) fold.inert = !on;   // folded away, nothing in it takes the keyboard
+}
+
+function renderMacros() {
+  const box = $('#view-macros'); box.replaceChildren();
+  const macros = S.dev.macros || {};
+  // With nothing chosen, the editor holds a blank new macro, ready to name and
+  // record. It stays out of the list, and does not count as unsaved, until
+  // something is put in it.
+  if (S.macro == null || (!macros[S.macro] && !S.mdrafts[S.macro])) S.macro = starterMacro();
+  const saved = Object.keys(macros).map(Number).sort((a, b) => a - b);
+  const drafts = Object.keys(S.mdrafts).map(Number)
+    .filter(n => S.mdrafts[n].isNew && !(S.mdrafts[n].starter && pristine(n))).sort((a, b) => a - b);
+
+  const row = n => {
+    const m = macros[n], d = S.mdrafts[n];
+    const steps = d ? effective(d) : m.steps;
+    const timed = steps.some(s => s.delay);
+    return el('button', { 'aria-current': String(S.macro === n), class: macroDirty(n) ? 'dirty' : '',
+      // choosing the open macro again puts it away, back to the blank one
+      onclick: () => { S.macro = S.macro === n ? null : n; S.selStep = null; S.ins = null; S.editName = false; renderMacros(); },
+      // right-clicking a macro opens it and offers Rename, Duplicate and Delete where the pointer is
+      oncontextmenu: e => {
+        e.preventDefault();
+        if (S.rec) return;
+        if (S.macro !== n) { S.macro = n; S.selStep = null; S.ins = null; S.editName = false; renderMacros(); }
+        macroMenu(pointAt(e.clientX, e.clientY));
+      } },
+      el('span', { class: 'ico' }, timed ? ICO.clock() : ICO.keys()),
+      el('span', { class: 'name' }, (d ? d.name : m.name) || `Macro ${n}`),
+      el('span', { class: 'sub' }, d?.isNew ? 'Not saved yet' : describeMacro(steps)));
+  };
+  const lib = el('div', { class: 'lib' },
+    el('div', { class: 'lib-head' }, el('b', {}, 'All macros'), el('span', {}, `${saved.length} of 100 slots`),
+      el('button', { class: 'tb add', disabled: !freeSlots().length || !!S.rec, onclick: newMacro }, '+ New')),
+    el('div', { class: 'macro-list' }, [...saved, ...drafts].map(row)));
+  const ws = S.macro != null && mdraft() ? workspace() : el('div', { class: 'ws empty-ws' },
+    el('p', { class: 'quiet' }, saved.length ? 'Choose a macro.' : 'No macros yet. Press + New to make one.'));
+  const open = macrosOpen();
+  const unsaved = [...saved, ...drafts].some(macroDirty);
+  box.classList.toggle('collapsed', !open);
+  box.append(el('button', { class: 'sec-head', 'aria-expanded': String(open), 'aria-controls': 'macro-body',
+      onclick: () => setMacrosOpen(box.classList.contains('collapsed')) },
+      el('h2', { id: 'macros-title' }, 'Macro Editor'),
+      unsaved ? el('span', { class: 'unsaved' }, 'Unsaved changes') : null,
+      el('span', { class: 'count' }, `${saved.length} saved`),
+      CHEV()),
+    el('div', { class: 'fold', id: 'macro-body', inert: !open }, el('div', { class: 'fold-in' }, el('div', { class: 'mwrap' }, lib, ws))));
+  // an input that just opened for editing takes the cursor straight away
+  const edit = box.querySelector('.wt.edit input, .title-in');
+  if (edit && document.activeElement !== edit) { edit.focus(); edit.select(); }
+  const cur = box.querySelector('.macro-list [aria-current="true"]');
+  if (cur && S.scrollToMacro) { cur.scrollIntoView({ block: 'nearest' }); S.scrollToMacro = false; }
+}
+
+const ICO = {
+  keys: () => svg('<rect x="1.5" y="4" width="13" height="8.5" rx="1.6"/><path d="M4 7h1M7 7h1M10 7h2M4.5 9.8h7"/>'),
+  clock: () => svg('<circle cx="8" cy="8.5" r="5.8"/><path d="M8 5.3v3.2l2.2 1.4M6.5 1.5h3"/>'),
+  gear: () => svg('<circle cx="8" cy="8" r="2.3"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/>'),
+  pen: () => svg('<path d="M10.5 2.5l3 3L6 13H3v-3z"/>'),
+};
+function svg(inner) {
+  const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  s.setAttribute('viewBox', '0 0 16 16'); s.setAttribute('fill', 'none'); s.setAttribute('stroke', 'currentColor'); s.setAttribute('stroke-width', '1.4');
+  s.innerHTML = inner; return s;
+}
+
+// A new macro is called New Macro 1, 2 and so on, the lowest number no other
+// macro is using.
+function newMacroName() {
+  const used = new Set([...Object.values(S.dev.macros).map(m => m.name), ...Object.values(S.mdrafts).map(d => d.name)]);
+  let k = 1;
+  while (used.has(`New Macro ${k}`)) k++;
+  return `New Macro ${k}`;
+}
+// the blank macro the editor opens on, kept in one free slot until it is used
+function starterMacro() {
+  const have = Object.keys(S.mdrafts).map(Number).find(n => S.mdrafts[n].starter);
+  if (have) return have;
+  const n = freeSlots()[0];
+  if (!n) return null;
+  const name = newMacroName();
+  S.mdrafts[n] = { name, blankName: name, steps: [], isNew: true, starter: true, timing: 'keep', same: 20, plays: null };
+  return n;
+}
+// a new macro nobody has put anything in yet
+function pristine(n) {
+  const d = S.mdrafts[n];
+  return !!d && d.isNew && d.name === d.blankName && !d.steps.length && !d.plays;
+}
+
+function newMacro() {
+  // the blank macro already open simply becomes the new one
+  const cur = S.mdrafts[S.macro];
+  if (cur?.starter) { delete cur.starter; S.selStep = null; S.ins = null; S.scrollToMacro = true; S.macrosOpen = true; renderMacros(); return; }
+  const n = freeSlots()[0];
+  if (!n) return;
+  const name = newMacroName();
+  S.mdrafts[n] = { name, blankName: name, steps: [], isNew: true, timing: 'keep', same: 20, plays: null };
+  S.macro = n; S.selStep = null; S.ins = null; S.scrollToMacro = true; S.macrosOpen = true;
+  renderMacros();
+}
+
+function workspace() {
+  const n = S.macro, d = mdraft(), m = S.dev.macros[n], rec = S.rec;
+  const locked = m && !m.editable;
+  const eff = effective(d);
+  const live = rec ? rec.steps : [];
+  const ins = S.ins == null ? d.steps.length : S.ins;
+  const upd = () => renderMacros();
+
+  // head: the name, whether it is saved, and the less common actions
+  const title = S.editName
+    ? el('input', { class: 'title-in', value: d.name, maxlength: 50, 'aria-label': 'Macro name',
+        onkeydown: e => { if (e.key === 'Enter') commitName(e.target.value); if (e.key === 'Escape') { S.editName = false; upd(); } },
+        onblur: e => commitName(e.target.value) })
+    : el('span', { class: 'title', ondblclick: () => { S.editName = true; upd(); } }, d.name);
+  const state = rec ? el('span', { class: 'state rec' }, el('i', { class: 'blink' }), 'Recording')
+    : el('span', { class: 'state' + (macroDirty(n) ? ' warn' : '') }, d.isNew ? 'Not saved yet' : macroDirty(n) ? 'Changed, not saved yet' : 'Saved on the keyboard');
+  const more = el('button', { class: 'more', 'aria-label': 'More', disabled: !!rec, onclick: e => moreMenu(e.currentTarget) }, '⋯');
+  const head = el('div', { class: 'ws-head' }, title,
+    el('button', { class: 'rename', 'aria-label': 'Rename', disabled: locked || !!rec, onclick: () => { S.editName = true; upd(); } }, ICO.pen()),
+    state, more);
+
+  // the chain
+  const chainEl = el('div', { class: 'chain' });
+  const joint = i => {
+    const hot = S.ins === i && i < d.steps.length;
+    return el('span', { class: 'cn' + (hot ? ' hot' : ''), title: 'Insert here',
+      onclick: e => { if (locked || rec) return; S.ins = i; S.selStep = null; upd(); insertMenu(document.querySelector('.cn.hot') || e.currentTarget); } },
+      hot ? el('span', { class: 'plus' }, '+') : null);
+  };
+  const chip = (st, i, liveChip) => el('span', {
+      class: 'ev' + ('media' in st ? ' media' : '') + (S.selStep === i && !liveChip ? ' sel' : '') + (liveChip ? ' fresh' : ''),
+      draggable: !liveChip && !locked && !rec ? 'true' : 'false', 'data-i': i,
+      onclick: e => { if (liveChip || locked || rec) return; S.selStep = i; S.ins = i + 1; upd(); stepMenu(document.querySelector(`.ev[data-i="${i}"]`) || e.currentTarget, i); },
+      ondragstart: e => { e.dataTransfer.setData('text/plain', String(i)); e.dataTransfer.effectAllowed = 'move'; },
+      ondragover: e => { if (!liveChip) { e.preventDefault(); e.currentTarget.classList.add('dropto'); } },
+      ondragleave: e => e.currentTarget.classList.remove('dropto'),
+      ondrop: e => { e.preventDefault(); const from = +e.dataTransfer.getData('text/plain'); moveStep(from, i); },
+    },
+    'media' in st ? el('span', { class: 'ic' }, '♫') : null, stepName(st),
+    el('span', { class: 'dir ' + (st.down ? 'dn' : 'up') }, st.down ? '↓' : '↑'));
+  const waitChip = (st, i, ms) => S.editWait === i
+    ? el('span', { class: 'wt edit' }, ICO.clock(), el('input', { value: ms, 'aria-label': 'Wait in milliseconds', inputmode: 'numeric',
+        onkeydown: e => { if (e.key === 'Enter') setWait(i, e.target.value); if (e.key === 'Escape') { S.editWait = null; upd(); } },
+        onblur: e => setWait(i, e.target.value) }), ' ms')
+    : el('span', { class: 'wt', onclick: () => { if (locked || rec) return; bakeTiming(d); S.editWait = i; upd(); } }, `${ms.toLocaleString()} ms `, ICO.clock());
+
+  if (!eff.length && !live.length) {
+    chainEl.classList.add('empty');
+    chainEl.append(el('div', { class: 'empty' }, el('div', { class: 'big' }, el('i')), rec
+      ? [el('b', {}, 'Recording'),
+         el('p', {}, 'Type the keys on your Z10. Press Stop to finish.')]
+      : [el('b', {}, 'No keys yet'),
+         el('p', {}, 'Press Record and type the keys on your Z10, or add keys, media keys and waits with the buttons below.')]));
+  } else {
+    eff.forEach((st, i) => {
+      if (i) chainEl.append(joint(i));
+      if (rec && i === ins) liveChain(chainEl, live, chip, waitChip);
+      chainEl.append(chip(st, i));
+      if (st.delay) { chainEl.append(el('span', { class: 'cn plain' })); chainEl.append(waitChip(st, i, st.delay)); }
+    });
+    if (rec && ins >= eff.length) liveChain(chainEl, live, chip, waitChip);
+    if (rec) chainEl.append(el('span', { class: 'caret' }));
+    else if (!locked) chainEl.append(el('span', { class: 'ins' + (S.ins == null || S.ins >= eff.length ? '' : ' off'), title: 'New steps are added here',
+      onclick: () => { S.ins = null; upd(); } }));
+  }
+
+  // the toolbar under the chain
+  const bytes = macroBytes(eff) + (rec ? rec.used : 0);
+  const left = MACRO_ROOM - bytes;
+  const count = eff.length + eff.filter(s => s.delay).length;
+  const meter = left < 60
+    ? el('span', { class: 'meter warn' }, left < 4 ? 'Full' : `Nearly full: room for about ${Math.floor(left / 4)} more key presses`)
+    : el('span', { class: 'meter' }, count ? `${count} step${count === 1 ? '' : 's'}` : '');
+  const off = locked || !!rec;
+  const tools = el('div', { class: 'tools' },
+    el('button', { class: 'tb icon', 'aria-label': 'Timing', disabled: off, onclick: e => timingMenu(e.currentTarget) }, ICO.gear()),
+    el('button', { class: 'tb', disabled: off || !d.steps.length, onclick: () => { d.steps = []; S.ins = null; S.selStep = null; upd(); } }, 'Clear'),
+    el('span', { class: 'sep' }),
+    el('button', { class: 'tb', disabled: off || left < 8, onclick: e => keyPicker(e.currentTarget, 'key', v => insertTap(v)) }, '+ Key'),
+    el('button', { class: 'tb', disabled: off || left < 12, onclick: e => keyPicker(e.currentTarget, 'media', v => insertTap(v)) }, '+ Media key'),
+    el('button', { class: 'tb', disabled: off || !d.steps.length, onclick: () => insertWait() }, '+ Wait'),
+    meter,
+    rec ? el('span', { class: 'clock' }, clockText(rec.elapsed)) : null,
+    rec ? el('button', { class: 'recbtn on', onclick: () => stopRecording(true) }, el('span', { class: 'dot' }), 'Stop')
+        : el('button', { class: 'recbtn', disabled: locked || left < 4, onclick: startRecording }, el('span', { class: 'dot' }), 'Record'));
+  const canvas = el('div', { class: 'canvas' + (rec ? ' rec' : '') }, chainEl, tools);
+
+  // how it plays on the keys it is on; where it is on them is the Keys page's business
+  const places = macroPlaces(n);
+  const plays = d.plays || macroPlays(n);
+  const playsLabel = !places.length ? 'Play once' : plays === 'varies' ? 'Varies by key'
+    : (PLAYS.find(([v]) => v === plays.mode)?.[1] || 'Play once') + (plays.mode === 11 ? ` (${plays.count} times)` : '');
+  const playsEl = el('div', { class: 'playsrow' },
+    el('span', { class: 'lab' }, 'Plays'),
+    el('button', { class: 'plays', 'aria-haspopup': 'menu', disabled: !places.length || off,
+      title: places.length ? '' : 'Put this macro on a key first, then choose how it plays there.',
+      onclick: e => playsMenu(e.currentTarget) }, playsLabel, CHEV()),
+    plays && plays !== 'varies' && plays.mode === 11 ? el('label', { class: 'count' }, el('input', { type: 'number', min: 2, max: 255, value: plays.count,
+      'aria-label': 'Times', onchange: e => { d.plays = { mode: 11, count: Math.max(2, Math.min(255, +e.target.value || 2)) }; upd(); } }), 'times') : null);
+
+  const dirty = macroDirty(n) && !rec;
+  const foot = el('div', { class: 'ws-foot' }, playsEl,
+    locked ? el('span', { class: 'readonly' }, 'This macro holds something the editor cannot rebuild exactly, so it is shown read only.') : null,
+    window.__window === 'macros' ? STATUS : null,
+    el('button', { class: 'ghost', disabled: !dirty || S.busy, onclick: revertMacro }, 'Revert'),
+    el('button', { class: 'primary', disabled: !dirty || S.busy || (!d.steps.length), onclick: saveMacro }, 'Save macro'));
+  return el('div', { class: 'ws' }, head, canvas, foot);
+}
+
+// The chain is drawn again at every look at the recording, several times a
+// second, so a step pops in once, when it arrives: each one's arrival is kept,
+// and a redrawn step carries its pop on from where it had got to, or has none.
+function liveChain(parent, live, chip, waitChip) {
+  const seen = S.rec ? (S.rec.seen ??= {}) : {}, now = performance.now();
+  const pop = (node, id) => {
+    const age = now - (seen[id] ??= now);
+    if (age >= 400) node.classList.remove('fresh');
+    else node.style.animationDelay = `-${Math.round(age)}ms`;
+    return node;
+  };
+  live.forEach((st, j) => {
+    parent.append(el('span', { class: 'cn plain' }));
+    parent.append(pop(chip(st, 1000 + j, true), 's' + j));
+    if (st.delay) { parent.append(el('span', { class: 'cn plain' })); parent.append(pop(el('span', { class: 'wt fresh' }, `${st.delay.toLocaleString()} ms `, ICO.clock()), 'w' + j)); }
+  });
+}
+const clockText = s => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`;
+
+// the timing choice becomes the steps' own waits the moment one is edited by hand
+function bakeTiming(d) {
+  if (d.timing === 'keep') return;
+  d.steps = effective(d); d.timing = 'keep';
+}
+function commitName(v) {
+  if (!S.editName) return;
+  const d = mdraft(); d.name = (v || '').trim().slice(0, 50) || d.name;
+  S.editName = false; renderMacros();
+}
+function setWait(i, v) {
+  if (S.editWait !== i) return;           // already committed
+  const d = mdraft(); bakeTiming(d);
+  const ms = Math.max(0, Math.min(65535, Math.round(+String(v).replace(/[^0-9]/g, '') || 0)));
+  if (d.steps[i]) d.steps[i].delay = ms;
+  S.editWait = null; renderMacros();
+}
+function moveStep(from, to) {
+  const d = mdraft(); bakeTiming(d);
+  if (from === to || from == null) return renderMacros();
+  const [st] = d.steps.splice(from, 1);
+  d.steps.splice(from < to ? to - 1 : to, 0, st);
+  S.selStep = null; S.ins = null; renderMacros();
+}
+function insertAt(steps) {
+  const d = mdraft(); bakeTiming(d);
+  const i = S.ins == null ? d.steps.length : S.ins;
+  d.steps.splice(i, 0, ...steps);
+  S.ins = S.ins == null ? null : i + steps.length;
+  S.selStep = null; renderMacros();
+}
+// a key added by hand goes down and comes back up, so it can never be left held
+function insertTap(v) {
+  insertAt([{ ...v, down: true, delay: 0 }, { ...v, down: false, delay: 0 }]);
+}
+function insertWait() {
+  const d = mdraft(); bakeTiming(d);
+  const i = (S.ins == null ? d.steps.length : S.ins) - 1;
+  if (i < 0) return;
+  if (!d.steps[i].delay) d.steps[i].delay = 100;
+  S.editWait = i; renderMacros();
+}
+
+// what dismissing a menu opened from the chain does: nothing stays chosen
+const letGo = () => { S.ins = null; S.selStep = null; renderMacros(); };
+function keyPicker(anchor, kind, on, current, onDismiss) {
+  const groups = kind === 'media'
+    ? [['Media keys', Object.entries(MACRO_MEDIA).map(([c, n]) => [n, { media: +c }])]]
+    : [['Modifiers', [112, 113, 114, 115, 116, 117, 118, 119].map(c => [MACRO_KEYS[c], { code: c }])],
+       ['Keys', Object.entries(MACRO_KEYS).filter(([c]) => +c < 112).map(([c, n]) => [n, { code: +c }])]];
+  openMenu(anchor, m => pickList(m, groups, current, on, kind === 'media' ? 'Search media keys' : 'Search keys'), { width: 260, onDismiss });
+}
+function insertMenu(anchor) {
+  openMenu(anchor, m => {
+    m.append(mHead('Insert here'),
+      mItem('Key', () => keyPicker(anchor, 'key', v => insertTap(v), undefined, letGo)),
+      mItem('Media key', () => keyPicker(anchor, 'media', v => insertTap(v), undefined, letGo)),
+      mItem('Wait', () => { closeMenu(); insertWait(); }));
+  }, { width: 220, onDismiss: letGo });
+}
+function stepMenu(anchor, i) {
+  const d = mdraft();
+  openMenu(anchor, (m, again) => {
+    const st = d.steps[i]; if (!st) return;
+    m.append(mHead(stepName(st)),
+      mItem('Press ↓', () => { st.down = true; closeMenu(); renderMacros(); }, { tick: st.down }),
+      mItem('Release ↑', () => { st.down = false; closeMenu(); renderMacros(); }, { tick: !st.down }),
+      el('hr'),
+      mItem('Change key ›', () => keyPicker(anchor, 'media' in st ? 'media' : 'key', v => {
+        delete st.code; delete st.media; Object.assign(st, v); renderMacros();
+      }, 'media' in st ? { media: st.media } : { code: st.code }, letGo)),
+      mItem('Remove', () => { d.steps.splice(i, 1); S.selStep = null; S.ins = null; closeMenu(); renderMacros(); }, { cls: 'danger' }));
+  }, { width: 220, onDismiss: letGo });
+}
+function timingMenu(anchor) {
+  const d = mdraft();
+  openMenu(anchor, (m, again) => {
+    m.append(mHead('Timing'),
+      mItem('Keep the waits as they are', () => { d.timing = 'keep'; closeMenu(); renderMacros(); }, { tick: d.timing === 'keep' }),
+      mItem('No waits', () => { d.timing = 'none'; closeMenu(); renderMacros(); }, { tick: d.timing === 'none' }),
+      el('div', { class: 'mi row-in' + (d.timing === 'same' ? ' on' : '') },
+        el('span', { class: 'tick' }, d.timing === 'same' ? '✓' : ''),
+        el('button', { class: 'plain', onclick: () => { d.timing = 'same'; closeMenu(); renderMacros(); } }, 'Same wait everywhere'),
+        el('input', { type: 'number', min: 0, max: 65535, value: d.same, 'aria-label': 'Milliseconds',
+          onchange: e => { d.same = Math.max(0, Math.min(65535, +e.target.value || 0)); d.timing = 'same'; renderMacros(); again(); } }), ' ms'),
+      el('hr'),
+      mItem('Record waits while recording', () => { S.recordWaits = !S.recordWaits; try { localStorage.setItem('z10:recordWaits', S.recordWaits ? '1' : '0'); } catch (e) {} again(); }, { tick: S.recordWaits }));
+  }, { width: 290 });
+}
+function playsMenu(anchor) {
+  const d = mdraft(), cur = d.plays || macroPlays(S.macro);
+  openMenu(anchor, m => {
+    m.append(mHead('Each time its key is pressed'),
+      ...PLAYS.map(([v, label]) => mItem(label, () => {
+        closeMenu(); d.plays = { mode: v, count: cur && cur !== 'varies' && cur.count > 1 ? cur.count : 3 }; renderMacros();
+      }, { tick: cur && cur !== 'varies' && cur.mode === v })));
+  }, { width: 260 });
+}
+// A place on the screen standing in for a button, for a menu opened where the
+// pointer is rather than under a button.
+const pointAt = (x, y) => ({ getBoundingClientRect: () => new DOMRect(x, y, 0, 0), contains: () => false });
+
+// The open macro's own menu: from its More button, or from right-clicking it in the list.
+function moreMenu(anchor) { macroMenu(anchor, { width: 240, align: 'right' }); }
+function macroMenu(anchor, place = { width: 220 }) {
+  const n = S.macro, d = mdraft(), saved = !!S.dev.macros[n], m0 = S.dev.macros[n];
+  openMenu(anchor, m => {
+    m.append(
+      mItem('Rename', () => { closeMenu(); S.editName = true; renderMacros(); }, { disabled: !!(m0 && !m0.editable) }),
+      mItem('Duplicate', () => {
+        closeMenu();
+        const k = freeSlots()[0]; if (!k) { status('All 100 macro slots are full.', 'bad'); return; }
+        S.mdrafts[k] = { name: `Copy of ${d.name}`.slice(0, 50), steps: effective(d), isNew: true, timing: 'keep', same: 20, plays: null };
+        S.macro = k; S.selStep = null; S.ins = null; S.scrollToMacro = true; renderMacros();
+      }, { disabled: !freeSlots().length }),
+      mItem(saved ? 'Delete macro…' : 'Discard this new macro', () => {
+        closeMenu();
+        if (!saved) { delete S.mdrafts[n]; S.macro = null; renderMacros(); return; }
+        const places = macroPlaces(n);
+        confirmDialog({
+          title: `Delete ${d.name}?`,
+          body: [places.length
+              ? `${places.map(pl => `${placeKey(pl)} (${profilesText(pl.profiles).toLowerCase()})`).join(', ')} will do nothing until you give ${places.length === 1 ? 'it' : 'them'} something else.`
+              : 'No key runs this macro.',
+            'This removes it from the keyboard and cannot be undone.'],
+          confirm: 'Delete macro', danger: true, onConfirm: deleteMacro,
+        });
+      }, { cls: 'danger' }));
+  }, place);
+}
+
+// A modal confirmation. Escape or a click outside cancels; Cancel has the focus,
+// so pressing Enter by reflex never deletes anything.
+function confirmDialog({ title, body, confirm, danger, onConfirm }) {
+  const close = () => { removeEventListener('keydown', key, true); back.remove(); };
+  const key = e => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+  const cancel = el('button', { class: 'ghost', onclick: close }, 'Cancel');
+  const box = el('div', { class: 'dialog', role: 'alertdialog', 'aria-modal': 'true', 'aria-labelledby': 'dlg-t' },
+    el('h3', { id: 'dlg-t' }, title), ...[].concat(body).map(t => el('p', {}, t)),
+    el('div', { class: 'row' }, cancel,
+      el('button', { class: danger ? 'danger' : 'primary', onclick: () => { close(); onConfirm(); } }, confirm)));
+  const back = el('div', { class: 'scrim', onmousedown: e => { if (e.target === back) close(); } }, box);
+  document.body.append(back);
+  addEventListener('keydown', key, true);
+  cancel.focus();
+}
+
+// ---- recording -------------------------------------------------------------
+async function startRecording() {
+  const d = mdraft(); bakeTiming(d);
+  closeMenu(); S.selStep = null; S.editWait = null;
+  try {
+    const r = await api('/api/record', { action: 'start', room: MACRO_ROOM - macroBytes(d.steps), waits: S.recordWaits });
+    S.rec = { ...r, steps: [], used: 0, elapsed: 0 };
+    status('Recording. The Z10’s keys go only to the recording until you press Stop.');
+  } catch (e) {
+    status(`Recording did not start: ${e.message}`, 'bad'); return;
+  }
+  renderMacros();
+  const tick = async () => {
+    if (!S.rec) return;
+    try {
+      const r = await api('/api/record');
+      if (!S.rec) return;
+      Object.assign(S.rec, r);
+      if (!r.recording) return stopRecording(true, r.reason);
+      renderMacros();
+    } catch (e) { return stopRecording(true); }
+    S.recTimer = setTimeout(tick, 150);
+  };
+  S.recTimer = setTimeout(tick, 150);
+}
+async function stopRecording(keep, reason) {
+  if (!S.rec) return;
+  clearTimeout(S.recTimer);
+  S.rec = null;
+  let r = { steps: [] };
+  try { r = await api('/api/record', { action: keep ? 'stop' : 'cancel' }); } catch (e) { status(`Recording stopped: ${e.message}`, 'bad'); }
+  const got = r.steps || [];
+  if (got.length) insertAt(got); else renderMacros();
+  const why = reason && reason !== 'stopped' ? ` It stopped because ${reason}.` : '';
+  status(got.length ? `Recorded ${got.length} step${got.length === 1 ? '' : 's'}.${why}` + (r.skipped ? ` ${r.skipped} key${r.skipped === 1 ? '' : 's'} a macro cannot hold were left out.` : '')
+    : `Nothing was recorded.${why}`);
+}
+
+// ---- save, revert, delete --------------------------------------------------
+function revertMacro() {
+  const n = S.macro;
+  if (S.mdrafts[n]?.isNew) { S.mdrafts[n] = { ...S.mdrafts[n], steps: [], timing: 'keep', plays: null }; }
+  else delete S.mdrafts[n];
+  S.selStep = null; S.ins = null; S.editWait = null;
+  renderMacros();
+}
+
+async function saveMacro() {
+  const n = S.macro, d = mdraft();
+  let steps = effective(d);
+  // anything pressed and never let go is let go at the end, so the macro can
+  // never leave a key held down
+  const held = [];
+  for (const st of steps) { const k = stepKey(st); if (st.down) held.push(st); else { const j = held.findLastIndex(h => stepKey(h) === k); if (j >= 0) held.splice(j, 1); } }
+  const added = held.reverse().map(h => ('media' in h ? { media: h.media, down: false, delay: 0 } : { code: h.code, down: false, delay: 0 }));
+  steps = steps.concat(added);
+  if (macroBytes(steps) > MACRO_ROOM) { status('This macro is too long for the keyboard. Remove some steps and save again.', 'bad'); return; }
+  S.busy = true; renderMacros(); status(`Saving ${d.name}…`);
+  const m = S.dev.macros[n];
+  try {
+    S.dev.macros = await api(`/api/macro/${n}`, { name: d.name || `Macro ${n}`, steps,
+      run: m?.method ?? 9, repeat: m?.repeat ?? 0, unit: m?.unit ?? 1 });
+    // how it plays lives on its keys: rewrite those, profile by profile, on top
+    // of what each profile has saved, and carry the change into its draft
+    if (d.plays) {
+      const byP = {};
+      for (const k of macroKeys(n)) (byP[k.p] ||= []).push(k);
+      for (const [p, ks] of Object.entries(byP)) {
+        const body = { keys: clone(saved(+p).keys), fnkeys: clone(saved(+p).fnkeys) };
+        for (const k of ks) {
+          const v = [3, n, d.plays.mode, d.plays.mode === 11 ? d.plays.count : 0];
+          body[k.layer][k.pos] = v; S.drafts[p][k.layer][k.pos] = clone(v);
+        }
+        S.dev.profiles[p] = await api(`/api/profile/${p}`, body);
+      }
+    }
+    delete S.mdrafts[n];
+    window.__tell('macros', S.dev.macros);
+    if (d.plays) window.__tell('profiles', S.dev.profiles);
+    status(`Saved ${d.name} to the keyboard.` + (added.length ? ` ${added.map(stepName).join(' and ')} ${added.length === 1 ? 'was' : 'were'} let go at the end so nothing stays held down.` : ''), 'good');
+  } catch (e) {
+    status(`${d.name} was not saved: ${e.message}`, 'bad');
+  }
+  S.busy = false; renderMacros(); renderProfiles(); renderActions();
+}
+
+async function deleteMacro() {
+  const n = S.macro, name = mdraft()?.name || `Macro ${n}`;
+  S.busy = true; renderMacros(); status(`Deleting ${name}…`);
+  try {
+    S.dev.macros = await api(`/api/macro/${n}`, { delete: true });
+    window.__tell('macros', S.dev.macros);
+    delete S.mdrafts[n];
+    S.macro = null;
+    status(`Deleted ${name}. Any key set to it now does nothing.`, 'good');
+  } catch (e) {
+    status(`${name} was not deleted: ${e.message}`, 'bad');
+  }
+  S.busy = false; renderMacros();
+}
+
+// ---------------------------------------------------------------- actions
+async function chooseProfile(n) {
+  S.editing = n; S.stars = {}; S.flashes = {};
+  renderAll();
+  if (S.view === 'lighting') startPreview();
+  if (n === S.dev.active) return;
+  try {
+    const r = await api('/api/active', { profile: n });
+    S.dev.active = r.active;
+    status(`Profile ${n} is now active on the keyboard.`, 'good');
+  } catch (e) {
+    status(`The keyboard did not switch profiles: ${e.message}`, 'bad');
+  }
+  renderProfiles();
+}
+
+async function save() {
+  const n = S.editing;
+  S.busy = true; renderActions(); status(`Saving profile ${n}…`);
+  try {
+    const body = clone(draft());
+    if (body.lighting.mode === 'custom') body.lighting.mode = 'off';
+    const p = await api(`/api/profile/${n}`, body);
+    S.dev.profiles[n] = p;
+    window.__tell('profiles', S.dev.profiles);
+    S.drafts[n] = clone(pick(p));
+    if (draft().lighting.mode === 'off' && customColors().some(c => Math.max(...c))) {
+      S.drafts[n].lighting.mode = 'custom';   // keep showing what was painted
+    }
+    status(`Saved profile ${n} to the keyboard and read it back to check.`, 'good');
+  } catch (e) {
+    status(`Profile ${n} was not saved: ${e.message}`, 'bad');
+  }
+  S.busy = false; renderAll();
+}
+
+function revert() {
+  S.drafts[S.editing] = clone(pick(saved(S.editing)));
+  status(`Discarded the unsaved changes to profile ${S.editing}.`);
+  renderAll();
+}
+
+// ---------------------------------------------------------------- wiring
+$('#board').addEventListener('click', e => {
+  if (S.view === 'keys' && !e.target.closest('.key')) deselectKey();
+});
+$('#save').addEventListener('click', save);
+$('#revert').addEventListener('click', revert);
+for (const b of document.querySelectorAll('.navtabs button')) b.addEventListener('click', () => {
+  if (!S.dev) return;                     // still reading the keyboard
+  if (S.rec) { status('Stop recording first.'); return; }
+  S.view = b.dataset.view;
+  renderView(); renderBoardLabels();
+  if (S.view === 'lighting') startPreview(); else stopPreview();
+});
+// A button let go of after a click gives up the focus. Typing on the Z10 is how
+// this page is used, and it would otherwise light the browser's keyboard focus
+// ring on whatever was last clicked. Moving around with Tab still shows it.
+addEventListener('pointerup', e => {
+  const b = e.target.closest?.('button');
+  if (b && !b.closest('.dialog, .menu')) setTimeout(() => { if (document.activeElement === b) b.blur(); });
+}, true);
+addEventListener('keydown', e => {
+  if (S.listening || !S.dev || e.target.closest?.('input,select')) return;
+  // Delete or Backspace removes the chosen step of the open macro
+  if (S.view === 'keys' && S.selStep != null && (e.key === 'Delete' || e.key === 'Backspace') && !S.rec && !S.menu) {
+    e.preventDefault(); const d = mdraft(); bakeTiming(d); d.steps.splice(S.selStep, 1); S.selStep = null; S.ins = null; renderMacros();
+    return;
+  }
+  const pos = posForEvent(e);
+  if (pos == null) return;
+  const k = S.byPos[pos]; if (!k) return;
+  pressKey(k);
+  if (draft().lighting.mode === 'trigger') flash(pos);
+});
+addEventListener('beforeunload', e => {
+  // the keyboard goes back to doing both sliders' jobs itself
+  if (S.fw?.build >= 2) window.__beacon('/api/dimmer', { level: null });
+  if (S.fw?.build >= 3) window.__beacon('/api/modes', { quietVolume: false, keepDimmer: false });
+  window.__beacon('/api/preview', { stop: true, tab: TAB });
+  if (S.rec) window.__beacon('/api/record', { action: 'cancel' });
+  if (S.dev && ([1, 2, 3, 4, 5].some(isDirty) || Object.keys(S.mdrafts).some(n => macroDirty(+n)))) e.preventDefault();
+});
+
+load();
+requestAnimationFrame(frame);

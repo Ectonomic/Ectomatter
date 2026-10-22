@@ -19,7 +19,7 @@ URL, OUT = sys.argv[1], sys.argv[2]
 
 
 def main():
-    w = Gtk.Window(title='Ectodeck corners')
+    w = Gtk.Window(title='Ectomatter corners')
     w.set_default_size(1200, 800)
     v = WebKit2.WebView()
     c = Gdk.RGBA(); c.red = c.green = c.blue = 0; c.alpha = 0

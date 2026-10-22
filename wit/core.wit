@@ -1,15 +1,15 @@
-/// How Ectodeck and a core talk, as a WebAssembly component: what a core may
-/// call in Ectodeck (its imports) and what Ectodeck calls in a core (its
+/// How Ectomatter and a core talk, as a WebAssembly component: what a core may
+/// call in Ectomatter (its imports) and what Ectomatter calls in a core (its
 /// exports). The core protocol (docs/core-protocol.md) says what the calls
-/// carry; this says how they are made. A plugin, which adds to Ectodeck's
+/// carry; this says how they are made. A plugin, which adds to Ectomatter's
 /// pages or brings in what another program drives, is made the same way,
-/// though Ectodeck keeps plugins and cores apart (section 11).
+/// though Ectomatter keeps plugins and cores apart (section 11).
 ///
 /// A core reaches nothing but what is here and the WebAssembly system
-/// interface Ectodeck gives it: the clocks, and its own folder of files,
+/// interface Ectomatter gives it: the clocks, and its own folder of files,
 /// seen as /data. Of what is here, it reaches only what its manifest names:
 /// the USB devices its `matches` names, and what its `uses` names.
-package ectodeck:core@2.0.0;
+package ectomatter:core@2.0.0;
 
 /// The USB devices a core's manifest matches, and no others.
 interface usb {
@@ -42,18 +42,18 @@ interface usb {
     open: func(device: device-info) -> result<hid-device, string>;
 }
 
-/// Ectodeck itself.
+/// Ectomatter itself.
 interface host {
-    /// Tell Ectodeck something, unasked: a protocol notification such as
+    /// Tell Ectomatter something, unasked: a protocol notification such as
     /// device/added or input/down, its params as JSON.
     notify: func(method: string, params: string);
     /// Call the core's `timer` export with `tag` in `ms` milliseconds. A
     /// timer asked for again with the same tag replaces the first.
     after: func(ms: u32, tag: u32);
-    /// A line for Ectodeck's log.
+    /// A line for Ectomatter's log.
     log: func(line: string);
 
-    /// A call Ectodeck has waiting for the core.
+    /// A call Ectomatter has waiting for the core.
     record waiting {
         id: u32,
         method: string,
@@ -63,7 +63,7 @@ interface host {
     /// among `methods`: ones the core can answer at once without leaving
     /// what it is doing, such as a preview, so they don't wait for the long
     /// call to end. The core answers each with `answer` before the long call
-    /// returns; Ectodeck keeps the rest until then.
+    /// returns; Ectomatter keeps the rest until then.
     take-waiting: func(methods: list<string>) -> list<waiting>;
     /// The answer to a call taken with `take-waiting`, as `call` would give it.
     answer: func(id: u32, reply: result<string, string>);
@@ -106,7 +106,7 @@ world core {
     import net;
 
     /// A protocol request: its method, and its params as JSON. Gives the
-    /// result as JSON, or a message for the person using Ectodeck.
+    /// result as JSON, or a message for the person using Ectomatter.
     export call: func(method: string, params: string) -> result<string, string>;
     /// A timer the core asked for with `after` has come round.
     export timer: func(tag: u32);

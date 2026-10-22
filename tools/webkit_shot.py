@@ -26,7 +26,7 @@ window.fetch = (u, o) => /\/api\/(preview|record)/.test(String(u))
 
 
 def main():
-    w = Gtk.Window(title='Ectodeck capture')
+    w = Gtk.Window(title='Ectomatter capture')
     w.set_default_size(W, H)
     ucm = WebKit2.UserContentManager()
     ucm.add_script(WebKit2.UserScript(STUB, WebKit2.UserContentInjectedFrames.TOP_FRAME,

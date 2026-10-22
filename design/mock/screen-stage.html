@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Screen stage</title>
+<style>
+@font-face { font-family: Geist; src: url(lab-legends/fonts/Geist-400.ttf); font-weight: 400; }
+@font-face { font-family: Geist; src: url(lab-legends/fonts/Geist-500.ttf); font-weight: 500; }
+@font-face { font-family: Geist; src: url(lab-legends/fonts/Geist-600.ttf); font-weight: 600; }
+:root {
+  color-scheme: dark;
+  --page: #0e0e10; --base: #18181b; --box: #1f1f23; --well: #131316; --line: #2b2b30;
+  --t1: #f4f4f5; --t2: #d4d4d8; --t3: #a1a1aa; --t4: #74747c; --amber: #f0b35a;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--t2); font: 15px/1.6 Geist, system-ui, sans-serif; }
+main { max-width: 1520px; margin: 0 auto; padding: 48px 32px 96px; }
+.eyebrow { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--t4); margin: 0 0 10px; }
+h1 { font-size: 32px; line-height: 1.15; letter-spacing: -.02em; color: var(--t1); margin: 0 0 12px; font-weight: 600; }
+.deck { font-size: 16.5px; color: var(--t3); max-width: 860px; margin: 0; }
+h2 { font-size: 20px; color: var(--t1); margin: 64px 0 8px; font-weight: 600; }
+h2 + p { margin-top: 0; color: var(--t3); max-width: 860px; }
+.bar { display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center; margin: 24px 0 14px; }
+.bar > span { font-size: 12.5px; color: var(--t4); margin-right: -12px; }
+.group { display: inline-flex; background: var(--box); border-radius: 10px; padding: 3px; gap: 2px; }
+.group button { height: 32px; padding: 0 14px; border: 0; border-radius: 8px; background: transparent; color: var(--t3); font: inherit; font-size: 13.5px; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+.group button:hover { background: #2a2a30; color: var(--t1); }
+.group button.on { background: #36363d; color: var(--t1); }
+.group button.on:hover { background: #3e3e46; }
+.group button i { width: 10px; height: 10px; border-radius: 5px; display: inline-block; }
+.tag { font-size: 10.5px; color: #131316; background: var(--amber); border-radius: 4px; padding: 0 5px; font-weight: 600; }
+
+/* the app's window at its own size, scaled to fit the page */
+.fit { position: relative; width: 100%; }
+.win { position: absolute; left: 0; top: 0; width: 1440px; height: 1028px; transform-origin: 0 0; border-radius: 10px; overflow: hidden; background: var(--base); box-shadow: 0 0 0 1px var(--line); }
+.win .top, .win .foot { position: absolute; left: 0; width: 1440px; display: block; }
+.win .top { top: 0; height: 146px; }
+.win .foot { top: 366px; height: 662px; }
+
+/* the stage: the well the screen sits in, as wide as the screen and a 24px gutter all round
+   (908 by 220), centered on the page; the screen 860 by 172 in its middle */
+.stage { position: absolute; left: 296px; top: 146px; width: 908px; height: 220px; border-radius: 12px; background: var(--well); overflow: hidden; }
+.stage .glow, .stage .spill { position: absolute; left: 24px; top: 24px; width: 860px; height: 172px; border-radius: 2px; transition: box-shadow .25s, opacity .25s; }
+.stage img { position: absolute; left: 24px; top: 24px; width: 860px; height: 172px; display: block; }
+/* Side walls: the page's width. Flat, solid walls either side of a bay set into the
+   middle (908 wide: the screen and a 24px gutter), the bay in the screen's own color,
+   inset; no glow, no shading on the walls. The walls are the well's gray, or the
+   screen's color. */
+.walls { left: 84px; width: 1332px; background-color: var(--well); transition: background-color .45s ease; }
+.walls.tinted { background-color: var(--f); }
+.walls .bay { position: absolute; left: 212px; top: 0; width: 908px; height: 220px; border-radius: 10px; background-color: var(--f); transition: background-color .45s ease; box-shadow: inset 0 0 0 1px rgb(0 0 0 / .55), inset 0 6px 14px rgb(0 0 0 / .5); }
+.walls .glow, .walls .spill, .walls .wash { display: none; }
+.walls img { left: 236px; }
+.wall { display: none; }
+
+/* (Today, as the app draws it now: the well the page's width) */
+.stage.wide { left: 84px; width: 1332px; }
+.stage.wide .glow, .stage.wide .spill, .stage.wide img, .stage.wide .wash { left: 236px; }
+
+/* Lit by the screen: the screen's own color falls on the well round it */
+.lit .glow { box-shadow: 0 0 40px 2px rgb(var(--c) / .30); }
+.lit .spill { box-shadow: 0 0 150px 40px rgb(var(--c) / .10); }
+.lit.off .glow, .lit.off .spill { opacity: 0; }
+
+/* One with the screen: the well in the screen's own background color, and lit */
+.field { background: var(--f); transition: background-color .45s ease; }
+/* (the glow off: the well in the screen's color, and nothing more) */
+.field.noglow .glow, .field.noglow .spill, .field.noglow .wash { opacity: 0; }
+.stage .glow, .stage .spill, .stage .wash { transition: box-shadow .45s ease, opacity .45s ease, background .45s ease; }
+.field .glow { box-shadow: 0 0 40px 2px rgb(var(--c) / .30); }
+.field .spill { box-shadow: 0 0 150px 40px rgb(var(--c) / .10); }
+.field.off .glow, .field.off .spill, .field.off .wash { opacity: 0; }
+/* the same light over the screen's own background, so the screen has no darker edge */
+.stage .wash { position: absolute; left: 24px; top: 24px; width: 860px; height: 172px; display: none; pointer-events: none; mix-blend-mode: screen; }
+.field .wash { display: block; background: radial-gradient(ellipse 75% 95% at 50% 50%, rgb(var(--c) / .05) 0%, rgb(var(--c) / .11) 100%); }
+
+/* A deeper well: no color, the well sunk into the page */
+.deep { background-color: var(--f); transition: background-color .45s ease; box-shadow: inset 0 10px 26px rgb(0 0 0 / .55), inset 0 -1px 0 rgb(255 255 255 / .035); }
+/* its shading, a lighter middle and darker sides, laid over the well and the screen's background alike */
+.deep::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse 60% 90% at 50% 50%, rgb(255 255 255 / .035) 0%, rgb(255 255 255 / 0) 55%, rgb(0 0 0 / .28) 100%); }
+
+figcaption { font-size: 13px; color: var(--t4); margin-top: 10px; max-width: 900px; }
+.why { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 36px; margin-top: 22px; max-width: 1200px; }
+.why div { border-top: 1px solid var(--line); padding-top: 12px; color: var(--t3); font-size: 14.5px; }
+.why b { color: var(--t1); font-weight: 600; display: block; margin-bottom: 3px; }
+table { width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 14px; max-width: 1200px; }
+th, td { text-align: left; padding: 11px 12px; border-top: 1px solid var(--line); vertical-align: top; }
+th { color: var(--t4); font-weight: 500; font-size: 12.5px; text-transform: uppercase; letter-spacing: .06em; }
+td:first-child { color: var(--t1); white-space: nowrap; }
+td { color: var(--t3); }
+td code { color: var(--t1); font: 13px ui-monospace, monospace; background: var(--box); padding: 1px 6px; border-radius: 5px; }
+.crops { display: grid; grid-template-columns: 1fr; gap: 14px; margin-top: 20px; }
+.crop { position: relative; width: 100%; aspect-ratio: 1440 / 260; overflow: hidden; border-radius: 10px; box-shadow: 0 0 0 1px var(--line); }
+.crop .win { top: -126px; }
+.crop .label { position: absolute; left: 12px; bottom: 10px; font-size: 12.5px; color: var(--t2); background: rgb(14 14 16 / .8); padding: 2px 8px; border-radius: 6px; }
+@media (max-width: 900px) { .why { grid-template-columns: 1fr; } main { padding: 32px 16px 64px; } }
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Ectomatter · Screen tab</p>
+  <h1>A stage for the screen</h1>
+  <p class="deck">The Z10's screen is a light source. On today's Screen tab it sits in its well like a sticker: the well stays the same flat gray whatever the screen shows, so nothing says the screen is on. The proposal lets the screen's own light fall on the well around it, the way the keyboard's picture lights its box on the other tabs. No bezel, no glass, the screen the same size.</p>
+
+  <h2>Today, and the proposal</h2>
+  <p>The app as it draws the Screen tab now, with the well rebuilt at its true size. Change the light and the state; the stage follows the light of the page on the screen.</p>
+  <div class="bar">
+    <span>Treatment</span>
+    <div class="group" id="treat">
+      <button data-t="today">Today</button>
+      <button data-t="lit">Lit by the screen</button>
+      <button data-t="field">One with the screen</button>
+      <button data-t="deep">A deeper well</button>
+      <button data-t="walls" class="on">Side walls <span class="tag">Chosen</span></button>
+    </div>
+    <span>Light</span>
+    <div class="group" id="light">
+      <button data-l="red" class="on"><i style="background:#ff2000"></i>Red</button>
+      <button data-l="amber"><i style="background:#ff8a00"></i>Amber</button>
+      <button data-l="blue"><i style="background:#3fa9ff"></i>Blue</button>
+      <button data-l="white"><i style="background:#ffffff"></i>White</button>
+      <button data-l="off"><i style="background:#2a2a30"></i>Screen dark</button>
+    </div>
+    <span>Walls</span>
+    <div class="group" id="wallc">
+      <button data-w="gray" class="on">Gray</button>
+      <button data-w="tint">Screen color</button>
+    </div>
+    <span>Glow</span>
+    <div class="group" id="glow">
+      <button data-g="on" class="on">On</button>
+      <button data-g="off">Off</button>
+    </div>
+    <div class="group"><button id="cycle">Cycle colors</button></div>
+    <span>State</span>
+    <div class="group" id="state">
+      <button data-s="play" class="on">Playing</button>
+      <button data-s="edit">Editing</button>
+    </div>
+  </div>
+  <figure style="margin:0">
+    <div class="fit" id="fit"><div class="win" id="win">
+      <img class="top" id="top" src="screen-stage/play-top.png" alt="">
+      <div class="stage lit" id="stage"><div class="wall l"></div><div class="wall r"></div><div class="bay"></div><div class="spill"></div><div class="glow"></div><img id="scr" src="screen-stage/screen-red.png" alt="The Z10's screen playing Stats"><div class="wash"></div></div>
+      <img class="foot" id="foot" src="screen-stage/play-foot.png" alt="">
+    </div></div>
+    <figcaption id="cap"></figcaption>
+  </figure>
+
+  <h2>Side by side, red</h2>
+  <p>The stage alone, each way, at the app's size.</p>
+  <div class="crops" id="crops"></div>
+
+  <h2>Why this one</h2>
+  <p>One with the screen, your idea: the well takes the screen's own background color, the dark tint between its dots, and the screen's light falls across the well and the screen's background alike. The well stops being a frame and becomes the panel the screen lights. The dot grid still marks out the display, as it does on the keyboard. Lit by the screen, the first proposal, keeps the gray well; next to this, the screen sits in a lit frame rather than filling the stage.</p>
+  <div class="why">
+    <div><b>It says the screen is on</b>The glow is the screen's light, so it changes with the page's light, dims with the screen's brightness and goes out when the screen goes dark. A paused screen still glows, because the keyboard still shows the page.</div>
+    <div><b>One family with the keyboard</b>On Keys and Lighting, the keyboard's picture lights its box from its LEDs. The screen doing the same makes the two wells read as one idea.</div>
+    <div><b>Quiet in red, quiet in white</b>Thirty percent close in and ten percent wide is enough to read in every light color without tinting the boxes below; the well clips the light, so nothing spills onto the page.</div>
+    <div><b>Editing stays readable</b>The grid and outlines sit on the screen itself, so the light round the screen doesn't touch them.</div>
+  </div>
+
+  <h2>The runner-up, and what I dropped</h2>
+  <p><b style="color:var(--t1)">A deeper well</b> sinks the well into the page with an inner shadow and a lighter middle. It adds depth in every state, but it treats the screen as a picture on a shelf and looks the same whether the screen is lit, dark or blue. Dropped outright: a reflection under the screen (it reads as glass, which you ruled out), a frame or bezel (ruled out), scan lines or flicker (the Z10's dots don't do that), and a glow that pulses with what the screen shows (busy).</p>
+
+  <h2>How it would be built</h2>
+  <table>
+    <tr><th>Part</th><th>Value</th><th>Note</th></tr>
+    <tr><td>Close light</td><td>The screen's rectangle with a drop shadow in the page's light color, <code>40px</code> blur, <code>2px</code> spread, <code>30%</code></td><td>Slint draws this natively: one drop shadow on the rectangle under the screen.</td></tr>
+    <tr><td>Wide light</td><td>A second rectangle the same size behind it, <code>150px</code> blur, <code>40px</code> spread, <code>10%</code></td><td>Slint gives one shadow per element, so the wide one is its own rectangle.</td></tr>
+    <tr><td>Brightness</td><td>Both scaled by the screen's brightness</td><td>At 0% brightness, or with the screen dark, no light at all.</td></tr>
+    <tr><td>Color</td><td>The light of the page on the screen now</td><td>A page with its own light changes the stage as it comes on; the game-launch frames use the profile's light.</td></tr>
+    <tr><td>The well</td><td><code>#131316</code>, unchanged, clipping the light</td><td>The same well as the keyboard's box.</td></tr>
+  </table>
+</main>
+<script>
+const RGB = { red: '255 32 0', amber: '255 138 0', blue: '63 169 255', white: '255 255 255', off: '0 0 0' };
+// the screen's own background, between its dots, in each light (sampled from the app's renders)
+const FIELD = { play: { red: '#130200', amber: '#130a00', blue: '#050d13', white: '#131313', off: '#000000' },
+                edit: { red: '#140503', amber: '#140c03', blue: '#070e14', white: '#141414', off: '#000000' } };
+let t = 'walls', l = 'red', s = 'play', g = 'on', w = 'gray', cycling = null;
+const $ = id => document.getElementById(id);
+function fitAll() {
+  document.querySelectorAll('.fit').forEach(f => {
+    const w = f.querySelector('.win'); const k = Math.min(1, f.clientWidth / 1440);
+    w.style.transform = `scale(${k})`; f.style.height = 1028 * k + 'px';
+  });
+  document.querySelectorAll('.crop').forEach(c => {
+    const w = c.querySelector('.win'); const k = c.clientWidth / 1440;
+    w.style.transform = `scale(${k})`; w.style.top = (-126 * k) + 'px';
+  });
+}
+function screenSrc(light, state) { return light === 'off' ? 'screen-stage/screen-off.png' : `screen-stage/${state === 'edit' ? 'edit' : 'screen'}-${light}.png`; }
+function show() {
+  const st = $('stage');
+  st.className = 'stage' + (t === 'lit' ? ' lit' : t === 'field' ? ' field' : t === 'deep' ? ' deep' : t === 'walls' ? ' walls' + (w === 'tint' ? ' tinted' : '') : ' wide') + (l === 'off' ? ' off' : '') + (g === 'off' ? ' noglow' : '');
+  st.style.setProperty('--c', RGB[l]);
+  st.style.setProperty('--f', FIELD[s][l]);
+  $('scr').src = screenSrc(l, s);
+  $('top').src = `screen-stage/${s}-top.png`; $('foot').src = `screen-stage/${s}-foot.png`;
+  document.querySelectorAll('#treat button').forEach(b => b.classList.toggle('on', b.dataset.t === t));
+  document.querySelectorAll('#light button').forEach(b => b.classList.toggle('on', b.dataset.l === l));
+  document.querySelectorAll('#state button').forEach(b => b.classList.toggle('on', b.dataset.s === s));
+  document.querySelectorAll('#glow button').forEach(b => b.classList.toggle('on', b.dataset.g === g));
+  document.querySelectorAll('#wallc button').forEach(b => b.classList.toggle('on', b.dataset.w === w));
+  $('cycle').classList.toggle('on', !!cycling);
+  $('cycle').textContent = cycling ? 'Stop cycling' : 'Cycle colors';
+  $('cap').textContent = {
+    today: 'Today: the well is the same gray whatever the screen shows.',
+    lit: l === 'off' ? 'Lit by the screen, with the screen dark: no light, so the well looks as it does today.' : 'Lit by the screen: the light of the page on the screen falls on the well, close in and faintly wide.',
+    field: l === 'off' ? 'One with the screen, with the screen dark: the well goes black with the screen.' : 'One with the screen: the well takes the screen\'s own background color, so the screen has no edge, and the screen\'s light falls on the well.',
+    walls: w === 'tint' ? 'Side walls in the screen\'s color: flat walls either side, the screen in a bay set into the middle, no glow.' : 'Side walls in the well\'s gray: flat walls either side, as the keyboard\'s box is, and the screen in a bay set into the middle, in the screen\'s own color, no glow.',
+    deep: l === 'off' ? 'A deeper well, with the screen dark: a black well, sunk into the page.' : 'A deeper well: the well in the screen\'s own background color, sunk into the page with an inner shadow and a lighter middle; no glow.'
+  }[t];
+}
+document.querySelectorAll('#treat button').forEach(b => b.onclick = () => { t = b.dataset.t; show(); });
+document.querySelectorAll('#light button').forEach(b => b.onclick = () => { l = b.dataset.l; show(); });
+document.querySelectorAll('#state button').forEach(b => b.onclick = () => { s = b.dataset.s; show(); });
+document.querySelectorAll('#glow button').forEach(b => b.onclick = () => { g = b.dataset.g; show(); });
+document.querySelectorAll('#wallc button').forEach(b => b.onclick = () => { w = b.dataset.w; show(); });
+// the light stepping through the colors, as pages with their own light come on in turn
+const ORDER = ['red', 'amber', 'blue', 'white'];
+$('cycle').onclick = () => {
+  if (cycling) { clearInterval(cycling); cycling = null; show(); return; }
+  cycling = setInterval(() => { l = ORDER[(ORDER.indexOf(l) + 1) % ORDER.length]; show(); }, 2000);
+  show();
+};
+// the pictures loaded up front, so the steps never flash
+for (const k of ORDER) for (const st of ['screen', 'edit']) new Image().src = `screen-stage/${st}-${k}.png`;
+// the three, side by side
+const crops = $('crops');
+[['today', 'Today'], ['lit', 'Lit by the screen'], ['field', 'One with the screen'], ['deep', 'A deeper well'], ['walls', 'Side walls, gray'], ['walls tinted', 'Side walls, screen color']].forEach(([k, name]) => {
+  const d = document.createElement('div'); d.className = 'crop';
+  d.innerHTML = `<div class="win"><img class="top" src="screen-stage/play-top.png" alt=""><div class="stage ${k === 'today' ? 'wide' : k}" style="--c:${RGB.red};--f:${FIELD.play.red}"><div class="wall l"></div><div class="wall r"></div><div class="bay"></div><div class="spill"></div><div class="glow"></div><img src="screen-stage/screen-red.png" alt=""><div class="wash"></div></div><img class="foot" src="screen-stage/play-foot.png" alt=""></div><span class="label">${name}</span>`;
+  crops.append(d);
+});
+// any state, straight from the address: #amber-edit, #blue, #off
+const h = location.hash.slice(1).split('-');
+if (['today', 'lit', 'field', 'deep', 'walls'].includes(h[0])) t = h.shift();
+if (h[0] === 'tint') { w = 'tint'; h.shift(); }
+if (h[0] === 'noglow') { g = 'off'; h.shift(); }
+if (RGB[h[0]]) l = h[0];
+if (h[1] === 'edit') s = 'edit';
+addEventListener('resize', fitAll); fitAll(); show();
+if (location.hash.includes('cycle')) $('cycle').click();
+</script>
+</body>
+</html>

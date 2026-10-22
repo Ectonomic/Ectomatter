@@ -1,0 +1,54 @@
+[package]
+name = "ectomatter"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Ectomatter as a native window: every pixel drawn in Rust, the keyboard in HDR"
+
+[dependencies]
+bytemuck = "1"
+ectomatter-draw = { path = "../../crates/ectomatter-draw" }
+# the core protocol's shared names and actions
+ectomatter-protocol = { path = "../../crates/ectomatter-protocol" }
+ectomatter-weather = { version = "0.1.0", path = "../../crates/ectomatter-weather" }
+evga-z10 = { version = "0.1.0", path = "../../crates/evga-z10" }
+# the USB devices cores reach, each through Ectomatter (core_host.rs)
+hidapi = "2.6"
+# cores run as WebAssembly components (core_host.rs, the interface in wit/core.wit)
+wasmtime = "=49.0.2"
+wasmtime-wasi = "=49.0.2"
+ksni = { version = "0.3", default-features = false, features = ["blocking", "async-io"] }
+# the desktop portal's file picker (picker.rs), the same zbus the tray uses
+zbus = { version = "5.19", default-features = false, features = ["async-io", "blocking-api"] }
+resvg = "0.45"
+rustybuzz = "0.20.1"
+serde_json = "1.0.151"
+# the window adapter says which cursor Slint asks for, through its internal hook
+i-slint-core = "=1.18.1"
+slint = { version = "=1.18.1", default-features = false, features = ["compat-1-2", "std", "renderer-software", "software-renderer-systemfonts"] }
+smithay-client-toolkit = { version = "0.19", default-features = false, features = ["calloop", "xkbcommon"] }
+sys-locale = "0.3.2"
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+# KDE's own account of each screen (kde-output-device-v2, vendored in protocols/)
+wayland-scanner = "0.31"
+wayland-backend = "0.3"
+bitflags = "2"
+libc = "0.2"
+# game names folded to plain letters for the screen, as the z10-lcd service did (NFKD)
+unicode-normalization = "0.1"
+# the Library's Steam games (steam.rs): where Steam is on Linux, Windows and macOS, its
+# libraries and installed apps; and its binary appinfo.vdf, which says which app is a game
+steamlocate = "2.1.1"
+steam-vdf-parser = "0.1.2"
+# plugins added from a file or their GitHub releases (packages.rs, updates.rs): a
+# package is a zip of its folder, fetched over HTTPS as the weather is
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+
+[dev-dependencies]
+# the parity vectors the Z10 module is checked against are gzipped
+flate2 = "1"
+
+[build-dependencies]
+slint-build = "1.18.1"

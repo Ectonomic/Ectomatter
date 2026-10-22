@@ -1,0 +1,9 @@
+# Ectomatter's fonts for a keyboard's glyphs
+
+The glyphs a key's legend can have that its typeface lacks: ⌘ ⌥ ⇧ ⎋ ⏻ and the rest of the Unicode blocks they come from (arrows, mathematical operators, technical signs, control pictures, shapes, symbols, and the supplemental arrows), the volume keys' speakers, and heavy arrows with wide tips. Ectomatter builds them in, so a typed legend draws the same, and the Key lab's glyph list still shows every glyph, on a computer that has none of the fonts they were cut from. The legends reach them after a core's own symbols font, and the lab's text after the computer's own fonts.
+
+- `KeyGlyphs-Bold.ttf`: Ectomatter Key Glyphs, the glyphs of DejaVu Sans Bold 2.37, 778 of them, under the Bitstream Vera and Arev licenses (`DejaVu-LICENSE.txt`).
+- `KeyGlyphsSymbols-Regular.ttf`: Ectomatter Key Glyphs Symbols, the glyphs of Noto Sans Symbols 2.003, at its Regular weight, 251 of them, under the SIL Open Font License 1.1 (`Noto-OFL.txt`).
+- `KeyGlyphsSymbols2-Regular.ttf`: Ectomatter Key Glyphs Symbols 2, the glyphs of Noto Sans Symbols 2 2.008, 543 of them, under the SIL Open Font License 1.1 (`Noto-OFL.txt`).
+
+Each is cut from its font and renamed, as DejaVu's license asks of a changed font and as Google's trademark on Noto asks. Built by `tools/glyph_fonts.py`.

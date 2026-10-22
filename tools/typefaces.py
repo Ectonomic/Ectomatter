@@ -1,8 +1,8 @@
-"""Ectodeck's own typefaces for legends: the faces keyboards are printed in,
-each under a license that lets Ectodeck carry it (SIL Open Font License or
+"""Ectomatter's own typefaces for legends: the faces keyboards are printed in,
+each under a license that lets Ectomatter carry it (SIL Open Font License or
 MIT), so a setup looks the same on any computer.
 
-  typefaces.py SOURCES    writes crates/ectodeck-draw/typefaces/ from the
+  typefaces.py SOURCES    writes crates/ectomatter-draw/typefaces/ from the
                           font files in SOURCES (as downloaded from their
                           projects, named below), with their licenses and a README
 
@@ -21,7 +21,7 @@ from fontTools.ttLib import TTFont
 from fontTools.varLib import instancer
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / 'crates/ectodeck-draw/typefaces'
+OUT = ROOT / 'crates/ectomatter-draw/typefaces'
 
 # (file written, source file, cut to these letters or None to carry it as it comes, look, project, license)
 LATIN = [(0x20, 0x52F), (0x1E00, 0x1EFF), (0x2000, 0x206F), (0x20A0, 0x20CF), (0x2100, 0x21FF)]
@@ -95,9 +95,9 @@ def main(sources):
     (OUT / 'OpenGorton-LICENSE.txt').write_bytes((Path(sources) / 'OpenGorton-LICENSE.txt').read_bytes())
     lines = [f'- `{file}`: {look}. {project}, {license}.' for file, _, _, look, project, license in FACES]
     (OUT / 'README.md').write_text(
-        '# Ectodeck\'s typefaces for legends\n\n'
-        'The faces keyboards are printed in, built into Ectodeck so a setup\'s legends look the same on any computer. '
-        'Each is under a license that lets Ectodeck carry it: the SIL Open Font License 1.1 (`OFL.txt`, with each font\'s own copyright in the font) or MIT (`OpenGorton-LICENSE.txt`). '
+        '# Ectomatter\'s typefaces for legends\n\n'
+        'The faces keyboards are printed in, built into Ectomatter so a setup\'s legends look the same on any computer. '
+        'Each is under a license that lets Ectomatter carry it: the SIL Open Font License 1.1 (`OFL.txt`, with each font\'s own copyright in the font) or MIT (`OpenGorton-LICENSE.txt`). '
         'Each is cut to the letters keyboards print, a variable font keeping all its weights; Audiowide and Orbitron, whose licenses reserve their names, are carried as they come.\n\n'
         + '\n'.join(lines) + '\n\nBuilt by `tools/typefaces.py`.\n')
     print('typefaces written:', sorted(p.name for p in OUT.iterdir()))
