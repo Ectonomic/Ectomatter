@@ -1,6 +1,8 @@
 //! Ectodeck playing the Z10's screen, as the z10-lcd service did: the Stats
-//! page once a second, and game-helper's launch and exit sequences breaking
-//! in when its note changes. The loop is z10lcd.py's main loop, carried over
+//! page once a second, and the launch and exit sequences breaking in when a
+//! game starts or quits, as the Screen tab's Game launch says (Ectodeck sees
+//! a game start and quit itself, games.rs; game-helper's note, while it runs,
+//! names the steps it takes and how far it has got). The loop is z10lcd.py's main loop, carried over
 //! step for step (see [Core::tick]), so the keyboard shows the same frames at
 //! the same moments; what Ectodeck adds sits around it: a pause, whether
 //! launches break in, standing aside while the old service still runs or while
@@ -144,13 +146,71 @@ fn int(v: Option<&String>, default: i64) -> i64 {
     v.and_then(|s| s.trim().parse::<i64>().ok()).unwrap_or(default)
 }
 
-/// Turns game-helper's notes into the launch and exit sequences.
+/// What game-helper's note last said, and the sequence playing.
 struct Session {
     key: Option<(Option<String>, Option<String>)>,
     ev: Arc<Mutex<HashMap<String, String>>>,
     frames: Option<Playing>,
     /// which sequence is playing: "launch" or "exit"
     kind: Option<&'static str>,
+}
+
+/// How long a screen stays as a game starts or quits: until the game's window
+/// opens (starting), until everything is put back (quitting), or some seconds.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Until {
+    Window,
+    Done,
+    Secs(u32),
+}
+
+/// What the Screen tab's Game launch shows as a game starts, or as one quits:
+/// whether anything, which layout (None: the screen as it ships, with its
+/// animation), and until when.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Showing {
+    pub on: bool,
+    pub layout: Option<crate::lcd_page::Page>,
+    pub until: Until,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Launch {
+    pub start: Showing,
+    pub quit: Showing,
+}
+
+impl Default for Launch {
+    /// As the note played them before there was a Game launch: both screens as they
+    /// ship, the launch screen held no longer than its own animation.
+    fn default() -> Launch {
+        Launch { start: Showing { on: true, layout: None, until: Until::Secs(0) }, quit: Showing { on: true, layout: None, until: Until::Done } }
+    }
+}
+
+/// A game as Ectodeck saw it: started, or quit (each with its readings), or
+/// its window come to the front.
+#[derive(Clone, Debug, PartialEq)]
+pub enum GameSeen {
+    Started(crate::lcd_page::Game),
+    Quit(crate::lcd_page::Game),
+    Window,
+}
+
+/// A game's name as the note and the Library are matched by: plain letters, any case.
+fn folded(name: &str) -> String {
+    plain(name).to_lowercase()
+}
+
+/// What the note says of a game's steps, if the note is of that game in that phase:
+/// its steps, and how many are done (all of them once game-helper has gone).
+fn note_steps(ev: &HashMap<String, String>, game: &str, phase: &str) -> Option<(Vec<String>, i64)> {
+    if ev.get("phase").map(String::as_str) != Some(phase) || folded(ev.get("name").map_or("", |s| s.as_str())) != folded(game) {
+        return None;
+    }
+    let steps: Vec<String> = ev.get("steps").map_or("", |s| s.as_str()).split('|').filter(|x| !x.is_empty()).map(String::from).collect();
+    let done = if alive(ev) { int(ev.get("done"), 0) } else { 1_000_000 };
+    Some((steps, done))
 }
 
 fn alive(ev: &HashMap<String, String>) -> bool {
@@ -162,38 +222,21 @@ impl Session {
         Session { key: None, ev: Arc::new(Mutex::new(HashMap::new())), frames: None, kind: None }
     }
 
-    fn update(&mut self, ev: HashMap<String, String>, shown: Vec<String>, stats: Ask<Vec<String>>, seed: &mut dyn FnMut() -> u64) {
+    /// The note as it reads now: a new phase of a session is a game starting or
+    /// quitting, said back as the phase, the game's name and, quitting, the minutes
+    /// played; anything else is progress on the sequence playing.
+    fn update(&mut self, ev: HashMap<String, String>) -> Option<(&'static str, String, i64)> {
         *self.ev.lock().unwrap() = ev.clone();
         let key = (ev.get("session").cloned(), ev.get("phase").cloned());
         if self.key.as_ref() == Some(&key) {
-            // progress on the sequence already playing
-            return;
+            return None;
         }
         self.key = Some(key);
         let name = Some(plain(ev.get("name").map_or("", |s| s.as_str()))).filter(|n| !n.is_empty()).unwrap_or_else(|| "GAME".into());
-        let steps: Vec<String> = ev.get("steps").map_or("", |s| s.as_str()).split('|').filter(|x| !x.is_empty()).map(String::from).collect();
-        // (if game-helper has gone away, stop waiting on it)
-        let shared = self.ev.clone();
-        let done: Ask<i64> = Arc::new(move || {
-            let ev = shared.lock().unwrap();
-            if alive(&ev) { int(ev.get("done"), 0) } else { 1_000_000 }
-        });
         match ev.get("phase").map(|s| s.as_str()) {
-            Some("launch") => {
-                self.frames = Some(Playing::launch(seed(), name, steps, done, stats, shown));
-                self.kind = Some("launch");
-            }
-            Some("exit") => {
-                let minutes = ((int(ev.get("ended"), 0) - int(ev.get("started"), 0)).div_euclid(60)).max(0);
-                let shared = self.ev.clone();
-                let finished: Ask<bool> = Arc::new(move || {
-                    let ev = shared.lock().unwrap();
-                    ev.get("finished").is_some_and(|f| f == "1") || !alive(&ev)
-                });
-                self.frames = Some(Playing::exit(seed(), name, steps, minutes, done, finished, stats, shown));
-                self.kind = Some("exit");
-            }
-            _ => {}
+            Some("launch") => Some(("launch", name, 0)),
+            Some("exit") => Some(("exit", name, ((int(ev.get("ended"), 0) - int(ev.get("started"), 0)).div_euclid(60)).max(0))),
+            _ => None,
         }
     }
 
@@ -236,6 +279,10 @@ pub enum Control {
     /// keyboard is using (its number and name), and the weather outside (°C, the
     /// sky in words)
     Context(Option<(u8, String)>, Option<(f64, String)>),
+    /// what the Screen tab's Game launch shows as a game starts and quits
+    GameSetup(Launch),
+    /// a game Ectodeck saw start or quit, or its window come to the front
+    Game(GameSeen),
 }
 
 /// What the player tells Ectodeck: what the screen shows, and why.
@@ -306,6 +353,22 @@ pub struct Core {
     /// so as it draws, see [crate::lcd_page::pace]): an effect every tenth of a second, words
     /// scrolling a cell's step at a time; 0 while it holds still, drawn once a second
     pub pace: Arc<AtomicU32>,
+    /// what the Game launch shows as a game starts and quits
+    pub launch: Launch,
+    /// the game starting, playing or quitting (or the last one), for the pages' readings;
+    /// whether its window has come to the front since it started
+    pub game: Arc<Mutex<Option<crate::lcd_page::Game>>>,
+    window: Arc<AtomicBool>,
+    /// the loop's clock, as its last turn read it (seconds, as f64 bits), for what a
+    /// screen shows until
+    clock: Arc<std::sync::atomic::AtomicU64>,
+    /// the sequences shown lately: their phase, their game, whether the note brought
+    /// it on, when; so the note and Ectodeck's own sight of the same game starting (or
+    /// quitting) bring on one screen, not two
+    shown_for: Vec<(&'static str, String, bool, f64)>,
+    /// a layout drawn with the computer's readings and the game's, a moment into it
+    /// (none in the tests, where a layout shows as the screen ships it)
+    pub draw: Option<Arc<dyn Fn(&crate::lcd_page::Page, f64) -> Vec<String> + Send + Sync>>,
 }
 
 impl Core {
@@ -338,7 +401,85 @@ impl Core {
             held: None,
             aside: false,
             pace: Arc::new(AtomicU32::new(0)),
+            launch: Launch::default(),
+            game: Arc::new(Mutex::new(None)),
+            window: Arc::new(AtomicBool::new(false)),
+            clock: Arc::new(std::sync::atomic::AtomicU64::new(0f64.to_bits())),
+            shown_for: Vec::new(),
+            draw: None,
         }
+    }
+
+    /// A game Ectodeck saw start or quit, or its window come to the front.
+    pub fn game_seen(&mut self, seen: GameSeen, now: f64) {
+        match seen {
+            GameSeen::Started(g) => {
+                self.window.store(false, Ordering::Relaxed);
+                let name = plain(&g.name);
+                *self.game.lock().unwrap() = Some(g);
+                self.announce("launch", name, 0, false, now);
+            }
+            GameSeen::Quit(g) => {
+                let minutes = g.session(crate::games::now()) as i64;
+                let name = plain(&g.name);
+                *self.game.lock().unwrap() = Some(g);
+                self.announce("exit", name, minutes, false, now);
+            }
+            GameSeen::Window => self.window.store(true, Ordering::Relaxed),
+        }
+    }
+
+    /// A game starting ("launch") or quitting ("exit"), by the note or seen by
+    /// Ectodeck: its screen comes in, unless the Game launch shows none, the
+    /// screen is left to the keyboard, or the other of the two brought that game's
+    /// screen in just now (a second start of the game, told the same way, is a start).
+    fn announce(&mut self, phase: &'static str, name: String, minutes: i64, by_note: bool, now: f64) {
+        if !self.announce || self.aside {
+            return;
+        }
+        let show = if phase == "launch" { self.launch.start.clone() } else { self.launch.quit.clone() };
+        if !show.on {
+            return;
+        }
+        let key = folded(&name);
+        self.shown_for.retain(|(_, _, _, t)| now - *t < 60.0);
+        if self.shown_for.iter().any(|(p, n, note, _)| *p == phase && *n == key && *note != by_note) {
+            return;
+        }
+        self.shown_for.push((phase, key, by_note, now));
+        let start = match &self.shown {
+            Some(s) => s.clone(),
+            None => (self.stats)(),
+        };
+        let (note, game) = (self.session.ev.clone(), name.clone());
+        let steps: Ask<Vec<String>> = Arc::new(move || note_steps(&note.lock().unwrap(), &game, phase).map(|s| s.0).unwrap_or_default());
+        let (note, game) = (self.session.ev.clone(), name.clone());
+        let done: Ask<i64> = Arc::new(move || note_steps(&note.lock().unwrap(), &game, phase).map_or(1_000_000, |s| s.1));
+        let (note, game, window, clock) = (self.session.ev.clone(), name.clone(), self.window.clone(), self.clock.clone());
+        let until: Ask<bool> = Arc::new(move || match show.until {
+            Until::Window => window.load(Ordering::Relaxed),
+            Until::Secs(n) => f64::from_bits(clock.load(Ordering::Relaxed)) - now >= n as f64,
+            // (everything put back: the note's game-helper finished, or gone, or no note at all)
+            Until::Done => {
+                let ev = note.lock().unwrap();
+                note_steps(&ev, &game, "exit").is_none() || ev.get("finished").is_some_and(|f| f == "1") || !alive(&ev)
+            }
+        });
+        let seed = (self.seeds)();
+        let layout = show.layout.clone().filter(|p| p.as_shipped_game().is_none());
+        self.session.frames = Some(match (layout, &self.draw) {
+            (Some(page), Some(draw)) => {
+                let draw = draw.clone();
+                let from = Instant::now();
+                Playing::layout(seed, Arc::new(move || draw(&page, from.elapsed().as_secs_f64())), until, phase == "exit", self.stats.clone(), start)
+            }
+            _ if phase == "launch" => Playing::launch(seed, name, steps, done, until, self.stats.clone(), start),
+            _ => Playing::exit(seed, name, steps, minutes, done, until, self.stats.clone(), start),
+        });
+        self.session.kind = Some(phase);
+        self.frame_until = 0.0;
+        // (a game's screen breaks in on a page coming in, too)
+        self.between.clear();
     }
 
     /// When the page showing is drawn next: once a second, or while it moves (an effect,
@@ -384,6 +525,7 @@ impl Core {
     /// One turn of the loop at `now` (seconds); false when the next turn
     /// should come at once, without the usual 10 ms sleep.
     pub fn tick(&mut self, now: f64) -> bool {
+        self.clock.store(now.to_bits(), Ordering::Relaxed);
         // (standing aside, the keyboard's own screen shows: nothing is drawn)
         if self.aside {
             return true;
@@ -391,16 +533,17 @@ impl Core {
         let (sig, ev) = read_event(&self.event);
         if sig != self.last_sig {
             self.last_sig = sig;
-            // (a note with nothing in it is no note)
-            if let (Some(ev), true) = (ev.filter(|e| !e.is_empty()), self.announce) {
-                let start = match &self.shown {
-                    Some(s) => s.clone(),
-                    None => (self.stats)(),
-                };
-                self.session.update(ev, start, self.stats.clone(), &mut self.seeds);
-                self.frame_until = 0.0;
-                // (a game's launch breaks in on a page coming in, too)
-                self.between.clear();
+            // (a note with nothing in it is no note; one that changes has the next frame
+            // come at once, as the service had it, whatever it changed)
+            if let Some(ev) = ev.filter(|e| !e.is_empty()) {
+                let news = self.session.update(ev);
+                if self.announce {
+                    if let Some((phase, name, minutes)) = news {
+                        self.announce(phase, name, minutes, true, now);
+                    }
+                    self.frame_until = 0.0;
+                    self.between.clear();
+                }
             }
         }
         if self.session.frames.is_some() {
@@ -674,7 +817,7 @@ pub struct Player {
 
 impl Player {
     /// Start playing; each frame sent, and each change of state, goes to `news`.
-    pub fn start(news: impl Fn(News) + Send + 'static, announce: bool, paused: bool, screen: Box<dyn Sink>) -> Player {
+    pub fn start(news: impl Fn(News) + Send + 'static, announce: bool, launch: Launch, paused: bool, screen: Box<dyn Sink>) -> Player {
         let (tell, heard) = mpsc::channel::<Control>();
         std::thread::spawn(move || {
             let stats = Arc::new(Mutex::new(Stats::here()));
@@ -687,18 +830,42 @@ impl Player {
             let (reader, page, at, moves) = (stats.clone(), shared.clone(), current.clone(), pace.clone());
             // the computer read once a second, however often the page is drawn; and the page
             // showing, and when it came on, which its scrolling words are timed from
-            let kept: Mutex<(Option<(Instant, crate::lcd_page::Readings)>, Option<(usize, String, Instant)>)> = Mutex::new((None, None));
+            let kept: Arc<Mutex<(Option<(Instant, crate::lcd_page::Readings)>, Option<(usize, String, Instant)>)>> = Arc::new(Mutex::new((None, None)));
+            // the game starting, playing or quitting, and the note's steps for it
+            let game: Arc<Mutex<Option<crate::lcd_page::Game>>> = Arc::new(Mutex::new(None));
+            let note: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
+            // everything a page may show, now: the computer read once a second, the rest as it is
+            let read: Arc<dyn Fn() -> crate::lcd_page::Readings + Send + Sync> = {
+                let (kept, page, game, note) = (kept.clone(), shared.clone(), game.clone(), note.clone());
+                Arc::new(move || {
+                    let mut k = kept.lock().unwrap();
+                    if k.0.as_ref().is_none_or(|(t, _)| t.elapsed() >= Duration::from_millis(990)) {
+                        k.0 = Some((Instant::now(), reader.lock().unwrap().read()));
+                    }
+                    let mut r = k.0.as_ref().unwrap().1.clone();
+                    let p = page.lock().unwrap();
+                    r.now = Some(crate::lcd_page::Moment::now());
+                    r.profile = p.1.as_ref().map(|(_, name)| name.clone());
+                    r.profile_number = p.1.as_ref().map(|(n, _)| *n);
+                    r.outside = p.2.clone();
+                    r.game = game.lock().unwrap().clone().map(|mut g| {
+                        // (what game-helper is setting or putting back, while its note is of this game)
+                        let ev = note.lock().unwrap();
+                        if let Some((steps, done)) = note_steps(&ev, &g.name, "launch").or_else(|| note_steps(&ev, &g.name, "exit")) {
+                            let d = (done.max(0) as usize).min(steps.len());
+                            g.changing = steps.get(d).cloned().unwrap_or_default();
+                            g.done = (d, steps.len());
+                        }
+                        g
+                    });
+                    r
+                })
+            };
+            let (reading, kept_page) = (read.clone(), kept.clone());
             let ask: Ask<Vec<String>> = Arc::new(move || {
-                let mut k = kept.lock().unwrap();
-                if k.0.as_ref().is_none_or(|(t, _)| t.elapsed() >= Duration::from_millis(990)) {
-                    k.0 = Some((Instant::now(), reader.lock().unwrap().read()));
-                }
-                let mut r = k.0.as_ref().unwrap().1.clone();
+                let r = reading();
+                let mut k = kept_page.lock().unwrap();
                 let p = page.lock().unwrap();
-                r.now = Some(crate::lcd_page::Moment::now());
-                r.profile = p.1.as_ref().map(|(_, name)| name.clone());
-                r.profile_number = p.1.as_ref().map(|(n, _)| *n);
-                r.outside = p.2.clone();
                 let i = at.load(Ordering::Relaxed);
                 let Some(page) = p.0.get(i).or(p.0.first()) else { return Vec::new() };
                 if k.1.as_ref().is_none_or(|(j, id, _)| *j != i || *id != page.id) {
@@ -710,6 +877,11 @@ impl Player {
             });
             let seeds = Box::new(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64));
             let mut core = Core::new(screen, ask, runtime_dir().join("z10-lcd/session"), seeds);
+            core.session.ev = note;
+            core.game = game;
+            core.launch = launch;
+            let drawing = read.clone();
+            core.draw = Some(Arc::new(move |p: &crate::lcd_page::Page, t: f64| crate::lcd_page::render_at(p, &drawing(), t)));
             core.frame_file = Some(runtime_dir().join("z10-lcd/frame"));
             core.trace = std::env::var_os("Z10_LCD_TRACE").map(PathBuf::from);
             core.announce = announce;
@@ -744,6 +916,8 @@ impl Player {
                             core.stand_aside(a, start.elapsed().as_secs_f64());
                         }
                         Control::Hold(i) => core.hold_on(i),
+                        Control::GameSetup(l) => core.launch = l,
+                        Control::Game(seen) => core.game_seen(seen, start.elapsed().as_secs_f64()),
                         Control::Context(profile, outside) => {
                             let mut s = shared.lock().unwrap();
                             if s.1 != profile || s.2 != outside {
@@ -820,6 +994,108 @@ impl Core {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A screen that keeps what it's sent.
+    struct Sent(Arc<Mutex<Vec<Vec<String>>>>);
+    impl Sink for Sent {
+        fn find(&mut self) -> bool {
+            true
+        }
+        fn send(&mut self, rows: &[String], _cmd: u8) -> Result<(), ()> {
+            self.0.lock().unwrap().push(rows.to_vec());
+            Ok(())
+        }
+    }
+
+    /// A player with no note, the Stats page as `stats`, run a while: what it sent.
+    fn player(note: &Path) -> (Core, Arc<Mutex<Vec<Vec<String>>>>) {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let stats: Ask<Vec<String>> = Arc::new(|| vec!["CPU 40° 5%".into(), String::new(), String::new(), String::new()]);
+        let core = Core::new(Box::new(Sent(sent.clone())), stats, note.to_path_buf(), Box::new(|| 7));
+        (core, sent)
+    }
+
+    fn run_for(core: &mut Core, from: f64, secs: f64) -> f64 {
+        let mut now = from;
+        while now < from + secs {
+            if core.tick(now) {
+                now += 0.01;
+            }
+        }
+        now
+    }
+
+    fn arc() -> crate::lcd_page::Game {
+        crate::lcd_page::Game { name: "ARC Raiders".into(), since: crate::games::now(), ..Default::default() }
+    }
+
+    /// A game Ectodeck sees start brings in the launch screen with no note at all; held
+    /// until the game's window opens, the screen waits at READY, then goes back to the page.
+    #[test]
+    fn a_game_seen_starting_brings_in_its_screen_held_till_its_window_opens() {
+        let dir = std::env::temp_dir().join(format!("ectodeck-seen-{}", std::process::id()));
+        let (mut core, sent) = player(&dir.join("session"));
+        core.launch.start.until = Until::Window;
+        let now = run_for(&mut core, 0.0, 1.0);
+        core.game_seen(GameSeen::Started(arc()), now);
+        let now = run_for(&mut core, now, 8.0);
+        let rows = sent.lock().unwrap().clone();
+        assert!(rows.iter().any(|r| r[0].starts_with("> LAUNCHING")) && rows.iter().any(|r| r[1].trim() == "ARC RAIDERS"), "the name comes in");
+        assert!(rows.last().unwrap()[0].starts_with("> READY"), "held at READY while the window hasn't opened: {:?}", rows.last());
+        assert!(core.playing_sequence());
+        core.game_seen(GameSeen::Window, now);
+        run_for(&mut core, now, 3.0);
+        assert!(!core.playing_sequence(), "gone back to the playlist once the window opened");
+        assert_eq!(sent.lock().unwrap().last().unwrap()[0], "CPU 40° 5%");
+    }
+
+    /// The note and Ectodeck's own sight of the same game bring in one screen, not two;
+    /// a Game launch showing nothing brings in none.
+    #[test]
+    fn one_game_starting_brings_in_one_screen_or_none() {
+        let dir = std::env::temp_dir().join(format!("ectodeck-once-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let note = dir.join("session");
+        let (mut core, _) = player(&note);
+        let now = run_for(&mut core, 0.0, 0.5);
+        core.game_seen(GameSeen::Started(arc()), now);
+        let now = run_for(&mut core, now, 0.5);
+        assert!(core.playing_sequence());
+        core.drop_sequence();
+        // game-helper's note of the same game, just after: no second screen
+        std::fs::write(&note, format!("session=1-1\npid={}\nphase=launch\nname=ARC Raiders\nsteps=MONITORS\ndone=0\n", std::process::id())).unwrap();
+        run_for(&mut core, now, 0.5);
+        assert!(!core.playing_sequence(), "the note's launch is the same game's, already shown");
+        // the game started again, as Ectodeck sees it: that's a start, and it's shown
+        core.game_seen(GameSeen::Started(arc()), now + 1.0);
+        assert!(core.playing_sequence(), "a second start is shown");
+        let (mut off, _) = player(&dir.join("none"));
+        off.launch.start.on = false;
+        off.game_seen(GameSeen::Started(arc()), 0.0);
+        assert!(!off.playing_sequence(), "Game launch shows nothing as a game starts");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A layout of one's own shows in place of the launch screen, drawn with the game's readings.
+    #[test]
+    fn a_layout_shows_in_place_of_the_launch_screen() {
+        let dir = std::env::temp_dir().join(format!("ectodeck-layout-{}", std::process::id()));
+        let (mut core, sent) = player(&dir.join("session"));
+        let game = core.game.clone();
+        core.draw = Some(Arc::new(move |p: &crate::lcd_page::Page, _t| {
+            let r = crate::lcd_page::Readings { game: game.lock().unwrap().clone(), ..Default::default() };
+            crate::lcd_page::render(p, &r)
+        }));
+        let mut page = crate::lcd_page::Page::built_in("game-launch").unwrap();
+        page.pieces.retain(|p| p.row == 1);
+        core.launch.start = Showing { on: true, layout: Some(page), until: Until::Secs(1) };
+        core.game_seen(GameSeen::Started(arc()), 0.0);
+        run_for(&mut core, 0.0, 4.0);
+        let rows = sent.lock().unwrap().clone();
+        assert!(rows.iter().any(|r| r[1].trim() == "ARC RAIDERS" && r[0].trim().is_empty()), "the layout, its game's name read");
+        assert!(!rows.iter().any(|r| r[0].starts_with("> LAUNCHING")), "and not the launch screen");
+        assert!(!core.playing_sequence());
+    }
 
     #[test]
     fn frames_as_the_service_built_them() {

@@ -304,6 +304,48 @@ export struct DeskPad {
     drawing: bool,
 }
 
+// a game's cover in the Library's grid: its name, its picture (none while it's
+// read) with its corners rounded, its place on the page, and whether it's a favorite
+export struct LibCover {
+    name: string,
+    pic: image,
+    x: length,
+    y: length,
+    w: length,
+    h: length,
+    fav: bool,
+}
+
+// a row of the Library's Apps tab: its name, what it changes, where it came
+// from, and its icon, if it has one
+export struct LibApp {
+    name: string,
+    sub: string,
+    from: string,
+    icon: image,
+    has-icon: bool,
+}
+
+// a row of the Screen tab's Game launch: whether it shows anything, its words, the
+// layout it shows (by name), until when, whether its bar is selected (its layout on the
+// screen above), and whether a layout carried from Layouts is over its bar
+export struct GlRow {
+    on: bool,
+    words: string,
+    layout: string,
+    until: string,
+    chosen: bool,
+    over: bool,
+}
+
+// a run of words under a game's picture, placed by the window: its words,
+// whether they're a number to stand out in ink, and where they start
+export struct LibFact {
+    text: string,
+    strong: bool,
+    x: length,
+}
+
 // a row in a menu: 0 a choice, 1 a heading, 2 a rule, 3 a note, 4 a choice
 // in red (one that deletes), 5 a choice that can't be made now
 export struct MenuRow {
@@ -430,18 +472,32 @@ component WordButton inherits Rectangle {
     in property <color> fill-hover: Ink.shade2;
     // as wide as it is given, rather than as its words
     in property <length> wide: 0;
+    // a filled glyph before its words, on a 14-unit square (Play's triangle)
+    in property <string> icon;
     out property <bool> hover: ta.has-hover && root.enabled;
     out property <bool> down: ta.pressed && root.enabled;
     callback clicked;
     height: root.primary ? 32px : 30px;
-    width: root.wide > 0 ? root.wide : label.preferred-width + 24px + (root.primary ? 2px : 0);
+    property <length> icon-w: root.icon != "" ? 14px + 8px : 0;
+    width: root.wide > 0 ? root.wide : label.preferred-width + 24px + root.icon-w + (root.primary ? 2px : 0);
     border-radius: 8px;
     // turned off, the whole button fades to 35% over the page's ground, as the
     // web app's does; faded piece by piece, its words would come out lighter
     property <color> face: root.primary ? (ta.has-hover && root.enabled ? #ffffff : Ink.ink) : ta.has-hover && root.enabled ? root.fill-hover : root.fill;
     property <color> ink: root.primary ? Ink.base : Ink.ink;
     background: root.enabled ? root.face : root.face.mix(Ink.base, 0.35);
+    if root.icon != "": Path {
+        x: (parent.width - label.width - root.icon-w) / 2;
+        y: (parent.height - 14px) / 2 + (ta.pressed && root.enabled ? 1px : 0);
+        width: 14px;
+        height: 14px;
+        viewbox-width: 14;
+        viewbox-height: 14;
+        commands: root.icon;
+        fill: root.enabled ? root.ink : root.ink.mix(Ink.base, 0.35);
+    }
     label := Text {
+        x: (parent.width - self.width + root.icon-w) / 2;
         y: (parent.height - self.height) / 2 + (ta.pressed && root.enabled ? 1px : 0);
         text: root.text;
         font-family: "Geist";
@@ -1086,10 +1142,22 @@ component CellView inherits Rectangle {
         border-radius: 10px;
         background: Ink.well;
     }
-    // a state's dot: 0 unknown, 1 good, 2 bad, 3 read from the weather
+    // a state's dot: 0 unknown, 1 good, 2 bad, 3 read from the weather; 4 a
+    // choice made on a Library page, in ink, which selected goes back to what
+    // it followed
     if root.c.kind == 14: Rectangle {
         border-radius: 3.5px;
-        background: root.c.style == 1 ? Ink.good : root.c.style == 2 ? Ink.bad : root.c.style == 3 ? Ink.warn : #5c5c66;
+        background: root.c.style == 1 ? Ink.good : root.c.style == 2 ? Ink.bad : root.c.style == 3 ? Ink.warn : root.c.style == 4 ? (state-ta.has-hover ? #ffffff : Ink.ink) : #5c5c66;
+        state-ta := TouchArea {
+            // (a little more room than the dot to aim at)
+            x: -5px;
+            y: -5px;
+            width: parent.width + 10px;
+            height: parent.height + 10px;
+            enabled: root.c.style == 4;
+            mouse-cursor: root.c.style == 4 ? MouseCursor.pointer : MouseCursor.default;
+            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+        }
     }
     // a tab of the Sensors box, as the Screen tab's own: rounded above, the open one in the
     // box's color and running on into it on its feet (none on the first's left, where the
@@ -1858,6 +1926,7 @@ component CellView inherits Rectangle {
         }
     }
     // a dropdown on a well: what is chosen, and a chevron
+    // a dropdown on a well (style 1: its value followed from elsewhere, in gray)
     if root.c.kind == 46: Rectangle {
         border-radius: 8px;
         background: dr-ta.has-hover || root.c.on ? Ink.hover-box : Ink.well;
@@ -1867,7 +1936,7 @@ component CellView inherits Rectangle {
             text: root.c.text;
             font-family: "Geist";
             font-size: 13px;
-            color: Ink.bright;
+            color: root.c.style == 1 ? Ink.soft : Ink.bright;
             vertical-alignment: center;
             overflow: elide;
         }
@@ -2863,6 +2932,113 @@ component GameBox inherits PageBox {
     }
 }
 
+// the Library's star, outlined, or filled for a favorite, on a 16-unit square
+global Star {
+    out property <string> path: "M8 1.9l1.8 3.8 4.1.5-3 2.9.8 4.1L8 11.2l-3.7 2 .8-4.1-3-2.9 4.1-.5Z";
+}
+
+// a game's cover in the Library: its picture, corners rounded, on a shadow;
+// lifted a little under the pointer, with a hairline round it; its name under
+// it in two lines at most; and under the pointer a star over its corner, to
+// make it a favorite or not
+component LibCoverView inherits Rectangle {
+    in property <LibCover> c;
+    callback open();
+    callback star();
+    x: root.c.x;
+    y: root.c.y;
+    width: root.c.w;
+    height: root.c.h + 9px + 34px;
+    property <bool> hot: ta.has-hover || star-ta.has-hover;
+    card := Rectangle {
+        y: ta.pressed ? -1px : root.hot ? -3px : 0;
+        animate y { duration: 140ms; }
+        width: root.c.w;
+        height: root.c.h;
+        border-radius: 8px;
+        background: Ink.box;
+        drop-shadow-blur: root.hot ? 30px : 18px;
+        drop-shadow-offset-y: root.hot ? 14px : 6px;
+        drop-shadow-color: root.hot ? #000000aa : #00000066;
+        Image {
+            width: parent.width;
+            height: parent.height;
+            source: root.c.pic;
+        }
+        Rectangle {
+            border-radius: 8px;
+            border-width: root.hot ? 1px : 0;
+            border-color: #ffffff26;
+        }
+    }
+    Text {
+        x: 0;
+        y: root.c.h + 9px;
+        width: root.c.w;
+        height: 34px;
+        text: root.c.name;
+        font-family: "Geist";
+        font-size: 13px;
+        color: root.hot ? Ink.ink : Ink.dim;
+        wrap: word-wrap;
+        overflow: elide;
+        vertical-alignment: top;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.open(); }
+    }
+    Rectangle {
+        x: root.c.w - 7px - 30px;
+        y: card.y + 7px;
+        width: 30px;
+        height: 30px;
+        border-radius: 8px;
+        background: star-ta.has-hover ? #2a2a30f2 : #111114d9;
+        opacity: root.hot ? 1 : 0;
+        animate opacity { duration: 120ms; }
+        Path {
+            width: 16px;
+            height: 16px;
+            viewbox-width: 16;
+            viewbox-height: 16;
+            commands: Star.path;
+            fill: root.c.fav ? Ink.ink : transparent;
+            stroke: Ink.ink;
+            stroke-width: 1.3px;
+        }
+        star-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.star(); }
+        }
+    }
+}
+
+// a square button with the star, for a game's page: filled once it's a favorite
+component StarButton inherits Rectangle {
+    in property <bool> on;
+    callback clicked;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    background: ta.has-hover ? Ink.shade2 : Ink.shade1;
+    Path {
+        y: (parent.height - 14px) / 2 + (ta.pressed ? 1px : 0);
+        width: 14px;
+        height: 14px;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        commands: Star.path;
+        fill: root.on ? Ink.ink : transparent;
+        stroke: Ink.ink;
+        stroke-width: 1.3px;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
 // one page of the playlist, as a card: its words on the left, the screen's
 // picture of it on the right in a bay of the screen's own color; the page on
 // the screen now marked by the active profile's bar, half the card's height
@@ -3827,6 +4003,73 @@ export component AppWindow inherits Window {
     in-out property <string> place: "home";
     in-out property <bool> rail-open;
 
+    // the Library (games_page.rs): its glyph in the rail; which shows (0 the
+    // Library's tabs, 1 a game's or an app's page, Every game's among them) and
+    // its tab (0 Favorites, 1 Games, 2 Apps); the words under the bar; what is
+    // typed in its find box, and the store and sort dropdowns' words and widths
+    in property <image> library-glyph;
+    in property <int> gl-view;
+    in property <int> gl-tab;
+    in property <string> gl-hint;
+    in-out property <string> gl-query;
+    in property <string> gl-find-hint;
+    in property <string> gl-store;
+    in property <length> gl-store-w: 120px;
+    in property <string> gl-sort;
+    in property <length> gl-sort-w: 150px;
+    // the covers, the Apps tab's rows, and what shows where neither has any: its two lines
+    in property <[LibCover]> gl-covers;
+    in property <[LibApp]> gl-apps;
+    in property <string> gl-empty;
+    in property <string> gl-empty-sub;
+    in property <length> gl-page-h;
+    // a page of its own: its name in the bar, whether it's Every game's (no star, no Play), a
+    // favorite, startable; its picture at the top with its facts; its sections, laid out by the window
+    in property <string> gl-name;
+    in property <bool> gl-every;
+    in property <bool> gl-fav;
+    in property <bool> gl-playable;
+    in property <bool> gl-has-hero;
+    in property <image> gl-hero;
+    in property <[LibFact]> gl-facts;
+    in property <length> gl-facts-w;
+    in property <[Cell]> gl-cells;
+    // what was last done or went wrong, at the bar's right for a moment
+    in property <string> gl-said;
+    in property <bool> gl-said-bad;
+    // a page's game or app can be taken out of the Library (one added by hand, or an
+    // app that's there for its ties); and Undo, just after
+    in property <bool> gl-removable;
+    in property <bool> gl-undo-shown;
+    callback gl-remove();
+    callback gl-undo();
+    // the form open over the Library (0 none, 1 Add a game, 2 Add an app): the program
+    // chosen (none yet: empty), the name typed, the apps to choose from and the one chosen
+    in property <int> gl-modal;
+    in property <string> gl-program;
+    in-out property <string> gl-name-typed;
+    in property <string> gl-name-hint;
+    in property <[LibApp]> gl-seen;
+    in property <int> gl-seen-chosen: -1;
+    in property <bool> gl-can-add;
+    out property <length> gl-width: content-w;
+    out property <length> gl-scroll: -gl-flick.content-y;
+    callback gl-tab-chosen(int);
+    callback gl-find(string);
+    callback gl-store-menu(length, length, length);
+    callback gl-sort-menu(length, length, length);
+    callback gl-open(int);
+    callback gl-star(int);
+    callback gl-every-page();
+    callback gl-add();
+    callback gl-back();
+    callback gl-star-page();
+    callback gl-play();
+    callback gl-choose-program();
+    callback gl-add-done();
+    callback gl-modal-close();
+    callback gl-seen-pick(int);
+
     // how the keyboard is: 0 being looked for, 1 connected, 2 not connected, 3 left to other programs
     in property <int> conn-state: 0;
     in property <string> conn-text: "Looking for the keyboard…";
@@ -3893,6 +4136,15 @@ export component AppWindow inherits Window {
     in property <length> board-shadow-margin;
     in property <int> lcd-state;
     in-out property <bool> screen-closed: false;
+    // the third tab open, Game launch: what the keyboard's screen shows as a game starts and
+    // as one quits, a row each (see games_page.rs and lcd_player.rs)
+    in-out property <bool> screen-game: false;
+    in property <[GlRow]> gl-rows;
+    callback gl-row-on(int);
+    callback gl-row-pick(int);
+    callback gl-row-until(int, length, length, length);
+    // a layout carried over the rows: the row it's over (-1 neither), and its place in Layouts
+    callback gl-carry-move(int, int);
     callback screen-state();
     // the second tab's row: whether the keyboard can keep an onboard layout (its
     // firmware build 5 on); the chooser's name and width, and its menu open; the
@@ -4340,7 +4592,7 @@ export component AppWindow inherits Window {
     // the box: as tall as Profiles, less whatever a narrow window takes off the screen's
     // height, so the row under the screen keeps its margin
     property <length> lcd-short: stage-h - 2 * bay-pad - 2 * kb-pad-y - lcd-h;
-    property <length> box-h: anchor.preferred-height - lcd-short;
+    property <length> box-h: anchor.preferred-height - lcd-short + (root.screen-game ? 40px : 0);
     // Layouts, joined to the box's foot: on the second tab only once the keyboard can keep a layout
     property <bool> shelf-on: !root.screen-closed || root.ob-ready;
     // the row under the screen in the box: the bay 16 in from the box's top, its gutter round the screen
@@ -5492,6 +5744,391 @@ export component AppWindow inherits Window {
                 }
             }
         }
+        // the Library (games_page.rs): the games and apps on three tabs, each
+        // game's or app's own page, and Every game's; its bar stays put over
+        // what scrolls, as a device's does
+        Rectangle {
+            visible: root.place == "library";
+            gl-flick := Flickable {
+                y: 56px;
+                height: parent.height - 56px;
+                content-height: root.gl-page-h;
+                mouse-drag-pan-enabled: false;
+                Text {
+                    x: pws-x;
+                    y: 12px;
+                    width: pws-w - (root.gl-view == 0 ? 240px + 20px + root.gl-store-w + root.gl-sort-w : 0);
+                    height: 36px;
+                    text: root.gl-hint;
+                    font-family: "Geist";
+                    font-size: 12.5px;
+                    color: Ink.quiet;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                // the find box, and on the games' tabs the store and the order
+                if root.gl-view == 0: HorizontalLayout {
+                    x: pws-x;
+                    y: 14px;
+                    width: pws-w;
+                    height: 32px;
+                    spacing: 10px;
+                    alignment: end;
+                    Rectangle {
+                        width: 240px;
+                        border-radius: 8px;
+                        background: Ink.well;
+                        Path {
+                            x: 10px;
+                            y: (parent.height - 14px) / 2;
+                            width: 14px;
+                            height: 14px;
+                            viewbox-width: 16;
+                            viewbox-height: 16;
+                            commands: "M11.6 7a4.6 4.6 0 1 1-9.2 0 4.6 4.6 0 0 1 9.2 0ZM10.4 10.4 14 14";
+                            fill: transparent;
+                            stroke: Ink.quiet;
+                            stroke-width: 1.5px;
+                            stroke-line-cap: round;
+                        }
+                        if gl-find-in.text == "": Text {
+                            x: 32px;
+                            height: parent.height;
+                            text: root.gl-find-hint;
+                            font-family: "Geist";
+                            font-size: 13px;
+                            color: #8a8a92;
+                            vertical-alignment: center;
+                        }
+                        gl-find-in := TextInput {
+                            x: 32px;
+                            width: parent.width - 42px;
+                            height: parent.height;
+                            text <=> root.gl-query;
+                            font-family: "Geist";
+                            font-size: 13px;
+                            color: Ink.ink;
+                            vertical-alignment: center;
+                            single-line: true;
+                            changed has-focus => { Typing.on = self.has-focus; }
+                            edited => { root.gl-find(self.text); }
+                            key-pressed(e) => {
+                                if (e.text == Key.Escape) {
+                                    self.clear-focus();
+                                    return accept;
+                                }
+                                reject
+                            }
+                        }
+                    }
+                    if root.gl-tab < 2: DropField {
+                        width: root.gl-store-w;
+                        height: 32px;
+                        text: root.gl-store;
+                        clicked(x, y, h) => { root.gl-store-menu(x, y, h); }
+                    }
+                    if root.gl-tab < 2: DropField {
+                        width: root.gl-sort-w;
+                        height: 32px;
+                        text: root.gl-sort;
+                        clicked(x, y, h) => { root.gl-sort-menu(x, y, h); }
+                    }
+                }
+                for c[i] in root.gl-covers: LibCoverView {
+                    c: c;
+                    open => { root.gl-open(i); }
+                    star => { root.gl-star(i); }
+                }
+                // the Apps tab: a row for each app, in a box of their own
+                if root.gl-view == 0 && root.gl-apps.length > 0: Rectangle {
+                    x: pws-x;
+                    y: head-end + 6px;
+                    width: pws-w;
+                    height: root.gl-apps.length * 60px + 12px;
+                    border-radius: 12px;
+                    background: Ink.box;
+                    for a[i] in root.gl-apps: Rectangle {
+                        x: 6px;
+                        y: 6px + i * 60px;
+                        width: parent.width - 12px;
+                        height: 60px;
+                        border-radius: 8px;
+                        background: row-ta.has-hover ? Ink.hover-box : transparent;
+                        if a.has-icon: Image {
+                            x: 12px;
+                            y: 14px;
+                            width: 32px;
+                            height: 32px;
+                            source: a.icon;
+                        }
+                        if !a.has-icon: Rectangle {
+                            x: 12px;
+                            y: 14px;
+                            width: 32px;
+                            height: 32px;
+                            border-radius: 7px;
+                            background: Ink.well;
+                        }
+                        Text {
+                            x: 58px;
+                            y: 11px;
+                            width: parent.width - 58px - 220px;
+                            height: 19px;
+                            text: a.name;
+                            font-family: "Geist";
+                            font-size: 14px;
+                            font-weight: 500;
+                            color: Ink.ink;
+                            overflow: elide;
+                        }
+                        Text {
+                            x: 58px;
+                            y: 31px;
+                            width: parent.width - 58px - 220px;
+                            height: 17px;
+                            text: a.sub;
+                            font-family: "Geist";
+                            font-size: 12.5px;
+                            color: Ink.quiet;
+                            overflow: elide;
+                        }
+                        Text {
+                            x: parent.width - 40px - 200px;
+                            width: 200px;
+                            height: parent.height;
+                            text: a.from;
+                            font-family: "Geist";
+                            font-size: 12.5px;
+                            color: Ink.quiet;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                        Path {
+                            x: parent.width - 26px;
+                            y: (parent.height - 12px) / 2;
+                            width: 12px;
+                            height: 12px;
+                            viewbox-width: 12;
+                            viewbox-height: 12;
+                            commands: "M4.5 2.5l3.5 3.5-3.5 3.5";
+                            fill: transparent;
+                            stroke: Ink.quiet;
+                            stroke-width: 1.6px;
+                            stroke-line-cap: round;
+                        }
+                        row-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.gl-open(i); }
+                        }
+                    }
+                }
+                // nothing to show: what's missing, and the way to it
+                if root.gl-view == 0 && root.gl-empty != "": VerticalLayout {
+                    x: pws-x;
+                    y: head-end + 48px;
+                    width: min(pws-w, 640px);
+                    height: self.preferred-height;
+                    spacing: 4px;
+                    Text {
+                        text: root.gl-empty;
+                        font-family: "Geist";
+                        font-size: 15px;
+                        font-weight: 500;
+                        color: Ink.dim;
+                        wrap: word-wrap;
+                    }
+                    Text {
+                        text: root.gl-empty-sub;
+                        font-family: "Geist";
+                        font-size: 14px;
+                        color: Ink.quiet;
+                        wrap: word-wrap;
+                    }
+                }
+                // a page of its own: the game's picture, then its sections
+                if root.gl-view == 1 && root.gl-has-hero: Rectangle {
+                    x: pws-x;
+                    y: head-end;
+                    width: pws-w;
+                    height: 240px;
+                    border-radius: 12px;
+                    background: Ink.box;
+                    Image {
+                        width: parent.width;
+                        height: parent.height;
+                        source: root.gl-hero;
+                    }
+                    for f in root.gl-facts: Text {
+                        x: parent.width - 24px - root.gl-facts-w + f.x;
+                        y: parent.height - 22px - 17px;
+                        height: 17px;
+                        text: f.text;
+                        font-family: "Geist";
+                        font-size: 12.5px;
+                        font-weight: f.strong ? 500 : 400;
+                        color: f.strong ? Ink.ink : Ink.dim;
+                        vertical-alignment: center;
+                    }
+                }
+                for c in root.gl-cells: CellView {
+                    c: c;
+                    glyph: root.keyboard-tile;
+                    glyph2: root.mouse-tile;
+                    pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
+                    slide(id, v) => { root.cell-slide(id, v); }
+                    typed(id, t) => { root.cell-typed(id, t); }
+                }
+            }
+            // the Library's bar: its name and tabs, or on a page of its own the way
+            // back to the Library, the page's name, its star and Play
+            Rectangle {
+                y: 0;
+                height: 56px;
+                background: Ink.base;
+                HorizontalLayout {
+                    padding-left: 28px;
+                    padding-right: 28px;
+                    spacing: 28px;
+                    if root.gl-view == 0: Text {
+                        horizontal-stretch: 0;
+                        text: "Library";
+                        font-family: "Geist";
+                        font-size: 17px;
+                        font-weight: 600;
+                        letter-spacing: 0.17px;
+                        color: Ink.ink;
+                        vertical-alignment: center;
+                    }
+                    if root.gl-view == 0: HorizontalLayout {
+                        horizontal-stretch: 0;
+                        spacing: 2px;
+                        for name[i] in ["Favorites", "Games", "Apps"]: Rectangle {
+                            width: lt.width;
+                            lt := Tab {
+                                text: name;
+                                selected: root.gl-tab == i;
+                                clicked => { root.gl-tab-chosen(i); }
+                            }
+                            if root.gl-tab == i: Rectangle {
+                                y: parent.height - 2px;
+                                height: 2px;
+                                background: Ink.ink;
+                            }
+                        }
+                    }
+                    if root.gl-view == 1: HorizontalLayout {
+                        horizontal-stretch: 0;
+                        spacing: 10px;
+                        Rectangle {
+                            width: up.preferred-width + 4px;
+                            up := Text {
+                                text: "Library";
+                                font-family: "Geist";
+                                font-size: 15px;
+                                font-weight: 500;
+                                color: up-ta.has-hover ? Ink.ink : Ink.quiet;
+                                vertical-alignment: center;
+                            }
+                            up-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.gl-back(); }
+                            }
+                        }
+                        Path {
+                            y: (56px - 12px) / 2;
+                            width: 12px;
+                            height: 12px;
+                            viewbox-width: 12;
+                            viewbox-height: 12;
+                            commands: "M4.5 2.5l3.5 3.5-3.5 3.5";
+                            fill: transparent;
+                            stroke: Ink.quiet;
+                            stroke-width: 1.6px;
+                            stroke-line-cap: round;
+                        }
+                        Text {
+                            text: root.gl-name;
+                            font-family: "Geist";
+                            font-size: 17px;
+                            font-weight: 600;
+                            letter-spacing: 0.17px;
+                            color: Ink.ink;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+                    // what was last done, or what went wrong, for a moment
+                    Text {
+                        horizontal-stretch: 1;
+                        text: root.gl-said;
+                        font-family: "Geist";
+                        font-size: 12.5px;
+                        color: root.gl-said-bad ? Ink.bad : Ink.quiet;
+                        horizontal-alignment: right;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    if root.gl-undo-shown: VerticalLayout {
+                        horizontal-stretch: 0;
+                        alignment: center;
+                        BoxLink {
+                            text: "Undo";
+                            clicked => { root.gl-undo(); }
+                        }
+                    }
+                    if root.gl-view == 0: HorizontalLayout {
+                        horizontal-stretch: 0;
+                        spacing: 8px;
+                        if root.gl-tab < 2: BarButton {
+                            // two cards, one on another: every game at once
+                            commands: "M2.5 5.5h7.5a1.5 1.5 0 0 1 1.5 1.5v6a1.5 1.5 0 0 1-1.5 1.5h-7.5a1.5 1.5 0 0 1-1.5-1.5v-6a1.5 1.5 0 0 1 1.5-1.5zM4.5 3h8a1.5 1.5 0 0 1 1.5 1.5v7.5";
+                            text: "Every game";
+                            clicked => { root.gl-every-page(); }
+                        }
+                        BarButton {
+                            commands: "M8 3v10M3 8h10";
+                            round: true;
+                            text: root.gl-tab < 2 ? "Add a game" : "Add an app";
+                            clicked => { root.gl-add(); }
+                        }
+                    }
+                    if root.gl-view == 1 && !root.gl-every: HorizontalLayout {
+                        horizontal-stretch: 0;
+                        spacing: 8px;
+                        alignment: center;
+                        if root.gl-removable: VerticalLayout {
+                            alignment: center;
+                            BoxLink {
+                                text: "Remove";
+                                clicked => { root.gl-remove(); }
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            StarButton {
+                                on: root.gl-fav;
+                                clicked => { root.gl-star-page(); }
+                            }
+                        }
+                        if root.gl-playable: VerticalLayout {
+                            alignment: center;
+                            WordButton {
+                                primary: true;
+                                text: "Play";
+                                icon: "M4 2.6v8.8c0 .5.5.8.9.5l7-4.4a.6.6 0 0 0 0-1L4.9 2.1c-.4-.3-.9 0-.9.5Z";
+                                clicked => { root.gl-play(); }
+                            }
+                        }
+                    }
+                }
+                Rectangle {
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: Ink.line;
+                }
+            }
+        }
         // Ectodeck's own settings, as the window lays them out
         set-flick := Flickable {
             visible: root.place == "settings";
@@ -5779,7 +6416,13 @@ export component AppWindow inherits Window {
                     function carry-to(wx: length, wy: length) {
                         root.carry-x = wx - self.absolute-position.x;
                         root.carry-y = wy - self.absolute-position.y;
-                        if (root.screen-closed) {
+                        if (root.screen-game) {
+                            root.gl-carry-move(
+                                wx < game-panel.absolute-position.x || wx > game-panel.absolute-position.x + game-panel.width ? -1
+                                : wy >= game-panel.absolute-position.y + 6px && wy < game-panel.absolute-position.y + 48px ? 0
+                                : wy >= game-panel.absolute-position.y + 48px && wy < game-panel.absolute-position.y + 92px ? 1 : -1,
+                                self.shelf-at(root.carry-x, root.carry-y));
+                        } else if (root.screen-closed) {
                             root.pl-carry-move(0,
                                 wx > screen-bay.absolute-position.x && wx < screen-bay.absolute-position.x + screen-bay.width
                                 && wy > screen-bay.absolute-position.y && wy < screen-bay.absolute-position.y + screen-bay.height,
@@ -5837,10 +6480,11 @@ export component AppWindow inherits Window {
                         alignment: start;
                         StateTab {
                             text: "Playlist";
-                            open: !root.screen-closed;
+                            open: !root.screen-closed && !root.screen-game;
                             first: true;
                             clicked => {
                                 root.screen-closed = false;
+                                root.screen-game = false;
                                 root.screen-state();
                             }
                         }
@@ -5849,6 +6493,16 @@ export component AppWindow inherits Window {
                             open: root.screen-closed;
                             clicked => {
                                 root.screen-closed = true;
+                                root.screen-game = false;
+                                root.screen-state();
+                            }
+                        }
+                        StateTab {
+                            text: "Game launch";
+                            open: root.screen-game;
+                            clicked => {
+                                root.screen-closed = false;
+                                root.screen-game = true;
                                 root.screen-state();
                             }
                         }
@@ -5865,7 +6519,7 @@ export component AppWindow inherits Window {
                         y: tabs-h;
                         height: box-h;
                         border-radius: 12px;
-                        border-top-left-radius: !root.screen-closed ? 0 : 12px;
+                        border-top-left-radius: !root.screen-closed && !root.screen-game ? 0 : 12px;
                         background: Ink.well;
                         // the bay the screen is set into, between plain walls: the screen's own
                         // background color, its corners rounded inside the box's, its top edge
@@ -5913,13 +6567,111 @@ export component AppWindow inherits Window {
                         }
                     }
 
+                    // ---------------------------------------------------- Game launch's rows
+                    // in the box under the screen, as the playlist's panel is: a row for a game
+                    // starting and one for a game quitting, each with its checkbox (unchecked, the
+                    // row shows nothing), its words, the layout's bar (select it to see the layout
+                    // on the screen above, again to let go; drag a layout from Layouts onto it to
+                    // show that one) and until when
+                    game-panel := Rectangle {
+                        visible: root.screen-game;
+                        y: band-y;
+                        height: 96px;
+                        for g[i] in root.gl-rows: Rectangle {
+                            x: 24px;
+                            y: 13px + i * 40px;
+                            width: parent.width - 48px;
+                            height: 30px;
+                            HorizontalLayout {
+                                spacing: 10px;
+                                alignment: start;
+                                VerticalLayout {
+                                    alignment: center;
+                                    CheckBox {
+                                        width: 17px;
+                                        on: g.on;
+                                        clicked => { root.gl-row-on(i); }
+                                    }
+                                }
+                                Text {
+                                    text: g.words;
+                                    font-family: "Geist";
+                                    font-size: 13px;
+                                    color: Ink.soft;
+                                    vertical-alignment: center;
+                                }
+                                VerticalLayout {
+                                    alignment: center;
+                                    Rectangle {
+                                        width: 230px;
+                                        height: 24px;
+                                        border-radius: 6px;
+                                        opacity: g.on ? 1 : 0.45;
+                                        background: g.chosen ? (bar-ta.has-hover ? #55555e : #4a4a52) : bar-ta.has-hover ? Ink.pick : Ink.hover-box;
+                                        border-width: g.over ? 2px : 0;
+                                        border-color: Ink.soft;
+                                        clip: true;
+                                        Rectangle {
+                                            x: 0;
+                                            width: 26px;
+                                            background: #ffffff0a;
+                                            Path {
+                                                width: 12px;
+                                                height: 12px;
+                                                viewbox-width: 12;
+                                                viewbox-height: 12;
+                                                commands: "M2.7 2.5h6.6a1.2 1.2 0 0 1 1.2 1.2v4.6a1.2 1.2 0 0 1-1.2 1.2H2.7a1.2 1.2 0 0 1-1.2-1.2V3.7a1.2 1.2 0 0 1 1.2-1.2zM3.5 5h5M3.5 7h3";
+                                                fill: transparent;
+                                                stroke: Ink.soft;
+                                                stroke-width: 1.2px;
+                                            }
+                                        }
+                                        Text {
+                                            x: 35px;
+                                            width: parent.width - 44px;
+                                            height: parent.height;
+                                            text: g.layout;
+                                            font-family: "Geist";
+                                            font-size: 12.5px;
+                                            font-weight: 500;
+                                            color: Ink.ink;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                        }
+                                        bar-ta := TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => { root.gl-row-pick(i); }
+                                        }
+                                    }
+                                }
+                                Text {
+                                    text: "until";
+                                    font-family: "Geist";
+                                    font-size: 13px;
+                                    color: Ink.soft;
+                                    vertical-alignment: center;
+                                }
+                                VerticalLayout {
+                                    alignment: center;
+                                    DropField {
+                                        width: 250px;
+                                        height: 28px;
+                                        opacity: g.on ? 1 : 0.45;
+                                        text: g.until;
+                                        clicked(x, y, h) => { root.gl-row-until(i, x, y, h); }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // ---------------------------------------------------- the playlist's panel
                     // attached under the screen's box, as wide as the box, in the boxes' gray (over
                     // the box's foot, so what opens from the panel rises over the box). One row:
                     // Pause, which playlist, then one round of it, left to right, each turn as long
                     // as its time, and the round starting again after it.
                     panel := Rectangle {
-                        visible: !root.screen-closed;
+                        visible: !root.screen-closed && !root.screen-game;
                         y: band-y;
                         height: pl-panel-h;
                         // Pause, at the playlist's right end, after the round's start again
@@ -6548,7 +7300,7 @@ export component AppWindow inherits Window {
                             y: 14px;
                             width: parent.width - 16px - self.x;
                             height: 22px;
-                            text: root.screen-closed ? "Drag a screen layout onto the screen to save the layout on the keyboard, or to another place in Layouts to move the layout." : "Drag a screen layout onto the playlist to add the layout to what the keyboard shows, or to another place in Layouts to move the layout.";
+                            text: root.screen-game ? "Drag a screen layout onto a bar above to show that layout when a game starts or quits." : root.screen-closed ? "Drag a screen layout onto the screen to save the layout on the keyboard, or to another place in Layouts to move the layout." : "Drag a screen layout onto the playlist to add the layout to what the keyboard shows, or to another place in Layouts to move the layout.";
                             font-family: "Geist";
                             font-size: 12.5px;
                             color: Ink.quiet;
@@ -7028,6 +7780,17 @@ export component AppWindow inherits Window {
             reveal: root.reveal;
             clicked => { root.rail(d.place); }
         }
+        r-library := RailItem {
+            x: 10px;
+            y: parent.height - 10px - 40px - 4px - 40px;
+            width: rail-w - 20px;
+            glyph: root.library-glyph;
+            name: "Library";
+            on: root.place == "library";
+            open: root.rail-open;
+            reveal: root.reveal;
+            clicked => { root.rail("library"); }
+        }
         r-settings := RailItem {
             x: 10px;
             y: parent.height - 10px - 40px;
@@ -7098,6 +7861,15 @@ export component AppWindow inherits Window {
         content: mouse-flick.content-height;
         offset: -mouse-flick.content-y;
         scroll-to(o) => { mouse-flick.content-y = -o; }
+    }
+    if root.place == "library": ScrollBar {
+        x: root.width - 12px;
+        y: bar + 56px + 2px;
+        height: root.height - bar - 56px - 2px - root.bar-foot;
+        view: gl-flick.height;
+        content: gl-flick.content-height;
+        offset: -gl-flick.content-y;
+        scroll-to(o) => { gl-flick.content-y = -o; }
     }
     if root.place == "settings": ScrollBar {
         x: root.width - 12px;
@@ -7215,6 +7987,222 @@ export component AppWindow inherits Window {
                             mouse-cursor: pointer;
                             clicked => { root.confirm-yes(); }
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    // a form over the Library: Add a game (its program and its name) or Add an
+    // app (one seen in front); the page dims under it, and a press on the dim,
+    // Cancel or Escape closes it
+    if root.gl-modal != 0: Rectangle {
+        background: #00000099;
+        border-radius: root.radius;
+        TouchArea {
+            clicked => { root.gl-modal-close(); }
+        }
+        FocusScope {
+            width: 0;
+            height: 0;
+            init => { self.focus(); }
+            key-pressed(e) => {
+                if (e.text == Key.Escape) {
+                    root.gl-modal-close();
+                    return accept;
+                }
+                reject
+            }
+        }
+        Rectangle {
+            width: min(560px, parent.width - 32px);
+            height: form.preferred-height + 44px;
+            border-radius: 14px;
+            background: Ink.box;
+            border-width: 1px;
+            border-color: #ffffff0d;
+            drop-shadow-blur: 80px;
+            drop-shadow-offset-y: 30px;
+            drop-shadow-color: #000000cc;
+            TouchArea { }
+            form := VerticalLayout {
+                x: 24px;
+                y: 24px;
+                width: parent.width - 48px;
+                height: self.preferred-height;
+                spacing: 0;
+                Text {
+                    text: root.gl-modal == 1 ? "Add a game" : "Add an app";
+                    font-family: "Geist";
+                    font-size: 17px;
+                    font-weight: 600;
+                    color: Ink.ink;
+                }
+                Rectangle { height: 4px; }
+                Text {
+                    text: root.gl-modal == 1 ? "Choose the game’s program. The game joins Games, with a page of its own." : "Choose an app you’ve had open while Ectodeck was running. The app joins Apps, with a page of its own.";
+                    font-family: "Geist";
+                    font-size: 13px;
+                    color: Ink.soft;
+                    wrap: word-wrap;
+                }
+                Rectangle { height: 18px; }
+                if root.gl-modal == 1: VerticalLayout {
+                    spacing: 0;
+                    Text {
+                        text: "Program";
+                        font-family: "Geist";
+                        font-size: 13px;
+                        color: Ink.dim;
+                    }
+                    Rectangle { height: 7px; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        height: 36px;
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            border-radius: 8px;
+                            background: Ink.well;
+                            Text {
+                                x: 12px;
+                                width: parent.width - 24px;
+                                height: parent.height;
+                                text: root.gl-program != "" ? root.gl-program : "No program chosen";
+                                font-family: "Geist";
+                                font-size: 13px;
+                                color: root.gl-program != "" ? Ink.ink : #8a8a92;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            WordButton {
+                                text: "Choose…";
+                                fill: Ink.hover-box;
+                                fill-hover: Ink.pick;
+                                clicked => { root.gl-choose-program(); }
+                            }
+                        }
+                    }
+                    Rectangle { height: 6px; }
+                    Text {
+                        text: "Ectodeck notices the game starting, from Play here or anywhere else.";
+                        font-family: "Geist";
+                        font-size: 12.5px;
+                        color: Ink.quiet;
+                        wrap: word-wrap;
+                    }
+                    Rectangle { height: 14px; }
+                    Text {
+                        text: "Name";
+                        font-family: "Geist";
+                        font-size: 13px;
+                        color: Ink.dim;
+                    }
+                    Rectangle { height: 7px; }
+                    Rectangle {
+                        height: 36px;
+                        border-radius: 8px;
+                        background: Ink.well;
+                        if name-in.text == "": Text {
+                            x: 12px;
+                            height: parent.height;
+                            text: root.gl-name-hint;
+                            font-family: "Geist";
+                            font-size: 13px;
+                            color: #8a8a92;
+                            vertical-alignment: center;
+                        }
+                        name-in := TextInput {
+                            x: 12px;
+                            width: parent.width - 24px;
+                            height: parent.height;
+                            text <=> root.gl-name-typed;
+                            font-family: "Geist";
+                            font-size: 13px;
+                            color: Ink.ink;
+                            vertical-alignment: center;
+                            single-line: true;
+                            changed has-focus => { Typing.on = self.has-focus; }
+                            accepted => { if (root.gl-can-add) { root.gl-add-done(); } }
+                            key-pressed(e) => {
+                                if (e.text == Key.Escape) {
+                                    root.gl-modal-close();
+                                    return accept;
+                                }
+                                reject
+                            }
+                        }
+                    }
+                }
+                if root.gl-modal == 2 && root.gl-seen.length == 0: Text {
+                    text: "Apps show here once they’ve been in front while Ectodeck is running.";
+                    font-family: "Geist";
+                    font-size: 13px;
+                    color: Ink.quiet;
+                    wrap: word-wrap;
+                }
+                if root.gl-modal == 2 && root.gl-seen.length > 0: Rectangle {
+                    height: min(root.gl-seen.length * 44px + 8px, 320px);
+                    border-radius: 10px;
+                    background: Ink.well;
+                    clip: true;
+                    seen-flick := Flickable {
+                        width: parent.width;
+                        height: parent.height;
+                        content-height: root.gl-seen.length * 44px + 8px;
+                        mouse-drag-pan-enabled: false;
+                        for a[i] in root.gl-seen: Rectangle {
+                            x: 4px;
+                            y: 4px + i * 44px;
+                            width: parent.width - 8px;
+                            height: 44px;
+                            border-radius: 7px;
+                            background: root.gl-seen-chosen == i ? (seen-ta.has-hover ? Ink.pick-hover : Ink.pick) : seen-ta.has-hover ? Ink.hover-well : transparent;
+                            if a.has-icon: Image {
+                                x: 10px;
+                                y: 10px;
+                                width: 24px;
+                                height: 24px;
+                                source: a.icon;
+                            }
+                            Text {
+                                x: 44px;
+                                width: parent.width - 54px;
+                                height: parent.height;
+                                text: a.name;
+                                font-family: "Geist";
+                                font-size: 13.5px;
+                                color: Ink.ink;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                            seen-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.gl-seen-pick(i); }
+                            }
+                        }
+                    }
+                }
+                Rectangle { height: 20px; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: end;
+                    VerticalLayout {
+                        alignment: center;
+                        WordButton {
+                            text: "Cancel";
+                            fill: Ink.hover-box;
+                            fill-hover: Ink.pick;
+                            clicked => { root.gl-modal-close(); }
+                        }
+                    }
+                    WordButton {
+                        primary: true;
+                        text: "Add";
+                        enabled: root.gl-can-add;
+                        clicked => { root.gl-add-done(); }
                     }
                 }
             }

@@ -469,7 +469,7 @@ pub fn source_menu(current: Shows, bars: bool, date: DateFormat, groups: &[(Stri
         }
     }
     // the others, each group once, in the menu's order
-    let order = ["Time and date", "Keyboard", "More"];
+    let order = ["Time and date", "Keyboard", "Game", "More"];
     let mut listed: Vec<Shows> = avail.iter().copied().filter(|s| order.contains(&s.group()) && (!bars || s.barred())).map(Shows::Reading).collect();
     if !bars {
         listed.push(Shows::Time);
@@ -791,6 +791,25 @@ pub fn has_room(page: &Page, cells: u8) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The Shows menu has a Game group, after the keyboard's readings and before the
+    /// weather: the game's name, the session, the time played, when last played, what's
+    /// changing and the changes done; on a Bar block, only the changes done.
+    #[test]
+    fn the_shows_menu_has_the_games_readings() {
+        let r = Readings { game: Some(crate::lcd_page::Game { name: "ARC Raiders".into(), since: 1, minutes: 90, last: 1, ..Default::default() }), ..Default::default() };
+        let avail = crate::lcd_page::available(&r, true);
+        let rows = source_menu(Shows::Time, false, DateFormat::Short, &[], &avail, &r);
+        let heads: Vec<&str> = rows.iter().filter(|r| r.0 == 1).map(|r| r.1.as_str()).collect();
+        assert_eq!(heads, ["Time and date", "Keyboard", "Game", "More"]);
+        let at = rows.iter().position(|r| r.0 == 1 && r.1 == "Game").unwrap();
+        let game: Vec<&str> = rows[at + 1..].iter().take_while(|r| r.0 == 0).map(|r| r.1.as_str()).collect();
+        assert_eq!(game, ["Game name", "Session time", "Time played", "Last played", "Changing now", "Changes done"]);
+        assert_eq!(rows[at + 1].2, "ARC RAIDERS", "each with how it reads now");
+        let bars = source_menu(Shows::Time, true, DateFormat::Short, &[], &avail, &r);
+        let at = bars.iter().position(|r| r.0 == 1 && r.1 == "Game").unwrap();
+        assert_eq!(bars[at + 1].1, "Changes done");
+    }
 
     #[test]
     fn the_keyboard_s_own_readings_have_a_group_of_their_own() {

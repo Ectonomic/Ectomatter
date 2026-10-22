@@ -96,6 +96,34 @@ pub fn new_rows(library: &[crate::lcd_page::Page]) -> (Vec<MenuRow>, Vec<Option<
 /// What the page asked for, done once its event has been handled.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Ask {
+    /// the Library (games_page.rs): a tab, what is typed in its find box, the
+    /// store's or the order's menu (where it hangs), a cover or an app's row
+    /// opened or its star, Every game's page, Add a game or an app, back to
+    /// the Library, the page's star and Play; in the form, Choose…, Add, the
+    /// form shut, an app chosen in it
+    GlTab(i32),
+    GlFind(String),
+    GlMenu(crate::games_page::Menu, f32, f32, f32),
+    GlOpen(i32),
+    GlStar(i32),
+    GlEvery,
+    GlAdd,
+    GlBack,
+    GlStarPage,
+    GlPlay,
+    GlProgram,
+    GlAddDone,
+    GlClose,
+    GlSeen(i32),
+    GlRemove,
+    GlUndo,
+    /// the Screen tab's Game launch: a row's checkbox, its layout's bar selected, its
+    /// until menu (where it hangs), and a layout carried over its rows (which row, or
+    /// -1, and its place in Layouts)
+    GlRowOn(i32),
+    GlRowPick(i32),
+    GlRowUntil(i32, f32, f32, f32),
+    GlCarryMove(i32, i32),
     /// the mouse's page: a tab, a button or light from its list or its picture,
     /// a kind of job (and where its switch is), the job's menu opened, the
     /// button back to its factory job, an effect; the pointer on the picture
@@ -599,6 +627,11 @@ pub struct Front {
     pub scale: f32,
     /// the mouse's page
     pub mouse: crate::mouse::Page,
+    /// the Library, its page, and the games running (games_page.rs); whether
+    /// each device's ties made before the Library kept them have been taken in
+    /// (the keyboard's, the mouse's)
+    pub games: crate::games_page::Games,
+    ties_taken: [bool; 2],
     /// what the system says of the mouse, looked at every two seconds, as the keyboard's
     mouse_status: Option<(Instant, serde_json::Value)>,
     mouse_icons: Option<(f32, Vec<slint::Image>)>,
@@ -673,6 +706,15 @@ pub struct Front {
     /// leaves the front (0 the keyboard's by its number, 1 the mouse's by its place)
     front_apps: crate::front_app::Seen,
     follow_back: [Option<usize>; 2],
+    /// the window KWin last said was in front, looked at again when a game starts or quits
+    last_front: Option<crate::front_app::Front>,
+    /// the Screen tab's Game launch: the row whose layout the screen above shows (selected
+    /// again, let go), the row a carried layout is over, the row whose until menu is open
+    gl_pick: Option<usize>,
+    gl_over: Option<usize>,
+    until_menu: Option<usize>,
+    /// the game starting, playing or quitting, or the last one, as its readings go to the screen
+    game_now: Option<crate::lcd_page::Game>,
     /// Ectodeck's macros played, for the controls given one (made when first
     /// needed), and where its steps' jobs come back to be done (main.rs)
     typist: Option<crate::typist::Player>,
@@ -873,6 +915,27 @@ impl Front {
         on!(on_desk_light_menu, |x, y, h| Ask::DeskLightMenu(x, y, h));
         on!(on_mouse_effect, |i| Ask::MouseEffect(i));
         on!(on_rail, |p| Ask::Rail(p.to_string()));
+        on!(on_gl_tab_chosen, |i| Ask::GlTab(i));
+        on!(on_gl_find, |t| Ask::GlFind(t.to_string()));
+        on!(on_gl_store_menu, |x, y, h| Ask::GlMenu(crate::games_page::Menu::Shop, x, y, h));
+        on!(on_gl_sort_menu, |x, y, h| Ask::GlMenu(crate::games_page::Menu::Order, x, y, h));
+        on!(on_gl_open, |i| Ask::GlOpen(i));
+        on!(on_gl_star, |i| Ask::GlStar(i));
+        on!(on_gl_every_page, Ask::GlEvery);
+        on!(on_gl_add, Ask::GlAdd);
+        on!(on_gl_back, Ask::GlBack);
+        on!(on_gl_star_page, Ask::GlStarPage);
+        on!(on_gl_play, Ask::GlPlay);
+        on!(on_gl_choose_program, Ask::GlProgram);
+        on!(on_gl_add_done, Ask::GlAddDone);
+        on!(on_gl_modal_close, Ask::GlClose);
+        on!(on_gl_seen_pick, |i| Ask::GlSeen(i));
+        on!(on_gl_remove, Ask::GlRemove);
+        on!(on_gl_undo, Ask::GlUndo);
+        on!(on_gl_row_on, |i| Ask::GlRowOn(i));
+        on!(on_gl_row_pick, |i| Ask::GlRowPick(i));
+        on!(on_gl_row_until, |i, x, y, h| Ask::GlRowUntil(i, x, y, h));
+        on!(on_gl_carry_move, |row, shelf| Ask::GlCarryMove(row, shelf));
         on!(on_macro_editor, |l| Ask::MacroEditor(l));
         on!(on_screen_editor, Ask::ScreenEditor);
         on!(on_effect, |i| Ask::Effect(i));
@@ -944,6 +1007,8 @@ impl Front {
         let slider_ends = crate::uistate::get("slider_ends").and_then(|v| serde_json::from_value(v).ok()).unwrap_or([[400.0, 3700.0], [400.0, 3700.0]]);
         let mut f = Front {
             mouse: crate::mouse::Page::new(),
+            games: crate::games_page::Games::new(&ui),
+            ties_taken: [false, false],
             mouse_status: None,
             mouse_icons: None,
             mouse_layers: None,
@@ -1041,6 +1106,11 @@ impl Front {
             apps_menu: None,
             front_apps: crate::front_app::Seen::load(),
             follow_back: [None, None],
+            last_front: None,
+            gl_pick: None,
+            gl_over: None,
+            until_menu: None,
+            game_now: None,
             typist: None,
             macro_jobs: None,
             idled: crate::uistate::get("slider_idled").and_then(|v| serde_json::from_value(v).ok()).unwrap_or([None, None]),
@@ -1801,7 +1871,11 @@ impl Front {
                 }
                 Ask::CarryDrop => {
                     if let Some(c) = self.carry.take() {
-                        if let Some(to) = c.shelf {
+                        if let Some(row) = self.gl_over.take() {
+                            self.set_game_launch(Self::launch_key(row as i32), "layout", serde_json::json!(c.page));
+                            self.gl_pick = Some(row);
+                            self.lcd_drawn = None;
+                        } else if let Some(to) = c.shelf {
                             if to != c.index {
                                 self.move_layout(c.index, to);
                             }
@@ -1827,6 +1901,7 @@ impl Front {
                 Ask::CarryCancel => {
                     self.carry = None;
                     self.ob_over = None;
+                    self.gl_over = None;
                 }
                 Ask::SizeTurn(i, dx) => {
                     let i = i.max(0) as usize;
@@ -1880,6 +1955,15 @@ impl Front {
                     self.ui.set_confirm_open(false);
                 }
                 Ask::LcdTick => {
+                    // the Library: Steam read, the games started and quit, the pictures drawn
+                    let showing = self.ui.get_place() == "library";
+                    let (events, news) = self.games.poll(showing);
+                    if !events.is_empty() {
+                        self.games_seen(events);
+                    }
+                    if news && showing {
+                        self.show_library();
+                    }
                     // (on Home, the mouse's picture drawn for its size on the desk once it settles)
                     if self.ui.get_place() == "home" {
                         self.desk_mouse_want();
@@ -2112,6 +2196,74 @@ impl Front {
                         m.query.clear();
                     }
                     self.build_menu();
+                }
+                Ask::GlTab(i) => {
+                    self.close_menu();
+                    self.games.tab_chosen(i, &self.ui);
+                }
+                Ask::GlFind(t) => self.games.find(&t),
+                Ask::GlMenu(m, x, y, h) => self.open_games_menu(m, (x, y, h)),
+                Ask::GlOpen(i) => {
+                    self.close_menu();
+                    self.games.open_at(i.max(0) as usize);
+                }
+                Ask::GlStar(i) => self.games.star_at(i.max(0) as usize),
+                Ask::GlEvery => {
+                    self.close_menu();
+                    self.games.every();
+                }
+                Ask::GlAdd => {
+                    self.close_menu();
+                    self.games.add(&self.ui);
+                }
+                Ask::GlBack => {
+                    self.close_menu();
+                    self.games.back();
+                }
+                Ask::GlStarPage => self.games.star_page(),
+                Ask::GlPlay => self.games.play(&self.front_apps),
+                Ask::GlProgram => self.games.choose_program(),
+                Ask::GlAddDone => self.games.add_done(&self.ui),
+                Ask::GlClose => {
+                    self.games.close_form();
+                }
+                Ask::GlSeen(i) => self.games.seen_pick(i),
+                Ask::GlRemove => {
+                    self.close_menu();
+                    self.games.remove(&self.front_apps);
+                }
+                Ask::GlUndo => self.games.undo(),
+                Ask::GlRowOn(i) => {
+                    let k = Self::launch_key(i);
+                    let on = !self.game_launch_value(k)["on"].as_bool().unwrap_or(true);
+                    self.set_game_launch(k, "on", serde_json::json!(on));
+                    if !on && self.gl_pick == Some(i.max(0) as usize) {
+                        self.gl_pick = None;
+                    }
+                    self.lcd_drawn = None;
+                }
+                Ask::GlRowPick(i) => {
+                    let i = i.max(0) as usize;
+                    self.gl_pick = if self.gl_pick == Some(i) { None } else { Some(i) };
+                    self.lcd_drawn = None;
+                }
+                Ask::GlRowUntil(i, x, y, h) => self.open_until_menu(i.max(0) as usize, (x, y, h)),
+                Ask::GlCarryMove(row, shelf) => {
+                    changed = false;
+                    let n = self.screens.library.len();
+                    if let Some(c) = self.carry.as_mut().filter(|c| !c.from_strip) {
+                        let at = usize::try_from(shelf).ok().filter(|_| n > 0).map(|s| s.min(n - 1));
+                        if at != c.shelf {
+                            c.shelf = at;
+                            changed = true;
+                        }
+                    }
+                    let over = usize::try_from(row).ok().filter(|_| self.carry.as_ref().is_some_and(|c| !c.from_strip));
+                    if over != self.gl_over {
+                        self.gl_over = over;
+                        self.lcd_drawn = None;
+                        changed = true;
+                    }
                 }
                 Ask::Go(place) => {
                     self.close_menu();
@@ -2450,6 +2602,17 @@ impl Front {
     /// A piece of the tile used: a swatch opens the color picker, the rest change the draft.
     fn cell_pick(&mut self, c: Ctl, index: usize, _anchor: (f32, f32, f32)) {
         match c {
+            Ctl::LibChoice => {
+                self.open_games_menu(crate::games_page::Menu::Device(index), _anchor);
+                self.refresh();
+                return;
+            }
+            Ctl::LibReset => {
+                self.close_menu();
+                self.games.reset_row(index);
+                self.refresh();
+                return;
+            }
             Ctl::MouseSameWheel => {
                 self.mouse.same_wheel = index % 2 == 1;
                 crate::uistate::set("mouse_same_wheel", serde_json::json!(self.mouse.same_wheel));
@@ -3050,7 +3213,7 @@ impl Front {
             self.ui.set_menu_open(false);
             self.ui.invoke_blur_menu();
         }
-        if self.mouse.menu.take().is_some() || std::mem::take(&mut self.profile_menu) || std::mem::take(&mut self.kb_profile_menu) || self.apps_menu.take().is_some() || std::mem::take(&mut self.desk_light_menu) || self.pad_menu.take().is_some() {
+        if self.mouse.menu.take().is_some() || std::mem::take(&mut self.profile_menu) || std::mem::take(&mut self.kb_profile_menu) || self.apps_menu.take().is_some() || std::mem::take(&mut self.desk_light_menu) || self.pad_menu.take().is_some() || self.games.menu.take().is_some() || self.until_menu.take().is_some() {
             self.ui.set_menu_open(false);
             self.ui.set_menu_w(300.0);
             self.ui.set_mouse_menu_open(false);
@@ -3227,6 +3390,20 @@ impl Front {
     /// Escape, with nothing being typed: the page's chosen thing let go, if
     /// it has one (false when it has none, for Escape to go on to the page).
     pub fn escape(&mut self) -> bool {
+        // (on the Library, Escape shuts its menu, then its form, then goes back
+        // from a page of its own to the Library)
+        if self.ui.get_place() == "library" {
+            if self.games.menu.is_some() {
+                self.close_menu();
+                self.refresh();
+                return true;
+            }
+            if self.games.escape() {
+                self.close_menu();
+                self.refresh();
+                return true;
+            }
+        }
         // (on Home, Escape shuts the color picker open on a pad, then lets the
         // chosen pad go, and then leaves edit mode, as Done does)
         if self.ui.get_place() == "home" && self.pick.is_some() {
@@ -3257,6 +3434,21 @@ impl Front {
     }
 
     fn menu_chose(&mut self, i: usize) {
+        if let Some(row) = self.until_menu {
+            self.close_menu();
+            let choices = Self::until_choices(row);
+            if let Some((v, _)) = choices.get(i) {
+                self.set_game_launch(Self::launch_key(row as i32), "until", serde_json::json!(v));
+            }
+            self.refresh();
+            return;
+        }
+        if let Some(m) = self.games.menu.clone() {
+            self.close_menu();
+            self.games.menu = Some(m);
+            self.games.chose(i);
+            return;
+        }
         if self.profile_menu {
             let anchor = (self.ui.get_menu_ax(), self.ui.get_menu_ay(), self.ui.get_menu_ah());
             self.close_menu();
@@ -3982,7 +4174,7 @@ impl Front {
                 View::Keys => "Select a key on the keyboard or in the Key library to change what a key does.",
                 View::Lighting => "Choose a lighting effect for this profile, then set the colors, speed and zones below.",
                 View::Display => "Check the keyboard’s connection and which features the installed firmware supports.",
-                View::Screen => "Choose what the keyboard’s screen shows while Ectodeck is running, and when it isn’t.",
+                View::Screen => "Choose what the keyboard’s screen shows while Ectodeck is running, when a game starts or quits, and when Ectodeck isn’t running.",
             }
             .into(),
         );
@@ -4220,8 +4412,11 @@ impl Front {
         if self.ui.get_place() == "home" {
             self.show_desk();
         }
+        self.take_old_ties();
         if self.ui.get_place() == "mouse" {
             self.refresh_mouse();
+        } else if self.ui.get_place() == "library" {
+            self.show_library();
         } else if self.ui.get_place() == "settings" {
             // what the kernel says of the keyboard, looked at every two seconds (it
             // scans every process), not at every step of a slider
@@ -4264,11 +4459,13 @@ impl Front {
                 let picking = self.pick.as_ref().is_some_and(|p| p.ctl == Ctl::LcdColor);
                 // the room the two tabs leave on their row: each tab its words and 18 either side, 4
                 // between them, the open second tab's foot, then a gap (the names as app.slint has them)
-                let tabs: f32 = ["Playlist", "Onboard layout"].iter().map(|t| crate::text::width(500, 13.0, t) + 36.0).sum();
-                crate::display::screen_cells(&self.page, w, tabs + 4.0 + 10.0 + 24.0, own.as_ref().map(|(n, l)| (n.as_str(), *l)), picking)
+                let names = ["Playlist", "Onboard layout", "Game launch"];
+                let tabs: f32 = names.iter().map(|t| crate::text::width(500, 13.0, t) + 36.0).sum::<f32>() + 4.0 * (names.len() - 1) as f32;
+                crate::display::screen_cells(&self.page, w, tabs + 10.0 + 24.0, own.as_ref().map(|(n, l)| (n.as_str(), *l)), picking)
             };
             self.show_cells(cells);
             self.refresh_onboard();
+            self.show_game_rows();
             self.refresh_editor();
             self.draw_screen();
         } else if loaded && self.page.view == View::Display {
@@ -5475,57 +5672,151 @@ impl Front {
         self.apps_menu = Some((device, profile, anchor));
     }
 
-    /// The apps a profile is tied to: the keyboard's (`device` 0, by its
-    /// number) as Ectodeck's settings keep them, the mouse's (1, by its place)
-    /// with it.
+    /// A device's key in the Library (`device` 0 the keyboard, 1 the mouse),
+    /// and a profile's id there: the keyboard's by its number, the mouse's by
+    /// the id Ectodeck gave it (from its place in the list).
+    fn tie_key(&self, device: usize, profile: usize) -> Option<(&'static str, String)> {
+        if device == 1 {
+            return self.mouse.profiles.as_ref().and_then(|s| s.list.get(profile)).map(|p| ("sensei310", p.id.clone()));
+        }
+        Some(("z10", profile.to_string()))
+    }
+
+    /// The games and apps a profile is chosen for, as the Library keeps them
+    /// (the keyboard's, `device` 0, by its number; the mouse's, 1, by its place).
     fn tied_apps(&self, device: usize, profile: usize) -> Vec<String> {
-        if device == 1 {
-            return self.mouse.profiles.as_ref().and_then(|s| s.list.get(profile)).map(|p| p.apps.clone()).unwrap_or_default();
-        }
-        self.settings
-            .get("devices.z10.profile_apps")
-            .and_then(|v| v[profile.to_string()].as_array().cloned())
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
-            .unwrap_or_default()
+        self.tie_key(device, profile).map(|(d, p)| self.games.library.tied(d, &p)).unwrap_or_default()
     }
 
-    /// The keyboard's profile tied to an app, if one is.
-    fn kb_profile_for(&self, app: &str) -> Option<u8> {
-        z10::PROFILE_NUMBERS.iter().copied().find(|&n| self.tied_apps(0, n as usize).iter().any(|a| a == app))
-    }
-
-    /// A profile tied to an app, or no longer; an app is tied to one of a
-    /// device's profiles at a time, the last it was tied to.
+    /// A profile tied to an app, or no longer: one profile of a device at a
+    /// time for each app, the last it was tied to, kept in the Library with
+    /// what each game switches.
     fn tie_app(&mut self, device: usize, profile: usize, app: &str, on: bool) {
-        if device == 1 {
-            if let Some(s) = &mut self.mouse.profiles {
-                s.tie(profile, app, on);
-            }
-            return;
-        }
-        let mut all = self.settings.get("devices.z10.profile_apps").filter(|v| v.is_object()).unwrap_or_else(|| serde_json::json!({}));
-        for n in z10::PROFILE_NUMBERS {
-            let key = n.to_string();
-            let mut list: Vec<String> = all[&key].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
-            list.retain(|a| a != app);
-            if on && n as usize == profile {
-                list.push(app.to_string());
-            }
-            all[&key] = serde_json::json!(list);
-        }
-        if let Err(e) = self.settings.set("devices.z10.profile_apps", all) {
-            self.status(format!("The profile's apps were not saved: {e}"), 2);
+        let Some((d, p)) = self.tie_key(device, profile) else { return };
+        let mine = self.games.library.choice(app, d) == Some(crate::games::Choice::Profile(p.clone()));
+        if on {
+            self.games.library.set_choice(app, d, Some(crate::games::Choice::Profile(p)));
+        } else if mine {
+            self.games.library.set_choice(app, d, None);
         }
     }
 
     /// The words under a profile's name for the apps it's tied to: "With
     /// Steam", or with how many more.
     fn with_apps(&self, apps: &[String]) -> Option<String> {
-        let first = self.front_apps.name(apps.first()?);
+        let first = self.games.name(apps.first()?, &self.front_apps);
         Some(match apps.len() {
             1 => format!("With {first}"),
             n => format!("With {first} and {} more", n - 1),
         })
+    }
+
+    /// Ties made before the Library kept them, taken in once and taken out of
+    /// where they were: the keyboard's from Ectodeck's settings, the mouse's
+    /// from its profiles' file (once the mouse's profiles have been read).
+    fn take_old_ties(&mut self) {
+        if !self.ties_taken[0] {
+            self.ties_taken[0] = true;
+            if let Some(all) = self.settings.get("devices.z10.profile_apps").and_then(|v| v.as_object().cloned()) {
+                let ties: Vec<(String, Vec<String>)> = all.iter().map(|(n, a)| (n.clone(), a.as_array().into_iter().flatten().filter_map(|v| v.as_str().map(String::from)).collect())).collect();
+                self.games.library.take_ties("z10", &ties);
+                let _ = self.settings.set("devices.z10.profile_apps", serde_json::Value::Null);
+            }
+        }
+        if !self.ties_taken[1] {
+            if let Some(store) = &mut self.mouse.profiles {
+                self.ties_taken[1] = true;
+                let ties: Vec<(String, Vec<String>)> = store.list.iter().filter(|p| !p.apps.is_empty()).map(|p| (p.id.clone(), p.apps.clone())).collect();
+                if !ties.is_empty() {
+                    self.games.library.take_ties("sensei310", &ties);
+                    for p in &mut store.list {
+                        p.apps.clear();
+                    }
+                    store.save();
+                }
+            }
+        }
+    }
+
+    /// The devices a Library page lists: each one met, by its key, its name
+    /// and its profiles (the keyboard's by their numbers, named as the
+    /// keyboard names them; the mouse's as Ectodeck keeps them).
+    fn lib_devices(&self) -> Vec<crate::games_page::Device> {
+        let mut out = Vec::new();
+        for (place, name, _, _) in self.devices_in_order() {
+            match place.as_str() {
+                "z10" => {
+                    let known = self.page.dev.is_some();
+                    let profiles = z10::PROFILE_NUMBERS.iter().map(|n| (n.to_string(), if known { self.page.profile_name(*n) } else { format!("Profile {n}") })).collect();
+                    out.push(crate::games_page::Device { key: "z10".into(), name, profiles });
+                }
+                "mouse" => {
+                    if let Some(s) = &self.mouse.profiles {
+                        out.push(crate::games_page::Device { key: "sensei310".into(), name, profiles: s.list.iter().map(|p| (p.id.clone(), p.name.clone())).collect() });
+                    }
+                }
+                _ => {}
+            }
+        }
+        out
+    }
+
+    /// The Library's page as it is now.
+    fn show_library(&mut self) {
+        let devices = self.lib_devices();
+        self.games.show(&self.ui, &devices, self.scale, &self.front_apps);
+    }
+
+    /// One of the Library's menus opened: the store's, the order's, or a
+    /// device's on a page, under what opened it.
+    fn open_games_menu(&mut self, m: crate::games_page::Menu, anchor: (f32, f32, f32)) {
+        if let Some((at, when)) = self.shut.take() {
+            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
+                return;
+            }
+        }
+        self.close_menu();
+        self.close_picker();
+        let counts = self.games.counts(&self.front_apps);
+        let rows = self.games.menu_rows(&m, counts);
+        let w = match m {
+            crate::games_page::Menu::Device(_) => 300.0,
+            _ => 220.0,
+        };
+        self.hang_menu(rows, w, anchor);
+        self.games.menu = Some(m);
+    }
+
+    /// Games started and quit, as the Library's watch saw them: the window in
+    /// front looked at again (a game's window may have come up before its
+    /// game was seen), and the keyboard's screen told.
+    fn games_seen(&mut self, events: Vec<crate::games_page::Event>) {
+        use crate::lcd_player::{Control, GameSeen};
+        for e in &events {
+            let (crate::games_page::Event::Started(r) | crate::games_page::Event::Quit(r)) = e;
+            let name = self.games.name(&r.id, &self.front_apps);
+            let started = matches!(e, crate::games_page::Event::Started(_));
+            eprintln!("ectodeck-native: {name} {}", if started { "started" } else { "quit" });
+            // (an app Steam starts, such as SteamVR or Wallpaper Engine, is no game starting)
+            if !self.games.library.is_game(&r.id) {
+                continue;
+            }
+            let entry = self.games.library.entries(&|id| self.front_apps.name(id)).into_iter().find(|x| x.id == r.id);
+            let game = if started {
+                crate::lcd_page::Game { name, since: r.since, ended: 0, minutes: entry.as_ref().map_or(0, |x| x.minutes), last: entry.as_ref().map_or(0, |x| x.last), changing: String::new(), done: (0, 0) }
+            } else {
+                let mut g = self.game_now.clone().filter(|g| g.name == name).unwrap_or_else(|| crate::lcd_page::Game { name, since: r.since, ..Default::default() });
+                g.ended = crate::games::now();
+                g
+            };
+            self.game_now = Some(game.clone());
+            if let Some(pl) = &self.player {
+                pl.tell(Control::Game(if started { GameSeen::Started(game) } else { GameSeen::Quit(game) }));
+            }
+        }
+        if let Some(f) = self.last_front.clone() {
+            self.front_app(f);
+        }
     }
 
     /// An app come to the front, as KWin says (see front_app.rs): each device
@@ -5533,16 +5824,45 @@ impl Front {
     /// leaves the front, back to the profile chosen by hand. Ectodeck's own
     /// windows change nothing, so a profile can be changed with Ectodeck in front.
     pub fn front_app(&mut self, f: crate::front_app::Front) {
-        let seen = self.front_apps.saw(&f);
+        // (a game's window goes by its game's id, whatever the window calls itself)
+        let app = self.games.front_id(&f);
+        // a window just opened, in front or not: only a running game's matters here, to
+        // its launch screen; what's in front is told as it comes to the front
+        if f.opened {
+            if self.games.running.iter().any(|r| r.id == app) {
+                if let Some(pl) = &self.player {
+                    pl.tell(crate::lcd_player::Control::Game(crate::lcd_player::GameSeen::Window));
+                }
+            }
+            return;
+        }
+        let seen = {
+            let (games, seen) = (&self.games, &mut self.front_apps);
+            let name = games.name(&app, seen);
+            seen.saw_as(&f, &app, || name)
+        };
         if f.is_ectodeck() {
             return;
         }
-        let app = f.app();
+        // a running game's window come to the front: its launch screen can go on
+        if self.games.running.iter().any(|r| r.id == app) {
+            if let Some(pl) = &self.player {
+                pl.tell(crate::lcd_player::Control::Game(crate::lcd_player::GameSeen::Window));
+            }
+        }
+        self.last_front = Some(f);
         let mut changed = false;
+        // what the Library says each device does while this is in front (a game
+        // with no choice of its own follows Every game's); Don't switch is none
+        let wanted = |d: &str| match self.games.library.wanted(&app, d) {
+            Some(crate::games::Choice::Profile(p)) => Some(p),
+            _ => None,
+        };
+        let (mouse_wants, kb_wants) = (wanted("sensei310"), wanted("z10").and_then(|p| p.parse::<u8>().ok()));
         // the mouse
         if let Some(store) = &self.mouse.profiles {
             let (active, count) = (store.active, store.list.len());
-            match store.for_app(&app) {
+            match mouse_wants.and_then(|id| store.list.iter().position(|p| p.id == id)) {
                 Some(i) if i != active => {
                     self.follow_back[1].get_or_insert(active);
                     self.mouse.choose_profile(i);
@@ -5561,7 +5881,7 @@ impl Front {
         // the keyboard
         if self.page.dev.is_some() {
             let active = self.page.active();
-            match self.kb_profile_for(&app) {
+            match kb_wants.filter(|n| z10::PROFILE_NUMBERS.contains(n)) {
                 Some(n) if n != active => {
                     self.follow_back[0].get_or_insert(active as usize);
                     self.choose_profile(n);
@@ -6732,6 +7052,111 @@ impl Front {
         self.tell_context();
     }
 
+    // ------------------------------------------------------------ Game launch
+
+    /// A row of Game launch by its place: the game starting, or quitting.
+    fn launch_key(i: i32) -> &'static str {
+        if i <= 0 { "start" } else { "quit" }
+    }
+
+    /// What Ectodeck's settings keep for a row of Game launch (devices.z10.screen.game).
+    fn game_launch_value(&self, k: &str) -> serde_json::Value {
+        self.settings.get("devices.z10.screen.game").map(|v| v[k].clone()).filter(|v| v.is_object()).unwrap_or_else(|| serde_json::json!({}))
+    }
+
+    fn set_game_launch(&mut self, k: &str, field: &str, v: serde_json::Value) {
+        if let Err(e) = self.settings.set(&format!("devices.z10.screen.game.{k}.{field}"), v) {
+            self.status(format!("Game launch was not saved: {e}"), 2);
+        }
+        self.tell_game_launch();
+    }
+
+    /// Until when a row can show, as kept and as said: a game starting until its
+    /// window opens or some seconds, one quitting until everything is put back or some seconds.
+    fn until_choices(row: usize) -> Vec<(&'static str, &'static str)> {
+        if row == 0 {
+            vec![("window", "the game’s window opens"), ("5", "5 seconds have passed"), ("10", "10 seconds have passed"), ("30", "30 seconds have passed")]
+        } else {
+            vec![("done", "everything is put back"), ("5", "5 seconds have passed"), ("10", "10 seconds have passed")]
+        }
+    }
+
+    /// What the Game launch shows as a game starts and quits, as Ectodeck's settings keep it,
+    /// each row's layout from Layouts (a row is on unless turned off; before there was a Game
+    /// launch, the screen's announce said whether launches broke in).
+    pub fn game_launch(&self) -> crate::lcd_player::Launch {
+        use crate::lcd_player::{Showing, Until};
+        let was_on = self.settings.on("devices.z10.screen.announce");
+        let show = |row: usize| {
+            let v = self.game_launch_value(Self::launch_key(row as i32));
+            let id = v["layout"].as_str().unwrap_or(crate::lcd_page::GAME_LAYOUTS[row.min(1)]);
+            let until = match v["until"].as_str() {
+                Some("window") => Until::Window,
+                Some("done") => Until::Done,
+                Some(n) if n.parse::<u32>().is_ok() => Until::Secs(n.parse().unwrap_or(5)),
+                _ if row == 0 => Until::Window,
+                _ => Until::Done,
+            };
+            Showing { on: v["on"].as_bool().unwrap_or(was_on), layout: self.screens.library.iter().find(|p| p.id == id).cloned(), until }
+        };
+        crate::lcd_player::Launch { start: show(0), quit: show(1) }
+    }
+
+    fn tell_game_launch(&self) {
+        if let Some(pl) = &self.player {
+            pl.tell(crate::lcd_player::Control::GameSetup(self.game_launch()));
+        }
+    }
+
+    /// Game launch's two rows, as the Screen tab shows them.
+    fn show_game_rows(&mut self) {
+        let launch = self.game_launch();
+        let rows: Vec<crate::GlRow> = [(&launch.start, "When a game starts, show"), (&launch.quit, "When a game quits, show")]
+            .iter()
+            .enumerate()
+            .map(|(i, (s, words))| {
+                let v = self.game_launch_value(Self::launch_key(i as i32));
+                let kept = v["until"].as_str().unwrap_or(if i == 0 { "window" } else { "done" }).to_string();
+                let until = Self::until_choices(i).into_iter().find(|(k, _)| *k == kept).map_or("", |(_, w)| w);
+                crate::GlRow {
+                    on: s.on,
+                    words: (*words).into(),
+                    layout: s.layout.as_ref().map_or_else(|| "No layout".to_string(), |p| p.name.clone()).into(),
+                    until: until.into(),
+                    chosen: self.gl_pick == Some(i),
+                    over: self.gl_over == Some(i),
+                }
+            })
+            .collect();
+        let ui = &self.ui;
+        show_rows(ui.get_gl_rows(), |m| ui.set_gl_rows(m), rows);
+    }
+
+    /// A row's until menu, under its dropdown.
+    fn open_until_menu(&mut self, row: usize, anchor: (f32, f32, f32)) {
+        if let Some((at, when)) = self.shut.take() {
+            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
+                return;
+            }
+        }
+        self.close_menu();
+        let kept = self.game_launch_value(Self::launch_key(row as i32))["until"].as_str().unwrap_or(if row == 0 { "window" } else { "done" }).to_string();
+        let rows: Vec<MenuRow> = Self::until_choices(row).iter().map(|(k, w)| MenuRow { kind: 0, label: (*w).into(), tag: "".into(), tick: *k == kept, sub: "".into() }).collect();
+        self.hang_menu(rows, 250.0, anchor);
+        self.until_menu = Some(row);
+    }
+
+    /// The game a page shows in its readings: the one starting, playing or quitting, or the
+    /// last one; before any, the game played last, as it was then (for the editor's and the
+    /// Screen tab's pictures).
+    fn game_reading(&self) -> Option<crate::lcd_page::Game> {
+        if let Some(g) = &self.game_now {
+            return Some(g.clone());
+        }
+        let e = self.games.library.entries(&|id| self.front_apps.name(id)).into_iter().filter(|e| e.kind == crate::games::Kind::Game).max_by_key(|e| e.last)?;
+        Some(crate::lcd_page::Game { name: e.name, since: e.last, ended: e.last, minutes: e.minutes, last: e.last, changing: String::new(), done: (0, 0) })
+    }
+
     /// A page edited: the keyboard shows the change at once, and it is saved
     /// once the editing pauses.
     fn pages_edited(&mut self) {
@@ -6751,6 +7176,7 @@ impl Front {
         if let Some(pl) = &self.player {
             pl.tell(crate::lcd_player::Control::Pages(pages));
         }
+        self.tell_game_launch();
     }
 
     /// The screen plays the playlist of the profile the page shows, as it
@@ -6845,6 +7271,7 @@ impl Front {
         r.profile = self.page.dev.as_ref().map(|_| self.page.profile_name(self.page.active()));
         r.profile_number = self.page.dev.as_ref().map(|_| self.page.active());
         r.outside = self.weather.report().map(|w| (w.temperature as f64, crate::ecto_settings::sky(w.code)));
+        r.game = self.game_reading();
         self.readings = r;
         self.read_at = Some(Instant::now());
     }
@@ -7260,6 +7687,14 @@ impl Front {
         // onboard layout, from build 5 of its firmware on (Some, or Some(None) for the screen
         // off); before that, EVGA's status screen, in the default backlight
         let closed = self.ui.get_screen_closed() && self.editor.is_none();
+        // the third tab: the layout of the row selected (or a layout carried over a row's bar,
+        // as it would show there; else the starting game's), drawn with the game's readings
+        let game_tab = self.ui.get_screen_game() && self.editor.is_none();
+        let game_page = game_tab.then(|| {
+            let launch = self.game_launch();
+            let carried = self.gl_over.and_then(|_| self.carry.as_ref()).and_then(|c| self.screens.library.iter().find(|p| p.id == c.page)).cloned();
+            carried.or_else(|| if self.gl_pick == Some(1) { launch.quit.layout } else { launch.start.layout })
+        });
         let onboard = (closed && self.onboard_ready()).then(|| self.ob_page().cloned());
         let profile = [light[1], light[2], light[3]];
         let lit = match &onboard {
@@ -7279,6 +7714,10 @@ impl Front {
         let t = self.edit_t();
         let rows = match self.editor.as_ref().and_then(|ed| self.screens.library.get(ed.page)) {
             Some(p) => crate::lcd_page::render_at(p, &self.readings, t),
+            None if game_tab => match game_page.flatten() {
+                Some(p) => crate::lcd_page::render_at(&p, &self.readings, t),
+                None => vec![String::new(); 4],
+            },
             None => match &onboard {
                 Some(Some(p)) => crate::lcd_page::render_onboard(p, &self.onboard_readings()),
                 Some(None) => vec![String::new(); 4],

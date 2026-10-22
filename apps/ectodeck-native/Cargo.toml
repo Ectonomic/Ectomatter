@@ -37,6 +37,10 @@ bitflags = "2"
 libc = "0.2"
 # game names folded to plain letters for the screen, as the z10-lcd service did (NFKD)
 unicode-normalization = "0.1"
+# the Library's Steam games (steam.rs): where Steam is on Linux, Windows and macOS, its
+# libraries and installed apps; and its binary appinfo.vdf, which says which app is a game
+steamlocate = "2.1.1"
+steam-vdf-parser = "0.1.2"
 
 [dev-dependencies]
 # the parity vectors the Z10 module is checked against are gzipped

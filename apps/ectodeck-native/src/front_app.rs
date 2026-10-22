@@ -8,6 +8,8 @@
 //! The apps seen in front are kept, newest first, for the menu that ties a
 //! profile to one; each by its desktop file's name (org.kde.konsole), or its
 //! window class where it has none, and named as its desktop file names it.
+//! KWin also says which process the window is from, so a game's windows are
+//! known for the game's, whatever each window calls itself (see games.rs).
 
 use std::path::PathBuf;
 
@@ -18,15 +20,31 @@ use smithay_client_toolkit::reexports::calloop::channel::Sender;
 pub const SERVICE: &str = "com.ectonomic.Ectodeck";
 pub const PATH: &str = "/com/ectonomic/Ectodeck";
 pub const IFACE: &str = "com.ectonomic.Ectodeck.FrontApp";
-/// The script's name in KWin.
+/// The script's name in KWin: with the Ectodeck it belongs to after it, so an
+/// Ectodeck quitting as the next one starts takes out its own script, not the
+/// next one's (an Ectodeck before this kept it under the name alone).
 const SCRIPT: &str = "ectodeck-front-app";
 
-/// What KWin says of a window come to the front.
+fn script_name() -> String {
+    format!("{SCRIPT}-{}", std::process::id())
+}
+
+/// Where the name of the script last loaded is kept, so one an Ectodeck left
+/// loaded when it stopped without quitting is taken out by the next.
+fn loaded_file() -> PathBuf {
+    crate::data_dir().join("kwin").join("loaded")
+}
+
+/// What KWin says of a window come to the front: its class, title and
+/// desktop file's name, and the process it's from (0 where KWin doesn't know);
+/// or (`opened`) of a window just opened, which may not be in front.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Front {
     pub class: String,
     pub title: String,
     pub desktop: String,
+    pub pid: u32,
+    pub opened: bool,
 }
 
 impl Front {
@@ -49,25 +67,72 @@ struct Listener {
     tell: Sender<Front>,
 }
 
+/// When KWin's script last told Ectodeck anything, and when it was last loaded
+/// (milliseconds since 1970): a script that has run says which window is in front
+/// at once, so one loaded a while ago that has said nothing since isn't running.
+static HEARD: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static LOADED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
+}
+
 #[zbus::interface(name = "com.ectonomic.Ectodeck.FrontApp")]
 impl Listener {
-    /// A window come to the front: its class, its title, its desktop file's name.
-    fn window_activated(&self, class: String, title: String, desktop: String) {
-        let _ = self.tell.send(Front { class, title, desktop });
+    /// A window come to the front: its class, its title, its desktop file's
+    /// name, and its process.
+    /// Each says which Ectodeck's script tells it (`from`, the Ectodeck's process):
+    /// one left in KWin by an Ectodeck before is told to stop telling.
+    /// (the Ectodeck as words: a number of the script's own goes over the bus as
+    /// whatever kind of number KWin makes of it)
+    fn window_activated(&self, class: String, title: String, desktop: String, pid: i32, from: String) -> bool {
+        if from != std::process::id().to_string() {
+            return false;
+        }
+        HEARD.store(now_ms(), std::sync::atomic::Ordering::Relaxed);
+        let _ = self.tell.send(Front { class, title, desktop, pid: u32::try_from(pid).unwrap_or(0), opened: false });
+        true
+    }
+
+    /// A window just opened, in front or not (a game's, its launch screen waits for).
+    fn window_opened(&self, class: String, title: String, desktop: String, pid: i32, from: String) -> bool {
+        if from != std::process::id().to_string() {
+            return false;
+        }
+        HEARD.store(now_ms(), std::sync::atomic::Ordering::Relaxed);
+        let _ = self.tell.send(Front { class, title, desktop, pid: u32::try_from(pid).unwrap_or(0), opened: true });
+        true
     }
 }
 
 /// The script Ectodeck loads into KWin.
 fn script() -> String {
+    let me = std::process::id();
     format!(
         r#"// Ectodeck: tells Ectodeck which app is in front, for the profiles that
-// follow one. Ectodeck loads it as it starts and takes it out as it quits.
+// follow one. Ectodeck loads it as it starts and takes it out as it quits;
+// each says which Ectodeck loaded it ({me}), and one an Ectodeck before left
+// here stops telling once the Ectodeck running says so.
+const from = "{me}";
+function heard(keep) {{
+    if (keep === false) {{
+        workspace.windowActivated.disconnect(tell);
+        workspace.windowAdded.disconnect(opened);
+    }}
+}}
 function tell(w) {{
     if (!w) return;
     callDBus("{SERVICE}", "{PATH}", "{IFACE}", "WindowActivated",
-        String(w.resourceClass || ""), String(w.caption || ""), String(w.desktopFileName || ""));
+        String(w.resourceClass || ""), String(w.caption || ""), String(w.desktopFileName || ""), w.pid || 0, from, heard);
+}}
+// and each window as it opens, in front or not: a game's window, which its launch screen waits for
+function opened(w) {{
+    if (!w) return;
+    callDBus("{SERVICE}", "{PATH}", "{IFACE}", "WindowOpened",
+        String(w.resourceClass || ""), String(w.caption || ""), String(w.desktopFileName || ""), w.pid || 0, from, heard);
 }}
 workspace.windowActivated.connect(tell);
+workspace.windowAdded.connect(opened);
 tell(workspace.activeWindow);
 "#
     )
@@ -94,8 +159,10 @@ fn kwin(conn: &zbus::blocking::Connection) -> zbus::Result<zbus::blocking::Proxy
     zbus::blocking::Proxy::new(conn, "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting")
 }
 
-/// The script written to Ectodeck's data folder and loaded into KWin, in
-/// place of one an Ectodeck before left there.
+/// The script written to Ectodeck's data folder and loaded into KWin under
+/// this Ectodeck's own name: in place of one an Ectodeck before left there
+/// (by the name alone, or one whose Ectodeck has gone); one whose Ectodeck is
+/// still quitting is left for it to take out.
 fn load(conn: &zbus::blocking::Connection) -> Result<(), String> {
     let path = crate::data_dir().join("kwin").join(format!("{SCRIPT}.js"));
     if let Some(dir) = path.parent() {
@@ -103,22 +170,64 @@ fn load(conn: &zbus::blocking::Connection) -> Result<(), String> {
     }
     std::fs::write(&path, script()).map_err(|e| e.to_string())?;
     let k = kwin(conn).map_err(|e| e.to_string())?;
-    let loaded: bool = k.call("isScriptLoaded", &(SCRIPT,)).map_err(|e| e.to_string())?;
-    if loaded {
-        let _: bool = k.call("unloadScript", &(SCRIPT,)).map_err(|e| e.to_string())?;
+    let mut stale = vec![SCRIPT.to_string()];
+    if let Ok(before) = std::fs::read_to_string(loaded_file()) {
+        let before = before.trim().to_string();
+        let gone = before.rsplit_once('-').and_then(|(_, pid)| pid.parse::<u32>().ok()).is_none_or(|pid| !PathBuf::from(format!("/proc/{pid}")).exists());
+        if gone {
+            stale.push(before);
+        }
     }
-    let id: i32 = k.call("loadScript", &(path.to_string_lossy().as_ref(), SCRIPT)).map_err(|e| e.to_string())?;
+    for name in &stale {
+        let loaded: bool = k.call("isScriptLoaded", &(name.as_str(),)).map_err(|e| e.to_string())?;
+        if loaded {
+            let _: bool = k.call("unloadScript", &(name.as_str(),)).map_err(|e| e.to_string())?;
+        }
+    }
+    let name = script_name();
+    let id: i32 = k.call("loadScript", &(path.to_string_lossy().as_ref(), name.as_str())).map_err(|e| e.to_string())?;
     if id < 0 {
         return Err("KWin didn't load the script".into());
     }
-    let () = k.call("start", &()).map_err(|e| e.to_string())?;
+    // (run by its own object, as KWin's own tools run a script: a script started by
+    // Scripting.start, which looks through every installed script first, didn't stay
+    // loaded on Plasma 6.7)
+    let run = zbus::blocking::Proxy::new(conn, "org.kde.KWin", format!("/Scripting/Script{id}"), "org.kde.kwin.Script").map_err(|e| e.to_string())?;
+    let () = run.call("run", &()).map_err(|e| e.to_string())?;
+    LOADED.store(now_ms(), std::sync::atomic::Ordering::Relaxed);
+    let _ = std::fs::write(loaded_file(), &name);
     Ok(())
 }
 
-/// Ectodeck's script taken out of KWin, as Ectodeck quits.
-pub fn stop(conn: &zbus::blocking::Connection) {
+/// This Ectodeck's script heard from once it's loaded, or loaded again (a few
+/// times at most, said in the log).
+/// (KWin's own word on whether a script is loaded can't be taken: on Plasma 6.7 a
+/// script that runs on is often no longer found by its name. What says it runs is
+/// what it tells: as it starts, it says which window is in front.)
+pub fn keep(conn: &zbus::blocking::Connection) {
+    use std::sync::atomic::Ordering;
+    static TRIES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let (heard, loaded) = (HEARD.load(Ordering::Relaxed), LOADED.load(Ordering::Relaxed));
+    if heard >= loaded || now_ms().saturating_sub(loaded) < 3000 || TRIES.fetch_add(1, Ordering::Relaxed) >= 3 {
+        return;
+    }
     if let Ok(k) = kwin(conn) {
-        let _: zbus::Result<bool> = k.call("unloadScript", &(SCRIPT,));
+        let _: zbus::Result<bool> = k.call("unloadScript", &(script_name().as_str(),));
+    }
+    match load(conn) {
+        Ok(()) => eprintln!("ectodeck-native: KWin's script hadn't started telling; it's loaded again"),
+        Err(e) => eprintln!("ectodeck-native: KWin's script hadn't started telling, and won't load again: {e}"),
+    }
+}
+
+/// This Ectodeck's script taken out of KWin, as Ectodeck quits.
+pub fn stop(conn: &zbus::blocking::Connection) {
+    let name = script_name();
+    if let Ok(k) = kwin(conn) {
+        let _: zbus::Result<bool> = k.call("unloadScript", &(name.as_str(),));
+    }
+    if std::fs::read_to_string(loaded_file()).is_ok_and(|n| n.trim() == name) {
+        let _ = std::fs::remove_file(loaded_file());
     }
 }
 
@@ -147,16 +256,18 @@ impl Seen {
         Seen { list }
     }
 
-    /// An app come to the front, first now; true if the list changed.
-    pub fn saw(&mut self, f: &Front) -> bool {
-        let id = f.app();
+    /// An app come to the front, first now, by the id it goes by (a game's
+    /// window by its game's: see games.rs), named by `name` if it's new; true
+    /// if the list changed.
+    pub fn saw_as(&mut self, f: &Front, id: &str, name: impl FnOnce() -> String) -> bool {
+        let id = id.to_string();
         if id.is_empty() || f.is_ectodeck() {
             return false;
         }
         if self.list.first().is_some_and(|a| a.id == id) {
             return false;
         }
-        let app = self.list.iter().position(|a| a.id == id).map(|i| self.list.remove(i)).unwrap_or_else(|| App { name: name_of(&id, &f.class), id });
+        let app = self.list.iter().position(|a| a.id == id).map(|i| self.list.remove(i)).unwrap_or_else(|| App { name: name(), id });
         self.list.insert(0, app);
         self.list.truncate(KEPT);
         crate::uistate::set("front_apps", Value::Array(self.list.iter().map(|a| json!({ "id": a.id, "name": a.name })).collect()));
@@ -169,31 +280,62 @@ impl Seen {
     }
 }
 
+/// Where desktop files and icons are kept: the person's own, the system's, and Flatpak's.
+fn share_dirs() -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        dirs.push(home.join(".local/share"));
+        dirs.push(home.join(".local/share/flatpak/exports/share"));
+    }
+    let data = std::env::var("XDG_DATA_DIRS").unwrap_or_else(|_| "/usr/local/share:/usr/share".into());
+    dirs.extend(data.split(':').filter(|d| !d.is_empty()).map(PathBuf::from));
+    dirs.push(PathBuf::from("/var/lib/flatpak/exports/share"));
+    dirs
+}
+
+/// An app's desktop file, as text, where one is.
+fn desktop_file(id: &str) -> Option<String> {
+    let file = format!("{id}.desktop");
+    share_dirs().into_iter().find_map(|d| std::fs::read_to_string(d.join("applications").join(&file)).ok())
+}
+
 /// An app's name, as its desktop file has it (`Name=`, in its Desktop Entry),
 /// looked for where desktop files are kept; else its class with a capital.
 pub fn name_of(id: &str, class: &str) -> String {
-    let file = format!("{id}.desktop");
-    let mut dirs: Vec<PathBuf> = Vec::new();
-    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
-        dirs.push(home.join(".local/share/applications"));
-        dirs.push(home.join(".local/share/flatpak/exports/share/applications"));
-    }
-    let data = std::env::var("XDG_DATA_DIRS").unwrap_or_else(|_| "/usr/local/share:/usr/share".into());
-    dirs.extend(data.split(':').filter(|d| !d.is_empty()).map(|d| PathBuf::from(d).join("applications")));
-    dirs.push(PathBuf::from("/var/lib/flatpak/exports/share/applications"));
-    for d in dirs {
-        if let Some(name) = std::fs::read_to_string(d.join(&file)).ok().and_then(|t| desktop_name(&t)) {
-            return name;
-        }
+    if let Some(name) = desktop_file(id).and_then(|t| desktop_entry(&t, "Name")) {
+        return name;
     }
     let c = if class.is_empty() { id } else { class };
     let mut chars = c.chars();
     chars.next().map_or_else(String::new, |f| f.to_uppercase().collect::<String>() + chars.as_str())
 }
 
-/// The name in a desktop file's Desktop Entry (its plain `Name=`, not a
-/// translation's).
-fn desktop_name(text: &str) -> Option<String> {
+/// An app's icon, as its desktop file names it (`Icon=`): a picture's own path,
+/// or a name looked for in the icon themes, largest first, then the old pixmaps.
+pub fn icon_of(id: &str) -> Option<PathBuf> {
+    let icon = desktop_entry(&desktop_file(id)?, "Icon")?;
+    let p = PathBuf::from(&icon);
+    if p.is_absolute() {
+        return p.is_file().then_some(p);
+    }
+    let dirs = share_dirs();
+    for theme in ["hicolor", "breeze", "breeze-dark", "Adwaita"] {
+        for size in ["scalable", "256x256", "128x128", "96x96", "64x64", "48x48", "32x32"] {
+            for d in &dirs {
+                for ext in ["svg", "png"] {
+                    let f = d.join("icons").join(theme).join(size).join("apps").join(format!("{icon}.{ext}"));
+                    if f.is_file() {
+                        return Some(f);
+                    }
+                }
+            }
+        }
+    }
+    dirs.iter().flat_map(|d| ["png", "svg"].map(|e| d.join("pixmaps").join(format!("{icon}.{e}")))).chain(["png", "svg"].map(|e| PathBuf::from(format!("/usr/share/pixmaps/{icon}.{e}")))).find(|f| f.is_file())
+}
+
+/// A key's value in a desktop file's Desktop Entry, as plainly written (not a translation's).
+fn desktop_entry(text: &str, key: &str) -> Option<String> {
     let mut in_entry = false;
     for line in text.lines() {
         let line = line.trim();
@@ -202,7 +344,7 @@ fn desktop_name(text: &str) -> Option<String> {
             continue;
         }
         if in_entry {
-            if let Some(n) = line.strip_prefix("Name=") {
+            if let Some(n) = line.strip_prefix(key).and_then(|r| r.strip_prefix('=')) {
                 return Some(n.trim().to_string()).filter(|n| !n.is_empty());
             }
         }
@@ -219,13 +361,16 @@ mod tests {
     /// name is its Desktop Entry's own.
     #[test]
     fn the_app_in_front_is_named_as_its_desktop_file_names_it() {
-        let f = Front { class: "konsole".into(), title: "~ : bash".into(), desktop: "org.kde.konsole".into() };
+        let f = Front { class: "konsole".into(), title: "~ : bash".into(), desktop: "org.kde.konsole".into(), pid: 0, opened: false };
         assert_eq!(f.app(), "org.kde.konsole");
         assert_eq!(Front { class: "Steam".into(), ..Default::default() }.app(), "steam");
         assert!(Front { class: "ectodeck-native".into(), ..Default::default() }.is_ectodeck());
         let text = "[Desktop Entry]\nName=Konsole\nName[de]=Konsole DE\nExec=konsole\n[Desktop Action new]\nName=New Window\n";
-        assert_eq!(desktop_name(text).as_deref(), Some("Konsole"));
-        assert_eq!(desktop_name("[Other]\nName=No\n"), None);
+        assert_eq!(desktop_entry(text, "Name").as_deref(), Some("Konsole"));
+        assert_eq!(desktop_entry("[Other]\nName=No\n", "Name"), None);
+        assert_eq!(desktop_entry("[Desktop Entry]\nIcon=org.kde.konsole\nName=Konsole\n", "Icon").as_deref(), Some("org.kde.konsole"));
         assert!(script().contains("workspace.windowActivated.connect(tell)"));
+        assert!(script().contains("w.pid || 0"), "the script says which process a window is from");
+        assert!(script().contains("workspace.windowAdded.connect(opened)"), "and tells of each window as it opens");
     }
 }

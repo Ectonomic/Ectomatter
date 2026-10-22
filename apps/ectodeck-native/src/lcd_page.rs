@@ -50,9 +50,18 @@ pub enum Source {
     /// one of the computer's sensors checked in Settings, by the number [crate::sensors]
     /// knows it by (kept in a layout by its id)
     Sensor(u16),
+    /// the game starting, playing or quitting (or the last one): its name, how long this
+    /// session has lasted, how long it's been played in all, when it was last played, what
+    /// Ectodeck is setting or putting back now, and how many of those changes are done
+    GameName,
+    SessionTime,
+    TimePlayed,
+    LastPlayed,
+    ChangingNow,
+    ChangesDone,
 }
 
-pub const SOURCES: [Source; 15] = [
+pub const SOURCES: [Source; 21] = [
     Source::CpuTemp,
     Source::CpuLoad,
     Source::CpuClock,
@@ -68,6 +77,12 @@ pub const SOURCES: [Source; 15] = [
     Source::KeyRollover,
     Source::OutsideTemp,
     Source::Sky,
+    Source::GameName,
+    Source::SessionTime,
+    Source::TimePlayed,
+    Source::LastPlayed,
+    Source::ChangingNow,
+    Source::ChangesDone,
 ];
 
 impl Source {
@@ -89,6 +104,12 @@ impl Source {
             Source::OutsideTemp => "outside-temp",
             Source::Sky => "sky",
             Source::Sensor(_) => "sensor",
+            Source::GameName => "game-name",
+            Source::SessionTime => "session-time",
+            Source::TimePlayed => "time-played",
+            Source::LastPlayed => "last-played",
+            Source::ChangingNow => "changing-now",
+            Source::ChangesDone => "changes-done",
         }
     }
 
@@ -122,6 +143,12 @@ impl Source {
             Source::OutsideTemp => "Outside temperature",
             Source::Sky => "Weather",
             Source::Sensor(_) => "Sensor",
+            Source::GameName => "Game name",
+            Source::SessionTime => "Session time",
+            Source::TimePlayed => "Time played",
+            Source::LastPlayed => "Last played",
+            Source::ChangingNow => "Changing now",
+            Source::ChangesDone => "Changes done",
         }
     }
 
@@ -151,6 +178,12 @@ impl Source {
             Source::OutsideTemp => "the temperature outside",
             Source::Sky => "the sky outside",
             Source::Sensor(_) => "a sensor",
+            Source::GameName => "the game’s name",
+            Source::SessionTime => "how long this session has lasted",
+            Source::TimePlayed => "the time played in all",
+            Source::LastPlayed => "when the game was last played",
+            Source::ChangingNow => "what Ectodeck is changing",
+            Source::ChangesDone => "how many changes are done",
         }
         .to_string()
     }
@@ -165,6 +198,7 @@ impl Source {
             Source::Date => "Time and date",
             Source::OutsideTemp | Source::Sky => "More",
             Source::Sensor(_) => "Sensors",
+            Source::GameName | Source::SessionTime | Source::TimePlayed | Source::LastPlayed | Source::ChangingNow | Source::ChangesDone => "Game",
         }
     }
 
@@ -180,6 +214,8 @@ impl Source {
             Source::GameMode | Source::KeyRollover => "The keyboard, with Ectodeck’s firmware build 5 or later",
             Source::OutsideTemp | Source::Sky => "Open-Meteo, for the place in Ectodeck’s settings",
             Source::Sensor(_) => "One of this computer’s sensors",
+            Source::GameName | Source::SessionTime | Source::TimePlayed | Source::LastPlayed => "The game in Ectodeck’s Library starting, playing or quitting",
+            Source::ChangingNow | Source::ChangesDone => "What Ectodeck sets as a game starts, and puts back as it quits",
         }
     }
 
@@ -187,7 +223,7 @@ impl Source {
     /// Whether the reading is words (the weather, the active profile's name), which
     /// carry on to the next row, scroll or are cut off, as Text does.
     pub fn is_words(self) -> bool {
-        matches!(self, Source::Sky | Source::Profile)
+        matches!(self, Source::Sky | Source::Profile | Source::GameName | Source::ChangingNow)
     }
 
     pub fn is_temperature(self) -> bool {
@@ -208,7 +244,7 @@ impl Source {
     pub fn barred(self) -> bool {
         match self {
             Source::Sensor(n) => crate::sensors::known(n).is_some_and(|k| matches!(k.what, What::Temperature | What::Load | What::Charge | What::FanShare | What::InUse)),
-            s => matches!(s, Source::CpuTemp | Source::CpuLoad | Source::GpuTemp | Source::GpuLoad | Source::Memory | Source::VideoMemory),
+            s => matches!(s, Source::CpuTemp | Source::CpuLoad | Source::GpuTemp | Source::GpuLoad | Source::Memory | Source::VideoMemory | Source::ChangesDone),
         }
     }
 
@@ -223,6 +259,7 @@ impl Source {
             Source::GameMode | Source::KeyRollover => Some("keyboard"),
             // (a sensor's part: its readings said unavailable once)
             Source::Sensor(n) => Some(crate::sensors::known(n).map_or("Sensor", |k| k.part.short())),
+            Source::GameName | Source::SessionTime | Source::TimePlayed | Source::LastPlayed | Source::ChangingNow | Source::ChangesDone => Some("game"),
             Source::CpuLoad | Source::Date | Source::Profile | Source::ProfileNumber => None,
         }
     }
@@ -240,6 +277,7 @@ impl Source {
             Source::KeyRollover => "Rollover",
             Source::OutsideTemp | Source::Sky => "Weather",
             Source::Sensor(n) => crate::sensors::known(n).map_or("Sensor", |k| k.part.short()),
+            Source::GameName | Source::SessionTime | Source::TimePlayed | Source::LastPlayed | Source::ChangingNow | Source::ChangesDone => "Game",
         }
     }
 }
@@ -462,10 +500,16 @@ fn behind(row: u8, height: u8, fx: Fx, speed: u8) -> Piece {
 
 /// The layouts Ectodeck ships, by key, in the order a new Library has them: the three
 /// Playlist 1 plays, the time with the weather, the computer's readings, the keyboard's
-/// profile, then the effects to look at. Each is set as Americans read them: the time on a
-/// 12-hour clock and the weather in °F (the computer's temperatures stay in °C, as their
-/// makers and every reading of them give them).
-pub const BUILT_INS: [&str; 12] = ["stats", "clock", "weather", "today", "gaming", "heartbeat", "profile", "rain", "starfield", "campfire", "aquarium", "music"];
+/// profile, the effects to look at, then the two the Screen tab's Game launch shows as a
+/// game starts and quits. Each is set as Americans read them: the time on a 12-hour clock
+/// and the weather in °F (the computer's temperatures stay in °C, as their makers and every
+/// reading of them give them).
+pub const BUILT_INS: [&str; 14] = ["stats", "clock", "weather", "today", "gaming", "heartbeat", "profile", "rain", "starfield", "campfire", "aquarium", "music", "game-launch", "game-quit"];
+
+/// The two layouts that redraw the screens the keyboard showed as a game started and
+/// quit before Ectodeck had a Game launch tab: played as they ship, they play those
+/// screens' own animation (lcd_anim.rs).
+pub const GAME_LAYOUTS: [&str; 2] = ["game-launch", "game-quit"];
 
 /// What a layout Ectodeck ships shows, for its card while it is as it shipped: in two lines
 /// of a card's words at the window's first size (1440 wide), each line kept short to fit.
@@ -483,6 +527,8 @@ fn shipped_line(key: &str) -> Option<&'static str> {
         "campfire" => "Flames flickering up the screen.",
         "aquarium" => "Fish swimming by, with bubbles rising.",
         "music" => "Bars that rise and fall with the computer’s sound.",
+        "game-launch" => "The game’s name and each change as it’s made.",
+        "game-quit" => "The game’s name, time played, what’s put back.",
         _ => return None,
     })
 }
@@ -588,9 +634,38 @@ impl Page {
             "campfire" => ("Campfire", vec![behind(0, ROWS, Fx::Fire, 100)]),
             "aquarium" => ("Aquarium", vec![behind(0, ROWS, Fx::Aquarium, 40)]),
             "music" => ("Music", vec![behind(0, ROWS, Fx::Spectrum, 100)]),
+            // (as the keyboard showed a game starting: its name in the middle, what is being
+            // set, and a bar of the changes done with their count, as wide as the screen)
+            "game-launch" => (
+                "Game launch",
+                vec![
+                    words(0, 0, "> LAUNCHING"),
+                    middle(1, Kind::Data(Source::GameName, false)),
+                    block(2, 2, 18, Kind::Data(Source::ChangingNow, false)),
+                    block(3, 0, 16, Kind::Bar(Source::ChangesDone)),
+                    block(3, 17, 3, Kind::Data(Source::ChangesDone, false)),
+                ],
+            ),
+            "game-quit" => (
+                "Game quit",
+                vec![
+                    words(0, 0, "> SESSION ENDED"),
+                    middle(1, Kind::Data(Source::GameName, false)),
+                    words(2, 3, "PLAYED"),
+                    block(2, 10, 7, Kind::Data(Source::SessionTime, false)),
+                    block(3, 0, 16, Kind::Bar(Source::ChangesDone)),
+                    block(3, 17, 3, Kind::Data(Source::ChangesDone, false)),
+                ],
+            ),
             _ => return None,
         };
         Some(Page { id: key.into(), name: name.into(), pieces, ..Page::blank() })
+    }
+
+    /// Which of the two game layouts this is, while it's as it ships: "game-launch" or
+    /// "game-quit", which play their own animation.
+    pub fn as_shipped_game(&self) -> Option<&'static str> {
+        GAME_LAYOUTS.iter().copied().find(|k| self.id == *k && Page::built_in(k).is_some_and(|t| t.pieces == self.pieces))
     }
 
     /// A layout as Ectodeck ships it (one of [BUILT_INS], or blank), by its key, with an id
@@ -1239,8 +1314,13 @@ pub struct Moment {
 
 impl Moment {
     pub fn now() -> Moment {
-        let mut t: libc::tm = unsafe { std::mem::zeroed() };
         let secs = unsafe { libc::time(std::ptr::null_mut()) };
+        Moment::at(secs)
+    }
+
+    /// The local time at a moment, in seconds since 1970.
+    pub fn at(secs: libc::time_t) -> Moment {
+        let mut t: libc::tm = unsafe { std::mem::zeroed() };
         unsafe { libc::localtime_r(&secs, &mut t) };
         Moment { hour: t.tm_hour as u32, minute: t.tm_min as u32, weekday: t.tm_wday as u32, day: t.tm_mday as u32, month: t.tm_mon as u32, year: t.tm_year + 1900 }
     }
@@ -1269,6 +1349,40 @@ pub struct Readings {
     pub outside: Option<(f64, String)>,
     /// each checked sensor's reading, by the number a layout knows it by, and what it reads
     pub sensors: std::collections::HashMap<u16, (What, Val)>,
+    /// the game starting, playing or quitting, or the last one
+    pub game: Option<Game>,
+}
+
+/// A game's readings: its name as the Library names it; when this session
+/// started and (once it has quit) when it ended, in seconds since 1970; the
+/// minutes it was played before this session, and when it was last played
+/// before it; what Ectodeck is changing now, and how many changes are done of how many.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Game {
+    pub name: String,
+    pub since: u64,
+    pub ended: u64,
+    pub minutes: u64,
+    pub last: u64,
+    pub changing: String,
+    pub done: (usize, usize),
+}
+
+impl Game {
+    /// The minutes this session has lasted, at `now` (seconds since 1970).
+    pub fn session(&self, now: u64) -> u64 {
+        let end = if self.ended > 0 { self.ended } else { now };
+        end.saturating_sub(self.since) / 60
+    }
+}
+
+/// Minutes as the screen writes them: "2H 05M", "45M".
+fn hours(m: u64) -> String {
+    if m >= 60 { format!("{}H {:02}M", m / 60, m % 60) } else { format!("{m}M") }
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
 
 fn fahrenheit(c: f64) -> f64 {
@@ -1307,6 +1421,29 @@ fn text_of(s: Source, f: bool, date: DateFormat, r: &Readings) -> Option<String>
             let (what, v) = r.sensors.get(&n)?;
             crate::sensor_read::on_screen(*what, *v, f)
         }
+        // (in capitals, as the keyboard has always written a game's name)
+        Source::GameName => ectotype_core::lcd::lcd_text(&r.game.as_ref()?.name.to_uppercase()),
+        Source::SessionTime => hours(r.game.as_ref()?.session(now_secs())),
+        Source::TimePlayed => {
+            let g = r.game.as_ref()?;
+            hours(g.minutes + g.session(now_secs()))
+        }
+        Source::LastPlayed => {
+            let g = r.game.as_ref()?;
+            if g.last == 0 {
+                "NEVER".into()
+            } else {
+                let t = Moment::at(g.last as libc::time_t);
+                const MONTHS: [&str; 12] = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+                let this_year = r.now.as_ref().is_none_or(|n| n.year == t.year);
+                if this_year { format!("{} {}", MONTHS[t.month as usize % 12], t.day) } else { format!("{} {} {}", MONTHS[t.month as usize % 12], t.day, t.year) }
+            }
+        }
+        Source::ChangingNow => ectotype_core::lcd::lcd_text(&r.game.as_ref()?.changing.to_uppercase()),
+        Source::ChangesDone => {
+            let (done, of) = r.game.as_ref()?.done;
+            if of == 0 { String::new() } else { format!("{done}/{of}") }
+        }
     })
 }
 
@@ -1323,6 +1460,11 @@ fn share_of(s: Source, r: &Readings) -> Option<f64> {
             let (what, v) = r.sensors.get(&n)?;
             crate::sensor_read::share(*what, *v)?
         }
+        // (with nothing to change, nothing is left to do)
+        Source::ChangesDone => match r.game.as_ref()?.done {
+            (_, 0) => 1.0,
+            (d, of) => d as f64 / of as f64,
+        },
         _ => return None,
     }
     .clamp(0.0, 1.0))
@@ -1378,6 +1520,8 @@ fn show(p: &Piece, r: &Readings) -> Result<String, &'static str> {
     match &p.kind {
         Kind::Text(t) => Ok(ectotype_core::lcd::lcd_text(t)),
         Kind::Data(s, f) => text_of(*s, *f, p.date_format, r).ok_or(fail(*s)),
+        // (a game with nothing to change has no bar of its changes, as its launch screen has none)
+        Kind::Bar(Source::ChangesDone) if r.game.as_ref().is_some_and(|g| g.done.1 == 0) => Ok(String::new()),
         Kind::Bar(s) => share_of(*s, r).map(|v| bar(v, p.width)).ok_or(fail(*s)),
         // (an effect draws its pattern, not words: see [lay_out])
         Kind::Effect { .. } => Ok(String::new()),
@@ -1817,6 +1961,8 @@ pub fn available(r: &Readings, weather: bool) -> Vec<Source> {
             Source::Memory => r.ram.is_some(),
             Source::OutsideTemp | Source::Sky => weather,
             Source::Sensor(n) => r.sensors.contains_key(n),
+            // (the game's readings are there to choose whether a game has run or not)
+            Source::GameName | Source::SessionTime | Source::TimePlayed | Source::LastPlayed | Source::ChangingNow | Source::ChangesDone => true,
         })
         .collect()
 }
@@ -2113,7 +2259,27 @@ mod tests {
             rollover: None,
             outside: None,
             sensors: Default::default(),
+            game: None,
         }
+    }
+
+    /// The game layouts show what the keyboard showed as a game started and quit: the
+    /// name in the middle, what's being set, the session's length, the changes' bar.
+    #[test]
+    fn the_game_layouts_redraw_the_launch_and_quit_screens() {
+        let mut r = readings();
+        let now = super::now_secs();
+        r.game = Some(Game { name: "ARC Raiders".into(), since: now - (2 * 60 + 14) * 60, ended: now, minutes: 21842, last: 0, changing: "MONITORS".into(), done: (1, 2) });
+        let rows = |k: &str, r: &Readings| render(&Page::built_in(k).unwrap(), r).iter().map(|s| s.trim_end().to_string()).collect::<Vec<_>>();
+        assert_eq!(rows("game-launch", &r), ["> LAUNCHING", "    ARC RAIDERS", "  MONITORS", "[#######.......] 1/2"]);
+        assert_eq!(rows("game-quit", &r), ["> SESSION ENDED", "    ARC RAIDERS", "   PLAYED 2H 14M", "[#######.......] 1/2"]);
+        // (with nothing to change, no bar and no count, as the launch screen has none)
+        r.game.as_mut().unwrap().done = (0, 0);
+        assert_eq!(rows("game-launch", &r)[3], "");
+        assert_eq!(Page::built_in("game-launch").unwrap().as_shipped_game(), Some("game-launch"));
+        let mut edited = Page::built_in("game-quit").unwrap();
+        edited.pieces.pop();
+        assert_eq!(edited.as_shipped_game(), None, "an edited game layout is a layout like any other");
     }
 
     #[test]
@@ -2336,11 +2502,12 @@ mod tests {
     fn a_layout_moves_to_another_place_in_the_library_and_keeps_its_turns() {
         let mut s = Screens::of(None, None, None, None);
         let ids = |s: &Screens| s.library.iter().map(|p| p.id.clone()).collect::<Vec<_>>();
-        // Weather to the end, Music to the start: the rest in their order
+        // Weather to the end, the last before it to the start: the rest in their order
+        let last = BUILT_INS[BUILT_INS.len() - 1];
         assert_eq!(s.move_page(2, 99), Some(BUILT_INS.len() - 1));
         assert_eq!(s.move_page(BUILT_INS.len() - 2, 0), Some(0));
-        let mut want: Vec<String> = BUILT_INS.iter().map(|k| k.to_string()).filter(|k| k != "weather" && k != "music").collect();
-        want.insert(0, "music".into());
+        let mut want: Vec<String> = BUILT_INS.iter().map(|k| k.to_string()).filter(|k| k != "weather" && k != last).collect();
+        want.insert(0, last.into());
         want.push("weather".into());
         assert_eq!(ids(&s), want);
         // Playlist 1 still plays the same layouts, and the order is kept through a save

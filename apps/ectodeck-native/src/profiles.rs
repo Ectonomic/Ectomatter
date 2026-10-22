@@ -18,7 +18,8 @@ pub struct Profile {
     pub id: String,
     pub name: String,
     pub body: Value,
-    /// the apps it's in use with, while one of them is in front (see front_app.rs)
+    /// the apps a file kept before the Library kept ties says it was tied to,
+    /// read once for the Library to take in (games.rs)
     pub apps: Vec<String>,
 }
 
@@ -180,28 +181,6 @@ impl Store {
         self.save();
     }
 
-    /// A profile tied to an app, or no longer: in use while the app is in
-    /// front. An app is tied to one profile at a time, the last it was tied to.
-    pub fn tie(&mut self, i: usize, app: &str, on: bool) {
-        for (k, p) in self.list.iter_mut().enumerate() {
-            if k != i && on {
-                p.apps.retain(|a| a != app);
-            }
-        }
-        if let Some(p) = self.list.get_mut(i) {
-            p.apps.retain(|a| a != app);
-            if on {
-                p.apps.push(app.to_string());
-            }
-        }
-        self.save();
-    }
-
-    /// The profile tied to an app, if one is.
-    pub fn for_app(&self, app: &str) -> Option<usize> {
-        self.list.iter().position(|p| p.apps.iter().any(|a| a == app))
-    }
-
     /// Choose the profile in use.
     pub fn choose(&mut self, i: usize) {
         if i < self.list.len() {
@@ -242,12 +221,12 @@ mod tests {
         // (each its own id, kept, and none of it in what goes to the device)
         assert_eq!(back.list.iter().map(|p| &p.id).collect::<Vec<_>>(), s.list.iter().map(|p| &p.id).collect::<Vec<_>>());
         assert!(s.list[1].id != s.list[2].id && back.list[0].body.get("id").is_none());
-        // an app tied to one profile at a time, kept with it
-        s.tie(1, "steam", true);
-        s.tie(2, "steam", true);
-        assert_eq!((s.for_app("steam"), Store::load(kept(&dir)).unwrap().for_app("steam")), (Some(2), Some(2)));
-        s.tie(2, "steam", false);
-        assert_eq!(s.for_app("steam"), None);
+        // apps a file says a profile was tied to (before the Library kept the
+        // ties) are read, for the Library to take in, and never sent to the device
+        s.list[1].apps = vec!["steam".into()];
+        s.save();
+        let back = Store::load(kept(&dir)).unwrap();
+        assert_eq!((back.list[1].apps.clone(), back.list[1].body.get("apps")), (vec!["steam".to_string()], None));
         s.choose(1);
         let gone = s.delete().unwrap();
         assert_eq!((gone.0, gone.1.name.as_str(), s.active, s.current().name.as_str()), (1, "Games", 0, "Profile 1"), "the one above in use");

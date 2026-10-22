@@ -30,6 +30,8 @@ mod devices;
 mod ecto_settings;
 mod front;
 mod front_app;
+mod games;
+mod games_page;
 mod jobs;
 mod kde_output;
 mod shadow;
@@ -63,6 +65,7 @@ mod sensor_read;
 mod sensors;
 mod settings;
 mod setups;
+mod steam;
 mod text;
 mod typefaces;
 mod tray;
@@ -557,6 +560,7 @@ fn main() {
     ui.set_home_glyph(glyph(include_str!("../ui/glyphs/home.svg"), 22, true));
     ui.set_keyboard_glyph(glyph(include_str!("../ui/glyphs/keyboard.svg"), 22, true));
     ui.set_settings_glyph(glyph(include_str!("../ui/glyphs/settings.svg"), 22, true));
+    ui.set_library_glyph(glyph(include_str!("../ui/glyphs/library.svg"), 22, true));
     ui.set_keyboard_tile(glyph(include_str!("../ui/glyphs/keyboard.svg"), 88, true));
     ui.set_mouse_glyph(glyph(include_str!("../ui/glyphs/mouse.svg"), 22, true));
     ui.set_mouse_tile(glyph(include_str!("../ui/glyphs/mouse.svg"), 88, true));
@@ -579,11 +583,14 @@ fn main() {
 }
 
 /// The apps a snapshot's setting names come to the front, in order, as KWin
-/// tells it: each `class,desktop`, apart by semicolons.
+/// tells it: each `class,desktop` (and its process, `class,desktop,pid`),
+/// apart by semicolons.
 fn front_apps_told(front: &mut Front, var: &str) {
     for f in std::env::var(var).unwrap_or_default().split(';').filter(|f| !f.is_empty()) {
-        let (class, desktop) = f.split_once(',').unwrap_or((f, ""));
-        front.front_app(front_app::Front { class: class.into(), title: String::new(), desktop: desktop.into() });
+        let mut parts = f.splitn(3, ',');
+        let (class, desktop) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+        let pid = parts.next().and_then(|p| p.trim().parse().ok()).unwrap_or(0);
+        front.front_app(front_app::Front { class: class.into(), title: String::new(), desktop: desktop.into(), pid, opened: false });
     }
 }
 
@@ -1947,6 +1954,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
                 let _ = news_tx.send(n);
             },
             app.front.settings.on("devices.z10.screen.announce"),
+            app.front.game_launch(),
             false,
             Box::new(screen),
         );
@@ -2013,7 +2021,15 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
     let mut open_macros = std::env::var("ECTODECK_NATIVE_OPEN_MACROS").ok().and_then(|v| v.parse::<u32>().ok());
     // ECTODECK_NATIVE_OPEN_LAB: open the lab at start, as Ctrl+Shift+K does
     let mut open_lab = std::env::var_os("ECTODECK_NATIVE_OPEN_LAB").is_some();
+    // KWin's script looked at every five seconds, in case something took it out
+    let mut kwin_looked = Instant::now();
     while !app.exit {
+        if kwin_looked.elapsed() > Duration::from_secs(5) && app.quitting.is_none() {
+            kwin_looked = Instant::now();
+            if let Some(c) = &front_bus {
+                front_app::keep(c);
+            }
+        }
         if TERM.load(std::sync::atomic::Ordering::Relaxed) && app.quitting.is_none() {
             app.front.desk_light_quit();
             app.front.hand_back();

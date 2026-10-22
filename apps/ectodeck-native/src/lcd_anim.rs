@@ -19,6 +19,10 @@ const FRAME: u32 = 40;
 const WAIT_TICK: u32 = 100;
 /// ms a sequence waits on game-helper, in all, before it stops waiting
 const WAIT_LIMIT: u32 = 60000;
+/// ms a screen stays up at the end of a sequence, at most, for what it shows until
+/// (the game's window opening, a few seconds passing): a game whose window never
+/// comes up holds the screen a minute, no more
+const HOLD_LIMIT: u32 = 60000;
 
 /// One frame: four rows of twenty, how long it stays up, and the step it belongs to.
 #[derive(Clone, Debug, PartialEq)]
@@ -361,6 +365,17 @@ impl Seq {
         Ok(rows)
     }
 
+    /// Hold the screen as it is until `ready`, at most HOLD_LIMIT (none at all when
+    /// it's ready at once, so a sequence that isn't held has the frames it always had).
+    fn hold(&mut self, ready: &dyn Fn() -> bool, rows: &[String], phase: &'static str) -> Go<()> {
+        let mut held = 0;
+        while !ready() && held < HOLD_LIMIT {
+            self.add(rows, WAIT_TICK, phase)?;
+            held += WAIT_TICK;
+        }
+        Ok(())
+    }
+
     /// Hold the screen (the cursor still blinking) until game-helper catches up.
     fn wait(&mut self, ready: &dyn Fn() -> bool, rows: &[String], phase: &'static str, animate: &mut dyn FnMut(&mut Vec<String>)) -> Go<()> {
         while !ready() && self.waited < WAIT_LIMIT {
@@ -373,13 +388,16 @@ impl Seq {
     }
 }
 
-/// The game's launch: `progress` says how many steps game-helper has done;
-/// `stats` gives the rows to dissolve into at the end.
-fn launch(s: &mut Seq, game: &str, steps: &[String], progress: Ask<i64>, stats: Ask<Vec<String>>, start: Vec<String>) -> Go<()> {
+/// The game's launch: `steps` says what is being set (asked as the bar is first
+/// drawn, and again as the steps begin, as a note may come in between), and
+/// `progress` how many are done; `ready` whether the screen may go on from
+/// READY; `stats` gives the rows to dissolve into at the end.
+#[allow(clippy::too_many_arguments)]
+fn launch(s: &mut Seq, game: &str, steps: Ask<Vec<String>>, progress: Ask<i64>, ready: Ask<bool>, stats: Ask<Vec<String>>, start: Vec<String>) -> Go<()> {
     let mut rows = s.wipe(&start, &blank(), "Wipe", false)?;
     rows = s.type_(&rows, 0, "> LAUNCHING", "Announce", 45)?;
     s.cursor = Some((0, "> LAUNCHING".into()));
-    rows[3] = bar(0, steps.len());
+    rows[3] = bar(0, steps().len());
     s.add(&rows, FRAME, "Announce")?;
     let name = game.to_uppercase();
     rows = s.decode(&rows, 1, &name, "Decode", 2, 4)?;
@@ -395,6 +413,7 @@ fn launch(s: &mut Seq, game: &str, steps: &[String], progress: Ask<i64>, stats: 
             off += 1;
         }
     };
+    let steps = steps();
     for (i, label) in steps.iter().enumerate() {
         let i = i + 1;
         rows[2] = format!("  {label}");
@@ -420,14 +439,17 @@ fn launch(s: &mut Seq, game: &str, steps: &[String], progress: Ask<i64>, stats: 
         s.add(&dark, 120, "Ready")?;
     }
     s.add(&rows, 700, "Ready")?;
+    s.hold(&*ready, &rows, "Ready")?;
     let target = stats();
     s.dissolve(&rows, &target, "Dissolve")?;
     Ok(())
 }
 
-/// The game's exit: `progress` says how many restore steps are done,
-/// `finished` whether game-helper has finished restoring.
-fn exit(s: &mut Seq, game: &str, steps: &[String], minutes: i64, progress: Ask<i64>, finished: Ask<bool>, stats: Ask<Vec<String>>, start: Vec<String>) -> Go<()> {
+/// The game's exit: `steps` says what is being put back (asked as the bar
+/// begins), `progress` how many are done, `finished` whether the screen may
+/// go on (everything put back, or its time up).
+#[allow(clippy::too_many_arguments)]
+fn exit(s: &mut Seq, game: &str, steps: Ask<Vec<String>>, minutes: i64, progress: Ask<i64>, finished: Ask<bool>, stats: Ask<Vec<String>>, start: Vec<String>) -> Go<()> {
     let mut rows = s.wipe(&start, &blank(), "Wipe", true)?;
     rows = s.type_(&rows, 0, "> SESSION ENDED", "Announce", 45)?;
     s.cursor = Some((0, "> SESSION ENDED".into()));
@@ -439,6 +461,7 @@ fn exit(s: &mut Seq, game: &str, steps: &[String], minutes: i64, progress: Ask<i
         rows[2] = center(&if f < n { played(m) } else { played(minutes) });
         s.add(&rows, FRAME, "Playtime")?;
     }
+    let steps = steps();
     for i in 0..=steps.len() {
         let p = progress.clone();
         s.wait(&move || p() >= i as i64, &rows.clone(), "Restore", &mut |_| {})?;
@@ -475,13 +498,32 @@ impl Playing {
         Playing { frames, resume }
     }
 
-    pub fn launch(seed: u64, game: String, steps: Vec<String>, progress: Ask<i64>, stats: Ask<Vec<String>>, start: Vec<String>) -> Playing {
-        Playing::spawn(seed, move |s| launch(s, &game, &steps, progress, stats, start))
+    #[allow(clippy::too_many_arguments)]
+    pub fn launch(seed: u64, game: String, steps: Ask<Vec<String>>, progress: Ask<i64>, ready: Ask<bool>, stats: Ask<Vec<String>>, start: Vec<String>) -> Playing {
+        Playing::spawn(seed, move |s| launch(s, &game, steps, progress, ready, stats, start))
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn exit(seed: u64, game: String, steps: Vec<String>, minutes: i64, progress: Ask<i64>, finished: Ask<bool>, stats: Ask<Vec<String>>, start: Vec<String>) -> Playing {
-        Playing::spawn(seed, move |s| exit(s, &game, &steps, minutes, progress, finished, stats, start))
+    pub fn exit(seed: u64, game: String, steps: Ask<Vec<String>>, minutes: i64, progress: Ask<i64>, finished: Ask<bool>, stats: Ask<Vec<String>>, start: Vec<String>) -> Playing {
+        Playing::spawn(seed, move |s| exit(s, &game, steps, minutes, progress, finished, stats, start))
+    }
+
+    /// A screen layout shown as a game starts or quits, in place of the sequences:
+    /// it comes in as a sequence does, shows (drawn afresh each tenth of a second,
+    /// for its readings) until `until`, then dissolves into the playlist's page.
+    pub fn layout(seed: u64, draw: Ask<Vec<String>>, until: Ask<bool>, leftward: bool, stats: Ask<Vec<String>>, start: Vec<String>) -> Playing {
+        Playing::spawn(seed, move |s| {
+            let mut rows = s.wipe(&start, &draw(), "Wipe", leftward)?;
+            let mut held = 0;
+            while !until() && held < HOLD_LIMIT {
+                rows = draw();
+                s.add(&rows, WAIT_TICK, "Layout")?;
+                held += WAIT_TICK;
+            }
+            let target = stats();
+            s.dissolve(&rows, &target, "Dissolve")?;
+            Ok(())
+        })
     }
 
     /// The next frame, or None once the sequence has ended.
