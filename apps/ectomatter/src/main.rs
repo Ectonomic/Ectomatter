@@ -776,6 +776,19 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         std::thread::sleep(Duration::from_secs_f64(t));
     }
     front.desk_light_now();
+    // ECTOMATTER_RIPPLE="F,400;Enter,900": ripples from those keys (by the
+    // layout's ids), each that many milliseconds into its run, as pressing
+    // them sends across Home's desk
+    // (the keys' light worked out first, as the live window has it, for the rings' colors)
+    if std::env::var_os("ECTOMATTER_RIPPLE").is_some() {
+        let _ = front.lights();
+    }
+    for part in std::env::var("ECTOMATTER_RIPPLE").unwrap_or_default().split(';').filter(|p| !p.is_empty()) {
+        let (id, ms) = part.split_once(',').unwrap_or((part, "0"));
+        if let Some(pos) = front.page.layout.iter().find(|k| k.id == id.trim()).map(|k| k.pos) {
+            front.ripple_from_key(pos, Duration::from_millis(ms.trim().parse().unwrap_or(0)));
+        }
+    }
     // ECTOMATTER_HEAR=control: a mouse button heard pressed and let go, as its core tells
     // it; ECTOMATTER_KEY_CODE=code: a keyboard key with that host code heard so (after
     // the clicks, each job Ectomatter does said in the log)
@@ -1493,9 +1506,7 @@ fn lay_keyboard(pic: &mut Picture, front: &Front, home_drawn: bool, lit: Option<
             dirty.push((r.0.max(0) as usize, r.1.max(0) as usize, r.2, r.3));
         }
     }
-    if let Some(r) = pic.set_decor(front.desk_decor(s)) {
-        dirty.push(r);
-    }
+    dirty.extend(pic.set_decor(front.desk_decor(s)));
     let (share, dim) = if front.desk_keyboard().is_some() { (share, if front.desk_keyboard_on() { 1.0 } else { 0.5 }) } else { (None, 1.0) };
     if pic.set_keyboard_ground(share, dim) && rect.2 > 0 {
         dirty.push((rect.0.max(0) as usize, rect.1.max(0) as usize, rect.2, rect.3));
@@ -2976,9 +2987,7 @@ impl App {
         } else if dirty.is_empty() {
             return;
         } else {
-            for &(x, y, dw, dh) in &dirty {
-                self.pic.encode(x, y, dw, dh);
-            }
+            self.pic.encode_many(&dirty);
             if self.check {
                 let parts = self.pic.out.clone();
                 self.pic.encode_all();
@@ -3025,7 +3034,9 @@ impl App {
         if fresh {
             surface.damage_buffer(0, 0, bw as i32, bh as i32);
         }
-        for &(x, y, dw, dh) in dirty {
+        // (many small boxes, a ripple's dots, told as the one box round them)
+        let merged = (dirty.len() > 32).then(|| bounding(dirty));
+        for &(x, y, dw, dh) in merged.as_ref().map_or(dirty, std::slice::from_ref) {
             surface.damage_buffer((x + ml) as i32, (y + mt) as i32, dw as i32, dh as i32);
         }
         surface.set_buffer_scale(self.scale as i32);
@@ -3739,11 +3750,23 @@ fn free_buffer(buffers: &mut Vec<(Buffer, Vec<Rect>)>, pool: &mut SlotPool, (w, 
         if j != i {
             stale.extend_from_slice(dirty);
             if stale.len() > 32 {
-                *stale = vec![(0, 0, w, h)];
+                *stale = vec![bounding(stale)];
             }
         }
     }
     (i, todo, fresh)
+}
+
+/// The one box round all of `boxes`.
+fn bounding(boxes: &[Rect]) -> Rect {
+    let (mut x0, mut y0, mut x1, mut y1) = (usize::MAX, usize::MAX, 0, 0);
+    for &(x, y, w, h) in boxes {
+        (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x + w), y1.max(y + h));
+    }
+    if x0 > x1 {
+        return (0, 0, 0, 0);
+    }
+    (x0, y0, x1 - x0, y1.saturating_sub(y0))
 }
 
 /// The keyboard lit: each part of its light at the core's brightness for it,

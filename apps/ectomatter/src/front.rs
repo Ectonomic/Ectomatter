@@ -1720,6 +1720,12 @@ impl Front {
                     // (a press that shut the color picker does nothing else)
                     if !(self.press_shut && i < 0) {
                         self.desk.press(usize::try_from(i).ok(), (x, y));
+                        // (a press on the empty desk, outside Arrange, sends a ripple from there)
+                        if i < 0 && !self.desk.editing {
+                            let light = self.keyboard_light();
+                            self.desk.ripple((x, y), light, Duration::ZERO);
+                            self.desk_frames_run();
+                        }
                     }
                     self.show_desk();
                 }
@@ -1783,8 +1789,14 @@ impl Front {
                 }
                 Ask::DeskTick => {
                     changed = false;
+                    let moving = self.desk.animating();
                     self.desk.tick(Instant::now());
-                    self.show_desk();
+                    // (a ripple changes only what the window lays on the ground,
+                    // which it reads each frame; the desk's own parts move only
+                    // while it eases or fades)
+                    if moving {
+                        self.show_desk();
+                    }
                     self.desk_frames_run();
                 }
                 Ask::DeskPadHover(i, on) => {
@@ -3334,11 +3346,40 @@ impl Front {
             if self.page.pressed.insert(pos) {
                 let now = self.t0.elapsed().as_secs_f64() * 1000.0;
                 self.page.flash(pos, now);
+                self.ripple_from_key(pos, Duration::ZERO);
                 self.refresh();
             }
         } else if self.page.pressed.remove(&pos) {
             self.refresh();
         }
+    }
+
+    /// A key pressed while Home shows the keyboard: a ripple runs out across
+    /// the desk from the key, in its light of the moment (white where the key
+    /// is dark), `age` into its run.
+    pub fn ripple_from_key(&mut self, pos: u32, age: Duration) {
+        // (none while the window is closed into the tray, where the desk isn't drawn)
+        if self.hidden {
+            return;
+        }
+        let Some([kx, ky, kw, kh]) = self.desk_keyboard() else { return };
+        let Some(k) = self.page.key(pos) else { return };
+        let (vx, vy, vw, vh) = self.page.view_box;
+        let x = kx + ((k.cx - vx) / vw) as f32 * kw - self.ui.get_desk_x();
+        let y = ky + ((k.cy - vy) / vh) as f32 * kh - self.ui.get_desk_y();
+        let color = self.page.last_colors.get(&pos).map(|c| [c[0], c[1], c[2]]).filter(|c| c.iter().any(|v| *v > 24.0));
+        self.desk.ripple((x, y), color.map_or([255; 3], |c| c.map(|v| v.clamp(0.0, 255.0) as u8)), age);
+        self.desk_frames_run();
+    }
+
+    /// The keyboard's light as a whole, for a ripple that starts from no key:
+    /// its lit keys' colors together, or white with none lit.
+    fn keyboard_light(&self) -> [u8; 3] {
+        let lit: Vec<[f64; 3]> = self.page.last_colors.values().map(|c| [c[0], c[1], c[2]]).filter(|c| c.iter().any(|v| *v > 24.0)).collect();
+        if lit.is_empty() {
+            return [255; 3];
+        }
+        [0, 1, 2].map(|i| (lit.iter().map(|c| c[i]).sum::<f64>() / lit.len() as f64).clamp(0.0, 255.0) as u8)
     }
 
     /// The computer's lock lights now (bit 0 Num Lock, 1 Caps Lock, 2 Scroll
@@ -5446,9 +5487,10 @@ impl Front {
         self.mouse_draw_at(w);
     }
 
-    /// The desk's easing and fading, a frame each sixtieth of a second while they go on.
+    /// The desk's easing, fading and ripples, a frame each sixtieth of a
+    /// second while they go on.
     fn desk_frames_run(&mut self) {
-        let want = self.desk.animating();
+        let want = self.desk.animating() || self.desk.rippling();
         if want == self.desk_frames.is_some() {
             return;
         }

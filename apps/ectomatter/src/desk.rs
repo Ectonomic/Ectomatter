@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
-use crate::picture::{Decor, Dots, PadLaid, Photo, Plate};
+use crate::picture::{Decor, Dots, PadLaid, Photo, Plate, RingLaid};
 
 /// The desk's units: at 100% a logical pixel; the Z10's 470 mm are 760 of them.
 pub const PER_MM: f32 = 760.0 / 470.0;
@@ -24,8 +24,23 @@ pub const SNAP: f32 = 24.0;
 const EDGE: f32 = 24.0;
 const CULL: f32 = 16.0;
 /// A dot's radius on the screen, whatever the zoom, and its white's opacity.
+/// The dots lie at half the spacing devices snap to, at rest too; in edit mode
+/// the ones devices snap onto, every other one each way, show brighter.
 const DOT_R: f32 = 1.25;
 pub const DOT_ALPHA: f32 = 0.06;
+const SNAP_LIFT: f32 = 0.7;
+/// A key's press on Home: a ring runs out across the dots from it, lighting
+/// the ones it passes in the key's light. Where it starts and how fast it runs
+/// (logical pixels, and a second), how wide its band is, how long it lasts,
+/// how much a dot it lights grows (logical pixels) and brightens, and the most
+/// that run at once (fast typing).
+const RING_START: f32 = 40.0;
+const RING_SPEED: f32 = 520.0;
+const RING_WIDTH: f32 = 26.0;
+const RING_LIFE: Duration = Duration::from_millis(1500);
+const RING_GROW: f32 = 1.5;
+const RING_LIT: f32 = 0.94;
+const RINGS_MOST: usize = 12;
 const ZOOM: (f32, f32) = (0.5, 4.0);
 /// At the fit: the room round the devices, and under them for their names.
 const PAD: f32 = 120.0;
@@ -275,6 +290,19 @@ pub struct Desk {
     /// draws a pad, and then it's off, as a drawing tool goes back to the
     /// pointer once it has drawn
     pub draw_tool: bool,
+    /// the ripples running, and the moment they're drawn at
+    rings: Vec<Ring>,
+    now: Instant,
+}
+
+/// A press's ripple: where it started, in the desk's logical pixels, the
+/// light it runs in (sRGB), and when.
+#[derive(Clone, Debug)]
+struct Ring {
+    x: f32,
+    y: f32,
+    color: [u8; 3],
+    t0: Instant,
 }
 
 impl Default for Desk {
@@ -288,7 +316,23 @@ impl Desk {
         // (the tests start from a desk nothing was kept for)
         let kept = if cfg!(test) { Vec::new() } else { Desk::saved() };
         let pads = if cfg!(test) { Vec::new() } else { pads_of(&crate::uistate::get("desk_pads").unwrap_or_default()) };
-        Desk { items: Vec::new(), editing: false, view: View { z: 1.0, px: 0.0, py: 0.0 }, size: (0.0, 0.0), hover: None, pressed: None, drag: None, ease: None, dots: 0.0, fade: None, changed: Instant::now(), kept, pads, pad_chosen: None, pad_hover: None, draw_tool: false }
+        Desk { items: Vec::new(), editing: false, view: View { z: 1.0, px: 0.0, py: 0.0 }, size: (0.0, 0.0), hover: None, pressed: None, drag: None, ease: None, dots: 0.0, fade: None, changed: Instant::now(), kept, pads, pad_chosen: None, pad_hover: None, draw_tool: false, rings: Vec::new(), now: Instant::now() }
+    }
+
+    /// A ripple from a point of the desk (its logical pixels), in a light's
+    /// color, `age` into its run (none, for a press now).
+    pub fn ripple(&mut self, at: (f32, f32), color: [u8; 3], age: Duration) {
+        if self.rings.len() >= RINGS_MOST {
+            self.rings.remove(0);
+        }
+        let now = Instant::now();
+        self.now = now;
+        self.rings.push(Ring { x: at.0, y: at.1, color, t0: now.checked_sub(age).unwrap_or(now) });
+    }
+
+    /// Whether a ripple is running.
+    pub fn rippling(&self) -> bool {
+        !self.rings.is_empty()
     }
 
     /// The pads kept as they are now.
@@ -557,8 +601,11 @@ impl Desk {
         self.ease.is_some() || self.fade.is_some()
     }
 
-    /// The easing and the fading, moved on to `now`; true while either goes on.
+    /// The easing, the fading and the ripples, moved on to `now`; true while
+    /// any goes on.
     pub fn tick(&mut self, now: Instant) -> bool {
+        self.now = now;
+        self.rings.retain(|r| now.saturating_duration_since(r.t0) < RING_LIFE);
         if let Some((t0, from, to)) = self.ease {
             let k = (now.duration_since(t0).as_secs_f32() / EASE.as_secs_f32()).min(1.0);
             let e = 1.0 - (1.0 - k).powi(3);
@@ -574,7 +621,7 @@ impl Desk {
                 self.fade = None;
             }
         }
-        self.animating()
+        self.animating() || self.rippling()
     }
 
     /// A device's picture on the desk, in its logical pixels: pressed, a pixel
@@ -864,14 +911,34 @@ impl Desk {
                 PadLaid { rect: [s(at.0 + x), s(at.1 + y), s(at.0 + x + pw), s(at.1 + y + ph)], radius: s(PAD_RADIUS * v.z), color: p.color, picture: p.picture.as_deref().and_then(pictures), bounds: room }
             })
             .collect();
-        let dots = (self.dots > 0.0 && !self.items.is_empty()).then(|| Dots {
+        // the dots, at rest and arranged, and the ripples running through them
+        let dots = (!self.items.is_empty()).then(|| Dots {
             ox: s(at.0 + v.px),
             oy: s(at.1 + v.py),
-            step: s(Desk::step(v.z) * v.z),
+            step: s(Desk::step(v.z) * v.z / 2.0),
             r: s(DOT_R),
-            alpha: DOT_ALPHA * self.dots,
+            alpha: DOT_ALPHA,
+            snap_alpha: DOT_ALPHA * (1.0 + SNAP_LIFT * self.dots),
+            over_pads: self.dots > 0.0,
             bounds: [s(at.0 + CULL), s(at.1 + CULL), s(at.0 + w - CULL), s(at.1 + h - CULL)],
             holes: names.iter().map(|n| [s(at.0 + n[0] - 8.0), s(at.1 + n[1] - 6.0), s(at.0 + n[2] + 8.0), s(at.1 + n[3] + 6.0)]).collect(),
+            grow: s(RING_GROW),
+            lit: RING_LIT,
+            rings: self
+                .rings
+                .iter()
+                .map(|r| {
+                    let t = self.now.saturating_duration_since(r.t0).as_secs_f32();
+                    RingLaid {
+                        x: s(at.0 + r.x),
+                        y: s(at.1 + r.y),
+                        radius: s(RING_START + RING_SPEED * t),
+                        width: s(RING_WIDTH),
+                        strength: (1.0 - t / RING_LIFE.as_secs_f32()).max(0.0).powf(1.4),
+                        color: r.color.map(|c| c as f32 / 255.0),
+                    }
+                })
+                .collect(),
         });
         let plates = match self.hover.filter(|_| !self.editing) {
             Some(i) if i < self.items.len() => {
@@ -1302,5 +1369,38 @@ mod tests {
         d.tick(Instant::now() + EASE + FADE);
         assert_eq!(d.view, d.fitted_free(), "back to the fit");
         assert_eq!(d.dots, 0.0, "the dots put away");
+    }
+    /// A key's press sends a ring out across the dots: it runs out as it
+    /// fades, and is gone after its run. The dots lie at rest too, a pad over
+    /// them; in Arrange the ones devices snap onto show brighter, over the pads.
+    #[test]
+    fn a_press_sends_a_ripple_across_the_dots() {
+        let mut d = desk();
+        let rest = d.decor((0.0, 0.0), 1.0, &[], &|_| None).dots.expect("the dots, at rest");
+        assert!(rest.rings.is_empty());
+        assert_eq!(rest.alpha, rest.snap_alpha, "at rest every dot alike");
+        assert!(!rest.over_pads, "a pad covers them at rest");
+        d.ripple((400.0, 300.0), [255, 60, 0], Duration::ZERO);
+        let t0 = Instant::now();
+        assert!(d.rippling());
+        d.tick(t0 + Duration::from_millis(300));
+        let early = d.decor((0.0, 0.0), 1.0, &[], &|_| None).dots.unwrap().rings[0].clone();
+        d.tick(t0 + Duration::from_millis(900));
+        let late = d.decor((0.0, 0.0), 1.0, &[], &|_| None).dots.unwrap().rings[0].clone();
+        assert!(late.radius > early.radius && late.strength < early.strength, "it runs out and fades");
+        assert_eq!((early.x, early.y), (400.0, 300.0));
+        assert!(early.color[0] > early.color[1], "in the key's light");
+        assert!(!d.tick(t0 + RING_LIFE + Duration::from_millis(50)), "and after its run it's gone");
+        assert!(!d.rippling());
+        // more presses than run at once: the oldest goes
+        for i in 0..RINGS_MOST + 3 {
+            d.ripple((i as f32, 0.0), [255; 3], Duration::ZERO);
+        }
+        assert_eq!(d.rings.len(), RINGS_MOST);
+        // in Arrange, the dots devices snap onto, brighter, and over the pads
+        d.set_editing(true);
+        d.tick(Instant::now() + EASE + FADE);
+        let arranged = d.decor((0.0, 0.0), 1.0, &[], &|_| None).dots.unwrap();
+        assert!(arranged.snap_alpha > arranged.alpha && arranged.over_pads);
     }
 }

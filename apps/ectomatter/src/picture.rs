@@ -112,7 +112,10 @@ impl Photo {
 }
 
 /// A dot every `step` pixels from `(ox, oy)`, `r` round, white at `alpha`
-/// over the ground, only inside `bounds` and outside each of `holes`.
+/// over the ground (every other one each way, from the first, at
+/// `snap_alpha`), only inside `bounds` and outside each of `holes`, and over
+/// the pads only with `over_pads`. A dot a ripple's ring passes takes the
+/// ring's light, grows by up to `grow` and brightens by up to `lit`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Dots {
     pub ox: f32,
@@ -120,8 +123,137 @@ pub struct Dots {
     pub step: f32,
     pub r: f32,
     pub alpha: f32,
+    pub snap_alpha: f32,
+    pub over_pads: bool,
     pub bounds: [f32; 4],
     pub holes: Vec<[f32; 4]>,
+    pub grow: f32,
+    pub lit: f32,
+    pub rings: Vec<RingLaid>,
+}
+
+/// The rings' light at a dot's middle: how lit the dot is (0 to 1) and in
+/// what color (sRGB, 0 to 1), the rings' colors mixed as much as each lights
+/// it, toward white where they light it little. Both in steps of 1/256, so a
+/// dot is drawn again exactly when its light changes by a step, and a frame
+/// drawn round the dots that changed is the frame drawn whole.
+fn dot_light(rings: &[RingLaid], lx: f32, ly: f32) -> (f32, [f32; 3]) {
+    let (mut e, mut tint) = (0f32, [0f32; 3]);
+    for r in rings {
+        // (four bands' spread or more from the ring, its light is too faint to see)
+        let d2 = (lx - r.x).powi(2) + (ly - r.y).powi(2);
+        let (near, far) = ((r.radius - 4.0 * r.width).max(0.0), r.radius + 4.0 * r.width);
+        if d2 >= far * far || d2 <= near * near {
+            continue;
+        }
+        let off = (d2.sqrt() - r.radius) / r.width;
+        let k = (-0.5 * off * off).exp() * r.strength;
+        e += k;
+        for i in 0..3 {
+            tint[i] += k * r.color[i];
+        }
+    }
+    let step = |v: f32| (v * 256.0).round() / 256.0;
+    let shine = step(e.min(1.0));
+    if shine <= 0.0 {
+        return UNLIT;
+    }
+    let m = (shine / 0.08).clamp(0.0, 1.0);
+    (shine, tint.map(|c| step(1.0 + (c / e - 1.0) * m)))
+}
+
+/// The light of a dot no ring lights.
+const UNLIT: (f32, [f32; 3]) = (0.0, [1.0; 3]);
+
+/// The rings' light at each of the dots inside the bounds (see dot_light),
+/// worked out once a frame for every pixel of a dot to share: a row of the
+/// grid after another, from its first dot (none, with no rings running).
+#[derive(Clone, Debug, Default, PartialEq)]
+struct DotLights {
+    ix0: i64,
+    iy0: i64,
+    cols: usize,
+    light: Vec<(f32, [f32; 3])>,
+}
+
+impl DotLights {
+    fn of(dots: Option<&Dots>) -> DotLights {
+        let Some(d) = dots.filter(|d| !d.rings.is_empty()) else { return DotLights::default() };
+        let (ix0, ix1, iy0, iy1) = d.grid();
+        let cols = (ix1 - ix0 + 1).max(0) as usize;
+        let mut light = Vec::with_capacity(cols * (iy1 - iy0 + 1).max(0) as usize);
+        for iy in iy0..=iy1 {
+            let ly = d.oy + iy as f32 * d.step;
+            for ix in ix0..=ix1 {
+                light.push(dot_light(&d.rings, d.ox + ix as f32 * d.step, ly));
+            }
+        }
+        DotLights { ix0, iy0, cols, light }
+    }
+
+    /// The light of the dot at `ix`, `iy` in the grid.
+    fn at(&self, ix: i64, iy: i64) -> (f32, [f32; 3]) {
+        let (cx, cy) = (ix - self.ix0, iy - self.iy0);
+        if cx < 0 || cy < 0 || cx as usize >= self.cols {
+            return UNLIT;
+        }
+        self.light.get(cy as usize * self.cols + cx as usize).copied().unwrap_or(UNLIT)
+    }
+}
+
+impl Dots {
+    /// The same dots as `o`, but perhaps for the rings running through them.
+    fn same_but_rings(&self, o: &Dots) -> bool {
+        (self.ox, self.oy, self.step, self.r, self.alpha, self.snap_alpha, self.over_pads, self.bounds, self.grow, self.lit) == (o.ox, o.oy, o.step, o.r, o.alpha, o.snap_alpha, o.over_pads, o.bounds, o.grow, o.lit) && self.holes == o.holes
+    }
+
+    /// The first and the last of the dots inside the bounds, across and
+    /// down, by their place in the grid.
+    fn grid(&self) -> (i64, i64, i64, i64) {
+        let [b0, b1, b2, b3] = self.bounds;
+        let first = |b: f32, o: f32| ((b - o) / self.step).ceil() as i64;
+        let last = |b: f32, o: f32| ((b - o) / self.step).floor() as i64;
+        (first(b0, self.ox), last(b2, self.ox), first(b1, self.oy), last(b3, self.oy))
+    }
+
+    /// The boxes round each dot whose light differs between `a` and `b`
+    /// (all else alike), in the buffer's pixels, each as large as the dot is
+    /// drawn in the brighter of its two lights: a ripple's frame changes only
+    /// the dots its rings pass.
+    fn changed(&self, a: &DotLights, b: &DotLights) -> Vec<(usize, usize, usize, usize)> {
+        if a.light.is_empty() && b.light.is_empty() {
+            return Vec::new();
+        }
+        let (ix0, ix1, iy0, iy1) = self.grid();
+        let mut out = Vec::new();
+        for iy in iy0..=iy1 {
+            let ly = self.oy + iy as f32 * self.step;
+            for ix in ix0..=ix1 {
+                let (la, lb) = (a.at(ix, iy), b.at(ix, iy));
+                if la != lb {
+                    let lx = self.ox + ix as f32 * self.step;
+                    // (its soft edge, and the middles of the pixels it reaches)
+                    let reach = self.r + self.grow * la.0.max(lb.0) + 1.0;
+                    let (x0, y0) = ((lx - reach).max(0.0) as usize, (ly - reach).max(0.0) as usize);
+                    let (x1, y1) = ((lx + reach).max(0.0).ceil() as usize, (ly + reach).max(0.0).ceil() as usize);
+                    out.push((x0, y0, x1.saturating_sub(x0), y1.saturating_sub(y0)));
+                }
+            }
+        }
+        out
+    }
+}
+
+/// A ripple's ring: its middle and radius, its band's width (a bell's
+/// spread), how strongly it shows now (0 to 1), and its light (sRGB, 0 to 1).
+#[derive(Clone, Debug, PartialEq)]
+pub struct RingLaid {
+    pub x: f32,
+    pub y: f32,
+    pub radius: f32,
+    pub width: f32,
+    pub strength: f32,
+    pub color: [f32; 3],
 }
 
 /// A box with rounded corners, white at `alpha` over the ground.
@@ -167,23 +299,42 @@ impl Decor {
         out
     }
 
-    /// How much white it lays over a pixel's ground, in sRGB's encoding, 0 to 1.
-    fn white_at(&self, px: f32, py: f32) -> f32 {
-        let mut a = 0f32;
+    /// What it lays over a pixel's ground, in sRGB's encoding: its color,
+    /// already weighed by how much of it shows, and how much of the ground it
+    /// covers, 0 to 1. Highlights and dots are white; a dot a ripple's ring
+    /// passes takes the ring's light, from `lights`. `on_pad`: a pad lies
+    /// there, and covers the dots unless they show over the pads.
+    fn over(&self, px: f32, py: f32, on_pad: bool, lights: &DotLights) -> ([f32; 3], f32) {
+        let (mut c, mut a) = ([0f32; 3], 0f32);
+        let mut lay = |col: [f32; 3], k: f32| {
+            for i in 0..3 {
+                c[i] += (1.0 - a) * k * col[i];
+            }
+            a += (1.0 - a) * k;
+        };
         for p in &self.plates {
-            let c = rounded_cover(p.rect, p.radius, px, py);
-            a += (1.0 - a) * c * p.alpha;
-        }
-        if let Some(d) = &self.dots {
-            let (lx, ly) = (d.ox + ((px - d.ox) / d.step).round() * d.step, d.oy + ((py - d.oy) / d.step).round() * d.step);
-            let [b0, b1, b2, b3] = d.bounds;
-            if lx >= b0 && lx <= b2 && ly >= b1 && ly <= b3 && !d.holes.iter().any(|h| lx >= h[0] && lx <= h[2] && ly >= h[1] && ly <= h[3]) {
-                let dist = ((px - lx).powi(2) + (py - ly).powi(2)).sqrt();
-                let c = (d.r + 0.5 - dist).clamp(0.0, 1.0);
-                a += (1.0 - a) * c * d.alpha;
+            let k = rounded_cover(p.rect, p.radius, px, py) * p.alpha;
+            if k > 0.0 {
+                lay([1.0; 3], k);
             }
         }
-        a
+        if let Some(d) = self.dots.as_ref().filter(|d| d.over_pads || !on_pad) {
+            let (ix, iy) = (((px - d.ox) / d.step).round(), ((py - d.oy) / d.step).round());
+            let (lx, ly) = (d.ox + ix * d.step, d.oy + iy * d.step);
+            let [b0, b1, b2, b3] = d.bounds;
+            let dist = ((px - lx).powi(2) + (py - ly).powi(2)).sqrt();
+            if dist <= d.r + d.grow + 0.5 && lx >= b0 && lx <= b2 && ly >= b1 && ly <= b3 && !d.holes.iter().any(|h| lx >= h[0] && lx <= h[2] && ly >= h[1] && ly <= h[3]) {
+                // the light the rings bring the dot
+                let (shine, col) = lights.at(ix as i64, iy as i64);
+                let cover = (d.r + d.grow * shine + 0.5 - dist).clamp(0.0, 1.0);
+                if cover > 0.0 {
+                    let snap = (ix as i64).rem_euclid(2) == 0 && (iy as i64).rem_euclid(2) == 0;
+                    let rest = if snap { d.snap_alpha } else { d.alpha };
+                    lay(col, cover * (rest + d.lit * shine).min(1.0));
+                }
+            }
+        }
+        (c, a)
     }
 
     /// Whether anything of it can fall on row `y` (at its pixels' middle).
@@ -192,7 +343,7 @@ impl Decor {
             || self.pads.iter().any(|p| py >= p.rect[1] - 1.0 && py <= p.rect[3] + 1.0)
             || self.dots.as_ref().is_some_and(|d| {
                 let ly = d.oy + ((py - d.oy) / d.step).round() * d.step;
-                (py - ly).abs() <= d.r + 1.0 && py >= d.bounds[1] - d.r - 1.0 && py <= d.bounds[3] + d.r + 1.0
+                (py - ly).abs() <= d.r + d.grow + 1.0 && py >= d.bounds[1] - d.r - d.grow - 1.0 && py <= d.bounds[3] + d.r + d.grow + 1.0
             })
     }
 }
@@ -234,6 +385,8 @@ pub struct Picture {
     /// on the ground to reach under it; and how strongly the keyboard shows (1,
     /// or less for one not plugged in)
     decor: Decor,
+    /// the light the ripples running bring each of its dots
+    lights: DotLights,
     share: Option<Rc<Vec<f32>>>,
     share_shown: Option<Rc<Vec<f32>>>,
     dim: f32,
@@ -251,7 +404,7 @@ impl Picture {
         }
         let ground = [lin[ground[0] as usize], lin[ground[1] as usize], lin[ground[2] as usize]];
         let page_ground = Ground { x: 0, y: 0, radius: 0.0, rgb: [0.0; 3] };
-        Picture { w: 0, h: 0, ui: Vec::new(), out: Vec::new(), enc: Encoder::new(reference), reference, lin, ground, page_ground, rect: (0, 0, 0, 0), src: None, shown: None, decor: Decor::default(), share: None, share_shown: None, dim: 1.0, mouse_rect: (0, 0, 0, 0), mouse: None }
+        Picture { w: 0, h: 0, ui: Vec::new(), out: Vec::new(), enc: Encoder::new(reference), reference, lin, ground, page_ground, rect: (0, 0, 0, 0), src: None, shown: None, decor: Decor::default(), lights: DotLights::default(), share: None, share_shown: None, dim: 1.0, mouse_rect: (0, 0, 0, 0), mouse: None }
     }
 
     /// Lay the app's ground under the page; true if it changed.
@@ -327,14 +480,24 @@ impl Picture {
         true
     }
 
-    /// Lay `decor` on the ground; the box to draw again, if it changed: what
-    /// changed of it, where it was and where it is (a highlight come under
-    /// the pointer draws its own box again, not the pads it lies over).
-    pub fn set_decor(&mut self, decor: Decor) -> Option<(usize, usize, usize, usize)> {
+    /// Lay `decor` on the ground; the boxes to draw again: what changed of
+    /// it, where it was and where it is (a highlight come under the pointer
+    /// draws its own box again, not the pads it lies over; a ripple's frame,
+    /// only round the dots its rings change).
+    pub fn set_decor(&mut self, decor: Decor) -> Vec<(usize, usize, usize, usize)> {
         if decor == self.decor {
-            return None;
+            return Vec::new();
         }
+        let lights = DotLights::of(decor.dots.as_ref());
         let (old, new) = (&self.decor, &decor);
+        if let (Some(a), Some(b)) = (&old.dots, &new.dots) {
+            if old.pads == new.pads && old.plates == new.plates && a.same_but_rings(b) {
+                let boxes = a.changed(&self.lights, &lights);
+                self.decor = decor;
+                self.lights = lights;
+                return boxes;
+            }
+        }
         let mut boxes: Vec<[f32; 4]> = Vec::new();
         if old.pads != new.pads {
             boxes.extend(old.pads.iter().chain(&new.pads).map(|p| p.rect));
@@ -347,12 +510,17 @@ impl Picture {
         }
         let both = boxes.into_iter().reduce(|a, b| [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]);
         self.decor = decor;
-        // (a pixel past each side, for the dots' and the corners' soft edges)
+        self.lights = lights;
+        // (a pixel past each side, for the dots' and the corners' soft edges,
+        // and the most a ripple grows a dot)
+        let grow = self.decor.dots.as_ref().map_or(0.0, |d| d.grow);
         both.map(|[x0, y0, x1, y1]| {
-            let (x0, y0) = ((x0 - 2.0).max(0.0) as usize, (y0 - 2.0).max(0.0) as usize);
-            let (x1, y1) = (((x1 + 2.0).max(0.0) as usize).max(x0), ((y1 + 2.0).max(0.0) as usize).max(y0));
+            let (x0, y0) = ((x0 - 2.0 - grow).max(0.0) as usize, (y0 - 2.0 - grow).max(0.0) as usize);
+            let (x1, y1) = (((x1 + 2.0 + grow).max(0.0) as usize).max(x0), ((y1 + 2.0 + grow).max(0.0) as usize).max(y0));
             (x0, y0, x1 - x0, y1 - y0)
         })
+        .into_iter()
+        .collect()
     }
 
     /// How much of the ground shows in each of the keyboard's pixels, and how
@@ -389,6 +557,58 @@ impl Picture {
         self.encode(0, 0, self.w, self.h);
     }
 
+    /// Encode each of `boxes`, many small ones (a ripple's dots) in one pass:
+    /// the picture split in bands of rows, one to a thread, which encodes its
+    /// rows' spans of the boxes.
+    pub fn encode_many(&mut self, boxes: &[(usize, usize, usize, usize)]) {
+        if boxes.len() <= 4 {
+            for &(x, y, w, h) in boxes {
+                self.encode(x, y, w, h);
+            }
+            return;
+        }
+        let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(12);
+        let band = self.h.div_ceil(threads).max(24);
+        let Picture { w: stride, h: height, ui, out, enc, lin, ground, page_ground, rect, shown, decor, lights, share_shown, dim, mouse_rect, mouse, .. } = self;
+        let (stride, height, ui, enc, lin, ground, rect, shown, decor, lights, dim) = (*stride, *height, &*ui, &*enc, &*lin, *ground, *rect, shown.as_deref(), &*decor, &*lights, *dim);
+        let page_ground = &*page_ground;
+        let share = share_shown.as_deref().map(|v| v.as_slice()).filter(|v| shown.is_some() && v.len() == rect.2 * rect.3);
+        let kb = KbGround { share, dim };
+        let ms = MouseOver { rect: *mouse_rect, lit: mouse.as_deref() };
+        std::thread::scope(|s| {
+            for (i, chunk) in out.chunks_mut(band * stride).enumerate() {
+                let (top, bottom) = (i * band, (i * band + band).min(height));
+                if !boxes.iter().any(|&(x, y, w, h)| y < bottom && y + h > top && x < stride && w > 0) {
+                    continue;
+                }
+                s.spawn(move || {
+                    // the band's rows' spans, merged where they touch
+                    let mut spans: Vec<(usize, usize, usize)> = Vec::new();
+                    for &(x, y, w, h) in boxes {
+                        let (x0, x1) = (x.min(stride), (x + w).min(stride));
+                        if x0 < x1 {
+                            spans.extend((y.max(top)..(y + h).min(bottom)).map(|row| (row, x0, x1)));
+                        }
+                    }
+                    spans.sort_unstable();
+                    let mut run: Option<(usize, usize, usize)> = None;
+                    for sp in spans.into_iter().map(Some).chain([None]) {
+                        match (&mut run, sp) {
+                            (Some(m), Some(sp)) if m.0 == sp.0 && sp.1 <= m.2 => m.2 = m.2.max(sp.2),
+                            _ => {
+                                if let Some((row, x0, x1)) = run {
+                                    let at = (row - top) * stride;
+                                    encode_row(&mut chunk[at..at + stride], row, x0, x1, (stride, height), ui, enc, lin, ground, page_ground, rect, shown, decor, lights, kb, ms);
+                                }
+                                run = sp;
+                            }
+                        }
+                    }
+                });
+            }
+        });
+    }
+
     /// Encode the pixels in a rectangle, on as many threads as it is worth.
     pub fn encode(&mut self, x: usize, y: usize, w: usize, h: usize) {
         let (x0, y0) = (x.min(self.w), y.min(self.h));
@@ -399,8 +619,8 @@ impl Picture {
         let rows = y1 - y0;
         let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(12);
         let band = rows.div_ceil(threads).max(24);
-        let Picture { w: stride, h: height, ui, out, enc, lin, ground, page_ground, rect, shown, decor, share_shown, dim, mouse_rect, mouse, .. } = self;
-        let (stride, height, ui, enc, lin, ground, rect, shown, decor, dim) = (*stride, *height, &*ui, &*enc, &*lin, *ground, *rect, shown.as_deref(), &*decor, *dim);
+        let Picture { w: stride, h: height, ui, out, enc, lin, ground, page_ground, rect, shown, decor, lights, share_shown, dim, mouse_rect, mouse, .. } = self;
+        let (stride, height, ui, enc, lin, ground, rect, shown, decor, lights, dim) = (*stride, *height, &*ui, &*enc, &*lin, *ground, *rect, shown.as_deref(), &*decor, &*lights, *dim);
         let page_ground = &*page_ground;
         let share = share_shown.as_deref().map(|v| v.as_slice()).filter(|v| shown.is_some() && v.len() == rect.2 * rect.3);
         let kb = KbGround { share, dim };
@@ -412,7 +632,7 @@ impl Picture {
                 let top = y0 + i * band;
                 s.spawn(move || {
                     for (r, row) in chunk.chunks_mut(stride).enumerate() {
-                        encode_row(row, top + r, x0, x1, (stride, height), ui, enc, lin, ground, page_ground, rect, shown, decor, kb, ms);
+                        encode_row(row, top + r, x0, x1, (stride, height), ui, enc, lin, ground, page_ground, rect, shown, decor, lights, kb, ms);
                     }
                 });
             }
@@ -450,6 +670,7 @@ fn encode_row(
     rect: (i32, i32, usize, usize),
     kb: Option<&Lit>,
     decor: &Decor,
+    lights: &DotLights,
     kbg: KbGround,
     ms: MouseOver,
 ) {
@@ -468,11 +689,12 @@ fn encode_row(
         }
         let px = x as f32 + 0.5;
         let padded = decor.padded(px, py, ground_e);
-        let a = decor.white_at(px, py);
+        let (c, a) = decor.over(px, py, padded.is_some(), lights);
         if padded.is_none() && a <= 0.0 {
             return None;
         }
-        Some(padded.unwrap_or(ground_e).map(|e| (e + a * (1.0 - e)).powf(2.2)))
+        let e = padded.unwrap_or(ground_e);
+        Some([0, 1, 2].map(|i| (e[i] * (1.0 - a) + c[i]).powf(2.2)))
     };
     // how much of a pixel the app's ground covers: all of it, but at its rounded corner
     let (cx, cy) = (stride as f32 - g.radius, height as f32 - g.radius);
@@ -504,6 +726,11 @@ fn encode_row(
     // faint white glare or a press's shade comes out as it did in the web page.
     // Under is linear RGB, `ua` its alpha; the result is premultiplied linear.
     let over = |p: PremultipliedRgbaColor, under: [f32; 3], ua: f32| -> [f32; 4] {
+        // (none of the page there, as over most of Home's desk: what lies under it,
+        // as the mixing below comes to, without going to sRGB's encoding and back)
+        if (p.red, p.green, p.blue, p.alpha) == (0, 0, 0, 0) {
+            return [under[0].max(0.0) * ua, under[1].max(0.0) * ua, under[2].max(0.0) * ua, ua];
+        }
         let a = p.alpha as f32 / 255.0;
         let t = 1.0 - a;
         let oa = a + ua * t;
@@ -672,7 +899,7 @@ mod tests {
         p.set_ground(0, 0, 0.0, [0x18, 0x18, 0x1b]);
         p.set_decor(Decor {
             pads: Vec::new(),
-            dots: Some(Dots { ox: 10.0, oy: 10.0, step: 20.0, r: 1.25, alpha: 0.3, bounds: [16.0, 16.0, 104.0, 64.0], holes: vec![[45.0, 45.0, 55.0, 55.0]] }),
+            dots: Some(Dots { ox: 10.0, oy: 10.0, step: 20.0, r: 1.25, alpha: 0.3, snap_alpha: 0.3, over_pads: true, bounds: [16.0, 16.0, 104.0, 64.0], holes: vec![[45.0, 45.0, 55.0, 55.0]], grow: 0.0, lit: 0.0, rings: Vec::new() }),
             plates: vec![Plate { rect: [0.0, 0.0, 30.0, 12.0], radius: 6.0, alpha: 0.2 }],
         });
         p.encode_all();
@@ -696,7 +923,7 @@ mod tests {
             let mut p = Picture::new(254.0, [0x18, 0x18, 0x1b]);
             p.resize(100, 60);
             p.set_ground(0, 0, 0.0, [0x18, 0x18, 0x1b]);
-            let dots = dots.then(|| Dots { ox: 30.0, oy: 30.0, step: 20.0, r: 1.25, alpha: 0.3, bounds: [0.0, 0.0, 100.0, 60.0], holes: Vec::new() });
+            let dots = dots.then(|| Dots { ox: 30.0, oy: 30.0, step: 20.0, r: 1.25, alpha: 0.3, snap_alpha: 0.3, over_pads: true, bounds: [0.0, 0.0, 100.0, 60.0], holes: Vec::new(), grow: 0.0, lit: 0.0, rings: Vec::new() });
             p.set_decor(Decor { pads: vec![pad], dots, plates: Vec::new() });
             p.encode_all();
             p.out
@@ -773,5 +1000,110 @@ mod tests {
         assert!(encoded(open.clone(), 1.0, 1.0, true)[0] > encoded(open, 1.0, 1.0, false)[0], "the highlight under the keyboard's open ground");
         let body = plain([1.0, 0.0, 0.0], 30, 20);
         assert!(encoded(body.clone(), 0.0, 0.5, false)[0] < encoded(body, 0.0, 1.0, false)[0], "dimmed, not plugged in");
+    }
+    /// A dot a ripple's ring passes takes the ring's light, brighter and
+    /// larger; one the ring is far from stays white and dim. At rest a pad
+    /// covers the dots; arranged, they show over it.
+    #[test]
+    fn a_ring_lights_the_dots_it_passes() {
+        let draw = |rings: Vec<RingLaid>, pad: bool, over_pads: bool| {
+            let mut p = Picture::new(254.0, [0x18, 0x18, 0x1b]);
+            p.resize(200, 120);
+            p.set_ground(0, 0, 0.0, [0x18, 0x18, 0x1b]);
+            let pads = if pad { vec![PadLaid { rect: [120.0, 0.0, 200.0, 120.0], radius: 0.0, color: [0x30, 0x30, 0x36], picture: None, bounds: [0.0, 0.0, 200.0, 120.0] }] } else { Vec::new() };
+            p.set_decor(Decor { pads, dots: Some(Dots { ox: 10.0, oy: 10.0, step: 20.0, r: 1.25, alpha: 0.06, snap_alpha: 0.06, over_pads, bounds: [0.0, 0.0, 200.0, 120.0], holes: Vec::new(), grow: 1.5, lit: 0.94, rings }), plates: Vec::new() });
+            p.encode_all();
+            p.out.clone()
+        };
+        let at = |out: &Vec<[u16; 4]>, x: usize, y: usize| out[y * 200 + x];
+        let ring = RingLaid { x: 10.0, y: 50.0, radius: 60.0, width: 10.0, strength: 1.0, color: [1.0, 0.2, 0.0] };
+        let lit = draw(vec![ring], false, false);
+        let rest = draw(Vec::new(), false, false);
+        // the dot at (70, 50) is on the ring; the one at (190, 110) far from it
+        let (on, far) = (at(&lit, 70, 50), at(&lit, 190, 110));
+        assert!(on[0] > on[1] + 1000, "the ring's red light on the dot it passes: {on:?}");
+        assert!(on[0] > at(&rest, 70, 50)[0], "brighter than it rests");
+        assert_eq!(far, at(&rest, 190, 110), "the far one as it rests");
+        assert!(at(&lit, 72, 50)[0] > at(&rest, 72, 50)[0], "the lit dot larger");
+        // at rest the pad covers the dot at (130, 10); arranged, it shows over it
+        let covered = draw(Vec::new(), true, false);
+        let shown = draw(Vec::new(), true, true);
+        assert_eq!(at(&covered, 130, 10), at(&covered, 140, 20), "under the pad, no dot");
+        assert!(at(&shown, 130, 10)[0] > at(&shown, 140, 20)[0], "arranged, the dot over the pad");
+    }
+
+    /// How long a frame of Home's desk takes to lay with ripples running, the
+    /// dots their rings change drawn again: one ring through its run, and the
+    /// twelve that run at once while typing fast (a key every eighth of a
+    /// second, across the keyboard). Run by hand with
+    /// cargo test --release -p ectomatter a_ripple_frame -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn a_ripple_frame_takes() {
+        let mut p = Picture::new(254.0, [0x18, 0x18, 0x1b]);
+        p.resize(1440, 1028);
+        p.set_ground(60, 36, 12.0, [0x18, 0x18, 0x1b]);
+        p.encode_all();
+        let n = 90;
+        // (this process's own processor time, from /proc, as the frames add to it)
+        let cpu = || -> f64 {
+            let s = std::fs::read_to_string("/proc/self/stat").unwrap_or_default();
+            let f: Vec<&str> = s.rsplit(')').next().unwrap_or("").split_whitespace().collect();
+            (f.get(11).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0) + f.get(12).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0)) * 10.0
+        };
+        for at_once in [1usize, 12] {
+            let c0 = cpu();
+            let t = std::time::Instant::now();
+            for i in 0..n {
+                let rings = (0..at_once)
+                    .map(|k| {
+                        let age = (i as f32 / 60.0 + k as f32 / 8.0) % 1.5;
+                        RingLaid { x: 220.0 + 70.0 * k as f32, y: 400.0 + 80.0 * (k % 4) as f32, radius: 40.0 + 520.0 * age, width: 26.0, strength: (1.0 - age / 1.5).max(0.0).powf(1.4), color: [1.0, 0.25, 0.0] }
+                    })
+                    .collect();
+                let dots = Dots { ox: 60.0, oy: 36.0, step: 14.0, r: 1.25, alpha: 0.06, snap_alpha: 0.06, over_pads: false, bounds: [76.0, 52.0, 1424.0, 1012.0], holes: Vec::new(), grow: 1.5, lit: 0.94, rings };
+                let boxes = p.set_decor(Decor { pads: Vec::new(), dots: Some(dots), plates: Vec::new() });
+                p.encode_many(&boxes);
+            }
+            eprintln!("{at_once} at once: a frame {:.2} ms, {:.1} ms of the processor's time", t.elapsed().as_secs_f64() * 1000.0 / n as f64, (cpu() - c0) / n as f64);
+        }
+    }
+
+    /// A ripple's frames, drawn again only round the dots their rings
+    /// change, come out as the whole picture drawn again would: frame after
+    /// frame as two rings run and fade, and as the last one goes.
+    #[test]
+    fn a_ripple_draws_only_the_dots_it_changes() {
+        let mut part = Picture::new(254.0, [0x18, 0x18, 0x1b]);
+        part.resize(320, 200);
+        part.set_ground(0, 0, 0.0, [0x18, 0x18, 0x1b]);
+        part.encode_all();
+        let dots = |rings: Vec<RingLaid>| Dots { ox: 8.0, oy: 8.0, step: 14.0, r: 1.25, alpha: 0.06, snap_alpha: 0.06, over_pads: false, bounds: [10.0, 10.0, 310.0, 190.0], holes: vec![[100.0, 90.0, 140.0, 110.0]], grow: 1.5, lit: 0.94, rings };
+        let ring = |x: f32, y: f32, t: f32, c: [f32; 3]| RingLaid { x, y, radius: 40.0 + 520.0 * t, width: 26.0, strength: (1.0 - t / 1.5).max(0.0).powf(1.4), color: c };
+        let mut boxes_seen = 0;
+        for i in 0..=24 {
+            let t = i as f32 / 16.0;
+            let mut rings = vec![ring(90.0, 70.0, t, [1.0, 0.25, 0.0])];
+            if t > 0.4 && t < 1.2 {
+                rings.push(ring(240.0, 150.0, t - 0.4, [0.2, 0.4, 1.0]));
+            }
+            if i == 24 {
+                rings.clear();
+            }
+            let decor = Decor { pads: Vec::new(), dots: Some(dots(rings)), plates: Vec::new() };
+            let boxes = part.set_decor(decor.clone());
+            if i > 0 {
+                assert!(boxes.iter().all(|b| b.2 <= 10 && b.3 <= 10), "only small boxes round dots, frame {i}: {:?}", boxes.iter().map(|b| (b.2, b.3)).max());
+            }
+            boxes_seen += boxes.len();
+            part.encode_many(&boxes);
+            let mut whole = Picture::new(254.0, [0x18, 0x18, 0x1b]);
+            whole.resize(320, 200);
+            whole.set_ground(0, 0, 0.0, [0x18, 0x18, 0x1b]);
+            whole.set_decor(decor);
+            whole.encode_all();
+            assert!(part.out == whole.out, "frame {i} drawn in parts differs from the whole");
+        }
+        assert!(boxes_seen > 0);
     }
 }
