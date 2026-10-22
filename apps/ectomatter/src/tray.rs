@@ -59,17 +59,21 @@ impl ksni::Tray for Tray {
 }
 
 /// The app's icon as the tray takes it: ARGB, straight alpha, big-endian.
+/// Each size a panel asks for is drawn at that size (tools/mark/build_icons.py),
+/// since the ring's line gets heavier as the mark gets smaller; shrinking one big
+/// picture would leave it too thin.
 fn icon() -> Vec<ksni::Icon> {
-    use resvg::tiny_skia::{FilterQuality, Pixmap, PixmapPaint, Transform};
-    let Ok(big) = Pixmap::decode_png(include_bytes!("../ui/icon.png")) else { return Vec::new() };
-    // the sizes a panel asks for, not the 512 the file holds
-    [22u32, 32, 48, 64]
+    use resvg::tiny_skia::Pixmap;
+    let sizes: [&[u8]; 4] = [
+        include_bytes!("../ui/icons/ectomatter-22.png"),
+        include_bytes!("../ui/icons/ectomatter-32.png"),
+        include_bytes!("../ui/icons/ectomatter-48.png"),
+        include_bytes!("../ui/icons/ectomatter-64.png"),
+    ];
+    sizes
         .iter()
-        .filter_map(|&n| {
-            let mut pix = Pixmap::new(n, n)?;
-            let k = n as f32 / big.width() as f32;
-            let paint = PixmapPaint { quality: FilterQuality::Bicubic, ..Default::default() };
-            pix.draw_pixmap(0, 0, big.as_ref(), &paint, Transform::from_scale(k, k), None);
+        .filter_map(|png| {
+            let pix = Pixmap::decode_png(png).ok()?;
             let data = pix
                 .pixels()
                 .iter()
@@ -78,7 +82,7 @@ fn icon() -> Vec<ksni::Icon> {
                     [c.alpha(), c.red(), c.green(), c.blue()]
                 })
                 .collect();
-            Some(ksni::Icon { width: n as i32, height: n as i32, data })
+            Some(ksni::Icon { width: pix.width() as i32, height: pix.height() as i32, data })
         })
         .collect()
 }
