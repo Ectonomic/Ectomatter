@@ -1170,7 +1170,7 @@ dependencies = [
  "bytemuck",
  "ectomatter-draw",
  "ectomatter-protocol",
- "ectomatter-weather",
+ "ectomatter-sensors",
  "evga-z10",
  "flate2",
  "hidapi",
@@ -1212,6 +1212,13 @@ name = "ectomatter-protocol"
 version = "0.1.0"
 dependencies = [
  "serde_json",
+]
+
+[[package]]
+name = "ectomatter-sensors"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

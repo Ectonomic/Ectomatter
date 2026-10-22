@@ -14,12 +14,15 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::sensors::{cards, Vendor};
+use crate::files;
+#[cfg(any(test, feature = "read"))]
+use crate::parts::cards;
+use crate::parts::Vendor;
 
 // ------------------------------------------------------------------ what a sensor is
 
 /// The parts of a computer, a tab each, in the tabs' order.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Part {
     Processor,
     Graphics,
@@ -78,7 +81,7 @@ impl Part {
 }
 
 /// What a sensor reads: the row it sits in on its tab, and how its reading is written.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
 pub enum What {
     Temperature,
     Load,
@@ -128,7 +131,7 @@ impl What {
 }
 
 /// A run of like readings that its row keeps folded into one line until it is opened.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Run {
     /// a reading for each of the processor's cores
     Cores,
@@ -148,7 +151,7 @@ impl Run {
 }
 
 /// What NVIDIA's driver gives for a card.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Nv {
     Temp,
     Load,
@@ -160,7 +163,7 @@ pub enum Nv {
 }
 
 /// How a sensor is read.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum How {
     /// a number in a file, divided by its scale (an hwmon's millidegrees, millivolts,
     /// microwatts and hertz; a fan's RPM as it is)
@@ -189,7 +192,7 @@ pub enum How {
 }
 
 /// One sensor, as the Sensors box lists it.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Sensor {
     pub id: String,
     /// Ectomatter's name for it, or the driver's where Ectomatter doesn't know better
@@ -204,7 +207,7 @@ pub struct Sensor {
 }
 
 /// A graphics card, as the main card is chosen among them.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CardOf {
     pub pci: String,
     /// its name, as Linux's list of PCI devices gives it: "NVIDIA GeForce RTX 5090"
@@ -217,7 +220,7 @@ pub struct CardOf {
 }
 
 /// A device the sensors read: a tab's first line, or one of its rows.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Device {
     /// what Ectomatter keeps it by: `cpu`, `memory`, `board`, `card@0000:01:00.0`
     pub key: String,
@@ -238,7 +241,7 @@ pub struct Device {
 
 /// Every sensor on the computer, by device; and each part whose readings can't come in,
 /// with why (a motherboard whose sensor chip Linux has no driver for).
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Catalog {
     pub devices: Vec<Device>,
     pub missing: Vec<(Part, String)>,
@@ -288,14 +291,15 @@ impl Catalog {
 }
 
 /// What NVIDIA's driver says of a card: what it reports, and its video memory in all (GiB).
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Probe {
     pub has: Vec<Nv>,
     pub vram: f64,
 }
 
 /// A reading: a number, or a share of a whole (memory in use, and in all, GiB).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
 pub enum Val {
     One(f64),
     Of(f64, f64),
@@ -332,11 +336,11 @@ impl Nvidia for NoNvidia {
 // ------------------------------------------------------------------ reading Linux's files
 
 fn num(p: &Path) -> Option<f64> {
-    std::fs::read_to_string(p).ok()?.trim().parse::<f64>().ok()
+    files::read_to_string(p).ok()?.trim().parse::<f64>().ok()
 }
 
 fn words(p: &Path) -> Option<String> {
-    Some(std::fs::read_to_string(p).ok()?.trim().to_string()).filter(|s| !s.is_empty())
+    Some(files::read_to_string(p).ok()?.trim().to_string()).filter(|s| !s.is_empty())
 }
 
 /// An hwmon's inputs of one kind ("temp", "fan", "in", "power", "energy", "freq", "curr"):
@@ -344,7 +348,7 @@ fn words(p: &Path) -> Option<String> {
 /// that can't be read now, or that its chip has turned off, is left out. (A power reading is
 /// the average on drivers that give only that.)
 fn inputs(h: &Path, kind: &str) -> Vec<(u32, Option<String>, PathBuf)> {
-    let Ok(rd) = std::fs::read_dir(h) else { return Vec::new() };
+    let Ok(rd) = files::read_dir(h) else { return Vec::new() };
     let mut all: Vec<(u32, PathBuf)> = Vec::new();
     for e in rd.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
@@ -369,13 +373,13 @@ fn inputs(h: &Path, kind: &str) -> Vec<(u32, Option<String>, PathBuf)> {
 /// it reads (none for some made by the kernel itself), in the order of the devices' places
 /// in the computer, which, unlike the hwmons' numbers, stays from one boot to the next.
 fn hwmons(root: &Path) -> Vec<(PathBuf, String, Option<PathBuf>)> {
-    let Ok(rd) = std::fs::read_dir(root.join("sys/class/hwmon")) else { return Vec::new() };
+    let Ok(rd) = files::read_dir(root.join("sys/class/hwmon")) else { return Vec::new() };
     let mut all: Vec<(Option<PathBuf>, u32, PathBuf, String)> = rd
         .flatten()
         .filter_map(|e| {
             let n: u32 = e.file_name().to_str()?.strip_prefix("hwmon")?.parse().ok()?;
             let p = e.path();
-            Some((std::fs::canonicalize(p.join("device")).ok(), n, p.clone(), words(&p.join("name"))?))
+            Some((files::canonicalize(p.join("device")).ok(), n, p.clone(), words(&p.join("name"))?))
         })
         .collect();
     all.sort();
@@ -422,7 +426,7 @@ fn device_key(dev: &Path) -> String {
 }
 
 fn hex(p: &Path) -> Option<u32> {
-    u32::from_str_radix(std::fs::read_to_string(p).ok()?.trim().trim_start_matches("0x"), 16).ok()
+    u32::from_str_radix(files::read_to_string(p).ok()?.trim().trim_start_matches("0x"), 16).ok()
 }
 
 /// The nearest PCI device on a device's path: its address, its directory and its class.
@@ -475,7 +479,7 @@ fn maker(v: &str) -> String {
             return s.to_string();
         }
     }
-    crate::sensors::short_vendor(v)
+    crate::parts::short_vendor(v)
 }
 
 /// A motherboard's sensor chip as its maker names it, from its driver's name for it.
@@ -524,7 +528,7 @@ fn laptop(root: &Path) -> bool {
 /// version, its name being a code).
 fn laptop_name(root: &Path) -> String {
     let read = |f: &str| words(&root.join("sys/class/dmi/id").join(f));
-    let vendor = read("sys_vendor").map(|v| crate::sensors::short_vendor(&v)).unwrap_or_default();
+    let vendor = read("sys_vendor").map(|v| crate::parts::short_vendor(&v)).unwrap_or_default();
     let model = if vendor == "Lenovo" { read("product_version").or_else(|| read("product_name")) } else { read("product_name") }.unwrap_or_else(|| "This laptop".into());
     if vendor.is_empty() || model.starts_with(&vendor) { model } else { format!("{vendor} {model}") }
 }
@@ -607,7 +611,7 @@ fn plain_inputs(h: &Path, driver: &str, dev: &str) -> Vec<Sensor> {
 /// The threads Linux runs on the processor, by core: each core's threads, in the order of
 /// its first (a core's threads share its clock; each counts its own load).
 fn cores(root: &Path) -> Vec<Vec<usize>> {
-    let Ok(rd) = std::fs::read_dir(root.join("sys/devices/system/cpu")) else { return Vec::new() };
+    let Ok(rd) = files::read_dir(root.join("sys/devices/system/cpu")) else { return Vec::new() };
     let mut threads: Vec<(usize, (i64, i64))> = rd
         .flatten()
         .filter_map(|e| {
@@ -658,14 +662,14 @@ fn processor(root: &Path, temps: Vec<Sensor>) -> Device {
             }
         }
     }
-    let name = crate::sensors::cpu_name(root);
+    let name = crate::parts::cpu_name(root);
     let src = if has_temps { "Temperatures from the processor’s own sensor, load and clocks from Linux" } else { "Load and clocks from Linux" };
     Device { key: "cpu".into(), part: Part::Processor, full: name.clone(), name, src: src.into(), inside: None, card: None, sensors, note: None }
 }
 
 /// A graphics card: its usual readings first, as the ready-made layouts show them, then its
 /// driver's other temperatures and its voltages, folded.
-fn card(root: &Path, c: &crate::sensors::Card, hw: Option<&(PathBuf, String)>, nv: &mut dyn Nvidia) -> Device {
+fn card(root: &Path, c: &crate::parts::Card, hw: Option<&(PathBuf, String)>, nv: &mut dyn Nvidia) -> Device {
     let key = format!("card@{}", c.pci);
     let id = |k: &str| format!("{key}/{k}");
     let mut sensors = Vec::new();
@@ -676,7 +680,7 @@ fn card(root: &Path, c: &crate::sensors::Card, hw: Option<&(PathBuf, String)>, n
     };
     let dir = root.join("sys/bus/pci/devices").join(&c.pci);
     // (a card no driver runs, as one given over to a virtual machine, has nothing to read)
-    let driven = dir.join("driver").exists();
+    let driven = files::exists(dir.join("driver"));
     let undriven = || Some("No Linux driver is running this card, so it can’t be read.".to_string());
     match c.vendor {
         _ if !driven => note = undriven(),
@@ -818,7 +822,7 @@ fn battery(dir: &Path) -> Option<Device> {
     }
     if words(&dir.join("scope")).as_deref() == Some("Device") {
         // (the device's own name: the nearest "product" up its path, as USB gives it)
-        let mut at = std::fs::canonicalize(dir.join("device")).ok();
+        let mut at = files::canonicalize(dir.join("device")).ok();
         let mut product = words(&dir.join("model_name"));
         while product.is_none() {
             let Some(p) = at.as_mut() else { break };
@@ -849,8 +853,9 @@ fn battery(dir: &Path) -> Option<Device> {
 
 /// Every sensor on the computer under `root`, by device, the devices in their tabs' order
 /// (the cards in their PCI addresses' order, the main card's place being the Settings' to give).
+#[cfg(any(test, feature = "read"))]
 pub fn catalog(root: &Path, nv: &mut dyn Nvidia) -> Catalog {
-    let ids = std::fs::read_to_string(root.join("usr/share/hwdata/pci.ids")).unwrap_or_default();
+    let ids = files::read_to_string(root.join("usr/share/hwdata/pci.ids")).unwrap_or_default();
     let on_laptop = laptop(root);
     let mut devices: Vec<Device> = Vec::new();
     let mut cpu_temps: Vec<Sensor> = Vec::new();
@@ -951,7 +956,7 @@ pub fn catalog(root: &Path, nv: &mut dyn Nvidia) -> Catalog {
     // the memory: in use, and each stick's temperature, by its place on its bus
     sticks.sort();
     let gib = |kb: f64| kb * 1024.0 / (1u64 << 30) as f64;
-    let total = std::fs::read_to_string(root.join("proc/meminfo")).ok().and_then(|s| s.lines().find(|l| l.starts_with("MemTotal:")).and_then(|l| l.split_whitespace().nth(1)?.parse::<f64>().ok())).map(gib);
+    let total = files::read_to_string(root.join("proc/meminfo")).ok().and_then(|s| s.lines().find(|l| l.starts_with("MemTotal:")).and_then(|l| l.split_whitespace().nth(1)?.parse::<f64>().ok())).map(gib);
     let mut mem = vec![Sensor { id: "memory/used".into(), name: "Memory".into(), orig: None, what: What::InUse, run: None, usual: true, how: How::Memory }];
     for (i, (key, driver, p)) in sticks.iter().enumerate() {
         mem.push(Sensor { id: format!("{driver}@{key}/temp/temp1"), name: format!("Stick {}", i + 1), orig: None, what: What::Temperature, run: None, usual: false, how: How::File(p.clone(), 1000.0) });
@@ -972,7 +977,7 @@ pub fn catalog(root: &Path, nv: &mut dyn Nvidia) -> Catalog {
             devices.push(Device { key: "laptop".into(), part: Part::Laptop, name: laptop_name(root), full: laptop_name(root), src: "From the laptop’s own controller".into(), inside: None, card: None, sensors, note: None });
         }
     } else {
-        let name = crate::sensors::board_name(root).unwrap_or_else(|| "The motherboard".into());
+        let name = crate::parts::board_name(root).unwrap_or_else(|| "The motherboard".into());
         let sensors: Vec<Sensor> = board.into_iter().flat_map(|(_, s)| s).collect();
         if chips.is_empty() {
             // (MSI's boards of the last years carry Nuvoton's NCT6687, which Linux reads only with its own driver)
@@ -990,13 +995,13 @@ pub fn catalog(root: &Path, nv: &mut dyn Nvidia) -> Catalog {
             let src = match chips.len() {
                 0 => String::new(),
                 1 => format!("From its sensor chip, a {}", chips[0]),
-                _ => format!("From its sensor chips, {}", crate::sensors::and_list(&chips.iter().map(|c| format!("a {c}")).collect::<Vec<_>>())),
+                _ => format!("From its sensor chips, {}", crate::parts::and_list(&chips.iter().map(|c| format!("a {c}")).collect::<Vec<_>>())),
             };
             devices.push(Device { key: "board".into(), part: Part::Motherboard, full: name.clone(), name, src, inside: None, card: None, sensors, note: None });
         }
     }
     // a laptop's batteries
-    if let Ok(rd) = std::fs::read_dir(root.join("sys/class/power_supply")) {
+    if let Ok(rd) = files::read_dir(root.join("sys/class/power_supply")) {
         let mut all: Vec<PathBuf> = rd.flatten().map(|e| e.path()).collect();
         all.sort();
         devices.extend(all.iter().filter_map(|d| battery(d)));
@@ -1028,132 +1033,9 @@ impl Sensor {
 }
 
 #[cfg(test)]
-pub mod tests {
+mod tests {
     use super::*;
-
-    /// A made-up NVIDIA driver: the cards it has, each with what it reports.
-    pub struct FakeNvidia(pub Vec<(String, Probe)>);
-
-    impl Nvidia for FakeNvidia {
-        fn probe(&mut self, pci: &str) -> Option<Probe> {
-            self.0.iter().find(|(p, _)| p == pci).map(|(_, p)| p.clone())
-        }
-        // (the RTX 5090 as it read on October 16)
-        fn read(&mut self, pci: &str, what: Nv) -> Option<Val> {
-            self.probe(pci).filter(|p| p.has.contains(&what))?;
-            Some(match what {
-                Nv::Temp => Val::One(43.0),
-                Nv::Load => Val::One(6.0),
-                Nv::Clock => Val::One(1882.0),
-                Nv::MemClock => Val::One(7001.0),
-                Nv::Vram => Val::Of(4.8, 31.8),
-                Nv::Power => Val::One(73.4),
-                Nv::Fan => Val::One(0.0),
-            })
-        }
-    }
-
-    /// A made-up computer like Grant's: an AMD processor with two chiplets and four cores of
-    /// two threads, an MSI board's NCT6687 (a temperature reading 193°, fans, voltages), two
-    /// sticks of DDR5, two drives, an NVIDIA card, an Intel Arc card and the processor's own
-    /// Radeon graphics, an Aquantia Ethernet chip and a MediaTek Wi-Fi card.
-    pub fn computer(dir: &Path) {
-        let w = |p: &str, s: &str| {
-            let f = dir.join(p);
-            std::fs::create_dir_all(f.parent().unwrap()).unwrap();
-            std::fs::write(f, format!("{s}\n")).unwrap();
-        };
-        let n = std::cell::Cell::new(0);
-        let hw = |name: &str, dev: &str, files: &[(&str, &str)]| {
-            let h = dir.join(format!("sys/class/hwmon/hwmon{}", n.get()));
-            n.set(n.get() + 1);
-            std::fs::create_dir_all(&h).unwrap();
-            std::fs::write(h.join("name"), format!("{name}\n")).unwrap();
-            let d = dir.join(dev);
-            std::fs::create_dir_all(&d).unwrap();
-            std::os::unix::fs::symlink(&d, h.join("device")).unwrap();
-            for (f, v) in files {
-                std::fs::write(h.join(f), format!("{v}\n")).unwrap();
-            }
-        };
-        hw("k10temp", "sys/devices/pci0000:00/0000:00:18.3", &[("temp1_input", "66000"), ("temp1_label", "Tctl"), ("temp3_input", "58000"), ("temp3_label", "Tccd1"), ("temp4_input", "54000"), ("temp4_label", "Tccd2")]);
-        hw("nct6687", "sys/devices/platform/nct6687.2592", &[
-            ("temp1_input", "65000"), ("temp1_label", "CPU"), ("temp2_input", "50000"), ("temp2_label", "System"), ("temp7_input", "193000"), ("temp7_label", "M2_1"),
-            ("fan1_input", "734"), ("fan1_label", "CPU Fan"), ("fan2_input", "2836"), ("fan2_label", "Pump Fan"),
-            ("in0_input", "12000"), ("in0_label", "+12V"), ("in1_input", "4980"), ("in1_label", "+5V"), ("in10_input", "1550"), ("in10_label", "Voltage #2"),
-        ]);
-        hw("spd5118", "sys/devices/pci0000:00/0000:00:14.0/i2c-1/1-0051", &[("temp1_input", "49000"), ("temp1_enable", "1")]);
-        hw("spd5118", "sys/devices/pci0000:00/0000:00:14.0/i2c-1/1-0050", &[("temp1_input", "47000"), ("temp1_enable", "1")]);
-        w("sys/devices/pci0000:00/0000:00:01.2/0000:02:00.0/class", "0x010802");
-        w("sys/devices/pci0000:00/0000:00:01.2/0000:02:00.0/nvme/nvme0/model", "Samsung SSD 9100 PRO 4TB          ");
-        w("sys/devices/pci0000:00/0000:00:01.2/0000:02:00.0/nvme/nvme0/serial", "S0EXAMPLE00001M     ");
-        hw("nvme", "sys/devices/pci0000:00/0000:00:01.2/0000:02:00.0/nvme/nvme0", &[("temp1_input", "47850"), ("temp1_label", "Composite"), ("temp2_input", "53850"), ("temp2_label", "Sensor 1")]);
-        w("sys/devices/pci0000:00/0000:00:02.1/0000:0f:00.0/class", "0x010802");
-        w("sys/devices/pci0000:00/0000:00:02.1/0000:0f:00.0/nvme/nvme3/model", "WDS200T1X0E-00AFY0");
-        w("sys/devices/pci0000:00/0000:00:02.1/0000:0f:00.0/nvme/nvme3/serial", "100000000002");
-        hw("nvme", "sys/devices/pci0000:00/0000:00:02.1/0000:0f:00.0/nvme/nvme3", &[("temp1_input", "42850"), ("temp1_label", "Composite")]);
-        // the Ethernet chip names its hwmon after its network: enp6s0
-        for (f, v) in [("class", "0x020000"), ("vendor", "0x1d6a"), ("device", "0x94c0")] {
-            w(&format!("sys/devices/pci0000:00/0000:00:02.1/0000:06:00.0/{f}"), v);
-        }
-        hw("enp6s0", "sys/devices/pci0000:00/0000:00:02.1/0000:06:00.0", &[("temp1_input", "50000"), ("temp1_label", "PHY Temperature"), ("temp2_input", "50000"), ("temp2_label", "MAC Temperature")]);
-        for (f, v) in [("class", "0x028000"), ("vendor", "0x14c3"), ("device", "0x0616")] {
-            w(&format!("sys/devices/pci0000:00/0000:00:02.1/0000:0b:00.0/{f}"), v);
-        }
-        hw("mt7921_phy0", "sys/devices/pci0000:00/0000:00:02.1/0000:0b:00.0/ieee80211/phy0", &[("temp1_input", "48000")]);
-        // the cards
-        let card = |path: &str, v: &str, d: &str| {
-            for (f, s) in [("class", "0x030000"), ("vendor", v), ("device", d)] {
-                w(&format!("sys/devices/{path}/{f}"), s);
-            }
-            let at = dir.join("sys/bus/pci/devices");
-            std::fs::create_dir_all(&at).unwrap();
-            std::os::unix::fs::symlink(dir.join("sys/devices").join(path), at.join(path.rsplit('/').next().unwrap())).unwrap();
-            // (a driver running it)
-            std::fs::create_dir_all(dir.join("sys/bus/pci/drivers/gpu")).unwrap();
-            std::os::unix::fs::symlink(dir.join("sys/bus/pci/drivers/gpu"), dir.join("sys/devices").join(path).join("driver")).unwrap();
-        };
-        card("pci0000:00/0000:00:01.1/0000:01:00.0", "0x10de", "0x2b85");
-        let arc = "pci0000:00/0000:00:02.2/0000:16:00.0";
-        card(arc, "0x8086", "0xe212");
-        w(&format!("sys/devices/{arc}/tile0/gt0/gtidle/idle_residency_ms"), "28005947");
-        w(&format!("sys/devices/{arc}/tile0/gt0/freq0/act_freq"), "1200");
-        hw("xe", &format!("sys/devices/{arc}"), &[
-            ("temp2_input", "49000"), ("temp2_label", "pkg"), ("temp3_input", "48000"), ("temp3_label", "vram"), ("temp6_input", "48000"), ("temp6_label", "vram_ch_0"),
-            ("fan1_input", "1255"), ("energy1_input", "1000000"), ("energy1_label", "card"), ("energy2_input", "500000"), ("energy2_label", "pkg"),
-        ]);
-        let radeon = "pci0000:00/0000:00:08.1/0000:18:00.0";
-        card(radeon, "0x1002", "0x13c0");
-        w(&format!("sys/devices/{radeon}/gpu_busy_percent"), "6");
-        w(&format!("sys/devices/{radeon}/mem_info_vram_used"), "75743232");
-        w(&format!("sys/devices/{radeon}/mem_info_vram_total"), "2147483648");
-        hw("amdgpu", &format!("sys/devices/{radeon}"), &[
-            ("temp1_input", "54000"), ("temp1_label", "edge"), ("freq1_input", "2200000000"), ("freq1_label", "sclk"), ("power1_input", "100000"), ("power1_label", "PPT"),
-            ("in0_input", "1340"), ("in0_label", "vddgfx"), ("in1_input", "1200"), ("in1_label", "vddnb"),
-        ]);
-        w("usr/share/hwdata/pci.ids", "1002  Advanced Micro Devices, Inc. [AMD/ATI]\n\t13c0  Granite Ridge [Radeon Graphics]\n10de  NVIDIA Corporation\n\t2b85  GB202 [GeForce RTX 5090]\n14c3  MEDIATEK Corp.\n\t0616  MT7922 802.11ax PCI Express Wireless Network Adapter\n1d6a  Aquantia Corp.\n\t94c0  AQtion AQC113CS NBase-T/IEEE 802.3an Ethernet Controller [Antigua 10G]\n8086  Intel Corporation\n\te212  Battlemage G21 [Arc Pro B50]");
-        // the processor: four cores of two threads (0 and 4 share the first)
-        for t in 0..8 {
-            w(&format!("sys/devices/system/cpu/cpu{t}/topology/physical_package_id"), "0");
-            w(&format!("sys/devices/system/cpu/cpu{t}/topology/core_id"), &(t % 4).to_string());
-            w(&format!("sys/devices/system/cpu/cpu{t}/cpufreq/scaling_cur_freq"), &(if t < 4 { 5_400_000 + t * 100_000 } else { 624_194 }).to_string());
-        }
-        w("proc/cpuinfo", "processor\t: 0\nmodel name\t: AMD Ryzen 9 9950X3D 16-Core Processor\ncpu cores\t: 4");
-        w("proc/meminfo", "MemTotal:       63119752 kB\nMemFree:        1 kB\nMemAvailable:   28100000 kB");
-        w("sys/class/dmi/id/board_vendor", "Micro-Star International Co., Ltd.");
-        w("sys/class/dmi/id/board_name", "MEG X670E ACE (MS-7D69)");
-        w("sys/class/dmi/id/chassis_type", "3");
-    }
-
-    pub fn nvidia() -> FakeNvidia {
-        FakeNvidia(vec![("0000:01:00.0".into(), Probe { has: vec![Nv::Temp, Nv::Load, Nv::Clock, Nv::Vram, Nv::MemClock, Nv::Power, Nv::Fan], vram: 31.8 })])
-    }
-
-    pub fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("ectomatter-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        dir
-    }
+    use crate::fake::{computer, nvidia, temp_dir, FakeNvidia};
 
     fn names(d: &Device) -> Vec<(String, Option<String>)> {
         d.sensors.iter().filter(|s| s.run.is_none()).map(|s| (s.name.clone(), s.orig.clone())).collect()

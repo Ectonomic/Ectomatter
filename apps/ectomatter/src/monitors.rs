@@ -584,20 +584,6 @@ fn set_one(_monitor: &str, _set: &str, _to: &Value) -> Result<(), String> {
     Err("Ectomatter can’t reach this computer’s monitors yet.".into())
 }
 
-/// The monitors as a plugin reads them: the system's, or for a check run
-/// offscreen, those in the file ECTOMATTER_MONITORS names.
-pub struct Desk;
-
-impl crate::core_host::Computer for Desk {
-    fn monitors(&self) -> Result<Value, String> {
-        if let Some(f) = std::env::var_os("ECTOMATTER_MONITORS") {
-            let t = std::fs::read_to_string(&f).map_err(|e| e.to_string())?;
-            return serde_json::from_str(&t).map_err(|e| e.to_string());
-        }
-        list().map(|l| to_json(&l))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -115,6 +115,13 @@ impl Package {
         self.manifest.all["adds"].as_array().is_some_and(|a| a.iter().any(|x| x == "game"))
     }
 
+    /// Whether it works on this system: everywhere, unless its manifest
+    /// names the systems it works on (`"systems": ["linux"]`); one that
+    /// doesn't work here isn't offered here.
+    pub fn works_here(&self) -> bool {
+        self.manifest.all["systems"].as_array().is_none_or(|a| a.iter().any(|s| s.as_str() == Some(std::env::consts::OS)))
+    }
+
     pub fn kind(&self) -> Kind {
         Kind::of(&self.manifest.all)
     }
@@ -162,6 +169,21 @@ pub fn can_words(m: &Value) -> Vec<String> {
         let here = address.starts_with("127.") || address.starts_with("localhost:") || address.starts_with("[::1]");
         out.push(if here { format!("Talks to {to} on this computer.") } else { format!("Talks to {to} at {address}.") });
     }
+    if !uses.web.is_empty() {
+        let mut whose: Vec<String> = Vec::new();
+        for (_, to) in &uses.web {
+            if !whose.contains(to) {
+                whose.push(to.clone());
+            }
+        }
+        out.push(format!("Reaches {} over the internet.", joined(&whose)));
+    }
+    if !uses.read.is_empty() {
+        out.push(format!("Reads this computer’s own information without changing it: {}.", joined(&uses.read)));
+    }
+    if uses.nvidia {
+        out.push("Reads NVIDIA graphics cards through NVIDIA’s driver.".into());
+    }
     for o in &uses.other {
         out.push(match o.as_str() {
             "sound-capture" => "Hears what your computer is playing.".to_string(),
@@ -173,6 +195,15 @@ pub fn can_words(m: &Value) -> Vec<String> {
         out.push("Reaches nothing outside Ectomatter.".into());
     }
     out
+}
+
+/// Names in a sentence: "A", "A and B", "A, B and C".
+fn joined(names: &[String]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
 }
 
 /// "owner/name", from that or a GitHub address.
@@ -231,6 +262,7 @@ pub fn all_in(builtin: &Path, added: &Path) -> Vec<Package> {
     dirs.sort();
     for d in dirs {
         match Package::read(&d, false) {
+            Ok(p) if !p.works_here() => {}
             Ok(p) => take(p),
             Err(e) => eprintln!("ectomatter: {e}"),
         }
@@ -243,6 +275,7 @@ pub fn all_in(builtin: &Path, added: &Path) -> Vec<Package> {
         versions.sort_by_key(|p| version_key(&p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()));
         if let Some(v) = versions.last() {
             match Package::read(v, true) {
+                Ok(p) if !p.works_here() => {}
                 Ok(p) => take(p),
                 Err(e) => eprintln!("ectomatter: {e}"),
             }
@@ -396,7 +429,15 @@ mod tests {
         assert_eq!(can(&plugins, "monitor-configurator"), vec!["Changes your monitors’ settings while a game runs.".to_string()]);
         assert!(cores.iter().all(|p| p.kind() == Kind::Core), "the cores folder holds cores");
         assert!(plugins.iter().all(|p| p.kind() == Kind::Plugin), "the plugins folder holds plugins");
-        assert_eq!(plugins.iter().map(|p| p.name()).collect::<Vec<_>>(), vec!["Monitor Configurator", "OpenRGB"]);
+        assert_eq!(plugins.iter().map(|p| p.name()).collect::<Vec<_>>(), vec!["Monitor Configurator", "OpenRGB", "Sensors", "Weather"]);
+        assert_eq!(can(&plugins, "weather"), vec!["Reaches Open-Meteo, Photon, the National Weather Service, Environment and Climate Change Canada and MeteoAlarm over the internet.".to_string()]);
+        assert_eq!(
+            can(&plugins, "sensors"),
+            vec![
+                "Reads this computer’s own information without changing it: /sys, /proc/stat, /proc/meminfo, /proc/cpuinfo and /usr/share/hwdata/pci.ids.".to_string(),
+                "Reads NVIDIA graphics cards through NVIDIA’s driver.".to_string(),
+            ]
+        );
         assert!(cores.iter().chain(&plugins).all(|p| p.glyph().is_some()), "each package brings its glyph");
         // (where each keeps its own files)
         assert!(cores[0].data().ends_with(format!("cores/{}", cores[0].id())));

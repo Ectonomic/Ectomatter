@@ -180,7 +180,7 @@ impl LayoutPage {
         on!(on_cell_slide, |id, v| Ask::CellSlide(id, v));
         on!(on_fx_chose, |k| Ask::FxChose(k));
         on!(on_cell_pick, |id, i, x, y, h| Ask::CellPick(id, i, x, y, h));
-        on!(on_cell_typed, |id, t| Ask::CellTyped(id, t.to_string()));
+        on!(on_cell_typed, |id, _index, t| Ask::CellTyped(id, t.to_string()));
         on!(on_menu_chose, |i| Ask::MenuChose(i));
         on!(on_menu_dismiss, Ask::MenuDismiss);
         on!(on_pk_sv, |x, y| Ask::PkSv(x, y));

@@ -5,17 +5,23 @@
 //! readings are the sensors checked in Settings (see [crate::sensors]): the
 //! processor's own temperature (Tctl by default), its load and its average
 //! clock, the memory in use, the main card's temperature, load, clock and
-//! video memory, and each other sensor checked, each read as
-//! [crate::sensor_read] reads it. A reading unchecked can't be had, as one the
-//! computer doesn't have. Everything is read under `root`, which is `/` but
-//! for tests, which hand in a made-up computer.
+//! video memory, and each other sensor checked. A reading unchecked can't be
+//! had, as one the computer doesn't have.
+//!
+//! Ectomatter never reads the sensors itself: the Sensors plugin lists them
+//! and reads those it's asked to watch ([crate::hosted::Readings]), and this
+//! asks for what it shows. Tests hand in a made-up computer, read here.
 
-use std::path::PathBuf;
 #[cfg(test)]
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use crate::sensor_list::{Catalog, Nvidia, Sensor, Val};
+#[cfg(test)]
+use ectomatter_sensors::list::Nvidia;
+use ectomatter_sensors::list::{Catalog, Sensor, Val};
+
+/// The Sensors plugin, by its id.
+pub const SENSORS: &str = "sensors";
 
 /// One reading of the main card: its temperature, load, core clock, and its video memory
 /// used and in all (GiB), each where its driver reports it and it is checked.
@@ -35,32 +41,50 @@ impl Gpu {
     }
 }
 
+/// Where the readings come from: the Sensors plugin, as it tells them, for
+/// one who shows them (the keyboard's screen, a page); or, in a test, a
+/// made-up computer read here.
+enum From {
+    Plugin(crate::hosted::Readings, &'static str),
+    #[cfg(test)]
+    Here(PathBuf, ectomatter_sensors::read::Reader),
+}
+
 pub struct Stats {
-    root: PathBuf,
-    reader: crate::sensor_read::Reader,
-    /// the computer's sensors, listed again every half minute
+    from: From,
+    /// the computer's sensors, as last listed (looked at again every half minute)
     listed: Option<(Instant, Catalog)>,
     /// the choices read by, where they aren't Ectomatter's own (a test's)
     pub setup: Option<crate::sensors::Setup>,
 }
 
 impl Stats {
+    /// The readings the Sensors plugin tells, for `who` (the screen, a page),
+    /// which asks it to watch what it shows.
+    pub fn of(readings: crate::hosted::Readings, who: &'static str) -> Stats {
+        Stats { from: From::Plugin(readings, who), listed: None, setup: None }
+    }
+
+    /// A made-up computer under `root`, its NVIDIA cards as `nv` says, read here.
+    #[cfg(test)]
     pub fn new(root: impl Into<PathBuf>, nv: Box<dyn Nvidia>) -> Stats {
         let root = root.into();
-        Stats { reader: crate::sensor_read::Reader::new(root.clone(), nv), root, listed: None, setup: None }
+        Stats { from: From::Here(root.clone(), ectomatter_sensors::read::Reader::new(root, nv)), listed: None, setup: None }
     }
 
-    /// This computer, its NVIDIA cards read through NVIDIA's driver.
-    pub fn here() -> Stats {
-        Stats::new("/", Box::new(crate::sensor_read::Nvml::default()))
-    }
-
-    /// The computer's sensors as last listed (again when half a minute old).
+    /// The computer's sensors as last listed (again when half a minute old):
+    /// as the Sensors plugin last told them, none while it isn't running.
     pub fn catalog(&mut self) -> &Catalog {
         if self.listed.as_ref().is_none_or(|(at, _)| at.elapsed().as_secs() >= 30) {
-            let cat = crate::sensor_list::catalog(&self.root, self.reader.nvidia());
+            let cat = match &mut self.from {
+                From::Plugin(r, _) => r.of(SENSORS).and_then(|t| serde_json::from_value::<Catalog>(t.list).ok()).unwrap_or_default(),
+                #[cfg(test)]
+                From::Here(root, reader) => ectomatter_sensors::list::catalog(root, reader.nvidia()),
+            };
             crate::sensors::remember(&cat, &self.setup.clone().unwrap_or_else(crate::sensors::setup));
-            self.listed = Some((Instant::now(), cat));
+            // (a list not yet told isn't kept: the next look asks again)
+            let at = if cat.devices.is_empty() { Instant::now() - std::time::Duration::from_secs(30) } else { Instant::now() };
+            self.listed = Some((at, cat));
         }
         &self.listed.as_ref().unwrap().1
     }
@@ -71,30 +95,48 @@ impl Stats {
         self.read();
     }
 
+    /// Each of these sensors read now: as the Sensors plugin last read it,
+    /// these being the ones asked for from now on.
+    fn values(&mut self, want: &[&Sensor]) -> std::collections::HashMap<String, Val> {
+        match &mut self.from {
+            From::Plugin(r, who) => {
+                r.want(SENSORS, who, want.iter().map(|s| s.id.clone()).collect());
+                let told = r.of(SENSORS).map(|t| t.values).unwrap_or_default();
+                want.iter().filter_map(|s| Some((s.id.clone(), serde_json::from_value::<Val>(told.get(&s.id)?.clone()).ok()?))).collect()
+            }
+            #[cfg(test)]
+            From::Here(_, reader) => reader.read(want),
+        }
+    }
+
     /// Every sensor on the computer read now, checked or not, by id, for the Sensors box.
     pub fn read_all(&mut self) -> std::collections::HashMap<String, Val> {
-        self.catalog();
-        let cat = &self.listed.as_ref().unwrap().1;
-        let all: Vec<&Sensor> = cat.devices.iter().flat_map(|d| d.sensors.iter()).collect();
-        self.reader.read(&all)
+        let all: Vec<Sensor> = self.catalog().devices.iter().flat_map(|d| d.sensors.iter().cloned()).collect();
+        self.values(&all.iter().collect::<Vec<_>>())
+    }
+
+    /// Nothing read for this one any longer (a page left).
+    pub fn rest(&mut self) {
+        if let From::Plugin(r, who) = &self.from {
+            r.want(SENSORS, who, Vec::new());
+        }
     }
 
     /// Everything the computer reads now, for a page (the time, the profile and the
     /// weather are the page's player's to add): every sensor checked, as Settings has it.
     pub fn read(&mut self) -> crate::lcd_page::Readings {
-        self.catalog();
+        let cat = self.catalog().clone();
         let setup = self.setup.clone().unwrap_or_else(crate::sensors::setup);
-        let cat = &self.listed.as_ref().unwrap().1;
-        let checked = setup.checked_in(cat);
+        let checked = setup.checked_in(&cat);
         let want: Vec<&Sensor> = cat.devices.iter().flat_map(|d| d.sensors.iter()).filter(|s| checked.contains(&s.id)).collect();
-        let v = self.reader.read(&want);
+        let v = self.values(&want);
         let one = |id: &str| v.get(id).map(|x| x.one());
         let cpu_temp = cat.cpu_temp().and_then(|s| one(&s.id));
         let ram = match v.get("memory/used") {
             Some(Val::Of(u, t)) => Some((*u, *t)),
             _ => None,
         };
-        let gpu = setup.main_card(cat).map(|d| {
+        let gpu = setup.main_card(&cat).map(|d| {
             let at = |k: &str| v.get(&format!("{}/{k}", d.key)).copied();
             let n = |k: &str| at(k).map(|x| x.one().round().max(0.0) as u32);
             let vram = match at("video-memory") {
@@ -118,8 +160,8 @@ impl Stats {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::sensor_list::tests::{nvidia, temp_dir, FakeNvidia};
-    use crate::sensor_list::{Nv, Probe};
+    use ectomatter_sensors::fake::{nvidia, temp_dir, FakeNvidia};
+    use ectomatter_sensors::list::{Nv, Probe};
 
     /// NVIDIA's driver with one card, at 0000:01:00.0, reading as given: its temperature,
     /// load, clock, and video memory used and in all (none in all: none reported); or not
@@ -182,7 +224,7 @@ pub mod tests {
     #[test]
     fn the_rows_as_the_service_wrote_them() {
         let dir = temp_dir("stats");
-        crate::sensor_list::tests::computer(&dir);
+        ectomatter_sensors::fake::computer(&dir);
         std::fs::write(dir.join("proc/stat"), "cpu  100 0 50 800 50 0 0 0 0 0\n").unwrap();
         let mut s = Stats::new(&dir, Box::new(nvidia()));
         s.setup = Some(Default::default());
@@ -200,7 +242,7 @@ pub mod tests {
     #[test]
     fn a_reading_unchecked_is_unavailable_and_a_sensor_checked_is_read() {
         let dir = temp_dir("stats-checked");
-        crate::sensor_list::tests::computer(&dir);
+        ectomatter_sensors::fake::computer(&dir);
         let mut s = Stats::new(&dir, Box::new(nvidia()));
         let cat = s.catalog().clone();
         let mut setup = crate::sensors::Setup::default();
@@ -210,7 +252,7 @@ pub mod tests {
         let r = s.read();
         assert_eq!(r.gpu.map(|g| (g.temp, g.load)), Some((None, Some(6))));
         let pump = crate::sensors::number("nct6687@nct6687.2592/fan/Pump Fan");
-        assert_eq!(r.sensors.get(&pump), Some(&(crate::sensor_list::What::Fan, Val::One(2836.0))));
+        assert_eq!(r.sensors.get(&pump), Some(&(ectomatter_sensors::list::What::Fan, Val::One(2836.0))));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

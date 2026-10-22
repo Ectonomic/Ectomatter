@@ -55,6 +55,13 @@ impl Settings {
         self.write()
     }
 
+    /// Take a key out of the settings and write them: its value, if there was one.
+    pub fn take(&self, key: &str) -> Option<Value> {
+        let v = self.data.lock().unwrap_or_else(|p| p.into_inner()).as_object_mut()?.remove(key)?;
+        let _ = self.write();
+        Some(v)
+    }
+
     /// Set a value that is still being changed, such as a slider being
     /// dragged: it takes effect at once, and is written once it rests.
     pub fn set_soon(&self, path: &str, value: Value) {

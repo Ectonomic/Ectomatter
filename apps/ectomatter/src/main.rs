@@ -20,6 +20,7 @@
 mod adapter;
 mod clipboard;
 mod commands;
+mod computer;
 mod core_host;
 mod cores;
 mod described;
@@ -56,6 +57,7 @@ mod macros;
 mod monitors;
 mod mouse;
 mod mouse_art;
+mod nvml;
 mod old_name;
 mod overlays;
 mod packages;
@@ -66,8 +68,6 @@ mod putback;
 mod screen_edit;
 mod screen_keys;
 mod screens;
-mod sensor_list;
-mod sensor_read;
 mod sensors;
 mod settings;
 mod setups;
@@ -639,7 +639,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     // ECTOMATTER_LCD's rows (split by |), in ECTOMATTER_LCD_STATE
     // (playing, paused, other, missing, launch, exit)
     {
-        let rows = std::env::var("ECTOMATTER_LCD").map(|r| r.split('|').map(String::from).collect()).unwrap_or_else(|_| lcd_stats::Stats::here().rows());
+        let rows = std::env::var("ECTOMATTER_LCD").map(|r| r.split('|').map(String::from).collect()).unwrap_or_else(|_| lcd_stats::Stats::of(front.hosted.readings(), "snapshot").rows());
         let st = std::env::var("ECTOMATTER_LCD_STATE").unwrap_or_default();
         let state = match st.as_str() {
             "paused" => lcd_player::State::Paused,
@@ -1997,6 +1997,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
             false,
             Box::new(screen),
             app.front.worker.steps.clone(),
+            app.front.hosted.readings(),
         );
         app.front.set_player(p);
     }

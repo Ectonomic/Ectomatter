@@ -1,31 +1,19 @@
 //! Ectomatter's own Settings, as the web app had them (shell.js at cd9ea82):
-//! each device, whether Ectomatter controls it, whether it may open it and
-//! what else has it open; the cores, and then the plugins, each with what it
-//! can do, its version and whether it's on; the weather
-//! every device shares, its place and its units; the HDR interface; and how
-//! often the window draws a lighting effect.
+//! each device with its core: whether Ectomatter controls it, whether it may
+//! open it, what else has it open; the plugins, each with what it can do,
+//! its version and whether it's on, then the sections the plugins describe
+//! of themselves (the weather's place and units), drawn here; the sensors the
+//! Sensors plugin reads, and which the screens show; the HDR interface; and
+//! how often the window draws a lighting effect.
 
 use serde_json::{json, Value};
 
 use std::collections::{BTreeSet, HashMap};
 
 use crate::lighting::{cell, id, kind, style, text_cell, Ctl};
-use crate::sensor_list::{Catalog, Device, Part, Run, Sensor, Val};
+use ectomatter_sensors::list::{Catalog, Device, Part, Run, Sensor, Val};
 use crate::text;
 use crate::Cell;
-
-const WMO: [(i32, &str); 28] = [
-    (0, "Clear"), (1, "Mostly clear"), (2, "Partly cloudy"), (3, "Overcast"), (45, "Fog"), (48, "Freezing fog"),
-    (51, "Light drizzle"), (53, "Drizzle"), (55, "Heavy drizzle"), (56, "Freezing drizzle"), (57, "Freezing drizzle"),
-    (61, "Light rain"), (63, "Rain"), (65, "Heavy rain"), (66, "Freezing rain"), (67, "Freezing rain"),
-    (71, "Light snow"), (73, "Snow"), (75, "Heavy snow"), (77, "Snow grains"), (80, "Light showers"), (81, "Showers"), (82, "Heavy showers"),
-    (85, "Snow showers"), (86, "Heavy snow showers"), (95, "Thunderstorm"), (96, "Thunderstorm with hail"), (99, "Thunderstorm with hail"),
-];
-/// The sky in words, from the weather's code.
-pub fn sky(code: i32) -> String {
-    WMO.iter().find(|(k, _)| *k == code).map_or(format!("Weather code {code}"), |(_, n)| n.to_string())
-}
-const ALERTS: [(i32, &str); 3] = [(1, "Tropical storm"), (2, "Hurricane"), (3, "Tornado")];
 
 /// the page's column, inside its padding, and a card's rows
 const X0: f32 = 40.0;
@@ -92,16 +80,33 @@ pub struct DeviceRow {
     pub holders_note: String,
 }
 
-pub struct State<'a> {
+/// A plugin's own Settings section, as it last described it (settings/section):
+/// whose it is, the section, the values Ectomatter keeps for it, and what is
+/// being typed into one of its boxes (that setting's id, and the words so far).
+#[derive(Clone, Debug, Default)]
+pub struct PluginSection {
+    pub plugin: String,
+    pub section: Value,
+    pub values: Value,
+    pub typed: Option<(String, String)>,
+}
+
+/// What a plugin section's pieces stand for, by their places: each box's
+/// plugin and setting, and each choice's plugin, setting and value.
+#[derive(Clone, Debug, Default)]
+pub struct PluginMap {
+    pub fields: Vec<(String, String)>,
+    pub choices: Vec<(String, String, Value)>,
+}
+
+pub struct State {
     pub sensors: Option<Sensors>,
     pub devices: Vec<DeviceRow>,
     pub plugins: Vec<PackageRow>,
+    pub sections: Vec<PluginSection>,
     pub settings: Value,
-    pub report: Option<ectomatter_weather::Report>,
-    pub locale: &'a str,
     pub top_peak: f64,
     pub reference: f64,
-    pub place_text: &'a str,
 }
 
 struct Card {
@@ -254,7 +259,7 @@ fn sensors_box(cells: &mut Vec<Cell>, y: &mut f32, v: &Sensors, map: &mut Sensor
             .iter()
             .filter_map(|s| {
                 let x = v.values.get(&s.id)?;
-                crate::sensor_read::odd(s.what, *x).then(|| format!("{} reads {}: probably no sensor is connected to it.", v.setup.names.get(&s.id).unwrap_or(&s.name), crate::sensor_read::shown(s.what, tab, *x)))
+                ectomatter_sensors::read::odd(s.what, *x).then(|| format!("{} reads {}: probably no sensor is connected to it.", v.setup.names.get(&s.id).unwrap_or(&s.name), ectomatter_sensors::read::shown(s.what, tab, *x)))
             })
             .collect()
     };
@@ -416,8 +421,8 @@ fn chip(out: &mut Vec<Cell>, v: &Sensors, checked: &BTreeSet<String>, part: Part
     let name = given.cloned().unwrap_or_else(|| s.name.clone());
     // (a renamed sensor keeps its own name beside the one given it)
     let orig = if given.is_some() { s.orig.clone().or(Some(s.name.clone())) } else { s.orig.clone() };
-    let reading = v.values.get(&s.id).map(|x| crate::sensor_read::shown(s.what, part, *x)).unwrap_or_default();
-    let odd = v.values.get(&s.id).is_some_and(|x| crate::sensor_read::odd(s.what, *x));
+    let reading = v.values.get(&s.id).map(|x| ectomatter_sensors::read::shown(s.what, part, *x)).unwrap_or_default();
+    let odd = v.values.get(&s.id).is_some_and(|x| ectomatter_sensors::read::odd(s.what, *x));
     let on = checked.contains(&s.id);
     let index = map.chips.len() as i32;
     map.chips.push(s.id.clone());
@@ -442,7 +447,7 @@ fn chip(out: &mut Vec<Cell>, v: &Sensors, checked: &BTreeSet<String>, part: Part
     }
 }
 
-pub fn page(s: &State) -> (Vec<Cell>, f32, SensorMap) {
+pub fn page(s: &State) -> (Vec<Cell>, f32, SensorMap, PluginMap) {
     let mut cells = vec![text_cell(style::TITLE, X0, 34.0, W, 29.0, "Settings")];
     let mut y = 34.0 + 29.0 + 6.0 - 14.0;
     y += 14.0;
@@ -451,100 +456,11 @@ pub fn page(s: &State) -> (Vec<Cell>, f32, SensorMap) {
     devices_section(&mut cells, &mut y, &s.devices);
     packages_section(&mut cells, &mut y, "Plugins", 1, &s.plugins, "Add a plugin", "Ectomatter checks each plugin’s GitHub releases for updates once a day.");
 
-    // the weather every device shares
-    let place = &s.settings["weather"]["place"];
-    let has_place = place.is_object();
-    let d = ectomatter_weather::units::units_for(s.locale);
-    let chosen = &s.settings["weather"]["units"];
-    let tu = chosen["temperature"].as_str().unwrap_or(d.temperature).to_string();
-    let wu = chosen["wind"].as_str().unwrap_or(d.wind).to_string();
-    section(&mut cells, &mut y, "Weather", |c| {
-        c.label("Place");
-        c.cells.push(Cell { text: s.place_text.into(), id: id(Ctl::Place), style: 1, ..cell(kind::FIELD, X0 + PAD_X + CTRL, c.y, 380.0, 35.56) });
-        let mut ny = c.y + 35.56 + 7.0;
-        let where_ = if has_place {
-            [place["name"].as_str(), place["region"].as_str(), place["country"].as_str()].into_iter().flatten().filter(|t| !t.is_empty()).collect::<Vec<_>>().join(", ")
-        } else {
-            "Every device that shows weather uses this place.".into()
-        };
-        c.note(&mut ny, &where_, 664.0);
-        c.next(ny - c.y - 0.125);
-        if has_place {
-            c.label("Now");
-            let (bx, by) = (X0 + PAD_X + CTRL, c.y);
-            c.cells.push(cell(kind::WBOX, bx, by, 380.0, 100.0));
-            match &s.report {
-                None => c.cells.push(text_cell(style::LABEL, bx + 16.0, by + 14.0, 340.0, 26.0, "Getting the weather…")),
-                Some(r) => {
-                    let t = if tu == "f" { r.temperature * 9.0 / 5.0 + 32.0 } else { r.temperature };
-                    let temp = format!("{}°{}", t.round(), tu.to_uppercase());
-                    let cond = WMO.iter().find(|(k, _)| *k == r.code).map_or(format!("Weather code {}", r.code), |(_, n)| n.to_string());
-                    let tw = text::width(500, 22.0, &temp) - 0.44 * temp.chars().count() as f32;
-                    c.cells.push(text_cell(style::BIG, bx + 16.0, by + 14.0, tw + 4.0, 26.0, &temp));
-                    c.cells.push(text_cell(style::LABEL_SOFT, bx + 16.0 + tw + 12.0, by + 22.0, 200.0, 16.0, &cond));
-                    let wind = |k: f32| match wu.as_str() {
-                        "mph" => format!("{} mph", (k / 1.609).round()),
-                        "ms" => format!("{} m/s", (k / 3.6).round()),
-                        _ => format!("{} km/h", k.round()),
-                    };
-                    let clock = |secs: f32| crate::lcd_page::twelve_hour((secs / 3600.0).floor().clamp(0.0, 23.0) as u32, ((secs % 3600.0) / 60.0).floor() as u32);
-                    let facts = [("Cloud", format!("{}%", (r.cloud * 100.0).round())), ("Wind", wind(r.wind_speed)), ("Sunrise", clock(r.sunrise)), ("Sunset", clock(r.sunset))];
-                    // two to a line, the first column as wide as its widest
-                    let col0 = facts.iter().step_by(2).map(|(k, v)| text::width(400, 13.0, &format!("{k} ")) + text::width(500, 13.0, v)).fold(0.0f32, f32::max);
-                    for (i, (k, v)) in facts.iter().enumerate() {
-                        let fx = bx + 16.0 + if i % 2 == 1 { col0 + 28.0 } else { 0.0 };
-                        let fy = by + 46.0 + (i / 2) as f32 * 22.0;
-                        let kw = text::width(400, 13.0, &format!("{k} "));
-                        c.cells.push(text_cell(style::FACT, fx, fy, kw + 2.0, 18.0, k));
-                        c.cells.push(text_cell(style::FACT_VALUE, fx + kw, fy, 120.0, 18.0, v));
-                    }
-                }
-            }
-            c.next(100.0);
-        }
-        c.label("Warnings");
-        let country = place["country_code"].as_str().unwrap_or("");
-        let official = ectomatter_weather::alerts::source(country).map(|x| x.name());
-        match (has_place, official) {
-            (false, _) => c.state(c.y, 0, "Chosen with the place"),
-            (true, Some(n)) => c.state(c.y, 1, n),
-            (true, None) => c.state(c.y, 3, "Read from the weather"),
-        }
-        let mut ny = c.y + 34.0 + 7.0;
-        if has_place {
-            let alert = s.report.as_ref().map_or(0, |r| r.alert);
-            let in_force = ALERTS.iter().find(|(k, _)| *k == alert).map_or(String::new(), |(_, n)| format!("{n} {}. ", if official.is_some() { "warning in force" } else { "conditions now" }));
-            let note = format!(
-                "{in_force}{}",
-                if official.is_some() {
-                    "Official warnings for this place, checked every 3 minutes."
-                } else {
-                    "No warning service covers this country yet, so storm-force wind with rain stands in for an official warning. A tornado cannot be told from the weather alone."
-                }
-            );
-            c.note(&mut ny, &note, 664.0);
-        }
-        c.next(ny - c.y - 0.125 - if has_place { 0.0 } else { 7.0 });
-        c.label("Temperature");
-        c.seg(c.y, Ctl::Temperature, &[("c", "Celsius"), ("f", "Fahrenheit")], &tu);
-        c.next(36.0);
-        c.label("Wind");
-        c.seg(c.y, Ctl::Wind, &[("kmh", "km/h"), ("mph", "mph"), ("ms", "m/s")], &wu);
-        let mut ny = c.y + 36.0 + 7.0;
-        if chosen["temperature"].is_null() && chosen["wind"].is_null() {
-            c.note(&mut ny, &format!("Set from this computer's region ({}). Change either and Ectomatter keeps your choice.", s.locale.replace('-', "_")), 664.0);
-        } else {
-            ny -= 7.0;
-        }
-        c.next(ny - c.y - 0.125);
-        let credit = "Weather and air from Open-Meteo (open-meteo.com, CC BY 4.0), every 15 minutes. Places from Open-Meteo, and from Photon over OpenStreetMap (ODbL) for names Open-Meteo cannot match. Warnings every 3 minutes from the National Weather Service, Environment and Climate Change Canada, or MeteoAlarm (meteoalarm.org, CC BY 4.0).";
-        let mut cy = c.y;
-        for line in text::wrap(400, 12.0, credit, 640.0) {
-            c.cells.push(text_cell(style::CREDIT, X0 + PAD_X + CTRL, cy, 640.0, 18.0, &line));
-            cy += 18.0;
-        }
-        c.next(cy - c.y);
-    });
+    // the sections the plugins describe of themselves
+    let mut pmap = PluginMap::default();
+    for p in &s.sections {
+        plugin_section(&mut cells, &mut y, p, &mut pmap);
+    }
 
     // every sensor on the computer, a tab for each part, and which the screen's layouts can show
     let mut map = SensorMap::default();
@@ -572,7 +488,113 @@ pub fn page(s: &State) -> (Vec<Cell>, f32, SensorMap) {
         c.next(34.0);
     });
 
-    (cells, y - 14.0 + 40.0, map)
+    (cells, y - 14.0 + 40.0, map, pmap)
+}
+
+/// A plugin's own section, drawn from what it says of itself: under its
+/// title, each part of its layout in order. `show` rows its settings (a
+/// `search`, a box to type in whose matches the plugin finds; a `choice`,
+/// its options side by side), the part's note under the last; `card`, a box
+/// with a reading in large and words beside it and facts two to a line (or
+/// what it's waiting for); `status`, a dot and words, its note under them;
+/// `credit`, the small words saying whose the data is.
+fn plugin_section(cells: &mut Vec<Cell>, y: &mut f32, p: &PluginSection, map: &mut PluginMap) {
+    let sec = &p.section;
+    let title = sec["label"].as_str().unwrap_or(&p.plugin).to_string();
+    let empty = Vec::new();
+    let settings = sec["settings"].as_array().unwrap_or(&empty);
+    let words = |v: &Value| v.as_str().unwrap_or("").to_string();
+    section(cells, y, &title, |c| {
+        let cx = X0 + PAD_X + CTRL;
+        for part in sec["layout"].as_array().unwrap_or(&empty) {
+            if let Some(ids) = part["show"].as_array() {
+                for (k, sid) in ids.iter().enumerate() {
+                    let Some(st) = settings.iter().find(|x| x["id"] == *sid) else { continue };
+                    let sid = words(sid);
+                    c.label(&words(&st["label"]));
+                    let value = p.values.get(&sid).cloned().filter(|v| !v.is_null()).unwrap_or_else(|| st["default"].clone());
+                    let h = if st["type"] == "search" {
+                        let text = match &p.typed {
+                            Some((t, typed)) if *t == sid => typed.clone(),
+                            _ => words(&st["text"]),
+                        };
+                        map.fields.push((p.plugin.clone(), sid.clone()));
+                        c.cells.push(Cell { text: text.into(), id: id(Ctl::PluginField), index: map.fields.len() as i32 - 1, style: 1, ..cell(kind::FIELD, cx, c.y, 380.0, 35.56) });
+                        35.56
+                    } else {
+                        let mut bx = cx + 3.0;
+                        let mut buttons = Vec::new();
+                        for o in st["options"].as_array().unwrap_or(&empty) {
+                            let name = words(&o["label"]);
+                            let w = text::width(400, 13.0, &name) + 24.0;
+                            map.choices.push((p.plugin.clone(), sid.clone(), o["value"].clone()));
+                            buttons.push(Cell { text: name.into(), on: o["value"] == value, id: id(Ctl::PluginChoice), index: map.choices.len() as i32 - 1, ..cell(kind::SEG_BUTTON, bx, c.y + 3.0, w, 30.0) });
+                            bx += w + 2.0;
+                        }
+                        c.cells.push(cell(kind::SEG, cx, c.y, bx - 2.0 + 3.0 - cx, 36.0));
+                        c.cells.extend(buttons);
+                        36.0
+                    };
+                    // (the part's note under its last row)
+                    match part["note"].as_str().filter(|n| !n.is_empty() && k + 1 == ids.len()) {
+                        Some(note) => {
+                            let mut ny = c.y + h + 7.0;
+                            c.note(&mut ny, note, 664.0);
+                            c.next(ny - c.y - 0.125);
+                        }
+                        None => c.next(h),
+                    }
+                }
+            } else if let Some(card) = part.get("card") {
+                c.label(&words(&card["label"]));
+                let (bx, by) = (cx, c.y);
+                c.cells.push(cell(kind::WBOX, bx, by, 380.0, 100.0));
+                if let Some(w) = card["waiting"].as_str() {
+                    c.cells.push(text_cell(style::LABEL, bx + 16.0, by + 14.0, 340.0, 26.0, w));
+                } else {
+                    let big = words(&card["big"]);
+                    let tw = text::width(500, 22.0, &big) - 0.44 * big.chars().count() as f32;
+                    c.cells.push(text_cell(style::BIG, bx + 16.0, by + 14.0, tw + 4.0, 26.0, &big));
+                    c.cells.push(text_cell(style::LABEL_SOFT, bx + 16.0 + tw + 12.0, by + 22.0, 200.0, 16.0, &words(&card["beside"])));
+                    let facts: Vec<(String, String)> = card["facts"].as_array().unwrap_or(&empty).iter().map(|f| (words(&f[0]), words(&f[1]))).collect();
+                    // two to a line, the first column as wide as its widest
+                    let col0 = facts.iter().step_by(2).map(|(k, v)| text::width(400, 13.0, &format!("{k} ")) + text::width(500, 13.0, v)).fold(0.0f32, f32::max);
+                    for (i, (k, v)) in facts.iter().enumerate() {
+                        let fx = bx + 16.0 + if i % 2 == 1 { col0 + 28.0 } else { 0.0 };
+                        let fy = by + 46.0 + (i / 2) as f32 * 22.0;
+                        let kw = text::width(400, 13.0, &format!("{k} "));
+                        c.cells.push(text_cell(style::FACT, fx, fy, kw + 2.0, 18.0, k));
+                        c.cells.push(text_cell(style::FACT_VALUE, fx + kw, fy, 120.0, 18.0, v));
+                    }
+                }
+                c.next(100.0);
+            } else if let Some(st) = part.get("status") {
+                c.label(&words(&st["label"]));
+                let tone = match st["tone"].as_str() {
+                    Some("good") => 1,
+                    Some("bad") => 2,
+                    Some("warn") => 3,
+                    _ => 0,
+                };
+                c.state(c.y, tone, &words(&st["words"]));
+                let mut ny = c.y + 34.0 + 7.0;
+                match st["note"].as_str().filter(|n| !n.is_empty()) {
+                    Some(note) => {
+                        c.note(&mut ny, note, 664.0);
+                        c.next(ny - c.y - 0.125);
+                    }
+                    None => c.next(ny - c.y - 0.125 - 7.0),
+                }
+            } else if let Some(credit) = part["credit"].as_str() {
+                let mut cy = c.y;
+                for line in text::wrap(400, 12.0, credit, 640.0) {
+                    c.cells.push(text_cell(style::CREDIT, cx, cy, 640.0, 18.0, &line));
+                    cy += 18.0;
+                }
+                c.next(cy - c.y);
+            }
+        }
+    });
 }
 
 /// Settings' Devices: each device with its core, one after another in one
@@ -759,8 +781,6 @@ pub fn peak_at(frac: f32, reference: f64, top: f64) -> Option<f64> {
 pub fn choice(c: Ctl, index: usize) -> Option<Value> {
     match c {
         Ctl::Control => ["on", "off"].get(index).map(|v| json!(*v == "on")),
-        Ctl::Temperature => ["c", "f"].get(index).map(|v| json!(v)),
-        Ctl::Wind => ["kmh", "mph", "ms"].get(index).map(|v| json!(v)),
         Ctl::HdrMode => ["auto", "off"].get(index).map(|v| json!(v)),
         _ => None,
     }
@@ -776,7 +796,7 @@ mod tests {
 
     /// The words on the page, each piece once.
     fn texts(devices: Vec<DeviceRow>) -> Vec<String> {
-        let s = State { sensors: None, devices, plugins: Vec::new(), settings: Value::Null, report: None, locale: "en-US", top_peak: 1000.0, reference: 254.0, place_text: "" };
+        let s = State { sensors: None, devices, plugins: Vec::new(), sections: Vec::new(), settings: Value::Null, top_peak: 1000.0, reference: 254.0 };
         page(&s).0.into_iter().map(|c| c.text.to_string()).filter(|t| !t.is_empty()).collect()
     }
 

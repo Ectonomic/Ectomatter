@@ -34,11 +34,12 @@ pub enum Ctl {
     GameKey,
     SliderBind,
     Control,
-    Temperature,
-    Wind,
+    /// a plugin's own Settings section: one of a setting's choices, and a box
+    /// to type in (each by its place in the page's PluginMap)
+    PluginChoice,
+    PluginField,
     HdrMode,
     PeakNits,
-    Place,
     /// one of the brush's ready colors
     Preset,
     /// one of the screen light's ready colors
@@ -92,7 +93,7 @@ pub enum Ctl {
     PackageRemove,
 }
 
-const CTLS: [Ctl; 49] = [
+const CTLS: [Ctl; 48] = [
     Ctl::None,
     Ctl::Paint,
     Ctl::Demo,
@@ -107,11 +108,10 @@ const CTLS: [Ctl; 49] = [
     Ctl::GameKey,
     Ctl::SliderBind,
     Ctl::Control,
-    Ctl::Temperature,
-    Ctl::Wind,
+    Ctl::PluginChoice,
+    Ctl::PluginField,
     Ctl::HdrMode,
     Ctl::PeakNits,
-    Ctl::Place,
     Ctl::Preset,
     Ctl::LcdPreset,
     Ctl::ScrText,

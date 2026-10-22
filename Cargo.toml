@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/evga-z10", "crates/ectomatter-weather", "crates/ectomatter-draw", "crates/ectomatter-protocol", "apps/ectomatter"]
+members = ["crates/evga-z10", "crates/ectomatter-weather", "crates/ectomatter-sensors", "crates/ectomatter-draw", "crates/ectomatter-protocol", "apps/ectomatter"]
 
 [workspace.package]
 edition = "2024"

@@ -844,10 +844,11 @@ pub struct Player {
 
 impl Player {
     /// Start playing; each frame sent, and each change of state, goes to `news`.
-    pub fn start(news: impl Fn(News) + Send + 'static, announce: bool, launch: Launch, paused: bool, screen: Box<dyn Sink>, own: Own) -> Player {
+    pub fn start(news: impl Fn(News) + Send + 'static, announce: bool, launch: Launch, paused: bool, screen: Box<dyn Sink>, own: Own, readings: crate::hosted::Readings) -> Player {
         let (tell, heard) = mpsc::channel::<Control>();
         std::thread::spawn(move || {
-            let stats = Arc::new(Mutex::new(Stats::here()));
+            // (the computer's readings as the Sensors plugin tells them)
+            let stats = Arc::new(Mutex::new(Stats::of(readings, "screen")));
             // primed, as the service primed it: the first reading of the load is 0
             stats.lock().unwrap().prime();
             // the pages, the one showing, and what they may show besides the computer's readings

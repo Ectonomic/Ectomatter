@@ -4,7 +4,7 @@
 //! to the layout, and where a new or moved block goes. The window itself is
 //! layout_page.rs.
 
-use crate::sensor_list::{Catalog, Part, What};
+use ectomatter_sensors::list::{Catalog, Part, What};
 use crate::lcd_page::{DateFormat, Kind, Page, Piece, Readings, Source, COLS, ROWS};
 use crate::lighting::{cell, id, kind, style, text_cell, Ctl};
 use crate::Cell;
@@ -165,7 +165,7 @@ pub fn computer_groups(cat: &Catalog, setup: &crate::sensors::Setup) -> Vec<(Str
     let checked = setup.checked_in(cat);
     let main = setup.main_card(cat).map(|d| d.key.clone());
     let usual_cpu = cat.cpu_temp().map(|s| s.id.clone());
-    let mut devices: Vec<&crate::sensor_list::Device> = cat.devices.iter().collect();
+    let mut devices: Vec<&ectomatter_sensors::list::Device> = cat.devices.iter().collect();
     // (in the tabs' order, the main card first among the cards)
     devices.sort_by_key(|d| (d.part, Some(&d.key) != main.as_ref()));
     let mut out = Vec::new();
@@ -500,8 +500,8 @@ pub fn source_menu(current: Shows, bars: bool, date: DateFormat, groups: &[(Stri
 /// One of the computer's readings now, as Settings' Sensors box writes it, for the Shows
 /// menu: "66°", "4.7 GHz", "1882 MHz", "33.4 / 60.2 GB", "2,836 RPM".
 fn reading_now(src: Source, r: &Readings) -> Option<String> {
-    use crate::sensor_list::Val;
-    let shown = |what: What, part: Part, v: Val| crate::sensor_read::shown(what, part, v);
+    use ectomatter_sensors::list::Val;
+    let shown = |what: What, part: Part, v: Val| ectomatter_sensors::read::shown(what, part, v);
     let g = r.gpu;
     Some(match src {
         Source::CpuTemp => shown(What::Temperature, Part::Processor, Val::One(r.cpu_temp?)),

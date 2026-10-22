@@ -249,7 +249,7 @@ pub enum Ask {
     PkWell(slint::Color),
     PkEnter,
     PkDismiss,
-    CellTyped(i32, String),
+    CellTyped(i32, i32, String),
     /// the profile being edited, given a new name
     Rename(String),
     /// the layer the Keys tab edits: 0 Base, 1 Function
@@ -777,16 +777,18 @@ pub struct Front {
     /// quitting: when the keyboard was asked to take its sliders back, which
     /// Ectomatter waits a moment for before it goes
     released: Option<Instant>,
-    /// Ectomatter's own settings, the weather every device shares, and the
-    /// place search: what is typed, when, and the places found
+    /// Ectomatter's own settings; and a search in a plugin's own Settings
+    /// section: whose box and which setting, with what is typed; when it was
+    /// typed; and what the plugin found (and its words for finding nothing)
     pub settings: crate::settings::Settings,
-    weather: ectomatter_weather::Feed,
-    place_text: String,
+    typing: Option<(String, String, String)>,
     typed_at: Option<Instant>,
-    found: Vec<ectomatter_weather::Place>,
-    found_tx: mpsc::Sender<(String, Vec<ectomatter_weather::Place>)>,
-    found_rx: mpsc::Receiver<(String, Vec<ectomatter_weather::Place>)>,
-    place_menu: bool,
+    found: (Vec<serde_json::Value>, String),
+    found_tx: mpsc::Sender<(String, Vec<serde_json::Value>, String)>,
+    found_rx: mpsc::Receiver<(String, Vec<serde_json::Value>, String)>,
+    search_menu: bool,
+    /// the plugin sections' pieces on the Settings page, by place
+    plugin_map: crate::ecto_settings::PluginMap,
     /// the screen's levels, for the Peak nits slider
     pub levels: (f64, f64),
     /// Ectomatter is to start again, on this place, for a change to what it may use
@@ -864,11 +866,11 @@ pub struct Front {
     /// run), the sensor being renamed and what is typed, what its pieces stood for as last
     /// drawn; the computer's sensors and their readings, read once a second while it shows;
     /// and the sensor asked about before it is unchecked
-    sensor_tab: crate::sensor_list::Part,
-    sensor_open: std::collections::BTreeSet<(String, crate::sensor_list::Run)>,
+    sensor_tab: ectomatter_sensors::list::Part,
+    sensor_open: std::collections::BTreeSet<(String, ectomatter_sensors::list::Run)>,
     renaming: Option<(String, String)>,
     sensor_map: crate::ecto_settings::SensorMap,
-    sensors_seen: Option<(Instant, crate::sensor_list::Catalog, std::collections::HashMap<String, crate::sensor_list::Val>)>,
+    sensors_seen: Option<(Instant, ectomatter_sensors::list::Catalog, std::collections::HashMap<String, ectomatter_sensors::list::Val>)>,
     unchecking: Option<String>,
     /// a layout card's own menu, the card selected or right-clicked: the layout's place in
     /// the Library; and the card whose menu a press just closed, so its click closes it
@@ -1005,7 +1007,7 @@ impl Front {
         on!(on_pk_field, |i, t| Ask::PkField(i, t.to_string()));
         on!(on_pk_well, |c| Ask::PkWell(c));
         on!(on_pk_enter, Ask::PkEnter);
-        on!(on_cell_typed, |id, t| Ask::CellTyped(id, t.to_string()));
+        on!(on_cell_typed, |id, index, t| Ask::CellTyped(id, index, t.to_string()));
         on!(on_pk_dismiss, Ask::PkDismiss);
         on!(on_rename_profile, |t| Ask::Rename(t.to_string()));
         on!(on_layer_changed, |i| Ask::Layer(i));
@@ -1064,7 +1066,7 @@ impl Front {
             })
             .collect();
         let slider_ends = crate::uistate::get("slider_ends").and_then(|v| serde_json::from_value(v).ok()).unwrap_or([[400.0, 3700.0], [400.0, 3700.0]]);
-        let mut hosted = crate::hosted::Hosted::new(std::sync::Arc::new(crate::monitors::Desk));
+        let mut hosted = crate::hosted::Hosted::new(std::sync::Arc::new(crate::computer::ThisComputer::new()));
         hosted.start_all(&settings);
         // (offscreen, nothing is changed: the thread has no monitors to reach)
         let screens: Option<Box<dyn crate::putback::Screens>> = if crate::desk::offscreen() { None } else { Some(Box::new(crate::monitors::Hands)) };
@@ -1191,14 +1193,14 @@ impl Front {
             held: None,
             sent: [None, None],
             released: None,
-            weather: ectomatter_weather::Feed::start(),
-            place_text: settings.get("weather.place").and_then(|p| p["name"].as_str().map(String::from)).unwrap_or_default(),
             settings,
+            typing: None,
             typed_at: None,
-            found: Vec::new(),
+            found: (Vec::new(), String::new()),
             found_tx: ftx,
             found_rx: frx,
-            place_menu: false,
+            search_menu: false,
+            plugin_map: Default::default(),
             levels: (254.0, 1000.0),
             restart: None,
             macros: None,
@@ -1234,7 +1236,7 @@ impl Front {
             pl_renaming: false,
             add_menu: false,
             new_menu: None,
-            sensor_tab: crate::sensor_list::Part::Processor,
+            sensor_tab: ectomatter_sensors::list::Part::Processor,
             sensor_open: Default::default(),
             renaming: None,
             sensor_map: Default::default(),
@@ -1267,7 +1269,17 @@ impl Front {
             .unwrap_or_default();
         f.screens_noted = f.screens.clone();
         f.screens_saved = f.screens.clone();
-        f.weather.set_place(weather_place(&f.settings));
+        // (the weather Ectomatter kept itself before the Weather plugin, the plugin's now)
+        if let Some(old) = f.settings.take("weather").filter(|_| f.settings.get("plugins.weather").is_none()) {
+            let mut v = serde_json::json!({});
+            for (key, from) in [("place", &old["place"]), ("temperature", &old["units"]["temperature"]), ("wind", &old["units"]["wind"])] {
+                if !from.is_null() {
+                    v[key] = from.clone();
+                }
+            }
+            let _ = f.settings.set("plugins.weather", v);
+        }
+        f.hand_values(None);
         // the desk's light, as it was left playing
         let light = f.settings.get("desk.light").and_then(|v| v.as_str().map(crate::desk_light::Effect::of)).unwrap_or(crate::desk_light::Effect::Off);
         if light != crate::desk_light::Effect::Off && controlled {
@@ -1455,52 +1467,51 @@ impl Front {
         [self.failed_at.map(|t| Duration::from_secs(3).saturating_sub(t.elapsed()) + Duration::from_millis(10)), picking, desk].into_iter().flatten().min()
     }
 
-    /// The place search: once typing has paused, the places matching it,
-    /// found away from the window's thread, in this computer's language.
-    fn search_places(&mut self) {
+    /// A search in a plugin's box: once typing has paused, what the plugin
+    /// finds for the words, asked away from the window's thread, since it may
+    /// wait on the network.
+    fn search_plugin(&mut self) {
         if let Some(t) = self.typed_at {
             if t.elapsed() >= Duration::from_millis(300) {
                 self.typed_at = None;
-                let q = self.place_text.trim().to_string();
+                let Some((plugin, setting, text)) = self.typing.clone() else { return };
+                let q = text.trim().to_string();
                 if q.is_empty() {
-                    self.close_place_menu();
+                    self.close_search_menu();
                     return;
                 }
+                let Some(core) = self.hosted.core_of(&plugin) else { return };
                 let tx = self.found_tx.clone();
-                let lang = ectomatter_weather::units::language(&crate::locale());
                 std::thread::spawn(move || {
-                    let found = ectomatter_weather::search(&q, &lang).unwrap_or_default();
-                    let _ = tx.send((q, found));
+                    let answer = core.call("settings/search", &serde_json::json!({ "id": setting, "text": q })).unwrap_or_default();
+                    let found = answer["found"].as_array().cloned().unwrap_or_default();
+                    let _ = tx.send((q, found, answer["none"].as_str().unwrap_or("Nothing found").to_string()));
                 });
             }
         }
-        while let Ok((q, found)) = self.found_rx.try_recv() {
-            if q != self.place_text.trim() {
+        while let Ok((q, found, none)) = self.found_rx.try_recv() {
+            if self.typing.as_ref().is_none_or(|(_, _, t)| q != t.trim()) {
                 continue; // typed on since
             }
-            self.found = found;
-            self.open_place_menu();
+            self.found = (found, none);
+            self.open_search_menu();
         }
     }
 
-    fn open_place_menu(&mut self) {
-        let rows: Vec<MenuRow> = if self.found.is_empty() {
-            vec![MenuRow { kind: 1, label: "No place by that name".into(), tag: "".into(), tick: false, sub: "".into() }]
+    fn open_search_menu(&mut self) {
+        let rows: Vec<MenuRow> = if self.found.0.is_empty() {
+            vec![MenuRow { kind: 1, label: self.found.1.clone().into(), tag: "".into(), tick: false, sub: "".into() }]
         } else {
             self.found
+                .0
                 .iter()
-                .map(|p| MenuRow {
-                    kind: 0,
-                    label: if !p.latin.is_empty() && p.latin != p.name { format!("{} ({})", p.name, p.latin) } else { p.name.clone() }.into(),
-                    tag: "".into(),
-                    tick: false,
-                    sub: [p.region.as_str(), p.country.as_str()].iter().filter(|x| !x.is_empty()).cloned().collect::<Vec<_>>().join(", ").into(),
-                })
+                .map(|f| MenuRow { kind: 0, label: f["label"].as_str().unwrap_or("").into(), tag: "".into(), tick: false, sub: f["sub"].as_str().unwrap_or("").into() })
                 .collect()
         };
         let list: f32 = rows.iter().map(|r| if r.kind == 1 { 28.0 } else { 33.0 }).sum();
-        // under the place field, as wide as it
-        let field = (0..self.cells.row_count()).filter_map(|i| self.cells.row_data(i)).find(|c| c.kind == lighting::kind::FIELD && lighting::ctl(c.id) == Ctl::Place);
+        // under the box typed in, as wide as it
+        let at = self.typing.as_ref().and_then(|(p, s, _)| self.plugin_map.fields.iter().position(|(fp, fs)| fp == p && fs == s)).map(|i| i as i32);
+        let field = (0..self.cells.row_count()).filter_map(|i| self.cells.row_data(i)).find(|c| c.kind == lighting::kind::FIELD && lighting::ctl(c.id) == Ctl::PluginField && Some(c.index) == at);
         let Some(f) = field else { return };
         let scroll = self.ui.get_settings_scroll();
         let (x, y) = (self.ui.get_rail_width() + f.x, 36.0 + f.y + scroll);
@@ -1515,12 +1526,12 @@ impl Front {
         self.ui.set_menu_top(y + f.h + 6.0);
         self.ui.set_menu_max(320.0 + 12.0);
         self.ui.set_menu_open(true);
-        self.place_menu = true;
+        self.search_menu = true;
     }
 
-    fn close_place_menu(&mut self) {
-        if self.place_menu {
-            self.place_menu = false;
+    fn close_search_menu(&mut self) {
+        if self.search_menu {
+            self.search_menu = false;
             self.ui.set_menu_open(false);
             self.ui.set_menu_search(true);
             self.ui.set_menu_w(300.0);
@@ -1529,7 +1540,7 @@ impl Front {
 
     /// Do what the page asked; what only the window can do is handed back.
     pub fn act(&mut self) -> Vec<WindowAsk> {
-        self.search_places();
+        self.search_plugin();
         self.poll_pads();
         self.settings.flush(false);
         let asks: Vec<Ask> = self.asks.borrow_mut().drain(..).collect();
@@ -2058,7 +2069,7 @@ impl Front {
                         if let Some(p) = self.packages.iter().find(|p| p.id() == id).cloned() {
                             if self.hosted.get(&id).is_some() {
                                 self.hosted.stop(&id);
-                                self.hosted.start(p);
+                                self.start_package(p);
                             }
                         }
                         if self.ui.get_place() == "settings" {
@@ -2187,7 +2198,7 @@ impl Front {
                         }
                     }
                 }
-                Ask::CellTyped(id, t) => match lighting::ctl(id) {
+                Ask::CellTyped(id, index, t) => match lighting::ctl(id) {
                     Ctl::Name => crate::display::act(&mut self.page, Ctl::Name, 0, 0.0, Some(&t)),
                     // (the line keeps what's typed; the box isn't drawn again under it)
                     Ctl::SensorName => {
@@ -2196,10 +2207,12 @@ impl Front {
                         }
                         changed = false;
                     }
-                    Ctl::Place => {
+                    Ctl::PluginField => {
                         // searched once typing pauses, as the web page did
-                        self.place_text = t;
-                        self.typed_at = Some(Instant::now());
+                        if let Some((plugin, setting)) = self.plugin_map.fields.get(index as usize).cloned() {
+                            self.typing = Some((plugin, setting, t));
+                            self.typed_at = Some(Instant::now());
+                        }
                         changed = false;
                     }
                     _ => {}
@@ -2879,12 +2892,18 @@ impl Front {
                 }
                 return;
             }
-            Ctl::Control | Ctl::Temperature | Ctl::Wind | Ctl::HdrMode => {
+            Ctl::PluginChoice => {
+                if let Some((plugin, setting, v)) = self.plugin_map.choices.get(index).cloned() {
+                    if self.settings.get(&format!("plugins.{plugin}.{setting}")).as_ref() != Some(&v) {
+                        self.set_plugin_value(&plugin, &setting, v);
+                    }
+                }
+                return;
+            }
+            Ctl::Control | Ctl::HdrMode => {
                 let Some(v) = crate::ecto_settings::choice(c, index) else { return };
                 let path = match c {
                     Ctl::Control => "devices.z10.control",
-                    Ctl::Temperature => "weather.units.temperature",
-                    Ctl::Wind => "weather.units.wind",
                     _ => "hdr.lighting",
                 };
                 if self.settings.get(path).as_ref() == Some(&v) || (c == Ctl::Control && v == serde_json::json!(self.controlled)) {
@@ -3420,10 +3439,10 @@ impl Front {
     pub fn pressed_at(&mut self, x: f32, y: f32) {
         self.press_shut = false;
         self.let_chosen_go(x, y);
-        if self.place_menu {
+        if self.search_menu {
             let (mx, my, mw, mh) = (self.ui.get_menu_x(), self.ui.get_menu_y(), self.ui.get_menu_width(), self.ui.get_menu_height());
             if !(x >= mx && x < mx + mw && y >= my && y < my + mh) {
-                self.close_place_menu();
+                self.close_search_menu();
             }
         }
         // a press away from the playlist's name being changed keeps the name
@@ -3503,7 +3522,7 @@ impl Front {
     /// the window.
     fn let_chosen_go(&mut self, x: f32, y: f32) {
         // (a press while any menu is open is the menu's: it chooses there, or shuts it)
-        if y < 36.0 || self.ui.get_menu_open() || self.menu.is_some() || self.mouse.menu.is_some() || self.profile_menu || self.kb_profile_menu || self.apps_menu.is_some() || self.desk_light_menu || self.pad_menu.is_some() || self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pick.is_some() || self.place_menu {
+        if y < 36.0 || self.ui.get_menu_open() || self.menu.is_some() || self.mouse.menu.is_some() || self.profile_menu || self.kb_profile_menu || self.apps_menu.is_some() || self.desk_light_menu || self.pad_menu.is_some() || self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pick.is_some() || self.search_menu {
             return;
         }
         let Some(keeps) = self.chosen_keeps() else { return };
@@ -3619,7 +3638,7 @@ impl Front {
             self.show_desk();
             return true;
         }
-        if self.chosen_keeps().is_none() || self.menu.is_some() || self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pick.is_some() || self.place_menu {
+        if self.chosen_keeps().is_none() || self.menu.is_some() || self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pick.is_some() || self.search_menu {
             return false;
         }
         self.let_chosen_go_now();
@@ -3738,15 +3757,10 @@ impl Front {
             self.refresh();
             return;
         }
-        if self.place_menu {
-            self.close_place_menu();
-            if let Some(p) = self.found.get(i).cloned() {
-                self.place_text = p.name.clone();
-                if let Ok(v) = serde_json::to_value(&p) {
-                    let _ = self.settings.set("weather.place", v);
-                }
-                self.weather.set_place(weather_place(&self.settings));
-                self.refresh();
+        if self.search_menu {
+            self.close_search_menu();
+            if let (Some(f), Some((plugin, setting, _))) = (self.found.0.get(i).cloned(), self.typing.take()) {
+                self.set_plugin_value(&plugin, &setting, f["value"].clone());
             }
             return;
         }
@@ -4322,6 +4336,12 @@ impl Front {
 
     /// Draw the page from the page's state.
     pub fn refresh(&mut self) {
+        // (the page's sensors read only while Settings or the screen editor shows them)
+        if self.ui.get_place() != "settings" && self.layouts.is_none() {
+            if let Some(r) = &mut self.reader {
+                r.rest();
+            }
+        }
         self.note_changes();
         self.sync_playlist_keys();
         self.follow_profile();
@@ -4620,15 +4640,14 @@ impl Front {
                 sensors: Some(sensors),
                 devices: self.device_rows(),
                 plugins: self.package_rows(crate::packages::Kind::Plugin),
+                sections: self.plugin_sections(),
                 settings: self.settings.all(),
-                report: self.weather.report(),
-                locale: &crate::locale(),
                 top_peak: self.levels.1,
                 reference: self.levels.0,
-                place_text: &self.place_text,
             };
-            let (cells, h, map) = crate::ecto_settings::page(&st);
+            let (cells, h, map, pmap) = crate::ecto_settings::page(&st);
             self.sensor_map = map;
+            self.plugin_map = pmap;
             self.ui.set_settings_h(h);
             self.show_cells(cells);
         } else if loaded && self.page.view == View::Screen {
@@ -6084,6 +6103,60 @@ impl Front {
         told.unwrap_or_else(|| "device".into())
     }
 
+    /// Each running plugin with a Settings section of its own handed all the
+    /// values Ectomatter keeps for it (`only` the one named, where one is), as
+    /// it starts and as one changes; handed, not waited on.
+    fn hand_values(&self, only: Option<&str>) {
+        for r in &self.hosted.plugins {
+            let id = r.package.id();
+            let has = r.package.manifest.all["adds"].as_array().is_some_and(|a| a.iter().any(|x| x == "settings"));
+            if !has || only.is_some_and(|o| o != id) {
+                continue;
+            }
+            let values = self.settings.get(&format!("plugins.{id}")).filter(serde_json::Value::is_object).unwrap_or_else(|| serde_json::json!({}));
+            r.core.tell("settings/set", &serde_json::json!({ "values": values }));
+        }
+    }
+
+    /// A package started, and if it's a plugin with a Settings section of its
+    /// own, handed its values.
+    fn start_package(&mut self, p: crate::packages::Package) {
+        let id = p.id().to_string();
+        self.start_package(p);
+        self.hand_values(Some(&id));
+    }
+
+    /// One of a plugin's own settings set, kept, and handed to the plugin.
+    fn set_plugin_value(&mut self, plugin: &str, setting: &str, v: serde_json::Value) {
+        if let Err(e) = self.settings.set(&format!("plugins.{plugin}.{setting}"), v) {
+            self.status(format!("The setting was not saved: {e}"), 2);
+            return;
+        }
+        self.hand_values(Some(plugin));
+        self.refresh();
+    }
+
+    /// The plugins' own Settings sections, each with the values Ectomatter
+    /// keeps for it and what's being typed into one of its boxes.
+    fn plugin_sections(&self) -> Vec<crate::ecto_settings::PluginSection> {
+        self.hosted
+            .settings_sections()
+            .into_iter()
+            .map(|(plugin, section)| {
+                let values = self.settings.get(&format!("plugins.{plugin}")).unwrap_or(serde_json::Value::Null);
+                let typed = self.typing.as_ref().filter(|(p, _, _)| *p == plugin).map(|(_, s, t)| (s.clone(), t.clone()));
+                crate::ecto_settings::PluginSection { plugin, section, values, typed }
+            })
+            .collect()
+    }
+
+    /// The weather outside, as the Weather plugin last told it: in °C, and
+    /// the sky in words.
+    fn outside(&self) -> Option<(f64, String)> {
+        let r = self.hosted.readings();
+        Some((r.value("weather", "temperature")?.as_f64()?, r.value("weather", "sky")?.as_str()?.to_string()))
+    }
+
     /// Add a core or Add a plugin, from Settings: its form.
     fn add_package_form(&mut self, kind: crate::packages::Kind) {
         self.package_form = Some(PackageForm { kind, repo: None, file: None, found: None, why: None, typed_at: None, looked_for: None, looking: None, picking: None, adding: None });
@@ -6259,7 +6332,7 @@ impl Front {
         if let Some(p) = self.packages.iter().find(|p| p.id() == id).cloned() {
             if !crate::hosted::started_elsewhere(id) && self.settings.on(&p.switch()) {
                 self.hosted.stop(id);
-                self.hosted.start(p);
+                self.start_package(p);
             }
         }
         self.status(format!("Added {name}."), 1);
@@ -6285,7 +6358,7 @@ impl Front {
         self.give_packages();
         if let Some(p) = self.packages.iter().find(|p| p.id() == id).cloned() {
             if self.settings.on(&p.switch()) && !crate::hosted::started_elsewhere(id) {
-                self.hosted.start(p);
+                self.start_package(p);
             }
         }
         self.hosted.forget_sections();
@@ -6315,7 +6388,7 @@ impl Front {
             return;
         }
         if on {
-            self.hosted.start(p);
+            self.start_package(p);
         } else {
             self.worker.drop_plugin(p.id());
             self.hosted.stop(p.id());
@@ -7075,7 +7148,7 @@ impl Front {
         });
         let Some(src) = src else { return Default::default() };
         let setup = crate::sensors::setup();
-        let cat = self.reader.get_or_insert_with(crate::lcd_stats::Stats::here).catalog();
+        let cat = self.reader.get_or_insert_with(|| crate::lcd_stats::Stats::of(self.hosted.readings(), "page")).catalog();
         crate::screen_edit::From { line: crate::screen_edit::from_line(src, cat, &setup) }
     }
 
@@ -7083,7 +7156,7 @@ impl Front {
     /// under the devices they read.
     fn shows_groups(&mut self) -> Vec<(String, Vec<(String, crate::lcd_page::Source)>)> {
         let setup = crate::sensors::setup();
-        let cat = self.reader.get_or_insert_with(crate::lcd_stats::Stats::here).catalog();
+        let cat = self.reader.get_or_insert_with(|| crate::lcd_stats::Stats::of(self.hosted.readings(), "page")).catalog();
         crate::screen_edit::computer_groups(cat, &setup)
     }
 
@@ -7101,7 +7174,7 @@ impl Front {
     /// card that has come in as the main card has its usual sensors checked as it is seen.
     fn sensors_view(&mut self) -> crate::ecto_settings::Sensors {
         if self.sensors_seen.as_ref().is_none_or(|(t, _, _)| t.elapsed() >= Duration::from_secs(1)) {
-            let stats = self.reader.get_or_insert_with(crate::lcd_stats::Stats::here);
+            let stats = self.reader.get_or_insert_with(|| crate::lcd_stats::Stats::of(self.hosted.readings(), "page"));
             let values = stats.read_all();
             let cat = stats.catalog().clone();
             let mut setup = crate::sensors::setup();
@@ -7130,7 +7203,7 @@ impl Front {
 
     /// The layouts that show a sensor, by name: one shown by its number, and the processor's,
     /// the memory's and the main card's usual readings shown as the ready-made layouts show them.
-    fn shown_in(&self, id: &str, cat: &crate::sensor_list::Catalog) -> Vec<String> {
+    fn shown_in(&self, id: &str, cat: &ectomatter_sensors::list::Catalog) -> Vec<String> {
         use crate::lcd_page::{Kind, Source};
         let main = crate::sensors::setup().main_card(cat).map(|d| d.key.clone()).unwrap_or_default();
         let reads = |s: Source| -> bool {
@@ -7166,7 +7239,7 @@ impl Front {
         let them = if shows.len() == 1 { "it" } else { "them" };
         let show = if shows.len() == 1 { "shows" } else { "show" };
         self.ui.set_confirm_title(format!("Uncheck {what}?").into());
-        self.ui.set_confirm_body(format!("{} {show} {what}. Unchecked, it shows as unavailable in {them}.", crate::sensors::and_list(&shows)).into());
+        self.ui.set_confirm_body(format!("{} {show} {what}. Unchecked, it shows as unavailable in {them}.", ectomatter_sensors::parts::and_list(&shows)).into());
         self.ui.set_confirm_keep("Keep".into());
         self.ui.set_confirm_do("Uncheck".into());
         self.unchecking = Some(id.to_string());
@@ -7178,8 +7251,11 @@ impl Front {
     /// temperature or clock from other than the usual sensor shows that sensor, as it did.
     fn carry_sensors(&mut self, b: &crate::sensors::Before) {
         use crate::lcd_page::{Kind, Source};
-        // (the processor's and the motherboard's sensors are Linux's own files; NVIDIA's driver isn't needed)
-        let cat = crate::sensor_list::catalog(std::path::Path::new("/"), &mut crate::sensor_list::NoNvidia);
+        // (the sensors as the Sensors plugin lists them)
+        let cat = self.reader.get_or_insert_with(|| crate::lcd_stats::Stats::of(self.hosted.readings(), "page")).catalog().clone();
+        if cat.devices.is_empty() {
+            return;
+        }
         let mut setup = crate::sensors::setup();
         let shows = setup.carry(b, &cat);
         let mut moved = false;
@@ -7875,7 +7951,7 @@ impl Front {
     /// the profile the keyboard is using, and the weather outside.
     fn tell_context(&mut self) {
         let profile = self.page.dev.as_ref().map(|_| (self.page.active(), self.page.profile_name(self.page.active())));
-        let outside = self.weather.report().map(|r| (r.temperature as f64, crate::ecto_settings::sky(r.code)));
+        let outside = self.outside();
         if let Some(pl) = &self.player {
             pl.tell(crate::lcd_player::Control::Context(profile, outside));
         }
@@ -7927,14 +8003,14 @@ impl Front {
     /// This computer's readings now, for the editor's picture of the page.
     fn read_now(&mut self) {
         let mut r = self.reader.get_or_insert_with(|| {
-            let mut s = crate::lcd_stats::Stats::here();
+            let mut s = crate::lcd_stats::Stats::of(self.hosted.readings(), "page");
             s.prime();
             s
         }).read();
         r.now = Some(crate::lcd_page::Moment::now());
         r.profile = self.page.dev.as_ref().map(|_| self.page.profile_name(self.page.active()));
         r.profile_number = self.page.dev.as_ref().map(|_| self.page.active());
-        r.outside = self.weather.report().map(|w| (w.temperature as f64, crate::ecto_settings::sky(w.code)));
+        r.outside = self.outside();
         r.game = self.game_reading();
         self.readings = r;
         self.read_at = Some(Instant::now());
@@ -8094,7 +8170,7 @@ impl Front {
         if self.layouts.is_none() {
             return Vec::new();
         }
-        let avail = crate::lcd_page::available(&self.readings, self.weather.report().is_some());
+        let avail = crate::lcd_page::available(&self.readings, self.outside().is_some());
         let light = self.layouts_light();
         let t = self.edit_t();
         let (onboard, profiles, from, groups) = (self.onboard_ready(), crate::lcd_page::PROFILES.map(|n| self.page.profile_name(n)), self.reading_from(), self.shows_groups());
@@ -8128,7 +8204,7 @@ impl Front {
         if self.layouts.is_none() {
             return;
         }
-        let avail = crate::lcd_page::available(&self.readings, self.weather.report().is_some());
+        let avail = crate::lcd_page::available(&self.readings, self.outside().is_some());
         let light = self.layouts_light();
         let t = self.edit_t();
         let (onboard, profiles, from, groups) = (self.onboard_ready(), crate::lcd_page::PROFILES.map(|n| self.page.profile_name(n)), self.reading_from(), self.shows_groups());
@@ -8579,12 +8655,6 @@ fn set_audio(target: &str, level: f64) {
     std::thread::spawn(move || {
         let _ = std::process::Command::new("wpctl").args(["set-volume", node, &level]).status();
     });
-}
-
-/// The place Settings names for the weather, as saved.
-fn weather_place(settings: &crate::settings::Settings) -> Option<ectomatter_weather::At> {
-    let p = settings.get("weather.place")?;
-    Some(ectomatter_weather::At { lat: p["lat"].as_f64()? as f32, lon: p["lon"].as_f64()? as f32, country: p["country_code"].as_str().unwrap_or("").to_string() })
 }
 
 impl Front {

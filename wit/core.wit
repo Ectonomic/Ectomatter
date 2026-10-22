@@ -82,6 +82,21 @@ interface system {
     /// absent where it can't be set) and `ddc` (whether DDC/CI may be used).
     /// For a plugin whose manifest uses "monitors".
     monitors: func() -> result<string, string>;
+    /// A file's text, for a package whose manifest names it or a folder it's
+    /// in to read (`{"read": "/sys"}`). Read only: nothing here changes a file.
+    read: func(path: string) -> result<string, string>;
+    /// The names in a folder, for one a manifest names to read.
+    entries: func(path: string) -> result<list<string>, string>;
+    /// Where a path leads once its links are followed, for one a manifest
+    /// names to read; an error where it leads outside what it may read.
+    resolve: func(path: string) -> result<string, string>;
+    /// What NVIDIA's driver says of the card at a PCI address
+    /// ("0000:01:00.0"), as JSON, for a package whose manifest uses
+    /// "nvidia": `what` is "probe" (what the card reports, `has`, and its
+    /// video memory in all, `vram`, GiB), or one reading: "temp" (°C),
+    /// "load" (%), "clock" and "mem-clock" (MHz), "vram" ([used, all], GiB),
+    /// "power" (W) or "fan" (%).
+    nvidia: func(pci: string, what: string) -> result<string, string>;
 }
 
 /// Connections to the addresses a manifest's `uses` names, and no others.
@@ -97,6 +112,11 @@ interface net {
     }
     /// Connect to `address`, as "127.0.0.1:6742", waiting up to `timeout-ms`.
     connect: func(address: string, timeout-ms: u32) -> result<tcp-stream, string>;
+    /// What a web address gives (HTTPS or HTTP, asked with GET), as text,
+    /// waiting up to `timeout-ms`: for a package whose manifest names the
+    /// address's host (`{"web": "api.open-meteo.com", "to": "Open-Meteo"}`).
+    /// An answer other than success is an error, with its status.
+    fetch: func(url: string, timeout-ms: u32) -> result<string, string>;
 }
 
 world core {

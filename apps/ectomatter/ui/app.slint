@@ -960,7 +960,8 @@ component CellView inherits Rectangle {
     in property <Cell> c;
     callback pick(int, int, length, length, length);
     callback slide(int, float);
-    callback typed(int, string);
+    // typed into a box: its id, its index (which of the boxes with that id) and what it holds now
+    callback typed(int, int, string);
     // a number typed into its box and set, by Enter or by leaving the box
     callback entered(int, string);
     // the pointer over a zone, or no longer; a box typed in, or no longer
@@ -1512,7 +1513,7 @@ component CellView inherits Rectangle {
             color: root.c.style == 1 || root.c.style == 7 ? Ink.bright : Ink.ink;
             vertical-alignment: root.c.style == 5 ? top : center;
             single-line: root.c.style != 5;
-            edited => { root.typed(root.c.id, self.text); }
+            edited => { root.typed(root.c.id, root.c.index, self.text); }
             changed has-focus => {
                 Typing.on = self.has-focus;
                 if (root.c.style >= 4 && root.c.style <= 6) {
@@ -4681,7 +4682,7 @@ export component AppWindow inherits Window {
     callback effect(int);
     callback cell-pick(int, int, length, length, length);
     callback cell-slide(int, float);
-    callback cell-typed(int, string);
+    callback cell-typed(int, int, string);
 
     background: transparent;
     default-font-family: "Barlow";
@@ -5775,7 +5776,7 @@ export component AppWindow inherits Window {
                         glyph: root.mouse-tile;
                         pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
                         slide(id, v) => { root.cell-slide(id, v); }
-                        typed(id, t) => { root.cell-typed(id, t); }
+                        typed(id, index, t) => { root.cell-typed(id, index, t); }
                     }
                 }
             }
@@ -6109,7 +6110,7 @@ export component AppWindow inherits Window {
                     glyphs: root.package-glyphs;
                     pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
                     slide(id, v) => { root.cell-slide(id, v); }
-                    typed(id, t) => { root.cell-typed(id, t); }
+                    typed(id, index, t) => { root.cell-typed(id, index, t); }
                 }
             }
             // On this page: each section's name and what it changes for this game, beside the
@@ -6336,7 +6337,7 @@ export component AppWindow inherits Window {
                 glyphs: root.package-tiles;
                 pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
                 slide(id, v) => { root.cell-slide(id, v); }
-                typed(id, t) => { root.cell-typed(id, t); }
+                typed(id, index, t) => { root.cell-typed(id, index, t); }
             }
         }
 
@@ -7667,7 +7668,7 @@ export component AppWindow inherits Window {
                         c: c;
                         pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
                         slide(id, v) => { root.cell-slide(id, v); }
-                        typed(id, t) => { root.cell-typed(id, t); }
+                        typed(id, index, t) => { root.cell-typed(id, index, t); }
                     }
                 }
 
@@ -10077,7 +10078,7 @@ export component LayoutWindow inherits Window {
     callback grid-toggle();
     callback cell-pick(int, int, length, length, length);
     callback cell-slide(int, float);
-    callback cell-typed(int, string);
+    callback cell-typed(int, int, string);
     callback menu-chose(int);
     callback menu-dismiss();
     callback pk-sv(float, float);
@@ -10958,7 +10959,7 @@ export component LayoutWindow inherits Window {
                 c: c;
                 pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
                 slide(id, v) => { root.cell-slide(id, v); }
-                typed(id, t) => { root.cell-typed(id, t); }
+                typed(id, index, t) => { root.cell-typed(id, index, t); }
             }
         }
 

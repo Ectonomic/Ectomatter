@@ -60,6 +60,12 @@ pub struct Uses {
     pub monitors: bool,
     /// the addresses it may connect to, each with what is there ("OpenRGB")
     pub network: Vec<(String, String)>,
+    /// the web hosts it may ask, each with whose it is ("Open-Meteo")
+    pub web: Vec<(String, String)>,
+    /// the files and folders it may read, and nothing in them changed
+    pub read: Vec<String>,
+    /// NVIDIA's driver: what it says of each card
+    pub nvidia: bool,
     /// anything else it names, as it names it ("sound-capture")
     pub other: Vec<String>,
 }
@@ -70,10 +76,19 @@ impl Uses {
         for x in v.as_array().into_iter().flatten() {
             match x {
                 Value::String(s) if s == "monitors" => u.monitors = true,
+                Value::String(s) if s == "nvidia" => u.nvidia = true,
                 Value::String(s) => u.other.push(s.clone()),
                 Value::Object(o) => {
+                    let to = |a: &str| o.get("to").and_then(Value::as_str).unwrap_or(a).to_string();
                     if let Some(a) = o.get("network").and_then(Value::as_str) {
-                        u.network.push((a.to_string(), o.get("to").and_then(Value::as_str).unwrap_or(a).to_string()));
+                        u.network.push((a.to_string(), to(a)));
+                    }
+                    if let Some(h) = o.get("web").and_then(Value::as_str) {
+                        u.web.push((h.to_lowercase(), to(h)));
+                    }
+                    // (a path as written, absolute and with no way up out of it)
+                    if let Some(f) = o.get("read").and_then(Value::as_str).filter(|f| plain_path(f)) {
+                        u.read.push(f.trim_end_matches('/').to_string());
                     }
                 }
                 _ => {}
@@ -84,9 +99,31 @@ impl Uses {
 }
 
 /// The computer as a core may read it through Ectomatter, beyond its USB
-/// devices: its monitors, as the system interface's `monitors` gives them.
+/// devices: its monitors, as the system interface's `monitors` gives them;
+/// its files (read only); NVIDIA's driver; and the web. Ectomatter checks
+/// what a package's manifest allows before asking any of these.
 pub trait Computer: Send + Sync {
     fn monitors(&self) -> Result<Value, String>;
+    fn read(&self, path: &Path) -> Result<String, String>;
+    fn entries(&self, path: &Path) -> Result<Vec<String>, String>;
+    fn resolve(&self, path: &Path) -> Result<PathBuf, String>;
+    fn nvidia(&self, pci: &str, what: &str) -> Result<Value, String>;
+    fn fetch(&self, url: &str, timeout: Duration) -> Result<String, String>;
+}
+
+/// A path a manifest may name to read: absolute, with nothing that leads up.
+fn plain_path(p: &str) -> bool {
+    let p = Path::new(p);
+    p.is_absolute() && !p.components().any(|c| matches!(c, std::path::Component::ParentDir | std::path::Component::CurDir))
+}
+
+/// The host of a web address ("https://api.open-meteo.com/v1/forecast?..."
+/// is "api.open-meteo.com"), or none where it isn't one Ectomatter asks.
+fn host_of(url: &str) -> Option<String> {
+    let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"))?;
+    let host = rest.split(['/', '?', '#']).next()?;
+    // (no name and password before the host, and the port isn't the host's)
+    (!host.contains('@')).then(|| host.split(':').next().unwrap_or(host).to_lowercase()).filter(|h| !h.is_empty())
 }
 
 /// A computer with no devices, for asking a core what it says of itself
@@ -303,13 +340,63 @@ impl ectomatter::core::usb::HostHidDevice for Run {
     }
 }
 
+impl Run {
+    /// A path its manifest lets it read: a file it names, or one in a folder it names.
+    fn may_read(&self, path: &str) -> Result<PathBuf, String> {
+        if !plain_path(path) {
+            return Err(format!("{path} isn’t a path Ectomatter reads: it must be whole, from /"));
+        }
+        let p = Path::new(path);
+        if self.uses.read.iter().any(|f| p.starts_with(f)) {
+            Ok(p.to_path_buf())
+        } else {
+            Err(format!("{} may not read {path}: its manifest doesn’t name it", self.id))
+        }
+    }
+
+    /// Where a path it may read really is, its links followed, and only if
+    /// that too is somewhere it may read: no link takes it outside.
+    fn real(&self, path: &str) -> Result<PathBuf, String> {
+        let p = self.may_read(path)?;
+        let real = self.reach("files")?.resolve(&p)?;
+        self.may_read(&real.to_string_lossy()).map_err(|_| format!("{path} leads outside what {} may read", self.id))
+    }
+
+    fn reach(&self, what: &str) -> Result<&std::sync::Arc<dyn Computer>, String> {
+        self.computer.as_ref().ok_or_else(|| format!("Ectomatter can’t reach this computer’s {what}"))
+    }
+}
+
 impl ectomatter::core::system::Host for Run {
     fn monitors(&mut self) -> Result<String, String> {
         if !self.uses.monitors {
             return Err(format!("{} may not read the monitors: its manifest doesn’t name them", self.id));
         }
-        let c = self.computer.as_ref().ok_or("Ectomatter can’t reach this computer’s monitors")?;
-        c.monitors().map(|v| v.to_string())
+        self.reach("monitors")?.monitors().map(|v| v.to_string())
+    }
+
+    fn read(&mut self, path: String) -> Result<String, String> {
+        let real = self.real(&path)?;
+        self.reach("files")?.read(&real)
+    }
+
+    fn entries(&mut self, path: String) -> Result<Vec<String>, String> {
+        let real = self.real(&path)?;
+        self.reach("files")?.entries(&real)
+    }
+
+    fn resolve(&mut self, path: String) -> Result<String, String> {
+        let p = self.may_read(&path)?;
+        let to = self.reach("files")?.resolve(&p)?.to_string_lossy().to_string();
+        // (a link may not lead it to what it may not read)
+        self.may_read(&to).map(|_| to).map_err(|_| format!("{path} leads outside what {} may read", self.id))
+    }
+
+    fn nvidia(&mut self, pci: String, what: String) -> Result<String, String> {
+        if !self.uses.nvidia {
+            return Err(format!("{} may not ask NVIDIA’s driver: its manifest doesn’t name it", self.id));
+        }
+        self.reach("NVIDIA driver")?.nvidia(&pci, &what).map(|v| v.to_string())
     }
 }
 
@@ -332,6 +419,15 @@ impl ectomatter::core::net::Host for Run {
         let s = std::net::TcpStream::connect_timeout(&at, Duration::from_millis(timeout_ms.max(1) as u64)).map_err(|e| e.to_string())?;
         let _ = s.set_nodelay(true);
         self.table.push(Stream(s)).map_err(|e| e.to_string())
+    }
+
+    fn fetch(&mut self, url: String, timeout_ms: u32) -> Result<String, String> {
+        // only a host the manifest names
+        let host = host_of(&url).ok_or_else(|| format!("{url} isn’t a web address Ectomatter asks"))?;
+        if !self.uses.web.iter().any(|(h, _)| *h == host) {
+            return Err(format!("{} may not ask {host}: its manifest doesn’t name it", self.id));
+        }
+        self.reach("web")?.fetch(&url, Duration::from_millis(timeout_ms.max(1) as u64))
     }
 }
 
@@ -518,6 +614,15 @@ impl Core {
         self.told.0.lock().unwrap_or_else(|p| p.into_inner()).wake = Some(Box::new(wake));
     }
 
+    /// Call `method` with `params` and go on without its answer: for what a
+    /// page hands a plugin as it changes (its Settings values), which mustn't
+    /// wait behind a plugin busy on the network.
+    pub fn tell(&self, method: &str, params: &Value) {
+        let (tell, _) = mpsc::channel();
+        let params = if params.is_null() { String::new() } else { params.to_string() };
+        let _ = self.ask.send(Ask::Call(method.to_string(), params, tell));
+    }
+
     /// Call `method` with `params`, and wait for the core's answer.
     pub fn call(&self, method: &str, params: &Value) -> Result<Value, String> {
         let (tell, told) = mpsc::channel();
@@ -599,7 +704,7 @@ fn run(m: Manifest, data: PathBuf, usb: Box<dyn Usb>, computer: Option<std::sync
             let t = Instant::now();
             let r = live.core.call_call(&mut live.store, &method, &params).unwrap_or_else(|trap| Err(format!("the {} core failed: {trap}", m.id)));
             live.store.data_mut().unanswered();
-            slow(&m.id, &method, t);
+            slow(&m, &method, t);
             let _ = tell.send(r);
         }
         let now = Instant::now();
@@ -607,20 +712,20 @@ fn run(m: Manifest, data: PathBuf, usb: Box<dyn Usb>, computer: Option<std::sync
             let (_, tag) = live.store.data_mut().timers.remove(i);
             let t = Instant::now();
             if let Err(trap) = live.core.call_timer(&mut live.store, tag) {
-                eprintln!("ectomatter: the {} core failed on its timer: {trap}", m.id);
+                eprintln!("ectomatter: the {} {} failed on its timer: {trap}", m.id, crate::packages::Kind::of(&m.all).word());
             }
             live.store.data_mut().unanswered();
-            slow(&m.id, &format!("timer {tag}"), t);
+            slow(&m, &format!("timer {tag}"), t);
         }
     }
 }
 
-/// A line for the log when a call kept the core's thread past a few of the
-/// preview's beats: everything else the core does waited for it.
-fn slow(id: &str, what: &str, since: Instant) {
+/// A line for the log when a call kept a package's thread past a few of the
+/// preview's beats: everything else it does waited for it.
+fn slow(m: &Manifest, what: &str, since: Instant) {
     let ms = since.elapsed().as_millis();
     if ms > 200 {
-        eprintln!("ectomatter: the {id} core took {ms} ms on {what}");
+        eprintln!("ectomatter: the {} {} took {ms} ms on {what}", m.id, crate::packages::Kind::of(&m.all).word());
     }
 }
 
@@ -630,6 +735,25 @@ mod tests {
     use std::collections::VecDeque;
     use std::io::Read;
     use std::sync::{Arc, Mutex};
+
+    /// What a manifest may name to reach: a web host by its name alone (no
+    /// name and password before it, no other kind of address); a file or
+    /// folder whole from /, with no way up out of it.
+    #[test]
+    fn a_package_reaches_only_what_its_manifest_names() {
+        assert_eq!(host_of("https://api.open-meteo.com/v1/forecast?x=1").as_deref(), Some("api.open-meteo.com"));
+        assert_eq!(host_of("https://API.Weather.gov:443/alerts").as_deref(), Some("api.weather.gov"));
+        assert_eq!(host_of("https://someone@elsewhere.example/"), None);
+        assert_eq!(host_of("ftp://elsewhere.example/"), None);
+        assert!(plain_path("/sys") && plain_path("/proc/stat"));
+        assert!(!plain_path("sys") && !plain_path("/sys/../etc"));
+        let u = Uses::of(&serde_json::json!([{ "read": "/sys" }, { "read": "/proc/stat" }, { "read": "/etc/../shadow" }, { "web": "API.open-meteo.com", "to": "Open-Meteo" }, "nvidia"]));
+        assert_eq!(u.read, vec!["/sys", "/proc/stat"], "a path with a way up isn't taken");
+        assert_eq!(u.web, vec![("api.open-meteo.com".to_string(), "Open-Meteo".to_string())]);
+        assert!(u.nvidia);
+        // (a file named is that file alone, not every name it starts)
+        assert!(Path::new("/proc/stat").starts_with("/proc/stat") && !Path::new("/proc/statm").starts_with("/proc/stat"));
+    }
 
     /// The Z10's collection, as a fake computer lists it.
     fn z10() -> DeviceInfo {

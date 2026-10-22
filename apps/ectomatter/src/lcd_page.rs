@@ -22,7 +22,7 @@
 use serde_json::{json, Value};
 
 use crate::lcd_stats::Gpu;
-use crate::sensor_list::{Val, What};
+use ectomatter_sensors::list::{Val, What};
 
 pub const COLS: u8 = 20;
 pub const ROWS: u8 = 4;
@@ -1419,7 +1419,7 @@ fn text_of(s: Source, f: bool, date: DateFormat, r: &Readings) -> Option<String>
         Source::Sky => evga_z10::lcd::lcd_text(&r.outside.as_ref()?.1),
         Source::Sensor(n) => {
             let (what, v) = r.sensors.get(&n)?;
-            crate::sensor_read::on_screen(*what, *v, f)
+            ectomatter_sensors::read::on_screen(*what, *v, f)
         }
         // (in capitals, as the keyboard has always written a game's name)
         Source::GameName => evga_z10::lcd::lcd_text(&r.game.as_ref()?.name.to_uppercase()),
@@ -1458,7 +1458,7 @@ fn share_of(s: Source, r: &Readings) -> Option<f64> {
         Source::VideoMemory => r.gpu?.vram.filter(|v| v.1 > 0.0).map(|(u, t)| u / t)?,
         Source::Sensor(n) => {
             let (what, v) = r.sensors.get(&n)?;
-            crate::sensor_read::share(*what, *v)?
+            ectomatter_sensors::read::share(*what, *v)?
         }
         // (with nothing to change, nothing is left to do)
         Source::ChangesDone => match r.game.as_ref()?.done {
@@ -2293,10 +2293,10 @@ mod tests {
 
     #[test]
     fn a_block_shows_a_sensor_kept_by_its_id() {
-        use crate::sensor_list::{Val, What};
-        let dir = crate::sensor_list::tests::temp_dir("page-sensor");
-        crate::sensor_list::tests::computer(&dir);
-        let cat = crate::sensor_list::catalog(&dir, &mut crate::sensor_list::tests::nvidia());
+        use ectomatter_sensors::list::{Val, What};
+        let dir = ectomatter_sensors::fake::temp_dir("page-sensor");
+        ectomatter_sensors::fake::computer(&dir);
+        let cat = ectomatter_sensors::list::catalog(&dir, &mut ectomatter_sensors::fake::nvidia());
         crate::sensors::remember(&cat, &Default::default());
         let pump = Source::Sensor(crate::sensors::number("nct6687@nct6687.2592/fan/Pump Fan"));
         let piece = |kind: Kind, row: u8| Piece { kind, row, col: 0, width: 7, right: false, center: false, gap: 1, height: 1, scroll: true, date_format: Default::default() };

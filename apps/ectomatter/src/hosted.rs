@@ -30,6 +30,8 @@ pub struct Run {
     pub devices: Vec<Value>,
     /// its sections, as last described for each page, and when
     described: Vec<(String, Value, Instant)>,
+    /// its own Settings section, as it last told it (settings/section)
+    pub section: Option<Value>,
     /// the folder it was given offscreen or in a test, removed when it stops
     scratch: Option<PathBuf>,
 }
@@ -46,6 +48,91 @@ pub struct Hosted {
     pub cores: Vec<Run>,
     pub plugins: Vec<Run>,
     computer: Arc<dyn Computer>,
+    /// what the plugins with readings told of them, for the page and the
+    /// keyboard's screen alike
+    readings: Readings,
+}
+
+/// The readings the plugins told, by plugin: what each lists it can read
+/// (readings/list), and each reading's latest value (readings/changed); and
+/// which readings each one showing them wants read, which the plugin is told
+/// (readings/watch). Shared with the keyboard screen's own thread, which
+/// never waits on a plugin.
+#[derive(Clone, Default)]
+pub struct Readings(Arc<std::sync::Mutex<Kept>>);
+
+#[derive(Default)]
+struct Kept {
+    told: std::collections::HashMap<String, Told>,
+    /// by plugin, by who shows them: the readings wanted
+    wants: std::collections::HashMap<String, std::collections::HashMap<&'static str, Vec<String>>>,
+    /// the plugins whose watch has changed since it was last told
+    changed: std::collections::BTreeSet<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Told {
+    pub list: Value,
+    pub values: serde_json::Map<String, Value>,
+}
+
+impl Readings {
+    fn kept(&self) -> std::sync::MutexGuard<'_, Kept> {
+        self.0.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// What a plugin told, if it's running and has told any.
+    pub fn of(&self, plugin: &str) -> Option<Told> {
+        self.kept().told.get(plugin).cloned()
+    }
+
+    /// One reading's latest value.
+    pub fn value(&self, plugin: &str, id: &str) -> Option<Value> {
+        self.kept().told.get(plugin)?.values.get(id).cloned()
+    }
+
+    /// The readings `who` wants read from now on (none: it has stopped
+    /// showing them); the plugin is told all that's wanted of it as it changes.
+    pub fn want(&self, plugin: &str, who: &'static str, mut ids: Vec<String>) {
+        ids.sort();
+        ids.dedup();
+        let mut k = self.kept();
+        let had = k.wants.entry(plugin.to_string()).or_default().insert(who, ids.clone());
+        if had.unwrap_or_default() != ids {
+            k.changed.insert(plugin.to_string());
+        }
+    }
+
+    /// Each plugin whose watch changed, with all that's wanted of it now.
+    fn watches(&self) -> Vec<(String, Vec<String>)> {
+        let mut k = self.kept();
+        let changed: Vec<String> = std::mem::take(&mut k.changed).into_iter().collect();
+        changed
+            .into_iter()
+            .map(|p| {
+                let mut all: Vec<String> = k.wants.get(&p).map(|w| w.values().flatten().cloned().collect()).unwrap_or_default();
+                all.sort();
+                all.dedup();
+                (p, all)
+            })
+            .collect()
+    }
+
+    /// A plugin started again: what's wanted of it is told it anew.
+    fn told_again(&self, plugin: &str) {
+        let mut k = self.kept();
+        if k.wants.contains_key(plugin) {
+            k.changed.insert(plugin.to_string());
+        }
+    }
+
+    fn forget(&self, plugin: &str) {
+        self.kept().told.remove(plugin);
+    }
+
+    fn with(&self, plugin: &str, f: impl FnOnce(&mut Told)) {
+        f(self.kept().told.entry(plugin.to_string()).or_default());
+    }
 }
 
 /// Packages Ectomatter starts elsewhere: the keyboard's and the mouse's cores.
@@ -55,7 +142,32 @@ pub fn started_elsewhere(id: &str) -> bool {
 
 impl Hosted {
     pub fn new(computer: Arc<dyn Computer>) -> Hosted {
-        Hosted { cores: Vec::new(), plugins: Vec::new(), computer }
+        Hosted { cores: Vec::new(), plugins: Vec::new(), computer, readings: Readings::default() }
+    }
+
+    /// The plugins' readings as they tell them, for whoever shows them.
+    pub fn readings(&self) -> Readings {
+        self.readings.clone()
+    }
+
+    /// The plugins with Settings sections of their own, in Settings' order:
+    /// each one's id and its section as it last told it.
+    pub fn settings_sections(&self) -> Vec<(String, Value)> {
+        self.plugins.iter().filter_map(|p| Some((p.package.id().to_string(), p.section.clone()?))).collect()
+    }
+
+    /// Hand a running package something without waiting on it (a plugin's
+    /// Settings values, what readings to watch).
+    pub fn tell(&self, id: &str, method: &str, params: &Value) {
+        if let Some(r) = self.get(id) {
+            r.core.tell(method, params);
+        }
+    }
+
+    /// A running package's core, for a thread of its own to call (a place
+    /// search, which waits on the network).
+    pub fn core_of(&self, id: &str) -> Option<Core> {
+        self.get(id).map(|r| r.core.clone())
     }
 
     fn all(&self) -> impl Iterator<Item = &Run> {
@@ -84,11 +196,12 @@ impl Hosted {
         let data = scratch.clone().unwrap_or_else(|| p.data());
         match Core::start_with(&p.dir, data, Box::new(NoDevices), Some(self.computer.clone())) {
             Ok(core) => {
-                match core.call("initialize", &json!({ "protocol": 4, "frontend": concat!("ectomatter ", env!("CARGO_PKG_VERSION")), "platform": platform() })) {
+                match core.call("initialize", &json!({ "protocol": 4, "frontend": concat!("ectomatter ", env!("CARGO_PKG_VERSION")), "platform": platform(), "locale": crate::locale() })) {
                     Ok(_) => eprintln!("ectomatter: the {} {} started", p.id(), kind.word()),
                     Err(e) => eprintln!("ectomatter: the {} {}: {e}", p.id(), kind.word()),
                 }
-                let run = Run { package: p, core, warning: None, devices: Vec::new(), described: Vec::new(), scratch };
+                self.readings.told_again(p.id());
+                let run = Run { package: p, core, warning: None, devices: Vec::new(), described: Vec::new(), section: None, scratch };
                 match kind {
                     Kind::Core => self.cores.push(run),
                     Kind::Plugin => self.plugins.push(run),
@@ -108,6 +221,7 @@ impl Hosted {
         for list in [&mut self.cores, &mut self.plugins] {
             if let Some(i) = list.iter().position(|x| x.package.id() == id) {
                 let p = list.remove(i);
+                self.readings.forget(id);
                 let _ = p.core.call("shutdown", &Value::Null);
             }
         }
@@ -146,9 +260,27 @@ impl Hosted {
                         p.described.clear();
                         changed = true;
                     }
+                    // (a plugin's own Settings section, and its readings, as they change)
+                    "settings/section" => {
+                        p.section = params.get("section").cloned().filter(Value::is_object);
+                        changed = true;
+                    }
+                    "readings/list" => {
+                        self.readings.with(p.package.id(), |t| t.list = params["readings"].clone());
+                        changed = true;
+                    }
+                    "readings/changed" => {
+                        if let Some(v) = params["values"].as_object() {
+                            self.readings.with(p.package.id(), |t| t.values.extend(v.clone()));
+                        }
+                    }
                     _ => {}
                 }
             }
+        }
+        // (each plugin told what's wanted read of it, as that changes)
+        for (plugin, ids) in self.readings.watches() {
+            self.tell(&plugin, "readings/watch", &json!({ "ids": ids }));
         }
         changed
     }
@@ -250,6 +382,21 @@ mod tests {
                   "mode": { "width": 2560, "height": 1440, "refresh": 59998 }, "brightness": 3500, "ddc": false }
             ]))
         }
+        fn read(&self, path: &std::path::Path) -> Result<String, String> {
+            Err(format!("{} isn’t on this test’s computer", path.display()))
+        }
+        fn entries(&self, path: &std::path::Path) -> Result<Vec<String>, String> {
+            Err(format!("{} isn’t on this test’s computer", path.display()))
+        }
+        fn resolve(&self, path: &std::path::Path) -> Result<std::path::PathBuf, String> {
+            Err(format!("{} isn’t on this test’s computer", path.display()))
+        }
+        fn nvidia(&self, _: &str, _: &str) -> Result<Value, String> {
+            Err("this test’s computer has no NVIDIA card".into())
+        }
+        fn fetch(&self, url: &str, _: std::time::Duration) -> Result<String, String> {
+            Err(format!("this test’s computer is offline ({url})"))
+        }
     }
 
     /// One package that comes with Ectomatter, started alone.
@@ -264,6 +411,179 @@ mod tests {
 
     fn plugin(id: &str) -> Hosted {
         hosted(Kind::Plugin, id)
+    }
+
+    /// A computer whose web answers as Open-Meteo, the National Weather
+    /// Service and the place search would (a clear 15 °C morning in Springfield
+    /// Lakes, with a tornado warning in force), and nothing else; and the
+    /// addresses asked, in order.
+    struct Web(std::sync::Mutex<Vec<String>>);
+
+    impl Computer for Web {
+        fn monitors(&self) -> Result<Value, String> {
+            Err("no monitors here".into())
+        }
+        fn read(&self, path: &std::path::Path) -> Result<String, String> {
+            Err(format!("{} isn’t on this test’s computer", path.display()))
+        }
+        fn entries(&self, path: &std::path::Path) -> Result<Vec<String>, String> {
+            Err(format!("{} isn’t on this test’s computer", path.display()))
+        }
+        fn resolve(&self, path: &std::path::Path) -> Result<std::path::PathBuf, String> {
+            Err(format!("{} isn’t on this test’s computer", path.display()))
+        }
+        fn nvidia(&self, _: &str, _: &str) -> Result<Value, String> {
+            Err("no NVIDIA card here".into())
+        }
+        fn fetch(&self, url: &str, _: std::time::Duration) -> Result<String, String> {
+            self.0.lock().unwrap().push(url.to_string());
+            let reply = if url.starts_with("https://api.open-meteo.com/v1/forecast") {
+                json!({ "utc_offset_seconds": -14400,
+                        "current": { "weather_code": 0, "cloud_cover": 0, "rain": 0, "showers": 0, "snowfall": 0, "wind_speed_10m": 6.4, "wind_direction_10m": 90, "wind_gusts_10m": 9.0, "visibility": 24000, "temperature_2m": 15.0 },
+                        "daily": { "sunrise": ["2026-10-22T07:28"], "sunset": ["2026-10-22T18:54"] } })
+            } else if url.starts_with("https://air-quality-api.open-meteo.com/") {
+                json!({ "current": { "pm2_5": 4.0, "dust": 0.0, "aerosol_optical_depth": 0.1 } })
+            } else if url.starts_with("https://api.weather.gov/alerts/active") {
+                json!({ "features": [{ "properties": { "event": "Tornado Warning" } }] })
+            } else if url.starts_with("https://geocoding-api.open-meteo.com/v1/search") {
+                json!({ "results": [{ "id": 4172086, "name": "Springfield", "admin1": "Florida", "country": "United States", "country_code": "US", "latitude": 30.15326, "longitude": -85.61132 }] })
+            } else {
+                return Err(format!("offline: {url}"));
+            };
+            Ok(reply.to_string())
+        }
+    }
+
+    /// A made-up computer's files (ectomatter_sensors::fake's, Grant's like),
+    /// kept under a folder of its own but seen from / as a computer's are;
+    /// and its NVIDIA card as the made-up driver reads it.
+    struct Files(std::path::PathBuf, std::sync::Mutex<ectomatter_sensors::fake::FakeNvidia>);
+
+    impl Files {
+        fn here(&self, path: &std::path::Path) -> std::path::PathBuf {
+            self.0.join(path.strip_prefix("/").unwrap_or(path))
+        }
+    }
+
+    impl Computer for Files {
+        fn monitors(&self) -> Result<Value, String> {
+            Err("no monitors here".into())
+        }
+        fn read(&self, path: &std::path::Path) -> Result<String, String> {
+            std::fs::read_to_string(self.here(path)).map_err(|e| e.to_string())
+        }
+        fn entries(&self, path: &std::path::Path) -> Result<Vec<String>, String> {
+            let mut names: Vec<String> = std::fs::read_dir(self.here(path)).map_err(|e| e.to_string())?.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+            names.sort();
+            Ok(names)
+        }
+        fn resolve(&self, path: &std::path::Path) -> Result<std::path::PathBuf, String> {
+            let real = std::fs::canonicalize(self.here(path)).map_err(|e| e.to_string())?;
+            Ok(std::path::Path::new("/").join(real.strip_prefix(&self.0).map_err(|_| "it leads off the made-up computer".to_string())?))
+        }
+        fn nvidia(&self, pci: &str, what: &str) -> Result<Value, String> {
+            use ectomatter_sensors::list::{Nv, Nvidia, Val};
+            let mut nv = self.1.lock().unwrap();
+            if what == "probe" {
+                let p = nv.probe(pci).ok_or("no such card")?;
+                return Ok(json!({ "has": p.has.iter().map(|n| crate::computer::nv_word(*n)).collect::<Vec<_>>(), "vram": p.vram }));
+            }
+            let n = [Nv::Temp, Nv::Load, Nv::Clock, Nv::MemClock, Nv::Vram, Nv::Power, Nv::Fan].into_iter().find(|n| crate::computer::nv_word(*n) == what).ok_or("no such reading")?;
+            match nv.read(pci, n).ok_or("no reading")? {
+                Val::One(v) => Ok(json!(v)),
+                Val::Of(u, t) => Ok(json!([u, t])),
+            }
+        }
+        fn fetch(&self, url: &str, _: std::time::Duration) -> Result<String, String> {
+            Err(format!("offline: {url}"))
+        }
+    }
+
+    /// The Sensors plugin lists a computer's sensors, each named and in its
+    /// part, as the Sensors box shows them, and reads those it's asked to
+    /// watch, reaching the files and NVIDIA's driver only through Ectomatter.
+    #[test]
+    fn the_sensors_plugin_lists_and_reads_what_it_is_asked() {
+        let dir = ectomatter_sensors::fake::temp_dir("sensors-plugin");
+        ectomatter_sensors::fake::computer(&dir);
+        let mut ps = Hosted::new(Arc::new(Files(dir.clone(), std::sync::Mutex::new(ectomatter_sensors::fake::nvidia()))));
+        ps.start(crate::packages::Package::read(&crate::packages::builtin_dir(Kind::Plugin).join("sensors"), false).unwrap());
+        let r = ps.readings();
+        let mut cat = ectomatter_sensors::list::Catalog::default();
+        for _ in 0..200 {
+            ps.poll();
+            if let Some(c) = r.of("sensors").and_then(|t| serde_json::from_value::<ectomatter_sensors::list::Catalog>(t.list).ok()) {
+                cat = c;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let keys: Vec<&str> = cat.devices.iter().map(|d| d.key.as_str()).collect();
+        assert!(keys.contains(&"cpu") && keys.contains(&"card@0000:01:00.0") && keys.contains(&"board"), "{keys:?}");
+        // what's wanted, read and told
+        r.want("sensors", "test", vec!["card@0000:01:00.0/temperature".into(), "memory/used".into()]);
+        let mut got = (None, None);
+        for _ in 0..200 {
+            ps.poll();
+            got = (r.value("sensors", "card@0000:01:00.0/temperature"), r.value("sensors", "memory/used"));
+            if got.0.is_some() && got.1.is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(got.0, Some(json!(43.0)), "the card's temperature, through NVIDIA's driver as Ectomatter reaches it");
+        assert!(got.1.as_ref().is_some_and(|v| v.as_array().is_some_and(|a| a.len() == 2)), "memory in use, of all of it: {got:?}");
+        assert!(r.value("sensors", "cpu/load").is_none(), "what isn't watched isn't read");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The Weather plugin tells its Settings section and its readings as they
+    /// change: without a place, it asks for one; with one, the weather there
+    /// in the units chosen, the warning in force and whose it is; and a place
+    /// typed in is looked up. It asks only the web its manifest names, through
+    /// Ectomatter.
+    #[test]
+    fn the_weather_plugin_tells_its_section_and_readings() {
+        let web = Arc::new(Web(Default::default()));
+        let mut ps = Hosted::new(web.clone());
+        ps.start(crate::packages::Package::read(&crate::packages::builtin_dir(Kind::Plugin).join("weather"), false).unwrap());
+        let section = |ps: &mut Hosted| {
+            ps.poll();
+            ps.settings_sections().into_iter().find(|(id, _)| id == "weather").map(|(_, s)| s)
+        };
+        let first = section(&mut ps).expect("it told its section as it started");
+        assert_eq!(first["layout"][0]["note"], "Every device that shows weather uses this place.");
+        assert_eq!(first["layout"][1]["status"]["words"], "Chosen with the place");
+        assert!(ps.readings().of("weather").is_some_and(|t| t.list.as_array().is_some_and(|l| l.len() == 2)), "it lists what it reads");
+        // a place, Fahrenheit and miles an hour
+        let place = json!({ "id": 4172086, "name": "Springfield", "latin": "Springfield", "region": "Florida", "country": "United States", "country_code": "US", "lat": 30.15326, "lon": -85.61132 });
+        ps.tell("weather", "settings/set", &json!({ "values": { "place": place, "temperature": "f", "wind": "mph" } }));
+        let mut now = Value::Null;
+        for _ in 0..200 {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            if let Some(s) = section(&mut ps).filter(|s| s["layout"][1]["card"]["big"].is_string()) {
+                now = s;
+                break;
+            }
+        }
+        let card = &now["layout"][1]["card"];
+        assert_eq!((card["big"].as_str(), card["beside"].as_str()), (Some("59°F"), Some("Clear")));
+        assert_eq!(card["facts"], json!([["Cloud", "0%"], ["Wind", "4 mph"], ["Sunrise", "7:28 AM"], ["Sunset", "6:54 PM"]]));
+        assert_eq!(now["layout"][3]["note"], "", "both units chosen: no word of the region's");
+        assert_eq!(now["layout"][0]["note"], "Springfield, Florida, United States");
+        let warn = &now["layout"][2]["status"];
+        assert_eq!((warn["words"].as_str(), warn["tone"].as_str()), (Some("National Weather Service"), Some("good")));
+        assert_eq!(warn["note"], "Tornado warning in force. Official warnings for this place, checked every 3 minutes.");
+        assert_eq!(now["settings"][0]["text"], "Springfield", "the box shows the place's name");
+        let r = ps.readings();
+        assert_eq!((r.value("weather", "temperature"), r.value("weather", "sky")), (Some(json!(15.0)), Some(json!("Clear"))), "the readings in °C, and the sky in words");
+        // a place typed in, looked up
+        let found = ps.core_of("weather").unwrap().call("settings/search", &json!({ "id": "place", "text": "Land" })).unwrap();
+        assert_eq!((found["found"][0]["label"].as_str(), found["found"][0]["sub"].as_str()), (Some("Springfield"), Some("Florida, United States")));
+        assert_eq!(found["found"][0]["value"]["country_code"], "US", "the place itself, kept as chosen");
+        // only what its manifest names, all over HTTPS
+        let asked = web.0.lock().unwrap().clone();
+        assert!(!asked.is_empty() && asked.iter().all(|u| u.starts_with("https://")), "{asked:?}");
     }
 
     /// The Monitor Configurator's section: a column for each monitor, a cell
