@@ -18,7 +18,7 @@ EVGA, SteelSeries or any other maker whose devices it drives.
   WebAssembly module that reaches only the USB devices its manifest names, and
   it describes its device in data. The app does the drawing.
 - **Plugins** (`plugins/`), which add to the app's pages or bring in another
-  program: the Monitor Configurator sets each monitor while a game runs; the
+  program: Monitors sets each monitor while a game runs; the
   OpenRGB plugin switches OpenRGB's lighting profiles with the game in front;
   Weather brings the weather and its warnings to the screens that show them;
   and Sensors reads the computer's temperatures, loads and fans for them, on

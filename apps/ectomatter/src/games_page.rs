@@ -5,7 +5,7 @@
 //! own section, Devices: the profile each device switches to while the game
 //! is in front. Then each plugin's section, drawn from what the plugin says
 //! of it (hosted.rs): its settings as dropdowns, in rows or in a grid (the
-//! Monitor Configurator's column for each monitor). Then Custom Scripts,
+//! Monitors plugin's column for each monitor). Then Custom Scripts,
 //! Ectomatter's own too: the person's own commands, each with Run now. Before
 //! the sections, where there's room, On this page: each section and what it
 //! changes here, on the left, as a page's way around it. The

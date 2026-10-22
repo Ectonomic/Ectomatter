@@ -496,7 +496,7 @@ mod tests {
     }
 
     fn bright(m: &str, to: u64) -> (String, Value, String, String, Option<Script>) {
-        ("monitor-configurator".into(), json!({ "monitor": m, "set": "brightness", "to": to }), "BRIGHTNESS".into(), format!("the {m}’s brightness"), None)
+        ("monitors".into(), json!({ "monitor": m, "set": "brightness", "to": to }), "BRIGHTNESS".into(), format!("the {m}’s brightness"), None)
     }
 
     fn wait_for(w: &Worker, n: usize) -> Vec<Told> {
@@ -517,7 +517,7 @@ mod tests {
         fake.0.lock().unwrap().insert("side/brightness".into(), json!(3500));
         fake.0.lock().unwrap().insert("main".into(), json!("big"));
         let w = Worker::start(Journal::load(None), Some(Box::new(fake.clone())));
-        let main = ("monitor-configurator".into(), json!({ "monitor": "side", "set": "main", "to": true }), "MAIN MONITOR".into(), "the side’s place".into(), None);
+        let main = ("monitors".into(), json!({ "monitor": "side", "set": "main", "to": true }), "MAIN MONITOR".into(), "the side’s place".into(), None);
         w.start_game(Plan { game: game("arc", 10), changes: vec![main, bright("side", 0)] });
         w.quit_game("arc");
         let told = wait_for(&w, 1);
@@ -554,7 +554,7 @@ mod tests {
         fake.0.lock().unwrap().insert("side/brightness".into(), json!(3500));
         {
             let mut j = Journal::load(Some(path.clone()));
-            j.sessions.push(Session { game: game("gone", 50), changes: vec![Change { plugin: "monitor-configurator".into(), what: json!({ "monitor": "side", "set": "brightness", "to": 0 }), label: "BRIGHTNESS".into(), words: "the side’s brightness".into(), before: json!(3500), made: true }] });
+            j.sessions.push(Session { game: game("gone", 50), changes: vec![Change { plugin: "monitors".into(), what: json!({ "monitor": "side", "set": "brightness", "to": 0 }), label: "BRIGHTNESS".into(), words: "the side’s brightness".into(), before: json!(3500), made: true }] });
             j.sessions.push(Session { game: game("still", 60), changes: vec![] });
             j.save();
             fake.0.lock().unwrap().insert("side/brightness".into(), json!(0));

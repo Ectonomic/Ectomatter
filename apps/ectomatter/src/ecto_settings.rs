@@ -63,6 +63,8 @@ pub struct PackageRow {
     pub glyph: usize,
     /// added, rather than come with Ectomatter: it can be taken out
     pub removable: bool,
+    /// the systems it works on, as people say them ("Linux"), each a tag beside its name
+    pub systems: Vec<String>,
 }
 
 /// A device as Settings' Devices shows it, with its core: how the device is
@@ -734,6 +736,13 @@ fn packages_section(cells: &mut Vec<Cell>, y: &mut f32, title: &str, add: i32, r
         let tx = bx + 40.0 + 16.0;
         let tw = vx - 16.0 - tx;
         out.push(text_cell(style::NAME, tx, ry, tw, 20.0, &r.name));
+        // (the systems it works on, a tag each, beside its name)
+        let mut gx = tx + text::width(500, 14.5, &r.name).ceil() + 10.0;
+        for sys in &r.systems {
+            let pw = text::width(400, 11.5, sys).ceil() + 14.0;
+            out.push(Cell { text: sys.as_str().into(), style: 4, ..cell(kind::PILL, gx, ry, pw, 20.0) });
+            gx += pw + 6.0;
+        }
         let mut ty = ry + 22.0;
         for l in text::wrap(400, 12.5, &r.description, tw) {
             out.push(Cell { color: slint::Color::from_rgb_u8(0xa1, 0xa1, 0xaa), ..text_cell(style::NOTE_IN, tx, ty, tw, 18.0, &l) });
@@ -791,7 +800,7 @@ mod tests {
     use super::*;
 
     fn row(name: &str, glyph: usize, on: bool, removable: bool, status: &str) -> PackageRow {
-        PackageRow { name: name.into(), description: format!("What the {name} is for."), can: vec![format!("Talks to the {name} over USB.")], version: "1.0.0".into(), status: status.into(), on, warning: None, glyph, removable }
+        PackageRow { name: name.into(), description: format!("What the {name} is for."), can: vec![format!("Talks to the {name} over USB.")], version: "1.0.0".into(), status: status.into(), on, warning: None, glyph, removable, systems: Vec::new() }
     }
 
     /// The words on the page, each piece once.

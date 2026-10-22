@@ -19,7 +19,7 @@ pub mod client {
     wayland_scanner::generate_client_code!("protocols/kde-output-device-v2.xml");
 }
 
-/// How the screens are changed, for the Monitor Configurator's changes (monitors.rs).
+/// How the screens are changed, for the Monitors plugin's changes (monitors.rs).
 #[allow(non_upper_case_globals, non_camel_case_types, non_snake_case, unused_imports, unused_mut, unused_variables, dead_code, missing_docs, clippy::all)]
 pub mod management {
     use wayland_client;

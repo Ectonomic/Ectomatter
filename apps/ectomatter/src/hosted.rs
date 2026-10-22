@@ -586,11 +586,11 @@ mod tests {
         assert!(!asked.is_empty() && asked.iter().all(|u| u.starts_with("https://")), "{asked:?}");
     }
 
-    /// The Monitor Configurator's section: a column for each monitor, a cell
+    /// The Monitors plugin's section: a column for each monitor, a cell
     /// saying why where a monitor can't do something, and the main monitor.
     #[test]
     fn the_monitors_section_has_a_column_for_each() {
-        let mut ps = plugin("monitor-configurator");
+        let mut ps = plugin("monitors");
         let s = &ps.sections("game", "ARC Raiders")[0].1;
         let grid = &s["layout"][0]["grid"];
         let cols: Vec<&str> = grid["columns"].as_array().unwrap().iter().map(|c| c["label"].as_str().unwrap()).collect();
@@ -610,7 +610,7 @@ mod tests {
     /// one the monitor is already at changes nothing.
     #[test]
     fn choices_become_changes() {
-        let ps = plugin("monitor-configurator");
+        let ps = plugin("monitors");
         let g = crate::putback::Game { id: "steam_app_1808500".into(), name: "ARC Raiders".into(), pid: 1, since: 1 };
         let values = |_: &str| json!({ "edid:MSI-3DA4-1/brightness": "100", "edid:WSD-0001-2/brightness": "lowest", "edid:MSI-3DA4-1/refresh": "165", "main": "edid:MSI-3DA4-1" });
         let c = ps.changes(&g, "game", &values);

@@ -1,6 +1,6 @@
 //! Ectomatter's packages: the cores, each for a device Ectomatter talks to
 //! itself (the keyboard's, the mouse's), and the plugins, which add to
-//! Ectomatter's pages (the Monitor Configurator adds a section to each game's
+//! Ectomatter's pages (the Monitors plugin adds a section to each game's
 //! page) or bring in what another program drives (OpenRGB's lighting). Both
 //! are packaged the
 //! same way (a folder holding its manifest, core.json, the module it names,
@@ -119,7 +119,12 @@ impl Package {
     /// names the systems it works on (`"systems": ["linux"]`); one that
     /// doesn't work here isn't offered here.
     pub fn works_here(&self) -> bool {
-        self.manifest.all["systems"].as_array().is_none_or(|a| a.iter().any(|s| s.as_str() == Some(std::env::consts::OS)))
+        works_here(&self.manifest.all)
+    }
+
+    /// The systems it works on, by their names, as Settings tags it.
+    pub fn systems(&self) -> Vec<&'static str> {
+        systems_of(&self.manifest.all)
     }
 
     pub fn kind(&self) -> Kind {
@@ -197,8 +202,31 @@ pub fn can_words(m: &Value) -> Vec<String> {
     out
 }
 
+/// The systems Ectomatter is made for, by the names the standard library
+/// and a manifest's `systems` give them, and as people say them.
+const SYSTEMS: [(&str, &str); 3] = [("linux", "Linux"), ("windows", "Windows"), ("macos", "macOS")];
+
+/// The systems a manifest says it works on, as people say them: all of
+/// them, where it names none.
+pub fn systems_of(m: &Value) -> Vec<&'static str> {
+    match m["systems"].as_array() {
+        Some(named) => SYSTEMS.iter().filter(|(os, _)| named.iter().any(|s| s.as_str() == Some(os))).map(|(_, n)| *n).collect(),
+        None => SYSTEMS.iter().map(|(_, n)| *n).collect(),
+    }
+}
+
+/// Whether a manifest's package works on this system.
+pub fn works_here(m: &Value) -> bool {
+    m["systems"].as_array().is_none_or(|a| a.iter().any(|s| s.as_str() == Some(std::env::consts::OS)))
+}
+
+/// This system, as people say it.
+pub fn this_system() -> &'static str {
+    SYSTEMS.iter().find(|(os, _)| *os == std::env::consts::OS).map_or(std::env::consts::OS, |(_, n)| n)
+}
+
 /// Names in a sentence: "A", "A and B", "A, B and C".
-fn joined(names: &[String]) -> String {
+pub fn joined(names: &[String]) -> String {
     match names {
         [] => String::new(),
         [one] => one.clone(),
@@ -288,15 +316,17 @@ pub fn all_in(builtin: &Path, added: &Path) -> Vec<Package> {
 
 /// Where each package's own files were kept before cores and plugins were
 /// kept apart (every one in the data folder's cores/, the mouse's core as
-/// "steelseries", the Monitor Configurator as "monitors", OpenRGB's plugin
-/// as "openrgb"), moved to where they're kept now, once.
+/// "steelseries", the Monitors plugin as "monitors", OpenRGB's plugin as
+/// "openrgb"), and while the Monitors plugin was named Monitor Configurator,
+/// moved to where they're kept now, once.
 pub fn move_old_folders() {
     let data = crate::data_dir();
     // (Custom Scripts, a plugin once, is Ectomatter's own now: its empty folder goes)
     let _ = std::fs::remove_dir(data.join("cores").join("scripts"));
     let moves = [
         (data.join("cores").join("steelseries"), data.join("cores").join(crate::mouse::CORE)),
-        (data.join("cores").join("monitors"), data.join("plugins").join("monitor-configurator")),
+        (data.join("cores").join("monitors"), data.join("plugins").join("monitors")),
+        (data.join("plugins").join("monitor-configurator"), data.join("plugins").join("monitors")),
         (data.join("cores").join("openrgb"), data.join("plugins").join("openrgb")),
     ];
     for (from, to) in moves {
@@ -417,6 +447,25 @@ mod tests {
     /// Every package with Ectomatter says what it can do in Ectomatter's words:
     /// the cores their devices, the plugins their uses; and each kind is in
     /// its own folder, the cores in cores/ and the plugins in plugins/.
+    /// Each plugin says the systems it works on, a tag each in Settings:
+    /// every one, where its manifest names none; and one made for other
+    /// systems isn't taken here, and says why.
+    #[test]
+    fn each_plugin_says_where_it_works() {
+        let none = std::env::temp_dir().join(format!("ectomatter-no-packages-{}", std::process::id()));
+        let plugins = all_in(&builtin_dir(Kind::Plugin), &none);
+        let on = |id: &str| plugins.iter().find(|p| p.id() == id).map(|p| p.systems()).unwrap_or_default();
+        assert_eq!(on("weather"), vec!["Linux", "Windows", "macOS"]);
+        assert_eq!(on("openrgb"), vec!["Linux", "Windows", "macOS"]);
+        assert_eq!(on("sensors"), vec!["Linux"]);
+        assert_eq!(on("monitors"), vec!["Linux"], "Ectomatter reaches the monitors on KDE Plasma alone, so far");
+        assert_eq!(systems_of(&serde_json::json!({ "systems": ["macos", "windows"] })), vec!["Windows", "macOS"], "in the tags' order");
+        if cfg!(target_os = "linux") {
+            let elsewhere = serde_json::json!({ "ectomatter": "0.1.0", "protocol": 4, "systems": ["windows", "macos"] });
+            assert_eq!(crate::updates::runs_here(&elsewhere), Err("it works on Windows and macOS, not on Linux".into()));
+        }
+    }
+
     #[test]
     fn each_package_says_what_it_can_do() {
         let none = std::env::temp_dir().join(format!("ectomatter-no-packages-{}", std::process::id()));
@@ -426,10 +475,10 @@ mod tests {
         assert_eq!(can(&cores, "evga-z10"), vec!["Talks to the EVGA Z10 RGB over USB.".to_string()]);
         assert_eq!(can(&cores, crate::mouse::CORE), vec!["Talks to the SteelSeries Sensei 310 over USB.".to_string()]);
         assert_eq!(can(&plugins, "openrgb"), vec!["Talks to OpenRGB on this computer.".to_string()]);
-        assert_eq!(can(&plugins, "monitor-configurator"), vec!["Changes your monitors’ settings while a game runs.".to_string()]);
+        assert_eq!(can(&plugins, "monitors"), vec!["Changes your monitors’ settings while a game runs.".to_string()]);
         assert!(cores.iter().all(|p| p.kind() == Kind::Core), "the cores folder holds cores");
         assert!(plugins.iter().all(|p| p.kind() == Kind::Plugin), "the plugins folder holds plugins");
-        assert_eq!(plugins.iter().map(|p| p.name()).collect::<Vec<_>>(), vec!["Monitor Configurator", "OpenRGB", "Sensors", "Weather"]);
+        assert_eq!(plugins.iter().map(|p| p.name()).collect::<Vec<_>>(), vec!["Monitors", "OpenRGB", "Sensors", "Weather"]);
         assert_eq!(can(&plugins, "weather"), vec!["Reaches Open-Meteo, Photon, the National Weather Service, Environment and Climate Change Canada and MeteoAlarm over the internet.".to_string()]);
         assert_eq!(
             can(&plugins, "sensors"),
@@ -441,6 +490,6 @@ mod tests {
         assert!(cores.iter().chain(&plugins).all(|p| p.glyph().is_some()), "each package brings its glyph");
         // (where each keeps its own files)
         assert!(cores[0].data().ends_with(format!("cores/{}", cores[0].id())));
-        assert!(plugins[0].data().ends_with("plugins/monitor-configurator"));
+        assert!(plugins[0].data().ends_with("plugins/monitors"));
     }
 }

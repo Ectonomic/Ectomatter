@@ -1279,6 +1279,10 @@ impl Front {
             }
             let _ = f.settings.set("plugins.weather", v);
         }
+        // (the Monitors plugin's settings, kept under the name it had for a while)
+        if let Some(old) = f.settings.take("plugins.monitor-configurator").filter(|_| f.settings.get("plugins.monitors").is_none()) {
+            let _ = f.settings.set("plugins.monitors", old);
+        }
         f.hand_values(None);
         // the desk's light, as it was left playing
         let light = f.settings.get("desk.light").and_then(|v| v.as_str().map(crate::desk_light::Effect::of)).unwrap_or(crate::desk_light::Effect::Off);
@@ -6049,6 +6053,7 @@ impl Front {
                     warning: running.and_then(|r| r.warning.clone()).filter(|_| on),
                     glyph: i,
                     removable: p.added,
+                    systems: p.systems().iter().map(|s| s.to_string()).collect(),
                 }
             })
             .collect()

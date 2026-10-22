@@ -57,6 +57,10 @@ pub fn runs_here(m: &Value) -> Result<(), String> {
     if m["protocol"].as_u64().is_some_and(|p| p > 4) {
         return Err("it speaks a newer core protocol than this Ectomatter".into());
     }
+    if !packages::works_here(m) {
+        let names: Vec<String> = packages::systems_of(m).iter().map(|s| s.to_string()).collect();
+        return Err(format!("it works on {}, not on {}", packages::joined(&names), packages::this_system()));
+    }
     Ok(())
 }
 
@@ -181,19 +185,19 @@ pub mod tests {
     use super::*;
     use std::io::{Read, Write};
 
-    /// The Monitor Configurator as a package file of another version: its
+    /// The Monitors plugin as a package file of another version: its
     /// folder, zipped.
     pub fn package_of(version: &str) -> (Vec<u8>, Vec<u8>) {
-        let dir = crate::cores::plugins_dir().join("monitor-configurator");
+        let dir = crate::cores::plugins_dir().join("monitors");
         let manifest = std::fs::read_to_string(dir.join("core.json")).unwrap().replace("\"version\": \"1.0.0\"", &format!("\"version\": \"{version}\""));
         let mut out = std::io::Cursor::new(Vec::new());
         {
             let mut z = zip::ZipWriter::new(&mut out);
             let o = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
-            z.start_file("monitor-configurator/core.json", o).unwrap();
+            z.start_file("monitors/core.json", o).unwrap();
             z.write_all(manifest.as_bytes()).unwrap();
             for f in ["core.wasm", "glyph.svg"] {
-                z.start_file(format!("monitor-configurator/{f}"), o).unwrap();
+                z.start_file(format!("monitors/{f}"), o).unwrap();
                 z.write_all(&std::fs::read(dir.join(f)).unwrap()).unwrap();
             }
             z.finish().unwrap();
@@ -231,21 +235,21 @@ pub mod tests {
     #[test]
     fn a_newer_release_is_put_in_place() {
         let (manifest, package) = package_of("1.0.1");
-        let base = "/test/monitor-configurator/releases/latest/download";
-        let at = fake_github(vec![(format!("{base}/core.json"), manifest), (format!("{base}/monitor-configurator.ectocore"), package)]);
+        let base = "/test/monitors/releases/latest/download";
+        let at = fake_github(vec![(format!("{base}/core.json"), manifest), (format!("{base}/monitors.ectocore"), package)]);
         // (set for this test alone: no other test asks GitHub)
         unsafe { std::env::set_var("ECTOMATTER_GITHUB", &at) };
         let into = std::env::temp_dir().join(format!("ectomatter-updates-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&into);
-        let p = Package::read(&crate::cores::plugins_dir().join("monitor-configurator"), false).unwrap();
-        assert_eq!(check(&p, "test/monitor-configurator", &into), Status::Updated("1.0.1".into()));
-        assert!(into.join("monitor-configurator/1.0.1/core.wasm").is_file() && !into.join("monitor-configurator/1.0.1/.unfinished").exists());
+        let p = Package::read(&crate::cores::plugins_dir().join("monitors"), false).unwrap();
+        assert_eq!(check(&p, "test/monitors", &into), Status::Updated("1.0.1".into()));
+        assert!(into.join("monitors/1.0.1/core.wasm").is_file() && !into.join("monitors/1.0.1/.unfinished").exists());
         let all = packages::all_in(&crate::cores::plugins_dir(), &into);
-        let used = all.iter().find(|x| x.id() == "monitor-configurator").unwrap();
+        let used = all.iter().find(|x| x.id() == "monitors").unwrap();
         assert_eq!((used.version(), used.added), ("1.0.1", true));
-        assert_eq!(used.repository().as_deref(), Some("test/monitor-configurator"), "it knows where its updates come from");
+        assert_eq!(used.repository().as_deref(), Some("test/monitors"), "it knows where its updates come from");
         // the version it has is up to date
-        assert!(matches!(check(used, "test/monitor-configurator", &into), Status::UpToDate(_)));
+        assert!(matches!(check(used, "test/monitors", &into), Status::UpToDate(_)));
         // a release of nothing Ectomatter knows by that name isn't taken
         assert!(matches!(check(&p, "test/elsewhere", &into), Status::Failed(_)));
         let _ = std::fs::remove_dir_all(&into);

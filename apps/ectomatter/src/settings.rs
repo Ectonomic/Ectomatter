@@ -55,9 +55,18 @@ impl Settings {
         self.write()
     }
 
-    /// Take a key out of the settings and write them: its value, if there was one.
-    pub fn take(&self, key: &str) -> Option<Value> {
-        let v = self.data.lock().unwrap_or_else(|p| p.into_inner()).as_object_mut()?.remove(key)?;
+    /// Take a value out of the settings, at a dotted path, and write them:
+    /// its value, if there was one.
+    pub fn take(&self, path: &str) -> Option<Value> {
+        let v = {
+            let mut d = self.data.lock().unwrap_or_else(|p| p.into_inner());
+            let mut at = &mut *d;
+            let keys: Vec<&str> = path.split('.').collect();
+            for k in &keys[..keys.len() - 1] {
+                at = at.get_mut(*k)?;
+            }
+            at.as_object_mut()?.remove(keys[keys.len() - 1])?
+        };
         let _ = self.write();
         Some(v)
     }

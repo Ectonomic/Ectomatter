@@ -108,12 +108,17 @@ fn kept_at() -> (Option<PathBuf>, Option<PathBuf>) {
     (Some(p.clone()), Some(p))
 }
 
+/// The Monitors plugin's choices, kept under the name it had for a while
+/// ("monitor-configurator"), under its own; whether there were any.
+fn renamed(v: &mut Value) -> bool {
+    v["plugins"].as_object_mut().is_some_and(|m| !m.contains_key("monitors") && m.remove("monitor-configurator").map(|old| m.insert("monitors".into(), old)).is_some())
+}
+
 impl Library {
     pub fn load() -> Library {
         let (read, write) = kept_at();
         let mut v = read.and_then(|p| std::fs::read(p).ok()).and_then(|b| serde_json::from_slice::<Value>(&b).ok()).filter(|v| v.is_object()).unwrap_or_else(|| json!({}));
-        // (the Monitor Configurator's choices, kept under its old name, "monitors")
-        let renamed = v["plugins"].as_object_mut().is_some_and(|m| !m.contains_key("monitor-configurator") && m.remove("monitors").map(|old| m.insert("monitor-configurator".into(), old)).is_some());
+        let renamed = renamed(&mut v);
         let l = Library { path: write, v, steam: None };
         if renamed {
             l.save();
@@ -858,21 +863,32 @@ mod tests {
         assert!(l.is_favorite(&a) && l.choice(&a, "z10") == Some(Choice::Profile("2".into())));
     }
 
+    /// The Monitors plugin's choices, kept while it was named Monitor
+    /// Configurator, are its own again; none are lost, and none are moved twice.
+    #[test]
+    fn the_monitors_plugins_choices_keep_its_name() {
+        let mut v = json!({ "plugins": { "monitor-configurator": { "game:*": { "edid:MSI/brightness": "100" } }, "openrgb": {} } });
+        assert!(renamed(&mut v));
+        assert_eq!(v["plugins"]["monitors"]["game:*"]["edid:MSI/brightness"], "100");
+        assert!(v["plugins"].get("monitor-configurator").is_none() && v["plugins"].get("openrgb").is_some());
+        assert!(!renamed(&mut v), "once only");
+    }
+
     /// A game's choices in a plugin's section are its own over Every game's;
     /// an app's are its own alone.
     #[test]
     fn a_plugins_choices_follow_every_game_for_games() {
         let mut l = Library::of(json!({}), Some(steam_of(&[(1808500, "ARC Raiders", steam::Kind::Game), (250820, "SteamVR", steam::Kind::App)], &[])));
-        l.set_plugin_value(EVERY, "monitor-configurator", "side/brightness", Some(json!("lowest")));
-        l.set_plugin_value(EVERY, "monitor-configurator", "main/brightness", Some(json!("100")));
-        l.set_plugin_value("steam_app_1808500", "monitor-configurator", "side/brightness", Some(json!("25")));
-        assert_eq!(l.wanted_values("steam_app_1808500", "monitor-configurator"), json!({ "side/brightness": "25", "main/brightness": "100" }));
-        l.set_plugin_value("steam_app_250820", "monitor-configurator", "side/brightness", Some(json!("off")));
-        assert_eq!(l.wanted_values("steam_app_250820", "monitor-configurator"), json!({ "side/brightness": "off" }), "an app follows no Every game");
+        l.set_plugin_value(EVERY, "monitors", "side/brightness", Some(json!("lowest")));
+        l.set_plugin_value(EVERY, "monitors", "main/brightness", Some(json!("100")));
+        l.set_plugin_value("steam_app_1808500", "monitors", "side/brightness", Some(json!("25")));
+        assert_eq!(l.wanted_values("steam_app_1808500", "monitors"), json!({ "side/brightness": "25", "main/brightness": "100" }));
+        l.set_plugin_value("steam_app_250820", "monitors", "side/brightness", Some(json!("off")));
+        assert_eq!(l.wanted_values("steam_app_250820", "monitors"), json!({ "side/brightness": "off" }), "an app follows no Every game");
         // a choice taken back follows Every game's again, and an empty record is taken out
-        l.set_plugin_value("steam_app_1808500", "monitor-configurator", "side/brightness", None);
-        assert_eq!(l.wanted_values("steam_app_1808500", "monitor-configurator")["side/brightness"], "lowest");
-        assert!(l.v["plugins"]["monitor-configurator"].get("steam_app_1808500").is_none());
+        l.set_plugin_value("steam_app_1808500", "monitors", "side/brightness", None);
+        assert_eq!(l.wanted_values("steam_app_1808500", "monitors")["side/brightness"], "lowest");
+        assert!(l.v["plugins"]["monitors"].get("steam_app_1808500").is_none());
         assert!(l.has_own("steam_app_250820") && !l.has_own("steam_app_1808500"));
     }
 
