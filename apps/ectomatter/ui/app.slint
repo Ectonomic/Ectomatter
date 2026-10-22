@@ -31,36 +31,36 @@ export global Typing {
     in-out property <bool> on;
 }
 
-global Ink {
-    out property <color> frame: #0e0e10;
-    out property <color> title: #131316;
-    out property <color> base: #18181b;
-    out property <color> box: #1f1f23;
-    out property <color> well: #131316;
+export global Ink {
+    in-out property <color> frame: #0e0e10;
+    in-out property <color> title: #131316;
+    in-out property <color> base: #18181b;
+    in-out property <color> box: #1f1f23;
+    in-out property <color> well: #131316;
     // the mouse's stage, as its approved mock has it: lighter than the keyboard's
     // well, as a black mouse needs
-    out property <color> stage: #1b1b1f;
-    out property <color> hover-well: #24242a;
-    out property <color> hover-box: #2a2a30;
-    out property <color> pick: #36363d;
-    out property <color> pick-hover: #3e3e46;
-    out property <color> pop: #27272c;
-    out property <color> line: #2b2b30;
-    out property <color> ink: #f4f4f5;
-    out property <color> bright: #f4f4f5;
-    out property <color> dim: #d4d4d8;
-    out property <color> soft: #a1a1aa;
-    out property <color> quiet: #74747c;
-    out property <color> warn: #f0b35a;
-    out property <color> bad: #ff8a80;
-    out property <color> good: #8fd6a1;
+    in-out property <color> stage: #1b1b1f;
+    in-out property <color> hover-well: #24242a;
+    in-out property <color> hover-box: #2a2a30;
+    in-out property <color> pick: #36363d;
+    in-out property <color> pick-hover: #3e3e46;
+    in-out property <color> pop: #27272c;
+    in-out property <color> line: #2b2b30;
+    in-out property <color> ink: #f4f4f5;
+    in-out property <color> bright: #f4f4f5;
+    in-out property <color> dim: #d4d4d8;
+    in-out property <color> soft: #a1a1aa;
+    in-out property <color> quiet: #74747c;
+    in-out property <color> warn: #f0b35a;
+    in-out property <color> bad: #ff8a80;
+    in-out property <color> good: #8fd6a1;
     // the shades the pages used before they had names for their parts
-    out property <color> shade1: #1f1f23;
-    out property <color> shade2: #2a2a30;
-    out property <color> shade3: #36363d;
-    out property <color> shade4: #3e3e46;
+    in-out property <color> shade1: #1f1f23;
+    in-out property <color> shade2: #2a2a30;
+    in-out property <color> shade3: #36363d;
+    in-out property <color> shade4: #3e3e46;
     // a slider's track
-    out property <color> track: #131316;
+    in-out property <color> track: #131316;
 }
 
 // how many clickable things the pointer is over: the window shows the hand

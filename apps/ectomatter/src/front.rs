@@ -5231,7 +5231,7 @@ impl Front {
         let Some((scale, imgs)) = &self.mouse_layers else { return };
         let Some((_, hdr)) = self.mouse_hdr.as_mut().filter(|(s, _)| s == scale) else { return };
         let part = mouse_part(&self.ui, *scale, &imgs.layers);
-        let lit = hdr.picture(&imgs.layers, [0x1b, 0x1b, 0x1f], self.mouse_shows.0, self.mouse_shows.1, colors, white, ceiling, part);
+        let lit = hdr.picture(&imgs.layers, crate::ink_env::rgb("stage", [0x1b, 0x1b, 0x1f]), self.mouse_shows.0, self.mouse_shows.1, colors, white, ceiling, part);
         self.mouse_lit = Some(Rc::new(lit));
         self.mouse_part = part;
         self.ui.set_mouse_hdr_ready(true);

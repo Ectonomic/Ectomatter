@@ -39,6 +39,7 @@ mod front_app;
 mod games;
 mod games_page;
 mod hosted;
+mod ink_env;
 mod jobs;
 mod kde_output;
 mod shadow;
@@ -299,7 +300,7 @@ mod kept_tests {
     fn scene() -> (Scene, impl Fn(f32) -> Setup) {
         let device: serde_json::Value = cores::shown().device_now();
         let tree = cores::shown().tree();
-        let board = Board::new(&tree, &device, GROUND, 632, 253).unwrap();
+        let board = Board::new(&tree, &device, ink_env::rgb("well", GROUND), 632, 253).unwrap();
         let base = Physics::from(&device["light"]);
         (Scene::of(&board), move |beam: f32| Setup::alike(Physics { beam, led: 7.0, ..base }))
     }
@@ -355,7 +356,7 @@ fn board_builder(done: calloop::channel::Sender<(bool, Board)>, home: bool) -> s
                 size = s;
             }
             let t = Instant::now();
-            match Board::new(&tree, &device, if home { HOME_GROUND } else { GROUND }, size.0, size.1) {
+            match Board::new(&tree, &device, if home { ink_env::rgb("base", HOME_GROUND) } else { ink_env::rgb("well", GROUND) }, size.0, size.1) {
                 Ok(mut b) => {
                     b.set_legends_from(&size.2);
                     b.lay_shadow(&stage_shadow(size.3), STAGE_SHADOW_OPACITY);
@@ -581,6 +582,7 @@ fn main() {
     slint::platform::set_platform(Box::new(Platform { made: made.clone(), start: Instant::now() })).unwrap();
     glyph_fonts_in_windows();
     let ui = AppWindow::new().unwrap();
+    ink_env::apply(&ui);
     let _ = slint::ComponentHandle::window(&ui);
     let window = made.borrow().last().cloned().expect("the main window's adapter");
     ui.set_mark(glyph(include_str!("../ui/glyphs/mark.svg"), 16, false));
@@ -727,7 +729,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         return snap_lab(front, made, reference, path);
     }
     // lay the page out once, so clicks land where it draws
-    let mut pic = Picture::new(reference, GROUND);
+    let mut pic = Picture::new(reference, ink_env::rgb("well", GROUND));
     pic.resize(w as usize, h as usize);
     window.draw_if_needed(|r| {
         r.render(&mut pic.ui, w as usize);
@@ -955,7 +957,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
             let rect = board_rect(&front.ui, 1.0);
             let tree = cores::shown().tree();
             let device = device_in_use(&front.settings);
-            let board = (rect.2 > 0).then(|| settled(&tree, &device, GROUND, rect.2 as u32, rect.3 as u32));
+            let board = (rect.2 > 0).then(|| settled(&tree, &device, ink_env::rgb("well", GROUND), rect.2 as u32, rect.3 as u32));
             for k in 1..=30 {
                 let t0 = Instant::now();
                 window.dispatch_event(WindowEvent::PointerMoved { position: at(k as f32 / 30.0) });
@@ -1010,7 +1012,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         let tree = cores::shown().tree();
         let device = device_in_use(&front.settings);
         let t = Instant::now();
-        let mut board = settled(&tree, &device, GROUND, rect.2 as u32, rect.3 as u32);
+        let mut board = settled(&tree, &device, ink_env::rgb("well", GROUND), rect.2 as u32, rect.3 as u32);
         // its shadow, as the window lays it
         board.lay_shadow(&stage_shadow(1.0), STAGE_SHADOW_OPACITY);
         if let Some(s) = &board.cast {
@@ -1067,7 +1069,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         let (bw, bh) = (kw.round().max(1.0) as u32, kh.round().max(1.0) as u32);
         let tree = cores::shown().tree();
         let device = device_in_use(&front.settings);
-        let mut board = settled(&tree, &device, HOME_GROUND, bw, bh);
+        let mut board = settled(&tree, &device, ink_env::rgb("base", HOME_GROUND), bw, bh);
         board.lay_shadow(&stage_shadow(1.0), STAGE_SHADOW_OPACITY);
         if let Some(s) = &board.cast {
             front.ui.set_desk_kb_shadow(shadow_image(s, board.w, board.h));
@@ -1320,7 +1322,7 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
         .unwrap_or(LAB_SIZE);
     let device = device_in_use(&front.settings);
     let tree = cores::shown().tree();
-    let board = settled(&tree, &device, GROUND, 1264, 506);
+    let board = settled(&tree, &device, ink_env::rgb("well", GROUND), 1264, 506);
     let ui = LabWindow::new().unwrap();
     let _ = slint::ComponentHandle::window(&ui);
     let window = made.borrow().last().cloned().unwrap();
@@ -1929,7 +1931,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
             (f.mouse.ask, f.mouse.tell) = mouse_ask.unzip();
             f
         },
-        pic: Picture::new(reference, GROUND),
+        pic: Picture::new(reference, ink_env::rgb("well", GROUND)),
         gain,
         board: None,
         lights: Vec::new(),
