@@ -241,7 +241,7 @@ fn draw(p: &Pic) -> Option<slint::SharedPixelBuffer<slint::Rgba8Pixel>> {
 /// label's room in a row (a device's glyph on its square, then its name) and the
 /// dropdowns' width.
 const X0: f32 = 24.0;
-const COLUMN: f32 = 960.0;
+const COLUMN: f32 = 1076.0;
 const PAD_X: f32 = 24.0;
 const LABEL_W: f32 = 236.0;
 const GLYPH: f32 = 36.0;
@@ -249,11 +249,12 @@ const DROP_W: f32 = 300.0;
 /// where a page's boxes start: under the line of words at its top
 const HEAD_END: f32 = 12.0 + 36.0 + 6.0;
 /// On this page: its column on the page's left (it's for getting about the
-/// page), at least and at most this wide, and the room after it before the
-/// sections; it takes what the sections' column leaves, so the sections end
-/// where the game's picture does
-const TOC_W: f32 = 236.0;
-const TOC_W_MAX: f32 = 336.0;
+/// page), at least and at most this wide (about what a docs site's On this page
+/// takes; its names and what they change need no more), and the room after it
+/// before the sections; it takes what the sections' column leaves, so the
+/// sections end where the game's picture does
+const TOC_W: f32 = 200.0;
+const TOC_W_MAX: f32 = 220.0;
 const TOC_GAP: f32 = 32.0;
 /// the covers: at least this wide, with these gaps across and down
 const COVER_MIN: f32 = 150.0;
