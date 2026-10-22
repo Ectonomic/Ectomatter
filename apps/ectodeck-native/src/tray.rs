@@ -101,3 +101,21 @@ pub fn start(tell: Sender<TrayAsk>) -> Option<Handle> {
         }
     }
 }
+
+/// A notice from Ectodeck on the desktop, as other programs give one (the
+/// desktop's notification service), sent on a thread of its own so nothing
+/// waits for it. For what the person needs to know while the window may be
+/// shut: what Ectodeck put back after it stopped short.
+pub fn notify(title: &str, body: &str) {
+    let (title, body) = (title.to_string(), body.to_string());
+    let _ = std::thread::Builder::new().name("notice".into()).spawn(move || {
+        let Ok(conn) = zbus::blocking::Connection::session() else { return };
+        let Ok(n) = zbus::blocking::Proxy::new(&conn, "org.freedesktop.Notifications", "/org/freedesktop/Notifications", "org.freedesktop.Notifications") else { return };
+        let hints: std::collections::HashMap<&str, zbus::zvariant::Value> = std::collections::HashMap::new();
+        let r: zbus::Result<u32> = n.call("Notify", &("Ectodeck", 0u32, "ectodeck", title.as_str(), body.as_str(), Vec::<&str>::new(), hints, -1i32));
+        match r {
+            Ok(id) => eprintln!("ectodeck-native: told the desktop: {title} (notice {id})"),
+            Err(e) => eprintln!("ectodeck-native: couldn’t tell the desktop {title}: {e}"),
+        }
+    });
+}

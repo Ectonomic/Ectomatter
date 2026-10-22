@@ -103,6 +103,15 @@ pub fn wrap(weight: u16, size: f32, s: &str, max: f32) -> Vec<String> {
 }
 
 /// A whole number with its thousands set apart by commas: 200,000.
+/// Things in a sentence: "a", "a and b", "a, b and c".
+pub fn list(items: &[String]) -> String {
+    match items.len() {
+        0 => String::new(),
+        1 => items[0].clone(),
+        n => format!("{} and {}", items[..n - 1].join(", "), items[n - 1]),
+    }
+}
+
 pub fn thousands(n: u64) -> String {
     let s = n.to_string();
     let mut out = String::new();

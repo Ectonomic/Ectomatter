@@ -21,7 +21,7 @@ mod world {
     wasmtime::component::bindgen!({
         path: "../../wit",
         world: "core",
-        with: { "ectodeck:core/usb.hid-device": super::Lent },
+        with: { "ectodeck:core/usb.hid-device": super::Lent, "ectodeck:core/net.tcp-stream": super::Stream },
     });
     pub use Core as World;
 }
@@ -48,6 +48,49 @@ pub trait Hid: Send {
 
 /// A device a core has open: its collection, behind the core's handle.
 pub struct Lent(Box<dyn Hid>);
+
+/// A connection a core has made, to an address its manifest names.
+pub struct Stream(std::net::TcpStream);
+
+/// What a core's manifest says it does beyond its USB devices (its `uses`),
+/// which is all of the computer it may reach through Ectodeck.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Uses {
+    /// the monitors: read them, and have Ectodeck change them while a game runs
+    pub monitors: bool,
+    /// the commands the person types into its section, which Ectodeck runs
+    pub commands: bool,
+    /// the addresses it may connect to, each with what is there ("OpenRGB")
+    pub network: Vec<(String, String)>,
+    /// anything else it names, as it names it ("sound-capture")
+    pub other: Vec<String>,
+}
+
+impl Uses {
+    pub fn of(v: &Value) -> Uses {
+        let mut u = Uses::default();
+        for x in v.as_array().into_iter().flatten() {
+            match x {
+                Value::String(s) if s == "monitors" => u.monitors = true,
+                Value::String(s) if s == "commands" => u.commands = true,
+                Value::String(s) => u.other.push(s.clone()),
+                Value::Object(o) => {
+                    if let Some(a) = o.get("network").and_then(Value::as_str) {
+                        u.network.push((a.to_string(), o.get("to").and_then(Value::as_str).unwrap_or(a).to_string()));
+                    }
+                }
+                _ => {}
+            }
+        }
+        u
+    }
+}
+
+/// The computer as a core may read it through Ectodeck, beyond its USB
+/// devices: its monitors, as the system interface's `monitors` gives them.
+pub trait Computer: Send + Sync {
+    fn monitors(&self) -> Result<Value, String>;
+}
 
 /// A computer with no devices, for asking a core what it says of itself
 /// without it reaching any.
@@ -180,6 +223,8 @@ struct Run {
     table: ResourceTable,
     usb: Box<dyn Usb>,
     matches: Vec<Match>,
+    uses: Uses,
+    computer: Option<std::sync::Arc<dyn Computer>>,
     timers: Vec<(Instant, u32)>,
     id: String,
     asked: Inbox,
@@ -261,6 +306,74 @@ impl ectodeck::core::usb::HostHidDevice for Run {
     }
 }
 
+impl ectodeck::core::system::Host for Run {
+    fn monitors(&mut self) -> Result<String, String> {
+        if !self.uses.monitors {
+            return Err(format!("{} may not read the monitors: its manifest doesn’t name them", self.id));
+        }
+        let c = self.computer.as_ref().ok_or("Ectodeck can’t reach this computer’s monitors")?;
+        c.monitors().map(|v| v.to_string())
+    }
+}
+
+/// An address as a manifest names it, as one to connect to: a number's, or
+/// this computer's by its name (no name is looked up anywhere else).
+fn address_of(a: &str) -> Option<std::net::SocketAddr> {
+    a.parse().ok().or_else(|| {
+        let port = a.strip_prefix("localhost:")?.parse().ok()?;
+        Some(std::net::SocketAddr::from(([127, 0, 0, 1], port)))
+    })
+}
+
+impl ectodeck::core::net::Host for Run {
+    fn connect(&mut self, address: String, timeout_ms: u32) -> Result<Resource<Stream>, String> {
+        // only an address the manifest names
+        if !self.uses.network.iter().any(|(a, _)| *a == address) {
+            return Err(format!("{} may not connect to {address}", self.id));
+        }
+        let at = address_of(&address).ok_or_else(|| format!("{address} isn’t an address Ectodeck can connect to"))?;
+        let s = std::net::TcpStream::connect_timeout(&at, Duration::from_millis(timeout_ms.max(1) as u64)).map_err(|e| e.to_string())?;
+        let _ = s.set_nodelay(true);
+        self.table.push(Stream(s)).map_err(|e| e.to_string())
+    }
+}
+
+impl ectodeck::core::net::HostTcpStream for Run {
+    fn write(&mut self, s: Resource<Stream>, bytes: Vec<u8>) -> Result<u32, String> {
+        use std::io::Write;
+        let s = &mut self.table.get_mut(&s).map_err(|e| e.to_string())?.0;
+        s.write_all(&bytes).map_err(|e| e.to_string())?;
+        Ok(bytes.len() as u32)
+    }
+    fn read(&mut self, s: Resource<Stream>, max: u32, timeout_ms: u32) -> Result<Vec<u8>, String> {
+        use std::io::Read;
+        let s = &mut self.table.get_mut(&s).map_err(|e| e.to_string())?.0;
+        let mut buf = vec![0u8; max.clamp(1, 1 << 20) as usize];
+        let got = if timeout_ms == 0 {
+            s.set_nonblocking(true).map_err(|e| e.to_string())?;
+            let r = s.read(&mut buf);
+            let _ = s.set_nonblocking(false);
+            r
+        } else {
+            s.set_read_timeout(Some(Duration::from_millis(timeout_ms as u64))).map_err(|e| e.to_string())?;
+            s.read(&mut buf)
+        };
+        match got {
+            Ok(0) => Err("the connection has closed".into()),
+            Ok(n) => {
+                buf.truncate(n);
+                Ok(buf)
+            }
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => Ok(Vec::new()),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+    fn drop(&mut self, s: Resource<Stream>) -> wasmtime::Result<()> {
+        self.table.delete(s)?;
+        Ok(())
+    }
+}
+
 impl ectodeck::core::host::Host for Run {
     fn notify(&mut self, method: String, params: String) {
         // (a control's every press isn't worth a line)
@@ -317,13 +430,17 @@ impl Run {
     }
 }
 
-/// A core's manifest, as Ectodeck reads it.
+/// A core's manifest, as Ectodeck reads it (and the whole of it as written,
+/// for what the rest of Ectodeck reads of it: its description, its glyph).
+#[derive(Clone)]
 pub struct Manifest {
     pub id: String,
     pub name: String,
     pub version: String,
     module: PathBuf,
     matches: Vec<Match>,
+    pub uses: Uses,
+    pub all: Value,
 }
 
 impl Manifest {
@@ -338,7 +455,15 @@ impl Manifest {
             version: s("version")?,
             module: dir.join(s("module")?),
             matches: m["matches"].as_array().map(|a| a.iter().filter_map(Match::of).collect()).unwrap_or_default(),
+            uses: Uses::of(&m["uses"]),
+            all: m,
         })
+    }
+
+    /// Whether it reaches any USB device: a device's core does; a plugin
+    /// that adds to Ectodeck's pages may not.
+    pub fn has_usb(&self) -> bool {
+        !self.matches.is_empty()
     }
 }
 
@@ -360,6 +485,12 @@ impl Core {
     /// `data`, its devices reached through `usb`. The module is made ready
     /// on the core's thread, so the first call waits for that.
     pub fn start(dir: &Path, data: PathBuf, usb: Box<dyn Usb>) -> Result<Core, String> {
+        Core::start_with(dir, data, usb, None)
+    }
+
+    /// The same, the core also reaching the computer as its manifest's `uses`
+    /// allows (its monitors, through `computer`).
+    pub fn start_with(dir: &Path, data: PathBuf, usb: Box<dyn Usb>, computer: Option<std::sync::Arc<dyn Computer>>) -> Result<Core, String> {
         let manifest = Manifest::read(dir)?;
         let id = manifest.id.clone();
         let (ask, asked) = mpsc::channel::<Ask>();
@@ -368,7 +499,7 @@ impl Core {
         let t = told.clone();
         std::thread::Builder::new()
             .name(name)
-            .spawn(move || run(manifest, data, usb, asked, t))
+            .spawn(move || run(manifest, data, usb, computer, asked, t))
             .map_err(|e| e.to_string())?;
         Ok(Core { id, ask, told })
     }
@@ -403,14 +534,14 @@ struct Live {
     core: World,
 }
 
-fn make(engine: &Engine, component: &Component, m: &Manifest, data: &Path, usb: Box<dyn Usb>, asked: Inbox, told: Told) -> Result<Live, String> {
+fn make(engine: &Engine, component: &Component, m: &Manifest, data: &Path, usb: Box<dyn Usb>, computer: Option<std::sync::Arc<dyn Computer>>, asked: Inbox, told: Told) -> Result<Live, String> {
     std::fs::create_dir_all(data).map_err(|e| format!("{}: {e}", data.display()))?;
     let wasi = WasiCtxBuilder::new()
         .inherit_stderr()
         .preopened_dir(data, "/data", FsPerms::ReadWrite)
         .map_err(|e| format!("{}: {e}", data.display()))?
         .build();
-    let run = Run { wasi, table: ResourceTable::new(), usb, matches: m.matches.clone(), timers: Vec::new(), id: m.id.clone(), asked, held: VecDeque::new(), taken: Vec::new(), next_id: 0, told };
+    let run = Run { wasi, table: ResourceTable::new(), usb, matches: m.matches.clone(), uses: m.uses.clone(), computer, timers: Vec::new(), id: m.id.clone(), asked, held: VecDeque::new(), taken: Vec::new(), next_id: 0, told };
     let mut linker = Linker::<Run>::new(engine);
     wasmtime_wasi::p2::add_to_linker_sync(&mut linker).map_err(|e| e.to_string())?;
     World::add_to_linker::<_, HasSelf<_>>(&mut linker, |r| r).map_err(|e| e.to_string())?;
@@ -419,13 +550,13 @@ fn make(engine: &Engine, component: &Component, m: &Manifest, data: &Path, usb: 
     Ok(Live { store, core })
 }
 
-fn run(m: Manifest, data: PathBuf, usb: Box<dyn Usb>, asked: mpsc::Receiver<Ask>, told: Told) {
+fn run(m: Manifest, data: PathBuf, usb: Box<dyn Usb>, computer: Option<std::sync::Arc<dyn Computer>>, asked: mpsc::Receiver<Ask>, told: Told) {
     let t0 = Instant::now();
     let engine = Engine::default();
     let inbox: Inbox = std::sync::Arc::new(std::sync::Mutex::new(asked));
     let made = Component::from_file(&engine, &m.module)
         .map_err(|e| format!("the {} core's module ({}) would not load: {e}", m.id, m.module.display()))
-        .and_then(|c| make(&engine, &c, &m, &data, usb, inbox.clone(), told));
+        .and_then(|c| make(&engine, &c, &m, &data, usb, computer, inbox.clone(), told));
     let asked = inbox;
     eprintln!("ectodeck-native: the {} core ({} {}) made ready in {} ms", m.id, m.name, m.version, t0.elapsed().as_millis());
     let mut live = match made {

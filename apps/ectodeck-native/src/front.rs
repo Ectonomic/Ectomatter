@@ -117,6 +117,17 @@ pub enum Ask {
     GlSeen(i32),
     GlRemove,
     GlUndo,
+    /// a page's On this page entry selected; in a script's form, its two
+    /// checkboxes, its time limit's menu (where it hangs), Remove, and words typed
+    GlToc(i32),
+    GlScriptWait,
+    GlScriptKeep,
+    GlScriptLimit(f32, f32, f32),
+    GlScriptRemove,
+    GlScriptTyped,
+    /// in Add a plugin: Choose…, and an address typed
+    GlPluginFile,
+    GlPluginTyped,
     /// the Screen tab's Game launch: a row's checkbox, its layout's bar selected, its
     /// until menu (where it hangs), and a layout carried over its rows (which row, or
     /// -1, and its place in Layouts)
@@ -526,6 +537,22 @@ struct Menu {
 /// The file picker open for a typeface, in place of a part of a legend's picture.
 const TYPEFACE_PICK: usize = usize::MAX;
 
+/// The form for adding a plugin, while it's open: the repository or file it's
+/// to come from, what was found there (its manifest) or why nothing was, and
+/// a look, a file being chosen, or the plugin being put in place, while one is.
+#[derive(Default)]
+pub struct PluginForm {
+    repo: Option<String>,
+    file: Option<std::path::PathBuf>,
+    found: Option<serde_json::Value>,
+    why: Option<String>,
+    typed_at: Option<Instant>,
+    looked_for: Option<String>,
+    looking: Option<mpsc::Receiver<Result<serde_json::Value, String>>>,
+    picking: Option<mpsc::Receiver<Option<std::path::PathBuf>>>,
+    adding: Option<mpsc::Receiver<Result<crate::core_host::Manifest, String>>>,
+}
+
 pub struct Front {
     pub ui: AppWindow,
     pub page: Page,
@@ -632,6 +659,26 @@ pub struct Front {
     /// (the keyboard's, the mouse's)
     pub games: crate::games_page::Games,
     ties_taken: [bool; 2],
+    /// the plugins running (plugins.rs), and the thread that makes their changes
+    /// as a game starts and puts them back as it quits (putback.rs); whether what
+    /// an Ectodeck before this one left changed has been settled; the profile each
+    /// device a plugin brought in was switched to for the app in front
+    pub plugins: crate::plugins::Plugins,
+    pub worker: crate::putback::Worker,
+    settled: bool,
+    following: HashMap<String, String>,
+    /// the packages, in Settings' order, as their glyphs are given to the window;
+    /// the form for adding one, while it's open; the daily look for updates
+    packages: Vec<crate::packages::Package>,
+    plugin_form: Option<PluginForm>,
+    updates: crate::updates::Checker,
+    /// each window open, by KWin's id for it, and the app it's from; the apps not
+    /// run through Steam whose plugins' changes are made, from their first window
+    /// opening to their last closing
+    windows: HashMap<String, String>,
+    app_sessions: std::collections::HashSet<String>,
+    /// an added plugin asked about removing
+    removing: Option<String>,
     /// what the system says of the mouse, looked at every two seconds, as the keyboard's
     mouse_status: Option<(Instant, serde_json::Value)>,
     mouse_icons: Option<(f32, Vec<slint::Image>)>,
@@ -932,6 +979,14 @@ impl Front {
         on!(on_gl_seen_pick, |i| Ask::GlSeen(i));
         on!(on_gl_remove, Ask::GlRemove);
         on!(on_gl_undo, Ask::GlUndo);
+        on!(on_gl_toc_jump, |i| Ask::GlToc(i));
+        on!(on_gl_script_wait_toggle, Ask::GlScriptWait);
+        on!(on_gl_script_keep_toggle, Ask::GlScriptKeep);
+        on!(on_gl_script_limit_menu, |x, y, h| Ask::GlScriptLimit(x, y, h));
+        on!(on_gl_script_remove, Ask::GlScriptRemove);
+        on!(on_gl_script_typed, Ask::GlScriptTyped);
+        on!(on_gl_plugin_choose_file, Ask::GlPluginFile);
+        on!(on_gl_plugin_typed, Ask::GlPluginTyped);
         on!(on_gl_row_on, |i| Ask::GlRowOn(i));
         on!(on_gl_row_pick, |i| Ask::GlRowPick(i));
         on!(on_gl_row_until, |i, x, y, h| Ask::GlRowUntil(i, x, y, h));
@@ -1005,10 +1060,25 @@ impl Front {
             })
             .collect();
         let slider_ends = crate::uistate::get("slider_ends").and_then(|v| serde_json::from_value(v).ok()).unwrap_or([[400.0, 3700.0], [400.0, 3700.0]]);
+        let mut plugins = crate::plugins::Plugins::new(std::sync::Arc::new(crate::monitors::Desk));
+        plugins.start_all(&settings);
+        // (offscreen, nothing is changed: the thread has no monitors to reach)
+        let screens: Option<Box<dyn crate::putback::Screens>> = if crate::desk::offscreen() { None } else { Some(Box::new(crate::monitors::Hands)) };
+        let worker = crate::putback::Worker::start(crate::putback::Journal::load(crate::putback::kept_at()), screens);
         let mut f = Front {
             mouse: crate::mouse::Page::new(),
             games: crate::games_page::Games::new(&ui),
             ties_taken: [false, false],
+            plugins,
+            worker,
+            settled: false,
+            following: HashMap::new(),
+            packages: Vec::new(),
+            plugin_form: None,
+            updates: crate::updates::Checker::start(),
+            windows: HashMap::new(),
+            app_sessions: Default::default(),
+            removing: None,
             mouse_status: None,
             mouse_icons: None,
             mouse_layers: None,
@@ -1215,6 +1285,7 @@ impl Front {
             f.ui.set_boot_title("Control is off".into());
             f.ui.set_boot_text("Ectodeck leaves this keyboard to other programs.".into());
         }
+        f.give_packages();
         f.refresh();
         f
     }
@@ -1940,7 +2011,9 @@ impl Front {
                 Ask::ObChoose(x, y, h) => self.open_ob_menu((x, y, h)),
                 Ask::LibMenu(k, x, y) => self.open_lib_menu(k.max(0) as usize, (x, y)),
                 Ask::ConfirmYes => {
-                    if let (Some(id), Some((_, cat, _))) = (self.unchecking.take(), self.sensors_seen.clone()) {
+                    if let Some(id) = self.removing.take() {
+                        self.remove_plugin(&id);
+                    } else if let (Some(id), Some((_, cat, _))) = (self.unchecking.take(), self.sensors_seen.clone()) {
                         let mut s = crate::sensors::setup();
                         s.check(&cat, &id, false);
                         self.keep_setup(s);
@@ -1952,14 +2025,42 @@ impl Front {
                 Ask::ConfirmNo => {
                     self.deleting = None;
                     self.unchecking = None;
+                    self.removing = None;
                     self.ui.set_confirm_open(false);
                 }
                 Ask::LcdTick => {
                     // the Library: Steam read, the games started and quit, the pictures drawn
                     let showing = self.ui.get_place() == "library";
-                    let (events, news) = self.games.poll(showing);
+                    let (events, mut news) = self.games.poll(showing);
+                    if !self.settled && self.games.looked() {
+                        self.settled = true;
+                        self.worker.settle(self.games.running.clone());
+                    }
                     if !events.is_empty() {
                         self.games_seen(events);
+                    }
+                    if self.plugins.poll() {
+                        news = true;
+                        if self.ui.get_place() == "settings" {
+                            self.refresh();
+                        }
+                    }
+                    news |= self.worker_told();
+                    if self.plugin_form.is_some() {
+                        self.plugin_form_tick();
+                    }
+                    while let Ok(id) = self.updates.updated.try_recv() {
+                        // an update put in place: its plugin started again on it
+                        self.give_packages();
+                        if let Some(p) = self.packages.iter().find(|p| p.id() == id).cloned() {
+                            if self.plugins.get(&id).is_some() {
+                                self.plugins.stop(&id);
+                                self.plugins.start(p);
+                            }
+                        }
+                        if self.ui.get_place() == "settings" {
+                            self.refresh();
+                        }
                     }
                     if news && showing {
                         self.show_library();
@@ -2223,9 +2324,41 @@ impl Front {
                 Ask::GlStarPage => self.games.star_page(),
                 Ask::GlPlay => self.games.play(&self.front_apps),
                 Ask::GlProgram => self.games.choose_program(),
-                Ask::GlAddDone => self.games.add_done(&self.ui),
+                Ask::GlAddDone => {
+                    if self.plugin_form.is_some() {
+                        self.plugin_add_done();
+                    } else {
+                        self.games.add_done(&self.ui);
+                    }
+                }
                 Ask::GlClose => {
-                    self.games.close_form();
+                    if self.plugin_form.take().is_some() {
+                        self.ui.set_gl_modal(0);
+                    } else {
+                        self.games.close_form();
+                    }
+                }
+                Ask::GlPluginFile => {
+                    if let Some(f) = &mut self.plugin_form {
+                        if f.picking.is_none() {
+                            // (offscreen, ECTODECK_NATIVE_PLUGIN_FILE's file, as if chosen there)
+                            f.picking = Some(match std::env::var_os("ECTODECK_NATIVE_PLUGIN_FILE").filter(|_| crate::desk::offscreen()) {
+                                Some(file) => {
+                                    let (tx, rx) = mpsc::channel();
+                                    let _ = tx.send(Some(std::path::PathBuf::from(file)));
+                                    rx
+                                }
+                                None => crate::picker::open_file("Choose a plugin’s file", "Plugins", &["*.ectocore", "*.zip"]),
+                            });
+                        }
+                    }
+                }
+                Ask::GlPluginTyped => {
+                    if let Some(f) = &mut self.plugin_form {
+                        f.typed_at = Some(Instant::now());
+                        f.file = None;
+                    }
+                    self.show_plugin_form();
                 }
                 Ask::GlSeen(i) => self.games.seen_pick(i),
                 Ask::GlRemove => {
@@ -2233,6 +2366,16 @@ impl Front {
                     self.games.remove(&self.front_apps);
                 }
                 Ask::GlUndo => self.games.undo(),
+                Ask::GlToc(i) => self.games.toc_jump(i.max(0) as usize, &self.ui),
+                Ask::GlScriptWait => self.games.script_wait(),
+                Ask::GlScriptKeep => self.games.script_keep(),
+                Ask::GlScriptLimit(x, y, h) => self.open_games_menu(crate::games_page::Menu::Limit, (x, y, h)),
+                Ask::GlScriptRemove => {
+                    self.close_menu();
+                    self.games.remove_script();
+                }
+                // (Add turns on once a command is typed)
+                Ask::GlScriptTyped => {}
                 Ask::GlRowOn(i) => {
                     let k = Self::launch_key(i);
                     let on = !self.game_launch_value(k)["on"].as_bool().unwrap_or(true);
@@ -2605,6 +2748,57 @@ impl Front {
             Ctl::LibChoice => {
                 self.open_games_menu(crate::games_page::Menu::Device(index), _anchor);
                 self.refresh();
+                return;
+            }
+            Ctl::LibSetting => {
+                self.open_games_menu(crate::games_page::Menu::Setting(index), _anchor);
+                self.refresh();
+                return;
+            }
+            Ctl::LibScript => {
+                self.close_menu();
+                self.games.edit_script(index, &self.ui);
+                self.refresh();
+                return;
+            }
+            Ctl::LibScriptRun => {
+                if let Some(s) = self.games.run_now(index) {
+                    self.worker.try_now(s);
+                }
+                self.refresh();
+                return;
+            }
+            Ctl::LibScriptAdd => {
+                self.close_menu();
+                self.games.add_script(&self.ui);
+                self.refresh();
+                return;
+            }
+            Ctl::PluginOn => {
+                self.plugin_switch(index / 2, index % 2 == 0);
+                self.refresh();
+                return;
+            }
+            Ctl::PluginAdd => {
+                self.close_menu();
+                self.add_plugin_form();
+                self.refresh();
+                return;
+            }
+            Ctl::PluginRemove => {
+                // first the question, saying what's left after
+                let Some(p) = self.packages.get(index).cloned() else { return };
+                let after = if crate::packages::all_in(&crate::cores::dir(), std::path::Path::new("")).iter().any(|b| b.id() == p.id()) {
+                    format!("Ectodeck goes back to the {} that comes with it.", p.name())
+                } else {
+                    format!("Its sections and devices go from Ectodeck, and what it changed for a game running is put back. The choices made in its sections are kept, for if you add {} again.", p.name())
+                };
+                self.ui.set_confirm_title(format!("Remove {} {}?", p.name(), p.version()).into());
+                self.ui.set_confirm_body(after.into());
+                self.ui.set_confirm_keep("Keep".into());
+                self.ui.set_confirm_do("Remove".into());
+                self.removing = Some(p.id().to_string());
+                self.ui.set_confirm_open(true);
                 return;
             }
 
@@ -4422,8 +4616,10 @@ impl Front {
             }
             let dc = self.dev_status.as_ref().map(|(_, v)| v.clone()).unwrap_or_default();
             let sensors = self.sensors_view();
+            self.plugins.poll();
             let st = crate::ecto_settings::State {
                 sensors: Some(sensors),
+                plugins: self.plugin_rows(),
                 status: dc,
                 control: self.controlled,
                 settings: self.settings.all(),
@@ -5745,11 +5941,11 @@ impl Front {
                 "z10" => {
                     let known = self.page.dev.is_some();
                     let profiles = z10::PROFILE_NUMBERS.iter().map(|n| (n.to_string(), if known { self.page.profile_name(*n) } else { format!("Profile {n}") })).collect();
-                    out.push(crate::games_page::Device { key: "z10".into(), name, kind, profiles });
+                    out.push(crate::games_page::Device { key: "z10".into(), name, kind, profiles, glyph: None, sub: String::new() });
                 }
                 "mouse" => {
                     if let Some(s) = &self.mouse.profiles {
-                        out.push(crate::games_page::Device { key: "sensei310".into(), name, kind, profiles: s.list.iter().map(|p| (p.id.clone(), p.name.clone())).collect() });
+                        out.push(crate::games_page::Device { key: "sensei310".into(), name, kind, profiles: s.list.iter().map(|p| (p.id.clone(), p.name.clone())).collect(), glyph: None, sub: String::new() });
                     }
                 }
                 _ => {}
@@ -5758,10 +5954,37 @@ impl Front {
         out
     }
 
-    /// The Library's page as it is now.
+    /// The devices plugins brought in, as a Library page lists them: each by its
+    /// own id, its profiles its plugin's, with its plugin's glyph.
+    fn plugin_devices(&self) -> Vec<crate::games_page::Device> {
+        self.plugins
+            .devices()
+            .into_iter()
+            .map(|(plugin, d)| {
+                let profiles = d["capabilities"]["profiles"]["list"].as_array().into_iter().flatten().filter_map(|p| Some((p["id"].as_str()?.to_string(), p["name"].as_str().unwrap_or("").to_string()))).collect();
+                let glyph = self.packages.iter().position(|p| p.id() == plugin);
+                let sub = match d["sub"].as_str().unwrap_or("") {
+                    "" => format!("Through {}", self.plugins.get(&plugin).map_or(plugin.clone(), |p| p.package.name().to_string())),
+                    s => s.to_string(),
+                };
+                crate::games_page::Device { key: d["device"].as_str().unwrap_or("").to_string(), name: d["name"].as_str().unwrap_or("").to_string(), kind: d["kind"].as_str().unwrap_or("").to_string(), profiles, glyph, sub }
+            })
+            .collect()
+    }
+
+    /// The Library's page as it is now, with each plugin's section for the page open.
     fn show_library(&mut self) {
-        let devices = self.lib_devices();
-        self.games.show(&self.ui, &devices, self.scale, &self.front_apps);
+        let mut devices = self.lib_devices();
+        devices.extend(self.plugin_devices());
+        let sections = match self.games.open.clone() {
+            Some(id) => {
+                let kind = if id == crate::games::EVERY { "every" } else if self.games.library.is_game(&id) { "game" } else { "app" };
+                let name = self.games.name(&id, &self.front_apps);
+                self.plugins.sections(kind, &name).into_iter().map(|(plugin, desc)| crate::games_page::Section { name: self.plugins.get(&plugin).map(|p| p.package.name().to_string()).unwrap_or_default(), plugin, desc }).collect()
+            }
+            None => Vec::new(),
+        };
+        self.games.show(&self.ui, &devices, sections, self.scale, &self.front_apps);
     }
 
     /// One of the Library's menus opened: the store's, the order's, or a
@@ -5784,9 +6007,350 @@ impl Front {
         self.games.menu = Some(m);
     }
 
+    /// The packages, read again, and each one's glyph given to the window, at
+    /// a device's row's size in the Library and a tile's in Settings.
+    fn give_packages(&mut self) {
+        self.packages = crate::packages::all();
+        let at = |px: u32| -> Vec<slint::Image> { self.packages.iter().map(|p| p.glyph().map(|g| crate::package_glyph(&g, px)).unwrap_or_default()).collect() };
+        let (small, tile) = (at(22), at(25));
+        self.ui.set_package_glyphs(ModelRc::new(VecModel::from(small)));
+        self.ui.set_package_tiles(ModelRc::new(VecModel::from(tile)));
+    }
+
+    /// Settings' Plugins: each package's row.
+    fn plugin_rows(&self) -> Vec<crate::ecto_settings::PluginRow> {
+        self.packages
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let on = if p.id() == crate::z10::CORE { self.controlled } else { self.settings.on(&p.switch()) };
+                let running = self.plugins.get(p.id());
+                let status = if p.repository().is_none() { if p.added { "Added from a file".to_string() } else { "Comes with Ectodeck".to_string() } } else { crate::updates::status_of(p) };
+                crate::ecto_settings::PluginRow {
+                    name: p.name().to_string(),
+                    description: p.description(),
+                    can: p.can(),
+                    version: p.version().to_string(),
+                    status,
+                    on,
+                    warning: running.and_then(|r| r.warning.clone()).filter(|_| on),
+                    glyph: i,
+                    removable: p.added,
+                }
+            })
+            .collect()
+    }
+
+    /// Add a plugin, from Settings: its form.
+    fn add_plugin_form(&mut self) {
+        self.plugin_form = Some(PluginForm::default());
+        self.ui.set_gl_plugin_address("".into());
+        self.show_plugin_form();
+    }
+
+    /// The form as it stands: what was found, and whether it can be added.
+    fn show_plugin_form(&mut self) {
+        let Some(f) = &self.plugin_form else { return };
+        self.ui.set_gl_modal(4);
+        // (the file by its name: the folder it's in says less than its name)
+        self.ui.set_gl_plugin_file(f.file.as_ref().map(|p| p.file_name().map_or_else(|| p.to_string_lossy().to_string(), |n| n.to_string_lossy().to_string())).unwrap_or_default().into());
+        let (mut can_add, mut state, mut bad) = (false, String::new(), false);
+        match &f.found {
+            Some(m) => {
+                let name = m["name"].as_str().unwrap_or("A plugin");
+                let version = m["version"].as_str().unwrap_or("");
+                self.ui.set_gl_plugin_found(format!("{name} {version}").trim().into());
+                self.ui.set_gl_plugin_found_sub(m["description"].as_str().unwrap_or("").into());
+                self.ui.set_gl_plugin_can(crate::packages::can_words(m).join("\n").into());
+                let id = m["id"].as_str().unwrap_or("");
+                let have = self.packages.iter().find(|p| p.id() == id);
+                if let Err(why) = crate::updates::runs_here(m) {
+                    (state, bad) = (format!("This Ectodeck can’t use it: {why}."), true);
+                } else if let Some(h) = have.filter(|h| crate::packages::version_key(h.version()) >= crate::packages::version_key(version)) {
+                    state = format!("Ectodeck already has {} {}.", h.name(), h.version());
+                } else if f.adding.is_some() {
+                    state = "Adding…".into();
+                } else {
+                    can_add = true;
+                }
+            }
+            None => {
+                self.ui.set_gl_plugin_found("".into());
+                self.ui.set_gl_plugin_found_sub("".into());
+                self.ui.set_gl_plugin_can("".into());
+                if let Some(why) = &f.why {
+                    (state, bad) = (why.clone(), true);
+                } else if f.looking.is_some() {
+                    state = format!("Looking for {} on GitHub…", f.looked_for.clone().unwrap_or_default());
+                }
+            }
+        }
+        self.ui.set_gl_plugin_state(state.into());
+        self.ui.set_gl_plugin_bad(bad);
+        self.ui.set_gl_can_add(can_add);
+    }
+
+    /// What came of the form's looking: an address looked up once its typing
+    /// rests, a file read once it's chosen, a plugin put in place.
+    fn plugin_form_tick(&mut self) {
+        let typed = self.ui.get_gl_plugin_address().to_string();
+        let Some(f) = &mut self.plugin_form else { return };
+        let mut changed = false;
+        if f.typed_at.is_some_and(|t| t.elapsed() >= Duration::from_millis(500)) {
+            f.typed_at = None;
+            let repo = crate::packages::repository_of(&typed);
+            if repo != f.looked_for {
+                f.found = None;
+                f.why = None;
+                f.looked_for = repo.clone();
+                f.repo = repo.clone();
+                f.looking = repo.map(|r| {
+                    let (tx, rx) = mpsc::channel();
+                    let _ = std::thread::Builder::new().name("plugin look".into()).spawn(move || {
+                        let _ = tx.send(crate::updates::release_manifest(&r));
+                    });
+                    rx
+                });
+                if f.looking.is_none() && !typed.trim().is_empty() {
+                    f.why = Some("That isn’t a GitHub address. It looks like github.com/owner/name.".into());
+                }
+                changed = true;
+            }
+        }
+        if let Some(rx) = &f.looking {
+            if let Ok(r) = rx.try_recv() {
+                f.looking = None;
+                match r {
+                    Ok(m) => f.found = Some(m),
+                    Err(e) => f.why = Some(format!("No plugin there: {e}.")),
+                }
+                changed = true;
+            }
+        }
+        if let Some(rx) = &f.picking {
+            if let Ok(chosen) = rx.try_recv() {
+                f.picking = None;
+                if let Some(p) = chosen {
+                    f.repo = None;
+                    f.looked_for = None;
+                    match crate::packages::manifest_in_file(&p) {
+                        Ok(m) => {
+                            f.found = Some(m);
+                            f.why = None;
+                        }
+                        Err(e) => {
+                            f.found = None;
+                            f.why = Some(e);
+                        }
+                    }
+                    f.file = Some(p);
+                    self.ui.set_gl_plugin_address("".into());
+                }
+                changed = true;
+            }
+        }
+        if let Some(rx) = &f.adding {
+            if let Ok(r) = rx.try_recv() {
+                f.adding = None;
+                match r {
+                    Ok(m) => {
+                        self.plugin_form = None;
+                        self.ui.set_gl_modal(0);
+                        self.plugin_added(&m.id, &m.name);
+                        return;
+                    }
+                    Err(e) => f.why = Some(format!("It couldn’t be added: {e}.")),
+                }
+                changed = true;
+            }
+        }
+        if changed {
+            self.show_plugin_form();
+        }
+    }
+
+    /// Add, in Add a plugin: the plugin put in place (from GitHub on a thread
+    /// of its own; from a file at once), then started.
+    fn plugin_add_done(&mut self) {
+        let Some(f) = &mut self.plugin_form else { return };
+        let Some(m) = f.found.clone() else { return };
+        let id = m["id"].as_str().unwrap_or("").to_string();
+        if let Some(repo) = f.repo.clone() {
+            let (tx, rx) = mpsc::channel();
+            let _ = std::thread::Builder::new().name("plugin add".into()).spawn(move || {
+                let _ = tx.send(crate::updates::install_latest(&repo, &id, &crate::packages::added_dir()));
+            });
+            f.adding = Some(rx);
+            self.show_plugin_form();
+            return;
+        }
+        if let Some(file) = f.file.clone() {
+            match crate::packages::install_file(&file, &crate::packages::added_dir()) {
+                Ok(m) => {
+                    self.plugin_form = None;
+                    self.ui.set_gl_modal(0);
+                    self.plugin_added(&m.id, &m.name);
+                }
+                Err(e) => {
+                    f.why = Some(format!("It couldn’t be added: {e}"));
+                    self.show_plugin_form();
+                }
+            }
+        }
+    }
+
+    /// A plugin added: in Settings' list, and started.
+    fn plugin_added(&mut self, id: &str, name: &str) {
+        self.give_packages();
+        if let Some(p) = self.packages.iter().find(|p| p.id() == id).cloned() {
+            if !matches!(id, "evga-z10" | "steelseries") && self.settings.on(&p.switch()) {
+                self.plugins.stop(id);
+                self.plugins.start(p);
+            }
+        }
+        self.status(format!("Added {name}."), 1);
+        self.refresh();
+    }
+
+    /// An added plugin taken out: what it changed put back, stopped, its folder
+    /// gone; one that came with Ectodeck too is used again in its place.
+    fn remove_plugin(&mut self, id: &str) {
+        let name = self.packages.iter().find(|p| p.id() == id).map(|p| p.name().to_string()).unwrap_or_else(|| id.to_string());
+        self.worker.drop_plugin(id);
+        self.plugins.stop(id);
+        self.following.retain(|k, _| !k.starts_with(&format!("{id}/")));
+        let dir = crate::packages::added_dir().join(id);
+        if dir.starts_with(crate::packages::added_dir()) && dir != crate::packages::added_dir() {
+            if let Err(e) = std::fs::remove_dir_all(&dir) {
+                self.status(format!("{name} wasn’t removed: {e}"), 2);
+                return;
+            }
+        }
+        self.give_packages();
+        if let Some(p) = self.packages.iter().find(|p| p.id() == id).cloned() {
+            if self.settings.on(&p.switch()) && !matches!(id, "evga-z10" | "steelseries") {
+                self.plugins.start(p);
+            }
+        }
+        self.plugins.forget_sections();
+        self.status(format!("Removed {name}."), 1);
+        self.refresh();
+    }
+
+    /// A package turned on or off in Settings: the keyboard's core is the
+    /// keyboard's Control, and it and the mouse's core start again with
+    /// Ectodeck; a plugin starts or stops at once, what it changed for a game
+    /// running put back first.
+    fn plugin_switch(&mut self, row: usize, on: bool) {
+        let Some(p) = self.packages.get(row).cloned() else { return };
+        if p.id() == crate::z10::CORE {
+            self.cell_pick(Ctl::Control, if on { 0 } else { 1 }, (0.0, 0.0, 0.0));
+            return;
+        }
+        if self.settings.on(&p.switch()) == on {
+            return;
+        }
+        if let Err(e) = self.settings.set(&p.switch(), serde_json::json!(on)) {
+            self.status(format!("The setting was not saved: {e}"), 2);
+            return;
+        }
+        if p.id() == "steelseries" {
+            self.restart = Some("settings".into());
+            return;
+        }
+        if on {
+            self.plugins.start(p);
+        } else {
+            self.worker.drop_plugin(p.id());
+            self.plugins.stop(p.id());
+            // (its devices let go of what they followed)
+            self.following.retain(|k, _| !k.starts_with(&format!("{}/", p.id())));
+        }
+        self.plugins.forget_sections();
+    }
+
+    /// An app that doesn't run through Steam, as its windows open and close:
+    /// its plugins' changes made as its first window opens (where its page
+    /// has any), and put back as its last closes. Games, and Steam's apps,
+    /// go by the Library's watch instead.
+    fn app_windows(&mut self, f: &crate::front_app::Front, app: &str) {
+        if f.window.is_empty() || f.is_ectodeck() {
+            return;
+        }
+        if f.closed {
+            if self.windows.remove(&f.window).is_some() && !self.windows.values().any(|a| a == app) && self.app_sessions.remove(app) {
+                eprintln!("ectodeck-native: {} closed", self.games.name(app, &self.front_apps));
+                self.worker.quit_game(app);
+            }
+            return;
+        }
+        self.windows.insert(f.window.clone(), app.to_string());
+        let watched = self.games.running.iter().any(|r| r.id == app) || crate::games::steam_number(app).is_some() || self.games.library.is_game(app);
+        if watched || self.app_sessions.contains(app) {
+            return;
+        }
+        let name = self.games.name(app, &self.front_apps);
+        let r = crate::games::Running { id: app.to_string(), pid: f.pid, since: crate::games::now() };
+        let plan = self.game_plan(&r, &name);
+        if !plan.changes.is_empty() {
+            eprintln!("ectodeck-native: {name} opened");
+            self.app_sessions.insert(app.to_string());
+            self.worker.start_game(plan);
+        }
+    }
+
+    /// What the plugins change as a game or app starts, for the put-back
+    /// thread to make: each plugin's changes for it from its choices (its own
+    /// over Every game's) and the person's commands for it.
+    fn game_plan(&self, r: &crate::games::Running, name: &str) -> crate::putback::Plan {
+        let lib = &self.games.library;
+        let kind = if lib.is_game(&r.id) { "game" } else { "app" };
+        let scripts = lib.scripts_for(&r.id);
+        let named: Vec<(u64, String, bool)> = scripts.iter().map(|(s, every)| (s.id, s.name.clone(), *every)).collect();
+        let game = crate::putback::Game { id: r.id.clone(), name: name.to_string(), pid: r.pid, since: r.since };
+        let values = |plugin: &str| lib.wanted_values(&r.id, plugin);
+        let changes = self
+            .plugins
+            .changes(&game, kind, &values, &named)
+            .into_iter()
+            .map(|(plugin, what, label, words)| {
+                let script = what["command"].as_u64().and_then(|n| scripts.iter().find(|(s, _)| s.id == n).map(|(s, _)| s.clone()));
+                (plugin, what, label, words, script)
+            })
+            .collect();
+        crate::putback::Plan { game, changes }
+    }
+
+    /// What the put-back thread said: a command run (kept with it), what was
+    /// put back after Ectodeck stopped short (said, here and as a notice), a
+    /// change that couldn't be made. True if the Library has news.
+    fn worker_told(&mut self) -> bool {
+        let mut news = false;
+        while let Ok(t) = self.worker.told.try_recv() {
+            news = true;
+            match t {
+                crate::putback::Told::Ran { script, game, quit, ran, at } => self.games.script_ran(script, &game, quit, &ran, at),
+                crate::putback::Told::PutBack { name, words, after_stop } => {
+                    eprintln!("ectodeck-native: put back for {name}: {}", words.join(", "));
+                    if after_stop && !words.is_empty() {
+                        let said = format!("Ectodeck stopped while {name} ran, so it put back {} now.", crate::text::list(&words));
+                        self.games.say(said.clone(), false);
+                        crate::tray::notify("Ectodeck put things back", &said);
+                    }
+                }
+                crate::putback::Told::Failed { words, why } => {
+                    eprintln!("ectodeck-native: couldn’t change {words}: {why}");
+                    self.games.say(format!("Ectodeck couldn’t change {words}: {why}"), true);
+                }
+            }
+        }
+        news
+    }
+
     /// Games started and quit, as the Library's watch saw them: the window in
     /// front looked at again (a game's window may have come up before its
-    /// game was seen), and the keyboard's screen told.
+    /// game was seen), the plugins' changes made or put back, and the
+    /// keyboard's screen told.
     fn games_seen(&mut self, events: Vec<crate::games_page::Event>) {
         use crate::lcd_player::{Control, GameSeen};
         for e in &events {
@@ -5794,6 +6358,13 @@ impl Front {
             let name = self.games.name(&r.id, &self.front_apps);
             let started = matches!(e, crate::games_page::Event::Started(_));
             eprintln!("ectodeck-native: {name} {}", if started { "started" } else { "quit" });
+            // what the plugins change, for games and apps alike (SteamVR's monitor turned off)
+            if started {
+                let plan = self.game_plan(r, &name);
+                self.worker.start_game(plan);
+            } else {
+                self.worker.quit_game(&r.id);
+            }
             // (an app Steam starts, such as SteamVR or Wallpaper Engine, is no game starting)
             if !self.games.library.is_game(&r.id) {
                 continue;
@@ -5823,6 +6394,10 @@ impl Front {
     pub fn front_app(&mut self, f: crate::front_app::Front) {
         // (a game's window goes by its game's id, whatever the window calls itself)
         let app = self.games.front_id(&f);
+        self.app_windows(&f, &app);
+        if f.closed {
+            return;
+        }
         // a window just opened, in front or not: only a running game's matters here, to
         // its launch screen; what's in front is told as it comes to the front
         if f.opened {
@@ -5856,6 +6431,16 @@ impl Front {
             _ => None,
         };
         let (mouse_wants, kb_wants) = (wanted("sensei310"), wanted("z10").and_then(|p| p.parse::<u8>().ok()));
+        let wants: Vec<(String, String, String, Option<String>)> = self
+            .plugins
+            .devices()
+            .into_iter()
+            .map(|(plugin, d)| {
+                let id = d["device"].as_str().unwrap_or("").to_string();
+                let w = wanted(&id);
+                (plugin, id, d["name"].as_str().unwrap_or("").to_string(), w)
+            })
+            .collect();
         // the mouse
         if let Some(store) = &self.mouse.profiles {
             let (active, count) = (store.active, store.list.len());
@@ -5890,6 +6475,35 @@ impl Front {
                     if let Some(back) = self.follow_back[0].take().filter(|b| *b as u8 != active) {
                         self.choose_profile(back as u8);
                         changed = true;
+                    }
+                }
+            }
+        }
+        // each device a plugin brought in (OpenRGB's lighting): its profile for this app,
+        // or once it followed one, back to what it was on before (its plugin keeps that)
+        for (plugin, id, name, want) in wants {
+            let follow = format!("{plugin}/{id}");
+            let Some(core) = self.plugins.get(&plugin).map(|p| p.core.clone()) else { continue };
+            match want {
+                Some(p) if self.following.get(&follow) != Some(&p) => {
+                    eprintln!("ectodeck-native: {name} follows {app}");
+                    self.following.insert(follow, p.clone());
+                    // (on a thread: its plugin may take a moment to reach the program it goes through)
+                    let _ = std::thread::Builder::new().name("plugin device".into()).spawn(move || {
+                        if let Err(e) = core.call("profiles/activate", &serde_json::json!({ "device": id, "profile": p })) {
+                            eprintln!("ectodeck-native: {name} didn’t switch: {e}");
+                        }
+                    });
+                    changed = true;
+                }
+                Some(_) => {}
+                None => {
+                    if self.following.remove(&follow).is_some() {
+                        let _ = std::thread::Builder::new().name("plugin device".into()).spawn(move || {
+                            if let Err(e) = core.call("profiles/restore", &serde_json::json!({ "device": id })) {
+                                eprintln!("ectodeck-native: {name} didn’t switch back: {e}");
+                            }
+                        });
                     }
                 }
             }

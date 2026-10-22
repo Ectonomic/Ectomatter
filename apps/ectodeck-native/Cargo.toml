@@ -41,6 +41,10 @@ unicode-normalization = "0.1"
 # libraries and installed apps; and its binary appinfo.vdf, which says which app is a game
 steamlocate = "2.1.1"
 steam-vdf-parser = "0.1.2"
+# plugins added from a file or their GitHub releases (packages.rs, updates.rs): a
+# package is a zip of its folder, fetched over HTTPS as the weather is
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 
 [dev-dependencies]
 # the parity vectors the Z10 module is checked against are gzipped

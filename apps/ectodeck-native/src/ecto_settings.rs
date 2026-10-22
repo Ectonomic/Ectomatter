@@ -1,7 +1,9 @@
 //! Ectodeck's own Settings, as the web app had them (shell.js at cd9ea82):
 //! each device, whether Ectodeck controls it, whether it may open it and
-//! what else has it open; the weather every device shares, its place and its
-//! units; the HDR interface; and how often the window draws a lighting effect.
+//! what else has it open; the plugins, each device's core and each plugin
+//! together, what each can do, its version and whether it's on; the weather
+//! every device shares, its place and its units; the HDR interface; and how
+//! often the window draws a lighting effect.
 
 use serde_json::{json, Value};
 
@@ -57,8 +59,27 @@ pub struct SensorMap {
     pub top: f32,
 }
 
+/// A package as Settings' Plugins lists it: its name, what it's for in its
+/// own words, what it can do in Ectodeck's, its version and where that
+/// stands, whether it's on, what it says is wrong (a server it can't reach),
+/// and its glyph (its place among the packages' glyphs).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PluginRow {
+    pub name: String,
+    pub description: String,
+    pub can: Vec<String>,
+    pub version: String,
+    pub status: String,
+    pub on: bool,
+    pub warning: Option<String>,
+    pub glyph: usize,
+    /// added, rather than come with Ectodeck: it can be taken out
+    pub removable: bool,
+}
+
 pub struct State<'a> {
     pub sensors: Option<Sensors>,
+    pub plugins: Vec<PluginRow>,
     pub status: Value,
     pub control: bool,
     pub settings: Value,
@@ -465,6 +486,9 @@ pub fn page(s: &State) -> (Vec<Cell>, f32, SensorMap) {
         }
     });
 
+    // the plugins: each device's core and each plugin, together
+    plugins_section(&mut cells, &mut y, &s.plugins);
+
     // the weather every device shares
     let place = &s.settings["weather"]["place"];
     let has_place = place.is_object();
@@ -587,6 +611,84 @@ pub fn page(s: &State) -> (Vec<Cell>, f32, SensorMap) {
     });
 
     (cells, y - 14.0 + 40.0, map)
+}
+
+/// Settings' Plugins: a row for each package, its glyph on its tile, its name,
+/// what it's for and what it can do (and what it says is wrong, in amber),
+/// its version and where that stands, and On and Off; then Add a plugin, and
+/// how updates come.
+fn plugins_section(cells: &mut Vec<Cell>, y: &mut f32, rows: &[PluginRow]) {
+    *y += 20.0;
+    cells.push(text_cell(style::HEAD, X0, *y, W, 18.0, "Plugins"));
+    *y += 18.0;
+    let top = *y + 2.0;
+    let (bx, bw) = (X0 + PAD_X, W - 2.0 * PAD_X);
+    let mut out: Vec<Cell> = Vec::new();
+    let mut ry = top;
+    for (i, r) in rows.iter().enumerate() {
+        if i > 0 {
+            out.push(Cell { color: slint::Color::from_argb_u8(9, 255, 255, 255), ..cell(kind::BOX, bx, ry, bw, 1.0) });
+        }
+        ry += 16.0;
+        // the switch, then the version, from the right
+        let opts = [("on", "On"), ("off", "Off")];
+        let bws: Vec<f32> = opts.iter().map(|(_, n)| text::width(400, 12.5, n) + 28.0).collect();
+        let seg_w = bws.iter().sum::<f32>() + 2.0 + 6.0;
+        let sx = bx + bw - seg_w;
+        out.push(cell(kind::SEG, sx, ry, seg_w, 34.0));
+        let mut x = sx + 3.0;
+        for (j, ((_, n), w)) in opts.iter().zip(&bws).enumerate() {
+            out.push(Cell { text: (*n).into(), on: (j == 0) == r.on, id: id(Ctl::PluginOn), index: (i * 2 + j) as i32, ..cell(kind::SEG_BUTTON, x, ry + 3.0, *w, 28.0) });
+            x += w + 2.0;
+        }
+        // (each line to the right, against the switch)
+        let right = sx - 16.0;
+        let (w1, w2) = (text::width(400, 12.5, &r.version).ceil() + 2.0, text::width(400, 12.5, &r.status).ceil() + 2.0);
+        let vx = right - w1.max(w2);
+        out.push(text_cell(style::NOTE, right - w1, ry + 1.0, w1, 18.0, &r.version));
+        out.push(Cell { color: slint::Color::from_rgb_u8(0xa1, 0xa1, 0xaa), ..text_cell(style::NOTE_IN, right - w2, ry + 19.0, w2, 18.0, &r.status) });
+        if r.removable {
+            let w3 = text::width(500, 12.5, "Remove").ceil() + 18.0;
+            out.push(Cell { text: "Remove".into(), id: id(Ctl::PluginRemove), index: i as i32, ..cell(kind::LINK, right - w3 + 9.0, ry + 40.0, w3, 26.0) });
+        }
+        // its tile, and its words
+        out.push(Cell { style: 2 + r.glyph as i32, ..cell(kind::DEVICE, bx, ry, 40.0, 40.0) });
+        let tx = bx + 40.0 + 16.0;
+        let tw = vx - 16.0 - tx;
+        out.push(text_cell(style::NAME, tx, ry, tw, 20.0, &r.name));
+        let mut ty = ry + 22.0;
+        for l in text::wrap(400, 12.5, &r.description, tw) {
+            out.push(Cell { color: slint::Color::from_rgb_u8(0xa1, 0xa1, 0xaa), ..text_cell(style::NOTE_IN, tx, ty, tw, 18.0, &l) });
+            ty += 18.0;
+        }
+        for c in &r.can {
+            for l in text::wrap(400, 12.5, c, tw) {
+                out.push(text_cell(style::NOTE, tx, ty, tw, 18.0, &l));
+                ty += 18.0;
+            }
+        }
+        if let Some(w) = &r.warning {
+            ty += 6.0;
+            let lines = text::wrap(400, 12.5, w, tw - 15.0);
+            out.push(Cell { style: 3, ..cell(kind::DOT, tx, ty + 6.0, 7.0, 7.0) });
+            for l in &lines {
+                out.push(Cell { color: slint::Color::from_rgb_u8(0xf0, 0xb3, 0x5a), ..text_cell(style::NOTE_IN, tx + 15.0, ty, tw - 15.0, 18.0, l) });
+                ty += 18.0;
+            }
+        }
+        ry = ty.max(ry + 40.0) + 16.0;
+    }
+    // Add a plugin, and how updates come
+    out.push(Cell { color: slint::Color::from_argb_u8(9, 255, 255, 255), ..cell(kind::BOX, bx, ry, bw, 1.0) });
+    ry += 16.0;
+    let aw = text::width(500, 13.0, "Add a plugin").ceil() + 12.0 + 14.0 + 7.0 + 12.0;
+    out.push(Cell { text: "Add a plugin".into(), lines: "M8 3v10M3 8h10".into(), style: 35, id: id(Ctl::PluginAdd), ..cell(kind::GHOST, bx, ry, aw, 30.0) });
+    out.push(text_cell(style::NOTE, bx + aw + 14.0, ry + 6.0, bw - aw - 14.0, 18.0, "Ectodeck checks each plugin’s GitHub releases for updates once a day."));
+    ry += 30.0 + 18.0;
+    let h = ry - *y;
+    cells.push(cell(kind::TILE, X0, *y, W, h));
+    cells.extend(out);
+    *y += h + 14.0;
 }
 
 /// Nits for a place along the Peak nits slider; `None` at its left end, the design's brightness.

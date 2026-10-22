@@ -79,9 +79,20 @@ pub enum Ctl {
     /// a game's or app's page in the Library (games_page.rs): a device's
     /// dropdown, by the device's row
     LibChoice,
+    /// and in a plugin's section: a setting's dropdown, by its place among the
+    /// page's; a script, its Run now, and Add a script
+    LibSetting,
+    LibScript,
+    LibScriptRun,
+    LibScriptAdd,
+    /// Settings' Plugins: a package's On and Off, by its place in the list; Add a plugin;
+    /// Remove on one added
+    PluginOn,
+    PluginAdd,
+    PluginRemove,
 }
 
-const CTLS: [Ctl; 42] = [
+const CTLS: [Ctl; 49] = [
     Ctl::None,
     Ctl::Paint,
     Ctl::Demo,
@@ -124,6 +135,13 @@ const CTLS: [Ctl; 42] = [
     Ctl::Described,
     Ctl::DeskPad,
     Ctl::LibChoice,
+    Ctl::LibSetting,
+    Ctl::LibScript,
+    Ctl::LibScriptRun,
+    Ctl::LibScriptAdd,
+    Ctl::PluginOn,
+    Ctl::PluginAdd,
+    Ctl::PluginRemove,
 ];
 
 pub fn ctl(id: i32) -> Ctl {
@@ -217,6 +235,8 @@ pub mod style {
     pub const END_R: i32 = 37;
     /// a card's title, as a box's
     pub const BOX_TITLE: i32 = 38;
+    /// a command as it was typed, in the typeface whose letters are all one width
+    pub const COMMAND: i32 = 41;
 }
 
 pub(crate) fn cell(kind: i32, x: f32, y: f32, w: f32, h: f32) -> Cell {

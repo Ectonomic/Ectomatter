@@ -213,6 +213,32 @@ fn note_steps(ev: &HashMap<String, String>, game: &str, phase: &str) -> Option<(
     Some((steps, done))
 }
 
+/// What Ectodeck itself is changing for a game, shared with the thread that
+/// makes the changes (putback.rs): the game, its phase, each change's words
+/// for the screen, and how far it has got.
+pub type Own = Arc<Mutex<Option<crate::putback::Steps>>>;
+
+/// A game's steps in a phase, Ectodeck's own first and then the note's
+/// (game-helper's, while it still runs games): each step's words, how many
+/// are done, and whether all of them are (a part with nothing to do is done).
+fn merged(ev: &HashMap<String, String>, own: &Option<crate::putback::Steps>, game: &str, phase: &str) -> Option<(Vec<String>, i64, bool)> {
+    let mine = own.as_ref().filter(|s| s.phase == phase && folded(&s.game) == folded(game));
+    let theirs = note_steps(ev, game, phase);
+    if mine.is_none() && theirs.is_none() {
+        return None;
+    }
+    let mut steps: Vec<String> = mine.map(|s| s.labels.clone()).unwrap_or_default();
+    let (mine_done, mine_finished) = mine.map_or((0, true), |s| (s.done as i64, s.finished));
+    let (their_done, their_finished) = match &theirs {
+        Some((st, d)) => (*d, *d >= st.len() as i64 || ev.get("finished").is_some_and(|f| f == "1") || !alive(ev)),
+        None => (0, true),
+    };
+    let theirs_n = theirs.as_ref().map_or(0, |(st, _)| st.len()) as i64;
+    steps.extend(theirs.map(|(st, _)| st).unwrap_or_default());
+    let done = if mine_finished { mine.map_or(0, |s| s.labels.len() as i64) + their_done.min(theirs_n) } else { mine_done };
+    Some((steps, done, mine_finished && their_finished))
+}
+
 fn alive(ev: &HashMap<String, String>) -> bool {
     Path::new(&format!("/proc/{}", int(ev.get("pid"), -1))).exists()
 }
@@ -353,6 +379,8 @@ pub struct Core {
     /// so as it draws, see [crate::lcd_page::pace]): an effect every tenth of a second, words
     /// scrolling a cell's step at a time; 0 while it holds still, drawn once a second
     pub pace: Arc<AtomicU32>,
+    /// what Ectodeck itself is changing for a game, as it starts or quits
+    pub own: Own,
     /// what the Game launch shows as a game starts and quits
     pub launch: Launch,
     /// the game starting, playing or quitting (or the last one), for the pages' readings;
@@ -402,6 +430,7 @@ impl Core {
             aside: false,
             pace: Arc::new(AtomicU32::new(0)),
             launch: Launch::default(),
+            own: Arc::new(Mutex::new(None)),
             game: Arc::new(Mutex::new(None)),
             window: Arc::new(AtomicBool::new(false)),
             clock: Arc::new(std::sync::atomic::AtomicU64::new(0f64.to_bits())),
@@ -451,19 +480,17 @@ impl Core {
             Some(s) => s.clone(),
             None => (self.stats)(),
         };
-        let (note, game) = (self.session.ev.clone(), name.clone());
-        let steps: Ask<Vec<String>> = Arc::new(move || note_steps(&note.lock().unwrap(), &game, phase).map(|s| s.0).unwrap_or_default());
-        let (note, game) = (self.session.ev.clone(), name.clone());
-        let done: Ask<i64> = Arc::new(move || note_steps(&note.lock().unwrap(), &game, phase).map_or(1_000_000, |s| s.1));
-        let (note, game, window, clock) = (self.session.ev.clone(), name.clone(), self.window.clone(), self.clock.clone());
+        // (the steps Ectodeck makes itself, then the note's)
+        let (note, own, game) = (self.session.ev.clone(), self.own.clone(), name.clone());
+        let steps: Ask<Vec<String>> = Arc::new(move || merged(&note.lock().unwrap(), &own.lock().unwrap(), &game, phase).map(|s| s.0).unwrap_or_default());
+        let (note, own, game) = (self.session.ev.clone(), self.own.clone(), name.clone());
+        let done: Ask<i64> = Arc::new(move || merged(&note.lock().unwrap(), &own.lock().unwrap(), &game, phase).map_or(1_000_000, |s| s.1));
+        let (note, own, game, window, clock) = (self.session.ev.clone(), self.own.clone(), name.clone(), self.window.clone(), self.clock.clone());
         let until: Ask<bool> = Arc::new(move || match show.until {
             Until::Window => window.load(Ordering::Relaxed),
             Until::Secs(n) => f64::from_bits(clock.load(Ordering::Relaxed)) - now >= n as f64,
-            // (everything put back: the note's game-helper finished, or gone, or no note at all)
-            Until::Done => {
-                let ev = note.lock().unwrap();
-                note_steps(&ev, &game, "exit").is_none() || ev.get("finished").is_some_and(|f| f == "1") || !alive(&ev)
-            }
+            // (everything put back: Ectodeck's own and the note's, or there's nothing to put back)
+            Until::Done => merged(&note.lock().unwrap(), &own.lock().unwrap(), &game, "exit").is_none_or(|m| m.2),
         });
         let seed = (self.seeds)();
         let layout = show.layout.clone().filter(|p| p.as_shipped_game().is_none());
@@ -817,7 +844,7 @@ pub struct Player {
 
 impl Player {
     /// Start playing; each frame sent, and each change of state, goes to `news`.
-    pub fn start(news: impl Fn(News) + Send + 'static, announce: bool, launch: Launch, paused: bool, screen: Box<dyn Sink>) -> Player {
+    pub fn start(news: impl Fn(News) + Send + 'static, announce: bool, launch: Launch, paused: bool, screen: Box<dyn Sink>, own: Own) -> Player {
         let (tell, heard) = mpsc::channel::<Control>();
         std::thread::spawn(move || {
             let stats = Arc::new(Mutex::new(Stats::here()));
@@ -836,7 +863,7 @@ impl Player {
             let note: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
             // everything a page may show, now: the computer read once a second, the rest as it is
             let read: Arc<dyn Fn() -> crate::lcd_page::Readings + Send + Sync> = {
-                let (kept, page, game, note) = (kept.clone(), shared.clone(), game.clone(), note.clone());
+                let (kept, page, game, note, own) = (kept.clone(), shared.clone(), game.clone(), note.clone(), own.clone());
                 Arc::new(move || {
                     let mut k = kept.lock().unwrap();
                     if k.0.as_ref().is_none_or(|(t, _)| t.elapsed() >= Duration::from_millis(990)) {
@@ -849,9 +876,11 @@ impl Player {
                     r.profile_number = p.1.as_ref().map(|(n, _)| *n);
                     r.outside = p.2.clone();
                     r.game = game.lock().unwrap().clone().map(|mut g| {
-                        // (what game-helper is setting or putting back, while its note is of this game)
+                        // (what Ectodeck, then game-helper, is setting or putting back for this game)
                         let ev = note.lock().unwrap();
-                        if let Some((steps, done)) = note_steps(&ev, &g.name, "launch").or_else(|| note_steps(&ev, &g.name, "exit")) {
+                        let o = own.lock().unwrap();
+                        let phase = if g.ended > 0 { "exit" } else { "launch" };
+                        if let Some((steps, done, _)) = merged(&ev, &o, &g.name, phase) {
                             let d = (done.max(0) as usize).min(steps.len());
                             g.changing = steps.get(d).cloned().unwrap_or_default();
                             g.done = (d, steps.len());
@@ -880,6 +909,7 @@ impl Player {
             core.session.ev = note;
             core.game = game;
             core.launch = launch;
+            core.own = own;
             let drawing = read.clone();
             core.draw = Some(Arc::new(move |p: &crate::lcd_page::Page, t: f64| crate::lcd_page::render_at(p, &drawing(), t)));
             core.frame_file = Some(runtime_dir().join("z10-lcd/frame"));
@@ -994,6 +1024,29 @@ impl Core {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Ectodeck's own steps come first on the screen, game-helper's after;
+    /// done counts Ectodeck's until they're all made, then game-helper's too;
+    /// and everything is put back only once both are.
+    #[test]
+    fn ectodecks_own_steps_come_first() {
+        let mut ev = HashMap::new();
+        for (k, v) in [("phase", "exit"), ("name", "ARC Raiders"), ("steps", "KEYBOARD|MOUSE"), ("done", "1"), ("pid", &std::process::id().to_string())] {
+            ev.insert(k.to_string(), v.to_string());
+        }
+        let mut own = Some(crate::putback::Steps { game: "ARC Raiders".into(), phase: "exit", labels: vec!["BRIGHTNESS".into(), "PAUSE THE LOCAL AI".into()], done: 1, finished: false });
+        let m = merged(&ev, &own, "ARC Raiders", "exit").unwrap();
+        assert_eq!(m.0, vec!["BRIGHTNESS", "PAUSE THE LOCAL AI", "KEYBOARD", "MOUSE"]);
+        assert_eq!((m.1, m.2), (1, false));
+        own.as_mut().unwrap().done = 2;
+        own.as_mut().unwrap().finished = true;
+        let m = merged(&ev, &own, "ARC Raiders", "exit").unwrap();
+        assert_eq!((m.1, m.2), (3, false), "game-helper still has one to put back");
+        ev.insert("finished".into(), "1".into());
+        assert!(merged(&ev, &own, "ARC Raiders", "exit").unwrap().2);
+        // another game's steps are none of this one's
+        assert!(merged(&HashMap::new(), &own, "Spelunky 2", "exit").is_none());
+    }
 
     /// A screen that keeps what it's sent.
     struct Sent(Arc<Mutex<Vec<Vec<String>>>>);

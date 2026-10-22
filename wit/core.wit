@@ -1,11 +1,13 @@
 /// How Ectodeck and a core talk, as a WebAssembly component: what a core may
 /// call in Ectodeck (its imports) and what Ectodeck calls in a core (its
 /// exports). The core protocol (docs/core-protocol.md) says what the calls
-/// carry; this says how they are made.
+/// carry; this says how they are made. A plugin is a core too, one that adds
+/// to Ectodeck's pages rather than bringing a device (section 11).
 ///
 /// A core reaches nothing but what is here and the WebAssembly system
 /// interface Ectodeck gives it: the clocks, and its own folder of files,
-/// seen as /data.
+/// seen as /data. Of what is here, it reaches only what its manifest names:
+/// the USB devices its `matches` names, and what its `uses` names.
 package ectodeck:core@2.0.0;
 
 /// The USB devices a core's manifest matches, and no others.
@@ -66,9 +68,41 @@ interface host {
     answer: func(id: u32, reply: result<string, string>);
 }
 
+/// The computer beyond its USB devices, as a plugin's manifest's `uses`
+/// allows (docs/core-protocol.md, section 11): a plugin that doesn't name
+/// one of these hears why it may not.
+interface system {
+    /// The monitors connected now, as JSON: a list, each with its `id` (made
+    /// from its EDID, so the same at every start whatever port it's on), its
+    /// `name` and `maker`, whether it's on (`enabled`) and the main one
+    /// (`main`), its `modes` and the `mode` in use (each `width`, `height` and
+    /// `refresh`, in millihertz), and what it can do: `hdr` and `vrr` (each as
+    /// it is now, absent where the monitor can't), `brightness` (0 to 10000,
+    /// absent where it can't be set) and `ddc` (whether DDC/CI may be used).
+    /// For a plugin whose manifest uses "monitors".
+    monitors: func() -> result<string, string>;
+}
+
+/// Connections to the addresses a manifest's `uses` names, and no others.
+interface net {
+    /// A connection made.
+    resource tcp-stream {
+        /// Send bytes; gives how many were sent.
+        write: func(bytes: list<u8>) -> result<u32, string>;
+        /// What has come, up to `max` bytes, waiting up to `timeout-ms` for
+        /// the first (0 returns at once); empty when nothing came, an error
+        /// once the other end has closed.
+        read: func(max: u32, timeout-ms: u32) -> result<list<u8>, string>;
+    }
+    /// Connect to `address`, as "127.0.0.1:6742", waiting up to `timeout-ms`.
+    connect: func(address: string, timeout-ms: u32) -> result<tcp-stream, string>;
+}
+
 world core {
     import usb;
     import host;
+    import system;
+    import net;
 
     /// A protocol request: its method, and its params as JSON. Gives the
     /// result as JSON, or a message for the person using Ectodeck.

@@ -76,6 +76,17 @@ pub struct Removed {
     added: Option<(usize, Value)>,
     choices: Option<Value>,
     favorite: bool,
+    /// its choices in each plugin's section, and its commands
+    plugins: Vec<(String, Value)>,
+    scripts: Option<Value>,
+}
+
+/// A command taken off a page, for Undo to put back: its page, its place, and itself.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScriptRemoved {
+    pub page: String,
+    at: usize,
+    v: Value,
 }
 
 /// What Ectodeck keeps of the Library, and Steam's games and apps as last read.
@@ -191,6 +202,164 @@ impl Library {
         took
     }
 
+    // ------------------------------------------------------------ plugins' choices
+
+    /// A page's own choices in a plugin's section (none: an empty object).
+    pub fn plugin_values(&self, id: &str, plugin: &str) -> Value {
+        let v = &self.v["plugins"][plugin][id];
+        if v.is_object() { v.clone() } else { json!({}) }
+    }
+
+    /// One of a page's own choices in a plugin's section, or none (a game
+    /// then follows Every game's, an app what the setting starts at).
+    pub fn set_plugin_value(&mut self, id: &str, plugin: &str, key: &str, value: Option<Value>) {
+        let pages = self.obj("plugins").entry(plugin.to_string()).or_insert_with(|| json!({}));
+        if !pages.is_object() {
+            *pages = json!({});
+        }
+        let pages = pages.as_object_mut().expect("an object");
+        let mine = pages.entry(id.to_string()).or_insert_with(|| json!({}));
+        if !mine.is_object() {
+            *mine = json!({});
+        }
+        let m = mine.as_object_mut().expect("an object");
+        match value {
+            Some(v) => {
+                m.insert(key.into(), v);
+            }
+            None => {
+                m.remove(key);
+            }
+        }
+        if m.is_empty() {
+            pages.remove(id);
+        }
+        self.save();
+    }
+
+    /// What a game or app has in a plugin's section, as it starts: its own
+    /// choices, and for a game Every game's where it has none of its own.
+    pub fn wanted_values(&self, id: &str, plugin: &str) -> Value {
+        let mut out = if self.is_game(id) { self.plugin_values(EVERY, plugin) } else { json!({}) };
+        if let (Some(o), Some(mine)) = (out.as_object_mut(), self.plugin_values(id, plugin).as_object()) {
+            for (k, v) in mine {
+                o.insert(k.clone(), v.clone());
+            }
+        }
+        out
+    }
+
+    // ------------------------------------------------------------ the person's commands
+
+    /// A page's own commands (Every game's are its own page's), in order.
+    pub fn scripts(&self, id: &str) -> Vec<crate::commands::Script> {
+        self.v["scripts"][id].as_array().into_iter().flatten().filter_map(crate::commands::Script::of).collect()
+    }
+
+    /// The commands that run for a game or app, each with whether it's Every
+    /// game's: Every game's first, for a game, then its own.
+    pub fn scripts_for(&self, id: &str) -> Vec<(crate::commands::Script, bool)> {
+        let mut out: Vec<(crate::commands::Script, bool)> = if self.is_game(id) { self.scripts(EVERY).into_iter().map(|s| (s, true)).collect() } else { Vec::new() };
+        out.extend(self.scripts(id).into_iter().map(|s| (s, false)));
+        out
+    }
+
+    /// A command, by its id, wherever it is.
+    pub fn script(&self, n: u64) -> Option<crate::commands::Script> {
+        self.v["scripts"].as_object()?.values().flat_map(|a| a.as_array().into_iter().flatten()).find(|x| x["id"].as_u64() == Some(n)).and_then(crate::commands::Script::of)
+    }
+
+    /// The page a command is on.
+    pub fn script_page(&self, n: u64) -> Option<String> {
+        self.v["scripts"].as_object()?.iter().find(|(_, a)| a.as_array().is_some_and(|a| a.iter().any(|x| x["id"].as_u64() == Some(n)))).map(|(p, _)| p.clone())
+    }
+
+    /// How a command last ran, as kept with it.
+    pub fn script_last(&self, n: u64) -> Value {
+        self.v["scripts"].as_object().and_then(|m| m.values().flat_map(|a| a.as_array().into_iter().flatten()).find(|x| x["id"].as_u64() == Some(n)).map(|x| x["last"].clone())).unwrap_or(Value::Null)
+    }
+
+    /// A command added to a page (its id given here), or one already there changed.
+    pub fn put_script(&mut self, page: &str, mut s: crate::commands::Script) -> u64 {
+        if s.id == 0 {
+            let n = self.v["next_script"].as_u64().unwrap_or(1).max(1);
+            self.v["next_script"] = json!(n + 1);
+            s.id = n;
+        }
+        let list = self.obj("scripts").entry(page.to_string()).or_insert_with(|| json!([]));
+        if !list.is_array() {
+            *list = json!([]);
+        }
+        let a = list.as_array_mut().expect("an array");
+        let mut v = s.to_value();
+        match a.iter().position(|x| x["id"].as_u64() == Some(s.id)) {
+            Some(i) => {
+                // (how it last ran stays with it, unless its commands changed)
+                let old = crate::commands::Script::of(&a[i]);
+                if old.is_some_and(|o| o.start == s.start && o.quit == s.quit) {
+                    v["last"] = a[i]["last"].clone();
+                }
+                a[i] = v;
+            }
+            None => a.push(v),
+        }
+        self.save();
+        s.id
+    }
+
+    /// A command taken off its page, with what Undo needs to put it back.
+    pub fn remove_script(&mut self, n: u64) -> Option<ScriptRemoved> {
+        let m = self.v["scripts"].as_object_mut()?;
+        let (page, at) = m.iter().find_map(|(page, a)| a.as_array()?.iter().position(|x| x["id"].as_u64() == Some(n)).map(|i| (page.clone(), i)))?;
+        let list = m.get_mut(&page)?.as_array_mut()?;
+        let v = list.remove(at);
+        if list.is_empty() {
+            m.remove(&page);
+        }
+        self.save();
+        Some(ScriptRemoved { page, at, v })
+    }
+
+    pub fn restore_script(&mut self, r: ScriptRemoved) {
+        let list = self.obj("scripts").entry(r.page).or_insert_with(|| json!([]));
+        if let Some(a) = list.as_array_mut() {
+            a.insert(r.at.min(a.len()), r.v);
+        }
+        self.save();
+    }
+
+    /// How a command ran, kept with it: as a game started or quit (named), or
+    /// for Run now (no game), when, and how it went.
+    pub fn script_ran(&mut self, n: u64, game: &str, quit: bool, ran: &crate::commands::Ran, at: u64) {
+        let Some(m) = self.v["scripts"].as_object_mut() else { return };
+        for a in m.values_mut().filter_map(|a| a.as_array_mut()) {
+            if let Some(x) = a.iter_mut().find(|x| x["id"].as_u64() == Some(n)) {
+                if !x["last"].is_object() {
+                    x["last"] = json!({});
+                }
+                // (a start's run begins its account afresh)
+                if !quit {
+                    x["last"] = json!({});
+                }
+                x["last"]["game"] = json!(game);
+                if !quit {
+                    x["last"]["at"] = json!(at);
+                }
+                x["last"][if quit { "quit" } else { "start" }] = ran.to_value();
+                self.save();
+                return;
+            }
+        }
+    }
+
+    /// Whether a game or app changes anything of its own: a device's
+    /// profile, a plugin's setting, or a command.
+    pub fn has_own(&self, id: &str) -> bool {
+        self.v["choices"][id].as_object().is_some_and(|m| !m.is_empty())
+            || self.v["plugins"].as_object().is_some_and(|m| m.values().any(|pages| pages[id].as_object().is_some_and(|o| !o.is_empty())))
+            || self.v["scripts"][id].as_array().is_some_and(|a| !a.is_empty())
+    }
+
     // ------------------------------------------------------------ favorites
 
     pub fn is_favorite(&self, id: &str) -> bool {
@@ -261,9 +430,16 @@ impl Library {
         let was = at.map(|i| (i, added.remove(i)));
         self.v["added"] = json!(added);
         let choices = self.obj("choices").remove(id);
+        let mut plugins = Vec::new();
+        for (plugin, pages) in self.obj("plugins").iter_mut() {
+            if let Some(v) = pages.as_object_mut().and_then(|m| m.remove(id)) {
+                plugins.push((plugin.clone(), v));
+            }
+        }
+        let scripts = self.obj("scripts").remove(id);
         let favorite = self.is_favorite(id);
         self.set_favorite(id, false);
-        Removed { id: id.to_string(), added: was, choices, favorite }
+        Removed { id: id.to_string(), added: was, choices, favorite, plugins, scripts }
     }
 
     /// Undo: a game or app taken out put back as it was.
@@ -275,6 +451,15 @@ impl Library {
         }
         if let Some(c) = r.choices {
             self.obj("choices").insert(r.id.clone(), c);
+        }
+        for (plugin, v) in r.plugins {
+            let pages = self.obj("plugins").entry(plugin).or_insert_with(|| json!({}));
+            if let Some(m) = pages.as_object_mut() {
+                m.insert(r.id.clone(), v);
+            }
+        }
+        if let Some(sc) = r.scripts {
+            self.obj("scripts").insert(r.id.clone(), sc);
         }
         if r.favorite {
             self.set_favorite(&r.id, true);
@@ -482,6 +667,11 @@ pub fn now() -> u64 {
 
 /// When a process started, in seconds since 1970: the computer's start plus
 /// the process's own start, as its stat line counts it in clock ticks.
+/// When a process started (seconds since 1970), where the system says.
+pub fn started_at(pid: u32) -> Option<u64> {
+    started(pid)
+}
+
 #[cfg(target_os = "linux")]
 fn started(pid: u32) -> Option<u64> {
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
@@ -660,6 +850,56 @@ mod tests {
         let ids: Vec<String> = l.entries(&|i| i.into()).into_iter().map(|e| e.id).collect();
         assert_eq!(ids, vec![a.clone(), b]);
         assert!(l.is_favorite(&a) && l.choice(&a, "z10") == Some(Choice::Profile("2".into())));
+    }
+
+    /// A game's choices in a plugin's section are its own over Every game's;
+    /// an app's are its own alone.
+    #[test]
+    fn a_plugins_choices_follow_every_game_for_games() {
+        let mut l = Library::of(json!({}), Some(steam_of(&[(1808500, "ARC Raiders", steam::Kind::Game), (250820, "SteamVR", steam::Kind::App)], &[])));
+        l.set_plugin_value(EVERY, "monitors", "side/brightness", Some(json!("lowest")));
+        l.set_plugin_value(EVERY, "monitors", "main/brightness", Some(json!("100")));
+        l.set_plugin_value("steam_app_1808500", "monitors", "side/brightness", Some(json!("25")));
+        assert_eq!(l.wanted_values("steam_app_1808500", "monitors"), json!({ "side/brightness": "25", "main/brightness": "100" }));
+        l.set_plugin_value("steam_app_250820", "monitors", "side/brightness", Some(json!("off")));
+        assert_eq!(l.wanted_values("steam_app_250820", "monitors"), json!({ "side/brightness": "off" }), "an app follows no Every game");
+        // a choice taken back follows Every game's again, and an empty record is taken out
+        l.set_plugin_value("steam_app_1808500", "monitors", "side/brightness", None);
+        assert_eq!(l.wanted_values("steam_app_1808500", "monitors")["side/brightness"], "lowest");
+        assert!(l.v["plugins"]["monitors"].get("steam_app_1808500").is_none());
+        assert!(l.has_own("steam_app_250820") && !l.has_own("steam_app_1808500"));
+    }
+
+    /// The person's commands: Every game's run first for a game and not for an
+    /// app; taken off with Undo to put back; how one last ran kept with it
+    /// until its commands change.
+    #[test]
+    fn the_persons_commands() {
+        let mut l = Library::of(json!({}), Some(steam_of(&[(1808500, "ARC Raiders", steam::Kind::Game), (250820, "SteamVR", steam::Kind::App)], &[])));
+        let s = |name: &str| crate::commands::Script { id: 0, name: name.into(), start: format!("echo {name}"), quit: String::new(), wait: true, keep: false, limit: 10 };
+        let ai = l.put_script(EVERY, s("Pause the local AI"));
+        let mine = l.put_script("steam_app_1808500", s("Mine"));
+        let vr = l.put_script("steam_app_250820", s("VR"));
+        assert!(ai != mine && mine != vr);
+        let names = |l: &Library, id: &str| l.scripts_for(id).into_iter().map(|(s, every)| (s.name, every)).collect::<Vec<_>>();
+        assert_eq!(names(&l, "steam_app_1808500"), vec![("Pause the local AI".to_string(), true), ("Mine".to_string(), false)]);
+        assert_eq!(names(&l, "steam_app_250820"), vec![("VR".to_string(), false)]);
+        l.script_ran(ai, "ARC Raiders", false, &crate::commands::Ran::Missing("~/.lmstudio/bin/lms".into()), 5);
+        assert_eq!(l.script_last(ai)["start"]["missing"], "~/.lmstudio/bin/lms");
+        // the same commands under a new name keep how it last ran; new commands don't
+        let mut renamed = l.script(ai).unwrap();
+        renamed.name = "Pause LM Studio".into();
+        l.put_script(EVERY, renamed.clone());
+        assert!(l.script_last(ai)["start"].is_object());
+        renamed.start = "true".into();
+        l.put_script(EVERY, renamed);
+        assert!(l.script_last(ai).is_null());
+        // taken off, and back with Undo in its place
+        let gone = l.remove_script(ai).unwrap();
+        assert_eq!(names(&l, "steam_app_1808500"), vec![("Mine".to_string(), false)]);
+        l.restore_script(gone);
+        assert_eq!(l.scripts(EVERY).len(), 1);
+        assert_eq!(l.script_page(mine).as_deref(), Some("steam_app_1808500"));
     }
 
     #[test]

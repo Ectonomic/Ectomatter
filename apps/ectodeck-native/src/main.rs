@@ -19,6 +19,7 @@
 
 mod adapter;
 mod clipboard;
+mod commands;
 mod core_host;
 mod cores;
 mod described;
@@ -51,12 +52,16 @@ mod lighting;
 mod locks;
 mod macro_page;
 mod macros;
+mod monitors;
 mod mouse;
 mod mouse_art;
 mod overlays;
+mod packages;
 mod picker;
+mod plugins;
 mod picture;
 mod profiles;
+mod putback;
 mod screen_edit;
 mod screen_keys;
 mod screens;
@@ -70,6 +75,7 @@ mod text;
 mod typefaces;
 mod tray;
 mod typist;
+mod updates;
 mod uistate;
 mod z10;
 
@@ -226,6 +232,20 @@ impl slint::platform::Platform for Platform {
 }
 
 /// A glyph from the app's drawings, as white on clear, for the page to tint.
+/// A package's glyph drawn at a size, in white for the window to tint (a
+/// glyph that can't be read is left empty).
+pub fn package_glyph(file: &std::path::Path, px: u32) -> slint::Image {
+    let Ok(svg) = std::fs::read_to_string(file) else { return slint::Image::default() };
+    let svg = svg.replace("currentColor", "#ffffff");
+    let Ok(tree) = usvg::Tree::from_str(&svg, &usvg::Options::default()) else { return slint::Image::default() };
+    let Some(mut pix) = Pixmap::new(px, px) else { return slint::Image::default() };
+    let s = tree.size();
+    resvg::render(&tree, Transform::from_scale(px as f32 / s.width(), px as f32 / s.height()), &mut pix.as_mut());
+    let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(px, px);
+    buf.make_mut_bytes().copy_from_slice(pix.data());
+    slint::Image::from_rgba8_premultiplied(buf)
+}
+
 fn glyph(svg: &str, px: u32, tint: bool) -> slint::Image {
     let svg = if tint { svg.replace("currentColor", "#ffffff") } else { svg.to_string() };
     let tree = usvg::Tree::from_str(&svg, &usvg::Options::default()).expect("a glyph the app drew");
@@ -590,7 +610,7 @@ fn front_apps_told(front: &mut Front, var: &str) {
         let mut parts = f.splitn(3, ',');
         let (class, desktop) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
         let pid = parts.next().and_then(|p| p.trim().parse().ok()).unwrap_or(0);
-        front.front_app(front_app::Front { class: class.into(), title: String::new(), desktop: desktop.into(), pid, opened: false });
+        front.front_app(front_app::Front { class: class.into(), title: String::new(), desktop: desktop.into(), pid, ..Default::default() });
     }
 }
 
@@ -813,6 +833,16 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         window.dispatch_event(WindowEvent::KeyReleased { text });
         slint::platform::update_timers_and_animations();
         front.act();
+    }
+    // ECTODECK_NATIVE_PAUSE=ms: that long passes after the typing, before the clicks after
+    // it (what was typed looked up, say)
+    if let Some(ms) = std::env::var("ECTODECK_NATIVE_PAUSE").ok().and_then(|v| v.parse::<u64>().ok()) {
+        let end = Instant::now() + Duration::from_millis(ms);
+        while Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(16));
+            slint::platform::update_timers_and_animations();
+            front.act();
+        }
     }
     // ECTODECK_NATIVE_CLICKS_AFTER: clicks once the typing is done ("x,y;x,y")
     for click in std::env::var("ECTODECK_NATIVE_CLICKS_AFTER").unwrap_or_default().split(';').filter(|c| !c.is_empty()) {
@@ -1957,6 +1987,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
             app.front.game_launch(),
             false,
             Box::new(screen),
+            app.front.worker.steps.clone(),
         );
         app.front.set_player(p);
     }

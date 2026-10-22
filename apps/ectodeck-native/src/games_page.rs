@@ -1,11 +1,16 @@
 //! The Library's page, the place "library" (games.rs keeps the Library, and
 //! steam.rs reads Steam's files): the games and apps on three tabs
 //! (Favorites, Games and Apps), each one's own page and Every game's, and the
-//! forms that add a game or an app. A game's page holds Ectodeck's own
-//! section, Devices: the profile each device switches to while the game is in
-//! front. The pictures (each cover, and a page's picture with its logo laid on
-//! it) are drawn from Steam's files at the size they show, on a thread of
-//! their own, and come in as each is ready.
+//! forms that add a game, an app or a script. A game's page holds Ectodeck's
+//! own section, Devices: the profile each device switches to while the game
+//! is in front. Then each plugin's section, drawn from what the plugin says
+//! of it (plugins.rs): its settings as dropdowns, in rows or in a grid (the
+//! Monitors plugin's column for each monitor), and the person's own commands
+//! (the Scripts plugin's), each with Run now. Beside the sections, where
+//! there's room, On this page: each section and what it changes here. The
+//! pictures (each cover, and a page's picture with its logo laid on it) are
+//! drawn from Steam's files at the size they show, on a thread of their own,
+//! and come in as each is ready.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -13,21 +18,35 @@ use std::rc::Rc;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use serde_json::Value;
 use slint::{ModelRc, VecModel};
 
+use crate::commands::{Ran, Script};
 use crate::games::{self, Choice, Entry, From, Kind, Library, Running, EVERY};
 use crate::lighting::{cell, id, kind, style, text_cell, Ctl};
-use crate::{AppWindow, Cell, LibApp, LibCover, LibFact, MenuRow};
+use crate::{AppWindow, Cell, LibApp, LibCover, LibFact, LibToc, MenuRow};
+
+/// A plugin's section as a page shows it: whose it is, its name, and how the
+/// plugin describes it (its settings, and the layout they're drawn in).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Section {
+    pub plugin: String,
+    pub name: String,
+    pub desc: Value,
+}
 
 /// A device as a page lists it: its key (as the Library keeps its choices),
 /// its name, what sort it is (for its glyph: "keyboard" or "mouse"), and its
-/// profiles, each by its id and its name.
+/// profiles, each by its id and its name; for a device a plugin brought in,
+/// its plugin's glyph (by the package's place) and what it is in a few words.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Device {
     pub key: String,
     pub name: String,
     pub kind: String,
     pub profiles: Vec<(String, String)>,
+    pub glyph: Option<usize>,
+    pub sub: String,
 }
 
 /// Which games the games' tabs show: every store's, Steam's, or those added by hand.
@@ -45,22 +64,49 @@ enum Order {
     Most,
 }
 
-/// A menu of the Library's, open: the store, the order, or a device's on a
-/// page (by its row there).
+/// A menu of the Library's, open: the store, the order, a device's on a
+/// page (by its row there), a plugin's setting (by its place among the
+/// page's), or a script's time limit in its form.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Menu {
     Shop,
     Order,
     Device(usize),
+    Setting(usize),
+    Limit,
 }
 
-/// The form open over the Library: Add a game (the program chosen) or Add an
-/// app (the app chosen, by its place in the list).
+/// The form for a script: the page it's on, the script being changed (none
+/// while one is added), and its choices; its words are the window's own.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScriptForm {
+    pub page: String,
+    pub editing: Option<u64>,
+    pub wait: bool,
+    pub keep: bool,
+    pub limit: u64,
+}
+
+/// The time limits a script can have, in seconds.
+const LIMITS: [u64; 5] = [5, 10, 30, 60, 120];
+
+fn limit_words(n: u64) -> String {
+    match n {
+        60 => "1 minute".into(),
+        n if n % 60 == 0 => format!("{} minutes", n / 60),
+        1 => "1 second".into(),
+        n => format!("{n} seconds"),
+    }
+}
+
+/// The form open over the Library: Add a game (the program chosen), Add an
+/// app (the app chosen, by its place in the list), or a script's.
 #[derive(Clone, Debug, PartialEq)]
 enum Form {
     None,
     Game(Option<PathBuf>),
     App(Option<usize>),
+    Script(ScriptForm),
 }
 
 /// A game started or quit, for the window to act on.
@@ -241,6 +287,17 @@ pub struct Games {
     shown: Vec<String>,
     rows: Vec<Device>,
     offered: Vec<(String, String)>,
+    /// the plugins' sections on the open page; each setting's dropdown there by its
+    /// plugin and its key, in the page's order; each script's card by its id; where
+    /// each of On this page's entries jumps to, and how many jumps there have been
+    sections: Vec<Section>,
+    setting_at: Vec<(String, String)>,
+    script_at: Vec<u64>,
+    toc_at: Vec<f32>,
+    jumps: i32,
+    /// a script taken off a page, which Undo puts back; the scripts being tried now
+    script_undo: Option<games::ScriptRemoved>,
+    pub trying: HashSet<u64>,
     pics: HashMap<Pic, slint::Image>,
     asked: HashSet<Pic>,
     painter: Painter,
@@ -249,6 +306,7 @@ pub struct Games {
     cells: Rc<VecModel<Cell>>,
     facts: Rc<VecModel<LibFact>>,
     seen: Rc<VecModel<LibApp>>,
+    toc: Rc<VecModel<LibToc>>,
 }
 
 impl Games {
@@ -258,6 +316,8 @@ impl Games {
         let cells = Rc::new(VecModel::default());
         let facts = Rc::new(VecModel::default());
         let seen = Rc::new(VecModel::default());
+        let toc = Rc::new(VecModel::default());
+        ui.set_gl_toc(ModelRc::from(toc.clone()));
         ui.set_gl_covers(ModelRc::from(covers.clone()));
         ui.set_gl_apps(ModelRc::from(apps.clone()));
         ui.set_gl_cells(ModelRc::from(cells.clone()));
@@ -285,6 +345,13 @@ impl Games {
             shown: Vec::new(),
             rows: Vec::new(),
             offered: Vec::new(),
+            sections: Vec::new(),
+            setting_at: Vec::new(),
+            script_at: Vec::new(),
+            toc_at: Vec::new(),
+            jumps: 0,
+            script_undo: None,
+            trying: HashSet::new(),
             pics: HashMap::new(),
             asked: HashSet::new(),
             painter: Painter::start(),
@@ -293,9 +360,14 @@ impl Games {
             cells,
             facts,
             seen,
+            toc,
         };
         g.read_steam();
         g.tell_watch();
+        // (offscreen, ECTODECK_NATIVE_LIBRARY_PAGE's page open, as if selected: a game's id or Every game's)
+        if crate::desk::offscreen() {
+            g.open = std::env::var("ECTODECK_NATIVE_LIBRARY_PAGE").ok().filter(|p| !p.is_empty());
+        }
         g
     }
 
@@ -379,12 +451,18 @@ impl Games {
                 changed = true;
             }
         }
-        if self.said.as_ref().is_some_and(|(_, _, t)| t.elapsed() > Duration::from_secs(if self.undo.is_some() { 10 } else { 6 })) {
+        if self.said.as_ref().is_some_and(|(_, _, t)| t.elapsed() > Duration::from_secs(if self.undo.is_some() || self.script_undo.is_some() { 10 } else { 6 })) {
             self.said = None;
             self.undo = None;
+            self.script_undo = None;
             changed = true;
         }
         (events, changed)
+    }
+
+    /// Whether the watch has looked once, so the games running are known.
+    pub fn looked(&self) -> bool {
+        self.looked
     }
 
     /// A picture, drawn already, or asked for (none until it's drawn;
@@ -406,7 +484,7 @@ impl Games {
         None
     }
 
-    fn say(&mut self, s: impl Into<String>, bad: bool) {
+    pub fn say(&mut self, s: impl Into<String>, bad: bool) {
         self.said = Some((s.into(), bad, Instant::now()));
     }
 
@@ -454,8 +532,9 @@ impl Games {
 
     /// The page as it is now, into the window: `devices` are those a page's
     /// Devices section lists, `scale` the window's pixels to a logical pixel.
-    pub fn show(&mut self, ui: &AppWindow, devices: &[Device], scale: f32, seen: &crate::front_app::Seen) {
+    pub fn show(&mut self, ui: &AppWindow, devices: &[Device], sections: Vec<Section>, scale: f32, seen: &crate::front_app::Seen) {
         self.rows = devices.to_vec();
+        self.sections = sections;
         let page_w = ui.get_gl_width();
         let all = self.entries(seen);
         // a page of its own that's no longer there goes back to the Library
@@ -467,7 +546,7 @@ impl Games {
         let said = self.said.clone();
         ui.set_gl_said(said.as_ref().map_or_else(Default::default, |(s, _, _)| s.as_str().into()));
         ui.set_gl_said_bad(said.is_some_and(|(_, b, _)| b));
-        ui.set_gl_undo_shown(self.undo.is_some());
+        ui.set_gl_undo_shown(self.undo.is_some() || self.script_undo.is_some());
         match self.open.clone() {
             None => self.show_tabs(ui, &all, page_w, scale),
             Some(id) => self.show_page(ui, &all, &id, devices, page_w, scale),
@@ -477,6 +556,7 @@ impl Games {
 
     fn show_tabs(&mut self, ui: &AppWindow, all: &[Entry], page_w: f32, scale: f32) {
         ui.set_gl_view(0);
+        crate::front::set_rows(&self.toc, Vec::new());
         ui.set_gl_tab(self.tab as i32);
         crate::front::set_rows(&self.cells, Vec::new());
         crate::front::set_rows(&self.facts, Vec::new());
@@ -693,11 +773,23 @@ impl Games {
                 out.push(Cell { color: slint::Color::from_argb_u8(9, 255, 255, 255), ..cell(kind::BOX, lx, ry, w - 2.0 * PAD_X, 1.0) });
             }
             let (c, own, _) = self.row_value(id, d);
-            out.push(Cell { style: (d.kind == "mouse") as i32, ..cell(kind::DEVICE, lx, ry + 13.0, GLYPH, GLYPH) });
-            out.push(text_cell(style::LABEL, lx + GLYPH + 12.0, ry + 13.0, LABEL_W - GLYPH - 12.0, 36.0, &d.name));
+            out.push(Cell { style: d.glyph.map_or((d.kind == "mouse") as i32, |g| 2 + g as i32), ..cell(kind::DEVICE, lx, ry + 13.0, GLYPH, GLYPH) });
+            let mut row_h = 36.0;
+            if d.sub.is_empty() {
+                out.push(text_cell(style::LABEL, lx + GLYPH + 12.0, ry + 13.0, LABEL_W - GLYPH - 12.0, 36.0, &d.name));
+            } else {
+                // (its name, and what it is under it, on as many lines as it takes)
+                let sw = LABEL_W - GLYPH - 12.0;
+                out.push(text_cell(style::LABEL, lx + GLYPH + 12.0, ry + 9.0, sw, 20.0, &d.name));
+                let lines = crate::text::wrap(400, 12.5, &d.sub, sw);
+                for (i, l) in lines.iter().enumerate() {
+                    out.push(text_cell(style::NOTE, lx + GLYPH + 12.0, ry + 29.0 + i as f32 * 17.0, sw, 17.0, l));
+                }
+                row_h = (16.0 + 20.0 + lines.len() as f32 * 17.0 - 13.0).max(36.0);
+            }
             let word = choice_name(&c, d);
             out.push(Cell { text: word.as_str().into(), style: (!own && !every) as i32, on: self.menu == Some(Menu::Device(k)), id: id_of(Ctl::LibChoice), index: k as i32, ..cell(kind::DROP, cx, ry + 13.0, DROP_W, 36.0) });
-            ry += 13.0 + 36.0 + 13.0;
+            ry += 13.0 + row_h + 13.0;
         }
         if devices.is_empty() {
             out.push(text_cell(style::NOTE, lx, ry + 13.0, w - 2.0 * PAD_X, 18.0, "Your devices show here once Ectodeck has found them."));
@@ -716,8 +808,312 @@ impl Games {
         let box_h = ry + 10.0 - box_y;
         cells.push(cell(kind::TILE, X0, box_y, w, box_h));
         cells.extend(out);
+        // On this page: Devices first, with the profiles this page switches to
+        let devices_top = box_y - 18.0 - 9.0;
+        let mut toc: Vec<LibToc> = vec![self.devices_entry(id, devices, devices_top, game, every)];
+        let mut y = box_y + box_h;
+        self.setting_at.clear();
+        self.script_at.clear();
+        for sec in self.sections.clone() {
+            y += 30.0;
+            let top = y;
+            y = self.draw_section(&mut cells, &sec, id, &name, w, y, game, every);
+            toc.push(self.section_entry(&sec, id, top, game, every));
+        }
         crate::front::sync_cells(&self.cells, cells);
-        ui.set_gl_page_h(box_y + box_h + 60.0);
+        // (beside the sections where there's room, and only with more than Devices to list)
+        let tx = X0 + w + 32.0;
+        let room = page_w - tx - 28.0;
+        if toc.len() > 1 && room >= 220.0 {
+            self.toc_at = toc.iter().map(|t| t.y.max(0.0)).collect();
+            ui.set_gl_toc_x(tx);
+            ui.set_gl_toc_w(room.min(336.0));
+            ui.set_gl_toc_top(devices_top);
+            ui.set_gl_toc_foot(if every { self.every_foot().into() } else { "".into() });
+            crate::front::set_rows(&self.toc, toc);
+        } else {
+            self.toc_at.clear();
+            crate::front::set_rows(&self.toc, Vec::new());
+        }
+        ui.set_gl_page_h(y + 60.0);
+    }
+
+    // ------------------------------------------------------------ the plugins' sections
+
+    /// A setting's value on this page, whether the page chose it itself, and
+    /// what it follows (Every game's, for a game; else what it starts at).
+    fn setting_value(&self, plugin: &str, key: &str, d: &Value, id: &str) -> (Value, bool, Value) {
+        let start = d["default"].clone();
+        let every = if self.library.is_game(id) || id == EVERY { self.library.plugin_values(EVERY, plugin)[key].clone() } else { Value::Null };
+        let follows = if every.is_null() { start } else { every };
+        if id == EVERY {
+            return (follows.clone(), true, follows);
+        }
+        match self.library.plugin_values(id, plugin).get(key) {
+            Some(v) if !v.is_null() => (v.clone(), true, follows),
+            _ => (follows.clone(), false, follows),
+        }
+    }
+
+    /// A setting's dropdown: its value's words, in gray where the page follows
+    /// another's, open while its menu is.
+    fn setting_cell(&mut self, plugin: &str, key: &str, desc: &Value, id: &str, x: f32, y: f32, w: f32) -> Cell {
+        let d = &desc["settings"][key];
+        let (v, own, _) = self.setting_value(plugin, key, d, id);
+        let words = option_label(d, &v);
+        let k = self.setting_at.len();
+        self.setting_at.push((plugin.to_string(), key.to_string()));
+        Cell { text: words.as_str().into(), style: (!own && id != EVERY) as i32, on: self.menu == Some(Menu::Setting(k)), id: id_of(Ctl::LibSetting), index: k as i32, ..cell(kind::DROP, x, y, w, 36.0) }
+    }
+
+    /// How many of a section's settings this game changes from Every game's.
+    fn changed_here(&self, sec: &Section, id: &str) -> usize {
+        sec.desc["settings"].as_object().map_or(0, |m| m.iter().filter(|(k, d)| {
+            let (v, own, follows) = self.setting_value(&sec.plugin, k, d, id);
+            own && v != follows
+        }).count())
+    }
+
+    /// A plugin's section: its heading with its plugin's tag and, on a game's
+    /// page, how many of its settings the game changes; then its box, its
+    /// parts in the order the plugin lays them out. Where the section ends.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_section(&mut self, cells: &mut Vec<Cell>, sec: &Section, id: &str, name: &str, w: f32, y: f32, game: bool, every: bool) -> f32 {
+        let label = sec.desc["label"].as_str().unwrap_or(&sec.name).to_string();
+        let lw = crate::text::width(500, 13.0, &label).ceil();
+        cells.push(text_cell(style::HEAD, X0 + 2.0, y, lw + 4.0, 18.0, &label));
+        cells.push(Cell { color: slint::Color::from_rgb_u8(0x74, 0x74, 0x7c), ..text_cell(style::SMALL_IN, X0 + 2.0 + lw + 10.0, y + 1.0, 60.0, 18.0, "Plugin") });
+        if game && !every && sec.desc["settings"].as_object().is_some_and(|m| !m.is_empty()) {
+            let state = match self.changed_here(sec, id) {
+                0 => "Same as every game".to_string(),
+                n => format!("{n} changed for this game"),
+            };
+            let sw = crate::text::width(400, 12.5, &state).ceil() + 2.0;
+            cells.push(text_cell(style::NOTE, X0 + w - sw, y, sw, 18.0, &state));
+        }
+        let box_y = y + 18.0 + 9.0;
+        let (lx, cx) = (X0 + PAD_X, X0 + PAD_X + LABEL_W + 24.0);
+        let inner = w - 2.0 * PAD_X;
+        let line = |x: f32, y: f32, w: f32| Cell { color: slint::Color::from_argb_u8(9, 255, 255, 255), ..cell(kind::BOX, x, y, w, 1.0) };
+        let mut out: Vec<Cell> = Vec::new();
+        let mut ry = box_y + 8.0;
+        let mut rows_drawn = 0usize;
+        let parts = sec.desc["layout"].as_array().cloned().unwrap_or_default();
+        for part in &parts {
+            if let Some(grid) = part.get("grid") {
+                // a column for each, its name and what it is now; a row for each setting
+                let cols = grid["columns"].as_array().cloned().unwrap_or_default();
+                let n = cols.len().max(1) as f32;
+                let cw = ((w - PAD_X - (cx - X0) - 24.0 * (n - 1.0)) / n).floor();
+                let col_x = |i: usize| cx + i as f32 * (cw + 24.0);
+                ry += 8.0;
+                for (i, c) in cols.iter().enumerate() {
+                    out.push(text_cell(style::NAME, col_x(i), ry, cw, 20.0, c["label"].as_str().unwrap_or("")));
+                    out.push(text_cell(style::NOTE, col_x(i), ry + 21.0, cw, 18.0, c["note"].as_str().unwrap_or("")));
+                }
+                ry += 21.0 + 18.0 + 8.0;
+                for row in grid["rows"].as_array().into_iter().flatten() {
+                    out.push(line(lx, ry, inner));
+                    out.push(text_cell(style::LABEL, lx, ry + 11.0, LABEL_W, 36.0, row["label"].as_str().unwrap_or("")));
+                    for (i, c) in row["cells"].as_array().into_iter().flatten().enumerate() {
+                        match c {
+                            Value::String(key) => {
+                                let dc = self.setting_cell(&sec.plugin, key, &sec.desc, id, col_x(i), ry + 11.0, cw);
+                                out.push(dc);
+                            }
+                            other => out.push(text_cell(style::NOTE, col_x(i), ry + 11.0, cw, 36.0, other["none"].as_str().unwrap_or(""))),
+                        }
+                    }
+                    ry += 11.0 + 36.0 + 11.0;
+                    rows_drawn += 1;
+                }
+            }
+            if let Some(show) = part["show"].as_array() {
+                for item in show {
+                    let (key, label) = match item {
+                        Value::String(k) => (k.clone(), sec.desc["settings"][k]["label"].as_str().unwrap_or(k).to_string()),
+                        o => (o["id"].as_str().unwrap_or("").to_string(), o["label"].as_str().or(sec.desc["settings"][o["id"].as_str().unwrap_or("")]["label"].as_str()).unwrap_or("").to_string()),
+                    };
+                    if rows_drawn > 0 {
+                        out.push(line(lx, ry, inner));
+                    }
+                    out.push(text_cell(style::LABEL, lx, ry + 13.0, LABEL_W, 36.0, &label));
+                    let dc = self.setting_cell(&sec.plugin, &key, &sec.desc, id, cx, ry + 13.0, DROP_W);
+                    out.push(dc);
+                    ry += 13.0 + 36.0;
+                    rows_drawn += 1;
+                    if let Some(note) = part["note"].as_str().filter(|_| show.last() == Some(item)) {
+                        let nw = w - PAD_X - (cx - X0);
+                        let lines = crate::text::wrap(400, 12.5, note, nw);
+                        ry += 8.0;
+                        for (k, l) in lines.iter().enumerate() {
+                            out.push(text_cell(style::NOTE, cx, ry + k as f32 * 18.0, nw, 18.0, l));
+                        }
+                        ry += lines.len() as f32 * 18.0;
+                    }
+                    ry += 13.0;
+                }
+                continue;
+            }
+            if part["commands"] == true {
+                ry = self.draw_commands(&mut out, id, name, lx, ry + 10.0, inner, part["note"].as_str().unwrap_or(""), every);
+                continue;
+            }
+            if part.get("grid").is_none() {
+                if let Some(note) = part["note"].as_str() {
+                    // a note alone: under the rows, in the controls' column; with nothing else, across the box
+                    let (nx, nw) = if rows_drawn > 0 { (cx, w - PAD_X - (cx - X0)) } else { (lx, inner) };
+                    if rows_drawn > 0 {
+                        out.push(line(lx, ry, inner));
+                    }
+                    let lines = crate::text::wrap(400, 12.5, note, nw);
+                    for (k, l) in lines.iter().enumerate() {
+                        out.push(text_cell(style::NOTE, nx, ry + 13.0 + k as f32 * 18.0, nw, 18.0, l));
+                    }
+                    ry += 13.0 + lines.len() as f32 * 18.0 + 13.0;
+                }
+            }
+        }
+        let box_h = ry + 10.0 - box_y;
+        cells.push(cell(kind::TILE, X0, box_y, w, box_h));
+        cells.extend(out);
+        box_y + box_h
+    }
+
+    /// The person's commands, a card each (Every game's marked so on a game's
+    /// page), then Add a script with the note beside it. Where they end.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_commands(&mut self, out: &mut Vec<Cell>, id: &str, name: &str, lx: f32, y: f32, inner: f32, note: &str, every: bool) -> f32 {
+        let list: Vec<(Script, bool)> = if every { self.library.scripts(EVERY).into_iter().map(|s| (s, false)).collect() } else { self.library.scripts_for(id) };
+        let mut ry = y;
+        let who = if every { "a game".to_string() } else { name.to_string() };
+        for (s, from_every) in &list {
+            let k = self.script_at.len();
+            self.script_at.push(s.id);
+            let card_h = 12.0 + 28.0 + 6.0 + 22.0 + 4.0 + 22.0 + 6.0 + 18.0 + 12.0;
+            // the card, which opens its form; on it, its name, Every game's tag, Run now
+            out.push(Cell { text: "".into(), style: 36, id: id_of(Ctl::LibScript), index: k as i32, ..cell(kind::LINK, lx, ry, inner, card_h) });
+            let shown = if s.name.trim().is_empty() { "A script".to_string() } else { s.name.clone() };
+            let nw = crate::text::width(500, 14.5, &shown).ceil() + 4.0;
+            out.push(text_cell(style::NAME, lx + 14.0, ry + 12.0, nw.min(inner - 200.0), 28.0, &shown));
+            if *from_every {
+                let tw = crate::text::width(400, 11.5, "Every game").ceil() + 14.0;
+                out.push(Cell { text: "Every game".into(), style: 4, ..cell(kind::PILL, lx + 14.0 + nw.min(inner - 200.0) + 10.0, ry + 16.0, tw, 20.0) });
+            }
+            let run = if self.trying.contains(&s.id) { "Running…" } else { "Run now" };
+            let rw = crate::text::width(500, 12.5, run).ceil() + 18.0;
+            out.push(Cell { text: run.into(), id: id_of(Ctl::LibScriptRun), index: k as i32, ..cell(kind::LINK, lx + inner - 14.0 + 9.0 - rw, ry + 12.0, rw, 28.0) });
+            let starts = if *from_every || every { "When a game starts".to_string() } else { format!("When {who} starts") };
+            let quits = if *from_every || every { "When the game quits".to_string() } else { format!("When {who} quits") };
+            let (kx, vx) = (lx + 14.0, lx + 14.0 + 170.0);
+            let vw = inner - 14.0 - 170.0 - 14.0;
+            let mut cy = ry + 12.0 + 28.0 + 6.0;
+            out.push(text_cell(style::NOTE, kx, cy, 166.0, 22.0, &starts));
+            out.push(text_cell(style::COMMAND, vx, cy, vw, 22.0, &s.start));
+            cy += 22.0 + 4.0;
+            out.push(text_cell(style::NOTE, kx, cy, 166.0, 22.0, &quits));
+            if s.quit.trim().is_empty() {
+                out.push(text_cell(style::NOTE, vx, cy, vw, 22.0, "Nothing to undo"));
+            } else {
+                out.push(text_cell(style::COMMAND, vx, cy, vw, 22.0, &s.quit));
+            }
+            cy += 22.0 + 6.0;
+            let (said, bad) = result_line(s, &self.library.script_last(s.id), self.trying.contains(&s.id));
+            let c = if bad { slint::Color::from_rgb_u8(0xff, 0x8a, 0x80) } else { slint::Color::from_rgb_u8(0x74, 0x74, 0x7c) };
+            out.push(Cell { color: c, ..text_cell(style::NOTE_IN, kx, cy, inner - 28.0, 18.0, &said) });
+            ry += card_h + 8.0;
+        }
+        // Add a script, and how they run
+        let aw = crate::text::width(500, 13.0, "Add a script").ceil() + 12.0 + 14.0 + 7.0 + 12.0;
+        let ay = ry + if list.is_empty() { 0.0 } else { 6.0 };
+        out.push(Cell { text: "Add a script".into(), lines: "M8 3v10M3 8h10".into(), style: 35, id: id_of(Ctl::LibScriptAdd), ..cell(kind::GHOST, lx, ay, aw, 30.0) });
+        let nx = lx + aw + 14.0;
+        let lines = crate::text::wrap(400, 12.5, note, inner - aw - 14.0);
+        let nh = lines.len() as f32 * 18.0;
+        for (k, l) in lines.iter().enumerate() {
+            out.push(text_cell(style::NOTE, nx, ay + (30.0 - nh).max(0.0) / 2.0 + k as f32 * 18.0, inner - aw - 14.0, 18.0, l));
+        }
+        ay + 30.0f32.max(nh) + 12.0
+    }
+
+    /// On this page's entry for Devices: the profiles this page switches to.
+    fn devices_entry(&self, id: &str, devices: &[Device], y: f32, game: bool, every: bool) -> LibToc {
+        let own: Vec<String> = devices
+            .iter()
+            .filter_map(|d| {
+                let (c, chosen, follows) = self.row_value(id, d);
+                (chosen && (every || c != follows)).then(|| choice_name(&c, d))
+            })
+            .filter(|n| n != "Don’t switch" || !every)
+            .collect();
+        let sub = if !own.is_empty() {
+            own.join(", ")
+        } else if every || !game {
+            if game || every { "Don’t switch".into() } else { "No changes".into() }
+        } else {
+            "Same as every game".into()
+        };
+        LibToc { name: "Devices".into(), sub: sub.as_str().into(), set: !own.is_empty(), y: y - 12.0 }
+    }
+
+    /// On this page's entry for a plugin's section: what it changes here.
+    fn section_entry(&self, sec: &Section, id: &str, y: f32, game: bool, every: bool) -> LibToc {
+        let mut own: Vec<String> = Vec::new();
+        if sec.desc["layout"].as_array().is_some_and(|l| l.iter().any(|p| p["commands"] == true)) {
+            let mine: Vec<Script> = if every { self.library.scripts(EVERY) } else { self.library.scripts(id) };
+            own.extend(mine.iter().map(|s| if s.name.trim().is_empty() { "A script".to_string() } else { s.name.clone() }));
+        }
+        // each setting the page chose itself, by its column's name where it's in a grid
+        let columns: Vec<(String, String)> = sec.desc["layout"].as_array().into_iter().flatten().filter_map(|p| p["grid"]["columns"].as_array()).flatten().map(|c| (c["id"].as_str().unwrap_or("").to_string(), c["label"].as_str().unwrap_or("").to_string())).collect();
+        if let Some(m) = sec.desc["settings"].as_object() {
+            for (k, d) in m {
+                let (v, chosen, follows) = self.setting_value(&sec.plugin, k, d, id);
+                let changes = if every { v != d["default"] } else { chosen && v != follows };
+                if !changes {
+                    continue;
+                }
+                let words = option_label(d, &v);
+                let whose = columns.iter().find(|(c, _)| k.starts_with(&format!("{c}/"))).map(|(_, l)| l.clone());
+                own.push(match whose {
+                    Some(c) => format!("{c}: {}", words.to_lowercase()),
+                    None => format!("{}: {}", d["label"].as_str().unwrap_or(k), words.to_lowercase()),
+                });
+            }
+        }
+        let n = own.len();
+        let commands_only = sec.desc["settings"].as_object().is_none_or(|m| m.is_empty()) && sec.desc["layout"].as_array().is_some_and(|l| l.iter().any(|p| p["commands"] == true));
+        let none = if commands_only { "No scripts" } else { "No changes" };
+        let sub = if n > 3 { format!("{}, and {} more", own[..2].join(", "), n - 2) } else if n > 0 { own.join(", ") } else if every || !game { none.into() } else { "Same as every game".into() };
+        LibToc { name: sec.desc["label"].as_str().unwrap_or(&sec.name).into(), sub: sub.as_str().into(), set: n > 0, y: y - 12.0 }
+    }
+
+    /// Under Every game's On this page: how many games it's for, and how many
+    /// change something of their own.
+    fn every_foot(&self) -> String {
+        let all = self.library.entries(&|id| id.to_string());
+        let games: Vec<&Entry> = all.iter().filter(|e| e.kind == Kind::Game).collect();
+        let own = games.iter().filter(|e| self.library.has_own(&e.id)).count();
+        let n = games.len();
+        let used = match n {
+            0 => "Used by every game you add".to_string(),
+            1 => "Used by your one game".to_string(),
+            n => format!("Used by all {n} games"),
+        };
+        let mine = match own {
+            0 => "none has changes of its own".to_string(),
+            1 => "1 has changes of its own".to_string(),
+            k => format!("{k} have changes of their own"),
+        };
+        format!("{used}; {mine}. Every game is for games only: an app’s page starts empty.")
+    }
+
+    /// On this page's entry selected: its section scrolled to.
+    pub fn toc_jump(&mut self, i: usize, ui: &AppWindow) {
+        if let Some(y) = self.toc_at.get(i) {
+            self.jumps += 1;
+            ui.set_gl_jump_y(*y);
+            ui.set_gl_jump_n(self.jumps);
+        }
     }
 
     fn show_form(&mut self, ui: &AppWindow, all: &[Entry], seen: &crate::front_app::Seen, scale: f32) {
@@ -756,6 +1152,36 @@ impl Games {
                 ui.set_gl_seen_chosen(chosen.map_or(-1, |c| c as i32));
                 ui.set_gl_can_add(chosen.is_some_and(|c| c < self.offered.len()));
             }
+            Form::Script(f) => {
+                ui.set_gl_modal(3);
+                let every = f.page == EVERY;
+                let n = if every { "a game".to_string() } else { self.name(&f.page, seen) };
+                let (starts, quits) = if every { ("a game starts".to_string(), "the game quits".to_string()) } else { (format!("{n} starts"), format!("{n} quits")) };
+                let opened_from = self.open.clone().unwrap_or_default();
+                ui.set_gl_script_title(
+                    match (&f.editing, every && opened_from != EVERY) {
+                        (Some(_), true) => "Edit Every game’s script",
+                        (Some(_), false) => "Edit the script",
+                        (None, _) => "Add a script",
+                    }
+                    .into(),
+                );
+                ui.set_gl_script_sub(format!("A command to run when {starts}, and one to undo the command when {quits}.").into());
+                ui.set_gl_script_start_label(format!("When {starts}").into());
+                ui.set_gl_script_quit_label(format!("When {quits}").into());
+                ui.set_gl_script_wait(f.wait);
+                ui.set_gl_script_keep(f.keep);
+                ui.set_gl_script_limit(limit_words(f.limit).into());
+                // (the game starts through Steam, so Ectodeck can hold up only its own next change)
+                ui.set_gl_script_wait_label("Wait for the command to finish before Ectodeck goes on".into());
+                ui.set_gl_script_keep_label(format!("Keep the command running until {quits}").into());
+                ui.set_gl_script_limit_note("Ectodeck stops a command that runs longer than this.".into());
+                ui.set_gl_script_editing(f.editing.is_some());
+                // (a command that would be an administrator's is said no to here, before it's added)
+                let warn = crate::commands::refused(&ui.get_gl_script_start()).or_else(|| crate::commands::refused(&ui.get_gl_script_quit()));
+                ui.set_gl_script_warning(warn.clone().unwrap_or_default().into());
+                ui.set_gl_can_add(!ui.get_gl_script_start().trim().is_empty() && warn.is_none());
+            }
         }
     }
 
@@ -784,6 +1210,29 @@ impl Games {
                 row("Added by hand", self.shop == Shop::Hand, all_counts.1.to_string()),
             ],
             Menu::Order => vec![row("Recently played", self.order == Order::Recent, String::new()), row("Name", self.order == Order::Name, String::new()), row("Most played", self.order == Order::Most, String::new())],
+            Menu::Setting(k) => {
+                let Some((plugin, key)) = self.setting_at.get(*k).cloned() else { return Vec::new() };
+                let Some(sec) = self.sections.iter().find(|x| x.plugin == plugin) else { return Vec::new() };
+                let d = &sec.desc["settings"][&key];
+                let id = self.open.clone().unwrap_or_default();
+                let (v, _, follows) = self.setting_value(&plugin, &key, d, &id);
+                let game = id != EVERY && self.library.is_game(&id);
+                d["options"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|o| {
+                        let ov = o.get("value").unwrap_or(o);
+                        let label = o["label"].as_str().map(String::from).unwrap_or_else(|| ov.as_str().unwrap_or("").to_string());
+                        // (on a game's page, Every game's is said: choosing it follows Every game again)
+                        row(&label, *ov == v, if game && *ov == follows { "Every game’s".into() } else { String::new() })
+                    })
+                    .collect()
+            }
+            Menu::Limit => {
+                let now = if let Form::Script(f) = &self.form { f.limit } else { 10 };
+                LIMITS.iter().map(|n| row(&limit_words(*n), *n == now, String::new())).collect()
+            }
             Menu::Device(k) => {
                 let Some(d) = self.rows.get(*k) else { return Vec::new() };
                 let id = self.open.clone().unwrap_or_default();
@@ -813,6 +1262,22 @@ impl Games {
         match m {
             Menu::Shop => self.shop = [Shop::All, Shop::Steam, Shop::Hand].get(i).copied().unwrap_or(self.shop),
             Menu::Order => self.order = [Order::Recent, Order::Name, Order::Most].get(i).copied().unwrap_or(self.order),
+            Menu::Setting(k) => {
+                let (Some((plugin, key)), Some(id)) = (self.setting_at.get(k).cloned(), self.open.clone()) else { return };
+                let Some(sec) = self.sections.iter().find(|x| x.plugin == plugin).cloned() else { return };
+                let d = &sec.desc["settings"][&key];
+                let Some(o) = d["options"].as_array().and_then(|a| a.get(i)) else { return };
+                let want = o.get("value").unwrap_or(o).clone();
+                let (_, _, follows) = self.setting_value(&plugin, &key, d, &id);
+                // what the page follows anyway is no choice of its own
+                let keep = if id == EVERY { (want != d["default"]).then_some(want) } else { (want != follows).then_some(want) };
+                self.library.set_plugin_value(&id, &plugin, &key, keep);
+            }
+            Menu::Limit => {
+                if let (Form::Script(f), Some(n)) = (&mut self.form, LIMITS.get(i)) {
+                    f.limit = *n;
+                }
+            }
             Menu::Device(k) => {
                 let (Some(d), Some(id)) = (self.rows.get(k).cloned(), self.open.clone()) else { return };
                 let want = if i == 0 { Choice::Stay } else if let Some((r, _)) = d.profiles.get(i - 1) { Choice::Profile(r.clone()) } else { return };
@@ -892,8 +1357,14 @@ impl Games {
         self.say(format!("Removed {name} from the Library."), false);
     }
 
-    /// Undo, after Remove: the game or app back, and its page.
+    /// Undo, after Remove: the script back on its page, or the game or app
+    /// back, and its page.
     pub fn undo(&mut self) {
+        if let Some(r) = self.script_undo.take() {
+            self.library.restore_script(r);
+            self.said = None;
+            return;
+        }
         let Some(r) = self.undo.take() else { return };
         let id = r.id.clone();
         self.library.restore(r);
@@ -961,9 +1432,91 @@ impl Games {
                 self.open = Some(id);
                 self.say(format!("Added {name} to Apps."), false);
             }
+            Form::Script(f) => {
+                let start = ui.get_gl_script_start().trim().to_string();
+                if start.is_empty() || crate::commands::refused(&start).is_some() || crate::commands::refused(&ui.get_gl_script_quit()).is_some() {
+                    return;
+                }
+                let typed = ui.get_gl_script_name().trim().to_string();
+                let name = if typed.is_empty() { name_of_command(&start) } else { typed };
+                let s = Script { id: f.editing.unwrap_or(0), name: name.clone(), start, quit: ui.get_gl_script_quit().trim().to_string(), wait: f.wait && !f.keep, keep: f.keep, limit: f.limit };
+                self.library.put_script(&f.page, s);
+                self.say(if f.editing.is_some() { format!("Saved the script {name}.") } else { format!("Added the script {name}.") }, false);
+            }
             _ => return,
         }
         self.form = Form::None;
+    }
+
+    // ------------------------------------------------------------ the scripts
+
+    /// Add a script, on the page open.
+    pub fn add_script(&mut self, ui: &AppWindow) {
+        let Some(page) = self.open.clone() else { return };
+        self.form = Form::Script(ScriptForm { page, editing: None, wait: true, keep: false, limit: 10 });
+        ui.set_gl_script_name("".into());
+        ui.set_gl_script_start("".into());
+        ui.set_gl_script_quit("".into());
+        self.menu = None;
+    }
+
+    /// A script's card selected: its form, to change it.
+    pub fn edit_script(&mut self, k: usize, ui: &AppWindow) {
+        let Some(n) = self.script_at.get(k).copied() else { return };
+        let Some(s) = self.library.script(n) else { return };
+        let page = self.library.script_page(n).unwrap_or_else(|| self.open.clone().unwrap_or_default());
+        self.form = Form::Script(ScriptForm { page, editing: Some(n), wait: s.wait, keep: s.keep, limit: s.limit });
+        ui.set_gl_script_name(s.name.as_str().into());
+        ui.set_gl_script_start(s.start.as_str().into());
+        ui.set_gl_script_quit(s.quit.as_str().into());
+        self.menu = None;
+    }
+
+    /// The script being changed taken off its page, with Undo for a moment.
+    pub fn remove_script(&mut self) {
+        let Form::Script(f) = self.form.clone() else { return };
+        let Some(n) = f.editing else { return };
+        let name = self.library.script(n).map(|s| s.name).unwrap_or_default();
+        self.script_undo = self.library.remove_script(n);
+        self.form = Form::None;
+        self.undo = None;
+        self.say(format!("Removed the script {name}."), false);
+    }
+
+    pub fn script_wait(&mut self) {
+        if let Form::Script(f) = &mut self.form {
+            f.wait = !f.wait;
+            if f.wait {
+                f.keep = false;
+            }
+        }
+    }
+
+    pub fn script_keep(&mut self) {
+        if let Form::Script(f) = &mut self.form {
+            f.keep = !f.keep;
+            if f.keep {
+                f.wait = false;
+            }
+        }
+    }
+
+    /// Run now on a script's card: the script to try (none while it's being tried).
+    pub fn run_now(&mut self, k: usize) -> Option<Script> {
+        let n = *self.script_at.get(k)?;
+        if !self.trying.insert(n) {
+            return None;
+        }
+        self.library.script(n)
+    }
+
+    /// A script ran: kept with it, and no longer being tried once its undo has
+    /// run too (or its start failed, or it has none).
+    pub fn script_ran(&mut self, n: u64, game: &str, quit: bool, ran: &Ran, at: u64) {
+        self.library.script_ran(n, game, quit, ran, at);
+        if game.is_empty() && (quit || !ran.ok() || self.library.script(n).is_none_or(|s| s.quit.trim().is_empty())) {
+            self.trying.remove(&n);
+        }
     }
 
     pub fn close_form(&mut self) -> bool {
@@ -992,12 +1545,87 @@ fn id_of(c: Ctl) -> i32 {
     id(c)
 }
 
+/// A setting's value in its own words: its option's, or what it starts at.
+fn option_label(d: &Value, v: &Value) -> String {
+    let opts = d["options"].as_array().cloned().unwrap_or_default();
+    let of = |want: &Value| opts.iter().find(|o| o.get("value").unwrap_or(o) == want).map(|o| o["label"].as_str().map(String::from).unwrap_or_else(|| o.as_str().unwrap_or("").to_string()));
+    if let Some(l) = of(v) {
+        return l;
+    }
+    if v.is_null() {
+        if let Some(l) = of(&d["default"]) {
+            return l;
+        }
+    }
+    match v {
+        Value::String(s) => s.clone(),
+        Value::Null => String::new(),
+        other => other.to_string(),
+    }
+}
+
+/// When something happened, as a script's line says it: "today at 3:04 PM",
+/// or "Oct 21 at 3:04 PM".
+fn when_words(secs: u64) -> String {
+    let t = crate::lcd_page::Moment::at(secs as libc::time_t);
+    let now = crate::lcd_page::Moment::now();
+    let clock = crate::lcd_page::twelve_hour(t.hour, t.minute);
+    if (t.year, t.month, t.day) == (now.year, now.month, now.day) {
+        return format!("today at {clock}");
+    }
+    let d = format!("{} {}", MONTHS[t.month as usize % 12], t.day);
+    if t.year == now.year { format!("{d} at {clock}") } else { format!("{d}, {} at {clock}", t.year) }
+}
+
+/// A sentence's first letter made a capital.
+fn capital(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map_or_else(String::new, |f| f.to_uppercase().collect::<String>() + c.as_str())
+}
+
+/// The line under a script: how it last ran, in red where it went wrong; or,
+/// before it has run, what Ectodeck does with it.
+fn result_line(s: &Script, last: &Value, trying: bool) -> (String, bool) {
+    if trying {
+        return ("Running now…".into(), false);
+    }
+    let Some(start) = Ran::of(&last["start"]) else {
+        let how = if s.keep {
+            "Ectodeck keeps it running until the game quits.".to_string()
+        } else if s.wait {
+            format!("Ectodeck waits up to {} for it to finish.", limit_words(s.limit))
+        } else {
+            "Ectodeck doesn’t wait for it to finish.".to_string()
+        };
+        return (format!("Not run yet. {how}"), false);
+    };
+    if !start.ok() {
+        return (format!("{}.", capital(&start.words())), true);
+    }
+    let game = last["game"].as_str().unwrap_or("");
+    let when = last["at"].as_u64().map(when_words).unwrap_or_default();
+    let lead = if game.is_empty() { format!("Tried {when}") } else { format!("Ran as {game} started, {when}") };
+    let mut said = format!("{lead}: {}.", start.words());
+    let mut bad = false;
+    if let Some(q) = Ran::of(&last["quit"]) {
+        said.push_str(&format!(" Its undo {}.", q.words()));
+        bad = !q.ok();
+    }
+    (said, bad)
+}
+
 /// A choice as a dropdown shows it.
 fn choice_name(c: &Choice, d: &Device) -> String {
     match c {
         Choice::Stay => "Don’t switch".into(),
         Choice::Profile(p) => d.profiles.iter().find(|(r, _)| r == p).map_or_else(|| "A profile no longer there".to_string(), |(_, n)| n.clone()),
     }
+}
+
+/// A script's name where none is typed: its program's, as a game's is.
+fn name_of_command(cmd: &str) -> String {
+    let first = cmd.split_whitespace().find(|w| !w.contains('=')).unwrap_or(cmd);
+    name_from(Path::new(first.trim_start_matches('~')))
 }
 
 /// A game's name from its program: the file's name, its separators spaces,

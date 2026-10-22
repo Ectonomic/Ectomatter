@@ -18,6 +18,8 @@ import "fonts/BarlowSemiCondensed-600.ttf";
 import "fonts/Geist-400.ttf";
 import "fonts/Geist-500.ttf";
 import "fonts/Geist-600.ttf";
+// commands as they are typed, in a typeface whose letters are all one width (the Scripts plugin's section)
+import "../../../crates/ectodeck-draw/typefaces/JetBrainsMono.ttf";
 
 // The window's shades, darkest to lightest: the frame (title bar, rail),
 // the page, the boxes on it. Wells (fields, tracks, tiles, the profiles'
@@ -340,6 +342,15 @@ export struct GlRow {
 
 // a run of words under a game's picture, placed by the window: its words,
 // whether they're a number to stand out in ink, and where they start
+// an entry of a Library page's On this page: a section's name, what it changes here (in
+// a lighter shade when it's this page's own), and where the section is
+export struct LibToc {
+    name: string,
+    sub: string,
+    set: bool,
+    y: length,
+}
+
 export struct LibFact {
     text: string,
     strong: bool,
@@ -961,13 +972,26 @@ component CellView inherits Rectangle {
     callback pad(int, float, float);
     in property <image> glyph;
     in property <image> glyph2;
+    // each package's own glyph (a device's tile with style 2 on: the package that many past 2)
+    in property <[image]> glyphs;
     x: root.c.x;
     y: root.c.y;
     width: root.c.w;
     height: root.c.h;
     // the Lighting page's words: a group's heading in small capitals (33), a color's hex
     // code (34), a setting's name (35), the words at a slider's ends (36 left, 37 right)
-    if root.c.kind == 0 && root.c.style >= 33: Text {
+    // a command, as it was typed (41), cut off with an ellipsis where it runs long
+    if root.c.kind == 0 && root.c.style == 41: Text {
+        x: 0;
+        width: parent.width;
+        text: root.c.text;
+        font-family: "JetBrains Mono";
+        font-size: 12px;
+        color: Ink.dim;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    if root.c.kind == 0 && root.c.style >= 33 && root.c.style != 41: Text {
         x: 0;
         width: parent.width;
         text: root.c.text;
@@ -1134,7 +1158,7 @@ component CellView inherits Rectangle {
         Image {
             width: floor(parent.width * 0.625 / 1px) * 1px;
             height: self.width;
-            source: root.c.style == 1 ? root.glyph2 : root.glyph;
+            source: root.c.style >= 2 ? root.glyphs[root.c.style - 2] : root.c.style == 1 ? root.glyph2 : root.glyph;
             colorize: Ink.soft;
         }
     }
@@ -1613,8 +1637,10 @@ component CellView inherits Rectangle {
     // faint; 29: the page round a menu, which shuts it, with no shade or hand; 33: a small
     // button, as a card's Make main)
     if root.c.kind >= 5 && root.c.kind <= 8: Rectangle {
-        border-radius: root.c.style == 25 ? 4px : root.c.kind == 5 ? 7px : root.c.kind == 8 || root.c.style == 33 ? 6px : 8px;
-        background: root.c.on ? (b.has-hover ? Ink.pick-hover : Ink.pick)
+        // (style 36: a card that opens, in the well's shade on a box: a script's)
+        border-radius: root.c.style == 36 ? 10px : root.c.style == 25 ? 4px : root.c.kind == 5 ? 7px : root.c.kind == 8 || root.c.style == 33 ? 6px : 8px;
+        background: root.c.style == 36 ? (b.has-hover ? Ink.hover-well : Ink.well)
+            : root.c.on ? (b.has-hover ? Ink.pick-hover : Ink.pick)
             : root.c.style == 26 ? transparent
             : root.c.style == 31 ? (b.has-hover ? Ink.pick : Ink.hover-box)
             : root.c.kind == 5 ? (b.has-hover ? Ink.hover-well : transparent)
@@ -1630,6 +1656,20 @@ component CellView inherits Rectangle {
             background: root.c.color;
             border-width: 1px;
             border-color: #ffffff33;
+        }
+        // style 35: an icon before its words, drawn as the bar's buttons draw theirs (its lines, on 16 units)
+        if root.c.style == 35: Path {
+            x: 12px;
+            y: (parent.height - 14px) / 2;
+            width: 14px;
+            height: 14px;
+            viewbox-width: 16;
+            viewbox-height: 16;
+            commands: root.c.lines;
+            fill: transparent;
+            stroke: Ink.ink;
+            stroke-width: 1.14px;
+            stroke-line-cap: round;
         }
         // style 31 with an icon's shapes: the icon, as its key prints it
         if root.c.style == 31 && (root.c.fill != "" || root.c.lines != ""): Rectangle {
@@ -1657,7 +1697,7 @@ component CellView inherits Rectangle {
             }
         }
         Text {
-            x: root.c.style == 32 ? 32px : (parent.width - self.width) / 2 - (root.c.style == 24 ? 7px : 0);
+            x: root.c.style == 32 ? 32px : root.c.style == 35 ? 12px + 14px + 7px : (parent.width - self.width) / 2 - (root.c.style == 24 ? 7px : 0);
             y: (parent.height - self.height) / 2 + (b.pressed && (root.c.kind == 7 || root.c.kind == 8) ? 1px : 0);
             text: root.c.text;
             font-family: "Geist";
@@ -1692,17 +1732,18 @@ component CellView inherits Rectangle {
     // ---- the Lighting page's own pieces, in the shades of its boxes
     // a value in a small well; style 1, a warning's tag, outlined in amber
     // (style 2: on a well, a step lighter than it; 3: a card's Main card, on the box)
+    // (style 4: a tag on a well, in the box's shade, its words quiet: a script's Every game)
     if root.c.kind == 40: Rectangle {
-        border-radius: root.c.style == 1 ? 4px : 6px;
-        background: root.c.style == 1 ? transparent : root.c.style == 2 ? Ink.hover-box : root.c.style == 3 ? Ink.pick : Ink.well;
+        border-radius: root.c.style == 1 ? 4px : root.c.style == 4 ? 5px : 6px;
+        background: root.c.style == 1 ? transparent : root.c.style == 2 ? Ink.hover-box : root.c.style == 3 ? Ink.pick : root.c.style == 4 ? Ink.box : Ink.well;
         border-width: root.c.style == 1 ? 1px : 0;
         border-color: #f0b35a73;
         Text {
             text: root.c.text;
             font-family: "Geist";
             font-size: root.c.style == 1 ? 11px : root.c.style == 2 ? 12px : 11.5px;
-            font-weight: root.c.style == 1 || root.c.style == 2 || root.c.style == 3 ? 400 : 500;
-            color: root.c.style == 1 ? Ink.warn : root.c.style == 2 || root.c.style == 3 ? Ink.bright : Ink.dim;
+            font-weight: root.c.style == 1 || root.c.style == 2 || root.c.style == 3 || root.c.style == 4 ? 400 : 500;
+            color: root.c.style == 1 ? Ink.warn : root.c.style == 2 || root.c.style == 3 ? Ink.bright : root.c.style == 4 ? Ink.quiet : Ink.dim;
             horizontal-alignment: center;
             vertical-alignment: center;
         }
@@ -2854,6 +2895,53 @@ component KeyLibrary inherits PageBox {
 }
 
 // a checkbox: a well with a tick when on, its words beside it
+// a line to type into on a form, its words until something is typed (in the typeface whose
+// letters are all one width, for a command)
+component FieldBox inherits Rectangle {
+    in property <string> placeholder;
+    in-out property <string> text;
+    in property <bool> mono;
+    callback edited();
+    callback accepted();
+    callback escape();
+    height: 36px;
+    border-radius: 8px;
+    background: Ink.well;
+    clip: true;
+    if field-in.text == "": Text {
+        x: 12px;
+        width: parent.width - 24px;
+        height: parent.height;
+        text: root.placeholder;
+        font-family: "Geist";
+        font-size: 13px;
+        color: #8a8a92;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    field-in := TextInput {
+        x: 12px;
+        width: parent.width - 24px;
+        height: parent.height;
+        text <=> root.text;
+        font-family: root.mono ? "JetBrains Mono" : "Geist";
+        font-size: root.mono ? 12px : 13px;
+        color: Ink.ink;
+        vertical-alignment: center;
+        single-line: true;
+        changed has-focus => { Typing.on = self.has-focus; }
+        edited => { root.edited(); }
+        accepted => { root.accepted(); }
+        key-pressed(e) => {
+            if (e.text == Key.Escape) {
+                root.escape();
+                return accept;
+            }
+            reject
+        }
+    }
+}
+
 component CheckBox inherits Rectangle {
     in property <string> text;
     in property <bool> on;
@@ -3997,6 +4085,9 @@ export component AppWindow inherits Window {
     // its tab (0 Favorites, 1 Games, 2 Apps); the words under the bar; what is
     // typed in its find box, and the store and sort dropdowns' words and widths
     in property <image> library-glyph;
+    // each package's glyph (packages.rs's order): for a device's row in the Library, and Settings' tiles
+    in property <[image]> package-glyphs;
+    in property <[image]> package-tiles;
     in property <int> gl-view;
     in property <int> gl-tab;
     in property <string> gl-hint;
@@ -4023,6 +4114,54 @@ export component AppWindow inherits Window {
     in property <[LibFact]> gl-facts;
     in property <length> gl-facts-w;
     in property <[Cell]> gl-cells;
+    // a page's On this page, beside its sections where there's room: its entries, where it
+    // sits (it stays in view as the page scrolls), and what it says under them; a jump to a
+    // section, told by its count
+    in property <[LibToc]> gl-toc;
+    in property <length> gl-toc-x;
+    in property <length> gl-toc-w;
+    in property <length> gl-toc-top;
+    in property <string> gl-toc-foot;
+    in property <length> gl-jump-y;
+    in property <int> gl-jump-n;
+    callback gl-toc-jump(int);
+    // (a jump from On this page: the section near the top, as far as the page goes)
+    changed gl-jump-n => {
+        gl-flick.viewport-y = -max(0, min(root.gl-jump-y, gl-flick.viewport-height - gl-flick.height));
+    }
+    // the form for a script (gl-modal 3): its words, what's typed into it, its choices
+    in property <string> gl-script-title;
+    in property <string> gl-script-sub;
+    in property <string> gl-script-start-label;
+    in property <string> gl-script-quit-label;
+    in-out property <string> gl-script-name;
+    in-out property <string> gl-script-start;
+    in-out property <string> gl-script-quit;
+    in property <bool> gl-script-wait;
+    in property <bool> gl-script-keep;
+    in property <string> gl-script-limit;
+    in property <string> gl-script-wait-label;
+    in property <string> gl-script-keep-label;
+    in property <string> gl-script-warning;
+    // the form for adding a plugin (gl-modal 4): its GitHub address as typed, the file
+    // chosen, what it is once found (its name and version, what it's for, what it can
+    // do), and where the looking stands (in red where it went wrong)
+    in-out property <string> gl-plugin-address;
+    in property <string> gl-plugin-file;
+    in property <string> gl-plugin-found;
+    in property <string> gl-plugin-found-sub;
+    in property <string> gl-plugin-can;
+    in property <string> gl-plugin-state;
+    in property <bool> gl-plugin-bad;
+    callback gl-plugin-choose-file();
+    callback gl-plugin-typed();
+    in property <string> gl-script-limit-note;
+    in property <bool> gl-script-editing;
+    callback gl-script-wait-toggle();
+    callback gl-script-keep-toggle();
+    callback gl-script-limit-menu(length, length, length);
+    callback gl-script-remove();
+    callback gl-script-typed();
     // what was last done or went wrong, at the bar's right for a moment
     in property <string> gl-said;
     in property <bool> gl-said-bad;
@@ -5965,9 +6104,73 @@ export component AppWindow inherits Window {
                     c: c;
                     glyph: root.keyboard-glyph;
                     glyph2: root.mouse-glyph;
+                    glyphs: root.package-glyphs;
                     pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
                     slide(id, v) => { root.cell-slide(id, v); }
                     typed(id, t) => { root.cell-typed(id, t); }
+                }
+            }
+            // On this page: each section's name and what it changes for this game, beside the
+            // sections; it scrolls with the page until it reaches the top, then stays in view
+            if root.gl-view == 1 && root.gl-toc.length > 0: Rectangle {
+                x: root.gl-toc-x;
+                y: 56px + max(16px, root.gl-toc-top + gl-flick.viewport-y);
+                width: root.gl-toc-w;
+                height: toc-col.preferred-height;
+                toc-col := VerticalLayout {
+                    spacing: 0;
+                    Text {
+                        text: "ON THIS PAGE";
+                        font-family: "Geist";
+                        font-size: 12px;
+                        font-weight: 500;
+                        letter-spacing: 1.2px;
+                        color: Ink.quiet;
+                        x: 2px;
+                    }
+                    Rectangle { height: 10px; }
+                    for t[i] in root.gl-toc: Rectangle {
+                        height: toc-words.preferred-height;
+                        border-radius: 8px;
+                        background: toc-ta.has-hover ? Ink.box : transparent;
+                        toc-words := VerticalLayout {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            padding-top: 10px;
+                            padding-bottom: 10px;
+                            spacing: 2px;
+                            Text {
+                                text: t.name;
+                                font-family: "Geist";
+                                font-size: 13.5px;
+                                font-weight: 500;
+                                color: Ink.dim;
+                            }
+                            Text {
+                                text: t.sub;
+                                font-family: "Geist";
+                                font-size: 12.5px;
+                                color: t.set ? Ink.soft : Ink.quiet;
+                                wrap: word-wrap;
+                            }
+                        }
+                        toc-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.gl-toc-jump(i); }
+                        }
+                    }
+                    if root.gl-toc-foot != "": Rectangle { height: 14px; }
+                    if root.gl-toc-foot != "": HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        Text {
+                            text: root.gl-toc-foot;
+                            font-family: "Geist";
+                            font-size: 12.5px;
+                            color: Ink.quiet;
+                            wrap: word-wrap;
+                        }
+                    }
                 }
             }
             // the Library's bar: its name and tabs, or on a page of its own the way
@@ -6128,6 +6331,7 @@ export component AppWindow inherits Window {
                 c: c;
                 glyph: root.keyboard-tile;
                 glyph2: root.mouse-tile;
+                glyphs: root.package-tiles;
                 pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
                 slide(id, v) => { root.cell-slide(id, v); }
                 typed(id, t) => { root.cell-typed(id, t); }
@@ -7871,6 +8075,439 @@ export component AppWindow inherits Window {
         scroll-to(o) => { set-flick.content-y = -o; }
     }
 
+    // a form over the Library: Add a game (its program and its name) or Add an
+    // app (one seen in front); the page dims under it, and a press on the dim,
+    // Cancel or Escape closes it
+    if root.gl-modal != 0: Rectangle {
+        background: #00000099;
+        border-radius: root.radius;
+        TouchArea {
+            clicked => { root.gl-modal-close(); }
+        }
+        FocusScope {
+            width: 0;
+            height: 0;
+            init => { self.focus(); }
+            key-pressed(e) => {
+                if (e.text == Key.Escape) {
+                    root.gl-modal-close();
+                    return accept;
+                }
+                reject
+            }
+        }
+        Rectangle {
+            width: min(560px, parent.width - 32px);
+            height: form.preferred-height + 44px;
+            border-radius: 14px;
+            background: Ink.box;
+            border-width: 1px;
+            border-color: #ffffff0d;
+            drop-shadow-blur: 80px;
+            drop-shadow-offset-y: 30px;
+            drop-shadow-color: #000000cc;
+            TouchArea { }
+            form := VerticalLayout {
+                x: 24px;
+                y: 24px;
+                width: parent.width - 48px;
+                height: self.preferred-height;
+                spacing: 0;
+                Text {
+                    text: root.gl-modal == 1 ? "Add a game" : root.gl-modal == 3 ? root.gl-script-title : root.gl-modal == 4 ? "Add a plugin" : "Add an app";
+                    font-family: "Geist";
+                    font-size: 17px;
+                    font-weight: 600;
+                    color: Ink.ink;
+                }
+                Rectangle { height: 4px; }
+                Text {
+                    text: root.gl-modal == 1 ? "Choose the game’s program. The game joins Games, with a page of its own." : root.gl-modal == 3 ? root.gl-script-sub
+                        : root.gl-modal == 4 ? "From the plugin’s GitHub releases, or from its file. Ectodeck says what the plugin can do before you add it."
+                        : "Choose an app you’ve had open while Ectodeck was running. The app joins Apps, with a page of its own.";
+                    font-family: "Geist";
+                    font-size: 13px;
+                    color: Ink.soft;
+                    wrap: word-wrap;
+                }
+                Rectangle { height: 18px; }
+                if root.gl-modal == 1: VerticalLayout {
+                    spacing: 0;
+                    Text {
+                        text: "Program";
+                        font-family: "Geist";
+                        font-size: 13px;
+                        color: Ink.dim;
+                    }
+                    Rectangle { height: 7px; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        height: 36px;
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            border-radius: 8px;
+                            background: Ink.well;
+                            Text {
+                                x: 12px;
+                                width: parent.width - 24px;
+                                height: parent.height;
+                                text: root.gl-program != "" ? root.gl-program : "No program chosen";
+                                font-family: "Geist";
+                                font-size: 13px;
+                                color: root.gl-program != "" ? Ink.ink : #8a8a92;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            WordButton {
+                                text: "Choose…";
+                                fill: Ink.hover-box;
+                                fill-hover: Ink.pick;
+                                clicked => { root.gl-choose-program(); }
+                            }
+                        }
+                    }
+                    Rectangle { height: 6px; }
+                    Text {
+                        text: "Ectodeck notices the game starting, from Play here or anywhere else.";
+                        font-family: "Geist";
+                        font-size: 12.5px;
+                        color: Ink.quiet;
+                        wrap: word-wrap;
+                    }
+                    Rectangle { height: 14px; }
+                    Text {
+                        text: "Name";
+                        font-family: "Geist";
+                        font-size: 13px;
+                        color: Ink.dim;
+                    }
+                    Rectangle { height: 7px; }
+                    Rectangle {
+                        height: 36px;
+                        border-radius: 8px;
+                        background: Ink.well;
+                        if name-in.text == "": Text {
+                            x: 12px;
+                            height: parent.height;
+                            text: root.gl-name-hint;
+                            font-family: "Geist";
+                            font-size: 13px;
+                            color: #8a8a92;
+                            vertical-alignment: center;
+                        }
+                        name-in := TextInput {
+                            x: 12px;
+                            width: parent.width - 24px;
+                            height: parent.height;
+                            text <=> root.gl-name-typed;
+                            font-family: "Geist";
+                            font-size: 13px;
+                            color: Ink.ink;
+                            vertical-alignment: center;
+                            single-line: true;
+                            changed has-focus => { Typing.on = self.has-focus; }
+                            accepted => { if (root.gl-can-add) { root.gl-add-done(); } }
+                            key-pressed(e) => {
+                                if (e.text == Key.Escape) {
+                                    root.gl-modal-close();
+                                    return accept;
+                                }
+                                reject
+                            }
+                        }
+                    }
+                }
+                // a plugin: from its GitHub address or its file, and what it is once found
+                if root.gl-modal == 4: VerticalLayout {
+                    spacing: 0;
+                    Text {
+                        text: "GitHub address";
+                        font-family: "Geist";
+                        font-size: 13px;
+                        color: Ink.dim;
+                    }
+                    Rectangle { height: 7px; }
+                    FieldBox {
+                        placeholder: "The plugin’s GitHub address, or its owner/name";
+                        text <=> root.gl-plugin-address;
+                        edited => { root.gl-plugin-typed(); }
+                        accepted => { if (root.gl-can-add) { root.gl-add-done(); } }
+                        escape => { root.gl-modal-close(); }
+                    }
+                    Rectangle { height: 14px; }
+                    Text {
+                        text: "Or a file";
+                        font-family: "Geist";
+                        font-size: 13px;
+                        color: Ink.dim;
+                    }
+                    Rectangle { height: 7px; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        height: 36px;
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            border-radius: 8px;
+                            background: Ink.well;
+                            Text {
+                                x: 12px;
+                                width: parent.width - 24px;
+                                height: parent.height;
+                                text: root.gl-plugin-file != "" ? root.gl-plugin-file : "No file chosen";
+                                font-family: "Geist";
+                                font-size: 13px;
+                                color: root.gl-plugin-file != "" ? Ink.ink : #8a8a92;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            WordButton {
+                                text: "Choose…";
+                                fill: Ink.hover-box;
+                                fill-hover: Ink.pick;
+                                clicked => { root.gl-plugin-choose-file(); }
+                            }
+                        }
+                    }
+                    Rectangle { height: 6px; }
+                    Text {
+                        text: "A plugin’s file ends in .ectocore.";
+                        font-family: "Geist";
+                        font-size: 12.5px;
+                        color: Ink.quiet;
+                    }
+                    if root.gl-plugin-found != "": Rectangle { height: 16px; }
+                    if root.gl-plugin-found != "": Rectangle {
+                        height: found-words.preferred-height;
+                        border-radius: 10px;
+                        background: Ink.well;
+                        found-words := VerticalLayout {
+                            padding: 14px;
+                            spacing: 3px;
+                            Text {
+                                text: root.gl-plugin-found;
+                                font-family: "Geist";
+                                font-size: 14px;
+                                font-weight: 500;
+                                color: Ink.ink;
+                            }
+                            if root.gl-plugin-found-sub != "": Text {
+                                text: root.gl-plugin-found-sub;
+                                font-family: "Geist";
+                                font-size: 12.5px;
+                                color: Ink.soft;
+                                wrap: word-wrap;
+                            }
+                            Text {
+                                text: root.gl-plugin-can;
+                                font-family: "Geist";
+                                font-size: 12.5px;
+                                color: Ink.quiet;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+                    if root.gl-plugin-state != "": Rectangle { height: 10px; }
+                    if root.gl-plugin-state != "": Text {
+                        text: root.gl-plugin-state;
+                        font-family: "Geist";
+                        font-size: 12.5px;
+                        color: root.gl-plugin-bad ? Ink.bad : Ink.quiet;
+                        wrap: word-wrap;
+                    }
+                }
+                // a script: its name, its command and its undo side by side, how it runs, its time limit
+                if root.gl-modal == 3: VerticalLayout {
+                    spacing: 0;
+                    Text {
+                        text: "Name";
+                        font-family: "Geist";
+                        font-size: 13px;
+                        color: Ink.dim;
+                    }
+                    Rectangle { height: 7px; }
+                    FieldBox {
+                        placeholder: "For example, Pause the local AI";
+                        text <=> root.gl-script-name;
+                        edited => { root.gl-script-typed(); }
+                        accepted => { if (root.gl-can-add) { root.gl-add-done(); } }
+                        escape => { root.gl-modal-close(); }
+                    }
+                    Rectangle { height: 14px; }
+                    HorizontalLayout {
+                        spacing: 14px;
+                        VerticalLayout {
+                            spacing: 0;
+                            Text {
+                                text: root.gl-script-start-label;
+                                font-family: "Geist";
+                                font-size: 13px;
+                                color: Ink.dim;
+                                overflow: elide;
+                            }
+                            Rectangle { height: 7px; }
+                            FieldBox {
+                                placeholder: "A command or a file";
+                                mono: true;
+                                text <=> root.gl-script-start;
+                                edited => { root.gl-script-typed(); }
+                                accepted => { if (root.gl-can-add) { root.gl-add-done(); } }
+                                escape => { root.gl-modal-close(); }
+                            }
+                        }
+                        VerticalLayout {
+                            spacing: 0;
+                            Text {
+                                text: root.gl-script-quit-label;
+                                font-family: "Geist";
+                                font-size: 13px;
+                                color: Ink.dim;
+                                overflow: elide;
+                            }
+                            Rectangle { height: 7px; }
+                            FieldBox {
+                                placeholder: "Optional";
+                                mono: true;
+                                text <=> root.gl-script-quit;
+                                edited => { root.gl-script-typed(); }
+                                accepted => { if (root.gl-can-add) { root.gl-add-done(); } }
+                                escape => { root.gl-modal-close(); }
+                            }
+                        }
+                    }
+                    if root.gl-script-warning != "": Rectangle { height: 8px; }
+                    if root.gl-script-warning != "": Text {
+                        text: root.gl-script-warning;
+                        font-family: "Geist";
+                        font-size: 12.5px;
+                        color: Ink.bad;
+                        wrap: word-wrap;
+                    }
+                    Rectangle { height: 18px; }
+                    CheckBox {
+                        text: root.gl-script-wait-label;
+                        on: root.gl-script-wait;
+                        clicked => { root.gl-script-wait-toggle(); }
+                    }
+                    Rectangle { height: 6px; }
+                    CheckBox {
+                        text: root.gl-script-keep-label;
+                        on: root.gl-script-keep;
+                        clicked => { root.gl-script-keep-toggle(); }
+                    }
+                    Rectangle { height: 18px; }
+                    Text {
+                        text: "Time limit";
+                        font-family: "Geist";
+                        font-size: 13px;
+                        color: Ink.dim;
+                    }
+                    Rectangle { height: 7px; }
+                    HorizontalLayout {
+                        alignment: start;
+                        DropField {
+                            width: 200px;
+                            text: root.gl-script-limit;
+                            open: root.menu-open;
+                            clicked(x, y, h) => { root.gl-script-limit-menu(x, y, h); }
+                        }
+                    }
+                    Rectangle { height: 6px; }
+                    Text {
+                        text: root.gl-script-limit-note;
+                        font-family: "Geist";
+                        font-size: 12.5px;
+                        color: Ink.quiet;
+                        wrap: word-wrap;
+                    }
+                }
+                if root.gl-modal == 2 && root.gl-seen.length == 0: Text {
+                    text: "Apps show here once they’ve been in front while Ectodeck is running.";
+                    font-family: "Geist";
+                    font-size: 13px;
+                    color: Ink.quiet;
+                    wrap: word-wrap;
+                }
+                if root.gl-modal == 2 && root.gl-seen.length > 0: Rectangle {
+                    height: min(root.gl-seen.length * 44px + 8px, 320px);
+                    border-radius: 10px;
+                    background: Ink.well;
+                    clip: true;
+                    seen-flick := Flickable {
+                        width: parent.width;
+                        height: parent.height;
+                        content-height: root.gl-seen.length * 44px + 8px;
+                        mouse-drag-pan-enabled: false;
+                        for a[i] in root.gl-seen: Rectangle {
+                            x: 4px;
+                            y: 4px + i * 44px;
+                            width: parent.width - 8px;
+                            height: 44px;
+                            border-radius: 7px;
+                            background: root.gl-seen-chosen == i ? (seen-ta.has-hover ? Ink.pick-hover : Ink.pick) : seen-ta.has-hover ? Ink.hover-well : transparent;
+                            if a.has-icon: Image {
+                                x: 10px;
+                                y: 10px;
+                                width: 24px;
+                                height: 24px;
+                                source: a.icon;
+                            }
+                            Text {
+                                x: 44px;
+                                width: parent.width - 54px;
+                                height: parent.height;
+                                text: a.name;
+                                font-family: "Geist";
+                                font-size: 13.5px;
+                                color: Ink.ink;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                            seen-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.gl-seen-pick(i); }
+                            }
+                        }
+                    }
+                }
+                Rectangle { height: 20px; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    if root.gl-modal == 3 && root.gl-script-editing: VerticalLayout {
+                        alignment: center;
+                        WordButton {
+                            text: "Remove";
+                            fill: Ink.hover-box;
+                            fill-hover: Ink.pick;
+                            clicked => { root.gl-script-remove(); }
+                        }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    VerticalLayout {
+                        alignment: center;
+                        WordButton {
+                            text: "Cancel";
+                            fill: Ink.hover-box;
+                            fill-hover: Ink.pick;
+                            clicked => { root.gl-modal-close(); }
+                        }
+                    }
+                    WordButton {
+                        primary: true;
+                        text: root.gl-modal == 3 && root.gl-script-editing ? "Save" : "Add";
+                        enabled: root.gl-can-add;
+                        clicked => { root.gl-add-done(); }
+                    }
+                }
+            }
+        }
+    }
+
     // the open menu, over everything
     menu := Menu {
         marks: root.menu-marks;
@@ -7983,221 +8620,7 @@ export component AppWindow inherits Window {
         }
     }
 
-    // a form over the Library: Add a game (its program and its name) or Add an
-    // app (one seen in front); the page dims under it, and a press on the dim,
-    // Cancel or Escape closes it
-    if root.gl-modal != 0: Rectangle {
-        background: #00000099;
-        border-radius: root.radius;
-        TouchArea {
-            clicked => { root.gl-modal-close(); }
-        }
-        FocusScope {
-            width: 0;
-            height: 0;
-            init => { self.focus(); }
-            key-pressed(e) => {
-                if (e.text == Key.Escape) {
-                    root.gl-modal-close();
-                    return accept;
-                }
-                reject
-            }
-        }
-        Rectangle {
-            width: min(560px, parent.width - 32px);
-            height: form.preferred-height + 44px;
-            border-radius: 14px;
-            background: Ink.box;
-            border-width: 1px;
-            border-color: #ffffff0d;
-            drop-shadow-blur: 80px;
-            drop-shadow-offset-y: 30px;
-            drop-shadow-color: #000000cc;
-            TouchArea { }
-            form := VerticalLayout {
-                x: 24px;
-                y: 24px;
-                width: parent.width - 48px;
-                height: self.preferred-height;
-                spacing: 0;
-                Text {
-                    text: root.gl-modal == 1 ? "Add a game" : "Add an app";
-                    font-family: "Geist";
-                    font-size: 17px;
-                    font-weight: 600;
-                    color: Ink.ink;
-                }
-                Rectangle { height: 4px; }
-                Text {
-                    text: root.gl-modal == 1 ? "Choose the game’s program. The game joins Games, with a page of its own." : "Choose an app you’ve had open while Ectodeck was running. The app joins Apps, with a page of its own.";
-                    font-family: "Geist";
-                    font-size: 13px;
-                    color: Ink.soft;
-                    wrap: word-wrap;
-                }
-                Rectangle { height: 18px; }
-                if root.gl-modal == 1: VerticalLayout {
-                    spacing: 0;
-                    Text {
-                        text: "Program";
-                        font-family: "Geist";
-                        font-size: 13px;
-                        color: Ink.dim;
-                    }
-                    Rectangle { height: 7px; }
-                    HorizontalLayout {
-                        spacing: 8px;
-                        height: 36px;
-                        Rectangle {
-                            horizontal-stretch: 1;
-                            border-radius: 8px;
-                            background: Ink.well;
-                            Text {
-                                x: 12px;
-                                width: parent.width - 24px;
-                                height: parent.height;
-                                text: root.gl-program != "" ? root.gl-program : "No program chosen";
-                                font-family: "Geist";
-                                font-size: 13px;
-                                color: root.gl-program != "" ? Ink.ink : #8a8a92;
-                                vertical-alignment: center;
-                                overflow: elide;
-                            }
-                        }
-                        VerticalLayout {
-                            alignment: center;
-                            WordButton {
-                                text: "Choose…";
-                                fill: Ink.hover-box;
-                                fill-hover: Ink.pick;
-                                clicked => { root.gl-choose-program(); }
-                            }
-                        }
-                    }
-                    Rectangle { height: 6px; }
-                    Text {
-                        text: "Ectodeck notices the game starting, from Play here or anywhere else.";
-                        font-family: "Geist";
-                        font-size: 12.5px;
-                        color: Ink.quiet;
-                        wrap: word-wrap;
-                    }
-                    Rectangle { height: 14px; }
-                    Text {
-                        text: "Name";
-                        font-family: "Geist";
-                        font-size: 13px;
-                        color: Ink.dim;
-                    }
-                    Rectangle { height: 7px; }
-                    Rectangle {
-                        height: 36px;
-                        border-radius: 8px;
-                        background: Ink.well;
-                        if name-in.text == "": Text {
-                            x: 12px;
-                            height: parent.height;
-                            text: root.gl-name-hint;
-                            font-family: "Geist";
-                            font-size: 13px;
-                            color: #8a8a92;
-                            vertical-alignment: center;
-                        }
-                        name-in := TextInput {
-                            x: 12px;
-                            width: parent.width - 24px;
-                            height: parent.height;
-                            text <=> root.gl-name-typed;
-                            font-family: "Geist";
-                            font-size: 13px;
-                            color: Ink.ink;
-                            vertical-alignment: center;
-                            single-line: true;
-                            changed has-focus => { Typing.on = self.has-focus; }
-                            accepted => { if (root.gl-can-add) { root.gl-add-done(); } }
-                            key-pressed(e) => {
-                                if (e.text == Key.Escape) {
-                                    root.gl-modal-close();
-                                    return accept;
-                                }
-                                reject
-                            }
-                        }
-                    }
-                }
-                if root.gl-modal == 2 && root.gl-seen.length == 0: Text {
-                    text: "Apps show here once they’ve been in front while Ectodeck is running.";
-                    font-family: "Geist";
-                    font-size: 13px;
-                    color: Ink.quiet;
-                    wrap: word-wrap;
-                }
-                if root.gl-modal == 2 && root.gl-seen.length > 0: Rectangle {
-                    height: min(root.gl-seen.length * 44px + 8px, 320px);
-                    border-radius: 10px;
-                    background: Ink.well;
-                    clip: true;
-                    seen-flick := Flickable {
-                        width: parent.width;
-                        height: parent.height;
-                        content-height: root.gl-seen.length * 44px + 8px;
-                        mouse-drag-pan-enabled: false;
-                        for a[i] in root.gl-seen: Rectangle {
-                            x: 4px;
-                            y: 4px + i * 44px;
-                            width: parent.width - 8px;
-                            height: 44px;
-                            border-radius: 7px;
-                            background: root.gl-seen-chosen == i ? (seen-ta.has-hover ? Ink.pick-hover : Ink.pick) : seen-ta.has-hover ? Ink.hover-well : transparent;
-                            if a.has-icon: Image {
-                                x: 10px;
-                                y: 10px;
-                                width: 24px;
-                                height: 24px;
-                                source: a.icon;
-                            }
-                            Text {
-                                x: 44px;
-                                width: parent.width - 54px;
-                                height: parent.height;
-                                text: a.name;
-                                font-family: "Geist";
-                                font-size: 13.5px;
-                                color: Ink.ink;
-                                vertical-alignment: center;
-                                overflow: elide;
-                            }
-                            seen-ta := TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => { root.gl-seen-pick(i); }
-                            }
-                        }
-                    }
-                }
-                Rectangle { height: 20px; }
-                HorizontalLayout {
-                    spacing: 8px;
-                    alignment: end;
-                    VerticalLayout {
-                        alignment: center;
-                        WordButton {
-                            text: "Cancel";
-                            fill: Ink.hover-box;
-                            fill-hover: Ink.pick;
-                            clicked => { root.gl-modal-close(); }
-                        }
-                    }
-                    WordButton {
-                        primary: true;
-                        text: "Add";
-                        enabled: root.gl-can-add;
-                        clicked => { root.gl-add-done(); }
-                    }
-                }
-            }
-        }
-    }
+
 }
 
 // ---------------------------------------------------------------- the Macro Editor

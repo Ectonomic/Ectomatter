@@ -37,7 +37,8 @@ fn loaded_file() -> PathBuf {
 
 /// What KWin says of a window come to the front: its class, title and
 /// desktop file's name, and the process it's from (0 where KWin doesn't know);
-/// or (`opened`) of a window just opened, which may not be in front.
+/// or (`opened`) of a window just opened, which may not be in front, or
+/// (`closed`) of one closed; and which window it is (KWin's own id for it).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Front {
     pub class: String,
@@ -45,6 +46,8 @@ pub struct Front {
     pub desktop: String,
     pub pid: u32,
     pub opened: bool,
+    pub closed: bool,
+    pub window: String,
 }
 
 impl Front {
@@ -90,7 +93,7 @@ impl Listener {
             return false;
         }
         HEARD.store(now_ms(), std::sync::atomic::Ordering::Relaxed);
-        let _ = self.tell.send(Front { class, title, desktop, pid: u32::try_from(pid).unwrap_or(0), opened: false });
+        let _ = self.tell.send(Front { class, title, desktop, pid: u32::try_from(pid).unwrap_or(0), ..Default::default() });
         true
     }
 
@@ -100,7 +103,24 @@ impl Listener {
             return false;
         }
         HEARD.store(now_ms(), std::sync::atomic::Ordering::Relaxed);
-        let _ = self.tell.send(Front { class, title, desktop, pid: u32::try_from(pid).unwrap_or(0), opened: true });
+        let _ = self.tell.send(Front { class, title, desktop, pid: u32::try_from(pid).unwrap_or(0), opened: true, ..Default::default() });
+        true
+    }
+
+    /// A window come to the front ("activated"), opened ("opened", every one
+    /// open as the script starts too) or closed ("closed"), with KWin's own id
+    /// for it: for an app that doesn't run through Steam, its first window
+    /// opening is the app starting, and its last closing the app quitting.
+    #[allow(clippy::too_many_arguments)]
+    fn window(&self, kind: String, class: String, title: String, desktop: String, pid: i32, window: String, from: String) -> bool {
+        if from != std::process::id().to_string() {
+            return false;
+        }
+        HEARD.store(now_ms(), std::sync::atomic::Ordering::Relaxed);
+        if std::env::var_os("ECTODECK_NATIVE_WINDOWS").is_some() {
+            eprintln!("ectodeck-native: KWin: {kind} {class} {desktop} {pid} {window}");
+        }
+        let _ = self.tell.send(Front { class, title, desktop, pid: u32::try_from(pid).unwrap_or(0), opened: kind == "opened", closed: kind == "closed", window });
         true
     }
 }
@@ -118,21 +138,26 @@ function heard(keep) {{
     if (keep === false) {{
         workspace.windowActivated.disconnect(tell);
         workspace.windowAdded.disconnect(opened);
+        workspace.windowRemoved.disconnect(closed);
     }}
 }}
-function tell(w) {{
+function say(kind, w) {{
     if (!w) return;
-    callDBus("{SERVICE}", "{PATH}", "{IFACE}", "WindowActivated",
-        String(w.resourceClass || ""), String(w.caption || ""), String(w.desktopFileName || ""), w.pid || 0, from, heard);
+    callDBus("{SERVICE}", "{PATH}", "{IFACE}", "Window", kind,
+        String(w.resourceClass || ""), String(w.caption || ""), String(w.desktopFileName || ""), w.pid || 0, String(w.internalId || ""), from, heard);
 }}
-// and each window as it opens, in front or not: a game's window, which its launch screen waits for
-function opened(w) {{
-    if (!w) return;
-    callDBus("{SERVICE}", "{PATH}", "{IFACE}", "WindowOpened",
-        String(w.resourceClass || ""), String(w.caption || ""), String(w.desktopFileName || ""), w.pid || 0, from, heard);
-}}
+function tell(w) {{ say("activated", w); }}
+// and each window as it opens, in front or not (a game's, which its launch screen waits for), and as it closes
+function opened(w) {{ say("opened", w); }}
+function closed(w) {{ say("closed", w); }}
 workspace.windowActivated.connect(tell);
 workspace.windowAdded.connect(opened);
+workspace.windowRemoved.connect(closed);
+// (the windows open already, then the one in front)
+const all = workspace.windowList();
+for (let i = 0; i < all.length; i++) {{
+    if (all[i].normalWindow) opened(all[i]);
+}}
 tell(workspace.activeWindow);
 "#
     )
@@ -361,7 +386,7 @@ mod tests {
     /// name is its Desktop Entry's own.
     #[test]
     fn the_app_in_front_is_named_as_its_desktop_file_names_it() {
-        let f = Front { class: "konsole".into(), title: "~ : bash".into(), desktop: "org.kde.konsole".into(), pid: 0, opened: false };
+        let f = Front { class: "konsole".into(), title: "~ : bash".into(), desktop: "org.kde.konsole".into(), ..Default::default() };
         assert_eq!(f.app(), "org.kde.konsole");
         assert_eq!(Front { class: "Steam".into(), ..Default::default() }.app(), "steam");
         assert!(Front { class: "ectodeck-native".into(), ..Default::default() }.is_ectodeck());

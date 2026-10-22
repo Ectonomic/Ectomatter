@@ -1,7 +1,11 @@
 //! KDE's own account of each screen, its output device protocol
 //! (kde-output-device-v2, Plasma's, as kscreen reads it; the definition is
 //! in protocols/): the screen by its name, whether HDR is on, and the SDR
-//! white its user set, which an idle dim does not change.
+//! white its user set, which an idle dim does not change. The definition's
+//! copy marks a mode's `removed` as ending the mode, as KWin treats it (it
+//! may give the mode's number to a new one at once), so a connection that
+//! lives through a change of modes doesn't fail. And KDE's output management
+//! (kde-output-management-v2), with which monitors.rs changes them.
 
 #[allow(non_upper_case_globals, non_camel_case_types, non_snake_case, unused_imports, unused_mut, unused_variables, dead_code, missing_docs, clippy::all)]
 pub mod client {
@@ -13,6 +17,21 @@ pub mod client {
     }
     use self::__interfaces::*;
     wayland_scanner::generate_client_code!("protocols/kde-output-device-v2.xml");
+}
+
+/// How the screens are changed, for the Monitors plugin's changes (monitors.rs).
+#[allow(non_upper_case_globals, non_camel_case_types, non_snake_case, unused_imports, unused_mut, unused_variables, dead_code, missing_docs, clippy::all)]
+pub mod management {
+    use wayland_client;
+    use wayland_client::protocol::*;
+    pub use super::client::{kde_output_device_mode_v2, kde_output_device_v2};
+    pub mod __interfaces {
+        use wayland_client::protocol::__interfaces::*;
+        use super::super::client::__interfaces::*;
+        wayland_scanner::generate_interfaces!("protocols/kde-output-management-v2.xml");
+    }
+    use self::__interfaces::*;
+    wayland_scanner::generate_client_code!("protocols/kde-output-management-v2.xml");
 }
 
 use client::kde_output_device_v2::Event;
