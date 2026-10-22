@@ -115,8 +115,12 @@ pub fn notify(title: &str, body: &str) {
     let _ = std::thread::Builder::new().name("notice".into()).spawn(move || {
         let Ok(conn) = zbus::blocking::Connection::session() else { return };
         let Ok(n) = zbus::blocking::Proxy::new(&conn, "org.freedesktop.Notifications", "/org/freedesktop/Notifications", "org.freedesktop.Notifications") else { return };
-        let hints: std::collections::HashMap<&str, zbus::zvariant::Value> = std::collections::HashMap::new();
-        let r: zbus::Result<u32> = n.call("Notify", &("Ectomatter", 0u32, "ectomatter", title.as_str(), body.as_str(), Vec::<&str>::new(), hints, -1i32));
+        // the icon by the name the desktop knows it by, and the desktop entry, so
+        // the notice shows the mark and the desktop's notification settings list
+        // Ectomatter as itself
+        let mut hints: std::collections::HashMap<&str, zbus::zvariant::Value> = std::collections::HashMap::new();
+        hints.insert("desktop-entry", zbus::zvariant::Value::from("com.ectonomic.ectomatter"));
+        let r: zbus::Result<u32> = n.call("Notify", &("Ectomatter", 0u32, "com.ectonomic.ectomatter", title.as_str(), body.as_str(), Vec::<&str>::new(), hints, -1i32));
         match r {
             Ok(id) => eprintln!("ectomatter: told the desktop: {title} (notice {id})"),
             Err(e) => eprintln!("ectomatter: couldn’t tell the desktop {title}: {e}"),
