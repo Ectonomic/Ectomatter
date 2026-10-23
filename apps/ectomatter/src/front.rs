@@ -707,6 +707,9 @@ pub struct Front {
     desk_light_mouse: (Option<Instant>, [[u8; 3]; 2]),
     desk_colors: (HashMap<u32, [u8; 3]>, [Option<[u8; 3]>; 2]),
     desk_light_menu: bool,
+    /// the devices out of the desk's light as its last frame went, the
+    /// keyboard and the mouse: each while its own Lighting page shows
+    desk_aside: (bool, bool),
     /// Add pad's menu open, or the chosen pad's Size menu
     pad_menu: Option<PadMenu>,
     /// the mouse in HDR on its page: its lamps and unlit picture, for the
@@ -1101,6 +1104,7 @@ impl Front {
             desk_light_mouse: (None, [[0; 3]; 2]),
             desk_colors: Default::default(),
             desk_light_menu: false,
+            desk_aside: (false, false),
             pad_menu: None,
             mouse_hdr: None,
             mouse_lit: None,
@@ -7695,8 +7699,9 @@ impl Front {
     pub fn lights(&mut self) -> Option<Vec<Light>> {
         let t = self.light_at.unwrap_or_else(|| self.t0.elapsed().as_secs_f64() * 1000.0);
         let mut lights = self.page.lights(t);
-        // (the desk's light, while it plays, on each key it lights)
-        if self.desk_light != crate::desk_light::Effect::Off {
+        // (the desk's light, while it plays, on each key it lights: but on the
+        // keyboard's own Lighting page, where its own lighting is chosen)
+        if self.desk_light != crate::desk_light::Effect::Off && !self.lighting_open().0 {
             for l in &mut lights {
                 if let Some(c) = self.desk_colors.0.get(&l.pos) {
                     (l.rgb, l.strength) = (*c, 1.0);
@@ -7833,6 +7838,7 @@ impl Front {
         self.mouse.hand_back();
         self.desk_colors = Default::default();
         self.desk_light_mouse = (None, [[0; 3]; 2]);
+        self.desk_aside = (false, false);
         self.last_lights = None;
     }
 
@@ -7843,6 +7849,14 @@ impl Front {
             self.desk_light_timer = None;
             self.desk_hand_back();
         }
+    }
+
+    /// Whether each device's own Lighting page shows now, the keyboard's and
+    /// the mouse's: there the device plays its own lighting, the one being
+    /// chosen, on itself and on its picture, out of the desk's light.
+    fn lighting_open(&self) -> (bool, bool) {
+        let place = self.ui.get_place();
+        (place == "z10" && self.page.view == View::Lighting, place == "mouse" && self.mouse.tab == 1)
     }
 
     /// Where each device's lights are on Home's desk, in millimeters: the
@@ -7873,9 +7887,11 @@ impl Front {
     }
 
     /// The desk's light's next frame: each light's color where it sits, sent
-    /// to its device (the keyboard every frame, but while its Lighting tab
-    /// previews; the mouse as often as it takes two commands, when its colors
-    /// change), and the pictures with it.
+    /// to its device (the keyboard every frame, the mouse as often as it takes
+    /// two commands, when its colors change), and the pictures with it. A
+    /// device whose own Lighting page shows is out of it (see lighting_open):
+    /// as the page opens, the keyboard plays the page's preview again and the
+    /// mouse is handed its own lights back; as it closes, each is in again.
     fn desk_light_frame(&mut self) {
         let e = self.desk_light;
         if e == crate::desk_light::Effect::Off {
@@ -7886,12 +7902,22 @@ impl Front {
         let keys: HashMap<u32, [u8; 3]> = places.keys.iter().map(|(pos, x, y)| (*pos, crate::desk_light::color(e, *x, *y, t))).collect();
         let mouse = [0, 1].map(|i| places.mouse.iter().find(|(id, ..)| *id == crate::mouse_art::LIGHT_IDS[i]).map(|(_, x, y)| crate::desk_light::color(e, *x, *y, t)));
         self.desk_colors = (keys, mouse);
-        let previewing = self.ui.get_place() == "z10" && self.page.view == View::Lighting;
-        if self.page.dev.is_some() && !previewing {
+        let aside = self.lighting_open();
+        if aside.0 && !self.desk_aside.0 {
+            self.start_preview();
+        }
+        if aside.1 != self.desk_aside.1 {
+            if aside.1 {
+                self.mouse.hand_back();
+            }
+            self.desk_light_mouse = (None, [[0; 3]; 2]);
+        }
+        self.desk_aside = aside;
+        if self.page.dev.is_some() && !aside.0 {
             let colors: Vec<[u8; 3]> = (0..evga_z10::protocol::NKEYS as u32).map(|p| self.desk_colors.0.get(&p).copied().unwrap_or([0; 3])).collect();
             self.ask_kb(device::Ask::Preview(serde_json::json!({ "colors": colors, "tab": "native", "claim": true })));
         }
-        if let (true, Some(logo), Some(wheel)) = (self.mouse.present(), mouse[0], mouse[1]) {
+        if let (true, false, Some(logo), Some(wheel)) = (self.mouse.present(), aside.1, mouse[0], mouse[1]) {
             let due = self.desk_light_mouse.0.is_none_or(|at| at.elapsed() >= Duration::from_millis(125));
             if due && self.desk_light_mouse.1 != [logo, wheel] {
                 self.mouse.direct(serde_json::json!({ "logo": lighting::hex_of(logo), "wheel": lighting::hex_of(wheel) }));
@@ -7910,9 +7936,10 @@ impl Front {
     }
 
     /// A mouse light's color for its picture now: the desk's light's, while
-    /// it plays; else the mouse's own, none while that light is off.
+    /// it plays (but on the mouse's own Lighting page); else the mouse's own,
+    /// none while that light is off.
     fn mouse_color(&self, i: usize, now: Instant) -> Option<[u8; 3]> {
-        if self.desk_light != crate::desk_light::Effect::Off {
+        if self.desk_light != crate::desk_light::Effect::Off && !self.lighting_open().1 {
             if let Some(c) = self.desk_colors.1[i] {
                 return Some(c);
             }
