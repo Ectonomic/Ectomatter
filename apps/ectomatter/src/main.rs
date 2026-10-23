@@ -776,19 +776,6 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         std::thread::sleep(Duration::from_secs_f64(t));
     }
     front.desk_light_now();
-    // ECTOMATTER_RIPPLE="F,400;Enter,900": ripples from those keys (by the
-    // layout's ids), each that many milliseconds into its run, as pressing
-    // them sends across Home's desk
-    // (the keys' light worked out first, as the live window has it, for the rings' colors)
-    if std::env::var_os("ECTOMATTER_RIPPLE").is_some() {
-        let _ = front.lights();
-    }
-    for part in std::env::var("ECTOMATTER_RIPPLE").unwrap_or_default().split(';').filter(|p| !p.is_empty()) {
-        let (id, ms) = part.split_once(',').unwrap_or((part, "0"));
-        if let Some(pos) = front.page.layout.iter().find(|k| k.id == id.trim()).map(|k| k.pos) {
-            front.ripple_from_key(pos, Duration::from_millis(ms.trim().parse().unwrap_or(0)));
-        }
-    }
     // ECTOMATTER_HEAR=control: a mouse button heard pressed and let go, as its core tells
     // it; ECTOMATTER_KEY_CODE=code: a keyboard key with that host code heard so (after
     // the clicks, each job Ectomatter does said in the log)
@@ -1110,6 +1097,20 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     lay_mouse(&mut pic, &mut front, 1.0);
     if pic.mouse_rect().2 > 0 {
         eprintln!("the mouse laid at {:?}", pic.mouse_rect());
+    }
+    // ECTOMATTER_RIPPLE="F,400;Enter,900;mouse/left,600": ripples from those
+    // keys (by the layout's ids) and mouse buttons (by the core's), each that
+    // many milliseconds into its run, as pressing them sends across Home's
+    // desk, in the devices' light as they're drawn
+    for part in std::env::var("ECTOMATTER_RIPPLE").unwrap_or_default().split(';').filter(|p| !p.is_empty()) {
+        let (id, ms) = part.split_once(',').unwrap_or((part, "0"));
+        let age = Duration::from_millis(ms.trim().parse().unwrap_or(0));
+        if let Some(button) = id.trim().strip_prefix("mouse/") {
+            front.ripple_from_button(button, age);
+        } else if let Some(pos) = front.page.layout.iter().find(|k| k.id == id.trim()).map(|k| k.pos) {
+            front.ripple_from_key(pos, age);
+        }
+        pic.set_decor(front.desk_decor(1.0));
     }
     window.request_redraw();
     window.draw_if_needed(|r| {

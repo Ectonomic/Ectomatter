@@ -1722,9 +1722,7 @@ impl Front {
                         self.desk.press(usize::try_from(i).ok(), (x, y));
                         // (a press on the empty desk, outside Arrange, sends a ripple from there)
                         if i < 0 && !self.desk.editing {
-                            let light = self.keyboard_light();
-                            self.desk.ripple((x, y), light, Duration::ZERO);
-                            self.desk_frames_run();
+                            self.ripple_at((x, y), Duration::ZERO);
                         }
                     }
                     self.show_desk();
@@ -3354,32 +3352,81 @@ impl Front {
         }
     }
 
-    /// A key pressed while Home shows the keyboard: a ripple runs out across
-    /// the desk from the key, in its light of the moment (white where the key
-    /// is dark), `age` into its run.
+    /// A key pressed on the keyboard Home shows: a ripple runs out across the
+    /// desk from the key, `age` into its run.
     pub fn ripple_from_key(&mut self, pos: u32, age: Duration) {
-        // (none while the window is closed into the tray, where the desk isn't drawn)
-        if self.hidden {
+        let Some(k) = self.page.key(pos) else { return };
+        let Some(at) = self.on_desk_keyboard(k.cx, k.cy) else { return };
+        self.ripple_at(at, age);
+    }
+
+    /// A mouse button pressed (by the core's name for it, see mouse::BUTTONS):
+    /// a ripple from the button, where the mouse sits on Home's desk.
+    pub fn ripple_from_button(&mut self, control: &str, age: Duration) {
+        let Some(b) = crate::mouse::BUTTONS.iter().position(|(id, ..)| *id == control) else { return };
+        let Some((dw, layers)) = self.desk_layers() else { return };
+        let Some(&(x, y)) = crate::mouse_art::button_middles(layers, dw).get(b) else { return };
+        let Some(at) = self.on_desk_mouse(x, y) else { return };
+        self.ripple_at(at, age);
+    }
+
+    /// A ripple from a point of Home's desk (its logical pixels), `age` into
+    /// its run, in the light nearest it as the devices show it now (see
+    /// desk::ripple_light): none while Home doesn't show, or while the window
+    /// is closed into the tray, where the desk isn't drawn.
+    fn ripple_at(&mut self, at: (f32, f32), age: Duration) {
+        if self.hidden || self.ui.get_place() != "home" {
             return;
         }
-        let Some([kx, ky, kw, kh]) = self.desk_keyboard() else { return };
-        let Some(k) = self.page.key(pos) else { return };
-        let (vx, vy, vw, vh) = self.page.view_box;
-        let x = kx + ((k.cx - vx) / vw) as f32 * kw - self.ui.get_desk_x();
-        let y = ky + ((k.cy - vy) / vh) as f32 * kh - self.ui.get_desk_y();
-        let color = self.page.last_colors.get(&pos).map(|c| [c[0], c[1], c[2]]).filter(|c| c.iter().any(|v| *v > 24.0));
-        self.desk.ripple((x, y), color.map_or([255; 3], |c| c.map(|v| v.clamp(0.0, 255.0) as u8)), age);
+        let color = crate::desk::ripple_light(at, &self.desk_lights_shown());
+        self.desk.ripple(at, color, age);
         self.desk_frames_run();
     }
 
-    /// The keyboard's light as a whole, for a ripple that starts from no key:
-    /// its lit keys' colors together, or white with none lit.
-    fn keyboard_light(&self) -> [u8; 3] {
-        let lit: Vec<[f64; 3]> = self.page.last_colors.values().map(|c| [c[0], c[1], c[2]]).filter(|c| c.iter().any(|v| *v > 24.0)).collect();
-        if lit.is_empty() {
-            return [255; 3];
+    /// Each light on Home's desk as it shows now: where it sits (the desk's
+    /// logical pixels) and its color, none where it's dark. The keys as the
+    /// keyboard was last lit (in the desk's light, while that plays), a key's
+    /// Reactive flash from the moment its press starts it; the mouse's logo
+    /// and wheel.
+    fn desk_lights_shown(&self) -> Vec<((f32, f32), Option<[u8; 3]>)> {
+        let mut out = Vec::new();
+        let drawn: HashMap<u32, &Light> = self.last_lights.iter().flatten().map(|l| (l.pos, l)).collect();
+        let desk_light = self.desk_light != crate::desk_light::Effect::Off;
+        for k in self.page.layout.iter().filter(|k| k.led) {
+            let Some(at) = self.on_desk_keyboard(k.cx, k.cy) else { break };
+            let color = if desk_light {
+                self.desk_colors.0.get(&k.pos).copied()
+            } else {
+                self.page.flash_look(k.pos).or_else(|| drawn.get(&k.pos).filter(|l| l.strength > 0.0).map(|l| l.rgb))
+            };
+            out.push((at, color));
         }
-        [0, 1, 2].map(|i| (lit.iter().map(|c| c[i]).sum::<f64>() / lit.len() as f64).clamp(0.0, 255.0) as u8)
+        if let Some((dw, layers)) = self.desk_layers() {
+            let now = Instant::now();
+            for (i, b) in crate::mouse_art::light_boxes(layers, dw).iter().enumerate() {
+                if let Some(at) = self.on_desk_mouse((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0) {
+                    out.push((at, self.mouse_color(i, now)));
+                }
+            }
+        }
+        out
+    }
+
+    /// A point of the keyboard's drawing (the board's own units, as the
+    /// page's view_box has them) where the keyboard sits on Home's desk, in
+    /// the desk's logical pixels; none off Home.
+    fn on_desk_keyboard(&self, x: f64, y: f64) -> Option<(f32, f32)> {
+        let [kx, ky, kw, kh] = self.desk_keyboard()?;
+        let (vx, vy, vw, vh) = self.page.view_box;
+        Some((kx + ((x - vx) / vw) as f32 * kw - self.ui.get_desk_x(), ky + ((y - vy) / vh) as f32 * kh - self.ui.get_desk_y()))
+    }
+
+    /// The same for a point of the mouse's drawing (see mouse_art::VIEW).
+    fn on_desk_mouse(&self, x: f32, y: f32) -> Option<(f32, f32)> {
+        let i = self.desk.items.iter().position(|it| it.id == "mouse")?;
+        let [mx, my, mw, mh] = self.desk.screen(i);
+        let v = crate::mouse_art::VIEW;
+        Some((mx + (x - v.0) / v.2 * mw, my + (y - v.1) / v.3 * mh))
     }
 
     /// The computer's lock lights now (bit 0 Num Lock, 1 Caps Lock, 2 Scroll
@@ -5020,9 +5067,13 @@ impl Front {
                 self.mouse_drawn(w, scale, *l);
                 return;
             }
-            // a button given one of Ectomatter's macros: pressed plays it (let go ends
-            // one that plays while it's held)
+            // a button pressed or let go: a press sends a ripple across Home's desk
+            // from the button, as a key's does; one given one of Ectomatter's macros
+            // plays it (let go ends one that plays while it's held)
             Heard::Input(control, down) => {
+                if down {
+                    self.ripple_from_button(&control, Duration::ZERO);
+                }
                 self.play_for(&format!("mouse/{control}"), crate::mouse::BUTTONS.iter().position(|(b, ..)| *b == control).map(|i| self.mouse.job(i)), down);
                 return;
             }

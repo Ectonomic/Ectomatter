@@ -1135,6 +1135,84 @@ mod tests {
         let _ = std::fs::remove_dir_all(&data);
     }
 
+    /// A computer with the whole fake mouse as hidapi lists it: its command
+    /// channel, its pointer's button reports and its key reports, the last
+    /// two each giving the reports pushed to it, opened as often as asked.
+    struct MouseWhole(Option<Box<dyn Hid>>, Arc<Mutex<VecDeque<Vec<u8>>>>, Arc<Mutex<VecDeque<Vec<u8>>>>);
+
+    impl Usb for MouseWhole {
+        fn devices(&mut self) -> Vec<DeviceInfo> {
+            vec![
+                DeviceInfo { vendor: 0x1038, product: 0x1722, interface: 0, usage_page: 0xFFC0, usage: 1, path: "mouse".into() },
+                DeviceInfo { vendor: 0x1038, product: 0x1722, interface: 1, usage_page: 0x0001, usage: 0x0002, path: "mouse-pointer".into() },
+                DeviceInfo { vendor: 0x1038, product: 0x1722, interface: 2, usage_page: 0x0001, usage: 0x0006, path: "mouse-keys".into() },
+            ]
+        }
+        fn open(&mut self, d: &DeviceInfo) -> Result<Box<dyn Hid>, String> {
+            match d.interface {
+                0 => self.0.take().ok_or_else(|| "opened twice".to_string()),
+                1 => Ok(Box::new(FakeKeys(self.1.clone()))),
+                _ => Ok(Box::new(FakeKeys(self.2.clone()))),
+            }
+        }
+    }
+
+    /// Asked to watch every press, the mouse's core hears every button: a
+    /// click in the pointer's reports, by the button whose job sends it, and
+    /// a key a side button sends, in the key reports, each pressed and let go,
+    /// told by the button's id and what it sent. Moving tells nothing, nor
+    /// does a click once it's no longer watched, and nothing is sent to the
+    /// mouse for any of it.
+    #[test]
+    fn the_mouse_core_hears_every_button_while_watched() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let (pointer, keys) = (Arc::new(Mutex::new(VecDeque::new())), Arc::new(Mutex::new(VecDeque::new())));
+        let usb = MouseWhole(Some(Box::new(FakeMouse { sent: sent.clone(), waiting: VecDeque::new() })), pointer.clone(), keys.clone());
+        let data = std::env::temp_dir().join(format!("ectomatter-mouse-watch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data);
+        let core = Core::start(&crate::cores::dir().join(crate::mouse::CORE), data.clone(), Box::new(usb)).unwrap();
+        core.call("initialize", &serde_json::json!({ "protocol": 3 })).unwrap();
+        let before = sent.lock().unwrap().len();
+        let heard = |n: usize| {
+            let mut got: Vec<(String, Value)> = Vec::new();
+            for _ in 0..100 {
+                std::thread::sleep(Duration::from_millis(10));
+                got.extend(core.told().into_iter().filter(|(m, _)| m.starts_with("input/")));
+                if got.len() >= n {
+                    break;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(60));
+            got.extend(core.told().into_iter().filter(|(m, _)| m.starts_with("input/")));
+            got.into_iter().map(|(m, p)| (m, p["control"].as_str().unwrap_or_default().to_string(), p["sends"].clone())).collect::<Vec<_>>()
+        };
+        let ev = |m: &str, c: &str, v: Value| (m.to_string(), c.to_string(), v);
+        let push = |q: &Arc<Mutex<VecDeque<Vec<u8>>>>, r: Vec<u8>| q.lock().unwrap().push_back(r);
+        assert_eq!(core.call("input/watch", &serde_json::json!({ "device": "sensei310-1", "all": true })).unwrap()["listening"], true);
+        // the left button, then the left side's back one with it held (the
+        // mouse's buttons 1 and 4, from the factory), then both let go
+        push(&pointer, vec![0x01, 0, 0, 0, 0, 0, 0, 0, 0]);
+        push(&pointer, vec![0x09, 0, 0, 0, 0, 0, 0, 0, 0]);
+        push(&pointer, vec![0x00, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let mouse = |n: u8| serde_json::json!({ "mouse": n });
+        assert_eq!(heard(4), [ev("input/down", "left", mouse(1)), ev("input/down", "left-side-back", mouse(4)), ev("input/up", "left", mouse(1)), ev("input/up", "left-side-back", mouse(4))]);
+        // the right side's back button, which sends Page Down from the factory
+        push(&keys, vec![1, 0, 0, 0x4E, 0, 0, 0, 0, 0]);
+        push(&keys, vec![1, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let page_down = serde_json::json!({ "key": "PageDown" });
+        assert_eq!(heard(2), [ev("input/down", "right-side-back", page_down.clone()), ev("input/up", "right-side-back", page_down)]);
+        // the pointer moved, no button: nothing
+        push(&pointer, vec![0x00, 7, 0, 3, 0, 0, 0, 0, 0]);
+        assert!(heard(1).is_empty());
+        // no longer watched: a click is the computer's alone
+        core.call("input/watch", &serde_json::json!({ "device": "sensei310-1", "all": false })).unwrap();
+        push(&pointer, vec![0x02, 0, 0, 0, 0, 0, 0, 0, 0]);
+        push(&keys, vec![1, 0, 0, 0x4E, 0, 0, 0, 0, 0]);
+        assert!(heard(1).is_empty());
+        assert_eq!(sent.lock().unwrap().len(), before, "nothing sent to the mouse to listen to it");
+        let _ = std::fs::remove_dir_all(&data);
+    }
+
     /// One of the fake Z10's interfaces as its key reports are read: each
     /// report once, and an error once the keyboard is unplugged.
     struct Ear(Arc<Mutex<VecDeque<Vec<u8>>>>, Arc<std::sync::atomic::AtomicBool>);

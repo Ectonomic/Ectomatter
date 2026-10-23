@@ -63,6 +63,11 @@ pub fn start(core: Core, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
         if let Err(e) = core.call("initialize", &json!({ "protocol": 3 })) {
             let _ = tell.send(Heard::Failed(e));
         }
+        // every button heard as it's pressed, as the keyboard's every key is
+        // (Home's desk answers each with a ripple)
+        if let Err(e) = core.call("input/watch", &json!({ "device": DEVICE, "all": true })) {
+            eprintln!("ectomatter: the mouse's buttons won't be heard: {e}");
+        }
         // (what the mouse ships as, which a new profile starts as)
         let factory = core.call("profiles/factory", &json!({ "device": DEVICE })).unwrap_or(Value::Null);
         let (mut present, mut device) = (false, Value::Null);

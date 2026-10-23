@@ -305,6 +305,19 @@ struct Ring {
     t0: Instant,
 }
 
+/// The light a ripple starting at `at` runs in, from the lights on the desk
+/// as the devices show them now (where each sits, in the desk's logical
+/// pixels, and its color, none where it's dark): the lit one nearest it, so a
+/// pressed key's own where it has one, and the keys' round it where it has
+/// none (the space bar); white with none lit.
+pub fn ripple_light(at: (f32, f32), lights: &[((f32, f32), Option<[u8; 3]>)]) -> [u8; 3] {
+    lights
+        .iter()
+        .filter_map(|(p, c)| c.filter(|c| c.iter().any(|v| *v > 24)).map(|c| ((p.0 - at.0).powi(2) + (p.1 - at.1).powi(2), c)))
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map_or([255; 3], |(_, c)| c)
+}
+
 impl Default for Desk {
     fn default() -> Self {
         Desk::new()
@@ -1402,5 +1415,18 @@ mod tests {
         d.tick(Instant::now() + EASE + FADE);
         let arranged = d.decor((0.0, 0.0), 1.0, &[], &|_| None).dots.unwrap();
         assert!(arranged.snap_alpha > arranged.alpha && arranged.over_pads);
+    }
+
+    /// A ripple runs in the light nearest where it starts: a key's own, the
+    /// nearest lit one for a key with none of its own (dark or near black
+    /// passed over), and white with nothing lit.
+    #[test]
+    fn a_ripple_runs_in_the_light_nearest_it() {
+        let (orange, blue) = ([255, 109, 13], [20, 60, 255]);
+        let lights = [((0.0, 0.0), Some(orange)), ((40.0, 0.0), Some(blue)), ((80.0, 0.0), None), ((100.0, 0.0), Some([10, 10, 10]))];
+        assert_eq!(ripple_light((0.0, 0.0), &lights), orange, "a key's own light");
+        assert_eq!(ripple_light((38.0, 30.0), &lights), blue, "the nearest lit");
+        assert_eq!(ripple_light((90.0, 0.0), &lights), blue, "past the dark and the near-black ones");
+        assert_eq!(ripple_light((0.0, 0.0), &[((0.0, 0.0), None)]), [255; 3], "white with none lit");
     }
 }

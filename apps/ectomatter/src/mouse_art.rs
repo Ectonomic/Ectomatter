@@ -157,6 +157,29 @@ pub fn light_boxes(l: &Layers, w: u32) -> [[f32; 4]; 2] {
     })
 }
 
+/// Each button's middle on the drawing, in the drawing's own units, in the
+/// mouse's order of its buttons (see mouse::BUTTONS): the middle of its shape
+/// where it shows, for the mouse drawn `w` pixels wide.
+pub fn button_middles(l: &Layers, w: u32) -> Vec<(f32, f32)> {
+    let k = w as f32 / VIEW.2;
+    let m = l.margin as f32;
+    l.shapes
+        .iter()
+        .map(|p| {
+            let pw = p.px.width() as usize;
+            let (mut sx, mut sy, mut sa) = (0f32, 0f32, 0f32);
+            for (i, c) in p.px.pixels().iter().enumerate() {
+                let a = c.alpha() as f32;
+                sx += a * ((i % pw) as f32 + 0.5);
+                sy += a * ((i / pw) as f32 + 0.5);
+                sa += a;
+            }
+            let (cx, cy) = if sa > 0.0 { (sx / sa, sy / sa) } else { (p.px.width() as f32 / 2.0, p.px.height() as f32 / 2.0) };
+            (VIEW.0 + (p.x as f32 + cx - m) / k, VIEW.1 + (p.y as f32 + cy - m) / k)
+        })
+        .collect()
+}
+
 /// The mouse in HDR at one size: each light's lamp (see ectomatter_draw's
 /// lamp), made from its window, its groups' shapes together, as the core's
 /// light says it is made; and the picture without light, as the page shows

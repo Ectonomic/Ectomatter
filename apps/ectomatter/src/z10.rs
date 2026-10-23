@@ -1167,6 +1167,16 @@ impl Page {
         })
     }
 
+    /// A key's Reactive flash as its LED shows it, while one plays on it
+    /// (from the moment it's pressed, before the keyboard is lit again);
+    /// none with another effect on, which leaves any flash unseen.
+    pub fn flash_look(&self, pos: u32) -> Option<[u8; 3]> {
+        if self.dev.is_none() || effect(&self.draft()["lighting"]) != "trigger" {
+            return None;
+        }
+        self.flashes.get(&pos).map(|(_, c)| led_look(*c))
+    }
+
     /// Light a key as pressing it would, for Reactive.
     pub fn flash(&mut self, pos: u32, t: f64) {
         if self.dev.is_none() || effect(&self.draft()["lighting"]) != "trigger" {
