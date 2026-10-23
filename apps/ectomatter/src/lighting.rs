@@ -60,7 +60,7 @@ pub enum Ctl {
     ScrFormat,
     /// how fast an effect moves
     ScrSpeed,
-    /// the Sensors box in Settings: a tab, by its place; a sensor checked or unchecked, and
+    /// the Sensor Feed box in Settings: a tab, by its place; a sensor checked or unchecked, and
     /// its pencil (which the window gives the id after the sensor's), by the sensor's place;
     /// a folded run opened or shut; a card made the main card; a sensor's new name typed
     SensorTab,
@@ -200,7 +200,7 @@ pub mod kind {
     pub const CHECKBOX: i32 = 48;
     /// a thing the firmware adds, a tick before it
     pub const TICKED: i32 = 49;
-    /// the Sensors box's: a tab (the Screen tab's own); a sensor's checkbox, its names and
+    /// the Sensor Feed box's: a tab (the Screen tab's own); a sensor's checkbox, its names and
     /// its reading, or a folded run of them
     pub const TAB: i32 = 50;
     pub const SENSOR: i32 = 51;

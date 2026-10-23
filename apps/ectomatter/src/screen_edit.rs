@@ -24,7 +24,7 @@ pub struct Editor {
 pub enum Shows {
     Reading(Source),
     Time,
-    /// "Add more sensors in Settings": Settings, at its Sensors box
+    /// "Add more sensors in Settings": Settings, at its Sensor Feed box
     MoreSensors,
 }
 
@@ -61,7 +61,7 @@ pub struct BlockBox {
 }
 
 /// Where the chosen block's reading comes from, for its From line, as [from_line] says it:
-/// the line, and the words in it that link to Settings' Sensors box. None says what the
+/// the line, and the words in it that link to the Sensor Feed box in Settings. None says what the
 /// reading's source says of itself.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct From {
@@ -75,7 +75,7 @@ fn bare(label: &str) -> bool {
 }
 
 /// The From line of a block showing one of the computer's readings: where it comes from
-/// and the driver's own name for it, ending in a link to Settings' Sensors box (to add more
+/// and the driver's own name for it, ending in a link to the Sensor Feed box in Settings (to add more
 /// sensors, or to change the main card); or, for one unchecked there, that it is. None for a
 /// reading not of the computer, or one this computer doesn't have.
 pub fn from_line(src: Source, cat: &Catalog, setup: &crate::sensors::Setup) -> Option<(String, &'static str)> {
@@ -497,7 +497,7 @@ pub fn source_menu(current: Shows, bars: bool, date: DateFormat, groups: &[(Stri
     rows
 }
 
-/// One of the computer's readings now, as Settings' Sensors box writes it, for the Shows
+/// One of the computer's readings now, as the Sensor Feed box in Settings writes it, for the Shows
 /// menu: "66°", "4.7 GHz", "1882 MHz", "33.4 / 60.2 GB", "2,836 RPM".
 fn reading_now(src: Source, r: &Readings) -> Option<String> {
     use ectomatter_sensors::list::Val;

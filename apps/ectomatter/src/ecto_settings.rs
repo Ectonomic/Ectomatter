@@ -3,7 +3,7 @@
 //! open it, what else has it open; the plugins, each with what it can do,
 //! its version and whether it's on, then the sections the plugins describe
 //! of themselves (the weather's place and units), drawn here; the sensors the
-//! Sensors plugin reads, and which the screens show; the HDR interface; and
+//! Sensor Feed reads, and which the screens show; the HDR interface; and
 //! how often the window draws a lighting effect.
 
 use serde_json::{json, Value};
@@ -22,7 +22,7 @@ const PAD_X: f32 = 24.0;
 const LABEL_W: f32 = 132.0;
 const CTRL: f32 = 148.0;
 
-/// What the Sensors box shows: the computer's sensors as last listed, each one's reading
+/// What the Sensor Feed box shows: the computer's sensors as last listed, each one's reading
 /// now, the choices, the tab open, the folded runs opened (by device and run), and the
 /// sensor being renamed with what is typed so far.
 #[derive(Clone)]
@@ -35,7 +35,7 @@ pub struct Sensors {
     pub renaming: Option<(String, String)>,
 }
 
-/// What the Sensors box's pieces stand for, by their places: each tab's part, each
+/// What the Sensor Feed box's pieces stand for, by their places: each tab's part, each
 /// checkbox's sensor, each folded run's device and run, each Make main's card; and where
 /// the box's heading is on the page.
 #[derive(Clone, Debug, Default)]
@@ -202,14 +202,14 @@ struct Row<'a> {
     tip: Option<(String, String)>,
 }
 
-/// Ectomatter's Settings' Sensors box: a tab for each part of the computer (the Screen tab's
+/// The Sensor Feed box in Ectomatter's Settings: a tab for each part of the computer (the Screen tab's
 /// own tabs), the open one's device and where its readings come from, then its rows, each
 /// sensor a checkbox with its name, its driver's name and its reading, three to a line; long
 /// runs of like readings folded into one line that opens; and at its foot what checking does.
 fn sensors_box(cells: &mut Vec<Cell>, y: &mut f32, v: &Sensors, map: &mut SensorMap) {
     *y += 20.0;
     map.top = *y;
-    cells.push(text_cell(style::HEAD, X0, *y, W, 18.0, "Sensors"));
+    cells.push(text_cell(style::HEAD, X0, *y, W, 18.0, "Sensor Feed"));
     *y += 18.0 + 8.0;
     let parts = v.cat.parts();
     let tab = if parts.contains(&v.tab) { v.tab } else { parts.first().copied().unwrap_or(Part::Processor) };

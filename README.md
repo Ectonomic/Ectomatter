@@ -18,23 +18,24 @@ EVGA, SteelSeries or any other maker whose devices it drives.
   WebAssembly module that reaches only the USB devices its manifest names, and
   it describes its device in data. The app does the drawing.
 - **Plugins** (`plugins/`), which add to the app's pages or bring in another
-  program: Monitors sets each monitor while a game runs; the
-  OpenRGB plugin switches OpenRGB's lighting profiles with the game in front;
-  Weather brings the weather and its warnings to the screens that show them;
-  and Sensors reads the computer's temperatures, loads and fans for them, on
-  Linux.
+  program: the Game Configurator sets how each game starts; the Monitor
+  Switcher sets each monitor while a game runs; OpenRGB Link switches OpenRGB's
+  lighting profiles with the game in front; the Weather Feed brings the weather
+  and its warnings to the screens that show them; and the Sensor Feed reads the
+  computer's temperatures, loads and fans for them, on Linux.
 - **The core protocol** (`docs/core-protocol.md`, and the WebAssembly interface
   in `wit/core.wit`): how the app talks to its cores and plugins.
 - **Libraries** (`crates/`): `evga-z10`, the keyboard's own code;
   `ectomatter-draw`, which draws the devices and their light;
-  `ectomatter-protocol`, the names every core shares; and the Weather and
-  Sensors plugins' own, `ectomatter-weather` and `ectomatter-sensors`.
+  `ectomatter-protocol`, the names every core shares; and the weather and the
+  sensors code the Weather Feed and the Sensor Feed run on, `ectomatter-weather`
+  and `ectomatter-sensors`.
 - **Design** (`design/`): the styles and data the design mocks are drawn with.
 
 ## Status
 
 Ectomatter runs on Linux (KDE Plasma on Wayland). Windows and macOS are planned,
-and so are a core for the MagTran M3 and the Game Configurator plugin.
+and so is a core for the MagTran M3.
 
 ## Building
 

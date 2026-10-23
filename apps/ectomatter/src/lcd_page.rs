@@ -255,7 +255,7 @@ impl Source {
             Source::CpuTemp | Source::CpuClock => Some("cpu"),
             Source::GpuTemp | Source::GpuLoad | Source::GpuClock | Source::VideoMemory => Some("gpu"),
             Source::Memory => Some("memory"),
-            Source::OutsideTemp | Source::Sky => Some("weather"),
+            Source::OutsideTemp | Source::Sky => Some("weather-feed"),
             Source::GameMode | Source::KeyRollover => Some("keyboard"),
             // (a sensor's part: its readings said unavailable once)
             Source::Sensor(n) => Some(crate::sensors::known(n).map_or("Sensor", |k| k.part.short())),

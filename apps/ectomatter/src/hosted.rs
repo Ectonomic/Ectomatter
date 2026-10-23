@@ -521,20 +521,20 @@ mod tests {
         }
     }
 
-    /// The Sensors plugin lists a computer's sensors, each named and in its
-    /// part, as the Sensors box shows them, and reads those it's asked to
+    /// The Sensor Feed lists a computer's sensors, each named and in its
+    /// part, as the Sensor Feed box shows them, and reads those it's asked to
     /// watch, reaching the files and NVIDIA's driver only through Ectomatter.
     #[test]
     fn the_sensors_plugin_lists_and_reads_what_it_is_asked() {
-        let dir = ectomatter_sensors::fake::temp_dir("sensors-plugin");
+        let dir = ectomatter_sensors::fake::temp_dir("sensor-feed-plugin");
         ectomatter_sensors::fake::computer(&dir);
         let mut ps = Hosted::new(Arc::new(Files(dir.clone(), std::sync::Mutex::new(ectomatter_sensors::fake::nvidia()))));
-        ps.start(crate::packages::Package::read(&crate::packages::builtin_dir(Kind::Plugin).join("sensors"), false).unwrap());
+        ps.start(crate::packages::Package::read(&crate::packages::builtin_dir(Kind::Plugin).join("sensor-feed"), false).unwrap());
         let r = ps.readings();
         let mut cat = ectomatter_sensors::list::Catalog::default();
         for _ in 0..200 {
             ps.poll();
-            if let Some(c) = r.of("sensors").and_then(|t| serde_json::from_value::<ectomatter_sensors::list::Catalog>(t.list).ok()) {
+            if let Some(c) = r.of("sensor-feed").and_then(|t| serde_json::from_value::<ectomatter_sensors::list::Catalog>(t.list).ok()) {
                 cat = c;
                 break;
             }
@@ -543,11 +543,11 @@ mod tests {
         let keys: Vec<&str> = cat.devices.iter().map(|d| d.key.as_str()).collect();
         assert!(keys.contains(&"cpu") && keys.contains(&"card@0000:01:00.0") && keys.contains(&"board"), "{keys:?}");
         // what's wanted, read and told
-        r.want("sensors", "test", vec!["card@0000:01:00.0/temperature".into(), "memory/used".into()]);
+        r.want("sensor-feed", "test", vec!["card@0000:01:00.0/temperature".into(), "memory/used".into()]);
         let mut got = (None, None);
         for _ in 0..200 {
             ps.poll();
-            got = (r.value("sensors", "card@0000:01:00.0/temperature"), r.value("sensors", "memory/used"));
+            got = (r.value("sensor-feed", "card@0000:01:00.0/temperature"), r.value("sensor-feed", "memory/used"));
             if got.0.is_some() && got.1.is_some() {
                 break;
             }
@@ -555,11 +555,11 @@ mod tests {
         }
         assert_eq!(got.0, Some(json!(43.0)), "the card's temperature, through NVIDIA's driver as Ectomatter reaches it");
         assert!(got.1.as_ref().is_some_and(|v| v.as_array().is_some_and(|a| a.len() == 2)), "memory in use, of all of it: {got:?}");
-        assert!(r.value("sensors", "cpu/load").is_none(), "what isn't watched isn't read");
+        assert!(r.value("sensor-feed", "cpu/load").is_none(), "what isn't watched isn't read");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// The Weather plugin tells its Settings section and its readings as they
+    /// The Weather Feed tells its Settings section and its readings as they
     /// change: without a place, it asks for one; with one, the weather there
     /// in the units chosen, the warning in force and whose it is; and a place
     /// typed in is looked up. It asks only the web its manifest names, through
@@ -568,18 +568,18 @@ mod tests {
     fn the_weather_plugin_tells_its_section_and_readings() {
         let web = Arc::new(Web(Default::default()));
         let mut ps = Hosted::new(web.clone());
-        ps.start(crate::packages::Package::read(&crate::packages::builtin_dir(Kind::Plugin).join("weather"), false).unwrap());
+        ps.start(crate::packages::Package::read(&crate::packages::builtin_dir(Kind::Plugin).join("weather-feed"), false).unwrap());
         let section = |ps: &mut Hosted| {
             ps.poll();
-            ps.settings_sections().into_iter().find(|(id, _)| id == "weather").map(|(_, s)| s)
+            ps.settings_sections().into_iter().find(|(id, _)| id == "weather-feed").map(|(_, s)| s)
         };
         let first = section(&mut ps).expect("it told its section as it started");
         assert_eq!(first["layout"][0]["note"], "Every device that shows weather uses this place.");
         assert_eq!(first["layout"][1]["status"]["words"], "Chosen with the place");
-        assert!(ps.readings().of("weather").is_some_and(|t| t.list.as_array().is_some_and(|l| l.len() == 2)), "it lists what it reads");
+        assert!(ps.readings().of("weather-feed").is_some_and(|t| t.list.as_array().is_some_and(|l| l.len() == 2)), "it lists what it reads");
         // a place, Fahrenheit and miles an hour
         let place = json!({ "id": 4172086, "name": "Springfield", "latin": "Springfield", "region": "Florida", "country": "United States", "country_code": "US", "lat": 30.15326, "lon": -85.61132 });
-        ps.tell("weather", "settings/set", &json!({ "values": { "place": place, "temperature": "f", "wind": "mph" } }));
+        ps.tell("weather-feed", "settings/set", &json!({ "values": { "place": place, "temperature": "f", "wind": "mph" } }));
         let mut now = Value::Null;
         for _ in 0..200 {
             std::thread::sleep(std::time::Duration::from_millis(10));
@@ -598,9 +598,9 @@ mod tests {
         assert_eq!(warn["note"], "Tornado warning in force. Official warnings for this place, checked every 3 minutes.");
         assert_eq!(now["settings"][0]["text"], "Springfield", "the box shows the place's name");
         let r = ps.readings();
-        assert_eq!((r.value("weather", "temperature"), r.value("weather", "sky")), (Some(json!(15.0)), Some(json!("Clear"))), "the readings in °C, and the sky in words");
+        assert_eq!((r.value("weather-feed", "temperature"), r.value("weather-feed", "sky")), (Some(json!(15.0)), Some(json!("Clear"))), "the readings in °C, and the sky in words");
         // a place typed in, looked up
-        let found = ps.core_of("weather").unwrap().call("settings/search", &json!({ "id": "place", "text": "Land" })).unwrap();
+        let found = ps.core_of("weather-feed").unwrap().call("settings/search", &json!({ "id": "place", "text": "Land" })).unwrap();
         assert_eq!((found["found"][0]["label"].as_str(), found["found"][0]["sub"].as_str()), (Some("Springfield"), Some("Florida, United States")));
         assert_eq!(found["found"][0]["value"]["country_code"], "US", "the place itself, kept as chosen");
         // only what its manifest names, all over HTTPS
@@ -608,11 +608,11 @@ mod tests {
         assert!(!asked.is_empty() && asked.iter().all(|u| u.starts_with("https://")), "{asked:?}");
     }
 
-    /// The Monitors plugin's section: a column for each monitor, a cell
+    /// The Monitor Switcher's section: a column for each monitor, a cell
     /// saying why where a monitor can't do something, and the main monitor.
     #[test]
     fn the_monitors_section_has_a_column_for_each() {
-        let mut ps = plugin("monitors");
+        let mut ps = plugin("monitor-switcher");
         let s = &ps.sections("game", "ARC Raiders", &|_| json!({}))[0].1;
         let grid = &s["layout"][0]["grid"];
         let cols: Vec<&str> = grid["columns"].as_array().unwrap().iter().map(|c| c["label"].as_str().unwrap()).collect();
@@ -659,7 +659,7 @@ mod tests {
     /// one the monitor is already at changes nothing.
     #[test]
     fn choices_become_changes() {
-        let ps = plugin("monitors");
+        let ps = plugin("monitor-switcher");
         let g = crate::putback::Game { id: "steam_app_1808500".into(), name: "ARC Raiders".into(), pid: 1, since: 1 };
         let values = |_: &str| json!({ "edid:MSI-3DA4-1/brightness": "100", "edid:WSD-0001-2/brightness": "lowest", "edid:MSI-3DA4-1/refresh": "165", "main": "edid:MSI-3DA4-1" });
         let c = ps.changes(&g, "game", &values);
@@ -786,7 +786,7 @@ mod tests {
         Some(rx)
     }
 
-    /// The OpenRGB plugin brings everything OpenRGB lights in as one device,
+    /// OpenRGB Link brings everything OpenRGB lights in as one device,
     /// its profiles OpenRGB's; switching loads one, and switching back loads
     /// the one OpenRGB was on before. Run alone, with OpenRGB's own server
     /// off (its port free): `cargo test openrgb -- --ignored`.
@@ -794,7 +794,7 @@ mod tests {
     #[ignore]
     fn openrgb_switches_and_puts_back() {
         let Some(loaded) = fake_openrgb() else { panic!("OpenRGB’s port is taken: its own server is running") };
-        let mut ps = plugin("openrgb");
+        let mut ps = plugin("openrgb-link");
         let mut device = None;
         for _ in 0..100 {
             std::thread::sleep(std::time::Duration::from_millis(50));

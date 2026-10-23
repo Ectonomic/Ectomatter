@@ -1,5 +1,5 @@
 //! The files the sensors are read from, as this library reaches them: the
-//! computer's own, or, in the Sensors plugin, Ectomatter's, which lends only
+//! computer's own, or, in the Sensor Feed plugin, Ectomatter's, which lends only
 //! what the plugin's manifest names to read, read only. The calls are the
 //! standard library's that the listing and the reading use, so the rest of
 //! this library reads as if it reached the files itself.

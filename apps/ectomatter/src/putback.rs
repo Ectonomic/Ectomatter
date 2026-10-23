@@ -64,7 +64,8 @@ impl Change {
 
     fn of(v: &Value) -> Option<Change> {
         Some(Change {
-            plugin: v["plugin"].as_str()?.to_string(),
+            // (one recorded under a plugin's old id, by the one it has now)
+            plugin: crate::packages::renamed_id(v["plugin"].as_str()?).to_string(),
             what: v["what"].clone(),
             label: v["label"].as_str().unwrap_or("").to_string(),
             words: v["words"].as_str().unwrap_or("").to_string(),
@@ -503,7 +504,7 @@ mod tests {
     }
 
     fn bright(m: &str, to: u64) -> (String, Value, String, String, Option<Script>) {
-        ("monitors".into(), json!({ "monitor": m, "set": "brightness", "to": to }), "BRIGHTNESS".into(), format!("the {m}’s brightness"), None)
+        ("monitor-switcher".into(), json!({ "monitor": m, "set": "brightness", "to": to }), "BRIGHTNESS".into(), format!("the {m}’s brightness"), None)
     }
 
     /// What the thread says, up to `n` things, its starts made aside.
@@ -517,6 +518,13 @@ mod tests {
             }
         }
         out
+    }
+
+    /// A change recorded under a plugin's old id is its new one's, to put back.
+    #[test]
+    fn a_change_recorded_under_an_old_name_is_kept() {
+        let c = Change::of(&json!({ "plugin": "monitors", "what": { "monitor": "side", "set": "brightness", "to": 0 }, "label": "BRIGHTNESS", "words": "the side’s brightness", "before": 3500, "made": true })).unwrap();
+        assert_eq!(c.plugin, "monitor-switcher");
     }
 
     /// A game's start is said once its changes are made, for a game started
@@ -539,7 +547,7 @@ mod tests {
         fake.0.lock().unwrap().insert("side/brightness".into(), json!(3500));
         fake.0.lock().unwrap().insert("main".into(), json!("big"));
         let w = Worker::start(Journal::load(None), Some(Box::new(fake.clone())));
-        let main = ("monitors".into(), json!({ "monitor": "side", "set": "main", "to": true }), "MAIN MONITOR".into(), "the side’s place".into(), None);
+        let main = ("monitor-switcher".into(), json!({ "monitor": "side", "set": "main", "to": true }), "MAIN MONITOR".into(), "the side’s place".into(), None);
         w.start_game(Plan { game: game("arc", 10), changes: vec![main, bright("side", 0)], seq: 0 });
         w.quit_game("arc");
         let told = wait_for(&w, 1);
@@ -576,7 +584,7 @@ mod tests {
         fake.0.lock().unwrap().insert("side/brightness".into(), json!(3500));
         {
             let mut j = Journal::load(Some(path.clone()));
-            j.sessions.push(Session { game: game("gone", 50), changes: vec![Change { plugin: "monitors".into(), what: json!({ "monitor": "side", "set": "brightness", "to": 0 }), label: "BRIGHTNESS".into(), words: "the side’s brightness".into(), before: json!(3500), made: true }] });
+            j.sessions.push(Session { game: game("gone", 50), changes: vec![Change { plugin: "monitor-switcher".into(), what: json!({ "monitor": "side", "set": "brightness", "to": 0 }), label: "BRIGHTNESS".into(), words: "the side’s brightness".into(), before: json!(3500), made: true }] });
             j.sessions.push(Session { game: game("still", 60), changes: vec![] });
             j.save();
             fake.0.lock().unwrap().insert("side/brightness".into(), json!(0));

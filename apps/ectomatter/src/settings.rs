@@ -102,6 +102,10 @@ impl Settings {
     }
 
     fn write(&self) -> std::io::Result<()> {
+        // (a snapshot keeps what it changes to itself: the person's settings are never written)
+        if crate::desk::offscreen() {
+            return Ok(());
+        }
         let d = self.data.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(dir) = self.path.parent() {
             std::fs::create_dir_all(dir)?;

@@ -816,7 +816,7 @@ component Menu inherits Rectangle {
                     color: Ink.quiet;
                     vertical-alignment: center;
                 }
-                // a way to somewhere else to find more (Settings' Sensors box), under the choices
+                // a way to somewhere else to find more (the Sensor Feed box in Settings), under the choices
                 if row.kind == 7: Text {
                     x: root.marks ? 32px : 12px;
                     height: parent.height;
@@ -1142,7 +1142,7 @@ component CellView inherits Rectangle {
     // a tile, under the pieces on it
     // (style 27: a panel over the page, raised off it; 28: the page behind one,
     // dimmed; 30: the row of a menu that is in use)
-    // (style 2: the Sensors box with its first tab open, square under that tab)
+    // (style 2: the Sensor Feed box with its first tab open, square under that tab)
     if root.c.kind == 9: Rectangle {
         border-radius: root.c.style == 30 ? 7px : root.c.style == 1 ? 12px : 14px;
         border-top-left-radius: root.c.style == 2 ? 0 : root.c.style == 30 ? 7px : root.c.style == 1 ? 12px : 14px;
@@ -1176,7 +1176,7 @@ component CellView inherits Rectangle {
         border-radius: 3.5px;
         background: root.c.style == 1 ? Ink.good : root.c.style == 2 ? Ink.bad : root.c.style == 3 ? Ink.warn : #5c5c66;
     }
-    // a tab of the Sensors box, as the Screen tab's own: rounded above, the open one in the
+    // a tab of the Sensor Feed box, as the Screen tab's own: rounded above, the open one in the
     // box's color and running on into it on its feet (none on the first's left, where the
     // box's corner is square), the others the page's own until the pointer is on them; an
     // amber dot after a part's name when its readings can't come in (style 1: the first
@@ -1235,7 +1235,7 @@ component CellView inherits Rectangle {
             clicked => { root.pick(root.c.id, root.c.index, 0, 0, 0); }
         }
     }
-    // over a device's name in the Sensors box: under the pointer, a while after it comes to
+    // over a device's name in the Sensor Feed box: under the pointer, a while after it comes to
     // rest, its whole name where the row's is shorter (`text`), and where its readings come
     // from (`fill`), in a box like the app's menus
     if root.c.kind == 52: Rectangle {
@@ -1271,7 +1271,7 @@ component CellView inherits Rectangle {
             }
         }
     }
-    // a sensor in the Sensors box: its checkbox, its name (as wide as `value` allows), its
+    // a sensor in the Sensor Feed box: its checkbox, its name (as wide as `value` allows), its
     // driver's name in gray (`fill`), its reading at its right (`lines`), and under the
     // pointer a pencil to rename it, whose click is the next control's; or a run of like
     // readings folded into one line, a chevron for its checkbox, how many are checked at its
@@ -4332,7 +4332,7 @@ export component AppWindow inherits Window {
     in property <length> tile-height;
     in property <length> settings-h;
     out property <length> settings-scroll: set-flick.content-y;
-    // Settings scrolled to a place on its page (its Sensors box), as far as it scrolls
+    // Settings scrolled to a place on its page (its Sensor Feed box), as far as it scrolls
     in property <length> settings-goto: -1px;
     changed settings-goto => {
         if (root.settings-goto >= 0) {

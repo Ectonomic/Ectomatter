@@ -1,5 +1,5 @@
 //! Made-up computers to list and read, for tests: here and in Ectomatter's,
-//! whose screen and Settings tests read them through the Sensors plugin's
+//! whose screen and Settings tests read them through the Sensor Feed plugin's
 //! library.
 
 use std::path::{Path, PathBuf};

@@ -5,7 +5,7 @@
 //! A load is worked out from the time counted since the last reading, and a power from the
 //! energy counted since, so the first reading of each is 0, as the processor's load always
 //! was on the keyboard's screen. An NVIDIA card is read through NVIDIA's driver, as the
-//! [Nvidia](crate::list::Nvidia) the reader is handed reaches it (in the Sensors plugin,
+//! [Nvidia](crate::list::Nvidia) the reader is handed reaches it (in the Sensor Feed plugin,
 //! through Ectomatter, which alone may load the driver).
 
 use std::collections::HashMap;

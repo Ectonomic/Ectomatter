@@ -108,10 +108,20 @@ fn kept_at() -> (Option<PathBuf>, Option<PathBuf>) {
     (Some(p.clone()), Some(p))
 }
 
-/// The Monitors plugin's choices, kept under the name it had for a while
-/// ("monitor-configurator"), under its own; whether there were any.
+/// Each plugin's choices kept under an id it had before (packages::RENAMED),
+/// put under the one it has now; whether any were.
 fn renamed(v: &mut Value) -> bool {
-    v["plugins"].as_object_mut().is_some_and(|m| !m.contains_key("monitors") && m.remove("monitor-configurator").map(|old| m.insert("monitors".into(), old)).is_some())
+    let Some(m) = v["plugins"].as_object_mut() else { return false };
+    let mut any = false;
+    for (old, new) in crate::packages::RENAMED {
+        if !m.contains_key(new) {
+            if let Some(kept) = m.remove(old) {
+                m.insert(new.into(), kept);
+                any = true;
+            }
+        }
+    }
+    any
 }
 
 impl Library {
@@ -869,14 +879,16 @@ mod tests {
         assert!(l.is_favorite(&a) && l.choice(&a, "z10") == Some(Choice::Profile("2".into())));
     }
 
-    /// The Monitors plugin's choices, kept while it was named Monitor
-    /// Configurator, are its own again; none are lost, and none are moved twice.
+    /// A plugin's choices kept under an id it had before are its own again,
+    /// as Monitor Configurator's and Monitors' are the Monitor Switcher's;
+    /// none are lost, and none are moved twice.
     #[test]
-    fn the_monitors_plugins_choices_keep_its_name() {
-        let mut v = json!({ "plugins": { "monitor-configurator": { "game:*": { "edid:MSI/brightness": "100" } }, "openrgb": {} } });
+    fn a_plugins_choices_follow_its_new_name() {
+        let mut v = json!({ "plugins": { "monitor-configurator": { "game:*": { "edid:MSI/brightness": "100" } }, "weather": { "x": 1 }, "game-configurator": {} } });
         assert!(renamed(&mut v));
-        assert_eq!(v["plugins"]["monitors"]["game:*"]["edid:MSI/brightness"], "100");
-        assert!(v["plugins"].get("monitor-configurator").is_none() && v["plugins"].get("openrgb").is_some());
+        assert_eq!(v["plugins"]["monitor-switcher"]["game:*"]["edid:MSI/brightness"], "100");
+        assert_eq!(v["plugins"]["weather-feed"]["x"], 1);
+        assert!(v["plugins"].get("monitor-configurator").is_none() && v["plugins"].get("weather").is_none() && v["plugins"].get("game-configurator").is_some());
         assert!(!renamed(&mut v), "once only");
     }
 
@@ -885,16 +897,16 @@ mod tests {
     #[test]
     fn a_plugins_choices_follow_every_game_for_games() {
         let mut l = Library::of(json!({}), Some(steam_of(&[(1808500, "ARC Raiders", steam::Kind::Game), (250820, "SteamVR", steam::Kind::App)], &[])));
-        l.set_plugin_value(EVERY, "monitors", "side/brightness", Some(json!("lowest")));
-        l.set_plugin_value(EVERY, "monitors", "main/brightness", Some(json!("100")));
-        l.set_plugin_value("steam_app_1808500", "monitors", "side/brightness", Some(json!("25")));
-        assert_eq!(l.wanted_values("steam_app_1808500", "monitors"), json!({ "side/brightness": "25", "main/brightness": "100" }));
-        l.set_plugin_value("steam_app_250820", "monitors", "side/brightness", Some(json!("off")));
-        assert_eq!(l.wanted_values("steam_app_250820", "monitors"), json!({ "side/brightness": "off" }), "an app follows no Every game");
+        l.set_plugin_value(EVERY, "monitor-switcher", "side/brightness", Some(json!("lowest")));
+        l.set_plugin_value(EVERY, "monitor-switcher", "main/brightness", Some(json!("100")));
+        l.set_plugin_value("steam_app_1808500", "monitor-switcher", "side/brightness", Some(json!("25")));
+        assert_eq!(l.wanted_values("steam_app_1808500", "monitor-switcher"), json!({ "side/brightness": "25", "main/brightness": "100" }));
+        l.set_plugin_value("steam_app_250820", "monitor-switcher", "side/brightness", Some(json!("off")));
+        assert_eq!(l.wanted_values("steam_app_250820", "monitor-switcher"), json!({ "side/brightness": "off" }), "an app follows no Every game");
         // a choice taken back follows Every game's again, and an empty record is taken out
-        l.set_plugin_value("steam_app_1808500", "monitors", "side/brightness", None);
-        assert_eq!(l.wanted_values("steam_app_1808500", "monitors")["side/brightness"], "lowest");
-        assert!(l.v["plugins"]["monitors"].get("steam_app_1808500").is_none());
+        l.set_plugin_value("steam_app_1808500", "monitor-switcher", "side/brightness", None);
+        assert_eq!(l.wanted_values("steam_app_1808500", "monitor-switcher")["side/brightness"], "lowest");
+        assert!(l.v["plugins"]["monitor-switcher"].get("steam_app_1808500").is_none());
         assert!(l.has_own("steam_app_250820") && !l.has_own("steam_app_1808500"));
     }
 

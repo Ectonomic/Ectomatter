@@ -4,10 +4,10 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Every sensor on a Linux computer, named as people say them: the Sensors plugin's library."
+description = "Every sensor on a Linux computer, named as people say them: the Sensor Feed plugin's library."
 
 [features]
-# finding the sensors and reading them: the Sensors plugin's, and tests'. Without it, only
+# finding the sensors and reading them: the Sensor Feed plugin's, and tests'. Without it, only
 # what a reading is and how it's written, for Ectomatter, which never reads them itself.
 read = []
 # made-up computers to read, for tests

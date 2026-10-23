@@ -1,6 +1,6 @@
 //! Ectomatter's packages: the cores, each for a device Ectomatter talks to
 //! itself (the keyboard's, the mouse's), and the plugins, which add to
-//! Ectomatter's pages (the Monitors plugin adds a section to each game's
+//! Ectomatter's pages (the Monitor Switcher adds a section to each game's
 //! page) or bring in what another program drives (OpenRGB's lighting). Both
 //! are packaged the
 //! same way (a folder holding its manifest, core.json, the module it names,
@@ -317,21 +317,46 @@ pub fn all_in(builtin: &Path, added: &Path) -> Vec<Package> {
     out
 }
 
+/// The plugins' old ids, each with the one it has now (Monitors was Monitor
+/// Configurator before it), for everything kept under a plugin's id: its
+/// folder, the Library's choices, Settings, the record of changes to put back.
+pub const RENAMED: [(&str, &str); 5] = [
+    ("monitor-configurator", "monitor-switcher"),
+    ("monitors", "monitor-switcher"),
+    ("openrgb", "openrgb-link"),
+    ("sensors", "sensor-feed"),
+    ("weather", "weather-feed"),
+];
+
+/// A plugin's id as it is now, for one kept under an old one.
+pub fn renamed_id(id: &str) -> &str {
+    RENAMED.iter().find(|(old, _)| *old == id).map_or(id, |(_, new)| new)
+}
+
+/// Each plugin's settings kept under an id it had before (RENAMED), under
+/// the one it has now: its own values and its switch alike.
+pub fn rename_settings(settings: &crate::settings::Settings) {
+    for (old, new) in RENAMED {
+        if let Some(kept) = settings.take(&format!("plugins.{old}")).filter(|_| settings.get(&format!("plugins.{new}")).is_none()) {
+            let _ = settings.set(&format!("plugins.{new}"), kept);
+        }
+    }
+}
+
 /// Where each package's own files were kept before cores and plugins were
 /// kept apart (every one in the data folder's cores/, the mouse's core as
-/// "steelseries", the Monitors plugin as "monitors", OpenRGB's plugin as
-/// "openrgb"), and while the Monitors plugin was named Monitor Configurator,
-/// moved to where they're kept now, once.
+/// "steelseries"), and under each plugin's old id (RENAMED), moved to where
+/// they're kept now, once.
 pub fn move_old_folders() {
     let data = crate::data_dir();
     // (Custom Scripts, a plugin once, is Ectomatter's own now: its empty folder goes)
     let _ = std::fs::remove_dir(data.join("cores").join("scripts"));
-    let moves = [
+    let mut moves = vec![
         (data.join("cores").join("steelseries"), data.join("cores").join(crate::mouse::CORE)),
-        (data.join("cores").join("monitors"), data.join("plugins").join("monitors")),
-        (data.join("plugins").join("monitor-configurator"), data.join("plugins").join("monitors")),
-        (data.join("cores").join("openrgb"), data.join("plugins").join("openrgb")),
+        (data.join("cores").join("monitors"), data.join("plugins").join(renamed_id("monitors"))),
+        (data.join("cores").join("openrgb"), data.join("plugins").join(renamed_id("openrgb"))),
     ];
+    moves.extend(RENAMED.iter().map(|(old, new)| (data.join("plugins").join(old), data.join("plugins").join(new))));
     for (from, to) in moves {
         // (a folder already where it goes is taken only if it's empty)
         if from.is_dir() && (!to.exists() || std::fs::remove_dir(&to).is_ok()) {
@@ -450,6 +475,20 @@ mod tests {
     /// Every package with Ectomatter says what it can do in Ectomatter's words:
     /// the cores their devices, the plugins their uses; and each kind is in
     /// its own folder, the cores in cores/ and the plugins in plugins/.
+    /// A plugin's settings kept under its old id are under its new one at
+    /// the next start: the Weather Feed's place, the Monitor Switcher's switch.
+    #[test]
+    fn settings_follow_a_plugins_new_name() {
+        let f = std::env::temp_dir().join(format!("ectomatter-renamed-settings-{}.json", std::process::id()));
+        std::fs::write(&f, r#"{ "plugins": { "weather": { "place": { "name": "Springfield" } }, "monitors": { "on": false } } }"#).unwrap();
+        let s = crate::settings::Settings::load(f.clone());
+        rename_settings(&s);
+        assert_eq!(s.get("plugins.weather-feed.place.name").and_then(|v| v.as_str().map(String::from)).as_deref(), Some("Springfield"));
+        assert!(!s.on("plugins.monitor-switcher.on"), "its switch kept");
+        assert!(s.get("plugins.weather").is_none() && s.get("plugins.monitors").is_none(), "nothing left under the old names");
+        let _ = std::fs::remove_file(&f);
+    }
+
     /// Each plugin says the systems it works on, a tag each in Settings:
     /// every one, where its manifest names none; and one made for other
     /// systems isn't taken here, and says why.
@@ -458,11 +497,11 @@ mod tests {
         let none = std::env::temp_dir().join(format!("ectomatter-no-packages-{}", std::process::id()));
         let plugins = all_in(&builtin_dir(Kind::Plugin), &none);
         let on = |id: &str| plugins.iter().find(|p| p.id() == id).map(|p| p.systems()).unwrap_or_default();
-        assert_eq!(on("weather"), vec!["Linux", "Windows", "macOS"]);
-        assert_eq!(on("openrgb"), vec!["Linux", "Windows", "macOS"]);
-        assert_eq!(on("sensors"), vec!["Linux"]);
+        assert_eq!(on("weather-feed"), vec!["Linux", "Windows", "macOS"]);
+        assert_eq!(on("openrgb-link"), vec!["Linux", "Windows", "macOS"]);
+        assert_eq!(on("sensor-feed"), vec!["Linux"]);
         assert_eq!(on("game-configurator"), vec!["Linux"], "Proton and its prefixes are Linux's");
-        assert_eq!(on("monitors"), vec!["Linux"], "Ectomatter reaches the monitors on KDE Plasma alone, so far");
+        assert_eq!(on("monitor-switcher"), vec!["Linux"], "Ectomatter reaches the monitors on KDE Plasma alone, so far");
         assert_eq!(systems_of(&serde_json::json!({ "systems": ["macos", "windows"] })), vec!["Windows", "macOS"], "in the tags' order");
         if cfg!(target_os = "linux") {
             let elsewhere = serde_json::json!({ "ectomatter": "0.1.0", "protocol": 4, "systems": ["windows", "macos"] });
@@ -478,15 +517,15 @@ mod tests {
         let can = |list: &[Package], id: &str| list.iter().find(|p| p.id() == id).map(|p| p.can()).unwrap_or_default();
         assert_eq!(can(&cores, "evga-z10"), vec!["Talks to the EVGA Z10 RGB over USB.".to_string()]);
         assert_eq!(can(&cores, crate::mouse::CORE), vec!["Talks to the SteelSeries Sensei 310 over USB.".to_string()]);
-        assert_eq!(can(&plugins, "openrgb"), vec!["Talks to OpenRGB on this computer.".to_string()]);
-        assert_eq!(can(&plugins, "monitors"), vec!["Changes your monitors’ settings while a game runs.".to_string()]);
+        assert_eq!(can(&plugins, "openrgb-link"), vec!["Talks to OpenRGB on this computer.".to_string()]);
+        assert_eq!(can(&plugins, "monitor-switcher"), vec!["Changes your monitors’ settings while a game runs.".to_string()]);
         assert!(cores.iter().all(|p| p.kind() == Kind::Core), "the cores folder holds cores");
         assert!(plugins.iter().all(|p| p.kind() == Kind::Plugin), "the plugins folder holds plugins");
-        assert_eq!(plugins.iter().map(|p| p.name()).collect::<Vec<_>>(), vec!["Game Configurator", "Monitors", "OpenRGB", "Sensors", "Weather"]);
+        assert_eq!(plugins.iter().map(|p| p.name()).collect::<Vec<_>>(), vec!["Game Configurator", "Monitor Switcher", "OpenRGB Link", "Sensor Feed", "Weather Feed"]);
         assert_eq!(can(&plugins, "game-configurator"), vec!["Changes how games start, and runs Wine’s tools.".to_string()]);
-        assert_eq!(can(&plugins, "weather"), vec!["Reaches Open-Meteo, Photon, the National Weather Service, Environment and Climate Change Canada and MeteoAlarm over the internet.".to_string()]);
+        assert_eq!(can(&plugins, "weather-feed"), vec!["Reaches Open-Meteo, Photon, the National Weather Service, Environment and Climate Change Canada and MeteoAlarm over the internet.".to_string()]);
         assert_eq!(
-            can(&plugins, "sensors"),
+            can(&plugins, "sensor-feed"),
             vec![
                 "Reads this computer’s own information without changing it: /sys, /proc/stat, /proc/meminfo, /proc/cpuinfo and /usr/share/hwdata/pci.ids.".to_string(),
                 "Reads NVIDIA graphics cards through NVIDIA’s driver.".to_string(),

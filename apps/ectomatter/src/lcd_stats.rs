@@ -8,7 +8,7 @@
 //! video memory, and each other sensor checked. A reading unchecked can't be
 //! had, as one the computer doesn't have.
 //!
-//! Ectomatter never reads the sensors itself: the Sensors plugin lists them
+//! Ectomatter never reads the sensors itself: the Sensor Feed lists them
 //! and reads those it's asked to watch ([crate::hosted::Readings]), and this
 //! asks for what it shows. Tests hand in a made-up computer, read here.
 
@@ -20,8 +20,8 @@ use std::time::Instant;
 use ectomatter_sensors::list::Nvidia;
 use ectomatter_sensors::list::{Catalog, Sensor, Val};
 
-/// The Sensors plugin, by its id.
-pub const SENSORS: &str = "sensors";
+/// The Sensor Feed, by its id.
+pub const SENSORS: &str = "sensor-feed";
 
 /// One reading of the main card: its temperature, load, core clock, and its video memory
 /// used and in all (GiB), each where its driver reports it and it is checked.
@@ -41,7 +41,7 @@ impl Gpu {
     }
 }
 
-/// Where the readings come from: the Sensors plugin, as it tells them, for
+/// Where the readings come from: the Sensor Feed, as it tells them, for
 /// one who shows them (the keyboard's screen, a page); or, in a test, a
 /// made-up computer read here.
 enum From {
@@ -59,7 +59,7 @@ pub struct Stats {
 }
 
 impl Stats {
-    /// The readings the Sensors plugin tells, for `who` (the screen, a page),
+    /// The readings the Sensor Feed tells, for `who` (the screen, a page),
     /// which asks it to watch what it shows.
     pub fn of(readings: crate::hosted::Readings, who: &'static str) -> Stats {
         Stats { from: From::Plugin(readings, who), listed: None, setup: None }
@@ -73,7 +73,7 @@ impl Stats {
     }
 
     /// The computer's sensors as last listed (again when half a minute old):
-    /// as the Sensors plugin last told them, none while it isn't running.
+    /// as the Sensor Feed last told them, none while it isn't running.
     pub fn catalog(&mut self) -> &Catalog {
         if self.listed.as_ref().is_none_or(|(at, _)| at.elapsed().as_secs() >= 30) {
             let cat = match &mut self.from {
@@ -95,7 +95,7 @@ impl Stats {
         self.read();
     }
 
-    /// Each of these sensors read now: as the Sensors plugin last read it,
+    /// Each of these sensors read now: as the Sensor Feed last read it,
     /// these being the ones asked for from now on.
     fn values(&mut self, want: &[&Sensor]) -> std::collections::HashMap<String, Val> {
         match &mut self.from {
@@ -109,7 +109,7 @@ impl Stats {
         }
     }
 
-    /// Every sensor on the computer read now, checked or not, by id, for the Sensors box.
+    /// Every sensor on the computer read now, checked or not, by id, for the Sensor Feed box.
     pub fn read_all(&mut self) -> std::collections::HashMap<String, Val> {
         let all: Vec<Sensor> = self.catalog().devices.iter().flat_map(|d| d.sensors.iter().cloned()).collect();
         self.values(&all.iter().collect::<Vec<_>>())

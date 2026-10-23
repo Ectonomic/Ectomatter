@@ -847,7 +847,7 @@ impl Player {
     pub fn start(news: impl Fn(News) + Send + 'static, announce: bool, launch: Launch, paused: bool, screen: Box<dyn Sink>, own: Own, readings: crate::hosted::Readings) -> Player {
         let (tell, heard) = mpsc::channel::<Control>();
         std::thread::spawn(move || {
-            // (the computer's readings as the Sensors plugin tells them)
+            // (the computer's readings as the Sensor Feed tells them)
             let stats = Arc::new(Mutex::new(Stats::of(readings, "screen")));
             // primed, as the service primed it: the first reading of the load is 0
             stats.lock().unwrap().prime();

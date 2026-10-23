@@ -1,6 +1,6 @@
 //! NVIDIA's driver through NVML, which Ectomatter loads itself and lends a
 //! plugin only through the system interface's `nvidia`, for a plugin whose
-//! manifest names it (computer.rs): the Sensors plugin reads NVIDIA cards so.
+//! manifest names it (computer.rs): the Sensor Feed reads NVIDIA cards so.
 
 use std::collections::HashMap;
 use std::time::Instant;

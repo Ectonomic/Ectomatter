@@ -894,7 +894,7 @@ pub struct Front {
     add_menu: bool,
     /// "New screen layout"'s menu: what each row makes
     new_menu: Option<Vec<Option<NewFrom>>>,
-    /// the Sensors box in Settings: the tab open, the folded runs opened (by device and
+    /// the Sensor Feed box in Settings: the tab open, the folded runs opened (by device and
     /// run), the sensor being renamed and what is typed, what its pieces stood for as last
     /// drawn; the computer's sensors and their readings, read once a second while it shows;
     /// and the sensor asked about before it is unchecked
@@ -1101,6 +1101,8 @@ impl Front {
             .collect();
         let slider_ends = crate::uistate::get("slider_ends").and_then(|v| serde_json::from_value(v).ok()).unwrap_or([[400.0, 3700.0], [400.0, 3700.0]]);
         let mut hosted = crate::hosted::Hosted::new(std::sync::Arc::new(crate::computer::ThisComputer::new()));
+        // (each plugin's settings under the id it has now first, its switch among them)
+        crate::packages::rename_settings(&settings);
         hosted.start_all(&settings);
         // (offscreen, nothing is changed: the thread has no monitors to reach)
         let screens: Option<Box<dyn crate::putback::Screens>> = if crate::desk::offscreen() { None } else { Some(Box::new(crate::monitors::Hands)) };
@@ -1316,19 +1318,15 @@ impl Front {
             .unwrap_or_default();
         f.screens_noted = f.screens.clone();
         f.screens_saved = f.screens.clone();
-        // (the weather Ectomatter kept itself before the Weather plugin, the plugin's now)
-        if let Some(old) = f.settings.take("weather").filter(|_| f.settings.get("plugins.weather").is_none()) {
+        // (the weather Ectomatter kept itself before the Weather Feed plugin, the plugin's now)
+        if let Some(old) = f.settings.take("weather").filter(|_| f.settings.get("plugins.weather-feed").is_none()) {
             let mut v = serde_json::json!({});
             for (key, from) in [("place", &old["place"]), ("temperature", &old["units"]["temperature"]), ("wind", &old["units"]["wind"])] {
                 if !from.is_null() {
                     v[key] = from.clone();
                 }
             }
-            let _ = f.settings.set("plugins.weather", v);
-        }
-        // (the Monitors plugin's settings, kept under the name it had for a while)
-        if let Some(old) = f.settings.take("plugins.monitor-configurator").filter(|_| f.settings.get("plugins.monitors").is_none()) {
-            let _ = f.settings.set("plugins.monitors", old);
+            let _ = f.settings.set("plugins.weather-feed", v);
         }
         f.hand_values(None);
         // the desk's light, as it was left playing
@@ -2161,7 +2159,7 @@ impl Front {
                         self.refresh_editor();
                         self.draw_screen();
                     }
-                    // the Sensors box's readings, once a second while Settings is open
+                    // the Sensor Feed box's readings, once a second while Settings is open
                     if self.ui.get_place() == "settings" && self.sensors_seen.as_ref().is_some_and(|(t, _, _)| t.elapsed() >= Duration::from_secs(1)) {
                         self.refresh();
                     }
@@ -6387,7 +6385,7 @@ impl Front {
             .collect()
     }
 
-    /// The weather outside, as the Weather plugin last told it: in °C, and
+    /// The weather outside, as the Weather Feed last told it: in °C, and
     /// the sky in words.
     fn outside(&self) -> Option<(f64, String)> {
         let r = self.hosted.readings();
@@ -7790,7 +7788,7 @@ impl Front {
         crate::screen_edit::computer_groups(cat, &setup)
     }
 
-    /// Settings, at its Sensors box (from the screen editor's From line, or its Shows menu).
+    /// Settings, at its Sensor Feed box (from the screen editor's From line, or its Shows menu).
     pub fn show_sensors(&mut self) {
         self.ui.set_place("settings".into());
         self.refresh();
@@ -7799,7 +7797,7 @@ impl Front {
         self.ui.set_settings_goto(to);
     }
 
-    /// What the Sensors box shows: the computer's sensors and their readings, read again
+    /// What the Sensor Feed box shows: the computer's sensors and their readings, read again
     /// when a second old; the choices; the tab open, the runs opened, the sensor renamed. A
     /// card that has come in as the main card has its usual sensors checked as it is seen.
     fn sensors_view(&mut self) -> crate::ecto_settings::Sensors {
@@ -7881,7 +7879,7 @@ impl Front {
     /// temperature or clock from other than the usual sensor shows that sensor, as it did.
     fn carry_sensors(&mut self, b: &crate::sensors::Before) {
         use crate::lcd_page::{Kind, Source};
-        // (the sensors as the Sensors plugin lists them)
+        // (the sensors as the Sensor Feed lists them)
         let cat = self.reader.get_or_insert_with(|| crate::lcd_stats::Stats::of(self.hosted.readings(), "page")).catalog().clone();
         if cat.devices.is_empty() {
             return;

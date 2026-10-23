@@ -712,8 +712,8 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         front.mouse.tab = t;
     }
     if let Ok(place) = std::env::var("ECTOMATTER_PLACE") {
-        // ("sensors": Settings, at its Sensors box, as the screen editor's links open it)
-        if place == "sensors" {
+        // ("sensor-feed": Settings, at the Sensor Feed box, as the screen editor's links open it)
+        if place == "sensor-feed" {
             front.show_sensors();
         } else {
             front.ui.set_place(place.into());

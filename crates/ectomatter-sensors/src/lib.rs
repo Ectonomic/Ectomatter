@@ -1,4 +1,4 @@
-//! Every sensor on a Linux computer, for the Sensors plugin (plugins/sensors),
+//! Every sensor on a Linux computer, for the Sensor Feed plugin (plugins/sensor-feed),
 //! which lists and reads them, and for Ectomatter, which shows what the plugin
 //! tells it: what a sensor is ([list]), and how a reading is written ([read]).
 //! Finding and reading the sensors is behind the `read` feature, so
