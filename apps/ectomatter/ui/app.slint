@@ -4998,6 +4998,16 @@ export component AppWindow inherits Window {
                         source: root.desk-kb-shadow;
                     }
                     if d.kind == 0: Rectangle {
+                        // the keys held down on the keyboard, shaded as its page shades them
+                        for k in root.keys: Rectangle {
+                            visible: k.pressed;
+                            x: k.x * d.w / root.units;
+                            y: k.y * d.w / root.units;
+                            width: k.w * d.w / root.units;
+                            height: k.h * d.w / root.units;
+                            border-radius: (k.molded ? 0.13 : 0.24) * d.w / 100;
+                            background: #00000052;
+                        }
                         for o in root.overlays: Image {
                             visible: root.board-ready;
                             property <float> along: o.frac;

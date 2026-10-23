@@ -1094,6 +1094,16 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     if front.ui.get_place() == "home" {
         front.ready_desk_mouse();
     }
+    // ECTOMATTER_HOLD="J;mouse/right": those keys (by the layout's ids) and mouse
+    // buttons (by the core's) held down, as the devices' presses hold them
+    for id in std::env::var("ECTOMATTER_HOLD").unwrap_or_default().split(';').map(str::trim).filter(|p| !p.is_empty()) {
+        if let Some(button) = id.strip_prefix("mouse/") {
+            front.mouse_heard(mouse::Heard::Input(button.to_string(), true));
+        } else if let Some(pos) = front.page.layout.iter().find(|k| k.id == id).map(|k| k.pos) {
+            front.page.pressed.insert(pos);
+            front.refresh();
+        }
+    }
     lay_mouse(&mut pic, &mut front, 1.0);
     if pic.mouse_rect().2 > 0 {
         eprintln!("the mouse laid at {:?}", pic.mouse_rect());

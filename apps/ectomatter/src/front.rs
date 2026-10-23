@@ -692,6 +692,9 @@ pub struct Front {
     mouse_hover: Option<u8>,
     /// the chosen and hovered buttons the picture shows now
     mouse_shows: (Option<u8>, Option<u8>),
+    /// the buttons held down on the mouse now, as its core tells them (bit
+    /// n - 1 for its button n, see mouse::BUTTONS), shown held on its pictures
+    mouse_down: u8,
     /// the lights' effects played on the picture, 30 frames a second, while they move
     mouse_frames: Option<slint::Timer>,
     /// the desk's light (see desk_light.rs): its effect, from when, its
@@ -1090,6 +1093,7 @@ impl Front {
             mouse_drawing: None,
             mouse_hover: None,
             mouse_shows: (None, None),
+            mouse_down: 0,
             mouse_frames: None,
             desk_light: crate::desk_light::Effect::Off,
             desk_light_t0: Instant::now(),
@@ -5060,6 +5064,11 @@ impl Front {
             Heard::State(v) => {
                 self.mouse.heard_state(v);
                 self.mouse.failed = None;
+                // (a mouse gone lets every button go)
+                if !self.mouse.present() && self.mouse_down != 0 {
+                    self.mouse_down = 0;
+                    self.show_mouse_held();
+                }
             }
             Heard::Failed(e) => self.mouse.failed = Some(e),
             // the picture plays the light's effect from the moment the mouse took it
@@ -5078,6 +5087,14 @@ impl Front {
             // comes from where it clicks the desk); one given one of Ectomatter's
             // macros plays it (let go ends one that plays while it's held)
             Heard::Input(control, down) => {
+                // (held down on its pictures as it is on the mouse)
+                if let Some(b) = crate::mouse::BUTTONS.iter().position(|(id, ..)| *id == control) {
+                    let held = if down { self.mouse_down | 1 << b } else { self.mouse_down & !(1 << b) };
+                    if held != self.mouse_down {
+                        self.mouse_down = held;
+                        self.show_mouse_held();
+                    }
+                }
                 if down {
                     self.ripple_from_button(&control, Duration::ZERO);
                 }
@@ -5216,6 +5233,24 @@ impl Front {
         }
     }
 
+    /// The mouse's buttons held down, as they are now, on the picture of it
+    /// that shows (drawn again now), and on the other when it next shows;
+    /// neither drawn while the window is closed into the tray.
+    fn show_mouse_held(&mut self) {
+        let shows = !self.hidden && self.mouse_pictured();
+        let place = self.ui.get_place();
+        if shows && place == "home" {
+            self.desk_light_up();
+        } else {
+            self.desk_mouse_lit = None;
+        }
+        if shows && place == "mouse" {
+            self.mouse_light_up();
+        } else {
+            self.mouse_lit = None;
+        }
+    }
+
     /// The mouse's picture drawn for the window's scale now, if it isn't (here,
     /// with no thread to draw it on: a snapshot).
     pub fn ready_mouse_picture(&mut self) {
@@ -5281,7 +5316,7 @@ impl Front {
             _ => return,
         };
         let Some((_, hdr)) = self.desk_mouse_hdr.as_mut() else { return };
-        let lit = hdr.on_ground(layers, colors, if on { 1.0 } else { 0.5 }, white, ceiling);
+        let lit = hdr.on_ground(layers, colors, if on { 1.0 } else { 0.5 }, self.mouse_down, white, ceiling);
         self.desk_mouse_lit = Some(Rc::new(lit));
     }
 
@@ -5330,7 +5365,7 @@ impl Front {
         let Some((scale, imgs)) = &self.mouse_layers else { return };
         let Some((_, hdr)) = self.mouse_hdr.as_mut().filter(|(s, _)| s == scale) else { return };
         let part = mouse_part(&self.ui, *scale, &imgs.layers);
-        let lit = hdr.picture(&imgs.layers, crate::ink_env::rgb("stage", [0x1b, 0x1b, 0x1f]), self.mouse_shows.0, self.mouse_shows.1, colors, white, ceiling, part);
+        let lit = hdr.picture(&imgs.layers, crate::ink_env::rgb("stage", [0x1b, 0x1b, 0x1f]), self.mouse_shows.0, self.mouse_shows.1, self.mouse_down, colors, white, ceiling, part);
         self.mouse_lit = Some(Rc::new(lit));
         self.mouse_part = part;
         self.ui.set_mouse_hdr_ready(true);

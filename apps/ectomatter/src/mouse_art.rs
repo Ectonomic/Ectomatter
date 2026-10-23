@@ -227,7 +227,7 @@ impl Hdr {
     /// in), its lights in `colors`, premultiplied linear light, each pixel's
     /// coverage made so the window's mixing of it in linear light comes out
     /// as the page's mixing in sRGB's encoding did (see loose).
-    pub fn on_ground(&mut self, l: &Layers, colors: [Lit; 2], dim: f32, white: f32, ceiling: f32) -> crate::picture::Lit {
+    pub fn on_ground(&mut self, l: &Layers, colors: [Lit; 2], dim: f32, down: u8, white: f32, ceiling: f32) -> crate::picture::Lit {
         let (bw, bh) = (l.base.width() as usize, l.base.height() as usize);
         let key = (dim.clamp(0.0, 1.0) * 1000.0).round() as u32;
         if self.loose_for != Some(key) {
@@ -246,6 +246,7 @@ impl Hdr {
                 lamp.clip(&mut px, bw, bh, ceiling);
             }
         }
+        shade_down(&mut px, bw, bh, l, down);
         crate::picture::Lit { px, w: bw, h: bh }
     }
 
@@ -254,10 +255,11 @@ impl Hdr {
     /// `hover`ed a shade lighter, mixed as the page mixes its colors; then
     /// each light in its color (none, off), as bright as its LED makes it, in
     /// linear light with the SDR white of `white` nits at 1.0, and what passes
-    /// `ceiling` times it drawn at the most the screen shows. Only the part
-    /// `(x, y, w, h)` of the whole picture, where the page shows it.
+    /// `ceiling` times it drawn at the most the screen shows; and the buttons
+    /// held `down` shaded (see shade_down). Only the part `(x, y, w, h)` of
+    /// the whole picture, where the page shows it.
     #[allow(clippy::too_many_arguments)]
-    pub fn picture(&mut self, l: &Layers, stage: [u8; 3], chosen: Option<u8>, hover: Option<u8>, colors: [Lit; 2], white: f32, ceiling: f32, part: (usize, usize, usize, usize)) -> crate::picture::Lit {
+    pub fn picture(&mut self, l: &Layers, stage: [u8; 3], chosen: Option<u8>, hover: Option<u8>, down: u8, colors: [Lit; 2], white: f32, ceiling: f32, part: (usize, usize, usize, usize)) -> crate::picture::Lit {
         let (bw, bh) = (l.base.width() as usize, l.base.height() as usize);
         if self.unlit_for != Some((chosen, hover, stage)) {
             self.unlit = unlit(l, stage, chosen, hover);
@@ -276,6 +278,7 @@ impl Hdr {
                 lamp.clip(px, bw, bh, ceiling);
             }
         }
+        shade_down(px, bw, bh, l, down);
         // the part the page shows
         let (x, y, w, h) = part;
         let (w, h) = (w.min(bw.saturating_sub(x)), h.min(bh.saturating_sub(y)));
@@ -284,6 +287,35 @@ impl Hdr {
             out.extend_from_slice(&px[(r * bw + x) * 4..(r * bw + x + w) * 4]);
         }
         crate::picture::Lit { px: out, w, h }
+    }
+}
+
+/// How a button held down shows: as the keyboard's page shows a key held
+/// down, black at 0x52 laid over it as the page lays its colors, in sRGB's
+/// encoding, so where the button shows wholly it keeps (1 - 0.32)^2.2 of its
+/// light, lit or not.
+const PRESS: f32 = 0x52 as f32 / 255.0;
+
+/// The buttons held `down` (bit n - 1 for the mouse's button n) shaded over
+/// their shapes where they show, on the whole picture (premultiplied linear
+/// light, `bw` by `bh`), its lights and all.
+fn shade_down(px: &mut [f32], bw: usize, bh: usize, l: &Layers, down: u8) {
+    for (n, p) in l.shapes.iter().enumerate() {
+        if down & (1 << n) == 0 {
+            continue;
+        }
+        let pw = p.px.width() as usize;
+        for (i, c) in p.px.pixels().iter().enumerate() {
+            let (x, y) = (p.x as usize + i % pw, p.y as usize + i / pw);
+            if c.alpha() == 0 || x >= bw || y >= bh {
+                continue;
+            }
+            let k = (1.0 - PRESS * c.alpha() as f32 / 255.0).powf(2.2);
+            let j = (y * bw + x) * 4;
+            for v in &mut px[j..j + 3] {
+                *v *= k;
+            }
+        }
     }
 }
 
@@ -701,6 +733,27 @@ mod tests {
         let (lx, ly) = at(152.5, 482.1);
         assert_eq!(l.light_at(lx, ly), Some(0), "the logo");
     }
+
+    /// A button held down shows as a key held down does on the keyboard's
+    /// page: wholly over its shape it keeps (1 - 0.32)^2.2 of its light, its
+    /// lights' glow and all, and the rest of the mouse is as it was.
+    #[test]
+    fn a_button_held_down_is_shaded_as_a_key_is() {
+        let l = layers(&art(), 240, &shadow(), 0.5).unwrap();
+        let light = crate::mouse::light_model(&serde_json::json!({ "light": "light.json" }));
+        let mut hdr = Hdr::new(&l, &light, px_mm(240, 520.0 / 125.1));
+        let lit = [Some([255, 60, 0]); 2];
+        let up = hdr.on_ground(&l, lit, 1.0, 0, 254.0, 3.9);
+        let held = hdr.on_ground(&l, lit, 1.0, 1, 254.0, 3.9);
+        let (k, m) = (240.0 / VIEW.2, l.margin as f32);
+        let at = |(x, y): (f32, f32)| ((m + (x - VIEW.0) * k) as usize, (m + (y - VIEW.1) * k) as usize);
+        let middles = button_middles(&l, 240);
+        let px = |p: &crate::picture::Lit, (x, y): (usize, usize)| [0, 1, 2].map(|c| p.px[(y * p.w + x) * 4 + c]);
+        let (a, b) = (px(&up, at(middles[0])), px(&held, at(middles[0])));
+        let want = (1.0 - PRESS).powf(2.2);
+        assert!(a.iter().zip(b).all(|(a, b)| (b - a * want).abs() <= 1e-6 * a.max(1e-3)), "the left button, held: {b:?} of {a:?}");
+        assert_eq!(px(&up, at(middles[1])), px(&held, at(middles[1])), "the right button, not held, as it was");
+    }
 }
 
 #[cfg(test)]
@@ -856,10 +909,10 @@ mod timing {
             let mut hdr = super::Hdr::new(&l, &light, super::px_mm(w, 520.0 / 125.1));
             eprintln!("{w} px wide: the lamps in {:?}", t.elapsed());
             let (bw, bh) = (l.base.width() as usize, l.base.height() as usize);
-            let _ = hdr.picture(&l, [0x1b, 0x1b, 0x1f], None, None, [Some([255, 0, 0]); 2], 254.0, 3.9, (0, 0, bw, bh));
+            let _ = hdr.picture(&l, [0x1b, 0x1b, 0x1f], None, None, 0, [Some([255, 0, 0]); 2], 254.0, 3.9, (0, 0, bw, bh));
             let t = std::time::Instant::now();
             for k in 0..30u8 {
-                let _ = hdr.picture(&l, [0x1b, 0x1b, 0x1f], None, None, [Some([255, k * 8, 0]); 2], 254.0, 3.9, (0, 0, bw, bh));
+                let _ = hdr.picture(&l, [0x1b, 0x1b, 0x1f], None, None, 0, [Some([255, k * 8, 0]); 2], 254.0, 3.9, (0, 0, bw, bh));
             }
             eprintln!("{w} px wide: a frame in {:?}", t.elapsed() / 30);
         }
