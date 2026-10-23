@@ -3361,9 +3361,15 @@ impl Front {
     }
 
     /// A mouse button pressed (by the core's name for it, see mouse::BUTTONS):
-    /// a ripple from the button, where the mouse sits on Home's desk.
+    /// a ripple from the button, where the mouse sits on Home's desk. Not the
+    /// pointer's click (the button whose job is the mouse's own button 1): its
+    /// ripple comes from where the pointer clicks the desk, and from nowhere
+    /// when the click is elsewhere.
     pub fn ripple_from_button(&mut self, control: &str, age: Duration) {
         let Some(b) = crate::mouse::BUTTONS.iter().position(|(id, ..)| *id == control) else { return };
+        if self.mouse.job(b)["mouse"].as_u64() == Some(1) {
+            return;
+        }
         let Some((dw, layers)) = self.desk_layers() else { return };
         let Some(&(x, y)) = crate::mouse_art::button_middles(layers, dw).get(b) else { return };
         let Some(at) = self.on_desk_mouse(x, y) else { return };
@@ -5068,8 +5074,9 @@ impl Front {
                 return;
             }
             // a button pressed or let go: a press sends a ripple across Home's desk
-            // from the button, as a key's does; one given one of Ectomatter's macros
-            // plays it (let go ends one that plays while it's held)
+            // from the button, as a key's does (but the pointer's click, whose ripple
+            // comes from where it clicks the desk); one given one of Ectomatter's
+            // macros plays it (let go ends one that plays while it's held)
             Heard::Input(control, down) => {
                 if down {
                     self.ripple_from_button(&control, Duration::ZERO);
