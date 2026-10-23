@@ -41,6 +41,13 @@ pub struct App {
     /// the library it's installed in
     pub library: PathBuf,
     pub art: Art,
+    /// whether Steam starts its Linux version: it has one (Steam's record lists
+    /// Linux among its systems), and Steam Play's own manifests don't send it
+    /// to Proton instead
+    pub linux: bool,
+    /// the Steam Linux Runtime Steam Play's manifests run its Linux version in
+    /// (as "SteamLinuxRuntime_sniper"), if they name one
+    pub runtime: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -67,6 +74,8 @@ fn read_dir(dir: &steamlocate::SteamDir) -> Steam {
     let user = user(&root);
     let info = std::fs::read(root.join("appcache/appinfo.vdf")).ok();
     let info = info.as_deref().and_then(|b| steam_vdf_parser::parse_appinfo(b).ok());
+    // (Steam Play's manifests, app 891390: the tool Valve has each app start with)
+    let mappings = info.as_ref().and_then(|v| v.get("891390")).map(|e| e.get("appinfo").unwrap_or(e)).and_then(|e| e.get("extended")).and_then(|x| x.get("app_mappings"));
     let played = user.map(|u| played(&root, u)).unwrap_or_default();
     let mut apps: Vec<App> = Vec::new();
     // (a library that can't be read, such as a drive not plugged in, is passed over)
@@ -85,7 +94,9 @@ fn read_dir(dir: &steamlocate::SteamDir) -> Steam {
             let Some(kind) = kind else { continue };
             let name = app.name.clone().or_else(|| entry.and_then(|e| e.get_str(&["common", "name"])).map(String::from)).unwrap_or_else(|| format!("App {}", app.app_id));
             let (minutes, last) = played.iter().find(|(id, _, _)| *id == app.app_id).map_or((0, 0), |(_, m, l)| (*m, *l));
-            apps.push(App { id: app.app_id, name: clean(&name), kind, minutes, last, library: lib.path().to_path_buf(), art });
+            let valve = mappings.and_then(|m| m.get(&app.app_id.to_string())).and_then(|m| m.get_str(&["tool"])).map(String::from);
+            let (linux, runtime) = start_of(entry.and_then(|e| e.as_obj()).is_some_and(on_linux), valve);
+            apps.push(App { id: app.app_id, name: clean(&name), kind, minutes, last, library: lib.path().to_path_buf(), art, linux, runtime });
         }
     }
     let favorites = user.map(|u| favorites(&root, u)).unwrap_or_default();
@@ -108,6 +119,23 @@ fn kind_of(entry: &Obj) -> Option<Kind> {
         "application" => Some(Kind::App),
         "tool" => common.get("library_assets").and_then(|a| a.as_obj()).filter(|a| a.contains_key("library_capsule")).map(|_| Kind::App),
         _ => None,
+    }
+}
+
+/// Whether Steam's record lists Linux among the systems an app runs on
+/// (common/oslist, as "windows,linux").
+fn on_linux(entry: &Obj) -> bool {
+    entry.get("common").and_then(|c| c.as_obj()).and_then(|c| c.get("oslist")).and_then(|o| o.as_str()).is_some_and(|l| l.split(',').any(|s| s.trim().eq_ignore_ascii_case("linux")))
+}
+
+/// How Steam starts an app that may have a Linux version, by Steam Play's
+/// own tool for it: its Windows version where the tool is a Proton build,
+/// else its Linux version, in the Steam Linux Runtime the tool names, if one.
+fn start_of(linux: bool, valve: Option<String>) -> (bool, Option<String>) {
+    match valve {
+        Some(t) if t.to_ascii_lowercase().contains("proton") => (false, None),
+        Some(t) if t.to_ascii_lowercase().starts_with("steamlinuxruntime") => (linux, linux.then_some(t)),
+        _ => (linux, None),
     }
 }
 
@@ -276,6 +304,15 @@ mod tests {
         assert_eq!(kind(r#""appinfo" { "common" { "type" "Tool" "library_assets" { "library_hero" "en" } } }"#), None);
         assert_eq!(kind(r#""appinfo" { "common" { "type" "Tool" } }"#), None);
         assert_eq!(kind(r#""appinfo" { "common" { "type" "DLC" } }"#), None);
+        let linux = |text: &str| on_linux(steam_vdf_parser::parse_text(text).unwrap().as_obj().unwrap());
+        assert!(linux(r#""appinfo" { "common" { "oslist" "windows,macos,linux" } }"#));
+        assert!(!linux(r#""appinfo" { "common" { "oslist" "windows" } }"#));
+        assert!(!linux(r#""appinfo" { "common" { "type" "Game" } }"#));
+        // Steam Play's own tool for it: Counter-Strike 2 in the sniper runtime, Hollow Knight through Proton
+        assert_eq!(start_of(true, Some("SteamLinuxRuntime_sniper".into())), (true, Some("SteamLinuxRuntime_sniper".into())));
+        assert_eq!(start_of(true, Some("proton-stable".into())), (false, None));
+        assert_eq!(start_of(true, None), (true, None));
+        assert_eq!(start_of(true, Some("steamrt4-any".into())), (true, None), "only a Proton build sends it to its Windows version");
     }
 
     #[test]

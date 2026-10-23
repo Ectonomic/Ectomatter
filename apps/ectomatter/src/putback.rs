@@ -160,13 +160,18 @@ pub enum Told {
     Ran { script: u64, game: String, quit: bool, ran: Ran, at: u64 },
     PutBack { name: String, words: Vec<String>, after_stop: bool },
     Failed { words: String, why: String },
+    /// a game's changes made (or tried), as it starts, by the plan's number:
+    /// a game started through Ectomatter waits for this
+    Started { id: String, seq: u64 },
 }
 
 /// A game's changes to make: the game, and each change with, for a
-/// command, the command itself (the plugin named it by its id alone).
+/// command, the command itself (the plugin named it by its id alone); and
+/// the plan's own number, which its Started says.
 pub struct Plan {
     pub game: Game,
     pub changes: Vec<(String, Value, String, String, Option<Script>)>,
+    pub seq: u64,
 }
 
 enum Job {
@@ -274,6 +279,7 @@ impl Hands {
             self.quit(&plan.game.id, false);
         }
         let game = plan.game.clone();
+        let plan_seq = plan.seq;
         self.show(Some(Steps { game: game.name.clone(), phase: "launch", labels: plan.changes.iter().map(|c| c.2.clone()).collect(), done: 0, finished: plan.changes.is_empty() }));
         self.journal.sessions.push(Session { game: game.clone(), changes: Vec::new() });
         let at = self.journal.sessions.len() - 1;
@@ -321,6 +327,7 @@ impl Hands {
         }
         let n = self.steps.lock().unwrap_or_else(|p| p.into_inner()).as_ref().map_or(0, |s| s.labels.len());
         self.step(n, true);
+        let _ = self.say.send(Told::Started { id: game.id.clone(), seq: plan_seq });
     }
 
     fn read(&mut self, what: &Value) -> Result<Value, String> {
@@ -499,15 +506,30 @@ mod tests {
         ("monitors".into(), json!({ "monitor": m, "set": "brightness", "to": to }), "BRIGHTNESS".into(), format!("the {m}’s brightness"), None)
     }
 
+    /// What the thread says, up to `n` things, its starts made aside.
     fn wait_for(w: &Worker, n: usize) -> Vec<Told> {
         let mut out = Vec::new();
         while out.len() < n {
             match w.told.recv_timeout(std::time::Duration::from_secs(10)) {
+                Ok(Told::Started { .. }) => {}
                 Ok(t) => out.push(t),
                 Err(_) => break,
             }
         }
         out
+    }
+
+    /// A game's start is said once its changes are made, for a game started
+    /// through Ectomatter's launcher, which waits on it.
+    #[test]
+    fn a_start_is_said_once_its_changes_are_made() {
+        let fake = Fake::default();
+        fake.0.lock().unwrap().insert("side/brightness".into(), json!(3500));
+        let w = Worker::start(Journal::load(None), Some(Box::new(fake.clone())));
+        w.start_game(Plan { game: game("arc", 10), changes: vec![bright("side", 0)], seq: 7 });
+        let t = w.told.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+        assert_eq!(t, Told::Started { id: "arc".into(), seq: 7 });
+        assert_eq!(fake.0.lock().unwrap()["side/brightness"], json!(0), "made before it's said");
     }
 
     /// Changes made as a game starts are put back as it quits, the last first.
@@ -518,7 +540,7 @@ mod tests {
         fake.0.lock().unwrap().insert("main".into(), json!("big"));
         let w = Worker::start(Journal::load(None), Some(Box::new(fake.clone())));
         let main = ("monitors".into(), json!({ "monitor": "side", "set": "main", "to": true }), "MAIN MONITOR".into(), "the side’s place".into(), None);
-        w.start_game(Plan { game: game("arc", 10), changes: vec![main, bright("side", 0)] });
+        w.start_game(Plan { game: game("arc", 10), changes: vec![main, bright("side", 0)], seq: 0 });
         w.quit_game("arc");
         let told = wait_for(&w, 1);
         assert_eq!(told, vec![Told::PutBack { name: "ARC".into(), words: vec!["the side’s brightness".into(), "the side’s place".into()], after_stop: false }]);
@@ -534,8 +556,8 @@ mod tests {
         let fake = Fake::default();
         fake.0.lock().unwrap().insert("side/brightness".into(), json!(3500));
         let w = Worker::start(Journal::load(None), Some(Box::new(fake.clone())));
-        w.start_game(Plan { game: game("a", 1), changes: vec![bright("side", 0)] });
-        w.start_game(Plan { game: game("b", 2), changes: vec![bright("side", 2500)] });
+        w.start_game(Plan { game: game("a", 1), changes: vec![bright("side", 0)], seq: 0 });
+        w.start_game(Plan { game: game("b", 2), changes: vec![bright("side", 2500)], seq: 0 });
         w.quit_game("a");
         let _ = wait_for(&w, 1);
         assert_eq!(fake.0.lock().unwrap()["side/brightness"], json!(2500), "b still holds it");
@@ -578,7 +600,7 @@ mod tests {
         let f = std::env::temp_dir().join(format!("ectomatter-script-{}", std::process::id()));
         let s = Script { id: 3, name: "Mark".into(), start: format!("echo started > '{}'", f.display()), quit: format!("rm '{}'", f.display()), wait: true, keep: false, limit: 5 };
         let w = Worker::start(Journal::load(None), None);
-        w.start_game(Plan { game: game("arc", 1), changes: vec![(crate::front::CUSTOM_SCRIPTS.into(), json!({ "command": 3 }), "MARK".into(), "Mark".into(), Some(s))] });
+        w.start_game(Plan { game: game("arc", 1), changes: vec![(crate::front::CUSTOM_SCRIPTS.into(), json!({ "command": 3 }), "MARK".into(), "Mark".into(), Some(s))], seq: 0 });
         let told = wait_for(&w, 1);
         assert!(matches!(&told[0], Told::Ran { script: 3, quit: false, ran: Ran::Done(_), .. }), "{told:?}");
         assert!(f.exists());

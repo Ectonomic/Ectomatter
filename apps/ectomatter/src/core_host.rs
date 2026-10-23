@@ -66,6 +66,9 @@ pub struct Uses {
     pub read: Vec<String>,
     /// NVIDIA's driver: what it says of each card
     pub nvidia: bool,
+    /// how games start: the recipe Ectomatter's launcher starts each game
+    /// from, and the Wine tools run in a game's prefix (game/launch)
+    pub launch: bool,
     /// anything else it names, as it names it ("sound-capture")
     pub other: Vec<String>,
 }
@@ -77,6 +80,7 @@ impl Uses {
             match x {
                 Value::String(s) if s == "monitors" => u.monitors = true,
                 Value::String(s) if s == "nvidia" => u.nvidia = true,
+                Value::String(s) if s == "launch" => u.launch = true,
                 Value::String(s) => u.other.push(s.clone()),
                 Value::Object(o) => {
                     let to = |a: &str| o.get("to").and_then(Value::as_str).unwrap_or(a).to_string();

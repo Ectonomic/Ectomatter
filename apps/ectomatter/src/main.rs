@@ -42,6 +42,7 @@ mod hosted;
 mod ink_env;
 mod jobs;
 mod kde_output;
+mod launcher;
 mod shadow;
 mod sound;
 mod lab;
@@ -83,6 +84,7 @@ mod tray;
 mod typist;
 mod updates;
 mod uistate;
+mod vdf;
 mod z10;
 
 slint::include_modules!();
@@ -574,6 +576,19 @@ fn main() {
         match state {
             Ok(s) => std::fs::write(path, serde_json::to_vec(&s).unwrap()).unwrap(),
             Err(e) => eprintln!("ectomatter: the keyboard could not be read: {e}"),
+        }
+        return;
+    }
+
+    // `--move-game-helper`: every game whose launch line in Steam runs game-helper set to
+    // start through Ectomatter, its flags carried over into the Library, and stop
+    if args.iter().any(|a| a == "--move-game-helper") {
+        match launcher::move_game_helper() {
+            Ok(said) => println!("{said}"),
+            Err(e) => {
+                eprintln!("ectomatter: {e}");
+                std::process::exit(1);
+            }
         }
         return;
     }
@@ -2046,6 +2061,18 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         })
         .unwrap();
     let front_bus = front_app::start(front_tx);
+    // games started through Ectomatter's launcher in Steam, each waiting for
+    // its changes before it goes on
+    let (starts_tx, starts_rx) = calloop::channel::channel::<launcher::Start>();
+    event_loop
+        .handle()
+        .insert_source(starts_rx, |e, _, app: &mut App| {
+            if let calloop::channel::Event::Msg(s) = e {
+                app.front.game_starting(s);
+            }
+        })
+        .unwrap();
+    launcher::listen(starts_tx);
     let (tray_tx, tray_rx) = calloop::channel::channel::<tray::TrayAsk>();
     app.tray = tray::start(tray_tx);
     event_loop

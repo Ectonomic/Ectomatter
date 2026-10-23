@@ -248,6 +248,12 @@ impl Library {
         self.save();
     }
 
+    /// Every page's choices in a plugin's section, as one line of words (to
+    /// tell when any has changed).
+    pub fn plugin_all(&self, plugin: &str) -> String {
+        self.v["plugins"][plugin].to_string()
+    }
+
     /// What a game or app has in a plugin's section, as it starts: its own
     /// choices, and for a game Every game's where it has none of its own.
     pub fn wanted_values(&self, id: &str, plugin: &str) -> Value {
@@ -772,7 +778,7 @@ mod tests {
     fn steam_of(apps: &[(u32, &str, steam::Kind)], favorites: &[u32]) -> steam::Steam {
         steam::Steam {
             root: PathBuf::new(),
-            apps: apps.iter().map(|(id, name, kind)| steam::App { id: *id, name: name.to_string(), kind: *kind, minutes: 0, last: 0, library: PathBuf::new(), art: steam::Art::default() }).collect(),
+            apps: apps.iter().map(|(id, name, kind)| steam::App { id: *id, name: name.to_string(), kind: *kind, minutes: 0, last: 0, library: PathBuf::new(), art: steam::Art::default(), linux: false, runtime: None }).collect(),
             favorites: favorites.to_vec(),
         }
     }

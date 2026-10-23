@@ -287,21 +287,28 @@ impl Hosted {
 
     /// The plugins whose sections a page gets, in Settings' order: each one's
     /// id and its section, as it describes it for this page (`page` is
-    /// "game", "app" or "every"). A description a few seconds old is asked again.
-    pub fn sections(&mut self, page: &str, name: &str) -> Vec<(String, Value)> {
-        let key = format!("{page}\u{0}{name}");
+    /// "game", "app" or "every"), given what `more` adds for each plugin (the
+    /// page's values; for the plugin that says how games start, what
+    /// Ectomatter knows). A description a few seconds old, or asked with
+    /// anything changed, is asked again.
+    pub fn sections(&mut self, page: &str, name: &str, more: &dyn Fn(&Package) -> Value) -> Vec<(String, Value)> {
         let mut out = Vec::new();
         for p in &mut self.plugins {
             if !p.package.adds_to_games() {
                 continue;
             }
+            let mut asked = json!({ "for": page, "name": name });
+            if let (Some(a), Value::Object(m)) = (asked.as_object_mut(), more(&p.package)) {
+                a.extend(m);
+            }
+            let key = asked.to_string();
             let fresh = p.described.iter().find(|(k, _, t)| *k == key && t.elapsed() < Duration::from_secs(3)).map(|(_, v, _)| v.clone());
             let section = match fresh {
                 Some(s) => s,
                 None => {
-                    let s = p.core.call("game/describe", &json!({ "for": page, "name": name })).map(|v| v["section"].clone()).unwrap_or_else(|e| json!({ "label": p.package.name(), "layout": [{ "note": e }] }));
-                    p.described.retain(|(k, _, _)| *k != key);
-                    p.described.push((key.clone(), s.clone(), Instant::now()));
+                    let s = p.core.call("game/describe", &asked).map(|v| v["section"].clone()).unwrap_or_else(|e| json!({ "label": p.package.name(), "layout": [{ "note": e }] }));
+                    p.described.retain(|(k, _, t)| *k != key && t.elapsed() < Duration::from_secs(3));
+                    p.described.push((key, s.clone(), Instant::now()));
                     s
                 }
             };
@@ -350,6 +357,21 @@ impl Hosted {
             }
         }
         out
+    }
+
+    /// The plugin that says how games start (the first on with `launch`
+    /// among its uses: the Game Configurator), by its id.
+    pub fn launcher(&self) -> Option<&str> {
+        self.plugins.iter().find(|p| p.package.adds_to_games() && p.package.manifest.uses.launch).map(|p| p.package.id())
+    }
+
+    /// A game's start as that plugin says it (game/launch): the recipe the
+    /// launcher starts it from, for the game (`game`: its id, name and Steam
+    /// number), its values (its own over Every game's) and what Ectomatter
+    /// knows. None without such a plugin.
+    pub fn launch(&self, game: &Value, values: &dyn Fn(&str) -> Value, every: &dyn Fn(&str) -> Value, facts: &Value) -> Option<Result<Value, String>> {
+        let p = self.plugins.iter().find(|p| p.package.adds_to_games() && p.package.manifest.uses.launch)?;
+        Some(p.core.call("game/launch", &json!({ "game": game, "values": values(p.package.id()), "every": every(p.package.id()), "facts": facts })).map(|v| v["recipe"].clone()))
     }
 
     /// The devices the packages running here told (a plugin's, from the
@@ -591,7 +613,7 @@ mod tests {
     #[test]
     fn the_monitors_section_has_a_column_for_each() {
         let mut ps = plugin("monitors");
-        let s = &ps.sections("game", "ARC Raiders")[0].1;
+        let s = &ps.sections("game", "ARC Raiders", &|_| json!({}))[0].1;
         let grid = &s["layout"][0]["grid"];
         let cols: Vec<&str> = grid["columns"].as_array().unwrap().iter().map(|c| c["label"].as_str().unwrap()).collect();
         assert_eq!(cols, vec!["MSI Wide 340 OLED", "Side 13 2K"]);
@@ -604,6 +626,33 @@ mod tests {
         assert_eq!(labels, vec!["Leave as is", "100%", "75%", "50%", "25%", "Lowest", "Turn off"]);
         assert_eq!(s["layout"][1]["show"][0]["id"], "main");
         assert!(s["layout"][1]["note"].as_str().unwrap().starts_with("Ectomatter sets these when ARC Raiders starts"));
+    }
+
+    /// The Game Configurator, run as Ectomatter runs it: its section drawn
+    /// from the page's values and what Ectomatter knows, asked again once a
+    /// value changes; and a game's recipe for the launcher.
+    #[test]
+    fn the_game_configurator_says_how_a_game_starts() {
+        let mut ps = plugin("game-configurator");
+        assert_eq!(ps.launcher(), Some("game-configurator"));
+        let facts = json!({
+            "default": "Proton-GE Latest", "home": "/home/someone", "cores": "0-7,16-23",
+            "protons": [{ "id": "Proton-GE Latest", "name": "Proton-GE Latest", "path": "/s/compatibilitytools.d/Proton-GE Latest", "runtime": "/s/common/SteamLinuxRuntime_4", "family": "ge" }],
+            "main": { "width": 3440, "height": 1440, "refresh": 240, "hdr": true },
+            "game": { "id": "steam_app_1808500", "name": "ARC Raiders", "app": 1808500, "native": false, "through": true, "prefix": { "path": "/home/someone/.local/share/Steam/steamapps/compatdata/1808500", "bytes": 662000000u64, "made": true }, "backups": 1 },
+        });
+        let more = |values: Value| { let facts = facts.clone(); move |p: &Package| if p.id() == "game-configurator" { json!({ "values": values, "facts": facts }) } else { json!({}) } };
+        let s = ps.sections("game", "ARC Raiders", &more(json!({})))[0].1.clone();
+        assert_eq!(s["label"], "Game Configurator");
+        assert_eq!(s["layout"][0]["row"]["status"]["words"], "Ectomatter");
+        assert!(s["layout"].to_string().contains("One backup so far."));
+        assert!(s["layout"][7]["row"].get("nest").is_none(), "gamescope's own settings only while it runs");
+        let s = ps.sections("game", "ARC Raiders", &more(json!({ "gs": true })))[0].1.clone();
+        assert_eq!(s["layout"][7]["row"]["nest"][0]["label"], "Size", "asked again for the new value");
+        let r = ps.launch(&json!({ "id": "steam_app_1808500", "name": "ARC Raiders", "app": 1808500 }), &|_| json!({ "hdr": "proton" }), &|_| json!({}), &facts).unwrap().unwrap();
+        assert_eq!(r["proton"], "/s/compatibilitytools.d/Proton-GE Latest");
+        assert_eq!(r["env"]["PROTON_ENABLE_HDR"], "1");
+        assert_eq!(r["wrap"], json!([["gamemoderun"]]));
     }
 
     /// A game's choices become changes, in order, each a change of a monitor;

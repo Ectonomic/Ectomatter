@@ -1208,6 +1208,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ectomatter-launch"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "serde_json",
+]
+
+[[package]]
 name = "ectomatter-protocol"
 version = "0.1.0"
 dependencies = [

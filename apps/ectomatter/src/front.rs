@@ -125,6 +125,9 @@ pub enum Ask {
     GlScriptLimit(f32, f32, f32),
     GlScriptRemove,
     GlScriptTyped,
+    /// a variable's form: Remove, and a word typed (Add turns on for a name)
+    GlVarRemove,
+    GlVarTyped,
     /// in Add a plugin: Choose…, and an address typed
     GlPluginFile,
     GlPluginTyped,
@@ -539,6 +542,9 @@ const TYPEFACE_PICK: usize = usize::MAX;
 
 /// What the record of changes calls Custom Scripts', Ectomatter's own section of
 /// the person's commands.
+/// The start plans made so far, each numbered, so a game's start answers only
+/// the launcher waiting on that plan, never one from before it.
+static PLANS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 pub const CUSTOM_SCRIPTS: &str = "custom-scripts";
 
 /// The form for adding a plugin, while it's open: the repository or file it's
@@ -682,6 +688,26 @@ pub struct Front {
     /// opening to their last closing
     windows: HashMap<String, String>,
     app_sessions: std::collections::HashSet<String>,
+    /// games started through Ectomatter (launcher.rs): what's known of this
+    /// computer for them, read on a thread of its own, and when it was last
+    /// asked for; the choices and what's known the recipes were last written
+    /// for; whether the launcher is installed in Steam; each game whose start
+    /// changes are being made (true once made), the launchers waiting on
+    /// them, and the starts made before the Library's watch saw their game;
+    /// the jobs running (Steam's settings changed, a prefix backed up), each
+    /// to say how it went, and whether Steam's are among them
+    facts_reader: Option<crate::launcher::Reader>,
+    known: Option<crate::launcher::Known>,
+    known_asked: Option<Instant>,
+    recipes_for: Option<(String, crate::launcher::Known)>,
+    tool_installed: bool,
+    starting: HashMap<String, (u64, bool)>,
+    holds: Vec<(String, u64, mpsc::Sender<()>, Instant)>,
+    early: Vec<(String, u32, Instant)>,
+    jobs: Vec<mpsc::Receiver<(String, bool)>>,
+    steam_busy: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// a program being chosen to run in a game's prefix, for that game
+    run_pick: Option<(String, mpsc::Receiver<Option<std::path::PathBuf>>)>,
     /// an added plugin asked about removing
     removing: Option<String>,
     mouse_icons: Option<(f32, Vec<slint::Image>)>,
@@ -997,6 +1023,8 @@ impl Front {
         on!(on_gl_script_limit_menu, |x, y, h| Ask::GlScriptLimit(x, y, h));
         on!(on_gl_script_remove, Ask::GlScriptRemove);
         on!(on_gl_script_typed, Ask::GlScriptTyped);
+        on!(on_gl_var_remove, Ask::GlVarRemove);
+        on!(on_gl_var_typed, Ask::GlVarTyped);
         on!(on_gl_plugin_choose_file, Ask::GlPluginFile);
         on!(on_gl_plugin_typed, Ask::GlPluginTyped);
         on!(on_gl_row_on, |i| Ask::GlRowOn(i));
@@ -1090,6 +1118,17 @@ impl Front {
             updates: crate::updates::Checker::start(),
             windows: HashMap::new(),
             app_sessions: Default::default(),
+            facts_reader: None,
+            known: None,
+            known_asked: None,
+            recipes_for: None,
+            tool_installed: false,
+            starting: HashMap::new(),
+            holds: Vec::new(),
+            early: Vec::new(),
+            jobs: Vec::new(),
+            steam_busy: None,
+            run_pick: None,
             removing: None,
             mouse_icons: None,
             mouse_layers: None,
@@ -2082,6 +2121,8 @@ impl Front {
                         }
                     }
                     news |= self.worker_told();
+                    news |= self.launch_tick();
+                    news |= self.games.typed_settled();
                     if self.package_form.is_some() {
                         self.package_form_tick();
                     }
@@ -2227,6 +2268,11 @@ impl Front {
                         if let Some((_, typed)) = &mut self.renaming {
                             *typed = t;
                         }
+                        changed = false;
+                    }
+                    // (a plugin's value on a Library page: kept as typed, set as its box is left)
+                    Ctl::LibText => {
+                        self.games.typing(index as usize, t);
                         changed = false;
                     }
                     Ctl::PluginField => {
@@ -2414,6 +2460,11 @@ impl Front {
                 }
                 // (Add turns on once a command is typed)
                 Ask::GlScriptTyped => {}
+                Ask::GlVarRemove => {
+                    self.close_menu();
+                    self.games.remove_var();
+                }
+                Ask::GlVarTyped => {}
                 Ask::GlRowOn(i) => {
                     let k = Self::launch_key(i);
                     let on = !self.game_launch_value(k)["on"].as_bool().unwrap_or(true);
@@ -2809,6 +2860,27 @@ impl Front {
             Ctl::LibScriptAdd => {
                 self.close_menu();
                 self.games.add_script(&self.ui);
+                self.refresh();
+                return;
+            }
+            Ctl::LibSpot => {
+                self.close_menu();
+                if let Some((plugin, action)) = self.games.spot_picked(index, &self.ui) {
+                    if self.hosted.launcher() == Some(plugin.as_str()) {
+                        self.launch_action(&action);
+                    }
+                }
+                self.refresh();
+                return;
+            }
+            Ctl::LibCheck => {
+                self.close_menu();
+                self.games.check_picked(index);
+                self.refresh();
+                return;
+            }
+            Ctl::LibText => {
+                self.games.text_done(_anchor.0 as u8);
                 self.refresh();
                 return;
             }
@@ -6129,13 +6201,34 @@ impl Front {
 
     /// The Library's page as it is now, with each plugin's section for the page open.
     fn show_library(&mut self) {
+        // (offscreen, what's known read at once: a snapshot has no later turn to take it on)
+        if crate::desk::offscreen() && self.known.is_none() && self.hosted.launcher().is_some() {
+            self.ask_known();
+        }
         let mut devices = self.lib_devices();
         devices.extend(self.hosted_devices());
         let sections = match self.games.open.clone() {
             Some(id) => {
                 let kind = if id == crate::games::EVERY { "every" } else if self.games.library.is_game(&id) { "game" } else { "app" };
                 let name = self.games.name(&id, &self.front_apps);
-                self.hosted.sections(kind, &name).into_iter().map(|(plugin, desc)| crate::games_page::Section { name: self.hosted.get(&plugin).map(|p| p.package.name().to_string()).unwrap_or_default(), plugin, desc }).collect()
+                // each plugin given the page's values; the one that says how games start, what's
+                // known too (its section waits for that, the moment it takes to read)
+                let launcher = self.hosted.launcher().map(String::from);
+                let facts = self.launch_facts(&id);
+                let lib = &self.games.library;
+                let more = |p: &crate::packages::Package| {
+                    let mut m = serde_json::json!({ "values": lib.wanted_values(&id, p.id()), "own": lib.plugin_values(&id, p.id()), "every": lib.plugin_values(crate::games::EVERY, p.id()) });
+                    if launcher.as_deref() == Some(p.id()) {
+                        m["facts"] = facts.clone();
+                    }
+                    m
+                };
+                let described = self.hosted.sections(kind, &name, &more);
+                described
+                    .into_iter()
+                    .filter(|(plugin, _)| launcher.as_deref() != Some(plugin.as_str()) || !facts.is_null())
+                    .map(|(plugin, desc)| crate::games_page::Section { name: self.hosted.get(&plugin).map(|p| p.package.name().to_string()).unwrap_or_default(), plugin, desc })
+                    .collect()
             }
             None => Vec::new(),
         };
@@ -6588,7 +6681,391 @@ impl Front {
             let label: String = if s.name.trim().is_empty() { "SCRIPT".to_string() } else { s.name.to_uppercase() }.chars().take(20).collect();
             changes.push((CUSTOM_SCRIPTS.to_string(), serde_json::json!({ "command": s.id }), label, s.name.clone(), Some(s)));
         }
-        crate::putback::Plan { game, changes }
+        crate::putback::Plan { game, changes, seq: PLANS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) }
+    }
+
+    // ------------------------------------------------------------ games started through Ectomatter
+
+    /// What the plugin that says how games start (the Game Configurator) is
+    /// told of a page: what's known of this computer, and for a Steam game its
+    /// own (its Steam number, whether it runs without Proton, whether it
+    /// starts through Ectomatter, its prefix and its backups), for a game
+    /// added by hand that it's one; for Every game's page, how many games
+    /// start through Ectomatter. Null until what's known is read.
+    fn launch_facts(&self, id: &str) -> serde_json::Value {
+        let Some(k) = &self.known else { return serde_json::Value::Null };
+        let mut f = k.facts();
+        let games: Vec<&crate::steam::App> = self.games.library.steam.as_ref().map(|s| s.apps.iter().filter(|a| a.kind == crate::steam::Kind::Game).collect()).unwrap_or_default();
+        if id == crate::games::EVERY {
+            f["through"] = serde_json::json!([games.iter().filter(|a| k.through(a.id)).count(), games.len()]);
+        } else if let Some(app) = crate::games::steam_number(id) {
+            let a = games.iter().find(|a| a.id == app);
+            let lib = a.map_or_else(|| k.root.clone(), |a| a.library.clone());
+            let (bytes, made, backups) = k.prefixes.get(&app).copied().unwrap_or((0, false, 0));
+            f["game"] = serde_json::json!({
+                "id": id, "name": self.games.name(id, &self.front_apps), "app": app, "native": a.is_some_and(|a| k.native(app, a.linux)), "through": k.through(app),
+                "prefix": { "path": crate::launcher::prefix_of(&lib, app), "bytes": bytes, "made": made }, "backups": backups,
+            });
+            // (until it starts through Ectomatter, the build Steam starts it with; a Linux
+            // version, the runtime Steam starts it in)
+            if !k.through(app) {
+                f["game"]["steam"] = serde_json::json!(k.steam_build(app));
+            }
+            if a.is_some_and(|a| k.native(app, a.linux)) {
+                f["game"]["runtime"] = serde_json::json!(k.runtime_of(app, a.and_then(|a| a.runtime.as_deref())));
+            }
+        } else {
+            f["game"] = serde_json::json!({ "id": id, "name": self.games.name(id, &self.front_apps), "hand": true });
+        }
+        f
+    }
+
+    /// A game's recipe for the launcher, as the plugin that says how games
+    /// start answers for it (Every game's, for games without one of their own).
+    fn recipe_of(&self, id: &str) -> Option<serde_json::Value> {
+        let facts = self.launch_facts(id);
+        if facts.is_null() {
+            return None;
+        }
+        let every = id == crate::games::EVERY;
+        let name = if every { String::new() } else { self.games.name(id, &self.front_apps) };
+        let lib = &self.games.library;
+        let values = |plugin: &str| lib.wanted_values(id, plugin);
+        let every_values = |plugin: &str| lib.plugin_values(crate::games::EVERY, plugin);
+        let game = serde_json::json!({ "id": id, "name": name, "app": crate::games::steam_number(id).unwrap_or(0) });
+        match self.hosted.launch(&game, &values, &every_values, &facts)? {
+            Ok(r) => Some(r),
+            Err(e) => {
+                eprintln!("ectomatter: how {} starts: {e}", if every { "every game" } else { name.as_str() });
+                None
+            }
+        }
+    }
+
+    /// Each Steam game's recipe written for the launcher, and Every game's
+    /// (launch/default.json), when the plugin's choices or what's known have
+    /// changed since they were last written. None offscreen: a snapshot
+    /// writes nothing.
+    fn write_recipes(&mut self) {
+        if crate::desk::offscreen() {
+            return;
+        }
+        let (Some(plugin), Some(k)) = (self.hosted.launcher().map(String::from), self.known.clone()) else { return };
+        let stamp = (self.games.library.plugin_all(&plugin), k.clone());
+        if self.recipes_for.as_ref() == Some(&stamp) {
+            return;
+        }
+        let ids: Vec<String> = self.games.library.steam.as_ref().map(|s| s.apps.iter().filter(|a| a.kind == crate::steam::Kind::Game).map(|a| crate::games::steam_id(a.id)).collect()).unwrap_or_default();
+        for id in std::iter::once(crate::games::EVERY.to_string()).chain(ids) {
+            let Some(r) = self.recipe_of(&id) else { continue };
+            let file = crate::games::steam_number(&id).map_or_else(|| "default".to_string(), |n| n.to_string());
+            if let Err(e) = crate::launcher::write_recipe(&file, &r) {
+                eprintln!("ectomatter: the recipe {file}.json wasn’t written: {e}");
+            }
+        }
+        self.recipes_for = Some(stamp);
+    }
+
+    /// What's known read again (on its thread; offscreen, now), with the
+    /// prefix of the game whose page is open.
+    fn ask_known(&mut self) {
+        let Some(root) = self.games.library.steam.as_ref().map(|s| s.root.clone()) else { return };
+        self.known_asked = Some(Instant::now());
+        let prefixes: Vec<(u32, std::path::PathBuf)> = self
+            .games
+            .open
+            .as_deref()
+            .and_then(crate::games::steam_number)
+            .and_then(|app| self.games.library.steam.as_ref()?.apps.iter().find(|a| a.id == app).map(|a| (app, a.library.clone())))
+            .into_iter()
+            .collect();
+        if crate::desk::offscreen() {
+            self.known = Some(crate::launcher::know(&root, &prefixes));
+            return;
+        }
+        self.facts_reader.get_or_insert_with(crate::launcher::Reader::start).ask(root, prefixes);
+    }
+
+    /// A game starting through Ectomatter's launcher, which waits: its
+    /// changes made now, before the Library's watch would see the game, by
+    /// Steam's reaper for it; the launcher answered once they're made.
+    pub fn game_starting(&mut self, s: crate::launcher::Start) {
+        // (a shortcut to a program outside Steam has no Steam number to know it by:
+        // the Library's watch makes its changes, by its program)
+        if s.id == crate::games::steam_id(0) {
+            let _ = s.done.send(());
+            return;
+        }
+        match self.starting.get(&s.id).copied() {
+            // (seen by the watch first: its changes are made, or being made)
+            Some((_, true)) => {
+                let id = s.id.clone();
+                self.let_start(&id, s.done);
+                return;
+            }
+            Some((seq, false)) => {
+                self.holds.push((s.id, seq, s.done, Instant::now()));
+                return;
+            }
+            None => {}
+        }
+        let reaper = crate::launcher::reaper_above(s.pid).unwrap_or(s.pid);
+        // (by the Library's name for it; a game it doesn't hold yet, by its recipe's)
+        let name = match self.games.name(&s.id, &self.front_apps) {
+            n if n == s.id && !s.name.is_empty() => s.name.clone(),
+            n => n,
+        };
+        eprintln!("ectomatter: {name} starting through Ectomatter");
+        let r = crate::games::Running { id: s.id.clone(), pid: reaper, since: crate::games::now() };
+        let plan = self.game_plan(&r, &name);
+        let seq = plan.seq;
+        self.worker.start_game(plan);
+        self.starting.insert(s.id.clone(), (seq, false));
+        self.early.push((s.id.clone(), reaper, Instant::now()));
+        self.holds.push((s.id, seq, s.done, Instant::now()));
+    }
+
+    /// A launcher waiting on a game answered: the game's recipe written
+    /// afresh first, with the main monitor as the game's changes left it (in
+    /// HDR, say, for gamescope to show the game in HDR).
+    fn let_start(&mut self, id: &str, done: mpsc::Sender<()>) {
+        if !crate::desk::offscreen() {
+            if let Some(k) = &mut self.known {
+                k.main = crate::launcher::main_monitor();
+            }
+            if let (Some(r), Some(n)) = (self.recipe_of(id), crate::games::steam_number(id)) {
+                if let Err(e) = crate::launcher::write_recipe(&n.to_string(), &r) {
+                    eprintln!("ectomatter: the recipe {n}.json wasn’t written: {e}");
+                }
+            }
+        }
+        let _ = done.send(());
+    }
+
+    /// A game's start changes made, as the put-back thread says: the
+    /// launchers waiting on it answered.
+    fn started_through(&mut self, id: &str, seq: u64) {
+        // (an older plan's word for the same game answers nothing of a newer start)
+        match self.starting.get_mut(id) {
+            Some(s) if s.0 == seq => s.1 = true,
+            _ => return,
+        }
+        let (waiting, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut self.holds).into_iter().partition(|(g, n, _, _)| g == id && *n == seq);
+        self.holds = rest;
+        for (_, _, done, _) in waiting {
+            self.let_start(id, done);
+        }
+    }
+
+    /// Each turn: what's known read again when it's due (each minute; each
+    /// few seconds while a page of the Library shows), the launcher installed
+    /// in Steam once, the recipes kept up to date, the waits past their time
+    /// let go, a start made early whose game never showed put back, a program
+    /// chosen to run in a prefix started, and the jobs finished said. True if
+    /// the Library has news.
+    fn launch_tick(&mut self) -> bool {
+        // (the launchers waiting, and starts made early, looked after first: the tool stays
+        // in Steam's settings while the plugin that says how games start is off)
+        self.holds.retain(|(_, _, _, t)| t.elapsed() < Duration::from_secs(31));
+        let gone: Vec<String> = self.early.iter().filter(|(_, pid, t)| t.elapsed() > Duration::from_secs(10) && !std::path::Path::new(&format!("/proc/{pid}")).exists()).map(|(id, _, _)| id.clone()).collect();
+        for id in gone {
+            self.early.retain(|(g, _, _)| *g != id);
+            if !self.games.running.iter().any(|r| r.id == id) {
+                eprintln!("ectomatter: {} ended before it was seen running", self.games.name(&id, &self.front_apps));
+                self.worker.quit_game(&id);
+                self.starting.remove(&id);
+            }
+        }
+        if self.hosted.launcher().is_none() {
+            return false;
+        }
+        let mut news = false;
+        let showing = self.ui.get_place() == "library" && self.games.open.is_some();
+        if self.known_asked.is_none_or(|t| t.elapsed() > Duration::from_secs(if showing { 5 } else { 60 })) {
+            self.ask_known();
+        }
+        if let Some(r) = &self.facts_reader {
+            while let Ok(k) = r.known.try_recv() {
+                if self.known.as_ref() != Some(&k) {
+                    self.known = Some(k);
+                    news = true;
+                }
+            }
+        }
+        if !self.tool_installed && !crate::desk::offscreen() {
+            if let Some(root) = self.games.library.steam.as_ref().map(|s| s.root.clone()) {
+                self.tool_installed = true;
+                let _ = std::thread::Builder::new().name("launcher-install".into()).spawn(move || match crate::launcher::install(&root) {
+                    Ok(true) => eprintln!("ectomatter: the launcher is installed in Steam (Steam lists it under Compatibility once it starts again)"),
+                    Ok(false) => {}
+                    Err(e) => eprintln!("ectomatter: the launcher wasn’t installed in Steam: {e}"),
+                });
+            }
+        }
+        self.write_recipes();
+        if let Some((id, rx)) = &self.run_pick {
+            if let Ok(chosen) = rx.try_recv() {
+                let id = id.clone();
+                self.run_pick = None;
+                if let Some(p) = chosen {
+                    self.in_prefix(&id, vec![p.to_string_lossy().into_owned()]);
+                }
+            }
+        }
+        let mut said = Vec::new();
+        self.jobs.retain(|rx| match rx.try_recv() {
+            Ok(s) => {
+                said.push(s);
+                false
+            }
+            Err(mpsc::TryRecvError::Empty) => true,
+            Err(mpsc::TryRecvError::Disconnected) => false,
+        });
+        for (words, bad) in said {
+            self.games.say(words, bad);
+            self.ask_known();
+            news = true;
+        }
+        news
+    }
+
+    /// The Proton build a game starts with (its own, else Every game's, else
+    /// Steam's default), as installed.
+    fn build_for(&self, id: &str) -> Option<crate::launcher::Build> {
+        let k = self.known.as_ref()?;
+        let plugin = self.hosted.launcher()?;
+        let want = self.games.library.wanted_values(id, plugin)["version"].as_str().map(String::from).unwrap_or_else(|| k.default.clone());
+        k.builds.iter().find(|b| b.id == want).or_else(|| k.builds.iter().find(|b| b.id == k.default)).or_else(|| k.builds.first()).cloned()
+    }
+
+    /// A Steam game's number and library, for its prefix.
+    fn prefix_place(&self, id: &str) -> Option<(u32, std::path::PathBuf)> {
+        let app = crate::games::steam_number(id)?;
+        let lib = self.games.library.steam.as_ref()?.apps.iter().find(|a| a.id == app)?.library.clone();
+        Some((app, lib))
+    }
+
+    /// A program run in a game's prefix with the game's Proton build (Wine's
+    /// configuration, Winetricks, or one the person chose).
+    fn in_prefix(&mut self, id: &str, what: Vec<String>) {
+        let name = self.games.name(id, &self.front_apps);
+        let (Some((app, lib)), Some(b), Some(root)) = (self.prefix_place(id), self.build_for(id), self.known.as_ref().map(|k| k.root.clone())) else {
+            self.games.say(format!("Ectomatter can’t find {name}’s prefix or a Proton build for it."), true);
+            return;
+        };
+        if what.first().is_some_and(|w| w == "winetricks") && !crate::launcher::on_path("winetricks") {
+            self.games.say("Winetricks isn’t installed. Install it from your system’s software center, then try again.", true);
+            return;
+        }
+        match crate::launcher::in_prefix(&root, &lib, app, &b.path, &what).spawn() {
+            Ok(_) => self.games.say(format!("Opening it in {name}’s prefix, with {}.", b.name), false),
+            Err(e) => self.games.say(format!("It didn’t open: {e}"), true),
+        }
+    }
+
+    /// One of the Game Configurator's actions on the open page.
+    fn launch_action(&mut self, action: &str) {
+        let Some(id) = self.games.open.clone() else { return };
+        let name = self.games.name(&id, &self.front_apps);
+        let running = self.games.running.iter().any(|r| r.id == id);
+        match action {
+            "through" => {
+                if let Some(app) = crate::games::steam_number(&id) {
+                    self.start_through(vec![app]);
+                }
+            }
+            "through-all" => {
+                let Some(k) = &self.known else { return };
+                let apps: Vec<u32> = self.games.library.steam.as_ref().map(|s| s.apps.iter().filter(|a| a.kind == crate::steam::Kind::Game && !k.through(a.id)).map(|a| a.id).collect()).unwrap_or_default();
+                self.start_through(apps);
+            }
+            "open-prefix" => {
+                if let Some((app, lib)) = self.prefix_place(&id) {
+                    let _ = std::process::Command::new("xdg-open").arg(crate::launcher::prefix_of(&lib, app)).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
+                }
+            }
+            "wine-configuration" => self.in_prefix(&id, vec!["winecfg".into()]),
+            "winetricks" => self.in_prefix(&id, vec!["winetricks".into()]),
+            "run-in-prefix" => {
+                if self.run_pick.is_none() {
+                    self.run_pick = Some((id.clone(), crate::picker::open_file(&format!("Choose a program to run in {name}’s prefix"), "Windows programs", &["*.exe", "*.msi", "*.bat"])));
+                }
+            }
+            "back-up-prefix" | "reset-prefix" => {
+                if running {
+                    self.games.say(format!("Quit {name} first: its prefix is in use."), true);
+                    return;
+                }
+                let Some((app, lib)) = self.prefix_place(&id) else { return };
+                let reset = action == "reset-prefix";
+                let (tx, rx) = mpsc::channel();
+                self.games.say(if reset { format!("Backing up {name}’s prefix, then resetting it…") } else { format!("Backing up {name}’s prefix…") }, false);
+                let _ = std::thread::Builder::new().name("prefix".into()).spawn(move || {
+                    let r = if reset { crate::launcher::reset(&lib, app) } else { crate::launcher::back_up(&lib, app) };
+                    let _ = tx.send(match r {
+                        Ok(p) if reset => (format!("Reset {name}’s prefix. Its backup is in {}.", crate::launcher::shown(&p)), false),
+                        Ok(p) => (format!("Backed up {name}’s prefix to {}.", crate::launcher::shown(&p)), false),
+                        Err(e) => (e, true),
+                    });
+                });
+                self.jobs.push(rx);
+            }
+            _ => {}
+        }
+    }
+
+    /// Games set to start through Ectomatter in Steam (each of `apps`, by
+    /// its Steam number): each one's Proton build and game-helper line
+    /// carried over into the Library first, then Steam closed, its settings
+    /// changed (the line taken out), and Steam opened again if it was open.
+    /// Refused while a Steam game runs, which Steam closing would end.
+    fn start_through(&mut self, apps: Vec<u32>) {
+        if apps.is_empty() || self.steam_busy.as_ref().is_some_and(|b| b.load(std::sync::atomic::Ordering::Relaxed)) {
+            return;
+        }
+        if let Some(r) = self.games.running.iter().find(|r| crate::games::steam_number(&r.id).is_some()) {
+            let n = self.games.name(&r.id, &self.front_apps);
+            self.games.say(format!("Quit {n} first: Steam has to close for this change."), true);
+            return;
+        }
+        let (Some(k), Some(plugin)) = (self.known.clone(), self.hosted.launcher().map(String::from)) else { return };
+        let lines = crate::launcher::launch_options(&k.root);
+        let mouse = self.mouse.profiles.as_ref().and_then(crate::launcher::game_profile);
+        let linux: Vec<u32> = self.games.library.steam.as_ref().map(|s| s.apps.iter().filter(|a| k.native(a.id, a.linux)).map(|a| a.id).collect()).unwrap_or_default();
+        let which: Vec<(u32, bool, bool)> = apps.iter().map(|a| (*a, linux.contains(a), true)).collect();
+        let switches = crate::launcher::carry_over(&mut self.games.library, &k, &which, &lines, mouse.as_deref(), &plugin);
+        let n = apps.len();
+        let busy = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        self.steam_busy = Some(busy.clone());
+        let (tx, rx) = mpsc::channel();
+        let backups = crate::data_dir().join("steam-backups");
+        let root = k.root.clone();
+        let one = (n == 1).then(|| self.games.name(&crate::games::steam_id(apps[0]), &self.front_apps));
+        self.games.say("Closing Steam to change its settings…", false);
+        let _ = std::thread::Builder::new().name("steam-settings".into()).spawn(move || {
+            // (looked at again as Steam is asked to close, which would end a game running)
+            if !crate::steam::running().is_empty() {
+                let _ = tx.send(("Quit the game first: Steam has to close for this change.".to_string(), true));
+                busy.store(false, std::sync::atomic::Ordering::Relaxed);
+                return;
+            }
+            let was_open = crate::launcher::steam_running();
+            // (the launcher in place first, for Steam to list it as it opens again)
+            let r = crate::launcher::install(&root).and_then(|_| crate::launcher::close_steam()).and_then(|_| crate::launcher::change_steam(&root, &switches, &backups));
+            let reopened = !was_open || crate::launcher::open_steam();
+            let _ = tx.send(match r {
+                Ok(_) => {
+                    let done = match one {
+                        Some(g) => format!("{g} starts through Ectomatter now."),
+                        None => format!("{n} games start through Ectomatter now."),
+                    };
+                    if reopened { (done, false) } else { (format!("{done} Steam didn’t open again: open it from your apps."), true) }
+                }
+                Err(e) => (format!("Steam’s settings weren’t changed: {e}"), true),
+            });
+            busy.store(false, std::sync::atomic::Ordering::Relaxed);
+        });
+        self.jobs.push(rx);
     }
 
     /// What the put-back thread said: a command run (kept with it), what was
@@ -6612,6 +7089,7 @@ impl Front {
                     eprintln!("ectomatter: couldn’t change {words}: {why}");
                     self.games.say(format!("Ectomatter couldn’t change {words}: {why}"), true);
                 }
+                crate::putback::Told::Started { id, seq } => self.started_through(&id, seq),
             }
         }
         news
@@ -6630,10 +7108,18 @@ impl Front {
             eprintln!("ectomatter: {name} {}", if started { "started" } else { "quit" });
             // what the plugins change, for games and apps alike (SteamVR's monitor turned off)
             if started {
-                let plan = self.game_plan(r, &name);
-                self.worker.start_game(plan);
+                if self.starting.contains_key(&r.id) {
+                    // (started through Ectomatter: its changes were made as its launcher asked)
+                    self.early.retain(|(g, _, _)| *g != r.id);
+                } else {
+                    let plan = self.game_plan(r, &name);
+                    self.starting.insert(r.id.clone(), (plan.seq, false));
+                    self.worker.start_game(plan);
+                }
             } else {
                 self.worker.quit_game(&r.id);
+                self.starting.remove(&r.id);
+                self.early.retain(|(g, _, _)| *g != r.id);
             }
             // (an app Steam starts, such as SteamVR or Wallpaper Engine, is no game starting)
             if !self.games.library.is_game(&r.id) {

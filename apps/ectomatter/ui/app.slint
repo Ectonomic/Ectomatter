@@ -997,11 +997,13 @@ component CellView inherits Rectangle {
         width: parent.width;
         text: root.c.text;
         font-family: "Geist";
-        // (39: the device a Sensors tab shows, on its first line)
-        font-size: root.c.style == 33 ? 10.5px : root.c.style == 34 ? 12px : root.c.style == 35 ? 12.5px : root.c.style == 38 || root.c.style == 39 ? 13.5px : 11px;
-        font-weight: root.c.style == 33 || root.c.style == 38 ? 600 : root.c.style == 34 || root.c.style == 39 ? 500 : 400;
-        letter-spacing: root.c.style == 33 ? 0.95px : 0;
-        color: root.c.style == 38 || root.c.style == 39 ? Ink.bright : root.c.style == 35 || root.c.style == 34 ? Ink.dim : Ink.quiet;
+        // (39: the device a Sensors tab shows, on its first line; 42: a heading inside a
+        // plugin's section, in capitals; 43: what a status says, beside its dot; 44: a
+        // row's value that's only to read, quieter)
+        font-size: root.c.style == 33 ? 10.5px : root.c.style == 34 || root.c.style == 42 ? 12px : root.c.style == 35 ? 12.5px : root.c.style == 38 || root.c.style == 39 ? 13.5px : root.c.style == 43 || root.c.style == 44 ? 14px : 11px;
+        font-weight: root.c.style == 33 || root.c.style == 38 ? 600 : root.c.style == 34 || root.c.style == 39 || root.c.style == 42 ? 500 : 400;
+        letter-spacing: root.c.style == 33 ? 0.95px : root.c.style == 42 ? 1.2px : 0;
+        color: root.c.style == 38 || root.c.style == 39 || root.c.style == 43 ? Ink.bright : root.c.style == 35 || root.c.style == 34 ? Ink.dim : root.c.style == 44 ? Ink.soft : Ink.quiet;
         horizontal-alignment: root.c.style == 37 ? right : left;
         vertical-alignment: center;
     }
@@ -1163,10 +1165,11 @@ component CellView inherits Rectangle {
             colorize: Ink.soft;
         }
     }
-    // the weather's box
+    // the weather's box (style 1: a folder's path in a plugin's section, its corners
+    // smaller; 2: the settings nested under one, a shade off the box)
     if root.c.kind == 13: Rectangle {
-        border-radius: 10px;
-        background: Ink.well;
+        border-radius: root.c.style == 1 ? 8px : 10px;
+        background: root.c.style == 2 ? #ffffff06 : Ink.well;
     }
     // a state's dot: 0 unknown, 1 good, 2 bad, 3 read from the weather
     if root.c.kind == 14: Rectangle {
@@ -1397,6 +1400,18 @@ component CellView inherits Rectangle {
             color: Ink.quiet;
             vertical-alignment: center;
         }
+        // (style 8: a value in a plugin's section, in the face whose letters are all one
+        // width, what it holds when empty in gray; Enter or leaving it gives it, Escape
+        // takes it back)
+        if root.c.style == 8 && input.text == "": Text {
+            x: 12px;
+            height: parent.height;
+            text: root.c.fill;
+            font-family: "JetBrains Mono";
+            font-size: 12px;
+            color: #8a8a92;
+            vertical-alignment: center;
+        }
         if root.c.style == 3 && input.text == "": Text {
             x: 10px;
             height: parent.height;
@@ -1503,14 +1518,16 @@ component CellView inherits Rectangle {
         input := TextInput {
             visible: root.c.style != 6;
             enabled: root.c.style != 6;
-            x: root.c.style == 1 ? 11px : root.c.style == 7 ? 8px : 10px;
+            property <bool> plugin-value: root.c.style == 8;
+            x: self.plugin-value ? 12px : root.c.style == 1 ? 11px : root.c.style == 7 ? 8px : 10px;
             y: root.c.style == 5 ? 8px : 0;
             width: parent.width - 2 * self.x - (root.c.style >= 4 && root.c.style <= 6 ? 30px : 0);
             height: root.c.style == 5 ? parent.height - 16px : parent.height;
             text: root.c.text;
-            font-family: "Geist";
-            font-size: root.c.style == 7 ? 12.5px : 13.5px;
-            color: root.c.style == 1 || root.c.style == 7 ? Ink.bright : Ink.ink;
+            font-family: self.plugin-value ? "JetBrains Mono" : "Geist";
+            font-size: self.plugin-value ? 12px : root.c.style == 7 ? 12.5px : 13.5px;
+            // (a value its page follows from elsewhere, in gray)
+            color: self.plugin-value ? (root.c.on && !self.has-focus ? Ink.soft : Ink.dim) : root.c.style == 1 || root.c.style == 7 ? Ink.bright : Ink.ink;
             vertical-alignment: root.c.style == 5 ? top : center;
             single-line: root.c.style != 5;
             edited => { root.typed(root.c.id, root.c.index, self.text); }
@@ -1521,6 +1538,9 @@ component CellView inherits Rectangle {
                 }
                 if (root.c.style == 7 && !self.has-focus) {
                     root.pick(root.c.id, 1, 0, 0, 0);
+                }
+                if (self.plugin-value && !self.has-focus) {
+                    root.pick(root.c.id, root.c.index, 1px, 0, 0);
                 }
             }
             // (style 3, a name to give, and 7: it takes the keys as it shows, all of
@@ -1535,8 +1555,17 @@ component CellView inherits Rectangle {
                 if (root.c.style == 3 || root.c.style == 7) {
                     root.pick(root.c.id, 1, 0, 0, 0);
                 }
+                if (self.plugin-value) {
+                    self.clear-focus();
+                }
             }
             key-pressed(e) => {
+                if (self.plugin-value && e.text == Key.Escape) {
+                    root.pick(root.c.id, root.c.index, 2px, 0, 0);
+                    self.text = root.c.text;
+                    self.clear-focus();
+                    return accept;
+                }
                 if ((root.c.style == 3 || root.c.style == 7) && e.text == Key.Escape) {
                     root.pick(root.c.id, 2, 0, 0, 0);
                     return accept;
@@ -1638,7 +1667,9 @@ component CellView inherits Rectangle {
     // faint; 29: the page round a menu, which shuts it, with no shade or hand; 33: a small
     // button, as a card's Make main)
     if root.c.kind >= 5 && root.c.kind <= 8: Rectangle {
-        // (style 36: a card that opens, in the well's shade on a box: a script's)
+        // (style 36: a card that opens, in the well's shade on a box: a script's; 37: a
+        // button that can't be used now, faded)
+        opacity: root.c.style == 37 ? 0.4 : 1;
         border-radius: root.c.style == 36 ? 10px : root.c.style == 25 ? 4px : root.c.kind == 5 ? 7px : root.c.kind == 8 || root.c.style == 33 ? 6px : 8px;
         background: root.c.style == 36 ? (b.has-hover ? Ink.hover-well : Ink.well)
             : root.c.on ? (b.has-hover ? Ink.pick-hover : Ink.pick)
@@ -1719,7 +1750,7 @@ component CellView inherits Rectangle {
             stroke-width: 1.35px;
         }
         b := TouchArea {
-            enabled: root.c.style != 26;
+            enabled: root.c.style != 26 && root.c.style != 37;
             mouse-cursor: root.c.style == 29 ? MouseCursor.default : MouseCursor.pointer;
             clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
             // style 23: it tells the page the pointer is over it, as a zone does
@@ -1888,10 +1919,12 @@ component CellView inherits Rectangle {
         border-bottom-right-radius: root.c.style >= 2 ? 5px : 0;
         background: @linear-gradient(90deg, root.c.color 0%, self.next 100%);
     }
-    // a switch's choice on its well, its icon before its words if it has one
+    // a switch's choice on its well, its icon before its words if it has one (style 1:
+    // one that can't be chosen, its words faint)
     if root.c.kind == 44: Rectangle {
+        property <bool> off: root.c.style == 1;
         border-radius: 6px;
-        background: root.c.on ? (ch-ta.has-hover ? Ink.pick-hover : Ink.pick) : ch-ta.has-hover ? Ink.hover-well : transparent;
+        background: root.c.on ? (ch-ta.has-hover ? Ink.pick-hover : Ink.pick) : ch-ta.has-hover && !self.off ? Ink.hover-well : transparent;
         HorizontalLayout {
             alignment: center;
             spacing: 6px;
@@ -1910,11 +1943,12 @@ component CellView inherits Rectangle {
                 text: root.c.text;
                 font-family: "Geist";
                 font-size: 12.5px;
-                color: root.c.on || ch-ta.has-hover ? Ink.bright : Ink.soft;
+                color: root.c.style == 1 ? #5d5d64 : root.c.on || ch-ta.has-hover ? Ink.bright : Ink.soft;
                 vertical-alignment: center;
             }
         }
         ch-ta := TouchArea {
+            enabled: root.c.style != 1;
             mouse-cursor: pointer;
             clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
         }
@@ -1958,9 +1992,12 @@ component CellView inherits Rectangle {
     }
     // a dropdown on a well: what is chosen, and a chevron
     // a dropdown on a well (style 1: its value followed from elsewhere, in gray)
+    // (style 2: its value needs choosing again, an amber line round it)
     if root.c.kind == 46: Rectangle {
         border-radius: 8px;
         background: dr-ta.has-hover || root.c.on ? Ink.hover-box : Ink.well;
+        border-width: root.c.style == 2 ? 1px : 0;
+        border-color: #f0b35a80;
         Text {
             x: 12px;
             width: parent.width - 40px;
@@ -2000,10 +2037,13 @@ component CellView inherits Rectangle {
             clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
         }
     }
-    // a quiet link: Reset (with its icon), Select all, Scatter colors
-    if root.c.kind == 47: Rectangle {
+    // a quiet link: Reset (with its icon), Select all, Scatter colors (style 1: a text
+    // button in a plugin's section, its icon on 14 units; 2: the same, not to be used now, faded)
+    if root.c.kind == 47: quiet := Rectangle {
+        property <bool> tb: root.c.style == 1 || root.c.style == 2;
         border-radius: 6px;
-        background: q-ta.has-hover ? Ink.hover-box : transparent;
+        opacity: root.c.style == 2 ? 0.4 : 1;
+        background: q-ta.has-hover ? (self.tb ? #ffffff0f : Ink.hover-box) : transparent;
         HorizontalLayout {
             padding-left: 9px;
             padding-right: 9px;
@@ -2012,23 +2052,25 @@ component CellView inherits Rectangle {
                 y: (parent.height - 13px) / 2;
                 width: 13px;
                 height: 13px;
-                viewbox-width: 24;
-                viewbox-height: 24;
+                viewbox-width: quiet.tb ? 14 : 24;
+                viewbox-height: quiet.tb ? 14 : 24;
                 commands: root.c.lines;
                 fill: transparent;
-                stroke: q-ta.has-hover ? Ink.bright : Ink.soft;
-                stroke-width: 1.9px;
+                stroke: q-ta.has-hover ? (quiet.tb ? Ink.ink : Ink.bright) : quiet.tb ? Ink.dim : Ink.soft;
+                stroke-width: quiet.tb ? 1.2px : 1.9px;
+                stroke-line-join: round;
             }
             Text {
                 text: root.c.text;
                 font-family: "Geist";
-                font-size: 12.5px;
+                font-size: quiet.tb ? 13px : 12.5px;
                 font-weight: 500;
-                color: q-ta.has-hover ? Ink.bright : Ink.soft;
+                color: q-ta.has-hover ? (quiet.tb ? Ink.ink : Ink.bright) : quiet.tb ? Ink.dim : Ink.soft;
                 vertical-alignment: center;
             }
         }
         q-ta := TouchArea {
+            enabled: root.c.style != 2;
             mouse-cursor: pointer;
             clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
         }
@@ -2058,18 +2100,53 @@ component CellView inherits Rectangle {
             overflow: elide;
         }
     }
-    // a checkbox on a box, and its words
+    // a fold's heading in a plugin's section: its chevron (turned down while open) and its
+    // words, which open and shut it
+    if root.c.kind == 53: Rectangle {
+        Path {
+            x: 0;
+            y: (parent.height - 12px) / 2;
+            width: 12px;
+            height: 12px;
+            viewbox-width: 12;
+            viewbox-height: 12;
+            commands: root.c.on ? "M2.5 4.5l3.5 3.5 3.5-3.5" : "M4.5 2.5l3.5 3.5-3.5 3.5";
+            fill: transparent;
+            stroke: fold-ta.has-hover ? Ink.ink : Ink.soft;
+            stroke-width: 1.6px;
+            stroke-line-cap: round;
+            stroke-line-join: round;
+        }
+        Text {
+            x: 20px;
+            width: parent.width - 20px;
+            text: root.c.text;
+            font-family: "Geist";
+            font-size: 13.5px;
+            color: fold-ta.has-hover ? Ink.ink : Ink.soft;
+            vertical-alignment: center;
+        }
+        fold-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.pick(root.c.id, root.c.index, 0, 0, 0); }
+        }
+    }
+    // a checkbox on a box, and its words (style 1: one that can't be changed now, faint and
+    // unticked; 2: one held on by another setting, ticked in gray)
     if root.c.kind == 48: Rectangle {
+        property <bool> off: root.c.style == 1;
+        property <bool> held: root.c.style == 2;
+        property <bool> hot: cb-ta.has-hover && root.c.style == 0;
         Rectangle {
             x: 0;
-            y: 1px;
+            y: (parent.height - 18px) / 2;
             width: 18px;
             height: 18px;
             border-radius: 5px;
-            background: root.c.on ? (cb-ta.has-hover ? Ink.bright : Ink.dim) : cb-ta.has-hover ? Ink.hover-box : Ink.well;
-            border-width: root.c.on ? 0 : 1px;
-            border-color: cb-ta.has-hover ? #6a6a74 : #4a4a52;
-            if root.c.on: Path {
+            background: parent.held ? #5d5d64 : parent.off ? transparent : root.c.on ? (parent.hot ? Ink.bright : Ink.dim) : parent.hot ? Ink.hover-box : Ink.well;
+            border-width: (root.c.on && !parent.off) || parent.held ? 0 : 1px;
+            border-color: parent.off ? #34343a : parent.hot ? #6a6a74 : #4a4a52;
+            if (root.c.on && !parent.off) || parent.held: Path {
                 width: 18px;
                 height: 18px;
                 viewbox-width: 18;
@@ -2086,10 +2163,11 @@ component CellView inherits Rectangle {
             text: root.c.text;
             font-family: "Geist";
             font-size: 13px;
-            color: cb-ta.has-hover ? Ink.bright : Ink.dim;
+            color: parent.off ? #5d5d64 : parent.hot ? Ink.bright : Ink.dim;
             vertical-alignment: center;
         }
         cb-ta := TouchArea {
+            enabled: root.c.style == 0;
             mouse-cursor: pointer;
             clicked => { root.pick(root.c.id, root.c.index * 2 + (root.c.on ? 0 : 1), 0, 0, 0); }
         }
@@ -4144,6 +4222,16 @@ export component AppWindow inherits Window {
     in property <string> gl-script-wait-label;
     in property <string> gl-script-keep-label;
     in property <string> gl-script-warning;
+    // the form for a variable in a plugin's section (gl-modal 5): its words, its name and
+    // value as typed, and why it can't be added as it is
+    in property <string> gl-var-title;
+    in property <string> gl-var-sub;
+    in-out property <string> gl-var-name;
+    in-out property <string> gl-var-value;
+    in property <bool> gl-var-editing;
+    in property <string> gl-var-warning;
+    callback gl-var-typed();
+    callback gl-var-remove();
     // the form for adding a plugin (gl-modal 4): its GitHub address as typed, the file
     // chosen, what it is once found (its name and version, what it's for, what it can
     // do), and where the looking stands (in red where it went wrong)
@@ -8127,7 +8215,7 @@ export component AppWindow inherits Window {
                 height: self.preferred-height;
                 spacing: 0;
                 Text {
-                    text: root.gl-modal == 1 ? "Add a game" : root.gl-modal == 3 ? root.gl-script-title : root.gl-modal == 4 ? root.gl-plugin-title : "Add an app";
+                    text: root.gl-modal == 1 ? "Add a game" : root.gl-modal == 3 ? root.gl-script-title : root.gl-modal == 4 ? root.gl-plugin-title : root.gl-modal == 5 ? root.gl-var-title : "Add an app";
                     font-family: "Geist";
                     font-size: 17px;
                     font-weight: 600;
@@ -8136,7 +8224,7 @@ export component AppWindow inherits Window {
                 Rectangle { height: 4px; }
                 Text {
                     text: root.gl-modal == 1 ? "Choose the game’s program. The game joins Games, with a page of its own." : root.gl-modal == 3 ? root.gl-script-sub
-                        : root.gl-modal == 4 ? root.gl-plugin-sub
+                        : root.gl-modal == 4 ? root.gl-plugin-sub : root.gl-modal == 5 ? root.gl-var-sub
                         : "Choose an app you’ve had open while Ectomatter was running. The app joins Apps, with a page of its own.";
                     font-family: "Geist";
                     font-size: 13px;
@@ -8334,6 +8422,57 @@ export component AppWindow inherits Window {
                         wrap: word-wrap;
                     }
                 }
+                // a variable: its name and its value side by side, as a launch line sets them
+                if root.gl-modal == 5: VerticalLayout {
+                    spacing: 0;
+                    HorizontalLayout {
+                        spacing: 14px;
+                        VerticalLayout {
+                            spacing: 0;
+                            Text {
+                                text: "Name";
+                                font-family: "Geist";
+                                font-size: 13px;
+                                color: Ink.dim;
+                            }
+                            Rectangle { height: 7px; }
+                            FieldBox {
+                                placeholder: "PROTON_ENABLE_NVAPI";
+                                mono: true;
+                                text <=> root.gl-var-name;
+                                edited => { root.gl-var-typed(); }
+                                accepted => { if (root.gl-can-add) { root.gl-add-done(); } }
+                                escape => { root.gl-modal-close(); }
+                            }
+                        }
+                        VerticalLayout {
+                            spacing: 0;
+                            Text {
+                                text: "Value";
+                                font-family: "Geist";
+                                font-size: 13px;
+                                color: Ink.dim;
+                            }
+                            Rectangle { height: 7px; }
+                            FieldBox {
+                                placeholder: "1";
+                                mono: true;
+                                text <=> root.gl-var-value;
+                                edited => { root.gl-var-typed(); }
+                                accepted => { if (root.gl-can-add) { root.gl-add-done(); } }
+                                escape => { root.gl-modal-close(); }
+                            }
+                        }
+                    }
+                    if root.gl-var-warning != "": Rectangle { height: 8px; }
+                    if root.gl-var-warning != "": Text {
+                        text: root.gl-var-warning;
+                        font-family: "Geist";
+                        font-size: 12.5px;
+                        color: Ink.bad;
+                        wrap: word-wrap;
+                    }
+                }
                 // a script: its name, its command and its undo side by side, how it runs, its time limit
                 if root.gl-modal == 3: VerticalLayout {
                     spacing: 0;
@@ -8500,6 +8639,15 @@ export component AppWindow inherits Window {
                             clicked => { root.gl-script-remove(); }
                         }
                     }
+                    if root.gl-modal == 5 && root.gl-var-editing: VerticalLayout {
+                        alignment: center;
+                        WordButton {
+                            text: "Remove";
+                            fill: Ink.hover-box;
+                            fill-hover: Ink.pick;
+                            clicked => { root.gl-var-remove(); }
+                        }
+                    }
                     Rectangle { horizontal-stretch: 1; }
                     VerticalLayout {
                         alignment: center;
@@ -8512,7 +8660,7 @@ export component AppWindow inherits Window {
                     }
                     WordButton {
                         primary: true;
-                        text: root.gl-modal == 3 && root.gl-script-editing ? "Save" : "Add";
+                        text: (root.gl-modal == 3 && root.gl-script-editing) || (root.gl-modal == 5 && root.gl-var-editing) ? "Save" : "Add";
                         enabled: root.gl-can-add;
                         clicked => { root.gl-add-done(); }
                     }

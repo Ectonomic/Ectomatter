@@ -77,6 +77,37 @@ pub enum Menu {
     Limit,
 }
 
+/// A control in a plugin's section other than its dropdowns, by its place
+/// among the page's (the piece's index): one of a choice's options, a
+/// checkbox, an action, a fold, a value to type, a variable (which opens
+/// its form), and Add a variable.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Spot {
+    Option { plugin: String, key: String, value: Value },
+    Check { plugin: String, key: String },
+    Action { plugin: String, action: String },
+    Fold(String),
+    Text { plugin: String, key: String },
+    Pair { plugin: String, key: String, name: String },
+    PairAdd { plugin: String, key: String },
+}
+
+/// The form for a variable in a plugin's section: whose and which setting
+/// it's in, and the variable being changed (none while one is added); its
+/// words are the window's own.
+#[derive(Clone, Debug, PartialEq)]
+pub struct VarForm {
+    pub plugin: String,
+    pub key: String,
+    pub editing: Option<String>,
+}
+
+/// Whether a variable's name is one a shell can set: letters, digits and
+/// underscores, not starting with a digit.
+fn var_name_ok(n: &str) -> bool {
+    !n.is_empty() && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && !n.starts_with(|c: char| c.is_ascii_digit())
+}
+
 /// The form for a script: the page it's on, the script being changed (none
 /// while one is added), and its choices; its words are the window's own.
 #[derive(Clone, Debug, PartialEq)]
@@ -108,6 +139,7 @@ enum Form {
     Game(Option<PathBuf>),
     App(Option<usize>),
     Script(ScriptForm),
+    Var(VarForm),
 }
 
 /// A game started or quit, for the window to act on.
@@ -256,6 +288,32 @@ const HEAD_END: f32 = 12.0 + 36.0 + 6.0;
 const TOC_W: f32 = 200.0;
 const TOC_W_MAX: f32 = 220.0;
 const TOC_GAP: f32 = 32.0;
+/// The pieces down a row's column in a plugin's section, as they're placed:
+/// where the next goes, and whether one has gone yet (the first sits on the
+/// line of the row's label, its middle on the label's).
+struct Column {
+    y: f32,
+    first: bool,
+}
+
+impl Column {
+    /// A piece `h` high placed, `gap` under the one before: where it goes
+    /// (the first, its middle on the label's, as the mock's rows have it).
+    fn place(&mut self, h: f32, gap: f32) -> f32 {
+        let y = if self.first { self.y + (36.0 - h).max(0.0) / 2.0 } else { self.y + gap };
+        self.y = y + h;
+        self.first = false;
+        y
+    }
+
+    /// A piece gone onto a line of its own (a line of buttons, wrapped): its bottom.
+    fn reach(&mut self, bottom: f32) {
+        self.y = self.y.max(bottom);
+    }
+}
+
+/// the glyph a plugin's section draws on a button to open a folder (on 14 units, as the mock's)
+const FOLDER: &str = "M1.8 3.6c0-.6.5-1.1 1.1-1.1h2.6l1.3 1.4h4.3c.6 0 1.1.5 1.1 1.1v5.4c0 .6-.5 1.1-1.1 1.1H2.9c-.6 0-1.1-.5-1.1-1.1Z";
 /// the covers: at least this wide, with these gaps across and down
 const COVER_MIN: f32 = 150.0;
 const GAP_X: f32 = 24.0;
@@ -301,6 +359,11 @@ pub struct Games {
     /// each of On this page's entries jumps to, and how many jumps there have been
     sections: Vec<Section>,
     setting_at: Vec<(String, String)>,
+    /// the section's other controls, in the page's order; the folds open (by
+    /// plugin and fold); what's being typed in a value's box, where, and when
+    spots: Vec<Spot>,
+    folds: HashSet<String>,
+    typed: Option<(Spot, String, Instant)>,
     script_at: Vec<u64>,
     toc_at: Vec<f32>,
     jumps: i32,
@@ -358,6 +421,9 @@ impl Games {
             offered: Vec::new(),
             sections: Vec::new(),
             setting_at: Vec::new(),
+            spots: Vec::new(),
+            folds: HashSet::new(),
+            typed: None,
             script_at: Vec::new(),
             toc_at: Vec::new(),
             jumps: 0,
@@ -832,6 +898,7 @@ impl Games {
         let mut toc: Vec<LibToc> = vec![self.devices_entry(id, devices, devices_top, game, every)];
         let mut y = box_y + box_h;
         self.setting_at.clear();
+        self.spots.clear();
         self.script_at.clear();
         for sec in self.sections.clone() {
             y += 30.0;
@@ -884,7 +951,228 @@ impl Games {
         let words = option_label(d, &v);
         let k = self.setting_at.len();
         self.setting_at.push((plugin.to_string(), key.to_string()));
-        Cell { text: words.as_str().into(), style: (!own && id != EVERY) as i32, on: self.menu == Some(Menu::Setting(k)), id: id_of(Ctl::LibSetting), index: k as i32, ..cell(kind::DROP, x, y, w, 36.0) }
+        // (in gray where the page follows another's; outlined in amber where it's to be chosen again)
+        let style = if d["warn"] == true { 2 } else { (!own && id != EVERY) as i32 };
+        Cell { text: words.as_str().into(), style, on: self.menu == Some(Menu::Setting(k)), id: id_of(Ctl::LibSetting), index: k as i32, ..cell(kind::DROP, x, y, w, 36.0) }
+    }
+
+    /// A setting's place among the section's other controls, its piece's index.
+    fn spot(&mut self, s: Spot) -> i32 {
+        self.spots.push(s);
+        (self.spots.len() - 1) as i32
+    }
+
+    /// A row of a plugin's section, as the settings language lays one out
+    /// (docs/core-protocol.md, section 11): its label, then down its column
+    /// what it shows (a status with its dot, a folder's path, a line of
+    /// actions, its settings, the settings nested under it) and its note.
+    /// Where the row ends.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_row(&mut self, out: &mut Vec<Cell>, sec: &Section, id: &str, row: &Value, x0: f32, w: f32, ry: f32) -> f32 {
+        let (lx, cx) = (x0 + PAD_X, x0 + PAD_X + LABEL_W + 24.0);
+        let cw = w - PAD_X - (cx - x0);
+        let settings = &sec.desc["settings"];
+        out.push(text_cell(style::LABEL, lx, ry + 13.0, LABEL_W, 36.0, row["label"].as_str().unwrap_or("")));
+        // each piece down the column: the first on the label's line, the rest under it
+        let mut col = Column { y: ry + 13.0, first: true };
+        if let Some(st) = row.get("status") {
+            // (its line as the mock's: 28 high, its middle on the label's)
+            let y = col.place(28.0, 8.0);
+            let tone = match st["tone"].as_str() {
+                Some("good") => 1,
+                Some("bad") => 2,
+                Some("warn") => 3,
+                _ => 0,
+            };
+            out.push(Cell { style: tone, ..cell(kind::DOT, cx, y + 10.5, 7.0, 7.0) });
+            out.push(text_cell(style::STATUS, cx + 16.0, y, cw - 16.0, 28.0, st["words"].as_str().unwrap_or("")));
+        }
+        if let Some(v) = row.get("value") {
+            let y = col.place(28.0, 8.0);
+            out.push(text_cell(if v["quiet"] == true { style::VALUE_QUIET } else { style::STATUS }, cx, y, cw, 28.0, v["words"].as_str().unwrap_or("")));
+        }
+        if let Some(p) = row.get("path") {
+            let y = col.place(32.0, 8.0);
+            let side = p["side"].as_str().unwrap_or("");
+            let sw = if side.is_empty() { 0.0 } else { crate::text::width(400, 12.5, side).ceil() + 2.0 };
+            out.push(Cell { style: 1, ..cell(kind::WBOX, cx, y, cw, 32.0) });
+            out.push(text_cell(style::COMMAND, cx + 12.0, y, cw - 24.0 - if sw > 0.0 { sw + 14.0 } else { 0.0 }, 32.0, p["words"].as_str().unwrap_or("")));
+            if sw > 0.0 {
+                out.push(text_cell(style::NOTE, cx + cw - 12.0 - sw, y, sw, 32.0, side));
+            }
+        }
+        if let Some(acts) = row["actions"].as_array() {
+            // a line of buttons, as many to a line as fit
+            let quiet = acts.iter().any(|a| a["quiet"] == true);
+            let h = if quiet { 28.0 } else { 30.0 };
+            let mut y = col.place(h, 8.0);
+            let mut x = cx;
+            for a in acts {
+                let label = a["label"].as_str().unwrap_or("");
+                let off = a["disabled"] == true;
+                let glyph = match a["glyph"].as_str() {
+                    Some("folder") => FOLDER,
+                    _ => "",
+                };
+                let tw = crate::text::width(500, 13.0, label).ceil();
+                let bw = if quiet { 9.0 + if glyph.is_empty() { 0.0 } else { 13.0 + 6.0 } + tw + 9.0 } else { 12.0 + tw + 12.0 };
+                if x > cx && x + bw > cx + cw {
+                    x = cx;
+                    y += h + 8.0;
+                    col.reach(y + h);
+                }
+                let index = self.spot(Spot::Action { plugin: sec.plugin.clone(), action: a["id"].as_str().unwrap_or("").to_string() });
+                out.push(if quiet {
+                    Cell { text: label.into(), lines: glyph.into(), style: if off { 2 } else { 1 }, id: id_of(Ctl::LibSpot), index, ..cell(kind::QUIET, x, y, bw, h) }
+                } else {
+                    Cell { text: label.into(), style: if off { 37 } else { 0 }, id: id_of(Ctl::LibSpot), index, ..cell(kind::GHOST, x, y, bw, h) }
+                });
+                x += bw + 8.0;
+            }
+        }
+        // its settings: checkboxes on a line (or down it, stacked), a switch's options, a
+        // dropdown, a value to type, or variables
+        let keys: Vec<String> = row["show"].as_array().into_iter().flatten().filter_map(|k| k.as_str().map(String::from)).collect();
+        let bools: Vec<&String> = keys.iter().filter(|k| settings[k.as_str()]["type"] == "bool").collect();
+        if !bools.is_empty() {
+            let stack = row["stack"] == true;
+            let mut x = cx;
+            let mut y = col.place(26.0, 8.0);
+            for (i, k) in bools.iter().enumerate() {
+                let d = &settings[k.as_str()];
+                let (v, _, _) = self.setting_value(&sec.plugin, k, d, id);
+                let label = d["label"].as_str().unwrap_or(k);
+                let bw = 28.0 + crate::text::width(400, 13.0, label).ceil() + 2.0;
+                if i > 0 {
+                    if stack || x + bw > cx + cw {
+                        x = cx;
+                        y += 26.0 + if stack { 4.0 } else { 8.0 };
+                        col.reach(y + 26.0);
+                    }
+                }
+                let (off, shown) = (d["disabled"] == true, d["shown"] == true);
+                let style = if off && shown { 2 } else if off { 1 } else { 0 };
+                let index = self.spot(Spot::Check { plugin: sec.plugin.clone(), key: k.to_string() }) ;
+                out.push(Cell { text: label.into(), on: v.as_bool().unwrap_or(false) || shown, style, id: id_of(Ctl::LibCheck), index, ..cell(kind::CHECKBOX, x, y, bw, 26.0) });
+                x += bw + 30.0;
+            }
+        }
+        for k in keys.iter().filter(|k| settings[k.as_str()]["type"] != "bool") {
+            let d = &settings[k.as_str()];
+            let (v, own, _) = self.setting_value(&sec.plugin, k, d, id);
+            let followed = !own && id != EVERY;
+            match d["type"].as_str() {
+                Some("choice") if d["menu"] == true => {
+                    let y = col.place(36.0, 8.0);
+                    // (as wide as the plugin says its words need, else as the other sections' are)
+                    let dw = d["width"].as_f64().map_or(DROP_W, |w| w as f32);
+                    let dc = self.setting_cell(&sec.plugin, k, &sec.desc, id, cx, y, dw.min(cw));
+                    out.push(dc);
+                }
+                Some("choice") => {
+                    // a switch: each option on its well, the one chosen lit
+                    let opts = d["options"].as_array().cloned().unwrap_or_default();
+                    let widths: Vec<f32> = opts.iter().map(|o| crate::text::width(400, 12.5, o["label"].as_str().unwrap_or("")).ceil() + 28.0).collect();
+                    let total = 6.0 + widths.iter().sum::<f32>() + 2.0 * (opts.len().max(1) - 1) as f32;
+                    let y = col.place(34.0, 8.0);
+                    out.push(cell(kind::SEG, cx, y, total, 34.0));
+                    let mut x = cx + 3.0;
+                    for (o, ow) in opts.iter().zip(widths) {
+                        let ov = o.get("value").cloned().unwrap_or(Value::Null);
+                        let index = self.spot(Spot::Option { plugin: sec.plugin.clone(), key: k.to_string(), value: ov.clone() });
+                        out.push(Cell { text: o["label"].as_str().unwrap_or("").into(), on: ov == v, style: (o["disabled"] == true) as i32, id: id_of(Ctl::LibSpot), index, ..cell(kind::CHOICE, x, y + 3.0, ow, 28.0) });
+                        x += ow + 2.0;
+                    }
+                }
+                Some("text") => {
+                    let y = col.place(34.0, 8.0);
+                    let index = self.spot(Spot::Text { plugin: sec.plugin.clone(), key: k.to_string() });
+                    out.push(Cell { text: v.as_str().unwrap_or("").into(), fill: d["none"].as_str().unwrap_or("").into(), on: followed, style: 8, id: id_of(Ctl::LibText), index, ..cell(kind::FIELD, cx, y, cw, 34.0) });
+                }
+                Some("pairs") => {
+                    // each variable as a launch line sets it, on a well that opens its form, as a script's card does
+                    for (name, value) in v.as_object().into_iter().flatten() {
+                        let y = col.place(34.0, 8.0);
+                        let index = self.spot(Spot::Pair { plugin: sec.plugin.clone(), key: k.to_string(), name: name.clone() });
+                        out.push(Cell { text: "".into(), style: 36, id: id_of(Ctl::LibSpot), index, ..cell(kind::LINK, cx, y, cw, 34.0) });
+                        out.push(text_cell(style::COMMAND, cx + 12.0, y, cw - 24.0, 34.0, &format!("{name}={}", value.as_str().unwrap_or(""))));
+                    }
+                    let add = d["add"].as_str().unwrap_or("Add");
+                    let aw = crate::text::width(500, 13.0, add).ceil() + 12.0 + 14.0 + 7.0 + 12.0;
+                    let y = col.place(30.0, 8.0);
+                    let index = self.spot(Spot::PairAdd { plugin: sec.plugin.clone(), key: k.to_string() });
+                    out.push(Cell { text: add.into(), lines: "M8 3v10M3 8h10".into(), style: 35, id: id_of(Ctl::LibSpot), index, ..cell(kind::GHOST, cx, y, aw, 30.0) });
+                }
+                _ => {}
+            }
+        }
+        // the settings nested under it, each with its name, a shade off the box
+        if let Some(nest) = row["nest"].as_array() {
+            let dw = 330.0f32.min(cw - 14.0 - 104.0 - 14.0 - 14.0);
+            let h = 12.0 + nest.len() as f32 * 36.0 + (nest.len().max(1) - 1) as f32 * 8.0 + 12.0;
+            let y = col.place(h, 8.0);
+            out.push(Cell { style: 2, ..cell(kind::WBOX, cx, y, 14.0 + 104.0 + 14.0 + dw + 14.0, h) });
+            for (i, n) in nest.iter().enumerate() {
+                let ny = y + 12.0 + i as f32 * 44.0;
+                out.push(text_cell(style::FACT, cx + 14.0, ny, 104.0, 36.0, n["label"].as_str().unwrap_or("")));
+                if let Some(key) = n["show"].as_str() {
+                    let dc = self.setting_cell(&sec.plugin, key, &sec.desc, id, cx + 14.0 + 104.0 + 14.0, ny, dw);
+                    out.push(dc);
+                }
+            }
+        }
+        // its note, in amber where one of its settings is to be chosen again
+        if let Some(note) = row["note"].as_str().filter(|n| !n.is_empty()) {
+            let warn = keys.iter().any(|k| settings[k.as_str()]["warn"] == true);
+            let nw = cw.min(640.0);
+            let lines = crate::text::wrap(400, 12.5, note, nw);
+            let y = col.place(lines.len() as f32 * 18.0, 8.0);
+            for (i, l) in lines.iter().enumerate() {
+                out.push(if warn {
+                    Cell { color: slint::Color::from_rgb_u8(0xf0, 0xb3, 0x5a), ..text_cell(style::NOTE_IN, cx, y + i as f32 * 18.0, nw, 18.0, l) }
+                } else {
+                    text_cell(style::NOTE, cx, y + i as f32 * 18.0, nw, 18.0, l)
+                });
+            }
+        }
+        // (a row is as tall as its label's line at least: the label 7 down, its line 22)
+        (ry + 13.0 + 29.0).max(col.y) + 13.0
+    }
+
+    /// The parts of a plugin's section in the settings language's own
+    /// shapes: a row, a heading inside the section, or a fold (its parts
+    /// drawn under its heading while it's open). Where they end; whether the
+    /// last drawn was a row (a row after a row has a line between).
+    #[allow(clippy::too_many_arguments)]
+    fn draw_parts(&mut self, out: &mut Vec<Cell>, sec: &Section, id: &str, parts: &[Value], x0: f32, w: f32, mut ry: f32, mut after_row: bool) -> (f32, bool) {
+        let (lx, inner) = (x0 + PAD_X, w - 2.0 * PAD_X);
+        let line = |y: f32| Cell { color: slint::Color::from_argb_u8(9, 255, 255, 255), ..cell(kind::BOX, lx, y, inner, 1.0) };
+        for part in parts {
+            if let Some(row) = part.get("row") {
+                if after_row {
+                    out.push(line(ry));
+                }
+                ry = self.draw_row(out, sec, id, row, x0, w, ry);
+                after_row = true;
+            } else if let Some(sub) = part["sub"].as_str() {
+                out.push(text_cell(style::SUB, lx, ry + 18.0, inner, 19.0, &sub.to_uppercase()));
+                ry += 18.0 + 19.0 + 2.0;
+                after_row = false;
+            } else if let Some(fold) = part.get("fold") {
+                let key = format!("{}/{}", sec.plugin, fold["id"].as_str().unwrap_or(""));
+                let open = self.folds.contains(&key);
+                out.push(line(ry));
+                let index = self.spot(Spot::Fold(key));
+                out.push(Cell { text: fold["label"].as_str().unwrap_or("").into(), on: open, id: id_of(Ctl::LibSpot), index, ..cell(kind::FOLD, lx, ry, inner, 45.0) });
+                ry += 45.0;
+                after_row = false;
+                if open {
+                    let inside = fold["parts"].as_array().cloned().unwrap_or_default();
+                    (ry, after_row) = self.draw_parts(out, sec, id, &inside, x0, w, ry, false);
+                }
+            }
+        }
+        (ry, after_row)
     }
 
     /// How many of a section's settings this game changes from Every game's.
@@ -920,6 +1208,8 @@ impl Games {
         let mut out: Vec<Cell> = Vec::new();
         let mut ry = box_y + 8.0;
         let mut rows_drawn = 0usize;
+        // (whether the last part drawn was a row, which the next row has a line under)
+        let mut after_row = false;
         let parts = sec.desc["layout"].as_array().cloned().unwrap_or_default();
         for part in &parts {
             if let Some(grid) = part.get("grid") {
@@ -949,6 +1239,7 @@ impl Games {
                     ry += 11.0 + 36.0 + 11.0;
                     rows_drawn += 1;
                 }
+                after_row = true;
             }
             if let Some(show) = part["show"].as_array() {
                 for item in show {
@@ -975,6 +1266,12 @@ impl Games {
                     }
                     ry += 13.0;
                 }
+                after_row = true;
+                continue;
+            }
+            if part.get("row").is_some() || part.get("sub").is_some() || part.get("fold").is_some() {
+                (ry, after_row) = self.draw_parts(&mut out, sec, id, std::slice::from_ref(part), x0, w, ry, after_row);
+                rows_drawn += 1;
                 continue;
             }
             if part.get("grid").is_none() {
@@ -1097,8 +1394,14 @@ impl Games {
         LibToc { name: "Devices".into(), sub: sub.as_str().into(), set: !own.is_empty(), y: y - 12.0 }
     }
 
-    /// On this page's entry for a plugin's section: what it changes here.
+    /// On this page's entry for a plugin's section: what it changes here (in
+    /// the plugin's own words, where it gives them).
     fn section_entry(&self, sec: &Section, id: &str, y: f32, game: bool, every: bool) -> LibToc {
+        let name = sec.desc["label"].as_str().unwrap_or(&sec.name);
+        if let Some(said) = sec.desc["summary"].as_str() {
+            let sub = if !said.is_empty() { said.to_string() } else if every || !game { "No changes".into() } else { "Same as every game".into() };
+            return LibToc { name: name.into(), sub: sub.as_str().into(), set: !said.is_empty(), y: y - 12.0 };
+        }
         let mut own: Vec<String> = Vec::new();
         // each setting the page chose itself, by its column's name where it's in a grid
         let columns: Vec<(String, String)> = sec.desc["layout"].as_array().into_iter().flatten().filter_map(|p| p["grid"]["columns"].as_array()).flatten().map(|c| (c["id"].as_str().unwrap_or("").to_string(), c["label"].as_str().unwrap_or("").to_string())).collect();
@@ -1233,6 +1536,17 @@ impl Games {
                 ui.set_gl_script_warning(warn.clone().unwrap_or_default().into());
                 ui.set_gl_can_add(!ui.get_gl_script_start().trim().is_empty() && warn.is_none());
             }
+            Form::Var(f) => {
+                ui.set_gl_modal(5);
+                let page = self.open.clone().unwrap_or_default();
+                let n = if page == EVERY { "each game".to_string() } else { self.name(&page, seen) };
+                ui.set_gl_var_title(if f.editing.is_some() { "Change the variable" } else { "Add a variable" }.into());
+                ui.set_gl_var_sub(format!("Ectomatter sets it before {n} starts.").into());
+                ui.set_gl_var_editing(f.editing.is_some());
+                let (ok, warn) = self.var_check(&f, ui);
+                ui.set_gl_var_warning(warn.into());
+                ui.set_gl_can_add(ok);
+            }
         }
     }
 
@@ -1309,6 +1623,7 @@ impl Games {
 
     /// A row of the open menu chosen.
     pub fn chose(&mut self, i: usize) {
+        self.commit_typed();
         let Some(m) = self.menu.take() else { return };
         match m {
             Menu::Shop => self.shop = [Shop::All, Shop::Steam, Shop::Hand].get(i).copied().unwrap_or(self.shop),
@@ -1347,12 +1662,138 @@ impl Games {
         }
     }
 
+    // ------------------------------------------------------------ the sections' other controls
+
+    /// A value set on the open page in a plugin's section (what the page
+    /// follows anyway is no choice of its own, as with a dropdown's).
+    fn set_value(&mut self, plugin: &str, key: &str, want: Value) {
+        let Some(id) = self.open.clone() else { return };
+        let Some(sec) = self.sections.iter().find(|x| x.plugin == plugin).cloned() else { return };
+        let d = &sec.desc["settings"][key];
+        let (_, _, follows) = self.setting_value(plugin, key, d, &id);
+        let keep = if id == EVERY { (want != d["default"]).then_some(want) } else { (want != follows).then_some(want) };
+        self.library.set_plugin_value(&id, plugin, key, keep);
+    }
+
+    /// A setting's variables as the page has them now: its own, or those it follows.
+    fn pairs_of(&self, plugin: &str, key: &str) -> serde_json::Map<String, Value> {
+        let id = self.open.clone().unwrap_or_default();
+        let d = self.sections.iter().find(|x| x.plugin == plugin).map(|s| s.desc["settings"][key].clone()).unwrap_or(Value::Null);
+        self.setting_value(plugin, key, &d, &id).0.as_object().cloned().unwrap_or_default()
+    }
+
+    /// One of a section's controls used (LibSpot, by its place): an option
+    /// chosen, a fold opened or shut, a variable's form opened. An action is
+    /// the window's to make: its plugin and its id.
+    pub fn spot_picked(&mut self, k: usize, ui: &AppWindow) -> Option<(String, String)> {
+        self.commit_typed();
+        let s = self.spots.get(k)?.clone();
+        self.menu = None;
+        match s {
+            Spot::Option { plugin, key, value } => self.set_value(&plugin, &key, value),
+            Spot::Fold(f) => {
+                if !self.folds.remove(&f) {
+                    self.folds.insert(f);
+                }
+            }
+            Spot::Action { plugin, action } => return Some((plugin, action)),
+            Spot::PairAdd { plugin, key } => {
+                self.form = Form::Var(VarForm { plugin, key, editing: None });
+                ui.set_gl_var_name("".into());
+                ui.set_gl_var_value("".into());
+            }
+            Spot::Pair { plugin, key, name } => {
+                let value = self.pairs_of(&plugin, &key).get(&name).and_then(|v| v.as_str().map(String::from)).unwrap_or_default();
+                ui.set_gl_var_name(name.as_str().into());
+                ui.set_gl_var_value(value.as_str().into());
+                self.form = Form::Var(VarForm { plugin, key, editing: Some(name) });
+            }
+            Spot::Check { .. } | Spot::Text { .. } => {}
+        }
+        None
+    }
+
+    /// A checkbox checked or unchecked (LibCheck: its place twice, and one for checked).
+    pub fn check_picked(&mut self, index: usize) {
+        self.commit_typed();
+        if let Some(Spot::Check { plugin, key }) = self.spots.get(index / 2).cloned() {
+            self.menu = None;
+            self.set_value(&plugin, &key, Value::Bool(index % 2 == 1));
+        }
+    }
+
+    /// What's typed in a value's box, kept until the box is left, Enter is
+    /// pressed, the typing pauses, or another control is used.
+    pub fn typing(&mut self, k: usize, t: String) {
+        if let Some(s) = self.spots.get(k).cloned() {
+            self.typed = Some((s, t, Instant::now()));
+        }
+    }
+
+    /// A value's box left (`how` 1), or put back with Escape (2).
+    pub fn text_done(&mut self, how: u8) {
+        if how == 2 {
+            self.typed = None;
+        } else {
+            self.commit_typed();
+        }
+    }
+
+    /// What's typed set, once the typing has paused a moment. True if it was.
+    pub fn typed_settled(&mut self) -> bool {
+        if self.typed.as_ref().is_some_and(|(_, _, t)| t.elapsed() > Duration::from_millis(800)) {
+            self.commit_typed();
+            return true;
+        }
+        false
+    }
+
+    /// What's typed in a value's box set, if anything is.
+    fn commit_typed(&mut self) {
+        if let Some((Spot::Text { plugin, key }, text, _)) = self.typed.take() {
+            self.set_value(&plugin, &key, Value::String(text.trim().to_string()));
+        }
+    }
+
+    /// Add or Save in a variable's form: whether it can be, and the warning
+    /// that says why not (none, for a name not yet typed).
+    fn var_check(&self, f: &VarForm, ui: &AppWindow) -> (bool, String) {
+        let name = ui.get_gl_var_name().trim().to_string();
+        if name.is_empty() {
+            return (false, String::new());
+        }
+        if !var_name_ok(&name) {
+            return (false, "A name has only letters, numbers and underscores, and doesn’t start with a number.".into());
+        }
+        if f.editing.as_deref() != Some(name.as_str()) && self.pairs_of(&f.plugin, &f.key).contains_key(&name) {
+            return (false, format!("{name} is set already. Select it in the list to change it."));
+        }
+        (true, String::new())
+    }
+
+    /// The variable being changed taken off.
+    pub fn remove_var(&mut self) {
+        let Form::Var(f) = self.form.clone() else { return };
+        let Some(name) = f.editing else { return };
+        let mut m = self.pairs_of(&f.plugin, &f.key);
+        m.remove(&name);
+        self.set_value(&f.plugin, &f.key, Value::Object(m));
+        self.form = Form::None;
+        self.say(format!("Removed the variable {name}."), false);
+    }
+
     /// A cover, or a row on the Apps tab, selected: its own page.
     pub fn open_at(&mut self, i: usize) {
         if let Some(id) = self.shown.get(i).cloned() {
+            self.left_page();
             self.open = Some(id);
             self.menu = None;
         }
+    }
+
+    /// A page left: what was typed on it set first.
+    fn left_page(&mut self) {
+        self.commit_typed();
     }
 
     /// A cover's star: a favorite, or no longer.
@@ -1364,10 +1805,12 @@ impl Games {
     }
 
     pub fn every(&mut self) {
+        self.left_page();
         self.open = Some(EVERY.to_string());
     }
 
     pub fn back(&mut self) {
+        self.left_page();
         self.open = None;
         self.menu = None;
     }
@@ -1382,6 +1825,8 @@ impl Games {
     /// Play: Steam asked to start the game, as a desktop shortcut does; a game
     /// added by hand started by its program.
     pub fn play(&mut self, seen: &crate::front_app::Seen) {
+        // (what was just typed on the page set first, for the game's start to have it)
+        self.commit_typed();
         let Some(id) = self.open.clone() else { return };
         let Some(e) = self.entries(seen).into_iter().find(|e| e.id == id) else { return };
         let done = if let Some(n) = games::steam_number(&e.id) {
@@ -1493,6 +1938,19 @@ impl Games {
                 let s = Script { id: f.editing.unwrap_or(0), name: name.clone(), start, quit: ui.get_gl_script_quit().trim().to_string(), wait: f.wait && !f.keep, keep: f.keep, limit: f.limit };
                 self.library.put_script(&f.page, s);
                 self.say(if f.editing.is_some() { format!("Saved the script {name}.") } else { format!("Added the script {name}.") }, false);
+            }
+            Form::Var(f) => {
+                if !self.var_check(&f, ui).0 {
+                    return;
+                }
+                let name = ui.get_gl_var_name().trim().to_string();
+                let mut m = self.pairs_of(&f.plugin, &f.key);
+                if let Some(old) = &f.editing {
+                    m.remove(old);
+                }
+                m.insert(name.clone(), Value::String(ui.get_gl_var_value().to_string()));
+                self.set_value(&f.plugin, &f.key, Value::Object(m));
+                self.say(if f.editing.is_some() { format!("Saved the variable {name}.") } else { format!("Added the variable {name}.") }, false);
             }
             _ => return,
         }

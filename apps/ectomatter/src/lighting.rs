@@ -91,9 +91,15 @@ pub enum Ctl {
     PackageOn,
     PackageAdd,
     PackageRemove,
+    /// and in a plugin's section, by its place among the page's (games_page.rs, Spot): a
+    /// choice's option, an action, a fold, a variable added or taken off; a checkbox (its
+    /// place twice, and one for checked); a value to type (given as it's left)
+    LibSpot,
+    LibCheck,
+    LibText,
 }
 
-const CTLS: [Ctl; 48] = [
+const CTLS: [Ctl; 51] = [
     Ctl::None,
     Ctl::Paint,
     Ctl::Demo,
@@ -142,6 +148,9 @@ const CTLS: [Ctl; 48] = [
     Ctl::PackageOn,
     Ctl::PackageAdd,
     Ctl::PackageRemove,
+    Ctl::LibSpot,
+    Ctl::LibCheck,
+    Ctl::LibText,
 ];
 
 pub fn ctl(id: i32) -> Ctl {
@@ -197,6 +206,8 @@ pub mod kind {
     pub const SENSOR: i32 = 51;
     /// words that say more under the pointer: a device's whole name, and where its readings come from
     pub const TIP: i32 = 52;
+    /// a fold's heading in a plugin's section, which opens and shuts it
+    pub const FOLD: i32 = 53;
 }
 /// the text styles
 #[allow(dead_code)]
@@ -237,6 +248,11 @@ pub mod style {
     pub const BOX_TITLE: i32 = 38;
     /// a command as it was typed, in the typeface whose letters are all one width
     pub const COMMAND: i32 = 41;
+    /// a heading inside a plugin's section, in capitals; what a status says, beside its dot
+    pub const SUB: i32 = 42;
+    pub const STATUS: i32 = 43;
+    /// a row's value that's only to read, quieter
+    pub const VALUE_QUIET: i32 = 44;
 }
 
 pub(crate) fn cell(kind: i32, x: f32, y: f32, w: f32, h: f32) -> Cell {

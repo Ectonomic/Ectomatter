@@ -1,0 +1,14 @@
+# Ectomatter's launcher: the compatibility tool Steam hands each game to once
+# the game's Compatibility setting names Ectomatter. Ectomatter installs it in
+# Steam's compatibilitytools.d and keeps a recipe for each game, from the
+# game's page in the Library (docs/core-protocol.md, section 11, A game's start).
+[package]
+name = "ectomatter-launch"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+serde_json = "1.0.151"
+libc = "0.2"

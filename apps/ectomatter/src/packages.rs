@@ -189,6 +189,9 @@ pub fn can_words(m: &Value) -> Vec<String> {
     if uses.nvidia {
         out.push("Reads NVIDIA graphics cards through NVIDIA’s driver.".into());
     }
+    if uses.launch {
+        out.push("Changes how games start, and runs Wine’s tools.".into());
+    }
     for o in &uses.other {
         out.push(match o.as_str() {
             "sound-capture" => "Hears what your computer is playing.".to_string(),
@@ -458,6 +461,7 @@ mod tests {
         assert_eq!(on("weather"), vec!["Linux", "Windows", "macOS"]);
         assert_eq!(on("openrgb"), vec!["Linux", "Windows", "macOS"]);
         assert_eq!(on("sensors"), vec!["Linux"]);
+        assert_eq!(on("game-configurator"), vec!["Linux"], "Proton and its prefixes are Linux's");
         assert_eq!(on("monitors"), vec!["Linux"], "Ectomatter reaches the monitors on KDE Plasma alone, so far");
         assert_eq!(systems_of(&serde_json::json!({ "systems": ["macos", "windows"] })), vec!["Windows", "macOS"], "in the tags' order");
         if cfg!(target_os = "linux") {
@@ -478,7 +482,8 @@ mod tests {
         assert_eq!(can(&plugins, "monitors"), vec!["Changes your monitors’ settings while a game runs.".to_string()]);
         assert!(cores.iter().all(|p| p.kind() == Kind::Core), "the cores folder holds cores");
         assert!(plugins.iter().all(|p| p.kind() == Kind::Plugin), "the plugins folder holds plugins");
-        assert_eq!(plugins.iter().map(|p| p.name()).collect::<Vec<_>>(), vec!["Monitors", "OpenRGB", "Sensors", "Weather"]);
+        assert_eq!(plugins.iter().map(|p| p.name()).collect::<Vec<_>>(), vec!["Game Configurator", "Monitors", "OpenRGB", "Sensors", "Weather"]);
+        assert_eq!(can(&plugins, "game-configurator"), vec!["Changes how games start, and runs Wine’s tools.".to_string()]);
         assert_eq!(can(&plugins, "weather"), vec!["Reaches Open-Meteo, Photon, the National Weather Service, Environment and Climate Change Canada and MeteoAlarm over the internet.".to_string()]);
         assert_eq!(
             can(&plugins, "sensors"),
@@ -490,6 +495,6 @@ mod tests {
         assert!(cores.iter().chain(&plugins).all(|p| p.glyph().is_some()), "each package brings its glyph");
         // (where each keeps its own files)
         assert!(cores[0].data().ends_with(format!("cores/{}", cores[0].id())));
-        assert!(plugins[0].data().ends_with("plugins/monitors"));
+        assert!(plugins[0].data().ends_with("plugins/game-configurator"));
     }
 }
