@@ -713,6 +713,23 @@ impl MacroPage {
                         push(&mut rows, &mut picks, "Previous profile", Job::MouseProfile(To::Previous));
                     }
                 }
+                // the scenes: each one, the next, the one before, and none
+                let scenes = names.scene_jobs();
+                if !scenes.is_empty() {
+                    if !rows.is_empty() {
+                        rows.push(row(2, "", false));
+                        picks.push(Pick::Nothing);
+                    }
+                    rows.push(row(1, "Scenes", false));
+                    picks.push(Pick::Nothing);
+                    for j in scenes {
+                        let words = match &j {
+                            Job::Scene(crate::jobs::SceneTo::Id(id)) => names.scenes.iter().find(|(k, _)| k == id).map_or_else(|| names.of(&j), |(_, n)| n.clone()),
+                            _ => names.of(&j),
+                        };
+                        push(&mut rows, &mut picks, &words, j);
+                    }
+                }
                 if rows.is_empty() {
                     rows.push(row(3, "No device is here to act on.", false));
                     picks.push(Pick::Nothing);
@@ -1425,6 +1442,7 @@ mod tests {
             mouse: vec![("pa".into(), "Studio".into()), ("pb".into(), "Gaming".into())],
             macros: vec![(81, "Gaming on".into()), (82, "Plays it".into()), (83, "Another".into())],
             order: vec![crate::jobs::KEYBOARD, crate::jobs::MOUSE],
+            scenes: vec![("wave".into(), "Wave across the desk".into()), ("scene-1".into(), "DOOM".into())],
         };
         mp.ed.jobs = names.clone();
         mp.other.jobs = names;
@@ -1444,15 +1462,22 @@ mod tests {
         let mouse = rows.iter().position(|r| *r == (1, "Mouse".to_string())).unwrap();
         assert!(rows[..mouse].contains(&(0, "Screen: next layout".to_string())));
         assert_eq!(rows[mouse + 1..mouse + 3], [(0, "Studio".into()), (0, "Gaming".into())]);
+        // then the scenes, each by its name, the next, the one before and none
+        let scenes = rows.iter().position(|r| *r == (1, "Scenes".to_string())).unwrap();
+        assert!(scenes > mouse);
+        assert_eq!(rows[scenes + 1..], [(0, "Wave across the desk".into()), (0, "DOOM".into()), (0, "Next scene".into()), (0, "Previous scene".into()), (0, "No scene".into())]);
         choose(&mut mp, &mut page, "FPS Gaming", 0);
         mp.ui.invoke_tool(6, 0.0, 0.0, 30.0);
         mp.act(&mut page, &|_| {});
         choose(&mut mp, &mut page, "Gaming", mouse);
+        mp.ui.invoke_tool(6, 0.0, 0.0, 30.0);
+        mp.act(&mut page, &|_| {});
+        choose(&mut mp, &mut page, "DOOM", scenes);
         let steps = mp.ed.drafts[&81].steps.clone();
-        assert_eq!(steps, [json!({ "job": "keyboard-profile:2", "after": 0 }), json!({ "job": "mouse-profile:pb", "after": 0 })]);
+        assert_eq!(steps, [json!({ "job": "keyboard-profile:2", "after": 0 }), json!({ "job": "mouse-profile:pb", "after": 0 }), json!({ "job": "scene:scene-1", "after": 0 })]);
         // the chain shows them as jobs, in their words
         let chips: Vec<(i32, String)> = mp.chain.iter().filter(|c| c.kind == piece::STEP).map(|c| (c.style, c.text.to_string())).collect();
-        assert_eq!(chips, [(2, "Keyboard: FPS Gaming".into()), (2, "Mouse: Gaming".into())]);
+        assert_eq!(chips, [(2, "Keyboard: FPS Gaming".into()), (2, "Mouse: Gaming".into()), (2, "Scene: DOOM".into())]);
         // + Macro: the other macros, not this one nor the one that plays it
         mp.ui.invoke_tool(7, 0.0, 0.0, 30.0);
         mp.act(&mut page, &|_| {});
