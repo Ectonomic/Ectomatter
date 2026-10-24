@@ -194,9 +194,15 @@ pub fn to_json(s: &Scene) -> Value {
     json!({ "id": s.id, "name": s.name, "lights": lights, "plugins": plugins })
 }
 
-/// An id for a new scene, unlike any kept.
-pub fn new_id(kept: &[Scene]) -> String {
-    let n = kept.iter().filter_map(|s| s.id.strip_prefix("scene-")?.parse::<u32>().ok()).max().unwrap_or(0) + 1;
+/// A scene id's number (`scene-3`, 3), 0 for one with none.
+pub fn id_number(id: &str) -> u32 {
+    id.strip_prefix("scene-").and_then(|n| n.parse().ok()).unwrap_or(0)
+}
+
+/// An id for a new scene, unlike any kept or made before (`made`, the
+/// highest number given yet, a deleted scene's among them).
+pub fn new_id(kept: &[Scene], made: u32) -> String {
+    let n = kept.iter().map(|s| id_number(&s.id)).max().unwrap_or(0).max(made) + 1;
     format!("scene-{n}")
 }
 
@@ -534,7 +540,8 @@ mod tests {
         assert_eq!(all.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["wave", "shift", "scene-3"]);
         assert_eq!(all[2], s);
         assert!(all[0].built_in && !all[2].built_in);
-        assert_eq!(new_id(&all), "scene-4");
+        assert_eq!(new_id(&all, 0), "scene-4");
+        assert_eq!(new_id(&all, 7), "scene-8", "never the id of a scene made and deleted since");
         assert_eq!(s.lights.part("sensei310"), Part::AsIs);
         assert_eq!(s.lights.part("a new mouse"), Part::AsIs, "a device the scene doesn't name is left as it is");
         assert!(!s.lights.moves(), "a static keyboard and a mouse as it is: no frames to keep sending");

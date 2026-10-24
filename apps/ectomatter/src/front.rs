@@ -785,10 +785,16 @@ pub struct Front {
     scene_claim: (bool, bool),
     /// the scene a game or app in front switched from, to go back to as it leaves
     scene_back: Option<Option<String>>,
-    /// the profile each plugin's device plays for the scene (OpenRGB's), by plugin/device,
-    /// and when the plugins' devices were last looked at for it
-    scene_plugins: HashMap<String, String>,
+    /// the profile Ectomatter last put each plugin's device on (OpenRGB's), for the
+    /// scene or for the app in front, by plugin/device; when they were last looked
+    /// at; and the thread their calls go to, in the order they were made
+    plugin_applied: HashMap<String, String>,
     scene_plugins_at: Instant,
+    plugin_calls: Option<mpsc::Sender<(crate::core_host::Core, &'static str, serde_json::Value, String)>>,
+    /// whether the scene on moves (a static one's frames change nothing on the page)
+    scene_moves: bool,
+    /// when a press last shut a menu or the color picker: its click closes nothing more
+    press_closed: Option<Instant>,
     /// Home's Scenes menu, open: what each of its rows does
     scene_menu: Option<Vec<SceneRow>>,
     /// the scene form, open, and its dropdown, open
@@ -1215,8 +1221,11 @@ impl Front {
             scene_colors: Default::default(),
             scene_claim: (false, false),
             scene_back: None,
-            scene_plugins: HashMap::new(),
+            plugin_applied: HashMap::new(),
             scene_plugins_at: Instant::now(),
+            plugin_calls: None,
+            scene_moves: false,
+            press_closed: None,
             scene_menu: None,
             scene_form: None,
             scene_form_menu: None,
@@ -1929,7 +1938,17 @@ impl Front {
                     }
                     self.show_scene_form();
                 }
-                Ask::SceneFormClose => self.close_scene_form(false),
+                Ask::SceneFormClose => {
+                    if self.press_closed.take().is_some_and(|t| t.elapsed() < Duration::from_millis(700)) {
+                        // (the press shut a menu or the picker, and only that)
+                    } else if self.ui.get_menu_open() || self.pick.is_some() {
+                        // (Escape: the open menu or the picker first, then the form)
+                        self.close_menu();
+                        self.close_picker();
+                    } else {
+                        self.close_scene_form(false);
+                    }
+                }
                 Ask::SceneFormDone => self.close_scene_form(true),
                 Ask::SceneFormDelete => self.delete_scene(),
                 Ask::SceneFrame => {
@@ -3743,6 +3762,12 @@ impl Front {
     }
 
     fn close_menu(&mut self) {
+        // (one of the scene form's dropdowns: shut, and drawn shut)
+        if self.scene_form_menu.take().is_some() {
+            self.ui.set_menu_open(false);
+            self.ui.set_menu_w(300.0);
+            self.show_scene_form();
+        }
         if self.bind_menu.take().is_some() || self.light_menu.take().is_some() || self.way_menu.take().is_some() || self.time_menu.take().is_some() || std::mem::take(&mut self.pl_menu) || std::mem::take(&mut self.add_menu) || std::mem::take(&mut self.ob_menu) || self.lib_menu.take().is_some() || self.new_menu.take().is_some() {
             self.ui.set_menu_open(false);
             self.ui.set_menu_search(true);
@@ -3757,7 +3782,7 @@ impl Front {
             self.ui.set_menu_open(false);
             self.ui.invoke_blur_menu();
         }
-        if self.mouse.menu.take().is_some() || std::mem::take(&mut self.profile_menu) || std::mem::take(&mut self.kb_profile_menu) || self.apps_menu.take().is_some() || self.scene_menu.take().is_some() || self.scene_form_menu.take().is_some() || self.pad_menu.take().is_some() || self.games.menu.take().is_some() || self.until_menu.take().is_some() {
+        if self.mouse.menu.take().is_some() || std::mem::take(&mut self.profile_menu) || std::mem::take(&mut self.kb_profile_menu) || self.apps_menu.take().is_some() || self.scene_menu.take().is_some() || self.pad_menu.take().is_some() || self.games.menu.take().is_some() || self.until_menu.take().is_some() {
             self.ui.set_menu_open(false);
             self.ui.set_menu_w(300.0);
             self.ui.set_mouse_menu_open(false);
@@ -3815,6 +3840,7 @@ impl Front {
                 if x >= ax && x < ax + aw && y >= ay && y < ay + ah {
                     self.shut = Some(((ax, ay), Instant::now()));
                 }
+                self.press_closed = Some(Instant::now());
                 self.close_menu();
                 self.refresh();
             }
@@ -3832,6 +3858,7 @@ impl Front {
                 }
                 self.close_picker();
                 self.press_shut = true;
+                self.press_closed = Some(Instant::now());
             }
         }
         let Some(m) = &self.menu else { return };
@@ -6772,6 +6799,7 @@ impl Front {
         self.worker.drop_plugin(id);
         self.hosted.stop(id);
         self.following.retain(|k, _| !k.starts_with(&format!("{id}/")));
+        self.plugin_applied.retain(|k, _| !k.starts_with(&format!("{id}/")));
         let kind = self.packages.iter().find(|p| p.id() == id).map_or(crate::packages::Kind::Plugin, |p| p.kind());
         let root = crate::packages::added_dir(kind);
         let dir = root.join(id);
@@ -6820,6 +6848,7 @@ impl Front {
             self.hosted.stop(p.id());
             // (its devices let go of what they followed)
             self.following.retain(|k, _| !k.starts_with(&format!("{}/", p.id())));
+            self.plugin_applied.retain(|k, _| !k.starts_with(&format!("{}/", p.id())));
         }
         self.hosted.forget_sections();
     }
@@ -7369,29 +7398,6 @@ impl Front {
         }
         self.last_front = Some(f);
         let mut changed = false;
-        // the scene: the one this app or game chose while it's in front (a game with none
-        // of its own follows Every game's); once it switched, back to the one before
-        match self.games.library.wanted(&app, "scene") {
-            Some(crate::games::Choice::Profile(p)) => {
-                let want = (p != "none").then_some(p);
-                if want != self.scene {
-                    if self.scene_back.is_none() {
-                        self.scene_back = Some(self.scene.clone());
-                    }
-                    eprintln!("ectomatter: the scene follows {app}");
-                    self.set_scene(want, false);
-                    changed = true;
-                }
-            }
-            _ => {
-                if let Some(back) = self.scene_back.take() {
-                    if back != self.scene {
-                        self.set_scene(back, false);
-                        changed = true;
-                    }
-                }
-            }
-        }
         // what the Library says each device does while this is in front (a game
         // with no choice of its own follows Every game's); Don't switch is none
         let wanted = |d: &str| match self.games.library.wanted(&app, d) {
@@ -7447,43 +7453,49 @@ impl Front {
                 }
             }
         }
-        // each device a plugin brought in (OpenRGB's lighting): its profile for this app,
-        // or once it followed one, back to what it was on before (its plugin keeps that)
+        // each device a plugin brought in (OpenRGB's lighting): the profile this app wants for
+        // it, put on below with the scene's, which comes first (see plugins_to)
         for (plugin, id, name, want) in wants {
             let follow = format!("{plugin}/{id}");
-            let Some(core) = self.hosted.get(&plugin).map(|p| p.core.clone()) else { continue };
-            // (a device the scene on gives a profile keeps it: what this app wants is kept for when the scene goes off)
-            let held = self.scene_plugins.contains_key(&follow);
             match want {
-                Some(p) if held => {
-                    self.following.insert(follow, p);
-                }
-                None if held => {
-                    self.following.remove(&follow);
-                }
                 Some(p) if self.following.get(&follow) != Some(&p) => {
                     eprintln!("ectomatter: {name} follows {app}");
-                    self.following.insert(follow, p.clone());
-                    // (on a thread: its plugin may take a moment to reach the program it goes through)
-                    let _ = std::thread::Builder::new().name("plugin device".into()).spawn(move || {
-                        if let Err(e) = core.call("profiles/activate", &serde_json::json!({ "device": id, "profile": p })) {
-                            eprintln!("ectomatter: {name} didn’t switch: {e}");
-                        }
-                    });
+                    self.following.insert(follow, p);
                     changed = true;
                 }
                 Some(_) => {}
                 None => {
                     if self.following.remove(&follow).is_some() {
-                        let _ = std::thread::Builder::new().name("plugin device".into()).spawn(move || {
-                            if let Err(e) = core.call("profiles/restore", &serde_json::json!({ "device": id })) {
-                                eprintln!("ectomatter: {name} didn’t switch back: {e}");
-                            }
-                        });
+                        changed = true;
                     }
                 }
             }
         }
+        // the scene: the one this app or game chose while it's in front (a game with none
+        // of its own follows Every game's); once it switched, back to the one before
+        match self.games.library.wanted(&app, "scene") {
+            // (a scene since deleted is no choice)
+            Some(crate::games::Choice::Profile(p)) if p == "none" || self.scenes().iter().any(|s| s.id == p) => {
+                let want = (p != "none").then_some(p);
+                if want != self.scene {
+                    if self.scene_back.is_none() {
+                        self.scene_back = Some(self.scene.clone());
+                    }
+                    eprintln!("ectomatter: the scene follows {app}");
+                    self.set_scene(want, false);
+                    changed = true;
+                }
+            }
+            _ => {
+                if let Some(back) = self.scene_back.take() {
+                    if back != self.scene {
+                        self.set_scene(back, false);
+                        changed = true;
+                    }
+                }
+            }
+        }
+        self.plugins_sync();
         if changed {
             self.show_mouse_lights();
         }
@@ -8422,7 +8434,7 @@ impl Front {
     }
 
     pub fn animated(&self) -> bool {
-        self.page.animated() || self.scene_timer.is_some()
+        self.page.animated() || (self.scene_timer.is_some() && self.scene_moves)
     }
 
     /// Home's Scenes menu: No scene, the scenes that come with Ectomatter, the
@@ -8594,7 +8606,8 @@ impl Front {
             }
             self.scene_frame();
         }
-        self.scene_plugins_play(playing.as_ref());
+        self.scene_moves = playing.as_ref().is_some_and(|s| s.lights.moves());
+        self.plugins_sync();
         self.show_scene_button();
         self.show_mouse_lights();
     }
@@ -8620,41 +8633,79 @@ impl Front {
     /// as it was, to come on again next time.
     pub fn scene_quit(&mut self) {
         self.scene_timer = None;
+        self.scene_form = None;
         self.scene_hand_back();
-        self.scene_plugins_play(None);
+        if !crate::desk::offscreen() {
+            self.plugins_to(None, true);
+        }
     }
 
-    /// Each device a plugin brought in (OpenRGB's lighting) on the profile the
-    /// scene playing names for it; one it no longer names back on what it was
-    /// on: a game's or app's profile while that's in front, else what it was
-    /// on before the scene.
-    fn scene_plugins_play(&mut self, scene: Option<&crate::scenes::Scene>) {
-        for (plugin, d) in self.hosted.devices() {
+    /// The scene form shut as Ectomatter closes to the tray, unkept: the scene
+    /// on plays again, not the one being set.
+    pub fn cancel_scene_form(&mut self) {
+        if self.scene_form.is_some() {
+            self.close_scene_form(false);
+        }
+    }
+
+    /// Each device a plugin brought in (OpenRGB's lighting) on the profile it
+    /// plays now: the scene playing's, else the one the app in front chose
+    /// (`following`), else back on what it was on before Ectomatter switched
+    /// it. A device is sent one call when that changes, every call in the
+    /// order made, on a thread of their own; a device gone is forgotten, to be
+    /// put on its profile again when it's back. Offscreen, nothing is sent.
+    fn plugins_sync(&mut self) {
+        if crate::desk::offscreen() {
+            return;
+        }
+        let scene = self.playing();
+        self.plugins_to(scene.as_ref(), false);
+    }
+
+    /// The plugins' devices put on what `scene` and the app in front have them
+    /// play, the calls made at once (`now`, as Ectomatter quits) or in turn.
+    fn plugins_to(&mut self, scene: Option<&crate::scenes::Scene>, now: bool) {
+        let devices = self.hosted.devices();
+        let live: std::collections::HashSet<String> = devices.iter().map(|(plugin, d)| format!("{plugin}/{}", d["device"].as_str().unwrap_or(""))).collect();
+        self.plugin_applied.retain(|k, _| live.contains(k));
+        for (plugin, d) in devices {
             let id = d["device"].as_str().unwrap_or("").to_string();
             let key = format!("{plugin}/{id}");
-            let want = scene.and_then(|s| s.plugins.iter().find(|(dev, _)| *dev == id).map(|(_, p)| p.clone()));
+            let want = scene.and_then(|s| s.plugins.iter().find(|(dev, _)| *dev == id).map(|(_, p)| p.clone())).or_else(|| self.following.get(&key).cloned());
+            if want == self.plugin_applied.get(&key).cloned() {
+                continue;
+            }
             let Some(core) = self.hosted.get(&plugin).map(|p| p.core.clone()) else { continue };
             let name = d["name"].as_str().unwrap_or("").to_string();
-            let call = match want {
-                Some(p) if self.scene_plugins.get(&key) != Some(&p) => {
-                    self.scene_plugins.insert(key, p.clone());
-                    Some(("profiles/activate", serde_json::json!({ "device": id, "profile": p })))
-                }
-                Some(_) => None,
-                None if self.scene_plugins.remove(&key).is_some() => match self.following.get(&key) {
-                    Some(p) => Some(("profiles/activate", serde_json::json!({ "device": id, "profile": p }))),
-                    None => Some(("profiles/restore", serde_json::json!({ "device": id }))),
-                },
-                None => None,
+            let (method, params) = match &want {
+                Some(p) => ("profiles/activate", serde_json::json!({ "device": id, "profile": p })),
+                None => ("profiles/restore", serde_json::json!({ "device": id })),
             };
-            if let Some((method, params)) = call {
-                eprintln!("ectomatter: {name} for the scene: {method}");
-                // (on a thread: its plugin may take a moment to reach the program it goes through)
-                let _ = std::thread::Builder::new().name("plugin device".into()).spawn(move || {
-                    if let Err(e) = core.call(method, &params) {
-                        eprintln!("ectomatter: {name} didn’t switch: {e}");
+            eprintln!("ectomatter: {name}: {method}");
+            match want {
+                Some(p) => self.plugin_applied.insert(key, p),
+                None => self.plugin_applied.remove(&key),
+            };
+            if now {
+                if let Err(e) = core.call(method, &params) {
+                    eprintln!("ectomatter: {name} didn’t switch: {e}");
+                }
+                continue;
+            }
+            // (on a thread: its plugin may take a moment to reach the program it goes through)
+            if self.plugin_calls.is_none() {
+                let (tx, rx) = mpsc::channel::<(crate::core_host::Core, &'static str, serde_json::Value, String)>();
+                let _ = std::thread::Builder::new().name("plugin devices".into()).spawn(move || {
+                    for (core, method, params, name) in rx {
+                        if let Err(e) = core.call(method, &params) {
+                            eprintln!("ectomatter: {name} didn’t switch: {e}");
+                        }
                     }
                 });
+                self.plugin_calls = Some(tx);
+            }
+            if let Some(tx) = &self.plugin_calls {
+                let _ = tx.send((core, method, params, name));
             }
         }
     }
@@ -8746,12 +8797,16 @@ impl Front {
         self.close_menu();
         self.close_picker();
         self.ui.set_scene_form(false);
+        // (the Name box's typing let go of: it goes without being left)
+        slint::ComponentHandle::global::<crate::Typing>(&self.ui).set_on(false);
         if keep {
             let all = self.scenes();
             let mut sc = form.scene();
-            sc.name = match form.name.trim() {
-                "" => format!("Scene {}", all.iter().filter(|s| !s.built_in).count() + 1),
-                n => n.to_string(),
+            let before = form.editing.as_ref().and_then(|id| all.iter().find(|s| &s.id == id)).map(|s| s.name.clone());
+            sc.name = match (form.name.trim(), before) {
+                ("", Some(was)) => was,
+                ("", None) => (1..).map(|n| format!("Scene {n}")).find(|n| !all.iter().any(|s| &s.name == n)).unwrap_or_default(),
+                (n, _) => n.to_string(),
             };
             let mut kept: Vec<serde_json::Value> = self.settings.get("scenes").and_then(|v| v.as_array().cloned()).unwrap_or_default();
             match &form.editing {
@@ -8761,7 +8816,10 @@ impl Front {
                     }
                 }
                 None => {
-                    sc.id = crate::scenes::new_id(&all);
+                    // (an id never used before, not even by a scene since deleted)
+                    let made = self.settings.get("scenes_made").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                    sc.id = crate::scenes::new_id(&all, made);
+                    let _ = self.settings.set("scenes_made", serde_json::json!(made.max(crate::scenes::id_number(&sc.id)) as u64));
                     kept.push(crate::scenes::to_json(&sc));
                 }
             }
@@ -8787,6 +8845,7 @@ impl Front {
         self.close_menu();
         self.close_picker();
         self.ui.set_scene_form(false);
+        slint::ComponentHandle::global::<crate::Typing>(&self.ui).set_on(false);
         let mut kept: Vec<serde_json::Value> = self.settings.get("scenes").and_then(|v| v.as_array().cloned()).unwrap_or_default();
         kept.retain(|v| v["id"].as_str() != Some(id.as_str()));
         let _ = self.settings.set("scenes", serde_json::Value::Array(kept));
@@ -8795,7 +8854,11 @@ impl Front {
             self.scene_back = Some(None);
         }
         if self.scene.as_deref() == Some(id.as_str()) {
-            self.set_scene(None, true);
+            match self.scene_back.take() {
+                // (a game or app had it on: the scene before it, as when that app leaves the front)
+                Some(back) => self.set_scene(back, false),
+                None => self.set_scene(None, true),
+            }
         } else {
             self.scene_play();
         }
@@ -9112,6 +9175,9 @@ impl Front {
 
     fn set_scene_form_color(&mut self, index: usize, rgb: [u8; 3]) {
         let key = (index >= 100).then(|| self.scene_form_devices().get(index / 100 - 1).map(|d| d.0.clone())).flatten();
+        if index >= 100 && key.is_none() {
+            return;
+        }
         let Some(f) = &mut self.scene_form else { return };
         let colors = match &key {
             None => Some(&mut f.look.colors),
@@ -9197,6 +9263,8 @@ impl Front {
         self.desk_aside = aside;
         if self.page.dev.is_some() && !aside.0 {
             if matches!(kb, Part::Look(_)) {
+                // (a Lighting page's preview still running, the page left by the rail, stops first)
+                self.stop_preview();
                 let colors: Vec<[u8; 3]> = (0..evga_z10::protocol::NKEYS as u32).map(|p| self.scene_colors.0.get(&p).copied().unwrap_or([0; 3])).collect();
                 self.ask_kb(device::Ask::Preview(serde_json::json!({ "colors": colors, "tab": "native", "claim": true })));
                 self.scene_claim.0 = true;
@@ -9209,7 +9277,10 @@ impl Front {
         if self.mouse.present() && !aside.1 {
             if let (Some(logo), Some(wheel)) = (lights[0], lights[1]) {
                 let due = self.scene_mouse.0.is_none_or(|at| at.elapsed() >= Duration::from_millis(125));
-                if due && self.scene_mouse.1 != [logo, wheel] {
+                // (sent again each second, unchanged: a profile put on the mouse, or the mouse
+                // plugged in again, shows its own lights until it is)
+                let stale = self.scene_mouse.0.is_none_or(|at| at.elapsed() >= Duration::from_secs(1));
+                if due && (self.scene_mouse.1 != [logo, wheel] || stale) {
                     self.mouse.direct(serde_json::json!({ "logo": lighting::hex_of(logo), "wheel": lighting::hex_of(wheel) }));
                     self.scene_mouse = (Some(Instant::now()), [logo, wheel]);
                     self.scene_claim.1 = true;
@@ -9229,7 +9300,7 @@ impl Front {
         // (a plugin's device met since the scene came on, OpenRGB's after its program started, gets its profile)
         if self.scene_plugins_at.elapsed() >= Duration::from_secs(1) {
             self.scene_plugins_at = Instant::now();
-            self.scene_plugins_play(Some(&scene));
+            self.plugins_sync();
         }
     }
 

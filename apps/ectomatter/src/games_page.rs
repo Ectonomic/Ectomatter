@@ -901,7 +901,7 @@ impl Games {
             out.push(Cell { text: word.as_str().into(), style: (!own && !every) as i32, value: chip, on: self.menu == Some(Menu::Device(k)), id: id_of(Ctl::LibChoice), index: k as i32, ..cell(kind::DROP, cx, ry + 13.0, DROP_W, 36.0) });
             ry += 13.0 + row_h + 13.0;
         }
-        if devices.is_empty() {
+        if devices.iter().all(|d| d.kind == "scene") {
             out.push(text_cell(style::NOTE, lx, ry + 13.0, w - 2.0 * PAD_X, 18.0, "Your devices show here once Ectomatter has found them."));
             ry += 13.0 + 18.0 + 13.0;
         } else {
@@ -1405,8 +1405,11 @@ impl Games {
 
     /// On this page's entry for Devices: the profiles this page switches to.
     fn devices_entry(&self, id: &str, devices: &[Device], y: f32, game: bool, every: bool) -> LibToc {
-        let own: Vec<String> = devices
-            .iter()
+        // (the scene last, after what each device switches to)
+        let mut order: Vec<&Device> = devices.iter().filter(|d| d.kind != "scene").collect();
+        order.extend(devices.iter().filter(|d| d.kind == "scene"));
+        let own: Vec<String> = order
+            .into_iter()
             .filter_map(|d| {
                 let (c, chosen, follows) = self.row_value(id, d);
                 (chosen && (every || c != follows)).then(|| match &c {

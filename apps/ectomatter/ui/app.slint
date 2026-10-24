@@ -795,7 +795,7 @@ component Menu inherits Rectangle {
         list := VerticalLayout {
             for row[i] in root.rows: Rectangle {
                 height: row.kind == 1 ? 28px : row.kind == 2 ? 11px : 33px;
-                background: (row.kind == 0 || row.kind == 4 || row.kind == 7) && item.has-hover ? #ffffff12 : transparent;
+                background: (row.kind == 0 || row.kind == 4 || row.kind == 7) && (item.has-hover || (row.edit && pen.has-hover)) ? #ffffff12 : transparent;
                 border-radius: 7px;
                 if row.kind == 1: Text {
                     x: 10px;
@@ -8818,8 +8818,9 @@ export component AppWindow inherits Window {
         }
         sf := Rectangle {
             property <length> head-h: 22px + 4px + sf-sub.preferred-height + 18px;
+            property <length> natural: 24px + self.head-h + 46px + 6px + root.scene-form-h + 24px + 36px + 20px;
             width: 600px;
-            height: 24px + self.head-h + 46px + 6px + root.scene-form-h + 24px + 36px + 20px;
+            height: min(self.natural, parent.height - 32px);
             x: (parent.width - self.width) / 2;
             y: max(16px, (parent.height - self.height) / 2);
             border-radius: 14px;
@@ -8865,11 +8866,12 @@ export component AppWindow inherits Window {
                     image-fit: fill;
                 }
             }
-            Rectangle {
+            sf-flick := Flickable {
                 x: 24px;
                 y: 24px + sf.head-h + 46px + 6px;
                 width: 552px;
-                height: root.scene-form-h;
+                height: sf.height - self.y - 24px - 36px - 20px;
+                viewport-height: root.scene-form-h;
                 for c in root.scene-cells: CellView {
                     c: c;
                     glyph: root.keyboard-glyph;

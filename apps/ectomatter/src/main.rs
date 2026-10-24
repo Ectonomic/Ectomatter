@@ -2277,6 +2277,8 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
             app.exit = true;
         }
     }
+    // each device its own again (Ectomatter started again, too: the new one turns the scene on)
+    app.front.scene_quit();
     // the screen handed back to the keyboard's own screens
     app.front.quit_screen();
     // a setting still being changed is written
@@ -2713,7 +2715,10 @@ impl App {
     /// unmapped, and Ectomatter carries on. With no tray, closing quits.
     fn hide(&mut self) {
         self.front.hand_back();
+        // (a scene being set, unkept: the scene on plays again)
+        self.front.cancel_scene_form();
         if self.tray.is_none() {
+            self.front.scene_quit();
             self.front.release_sliders();
             self.quitting = Some(Instant::now());
             return;
