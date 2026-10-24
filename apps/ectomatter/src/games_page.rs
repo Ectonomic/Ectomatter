@@ -111,11 +111,49 @@ pub enum Spot {
 }
 
 /// A row a game's page changed from Every game's, which its dot puts back:
-/// a device's (by its row's key), or a plugin's settings (by their keys).
+/// a device's (by its row's key), or a plugin's settings (by their keys);
+/// each with its name, for the bar to say.
 #[derive(Clone, Debug, PartialEq)]
 enum Reset {
-    Device(String),
-    Settings(String, Vec<String>),
+    Device { key: String, label: String },
+    Settings { plugin: String, keys: Vec<String>, label: String },
+}
+
+/// What a dot put back, which Undo puts as it was: the page's own choice
+/// for a device, or its own value for each of a plugin's settings.
+#[derive(Clone, Debug)]
+enum ResetUndo {
+    Device { id: String, key: String, was: Option<Choice> },
+    Settings { id: String, plugin: String, was: Vec<(String, Option<Value>)> },
+}
+
+/// The settings a section's layout parts show, wherever they're laid out:
+/// in a row (and nested under it), a grid's row, a list of them, or inside
+/// a fold, open or shut. (A setting no part shows now, such as one nested
+/// under a box that's unticked, does nothing, so it counts as no change.)
+fn keys_in(parts: &[Value]) -> Vec<String> {
+    let mut out = Vec::new();
+    for part in parts {
+        if let Some(row) = part.get("row") {
+            out.extend(row["show"].as_array().into_iter().flatten().filter_map(|k| k.as_str().map(String::from)));
+            out.extend(row["nest"].as_array().into_iter().flatten().filter_map(|n| n["show"].as_str().map(String::from)));
+        }
+        for r in part["grid"]["rows"].as_array().into_iter().flatten() {
+            out.extend(r["cells"].as_array().into_iter().flatten().filter_map(|c| c.as_str().map(String::from)));
+        }
+        for item in part["show"].as_array().into_iter().flatten() {
+            match item {
+                Value::String(k) => out.push(k.clone()),
+                o => out.extend(o["id"].as_str().map(String::from)),
+            }
+        }
+        if let Some(inside) = part["fold"]["parts"].as_array() {
+            out.extend(keys_in(inside));
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// The form for a variable in a plugin's section: whose and which setting
@@ -397,8 +435,10 @@ pub struct Games {
     jumps: i32,
     /// where the open page's sections start across: after On this page where it has a column
     left: f32,
-    /// a script taken off a page, which Undo puts back; the scripts being tried now
+    /// a script taken off a page, which Undo puts back; a row a dot put back to
+    /// Every game's, which Undo puts as it was; the scripts being tried now
     script_undo: Option<games::ScriptRemoved>,
+    reset_undo: Option<ResetUndo>,
     pub trying: HashSet<u64>,
     pics: HashMap<Pic, slint::Image>,
     asked: HashSet<Pic>,
@@ -458,6 +498,7 @@ impl Games {
             jumps: 0,
             left: X0,
             script_undo: None,
+            reset_undo: None,
             trying: HashSet::new(),
             pics: HashMap::new(),
             asked: HashSet::new(),
@@ -558,10 +599,11 @@ impl Games {
                 changed = true;
             }
         }
-        if self.said.as_ref().is_some_and(|(_, _, t)| t.elapsed() > Duration::from_secs(if self.undo.is_some() || self.script_undo.is_some() { 10 } else { 6 })) {
+        if self.said.as_ref().is_some_and(|(_, _, t)| t.elapsed() > Duration::from_secs(if self.undo.is_some() || self.script_undo.is_some() || self.reset_undo.is_some() { 10 } else { 6 })) {
             self.said = None;
             self.undo = None;
             self.script_undo = None;
+            self.reset_undo = None;
             changed = true;
         }
         (events, changed)
@@ -653,7 +695,7 @@ impl Games {
         let said = self.said.clone();
         ui.set_gl_said(said.as_ref().map_or_else(Default::default, |(s, _, _)| s.as_str().into()));
         ui.set_gl_said_bad(said.is_some_and(|(_, b, _)| b));
-        ui.set_gl_undo_shown(self.undo.is_some() || self.script_undo.is_some());
+        ui.set_gl_undo_shown(self.undo.is_some() || self.script_undo.is_some() || self.reset_undo.is_some());
         match self.open.clone() {
             None => self.show_tabs(ui, &all, page_w, scale),
             Some(id) => self.show_page(ui, &all, &id, devices, page_w, scale),
@@ -891,7 +933,7 @@ impl Games {
             // (a game's own choice, unlike Every game's: a dot beside its name puts it back)
             if game && !every && own && c != follows {
                 let mid = if d.sub.is_empty() { ry + 13.0 + 18.0 } else { ry + 9.0 + 10.0 };
-                self.reset_dot(&mut out, Reset::Device(d.key.clone()), lx, mid);
+                self.reset_dot(&mut out, Reset::Device { key: d.key.clone(), label: d.name.clone() }, lx, mid);
             }
             // (the Scene row's glyph is the scenes' own)
             let glyph = if d.kind == "scene" { -1 } else { d.glyph.map_or((d.kind == "mouse") as i32, |g| 2 + g as i32) };
@@ -1014,7 +1056,7 @@ impl Games {
     /// A row's dot in a plugin's section, on a game's page where the game changed
     /// one of the row's settings (`keys`) from Every game's: it puts back every
     /// one of them the game has its own of.
-    fn settings_dot(&mut self, out: &mut Vec<Cell>, sec: &Section, id: &str, keys: Vec<String>, x: f32, y: f32) {
+    fn settings_dot(&mut self, out: &mut Vec<Cell>, sec: &Section, id: &str, keys: Vec<String>, label: &str, x: f32, y: f32) {
         if id == EVERY || !self.library.is_game(id) {
             return;
         }
@@ -1028,23 +1070,36 @@ impl Games {
             }
         }
         if changed {
-            self.reset_dot(out, Reset::Settings(sec.plugin.clone(), own_keys), x, y);
+            self.reset_dot(out, Reset::Settings { plugin: sec.plugin.clone(), keys: own_keys, label: label.to_string() }, x, y);
         }
     }
 
-    /// A row's dot selected: the row goes back to Every game's.
+    /// A row's dot selected: the row goes back to Every game's, as the bar
+    /// says, with Undo for a moment (the last thing done is the one undone).
     pub fn reset_picked(&mut self, k: usize) {
         self.commit_typed();
         self.menu = None;
         let (Some(r), Some(id)) = (self.resets.get(k).cloned(), self.open.clone()) else { return };
-        match r {
-            Reset::Device(key) => self.library.set_choice(&id, &key, None),
-            Reset::Settings(plugin, keys) => {
-                for key in keys {
-                    self.library.set_plugin_value(&id, &plugin, &key, None);
-                }
+        let label = match r {
+            Reset::Device { key, label } => {
+                let was = self.library.choice(&id, &key);
+                self.library.set_choice(&id, &key, None);
+                self.reset_undo = Some(ResetUndo::Device { id, key, was });
+                label
             }
-        }
+            Reset::Settings { plugin, keys, label } => {
+                let mine = self.library.plugin_values(&id, &plugin);
+                let was = keys.iter().map(|k| (k.clone(), mine.get(k).cloned())).collect();
+                for key in &keys {
+                    self.library.set_plugin_value(&id, &plugin, key, None);
+                }
+                self.reset_undo = Some(ResetUndo::Settings { id, plugin, was });
+                label
+            }
+        };
+        self.undo = None;
+        self.script_undo = None;
+        self.say(format!("Put {label} back to Every game’s."), false);
     }
 
     /// A setting's place among the section's other controls, its piece's index.
@@ -1066,7 +1121,7 @@ impl Games {
         out.push(text_cell(style::LABEL, lx, ry + 13.0, LABEL_W, 36.0, row["label"].as_str().unwrap_or("")));
         let shown = row["show"].as_array().into_iter().flatten().filter_map(|k| k.as_str().map(String::from));
         let nested = row["nest"].as_array().into_iter().flatten().filter_map(|n| n["show"].as_str().map(String::from));
-        self.settings_dot(out, sec, id, shown.chain(nested).collect(), lx, ry + 13.0 + 18.0);
+        self.settings_dot(out, sec, id, shown.chain(nested).collect(), row["label"].as_str().unwrap_or(""), lx, ry + 13.0 + 18.0);
         // each piece down the column: the first on the label's line, the rest under it
         let mut col = Column { y: ry + 13.0, first: true };
         if let Some(st) = row.get("status") {
@@ -1258,6 +1313,11 @@ impl Games {
                 out.push(line(ry));
                 let index = self.spot(Spot::Fold(key));
                 out.push(Cell { text: fold["label"].as_str().unwrap_or("").into(), on: open, id: id_of(Ctl::LibSpot), index, ..cell(kind::FOLD, lx, ry, inner, 45.0) });
+                // (shut, the changes inside it are under the fold's own dot)
+                if !open {
+                    let inside = keys_in(fold["parts"].as_array().map_or(&[][..], |v| v.as_slice()));
+                    self.settings_dot(out, sec, id, inside, fold["label"].as_str().unwrap_or(""), lx, ry + 22.5);
+                }
                 ry += 45.0;
                 after_row = false;
                 if open {
@@ -1269,12 +1329,17 @@ impl Games {
         (ry, after_row)
     }
 
-    /// How many of a section's settings this game changes from Every game's.
+    /// How many of a section's settings this game changes from Every game's,
+    /// of those the section lays out (each under a dot: its row's, or a shut fold's).
     fn changed_here(&self, sec: &Section, id: &str) -> usize {
-        sec.desc["settings"].as_object().map_or(0, |m| m.iter().filter(|(k, d)| {
-            let (v, own, follows) = self.setting_value(&sec.plugin, k, d, id);
-            own && v != follows
-        }).count())
+        let settings = &sec.desc["settings"];
+        keys_in(sec.desc["layout"].as_array().map_or(&[][..], |v| v.as_slice()))
+            .iter()
+            .filter(|k| {
+                let (v, own, follows) = self.setting_value(&sec.plugin, k, &settings[k.as_str()], id);
+                own && v != follows
+            })
+            .count()
     }
 
     /// A plugin's section: its heading with its plugin's tag and, on a game's
@@ -1322,7 +1387,7 @@ impl Games {
                     out.push(line(lx, ry, inner));
                     out.push(text_cell(style::LABEL, lx, ry + 11.0, LABEL_W, 36.0, row["label"].as_str().unwrap_or("")));
                     let keys = row["cells"].as_array().into_iter().flatten().filter_map(|c| c.as_str().map(String::from)).collect();
-                    self.settings_dot(&mut out, sec, id, keys, lx, ry + 11.0 + 18.0);
+                    self.settings_dot(&mut out, sec, id, keys, row["label"].as_str().unwrap_or(""), lx, ry + 11.0 + 18.0);
                     for (i, c) in row["cells"].as_array().into_iter().flatten().enumerate() {
                         match c {
                             Value::String(key) => {
@@ -1347,7 +1412,7 @@ impl Games {
                         out.push(line(lx, ry, inner));
                     }
                     out.push(text_cell(style::LABEL, lx, ry + 13.0, LABEL_W, 36.0, &label));
-                    self.settings_dot(&mut out, sec, id, vec![key.clone()], lx, ry + 13.0 + 18.0);
+                    self.settings_dot(&mut out, sec, id, vec![key.clone()], &label, lx, ry + 13.0 + 18.0);
                     let dc = self.setting_cell(&sec.plugin, &key, &sec.desc, id, cx, ry + 13.0, DROP_W);
                     out.push(dc);
                     ry += 13.0 + 36.0;
@@ -1975,6 +2040,7 @@ impl Games {
         let Some(id) = self.open.clone().filter(|id| id != EVERY) else { return };
         let name = self.name(&id, seen);
         self.undo = Some(self.library.remove(&id));
+        self.reset_undo = None;
         self.tell_watch();
         self.open = None;
         self.say(format!("Removed {name} from the Library."), false);
@@ -1983,6 +2049,26 @@ impl Games {
     /// Undo, after Remove: the script back on its page, or the game or app
     /// back, and its page.
     pub fn undo(&mut self) {
+        if let Some(r) = self.reset_undo.take() {
+            // (each as it was, unless it's been chosen again since: that choice stays)
+            match r {
+                ResetUndo::Device { id, key, was } => {
+                    if self.library.choice(&id, &key).is_none() {
+                        self.library.set_choice(&id, &key, was);
+                    }
+                }
+                ResetUndo::Settings { id, plugin, was } => {
+                    let now = self.library.plugin_values(&id, &plugin);
+                    for (key, v) in was {
+                        if now.get(&key).is_none_or(|n| n.is_null()) {
+                            self.library.set_plugin_value(&id, &plugin, &key, v);
+                        }
+                    }
+                }
+            }
+            self.said = None;
+            return;
+        }
         if let Some(r) = self.script_undo.take() {
             self.library.restore_script(r);
             self.said = None;
@@ -2116,6 +2202,7 @@ impl Games {
         self.script_undo = self.library.remove_script(n);
         self.form = Form::None;
         self.undo = None;
+        self.reset_undo = None;
         self.say(format!("Removed the script {name}."), false);
     }
 

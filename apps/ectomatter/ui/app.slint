@@ -371,6 +371,8 @@ export struct MenuRow {
     chip: image,
     chipped: bool,
     edit: bool,
+    // a note's lines, where it takes more than one (its words wrap, its row as tall as they need)
+    lines: int,
 }
 
 // one of the window's own buttons: minimize, maximize, close
@@ -794,7 +796,7 @@ component Menu inherits Rectangle {
         mouse-drag-pan-enabled: false;
         list := VerticalLayout {
             for row[i] in root.rows: Rectangle {
-                height: row.kind == 1 ? 28px : row.kind == 2 ? 11px : 33px;
+                height: row.kind == 1 ? 28px : row.kind == 2 ? 11px : row.kind == 3 && row.lines > 1 ? 15px + row.lines * 17px : 33px;
                 background: (row.kind == 0 || row.kind == 4 || row.kind == 7) && (item.has-hover || (row.edit && pen.has-hover)) ? #ffffff12 : transparent;
                 border-radius: 7px;
                 if row.kind == 1: Text {
@@ -817,12 +819,14 @@ component Menu inherits Rectangle {
                 }
                 if row.kind == 3: Text {
                     x: 10px;
+                    width: parent.width - 20px;
                     height: parent.height;
                     text: row.label;
                     font-family: "Geist";
                     font-size: 13px;
                     color: Ink.quiet;
                     vertical-alignment: center;
+                    wrap: row.lines > 1 ? TextWrap.word-wrap : TextWrap.no-wrap;
                 }
                 // a way to somewhere else to find more (the Sensor Feed box in Settings), under the choices
                 if row.kind == 7: Text {

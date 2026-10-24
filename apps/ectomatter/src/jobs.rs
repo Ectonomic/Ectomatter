@@ -192,7 +192,7 @@ impl Names {
         }
     }
 
-    /// The scenes' jobs: each scene, the next, the one before, and none.
+    /// The scenes' jobs: each scene, the next, the one before, and off.
     pub fn scene_jobs(&self) -> Vec<Job> {
         if self.scenes.is_empty() {
             return Vec::new();

@@ -4605,7 +4605,8 @@ impl Front {
         let lists: [&Vec<Entry>; 7] = [&g.keys, &g.media, &g.mouse, &g.profiles, &g.layouts, &g.playlists, &g.board];
         let mut rows: Vec<MenuRow> = Vec::new();
         let mut choices: Vec<Choice> = Vec::new();
-        let row = |kind: i32, label: &str, tag: &str, tick: bool| MenuRow { kind, label: label.into(), tag: tag.into(), tick, sub: "".into(), ..Default::default() };
+        // (a note on as many lines as it takes in the menu's 268 for words, measured a little narrower)
+        let row = |kind: i32, label: &str, tag: &str, tick: bool| MenuRow { kind, label: label.into(), tag: tag.into(), tick, sub: "".into(), lines: if kind == 3 { crate::text::wrap(400, 13.0, label, 262.0).len() as i32 } else { 0 }, ..Default::default() };
         let q = m.query.trim().to_lowercase();
         // each job as a row: what choosing it does, and the row's kind (0, or 5 for one that
         // can't be given now)
@@ -4614,7 +4615,7 @@ impl Front {
         let (others, own_macros, scene_jobs) = self.device_jobs();
         // (the jobs Ectomatter does for a key share the keyboard's seven spare codes with
         // the playlists: once keys use all seven, a page with a row that can't be given says why)
-        let full = "Seven keys already have jobs Ectomatter does, the most the keyboard allows. Give one of those keys a different job to make room.";
+        let full = "The keyboard has room for seven of Ectomatter’s jobs, playlists included, and keys on your profiles fill all seven. To make room, give the keys that have one of them something else to do.";
         let job_key = self.is_job_key(&def);
         let def_tag = self.key_tag(&def);
         // a searchable list, as pickList draws it
@@ -4745,7 +4746,7 @@ impl Front {
         self.ui.set_menu_placeholder(placeholder.into());
         // its height as the page lays its rows out: Slint lays a list's rows out
         // only as it draws them, so the window works it out
-        let list: f32 = rows.iter().map(|r| match r.kind { 1 => 28.0, 2 => 11.0, _ => 33.0 }).sum();
+        let list: f32 = rows.iter().map(|r| match r.kind { 1 => 28.0, 2 => 11.0, 3 if r.lines > 1 => 15.0 + 17.0 * r.lines as f32, _ => 33.0 }).sum();
         self.ui.set_menu_natural(6.0 + if back { 33.0 } else { 0.0 } + 33.0 + 6.0 + list + 6.0);
         self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
         if let Some(m) = &mut self.menu {
