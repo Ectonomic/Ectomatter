@@ -16,6 +16,10 @@
 //! into ECTOMATTER_DUMP when it reads the keyboard), clicks where
 //! ECTOMATTER_CLICKS says ("x,y;x,y", logical pixels) and types
 //! ECTOMATTER_TYPE, so each state of the page can be checked offscreen.
+//!
+//! `ectomatter --hide` starts into the tray, as it starts at login.
+//! `ectomatter --move-game-helper` moves every game whose launch line in Steam
+//! runs game-helper to start through Ectomatter, and stops.
 
 // A function that can only call itself is a crash waiting for its caller, so
 // it stops the build rather than warning (one slipped through in 1da0b0b).
@@ -2075,6 +2079,11 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
     launcher::listen(starts_tx);
     let (tray_tx, tray_rx) = calloop::channel::channel::<tray::TrayAsk>();
     app.tray = tray::start(tray_tx);
+    // `--hide`: started into the tray, as at login (with no tray to start into,
+    // the window shows, since closing it would quit)
+    if std::env::args().any(|a| a == "--hide") && app.tray.is_some() {
+        app.hide();
+    }
     event_loop
         .handle()
         .insert_source(tray_rx, |e, _, app: &mut App| {
@@ -2656,6 +2665,11 @@ impl App {
         self.front.set_hidden(false);
         self.full = true;
         self.window.commit();
+        // (one hidden before it was first shown, as at login, has its size already: the
+        // compositor sends nothing new, so it's drawn now)
+        if self.configured {
+            self.draw();
+        }
     }
 
     /// The keyboard came back drawn at a size, for its page or (`home`) for
