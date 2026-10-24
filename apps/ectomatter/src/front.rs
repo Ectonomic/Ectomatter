@@ -3064,6 +3064,12 @@ impl Front {
                 self.refresh();
                 return;
             }
+            Ctl::LibReset => {
+                self.close_menu();
+                self.games.reset_picked(index);
+                self.refresh();
+                return;
+            }
             Ctl::LibText => {
                 self.games.text_done(_anchor.0 as u8);
                 self.refresh();

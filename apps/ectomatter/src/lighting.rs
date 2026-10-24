@@ -97,6 +97,9 @@ pub enum Ctl {
     LibSpot,
     LibCheck,
     LibText,
+    /// a dot beside a label on a game's page, by its place among the page's
+    /// (games_page.rs, Reset): the row the game changed, put back to Every game's
+    LibReset,
     /// the scene form's name, Whole desk or Each device, a wave's way, a color,
     /// a speed, a device's effect, a plugin device's profile
     SceneName,
@@ -108,7 +111,7 @@ pub enum Ctl {
     ScenePlugin,
 }
 
-const CTLS: [Ctl; 58] = [
+const CTLS: [Ctl; 59] = [
     Ctl::None,
     Ctl::Paint,
     Ctl::Demo,
@@ -160,6 +163,7 @@ const CTLS: [Ctl; 58] = [
     Ctl::LibSpot,
     Ctl::LibCheck,
     Ctl::LibText,
+    Ctl::LibReset,
     Ctl::SceneName,
     Ctl::SceneLights,
     Ctl::SceneWay,
@@ -224,6 +228,9 @@ pub mod kind {
     pub const TIP: i32 = 52;
     /// a fold's heading in a plugin's section, which opens and shuts it
     pub const FOLD: i32 = 53;
+    /// a dot beside a label on a game's page, where the game changed the row from
+    /// Every game's: selecting it puts the row back; what it does under the pointer
+    pub const RESET: i32 = 54;
 }
 /// the text styles
 #[allow(dead_code)]

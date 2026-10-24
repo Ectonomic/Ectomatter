@@ -110,6 +110,14 @@ pub enum Spot {
     PairAdd { plugin: String, key: String },
 }
 
+/// A row a game's page changed from Every game's, which its dot puts back:
+/// a device's (by its row's key), or a plugin's settings (by their keys).
+#[derive(Clone, Debug, PartialEq)]
+enum Reset {
+    Device(String),
+    Settings(String, Vec<String>),
+}
+
 /// The form for a variable in a plugin's section: whose and which setting
 /// it's in, and the variable being changed (none while one is added); its
 /// words are the window's own.
@@ -380,6 +388,8 @@ pub struct Games {
     /// the section's other controls, in the page's order; the folds open (by
     /// plugin and fold); what's being typed in a value's box, where, and when
     spots: Vec<Spot>,
+    /// the rows a game changed from Every game's, each by its dot's place
+    resets: Vec<Reset>,
     folds: HashSet<String>,
     typed: Option<(Spot, String, Instant)>,
     script_at: Vec<u64>,
@@ -440,6 +450,7 @@ impl Games {
             sections: Vec::new(),
             setting_at: Vec::new(),
             spots: Vec::new(),
+            resets: Vec::new(),
             folds: HashSet::new(),
             typed: None,
             script_at: Vec::new(),
@@ -808,6 +819,7 @@ impl Games {
         crate::front::set_rows(&self.apps, Vec::new());
         ui.set_gl_empty("".into());
         self.shown.clear();
+        self.resets.clear();
         let every = id == EVERY;
         let entry = all.iter().find(|e| e.id == id).cloned();
         let name = entry.as_ref().map_or_else(|| "Every game".to_string(), |e| e.name.clone());
@@ -875,7 +887,12 @@ impl Games {
             if k > 0 {
                 out.push(Cell { color: slint::Color::from_argb_u8(9, 255, 255, 255), ..cell(kind::BOX, lx, ry, w - 2.0 * PAD_X, 1.0) });
             }
-            let (c, own, _) = self.row_value(id, d);
+            let (c, own, follows) = self.row_value(id, d);
+            // (a game's own choice, unlike Every game's: a dot beside its name puts it back)
+            if game && !every && own && c != follows {
+                let mid = if d.sub.is_empty() { ry + 13.0 + 18.0 } else { ry + 9.0 + 10.0 };
+                self.reset_dot(&mut out, Reset::Device(d.key.clone()), lx, mid);
+            }
             // (the Scene row's glyph is the scenes' own)
             let glyph = if d.kind == "scene" { -1 } else { d.glyph.map_or((d.kind == "mouse") as i32, |g| 2 + g as i32) };
             out.push(Cell { style: glyph, ..cell(kind::DEVICE, lx, ry + 13.0, GLYPH, GLYPH) });
@@ -985,6 +1002,51 @@ impl Games {
         Cell { text: words.as_str().into(), style, on: self.menu == Some(Menu::Setting(k)), id: id_of(Ctl::LibSetting), index: k as i32, ..cell(kind::DROP, x, y, w, 36.0) }
     }
 
+    /// A dot beside a label that starts at `x`, its line's middle at `y`, on a game's
+    /// page for a row the game changed: selecting it puts the row back to Every game's.
+    fn reset_dot(&mut self, out: &mut Vec<Cell>, r: Reset, x: f32, y: f32) {
+        self.resets.push(r);
+        let index = (self.resets.len() - 1) as i32;
+        // (the dot 13 left of the label, as the mock's, in a place to press round it)
+        out.push(Cell { text: "Changed for this game. Select the dot to go back to Every game’s.".into(), id: id_of(Ctl::LibReset), index, ..cell(kind::RESET, x - 20.0, y - 10.0, 20.0, 20.0) });
+    }
+
+    /// A row's dot in a plugin's section, on a game's page where the game changed
+    /// one of the row's settings (`keys`) from Every game's: it puts back every
+    /// one of them the game has its own of.
+    fn settings_dot(&mut self, out: &mut Vec<Cell>, sec: &Section, id: &str, keys: Vec<String>, x: f32, y: f32) {
+        if id == EVERY || !self.library.is_game(id) {
+            return;
+        }
+        let mut changed = false;
+        let mut own_keys = Vec::new();
+        for k in keys {
+            let (v, own, follows) = self.setting_value(&sec.plugin, &k, &sec.desc["settings"][k.as_str()], id);
+            if own {
+                changed |= v != follows;
+                own_keys.push(k);
+            }
+        }
+        if changed {
+            self.reset_dot(out, Reset::Settings(sec.plugin.clone(), own_keys), x, y);
+        }
+    }
+
+    /// A row's dot selected: the row goes back to Every game's.
+    pub fn reset_picked(&mut self, k: usize) {
+        self.commit_typed();
+        self.menu = None;
+        let (Some(r), Some(id)) = (self.resets.get(k).cloned(), self.open.clone()) else { return };
+        match r {
+            Reset::Device(key) => self.library.set_choice(&id, &key, None),
+            Reset::Settings(plugin, keys) => {
+                for key in keys {
+                    self.library.set_plugin_value(&id, &plugin, &key, None);
+                }
+            }
+        }
+    }
+
     /// A setting's place among the section's other controls, its piece's index.
     fn spot(&mut self, s: Spot) -> i32 {
         self.spots.push(s);
@@ -1002,6 +1064,9 @@ impl Games {
         let cw = w - PAD_X - (cx - x0);
         let settings = &sec.desc["settings"];
         out.push(text_cell(style::LABEL, lx, ry + 13.0, LABEL_W, 36.0, row["label"].as_str().unwrap_or("")));
+        let shown = row["show"].as_array().into_iter().flatten().filter_map(|k| k.as_str().map(String::from));
+        let nested = row["nest"].as_array().into_iter().flatten().filter_map(|n| n["show"].as_str().map(String::from));
+        self.settings_dot(out, sec, id, shown.chain(nested).collect(), lx, ry + 13.0 + 18.0);
         // each piece down the column: the first on the label's line, the rest under it
         let mut col = Column { y: ry + 13.0, first: true };
         if let Some(st) = row.get("status") {
@@ -1256,6 +1321,8 @@ impl Games {
                 for row in grid["rows"].as_array().into_iter().flatten() {
                     out.push(line(lx, ry, inner));
                     out.push(text_cell(style::LABEL, lx, ry + 11.0, LABEL_W, 36.0, row["label"].as_str().unwrap_or("")));
+                    let keys = row["cells"].as_array().into_iter().flatten().filter_map(|c| c.as_str().map(String::from)).collect();
+                    self.settings_dot(&mut out, sec, id, keys, lx, ry + 11.0 + 18.0);
                     for (i, c) in row["cells"].as_array().into_iter().flatten().enumerate() {
                         match c {
                             Value::String(key) => {
@@ -1280,6 +1347,7 @@ impl Games {
                         out.push(line(lx, ry, inner));
                     }
                     out.push(text_cell(style::LABEL, lx, ry + 13.0, LABEL_W, 36.0, &label));
+                    self.settings_dot(&mut out, sec, id, vec![key.clone()], lx, ry + 13.0 + 18.0);
                     let dc = self.setting_cell(&sec.plugin, &key, &sec.desc, id, cx, ry + 13.0, DROP_W);
                     out.push(dc);
                     ry += 13.0 + 36.0;

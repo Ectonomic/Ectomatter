@@ -1283,6 +1283,50 @@ component CellView inherits Rectangle {
             clicked => { root.pick(root.c.id, root.c.index, 0, 0, 0); }
         }
     }
+    // a dot beside a label on a game's page, where the game changed the row from Every
+    // game's: selecting it puts the row back; under the pointer, a well round it and, a
+    // while after the pointer comes to rest, what it does (`text`), in a box like the tip's
+    if root.c.kind == 54: Rectangle {
+        reset-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.pick(root.c.id, root.c.index, 0, 0, 0); }
+        }
+        Rectangle {
+            width: 20px;
+            height: 20px;
+            border-radius: 10px;
+            background: reset-ta.has-hover ? #ffffff14 : transparent;
+        }
+        Rectangle {
+            width: 6px;
+            height: 6px;
+            border-radius: 3px;
+            background: Ink.ink;
+        }
+        Tooltip {
+            Rectangle {
+                border-radius: 8px;
+                background: Ink.hover-box;
+                border-width: 1px;
+                border-color: #3a3a41;
+                drop-shadow-blur: 16px;
+                drop-shadow-offset-y: 4px;
+                drop-shadow-color: #00000080;
+                VerticalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    padding-top: 7px;
+                    padding-bottom: 7px;
+                    Text {
+                        text: root.c.text;
+                        font-family: "Geist";
+                        font-size: 12.5px;
+                        color: Ink.bright;
+                    }
+                }
+            }
+        }
+    }
     // over a device's name in the Sensor Feed box: under the pointer, a while after it comes to
     // rest, its whole name where the row's is shorter (`text`), and where its readings come
     // from (`fill`), in a box like the app's menus
