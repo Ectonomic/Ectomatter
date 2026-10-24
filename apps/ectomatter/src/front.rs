@@ -426,6 +426,17 @@ pub enum WindowAsk {
     ShowSettings,
 }
 
+/// A menu `w` wide's notes set to wrap, each on as many lines as its words
+/// take there (in the menu's room for them, its 6s and the note's 10s off,
+/// measured a little narrower); and the height its rows take as the menu lays
+/// them out: a heading 28, a line 11, a note of lines 15 and 17 a line, the rest 33.
+fn fit_notes(rows: &mut [MenuRow], w: f32) -> f32 {
+    for r in rows.iter_mut().filter(|r| r.kind == 3) {
+        r.lines = crate::text::wrap(400, 13.0, &r.label, w - 12.0 - 20.0 - 6.0).len() as i32;
+    }
+    rows.iter().map(|r| match r.kind { 1 => 28.0, 2 => 11.0, 3 if r.lines > 1 => 15.0 + 17.0 * r.lines as f32, _ => 33.0 }).sum()
+}
+
 /// What a row of Home's Scenes menu does: No scene, a scene turned on (or
 /// off, the one on), New scene…; a line between groups does nothing.
 #[derive(Clone, Debug, PartialEq)]
@@ -4605,8 +4616,7 @@ impl Front {
         let lists: [&Vec<Entry>; 7] = [&g.keys, &g.media, &g.mouse, &g.profiles, &g.layouts, &g.playlists, &g.board];
         let mut rows: Vec<MenuRow> = Vec::new();
         let mut choices: Vec<Choice> = Vec::new();
-        // (a note on as many lines as it takes in the menu's 268 for words, measured a little narrower)
-        let row = |kind: i32, label: &str, tag: &str, tick: bool| MenuRow { kind, label: label.into(), tag: tag.into(), tick, sub: "".into(), lines: if kind == 3 { crate::text::wrap(400, 13.0, label, 262.0).len() as i32 } else { 0 }, ..Default::default() };
+        let row = |kind: i32, label: &str, tag: &str, tick: bool| MenuRow { kind, label: label.into(), tag: tag.into(), tick, sub: "".into(), ..Default::default() };
         let q = m.query.trim().to_lowercase();
         // each job as a row: what choosing it does, and the row's kind (0, or 5 for one that
         // can't be given now)
@@ -4746,7 +4756,8 @@ impl Front {
         self.ui.set_menu_placeholder(placeholder.into());
         // its height as the page lays its rows out: Slint lays a list's rows out
         // only as it draws them, so the window works it out
-        let list: f32 = rows.iter().map(|r| match r.kind { 1 => 28.0, 2 => 11.0, 3 if r.lines > 1 => 15.0 + 17.0 * r.lines as f32, _ => 33.0 }).sum();
+        // (the action menu is 300 wide)
+        let list = fit_notes(&mut rows, 300.0);
         self.ui.set_menu_natural(6.0 + if back { 33.0 } else { 0.0 } + 33.0 + 6.0 + list + 6.0);
         self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
         if let Some(m) = &mut self.menu {
@@ -6310,8 +6321,8 @@ impl Front {
 
     /// A small menu of `rows`, `w` wide, open from `anchor`: under it where
     /// it fits, over it where there's more room there.
-    fn hang_menu(&mut self, rows: Vec<MenuRow>, w: f32, anchor: (f32, f32, f32)) {
-        let h = 6.0 + rows.iter().map(|r| match r.kind { 1 => 28.0, 2 => 11.0, _ => 33.0 }).sum::<f32>() + 6.0;
+    fn hang_menu(&mut self, mut rows: Vec<MenuRow>, w: f32, anchor: (f32, f32, f32)) {
+        let h = 6.0 + fit_notes(&mut rows, w) + 6.0;
         self.ui.set_menu_search(false);
         self.ui.set_menu_back(false);
         self.ui.set_menu_natural(h);
@@ -7586,7 +7597,7 @@ impl Front {
         if rows.is_empty() && kind == crate::mouse::DEVICES_KIND {
             rows.push(MenuRow { kind: 3, label: "Plug in another device to give this button one of its jobs.".into(), tag: "".into(), tick: false, sub: "".into(), ..Default::default() });
         }
-        let h = 6.0 + rows.len() as f32 * 33.0 + 6.0;
+        let h = 6.0 + fit_notes(&mut rows, 260.0) + 6.0;
         self.ui.set_menu_search(false);
         self.ui.set_menu_back(false);
         self.ui.set_menu_natural(h);
@@ -7774,17 +7785,16 @@ impl Front {
             rows.push(MenuRow { kind: 0, label: t.name().into(), tag: "".into(), tick: t == e.comes_in, sub: "".into(), ..Default::default() });
         }
         // the only turn: nothing comes in after it, so its way in waits for another
-        // (the menu as wide as the line, which doesn't wrap)
+        // (the menu as wide as the line, on one line: its 6s, the note's 10s and room to spare)
         let mut w = 200.0f32;
         if self.screens.turns(self.page.editing).len() == 1 {
             let note = "Plays once the playlist has a second layout.";
-            w = w.max(crate::text::width(400, 13.0, note) + 34.0).ceil();
+            w = w.max(crate::text::width(400, 13.0, note) + 44.0).ceil();
             rows.push(MenuRow { kind: 3, label: note.into(), tag: "".into(), tick: false, sub: "".into(), ..Default::default() });
         }
         self.close_menu();
         self.close_picker();
-        let list: f32 = rows.iter().map(|r| if r.kind == 1 { 28.0 } else { 33.0 }).sum();
-        let h = 6.0 + list + 6.0;
+        let h = 6.0 + fit_notes(&mut rows, w) + 6.0;
         self.ui.set_menu_search(false);
         self.ui.set_menu_back(false);
         self.ui.set_menu_natural(h);

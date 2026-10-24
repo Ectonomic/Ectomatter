@@ -128,27 +128,30 @@ enum ResetUndo {
 }
 
 /// The settings a section's layout parts show, wherever they're laid out:
-/// in a row (and nested under it), a grid's row, a list of them, or inside
-/// a fold, open or shut. (A setting no part shows now, such as one nested
-/// under a box that's unticked, does nothing, so it counts as no change.)
-fn keys_in(parts: &[Value]) -> Vec<String> {
+/// in a row (and nested under it), a grid's row or a list of them (at the
+/// section's top, where the page draws those: `top`), or inside a fold,
+/// open or shut. (A setting no part shows now, such as one nested under a
+/// box that's unticked, does nothing, so it counts as no change.)
+fn keys_in(parts: &[Value], top: bool) -> Vec<String> {
     let mut out = Vec::new();
     for part in parts {
         if let Some(row) = part.get("row") {
             out.extend(row["show"].as_array().into_iter().flatten().filter_map(|k| k.as_str().map(String::from)));
             out.extend(row["nest"].as_array().into_iter().flatten().filter_map(|n| n["show"].as_str().map(String::from)));
         }
-        for r in part["grid"]["rows"].as_array().into_iter().flatten() {
-            out.extend(r["cells"].as_array().into_iter().flatten().filter_map(|c| c.as_str().map(String::from)));
-        }
-        for item in part["show"].as_array().into_iter().flatten() {
-            match item {
-                Value::String(k) => out.push(k.clone()),
-                o => out.extend(o["id"].as_str().map(String::from)),
+        if top {
+            for r in part["grid"]["rows"].as_array().into_iter().flatten() {
+                out.extend(r["cells"].as_array().into_iter().flatten().filter_map(|c| c.as_str().map(String::from)));
+            }
+            for item in part["show"].as_array().into_iter().flatten() {
+                match item {
+                    Value::String(k) => out.push(k.clone()),
+                    o => out.extend(o["id"].as_str().map(String::from)),
+                }
             }
         }
         if let Some(inside) = part["fold"]["parts"].as_array() {
-            out.extend(keys_in(inside));
+            out.extend(keys_in(inside, false));
         }
     }
     out.sort();
@@ -634,6 +637,10 @@ impl Games {
     }
 
     pub fn say(&mut self, s: impl Into<String>, bad: bool) {
+        // (the bar's Undo goes with the words it was beside: one said after sets its own)
+        self.undo = None;
+        self.script_undo = None;
+        self.reset_undo = None;
         self.said = Some((s.into(), bad, Instant::now()));
     }
 
@@ -1080,12 +1087,11 @@ impl Games {
         self.commit_typed();
         self.menu = None;
         let (Some(r), Some(id)) = (self.resets.get(k).cloned(), self.open.clone()) else { return };
-        let label = match r {
+        let (label, undo) = match r {
             Reset::Device { key, label } => {
                 let was = self.library.choice(&id, &key);
                 self.library.set_choice(&id, &key, None);
-                self.reset_undo = Some(ResetUndo::Device { id, key, was });
-                label
+                (label, ResetUndo::Device { id, key, was })
             }
             Reset::Settings { plugin, keys, label } => {
                 let mine = self.library.plugin_values(&id, &plugin);
@@ -1093,13 +1099,11 @@ impl Games {
                 for key in &keys {
                     self.library.set_plugin_value(&id, &plugin, key, None);
                 }
-                self.reset_undo = Some(ResetUndo::Settings { id, plugin, was });
-                label
+                (label, ResetUndo::Settings { id, plugin, was })
             }
         };
-        self.undo = None;
-        self.script_undo = None;
         self.say(format!("Put {label} back to Every game’s."), false);
+        self.reset_undo = Some(undo);
     }
 
     /// A setting's place among the section's other controls, its piece's index.
@@ -1315,7 +1319,7 @@ impl Games {
                 out.push(Cell { text: fold["label"].as_str().unwrap_or("").into(), on: open, id: id_of(Ctl::LibSpot), index, ..cell(kind::FOLD, lx, ry, inner, 45.0) });
                 // (shut, the changes inside it are under the fold's own dot)
                 if !open {
-                    let inside = keys_in(fold["parts"].as_array().map_or(&[][..], |v| v.as_slice()));
+                    let inside = keys_in(fold["parts"].as_array().map_or(&[][..], |v| v.as_slice()), false);
                     self.settings_dot(out, sec, id, inside, fold["label"].as_str().unwrap_or(""), lx, ry + 22.5);
                 }
                 ry += 45.0;
@@ -1333,7 +1337,7 @@ impl Games {
     /// of those the section lays out (each under a dot: its row's, or a shut fold's).
     fn changed_here(&self, sec: &Section, id: &str) -> usize {
         let settings = &sec.desc["settings"];
-        keys_in(sec.desc["layout"].as_array().map_or(&[][..], |v| v.as_slice()))
+        keys_in(sec.desc["layout"].as_array().map_or(&[][..], |v| v.as_slice()), true)
             .iter()
             .filter(|k| {
                 let (v, own, follows) = self.setting_value(&sec.plugin, k, &settings[k.as_str()], id);
@@ -1573,8 +1577,10 @@ impl Games {
         let mut own: Vec<String> = Vec::new();
         // each setting the page chose itself, by its column's name where it's in a grid
         let columns: Vec<(String, String)> = sec.desc["layout"].as_array().into_iter().flatten().filter_map(|p| p["grid"]["columns"].as_array()).flatten().map(|c| (c["id"].as_str().unwrap_or("").to_string(), c["label"].as_str().unwrap_or("").to_string())).collect();
+        // (those the section lays out, as its head counts them)
+        let laid = keys_in(sec.desc["layout"].as_array().map_or(&[][..], |v| v.as_slice()), true);
         if let Some(m) = sec.desc["settings"].as_object() {
-            for (k, d) in m {
+            for (k, d) in m.iter().filter(|(k, _)| laid.contains(k)) {
                 let (v, chosen, follows) = self.setting_value(&sec.plugin, k, d, id);
                 let changes = if every { v != d["default"] } else { chosen && v != follows };
                 if !changes {
@@ -2039,11 +2045,11 @@ impl Games {
     pub fn remove(&mut self, seen: &crate::front_app::Seen) {
         let Some(id) = self.open.clone().filter(|id| id != EVERY) else { return };
         let name = self.name(&id, seen);
-        self.undo = Some(self.library.remove(&id));
-        self.reset_undo = None;
+        let removed = self.library.remove(&id);
         self.tell_watch();
         self.open = None;
         self.say(format!("Removed {name} from the Library."), false);
+        self.undo = Some(removed);
     }
 
     /// Undo, after Remove: the script back on its page, or the game or app
@@ -2199,11 +2205,10 @@ impl Games {
         let Form::Script(f) = self.form.clone() else { return };
         let Some(n) = f.editing else { return };
         let name = self.library.script(n).map(|s| s.name).unwrap_or_default();
-        self.script_undo = self.library.remove_script(n);
+        let removed = self.library.remove_script(n);
         self.form = Form::None;
-        self.undo = None;
-        self.reset_undo = None;
         self.say(format!("Removed the script {name}."), false);
+        self.script_undo = removed;
     }
 
     pub fn script_wait(&mut self) {
