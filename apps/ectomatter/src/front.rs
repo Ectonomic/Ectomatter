@@ -4615,7 +4615,7 @@ impl Front {
         let (others, own_macros, scene_jobs) = self.device_jobs();
         // (the jobs Ectomatter does for a key share the keyboard's seven spare codes with
         // the playlists: once keys use all seven, a page with a row that can't be given says why)
-        let full = "The keyboard has room for seven of Ectomatter’s jobs, playlists included, and keys on your profiles fill all seven. To make room, give the keys that have one of them something else to do.";
+        let full = "The keyboard has room for seven of Ectomatter’s jobs, playlists included, and keys on your profiles fill all seven. To make room, give the keys that have one of those jobs something else to do.";
         let job_key = self.is_job_key(&def);
         let def_tag = self.key_tag(&def);
         // a searchable list, as pickList draws it
