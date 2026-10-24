@@ -1076,6 +1076,12 @@ impl Page {
         // (a macro, or another device's job, is Ectomatter's to do: the mouse keeps only a sign for it)
         let note = if !self.job_known(i) {
             "The mouse can’t tell Ectomatter what this button does. Giving it a job sets all eight buttons, and the others get their factory jobs.".into()
+        } else if let Some(crate::jobs::Job::Scene(crate::jobs::SceneTo::Id(id))) = crate::jobs::Job::read(&job).filter(|_| kind_of(&job) == DEVICES_KIND) {
+            if self.names.scenes.iter().any(|(k, _)| *k == id) {
+                "Ectomatter does this while it’s running. With Ectomatter closed, this button does nothing.".into()
+            } else {
+                "The scene this button turned on was deleted, so the button does nothing until you give it another job.".into()
+            }
         } else if kind_of(&job) == DEVICES_KIND {
             "Ectomatter does this while it’s running. With Ectomatter closed, this button does nothing.".into()
         } else if kind_of(&job) == MACRO_KIND {

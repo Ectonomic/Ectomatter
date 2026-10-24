@@ -1465,7 +1465,7 @@ mod tests {
         // then the scenes, each by its name, the next, the one before and none
         let scenes = rows.iter().position(|r| *r == (1, "Scenes".to_string())).unwrap();
         assert!(scenes > mouse);
-        assert_eq!(rows[scenes + 1..], [(0, "Wave across the desk".into()), (0, "DOOM".into()), (0, "Next scene".into()), (0, "Previous scene".into()), (0, "No scene".into())]);
+        assert_eq!(rows[scenes + 1..], [(0, "Wave across the desk".into()), (0, "DOOM".into()), (0, "Next scene".into()), (0, "Previous scene".into()), (0, "Scene off".into())]);
         choose(&mut mp, &mut page, "FPS Gaming", 0);
         mp.ui.invoke_tool(6, 0.0, 0.0, 30.0);
         mp.act(&mut page, &|_| {});

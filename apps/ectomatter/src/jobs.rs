@@ -188,7 +188,7 @@ impl Names {
             },
             Job::Scene(SceneTo::Next) => "Next scene".into(),
             Job::Scene(SceneTo::Previous) => "Previous scene".into(),
-            Job::Scene(SceneTo::Off) => "No scene".into(),
+            Job::Scene(SceneTo::Off) => "Scene off".into(),
         }
     }
 
@@ -309,8 +309,8 @@ mod tests {
     fn both_devices_are_offered_the_scenes() {
         let names = Names { scenes: vec![("wave".into(), "Wave across the desk".into()), ("scene-1".into(), "DOOM".into())], macros: vec![(1, "Copy".into())], ..Default::default() };
         let words = |d| names.for_device(d).into_iter().map(|(w, _)| w).collect::<Vec<_>>();
-        assert_eq!(words(MOUSE), ["Scene: Wave across the desk", "Scene: DOOM", "Next scene", "Previous scene", "No scene"]);
-        assert_eq!(words(KEYBOARD), ["Scene: Wave across the desk", "Scene: DOOM", "Next scene", "Previous scene", "No scene", "Copy"]);
+        assert_eq!(words(MOUSE), ["Scene: Wave across the desk", "Scene: DOOM", "Next scene", "Previous scene", "Scene off"]);
+        assert_eq!(words(KEYBOARD), ["Scene: Wave across the desk", "Scene: DOOM", "Next scene", "Previous scene", "Scene off", "Copy"]);
         assert_eq!(names.of(&Job::Scene(SceneTo::Id("gone".into()))), "Scene: a deleted scene");
     }
 
