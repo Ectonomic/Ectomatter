@@ -74,7 +74,7 @@ pub enum NewFrom {
 /// ships that was deleted, to put back as it shipped; and what each row makes (None for the
 /// rules and the headings).
 pub fn new_rows(library: &[crate::lcd_page::Page]) -> (Vec<MenuRow>, Vec<Option<NewFrom>>) {
-    let row = |kind: i32, label: &str| MenuRow { kind, label: label.into(), tag: "".into(), tick: false, sub: "".into() };
+    let row = |kind: i32, label: &str| MenuRow { kind, label: label.into(), tag: "".into(), tick: false, sub: "".into(), ..Default::default() };
     let mut rows = vec![row(0, "From scratch"), row(2, ""), row(1, "Duplicate a layout")];
     let mut made = vec![Some(NewFrom::Scratch), None, None];
     for p in library {
@@ -198,9 +198,16 @@ pub enum Ask {
     DeskAddPad(f32, f32, f32),
     DeskPadSize(f32, f32, f32),
     DeskDrawCancel,
-    /// the desk's light: its menu, on Home; the next of its frames
-    DeskLightMenu(f32, f32, f32),
-    DeskLightFrame,
+    /// scenes: Home's Scenes menu, where its button is; the next of the scene's
+    /// frames; a scene's pencil in a menu; the scene form's effect tiles, its
+    /// Cancel (or Escape, or a press off it), its Create or Save, its Delete
+    SceneMenu(f32, f32, f32),
+    SceneFrame,
+    MenuEdit(i32),
+    SceneTile(i32),
+    SceneFormClose,
+    SceneFormDone,
+    SceneFormDelete,
     /// the rebindings shown on the keyboard, or not
     ShowRebindings,
     Move,
@@ -418,6 +425,46 @@ pub enum WindowAsk {
 }
 
 /// The pads' menus on Home: Add pad's, and the chosen pad's Size.
+/// What a row of Home's Scenes menu does: No scene, a scene turned on (or
+/// off, the one on), New scene…; a line between groups does nothing.
+#[derive(Clone, Debug, PartialEq)]
+enum SceneRow {
+    Off,
+    Scene(String),
+    New,
+    Line,
+}
+
+/// The scene form, open over the page: the scene it changes (none for a new
+/// one), and what it holds so far: the name, whether one effect lights the
+/// whole desk, that effect, each device's part (the keyboard's and the
+/// mouse's, by their keys) and each plugin device's profile.
+struct SceneForm {
+    editing: Option<String>,
+    name: String,
+    desk: bool,
+    look: crate::scenes::Look,
+    parts: Vec<(String, crate::scenes::Part)>,
+    plugins: Vec<(String, String)>,
+}
+
+impl SceneForm {
+    /// The scene as the form has it now: to play while the form is open, and to keep.
+    fn scene(&self) -> crate::scenes::Scene {
+        use crate::scenes::{Lights, Scene};
+        let lights = if self.desk { Lights::Desk(self.look.clone()) } else { Lights::Each(self.parts.clone()) };
+        Scene { id: self.editing.clone().unwrap_or_default(), name: self.name.clone(), lights, plugins: self.plugins.clone(), built_in: false }
+    }
+}
+
+/// The scene form's dropdown open: a device's effect (by its key), or a
+/// plugin device's profile (by its id).
+#[derive(Clone, Debug, PartialEq)]
+enum FormMenu {
+    Part(String),
+    Plugin(String),
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum PadMenu {
     Add,
@@ -647,6 +694,8 @@ pub struct Front {
     /// the effects' tiles' pictures, for the scale and the effects they were drawn for
     icons: Option<(f32, Vec<String>, Vec<slint::Image>)>,
     cells: Rc<VecModel<Cell>>,
+    /// the scene form's pieces, under its preview
+    scene_cells: Rc<VecModel<Cell>>,
     /// the Where and when box's pieces; the zones chosen for each profile's
     /// effects, kept while the whole keyboard is lit; the setting whose menu
     /// is open (by its place in the effect's settings); the zone the pointer
@@ -723,18 +772,30 @@ pub struct Front {
     mouse_down: u8,
     /// the lights' effects played on the picture, 30 frames a second, while they move
     mouse_frames: Option<slint::Timer>,
-    /// the desk's light (see desk_light.rs): its effect, from when, its
-    /// frames' timer, when each device was last sent its part (the mouse's
-    /// with the colors it was sent), the colors it gives now (each key by its
-    /// place, the mouse's logo and wheel), and whether its menu is open
-    desk_light: crate::desk_light::Effect,
-    desk_light_t0: Instant,
-    desk_light_timer: Option<slint::Timer>,
-    desk_light_mouse: (Option<Instant>, [[u8; 3]; 2]),
-    desk_colors: (HashMap<u32, [u8; 3]>, [Option<[u8; 3]>; 2]),
-    desk_light_menu: bool,
-    /// the devices out of the desk's light as its last frame went, the
-    /// keyboard and the mouse: each while its own Lighting page shows
+    /// the scene on (see scenes.rs), by id: chosen by hand, or by a game or app
+    /// in front; from when it plays, its frames' timer, when the mouse was
+    /// last sent its part (with the colors it was sent), the colors it gives
+    /// now (each key by its place, the mouse's logo and wheel), and whether
+    /// it is sending each device its part now (the keyboard, the mouse)
+    scene: Option<String>,
+    scene_t0: Instant,
+    scene_timer: Option<slint::Timer>,
+    scene_mouse: (Option<Instant>, [[u8; 3]; 2]),
+    scene_colors: (HashMap<u32, [u8; 3]>, [Option<[u8; 3]>; 2]),
+    scene_claim: (bool, bool),
+    /// the scene a game or app in front switched from, to go back to as it leaves
+    scene_back: Option<Option<String>>,
+    /// the profile each plugin's device plays for the scene (OpenRGB's), by plugin/device,
+    /// and when the plugins' devices were last looked at for it
+    scene_plugins: HashMap<String, String>,
+    scene_plugins_at: Instant,
+    /// Home's Scenes menu, open: what each of its rows does
+    scene_menu: Option<Vec<SceneRow>>,
+    /// the scene form, open, and its dropdown, open
+    scene_form: Option<SceneForm>,
+    scene_form_menu: Option<FormMenu>,
+    /// the devices out of the scene as its last frame went, the keyboard and
+    /// the mouse: each while its own Lighting page shows
     desk_aside: (bool, bool),
     /// Add pad's menu open, or the chosen pad's Size menu
     pad_menu: Option<PadMenu>,
@@ -1000,7 +1061,12 @@ impl Front {
         on!(on_desk_add_pad, |x, y, h| Ask::DeskAddPad(x, y, h));
         on!(on_desk_pad_size_menu, |x, y, h| Ask::DeskPadSize(x, y, h));
         on!(on_desk_draw_cancel, Ask::DeskDrawCancel);
-        on!(on_desk_light_menu, |x, y, h| Ask::DeskLightMenu(x, y, h));
+        on!(on_scene_menu, |x, y, h| Ask::SceneMenu(x, y, h));
+        on!(on_menu_edit, |i| Ask::MenuEdit(i));
+        on!(on_scene_tile, |i| Ask::SceneTile(i));
+        on!(on_scene_form_close, Ask::SceneFormClose);
+        on!(on_scene_form_done, Ask::SceneFormDone);
+        on!(on_scene_form_delete, Ask::SceneFormDelete);
         on!(on_mouse_effect, |i| Ask::MouseEffect(i));
         on!(on_rail, |p| Ask::Rail(p.to_string()));
         on!(on_gl_tab_chosen, |i| Ask::GlTab(i));
@@ -1142,12 +1208,18 @@ impl Front {
             mouse_shows: (None, None),
             mouse_down: 0,
             mouse_frames: None,
-            desk_light: crate::desk_light::Effect::Off,
-            desk_light_t0: Instant::now(),
-            desk_light_timer: None,
-            desk_light_mouse: (None, [[0; 3]; 2]),
-            desk_colors: Default::default(),
-            desk_light_menu: false,
+            scene: None,
+            scene_t0: Instant::now(),
+            scene_timer: None,
+            scene_mouse: (None, [[0; 3]; 2]),
+            scene_colors: Default::default(),
+            scene_claim: (false, false),
+            scene_back: None,
+            scene_plugins: HashMap::new(),
+            scene_plugins_at: Instant::now(),
+            scene_menu: None,
+            scene_form: None,
+            scene_form_menu: None,
             desk_aside: (false, false),
             pad_menu: None,
             mouse_hdr: None,
@@ -1216,6 +1288,7 @@ impl Front {
             preview_again: false,
             icons: None,
             cells: Rc::new(VecModel::default()),
+            scene_cells: Rc::new(VecModel::default()),
             place_cells: Rc::new(VecModel::default()),
             areas: HashMap::new(),
             light_menu: None,
@@ -1333,14 +1406,21 @@ impl Front {
             let _ = f.settings.set("plugins.weather-feed", v);
         }
         f.hand_values(None);
-        // the desk's light, as it was left playing
-        let light = f.settings.get("desk.light").and_then(|v| v.as_str().map(crate::desk_light::Effect::of)).unwrap_or(crate::desk_light::Effect::Off);
-        if light != crate::desk_light::Effect::Off && controlled {
-            f.set_desk_light(light);
+        // the scene, as it was left on (the setting Home kept before there were scenes, taken in as it)
+        if let Some(old) = f.settings.take("desk.light") {
+            if f.settings.get("scene").is_none() {
+                let _ = f.settings.set("scene", old.as_str().and_then(crate::scenes::from_old_setting).map_or(serde_json::Value::Null, |s| serde_json::json!(s)));
+            }
         }
+        let on = f.settings.get("scene").and_then(|v| v.as_str().map(String::from));
+        if on.is_some() && controlled {
+            f.set_scene(on, false);
+        }
+        f.show_scene_button();
         f.ui.set_overlays(ModelRc::from(f.overlay_model.clone()));
         f.ui.set_pk_presets(ModelRc::new(VecModel::from(PRESETS.iter().map(|c| color(*c)).collect::<Vec<_>>())));
         f.ui.set_cells(ModelRc::from(f.cells.clone()));
+        f.ui.set_scene_cells(ModelRc::from(f.scene_cells.clone()));
         f.ui.set_place_cells(ModelRc::from(f.place_cells.clone()));
         f.ui.set_pl_blocks(ModelRc::from(f.blocks.clone()));
         f.poll_lcd();
@@ -1553,12 +1633,12 @@ impl Front {
 
     fn open_search_menu(&mut self) {
         let rows: Vec<MenuRow> = if self.found.0.is_empty() {
-            vec![MenuRow { kind: 1, label: self.found.1.clone().into(), tag: "".into(), tick: false, sub: "".into() }]
+            vec![MenuRow { kind: 1, label: self.found.1.clone().into(), tag: "".into(), tick: false, sub: "".into(), ..Default::default() }]
         } else {
             self.found
                 .0
                 .iter()
-                .map(|f| MenuRow { kind: 0, label: f["label"].as_str().unwrap_or("").into(), tag: "".into(), tick: false, sub: f["sub"].as_str().unwrap_or("").into() })
+                .map(|f| MenuRow { kind: 0, label: f["label"].as_str().unwrap_or("").into(), tag: "".into(), tick: false, sub: f["sub"].as_str().unwrap_or("").into(), ..Default::default() })
                 .collect()
         };
         let list: f32 = rows.iter().map(|r| if r.kind == 1 { 28.0 } else { 33.0 }).sum();
@@ -1624,6 +1704,10 @@ impl Front {
                 Ask::Effect(i) => {
                     if let Some(id) = self.page.effects().get(i.max(0) as usize).and_then(|e| e["id"].as_str().map(String::from)) {
                         self.page.set_effect(&id);
+                        // (the desk matches what was just chosen: the scene lighting it goes off)
+                        if self.scene_lighting("z10").is_some() {
+                            self.set_scene(None, true);
+                        }
                     }
                     self.push_preview();
                 }
@@ -1721,6 +1805,9 @@ impl Front {
                     if let Some(e) = self.mouse.effects().get(i.max(0) as usize) {
                         let old = self.mouse.light_of(self.mouse.light_name());
                         self.mouse.set_light(crate::described::with_effect(&old, e));
+                        if self.scene_lighting("sensei310").is_some() {
+                            self.set_scene(None, true);
+                        }
                     }
                 }
                 Ask::MousePicMoved(x, y, over) => {
@@ -1829,10 +1916,25 @@ impl Front {
                     self.desk.zoom_step(how);
                     self.desk_frames_run();
                 }
-                Ask::DeskLightMenu(x, y, h) => self.open_desk_light_menu((x, y, h)),
-                Ask::DeskLightFrame => {
+                Ask::SceneMenu(x, y, h) => self.open_scene_menu((x, y, h)),
+                Ask::MenuEdit(i) => {
+                    if let Some(SceneRow::Scene(id)) = self.scene_menu.as_ref().and_then(|a| a.get(i.max(0) as usize)).cloned() {
+                        self.close_menu();
+                        self.open_scene_form(Some(id));
+                    }
+                }
+                Ask::SceneTile(i) => {
+                    if let (Some(f), Some((e, ..))) = (&mut self.scene_form, crate::scenes::EFFECTS.get(i.max(0) as usize)) {
+                        f.look = f.look.as_effect(*e);
+                    }
+                    self.show_scene_form();
+                }
+                Ask::SceneFormClose => self.close_scene_form(false),
+                Ask::SceneFormDone => self.close_scene_form(true),
+                Ask::SceneFormDelete => self.delete_scene(),
+                Ask::SceneFrame => {
                     changed = false;
-                    self.desk_light_frame();
+                    self.scene_frame();
                 }
                 Ask::DeskTick => {
                     changed = false;
@@ -1926,6 +2028,12 @@ impl Front {
                             self.settings.set_soon("hdr.glow_limit", nits.map_or(serde_json::Value::Null, |n| serde_json::json!(n)));
                         }
                         Ctl::LcdBrightness => crate::display::act(&mut self.page, Ctl::LcdBrightness, 0, v, None),
+                        Ctl::SceneSpeed => {
+                            if let Some(f) = &mut self.scene_form {
+                                f.look.speed = v.clamp(0.0, 1.0);
+                            }
+                            self.show_scene_form();
+                        }
                         _ => {}
                     }
                     self.push_preview();
@@ -2264,6 +2372,13 @@ impl Front {
                     }
                 }
                 Ask::CellTyped(id, index, t) => match lighting::ctl(id) {
+                    // (the name keeps what's typed; the box isn't drawn again under it)
+                    Ctl::SceneName => {
+                        if let Some(f) = &mut self.scene_form {
+                            f.name = t;
+                        }
+                        changed = false;
+                    }
                     Ctl::Name => crate::display::act(&mut self.page, Ctl::Name, 0, 0.0, Some(&t)),
                     // (the line keeps what's typed; the box isn't drawn again under it)
                     Ctl::SensorName => {
@@ -2836,6 +2951,41 @@ impl Front {
     /// A piece of the tile used: a swatch opens the color picker, the rest change the draft.
     fn cell_pick(&mut self, c: Ctl, index: usize, _anchor: (f32, f32, f32)) {
         match c {
+            Ctl::SceneName if index == 2 => {
+                self.close_scene_form(false);
+                return;
+            }
+            Ctl::SceneLights => {
+                if let Some(f) = &mut self.scene_form {
+                    f.desk = index == 0;
+                }
+                self.show_scene_form();
+                self.scene_play();
+                return;
+            }
+            Ctl::SceneWay => {
+                if let Some(f) = &mut self.scene_form {
+                    f.look.reverse = index == 1;
+                }
+                self.show_scene_form();
+                return;
+            }
+            Ctl::SceneColor => {
+                self.open_picker(Ctl::SceneColor, None, index, _anchor);
+                return;
+            }
+            Ctl::ScenePart => {
+                if let Some((key, ..)) = self.scene_form_devices().get(index).cloned() {
+                    self.open_scene_form_menu(FormMenu::Part(key), _anchor);
+                }
+                return;
+            }
+            Ctl::ScenePlugin => {
+                if let Some((dev, ..)) = self.scene_form_plugins().get(index).cloned() {
+                    self.open_scene_form_menu(FormMenu::Plugin(dev), _anchor);
+                }
+                return;
+            }
             Ctl::LibChoice => {
                 self.open_games_menu(crate::games_page::Menu::Device(index), _anchor);
                 self.refresh();
@@ -3069,6 +3219,7 @@ impl Front {
         let rgb = match described {
             Some((_, d, v)) => crate::described::color_at(&d, &v, index).unwrap_or([0xff, 0, 0]),
             None if c == Ctl::DeskPad => self.desk.pad_chosen.and_then(|i| self.desk.pads.get(i)).map_or(crate::desk::PAD_COLOR, |p| p.color),
+            None if c == Ctl::SceneColor => self.scene_form_color(index).unwrap_or([0xff, 0x60, 0]),
             None => lighting::color_of(&self.page, c, self.paint),
         };
         self.pick = Some(Pick { ctl: c, piece, index, start: rgb, hsv: rgb2hsv(rgb), rgb, anchor });
@@ -3146,6 +3297,8 @@ impl Front {
         let (c, piece, index, rgb) = (p.ctl, p.piece, p.index, p.rgb);
         if c == Ctl::Paint {
             self.paint = rgb;
+        } else if c == Ctl::SceneColor {
+            self.set_scene_form_color(index, rgb);
         } else if c == Ctl::DeskPad {
             self.desk.set_pad_color(rgb);
             self.show_desk();
@@ -3466,7 +3619,7 @@ impl Front {
         if self.hidden || self.ui.get_place() != "home" {
             return;
         }
-        let color = crate::desk::ripple_light(at, &self.desk_lights_shown());
+        let color = crate::desk::ripple_light(at, &self.lights_on_desk());
         self.desk.ripple(at, color, age);
         self.desk_frames_run();
     }
@@ -3476,14 +3629,14 @@ impl Front {
     /// keyboard was last lit (in the desk's light, while that plays), a key's
     /// Reactive flash from the moment its press starts it; the mouse's logo
     /// and wheel.
-    fn desk_lights_shown(&self) -> Vec<((f32, f32), Option<[u8; 3]>)> {
+    fn lights_on_desk(&self) -> Vec<((f32, f32), Option<[u8; 3]>)> {
         let mut out = Vec::new();
         let drawn: HashMap<u32, &Light> = self.last_lights.iter().flatten().map(|l| (l.pos, l)).collect();
-        let desk_light = self.desk_light != crate::desk_light::Effect::Off;
+        let scene = !self.scene_colors.0.is_empty();
         for k in self.page.layout.iter().filter(|k| k.led) {
             let Some(at) = self.on_desk_keyboard(k.cx, k.cy) else { break };
-            let color = if desk_light {
-                self.desk_colors.0.get(&k.pos).copied()
+            let color = if scene {
+                self.scene_colors.0.get(&k.pos).copied()
             } else {
                 self.page.flash_look(k.pos).or_else(|| drawn.get(&k.pos).filter(|l| l.strength > 0.0).map(|l| l.rgb))
             };
@@ -3604,7 +3757,7 @@ impl Front {
             self.ui.set_menu_open(false);
             self.ui.invoke_blur_menu();
         }
-        if self.mouse.menu.take().is_some() || std::mem::take(&mut self.profile_menu) || std::mem::take(&mut self.kb_profile_menu) || self.apps_menu.take().is_some() || std::mem::take(&mut self.desk_light_menu) || self.pad_menu.take().is_some() || self.games.menu.take().is_some() || self.until_menu.take().is_some() {
+        if self.mouse.menu.take().is_some() || std::mem::take(&mut self.profile_menu) || std::mem::take(&mut self.kb_profile_menu) || self.apps_menu.take().is_some() || self.scene_menu.take().is_some() || self.scene_form_menu.take().is_some() || self.pad_menu.take().is_some() || self.games.menu.take().is_some() || self.until_menu.take().is_some() {
             self.ui.set_menu_open(false);
             self.ui.set_menu_w(300.0);
             self.ui.set_mouse_menu_open(false);
@@ -3702,7 +3855,7 @@ impl Front {
     /// the window.
     fn let_chosen_go(&mut self, x: f32, y: f32) {
         // (a press while any menu is open is the menu's: it chooses there, or shuts it)
-        if y < 36.0 || self.ui.get_menu_open() || self.menu.is_some() || self.mouse.menu.is_some() || self.profile_menu || self.kb_profile_menu || self.apps_menu.is_some() || self.desk_light_menu || self.pad_menu.is_some() || self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pick.is_some() || self.search_menu {
+        if y < 36.0 || self.ui.get_menu_open() || self.menu.is_some() || self.mouse.menu.is_some() || self.profile_menu || self.kb_profile_menu || self.apps_menu.is_some() || self.scene_menu.is_some() || self.scene_form_menu.is_some() || self.pad_menu.is_some() || self.bind_menu.is_some() || self.light_menu.is_some() || self.way_menu.is_some() || self.pick.is_some() || self.search_menu {
             return;
         }
         let Some(keeps) = self.chosen_keeps() else { return };
@@ -3868,11 +4021,24 @@ impl Front {
             self.refresh();
             return;
         }
-        if self.desk_light_menu {
+        if let Some(rows) = self.scene_menu.clone() {
             self.close_menu();
-            if let Some((e, ..)) = crate::desk_light::EFFECTS.get(i) {
-                self.set_desk_light(*e);
+            match rows.get(i) {
+                Some(SceneRow::Off) => self.set_scene(None, true),
+                // (selecting the scene that's on turns it off, as in iCUE)
+                Some(SceneRow::Scene(id)) => {
+                    let id = (self.scene.as_ref() != Some(id)).then(|| id.clone());
+                    self.set_scene(id, true);
+                }
+                Some(SceneRow::New) => self.open_scene_form(None),
+                _ => {}
             }
+            self.refresh();
+            return;
+        }
+        if let Some(m) = self.scene_form_menu.clone() {
+            self.close_menu();
+            self.scene_form_chose(&m, i);
             self.refresh();
             return;
         }
@@ -4379,7 +4545,7 @@ impl Front {
         let lists: [&Vec<Entry>; 7] = [&g.keys, &g.media, &g.mouse, &g.profiles, &g.layouts, &g.playlists, &g.board];
         let mut rows: Vec<MenuRow> = Vec::new();
         let mut choices: Vec<Choice> = Vec::new();
-        let row = |kind: i32, label: &str, tag: &str, tick: bool| MenuRow { kind, label: label.into(), tag: tag.into(), tick, sub: "".into() };
+        let row = |kind: i32, label: &str, tag: &str, tick: bool| MenuRow { kind, label: label.into(), tag: tag.into(), tick, sub: "".into(), ..Default::default() };
         let q = m.query.trim().to_lowercase();
         // each job as a row: what choosing it does, and the row's kind (0, or 5 for one that
         // can't be given now)
@@ -4526,6 +4692,15 @@ impl Front {
         self.sync_playlist_keys();
         self.follow_profile();
         self.sync_aside();
+        // (a scene that lights the keyboard says so in place of the Lighting page's hint)
+        let kb_scene = self.scene_lighting("z10");
+        let lighting_hint = match &kb_scene {
+            Some(name) => format!("The {name} scene is lighting the desk. Choosing an effect here turns the scene off."),
+            None => "Choose a lighting effect for this profile, then set the colors, speed and zones below.".to_string(),
+        };
+        if kb_scene.is_some() {
+            self.ui.set_hint_chip(self.scene_chip(self.scene_on().as_ref()));
+        }
         let ui = &self.ui;
         let p = &self.page;
         ui.set_tab(match p.view {
@@ -4560,13 +4735,12 @@ impl Front {
             show_rows(ui.get_profiles(), |m| ui.set_profiles(m), profiles);
         }
         ui.set_layer(self.layer as i32);
-        if loaded {
-        }
+        ui.set_hint_chip_on(p.view == View::Lighting && kb_scene.is_some());
         ui.set_hint(
             match p.view {
                 View::Keys if p.sel.is_some() => "Escape clears the choice.",
                 View::Keys => "Select a key on the keyboard or in the Key library to change what a key does.",
-                View::Lighting => "Choose a lighting effect for this profile, then set the colors, speed and zones below.",
+                View::Lighting => lighting_hint.as_str(),
                 View::Display => "Check the keyboard’s connection and which features the installed firmware supports.",
                 View::Screen => "Choose what the keyboard’s screen shows while Ectomatter is running, when a game starts or quits, and when Ectomatter isn’t running.",
             }
@@ -5248,7 +5422,7 @@ impl Front {
         if for_desk {
             self.desk_mouse = Some((w, imgs));
             self.show_desk_mouse();
-            self.desk_light_up();
+            self.light_desk_mouse();
             return;
         }
         self.ui.set_mouse_picture(imgs.base.clone());
@@ -5297,7 +5471,7 @@ impl Front {
     fn show_mouse_lights(&mut self) {
         self.mouse_light_up();
         if self.ui.get_place() == "home" {
-            self.desk_light_up();
+            self.light_desk_mouse();
         }
         let now = Instant::now();
         for i in 0..2 {
@@ -5318,7 +5492,7 @@ impl Front {
         let shows = !self.hidden && self.mouse_pictured();
         let place = self.ui.get_place();
         if shows && place == "home" {
-            self.desk_light_up();
+            self.light_desk_mouse();
         } else {
             self.desk_mouse_lit = None;
         }
@@ -5376,7 +5550,7 @@ impl Front {
 
     /// The mouse lit in HDR for Home's desk, as it shows now: dark and half
     /// shown while it isn't plugged in.
-    fn desk_light_up(&mut self) {
+    fn light_desk_mouse(&mut self) {
         let Some(item) = self.desk.items.iter().find(|it| it.id == "mouse") else { return };
         let on = item.connected;
         let (white, ceiling) = (self.levels.0 as f32, self.light_gain(self.levels.0));
@@ -5459,7 +5633,7 @@ impl Front {
         if self.ui.get_place() == "home" {
             let Some(i) = self.desk.items.iter().position(|it| it.id == "mouse") else { return none };
             if self.desk_mouse_lit.is_none() {
-                self.desk_light_up();
+                self.light_desk_mouse();
             }
             let Some((dw, layers)) = self.desk_layers() else { return none };
             let [x, y, w, h] = self.desk.screen(i);
@@ -5875,10 +6049,18 @@ impl Front {
         if self.mouse.names != names {
             self.mouse.names = names;
         }
+        let mouse_scene = (self.mouse.tab == 1).then(|| self.scene_lighting("sensei310")).flatten();
+        if mouse_scene.is_some() {
+            self.ui.set_mouse_hint_chip(self.scene_chip(self.scene_on().as_ref()));
+        }
         let ui = &self.ui;
         let m = &self.mouse;
         ui.set_mouse_tab(m.tab as i32);
-        ui.set_mouse_hint(m.hint().into());
+        ui.set_mouse_hint_chip_on(mouse_scene.is_some());
+        match &mouse_scene {
+            Some(name) => ui.set_mouse_hint(format!("The {name} scene is lighting the desk. Choosing an effect here turns the scene off.").into()),
+            None => ui.set_mouse_hint(m.hint().into()),
+        }
         ui.set_mouse_status(m.failed.clone().unwrap_or_default().into());
         // the profiles, and what was last done to them, with Undo for a moment
         // (a profile tied to apps says so under its name)
@@ -6028,7 +6210,7 @@ impl Front {
         self.close_menu();
         self.close_picker();
         let only = self.mouse.profiles.as_ref().is_none_or(|p| p.list.len() < 2);
-        let row = |kind: i32, label: &str| MenuRow { kind, label: label.into(), tag: "".into(), tick: false, sub: "".into() };
+        let row = |kind: i32, label: &str| MenuRow { kind, label: label.into(), tag: "".into(), tick: false, sub: "".into(), ..Default::default() };
         let mut rows = vec![row(0, "Duplicate"), row(0, "Use with an app…"), row(2, ""), row(if only { 5 } else { 4 }, "Delete")];
         if only {
             rows.push(row(3, "Your only profile can’t be deleted."));
@@ -6067,7 +6249,7 @@ impl Front {
         }
         self.close_menu();
         self.close_picker();
-        let row = |kind: i32, label: &str| MenuRow { kind, label: label.into(), tag: "".into(), tick: false, sub: "".into() };
+        let row = |kind: i32, label: &str| MenuRow { kind, label: label.into(), tag: "".into(), tick: false, sub: "".into(), ..Default::default() };
         self.hang_menu(vec![row(0, "Use with an app…")], 220.0, anchor);
         self.kb_profile_menu = true;
     }
@@ -6084,10 +6266,10 @@ impl Front {
                 apps.push((t.clone(), self.front_apps.name(t)));
             }
         }
-        let mut rows = vec![MenuRow { kind: 1, label: "Use it while one of these is in front".into(), tag: "".into(), tick: false, sub: "".into() }];
-        rows.extend(apps.iter().map(|(id, name)| MenuRow { kind: 0, label: name.as_str().into(), tag: "".into(), tick: tied.contains(id), sub: "".into() }));
+        let mut rows = vec![MenuRow { kind: 1, label: "Use it while one of these is in front".into(), tag: "".into(), tick: false, sub: "".into(), ..Default::default() }];
+        rows.extend(apps.iter().map(|(id, name)| MenuRow { kind: 0, label: name.as_str().into(), tag: "".into(), tick: tied.contains(id), sub: "".into(), ..Default::default() }));
         if apps.is_empty() {
-            rows.push(MenuRow { kind: 3, label: "Apps show here once they’ve been in front while Ectomatter is running.".into(), tag: "".into(), tick: false, sub: "".into() });
+            rows.push(MenuRow { kind: 3, label: "Apps show here once they’ve been in front while Ectomatter is running.".into(), tag: "".into(), tick: false, sub: "".into(), ..Default::default() });
         }
         self.hang_menu(rows, 300.0, anchor);
         self.apps_menu = Some((device, profile, anchor));
@@ -6169,11 +6351,11 @@ impl Front {
                 "z10" => {
                     let known = self.page.dev.is_some();
                     let profiles = z10::PROFILE_NUMBERS.iter().map(|n| (n.to_string(), if known { self.page.profile_name(*n) } else { format!("Profile {n}") })).collect();
-                    out.push(crate::games_page::Device { key: "z10".into(), name, kind, profiles, glyph: None, sub: String::new() });
+                    out.push(crate::games_page::Device { key: "z10".into(), name, kind, profiles, glyph: None, sub: String::new(), chips: Vec::new() });
                 }
                 "mouse" => {
                     if let Some(s) = &self.mouse.profiles {
-                        out.push(crate::games_page::Device { key: "sensei310".into(), name, kind, profiles: s.list.iter().map(|p| (p.id.clone(), p.name.clone())).collect(), glyph: None, sub: String::new() });
+                        out.push(crate::games_page::Device { key: "sensei310".into(), name, kind, profiles: s.list.iter().map(|p| (p.id.clone(), p.name.clone())).collect(), glyph: None, sub: String::new(), chips: Vec::new() });
                     }
                 }
                 _ => {}
@@ -6196,7 +6378,7 @@ impl Front {
                     "" => format!("Through {}", self.hosted.get(&core).map_or(core.clone(), |p| p.package.name().to_string())),
                     s => s.to_string(),
                 };
-                crate::games_page::Device { key: d["device"].as_str().unwrap_or("").to_string(), name: d["name"].as_str().unwrap_or("").to_string(), kind: d["kind"].as_str().unwrap_or("").to_string(), profiles, glyph, sub }
+                crate::games_page::Device { key: d["device"].as_str().unwrap_or("").to_string(), name: d["name"].as_str().unwrap_or("").to_string(), kind: d["kind"].as_str().unwrap_or("").to_string(), profiles, glyph, sub, chips: Vec::new() }
             })
             .collect()
     }
@@ -6207,7 +6389,12 @@ impl Front {
         if crate::desk::offscreen() && self.known.is_none() && self.hosted.launcher().is_some() {
             self.ask_known();
         }
-        let mut devices = self.lib_devices();
+        // the scene first, a row like a device's: No scene and every scene, each with its chip
+        let chips = self.scene_chips();
+        self.ui.set_scene_chips(ModelRc::new(VecModel::from(chips.clone())));
+        let profiles = std::iter::once(("none".to_string(), "No scene".to_string())).chain(self.scenes().into_iter().map(|s| (s.id, s.name))).collect();
+        let mut devices = vec![crate::games_page::Device { key: "scene".into(), name: "Scene".into(), kind: "scene".into(), profiles, glyph: None, sub: String::new(), chips }];
+        devices.extend(self.lib_devices());
         devices.extend(self.hosted_devices());
         let sections = match self.games.open.clone() {
             Some(id) => {
@@ -7182,6 +7369,29 @@ impl Front {
         }
         self.last_front = Some(f);
         let mut changed = false;
+        // the scene: the one this app or game chose while it's in front (a game with none
+        // of its own follows Every game's); once it switched, back to the one before
+        match self.games.library.wanted(&app, "scene") {
+            Some(crate::games::Choice::Profile(p)) => {
+                let want = (p != "none").then_some(p);
+                if want != self.scene {
+                    if self.scene_back.is_none() {
+                        self.scene_back = Some(self.scene.clone());
+                    }
+                    eprintln!("ectomatter: the scene follows {app}");
+                    self.set_scene(want, false);
+                    changed = true;
+                }
+            }
+            _ => {
+                if let Some(back) = self.scene_back.take() {
+                    if back != self.scene {
+                        self.set_scene(back, false);
+                        changed = true;
+                    }
+                }
+            }
+        }
         // what the Library says each device does while this is in front (a game
         // with no choice of its own follows Every game's); Don't switch is none
         let wanted = |d: &str| match self.games.library.wanted(&app, d) {
@@ -7242,7 +7452,15 @@ impl Front {
         for (plugin, id, name, want) in wants {
             let follow = format!("{plugin}/{id}");
             let Some(core) = self.hosted.get(&plugin).map(|p| p.core.clone()) else { continue };
+            // (a device the scene on gives a profile keeps it: what this app wants is kept for when the scene goes off)
+            let held = self.scene_plugins.contains_key(&follow);
             match want {
+                Some(p) if held => {
+                    self.following.insert(follow, p);
+                }
+                None if held => {
+                    self.following.remove(&follow);
+                }
                 Some(p) if self.following.get(&follow) != Some(&p) => {
                     eprintln!("ectomatter: {name} follows {app}");
                     self.following.insert(follow, p.clone());
@@ -7287,12 +7505,12 @@ impl Front {
         let now = self.mouse.job(b);
         // (a macro ticked whatever it plays as)
         let same = |a: &serde_json::Value| *a == now || (a.get("macro").is_some() && a["macro"] == now["macro"]);
-        let mut rows: Vec<MenuRow> = self.mouse.choices_for(kind).iter().map(|(label, a)| MenuRow { kind: 0, label: label.as_str().into(), tag: "".into(), tick: same(a), sub: "".into() }).collect();
+        let mut rows: Vec<MenuRow> = self.mouse.choices_for(kind).iter().map(|(label, a)| MenuRow { kind: 0, label: label.as_str().into(), tag: "".into(), tick: same(a), sub: "".into(), ..Default::default() }).collect();
         if rows.is_empty() && kind == crate::mouse::MACRO_KIND {
-            rows.push(MenuRow { kind: 3, label: "No macros yet. Make one in the Macro Editor.".into(), tag: "".into(), tick: false, sub: "".into() });
+            rows.push(MenuRow { kind: 3, label: "No macros yet. Make one in the Macro Editor.".into(), tag: "".into(), tick: false, sub: "".into(), ..Default::default() });
         }
         if rows.is_empty() && kind == crate::mouse::DEVICES_KIND {
-            rows.push(MenuRow { kind: 3, label: "Plug in another device to give this button one of its jobs.".into(), tag: "".into(), tick: false, sub: "".into() });
+            rows.push(MenuRow { kind: 3, label: "Plug in another device to give this button one of its jobs.".into(), tag: "".into(), tick: false, sub: "".into(), ..Default::default() });
         }
         let h = 6.0 + rows.len() as f32 * 33.0 + 6.0;
         self.ui.set_menu_search(false);
@@ -7443,7 +7661,7 @@ impl Front {
         }
         let crate::described::Piece::Effect(k) = piece else { return };
         let Some((id, d, e)) = self.page.described(piece) else { return };
-        let rows: Vec<MenuRow> = crate::described::menu_rows(&d, &crate::described::kept(&e, &id, &d)).into_iter().map(|(kind, label, tick)| MenuRow { kind, label: label.into(), tag: "".into(), tick, sub: "".into() }).collect();
+        let rows: Vec<MenuRow> = crate::described::menu_rows(&d, &crate::described::kept(&e, &id, &d)).into_iter().map(|(kind, label, tick)| MenuRow { kind, label: label.into(), tag: "".into(), tick, sub: "".into(), ..Default::default() }).collect();
         let in_place = crate::described::in_place_box(&self.page.effect_desc(&self.page.effect_id()), &id);
         self.close_menu();
         self.close_picker();
@@ -7477,9 +7695,9 @@ impl Front {
         }
         let Some(e) = self.screens.turns(self.page.editing).get(i) else { return };
         let name = self.screens.page_of(e).map_or("The screen".to_string(), |p| p.name.clone());
-        let mut rows = vec![MenuRow { kind: 1, label: format!("How {name} comes in").into(), tag: "".into(), tick: false, sub: "".into() }];
+        let mut rows = vec![MenuRow { kind: 1, label: format!("How {name} comes in").into(), tag: "".into(), tick: false, sub: "".into(), ..Default::default() }];
         for t in crate::lcd_page::TRANSITIONS {
-            rows.push(MenuRow { kind: 0, label: t.name().into(), tag: "".into(), tick: t == e.comes_in, sub: "".into() });
+            rows.push(MenuRow { kind: 0, label: t.name().into(), tag: "".into(), tick: t == e.comes_in, sub: "".into(), ..Default::default() });
         }
         // the only turn: nothing comes in after it, so its way in waits for another
         // (the menu as wide as the line, which doesn't wrap)
@@ -7487,7 +7705,7 @@ impl Front {
         if self.screens.turns(self.page.editing).len() == 1 {
             let note = "Plays once the playlist has a second layout.";
             w = w.max(crate::text::width(400, 13.0, note) + 34.0).ceil();
-            rows.push(MenuRow { kind: 3, label: note.into(), tag: "".into(), tick: false, sub: "".into() });
+            rows.push(MenuRow { kind: 3, label: note.into(), tag: "".into(), tick: false, sub: "".into(), ..Default::default() });
         }
         self.close_menu();
         self.close_picker();
@@ -7530,7 +7748,7 @@ impl Front {
         }
         let mut picks: Vec<Option<u32>> = secs.into_iter().map(Some).collect();
         picks.push(None);
-        let row = |kind: i32, label: String, tick: bool| MenuRow { kind, label: label.into(), tag: "".into(), tick, sub: "".into() };
+        let row = |kind: i32, label: String, tick: bool| MenuRow { kind, label: label.into(), tag: "".into(), tick, sub: "".into(), ..Default::default() };
         let mut rows = vec![row(1, format!("How long {name} shows"), false)];
         for p in &picks {
             rows.push(match p {
@@ -7576,7 +7794,7 @@ impl Front {
         }
         let n = self.page.editing;
         let mine = self.screens.of_profile(n);
-        let row = |kind: i32, label: String, tick: bool, sub: String| MenuRow { kind, label: label.into(), tag: "".into(), tick, sub: sub.into() };
+        let row = |kind: i32, label: String, tick: bool, sub: String| MenuRow { kind, label: label.into(), tag: "".into(), tick, sub: sub.into(), ..Default::default() };
         let mut rows = vec![row(1, format!("{} plays", self.page.profile_name(n)), false, String::new())];
         for (k, l) in self.screens.playlists.iter().enumerate() {
             // (which profiles play it, by their names)
@@ -7626,7 +7844,7 @@ impl Front {
         }
         let n = self.page.editing;
         let kept = self.screens.onboard_of(n).map(|p| (p.id.clone(), p.name.clone()));
-        let row = |kind: i32, label: String, tick: bool, sub: &str| MenuRow { kind, label: label.into(), tag: "".into(), tick, sub: sub.into() };
+        let row = |kind: i32, label: String, tick: bool, sub: &str| MenuRow { kind, label: label.into(), tag: "".into(), tick, sub: sub.into(), ..Default::default() };
         let mut rows = vec![row(1, format!("{}’s onboard layout", self.page.profile_name(n)), false, "")];
         rows.push(row(0, "Screen off".into(), kept.is_none(), ""));
         for p in &self.screens.library {
@@ -7953,7 +8171,7 @@ impl Front {
             return;
         }
         let Some(name) = self.screens.library.get(k).map(|p| p.name.clone()) else { return };
-        let row = |kind: i32, label: String| MenuRow { kind, label: label.into(), tag: "".into(), tick: false, sub: "".into() };
+        let row = |kind: i32, label: String| MenuRow { kind, label: label.into(), tag: "".into(), tick: false, sub: "".into(), ..Default::default() };
         let second = if self.ui.get_screen_closed() {
             format!("Keep {name} on the keyboard")
         } else {
@@ -7991,7 +8209,7 @@ impl Front {
                 return;
             }
         }
-        let row = |kind: i32, label: &str| MenuRow { kind, label: label.into(), tag: "".into(), tick: false, sub: "".into() };
+        let row = |kind: i32, label: &str| MenuRow { kind, label: label.into(), tag: "".into(), tick: false, sub: "".into(), ..Default::default() };
         let mut rows = vec![row(1, "Add a screen layout")];
         for p in &self.screens.library {
             rows.push(row(0, &p.name));
@@ -8055,9 +8273,9 @@ impl Front {
     fn open_bind_menu(&mut self, i: usize, anchor: (f32, f32, f32)) {
         self.close_menu();
         let name = if i == 0 { "dimmer" } else { "volume" };
-        let mut rows = vec![MenuRow { kind: 1, label: format!("The {name} controls").into(), tag: "".into(), tick: false, sub: "".into() }];
+        let mut rows = vec![MenuRow { kind: 1, label: format!("The {name} controls").into(), tag: "".into(), tick: false, sub: "".into(), ..Default::default() }];
         for (v, label) in crate::display::BIND_CHOICES[i] {
-            rows.push(MenuRow { kind: 0, label: label.into(), tag: "".into(), tick: self.bind[i] == v, sub: "".into() });
+            rows.push(MenuRow { kind: 0, label: label.into(), tag: "".into(), tick: self.bind[i] == v, sub: "".into(), ..Default::default() });
         }
         let list: f32 = rows.iter().map(|r| if r.kind == 1 { 28.0 } else { 33.0 }).sum();
         let h = 6.0 + list + 6.0;
@@ -8187,11 +8405,11 @@ impl Front {
     pub fn lights(&mut self) -> Option<Vec<Light>> {
         let t = self.light_at.unwrap_or_else(|| self.t0.elapsed().as_secs_f64() * 1000.0);
         let mut lights = self.page.lights(t);
-        // (the desk's light, while it plays, on each key it lights: but on the
+        // (the scene's light, while it lights the keyboard, on each key: but on the
         // keyboard's own Lighting page, where its own lighting is chosen)
-        if self.desk_light != crate::desk_light::Effect::Off && !self.lighting_open().0 {
+        if !self.scene_colors.0.is_empty() && !self.lighting_open().0 {
             for l in &mut lights {
-                if let Some(c) = self.desk_colors.0.get(&l.pos) {
+                if let Some(c) = self.scene_colors.0.get(&l.pos) {
                     (l.rgb, l.strength) = (*c, 1.0);
                 }
             }
@@ -8204,20 +8422,43 @@ impl Front {
     }
 
     pub fn animated(&self) -> bool {
-        self.page.animated() || self.desk_light != crate::desk_light::Effect::Off
+        self.page.animated() || self.scene_timer.is_some()
     }
 
-    /// Home's Desk light menu: its effects, the one playing ticked.
-    fn open_desk_light_menu(&mut self, anchor: (f32, f32, f32)) {
+    /// Home's Scenes menu: No scene, the scenes that come with Ectomatter, the
+    /// person's own (each with a pencil to change it), and New scene…; the one
+    /// on ticked, each with a chip of its colors.
+    fn open_scene_menu(&mut self, anchor: (f32, f32, f32)) {
         if let Some((at, when)) = self.shut.take() {
             if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
                 return;
             }
         }
         self.close_menu();
-        let rows = crate::desk_light::EFFECTS.iter().map(|(e, _, w)| MenuRow { kind: 0, label: (*w).into(), tag: "".into(), tick: *e == self.desk_light, sub: "".into() }).collect();
-        self.hang_menu(rows, 240.0, anchor);
-        self.desk_light_menu = true;
+        self.close_picker();
+        let scenes = self.scenes();
+        let on = self.scene.clone();
+        let mut rows = vec![MenuRow { kind: 0, label: "No scene".into(), tick: on.is_none(), chip: self.scene_chip(None), chipped: true, ..Default::default() }];
+        let mut does = vec![SceneRow::Off];
+        let (built, own): (Vec<&crate::scenes::Scene>, Vec<&crate::scenes::Scene>) = scenes.iter().partition(|s| s.built_in);
+        for group in [built, own] {
+            if group.is_empty() {
+                continue;
+            }
+            rows.push(MenuRow { kind: 2, ..Default::default() });
+            does.push(SceneRow::Line);
+            for sc in group {
+                rows.push(MenuRow { kind: 0, label: sc.name.as_str().into(), tick: on.as_deref() == Some(sc.id.as_str()), chip: self.scene_chip(Some(sc)), chipped: true, edit: !sc.built_in, ..Default::default() });
+                does.push(SceneRow::Scene(sc.id.clone()));
+            }
+        }
+        rows.push(MenuRow { kind: 2, ..Default::default() });
+        does.push(SceneRow::Line);
+        rows.push(MenuRow { kind: 0, label: "New scene…".into(), chip: crate::plus_glyph((14.0 * self.scale).round() as u32), chipped: true, ..Default::default() });
+        does.push(SceneRow::New);
+        self.ui.set_menu_marks(true);
+        self.hang_menu(rows, 272.0, anchor);
+        self.scene_menu = Some(does);
     }
 
     /// Add pad's menu (the makers' sizes, and Draw your own), or the chosen
@@ -8242,7 +8483,7 @@ impl Front {
     /// kinds' headings, each with its size in inches; then Draw your own, or
     /// the chosen pad's width and depth to type.
     fn pad_rows(&self, which: PadMenu) -> (Vec<MenuRow>, Vec<Option<PadRow>>) {
-        let row = |kind: i32, label: &str, tag: String, tick: bool, sub: &str| MenuRow { kind, label: label.into(), tag: tag.into(), tick, sub: sub.into() };
+        let row = |kind: i32, label: &str, tag: String, tick: bool, sub: &str| MenuRow { kind, label: label.into(), tag: tag.into(), tick, sub: sub.into(), ..Default::default() };
         let now = self.desk.pad_size_mm();
         let at = now.and_then(|(w, h)| crate::desk::standard(w, h));
         let (mut rows, mut what) = (Vec::new(), Vec::new());
@@ -8293,50 +8534,593 @@ impl Front {
         self.show_desk();
     }
 
-    /// The desk's light set to an effect, kept so: its frames from now, or,
-    /// off, each device's own lighting handed back to it.
-    pub fn set_desk_light(&mut self, e: crate::desk_light::Effect) {
-        use crate::desk_light::Effect;
-        let was = self.desk_light;
-        self.desk_light = e;
-        if let Err(err) = self.settings.set("desk.light", serde_json::json!(e.id())) {
-            self.status(format!("The desk's light was not saved: {err}"), 2);
+    // ------------------------------------------------------------ scenes
+
+    /// Every scene: the two that come with Ectomatter, then the person's own.
+    pub fn scenes(&self) -> Vec<crate::scenes::Scene> {
+        crate::scenes::all(&self.settings.get("scenes").unwrap_or_default())
+    }
+
+    /// The scene on, if any (chosen by hand, or by a game or app in front).
+    pub fn scene_on(&self) -> Option<crate::scenes::Scene> {
+        let id = self.scene.as_ref()?;
+        self.scenes().into_iter().find(|s| &s.id == id)
+    }
+
+    /// The scene on, by its id.
+    pub fn scene_id(&self) -> Option<String> {
+        self.scene.clone()
+    }
+
+    /// What the desk plays now: the scene form's scene while the form is open
+    /// (the devices show it as it's set), else the scene on.
+    fn playing(&self) -> Option<crate::scenes::Scene> {
+        match &self.scene_form {
+            Some(f) => Some(f.scene()),
+            None => self.scene_on(),
         }
-        if e == Effect::Off {
-            self.desk_light_timer = None;
-            if was != Effect::Off {
-                self.desk_hand_back();
+    }
+
+    /// A scene turned on, or none (No scene): by hand, kept to come on again
+    /// when Ectomatter next starts; or for a game or app in front, not kept.
+    pub fn set_scene(&mut self, id: Option<String>, by_hand: bool) {
+        let id = id.filter(|i| self.scenes().iter().any(|s| &s.id == i));
+        if by_hand {
+            self.scene_back = None;
+            if let Err(err) = self.settings.set("scene", id.as_ref().map_or(serde_json::Value::Null, |i| serde_json::json!(i))) {
+                self.status(format!("The scene was not saved: {err}"), 2);
             }
-        } else if self.desk_light_timer.is_none() {
-            self.desk_light_t0 = Instant::now();
-            let t = slint::Timer::default();
-            let asks = self.asks.clone();
-            // (the keyboard takes 25 frames a second)
-            t.start(slint::TimerMode::Repeated, Duration::from_millis(40), move || asks.borrow_mut().push(Ask::DeskLightFrame));
-            self.desk_light_timer = Some(t);
         }
-        self.ui.set_desk_light(e.short().into());
+        self.scene = id;
+        self.scene_play();
+    }
+
+    /// The desk lit as the scene playing has it: its frames from now (one at
+    /// once), each plugin's device on the scene's profile; with none playing,
+    /// each device's own lighting handed back to it.
+    fn scene_play(&mut self) {
+        let playing = self.playing();
+        if playing.is_none() {
+            self.scene_timer = None;
+            self.scene_hand_back();
+        } else {
+            if self.scene_timer.is_none() {
+                self.scene_t0 = Instant::now();
+                let t = slint::Timer::default();
+                let asks = self.asks.clone();
+                // (the keyboard takes 25 frames a second)
+                t.start(slint::TimerMode::Repeated, Duration::from_millis(40), move || asks.borrow_mut().push(Ask::SceneFrame));
+                self.scene_timer = Some(t);
+            }
+            self.scene_frame();
+        }
+        self.scene_plugins_play(playing.as_ref());
+        self.show_scene_button();
         self.show_mouse_lights();
     }
 
-    /// Each device's own lighting again, the desk's light over: the keyboard
-    /// out of its direct colors, the mouse's lights as it keeps them.
-    fn desk_hand_back(&mut self) {
-        self.ask_kb(device::Ask::Preview(serde_json::json!({ "stop": true, "tab": "native", "claim": true })));
-        self.mouse.hand_back();
-        self.desk_colors = Default::default();
-        self.desk_light_mouse = (None, [[0; 3]; 2]);
+    /// Each device's own lighting again, where the scene was sending it its
+    /// part: the keyboard out of its direct colors, the mouse's lights as it
+    /// keeps them.
+    fn scene_hand_back(&mut self) {
+        if self.scene_claim.0 {
+            self.ask_kb(device::Ask::Preview(serde_json::json!({ "stop": true, "tab": "native", "claim": true })));
+        }
+        if self.scene_claim.1 {
+            self.mouse.hand_back();
+        }
+        self.scene_claim = (false, false);
+        self.scene_colors = Default::default();
+        self.scene_mouse = (None, [[0; 3]; 2]);
         self.desk_aside = (false, false);
         self.last_lights = None;
     }
 
-    /// The desk's light off for Ectomatter quitting, each device its own again;
-    /// kept as it was, to play again next time.
-    pub fn desk_light_quit(&mut self) {
-        if self.desk_light != crate::desk_light::Effect::Off {
-            self.desk_light_timer = None;
-            self.desk_hand_back();
+    /// The scene off for Ectomatter quitting, each device its own again; kept
+    /// as it was, to come on again next time.
+    pub fn scene_quit(&mut self) {
+        self.scene_timer = None;
+        self.scene_hand_back();
+        self.scene_plugins_play(None);
+    }
+
+    /// Each device a plugin brought in (OpenRGB's lighting) on the profile the
+    /// scene playing names for it; one it no longer names back on what it was
+    /// on: a game's or app's profile while that's in front, else what it was
+    /// on before the scene.
+    fn scene_plugins_play(&mut self, scene: Option<&crate::scenes::Scene>) {
+        for (plugin, d) in self.hosted.devices() {
+            let id = d["device"].as_str().unwrap_or("").to_string();
+            let key = format!("{plugin}/{id}");
+            let want = scene.and_then(|s| s.plugins.iter().find(|(dev, _)| *dev == id).map(|(_, p)| p.clone()));
+            let Some(core) = self.hosted.get(&plugin).map(|p| p.core.clone()) else { continue };
+            let name = d["name"].as_str().unwrap_or("").to_string();
+            let call = match want {
+                Some(p) if self.scene_plugins.get(&key) != Some(&p) => {
+                    self.scene_plugins.insert(key, p.clone());
+                    Some(("profiles/activate", serde_json::json!({ "device": id, "profile": p })))
+                }
+                Some(_) => None,
+                None if self.scene_plugins.remove(&key).is_some() => match self.following.get(&key) {
+                    Some(p) => Some(("profiles/activate", serde_json::json!({ "device": id, "profile": p }))),
+                    None => Some(("profiles/restore", serde_json::json!({ "device": id }))),
+                },
+                None => None,
+            };
+            if let Some((method, params)) = call {
+                eprintln!("ectomatter: {name} for the scene: {method}");
+                // (on a thread: its plugin may take a moment to reach the program it goes through)
+                let _ = std::thread::Builder::new().name("plugin device".into()).spawn(move || {
+                    if let Err(e) = core.call(method, &params) {
+                        eprintln!("ectomatter: {name} didn’t switch: {e}");
+                    }
+                });
+            }
         }
+    }
+
+    /// Home's Scenes button: the scene on, its name and its chip (with none
+    /// on, the button says Scenes).
+    fn show_scene_button(&mut self) {
+        let on = self.scene_on();
+        self.ui.set_scene_name(on.as_ref().map_or_else(String::new, |s| s.name.clone()).into());
+        self.ui.set_scene_chip(self.scene_chip(on.as_ref()));
+    }
+
+    /// The devices on Home's desk as a scene's pictures lay them, left to
+    /// right: the keyboard and the mouse by their keys, each where it runs
+    /// across the desk.
+    fn scene_spans(&self) -> Vec<crate::scenes::Span> {
+        let mut out: Vec<crate::scenes::Span> = self
+            .desk
+            .items
+            .iter()
+            .filter_map(|it| {
+                let key = match it.id.as_str() {
+                    "z10" => "z10",
+                    "mouse" => "sensei310",
+                    _ => return None,
+                };
+                Some(crate::scenes::Span { key: key.into(), x0: it.x / crate::desk::PER_MM, x1: (it.x + it.w) / crate::desk::PER_MM })
+            })
+            .collect();
+        out.sort_by(|a, b| a.x0.total_cmp(&b.x0));
+        out
+    }
+
+    /// A scene's chip at the window's scale (none's, an empty outline).
+    fn scene_chip(&self, s: Option<&crate::scenes::Scene>) -> slint::Image {
+        let px = (14.0 * self.scale).round().max(14.0) as u32;
+        let rgba = crate::scenes::chip(s, &self.scene_spans(), px);
+        let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(px, px);
+        buf.make_mut_bytes().copy_from_slice(&rgba);
+        slint::Image::from_rgba8_premultiplied(buf)
+    }
+
+    /// Each scene's chip, No scene's first, in the order a Library page's
+    /// Scene row lists them.
+    pub fn scene_chips(&self) -> Vec<slint::Image> {
+        std::iter::once(self.scene_chip(None)).chain(self.scenes().iter().map(|s| self.scene_chip(Some(s)))).collect()
+    }
+
+    /// The scene a device's Lighting page is out of, by its name: the scene on,
+    /// while it lights that device (by its key, `z10` or `sensei310`).
+    fn scene_lighting(&self, device: &str) -> Option<String> {
+        let s = self.scene_on()?;
+        matches!(s.lights.part(device), crate::scenes::Part::Look(_)).then_some(s.name)
+    }
+
+    // ------------------------------------------------------------ the scene form
+
+    /// The scene form opened over the page: New scene, or one of the person's
+    /// own scenes to change. The devices show the scene as it's set.
+    pub fn open_scene_form(&mut self, editing: Option<String>) {
+        use crate::scenes::{Effect, Lights, Look, Part};
+        self.close_menu();
+        self.close_picker();
+        let start = Part::Look(Look::new(Effect::Static));
+        let keys = ["z10", "sensei310"];
+        let mut form = SceneForm { editing: None, name: String::new(), desk: true, look: Look::new(Effect::Wave), parts: keys.iter().map(|k| (k.to_string(), start.clone())).collect(), plugins: Vec::new() };
+        if let Some(sc) = editing.and_then(|id| self.scenes().into_iter().find(|s| s.id == id && !s.built_in)) {
+            form.editing = Some(sc.id.clone());
+            form.name = sc.name.clone();
+            match &sc.lights {
+                Lights::Desk(l) => form.look = l.clone(),
+                Lights::Each(_) => {
+                    form.desk = false;
+                    form.parts = keys.iter().map(|k| (k.to_string(), sc.lights.part(k))).collect();
+                }
+            }
+            form.plugins = sc.plugins.clone();
+        }
+        self.scene_form = Some(form);
+        self.ui.set_scene_form(true);
+        self.show_scene_form();
+        self.scene_play();
+    }
+
+    /// The scene form closed: Cancel (the scene on plays again), or Create
+    /// scene (kept, and on) or Save (kept; on again if it was).
+    fn close_scene_form(&mut self, keep: bool) {
+        let Some(form) = self.scene_form.take() else { return };
+        self.close_menu();
+        self.close_picker();
+        self.ui.set_scene_form(false);
+        if keep {
+            let all = self.scenes();
+            let mut sc = form.scene();
+            sc.name = match form.name.trim() {
+                "" => format!("Scene {}", all.iter().filter(|s| !s.built_in).count() + 1),
+                n => n.to_string(),
+            };
+            let mut kept: Vec<serde_json::Value> = self.settings.get("scenes").and_then(|v| v.as_array().cloned()).unwrap_or_default();
+            match &form.editing {
+                Some(id) => {
+                    if let Some(v) = kept.iter_mut().find(|v| v["id"].as_str() == Some(id)) {
+                        *v = crate::scenes::to_json(&sc);
+                    }
+                }
+                None => {
+                    sc.id = crate::scenes::new_id(&all);
+                    kept.push(crate::scenes::to_json(&sc));
+                }
+            }
+            if let Err(err) = self.settings.set("scenes", serde_json::Value::Array(kept)) {
+                self.status(format!("The scene was not saved: {err}"), 2);
+            }
+            if form.editing.is_none() {
+                self.set_scene(Some(sc.id), true);
+            } else {
+                self.scene_play();
+            }
+        } else {
+            self.scene_play();
+        }
+        self.refresh();
+    }
+
+    /// The scene being changed deleted: the games and apps that turned it on
+    /// go back to Every game's choice (or none), and it's off if it was on.
+    fn delete_scene(&mut self) {
+        let Some(id) = self.scene_form.as_ref().and_then(|f| f.editing.clone()) else { return };
+        self.scene_form = None;
+        self.close_menu();
+        self.close_picker();
+        self.ui.set_scene_form(false);
+        let mut kept: Vec<serde_json::Value> = self.settings.get("scenes").and_then(|v| v.as_array().cloned()).unwrap_or_default();
+        kept.retain(|v| v["id"].as_str() != Some(id.as_str()));
+        let _ = self.settings.set("scenes", serde_json::Value::Array(kept));
+        self.games.library.forget_scene(&id);
+        if self.scene_back.as_ref().is_some_and(|b| b.as_deref() == Some(id.as_str())) {
+            self.scene_back = Some(None);
+        }
+        if self.scene.as_deref() == Some(id.as_str()) {
+            self.set_scene(None, true);
+        } else {
+            self.scene_play();
+        }
+        self.refresh();
+    }
+
+    /// What the form says under its title: what a scene is for, or, changing
+    /// one that games or apps turn on, which (so deleting it surprises none).
+    fn scene_form_sub(&self) -> String {
+        let plain = "Light the whole desk with one effect, or give each device its own.".to_string();
+        let Some(id) = self.scene_form.as_ref().and_then(|f| f.editing.clone()) else { return plain };
+        let tied = self.games.library.tied("scene", &id);
+        let names: Vec<String> = tied.iter().map(|a| if a == crate::games::EVERY { "Every game".to_string() } else { self.games.name(a, &self.front_apps) }).collect();
+        match names.as_slice() {
+            [] => plain,
+            [one] if tied[0] == crate::games::EVERY => format!("{one} turns this scene on while a game is in front."),
+            [one] if self.games.library.is_game(&tied[0]) => format!("{one} turns this scene on while the game is in front."),
+            [one] => format!("{one} turns this scene on while the app is in front."),
+            [rest @ .., last] => format!("{} and {last} turn this scene on while they’re in front.", rest.join(", ")),
+        }
+    }
+
+    /// The devices the form gives a part each, as Home's desk has them, left
+    /// to right: each one's key, name and glyph's style.
+    fn scene_form_devices(&self) -> Vec<(String, String, i32)> {
+        let named: HashMap<String, String> = self.devices_in_order().into_iter().map(|(place, name, ..)| (place, name)).collect();
+        self.scene_spans()
+            .into_iter()
+            .map(|sp| {
+                let (place, style) = if sp.key == "z10" { ("z10", 0) } else { ("mouse", 1) };
+                let name = named.get(place).cloned().unwrap_or_else(|| if place == "z10" { "Keyboard".to_string() } else { "Mouse".to_string() });
+                (sp.key, name, style)
+            })
+            .collect()
+    }
+
+    /// The plugins' devices a scene can give a profile (OpenRGB's): each one's
+    /// id, name, glyph's style and profiles (by id and name).
+    fn scene_form_plugins(&self) -> Vec<(String, String, i32, Vec<(String, String)>)> {
+        self.hosted_devices().into_iter().filter(|d| !d.profiles.is_empty()).map(|d| (d.key, d.name, d.glyph.map_or(0, |g| 2 + g as i32), d.profiles)).collect()
+    }
+
+    /// The form drawn as it is: its title and words, its pieces (the cells
+    /// under the preview), the effect tiles and the preview itself.
+    fn show_scene_form(&mut self) {
+        use crate::lighting::{cell, id, kind, style, text_cell};
+        use crate::scenes::{Effect, Part};
+        let Some(form) = &self.scene_form else { return };
+        const W: f32 = 552.0;
+        let mut cells: Vec<Cell> = Vec::new();
+        let wrap = |t: &str| crate::text::wrap(400, 12.5, t, W);
+        let mut y = 0.0;
+        // the preview's words: each device under its part of the strip
+        let spans = self.scene_spans();
+        let devices = self.scene_form_devices();
+        let room = W - 3.0 * spans.len().saturating_sub(1) as f32;
+        let mut x = 0.0;
+        for (share, (_, name, _)) in crate::scenes::shares(&spans).into_iter().zip(&devices) {
+            let w = share * room;
+            cells.push(text_cell(style::NOTE, x, y, w - 6.0, 16.0, name));
+            x += w + 3.0;
+        }
+        y += 16.0 + 18.0;
+        // Name
+        cells.push(text_cell(style::LABEL, 0.0, y, W, 18.0, "Name"));
+        y += 25.0;
+        cells.push(Cell { text: form.name.as_str().into(), fill: "Name this scene".into(), style: 9, id: id(Ctl::SceneName), ..cell(kind::FIELD, 0.0, y, W, 36.0) });
+        y += 36.0 + 18.0;
+        // Lights: the whole desk, or each device
+        cells.push(text_cell(style::LABEL, 0.0, y, W, 18.0, "Lights"));
+        y += 25.0;
+        let seg = |cells: &mut Vec<Cell>, x0: f32, y: f32, c: Ctl, words: &[&str], on: usize| {
+            let mut bx = x0 + 3.0;
+            for (j, w) in words.iter().enumerate() {
+                let bw = crate::text::width(400, 12.5, w) + 28.0;
+                cells.push(Cell { text: (*w).into(), on: j == on, id: id(c), index: j as i32, ..cell(kind::SEG_BUTTON, bx, y + 3.0, bw, 30.0) });
+                bx += bw + 2.0;
+            }
+            cells.insert(cells.len() - words.len(), cell(kind::SEG, x0, y, bx - 2.0 + 3.0 - x0, 36.0));
+        };
+        seg(&mut cells, 0.0, y, Ctl::SceneLights, &["Whole desk", "Each device"], if form.desk { 0 } else { 1 });
+        y += 36.0 + 7.0;
+        let order: Vec<&str> = devices.iter().map(|(_, _, glyph)| if *glyph == 0 { "the keyboard" } else { "the mouse" }).collect();
+        let note = if form.desk {
+            match order.as_slice() {
+                [a, b] => format!("One effect crosses {a}, then {b}, in the order they sit on Home."),
+                _ => "One effect crosses the whole desk, in the order the devices sit on Home.".to_string(),
+            }
+        } else {
+            "Each device plays an effect of its own. Leave a device as it is to keep its profile’s lighting.".to_string()
+        };
+        for l in wrap(&note) {
+            cells.push(text_cell(style::NOTE, 0.0, y, W, 18.0, &l));
+            y += 18.0;
+        }
+        y += 18.0;
+        let dots = |cells: &mut Vec<Cell>, x0: f32, y: f32, colors: &[[u8; 3]], base: usize, codes: bool| -> f32 {
+            let mut x = x0;
+            for (k, c) in colors.iter().enumerate() {
+                cells.push(Cell { color: slint::Color::from_rgb_u8(c[0], c[1], c[2]), id: id(Ctl::SceneColor), index: (base + k) as i32, ..cell(kind::COLOR_DOT, x, y + 4.0, 28.0, 28.0) });
+                x += 28.0 + 8.0;
+                if codes {
+                    let hex = lighting::hex_of(*c);
+                    let w = crate::text::width(400, 12.5, &hex).ceil() + 4.0;
+                    cells.push(text_cell(style::CODE, x - 2.0, y, w, 36.0, &hex));
+                    x += w + 14.0;
+                }
+            }
+            x
+        };
+        let mut tiles_y = 0.0;
+        if form.desk {
+            let l = &form.look;
+            cells.push(text_cell(style::LABEL, 0.0, y, W, 18.0, "Effect"));
+            y += 25.0;
+            tiles_y = y;
+            y += 76.0 + 18.0;
+            if l.effect.colors() > 0 || l.effect == Effect::Wave {
+                if l.effect.colors() > 0 {
+                    cells.push(text_cell(style::LABEL, 0.0, y, 260.0, 18.0, "Colors"));
+                }
+                if l.effect == Effect::Wave {
+                    cells.push(text_cell(style::LABEL, 283.0, y, 260.0, 18.0, "Direction"));
+                }
+                y += 25.0;
+                dots(&mut cells, 0.0, y, &l.colors, 0, true);
+                if l.effect == Effect::Wave {
+                    seg(&mut cells, 283.0, y, Ctl::SceneWay, &["Left to right", "Right to left"], l.reverse as usize);
+                }
+                y += 36.0 + 18.0;
+            }
+            if l.effect != Effect::Static {
+                cells.push(text_cell(style::LABEL, 0.0, y, W, 18.0, "Speed"));
+                let words = crate::scenes::speed_words(l.speed);
+                let ww = crate::text::width(400, 12.5, words).ceil() + 2.0;
+                cells.push(text_cell(style::NOTE, W - ww, y, ww, 18.0, words));
+                y += 25.0;
+                cells.push(Cell { value: l.speed, id: id(Ctl::SceneSpeed), ..cell(kind::FILLED, 0.0, y, W, 20.0) });
+                y += 20.0 + 18.0;
+            }
+            for (k, (dev, name, _, profiles)) in self.scene_form_plugins().iter().enumerate() {
+                cells.push(text_cell(style::LABEL, 0.0, y, W, 18.0, name));
+                y += 25.0;
+                let shown = form.plugins.iter().find(|(d, _)| d == dev).and_then(|(_, p)| profiles.iter().find(|(r, _)| r == p).map(|(_, n)| n.clone())).unwrap_or_else(|| "Leave as it is".into());
+                cells.push(Cell { text: shown.as_str().into(), on: self.scene_form_menu == Some(FormMenu::Plugin(dev.clone())), id: id(Ctl::ScenePlugin), index: k as i32, ..cell(kind::DROP, 0.0, y, 260.0, 36.0) });
+                y += 36.0 + 7.0;
+                for l in wrap(&format!("{name} lights its devices from its own profiles. Choose one for this scene.")) {
+                    cells.push(text_cell(style::NOTE, 0.0, y, W, 18.0, &l));
+                    y += 18.0;
+                }
+                y += 18.0;
+            }
+            y -= 18.0;
+        } else {
+            // a row for each device: its glyph, its name, its effect and its colors
+            let mut first = true;
+            for (k, (key, name, glyph)) in devices.iter().enumerate() {
+                if !first {
+                    cells.push(Cell { color: slint::Color::from_argb_u8(9, 255, 255, 255), ..cell(kind::BOX, 0.0, y, W, 1.0) });
+                }
+                first = false;
+                cells.push(Cell { style: *glyph, ..cell(kind::DEVICE, 0.0, y + 10.0, 36.0, 36.0) });
+                cells.push(text_cell(style::LABEL, 48.0, y + 10.0, 172.0, 36.0, name));
+                let part = form.parts.iter().find(|(d, _)| d == key).map_or(Part::AsIs, |(_, p)| p.clone());
+                let word = match &part {
+                    Part::AsIs => "Leave as it is",
+                    Part::Look(l) => l.effect.label(),
+                };
+                cells.push(Cell { text: word.into(), on: self.scene_form_menu == Some(FormMenu::Part(key.clone())), id: id(Ctl::ScenePart), index: k as i32, ..cell(kind::DROP, 232.0, y + 10.0, 190.0, 36.0) });
+                if let Part::Look(l) = &part {
+                    dots(&mut cells, 434.0, y + 10.0, &l.colors, 100 * (k + 1), l.colors.len() == 1);
+                }
+                y += 56.0;
+            }
+            for (k, (dev, name, glyph, profiles)) in self.scene_form_plugins().iter().enumerate() {
+                cells.push(Cell { color: slint::Color::from_argb_u8(9, 255, 255, 255), ..cell(kind::BOX, 0.0, y, W, 1.0) });
+                cells.push(Cell { style: *glyph, ..cell(kind::DEVICE, 0.0, y + 10.0, 36.0, 36.0) });
+                cells.push(text_cell(style::LABEL, 48.0, y + 10.0, 172.0, 36.0, name));
+                let shown = form.plugins.iter().find(|(d, _)| d == dev).and_then(|(_, p)| profiles.iter().find(|(r, _)| r == p).map(|(_, n)| n.clone())).unwrap_or_else(|| "Leave as it is".into());
+                cells.push(Cell { text: shown.as_str().into(), on: self.scene_form_menu == Some(FormMenu::Plugin(dev.clone())), id: id(Ctl::ScenePlugin), index: k as i32, ..cell(kind::DROP, 232.0, y + 10.0, 190.0, 36.0) });
+                y += 56.0;
+            }
+        }
+        let editing = form.editing.is_some();
+        let tiles = form.desk.then(|| self.scene_tiles());
+        self.ui.set_scene_form_title(if editing { "Edit scene" } else { "New scene" }.into());
+        self.ui.set_scene_form_sub(self.scene_form_sub().into());
+        self.ui.set_scene_form_edit(editing);
+        self.ui.set_scene_form_h(y);
+        self.ui.set_scene_tiles_y(tiles_y);
+        self.ui.set_scene_tiles_on(tiles.is_some());
+        show_rows(self.ui.get_scene_tiles(), |m| self.ui.set_scene_tiles(m), tiles.unwrap_or_default());
+        sync_cells(&self.scene_cells, cells);
+        self.show_scene_strip(self.scene_t0.elapsed().as_secs_f32());
+    }
+
+    /// The scene form's effect tiles: each effect in the form's colors, the one chosen ticked.
+    fn scene_tiles(&self) -> Vec<EffectItem> {
+        let Some(form) = &self.scene_form else { return Vec::new() };
+        crate::scenes::EFFECTS
+            .iter()
+            .map(|(e, _, label)| {
+                let l = form.look.as_effect(*e);
+                let (w, h) = ((72.0 * self.scale).round() as u32, (40.0 * self.scale).round() as u32);
+                let across = if *e == crate::scenes::Effect::Wave { 2 } else { 1 };
+                let rgba = crate::scenes::tile(&l, w * across, h);
+                let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(w * across, h);
+                buf.make_mut_bytes().copy_from_slice(&rgba);
+                let motion = match e {
+                    crate::scenes::Effect::Breathing => 1,
+                    crate::scenes::Effect::Wave => 3,
+                    _ => 0,
+                };
+                EffectItem { name: (*label).into(), icon: slint::Image::from_rgba8(buf), on: *e == form.look.effect, motion }
+            })
+            .collect()
+    }
+
+    /// The form's preview: the scene across the desk now.
+    fn show_scene_strip(&mut self, t: f32) {
+        let Some(form) = &self.scene_form else { return };
+        let (w, h, gap) = ((552.0 * self.scale).round() as u32, (46.0 * self.scale).round() as u32, (3.0 * self.scale).round() as u32);
+        let rgba = crate::scenes::strip(&form.scene().lights, &self.scene_spans(), w, h, gap, t);
+        let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(w, h);
+        buf.make_mut_bytes().copy_from_slice(&rgba);
+        self.ui.set_scene_strip(slint::Image::from_rgba8(buf));
+    }
+
+    /// One of the form's dropdowns opened, under it: a device's effects (or
+    /// Leave as it is), or a plugin device's profiles.
+    fn open_scene_form_menu(&mut self, m: FormMenu, anchor: (f32, f32, f32)) {
+        if let Some((at, when)) = self.shut.take() {
+            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
+                return;
+            }
+        }
+        self.close_menu();
+        self.close_picker();
+        let Some(form) = &self.scene_form else { return };
+        let row = |label: &str, tick: bool| MenuRow { kind: 0, label: label.into(), tick, ..Default::default() };
+        let rows = match &m {
+            FormMenu::Part(key) => {
+                let now = form.parts.iter().find(|(d, _)| d == key).map(|(_, p)| p.clone());
+                let effect = match &now {
+                    Some(crate::scenes::Part::Look(l)) => Some(l.effect),
+                    _ => None,
+                };
+                std::iter::once(row("Leave as it is", effect.is_none())).chain(std::iter::once(MenuRow { kind: 2, ..Default::default() })).chain(crate::scenes::EFFECTS.iter().map(|(e, _, w)| row(w, effect == Some(*e)))).collect()
+            }
+            FormMenu::Plugin(dev) => {
+                let now = form.plugins.iter().find(|(d, _)| d == dev).map(|(_, p)| p.clone());
+                let profiles = self.scene_form_plugins().into_iter().find(|(d, ..)| d == dev).map(|(.., p)| p).unwrap_or_default();
+                std::iter::once(row("Leave as it is", now.is_none())).chain(std::iter::once(MenuRow { kind: 2, ..Default::default() })).chain(profiles.iter().map(|(r, n)| row(n, now.as_deref() == Some(r.as_str())))).collect()
+            }
+        };
+        self.ui.set_menu_marks(true);
+        self.hang_menu(rows, 240.0, anchor);
+        self.scene_form_menu = Some(m);
+        self.show_scene_form();
+    }
+
+    /// A row of the form's open dropdown chosen.
+    fn scene_form_chose(&mut self, m: &FormMenu, i: usize) {
+        use crate::scenes::{Look, Part, EFFECTS};
+        let profiles = match m {
+            FormMenu::Plugin(dev) => self.scene_form_plugins().into_iter().find(|(d, ..)| d == dev).map(|(.., p)| p).unwrap_or_default(),
+            FormMenu::Part(_) => Vec::new(),
+        };
+        let Some(form) = &mut self.scene_form else { return };
+        match m {
+            FormMenu::Part(key) => {
+                let new = match i {
+                    0 => Some(Part::AsIs),
+                    i if i >= 2 => EFFECTS.get(i - 2).map(|(e, ..)| {
+                        let was = form.parts.iter().find(|(d, _)| d == key).and_then(|(_, p)| if let Part::Look(l) = p { Some(l.clone()) } else { None });
+                        Part::Look(was.map_or_else(|| Look::new(*e), |l| l.as_effect(*e)))
+                    }),
+                    _ => None,
+                };
+                if let Some(p) = new {
+                    match form.parts.iter_mut().find(|(d, _)| d == key) {
+                        Some(x) => x.1 = p,
+                        None => form.parts.push((key.clone(), p)),
+                    }
+                }
+            }
+            FormMenu::Plugin(dev) => {
+                form.plugins.retain(|(d, _)| d != dev);
+                if i >= 2 {
+                    if let Some((r, _)) = profiles.get(i - 2) {
+                        form.plugins.push((dev.clone(), r.clone()));
+                    }
+                }
+            }
+        }
+        self.show_scene_form();
+        self.scene_play();
+    }
+
+    /// A color of the form's, by its place (the whole desk's 0 and 1; a
+    /// device's, 100 for each row down, and its own place).
+    fn scene_form_color(&self, index: usize) -> Option<[u8; 3]> {
+        let f = self.scene_form.as_ref()?;
+        if index < 100 {
+            return f.look.colors.get(index).copied();
+        }
+        let (row, k) = (index / 100 - 1, index % 100);
+        let key = self.scene_form_devices().get(row)?.0.clone();
+        match f.parts.iter().find(|(d, _)| *d == key)? {
+            (_, crate::scenes::Part::Look(l)) => l.colors.get(k).copied(),
+            _ => None,
+        }
+    }
+
+    fn set_scene_form_color(&mut self, index: usize, rgb: [u8; 3]) {
+        let key = (index >= 100).then(|| self.scene_form_devices().get(index / 100 - 1).map(|d| d.0.clone())).flatten();
+        let Some(f) = &mut self.scene_form else { return };
+        let colors = match &key {
+            None => Some(&mut f.look.colors),
+            Some(k) => f.parts.iter_mut().find(|(d, _)| d == k).and_then(|(_, p)| if let crate::scenes::Part::Look(l) = p { Some(&mut l.colors) } else { None }),
+        };
+        if let Some(c) = colors.and_then(|c| c.get_mut(index % 100)) {
+            *c = rgb;
+        }
+        self.show_scene_form();
     }
 
     /// Whether each device's own Lighting page shows now, the keyboard's and
@@ -8349,13 +9133,13 @@ impl Front {
 
     /// Where each device's lights are on Home's desk, in millimeters: the
     /// keyboard's keys with LEDs, the mouse's logo and wheel.
-    fn desk_places(&self) -> crate::desk_light::Places {
-        let mut out = crate::desk_light::Places::default();
+    fn desk_places(&self) -> crate::scenes::Places {
+        let mut out = crate::scenes::Places::default();
         let item = |id: &str| self.desk.items.iter().find(|it| it.id == id).map(|it| [it.x, it.y, it.w, it.h]);
         if let (Some(r), true) = (item("z10"), self.page.dev.is_some()) {
             let vb = self.page.view_box;
             out.keys = self.page.layout.iter().filter(|k| k.led).map(|k| {
-                let (x, y) = crate::desk_light::on_desk(vb, r, k.cx, k.cy);
+                let (x, y) = crate::scenes::on_desk(vb, r, k.cx, k.cy);
                 (k.pos, x, y)
             }).collect();
         }
@@ -8367,68 +9151,99 @@ impl Front {
                 None => crate::mouse_art::LIGHT_MIDDLES,
             };
             out.mouse = crate::mouse_art::LIGHT_IDS.iter().zip(middles).map(|(id, (x, y))| {
-                let (dx, dy) = crate::desk_light::on_desk(view, r, x as f64, y as f64);
+                let (dx, dy) = crate::scenes::on_desk(view, r, x as f64, y as f64);
                 (*id, dx, dy)
             }).collect();
         }
         out
     }
 
-    /// The desk's light's next frame: each light's color where it sits, sent
-    /// to its device (the keyboard every frame, the mouse as often as it takes
-    /// two commands, when its colors change), and the pictures with it. A
-    /// device whose own Lighting page shows is out of it (see lighting_open):
-    /// as the page opens, the keyboard plays the page's preview again and the
-    /// mouse is handed its own lights back; as it closes, each is in again.
-    fn desk_light_frame(&mut self) {
-        let e = self.desk_light;
-        if e == crate::desk_light::Effect::Off {
-            return;
-        }
-        let t = self.desk_light_t0.elapsed().as_secs_f32();
+    /// The scene's next frame: each light's color where it sits, sent to its
+    /// device (the keyboard every frame, the mouse as often as it takes two
+    /// commands, when its colors change), and the pictures with it. A device
+    /// the scene leaves as it is plays its own lighting, as does one whose own
+    /// Lighting page shows (see lighting_open): as the page opens, the keyboard
+    /// plays the page's preview again and the mouse is handed its own lights
+    /// back; as it closes, each is in again.
+    fn scene_frame(&mut self) {
+        use crate::scenes::Part;
+        let Some(scene) = self.playing() else { return };
+        let t = self.scene_t0.elapsed().as_secs_f32();
         let places = self.desk_places();
-        let keys: HashMap<u32, [u8; 3]> = places.keys.iter().map(|(pos, x, y)| (*pos, crate::desk_light::color(e, *x, *y, t))).collect();
-        let mouse = [0, 1].map(|i| places.mouse.iter().find(|(id, ..)| *id == crate::mouse_art::LIGHT_IDS[i]).map(|(_, x, y)| crate::desk_light::color(e, *x, *y, t)));
-        self.desk_colors = (keys, mouse);
+        let (kb, mouse) = (scene.lights.part("z10"), scene.lights.part("sensei310"));
+        let keys: HashMap<u32, [u8; 3]> = match &kb {
+            Part::Look(l) => places.keys.iter().map(|(pos, x, _)| (*pos, crate::scenes::color(l, *x, t))).collect(),
+            Part::AsIs => HashMap::new(),
+        };
+        let lights = [0, 1].map(|i| match &mouse {
+            Part::Look(l) => places.mouse.iter().find(|(id, ..)| *id == crate::mouse_art::LIGHT_IDS[i]).map(|(_, x, _)| crate::scenes::color(l, *x, t)),
+            Part::AsIs => None,
+        });
+        self.scene_colors = (keys, lights);
         let aside = self.lighting_open();
         if aside.0 && !self.desk_aside.0 {
-            self.start_preview();
+            if self.scene_claim.0 {
+                self.start_preview();
+            }
+            self.scene_claim.0 = false;
         }
         if aside.1 != self.desk_aside.1 {
-            if aside.1 {
+            if aside.1 && self.scene_claim.1 {
                 self.mouse.hand_back();
             }
-            self.desk_light_mouse = (None, [[0; 3]; 2]);
+            self.scene_claim.1 = false;
+            self.scene_mouse = (None, [[0; 3]; 2]);
         }
         self.desk_aside = aside;
         if self.page.dev.is_some() && !aside.0 {
-            let colors: Vec<[u8; 3]> = (0..evga_z10::protocol::NKEYS as u32).map(|p| self.desk_colors.0.get(&p).copied().unwrap_or([0; 3])).collect();
-            self.ask_kb(device::Ask::Preview(serde_json::json!({ "colors": colors, "tab": "native", "claim": true })));
-        }
-        if let (true, false, Some(logo), Some(wheel)) = (self.mouse.present(), aside.1, mouse[0], mouse[1]) {
-            let due = self.desk_light_mouse.0.is_none_or(|at| at.elapsed() >= Duration::from_millis(125));
-            if due && self.desk_light_mouse.1 != [logo, wheel] {
-                self.mouse.direct(serde_json::json!({ "logo": lighting::hex_of(logo), "wheel": lighting::hex_of(wheel) }));
-                self.desk_light_mouse = (Some(Instant::now()), [logo, wheel]);
+            if matches!(kb, Part::Look(_)) {
+                let colors: Vec<[u8; 3]> = (0..evga_z10::protocol::NKEYS as u32).map(|p| self.scene_colors.0.get(&p).copied().unwrap_or([0; 3])).collect();
+                self.ask_kb(device::Ask::Preview(serde_json::json!({ "colors": colors, "tab": "native", "claim": true })));
+                self.scene_claim.0 = true;
+            } else if self.scene_claim.0 {
+                self.ask_kb(device::Ask::Preview(serde_json::json!({ "stop": true, "tab": "native", "claim": true })));
+                self.scene_claim.0 = false;
+                self.last_lights = None;
             }
+        }
+        if self.mouse.present() && !aside.1 {
+            if let (Some(logo), Some(wheel)) = (lights[0], lights[1]) {
+                let due = self.scene_mouse.0.is_none_or(|at| at.elapsed() >= Duration::from_millis(125));
+                if due && self.scene_mouse.1 != [logo, wheel] {
+                    self.mouse.direct(serde_json::json!({ "logo": lighting::hex_of(logo), "wheel": lighting::hex_of(wheel) }));
+                    self.scene_mouse = (Some(Instant::now()), [logo, wheel]);
+                    self.scene_claim.1 = true;
+                }
+            } else if self.scene_claim.1 {
+                self.mouse.hand_back();
+                self.scene_claim.1 = false;
+                self.scene_mouse = (None, [[0; 3]; 2]);
+            }
+        }
+        if self.scene_form.is_some() {
+            self.show_scene_strip(t);
         }
         if self.mouse_pictured() {
             self.show_mouse_lights();
         }
+        // (a plugin's device met since the scene came on, OpenRGB's after its program started, gets its profile)
+        if self.scene_plugins_at.elapsed() >= Duration::from_secs(1) {
+            self.scene_plugins_at = Instant::now();
+            self.scene_plugins_play(Some(&scene));
+        }
     }
 
-    /// The desk's light's frame now, as its timer would give it (a snapshot
-    /// has no timers).
-    pub fn desk_light_now(&mut self) {
-        self.desk_light_frame();
+    /// The scene's frame now, as its timer would give it (a snapshot has no timers).
+    pub fn scene_now(&mut self) {
+        self.scene_frame();
     }
 
-    /// A mouse light's color for its picture now: the desk's light's, while
-    /// it plays (but on the mouse's own Lighting page); else the mouse's own,
+    /// A mouse light's color for its picture now: the scene's, while it lights
+    /// the mouse (but on the mouse's own Lighting page); else the mouse's own,
     /// none while that light is off.
     fn mouse_color(&self, i: usize, now: Instant) -> Option<[u8; 3]> {
-        if self.desk_light != crate::desk_light::Effect::Off && !self.lighting_open().1 {
-            if let Some(c) = self.desk_colors.1[i] {
+        if !self.lighting_open().1 {
+            if let Some(c) = self.scene_colors.1[i] {
                 return Some(c);
             }
         }
@@ -8536,7 +9351,7 @@ impl Front {
         }
         self.close_menu();
         let kept = self.game_launch_value(Self::launch_key(row as i32))["until"].as_str().unwrap_or(if row == 0 { "window" } else { "done" }).to_string();
-        let rows: Vec<MenuRow> = Self::until_choices(row).iter().map(|(k, w)| MenuRow { kind: 0, label: (*w).into(), tag: "".into(), tick: *k == kept, sub: "".into() }).collect();
+        let rows: Vec<MenuRow> = Self::until_choices(row).iter().map(|(k, w)| MenuRow { kind: 0, label: (*w).into(), tag: "".into(), tick: *k == kept, sub: "".into(), ..Default::default() }).collect();
         self.hang_menu(rows, 250.0, anchor);
         self.until_menu = Some(row);
     }

@@ -48,6 +48,24 @@ pub struct Device {
     pub profiles: Vec<(String, String)>,
     pub glyph: Option<usize>,
     pub sub: String,
+    /// each profile's chip, for the Scene row (kind "scene"), whose profiles
+    /// are No scene and the scenes
+    pub chips: Vec<slint::Image>,
+}
+
+/// What each row of the Scene row's menu chooses, Don't switch first, then
+/// No scene, the scenes that come with Ectomatter and the person's own, a
+/// line (none) between the groups; the Scene row's profiles are No scene,
+/// the two built-in scenes, then the person's.
+fn scene_rows(d: &Device) -> Vec<Option<Choice>> {
+    let p = |i: usize| d.profiles.get(i).map(|(r, _)| Choice::Profile(r.clone()));
+    let mut out = vec![Some(Choice::Stay), p(0), None];
+    out.extend((1..d.profiles.len().min(3)).map(p));
+    if d.profiles.len() > 3 {
+        out.push(None);
+        out.extend((3..d.profiles.len()).map(p));
+    }
+    out
 }
 
 /// Which games the games' tabs show: every store's, Steam's, or those added by hand.
@@ -858,7 +876,9 @@ impl Games {
                 out.push(Cell { color: slint::Color::from_argb_u8(9, 255, 255, 255), ..cell(kind::BOX, lx, ry, w - 2.0 * PAD_X, 1.0) });
             }
             let (c, own, _) = self.row_value(id, d);
-            out.push(Cell { style: d.glyph.map_or((d.kind == "mouse") as i32, |g| 2 + g as i32), ..cell(kind::DEVICE, lx, ry + 13.0, GLYPH, GLYPH) });
+            // (the Scene row's glyph is the scenes' own)
+            let glyph = if d.kind == "scene" { -1 } else { d.glyph.map_or((d.kind == "mouse") as i32, |g| 2 + g as i32) };
+            out.push(Cell { style: glyph, ..cell(kind::DEVICE, lx, ry + 13.0, GLYPH, GLYPH) });
             let mut row_h = 36.0;
             if d.sub.is_empty() {
                 out.push(text_cell(style::LABEL, lx + GLYPH + 12.0, ry + 13.0, LABEL_W - GLYPH - 12.0, 36.0, &d.name));
@@ -873,7 +893,12 @@ impl Games {
                 row_h = (16.0 + 20.0 + lines.len() as f32 * 17.0 - 13.0).max(36.0);
             }
             let word = choice_name(&c, d);
-            out.push(Cell { text: word.as_str().into(), style: (!own && !every) as i32, on: self.menu == Some(Menu::Device(k)), id: id_of(Ctl::LibChoice), index: k as i32, ..cell(kind::DROP, cx, ry + 13.0, DROP_W, 36.0) });
+            // (a scene's chip in its dropdown, by its place among the Scene row's chips)
+            let chip = match &c {
+                Choice::Profile(p) if d.kind == "scene" => d.profiles.iter().position(|(r, _)| r == p).map_or(0.0, |i| i as f32 + 1.0),
+                _ => 0.0,
+            };
+            out.push(Cell { text: word.as_str().into(), style: (!own && !every) as i32, value: chip, on: self.menu == Some(Menu::Device(k)), id: id_of(Ctl::LibChoice), index: k as i32, ..cell(kind::DROP, cx, ry + 13.0, DROP_W, 36.0) });
             ry += 13.0 + row_h + 13.0;
         }
         if devices.is_empty() {
@@ -882,7 +907,11 @@ impl Games {
         } else {
             out.push(Cell { color: slint::Color::from_argb_u8(9, 255, 255, 255), ..cell(kind::BOX, lx, ry, w - 2.0 * PAD_X, 1.0) });
             let who = if every { "a game".to_string() } else { name.clone() };
-            let note = format!("Each device switches when {who} comes to the front, and switches back when another app does.");
+            let note = if devices.iter().any(|d| d.kind == "scene") {
+                format!("The scene and each device’s profile switch when {who} comes to the front, and switch back when another app does.")
+            } else {
+                format!("Each device switches when {who} comes to the front, and switches back when another app does.")
+            };
             let nw = w - PAD_X - (cx - x0);
             let lines = crate::text::wrap(400, 12.5, &note, nw);
             for (i, l) in lines.iter().enumerate() {
@@ -1380,7 +1409,10 @@ impl Games {
             .iter()
             .filter_map(|d| {
                 let (c, chosen, follows) = self.row_value(id, d);
-                (chosen && (every || c != follows)).then(|| choice_name(&c, d))
+                (chosen && (every || c != follows)).then(|| match &c {
+                    Choice::Profile(p) if d.kind == "scene" && p != "none" => format!("{} scene", choice_name(&c, d)),
+                    _ => choice_name(&c, d),
+                })
             })
             .filter(|n| n != "Don’t switch" || !every)
             .collect();
@@ -1567,7 +1599,7 @@ impl Games {
 
     /// A menu's rows, for the menu being opened.
     pub fn menu_rows(&self, m: &Menu, all_counts: (usize, usize)) -> Vec<MenuRow> {
-        let row = |label: &str, tick: bool, sub: String| MenuRow { kind: 0, label: label.into(), tag: "".into(), tick, sub: sub.into() };
+        let row = |label: &str, tick: bool, sub: String| MenuRow { kind: 0, label: label.into(), tag: "".into(), tick, sub: sub.into(), ..Default::default() };
         match m {
             Menu::Shop => vec![
                 row("All stores", self.shop == Shop::All, String::new()),
@@ -1604,6 +1636,21 @@ impl Games {
                 let (c, _, follows) = self.row_value(&id, d);
                 // (on a game's page, what Every game has is said: choosing it follows Every game again)
                 let every = |x: &Choice| if id != EVERY && self.library.is_game(&id) && *x == follows { "Every game’s".to_string() } else { String::new() };
+                if d.kind == "scene" {
+                    // (each with its chip, Don't switch a chip's room on its own, a line between groups)
+                    return scene_rows(d)
+                        .into_iter()
+                        .map(|x| match x {
+                            None => MenuRow { kind: 2, ..Default::default() },
+                            Some(Choice::Stay) => MenuRow { chipped: true, ..row("Don’t switch", c == Choice::Stay, every(&Choice::Stay)) },
+                            Some(Choice::Profile(p)) => {
+                                let i = d.profiles.iter().position(|(r, _)| *r == p).unwrap_or(0);
+                                let ch = Choice::Profile(p.clone());
+                                MenuRow { chip: d.chips.get(i).cloned().unwrap_or_default(), chipped: true, ..row(&d.profiles[i].1, c == ch, every(&ch)) }
+                            }
+                        })
+                        .collect();
+                }
                 std::iter::once(row("Don’t switch", c == Choice::Stay, every(&Choice::Stay)))
                     .chain(d.profiles.iter().map(|(r, n)| {
                         let p = Choice::Profile(r.clone());
@@ -1646,7 +1693,16 @@ impl Games {
             }
             Menu::Device(k) => {
                 let (Some(d), Some(id)) = (self.rows.get(k).cloned(), self.open.clone()) else { return };
-                let want = if i == 0 { Choice::Stay } else if let Some((r, _)) = d.profiles.get(i - 1) { Choice::Profile(r.clone()) } else { return };
+                let want = if d.kind == "scene" {
+                    let Some(Some(w)) = scene_rows(&d).get(i).cloned() else { return };
+                    w
+                } else if i == 0 {
+                    Choice::Stay
+                } else if let Some((r, _)) = d.profiles.get(i - 1) {
+                    Choice::Profile(r.clone())
+                } else {
+                    return;
+                };
                 let (_, _, follows) = self.row_value(&id, &d);
                 let keep = if id == EVERY {
                     // (Every game's own Don't switch is no choice at all)

@@ -97,9 +97,18 @@ pub enum Ctl {
     LibSpot,
     LibCheck,
     LibText,
+    /// the scene form's name, Whole desk or Each device, a wave's way, a color,
+    /// a speed, a device's effect, a plugin device's profile
+    SceneName,
+    SceneLights,
+    SceneWay,
+    SceneColor,
+    SceneSpeed,
+    ScenePart,
+    ScenePlugin,
 }
 
-const CTLS: [Ctl; 51] = [
+const CTLS: [Ctl; 58] = [
     Ctl::None,
     Ctl::Paint,
     Ctl::Demo,
@@ -151,6 +160,13 @@ const CTLS: [Ctl; 51] = [
     Ctl::LibSpot,
     Ctl::LibCheck,
     Ctl::LibText,
+    Ctl::SceneName,
+    Ctl::SceneLights,
+    Ctl::SceneWay,
+    Ctl::SceneColor,
+    Ctl::SceneSpeed,
+    Ctl::ScenePart,
+    Ctl::ScenePlugin,
 ];
 
 pub fn ctl(id: i32) -> Ctl {

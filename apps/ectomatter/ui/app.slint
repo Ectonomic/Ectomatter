@@ -365,6 +365,12 @@ export struct MenuRow {
     tag: string,
     tick: bool,
     sub: string,
+    // a chip before its name (a scene's colors), in a column kept for it in every row
+    // of a menu that has chips (chipped, the chip left empty to keep the column);
+    // a pencil at its right under the pointer, to change it (a scene of the person's own)
+    chip: image,
+    chipped: bool,
+    edit: bool,
 }
 
 // one of the window's own buttons: minimize, maximize, close
@@ -699,6 +705,8 @@ component Menu inherits Rectangle {
     in property <bool> search: true;
     in-out property <string> query;
     callback chose(int);
+    // a row's pencil pressed
+    callback edit(int);
     callback go-back();
     callback typed(string);
     callback enter();
@@ -898,6 +906,17 @@ component Menu inherits Rectangle {
                         color: Ink.ink;
                         vertical-alignment: center;
                     }
+                    if row.chipped: Rectangle {
+                        width: 14px + 2px;
+                        Image {
+                            x: 0;
+                            y: (parent.height - 14px) / 2;
+                            width: 14px;
+                            height: 14px;
+                            source: row.chip;
+                            image-fit: fill;
+                        }
+                    }
                     if row.tag != "": Rectangle {
                         width: tag.preferred-width + 12px;
                         Rectangle {
@@ -939,6 +958,31 @@ component Menu inherits Rectangle {
                     mouse-cursor: pointer;
                     clicked => { root.chose(i); }
                 }
+                if row.edit && (item.has-hover || pen.has-hover): Rectangle {
+                    x: parent.width - 30px;
+                    y: (parent.height - 24px) / 2;
+                    width: 24px;
+                    height: 24px;
+                    border-radius: 6px;
+                    background: pen.has-hover ? #ffffff14 : transparent;
+                    Path {
+                        width: 13px;
+                        height: 13px;
+                        viewbox-width: 14;
+                        viewbox-height: 14;
+                        commands: "M9.6 2.2l2.2 2.2-7 7H2.6V9.2ZM8.3 3.5l2.2 2.2";
+                        fill: transparent;
+                        stroke: pen.has-hover ? Ink.bright : Ink.soft;
+                        stroke-width: 1.3px;
+                    }
+                }
+                pen := TouchArea {
+                    x: parent.width - 30px;
+                    width: row.edit ? 24px : 0;
+                    enabled: row.edit;
+                    mouse-cursor: pointer;
+                    clicked => { root.edit(i); }
+                }
             }
         }
     }
@@ -975,6 +1019,10 @@ component CellView inherits Rectangle {
     in property <image> glyph2;
     // each package's own glyph (a device's tile with style 2 on: the package that many past 2)
     in property <[image]> glyphs;
+    // the scenes' glyph (a device glyph's style -1), and the chips a dropdown can show
+    // before its words (its value, one more than the chip's place)
+    in property <image> glyph3;
+    in property <[image]> chips;
     x: root.c.x;
     y: root.c.y;
     width: root.c.w;
@@ -1161,7 +1209,7 @@ component CellView inherits Rectangle {
         Image {
             width: floor(parent.width * 0.625 / 1px) * 1px;
             height: self.width;
-            source: root.c.style >= 2 ? root.glyphs[root.c.style - 2] : root.c.style == 1 ? root.glyph2 : root.glyph;
+            source: root.c.style == -1 ? root.glyph3 : root.c.style >= 2 ? root.glyphs[root.c.style - 2] : root.c.style == 1 ? root.glyph2 : root.glyph;
             colorize: Ink.soft;
         }
     }
@@ -1412,6 +1460,16 @@ component CellView inherits Rectangle {
             color: #8a8a92;
             vertical-alignment: center;
         }
+        // (style 9: a name to give, what it holds when empty in gray, as the scene form's Name)
+        if root.c.style == 9 && input.text == "": Text {
+            x: 10px;
+            height: parent.height;
+            text: root.c.fill;
+            font-family: "Geist";
+            font-size: 13.5px;
+            color: Ink.quiet;
+            vertical-alignment: center;
+        }
         if root.c.style == 3 && input.text == "": Text {
             x: 10px;
             height: parent.height;
@@ -1566,7 +1624,7 @@ component CellView inherits Rectangle {
                     self.clear-focus();
                     return accept;
                 }
-                if ((root.c.style == 3 || root.c.style == 7) && e.text == Key.Escape) {
+                if ((root.c.style == 3 || root.c.style == 7 || root.c.style == 9) && e.text == Key.Escape) {
                     root.pick(root.c.id, 2, 0, 0, 0);
                     return accept;
                 }
@@ -1998,9 +2056,17 @@ component CellView inherits Rectangle {
         background: dr-ta.has-hover || root.c.on ? Ink.hover-box : Ink.well;
         border-width: root.c.style == 2 ? 1px : 0;
         border-color: #f0b35a80;
-        Text {
+        if root.c.value > 0: Image {
             x: 12px;
-            width: parent.width - 40px;
+            y: (parent.height - 14px) / 2;
+            width: 14px;
+            height: 14px;
+            source: root.chips[round(root.c.value) - 1];
+            image-fit: fill;
+        }
+        Text {
+            x: root.c.value > 0 ? 12px + 14px + 9px : 12px;
+            width: parent.width - self.x - 28px;
             text: root.c.text;
             font-family: "Geist";
             font-size: 13px;
@@ -4563,8 +4629,37 @@ export component AppWindow inherits Window {
     // the menu on the keyboard's profile being edited
     callback kb-profile-menu(length, length, length);
     // the desk's light on Home: what it plays (its short words; none while off), and its menu
-    in property <string> desk-light;
-    callback desk-light-menu(length, length, length);
+    // Home's Scenes button: the scene on (none: "") and its chip; its menu opened
+    in property <string> scene-name;
+    in property <image> scene-chip;
+    callback scene-menu(length, length, length);
+    // a row's pencil in the open menu
+    callback menu-edit(int);
+    // the scene form, over the window: its title and words, whether it changes a scene
+    // (Delete), the height of its pieces under its preview, the pieces, the preview, the
+    // effect tiles (where they go, and whether they show), and its buttons and tiles
+    in property <bool> scene-form;
+    in property <string> scene-form-title;
+    in property <string> scene-form-sub;
+    in property <bool> scene-form-edit;
+    in property <length> scene-form-h;
+    in property <[Cell]> scene-cells;
+    in property <image> scene-strip;
+    in property <[EffectItem]> scene-tiles;
+    in property <length> scene-tiles-y;
+    in property <bool> scene-tiles-on;
+    callback scene-tile(int);
+    callback scene-form-close();
+    callback scene-form-done();
+    callback scene-form-delete();
+    // each scene's chip (No scene's first), for the Library's Scene row; the scenes' glyph
+    in property <[image]> scene-chips;
+    in property <image> scene-glyph;
+    // a scene's chip before the keyboard's and the mouse's Lighting hint, while the scene lights it
+    in property <image> hint-chip;
+    in property <bool> hint-chip-on;
+    in property <image> mouse-hint-chip;
+    in property <bool> mouse-hint-chip-on;
     callback mouse-undo();
     // its picture, and how far the picture's shadow reaches past the mouse;
     // over it, the chosen button picked out and the one under the pointer a
@@ -5218,7 +5313,8 @@ export component AppWindow inherits Window {
                 color: Ink.quiet;
                 vertical-alignment: center;
             }
-            // the desk's light, left of Arrange: one effect across every device on the desk
+            // Scenes, left of Arrange: the scene on, by its name and its chip (Scenes, with the
+            // light's glyph, while none is on)
             if !root.desk-editing && root.desk-empty == "": Rectangle {
                 x: parent.width - 24px - arrange-measure.preferred-width - 8px - self.width;
                 y: 17px;
@@ -5230,7 +5326,14 @@ export component AppWindow inherits Window {
                     padding-left: 9px;
                     padding-right: 9px;
                     spacing: 7px;
-                    Path {
+                    if root.scene-name != "": Image {
+                        y: 6px;
+                        width: 14px;
+                        height: 14px;
+                        source: root.scene-chip;
+                        image-fit: fill;
+                    }
+                    if root.scene-name == "": Path {
                         y: 6px;
                         width: 14px;
                         height: 14px;
@@ -5239,25 +5342,25 @@ export component AppWindow inherits Window {
                         // (a bulb's light: a ring, and its rays)
                         commands: "M7 4.6a2.4 2.4 0 1 0 0 4.8a2.4 2.4 0 1 0 0-4.8zM7 0.9v1.5M7 11.6v1.5M0.9 7h1.5M11.6 7h1.5M2.7 2.7l1.06 1.06M10.24 10.24l1.06 1.06M2.7 11.3l1.06-1.06M10.24 3.76l1.06-1.06";
                         fill: transparent;
-                        stroke: root.desk-light != "" ? Ink.bright : light-ta.has-hover ? Ink.bright : Ink.soft;
+                        stroke: light-ta.has-hover ? Ink.bright : Ink.soft;
                         stroke-width: 1.4px;
                         stroke-line-cap: LineCap.round;
                     }
                     Text {
-                        text: root.desk-light == "" ? "Desk light" : "Desk light: " + root.desk-light;
+                        text: root.scene-name == "" ? "Scenes" : "Scene: " + root.scene-name;
                         font-family: "Geist";
                         font-size: 12.5px;
                         font-weight: 500;
-                        color: root.desk-light != "" || light-ta.has-hover ? Ink.bright : Ink.soft;
+                        color: root.scene-name != "" || light-ta.has-hover ? Ink.bright : Ink.soft;
                         vertical-alignment: center;
                     }
                 }
                 light-ta := TouchArea {
                     mouse-cursor: pointer;
-                    clicked => { root.desk-light-menu(self.absolute-position.x, self.absolute-position.y, self.height); }
+                    clicked => { root.scene-menu(self.absolute-position.x, self.absolute-position.y, self.height); }
                 }
             }
-            // (Arrange's width, for the desk light's place beside it)
+            // (Arrange's width, for the Scenes button's place beside it)
             arrange-measure := HorizontalLayout {
                 visible: false;
                 padding-left: 9px;
@@ -5572,14 +5675,22 @@ export component AppWindow inherits Window {
                 height: parent.height - 56px;
                 content-height: max(low-y + (root.mouse-tab < 2 ? low-h : root.mouse-cells-h), pro-w > 0 ? pro-y + pro-h : 0) + 24px;
                 mouse-drag-pan-enabled: false;
-                Text {
+                if root.mouse-hint-chip-on: Image {
                     x: pws-x;
+                    y: 12px + 11px;
+                    width: 14px;
+                    height: 14px;
+                    source: root.mouse-hint-chip;
+                    image-fit: fill;
+                }
+                Text {
+                    x: pws-x + (root.mouse-hint-chip-on ? 24px : 0);
                     y: 12px;
                     height: 36px;
                     text: root.mouse-hint;
                     font-family: "Geist";
                     font-size: 12.5px;
-                    color: Ink.quiet;
+                    color: root.mouse-hint-chip-on ? Ink.soft : Ink.quiet;
                     vertical-alignment: center;
                 }
                 // the stage: the mouse on its own shade, as its mock has it; the
@@ -6206,6 +6317,8 @@ export component AppWindow inherits Window {
                     glyph: root.keyboard-glyph;
                     glyph2: root.mouse-glyph;
                     glyphs: root.package-glyphs;
+                    glyph3: root.scene-glyph;
+                    chips: root.scene-chips;
                     pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
                     slide(id, v) => { root.cell-slide(id, v); }
                     typed(id, index, t) => { root.cell-typed(id, index, t); }
@@ -6481,12 +6594,25 @@ export component AppWindow inherits Window {
                     }
                     if root.boot == 0: HorizontalLayout {
                         spacing: 16px;
-                        Text {
-                            text: root.hint;
-                            font-family: "Geist";
-                            font-size: 12.5px;
-                            color: Ink.quiet;
-                            vertical-alignment: center;
+                        HorizontalLayout {
+                            spacing: 10px;
+                            if root.hint-chip-on: Rectangle {
+                                width: 14px;
+                                Image {
+                                    y: (parent.height - 14px) / 2;
+                                    width: 14px;
+                                    height: 14px;
+                                    source: root.hint-chip;
+                                    image-fit: fill;
+                                }
+                            }
+                            Text {
+                                text: root.hint;
+                                font-family: "Geist";
+                                font-size: 12.5px;
+                                color: root.hint-chip-on ? Ink.soft : Ink.quiet;
+                                vertical-alignment: center;
+                            }
                         }
                         if root.live: HorizontalLayout {
                             spacing: 6px;
@@ -8669,6 +8795,172 @@ export component AppWindow inherits Window {
         }
     }
 
+    // the scene form, over the window: New scene or Edit scene, the scene across the desk
+    // as it's set (the devices show it too), its pieces, and Cancel and Create scene (or
+    // Save, and Delete scene apart at the left); a press on the dim, Cancel or Escape closes it
+    if root.scene-form: Rectangle {
+        background: #00000099;
+        border-radius: root.radius;
+        TouchArea {
+            clicked => { root.scene-form-close(); }
+        }
+        FocusScope {
+            width: 0;
+            height: 0;
+            init => { self.focus(); }
+            key-pressed(e) => {
+                if (e.text == Key.Escape) {
+                    root.scene-form-close();
+                    return accept;
+                }
+                reject
+            }
+        }
+        sf := Rectangle {
+            property <length> head-h: 22px + 4px + sf-sub.preferred-height + 18px;
+            width: 600px;
+            height: 24px + self.head-h + 46px + 6px + root.scene-form-h + 24px + 36px + 20px;
+            x: (parent.width - self.width) / 2;
+            y: max(16px, (parent.height - self.height) / 2);
+            border-radius: 14px;
+            background: Ink.box;
+            border-width: 1px;
+            border-color: #ffffff0d;
+            drop-shadow-blur: 80px;
+            drop-shadow-offset-y: 30px;
+            drop-shadow-color: #000000cc;
+            TouchArea { }
+            Text {
+                x: 24px;
+                y: 24px;
+                height: 22px;
+                text: root.scene-form-title;
+                font-family: "Geist";
+                font-size: 17px;
+                font-weight: 600;
+                color: Ink.ink;
+                vertical-alignment: center;
+            }
+            sf-sub := Text {
+                x: 24px;
+                y: 24px + 22px + 4px;
+                width: parent.width - 48px;
+                text: root.scene-form-sub;
+                font-family: "Geist";
+                font-size: 13px;
+                color: Ink.soft;
+                wrap: word-wrap;
+            }
+            Rectangle {
+                x: 24px;
+                y: 24px + sf.head-h;
+                width: 552px;
+                height: 46px;
+                border-radius: 9px;
+                clip: true;
+                Image {
+                    width: parent.width;
+                    height: parent.height;
+                    source: root.scene-strip;
+                    image-fit: fill;
+                }
+            }
+            Rectangle {
+                x: 24px;
+                y: 24px + sf.head-h + 46px + 6px;
+                width: 552px;
+                height: root.scene-form-h;
+                for c in root.scene-cells: CellView {
+                    c: c;
+                    glyph: root.keyboard-glyph;
+                    glyph2: root.mouse-glyph;
+                    glyphs: root.package-glyphs;
+                    pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
+                    slide(id, v) => { root.cell-slide(id, v); }
+                    typed(id, index, t) => { root.cell-typed(id, index, t); }
+                }
+                // the effects, as the Lighting page's tiles, each in the scene's colors
+                if root.scene-tiles-on: Rectangle {
+                    y: root.scene-tiles-y;
+                    height: 76px;
+                    for fx[i] in root.scene-tiles: Rectangle {
+                        x: i * (84px + 8px);
+                        width: 84px;
+                        height: 76px;
+                        border-radius: 10px;
+                        background: fx.on ? (st-ta.has-hover ? Ink.pick-hover : Ink.pick) : st-ta.has-hover ? Ink.hover-box : Ink.well;
+                        Rectangle {
+                            x: 6px;
+                            y: 6px;
+                            width: parent.width - 12px;
+                            height: 40px;
+                            border-radius: 6px;
+                            clip: true;
+                            background: #0c0e10;
+                            property <float> phase: fx.on && fx.motion != 0 ? animation-tick() / 1ms : 0;
+                            Image {
+                                // (a wave rolls along a picture twice as wide; a breath fades and comes back)
+                                x: fx.on && fx.motion == 3 ? -mod(parent.phase / 3000, 1) * parent.width : 0;
+                                width: fx.motion == 3 ? parent.width * 2 : parent.width;
+                                height: parent.height;
+                                source: fx.icon;
+                                image-fit: fill;
+                                opacity: fx.on && fx.motion == 1 ? 0.3 + 0.7 * (0.5 - 0.5 * cos(parent.phase / 3000 * 360deg)) : 1;
+                            }
+                        }
+                        Text {
+                            y: 53px;
+                            height: 15px;
+                            width: parent.width;
+                            text: fx.name;
+                            font-family: "Geist";
+                            font-size: 12px;
+                            font-weight: fx.on ? 500 : 400;
+                            color: fx.on || st-ta.has-hover ? Ink.bright : Ink.soft;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        st-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.scene-tile(i); }
+                        }
+                    }
+                }
+            }
+            HorizontalLayout {
+                x: 24px;
+                y: parent.height - 20px - 36px;
+                width: parent.width - 48px;
+                height: 36px;
+                spacing: 8px;
+                if root.scene-form-edit: VerticalLayout {
+                    alignment: center;
+                    WordButton {
+                        text: "Delete scene";
+                        fill: Ink.hover-box;
+                        fill-hover: Ink.pick;
+                        clicked => { root.scene-form-delete(); }
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                VerticalLayout {
+                    alignment: center;
+                    WordButton {
+                        text: "Cancel";
+                        fill: Ink.hover-box;
+                        fill-hover: Ink.pick;
+                        clicked => { root.scene-form-close(); }
+                    }
+                }
+                WordButton {
+                    primary: true;
+                    text: root.scene-form-edit ? "Save" : "Create scene";
+                    clicked => { root.scene-form-done(); }
+                }
+            }
+        }
+    }
+
     // the open menu, over everything
     menu := Menu {
         marks: root.menu-marks;
@@ -8683,6 +8975,7 @@ export component AppWindow inherits Window {
         search: root.menu-search;
         query <=> root.menu-query;
         chose(i) => { root.menu-chose(i); }
+        edit(i) => { root.menu-edit(i); }
         go-back => { root.menu-back-to(); }
         typed(t) => { root.menu-typed(t); }
         enter => { root.menu-enter(); }

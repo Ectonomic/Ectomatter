@@ -1,6 +1,8 @@
 //! Ectomatter in the system tray, as the web app had it: Open Ectomatter, each
-//! device (grayed out while it is not connected), and Quit. A click on the
-//! icon opens the window; closing the window leaves Ectomatter in the tray.
+//! device (grayed out while it is not connected), the Scene menu (No scene,
+//! the scenes that come with Ectomatter, the person's own, the one on chosen),
+//! and Quit. A click on the icon opens the window; closing the window leaves
+//! Ectomatter in the tray.
 
 use ksni::blocking::TrayMethods;
 use smithay_client_toolkit::reexports::calloop::channel::Sender;
@@ -9,6 +11,8 @@ use smithay_client_toolkit::reexports::calloop::channel::Sender;
 pub enum TrayAsk {
     Open,
     Device(String),
+    /// a scene chosen in the Scene menu, or No scene
+    Scene(Option<String>),
     Quit,
 }
 
@@ -17,6 +21,10 @@ struct Tray {
     /// the devices, as they sit on Home's desk: each one's place, its name,
     /// and whether it is plugged in
     devices: Vec<(String, String, bool)>,
+    /// the scenes (each one's id and name, the two that come with Ectomatter
+    /// first) and the one on
+    scenes: Vec<(String, String)>,
+    scene: Option<String>,
     icon: Vec<ksni::Icon>,
 }
 
@@ -52,6 +60,35 @@ impl ksni::Tray for Tray {
                 }
                 .into(),
             );
+        }
+        // the Scene menu: a group of choices for No scene, the built-in scenes and the person's own
+        if !self.scenes.is_empty() {
+            use ksni::menu::{RadioGroup, RadioItem, SubMenu};
+            let group = |ids: Vec<Option<String>>, names: Vec<String>, on: &Option<String>| -> ksni::MenuItem<Self> {
+                let selected = ids.iter().position(|i| i == on).unwrap_or(usize::MAX);
+                RadioGroup {
+                    selected,
+                    select: Box::new(move |t: &mut Self, i| {
+                        if let Some(id) = ids.get(i) {
+                            let _ = t.tell.send(TrayAsk::Scene(id.clone()));
+                        }
+                    }),
+                    options: names.into_iter().map(|n| RadioItem { label: n, ..Default::default() }).collect(),
+                }
+                .into()
+            };
+            let (built, own): (Vec<_>, Vec<_>) = self.scenes.iter().cloned().partition(|(id, _)| id == "wave" || id == "shift");
+            let mut sub = vec![group(vec![None], vec!["No scene".into()], &self.scene)];
+            for g in [built, own] {
+                if !g.is_empty() {
+                    sub.push(ksni::MenuItem::Separator);
+                    let (ids, names): (Vec<Option<String>>, Vec<String>) = g.into_iter().map(|(id, n)| (Some(id), n)).unzip();
+                    sub.push(group(ids, names, &self.scene));
+                }
+            }
+            items.push(ksni::MenuItem::Separator);
+            items.push(SubMenu { label: "Scene".into(), submenu: sub, ..Default::default() }.into());
+            items.push(ksni::MenuItem::Separator);
         }
         items.push(StandardItem { label: "Quit Ectomatter".into(), activate: Box::new(|t: &mut Self| { let _ = t.tell.send(TrayAsk::Quit); }), ..Default::default() }.into());
         items
@@ -94,10 +131,18 @@ impl Handle {
     pub fn devices(&self, devices: Vec<(String, String, bool)>) {
         self.0.update(|t| t.devices = devices);
     }
+
+    /// The scenes, for the Scene menu, and the one on.
+    pub fn scenes(&self, scenes: Vec<(String, String)>, on: Option<String>) {
+        self.0.update(|t| {
+            t.scenes = scenes;
+            t.scene = on;
+        });
+    }
 }
 
 pub fn start(tell: Sender<TrayAsk>) -> Option<Handle> {
-    match (Tray { tell, devices: Vec::new(), icon: icon() }).spawn() {
+    match (Tray { tell, devices: Vec::new(), scenes: Vec::new(), scene: None, icon: icon() }).spawn() {
         Ok(h) => Some(Handle(h)),
         Err(e) => {
             eprintln!("ectomatter: no tray: {e}");

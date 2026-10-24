@@ -138,7 +138,7 @@ pub struct LayoutPage {
 }
 
 fn row(kind: i32, label: &str, tick: bool, sub: &str) -> MenuRow {
-    MenuRow { kind, label: label.into(), tag: "".into(), tick, sub: sub.into() }
+    MenuRow { kind, label: label.into(), tag: "".into(), tick, sub: sub.into(), ..Default::default() }
 }
 
 impl LayoutPage {

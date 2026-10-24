@@ -171,7 +171,7 @@ const ROW_H: f32 = 55.0;
 const LIST_TOP: f32 = 36.0 + 54.0;
 
 fn row(kind: i32, label: &str, tick: bool) -> MenuRow {
-    MenuRow { kind, label: label.into(), tag: "".into(), tick, sub: "".into() }
+    MenuRow { kind, label: label.into(), tag: "".into(), tick, sub: "".into(), ..Default::default() }
 }
 
 impl MacroPage {

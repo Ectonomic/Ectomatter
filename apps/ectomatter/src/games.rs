@@ -196,6 +196,14 @@ impl Library {
         self.save();
     }
 
+    /// A scene deleted: each game and app that turned it on chooses nothing of
+    /// its own for the scene again (a game follows Every game's).
+    pub fn forget_scene(&mut self, id: &str) {
+        for app in self.tied("scene", id) {
+            self.set_choice(&app, "scene", None);
+        }
+    }
+
     /// The games and apps a device's profile is chosen for, Every game among them.
     pub fn tied(&self, device: &str, profile: &str) -> Vec<String> {
         self.v["choices"].as_object().map_or(Vec::new(), |m| m.iter().filter(|(_, c)| c[device].as_str() == Some(profile)).map(|(id, _)| id.clone()).collect())

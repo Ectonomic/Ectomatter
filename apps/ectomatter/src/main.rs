@@ -33,7 +33,6 @@ mod core_host;
 mod cores;
 mod described;
 mod desk;
-mod desk_light;
 mod device;
 mod display;
 mod devices;
@@ -77,6 +76,7 @@ mod profiles;
 mod putback;
 mod screen_edit;
 mod screen_keys;
+mod scenes;
 mod screens;
 mod sensors;
 mod settings;
@@ -256,6 +256,11 @@ pub fn package_glyph(file: &std::path::Path, px: u32) -> slint::Image {
     let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(px, px);
     buf.make_mut_bytes().copy_from_slice(pix.data());
     slint::Image::from_rgba8_premultiplied(buf)
+}
+
+/// A plus, in a menu's gray, `px` pixels square: New scene…'s, where a scene's chip goes.
+pub fn plus_glyph(px: u32) -> slint::Image {
+    glyph(r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14" fill="none" stroke="#a1a1aa" stroke-width="1.6" stroke-linecap="round"><path d="M7 2.5v9M2.5 7h9"/></svg>"##, px.max(14), false)
 }
 
 fn glyph(svg: &str, px: u32, tint: bool) -> slint::Image {
@@ -611,6 +616,8 @@ fn main() {
     ui.set_library_glyph(glyph(include_str!("../ui/glyphs/library.svg"), 22, true));
     ui.set_keyboard_tile(glyph(include_str!("../ui/glyphs/keyboard.svg"), 88, true));
     ui.set_mouse_glyph(glyph(include_str!("../ui/glyphs/mouse.svg"), 22, true));
+    // (the scenes' glyph, the Library's Scene row's: a light's ring and its rays, as Home's Scenes button has it)
+    ui.set_scene_glyph(glyph(r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M7 4.6a2.4 2.4 0 1 0 0 4.8a2.4 2.4 0 1 0 0-4.8zM7 0.9v1.5M7 11.6v1.5M0.9 7h1.5M11.6 7h1.5M2.7 2.7l1.06 1.06M10.24 10.24l1.06 1.06M2.7 11.3l1.06-1.06M10.24 3.76l1.06-1.06"/></svg>"##, 22, true));
     ui.set_mouse_tile(glyph(include_str!("../ui/glyphs/mouse.svg"), 88, true));
     ui.set_rail_open(uistate::get("rail_open").and_then(|v| v.as_bool()).unwrap_or(false));
     slint::ComponentHandle::show(&ui).unwrap();
@@ -759,6 +766,14 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     }
     // ECTOMATTER_FRONT=class,desktop;...: apps come to the front, in order, as KWin tells it
     front_apps_told(&mut front, "ECTOMATTER_FRONT");
+    // ECTOMATTER_SCENE=id: that scene on (not kept); ECTOMATTER_SCENE_FORM=new, or a
+    // scene's id: the scene form open, making one or changing that one
+    if let Ok(id) = std::env::var("ECTOMATTER_SCENE") {
+        front.set_scene(Some(id), false);
+    }
+    if let Ok(f) = std::env::var("ECTOMATTER_SCENE_FORM") {
+        front.open_scene_form((f != "new").then_some(f));
+    }
     for click in std::env::var("ECTOMATTER_CLICKS").unwrap_or_default().split(';').filter(|c| !c.is_empty()) {
         let mut xy = click.split(',').map(|v| v.trim().parse::<f32>().unwrap_or(0.0));
         let (x, y) = (xy.next().unwrap_or(0.0), xy.next().unwrap_or(0.0));
@@ -790,11 +805,11 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     }
     // ECTOMATTER_FRONT_AFTER: the same, after the clicks
     front_apps_told(&mut front, "ECTOMATTER_FRONT_AFTER");
-    // (the desk's light, if it plays, at a moment of its own: ECTOMATTER_DESK_LIGHT_AT=seconds)
-    if let Some(t) = std::env::var("ECTOMATTER_DESK_LIGHT_AT").ok().and_then(|v| v.parse::<f64>().ok()) {
+    // (the scene, if one plays, at a moment of its own: ECTOMATTER_SCENE_AT=seconds)
+    if let Some(t) = std::env::var("ECTOMATTER_SCENE_AT").ok().and_then(|v| v.parse::<f64>().ok()) {
         std::thread::sleep(Duration::from_secs_f64(t));
     }
-    front.desk_light_now();
+    front.scene_now();
     // ECTOMATTER_HEAR=control: a mouse button heard pressed and let go, as its core tells
     // it; ECTOMATTER_KEY_CODE=code: a keyboard key with that host code heard so (after
     // the clicks, each job Ectomatter does said in the log)
@@ -1680,6 +1695,8 @@ struct App {
     tray: Option<tray::Handle>,
     /// the devices the tray lists, as last told it
     tray_devices: Vec<(String, String, bool)>,
+    /// the scenes the tray's Scene menu lists (each one's id and name) and the one on
+    tray_scenes: (Vec<(String, String)>, Option<String>),
     /// the windows Slint has made, the Macro Editor's among them
     made: Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>,
     /// the windows of their own beside the main one (the Macro Editor's, the
@@ -2040,6 +2057,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         hidden: false,
         tray: None,
         tray_devices: Vec::new(),
+        tray_scenes: (Vec::new(), None),
         made,
         subs: [None, None, None],
         keys_on: None,
@@ -2138,8 +2156,13 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
                         app.show();
                         app.front.ui.set_place(d.into());
                     }
+                    tray::TrayAsk::Scene(id) => {
+                        app.front.set_scene(id, true);
+                        app.front.refresh();
+                        app.full = true;
+                    }
                     tray::TrayAsk::Quit => {
-                        app.front.desk_light_quit();
+                        app.front.scene_quit();
                         app.front.hand_back();
                         app.front.release_sliders();
                         // (once what changed is saved: see the loop)
@@ -2180,7 +2203,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
             }
         }
         if TERM.load(std::sync::atomic::Ordering::Relaxed) && app.quitting.is_none() {
-            app.front.desk_light_quit();
+            app.front.scene_quit();
             app.front.hand_back();
             app.front.release_sliders();
             app.quitting = Some(Instant::now());
@@ -2900,6 +2923,11 @@ impl App {
             if devices != self.tray_devices {
                 self.tray_devices = devices.clone();
                 t.devices(devices);
+            }
+            let scenes = (self.front.scenes().into_iter().map(|s| (s.id, s.name)).collect::<Vec<_>>(), self.front.scene_id());
+            if scenes != self.tray_scenes {
+                self.tray_scenes = scenes.clone();
+                t.scenes(scenes.0, scenes.1);
             }
         }
         // (asked for whether or not this frame is drawn: a window out of sight
