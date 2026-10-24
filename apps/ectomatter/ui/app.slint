@@ -4650,6 +4650,7 @@ export component AppWindow inherits Window {
     in property <bool> scene-tiles-on;
     callback scene-tile(int);
     callback scene-form-close();
+    callback scene-form-escape();
     callback scene-form-done();
     callback scene-form-delete();
     // each scene's chip (No scene's first), for the Library's Scene row; the scenes' glyph
@@ -8810,7 +8811,7 @@ export component AppWindow inherits Window {
             init => { self.focus(); }
             key-pressed(e) => {
                 if (e.text == Key.Escape) {
-                    root.scene-form-close();
+                    root.scene-form-escape();
                     return accept;
                 }
                 reject
@@ -8867,6 +8868,8 @@ export component AppWindow inherits Window {
                 }
             }
             sf-flick := Flickable {
+                // (scrolled by the wheel; a drag is the slider's)
+                mouse-drag-pan-enabled: false;
                 x: 24px;
                 y: 24px + sf.head-h + 46px + 6px;
                 width: 552px;

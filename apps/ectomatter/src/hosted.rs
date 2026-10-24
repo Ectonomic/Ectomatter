@@ -51,6 +51,8 @@ pub struct Hosted {
     /// what the plugins with readings told of them, for the page and the
     /// keyboard's screen alike
     readings: Readings,
+    /// the devices told added since last asked, by plugin/device
+    added: Vec<String>,
 }
 
 /// The readings the plugins told, by plugin: what each lists it can read
@@ -142,7 +144,7 @@ pub fn started_elsewhere(id: &str) -> bool {
 
 impl Hosted {
     pub fn new(computer: Arc<dyn Computer>) -> Hosted {
-        Hosted { cores: Vec::new(), plugins: Vec::new(), computer, readings: Readings::default() }
+        Hosted { cores: Vec::new(), plugins: Vec::new(), computer, readings: Readings::default(), added: Vec::new() }
     }
 
     /// The plugins' readings as they tell them, for whoever shows them.
@@ -247,6 +249,7 @@ impl Hosted {
                     }
                     "device/added" => {
                         let id = params["device"].clone();
+                        self.added.push(format!("{}/{}", p.package.id(), id.as_str().unwrap_or("")));
                         p.devices.retain(|d| d["device"] != id);
                         p.devices.push(params);
                         changed = true;
@@ -376,6 +379,11 @@ impl Hosted {
 
     /// The devices the packages running here told (a plugin's, from the
     /// program it reaches, as OpenRGB's), each by its package and as it told it.
+    /// The devices told added since this was last asked, by plugin/device.
+    pub fn take_added(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.added)
+    }
+
     pub fn devices(&self) -> Vec<(String, Value)> {
         self.all().flat_map(|p| p.devices.iter().map(|d| (p.package.id().to_string(), d.clone()))).collect()
     }

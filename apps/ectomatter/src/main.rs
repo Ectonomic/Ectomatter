@@ -2271,6 +2271,8 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         }
         // started again for a change to what Ectomatter may use, back on that place
         if let Some(place) = app.front.restart.take() {
+            // (each device handed back before the new Ectomatter turns the scene on again)
+            app.front.scene_quit();
             if let Ok(me) = std::env::current_exe() {
                 let _ = std::process::Command::new(me).args(["--place", &place]).spawn();
             }

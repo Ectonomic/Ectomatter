@@ -206,6 +206,8 @@ pub enum Ask {
     MenuEdit(i32),
     SceneTile(i32),
     SceneFormClose,
+    /// Escape on the scene form: its open dropdown or the picker first
+    SceneFormEscape,
     SceneFormDone,
     SceneFormDelete,
     /// the rebindings shown on the keyboard, or not
@@ -791,6 +793,9 @@ pub struct Front {
     plugin_applied: HashMap<String, String>,
     scene_plugins_at: Instant,
     plugin_calls: Option<mpsc::Sender<(crate::core_host::Core, &'static str, serde_json::Value, String)>>,
+    plugin_done: Option<mpsc::Receiver<()>>,
+    /// the scene handed back for Ectomatter quitting: nothing more is sent
+    scene_quit_done: bool,
     /// whether the scene on moves (a static one's frames change nothing on the page)
     scene_moves: bool,
     /// when a press last shut a menu or the color picker: its click closes nothing more
@@ -1071,6 +1076,7 @@ impl Front {
         on!(on_menu_edit, |i| Ask::MenuEdit(i));
         on!(on_scene_tile, |i| Ask::SceneTile(i));
         on!(on_scene_form_close, Ask::SceneFormClose);
+        on!(on_scene_form_escape, Ask::SceneFormEscape);
         on!(on_scene_form_done, Ask::SceneFormDone);
         on!(on_scene_form_delete, Ask::SceneFormDelete);
         on!(on_mouse_effect, |i| Ask::MouseEffect(i));
@@ -1224,6 +1230,8 @@ impl Front {
             plugin_applied: HashMap::new(),
             scene_plugins_at: Instant::now(),
             plugin_calls: None,
+            plugin_done: None,
+            scene_quit_done: false,
             scene_moves: false,
             press_closed: None,
             scene_menu: None,
@@ -1939,16 +1947,12 @@ impl Front {
                     self.show_scene_form();
                 }
                 Ask::SceneFormClose => {
-                    if self.press_closed.take().is_some_and(|t| t.elapsed() < Duration::from_millis(700)) {
-                        // (the press shut a menu or the picker, and only that)
-                    } else if self.ui.get_menu_open() || self.pick.is_some() {
-                        // (Escape: the open menu or the picker first, then the form)
-                        self.close_menu();
-                        self.close_picker();
-                    } else {
+                    // (a press that shut a menu or the picker shuts only that)
+                    if !self.press_closed.take().is_some_and(|t| t.elapsed() < Duration::from_millis(700)) {
                         self.close_scene_form(false);
                     }
                 }
+                Ask::SceneFormEscape => self.scene_form_escape(),
                 Ask::SceneFormDone => self.close_scene_form(true),
                 Ask::SceneFormDelete => self.delete_scene(),
                 Ask::SceneFrame => {
@@ -2248,6 +2252,14 @@ impl Front {
                         if self.ui.get_place() == "settings" {
                             self.refresh();
                         }
+                    }
+                    // (a device a plugin met again, OpenRGB's after its program restarted, put on its profile afresh)
+                    let met = self.hosted.take_added();
+                    if !met.is_empty() {
+                        for k in &met {
+                            self.plugin_applied.remove(k);
+                        }
+                        self.plugins_sync();
                     }
                     news |= self.worker_told();
                     news |= self.launch_tick();
@@ -2892,7 +2904,9 @@ impl Front {
     }
 
     fn push_preview(&mut self) {
-        if !self.previewing || self.page.dev.is_none() || self.kb.is_none() {
+        // (while a scene sends the keyboard its colors, a preview left running waits: it
+        // goes on again as the scene lets the keyboard go)
+        if !self.previewing || self.page.dev.is_none() || self.kb.is_none() || self.scene_claim.0 {
             return;
         }
         // one asked for at a time; a change made meanwhile goes once it is answered
@@ -2971,7 +2985,7 @@ impl Front {
     fn cell_pick(&mut self, c: Ctl, index: usize, _anchor: (f32, f32, f32)) {
         match c {
             Ctl::SceneName if index == 2 => {
-                self.close_scene_form(false);
+                self.scene_form_escape();
                 return;
             }
             Ctl::SceneLights => {
@@ -3796,6 +3810,7 @@ impl Front {
     /// keeps that button's click from opening it again.
     pub fn pressed_at(&mut self, x: f32, y: f32) {
         self.press_shut = false;
+        self.press_closed = None;
         self.let_chosen_go(x, y);
         if self.search_menu {
             let (mx, my, mw, mh) = (self.ui.get_menu_x(), self.ui.get_menu_y(), self.ui.get_menu_width(), self.ui.get_menu_height());
@@ -8591,6 +8606,10 @@ impl Front {
     /// once), each plugin's device on the scene's profile; with none playing,
     /// each device's own lighting handed back to it.
     fn scene_play(&mut self) {
+        // (handed back for Ectomatter quitting: nothing lights the devices again)
+        if self.scene_quit_done {
+            return;
+        }
         let playing = self.playing();
         if playing.is_none() {
             self.scene_timer = None;
@@ -8635,8 +8654,26 @@ impl Front {
         self.scene_timer = None;
         self.scene_form = None;
         self.scene_hand_back();
-        if !crate::desk::offscreen() {
+        if !crate::desk::offscreen() && !self.scene_quit_done {
+            // (each plugin's device Ectomatter switched back on its own, after any call
+            // still waiting its turn; up to three seconds for them, then Ectomatter goes)
             self.plugins_to(None, true);
+            self.plugin_calls = None;
+            if let Some(done) = self.plugin_done.take() {
+                let _ = done.recv_timeout(Duration::from_secs(3));
+            }
+        }
+        self.scene_quit_done = true;
+    }
+
+    /// Escape on the scene form: its open dropdown or the color picker shut
+    /// first, else the form, unkept.
+    fn scene_form_escape(&mut self) {
+        if self.ui.get_menu_open() || self.pick.is_some() {
+            self.close_menu();
+            self.close_picker();
+        } else {
+            self.close_scene_form(false);
         }
     }
 
@@ -8655,7 +8692,7 @@ impl Front {
     /// order made, on a thread of their own; a device gone is forgotten, to be
     /// put on its profile again when it's back. Offscreen, nothing is sent.
     fn plugins_sync(&mut self) {
-        if crate::desk::offscreen() {
+        if crate::desk::offscreen() || self.scene_quit_done {
             return;
         }
         let scene = self.playing();
@@ -8663,15 +8700,15 @@ impl Front {
     }
 
     /// The plugins' devices put on what `scene` and the app in front have them
-    /// play, the calls made at once (`now`, as Ectomatter quits) or in turn.
-    fn plugins_to(&mut self, scene: Option<&crate::scenes::Scene>, now: bool) {
+    /// play; quitting, each one Ectomatter switched back on its own.
+    fn plugins_to(&mut self, scene: Option<&crate::scenes::Scene>, quitting: bool) {
         let devices = self.hosted.devices();
         let live: std::collections::HashSet<String> = devices.iter().map(|(plugin, d)| format!("{plugin}/{}", d["device"].as_str().unwrap_or(""))).collect();
         self.plugin_applied.retain(|k, _| live.contains(k));
         for (plugin, d) in devices {
             let id = d["device"].as_str().unwrap_or("").to_string();
             let key = format!("{plugin}/{id}");
-            let want = scene.and_then(|s| s.plugins.iter().find(|(dev, _)| *dev == id).map(|(_, p)| p.clone())).or_else(|| self.following.get(&key).cloned());
+            let want = if quitting { None } else { scene.and_then(|s| s.plugins.iter().find(|(dev, _)| *dev == id).map(|(_, p)| p.clone())).or_else(|| self.following.get(&key).cloned()) };
             if want == self.plugin_applied.get(&key).cloned() {
                 continue;
             }
@@ -8686,23 +8723,20 @@ impl Front {
                 Some(p) => self.plugin_applied.insert(key, p),
                 None => self.plugin_applied.remove(&key),
             };
-            if now {
-                if let Err(e) = core.call(method, &params) {
-                    eprintln!("ectomatter: {name} didn’t switch: {e}");
-                }
-                continue;
-            }
             // (on a thread: its plugin may take a moment to reach the program it goes through)
             if self.plugin_calls.is_none() {
                 let (tx, rx) = mpsc::channel::<(crate::core_host::Core, &'static str, serde_json::Value, String)>();
+                let (done_tx, done_rx) = mpsc::channel::<()>();
                 let _ = std::thread::Builder::new().name("plugin devices".into()).spawn(move || {
                     for (core, method, params, name) in rx {
                         if let Err(e) = core.call(method, &params) {
                             eprintln!("ectomatter: {name} didn’t switch: {e}");
                         }
                     }
+                    let _ = done_tx.send(());
                 });
                 self.plugin_calls = Some(tx);
+                self.plugin_done = Some(done_rx);
             }
             if let Some(tx) = &self.plugin_calls {
                 let _ = tx.send((core, method, params, name));
@@ -9043,7 +9077,9 @@ impl Front {
             }
         }
         let editing = form.editing.is_some();
+        let moves = form.scene().lights.moves();
         let tiles = form.desk.then(|| self.scene_tiles());
+        self.scene_moves = moves;
         self.ui.set_scene_form_title(if editing { "Edit scene" } else { "New scene" }.into());
         self.ui.set_scene_form_sub(self.scene_form_sub().into());
         self.ui.set_scene_form_edit(editing);
@@ -9233,6 +9269,9 @@ impl Front {
     /// back; as it closes, each is in again.
     fn scene_frame(&mut self) {
         use crate::scenes::Part;
+        if self.scene_quit_done {
+            return;
+        }
         let Some(scene) = self.playing() else { return };
         let t = self.scene_t0.elapsed().as_secs_f32();
         let places = self.desk_places();
@@ -9248,10 +9287,11 @@ impl Front {
         self.scene_colors = (keys, lights);
         let aside = self.lighting_open();
         if aside.0 && !self.desk_aside.0 {
-            if self.scene_claim.0 {
+            let had = self.scene_claim.0;
+            self.scene_claim.0 = false;
+            if had {
                 self.start_preview();
             }
-            self.scene_claim.0 = false;
         }
         if aside.1 != self.desk_aside.1 {
             if aside.1 && self.scene_claim.1 {
@@ -9263,8 +9303,6 @@ impl Front {
         self.desk_aside = aside;
         if self.page.dev.is_some() && !aside.0 {
             if matches!(kb, Part::Look(_)) {
-                // (a Lighting page's preview still running, the page left by the rail, stops first)
-                self.stop_preview();
                 let colors: Vec<[u8; 3]> = (0..evga_z10::protocol::NKEYS as u32).map(|p| self.scene_colors.0.get(&p).copied().unwrap_or([0; 3])).collect();
                 self.ask_kb(device::Ask::Preview(serde_json::json!({ "colors": colors, "tab": "native", "claim": true })));
                 self.scene_claim.0 = true;
