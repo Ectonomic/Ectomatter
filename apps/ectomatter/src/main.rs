@@ -286,15 +286,15 @@ fn core_data(id: &str) -> PathBuf {
     data_dir().join("cores").join(id)
 }
 
-/// How bright the desktop's white is and how far the keyboard's light may go
-/// above it: the Peak nits setting, or the brightest screen's peak.
+/// How bright the desktop's white is and how bright the keys' light can go
+/// on the brightest screen: up to Peak nits, and no higher than its peak.
 fn levels(settings: &settings::Settings) -> (f64, f64) {
     let screens = screens::screens();
     let best = screens.iter().max_by(|a, b| a["peak"].as_f64().partial_cmp(&b["peak"].as_f64()).unwrap_or(std::cmp::Ordering::Equal));
     // (the white the screen's user set, which an idle dim does not change)
     let reference = best.and_then(|s| s["white"].as_f64().or(s["reference"].as_f64())).filter(|r| *r > 0.0).unwrap_or(203.0);
-    let peak = settings.get("hdr.glow_limit").and_then(|v| v.as_f64()).or_else(|| best.and_then(|s| s["peak"].as_f64())).unwrap_or(reference);
-    (reference, peak.max(reference))
+    let peak = best.and_then(|s| s["peak"].as_f64()).unwrap_or(reference).max(reference);
+    (reference, front::gain_for(&settings.get("hdr").unwrap_or_default(), reference, peak) as f64 * reference)
 }
 
 #[cfg(test)]
@@ -622,7 +622,7 @@ fn main() {
     }
     let (reference, glow) = levels(&settings);
     let gain = LIGHT_GAIN;
-    eprintln!("ectomatter: the desktop's white is {reference} nits; the light goes to {glow}");
+    eprintln!("ectomatter: the desktop's white is {reference} nits; the light goes to {glow:.0}");
 
     if let Some(path) = snapshot {
         return snap(&window, &made, ui, reference, gain, &path);
@@ -1613,7 +1613,7 @@ struct App {
     failed: Option<String>,
     /// color management: the picture's description on the surface, each
     /// screen's levels as KWin describes them, the screen the window is on,
-    /// and the levels the picture is drawn for (the desktop's white, the light's top)
+    /// and the levels the picture is described for (the desktop's white, the screen's peak)
     cm: WpColorManagerV1,
     cm_surface: WpColorManagementSurfaceV1,
     screens: Vec<ScreenLevels>,
@@ -1622,7 +1622,8 @@ struct App {
     kde: Vec<(KdeOutputDeviceV2, kde_output::Device, kde_output::Device)>,
     _kde_registry: Option<KdeOutputDeviceRegistryV2>,
     on_screen: Option<u32>,
-    glow_limit: Option<f64>,
+    /// the screens the window is on, in the order it reached them
+    entered: Entered,
     levels: (f64, f64),
     /// the screen's own peak, for Settings › HDR
     levels_peak: f64,
@@ -1776,10 +1777,52 @@ struct ScreenLevels {
     undimmed: Option<f64>,
 }
 
+/// The screens a window is on, in the order it reached them. Wayland says
+/// which screens a window is on but not how much of it is on each, so, as
+/// SDL does, the window counts as on the last one it reached that it's
+/// still on (and, off every screen, as when closed to the tray, on none).
+#[derive(Default)]
+struct Entered(Vec<u32>);
+
+impl Entered {
+    /// The window reached a screen: the one it's on now.
+    fn enter(&mut self, id: u32) -> u32 {
+        self.0.retain(|&s| s != id);
+        self.0.push(id);
+        id
+    }
+    /// The window left a screen: the one it's on now, if it's on any.
+    fn leave(&mut self, id: u32) -> Option<u32> {
+        self.0.retain(|&s| s != id);
+        self.0.last().copied()
+    }
+}
+
+#[cfg(test)]
+mod entered_tests {
+    use super::Entered;
+
+    /// The window counts as on the last screen it reached that it's still
+    /// on: moved partly onto a second screen and back, it's on the first
+    /// again, not left on the second.
+    #[test]
+    fn the_window_is_on_the_last_screen_it_reached_that_it_is_still_on() {
+        let mut e = Entered::default();
+        assert_eq!(e.enter(1), 1);
+        assert_eq!(e.enter(2), 2, "reaching a second screen, across both");
+        assert_eq!(e.leave(2), Some(1), "back on the first alone");
+        assert_eq!(e.enter(2), 2);
+        assert_eq!(e.leave(1), Some(2), "moved over to the second");
+        assert_eq!(e.enter(2), 2, "a screen reached twice is listed once");
+        assert_eq!(e.leave(2), None, "on no screen, as when closed to the tray");
+        assert_eq!(e.leave(3), None, "a screen it was never on");
+    }
+}
+
 /// Which screen a description or its information was asked for.
 #[derive(Clone, Copy)]
 struct ScreenTag(u32);
-/// A new description for the picture, for these levels (white, light's top).
+/// A new description for the picture, for these levels (the white, the screen's peak).
 #[derive(Clone, Copy)]
 struct PictureTag(f64, f64);
 
@@ -1960,12 +2003,13 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         kde: Vec::new(),
         _kde_registry: kde_registry,
         on_screen: None,
-        glow_limit: settings.get("hdr.glow_limit").and_then(|v| v.as_f64()),
+        entered: Entered::default(),
         levels_peak: 1000.0,
         mastering: false,
         intent: wp_color_manager_v1::RenderIntent::Perceptual,
         panel_rev: 0,
-        levels: (reference, reference * gain as f64),
+        // (none described for the window's screen yet: its first levels are)
+        levels: (0.0, 0.0),
         slint,
         front: {
             let mut f = Front::new(ui, kb, controlled, settings);
@@ -2601,12 +2645,19 @@ impl App {
         }
         let white = kde_output::white(reported, self.kde_of(id), undimmed);
         self.levels_peak = peak.max(white);
-        let glow = self.glow_limit.unwrap_or(peak).max(white);
-        if (white - self.levels.0).abs() < 0.5 && (glow - self.levels.1).abs() < 0.5 {
+        if (white - self.levels.0).abs() < 0.5 && (self.levels_peak - self.levels.1).abs() < 0.5 {
             return;
         }
-        eprintln!("ectomatter: the screen's white is now {white} nits; the light goes to {glow}");
-        describe(&self.cm, qh, white, self.levels_peak, self.mastering, PictureTag(white, glow));
+        // (as bright as the keys' light can go here, as Settings › HDR lets it)
+        let glow = front::gain_for(&self.front.settings.get("hdr").unwrap_or_default(), white, self.levels_peak) as f64 * white;
+        eprintln!("ectomatter: the screen's white is now {white} nits; the light goes to {glow:.0}");
+        describe(&self.cm, qh, white, self.levels_peak, self.mastering, PictureTag(white, self.levels_peak));
+    }
+
+    /// The brightest screen's peak: the top of Settings › HDR's Peak nits
+    /// wherever the window is, so a dimmer screen never lowers the setting.
+    fn top_peak(&self) -> f64 {
+        self.screens.iter().map(|s| s.peak).fold(self.levels_peak, f64::max)
     }
 
     /// What KDE says of a screen, by its output's id: the one of its name.
@@ -2834,8 +2885,10 @@ impl App {
     }
 
     fn draw(&mut self) {
-        // the keys' light as bright as Settings › HDR lets it go
-        self.front.levels = (self.pic.reference(), self.levels_peak);
+        // the keys' light as bright as Settings › HDR lets it go on this screen, and
+        // Peak nits' slider from this screen's white to the brightest screen's peak
+        self.front.screen_peak = self.levels_peak;
+        self.front.levels = (self.pic.reference(), self.top_peak());
         let g = self.front.light_gain(self.pic.reference());
         if (g - self.gain).abs() > 1e-3 {
             self.gain = g;
@@ -3223,10 +3276,20 @@ impl CompositorHandler for App {
             return;
         }
         use smithay_client_toolkit::reexports::client::Proxy;
-        self.on_screen = Some(output.id().protocol_id());
+        self.on_screen = Some(self.entered.enter(output.id().protocol_id()));
         self.retarget(qh);
     }
-    fn surface_leave(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: &wl_output::WlOutput) {}
+    fn surface_leave(&mut self, _: &Connection, qh: &QueueHandle<Self>, surface: &wl_surface::WlSurface, output: &wl_output::WlOutput) {
+        if surface != self.window.wl_surface() {
+            return;
+        }
+        use smithay_client_toolkit::reexports::client::Proxy;
+        // back on the screen it's still on (off every screen, it keeps the last one's levels)
+        if let Some(id) = self.entered.leave(output.id().protocol_id()) {
+            self.on_screen = Some(id);
+            self.retarget(qh);
+        }
+    }
 }
 
 impl OutputHandler for App {
@@ -3242,7 +3305,19 @@ impl OutputHandler for App {
         self.screens.push(ScreenLevels { id, cmo, reference: 0.0, peak: 0.0, reading: (0.0, 0.0), undimmed: None });
     }
     fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
-    fn output_destroyed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
+    fn output_destroyed(&mut self, _: &Connection, qh: &QueueHandle<Self>, output: wl_output::WlOutput) {
+        use smithay_client_toolkit::reexports::client::Proxy;
+        // a screen unplugged or turned off: its levels go with it (so Peak nits
+        // tops out at a screen that's still there)
+        let id = output.id().protocol_id();
+        if let Some(i) = self.screens.iter().position(|s| s.id == id) {
+            self.screens.remove(i).cmo.destroy();
+        }
+        if let Some(now) = self.entered.leave(id) {
+            self.on_screen = Some(now);
+            self.retarget(qh);
+        }
+    }
 }
 
 impl WindowHandler for App {
@@ -3488,9 +3563,9 @@ impl Dispatch<WpImageDescriptionV1, PictureTag> for App {
     fn event(app: &mut Self, desc: &WpImageDescriptionV1, e: wp_image_description_v1::Event, tag: &PictureTag, _: &Connection, _: &QueueHandle<Self>) {
         if let wp_image_description_v1::Event::Ready { .. } | wp_image_description_v1::Event::Ready2 { .. } = e {
             // the description and the pixels drawn for it go to KWin together, on the next frame
-            let PictureTag(reference, glow) = *tag;
+            let PictureTag(reference, peak) = *tag;
             app.cm_surface.set_image_description(desc, app.intent);
-            app.levels = (reference, glow);
+            app.levels = (reference, peak);
             app.pic.set_reference(reference);
             app.gain = LIGHT_GAIN;
             if let Some(board) = &app.board {

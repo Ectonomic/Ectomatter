@@ -107,6 +107,8 @@ pub struct State {
     pub plugins: Vec<PackageRow>,
     pub sections: Vec<PluginSection>,
     pub settings: Value,
+    /// the Peak nits slider's two ends: the brightest screen's peak, and the
+    /// white of the screen the window is on
     pub top_peak: f64,
     pub reference: f64,
 }
@@ -807,6 +809,21 @@ mod tests {
     fn texts(devices: Vec<DeviceRow>) -> Vec<String> {
         let s = State { sensors: None, devices, plugins: Vec::new(), sections: Vec::new(), settings: Value::Null, top_peak: 1000.0, reference: 254.0 };
         page(&s).0.into_iter().map(|c| c.text.to_string()).filter(|t| !t.is_empty()).collect()
+    }
+
+    /// Peak nits reaches the brightest screen's peak wherever the window is:
+    /// on a dim screen (white 73, peak 200) a saved 1000 shows as 1000 at the
+    /// slider's right end, and a press there keeps it at 1000.
+    #[test]
+    fn peak_nits_reaches_the_brightest_screens_peak_on_a_dim_screen() {
+        let settings = json!({ "hdr": { "lighting": "auto", "glow_limit": 1000.0 } });
+        let s = State { sensors: None, devices: Vec::new(), plugins: Vec::new(), sections: Vec::new(), settings, top_peak: 1000.0, reference: 73.0 };
+        let cells = page(&s).0;
+        let slider = cells.iter().find(|c| c.id == id(Ctl::PeakNits)).expect("the Peak nits slider");
+        assert_eq!(slider.value, 1.0, "the saved 1000 at the right end");
+        assert!(cells.iter().any(|c| c.text.as_str() == "1000 nits"));
+        assert_eq!(peak_at(1.0, 73.0, 1000.0), Some(1000.0), "a press at the right end keeps 1000");
+        assert_eq!(peak_at(0.0, 73.0, 1000.0), None, "the left end: the design's brightness");
     }
 
     /// Settings' Devices: each core's device with how it is (connected, not

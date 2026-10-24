@@ -821,8 +821,11 @@ pub struct Front {
     search_menu: bool,
     /// the plugin sections' pieces on the Settings page, by place
     plugin_map: crate::ecto_settings::PluginMap,
-    /// the screen's levels, for the Peak nits slider
+    /// the white of the screen the window is on and the brightest screen's
+    /// peak: the Peak nits slider's two ends, wherever the window is
     pub levels: (f64, f64),
+    /// the peak of the screen the window is on: the keys' light goes no higher there
+    pub screen_peak: f64,
     /// Ectomatter is to start again, on this place, for a change to what it may use
     pub restart: Option<String>,
     /// the Macro Editor's window, once it has been opened
@@ -1251,6 +1254,7 @@ impl Front {
             search_menu: false,
             plugin_map: Default::default(),
             levels: (254.0, 1000.0),
+            screen_peak: 1000.0,
             restart: None,
             macros: None,
             lab: None,
@@ -9309,16 +9313,23 @@ fn set_audio(target: &str, level: f64) {
 }
 
 impl Front {
-    /// How much brighter than the page's colors the keys' light is drawn:
-    /// the design's brightness, unless Settings › HDR lets it go to a peak.
+    /// How much brighter than the page's colors the keys' light is drawn on
+    /// the screen the window is on (see `gain_for`).
     pub fn light_gain(&self, reference: f64) -> f32 {
-        let hdr = self.settings.get("hdr").unwrap_or_default();
-        if hdr["lighting"].as_str() == Some("off") {
-            return 1.0;
-        }
-        // up to Peak nits; at the slider's left end, the design's brightness
-        hdr["glow_limit"].as_f64().map_or(1.0, |n| (n / reference).max(1.0) as f32)
+        gain_for(&self.settings.get("hdr").unwrap_or_default(), reference, self.screen_peak)
     }
+}
+
+/// How much brighter than the page's colors the keys' light is drawn on a
+/// screen of this white and peak: the design's brightness, unless Settings ›
+/// HDR lets it glow up to Peak nits, and never past the screen's own peak
+/// (Peak nits is set for the brightest screen; a dimmer one stops at its own).
+pub fn gain_for(hdr: &serde_json::Value, reference: f64, peak: f64) -> f32 {
+    if hdr["lighting"].as_str() == Some("off") {
+        return 1.0;
+    }
+    // up to Peak nits; at the slider's left end, the design's brightness
+    hdr["glow_limit"].as_f64().map_or(1.0, |n| (n.min(peak) / reference).max(1.0) as f32)
 }
 
 /// Bring a model to `rows` in place: each row that changed is changed, rows
@@ -9389,6 +9400,19 @@ pub fn sync_cells(model: &VecModel<Cell>, rows: Vec<Cell>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The keys' light glows up to Peak nits, but on a dimmer screen no
+    /// higher than that screen's own peak; with the HDR interface off, or the
+    /// slider at its left end, it keeps the design's brightness.
+    #[test]
+    fn the_light_stops_at_the_screens_own_peak() {
+        let hdr = serde_json::json!({ "lighting": "auto", "glow_limit": 1000.0 });
+        assert!((gain_for(&hdr, 254.0, 1000.0) - (1000.0 / 254.0) as f32).abs() < 1e-6, "the brightest screen: up to Peak nits");
+        assert!((gain_for(&hdr, 73.0, 200.0) - (200.0 / 73.0) as f32).abs() < 1e-6, "a dim screen: up to its own peak");
+        assert_eq!(gain_for(&serde_json::json!({ "lighting": "off", "glow_limit": 1000.0 }), 254.0, 1000.0), 1.0, "the HDR interface off");
+        assert_eq!(gain_for(&serde_json::json!({ "lighting": "auto" }), 254.0, 1000.0), 1.0, "the slider at its left end");
+        assert_eq!(gain_for(&serde_json::json!({ "glow_limit": 200.0 }), 254.0, 1000.0), 1.0, "a limit under the screen's white");
+    }
 
     #[test]
     fn the_strip_fits_each_turn_to_its_time() {
