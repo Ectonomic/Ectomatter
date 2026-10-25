@@ -332,7 +332,7 @@ export component Picker inherits Rectangle {
     callback well(color);
     callback enter();
     callback dismiss();
-    width: 264px;
+    width: Size.picker;
     border-radius: Radius.panel;
     background: Ink.shade2;
     drop-shadow-blur: Shadow.float.blur;
@@ -340,9 +340,9 @@ export component Picker inherits Rectangle {
     drop-shadow-color: Shadow.float.color;
     // the square: white to the hue across, then to black downward
     Rectangle {
-        x: 6px;
+        x: Part.menu-pad;
         y: 6px;
-        width: 252px;
+        width: parent.width - 2 * Part.menu-pad;
         height: 160px;
         Image {
             width: parent.width;
@@ -389,9 +389,9 @@ export component Picker inherits Rectangle {
     }
     // the hue
     Rectangle {
-        x: 6px;
+        x: Part.menu-pad;
         y: 6px + 160px + 10px;
-        width: 252px;
+        width: parent.width - 2 * Part.menu-pad;
         height: 12px;
         Image {
             width: parent.width;
@@ -432,9 +432,9 @@ export component Picker inherits Rectangle {
     }
     // the color as numbers
     HorizontalLayout {
-        x: 6px;
+        x: Part.menu-pad;
         y: 6px + 160px + 10px + 12px + 10px;
-        width: 252px;
+        width: parent.width - 2 * Part.menu-pad;
         height: 45px;
         spacing: 6px;
         PickField { horizontal-stretch: 1.7; label: "Hex"; which: 0; value <=> root.t-hex; edited(i, t) => { root.field(i, t); } enter => { root.enter(); } dismiss => { root.dismiss(); } }
@@ -443,9 +443,9 @@ export component Picker inherits Rectangle {
         PickField { horizontal-stretch: 1; label: "B"; which: 3; value <=> root.t-b; edited(i, t) => { root.field(i, t); } enter => { root.enter(); } dismiss => { root.dismiss(); } }
     }
     HorizontalLayout {
-        x: 6px;
+        x: Part.menu-pad;
         y: 6px + 160px + 10px + 12px + 10px + 45px + 10px;
-        width: 252px;
+        width: parent.width - 2 * Part.menu-pad;
         height: 45px;
         spacing: 6px;
         PickField { label: "H°"; which: 4; value <=> root.t-h; edited(i, t) => { root.field(i, t); } enter => { root.enter(); } dismiss => { root.dismiss(); } }
@@ -454,7 +454,7 @@ export component Picker inherits Rectangle {
     }
     // preset colors, then the ones used lately
     Text {
-        x: 6px;
+        x: Part.menu-pad;
         y: 308px;
         height: 16px;
         text: "Presets";
@@ -469,7 +469,7 @@ export component Picker inherits Rectangle {
         clicked => { root.well(c); }
     }
     if root.recent.length > 0: Text {
-        x: 6px;
+        x: Part.menu-pad;
         y: 363.56px;
         height: 16px;
         text: "Recent";

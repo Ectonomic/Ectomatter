@@ -1826,7 +1826,7 @@ impl LabPage {
         let note = format!("Changes you make to a chosen {0} are for it alone. A dot marks a {0} with its own setup.", self.parts().1);
         let lines = wrap_after(&note, mw - 40.0, mw - 40.0);
         // (the page above the foot, less the list's padding, its rule and its note)
-        let room = h - 36.0 - 64.0 - 16.0 - my - 36.0 - 18.0 * lines.len() as f32;
+        let room = h - crate::tokens::size::TITLE_BAR - crate::tokens::size::FOOT - 16.0 - my - 36.0 - 18.0 * lines.len() as f32;
         let rows = ((room / PART_ROW).floor().max(1.0) as usize).min(self.device.caps.len());
         (mx, my, mw, rows, lines)
     }
@@ -2470,7 +2470,7 @@ impl LabPage {
         let (lx, ly) = ((bx - 84.0).min(w - 24.0 - lw), by + bh + 6.0);
         let mut out = vec![
             // anywhere else on the page shuts it
-            Cell { id: GLYPH_SHUT, style: 29, ..cell(kind::LINK, 0.0, 0.0, w, h - 36.0 - 64.0) },
+            Cell { id: GLYPH_SHUT, style: 29, ..cell(kind::LINK, 0.0, 0.0, w, h - crate::tokens::size::TITLE_BAR - crate::tokens::size::FOOT) },
             Cell { style: 27, ..cell(kind::TILE, lx, ly, lw, lh) },
             Cell { id: GLYPH_LIST, style: 29, ..cell(kind::LINK, lx, ly, lw, lh) },
         ];
@@ -2643,7 +2643,7 @@ impl LabPage {
         let mw = 380.0;
         let (mx, my) = (x.min(w - 24.0 - mw), 59.0);
         // anywhere else on the page shuts it
-        top.push(Cell { id: SETUP, index: 1, style: 29, ..cell(kind::LINK, 0.0, 0.0, w, h - 36.0 - 64.0) });
+        top.push(Cell { id: SETUP, index: 1, style: 29, ..cell(kind::LINK, 0.0, 0.0, w, h - crate::tokens::size::TITLE_BAR - crate::tokens::size::FOOT) });
         let mut items = Vec::new();
         let changed = self.light != self.saved;
         let naming = matches!(self.menu, Menu::New | Menu::Rename | Menu::Delete);
@@ -2776,7 +2776,7 @@ impl LabPage {
         let (quiet, dim, bright) = ([0x9a, 0x9a, 0x9a], [0xd4, 0xd4, 0xd4], [0xf5, 0xf5, 0xf5]);
         let (mx, my, mw, rows, lines) = self.part_box(x);
         // anywhere else on the page shuts it
-        top.push(Cell { id: SCOPE, index: 1, style: 29, ..cell(kind::LINK, 0.0, 0.0, w, h - 36.0 - 64.0) });
+        top.push(Cell { id: SCOPE, index: 1, style: 29, ..cell(kind::LINK, 0.0, 0.0, w, h - crate::tokens::size::TITLE_BAR - crate::tokens::size::FOOT) });
         let mut items = Vec::new();
         let mut y = 8.0;
         for (i, (c, _)) in self.device.caps.iter().enumerate().skip(self.part_first).take(rows) {
@@ -2887,7 +2887,7 @@ impl LabPage {
     /// The window's size, and the stage's in it.
     fn sizes(&self) -> (f32, f32, f32, f32) {
         let (w, h) = (self.ui.get_window_width().max(900.0), self.ui.get_window_height().max(560.0));
-        (w, h, w - 48.0, (h - 36.0 - HEAD_H - 10.0 - HELP_H - 4.0 - 64.0).max(300.0))
+        (w, h, w - 48.0, (h - crate::tokens::size::TITLE_BAR - HEAD_H - 10.0 - HELP_H - 4.0 - crate::tokens::size::FOOT).max(300.0))
     }
 
     /// The slider drawn white: the one being typed in, or under the pointer.

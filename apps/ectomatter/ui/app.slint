@@ -541,7 +541,7 @@ component KeyLibrary inherits PageBox {
                 }
                 // its keys, set in under the group's name (at its words, as the Fold sets them)
                 if g.open: VerticalLayout {
-                    padding-left: Part.tile-inset + 12px;
+                    padding-left: Part.fold-in;
                     for r in g.rows: Rectangle {
                         height: Size.control;
                         border-radius: Radius.control;
@@ -1905,7 +1905,9 @@ export component AppWindow inherits Window {
     // the box: as tall as Profiles, less whatever a narrow window takes off the screen's
     // height, so the row under the screen keeps its margin
     property <length> lcd-short: stage-h - 2 * bay-pad - 2 * kb-pad-y - lcd-h;
-    property <length> box-h: anchor.preferred-height - lcd-short + (root.screen-game ? 40px : 0);
+    // (Game launch's two rows take more than the playlist's one)
+    property <length> game-panel-h: 2 * Size.button + Space.inline + 2 * Space.row;
+    property <length> box-h: anchor.preferred-height - lcd-short + (root.screen-game ? game-panel-h - pl-panel-h : 0);
     // Layouts, joined to the box's foot: on the second tab only once the keyboard can keep a layout
     property <bool> shelf-on: !root.screen-closed || root.ob-ready;
     // the row under the screen in the box: the bay 16 in from the box's top, its gutter round the screen
@@ -1919,7 +1921,9 @@ export component AppWindow inherits Window {
     out property <length> lcd-w: lcd-h * 5;
     // under the panel: the Library, its cards two to a row while each has room for its
     // picture and its words, otherwise one; after them, an empty block for a new screen
-    out property <bool> shelf-two: (under-w - 32px - 8px) / 2 >= 454px;
+    // (Layouts' cards two to a row where each still has its least, Space.pad in from the
+    // shelf and Space.inline apart)
+    out property <bool> shelf-two: (under-w - 2 * Space.pad - Space.inline) / 2 >= 454px;
     property <int> shelf-rows: shelf-two ? ceil((root.lib-pages.length + 1) / 2) : root.lib-pages.length + 1;
     property <length> shelf-h: 48px + shelf-rows * 104px - 8px + 16px;
     // the screen's own background, which its bay is
@@ -2232,7 +2236,7 @@ export component AppWindow inherits Window {
                         x: (parent.width - self.preferred-width) / 2;
                         y: parent.height + 16px;
                         width: self.preferred-width;
-                        spacing: 2px;
+                        spacing: Space.list;
                         HorizontalLayout {
                             alignment: center;
                             spacing: Space.inline;
@@ -3117,7 +3121,7 @@ export component AppWindow inherits Window {
                     width: pws-w;
                     height: head-h;
                     if root.boot != 0: HorizontalLayout {
-                        spacing: 10px;
+                        spacing: Space.inline;
                         alignment: start;
                         if root.boot == 1: Rectangle {
                             width: 16px;
@@ -3398,7 +3402,7 @@ export component AppWindow inherits Window {
                         x: 0;
                         y: 0;
                         height: tabs-h;
-                        spacing: 4px;
+                        spacing: Space.tight;
                         alignment: start;
                         FolderTab {
                             fill: Ink.well;
@@ -3501,19 +3505,21 @@ export component AppWindow inherits Window {
                     game-panel := Rectangle {
                         visible: root.screen-game;
                         y: band-y;
-                        height: 96px;
+                        height: game-panel-h;
+                        // (its rows a button's height, Space.inline apart, Space.row in from the
+                        // panel's top and foot, Space.pad from its sides as the playlist's row is)
                         for g[i] in root.gl-rows: Rectangle {
-                            x: 24px;
-                            y: 13px + i * 40px;
-                            width: parent.width - 48px;
-                            height: 30px;
+                            x: Space.pad;
+                            y: Space.row + i * (Size.button + Space.inline);
+                            width: parent.width - 2 * Space.pad;
+                            height: Size.button;
                             HorizontalLayout {
-                                spacing: 10px;
+                                spacing: Space.inline;
                                 alignment: start;
                                 VerticalLayout {
                                     alignment: center;
                                     CheckBox {
-                                        width: 17px;
+                                        width: Size.check;
                                         on: g.on;
                                         clicked => { root.gl-row-on(i); }
                                     }
@@ -3755,9 +3761,9 @@ export component AppWindow inherits Window {
                                     // are switched (the time left off a bar too short to keep some of the
                                     // name beside it, and both off one too short for a letter or two)
                                     if b.w >= 28px: HorizontalLayout {
-                                        padding-left: 8px;
-                                        padding-right: 10px;
-                                        spacing: 8px;
+                                        padding-left: 8px;  // art: a turn on the strip
+                                        padding-right: 10px;  // art: a turn on the strip
+                                        spacing: 8px;  // art: a turn on the strip
                                         Text {
                                             min-width: 0px;
                                             horizontal-stretch: 1;
@@ -3892,7 +3898,7 @@ export component AppWindow inherits Window {
                                                 height: 10px;
                                                 viewbox-width: 24;
                                                 viewbox-height: 24;
-                                                commands: "M6 9l6 6 6-6";
+                                                commands: "M6 9l6 6 6-6";  // art: the turn's own tools, over the strip
                                                 fill: transparent;
                                                 stroke: time-ta.has-hover || root.pl-timing == i ? Ink.bright : Ink.soft;
                                                 stroke-width: 2px;
@@ -4113,8 +4119,8 @@ export component AppWindow inherits Window {
                         // each card in its place: while a layout is carried along the Library, the
                         // others make room where it will land, and it is left out of its own
                         for c[k] in root.lib-pages: Rectangle {
-                            property <length> cw: shelf-two ? (parent.width - 32px - 8px) / 2 : parent.width - 32px;
-                            x: 16px + (shelf-two ? mod(c.at, 2) * (self.cw + 8px) : 0);
+                            property <length> cw: shelf-two ? (parent.width - 2 * Space.pad - Space.inline) / 2 : parent.width - 2 * Space.pad;
+                            x: Space.pad + (shelf-two ? mod(c.at, 2) * (self.cw + Space.inline) : 0);
                             y: 48px + (shelf-two ? floor(c.at / 2) : c.at) * 104px;
                             animate x, y { duration: root.carry-on ? 250ms : 0ms; easing: ease; }
                             opacity: c.carried ? 0 : 1;
@@ -4179,8 +4185,8 @@ export component AppWindow inherits Window {
                         // a new screen: an empty block after the last, in the cards' own shade
                         Rectangle {
                             property <int> k: root.lib-pages.length;
-                            property <length> cw: shelf-two ? (parent.width - 32px - 8px) / 2 : parent.width - 32px;
-                            x: 16px + (shelf-two ? mod(self.k, 2) * (self.cw + 8px) : 0);
+                            property <length> cw: shelf-two ? (parent.width - 2 * Space.pad - Space.inline) / 2 : parent.width - 2 * Space.pad;
+                            x: Space.pad + (shelf-two ? mod(self.k, 2) * (self.cw + Space.inline) : 0);
                             y: 48px + (shelf-two ? floor(self.k / 2) : self.k) * 104px;
                             width: self.cw;
                             height: 96px;
@@ -4393,10 +4399,14 @@ export component AppWindow inherits Window {
         background: Ink.frame;
         border-bottom-left-radius: root.radius;
         clip: !root.rail-open ? false : true;
+        // (its items in from its edges by as much as its width leaves, Space.tight apart;
+        // the devices Space.pad under Home; Library and Settings at its foot)
+        property <length> rail-in: (rail-w - Size.rail) / 2;
+        property <length> pitch: Size.rail + Space.tight;
         r-home := RailItem {
-            x: 10px;
-            y: 10px;
-            width: rail-w - 20px;
+            x: parent.rail-in;
+            y: parent.rail-in;
+            width: rail-w - 2 * parent.rail-in;
             glyph: root.home-glyph;
             name: "Home";
             on: root.place == "home";
@@ -4406,9 +4416,9 @@ export component AppWindow inherits Window {
         }
         // (the devices, as they sit on Home's desk, left to right)
         for d[i] in root.rail-devices: RailItem {
-            x: 10px;
-            y: 10px + 40px + 4px + 8px + 4px + i * (40px + 4px);
-            width: rail-w - 20px;
+            x: parent.rail-in;
+            y: parent.rail-in + Size.rail + Space.pad + i * parent.pitch;
+            width: rail-w - 2 * parent.rail-in;
             glyph: d.kind == "mouse" ? root.mouse-glyph : root.keyboard-glyph;
             name: d.name;
             on: root.place == d.place;
@@ -4417,9 +4427,9 @@ export component AppWindow inherits Window {
             clicked => { root.rail(d.place); }
         }
         r-library := RailItem {
-            x: 10px;
-            y: parent.height - 10px - 40px - 4px - 40px;
-            width: rail-w - 20px;
+            x: parent.rail-in;
+            y: parent.height - parent.rail-in - parent.pitch - Size.rail;
+            width: rail-w - 2 * parent.rail-in;
             glyph: root.library-glyph;
             name: "Library";
             on: root.place == "library";
@@ -4428,9 +4438,9 @@ export component AppWindow inherits Window {
             clicked => { root.rail("library"); }
         }
         r-settings := RailItem {
-            x: 10px;
-            y: parent.height - 10px - 40px;
-            width: rail-w - 20px;
+            x: parent.rail-in;
+            y: parent.height - parent.rail-in - Size.rail;
+            width: rail-w - 2 * parent.rail-in;
             glyph: root.settings-glyph;
             name: "Settings";
             on: root.place == "settings";
@@ -4979,9 +4989,9 @@ export component AppWindow inherits Window {
     menu := Menu {
         marks: root.menu-marks;
         visible: root.menu-open;
-        x: max(8px, min(root.menu-ax, root.width - root.menu-w - 8px));
+        x: max(Space.inline, min(root.menu-ax, root.width - root.menu-w - Space.inline));
         width: root.menu-w;
-        height: min(root.menu-natural, min(root.menu-max, root.height - root.menu-top - 8px));
+        height: min(root.menu-natural, min(root.menu-max, root.height - root.menu-top - Space.inline));
         y: root.menu-top;
         rows: root.menu-rows;
         placeholder: root.menu-placeholder;
@@ -4998,7 +5008,7 @@ export component AppWindow inherits Window {
     }
     picker := Picker {
         visible: root.picker-open;
-        x: max(8px, min(root.picker-x, root.width - 264px - 8px));
+        x: max(Space.inline, min(root.picker-x, root.width - Size.picker - Space.inline));
         y: root.picker-top;
         height: root.picker-height;
         hue: root.pk-hue;
@@ -5137,9 +5147,9 @@ component ChainPiece inherits Rectangle {
         background: root.c.on ? Ink.ink : ev.has-hover ? Ink.pick-hover : Ink.pick;
         opacity: dragging ? 0.6 : 1;
         HorizontalLayout {
-            padding-left: 11px;
-            padding-right: 11px;
-            spacing: 6px;
+            padding-left: 11px;  // art: a step in the chain (macros.rs measures it so)
+            padding-right: 11px;  // art: a step in the chain
+            spacing: 6px;  // art: a step in the chain
             // (a media key's note; a job's mark, on a device or the screen, or
             // another macro played; a key's step has none)
             if root.c.style == 1: Text {
@@ -5211,9 +5221,9 @@ component ChainPiece inherits Rectangle {
         border-radius: Radius.control;
         background: wt.has-hover ? Ink.shade2 : transparent;
         HorizontalLayout {
-            padding-left: 8px;
-            padding-right: 8px;
-            spacing: 4px;
+            padding-left: 8px;  // art: a wait in the chain (macros.rs measures it so)
+            padding-right: 8px;  // art: a wait in the chain
+            spacing: 4px;  // art: a wait in the chain
             Text {
                 text: root.c.text;
                 font-family: Font.ui;
@@ -5248,7 +5258,7 @@ component ChainPiece inherits Rectangle {
             which: 1;
             stroke: Ink.white;
         }
-        input := TextInput {
+        input := TextInput {  // art: a wait typed in place, in the chain
             x: 24px;
             width: 44px;
             height: parent.height;
@@ -5800,9 +5810,9 @@ export component MacroWindow inherits Window {
     menu := Menu {
         marks: root.menu-marks;
         visible: root.menu-open;
-        x: max(8px, min(root.menu-ax, root.width - root.menu-w - 8px));
+        x: max(Space.inline, min(root.menu-ax, root.width - root.menu-w - Space.inline));
         width: root.menu-w;
-        height: min(root.menu-natural, min(root.menu-max, root.height - root.menu-top - 8px));
+        height: min(root.menu-natural, min(root.menu-max, root.height - root.menu-top - Space.inline));
         y: root.menu-top;
         rows: root.menu-rows;
         placeholder: root.menu-placeholder;
@@ -6765,9 +6775,9 @@ export component LayoutWindow inherits Window {
     menu := Menu {
         marks: root.menu-marks;
         visible: root.menu-open;
-        x: max(8px, min(root.menu-ax, root.width - root.menu-w - 8px));
+        x: max(Space.inline, min(root.menu-ax, root.width - root.menu-w - Space.inline));
         width: root.menu-w;
-        height: min(root.menu-natural, min(root.menu-max, root.height - root.menu-top - 8px));
+        height: min(root.menu-natural, min(root.menu-max, root.height - root.menu-top - Space.inline));
         y: root.menu-top;
         rows: root.menu-rows;
         search: false;
@@ -6777,7 +6787,7 @@ export component LayoutWindow inherits Window {
 
     Picker {
         visible: root.picker-open;
-        x: max(8px, min(root.picker-x, root.width - 264px - 8px));
+        x: max(Space.inline, min(root.picker-x, root.width - Size.picker - Space.inline));
         y: root.picker-top;
         height: root.picker-height;
         hue: root.pk-hue;
@@ -7067,7 +7077,7 @@ export component LabWindow inherits Window {
     // the page: its head and sections, the stage, the line under it
     Rectangle {
         y: Size.title-bar;
-        height: root.height - Size.title-bar - 64px;
+        height: root.height - Size.title-bar - Size.foot;
         background: Ink.base;
         for c in root.cells: CellView {
             c: c;
@@ -7122,7 +7132,7 @@ export component LabWindow inherits Window {
         }
         Picker {
             visible: root.picker-open;
-            x: max(8px, min(root.picker-x, root.width - 264px - 8px));
+            x: max(Space.inline, min(root.picker-x, root.width - Size.picker - Space.inline));
             y: root.picker-top;
             height: root.picker-height;
             hue: root.pk-hue;
@@ -7152,15 +7162,15 @@ export component LabWindow inherits Window {
 
     // the foot: what is on the keyboard now, what was last done, Revert and Save
     Rectangle {
-        y: root.height - 64px;
-        height: 64px;
+        y: root.height - Size.foot;
+        height: Size.foot;
         background: Ink.base;
         border-bottom-left-radius: root.radius;
         border-bottom-right-radius: root.radius;
         Rectangle {
-            x: 24px;
+            x: Space.margin;
             y: 0;
-            width: parent.width - 48px;
+            width: parent.width - 2 * Space.margin;
             height: 1px;
             background: Ink.line;
         }
@@ -7168,12 +7178,14 @@ export component LabWindow inherits Window {
             c: c;
             hovered(id, on) => { root.hovered(id, on); }
         }
+        // (a line of buttons at the foot's middle, the page's margin in)
         HorizontalLayout {
-            x: 24px;
-            y: 15px;
-            width: parent.width - 48px;
-            height: 34px;
-            spacing: 10px;
+            x: Space.margin;
+            y: (parent.height - self.height) / 2;
+            width: parent.width - 2 * Space.margin;
+            height: self.preferred-height;
+            spacing: Space.inline;
+            cross-axis-alignment: center;
             Rectangle {
                 horizontal-stretch: 1;
             }
@@ -7187,32 +7199,23 @@ export component LabWindow inherits Window {
                 wrap: word-wrap;
             }
             WordButton {
-                y: 1px;
-                height: 32px;
-                width: 132px;
                 text: "Hold to compare";
                 enabled: root.can-revert;
                 changed down => { root.compare(self.down); }
             }
             if root.has-default: WordButton {
-                y: 1px;
-                height: 32px;
                 text: root.default-text;
                 enabled: root.can-default;
                 clicked => { root.pick(1610, 0); }
                 changed hover => { root.hovered(1610, self.hover); }
             }
             WordButton {
-                y: 1px;
-                height: 32px;
-                width: 68px;
                 text: "Revert";
                 enabled: root.can-revert;
                 clicked => { root.revert(); }
             }
             WordButton {
-                height: 34px;
-                width: root.save-w;
+                wide: root.save-w;
                 text: root.save-text;
                 primary: true;
                 enabled: root.can-save;

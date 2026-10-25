@@ -143,8 +143,102 @@ mod system {
         assert!(bad.is_empty(), "shadows set by hand, not from Shadow:\n{}", bad.join("\n"));
     }
 
+    /// The pages' own lines (app.slint's, the parts aside): their file, number, the line
+    /// as written, and its code (comments out), art and lines marked `// art:` left out.
+    fn page_lines() -> Vec<(usize, String, String)> {
+        let text = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/app.slint")).unwrap();
+        let mut part = String::new();
+        let mut out = Vec::new();
+        for (i, line) in text.lines().enumerate() {
+            let t = line.trim_start();
+            if let Some(rest) = t.strip_prefix("export component ").or_else(|| t.strip_prefix("component ")) {
+                part = rest.split_whitespace().next().unwrap_or("").to_string();
+            }
+            if ART.contains(&part.as_str()) || line.contains("// art:") {
+                continue;
+            }
+            out.push((i + 1, line.to_string(), line.split("//").next().unwrap_or("").to_string()));
+        }
+        out
+    }
+
+    #[test]
+    fn page_gaps_are_tokens() {
+        let mut bad = Vec::new();
+        for (n, line, code) in page_lines() {
+            for prop in ["padding", "padding-left", "padding-right", "padding-top", "padding-bottom", "spacing"] {
+                let Some(v) = value_of(&code, prop) else { continue };
+                if px_values(v).iter().any(|&p| p > 0.0) {
+                    bad.push(format!("app.slint:{n}: {}", line.trim()));
+                }
+            }
+        }
+        assert!(bad.is_empty(), "gaps set by hand on a page, not from Space (or a part's):\n{}", bad.join("\n"));
+    }
+
+    #[test]
+    fn pages_use_the_parts() {
+        // (a line to type in is a FieldBox, a RenameField or a cell's; a dropdown's or a
+        // menu's chevron is the DropField's or the WordButton's)
+        const CHEVRONS: &[&str] = &["M3 4.5l3 3 3-3", "M1 1l4 4 4-4", "M2 3.5l3 3 3-3", "M6 9l6 6 6-6"];
+        let mut bad = Vec::new();
+        for (n, line, code) in page_lines() {
+            if code.contains("TextInput {") || CHEVRONS.iter().any(|c| line.contains(c)) {
+                bad.push(format!("app.slint:{n}: {}", line.trim()));
+            }
+        }
+        assert!(bad.is_empty(), "a field or a dropdown drawn on a page, not the system's part:\n{}", bad.join("\n"));
+    }
+
     /// the pages laid out in Rust, and the parts they're laid out with
-    const LAID: &[&str] = &["boxes.rs", "described.rs", "display.rs", "ecto_settings.rs", "form.rs", "games_page.rs", "lighting.rs", "mouse.rs", "screen_edit.rs"];
+    const LAID: &[&str] = &["boxes.rs", "described.rs", "display.rs", "ecto_settings.rs", "form.rs", "games_page.rs", "lighting.rs", "menu_size.rs", "mouse.rs", "screen_edit.rs"];
+
+    /// The floats written on a line of code, as numbers.
+    fn floats(code: &str) -> Vec<f32> {
+        let mut out = Vec::new();
+        let b = code.as_bytes();
+        let mut i = 0;
+        while i < b.len() {
+            if b[i].is_ascii_digit() && (i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_' || b[i - 1] == b'.')) {
+                let start = i;
+                while i < b.len() && (b[i].is_ascii_digit() || b[i] == b'.') {
+                    i += 1;
+                }
+                let lit = &code[start..i];
+                if lit.contains('.') && !code[i..].starts_with(|c: char| c.is_ascii_alphabetic() && c != 'f') {
+                    out.push(lit.parse().unwrap_or(0.0));
+                }
+            }
+            i += 1;
+        }
+        out
+    }
+
+    #[test]
+    fn rust_layouts_place_with_tokens() {
+        // (where a piece is placed or a layout steps on, no number of its own: a token, a
+        // part's measure or a named measure of the page's, said once)
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let places = |code: &str| code.contains("cell(") || code.contains("text_cell(") || code.contains("gap(") || ["y +=", "y -=", "x +=", "x -=", ".y =", ".x ="].iter().any(|p| code.contains(p));
+        let mut bad = Vec::new();
+        for f in LAID {
+            let text = std::fs::read_to_string(src.join(f)).unwrap();
+            for (i, line) in text.lines().enumerate() {
+                if line.trim_start().starts_with("#[cfg(test)]") {
+                    break;
+                }
+                let code = line.split("//").next().unwrap_or("");
+                let code: String = code.split('"').step_by(2).collect::<Vec<_>>().join("\"\"");
+                if line.contains("// art:") || code.trim_start().starts_with("const ") || !places(&code) {
+                    continue;
+                }
+                if floats(&code).iter().any(|&v| v >= 3.0) {
+                    bad.push(format!("{f}:{}: {}", i + 1, line.trim()));
+                }
+            }
+        }
+        assert!(bad.is_empty(), "placed with a number of its own, not a token:\n{}", bad.join("\n"));
+    }
 
     #[test]
     fn rust_layouts_measure_and_color_with_tokens() {

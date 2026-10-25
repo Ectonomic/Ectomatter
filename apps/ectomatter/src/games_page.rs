@@ -1299,7 +1299,8 @@ impl Games {
             let dw = NEST_DROP.min(cw - 3.0 * pad - NEST_LABEL);
             let h = 2.0 * pad + nest.len() as f32 * ctl + (nest.len().max(1) - 1) as f32 * gap;
             let y = col.place(h, gap);
-            out.push(Cell { style: 2, ..cell(kind::WBOX, cx, y, 3.0 * pad + NEST_LABEL + dw, h) });
+            let well_w = NEST_LABEL + dw + 3.0 * pad;
+            out.push(Cell { style: 2, ..cell(kind::WBOX, cx, y, well_w, h) });
             for (i, n) in nest.iter().enumerate() {
                 let ny = y + pad + i as f32 * (ctl + gap);
                 out.push(text_cell(style::FACT, cx + pad, ny, NEST_LABEL, ctl, n["label"].as_str().unwrap_or("")));
