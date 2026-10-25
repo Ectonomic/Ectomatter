@@ -177,8 +177,8 @@ const LAYOUT_MIN_SIZE: (u32, u32) = (1200, 760);
 const MACROS: usize = 0;
 const LAB: usize = 1;
 const LAYOUTS: usize = 2;
-/// the ground the keyboard sits on: its box's (Ink.well)
-const GROUND: [u8; 3] = [0x13, 0x13, 0x16];
+/// the ground the keyboard sits on: its stage's, every device's (Ink.stage)
+const STAGE: [u8; 3] = [0x1b, 0x1b, 0x1f];
 /// the ground it sits on on Home's desk: the app's own (Ink.base)
 const HOME_GROUND: [u8; 3] = [0x18, 0x18, 0x1b];
 /// How much brighter than the page's colors the keys' light is drawn. The
@@ -311,7 +311,7 @@ mod kept_tests {
     fn scene() -> (Scene, impl Fn(f32) -> Setup) {
         let device: serde_json::Value = cores::shown().device_now();
         let tree = cores::shown().tree();
-        let board = Board::new(&tree, &device, ink_env::rgb("well", GROUND), 632, 253).unwrap();
+        let board = Board::new(&tree, &device, ink_env::rgb("stage", STAGE), 632, 253).unwrap();
         let base = Physics::from(&device["light"]);
         (Scene::of(&board), move |beam: f32| Setup::alike(Physics { beam, led: 7.0, ..base }))
     }
@@ -367,7 +367,7 @@ fn board_builder(done: calloop::channel::Sender<(bool, Board)>, home: bool) -> s
                 size = s;
             }
             let t = Instant::now();
-            match Board::new(&tree, &device, if home { ink_env::rgb("base", HOME_GROUND) } else { ink_env::rgb("well", GROUND) }, size.0, size.1) {
+            match Board::new(&tree, &device, if home { ink_env::rgb("base", HOME_GROUND) } else { ink_env::rgb("stage", STAGE) }, size.0, size.1) {
                 Ok(mut b) => {
                     b.set_legends_from(&size.2);
                     b.lay_shadow(&stage_shadow(size.3), STAGE_SHADOW_OPACITY);
@@ -755,7 +755,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         return snap_lab(front, made, reference, path);
     }
     // lay the page out once, so clicks land where it draws
-    let mut pic = Picture::new(reference, ink_env::rgb("well", GROUND));
+    let mut pic = Picture::new(reference, ink_env::rgb("stage", STAGE));
     pic.resize(w as usize, h as usize);
     window.draw_if_needed(|r| {
         r.render(&mut pic.ui, w as usize);
@@ -991,7 +991,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
             let rect = board_rect(&front.ui, 1.0);
             let tree = cores::shown().tree();
             let device = device_in_use(&front.settings);
-            let board = (rect.2 > 0).then(|| settled(&tree, &device, ink_env::rgb("well", GROUND), rect.2 as u32, rect.3 as u32));
+            let board = (rect.2 > 0).then(|| settled(&tree, &device, ink_env::rgb("stage", STAGE), rect.2 as u32, rect.3 as u32));
             for k in 1..=30 {
                 let t0 = Instant::now();
                 window.dispatch_event(WindowEvent::PointerMoved { position: at(k as f32 / 30.0) });
@@ -1046,7 +1046,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         let tree = cores::shown().tree();
         let device = device_in_use(&front.settings);
         let t = Instant::now();
-        let mut board = settled(&tree, &device, ink_env::rgb("well", GROUND), rect.2 as u32, rect.3 as u32);
+        let mut board = settled(&tree, &device, ink_env::rgb("stage", STAGE), rect.2 as u32, rect.3 as u32);
         // its shadow, as the window lays it
         board.lay_shadow(&stage_shadow(1.0), STAGE_SHADOW_OPACITY);
         if let Some(s) = &board.cast {
@@ -1380,7 +1380,7 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
         .unwrap_or(LAB_SIZE);
     let device = device_in_use(&front.settings);
     let tree = cores::shown().tree();
-    let board = settled(&tree, &device, ink_env::rgb("well", GROUND), 1264, 506);
+    let board = settled(&tree, &device, ink_env::rgb("stage", STAGE), 1264, 506);
     let ui = LabWindow::new().unwrap();
     let _ = slint::ComponentHandle::window(&ui);
     let window = made.borrow().last().cloned().unwrap();
@@ -2033,7 +2033,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
             (f.mouse.ask, f.mouse.tell) = mouse_ask.unzip();
             f
         },
-        pic: Picture::new(reference, ink_env::rgb("well", GROUND)),
+        pic: Picture::new(reference, ink_env::rgb("stage", STAGE)),
         gain,
         board: None,
         lights: Vec::new(),

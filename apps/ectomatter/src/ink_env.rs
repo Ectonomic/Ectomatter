@@ -1,8 +1,8 @@
 //! ECTOMATTER_INK="base=#1c1c20;box=#242429": the page's colors, by the names
 //! ui/app.slint gives its Ink tokens, set otherwise for a color mock drawn by
 //! Ectomatter itself. Unset, nothing changes. The grounds the keyboard and the
-//! mouse are drawn on follow the tokens they match (well, base and stage), so
-//! a changed page still meets its pictures without a seam.
+//! mouse are drawn on follow the tokens they match (stage, and base on Home),
+//! so a changed page still meets its pictures without a seam.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
