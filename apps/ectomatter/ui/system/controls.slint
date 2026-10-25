@@ -15,7 +15,7 @@ export component WinButton inherits Rectangle {
     callback clicked;
     width: 40px;
     border-top-right-radius: root.corner;
-    background: ta.has-hover ? (root.danger ? Ink.close : #2e2e2e) : transparent;
+    background: ta.has-hover ? (root.danger ? Ink.close : Ink.hover-box) : transparent;
     Path {
         width: root.size;
         height: root.size;
@@ -23,7 +23,7 @@ export component WinButton inherits Rectangle {
         viewbox-height: 16;
         commands: root.commands;
         fill: transparent;
-        stroke: ta.has-hover ? (root.danger ? #ffffff : #f5f5f5) : #a3a3a3;
+        stroke: ta.has-hover ? (root.danger ? Ink.white : Ink.bright) : Ink.soft;
         stroke-width: 1.4px * root.size / 16px;
     }
     ta := TouchArea {
@@ -191,7 +191,7 @@ export component ScrollBar inherits Rectangle {
     in property <length> view;
     in property <length> content;
     in property <length> offset;
-    in property <color> thumb-color: #4c4c4c;
+    in property <color> thumb-color: Ink.edge;
     // the page's has a dark rim round the thumb; a list's is the thumb alone
     in property <bool> framed: true;
     callback scroll-to(length);
@@ -211,12 +211,12 @@ export component ScrollBar inherits Rectangle {
         width: 5px;
         height: root.th;
         border-radius: 2px;
-        background: root.framed ? #191919 : transparent;
+        background: root.framed ? Ink.frame : transparent;
         Rectangle {
             x: 1px;
             width: 3px;
             border-radius: self.width / 2;
-            background: bar-ta.has-hover || root.held ? #6e6e6e : root.thumb-color;
+            background: bar-ta.has-hover || root.held ? Ink.edge-hover : root.thumb-color;
         }
     }
     bar-ta := TouchArea {
@@ -308,7 +308,7 @@ export component Well inherits Rectangle {
     Rectangle {
         border-radius: self.width / 2;
         border-width: 1px;
-        border-color: ta.has-hover ? #ffffff99 : #ffffff24;
+        border-color: ta.has-hover ? Ink.white.with-alpha(0.6) : Ink.white.with-alpha(0.141);
     }
     ta := TouchArea {
         mouse-cursor: pointer;
@@ -438,7 +438,7 @@ export component FieldBox inherits Rectangle {
         width: parent.width - 24px;
         height: parent.height;
         text <=> root.text;
-        font-family: root.mono ? "JetBrains Mono" : "Geist";
+        font-family: root.mono ? Font.mono : Font.ui;
         font-size: root.mono ? Font.caption : Font.control;
         color: Ink.ink;
         vertical-alignment: center;
@@ -721,4 +721,58 @@ export component BarButton inherits Rectangle {
             clicked => { root.clicked(); }
         }
     }
+}
+
+// The app's own glyphs, each drawn once here: the pencil that renames a thing, on
+// 24 units; the three dots of a thing's less common actions, on 14 units.
+export global Glyph {
+    out property <string> pencil: "M4 20h4L19 9l-4-4L4 16z";
+    out property <string> more: "M1.7 7a1.3 1.3 0 1 0 2.6 0a1.3 1.3 0 1 0 -2.6 0zM5.7 7a1.3 1.3 0 1 0 2.6 0a1.3 1.3 0 1 0 -2.6 0zM9.7 7a1.3 1.3 0 1 0 2.6 0a1.3 1.3 0 1 0 -2.6 0z";
+}
+
+// A small square button with a glyph and no words, a shade under the pointer;
+// it says where it is when pressed, for the menu it opens
+export component IconButton inherits Rectangle {
+    in property <string> icon;
+    in property <float> units: 14;
+    // its glyph's shapes filled (the dots), else drawn as lines (the pencil)
+    in property <bool> filled;
+    in property <bool> enabled: true;
+    // the shade under the pointer: a box's, or on a chosen row its own lighter one
+    in property <brush> hover-fill: Ink.hover-box;
+    callback clicked(length, length, length);
+    property <bool> hot: ta.has-hover && root.enabled;
+    width: 26px;
+    height: 26px;
+    border-radius: Radius.small;
+    background: root.hot ? root.hover-fill : transparent;
+    opacity: root.enabled ? 1 : 0.35;
+    Path {
+        width: 14px;
+        height: 14px;
+        viewbox-width: root.units;
+        viewbox-height: root.units;
+        commands: root.icon;
+        fill: root.filled ? (root.hot ? Ink.bright : Ink.quiet) : transparent;
+        stroke: root.filled ? transparent : root.hot ? Ink.bright : Ink.quiet;
+        stroke-width: 1.8px * 14 / root.units;
+        stroke-line-join: round;
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(self.absolute-position.x, self.absolute-position.y, self.height); }
+    }
+}
+
+// the button that opens a thing's less common actions (Rename, Duplicate, Delete)
+export component MoreButton inherits IconButton {
+    icon: Glyph.more;
+    filled: true;
+}
+
+// the button that renames a thing in place
+export component PencilButton inherits IconButton {
+    icon: Glyph.pencil;
+    units: 24;
 }

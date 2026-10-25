@@ -874,7 +874,7 @@ impl LayoutPage {
         let rows = crate::lcd_page::render_at(&shown, cx.readings, cx.t);
         self.draw(&rows, page.light.unwrap_or(default), cx.light[0]);
         // the box of the block selected
-        let rig_w = self.ui.get_window_width() - 290.0 - 2.0 * crate::tokens::space::MARGIN;
+        let rig_w = self.ui.get_window_width() - crate::tokens::size::SIDEBAR - 2.0 * crate::tokens::space::MARGIN;
         let open = match self.menu {
             Some(Menu::Shows(_)) => Some(Ctl::ScrSource),
             Some(Menu::Formats(_)) => Some(Ctl::ScrFormat),
@@ -935,10 +935,11 @@ impl LayoutPage {
     /// The window's layouts list scrolled to the one open (after a new one is made).
     pub fn reveal(&self, i: usize) {
         let h = self.ui.get_window_height() - 36.0 - 52.0 - 10.0;
-        let y = i as f32 * 54.0;
+        let pitch = crate::tokens::size::ROW + crate::tokens::space::LIST;
+        let y = i as f32 * pitch;
         let at = -self.ui.get_list_scroll();
-        if y < at || y + 54.0 > at + h {
-            self.ui.set_list_scroll(-(y + 54.0 - h).max(0.0));
+        if y < at || y + pitch > at + h {
+            self.ui.set_list_scroll(-(y + pitch - h).max(0.0));
         }
     }
 }

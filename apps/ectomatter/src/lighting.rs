@@ -336,7 +336,7 @@ pub(crate) struct Stack {
 impl Stack {
     pub(crate) fn new(w: f32) -> Stack {
         // under the box's title
-        Stack { w, y: 48.0, cells: Vec::new(), groups: 0 }
+        Stack { w, y: crate::tokens::size::BOX_HEAD, cells: Vec::new(), groups: 0 }
     }
     pub(crate) fn inner(&self) -> f32 {
         self.w - 32.0

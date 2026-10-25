@@ -214,3 +214,77 @@ export component Confirm inherits Scrim {
         }
     }
 }
+
+// What an area says while it has nothing to show, the same everywhere: what's
+// missing (its title), what to do about it (its words, wrapped, or `lines` as
+// Rust broke them), and the way to it (its children: a button), each line
+// centered. The page centers it in the area.
+export component EmptyState inherits VerticalLayout {
+    in property <string> title;
+    in property <string> text;
+    in property <[string]> lines;
+    width: 440px;
+    spacing: Space.label;
+    alignment: center;
+    if root.title != "": Text {
+        text: root.title;
+        font-family: Font.ui;
+        font-size: Font.name;
+        font-weight: Font.strong;
+        color: Ink.bright;
+        horizontal-alignment: center;
+        wrap: word-wrap;
+    }
+    if root.text != "": Text {
+        text: root.text;
+        font-family: Font.ui;
+        font-size: Font.control;
+        color: Ink.soft;
+        horizontal-alignment: center;
+        wrap: word-wrap;
+    }
+    if root.lines.length > 0: VerticalLayout {
+        for line in root.lines: Text {
+            height: 20px;
+            text: line;
+            font-family: Font.ui;
+            font-size: Font.control;
+            color: Ink.soft;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    @children
+}
+
+// A tooltip's box, every tooltip's: a raised surface's shade and outline, lifted
+// a little, what it says (its children) 10 in from its sides and 7 from its top
+// and its foot.
+export component TipBox inherits Rectangle {
+    border-radius: Radius.control;
+    background: Ink.hover-box;
+    border-width: 1px;
+    border-color: Ink.seam;
+    drop-shadow-blur: Shadow.lift.blur;
+    drop-shadow-offset-y: Shadow.lift.y;
+    drop-shadow-color: Shadow.lift.color;
+    VerticalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        padding-top: 7px;
+        padding-bottom: 7px;
+        spacing: 2px;
+        @children
+    }
+}
+
+// a tooltip of a line of words
+export component Tip inherits TipBox {
+    in property <string> text;
+    Text {
+        text: root.text;
+        font-family: Font.ui;
+        font-size: Font.note;
+        color: Ink.bright;
+    }
+}

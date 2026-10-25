@@ -5,7 +5,7 @@
 import { Space, Radius, Font, Size, Part, Shadow, Ink } from "tokens.slint";
 import { Typing } from "state.slint";
 import { CheckBox, LinkButton, TextButton } from "controls.slint";
-import { ScrollBox, PageBox } from "surfaces.slint";
+import { ScrollBox, PageBox, Tip, TipBox } from "surfaces.slint";
 
 // a piece of the Lighting page's tile, placed by the window: text, a color
 // swatch, a checkbox, a slider, a switch and its buttons, an area chip, a
@@ -114,7 +114,7 @@ export component CellView inherits Rectangle {
         Rectangle {
             border-radius: Radius.control;
             border-width: 1px;
-            border-color: sw.has-hover ? #ffffff66 : #ffffff2e;
+            border-color: sw.has-hover ? Ink.white.with-alpha(0.4) : Ink.white.with-alpha(0.18);
         }
         sw := TouchArea {
             mouse-cursor: pointer;
@@ -197,7 +197,7 @@ export component CellView inherits Rectangle {
     if root.c.kind == 9: Rectangle {
         border-radius: root.c.style == 30 ? Radius.control : Radius.box;
         border-top-left-radius: root.c.style == 2 ? 0 : root.c.style == 30 ? Radius.control : Radius.box;
-        background: root.c.style == 27 ? Ink.pop : root.c.style == 28 ? #131316b8 : root.c.style == 30 ? Ink.shade4 : Ink.shade1;
+        background: root.c.style == 27 ? Ink.pop : root.c.style == 28 ? Ink.well.with-alpha(0.722) : root.c.style == 30 ? Ink.shade4 : Ink.shade1;
         border-width: root.c.style == 27 ? 1px : 0;
         border-color: Ink.seam;
         drop-shadow-blur: root.c.style == 27 ? Shadow.float.blur : 0;
@@ -220,12 +220,12 @@ export component CellView inherits Rectangle {
     // smaller; 2: the settings nested under one, a shade off the box)
     if root.c.kind == 13: Rectangle {
         border-radius: root.c.style == 1 ? Radius.control : Radius.panel;
-        background: root.c.style == 2 ? #ffffff06 : Ink.well;
+        background: root.c.style == 2 ? Ink.white.with-alpha(0.024) : Ink.well;
     }
     // a state's dot: 0 unknown, 1 good, 2 bad, 3 read from the weather
     if root.c.kind == 14: Rectangle {
         border-radius: min(self.width, self.height) / 2;
-        background: root.c.style == 1 ? Ink.good : root.c.style == 2 ? Ink.bad : root.c.style == 3 ? Ink.warn : #5c5c66;
+        background: root.c.style == 1 ? Ink.good : root.c.style == 2 ? Ink.bad : root.c.style == 3 ? Ink.warn : Ink.off;
     }
     // a tab of the Sensor Feed box, as the Screen tab's own: rounded above, the open one in the
     // box's color and running on into it on its feet (none on the first's left, where the
@@ -298,7 +298,7 @@ export component CellView inherits Rectangle {
             width: 20px;
             height: 20px;
             border-radius: self.width / 2;
-            background: reset-ta.has-hover ? #ffffff14 : transparent;
+            background: reset-ta.has-hover ? Ink.white.with-alpha(0.078) : transparent;
         }
         Rectangle {
             width: 6px;
@@ -307,26 +307,8 @@ export component CellView inherits Rectangle {
             background: Ink.ink;
         }
         Tooltip {
-            Rectangle {
-                border-radius: Radius.control;
-                background: Ink.hover-box;
-                border-width: 1px;
-                border-color: Ink.seam;
-                drop-shadow-blur: Shadow.lift.blur;
-                drop-shadow-offset-y: Shadow.lift.y;
-                drop-shadow-color: Shadow.lift.color;
-                VerticalLayout {
-                    padding-left: 10px;
-                    padding-right: 10px;
-                    padding-top: 7px;
-                    padding-bottom: 7px;
-                    Text {
-                        text: root.c.text;
-                        font-family: Font.ui;
-                        font-size: Font.note;
-                        color: Ink.bright;
-                    }
-                }
+            Tip {
+                text: root.c.text;
             }
         }
     }
@@ -335,20 +317,7 @@ export component CellView inherits Rectangle {
     // from (`fill`), in a box like the app's menus
     if root.c.kind == 52: Rectangle {
         Tooltip {
-            Rectangle {
-                border-radius: Radius.control;
-                background: Ink.hover-box;
-                border-width: 1px;
-                border-color: Ink.seam;
-                drop-shadow-blur: Shadow.lift.blur;
-                drop-shadow-offset-y: Shadow.lift.y;
-                drop-shadow-color: Shadow.lift.color;
-                VerticalLayout {
-                    padding-left: 10px;
-                    padding-right: 10px;
-                    padding-top: 7px;
-                    padding-bottom: 7px;
-                    spacing: 2px;
+            TipBox {
                     if root.c.text != "": Text {
                         text: root.c.text;
                         font-family: Font.ui;
@@ -362,7 +331,6 @@ export component CellView inherits Rectangle {
                         font-size: Font.caption;
                         color: Ink.soft;
                     }
-                }
             }
         }
     }
@@ -579,7 +547,7 @@ export component CellView inherits Rectangle {
             width: 28px;
             height: 28px;
             border-radius: Radius.small;
-            background: off.has-hover ? #ffffff14 : transparent;
+            background: off.has-hover ? Ink.white.with-alpha(0.078) : transparent;
             Text {
                 text: "×";
                 font-size: Font.title;
@@ -599,7 +567,7 @@ export component CellView inherits Rectangle {
             width: 28px;
             height: 28px;
             border-radius: Radius.small;
-            background: glyphs.has-hover ? #ffffff14 : transparent;
+            background: glyphs.has-hover ? Ink.white.with-alpha(0.078) : transparent;
             Text {
                 text: "⌘";
                 font-size: Font.lead;
@@ -629,7 +597,7 @@ export component CellView inherits Rectangle {
             width: parent.width - 2 * self.x - (root.c.style >= 4 && root.c.style <= 6 ? 30px : 0);
             height: root.c.style == 5 ? parent.height - 16px : parent.height;
             text: root.c.text;
-            font-family: self.plugin-value ? "JetBrains Mono" : "Geist";
+            font-family: self.plugin-value ? Font.mono : Font.ui;
             font-size: self.plugin-value ? Font.caption : root.c.style == 7 ? Font.note : Font.text;
             // (a value its page follows from elsewhere, in gray)
             color: self.plugin-value ? (root.c.on && !self.has-focus ? Ink.soft : Ink.dim) : root.c.style == 1 || root.c.style == 7 ? Ink.bright : Ink.ink;
@@ -696,7 +664,7 @@ export component CellView inherits Rectangle {
         border-radius: Radius.small;
         background: Ink.well;
         border-width: 1px;
-        border-color: num.has-focus ? Ink.edge-hover : box-ta.has-hover ? Ink.edge : #34343a;
+        border-color: num.has-focus ? Ink.edge-hover : box-ta.has-hover ? Ink.edge : Ink.seam;
         box-ta := TouchArea {
             mouse-cursor: text;
             clicked => { num.focus(); }
@@ -781,7 +749,7 @@ export component CellView inherits Rectangle {
             : root.c.style == 26 ? transparent
             : root.c.style == 31 ? (b.has-hover ? Ink.pick : Ink.hover-box)
             : root.c.kind == 5 ? (b.has-hover ? Ink.hover-well : transparent)
-            : root.c.kind == 8 ? (b.has-hover && root.c.style != 29 ? #ffffff0f : transparent)
+            : root.c.kind == 8 ? (b.has-hover && root.c.style != 29 ? Ink.white.with-alpha(0.059) : transparent)
             : (b.has-hover ? Ink.pick : Ink.hover-box);
         // style 32: a color's button, its color in a small square before its words
         if root.c.style == 32: Rectangle {
@@ -792,7 +760,7 @@ export component CellView inherits Rectangle {
             border-radius: Radius.tiny;
             background: root.c.color;
             border-width: 1px;
-            border-color: #ffffff33;
+            border-color: Ink.white.with-alpha(0.2);
         }
         // style 35: an icon before its words, drawn as the bar's buttons draw theirs (its lines, on 16 units)
         if root.c.style == 35: Path {
@@ -820,7 +788,7 @@ export component CellView inherits Rectangle {
                 viewbox-width: 24;
                 viewbox-height: 24;
                 commands: root.c.fill;
-                fill: b.has-hover ? #ffffff : Ink.dim;
+                fill: b.has-hover ? Ink.white : Ink.dim;
             }
             Path {
                 width: 20px;
@@ -829,7 +797,7 @@ export component CellView inherits Rectangle {
                 viewbox-height: 24;
                 commands: root.c.lines;
                 fill: transparent;
-                stroke: b.has-hover ? #ffffff : Ink.dim;
+                stroke: b.has-hover ? Ink.white : Ink.dim;
                 stroke-width: 1.67px;
             }
         }
@@ -840,7 +808,7 @@ export component CellView inherits Rectangle {
             font-family: Font.ui;
             font-size: root.c.style == 25 ? Font.small : root.c.style == 31 ? Font.title : root.c.style == 33 ? Font.caption : root.c.kind == 8 ? Font.note : Font.control;
             font-weight: root.c.kind >= 7 && root.c.style != 33 ? Font.medium : Font.regular;
-            color: root.c.on ? Ink.bright : root.c.style == 26 ? #5a5a60 : root.c.style == 33 ? (b.has-hover ? Ink.bright : Ink.dim) : root.c.kind == 8 ? (b.has-hover ? Ink.ink : Ink.quiet) : root.c.kind == 7 ? Ink.ink : b.has-hover ? #ffffff : Ink.dim;
+            color: root.c.on ? Ink.bright : root.c.style == 26 ? Ink.off : root.c.style == 33 ? (b.has-hover ? Ink.bright : Ink.dim) : root.c.kind == 8 ? (b.has-hover ? Ink.ink : Ink.quiet) : root.c.kind == 7 ? Ink.ink : b.has-hover ? Ink.white : Ink.dim;
         }
         if root.c.style == 24 || root.c.style == 32: Path {
             x: parent.width - 19px;
@@ -851,7 +819,7 @@ export component CellView inherits Rectangle {
             viewbox-height: 6;
             commands: "M1 1l4 4 4-4";
             fill: transparent;
-            stroke: root.c.on ? #171717 : Ink.quiet;
+            stroke: root.c.on ? Ink.base : Ink.quiet;
             stroke-width: 1.35px;
         }
         b := TouchArea {
@@ -874,7 +842,7 @@ export component CellView inherits Rectangle {
         border-radius: root.c.style == 1 ? Radius.tiny : Radius.small;
         background: root.c.style == 1 ? transparent : root.c.style == 2 ? Ink.hover-box : root.c.style == 3 ? Ink.pick : root.c.style == 4 ? Ink.box : Ink.well;
         border-width: root.c.style == 1 ? 1px : 0;
-        border-color: #f0b35a73;
+        border-color: Ink.warn.with-alpha(0.451);
         Text {
             text: root.c.text;
             font-family: Font.ui;
@@ -933,7 +901,7 @@ export component CellView inherits Rectangle {
                 width: parent.d;
                 height: parent.d;
                 border-radius: self.width / 2;
-                background: #fafafa;
+                background: Ink.bright;
             }
         }
         fdrag := TouchArea {
@@ -968,7 +936,7 @@ export component CellView inherits Rectangle {
             border-radius: self.d / 2;
             background: root.c.style == 1 ? (dot-ta.has-hover ? Ink.hover-box : transparent) : root.c.color;
             border-width: root.c.style == 1 || !dotcell.small ? 1px : 0;
-            border-color: root.c.style == 1 ? (dot-ta.has-hover ? #8a8a94 : Ink.edge) : #ffffff2a;
+            border-color: root.c.style == 1 ? (dot-ta.has-hover ? Ink.placeholder : Ink.edge) : Ink.white.with-alpha(0.165);
             if root.c.style == 1: Path {
                 width: dotcell.small ? 10px : 12px;
                 height: dotcell.small ? 10px : 12px;
@@ -998,7 +966,7 @@ export component CellView inherits Rectangle {
             border-radius: self.width / 2;
             background: root.c.color;
             border-width: 1px;
-            border-color: #ffffff2a;
+            border-color: Ink.white.with-alpha(0.165);
         }
         Text {
             x: 32px;
@@ -1102,7 +1070,7 @@ export component CellView inherits Rectangle {
         border-radius: Radius.control;
         background: dr-ta.has-hover || root.c.on ? Ink.hover-box : Ink.well;
         border-width: root.c.style == 2 ? 1px : 0;
-        border-color: #f0b35a80;
+        border-color: Ink.warn.with-alpha(0.502);
         if root.c.value > 0: Image {
             x: 12px;
             y: (parent.height - 14px) / 2;
@@ -1143,7 +1111,7 @@ export component CellView inherits Rectangle {
         text: root.c.text;
         font-family: Font.ui;
         font-size: Font.note;
-        color: il-ta.has-hover ? #ffffff : Ink.bright;
+        color: il-ta.has-hover ? Ink.white : Ink.bright;
         vertical-alignment: center;
         il-ta := TouchArea {
             mouse-cursor: pointer;

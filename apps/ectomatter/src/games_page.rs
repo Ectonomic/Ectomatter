@@ -353,8 +353,7 @@ const ROW: f32 = crate::tokens::space::ROW;
 const BOX_IN: f32 = crate::tokens::space::PAD - crate::tokens::space::ROW;
 /// the rule between rows
 fn rule() -> slint::Color {
-    let c = crate::tokens::ink::LINE;
-    slint::Color::from_rgb_u8(c[0], c[1], c[2])
+    crate::tokens::color(crate::tokens::ink::LINE)
 }
 /// where a page's boxes start: under the line of words at its top
 const HEAD_END: f32 = crate::tokens::size::HEAD;

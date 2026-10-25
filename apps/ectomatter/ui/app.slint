@@ -28,7 +28,7 @@ import "../../../crates/ectomatter-draw/typefaces/JetBrainsMono.ttf";
 import { Space, Radius, Font, Size, Part, Shadow, Ink } from "tokens.slint";
 export { Ink }
 // The design system's parts (ui/system/), which every page is built from.
-import { BoxRow, Scrim, DialogBox, Confirm, Dot, TitleBar, PageBar, HintRow, Typing, WinButton, Tab, WordButton, TextButton, Spinner, ScrollBar, PickField, Well, LinkButton, SmallCap, FieldBox, CheckBox, Star, StarButton, StripIcon, PlayButton, SegSwitch, DropField, BarButton, Stage, PageBox, ScrollBox, MenuRow, Menu, Picker, Cell, CellView, LaidBox, CellBox, ProfileItem, RailItem, AnchorRow, AnchorHead, ListBox, AnchorColumn } from "system/system.slint";
+import { TipBox, Tip, EmptyState, ListRow, EditorHeader, EffectTile, Glyph, IconButton, MoreButton, PencilButton, BoxRow, Scrim, DialogBox, Confirm, Dot, TitleBar, PageBar, HintRow, Typing, WinButton, Tab, WordButton, TextButton, Spinner, ScrollBar, PickField, Well, LinkButton, SmallCap, FieldBox, CheckBox, Star, StarButton, StripIcon, PlayButton, SegSwitch, DropField, BarButton, Stage, PageBox, ScrollBox, MenuRow, Menu, Picker, Cell, CellView, LaidBox, CellBox, ProfileItem, RailItem, AnchorRow, AnchorHead, ListBox, AnchorColumn } from "system/system.slint";
 export { Typing, MenuRow, Cell, LaidBox, ProfileItem }
 
 // a key over the keyboard: where it is in the drawing's units, from the
@@ -344,62 +344,19 @@ component EffectGrid inherits PageBox {
     // how wide each tile shows its picture, for the pictures to be drawn that wide
     out property <length> pic-w: root.tw - 12px;
     title: "Effect";
-    property <length> tw: (self.width - 32px - 16px) / 3;
+    property <length> tw: (self.width - 2 * Space.pad - 2 * Space.inline) / 3;
     property <duration> t: root.moving ? animation-tick() : 0ms;
-    for fx[i] in root.effects: Rectangle {
-        x: 16px + mod(i, 3) * (root.tw + 8px);
-        y: 48px + floor(i / 3) * (76px + 8px);
+    for fx[i] in root.effects: EffectTile {
+        x: Space.pad + mod(i, 3) * (root.tw + Space.inline);
+        y: Size.box-head + floor(i / 3) * (76px + Space.inline);
         width: root.tw;
-        height: 76px;
-        border-radius: Radius.panel;
-        background: fx.on ? (fx-ta.has-hover ? Ink.pick-hover : Ink.pick) : fx-ta.has-hover ? Ink.hover-box : Ink.well;
-        Rectangle {
-            x: 6px;
-            y: 6px;
-            width: parent.width - 12px;
-            height: 40px;
-            border-radius: Radius.small;
-            clip: true;
-            background: fx.name == "Off" ? Ink.hover-box : Ink.preview;
-            property <float> phase: fx.on && fx.motion != 0 ? root.t / 1ms : 0;
-            if fx.name != "Off": Image {
-                // rolling: a picture twice as wide, slid along and round again;
-                // Pulse, chosen: its five colors each as wide as the tile, one
-                // shown at a time, jumping to the next as the keys do
-                x: fx.on && fx.motion == 3 ? -mod(parent.phase / 3000, 1) * parent.width
-                    : fx.on && fx.motion == 2 ? -mod(floor(parent.phase / 700), 5) * parent.width
-                    : 0;
-                width: fx.motion == 3 ? parent.width * 2 : fx.on && fx.motion == 2 ? parent.width * 5 : parent.width;
-                height: parent.height;
-                source: fx.icon;
-                image-fit: fill;
-                opacity: !fx.on ? 1
-                    : fx.motion == 1 ? 0.3 + 0.7 * (0.5 - 0.5 * cos(parent.phase / 3000 * 360deg))
-                    : fx.motion == 4 ? 0.55 + 0.45 * (0.5 - 0.5 * cos(parent.phase / 1600 * 360deg))
-                    : fx.motion == 5 ? 1 - 0.75 * min(1, mod(parent.phase, 1400) / 1400)
-                    : 1;
-            }
-            // the film every picture sits under
-            Rectangle {
-                background: Ink.pick.with-alpha(0.35);
-            }
-        }
-        Text {
-            y: 53px;
-            height: 15px;
-            width: parent.width;
-            text: fx.name;
-            font-family: Font.ui;
-            font-size: Font.caption;
-            font-weight: fx.on ? Font.medium : Font.regular;
-            color: fx.on || fx-ta.has-hover ? Ink.bright : Ink.soft;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
-        fx-ta := TouchArea {
-            mouse-cursor: pointer;
-            clicked => { root.chose(i); }
-        }
+        name: fx.name;
+        icon: fx.icon;
+        on: fx.on;
+        motion: fx.motion;
+        blank: fx.name == "Off";
+        t: root.t;
+        clicked => { root.chose(i); }
     }
 }
 
@@ -474,7 +431,7 @@ component LayerSwitch inherits Rectangle {
     // the pointer over a tab that is not open
     property <bool> shut-hover;
     // the dark tabs' color, at rest or under the pointer
-    property <color> shut: root.shut-hover ? #1a1a1e : Ink.well;
+    property <color> shut: root.shut-hover ? Ink.stage : Ink.well;
     // behind them all, the dark tabs' color, which shows round the open tab's inner corners
     Rectangle {
         border-top-left-radius: Radius.box;
@@ -512,7 +469,7 @@ component LayerSwitch inherits Rectangle {
             border-radius: Radius.tiny + 1px;
             background: t.open ? Ink.well : Ink.box;
             border-width: 1px;
-            border-color: t.open ? #5a5a62 : Ink.seam;
+            border-color: t.open ? Ink.off : Ink.seam;
             if l.cap != "": Text {
                 text: l.cap;
                 font-family: Font.ui;
@@ -528,7 +485,7 @@ component LayerSwitch inherits Rectangle {
                 width: 12px;
                 height: 2px;
                 border-radius: self.height / 2;
-                background: #6a6a72;
+                background: Ink.edge-hover;
             }
         }
         Text {
@@ -565,7 +522,7 @@ component KeyLibrary inherits PageBox {
     in property <length> reveal-y;
     in property <int> reveal-n;
     changed reveal-n => {
-        lib-flick.viewport-y = -max(0, min(root.reveal-y - 40px, lib-flick.viewport-height - lib-flick.height));
+        lib-flick.content-y = -max(0, min(root.reveal-y - 40px, lib-flick.content-height - lib-flick.height));
     }
     in-out property <string> query;
     callback toggle(string);
@@ -688,7 +645,7 @@ component KeyLibrary inherits PageBox {
                             x: 6px;
                             y: 4px;
                             text: r.cap;
-                            size: r.cap.character-count > 3 ? 9.5px : 11px;
+                            size: r.cap.character-count > 3 ? 9.5px : Font.small;  // art: a long name small on its cap, as a key prints it
                         }
                         Text {
                             x: 50px;
@@ -728,11 +685,11 @@ component KeyLibrary inherits PageBox {
         y: lib-flick.y;
         height: lib-flick.height;
         view: lib-flick.height;
-        content: lib-flick.viewport-height;
-        offset: -lib-flick.viewport-y;
+        content: lib-flick.content-height;
+        offset: -lib-flick.content-y;
         framed: false;
         thumb-color: Ink.edge;
-        scroll-to(o) => { lib-flick.viewport-y = -o; }
+        scroll-to(o) => { lib-flick.content-y = -o; }
     }
 }
 
@@ -792,7 +749,7 @@ component LibCoverView inherits Rectangle {
         Rectangle {
             border-radius: Radius.control;
             border-width: root.hot ? 1px : 0;
-            border-color: #ffffff26;
+            border-color: Ink.white.with-alpha(0.149);
         }
     }
     Text {
@@ -818,7 +775,7 @@ component LibCoverView inherits Rectangle {
         width: 30px;
         height: 30px;
         border-radius: Radius.control;
-        background: star-ta.has-hover ? #2a2a30f2 : #111114d9;
+        background: star-ta.has-hover ? Ink.hover-box.with-alpha(0.949) : Ink.well.with-alpha(0.851);
         opacity: root.hot ? 1 : 0;
         animate opacity { duration: 120ms; }
         Path {
@@ -1018,7 +975,7 @@ component KeyDetail inherits PageBox {
         width: 54px;
         height: 48px;
         text: root.cap;
-        size: root.cap.character-count > 3 ? 11px : 15px;
+        size: root.cap.character-count > 3 ? Font.small : Font.lead;
     }
     VerticalLayout {
         x: 84px;
@@ -1067,7 +1024,7 @@ component KeyDetail inherits PageBox {
         width: pill.preferred-width + 16px;
         height: 20px;
         border-radius: self.height / 2;
-        background: #f0b35a22;
+        background: Ink.warn.with-alpha(0.133);
         pill := Text {
             x: 8px;
             height: parent.height;
@@ -1103,9 +1060,9 @@ component KeyDetail inherits PageBox {
         width: 96px;
         height: 36px;
         border-radius: Radius.control;
-        background: root.listening ? #f0b35a1a : rec-ta.has-hover ? Ink.hover-box : transparent;
+        background: root.listening ? Ink.warn.with-alpha(0.102) : rec-ta.has-hover ? Ink.hover-box : transparent;
         border-width: 1px;
-        border-color: root.listening ? Ink.warn : rec-ta.has-hover ? #6a6a72 : #45454c;
+        border-color: root.listening ? Ink.warn : rec-ta.has-hover ? Ink.edge-hover : Ink.edge;
         HorizontalLayout {
             alignment: center;
             spacing: 7px;
@@ -1116,7 +1073,7 @@ component KeyDetail inherits PageBox {
                     width: 7px;
                     height: 7px;
                     border-radius: self.width / 2;
-                    background: root.listening ? Ink.warn : #e05a4f;
+                    background: root.listening ? Ink.warn : Ink.record;
                     opacity: root.listening ? 0.4 + 0.6 * abs(cos(animation-tick() / 1000ms * 180deg)) : 1;
                 }
             }
@@ -1220,7 +1177,7 @@ component SliderDetail inherits PageBox {
             height: 14px;
             border-radius: self.width / 2;
             border-width: c.on ? 4px : 1.5px;
-            border-color: c.on ? Ink.bright : #6a6a72;
+            border-color: c.on ? Ink.bright : Ink.edge-hover;
         }
         Text {
             x: 34px;
@@ -1419,7 +1376,7 @@ export component AppWindow inherits Window {
     callback gl-toc-jump(int);
     // (a jump from On this page: the section near the top, as far as the page goes)
     changed gl-jump-n => {
-        gl-flick.viewport-y = -max(0, min(root.gl-jump-y, gl-flick.viewport-height - gl-flick.height));
+        gl-flick.content-y = -max(0, min(root.gl-jump-y, gl-flick.content-height - gl-flick.height));
     }
     // the form for a script (gl-modal 3): its words, what's typed into it, its choices
     in property <string> gl-script-title;
@@ -1734,9 +1691,9 @@ export component AppWindow inherits Window {
     // it has, till when the stage's shade fills the hole
     out property <bool> mouse-hole-shown: root.place == "mouse" && root.mouse-tab < 2;
     out property <length> mouse-pic-wx: rail-w + pws-x + pws-w / 2 - 600px + 480px - root.mouse-pic-m;
-    out property <length> mouse-pic-wy: bar + 56px + mouse-flick.content-y + head-end + 30px - root.mouse-pic-m;
+    out property <length> mouse-pic-wy: bar + Size.bar + mouse-flick.content-y + head-end + 30px - root.mouse-pic-m;
     out property <length> mouse-stage-wx: rail-w + pws-x;
-    out property <length> mouse-stage-wy: bar + 56px + mouse-flick.content-y + head-end;
+    out property <length> mouse-stage-wy: bar + Size.bar + mouse-flick.content-y + head-end;
     out property <length> mouse-stage-width: pws-w;
     in property <bool> mouse-hdr-ready;
     // where the keyboard goes, for the window to draw it there, when its page shows
@@ -1745,7 +1702,7 @@ export component AppWindow inherits Window {
     in property <bool> board-ready;
     in property <duration> knob-glide: 120ms;
     out property <length> board-x: rail-w + pws-x + kb-pad-x;
-    out property <length> board-y: bar + 56px + flick.content-y + board-top;
+    out property <length> board-y: bar + Size.bar + flick.content-y + board-top;
     out property <length> board-width: board-w;
     out property <length> board-height: board-h;
     // the app's ground, which the window lays under the content
@@ -1953,9 +1910,9 @@ export component AppWindow inherits Window {
     property <length> mouse-band-max: max(mouse-band-min, mouse-flick.height - mouse-low-y - Space.margin);
     property <length> mouse-second-need: root.mouse-chosen && root.mouse-note != "" ? 320px : 270px;
     // the effects' box on Lighting: its tiles, three to a line
-    property <length> mouse-fx-h: 48px + ceil(root.mouse-effects.length / 3) * (76px + 8px) - 8px + 14px;
+    property <length> mouse-fx-h: Size.box-head + ceil(root.mouse-effects.length / 3) * (76px + Space.inline) - Space.inline + Space.pad;
     out property <length> mouse-wx: rail-w + pws-x;
-    out property <length> mouse-wy: bar + 56px + mouse-flick.content-y;
+    out property <length> mouse-wy: bar + Size.bar + mouse-flick.content-y;
     out property <length> mouse-stage-y: head-end;
     out property <length> mouse-stage-height: mouse-stage-h;
     out property <length> mouse-low-top: mouse-low-y;
@@ -2030,7 +1987,7 @@ export component AppWindow inherits Window {
     default-font-size: Font.lead;
 
     property <length> radius: root.is-maximized ? 0 : Radius.window;
-    property <length> bar: 36px;
+    property <length> bar: Size.title-bar;
     // the rail, opened into its blade, widens and the page narrows to make room
     property <length> rail-w: root.rail-open ? 232px : 60px;
     animate rail-w { duration: 220ms; easing: cubic-bezier(0.2, 0.8, 0.2, 1); }
@@ -2047,7 +2004,7 @@ export component AppWindow inherits Window {
     // the keyboard fills the page's width, at the drawing's proportions, under the head
     // over the keyboard, one line: what to do here, and Show rebindings
     property <length> head-h: 36px;
-    property <length> head-end: 12px + head-h + 6px;
+    property <length> head-end: Size.head;
     // the keyboard sits in a box of its own, a gutter round it
     property <length> kb-pad-x: 48px;
     property <length> kb-pad-y: 24px;
@@ -2084,14 +2041,14 @@ export component AppWindow inherits Window {
     property <int> shelf-rows: shelf-two ? ceil((root.lib-pages.length + 1) / 2) : root.lib-pages.length + 1;
     property <length> shelf-h: 48px + shelf-rows * 104px - 8px + 16px;
     // the screen's own background, which its bay is
-    in property <color> lcd-field: #0a0908;
+    in property <color> lcd-field: #0a0908;  // art: the screen's own ground, until its core says
     // (on the Screen tab, what is under the screen's box and its panel: the Library)
     // (the gap under the stage, as under every device's)
     property <length> under-top: root.tab == 3 ? head-end + tabs-h + box-h : head-end + board-h + 2 * kb-pad-y + Space.gap;
     // the playlist's name changed in place: where its field is in the window, so a press
     // away from it keeps the name
     out property <length> pl-rename-wx: rail-w + under-x + 16px;
-    out property <length> pl-rename-wy: bar + 56px + flick.content-y + head-end + band-y + 14px;
+    out property <length> pl-rename-wy: bar + Size.bar + flick.content-y + head-end + band-y + 14px;
     property <length> anchor-w: 240px;
     property <length> under-x: pws-x + anchor-w + Space.gap;
     out property <length> under-w: pws-w - anchor-w - Space.gap;
@@ -2112,7 +2069,7 @@ export component AppWindow inherits Window {
     property <length> second-need: root.slider-chosen != 0 ? 328px : root.key-open ? (root.key-note != "" ? 320px : 270px) : 230px;
     property <length> second-w: root.key-open ? 460px : root.slider-chosen != 0 ? 360px : 340px;
     // Lighting: the effects, the effect's settings and where and when, in the row of boxes
-    property <length> lfx-h: 48px + 3 * 76px + 2 * 8px + 14px;
+    property <length> lfx-h: Size.box-head + 3 * 76px + 2 * Space.inline + Space.pad;
     property <length> tab-h: root.tab == 0 ? kb-keys.height : root.tab == 1 ? kb-light.height
         : root.tab == 3 ? (shelf-on ? shelf-h : 0) : root.tile-height;
     property <length> under-board: Space.gap + max(anchor.preferred-height, tab-h);
@@ -2120,7 +2077,7 @@ export component AppWindow inherits Window {
         : root.tab == 3 ? max(head-end + anchor.preferred-height, under-top + tab-h) + Space.margin
         : board-top + board-h + kb-pad-y + under-board + Space.margin;
     // the page's scrollbar, as WebKit drew it: over the whole window, when the page is longer than it
-    property <length> doc-h: bar + 56px + page-h;
+    property <length> doc-h: bar + Size.bar + page-h;
 
     public function focus-menu() {
         menu.focus-search();
@@ -2180,7 +2137,7 @@ export component AppWindow inherits Window {
                     if root.desk-editing && (p.chosen || (p.hover && !root.desk-carrying)): Rectangle {
                         border-radius: p.r;
                         border-width: p.chosen ? 1.5px : 1px;
-                        border-color: p.chosen ? #ffffffe0 : #ffffff40;
+                        border-color: p.chosen ? Ink.white.with-alpha(0.878) : Ink.white.with-alpha(0.251);
                     }
                     if root.desk-editing && !p.drawing: TouchArea {
                         mouse-cursor: root.desk-drawing ? MouseCursor.crosshair : root.desk-carrying ? MouseCursor.grabbing : MouseCursor.grab;
@@ -2330,7 +2287,7 @@ export component AppWindow inherits Window {
                             width: k.w * d.w / root.units;
                             height: k.h * d.w / root.units;
                             border-radius: (k.molded ? 0.13 : 0.24) * d.w / 100;
-                            background: #00000052;
+                            background: #00000052;  // art: a key held down, as the keyboard's own picture has it
                         }
                         for o in root.overlays: Image {
                             visible: root.board-ready;
@@ -2372,7 +2329,7 @@ export component AppWindow inherits Window {
                         height: parent.height + 16px + 58px;
                         border-radius: Radius.box;
                         border-width: 1px;
-                        border-color: #ffffff1c;
+                        border-color: Ink.white.with-alpha(0.11);
                     }
                     // over a pad it could be lost on, its name on a backing of the
                     // app's own ground
@@ -2382,7 +2339,7 @@ export component AppWindow inherits Window {
                         width: name-col.preferred-width + 20px;
                         height: name-col.preferred-height + 10px;
                         border-radius: Radius.control;
-                        background: #18181bd9;
+                        background: Ink.base.with-alpha(0.851);
                     }
                     // its name under it, and under that whether it is plugged in
                     name-col := VerticalLayout {
@@ -2579,7 +2536,7 @@ export component AppWindow inherits Window {
                                         border-radius: Radius.tiny;
                                         background: root.desk-pad-rgb;
                                         border-width: 1px;
-                                        border-color: #ffffff2e;
+                                        border-color: Ink.white.with-alpha(0.18);
                                     }
                                 }
                                 Text {
@@ -2699,16 +2656,11 @@ export component AppWindow inherits Window {
                 }
             }
             // before anything is plugged in: which devices Ectomatter works with
-            if root.desk-empty != "": Text {
+            if root.desk-empty != "": EmptyState {
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2;
-                width: min(480px, parent.width - 48px);
+                width: min(440px, parent.width - 2 * Space.margin);
                 text: root.desk-empty;
-                font-family: Font.ui;
-                font-size: Font.name;
-                color: Ink.soft;
-                horizontal-alignment: center;
-                wrap: word-wrap;
             }
         }
 
@@ -2721,8 +2673,8 @@ export component AppWindow inherits Window {
             property <length> low-y: mouse-low-y;
 
             mouse-flick := Flickable {
-                y: 56px;
-                height: parent.height - 56px;
+                y: Size.bar;
+                height: parent.height - Size.bar;
                 // (Settings' form brings its own margin under it)
                 content-height: low-y + (root.mouse-tab < 3 ? max(mouse-pro.visible ? mouse-pro.height : 0, mouse-row.height) + Space.margin : root.mouse-cells-h);
                 mouse-drag-pan-enabled: false;
@@ -2847,7 +2799,7 @@ export component AppWindow inherits Window {
                                     border-radius: Radius.small;
                                     background: c.chosen ? Ink.pick : transparent;
                                     border-width: c.chosen ? 1px : 0;
-                                    border-color: #ffffff40;
+                                    border-color: Ink.white.with-alpha(0.251);
                                     job-t := Text {
                                         x: c.chosen ? 8px : 0;
                                         height: parent.height;
@@ -2964,29 +2916,14 @@ export component AppWindow inherits Window {
                         min-width: Size.column;
                         preferred-width: Size.column;
                         max-height: mouse-band-max;
-                for r[i] in root.mouse-rows: AnchorRow {
+                for r[i] in root.mouse-rows: ListRow {
+                    name: r.name;
+                    // (a job not the factory's in amber)
+                    sub: r.rebound ? "" : r.job;
+                    warn: r.rebound ? r.job : "";
                     chosen: r.chosen;
+                    end: r.swatched ? 38px : 12px;
                     clicked => { root.mouse-row(i); }
-                    Text {
-                        x: 12px;
-                        y: 7px;
-                        width: parent.width - 24px - (r.swatched ? 24px : 0);
-                        text: r.name;
-                        font-family: Font.ui;
-                        font-size: Font.text;
-                        color: Ink.bright;
-                        overflow: elide;
-                    }
-                    Text {
-                        x: 12px;
-                        y: 25px;
-                        width: parent.width - 24px - (r.swatched ? 24px : 0);
-                        text: r.job;
-                        font-family: Font.ui;
-                        font-size: Font.caption;
-                        color: r.rebound ? Ink.warn : r.chosen ? Ink.soft : Ink.quiet;
-                        overflow: elide;
-                    }
                     if r.swatched: Rectangle {
                         x: parent.width - 12px - 14px;
                         y: (parent.height - 14px) / 2;
@@ -2995,7 +2932,7 @@ export component AppWindow inherits Window {
                         border-radius: Radius.tiny;
                         background: r.swatch;
                         border-width: 1px;
-                        border-color: #ffffff2e;
+                        border-color: Ink.white.with-alpha(0.18);
                     }
                 }
                     }
@@ -3074,8 +3011,8 @@ export component AppWindow inherits Window {
         Rectangle {
             visible: root.place == "library";
             gl-flick := Flickable {
-                y: 56px;
-                height: parent.height - 56px;
+                y: Size.bar;
+                height: parent.height - Size.bar;
                 content-height: root.gl-page-h;
                 mouse-drag-pan-enabled: false;
                 // what to do here, and beside it the find box and, on the games' tabs, the
@@ -3240,28 +3177,14 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
-                // nothing to show: what's missing, and the way to it
-                if root.gl-view == 0 && root.gl-empty != "": VerticalLayout {
-                    x: pws-x;
-                    y: head-end + 48px;
-                    width: min(pws-w, 640px);
+                // nothing to show: what's missing, and the way to it, in the page's middle
+                if root.gl-view == 0 && root.gl-empty != "": EmptyState {
+                    x: (parent.width - self.width) / 2;
+                    y: max(head-end + Space.section, (gl-flick.height - self.preferred-height) / 2);
+                    width: min(440px, pws-w);
                     height: self.preferred-height;
-                    spacing: 4px;
-                    Text {
-                        text: root.gl-empty;
-                        font-family: Font.ui;
-                        font-size: Font.lead;
-                        font-weight: Font.medium;
-                        color: Ink.dim;
-                        wrap: word-wrap;
-                    }
-                    Text {
-                        text: root.gl-empty-sub;
-                        font-family: Font.ui;
-                        font-size: Font.name;
-                        color: Ink.quiet;
-                        wrap: word-wrap;
-                    }
+                    title: root.gl-empty;
+                    text: root.gl-empty-sub;
                 }
                 // a page of its own: the game's picture, then its sections
                 if root.gl-view == 1 && root.gl-has-hero: Rectangle {
@@ -3305,7 +3228,7 @@ export component AppWindow inherits Window {
             // sections; it scrolls with the page until it reaches the top, then stays in view
             if root.gl-view == 1 && root.gl-toc.length > 0: Rectangle {
                 x: root.gl-toc-x;
-                y: 56px + max(16px, root.gl-toc-top + gl-flick.viewport-y);
+                y: Size.bar + max(16px, root.gl-toc-top + gl-flick.content-y);
                 width: root.gl-toc-w;
                 height: toc-col.preferred-height;
                 toc-col := VerticalLayout {
@@ -3453,8 +3376,8 @@ export component AppWindow inherits Window {
             visible: root.place == "z10";
             // the page scrolls under the device's bar, as the web page did
             flick := Flickable {
-                y: 56px;
-                height: parent.height - 56px;
+                y: Size.bar;
+                height: parent.height - Size.bar;
                 content-height: root.page-h;
                 mouse-drag-pan-enabled: false;
                 // over the keyboard: what to do on this tab, and Show rebindings
@@ -3799,13 +3722,13 @@ export component AppWindow inherits Window {
                             background: root.lcd-field;
                             animate background { duration: 450ms; easing: ease; }
                             border-width: 1px;
-                            border-color: #0000008c;
+                            border-color: Ink.black.with-alpha(0.549);
                             clip: true;
                             // (at the top: an element placed nowhere sits in the middle)
                             Rectangle {
                                 y: 0;
                                 height: 14px;
-                                background: @linear-gradient(180deg, #00000073 0%, #00000000 100%);
+                                background: @linear-gradient(180deg, Ink.black.with-alpha(0.451) 0%, Ink.black.with-alpha(0) 100%);
                             }
                         }
                         // a layout carried over the screen on the second tab: ringed, as where it lands
@@ -3873,14 +3796,14 @@ export component AppWindow inherits Window {
                                         height: 24px;
                                         border-radius: Radius.small;
                                         opacity: g.on ? 1 : 0.45;
-                                        background: g.chosen ? (bar-ta.has-hover ? #55555e : Ink.edge) : bar-ta.has-hover ? Ink.pick : Ink.hover-box;
+                                        background: g.chosen ? (bar-ta.has-hover ? Ink.edge-hover : Ink.edge) : bar-ta.has-hover ? Ink.pick : Ink.hover-box;
                                         border-width: g.over ? 2px : 0;
                                         border-color: Ink.soft;
                                         clip: true;
                                         Rectangle {
                                             x: 0;
                                             width: 26px;
-                                            background: #ffffff0a;
+                                            background: Ink.white.with-alpha(0.039);
                                             Path {
                                                 width: 12px;
                                                 height: 12px;
@@ -4174,7 +4097,7 @@ export component AppWindow inherits Window {
                                     height: 24px;
                                     border-top-right-radius: Radius.small;
                                     border-bottom-right-radius: Radius.small;
-                                    background: b.on ? (turn.hov || turn.way-hov ? #5c5c66 : #52525b) : (turn.hov || turn.way-hov ? Ink.pick-hover : Ink.pick);
+                                    background: b.on ? (turn.hov || turn.way-hov ? Ink.off : Ink.edge) : (turn.hov || turn.way-hov ? Ink.pick-hover : Ink.pick);
                                     animate background { duration: 120ms; }
                                     // its name, then its time at its end, short of the end's handle: its
                                     // seconds, or the infinity mark for a turn that stays until the layouts
@@ -4392,22 +4315,12 @@ export component AppWindow inherits Window {
                                     clicked => { root.pl-mark(i, self.absolute-position.x, self.absolute-position.y + 16px, 24px); }
                                 }
                                 // its name over it while the pointer is on it (not while its menu is open)
-                                if turn.way-hov && root.pl-menu != i: Rectangle {
+                                if turn.way-hov && root.pl-menu != i: Tip {
                                     x: (root.pl-way-w - self.width) / 2;
-                                    y: 4px;
-                                    width: wn-text.preferred-width + 14px;
-                                    height: 20px;
-                                    border-radius: Radius.small;
-                                    background: Ink.pop;
-                                    wn-text := Text {
-                                        x: 7px;
-                                        height: parent.height;
-                                        text: b.way-name;
-                                        font-family: Font.ui;
-                                        font-size: Font.caption;
-                                        color: Ink.bright;
-                                        vertical-alignment: center;
-                                    }
+                                    y: 32px - self.height - Space.tight;
+                                    width: self.preferred-width;
+                                    height: self.preferred-height;
+                                    text: b.way-name;
                                 }
                             }
                             // a script's screen on the keyboard: the strip waits, and says so
@@ -4946,8 +4859,8 @@ export component AppWindow inherits Window {
     // short of the window's rounded corner at the foot.
     if root.place == "z10": ScrollBar {
         x: root.width - 12px;
-        y: bar + 56px + 2px;
-        height: root.height - bar - 56px - 2px - root.bar-foot;
+        y: bar + Size.bar + 2px;
+        height: root.height - bar - Size.bar - 2px - root.bar-foot;
         view: flick.height;
         content: flick.content-height;
         offset: -flick.content-y;
@@ -4955,8 +4868,8 @@ export component AppWindow inherits Window {
     }
     if root.place == "mouse": ScrollBar {
         x: root.width - 12px;
-        y: bar + 56px + 2px;
-        height: root.height - bar - 56px - 2px - root.bar-foot;
+        y: bar + Size.bar + 2px;
+        height: root.height - bar - Size.bar - 2px - root.bar-foot;
         view: mouse-flick.height;
         content: mouse-flick.content-height;
         offset: -mouse-flick.content-y;
@@ -4964,8 +4877,8 @@ export component AppWindow inherits Window {
     }
     if root.place == "library": ScrollBar {
         x: root.width - 12px;
-        y: bar + 56px + 2px;
-        height: root.height - bar - 56px - 2px - root.bar-foot;
+        y: bar + Size.bar + 2px;
+        height: root.height - bar - Size.bar - 2px - root.bar-foot;
         view: gl-flick.height;
         content: gl-flick.content-height;
         offset: -gl-flick.content-y;
@@ -4973,8 +4886,8 @@ export component AppWindow inherits Window {
     }
     if root.place == "settings": ScrollBar {
         x: root.width - 12px;
-        y: bar + 56px + 2px;
-        height: root.height - bar - 56px - 2px - root.bar-foot;
+        y: bar + Size.bar + 2px;
+        height: root.height - bar - Size.bar - 2px - root.bar-foot;
         view: set-flick.height;
         content: set-flick.content-height;
         offset: -set-flick.content-y;
@@ -5502,7 +5415,7 @@ export component AppWindow inherits Window {
                 y: Space.margin + sf.head-h + 46px + 6px;
                 width: parent.width - 2 * Space.margin;
                 height: sf.height - self.y - Space.margin - Size.button - 2px - Space.margin;
-                viewport-height: root.scene-form-h;
+                content-height: root.scene-form-h;
                 for c in root.scene-cells: CellView {
                     c: c;
                     glyph: root.keyboard-glyph;
@@ -5516,47 +5429,15 @@ export component AppWindow inherits Window {
                 if root.scene-tiles-on: Rectangle {
                     y: root.scene-tiles-y;
                     height: 76px;
-                    for fx[i] in root.scene-tiles: Rectangle {
-                        x: i * (84px + 8px);
+                    for fx[i] in root.scene-tiles: EffectTile {
+                        x: i * (84px + Space.inline);
                         width: 84px;
-                        height: 76px;
-                        border-radius: Radius.panel;
-                        background: fx.on ? (st-ta.has-hover ? Ink.pick-hover : Ink.pick) : st-ta.has-hover ? Ink.hover-box : Ink.well;
-                        Rectangle {
-                            x: 6px;
-                            y: 6px;
-                            width: parent.width - 12px;
-                            height: 40px;
-                            border-radius: Radius.small;
-                            clip: true;
-                            background: Ink.preview;
-                            property <float> phase: fx.on && fx.motion != 0 ? animation-tick() / 1ms : 0;
-                            Image {
-                                // (a wave rolls along a picture twice as wide; a breath fades and comes back)
-                                x: fx.on && fx.motion == 3 ? -mod(parent.phase / 3000, 1) * parent.width : 0;
-                                width: fx.motion == 3 ? parent.width * 2 : parent.width;
-                                height: parent.height;
-                                source: fx.icon;
-                                image-fit: fill;
-                                opacity: fx.on && fx.motion == 1 ? 0.3 + 0.7 * (0.5 - 0.5 * cos(parent.phase / 3000 * 360deg)) : 1;
-                            }
-                        }
-                        Text {
-                            y: 53px;
-                            height: 15px;
-                            width: parent.width;
-                            text: fx.name;
-                            font-family: Font.ui;
-                            font-size: Font.caption;
-                            font-weight: fx.on ? Font.medium : Font.regular;
-                            color: fx.on || st-ta.has-hover ? Ink.bright : Ink.soft;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                        st-ta := TouchArea {
-                            mouse-cursor: pointer;
-                            clicked => { root.scene-tile(i); }
-                        }
+                        name: fx.name;
+                        icon: fx.icon;
+                        on: fx.on;
+                        motion: fx.motion;
+                        t: fx.on && fx.motion != 0 ? animation-tick() : 0ms;
+                        clicked => { root.scene-tile(i); }
                     }
                 }
             }
@@ -5700,69 +5581,23 @@ component MacroIcon inherits Path {
         : "M3.1 4h9.8a1.6 1.6 0 0 1 1.6 1.6v5.3a1.6 1.6 0 0 1-1.6 1.6H3.1a1.6 1.6 0 0 1-1.6-1.6V5.6a1.6 1.6 0 0 1 1.6-1.6zM4 7h1M7 7h1M10 7h2M4.5 9.8h7";
 }
 
-// a macro's row in the library
-component MacroRow inherits Rectangle {
+// a macro's row in the library, a list's row with its glyph: a macro that waits, or one that doesn't
+component MacroRow inherits ListRow {
     in property <MacroItem> m;
-    callback clicked;
     callback menu(length, length);
-    height: 53px;
-    border-radius: Radius.control;
-    background: root.m.current ? (ta.has-hover ? Ink.pick-hover : Ink.pick) : ta.has-hover ? Ink.hover-box : transparent;
+    name: root.m.name;
+    sub: root.m.sub;
+    chosen: root.m.current;
+    dirty: root.m.dirty;
+    inset: 40px;
+    right-clicked(x, y) => { root.menu(x, y); }
     MacroIcon {
         x: 11.5px;
-        y: 19px;
+        y: (parent.height - self.height) / 2;
         width: 15px;
         height: 15px;
         which: root.m.timed ? 1 : 0;
         stroke: root.m.current ? Ink.bright : Ink.soft;
-    }
-    HorizontalLayout {
-        x: 40px;
-        y: 8px;
-        width: parent.width - 52px;
-        height: 19px;
-        spacing: 7px;
-        alignment: start;
-        Text {
-            text: root.m.name;
-            font-family: Font.ui;
-            font-size: Font.text;
-            font-weight: Font.medium;
-            color: (root.m.current || ta.has-hover) ? Ink.bright : Ink.dim;
-            overflow: elide;
-            vertical-alignment: center;
-        }
-        if root.m.dirty: Rectangle {
-            width: 6px;
-            Rectangle {
-                y: 8px;
-                width: 6px;
-                height: 6px;
-                border-radius: self.width / 2;
-                background: Ink.warn;
-            }
-        }
-    }
-    Text {
-        x: 40px;
-        y: 27px;
-        width: parent.width - 52px;
-        height: 17px;
-        text: root.m.sub;
-        font-family: Font.ui;
-        font-size: Font.caption;
-        color: Ink.soft;
-        overflow: elide;
-        vertical-alignment: center;
-    }
-    ta := TouchArea {
-        mouse-cursor: pointer;
-        pointer-event(e) => {
-            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
-                root.menu(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
-            }
-        }
-        clicked => { root.clicked(); }
     }
 }
 
@@ -5796,7 +5631,7 @@ component ChainPiece inherits Rectangle {
     if root.c.kind == 15: Rectangle {
         property <bool> dragging: ev.pressed && (abs(ev.mouse-x - ev.pressed-x) > 5px || abs(ev.mouse-y - ev.pressed-y) > 5px);
         border-radius: Radius.control;
-        background: root.c.on ? Ink.ink : ev.has-hover ? #3d3d3d : #333333;
+        background: root.c.on ? Ink.ink : ev.has-hover ? Ink.pick-hover : Ink.pick;
         opacity: dragging ? 0.6 : 1;
         HorizontalLayout {
             padding-left: 11px;
@@ -5808,21 +5643,21 @@ component ChainPiece inherits Rectangle {
                 text: "♫";
                 font-family: Font.ui;
                 font-size: Font.caption;
-                color: root.c.on ? #171717 : #9fc2ea;
+                color: root.c.on ? Ink.base : Ink.media;
                 vertical-alignment: center;
             }
             if root.c.style == 2: Text {
                 text: "◆";
                 font-family: Font.ui;
                 font-size: Font.caption;
-                color: root.c.on ? #171717 : Ink.warn;
+                color: root.c.on ? Ink.base : Ink.warn;
                 vertical-alignment: center;
             }
             if root.c.style == 3: Text {
                 text: "▶";
                 font-family: Font.ui;
                 font-size: Font.caption;
-                color: root.c.on ? #171717 : Ink.good;
+                color: root.c.on ? Ink.base : Ink.good;
                 vertical-alignment: center;
             }
             Text {
@@ -5830,7 +5665,7 @@ component ChainPiece inherits Rectangle {
                 font-family: Font.ui;
                 font-size: Font.control;
                 font-weight: Font.medium;
-                color: root.c.on ? #171717 : Ink.ink;
+                color: root.c.on ? Ink.base : Ink.ink;
                 vertical-alignment: center;
             }
             // (which way a key goes; a job goes no way)
@@ -5839,7 +5674,7 @@ component ChainPiece inherits Rectangle {
                 font-family: Font.ui;
                 font-size: Font.note;
                 font-weight: Font.medium;
-                color: root.c.value > 0.5 ? (root.c.on ? #171717 : Ink.ink) : (root.c.on ? #525252 : Ink.quiet);
+                color: root.c.value > 0.5 ? (root.c.on ? Ink.base : Ink.ink) : (root.c.on ? Ink.edge : Ink.quiet);
                 vertical-alignment: center;
             }
         }
@@ -5848,7 +5683,7 @@ component ChainPiece inherits Rectangle {
             y: 1px;
             width: 3px;
             height: parent.height - 2px;
-            background: #a3a3a3;
+            background: Ink.soft;
         }
         ev := TouchArea {
             mouse-cursor: pointer;
@@ -5901,14 +5736,14 @@ component ChainPiece inherits Rectangle {
     // a wait being typed
     if root.c.kind == 20: Rectangle {
         border-radius: Radius.control;
-        background: #333333;
+        background: Ink.pick;
         MacroIcon {
             x: 8px;
             y: (parent.height - 12px) / 2;
             width: 12px;
             height: 12px;
             which: 1;
-            stroke: #ffffff;
+            stroke: Ink.white;
         }
         input := TextInput {
             x: 24px;
@@ -5918,7 +5753,7 @@ component ChainPiece inherits Rectangle {
             font-family: Font.ui;
             font-size: Font.note;
             font-weight: Font.medium;
-            color: #ffffff;
+            color: Ink.white;
             vertical-alignment: center;
             single-line: true;
             init => {
@@ -5947,7 +5782,7 @@ component ChainPiece inherits Rectangle {
             font-family: Font.ui;
             font-size: Font.note;
             font-weight: Font.medium;
-            color: #ffffff;
+            color: Ink.white;
             vertical-alignment: center;
         }
     }
@@ -5960,7 +5795,7 @@ component ChainPiece inherits Rectangle {
             width: 12px;
             height: 2px;
             border-radius: self.height / 2;
-            background: parent.lit ? Ink.soft : #4a4a4a;
+            background: parent.lit ? Ink.soft : Ink.edge;
         }
         Rectangle {
             x: 12px;
@@ -5968,7 +5803,7 @@ component ChainPiece inherits Rectangle {
             width: 6px;
             height: 6px;
             border-radius: self.width / 2;
-            background: #5c5c5c;
+            background: Ink.off;
         }
         if root.c.on: Rectangle {
             x: 0;
@@ -5982,7 +5817,7 @@ component ChainPiece inherits Rectangle {
                 font-family: Font.ui;
                 font-size: Font.name;
                 font-weight: Font.strong;
-                color: #171717;
+                color: Ink.base;
             }
         }
         cn := TouchArea {
@@ -5994,7 +5829,7 @@ component ChainPiece inherits Rectangle {
     // where new steps go
     if root.c.kind == 18: Rectangle {
         border-radius: 1px;
-        background: #525252;
+        background: Ink.edge;
         opacity: root.c.on ? 1 : 0.25;
         TouchArea {
             x: -4px;
@@ -6075,7 +5910,7 @@ export component MacroWindow inherits Window {
     out property <length> window-height: root.height;
     out property <length> window-width: root.width;
     // the chain's width, for the window to wrap it
-    out property <length> chain-width: root.width - 290px - 2 * Space.margin - 36px;
+    out property <length> chain-width: root.width - Size.sidebar - 2 * Space.margin - 36px;
     out property <length> chain-scroll: chain-flick.content-y;
     // are you sure: deleting a macro
     in property <bool> confirm-open;
@@ -6148,9 +5983,9 @@ export component MacroWindow inherits Window {
     // to make a new one there, and its macros
     Rectangle {
         x: 0;
-        y: 36px;
-        width: 290px;
-        height: root.height - 36px;
+        y: Size.title-bar;
+        width: Size.sidebar;
+        height: root.height - Size.title-bar;
         background: Ink.box;
         border-bottom-left-radius: root.radius;
         property <length> head-h: 10px + 34px + 10px;
@@ -6260,135 +6095,44 @@ export component MacroWindow inherits Window {
     // the workspace: the canvas a margin in from its edges, the foot a gap under it
     property <length> foot-h: Space.gap + 34px + Space.margin;
     Rectangle {
-        x: 290px;
-        y: 36px;
-        width: root.width - 290px;
-        height: root.height - 36px;
+        x: Size.sidebar;
+        y: Size.title-bar;
+        width: root.width - Size.sidebar;
+        height: root.height - Size.title-bar;
         background: Ink.base;
         border-bottom-right-radius: root.radius;
-        // the name, whether it is saved, and the less common actions
-        HorizontalLayout {
-            x: Space.margin;
+        // the name, whether it is saved, and the less common actions: its header, every editor's
+        EditorHeader {
             y: 0;
-            width: parent.width - 2 * Space.margin;
-            height: 56px;
-            spacing: 8px;
-            // the name: a click into it edits it, as the rename button does
-            if !root.editing-name: Text {
-                text: root.macro-name;
-                font-size: Font.tab;
-                font-weight: Font.strong;
-                color: Ink.ink;
-                vertical-alignment: center;
-                overflow: elide;
-                TouchArea {
-                    enabled: root.can-rename;
-                    mouse-cursor: text;
-                    clicked => { root.rename(); }
-                }
-            }
-            if root.editing-name: Rectangle {
-                width: 320px;
-                y: 13px;
-                height: 30px;
-                border-radius: Radius.control;
-                background: Ink.shade1;
-                name-in := TextInput {
-                    x: 8px;
-                    width: parent.width - 16px;
-                    height: parent.height;
-                    text <=> root.name-text;
-                    font-size: Font.tab;
-                    font-weight: Font.strong;
-                    color: Ink.ink;
-                    vertical-alignment: center;
-                    single-line: true;
-                    init => {
-                        self.focus();
-                        self.select-all();
-                    }
-                    accepted => { root.name-done(self.text); }
-                    key-pressed(e) => {
-                        if (e.text == Key.Escape) {
-                            root.name-cancel();
-                            return accept;
-                        }
-                        reject
-                    }
-                    changed has-focus => {
-                        if (!self.has-focus) {
-                            root.name-done(self.text);
-                        }
-                    }
-                }
-            }
-            if !root.editing-name: Rectangle {
-                width: 17px;
-                MacroIcon {
-                    x: 2px;
-                    y: 21.5px;
-                    width: 13px;
-                    height: 13px;
-                    which: 3;
-                    stroke: Ink.quiet;
-                    opacity: root.can-rename ? 1 : 0.35;
-                }
-                TouchArea {
-                    enabled: root.can-rename;
-                    mouse-cursor: pointer;
-                    clicked => { root.rename(); }
-                }
-            }
-            Rectangle { horizontal-stretch: 1; }
-            if root.state-kind == 2: Rectangle {
-                width: 7px;
-                Rectangle {
-                    y: 24px;
-                    width: 8px;
-                    height: 8px;
-                    border-radius: self.width / 2;
-                    background: Ink.record;
-                    opacity: root.blink ? 1 : 0.15;
-                }
-            }
-            Text {
-                text: root.state-text;
-                font-size: Font.caption;
-                font-weight: root.state-kind == 2 ? Font.strong : Font.regular;
-                color: root.state-kind == 2 ? #ff6b6b : root.state-kind == 1 ? Ink.warn : Ink.quiet;
-                vertical-alignment: center;
-            }
-            Rectangle {
-                width: 28px;
-                more-b := Rectangle {
-                    y: 15px;
-                    height: 26px;
-                    border-radius: Radius.small;
-                    background: more-ta.has-hover && !root.recording ? Ink.shade2 : transparent;
-                    Text { text: "⋯"; font-size: Font.lead; color: Ink.quiet; }
-                    more-ta := TouchArea {
-                        enabled: !root.recording;
-                        mouse-cursor: pointer;
-                        clicked => { root.more(self.absolute-position.x, self.absolute-position.y, 26px); }
-                    }
-                }
-            }
+            width: parent.width;
+            name: root.macro-name;
+            can-rename: root.can-rename;
+            renaming: root.editing-name;
+            typed <=> root.name-text;
+            state: root.state-text;
+            state-kind: root.state-kind;
+            blink: root.blink;
+            more-enabled: !root.recording;
+            rename => { root.rename(); }
+            rename-done(t) => { root.name-done(t); }
+            rename-cancel => { root.name-cancel(); }
+            more(x, y, h) => { root.more(x, y, h); }
         }
         // the recording area: the chain, then the tools under it
         // recording is a signal, so the canvas keeps a red edge while it runs
         if root.recording: Rectangle {
             x: Space.margin - 1px;
-            y: 56px - 1px;
+            y: Size.bar - 1px;
             width: parent.width - 2 * Space.margin + 2px;
-            height: parent.height - 56px - foot-h + 2px;
+            height: parent.height - Size.bar - foot-h + 2px;
             border-radius: Radius.box + 1px;
-            background: #ff5b5bb3;
+            background: Ink.record.with-alpha(0.702);
         }
         canvas := Rectangle {
             x: Space.margin;
-            y: 56px;
+            y: Size.bar;
             width: parent.width - 2 * Space.margin;
-            height: parent.height - 56px - foot-h;
+            height: parent.height - Size.bar - foot-h;
             border-radius: Radius.box;
             background: Ink.shade1;
             chain-flick := Flickable {
@@ -6422,7 +6166,7 @@ export component MacroWindow inherits Window {
                         viewbox-height: 38;
                         commands: "M19.00 0.50A18.5 18.5 0 0 1 22.04 0.75M25.01 1.50A18.5 18.5 0 0 1 27.81 2.73M30.36 4.40A18.5 18.5 0 0 1 32.61 6.47M34.49 8.88A18.5 18.5 0 0 1 35.94 11.57M36.93 14.46A18.5 18.5 0 0 1 37.44 17.47M37.44 20.53A18.5 18.5 0 0 1 36.93 23.54M35.94 26.43A18.5 18.5 0 0 1 34.49 29.12M32.61 31.53A18.5 18.5 0 0 1 30.36 33.60M27.81 35.27A18.5 18.5 0 0 1 25.01 36.50M22.04 37.25A18.5 18.5 0 0 1 19.00 37.50M15.96 37.25A18.5 18.5 0 0 1 12.99 36.50M10.19 35.27A18.5 18.5 0 0 1 7.64 33.60M5.39 31.53A18.5 18.5 0 0 1 3.51 29.12M2.06 26.43A18.5 18.5 0 0 1 1.07 23.54M0.56 20.53A18.5 18.5 0 0 1 0.56 17.47M1.07 14.46A18.5 18.5 0 0 1 2.06 11.57M3.51 8.88A18.5 18.5 0 0 1 5.39 6.47M7.64 4.40A18.5 18.5 0 0 1 10.19 2.73M12.99 1.50A18.5 18.5 0 0 1 15.96 0.75";
                         fill: transparent;
-                        stroke: #525252;
+                        stroke: Ink.edge;
                         stroke-width: 1px;
                     }
                     Rectangle {
@@ -6433,26 +6177,11 @@ export component MacroWindow inherits Window {
                         border-radius: self.width / 2;
                         background: Ink.record;
                     }
-                    Text {
+                    EmptyState {
                         y: 52px;
                         width: parent.width;
-                        height: 20px;
-                        text: root.chain-empty == 2 ? "Recording" : "No keys yet";
-                        font-size: Font.name;
-                        font-weight: Font.strong;
-                        color: Ink.ink;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
-                    for line[i] in root.empty-lines: Text {
-                        y: 78px + i * 20.15px;
-                        width: parent.width;
-                        height: 20.15px;
-                        text: line;
-                        font-size: Font.control;
-                        color: Ink.soft;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
+                        title: root.chain-empty == 2 ? "Recording" : "No keys yet";
+                        lines: root.empty-lines;
                     }
                 }
             }
@@ -6512,14 +6241,14 @@ export component MacroWindow inherits Window {
                 if root.recording: Text {
                     text: root.rec-clock;
                     font-size: Font.control;
-                    color: #ff9a9a;
+                    color: Ink.bad;
                     vertical-alignment: center;
                 }
                 if root.recording: Rectangle { width: 4px; }
                 Rectangle {
                     width: rec-row.preferred-width;
                     border-radius: Radius.control;
-                    background: root.recording ? #e23b3b33 : rec-ta.has-hover && root.can-record ? Ink.pick-hover : Ink.pick;
+                    background: root.recording ? Ink.record.with-alpha(0.2) : rec-ta.has-hover && root.can-record ? Ink.pick-hover : Ink.pick;
                     opacity: root.recording || root.can-record ? 1 : 0.35;
                     rec-row := HorizontalLayout {
                         padding-left: 10px;
@@ -6532,14 +6261,14 @@ export component MacroWindow inherits Window {
                                 width: root.recording ? 8px : 9px;
                                 height: self.width;
                                 border-radius: root.recording ? 2px : self.width / 2;
-                                background: root.recording ? #ff8a8a : Ink.record;
+                                background: root.recording ? Ink.bad : Ink.record;
                             }
                         }
                         Text {
                             text: root.recording ? "Stop" : "Record";
                             font-size: Font.control;
                             font-weight: Font.medium;
-                            color: root.recording ? #ffc9c9 : Ink.bright;
+                            color: root.recording ? Ink.record.mix(Ink.white, 0.35) : Ink.bright;
                             vertical-alignment: center;
                         }
                     }
@@ -6799,7 +6528,7 @@ component BlockChip inherits Rectangle {
     width: 88px;
     height: 24px;
     border-radius: Radius.small;
-    background: root.lit ? #52525b : ta.has-hover ? Ink.pick-hover : Ink.pick;
+    background: root.lit ? Ink.edge : ta.has-hover ? Ink.pick-hover : Ink.pick;
     property <bool> far;
     BlockGlyph {
         x: 9px;
@@ -6849,51 +6578,13 @@ component BlockChip inherits Rectangle {
     }
 }
 
-// A layout in the editor's list, as a macro in the Macro Editor's: chosen, its
-// row lit, with a bar at its left.
-component LayoutListRow inherits Rectangle {
+// A layout in the editor's list, a list's row: the one open lit, with the bar at its left.
+component LayoutListRow inherits ListRow {
     in property <LayoutRow> r;
-    callback clicked;
-    height: 52px;
-    border-radius: Radius.control;
-    background: root.r.on ? (ta.has-hover ? Ink.pick-hover : Ink.pick) : ta.has-hover ? Ink.hover-box : transparent;
-    if root.r.on: Rectangle {
-        x: 0;
-        y: 12px;
-        width: 4px;
-        height: 28px;
-        border-radius: self.width / 2;
-        background: Ink.bright;
-    }
-    Text {
-        x: 20px;
-        y: 8px;
-        width: parent.width - 32px;
-        height: 18px;
-        text: root.r.name;
-        font-family: Font.ui;
-        font-size: Font.control;
-        font-weight: Font.medium;
-        color: root.r.on || ta.has-hover ? Ink.bright : Ink.dim;
-        overflow: elide;
-        vertical-alignment: center;
-    }
-    Text {
-        x: 20px;
-        y: 26px;
-        width: parent.width - 32px;
-        height: 17px;
-        text: root.r.about;
-        font-family: Font.ui;
-        font-size: Font.caption;
-        color: Ink.quiet;
-        overflow: elide;
-        vertical-alignment: center;
-    }
-    ta := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
+    name: root.r.name;
+    sub: root.r.about;
+    chosen: root.r.on;
+    active: root.r.on;
 }
 
 // The screen layout editor, a window of its own as the Macro Editor is: the
@@ -6920,7 +6611,7 @@ export component LayoutWindow inherits Window {
     // the screen: its picture and the background round it, its blocks, its grid; a block
     // on its way in from the bar (the cells it would take), and its name under the pointer
     in property <image> picture;
-    in property <color> field: #0a0908;
+    in property <color> field: #0a0908;  // art: the screen's own ground, until its core says
     in property <[EdBlock]> blocks;
     // the block selected (-1, none); its corner being dragged and how many cells wider and
     // rows taller so far; and whether it is being carried (its corner and × step aside)
@@ -7043,7 +6734,7 @@ export component LayoutWindow inherits Window {
     background: transparent;
     default-font-family: Font.ui;
     property <length> radius: root.is-maximized ? 0 : Radius.window;
-    property <length> main-w: root.width - 290px;
+    property <length> main-w: root.width - Size.sidebar;
     property <length> rig-w: main-w - 2 * Space.margin;
     // the screen holds the keyboard when a block on it is pressed, so a field in the box
     // lets go of it (and the window no longer counts as typing)
@@ -7068,9 +6759,9 @@ export component LayoutWindow inherits Window {
     // the layouts
     Rectangle {
         x: 0;
-        y: 36px;
-        width: 290px;
-        height: root.height - 36px;
+        y: Size.title-bar;
+        width: Size.sidebar;
+        height: root.height - Size.title-bar;
         background: Ink.box;
         border-bottom-left-radius: root.radius;
         Text {
@@ -7094,11 +6785,11 @@ export component LayoutWindow inherits Window {
             y: 52px;
             width: 274px;
             height: parent.height - 52px - 10px;
-            content-height: root.rows.length * 54px;
+            content-height: root.rows.length * (Size.row + Space.list);
             content-y <=> root.list-scroll;
             mouse-drag-pan-enabled: false;
             for r[i] in root.rows: LayoutListRow {
-                y: i * 54px;
+                y: i * (Size.row + Space.list);
                 width: parent.width;
                 r: r;
                 clicked => { root.choose(i); }
@@ -7108,110 +6799,24 @@ export component LayoutWindow inherits Window {
 
     // the layout open
     Rectangle {
-        x: 290px;
-        y: 36px;
+        x: Size.sidebar;
+        y: Size.title-bar;
         width: main-w;
-        height: root.height - 36px;
+        height: root.height - Size.title-bar;
         background: Ink.base;
         border-bottom-right-radius: root.radius;
-        // its name, a pencil to change it, and its menu; asking before it is deleted, in their place
-        Rectangle {
+        // its name, a pencil to change it, and its menu: its header, every editor's
+        EditorHeader {
             visible: root.has-layout;
-            x: Space.margin;
             y: 0;
-            width: parent.width - 2 * Space.margin;
-            height: 56px;
-            if !root.editing-name: name-t := Text {
-                x: 0;
-                height: parent.height;
-                text: root.name;
-                font-size: Font.name;
-                font-weight: Font.strong;
-                color: Ink.bright;
-                vertical-alignment: center;
-                overflow: elide;
-                TouchArea {
-                    mouse-cursor: text;
-                    clicked => { root.rename(); }
-                }
-            }
-            if !root.editing-name: Rectangle {
-                x: min(name-w.preferred-width, parent.width - 80px) + 9px;
-                width: 13px;
-                Path {
-                    y: 21.5px;
-                    width: 13px;
-                    height: 13px;
-                    viewbox-width: 24;
-                    viewbox-height: 24;
-                    commands: "M4 20h4L19 9l-4-4L4 16z";
-                    fill: transparent;
-                    stroke: pen-ta.has-hover ? Ink.soft : Ink.quiet;
-                    stroke-width: 1.8px;
-                    stroke-line-join: round;
-                }
-                pen-ta := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => { root.rename(); }
-                }
-            }
-            // (the name's width, for the pencil after it)
-            name-w := Text {
-                visible: false;
-                text: root.name;
-                font-size: Font.name;
-                font-weight: Font.strong;
-            }
-            if root.editing-name: Rectangle {
-                x: 0;
-                y: 13px;
-                width: 320px;
-                height: 30px;
-                border-radius: Radius.control;
-                background: Ink.shade1;
-                TextInput {
-                    x: 8px;
-                    width: parent.width - 16px;
-                    height: parent.height;
-                    text <=> root.name-text;
-                    font-size: Font.name;
-                    font-weight: Font.strong;
-                    color: Ink.ink;
-                    vertical-alignment: center;
-                    single-line: true;
-                    init => {
-                        self.focus();
-                        self.select-all();
-                    }
-                    accepted => { root.name-done(self.text); }
-                    key-pressed(e) => {
-                        if (e.text == Key.Escape) {
-                            root.name-cancel();
-                            return accept;
-                        }
-                        reject
-                    }
-                    changed has-focus => {
-                        Typing.on = self.has-focus;
-                        if (!self.has-focus) {
-                            root.name-done(self.text);
-                        }
-                    }
-                }
-            }
-            Rectangle {
-                x: parent.width - 30px;
-                y: 14px;
-                width: 30px;
-                height: 28px;
-                border-radius: Radius.small;
-                background: more-ta.has-hover ? Ink.hover-box : transparent;
-                Text { text: "···"; font-size: Font.title; letter-spacing: 1px; color: Ink.soft; }
-                more-ta := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => { root.more(self.absolute-position.x, self.absolute-position.y, self.height); }
-                }
-            }
+            width: parent.width;
+            name: root.name;
+            renaming: root.editing-name;
+            typed <=> root.name-text;
+            rename => { root.rename(); }
+            rename-done(t) => { root.name-done(t); }
+            rename-cancel => { root.name-cancel(); }
+            more(x, y, h) => { root.more(x, y, h); }
         }
 
         // the bar of blocks, joined to the top of the screen's box, as the playlist's panel
@@ -7219,9 +6824,9 @@ export component LayoutWindow inherits Window {
         Rectangle {
             visible: root.has-layout;
             x: Space.margin;
-            y: 56px;
+            y: Size.bar;
             width: rig-w;
-            height: 56px;
+            height: Size.bar;
             border-top-left-radius: Radius.box;
             border-top-right-radius: Radius.box;
             background: Ink.box;
@@ -7282,7 +6887,7 @@ export component LayoutWindow inherits Window {
                             border-radius: self.width / 2;
                             background: root.default-light;
                             border-width: 1px;
-                            border-color: #0000001f;
+                            border-color: Ink.black.with-alpha(0.122);
                         }
                         def-l := Text {
                             x: 11px + 9px + 7px;
@@ -7333,7 +6938,7 @@ export component LayoutWindow inherits Window {
                         border-radius: self.width / 2;
                         background: root.own-color;
                         border-width: 1px;
-                        border-color: #ffffff2a;
+                        border-color: Ink.white.with-alpha(0.165);
                     }
                     hex-t := Text {
                         x: 32px;
@@ -7371,7 +6976,7 @@ export component LayoutWindow inherits Window {
         Rectangle {
             visible: root.has-layout;
             x: Space.margin;
-            y: 56px + 44px;
+            y: Size.bar + 44px;
             width: rig-w;
             height: 24px;
             background: Ink.box;
@@ -7380,7 +6985,7 @@ export component LayoutWindow inherits Window {
         Rectangle {
             visible: root.has-layout;
             x: Space.margin;
-            y: 56px + 56px;
+            y: 2 * Size.bar;
             width: rig-w;
             height: 236px;
             border-radius: Radius.box;
@@ -7393,11 +6998,11 @@ export component LayoutWindow inherits Window {
                 border-radius: Radius.panel;
                 background: root.field;
                 border-width: 1px;
-                border-color: #0000008c;
+                border-color: Ink.black.with-alpha(0.549);
                 Rectangle {
                     y: 0;
                     height: 14px;
-                    background: @linear-gradient(180deg, #00000073 0%, #00000000 100%);
+                    background: @linear-gradient(180deg, Ink.black.with-alpha(0.451) 0%, Ink.black.with-alpha(0) 100%);
                 }
                 lcd := Rectangle {
                     x: 24px;
@@ -7428,12 +7033,12 @@ export component LayoutWindow inherits Window {
                         for k in 19: Rectangle {
                             x: (k + 1) * parent.width / 20 - 0.5px;
                             width: 1px;
-                            background: #ffffff1c;
+                            background: Ink.white.with-alpha(0.11);
                         }
                         for k in 3: Rectangle {
                             y: (k + 1) * parent.height / 4 - 0.5px;
                             height: 1px;
-                            background: #ffffff1c;
+                            background: Ink.white.with-alpha(0.11);
                         }
                     }
                     // a block on its way in: the cells it would take
@@ -7444,7 +7049,7 @@ export component LayoutWindow inherits Window {
                         height: root.ghost.height * parent.height / 4 - 2px;
                         border-radius: 3px;
                         border-width: 1.5px;
-                        border-color: #ffffffb0;
+                        border-color: Ink.white.with-alpha(0.69);
                         background: root.field.with-alpha(0.5);
                     }
                     // each block outlined; the one selected in amber (its corner glyph and × over
@@ -7500,8 +7105,8 @@ export component LayoutWindow inherits Window {
                             height: parent.height - 2px;
                             border-radius: 3px;
                             border-width: b.on || move-ta.pressed ? 2px : 1px;
-                            border-color: b.on || move-ta.pressed ? Ink.warn : move-ta.has-hover ? #ffffff80 : #ffffff33;
-                            background: b.on && !b.fx ? #f0b35a1a : move-ta.has-hover && !b.on ? Ink.glass : transparent;
+                            border-color: b.on || move-ta.pressed ? Ink.warn : move-ta.has-hover ? Ink.white.with-alpha(0.502) : Ink.white.with-alpha(0.2);
+                            background: b.on && !b.fx ? Ink.warn.with-alpha(0.102) : move-ta.has-hover && !b.on ? Ink.glass : transparent;
                         }
                         // the finger, as on anything that can be selected; the closed hand only
                         // once the block is carried, and the finger again as it is let go
@@ -7595,7 +7200,7 @@ export component LayoutWindow inherits Window {
                             y: parent.height - 2px - 12px;
                             width: 24px;
                             height: 24px;
-                            property <color> ink: corner-ta.has-hover || corner-ta.pressed ? #f7c47a : Ink.warn;
+                            property <color> ink: corner-ta.has-hover || corner-ta.pressed ? Ink.warn.mix(Ink.white, 0.8) : Ink.warn;
                             // (the corner's middle, at 12 in the box, on the line's middle)
                             Rectangle {
                                 x: 12px - 14px;
@@ -7674,7 +7279,7 @@ export component LayoutWindow inherits Window {
         Rectangle {
             visible: root.has-layout;
             x: Space.margin;
-            y: 56px + 56px + 236px + Space.gap;
+            y: 2 * Size.bar + 236px + Space.gap;
             width: (rig-w - Space.gap) / 2;
             height: root.box-h;
             border-radius: Radius.box;
@@ -7745,49 +7350,16 @@ export component LayoutWindow inherits Window {
             // tab's Effect grid is: each a well with its picture under a film and its name, the
             // chosen one lit and only its picture moving
             if root.box-kind == 4: Rectangle {
-                property <length> tw: (self.width - 32px - 24px) / 4;
-                for t[k] in root.fx-tiles: Rectangle {
-                    x: 16px + mod(k, 4) * (parent.tw + 8px);
-                    y: 50px + floor(k / 4) * (76px + 8px);
+                property <length> tw: (self.width - 2 * Space.pad - 3 * Space.inline) / 4;
+                for t[k] in root.fx-tiles: EffectTile {
+                    x: Space.pad + mod(k, 4) * (parent.tw + Space.inline);
+                    y: Size.box-head + floor(k / 4) * (76px + Space.inline);
                     width: parent.tw;
-                    height: 76px;
-                    border-radius: Radius.panel;
-                    background: t.on ? (tile-ta.has-hover ? Ink.pick-hover : Ink.pick) : tile-ta.has-hover ? Ink.hover-box : Ink.well;
-                    Rectangle {
-                        x: 6px;
-                        y: 6px;
-                        width: parent.width - 12px;
-                        height: 40px;
-                        border-radius: Radius.small;
-                        clip: true;
-                        background: Ink.preview;
-                        // (the screen's own shape, across the tile and in its middle)
-                        Image {
-                            width: parent.width;
-                            height: parent.width / 5;
-                            source: t.pic;
-                            image-fit: fill;
-                        }
-                        // the film every picture sits under
-                        Rectangle {
-                            background: Ink.pick.with-alpha(0.35);
-                        }
-                    }
-                    Text {
-                        y: 53px;
-                        height: 15px;
-                        width: parent.width;
-                        text: t.name;
-                        font-size: Font.caption;
-                        font-weight: t.on ? Font.medium : Font.regular;
-                        color: t.on || tile-ta.has-hover ? Ink.bright : Ink.soft;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
-                    tile-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => { root.fx-chose(k); }
-                    }
+                    name: t.name;
+                    icon: t.pic;
+                    on: t.on;
+                    screen: true;
+                    clicked => { root.fx-chose(k); }
                 }
             }
             for c in root.box-cells: CellView {
@@ -7799,28 +7371,14 @@ export component LayoutWindow inherits Window {
         }
 
         // no layout left to open: what the keyboard shows meanwhile, and a new one
-        if !root.has-layout: VerticalLayout {
+        if !root.has-layout: EmptyState {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2 - 40px;
-            width: 420px;
             height: self.preferred-height;
-            spacing: 8px;
-            Text {
-                text: "No screen layouts";
-                font-size: Font.name;
-                font-weight: Font.strong;
-                color: Ink.bright;
-                horizontal-alignment: center;
-            }
-            Text {
-                text: "The keyboard’s screen stays blank until a playlist has a layout to show.";
-                font-size: Font.control;
-                color: Ink.soft;
-                horizontal-alignment: center;
-                wrap: word-wrap;
-            }
-            Rectangle { height: 8px; }
+            title: "No screen layouts";
+            text: "The keyboard’s screen stays blank until a playlist has a layout to show.";
             HorizontalLayout {
+                padding-top: Space.label;
                 alignment: center;
                 WordButton {
                     primary: true;
@@ -7962,7 +7520,7 @@ component LabControl inherits Rectangle {
     width: root.r.w + 20px;
     height: root.r.low != "" ? 76px : 62px;
     border-radius: Radius.panel;
-    background: root.r.hot ? #ffffff0b : transparent;
+    background: root.r.hot ? Ink.white.with-alpha(0.043) : transparent;
     zone := TouchArea {
         changed has-hover => { root.hovered(root.r.id, self.has-hover); }
         Text {
@@ -8027,7 +7585,7 @@ component LabControl inherits Rectangle {
             width: 2px;
             height: 12px;
             border-radius: self.width / 2;
-            background: #8a8a94;
+            background: Ink.placeholder;
         }
         // its reset, at the end of its track: the arrow alone, as gray as the
         // track while the value is the saved one, brighter once it differs,
@@ -8164,8 +7722,8 @@ export component LabWindow inherits Window {
 
     // the page: its head and sections, the stage, the line under it
     Rectangle {
-        y: 36px;
-        height: root.height - 36px - 64px;
+        y: Size.title-bar;
+        height: root.height - Size.title-bar - 64px;
         background: Ink.base;
         for c in root.cells: CellView {
             c: c;

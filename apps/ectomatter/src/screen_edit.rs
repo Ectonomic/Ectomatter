@@ -46,7 +46,7 @@ pub fn behind(p: &Piece) -> bool {
 }
 
 /// How tall the effects' tiles are in the Effect box, four to a row, for the groups under them.
-pub const TILES_H: f32 = TILE_ROWS * 76.0 + (TILE_ROWS - 1.0) * 8.0;
+pub const TILES_H: f32 = TILE_ROWS * 76.0 + (TILE_ROWS - 1.0) * crate::tokens::space::INLINE;
 const TILE_ROWS: f32 = crate::lcd_fx::FXS.len().div_ceil(4) as f32;
 /// What the Effect box says under its tiles.
 const UNDER: &str = "Blocks placed on the effect cover the effect in their own cells. Drag the handle on the effect’s corner to change how much of the screen the effect fills.";
@@ -234,7 +234,7 @@ struct Grid {
 impl Grid {
     fn new(w: f32) -> Grid {
         // under the title's line
-        Grid { w, y: 50.0, col: 0, row_h: 0.0, cells: Vec::new() }
+        Grid { w, y: crate::tokens::size::BOX_HEAD, col: 0, row_h: 0.0, cells: Vec::new() }
     }
     fn col_w(&self) -> f32 {
         (self.w - 32.0 - 16.0) / 2.0

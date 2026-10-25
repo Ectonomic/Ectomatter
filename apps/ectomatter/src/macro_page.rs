@@ -136,12 +136,12 @@ pub struct MacroPage {
 /// A heading's note in lines: the first short of the New button beside it,
 /// the rest the list's width.
 fn note_lines(note: &str) -> Vec<String> {
-    let first = crate::text::wrap(400, 12.0, note, NOTE_W - NEW_W);
+    let first = crate::text::wrap(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, note, NOTE_W - NEW_W);
     let Some(head) = first.first().cloned() else { return Vec::new() };
     let rest = note.get(head.len()..).unwrap_or("").trim_start();
     let mut lines = vec![head];
     if !rest.is_empty() {
-        lines.extend(crate::text::wrap(400, 12.0, rest, NOTE_W));
+        lines.extend(crate::text::wrap(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, rest, NOTE_W));
     }
     lines
 }
@@ -166,7 +166,7 @@ const NEW_W: f32 = 64.0;
 const NOTE_LINE: f32 = 15.6;
 const NOTE_W: f32 = 254.0;
 const UNDER_NOTE: f32 = 8.0;
-const ROW_H: f32 = 55.0;
+const ROW_H: f32 = crate::tokens::size::ROW + crate::tokens::space::LIST;
 /// where the list starts in its column, below the window's bar and the libraries' drop-down
 const LIST_TOP: f32 = 36.0 + 54.0;
 
@@ -467,7 +467,7 @@ impl MacroPage {
 
     /// The step under a point in the window, by its index.
     fn step_at(&self, x: f32, y: f32) -> Option<i32> {
-        let (cx, cy) = (290.0 + crate::tokens::space::MARGIN, 36.0 + 56.0 + self.ui.get_chain_scroll());
+        let (cx, cy) = (crate::tokens::size::SIDEBAR + crate::tokens::space::MARGIN, crate::tokens::size::TITLE_BAR + crate::tokens::size::BAR + self.ui.get_chain_scroll());
         self.chain
             .iter()
             .find(|c| c.kind == piece::STEP && c.id == hit::STEP && x >= cx + c.x - 6.0 && x < cx + c.x + c.w && y >= cy + c.y && y < cy + c.y + c.h)
@@ -1307,7 +1307,7 @@ impl MacroPage {
         } else {
             "Add keys, media keys, waits, actions and other macros with the buttons below."
         };
-        let lines: Vec<SharedString> = crate::text::wrap(400, 13.0, hint, 440.0).into_iter().map(Into::into).collect();
+        let lines: Vec<SharedString> = crate::text::wrap(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, hint, 440.0).into_iter().map(Into::into).collect();
         ui.set_empty_lines(ModelRc::new(VecModel::from(lines)));
 
         // (the keyboard's macros have room for so many steps; Ectomatter's, any number)

@@ -114,8 +114,7 @@ impl Card {
 
     /// A rule across the box at `y`.
     pub fn rule(&mut self) {
-        let c = ink::LINE;
-        self.cells.push(Cell { color: slint::Color::from_rgb_u8(c[0], c[1], c[2]), ..cell(kind::BOX, self.inner_x(), self.y, self.inner_w(), 1.0) });
+        self.cells.push(Cell { color: crate::tokens::color(ink::LINE), ..cell(kind::BOX, self.inner_x(), self.y, self.inner_w(), 1.0) });
     }
 
     /// The row's label, level with a control on the row's first line.

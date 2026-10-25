@@ -3,7 +3,8 @@
 // opens the same way.
 
 import { Space, Radius, Font, Size, Part, Shadow, Ink } from "tokens.slint";
-import { WinButton, Tab, LinkButton } from "controls.slint";
+import { WinButton, Tab, LinkButton, PencilButton, MoreButton } from "controls.slint";
+import { Typing } from "state.slint";
 
 // a dot that says how something is: 0 not known or not there, 1 good, 2 a
 // problem, 3 a warning
@@ -263,5 +264,122 @@ export component HintRow inherits Rectangle {
             }
         }
         @children
+    }
+}
+
+// An editor window's header, its page bar: the open thing's name in the bar's
+// type (a click on it, or on its pencil, renames it in place), how it stands
+// (`state`, and `state-kind`: 0 as it is, 1 changed, 2 recording, its dot
+// blinking), and its less common actions behind its three dots; the page's
+// margin at either side, as every bar has.
+export component EditorHeader inherits Rectangle {
+    in property <string> name;
+    in property <bool> can-rename: true;
+    in property <bool> renaming;
+    in-out property <string> typed;
+    in property <string> state;
+    in property <int> state-kind;
+    in property <bool> blink;
+    in property <bool> more-enabled: true;
+    callback rename();
+    callback rename-done(string);
+    callback rename-cancel();
+    callback more(length, length, length);
+    height: Size.bar;
+    HorizontalLayout {
+        padding-left: Space.margin;
+        padding-right: Space.margin;
+        spacing: Space.inline;
+        if !root.renaming: Text {
+            text: root.name;
+            font-family: Font.ui;
+            font-size: Font.title;
+            font-weight: Font.strong;
+            letter-spacing: 0.17px;
+            color: Ink.bright;
+            vertical-alignment: center;
+            overflow: elide;
+            TouchArea {
+                enabled: root.can-rename;
+                mouse-cursor: text;
+                clicked => { root.rename(); }
+            }
+        }
+        if root.renaming: Rectangle {
+            width: 320px;
+            // (a field's height, in the bar's middle)
+            Rectangle {
+                y: (parent.height - self.height) / 2;
+                height: Size.control;
+                border-radius: Radius.control;
+                background: Ink.box;
+                TextInput {
+                    x: 8px;
+                    width: parent.width - 16px;
+                    height: parent.height;
+                    text <=> root.typed;
+                    font-family: Font.ui;
+                    font-size: Font.title;
+                    font-weight: Font.strong;
+                    color: Ink.bright;
+                    vertical-alignment: center;
+                    single-line: true;
+                    init => {
+                        self.focus();
+                        self.select-all();
+                    }
+                    accepted => { root.rename-done(self.text); }
+                    key-pressed(e) => {
+                        if (e.text == Key.Escape) {
+                            root.rename-cancel();
+                            return accept;
+                        }
+                        reject
+                    }
+                    changed has-focus => {
+                        Typing.on = self.has-focus;
+                        if (!self.has-focus) {
+                            root.rename-done(self.text);
+                        }
+                    }
+                }
+            }
+        }
+        if !root.renaming: VerticalLayout {
+            alignment: center;
+            PencilButton {
+                enabled: root.can-rename;
+                clicked => { root.rename(); }
+            }
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+        }
+        if root.state-kind == 2: Rectangle {
+            width: 8px;
+            Rectangle {
+                y: (parent.height - self.height) / 2;
+                width: 8px;
+                height: 8px;
+                border-radius: self.width / 2;
+                background: Ink.record;
+                opacity: root.blink ? 1 : 0.15;
+            }
+        }
+        if root.state != "": Text {
+            text: root.state;
+            font-family: Font.ui;
+            font-size: Font.caption;
+            font-weight: root.state-kind == 2 ? Font.strong : Font.regular;
+            color: root.state-kind == 2 ? Ink.record : root.state-kind == 1 ? Ink.warn : Ink.quiet;
+            vertical-alignment: center;
+        }
+        VerticalLayout {
+            alignment: center;
+            MoreButton {
+                enabled: root.more-enabled;
+                clicked(x, y, h) => { root.more(x, y, h); }
+            }
+        }
     }
 }

@@ -377,7 +377,7 @@ impl Svg {
 
     /// a word, its baseline at `y`, starting at `x` (`anchor` 0), or ending at it (1)
     fn text(&mut self, x: f64, y: f64, s: &str, color: [u8; 3], anchor: f64) {
-        let x = x - text::width(400, 11.5, s) as f64 * anchor;
+        let x = x - text::width(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, s) as f64 * anchor;
         self.words.push(Word { x: x as f32, y: y as f32, text: s.to_string(), color });
     }
 }
@@ -1291,7 +1291,7 @@ pub fn stage(v: &Values, lens: Lens, w: f32, h: f32, places: &[Place], hot: Opti
     // (the slices are seen from the side, north to south; the legends from above)
     if !matches!(lens, Lens::Display | Lens::Legends) {
         s.words.push(Word { x: (px0 + 16.0) as f32, y: (py0 + ph - 12.0) as f32, text: "North".into(), color: QUIET_WORD });
-        let south = text::width(400, 11.5, "South") as f64;
+        let south = text::width(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, "South") as f64;
         s.words.push(Word { x: (px0 + pw - 16.0 - south) as f32, y: (py0 + ph - 12.0) as f32, text: "South".into(), color: QUIET_WORD });
     }
     Stage { w, h, svg, words: s.words, extras }
@@ -1631,7 +1631,7 @@ mod tests {
                     let st = stage(&v, lens, w, h, &places, Some(ids[0]), None);
                     resvg::usvg::Tree::from_str(&st.svg, &resvg::usvg::Options::default()).expect("a stage reads as an SVG");
                     for word in &st.words {
-                        assert!(word.x >= 0.0 && word.x + text::width(400, 11.5, &word.text) <= w + 0.5 && word.y <= h, "{} inside the stage", word.text);
+                        assert!(word.x >= 0.0 && word.x + text::width(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, &word.text) <= w + 0.5 && word.y <= h, "{} inside the stage", word.text);
                     }
                 }
             }

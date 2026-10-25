@@ -11,7 +11,8 @@
     "pad": { "$value": { "value": 16, "unit": "px" }, "$description": "A box's padding: from its edges to its title and what it holds; also between a form's label column and its controls." },
     "row": { "$value": { "value": 12, "unit": "px" }, "$description": "Above and below the rule between two rows of a form." },
     "inline": { "$value": { "value": 8, "unit": "px" }, "$description": "Between controls side by side: a bar's buttons, a row of buttons, a field and its button." },
-    "tight": { "$value": { "value": 4, "unit": "px" }, "$description": "Between things that belong together: a name and the line under it, a control and its note." }
+    "tight": { "$value": { "value": 4, "unit": "px" }, "$description": "Between things that belong together: a name and the line under it, a control and its note." },
+    "list": { "$value": { "value": 2, "unit": "px" }, "$description": "Between the rows of a list down a side." }
   },
   "radius": {
     "$type": "dimension",
@@ -50,6 +51,7 @@
     "title-bar": { "$value": { "value": 36, "unit": "px" }, "$description": "A window's title bar." },
     "bar": { "$value": { "value": 56, "unit": "px" }, "$description": "A page's bar: its name, its tabs, its buttons." },
     "head": { "$value": { "value": 54, "unit": "px" }, "$description": "A page's head under its bar: the hint line (12 down, 36 tall) and 6 under it to what comes next." },
+    "box-head": { "$value": { "value": 48, "unit": "px" }, "$description": "A box's head: its title's band (Space.pad's worth less 2 above it, 22 tall), where what the box holds starts." },
     "column": { "$value": { "value": 240, "unit": "px" }, "$description": "A page's first column: the Profiles box, a side list (the mouse's lights)." },
     "library": { "$value": { "value": 440, "unit": "px" }, "$description": "The Key library's box, at its least (a row of boxes grows a box from its least)." },
     "detail": { "$value": { "value": 460, "unit": "px" }, "$description": "A key's or a button's job box, at its least." },
@@ -61,6 +63,7 @@
     "form": { "$value": { "value": 860, "unit": "px" }, "$description": "The widest a form's column grows (Settings, a device's Settings, a game's page)." },
     "label": { "$value": { "value": 200, "unit": "px" }, "$description": "A form's label column." },
     "control": { "$value": { "value": 34, "unit": "px" }, "$description": "A field's, a drop-down's and a switch's height." },
+    "row": { "$value": { "value": 48, "unit": "px" }, "$description": "A row in a list down a side (the profiles, the macros, the screen layouts): a name and the line under it." },
     "button": { "$value": { "value": 30, "unit": "px" }, "$description": "A button's height." },
     "dot": { "$value": { "value": 7, "unit": "px" }, "$description": "A status dot (a device's connection, a setting's state)." },
     "check": { "$value": { "value": 18, "unit": "px" }, "$description": "A checkbox." }
@@ -118,7 +121,9 @@
     "danger-hover": { "$value": "#e25f5b", "$description": "A button that deletes, under the pointer." },
     "record": { "$value": "#ff5b5b", "$description": "Recording." },
     "close": { "$value": "#dc2626", "$description": "The window's close button under the pointer." },
-    "white": { "$value": "#ffffff", "$description": "Words and marks on a strong fill (a button that deletes, a lit swatch); a primary button under the pointer." },
+    "white": { "$value": "#ffffff", "$description": "Words and marks on a strong fill (a button that deletes, a lit swatch); a primary button under the pointer. A part's light washes and hairlines are white at an opacity of the part's own." },
+    "black": { "$value": "#000000", "$description": "A part's dark washes (a press, a picture's film), at an opacity of the part's own." },
+    "media": { "$value": "#9fc2ea", "$description": "A media key's mark in a macro." },
     "off": { "$value": "#5c5c66", "$description": "What isn't known, isn't there, or can't be changed now: a status dot; a control held off, and its words." },
     "shade1": { "$value": "{ink.box}", "$description": "The shades the pages used before they had names for their parts." },
     "shade2": { "$value": "{ink.hover-box}" },
