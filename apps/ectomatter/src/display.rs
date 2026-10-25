@@ -5,9 +5,8 @@
 
 use serde_json::{json, Value};
 
-use crate::form::TEXT_LINE;
 use crate::lighting::{cell, id, kind, style, text_cell, Ctl};
-use crate::tokens::font;
+use crate::tokens::{font, line, part, size, space};
 use crate::z10::Page;
 use crate::Cell;
 
@@ -52,10 +51,10 @@ pub fn tiles(fw: &Value, connected: Option<bool>, room: f32) -> Tiles {
                 k.row();
                 k.label_text("Firmware");
                 let (x, top) = (k.control_x(), k.y);
-                let w = crate::text::width(font::REGULAR, font::TEXT, &v);
-                k.cells.push(text_cell(style::VALUE_BRIGHT, x, top, w + 4.0, TEXT_LINE, &v));
-                k.cells.push(Cell { text: "Unofficial".into(), style: 1, ..cell(kind::PILL, x + w + 12.0, top + 1.0, crate::text::width(font::REGULAR, font::SMALL, "Unofficial") + 14.0, 18.0) });
-                k.next(top, TEXT_LINE);
+                let w = crate::text::width(font::REGULAR, font::TEXT, &v).ceil() + 2.0;
+                k.cells.push(text_cell(style::VALUE_BRIGHT, x, top, w, line::TEXT, &v));
+                crate::form::pill(&mut k.cells, 1, x + w + space::INLINE, top, "Unofficial");
+                k.next(top, line::TEXT);
                 let adds: Vec<String> = fw["features"].as_array().map(|a| a.iter().filter_map(|x| x["name"].as_str().map(String::from)).collect()).unwrap_or_default();
                 k.row();
                 k.label_text("Adds");
@@ -64,22 +63,24 @@ pub fn tiles(fw: &Value, connected: Option<bool>, room: f32) -> Tiles {
                     let end = k.note_at(k.control_x(), top + 1.0, k.control_w(), "Nothing Ectomatter controls yet. This build fixes how the volume slider steps.");
                     k.next(top, end - top);
                 } else {
-                    // two across, a tick before each
+                    // two across, a tick before each, Space.tight between the lines
                     let (x, col) = (k.control_x(), k.control_w() / 2.0);
+                    let pitch = line::TEXT + space::TIGHT;
                     for (i, a) in adds.iter().enumerate() {
-                        k.cells.push(Cell { text: a.into(), ..cell(kind::TICKED, x + (i % 2) as f32 * col, top + (i / 2) as f32 * 24.0, col - 8.0, TEXT_LINE) });
+                        k.cells.push(Cell { text: a.into(), ..cell(kind::TICKED, x + (i % 2) as f32 * col, top + (i / 2) as f32 * pitch, col - space::INLINE, line::TEXT) });
                     }
-                    k.next(top, adds.len().div_ceil(2) as f32 * 24.0 - 4.0);
+                    k.next(top, adds.len().div_ceil(2) as f32 * pitch - space::TIGHT);
                 }
                 let later: Vec<String> = fw["later"].as_array().map(|a| a.iter().map(|x| format!("{} (build {})", x["name"].as_str().unwrap_or(""), x["since"])).collect()).unwrap_or_default();
                 if !later.is_empty() {
                     k.row();
                     k.label_text("In later builds");
                     let (x, w, top) = (k.control_x(), k.control_w(), k.y);
+                    let pitch = line::TEXT + space::TIGHT;
                     for (i, l) in later.iter().enumerate() {
-                        k.cells.push(text_cell(style::VALUE_BRIGHT, x, top + i as f32 * 24.0, w, TEXT_LINE, l));
+                        k.cells.push(text_cell(style::VALUE_BRIGHT, x, top + i as f32 * pitch, w, line::TEXT, l));
                     }
-                    k.next(top, later.len() as f32 * 24.0 - 4.0);
+                    k.next(top, later.len() as f32 * pitch - space::TIGHT);
                 }
             }
             "retail" => {
@@ -109,60 +110,71 @@ pub const LIGHTS: [[u8; 3]; 7] = [[0xff, 0xff, 0xff], [0xff, 0x20, 0x00], [0xff,
 /// the color picker (`picking` while it is open on it), then how bright, on the app's
 /// slider with its value. Before it, while a layout with a light of its own plays (`own`,
 /// its name and its light), a line saying so.
+/// the slider's least and most across, as the hint line's room allows
+const SLIDER_LEAST: f32 = 72.0;
+const SLIDER_MOST: f32 = 120.0;
+
 pub fn screen_cells(page: &Page, w: f32, from: f32, own: Option<(&str, [u8; 3])>, picking: bool) -> Vec<Cell> {
     let mut c = Vec::new();
     let l = &page.draft()["lighting"];
     let lc = &l["screen"]["color"];
     let b = |v: &Value| v.as_u64().unwrap_or(0).min(255) as u8;
     let rgb = [b(&lc["color"][0]), b(&lc["color"][1]), b(&lc["color"][2])];
-    let col = slint::Color::from_rgb_u8(rgb[0], rgb[1], rgb[2]);
+    let col = crate::tokens::color(rgb);
     let br = lc["brightness"].as_f64().unwrap_or(255.0);
     // from the row's right end leftward: how bright, the slider, its name; the color (its dot
-    // and its code, one button), the name of both. (Each text's cell runs 2 past its words,
-    // into the gap after them, so the gaps are the words' own.)
-    let t = |s: &str| crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, s);
+    // and its code, one button), the name of both, each at the middle of the hint line. A
+    // control's own words are Space.inline before it, the slider Space.row before its value,
+    // the two groups Space.margin apart. (Each text's cell runs 2 past its words, into the
+    // gap after them, so the gaps are the words' own.)
+    let t = |s: &str| crate::text::width(font::REGULAR, font::NOTE, s);
+    let mid = |h: f32| (size::HINT - h) / 2.0;
     let v = format!("{}%", (br / 2.55).round());
     // (the pill as wide at every value as at 100%, so the slider never shifts under the pointer)
-    let pw = crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, "100%") + 14.0;
+    let pw = crate::form::pill_width(2, "100%");
     let hex = crate::lighting::hex_of(rgb);
-    let cw = 4.0 + 20.0 + 8.0 + crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, &hex) + 9.0;
+    let code_w = |s: &str| crate::text::width(font::REGULAR, font::CONTROL, s);
+    let cw = part::SWATCH_WORDS + code_w(&hex) + part::QUIET_PAD;
     // In a window too narrow for all of it beside the tabs (which end at `from`), the slider
-    // shortens, to 72 at the least, then the words go: Brightness's first (the slider and its
+    // shortens, to SLIDER_LEAST, then the words go: Brightness's first (the slider and its
     // value still read as how bright), then the default backlight's; the slider takes back
-    // what a word leaves, to 120. Reckoned with the widest color code, so a color picked
-    // never moves it.
-    let widest = 4.0 + 20.0 + 8.0 + crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, "#") + 6.0 * "0123456789ABCDEF".chars().map(|d| crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, &d.to_string())).fold(0.0, f32::max) + 9.0;
+    // what a word leaves, to SLIDER_MOST. Reckoned with the widest color code, so a color
+    // picked never moves it.
+    let widest = part::SWATCH_WORDS + code_w("#") + 6.0 * "0123456789ABCDEF".chars().map(|d| code_w(&d.to_string())).fold(0.0, f32::max) + part::QUIET_PAD;
     let (bw, lw) = (t("Brightness"), t("Default backlight"));
-    let room = w - from - pw - 12.0 - 22.0 - widest;
-    let (with_bright, with_name) = if 72.0 + 10.0 + bw + 10.0 + lw <= room { (true, true) } else if 72.0 + 10.0 + lw <= room { (false, true) } else { (false, false) };
-    let sl = (room - if with_bright { 10.0 + bw } else { 0.0 } - if with_name { 10.0 + lw } else { 0.0 }).clamp(72.0, 120.0);
+    let room = w - from - pw - space::ROW - space::MARGIN - widest;
+    let word = space::INLINE;
+    let (with_bright, with_name) = if SLIDER_LEAST + word + bw + word + lw <= room { (true, true) } else if SLIDER_LEAST + word + lw <= room { (false, true) } else { (false, false) };
+    let sl = (room - if with_bright { word + bw } else { 0.0 } - if with_name { word + lw } else { 0.0 }).clamp(SLIDER_LEAST, SLIDER_MOST);
     let mut x = w - pw;
-    c.push(Cell { text: v.into(), style: 2, ..cell(kind::PILL, x, 8.0, pw, 20.0) });
-    x -= 12.0 + sl;
-    c.push(Cell { value: (br / 255.0) as f32, color: col, style: 2, id: id(Ctl::LcdBrightness), ..cell(kind::FILLED, x, 8.0, sl, 20.0) });
+    c.push(Cell { text: v.into(), style: 2, ..cell(kind::PILL, x, mid(size::PILL), pw, size::PILL) });
+    x -= space::ROW + sl;
+    c.push(Cell { value: (br / 255.0) as f32, color: col, style: 2, id: id(Ctl::LcdBrightness), ..cell(kind::FILLED, x, mid(size::SLIDER), sl, size::SLIDER) });
     if with_bright {
-        x -= 10.0 + bw;
-        c.push(text_cell(style::SMALL, x, 8.0, bw + 2.0, 20.0, "Brightness"));
+        x -= word + bw;
+        c.push(text_cell(style::SMALL, x, mid(line::TEXT), bw + 2.0, line::TEXT, "Brightness"));
     }
-    x -= 22.0 + cw;
-    c.push(Cell { color: col, on: picking, style: 2, text: hex.into(), id: id(Ctl::LcdColor), ..cell(kind::COLOR_DOT, x, 4.0, cw, 28.0) });
+    x -= space::MARGIN + cw;
+    c.push(Cell { color: col, on: picking, style: 2, text: hex.into(), id: id(Ctl::LcdColor), ..cell(kind::COLOR_DOT, x, mid(size::SWATCH), cw, size::SWATCH) });
     if with_name {
-        x -= 10.0 + lw;
-        c.push(text_cell(style::SMALL, x, 8.0, lw + 2.0, 20.0, "Default backlight"));
+        x -= word + lw;
+        c.push(text_cell(style::SMALL, x, mid(line::TEXT), lw + 2.0, line::TEXT, "Default backlight"));
     }
     // while a layout with a color of its own plays, a line saying so, in what room the tabs
     // leave: the layout's name cut short to fit, or the line not there where not even a
-    // letter of the name fits (the default backlight never moves for it)
+    // letter of the name fits (the default backlight never moves for it); its color's dot
+    // before it, as a status's
     if let Some((name, light)) = own {
         let tail = " has its own color";
-        let most = x - 20.0 - from - 16.0 - t(tail);
+        let lead = size::DOT + space::INLINE;
+        let most = x - space::MARGIN - from - lead - t(tail);
         let least = name.chars().next().map_or(f32::MAX, |f| t(&format!("{f}…")));
         if most >= least {
-            let s = format!("{}{tail}", crate::text::elide(name, most, 400, 12.5));
+            let s = format!("{}{tail}", crate::text::elide(name, most, font::REGULAR, font::NOTE));
             let sw = t(&s);
-            x -= 20.0 + sw;
-            c.push(text_cell(style::NOTE, x, 8.0, sw + 2.0, 20.0, &s));
-            c.push(Cell { color: slint::Color::from_rgb_u8(light[0], light[1], light[2]), ..cell(kind::BOX, x - 16.0, 13.5, 9.0, 9.0) });
+            x -= space::MARGIN + sw;
+            c.push(text_cell(style::NOTE, x, mid(line::TEXT), sw + 2.0, line::TEXT, &s));
+            c.push(Cell { color: crate::tokens::color(light), ..cell(kind::BOX, x - lead, mid(size::DOT), size::DOT, size::DOT) });
         }
     }
     c

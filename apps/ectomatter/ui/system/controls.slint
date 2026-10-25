@@ -2,7 +2,7 @@
 // switches, drop-downs, scrollbars. Each is drawn here once, from the tokens;
 // a page sets what it says and does, never how it looks.
 
-import { Space, Radius, Font, Size, Part, Shadow, Ink } from "tokens.slint";
+import { Space, Radius, Font, Line, Size, Part, Shadow, Ink } from "tokens.slint";
 import { Typing } from "state.slint";
 
 // one of the window's own buttons: minimize, maximize, close
@@ -68,20 +68,24 @@ export component WordButton inherits Rectangle {
     in property <color> fill-hover: root.on-box ? Ink.pick : Ink.hover-box;
     // as wide as it is given, rather than as its words
     in property <length> wide: 0;
-    // a filled glyph before its words, on a 14-unit square (Play's triangle)
+    // a filled glyph before its words, on a 14-unit square (Play's triangle), or
+    // one drawn in lines, on a 16-unit square, as a bar's buttons draw theirs (Add's +)
     in property <string> icon;
+    in property <string> lines;
+    // the small one inside a card (Make main): its words a caption's, in gray
+    in property <bool> small;
     out property <bool> hover: ta.has-hover && root.enabled;
     out property <bool> down: ta.pressed && root.enabled;
     callback clicked;
-    height: root.primary ? 32px : 30px;
-    property <length> icon-w: root.icon != "" ? Part.glyph + Part.glyph-gap : 0;
+    height: root.primary ? Size.button + 2px : Size.button;
+    property <length> icon-w: root.icon != "" || root.lines != "" ? Part.glyph + Part.glyph-gap : 0;
     width: root.wide > 0 ? root.wide : label.preferred-width + 2 * Part.button-pad + root.icon-w + (root.primary ? 2px : 0);
-    border-radius: Radius.control;
+    border-radius: root.small ? Radius.small : Radius.control;
     // turned off, the whole button fades to 35% over the page's ground, as the
     // web app's does; faded piece by piece, its words would come out lighter
     property <color> face: root.danger ? (ta.has-hover && root.enabled ? Ink.danger-hover : Ink.danger)
         : root.primary ? (ta.has-hover && root.enabled ? Ink.white : Ink.bright) : ta.has-hover && root.enabled ? root.fill-hover : root.fill;
-    property <color> ink: root.danger ? Ink.white : root.primary ? Ink.base : Ink.bright;
+    property <color> ink: root.danger ? Ink.white : root.primary ? Ink.base : root.small && !root.hover ? Ink.dim : Ink.bright;
     background: root.enabled ? root.face : root.face.mix(Ink.base, 0.35);
     if root.icon != "": Path {
         x: (parent.width - label.width - root.icon-w) / 2;
@@ -93,13 +97,26 @@ export component WordButton inherits Rectangle {
         commands: root.icon;
         fill: root.enabled ? root.ink : root.ink.mix(Ink.base, 0.35);
     }
+    if root.lines != "": Path {
+        x: (parent.width - label.width - root.icon-w) / 2;
+        y: (parent.height - Part.glyph) / 2 + (ta.pressed && root.enabled ? 1px : 0);
+        width: Part.glyph;
+        height: Part.glyph;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        commands: root.lines;
+        fill: transparent;
+        stroke: root.enabled ? root.ink : root.ink.mix(Ink.base, 0.35);
+        stroke-width: 1.14px;
+        stroke-line-cap: round;
+    }
     label := Text {
         x: (parent.width - self.width + root.icon-w) / 2;
         y: (parent.height - self.height) / 2 + (ta.pressed && root.enabled ? 1px : 0);
         text: root.text;
         font-family: Font.ui;
-        font-size: Font.control;
-        font-weight: root.primary || root.danger ? Font.strong : Font.medium;
+        font-size: root.small ? Font.caption : Font.control;
+        font-weight: root.primary || root.danger ? Font.strong : root.small ? Font.regular : Font.medium;
         color: root.enabled ? root.ink : root.ink.mix(Ink.base, 0.35);
     }
     ta := TouchArea {
@@ -331,7 +348,7 @@ export component LinkButton inherits Rectangle {
     in property <bool> lit;
     out property <bool> hover: ta.has-hover && root.enabled;
     callback clicked;
-    height: 26px;
+    height: Size.quiet;
     width: row.preferred-width;
     border-radius: Radius.small;
     background: root.hover ? Ink.hover-box : transparent;
@@ -408,23 +425,44 @@ export component SmallCap inherits Rectangle {
     }
 }
 
-// a checkbox: a well with a tick when on, its words beside it
-// a line to type into on a form, its words until something is typed (in the typeface whose
-// letters are all one width, for a command)
+// A line to type into, the same wherever one is: what it holds until something is
+// typed in gray, a glyph before it where it has one (a search's), a shade lighter
+// while it's typed in. In the typeface whose letters are all one width for a
+// command (`mono`). Escape leaves it (`escape`); `read-only` shows what it holds
+// with no typing (a program's path, chosen with a button beside it).
 export component FieldBox inherits Rectangle {
     in property <string> placeholder;
     in-out property <string> text;
     in property <bool> mono;
+    in property <string> glyph;
+    in property <bool> read-only;
+    out property <bool> typing: field-in.has-focus;
     callback edited();
     callback accepted();
     callback escape();
-    height: 36px;
+    public function start-typing() { field-in.focus(); }
+    public function stop-typing() { field-in.clear-focus(); }
+    height: Size.control;
     border-radius: Radius.control;
-    background: Ink.well;
+    background: field-in.has-focus ? Ink.hover-well : Ink.well;
     clip: true;
+    property <length> words-x: root.glyph != "" ? Part.field-pad + Part.glyph + Part.glyph-gap : Part.field-pad;
+    if root.glyph != "": Path {
+        x: Part.field-pad;
+        y: (parent.height - Part.glyph) / 2;
+        width: Part.glyph;
+        height: Part.glyph;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        commands: root.glyph;
+        fill: transparent;
+        stroke: Ink.quiet;
+        stroke-width: 1.5px;
+        stroke-line-cap: round;
+    }
     if field-in.text == "": Text {
-        x: 12px;
-        width: parent.width - 24px;
+        x: root.words-x;
+        width: parent.width - root.words-x - Part.field-pad;
         height: parent.height;
         text: root.placeholder;
         font-family: Font.ui;
@@ -434,10 +472,12 @@ export component FieldBox inherits Rectangle {
         overflow: elide;
     }
     field-in := TextInput {
-        x: 12px;
-        width: parent.width - 24px;
+        x: root.words-x;
+        width: parent.width - root.words-x - Part.field-pad;
         height: parent.height;
         text <=> root.text;
+        read-only: root.read-only;
+        enabled: !root.read-only;
         font-family: root.mono ? Font.mono : Font.ui;
         font-size: root.mono ? Font.caption : Font.control;
         color: Ink.ink;
@@ -467,8 +507,8 @@ export component CheckBox inherits Rectangle {
     property <bool> off: root.state == 1;
     property <bool> held: root.state == 2;
     property <bool> hot: ta.has-hover && root.state == 0;
-    height: 26px;
-    preferred-width: Size.check + 10px + words.preferred-width;
+    height: Size.quiet;
+    preferred-width: Size.check + Part.check-gap + words.preferred-width;
     Rectangle {
         x: 0;
         y: (parent.height - self.height) / 2;
@@ -490,7 +530,7 @@ export component CheckBox inherits Rectangle {
         }
     }
     words := Text {
-        x: Size.check + 10px;
+        x: Size.check + Part.check-gap;
         width: parent.width - self.x;
         height: parent.height;
         text: root.text;
@@ -588,21 +628,67 @@ export component PlayButton inherits Rectangle {
     }
 }
 
-// a segmented switch on a well: the chosen part a step lighter
-export component SegSwitch inherits Rectangle {
+// A switch's ground: a well, its corners its choices' (Radius.small) and the
+// inset between them, so the two curves follow each other.
+export component SegGround inherits Rectangle {
+    border-radius: Radius.small + Part.inset;
+    background: Ink.well;
+}
+
+// One of a switch's choices, Part.inset in from its ground: the chosen one a
+// step lighter, the others lit under the pointer; its icon's lines before its
+// words where it has one; `off`, one that can't be chosen now, its words faint.
+export component SegChoice inherits Rectangle {
+    in property <string> text;
+    in property <string> icon;
+    in property <bool> on;
+    in property <bool> off;
+    callback clicked(length, length, length);
+    border-radius: Radius.small;
+    background: root.on ? (ta.has-hover ? Ink.pick-hover : Ink.pick) : ta.has-hover && !root.off ? Ink.hover-well : transparent;
+    HorizontalLayout {
+        alignment: center;
+        spacing: 6px;
+        if root.icon != "": Path {
+            y: (parent.height - Part.glyph) / 2;
+            width: Part.glyph;
+            height: Part.glyph;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            commands: root.icon;
+            fill: transparent;
+            stroke: root.on || ta.has-hover ? Ink.bright : Ink.soft;
+            stroke-width: 1.8px;
+        }
+        Text {
+            text: root.text;
+            font-family: Font.ui;
+            font-size: Font.note;
+            color: root.off ? Ink.off : root.on || ta.has-hover ? Ink.bright : Ink.soft;
+            vertical-alignment: center;
+        }
+    }
+    ta := TouchArea {
+        enabled: !root.off;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(self.absolute-position.x, self.absolute-position.y, self.height); }
+    }
+}
+
+// a segmented switch on a well: the chosen part a step lighter, its choices
+// sharing its width (`tall`: each one's icon over its words)
+export component SegSwitch inherits SegGround {
     in property <[string]> options;
     in property <[string]> icons;
     in property <int> chosen;
     in property <bool> tall;
     callback picked(int, length, length, length);
-    height: root.tall ? 50px : 34px;
-    border-radius: Radius.small + 3px;
-    background: Ink.well;
+    height: root.tall ? 50px : Size.control;
     for o[i] in root.options: Rectangle {
-        x: 3px + i * (parent.width - 6px) / root.options.length;
-        y: 3px;
-        width: (parent.width - 6px) / root.options.length - (i < root.options.length - 1 ? 2px : 0);
-        height: parent.height - 6px;
+        x: Part.inset + i * (parent.width - 2 * Part.inset + Part.seg-gap) / root.options.length;
+        y: Part.inset;
+        width: (parent.width - 2 * Part.inset + Part.seg-gap) / root.options.length - Part.seg-gap;
+        height: parent.height - 2 * Part.inset;
         border-radius: Radius.small;
         background: root.chosen == i ? (seg-ta.has-hover ? Ink.pick-hover : Ink.pick) : seg-ta.has-hover ? Ink.hover-well : transparent;
         if root.tall && root.icons.length > i: Path {
@@ -635,27 +721,47 @@ export component SegSwitch inherits Rectangle {
     }
 }
 
-// a dropdown on a well: what is chosen, and a chevron
+// A dropdown, the same wherever one is: what is chosen, and a chevron at its right;
+// a shade lighter under the pointer and while its menu is open. A picture before
+// its words where it has one (`chip`, a scene's colors). `followed`: its value
+// follows something else, in gray; `warn`: its value needs choosing again, an
+// amber line round it; `subtle`: with no well until the pointer is on it (a
+// chooser at a panel's head).
 export component DropField inherits Rectangle {
     in property <string> text;
     in property <bool> open;
+    in property <image> chip;
+    in property <bool> chip-on;
+    in property <bool> followed;
+    in property <bool> warn;
+    in property <bool> subtle;
     callback clicked(length, length, length);
-    height: 36px;
+    height: Size.control;
     border-radius: Radius.control;
-    background: ta.has-hover || root.open ? Ink.hover-box : Ink.well;
+    background: ta.has-hover || root.open ? (root.subtle ? Ink.hover-well : Ink.hover-box) : root.subtle ? transparent : Ink.well;
+    border-width: root.warn ? 1px : 0;
+    border-color: Ink.warn.with-alpha(0.502);
+    if root.chip-on: Image {
+        x: Part.field-pad;
+        y: (parent.height - Part.glyph) / 2;
+        width: Part.glyph;
+        height: Part.glyph;
+        source: root.chip;
+        image-fit: fill;
+    }
     Text {
-        x: 12px;
-        width: parent.width - 40px;
+        x: root.chip-on ? Part.field-pad + Part.glyph + Part.glyph-gap : Part.field-pad;
+        width: parent.width - self.x - Part.field-pad - 16px;
         height: parent.height;
         text: root.text;
         font-family: Font.ui;
         font-size: Font.control;
-        color: Ink.bright;
+        color: root.followed ? Ink.soft : Ink.bright;
         vertical-alignment: center;
         overflow: elide;
     }
     Path {
-        x: parent.width - 24px;
+        x: parent.width - Part.field-pad - 12px;
         y: (parent.height - 12px) / 2;
         width: 12px;
         height: 12px;
@@ -672,7 +778,186 @@ export component DropField inherits Rectangle {
     }
 }
 
-// A slider chosen in the Key library: where it sits now, and what it controls.
+// A slider, the same wherever one is: a track filled to its place in `fill`, and a
+// knob, ringed in what it sits on, that follows the pointer while held; double-
+// clicked, it goes back as it was (`reset`). `style`, by what it sits on: 0 a box
+// (its track a well), 1 a box of the well's own shade, 2 the page itself, 3 a box
+// (its track a step lighter), 4 as 3 with a notch at its middle, its default,
+// which holds the knob as it passes.
+export component Slider inherits Rectangle {
+    in property <float> value;
+    in property <color> fill;
+    in property <int> style;
+    callback moved(float);
+    callback reset();
+    height: Size.slider;
+    // (the knob's half: the track runs from one knob's center to the other's)
+    property <length> half: 9px;
+    property <float> held: max(0, min(1, (drag.mouse-x - self.half) / (self.width - 2 * self.half)));
+    property <float> at: drag.pressed ? (root.style == 4 && abs(self.held - 0.5) <= 0.04 ? 0.5 : self.held) : root.value;
+    Rectangle {
+        y: (parent.height - 6px) / 2;
+        height: 6px;
+        border-radius: self.height / 2;
+        background: root.style >= 1 ? Ink.hover-box : Ink.well;
+        clip: true;
+        Rectangle {
+            x: 0;
+            width: root.half + root.at * (parent.width - 2 * root.half);
+            border-radius: 3px;
+            background: root.fill;
+        }
+    }
+    // the notch: a short line across the track at its middle, under the knob
+    if root.style == 4: Rectangle {
+        x: root.half + 0.5 * (parent.width - 2 * root.half) - 1px;
+        y: (parent.height - 14px) / 2;
+        width: 2px;
+        height: 14px;
+        border-radius: self.width / 2;
+        background: Ink.quiet;
+    }
+    // the knob, ringed in what it sits on
+    Rectangle {
+        property <length> d: drag.has-hover || drag.pressed ? 19.5px : 18px;
+        x: root.at * (parent.width - 2 * root.half) + root.half - self.d / 2 - 3px;
+        y: parent.height / 2 - self.d / 2 - 3px;
+        width: self.d + 6px;
+        height: self.d + 6px;
+        border-radius: self.width / 2;
+        background: root.style == 2 ? Ink.base : root.style == 1 ? Ink.well : Ink.box;
+        drop-shadow-blur: Shadow.knob.blur;
+        drop-shadow-offset-y: Shadow.knob.y;
+        drop-shadow-color: Shadow.knob.color;
+        Rectangle {
+            x: 3px;
+            y: 3px;
+            width: parent.d;
+            height: parent.d;
+            border-radius: self.width / 2;
+            background: Ink.bright;
+        }
+    }
+    drag := TouchArea {
+        mouse-cursor: pointer;
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                root.moved(max(0, min(1, (self.mouse-x - root.half) / (self.width - 2 * root.half))));
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                root.moved(max(0, min(1, (self.mouse-x - root.half) / (self.width - 2 * root.half))));
+            }
+        }
+        double-clicked => { root.reset(); }
+    }
+}
+
+// A color's dot and its code as one button, lit under the pointer and while the
+// color picker is open on it (`open`): the screen's default backlight, a layout's own.
+export component ColorButton inherits Rectangle {
+    in property <color> swatch;
+    in property <string> code;
+    in property <bool> open;
+    callback clicked(length, length, length);
+    height: Size.swatch;
+    width: Part.swatch-words + code-t.preferred-width + Part.quiet-pad;
+    border-radius: Radius.control;
+    background: ta.has-hover || root.open ? Ink.hover-box : transparent;
+    Rectangle {
+        x: 4px;
+        y: (parent.height - self.height) / 2;
+        width: 20px;
+        height: 20px;
+        border-radius: self.width / 2;
+        background: root.swatch;
+        border-width: 1px;
+        border-color: Ink.white.with-alpha(0.165);
+    }
+    code-t := Text {
+        x: Part.swatch-words;
+        width: parent.width - Part.swatch-words;
+        height: parent.height;
+        text: root.code;
+        font-family: Font.ui;
+        font-size: Font.control;
+        color: Ink.bright;
+        vertical-alignment: center;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(self.absolute-position.x, self.absolute-position.y, self.height); }
+    }
+}
+
+// A tab over a box, the same wherever one is (the Screen tab's pages, the Sensor
+// Feed's parts): rounded above; the open one in the box's color (`fill`) and running
+// on into it on its feet (none on the first's left, where the box's corner is
+// square), the others the page's own until the pointer is on them; an amber dot
+// after its name where something under it needs seeing to (`warn`).
+export component FolderTab inherits Rectangle {
+    in property <string> text;
+    in property <bool> open;
+    in property <bool> first;
+    in property <bool> warn;
+    in property <brush> fill: Ink.box;
+    callback clicked;
+    width: words.preferred-width + 2 * Part.tab-pad + (root.warn ? Part.glyph-gap + Size.dot : 0);
+    height: Size.tab;
+    if root.open && !root.first: Rectangle {
+        x: -Radius.panel;
+        y: parent.height - Radius.panel;
+        width: Radius.panel;
+        height: Radius.panel;
+        background: root.fill;
+        Rectangle {
+            background: Ink.base;
+            border-bottom-right-radius: Radius.panel;
+        }
+    }
+    if root.open: Rectangle {
+        x: parent.width;
+        y: parent.height - Radius.panel;
+        width: Radius.panel;
+        height: Radius.panel;
+        background: root.fill;
+        Rectangle {
+            background: Ink.base;
+            border-bottom-left-radius: Radius.panel;
+        }
+    }
+    Rectangle {
+        border-top-left-radius: Radius.panel;
+        border-top-right-radius: Radius.panel;
+        background: root.open ? root.fill : ta.has-hover ? Ink.box : transparent;
+    }
+    words := Text {
+        x: Part.tab-pad;
+        height: parent.height;
+        text: root.text;
+        font-family: Font.ui;
+        font-size: Font.control;
+        font-weight: Font.medium;
+        color: root.open ? Ink.bright : ta.has-hover ? Ink.dim : Ink.soft;
+        vertical-alignment: center;
+    }
+    if root.warn: Rectangle {
+        x: words.x + words.width + Part.glyph-gap;
+        y: (parent.height - self.height) / 2;
+        width: Size.dot;
+        height: Size.dot;
+        border-radius: self.width / 2;
+        background: Ink.warn;
+    }
+    // (the open tab is already chosen: only the others answer the pointer)
+    ta := TouchArea {
+        enabled: !root.open;
+        mouse-cursor: root.open ? MouseCursor.default : MouseCursor.pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
 // a button on the device's bar: its glyph, drawn in lines, and its name if it has one
 export component BarButton inherits Rectangle {
     in property <string> text;
@@ -742,8 +1027,9 @@ export component IconButton inherits Rectangle {
     in property <brush> hover-fill: Ink.hover-box;
     callback clicked(length, length, length);
     property <bool> hot: ta.has-hover && root.enabled;
-    width: 26px;
-    height: 26px;
+    out property <bool> hover: root.hot;
+    width: Size.quiet;
+    height: Size.quiet;
     border-radius: Radius.small;
     background: root.hot ? root.hover-fill : transparent;
     opacity: root.enabled ? 1 : 0.35;

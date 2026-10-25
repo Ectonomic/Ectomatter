@@ -12,6 +12,7 @@
 use serde_json::json;
 
 use crate::text;
+use crate::tokens::{font, line, part, size, space};
 use crate::z10::Page;
 use crate::Cell;
 
@@ -325,122 +326,163 @@ fn color(c: [u8; 3]) -> slint::Color {
     slint::Color::from_rgb_u8(c[0], c[1], c[2])
 }
 
-/// A box's pieces, top to bottom, 16 in from its sides.
+/// A box's pieces, top to bottom, Space.pad in from its sides: a stacked form.
+/// Each setting's name is Space.label over its control, settings are Space.pad
+/// apart (`next`), what belongs to the setting before it Space.row under it
+/// (`then`), and a control's own note Space.tight under it (`close`); the first
+/// piece starts under the box's title, and the box ends Space.pad under the last.
 pub(crate) struct Stack {
-    pub(crate) w: f32,
+    /// where what the box holds starts, and how wide it is
+    pub(crate) x: f32,
+    pub(crate) iw: f32,
     pub(crate) y: f32,
     pub(crate) cells: Vec<Cell>,
     groups: usize,
+    /// nothing laid yet: the first piece takes no gap before it
+    empty: bool,
 }
 
 impl Stack {
     pub(crate) fn new(w: f32) -> Stack {
         // under the box's title
-        Stack { w, y: crate::tokens::size::BOX_HEAD, cells: Vec::new(), groups: 0 }
+        Stack { x: space::PAD, iw: (w - 2.0 * space::PAD).max(0.0), y: size::BOX_HEAD, cells: Vec::new(), groups: 0, empty: true }
     }
-    pub(crate) fn inner(&self) -> f32 {
-        self.w - 32.0
+    fn gap(&mut self, h: f32) {
+        if !self.empty {
+            self.y += h;
+        }
     }
-    pub(crate) fn gap(&mut self, h: f32) {
-        self.y += h;
+    /// Space.pad down to the next setting
+    pub(crate) fn next(&mut self) {
+        self.gap(space::PAD);
+    }
+    /// Space.row down to what belongs to the setting before it (its note, its zones)
+    pub(crate) fn then(&mut self) {
+        self.gap(space::ROW);
+    }
+    /// Space.tight down to a control's own note, or a note's next paragraph
+    pub(crate) fn close(&mut self) {
+        self.gap(space::TIGHT);
+    }
+    fn laid(&mut self) {
+        self.empty = false;
     }
     pub(crate) fn note(&mut self, s: &str) {
-        let lines = text::wrap(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, s, self.inner());
-        for (k, line) in lines.iter().enumerate() {
-            self.cells.push(text_cell(style::NOTE, 16.0, self.y + k as f32 * 18.0, self.inner(), 18.0, line));
-        }
-        self.y += lines.len() as f32 * 18.0;
+        self.y = crate::form::note_lines(&mut self.cells, self.x, self.y, self.iw, style::NOTE, s);
+        self.laid();
     }
-    /// a group: a hairline over all but the first, then its name in small capitals
+    /// a note under a checkbox, under its words
+    pub(crate) fn check_note(&mut self, s: &str) {
+        let indent = size::CHECK + part::CHECK_GAP;
+        self.y = crate::form::note_lines(&mut self.cells, self.x + indent, self.y, self.iw - indent, style::NOTE, s);
+        self.laid();
+    }
+    /// a group: a hairline over all but the first, then its name in small capitals; the next
+    /// group's name Space.section under the last setting, its rule Space.pad under that
     pub(crate) fn group(&mut self, name: &str) {
         if self.groups > 0 {
-            self.y += 16.0;
-            self.cells.push(Cell { color: crate::tokens::color(crate::tokens::ink::LINE), ..cell(kind::BOX, 16.0, self.y, self.inner(), 1.0) });
-            self.y += 15.0;
+            self.cells.push(crate::form::rule(self.x, self.y + space::PAD, self.iw));
+            self.y += space::SECTION;
         } else {
-            self.y += 6.0;
+            self.then();
         }
         self.groups += 1;
-        self.cells.push(text_cell(style::GROUP, 16.0, self.y, self.inner(), 14.0, &name.to_uppercase()));
-        self.y += 14.0 + 12.0;
+        self.caps(name);
     }
-    /// a setting's name, and its value in a small well at the right
+    /// a hairline across the box, Space.pad either side
+    pub(crate) fn rule(&mut self) {
+        self.cells.push(crate::form::rule(self.x, self.y + space::PAD, self.iw));
+        self.y += 2.0 * space::PAD + 1.0;
+    }
+    /// a name in small capitals over what it names, Space.row under it
+    pub(crate) fn caps(&mut self, name: &str) {
+        self.cells.push(text_cell(style::GROUP, self.x, self.y, self.iw, line::SMALL, &name.to_uppercase()));
+        self.y += line::SMALL + space::ROW;
+        self.empty = true;
+    }
+    /// a setting's name, and its value in a pill at the right; its control Space.label under it
     pub(crate) fn head(&mut self, label: &str, value: Option<&str>) {
-        self.cells.push(text_cell(style::PROP, 16.0, self.y, self.inner(), 20.0, label));
+        self.cells.push(text_cell(style::PROP, self.x, self.y, self.iw, line::TEXT, label));
         if let Some(v) = value {
-            let w = text::width(crate::tokens::font::MEDIUM, crate::tokens::font::CAPTION, v) + 16.0;
-            self.cells.push(Cell { text: v.into(), ..cell(kind::PILL, self.w - 16.0 - w, self.y, w, 20.0) });
+            let w = crate::form::pill_width(0, v);
+            crate::form::pill(&mut self.cells, 0, self.x + self.iw - w, self.y, v);
         }
-        self.y += 20.0 + 8.0;
+        self.y += line::TEXT + space::LABEL;
+        self.empty = true;
     }
     /// a slider, filled to its place in `fill`, its ends named under it
     pub(crate) fn slider_at(&mut self, id: i32, frac: f32, fill: slint::Color, ends: Option<(&str, &str)>) {
-        self.cells.push(Cell { value: frac, color: fill, id, ..cell(kind::FILLED, 16.0, self.y, self.inner(), 20.0) });
-        self.y += 20.0;
+        self.cells.push(Cell { value: frac, color: fill, id, ..cell(kind::FILLED, self.x, self.y, self.iw, size::SLIDER) });
+        self.y += size::SLIDER;
         if let Some((l, r)) = ends {
-            self.y += 4.0;
-            self.cells.push(text_cell(style::END_L, 16.0, self.y, self.inner() / 2.0, 14.0, l));
-            self.cells.push(text_cell(style::END_R, 16.0 + self.inner() / 2.0, self.y, self.inner() / 2.0, 14.0, r));
-            self.y += 14.0;
+            self.y += space::TIGHT;
+            self.cells.push(text_cell(style::END_L, self.x, self.y, self.iw / 2.0, line::SMALL, l));
+            self.cells.push(text_cell(style::END_R, self.x + self.iw / 2.0, self.y, self.iw / 2.0, line::SMALL, r));
+            self.y += line::SMALL;
         }
+        self.laid();
     }
-    /// a run of colors, as the effect blends them
+    /// a run of colors, as the effect blends them, Space.row over its colors' dots
     pub(crate) fn strip(&mut self, cols: &[[u8; 3]]) {
         let n = cols.len().max(2) - 1;
-        let w = self.inner() / n as f32;
+        let w = self.iw / n as f32;
         for k in 0..n {
             let (a, b) = (cols[k], cols[(k + 1).min(cols.len() - 1)]);
             let ends = (if k == 0 { 1 } else { 0 }) | (if k == n - 1 { 2 } else { 0 });
-            self.cells.push(Cell { color: color(a), value: (b[0] as u32 * 65536 + b[1] as u32 * 256 + b[2] as u32) as f32, style: ends, ..cell(kind::STRIP, 16.0 + k as f32 * w, self.y, w + 0.5, 10.0) });
+            self.cells.push(Cell { color: color(a), value: (b[0] as u32 * 65536 + b[1] as u32 * 256 + b[2] as u32) as f32, style: ends, ..cell(kind::STRIP, self.x + k as f32 * w, self.y, w + 0.5, size::STRIP) });
         }
-        self.y += 10.0 + 12.0;
+        self.y += size::STRIP + space::ROW;
+        self.empty = true;
     }
-    /// colors as dots, 8 apart, wrapping; the one the picker is open on ringed
+    /// colors as dots, Space.inline apart, wrapping; the one the picker is open on ringed
     pub(crate) fn dots_at(&mut self, id: i32, cols: &[[u8; 3]], open: Option<usize>, code: bool) {
-        let (mut x, mut y) = (16.0f32, self.y);
-        for (j, col) in cols.iter().enumerate() {
-            if x > 16.0 && x + 28.0 > self.w - 16.0 {
-                x = 16.0;
-                y += 36.0;
-            }
-            self.cells.push(Cell { color: color(*col), on: open == Some(j), id, index: j as i32, ..cell(kind::COLOR_DOT, x, y, 28.0, 28.0) });
-            x += 36.0;
-        }
+        let dots: Vec<Cell> = cols.iter().enumerate().map(|(j, col)| Cell { color: color(*col), on: open == Some(j), id, index: j as i32, ..cell(kind::COLOR_DOT, 0.0, 0.0, size::SWATCH, size::SWATCH) }).collect();
+        let (end_x, top) = self.dots(dots);
         if code && cols.len() == 1 {
-            self.cells.push(text_cell(style::CODE, x - 4.0, y, 90.0, 28.0, &hex_of(cols[0])));
+            let hex = hex_of(cols[0]);
+            let cw = text::width(font::MEDIUM, font::CAPTION, &hex).ceil() + 2.0;
+            self.cells.push(text_cell(style::CODE, end_x + space::TIGHT, top, cw, size::SWATCH, &hex));
         }
-        self.y = y + 28.0;
+    }
+    /// dots (each a swatch's size), Space.inline apart, wrapping at the box's padding; where
+    /// the last one ends across, and its row's top
+    pub(crate) fn dots(&mut self, dots: Vec<Cell>) -> (f32, f32) {
+        let pitch = size::SWATCH + space::INLINE;
+        let (mut x, mut y) = (self.x, self.y);
+        for d in dots {
+            if x > self.x && x + size::SWATCH > self.x + self.iw {
+                x = self.x;
+                y += pitch;
+            }
+            self.cells.push(Cell { x, y, ..d });
+            x += pitch;
+        }
+        self.y = y + size::SWATCH;
+        self.laid();
+        (x - space::INLINE, y)
     }
     /// a switch across the box: each choice its share, with its icon if it has one
+    /// (`chosen` none, past the last, while the device can't say which)
     pub(crate) fn switch_at(&mut self, id: i32, opts: &[(&str, &str)], chosen: usize) {
-        self.cells.push(Cell { style: 1, ..cell(kind::SEG, 16.0, self.y, self.inner(), 34.0) });
-        let n = opts.len() as f32;
-        let each = (self.inner() - 6.0 - 2.0 * (n - 1.0)) / n;
-        for (j, (name, icon)) in opts.iter().enumerate() {
-            self.cells.push(Cell {
-                text: (*name).into(),
-                lines: (*icon).into(),
-                on: j == chosen,
-                id,
-                index: j as i32,
-                ..cell(kind::CHOICE, 16.0 + 3.0 + j as f32 * (each + 2.0), self.y + 3.0, each, 28.0)
-            });
-        }
-        self.y += 34.0;
+        crate::form::switch(&mut self.cells, self.x, self.y, Some(self.iw), opts, Some(chosen).filter(|c| *c < opts.len()), |j| (id, j as i32, 0));
+        self.y += size::CONTROL;
+        self.laid();
     }
     pub(crate) fn check(&mut self, c: Ctl, on: bool, label: &str) {
         self.check_at(id(c), on, label);
     }
     pub(crate) fn check_at(&mut self, id: i32, on: bool, label: &str) {
-        self.cells.push(Cell { on, id, text: label.into(), ..cell(kind::CHECKBOX, 16.0, self.y, 28.0 + text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, label), 20.0) });
-        self.y += 20.0;
+        self.cells.push(Cell { on, id, text: label.into(), ..cell(kind::CHECKBOX, self.x, self.y, crate::form::check_width(label).min(self.iw), size::QUIET) });
+        self.y += size::QUIET;
+        self.laid();
     }
     /// a dropdown showing the choice it is on
     pub(crate) fn dropdown_at(&mut self, id: i32, shown: &str, open: bool) {
-        self.cells.push(Cell { text: shown.into(), on: open, id, ..cell(kind::DROP, 16.0, self.y, self.inner(), 34.0) });
-        self.y += 34.0;
+        self.cells.push(Cell { text: shown.into(), on: open, id, ..cell(kind::DROP, self.x, self.y, self.iw, size::CONTROL) });
+        self.y += size::CONTROL;
+        self.laid();
     }
-    /// zones as chips, 6 apart, wrapping, a chosen one ticked; `index` is each
+    /// zones as chips, Space.inline apart, wrapping, a chosen one ticked; `index` is each
     /// one's place in the light's zones. Faded (style 2) while the whole
     /// keyboard is lit; `hot` is the one the pointer is over on the keyboard's picture.
     pub(crate) fn chips(&mut self, c: Ctl, chips: &[(usize, &str, bool)], faded: bool, hot: Option<usize>) {
@@ -449,24 +491,39 @@ impl Stack {
     pub(crate) fn chips_at(&mut self, id: i32, chips: &[(usize, &str, bool)], faded: bool, hot: Option<usize>) {
         let (mut x, mut y) = (0.0f32, self.y);
         for (index, name, on) in chips {
-            let w = text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, name) + 24.0 + if *on { 14.0 } else { 0.0 };
-            if x > 0.0 && x + w > self.inner() {
+            let w = crate::form::chip_width(name, *on);
+            if x > 0.0 && x + w > self.iw {
                 x = 0.0;
-                y += 34.0;
+                y += size::CHIP + space::INLINE;
             }
             let hot = if hot == Some(*index) { 1.0 } else { 0.0 };
-            self.cells.push(Cell { text: (*name).into(), on: *on, style: if faded { 2 } else { 1 }, value: hot, id, index: *index as i32, ..cell(kind::AREA, 16.0 + x, y, w, 28.0) });
-            x += w + 6.0;
+            self.cells.push(Cell { text: (*name).into(), on: *on, style: if faded { 2 } else { 1 }, value: hot, id, index: *index as i32, ..cell(kind::AREA, self.x + x, y, w, size::CHIP) });
+            x += w + space::INLINE;
         }
-        self.y = y + 28.0;
+        self.y = y + size::CHIP;
+        self.laid();
     }
-    /// a quiet link at the right of the row it sits on
-    pub(crate) fn link_right(&mut self, c: Ctl, label: &str, y: f32, icon: &str) {
+    /// quiet links in a row, Space.tight apart, the first one's words at the box's padding
+    pub(crate) fn links(&mut self, links: &[(Ctl, &str)]) {
+        let mut x = self.x - part::QUIET_PAD;
+        for (c, label) in links {
+            let w = quiet_width(label, false);
+            self.cells.push(Cell { text: (*label).into(), id: id(*c), ..cell(kind::QUIET, x, self.y, w, size::QUIET) });
+            x += w + space::TIGHT;
+        }
+        self.y += size::QUIET;
+        self.laid();
+    }
+    /// a quiet link at the box's top right, level with its title, its words ending at the
+    /// box's padding
+    pub(crate) fn title_link(&mut self, c: Ctl, label: &str, icon: &str) {
         let w = quiet_width(label, !icon.is_empty());
-        self.cells.push(Cell { text: label.into(), lines: icon.into(), id: id(c), ..cell(kind::QUIET, self.w - 16.0 - w + 8.0, y, w, 24.0) });
+        let y = part::TITLE_TOP + (line::TITLE - size::QUIET) / 2.0;
+        self.cells.push(Cell { text: label.into(), lines: icon.into(), id: id(c), ..cell(kind::QUIET, self.x + self.iw - w + part::QUIET_PAD, y, w, size::QUIET) });
     }
+    /// how tall the box is: Space.pad under its last piece
     pub(crate) fn height(&self) -> f32 {
-        self.y + 18.0
+        self.y + space::PAD
     }
 }
 
@@ -494,7 +551,7 @@ pub fn icon(mode: &str, scale: f32, wide: f32) -> slint::Image {
     // (as wide as its tile shows it, so nothing is stretched to fit)
     #[allow(non_snake_case)]
     let W: f32 = wide.max(1.0);
-    const H: f32 = 40.0;
+    const H: f32 = part::TILE_PIC;
     // (Wave rolls along a picture twice as wide; Pulse is five tiles wide, a color each)
     let across = if mode == "wave" { 2.0 } else if mode == "pulse" { 5.0 } else { 1.0 };
     let (w, h) = ((W * across * scale).round() as u32, (H * scale).round() as u32);
@@ -583,6 +640,5 @@ pub fn icon(mode: &str, scale: f32, wide: f32) -> slint::Image {
 /// How wide a quiet link is (a LinkButton, ui/system/controls.slint): its words,
 /// its room each side, and its glyph before them where it has one.
 pub(crate) fn quiet_width(label: &str, glyph: bool) -> f32 {
-    use crate::tokens::{font, part};
     text::width(font::MEDIUM, font::NOTE, label) + 2.0 * part::QUIET_PAD + if glyph { part::GLYPH + part::GLYPH_GAP } else { 0.0 }
 }

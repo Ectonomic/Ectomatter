@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use std::collections::{BTreeSet, HashMap};
 
 use crate::form::{self, Card, Form};
-use crate::tokens::{font, ink, size};
+use crate::tokens::{font, ink, line, part, size, space};
 use crate::lighting::{cell, id, kind, style, text_cell, Ctl};
 use ectomatter_sensors::list::{Catalog, Device, Part, Run, Sensor, Val};
 use crate::text;
@@ -122,10 +122,11 @@ fn seg(c: &mut Card, y: f32, ctl: Ctl, opts: &[(&str, &str)], current: &str) -> 
     form::switch(&mut c.cells, x, y, None, &names, chosen, |j| (id(ctl), j as i32, 0))
 }
 
-/// A row's state in its controls' column: its dot and its words, level with the label.
+/// A row's state in its controls' column: its dot and its words, on a line of words
+/// level with the label (the row's label set with `label_text`).
 fn state(c: &mut Card, y: f32, tone: i32, s: &str) {
     let x = c.control_x();
-    c.status(x, y, form::LINE, tone, s);
+    c.status(x, y, line::TEXT, tone, s);
 }
 
 /// A section: its heading, then its box under it, the box's rows laid by `fill`.
@@ -178,26 +179,25 @@ struct Row<'a> {
 /// runs of like readings folded into one line that opens; and at its foot what checking does.
 fn sensors_box(f: &mut Form, v: &Sensors, map: &mut SensorMap) {
     f.heading("Sensor Feed", "");
-    map.top = f.y - 18.0 - crate::tokens::space::LABEL;
+    map.top = f.y - line::NOTE - space::LABEL;
     let (x0, w0) = (f.x, f.w);
-    let line = slint::Color::from_rgb_u8(ink::LINE[0], ink::LINE[1], ink::LINE[2]);
     let parts = v.cat.parts();
     let tab = if parts.contains(&v.tab) { v.tab } else { parts.first().copied().unwrap_or(Part::Processor) };
     // the tabs, each as wide as its name; an amber dot on a part whose readings can't come in
     let mut tx = x0;
     for (i, p) in parts.iter().enumerate() {
         let bad = v.cat.missing.iter().any(|(m, _)| m == p);
-        let w = text::width(crate::tokens::font::MEDIUM, crate::tokens::font::CONTROL, p.name()).ceil() + 36.0 + if bad { 13.0 } else { 0.0 };
-        f.cells.push(Cell { text: p.name().into(), on: *p == tab, style: (i == 0) as i32 + if bad { 2 } else { 0 }, id: id(Ctl::SensorTab), index: i as i32, ..cell(kind::TAB, tx, f.y, w, 36.0) });
+        let w = text::width(font::MEDIUM, font::CONTROL, p.name()).ceil() + 2.0 * part::TAB_PAD + if bad { part::GLYPH_GAP + size::DOT } else { 0.0 };
+        f.cells.push(Cell { text: p.name().into(), on: *p == tab, style: (i == 0) as i32 + if bad { 2 } else { 0 }, id: id(Ctl::SensorTab), index: i as i32, ..cell(kind::TAB, tx, f.y, w, size::TAB) });
         map.tabs.push(*p);
-        tx += w + 4.0;
+        tx += w + space::TIGHT;
     }
-    f.y += 36.0;
+    f.y += size::TAB;
     let top = f.y;
     let (bx, bw) = (x0 + PAD_X, w0 - 2.0 * PAD_X);
     let (cx, cw) = (bx + CTRL, bw - CTRL);
     let mut out: Vec<Cell> = Vec::new();
-    let mut cy = top + 16.0;
+    let mut cy = top + space::PAD;
     let main = v.setup.main_card(&v.cat).map(|d| d.key.clone());
     let checked = v.setup.checked_in(&v.cat);
     let mut devices: Vec<&Device> = v.cat.devices.iter().filter(|d| d.part == tab).collect();
@@ -206,23 +206,17 @@ fn sensors_box(f: &mut Form, v: &Sensors, map: &mut SensorMap) {
     // the device the tab shows, and where its readings come from
     if !tab.by_device() {
         if let Some(d) = devices.first() {
-            let nw = text::width(crate::tokens::font::MEDIUM, crate::tokens::font::TEXT, &d.name).ceil() + 2.0;
-            out.push(text_cell(39, bx, cy, nw, 22.0, &d.name));
+            let nw = text::width(font::MEDIUM, font::TEXT, &d.name).ceil() + 2.0;
+            out.push(text_cell(39, bx, cy, nw, line::TEXT, &d.name));
             if !d.src.is_empty() && !v.cat.missing.iter().any(|(p, _)| *p == tab) {
-                out.push(Cell { y: cy + 1.0, ..text_cell(style::NOTE, bx + nw + 10.0, cy, bw - nw - 10.0, 22.0, &d.src) });
+                out.push(text_cell(style::NOTE, bx + nw + space::INLINE, cy, bw - nw - space::INLINE, line::TEXT, &d.src));
             }
-            cy += 22.0 + 8.0;
+            cy += line::TEXT + space::INLINE;
         }
     }
     // a source that can't be read, said in amber
     if let Some((_, why)) = v.cat.missing.iter().find(|(p, _)| *p == tab) {
-        cy += 6.0;
-        let lines = text::wrap(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, why, bw - 14.0);
-        out.push(Cell { style: 3, ..cell(kind::DOT, bx, cy + 6.5, 6.0, 6.0) });
-        for (k, l) in lines.iter().enumerate() {
-            out.push(text_cell(style::FACT, bx + 14.0, cy + k as f32 * 19.0, bw - 14.0, 19.0, l));
-        }
-        cy += lines.len() as f32 * 19.0 + 10.0;
+        cy = form::warning(&mut out, bx, cy, bw, why) + space::INLINE;
     }
     // the rows: on Graphics, Drives and Network each device, elsewhere each kind of reading
     let mut rows: Vec<Row> = Vec::new();
@@ -273,44 +267,48 @@ fn sensors_box(f: &mut Form, v: &Sensors, map: &mut SensorMap) {
             rows.push(Row { name: name.to_string(), card: None, inside: None, items, runs, notes, key: format!("{}#{name}", d.key), tip: None });
         }
     }
-    let col = (cw - 2.0 * 8.0) / 3.0;
-    let sub_col = (cw - 12.0 - 3.0 * 6.0) / 4.0;
+    // (three chips to a line, Space.inline apart; an open run's four to a line in a well,
+    // Space.inline in from it; a row Space.inline in from the rules round it, its name's
+    // lines at the middle of its chips' first line)
+    let gap = space::INLINE;
+    let col = (cw - 2.0 * gap) / 3.0;
+    let sub_col = (cw - 2.0 * gap - 3.0 * gap) / 4.0;
+    let name_w = CTRL - space::ROW;
+    let name_top = gap + (size::SENSOR - line::TEXT) / 2.0;
     for (k, r) in rows.iter().enumerate() {
         let ry = cy;
         if k > 0 {
-            out.push(Cell { color: line, ..cell(kind::BOX, bx, ry, bw, 1.0) });
+            out.push(form::rule(bx, ry, bw));
         }
         // the row's name, and under a card's its Main card or Make main (a model's code too
         // long for the column broken after a hyphen: WDS200T1X0E- / 00AFY0)
-        let broken: Vec<String> = r.name.split(' ').map(|w| if text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, w) > CTRL - 12.0 { w.replacen('-', "- ", 1) } else { w.to_string() }).collect();
-        let lines = text::wrap(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, &broken.join(" "), CTRL - 12.0);
+        let broken: Vec<String> = r.name.split(' ').map(|w| if text::width(font::REGULAR, font::TEXT, w) > name_w { w.replacen('-', "- ", 1) } else { w.to_string() }).collect();
+        let lines = text::wrap(font::REGULAR, font::TEXT, &broken.join(" "), name_w);
         for (i, l) in lines.iter().enumerate() {
-            out.push(text_cell(style::LABEL, bx, ry + 6.0 + i as f32 * 18.0, CTRL - 12.0, 18.0, l));
+            out.push(text_cell(style::LABEL, bx, ry + name_top + i as f32 * line::TEXT, name_w, line::TEXT, l));
         }
         if let Some((full, src)) = &r.tip {
-            let w = lines.iter().map(|l| text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, l).ceil()).fold(0.0f32, f32::max);
-            out.push(Cell { text: full.into(), fill: src.into(), ..cell(kind::TIP, bx, ry + 6.0, w, lines.len() as f32 * 18.0) });
+            let w = lines.iter().map(|l| text::width(font::REGULAR, font::TEXT, l).ceil()).fold(0.0f32, f32::max);
+            out.push(Cell { text: full.into(), fill: src.into(), ..cell(kind::TIP, bx, ry + name_top, w, lines.len() as f32 * line::TEXT) });
         }
-        let mut left_h = 6.0 + lines.len() as f32 * 18.0;
+        let mut left_h = name_top + lines.len() as f32 * line::TEXT;
         if r.card.is_some() || r.inside.is_some() {
-            let sy = ry + left_h + 4.0;
+            let sy = ry + left_h + space::TIGHT;
             let mut sx = bx;
             if let Some((d, is_main)) = r.card {
                 if is_main {
-                    let w = text::width(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, "Main card").ceil() + 14.0;
-                    out.push(Cell { text: "Main card".into(), style: 3, ..cell(kind::PILL, sx, sy + 1.0, w, 20.0) });
-                    sx += w + 6.0;
+                    sx += form::pill(&mut out, 3, sx, sy, "Main card") + space::INLINE;
                 } else {
-                    let w = text::width(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, "Make main").ceil() + 16.0;
-                    out.push(Cell { text: "Make main".into(), style: 33, id: id(Ctl::MakeMain), index: map.mains.len() as i32, ..cell(kind::GHOST, sx, sy, w, 22.0) });
+                    let w = form::small_button_width("Make main");
+                    out.push(Cell { text: "Make main".into(), style: 33, id: id(Ctl::MakeMain), index: map.mains.len() as i32, ..cell(kind::GHOST, sx, sy + (line::TEXT - size::PILL) / 2.0, w, size::PILL) });
                     map.mains.push(d.key.clone());
-                    sx += w + 6.0;
+                    sx += w + space::INLINE;
                 }
             }
             if let Some(i) = &r.inside {
-                out.push(text_cell(style::CREDIT, sx, sy, CTRL - (sx - bx), 22.0, i));
+                out.push(text_cell(style::CREDIT, sx, sy, CTRL - (sx - bx), line::TEXT, i));
             }
-            left_h += 4.0 + 22.0;
+            left_h += space::TIGHT + line::TEXT;
         }
         // its sensors, three to a line, then its folded runs; a renamed sensor, or one whose
         // name and driver's name run long together, takes two places
@@ -319,7 +317,7 @@ fn sensors_box(f: &mut Form, v: &Sensors, map: &mut SensorMap) {
             if place.1 + span > 3 {
                 place = (place.0 + 1, 0);
             }
-            let p = (cx + place.1 as f32 * (col + 8.0), ry + 6.0 + place.0 as f32 * 30.0, span as f32 * col + (span - 1) as f32 * 8.0);
+            let p = (cx + place.1 as f32 * (col + gap), ry + gap + place.0 as f32 * size::SENSOR, span as f32 * col + (span - 1) as f32 * gap);
             place.1 += span;
             p
         };
@@ -335,50 +333,46 @@ fn sensors_box(f: &mut Form, v: &Sensors, map: &mut SensorMap) {
             let n = items.iter().filter(|s| checked.contains(&s.id)).count();
             let name = format!("{} ({})", run.name(), items.len());
             let said = if n > 0 { format!("{n} checked") } else { String::new() };
-            out.push(Cell { text: name.into(), lines: said.into(), style: if open { 3 } else { 2 }, value: w, id: id(Ctl::SensorRun), index: map.runs.len() as i32, ..cell(kind::SENSOR, x, sy, w, 30.0) });
+            out.push(Cell { text: name.into(), lines: said.into(), style: if open { 3 } else { 2 }, id: id(Ctl::SensorRun), index: map.runs.len() as i32, ..cell(kind::SENSOR, x, sy, w, size::SENSOR) });
             map.runs.push((r.key.clone(), *run));
         }
         let used = if r.items.is_empty() && r.runs.is_empty() { 0 } else { place.0 + 1 };
-        let mut right = 6.0 + used as f32 * 30.0;
+        let mut right = gap + used as f32 * size::SENSOR;
         // a run opened: its readings four to a line in a well
         for (run, items) in &r.runs {
             if !v.open.contains(&(r.key.clone(), *run)) {
                 continue;
             }
-            let wy = ry + right + 2.0;
+            let wy = ry + right + space::TIGHT;
             let lines = items.len().div_ceil(4);
-            let h = 12.0 + lines as f32 * 30.0;
+            let h = 2.0 * gap + lines as f32 * size::SENSOR;
             out.push(Cell { style: 1, ..cell(kind::WBOX, cx, wy, cw, h) });
             for (i, s) in items.iter().enumerate() {
-                chip(&mut out, v, &checked, tab, s, (cx + 6.0 + (i % 4) as f32 * (sub_col + 6.0), wy + 6.0 + (i / 4) as f32 * 30.0, sub_col), map);
+                chip(&mut out, v, &checked, tab, s, (cx + gap + (i % 4) as f32 * (sub_col + gap), wy + gap + (i / 4) as f32 * size::SENSOR, sub_col), map);
             }
-            right += 2.0 + h + 2.0;
+            right += space::TIGHT + h + space::TIGHT;
         }
-        // the lines under it
+        // the lines under it, in from the chips' edges as their words are
         for n in &r.notes {
-            right += 2.0;
-            for l in text::wrap(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, n, cw - 16.0) {
-                out.push(text_cell(style::CREDIT, cx + 8.0, ry + right, cw - 16.0, 17.0, &l));
-                right += 17.0;
+            right += space::TIGHT;
+            let (nx, nw) = (cx + part::SENSOR_PAD, cw - 2.0 * part::SENSOR_PAD);
+            for l in text::wrap(font::REGULAR, font::CAPTION, n, nw) {
+                out.push(text_cell(style::CREDIT, nx, ry + right, nw, line::NOTE, &l));
+                right += line::NOTE;
             }
-            right += 2.0;
         }
-        cy = ry + left_h.max(right) + 6.0;
+        cy = ry + left_h.max(right) + gap;
     }
     // the foot: what checking does, and how many are checked
     let all: Vec<&Sensor> = v.cat.devices.iter().flat_map(|d| d.sensors.iter()).collect();
     let on = all.iter().filter(|s| checked.contains(&s.id)).count();
     let count = format!("{on} of {} checked", all.len());
-    let count_w = text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, &count).ceil() + 2.0;
-    cy += 8.0;
-    out.push(Cell { color: line, ..cell(kind::BOX, bx, cy, bw, 1.0) });
-    cy += 12.0;
-    let lines = text::wrap(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, "The sensors checked here are the readings you can add to a screen layout. Ectomatter checked the usual ones for you.", bw - count_w - 16.0);
-    for (i, l) in lines.iter().enumerate() {
-        out.push(text_cell(style::NOTE, bx, cy + i as f32 * 18.0, bw - count_w - 16.0, 18.0, l));
-    }
-    out.push(text_cell(style::NOTE, bx + bw - count_w, cy, count_w, 18.0, &count));
-    cy += lines.len() as f32 * 18.0 + 14.0;
+    let count_w = text::width(font::REGULAR, font::NOTE, &count).ceil() + 2.0;
+    out.push(form::rule(bx, cy, bw));
+    cy += 1.0 + space::ROW;
+    let end = form::note_lines(&mut out, bx, cy, bw - count_w - space::PAD, style::NOTE, "The sensors checked here are the readings you can add to a screen layout. Ectomatter checked the usual ones for you.");
+    out.push(text_cell(style::NOTE, bx + bw - count_w, cy, count_w, line::NOTE, &count));
+    cy = end + space::PAD;
     let h = cy - top;
     f.cells.push(Cell { style: if parts.first() == Some(&tab) { 2 } else { 0 }, ..cell(kind::TILE, x0, top, w0, h) });
     f.cells.extend(out);
@@ -399,23 +393,22 @@ fn chip(out: &mut Vec<Cell>, v: &Sensors, checked: &BTreeSet<String>, part: Part
     let index = map.chips.len() as i32;
     map.chips.push(s.id.clone());
     let editing = v.renaming.as_ref().filter(|(id, _)| *id == s.id);
-    // the name's room: the chip less its checkbox, its driver's name and its reading (the
-    // window takes the pencil's place from it while the pencil shows)
-    let orig_w = orig.as_ref().map_or(0.0, |o| text::width(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, o).ceil() + 8.0);
-    let room = (w - 8.0 - 15.0 - 8.0 - orig_w - 8.0 - text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, &reading).ceil() - 8.0).max(24.0);
+    // (the window reckons the name's room: the chip less its checkbox, its driver's name,
+    // its reading and, while it shows, the pencil)
     out.push(Cell {
         text: name.into(),
         fill: orig.unwrap_or_default().into(),
         lines: reading.into(),
         on,
-        value: room,
         style: if editing.is_some() { 4 } else if odd { 1 } else { 0 },
         id: id(Ctl::Sensor),
         index,
-        ..cell(kind::SENSOR, x, y, w, 30.0)
+        ..cell(kind::SENSOR, x, y, w, size::SENSOR)
     });
     if let Some((_, typed)) = editing {
-        out.push(Cell { text: typed.into(), style: 7, id: id(Ctl::SensorName), index, ..cell(kind::FIELD, x + 31.0, y + 3.0, w - 31.0 - 8.0, 24.0) });
+        // the line to type its new name in, where its name is, Part.inset in from the chip
+        let nx = part::SENSOR_PAD + size::CHECK + part::CHECK_GAP;
+        out.push(Cell { text: typed.into(), style: 7, id: id(Ctl::SensorName), index, ..cell(kind::FIELD, x + nx, y + part::INSET, w - nx - part::SENSOR_PAD, size::SENSOR - 2.0 * part::INSET) });
     }
 }
 
@@ -457,9 +450,12 @@ pub fn page(s: &State, room: f32) -> (Vec<Cell>, f32, SensorMap, PluginMap) {
         let nits = hdr["glow_limit"].as_f64().map_or(lo, |v| v.clamp(lo, hi));
         let frac = ((nits - lo) / (hi - lo)) as f32;
         let (cx, cw) = (c.control_x(), c.control_w());
-        let vw = 56.0;
-        c.cells.push(Cell { value: frac, id: id(Ctl::PeakNits), ..cell(kind::SLIDER, cx + 2.0, top + 9.0, cw - vw - 14.0 - 4.0, 16.0) });
-        c.cells.push(text_cell(style::VALUE, cx + cw - vw, top + 8.0, vw, 18.0, &format!("{} nits", nits.round())));
+        // the app's slider, at the middle of the row's first line, and how bright it says at
+        // its right, Space.row after it (as wide at every place as at its brightest, so the
+        // slider never shifts under the pointer)
+        let vw = text::width(font::REGULAR, font::CONTROL, &format!("{} nits", hi)).ceil() + 2.0;
+        c.cells.push(Cell { value: frac, color: crate::tokens::color(ink::SOFT), style: 3, id: id(Ctl::PeakNits), ..cell(kind::FILLED, cx, top + (form::LINE - size::SLIDER) / 2.0, cw - vw - space::ROW, size::SLIDER) });
+        c.cells.push(text_cell(style::VALUE, cx + cw - vw, top, vw, form::LINE, &format!("{} nits", nits.round())));
         c.next(top, form::LINE);
     });
 
@@ -483,7 +479,7 @@ fn plugin_section(f: &mut Form, p: &PluginSection, map: &mut PluginMap) {
     section(f, &title, |c| {
         let cx = c.control_x();
         // (a field's, a card's and a credit's width: the column's, at most a reading's)
-        let field_w = c.control_w().min(380.0);
+        let field_w = c.control_w().min(FIELD_MOST);
         for part in sec["layout"].as_array().unwrap_or(&empty) {
             if let Some(ids) = part["show"].as_array() {
                 for (k, sid) in ids.iter().enumerate() {
@@ -521,29 +517,41 @@ fn plugin_section(f: &mut Form, p: &PluginSection, map: &mut PluginMap) {
                 c.row();
                 c.label(&words(&card["label"]));
                 let (bx, by) = (cx, c.y);
-                c.cells.push(cell(kind::WBOX, bx, by, field_w, 100.0));
+                // the card: a well, its reading in large on its first line (Line.title's room
+                // Part.title-top down, as a box's title), the words beside the reading
+                // Space.row after it, then its facts two to a line, Space.tight apart, the
+                // first column as wide as its widest and Space.margin before the second; the
+                // card Space.pad in all round
+                let (fx0, inner) = (bx + space::PAD, field_w - 2.0 * space::PAD);
+                let first = by + part::TITLE_TOP;
+                let facts: Vec<(String, String)> = card["facts"].as_array().unwrap_or(&empty).iter().map(|f| (words(&f[0]), words(&f[1]))).collect();
+                let pitch = line::NOTE + space::TIGHT;
+                let fy0 = first + line::TITLE + space::ROW;
+                let h = if card["waiting"].is_string() { part::TITLE_TOP + line::TITLE + part::TITLE_TOP } else { fy0 - by + facts.len().div_ceil(2) as f32 * pitch - space::TIGHT + space::PAD };
+                c.cells.push(cell(kind::WBOX, bx, by, field_w, h));
                 if let Some(w) = card["waiting"].as_str() {
-                    c.cells.push(text_cell(style::LABEL, bx + 16.0, by + 14.0, field_w - 32.0, 26.0, w));
+                    c.cells.push(text_cell(style::LABEL, fx0, first, inner, line::TITLE, w));
                 } else {
                     let big = words(&card["big"]);
-                    let tw = text::width(crate::tokens::font::MEDIUM, crate::tokens::font::DISPLAY, &big) - 0.44 * big.chars().count() as f32;
-                    c.cells.push(text_cell(style::BIG, bx + 16.0, by + 14.0, tw + 4.0, 26.0, &big));
-                    c.cells.push(text_cell(style::LABEL_SOFT, bx + 16.0 + tw + 12.0, by + 22.0, 200.0, 16.0, &words(&card["beside"])));
-                    let facts: Vec<(String, String)> = card["facts"].as_array().unwrap_or(&empty).iter().map(|f| (words(&f[0]), words(&f[1]))).collect();
-                    // two to a line, the first column as wide as its widest
-                    let col0 = facts.iter().step_by(2).map(|(k, v)| text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, &format!("{k} ")) + text::width(crate::tokens::font::MEDIUM, crate::tokens::font::CONTROL, v)).fold(0.0f32, f32::max);
+                    let tw = text::width(font::MEDIUM, font::DISPLAY, &big).ceil() + 2.0;
+                    c.cells.push(text_cell(style::BIG, fx0, first, tw, line::TITLE, &big));
+                    let bx2 = fx0 + tw + space::ROW;
+                    c.cells.push(text_cell(style::LABEL_SOFT, bx2, first, (fx0 + inner - bx2).max(1.0), line::TITLE, &words(&card["beside"])));
+                    let kw_of = |k: &str| text::width(font::REGULAR, font::CONTROL, &format!("{k} "));
+                    let col0 = facts.iter().step_by(2).map(|(k, v)| kw_of(k) + text::width(font::MEDIUM, font::CONTROL, v)).fold(0.0f32, f32::max).ceil();
                     for (i, (k, v)) in facts.iter().enumerate() {
-                        let fx = bx + 16.0 + if i % 2 == 1 { col0 + 28.0 } else { 0.0 };
-                        let fy = by + 46.0 + (i / 2) as f32 * 22.0;
-                        let kw = text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, &format!("{k} "));
-                        c.cells.push(text_cell(style::FACT, fx, fy, kw + 2.0, 18.0, k));
-                        c.cells.push(text_cell(style::FACT_VALUE, fx + kw, fy, 120.0, 18.0, v));
+                        let fx = fx0 + if i % 2 == 1 { col0 + space::MARGIN } else { 0.0 };
+                        let fy = fy0 + (i / 2) as f32 * pitch;
+                        let kw = kw_of(k);
+                        let vw = text::width(font::MEDIUM, font::CONTROL, v).ceil() + 2.0;
+                        c.cells.push(text_cell(style::FACT, fx, fy, kw + 2.0, line::NOTE, k));
+                        c.cells.push(text_cell(style::FACT_VALUE, fx + kw, fy, vw, line::NOTE, v));
                     }
                 }
-                c.next(by, 100.0);
+                c.next(by, h);
             } else if let Some(st) = part.get("status") {
                 c.row();
-                c.label(&words(&st["label"]));
+                c.label_text(&words(&st["label"]));
                 let top = c.y;
                 let tone = match st["tone"].as_str() {
                     Some("good") => 1,
@@ -552,7 +560,7 @@ fn plugin_section(f: &mut Form, p: &PluginSection, map: &mut PluginMap) {
                     _ => 0,
                 };
                 state(c, top, tone, &words(&st["words"]));
-                let mut end = top + form::LINE;
+                let mut end = top + line::TEXT;
                 if let Some(note) = st["note"].as_str().filter(|n| !n.is_empty()) {
                     end = c.note(end, note);
                 }
@@ -560,11 +568,11 @@ fn plugin_section(f: &mut Form, p: &PluginSection, map: &mut PluginMap) {
             } else if let Some(credit) = part["credit"].as_str() {
                 c.row();
                 let top = c.y;
-                let w = c.control_w().min(640.0);
+                let w = c.control_w().min(READ_MOST);
                 let mut cy = top;
-                for line in text::wrap(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, credit, w) {
-                    c.cells.push(text_cell(style::CREDIT, cx, cy, w, 18.0, &line));
-                    cy += 18.0;
+                for l in text::wrap(font::REGULAR, font::CAPTION, credit, w) {
+                    c.cells.push(text_cell(style::CREDIT, cx, cy, w, line::NOTE, &l));
+                    cy += line::NOTE;
                 }
                 c.next(top, cy - top);
             }
@@ -593,10 +601,9 @@ fn devices_section(f: &mut Form, devices: &[DeviceRow]) {
             };
             c.row();
             let (x, top, w) = (c.inner_x(), c.y, c.inner_w());
-            c.cells.push(Cell { style: 2 + r.glyph as i32, ..cell(kind::DEVICE, x, top, 48.0, 48.0) });
-            c.cells.push(text_cell(style::NAME, x + 62.0, top + 3.0, w - 62.0, 21.0, &r.name));
-            c.cells.push(text_cell(style::SMALL, x + 62.0, top + 27.0, w - 62.0, 17.0, &line));
-            c.next(top, 48.0);
+            let end = package_head(&mut c.cells, x, top, w, 2 + r.glyph as i32, &r.name);
+            c.cells.push(text_cell(style::SMALL, x + size::ROW + space::PAD, end, w - size::ROW - space::PAD, line::NOTE, &line));
+            c.next(top, size::ROW);
             // (its switch is its core's)
             c.row();
             c.label("Control");
@@ -605,8 +612,10 @@ fn devices_section(f: &mut Form, devices: &[DeviceRow]) {
             form::switch(&mut c.cells, cx, top, None, &[("On", ""), ("Off", "")], Some(if r.on { 0 } else { 1 }), |j| (id(Ctl::PackageOn), (r.glyph * 2 + j) as i32, 0));
             let end = c.note(top + form::LINE, &format!("When off, Ectomatter leaves the {} to other programs.", d.kind));
             c.next(top, end - top);
+            // (rows of words: each on a line of words, its note Space.tight under it, as a
+            // control's is)
             c.row();
-            c.label("Permission");
+            c.label_text("Permission");
             let top = c.y;
             match d.reachable {
                 None => state(c, top, 0, "Not needed on this system"),
@@ -614,48 +623,41 @@ fn devices_section(f: &mut Form, devices: &[DeviceRow]) {
                 Some(true) => state(c, top, 1, "Granted"),
                 Some(false) => state(c, top, 2, "Not granted"),
             }
-            c.next(top, form::LINE);
+            c.next(top, line::TEXT);
             if !d.holders.is_empty() {
                 c.row();
-                c.label("Also open in");
+                c.label_text("Also open in");
                 let top = c.y;
-                c.cells.push(text_cell(style::VALUE_BRIGHT, cx, top, c.control_w(), form::LINE, &d.holders.join(", ")));
-                let end = c.note(top + form::LINE, &d.holders_note);
+                c.cells.push(text_cell(style::VALUE_BRIGHT, cx, top, c.control_w(), line::TEXT, &d.holders.join(", ")));
+                let end = c.note(top + line::TEXT, &d.holders_note);
                 c.next(top, end - top);
             }
             // its core: the version and where it stands, then its own words and Ectomatter's
             c.row();
-            c.label("Core");
+            c.label_text("Core");
             let top = c.y;
             let v = format!("{} · {}", r.version, r.status);
             let cw = c.control_w();
-            c.cells.push(text_cell(style::VALUE_BRIGHT, cx, top, cw, form::LINE, &v));
+            c.cells.push(text_cell(style::VALUE_BRIGHT, cx, top, cw, line::TEXT, &v));
             if r.removable {
-                let vx = cx + text::width(font::REGULAR, font::TEXT, &v).ceil() + 10.0;
-                c.cells.push(Cell { text: "Remove".into(), id: id(Ctl::PackageRemove), index: r.glyph as i32, ..cell(kind::LINK, vx, top + 4.0, crate::lighting::quiet_width("Remove", false), 26.0) });
+                // (Remove after the version, its words Space.row after the version's)
+                let vx = cx + text::width(font::REGULAR, font::TEXT, &v).ceil() + space::ROW - part::QUIET_PAD;
+                form::link(&mut c.cells, vx, top, line::TEXT, "Remove", id(Ctl::PackageRemove), r.glyph as i32);
             }
-            let mut end = c.note(top + form::LINE, &r.description);
+            let mut end = c.note(top + line::TEXT, &r.description);
             for words in &r.can {
                 end = c.note_at(cx, end, cw, words);
             }
             if let Some(w) = &r.warning {
-                end += 6.0;
-                let a = ink::WARN;
-                c.cells.push(Cell { style: 3, ..cell(kind::DOT, cx, end + 6.0, size::DOT, size::DOT) });
-                for l in text::wrap(font::REGULAR, font::NOTE, w, cw - 15.0) {
-                    c.cells.push(Cell { color: slint::Color::from_rgb_u8(a[0], a[1], a[2]), ..text_cell(style::NOTE_IN, cx + 15.0, end, cw - 15.0, form::NOTE_LINE, &l) });
-                    end += form::NOTE_LINE;
-                }
+                end = form::warning(&mut c.cells, cx, end + space::TIGHT, cw, w);
             }
             c.next(top, end - top);
         }
         // Add a core, and how updates come
         c.row();
         let (x, top, w) = (c.inner_x(), c.y, c.inner_w());
-        let aw = form::button_width("Add a core", true);
-        c.cells.push(Cell { text: "Add a core".into(), lines: "M8 3v10M3 8h10".into(), style: 35, id: id(Ctl::PackageAdd), index: 0, ..cell(kind::GHOST, x, top, aw, size::BUTTON) });
-        c.cells.push(text_cell(style::NOTE, x + aw + 14.0, top + 6.0, w - aw - 14.0, form::NOTE_LINE, "Ectomatter checks each core’s GitHub releases for updates once a day."));
-        c.next(top, size::BUTTON);
+        let h = form::add_row(&mut c.cells, x, top, w, "Add a core", "Ectomatter checks each core’s GitHub releases for updates once a day.", id(Ctl::PackageAdd), 0);
+        c.next(top, h);
     });
 }
 
@@ -675,56 +677,58 @@ fn packages_section(f: &mut Form, title: &str, add: i32, rows: &[PackageRow], ad
             let opts = [("On", ""), ("Off", "")];
             let sx = bx + bw - form::switch_width(&opts);
             form::switch(&mut c.cells, sx, ry, None, &opts, Some(if r.on { 0 } else { 1 }), |j| (id(Ctl::PackageOn), (r.glyph * 2 + j) as i32, 0));
-            // (each line to the right, against the switch)
-            let right = sx - 16.0;
+            // (each line to the right, Space.pad before the switch: the version, where it
+            // stands under it, and Remove under that)
+            let right = sx - space::PAD;
             let (w1, w2) = (text::width(font::REGULAR, font::NOTE, &r.version).ceil() + 2.0, text::width(font::REGULAR, font::NOTE, &r.status).ceil() + 2.0);
             let vx = right - w1.max(w2);
-            c.cells.push(text_cell(style::NOTE, right - w1, ry + 1.0, w1, form::NOTE_LINE, &r.version));
-            c.cells.push(Cell { color: slint::Color::from_rgb_u8(soft[0], soft[1], soft[2]), ..text_cell(style::NOTE_IN, right - w2, ry + 19.0, w2, form::NOTE_LINE, &r.status) });
+            c.cells.push(text_cell(style::NOTE, right - w1, ry, w1, line::NOTE, &r.version));
+            c.cells.push(Cell { color: crate::tokens::color(soft), ..text_cell(style::NOTE_IN, right - w2, ry + line::NOTE, w2, line::NOTE, &r.status) });
+            let mut right_h = 2.0 * line::NOTE;
             if r.removable {
                 let w3 = crate::lighting::quiet_width("Remove", false);
-                c.cells.push(Cell { text: "Remove".into(), id: id(Ctl::PackageRemove), index: r.glyph as i32, ..cell(kind::LINK, right - w3 + 9.0, ry + 40.0, w3, 26.0) });
+                form::link(&mut c.cells, right - w3 + part::QUIET_PAD, ry + right_h, size::QUIET, "Remove", id(Ctl::PackageRemove), r.glyph as i32);
+                right_h += size::QUIET;
             }
             // its tile, and its words
-            c.cells.push(Cell { style: 2 + r.glyph as i32, ..cell(kind::DEVICE, bx, ry, 40.0, 40.0) });
-            let tx = bx + 40.0 + 16.0;
-            let tw = vx - 16.0 - tx;
-            c.cells.push(text_cell(style::NAME, tx, ry, tw, 20.0, &r.name));
-            // (the systems it works on, a tag each, beside its name)
-            let mut gx = tx + text::width(font::MEDIUM, font::TAB, &r.name).ceil() + 10.0;
+            let tx = bx + size::ROW + space::PAD;
+            let tw = vx - space::PAD - tx;
+            let end = package_head(&mut c.cells, bx, ry, tw + size::ROW + space::PAD, 2 + r.glyph as i32, &r.name);
+            // (the systems it works on, a tag each, Space.inline after its name)
+            let mut gx = tx + text::width(font::MEDIUM, font::TAB, &r.name).ceil() + 2.0 + space::INLINE;
             for sys in &r.systems {
-                let pw = text::width(font::REGULAR, font::CAPTION, sys).ceil() + 14.0;
-                c.cells.push(Cell { text: sys.as_str().into(), style: 4, ..cell(kind::PILL, gx, ry, pw, 20.0) });
-                gx += pw + 6.0;
+                gx += form::pill(&mut c.cells, 4, gx, end - line::TEXT, sys) + space::INLINE;
             }
-            let mut ty = ry + 22.0;
-            for l in text::wrap(font::REGULAR, font::NOTE, &r.description, tw) {
-                c.cells.push(Cell { color: slint::Color::from_rgb_u8(soft[0], soft[1], soft[2]), ..text_cell(style::NOTE_IN, tx, ty, tw, form::NOTE_LINE, &l) });
-                ty += form::NOTE_LINE;
-            }
+            let mut ty = form::note_lines_in(&mut c.cells, tx, end, tw, soft, &r.description);
             for can in &r.can {
                 ty = c.note_at(tx, ty, tw, can);
             }
             if let Some(w) = &r.warning {
-                ty += 6.0;
-                let a = ink::WARN;
-                c.cells.push(Cell { style: 3, ..cell(kind::DOT, tx, ty + 6.0, size::DOT, size::DOT) });
-                for l in text::wrap(font::REGULAR, font::NOTE, w, tw - 15.0) {
-                    c.cells.push(Cell { color: slint::Color::from_rgb_u8(a[0], a[1], a[2]), ..text_cell(style::NOTE_IN, tx + 15.0, ty, tw - 15.0, form::NOTE_LINE, &l) });
-                    ty += form::NOTE_LINE;
-                }
+                ty = form::warning(&mut c.cells, tx, ty + space::TIGHT, tw, w);
             }
-            c.next(ry, (ty - ry).max(40.0).max(if r.removable { 66.0 } else { 0.0 }));
+            c.next(ry, (ty - ry).max(size::ROW).max(right_h));
         }
         // Add a plugin, and how updates come
         c.row();
         let top = c.y;
-        let aw = form::button_width(add_words, true);
-        c.cells.push(Cell { text: add_words.into(), lines: "M8 3v10M3 8h10".into(), style: 35, id: id(Ctl::PackageAdd), index: add, ..cell(kind::GHOST, bx, top, aw, size::BUTTON) });
-        c.cells.push(text_cell(style::NOTE, bx + aw + 14.0, top + 6.0, bw - aw - 14.0, form::NOTE_LINE, note));
-        c.next(top, size::BUTTON);
+        let h = form::add_row(&mut c.cells, bx, top, bw, add_words, note, id(Ctl::PackageAdd), add);
+        c.next(top, h);
     });
 }
+
+/// A package's head in Settings (a device's core, a plugin): its glyph on its tile, a row's
+/// height square, and its name Space.pad after the tile, Space.tight down; where the line
+/// under the name starts.
+fn package_head(cells: &mut Vec<Cell>, x: f32, top: f32, w: f32, glyph: i32, name: &str) -> f32 {
+    cells.push(Cell { style: glyph, ..cell(kind::DEVICE, x, top, size::ROW, size::ROW) });
+    let tx = x + size::ROW + space::PAD;
+    cells.push(text_cell(style::NAME, tx, top + space::TIGHT, w - (tx - x), line::TEXT, name));
+    top + space::TIGHT + line::TEXT
+}
+
+/// the widest a plugin's field and card grow, a reading's
+const FIELD_MOST: f32 = 380.0;
+use form::READ_MOST;
 
 /// Nits for a place along the Peak nits slider; `None` at its left end, the design's brightness.
 pub fn peak_at(frac: f32, reference: f64, top: f64) -> Option<f64> {

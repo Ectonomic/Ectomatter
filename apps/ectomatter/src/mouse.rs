@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 use smithay_client_toolkit::reexports::calloop::channel::Sender;
 
 use crate::core_host::Core;
-use crate::lighting::{Ctl, Stack, style, text_cell};
+use crate::lighting::{Ctl, Stack};
 use crate::{Cell, MouseCall, MouseRow};
 
 pub const DEVICE: &str = "sensei310-1";
@@ -1168,14 +1168,10 @@ impl Page {
         let mut s = Stack::new(w);
         crate::described::draw_effect(&mut s, &e, &l["params"], open);
         if self.light == 0 {
-            s.gap(22.0);
+            s.next();
             s.check(Ctl::MouseSameWheel, self.same_wheel, "Same on the wheel");
-            s.gap(6.0);
-            let lines = crate::text::wrap(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, "The wheel copies the logo’s effect and colors.", s.inner() - 26.0);
-            for line in lines {
-                s.cells.push(text_cell(style::NOTE, 42.0, s.y, s.inner() - 26.0, 18.0, &line));
-                s.y += 18.0;
-            }
+            s.close();
+            s.check_note("The wheel copies the logo’s effect and colors.");
         }
         laid(s, e["label"].as_str().unwrap_or(""))
     }
@@ -1195,7 +1191,7 @@ impl Page {
             // (the mouse's own word on which of its sensitivities was in use)
             let has_cpi = sec.items.iter().any(|&k| crate::described::setting(desc, k).is_some_and(|(id, _)| id == "cpi1"));
             if let Some(p) = self.state["settings"]["active"].as_u64().filter(|_| has_cpi) {
-                s.gap(6.0);
+                s.close();
                 s.note(&format!("When Ectomatter last asked, the mouse was using the {}.", if p == 1 { "first" } else { "second" }));
             }
             out.push(crate::boxes::Laid { title: sec.title.clone(), least, h: s.height(), cells: s.cells });

@@ -7,6 +7,7 @@
 use ectomatter_sensors::list::{Catalog, Part, What};
 use crate::lcd_page::{DateFormat, Kind, Page, Piece, Readings, Source, COLS, ROWS};
 use crate::lighting::{cell, id, kind, style, text_cell, Ctl};
+use crate::tokens::{font, line, size, space};
 use crate::Cell;
 
 /// What is being edited: which page of the Library, the block chosen, and
@@ -46,7 +47,7 @@ pub fn behind(p: &Piece) -> bool {
 }
 
 /// How tall the effects' tiles are in the Effect box, four to a row, for the groups under them.
-pub const TILES_H: f32 = TILE_ROWS * 76.0 + (TILE_ROWS - 1.0) * crate::tokens::space::INLINE;
+pub const TILES_H: f32 = TILE_ROWS * crate::tokens::size::TILE + (TILE_ROWS - 1.0) * crate::tokens::space::INLINE;
 const TILE_ROWS: f32 = crate::lcd_fx::FXS.len().div_ceil(4) as f32;
 /// What the Effect box says under its tiles.
 const UNDER: &str = "Blocks placed on the effect cover the effect in their own cells. Drag the handle on the effect’s corner to change how much of the screen the effect fills.";
@@ -221,8 +222,10 @@ fn looks(p: &Piece, r: &Readings) -> String {
     if row.ends_with(" unavailable") || row.is_empty() { "Unavailable".into() } else { row.trim().to_string() }
 }
 
-/// The box's groups, laid out two to a row: each a setting's name (with its
-/// value in a small well, for Looks like) over its control, or a note alone.
+/// The box's groups, laid out two to a row, Space.pad between the columns and between
+/// the rows: each a setting's name (with its value in a pill, for Looks like) Space.label
+/// over its control, or a note alone. A row is a control's height and more where a note
+/// runs longer, so the two groups in a row line up.
 struct Grid {
     w: f32,
     y: f32,
@@ -234,13 +237,13 @@ struct Grid {
 impl Grid {
     fn new(w: f32) -> Grid {
         // under the title's line
-        Grid { w, y: crate::tokens::size::BOX_HEAD, col: 0, row_h: 0.0, cells: Vec::new() }
+        Grid { w, y: size::BOX_HEAD, col: 0, row_h: 0.0, cells: Vec::new() }
     }
     fn col_w(&self) -> f32 {
-        (self.w - 32.0 - 16.0) / 2.0
+        (self.w - 3.0 * space::PAD) / 2.0
     }
     fn x(&self) -> f32 {
-        16.0 + self.col as f32 * (self.col_w() + 16.0)
+        space::PAD + self.col as f32 * (self.col_w() + space::PAD)
     }
     /// the group ends: the next goes beside it, or on a new row
     fn done(&mut self, h: f32) {
@@ -249,51 +252,49 @@ impl Grid {
             self.col = 1;
         } else {
             self.col = 0;
-            self.y += self.row_h + 14.0;
+            self.y += self.row_h + space::PAD;
             self.row_h = 0.0;
         }
     }
     fn head(&mut self, label: &str, value: Option<&str>) -> f32 {
         let (x, w) = (self.x(), self.col_w());
-        self.cells.push(text_cell(style::PROP, x, self.y, w, 20.0, label));
+        self.cells.push(text_cell(style::PROP, x, self.y, w, line::TEXT, label));
         if let Some(v) = value {
-            let vw = (crate::text::width(crate::tokens::font::MEDIUM, crate::tokens::font::CAPTION, v) + 16.0).min(w - crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, label) - 12.0);
-            self.cells.push(Cell { text: v.into(), ..cell(kind::PILL, x + w - vw, self.y, vw, 20.0) });
+            // (never over the setting's name: at most what it leaves, less Space.row)
+            let vw = crate::form::pill_width(0, v).min(w - crate::text::width(font::REGULAR, font::NOTE, label) - space::ROW);
+            self.cells.push(Cell { text: v.into(), ..cell(kind::PILL, x + w - vw, self.y + (line::TEXT - size::PILL) / 2.0, vw, size::PILL) });
         }
-        26.0
+        line::TEXT + space::LABEL
     }
     fn switch(&mut self, label: &str, c: Ctl, opts: &[&str], chosen: usize) {
         let top = self.head(label, None);
         let (x, w, y) = (self.x(), self.col_w(), self.y + top);
-        self.cells.push(Cell { style: 1, ..cell(kind::SEG, x, y, w, 34.0) });
-        let n = opts.len() as f32;
-        let each = (w - 6.0 - 2.0 * (n - 1.0)) / n;
-        for (j, name) in opts.iter().enumerate() {
-            self.cells.push(Cell { text: (*name).into(), on: j == chosen, id: id(c), index: j as i32, ..cell(kind::CHOICE, x + 3.0 + j as f32 * (each + 2.0), y + 3.0, each, 28.0) });
-        }
-        self.done(top + 34.0);
+        let opts: Vec<(&str, &str)> = opts.iter().map(|o| (*o, "")).collect();
+        crate::form::switch(&mut self.cells, x, y, Some(w), &opts, Some(chosen), |j| (id(c), j as i32, 0));
+        self.done(top + size::CONTROL);
     }
     fn dropdown(&mut self, label: &str, c: Ctl, shown: &str, open: bool) {
         let top = self.head(label, None);
-        self.cells.push(Cell { text: shown.into(), on: open, id: id(c), ..cell(kind::DROP, self.x(), self.y + top, self.col_w(), 34.0) });
-        self.done(top + 34.0);
+        self.cells.push(Cell { text: shown.into(), on: open, id: id(c), ..cell(kind::DROP, self.x(), self.y + top, self.col_w(), size::CONTROL) });
+        self.done(top + size::CONTROL);
     }
     fn field(&mut self, label: &str, c: Ctl, words: &str) {
         let top = self.head(label, None);
-        self.cells.push(Cell { text: words.into(), style: 7, id: id(c), ..cell(kind::FIELD, self.x(), self.y + top, self.col_w(), 34.0) });
-        self.done(top + 34.0);
+        self.cells.push(Cell { text: words.into(), style: 10, id: id(c), ..cell(kind::FIELD, self.x(), self.y + top, self.col_w(), size::CONTROL) });
+        self.done(top + size::CONTROL);
     }
     /// a slider, as the Lighting tab's speed is, filled to `frac`, the words for its two
-    /// ends beside it, and what it is set to in a small well at its name's right; `notch`, a
-    /// notch at its middle, its default, which holds the knob as it passes
+    /// ends beside it (Space.inline either side), at the middle of a control's height so it
+    /// lines up with the control beside it, and what it is set to in a pill at its name's
+    /// right; `notch`, a notch at its middle, its default, which holds the knob as it passes
     fn slider(&mut self, label: &str, c: Ctl, frac: f32, ends: (&str, &str), value: Option<&str>, notch: bool) {
         let top = self.head(label, value);
-        let (x, w, y) = (self.x(), self.col_w(), self.y + top);
-        let (lw, rw) = (crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::SMALL, ends.0).ceil(), crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::SMALL, ends.1).ceil());
-        self.cells.push(text_cell(style::END_L, x, y + 7.0, lw, 20.0, ends.0));
-        self.cells.push(Cell { value: frac, color: crate::tokens::color(crate::tokens::ink::SOFT), id: id(c), style: if notch { 4 } else { 3 }, ..cell(kind::FILLED, x + lw + 10.0, y + 7.0, w - lw - rw - 20.0, 20.0) });
-        self.cells.push(text_cell(style::END_R, x + w - rw, y + 7.0, rw, 20.0, ends.1));
-        self.done(top + 34.0);
+        let (x, w, y) = (self.x(), self.col_w(), self.y + top + (size::CONTROL - size::SLIDER) / 2.0);
+        let (lw, rw) = (crate::text::width(font::REGULAR, font::SMALL, ends.0).ceil(), crate::text::width(font::REGULAR, font::SMALL, ends.1).ceil());
+        self.cells.push(text_cell(style::END_L, x, y, lw, size::SLIDER, ends.0));
+        self.cells.push(Cell { value: frac, color: crate::tokens::color(crate::tokens::ink::SOFT), id: id(c), style: if notch { 4 } else { 3 }, ..cell(kind::FILLED, x + lw + space::INLINE, y, w - lw - rw - 2.0 * space::INLINE, size::SLIDER) });
+        self.cells.push(text_cell(style::END_R, x + w - rw, y, rw, size::SLIDER, ends.1));
+        self.done(top + size::CONTROL);
     }
     /// a note naming where a reading comes from, ending in a link to where that is chosen:
     /// `s` holds `link` once, its words kept on one line
@@ -301,41 +302,39 @@ impl Grid {
         let top = label.map_or(0.0, |l| self.head(l, None));
         let (x, w) = (self.x(), self.col_w());
         let held = link.replace(' ', "\u{a0}");
-        let lines = crate::text::wrap(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, &s.replace(link, &held), w);
+        let lines = crate::text::wrap(font::REGULAR, font::NOTE, &s.replace(link, &held), w);
         let lines: Vec<String> = lines.iter().map(|l| l.replace(&held, link)).collect();
-        for (k, line) in lines.iter().enumerate() {
-            let y = self.y + top + k as f32 * 18.0;
-            match line.find(link) {
+        for (k, l) in lines.iter().enumerate() {
+            let y = self.y + top + k as f32 * line::NOTE;
+            match l.find(link) {
                 Some(at) => {
-                    let (before, after) = (&line[..at], &line[at + link.len()..]);
-                    let (bw, lw) = (crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, before), crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, link).ceil() + 1.0);
-                    self.cells.push(text_cell(style::NOTE, x, y, bw + 1.0, 18.0, before));
-                    self.cells.push(Cell { text: link.into(), id: id(c), ..cell(kind::INLINE_LINK, x + bw, y, lw, 18.0) });
-                    self.cells.push(text_cell(style::NOTE, x + bw + lw, y, (w - bw - lw).max(1.0), 18.0, after));
+                    let (before, after) = (&l[..at], &l[at + link.len()..]);
+                    let (bw, lw) = (crate::text::width(font::REGULAR, font::NOTE, before), crate::text::width(font::REGULAR, font::NOTE, link).ceil() + 1.0);
+                    self.cells.push(text_cell(style::NOTE, x, y, bw + 1.0, line::NOTE, before));
+                    self.cells.push(Cell { text: link.into(), id: id(c), ..cell(kind::INLINE_LINK, x + bw, y, lw, line::NOTE) });
+                    self.cells.push(text_cell(style::NOTE, x + bw + lw, y, (w - bw - lw).max(1.0), line::NOTE, after));
                 }
-                None => self.cells.push(text_cell(style::NOTE, x, y, w, 18.0, line)),
+                None => self.cells.push(text_cell(style::NOTE, x, y, w, line::NOTE, l)),
             }
         }
-        self.done(top + lines.len() as f32 * 18.0);
+        self.done(top + lines.len() as f32 * line::NOTE);
     }
     fn value(&mut self, label: &str, v: &str) {
-        let h = self.head(label, Some(v));
-        self.done(h - 6.0);
+        self.head(label, Some(v));
+        self.done(line::TEXT);
     }
     fn note(&mut self, label: Option<&str>, s: &str) {
         let top = label.map_or(0.0, |l| self.head(l, None));
         let (x, w) = (self.x(), self.col_w());
-        let lines = crate::text::wrap(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, s, w);
-        for (k, line) in lines.iter().enumerate() {
-            self.cells.push(text_cell(style::NOTE, x, self.y + top + k as f32 * 18.0, w, 18.0, line));
-        }
-        self.done(top + lines.len() as f32 * 18.0);
+        let end = crate::form::note_lines(&mut self.cells, x, self.y + top, w, style::NOTE, s);
+        self.done(end - self.y);
     }
+    /// the box's pieces, and how tall it is: Space.pad under its last row
     fn height(mut self) -> (Vec<Cell>, f32) {
         if self.col == 1 {
-            self.y += self.row_h + 14.0;
+            self.y += self.row_h + space::PAD;
         }
-        (self.cells, self.y - 14.0 + 18.0)
+        (self.cells, self.y)
     }
 }
 
@@ -353,8 +352,10 @@ const FIT: [&str; 2] = ["Cut off", "Scroll"];
 /// From line names and links to Settings for.
 pub fn block_box(page: &Page, chosen: Option<usize>, r: &Readings, avail: &[Source], open: Option<Ctl>, from: &From, w: f32) -> BlockBox {
     let Some(p) = chosen.and_then(|i| page.pieces.get(i)) else {
-        // (its legend has the four lines, and the line on selecting once there are blocks)
-        let h = if page.pieces.is_empty() { 50.0 + 3.0 * 29.0 + 18.0 - 11.0 + 18.0 } else { 78.0 + 3.0 * 29.0 - 11.0 + 18.0 };
+        // (its legend, as the window draws it: the line on selecting, once there are blocks,
+        // Space.row over the three kinds of block, a note's line each, Space.row apart)
+        let lead = if page.pieces.is_empty() { 0.0 } else { line::NOTE + space::ROW };
+        let h = size::BOX_HEAD + lead + 3.0 * line::NOTE + 2.0 * space::ROW + space::PAD;
         return BlockBox { kind: 0, title: "Nothing selected".into(), cells: Vec::new(), h };
     };
     let mut g = Grid::new(w);
@@ -398,7 +399,7 @@ pub fn block_box(page: &Page, chosen: Option<usize>, r: &Readings, avail: &[Sour
         }
         Kind::Effect { fx, speed, word } => {
             // (under the effects' tiles, which the window draws)
-            g.y += TILES_H + 14.0;
+            g.y += TILES_H + space::PAD;
             if *fx == crate::lcd_page::Fx::Bounce {
                 g.field("Word", Ctl::ScrText, word);
             }

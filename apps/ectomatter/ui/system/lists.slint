@@ -1,7 +1,7 @@
 // Lists down a page's side: the rail's items, and the anchoring column of a
 // device's page (its profiles) with its rows and its heading.
 
-import { Space, Radius, Font, Size, Part, Shadow, Ink } from "tokens.slint";
+import { Space, Radius, Font, Line, Size, Part, Shadow, Ink } from "tokens.slint";
 import { Typing } from "state.slint";
 import { PencilButton, MoreButton } from "controls.slint";
 import { Tip } from "surfaces.slint";
@@ -94,7 +94,7 @@ export component AnchorHead inherits Text {
     font-family: Font.ui;
     font-size: Font.small;
     font-weight: Font.strong;
-    letter-spacing: 0.9px;
+    letter-spacing: Font.caps-tracking;
     color: Ink.quiet;
     vertical-alignment: center;
 }

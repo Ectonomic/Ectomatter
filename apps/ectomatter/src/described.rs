@@ -12,7 +12,7 @@
 
 use serde_json::{Value, json};
 
-use crate::lighting::{Ctl, Stack, hex_of, kind, style, text_cell};
+use crate::lighting::{Ctl, Stack, hex_of, kind};
 use crate::Cell;
 
 /// The ids the pieces carry: an effect's setting is EFFECT_IDS and its place
@@ -223,12 +223,6 @@ pub fn with_color(d: &Value, v: &Value, index: usize, c: [u8; 3]) -> Value {
     }
 }
 
-/// A group's name in small capitals, as a box's groups are named.
-fn small_caps(s: &mut Stack, name: &str) {
-    s.cells.push(text_cell(style::GROUP, 16.0, s.y, s.inner(), 14.0, &name.to_uppercase()));
-    s.gap(14.0 + 10.0);
-}
-
 /// The sliders' fill.
 fn fill() -> slint::Color {
     crate::tokens::color(crate::tokens::ink::SOFT)
@@ -247,21 +241,21 @@ pub fn draw_effect(s: &mut Stack, effect: &Value, params: &Value, open: Option<(
         let open = open.filter(|(p, _)| *p == k).map(|(_, i)| i);
         match d["type"].as_str().unwrap_or("") {
             "color" => {
-                s.gap(14.0);
-                small_caps(s, &label(id, d));
+                s.next();
+                s.caps(&label(id, d));
                 s.dots_at(at, &[rgb(v).unwrap_or([0; 3])], open, true);
             }
             "colors" => {
                 // its colors as dots you can change, over the strip they blend along
                 let cols = colors(v);
-                s.gap(14.0);
-                small_caps(s, &label(id, d));
+                s.next();
+                s.caps(&label(id, d));
                 s.strip(&cols);
                 s.dots_at(at, &cols, open, false);
             }
             "duration" => {
                 let secs = v.as_f64().unwrap_or(0.0) / 1000.0;
-                s.gap(18.0);
+                s.next();
                 if is_speed(id) {
                     s.head(&label(id, d), Some(&format!("{secs:.1} s a cycle")));
                     // quick at the right, as the keyboard's speed sliders run
@@ -272,19 +266,19 @@ pub fn draw_effect(s: &mut Stack, effect: &Value, params: &Value, open: Option<(
                 }
             }
             "int" | "number" => {
-                s.gap(18.0);
+                s.next();
                 s.head(&label(id, d), Some(&amount(d, v)));
                 s.slider_at(at, frac(id, d, v), fill(), None);
             }
             "choice" => {
-                s.gap(18.0);
+                s.next();
                 s.head(&label(id, d), None);
                 let words = options(d);
                 let opts: Vec<(&str, &str)> = words.iter().map(|w| (w.as_str(), "")).collect();
                 s.switch_at(at, &opts, chosen(d, v));
             }
             "bool" => {
-                s.gap(18.0);
+                s.next();
                 s.check_at(at, v.as_bool().unwrap_or(false), &label(id, d));
             }
             _ => {}
@@ -357,19 +351,15 @@ pub fn sections(desc: &Value, values: &Value) -> Vec<Section> {
 pub fn draw_section(s: &mut Stack, desc: &Value, sec: &Section, values: &Value, known: &Value) {
     let items = desc["capabilities"]["settings"]["items"].as_array().cloned().unwrap_or_default();
     let kind = desc["kind"].as_str().unwrap_or("device");
-    let mut last_switch = false;
-    for (j, &k) in sec.items.iter().enumerate() {
+    for &k in &sec.items {
         let Some(d) = items.get(k) else { continue };
         let id = d["id"].as_str().unwrap_or("");
         let at = SETTING_IDS + k as i32;
         let v = value_of(values, id, d);
-        if j > 0 {
-            s.gap(22.0);
-        }
+        s.next();
         // (a setting the section is named for needs no name of its own)
         let words = d["short"].as_str().map(String::from).unwrap_or_else(|| label(id, d));
         let own_name = label(id, d) != sec.title;
-        last_switch = false;
         match d["type"].as_str().unwrap_or("") {
             "int" | "number" | "duration" => {
                 let shown = if d["type"] == "duration" { format!("{:.1} s", v.as_f64().unwrap_or(0.0) / 1000.0) } else { amount(d, v) };
@@ -385,21 +375,23 @@ pub fn draw_section(s: &mut Stack, desc: &Value, sec: &Section, values: &Value, 
                 // (one the device can't tell back: none chosen until one is)
                 let unknown = known[id].as_bool() == Some(false);
                 s.switch_at(at, &opts, if unknown { usize::MAX } else { chosen(d, v) });
-                last_switch = true;
             }
             "bool" => s.check_at(at, v.as_bool().unwrap_or(false), &words),
             _ => {}
         }
     }
+    let mut noted = false;
     if let Some(n) = &sec.note {
-        s.gap(if last_switch { 12.0 } else { 18.0 });
+        s.then();
         s.note(n);
+        noted = true;
     }
     for &k in &sec.items {
         let Some(d) = items.get(k) else { continue };
         let id = d["id"].as_str().unwrap_or("");
         if known[id].as_bool() == Some(false) {
-            s.gap(6.0);
+            if noted { s.close() } else { s.then() }
+            noted = true;
             let name = label(id, d).to_lowercase();
             if d["type"] == "choice" {
                 s.note(&format!("The {kind} can’t tell Ectomatter its {name}. Choose one to set it."));
@@ -718,8 +710,8 @@ pub struct Boxes {
 
 /// the boxes' least widths, which the page's row of boxes grows them from
 /// (ui/app.slint's Lighting row has them too)
-pub const SET_W: f32 = 360.0;
-pub const PLACE_W: f32 = 320.0;
+pub const SET_W: f32 = crate::tokens::size::SETTINGS;
+pub const PLACE_W: f32 = crate::tokens::size::PLACES;
 /// a speed's slider's fill
 const SPEED_FILL: [u8; 3] = [0xd4, 0xd4, 0xd8];
 
@@ -750,13 +742,11 @@ pub fn boxes(light: &Value, effect: &Value, e: &Value, look: &Look, set_w: f32, 
     let mut s = Stack::new(set_w);
     // the reset, at the top right, level with the title
     if effect["reset"] == true {
-        s.link_right(Ctl::Reset, "Reset", 13.0, crate::lighting::RESET_ICON);
-        s.y -= 6.0;
+        s.title_link(Ctl::Reset, "Reset", crate::lighting::RESET_ICON);
     }
     if let Some(n) = effect["note"].as_str() {
         s.note(&words(n, look));
     }
-    s.gap(4.0);
     // (a level's slider in the effect's first color, white with none)
     let tint = ps
         .iter()
@@ -786,20 +776,18 @@ pub fn boxes(light: &Value, effect: &Value, e: &Value, look: &Look, set_w: f32, 
     }
     for (name, show, note) in sections.iter().filter(|(_, show, note)| !show.is_empty() || note.is_some()) {
         s.group(name);
-        for (j, &k) in show.iter().enumerate() {
+        for &k in show {
             let (id, d) = (&ps[k].0, &ps[k].1);
-            if j > 0 {
-                s.gap(if d["type"] == "bool" { 14.0 } else { 16.0 });
-            }
+            s.next();
             drawn(&mut s, k, id, d, &kept(e, id, d), look, tint);
         }
         if let Some(n) = note {
-            s.gap(12.0);
+            s.then();
             s.note(&words(n, look));
         }
     }
     if effect["reactive"] == true {
-        s.gap(14.0);
+        s.next();
         s.check(Ctl::Demo, look.demo, "Preview with pretend typing");
     }
     // where and when: the zones it lights, as a switch and chips (faded on the
@@ -807,7 +795,6 @@ pub fn boxes(light: &Value, effect: &Value, e: &Value, look: &Look, set_w: f32, 
     // a menu, under a hairline. Everything sits where it always does, so
     // nothing moves as it changes.
     let mut p = Stack::new(place_w);
-    p.y = 46.0;
     let mut place_title = String::new();
     let mut rule = true;
     for g in layout.iter().filter(|g| g["box"] == "place") {
@@ -822,14 +809,14 @@ pub fn boxes(light: &Value, effect: &Value, e: &Value, look: &Look, set_w: f32, 
             }
             if rule {
                 rule = false;
-                p.y = p.y.max(182.0) + 14.0;
-                p.cells.push(Cell { color: crate::tokens::color(crate::tokens::ink::LINE), ..crate::lighting::cell(kind::BOX, 16.0, p.y, p.inner(), 1.0) });
-                p.y += 14.0;
+                // (under the zones at their tallest, so nothing under them moves as they change)
+                p.y = p.y.max(zones_most());
+                p.rule();
+            } else {
+                p.next();
             }
-            p.cells.push(text_cell(style::PROP, 16.0, p.y, p.inner(), 20.0, &label(id, d)));
-            p.y += 24.0;
+            p.head(&label(id, d), None);
             p.dropdown_at(at, &chosen_label(d, &v), look.menu == Some(k));
-            p.y += 10.0;
         }
     }
     Boxes { kind: 0, title, set_h: s.height(), set: s.cells, place_h: if place_title.is_empty() { 0.0 } else { p.height() }, place: p.cells, place_title }
@@ -843,7 +830,6 @@ pub fn boxes(light: &Value, effect: &Value, e: &Value, look: &Look, set_w: f32, 
 fn drawn(s: &mut Stack, k: usize, id: &str, d: &Value, v: &Value, look: &Look, tint: [u8; 3]) {
     let at = EFFECT_IDS + k as i32;
     let open = look.open.filter(|(p, _)| *p == k).map(|(_, i)| i);
-    let rgb_of = |c: [u8; 3]| slint::Color::from_rgb_u8(c[0], c[1], c[2]);
     match d["type"].as_str().unwrap_or("") {
         "color" => s.dots_at(at, &[rgb(v).unwrap_or([0; 3])], open, true),
         "colors" => {
@@ -857,7 +843,7 @@ fn drawn(s: &mut Stack, k: usize, id: &str, d: &Value, v: &Value, look: &Look, t
             let n = v.as_f64().unwrap_or(min);
             let shown = if d["percent"] == true { format!("{}%", ((n - min) / (max - min) * 100.0).round()) } else { amount(d, v) };
             s.head(&label(id, d), Some(&shown));
-            s.slider_at(at, ((n - min) / (max - min)) as f32, if d["tint"] == true { rgb_of(tint) } else { fill() }, None);
+            s.slider_at(at, ((n - min) / (max - min)) as f32, if d["tint"] == true { crate::tokens::color(tint) } else { fill() }, None);
         }
         "duration" => {
             let (min, max, _) = span(d);
@@ -865,7 +851,7 @@ fn drawn(s: &mut Stack, k: usize, id: &str, d: &Value, v: &Value, look: &Look, t
             s.head(&label(id, d), Some(&format!("{:.1} s", n / 1000.0)));
             if is_speed_of(id, d) {
                 // the slider runs slow to fast: right is faster
-                s.slider_at(at, ((max - n) / (max - min)) as f32, rgb_of(SPEED_FILL), Some(("Slow", "Fast")));
+                s.slider_at(at, ((max - n) / (max - min)) as f32, crate::tokens::color(SPEED_FILL), Some(("Slow", "Fast")));
             } else {
                 s.slider_at(at, ((n - min) / (max - min)) as f32, fill(), None);
             }
@@ -885,6 +871,13 @@ fn drawn(s: &mut Stack, k: usize, id: &str, d: &Value, v: &Value, look: &Look, t
     }
 }
 
+/// Where the zones' setting ends at its tallest: its switch, two rows of chips and a
+/// line of its note, under the box's title.
+fn zones_most() -> f32 {
+    use crate::tokens::{line, size, space};
+    size::BOX_HEAD + size::CONTROL + space::ROW + 2.0 * size::CHIP + space::INLINE + space::ROW + line::NOTE
+}
+
 /// A zones setting: the whole light or some zones, the zones as chips (each
 /// by its place in the light's list, faded on the whole light; `hot` the one
 /// the pointer is over on the picture), and a word on what lights.
@@ -897,11 +890,11 @@ fn zones_drawn(p: &mut Stack, at: i32, light: &Value, z: u64, look: &Look) {
     for c in p.cells.iter_mut().rev().take(2) {
         c.index += 100;
     }
-    p.gap(14.0);
+    p.then();
     let picks = if whole { 0 } else { z & all };
     let chips: Vec<(usize, &str, bool)> = list.iter().enumerate().filter(|(_, z)| !z.2).map(|(i, z)| (i, z.1.as_str(), picks & z.0 != 0)).collect();
     p.chips_at(at, &chips, whole, look.hot);
-    p.gap(8.0);
+    p.then();
     p.note(&if whole {
         "Every key lights. Pick a zone to light only that.".to_string()
     } else if picks != 0 {
@@ -924,34 +917,17 @@ fn brush(light: &Value, effect: &Value, look: &Look, w: f32) -> Boxes {
         cols.push(look.paint);
     }
     let at = chosen.unwrap_or(PRESETS.len());
-    let rgb_of = |c: [u8; 3]| slint::Color::from_rgb_u8(c[0], c[1], c[2]);
-    // (a little closer than the effects' colors, so the ready ones and "+" share a line)
-    let (mut x, mut y) = (16.0f32, s.y);
-    for (j, col) in cols.iter().enumerate() {
-        if x > 16.0 && x + 28.0 > w - 16.0 {
-            x = 16.0;
-            y += 36.0;
-        }
-        s.cells.push(Cell { color: rgb_of(*col), on: j == at, id: crate::lighting::id(Ctl::Preset), index: j as i32, ..crate::lighting::cell(kind::COLOR_DOT, x, y, 28.0, 28.0) });
-        x += 33.0;
-    }
-    // any other color, from the picker
-    if x + 28.0 > w - 16.0 {
-        x = 16.0;
-        y += 36.0;
-    }
-    s.cells.push(Cell { style: 1, on: look.painting, id: crate::lighting::id(Ctl::Paint), ..crate::lighting::cell(kind::COLOR_DOT, x, y, 28.0, 28.0) });
-    s.y = y + 28.0;
+    // the ready colors, and any other from the picker
+    let mut dots: Vec<Cell> = cols.iter().enumerate().map(|(j, col)| Cell { color: crate::tokens::color(*col), on: j == at, id: crate::lighting::id(Ctl::Preset), index: j as i32, ..crate::lighting::cell(kind::COLOR_DOT, 0.0, 0.0, crate::tokens::size::SWATCH, crate::tokens::size::SWATCH) }).collect();
+    dots.push(Cell { style: 1, on: look.painting, id: crate::lighting::id(Ctl::Paint), ..crate::lighting::cell(kind::COLOR_DOT, 0.0, 0.0, crate::tokens::size::SWATCH, crate::tokens::size::SWATCH) });
+    s.dots(dots);
     s.group("Fill a zone");
     let list = zones(light).0;
     let chips: Vec<(usize, &str, bool)> = list.iter().enumerate().map(|(i, z)| (i, z.1.as_str(), false)).collect();
     s.chips(Ctl::Fill, &chips, false, None);
-    s.gap(10.0);
-    let row = s.y;
-    let w1 = crate::lighting::quiet_width("Scatter colors", false);
-    s.cells.push(Cell { text: "Scatter colors".into(), id: crate::lighting::id(Ctl::Scatter), ..crate::lighting::cell(kind::QUIET, 8.0, row, w1, 24.0) });
-    s.cells.push(Cell { text: "Clear every key".into(), id: crate::lighting::id(Ctl::Clear), ..crate::lighting::cell(kind::QUIET, 8.0 + w1 + 4.0, row, crate::lighting::quiet_width("Clear every key", false), 24.0) });
-    s.y = row + 24.0 + 12.0;
+    s.then();
+    s.links(&[(Ctl::Scatter, "Scatter colors"), (Ctl::Clear, "Clear every key")]);
+    s.then();
     s.note(&words(effect["note"].as_str().unwrap_or(""), look));
     Boxes { kind: 2, title: "Brush".into(), set_h: s.height(), set: s.cells, place: Vec::new(), place_h: 0.0, place_title: String::new() }
 }

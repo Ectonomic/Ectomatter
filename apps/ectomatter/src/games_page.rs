@@ -346,15 +346,13 @@ const PAD_X: f32 = crate::tokens::space::PAD;
 const LABEL_W: f32 = crate::tokens::size::LABEL;
 const LINE: f32 = crate::form::LINE;
 const GLYPH: f32 = crate::form::LINE;
+/// where a row's controls start, from the box's edge: after its label's column, the form's
+const CTRL_X: f32 = PAD_X + LABEL_W + PAD_X;
 const DROP_W: f32 = 300.0;
 /// the rhythm down a box: a row's room above and below what it holds, a rule between
 const ROW: f32 = crate::tokens::space::ROW;
 /// a box's first row's top, and its foot, from its own edges
 const BOX_IN: f32 = crate::tokens::space::PAD - crate::tokens::space::ROW;
-/// the rule between rows
-fn rule() -> slint::Color {
-    crate::tokens::color(crate::tokens::ink::LINE)
-}
 /// where a page's boxes start: under the line of words at its top
 const HEAD_END: f32 = crate::tokens::size::HEAD;
 /// On this page: its column on the page's left (it's for getting about the
@@ -365,19 +363,27 @@ const HEAD_END: f32 = crate::tokens::size::HEAD;
 const TOC_W: f32 = 200.0;
 const TOC_W_MAX: f32 = 220.0;
 const TOC_GAP: f32 = crate::tokens::space::SECTION;
+/// beside On this page, the sections' column at least, and without it, at least
+const SECTIONS_LEAST: f32 = 640.0;
+const COLUMN_LEAST: f32 = 400.0;
+/// the game's picture across the page's top
+const HERO_H: f32 = crate::tokens::size::HERO;
 /// The pieces down a row's column in a plugin's section, as they're placed:
 /// where the next goes, and whether one has gone yet (the first sits on the
 /// line of the row's label, its middle on the label's).
 struct Column {
     y: f32,
     first: bool,
+    /// the line the row's label sits on: a control's, or a line of words where the row's
+    /// first piece is words (a status, a value), as a form's rows have it
+    line: f32,
 }
 
 impl Column {
     /// A piece `h` high placed, `gap` under the one before: where it goes
     /// (the first, its middle on the label's, as the mock's rows have it).
     fn place(&mut self, h: f32, gap: f32) -> f32 {
-        let y = if self.first { self.y + (LINE - h).max(0.0) / 2.0 } else { self.y + gap };
+        let y = if self.first { self.y + (self.line - h).max(0.0) / 2.0 } else { self.y + gap };
         self.y = y + h;
         self.first = false;
         y
@@ -389,6 +395,13 @@ impl Column {
     }
 }
 
+/// a script's card: the column its When it starts and When it quits are in
+const SCRIPT_KEY: f32 = 170.0;
+/// where On this page scrolls a section to: its heading, Space.row under the page's head
+const TOC_ABOVE: f32 = crate::tokens::space::ROW;
+/// a nested setting's name's column, and its dropdown's width at most
+const NEST_LABEL: f32 = 104.0;
+const NEST_DROP: f32 = 330.0;
 /// the glyph a plugin's section draws on a button to open a folder (on 14 units, as the mock's)
 const FOLDER: &str = "M1.8 3.6c0-.6.5-1.1 1.1-1.1h2.6l1.3 1.4h4.3c.6 0 1.1.5 1.1 1.1v5.4c0 .6-.5 1.1-1.1 1.1H2.9c-.6 0-1.1-.5-1.1-1.1Z";
 /// the covers: at least this wide, with a card grid's gaps across and down
@@ -741,9 +754,9 @@ impl Games {
             Order::Most => "Most played",
         };
         ui.set_gl_store(shop_word.into());
-        ui.set_gl_store_w(crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, shop_word).ceil() + 48.0);
+        ui.set_gl_store_w(crate::form::drop_width(shop_word));
         ui.set_gl_sort(order_word.into());
-        ui.set_gl_sort_w(crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, order_word).ceil() + 48.0);
+        ui.set_gl_sort_w(crate::form::drop_width(order_word));
         let q = self.query.trim().to_lowercase();
         let found = |e: &&Entry| q.is_empty() || e.name.to_lowercase().contains(&q);
         if apps_tab {
@@ -781,7 +794,8 @@ impl Games {
             };
             ui.set_gl_empty(empty.into());
             ui.set_gl_empty_sub(sub.into());
-            ui.set_gl_page_h(HEAD_END + 6.0 + n as f32 * 60.0 + 12.0 + 40.0);
+            // (the apps' box under the head, its rows Space.inline in from it, the page's margin under it)
+            ui.set_gl_page_h(HEAD_END + n as f32 * crate::tokens::size::APP + 2.0 * crate::tokens::space::INLINE + crate::tokens::space::MARGIN);
             return;
         }
         crate::front::set_rows(&self.apps, Vec::new());
@@ -806,9 +820,10 @@ impl Games {
         let cols = (((room + GAP_X) / (COVER_MIN + GAP_X)).floor() as usize).clamp(2, 12);
         let cw = ((room - GAP_X * (cols - 1) as f32) / cols as f32).floor();
         let ch = (cw * 1.5).round();
-        let pitch = ch + 9.0 + 34.0 + GAP_Y;
-        let top = HEAD_END + 6.0;
-        let (pw, ph, pr) = ((cw * scale).round() as u32, (ch * scale).round() as u32, (8.0 * scale).round() as u32);
+        // (each cover, its name Space.inline under it, then the grid's gap)
+        let pitch = ch + crate::tokens::space::INLINE + crate::tokens::size::COVER_NAME + GAP_Y;
+        let top = HEAD_END;
+        let (pw, ph, pr) = ((cw * scale).round() as u32, (ch * scale).round() as u32, (crate::tokens::radius::CONTROL * scale).round() as u32);
         let covers: Vec<LibCover> = list
             .iter()
             .enumerate()
@@ -844,7 +859,7 @@ impl Games {
         ui.set_gl_empty(empty.into());
         ui.set_gl_empty_sub(sub.into());
         let rows = n.div_ceil(cols);
-        ui.set_gl_page_h(top + rows as f32 * pitch + 40.0);
+        ui.set_gl_page_h(top + rows as f32 * pitch - GAP_Y + crate::tokens::space::MARGIN);
     }
 
     /// An app's icon: Steam's, or its desktop file's.
@@ -902,71 +917,70 @@ impl Games {
         // room beside it; without, the sections take the page
         let room = page_w - 2.0 * X0;
         let toc_w = (room - crate::tokens::size::FORM - TOC_GAP).clamp(TOC_W, TOC_W_MAX);
-        let with_toc = room - (toc_w + TOC_GAP) >= 640.0;
+        let with_toc = room - (toc_w + TOC_GAP) >= SECTIONS_LEAST;
         self.left = if with_toc { X0 + toc_w + TOC_GAP } else { X0 };
-        let w = if with_toc { (page_w - self.left - X0).min(crate::tokens::size::FORM) } else { room.min(crate::tokens::size::FORM).max(400.0) };
+        let w = if with_toc { (page_w - self.left - X0).min(crate::tokens::size::FORM) } else { room.min(crate::tokens::size::FORM).max(COLUMN_LEAST) };
         let x0 = self.left;
         // the game's picture, as wide as the page, with its facts
         let hero = entry.as_ref().and_then(|e| e.art.hero.clone().map(|h| (h, e.art.logo.clone())));
         let mut y = HEAD_END;
         if let Some((hero, logo)) = hero {
             let hw = (page_w - 2.0 * X0).max(1.0);
-            let pic = self.pic(Pic::Hero(hero, logo, (hw * scale).round() as u32, (240.0 * scale).round() as u32, (scale * 100.0).round() as u32));
+            let pic = self.pic(Pic::Hero(hero, logo, (hw * scale).round() as u32, (HERO_H * scale).round() as u32, (scale * 100.0).round() as u32));
             ui.set_gl_has_hero(true);
             ui.set_gl_hero(pic.unwrap_or_default());
             let e = entry.as_ref().expect("a hero is an entry's");
             let (runs, w) = facts(e);
             crate::front::set_rows(&self.facts, runs);
             ui.set_gl_facts_w(w);
-            y += 240.0 + 28.0;
+            y += HERO_H + crate::tokens::space::SECTION;
         } else {
             ui.set_gl_has_hero(false);
             crate::front::set_rows(&self.facts, Vec::new());
-            y += 6.0;
         }
         let mut cells = Vec::new();
         // Devices: a row for each, its glyph and name and its dropdown (in gray what
         // the page follows, in ink what it chose), and under them how the switching goes
-        cells.push(text_cell(style::HEAD, x0, y, w / 2.0, 18.0, "Devices"));
-        if game && !every {
+        let state = if game && !every {
             let n = devices.iter().filter(|d| self.row_value(id, d).1 && self.row_value(id, d).0 != self.row_value(id, d).2).count();
-            let state = match n {
+            match n {
                 0 => "Same as every game".to_string(),
                 n => format!("{n} changed for this game"),
-            };
-            let sw = crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, &state).ceil() + 2.0;
-            cells.push(text_cell(style::NOTE, x0 + w - sw, y, sw, 18.0, &state));
-        }
-        y += 18.0 + crate::tokens::space::LABEL;
+            }
+        } else {
+            String::new()
+        };
+        let devices_top = y;
+        y = crate::form::heading(&mut cells, x0, y, w, "Devices", "", &state);
         let box_y = y;
         let mut out = Vec::new();
-        let (lx, cx) = (x0 + PAD_X, x0 + PAD_X + LABEL_W + 24.0);
+        let (lx, cx) = (x0 + PAD_X, x0 + CTRL_X);
         let mut ry = box_y + BOX_IN;
         for (k, d) in devices.iter().enumerate() {
             if k > 0 {
-                out.push(Cell { color: rule(), ..cell(kind::BOX, lx, ry, w - 2.0 * PAD_X, 1.0) });
+                out.push(crate::form::rule(lx, ry, w - 2.0 * PAD_X));
             }
             let (c, own, follows) = self.row_value(id, d);
+            // (its name on the control's line, or, with what it is under it, Space.tight up)
+            let name_top = if d.sub.is_empty() { ry + ROW } else { ry + ROW - crate::tokens::space::TIGHT };
             // (a game's own choice, unlike Every game's: a dot beside its name puts it back)
             if game && !every && own && c != follows {
-                let mid = if d.sub.is_empty() { ry + ROW + LINE / 2.0 } else { ry + ROW - 4.0 + 10.0 };
+                let mid = if d.sub.is_empty() { ry + ROW + LINE / 2.0 } else { name_top + crate::tokens::line::TEXT / 2.0 };
                 self.reset_dot(&mut out, Reset::Device { key: d.key.clone(), label: d.name.clone() }, lx, mid);
             }
             // (the Scene row's glyph is the scenes' own)
             let glyph = if d.kind == "scene" { -1 } else { d.glyph.map_or((d.kind == "mouse") as i32, |g| 2 + g as i32) };
             out.push(Cell { style: glyph, ..cell(kind::DEVICE, lx, ry + ROW, GLYPH, GLYPH) });
             let mut row_h = LINE;
+            // (its name Space.row after its glyph)
+            let (nx, nw) = (lx + GLYPH + crate::tokens::space::ROW, LABEL_W - GLYPH - crate::tokens::space::ROW);
             if d.sub.is_empty() {
-                out.push(text_cell(style::LABEL, lx + GLYPH + 12.0, ry + ROW, LABEL_W - GLYPH - 12.0, LINE, &d.name));
+                out.push(text_cell(style::LABEL, nx, ry + ROW, nw, LINE, &d.name));
             } else {
                 // (its name, and what it is under it, on as many lines as it takes)
-                let sw = LABEL_W - GLYPH - 12.0;
-                out.push(text_cell(style::LABEL, lx + GLYPH + 12.0, ry + ROW - 4.0, sw, 20.0, &d.name));
-                let lines = crate::text::wrap(font::REGULAR, font::NOTE, &d.sub, sw);
-                for (i, l) in lines.iter().enumerate() {
-                    out.push(text_cell(style::NOTE, lx + GLYPH + 12.0, ry + ROW + 16.0 + i as f32 * 17.0, sw, 17.0, l));
-                }
-                row_h = (20.0 + lines.len() as f32 * 17.0).max(LINE);
+                out.push(text_cell(style::LABEL, nx, name_top, nw, crate::tokens::line::TEXT, &d.name));
+                let end = crate::form::note_lines(&mut out, nx, name_top + crate::tokens::line::TEXT, nw, style::NOTE, &d.sub);
+                row_h = (end - (ry + ROW)).max(LINE);
             }
             let word = choice_name(&c, d);
             // (a scene's chip in its dropdown, by its place among the Scene row's chips)
@@ -978,10 +992,10 @@ impl Games {
             ry += ROW + row_h + ROW;
         }
         if devices.iter().all(|d| d.kind == "scene") {
-            out.push(text_cell(style::NOTE, lx, ry + ROW, w - 2.0 * PAD_X, 18.0, "Your devices show here once Ectomatter has found them."));
-            ry += ROW + 18.0 + ROW;
+            let end = crate::form::note_lines(&mut out, lx, ry + ROW, w - 2.0 * PAD_X, style::NOTE, "Your devices show here once Ectomatter has found them.");
+            ry = end + ROW;
         } else {
-            out.push(Cell { color: rule(), ..cell(kind::BOX, lx, ry, w - 2.0 * PAD_X, 1.0) });
+            out.push(crate::form::rule(lx, ry, w - 2.0 * PAD_X));
             let who = if every { "a game".to_string() } else { name.clone() };
             let note = if devices.iter().any(|d| d.kind == "scene") {
                 format!("The scene and each device’s profile switch when {who} comes to the front, and switch back when another app does.")
@@ -989,17 +1003,12 @@ impl Games {
                 format!("Each device switches when {who} comes to the front, and switches back when another app does.")
             };
             let nw = w - PAD_X - (cx - x0);
-            let lines = crate::text::wrap(font::REGULAR, font::NOTE, &note, nw);
-            for (i, l) in lines.iter().enumerate() {
-                out.push(text_cell(style::NOTE, cx, ry + ROW + i as f32 * 18.0, nw, 18.0, l));
-            }
-            ry += ROW + lines.len() as f32 * 18.0 + ROW;
+            ry = crate::form::note_lines(&mut out, cx, ry + ROW, nw, style::NOTE, &note) + ROW;
         }
         let box_h = ry + BOX_IN - box_y;
         cells.push(cell(kind::TILE, x0, box_y, w, box_h));
         cells.extend(out);
         // On this page: Devices first, with the profiles this page switches to
-        let devices_top = box_y - 18.0 - crate::tokens::space::LABEL;
         let mut toc: Vec<LibToc> = vec![self.devices_entry(id, devices, devices_top, game, every)];
         let mut y = box_y + box_h;
         self.setting_at.clear();
@@ -1066,8 +1075,9 @@ impl Games {
     fn reset_dot(&mut self, out: &mut Vec<Cell>, r: Reset, x: f32, y: f32) {
         self.resets.push(r);
         let index = (self.resets.len() - 1) as i32;
-        // (the dot 13 left of the label, as the mock's, in a place to press round it)
-        out.push(Cell { text: "Changed for this game. Select the dot to go back to Every game’s.".into(), id: id_of(Ctl::LibReset), index, ..cell(kind::RESET, x - 20.0, y - 10.0, 20.0, 20.0) });
+        // (the dot in the box's padding, just left of the label, in a place to press round it)
+        let r = crate::tokens::size::RESET;
+        out.push(Cell { text: "Changed for this game. Select the dot to go back to Every game’s.".into(), id: id_of(Ctl::LibReset), index, ..cell(kind::RESET, x - r, y - r / 2.0, r, r) });
     }
 
     /// A row's dot in a plugin's section, on a game's page where the game changed
@@ -1129,46 +1139,54 @@ impl Games {
     /// Where the row ends.
     #[allow(clippy::too_many_arguments)]
     fn draw_row(&mut self, out: &mut Vec<Cell>, sec: &Section, id: &str, row: &Value, x0: f32, w: f32, ry: f32) -> f32 {
-        let (lx, cx) = (x0 + PAD_X, x0 + PAD_X + LABEL_W + PAD_X);
+        let (lx, cx) = (x0 + PAD_X, x0 + CTRL_X);
         let cw = w - PAD_X - (cx - x0);
+        // (the pieces down the column, Space.inline apart)
+        let gap = crate::tokens::space::INLINE;
         let settings = &sec.desc["settings"];
-        out.push(text_cell(style::LABEL, lx, ry + ROW, LABEL_W, LINE, row["label"].as_str().unwrap_or("")));
+        // (a row whose first piece is words sits on a line of words, as a form's does)
+        let words_first = row.get("status").is_some() || row.get("value").is_some();
+        let line_h = if words_first { crate::tokens::line::TEXT } else { LINE };
+        out.push(text_cell(style::LABEL, lx, ry + ROW, LABEL_W, line_h, row["label"].as_str().unwrap_or("")));
         let shown = row["show"].as_array().into_iter().flatten().filter_map(|k| k.as_str().map(String::from));
         let nested = row["nest"].as_array().into_iter().flatten().filter_map(|n| n["show"].as_str().map(String::from));
-        self.settings_dot(out, sec, id, shown.chain(nested).collect(), row["label"].as_str().unwrap_or(""), lx, ry + ROW + LINE / 2.0);
+        self.settings_dot(out, sec, id, shown.chain(nested).collect(), row["label"].as_str().unwrap_or(""), lx, ry + ROW + line_h / 2.0);
         // each piece down the column: the first on the label's line, the rest under it
-        let mut col = Column { y: ry + ROW, first: true };
+        let mut col = Column { y: ry + ROW, first: true, line: line_h };
+        let text_h = crate::tokens::line::TEXT;
         if let Some(st) = row.get("status") {
-            // (its line as the mock's: 28 high, its middle on the label's)
-            let y = col.place(28.0, 8.0);
+            // (its dot and its words on the label's line, as a status is on Settings)
+            let y = col.place(text_h, gap);
             let tone = match st["tone"].as_str() {
                 Some("good") => 1,
                 Some("bad") => 2,
                 Some("warn") => 3,
                 _ => 0,
             };
-            out.push(Cell { style: tone, ..cell(kind::DOT, cx, y + 10.5, 7.0, 7.0) });
-            out.push(text_cell(style::STATUS, cx + 16.0, y, cw - 16.0, 28.0, st["words"].as_str().unwrap_or("")));
+            crate::form::status(out, cx, y, text_h, cx + cw, tone, style::VALUE_BRIGHT, st["words"].as_str().unwrap_or(""));
         }
         if let Some(v) = row.get("value") {
-            let y = col.place(28.0, 8.0);
-            out.push(text_cell(if v["quiet"] == true { style::VALUE_QUIET } else { style::STATUS }, cx, y, cw, 28.0, v["words"].as_str().unwrap_or("")));
+            let y = col.place(text_h, gap);
+            out.push(text_cell(if v["quiet"] == true { style::VALUE_QUIET } else { style::VALUE_BRIGHT }, cx, y, cw, text_h, v["words"].as_str().unwrap_or("")));
         }
         if let Some(p) = row.get("path") {
-            let y = col.place(32.0, 8.0);
+            // (a folder's path, as a field holds words to read, and what's beside it at its right)
+            let h = crate::tokens::size::CONTROL;
+            let pad = crate::tokens::part::FIELD_PAD;
+            let y = col.place(h, gap);
             let side = p["side"].as_str().unwrap_or("");
             let sw = if side.is_empty() { 0.0 } else { crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, side).ceil() + 2.0 };
-            out.push(Cell { style: 1, ..cell(kind::WBOX, cx, y, cw, 32.0) });
-            out.push(text_cell(style::COMMAND, cx + 12.0, y, cw - 24.0 - if sw > 0.0 { sw + 14.0 } else { 0.0 }, 32.0, p["words"].as_str().unwrap_or("")));
+            out.push(Cell { style: 1, ..cell(kind::WBOX, cx, y, cw, h) });
+            out.push(text_cell(style::COMMAND, cx + pad, y, cw - 2.0 * pad - if sw > 0.0 { sw + crate::tokens::space::ROW } else { 0.0 }, h, p["words"].as_str().unwrap_or("")));
             if sw > 0.0 {
-                out.push(text_cell(style::NOTE, cx + cw - 12.0 - sw, y, sw, 32.0, side));
+                out.push(text_cell(style::NOTE, cx + cw - pad - sw, y, sw, h, side));
             }
         }
         if let Some(acts) = row["actions"].as_array() {
-            // a line of buttons, as many to a line as fit
+            // a line of buttons, as many to a line as fit (quiet ones a TextButton's height)
             let quiet = acts.iter().any(|a| a["quiet"] == true);
-            let h = if quiet { 28.0 } else { 30.0 };
-            let mut y = col.place(h, 8.0);
+            let h = if quiet { crate::tokens::size::COMPACT } else { crate::tokens::size::BUTTON };
+            let mut y = col.place(h, gap);
             let mut x = cx;
             for a in acts {
                 let label = a["label"].as_str().unwrap_or("");
@@ -1186,7 +1204,7 @@ impl Games {
                 };
                 if x > cx && x + bw > cx + cw {
                     x = cx;
-                    y += h + 8.0;
+                    y += h + gap;
                     col.reach(y + h);
                 }
                 let index = self.spot(Spot::Action { plugin: sec.plugin.clone(), action: a["id"].as_str().unwrap_or("").to_string() });
@@ -1195,7 +1213,7 @@ impl Games {
                 } else {
                     Cell { text: label.into(), style: if off { 37 } else { 0 }, id: id_of(Ctl::LibSpot), index, ..cell(kind::GHOST, x, y, bw, h) }
                 });
-                x += bw + 8.0;
+                x += bw + gap;
             }
         }
         // its settings: checkboxes on a line (or down it, stacked), a switch's options, a
@@ -1204,25 +1222,27 @@ impl Games {
         let bools: Vec<&String> = keys.iter().filter(|k| settings[k.as_str()]["type"] == "bool").collect();
         if !bools.is_empty() {
             let stack = row["stack"] == true;
+            let h = crate::tokens::size::QUIET;
             let mut x = cx;
-            let mut y = col.place(26.0, 8.0);
+            let mut y = col.place(h, gap);
             for (i, k) in bools.iter().enumerate() {
                 let d = &settings[k.as_str()];
                 let (v, _, _) = self.setting_value(&sec.plugin, k, d, id);
                 let label = d["label"].as_str().unwrap_or(k);
-                let bw = crate::tokens::size::CHECK + 10.0 + crate::text::width(font::REGULAR, font::CONTROL, label).ceil() + 2.0;
+                let bw = crate::form::check_width(label);
                 if i > 0 {
                     if stack || x + bw > cx + cw {
                         x = cx;
-                        y += 26.0 + if stack { 4.0 } else { 8.0 };
-                        col.reach(y + 26.0);
+                        y += h + if stack { crate::tokens::space::TIGHT } else { gap };
+                        col.reach(y + h);
                     }
                 }
                 let (off, shown) = (d["disabled"] == true, d["shown"] == true);
                 let style = if off && shown { 2 } else if off { 1 } else { 0 };
                 let index = self.spot(Spot::Check { plugin: sec.plugin.clone(), key: k.to_string() }) ;
-                out.push(Cell { text: label.into(), on: v.as_bool().unwrap_or(false) || shown, style, id: id_of(Ctl::LibCheck), index, ..cell(kind::CHECKBOX, x, y, bw, 26.0) });
-                x += bw + 30.0;
+                out.push(Cell { text: label.into(), on: v.as_bool().unwrap_or(false) || shown, style, id: id_of(Ctl::LibCheck), index, ..cell(kind::CHECKBOX, x, y, bw, h) });
+                // (checkboxes on a line Space.margin apart)
+                x += bw + crate::tokens::space::MARGIN;
             }
         }
         for k in keys.iter().filter(|k| settings[k.as_str()]["type"] != "bool") {
@@ -1231,7 +1251,7 @@ impl Games {
             let followed = !own && id != EVERY;
             match d["type"].as_str() {
                 Some("choice") if d["menu"] == true => {
-                    let y = col.place(crate::tokens::size::CONTROL, 8.0);
+                    let y = col.place(crate::tokens::size::CONTROL, gap);
                     // (as wide as the plugin says its words need, else as the other sections' are)
                     let dw = d["width"].as_f64().map_or(DROP_W, |w| w as f32);
                     let dc = self.setting_cell(&sec.plugin, k, &sec.desc, id, cx, y, dw.min(cw));
@@ -1243,43 +1263,48 @@ impl Games {
                     let names: Vec<(&str, &str)> = opts.iter().map(|o| (o["label"].as_str().unwrap_or(""), "")).collect();
                     let values: Vec<Value> = opts.iter().map(|o| o.get("value").cloned().unwrap_or(Value::Null)).collect();
                     let indexes: Vec<i32> = values.iter().map(|ov| self.spot(Spot::Option { plugin: sec.plugin.clone(), key: k.to_string(), value: ov.clone() })).collect();
-                    let y = col.place(crate::tokens::size::CONTROL, 8.0);
+                    let y = col.place(crate::tokens::size::CONTROL, gap);
                     let chosen = values.iter().position(|ov| *ov == v);
                     crate::form::switch(out, cx, y, None, &names, chosen, |j| (id_of(Ctl::LibSpot), indexes[j], (opts[j]["disabled"] == true) as i32));
                 }
                 Some("text") => {
-                    let y = col.place(34.0, 8.0);
+                    let h = crate::tokens::size::CONTROL;
+                    let y = col.place(h, gap);
                     let index = self.spot(Spot::Text { plugin: sec.plugin.clone(), key: k.to_string() });
-                    out.push(Cell { text: v.as_str().unwrap_or("").into(), fill: d["none"].as_str().unwrap_or("").into(), on: followed, style: 8, id: id_of(Ctl::LibText), index, ..cell(kind::FIELD, cx, y, cw, 34.0) });
+                    out.push(Cell { text: v.as_str().unwrap_or("").into(), fill: d["none"].as_str().unwrap_or("").into(), on: followed, style: 8, id: id_of(Ctl::LibText), index, ..cell(kind::FIELD, cx, y, cw, h) });
                 }
                 Some("pairs") => {
                     // each variable as a launch line sets it, on a well that opens its form, as a script's card does
+                    let (h, pad) = (crate::tokens::size::CONTROL, crate::tokens::part::FIELD_PAD);
                     for (name, value) in v.as_object().into_iter().flatten() {
-                        let y = col.place(34.0, 8.0);
+                        let y = col.place(h, gap);
                         let index = self.spot(Spot::Pair { plugin: sec.plugin.clone(), key: k.to_string(), name: name.clone() });
-                        out.push(Cell { text: "".into(), style: 36, id: id_of(Ctl::LibSpot), index, ..cell(kind::LINK, cx, y, cw, 34.0) });
-                        out.push(text_cell(style::COMMAND, cx + 12.0, y, cw - 24.0, 34.0, &format!("{name}={}", value.as_str().unwrap_or(""))));
+                        out.push(Cell { text: "".into(), style: 36, id: id_of(Ctl::LibSpot), index, ..cell(kind::LINK, cx, y, cw, h) });
+                        out.push(text_cell(style::COMMAND, cx + pad, y, cw - 2.0 * pad, h, &format!("{name}={}", value.as_str().unwrap_or(""))));
                     }
                     let add = d["add"].as_str().unwrap_or("Add");
                     let aw = crate::form::button_width(add, true);
-                    let y = col.place(30.0, 8.0);
+                    let y = col.place(crate::tokens::size::BUTTON, gap);
                     let index = self.spot(Spot::PairAdd { plugin: sec.plugin.clone(), key: k.to_string() });
-                    out.push(Cell { text: add.into(), lines: "M8 3v10M3 8h10".into(), style: 35, id: id_of(Ctl::LibSpot), index, ..cell(kind::GHOST, cx, y, aw, 30.0) });
+                    out.push(Cell { text: add.into(), lines: crate::form::ADD.into(), style: 35, id: id_of(Ctl::LibSpot), index, ..cell(kind::GHOST, cx, y, aw, crate::tokens::size::BUTTON) });
                 }
                 _ => {}
             }
         }
         // the settings nested under it, each with its name, a shade off the box
         if let Some(nest) = row["nest"].as_array() {
-            let dw = 330.0f32.min(cw - 14.0 - 104.0 - 14.0 - 14.0);
-            let h = 12.0 + nest.len() as f32 * crate::tokens::size::CONTROL + (nest.len().max(1) - 1) as f32 * 8.0 + 12.0;
-            let y = col.place(h, 8.0);
-            out.push(Cell { style: 2, ..cell(kind::WBOX, cx, y, 14.0 + 104.0 + 14.0 + dw + 14.0, h) });
+            // (a well, Space.row in all round: each nested setting's name in a column of its
+            // own, its dropdown Space.row after it, Space.inline between them)
+            let (pad, ctl) = (crate::tokens::space::ROW, crate::tokens::size::CONTROL);
+            let dw = NEST_DROP.min(cw - 3.0 * pad - NEST_LABEL);
+            let h = 2.0 * pad + nest.len() as f32 * ctl + (nest.len().max(1) - 1) as f32 * gap;
+            let y = col.place(h, gap);
+            out.push(Cell { style: 2, ..cell(kind::WBOX, cx, y, 3.0 * pad + NEST_LABEL + dw, h) });
             for (i, n) in nest.iter().enumerate() {
-                let ny = y + 12.0 + i as f32 * (crate::tokens::size::CONTROL + 8.0);
-                out.push(text_cell(style::FACT, cx + 14.0, ny, 104.0, crate::tokens::size::CONTROL, n["label"].as_str().unwrap_or("")));
+                let ny = y + pad + i as f32 * (ctl + gap);
+                out.push(text_cell(style::FACT, cx + pad, ny, NEST_LABEL, ctl, n["label"].as_str().unwrap_or("")));
                 if let Some(key) = n["show"].as_str() {
-                    let dc = self.setting_cell(&sec.plugin, key, &sec.desc, id, cx + 14.0 + 104.0 + 14.0, ny, dw);
+                    let dc = self.setting_cell(&sec.plugin, key, &sec.desc, id, cx + 2.0 * pad + NEST_LABEL, ny, dw);
                     out.push(dc);
                 }
             }
@@ -1287,20 +1312,18 @@ impl Games {
         // its note, in amber where one of its settings is to be chosen again
         if let Some(note) = row["note"].as_str().filter(|n| !n.is_empty()) {
             let warn = keys.iter().any(|k| settings[k.as_str()]["warn"] == true);
-            let nw = cw.min(640.0);
+            let nw = cw.min(crate::form::READ_MOST);
             let lines = crate::text::wrap(font::REGULAR, font::NOTE, note, nw);
-            let y = col.place(lines.len() as f32 * 18.0, 8.0);
-            let a = crate::tokens::ink::WARN;
-            for (i, l) in lines.iter().enumerate() {
-                out.push(if warn {
-                    Cell { color: slint::Color::from_rgb_u8(a[0], a[1], a[2]), ..text_cell(style::NOTE_IN, cx, y + i as f32 * 18.0, nw, 18.0, l) }
-                } else {
-                    text_cell(style::NOTE, cx, y + i as f32 * 18.0, nw, 18.0, l)
-                });
+            // (a note Space.tight under what it's about)
+            let y = col.place(lines.len() as f32 * crate::tokens::line::NOTE, crate::tokens::space::TIGHT);
+            if warn {
+                crate::form::note_lines_in(out, cx, y, nw, crate::tokens::ink::WARN, note);
+            } else {
+                crate::form::note_lines(out, cx, y, nw, style::NOTE, note);
             }
         }
-        // (a row is as tall as its label's line at least: the label 7 down, its line 22)
-        (ry + ROW + 29.0).max(col.y) + ROW
+        // (a row is as tall as its label's line at least)
+        (ry + ROW + line_h).max(col.y) + ROW
     }
 
     /// The parts of a plugin's section in the settings language's own
@@ -1310,7 +1333,7 @@ impl Games {
     #[allow(clippy::too_many_arguments)]
     fn draw_parts(&mut self, out: &mut Vec<Cell>, sec: &Section, id: &str, parts: &[Value], x0: f32, w: f32, mut ry: f32, mut after_row: bool) -> (f32, bool) {
         let (lx, inner) = (x0 + PAD_X, w - 2.0 * PAD_X);
-        let line = |y: f32| Cell { color: rule(), ..cell(kind::BOX, lx, y, inner, 1.0) };
+        let line = |y: f32| crate::form::rule(lx, y, inner);
         for part in parts {
             if let Some(row) = part.get("row") {
                 if after_row {
@@ -1319,21 +1342,26 @@ impl Games {
                 ry = self.draw_row(out, sec, id, row, x0, w, ry);
                 after_row = true;
             } else if let Some(sub) = part["sub"].as_str() {
-                out.push(text_cell(style::SUB, lx, ry + 18.0, inner, 19.0, &sub.to_uppercase()));
-                ry += 18.0 + 19.0 + 2.0;
+                // a heading in capitals inside the section: Space.pad over it, Space.row under
+                // it (as a group's in a box)
+                out.push(text_cell(style::SUB, lx, ry + crate::tokens::space::PAD, inner, crate::tokens::line::SMALL, &sub.to_uppercase()));
+                // (the row after it puts Space.row between)
+                ry += crate::tokens::space::PAD + crate::tokens::line::SMALL;
                 after_row = false;
             } else if let Some(fold) = part.get("fold") {
                 let key = format!("{}/{}", sec.plugin, fold["id"].as_str().unwrap_or(""));
                 let open = self.folds.contains(&key);
                 out.push(line(ry));
                 let index = self.spot(Spot::Fold(key));
-                out.push(Cell { text: fold["label"].as_str().unwrap_or("").into(), on: open, id: id_of(Ctl::LibSpot), index, ..cell(kind::FOLD, lx, ry, inner, 45.0) });
+                // (the fold's heading: a row's height round a line of words)
+                let fh = ROW + crate::tokens::line::TEXT + ROW;
+                out.push(Cell { text: fold["label"].as_str().unwrap_or("").into(), on: open, id: id_of(Ctl::LibSpot), index, ..cell(kind::FOLD, lx, ry, inner, fh) });
                 // (shut, the changes inside it are under the fold's own dot)
                 if !open {
                     let inside = keys_in(fold["parts"].as_array().map_or(&[][..], |v| v.as_slice()), false);
-                    self.settings_dot(out, sec, id, inside, fold["label"].as_str().unwrap_or(""), lx, ry + 22.5);
+                    self.settings_dot(out, sec, id, inside, fold["label"].as_str().unwrap_or(""), lx, ry + fh / 2.0);
                 }
-                ry += 45.0;
+                ry += fh;
                 after_row = false;
                 if open {
                     let inside = fold["parts"].as_array().cloned().unwrap_or_default();
@@ -1364,22 +1392,18 @@ impl Games {
     fn draw_section(&mut self, cells: &mut Vec<Cell>, sec: &Section, id: &str, w: f32, y: f32, game: bool, every: bool) -> f32 {
         let x0 = self.left;
         let label = sec.desc["label"].as_str().unwrap_or(&sec.name).to_string();
-        let lw = crate::text::width(font::MEDIUM, font::CONTROL, &label).ceil();
-        let q = crate::tokens::ink::QUIET;
-        cells.push(text_cell(style::HEAD, x0, y, lw + 4.0, 18.0, &label));
-        cells.push(Cell { color: slint::Color::from_rgb_u8(q[0], q[1], q[2]), ..text_cell(style::SMALL_IN, x0 + lw + 10.0, y + 1.0, 60.0, 18.0, "Plugin") });
-        if game && !every && sec.desc["settings"].as_object().is_some_and(|m| !m.is_empty()) {
-            let state = match self.changed_here(sec, id) {
+        let state = if game && !every && sec.desc["settings"].as_object().is_some_and(|m| !m.is_empty()) {
+            match self.changed_here(sec, id) {
                 0 => "Same as every game".to_string(),
                 n => format!("{n} changed for this game"),
-            };
-            let sw = crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, &state).ceil() + 2.0;
-            cells.push(text_cell(style::NOTE, x0 + w - sw, y, sw, 18.0, &state));
-        }
-        let box_y = y + 18.0 + crate::tokens::space::LABEL;
-        let (lx, cx) = (x0 + PAD_X, x0 + PAD_X + LABEL_W + PAD_X);
+            }
+        } else {
+            String::new()
+        };
+        let box_y = crate::form::heading(cells, x0, y, w, &label, "Plugin", &state);
+        let (lx, cx) = (x0 + PAD_X, x0 + CTRL_X);
         let inner = w - 2.0 * PAD_X;
-        let line = |x: f32, y: f32, w: f32| Cell { color: rule(), ..cell(kind::BOX, x, y, w, 1.0) };
+        let line = |x: f32, y: f32, w: f32| crate::form::rule(x, y, w);
         let mut out: Vec<Cell> = Vec::new();
         let mut ry = box_y + BOX_IN;
         let mut rows_drawn = 0usize;
@@ -1393,12 +1417,14 @@ impl Games {
                 let n = cols.len().max(1) as f32;
                 let cw = ((w - PAD_X - (cx - x0) - PAD_X * (n - 1.0)) / n).floor();
                 let col_x = |i: usize| cx + i as f32 * (cw + PAD_X);
-                ry += 8.0;
+                // (each column's name, and what it is under it, Space.inline above and below)
+                let (tl, nl) = (crate::tokens::line::TEXT, crate::tokens::line::NOTE);
+                ry += crate::tokens::space::INLINE;
                 for (i, c) in cols.iter().enumerate() {
-                    out.push(text_cell(style::NAME, col_x(i), ry, cw, 20.0, c["label"].as_str().unwrap_or("")));
-                    out.push(text_cell(style::NOTE, col_x(i), ry + 21.0, cw, 18.0, c["note"].as_str().unwrap_or("")));
+                    out.push(text_cell(style::NAME, col_x(i), ry, cw, tl, c["label"].as_str().unwrap_or("")));
+                    out.push(text_cell(style::NOTE, col_x(i), ry + tl, cw, nl, c["note"].as_str().unwrap_or("")));
                 }
-                ry += 21.0 + 18.0 + 8.0;
+                ry += tl + nl + crate::tokens::space::INLINE;
                 for row in grid["rows"].as_array().into_iter().flatten() {
                     out.push(line(lx, ry, inner));
                     out.push(text_cell(style::LABEL, lx, ry + ROW, LABEL_W, LINE, row["label"].as_str().unwrap_or("")));
@@ -1434,13 +1460,9 @@ impl Games {
                     ry += ROW + LINE;
                     rows_drawn += 1;
                     if let Some(note) = part["note"].as_str().filter(|_| show.last() == Some(item)) {
+                        // (Space.tight under the dropdown it's about)
                         let nw = w - PAD_X - (cx - x0);
-                        let lines = crate::text::wrap(font::REGULAR, font::NOTE, note, nw);
-                        ry += 8.0;
-                        for (k, l) in lines.iter().enumerate() {
-                            out.push(text_cell(style::NOTE, cx, ry + k as f32 * 18.0, nw, 18.0, l));
-                        }
-                        ry += lines.len() as f32 * 18.0;
+                        ry = crate::form::note_lines(&mut out, cx, ry + crate::tokens::space::TIGHT, nw, style::NOTE, note);
                     }
                     ry += ROW;
                 }
@@ -1459,11 +1481,7 @@ impl Games {
                     if rows_drawn > 0 {
                         out.push(line(lx, ry, inner));
                     }
-                    let lines = crate::text::wrap(font::REGULAR, font::NOTE, note, nw);
-                    for (k, l) in lines.iter().enumerate() {
-                        out.push(text_cell(style::NOTE, nx, ry + ROW + k as f32 * 18.0, nw, 18.0, l));
-                    }
-                    ry += ROW + lines.len() as f32 * 18.0 + ROW;
+                    ry = crate::form::note_lines(&mut out, nx, ry + ROW, nw, style::NOTE, note) + ROW;
                 }
             }
         }
@@ -1478,8 +1496,7 @@ impl Games {
     #[allow(clippy::too_many_arguments)]
     fn draw_scripts(&mut self, cells: &mut Vec<Cell>, id: &str, name: &str, w: f32, y: f32, game: bool, every: bool) -> f32 {
         let x0 = self.left;
-        cells.push(text_cell(style::HEAD, x0, y, w / 2.0, 18.0, "Custom Scripts"));
-        let box_y = y + 18.0 + crate::tokens::space::LABEL;
+        let box_y = crate::form::heading(cells, x0, y, w, "Custom Scripts", "", "");
         let note = if every {
             "Scripts for every game run first when a game starts and last when the game quits.".to_string()
         } else if game {
@@ -1488,9 +1505,9 @@ impl Games {
             format!("Each script runs when {name} starts, and its undo when {name} quits.")
         };
         let mut out = Vec::new();
-        let end = self.draw_commands(&mut out, id, name, x0 + PAD_X, box_y + PAD_X + 2.0, w - 2.0 * PAD_X, &note, every);
-        // (16 under Add a script, as the mock's box has)
-        let box_h = end - 12.0 + PAD_X - box_y;
+        let end = self.draw_commands(&mut out, id, name, x0 + PAD_X, box_y + PAD_X, w - 2.0 * PAD_X, &note, every);
+        // (Space.pad under Add a script, as a box's padding)
+        let box_h = end + PAD_X - box_y;
         cells.push(cell(kind::TILE, x0, box_y, w, box_h));
         cells.extend(out);
         box_y + box_h
@@ -1503,53 +1520,50 @@ impl Games {
         let list: Vec<(Script, bool)> = if every { self.library.scripts(EVERY).into_iter().map(|s| (s, false)).collect() } else { self.library.scripts_for(id) };
         let mut ry = y;
         let who = if every { "a game".to_string() } else { name.to_string() };
+        // a card: Space.row in all round; its name on a line a TextButton's height (Run now at
+        // its right), then When it starts and When it quits, a value's line each, Space.tight
+        // apart and Space.inline under the name, and Space.inline under them what it last did
+        let (pad, gap) = (crate::tokens::space::ROW, crate::tokens::space::INLINE);
+        let (head, tl, nl) = (crate::tokens::size::COMPACT, crate::tokens::line::TEXT, crate::tokens::line::NOTE);
+        let card_h = pad + head + gap + tl + crate::tokens::space::TIGHT + tl + gap + nl + pad;
+        let (kx, vx) = (lx + pad, lx + pad + SCRIPT_KEY);
+        let vw = inner - 2.0 * pad - SCRIPT_KEY;
         for (s, from_every) in &list {
             let k = self.script_at.len();
             self.script_at.push(s.id);
-            let card_h = 12.0 + 28.0 + 6.0 + 22.0 + 4.0 + 22.0 + 6.0 + 18.0 + 12.0;
             // the card, which opens its form; on it, its name, Every game's tag, Run now
             out.push(Cell { text: "".into(), style: 36, id: id_of(Ctl::LibScript), index: k as i32, ..cell(kind::LINK, lx, ry, inner, card_h) });
             let shown = if s.name.trim().is_empty() { "A script".to_string() } else { s.name.clone() };
-            let nw = crate::text::width(crate::tokens::font::MEDIUM, crate::tokens::font::TAB, &shown).ceil() + 4.0;
-            out.push(text_cell(style::NAME, lx + 14.0, ry + 12.0, nw.min(inner - 200.0), 28.0, &shown));
-            if *from_every {
-                let tw = crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, "Every game").ceil() + 14.0;
-                out.push(Cell { text: "Every game".into(), style: 4, ..cell(kind::PILL, lx + 14.0 + nw.min(inner - 200.0) + 10.0, ry + 16.0, tw, 20.0) });
-            }
             let run = if self.trying.contains(&s.id) { "Running…" } else { "Run now" };
-            let rw = crate::text::width(crate::tokens::font::MEDIUM, crate::tokens::font::NOTE, run).ceil() + 18.0;
-            out.push(Cell { text: run.into(), id: id_of(Ctl::LibScriptRun), index: k as i32, ..cell(kind::LINK, lx + inner - 14.0 + 9.0 - rw, ry + 12.0, rw, 28.0) });
+            let rw = crate::lighting::quiet_width(run, false);
+            let nw = (crate::text::width(crate::tokens::font::MEDIUM, crate::tokens::font::TAB, &shown).ceil() + 2.0).min(inner - 2.0 * pad - rw - SCRIPT_KEY);
+            let top = ry + pad;
+            out.push(text_cell(style::NAME, kx, top, nw, head, &shown));
+            if *from_every {
+                crate::form::pill(out, 4, kx + nw + gap, top + (head - tl) / 2.0, "Every game");
+            }
+            // (its words end at the card's padding)
+            crate::form::link(out, lx + inner - pad + crate::tokens::part::QUIET_PAD - rw, top, head, run, id_of(Ctl::LibScriptRun), k as i32);
             let starts = if *from_every || every { "When a game starts".to_string() } else { format!("When {who} starts") };
             let quits = if *from_every || every { "When the game quits".to_string() } else { format!("When {who} quits") };
-            let (kx, vx) = (lx + 14.0, lx + 14.0 + 170.0);
-            let vw = inner - 14.0 - 170.0 - 14.0;
-            let mut cy = ry + 12.0 + 28.0 + 6.0;
-            out.push(text_cell(style::NOTE, kx, cy, 166.0, 22.0, &starts));
-            out.push(text_cell(style::COMMAND, vx, cy, vw, 22.0, &s.start));
-            cy += 22.0 + 4.0;
-            out.push(text_cell(style::NOTE, kx, cy, 166.0, 22.0, &quits));
+            let mut cy = top + head + gap;
+            out.push(text_cell(style::NOTE, kx, cy, SCRIPT_KEY - crate::tokens::space::TIGHT, tl, &starts));
+            out.push(text_cell(style::COMMAND, vx, cy, vw, tl, &s.start));
+            cy += tl + crate::tokens::space::TIGHT;
+            out.push(text_cell(style::NOTE, kx, cy, SCRIPT_KEY - crate::tokens::space::TIGHT, tl, &quits));
             if s.quit.trim().is_empty() {
-                out.push(text_cell(style::NOTE, vx, cy, vw, 22.0, "Nothing to undo"));
+                out.push(text_cell(style::NOTE, vx, cy, vw, tl, "Nothing to undo"));
             } else {
-                out.push(text_cell(style::COMMAND, vx, cy, vw, 22.0, &s.quit));
+                out.push(text_cell(style::COMMAND, vx, cy, vw, tl, &s.quit));
             }
-            cy += 22.0 + 6.0;
+            cy += tl + gap;
             let (said, bad) = result_line(s, &self.library.script_last(s.id), self.trying.contains(&s.id));
             let c = if bad { crate::tokens::color(crate::tokens::ink::BAD) } else { crate::tokens::color(crate::tokens::ink::QUIET) };
-            out.push(Cell { color: c, ..text_cell(style::NOTE_IN, kx, cy, inner - 28.0, 18.0, &said) });
-            ry += card_h + 8.0;
+            out.push(Cell { color: c, ..text_cell(style::NOTE_IN, kx, cy, inner - 2.0 * pad, nl, &said) });
+            ry += card_h + gap;
         }
         // Add a script, and how they run
-        let aw = crate::form::button_width("Add a script", true);
-        let ay = ry + if list.is_empty() { 0.0 } else { 6.0 };
-        out.push(Cell { text: "Add a script".into(), lines: "M8 3v10M3 8h10".into(), style: 35, id: id_of(Ctl::LibScriptAdd), ..cell(kind::GHOST, lx, ay, aw, 30.0) });
-        let nx = lx + aw + 14.0;
-        let lines = crate::text::wrap(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, note, inner - aw - 14.0);
-        let nh = lines.len() as f32 * 18.0;
-        for (k, l) in lines.iter().enumerate() {
-            out.push(text_cell(style::NOTE, nx, ay + (30.0 - nh).max(0.0) / 2.0 + k as f32 * 18.0, inner - aw - 14.0, 18.0, l));
-        }
-        ay + 30.0f32.max(nh) + 12.0
+        crate::form::add_row(out, lx, ry, inner, "Add a script", note, id_of(Ctl::LibScriptAdd), 0) + ry
     }
 
     /// On this page's entry for Devices: the profiles this page switches to.
@@ -1575,7 +1589,7 @@ impl Games {
         } else {
             "Same as every game".into()
         };
-        LibToc { name: "Devices".into(), sub: sub.as_str().into(), set: !own.is_empty(), y: y - 12.0 }
+        LibToc { name: "Devices".into(), sub: sub.as_str().into(), set: !own.is_empty(), y: y - TOC_ABOVE }
     }
 
     /// On this page's entry for a plugin's section: what it changes here (in
@@ -1584,7 +1598,7 @@ impl Games {
         let name = sec.desc["label"].as_str().unwrap_or(&sec.name);
         if let Some(said) = sec.desc["summary"].as_str() {
             let sub = if !said.is_empty() { said.to_string() } else if every || !game { "No changes".into() } else { "Same as every game".into() };
-            return LibToc { name: name.into(), sub: sub.as_str().into(), set: !said.is_empty(), y: y - 12.0 };
+            return LibToc { name: name.into(), sub: sub.as_str().into(), set: !said.is_empty(), y: y - TOC_ABOVE };
         }
         let mut own: Vec<String> = Vec::new();
         // each setting the page chose itself, by its column's name where it's in a grid
@@ -1608,7 +1622,7 @@ impl Games {
         }
         let n = own.len();
         let sub = if n > 3 { format!("{}, and {} more", own[..2].join(", "), n - 2) } else if n > 0 { own.join(", ") } else if every || !game { "No changes".into() } else { "Same as every game".into() };
-        LibToc { name: sec.desc["label"].as_str().unwrap_or(&sec.name).into(), sub: sub.as_str().into(), set: n > 0, y: y - 12.0 }
+        LibToc { name: sec.desc["label"].as_str().unwrap_or(&sec.name).into(), sub: sub.as_str().into(), set: n > 0, y: y - TOC_ABOVE }
     }
 
     /// On this page's entry for Custom Scripts: the page's own scripts by name.
@@ -1624,7 +1638,7 @@ impl Games {
         } else {
             "No scripts".into()
         };
-        LibToc { name: "Custom Scripts".into(), sub: sub.as_str().into(), set: n > 0, y: y - 12.0 }
+        LibToc { name: "Custom Scripts".into(), sub: sub.as_str().into(), set: n > 0, y: y - TOC_ABOVE }
     }
 
     /// Under Every game's On this page: how many games it's for, and how many
@@ -2399,12 +2413,13 @@ fn facts(e: &Entry) -> (Vec<LibFact>, f32) {
     let mut runs = Vec::new();
     let mut x = 0.0f32;
     for (k, (strong, words)) in said.iter().enumerate() {
+        // (the facts Space.pad apart, a number Space.tight before its words)
         if k > 0 {
-            x += 18.0;
+            x += crate::tokens::space::PAD;
         }
         if !strong.is_empty() {
             runs.push(LibFact { text: strong.as_str().into(), strong: true, x });
-            x += crate::text::width(crate::tokens::font::MEDIUM, crate::tokens::font::NOTE, strong).ceil() + 4.0;
+            x += crate::text::width(crate::tokens::font::MEDIUM, crate::tokens::font::NOTE, strong).ceil() + crate::tokens::space::TIGHT;
         }
         runs.push(LibFact { text: words.as_str().into(), strong: false, x });
         x += crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, words).ceil();

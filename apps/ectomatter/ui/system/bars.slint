@@ -2,7 +2,7 @@
 // bar. Each is drawn here once, from the tokens, so every window and every page
 // opens the same way.
 
-import { Space, Radius, Font, Size, Part, Shadow, Ink } from "tokens.slint";
+import { Space, Radius, Font, Line, Size, Part, Shadow, Ink } from "tokens.slint";
 import { WinButton, Tab, LinkButton, PencilButton, MoreButton } from "controls.slint";
 import { Typing } from "state.slint";
 
@@ -171,7 +171,7 @@ export component PageBar inherits Rectangle {
                 font-family: Font.ui;
                 font-size: Font.title;
                 font-weight: Font.strong;
-                letter-spacing: 0.17px;
+                letter-spacing: Font.title-tracking;
                 color: Ink.bright;
                 vertical-alignment: center;
                 overflow: elide;
@@ -295,7 +295,7 @@ export component EditorHeader inherits Rectangle {
             font-family: Font.ui;
             font-size: Font.title;
             font-weight: Font.strong;
-            letter-spacing: 0.17px;
+            letter-spacing: Font.title-tracking;
             color: Ink.bright;
             vertical-alignment: center;
             overflow: elide;
