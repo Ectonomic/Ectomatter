@@ -443,8 +443,10 @@ pub struct Page {
     pub button: Option<usize>,
     pub light: usize,
     pub same_wheel: bool,
-    /// the kind of job whose menu is open
+    /// the kind of job whose menu is open, and each of its rows' job by its
+    /// place among the kind's (none for a heading or a note)
     pub menu: Option<usize>,
+    pub menu_picks: Vec<Option<usize>>,
     pub failed: Option<String>,
     /// what each light (the logo, the wheel) plays, and from when
     pub plays: [Option<(Plays, Instant)>; 2],
@@ -508,7 +510,7 @@ impl Plays {
 impl Page {
     pub fn new() -> Page {
         let same_wheel = crate::uistate::get("mouse_same_wheel").and_then(|v| v.as_bool()).unwrap_or(true);
-        Page { ask: None, state: Value::Null, tab: 0, button: None, light: 0, same_wheel, menu: None, failed: None, plays: [None, None], tell: None, profiles: None, said: None, gone: None, names: Default::default() }
+        Page { ask: None, state: Value::Null, tab: 0, button: None, light: 0, same_wheel, menu: None, menu_picks: Vec::new(), failed: None, plays: [None, None], tell: None, profiles: None, said: None, gone: None, names: Default::default() }
     }
 
     /// What the core says of the mouse: what each light plays is kept with

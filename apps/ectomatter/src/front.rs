@@ -4156,8 +4156,10 @@ impl Front {
             return;
         }
         if let Some(k) = self.mouse.menu {
+            // (the row's job by its place among the kind's: a heading's row has none)
+            let pick = self.mouse.menu_picks.get(i).copied().flatten();
             self.close_menu();
-            if let (Some((_, a)), Some(b)) = (self.mouse.choices_for(k).get(i), self.mouse.button) {
+            if let (Some((_, a)), Some(b)) = (pick.and_then(|c| self.mouse.choices_for(k).get(c).cloned()), self.mouse.button) {
                 self.mouse.set_job(b, a.clone());
             }
             self.refresh();
@@ -4490,14 +4492,16 @@ impl Front {
     /// Other devices' jobs, Ectomatter's own macros and the scenes' jobs, as
     /// the action menu lists them: those that switch a profile, the macros, and
     /// the scenes'. Each one's row (its definition, for its tick, once it has a
-    /// code), what choosing it does, and its row's kind (5 while every code is
-    /// some key's).
+    /// code), what choosing it does, its row's kind (5 while every code is
+    /// some key's), and its words under its heading (Names::short).
     #[allow(clippy::type_complexity)]
-    fn device_jobs(&self) -> (Vec<(Entry, Choice, i32)>, Vec<(Entry, Choice, i32)>, Vec<(Entry, Choice, i32)>) {
+    fn device_jobs(&self) -> (Vec<(Entry, Choice, i32, String)>, Vec<(Entry, Choice, i32, String)>, Vec<(Entry, Choice, i32, String)>) {
         let sent = self.page.sent_codes();
         let lists = &self.screens.playlists;
         let (mut profiles, mut macros, mut scenes) = (Vec::new(), Vec::new(), Vec::new());
-        for (words, j) in self.job_names().for_device(crate::jobs::KEYBOARD) {
+        let names = self.job_names();
+        for (words, j) in names.for_device(crate::jobs::KEYBOARD) {
+            let short = names.short(&j);
             let id = format!("{}{}", crate::jobs::ON_KEY, j.id());
             let code = self.keyed.iter().find(|(_, k)| **k == id).map(|(c, _)| *c);
             let can = code.is_some() || crate::screen_keys::code_for(&id, &self.keyed, &sent, |p| p.starts_with(crate::jobs::ON_KEY) || lists.iter().any(|x| x.id == p)).is_some();
@@ -4507,7 +4511,7 @@ impl Front {
                 _ => (&mut profiles, "Profile"),
             };
             let a = Entry { label: words, act: code.map_or(Action::Raw(Vec::new()), z10::screen_slot), tag };
-            list.push(if can { (a, Choice::Job(j.id()), 0) } else { (a, Choice::Nothing, 5) });
+            list.push(if can { (a, Choice::Job(j.id()), 0, short) } else { (a, Choice::Nothing, 5, short) });
         }
         (profiles, macros, scenes)
     }
@@ -4623,6 +4627,11 @@ impl Front {
         let set = |list: &[Entry]| list.iter().map(|e| (e.clone(), Choice::Set(e.act.clone()), 0)).collect::<Vec<_>>();
         let plays = self.play_jobs();
         let (others, own_macros, scene_jobs) = self.device_jobs();
+        // (in whole words, or by their own names under their heading)
+        let whole = |v: &[(Entry, Choice, i32, String)]| v.iter().map(|(e, c, k, _)| (e.clone(), c.clone(), *k)).collect::<Vec<_>>();
+        let headed = |v: &[(Entry, Choice, i32, String)]| v.iter().map(|(e, c, k, s)| (Entry { label: s.clone(), ..e.clone() }, c.clone(), *k)).collect::<Vec<_>>();
+        let (others_h, scene_jobs_h) = (headed(&others), headed(&scene_jobs));
+        let (others, own_macros, scene_jobs) = (whole(&others), whole(&own_macros), whole(&scene_jobs));
         // (the jobs Ectomatter does for a key share the keyboard's seven spare codes with
         // the playlists: once keys use all seven, a page with a row that can't be given says why)
         let full = "The keyboard has room for seven of Ectomatter’s jobs, playlists included, and keys on your profiles fill all seven. To make room, give the keys that have one of those jobs something else to do.";
@@ -4632,7 +4641,9 @@ impl Front {
         let pick = |rows: &mut Vec<MenuRow>, choices: &mut Vec<Choice>, groups: &[(&str, Vec<(Entry, Choice, i32)>)]| {
             let mut n = 0;
             for (head, items) in groups {
-                let hit: Vec<&(Entry, Choice, i32)> = items.iter().filter(|(a, ..)| q.is_empty() || a.label.to_lowercase().contains(&q) || a.tag.to_lowercase().contains(&q)).collect();
+                // (a group's heading found finds all of it: "mouse" lists the mouse's)
+                let whole_group = !q.is_empty() && !head.is_empty() && head.to_lowercase().contains(&q);
+                let hit: Vec<&(Entry, Choice, i32)> = items.iter().filter(|(a, ..)| q.is_empty() || whole_group || a.label.to_lowercase().contains(&q) || a.tag.to_lowercase().contains(&q)).collect();
                 if hit.is_empty() {
                     continue;
                 }
@@ -4679,7 +4690,19 @@ impl Front {
                     items.extend(plays.iter().cloned());
                 }
                 if p == PROFILE_PAGE {
-                    pick(&mut rows, &mut choices, &[(title, items), ("The mouse", others.clone()), ("Scenes", scene_jobs.clone())]);
+                    // (each device's profiles and the scenes under their headings, each by its own
+                    // name, as the Macro Editor lists them; a search across every page has them whole)
+                    let own: Vec<(Entry, Choice, i32)> = items
+                        .iter()
+                        .map(|(e, c, k)| {
+                            let label = match &e.act {
+                                Action::Profile(ectomatter_protocol::Jump::To(n)) => self.page.profile_name(*n as u8),
+                                _ => e.label.clone(),
+                            };
+                            (Entry { label, ..e.clone() }, c.clone(), *k)
+                        })
+                        .collect();
+                    pick(&mut rows, &mut choices, &[("Keyboard", own), ("Mouse", others_h.clone()), ("Scenes", scene_jobs_h.clone())]);
                 } else {
                     pick(&mut rows, &mut choices, &[(title, items)]);
                 }
@@ -7590,13 +7613,49 @@ impl Front {
         let now = self.mouse.job(b);
         // (a macro ticked whatever it plays as)
         let same = |a: &serde_json::Value| *a == now || (a.get("macro").is_some() && a["macro"] == now["macro"]);
-        let mut rows: Vec<MenuRow> = self.mouse.choices_for(kind).iter().map(|(label, a)| MenuRow { kind: 0, label: label.as_str().into(), tag: "".into(), tick: same(a), sub: "".into(), ..Default::default() }).collect();
+        let choices = self.mouse.choices_for(kind);
+        let mut rows: Vec<MenuRow> = Vec::new();
+        // (each row's job, by its place among the kind's; none for a heading or a note)
+        let mut picks: Vec<Option<usize>> = Vec::new();
+        if kind == crate::mouse::DEVICES_KIND {
+            // other devices' jobs and the scenes', under their headings, each by its own name,
+            // as the keys' Profile page and the Macro Editor list them
+            let names = self.job_names();
+            let head = |a: &serde_json::Value| match crate::jobs::Job::read(a) {
+                Some(crate::jobs::Job::Scene(_)) => "Scenes",
+                Some(crate::jobs::Job::MouseProfile(_)) => "Mouse",
+                _ => "Keyboard",
+            };
+            let mut heads: Vec<&str> = Vec::new();
+            for (_, a) in &choices {
+                if !heads.contains(&head(a)) {
+                    heads.push(head(a));
+                }
+            }
+            for h in heads {
+                rows.push(MenuRow { kind: 1, label: h.into(), ..Default::default() });
+                picks.push(None);
+                for (i, (label, a)) in choices.iter().enumerate().filter(|(_, (_, a))| head(a) == h) {
+                    let words = crate::jobs::Job::read(a).map_or_else(|| label.clone(), |j| names.short(&j));
+                    rows.push(MenuRow { kind: 0, label: words.into(), tick: same(a), ..Default::default() });
+                    picks.push(Some(i));
+                }
+            }
+        } else {
+            for (i, (label, a)) in choices.iter().enumerate() {
+                rows.push(MenuRow { kind: 0, label: label.as_str().into(), tag: "".into(), tick: same(a), sub: "".into(), ..Default::default() });
+                picks.push(Some(i));
+            }
+        }
         if rows.is_empty() && kind == crate::mouse::MACRO_KIND {
             rows.push(MenuRow { kind: 3, label: "No macros yet. Make one in the Macro Editor.".into(), tag: "".into(), tick: false, sub: "".into(), ..Default::default() });
+            picks.push(None);
         }
         if rows.is_empty() && kind == crate::mouse::DEVICES_KIND {
             rows.push(MenuRow { kind: 3, label: "Plug in another device to give this button one of its jobs.".into(), tag: "".into(), tick: false, sub: "".into(), ..Default::default() });
+            picks.push(None);
         }
+        self.mouse.menu_picks = picks;
         let h = 6.0 + fit_notes(&mut rows, 260.0) + 6.0;
         self.ui.set_menu_search(false);
         self.ui.set_menu_back(false);

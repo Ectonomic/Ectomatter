@@ -192,6 +192,20 @@ impl Names {
         }
     }
 
+    /// A job in a list under its device's heading, or the scenes': a profile
+    /// or a scene by its own name, the rest in their own words ("Next
+    /// profile", "Next scene"), as the Macro Editor lists them.
+    pub fn short(&self, j: &Job) -> String {
+        match j {
+            Job::KeyboardProfile(Jump::To(n)) => self.keyboard.iter().find(|(k, _)| *k as u32 == *n).map_or_else(|| format!("Profile {n}"), |(_, name)| name.clone()),
+            Job::MouseProfile(To::Id(id)) => self.mouse.iter().find(|(k, _)| k == id).map_or_else(|| "A deleted profile".into(), |(_, name)| name.clone()),
+            Job::KeyboardProfile(Jump::Next) | Job::MouseProfile(To::Next) => "Next profile".into(),
+            Job::KeyboardProfile(Jump::Previous) | Job::MouseProfile(To::Previous) => "Previous profile".into(),
+            Job::Scene(SceneTo::Id(id)) => self.scenes.iter().find(|(k, _)| k == id).map_or_else(|| "A deleted scene".into(), |(_, name)| name.clone()),
+            _ => self.of(j),
+        }
+    }
+
     /// The scenes' jobs: each scene, the next, the one before, and off.
     pub fn scene_jobs(&self) -> Vec<Job> {
         if self.scenes.is_empty() {
@@ -312,6 +326,21 @@ mod tests {
         assert_eq!(words(MOUSE), ["Scene: Wave across the desk", "Scene: DOOM", "Next scene", "Previous scene", "Scene off"]);
         assert_eq!(words(KEYBOARD), ["Scene: Wave across the desk", "Scene: DOOM", "Next scene", "Previous scene", "Scene off", "Copy"]);
         assert_eq!(names.of(&Job::Scene(SceneTo::Id("gone".into()))), "Scene: a deleted scene");
+    }
+
+    /// Under its heading a job goes by its own name: a profile or a scene by
+    /// its name, the rest in their own words.
+    #[test]
+    fn under_its_heading_a_job_goes_by_its_own_name() {
+        let names = Names { keyboard: vec![(1, "Work".into())], mouse: vec![("pa".into(), "Games".into())], scenes: vec![("scene-1".into(), "DOOM".into())], ..Default::default() };
+        let short = |j: Job| names.short(&j);
+        assert_eq!(short(Job::KeyboardProfile(Jump::To(1))), "Work");
+        assert_eq!(short(Job::KeyboardProfile(Jump::To(3))), "Profile 3");
+        assert_eq!(short(Job::MouseProfile(To::Id("pa".into()))), "Games");
+        assert_eq!([short(Job::MouseProfile(To::Next)), short(Job::KeyboardProfile(Jump::Previous))], ["Next profile", "Previous profile"]);
+        assert_eq!(short(Job::Scene(SceneTo::Id("scene-1".into()))), "DOOM");
+        assert_eq!([short(Job::Scene(SceneTo::Next)), short(Job::Scene(SceneTo::Off))], ["Next scene", "Scene off"]);
+        assert_eq!(short(Job::Screen(crate::z10::NEXT_LAYOUT)), "Screen: next layout");
     }
 
     /// A scene's job turns its scene on, or off when it's the one on; the next
