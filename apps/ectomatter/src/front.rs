@@ -802,6 +802,10 @@ pub struct Front {
     /// scene or for the app in front, by plugin/device; when they were last looked
     /// at; and the thread their calls go to, in the order they were made
     plugin_applied: HashMap<String, String>,
+    /// a plugin's device switched to a profile by hand (by plugin/device), with what
+    /// had Ectomatter switching it then (the scene playing, the app in front's
+    /// choice): the hand's choice stays until that changes
+    plugin_hand: HashMap<String, (Option<String>, Option<String>)>,
     scene_plugins_at: Instant,
     plugin_calls: Option<mpsc::Sender<(crate::core_host::Core, &'static str, serde_json::Value, String)>>,
     plugin_done: Option<mpsc::Receiver<()>>,
@@ -1239,6 +1243,7 @@ impl Front {
             scene_claim: (false, false),
             scene_back: None,
             plugin_applied: HashMap::new(),
+            plugin_hand: HashMap::new(),
             scene_plugins_at: Instant::now(),
             plugin_calls: None,
             plugin_done: None,
@@ -4169,12 +4174,12 @@ impl Front {
             self.refresh();
             return;
         }
-        if let Some(k) = self.mouse.menu {
-            // (the row's job by its place among the kind's: a heading's row has none)
-            let pick = self.mouse.menu_picks.get(i).copied().flatten();
+        if self.mouse.menu.is_some() {
+            // (the row's job as it was offered: a heading's row has none)
+            let pick = self.mouse.menu_picks.get(i).cloned().flatten();
             self.close_menu();
-            if let (Some((_, a)), Some(b)) = (pick.and_then(|c| self.mouse.choices_for(k).get(c).cloned()), self.mouse.button) {
-                self.mouse.set_job(b, a.clone());
+            if let (Some(a), Some(b)) = (pick, self.mouse.button) {
+                self.mouse.set_job(b, a);
             }
             self.refresh();
             return;
@@ -4516,7 +4521,7 @@ impl Front {
     fn device_jobs(&self) -> (Vec<(String, Vec<(Entry, Choice, i32, String)>)>, Vec<(Entry, Choice, i32, String)>, Vec<(Entry, Choice, i32, String)>) {
         let sent = self.page.sent_codes();
         let lists = &self.screens.playlists;
-        let (mut profiles, mut macros, mut scenes) = (Vec::<(String, Vec<(Entry, Choice, i32, String)>)>::new(), Vec::new(), Vec::new());
+        let (mut groups, mut macros, mut scenes) = (Vec::<(String, String, Vec<(Entry, Choice, i32, String)>)>::new(), Vec::new(), Vec::new());
         let names = self.job_names();
         let mut jobs = names.for_device(crate::jobs::KEYBOARD);
         jobs.extend(names.macros.iter().map(|(n, _)| crate::jobs::Job::Macro { n: *n, plays: ectomatter_protocol::Plays::Once }).map(|j| (names.of(&j), j)));
@@ -4525,10 +4530,11 @@ impl Front {
             let id = format!("{}{}", crate::jobs::ON_KEY, j.id());
             let code = self.keyed.iter().find(|(_, k)| **k == id).map(|(c, _)| *c);
             let can = code.is_some() || crate::screen_keys::code_for(&id, &self.keyed, &sent, |p| p.starts_with(crate::jobs::ON_KEY) || lists.iter().any(|x| x.id == p)).is_some();
+            // (a device's job tagged with its sort, so a search for "mouse" finds the mouse's)
             let tag = match j {
                 crate::jobs::Job::Macro { .. } => "Macro",
                 crate::jobs::Job::Scene(_) => "Scene",
-                _ => "Profile",
+                _ => names.sort_of(&j),
             };
             let a = Entry { label: words, act: code.map_or(Action::Raw(Vec::new()), z10::screen_slot), tag };
             let row = if can { (a, Choice::Job(j.id()), 0, short) } else { (a, Choice::Nothing, 5, short) };
@@ -4536,14 +4542,16 @@ impl Front {
                 crate::jobs::Job::Macro { .. } => macros.push(row),
                 crate::jobs::Job::Scene(_) => scenes.push(row),
                 _ => {
-                    let head = names.group(&j).unwrap_or_default();
-                    match profiles.iter_mut().find(|(h, _)| *h == head) {
-                        Some((_, list)) => list.push(row),
-                        None => profiles.push((head, vec![row])),
+                    let (key, head) = names.group(&j).unwrap_or_default();
+                    match groups.iter_mut().find(|(k, ..)| *k == key) {
+                        Some((_, _, list)) => list.push(row),
+                        None => groups.push((key, head, vec![row])),
                     }
                 }
             }
         }
+        // (each device's by its key, two of a name kept apart; under its name)
+        let profiles = groups.into_iter().map(|(_, head, list)| (head, list)).collect();
         (profiles, macros, scenes)
     }
 
@@ -4673,7 +4681,8 @@ impl Front {
         let pick = |rows: &mut Vec<MenuRow>, choices: &mut Vec<Choice>, groups: &[(&str, Vec<(Entry, Choice, i32)>)]| {
             let mut n = 0;
             for (head, items) in groups {
-                // (a group's heading found finds all of it: "mouse" lists the mouse's)
+                // (a group's heading found finds all of it: "steelseries" lists the mouse's,
+                // and "mouse" finds its rows by their tag)
                 let whole_group = !q.is_empty() && !head.is_empty() && head.to_lowercase().contains(&q);
                 let hit: Vec<&(Entry, Choice, i32)> = items.iter().filter(|(a, ..)| q.is_empty() || whole_group || a.label.to_lowercase().contains(&q) || a.tag.to_lowercase().contains(&q)).collect();
                 if hit.is_empty() {
@@ -5409,7 +5418,8 @@ impl Front {
                 }
             }
             Job::Profile { device, to: To::Id(p) } => self.plugin_choose(device, p),
-            Job::Profile { .. } => {}
+            // (a plugin's device steps through its profiles only as its plugin can: none does yet)
+            Job::Profile { device, .. } => eprintln!("ectomatter: {device} can’t step through its profiles"),
             Job::Screen(code) => self.screen_key(*code),
             Job::Scene(to) => {
                 // (chosen by hand, as on Home: kept, and on again when Ectomatter next starts;
@@ -5434,15 +5444,17 @@ impl Front {
         let mut devices: Vec<crate::jobs::Profiled> = self
             .lib_devices()
             .into_iter()
-            .filter(|d| d.key != crate::jobs::KEYBOARD || self.page.dev.is_some())
-            .map(|d| crate::jobs::Profiled { steps: true, screen: d.key == crate::jobs::KEYBOARD, key: d.key, name: d.name, profiles: d.profiles })
+            .map(|d| crate::jobs::Profiled { steps: true, screen: d.key == crate::jobs::KEYBOARD, here: d.key != crate::jobs::KEYBOARD || self.page.dev.is_some(), key: d.key, name: d.name, kind: d.kind, profiles: d.profiles })
             .collect();
         for (_, d) in self.hosted.devices() {
             let cap = &d["capabilities"]["profiles"];
-            if cap["choose"] == true {
-                let profiles = cap["list"].as_array().into_iter().flatten().filter_map(|p| Some((p["id"].as_str()?.to_string(), p["name"].as_str().unwrap_or("").to_string()))).collect();
-                devices.push(crate::jobs::Profiled { key: d["device"].as_str().unwrap_or("").into(), name: d["name"].as_str().unwrap_or("").into(), profiles, steps: false, screen: false });
+            let key = d["device"].as_str().unwrap_or("").to_string();
+            // (a device id a job's id can carry, and no other device's)
+            if cap["choose"] != true || key.is_empty() || key.contains(':') || devices.iter().any(|x| x.key == key) {
+                continue;
             }
+            let profiles = cap["list"].as_array().into_iter().flatten().filter_map(|p| Some((p["id"].as_str()?.to_string(), p["name"].as_str().unwrap_or("").to_string()))).collect();
+            devices.push(crate::jobs::Profiled { key, name: d["name"].as_str().unwrap_or("").into(), kind: d["kind"].as_str().unwrap_or("").into(), profiles, steps: false, screen: false, here: true });
         }
         let all = crate::library::all();
         let mut macros: Vec<(u32, String)> = all.as_object().map(|m| m.iter().filter_map(|(n, v)| Some((n.parse().ok()?, v["name"].as_str().filter(|s| !s.is_empty()).map_or_else(|| format!("Macro {n}"), String::from)))).collect()).unwrap_or_default();
@@ -7665,32 +7677,33 @@ impl Front {
         let same = |a: &serde_json::Value| *a == now || (a.get("macro").is_some() && a["macro"] == now["macro"]);
         let choices = self.mouse.choices_for(kind);
         let mut rows: Vec<MenuRow> = Vec::new();
-        // (each row's job, by its place among the kind's; none for a heading or a note)
-        let mut picks: Vec<Option<usize>> = Vec::new();
+        // (each row's job, kept as it was offered: the list may change while the menu's
+        // open, a plugin's device coming or going; none for a heading or a note)
+        let mut picks: Vec<Option<serde_json::Value>> = Vec::new();
         if kind == crate::mouse::DEVICES_KIND {
             // other devices' jobs and the scenes', under their headings, each by its own name,
             // as the keys' Profile page and the Macro Editor list them
             let names = self.job_names();
-            let head = |a: &serde_json::Value| crate::jobs::Job::read(a).and_then(|j| names.group(&j)).unwrap_or_default();
-            let mut heads: Vec<String> = Vec::new();
+            let group = |a: &serde_json::Value| crate::jobs::Job::read(a).and_then(|j| names.group(&j)).unwrap_or_default();
+            let mut groups: Vec<(String, String)> = Vec::new();
             for (_, a) in &choices {
-                if !heads.contains(&head(a)) {
-                    heads.push(head(a));
+                if !groups.iter().any(|(k, _)| *k == group(a).0) {
+                    groups.push(group(a));
                 }
             }
-            for h in heads {
-                rows.push(MenuRow { kind: 1, label: h.as_str().into(), ..Default::default() });
+            for (key, head) in groups {
+                rows.push(MenuRow { kind: 1, label: head.as_str().into(), ..Default::default() });
                 picks.push(None);
-                for (i, (label, a)) in choices.iter().enumerate().filter(|(_, (_, a))| head(a) == h) {
+                for (label, a) in choices.iter().filter(|(_, a)| group(a).0 == key) {
                     let words = crate::jobs::Job::read(a).map_or_else(|| label.clone(), |j| names.short(&j));
                     rows.push(MenuRow { kind: 0, label: words.into(), tick: same(a), ..Default::default() });
-                    picks.push(Some(i));
+                    picks.push(Some(a.clone()));
                 }
             }
         } else {
-            for (i, (label, a)) in choices.iter().enumerate() {
+            for (label, a) in &choices {
                 rows.push(MenuRow { kind: 0, label: label.as_str().into(), tag: "".into(), tick: same(a), sub: "".into(), ..Default::default() });
-                picks.push(Some(i));
+                picks.push(Some(a.clone()));
             }
         }
         if rows.is_empty() && kind == crate::mouse::MACRO_KIND {
@@ -8871,7 +8884,18 @@ impl Front {
             let id = d["device"].as_str().unwrap_or("").to_string();
             let key = format!("{plugin}/{id}");
             let want = if quitting { None } else { scene.and_then(|s| s.plugins.iter().find(|(dev, _)| *dev == id).map(|(_, p)| p.clone())).or_else(|| self.following.get(&key).cloned()) };
-            if want == self.plugin_applied.get(&key).cloned() {
+            // (a profile chosen by hand stays while the scene playing and the app in front's
+            // choice are what they were then; once either changes, what's wanted goes on)
+            let why = (scene.map(|s| s.id.clone()), self.following.get(&key).cloned());
+            let mut force = quitting && self.plugin_hand.contains_key(&key);
+            if let Some(then) = self.plugin_hand.get(&key) {
+                if *then == why && !quitting {
+                    continue;
+                }
+                self.plugin_hand.remove(&key);
+                force = true;
+            }
+            if !force && want == self.plugin_applied.get(&key).cloned() {
                 continue;
             }
             let Some(core) = self.hosted.get(&plugin).map(|p| p.core.clone()) else { continue };
@@ -8915,12 +8939,19 @@ impl Front {
     /// job): through its plugin, in turn with the scenes' and the apps'
     /// switches; the person's own choice from then on (profiles/choose).
     fn plugin_choose(&mut self, device: &str, profile: &str) {
-        if self.scene_quit_done {
+        if self.scene_quit_done || crate::desk::offscreen() {
             return;
         }
         let Some((plugin, d)) = self.hosted.devices().into_iter().find(|(_, d)| d["device"].as_str() == Some(device)) else { return };
-        let Some(core) = self.hosted.get(&plugin).map(|p| p.core.clone()) else { return };
         let name = d["name"].as_str().unwrap_or("").to_string();
+        if d["capabilities"]["profiles"]["choose"] != true {
+            eprintln!("ectomatter: {name} can’t be switched by hand");
+            return;
+        }
+        let Some(core) = self.hosted.get(&plugin).map(|p| p.core.clone()) else { return };
+        let key = format!("{plugin}/{device}");
+        let scene = self.playing();
+        self.plugin_hand.insert(key.clone(), (scene.map(|s| s.id), self.following.get(&key).cloned()));
         eprintln!("ectomatter: {name}: profiles/choose");
         self.plugin_call(core, "profiles/choose", serde_json::json!({ "device": device, "profile": profile }), name);
     }

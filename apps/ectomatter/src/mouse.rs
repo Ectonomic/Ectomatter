@@ -443,10 +443,10 @@ pub struct Page {
     pub button: Option<usize>,
     pub light: usize,
     pub same_wheel: bool,
-    /// the kind of job whose menu is open, and each of its rows' job by its
-    /// place among the kind's (none for a heading or a note)
+    /// the kind of job whose menu is open, and each of its rows' job as it
+    /// was offered (none for a heading or a note)
     pub menu: Option<usize>,
-    pub menu_picks: Vec<Option<usize>>,
+    pub menu_picks: Vec<Option<Value>>,
     pub failed: Option<String>,
     /// what each light (the logo, the wheel) plays, and from when
     pub plays: [Option<(Plays, Instant)>; 2],

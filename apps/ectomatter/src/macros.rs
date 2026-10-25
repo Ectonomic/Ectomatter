@@ -739,7 +739,7 @@ mod tests {
     /// together, then each job, as the devices' profiles are called now.
     #[test]
     fn a_macro_with_jobs_says_them() {
-        let device = |key: &str, name: &str, id: &str, profile: &str| crate::jobs::Profiled { key: key.into(), name: name.into(), profiles: vec![(id.into(), profile.into())], steps: true, screen: false };
+        let device = |key: &str, name: &str, id: &str, profile: &str| crate::jobs::Profiled { key: key.into(), name: name.into(), profiles: vec![(id.into(), profile.into())], steps: true, screen: false, here: true, kind: String::new() };
         let names = crate::jobs::Names { devices: vec![device("z10", "EVGA Z10 RGB", "2", "FPS Gaming"), device("sensei310", "SteelSeries Sensei 310", "pa", "Gaming")], ..Default::default() };
         let k = |key: &str, down: bool| json!({ "key": key, "down": down, "after": 0 });
         let steps = vec![k("LeftCtrl", true), k("T", true), k("T", false), k("LeftCtrl", false), json!({ "job": "profile:z10:2", "after": 0 }), json!({ "job": "profile:sensei310:pa", "after": 0 })];

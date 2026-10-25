@@ -673,7 +673,7 @@ impl MacroPage {
                     rows.push(row(0, label, current.as_ref() == Some(&j)));
                     picks.push(Pick::Job(j.id()));
                 };
-                let groups = names.devices.iter().map(|dev| (dev.name.clone(), dev.jobs())).chain(std::iter::once(("Scenes".to_string(), names.scene_jobs())));
+                let groups = names.devices.iter().filter(|dev| dev.here).map(|dev| (dev.name.clone(), dev.jobs())).chain(std::iter::once(("Scenes".to_string(), names.scene_jobs())));
                 for (head, jobs) in groups.filter(|(_, jobs)| !jobs.is_empty()) {
                     if !rows.is_empty() {
                         rows.push(row(2, "", false));
@@ -1399,6 +1399,8 @@ mod tests {
             profiles: profiles.iter().map(|(id, n)| (id.to_string(), n.to_string())).collect(),
             steps: true,
             screen,
+            here: true,
+            kind: String::new(),
         };
         let names = crate::jobs::Names {
             devices: vec![device("z10", "EVGA Z10 RGB", &[("1", "Studio"), ("2", "FPS Gaming")], true), device("sensei310", "SteelSeries Sensei 310", &[("pa", "Studio"), ("pb", "Gaming")], false)],

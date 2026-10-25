@@ -153,16 +153,20 @@ impl Job {
 
 }
 
-/// A device whose profiles a control can switch: its key, its own name, its
-/// profiles (each by its id and its name), whether it steps to its next and
-/// its previous, and whether the keyboard's screen jobs are its.
+/// A device whose profiles a control can switch: its key, its own name and
+/// what sort it is ("keyboard", "mouse", "lights"), its profiles (each by
+/// its id and its name), whether it steps to its next and its previous,
+/// whether the keyboard's screen jobs are its, and whether it's here to be
+/// offered (a keyboard not read yet isn't, but its jobs are still said).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Profiled {
     pub key: String,
     pub name: String,
+    pub kind: String,
     pub profiles: Vec<(String, String)>,
     pub steps: bool,
     pub screen: bool,
+    pub here: bool,
 }
 
 impl Profiled {
@@ -245,14 +249,31 @@ impl Names {
         self.devices.iter().find(|d| d.key == key)
     }
 
-    /// The heading a job is listed under: its device's name (the screen's jobs,
-    /// the device the screen is), or Scenes; a macro, none.
-    pub fn group(&self, j: &Job) -> Option<String> {
+    /// The group a job is listed in, by its device's key (the screen's jobs,
+    /// the device the screen is; the scenes', "scenes"), with its heading: the
+    /// device's own name, or Scenes; a macro, none.
+    pub fn group(&self, j: &Job) -> Option<(String, String)> {
         match j {
-            Job::Profile { device, .. } => Some(self.device(device).map_or_else(|| "Other devices".to_string(), |d| d.name.clone())),
-            Job::Screen(_) => self.devices.iter().find(|d| d.screen).map(|d| d.name.clone()),
-            Job::Scene(_) => Some("Scenes".into()),
+            Job::Profile { device, .. } => Some((device.clone(), self.device(device).map_or_else(|| "Other devices".to_string(), |d| d.name.clone()))),
+            Job::Screen(_) => self.devices.iter().find(|d| d.screen).map(|d| (d.key.clone(), d.name.clone())),
+            Job::Scene(_) => Some(("scenes".into(), "Scenes".into())),
             Job::Macro { .. } => None,
+        }
+    }
+
+    /// What sort of device a job's is, for a search to find it by ("mouse"):
+    /// a word of the frontend's own, as the menus' tags are.
+    pub fn sort_of(&self, j: &Job) -> &'static str {
+        let kind = match j {
+            Job::Profile { device, .. } => self.device(device).map_or("", |d| d.kind.as_str()),
+            Job::Screen(_) => "keyboard",
+            _ => "",
+        };
+        match kind {
+            "keyboard" => "Keyboard",
+            "mouse" => "Mouse",
+            "lights" => "Lights",
+            _ => "Profile",
         }
     }
 
@@ -271,7 +292,7 @@ impl Names {
     /// they sit on the desk, then the scenes'. (Ectomatter's macros are each
     /// page's own to list.)
     pub fn for_device(&self, device: &str) -> Vec<(String, Job)> {
-        let mut out: Vec<Job> = self.devices.iter().filter(|d| d.key != device).flat_map(Profiled::jobs).collect();
+        let mut out: Vec<Job> = self.devices.iter().filter(|d| d.here && d.key != device).flat_map(Profiled::jobs).collect();
         out.extend(self.scene_jobs());
         out.into_iter().map(|j| (self.of(&j), j)).collect()
     }
@@ -306,7 +327,8 @@ pub fn rename_in_macros() {
     let all = crate::library::all();
     for (n, m) in all.as_object().into_iter().flatten() {
         let mut steps = m["steps"].clone();
-        if let (true, Ok(n)) = (rename_in(&mut steps), n.parse::<u32>()) {
+        // (steps that aren't a list are no macro's: left as they are)
+        if let (true, true, Ok(n)) = (steps.is_array(), rename_in(&mut steps), n.parse::<u32>()) {
             crate::library::set(n, m["name"].as_str().unwrap_or(""), steps.as_array().cloned().unwrap_or_default());
         }
     }
@@ -346,9 +368,11 @@ mod tests {
         let device = |key: &str, name: &str, profiles: &[(&str, &str)], steps: bool, screen: bool| Profiled {
             key: key.into(),
             name: name.into(),
+            kind: String::new(),
             profiles: profiles.iter().map(|(id, n)| (id.to_string(), n.to_string())).collect(),
             steps,
             screen,
+            here: true,
         };
         Names {
             devices: vec![
@@ -438,10 +462,14 @@ mod tests {
     #[test]
     fn a_new_device_is_offered_as_it_comes() {
         let mut names = desk();
-        names.devices.push(Profiled { key: "m3".into(), name: "OpenDeck M3".into(), profiles: vec![("a".into(), "Streaming".into())], steps: true, screen: false });
+        names.devices.push(Profiled { key: "m3".into(), name: "OpenDeck M3".into(), profiles: vec![("a".into(), "Streaming".into())], steps: true, here: true, ..Default::default() });
         let jobs = names.for_device(KEYBOARD);
         assert!(jobs.iter().any(|(w, _)| w == "OpenDeck M3: Streaming"));
-        assert_eq!(names.group(&jobs.last().unwrap().1).as_deref(), Some("OpenDeck M3"));
+        assert_eq!(names.group(&jobs.last().unwrap().1), Some(("m3".into(), "OpenDeck M3".into())));
+        // (one not here isn't offered, but its jobs are still said by its name)
+        names.devices[0].here = false;
+        assert!(names.for_device(MOUSE).iter().all(|(_, j)| !matches!(j, Job::Profile { device, .. } if device == KEYBOARD)));
+        assert_eq!(names.of(&Job::Profile { device: KEYBOARD.into(), to: To::Id("1".into()) }), "EVGA Z10 RGB: Work");
     }
 
     /// Both devices are offered the scenes' jobs, each scene by its name, then
@@ -469,10 +497,10 @@ mod tests {
         assert_eq!(short(Job::Scene(SceneTo::Id("scene-1".into()))), "DOOM");
         assert_eq!([short(Job::Scene(SceneTo::Next)), short(Job::Scene(SceneTo::Off))], ["Next scene", "Scene off"]);
         assert_eq!(short(Job::Screen(crate::z10::NEXT_LAYOUT)), "Screen: next layout");
-        let group = |j: Job| names.group(&j);
-        assert_eq!(group(profile(MOUSE, To::Next)).as_deref(), Some("SteelSeries Sensei 310"));
-        assert_eq!(group(Job::Screen(crate::z10::NEXT_LAYOUT)).as_deref(), Some("EVGA Z10 RGB"));
-        assert_eq!(group(Job::Scene(SceneTo::Off)).as_deref(), Some("Scenes"));
+        let heading = |j: Job| names.group(&j).map(|(_, h)| h);
+        assert_eq!(heading(profile(MOUSE, To::Next)).as_deref(), Some("SteelSeries Sensei 310"));
+        assert_eq!(heading(Job::Screen(crate::z10::NEXT_LAYOUT)).as_deref(), Some("EVGA Z10 RGB"));
+        assert_eq!(heading(Job::Scene(SceneTo::Off)).as_deref(), Some("Scenes"));
     }
 
     /// A scene's job turns its scene on, or off when it's the one on; the next
