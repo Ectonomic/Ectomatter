@@ -337,17 +337,27 @@ fn draw(p: &Pic) -> Option<slint::SharedPixelBuffer<slint::Rgba8Pixel>> {
     Some(buf)
 }
 
-/// The page's measures: its gutter, a page's column at most, and on a page the
-/// label's room in a row (a device's glyph on its square, then its name) and the
+/// The page's measures, a form's (src/form.rs): its margin, its column at most
+/// (Size.form), a box's padding, a row's label column (a device's glyph on its
+/// square, then its name), the line a row's first piece sits on, and the
 /// dropdowns' width.
 const X0: f32 = crate::tokens::space::MARGIN;
-const COLUMN: f32 = 1076.0;
-const PAD_X: f32 = 24.0;
-const LABEL_W: f32 = 236.0;
-const GLYPH: f32 = 36.0;
+const PAD_X: f32 = crate::tokens::space::PAD;
+const LABEL_W: f32 = crate::tokens::size::LABEL;
+const LINE: f32 = crate::form::LINE;
+const GLYPH: f32 = crate::form::LINE;
 const DROP_W: f32 = 300.0;
+/// the rhythm down a box: a row's room above and below what it holds, a rule between
+const ROW: f32 = crate::tokens::space::ROW;
+/// a box's first row's top, and its foot, from its own edges
+const BOX_IN: f32 = crate::tokens::space::PAD - crate::tokens::space::ROW;
+/// the rule between rows
+fn rule() -> slint::Color {
+    let c = crate::tokens::ink::LINE;
+    slint::Color::from_rgb_u8(c[0], c[1], c[2])
+}
 /// where a page's boxes start: under the line of words at its top
-const HEAD_END: f32 = 12.0 + 36.0 + 6.0;
+const HEAD_END: f32 = crate::tokens::size::HEAD;
 /// On this page: its column on the page's left (it's for getting about the
 /// page), at least and at most this wide (about what a docs site's On this page
 /// takes; its names and what they change need no more), and the room after it
@@ -368,7 +378,7 @@ impl Column {
     /// A piece `h` high placed, `gap` under the one before: where it goes
     /// (the first, its middle on the label's, as the mock's rows have it).
     fn place(&mut self, h: f32, gap: f32) -> f32 {
-        let y = if self.first { self.y + (36.0 - h).max(0.0) / 2.0 } else { self.y + gap };
+        let y = if self.first { self.y + (LINE - h).max(0.0) / 2.0 } else { self.y + gap };
         self.y = y + h;
         self.first = false;
         y
@@ -732,9 +742,9 @@ impl Games {
             Order::Most => "Most played",
         };
         ui.set_gl_store(shop_word.into());
-        ui.set_gl_store_w(crate::text::width(400, 13.0, shop_word).ceil() + 48.0);
+        ui.set_gl_store_w(crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, shop_word).ceil() + 48.0);
         ui.set_gl_sort(order_word.into());
-        ui.set_gl_sort_w(crate::text::width(400, 13.0, order_word).ceil() + 48.0);
+        ui.set_gl_sort_w(crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, order_word).ceil() + 48.0);
         let q = self.query.trim().to_lowercase();
         let found = |e: &&Entry| q.is_empty() || e.name.to_lowercase().contains(&q);
         if apps_tab {
@@ -891,11 +901,11 @@ impl Games {
         );
         // On this page has a column of its own at the left where the sections still have
         // room beside it; without, the sections take the page
-        let room = page_w - X0 - 28.0;
-        let toc_w = (room - COLUMN - TOC_GAP).clamp(TOC_W, TOC_W_MAX);
+        let room = page_w - 2.0 * X0;
+        let toc_w = (room - crate::tokens::size::FORM - TOC_GAP).clamp(TOC_W, TOC_W_MAX);
         let with_toc = room - (toc_w + TOC_GAP) >= 640.0;
         self.left = if with_toc { X0 + toc_w + TOC_GAP } else { X0 };
-        let w = if with_toc { (page_w - self.left - 28.0).min(COLUMN) } else { (page_w - 2.0 * X0).min(COLUMN).max(400.0) };
+        let w = if with_toc { (page_w - self.left - X0).min(crate::tokens::size::FORM) } else { room.min(crate::tokens::size::FORM).max(400.0) };
         let x0 = self.left;
         // the game's picture, as wide as the page, with its facts
         let hero = entry.as_ref().and_then(|e| e.art.hero.clone().map(|h| (h, e.art.logo.clone())));
@@ -918,46 +928,46 @@ impl Games {
         let mut cells = Vec::new();
         // Devices: a row for each, its glyph and name and its dropdown (in gray what
         // the page follows, in ink what it chose), and under them how the switching goes
-        cells.push(text_cell(style::HEAD, x0 + 2.0, y, w / 2.0, 18.0, "Devices"));
+        cells.push(text_cell(style::HEAD, x0, y, w / 2.0, 18.0, "Devices"));
         if game && !every {
             let n = devices.iter().filter(|d| self.row_value(id, d).1 && self.row_value(id, d).0 != self.row_value(id, d).2).count();
             let state = match n {
                 0 => "Same as every game".to_string(),
                 n => format!("{n} changed for this game"),
             };
-            let sw = crate::text::width(400, 12.5, &state).ceil() + 2.0;
+            let sw = crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, &state).ceil() + 2.0;
             cells.push(text_cell(style::NOTE, x0 + w - sw, y, sw, 18.0, &state));
         }
         y += 18.0 + crate::tokens::space::LABEL;
         let box_y = y;
         let mut out = Vec::new();
         let (lx, cx) = (x0 + PAD_X, x0 + PAD_X + LABEL_W + 24.0);
-        let mut ry = box_y + 8.0;
+        let mut ry = box_y + BOX_IN;
         for (k, d) in devices.iter().enumerate() {
             if k > 0 {
-                out.push(Cell { color: slint::Color::from_argb_u8(9, 255, 255, 255), ..cell(kind::BOX, lx, ry, w - 2.0 * PAD_X, 1.0) });
+                out.push(Cell { color: rule(), ..cell(kind::BOX, lx, ry, w - 2.0 * PAD_X, 1.0) });
             }
             let (c, own, follows) = self.row_value(id, d);
             // (a game's own choice, unlike Every game's: a dot beside its name puts it back)
             if game && !every && own && c != follows {
-                let mid = if d.sub.is_empty() { ry + 13.0 + 18.0 } else { ry + 9.0 + 10.0 };
+                let mid = if d.sub.is_empty() { ry + ROW + LINE / 2.0 } else { ry + ROW - 4.0 + 10.0 };
                 self.reset_dot(&mut out, Reset::Device { key: d.key.clone(), label: d.name.clone() }, lx, mid);
             }
             // (the Scene row's glyph is the scenes' own)
             let glyph = if d.kind == "scene" { -1 } else { d.glyph.map_or((d.kind == "mouse") as i32, |g| 2 + g as i32) };
-            out.push(Cell { style: glyph, ..cell(kind::DEVICE, lx, ry + 13.0, GLYPH, GLYPH) });
-            let mut row_h = 36.0;
+            out.push(Cell { style: glyph, ..cell(kind::DEVICE, lx, ry + ROW, GLYPH, GLYPH) });
+            let mut row_h = LINE;
             if d.sub.is_empty() {
-                out.push(text_cell(style::LABEL, lx + GLYPH + 12.0, ry + 13.0, LABEL_W - GLYPH - 12.0, 36.0, &d.name));
+                out.push(text_cell(style::LABEL, lx + GLYPH + 12.0, ry + ROW, LABEL_W - GLYPH - 12.0, LINE, &d.name));
             } else {
                 // (its name, and what it is under it, on as many lines as it takes)
                 let sw = LABEL_W - GLYPH - 12.0;
-                out.push(text_cell(style::LABEL, lx + GLYPH + 12.0, ry + 9.0, sw, 20.0, &d.name));
-                let lines = crate::text::wrap(400, 12.5, &d.sub, sw);
+                out.push(text_cell(style::LABEL, lx + GLYPH + 12.0, ry + ROW - 4.0, sw, 20.0, &d.name));
+                let lines = crate::text::wrap(font::REGULAR, font::NOTE, &d.sub, sw);
                 for (i, l) in lines.iter().enumerate() {
-                    out.push(text_cell(style::NOTE, lx + GLYPH + 12.0, ry + 29.0 + i as f32 * 17.0, sw, 17.0, l));
+                    out.push(text_cell(style::NOTE, lx + GLYPH + 12.0, ry + ROW + 16.0 + i as f32 * 17.0, sw, 17.0, l));
                 }
-                row_h = (16.0 + 20.0 + lines.len() as f32 * 17.0 - 13.0).max(36.0);
+                row_h = (20.0 + lines.len() as f32 * 17.0).max(LINE);
             }
             let word = choice_name(&c, d);
             // (a scene's chip in its dropdown, by its place among the Scene row's chips)
@@ -965,14 +975,14 @@ impl Games {
                 Choice::Profile(p) if d.kind == "scene" => d.profiles.iter().position(|(r, _)| r == p).map_or(0.0, |i| i as f32 + 1.0),
                 _ => 0.0,
             };
-            out.push(Cell { text: word.as_str().into(), style: (!own && !every) as i32, value: chip, on: self.menu == Some(Menu::Device(k)), id: id_of(Ctl::LibChoice), index: k as i32, ..cell(kind::DROP, cx, ry + 13.0, DROP_W, 36.0) });
-            ry += 13.0 + row_h + 13.0;
+            out.push(Cell { text: word.as_str().into(), style: (!own && !every) as i32, value: chip, on: self.menu == Some(Menu::Device(k)), id: id_of(Ctl::LibChoice), index: k as i32, ..cell(kind::DROP, cx, ry + ROW, DROP_W, crate::tokens::size::CONTROL) });
+            ry += ROW + row_h + ROW;
         }
         if devices.iter().all(|d| d.kind == "scene") {
-            out.push(text_cell(style::NOTE, lx, ry + 13.0, w - 2.0 * PAD_X, 18.0, "Your devices show here once Ectomatter has found them."));
-            ry += 13.0 + 18.0 + 13.0;
+            out.push(text_cell(style::NOTE, lx, ry + ROW, w - 2.0 * PAD_X, 18.0, "Your devices show here once Ectomatter has found them."));
+            ry += ROW + 18.0 + ROW;
         } else {
-            out.push(Cell { color: slint::Color::from_argb_u8(9, 255, 255, 255), ..cell(kind::BOX, lx, ry, w - 2.0 * PAD_X, 1.0) });
+            out.push(Cell { color: rule(), ..cell(kind::BOX, lx, ry, w - 2.0 * PAD_X, 1.0) });
             let who = if every { "a game".to_string() } else { name.clone() };
             let note = if devices.iter().any(|d| d.kind == "scene") {
                 format!("The scene and each device’s profile switch when {who} comes to the front, and switch back when another app does.")
@@ -980,13 +990,13 @@ impl Games {
                 format!("Each device switches when {who} comes to the front, and switches back when another app does.")
             };
             let nw = w - PAD_X - (cx - x0);
-            let lines = crate::text::wrap(400, 12.5, &note, nw);
+            let lines = crate::text::wrap(font::REGULAR, font::NOTE, &note, nw);
             for (i, l) in lines.iter().enumerate() {
-                out.push(text_cell(style::NOTE, cx, ry + 13.0 + i as f32 * 18.0, nw, 18.0, l));
+                out.push(text_cell(style::NOTE, cx, ry + ROW + i as f32 * 18.0, nw, 18.0, l));
             }
-            ry += 13.0 + lines.len() as f32 * 18.0 + 13.0;
+            ry += ROW + lines.len() as f32 * 18.0 + ROW;
         }
-        let box_h = ry + 10.0 - box_y;
+        let box_h = ry + BOX_IN - box_y;
         cells.push(cell(kind::TILE, x0, box_y, w, box_h));
         cells.extend(out);
         // On this page: Devices first, with the profiles this page switches to
@@ -1019,7 +1029,7 @@ impl Games {
             self.toc_at.clear();
             crate::front::set_rows(&self.toc, Vec::new());
         }
-        ui.set_gl_page_h(y + 60.0);
+        ui.set_gl_page_h(y + crate::tokens::space::MARGIN);
     }
 
     // ------------------------------------------------------------ the plugins' sections
@@ -1049,7 +1059,7 @@ impl Games {
         self.setting_at.push((plugin.to_string(), key.to_string()));
         // (in gray where the page follows another's; outlined in amber where it's to be chosen again)
         let style = if d["warn"] == true { 2 } else { (!own && id != EVERY) as i32 };
-        Cell { text: words.as_str().into(), style, on: self.menu == Some(Menu::Setting(k)), id: id_of(Ctl::LibSetting), index: k as i32, ..cell(kind::DROP, x, y, w, 36.0) }
+        Cell { text: words.as_str().into(), style, on: self.menu == Some(Menu::Setting(k)), id: id_of(Ctl::LibSetting), index: k as i32, ..cell(kind::DROP, x, y, w, crate::tokens::size::CONTROL) }
     }
 
     /// A dot beside a label that starts at `x`, its line's middle at `y`, on a game's
@@ -1120,15 +1130,15 @@ impl Games {
     /// Where the row ends.
     #[allow(clippy::too_many_arguments)]
     fn draw_row(&mut self, out: &mut Vec<Cell>, sec: &Section, id: &str, row: &Value, x0: f32, w: f32, ry: f32) -> f32 {
-        let (lx, cx) = (x0 + PAD_X, x0 + PAD_X + LABEL_W + 24.0);
+        let (lx, cx) = (x0 + PAD_X, x0 + PAD_X + LABEL_W + PAD_X);
         let cw = w - PAD_X - (cx - x0);
         let settings = &sec.desc["settings"];
-        out.push(text_cell(style::LABEL, lx, ry + 13.0, LABEL_W, 36.0, row["label"].as_str().unwrap_or("")));
+        out.push(text_cell(style::LABEL, lx, ry + ROW, LABEL_W, LINE, row["label"].as_str().unwrap_or("")));
         let shown = row["show"].as_array().into_iter().flatten().filter_map(|k| k.as_str().map(String::from));
         let nested = row["nest"].as_array().into_iter().flatten().filter_map(|n| n["show"].as_str().map(String::from));
-        self.settings_dot(out, sec, id, shown.chain(nested).collect(), row["label"].as_str().unwrap_or(""), lx, ry + 13.0 + 18.0);
+        self.settings_dot(out, sec, id, shown.chain(nested).collect(), row["label"].as_str().unwrap_or(""), lx, ry + ROW + LINE / 2.0);
         // each piece down the column: the first on the label's line, the rest under it
-        let mut col = Column { y: ry + 13.0, first: true };
+        let mut col = Column { y: ry + ROW, first: true };
         if let Some(st) = row.get("status") {
             // (its line as the mock's: 28 high, its middle on the label's)
             let y = col.place(28.0, 8.0);
@@ -1148,7 +1158,7 @@ impl Games {
         if let Some(p) = row.get("path") {
             let y = col.place(32.0, 8.0);
             let side = p["side"].as_str().unwrap_or("");
-            let sw = if side.is_empty() { 0.0 } else { crate::text::width(400, 12.5, side).ceil() + 2.0 };
+            let sw = if side.is_empty() { 0.0 } else { crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, side).ceil() + 2.0 };
             out.push(Cell { style: 1, ..cell(kind::WBOX, cx, y, cw, 32.0) });
             out.push(text_cell(style::COMMAND, cx + 12.0, y, cw - 24.0 - if sw > 0.0 { sw + 14.0 } else { 0.0 }, 32.0, p["words"].as_str().unwrap_or("")));
             if sw > 0.0 {
@@ -1201,7 +1211,7 @@ impl Games {
                 let d = &settings[k.as_str()];
                 let (v, _, _) = self.setting_value(&sec.plugin, k, d, id);
                 let label = d["label"].as_str().unwrap_or(k);
-                let bw = 28.0 + crate::text::width(400, 13.0, label).ceil() + 2.0;
+                let bw = crate::tokens::size::CHECK + 10.0 + crate::text::width(font::REGULAR, font::CONTROL, label).ceil() + 2.0;
                 if i > 0 {
                     if stack || x + bw > cx + cw {
                         x = cx;
@@ -1222,26 +1232,21 @@ impl Games {
             let followed = !own && id != EVERY;
             match d["type"].as_str() {
                 Some("choice") if d["menu"] == true => {
-                    let y = col.place(36.0, 8.0);
+                    let y = col.place(crate::tokens::size::CONTROL, 8.0);
                     // (as wide as the plugin says its words need, else as the other sections' are)
                     let dw = d["width"].as_f64().map_or(DROP_W, |w| w as f32);
                     let dc = self.setting_cell(&sec.plugin, k, &sec.desc, id, cx, y, dw.min(cw));
                     out.push(dc);
                 }
                 Some("choice") => {
-                    // a switch: each option on its well, the one chosen lit
+                    // a switch, the form's: each option on its well, the one chosen lit
                     let opts = d["options"].as_array().cloned().unwrap_or_default();
-                    let widths: Vec<f32> = opts.iter().map(|o| crate::text::width(400, 12.5, o["label"].as_str().unwrap_or("")).ceil() + 28.0).collect();
-                    let total = 6.0 + widths.iter().sum::<f32>() + 2.0 * (opts.len().max(1) - 1) as f32;
-                    let y = col.place(34.0, 8.0);
-                    out.push(cell(kind::SEG, cx, y, total, 34.0));
-                    let mut x = cx + 3.0;
-                    for (o, ow) in opts.iter().zip(widths) {
-                        let ov = o.get("value").cloned().unwrap_or(Value::Null);
-                        let index = self.spot(Spot::Option { plugin: sec.plugin.clone(), key: k.to_string(), value: ov.clone() });
-                        out.push(Cell { text: o["label"].as_str().unwrap_or("").into(), on: ov == v, style: (o["disabled"] == true) as i32, id: id_of(Ctl::LibSpot), index, ..cell(kind::CHOICE, x, y + 3.0, ow, 28.0) });
-                        x += ow + 2.0;
-                    }
+                    let names: Vec<(&str, &str)> = opts.iter().map(|o| (o["label"].as_str().unwrap_or(""), "")).collect();
+                    let values: Vec<Value> = opts.iter().map(|o| o.get("value").cloned().unwrap_or(Value::Null)).collect();
+                    let indexes: Vec<i32> = values.iter().map(|ov| self.spot(Spot::Option { plugin: sec.plugin.clone(), key: k.to_string(), value: ov.clone() })).collect();
+                    let y = col.place(crate::tokens::size::CONTROL, 8.0);
+                    let chosen = values.iter().position(|ov| *ov == v);
+                    crate::form::switch(out, cx, y, None, &names, chosen, |j| (id_of(Ctl::LibSpot), indexes[j], (opts[j]["disabled"] == true) as i32));
                 }
                 Some("text") => {
                     let y = col.place(34.0, 8.0);
@@ -1257,7 +1262,7 @@ impl Games {
                         out.push(text_cell(style::COMMAND, cx + 12.0, y, cw - 24.0, 34.0, &format!("{name}={}", value.as_str().unwrap_or(""))));
                     }
                     let add = d["add"].as_str().unwrap_or("Add");
-                    let aw = crate::text::width(500, 13.0, add).ceil() + 12.0 + 14.0 + 7.0 + 12.0;
+                    let aw = crate::form::button_width(add, true);
                     let y = col.place(30.0, 8.0);
                     let index = self.spot(Spot::PairAdd { plugin: sec.plugin.clone(), key: k.to_string() });
                     out.push(Cell { text: add.into(), lines: "M8 3v10M3 8h10".into(), style: 35, id: id_of(Ctl::LibSpot), index, ..cell(kind::GHOST, cx, y, aw, 30.0) });
@@ -1268,12 +1273,12 @@ impl Games {
         // the settings nested under it, each with its name, a shade off the box
         if let Some(nest) = row["nest"].as_array() {
             let dw = 330.0f32.min(cw - 14.0 - 104.0 - 14.0 - 14.0);
-            let h = 12.0 + nest.len() as f32 * 36.0 + (nest.len().max(1) - 1) as f32 * 8.0 + 12.0;
+            let h = 12.0 + nest.len() as f32 * crate::tokens::size::CONTROL + (nest.len().max(1) - 1) as f32 * 8.0 + 12.0;
             let y = col.place(h, 8.0);
             out.push(Cell { style: 2, ..cell(kind::WBOX, cx, y, 14.0 + 104.0 + 14.0 + dw + 14.0, h) });
             for (i, n) in nest.iter().enumerate() {
-                let ny = y + 12.0 + i as f32 * 44.0;
-                out.push(text_cell(style::FACT, cx + 14.0, ny, 104.0, 36.0, n["label"].as_str().unwrap_or("")));
+                let ny = y + 12.0 + i as f32 * (crate::tokens::size::CONTROL + 8.0);
+                out.push(text_cell(style::FACT, cx + 14.0, ny, 104.0, crate::tokens::size::CONTROL, n["label"].as_str().unwrap_or("")));
                 if let Some(key) = n["show"].as_str() {
                     let dc = self.setting_cell(&sec.plugin, key, &sec.desc, id, cx + 14.0 + 104.0 + 14.0, ny, dw);
                     out.push(dc);
@@ -1284,18 +1289,19 @@ impl Games {
         if let Some(note) = row["note"].as_str().filter(|n| !n.is_empty()) {
             let warn = keys.iter().any(|k| settings[k.as_str()]["warn"] == true);
             let nw = cw.min(640.0);
-            let lines = crate::text::wrap(400, 12.5, note, nw);
+            let lines = crate::text::wrap(font::REGULAR, font::NOTE, note, nw);
             let y = col.place(lines.len() as f32 * 18.0, 8.0);
+            let a = crate::tokens::ink::WARN;
             for (i, l) in lines.iter().enumerate() {
                 out.push(if warn {
-                    Cell { color: slint::Color::from_rgb_u8(0xf0, 0xb3, 0x5a), ..text_cell(style::NOTE_IN, cx, y + i as f32 * 18.0, nw, 18.0, l) }
+                    Cell { color: slint::Color::from_rgb_u8(a[0], a[1], a[2]), ..text_cell(style::NOTE_IN, cx, y + i as f32 * 18.0, nw, 18.0, l) }
                 } else {
                     text_cell(style::NOTE, cx, y + i as f32 * 18.0, nw, 18.0, l)
                 });
             }
         }
         // (a row is as tall as its label's line at least: the label 7 down, its line 22)
-        (ry + 13.0 + 29.0).max(col.y) + 13.0
+        (ry + ROW + 29.0).max(col.y) + ROW
     }
 
     /// The parts of a plugin's section in the settings language's own
@@ -1305,7 +1311,7 @@ impl Games {
     #[allow(clippy::too_many_arguments)]
     fn draw_parts(&mut self, out: &mut Vec<Cell>, sec: &Section, id: &str, parts: &[Value], x0: f32, w: f32, mut ry: f32, mut after_row: bool) -> (f32, bool) {
         let (lx, inner) = (x0 + PAD_X, w - 2.0 * PAD_X);
-        let line = |y: f32| Cell { color: slint::Color::from_argb_u8(9, 255, 255, 255), ..cell(kind::BOX, lx, y, inner, 1.0) };
+        let line = |y: f32| Cell { color: rule(), ..cell(kind::BOX, lx, y, inner, 1.0) };
         for part in parts {
             if let Some(row) = part.get("row") {
                 if after_row {
@@ -1359,23 +1365,24 @@ impl Games {
     fn draw_section(&mut self, cells: &mut Vec<Cell>, sec: &Section, id: &str, w: f32, y: f32, game: bool, every: bool) -> f32 {
         let x0 = self.left;
         let label = sec.desc["label"].as_str().unwrap_or(&sec.name).to_string();
-        let lw = crate::text::width(500, 13.0, &label).ceil();
-        cells.push(text_cell(style::HEAD, x0 + 2.0, y, lw + 4.0, 18.0, &label));
-        cells.push(Cell { color: slint::Color::from_rgb_u8(0x74, 0x74, 0x7c), ..text_cell(style::SMALL_IN, x0 + 2.0 + lw + 10.0, y + 1.0, 60.0, 18.0, "Plugin") });
+        let lw = crate::text::width(font::MEDIUM, font::CONTROL, &label).ceil();
+        let q = crate::tokens::ink::QUIET;
+        cells.push(text_cell(style::HEAD, x0, y, lw + 4.0, 18.0, &label));
+        cells.push(Cell { color: slint::Color::from_rgb_u8(q[0], q[1], q[2]), ..text_cell(style::SMALL_IN, x0 + lw + 10.0, y + 1.0, 60.0, 18.0, "Plugin") });
         if game && !every && sec.desc["settings"].as_object().is_some_and(|m| !m.is_empty()) {
             let state = match self.changed_here(sec, id) {
                 0 => "Same as every game".to_string(),
                 n => format!("{n} changed for this game"),
             };
-            let sw = crate::text::width(400, 12.5, &state).ceil() + 2.0;
+            let sw = crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, &state).ceil() + 2.0;
             cells.push(text_cell(style::NOTE, x0 + w - sw, y, sw, 18.0, &state));
         }
         let box_y = y + 18.0 + crate::tokens::space::LABEL;
-        let (lx, cx) = (x0 + PAD_X, x0 + PAD_X + LABEL_W + 24.0);
+        let (lx, cx) = (x0 + PAD_X, x0 + PAD_X + LABEL_W + PAD_X);
         let inner = w - 2.0 * PAD_X;
-        let line = |x: f32, y: f32, w: f32| Cell { color: slint::Color::from_argb_u8(9, 255, 255, 255), ..cell(kind::BOX, x, y, w, 1.0) };
+        let line = |x: f32, y: f32, w: f32| Cell { color: rule(), ..cell(kind::BOX, x, y, w, 1.0) };
         let mut out: Vec<Cell> = Vec::new();
-        let mut ry = box_y + 8.0;
+        let mut ry = box_y + BOX_IN;
         let mut rows_drawn = 0usize;
         // (whether the last part drawn was a row, which the next row has a line under)
         let mut after_row = false;
@@ -1385,8 +1392,8 @@ impl Games {
                 // a column for each, its name and what it is now; a row for each setting
                 let cols = grid["columns"].as_array().cloned().unwrap_or_default();
                 let n = cols.len().max(1) as f32;
-                let cw = ((w - PAD_X - (cx - x0) - 24.0 * (n - 1.0)) / n).floor();
-                let col_x = |i: usize| cx + i as f32 * (cw + 24.0);
+                let cw = ((w - PAD_X - (cx - x0) - PAD_X * (n - 1.0)) / n).floor();
+                let col_x = |i: usize| cx + i as f32 * (cw + PAD_X);
                 ry += 8.0;
                 for (i, c) in cols.iter().enumerate() {
                     out.push(text_cell(style::NAME, col_x(i), ry, cw, 20.0, c["label"].as_str().unwrap_or("")));
@@ -1395,19 +1402,19 @@ impl Games {
                 ry += 21.0 + 18.0 + 8.0;
                 for row in grid["rows"].as_array().into_iter().flatten() {
                     out.push(line(lx, ry, inner));
-                    out.push(text_cell(style::LABEL, lx, ry + 11.0, LABEL_W, 36.0, row["label"].as_str().unwrap_or("")));
+                    out.push(text_cell(style::LABEL, lx, ry + ROW, LABEL_W, LINE, row["label"].as_str().unwrap_or("")));
                     let keys = row["cells"].as_array().into_iter().flatten().filter_map(|c| c.as_str().map(String::from)).collect();
-                    self.settings_dot(&mut out, sec, id, keys, row["label"].as_str().unwrap_or(""), lx, ry + 11.0 + 18.0);
+                    self.settings_dot(&mut out, sec, id, keys, row["label"].as_str().unwrap_or(""), lx, ry + ROW + LINE / 2.0);
                     for (i, c) in row["cells"].as_array().into_iter().flatten().enumerate() {
                         match c {
                             Value::String(key) => {
-                                let dc = self.setting_cell(&sec.plugin, key, &sec.desc, id, col_x(i), ry + 11.0, cw);
+                                let dc = self.setting_cell(&sec.plugin, key, &sec.desc, id, col_x(i), ry + ROW, cw);
                                 out.push(dc);
                             }
-                            other => out.push(text_cell(style::NOTE, col_x(i), ry + 11.0, cw, 36.0, other["none"].as_str().unwrap_or(""))),
+                            other => out.push(text_cell(style::NOTE, col_x(i), ry + ROW, cw, LINE, other["none"].as_str().unwrap_or(""))),
                         }
                     }
-                    ry += 11.0 + 36.0 + 11.0;
+                    ry += ROW + LINE + ROW;
                     rows_drawn += 1;
                 }
                 after_row = true;
@@ -1421,22 +1428,22 @@ impl Games {
                     if rows_drawn > 0 {
                         out.push(line(lx, ry, inner));
                     }
-                    out.push(text_cell(style::LABEL, lx, ry + 13.0, LABEL_W, 36.0, &label));
-                    self.settings_dot(&mut out, sec, id, vec![key.clone()], &label, lx, ry + 13.0 + 18.0);
-                    let dc = self.setting_cell(&sec.plugin, &key, &sec.desc, id, cx, ry + 13.0, DROP_W);
+                    out.push(text_cell(style::LABEL, lx, ry + ROW, LABEL_W, LINE, &label));
+                    self.settings_dot(&mut out, sec, id, vec![key.clone()], &label, lx, ry + ROW + LINE / 2.0);
+                    let dc = self.setting_cell(&sec.plugin, &key, &sec.desc, id, cx, ry + ROW, DROP_W);
                     out.push(dc);
-                    ry += 13.0 + 36.0;
+                    ry += ROW + LINE;
                     rows_drawn += 1;
                     if let Some(note) = part["note"].as_str().filter(|_| show.last() == Some(item)) {
                         let nw = w - PAD_X - (cx - x0);
-                        let lines = crate::text::wrap(400, 12.5, note, nw);
+                        let lines = crate::text::wrap(font::REGULAR, font::NOTE, note, nw);
                         ry += 8.0;
                         for (k, l) in lines.iter().enumerate() {
                             out.push(text_cell(style::NOTE, cx, ry + k as f32 * 18.0, nw, 18.0, l));
                         }
                         ry += lines.len() as f32 * 18.0;
                     }
-                    ry += 13.0;
+                    ry += ROW;
                 }
                 after_row = true;
                 continue;
@@ -1453,15 +1460,15 @@ impl Games {
                     if rows_drawn > 0 {
                         out.push(line(lx, ry, inner));
                     }
-                    let lines = crate::text::wrap(400, 12.5, note, nw);
+                    let lines = crate::text::wrap(font::REGULAR, font::NOTE, note, nw);
                     for (k, l) in lines.iter().enumerate() {
-                        out.push(text_cell(style::NOTE, nx, ry + 13.0 + k as f32 * 18.0, nw, 18.0, l));
+                        out.push(text_cell(style::NOTE, nx, ry + ROW + k as f32 * 18.0, nw, 18.0, l));
                     }
-                    ry += 13.0 + lines.len() as f32 * 18.0 + 13.0;
+                    ry += ROW + lines.len() as f32 * 18.0 + ROW;
                 }
             }
         }
-        let box_h = ry + 10.0 - box_y;
+        let box_h = ry + BOX_IN - box_y;
         cells.push(cell(kind::TILE, x0, box_y, w, box_h));
         cells.extend(out);
         box_y + box_h
@@ -1472,7 +1479,7 @@ impl Games {
     #[allow(clippy::too_many_arguments)]
     fn draw_scripts(&mut self, cells: &mut Vec<Cell>, id: &str, name: &str, w: f32, y: f32, game: bool, every: bool) -> f32 {
         let x0 = self.left;
-        cells.push(text_cell(style::HEAD, x0 + 2.0, y, w / 2.0, 18.0, "Custom Scripts"));
+        cells.push(text_cell(style::HEAD, x0, y, w / 2.0, 18.0, "Custom Scripts"));
         let box_y = y + 18.0 + crate::tokens::space::LABEL;
         let note = if every {
             "Scripts for every game run first when a game starts and last when the game quits.".to_string()
@@ -1482,9 +1489,9 @@ impl Games {
             format!("Each script runs when {name} starts, and its undo when {name} quits.")
         };
         let mut out = Vec::new();
-        let end = self.draw_commands(&mut out, id, name, x0 + PAD_X, box_y + 18.0, w - 2.0 * PAD_X, &note, every);
+        let end = self.draw_commands(&mut out, id, name, x0 + PAD_X, box_y + PAD_X + 2.0, w - 2.0 * PAD_X, &note, every);
         // (16 under Add a script, as the mock's box has)
-        let box_h = end - 12.0 + 16.0 - box_y;
+        let box_h = end - 12.0 + PAD_X - box_y;
         cells.push(cell(kind::TILE, x0, box_y, w, box_h));
         cells.extend(out);
         box_y + box_h
@@ -1504,14 +1511,14 @@ impl Games {
             // the card, which opens its form; on it, its name, Every game's tag, Run now
             out.push(Cell { text: "".into(), style: 36, id: id_of(Ctl::LibScript), index: k as i32, ..cell(kind::LINK, lx, ry, inner, card_h) });
             let shown = if s.name.trim().is_empty() { "A script".to_string() } else { s.name.clone() };
-            let nw = crate::text::width(500, 14.5, &shown).ceil() + 4.0;
+            let nw = crate::text::width(crate::tokens::font::MEDIUM, crate::tokens::font::TAB, &shown).ceil() + 4.0;
             out.push(text_cell(style::NAME, lx + 14.0, ry + 12.0, nw.min(inner - 200.0), 28.0, &shown));
             if *from_every {
-                let tw = crate::text::width(400, 11.5, "Every game").ceil() + 14.0;
+                let tw = crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, "Every game").ceil() + 14.0;
                 out.push(Cell { text: "Every game".into(), style: 4, ..cell(kind::PILL, lx + 14.0 + nw.min(inner - 200.0) + 10.0, ry + 16.0, tw, 20.0) });
             }
             let run = if self.trying.contains(&s.id) { "Running…" } else { "Run now" };
-            let rw = crate::text::width(500, 12.5, run).ceil() + 18.0;
+            let rw = crate::text::width(crate::tokens::font::MEDIUM, crate::tokens::font::NOTE, run).ceil() + 18.0;
             out.push(Cell { text: run.into(), id: id_of(Ctl::LibScriptRun), index: k as i32, ..cell(kind::LINK, lx + inner - 14.0 + 9.0 - rw, ry + 12.0, rw, 28.0) });
             let starts = if *from_every || every { "When a game starts".to_string() } else { format!("When {who} starts") };
             let quits = if *from_every || every { "When the game quits".to_string() } else { format!("When {who} quits") };
@@ -1529,16 +1536,16 @@ impl Games {
             }
             cy += 22.0 + 6.0;
             let (said, bad) = result_line(s, &self.library.script_last(s.id), self.trying.contains(&s.id));
-            let c = if bad { slint::Color::from_rgb_u8(0xff, 0x8a, 0x80) } else { slint::Color::from_rgb_u8(0x74, 0x74, 0x7c) };
+            let c = if bad { crate::tokens::color(crate::tokens::ink::BAD) } else { crate::tokens::color(crate::tokens::ink::QUIET) };
             out.push(Cell { color: c, ..text_cell(style::NOTE_IN, kx, cy, inner - 28.0, 18.0, &said) });
             ry += card_h + 8.0;
         }
         // Add a script, and how they run
-        let aw = crate::text::width(500, 13.0, "Add a script").ceil() + 12.0 + 14.0 + 7.0 + 12.0;
+        let aw = crate::form::button_width("Add a script", true);
         let ay = ry + if list.is_empty() { 0.0 } else { 6.0 };
         out.push(Cell { text: "Add a script".into(), lines: "M8 3v10M3 8h10".into(), style: 35, id: id_of(Ctl::LibScriptAdd), ..cell(kind::GHOST, lx, ay, aw, 30.0) });
         let nx = lx + aw + 14.0;
-        let lines = crate::text::wrap(400, 12.5, note, inner - aw - 14.0);
+        let lines = crate::text::wrap(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, note, inner - aw - 14.0);
         let nh = lines.len() as f32 * 18.0;
         for (k, l) in lines.iter().enumerate() {
             out.push(text_cell(style::NOTE, nx, ay + (30.0 - nh).max(0.0) / 2.0 + k as f32 * 18.0, inner - aw - 14.0, 18.0, l));
@@ -2398,10 +2405,10 @@ fn facts(e: &Entry) -> (Vec<LibFact>, f32) {
         }
         if !strong.is_empty() {
             runs.push(LibFact { text: strong.as_str().into(), strong: true, x });
-            x += crate::text::width(500, 12.5, strong).ceil() + 4.0;
+            x += crate::text::width(crate::tokens::font::MEDIUM, crate::tokens::font::NOTE, strong).ceil() + 4.0;
         }
         runs.push(LibFact { text: words.as_str().into(), strong: false, x });
-        x += crate::text::width(400, 12.5, words).ceil();
+        x += crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, words).ceil();
     }
     (runs, x)
 }

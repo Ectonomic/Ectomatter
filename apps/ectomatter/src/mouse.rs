@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 use smithay_client_toolkit::reexports::calloop::channel::Sender;
 
 use crate::core_host::Core;
-use crate::lighting::{Ctl, Stack, cell, kind, style, text_cell};
+use crate::lighting::{Ctl, Stack, style, text_cell};
 use crate::{Cell, MouseCall, MouseRow};
 
 pub const DEVICE: &str = "sensei310-1";
@@ -1171,7 +1171,7 @@ impl Page {
             s.gap(22.0);
             s.check(Ctl::MouseSameWheel, self.same_wheel, "Same on the wheel");
             s.gap(6.0);
-            let lines = crate::text::wrap(400, 12.5, "The wheel copies the logo’s effect and colors.", s.inner() - 26.0);
+            let lines = crate::text::wrap(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, "The wheel copies the logo’s effect and colors.", s.inner() - 26.0);
             for line in lines {
                 s.cells.push(text_cell(style::NOTE, 42.0, s.y, s.inner() - 26.0, 18.0, &line));
                 s.y += 18.0;
@@ -1203,36 +1203,19 @@ impl Page {
         out
     }
 
+    /// The mouse's own facts, a form (src/form.rs) `w` across: how it's connected,
+    /// its firmware, where its settings are kept, its model.
     fn settings_cells(&self, w: f32) -> (Vec<Cell>, f32) {
-        let card_w = 760.0f32.min(w);
-        let x0 = ((w - card_w) / 2.0).max(0.0);
-        let mut cells = vec![Cell { style: 1, ..cell(kind::TILE, x0, 22.0, card_w, 0.0) }];
-        cells.push(text_cell(style::BOX_TITLE, x0 + 20.0, 22.0 + 18.0, card_w - 40.0, 20.0, "Mouse"));
-        let mut y = 22.0 + 46.0;
-        let present = self.present();
-        cells.push(Cell { style: if present { 1 } else { 2 }, ..cell(kind::DOT, x0 + 20.0, y + 6.0, 7.0, 7.0) });
-        cells.push(text_cell(style::NOTE, x0 + 35.0, y, card_w - 60.0, 20.0, if present { "Connected by USB." } else { "Not connected. Plug the mouse in to change it; what it was set to stays here." }));
-        y += 34.0;
-        let firmware = self.state["device"]["firmware"]["version"].as_str().map_or("Not known yet".to_string(), |v| format!("SteelSeries {v}"));
-        let rows: [(&str, String); 3] = [
-            ("Firmware", firmware),
-            ("Settings kept", "Your profiles are kept in Ectomatter. The one in use is also on the mouse, so the mouse keeps working that way without Ectomatter. A change made to the mouse in another app won’t show here.".into()),
-            ("Model", "SteelSeries Sensei 310, USB 1038:1722".into()),
-        ];
-        for (k, v) in rows {
-            cells.push(Cell { color: slint::Color::from_rgb_u8(0x2b, 0x2b, 0x30), ..cell(kind::BOX, x0 + 20.0, y, card_w - 40.0, 1.0) });
-            y += 13.0;
-            cells.push(text_cell(style::LABEL_SOFT, x0 + 20.0, y, 190.0, 20.0, k));
-            // (wrapped a little short of the column, as the card's words are measured, not drawn)
-            let lines = crate::text::wrap(400, 13.0, &v, card_w - 40.0 - 198.0 - 16.0);
-            for (j, line) in lines.iter().enumerate() {
-                cells.push(text_cell(style::VALUE_BRIGHT, x0 + 20.0 + 198.0, y + j as f32 * 20.0, card_w - 40.0 - 198.0, 20.0, line));
-            }
-            y += lines.len().max(1) as f32 * 20.0 + 13.0;
-        }
-        let h = y + 8.0 - 22.0;
-        cells[0].h = h;
-        (cells, 22.0 + h + 40.0)
+        let mut f = crate::form::Form::new(0.0, 0.0, w);
+        f.section("Mouse", "", |k| {
+            let present = self.present();
+            k.status_row(if present { 1 } else { 2 }, if present { "Connected by USB." } else { "Not connected. Plug the mouse in to change it; what it was set to stays here." });
+            let firmware = self.state["device"]["firmware"]["version"].as_str().map_or("Not known yet".to_string(), |v| format!("SteelSeries {v}"));
+            k.fact("Firmware", &firmware, "");
+            k.fact("Settings kept", "Your profiles are kept in Ectomatter. The one in use is also on the mouse, so the mouse keeps working that way without Ectomatter. A change made to the mouse in another app won’t show here.", "");
+            k.fact("Model", "SteelSeries Sensei 310, USB 1038:1722", "");
+        });
+        f.end()
     }
 }
 

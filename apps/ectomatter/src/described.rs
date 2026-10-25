@@ -231,7 +231,7 @@ fn small_caps(s: &mut Stack, name: &str) {
 
 /// The sliders' fill.
 fn fill() -> slint::Color {
-    slint::Color::from_rgb_u8(0xa1, 0xa1, 0xaa)
+    crate::tokens::color(crate::tokens::ink::SOFT)
 }
 
 /// An effect's settings, under its note, into a box's stack. `params` are
@@ -823,7 +823,7 @@ pub fn boxes(light: &Value, effect: &Value, e: &Value, look: &Look, set_w: f32, 
             if rule {
                 rule = false;
                 p.y = p.y.max(182.0) + 14.0;
-                p.cells.push(Cell { color: slint::Color::from_rgb_u8(0x2b, 0x2b, 0x30), ..crate::lighting::cell(kind::BOX, 16.0, p.y, p.inner(), 1.0) });
+                p.cells.push(Cell { color: crate::tokens::color(crate::tokens::ink::LINE), ..crate::lighting::cell(kind::BOX, 16.0, p.y, p.inner(), 1.0) });
                 p.y += 14.0;
             }
             p.cells.push(text_cell(style::PROP, 16.0, p.y, p.inner(), 20.0, &label(id, d)));

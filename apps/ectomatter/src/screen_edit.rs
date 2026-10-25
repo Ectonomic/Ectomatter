@@ -257,7 +257,7 @@ impl Grid {
         let (x, w) = (self.x(), self.col_w());
         self.cells.push(text_cell(style::PROP, x, self.y, w, 20.0, label));
         if let Some(v) = value {
-            let vw = (crate::text::width(500, 11.5, v) + 16.0).min(w - crate::text::width(400, 12.5, label) - 12.0);
+            let vw = (crate::text::width(crate::tokens::font::MEDIUM, crate::tokens::font::CAPTION, v) + 16.0).min(w - crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, label) - 12.0);
             self.cells.push(Cell { text: v.into(), ..cell(kind::PILL, x + w - vw, self.y, vw, 20.0) });
         }
         26.0
@@ -289,9 +289,9 @@ impl Grid {
     fn slider(&mut self, label: &str, c: Ctl, frac: f32, ends: (&str, &str), value: Option<&str>, notch: bool) {
         let top = self.head(label, value);
         let (x, w, y) = (self.x(), self.col_w(), self.y + top);
-        let (lw, rw) = (crate::text::width(400, 11.0, ends.0).ceil(), crate::text::width(400, 11.0, ends.1).ceil());
+        let (lw, rw) = (crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::SMALL, ends.0).ceil(), crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::SMALL, ends.1).ceil());
         self.cells.push(text_cell(style::END_L, x, y + 7.0, lw, 20.0, ends.0));
-        self.cells.push(Cell { value: frac, color: slint::Color::from_rgb_u8(0xa1, 0xa1, 0xaa), id: id(c), style: if notch { 4 } else { 3 }, ..cell(kind::FILLED, x + lw + 10.0, y + 7.0, w - lw - rw - 20.0, 20.0) });
+        self.cells.push(Cell { value: frac, color: crate::tokens::color(crate::tokens::ink::SOFT), id: id(c), style: if notch { 4 } else { 3 }, ..cell(kind::FILLED, x + lw + 10.0, y + 7.0, w - lw - rw - 20.0, 20.0) });
         self.cells.push(text_cell(style::END_R, x + w - rw, y + 7.0, rw, 20.0, ends.1));
         self.done(top + 34.0);
     }
@@ -301,14 +301,14 @@ impl Grid {
         let top = label.map_or(0.0, |l| self.head(l, None));
         let (x, w) = (self.x(), self.col_w());
         let held = link.replace(' ', "\u{a0}");
-        let lines = crate::text::wrap(400, 12.5, &s.replace(link, &held), w);
+        let lines = crate::text::wrap(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, &s.replace(link, &held), w);
         let lines: Vec<String> = lines.iter().map(|l| l.replace(&held, link)).collect();
         for (k, line) in lines.iter().enumerate() {
             let y = self.y + top + k as f32 * 18.0;
             match line.find(link) {
                 Some(at) => {
                     let (before, after) = (&line[..at], &line[at + link.len()..]);
-                    let (bw, lw) = (crate::text::width(400, 12.5, before), crate::text::width(400, 12.5, link).ceil() + 1.0);
+                    let (bw, lw) = (crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, before), crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, link).ceil() + 1.0);
                     self.cells.push(text_cell(style::NOTE, x, y, bw + 1.0, 18.0, before));
                     self.cells.push(Cell { text: link.into(), id: id(c), ..cell(kind::INLINE_LINK, x + bw, y, lw, 18.0) });
                     self.cells.push(text_cell(style::NOTE, x + bw + lw, y, (w - bw - lw).max(1.0), 18.0, after));
@@ -325,7 +325,7 @@ impl Grid {
     fn note(&mut self, label: Option<&str>, s: &str) {
         let top = label.map_or(0.0, |l| self.head(l, None));
         let (x, w) = (self.x(), self.col_w());
-        let lines = crate::text::wrap(400, 12.5, s, w);
+        let lines = crate::text::wrap(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, s, w);
         for (k, line) in lines.iter().enumerate() {
             self.cells.push(text_cell(style::NOTE, x, self.y + top + k as f32 * 18.0, w, 18.0, line));
         }

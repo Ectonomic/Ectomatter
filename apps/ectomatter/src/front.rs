@@ -436,7 +436,7 @@ pub enum WindowAsk {
 /// them out: a heading 28, a line 11, a note of lines 15 and 17 a line, the rest 33.
 fn fit_notes(rows: &mut [MenuRow], w: f32) -> f32 {
     for r in rows.iter_mut().filter(|r| r.kind == 3) {
-        r.lines = crate::text::wrap(400, 13.0, &r.label, w - 12.0 - 20.0 - 6.0).len() as i32;
+        r.lines = crate::text::wrap(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, &r.label, w - 12.0 - 20.0 - 6.0).len() as i32;
     }
     rows.iter().map(|r| match r.kind { 1 => 28.0, 2 => 11.0, 3 if r.lines > 1 => 15.0 + 17.0 * r.lines as f32, _ => 33.0 }).sum()
 }
@@ -1718,7 +1718,8 @@ impl Front {
         let field = (0..self.cells.row_count()).filter_map(|i| self.cells.row_data(i)).find(|c| c.kind == lighting::kind::FIELD && lighting::ctl(c.id) == Ctl::PluginField && Some(c.index) == at);
         let Some(f) = field else { return };
         let scroll = self.ui.get_settings_scroll();
-        let (x, y) = (self.ui.get_rail_width() + f.x, 36.0 + f.y + scroll);
+        // (the page under the title bar and its own bar)
+        let (x, y) = (self.ui.get_rail_width() + f.x, crate::tokens::size::TITLE_BAR + crate::tokens::size::BAR + f.y + scroll);
         self.ui.set_menu_search(false);
         self.ui.set_menu_back(false);
         self.ui.set_menu_natural(6.0 + list.min(320.0) + 6.0);
@@ -3930,7 +3931,7 @@ impl Front {
             if !(x >= px && x < px + 264.0 && y >= py && y < py + ph) {
                 let (ax, ay, ah) = self.pick.as_ref().unwrap().anchor;
                 // (a swatch is 34 wide; a pad's Color button, its swatch and its word)
-                let aw = if self.pick.as_ref().is_some_and(|p| p.ctl == Ctl::DeskPad) { crate::text::width(500, 13.0, "Color") + 42.0 } else { 34.0 };
+                let aw = if self.pick.as_ref().is_some_and(|p| p.ctl == Ctl::DeskPad) { crate::text::width(crate::tokens::font::MEDIUM, crate::tokens::font::CONTROL, "Color") + 42.0 } else { 34.0 };
                 if x >= ax && x < ax + aw && y >= ay && y < ay + ah {
                     self.shut = Some(((ax, ay), Instant::now()));
                 }
@@ -5180,7 +5181,7 @@ impl Front {
                 top_peak: self.levels.1,
                 reference: self.levels.0,
             };
-            let (cells, h, map, pmap) = crate::ecto_settings::page(&st);
+            let (cells, h, map, pmap) = crate::ecto_settings::page(&st, self.ui.get_content_width());
             self.sensor_map = map;
             self.plugin_map = pmap;
             self.ui.set_settings_h(h);
@@ -5199,7 +5200,7 @@ impl Front {
                 // the room the two tabs leave on their row: each tab its words and 18 either side, 4
                 // between them, the open second tab's foot, then a gap (the names as app.slint has them)
                 let names = ["Playlist", "Onboard layout", "Game launch"];
-                let tabs: f32 = names.iter().map(|t| crate::text::width(500, 13.0, t) + 36.0).sum::<f32>() + 4.0 * (names.len() - 1) as f32;
+                let tabs: f32 = names.iter().map(|t| crate::text::width(crate::tokens::font::MEDIUM, crate::tokens::font::CONTROL, t) + 36.0).sum::<f32>() + 4.0 * (names.len() - 1) as f32;
                 crate::display::screen_cells(&self.page, w, tabs + 10.0 + 24.0, own.as_ref().map(|(n, l)| (n.as_str(), *l)), picking)
             };
             self.show_cells(cells);
@@ -5214,7 +5215,7 @@ impl Front {
                 3 => None,
                 _ => Some(false),
             };
-            let t = crate::display::tiles(&fw, connected);
+            let t = crate::display::tiles(&fw, connected, self.ui.get_page_w());
             self.ui.set_tile_height(t.height);
             self.show_cells(t.cells);
         }
@@ -6114,8 +6115,8 @@ impl Front {
             .enumerate()
             .map(|(i, it)| {
                 let [x, y, w, h] = d.screen(i);
-                let nw = crate::text::width(500, 13.5, &it.name) + 15.0;
-                let sw = if it.connected { 0.0 } else { crate::text::width(400, 12.0, "Not connected") };
+                let nw = crate::text::width(crate::tokens::font::MEDIUM, crate::tokens::font::TEXT, &it.name) + 15.0;
+                let sw = if it.connected { 0.0 } else { crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, "Not connected") };
                 let half = nw.max(sw) / 2.0;
                 let top = y + h + crate::desk::NAME_GAP;
                 [x + w / 2.0 - half, top, x + w / 2.0 + half, top + if it.connected { 18.0 } else { 38.0 }]
@@ -7952,7 +7953,7 @@ impl Front {
         let mut w = 200.0f32;
         if self.screens.turns(self.page.editing).len() == 1 {
             let note = "Plays once the playlist has a second layout.";
-            w = w.max(crate::text::width(400, 13.0, note) + 44.0).ceil();
+            w = w.max(crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, note) + 44.0).ceil();
             rows.push(MenuRow { kind: 3, label: note.into(), tag: "".into(), tick: false, sub: "".into(), ..Default::default() });
         }
         self.close_menu();
@@ -8062,7 +8063,7 @@ impl Front {
         self.ui.set_menu_back(false);
         self.ui.set_menu_natural(h);
         // (wide enough for the profiles' names beside each playlist's, up to a point)
-        let widest = rows.iter().filter(|r| r.kind == 0).map(|r| crate::text::width(400, 13.5, &r.label) + if r.sub.is_empty() { 0.0 } else { 12.0 + crate::text::width(400, 12.0, &r.sub) }).fold(0.0, f32::max);
+        let widest = rows.iter().filter(|r| r.kind == 0).map(|r| crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, &r.label) + if r.sub.is_empty() { 0.0 } else { 12.0 + crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, &r.sub) }).fold(0.0, f32::max);
         self.ui.set_menu_w((widest + 74.0).clamp(248.0, 360.0));
         self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
         let (ax, ay, ah) = anchor;
@@ -8107,7 +8108,7 @@ impl Front {
         let list: f32 = rows.iter().map(|r| match r.kind { 1 => 28.0, 2 => 11.0, _ => 33.0 }).sum();
         let h = 6.0 + list + 6.0;
         // (as wide as the longest row needs, its note too, from 248 to 340)
-        let w = rows.iter().map(|r| crate::text::width(400, 13.5, &r.label) + if r.sub.is_empty() { 0.0 } else { crate::text::width(400, 12.0, &r.sub) + 8.0 } + 64.0).fold(248.0f32, f32::max).min(340.0).ceil();
+        let w = rows.iter().map(|r| crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, &r.label) + if r.sub.is_empty() { 0.0 } else { crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, &r.sub) + 8.0 } + 64.0).fold(248.0f32, f32::max).min(340.0).ceil();
         self.ui.set_menu_search(false);
         self.ui.set_menu_back(false);
         self.ui.set_menu_natural(h);
@@ -8168,7 +8169,7 @@ impl Front {
             None => "The screen and its backlight stay off while Ectomatter isn’t running.".to_string(),
             Some(p) => crate::lcd_page::Gaps::of(p).line().unwrap_or_else(|| "While this tab is open, the keyboard shows this layout instead of the playlist.".to_string()),
         };
-        self.ui.set_ob_chooser_w((crate::text::width(500, 13.0, &name) as f64 + 33.0).min(240.0).ceil() as f32);
+        self.ui.set_ob_chooser_w((crate::text::width(crate::tokens::font::MEDIUM, crate::tokens::font::CONTROL, &name) as f64 + 33.0).min(240.0).ceil() as f32);
         self.ui.set_ob_name(name.into());
         self.ui.set_ob_say(say.into());
         self.ui.set_ob_over(self.ob_over.is_some());
@@ -8187,7 +8188,7 @@ impl Front {
         self.ui.set_menu_marks(false);
         let list: f32 = rows.iter().map(|r| match r.kind { 1 => 28.0, 2 => 11.0, _ => 33.0 }).sum();
         let h = 6.0 + list + 6.0;
-        let w = rows.iter().map(|r| crate::text::width(400, 13.5, &r.label) + 64.0).fold(200.0f32, f32::max).min(320.0).ceil();
+        let w = rows.iter().map(|r| crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, &r.label) + 64.0).fold(200.0f32, f32::max).min(320.0).ceil();
         self.ui.set_menu_search(false);
         self.ui.set_menu_back(false);
         self.ui.set_menu_natural(h);
@@ -8431,7 +8432,7 @@ impl Front {
         self.ui.set_menu_marks(false);
         let list: f32 = rows.iter().map(|r| if r.kind == 2 { 11.0 } else { 33.0 }).sum();
         let h = 6.0 + list + 6.0;
-        let w = rows.iter().map(|r| crate::text::width(400, 13.5, &r.label) + 64.0).fold(200.0f32, f32::max).min(320.0).ceil();
+        let w = rows.iter().map(|r| crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, &r.label) + 64.0).fold(200.0f32, f32::max).min(320.0).ceil();
         self.ui.set_menu_search(false);
         self.ui.set_menu_back(false);
         self.ui.set_menu_natural(h);
@@ -8467,7 +8468,7 @@ impl Front {
         let list: f32 = rows.iter().map(|r| if r.kind == 1 { 28.0 } else { 33.0 }).sum();
         let h = 6.0 + list + 6.0;
         // (as wide as the longest name needs, to 300)
-        let w = rows.iter().map(|r| crate::text::width(400, 13.5, &r.label) + 64.0).fold(200.0f32, f32::max).min(300.0).ceil();
+        let w = rows.iter().map(|r| crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, &r.label) + 64.0).fold(200.0f32, f32::max).min(300.0).ceil();
         self.ui.set_menu_search(false);
         self.ui.set_menu_back(false);
         self.ui.set_menu_natural(h);
@@ -9197,10 +9198,14 @@ impl Front {
     fn show_scene_form(&mut self) {
         use crate::lighting::{cell, id, kind, style, text_cell};
         use crate::scenes::{Effect, Part};
+        use crate::tokens::{size, space};
         let Some(form) = &self.scene_form else { return };
-        const W: f32 = 552.0;
+        // (the dialog's room inside its padding; a stacked form: each label over what it
+        // labels, Space.label between, Space.pad between one and the next)
+        const W: f32 = 600.0 - 2.0 * space::MARGIN;
+        const CTRL: f32 = size::CONTROL;
         let mut cells: Vec<Cell> = Vec::new();
-        let wrap = |t: &str| crate::text::wrap(400, 12.5, t, W);
+        let wrap = |t: &str| crate::text::wrap(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, t, W);
         let mut y = 0.0;
         // the preview's words: each device under its part of the strip
         let spans = self.scene_spans();
@@ -9212,26 +9217,21 @@ impl Front {
             cells.push(text_cell(style::NOTE, x, y, w - 6.0, 16.0, name));
             x += w + 3.0;
         }
-        y += 16.0 + 18.0;
+        y += 16.0 + space::PAD;
         // Name
         cells.push(text_cell(style::LABEL, 0.0, y, W, 18.0, "Name"));
-        y += 25.0;
-        cells.push(Cell { text: form.name.as_str().into(), fill: "Name this scene".into(), style: 9, id: id(Ctl::SceneName), ..cell(kind::FIELD, 0.0, y, W, 36.0) });
-        y += 36.0 + 18.0;
+        y += 18.0 + space::LABEL;
+        cells.push(Cell { text: form.name.as_str().into(), fill: "Name this scene".into(), style: 9, id: id(Ctl::SceneName), ..cell(kind::FIELD, 0.0, y, W, CTRL) });
+        y += CTRL + space::PAD;
         // Lights: the whole desk, or each device
         cells.push(text_cell(style::LABEL, 0.0, y, W, 18.0, "Lights"));
-        y += 25.0;
+        y += 18.0 + space::LABEL;
         let seg = |cells: &mut Vec<Cell>, x0: f32, y: f32, c: Ctl, words: &[&str], on: usize| {
-            let mut bx = x0 + 3.0;
-            for (j, w) in words.iter().enumerate() {
-                let bw = crate::text::width(400, 12.5, w) + 28.0;
-                cells.push(Cell { text: (*w).into(), on: j == on, id: id(c), index: j as i32, ..cell(kind::SEG_BUTTON, bx, y + 3.0, bw, 30.0) });
-                bx += bw + 2.0;
-            }
-            cells.insert(cells.len() - words.len(), cell(kind::SEG, x0, y, bx - 2.0 + 3.0 - x0, 36.0));
+            let opts: Vec<(&str, &str)> = words.iter().map(|w| (*w, "")).collect();
+            crate::form::switch(cells, x0, y, None, &opts, Some(on), |j| (id(c), j as i32, 0));
         };
         seg(&mut cells, 0.0, y, Ctl::SceneLights, &["Whole desk", "Each device"], if form.desk { 0 } else { 1 });
-        y += 36.0 + 7.0;
+        y += CTRL + space::TIGHT;
         let order: Vec<&str> = devices.iter().map(|(_, _, glyph)| if *glyph == 0 { "the keyboard" } else { "the mouse" }).collect();
         let note = if form.desk {
             match order.as_slice() {
@@ -9245,16 +9245,16 @@ impl Front {
             cells.push(text_cell(style::NOTE, 0.0, y, W, 18.0, &l));
             y += 18.0;
         }
-        y += 18.0;
+        y += space::PAD;
         let dots = |cells: &mut Vec<Cell>, x0: f32, y: f32, colors: &[[u8; 3]], base: usize, codes: bool| -> f32 {
             let mut x = x0;
             for (k, c) in colors.iter().enumerate() {
-                cells.push(Cell { color: slint::Color::from_rgb_u8(c[0], c[1], c[2]), id: id(Ctl::SceneColor), index: (base + k) as i32, ..cell(kind::COLOR_DOT, x, y + 4.0, 28.0, 28.0) });
+                cells.push(Cell { color: slint::Color::from_rgb_u8(c[0], c[1], c[2]), id: id(Ctl::SceneColor), index: (base + k) as i32, ..cell(kind::COLOR_DOT, x, y + (CTRL - 28.0) / 2.0, 28.0, 28.0) });
                 x += 28.0 + 8.0;
                 if codes {
                     let hex = lighting::hex_of(*c);
-                    let w = crate::text::width(400, 12.5, &hex).ceil() + 4.0;
-                    cells.push(text_cell(style::CODE, x - 2.0, y, w, 36.0, &hex));
+                    let w = crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, &hex).ceil() + 4.0;
+                    cells.push(text_cell(style::CODE, x - 2.0, y, w, CTRL, &hex));
                     x += w + 14.0;
                 }
             }
@@ -9264,9 +9264,9 @@ impl Front {
         if form.desk {
             let l = &form.look;
             cells.push(text_cell(style::LABEL, 0.0, y, W, 18.0, "Effect"));
-            y += 25.0;
+            y += 18.0 + space::LABEL;
             tiles_y = y;
-            y += 76.0 + 18.0;
+            y += 76.0 + space::PAD;
             if l.effect.colors() > 0 || l.effect == Effect::Wave {
                 if l.effect.colors() > 0 {
                     cells.push(text_cell(style::LABEL, 0.0, y, 260.0, 18.0, "Colors"));
@@ -9274,63 +9274,64 @@ impl Front {
                 if l.effect == Effect::Wave {
                     cells.push(text_cell(style::LABEL, 283.0, y, 260.0, 18.0, "Direction"));
                 }
-                y += 25.0;
+                y += 18.0 + space::LABEL;
                 dots(&mut cells, 0.0, y, &l.colors, 0, true);
                 if l.effect == Effect::Wave {
                     seg(&mut cells, 283.0, y, Ctl::SceneWay, &["Left to right", "Right to left"], l.reverse as usize);
                 }
-                y += 36.0 + 18.0;
+                y += CTRL + space::PAD;
             }
             if l.effect != Effect::Static {
                 cells.push(text_cell(style::LABEL, 0.0, y, W, 18.0, "Speed"));
                 let words = crate::scenes::speed_words(l.speed);
-                let ww = crate::text::width(400, 12.5, words).ceil() + 2.0;
+                let ww = crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, words).ceil() + 2.0;
                 cells.push(text_cell(style::NOTE, W - ww, y, ww, 18.0, words));
-                y += 25.0;
+                y += 18.0 + space::LABEL;
                 cells.push(Cell { value: l.speed, id: id(Ctl::SceneSpeed), ..cell(kind::FILLED, 0.0, y, W, 20.0) });
-                y += 20.0 + 18.0;
+                y += 20.0 + space::PAD;
             }
             for (k, (dev, name, _, profiles)) in self.scene_form_plugins().iter().enumerate() {
                 cells.push(text_cell(style::LABEL, 0.0, y, W, 18.0, name));
-                y += 25.0;
+                y += 18.0 + space::LABEL;
                 let shown = form.plugins.iter().find(|(d, _)| d == dev).and_then(|(_, p)| profiles.iter().find(|(r, _)| r == p).map(|(_, n)| n.clone())).unwrap_or_else(|| "Leave as it is".into());
-                cells.push(Cell { text: shown.as_str().into(), on: self.scene_form_menu == Some(FormMenu::Plugin(dev.clone())), id: id(Ctl::ScenePlugin), index: k as i32, ..cell(kind::DROP, 0.0, y, 260.0, 36.0) });
-                y += 36.0 + 7.0;
+                cells.push(Cell { text: shown.as_str().into(), on: self.scene_form_menu == Some(FormMenu::Plugin(dev.clone())), id: id(Ctl::ScenePlugin), index: k as i32, ..cell(kind::DROP, 0.0, y, 260.0, CTRL) });
+                y += CTRL + space::TIGHT;
                 for l in wrap(&format!("{name} lights its devices from its own profiles. Choose one for this scene.")) {
                     cells.push(text_cell(style::NOTE, 0.0, y, W, 18.0, &l));
                     y += 18.0;
                 }
-                y += 18.0;
+                y += space::PAD;
             }
-            y -= 18.0;
+            y -= space::PAD;
         } else {
             // a row for each device: its glyph, its name, its effect and its colors
             let mut first = true;
             for (k, (key, name, glyph)) in devices.iter().enumerate() {
                 if !first {
-                    cells.push(Cell { color: slint::Color::from_argb_u8(9, 255, 255, 255), ..cell(kind::BOX, 0.0, y, W, 1.0) });
+                    cells.push(Cell { color: crate::tokens::color(crate::tokens::ink::LINE), ..cell(kind::BOX, 0.0, y, W, 1.0) });
                 }
                 first = false;
-                cells.push(Cell { style: *glyph, ..cell(kind::DEVICE, 0.0, y + 10.0, 36.0, 36.0) });
-                cells.push(text_cell(style::LABEL, 48.0, y + 10.0, 172.0, 36.0, name));
+                cells.push(Cell { style: *glyph, ..cell(kind::DEVICE, 0.0, y + space::ROW, CTRL, CTRL) });
+                cells.push(text_cell(style::LABEL, CTRL + 12.0, y + space::ROW, size::LABEL - CTRL - 12.0, CTRL, name));
                 let part = form.parts.iter().find(|(d, _)| d == key).map_or(Part::AsIs, |(_, p)| p.clone());
                 let word = match &part {
                     Part::AsIs => "Leave as it is",
                     Part::Look(l) => l.effect.label(),
                 };
-                cells.push(Cell { text: word.into(), on: self.scene_form_menu == Some(FormMenu::Part(key.clone())), id: id(Ctl::ScenePart), index: k as i32, ..cell(kind::DROP, 232.0, y + 10.0, 190.0, 36.0) });
+                let dx = size::LABEL + space::PAD;
+                cells.push(Cell { text: word.into(), on: self.scene_form_menu == Some(FormMenu::Part(key.clone())), id: id(Ctl::ScenePart), index: k as i32, ..cell(kind::DROP, dx, y + space::ROW, 190.0, CTRL) });
                 if let Part::Look(l) = &part {
-                    dots(&mut cells, 434.0, y + 10.0, &l.colors, 100 * (k + 1), l.colors.len() == 1);
+                    dots(&mut cells, dx + 190.0 + space::GAP, y + space::ROW, &l.colors, 100 * (k + 1), l.colors.len() == 1);
                 }
-                y += 56.0;
+                y += space::ROW + CTRL + space::ROW;
             }
             for (k, (dev, name, glyph, profiles)) in self.scene_form_plugins().iter().enumerate() {
-                cells.push(Cell { color: slint::Color::from_argb_u8(9, 255, 255, 255), ..cell(kind::BOX, 0.0, y, W, 1.0) });
-                cells.push(Cell { style: *glyph, ..cell(kind::DEVICE, 0.0, y + 10.0, 36.0, 36.0) });
-                cells.push(text_cell(style::LABEL, 48.0, y + 10.0, 172.0, 36.0, name));
+                cells.push(Cell { color: crate::tokens::color(crate::tokens::ink::LINE), ..cell(kind::BOX, 0.0, y, W, 1.0) });
+                cells.push(Cell { style: *glyph, ..cell(kind::DEVICE, 0.0, y + space::ROW, CTRL, CTRL) });
+                cells.push(text_cell(style::LABEL, CTRL + 12.0, y + space::ROW, size::LABEL - CTRL - 12.0, CTRL, name));
                 let shown = form.plugins.iter().find(|(d, _)| d == dev).and_then(|(_, p)| profiles.iter().find(|(r, _)| r == p).map(|(_, n)| n.clone())).unwrap_or_else(|| "Leave as it is".into());
-                cells.push(Cell { text: shown.as_str().into(), on: self.scene_form_menu == Some(FormMenu::Plugin(dev.clone())), id: id(Ctl::ScenePlugin), index: k as i32, ..cell(kind::DROP, 232.0, y + 10.0, 190.0, 36.0) });
-                y += 56.0;
+                cells.push(Cell { text: shown.as_str().into(), on: self.scene_form_menu == Some(FormMenu::Plugin(dev.clone())), id: id(Ctl::ScenePlugin), index: k as i32, ..cell(kind::DROP, size::LABEL + space::PAD, y + space::ROW, 190.0, CTRL) });
+                y += space::ROW + CTRL + space::ROW;
             }
         }
         let editing = form.editing.is_some();
@@ -10121,7 +10122,7 @@ impl Front {
         // panel's end, where the round starts again and then Pause
         let under_w = self.ui.get_under_w() as f64;
         let name = self.screens.playlist(who).name.clone();
-        let chooser = (crate::text::width(500, 13.0, &name) as f64 + 33.0).min(200.0).ceil();
+        let chooser = (crate::text::width(crate::tokens::font::MEDIUM, crate::tokens::font::CONTROL, &name) as f64 + 33.0).min(200.0).ceil();
         let track_x = 16.0 + if self.pl_renaming { 195.0 } else { chooser } + 14.0;
         let track_w = (under_w - 82.0 - track_x).max(120.0);
         self.ui.set_pl_name(name.as_str().into());
@@ -10416,14 +10417,14 @@ fn lay_strip(secs: &[f64], fixed: Option<(f64, f64)>, width: f64) -> (f64, f64, 
 /// `s` in at most two lines `w` wide, as a Library card's words are set: the
 /// second ending in an ellipsis when more would follow.
 fn two_lines(s: &str, w: f32) -> (String, String) {
-    let lines = crate::text::wrap(400, 12.5, s, w);
+    let lines = crate::text::wrap(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, s, w);
     match lines.len() {
         0 => (String::new(), String::new()),
         1 => (lines[0].clone(), String::new()),
         2 => (lines[0].clone(), lines[1].clone()),
         _ => {
             let mut cut = lines[1..].join(" ");
-            while !cut.is_empty() && crate::text::width(400, 12.5, &format!("{}…", cut.trim_end())) > w {
+            while !cut.is_empty() && crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, &format!("{}…", cut.trim_end())) > w {
                 cut.pop();
             }
             (lines[0].clone(), format!("{}…", cut.trim_end()))
@@ -10628,7 +10629,7 @@ mod tests {
         assert_eq!(two_lines("The time and the date.", 204.0), ("The time and the date.".to_string(), String::new()));
         let (a, b) = two_lines("Says “A LONG LINE OF WORDS”, with the CPU temperature, the GPU load, the memory used and the time.", 204.0);
         assert!(!a.is_empty() && b.ends_with('…'), "{a} / {b}");
-        assert!(crate::text::width(400, 12.5, &b) <= 204.0);
+        assert!(crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, &b) <= 204.0);
     }
 
     #[test]

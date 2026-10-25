@@ -1929,7 +1929,8 @@ export component AppWindow inherits Window {
     callback desk-arrange();
     callback desk-done();
     callback desk-zoom-step(int);
-    // the room the page's boxes have across
+    // the room the page's boxes have across, a device's page's and the mouse's
+    out property <length> page-w: pws-w;
     out property <length> mouse-w: pws-w;
     // whether a button is chosen; with none, what the All buttons box says
     // and whether any button can go back to the factory's job
@@ -2036,6 +2037,8 @@ export component AppWindow inherits Window {
     property <float> reveal: root.rail-open ? 1 : 0;
     animate reveal { duration: 160ms; delay: 60ms; easing: ease; }
     property <length> content-w: root.width - rail-w;
+    // (the room a page has across, for the pages laid out in Rust)
+    out property <length> content-width: content-w;
     // the scrollbars stop short of the window's rounded corner
     property <length> bar-foot: root.radius > 0 ? 5px : 2px;
     // the page runs the window's width, its margin either side
@@ -2113,7 +2116,7 @@ export component AppWindow inherits Window {
     property <length> tab-h: root.tab == 0 ? kb-keys.height : root.tab == 1 ? kb-light.height
         : root.tab == 3 ? (shelf-on ? shelf-h : 0) : root.tile-height;
     property <length> under-board: Space.gap + max(anchor.preferred-height, tab-h);
-    property <length> page-h: root.tab == 2 ? 12px + head-h + 6px + 24px + root.tile-height + 40px
+    property <length> page-h: root.tab == 2 ? head-end + root.tile-height
         : root.tab == 3 ? max(head-end + anchor.preferred-height, under-top + tab-h) + Space.margin
         : board-top + board-h + kb-pad-y + under-board + Space.margin;
     // the page's scrollbar, as WebKit drew it: over the whole window, when the page is longer than it
@@ -2720,7 +2723,8 @@ export component AppWindow inherits Window {
             mouse-flick := Flickable {
                 y: 56px;
                 height: parent.height - 56px;
-                content-height: low-y + max(mouse-pro.visible ? mouse-pro.height : 0, root.mouse-tab < 3 ? mouse-row.height : root.mouse-cells-h) + Space.margin;
+                // (Settings' form brings its own margin under it)
+                content-height: low-y + (root.mouse-tab < 3 ? max(mouse-pro.visible ? mouse-pro.height : 0, mouse-row.height) + Space.margin : root.mouse-cells-h);
                 mouse-drag-pan-enabled: false;
                 HintRow {
                     x: pws-x;
@@ -3420,9 +3424,13 @@ export component AppWindow inherits Window {
                 }
             }
         }
-        // Ectomatter's own settings, as the window lays them out
-        set-flick := Flickable {
+        // Ectomatter's own settings: its bar, every page's, and under it the form
+        // (src/ecto_settings.rs), which scrolls
+        Rectangle {
             visible: root.place == "settings";
+        set-flick := Flickable {
+            y: Size.bar;
+            height: parent.height - Size.bar;
             content-height: root.settings-h;
             mouse-drag-pan-enabled: false;
             for c in root.cells: CellView {
@@ -3433,6 +3441,11 @@ export component AppWindow inherits Window {
                 pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
                 slide(id, v) => { root.cell-slide(id, v); }
                 typed(id, index, t) => { root.cell-typed(id, index, t); }
+            }
+        }
+            PageBar {
+                y: 0;
+                title: "Settings";
             }
         }
 
@@ -4706,19 +4719,11 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
-                // Settings: its tiles, as the window lays them out
-                // Settings: one column of cards in the middle of the page, under a rule
+                // Settings: the keyboard's facts, a form (src/form.rs) laid out in Rust
                 if root.tab == 2: Rectangle {
-                    x: 0;
-                    y: 12px + head-h + 6px;
-                    width: content-w;
-                    height: 1px;
-                    background: Ink.line;
-                }
-                if root.tab == 2: Rectangle {
-                    x: pws-x + max(0, (pws-w - 820px) / 2);
-                    y: 12px + head-h + 6px + 24px;
-                    width: 820px;
+                    x: pws-x;
+                    y: head-end;
+                    width: pws-w;
                     height: root.tile-height;
                     for c in root.cells: CellView {
                         c: c;
@@ -4968,8 +4973,8 @@ export component AppWindow inherits Window {
     }
     if root.place == "settings": ScrollBar {
         x: root.width - 12px;
-        y: bar + 2px;
-        height: root.height - bar - 2px - root.bar-foot;
+        y: bar + 56px + 2px;
+        height: root.height - bar - 56px - 2px - root.bar-foot;
         view: set-flick.height;
         content: set-flick.content-height;
         offset: -set-flick.content-y;
@@ -5449,15 +5454,15 @@ export component AppWindow inherits Window {
         cancel => { root.scene-form-close(); }
         escape => { root.scene-form-escape(); }
         sf := DialogBox {
-            property <length> head-h: 22px + 4px + sf-sub.preferred-height + 18px;
-            property <length> natural: 24px + self.head-h + 46px + 6px + root.scene-form-h + 24px + 36px + 20px;
+            property <length> head-h: 22px + Space.tight + sf-sub.preferred-height + Space.pad;
+            property <length> natural: Space.margin + self.head-h + 46px + 6px + root.scene-form-h + Space.margin + Size.button + 2px + Space.margin;
             width: 600px;
             height: min(self.natural, parent.height - 32px);
             x: (parent.width - self.width) / 2;
             y: max(16px, (parent.height - self.height) / 2);
             Text {
-                x: 24px;
-                y: 24px;
+                x: Space.margin;
+                y: Space.margin;
                 height: 22px;
                 text: root.scene-form-title;
                 font-family: Font.ui;
@@ -5467,8 +5472,8 @@ export component AppWindow inherits Window {
                 vertical-alignment: center;
             }
             sf-sub := Text {
-                x: 24px;
-                y: 24px + 22px + 4px;
+                x: Space.margin;
+                y: Space.margin + 22px + Space.tight;
                 width: parent.width - 48px;
                 text: root.scene-form-sub;
                 font-family: Font.ui;
@@ -5477,9 +5482,9 @@ export component AppWindow inherits Window {
                 wrap: word-wrap;
             }
             Rectangle {
-                x: 24px;
-                y: 24px + sf.head-h;
-                width: 552px;
+                x: Space.margin;
+                y: Space.margin + sf.head-h;
+                width: parent.width - 2 * Space.margin;
                 height: 46px;
                 border-radius: Radius.control;
                 clip: true;
@@ -5493,10 +5498,10 @@ export component AppWindow inherits Window {
             sf-flick := Flickable {
                 // (scrolled by the wheel; a drag is the slider's)
                 mouse-drag-pan-enabled: false;
-                x: 24px;
-                y: 24px + sf.head-h + 46px + 6px;
-                width: 552px;
-                height: sf.height - self.y - 24px - 36px - 20px;
+                x: Space.margin;
+                y: Space.margin + sf.head-h + 46px + 6px;
+                width: parent.width - 2 * Space.margin;
+                height: sf.height - self.y - Space.margin - Size.button - 2px - Space.margin;
                 viewport-height: root.scene-form-h;
                 for c in root.scene-cells: CellView {
                     c: c;
@@ -5555,12 +5560,13 @@ export component AppWindow inherits Window {
                     }
                 }
             }
+            // its buttons, at its foot (as tall as the primary one, two more than the rest)
             HorizontalLayout {
-                x: 24px;
-                y: parent.height - 20px - 36px;
-                width: parent.width - 48px;
-                height: 36px;
-                spacing: 8px;
+                x: Space.margin;
+                y: parent.height - Space.margin - self.height;
+                width: parent.width - 2 * Space.margin;
+                height: Size.button + 2px;
+                spacing: Space.inline;
                 if root.scene-form-edit: VerticalLayout {
                     alignment: center;
                     WordButton {

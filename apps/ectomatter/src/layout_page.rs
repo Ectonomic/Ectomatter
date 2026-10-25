@@ -600,7 +600,7 @@ impl LayoutPage {
         let Some(p) = LayoutPage::page(cx) else { return };
         self.close_picker();
         let rows = vec![row(0, &format!("Duplicate {}", p.name), false, ""), row(4, &format!("Delete {}…", p.name), false, "")];
-        let w = rows.iter().map(|r| crate::text::width(400, 13.5, &r.label) + 64.0).fold(200.0f32, f32::max).min(320.0).ceil();
+        let w = rows.iter().map(|r| crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, &r.label) + 64.0).fold(200.0f32, f32::max).min(320.0).ceil();
         // (its right edge at the button's)
         self.place_menu(rows, w, (anchor.0 + 30.0 - w, anchor.1, anchor.2));
         self.menu = Some(Menu::More);
@@ -614,7 +614,7 @@ impl LayoutPage {
         }
         self.close_picker();
         let (rows, made) = new_rows(&cx.screens.library);
-        let w = rows.iter().map(|r| crate::text::width(400, 13.5, &r.label) + 64.0).fold(200.0f32, f32::max).min(320.0).ceil();
+        let w = rows.iter().map(|r| crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, &r.label) + 64.0).fold(200.0f32, f32::max).min(320.0).ceil();
         self.place_menu(rows, w, (anchor.0 + bw - w, anchor.1, anchor.2));
         self.menu = Some(Menu::New(made));
     }

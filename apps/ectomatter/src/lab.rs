@@ -1820,7 +1820,7 @@ impl LabPage {
     /// the window has room for, turned by the wheel), and its note's lines.
     fn part_box(&self, x: f32) -> (f32, f32, f32, usize, Vec<String>) {
         let (w, h, _, _) = self.sizes();
-        let widest = self.device.caps.iter().map(|(c, _)| text::width(400, 13.5, &c.label)).fold(0.0, f32::max);
+        let widest = self.device.caps.iter().map(|(c, _)| text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, &c.label)).fold(0.0, f32::max);
         let mw = (widest + 76.0).clamp(260.0, 380.0);
         let (mx, my) = (x.min(w - 24.0 - mw), 59.0);
         let note = format!("Changes you make to a chosen {0} are for it alone. A dot marks a {0} with its own setup.", self.parts().1);
@@ -2270,7 +2270,7 @@ impl LabPage {
             if c == 3 && !weights.contains(&(weight_of(j) as u16)) {
                 continue;
             }
-            let w = text::width(400, 13.0, name) + 20.0;
+            let w = text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, name) + 20.0;
             if x + w > drawing::CTRL_W && rows.last().is_some_and(|r| !r.is_empty()) {
                 rows.push(Vec::new());
                 x = 6.0;
@@ -2613,11 +2613,11 @@ impl LabPage {
     /// How wide Save is: as its words need, and no narrower than it was.
     /// The section reset button's width, as its words make it.
     fn default_w(&self) -> f32 {
-        text::width(500, 13.0, &self.section_reset_words().0) + 24.0
+        text::width(crate::tokens::font::MEDIUM, crate::tokens::font::CONTROL, &self.section_reset_words().0) + 24.0
     }
 
     fn save_w(&self) -> f32 {
-        (text::width(600, 13.0, &self.save_text()) + 26.0).max(176.0)
+        (text::width(crate::tokens::font::STRONG, crate::tokens::font::CONTROL, &self.save_text()) + 26.0).max(176.0)
     }
 
     fn save_text(&self) -> String {
@@ -2639,7 +2639,7 @@ impl LabPage {
         let (_, h, _, _) = self.sizes();
         let color = |c: [u8; 3]| slint::Color::from_rgb_u8(c[0], c[1], c[2]);
         let (quiet, faint, dim, bright) = ([0x9a, 0x9a, 0x9a], [0x5a, 0x5a, 0x5a], [0xd4, 0xd4, 0xd4], [0xf5, 0xf5, 0xf5]);
-        let words = |x: f32, y: f32, s: &str, c: [u8; 3]| Cell { color: color(c), ..text_cell(style::WORDS_IN, x, y, text::width(400, 13.5, s) + 2.0, 20.0, s) };
+        let words = |x: f32, y: f32, s: &str, c: [u8; 3]| Cell { color: color(c), ..text_cell(style::WORDS_IN, x, y, text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, s) + 2.0, 20.0, s) };
         let mw = 380.0;
         let (mx, my) = (x.min(w - 24.0 - mw), 59.0);
         // anywhere else on the page shuts it
@@ -2748,7 +2748,7 @@ impl LabPage {
                 Menu::Rename => "Rename",
                 _ => "Delete",
             };
-            let (gw, cw) = (text::width(500, 13.0, go) + 28.0, text::width(500, 13.0, "Cancel") + 28.0);
+            let (gw, cw) = (text::width(crate::tokens::font::MEDIUM, crate::tokens::font::CONTROL, go) + 28.0, text::width(crate::tokens::font::MEDIUM, crate::tokens::font::CONTROL, "Cancel") + 28.0);
             items.push(Cell { text: go.into(), on: true, id: SETUP, index: 5, ..cell(kind::SEG_BUTTON, mx + mw - 16.0 - gw, my + y, gw, 30.0) });
             items.push(Cell { text: "Cancel".into(), id: SETUP, index: 6, ..cell(kind::GHOST, mx + mw - 16.0 - gw - 8.0 - cw, my + y, cw, 30.0) });
             y += 30.0;
@@ -2785,7 +2785,7 @@ impl LabPage {
                 items.push(Cell { style: 30, ..cell(kind::TILE, mx + 8.0, my + y, mw - 16.0, PART_ROW) });
             }
             let name = elide(&c.label, mw - 76.0, 400, 13.5);
-            let nw = text::width(400, 13.5, &name) + 2.0;
+            let nw = text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, &name) + 2.0;
             items.push(Cell { color: color(if chosen { bright } else { dim }), ..text_cell(style::WORDS_IN, mx + 20.0, my + y + 8.0, nw, 20.0, &name) });
             if self.light["keys"][c.id.as_str()].is_object() {
                 items.push(Cell { style: 3, ..cell(kind::DOT, mx + 20.0 + nw + 8.0, my + y + 15.0, 6.0, 6.0) });
@@ -3183,7 +3183,7 @@ impl LabPage {
         let mut tabs = Vec::new();
         for i in self.sections() {
             let title = &SECTIONS[i].0;
-            let bw = text::width(400, 13.0, title) + 24.0;
+            let bw = text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, title) + 24.0;
             tabs.push((i, title, bx, bw));
             bx += bw + 2.0;
         }
@@ -3195,19 +3195,19 @@ impl LabPage {
         let (many, single) = self.parts();
         let (all_words, one_words) = (format!("All {many}"), format!("One {single}"));
         let one = elide(&self.key().map_or_else(|| one_words.clone(), |k| k.label.clone()), SETUP_W, 400, 13.0);
-        let (aw, kw) = (text::width(400, 13.0, &all_words) + 24.0, text::width(400, 13.0, &one) + 24.0 + 16.0);
+        let (aw, kw) = (text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, &all_words) + 24.0, text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, &one) + 24.0 + 16.0);
         let scope_w = aw + 2.0 + kw + 6.0;
         let qx = tx - 12.0 - scope_w;
         // the light setup tuned, before the keys: the core's, or one of the
         // person's own, which opens the menu of them
         let setup = elide(&self.setup_name(), SETUP_W, 400, 13.0);
-        let uw = text::width(400, 13.0, &setup) + 24.0 + 16.0;
+        let uw = text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, &setup) + 24.0 + 16.0;
         let ux = qx - 12.0 - (uw + 6.0);
         // what the page is, or whose own setup it shows; shorter where the head is narrow
         let room = (ux - 48.0).max(200.0);
         let (full, brief) = self.intro();
         // (cut short where even the brief one does not fit)
-        let intro = if text::width(400, 12.5, &full) <= room { full } else { elide(&brief, room, 400, 12.5) };
+        let intro = if text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, &full) <= room { full } else { elide(&brief, room, 400, 12.5) };
         cells.push(text_cell(style::NOTE, 24.0, 44.0, room, 18.0, &intro));
         cells.push(cell(kind::SEG, ux, 17.0, uw + 6.0, 36.0));
         cells.push(Cell { text: setup.into(), on: self.menu != Menu::Shut, id: SETUP, index: 0, style: 24, ..cell(kind::SEG_BUTTON, ux + 3.0, 20.0, uw, 30.0) });
@@ -3237,7 +3237,7 @@ impl LabPage {
             for word in &st.words {
                 // a word's baseline where the stage has it, in Geist's 11.5px line centered in its box
                 let top = sy + word.y - 1.005 * 11.5 - (16.0 - 1.3 * 11.5) / 2.0;
-                over.push(in_color(style::SMALL_IN, sx + word.x, top, text::width(400, 11.5, &word.text) + 2.0, 16.0, &word.text, word.color));
+                over.push(in_color(style::SMALL_IN, sx + word.x, top, text::width(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, &word.text) + 2.0, 16.0, &word.text, word.color));
             }
         }
         // the section's choices, at the top of its left column, over the stage:
@@ -3253,7 +3253,7 @@ impl LabPage {
             if self.owns(("legends", "typeface")) {
                 own_mark(&mut over, cx, y, TYPEFACE);
             }
-            let bw = (text::width(400, 13.0, &family) + 24.0 + 16.0).min(drawing::CTRL_W - 6.0);
+            let bw = (text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, &family) + 24.0 + 16.0).min(drawing::CTRL_W - 6.0);
             over.push(cell(kind::SEG, cx, y + 30.0, bw + 6.0, 34.0));
             over.push(Cell { text: family.into(), on: self.faces_open, id: TYPEFACE, index: 0, style: 24, ..cell(kind::SEG_BUTTON, cx + 3.0, y + 32.0, bw, 30.0) });
         }
@@ -3313,7 +3313,7 @@ impl LabPage {
             over.push(text_cell(style::LABEL, rx, y, drawing::CTRL_W, 26.0, "Adjust"));
             let here = self.parts_here();
             let options: Vec<(usize, &str)> = PART_NAMES.iter().copied().enumerate().filter(|&(j, _)| j == 0 || here[j - 1]).collect();
-            let widths: Vec<f32> = options.iter().map(|(_, name)| text::width(400, 13.0, name) + 20.0).collect();
+            let widths: Vec<f32> = options.iter().map(|(_, name)| text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, name) + 20.0).collect();
             let seg_w = widths.iter().sum::<f32>() + 2.0 * (widths.len() as f32 - 1.0) + 6.0;
             over.push(cell(kind::SEG, rx, y + 30.0, seg_w, 34.0));
             let on = self.part_on();
@@ -3394,7 +3394,7 @@ impl LabPage {
             sketches.push(Sketch { x: px, y: py, w: st.w, h: st.h, image: image.clone() });
             for word in &st.words {
                 let top = py + word.y - 1.005 * 11.5 - (16.0 - 1.3 * 11.5) / 2.0;
-                over.push(in_color(style::SMALL_IN, px + word.x, top, text::width(400, 11.5, &word.text) + 2.0, 16.0, &word.text, word.color));
+                over.push(in_color(style::SMALL_IN, px + word.x, top, text::width(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, &word.text) + 2.0, 16.0, &word.text, word.color));
             }
             over.push(Cell { id: PAD, ..cell(18, px, py, pw, ph) });
             if self.owns(PARAMS[PLACE_E].path) || self.owns(PARAMS[PLACE_N].path) {
@@ -3414,7 +3414,7 @@ impl LabPage {
             sketches.push(Sketch { x: fx, y: fy, w: st.w, h: st.h, image: image.clone() });
             for word in &st.words {
                 let top = fy + word.y - 1.005 * 11.5 - (16.0 - 1.3 * 11.5) / 2.0;
-                over.push(in_color(style::SMALL_IN, fx + word.x, top, text::width(400, 11.5, &word.text) + 2.0, 16.0, &word.text, word.color));
+                over.push(in_color(style::SMALL_IN, fx + word.x, top, text::width(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, &word.text) + 2.0, 16.0, &word.text, word.color));
             }
             let (first, rows) = (self.face_first, self.face_rows());
             over.push(Cell { id: FIND, style: 2, text: self.face_query.clone().into(), ..cell(kind::FIELD, fx + 12.0, fy + 12.0, fw - 24.0, 34.0) });
@@ -3445,7 +3445,7 @@ impl LabPage {
             let title = format!("Choose a {one}");
             over.push(text_cell(style::LABEL, mx + 24.0, my + 18.0, 200.0, 26.0, &title));
             let note = format!("Changes you make to a chosen {one} are for it alone. A dot marks a {one} with its own setup.");
-            over.push(text_cell(style::NOTE, mx + 24.0 + text::width(400, 13.5, &title) + 14.0, my + 22.0, mw - 200.0, 18.0, &note));
+            over.push(text_cell(style::NOTE, mx + 24.0 + text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, &title) + 14.0, my + 22.0, mw - 200.0, 18.0, &note));
             for (i, (c, _)) in self.device.caps.iter().enumerate() {
                 let (mut kx, mut ky) = (mx + 24.0 + (c.foot[0] - x0) * k, my + 64.0 + (c.foot[1] - y0) * k);
                 let (mut kw, mut kh) = ((c.foot[2] - c.foot[0]) * k, (c.foot[3] - c.foot[1]) * k);
@@ -3453,7 +3453,7 @@ impl LabPage {
                 // a button smaller than a key: its box round its middle, as big as
                 // its name needs, with room above it for the dot
                 if c.button {
-                    let (bw, bh) = (kw.max(text::width(400, 10.5, &name) + 24.0), kh.max(32.0));
+                    let (bw, bh) = (kw.max(text::width(crate::tokens::font::REGULAR, crate::tokens::font::SMALL, &name) + 24.0), kh.max(32.0));
                     (kx, ky, kw, kh) = (kx + (kw - bw) / 2.0, ky + (kh - bh) / 2.0, bw, bh);
                 }
                 over.push(Cell { text: name.into(), on: self.scope == Some(i), id: MAP, index: i as i32, style: 25, ..cell(kind::GHOST, kx + 1.5, ky + 1.5, kw - 3.0, kh - 3.0) });
@@ -3465,7 +3465,7 @@ impl LabPage {
         // the line under the stage: what the slider under the pointer does, or what the section is
         let (name, note) = self.told();
         let hy = sy + sh + 10.0;
-        let nw = text::width(500, 12.5, &name) + 2.0;
+        let nw = text::width(crate::tokens::font::MEDIUM, crate::tokens::font::NOTE, &name) + 2.0;
         cells.push(in_color(style::LABEL_IN, 24.0, hy, nw, 18.0, &name, [0xe5, 0xe5, 0xe5]));
         let first = (w - 48.0 - nw - 6.0).max(100.0);
         // (two lines of it, the second ending in an ellipsis where it goes on)
@@ -3490,7 +3490,7 @@ impl LabPage {
     /// shortest, its words wrapping past it.
     fn readout_line(&self) -> Vec<Cell> {
         let status = self.status_shown();
-        let room = self.foot_room() - if status.is_empty() { 0.0 } else { (text::width(400, 12.5, status) + 16.0).min(self.status_room() + 16.0) };
+        let room = self.foot_room() - if status.is_empty() { 0.0 } else { (text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, status) + 16.0).min(self.status_room() + 16.0) };
         for level in 0..5 {
             let (cells, end) = self.readout_at(level);
             if end - 24.0 <= room || level == 4 {
@@ -3533,17 +3533,17 @@ impl LabPage {
         if level < 2 {
             let head = "Brightest now";
             out.push(in_color(style::LABEL_IN, x, head, [0xa3, 0xa3, 0xa3]));
-            x += text::width(500, 12.5, head) + 12.0;
+            x += text::width(crate::tokens::font::MEDIUM, crate::tokens::font::NOTE, head) + 12.0;
         }
         // (a device whose lights are windows: each light's brightest, then the desktop's white)
         if self.device.windows {
             for (k, (c, _)) in self.device.caps.iter().take(2).enumerate() {
                 let value = format!("{} nits", nits(r.lights[k]));
                 let x0 = x;
-                out.push(text_cell(style::NOTE, x, 23.0, text::width(400, 12.5, &c.label) + 2.0, 18.0, &c.label));
-                x += text::width(400, 12.5, &c.label) + 6.0;
+                out.push(text_cell(style::NOTE, x, 23.0, text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, &c.label) + 2.0, 18.0, &c.label));
+                x += text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, &c.label) + 6.0;
                 out.push(in_color(style::LABEL_IN, x, &value, value_color));
-                x += text::width(500, 12.5, &value);
+                x += text::width(crate::tokens::font::MEDIUM, crate::tokens::font::NOTE, &value);
                 out.insert(out.len() - 2, Cell { id: READING + 5, ..cell(kind::ZONE, x0 - 4.0, 16.0, x - x0 + 8.0, 32.0) });
                 x += 14.0;
             }
@@ -3551,20 +3551,20 @@ impl LabPage {
             out.push(Cell { color: color([0x3a, 0x3a, 0x3a]), ..cell(kind::BOX, x, 25.0, 1.0, 14.0) });
             x += 15.0;
             let white = format!("{} nits", nits(r.white));
-            out.push(text_cell(style::NOTE, x, 23.0, text::width(400, 12.5, "Desktop white") + 2.0, 18.0, "Desktop white"));
-            x += text::width(400, 12.5, "Desktop white") + 6.0;
+            out.push(text_cell(style::NOTE, x, 23.0, text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, "Desktop white") + 2.0, 18.0, "Desktop white"));
+            x += text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, "Desktop white") + 6.0;
             out.push(in_color(style::LABEL_IN, x, &white, value_color));
-            x += text::width(500, 12.5, &white);
+            x += text::width(crate::tokens::font::MEDIUM, crate::tokens::font::NOTE, &white);
             return (out, x);
         }
         let held = self.legend_note().is_some();
         let items: [(&str, String); 5] = [("Legend", nits(r.legend)), ("Deck", nits(r.deck)), ("Skirt", nits(r.skirt)), ("Chassis", nits(r.chassis)), ("Display", format!("{} nits", nits(r.lcd)))];
         let item = |out: &mut Vec<Cell>, x: &mut f32, id: i32, label: &str, value: &str, c: [u8; 3]| {
             let x0 = *x;
-            out.push(text_cell(style::NOTE, *x, 23.0, text::width(400, 12.5, label) + 2.0, 18.0, label));
-            *x += text::width(400, 12.5, label) + 6.0;
+            out.push(text_cell(style::NOTE, *x, 23.0, text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, label) + 2.0, 18.0, label));
+            *x += text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, label) + 6.0;
             out.push(in_color(style::LABEL_IN, *x, value, c));
-            *x += text::width(500, 12.5, value);
+            *x += text::width(crate::tokens::font::MEDIUM, crate::tokens::font::NOTE, value);
             out.insert(out.len() - 2, Cell { id, ..cell(kind::ZONE, x0 - 4.0, 16.0, *x - x0 + 8.0, 32.0) });
             *x += 14.0;
         };
@@ -3593,7 +3593,7 @@ impl LabPage {
         } else {
             format!("Clearing{photons}")
         };
-        let sw = text::width(400, 12.5, &sim) + 2.0;
+        let sw = text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, &sim) + 2.0;
         out.push(Cell { id: READING + 6, ..cell(kind::ZONE, x - 4.0, 16.0, sw + 8.0, 32.0) });
         out.push(text_cell(style::NOTE, x, 23.0, sw, 18.0, &sim));
         (out, x + sw)
@@ -3647,7 +3647,7 @@ fn wrap_after(s: &str, first: f32, rest: f32) -> Vec<String> {
     for word in s.split(' ') {
         let max = if lines.is_empty() { first } else { rest };
         let next = if line.is_empty() { word.to_string() } else { format!("{line} {word}") };
-        if !line.is_empty() && text::width(400, 12.5, &next) > max {
+        if !line.is_empty() && text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, &next) > max {
             lines.push(std::mem::take(&mut line));
             line = word.to_string();
         } else {
@@ -3923,7 +3923,7 @@ mod tests {
             let e = ends(p.path);
             assert_eq!(e.is_some(), p.unit == Unit::Fraction, "{}", p.label);
             if let Some((low, high)) = e {
-                assert!(text::width(400, 11.5, low) + 16.0 + text::width(400, 11.5, high) <= drawing::CTRL_W - 26.0, "{}: its words fit under its track", p.label);
+                assert!(text::width(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, low) + 16.0 + text::width(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, high) <= drawing::CTRL_W - 26.0, "{}: its words fit under its track", p.label);
             }
         }
     }

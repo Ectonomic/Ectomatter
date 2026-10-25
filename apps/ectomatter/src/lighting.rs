@@ -345,7 +345,7 @@ impl Stack {
         self.y += h;
     }
     pub(crate) fn note(&mut self, s: &str) {
-        let lines = text::wrap(400, 12.5, s, self.inner());
+        let lines = text::wrap(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, s, self.inner());
         for (k, line) in lines.iter().enumerate() {
             self.cells.push(text_cell(style::NOTE, 16.0, self.y + k as f32 * 18.0, self.inner(), 18.0, line));
         }
@@ -355,7 +355,7 @@ impl Stack {
     pub(crate) fn group(&mut self, name: &str) {
         if self.groups > 0 {
             self.y += 16.0;
-            self.cells.push(Cell { color: slint::Color::from_rgb_u8(0x2b, 0x2b, 0x30), ..cell(kind::BOX, 16.0, self.y, self.inner(), 1.0) });
+            self.cells.push(Cell { color: crate::tokens::color(crate::tokens::ink::LINE), ..cell(kind::BOX, 16.0, self.y, self.inner(), 1.0) });
             self.y += 15.0;
         } else {
             self.y += 6.0;
@@ -368,7 +368,7 @@ impl Stack {
     pub(crate) fn head(&mut self, label: &str, value: Option<&str>) {
         self.cells.push(text_cell(style::PROP, 16.0, self.y, self.inner(), 20.0, label));
         if let Some(v) = value {
-            let w = text::width(500, 11.5, v) + 16.0;
+            let w = text::width(crate::tokens::font::MEDIUM, crate::tokens::font::CAPTION, v) + 16.0;
             self.cells.push(Cell { text: v.into(), ..cell(kind::PILL, self.w - 16.0 - w, self.y, w, 20.0) });
         }
         self.y += 20.0 + 8.0;
@@ -432,7 +432,7 @@ impl Stack {
         self.check_at(id(c), on, label);
     }
     pub(crate) fn check_at(&mut self, id: i32, on: bool, label: &str) {
-        self.cells.push(Cell { on, id, text: label.into(), ..cell(kind::CHECKBOX, 16.0, self.y, 28.0 + text::width(400, 13.0, label), 20.0) });
+        self.cells.push(Cell { on, id, text: label.into(), ..cell(kind::CHECKBOX, 16.0, self.y, 28.0 + text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, label), 20.0) });
         self.y += 20.0;
     }
     /// a dropdown showing the choice it is on
@@ -449,7 +449,7 @@ impl Stack {
     pub(crate) fn chips_at(&mut self, id: i32, chips: &[(usize, &str, bool)], faded: bool, hot: Option<usize>) {
         let (mut x, mut y) = (0.0f32, self.y);
         for (index, name, on) in chips {
-            let w = text::width(400, 12.5, name) + 24.0 + if *on { 14.0 } else { 0.0 };
+            let w = text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, name) + 24.0 + if *on { 14.0 } else { 0.0 };
             if x > 0.0 && x + w > self.inner() {
                 x = 0.0;
                 y += 34.0;

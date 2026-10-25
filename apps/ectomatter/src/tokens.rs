@@ -4,3 +4,8 @@
 //! window's Slint globals hold (`Space`, `Ink`), from the same file.
 
 include!(concat!(env!("OUT_DIR"), "/tokens.rs"));
+
+/// A token's color, for a piece the window draws where Rust says.
+pub fn color(c: [u8; 3]) -> slint::Color {
+    slint::Color::from_rgb_u8(c[0], c[1], c[2])
+}

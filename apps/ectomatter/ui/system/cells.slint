@@ -97,8 +97,8 @@ export component CellView inherits Rectangle {
         // 11 the weather's words, 12 a fact, 13 its value, 14 the credit, 19 a note in its own color,
         // 20 a menu's words in their own color, 21 a small word in its own color, 22 a stronger word in its own color
         font-size: root.c.style == 1 ? Font.control : root.c.style == 2 || root.c.style == 19 ? Font.note : root.c.style == 3 ? Font.name : root.c.style == 4 ? Font.control
-            : root.c.style == 7 ? 20px : root.c.style == 8 ? 14.5px : root.c.style == 9 || root.c.style == 22 ? 12.5px : root.c.style == 10 ? 22px
-            : root.c.style == 12 || root.c.style == 13 ? 13px : root.c.style == 14 ? 12px : root.c.style == 21 ? 11.5px : 13.5px;
+            : root.c.style == 7 ? Font.title : root.c.style == 8 ? Font.tab : root.c.style == 9 || root.c.style == 22 ? Font.note : root.c.style == 10 ? Font.display
+            : root.c.style == 12 || root.c.style == 13 ? Font.control : root.c.style == 14 ? Font.caption : root.c.style == 21 ? Font.caption : Font.text;
         font-weight: root.c.style == 1 || root.c.style == 8 || root.c.style == 10 || root.c.style == 13 || root.c.style == 22 ? Font.medium : root.c.style == 7 ? Font.strong : Font.regular;
         letter-spacing: root.c.style == 7 ? -0.4px : root.c.style == 10 ? -0.44px : 0;
         color: root.c.style >= 19 && root.c.style <= 22 ? root.c.color
@@ -1048,7 +1048,7 @@ export component CellView inherits Rectangle {
                 text: root.c.text;
                 font-family: Font.ui;
                 font-size: Font.note;
-                color: root.c.style == 1 ? #5d5d64 : root.c.on || ch-ta.has-hover ? Ink.bright : Ink.soft;
+                color: root.c.style == 1 ? Ink.off : root.c.on || ch-ta.has-hover ? Ink.bright : Ink.soft;
                 vertical-alignment: center;
             }
         }

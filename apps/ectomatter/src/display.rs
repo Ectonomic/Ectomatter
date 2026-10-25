@@ -5,7 +5,9 @@
 
 use serde_json::{json, Value};
 
+use crate::form::TEXT_LINE;
 use crate::lighting::{cell, id, kind, style, text_cell, Ctl};
+use crate::tokens::font;
 use crate::z10::Page;
 use crate::Cell;
 
@@ -33,116 +35,68 @@ pub struct Tiles {
     pub height: f32,
 }
 
-/// The cards' width: the tab is one column of them, in the middle of the page.
-pub const CARD_W: f32 = 820.0;
-const LABEL_W: f32 = 198.0;
-
-/// A card's pieces, from its top: its title, then rows of a name and its value, a hairline between.
-struct Card {
-    y0: f32,
-    y: f32,
-    cells: Vec<Cell>,
-}
-
-impl Card {
-    fn new(y0: f32, title: &str, cells: &mut Vec<Cell>) -> Card {
-        let _ = cells;
-        let mut c = Card { y0, y: y0 + 48.0, cells: Vec::new() };
-        c.cells.push(text_cell(style::BOX_TITLE, 24.0, y0 + 16.0, CARD_W - 48.0, 22.0, title));
-        c
-    }
-    fn rule(&mut self) {
-        self.y += 14.0;
-        self.cells.push(Cell { color: slint::Color::from_rgb_u8(0x2b, 0x2b, 0x30), ..cell(kind::BOX, 24.0, self.y, CARD_W - 48.0, 1.0) });
-        self.y += 15.0;
-    }
-    /// a row: its name, and what goes in the value's column, `h` tall
-    fn row(&mut self, label: &str, h: f32, value: impl FnOnce(&mut Vec<Cell>, f32, f32)) {
-        self.rule();
-        self.cells.push(text_cell(style::FACT, 24.0, self.y, LABEL_W, 20.0, label));
-        value(&mut self.cells, 24.0 + LABEL_W, self.y);
-        self.y += h.max(20.0);
-    }
-    fn note(&mut self, x: f32, s: &str) {
-        let w = CARD_W - 24.0 - x;
-        let lines = crate::text::wrap(400, 12.5, s, w);
-        for (k, line) in lines.iter().enumerate() {
-            self.cells.push(text_cell(style::NOTE, x, self.y + k as f32 * 18.0, w, 18.0, line));
-        }
-        self.y += lines.len() as f32 * 18.0;
-    }
-    /// the card itself under its pieces; where the next one goes
-    fn close(mut self, out: &mut Vec<Cell>) -> f32 {
-        let h = self.y + 22.0 - self.y0;
-        out.push(Cell { style: 1, ..cell(kind::TILE, 0.0, self.y0, CARD_W, h) });
-        out.append(&mut self.cells);
-        self.y0 + h + 12.0
-    }
-}
-
 /// The tab: the keyboard (how it is connected, its firmware and what that
-/// adds, the model).
-pub fn tiles(fw: &Value, connected: Option<bool>) -> Tiles {
-    let mut cells = Vec::new();
-    let mut k = Card::new(0.0, "Keyboard", &mut cells);
-    let (tone, words) = match connected {
-        Some(true) => (1, "Connected by USB."),
-        Some(false) => (2, "Not connected. Ectomatter tries again every few seconds."),
-        None => (0, "Ectomatter leaves this keyboard to other programs."),
-    };
-    k.cells.push(Cell { style: tone, ..cell(kind::DOT, 24.0, k.y + 6.5, 7.0, 7.0) });
-    k.cells.push(text_cell(style::SMALL, 39.0, k.y, CARD_W - 63.0, 20.0, words));
-    k.y += 20.0;
-    match fw["kind"].as_str().unwrap_or("unknown") {
-        "custom" => {
-            let v = format!("Ectomatter v{}, build {}", fw["version"].as_str().unwrap_or(""), fw["build"]);
-            k.row("Firmware", 20.0, |c, x, y| {
-                let w = crate::text::width(500, 13.0, &v);
-                c.push(text_cell(style::FACT_VALUE, x, y, w + 4.0, 20.0, &v));
-                c.push(Cell { text: "Unofficial".into(), style: 1, ..cell(kind::PILL, x + w + 12.0, y + 1.0, crate::text::width(400, 11.0, "Unofficial") + 14.0, 18.0) });
-            });
-            let adds: Vec<String> = fw["features"].as_array().map(|a| a.iter().filter_map(|x| x["name"].as_str().map(String::from)).collect()).unwrap_or_default();
-            if adds.is_empty() {
-                k.rule();
-                k.cells.push(text_cell(style::FACT, 24.0, k.y, LABEL_W, 20.0, "Adds"));
-                k.note(24.0 + LABEL_W, "Nothing Ectomatter controls yet. This build fixes how the volume slider steps.");
-            } else {
-                // two across, a tick before each
-                let rows = adds.len().div_ceil(2);
-                k.row("Adds", rows as f32 * 24.0 - 4.0, |c, x, y| {
-                    let col = (CARD_W - 24.0 - x) / 2.0;
+/// adds, the model), a form (src/form.rs) in `room` across.
+pub fn tiles(fw: &Value, connected: Option<bool>, room: f32) -> Tiles {
+    let mut f = crate::form::Form::new(0.0, 0.0, room);
+    f.section("Keyboard", "", |k| {
+        let (tone, words) = match connected {
+            Some(true) => (1, "Connected by USB."),
+            Some(false) => (2, "Not connected. Ectomatter tries again every few seconds."),
+            None => (0, "Ectomatter leaves this keyboard to other programs."),
+        };
+        k.status_row(tone, words);
+        match fw["kind"].as_str().unwrap_or("unknown") {
+            "custom" => {
+                let v = format!("Ectomatter v{}, build {}", fw["version"].as_str().unwrap_or(""), fw["build"]);
+                k.row();
+                k.label_text("Firmware");
+                let (x, top) = (k.control_x(), k.y);
+                let w = crate::text::width(font::REGULAR, font::TEXT, &v);
+                k.cells.push(text_cell(style::VALUE_BRIGHT, x, top, w + 4.0, TEXT_LINE, &v));
+                k.cells.push(Cell { text: "Unofficial".into(), style: 1, ..cell(kind::PILL, x + w + 12.0, top + 1.0, crate::text::width(font::REGULAR, font::SMALL, "Unofficial") + 14.0, 18.0) });
+                k.next(top, TEXT_LINE);
+                let adds: Vec<String> = fw["features"].as_array().map(|a| a.iter().filter_map(|x| x["name"].as_str().map(String::from)).collect()).unwrap_or_default();
+                k.row();
+                k.label_text("Adds");
+                let top = k.y;
+                if adds.is_empty() {
+                    let end = k.note_at(k.control_x(), top + 1.0, k.control_w(), "Nothing Ectomatter controls yet. This build fixes how the volume slider steps.");
+                    k.next(top, end - top);
+                } else {
+                    // two across, a tick before each
+                    let (x, col) = (k.control_x(), k.control_w() / 2.0);
                     for (i, a) in adds.iter().enumerate() {
-                        c.push(Cell { text: a.into(), ..cell(kind::TICKED, x + (i % 2) as f32 * col, y + (i / 2) as f32 * 24.0, col - 8.0, 20.0) });
+                        k.cells.push(Cell { text: a.into(), ..cell(kind::TICKED, x + (i % 2) as f32 * col, top + (i / 2) as f32 * 24.0, col - 8.0, TEXT_LINE) });
                     }
-                });
-            }
-            let later: Vec<String> = fw["later"].as_array().map(|a| a.iter().map(|x| format!("{} (build {})", x["name"].as_str().unwrap_or(""), x["since"])).collect()).unwrap_or_default();
-            if !later.is_empty() {
-                k.row("In later builds", later.len() as f32 * 24.0 - 4.0, |c, x, y| {
+                    k.next(top, adds.len().div_ceil(2) as f32 * 24.0 - 4.0);
+                }
+                let later: Vec<String> = fw["later"].as_array().map(|a| a.iter().map(|x| format!("{} (build {})", x["name"].as_str().unwrap_or(""), x["since"])).collect()).unwrap_or_default();
+                if !later.is_empty() {
+                    k.row();
+                    k.label_text("In later builds");
+                    let (x, w, top) = (k.control_x(), k.control_w(), k.y);
                     for (i, l) in later.iter().enumerate() {
-                        c.push(text_cell(style::FACT_VALUE, x, y + i as f32 * 24.0, CARD_W - 24.0 - x, 20.0, l));
+                        k.cells.push(text_cell(style::VALUE_BRIGHT, x, top + i as f32 * 24.0, w, TEXT_LINE, l));
                     }
-                });
+                    k.next(top, later.len() as f32 * 24.0 - 4.0);
+                }
+            }
+            "retail" => {
+                let v = format!("EVGA v{}", fw["version"].as_str().unwrap_or(""));
+                k.fact("Firmware", &v, "Features that need Ectomatter’s custom firmware show here when the keyboard runs it.");
+            }
+            _ => {
+                let v = fw["version"].as_str().unwrap_or("");
+                let v = if v.is_empty() { "Not known".to_string() } else { format!("v{v}") };
+                k.fact("Firmware", &v, "This version is neither EVGA’s nor Ectomatter’s, so no custom features are offered.");
             }
         }
-        "retail" => {
-            let v = format!("EVGA v{}", fw["version"].as_str().unwrap_or(""));
-            k.row("Firmware", 20.0, |c, x, y| c.push(text_cell(style::FACT_VALUE, x, y, CARD_W - 24.0 - x, 20.0, &v)));
-            k.y += 6.0;
-            k.note(24.0 + LABEL_W, "Features that need Ectomatter’s custom firmware show here when the keyboard runs it.");
-        }
-        _ => {
-            let v = fw["version"].as_str().unwrap_or("");
-            let v = if v.is_empty() { "Not known".to_string() } else { format!("v{v}") };
-            k.row("Firmware", 20.0, |c, x, y| c.push(text_cell(style::FACT_VALUE, x, y, CARD_W - 24.0 - x, 20.0, &v)));
-            k.y += 6.0;
-            k.note(24.0 + LABEL_W, "This version is neither EVGA’s nor Ectomatter’s, so no custom features are offered.");
-        }
-    }
-    let model = format!("EVGA Z10 RGB, USB {:04x}:{:04x}", evga_z10::protocol::VID, evga_z10::protocol::PID);
-    k.row("Model", 20.0, |c, x, y| c.push(text_cell(style::FACT_VALUE, x, y, CARD_W - 24.0 - x, 20.0, &model)));
-    let y = k.close(&mut cells);
-    Tiles { cells, height: y - 12.0 }
+        let model = format!("EVGA Z10 RGB, USB {:04x}:{:04x}", evga_z10::protocol::VID, evga_z10::protocol::PID);
+        k.fact("Model", &model, "");
+    });
+    let (cells, height) = f.end();
+    Tiles { cells, height }
 }
 
 /// The screen light's ready colors: white first, the keyboard's own default.
@@ -166,18 +120,18 @@ pub fn screen_cells(page: &Page, w: f32, from: f32, own: Option<(&str, [u8; 3])>
     // from the row's right end leftward: how bright, the slider, its name; the color (its dot
     // and its code, one button), the name of both. (Each text's cell runs 2 past its words,
     // into the gap after them, so the gaps are the words' own.)
-    let t = |s: &str| crate::text::width(400, 12.5, s);
+    let t = |s: &str| crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, s);
     let v = format!("{}%", (br / 2.55).round());
     // (the pill as wide at every value as at 100%, so the slider never shifts under the pointer)
-    let pw = crate::text::width(400, 12.0, "100%") + 14.0;
+    let pw = crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, "100%") + 14.0;
     let hex = crate::lighting::hex_of(rgb);
-    let cw = 4.0 + 20.0 + 8.0 + crate::text::width(400, 13.0, &hex) + 9.0;
+    let cw = 4.0 + 20.0 + 8.0 + crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, &hex) + 9.0;
     // In a window too narrow for all of it beside the tabs (which end at `from`), the slider
     // shortens, to 72 at the least, then the words go: Brightness's first (the slider and its
     // value still read as how bright), then the default backlight's; the slider takes back
     // what a word leaves, to 120. Reckoned with the widest color code, so a color picked
     // never moves it.
-    let widest = 4.0 + 20.0 + 8.0 + crate::text::width(400, 13.0, "#") + 6.0 * "0123456789ABCDEF".chars().map(|d| crate::text::width(400, 13.0, &d.to_string())).fold(0.0, f32::max) + 9.0;
+    let widest = 4.0 + 20.0 + 8.0 + crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, "#") + 6.0 * "0123456789ABCDEF".chars().map(|d| crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, &d.to_string())).fold(0.0, f32::max) + 9.0;
     let (bw, lw) = (t("Brightness"), t("Default backlight"));
     let room = w - from - pw - 12.0 - 22.0 - widest;
     let (with_bright, with_name) = if 72.0 + 10.0 + bw + 10.0 + lw <= room { (true, true) } else if 72.0 + 10.0 + lw <= room { (false, true) } else { (false, false) };

@@ -644,13 +644,13 @@ pub fn chain(ed: &Editor, d: &Draft, locked: bool, width: f32) -> (Vec<Cell>, f3
         let name = step_words(st, &ed.jobs);
         let style = if macro_of(st).is_some() { 3 } else if is_job(st) { 2 } else if media { 1 } else { 0 };
         let mark = match style {
-            1 => text::width(400, 12.0, "♫") + 6.0,
-            2 => text::width(400, 12.0, "◆") + 6.0,
-            3 => text::width(400, 12.0, "▶") + 6.0,
+            1 => text::width(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, "♫") + 6.0,
+            2 => text::width(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, "◆") + 6.0,
+            3 => text::width(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, "▶") + 6.0,
             _ => 0.0,
         };
-        let way = if style >= 2 { 0.0 } else { 6.0 + text::width(500, 12.5, if down(st) { "↓" } else { "↑" }) };
-        let w = 11.0 + mark + text::width(500, 13.0, &name) + way + 11.0;
+        let way = if style >= 2 { 0.0 } else { 6.0 + text::width(crate::tokens::font::MEDIUM, crate::tokens::font::NOTE, if down(st) { "↓" } else { "↑" }) };
+        let w = 11.0 + mark + text::width(crate::tokens::font::MEDIUM, crate::tokens::font::CONTROL, &name) + way + 11.0;
         Cell { kind: piece::STEP, text: name.into(), on, value: if down(st) { 1.0 } else { 0.0 }, style, id, index: i as i32, ..cell(0, 0.0, 0.0, w, line) }
     };
     let wait = |ms: u64, i: usize, editing: bool, id: i32| -> Cell {
@@ -658,7 +658,7 @@ pub fn chain(ed: &Editor, d: &Draft, locked: bool, width: f32) -> (Vec<Cell>, f3
             return Cell { kind: piece::WAIT_EDIT, text: ms.to_string().into(), id, index: i as i32, ..cell(0, 0.0, 0.0, 92.0, 25.0) };
         }
         let t = format!("{} ms", group(ms));
-        let w = 8.0 + text::width(500, 12.5, &t) + 4.0 + 12.0 + 8.0;
+        let w = 8.0 + text::width(crate::tokens::font::MEDIUM, crate::tokens::font::NOTE, &t) + 4.0 + 12.0 + 8.0;
         Cell { kind: piece::WAIT, text: t.into(), id, index: i as i32, ..cell(0, 0.0, 0.0, w, 24.5) }
     };
     let joint = |i: usize, hot: bool, plain: bool| Cell { kind: piece::JOINT, on: hot, style: if plain { 1 } else { 0 }, id: hit::JOINT, index: i as i32, ..cell(0, 0.0, 0.0, 20.0, 18.0) };
