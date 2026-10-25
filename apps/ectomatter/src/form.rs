@@ -205,6 +205,12 @@ fn choice_width(o: &str) -> f32 {
     crate::text::width(font::REGULAR, font::NOTE, o).ceil() + 2.0 * part::CHOICE_PAD
 }
 
+/// How wide a switch's button is with these words, and a chevron after them where it
+/// opens a list (`menu`), or a color's square before them too (`square`).
+pub fn choice_w(words: &str, menu: bool, square: bool) -> f32 {
+    choice_width(words) + if menu { part::CHOICE_GAP + CHEVRON } else { 0.0 } + if square { part::GLYPH + part::CHOICE_GAP } else { 0.0 }
+}
+
 /// How wide a switch of these options is, its buttons as wide as their words.
 pub fn switch_width(opts: &[(&str, &str)]) -> f32 {
     let n = opts.len().max(1) as f32;

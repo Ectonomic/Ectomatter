@@ -663,6 +663,10 @@ const REST: Duration = Duration::from_millis(250);
 /// the page's rows below the title bar: its head, the stage after a gap, the
 /// line under the stage, and the foot's 64
 const HEAD_H: f32 = 70.0;
+/// the head's switches' ground, at the middle of its title and what's said under it
+const HEAD_SWITCH_Y: f32 = 18.0;
+/// a choice's switch, under its name
+const CHOICE_TOP: f32 = 30.0;
 const HELP_H: f32 = 44.0;
 
 /// The device the lab tunes, as its core describes it: what it is called
@@ -2264,19 +2268,20 @@ impl LabPage {
         } else {
             Vec::new()
         };
+        // (each as wide as its words, as a switch's buttons are, the switch's room round them)
         let mut rows: Vec<Vec<(usize, &'static str, f32)>> = vec![Vec::new()];
-        let mut x = 6.0;
+        let mut x = 2.0 * crate::tokens::part::INSET;
         for (j, &name) in CHOICES[c].options.iter().enumerate() {
             if c == 3 && !weights.contains(&(weight_of(j) as u16)) {
                 continue;
             }
-            let w = text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, name) + 20.0;
+            let w = crate::form::choice_w(name, false, false);
             if x + w > drawing::CTRL_W && rows.last().is_some_and(|r| !r.is_empty()) {
                 rows.push(Vec::new());
-                x = 6.0;
+                x = 2.0 * crate::tokens::part::INSET;
             }
             rows.last_mut().expect("a row").push((j, name, w));
-            x += w + 2.0;
+            x += w + crate::tokens::part::SEG_GAP;
         }
         rows
     }
@@ -2329,10 +2334,13 @@ impl LabPage {
     /// Where the caps' color buttons are on the page, their tops' and their sides'.
     fn color_buttons(&self) -> [(f32, f32, f32, f32); 2] {
         let (_, _, sw, _) = self.sizes();
-        let cx = 24.0 + drawing::column_x(true, sw);
-        let y = HEAD_H + drawing::choice_y(self.choices().len()) + 32.0;
-        let bw = (drawing::CTRL_W - 8.0) / 2.0;
-        [(cx + 3.0, y, bw, 30.0), (cx + 3.0 + bw + 2.0, y, bw, 30.0)]
+        use crate::tokens::{part, size};
+        let cx = crate::tokens::space::MARGIN + drawing::column_x(true, sw);
+        // (two buttons sharing a switch's room, under the choice's name)
+        let y = HEAD_H + drawing::choice_y(self.choices().len()) + CHOICE_TOP + part::INSET;
+        let bw = (drawing::CTRL_W - 2.0 * part::INSET - part::SEG_GAP) / 2.0;
+        let bh = size::CONTROL - 2.0 * part::INSET;
+        [(cx + part::INSET, y, bw, bh), (cx + part::INSET + bw + part::SEG_GAP, y, bw, bh)]
     }
 
     /// Open the color picker on a part of the caps, under its button.
@@ -3179,47 +3187,53 @@ impl LabPage {
         let in_color = |st: i32, x: f32, y: f32, ww: f32, hh: f32, s: &str, c: [u8; 3]| Cell { color: color(c), ..text_cell(st, x, y, ww, hh, s) };
         // the head: the title and what the lab is, and the sections
         let mut cells = vec![text_cell(style::TITLE, 24.0, 14.0, 300.0, 29.0, &self.device.lab())];
+        use crate::tokens::{part, size, space};
+        // (its switches the app's: a ground a control's height, its buttons Part.inset in,
+        // as wide as their words, Part.seg-gap apart; Space.row between the switches, the
+        // last at the page's margin)
+        let ground = |x: f32, w: f32| cell(kind::SEG, x, HEAD_SWITCH_Y, w, size::CONTROL);
+        let (by, bh) = (HEAD_SWITCH_Y + part::INSET, size::CONTROL - 2.0 * part::INSET);
         let mut bx = 0.0;
         let mut tabs = Vec::new();
         for i in self.sections() {
             let title = &SECTIONS[i].0;
-            let bw = text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, title) + 24.0;
+            let bw = crate::form::choice_w(title, false, false);
             tabs.push((i, title, bx, bw));
-            bx += bw + 2.0;
+            bx += bw + part::SEG_GAP;
         }
-        let tabs_w = bx - 2.0 + 6.0;
-        let tx = w - 24.0 - tabs_w;
+        let tabs_w = bx - part::SEG_GAP + 2.0 * part::INSET;
+        let tx = w - space::MARGIN - tabs_w;
         // the keys tuned, before the sections: all of them, or one, whose button
         // opens what chooses it: a keyboard's keys on the map, a device's lights
         // on a list of their names
         let (many, single) = self.parts();
         let (all_words, one_words) = (format!("All {many}"), format!("One {single}"));
-        let one = elide(&self.key().map_or_else(|| one_words.clone(), |k| k.label.clone()), SETUP_W, 400, 13.0);
-        let (aw, kw) = (text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, &all_words) + 24.0, text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, &one) + 24.0 + 16.0);
-        let scope_w = aw + 2.0 + kw + 6.0;
-        let qx = tx - 12.0 - scope_w;
+        let one = elide(&self.key().map_or_else(|| one_words.clone(), |k| k.label.clone()), SETUP_W, crate::tokens::font::REGULAR, crate::tokens::font::NOTE);
+        let (aw, kw) = (crate::form::choice_w(&all_words, false, false), crate::form::choice_w(&one, true, false));
+        let scope_w = aw + part::SEG_GAP + kw + 2.0 * part::INSET;
+        let qx = tx - space::ROW - scope_w;
         // the light setup tuned, before the keys: the core's, or one of the
         // person's own, which opens the menu of them
-        let setup = elide(&self.setup_name(), SETUP_W, 400, 13.0);
-        let uw = text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, &setup) + 24.0 + 16.0;
-        let ux = qx - 12.0 - (uw + 6.0);
+        let setup = elide(&self.setup_name(), SETUP_W, crate::tokens::font::REGULAR, crate::tokens::font::NOTE);
+        let uw = crate::form::choice_w(&setup, true, false);
+        let ux = qx - space::ROW - (uw + 2.0 * part::INSET);
         // what the page is, or whose own setup it shows; shorter where the head is narrow
         let room = (ux - 48.0).max(200.0);
         let (full, brief) = self.intro();
         // (cut short where even the brief one does not fit)
         let intro = if text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, &full) <= room { full } else { elide(&brief, room, 400, 12.5) };
         cells.push(text_cell(style::NOTE, 24.0, 44.0, room, 18.0, &intro));
-        cells.push(cell(kind::SEG, ux, 17.0, uw + 6.0, 36.0));
-        cells.push(Cell { text: setup.into(), on: self.menu != Menu::Shut, id: SETUP, index: 0, style: 24, ..cell(kind::SEG_BUTTON, ux + 3.0, 20.0, uw, 30.0) });
-        cells.push(cell(kind::SEG, qx, 17.0, scope_w, 36.0));
-        cells.push(Cell { text: all_words.as_str().into(), on: self.scope.is_none() && !self.picking, id: SCOPE, index: 0, ..cell(kind::SEG_BUTTON, qx + 3.0, 20.0, aw, 30.0) });
-        let one_x = qx + 3.0 + aw + 2.0;
-        cells.push(Cell { text: one.into(), on: self.scope.is_some() || self.picking, id: SCOPE, index: 1, style: 24, ..cell(kind::SEG_BUTTON, one_x, 20.0, kw, 30.0) });
-        cells.push(cell(kind::SEG, tx, 17.0, tabs_w, 36.0));
+        cells.push(ground(ux, uw + 2.0 * part::INSET));
+        cells.push(Cell { text: setup.into(), on: self.menu != Menu::Shut, id: SETUP, index: 0, style: 24, ..cell(kind::CHOICE, ux + part::INSET, by, uw, bh) });
+        cells.push(ground(qx, scope_w));
+        cells.push(Cell { text: all_words.as_str().into(), on: self.scope.is_none() && !self.picking, id: SCOPE, index: 0, ..cell(kind::CHOICE, qx + part::INSET, by, aw, bh) });
+        let one_x = qx + part::INSET + aw + part::SEG_GAP;
+        cells.push(Cell { text: one.into(), on: self.scope.is_some() || self.picking, id: SCOPE, index: 1, style: 24, ..cell(kind::CHOICE, one_x, by, kw, bh) });
+        cells.push(ground(tx, tabs_w));
         for (i, title, x, bw) in tabs {
             // (for one key, the sections that are every key's are not to be chosen)
             let style = if self.section_open(i) { 0 } else { 26 };
-            cells.push(Cell { text: (*title).into(), on: i == self.section, id: TABS, index: i as i32, style, ..cell(kind::SEG_BUTTON, tx + 3.0 + x, 20.0, bw, 30.0) });
+            cells.push(Cell { text: (*title).into(), on: i == self.section, id: TABS, index: i as i32, style, ..cell(kind::CHOICE, tx + part::INSET + x, by, bw, bh) });
         }
         let work = self.work();
         let saved_work = self.work_of(&self.saved);
@@ -3253,9 +3267,9 @@ impl LabPage {
             if self.owns(("legends", "typeface")) {
                 own_mark(&mut over, cx, y, TYPEFACE);
             }
-            let bw = (text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, &family) + 24.0 + 16.0).min(drawing::CTRL_W - 6.0);
-            over.push(cell(kind::SEG, cx, y + 30.0, bw + 6.0, 34.0));
-            over.push(Cell { text: family.into(), on: self.faces_open, id: TYPEFACE, index: 0, style: 24, ..cell(kind::SEG_BUTTON, cx + 3.0, y + 32.0, bw, 30.0) });
+            let bw = crate::form::choice_w(&family, true, false).min(drawing::CTRL_W - 2.0 * part::INSET);
+            over.push(cell(kind::SEG, cx, y + CHOICE_TOP, bw + 2.0 * part::INSET, size::CONTROL));
+            over.push(Cell { text: family.into(), on: self.faces_open, id: TYPEFACE, index: 0, style: 24, ..cell(kind::CHOICE, cx + part::INSET, y + CHOICE_TOP + part::INSET, bw, bh) });
         }
         for (k, &c) in self.choices().iter().enumerate() {
             let choice = &CHOICES[c];
@@ -3276,13 +3290,13 @@ impl LabPage {
             // they are, in rows as many as it takes
             let on = self.chosen_here(c, &work);
             for (r, row) in rows.into_iter().enumerate() {
-                let ry = y + 30.0 + ROW_H * r as f32;
-                let seg_w = row.iter().map(|(_, _, w)| w).sum::<f32>() + 2.0 * (row.len() as f32 - 1.0) + 6.0;
-                over.push(cell(kind::SEG, cx, ry, seg_w, 34.0));
-                let mut bx = cx + 3.0;
+                let ry = y + CHOICE_TOP + ROW_H * r as f32;
+                let seg_w = row.iter().map(|(_, _, w)| w).sum::<f32>() + part::SEG_GAP * (row.len() as f32 - 1.0) + 2.0 * part::INSET;
+                over.push(cell(kind::SEG, cx, ry, seg_w, size::CONTROL));
+                let mut bx = cx + part::INSET;
                 for (j, name, bw) in row {
-                    over.push(Cell { text: name.into(), on: j == on, id, index: j as i32, style: style::TELLS, ..cell(kind::SEG_BUTTON, bx, ry + 2.0, bw, 30.0) });
-                    bx += bw + 2.0;
+                    over.push(Cell { text: name.into(), on: j == on, id, index: j as i32, style: style::TELLS, ..cell(kind::CHOICE, bx, ry + part::INSET, bw, bh) });
+                    bx += bw + part::SEG_GAP;
                 }
             }
         }
@@ -3297,11 +3311,10 @@ impl LabPage {
             }
             let colors = cap_colors(&work);
             let buttons = self.color_buttons();
-            over.push(cell(kind::SEG, cx, y + 30.0, buttons[1].0 + buttons[1].2 + 3.0 - cx, 34.0));
-            for (part, (bx, by, bw, bh)) in buttons.into_iter().enumerate() {
-                let [r, g, b] = colors[part];
-                let open = self.pick.as_ref().is_some_and(|p| p.part == part);
-                over.push(Cell { text: ["Top", "Sides"][part].into(), color: slint::Color::from_rgb_u8(r, g, b), on: open, id: [COLOR_TOP, COLOR_SIDES][part], style: 32, ..cell(kind::SEG_BUTTON, bx, by, bw, bh) });
+            over.push(cell(kind::SEG, cx, y + CHOICE_TOP, buttons[1].0 + buttons[1].2 + part::INSET - cx, size::CONTROL));
+            for (k, (bx, by, bw, bh)) in buttons.into_iter().enumerate() {
+                let open = self.pick.as_ref().is_some_and(|p| p.part == k);
+                over.push(Cell { text: ["Top", "Sides"][k].into(), color: crate::tokens::color(colors[k]), on: open, id: [COLOR_TOP, COLOR_SIDES][k], style: 32, ..cell(kind::CHOICE, bx, by, bw, bh) });
             }
         }
         // which part of the legend the sliders act on, at the top of the right
@@ -3313,14 +3326,14 @@ impl LabPage {
             over.push(text_cell(style::LABEL, rx, y, drawing::CTRL_W, 26.0, "Adjust"));
             let here = self.parts_here();
             let options: Vec<(usize, &str)> = PART_NAMES.iter().copied().enumerate().filter(|&(j, _)| j == 0 || here[j - 1]).collect();
-            let widths: Vec<f32> = options.iter().map(|(_, name)| text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, name) + 20.0).collect();
-            let seg_w = widths.iter().sum::<f32>() + 2.0 * (widths.len() as f32 - 1.0) + 6.0;
-            over.push(cell(kind::SEG, rx, y + 30.0, seg_w, 34.0));
+            let widths: Vec<f32> = options.iter().map(|(_, name)| crate::form::choice_w(name, false, false)).collect();
+            let seg_w = widths.iter().sum::<f32>() + part::SEG_GAP * (widths.len() as f32 - 1.0) + 2.0 * part::INSET;
+            over.push(cell(kind::SEG, rx, y + CHOICE_TOP, seg_w, size::CONTROL));
             let on = self.part_on();
-            let mut bx = rx + 3.0;
+            let mut bx = rx + part::INSET;
             for ((j, name), bw) in options.into_iter().zip(widths) {
-                over.push(Cell { text: name.into(), on: j == on, id: PART, index: j as i32, style: style::TELLS, ..cell(kind::SEG_BUTTON, bx, y + 32.0, bw, 30.0) });
-                bx += bw + 2.0;
+                over.push(Cell { text: name.into(), on: j == on, id: PART, index: j as i32, style: style::TELLS, ..cell(kind::CHOICE, bx, y + CHOICE_TOP + part::INSET, bw, bh) });
+                bx += bw + part::SEG_GAP;
             }
         }
         // the legend to drag anywhere on the drawing's key's top

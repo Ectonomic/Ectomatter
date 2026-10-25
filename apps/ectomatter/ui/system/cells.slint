@@ -550,17 +550,16 @@ export component CellView inherits Rectangle {
                 num.text = self.shown;
             }
         }
-        border-radius: Radius.small;
-        background: Ink.well;
-        border-width: 1px;
-        border-color: num.has-focus ? Ink.edge-hover : box-ta.has-hover ? Ink.edge : Ink.seam;
+        // (a field's look: a well, a shade lighter while it's typed in)
+        border-radius: Radius.control;
+        background: num.has-focus ? Ink.hover-well : Ink.well;
         box-ta := TouchArea {
             mouse-cursor: text;
             clicked => { num.focus(); }
         }
         num := TextInput {
-            x: 8px;
-            width: parent.width - 16px;
+            x: Part.field-pad;
+            width: parent.width - 2 * Part.field-pad;
             height: parent.height;
             text: root.c.text;
             font-family: Font.ui;
@@ -786,16 +785,26 @@ export component CellView inherits Rectangle {
         border-bottom-right-radius: root.c.style >= 2 ? self.height / 2 : 0;
         background: @linear-gradient(90deg, root.c.color 0%, self.next 100%);
     }
-    // a switch's choice on its ground, its icon before its words if it has one (style 1:
-    // one that can't be chosen, its words faint)
+    // a switch's choice on its ground, its icon before its words if it has one (style 1,
+    // or 26: one that can't be chosen, its words faint; 24: one that opens a list, its
+    // chevron after its words; 32: a color's, its square before its words and its
+    // chevron after them; 23 and 32 tell the page the pointer is on them)
     if root.c.kind == 44: SegChoice {
         width: parent.width;
         height: parent.height;
         text: root.c.text;
         icon: root.c.lines;
         on: root.c.on;
-        off: root.c.style == 1;
+        off: root.c.style == 1 || root.c.style == 26;
+        menu: root.c.style == 24 || root.c.style == 32;
+        square: root.c.style == 32;
+        swatch: root.c.color;
         clicked(x, y, h) => { root.pick(root.c.id, root.c.index, x, y, root.height); }
+        changed hover => {
+            if (root.c.style == 23 || root.c.style == 32) {
+                root.hovered(root.c.id, self.hover);
+            }
+        }
     }
     // an area's chip: outlined, white when chosen (with a tick, style 1); it tells the page the pointer is over it
     if root.c.kind == 45: Rectangle {

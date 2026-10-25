@@ -1,11 +1,11 @@
 # Ectomatter's design system
 
 Every page in Ectomatter is built from one set of values and one set of parts.
-No page sets a gutter, a corner, a type size, a shadow or a color of its own:
-it takes them from the tokens, and it lays itself out with the system's parts.
-A new design uses what is here. Where nothing here fits, the new value or part
-is added here first, with what it is for, and then every page that needs it
-uses it.
+No page sets a gutter, a line's height, a corner, a type size, a shadow or a
+color of its own: it takes them from the tokens, and it lays itself out with the
+system's parts. A new design uses what is here. Where nothing here fits, the new
+value or part is added here first, with what it is for, and then every page that
+needs it uses it.
 
 ## Where it lives
 
@@ -14,190 +14,252 @@ uses it.
 | The tokens, one file | `design/ectomatter.tokens.json` |
 | What writes them out | `crates/ectomatter-tokens` (run by `apps/ectomatter/build.rs`) |
 | The window's parts | `apps/ectomatter/ui/system/*.slint` |
-| The tokens in Rust | `src/tokens.rs` (`crate::tokens::space::MARGIN`, `ink::LINE`, ...) |
-| Forms laid out in Rust | `src/form.rs` |
+| The tokens in Rust | `src/tokens.rs` (`crate::tokens::space::MARGIN`, `line::NOTE`, `ink::LINE`, ...) |
+| The pieces Rust lays out with | `src/form.rs` (a form, and the pieces every Rust page shares) |
+| A box's settings, top to bottom | `src/lighting.rs`'s `Stack` |
 | Boxes laid out in Rust, in a row of boxes | `src/boxes.rs` with `CellBox` |
-| The check that keeps it so | `src/tokens.rs`, `mod system` (`cargo test tokens::system`) |
+| A menu's height | `src/menu_size.rs` |
+| The checks that keep it so | `src/tokens.rs`, `mod system` (`cargo test tokens::system`) |
 
 The tokens file is in the Design Tokens Community Group's format
 (designtokens.org): groups of tokens, each with a `$value`, a `$type` and a
 `$description` saying what it is for. Colors are hex strings, the form Penpot
 reads and writes. The build writes the file out twice: as Slint globals
-(`Space`, `Radius`, `Font`, `Size`, `Part`, `Shadow`, `Ink`) and as a Rust
-module of constants. Change a token in the file and every page that uses it
-changes, in the window and in what Rust lays out.
+(`Space`, `Radius`, `Font`, `Line`, `Size`, `Part`, `Shadow`, `Ink`) and as a
+Rust module of constants. Change a token in the file and every page that uses
+it changes, in the window and in what Rust lays out.
 
 ## The tokens
 
-**Space**, on a 4 px base:
+**Space**, on a 4 px base, each for a role:
 
 | Token | px | For |
 |---|---|---|
-| `margin` | 24 | A page's margin, its bar's too; the gap between cards in a grid. |
+| `margin` | 24 | A page's margin, its bar's too; the gap between cards in a grid; between the groups of a line of controls. |
 | `gap` | 12 | Between boxes, side by side or one above another; under a stage. |
-| `section` | 32 | Between a section's box and the next section's heading. |
-| `label` | 8 | From a heading down to what it heads. |
-| `pad` | 16 | A box's padding; between a form's label column and its controls; between a stacked form's fields. |
-| `row` | 12 | Above and below the rule between two rows of a form. |
-| `inline` | 8 | Between controls side by side. |
-| `tight` | 4 | Between things that belong together (a control and its note). |
+| `section` | 32 | Between a section's box and the next section's heading; in a box, from one group's last setting to the next group's heading. |
+| `label` | 8 | From a heading down to what it heads; from a setting's name down to its control. |
+| `pad` | 16 | A box's padding, and under its last piece; between a form's label column and its controls; between two settings stacked in a box, or a stacked form's fields; between a box's two columns. |
+| `row` | 12 | Above and below the rule between two rows of a form; under a heading in small capitals; above a note on a whole group. |
+| `inline` | 8 | Between controls side by side (or stacked in a row's column); a list's rows in from its box. |
+| `tight` | 4 | Between things that belong together: a name and the line under it, a control and its note, a slider and its ends' words. |
+| `list` | 2 | Between the rows of a list down a side. |
+
+**Line**, a line of words' height by what the words are, wherever Rust lays
+words out (words sit at the middle of their line): `title` 22 (a box's title),
+`text` 20 (words read on a row: a name, a value, a status), `note` 18 (a note,
+a caption, a section's heading), `small` 14 (a heading in small capitals in a
+box, a slider's ends).
 
 **Radius**, by the size of what it rounds: `window` 10, `box` 12 (a box, a
 card, a stage, a dialog), `panel` 10 (a menu, a tile, a well, a floating bar),
 `control` 8 (a button, a field, a row), `small` 6 (a quiet button, a chip, a
-tooltip), `tiny` 4 (a checkbox, a badge). Something round takes half its
-height. A part set close inside another (4 px or less) follows its curve: the
-outer corner less the inset.
+tag, a tooltip, a switch's choice), `tiny` 4 (a checkbox, a color's square).
+Something round takes half its height. A part set close inside another follows
+its curve: a switch's ground is `small` and `Part.inset`, its choices `small`.
 
 **Font**: the typefaces (`ui` Geist, `mono` JetBrains Mono), the weights
-(`regular`, `medium`, `strong`) and the ramp, each size named for what it
-sets: `display` 22, `title` 17, `lead` 15, `tab` 14.5, `name` 14, `text` 13.5,
-`control` 13, `note` 12.5, `caption` 12, `small` 11.
+(`regular`, `medium`, `strong`), the ramp, each size named for what it sets
+(`display` 22, `title` 17, `lead` 15, `tab` 14.5, `name` 14, `text` 13.5,
+`control` 13, `note` 12.5, `caption` 12, `small` 11), and three trackings: a
+heading in capitals' (`caps-tracking`, with `small` and `strong`, in
+`Ink.quiet`), a page's title's, a reading shown large's.
 
-**Size**, the sizes parts share: `title-bar` 36, `bar` 56, `head` 54 (the hint
-line's band), `column` 240 (a page's first column), the boxes' least widths
-(`library` 440, `detail` 460, `game` 340, `effects` 300, `settings` 360,
-`places` 320), `sidebar` 290, `form` 860 (a form's column at most), `label` 200
-(a form's label column), `control` 34, `button` 30, `dot` 7, `check` 18.
+**Size**, the sizes parts share across pages, so a part is the same size
+wherever it is. The control heights: `control` 34 (a field, a dropdown, a
+switch, in a form or a box), `button` 30 (a button with words; a line of
+controls on a hint line or an editor's foot), `compact` 28 (a control on a
+floating bar or a toolbar, a chooser at a panel's head), `quiet` 26 (a link, a
+checkbox, an icon button). The bands: `title-bar`, `bar`, `head`, `hint`,
+`box-head`, `tab`, `row`, `list-head`, `menu-head`, `menu-rule`, `app`,
+`pick-row`, `sensor`, `foot`. The pieces: `pill`, `swatch`, `slider`, `chip`,
+`strip`, `tile`, `scene-tile`, `preview`, `hero`, `cover-name`, `dot`,
+`check`, `round`, `reset`, `rail`, `block-chip`, `app-icon`, `pick-icon`. The
+widths: `column`, the boxes' least widths (`library`, `detail`, `game`,
+`effects`, `settings`, `places`), `sidebar`, `form`, `label`, `dialog`,
+`find`, `rename`, `picker`, `empty`.
 
-**Part**: a part's own measurements that Rust works widths out from
-(`quiet-pad`, `button-pad`, `glyph`, `glyph-gap`), so a button Rust places is as
-wide as the window draws it.
+**Part**: a part's own measurements that Rust works sizes out from, so what
+Rust places is as big as the window draws it: a button's and a quiet button's
+room (`button-pad`, `quiet-pad`), a glyph and its gap (`glyph`, `glyph-gap`),
+a box's title's top (`title-top`), a pill's, a chip's, a field's, a tab's, a
+switch button's and a sensor chip's room (`pill-pad`, `chip-pad`, `chip-tick`,
+`field-pad`, `tab-pad`, `choice-pad`, `choice-gap`, `sensor-pad`), a switch's
+inset and gap (`inset`, `seg-gap`), a checkbox's gap to its words
+(`check-gap`), a color button's dot (`swatch-words`), a menu's room
+(`menu-pad`, `menu-in`), a fold's (`fold-in`), a scrollbar's place
+(`scroll-in`), an effect tile's picture (`tile-inset`, `tile-pic`), the scene
+preview's gap (`span-gap`), the macro chain's inset (`chain-in`).
 
 **Shadow**, how far a surface lifts: `lift` (a cover, a tooltip), `float` (a
-menu, the picker, a popover, a floating bar, something carried), `modal` (a
-dialog), and `knob` (a slider's knob on its track).
+menu, the picker, a floating bar, something carried), `modal` (a dialog), and
+`knob` (a slider's knob on its track).
 
-**Ink**, the colors: the window's shades darkest to lightest (`frame`,
-`title`, `base`, `box`, `well`, `stage`), each control's four states
-(`hover-well`, `hover-box`, `pick`, `pick-hover`), the outlines (`line`,
-`edge`, `edge-hover`, `seam`, `glass`), the words (`bright`, `dim`, `soft`,
-`quiet`, `placeholder`, `off`), and the signals (`warn`, `bad`, `good`,
-`danger`, `record`, `close`, `media`). A part's light or dark wash is `white` or
-`black` at an opacity of the part's own. Ink can be set while the app runs
-(`ECTOMATTER_INK`) for a color mock.
+**Ink**, the colors: the window's shades, each control's four states, the
+outlines, the words (`bright`, `dim`, `soft`, `quiet`, `placeholder`, `off`),
+and the signals (`warn`, `bad`, `good`, `danger`, `record`, `close`, `media`).
+A part's light or dark wash is `white` or `black` at an opacity of the part's
+own. Ink can be set while the app runs (`ECTOMATTER_INK`) for a color mock.
 
 ## The parts
 
-In `ui/system/`:
+In `ui/system/`, each drawn once:
 
-- **bars**: `TitleBar` (a window's), `PageBar` (a page's: its name, a dot or
-  the way back before it, its tabs, its status, Undo, its buttons),
-  `EditorHeader` (an editor window's page bar, its name renamed in place),
-  `HintRow` (the line under a page's bar), `Dot`.
-- **surfaces**: `PageBox` (a box), `ScrollBox` (a box that scrolls), `Stage`
-  (what a device is drawn on), `Scrim`, `DialogBox` and `Confirm` (every
-  dialog), `EmptyState` (what an area says while it has nothing to show),
-  `TipBox` and `Tip` (every tooltip).
-- **tiles**: `EffectTile`, an effect to choose, wherever effects are chosen.
-- **layout**: `BoxRow`, the row of boxes on a device's page.
-- **lists**: `ListBox` (a list under a heading in capitals: the Profiles
-  column, the mouse's lights), `ListRow` (a row in any list down a side: the
-  profiles, the lights, the macros, the screen layouts), `AnchorColumn` (the
-  Profiles), `AnchorRow`, `AnchorHead`, `RailItem`.
-- **controls**: `WordButton` (gray, `primary`, `danger`; `on-box` on a box),
-  `TextButton` (a toolbar's quiet button), `LinkButton` (a box's quiet link),
-  `BarButton`, `IconButton`, `MoreButton`, `PencilButton`, `Tab`, `CheckBox`,
-  `SegSwitch`, `DropField`, `FieldBox`, `ScrollBar`, `Spinner`, and `Glyph` (the
-  app's own glyphs).
-- **menu**: `Menu`, `Picker`.
-- **cells**: `CellView`, which draws every piece Rust lays out, and `CellBox`,
-  a box of such pieces in a row of boxes.
+- **bars**: `TitleBar`, `PageBar` (a page's name, a dot or the way back before
+  it, its tabs, its status, Undo, its buttons), `EditorHeader` (an editor
+  window's page bar), `HintRow` (the line under a page's bar), `Dot`.
+- **surfaces**: `PageBox`, `ScrollBox`, `Stage`, `Scrim`, `DialogBox`,
+  `DialogHead` (every dialog's title and the line under it), `Confirm`,
+  `FloatBar` (a bar floating over the page: Home's edit bar and zoom),
+  `EmptyState`, `TipBox` and `Tip`, `FormLabel` and `FormNote` (a form's label
+  and the note under a control, in a dialog's stacked form).
+- **controls**: `WordButton` (gray, `primary`, `danger`; `on-box`; `small`
+  inside a card; `compact` on a floating bar; with a glyph, `lines`, a color's
+  square, or a `menu` chevron), `TextButton` (a toolbar's quiet button),
+  `LinkButton` (a box's quiet link), `IconButton`, `MoreButton`,
+  `PencilButton`, `BarButton`, `StarButton` (`on-picture` over a cover),
+  `RecordButton`, `Tab`, `FolderTab` (a tab over a box), `FieldBox` (every
+  line to type in: a find box's lens, `read-only`, `centered`, its `fill` on a
+  menu), `RenameField` (a name renamed in place), `DropField` (every dropdown:
+  `subtle` at a panel's head, `followed`, `warn`, a chip), `SegSwitch` and its
+  pieces `SegGround` and `SegChoice` (a choice's icon, a color's dot or square,
+  a `menu` chevron), `CheckBox`, `RadioRow`, `Slider` (the one slider), `Tag`,
+  `ColorButton`, `ColorSquare`, `Fold` (a heading that opens and shuts),
+  `ScrollBar`, `Spinner`, `PickField`, `SmallCap`, `StripIcon`, `PlayButton`,
+  and `Glyph` (the app's own glyphs).
+- **lists**: `ListBox`, `ListRow`, `AnchorColumn`, `AnchorRow`, `AnchorHead`
+  (every heading in capitals over a list), `RailItem`.
+- **menu**: `Menu` (every menu: its rows, Back and its search box on the
+  tokens), `Picker`.
+- **tiles**: `EffectTile`.
+- **layout**: `BoxRow`.
+- **cells**: `CellView`, which draws every piece Rust lays out, each kind with
+  the part above (a switch's choice is the `SegChoice`, a dropdown the
+  `DropField`, a button the `WordButton`, a slider the `Slider`, a tab the
+  `FolderTab`, a fold the `Fold`), and `CellBox`, a box of such pieces in a row
+  of boxes.
 
-In Rust: `form::Form` and `form::Card` (a form and its rows), `form::switch`
-(every switch Rust places), `boxes::Row` (boxes laid out in Rust for a row of
-boxes, each told the width the row gave it).
+In Rust: `form::Form` and `form::Card` (a form and its rows); the pieces every
+Rust page shares, in `form.rs`: `heading`, `note_lines` and `note_lines_in`,
+`rule`, `status`, `pill`, `warning`, `link`, `add_row`, `switch`, and the
+widths a part is drawn at (`button_width`, `small_button_width`,
+`check_width`, `chip_width`, `drop_width`, `chooser_width`, `choice_w`,
+`pill_width`); `lighting::Stack` (a box's settings top to bottom);
+`boxes::Row` (boxes laid out in Rust for a row of boxes); `menu_size` (every
+menu's height).
 
 ## How a page is put together
 
 **Every page**: the window's `TitleBar`, the page's `PageBar`, then its
 `HintRow` where it has a hint (the page's head, `Size.head` tall), then what
-it holds, from `Space.margin` at either side. A page with no hint starts
-`Space.margin` under its bar. Home is the desk, the devices on it to scale:
-it has no bar, only its hint row over the desk (with Scenes and Arrange at
-its right).
+it holds, from `Space.margin` at either side, starting at the head's end. A
+page with no hint starts `Space.margin` under its bar. Home is the desk, the
+devices on it to scale: it has no bar, only its hint row over the desk.
 
-**A device's page**: the stage first, `Space.gap` under the head; under it,
-`Space.gap` down, the Profiles column (`Size.column`) and beside it the tab's
-boxes in a `BoxRow`. In the row each box is at least its least width and
-grows from it as the others do, so every line reaches the margin; a box that
-doesn't fit beside the one before starts a line under them; a line's boxes are
-as tall as each other, at most the room left in the window (a box with more
-scrolls); the row is at least as tall as the Profiles column, and the column
-reaches the row's foot. A box whose pieces Rust lays out is a `CellBox`: it
-says how wide the row made it, and Rust lays its pieces out to that width.
+**A device's page**: the stage first, under the head; under it, `Space.gap`
+down, the Profiles column (`Size.column`) and beside it the tab's boxes in a
+`BoxRow`. In the row each box is at least its least width and grows from it as
+the others do, so every line reaches the margin; a line's boxes are as tall as
+each other, at most the room left in the window (a box with more scrolls). A
+box whose pieces Rust lays out is a `CellBox`: it says how wide the row made
+it, and Rust lays its pieces out to that width. A box drawn in Slint says how
+tall it needs to be (`need`), and the page gives it that.
 
-**A form** (Settings, a device's Settings tab, a game's page): `form::Form`.
-A column at most `Size.form` wide from the margin; each section a heading over
-its box; in the box rows, each with its label in a column `Size.label` wide
-and its controls `Space.pad` after it, a rule between rows. A form inside a
-dialog stacks each label over what it labels instead.
+**A box of settings** (an effect's, a mouse's, a plugin's): a `Stack`. Its
+first piece is at `Size.box-head`; each setting's name is `Space.label` over its
+control; settings are `Space.pad` apart; a group's name in capitals is
+`Space.row` over its first setting, the next group `Space.section` under the
+last setting with a rule `Space.pad` under it; a note on a group is
+`Space.row` under it, a control's own note `Space.tight` under it; the box ends
+`Space.pad` under its last piece. The Screen Editor's box lays its settings two
+to a row the same way.
+
+**A form** (Settings, a device's Settings tab, a game's page): `form::Form`. A
+column at most `Size.form` wide from the margin; each section a heading over
+its box; in the box rows, each with its label in a column `Size.label` wide and
+its controls `Space.pad` after it, a rule between rows. A row whose first piece
+is words (a status, a value) sits on a line of words, its note `Space.tight`
+under it, as a control's is. A form inside a dialog stacks each label over what
+it labels: `FormLabel`, `Space.label`, the control, `Space.pad` to the next.
 
 **A dialog**: a `Scrim` (a press on it, or Escape, is Cancel) and a
-`DialogBox`, its title, the line under it, what it asks, and its buttons at
-its foot's right. A question before something is deleted is a `Confirm`.
+`DialogBox`, its `DialogHead`, what it asks, and its buttons `Space.margin`
+under it at its foot's right. A question before something is deleted is a
+`Confirm`.
 
 **An editor window** (the Macro Editor, the Screen Editor): its `TitleBar`,
-its list down the left (`Size.sidebar`, its rows `ListRow`s), and beside it
-its `EditorHeader`, what it edits, and its foot.
+its list down the left (`Size.sidebar`, its rows `ListRow`s, `Space.inline` in
+from the column), and beside it its `EditorHeader`, what it edits, and its foot
+(a line of controls at a button's height).
+
+**A menu**: the `Menu`, its height from `menu_size::height`.
 
 ## Adding a design
 
 1. Build it from the parts above, with the tokens. A page's structure comes
-   from the bars, `BoxRow`, `Form` and the dialog parts; a box is a `PageBox`.
+   from the bars, `BoxRow`, `Form`, `Stack` and the dialog parts; a box is a
+   `PageBox`.
 2. A value none of the tokens fits goes into `design/ectomatter.tokens.json`
    first, with a `$description` saying what it is for.
 3. A part none of these fits goes into `ui/system/`, drawn from the tokens,
-   and every page that has a copy of it uses it.
-4. `cargo test tokens::system` fails when a page sets a color, a type size, a
-   typeface, a corner or a shadow of its own, or when Rust measures text or
-   sets a color by hand in a page it lays out. A device's own art (the keys,
-   the mouse, the screen's ground) is the one exception: the parts that draw it
-   (`KeyBox`, `MouseLayers`) and a line marked `// art:`.
+   and every page that has a copy of it uses it. A size Rust needs to know (to
+   place the part or measure it) is a `Size` or a `Part` token both read.
+4. `cargo test tokens::system` fails when:
+   - a page or part sets a color, a type size, a typeface, a corner or a
+     shadow of its own;
+   - a page sets a padding or a gap of its own, or draws a line to type in or
+     a dropdown's chevron itself rather than using the part;
+   - Rust measures text or sets a color by hand in a page it lays out, or
+     places a piece with a number of its own (a token, a part's measure or a
+     named measure said once).
+   A drawing's own measures are the exception: the parts that draw a device
+   (`KeyBox`, `MouseLayers`) and lines marked `// art:`.
 
 ## Choices made where the copies disagreed
 
-- The bars' sides are the page's margin (they were 28 while the page under
-  them was 24, so the name sat 4 px right of everything below it).
-- A dialog is a box (`Ink.box`, a faint outline, `Radius.box`, padded
-  `Space.margin`); the confirm dialogs had their own lighter surface and 20 px
-  padding. The Screen Editor asked before deleting inside its header; it asks
-  in a dialog now, as every window does.
-- One red for what deletes (`Ink.danger`, white words); there were three.
+- The bars' sides are the page's margin. A page bar's title is
+  `Space.margin` from its tabs.
+- A dialog is a box; every dialog's head is one `DialogHead`; one red for
+  what deletes; one form rhythm in every dialog.
 - Two quiet buttons, each for one job: `LinkButton` for a box's own actions,
   `TextButton` for a toolbar's.
-- One checkbox, 18 px, its words 10 px after it (there were six, 15 to 18 px).
-- One switch, `Size.control` tall with 28 px buttons (there were two sizes).
-- The boxes in a device's row grow to fill it on every device (the keyboard's
-  stopped at fixed widths, the mouse's last box filled). The effects' pictures
-  are drawn at their tiles' width, so a wider box doesn't stretch them.
-- Headings in capitals (PROFILES, LIGHTS) sit level with a box's title beside
-  them.
-- One form: a column at most 860, a label column 200, a box padded 16, a rule
-  between every row (four widths, four label columns and three rhythms
-  before). Settings has the page bar every page has.
-- Type sizes that disagreed within one role took the ramp's: 11.5 became 12,
-  10.5 became 11, a dialog's 16 became 17, an editor's name 14 and 14.5 became
-  the bar's 17, the lab's 20 became 17.
-- Corners: 7 became 8, 14 became 12, 5 became 4 or 6 by what it rounds.
+- One checkbox, 18 px, its words 10 px after it, 26 px its line (a sensor's
+  chip's 15 px one too).
+- One switch: a ground a control's height, its choices `Part.inset` in and
+  `Part.seg-gap` apart, their words a note's size (the lab's 36 px switches
+  and the Screen Editor's 28 px one are this one now).
+- One dropdown and one field, a control's height (34; they were 36 here, 34
+  there, 32 and 28 elsewhere), their words `Part.field-pad` in; on a hint line
+  or an editor's foot, a button's height.
+- One slider (Peak nits had a thin one of its own).
+- One gap between settings in every box (it was 14, 16, 18 and 22); a box's
+  first piece always at `Size.box-head`, its foot `Space.pad`.
+- The game page's controls at the form's column (they were 8 px right of its
+  plugin sections'); Game launch's rows level with the playlist's.
+- One line a note's lines are apart (the Macro Editor's were 15.6 px).
+- One heading in capitals (two sizes and three letter-spacings before).
+- One rename field, one tag for a warning, one record button, one fold, one
+  floating bar (Home's two had different heights and gaps).
+- A menu's rows a control's height (33 before), its height worked out once.
+- The Library's covers and Apps start under the head as every page's content
+  does.
+- Type sizes that disagreed within one role took the ramp's; corners took the
+  radius of what they round.
 
 ## Not on the system yet
 
-- The pieces Rust lays out inside a box (an effect's settings, a plugin's
-  rows, the Screen Editor's settings, the sensors' map, Custom Scripts) still
-  type their own line heights, insets and piece sizes, and three of them have
-  a copy of the switch. They are moving onto shared pieces next.
 - The rows a plugin describes for Settings and for a game's page are two
   pieces of code (`ecto_settings.rs`'s `plugin_section`, `games_page.rs`'s
   `draw_row`), because the protocol gives them two vocabularies (Settings'
   `show`, `card`, `status`, `credit`; a game page's `grid`, `row`, `sub`,
-  `fold`). They share the form's tokens and its switch, not one renderer;
-  one renderer needs one vocabulary in the core protocol first.
-- The four page scrollbars are four copies of one `ScrollBar` placement
-  (one per page that scrolls, as Slint can't hand a part another part's
-  scrolling area).
-- Spacing inside a part (a button's padding, a list row's insets) is the
-  part's own, set where the part is drawn. The check above covers colors,
-  type, corners and shadows everywhere, and the page structure comes from
-  the parts, but it doesn't measure gutters; the renders do (the gutter
-  measure, every page, every width).
+  `fold`). They share the form's tokens and pieces, not one renderer; one
+  renderer needs one vocabulary in the core protocol first.
+- The lab's own menus and pickers (its setups' menu, the typefaces' list, the
+  glyphs' grid, the key map) are drawn as cells by `lab.rs`, not with the
+  `Menu`; its switches, buttons and fields are the shared ones.
+- The drawings keep their own measures: the keyboard and the mouse, Home's
+  desk, the playlist's strip, the macro chain, the Screen Editor's screen and
+  the lab's cross-section. Their controls that are controls elsewhere use the
+  parts; the rest is marked `// art:`.
+- Inside a part, its own drawing (a glyph's size, a knob's ring) is the part's;
+  what Rust measures it by is a token.

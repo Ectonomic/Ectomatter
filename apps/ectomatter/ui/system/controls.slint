@@ -842,9 +842,14 @@ export component SegChoice inherits Rectangle {
     in property <string> icon;
     in property <bool> on;
     in property <bool> off;
-    // a color's dot before its words (the profile's backlight, for Default)
+    // a color's dot before its words (the profile's backlight, for Default), or its
+    // square (a cap's color, in the lab)
     in property <bool> swatched;
+    in property <bool> square;
     in property <color> swatch;
+    // one that opens a list: a chevron after its words
+    in property <bool> menu;
+    out property <bool> hover: ta.has-hover;
     // as wide as its words want, with Part.choice-pad either side
     out property <length> need: row.preferred-width + 2 * Part.choice-pad;
     callback clicked(length, length, length);
@@ -852,7 +857,7 @@ export component SegChoice inherits Rectangle {
     background: root.on ? (ta.has-hover ? Ink.pick-hover : Ink.pick) : ta.has-hover && !root.off ? Ink.hover-well : transparent;
     row := HorizontalLayout {
         alignment: center;
-        spacing: 6px;
+        spacing: Part.choice-gap;
         if root.swatched: VerticalLayout {
             alignment: center;
             Rectangle {
@@ -863,6 +868,10 @@ export component SegChoice inherits Rectangle {
                 border-width: 1px;
                 border-color: Ink.black.with-alpha(0.122);
             }
+        }
+        if root.square: VerticalLayout {
+            alignment: center;
+            ColorSquare { swatch: root.swatch; }
         }
         if root.icon != "": Path {
             y: (parent.height - Part.glyph) / 2;
@@ -881,6 +890,20 @@ export component SegChoice inherits Rectangle {
             font-size: Font.note;
             color: root.off ? Ink.off : root.on || ta.has-hover ? Ink.bright : Ink.soft;
             vertical-alignment: center;
+            overflow: elide;
+        }
+        if root.menu: VerticalLayout {
+            alignment: center;
+            Path {
+                width: 12px;
+                height: 12px;
+                viewbox-width: 12;
+                viewbox-height: 12;
+                commands: "M3 4.5l3 3 3-3";
+                fill: transparent;
+                stroke: root.on || ta.has-hover ? Ink.bright : Ink.quiet;
+                stroke-width: 1.6px;
+            }
         }
     }
     ta := TouchArea {
