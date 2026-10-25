@@ -46,6 +46,7 @@ mod games_page;
 mod hosted;
 mod ink_env;
 mod jobs;
+mod menu_size;
 mod kde_output;
 mod launcher;
 mod shadow;

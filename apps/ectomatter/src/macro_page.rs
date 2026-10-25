@@ -10,6 +10,8 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use slint::{Model, ModelRc, SharedString, VecModel};
 
+use crate::tokens::{font, line, part, size, space};
+
 use crate::device;
 use crate::front::WindowAsk;
 use crate::macros::{self, hit, piece, Draft, Editor, Lib, Plays, Recording, Timing, MEDIA, PLAYS, ROOM};
@@ -136,12 +138,12 @@ pub struct MacroPage {
 /// A heading's note in lines: the first short of the New button beside it,
 /// the rest the list's width.
 fn note_lines(note: &str) -> Vec<String> {
-    let first = crate::text::wrap(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, note, NOTE_W - NEW_W);
+    let first = crate::text::wrap(font::REGULAR, font::NOTE, note, NOTE_W - new_w());
     let Some(head) = first.first().cloned() else { return Vec::new() };
     let rest = note.get(head.len()..).unwrap_or("").trim_start();
     let mut lines = vec![head];
     if !rest.is_empty() {
-        lines.extend(crate::text::wrap(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, rest, NOTE_W));
+        lines.extend(crate::text::wrap(font::REGULAR, font::NOTE, rest, NOTE_W));
     }
     lines
 }
@@ -158,17 +160,21 @@ fn lib_of(l: i32) -> Lib {
 /// The keyboard whose memory keeps its macros, by the name its library has.
 const KEYBOARD: &str = "EVGA Z10 RGB";
 
-/// The list's measures: where the library's note starts (beside its New
-/// button, which takes this much of its first line), a line of the note
-/// (Geist at 12px) and its width, the room under it, and a macro's row.
-const NOTE_TOP: f32 = 7.0;
-const NEW_W: f32 = 64.0;
-const NOTE_LINE: f32 = 15.6;
-const NOTE_W: f32 = 254.0;
-const UNDER_NOTE: f32 = 8.0;
-const ROW_H: f32 = crate::tokens::size::ROW + crate::tokens::space::LIST;
+/// The list's measures (ui/app.slint's MacroWindow): where the library's note starts
+/// (its first line at the middle of its New button, which takes the button's room of
+/// that line), a line of the note and its width (the column less the list's insets,
+/// Space.row before the words and Space.tight after), the room under it, and a macro's row.
+const NOTE_TOP: f32 = (size::COMPACT - line::NOTE) / 2.0;
+const NOTE_LINE: f32 = line::NOTE;
+const NOTE_W: f32 = size::SIDEBAR - 2.0 * space::INLINE - space::ROW - space::TIGHT;
+const UNDER_NOTE: f32 = space::INLINE;
+const ROW_H: f32 = size::ROW + space::LIST;
 /// where the list starts in its column, below the window's bar and the libraries' drop-down
-const LIST_TOP: f32 = 36.0 + 54.0;
+const LIST_TOP: f32 = size::TITLE_BAR + space::INLINE + size::BUTTON + space::INLINE;
+/// the room the New button takes of the note's first line: the button, and Space.inline before it
+fn new_w() -> f32 {
+    crate::text::width(font::MEDIUM, font::CONTROL, "+ New").ceil() + 2.0 * part::QUIET_PAD + space::INLINE
+}
 
 fn row(kind: i32, label: &str, tick: bool) -> MenuRow {
     MenuRow { kind, label: label.into(), tag: "".into(), tick, sub: "".into(), ..Default::default() }
@@ -580,11 +586,10 @@ impl MacroPage {
             rows.push(MenuRow { sub: count.into(), ..row(if still && !shown { 5 } else { 0 }, &name, shown) });
             picks.push(if still && !shown { Pick::Nothing } else { Pick::Lib(lib) });
         }
-        let list: f32 = rows.len() as f32 * 33.0;
         self.ui.set_menu_search(false);
         self.ui.set_menu_back(false);
         self.ui.set_menu_placeholder("".into());
-        self.ui.set_menu_natural(6.0 + list + 6.0);
+        self.ui.set_menu_natural(crate::menu_size::height(&rows, false, false, f32::MAX));
         self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
         if let Some(m) = &mut self.menu {
             m.picks = picks;
@@ -779,11 +784,10 @@ impl MacroPage {
                 picks.push(Pick::Delete);
             }
         }
-        let list: f32 = rows.iter().map(|r| match r.kind { 1 => 28.0, 2 => 11.0, _ => 33.0 }).sum();
         self.ui.set_menu_search(search);
         self.ui.set_menu_back(false);
         self.ui.set_menu_placeholder(placeholder.into());
-        self.ui.set_menu_natural(6.0 + if search { 39.0 } else { 0.0 } + list + 6.0);
+        self.ui.set_menu_natural(crate::menu_size::height(&rows, search, false, f32::MAX));
         self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
         if let Some(m) = &mut self.menu {
             m.picks = picks;
@@ -1195,6 +1199,7 @@ impl MacroPage {
             n: 0,
             name: "".into(),
             sub: note.join("\n").into(),
+            lines: ModelRc::new(VecModel::from(note.iter().map(|l| SharedString::from(l.as_str())).collect::<Vec<_>>())),
             timed: false,
             current: false,
             dirty: false,
@@ -1217,6 +1222,7 @@ impl MacroPage {
                 n: n as i32,
                 name: name.into(),
                 sub: if d.is_some_and(|d| d.is_new) { "Not saved yet".into() } else { macros::describe(&steps, &ed.jobs).into() },
+                lines: ModelRc::default(),
                 timed: steps.iter().any(|s| s["after"].as_u64().unwrap_or(0) > 0),
                 current: ed.current == Some(n),
                 dirty: ed.dirty(page, n),
@@ -1307,7 +1313,7 @@ impl MacroPage {
         } else {
             "Add keys, media keys, waits, actions and other macros with the buttons below."
         };
-        let lines: Vec<SharedString> = crate::text::wrap(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, hint, 440.0).into_iter().map(Into::into).collect();
+        let lines: Vec<SharedString> = crate::text::wrap(font::REGULAR, font::CONTROL, hint, size::EMPTY).into_iter().map(Into::into).collect();
         ui.set_empty_lines(ModelRc::new(VecModel::from(lines)));
 
         // (the keyboard's macros have room for so many steps; Ectomatter's, any number)

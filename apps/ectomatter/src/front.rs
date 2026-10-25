@@ -430,15 +430,11 @@ pub enum WindowAsk {
     ShowSettings,
 }
 
-/// A menu `w` wide's notes set to wrap, each on as many lines as its words
-/// take there (in the menu's room for them, its 6s and the note's 10s off,
-/// measured a little narrower); and the height its rows take as the menu lays
-/// them out: a heading 28, a line 11, a note of lines 15 and 17 a line, the rest 33.
+/// A menu `w` wide's notes set to wrap, and how tall the menu is with no search box
+/// or Back (src/menu_size.rs, every menu's).
 fn fit_notes(rows: &mut [MenuRow], w: f32) -> f32 {
-    for r in rows.iter_mut().filter(|r| r.kind == 3) {
-        r.lines = crate::text::wrap(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, &r.label, w - 12.0 - 20.0 - 6.0).len() as i32;
-    }
-    rows.iter().map(|r| match r.kind { 1 => 28.0, 2 => 11.0, 3 if r.lines > 1 => 15.0 + 17.0 * r.lines as f32, _ => 33.0 }).sum()
+    crate::menu_size::fit_notes(rows, w);
+    crate::menu_size::height(rows, false, false, f32::MAX)
 }
 
 /// What a row of Home's Scenes menu does: No scene, a scene turned on (or
@@ -1712,7 +1708,8 @@ impl Front {
                 .map(|f| MenuRow { kind: 0, label: f["label"].as_str().unwrap_or("").into(), tag: "".into(), tick: false, sub: f["sub"].as_str().unwrap_or("").into(), ..Default::default() })
                 .collect()
         };
-        let list: f32 = rows.iter().map(|r| if r.kind == 1 { 28.0 } else { 33.0 }).sum();
+        // (at most PLUGIN_MENU_MOST of rows; the rest scroll)
+        let natural = crate::menu_size::height(&rows, false, false, PLUGIN_MENU_MOST);
         // under the box typed in, as wide as it
         let at = self.typing.as_ref().and_then(|(p, s, _)| self.plugin_map.fields.iter().position(|(fp, fs)| fp == p && fs == s)).map(|i| i as i32);
         let field = (0..self.cells.row_count()).filter_map(|i| self.cells.row_data(i)).find(|c| c.kind == lighting::kind::FIELD && lighting::ctl(c.id) == Ctl::PluginField && Some(c.index) == at);
@@ -1722,7 +1719,7 @@ impl Front {
         let (x, y) = (self.ui.get_rail_width() + f.x, crate::tokens::size::TITLE_BAR + crate::tokens::size::BAR + f.y + scroll);
         self.ui.set_menu_search(false);
         self.ui.set_menu_back(false);
-        self.ui.set_menu_natural(6.0 + list.min(320.0) + 6.0);
+        self.ui.set_menu_natural(natural);
         self.ui.set_menu_w(f.w);
         self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
         self.ui.set_menu_ax(x);
@@ -4851,9 +4848,9 @@ impl Front {
         self.ui.set_menu_placeholder(placeholder.into());
         // its height as the page lays its rows out: Slint lays a list's rows out
         // only as it draws them, so the window works it out
-        // (the action menu is 300 wide)
-        let list = fit_notes(&mut rows, 300.0);
-        self.ui.set_menu_natural(6.0 + if back { 33.0 } else { 0.0 } + 33.0 + 6.0 + list + 6.0);
+        // (the action menu is ACTION_MENU_W wide, with its search box)
+        crate::menu_size::fit_notes(&mut rows, ACTION_MENU_W);
+        self.ui.set_menu_natural(crate::menu_size::height(&rows, true, back, f32::MAX));
         self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
         if let Some(m) = &mut self.menu {
             m.choices = choices;
@@ -6446,7 +6443,7 @@ impl Front {
     /// A small menu of `rows`, `w` wide, open from `anchor`: under it where
     /// it fits, over it where there's more room there.
     fn hang_menu(&mut self, mut rows: Vec<MenuRow>, w: f32, anchor: (f32, f32, f32)) {
-        let h = 6.0 + fit_notes(&mut rows, w) + 6.0;
+        let h = fit_notes(&mut rows, w);
         self.ui.set_menu_search(false);
         self.ui.set_menu_back(false);
         self.ui.set_menu_natural(h);
@@ -7754,7 +7751,7 @@ impl Front {
             picks.push(None);
         }
         self.mouse.menu_picks = picks;
-        let h = 6.0 + fit_notes(&mut rows, 260.0) + 6.0;
+        let h = fit_notes(&mut rows, MOUSE_MENU_W);
         self.ui.set_menu_search(false);
         self.ui.set_menu_back(false);
         self.ui.set_menu_natural(h);
@@ -7914,7 +7911,7 @@ impl Front {
         let in_place = crate::described::in_place_box(&self.page.effect_desc(&self.page.effect_id()), &id);
         self.close_menu();
         self.close_picker();
-        let h = 6.0 + rows.iter().map(|r| if r.kind == 2 { 11.0 } else { 33.0 }).sum::<f32>() + 6.0;
+        let h = crate::menu_size::height(&rows, false, false, f32::MAX);
         self.ui.set_menu_search(false);
         self.ui.set_menu_back(false);
         self.ui.set_menu_natural(h);
@@ -7959,7 +7956,7 @@ impl Front {
         }
         self.close_menu();
         self.close_picker();
-        let h = 6.0 + fit_notes(&mut rows, w) + 6.0;
+        let h = fit_notes(&mut rows, w);
         self.ui.set_menu_search(false);
         self.ui.set_menu_back(false);
         self.ui.set_menu_natural(h);
@@ -8008,8 +8005,7 @@ impl Front {
         self.close_menu();
         self.close_picker();
         self.ui.set_menu_marks(true);
-        let list: f32 = rows.iter().map(|r| if r.kind == 1 { 28.0 } else { 33.0 }).sum();
-        let h = 6.0 + list + 6.0;
+        let h = crate::menu_size::height(&rows, false, false, f32::MAX);
         // (as wide as the longest line needs)
         let w = rows.iter().map(|r| crate::text::width(if r.kind == 1 { 500 } else { 400 }, 13.5, &r.label) + 58.0).fold(200.0f32, f32::max).ceil();
         self.ui.set_menu_search(false);
@@ -8058,8 +8054,7 @@ impl Front {
         rows.push(row(if self.screens.playlists.len() > 1 { 4 } else { 5 }, format!("Delete {name}"), false, String::new()));
         self.close_menu();
         self.close_picker();
-        let list: f32 = rows.iter().map(|r| match r.kind { 1 => 28.0, 2 => 11.0, _ => 33.0 }).sum();
-        let h = 6.0 + list + 6.0;
+        let h = crate::menu_size::height(&rows, false, false, f32::MAX);
         self.ui.set_menu_search(false);
         self.ui.set_menu_back(false);
         self.ui.set_menu_natural(h);
@@ -8106,8 +8101,7 @@ impl Front {
         }
         self.close_menu();
         self.close_picker();
-        let list: f32 = rows.iter().map(|r| match r.kind { 1 => 28.0, 2 => 11.0, _ => 33.0 }).sum();
-        let h = 6.0 + list + 6.0;
+        let h = crate::menu_size::height(&rows, false, false, f32::MAX);
         // (as wide as the longest row needs, its note too, from 248 to 340)
         let w = rows.iter().map(|r| crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, &r.label) + if r.sub.is_empty() { 0.0 } else { crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, &r.sub) + 8.0 } + 64.0).fold(248.0f32, f32::max).min(340.0).ceil();
         self.ui.set_menu_search(false);
@@ -8187,8 +8181,7 @@ impl Front {
         self.close_picker();
         // (nothing in it is ticked)
         self.ui.set_menu_marks(false);
-        let list: f32 = rows.iter().map(|r| match r.kind { 1 => 28.0, 2 => 11.0, _ => 33.0 }).sum();
-        let h = 6.0 + list + 6.0;
+        let h = crate::menu_size::height(&rows, false, false, f32::MAX);
         let w = rows.iter().map(|r| crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, &r.label) + 64.0).fold(200.0f32, f32::max).min(320.0).ceil();
         self.ui.set_menu_search(false);
         self.ui.set_menu_back(false);
@@ -8431,8 +8424,7 @@ impl Front {
         self.close_picker();
         // (nothing in it is ticked)
         self.ui.set_menu_marks(false);
-        let list: f32 = rows.iter().map(|r| if r.kind == 2 { 11.0 } else { 33.0 }).sum();
-        let h = 6.0 + list + 6.0;
+        let h = crate::menu_size::height(&rows, false, false, f32::MAX);
         let w = rows.iter().map(|r| crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, &r.label) + 64.0).fold(200.0f32, f32::max).min(320.0).ceil();
         self.ui.set_menu_search(false);
         self.ui.set_menu_back(false);
@@ -8466,8 +8458,7 @@ impl Front {
         self.close_menu();
         self.close_picker();
         self.ui.set_menu_marks(false);
-        let list: f32 = rows.iter().map(|r| if r.kind == 1 { 28.0 } else { 33.0 }).sum();
-        let h = 6.0 + list + 6.0;
+        let h = crate::menu_size::height(&rows, false, false, f32::MAX);
         // (as wide as the longest name needs, to 300)
         let w = rows.iter().map(|r| crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, &r.label) + 64.0).fold(200.0f32, f32::max).min(300.0).ceil();
         self.ui.set_menu_search(false);
@@ -8526,8 +8517,7 @@ impl Front {
         for (v, label) in crate::display::BIND_CHOICES[i] {
             rows.push(MenuRow { kind: 0, label: label.into(), tag: "".into(), tick: self.bind[i] == v, sub: "".into(), ..Default::default() });
         }
-        let list: f32 = rows.iter().map(|r| if r.kind == 1 { 28.0 } else { 33.0 }).sum();
-        let h = 6.0 + list + 6.0;
+        let h = crate::menu_size::height(&rows, false, false, f32::MAX);
         self.ui.set_menu_search(false);
         self.ui.set_menu_back(false);
         self.ui.set_menu_natural(h);
@@ -10699,6 +10689,12 @@ mod tests {
 
 /// How wide an effect's tile shows its picture, as the page's grid of effects
 /// says (in whole pixels; the grid's least until it has drawn it).
+/// the menus' widths: the action menu's (a key's job), the mouse's; a plugin's search's
+/// rows at most, before they scroll
+const ACTION_MENU_W: f32 = 300.0;
+const MOUSE_MENU_W: f32 = 260.0;
+const PLUGIN_MENU_MOST: f32 = 320.0;
+
 /// the playlist's chooser at its widest, and the field its playlist is renamed in; the
 /// onboard layout's at its widest; and the strip after the chooser at its least
 const CHOOSER_MOST: f32 = 200.0;

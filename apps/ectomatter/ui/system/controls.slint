@@ -54,6 +54,18 @@ export component Tab inherits Rectangle {
     }
 }
 
+// A color as a small square, a glyph's size, beside the words it's for (a pad's
+// Color, a mouse light's color in its row): rounded a little, with a faint edge.
+export component ColorSquare inherits Rectangle {
+    in property <color> swatch;
+    width: Part.glyph;
+    height: Part.glyph;
+    border-radius: Radius.tiny;
+    background: root.swatch;
+    border-width: 1px;
+    border-color: Ink.white.with-alpha(0.18);
+}
+
 // a button with words: filled gray (the page's ghost buttons, which here have
 // no outline), primary (ink), or one that deletes (red); a pixel down under a
 // press. Its gray stands off what it sits on: the page's ground, or a box
@@ -105,15 +117,10 @@ export component WordButton inherits Rectangle {
         commands: root.icon;
         fill: root.enabled ? root.ink : root.ink.mix(Ink.base, 0.35);
     }
-    if root.swatched: Rectangle {
+    if root.swatched: ColorSquare {
         x: (parent.width - label.width - root.icon-w - root.menu-w) / 2;
-        y: (parent.height - Part.glyph) / 2 + (ta.pressed && root.enabled ? 1px : 0);
-        width: Part.glyph;
-        height: Part.glyph;
-        border-radius: Radius.tiny;
-        background: root.swatch;
-        border-width: 1px;
-        border-color: Ink.white.with-alpha(0.18);
+        y: (parent.height - self.height) / 2 + (ta.pressed && root.enabled ? 1px : 0);
+        swatch: root.swatch;
     }
     if root.menu: Path {
         x: (parent.width + label.width + root.icon-w - root.menu-w) / 2 + Part.glyph-gap;
@@ -469,7 +476,14 @@ export component FieldBox inherits Rectangle {
     // Escape stays here (`escape`), or goes on to the page (a find box's, which
     // the page's own Escape answers)
     in property <bool> keeps-escape: true;
+    // its words at its middle (a count to type)
+    in property <bool> centered;
+    // its shade, and its shade while typed in (in a menu, the box's, a step off the menu's)
+    in property <brush> fill: Ink.well;
+    in property <brush> fill-typing: Ink.hover-well;
     out property <bool> typing: field-in.has-focus;
+    // typing in it ends, the field left
+    callback left();
     callback edited();
     callback accepted();
     callback escape();
@@ -477,7 +491,7 @@ export component FieldBox inherits Rectangle {
     public function stop-typing() { field-in.clear-focus(); }
     height: Size.control;
     border-radius: Radius.control;
-    background: field-in.has-focus ? Ink.hover-well : Ink.well;
+    background: field-in.has-focus ? root.fill-typing : root.fill;
     clip: true;
     property <length> words-x: root.glyph != "" ? Part.field-pad + Part.glyph + Part.glyph-gap : Part.field-pad;
     if root.glyph != "": Path {
@@ -511,12 +525,18 @@ export component FieldBox inherits Rectangle {
         text <=> root.text;
         read-only: root.read-only;
         enabled: !root.read-only;
+        horizontal-alignment: root.centered ? TextHorizontalAlignment.center : TextHorizontalAlignment.left;
         font-family: root.mono ? Font.mono : Font.ui;
         font-size: root.mono ? Font.caption : Font.control;
         color: Ink.ink;
         vertical-alignment: center;
         single-line: true;
-        changed has-focus => { Typing.on = self.has-focus; }
+        changed has-focus => {
+            Typing.on = self.has-focus;
+            if (!self.has-focus) {
+                root.left();
+            }
+        }
         edited => { root.edited(); }
         accepted => { root.accepted(); }
         key-pressed(e) => {
@@ -822,12 +842,28 @@ export component SegChoice inherits Rectangle {
     in property <string> icon;
     in property <bool> on;
     in property <bool> off;
+    // a color's dot before its words (the profile's backlight, for Default)
+    in property <bool> swatched;
+    in property <color> swatch;
+    // as wide as its words want, with Part.choice-pad either side
+    out property <length> need: row.preferred-width + 2 * Part.choice-pad;
     callback clicked(length, length, length);
     border-radius: Radius.small;
     background: root.on ? (ta.has-hover ? Ink.pick-hover : Ink.pick) : ta.has-hover && !root.off ? Ink.hover-well : transparent;
-    HorizontalLayout {
+    row := HorizontalLayout {
         alignment: center;
         spacing: 6px;
+        if root.swatched: VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 9px;
+                height: 9px;
+                border-radius: self.width / 2;
+                background: root.swatch;
+                border-width: 1px;
+                border-color: Ink.black.with-alpha(0.122);
+            }
+        }
         if root.icon != "": Path {
             y: (parent.height - Part.glyph) / 2;
             width: Part.glyph;
@@ -914,10 +950,14 @@ export component DropField inherits Rectangle {
     in property <bool> followed;
     in property <bool> warn;
     in property <bool> subtle;
+    // (a subtle one on a box, lit in the box's hover shade rather than a well's)
+    in property <bool> on-box;
+    in property <bool> enabled: true;
     callback clicked(length, length, length);
     height: Size.control;
     border-radius: Radius.control;
-    background: ta.has-hover || root.open ? (root.subtle ? Ink.hover-well : Ink.hover-box) : root.subtle ? transparent : Ink.well;
+    opacity: root.enabled ? 1 : 0.35;
+    background: (ta.has-hover && root.enabled) || root.open ? (root.subtle && !root.on-box ? Ink.hover-well : Ink.hover-box) : root.subtle ? transparent : Ink.well;
     border-width: root.warn ? 1px : 0;
     border-color: Ink.warn.with-alpha(0.502);
     if root.chip-on: Image {
@@ -954,6 +994,7 @@ export component DropField inherits Rectangle {
         stroke-width: 1.6px;
     }
     ta := TouchArea {
+        enabled: root.enabled;
         mouse-cursor: pointer;
         clicked => { root.clicked(self.absolute-position.x, self.absolute-position.y, self.height); }
     }

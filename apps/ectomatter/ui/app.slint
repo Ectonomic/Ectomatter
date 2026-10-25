@@ -28,7 +28,7 @@ import "../../../crates/ectomatter-draw/typefaces/JetBrainsMono.ttf";
 import { Space, Radius, Font, Line, Size, Part, Shadow, Ink } from "tokens.slint";
 export { Ink }
 // The design system's parts (ui/system/), which every page is built from.
-import { DialogHead, FormLabel, FormNote, RenameField, FloatBar, Fold, RecordButton, Tag, RadioRow, FolderTab, Slider, ColorButton, SegGround, SegChoice, TipBox, Tip, EmptyState, ListRow, EditorHeader, EffectTile, Glyph, IconButton, MoreButton, PencilButton, BoxRow, Scrim, DialogBox, Confirm, Dot, TitleBar, PageBar, HintRow, Typing, WinButton, Tab, WordButton, TextButton, Spinner, ScrollBar, PickField, Well, LinkButton, SmallCap, FieldBox, CheckBox, Star, StarButton, StripIcon, PlayButton, SegSwitch, DropField, BarButton, Stage, PageBox, ScrollBox, MenuRow, Menu, Picker, Cell, CellView, LaidBox, CellBox, ProfileItem, RailItem, AnchorRow, AnchorHead, ListBox, AnchorColumn } from "system/system.slint";
+import { ColorSquare, DialogHead, FormLabel, FormNote, RenameField, FloatBar, Fold, RecordButton, Tag, RadioRow, FolderTab, Slider, ColorButton, SegGround, SegChoice, TipBox, Tip, EmptyState, ListRow, EditorHeader, EffectTile, Glyph, IconButton, MoreButton, PencilButton, BoxRow, Scrim, DialogBox, Confirm, Dot, TitleBar, PageBar, HintRow, Typing, WinButton, Tab, WordButton, TextButton, Spinner, ScrollBar, PickField, Well, LinkButton, SmallCap, FieldBox, CheckBox, Star, StarButton, StripIcon, PlayButton, SegSwitch, DropField, BarButton, Stage, PageBox, ScrollBox, MenuRow, Menu, Picker, Cell, CellView, LaidBox, CellBox, ProfileItem, RailItem, AnchorRow, AnchorHead, ListBox, AnchorColumn } from "system/system.slint";
 export { Typing, MenuRow, Cell, LaidBox, ProfileItem }
 
 // a key over the keyboard: where it is in the drawing's units, from the
@@ -2698,17 +2698,13 @@ export component AppWindow inherits Window {
                     sub: r.rebound ? "" : r.job;
                     warn: r.rebound ? r.job : "";
                     chosen: r.chosen;
-                    end: r.swatched ? 38px : 12px;
+                    // (its color at its right end, Space.row in, the row's words kept clear of it)
+                    end: r.swatched ? Space.row + Part.glyph + Space.row : Space.row;
                     clicked => { root.mouse-row(i); }
-                    if r.swatched: Rectangle {
-                        x: parent.width - 12px - 14px;
-                        y: (parent.height - 14px) / 2;
-                        width: 14px;
-                        height: 14px;
-                        border-radius: Radius.tiny;
-                        background: r.swatch;
-                        border-width: 1px;
-                        border-color: Ink.white.with-alpha(0.18);
+                    if r.swatched: ColorSquare {
+                        x: parent.width - Space.row - self.width;
+                        y: (parent.height - self.height) / 2;
+                        swatch: r.swatch;
                     }
                 }
                     }
@@ -3152,16 +3148,13 @@ export component AppWindow inherits Window {
                         text: root.hint;
                         chip: root.hint-chip;
                         chip-on: root.hint-chip-on;
+                        // (a status: its dot, breathing while it plays, and its words)
                         if root.live: HorizontalLayout {
-                            spacing: 6px;
-                            Rectangle {
-                                width: 6px;
-                                Rectangle {
-                                    y: (parent.height - 6px) / 2;
-                                    width: 6px;
-                                    height: 6px;
-                                    border-radius: self.width / 2;
-                                    background: Ink.good;
+                            spacing: Space.inline;
+                            VerticalLayout {
+                                alignment: center;
+                                Dot {
+                                    state: 1;
                                     opacity: 0.55 + 0.45 * cos(animation-tick() / 1600ms * 360deg);
                                 }
                             }
@@ -5068,6 +5061,8 @@ export struct MacroItem {
     n: int,
     name: string,
     sub: string,
+    // (a section's note, a line each, as Rust broke it)
+    lines: [string],
     timed: bool,
     current: bool,
     dirty: bool,
@@ -5418,7 +5413,8 @@ export component MacroWindow inherits Window {
     out property <length> window-height: root.height;
     out property <length> window-width: root.width;
     // the chain's width, for the window to wrap it
-    out property <length> chain-width: root.width - Size.sidebar - 2 * Space.margin - 36px;
+    // (the chain's room: the canvas, less the chain's inset either side)
+    out property <length> chain-width: root.width - Size.sidebar - 2 * Space.margin - 2 * Part.chain-in;
     out property <length> chain-scroll: chain-flick.content-y;
     // are you sure: deleting a macro
     in property <bool> confirm-open;
@@ -5496,46 +5492,24 @@ export component MacroWindow inherits Window {
         height: root.height - Size.title-bar;
         background: Ink.box;
         border-bottom-left-radius: root.radius;
-        property <length> head-h: 10px + 34px + 10px;
-        // (the drop-down as the Plays one is drawn)
-        Rectangle {
-            x: 10px;
-            y: 10px + 1px;
-            width: parent.width - 20px;
-            height: 32px;
-            border-radius: Radius.control;
-            background: libs-ta.has-hover ? Ink.shade2 : Ink.shade1;
-            Text {
-                x: 14px;
-                width: parent.width - 42px;
-                text: root.lib-name;
-                font-size: Font.control;
-                color: Ink.ink;
-                vertical-alignment: center;
-                overflow: elide;
-            }
-            Path {
-                x: parent.width - 23px;
-                y: 13px;
-                width: 9px;
-                height: 6px;
-                viewbox-width: 10;
-                viewbox-height: 6;
-                commands: "M1 1l4 4 4-4";
-                fill: transparent;
-                stroke: Ink.quiet;
-                stroke-width: 1.35px;
-            }
-            libs-ta := TouchArea {
-                mouse-cursor: pointer;
-                clicked => { root.libs(self.absolute-position.x, self.absolute-position.y, 32px); }
-            }
+        // (its head: the libraries' drop-down, Space.inline in; macro_page.rs's LIST_TOP)
+        property <length> head-h: Space.inline + Size.button + Space.inline;
+        DropField {
+            x: Space.inline;
+            y: Space.inline;
+            width: parent.width - 2 * Space.inline;
+            height: Size.button;
+            subtle: true;
+            on-box: true;
+            text: root.lib-name;
+            clicked(x, y, h) => { root.libs(x, y, h); }
         }
+        // the list, Space.inline in from the column's sides, as a list's in a box is
         Flickable {
-            x: 10px;
+            x: Space.inline;
             y: parent.head-h;
-            width: parent.width - 20px;
-            height: parent.height - parent.head-h - 10px;
+            width: parent.width - 2 * Space.inline;
+            height: parent.height - parent.head-h - Space.inline;
             content-height: root.items-h;
             content-y <=> root.lib-scroll;
             mouse-drag-pan-enabled: false;
@@ -5551,38 +5525,35 @@ export component MacroWindow inherits Window {
                 }
                 // a section's heading: as the mouse's page heads its lists
                 // (a heading with no name, where the tab above names the library:
-                // its note beside the New button, from the top)
+                // its note beside the New button, from the top, its first line at
+                // the button's middle)
                 if m.kind == 1: Rectangle {
-                    if m.name != "": Text {
-                        x: 12px;
+                    if m.name != "": AnchorHead {
+                        x: Space.row;
                         y: 0;
-                        height: 30px;
-                        width: parent.width - 84px;
+                        height: Size.list-head;
+                        width: parent.width - Space.row - new-b.width - Space.tight;
                         text: m.name;
-                        font-family: Font.ui;
-                        font-size: Font.small;
-                        font-weight: Font.strong;
-                        letter-spacing: 0.9px;
-                        color: Ink.quiet;
-                        vertical-alignment: center;
                         overflow: elide;
                     }
-                    TextButton {
-                        x: parent.width - self.width - 4px;
-                        y: 1px;
+                    new-b := TextButton {
+                        x: parent.width - self.width - Space.tight;
+                        y: 0;
                         text: "+ New";
-                        opacity: m.can-new ? 1 : 0.35;
-                        clicked => { if (m.can-new) { root.new-in(m.lib); } }
+                        enabled: m.can-new;
+                        clicked => { root.new-in(m.lib); }
                     }
                     // (broken into lines where the page measured them, so the
                     // macros start below the last)
-                    Text {
-                        x: 12px;
-                        y: m.name == "" ? 7px : 30px;
-                        text: m.sub;
-                        font-size: Font.caption;
+                    for l[k] in m.lines: Text {
+                        x: Space.row;
+                        y: (m.name == "" ? (Size.compact - Line.note) / 2 : Size.list-head) + k * Line.note;
+                        height: Line.note;
+                        text: l;
+                        font-family: Font.ui;
+                        font-size: Font.note;
                         color: Ink.quiet;
-                        vertical-alignment: top;
+                        vertical-alignment: center;
                     }
                 }
             }
@@ -5590,8 +5561,8 @@ export component MacroWindow inherits Window {
         ScrollBar {
             x: parent.width - Part.scroll-in;
             y: parent.head-h;
-            height: parent.height - parent.head-h - 10px;
-            view: parent.height - parent.head-h - 10px;
+            height: parent.height - parent.head-h - Space.inline;
+            view: parent.height - parent.head-h - Space.inline;
             content: root.items-h;
             offset: -root.lib-scroll;
             framed: false;
@@ -5601,7 +5572,9 @@ export component MacroWindow inherits Window {
     }
 
     // the workspace: the canvas a margin in from its edges, the foot a gap under it
-    property <length> foot-h: Space.gap + 34px + Space.margin;
+    property <length> foot-h: Space.gap + Size.button + Space.margin;
+    // the tools' row at the canvas's foot, Space.inline in from it
+    property <length> tools-h: Size.button + 2 * Space.inline;
     Rectangle {
         x: Size.sidebar;
         y: Size.title-bar;
@@ -5646,8 +5619,9 @@ export component MacroWindow inherits Window {
             chain-flick := Flickable {
                 y: 0;
                 width: parent.width;
-                height: parent.height - 48px;
-                content-height: max(self.height, root.chain-h + 36px);
+                height: parent.height - tools-h;
+                // (the chain Part.chain-in in from the canvas, at its foot too)
+                content-height: max(self.height, root.chain-h + 2 * Part.chain-in);
                 mouse-drag-pan-enabled: false;
                 for c in root.chain: ChainPiece {
                     c: c;
@@ -5661,9 +5635,9 @@ export component MacroWindow inherits Window {
                 }
                 // nothing in it yet: a dashed ring round the record dot, and what to do
                 if root.chain-empty != 0: Rectangle {
-                    x: (parent.width - 440px) / 2;
+                    x: (parent.width - Size.empty) / 2;
                     y: (parent.height - 118px) / 2;
-                    width: 440px;
+                    width: Size.empty;
                     height: 118px;
                     Path {
                         x: (parent.width - 38px) / 2;
@@ -5695,8 +5669,8 @@ export component MacroWindow inherits Window {
             }
             ScrollBar {
                 x: parent.width - Part.scroll-in;
-                y: 8px;
-                height: parent.height - 48px - 8px - 2px;
+                y: Space.inline;
+                height: chain-flick.height - Space.inline;
                 view: chain-flick.height;
                 content: chain-flick.content-height;
                 offset: -chain-flick.content-y;
@@ -5704,159 +5678,89 @@ export component MacroWindow inherits Window {
                 thumb-color: Ink.edge;
                 scroll-to(o) => { chain-flick.content-y = -o; }
             }
-            // the tools
+            // the tools, a toolbar's quiet buttons at the canvas's foot: the settings, Clear,
+            // then what to add; how full it is, and Record
             HorizontalLayout {
-                x: 10px;
-                y: parent.height - 48px + 8px;
-                width: parent.width - 20px;
-                height: 30px;
-                spacing: 2px;
-                Rectangle {
-                    width: 30px;
-                    Rectangle {
-                        y: 3px;
-                        height: 24px;
-                        border-radius: Radius.small;
-                        background: gear.has-hover && !root.tools-off ? Ink.shade2 : transparent;
-                        opacity: root.tools-off ? 0.35 : 1;
-                        MacroIcon { width: 14px; height: 14px; which: 2; stroke: Ink.dim; }
-                        gear := TouchArea {
-                            enabled: !root.tools-off;
-                            mouse-cursor: pointer;
-                            clicked => { root.tool(0, self.absolute-position.x, self.absolute-position.y, 24px); }
-                        }
-                    }
+                x: Space.inline;
+                y: parent.height - tools-h + Space.inline;
+                width: parent.width - 2 * Space.inline;
+                height: Size.button;
+                spacing: Space.list;
+                cross-axis-alignment: center;
+                IconButton {
+                    width: Size.compact;
+                    height: Size.compact;
+                    icon: "M10.3 8a2.3 2.3 0 1 1-4.6 0a2.3 2.3 0 1 1 4.6 0zM8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4";
+                    units: 16;
+                    enabled: !root.tools-off;
+                    clicked(x, y, h) => { root.tool(0, x, y, h); }
                 }
-                TextButton { y: 1px; text: "Clear"; opacity: root.can-clear ? 1 : 0.35; clicked => { if (root.can-clear) { root.tool(1, self.absolute-position.x, self.absolute-position.y, self.height); } } }
+                TextButton { text: "Clear"; enabled: root.can-clear; clicked => { root.tool(1, self.absolute-position.x, self.absolute-position.y, self.height); } }
+                // (a rule between clearing and adding, Space.tight either side of it)
                 Rectangle {
-                    width: 13px;
-                    Rectangle { x: 6px; y: 7px; width: 1px; height: 16px; background: Ink.shade4; }
+                    width: 2 * Space.tight + 1px;
+                    Rectangle { x: Space.tight; y: (parent.height - self.height) / 2; width: 1px; height: Line.small; background: Ink.line; }
                 }
-                TextButton { y: 1px; text: "+ Key"; opacity: root.can-key ? 1 : 0.35; clicked => { if (root.can-key) { root.tool(2, self.absolute-position.x, self.absolute-position.y, self.height); } } }
-                TextButton { y: 1px; text: "+ Media key"; opacity: root.can-media ? 1 : 0.35; clicked => { if (root.can-media) { root.tool(3, self.absolute-position.x, self.absolute-position.y, self.height); } } }
-                TextButton { y: 1px; text: "+ Wait"; opacity: root.can-wait ? 1 : 0.35; clicked => { if (root.can-wait) { root.tool(4, self.absolute-position.x, self.absolute-position.y, self.height); } } }
-                if root.jobs-shown: TextButton { y: 1px; text: "+ Action"; opacity: root.can-jobs ? 1 : 0.35; clicked => { if (root.can-jobs) { root.tool(6, self.absolute-position.x, self.absolute-position.y, self.height); } } }
-                if root.jobs-shown: TextButton { y: 1px; text: "+ Macro"; opacity: root.can-jobs ? 1 : 0.35; clicked => { if (root.can-jobs) { root.tool(7, self.absolute-position.x, self.absolute-position.y, self.height); } } }
+                TextButton { text: "+ Key"; enabled: root.can-key; clicked => { root.tool(2, self.absolute-position.x, self.absolute-position.y, self.height); } }
+                TextButton { text: "+ Media key"; enabled: root.can-media; clicked => { root.tool(3, self.absolute-position.x, self.absolute-position.y, self.height); } }
+                TextButton { text: "+ Wait"; enabled: root.can-wait; clicked => { root.tool(4, self.absolute-position.x, self.absolute-position.y, self.height); } }
+                if root.jobs-shown: TextButton { text: "+ Action"; enabled: root.can-jobs; clicked => { root.tool(6, self.absolute-position.x, self.absolute-position.y, self.height); } }
+                if root.jobs-shown: TextButton { text: "+ Macro"; enabled: root.can-jobs; clicked => { root.tool(7, self.absolute-position.x, self.absolute-position.y, self.height); } }
                 Rectangle { horizontal-stretch: 1; }
                 Text {
                     text: root.meter-text;
+                    font-family: Font.ui;
                     font-size: Font.caption;
                     color: root.meter-warn ? Ink.warn : Ink.quiet;
                     vertical-alignment: center;
                 }
-                Rectangle { width: 4px; }
-                if root.recording: Rectangle { width: 6px; }
+                // (while it records, how long, in red, Space.inline either side)
+                if root.recording: Rectangle { width: Space.inline; }
                 if root.recording: Text {
                     text: root.rec-clock;
+                    font-family: Font.ui;
                     font-size: Font.control;
                     color: Ink.bad;
                     vertical-alignment: center;
                 }
-                if root.recording: Rectangle { width: 4px; }
-                Rectangle {
-                    width: rec-row.preferred-width;
-                    border-radius: Radius.control;
-                    background: root.recording ? Ink.record.with-alpha(0.2) : rec-ta.has-hover && root.can-record ? Ink.pick-hover : Ink.pick;
-                    opacity: root.recording || root.can-record ? 1 : 0.35;
-                    rec-row := HorizontalLayout {
-                        padding-left: 10px;
-                        padding-right: 12px;
-                        spacing: 7px;
-                        Rectangle {
-                            width: root.recording ? 8px : 9px;
-                            Rectangle {
-                                y: (parent.height - self.height) / 2;
-                                width: root.recording ? 8px : 9px;
-                                height: self.width;
-                                border-radius: root.recording ? 2px : self.width / 2;
-                                background: root.recording ? Ink.bad : Ink.record;
-                            }
-                        }
-                        Text {
-                            text: root.recording ? "Stop" : "Record";
-                            font-size: Font.control;
-                            font-weight: Font.medium;
-                            color: root.recording ? Ink.record.mix(Ink.white, 0.35) : Ink.bright;
-                            vertical-alignment: center;
-                        }
-                    }
-                    rec-ta := TouchArea {
-                        enabled: root.recording || root.can-record;
-                        mouse-cursor: pointer;
-                        clicked => { root.tool(5, self.absolute-position.x, self.absolute-position.y, self.height); }
-                    }
+                Rectangle { width: Space.inline; }
+                RecordButton {
+                    on: root.recording;
+                    enabled: root.can-record;
+                    clicked(x, y, h) => { root.tool(5, x, y, h); }
                 }
             }
         }
-        // the foot: how it plays, what was last done, Revert and Save, a gap under the canvas
+
+        // the foot: how it plays, what was last done, Revert and Save, a gap under the canvas;
+        // a line of controls at a button's height
         HorizontalLayout {
             x: Space.margin;
-            y: parent.height - Space.margin - 34px;
+            y: parent.height - Space.margin - Size.button;
             width: parent.width - 2 * Space.margin;
-            height: 34px;
-            spacing: 10px;
-            Text { text: "Plays"; font-size: Font.caption; color: Ink.quiet; vertical-alignment: center; }
-            Rectangle {
+            height: Size.button;
+            spacing: Space.inline;
+            cross-axis-alignment: center;
+            Text { text: "Plays"; font-family: Font.ui; font-size: Font.caption; color: Ink.quiet; vertical-alignment: center; }
+            DropField {
                 width: 170px;
-                Rectangle {
-                    y: 1px;
-                    height: 32px;
-                    border-radius: Radius.control;
-                    background: plays-ta.has-hover && root.plays-on ? Ink.shade2 : Ink.shade1;
-                    opacity: root.plays-on ? 1 : 0.35;
-                    Text {
-                        x: 14px;
-                        width: parent.width - 42px;
-                        text: root.plays-text;
-                        font-size: Font.control;
-                        color: Ink.ink;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-                    Path {
-                        x: parent.width - 23px;
-                        y: 13px;
-                        width: 9px;
-                        height: 6px;
-                        viewbox-width: 10;
-                        viewbox-height: 6;
-                        commands: "M1 1l4 4 4-4";
-                        fill: transparent;
-                        stroke: Ink.quiet;
-                        stroke-width: 1.35px;
-                    }
-                    plays-ta := TouchArea {
-                        enabled: root.plays-on;
-                        mouse-cursor: pointer;
-                        clicked => { root.plays(self.absolute-position.x, self.absolute-position.y, 32px); }
-                    }
-                }
+                height: Size.button;
+                text: root.plays-text;
+                enabled: root.plays-on;
+                clicked(x, y, h) => { root.plays(x, y, h); }
             }
-            if root.count-shown: Rectangle {
+            if root.count-shown: FieldBox {
                 width: 56px;
-                Rectangle {
-                    y: 1px;
-                    height: 32px;
-                    border-radius: Radius.control;
-                    background: Ink.shade1;
-                    TextInput {
-                        x: 8px;
-                        width: parent.width - 16px;
-                        height: parent.height;
-                        text <=> root.count-text;
-                        font-size: Font.control;
-                        color: Ink.ink;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                        single-line: true;
-                        accepted => { root.count-done(self.text); }
-                        changed has-focus => { if (!self.has-focus) { root.count-done(self.text); } }
-                    }
-                }
+                height: Size.button;
+                centered: true;
+                text <=> root.count-text;
+                accepted => { root.count-done(self.text); }
+                left => { root.count-done(self.text); }
             }
-            if root.count-shown: Text { text: "times"; font-size: Font.control; color: Ink.dim; vertical-alignment: center; }
+            if root.count-shown: Text { text: "times"; font-family: Font.ui; font-size: Font.control; color: Ink.dim; vertical-alignment: center; }
             if root.locked: Text {
                 text: "This macro holds something the editor cannot rebuild exactly, so it is shown read only.";
+                font-family: Font.ui;
                 font-size: Font.note;
                 color: Ink.quiet;
                 vertical-alignment: center;
@@ -5865,24 +5769,19 @@ export component MacroWindow inherits Window {
             Text {
                 horizontal-stretch: 1;
                 text: root.status-text;
+                font-family: Font.ui;
                 font-size: Font.note;
                 color: root.status-kind == 1 ? Ink.good : root.status-kind == 2 ? Ink.bad : Ink.quiet;
                 horizontal-alignment: right;
                 vertical-alignment: center;
                 overflow: elide;
             }
-            Rectangle { width: 0; }
             WordButton {
-                y: 1px;
-                height: 32px;
-                width: 68px;
                 text: "Revert";
                 enabled: root.can-revert;
                 clicked => { root.revert(); }
             }
             WordButton {
-                height: 34px;
-                width: 103px;
                 text: "Save macro";
                 primary: true;
                 enabled: root.can-save;
@@ -6033,7 +5932,7 @@ component BlockChip inherits Rectangle {
     callback carry(length, length);
     callback drop(length, length);
     callback cancel();
-    width: 88px;
+    width: Size.block-chip;
     height: 24px;
     border-radius: Radius.small;
     background: root.lit ? Ink.edge : ta.has-hover ? Ink.pick-hover : Ink.pick;
@@ -6339,8 +6238,8 @@ export component LayoutWindow inherits Window {
             border-top-right-radius: Radius.box;
             background: Ink.box;
             for name[k] in ["Text", "Data", "Bar", "Effect"]: BlockChip {
-                x: 16px + k * 94px;
-                y: 16px;
+                x: Space.pad + k * (Size.block-chip + Space.inline);
+                y: (parent.height - self.height) / 2;
                 text: name;
                 which: k;
                 lit: root.lit-chip == k;
@@ -6351,133 +6250,79 @@ export component LayoutWindow inherits Window {
             }
             // (whole or not at all: in a narrow window it steps aside for the backlight)
             Text {
-                x: 16px + 4 * 94px + 10px;
-                y: 16px;
-                width: light-row.x - self.x - 16px;
-                height: 24px;
+                x: Space.pad + 4 * (Size.block-chip + Space.inline) - Space.inline + Space.row;
+                y: (parent.height - self.height) / 2;
+                width: light-row.x - self.x - Space.pad;
+                height: Line.text;
                 visible: self.preferred-width <= self.width;
                 text: root.bar-hint;
+                font-family: Font.ui;
                 font-size: Font.note;
                 color: Ink.quiet;
                 vertical-alignment: center;
             }
-            // the layout's backlight: Default (the profile's, whose color the dot shows), or a
-            // color of the layout's own, as its dot and its code, which open the picker
+            // at the bar's right, compact and at its middle: the layout's backlight, Default
+            // (the profile's, whose color the dot shows) or a color of the layout's own, as its
+            // dot and its code, which open the picker; a hairline, then Grid, only the editor's
+            // view
             light-row := HorizontalLayout {
-                x: parent.width - 108px - self.width;
-                y: 14px;
+                x: parent.width - Space.pad - self.width;
+                y: (parent.height - self.height) / 2;
                 width: self.preferred-width;
-                height: 28px;
-                spacing: 0;
+                height: Size.compact;
+                spacing: Space.inline;
                 Text {
                     text: "Backlight";
+                    font-family: Font.ui;
                     font-size: Font.note;
                     color: Ink.soft;
                     vertical-alignment: center;
                 }
-                Rectangle { width: 10px; }
+                // (a switch, its choices as wide as their words)
+                SegGround {
+                    width: def-c.need + own-c.need + Part.seg-gap + 2 * Part.inset;
+                    def-c := SegChoice {
+                        x: Part.inset;
+                        y: Part.inset;
+                        width: self.need;
+                        height: parent.height - 2 * Part.inset;
+                        text: "Default";
+                        swatched: true;
+                        swatch: root.default-light;
+                        on: !root.own-light;
+                        clicked => { if (root.own-light) { root.light-own(false); } }
+                    }
+                    own-c := SegChoice {
+                        x: def-c.x + def-c.width + Part.seg-gap;
+                        y: Part.inset;
+                        width: self.need;
+                        height: parent.height - 2 * Part.inset;
+                        text: "Own color";
+                        on: root.own-light;
+                        clicked => { if (!root.own-light) { root.light-own(true); } }
+                    }
+                }
+                if root.own-light: ColorButton {
+                    swatch: root.own-color;
+                    code: root.own-hex;
+                    open: root.picking;
+                    clicked(x, y, h) => { root.light-color(x, y, h); }
+                }
                 Rectangle {
-                    width: def-l.preferred-width + own-l.preferred-width + 22px + 22px + 9px + 7px + 6px;
-                    border-radius: Radius.control;
-                    background: Ink.well;
-                    def-b := Rectangle {
-                        x: 2px;
-                        y: 2px;
-                        width: def-l.preferred-width + 22px + 9px + 7px;
-                        height: 24px;
-                        border-radius: Radius.control - 2px;
-                        background: !root.own-light ? Ink.pick : def-ta.has-hover ? Ink.hover-well : transparent;
-                        Rectangle {
-                            x: 11px;
-                            y: 7.5px;
-                            width: 9px;
-                            height: 9px;
-                            border-radius: self.width / 2;
-                            background: root.default-light;
-                            border-width: 1px;
-                            border-color: Ink.black.with-alpha(0.122);
-                        }
-                        def-l := Text {
-                            x: 11px + 9px + 7px;
-                            height: parent.height;
-                            text: "Default";
-                            font-size: Font.note;
-                            color: !root.own-light ? Ink.bright : Ink.soft;
-                            vertical-alignment: center;
-                        }
-                        def-ta := TouchArea {
-                            enabled: root.own-light;
-                            mouse-cursor: root.own-light ? MouseCursor.pointer : MouseCursor.default;
-                            clicked => { root.light-own(false); }
-                        }
-                    }
+                    width: 1px;
                     Rectangle {
-                        x: def-b.x + def-b.width + 2px;
-                        y: 2px;
-                        width: own-l.preferred-width + 22px;
-                        height: 24px;
-                        border-radius: Radius.control - 2px;
-                        background: root.own-light ? Ink.pick : own-ta.has-hover ? Ink.hover-well : transparent;
-                        own-l := Text {
-                            x: 11px;
-                            height: parent.height;
-                            text: "Own color";
-                            font-size: Font.note;
-                            color: root.own-light ? Ink.bright : Ink.soft;
-                            vertical-alignment: center;
-                        }
-                        own-ta := TouchArea {
-                            enabled: !root.own-light;
-                            mouse-cursor: !root.own-light ? MouseCursor.pointer : MouseCursor.default;
-                            clicked => { root.light-own(true); }
-                        }
+                        y: (parent.height - self.height) / 2;
+                        width: 1px;
+                        height: Line.text;
+                        background: Ink.line;
                     }
                 }
-                if root.own-light: Rectangle { width: 10px; }
-                if root.own-light: Rectangle {
-                    width: hex-t.preferred-width + 4px + 20px + 8px + 9px;
-                    border-radius: Radius.control;
-                    background: col-ta.has-hover || root.picking ? Ink.hover-box : transparent;
-                    Rectangle {
-                        x: 4px;
-                        y: 4px;
-                        width: 20px;
-                        height: 20px;
-                        border-radius: self.width / 2;
-                        background: root.own-color;
-                        border-width: 1px;
-                        border-color: Ink.white.with-alpha(0.165);
-                    }
-                    hex-t := Text {
-                        x: 32px;
-                        height: parent.height;
-                        text: root.own-hex;
-                        font-size: Font.control;
-                        color: Ink.bright;
-                        vertical-alignment: center;
-                    }
-                    col-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => { root.light-color(self.absolute-position.x, self.absolute-position.y, self.height); }
-                    }
+                CheckBox {
+                    width: self.preferred-width;
+                    text: "Grid";
+                    on: root.grid;
+                    clicked => { root.grid-toggle(); }
                 }
-            }
-            // a hairline, then Grid: only the editor's view
-            Rectangle {
-                x: parent.width - 92px;
-                y: 18px;
-                width: 1px;
-                height: 20px;
-                background: Ink.line;
-            }
-            CheckBox {
-                x: parent.width - 16px - self.width;
-                y: 14px;
-                width: self.preferred-width;
-                height: 28px;
-                text: "Grid";
-                on: root.grid;
-                clicked => { root.grid-toggle(); }
             }
         }
         // the bar's gray behind the box's top corners, where the two meet

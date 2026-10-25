@@ -24,7 +24,7 @@ export struct ProfileItem {
     c4: color,
 }
 
-// an item on the rail: a 40px square with its glyph, which the rail's blade
+// an item on the rail: a square (Size.rail) with its glyph, which the rail's blade
 // widens to take its name; closed, the name shows beside it when pointed at
 export component RailItem inherits Rectangle {
     in property <image> glyph;
@@ -34,20 +34,23 @@ export component RailItem inherits Rectangle {
     in property <float> reveal;      // how far the blade's names have come in, 0 to 1
     out property <bool> hover: ta.has-hover;
     callback clicked;
-    height: 40px;
+    height: Size.rail;
     border-radius: Radius.panel;
     background: root.on ? (ta.has-hover ? Ink.pick : Ink.hover-box) : ta.has-hover ? Ink.box : transparent;
+    // (its glyph at the square's middle; its name Space.row after it, sliding in as it shows)
+    property <length> glyph-w: 22px;
+    property <length> glyph-in: (Size.rail - self.glyph-w) / 2;
     Image {
-        x: 9px;
-        y: 9px;
-        width: 22px;
-        height: 22px;
+        x: root.glyph-in;
+        y: root.glyph-in;
+        width: root.glyph-w;
+        height: root.glyph-w;
         source: root.glyph;
         colorize: (root.on || ta.has-hover) ? Ink.bright : Ink.soft;
     }
     if root.reveal > 0: Text {
-        x: 9px + 22px + 12px - 6px * (1 - root.reveal);
-        width: parent.width - self.x - 9px;
+        x: root.glyph-in + root.glyph-w + Space.row - 6px * (1 - root.reveal);
+        width: parent.width - self.x - root.glyph-in;
         height: parent.height;
         text: root.name;
         font-family: Font.ui;
@@ -63,7 +66,7 @@ export component RailItem inherits Rectangle {
         clicked => { root.clicked(); }
     }
     if ta.has-hover && !root.open: Tip {
-        x: 50px;
+        x: Size.rail + Space.row;
         y: (parent.height - self.height) / 2;
         width: self.preferred-width;
         height: self.preferred-height;
@@ -78,7 +81,7 @@ export component AnchorRow inherits Rectangle {
     in property <bool> chosen;
     out property <bool> hover: ta.has-hover;
     callback clicked;
-    height: 48px;
+    height: Size.row;
     border-radius: Radius.control;
     background: root.chosen ? (ta.has-hover ? Ink.pick-hover : Ink.pick) : ta.has-hover ? Ink.hover-well : transparent;
     ta := TouchArea {
@@ -90,7 +93,7 @@ export component AnchorRow inherits Rectangle {
 
 // a small capitals heading over one of the column's lists
 export component AnchorHead inherits Text {
-    height: 30px;
+    height: Size.list-head;
     font-family: Font.ui;
     font-size: Font.small;
     font-weight: Font.strong;
@@ -116,8 +119,9 @@ export component ListRow inherits Rectangle {
     in property <bool> dirty;
     in property <bool> on-well;
     in property <bool> bare;
-    in property <length> inset: 20px;
-    in property <length> end: 12px;
+    // (its words after the bar's room: the bar, Space.inline either side of it)
+    in property <length> inset: Space.inline + Space.tight + Space.inline;
+    in property <length> end: Space.row;
     out property <bool> hover: ta.has-hover;
     callback clicked;
     callback right-clicked(length, length);
@@ -135,10 +139,10 @@ export component ListRow inherits Rectangle {
     }
     // the one in use: a white bar at its left
     if root.active: Rectangle {
-        x: 8px;
+        x: Space.inline;
         y: (parent.height - self.height) / 2;
-        width: 4px;
-        height: 28px;
+        width: Space.tight;
+        height: Size.compact;
         border-radius: self.width / 2;
         background: Ink.bright;
     }
@@ -147,7 +151,7 @@ export component ListRow inherits Rectangle {
         width: parent.width - root.inset - root.end;
         alignment: center;
         HorizontalLayout {
-            spacing: 7px;
+            spacing: Part.glyph-gap;
             alignment: start;
             Text {
                 text: root.name;
@@ -160,15 +164,15 @@ export component ListRow inherits Rectangle {
             if root.dirty: VerticalLayout {
                 alignment: center;
                 Rectangle {
-                    width: 6px;
-                    height: 6px;
+                    width: Size.dot;
+                    height: Size.dot;
                     border-radius: self.width / 2;
                     background: Ink.warn;
                 }
             }
         }
         HorizontalLayout {
-            spacing: 6px;
+            spacing: Part.glyph-gap;
             alignment: start;
             Text {
                 text: root.sub;
@@ -204,14 +208,16 @@ export component ListBox inherits Rectangle {
         y: 0;
         width: parent.width;
         height: self.preferred-height;
-        padding: 8px;
-        padding-top: 10px;
+        // (its rows Space.inline in from its sides; its heading's line at the middle of a
+        // box title's, so the heading sits level with the title of the box beside it)
+        padding: Space.inline;
+        padding-top: Part.title-top + Line.title / 2 - Size.list-head / 2;
         spacing: Space.list;
         alignment: start;
         Rectangle {
-            height: 30px;
+            height: Size.list-head;
             AnchorHead {
-                x: Space.pad - 8px;
+                x: Space.pad - Space.inline;
                 text: root.heading;
             }
         }
@@ -248,7 +254,8 @@ export component AnchorColumn inherits ListBox {
         active: p.active;
         on-well: true;
         bare: p.current && root.renaming;
-        end: (root.kept || root.has-menu) && p.current ? 62px : 34px;
+        // (room at its right for its pencil and, where it has one, its menu)
+        end: Space.inline + Size.quiet + ((root.kept || root.has-menu) && p.current ? Space.list + Size.quiet : 0);
         clicked => { root.renaming = false; root.choose(p.n); }
         // the profile being edited, renamed in place, Space.inline in from the row's ends
         if p.current && root.renaming: RenameField {
@@ -265,14 +272,14 @@ export component AnchorColumn inherits ListBox {
         }
         // the pencil, on the profile being edited
         if p.current && !root.renaming: PencilButton {
-            x: parent.width - (root.kept || root.has-menu ? 60px : 32px);
+            x: parent.width - Space.inline - Size.quiet - (root.kept || root.has-menu ? Space.list + Size.quiet : 0);
             y: (parent.height - self.height) / 2;
             hover-fill: Ink.pick-hover;
             clicked => { root.renaming = true; }
         }
         // and its menu: Duplicate, Use with an app, Delete
         if (root.kept || root.has-menu) && p.current && !root.renaming: MoreButton {
-            x: parent.width - 32px;
+            x: parent.width - Space.inline - Size.quiet;
             y: (parent.height - self.height) / 2;
             hover-fill: Ink.pick-hover;
             clicked(x, y, h) => { root.menu(x, y, h); }
@@ -283,8 +290,8 @@ export component AnchorColumn inherits ListBox {
         chosen: false;
         clicked => { root.renaming = false; root.add(); }
         HorizontalLayout {
-            x: 20px;
-            spacing: 8px;
+            x: Space.inline + Space.tight + Space.inline;
+            spacing: Space.inline;
             alignment: start;
             Path {
                 y: (parent.height - 12px) / 2;

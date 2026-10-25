@@ -574,8 +574,7 @@ impl LayoutPage {
     }
 
     fn place_menu(&mut self, rows: Vec<MenuRow>, w: f32, anchor: (f32, f32, f32)) {
-        let list: f32 = rows.iter().map(|r| match r.kind { 1 => 28.0, 2 => 11.0, _ => 33.0 }).sum();
-        let h = 6.0 + list + 6.0;
+        let h = crate::menu_size::height(&rows, false, false, f32::MAX);
         self.ui.set_menu_natural(h);
         self.ui.set_menu_w(w);
         // (a column for ticks only when something in the menu is ticked)

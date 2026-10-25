@@ -631,8 +631,9 @@ pub fn chain(ed: &Editor, d: &Draft, locked: bool, width: f32) -> (Vec<Cell>, f3
             *y += line + 12.0;
         }
         *x += lead;
-        c.x = 18.0 + *x;
-        c.y = 18.0 + *y + (line - c.h) / 2.0;
+        // (the chain Part.chain-in in from its canvas, which keeps the same room at its foot)
+        c.x = crate::tokens::part::CHAIN_IN + *x;
+        c.y = crate::tokens::part::CHAIN_IN + *y + (line - c.h) / 2.0;
         *x += c.w;
         cells.push(c);
     };

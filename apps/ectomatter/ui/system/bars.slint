@@ -40,15 +40,16 @@ export component TitleBar inherits Rectangle {
         }
         double-clicked => { root.maximize(); }
     }
-    Image {
-        x: 12px;
-        y: (root.height - 16px) / 2;
+    // the mark, Space.row in, and the wordmark Part.glyph-gap after it
+    mark-i := Image {
+        x: Space.row;
+        y: (root.height - self.height) / 2;
         width: 16px;
         height: 16px;
         source: root.mark;
     }
     wordmark := Text {
-        x: 12px + 16px + 7px;
+        x: mark-i.x + mark-i.width + Part.glyph-gap;
         height: root.height;
         text: "Ectomatter";
         font-family: Font.ui;
@@ -58,13 +59,14 @@ export component TitleBar inherits Rectangle {
         color: Ink.bright;
         vertical-alignment: center;
     }
+    // where the window is, Space.pad after the wordmark, each crumb after a slash
     if root.crumbs.length > 0: HorizontalLayout {
-        x: 114px;
+        x: wordmark.x + wordmark.preferred-width + Space.pad;
         width: self.preferred-width;
         height: root.height;
-        spacing: 6px;
+        spacing: Part.glyph-gap;
         for c[i] in root.crumbs: HorizontalLayout {
-            spacing: 6px;
+            spacing: Part.glyph-gap;
             if i > 0: Text {
                 text: "/";
                 font-family: Font.ui;
@@ -81,9 +83,9 @@ export component TitleBar inherits Rectangle {
             }
         }
     }
-    HorizontalLayout {
-        x: parent.width - 120px;
-        width: 120px;
+    win-row := HorizontalLayout {
+        x: parent.width - self.width;
+        width: self.preferred-width;
         WinButton {
             commands: "M3 8h10";
             clicked => { root.minimize(); }
@@ -128,10 +130,10 @@ export component PageBar inherits Rectangle {
     HorizontalLayout {
         padding-left: Space.margin;
         padding-right: Space.margin;
-        spacing: 28px;
+        spacing: Space.margin;
         HorizontalLayout {
             horizontal-stretch: 0;
-            spacing: 10px;
+            spacing: Space.inline;
             if root.dot >= 0: Rectangle {
                 width: Size.dot;
                 Dot {
@@ -140,7 +142,7 @@ export component PageBar inherits Rectangle {
                 }
             }
             if root.back != "": Rectangle {
-                width: up.preferred-width + 4px;
+                width: up.preferred-width + Space.tight;
                 up := Text {
                     text: root.back;
                     font-family: Font.ui;
@@ -155,7 +157,7 @@ export component PageBar inherits Rectangle {
                 }
             }
             if root.back != "": Path {
-                y: (root.height - 12px) / 2;
+                y: (root.height - self.height) / 2;
                 width: 12px;
                 height: 12px;
                 viewbox-width: 12;
@@ -179,7 +181,7 @@ export component PageBar inherits Rectangle {
         }
         if root.tabs.length > 0: HorizontalLayout {
             horizontal-stretch: 0;
-            spacing: 2px;
+            spacing: Space.list;
             for name[i] in root.tabs: Rectangle {
                 width: t.width;
                 t := Tab {
@@ -230,26 +232,26 @@ export component PageBar inherits Rectangle {
 // The line under a page's bar, the same on every page: what to do here, a chip
 // before it where the words name one, and whatever the page keeps beside it
 // (its children: a checkbox, a status, a button), in the band the page's head
-// is (Size.head: 12 down, 36 tall).
+// is (Size.head: Space.row down, Size.hint tall).
 export component HintRow inherits Rectangle {
     in property <string> text;
     in property <image> chip;
     in property <bool> chip-on;
     // shortened to the room it has, where something sits beside it
     in property <bool> shorten;
-    y: 12px;
-    height: 36px;
+    y: Space.row;
+    height: Size.hint;
     HorizontalLayout {
-        spacing: 16px;
+        spacing: Space.pad;
         HorizontalLayout {
             horizontal-stretch: root.shorten ? 1 : 0;
-            spacing: 10px;
+            spacing: Space.inline;
             if root.chip-on: Rectangle {
-                width: 14px;
+                width: Part.glyph;
                 Image {
-                    y: (parent.height - 14px) / 2;
-                    width: 14px;
-                    height: 14px;
+                    y: (parent.height - self.height) / 2;
+                    width: Part.glyph;
+                    height: Part.glyph;
                     source: root.chip;
                     image-fit: fill;
                 }
@@ -310,7 +312,7 @@ export component EditorHeader inherits Rectangle {
         if root.renaming: VerticalLayout {
             alignment: center;
             RenameField {
-                width: 320px;
+                width: Size.rename;
                 big: true;
                 tick: false;
                 keep-on-leave: true;
@@ -335,11 +337,11 @@ export component EditorHeader inherits Rectangle {
             horizontal-stretch: 1;
         }
         if root.state-kind == 2: Rectangle {
-            width: 8px;
+            width: Size.dot;
             Rectangle {
                 y: (parent.height - self.height) / 2;
-                width: 8px;
-                height: 8px;
+                width: Size.dot;
+                height: Size.dot;
                 border-radius: self.width / 2;
                 background: Ink.record;
                 opacity: root.blink ? 1 : 0.15;
