@@ -3,7 +3,7 @@
 
 import { Space, Radius, Font, Line, Size, Part, Shadow, Ink } from "tokens.slint";
 import { Typing } from "state.slint";
-import { PencilButton, MoreButton } from "controls.slint";
+import { PencilButton, MoreButton, RenameField } from "controls.slint";
 import { Tip } from "surfaces.slint";
 
 // a profile's button in the panel's head
@@ -250,65 +250,17 @@ export component AnchorColumn inherits ListBox {
         bare: p.current && root.renaming;
         end: (root.kept || root.has-menu) && p.current ? 62px : 34px;
         clicked => { root.renaming = false; root.choose(p.n); }
-        // the profile being edited, renamed in place
-        if p.current && root.renaming: Rectangle {
-            x: 16px;
-            y: 8px;
-            width: parent.width - 24px;
-            height: 32px;
-            border-radius: Radius.control;
-            background: Ink.box;
-            border-width: 1px;
-            border-color: Ink.warn;
-            // (a click on the box, off the words and the tick, stays in it
-            // rather than reaching the row under it, which would drop the name)
-            TouchArea {
-                mouse-cursor: text;
-                clicked => { name-in.focus(); }
-            }
-            name-in := TextInput {
-                changed has-focus => { Typing.on = self.has-focus; }
-                x: 9px;
-                width: parent.width - 9px - 32px;
-                height: parent.height;
-                text: p.name;
-                font-family: Font.ui;
-                font-size: Font.control;
-                color: Ink.bright;
-                selection-background-color: Ink.warn.with-alpha(0.333);
-                vertical-alignment: center;
-                single-line: true;
-                init => { self.focus(); self.select-all(); }
-                accepted => { root.rename(self.text); root.renaming = false; }
-                key-pressed(e) => {
-                    if (e.text == Key.Escape) { root.renaming = false; return accept; }
-                    return reject;
+        // the profile being edited, renamed in place, Space.inline in from the row's ends
+        if p.current && root.renaming: RenameField {
+            x: Space.inline;
+            y: (parent.height - self.height) / 2;
+            width: parent.width - 2 * Space.inline;
+            text: p.name;
+            done(kept, t) => {
+                if (kept) {
+                    root.rename(t);
                 }
-            }
-            // a tick at the box's end, which keeps the name as Enter does
-            Rectangle {
-                x: parent.width - 4px - 24px;
-                y: (parent.height - 24px) / 2;
-                width: 24px;
-                height: 24px;
-                border-radius: Radius.small;
-                background: ok-ta.pressed ? Ink.pick : ok-ta.has-hover ? Ink.hover-box : transparent;
-                Path {
-                    x: 3px;
-                    y: 3px;
-                    width: 18px;
-                    height: 18px;
-                    viewbox-width: 18;
-                    viewbox-height: 18;
-                    commands: "M5.2 9.3 L7.9 11.9 L12.9 6.4";
-                    fill: transparent;
-                    stroke: ok-ta.has-hover ? Ink.bright : Ink.soft;
-                    stroke-width: 1.8px;
-                }
-                ok-ta := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => { root.rename(name-in.text); root.renaming = false; }
-                }
+                root.renaming = false;
             }
         }
         // the pencil, on the profile being edited

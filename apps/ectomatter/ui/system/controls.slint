@@ -74,12 +74,20 @@ export component WordButton inherits Rectangle {
     in property <string> lines;
     // the small one inside a card (Make main): its words a caption's, in gray
     in property <bool> small;
+    // on a bar floating over the page (Home's while it's arranged): a compact control's height
+    in property <bool> compact;
+    // one that opens a menu: a chevron after its words (a pad's size)
+    in property <bool> menu;
+    // a color's square before its words (a pad's Color)
+    in property <bool> swatched;
+    in property <color> swatch;
     out property <bool> hover: ta.has-hover && root.enabled;
     out property <bool> down: ta.pressed && root.enabled;
     callback clicked;
-    height: root.primary ? Size.button + 2px : Size.button;
-    property <length> icon-w: root.icon != "" || root.lines != "" ? Part.glyph + Part.glyph-gap : 0;
-    width: root.wide > 0 ? root.wide : label.preferred-width + 2 * Part.button-pad + root.icon-w + (root.primary ? 2px : 0);
+    height: root.compact ? Size.compact : root.primary ? Size.button + 2px : Size.button;
+    property <length> icon-w: root.icon != "" || root.lines != "" || root.swatched ? Part.glyph + Part.glyph-gap : 0;
+    property <length> menu-w: root.menu ? Part.glyph-gap + 12px : 0;
+    width: root.wide > 0 ? root.wide : label.preferred-width + 2 * Part.button-pad + root.icon-w + root.menu-w + (root.primary ? 2px : 0);
     border-radius: root.small ? Radius.small : Radius.control;
     // turned off, the whole button fades to 35% over the page's ground, as the
     // web app's does; faded piece by piece, its words would come out lighter
@@ -88,7 +96,7 @@ export component WordButton inherits Rectangle {
     property <color> ink: root.danger ? Ink.white : root.primary ? Ink.base : root.small && !root.hover ? Ink.dim : Ink.bright;
     background: root.enabled ? root.face : root.face.mix(Ink.base, 0.35);
     if root.icon != "": Path {
-        x: (parent.width - label.width - root.icon-w) / 2;
+        x: (parent.width - label.width - root.icon-w - root.menu-w) / 2;
         y: (parent.height - 14px) / 2 + (ta.pressed && root.enabled ? 1px : 0);
         width: 14px;
         height: 14px;
@@ -97,8 +105,30 @@ export component WordButton inherits Rectangle {
         commands: root.icon;
         fill: root.enabled ? root.ink : root.ink.mix(Ink.base, 0.35);
     }
+    if root.swatched: Rectangle {
+        x: (parent.width - label.width - root.icon-w - root.menu-w) / 2;
+        y: (parent.height - Part.glyph) / 2 + (ta.pressed && root.enabled ? 1px : 0);
+        width: Part.glyph;
+        height: Part.glyph;
+        border-radius: Radius.tiny;
+        background: root.swatch;
+        border-width: 1px;
+        border-color: Ink.white.with-alpha(0.18);
+    }
+    if root.menu: Path {
+        x: (parent.width + label.width + root.icon-w - root.menu-w) / 2 + Part.glyph-gap;
+        y: (parent.height - self.height) / 2 + (ta.pressed && root.enabled ? 1px : 0);
+        width: 12px;
+        height: 12px;
+        viewbox-width: 12;
+        viewbox-height: 12;
+        commands: "M3 4.5l3 3 3-3";
+        fill: transparent;
+        stroke: Ink.quiet;
+        stroke-width: 1.6px;
+    }
     if root.lines != "": Path {
-        x: (parent.width - label.width - root.icon-w) / 2;
+        x: (parent.width - label.width - root.icon-w - root.menu-w) / 2;
         y: (parent.height - Part.glyph) / 2 + (ta.pressed && root.enabled ? 1px : 0);
         width: Part.glyph;
         height: Part.glyph;
@@ -111,7 +141,7 @@ export component WordButton inherits Rectangle {
         stroke-line-cap: round;
     }
     label := Text {
-        x: (parent.width - self.width + root.icon-w) / 2;
+        x: (parent.width - self.width + root.icon-w - root.menu-w) / 2;
         y: (parent.height - self.height) / 2 + (ta.pressed && root.enabled ? 1px : 0);
         text: root.text;
         font-family: Font.ui;
@@ -436,6 +466,9 @@ export component FieldBox inherits Rectangle {
     in property <bool> mono;
     in property <string> glyph;
     in property <bool> read-only;
+    // Escape stays here (`escape`), or goes on to the page (a find box's, which
+    // the page's own Escape answers)
+    in property <bool> keeps-escape: true;
     out property <bool> typing: field-in.has-focus;
     callback edited();
     callback accepted();
@@ -487,13 +520,156 @@ export component FieldBox inherits Rectangle {
         edited => { root.edited(); }
         accepted => { root.accepted(); }
         key-pressed(e) => {
-            if (e.text == Key.Escape) {
+            if (e.text == Key.Escape && root.keeps-escape) {
                 root.escape();
                 return accept;
             }
             reject
         }
     }
+}
+
+// The button that records (a macro's steps, the next key pressed), the same wherever
+// one is: its red dot and its words on a button's gray; while it records (`on`), a red
+// tint, the dot a square, and what it says then (`on-text`: Stop, Press a key…).
+export component RecordButton inherits Rectangle {
+    in property <bool> on;
+    in property <string> text: "Record";
+    in property <string> on-text: "Stop";
+    in property <bool> enabled: true;
+    callback clicked(length, length, length);
+    height: Size.button;
+    width: row.preferred-width;
+    border-radius: Radius.control;
+    background: root.on ? Ink.record.with-alpha(0.2) : ta.has-hover && root.enabled ? Ink.pick-hover : Ink.pick;
+    opacity: root.on || root.enabled ? 1 : 0.35;
+    row := HorizontalLayout {
+        padding-left: Part.button-pad - 2px;
+        padding-right: Part.button-pad;
+        spacing: Part.glyph-gap;
+        Rectangle {
+            width: root.on ? 8px : 9px;
+            Rectangle {
+                y: (parent.height - self.height) / 2;
+                width: root.on ? 8px : 9px;
+                height: self.width;
+                border-radius: root.on ? 2px : self.width / 2;
+                background: root.on ? Ink.bad : Ink.record;
+            }
+        }
+        Text {
+            text: root.on ? root.on-text : root.text;
+            font-family: Font.ui;
+            font-size: Font.control;
+            font-weight: Font.medium;
+            color: root.on ? Ink.record.mix(Ink.white, 0.35) : Ink.bright;
+            vertical-alignment: center;
+        }
+    }
+    ta := TouchArea {
+        enabled: root.on || root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(self.absolute-position.x, self.absolute-position.y, self.height); }
+    }
+}
+
+// A tag beside what it's about, the same wherever one is: its words small on a well,
+// or a warning's (`warn`: Rebound, Unofficial) in amber on its own tint.
+export component Tag inherits Rectangle {
+    in property <string> text;
+    in property <bool> warn;
+    height: Size.pill;
+    width: words.preferred-width + 2 * Part.pill-pad;
+    border-radius: Radius.small;
+    background: root.warn ? Ink.warn.with-alpha(0.133) : Ink.well;
+    words := Text {
+        x: Part.pill-pad;
+        height: parent.height;
+        text: root.text;
+        font-family: Font.ui;
+        font-size: Font.small;
+        color: root.warn ? Ink.warn : Ink.quiet;
+        vertical-alignment: center;
+    }
+}
+
+// One of a list's choices, only one chosen (what a slider controls): its ring, filled
+// in for the chosen one, and its words, on a row a control's height, lit while chosen.
+export component RadioRow inherits Rectangle {
+    in property <string> text;
+    in property <bool> on;
+    callback clicked;
+    height: Size.control;
+    border-radius: Radius.control;
+    background: root.on ? (ta.has-hover ? Ink.pick-hover : Ink.pick) : ta.has-hover ? Ink.hover-box : transparent;
+    Rectangle {
+        x: Part.field-pad - 2px;
+        y: (parent.height - self.height) / 2;
+        width: Part.glyph;
+        height: Part.glyph;
+        border-radius: self.width / 2;
+        border-width: root.on ? 4px : 1.5px;
+        border-color: root.on ? Ink.bright : Ink.edge-hover;
+    }
+    Text {
+        x: Part.field-pad - 2px + Part.glyph + Part.field-pad - 2px;
+        height: parent.height;
+        text: root.text;
+        font-family: Font.ui;
+        font-size: Font.control;
+        color: root.on ? Ink.bright : Ink.dim;
+        vertical-alignment: center;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// A heading that opens and shuts what's under it, the same wherever one is (a group
+// in the Key library, a fold in a plugin's section): its chevron, turned down while
+// it's open, and its words, a shade under the pointer; what it counts at its right
+// (its children). `small`: a list's group, its words a caption's.
+export component Fold inherits Rectangle {
+    in property <string> text;
+    in property <bool> open;
+    in property <bool> small;
+    out property <bool> hover: ta.has-hover;
+    callback clicked;
+    height: Size.list-head;
+    border-radius: Radius.small;
+    background: ta.has-hover ? Ink.hover-box : transparent;
+    Path {
+        x: Part.tile-inset;
+        y: (parent.height - self.height) / 2;
+        width: 12px;
+        height: 12px;
+        viewbox-width: 12;
+        viewbox-height: 12;
+        commands: root.open ? "M3 4.5l3 3 3-3" : "M4.5 3l3 3-3 3";
+        fill: transparent;
+        stroke: ta.has-hover ? Ink.bright : Ink.quiet;
+        stroke-width: 1.6px;
+        stroke-line-cap: round;
+        stroke-line-join: round;
+    }
+    Text {
+        x: Part.tile-inset + 12px + Part.tile-inset;
+        width: parent.width - self.x;
+        height: parent.height;
+        text: root.text;
+        font-family: Font.ui;
+        font-size: root.small ? Font.caption : Font.text;
+        font-weight: root.small ? Font.medium : Font.regular;
+        color: ta.has-hover ? Ink.bright : Ink.soft;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    @children
 }
 
 // a checkbox and its words, the same wherever one is: ticked in the words' own
@@ -552,18 +728,21 @@ export global Star {
     out property <string> path: "M8 1.9l1.8 3.8 4.1.5-3 2.9.8 4.1L8 11.2l-3.7 2 .8-4.1-3-2.9 4.1-.5Z";
 }
 
-// a square button with the star, for a game's page: filled once it's a favorite
+// a square button with the star, a button's height, for a game's page: filled once
+// it's a favorite; `on-picture`, over a cover's corner, its well a little clear
 export component StarButton inherits Rectangle {
     in property <bool> on;
+    in property <bool> on-picture;
+    out property <bool> hover: ta.has-hover;
     callback clicked;
-    width: 30px;
-    height: 30px;
+    width: Size.button;
+    height: Size.button;
     border-radius: Radius.control;
-    background: ta.has-hover ? Ink.shade2 : Ink.shade1;
+    background: root.on-picture ? (ta.has-hover ? Ink.hover-box.with-alpha(0.949) : Ink.well.with-alpha(0.851)) : ta.has-hover ? Ink.shade2 : Ink.shade1;
     Path {
-        y: (parent.height - 14px) / 2 + (ta.pressed ? 1px : 0);
-        width: 14px;
-        height: 14px;
+        y: (parent.height - Part.glyph) / 2 + (ta.pressed ? 1px : 0);
+        width: Part.glyph;
+        height: Part.glyph;
         viewbox-width: 16;
         viewbox-height: 16;
         commands: Star.path;
@@ -756,6 +935,8 @@ export component DropField inherits Rectangle {
         text: root.text;
         font-family: Font.ui;
         font-size: Font.control;
+        // (a chooser at a panel's head names what the panel shows, a step heavier)
+        font-weight: root.subtle ? Font.medium : Font.regular;
         color: root.followed ? Ink.soft : Ink.bright;
         vertical-alignment: center;
         overflow: elide;
@@ -1009,10 +1190,15 @@ export component BarButton inherits Rectangle {
 }
 
 // The app's own glyphs, each drawn once here: the pencil that renames a thing, on
-// 24 units; the three dots of a thing's less common actions, on 14 units.
+// 24 units; the three dots of a thing's less common actions, on 14 units; a find
+// box's lens; a row's way on to a page of its own.
 export global Glyph {
     out property <string> pencil: "M4 20h4L19 9l-4-4L4 16z";
     out property <string> more: "M1.7 7a1.3 1.3 0 1 0 2.6 0a1.3 1.3 0 1 0 -2.6 0zM5.7 7a1.3 1.3 0 1 0 2.6 0a1.3 1.3 0 1 0 -2.6 0zM9.7 7a1.3 1.3 0 1 0 2.6 0a1.3 1.3 0 1 0 -2.6 0z";
+    // a find box's lens, on 16 units
+    out property <string> find: "M11.6 7a4.6 4.6 0 1 1-9.2 0 4.6 4.6 0 0 1 9.2 0ZM10.4 10.4 14 14";
+    // a row that opens a page of its own: a chevron pointing on, on 12 units
+    out property <string> onward: "M4.5 2.5l3.5 3.5-3.5 3.5";
 }
 
 // A small square button with a glyph and no words, a shade under the pointer;
@@ -1061,4 +1247,69 @@ export component MoreButton inherits IconButton {
 export component PencilButton inherits IconButton {
     icon: Glyph.pencil;
     units: 24;
+}
+
+// A name changed in place, the same wherever one is (a profile's in its list, a
+// playlist's at its panel's head, an open macro's or layout's in its editor's bar): a
+// field on a box's shade, outlined, all of it chosen as it shows. Enter, the tick at
+// its end (`tick`) or, with `keep-on-leave`, leaving it keeps the name (`done(true,
+// …)`); Escape lets it go (`done(false, …)`). `big`: in a bar's type, as the name it
+// changes is set.
+export component RenameField inherits Rectangle {
+    in-out property <string> text;
+    in property <bool> big;
+    in property <bool> tick: true;
+    in property <bool> keep-on-leave;
+    callback done(bool, string);
+    height: Size.control;
+    border-radius: Radius.control;
+    background: Ink.box;
+    border-width: 1px;
+    border-color: Ink.edge-hover;
+    property <length> tick-w: root.tick ? self.height - 2 * Part.inset : 0;
+    // (a press on the field, off its words and the tick, stays in it)
+    TouchArea {
+        mouse-cursor: MouseCursor.text;
+        clicked => { field-in.focus(); }
+    }
+    field-in := TextInput {
+        x: Part.field-pad;
+        width: parent.width - 2 * Part.field-pad - root.tick-w;
+        height: parent.height;
+        text <=> root.text;
+        font-family: Font.ui;
+        font-size: root.big ? Font.title : Font.control;
+        font-weight: root.big ? Font.strong : Font.medium;
+        color: Ink.bright;
+        vertical-alignment: center;
+        single-line: true;
+        init => {
+            self.focus();
+            self.select-all();
+        }
+        changed has-focus => {
+            Typing.on = self.has-focus;
+            if (!self.has-focus && root.keep-on-leave) {
+                root.done(true, self.text);
+            }
+        }
+        accepted => { root.done(true, self.text); }
+        key-pressed(e) => {
+            if (e.text == Key.Escape) {
+                root.done(false, self.text);
+                return accept;
+            }
+            reject
+        }
+    }
+    // a tick at its end, which keeps the name as Enter does
+    if root.tick: IconButton {
+        x: parent.width - Part.inset - self.width;
+        y: Part.inset;
+        width: root.tick-w;
+        height: root.tick-w;
+        icon: "M5 12.5l4.5 4.5L19 7.5";
+        units: 24;
+        clicked => { root.done(true, field-in.text); }
+    }
 }

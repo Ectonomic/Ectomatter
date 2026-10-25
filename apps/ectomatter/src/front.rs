@@ -8170,7 +8170,7 @@ impl Front {
             None => "The screen and its backlight stay off while Ectomatter isn’t running.".to_string(),
             Some(p) => crate::lcd_page::Gaps::of(p).line().unwrap_or_else(|| "While this tab is open, the keyboard shows this layout instead of the playlist.".to_string()),
         };
-        self.ui.set_ob_chooser_w((crate::text::width(crate::tokens::font::MEDIUM, crate::tokens::font::CONTROL, &name) as f64 + 33.0).min(240.0).ceil() as f32);
+        self.ui.set_ob_chooser_w(crate::form::chooser_width(&name).min(OB_CHOOSER_MOST).ceil());
         self.ui.set_ob_name(name.into());
         self.ui.set_ob_say(say.into());
         self.ui.set_ob_over(self.ob_over.is_some());
@@ -10119,14 +10119,18 @@ impl Front {
         // the turn on the screen is marked while Ectomatter plays the screen, playing or paused
         let marked = self.controlled && self.editor.is_none() && matches!(self.lcd.state, State::Playing | State::Paused);
         // the panel's head: the playlist's name in its chooser (as wide as the name needs,
-        // to 200) or the field it is renamed in; the strip after it, to 82 short of the
-        // panel's end, where the round starts again and then Pause
+        // to its most) or the field it is renamed in; the strip Space.row after it, to
+        // where the round starts again (Space.row on) and then Pause (Space.inline on, at
+        // the panel's padding)
+        use crate::tokens::{size, space};
         let under_w = self.ui.get_under_w() as f64;
         let name = self.screens.playlist(who).name.clone();
-        let chooser = (crate::text::width(crate::tokens::font::MEDIUM, crate::tokens::font::CONTROL, &name) as f64 + 33.0).min(200.0).ceil();
-        let track_x = 16.0 + if self.pl_renaming { 195.0 } else { chooser } + 14.0;
-        let track_w = (under_w - 82.0 - track_x).max(120.0);
+        let chooser = (crate::form::chooser_width(&name) as f64).min(CHOOSER_MOST as f64).ceil();
+        let track_x = (space::PAD + space::ROW) as f64 + if self.pl_renaming { CHOOSER_MOST as f64 } else { chooser };
+        let right = (space::PAD + size::COMPACT + space::INLINE + size::ROUND + space::ROW) as f64;
+        let track_w = (under_w - right - track_x).max(TRACK_LEAST);
         self.ui.set_pl_name(name.as_str().into());
+        self.ui.set_pl_chooser_most(CHOOSER_MOST);
         self.ui.set_pl_chooser_w(chooser as f32);
         self.ui.set_pl_track_x(track_x as f32);
         self.ui.set_pl_track_w(track_w as f32);
@@ -10695,6 +10699,12 @@ mod tests {
 
 /// How wide an effect's tile shows its picture, as the page's grid of effects
 /// says (in whole pixels; the grid's least until it has drawn it).
+/// the playlist's chooser at its widest, and the field its playlist is renamed in; the
+/// onboard layout's at its widest; and the strip after the chooser at its least
+const CHOOSER_MOST: f32 = 200.0;
+const OB_CHOOSER_MOST: f32 = 240.0;
+const TRACK_LEAST: f64 = 120.0;
+
 fn pic_wide(shown: f32) -> f32 {
     if shown > 0.0 { shown.round() } else { 72.0 }
 }

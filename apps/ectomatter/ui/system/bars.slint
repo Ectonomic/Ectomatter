@@ -3,7 +3,7 @@
 // opens the same way.
 
 import { Space, Radius, Font, Line, Size, Part, Shadow, Ink } from "tokens.slint";
-import { WinButton, Tab, LinkButton, PencilButton, MoreButton } from "controls.slint";
+import { WinButton, Tab, LinkButton, PencilButton, MoreButton, RenameField } from "controls.slint";
 import { Typing } from "state.slint";
 
 // a dot that says how something is: 0 not known or not there, 1 good, 2 a
@@ -305,42 +305,21 @@ export component EditorHeader inherits Rectangle {
                 clicked => { root.rename(); }
             }
         }
-        if root.renaming: Rectangle {
-            width: 320px;
-            // (a field's height, in the bar's middle)
-            Rectangle {
-                y: (parent.height - self.height) / 2;
-                height: Size.control;
-                border-radius: Radius.control;
-                background: Ink.box;
-                TextInput {
-                    x: 8px;
-                    width: parent.width - 16px;
-                    height: parent.height;
-                    text <=> root.typed;
-                    font-family: Font.ui;
-                    font-size: Font.title;
-                    font-weight: Font.strong;
-                    color: Ink.bright;
-                    vertical-alignment: center;
-                    single-line: true;
-                    init => {
-                        self.focus();
-                        self.select-all();
-                    }
-                    accepted => { root.rename-done(self.text); }
-                    key-pressed(e) => {
-                        if (e.text == Key.Escape) {
-                            root.rename-cancel();
-                            return accept;
-                        }
-                        reject
-                    }
-                    changed has-focus => {
-                        Typing.on = self.has-focus;
-                        if (!self.has-focus) {
-                            root.rename-done(self.text);
-                        }
+        // (renamed in place: a field in the bar's type, at the bar's middle; leaving it keeps
+        // the name as Enter does)
+        if root.renaming: VerticalLayout {
+            alignment: center;
+            RenameField {
+                width: 320px;
+                big: true;
+                tick: false;
+                keep-on-leave: true;
+                text <=> root.typed;
+                done(kept, t) => {
+                    if (kept) {
+                        root.rename-done(t);
+                    } else {
+                        root.rename-cancel();
                     }
                 }
             }

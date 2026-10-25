@@ -99,7 +99,7 @@ export component ScrollBox inherits Rectangle {
         @children
     }
     ScrollBar {
-        x: parent.width - 12px;
+        x: parent.width - Part.scroll-in;
         y: 8px;
         height: parent.height - 16px;
         view: sb-flick.height;
@@ -108,6 +108,30 @@ export component ScrollBox inherits Rectangle {
         framed: false;
         thumb-color: Ink.edge;
         scroll-to(o) => { sb-flick.content-y = -o; }
+    }
+}
+
+// A bar floating over what's under it, the same wherever one is (Home's while it's
+// arranged, its zoom; the Screen tab's tools over the strip): a panel lifted off the
+// page with a faint outline, its controls compact and Space.tight in from its edges and
+// apart (its children, in a row); a press on it is its own.
+export component FloatBar inherits Rectangle {
+    in property <brush> fill: Ink.box;
+    height: Size.compact + 2 * Space.tight;
+    width: row.preferred-width;
+    border-radius: Radius.panel;
+    background: root.fill;
+    border-width: 1px;
+    border-color: Ink.line;
+    drop-shadow-blur: Shadow.float.blur;
+    drop-shadow-offset-y: Shadow.float.y;
+    drop-shadow-color: Shadow.float.color;
+    TouchArea {}
+    row := HorizontalLayout {
+        padding: Space.tight;
+        spacing: Space.tight;
+        alignment: start;
+        @children
     }
 }
 
@@ -156,6 +180,48 @@ export component DialogBox inherits Rectangle {
     @children
 }
 
+// A dialog's head, the same on every dialog: its title (a page title's type, on a box
+// title's line) and, Space.tight under it, the line that says what it's for.
+export component DialogHead inherits VerticalLayout {
+    in property <string> title;
+    in property <string> text;
+    spacing: Space.tight;
+    Text {
+        height: Line.title;
+        text: root.title;
+        font-family: Font.ui;
+        font-size: Font.title;
+        font-weight: Font.strong;
+        color: Ink.bright;
+        vertical-alignment: center;
+        wrap: word-wrap;
+    }
+    if root.text != "": Text {
+        text: root.text;
+        font-family: Font.ui;
+        font-size: Font.control;
+        color: Ink.soft;
+        wrap: word-wrap;
+    }
+}
+
+// A form's label, over what it labels in a dialog's stacked form or beside it in a
+// form's row (a label's type, in the dim gray).
+export component FormLabel inherits Text {
+    font-family: Font.ui;
+    font-size: Font.text;
+    color: Ink.dim;
+    overflow: elide;
+}
+
+// A note under what it's about in a form: a note's type, in the quiet gray, wrapped.
+export component FormNote inherits Text {
+    font-family: Font.ui;
+    font-size: Font.note;
+    color: Ink.quiet;
+    wrap: word-wrap;
+}
+
 // Are you sure: a question in a dialog, what it changes, and its two answers,
 // keeping things as they are and doing it (in red, as it deletes)
 export component Confirm inherits Scrim {
@@ -173,31 +239,22 @@ export component Confirm inherits Scrim {
             y: Space.margin;
             width: parent.width - 2 * Space.margin;
             height: self.preferred-height;
-            spacing: 10px;
-            Text {
-                text: root.title;
-                font-family: Font.ui;
-                font-size: Font.title;
-                font-weight: Font.strong;
-                color: Ink.bright;
-                wrap: word-wrap;
-            }
-            Text {
-                text: root.body;
-                font-family: Font.ui;
-                font-size: Font.text;
-                color: Ink.dim;
-                wrap: word-wrap;
-            }
-            if root.body2 != "": Text {
-                text: root.body2;
-                font-family: Font.ui;
-                font-size: Font.text;
-                color: Ink.dim;
-                wrap: word-wrap;
+            spacing: Space.margin;
+            VerticalLayout {
+                spacing: Space.inline;
+                DialogHead {
+                    title: root.title;
+                    text: root.body;
+                }
+                if root.body2 != "": Text {
+                    text: root.body2;
+                    font-family: Font.ui;
+                    font-size: Font.control;
+                    color: Ink.soft;
+                    wrap: word-wrap;
+                }
             }
             HorizontalLayout {
-                padding-top: 8px;
                 spacing: Space.inline;
                 alignment: end;
                 WordButton {

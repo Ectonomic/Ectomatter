@@ -4,7 +4,7 @@
 
 import { Space, Radius, Font, Line, Size, Part, Shadow, Ink } from "tokens.slint";
 import { Typing } from "state.slint";
-import { CheckBox, LinkButton, TextButton, WordButton, DropField, SegGround, SegChoice, Slider, ColorButton, FolderTab, PencilButton } from "controls.slint";
+import { CheckBox, LinkButton, TextButton, WordButton, DropField, SegGround, SegChoice, Slider, ColorButton, FolderTab, PencilButton, Fold } from "controls.slint";
 import { ScrollBox, PageBox, Tip, TipBox } from "surfaces.slint";
 
 // a piece of the Lighting page's tile, placed by the window: text, a color
@@ -707,14 +707,12 @@ export component CellView inherits Rectangle {
         }
     }
     // ---- the Lighting page's own pieces, in the shades of its boxes
-    // a value in a small well; style 1, a warning's tag, outlined in amber
+    // a value in a small well; style 1, a warning's tag, as the Tag draws one
     // (style 2: on a well, a step lighter than it; 3: a card's Main card, on the box)
     // (style 4: a tag on a well, in the box's shade, its words quiet: a script's Every game)
     if root.c.kind == 40: Rectangle {
-        border-radius: root.c.style == 1 ? Radius.tiny : Radius.small;
-        background: root.c.style == 1 ? transparent : root.c.style == 2 ? Ink.hover-box : root.c.style == 3 ? Ink.pick : root.c.style == 4 ? Ink.box : Ink.well;
-        border-width: root.c.style == 1 ? 1px : 0;
-        border-color: Ink.warn.with-alpha(0.451);
+        border-radius: Radius.small;
+        background: root.c.style == 1 ? Ink.warn.with-alpha(0.133) : root.c.style == 2 ? Ink.hover-box : root.c.style == 3 ? Ink.pick : root.c.style == 4 ? Ink.box : Ink.well;
         Text {
             text: root.c.text;
             font-family: Font.ui;
@@ -907,36 +905,13 @@ export component CellView inherits Rectangle {
             overflow: elide;
         }
     }
-    // a fold's heading in a plugin's section: its chevron (turned down while open) and its
-    // words, which open and shut it
-    if root.c.kind == 53: Rectangle {
-        Path {
-            x: 0;
-            y: (parent.height - 12px) / 2;
-            width: 12px;
-            height: 12px;
-            viewbox-width: 12;
-            viewbox-height: 12;
-            commands: root.c.on ? "M2.5 4.5l3.5 3.5 3.5-3.5" : "M4.5 2.5l3.5 3.5-3.5 3.5";
-            fill: transparent;
-            stroke: fold-ta.has-hover ? Ink.ink : Ink.soft;
-            stroke-width: 1.6px;
-            stroke-line-cap: round;
-            stroke-line-join: round;
-        }
-        Text {
-            x: 20px;
-            width: parent.width - 20px;
-            text: root.c.text;
-            font-family: Font.ui;
-            font-size: Font.text;
-            color: fold-ta.has-hover ? Ink.ink : Ink.soft;
-            vertical-alignment: center;
-        }
-        fold-ta := TouchArea {
-            mouse-cursor: pointer;
-            clicked => { root.pick(root.c.id, root.c.index, 0, 0, 0); }
-        }
+    // a fold's heading in a plugin's section, which opens and shuts it: the Fold
+    if root.c.kind == 53: Fold {
+        width: parent.width;
+        height: parent.height;
+        text: root.c.text;
+        open: root.c.on;
+        clicked => { root.pick(root.c.id, root.c.index, 0, 0, 0); }
     }
     // a checkbox on a box, and its words (style 1: one that can't be changed now, faint and
     // unticked; 2: one held on by another setting, ticked in gray)

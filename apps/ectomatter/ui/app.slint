@@ -28,7 +28,7 @@ import "../../../crates/ectomatter-draw/typefaces/JetBrainsMono.ttf";
 import { Space, Radius, Font, Line, Size, Part, Shadow, Ink } from "tokens.slint";
 export { Ink }
 // The design system's parts (ui/system/), which every page is built from.
-import { FolderTab, Slider, ColorButton, SegGround, SegChoice, TipBox, Tip, EmptyState, ListRow, EditorHeader, EffectTile, Glyph, IconButton, MoreButton, PencilButton, BoxRow, Scrim, DialogBox, Confirm, Dot, TitleBar, PageBar, HintRow, Typing, WinButton, Tab, WordButton, TextButton, Spinner, ScrollBar, PickField, Well, LinkButton, SmallCap, FieldBox, CheckBox, Star, StarButton, StripIcon, PlayButton, SegSwitch, DropField, BarButton, Stage, PageBox, ScrollBox, MenuRow, Menu, Picker, Cell, CellView, LaidBox, CellBox, ProfileItem, RailItem, AnchorRow, AnchorHead, ListBox, AnchorColumn } from "system/system.slint";
+import { DialogHead, FormLabel, FormNote, RenameField, FloatBar, Fold, RecordButton, Tag, RadioRow, FolderTab, Slider, ColorButton, SegGround, SegChoice, TipBox, Tip, EmptyState, ListRow, EditorHeader, EffectTile, Glyph, IconButton, MoreButton, PencilButton, BoxRow, Scrim, DialogBox, Confirm, Dot, TitleBar, PageBar, HintRow, Typing, WinButton, Tab, WordButton, TextButton, Spinner, ScrollBar, PickField, Well, LinkButton, SmallCap, FieldBox, CheckBox, Star, StarButton, StripIcon, PlayButton, SegSwitch, DropField, BarButton, Stage, PageBox, ScrollBox, MenuRow, Menu, Picker, Cell, CellView, LaidBox, CellBox, ProfileItem, RailItem, AnchorRow, AnchorHead, ListBox, AnchorColumn } from "system/system.slint";
 export { Typing, MenuRow, Cell, LaidBox, ProfileItem }
 
 // a key over the keyboard: where it is in the drawing's units, from the
@@ -491,77 +491,38 @@ component KeyLibrary inherits PageBox {
         layers: root.layers;
         chosen(i) => { root.layer-chosen(i); }
     }
-    // find a key, or what it does, under the tabs
-    Rectangle {
-        x: 16px;
-        y: root.top + 16px;
-        width: parent.width - 32px;
-        height: 34px;
-        border-radius: Radius.control;
-        background: find-in.has-focus ? Ink.hover-well : Ink.well;
-        if find-in.text == "": Text {
-            x: 12px;
-            height: parent.height;
-            text: root.placeholder;
-            font-family: Font.ui;
-            font-size: Font.control;
-            color: Ink.quiet;
-            vertical-alignment: center;
-        }
-        find-in := TextInput {
-            changed has-focus => { Typing.on = self.has-focus; }
-            x: 12px;
-            width: parent.width - 24px;
-            height: parent.height;
-            text <=> root.query;
-            font-family: Font.ui;
-            font-size: Font.control;
-            color: Ink.bright;
-            single-line: true;
-            vertical-alignment: center;
-            edited => { root.find(self.text); }
-        }
+    // find a key, or what it does, under the tabs (Escape goes on to the page)
+    FieldBox {
+        x: Space.pad;
+        y: root.top + Space.pad;
+        width: parent.width - 2 * Space.pad;
+        placeholder: root.placeholder;
+        keeps-escape: false;
+        text <=> root.query;
+        edited => { root.find(self.text); }
     }
+    // the groups, Space.inline under the find box, their rows Space.inline in from the box's
+    // sides, as a list's in a box are
     lib-flick := Flickable {
-        x: 8px;
-        y: root.top + 60px;
-        width: parent.width - 16px;
-        height: parent.height - root.top - 60px - 10px;
+        x: Space.inline;
+        y: root.top + Space.pad + Size.control + Space.inline;
+        width: parent.width - 2 * Space.inline;
+        height: parent.height - self.y - Space.inline;
         mouse-drag-pan-enabled: false;
         VerticalLayout {
             alignment: start;
             for g in root.groups: VerticalLayout {
-                // the group's heading: it opens and closes the group
-                Rectangle {
-                    height: 30px;
-                    border-radius: Radius.small;
-                    background: head-ta.has-hover ? Ink.hover-box : transparent;
-                    Path {
-                        x: 6px;
-                        y: 9px;
-                        width: 12px;
-                        height: 12px;
-                        viewbox-width: 12;
-                        viewbox-height: 12;
-                        commands: g.open ? "M3 4.5l3 3 3-3" : "M4.5 3l3 3-3 3";
-                        fill: transparent;
-                        stroke: Ink.quiet;
-                        stroke-width: 1.6px;
-                    }
-                    Text {
-                        x: 24px;
-                        height: parent.height;
-                        text: g.name;
-                        font-family: Font.ui;
-                        font-size: Font.caption;
-                        font-weight: Font.medium;
-                        color: head-ta.has-hover ? Ink.bright : Ink.soft;
-                        vertical-alignment: center;
-                    }
+                // the group's heading: it opens and closes the group; how many keys it has
+                // (and how many are rebound) at its right
+                Fold {
+                    text: g.name;
+                    open: g.open;
+                    small: true;
+                    clicked => { root.toggle(g.name); }
                     HorizontalLayout {
-                        x: parent.width - self.preferred-width - 8px;
+                        x: parent.width - self.preferred-width - Space.inline;
                         width: self.preferred-width;
-                        spacing: 10px;
+                        spacing: Space.inline;
                         if g.rebound > 0: Text {
                             text: g.rebound + " rebound";
                             font-family: Font.ui;
@@ -577,16 +538,12 @@ component KeyLibrary inherits PageBox {
                             vertical-alignment: center;
                         }
                     }
-                    head-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => { root.toggle(g.name); }
-                    }
                 }
-                // its keys, set in under the group's name
+                // its keys, set in under the group's name (at its words, as the Fold sets them)
                 if g.open: VerticalLayout {
-                    padding-left: 18px;
+                    padding-left: Part.tile-inset + 12px;
                     for r in g.rows: Rectangle {
-                        height: 34px;
+                        height: Size.control;
                         border-radius: Radius.control;
                         background: r.chosen ? (row-ta.has-hover ? Ink.pick-hover : Ink.pick) : row-ta.has-hover ? Ink.hover-box : transparent;
                         SmallCap {
@@ -627,9 +584,9 @@ component KeyLibrary inherits PageBox {
             }
         }
     }
-    // its scrollbar, at the box's right edge beside the list
+    // its scrollbar, at the box's right edge beside the list, as a ScrollBox's
     ScrollBar {
-        x: parent.width - 12px;
+        x: parent.width - Part.scroll-in;
         y: lib-flick.y;
         height: lib-flick.height;
         view: lib-flick.height;
@@ -646,10 +603,15 @@ component GameBox inherits PageBox {
     in property <[CheckItem]> items;
     callback toggled(int);
     title: "Game mode";
-    Text {
-        x: 16px;
-        y: 46px;
-        width: parent.width - 32px;
+    // its note, then the keys two to a line, Space.row under it, Space.tight between lines
+    property <length> lines-top: Size.box-head + note.preferred-height + Space.row;
+    property <length> pitch: Size.quiet + Space.tight;
+    // how tall what it holds is (the page gives the box this much at least)
+    out property <length> need: self.lines-top + ceil(root.items.length / 2) * self.pitch - Space.tight + Space.pad;
+    note := Text {
+        x: Space.pad;
+        y: Size.box-head;
+        width: parent.width - 2 * Space.pad;
         text: "The G/PC button turns game mode on and off. These keys do nothing while it's on:";
         font-family: Font.ui;
         font-size: Font.note;
@@ -657,9 +619,9 @@ component GameBox inherits PageBox {
         wrap: word-wrap;
     }
     for c[i] in root.items: CheckBox {
-        x: 16px + mod(i, 2) * (parent.width - 32px) / 2;
-        y: 92px + floor(i / 2) * 30px;
-        width: (parent.width - 32px) / 2 - 8px;
+        x: Space.pad + mod(i, 2) * (parent.width - 2 * Space.pad) / 2;
+        y: root.lines-top + floor(i / 2) * root.pitch;
+        width: (parent.width - 2 * Space.pad) / 2 - Space.inline;
         text: c.name;
         on: c.on;
         clicked => { root.toggled(i); }
@@ -678,7 +640,7 @@ component LibCoverView inherits Rectangle {
     y: root.c.y;
     width: root.c.w;
     height: root.c.h + Space.inline + Size.cover-name;
-    property <bool> hot: ta.has-hover || star-ta.has-hover;
+    property <bool> hot: ta.has-hover || star-b.hover;
     card := Rectangle {
         y: ta.pressed ? -1px : root.hot ? -3px : 0;
         animate y { duration: 140ms; }
@@ -717,29 +679,15 @@ component LibCoverView inherits Rectangle {
         mouse-cursor: pointer;
         clicked => { root.open(); }
     }
-    Rectangle {
-        x: root.c.w - 7px - 30px;
-        y: card.y + 7px;
-        width: 30px;
-        height: 30px;
-        border-radius: Radius.control;
-        background: star-ta.has-hover ? Ink.hover-box.with-alpha(0.949) : Ink.well.with-alpha(0.851);
+    // the star, Space.inline in from the cover's corner, while the pointer is on the cover
+    star-b := StarButton {
+        x: root.c.w - Space.inline - self.width;
+        y: card.y + Space.inline;
+        on-picture: true;
+        on: root.c.fav;
         opacity: root.hot ? 1 : 0;
         animate opacity { duration: 120ms; }
-        Path {
-            width: 16px;
-            height: 16px;
-            viewbox-width: 16;
-            viewbox-height: 16;
-            commands: Star.path;
-            fill: root.c.fav ? Ink.ink : transparent;
-            stroke: Ink.ink;
-            stroke-width: 1.3px;
-        }
-        star-ta := TouchArea {
-            mouse-cursor: pointer;
-            clicked => { root.star(); }
-        }
+        clicked => { root.star(); }
     }
 }
 
@@ -911,142 +859,121 @@ component KeyDetail inherits PageBox {
     callback kind-picked(int, length, length, length);
     callback job-clicked(length, length, length);
     callback record();
+    // how tall what it holds is (the page gives the box this much at least)
+    out property <length> need: Size.box-head + body.preferred-height + Space.pad;
+    // Done, at the title's line, its words at the box's padding
     if root.closable: LinkButton {
-        x: parent.width - self.width - 10px;
-        y: 12px;
+        x: parent.width - Space.pad + Part.quiet-pad - self.width;
+        y: Part.title-top + (Line.title - self.height) / 2;
         text: "Done";
         clicked => { root.done(); }
     }
-    SmallCap {
-        x: 16px;
-        y: 50px;
-        width: 54px;
-        height: 48px;
-        text: root.cap;
-        size: root.cap.character-count > 3 ? Font.small : Font.lead;
-    }
-    VerticalLayout {
-        x: 84px;
-        y: 50px;
-        width: parent.width - 84px - 150px;
-        height: 48px;
-        alignment: center;
-        spacing: 3px;
-        Text {
-            text: root.factory;
-            font-family: Font.ui;
-            font-size: Font.note;
-            color: Ink.soft;
-            overflow: elide;
-        }
-        Text {
-            text: root.state;
-            font-family: Font.ui;
-            font-size: Font.note;
-            color: Ink.quiet;
-            overflow: elide;
-        }
-    }
-    WordButton {
-        x: parent.width - self.width - 16px;
-        y: 58px;
-        text: "Back to factory";
-        enabled: root.rebound;
-        on-box: true;
-        clicked => { root.reset(); }
-    }
-    Text {
-        x: 16px;
-        y: 116px;
-        height: 24px;
-        text: root.layer-title;
-        font-family: Font.ui;
-        font-size: Font.note;
-        font-weight: Font.strong;
-        color: Ink.dim;
-        vertical-alignment: center;
-    }
-    if root.layer-rebound: Rectangle {
-        x: parent.width - self.width - 16px;
-        y: 118px;
-        width: pill.preferred-width + 16px;
-        height: 20px;
-        border-radius: self.height / 2;
-        background: Ink.warn.with-alpha(0.133);
-        pill := Text {
-            x: 8px;
-            height: parent.height;
-            text: "Rebound";
-            font-family: Font.ui;
-            font-size: Font.small;
-            color: Ink.warn;
-            vertical-alignment: center;
-        }
-    }
-    SegSwitch {
-        x: 16px;
-        y: 148px;
-        width: parent.width - 32px;
-        tall: true;
-        options: root.kinds;
-        icons: root.kind-icons;
-        chosen: root.kind;
-        picked(i, x, y, h) => { root.kind-picked(i, x, y, h); }
-    }
-    DropField {
-        x: 16px;
-        y: 208px;
-        width: parent.width - 32px - (root.recordable ? 104px : 0);
-        text: root.job;
-        open: root.menu-open;
-        clicked(x, y, h) => { root.job-clicked(x, y, h); }
-    }
-    // Record: takes the next key pressed on the Z10
-    if root.recordable: Rectangle {
-        x: parent.width - 16px - 96px;
-        y: 208px;
-        width: 96px;
-        height: 36px;
-        border-radius: Radius.control;
-        background: root.listening ? Ink.warn.with-alpha(0.102) : rec-ta.has-hover ? Ink.hover-box : transparent;
-        border-width: 1px;
-        border-color: root.listening ? Ink.warn : rec-ta.has-hover ? Ink.edge-hover : Ink.edge;
+    // a stacked form: the key, then its layer's job (the kind of job, the job, its note)
+    body := VerticalLayout {
+        x: Space.pad;
+        y: Size.box-head;
+        width: parent.width - 2 * Space.pad;
+        height: self.preferred-height;
+        spacing: Space.pad;
+        // the key: its cap, large, what it is from the factory and what it is now, and
+        // Back to factory at the right
         HorizontalLayout {
-            alignment: center;
-            spacing: 7px;
-            Rectangle {
-                width: 7px;
-                Rectangle {
-                    y: (parent.height - 7px) / 2;
-                    width: 7px;
-                    height: 7px;
-                    border-radius: self.width / 2;
-                    background: root.listening ? Ink.warn : Ink.record;
-                    opacity: root.listening ? 0.4 + 0.6 * abs(cos(animation-tick() / 1000ms * 180deg)) : 1;
+            spacing: Space.pad;
+            SmallCap {
+                width: 54px;
+                height: 48px;
+                text: root.cap;
+                size: root.cap.character-count > 3 ? Font.small : Font.lead;
+            }
+            VerticalLayout {
+                alignment: center;
+                spacing: Space.list;
+                Text {
+                    text: root.factory;
+                    font-family: Font.ui;
+                    font-size: Font.note;
+                    color: Ink.soft;
+                    overflow: elide;
+                }
+                Text {
+                    text: root.state;
+                    font-family: Font.ui;
+                    font-size: Font.note;
+                    color: Ink.quiet;
+                    overflow: elide;
                 }
             }
-            Text {
-                text: root.listening ? "Press a key…" : "Record";
-                font-family: Font.ui;
-                font-size: Font.note;
-                color: root.listening ? Ink.warn : rec-ta.has-hover ? Ink.bright : Ink.soft;
-                vertical-alignment: center;
+            VerticalLayout {
+                alignment: center;
+                WordButton {
+                    text: "Back to factory";
+                    enabled: root.rebound;
+                    on-box: true;
+                    clicked => { root.reset(); }
+                }
             }
         }
-        rec-ta := TouchArea {
-            mouse-cursor: pointer;
-            clicked => { root.record(); }
+        // its job on the layer: the layer's name (Rebound at its right while the job isn't the
+        // factory's), Space.label over the kind of job, the job Space.inline under that (and
+        // Record beside it), and its note Space.tight under the job
+        VerticalLayout {
+            spacing: Space.label;
+            HorizontalLayout {
+                height: Line.text;
+                Text {
+                    text: root.layer-title;
+                    font-family: Font.ui;
+                    font-size: Font.note;
+                    font-weight: Font.strong;
+                    color: Ink.dim;
+                    vertical-alignment: center;
+                }
+                if root.layer-rebound: VerticalLayout {
+                    alignment: center;
+                    Tag {
+                        text: "Rebound";
+                        warn: true;
+                    }
+                }
+            }
+            VerticalLayout {
+                spacing: Space.inline;
+                SegSwitch {
+                    tall: true;
+                    options: root.kinds;
+                    icons: root.kind-icons;
+                    chosen: root.kind;
+                    picked(i, x, y, h) => { root.kind-picked(i, x, y, h); }
+                }
+                VerticalLayout {
+                    spacing: Space.tight;
+                    HorizontalLayout {
+                        spacing: Space.inline;
+                        DropField {
+                            text: root.job;
+                            open: root.menu-open;
+                            clicked(x, y, h) => { root.job-clicked(x, y, h); }
+                        }
+                        // Record: takes the next key pressed on the keyboard
+                        if root.recordable: VerticalLayout {
+                            alignment: center;
+                            RecordButton {
+                                on: root.listening;
+                                on-text: "Press a key…";
+                                clicked => { root.record(); }
+                            }
+                        }
+                    }
+                    if root.note != "": Text {
+                        text: root.note;
+                        font-family: Font.ui;
+                        font-size: Font.caption;
+                        color: Ink.quiet;
+                        wrap: word-wrap;
+                    }
+                }
+            }
         }
-    }
-    if root.note != "": Text {
-        x: 16px;
-        y: 254px;
-        width: parent.width - 32px;
-        text: root.note;
-        font-family: Font.ui;
-        font-size: Font.caption;
-        color: Ink.quiet;
-        wrap: word-wrap;
     }
 }
 
@@ -1058,98 +985,97 @@ component SliderDetail inherits PageBox {
     in property <[CheckItem]> choices;
     callback done();
     callback picked(int);
+    // how tall what it holds is (the page gives the box this much at least)
+    out property <length> need: Size.box-head + body.preferred-height + Space.pad;
+    // Done, at the title's line, its words at the box's padding
     LinkButton {
-        x: parent.width - self.width - 10px;
-        y: 12px;
+        x: parent.width - Space.pad + Part.quiet-pad - self.width;
+        y: Part.title-top + (Line.title - self.height) / 2;
         text: "Done";
         clicked => { root.done(); }
     }
-    Text {
-        x: 16px;
-        y: 46px;
-        text: "Where the " + root.side + " slider on the keyboard sits now";
-        font-family: Font.ui;
-        font-size: Font.note;
-        color: Ink.quiet;
-    }
-    // a reading, not a control: a thin bar filled to where the slider is, and how far that is
-    Rectangle {
-        x: 16px;
-        y: 81px;
-        width: parent.width - 32px - 56px;
-        height: 6px;
-        border-radius: self.height / 2;
-        background: Ink.well;
-        clip: true;
-        Rectangle {
-            x: 0;
-            width: root.at * parent.width;
-            border-radius: 3px;
-            background: Ink.soft;
-            animate width { duration: 120ms; easing: ease-out; }
-        }
-    }
-    Text {
-        x: parent.width - 16px - 46px;
-        y: 76px;
-        width: 46px;
-        height: 16px;
-        text: round(root.at * 100) + "%";
+    // (as wide at every place as at the slider's top, so the bar never shifts)
+    pct-most := Text {
+        visible: false;
+        text: "100%";
         font-family: Font.ui;
         font-size: Font.note;
         font-weight: Font.medium;
-        color: Ink.dim;
-        horizontal-alignment: right;
-        vertical-alignment: center;
     }
-    Text {
-        x: 16px;
-        y: 112px;
-        text: "Controls";
-        font-family: Font.ui;
-        font-size: Font.note;
-        font-weight: Font.strong;
-        color: Ink.dim;
-    }
-    for c[i] in root.choices: Rectangle {
-        x: 12px;
-        y: 138px + i * 36px;
-        width: parent.width - 24px;
-        height: 34px;
-        border-radius: Radius.control;
-        background: c.on ? (opt-ta.has-hover ? Ink.pick-hover : Ink.pick) : opt-ta.has-hover ? Ink.hover-box : transparent;
-        Rectangle {
-            x: 10px;
-            y: (parent.height - 14px) / 2;
-            width: 14px;
-            height: 14px;
-            border-radius: self.width / 2;
-            border-width: c.on ? 4px : 1.5px;
-            border-color: c.on ? Ink.bright : Ink.edge-hover;
+    // a stacked form: where the slider sits now, what it controls, and a note
+    body := VerticalLayout {
+        x: Space.pad;
+        y: Size.box-head;
+        width: parent.width - 2 * Space.pad;
+        height: self.preferred-height;
+        spacing: Space.pad;
+        // where it sits now: a reading, not a control, a thin bar filled to where the
+        // slider is and how far that is, Space.row after it
+        VerticalLayout {
+            spacing: Space.label;
+            Text {
+                text: "Where the " + root.side + " slider on the keyboard sits now";
+                font-family: Font.ui;
+                font-size: Font.note;
+                color: Ink.quiet;
+            }
+            HorizontalLayout {
+                height: Line.text;
+                spacing: Space.row;
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        height: 6px;
+                        border-radius: self.height / 2;
+                        background: Ink.well;
+                        clip: true;
+                        Rectangle {
+                            x: 0;
+                            width: root.at * parent.width;
+                            border-radius: 3px;
+                            background: Ink.soft;
+                            animate width { duration: 120ms; easing: ease-out; }
+                        }
+                    }
+                }
+                Text {
+                    width: pct-most.preferred-width;
+                    text: round(root.at * 100) + "%";
+                    font-family: Font.ui;
+                    font-size: Font.note;
+                    font-weight: Font.medium;
+                    color: Ink.dim;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                }
+            }
+        }
+        // what it controls: one of its jobs, Space.list between them
+        VerticalLayout {
+            spacing: Space.label;
+            Text {
+                text: "Controls";
+                font-family: Font.ui;
+                font-size: Font.note;
+                font-weight: Font.strong;
+                color: Ink.dim;
+            }
+            VerticalLayout {
+                spacing: Space.list;
+                for c[i] in root.choices: RadioRow {
+                    text: c.name;
+                    on: c.on;
+                    clicked => { root.picked(i); }
+                }
+            }
         }
         Text {
-            x: 34px;
-            height: parent.height;
-            text: c.name;
+            text: root.note == "" ? "The same on every profile, while Ectomatter is open." : "The same on every profile, while Ectomatter is open. " + root.note;
             font-family: Font.ui;
-            font-size: Font.control;
-            color: c.on ? Ink.bright : Ink.dim;
-            vertical-alignment: center;
+            font-size: Font.caption;
+            color: Ink.quiet;
+            wrap: word-wrap;
         }
-        opt-ta := TouchArea {
-            mouse-cursor: pointer;
-            clicked => { root.picked(i); }
-        }
-    }
-    Text {
-        x: 16px;
-        y: 138px + root.choices.length * 36px + 8px;
-        width: parent.width - 32px;
-        text: root.note == "" ? "The same on every profile, while Ectomatter is open." : "The same on every profile, while Ectomatter is open. " + root.note;
-        font-family: Font.ui;
-        font-size: Font.caption;
-        color: Ink.quiet;
-        wrap: word-wrap;
     }
 }
 
@@ -1507,6 +1433,8 @@ export component AppWindow inherits Window {
     // lays out all four)
     in property <string> pl-name;
     in property <length> pl-chooser-w: 80px;
+    // the chooser's widest, and the field its playlist is renamed in
+    in property <length> pl-chooser-most: 200px;
     in property <bool> pl-choosing;
     in property <bool> pl-renaming;
     in-out property <string> pl-rename-text;
@@ -1856,7 +1784,12 @@ export component AppWindow inherits Window {
     property <length> mouse-pro-w: root.mouse-profiles-shown && root.mouse-tab < 3 ? Size.column + Space.gap : 0;
     property <length> mouse-band-min: mouse-pro-w > 0 ? mouse-pro.preferred-height : 0;
     property <length> mouse-band-max: max(mouse-band-min, mouse-flick.height - mouse-low-y - Space.margin);
-    property <length> mouse-second-need: root.mouse-chosen && root.mouse-note != "" ? 320px : 270px;
+    // (the second box, a button's or All buttons, as tall as it says it needs; All buttons
+    // keeps a button's room, so the row doesn't move as a button is chosen and the Key
+    // library beside it keeps its height)
+    property <length> mouse-key-need: 270px;
+    property <length> mouse-all-need: 120px;
+    property <length> mouse-second-need: root.mouse-chosen ? root.mouse-key-need : max(root.mouse-key-need, root.mouse-all-need);
     // the effects' box on Lighting: its tiles, three to a line
     property <length> mouse-fx-h: Size.box-head + ceil(root.mouse-effects.length / 3) * (Size.tile + Space.inline) - Space.inline + Space.pad;
     out property <length> mouse-wx: rail-w + pws-x;
@@ -1965,9 +1898,10 @@ export component AppWindow inherits Window {
     // under it, the playlist on the first tab, or on the second the chooser of the layout
     // the keyboard keeps, with Layouts joined to the box's foot. The box is as tall as
     // Profiles. (`stage-h` is the screen's part of the box.)
-    property <length> pl-panel-h: 56px;
+    // (the playlist's row: a bar's height, its controls at its middle)
+    property <length> pl-panel-h: Size.bar;
     property <length> stage-h: anchor.preferred-height - pl-panel-h;
-    property <length> tabs-h: 36px;
+    property <length> tabs-h: Size.tab;
     // the box: as tall as Profiles, less whatever a narrow window takes off the screen's
     // height, so the row under the screen keeps its margin
     property <length> lcd-short: stage-h - 2 * bay-pad - 2 * kb-pad-y - lcd-h;
@@ -1996,7 +1930,7 @@ export component AppWindow inherits Window {
     // the playlist's name changed in place: where its field is in the window, so a press
     // away from it keeps the name
     out property <length> pl-rename-wx: rail-w + under-x + 16px;
-    out property <length> pl-rename-wy: bar + Size.bar + flick.content-y + head-end + band-y + 14px;
+    out property <length> pl-rename-wy: bar + Size.bar + flick.content-y + head-end + band-y + (pl-panel-h - Size.compact) / 2;
     property <length> anchor-w: 240px;
     property <length> under-x: pws-x + anchor-w + Space.gap;
     out property <length> under-w: pws-w - anchor-w - Space.gap;
@@ -2014,8 +1948,12 @@ export component AppWindow inherits Window {
     property <length> band-min: anchor.preferred-height;
     property <length> room: flick.height - under-top - Space.margin;
     property <length> band-max: max(band-min, room);
-    property <length> second-need: root.slider-chosen != 0 ? 328px : root.key-open ? (root.key-note != "" ? 320px : 270px) : 230px;
-    property <length> second-w: root.key-open ? 460px : root.slider-chosen != 0 ? 360px : 340px;
+    // (each of the second box's three, as tall as it says it needs)
+    property <length> key-need: 270px;
+    property <length> slider-need: 330px;
+    property <length> game-need: 230px;
+    property <length> second-need: root.slider-chosen != 0 ? root.slider-need : root.key-open ? root.key-need : root.game-need;
+    property <length> second-w: root.key-open ? Size.detail : root.slider-chosen != 0 ? Size.settings : Size.game;
     // Lighting: the effects, the effect's settings and where and when, in the row of boxes
     property <length> lfx-h: Size.box-head + 3 * Size.tile + 2 * Space.inline + Space.pad;
     property <length> tab-h: root.tab == 0 ? kb-keys.height : root.tab == 1 ? kb-light.height
@@ -2297,16 +2235,10 @@ export component AppWindow inherits Window {
                         spacing: 2px;
                         HorizontalLayout {
                             alignment: center;
-                            spacing: 8px;
-                            Rectangle {
-                                width: 7px;
-                                Rectangle {
-                                    y: (parent.height - 7px) / 2;
-                                    width: 7px;
-                                    height: 7px;
-                                    border-radius: self.width / 2;
-                                    background: d.off ? Ink.bad : Ink.good;
-                                }
+                            spacing: Space.inline;
+                            VerticalLayout {
+                                alignment: center;
+                                Dot { state: d.off ? 2 : 1; }
                             }
                             Text {
                                 text: d.name;
@@ -2314,7 +2246,7 @@ export component AppWindow inherits Window {
                                 font-size: Font.text;
                                 font-weight: Font.medium;
                                 color: d.hover ? Ink.bright : Ink.dim;
-                                height: 18px;
+                                height: Line.text;
                                 vertical-alignment: center;
                             }
                         }
@@ -2378,230 +2310,120 @@ export component AppWindow inherits Window {
                 }
             }
             // edit mode: what to do and Done, on a bar of its own over the dots
-            if root.desk-editing: Rectangle {
+            if root.desk-editing: FloatBar {
                 x: (parent.width - self.width) / 2;
-                y: 14px;
-                width: mode-row.preferred-width;
-                height: 40px;
-                border-radius: Radius.panel;
-                background: Ink.box;
-                border-width: 1px;
-                border-color: Ink.line;
-                drop-shadow-blur: Shadow.float.blur;
-                drop-shadow-offset-y: Shadow.float.y;
-                drop-shadow-color: Shadow.float.color;
-                // (a press on the bar is the bar's, not the desk's under it)
-                TouchArea {}
-                mode-row := HorizontalLayout {
-                    padding-left: root.desk-pad-chosen >= 0 ? 6px : 16px;
-                    padding-right: 6px;
-                    spacing: root.desk-pad-chosen >= 0 ? 6px : 10px;
-                    alignment: start;
-                    if root.desk-pad-chosen < 0: Text {
+                y: Space.row;
+                // nothing chosen: what to do, Space.row in from the bar's edge
+                if root.desk-pad-chosen < 0: HorizontalLayout {
+                    padding-left: Space.row - Space.tight;
+                    padding-right: Space.tight;
+                    Text {
                         text: root.desk-drawing ? "Drag across the desk to draw your pad." : "Drag a device to where it sits on your desk.";
                         font-family: Font.ui;
                         font-size: Font.note;
                         color: Ink.soft;
                         vertical-alignment: center;
                     }
-                    // (a gap after the words, as wide as the bar's own between buttons)
-                    if root.desk-pad-chosen < 0: Rectangle { width: 4px; }
-                    // nothing chosen: a pad to add, at its maker's size or drawn
-                    if root.desk-pad-chosen < 0 && !root.desk-drawing: VerticalLayout {
-                        alignment: center;
-                        WordButton {
-                            text: "Add pad";
-                            height: 28px;
-                            on-box: true;
-                            clicked => { root.desk-add-pad(self.absolute-position.x, self.absolute-position.y, self.height); }
-                        }
-                    }
-                    // drawing: put away unused
-                    if root.desk-pad-chosen < 0 && root.desk-drawing: VerticalLayout {
-                        alignment: center;
-                        WordButton {
-                            text: "Cancel";
-                            height: 28px;
-                            on-box: true;
-                            clicked => { root.desk-draw-cancel(); }
-                        }
-                    }
-                    // a pad chosen: its size, its color, its picture, and taking it off the desk
-                    if root.desk-pad-chosen >= 0: VerticalLayout {
-                        alignment: center;
-                        Rectangle {
-                            height: 28px;
-                            width: size-row.preferred-width;
-                            border-radius: Radius.control;
-                            background: size-ta.has-hover ? Ink.pick : Ink.hover-box;
-                            size-row := HorizontalLayout {
-                                padding-left: 12px;
-                                padding-right: 10px;
-                                spacing: 8px;
-                                Text {
-                                    text: root.desk-pad-size;
-                                    font-family: Font.ui;
-                                    font-size: Font.control;
-                                    font-weight: Font.medium;
-                                    color: Ink.ink;
-                                    vertical-alignment: center;
-                                }
-                                Path {
-                                    y: (parent.height - 12px) / 2;
-                                    width: 12px;
-                                    height: 12px;
-                                    viewbox-width: 12;
-                                    viewbox-height: 12;
-                                    commands: "M3 4.5l3 3 3-3";
-                                    fill: transparent;
-                                    stroke: Ink.quiet;
-                                    stroke-width: 1.6px;
-                                }
-                            }
-                            size-ta := TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => { root.desk-pad-size-menu(self.absolute-position.x, self.absolute-position.y, self.height); }
-                            }
-                        }
-                    }
-                    if root.desk-pad-chosen >= 0: VerticalLayout {
-                        alignment: center;
-                        Rectangle {
-                            height: 28px;
-                            width: color-row.preferred-width;
-                            border-radius: Radius.control;
-                            background: color-ta.has-hover ? Ink.pick : Ink.hover-box;
-                            color-row := HorizontalLayout {
-                                padding-left: 8px;
-                                padding-right: 12px;
-                                spacing: 8px;
-                                Rectangle {
-                                    width: 14px;
-                                    Rectangle {
-                                        y: (parent.height - 14px) / 2;
-                                        width: 14px;
-                                        height: 14px;
-                                        border-radius: Radius.tiny;
-                                        background: root.desk-pad-rgb;
-                                        border-width: 1px;
-                                        border-color: Ink.white.with-alpha(0.18);
-                                    }
-                                }
-                                Text {
-                                    text: "Color";
-                                    font-family: Font.ui;
-                                    font-size: Font.control;
-                                    font-weight: Font.medium;
-                                    color: Ink.ink;
-                                    vertical-alignment: center;
-                                }
-                            }
-                            color-ta := TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => { root.desk-pad-color(self.absolute-position.x, self.absolute-position.y, self.height); }
-                            }
-                        }
-                    }
-                    if root.desk-pad-chosen >= 0: VerticalLayout {
-                        alignment: center;
-                        WordButton {
-                            text: "Choose a picture…";
-                            height: 28px;
-                            on-box: true;
-                            clicked => { root.desk-pad-picture(); }
-                        }
-                    }
-                    if root.desk-pad-chosen >= 0 && root.desk-pad-pictured: VerticalLayout {
-                        alignment: center;
-                        WordButton {
-                            text: "Remove picture";
-                            height: 28px;
-                            on-box: true;
-                            clicked => { root.desk-pad-no-picture(); }
-                        }
-                    }
-                    if root.desk-pad-chosen >= 0: VerticalLayout {
-                        alignment: center;
-                        WordButton {
-                            text: "Delete pad";
-                            height: 28px;
-                            danger: true;
-                            clicked => { root.desk-pad-delete(); }
-                        }
-                    }
-                    if root.desk-pad-chosen >= 0 && root.desk-pad-note != "": Text {
-                        text: root.desk-pad-note;
-                        font-family: Font.ui;
-                        font-size: Font.note;
-                        color: Ink.bad;
-                        vertical-alignment: center;
-                    }
-                    // (a gap before Done, as wide as the bar's own spacing)
-                    if root.desk-pad-chosen >= 0: Rectangle { width: 8px; }
-                    VerticalLayout {
-                        alignment: center;
-                        WordButton {
-                            text: "Done";
-                            height: 28px;
-                            on-box: true;
-                            clicked => { root.desk-done(); }
-                        }
-                    }
+                }
+                // nothing chosen: a pad to add, at its maker's size or drawn
+                if root.desk-pad-chosen < 0 && !root.desk-drawing: WordButton {
+                    text: "Add pad";
+                    compact: true;
+                    on-box: true;
+                    clicked => { root.desk-add-pad(self.absolute-position.x, self.absolute-position.y, self.height); }
+                }
+                // drawing: put away unused
+                if root.desk-pad-chosen < 0 && root.desk-drawing: WordButton {
+                    text: "Cancel";
+                    compact: true;
+                    on-box: true;
+                    clicked => { root.desk-draw-cancel(); }
+                }
+                // a pad chosen: its size, its color, its picture, and taking it off the desk
+                if root.desk-pad-chosen >= 0: WordButton {
+                    text: root.desk-pad-size;
+                    compact: true;
+                    on-box: true;
+                    menu: true;
+                    clicked => { root.desk-pad-size-menu(self.absolute-position.x, self.absolute-position.y, self.height); }
+                }
+                if root.desk-pad-chosen >= 0: WordButton {
+                    text: "Color";
+                    compact: true;
+                    on-box: true;
+                    swatched: true;
+                    swatch: root.desk-pad-rgb;
+                    clicked => { root.desk-pad-color(self.absolute-position.x, self.absolute-position.y, self.height); }
+                }
+                if root.desk-pad-chosen >= 0: WordButton {
+                    text: "Choose a picture…";
+                    compact: true;
+                    on-box: true;
+                    clicked => { root.desk-pad-picture(); }
+                }
+                if root.desk-pad-chosen >= 0 && root.desk-pad-pictured: WordButton {
+                    text: "Remove picture";
+                    compact: true;
+                    on-box: true;
+                    clicked => { root.desk-pad-no-picture(); }
+                }
+                if root.desk-pad-chosen >= 0: WordButton {
+                    text: "Delete pad";
+                    compact: true;
+                    danger: true;
+                    clicked => { root.desk-pad-delete(); }
+                }
+                if root.desk-pad-chosen >= 0 && root.desk-pad-note != "": Text {
+                    text: root.desk-pad-note;
+                    font-family: Font.ui;
+                    font-size: Font.note;
+                    color: Ink.bad;
+                    vertical-alignment: center;
+                }
+                // (Done apart from the rest, Space.inline more)
+                if root.desk-pad-chosen >= 0: Rectangle { width: Space.inline; }
+                WordButton {
+                    text: "Done";
+                    compact: true;
+                    on-box: true;
+                    clicked => { root.desk-done(); }
                 }
             }
-            // edit mode: zoom, at the bottom right
-            if root.desk-editing: Rectangle {
-                x: parent.width - self.width - 24px;
-                y: parent.height - self.height - 24px;
-                width: zoom-row.preferred-width;
-                height: 36px;
-                border-radius: Radius.panel;
-                background: Ink.box;
-                border-width: 1px;
-                border-color: Ink.line;
-                drop-shadow-blur: Shadow.float.blur;
-                drop-shadow-offset-y: Shadow.float.y;
-                drop-shadow-color: Shadow.float.color;
-                TouchArea {}
-                zoom-row := HorizontalLayout {
-                    padding: 4px;
-                    spacing: 2px;
-                    for z[j] in [{ t: "", how: -1 }, { t: root.desk-zoom, how: 0 }, { t: "", how: 1 }, { t: "Fit", how: 2 }]: Rectangle {
-                        width: z.how == 0 ? 52px : z.how == 2 ? fit-t.preferred-width + 16px : 28px;
-                        height: 28px;
-                        border-radius: Radius.panel - 4px;
-                        background: zt.has-hover ? Ink.hover-box : transparent;
-                        if z.how == -1 || z.how == 1: Path {
-                            x: 8px;
-                            y: 8px;
-                            width: 12px;
-                            height: 12px;
-                            viewbox-width: 12;
-                            viewbox-height: 12;
-                            commands: z.how == 1 ? "M2 6h8M6 2v8" : "M2 6h8";
-                            fill: transparent;
-                            stroke: zt.has-hover ? Ink.bright : Ink.soft;
-                            stroke-width: 1.6px;
-                            stroke-line-cap: LineCap.round;
-                        }
-                        fit-t := Text {
-                            visible: z.how == 0 || z.how == 2;
-                            width: parent.width;
-                            height: parent.height;
-                            text: z.t;
-                            font-family: Font.ui;
-                            font-size: Font.note;
-                            font-weight: Font.medium;
-                            color: zt.has-hover ? Ink.bright : Ink.soft;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                        zt := TouchArea {
-                            mouse-cursor: pointer;
-                            clicked => { root.desk-zoom-step(z.how); }
-                        }
-                    }
+            // edit mode: zoom, at the bottom right, Space.margin in
+            if root.desk-editing: FloatBar {
+                x: parent.width - self.width - Space.margin;
+                y: parent.height - self.height - Space.margin;
+                IconButton {
+                    width: Size.compact;
+                    height: Size.compact;
+                    icon: "M2 6h8";
+                    units: 12;
+                    clicked => { root.desk-zoom-step(-1); }
                 }
+                // (as wide at every zoom as at its widest, so the bar never moves)
+                TextButton {
+                    width: max(self.preferred-width, zoom-most.preferred-width + 2 * Part.quiet-pad);
+                    text: root.desk-zoom;
+                    clicked => { root.desk-zoom-step(0); }
+                }
+                IconButton {
+                    width: Size.compact;
+                    height: Size.compact;
+                    icon: "M2 6h8M6 2v8";
+                    units: 12;
+                    clicked => { root.desk-zoom-step(1); }
+                }
+                TextButton {
+                    text: "Fit";
+                    clicked => { root.desk-zoom-step(2); }
+                }
+            }
+            zoom-most := Text {
+                visible: false;
+                text: "400%";
+                font-family: Font.ui;
+                font-size: Font.control;
+                font-weight: Font.medium;
             }
             // before anything is plugged in: which devices Ectomatter works with
             if root.desk-empty != "": EmptyState {
@@ -2815,10 +2637,14 @@ export component AppWindow inherits Window {
                         max-height: mouse-band-max;
                         preferred-height: mouse-second-need;
                         title: "All buttons";
-                        Text {
-                            x: 16px;
-                            y: 46px;
-                            width: parent.width - 32px - (root.mouse-any-rebound ? all-reset.width + 16px : 0);
+                        // its note, and Back to factory Space.pad after it, at the middle of its first line
+                        property <length> need: Size.box-head + all-note.preferred-height + Space.pad;
+                        init => { root.mouse-all-need = self.need; }
+                        changed need => { root.mouse-all-need = self.need; }
+                        all-note := Text {
+                            x: Space.pad;
+                            y: Size.box-head;
+                            width: parent.width - 2 * Space.pad - (root.mouse-any-rebound ? all-reset.width + Space.pad : 0);
                             text: root.mouse-all-note;
                             font-family: Font.ui;
                             font-size: Font.note;
@@ -2827,8 +2653,8 @@ export component AppWindow inherits Window {
                         }
                         all-reset := WordButton {
                             visible: root.mouse-any-rebound;
-                            x: parent.width - self.width - 16px;
-                            y: 40px;
+                            x: parent.width - self.width - Space.pad;
+                            y: Size.box-head + (Line.note - self.height) / 2;
                             text: "Back to factory";
                             on-box: true;
                             clicked => { root.mouse-reset-all(); }
@@ -2839,6 +2665,8 @@ export component AppWindow inherits Window {
                         preferred-width: Size.detail;
                         max-height: mouse-band-max;
                         preferred-height: mouse-second-need;
+                        init => { root.mouse-key-need = self.need; }
+                        changed need => { root.mouse-key-need = self.need; }
                         title: root.mouse-title;
                         cap: root.mouse-cap;
                         factory: root.mouse-factory;
@@ -2970,67 +2798,30 @@ export component AppWindow inherits Window {
                     width: pws-w;
                     text: root.gl-hint;
                     shorten: true;
-                    // the find box, and on the games' tabs the store and the order
+                    // the find box, and on the games' tabs the store and the order, on the
+                    // hint line at a button's height
                     if root.gl-view == 0: HorizontalLayout {
                         cross-axis-self-alignment: center;
-                        height: 32px;
-                        spacing: 10px;
-                        Rectangle {
-                            width: 240px;
-                            border-radius: Radius.control;
-                            background: Ink.well;
-                            Path {
-                                x: 10px;
-                                y: (parent.height - 14px) / 2;
-                                width: 14px;
-                                height: 14px;
-                                viewbox-width: 16;
-                                viewbox-height: 16;
-                                commands: "M11.6 7a4.6 4.6 0 1 1-9.2 0 4.6 4.6 0 0 1 9.2 0ZM10.4 10.4 14 14";
-                                fill: transparent;
-                                stroke: Ink.quiet;
-                                stroke-width: 1.5px;
-                                stroke-line-cap: round;
-                            }
-                            if gl-find-in.text == "": Text {
-                                x: 32px;
-                                height: parent.height;
-                                text: root.gl-find-hint;
-                                font-family: Font.ui;
-                                font-size: Font.control;
-                                color: Ink.placeholder;
-                                vertical-alignment: center;
-                            }
-                            gl-find-in := TextInput {
-                                x: 32px;
-                                width: parent.width - 42px;
-                                height: parent.height;
-                                text <=> root.gl-query;
-                                font-family: Font.ui;
-                                font-size: Font.control;
-                                color: Ink.ink;
-                                vertical-alignment: center;
-                                single-line: true;
-                                changed has-focus => { Typing.on = self.has-focus; }
-                                edited => { root.gl-find(self.text); }
-                                key-pressed(e) => {
-                                    if (e.text == Key.Escape) {
-                                        self.clear-focus();
-                                        return accept;
-                                    }
-                                    reject
-                                }
-                            }
+                        height: Size.button;
+                        spacing: Space.inline;
+                        FieldBox {
+                            width: Size.find;
+                            height: Size.button;
+                            glyph: Glyph.find;
+                            placeholder: root.gl-find-hint;
+                            text <=> root.gl-query;
+                            edited => { root.gl-find(self.text); }
+                            escape => { self.stop-typing(); }
                         }
                         if root.gl-tab < 2: DropField {
                             width: root.gl-store-w;
-                            height: 32px;
+                            height: Size.button;
                             text: root.gl-store;
                             clicked(x, y, h) => { root.gl-store-menu(x, y, h); }
                         }
                         if root.gl-tab < 2: DropField {
                             width: root.gl-sort-w;
-                            height: 32px;
+                            height: Size.button;
                             text: root.gl-sort;
                             clicked(x, y, h) => { root.gl-sort-menu(x, y, h); }
                         }
@@ -3041,62 +2832,62 @@ export component AppWindow inherits Window {
                     open => { root.gl-open(i); }
                     star => { root.gl-star(i); }
                 }
-                // the Apps tab: a row for each app, in a box of their own
-                if root.gl-view == 0 && root.gl-apps.length > 0: Rectangle {
+                // the Apps tab: a row for each app, in a box of their own, Space.inline in from it
+                // as a list's rows in a box are: its icon, its name and what changes for it, where
+                // it's from, and the way on to its page
+                if root.gl-view == 0 && root.gl-apps.length > 0: PageBox {
                     x: pws-x;
-                    y: head-end + 6px;
+                    y: head-end;
                     width: pws-w;
-                    height: root.gl-apps.length * 60px + 12px;
-                    border-radius: Radius.box;
-                    background: Ink.box;
+                    height: root.gl-apps.length * Size.app + 2 * Space.inline;
                     for a[i] in root.gl-apps: Rectangle {
-                        x: 6px;
-                        y: 6px + i * 60px;
-                        width: parent.width - 12px;
-                        height: 60px;
+                        x: Space.inline;
+                        y: Space.inline + i * Size.app;
+                        width: parent.width - 2 * Space.inline;
+                        height: Size.app;
                         border-radius: Radius.control;
                         background: row-ta.has-hover ? Ink.hover-box : transparent;
+                        property <length> words-x: Space.row + Size.app-icon + Space.row;
+                        property <length> onward-x: self.width - Part.field-pad - 12px;
                         if a.has-icon: Image {
-                            x: 12px;
-                            y: 14px;
-                            width: 32px;
-                            height: 32px;
+                            x: Space.row;
+                            y: (parent.height - self.height) / 2;
+                            width: Size.app-icon;
+                            height: Size.app-icon;
                             source: a.icon;
                         }
                         if !a.has-icon: Rectangle {
-                            x: 12px;
-                            y: 14px;
-                            width: 32px;
-                            height: 32px;
+                            x: Space.row;
+                            y: (parent.height - self.height) / 2;
+                            width: Size.app-icon;
+                            height: Size.app-icon;
                             border-radius: Radius.control;
                             background: Ink.well;
                         }
-                        Text {
-                            x: 58px;
-                            y: 11px;
-                            width: parent.width - 58px - 220px;
-                            height: 19px;
-                            text: a.name;
-                            font-family: Font.ui;
-                            font-size: Font.name;
-                            font-weight: Font.medium;
-                            color: Ink.ink;
-                            overflow: elide;
+                        VerticalLayout {
+                            x: parent.words-x;
+                            width: parent.width - parent.words-x - from-t.width - Space.row - (parent.width - parent.onward-x);
+                            alignment: center;
+                            spacing: Space.list;
+                            Text {
+                                text: a.name;
+                                font-family: Font.ui;
+                                font-size: Font.name;
+                                font-weight: Font.medium;
+                                color: Ink.ink;
+                                overflow: elide;
+                            }
+                            Text {
+                                text: a.sub;
+                                font-family: Font.ui;
+                                font-size: Font.note;
+                                color: Ink.quiet;
+                                overflow: elide;
+                            }
                         }
-                        Text {
-                            x: 58px;
-                            y: 31px;
-                            width: parent.width - 58px - 220px;
-                            height: 17px;
-                            text: a.sub;
-                            font-family: Font.ui;
-                            font-size: Font.note;
-                            color: Ink.quiet;
-                            overflow: elide;
-                        }
-                        Text {
-                            x: parent.width - 40px - 200px;
-                            width: 200px;
+                        from-t := Text {
+                            x: parent.onward-x - Space.row - self.width;
+                            width: min(self.preferred-width, parent.width / 3);
                             height: parent.height;
                             text: a.from;
                             font-family: Font.ui;
@@ -3107,13 +2898,13 @@ export component AppWindow inherits Window {
                             overflow: elide;
                         }
                         Path {
-                            x: parent.width - 26px;
-                            y: (parent.height - 12px) / 2;
+                            x: parent.onward-x;
+                            y: (parent.height - self.height) / 2;
                             width: 12px;
                             height: 12px;
                             viewbox-width: 12;
                             viewbox-height: 12;
-                            commands: "M4.5 2.5l3.5 3.5-3.5 3.5";
+                            commands: Glyph.onward;
                             fill: transparent;
                             stroke: Ink.quiet;
                             stroke-width: 1.6px;
@@ -3176,31 +2967,26 @@ export component AppWindow inherits Window {
             // sections; it scrolls with the page until it reaches the top, then stays in view
             if root.gl-view == 1 && root.gl-toc.length > 0: Rectangle {
                 x: root.gl-toc-x;
-                y: Size.bar + max(16px, root.gl-toc-top + gl-flick.content-y);
+                y: Size.bar + max(Space.pad, root.gl-toc-top + gl-flick.content-y);
                 width: root.gl-toc-w;
                 height: toc-col.preferred-height;
+                // its heading in capitals, as a list's, its words level with the entries'
                 toc-col := VerticalLayout {
                     spacing: 0;
-                    Text {
-                        text: "ON THIS PAGE";
-                        font-family: Font.ui;
-                        font-size: Font.caption;
-                        font-weight: Font.medium;
-                        letter-spacing: 1.2px;
-                        color: Ink.quiet;
-                        x: 2px;
+                    HorizontalLayout {
+                        padding-left: Space.row;
+                        AnchorHead { text: "ON THIS PAGE"; }
                     }
-                    Rectangle { height: 10px; }
                     for t[i] in root.gl-toc: Rectangle {
                         height: toc-words.preferred-height;
                         border-radius: Radius.control;
                         background: toc-ta.has-hover ? Ink.box : transparent;
                         toc-words := VerticalLayout {
-                            padding-left: 12px;
-                            padding-right: 12px;
-                            padding-top: 10px;
-                            padding-bottom: 10px;
-                            spacing: 2px;
+                            padding-left: Space.row;
+                            padding-right: Space.row;
+                            padding-top: Space.inline;
+                            padding-bottom: Space.inline;
+                            spacing: Space.list;
                             Text {
                                 text: t.name;
                                 font-family: Font.ui;
@@ -3221,10 +3007,10 @@ export component AppWindow inherits Window {
                             clicked => { root.gl-toc-jump(i); }
                         }
                     }
-                    if root.gl-toc-foot != "": Rectangle { height: 14px; }
+                    if root.gl-toc-foot != "": Rectangle { height: Space.row; }
                     if root.gl-toc-foot != "": HorizontalLayout {
-                        padding-left: 12px;
-                        padding-right: 12px;
+                        padding-left: Space.row;
+                        padding-right: Space.row;
                         Text {
                             text: root.gl-toc-foot;
                             font-family: Font.ui;
@@ -3464,11 +3250,15 @@ export component AppWindow inherits Window {
                             fill: transparent;
                             items: root.game-items;
                             toggled(i) => { root.game-toggled(i); }
+                            init => { root.game-need = self.need; }
+                            changed need => { root.game-need = self.need; }
                         }
                         if root.key-open: KeyDetail {
                             width: parent.width;
                             height: max(second-need, parent.height);
                             fill: transparent;
+                            init => { root.key-need = self.need; }
+                            changed need => { root.key-need = self.need; }
                             title: root.key-name;
                             cap: root.key-cap;
                             factory: root.key-factory;
@@ -3491,6 +3281,8 @@ export component AppWindow inherits Window {
                             width: parent.width;
                             height: max(second-need, parent.height);
                             fill: transparent;
+                            init => { root.slider-need = self.need; }
+                            changed need => { root.slider-need = self.need; }
                             title: root.slider-chosen == 1 ? "Dimmer" : "Volume";
                             side: root.slider-chosen == 1 ? "left" : "right";
                             at: root.slider-at;
@@ -3816,125 +3608,40 @@ export component AppWindow inherits Window {
                         height: pl-panel-h;
                         // Pause, at the playlist's right end, after the round's start again
                         PlayButton {
-                            x: parent.width - 16px - self.width;
-                            y: 14px;
+                            x: parent.width - Space.pad - self.width;
+                            y: (pl-panel-h - self.height) / 2;
                             paused: root.lcd-state == 1;
                             clicked => { root.lcd-pause(); }
                         }
                         // which playlist the profile plays: select it to choose another, or to
                         // make, rename or delete one
-                        if !root.pl-renaming: Rectangle {
-                            x: 16px;
-                            y: 14px;
+                        if !root.pl-renaming: DropField {
+                            x: Space.pad;
+                            y: (pl-panel-h - self.height) / 2;
                             width: root.pl-chooser-w;
-                            height: 28px;
-                            border-radius: Radius.control;
-                            background: cho-ta.has-hover || root.pl-choosing ? Ink.hover-well : transparent;
-                            Text {
-                                x: 8px;
-                                width: parent.width - 33px;
-                                height: parent.height;
-                                text: root.pl-name;
-                                font-family: Font.ui;
-                                font-size: Font.control;
-                                font-weight: Font.medium;
-                                color: Ink.bright;
-                                vertical-alignment: center;
-                                overflow: elide;
-                            }
-                            Path {
-                                x: parent.width - 18px;
-                                y: 9px;
-                                width: 10px;
-                                height: 10px;
-                                viewbox-width: 10;
-                                viewbox-height: 10;
-                                commands: "M2 3.5l3 3 3-3";
-                                fill: transparent;
-                                stroke: Ink.soft;
-                                stroke-width: 1.5px;
-                                stroke-line-cap: round;
-                                stroke-line-join: round;
-                            }
-                            cho-ta := TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => { root.pl-choose(self.absolute-position.x, self.absolute-position.y, self.height); }
-                            }
+                            height: Size.compact;
+                            subtle: true;
+                            text: root.pl-name;
+                            open: root.pl-choosing;
+                            clicked(x, y, h) => { root.pl-choose(x, y, h); }
                         }
                         // the playlist's name changed in place: Enter, the tick or a press away keeps
                         // it, Escape lets it go
-                        if root.pl-renaming: Rectangle {
-                            x: 16px;
-                            y: 14px;
-                            width: 195px;
-                            height: 28px;
-                            border-radius: Radius.control;
-                            background: Ink.box;
-                            border-width: 1px;
-                            border-color: Ink.edge;
-                            TouchArea {
-                                mouse-cursor: text;
-                                clicked => { ren-in.focus(); }
-                            }
-                            ren-in := TextInput {
-                                x: 10px;
-                                width: 160px;
-                                height: parent.height;
-                                text <=> root.pl-rename-text;
-                                font-family: Font.ui;
-                                font-size: Font.control;
-                                font-weight: Font.medium;
-                                color: Ink.bright;
-                                vertical-alignment: center;
-                                single-line: true;
-                                init => {
-                                    self.focus();
-                                    self.select-all();
-                                }
-                                changed has-focus => { Typing.on = self.has-focus; }
-                                accepted => { root.pl-rename-done(true, self.text); }
-                                key-pressed(e) => {
-                                    if (e.text == Key.Escape) {
-                                        root.pl-rename-done(false, self.text);
-                                        return accept;
-                                    }
-                                    reject
-                                }
-                            }
-                            Rectangle {
-                                x: 170px;
-                                y: 3px;
-                                width: 22px;
-                                height: 22px;
-                                border-radius: Radius.small;
-                                background: ok-ta.has-hover ? Ink.hover-well : transparent;
-                                Path {
-                                    x: 4.5px;
-                                    y: 4.5px;
-                                    width: 13px;
-                                    height: 13px;
-                                    viewbox-width: 24;
-                                    viewbox-height: 24;
-                                    commands: "M5 12.5l4.5 4.5L19 7.5";
-                                    fill: transparent;
-                                    stroke: ok-ta.has-hover ? Ink.bright : Ink.dim;
-                                    stroke-width: 2px;
-                                    stroke-line-cap: round;
-                                    stroke-line-join: round;
-                                }
-                                ok-ta := TouchArea {
-                                    mouse-cursor: pointer;
-                                    clicked => { root.pl-rename-done(true, ren-in.text); }
-                                }
-                            }
+                        if root.pl-renaming: RenameField {
+                            x: Space.pad;
+                            y: (pl-panel-h - self.height) / 2;
+                            width: root.pl-chooser-most;
+                            height: Size.compact;
+                            text <=> root.pl-rename-text;
+                            done(kept, t) => { root.pl-rename-done(kept, t); }
                         }
                         // the round starting again, after the strip (before Pause)
                         Path {
                             visible: !root.pl-single && !root.pl-empty && root.pl-sizing < 0;
-                            x: parent.width - 16px - 28px - 8px - 20px;
-                            y: 18px;
-                            width: 20px;
-                            height: 20px;
+                            x: parent.width - Space.pad - Size.compact - Space.inline - Size.round;
+                            y: (pl-panel-h - self.height) / 2;
+                            width: Size.round;
+                            height: Size.round;
                             viewbox-width: 24;
                             viewbox-height: 24;
                             commands: "M20 12a8 8 0 1 1-2.6-5.9M20 4v4.5h-4.5";
@@ -4329,43 +4036,15 @@ export component AppWindow inherits Window {
                     if root.screen-closed: Rectangle {
                         y: band-y;
                         height: pl-panel-h;
-                        if root.ob-ready: Rectangle {
-                            x: 16px;
-                            y: 14px;
+                        if root.ob-ready: DropField {
+                            x: Space.pad;
+                            y: (pl-panel-h - self.height) / 2;
                             width: root.ob-chooser-w;
-                            height: 28px;
-                            border-radius: Radius.control;
-                            background: ob-ta.has-hover || root.ob-choosing ? Ink.hover-well : transparent;
-                            Text {
-                                x: 8px;
-                                width: parent.width - 33px;
-                                height: parent.height;
-                                text: root.ob-name;
-                                font-family: Font.ui;
-                                font-size: Font.control;
-                                font-weight: Font.medium;
-                                color: Ink.bright;
-                                vertical-alignment: center;
-                                overflow: elide;
-                            }
-                            Path {
-                                x: parent.width - 18px;
-                                y: 9px;
-                                width: 10px;
-                                height: 10px;
-                                viewbox-width: 10;
-                                viewbox-height: 10;
-                                commands: "M2 3.5l3 3 3-3";
-                                fill: transparent;
-                                stroke: Ink.soft;
-                                stroke-width: 1.5px;
-                                stroke-line-cap: round;
-                                stroke-line-join: round;
-                            }
-                            ob-ta := TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => { root.ob-choose(self.absolute-position.x, self.absolute-position.y, self.height); }
-                            }
+                            height: Size.compact;
+                            subtle: true;
+                            text: root.ob-name;
+                            open: root.ob-choosing;
+                            clicked(x, y, h) => { root.ob-choose(x, y, h); }
                         }
                         if root.ob-ready: Text {
                             x: 16px + root.ob-chooser-w + 24px;
@@ -4809,7 +4488,7 @@ export component AppWindow inherits Window {
     // the title bar, under the device's bar on its page (which stays put), and
     // short of the window's rounded corner at the foot.
     if root.place == "z10": ScrollBar {
-        x: root.width - 12px;
+        x: root.width - Part.scroll-in;
         y: bar + Size.bar + 2px;
         height: root.height - bar - Size.bar - 2px - root.bar-foot;
         view: flick.height;
@@ -4818,7 +4497,7 @@ export component AppWindow inherits Window {
         scroll-to(o) => { flick.content-y = -o; }
     }
     if root.place == "mouse": ScrollBar {
-        x: root.width - 12px;
+        x: root.width - Part.scroll-in;
         y: bar + Size.bar + 2px;
         height: root.height - bar - Size.bar - 2px - root.bar-foot;
         view: mouse-flick.height;
@@ -4827,7 +4506,7 @@ export component AppWindow inherits Window {
         scroll-to(o) => { mouse-flick.content-y = -o; }
     }
     if root.place == "library": ScrollBar {
-        x: root.width - 12px;
+        x: root.width - Part.scroll-in;
         y: bar + Size.bar + 2px;
         height: root.height - bar - Size.bar - 2px - root.bar-foot;
         view: gl-flick.height;
@@ -4836,7 +4515,7 @@ export component AppWindow inherits Window {
         scroll-to(o) => { gl-flick.content-y = -o; }
     }
     if root.place == "settings": ScrollBar {
-        x: root.width - 12px;
+        x: root.width - Part.scroll-in;
         y: bar + Size.bar + 2px;
         height: root.height - bar - Size.bar - 2px - root.bar-foot;
         view: set-flick.height;
@@ -4852,7 +4531,7 @@ export component AppWindow inherits Window {
         corner: root.radius;
         cancel => { root.gl-modal-close(); }
         DialogBox {
-            width: min(560px, parent.width - 32px);
+            width: min(Size.dialog, parent.width - 2 * Space.pad);
             height: form.preferred-height + 2 * Space.margin;
             form := VerticalLayout {
                 x: Space.margin;
@@ -4860,51 +4539,26 @@ export component AppWindow inherits Window {
                 width: parent.width - 2 * Space.margin;
                 height: self.preferred-height;
                 spacing: 0;
-                Text {
-                    text: root.gl-modal == 1 ? "Add a game" : root.gl-modal == 3 ? root.gl-script-title : root.gl-modal == 4 ? root.gl-plugin-title : root.gl-modal == 5 ? root.gl-var-title : "Add an app";
-                    font-family: Font.ui;
-                    font-size: Font.title;
-                    font-weight: Font.strong;
-                    color: Ink.ink;
-                }
-                Rectangle { height: 4px; }
-                Text {
+                DialogHead {
+                    title: root.gl-modal == 1 ? "Add a game" : root.gl-modal == 3 ? root.gl-script-title : root.gl-modal == 4 ? root.gl-plugin-title : root.gl-modal == 5 ? root.gl-var-title : "Add an app";
                     text: root.gl-modal == 1 ? "Choose the game’s program. The game joins Games, with a page of its own." : root.gl-modal == 3 ? root.gl-script-sub
                         : root.gl-modal == 4 ? root.gl-plugin-sub : root.gl-modal == 5 ? root.gl-var-sub
                         : "Choose an app you’ve had open while Ectomatter was running. The app joins Apps, with a page of its own.";
-                    font-family: Font.ui;
-                    font-size: Font.control;
-                    color: Ink.soft;
-                    wrap: word-wrap;
                 }
-                Rectangle { height: 18px; }
+                Rectangle { height: Space.pad; }
                 if root.gl-modal == 1: VerticalLayout {
                     spacing: 0;
-                    Text {
+                    FormLabel {
                         text: "Program";
-                        font-family: Font.ui;
-                        font-size: Font.control;
-                        color: Ink.dim;
                     }
-                    Rectangle { height: 7px; }
+                    Rectangle { height: Space.label; }
                     HorizontalLayout {
-                        spacing: 8px;
-                        height: 36px;
-                        Rectangle {
+                        spacing: Space.inline;
+                        FieldBox {
                             horizontal-stretch: 1;
-                            border-radius: Radius.control;
-                            background: Ink.well;
-                            Text {
-                                x: 12px;
-                                width: parent.width - 24px;
-                                height: parent.height;
-                                text: root.gl-program != "" ? root.gl-program : "No program chosen";
-                                font-family: Font.ui;
-                                font-size: Font.control;
-                                color: root.gl-program != "" ? Ink.ink : Ink.placeholder;
-                                vertical-alignment: center;
-                                overflow: elide;
-                            }
+                            read-only: true;
+                            text: root.gl-program;
+                            placeholder: "No program chosen";
                         }
                         VerticalLayout {
                             alignment: center;
@@ -4915,67 +4569,29 @@ export component AppWindow inherits Window {
                             }
                         }
                     }
-                    Rectangle { height: 6px; }
-                    Text {
+                    Rectangle { height: Space.tight; }
+                    FormNote {
                         text: "Ectomatter notices the game starting, from Play here or anywhere else.";
-                        font-family: Font.ui;
-                        font-size: Font.note;
-                        color: Ink.quiet;
-                        wrap: word-wrap;
                     }
-                    Rectangle { height: 14px; }
-                    Text {
+                    Rectangle { height: Space.pad; }
+                    FormLabel {
                         text: "Name";
-                        font-family: Font.ui;
-                        font-size: Font.control;
-                        color: Ink.dim;
                     }
-                    Rectangle { height: 7px; }
-                    Rectangle {
-                        height: 36px;
-                        border-radius: Radius.control;
-                        background: Ink.well;
-                        if name-in.text == "": Text {
-                            x: 12px;
-                            height: parent.height;
-                            text: root.gl-name-hint;
-                            font-family: Font.ui;
-                            font-size: Font.control;
-                            color: Ink.placeholder;
-                            vertical-alignment: center;
-                        }
-                        name-in := TextInput {
-                            x: 12px;
-                            width: parent.width - 24px;
-                            height: parent.height;
-                            text <=> root.gl-name-typed;
-                            font-family: Font.ui;
-                            font-size: Font.control;
-                            color: Ink.ink;
-                            vertical-alignment: center;
-                            single-line: true;
-                            changed has-focus => { Typing.on = self.has-focus; }
-                            accepted => { if (root.gl-can-add) { root.gl-add-done(); } }
-                            key-pressed(e) => {
-                                if (e.text == Key.Escape) {
-                                    root.gl-modal-close();
-                                    return accept;
-                                }
-                                reject
-                            }
-                        }
+                    Rectangle { height: Space.label; }
+                    FieldBox {
+                        placeholder: root.gl-name-hint;
+                        text <=> root.gl-name-typed;
+                        accepted => { if (root.gl-can-add) { root.gl-add-done(); } }
+                        escape => { root.gl-modal-close(); }
                     }
                 }
                 // a plugin: from its GitHub address or its file, and what it is once found
                 if root.gl-modal == 4: VerticalLayout {
                     spacing: 0;
-                    Text {
+                    FormLabel {
                         text: "GitHub address";
-                        font-family: Font.ui;
-                        font-size: Font.control;
-                        color: Ink.dim;
                     }
-                    Rectangle { height: 7px; }
+                    Rectangle { height: Space.label; }
                     FieldBox {
                         placeholder: "Its GitHub address, or its owner/name";
                         text <=> root.gl-plugin-address;
@@ -4983,32 +4599,18 @@ export component AppWindow inherits Window {
                         accepted => { if (root.gl-can-add) { root.gl-add-done(); } }
                         escape => { root.gl-modal-close(); }
                     }
-                    Rectangle { height: 14px; }
-                    Text {
+                    Rectangle { height: Space.pad; }
+                    FormLabel {
                         text: "Or a file";
-                        font-family: Font.ui;
-                        font-size: Font.control;
-                        color: Ink.dim;
                     }
-                    Rectangle { height: 7px; }
+                    Rectangle { height: Space.label; }
                     HorizontalLayout {
-                        spacing: 8px;
-                        height: 36px;
-                        Rectangle {
+                        spacing: Space.inline;
+                        FieldBox {
                             horizontal-stretch: 1;
-                            border-radius: Radius.control;
-                            background: Ink.well;
-                            Text {
-                                x: 12px;
-                                width: parent.width - 24px;
-                                height: parent.height;
-                                text: root.gl-plugin-file != "" ? root.gl-plugin-file : "No file chosen";
-                                font-family: Font.ui;
-                                font-size: Font.control;
-                                color: root.gl-plugin-file != "" ? Ink.ink : Ink.placeholder;
-                                vertical-alignment: center;
-                                overflow: elide;
-                            }
+                            read-only: true;
+                            text: root.gl-plugin-file;
+                            placeholder: "No file chosen";
                         }
                         VerticalLayout {
                             alignment: center;
@@ -5019,21 +4621,18 @@ export component AppWindow inherits Window {
                             }
                         }
                     }
-                    Rectangle { height: 6px; }
-                    Text {
+                    Rectangle { height: Space.tight; }
+                    FormNote {
                         text: "Its file ends in .ectocore.";
-                        font-family: Font.ui;
-                        font-size: Font.note;
-                        color: Ink.quiet;
                     }
-                    if root.gl-plugin-found != "": Rectangle { height: 16px; }
+                    if root.gl-plugin-found != "": Rectangle { height: Space.pad; }
                     if root.gl-plugin-found != "": Rectangle {
                         height: found-words.preferred-height;
                         border-radius: Radius.panel;
                         background: Ink.well;
                         found-words := VerticalLayout {
-                            padding: 14px;
-                            spacing: 3px;
+                            padding: Space.row;
+                            spacing: Space.list;
                             Text {
                                 text: root.gl-plugin-found;
                                 font-family: Font.ui;
@@ -5048,16 +4647,12 @@ export component AppWindow inherits Window {
                                 color: Ink.soft;
                                 wrap: word-wrap;
                             }
-                            Text {
+                            FormNote {
                                 text: root.gl-plugin-can;
-                                font-family: Font.ui;
-                                font-size: Font.note;
-                                color: Ink.quiet;
-                                wrap: word-wrap;
                             }
                         }
                     }
-                    if root.gl-plugin-state != "": Rectangle { height: 10px; }
+                    if root.gl-plugin-state != "": Rectangle { height: Space.inline; }
                     if root.gl-plugin-state != "": Text {
                         text: root.gl-plugin-state;
                         font-family: Font.ui;
@@ -5070,16 +4665,13 @@ export component AppWindow inherits Window {
                 if root.gl-modal == 5: VerticalLayout {
                     spacing: 0;
                     HorizontalLayout {
-                        spacing: 14px;
+                        spacing: Space.pad;
                         VerticalLayout {
                             spacing: 0;
-                            Text {
+                            FormLabel {
                                 text: "Name";
-                                font-family: Font.ui;
-                                font-size: Font.control;
-                                color: Ink.dim;
                             }
-                            Rectangle { height: 7px; }
+                            Rectangle { height: Space.label; }
                             FieldBox {
                                 placeholder: "PROTON_ENABLE_NVAPI";
                                 mono: true;
@@ -5091,13 +4683,10 @@ export component AppWindow inherits Window {
                         }
                         VerticalLayout {
                             spacing: 0;
-                            Text {
+                            FormLabel {
                                 text: "Value";
-                                font-family: Font.ui;
-                                font-size: Font.control;
-                                color: Ink.dim;
                             }
-                            Rectangle { height: 7px; }
+                            Rectangle { height: Space.label; }
                             FieldBox {
                                 placeholder: "1";
                                 mono: true;
@@ -5108,7 +4697,7 @@ export component AppWindow inherits Window {
                             }
                         }
                     }
-                    if root.gl-var-warning != "": Rectangle { height: 8px; }
+                    if root.gl-var-warning != "": Rectangle { height: Space.tight; }
                     if root.gl-var-warning != "": Text {
                         text: root.gl-var-warning;
                         font-family: Font.ui;
@@ -5120,13 +4709,10 @@ export component AppWindow inherits Window {
                 // a script: its name, its command and its undo side by side, how it runs, its time limit
                 if root.gl-modal == 3: VerticalLayout {
                     spacing: 0;
-                    Text {
+                    FormLabel {
                         text: "Name";
-                        font-family: Font.ui;
-                        font-size: Font.control;
-                        color: Ink.dim;
                     }
-                    Rectangle { height: 7px; }
+                    Rectangle { height: Space.label; }
                     FieldBox {
                         placeholder: "For example, Pause the local AI";
                         text <=> root.gl-script-name;
@@ -5134,19 +4720,15 @@ export component AppWindow inherits Window {
                         accepted => { if (root.gl-can-add) { root.gl-add-done(); } }
                         escape => { root.gl-modal-close(); }
                     }
-                    Rectangle { height: 14px; }
+                    Rectangle { height: Space.pad; }
                     HorizontalLayout {
-                        spacing: 14px;
+                        spacing: Space.pad;
                         VerticalLayout {
                             spacing: 0;
-                            Text {
+                            FormLabel {
                                 text: root.gl-script-start-label;
-                                font-family: Font.ui;
-                                font-size: Font.control;
-                                color: Ink.dim;
-                                overflow: elide;
                             }
-                            Rectangle { height: 7px; }
+                            Rectangle { height: Space.label; }
                             FieldBox {
                                 placeholder: "A command or a file";
                                 mono: true;
@@ -5158,14 +4740,10 @@ export component AppWindow inherits Window {
                         }
                         VerticalLayout {
                             spacing: 0;
-                            Text {
+                            FormLabel {
                                 text: root.gl-script-quit-label;
-                                font-family: Font.ui;
-                                font-size: Font.control;
-                                color: Ink.dim;
-                                overflow: elide;
                             }
-                            Rectangle { height: 7px; }
+                            Rectangle { height: Space.label; }
                             FieldBox {
                                 placeholder: "Optional";
                                 mono: true;
@@ -5176,7 +4754,7 @@ export component AppWindow inherits Window {
                             }
                         }
                     }
-                    if root.gl-script-warning != "": Rectangle { height: 8px; }
+                    if root.gl-script-warning != "": Rectangle { height: Space.tight; }
                     if root.gl-script-warning != "": Text {
                         text: root.gl-script-warning;
                         font-family: Font.ui;
@@ -5184,26 +4762,23 @@ export component AppWindow inherits Window {
                         color: Ink.bad;
                         wrap: word-wrap;
                     }
-                    Rectangle { height: 18px; }
+                    Rectangle { height: Space.pad; }
                     CheckBox {
                         text: root.gl-script-wait-label;
                         on: root.gl-script-wait;
                         clicked => { root.gl-script-wait-toggle(); }
                     }
-                    Rectangle { height: 6px; }
+                    Rectangle { height: Space.tight; }
                     CheckBox {
                         text: root.gl-script-keep-label;
                         on: root.gl-script-keep;
                         clicked => { root.gl-script-keep-toggle(); }
                     }
-                    Rectangle { height: 18px; }
-                    Text {
+                    Rectangle { height: Space.pad; }
+                    FormLabel {
                         text: "Time limit";
-                        font-family: Font.ui;
-                        font-size: Font.control;
-                        color: Ink.dim;
                     }
-                    Rectangle { height: 7px; }
+                    Rectangle { height: Space.label; }
                     HorizontalLayout {
                         alignment: start;
                         DropField {
@@ -5213,13 +4788,9 @@ export component AppWindow inherits Window {
                             clicked(x, y, h) => { root.gl-script-limit-menu(x, y, h); }
                         }
                     }
-                    Rectangle { height: 6px; }
-                    Text {
+                    Rectangle { height: Space.tight; }
+                    FormNote {
                         text: root.gl-script-limit-note;
-                        font-family: Font.ui;
-                        font-size: Font.note;
-                        color: Ink.quiet;
-                        wrap: word-wrap;
                     }
                 }
                 if root.gl-modal == 2 && root.gl-seen.length == 0: Text {
@@ -5230,32 +4801,32 @@ export component AppWindow inherits Window {
                     wrap: word-wrap;
                 }
                 if root.gl-modal == 2 && root.gl-seen.length > 0: Rectangle {
-                    height: min(root.gl-seen.length * 44px + 8px, 320px);
+                    height: min(root.gl-seen.length * Size.pick-row + 2 * Space.tight, 320px);
                     border-radius: Radius.panel;
                     background: Ink.well;
                     clip: true;
                     seen-flick := Flickable {
                         width: parent.width;
                         height: parent.height;
-                        content-height: root.gl-seen.length * 44px + 8px;
+                        content-height: root.gl-seen.length * Size.pick-row + 2 * Space.tight;
                         mouse-drag-pan-enabled: false;
                         for a[i] in root.gl-seen: Rectangle {
-                            x: 4px;
-                            y: 4px + i * 44px;
-                            width: parent.width - 8px;
-                            height: 44px;
+                            x: Space.tight;
+                            y: Space.tight + i * Size.pick-row;
+                            width: parent.width - 2 * Space.tight;
+                            height: Size.pick-row;
                             border-radius: Radius.control;
                             background: root.gl-seen-chosen == i ? (seen-ta.has-hover ? Ink.pick-hover : Ink.pick) : seen-ta.has-hover ? Ink.hover-well : transparent;
                             if a.has-icon: Image {
-                                x: 10px;
-                                y: 10px;
-                                width: 24px;
-                                height: 24px;
+                                x: Space.row;
+                                y: (parent.height - self.height) / 2;
+                                width: Size.pick-icon;
+                                height: Size.pick-icon;
                                 source: a.icon;
                             }
                             Text {
-                                x: 44px;
-                                width: parent.width - 54px;
+                                x: Space.row + Size.pick-icon + Space.row;
+                                width: parent.width - self.x - Space.row;
                                 height: parent.height;
                                 text: a.name;
                                 font-family: Font.ui;
@@ -5271,9 +4842,9 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
-                Rectangle { height: 20px; }
+                Rectangle { height: Space.margin; }
                 HorizontalLayout {
-                    spacing: 8px;
+                    spacing: Space.inline;
                     if root.gl-modal == 3 && root.gl-script-editing: VerticalLayout {
                         alignment: center;
                         WordButton {
@@ -5318,32 +4889,18 @@ export component AppWindow inherits Window {
         cancel => { root.scene-form-close(); }
         escape => { root.scene-form-escape(); }
         sf := DialogBox {
-            property <length> head-h: 22px + Space.tight + sf-sub.preferred-height + Space.pad;
+            property <length> head-h: sf-head.preferred-height + Space.pad;
             property <length> natural: Space.margin + self.head-h + Size.preview + Space.tight + root.scene-form-h + Space.margin + Size.button + 2px + Space.margin;
             width: Size.dialog;
             height: min(self.natural, parent.height - 32px);
             x: (parent.width - self.width) / 2;
             y: max(16px, (parent.height - self.height) / 2);
-            Text {
+            sf-head := DialogHead {
                 x: Space.margin;
                 y: Space.margin;
-                height: 22px;
-                text: root.scene-form-title;
-                font-family: Font.ui;
-                font-size: Font.title;
-                font-weight: Font.strong;
-                color: Ink.ink;
-                vertical-alignment: center;
-            }
-            sf-sub := Text {
-                x: Space.margin;
-                y: Space.margin + 22px + Space.tight;
-                width: parent.width - 48px;
+                width: parent.width - 2 * Space.margin;
+                title: root.scene-form-title;
                 text: root.scene-form-sub;
-                font-family: Font.ui;
-                font-size: Font.control;
-                color: Ink.soft;
-                wrap: word-wrap;
             }
             Rectangle {
                 x: Space.margin;
@@ -6031,7 +5588,7 @@ export component MacroWindow inherits Window {
             }
         }
         ScrollBar {
-            x: parent.width - 12px;
+            x: parent.width - Part.scroll-in;
             y: parent.head-h;
             height: parent.height - parent.head-h - 10px;
             view: parent.height - parent.head-h - 10px;
@@ -6137,7 +5694,7 @@ export component MacroWindow inherits Window {
                 }
             }
             ScrollBar {
-                x: parent.width - 12px;
+                x: parent.width - Part.scroll-in;
                 y: 8px;
                 height: parent.height - 48px - 8px - 2px;
                 view: chain-flick.height;

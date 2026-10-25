@@ -766,7 +766,7 @@ impl Games {
             let rows: Vec<LibApp> = list
                 .iter()
                 .map(|e| {
-                    let icon = self.icon_for(e, 32, 7, scale);
+                    let icon = self.icon_for(e, crate::tokens::size::APP_ICON as u32, crate::tokens::radius::CONTROL as u32, scale);
                     LibApp {
                         name: e.name.as_str().into(),
                         sub: self.changes_line(&e.id).into(),
@@ -1698,7 +1698,7 @@ impl Games {
                     .clone()
                     .iter()
                     .map(|(id, name)| {
-                        let icon = crate::front_app::icon_of(id).and_then(|f| self.pic(Pic::Icon(f, (24.0 * scale).round() as u32, (5.0 * scale).round() as u32)));
+                        let icon = crate::front_app::icon_of(id).and_then(|f| self.pic(Pic::Icon(f, (crate::tokens::size::PICK_ICON * scale).round() as u32, (crate::tokens::radius::SMALL * scale).round() as u32)));
                         LibApp { name: name.as_str().into(), sub: "".into(), from: "".into(), has_icon: icon.is_some(), icon: icon.unwrap_or_default() }
                     })
                     .collect();

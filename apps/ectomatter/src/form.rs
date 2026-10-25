@@ -222,6 +222,12 @@ pub fn drop_width(words: &str) -> f32 {
     crate::text::width(font::REGULAR, font::CONTROL, words).ceil() + 2.0 * part::FIELD_PAD + space::ROW + CHEVRON
 }
 
+/// How wide a chooser at a panel's head is (a DropField with no well, its words a step
+/// heavier): as a dropdown is.
+pub fn chooser_width(words: &str) -> f32 {
+    crate::text::width(font::MEDIUM, font::CONTROL, words).ceil() + 2.0 * part::FIELD_PAD + space::ROW + CHEVRON
+}
+
 /// a dropdown's chevron, across (ui/system/controls.slint's DropField)
 const CHEVRON: f32 = 12.0;
 
