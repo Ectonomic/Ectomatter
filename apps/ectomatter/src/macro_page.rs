@@ -664,69 +664,25 @@ impl MacroPage {
                 }
             }
             Kind::Jobs { macros: false, change } => {
-                // each device's jobs, as they sit on the desk: its profiles, the
-                // next and the one before, and the keyboard's screen jobs
-                use crate::jobs::{Job, To};
-                use ectomatter_protocol::Jump;
+                // each device's jobs under its name, as they sit on the desk: its profiles, the
+                // next and the one before, and the keyboard's screen jobs; then the scenes'
+                use crate::jobs::Job;
                 let current = change.and_then(|i| d.steps.get(i)).and_then(macros::job_of);
                 let names = &self.ed.jobs;
-                let mut order: Vec<&str> = names.order.clone();
-                for dev in [crate::jobs::KEYBOARD, crate::jobs::MOUSE] {
-                    if !order.contains(&dev) {
-                        order.push(dev);
-                    }
-                }
                 let push = |rows: &mut Vec<MenuRow>, picks: &mut Vec<Pick>, label: &str, j: Job| {
                     rows.push(row(0, label, current.as_ref() == Some(&j)));
                     picks.push(Pick::Job(j.id()));
                 };
-                for dev in order {
-                    if dev == crate::jobs::KEYBOARD && !names.keyboard.is_empty() {
-                        if !rows.is_empty() {
-                            rows.push(row(2, "", false));
-                            picks.push(Pick::Nothing);
-                        }
-                        rows.push(row(1, "Keyboard", false));
-                        picks.push(Pick::Nothing);
-                        for (k, name) in &names.keyboard {
-                            push(&mut rows, &mut picks, name, Job::KeyboardProfile(Jump::To(*k as u32)));
-                        }
-                        push(&mut rows, &mut picks, "Next profile", Job::KeyboardProfile(Jump::Next));
-                        push(&mut rows, &mut picks, "Previous profile", Job::KeyboardProfile(Jump::Previous));
-                        for code in [crate::z10::NEXT_LAYOUT, crate::z10::PREV_LAYOUT, crate::z10::NEXT_PLAYLIST, crate::z10::PREV_PLAYLIST] {
-                            let j = Job::Screen(code);
-                            let words = names.of(&j);
-                            push(&mut rows, &mut picks, &words, j);
-                        }
-                    }
-                    if dev == crate::jobs::MOUSE && !names.mouse.is_empty() {
-                        if !rows.is_empty() {
-                            rows.push(row(2, "", false));
-                            picks.push(Pick::Nothing);
-                        }
-                        rows.push(row(1, "Mouse", false));
-                        picks.push(Pick::Nothing);
-                        for (id, name) in &names.mouse {
-                            push(&mut rows, &mut picks, name, Job::MouseProfile(To::Id(id.clone())));
-                        }
-                        push(&mut rows, &mut picks, "Next profile", Job::MouseProfile(To::Next));
-                        push(&mut rows, &mut picks, "Previous profile", Job::MouseProfile(To::Previous));
-                    }
-                }
-                // the scenes: each one, the next, the one before, and none
-                let scenes = names.scene_jobs();
-                if !scenes.is_empty() {
+                let groups = names.devices.iter().map(|dev| (dev.name.clone(), dev.jobs())).chain(std::iter::once(("Scenes".to_string(), names.scene_jobs())));
+                for (head, jobs) in groups.filter(|(_, jobs)| !jobs.is_empty()) {
                     if !rows.is_empty() {
                         rows.push(row(2, "", false));
                         picks.push(Pick::Nothing);
                     }
-                    rows.push(row(1, "Scenes", false));
+                    rows.push(row(1, &head, false));
                     picks.push(Pick::Nothing);
-                    for j in scenes {
-                        let words = match &j {
-                            Job::Scene(crate::jobs::SceneTo::Id(id)) => names.scenes.iter().find(|(k, _)| k == id).map_or_else(|| names.of(&j), |(_, n)| n.clone()),
-                            _ => names.of(&j),
-                        };
+                    for j in jobs {
+                        let words = names.short(&j);
                         push(&mut rows, &mut picks, &words, j);
                     }
                 }
@@ -1437,11 +1393,16 @@ mod tests {
         let mut page = Page::new();
         page.dev = Some(json!({ "macros": {} }));
         let mut mp = MacroPage::new(MacroWindow::new().unwrap(), slint::Image::default());
+        let device = |key: &str, name: &str, profiles: &[(&str, &str)], screen: bool| crate::jobs::Profiled {
+            key: key.into(),
+            name: name.into(),
+            profiles: profiles.iter().map(|(id, n)| (id.to_string(), n.to_string())).collect(),
+            steps: true,
+            screen,
+        };
         let names = crate::jobs::Names {
-            keyboard: vec![(1, "Studio".into()), (2, "FPS Gaming".into())],
-            mouse: vec![("pa".into(), "Studio".into()), ("pb".into(), "Gaming".into())],
+            devices: vec![device("z10", "EVGA Z10 RGB", &[("1", "Studio"), ("2", "FPS Gaming")], true), device("sensei310", "SteelSeries Sensei 310", &[("pa", "Studio"), ("pb", "Gaming")], false)],
             macros: vec![(81, "Gaming on".into()), (82, "Plays it".into()), (83, "Another".into())],
-            order: vec![crate::jobs::KEYBOARD, crate::jobs::MOUSE],
             scenes: vec![("wave".into(), "Wave across the desk".into()), ("scene-1".into(), "DOOM".into())],
         };
         mp.ed.jobs = names.clone();
@@ -1454,12 +1415,12 @@ mod tests {
             mp.ui.invoke_menu_chose(i as i32);
             mp.act(page, &|_| {});
         };
-        // + Action: the keyboard's profiles and screen jobs, then the mouse's
+        // + Action: each device's under its own name, the keyboard's profiles and screen jobs, then the mouse's
         mp.ui.invoke_tool(6, 0.0, 0.0, 30.0);
         mp.act(&mut page, &|_| {});
         let rows = menu(&mp);
-        assert_eq!(rows[..5], [(1, "Keyboard".into()), (0, "Studio".into()), (0, "FPS Gaming".into()), (0, "Next profile".into()), (0, "Previous profile".into())]);
-        let mouse = rows.iter().position(|r| *r == (1, "Mouse".to_string())).unwrap();
+        assert_eq!(rows[..5], [(1, "EVGA Z10 RGB".into()), (0, "Studio".into()), (0, "FPS Gaming".into()), (0, "Next profile".into()), (0, "Previous profile".into())]);
+        let mouse = rows.iter().position(|r| *r == (1, "SteelSeries Sensei 310".to_string())).unwrap();
         assert!(rows[..mouse].contains(&(0, "Screen: next layout".to_string())));
         assert_eq!(rows[mouse + 1..mouse + 3], [(0, "Studio".into()), (0, "Gaming".into())]);
         // then the scenes, each by its name, the next, the one before and none
@@ -1474,10 +1435,10 @@ mod tests {
         mp.act(&mut page, &|_| {});
         choose(&mut mp, &mut page, "DOOM", scenes);
         let steps = mp.ed.drafts[&81].steps.clone();
-        assert_eq!(steps, [json!({ "job": "keyboard-profile:2", "after": 0 }), json!({ "job": "mouse-profile:pb", "after": 0 }), json!({ "job": "scene:scene-1", "after": 0 })]);
+        assert_eq!(steps, [json!({ "job": "profile:z10:2", "after": 0 }), json!({ "job": "profile:sensei310:pb", "after": 0 }), json!({ "job": "scene:scene-1", "after": 0 })]);
         // the chain shows them as jobs, in their words
         let chips: Vec<(i32, String)> = mp.chain.iter().filter(|c| c.kind == piece::STEP).map(|c| (c.style, c.text.to_string())).collect();
-        assert_eq!(chips, [(2, "Keyboard: FPS Gaming".into()), (2, "Mouse: Gaming".into()), (2, "Scene: DOOM".into())]);
+        assert_eq!(chips, [(2, "EVGA Z10 RGB: FPS Gaming".into()), (2, "SteelSeries Sensei 310: Gaming".into()), (2, "Scene: DOOM".into())]);
         // + Macro: the other macros, not this one nor the one that plays it
         mp.ui.invoke_tool(7, 0.0, 0.0, 30.0);
         mp.act(&mut page, &|_| {});
@@ -1487,10 +1448,10 @@ mod tests {
         // a job's step has its own menu: change it, or take it out
         mp.ui.invoke_chain_click(hit::STEP, 0, 0.0, 0.0, 29.0);
         mp.act(&mut page, &|_| {});
-        assert_eq!(menu(&mp), [(1, "Keyboard: FPS Gaming".into()), (0, "Change action ›".into()), (2, "".into()), (4, "Remove".into())]);
+        assert_eq!(menu(&mp), [(1, "EVGA Z10 RGB: FPS Gaming".into()), (0, "Change action ›".into()), (2, "".into()), (4, "Remove".into())]);
         choose(&mut mp, &mut page, "Change action ›", 0);
         choose(&mut mp, &mut page, "Studio", 0);
-        assert_eq!(mp.ed.drafts[&81].steps[0], json!({ "job": "keyboard-profile:1", "after": 0 }));
+        assert_eq!(mp.ed.drafts[&81].steps[0], json!({ "job": "profile:z10:1", "after": 0 }));
         // the keyboard's macros, which it plays itself, offer neither
         mp.open(&page, Lib::Keyboard, None);
         assert!(!mp.ui.get_jobs_shown());

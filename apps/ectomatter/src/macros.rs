@@ -739,12 +739,13 @@ mod tests {
     /// together, then each job, as the devices' profiles are called now.
     #[test]
     fn a_macro_with_jobs_says_them() {
-        let names = crate::jobs::Names { keyboard: vec![(2, "FPS Gaming".into())], mouse: vec![("pa".into(), "Gaming".into())], ..Default::default() };
+        let device = |key: &str, name: &str, id: &str, profile: &str| crate::jobs::Profiled { key: key.into(), name: name.into(), profiles: vec![(id.into(), profile.into())], steps: true, screen: false };
+        let names = crate::jobs::Names { devices: vec![device("z10", "EVGA Z10 RGB", "2", "FPS Gaming"), device("sensei310", "SteelSeries Sensei 310", "pa", "Gaming")], ..Default::default() };
         let k = |key: &str, down: bool| json!({ "key": key, "down": down, "after": 0 });
-        let steps = vec![k("LeftCtrl", true), k("T", true), k("T", false), k("LeftCtrl", false), json!({ "job": "keyboard-profile:2", "after": 0 }), json!({ "job": "mouse-profile:pa", "after": 0 })];
-        assert_eq!(describe(&steps, &names), "Left Ctrl + T, Keyboard: FPS Gaming, Mouse: Gaming");
-        assert_eq!(describe(&steps[4..], &names), "Keyboard: FPS Gaming, Mouse: Gaming");
-        assert_eq!(step_words(&json!({ "job": "mouse-profile:gone" }), &names), "Mouse: a deleted profile");
+        let steps = vec![k("LeftCtrl", true), k("T", true), k("T", false), k("LeftCtrl", false), json!({ "job": "profile:z10:2", "after": 0 }), json!({ "job": "profile:sensei310:pa", "after": 0 })];
+        assert_eq!(describe(&steps, &names), "Left Ctrl + T, EVGA Z10 RGB: FPS Gaming, SteelSeries Sensei 310: Gaming");
+        assert_eq!(describe(&steps[4..], &names), "EVGA Z10 RGB: FPS Gaming, SteelSeries Sensei 310: Gaming");
+        assert_eq!(step_words(&json!({ "job": "profile:sensei310:gone" }), &names), "SteelSeries Sensei 310: a deleted profile");
         assert_eq!(step_words(&json!({ "job": "nonsense" }), &names), "An action Ectomatter no longer knows");
     }
 
@@ -758,12 +759,12 @@ mod tests {
         let k = |key: &str, down: bool| json!({ "key": key, "down": down, "after": 0 });
         let m = |n: u32, after: u64| json!({ "job": format!("macro:{n}:once"), "after": after });
         crate::library::set(61, "A", vec![k("A", true), k("A", false)]);
-        crate::library::set(62, "A then a profile", vec![m(61, 30), json!({ "job": "keyboard-profile:2", "after": 0 })]);
+        crate::library::set(62, "A then a profile", vec![m(61, 30), json!({ "job": "profile:z10:2", "after": 0 })]);
         crate::library::set(63, "Itself", vec![m(63, 0), k("C", true), k("C", false)]);
         crate::library::set(64, "One way round", vec![m(65, 0)]);
         crate::library::set(65, "The other way", vec![m(64, 0), k("B", true), k("B", false)]);
         let flat = |n: u32| flatten(crate::library::get(n).unwrap()["steps"].as_array().unwrap(), &mut vec![n]);
-        assert_eq!(flat(62), [k("A", true), json!({ "key": "A", "down": false, "after": 30 }), json!({ "job": "keyboard-profile:2", "after": 0 })]);
+        assert_eq!(flat(62), [k("A", true), json!({ "key": "A", "down": false, "after": 30 }), json!({ "job": "profile:z10:2", "after": 0 })]);
         assert_eq!(flat(63), [k("C", true), k("C", false)], "it never plays itself");
         assert_eq!(flat(64), [k("B", true), k("B", false)], "nor round through another");
         assert!(plays_macro(62, 61, &mut Vec::new()) && !plays_macro(61, 62, &mut Vec::new()));

@@ -527,7 +527,13 @@ impl Page {
         // set to now as Profile 1
         if self.profiles.is_none() && self.known() {
             let path = crate::profiles::path_for("sensei310");
-            self.profiles = Some(crate::profiles::Store::load(path.clone()).unwrap_or_else(|| crate::profiles::Store::first(path, self.body_now())));
+            let mut store = crate::profiles::Store::load(path.clone()).unwrap_or_else(|| crate::profiles::Store::first(path, self.body_now()));
+            // (a button's job kept by an old id, from when a job named the keyboard or the
+            // mouse in place of a device: kept by the device's key now)
+            if store.list.iter_mut().fold(false, |renamed, p| crate::jobs::rename_in(&mut p.body) | renamed) {
+                store.save();
+            }
+            self.profiles = Some(store);
         }
     }
 

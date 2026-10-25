@@ -394,17 +394,17 @@ mod tests {
     fn a_macros_jobs_are_handed_on_in_order() {
         let (tell, typed, stopped, jobs) = player_with_jobs();
         let steps = vec![
-            json!({ "job": "keyboard-profile:2", "after": 0 }),
+            json!({ "job": "profile:z10:2", "after": 0 }),
             json!({ "key": "A", "down": true, "after": 0 }),
             json!({ "key": "A", "down": false, "after": 150 }),
-            json!({ "job": "mouse-profile:pq", "after": 0 }),
+            json!({ "job": "profile:sensei310:pq", "after": 0 }),
         ];
         tell.send(Cmd::Down("b".into(), steps, Plays::Once)).unwrap();
         std::thread::sleep(Duration::from_millis(50));
-        assert_eq!(*jobs.lock().unwrap(), ["keyboard-profile:2"], "the second job waits for the wait before it");
+        assert_eq!(*jobs.lock().unwrap(), ["profile:z10:2"], "the second job waits for the wait before it");
         assert_eq!(typed.now(), [(30, true), (30, false)]);
         std::thread::sleep(Duration::from_millis(200));
-        assert_eq!(*jobs.lock().unwrap(), ["keyboard-profile:2", "mouse-profile:pq"]);
+        assert_eq!(*jobs.lock().unwrap(), ["profile:z10:2", "profile:sensei310:pq"]);
         drop(tell);
         stopped.recv_timeout(Duration::from_secs(2)).expect("the player stops");
     }
@@ -418,11 +418,11 @@ mod tests {
         let (tell, told) = mpsc::channel();
         let j = jobs.clone();
         let t = std::thread::spawn(move || play::<Typed>(told, || Err("no keyboard here".into()), move |id: &str| j.lock().unwrap().push(id.to_string())));
-        tell.send(Cmd::Down("a".into(), vec![json!({ "job": "keyboard-profile:2", "after": 0 }), json!({ "job": "mouse-profile:pq", "after": 0 })], Plays::Once)).unwrap();
+        tell.send(Cmd::Down("a".into(), vec![json!({ "job": "profile:z10:2", "after": 0 }), json!({ "job": "profile:sensei310:pq", "after": 0 })], Plays::Once)).unwrap();
         std::thread::sleep(Duration::from_millis(50));
-        tell.send(Cmd::Down("b".into(), vec![json!({ "job": "keyboard-profile:3", "after": 0 }), json!({ "key": "A", "down": true, "after": 0 })], Plays::Once)).unwrap();
+        tell.send(Cmd::Down("b".into(), vec![json!({ "job": "profile:z10:3", "after": 0 }), json!({ "key": "A", "down": true, "after": 0 })], Plays::Once)).unwrap();
         std::thread::sleep(Duration::from_millis(50));
-        assert_eq!(*jobs.lock().unwrap(), ["keyboard-profile:2", "mouse-profile:pq"]);
+        assert_eq!(*jobs.lock().unwrap(), ["profile:z10:2", "profile:sensei310:pq"]);
         drop(tell);
         t.join().unwrap();
     }
