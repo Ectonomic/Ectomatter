@@ -467,7 +467,7 @@ impl MacroPage {
 
     /// The step under a point in the window, by its index.
     fn step_at(&self, x: f32, y: f32) -> Option<i32> {
-        let (cx, cy) = (290.0 + 18.0, 36.0 + 56.0 + self.ui.get_chain_scroll());
+        let (cx, cy) = (290.0 + crate::tokens::space::MARGIN, 36.0 + 56.0 + self.ui.get_chain_scroll());
         self.chain
             .iter()
             .find(|c| c.kind == piece::STEP && c.id == hit::STEP && x >= cx + c.x - 6.0 && x < cx + c.x + c.w && y >= cy + c.y && y < cy + c.y + c.h)

@@ -1,0 +1,24 @@
+// How a page lays its boxes out, every page the same way.
+
+import { Space } from "tokens.slint";
+
+// The row of boxes on a device's page, under its stage (or under the page's head
+// where it has none), beside the Profiles column: the tab's boxes left to right,
+// Space.gap apart. Each box is at least its least width (its `min-width`, and
+// its `preferred-width` the same) and grows from it as the row's other boxes do,
+// so every line of boxes reaches the row's right edge; a box that can't use much
+// more room says so with a `max-width`, and the rest goes to its neighbors. A box
+// that doesn't fit beside the one before it starts a line under them. The boxes
+// in a line are as tall as each other: as tall as the tallest needs (its
+// `preferred-height`), at most the room left in the window (`max-height`), a box
+// that holds more scrolling inside itself; the row as a whole at least as tall as
+// the Profiles column beside it (the page sets its height so), its one line then
+// that tall. A box whose pieces are laid out in Rust says how wide the row made
+// it, so Rust lays them out to its width (CellBox).
+export component BoxRow inherits FlexboxLayout {
+    flex-direction: row;
+    flex-wrap: wrap;
+    spacing: Space.gap;
+    alignment: stretch;
+    cross-axis-alignment: stretch;
+}

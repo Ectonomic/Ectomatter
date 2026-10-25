@@ -462,7 +462,7 @@ impl Stack {
     }
     /// a quiet link at the right of the row it sits on
     pub(crate) fn link_right(&mut self, c: Ctl, label: &str, y: f32, icon: &str) {
-        let w = text::width(500, 12.5, label) + 18.0 + if icon.is_empty() { 0.0 } else { 20.0 };
+        let w = quiet_width(label, !icon.is_empty());
         self.cells.push(Cell { text: label.into(), lines: icon.into(), id: id(c), ..cell(kind::QUIET, self.w - 16.0 - w + 8.0, y, w, 24.0) });
     }
     pub(crate) fn height(&self) -> f32 {
@@ -490,8 +490,10 @@ pub fn color_of(page: &Page, c: Ctl, paint: [u8; 3]) -> [u8; 3] {
 
 /// Each effect's small picture, for its tile on the Lighting page, at `scale`:
 /// 72 by 40, and Wave's twice as wide, its colors round twice, to roll along.
-pub fn icon(mode: &str, scale: f32) -> slint::Image {
-    const W: f32 = 72.0;
+pub fn icon(mode: &str, scale: f32, wide: f32) -> slint::Image {
+    // (as wide as its tile shows it, so nothing is stretched to fit)
+    #[allow(non_snake_case)]
+    let W: f32 = wide.max(1.0);
     const H: f32 = 40.0;
     // (Wave rolls along a picture twice as wide; Pulse is five tiles wide, a color each)
     let across = if mode == "wave" { 2.0 } else if mode == "pulse" { 5.0 } else { 1.0 };
@@ -576,4 +578,11 @@ pub fn icon(mode: &str, scale: f32) -> slint::Image {
         *p = slint::Rgba8Pixel { r: (c[0] * a).round() as u8, g: (c[1] * a).round() as u8, b: (c[2] * a).round() as u8, a: (a * 255.0).round() as u8 };
     }
     slint::Image::from_rgba8_premultiplied(buf)
+}
+
+/// How wide a quiet link is (a LinkButton, ui/system/controls.slint): its words,
+/// its room each side, and its glyph before them where it has one.
+pub(crate) fn quiet_width(label: &str, glyph: bool) -> f32 {
+    use crate::tokens::{font, part};
+    text::width(font::MEDIUM, font::NOTE, label) + 2.0 * part::QUIET_PAD + if glyph { part::GLYPH + part::GLYPH_GAP } else { 0.0 }
 }

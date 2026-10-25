@@ -26,6 +26,7 @@
 #![deny(unconditional_recursion)]
 
 mod adapter;
+mod boxes;
 mod clipboard;
 mod commands;
 mod computer;
@@ -77,6 +78,7 @@ mod putback;
 mod screen_edit;
 mod screen_keys;
 mod scenes;
+mod tokens;
 mod screens;
 mod sensors;
 mod settings;
@@ -178,9 +180,9 @@ const MACROS: usize = 0;
 const LAB: usize = 1;
 const LAYOUTS: usize = 2;
 /// the ground the keyboard sits on: its stage's, every device's (Ink.stage)
-const STAGE: [u8; 3] = [0x1b, 0x1b, 0x1f];
+const STAGE: [u8; 3] = tokens::ink::STAGE;
 /// the ground it sits on on Home's desk: the app's own (Ink.base)
-const HOME_GROUND: [u8; 3] = [0x18, 0x18, 0x1b];
+const HOME_GROUND: [u8; 3] = tokens::ink::BASE;
 /// How much brighter than the page's colors the keys' light is drawn. The
 /// light is drawn at the web design's brightness, as approved in WebKit; going
 /// above the desktop's white by the screen's headroom looked overdone.
@@ -1274,6 +1276,7 @@ fn snap_layouts(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow
         .and_then(|s| s.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
         .unwrap_or(LAYOUT_SIZE);
     let ui = LayoutWindow::new().unwrap();
+    ui.set_device_name(cores::shown().name().into());
     let _ = slint::ComponentHandle::window(&ui);
     let window = made.borrow().last().cloned().unwrap();
     slint::ComponentHandle::show(&ui).unwrap();
@@ -2421,10 +2424,11 @@ impl App {
     fn open_layouts(&mut self, i: usize) {
         if self.front.layouts.is_none() {
             let ui = LayoutWindow::new().unwrap();
+            ui.set_device_name(cores::shown().name().into());
             let _ = slint::ComponentHandle::window(&ui);
             slint::ComponentHandle::show(&ui).unwrap();
             self.front.layouts = Some(layout_page::LayoutPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false)));
-            self.subs[LAYOUTS] = Some(self.make_sub("EVGA Z10 RGB / Screen layouts", LAYOUT_SIZE, LAYOUT_MIN_SIZE));
+            self.subs[LAYOUTS] = Some(self.make_sub(&format!("{} / Screen layouts", cores::shown().name()), LAYOUT_SIZE, LAYOUT_MIN_SIZE));
         } else {
             self.show_sub(LAYOUTS);
         }

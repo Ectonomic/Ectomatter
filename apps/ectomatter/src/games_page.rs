@@ -25,6 +25,7 @@ use slint::{ModelRc, VecModel};
 use crate::commands::{Ran, Script};
 use crate::games::{self, Choice, Entry, From, Kind, Library, Running, EVERY};
 use crate::lighting::{cell, id, kind, style, text_cell, Ctl};
+use crate::tokens::{font, part};
 use crate::{AppWindow, Cell, LibApp, LibCover, LibFact, LibToc, MenuRow};
 
 /// A plugin's section as a page shows it: whose it is, its name, and how the
@@ -339,7 +340,7 @@ fn draw(p: &Pic) -> Option<slint::SharedPixelBuffer<slint::Rgba8Pixel>> {
 /// The page's measures: its gutter, a page's column at most, and on a page the
 /// label's room in a row (a device's glyph on its square, then its name) and the
 /// dropdowns' width.
-const X0: f32 = 24.0;
+const X0: f32 = crate::tokens::space::MARGIN;
 const COLUMN: f32 = 1076.0;
 const PAD_X: f32 = 24.0;
 const LABEL_W: f32 = 236.0;
@@ -354,7 +355,7 @@ const HEAD_END: f32 = 12.0 + 36.0 + 6.0;
 /// sections end where the game's picture does
 const TOC_W: f32 = 200.0;
 const TOC_W_MAX: f32 = 220.0;
-const TOC_GAP: f32 = 32.0;
+const TOC_GAP: f32 = crate::tokens::space::SECTION;
 /// The pieces down a row's column in a plugin's section, as they're placed:
 /// where the next goes, and whether one has gone yet (the first sits on the
 /// line of the row's label, its middle on the label's).
@@ -381,10 +382,10 @@ impl Column {
 
 /// the glyph a plugin's section draws on a button to open a folder (on 14 units, as the mock's)
 const FOLDER: &str = "M1.8 3.6c0-.6.5-1.1 1.1-1.1h2.6l1.3 1.4h4.3c.6 0 1.1.5 1.1 1.1v5.4c0 .6-.5 1.1-1.1 1.1H2.9c-.6 0-1.1-.5-1.1-1.1Z";
-/// the covers: at least this wide, with these gaps across and down
+/// the covers: at least this wide, with a card grid's gaps across and down
 const COVER_MIN: f32 = 150.0;
-const GAP_X: f32 = 24.0;
-const GAP_Y: f32 = 22.0;
+const GAP_X: f32 = crate::tokens::space::MARGIN;
+const GAP_Y: f32 = crate::tokens::space::MARGIN;
 
 pub struct Games {
     pub library: Library,
@@ -927,7 +928,7 @@ impl Games {
             let sw = crate::text::width(400, 12.5, &state).ceil() + 2.0;
             cells.push(text_cell(style::NOTE, x0 + w - sw, y, sw, 18.0, &state));
         }
-        y += 18.0 + 9.0;
+        y += 18.0 + crate::tokens::space::LABEL;
         let box_y = y;
         let mut out = Vec::new();
         let (lx, cx) = (x0 + PAD_X, x0 + PAD_X + LABEL_W + 24.0);
@@ -989,20 +990,20 @@ impl Games {
         cells.push(cell(kind::TILE, x0, box_y, w, box_h));
         cells.extend(out);
         // On this page: Devices first, with the profiles this page switches to
-        let devices_top = box_y - 18.0 - 9.0;
+        let devices_top = box_y - 18.0 - crate::tokens::space::LABEL;
         let mut toc: Vec<LibToc> = vec![self.devices_entry(id, devices, devices_top, game, every)];
         let mut y = box_y + box_h;
         self.setting_at.clear();
         self.spots.clear();
         self.script_at.clear();
         for sec in self.sections.clone() {
-            y += 30.0;
+            y += crate::tokens::space::SECTION;
             let top = y;
             y = self.draw_section(&mut cells, &sec, id, w, y, game, every);
             toc.push(self.section_entry(&sec, id, top, game, every));
         }
         // then Ectomatter's own Custom Scripts
-        y += 30.0;
+        y += crate::tokens::space::SECTION;
         toc.push(self.scripts_entry(id, y, game, every));
         y = self.draw_scripts(&mut cells, id, &name, w, y, game, every);
         crate::front::sync_cells(&self.cells, cells);
@@ -1167,8 +1168,13 @@ impl Games {
                     Some("folder") => FOLDER,
                     _ => "",
                 };
-                let tw = crate::text::width(500, 13.0, label).ceil();
-                let bw = if quiet { 9.0 + if glyph.is_empty() { 0.0 } else { 13.0 + 6.0 } + tw + 9.0 } else { 12.0 + tw + 12.0 };
+                // (as wide as a TextButton or a WordButton draws its words, ui/system/controls.slint)
+                let tw = crate::text::width(font::MEDIUM, font::CONTROL, label).ceil();
+                let bw = if quiet {
+                    2.0 * part::QUIET_PAD + if glyph.is_empty() { 0.0 } else { part::GLYPH + part::GLYPH_GAP } + tw
+                } else {
+                    2.0 * part::BUTTON_PAD + tw
+                };
                 if x > cx && x + bw > cx + cw {
                     x = cx;
                     y += h + 8.0;
@@ -1364,7 +1370,7 @@ impl Games {
             let sw = crate::text::width(400, 12.5, &state).ceil() + 2.0;
             cells.push(text_cell(style::NOTE, x0 + w - sw, y, sw, 18.0, &state));
         }
-        let box_y = y + 18.0 + 9.0;
+        let box_y = y + 18.0 + crate::tokens::space::LABEL;
         let (lx, cx) = (x0 + PAD_X, x0 + PAD_X + LABEL_W + 24.0);
         let inner = w - 2.0 * PAD_X;
         let line = |x: f32, y: f32, w: f32| Cell { color: slint::Color::from_argb_u8(9, 255, 255, 255), ..cell(kind::BOX, x, y, w, 1.0) };
@@ -1467,7 +1473,7 @@ impl Games {
     fn draw_scripts(&mut self, cells: &mut Vec<Cell>, id: &str, name: &str, w: f32, y: f32, game: bool, every: bool) -> f32 {
         let x0 = self.left;
         cells.push(text_cell(style::HEAD, x0 + 2.0, y, w / 2.0, 18.0, "Custom Scripts"));
-        let box_y = y + 18.0 + 9.0;
+        let box_y = y + 18.0 + crate::tokens::space::LABEL;
         let note = if every {
             "Scripts for every game run first when a game starts and last when the game quits.".to_string()
         } else if game {

@@ -16,7 +16,7 @@ use crate::text;
 use crate::Cell;
 
 /// the page's column, inside its padding, and a card's rows
-const X0: f32 = 40.0;
+const X0: f32 = crate::tokens::space::MARGIN;
 const W: f32 = 860.0;
 const PAD_X: f32 = 24.0;
 const LABEL_W: f32 = 132.0;
@@ -154,15 +154,15 @@ impl Card {
 
 /// A heading, then a card under it; the card's pieces placed by `fill`.
 fn section(cells: &mut Vec<Cell>, y: &mut f32, title: &str, fill: impl FnOnce(&mut Card)) {
-    *y += 20.0;
+    *y += crate::tokens::space::SECTION;
     cells.push(text_cell(style::HEAD, X0, *y, W, 18.0, title));
-    *y += 18.0;
+    *y += 18.0 + crate::tokens::space::LABEL;
     let mut card = Card { y: *y + 20.0, cells: Vec::new() };
     fill(&mut card);
     let h = card.y - 14.0 + 20.0 - *y;
     cells.push(cell(kind::TILE, X0, *y, W, h));
     cells.extend(card.cells);
-    *y += h + 14.0;
+    *y += h;
 }
 
 /// The rows on a tab, in their order: on a tab of one device, its readings by kind; the
@@ -209,10 +209,10 @@ struct Row<'a> {
 /// sensor a checkbox with its name, its driver's name and its reading, three to a line; long
 /// runs of like readings folded into one line that opens; and at its foot what checking does.
 fn sensors_box(cells: &mut Vec<Cell>, y: &mut f32, v: &Sensors, map: &mut SensorMap) {
-    *y += 20.0;
+    *y += crate::tokens::space::SECTION;
     map.top = *y;
     cells.push(text_cell(style::HEAD, X0, *y, W, 18.0, "Sensor Feed"));
-    *y += 18.0 + 8.0;
+    *y += 18.0 + crate::tokens::space::LABEL;
     let parts = v.cat.parts();
     let tab = if parts.contains(&v.tab) { v.tab } else { parts.first().copied().unwrap_or(Part::Processor) };
     // the tabs, each as wide as its name; an amber dot on a part whose readings can't come in
@@ -414,7 +414,7 @@ fn sensors_box(cells: &mut Vec<Cell>, y: &mut f32, v: &Sensors, map: &mut Sensor
     let h = cy - top;
     cells.push(Cell { style: if parts.first() == Some(&tab) { 2 } else { 0 }, ..cell(kind::TILE, X0, top, W, h) });
     cells.extend(out);
-    *y = top + h + 14.0;
+    *y = top + h;
 }
 
 /// A sensor's checkbox: its name (or the one given it), its driver's name in gray, its
@@ -453,8 +453,7 @@ fn chip(out: &mut Vec<Cell>, v: &Sensors, checked: &BTreeSet<String>, part: Part
 
 pub fn page(s: &State) -> (Vec<Cell>, f32, SensorMap, PluginMap) {
     let mut cells = vec![text_cell(style::TITLE, X0, 34.0, W, 29.0, "Settings")];
-    let mut y = 34.0 + 29.0 + 6.0 - 14.0;
-    y += 14.0;
+    let mut y = 34.0 + 29.0;
 
     // each device with its core, then Add a core; then the plugins
     devices_section(&mut cells, &mut y, &s.devices);
@@ -492,7 +491,7 @@ pub fn page(s: &State) -> (Vec<Cell>, f32, SensorMap, PluginMap) {
         c.next(34.0);
     });
 
-    (cells, y - 14.0 + 40.0, map, pmap)
+    (cells, y + crate::tokens::space::MARGIN, map, pmap)
 }
 
 /// A plugin's own section, drawn from what it says of itself: under its
@@ -700,9 +699,9 @@ fn devices_section(cells: &mut Vec<Cell>, y: &mut f32, devices: &[DeviceRow]) {
 /// amber), its version and where that stands, and On and Off; then Add (a
 /// core, `add` 0, or a plugin, 1), and how updates come.
 fn packages_section(cells: &mut Vec<Cell>, y: &mut f32, title: &str, add: i32, rows: &[PackageRow], add_words: &str, note: &str) {
-    *y += 20.0;
+    *y += crate::tokens::space::SECTION;
     cells.push(text_cell(style::HEAD, X0, *y, W, 18.0, title));
-    *y += 18.0;
+    *y += 18.0 + crate::tokens::space::LABEL;
     let top = *y + 2.0;
     let (bx, bw) = (X0 + PAD_X, W - 2.0 * PAD_X);
     let mut out: Vec<Cell> = Vec::new();
@@ -777,7 +776,7 @@ fn packages_section(cells: &mut Vec<Cell>, y: &mut f32, title: &str, add: i32, r
     let h = ry - *y;
     cells.push(cell(kind::TILE, X0, *y, W, h));
     cells.extend(out);
-    *y += h + 14.0;
+    *y += h;
 }
 
 /// Nits for a place along the Peak nits slider; `None` at its left end, the design's brightness.

@@ -1,0 +1,340 @@
+// Lists down a page's side: the rail's items, and the anchoring column of a
+// device's page (its profiles) with its rows and its heading.
+
+import { Space, Radius, Font, Size, Part, Shadow, Ink } from "tokens.slint";
+import { Typing } from "state.slint";
+
+// a profile's button in the panel's head
+export struct ProfileItem {
+    n: int,
+    name: string,
+    sub: string,
+    active: bool,
+    current: bool,
+    dirty: bool,
+    // how many of its settings differ from what the keyboard holds
+    unsaved: int,
+    // its color sample: one color, or up to four across it
+    colors: int,
+    c1: color,
+    c2: color,
+    c3: color,
+    c4: color,
+}
+
+// an item on the rail: a 40px square with its glyph, which the rail's blade
+// widens to take its name; closed, the name shows beside it when pointed at
+export component RailItem inherits Rectangle {
+    in property <image> glyph;
+    in property <string> name;
+    in property <bool> on;
+    in property <bool> open;
+    in property <float> reveal;      // how far the blade's names have come in, 0 to 1
+    out property <bool> hover: ta.has-hover;
+    callback clicked;
+    height: 40px;
+    border-radius: Radius.panel;
+    background: root.on ? (ta.has-hover ? Ink.pick : Ink.hover-box) : ta.has-hover ? Ink.box : transparent;
+    Image {
+        x: 9px;
+        y: 9px;
+        width: 22px;
+        height: 22px;
+        source: root.glyph;
+        colorize: (root.on || ta.has-hover) ? Ink.bright : Ink.soft;
+    }
+    if root.reveal > 0: Text {
+        x: 9px + 22px + 12px - 6px * (1 - root.reveal);
+        width: parent.width - self.x - 9px;
+        height: parent.height;
+        text: root.name;
+        font-family: Font.ui;
+        font-weight: Font.medium;
+        font-size: Font.text;
+        color: (root.on || ta.has-hover) ? Ink.bright : Ink.soft;
+        opacity: root.reveal;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    if ta.has-hover && !root.open: Rectangle {
+        x: 50px;
+        y: (parent.height - self.height) / 2;
+        width: tip.preferred-width + 18px;
+        height: tip.preferred-height + 10px;
+        border-radius: Radius.small;
+        background: Ink.shade4;
+        drop-shadow-blur: Shadow.lift.blur;
+        drop-shadow-offset-y: Shadow.lift.y;
+        drop-shadow-color: Shadow.lift.color;
+        tip := Text {
+            text: root.name;
+            font-family: Font.ui;
+            font-size: Font.note;
+            color: Ink.bright;
+        }
+    }
+}
+
+// a row of the anchoring column's lists: a profile or a layer. At rest the
+// well shows through; under the pointer a step lighter; chosen lighter still,
+// and lighter again under the pointer.
+export component AnchorRow inherits Rectangle {
+    in property <bool> chosen;
+    out property <bool> hover: ta.has-hover;
+    callback clicked;
+    height: 48px;
+    border-radius: Radius.control;
+    background: root.chosen ? (ta.has-hover ? Ink.pick-hover : Ink.pick) : ta.has-hover ? Ink.hover-well : transparent;
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    @children
+}
+
+// a small capitals heading over one of the column's lists
+export component AnchorHead inherits Text {
+    height: 30px;
+    font-family: Font.ui;
+    font-size: Font.small;
+    font-weight: Font.strong;
+    letter-spacing: 0.9px;
+    color: Ink.quiet;
+    vertical-alignment: center;
+}
+
+// A list in a box under its heading in small capitals: the profiles (in a well,
+// a device page's first column), the mouse's lights (in a box). Its heading sits
+// where a box's title does (Space.pad in, level with it), its rows 8 in from its
+// sides; given more height than its rows take (as a row of boxes gives it), the
+// rest is the box's own, empty.
+export component ListBox inherits Rectangle {
+    in property <string> heading;
+    in property <brush> fill: Ink.box;
+    background: root.fill;
+    border-radius: Radius.box;
+    min-height: list.preferred-height;
+    preferred-height: list.preferred-height;
+    list := VerticalLayout {
+        y: 0;
+        width: parent.width;
+        height: self.preferred-height;
+        padding: 8px;
+        padding-top: 10px;
+        spacing: 2px;
+        alignment: start;
+        Rectangle {
+            height: 30px;
+            AnchorHead {
+                x: Space.pad - 8px;
+                text: root.heading;
+            }
+        }
+        @children
+    }
+}
+
+// The anchoring column under the keyboard: the profiles (the one the Z10 is
+// running marked by a white bar at its edge, the one being edited lit). The
+// layers are a switch over the Key library; Save and Discard are in the device's bar. Choices go top to bottom: a profile, then a layer, then a key.
+// For a device whose profiles Ectomatter keeps, as many as you want (`kept`),
+// the one in use has a menu beside its pencil and a last row makes a new one.
+export component AnchorColumn inherits ListBox {
+    in property <[ProfileItem]> profiles;
+    in property <bool> kept;
+    // the menu on the profile being edited, as profiles Ectomatter keeps have, for a
+    // device that keeps its own (no New profile row for it)
+    in property <bool> has-menu: false;
+    callback choose(int);
+    callback rename(string);
+    callback add();
+    callback menu(length, length, length);
+    in-out property <bool> renaming;
+    heading: "PROFILES";
+    fill: Ink.well;
+
+    // the profiles
+    for p in root.profiles: AnchorRow {
+        chosen: p.current;
+        clicked => { root.renaming = false; root.choose(p.n); }
+        // the profile the Z10 is running: a white bar at its edge
+        Rectangle {
+            x: 8px;
+            y: (parent.height - 28px) / 2;
+            width: 4px;
+            height: 28px;
+            border-radius: self.width / 2;
+            background: p.active ? Ink.bright : transparent;
+        }
+        if !(p.current && root.renaming): VerticalLayout {
+            x: 20px;
+            width: parent.width - 20px - ((root.kept || root.has-menu) && p.current ? 62px : 34px);
+            alignment: center;
+            Text {
+                text: p.name;
+                font-family: Font.ui;
+                font-size: Font.control;
+                font-weight: Font.medium;
+                color: p.current ? Ink.bright : Ink.dim;
+                overflow: elide;
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                alignment: start;
+                Text {
+                    text: p.sub;
+                    font-family: Font.ui;
+                    font-size: Font.caption;
+                    color: Ink.quiet;
+                }
+                if p.unsaved > 0: Text {
+                    text: "·  " + p.unsaved + " unsaved";
+                    font-family: Font.ui;
+                    font-size: Font.caption;
+                    color: Ink.warn;
+                }
+            }
+        }
+        // the profile being edited, renamed in place
+        if p.current && root.renaming: Rectangle {
+            x: 16px;
+            y: 8px;
+            width: parent.width - 24px;
+            height: 32px;
+            border-radius: Radius.control;
+            background: Ink.box;
+            border-width: 1px;
+            border-color: Ink.warn;
+            // (a click on the box, off the words and the tick, stays in it
+            // rather than reaching the row under it, which would drop the name)
+            TouchArea {
+                mouse-cursor: text;
+                clicked => { name-in.focus(); }
+            }
+            name-in := TextInput {
+                changed has-focus => { Typing.on = self.has-focus; }
+                x: 9px;
+                width: parent.width - 9px - 32px;
+                height: parent.height;
+                text: p.name;
+                font-family: Font.ui;
+                font-size: Font.control;
+                color: Ink.bright;
+                selection-background-color: #f0b35a55;
+                vertical-alignment: center;
+                single-line: true;
+                init => { self.focus(); self.select-all(); }
+                accepted => { root.rename(self.text); root.renaming = false; }
+                key-pressed(e) => {
+                    if (e.text == Key.Escape) { root.renaming = false; return accept; }
+                    return reject;
+                }
+            }
+            // a tick at the box's end, which keeps the name as Enter does
+            Rectangle {
+                x: parent.width - 4px - 24px;
+                y: (parent.height - 24px) / 2;
+                width: 24px;
+                height: 24px;
+                border-radius: Radius.small;
+                background: ok-ta.pressed ? Ink.pick : ok-ta.has-hover ? Ink.hover-box : transparent;
+                Path {
+                    x: 3px;
+                    y: 3px;
+                    width: 18px;
+                    height: 18px;
+                    viewbox-width: 18;
+                    viewbox-height: 18;
+                    commands: "M5.2 9.3 L7.9 11.9 L12.9 6.4";
+                    fill: transparent;
+                    stroke: ok-ta.has-hover ? Ink.bright : Ink.soft;
+                    stroke-width: 1.8px;
+                }
+                ok-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.rename(name-in.text); root.renaming = false; }
+                }
+            }
+        }
+        // the pencil, on the profile being edited
+        if p.current && !root.renaming: Rectangle {
+            x: parent.width - (root.kept || root.has-menu ? 60px : 32px);
+            y: (parent.height - 26px) / 2;
+            width: 26px;
+            height: 26px;
+            border-radius: Radius.small;
+            background: pen-ta.has-hover ? Ink.pick-hover : transparent;
+            Path {
+                x: 6px;
+                y: 6px;
+                width: 14px;
+                height: 14px;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                commands: "M4 20h4L19 9l-4-4L4 16z";
+                fill: transparent;
+                stroke: pen-ta.has-hover ? Ink.bright : Ink.quiet;
+                stroke-width: 1.8px;
+            }
+            pen-ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.renaming = true; }
+            }
+        }
+        // and its menu: Duplicate, Use with an app, Delete
+        if (root.kept || root.has-menu) && p.current && !root.renaming: Rectangle {
+            x: parent.width - 32px;
+            y: (parent.height - 26px) / 2;
+            width: 26px;
+            height: 26px;
+            border-radius: Radius.small;
+            background: dots-ta.has-hover ? Ink.pick-hover : transparent;
+            Path {
+                x: 6px;
+                y: 6px;
+                width: 14px;
+                height: 14px;
+                viewbox-width: 14;
+                viewbox-height: 14;
+                commands: "M1.7 7a1.3 1.3 0 1 0 2.6 0a1.3 1.3 0 1 0 -2.6 0zM5.7 7a1.3 1.3 0 1 0 2.6 0a1.3 1.3 0 1 0 -2.6 0zM9.7 7a1.3 1.3 0 1 0 2.6 0a1.3 1.3 0 1 0 -2.6 0z";
+                fill: dots-ta.has-hover ? Ink.bright : Ink.quiet;
+            }
+            dots-ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.menu(self.absolute-position.x, self.absolute-position.y, self.height); }
+            }
+        }
+    }
+    // a new profile, last
+    if root.kept: new-row := AnchorRow {
+        chosen: false;
+        clicked => { root.renaming = false; root.add(); }
+        HorizontalLayout {
+            x: 20px;
+            spacing: 8px;
+            alignment: start;
+            Path {
+                y: (parent.height - 12px) / 2;
+                width: 12px;
+                height: 12px;
+                viewbox-width: 12;
+                viewbox-height: 12;
+                commands: "M6 1.5v9M1.5 6h9";
+                stroke: new-row.hover ? Ink.bright : Ink.soft;
+                stroke-width: 1.8px;
+                fill: transparent;
+            }
+            Text {
+                text: "New profile";
+                font-family: Font.ui;
+                font-size: Font.control;
+                color: new-row.hover ? Ink.bright : Ink.soft;
+                vertical-alignment: center;
+            }
+        }
+    }
+}

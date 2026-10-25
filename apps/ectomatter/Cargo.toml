@@ -55,3 +55,5 @@ flate2 = "1"
 
 [build-dependencies]
 slint-build = "1.18.1"
+# the design tokens, written out as Slint and Rust (build.rs)
+ectomatter-tokens = { path = "../../crates/ectomatter-tokens" }

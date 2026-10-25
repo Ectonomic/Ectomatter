@@ -1,0 +1,724 @@
+// The controls every page is built from: buttons, tabs, fields, checkboxes,
+// switches, drop-downs, scrollbars. Each is drawn here once, from the tokens;
+// a page sets what it says and does, never how it looks.
+
+import { Space, Radius, Font, Size, Part, Shadow, Ink } from "tokens.slint";
+import { Typing } from "state.slint";
+
+// one of the window's own buttons: minimize, maximize, close
+export component WinButton inherits Rectangle {
+    in property <string> commands;
+    in property <length> size: 14px;
+    in property <bool> danger;
+    // (the close button, at the window's corner: rounded as the window is)
+    in property <length> corner;
+    callback clicked;
+    width: 40px;
+    border-top-right-radius: root.corner;
+    background: ta.has-hover ? (root.danger ? Ink.close : #2e2e2e) : transparent;
+    Path {
+        width: root.size;
+        height: root.size;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        commands: root.commands;
+        fill: transparent;
+        stroke: ta.has-hover ? (root.danger ? #ffffff : #f5f5f5) : #a3a3a3;
+        stroke-width: 1.4px * root.size / 16px;
+    }
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// a tab in the device's bar: quiet, then ink with its underline when chosen
+export component Tab inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected;
+    out property <bool> hover: ta.has-hover;
+    callback clicked;
+    width: label.preferred-width + 28px;
+    label := Text {
+        y: 0;
+        height: parent.height - 2px;
+        text: root.text;
+        font-family: Font.ui;
+        font-size: Font.tab;
+        font-weight: Font.medium;
+        color: (root.selected || ta.has-hover) ? Ink.ink : Ink.quiet;
+        vertical-alignment: center;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// a button with words: filled gray (the page's ghost buttons, which here have
+// no outline), primary (ink), or one that deletes (red); a pixel down under a
+// press. Its gray stands off what it sits on: the page's ground, or a box
+// (`on-box`, as in a dialog).
+export component WordButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary;
+    in property <bool> danger;
+    in property <bool> on-box;
+    in property <bool> enabled: true;
+    in property <color> fill: root.on-box ? Ink.hover-box : Ink.box;
+    in property <color> fill-hover: root.on-box ? Ink.pick : Ink.hover-box;
+    // as wide as it is given, rather than as its words
+    in property <length> wide: 0;
+    // a filled glyph before its words, on a 14-unit square (Play's triangle)
+    in property <string> icon;
+    out property <bool> hover: ta.has-hover && root.enabled;
+    out property <bool> down: ta.pressed && root.enabled;
+    callback clicked;
+    height: root.primary ? 32px : 30px;
+    property <length> icon-w: root.icon != "" ? Part.glyph + Part.glyph-gap : 0;
+    width: root.wide > 0 ? root.wide : label.preferred-width + 2 * Part.button-pad + root.icon-w + (root.primary ? 2px : 0);
+    border-radius: Radius.control;
+    // turned off, the whole button fades to 35% over the page's ground, as the
+    // web app's does; faded piece by piece, its words would come out lighter
+    property <color> face: root.danger ? (ta.has-hover && root.enabled ? Ink.danger-hover : Ink.danger)
+        : root.primary ? (ta.has-hover && root.enabled ? Ink.white : Ink.bright) : ta.has-hover && root.enabled ? root.fill-hover : root.fill;
+    property <color> ink: root.danger ? Ink.white : root.primary ? Ink.base : Ink.bright;
+    background: root.enabled ? root.face : root.face.mix(Ink.base, 0.35);
+    if root.icon != "": Path {
+        x: (parent.width - label.width - root.icon-w) / 2;
+        y: (parent.height - 14px) / 2 + (ta.pressed && root.enabled ? 1px : 0);
+        width: 14px;
+        height: 14px;
+        viewbox-width: 14;
+        viewbox-height: 14;
+        commands: root.icon;
+        fill: root.enabled ? root.ink : root.ink.mix(Ink.base, 0.35);
+    }
+    label := Text {
+        x: (parent.width - self.width + root.icon-w) / 2;
+        y: (parent.height - self.height) / 2 + (ta.pressed && root.enabled ? 1px : 0);
+        text: root.text;
+        font-family: Font.ui;
+        font-size: Font.control;
+        font-weight: root.primary || root.danger ? Font.strong : Font.medium;
+        color: root.enabled ? root.ink : root.ink.mix(Ink.base, 0.35);
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// A quiet button with words and no fill, for a toolbar's actions (+ Key, + New,
+// Record) and "Press a key" (`on`, amber while it listens); a glyph before its
+// words where it has one, on a 14-unit square; faded while it can't be used. Its
+// words are a button's (Font.control), a pixel down under a press.
+export component TextButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> on;
+    in property <bool> enabled: true;
+    // its glyph's lines, and the square they're drawn on
+    in property <string> icon;
+    in property <float> units: 14;
+    out property <bool> hover: ta.has-hover && root.enabled;
+    callback clicked;
+    height: 28px;
+    width: row.preferred-width;
+    border-radius: Radius.small;
+    opacity: root.enabled ? 1 : 0.4;
+    background: root.on ? Ink.warn.with-alpha(0.08) : root.hover ? Ink.tint : transparent;
+    row := HorizontalLayout {
+        padding-left: Part.quiet-pad;
+        padding-right: Part.quiet-pad;
+        spacing: Part.glyph-gap;
+        y: ta.pressed && root.enabled ? 1px : 0;
+        if root.icon != "": Path {
+            y: (parent.height - self.height) / 2;
+            width: Part.glyph;
+            height: Part.glyph;
+            viewbox-width: root.units;
+            viewbox-height: root.units;
+            commands: root.icon;
+            fill: transparent;
+            stroke: root.on ? Ink.warn : root.hover ? Ink.bright : Ink.dim;
+            stroke-width: 1.2px * root.units / 14;
+            stroke-line-join: round;
+        }
+        Text {
+            text: root.text;
+            font-family: Font.ui;
+            font-size: Font.control;
+            font-weight: Font.medium;
+            color: root.on ? Ink.warn : root.hover ? Ink.bright : Ink.dim;
+            vertical-alignment: center;
+        }
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+}
+
+// the small ring that turns while the keyboard is read
+export component Spinner inherits Rectangle {
+    width: 16px;
+    height: 16px;
+    property <angle> a: mod(animation-tick() / 800ms, 1) * 360deg;
+    Rectangle {
+        border-radius: self.width / 2;
+        border-width: 2px;
+        border-color: Ink.line;
+    }
+    Path {
+        width: 16px;
+        height: 16px;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        fill: transparent;
+        stroke: Ink.ink;
+        stroke-width: 2px;
+        commands: "M " + (8 + 7 * cos(root.a)) + " " + (8 + 7 * sin(root.a)) + " A 7 7 0 0 1 " + (8 + 7 * cos(root.a + 90deg)) + " " + (8 + 7 * sin(root.a + 90deg));
+    }
+}
+
+// A scrollbar, as WebKit drew the page's: a thin thumb in a dark rim, lighter
+// while the pointer is on it or it is held. Its thumb is dragged, or a press
+// on its track takes the thumb there; the wheel scrolls the area as ever. The
+// area itself never scrolls by dragging it, as a web page does not.
+export component ScrollBar inherits Rectangle {
+    // how much of the area shows, how much there is, and how far it is scrolled
+    in property <length> view;
+    in property <length> content;
+    in property <length> offset;
+    in property <color> thumb-color: #4c4c4c;
+    // the page's has a dark rim round the thumb; a list's is the thumb alone
+    in property <bool> framed: true;
+    callback scroll-to(length);
+    width: 12px;
+    visible: root.content > root.view + 1px;
+    property <length> travel: max(1px, root.content - root.view);
+    property <length> th: max(24px, root.height * root.view / max(1px, root.content));
+    property <length> ty: min(1, max(0, root.offset / root.travel)) * (root.height - root.th);
+    property <length> grab;
+    property <bool> held;
+    pure function at(y: length) -> length {
+        max(0px, min(root.travel, (y - root.grab) / max(1px, root.height - root.th) * root.travel))
+    }
+    Rectangle {
+        x: parent.width - 7px;
+        y: root.ty;
+        width: 5px;
+        height: root.th;
+        border-radius: 2px;
+        background: root.framed ? #191919 : transparent;
+        Rectangle {
+            x: 1px;
+            width: 3px;
+            border-radius: self.width / 2;
+            background: bar-ta.has-hover || root.held ? #6e6e6e : root.thumb-color;
+        }
+    }
+    bar-ta := TouchArea {
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
+                if (self.mouse-y >= root.ty && self.mouse-y < root.ty + root.th) {
+                    root.grab = self.mouse-y - root.ty;
+                } else {
+                    root.grab = root.th / 2;
+                    root.scroll-to(root.at(self.mouse-y));
+                }
+                root.held = true;
+            }
+            if (e.kind == PointerEventKind.up) {
+                root.held = false;
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                root.scroll-to(root.at(self.mouse-y));
+            }
+        }
+        // the wheel over the bar scrolls the area, as it does over the area
+        scroll-event(e) => {
+            root.scroll-to(max(0px, min(root.travel, root.offset - e.delta-y)));
+            accept
+        }
+    }
+}
+
+// a number or code in the color picker, its name under it
+export component PickField inherits VerticalLayout {
+    in-out property <string> value;
+    in property <string> label;
+    in property <int> which;
+    callback edited(int, string);
+    callback enter();
+    callback dismiss();
+    spacing: 3px;
+    Rectangle {
+        height: 27px;
+        border-radius: Radius.small;
+        background: Ink.shade1;
+        border-width: input.has-focus ? 1px : 0;
+        border-color: Ink.edge-hover;
+        input := TextInput {
+            changed has-focus => { Typing.on = self.has-focus; }
+            x: 6px;
+            width: parent.width - 12px;
+            height: parent.height;
+            text <=> root.value;
+            font-family: Font.ui;
+            font-size: Font.note;
+            font-weight: Font.medium;
+            color: Ink.ink;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            single-line: true;
+            edited => { root.edited(root.which, self.text); }
+            accepted => { root.enter(); }
+            key-pressed(e) => {
+                if (e.text == Key.Escape) {
+                    root.dismiss();
+                    return accept;
+                }
+                reject
+            }
+        }
+    }
+    Text {
+        height: 15px;
+        text: root.label;
+        font-family: Font.ui;
+        font-size: Font.small;
+        color: Ink.quiet;
+        horizontal-alignment: center;
+    }
+}
+
+// a color to pick in one click: a preset, or one used lately
+export component Well inherits Rectangle {
+    in property <color> c;
+    callback clicked;
+    width: 23.56px;
+    height: 23.56px;
+    // round, as every color dot in the app is
+    border-radius: self.width / 2;
+    background: root.c;
+    Rectangle {
+        border-radius: self.width / 2;
+        border-width: 1px;
+        border-color: ta.has-hover ? #ffffff99 : #ffffff24;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// A quiet link with words and no fill, smaller than a button: a box's own
+// actions at its top right (Reset, Done, Collapse all), Undo in a bar, Home's
+// Scenes and Arrange. A glyph before its words where it has one: its lines on a
+// square of `units` (`icon`), or a picture (`chip`, a scene's colors); `lit`, its
+// words at full strength (a scene that's on).
+export component LinkButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <string> icon;
+    in property <float> units: 14;
+    in property <image> chip;
+    in property <bool> chip-on;
+    in property <bool> lit;
+    out property <bool> hover: ta.has-hover && root.enabled;
+    callback clicked;
+    height: 26px;
+    width: row.preferred-width;
+    border-radius: Radius.small;
+    background: root.hover ? Ink.hover-box : transparent;
+    row := HorizontalLayout {
+        padding-left: Part.quiet-pad;
+        padding-right: Part.quiet-pad;
+        spacing: Part.glyph-gap;
+        if root.chip-on: Image {
+            y: (parent.height - self.height) / 2;
+            width: Part.glyph;
+            height: Part.glyph;
+            source: root.chip;
+            image-fit: fill;
+        }
+        if root.icon != "" && !root.chip-on: Path {
+            y: (parent.height - self.height) / 2;
+            width: Part.glyph;
+            height: Part.glyph;
+            viewbox-width: root.units;
+            viewbox-height: root.units;
+            commands: root.icon;
+            fill: transparent;
+            stroke: root.hover ? Ink.bright : Ink.soft;
+            stroke-width: 1.4px * root.units / 14;
+            stroke-line-cap: round;
+            stroke-line-join: round;
+        }
+        Text {
+            text: root.text;
+            font-family: Font.ui;
+            font-size: Font.note;
+            font-weight: Font.medium;
+            color: !root.enabled ? Ink.quiet.with-alpha(0.6) : root.hover || root.lit ? Ink.bright : Ink.soft;
+            vertical-alignment: center;
+        }
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+}
+
+// a key's cap, small, as the Key library shows it
+export component SmallCap inherits Rectangle {
+    in property <string> text;
+    in property <length> size: Font.small;
+    width: 34px;
+    height: 26px;
+    // the cap's edge, deeper at its front, all of it following the rounded corners
+    border-radius: Radius.tiny + 1px;
+    background: Ink.seam;
+    Rectangle {
+        x: 1px;
+        y: 1px;
+        width: parent.width - 2px;
+        height: parent.height - 4px;
+        border-radius: Radius.tiny;
+        background: Ink.well;
+    }
+    Text {
+        y: 0;
+        height: parent.height - 3px;
+        text: root.text;
+        font-family: Font.ui;
+        font-size: root.size;
+        font-weight: Font.strong;
+        color: Ink.bright;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+        width: parent.width - 4px;
+        x: 2px;
+    }
+}
+
+// a checkbox: a well with a tick when on, its words beside it
+// a line to type into on a form, its words until something is typed (in the typeface whose
+// letters are all one width, for a command)
+export component FieldBox inherits Rectangle {
+    in property <string> placeholder;
+    in-out property <string> text;
+    in property <bool> mono;
+    callback edited();
+    callback accepted();
+    callback escape();
+    height: 36px;
+    border-radius: Radius.control;
+    background: Ink.well;
+    clip: true;
+    if field-in.text == "": Text {
+        x: 12px;
+        width: parent.width - 24px;
+        height: parent.height;
+        text: root.placeholder;
+        font-family: Font.ui;
+        font-size: Font.control;
+        color: Ink.placeholder;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    field-in := TextInput {
+        x: 12px;
+        width: parent.width - 24px;
+        height: parent.height;
+        text <=> root.text;
+        font-family: root.mono ? "JetBrains Mono" : "Geist";
+        font-size: root.mono ? Font.caption : Font.control;
+        color: Ink.ink;
+        vertical-alignment: center;
+        single-line: true;
+        changed has-focus => { Typing.on = self.has-focus; }
+        edited => { root.edited(); }
+        accepted => { root.accepted(); }
+        key-pressed(e) => {
+            if (e.text == Key.Escape) {
+                root.escape();
+                return accept;
+            }
+            reject
+        }
+    }
+}
+
+// a checkbox and its words, the same wherever one is: ticked in the words' own
+// gray, lighter under the pointer; `state` 1 for one that can't be changed now
+// (faint, unticked), 2 for one another setting holds on (ticked in gray)
+export component CheckBox inherits Rectangle {
+    in property <string> text;
+    in property <bool> on;
+    in property <int> state;
+    callback clicked;
+    property <bool> off: root.state == 1;
+    property <bool> held: root.state == 2;
+    property <bool> hot: ta.has-hover && root.state == 0;
+    height: 26px;
+    preferred-width: Size.check + 10px + words.preferred-width;
+    Rectangle {
+        x: 0;
+        y: (parent.height - self.height) / 2;
+        width: Size.check;
+        height: Size.check;
+        border-radius: Radius.tiny;
+        background: root.held ? Ink.off : root.off ? transparent : root.on ? (root.hot ? Ink.bright : Ink.dim) : root.hot ? Ink.hover-box : Ink.well;
+        border-width: (root.on && !root.off) || root.held ? 0 : 1px;
+        border-color: root.off ? Ink.seam : root.hot ? Ink.edge-hover : Ink.edge;
+        if (root.on && !root.off) || root.held: Path {
+            width: parent.width;
+            height: parent.height;
+            viewbox-width: 18;
+            viewbox-height: 18;
+            commands: "M5.2 9.3 L7.9 11.9 L12.9 6.4";
+            fill: transparent;
+            stroke: Ink.base;
+            stroke-width: 2px;
+        }
+    }
+    words := Text {
+        x: Size.check + 10px;
+        width: parent.width - self.x;
+        height: parent.height;
+        text: root.text;
+        font-family: Font.ui;
+        font-size: Font.control;
+        color: root.off ? Ink.off : root.hot ? Ink.bright : Ink.dim;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    ta := TouchArea {
+        enabled: root.state == 0;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// the Library's star, outlined, or filled for a favorite, on a 16-unit square
+export global Star {
+    out property <string> path: "M8 1.9l1.8 3.8 4.1.5-3 2.9.8 4.1L8 11.2l-3.7 2 .8-4.1-3-2.9 4.1-.5Z";
+}
+
+// a square button with the star, for a game's page: filled once it's a favorite
+export component StarButton inherits Rectangle {
+    in property <bool> on;
+    callback clicked;
+    width: 30px;
+    height: 30px;
+    border-radius: Radius.control;
+    background: ta.has-hover ? Ink.shade2 : Ink.shade1;
+    Path {
+        y: (parent.height - 14px) / 2 + (ta.pressed ? 1px : 0);
+        width: 14px;
+        height: 14px;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        commands: Star.path;
+        fill: root.on ? Ink.ink : transparent;
+        stroke: Ink.ink;
+        stroke-width: 1.3px;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Edit or Remove among a turn's time and buttons: a small line glyph on their dark backing
+export component StripIcon inherits Rectangle {
+    in property <string> commands;
+    callback clicked;
+    width: 20px;
+    height: 20px;
+    border-radius: Radius.small;
+    background: ta.pressed ? Ink.pick : ta.has-hover ? Ink.hover-box : transparent;
+    Path {
+        x: 4px;
+        y: 4px;
+        width: 12px;
+        height: 12px;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: root.commands;
+        fill: transparent;
+        stroke: ta.has-hover ? Ink.bright : Ink.soft;
+        stroke-width: 1.8px;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Pause, at the head of the playlist's panel; Play while the playlist is paused
+export component PlayButton inherits Rectangle {
+    in property <bool> paused;
+    callback clicked;
+    width: 28px;
+    height: 28px;
+    border-radius: Radius.control;
+    background: ta.pressed ? Ink.pick-hover : ta.has-hover ? Ink.pick : Ink.hover-box;
+    Path {
+        x: 8px;
+        y: 8px;
+        width: 12px;
+        height: 12px;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: root.paused ? "M8 5.5v13a1 1 0 0 0 1.5.9l10-6.5a1 1 0 0 0 0-1.7l-10-6.6A1 1 0 0 0 8 5.5z"
+            : "M7 5h2a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM15 5h2a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z";
+        fill: Ink.bright;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// a segmented switch on a well: the chosen part a step lighter
+export component SegSwitch inherits Rectangle {
+    in property <[string]> options;
+    in property <[string]> icons;
+    in property <int> chosen;
+    in property <bool> tall;
+    callback picked(int, length, length, length);
+    height: root.tall ? 50px : 34px;
+    border-radius: Radius.small + 3px;
+    background: Ink.well;
+    for o[i] in root.options: Rectangle {
+        x: 3px + i * (parent.width - 6px) / root.options.length;
+        y: 3px;
+        width: (parent.width - 6px) / root.options.length - (i < root.options.length - 1 ? 2px : 0);
+        height: parent.height - 6px;
+        border-radius: Radius.small;
+        background: root.chosen == i ? (seg-ta.has-hover ? Ink.pick-hover : Ink.pick) : seg-ta.has-hover ? Ink.hover-well : transparent;
+        if root.tall && root.icons.length > i: Path {
+            x: (parent.width - 15px) / 2;
+            y: 7px;
+            width: 15px;
+            height: 15px;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            commands: root.icons[i];
+            fill: transparent;
+            stroke: root.chosen == i || seg-ta.has-hover ? Ink.bright : Ink.soft;
+            stroke-width: 1.7px;
+        }
+        Text {
+            y: root.tall ? 25px : 0;
+            width: parent.width;
+            height: root.tall ? 16px : parent.height;
+            text: o;
+            font-family: Font.ui;
+            font-size: root.tall ? Font.small : Font.note;
+            color: root.chosen == i || seg-ta.has-hover ? Ink.bright : Ink.soft;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        seg-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.picked(i, self.absolute-position.x, self.absolute-position.y, self.height); }
+        }
+    }
+}
+
+// a dropdown on a well: what is chosen, and a chevron
+export component DropField inherits Rectangle {
+    in property <string> text;
+    in property <bool> open;
+    callback clicked(length, length, length);
+    height: 36px;
+    border-radius: Radius.control;
+    background: ta.has-hover || root.open ? Ink.hover-box : Ink.well;
+    Text {
+        x: 12px;
+        width: parent.width - 40px;
+        height: parent.height;
+        text: root.text;
+        font-family: Font.ui;
+        font-size: Font.control;
+        color: Ink.bright;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    Path {
+        x: parent.width - 24px;
+        y: (parent.height - 12px) / 2;
+        width: 12px;
+        height: 12px;
+        viewbox-width: 12;
+        viewbox-height: 12;
+        commands: "M3 4.5l3 3 3-3";
+        fill: transparent;
+        stroke: Ink.quiet;
+        stroke-width: 1.6px;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(self.absolute-position.x, self.absolute-position.y, self.height); }
+    }
+}
+
+// A slider chosen in the Key library: where it sits now, and what it controls.
+// a button on the device's bar: its glyph, drawn in lines, and its name if it has one
+export component BarButton inherits Rectangle {
+    in property <string> text;
+    in property <string> commands;
+    // the lines' ends and corners rounded
+    in property <bool> round;
+    callback clicked;
+    // a whole number of pixels wide, so its glyph's lines land on the pixel grid
+    width: ceil(row.preferred-width / 1px) * 1px;
+    Rectangle {
+        x: 0;
+        y: (parent.height - 30px) / 2;
+        width: parent.width;
+        height: 30px;
+        border-radius: Radius.control;
+        background: ta.has-hover ? Ink.shade2 : Ink.shade1;
+        // (with no name, a square round its glyph)
+        row := HorizontalLayout {
+            padding-left: root.text == "" ? 8px : Part.button-pad;
+            padding-right: root.text == "" ? 8px : Part.button-pad;
+            spacing: Part.glyph-gap;
+            alignment: start;
+            Path {
+                width: Part.glyph;
+                height: Part.glyph;
+                y: (30px - self.height) / 2;
+                viewbox-width: 16;
+                viewbox-height: 16;
+                commands: root.commands;
+                fill: transparent;
+                stroke: Ink.ink;
+                stroke-width: 1.14px;
+                stroke-line-cap: root.round ? LineCap.round : LineCap.butt;
+            }
+            if root.text != "": Text {
+                text: root.text;
+                font-family: Font.ui;
+                font-size: Font.control;
+                font-weight: Font.medium;
+                color: Ink.ink;
+                vertical-alignment: center;
+            }
+        }
+        ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.clicked(); }
+        }
+    }
+}

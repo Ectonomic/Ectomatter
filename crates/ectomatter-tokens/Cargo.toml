@@ -1,0 +1,14 @@
+# Ectomatter's design tokens (design/ectomatter.tokens.json), written out for
+# each place that draws with them: a Slint file of globals for the window and a
+# Rust module for the pages Ectomatter lays out itself. The app's build script
+# runs it, so the two can never disagree.
+[package]
+name = "ectomatter-tokens"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/OMGrant/Ectomatter"
+description = "Ectomatter's design tokens, as Slint globals and Rust constants."
+
+[dependencies]
+serde_json = { version = "1", features = ["preserve_order"] }

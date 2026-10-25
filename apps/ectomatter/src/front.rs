@@ -145,6 +145,10 @@ pub enum Ask {
     /// button's words, and the next frame of the lights' effects
     MouseTab(i32),
     MouseRow(i32),
+    /// a box the page's row of boxes laid out came out a new width: its pieces
+    /// laid out anew to it (the Lighting tab's, the mouse's), and the effects'
+    /// pictures drawn anew to their tiles
+    BoxesResized,
     /// the mouse's Key library on Buttons: a group's heading pressed (it opens
     /// or closes), and what is typed in its find box
     MouseLibToggle(String),
@@ -705,7 +709,7 @@ pub struct Front {
     /// the draft changed while a preview was asked for: sent once it is answered
     preview_again: bool,
     /// the effects' tiles' pictures, for the scale and the effects they were drawn for
-    icons: Option<(f32, Vec<String>, Vec<slint::Image>)>,
+    icons: Option<(f32, f32, Vec<String>, Vec<slint::Image>)>,
     cells: Rc<VecModel<Cell>>,
     /// the scene form's pieces, under its preview
     scene_cells: Rc<VecModel<Cell>>,
@@ -713,7 +717,9 @@ pub struct Front {
     /// effects, kept while the whole keyboard is lit; the setting whose menu
     /// is open (by its place in the effect's settings); the zone the pointer
     /// is over, which the keyboard shows
-    place_cells: Rc<VecModel<Cell>>,
+    /// the Lighting tab's boxes beside the effects, and the mouse's, laid out here
+    light_boxes: crate::boxes::Row,
+    mouse_boxes: crate::boxes::Row,
     areas: HashMap<(u8, String), u64>,
     light_menu: Option<usize>,
     pub hover_area: Option<usize>,
@@ -772,7 +778,7 @@ pub struct Front {
     run_pick: Option<(String, mpsc::Receiver<Option<std::path::PathBuf>>)>,
     /// an added plugin asked about removing
     removing: Option<String>,
-    mouse_icons: Option<(f32, Vec<slint::Image>)>,
+    mouse_icons: Option<(f32, f32, Vec<slint::Image>)>,
     /// the mouse's picture in layers, for a scale, and the scale being drawn
     mouse_layers: Option<(f32, MouseImages)>,
     mouse_drawing: Option<f32>,
@@ -1052,6 +1058,22 @@ impl Front {
         on!(on_menu_back_to, Ask::MenuBack);
         on!(on_go, |p| Ask::Go(p.to_string()));
         on!(on_mouse_tab_chosen, |i| Ask::MouseTab(i));
+        on!(on_boxes_resized, Ask::BoxesResized);
+        // (a box's width kept as the window draws it, and its pieces laid out anew to it)
+        let (light_boxes, mouse_boxes) = (crate::boxes::Row::default(), crate::boxes::Row::default());
+        for (row, set) in [(light_boxes.widths(), 0), (mouse_boxes.widths(), 1)] {
+            let a = asks.clone();
+            let told = move |i: i32, w: f32| {
+                if crate::boxes::noted(&row, i.max(0) as usize, w) {
+                    a.borrow_mut().push(Ask::BoxesResized);
+                }
+            };
+            if set == 0 {
+                ui.on_light_box_resized(told);
+            } else {
+                ui.on_mouse_box_resized(told);
+            }
+        }
         on!(on_mouse_row, |i| Ask::MouseRow(i));
         on!(on_mouse_lib_toggle, |g| Ask::MouseLibToggle(g.to_string()));
         on!(on_mouse_lib_find, |t| Ask::MouseLibFind(t.to_string()));
@@ -1322,7 +1344,8 @@ impl Front {
             icons: None,
             cells: Rc::new(VecModel::default()),
             scene_cells: Rc::new(VecModel::default()),
-            place_cells: Rc::new(VecModel::default()),
+            light_boxes,
+            mouse_boxes,
             areas: HashMap::new(),
             light_menu: None,
             hover_area: None,
@@ -1468,7 +1491,8 @@ impl Front {
         f.ui.set_pk_presets(ModelRc::new(VecModel::from(PRESETS.iter().map(|c| color(*c)).collect::<Vec<_>>())));
         f.ui.set_cells(ModelRc::from(f.cells.clone()));
         f.ui.set_scene_cells(ModelRc::from(f.scene_cells.clone()));
-        f.ui.set_place_cells(ModelRc::from(f.place_cells.clone()));
+        f.ui.set_light_boxes(ModelRc::from(f.light_boxes.model.clone()));
+        f.ui.set_mouse_boxes(ModelRc::from(f.mouse_boxes.model.clone()));
         f.ui.set_pl_blocks(ModelRc::from(f.blocks.clone()));
         f.poll_lcd();
         if controlled {
@@ -1763,6 +1787,8 @@ impl Front {
                     self.close_picker();
                     self.mouse.tab = i.clamp(0, 3) as usize;
                 }
+                // (the refresh lays them out to their new widths)
+                Ask::BoxesResized => {}
                 Ask::MouseRow(i) => {
                     self.close_menu();
                     self.close_picker();
@@ -3981,10 +4007,9 @@ impl Front {
                         (a, c, (b - a).max(0.0), (d - c).max(0.0))
                     })
                     .collect();
-                // (the low row right of the Profiles box: the Key library and the Key detail box)
+                // (the row of boxes right of the Profiles box: the Key library and the Key detail box)
                 let (ly, lh) = (y0 + ui.get_mouse_low_top(), ui.get_mouse_low_height());
-                let pro = if self.mouse.profiles.is_some() { 252.0 } else { 0.0 };
-                k.push((x0 + pro, ly, w - pro, lh));
+                k.push((ui.get_mouse_row_wx(), ly, ui.get_mouse_row_width(), lh));
                 Some(k)
             }
             // a pad on Home's desk: the whole desk (where a press chooses
@@ -5491,6 +5516,14 @@ impl Front {
     fn show_rail(&self) {
         let ui = &self.ui;
         let rows: Vec<crate::RailDevice> = self.devices_in_order().into_iter().map(|(place, name, kind, _)| crate::RailDevice { place: place.into(), name: name.into(), kind: kind.into() }).collect();
+        // (each device's page names it in its bar as the rail does)
+        for r in &rows {
+            match r.place.as_str() {
+                "z10" if ui.get_kb_name() != r.name => ui.set_kb_name(r.name.clone()),
+                "mouse" if ui.get_mouse_name() != r.name => ui.set_mouse_name(r.name.clone()),
+                _ => {}
+            }
+        }
         show_rows(ui.get_rail_devices(), |r| ui.set_rail_devices(r), rows);
     }
 
@@ -5802,7 +5835,7 @@ impl Front {
         let Some((scale, imgs)) = &self.mouse_layers else { return };
         let Some((_, hdr)) = self.mouse_hdr.as_mut().filter(|(s, _)| s == scale) else { return };
         let part = mouse_part(&self.ui, *scale, &imgs.layers);
-        let lit = hdr.picture(&imgs.layers, crate::ink_env::rgb("stage", [0x1b, 0x1b, 0x1f]), self.mouse_shows.0, self.mouse_shows.1, self.mouse_down, colors, white, ceiling, part);
+        let lit = hdr.picture(&imgs.layers, crate::ink_env::rgb("stage", crate::tokens::ink::STAGE), self.mouse_shows.0, self.mouse_shows.1, self.mouse_down, colors, white, ceiling, part);
         self.mouse_lit = Some(Rc::new(lit));
         self.mouse_part = part;
         self.ui.set_mouse_hdr_ready(true);
@@ -6347,9 +6380,10 @@ impl Front {
             ui.set_mouse_any_rebound(any);
         }
         // the effects' tiles, their pictures the keyboard's own
-        if self.mouse_icons.as_ref().map(|(s, _)| *s) != Some(self.scale) {
-            let icons = ["off", "static", "breathing", "wave"].iter().map(|e| lighting::icon(e, self.scale)).collect();
-            self.mouse_icons = Some((self.scale, icons));
+        let wide = pic_wide(self.ui.get_mouse_fx_w());
+        if self.mouse_icons.as_ref().map(|(s, w, _)| (*s, *w)) != Some((self.scale, wide)) {
+            let icons = ["off", "static", "breathing", "wave"].iter().map(|e| lighting::icon(e, self.scale, wide)).collect();
+            self.mouse_icons = Some((self.scale, wide, icons));
         }
         let fx = self.mouse.effect();
         let known = self.mouse.light_known(self.mouse.light_name());
@@ -6360,23 +6394,26 @@ impl Front {
             .enumerate()
             .map(|(i, e)| {
                 let (tile, motion) = crate::mouse::tile_of(e["id"].as_str().unwrap_or(""));
-                let icon = self.mouse_icons.as_ref().unwrap().1[["off", "static", "breathing", "wave"].iter().position(|t| *t == tile).unwrap_or(1)].clone();
+                let icon = self.mouse_icons.as_ref().unwrap().2[["off", "static", "breathing", "wave"].iter().position(|t| *t == tile).unwrap_or(1)].clone();
                 EffectItem { name: e["label"].as_str().unwrap_or("").into(), icon, on: i == fx && known, motion }
             })
             .collect();
         self.ui.set_mouse_effect_moves(effects.iter().any(|e| e.on && e.motion != 0));
         show_rows(self.ui.get_mouse_effects(), |r| self.ui.set_mouse_effects(r), effects);
-        // (the Profiles box first in the row, on each tab whose settings belong to a profile)
-        let profiles_w = if self.mouse.tab < 3 && self.mouse.profiles.is_some() { 252.0 } else { 0.0 };
-        let w = self.ui.get_mouse_w() - if self.mouse.tab == 1 { 564.0 } else { 0.0 } - profiles_w;
         // (the color the picker is open on, ringed)
         let open = self.pick.as_ref().and_then(|p| match p.piece {
             Some(crate::described::Piece::Effect(k)) => Some((k, p.index)),
             _ => None,
         });
-        let (cells, h) = self.mouse.cells(w, open);
-        self.ui.set_mouse_cells_h(h);
-        self.show_cells(cells);
+        // the tab's boxes, in the page's row of boxes, each laid out to the width the row made it;
+        // on Settings, the form across the page
+        let boxes = self.mouse.boxes(|i, least| self.mouse_boxes.width(i, least), open);
+        self.mouse_boxes.show(boxes);
+        if self.mouse.tab == 3 {
+            let (cells, h) = self.mouse.cells(self.ui.get_mouse_w());
+            self.ui.set_mouse_cells_h(h);
+            self.show_cells(cells);
+        }
         // the picture: its layers, the buttons it picks out, its lights now, and their effects playing
         self.mouse_draw();
         self.show_mouse_picked();
@@ -7746,10 +7783,11 @@ impl Front {
         let effects = self.page.effects();
         let ids: Vec<String> = effects.iter().map(|e| e["id"].as_str().unwrap_or("").to_string()).collect();
         let scale = self.scale;
-        if self.icons.as_ref().map(|(s, i, _)| (*s, i)) != Some((scale, &ids)) {
-            self.icons = Some((scale, ids.clone(), ids.iter().map(|id| lighting::icon(crate::described::tile(id).0, scale)).collect()));
+        let wide = pic_wide(self.ui.get_light_fx_w());
+        if self.icons.as_ref().map(|(s, w, i, _)| (*s, *w, i)) != Some((scale, wide, &ids)) {
+            self.icons = Some((scale, wide, ids.clone(), ids.iter().map(|id| lighting::icon(crate::described::tile(id).0, scale, wide)).collect()));
         }
-        let icons = &self.icons.as_ref().unwrap().2;
+        let icons = &self.icons.as_ref().unwrap().3;
         let tiles: Vec<EffectItem> = effects
             .iter()
             .zip(icons)
@@ -7774,14 +7812,20 @@ impl Front {
             demo: self.page.demo,
             paint: self.paint,
         };
-        let b = crate::described::boxes(&self.page.keys_light(), &self.page.effect_desc(&mode), &self.page.effect_settings(), &look);
-        self.ui.set_light_kind(b.kind);
-        self.ui.set_light_title(b.title.into());
-        self.ui.set_place_title(b.place_title.into());
-        self.ui.set_set_h(b.set_h);
-        self.ui.set_place_h(b.place_h);
-        self.show_cells(b.set);
-        sync_cells(&self.place_cells, b.place);
+        let (set_w, place_w) = self.light_box_widths();
+        let b = crate::described::boxes(&self.page.keys_light(), &self.page.effect_desc(&mode), &self.page.effect_settings(), &look, set_w, place_w);
+        // (where and when beside the settings, for an effect with places to light)
+        let mut shown = vec![crate::boxes::Laid { title: b.title, least: crate::described::SET_W, h: b.set_h, cells: b.set }];
+        if b.kind == 0 && !b.place_title.is_empty() {
+            shown.push(crate::boxes::Laid { title: b.place_title, least: crate::described::PLACE_W, h: b.place_h, cells: b.place });
+        }
+        self.light_boxes.show(shown);
+    }
+
+    /// How wide the page's row of boxes made the Lighting tab's settings and its where
+    /// and when (their least widths until it has drawn them).
+    fn light_box_widths(&self) -> (f32, f32) {
+        (self.light_boxes.width(0, crate::described::SET_W), self.light_boxes.width(1, crate::described::PLACE_W))
     }
 
     /// Whether the Lighting page lights some zones of the keyboard, not all of
@@ -7872,7 +7916,8 @@ impl Front {
         self.ui.set_menu_search(false);
         self.ui.set_menu_back(false);
         self.ui.set_menu_natural(h);
-        let w = if in_place { crate::described::PLACE_W } else { crate::described::SET_W } - 32.0;
+        let (set_w, place_w) = self.light_box_widths();
+        let w = if in_place { place_w } else { set_w } - 32.0;
         self.ui.set_menu_w(w);
         self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
         let (ax, ay, ah) = anchor;
@@ -10644,4 +10689,10 @@ mod tests {
             }
         }
     }
+}
+
+/// How wide an effect's tile shows its picture, as the page's grid of effects
+/// says (in whole pixels; the grid's least until it has drawn it).
+fn pic_wide(shown: f32) -> f32 {
+    if shown > 0.0 { shown.round() } else { 72.0 }
 }

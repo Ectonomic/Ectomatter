@@ -1133,23 +1133,36 @@ impl Page {
     /// The boxes under the picture as cells: on Lighting, the chosen effect's
     /// settings; on Performance, the sensitivities and the polling rate; on
     /// Settings, the card. `w` is the room across.
-    pub fn cells(&self, w: f32, open: Option<(usize, usize)>) -> (Vec<Cell>, f32) {
+    /// The tab's pieces laid out here as a form (Settings): its cells, and how tall they are.
+    pub fn cells(&self, w: f32) -> (Vec<Cell>, f32) {
         match self.tab {
-            1 => self.light_cells(w, open),
-            2 => self.performance_cells(w),
             3 => self.settings_cells(w),
             _ => (Vec::new(), 0.0),
         }
     }
 
+    /// The tab's boxes laid out here, for the page's row of boxes: on Lighting the
+    /// chosen light's effect's settings, on Performance a box for each of the
+    /// sections the core's layout gives the mouse's settings; each laid out to
+    /// the width the row made it (`width(i, least)`); `open` is the color the
+    /// picker is open on.
+    pub fn boxes(&self, width: impl Fn(usize, f32) -> f32, open: Option<(usize, usize)>) -> Vec<crate::boxes::Laid> {
+        match self.tab {
+            1 => vec![self.light_box(width(0, crate::tokens::size::SETTINGS), open)],
+            2 => self.performance_boxes(width),
+            _ => Vec::new(),
+        }
+    }
+
     /// The chosen light's effect's settings, drawn from the core's
     /// description of the effect; `open` is the color the picker is open on.
-    fn light_cells(&self, w: f32, open: Option<(usize, usize)>) -> (Vec<Cell>, f32) {
+    fn light_box(&self, w: f32, open: Option<(usize, usize)>) -> crate::boxes::Laid {
+        let laid = |s: Stack, title: &str| crate::boxes::Laid { title: title.into(), least: crate::tokens::size::SETTINGS, h: s.height(), cells: s.cells };
         let l = self.light_of(self.light_name());
         if !self.light_known(self.light_name()) {
             let mut s = Stack::new(w);
             s.note("The mouse can’t tell Ectomatter this light’s effect, only its color. Choose an effect to set it.");
-            return boxed(s, 0.0, 0.0, "Not known");
+            return laid(s, "Not known");
         }
         let e = self.effect_desc(l["effect"].as_str().unwrap_or("static"));
         let mut s = Stack::new(w);
@@ -1164,26 +1177,20 @@ impl Page {
                 s.y += 18.0;
             }
         }
-        boxed(s, 0.0, 0.0, e["label"].as_str().unwrap_or(""))
+        laid(s, e["label"].as_str().unwrap_or(""))
     }
 
     /// The mouse's own settings, a box for each of the sections the core's
-    /// layout gives them, side by side (the last of two as wide as a switch
-    /// needs), drawn from its description.
-    fn performance_cells(&self, w: f32) -> (Vec<Cell>, f32) {
+    /// layout gives them, drawn from its description; the page's row of boxes
+    /// lays them out side by side as it does any boxes.
+    fn performance_boxes(&self, width: impl Fn(usize, f32) -> f32) -> Vec<crate::boxes::Laid> {
         let desc = &self.state["device"];
         let (values, known) = (&self.state["settings"]["values"], &self.state["settings"]["known"]);
         let secs = crate::described::sections(desc, values);
-        let n = secs.len().max(1);
-        let widths: Vec<f32> = if n == 2 {
-            let last = 420.0f32.min(w * 0.42);
-            vec![w - last - 12.0, last]
-        } else {
-            vec![(w - 12.0 * (n - 1) as f32) / n as f32; n]
-        };
-        let (mut cells, mut h, mut x) = (Vec::new(), 0.0f32, 0.0f32);
-        for (sec, sw) in secs.iter().zip(widths) {
-            let mut s = Stack::new(sw);
+        let least = crate::tokens::size::SETTINGS;
+        let mut out = Vec::new();
+        for (k, sec) in secs.iter().enumerate() {
+            let mut s = Stack::new(width(k, least));
             crate::described::draw_section(&mut s, desc, sec, values, known);
             // (the mouse's own word on which of its sensitivities was in use)
             let has_cpi = sec.items.iter().any(|&k| crate::described::setting(desc, k).is_some_and(|(id, _)| id == "cpi1"));
@@ -1191,12 +1198,9 @@ impl Page {
                 s.gap(6.0);
                 s.note(&format!("When Ectomatter last asked, the mouse was using the {}.", if p == 1 { "first" } else { "second" }));
             }
-            let (more, bh) = boxed(s, x, 0.0, &sec.title);
-            cells.extend(more);
-            h = h.max(bh);
-            x += sw + 12.0;
+            out.push(crate::boxes::Laid { title: sec.title.clone(), least, h: s.height(), cells: s.cells });
         }
-        (cells, h)
+        out
     }
 
     fn settings_cells(&self, w: f32) -> (Vec<Cell>, f32) {
@@ -1256,19 +1260,6 @@ pub fn tile_of(e: &str) -> (&'static str, i32) {
         "colorshift" => ("wave", 3),
         _ => ("static", 0),
     }
-}
-
-/// A stack laid out as a box: its tile under it at `x`, `y`, its title, its pieces moved there.
-fn boxed(s: Stack, x: f32, y: f32, title: &str) -> (Vec<Cell>, f32) {
-    let h = s.height();
-    let mut cells = vec![Cell { style: 1, ..cell(kind::TILE, x, y, s.w, h) }];
-    cells.push(text_cell(style::BOX_TITLE, x + 16.0, y + 14.0, s.w - 32.0, 20.0, title));
-    for mut c in s.cells {
-        c.x += x;
-        c.y += y;
-        cells.push(c);
-    }
-    (cells, y + h)
 }
 
 pub fn rgb(v: &Value) -> Option<[u8; 3]> {

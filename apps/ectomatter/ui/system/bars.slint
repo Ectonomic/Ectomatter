@@ -1,0 +1,267 @@
+// The bars across the top of every window and page, and the line under a page's
+// bar. Each is drawn here once, from the tokens, so every window and every page
+// opens the same way.
+
+import { Space, Radius, Font, Size, Part, Shadow, Ink } from "tokens.slint";
+import { WinButton, Tab, LinkButton } from "controls.slint";
+
+// a dot that says how something is: 0 not known or not there, 1 good, 2 a
+// problem, 3 a warning
+export component Dot inherits Rectangle {
+    in property <int> state;
+    width: Size.dot;
+    height: Size.dot;
+    border-radius: self.height / 2;
+    background: root.state == 1 ? Ink.good : root.state == 2 ? Ink.bad : root.state == 3 ? Ink.warn : Ink.off;
+}
+
+// A window's title bar, the same on every window: the mark and the wordmark,
+// where the window is (its crumbs, each after a slash), then the window's own
+// buttons. Dragging it moves the window; a double click maximizes it.
+export component TitleBar inherits Rectangle {
+    in property <image> mark;
+    in property <[string]> crumbs;
+    // the window's corners (none while it's maximized), which the bar's top follows
+    in property <length> corner;
+    callback drag();
+    callback maximize();
+    callback minimize();
+    callback close();
+    height: Size.title-bar;
+    background: Ink.title;
+    border-top-left-radius: root.corner;
+    border-top-right-radius: root.corner;
+    TouchArea {
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
+                root.drag();
+            }
+        }
+        double-clicked => { root.maximize(); }
+    }
+    Image {
+        x: 12px;
+        y: (root.height - 16px) / 2;
+        width: 16px;
+        height: 16px;
+        source: root.mark;
+    }
+    wordmark := Text {
+        x: 12px + 16px + 7px;
+        height: root.height;
+        text: "Ectomatter";
+        font-family: Font.ui;
+        font-weight: Font.strong;
+        font-size: Font.text;
+        letter-spacing: -0.54px;
+        color: Ink.bright;
+        vertical-alignment: center;
+    }
+    if root.crumbs.length > 0: HorizontalLayout {
+        x: 114px;
+        width: self.preferred-width;
+        height: root.height;
+        spacing: 6px;
+        for c[i] in root.crumbs: HorizontalLayout {
+            spacing: 6px;
+            if i > 0: Text {
+                text: "/";
+                font-family: Font.ui;
+                font-size: Font.control;
+                color: Ink.edge;
+                vertical-alignment: center;
+            }
+            Text {
+                text: c;
+                font-family: Font.ui;
+                font-size: Font.control;
+                color: Ink.dim;
+                vertical-alignment: center;
+            }
+        }
+    }
+    HorizontalLayout {
+        x: parent.width - 120px;
+        width: 120px;
+        WinButton {
+            commands: "M3 8h10";
+            clicked => { root.minimize(); }
+        }
+        WinButton {
+            size: 12px;
+            commands: "M3.5 2.5h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z";
+            clicked => { root.maximize(); }
+        }
+        WinButton {
+            danger: true;
+            corner: root.corner;
+            commands: "M3.5 3.5l9 9M12.5 3.5l-9 9";
+            clicked => { root.close(); }
+        }
+    }
+}
+
+// A page's bar, the same on every page: its name (a device's after its
+// connection's dot, a page's after the way back to where it opened from), its
+// tabs with the chosen one underlined, what was last done or what went wrong,
+// Undo for a moment after a change, and the page's own buttons at its end (its
+// children). Its sides are the page's margin, so its name starts where the
+// page's hint, stage and boxes do.
+export component PageBar inherits Rectangle {
+    in property <string> title;
+    // the connection's dot before the name: -1 none, else as a Dot's state
+    in property <int> dot: -1;
+    // the way back before the name (the Library, from a game's page)
+    in property <string> back;
+    callback back-clicked();
+    in property <[string]> tabs;
+    // the chosen tab, by its place in `tabs`
+    in property <int> tab;
+    callback tab-chosen(int);
+    in property <string> status;
+    in property <bool> status-bad;
+    in property <bool> undo-shown;
+    callback undo();
+    height: Size.bar;
+    background: Ink.base;
+    HorizontalLayout {
+        padding-left: Space.margin;
+        padding-right: Space.margin;
+        spacing: 28px;
+        HorizontalLayout {
+            horizontal-stretch: 0;
+            spacing: 10px;
+            if root.dot >= 0: Rectangle {
+                width: Size.dot;
+                Dot {
+                    y: (parent.height - self.height) / 2;
+                    state: root.dot;
+                }
+            }
+            if root.back != "": Rectangle {
+                width: up.preferred-width + 4px;
+                up := Text {
+                    text: root.back;
+                    font-family: Font.ui;
+                    font-size: Font.lead;
+                    font-weight: Font.medium;
+                    color: up-ta.has-hover ? Ink.bright : Ink.quiet;
+                    vertical-alignment: center;
+                }
+                up-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.back-clicked(); }
+                }
+            }
+            if root.back != "": Path {
+                y: (root.height - 12px) / 2;
+                width: 12px;
+                height: 12px;
+                viewbox-width: 12;
+                viewbox-height: 12;
+                commands: "M4.5 2.5l3.5 3.5-3.5 3.5";
+                fill: transparent;
+                stroke: Ink.quiet;
+                stroke-width: 1.6px;
+                stroke-line-cap: round;
+            }
+            Text {
+                text: root.title;
+                font-family: Font.ui;
+                font-size: Font.title;
+                font-weight: Font.strong;
+                letter-spacing: 0.17px;
+                color: Ink.bright;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+        if root.tabs.length > 0: HorizontalLayout {
+            horizontal-stretch: 0;
+            spacing: 2px;
+            for name[i] in root.tabs: Rectangle {
+                width: t.width;
+                t := Tab {
+                    text: name;
+                    selected: root.tab == i;
+                    clicked => { root.tab-chosen(i); }
+                }
+                if root.tab == i: Rectangle {
+                    y: parent.height - 2px;
+                    height: 2px;
+                    background: Ink.bright;
+                }
+            }
+        }
+        // what was last done, which fades, or what went wrong, which stays
+        Text {
+            horizontal-stretch: 1;
+            text: root.status;
+            font-family: Font.ui;
+            font-size: Font.note;
+            color: root.status-bad ? Ink.bad : Ink.quiet;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        if root.undo-shown: VerticalLayout {
+            horizontal-stretch: 0;
+            alignment: center;
+            LinkButton {
+                text: "Undo";
+                clicked => { root.undo(); }
+            }
+        }
+        // the page's own buttons
+        HorizontalLayout {
+            horizontal-stretch: 0;
+            spacing: Space.inline;
+            @children
+        }
+    }
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Ink.line;
+    }
+}
+
+// The line under a page's bar, the same on every page: what to do here, a chip
+// before it where the words name one, and whatever the page keeps beside it
+// (its children: a checkbox, a status, a button), in the band the page's head
+// is (Size.head: 12 down, 36 tall).
+export component HintRow inherits Rectangle {
+    in property <string> text;
+    in property <image> chip;
+    in property <bool> chip-on;
+    // shortened to the room it has, where something sits beside it
+    in property <bool> shorten;
+    y: 12px;
+    height: 36px;
+    HorizontalLayout {
+        spacing: 16px;
+        HorizontalLayout {
+            horizontal-stretch: root.shorten ? 1 : 0;
+            spacing: 10px;
+            if root.chip-on: Rectangle {
+                width: 14px;
+                Image {
+                    y: (parent.height - 14px) / 2;
+                    width: 14px;
+                    height: 14px;
+                    source: root.chip;
+                    image-fit: fill;
+                }
+            }
+            Text {
+                text: root.text;
+                font-family: Font.ui;
+                font-size: Font.note;
+                color: root.chip-on ? Ink.soft : Ink.quiet;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+        @children
+    }
+}

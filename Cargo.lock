@@ -1171,6 +1171,7 @@ dependencies = [
  "ectomatter-draw",
  "ectomatter-protocol",
  "ectomatter-sensors",
+ "ectomatter-tokens",
  "evga-z10",
  "flate2",
  "hidapi",
@@ -1227,6 +1228,13 @@ name = "ectomatter-sensors"
 version = "0.1.0"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "ectomatter-tokens"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]

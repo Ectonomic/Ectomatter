@@ -703,8 +703,8 @@ pub struct Look<'a> {
 
 /// The boxes beside the effects for an effect with a layout of its own: its
 /// settings, and where and when it plays (or, painting key by key, the
-/// brush). Each box is a fixed width, so its pieces are placed here, from its
-/// own top left; the page places the boxes and wraps them.
+/// brush). The page's row of boxes says how wide each is, and its pieces are
+/// placed here to that width, from its own top left.
 pub struct Boxes {
     /// 0 an effect's settings, 1 the light dark, 2 painting key by key
     pub kind: i32,
@@ -716,6 +716,8 @@ pub struct Boxes {
     pub place_title: String,
 }
 
+/// the boxes' least widths, which the page's row of boxes grows them from
+/// (ui/app.slint's Lighting row has them too)
 pub const SET_W: f32 = 360.0;
 pub const PLACE_W: f32 = 320.0;
 /// a speed's slider's fill
@@ -733,19 +735,19 @@ pub fn in_place_box(effect: &Value, id: &str) -> bool {
 
 /// The boxes for an effect with a layout of its own, its settings read from
 /// `e`, the effect's own settings in the device's profile; `light` the light
-/// it plays on (its zones).
-pub fn boxes(light: &Value, effect: &Value, e: &Value, look: &Look) -> Boxes {
+/// it plays on (its zones); the boxes `set_w` and `place_w` wide.
+pub fn boxes(light: &Value, effect: &Value, e: &Value, look: &Look, set_w: f32, place_w: f32) -> Boxes {
     let title = effect["label"].as_str().or(effect["id"].as_str()).unwrap_or("").to_string();
     if effect["paint"] == true {
-        return brush(light, effect, look);
+        return brush(light, effect, look, set_w);
     }
     let ps = params(effect);
     if ps.is_empty() {
-        let mut s = Stack::new(SET_W);
+        let mut s = Stack::new(set_w);
         s.note(&words(effect["note"].as_str().unwrap_or(""), look));
         return Boxes { kind: 1, title, set_h: s.height(), set: s.cells, place: Vec::new(), place_h: 0.0, place_title: String::new() };
     }
-    let mut s = Stack::new(SET_W);
+    let mut s = Stack::new(set_w);
     // the reset, at the top right, level with the title
     if effect["reset"] == true {
         s.link_right(Ctl::Reset, "Reset", 13.0, crate::lighting::RESET_ICON);
@@ -804,7 +806,7 @@ pub fn boxes(light: &Value, effect: &Value, e: &Value, look: &Look) -> Boxes {
     // whole light, where picking one lights only that), then the rest, each
     // a menu, under a hairline. Everything sits where it always does, so
     // nothing moves as it changes.
-    let mut p = Stack::new(PLACE_W);
+    let mut p = Stack::new(place_w);
     p.y = 46.0;
     let mut place_title = String::new();
     let mut rule = true;
@@ -912,9 +914,9 @@ fn zones_drawn(p: &mut Stack, at: i32, light: &Value, z: u64, look: &Look) {
 /// Painting key by key: the brush's colors (the ready ones, the one chosen
 /// ringed, and any other from the picker), filling a zone, scattering colors
 /// or clearing every key, and the effect's note.
-fn brush(light: &Value, effect: &Value, look: &Look) -> Boxes {
+fn brush(light: &Value, effect: &Value, look: &Look, w: f32) -> Boxes {
     use crate::lighting::PRESETS;
-    let mut s = Stack::new(SET_W);
+    let mut s = Stack::new(w);
     s.group("Color");
     let mut cols: Vec<[u8; 3]> = PRESETS.to_vec();
     let chosen = PRESETS.iter().position(|c| *c == look.paint);
@@ -926,7 +928,7 @@ fn brush(light: &Value, effect: &Value, look: &Look) -> Boxes {
     // (a little closer than the effects' colors, so the ready ones and "+" share a line)
     let (mut x, mut y) = (16.0f32, s.y);
     for (j, col) in cols.iter().enumerate() {
-        if x > 16.0 && x + 28.0 > SET_W - 16.0 {
+        if x > 16.0 && x + 28.0 > w - 16.0 {
             x = 16.0;
             y += 36.0;
         }
@@ -934,7 +936,7 @@ fn brush(light: &Value, effect: &Value, look: &Look) -> Boxes {
         x += 33.0;
     }
     // any other color, from the picker
-    if x + 28.0 > SET_W - 16.0 {
+    if x + 28.0 > w - 16.0 {
         x = 16.0;
         y += 36.0;
     }
@@ -946,9 +948,9 @@ fn brush(light: &Value, effect: &Value, look: &Look) -> Boxes {
     s.chips(Ctl::Fill, &chips, false, None);
     s.gap(10.0);
     let row = s.y;
-    let w1 = crate::text::width(500, 12.5, "Scatter colors") + 18.0;
+    let w1 = crate::lighting::quiet_width("Scatter colors", false);
     s.cells.push(Cell { text: "Scatter colors".into(), id: crate::lighting::id(Ctl::Scatter), ..crate::lighting::cell(kind::QUIET, 8.0, row, w1, 24.0) });
-    s.cells.push(Cell { text: "Clear every key".into(), id: crate::lighting::id(Ctl::Clear), ..crate::lighting::cell(kind::QUIET, 8.0 + w1 + 4.0, row, crate::text::width(500, 12.5, "Clear every key") + 18.0, 24.0) });
+    s.cells.push(Cell { text: "Clear every key".into(), id: crate::lighting::id(Ctl::Clear), ..crate::lighting::cell(kind::QUIET, 8.0 + w1 + 4.0, row, crate::lighting::quiet_width("Clear every key", false), 24.0) });
     s.y = row + 24.0 + 12.0;
     s.note(&words(effect["note"].as_str().unwrap_or(""), look));
     Boxes { kind: 2, title: "Brush".into(), set_h: s.height(), set: s.cells, place: Vec::new(), place_h: 0.0, place_title: String::new() }
@@ -1041,7 +1043,7 @@ mod tests {
                     assert!(read(stored, &steps(d["at"].as_str().unwrap_or(&format!("/{k}")))).is_some(), "{id}'s {k} is kept where its at says");
                 }
             }
-            let b = boxes(&light, e, stored, &look);
+            let b = boxes(&light, e, stored, &look, SET_W, PLACE_W);
             match id {
                 "off" => assert_eq!((b.kind, b.set.iter().any(|c| c.text.contains("Studio"))), (1, true)),
                 "custom" => assert_eq!((b.kind, b.title.as_str()), (2, "Brush")),
@@ -1056,12 +1058,12 @@ mod tests {
             let ef = effect(&l, e);
             let mut st = kept_by_keyboard[e].clone();
             keep(&mut st, "brightness", &setting(&ef, "brightness"), &json!(v));
-            boxes(&light, &ef, &st, &look).set.iter().find(|c| c.text.ends_with('%')).unwrap().text.to_string()
+            boxes(&light, &ef, &st, &look, SET_W, PLACE_W).set.iter().find(|c| c.text.ends_with('%')).unwrap().text.to_string()
         };
         assert_eq!(pct("static", 128), "50%");
         assert_eq!(pct("wave", 255), "100%");
         let wave = effect(&l, "wave");
-        let b = boxes(&light, &wave, &kept_by_keyboard["wave"], &look);
+        let b = boxes(&light, &wave, &kept_by_keyboard["wave"], &look, SET_W, PLACE_W);
         assert!(b.set.iter().any(|c| c.text == "1.0 s"));
         assert!(b.set.iter().any(|c| c.text == "Right" && c.on), "kept 2, shown Right");
     }

@@ -1,0 +1,216 @@
+// The surfaces a page lays its parts on: a box, a box that scrolls, the stage a
+// device is drawn on. Each is drawn here once, from the tokens.
+
+import { Space, Radius, Font, Size, Part, Shadow, Ink } from "tokens.slint";
+import { ScrollBar, WordButton } from "controls.slint";
+
+// the stage a device is drawn on, the same on every device's page: its shade round
+// a hole the window draws the device in (filled too, `filled`, until it's drawn),
+// the box's corners rounded on its outer pieces themselves (the software renderer
+// draws a piece's own corners round, but clips square)
+export component Stage inherits Rectangle {
+    in property <length> hole-x;
+    in property <length> hole-y;
+    in property <length> hole-w;
+    in property <length> hole-h;
+    in property <bool> filled;
+    property <length> r: 12px;
+    // left and right of the hole, the whole height, rounded at the box's corners
+    Rectangle {
+        x: 0;
+        width: root.hole-x;
+        height: root.height;
+        border-top-left-radius: root.r;
+        border-bottom-left-radius: root.r;
+        background: Ink.stage;
+    }
+    Rectangle {
+        x: root.hole-x + root.hole-w;
+        width: root.width - self.x;
+        height: root.height;
+        border-top-right-radius: root.r;
+        border-bottom-right-radius: root.r;
+        background: Ink.stage;
+    }
+    // above and below it, between those
+    Rectangle {
+        x: root.hole-x;
+        y: 0;
+        width: root.hole-w;
+        height: root.hole-y;
+        background: Ink.stage;
+    }
+    Rectangle {
+        x: root.hole-x;
+        y: root.hole-y + root.hole-h;
+        width: root.hole-w;
+        height: root.height - self.y;
+        background: Ink.stage;
+    }
+    if root.filled: Rectangle {
+        x: root.hole-x;
+        y: root.hole-y;
+        width: root.hole-w;
+        height: root.hole-h;
+        background: Ink.stage;
+    }
+}
+
+// A box on the page: a raised surface, no border, its title at its top left
+// and anything beside the title at its top right.
+export component PageBox inherits Rectangle {
+    in property <string> title;
+    // where the title sits: lower when something comes before it in the box
+    in property <length> title-y: 14px;
+    // (clear inside a ScrollBox, which draws the box itself)
+    in property <brush> fill: Ink.box;
+    background: root.fill;
+    border-radius: Radius.box;
+    Text {
+        x: Space.pad;
+        y: root.title-y;
+        height: 22px;
+        text: root.title;
+        font-family: Font.ui;
+        font-size: Font.text;
+        font-weight: Font.strong;
+        color: Ink.bright;
+        vertical-alignment: center;
+        overflow: elide;
+        width: parent.width - 120px;
+    }
+    @children
+}
+
+// A box under the keyboard that holds more than its height: the box itself,
+// rounded, and what it holds (`need` tall) scrolling inside it, with the Key
+// library's scrollbar at its edge when there is more than shows.
+export component ScrollBox inherits Rectangle {
+    in property <length> need;
+    in property <brush> fill: Ink.box;
+    background: root.fill;
+    border-radius: Radius.box;
+    clip: true;
+    sb-flick := Flickable {
+        width: parent.width;
+        height: parent.height;
+        content-height: max(root.need, root.height);
+        mouse-drag-pan-enabled: false;
+        @children
+    }
+    ScrollBar {
+        x: parent.width - 12px;
+        y: 8px;
+        height: parent.height - 16px;
+        view: sb-flick.height;
+        content: sb-flick.content-height;
+        offset: -sb-flick.content-y;
+        framed: false;
+        thumb-color: Ink.edge;
+        scroll-to(o) => { sb-flick.content-y = -o; }
+    }
+}
+
+// Under a dialog, over the whole window, the window's corners followed: a press
+// on it is Cancel, and so is Escape (unless the dialog takes Escape itself,
+// `escape`, as a form with a menu open does).
+export component Scrim inherits Rectangle {
+    in property <length> corner;
+    callback cancel();
+    callback escape();
+    escape => { root.cancel(); }
+    background: Ink.scrim;
+    border-radius: root.corner;
+    TouchArea {
+        clicked => { root.cancel(); }
+    }
+    FocusScope {
+        width: 0;
+        height: 0;
+        init => { self.focus(); }
+        key-pressed(e) => {
+            if (e.text == Key.Escape) {
+                root.escape();
+                return accept;
+            }
+            reject
+        }
+    }
+    @children
+}
+
+// A dialog's box, on its scrim, the same for a question and for a form: a box
+// lifted the most, with a faint outline. What it holds sits Space.margin in from
+// its edges: a title (Font.title), the line under it, then what it asks, and its
+// buttons at its foot's right, the one it's for last.
+export component DialogBox inherits Rectangle {
+    border-radius: Radius.box;
+    background: Ink.box;
+    border-width: 1px;
+    border-color: Ink.glass;
+    drop-shadow-blur: Shadow.modal.blur;
+    drop-shadow-offset-y: Shadow.modal.y;
+    drop-shadow-color: Shadow.modal.color;
+    // (a press inside it stays inside it)
+    TouchArea { }
+    @children
+}
+
+// Are you sure: a question in a dialog, what it changes, and its two answers,
+// keeping things as they are and doing it (in red, as it deletes)
+export component Confirm inherits Scrim {
+    in property <string> title;
+    in property <string> body;
+    in property <string> body2;
+    in property <string> keep: "Cancel";
+    in property <string> do;
+    callback yes();
+    DialogBox {
+        width: min(440px, root.width - 32px);
+        height: dlg.preferred-height + 2 * Space.margin;
+        dlg := VerticalLayout {
+            x: Space.margin;
+            y: Space.margin;
+            width: parent.width - 2 * Space.margin;
+            height: self.preferred-height;
+            spacing: 10px;
+            Text {
+                text: root.title;
+                font-family: Font.ui;
+                font-size: Font.title;
+                font-weight: Font.strong;
+                color: Ink.bright;
+                wrap: word-wrap;
+            }
+            Text {
+                text: root.body;
+                font-family: Font.ui;
+                font-size: Font.text;
+                color: Ink.dim;
+                wrap: word-wrap;
+            }
+            if root.body2 != "": Text {
+                text: root.body2;
+                font-family: Font.ui;
+                font-size: Font.text;
+                color: Ink.dim;
+                wrap: word-wrap;
+            }
+            HorizontalLayout {
+                padding-top: 8px;
+                spacing: Space.inline;
+                alignment: end;
+                WordButton {
+                    text: root.keep;
+                    on-box: true;
+                    clicked => { root.cancel(); }
+                }
+                WordButton {
+                    text: root.do;
+                    danger: true;
+                    clicked => { root.yes(); }
+                }
+            }
+        }
+    }
+}

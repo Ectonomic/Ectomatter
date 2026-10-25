@@ -1,0 +1,1279 @@
+// The pieces the pages laid out in Rust are drawn with (the Settings page, a
+// game's page, the Lighting page's boxes, a plugin's settings): Rust says where
+// each goes and what it is, and each kind is drawn here once, from the tokens.
+
+import { Space, Radius, Font, Size, Part, Shadow, Ink } from "tokens.slint";
+import { Typing } from "state.slint";
+import { CheckBox, LinkButton, TextButton } from "controls.slint";
+import { ScrollBox, PageBox } from "surfaces.slint";
+
+// a piece of the Lighting page's tile, placed by the window: text, a color
+// swatch, a checkbox, a slider, a switch and its buttons, an area chip, a
+// button, the reset at the foot
+export struct Cell {
+    kind: int,
+    x: length,
+    y: length,
+    w: length,
+    h: length,
+    text: string,
+    // an icon drawn in place of its words, on a 24-unit square: its filled
+    // shapes and its lines (2 units wide), as SVG path data (a sensor's cell,
+    // kind 51, carries its driver's name and its reading in them)
+    fill: string,
+    lines: string,
+    color: color,
+    on: bool,
+    value: float,
+    id: int,
+    index: int,
+    style: int,
+}
+
+// one piece of the Lighting page's tile, drawn where the window placed it
+export component CellView inherits Rectangle {
+    in property <Cell> c;
+    callback pick(int, int, length, length, length);
+    callback slide(int, float);
+    // typed into a box: its id, its index (which of the boxes with that id) and what it holds now
+    callback typed(int, int, string);
+    // a number typed into its box and set, by Enter or by leaving the box
+    callback entered(int, string);
+    // the pointer over a zone, or no longer; a box typed in, or no longer
+    callback hovered(int, bool);
+    callback focused(int, bool);
+    // a slider double-clicked, to put it back as it was
+    callback reset(int);
+    // a pad pressed or dragged on: where, as a share of it across and down
+    callback pad(int, float, float);
+    in property <image> glyph;
+    in property <image> glyph2;
+    // each package's own glyph (a device's tile with style 2 on: the package that many past 2)
+    in property <[image]> glyphs;
+    // the scenes' glyph (a device glyph's style -1), and the chips a dropdown can show
+    // before its words (its value, one more than the chip's place)
+    in property <image> glyph3;
+    in property <[image]> chips;
+    x: root.c.x;
+    y: root.c.y;
+    width: root.c.w;
+    height: root.c.h;
+    // the Lighting page's words: a group's heading in small capitals (33), a color's hex
+    // code (34), a setting's name (35), the words at a slider's ends (36 left, 37 right)
+    // a command, as it was typed (41), cut off with an ellipsis where it runs long
+    if root.c.kind == 0 && root.c.style == 41: Text {
+        x: 0;
+        width: parent.width;
+        text: root.c.text;
+        font-family: Font.mono;
+        font-size: Font.caption;
+        color: Ink.dim;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    if root.c.kind == 0 && root.c.style >= 33 && root.c.style != 41: Text {
+        x: 0;
+        width: parent.width;
+        text: root.c.text;
+        font-family: Font.ui;
+        // (39: the device a Sensors tab shows, on its first line; 42: a heading inside a
+        // plugin's section, in capitals; 43: what a status says, beside its dot; 44: a
+        // row's value that's only to read, quieter)
+        font-size: root.c.style == 33 ? Font.small : root.c.style == 34 || root.c.style == 42 ? Font.caption : root.c.style == 35 ? Font.note : root.c.style == 38 || root.c.style == 39 ? Font.text : root.c.style == 43 || root.c.style == 44 ? Font.name : Font.small;
+        font-weight: root.c.style == 33 || root.c.style == 38 ? Font.strong : root.c.style == 34 || root.c.style == 39 || root.c.style == 42 ? Font.medium : Font.regular;
+        letter-spacing: root.c.style == 33 ? 0.95px : root.c.style == 42 ? 1.2px : 0;
+        color: root.c.style == 38 || root.c.style == 39 || root.c.style == 43 ? Ink.bright : root.c.style == 35 || root.c.style == 34 ? Ink.dim : root.c.style == 44 ? Ink.soft : Ink.quiet;
+        horizontal-alignment: root.c.style == 37 ? right : left;
+        vertical-alignment: center;
+    }
+    // text: a row's name, a column's heading, a note, the empty tile's words, a slider's value
+    if root.c.kind == 0 && root.c.style < 33: Text {
+        x: 0;
+        width: parent.width;
+        text: root.c.text;
+        font-family: Font.ui;
+        // 0 a row's name, 1 a heading, 2 a note, 3 an empty tile's words, 4 a slider's value, 5 a value,
+        // 6 a list's item, 7 the page's title, 8 a device's name, 9 its state, 10 the temperature,
+        // 11 the weather's words, 12 a fact, 13 its value, 14 the credit, 19 a note in its own color,
+        // 20 a menu's words in their own color, 21 a small word in its own color, 22 a stronger word in its own color
+        font-size: root.c.style == 1 ? Font.control : root.c.style == 2 || root.c.style == 19 ? Font.note : root.c.style == 3 ? Font.name : root.c.style == 4 ? Font.control
+            : root.c.style == 7 ? 20px : root.c.style == 8 ? 14.5px : root.c.style == 9 || root.c.style == 22 ? 12.5px : root.c.style == 10 ? 22px
+            : root.c.style == 12 || root.c.style == 13 ? 13px : root.c.style == 14 ? 12px : root.c.style == 21 ? 11.5px : 13.5px;
+        font-weight: root.c.style == 1 || root.c.style == 8 || root.c.style == 10 || root.c.style == 13 || root.c.style == 22 ? Font.medium : root.c.style == 7 ? Font.strong : Font.regular;
+        letter-spacing: root.c.style == 7 ? -0.4px : root.c.style == 10 ? -0.44px : 0;
+        color: root.c.style >= 19 && root.c.style <= 22 ? root.c.color
+            : root.c.style == 1 || root.c.style == 9 || root.c.style == 12 ? Ink.soft : root.c.style == 2 || root.c.style == 3 || root.c.style == 14 ? Ink.quiet
+            : root.c.style == 5 || root.c.style == 8 ? Ink.bright : root.c.style == 7 || root.c.style == 10 ? Ink.ink : Ink.dim;
+        horizontal-alignment: root.c.style == 4 ? right : left;
+        vertical-alignment: center;
+    }
+    // a color: a swatch that opens the color picker
+    if root.c.kind == 1: Rectangle {
+        border-radius: Radius.control;
+        background: root.c.color;
+        Rectangle {
+            border-radius: Radius.control;
+            border-width: 1px;
+            border-color: sw.has-hover ? #ffffff66 : #ffffff2e;
+        }
+        sw := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+        }
+    }
+    // a checkbox and its words
+    if root.c.kind == 2: CheckBox {
+        width: parent.width;
+        height: parent.height;
+        text: root.c.text;
+        on: root.c.on;
+        // which box, and the state it is turned to
+        clicked => { root.pick(root.c.id, root.c.index * 2 + (root.c.on ? 0 : 1), 0, 0, 0); }
+    }
+    // a slider: a thin track and a round knob, which follows the pointer while held
+    if root.c.kind == 3: Rectangle {
+        property <float> at: drag.pressed ? max(0, min(1, (drag.mouse-x - 8px) / (self.width - 16px))) : root.c.value;
+        Rectangle {
+            y: (parent.height - 4px) / 2;
+            height: 4px;
+            border-radius: self.height / 2;
+            background: Ink.track;
+        }
+        Rectangle {
+            x: parent.at * (parent.width - 16px);
+            width: 16px;
+            height: 16px;
+            border-radius: self.width / 2;
+            background: Ink.ink;
+        }
+        drag := TouchArea {
+            mouse-cursor: pointer;
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.down) {
+                    root.slide(root.c.id, max(0, min(1, (self.mouse-x - 8px) / (self.width - 16px))));
+                }
+            }
+            moved => {
+                if (self.pressed) {
+                    root.slide(root.c.id, max(0, min(1, (self.mouse-x - 8px) / (self.width - 16px))));
+                }
+            }
+            double-clicked => { root.reset(root.c.id); }
+        }
+    }
+    // a switch's ground
+    if root.c.kind == 4: Rectangle {
+        border-radius: Radius.panel;
+        background: Ink.well;
+    }
+    // a box in its color, rounded at its ends: a mark on a track, a rule between readings
+    if root.c.kind == 16: Rectangle {
+        border-radius: min(self.width, self.height) / 2;
+        background: root.c.color;
+    }
+    // a place that tells the page when the pointer is over it, under the words it covers
+    if root.c.kind == 17: TouchArea {
+        changed has-hover => { root.hovered(root.c.id, self.has-hover); }
+    }
+    // a pad to move something on, both ways at once: where the pointer is on it
+    if root.c.kind == 18: TouchArea {
+        mouse-cursor: move;
+        changed has-hover => { root.hovered(root.c.id, self.has-hover); }
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                root.pad(root.c.id, max(0, min(1, self.mouse-x / self.width)), max(0, min(1, self.mouse-y / self.height)));
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                root.pad(root.c.id, max(0, min(1, self.mouse-x / self.width)), max(0, min(1, self.mouse-y / self.height)));
+            }
+        }
+    }
+    // a tile, under the pieces on it
+    // (style 27: a panel over the page, raised off it; 28: the page behind one,
+    // dimmed; 30: the row of a menu that is in use)
+    // (style 2: the Sensor Feed box with its first tab open, square under that tab)
+    if root.c.kind == 9: Rectangle {
+        border-radius: root.c.style == 30 ? Radius.control : Radius.box;
+        border-top-left-radius: root.c.style == 2 ? 0 : root.c.style == 30 ? Radius.control : Radius.box;
+        background: root.c.style == 27 ? Ink.pop : root.c.style == 28 ? #131316b8 : root.c.style == 30 ? Ink.shade4 : Ink.shade1;
+        border-width: root.c.style == 27 ? 1px : 0;
+        border-color: Ink.seam;
+        drop-shadow-blur: root.c.style == 27 ? Shadow.float.blur : 0;
+        drop-shadow-offset-y: root.c.style == 27 ? Shadow.float.y : 0;
+        drop-shadow-color: root.c.style == 27 ? Shadow.float.color : transparent;
+    }
+    // a device's glyph on its square (style 1: the second device's, the mouse)
+    if root.c.kind == 12: Rectangle {
+        border-radius: Radius.panel;
+        background: Ink.well;
+        // (30 on Settings' 48 square, and as much of a smaller one)
+        Image {
+            width: floor(parent.width * 0.625 / 1px) * 1px;
+            height: self.width;
+            source: root.c.style == -1 ? root.glyph3 : root.c.style >= 2 ? root.glyphs[root.c.style - 2] : root.c.style == 1 ? root.glyph2 : root.glyph;
+            colorize: Ink.soft;
+        }
+    }
+    // the weather's box (style 1: a folder's path in a plugin's section, its corners
+    // smaller; 2: the settings nested under one, a shade off the box)
+    if root.c.kind == 13: Rectangle {
+        border-radius: root.c.style == 1 ? Radius.control : Radius.panel;
+        background: root.c.style == 2 ? #ffffff06 : Ink.well;
+    }
+    // a state's dot: 0 unknown, 1 good, 2 bad, 3 read from the weather
+    if root.c.kind == 14: Rectangle {
+        border-radius: min(self.width, self.height) / 2;
+        background: root.c.style == 1 ? Ink.good : root.c.style == 2 ? Ink.bad : root.c.style == 3 ? Ink.warn : #5c5c66;
+    }
+    // a tab of the Sensor Feed box, as the Screen tab's own: rounded above, the open one in the
+    // box's color and running on into it on its feet (none on the first's left, where the
+    // box's corner is square), the others the page's own until the pointer is on them; an
+    // amber dot after a part's name when its readings can't come in (style 1: the first
+    // tab, 2: with its dot, 3: both)
+    if root.c.kind == 50: tab := Rectangle {
+        property <bool> first: root.c.style == 1 || root.c.style == 3;
+        if root.c.on && !tab.first: Rectangle {
+            x: -10px;
+            y: parent.height - 10px;
+            width: 10px;
+            height: 10px;
+            background: Ink.box;
+            Rectangle {
+                background: Ink.base;
+                border-bottom-right-radius: Radius.panel;
+            }
+        }
+        if root.c.on: Rectangle {
+            x: parent.width;
+            y: parent.height - 10px;
+            width: 10px;
+            height: 10px;
+            background: Ink.box;
+            Rectangle {
+                background: Ink.base;
+                border-bottom-left-radius: Radius.panel;
+            }
+        }
+        Rectangle {
+            border-top-left-radius: Radius.panel;
+            border-top-right-radius: Radius.panel;
+            background: root.c.on || tab-ta.has-hover ? Ink.box : transparent;
+        }
+        tab-words := Text {
+            x: 18px;
+            height: parent.height;
+            text: root.c.text;
+            font-family: Font.ui;
+            font-size: Font.control;
+            font-weight: Font.medium;
+            color: root.c.on ? Ink.bright : tab-ta.has-hover ? Ink.dim : Ink.soft;
+            vertical-alignment: center;
+        }
+        if root.c.style >= 2: Rectangle {
+            x: tab-words.x + tab-words.width + 7px;
+            y: (parent.height - 6px) / 2;
+            width: 6px;
+            height: 6px;
+            border-radius: self.width / 2;
+            background: Ink.warn;
+        }
+        // (the open tab is already chosen: only the others answer the pointer)
+        tab-ta := TouchArea {
+            enabled: !root.c.on;
+            mouse-cursor: root.c.on ? MouseCursor.default : MouseCursor.pointer;
+            clicked => { root.pick(root.c.id, root.c.index, 0, 0, 0); }
+        }
+    }
+    // a dot beside a label on a game's page, where the game changed the row from Every
+    // game's: selecting it puts the row back; under the pointer, a well round it and, a
+    // while after the pointer comes to rest, what it does (`text`), in a box like the tip's
+    if root.c.kind == 54: Rectangle {
+        reset-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.pick(root.c.id, root.c.index, 0, 0, 0); }
+        }
+        Rectangle {
+            width: 20px;
+            height: 20px;
+            border-radius: self.width / 2;
+            background: reset-ta.has-hover ? #ffffff14 : transparent;
+        }
+        Rectangle {
+            width: 6px;
+            height: 6px;
+            border-radius: self.width / 2;
+            background: Ink.ink;
+        }
+        Tooltip {
+            Rectangle {
+                border-radius: Radius.control;
+                background: Ink.hover-box;
+                border-width: 1px;
+                border-color: Ink.seam;
+                drop-shadow-blur: Shadow.lift.blur;
+                drop-shadow-offset-y: Shadow.lift.y;
+                drop-shadow-color: Shadow.lift.color;
+                VerticalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    padding-top: 7px;
+                    padding-bottom: 7px;
+                    Text {
+                        text: root.c.text;
+                        font-family: Font.ui;
+                        font-size: Font.note;
+                        color: Ink.bright;
+                    }
+                }
+            }
+        }
+    }
+    // over a device's name in the Sensor Feed box: under the pointer, a while after it comes to
+    // rest, its whole name where the row's is shorter (`text`), and where its readings come
+    // from (`fill`), in a box like the app's menus
+    if root.c.kind == 52: Rectangle {
+        Tooltip {
+            Rectangle {
+                border-radius: Radius.control;
+                background: Ink.hover-box;
+                border-width: 1px;
+                border-color: Ink.seam;
+                drop-shadow-blur: Shadow.lift.blur;
+                drop-shadow-offset-y: Shadow.lift.y;
+                drop-shadow-color: Shadow.lift.color;
+                VerticalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    padding-top: 7px;
+                    padding-bottom: 7px;
+                    spacing: 2px;
+                    if root.c.text != "": Text {
+                        text: root.c.text;
+                        font-family: Font.ui;
+                        font-size: Font.note;
+                        font-weight: Font.medium;
+                        color: Ink.bright;
+                    }
+                    Text {
+                        text: root.c.fill;
+                        font-family: Font.ui;
+                        font-size: Font.caption;
+                        color: Ink.soft;
+                    }
+                }
+            }
+        }
+    }
+    // a sensor in the Sensor Feed box: its checkbox, its name (as wide as `value` allows), its
+    // driver's name in gray (`fill`), its reading at its right (`lines`), and under the
+    // pointer a pencil to rename it, whose click is the next control's; or a run of like
+    // readings folded into one line, a chevron for its checkbox, how many are checked at its
+    // right (style 0: a sensor, 1: one whose reading can't be right, its reading amber, 2: a
+    // run, 3: a run opened, 4: a sensor being renamed, its line to type in over it)
+    if root.c.kind == 51: chip := Rectangle {
+        property <bool> run: root.c.style == 2 || root.c.style == 3;
+        property <bool> hot: (chip-ta.has-hover || pen-ta.has-hover) && root.c.style != 4;
+        border-radius: Radius.control;
+        background: self.hot ? Ink.hover-well : transparent;
+        chip-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.pick(root.c.id, root.c.index, 0, 0, 0); }
+        }
+        if !chip.run: Rectangle {
+            x: 8px;
+            y: (parent.height - 15px) / 2;
+            width: 15px;
+            height: 15px;
+            border-radius: Radius.tiny;
+            background: root.c.on ? (chip.hot ? Ink.bright : Ink.dim) : chip.hot ? Ink.hover-box : Ink.well;
+            border-width: root.c.on ? 0 : 1px;
+            border-color: Ink.edge;
+            if root.c.on: Path {
+                width: 15px;
+                height: 15px;
+                viewbox-width: 18;
+                viewbox-height: 18;
+                commands: "M5.2 9.3 L7.9 11.9 L12.9 6.4";
+                fill: transparent;
+                stroke: Ink.base;
+                stroke-width: 2.2px;
+            }
+        }
+        if chip.run: Path {
+            x: 10px;
+            y: (parent.height - 10px) / 2;
+            width: 10px;
+            height: 10px;
+            viewbox-width: 10;
+            viewbox-height: 10;
+            commands: root.c.style == 3 ? "M2 3.5l3 3 3-3" : "M3.5 2l3 3-3 3";
+            fill: transparent;
+            stroke: Ink.soft;
+            stroke-width: 1.4px;
+        }
+        chip-name := Text {
+            x: 31px;
+            width: root.c.style == 4 ? 0 : min(self.preferred-width, root.c.value * 1px - (chip.hot && !chip.run ? 30px : 0));
+            height: parent.height;
+            text: root.c.text;
+            font-family: Font.ui;
+            font-size: Font.note;
+            color: root.c.on || (chip.run && chip.hot) ? Ink.bright : Ink.dim;
+            vertical-alignment: center;
+            overflow: elide;
+            visible: root.c.style != 4;
+        }
+        if root.c.fill != "" && root.c.style != 4: Text {
+            x: chip-name.x + chip-name.width + 8px;
+            height: parent.height;
+            text: root.c.fill;
+            font-family: Font.ui;
+            font-size: Font.caption;
+            color: Ink.quiet;
+            vertical-alignment: center;
+        }
+        chip-val := Text {
+            x: parent.width - 8px - self.width - (chip.hot && !chip.run ? 30px : 0);
+            height: parent.height;
+            text: root.c.lines;
+            font-family: Font.ui;
+            font-size: Font.note;
+            color: root.c.style == 1 ? Ink.warn : chip.run ? Ink.quiet : root.c.on ? Ink.dim : Ink.soft;
+            vertical-alignment: center;
+            visible: root.c.style != 4;
+        }
+        Rectangle {
+            x: parent.width - 8px - 22px;
+            y: (parent.height - 20px) / 2;
+            width: 22px;
+            height: 20px;
+            border-radius: Radius.small;
+            visible: chip.hot && !chip.run;
+            background: pen-ta.has-hover ? Ink.pick : transparent;
+            Path {
+                width: 12px;
+                height: 12px;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                commands: "M4 20h4L19 9l-4-4L4 16z";
+                fill: transparent;
+                stroke: pen-ta.has-hover ? Ink.bright : Ink.soft;
+                stroke-width: 1.8px;
+                stroke-line-join: round;
+            }
+            pen-ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.pick(root.c.id + 1, root.c.index, 0, 0, 0); }
+            }
+        }
+    }
+    // a line to type in: the profile's name, or the weather's place
+    // (style 7: a sensor's new name, typed on its chip: Enter, or leaving it, gives it,
+    // Escape takes it back)
+    if root.c.kind == 10: Rectangle {
+        border-radius: root.c.style == 7 ? Radius.small : Radius.control;
+        background: root.c.style == 7 ? Ink.base : Ink.well;
+        border-width: root.c.style == 7 ? 1px : 0;
+        border-color: Ink.edge;
+        if root.c.style == 2 && input.text == "": Text {
+            x: 10px;
+            height: parent.height;
+            text: "Find a typeface";
+            font-family: Font.ui;
+            font-size: Font.text;
+            color: Ink.quiet;
+            vertical-alignment: center;
+        }
+        if (root.c.style == 4 || root.c.style == 5) && input.text == "": Text {
+            x: 10px;
+            height: 34px;
+            text: "None";
+            font-family: Font.ui;
+            font-size: Font.text;
+            color: Ink.quiet;
+            vertical-alignment: center;
+        }
+        // (style 8: a value in a plugin's section, in the face whose letters are all one
+        // width, what it holds when empty in gray; Enter or leaving it gives it, Escape
+        // takes it back)
+        if root.c.style == 8 && input.text == "": Text {
+            x: 12px;
+            height: parent.height;
+            text: root.c.fill;
+            font-family: Font.mono;
+            font-size: Font.caption;
+            color: Ink.placeholder;
+            vertical-alignment: center;
+        }
+        // (style 9: a name to give, what it holds when empty in gray, as the scene form's Name)
+        if root.c.style == 9 && input.text == "": Text {
+            x: 10px;
+            height: parent.height;
+            text: root.c.fill;
+            font-family: Font.ui;
+            font-size: Font.text;
+            color: Ink.quiet;
+            vertical-alignment: center;
+        }
+        if root.c.style == 3 && input.text == "": Text {
+            x: 10px;
+            height: parent.height;
+            text: "Setup name";
+            font-family: Font.ui;
+            font-size: Font.text;
+            color: Ink.quiet;
+            vertical-alignment: center;
+        }
+        if root.c.style == 1 && input.text == "": Text {
+            x: 11px;
+            height: parent.height;
+            text: "Search for a city or town";
+            font-family: Font.ui;
+            font-size: Font.text;
+            color: Ink.quiet;
+            vertical-alignment: center;
+        }
+        // (a key's text: what the page sets it to, unless it is being typed in)
+        property <string> shown: root.c.text;
+        changed shown => {
+            if (root.c.style >= 4 && !input.has-focus && input.text != self.shown) {
+                input.text = self.shown;
+            }
+        }
+        // a key's picture in place of its text (style 6): a frame, its file's
+        // name, and the button that takes it off
+        if root.c.style == 6: Path {
+            x: 11px;
+            y: (34px - 14px) / 2;
+            width: 16px;
+            height: 14px;
+            viewbox-width: 16;
+            viewbox-height: 14;
+            commands: "M1.5 1.5h13v11h-13z M3.5 10.5l3.5-4 2.5 2.5 1.5-1.5 2.5 3";
+            fill: transparent;
+            stroke: Ink.quiet;
+            stroke-width: 1.2px;
+        }
+        if root.c.style == 6: Text {
+            x: 34px;
+            width: parent.width - 34px - 36px;
+            height: 34px;
+            text: root.c.text;
+            font-family: Font.ui;
+            font-size: Font.text;
+            color: Ink.ink;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        // (the box tells the page the pointer is over it, for its note)
+        if root.c.style == 6: TouchArea {
+            width: parent.width - 36px;
+            height: parent.height;
+            changed has-hover => { root.hovered(root.c.id, self.has-hover); }
+        }
+        if root.c.style == 6: Rectangle {
+            x: parent.width - 32px;
+            y: 3px;
+            width: 28px;
+            height: 28px;
+            border-radius: Radius.small;
+            background: off.has-hover ? #ffffff14 : transparent;
+            Text {
+                text: "×";
+                font-size: Font.title;
+                color: off.has-hover ? Ink.ink : Ink.quiet;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            off := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.pick(root.c.id, 2, 0, 0, 0); }
+            }
+        }
+        // a key's text: its glyphs' button, which gives the box the keys and opens their list
+        if root.c.style == 4 || root.c.style == 5: Rectangle {
+            x: parent.width - 32px;
+            y: 3px;
+            width: 28px;
+            height: 28px;
+            border-radius: Radius.small;
+            background: glyphs.has-hover ? #ffffff14 : transparent;
+            Text {
+                text: "⌘";
+                font-size: Font.lead;
+                color: glyphs.has-hover ? Ink.ink : Ink.quiet;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            // (the box's text chosen as it takes the keys, so a glyph takes its
+            // place; with the cursor already in the box, a glyph goes there)
+            glyphs := TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    if (!input.has-focus) {
+                        input.focus();
+                        input.select-all();
+                    }
+                    root.pick(root.c.id, 1, 0, 0, 0);
+                }
+            }
+        }
+        input := TextInput {
+            visible: root.c.style != 6;
+            enabled: root.c.style != 6;
+            property <bool> plugin-value: root.c.style == 8;
+            x: self.plugin-value ? 12px : root.c.style == 1 ? 11px : root.c.style == 7 ? 8px : 10px;
+            y: root.c.style == 5 ? 8px : 0;
+            width: parent.width - 2 * self.x - (root.c.style >= 4 && root.c.style <= 6 ? 30px : 0);
+            height: root.c.style == 5 ? parent.height - 16px : parent.height;
+            text: root.c.text;
+            font-family: self.plugin-value ? "JetBrains Mono" : "Geist";
+            font-size: self.plugin-value ? Font.caption : root.c.style == 7 ? Font.note : Font.text;
+            // (a value its page follows from elsewhere, in gray)
+            color: self.plugin-value ? (root.c.on && !self.has-focus ? Ink.soft : Ink.dim) : root.c.style == 1 || root.c.style == 7 ? Ink.bright : Ink.ink;
+            vertical-alignment: root.c.style == 5 ? top : center;
+            single-line: root.c.style != 5;
+            edited => { root.typed(root.c.id, root.c.index, self.text); }
+            changed has-focus => {
+                Typing.on = self.has-focus;
+                if (root.c.style >= 4 && root.c.style <= 6) {
+                    root.focused(root.c.id, self.has-focus);
+                }
+                if (root.c.style == 7 && !self.has-focus) {
+                    root.pick(root.c.id, 1, 0, 0, 0);
+                }
+                if (self.plugin-value && !self.has-focus) {
+                    root.pick(root.c.id, root.c.index, 1px, 0, 0);
+                }
+            }
+            // (style 3, a name to give, and 7: it takes the keys as it shows, all of
+            // it chosen; Enter gives it, Escape cancels)
+            init => {
+                if (root.c.style == 3 || root.c.style == 7) {
+                    self.focus();
+                    self.select-all();
+                }
+            }
+            accepted => {
+                if (root.c.style == 3 || root.c.style == 7) {
+                    root.pick(root.c.id, 1, 0, 0, 0);
+                }
+                if (self.plugin-value) {
+                    self.clear-focus();
+                }
+            }
+            key-pressed(e) => {
+                if (self.plugin-value && e.text == Key.Escape) {
+                    root.pick(root.c.id, root.c.index, 2px, 0, 0);
+                    self.text = root.c.text;
+                    self.clear-focus();
+                    return accept;
+                }
+                if ((root.c.style == 3 || root.c.style == 7 || root.c.style == 9) && e.text == Key.Escape) {
+                    root.pick(root.c.id, 2, 0, 0, 0);
+                    return accept;
+                }
+                if (root.c.style >= 4 && root.c.style <= 6 && e.text == Key.Escape) {
+                    self.clear-focus();
+                    return accept;
+                }
+                reject
+            }
+        }
+    }
+    // a number to type, as the lab's values are: Enter or leaving the
+    // box sets it, Escape puts it back as it was; set elsewhere (its slider),
+    // the box follows unless it is being typed in
+    if root.c.kind == 15: Rectangle {
+        property <string> shown: root.c.text;
+        changed shown => {
+            if (!num.has-focus) {
+                num.text = self.shown;
+            }
+        }
+        border-radius: Radius.small;
+        background: Ink.well;
+        border-width: 1px;
+        border-color: num.has-focus ? Ink.edge-hover : box-ta.has-hover ? Ink.edge : #34343a;
+        box-ta := TouchArea {
+            mouse-cursor: text;
+            clicked => { num.focus(); }
+        }
+        num := TextInput {
+            x: 8px;
+            width: parent.width - 16px;
+            height: parent.height;
+            text: root.c.text;
+            font-family: Font.ui;
+            font-size: Font.control;
+            color: Ink.bright;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            single-line: true;
+            accepted => {
+                root.entered(root.c.id, self.text);
+                self.clear-focus();
+            }
+            changed has-focus => {
+                Typing.on = self.has-focus;
+                root.focused(root.c.id, self.has-focus);
+                if (self.has-focus) {
+                    self.select-all();
+                } else if (self.text != root.c.text) {
+                    root.entered(root.c.id, self.text);
+                }
+            }
+            key-pressed(e) => {
+                if (e.text == Key.Escape) {
+                    self.text = root.c.text;
+                    self.clear-focus();
+                    return accept;
+                }
+                reject
+            }
+        }
+    }
+    // a button that opens a menu of choices, as the key editor's action button
+    if root.c.kind == 11: Rectangle {
+        border-radius: Radius.control;
+        background: dd.has-hover ? Ink.shade3 : Ink.shade2;
+        Text {
+            x: 10px;
+            width: parent.width - 39px;
+            text: root.c.text;
+            font-family: Font.ui;
+            font-size: Font.control;
+            color: Ink.ink;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        Path {
+            x: parent.width - 19px;
+            y: (parent.height - 6px) / 2;
+            width: 9px;
+            height: 6px;
+            viewbox-width: 10;
+            viewbox-height: 6;
+            commands: "M1 1l4 4 4-4";
+            fill: transparent;
+            stroke: Ink.quiet;
+            stroke-width: 1.35px;
+        }
+        dd := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+        }
+    }
+    // a switch's choice, an area chip, a button, the reset: words on a shade
+    // (style 24: it opens a list, a chevron after its words; 25: a key on the
+    // lab's map, its words small; 26: not to be chosen here, its words
+    // faint; 29: the page round a menu, which shuts it, with no shade or hand; 33: a small
+    // button, as a card's Make main)
+    if root.c.kind >= 5 && root.c.kind <= 8: Rectangle {
+        // (style 36: a card that opens, in the well's shade on a box: a script's; 37: a
+        // button that can't be used now, faded)
+        opacity: root.c.style == 37 ? 0.4 : 1;
+        border-radius: root.c.style == 36 ? Radius.panel : root.c.style == 25 ? Radius.tiny : root.c.kind == 8 || root.c.style == 33 ? Radius.small : Radius.control;
+        background: root.c.style == 36 ? (b.has-hover ? Ink.hover-well : Ink.well)
+            : root.c.on ? (b.has-hover ? Ink.pick-hover : Ink.pick)
+            : root.c.style == 26 ? transparent
+            : root.c.style == 31 ? (b.has-hover ? Ink.pick : Ink.hover-box)
+            : root.c.kind == 5 ? (b.has-hover ? Ink.hover-well : transparent)
+            : root.c.kind == 8 ? (b.has-hover && root.c.style != 29 ? #ffffff0f : transparent)
+            : (b.has-hover ? Ink.pick : Ink.hover-box);
+        // style 32: a color's button, its color in a small square before its words
+        if root.c.style == 32: Rectangle {
+            x: 9px;
+            y: (parent.height - 16px) / 2;
+            width: 16px;
+            height: 16px;
+            border-radius: Radius.tiny;
+            background: root.c.color;
+            border-width: 1px;
+            border-color: #ffffff33;
+        }
+        // style 35: an icon before its words, drawn as the bar's buttons draw theirs (its lines, on 16 units)
+        if root.c.style == 35: Path {
+            x: 12px;
+            y: (parent.height - 14px) / 2;
+            width: 14px;
+            height: 14px;
+            viewbox-width: 16;
+            viewbox-height: 16;
+            commands: root.c.lines;
+            fill: transparent;
+            stroke: Ink.ink;
+            stroke-width: 1.14px;
+            stroke-line-cap: round;
+        }
+        // style 31 with an icon's shapes: the icon, as its key prints it
+        if root.c.style == 31 && (root.c.fill != "" || root.c.lines != ""): Rectangle {
+            x: (parent.width - 20px) / 2;
+            y: (parent.height - 20px) / 2;
+            width: 20px;
+            height: 20px;
+            Path {
+                width: 20px;
+                height: 20px;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                commands: root.c.fill;
+                fill: b.has-hover ? #ffffff : Ink.dim;
+            }
+            Path {
+                width: 20px;
+                height: 20px;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                commands: root.c.lines;
+                fill: transparent;
+                stroke: b.has-hover ? #ffffff : Ink.dim;
+                stroke-width: 1.67px;
+            }
+        }
+        Text {
+            x: root.c.style == 32 ? 32px : root.c.style == 35 ? 12px + 14px + 7px : (parent.width - self.width) / 2 - (root.c.style == 24 ? 7px : 0);
+            y: (parent.height - self.height) / 2 + (b.pressed && (root.c.kind == 7 || root.c.kind == 8) ? 1px : 0);
+            text: root.c.text;
+            font-family: Font.ui;
+            font-size: root.c.style == 25 ? Font.small : root.c.style == 31 ? Font.title : root.c.style == 33 ? Font.caption : root.c.kind == 8 ? Font.note : Font.control;
+            font-weight: root.c.kind >= 7 && root.c.style != 33 ? Font.medium : Font.regular;
+            color: root.c.on ? Ink.bright : root.c.style == 26 ? #5a5a60 : root.c.style == 33 ? (b.has-hover ? Ink.bright : Ink.dim) : root.c.kind == 8 ? (b.has-hover ? Ink.ink : Ink.quiet) : root.c.kind == 7 ? Ink.ink : b.has-hover ? #ffffff : Ink.dim;
+        }
+        if root.c.style == 24 || root.c.style == 32: Path {
+            x: parent.width - 19px;
+            y: (parent.height - 6px) / 2;
+            width: 9px;
+            height: 6px;
+            viewbox-width: 10;
+            viewbox-height: 6;
+            commands: "M1 1l4 4 4-4";
+            fill: transparent;
+            stroke: root.c.on ? #171717 : Ink.quiet;
+            stroke-width: 1.35px;
+        }
+        b := TouchArea {
+            enabled: root.c.style != 26 && root.c.style != 37;
+            mouse-cursor: root.c.style == 29 ? MouseCursor.default : MouseCursor.pointer;
+            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+            // style 23: it tells the page the pointer is over it, as a zone does
+            changed has-hover => {
+                if (root.c.style == 23 || root.c.style == 31 || root.c.style == 32) {
+                    root.hovered(root.c.id, self.has-hover);
+                }
+            }
+        }
+    }
+    // ---- the Lighting page's own pieces, in the shades of its boxes
+    // a value in a small well; style 1, a warning's tag, outlined in amber
+    // (style 2: on a well, a step lighter than it; 3: a card's Main card, on the box)
+    // (style 4: a tag on a well, in the box's shade, its words quiet: a script's Every game)
+    if root.c.kind == 40: Rectangle {
+        border-radius: root.c.style == 1 ? Radius.tiny : Radius.small;
+        background: root.c.style == 1 ? transparent : root.c.style == 2 ? Ink.hover-box : root.c.style == 3 ? Ink.pick : root.c.style == 4 ? Ink.box : Ink.well;
+        border-width: root.c.style == 1 ? 1px : 0;
+        border-color: #f0b35a73;
+        Text {
+            text: root.c.text;
+            font-family: Font.ui;
+            font-size: root.c.style == 1 ? Font.small : root.c.style == 2 ? Font.caption : Font.caption;
+            font-weight: root.c.style == 1 || root.c.style == 2 || root.c.style == 3 || root.c.style == 4 ? Font.regular : Font.medium;
+            color: root.c.style == 1 ? Ink.warn : root.c.style == 2 || root.c.style == 3 ? Ink.bright : root.c.style == 4 ? Ink.quiet : Ink.dim;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    // a slider on a well, filled to its place in its color; the knob follows the pointer while held
+    // (style 1: in a box of the well's own shade, the track a step lighter than it; style 2: the
+    // same track on the page itself, the knob ringed in the page's shade; style 3: the lighter
+    // track in a box's shade; style 4: as 3, with a notch at its middle, its default, which holds
+    // the knob as it passes)
+    if root.c.kind == 41: filled := Rectangle {
+        property <float> held: max(0, min(1, (fdrag.mouse-x - 9px) / (self.width - 18px)));
+        property <float> at: fdrag.pressed ? (root.c.style == 4 && abs(self.held - 0.5) <= 0.04 ? 0.5 : self.held) : root.c.value;
+        Rectangle {
+            y: 7px;
+            height: 6px;
+            border-radius: self.height / 2;
+            background: root.c.style >= 1 ? Ink.hover-box : Ink.well;
+            clip: true;
+            Rectangle {
+                x: 0;
+                width: 9px + filled.at * (parent.width - 18px);
+                border-radius: 3px;
+                background: root.c.color;
+            }
+        }
+        // the notch: a short line across the track at its middle, under the knob
+        if root.c.style == 4: Rectangle {
+            x: 9px + 0.5 * (parent.width - 18px) - 1px;
+            y: 3px;
+            width: 2px;
+            height: 14px;
+            border-radius: self.width / 2;
+            background: Ink.quiet;
+        }
+        // the knob, ringed in the box's color
+        Rectangle {
+            property <length> d: fdrag.has-hover || fdrag.pressed ? 19.5px : 18px;
+            x: parent.at * (parent.width - 18px) + 9px - self.d / 2 - 3px;
+            y: 10px - self.d / 2 - 3px;
+            width: self.d + 6px;
+            height: self.d + 6px;
+            border-radius: self.width / 2;
+            background: root.c.style == 2 ? Ink.base : root.c.style == 1 ? Ink.well : Ink.box;
+            drop-shadow-blur: Shadow.knob.blur;
+            drop-shadow-offset-y: Shadow.knob.y;
+            drop-shadow-color: Shadow.knob.color;
+            Rectangle {
+                x: 3px;
+                y: 3px;
+                width: parent.d;
+                height: parent.d;
+                border-radius: self.width / 2;
+                background: #fafafa;
+            }
+        }
+        fdrag := TouchArea {
+            mouse-cursor: pointer;
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.down) {
+                    root.slide(root.c.id, max(0, min(1, (self.mouse-x - 9px) / (self.width - 18px))));
+                }
+            }
+            moved => {
+                if (self.pressed) {
+                    root.slide(root.c.id, max(0, min(1, (self.mouse-x - 9px) / (self.width - 18px))));
+                }
+            }
+            double-clicked => { root.reset(root.c.id); }
+        }
+    }
+    // a color's dot, ringed while the picker is open on it; style 1 opens the picker for any color
+    // (in a cell under 28 across, as a narrow box has them: the dot 20 across, its ring a
+    // hairline of the brightest ink, kept apart from it by the box's own shade)
+    if root.c.kind == 42 && root.c.style != 2: dotcell := Rectangle {
+        property <bool> small: root.width < 28px;
+        border-radius: self.width / 2;
+        border-width: root.c.on ? (self.small ? 1.5px : 2px) : 0;
+        border-color: self.small ? Ink.bright : Ink.dim;
+        Rectangle {
+            property <length> d: dotcell.small ? (dot-ta.has-hover ? 22px : 20px) : dot-ta.has-hover ? 26px : 24px;
+            x: (parent.width - self.d) / 2;
+            y: (parent.height - self.d) / 2;
+            width: self.d;
+            height: self.d;
+            border-radius: self.d / 2;
+            background: root.c.style == 1 ? (dot-ta.has-hover ? Ink.hover-box : transparent) : root.c.color;
+            border-width: root.c.style == 1 || !dotcell.small ? 1px : 0;
+            border-color: root.c.style == 1 ? (dot-ta.has-hover ? #8a8a94 : Ink.edge) : #ffffff2a;
+            if root.c.style == 1: Path {
+                width: dotcell.small ? 10px : 12px;
+                height: dotcell.small ? 10px : 12px;
+                viewbox-width: 12;
+                viewbox-height: 12;
+                commands: "M6 1.5v9M1.5 6h9";
+                fill: transparent;
+                stroke: dot-ta.has-hover ? Ink.bright : Ink.soft;
+                stroke-width: 1.5px;
+            }
+        }
+        dot-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+        }
+    }
+    // style 2: a color's dot and its code as one button, lit under the pointer and while the
+    // picker is open on it (the screen's default backlight, on the page itself)
+    if root.c.kind == 42 && root.c.style == 2: Rectangle {
+        border-radius: Radius.control;
+        background: code-ta.has-hover || root.c.on ? Ink.hover-box : transparent;
+        Rectangle {
+            x: 4px;
+            y: (parent.height - self.height) / 2;
+            width: 20px;
+            height: 20px;
+            border-radius: self.width / 2;
+            background: root.c.color;
+            border-width: 1px;
+            border-color: #ffffff2a;
+        }
+        Text {
+            x: 32px;
+            width: parent.width - 32px;
+            text: root.c.text;
+            font-family: Font.ui;
+            font-size: Font.control;
+            color: Ink.bright;
+            vertical-alignment: center;
+        }
+        code-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+        }
+    }
+    // a piece of a run of colors, from its color to the next (its red, green and blue packed in
+    // `value`, as 65536 r + 256 g + b); style says which ends are round
+    if root.c.kind == 43: Rectangle {
+        property <color> next: rgb(floor(root.c.value / 65536), mod(floor(root.c.value / 256), 256), mod(root.c.value, 256));
+        border-top-left-radius: mod(root.c.style, 2) == 1 ? self.height / 2 : 0;
+        border-bottom-left-radius: mod(root.c.style, 2) == 1 ? self.height / 2 : 0;
+        border-top-right-radius: root.c.style >= 2 ? self.height / 2 : 0;
+        border-bottom-right-radius: root.c.style >= 2 ? self.height / 2 : 0;
+        background: @linear-gradient(90deg, root.c.color 0%, self.next 100%);
+    }
+    // a switch's choice on its well, its icon before its words if it has one (style 1:
+    // one that can't be chosen, its words faint)
+    if root.c.kind == 44: Rectangle {
+        property <bool> off: root.c.style == 1;
+        border-radius: Radius.small;
+        background: root.c.on ? (ch-ta.has-hover ? Ink.pick-hover : Ink.pick) : ch-ta.has-hover && !self.off ? Ink.hover-well : transparent;
+        HorizontalLayout {
+            alignment: center;
+            spacing: 6px;
+            if root.c.lines != "": Path {
+                y: (parent.height - 14px) / 2;
+                width: 14px;
+                height: 14px;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                commands: root.c.lines;
+                fill: transparent;
+                stroke: root.c.on || ch-ta.has-hover ? Ink.bright : Ink.soft;
+                stroke-width: 1.8px;
+            }
+            Text {
+                text: root.c.text;
+                font-family: Font.ui;
+                font-size: Font.note;
+                color: root.c.style == 1 ? #5d5d64 : root.c.on || ch-ta.has-hover ? Ink.bright : Ink.soft;
+                vertical-alignment: center;
+            }
+        }
+        ch-ta := TouchArea {
+            enabled: root.c.style != 1;
+            mouse-cursor: pointer;
+            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+        }
+    }
+    // an area's chip: outlined, white when chosen (with a tick, style 1); it tells the page the pointer is over it
+    if root.c.kind == 45: Rectangle {
+        // (style 1 ticked when chosen; style 2 faded, the whole keyboard lit;
+        // value 1 when the pointer is over its area on the keyboard's picture)
+        property <bool> hot: ar-ta.has-hover || root.c.value > 0.5;
+        border-radius: self.height / 2;
+        background: root.c.on ? (self.hot ? Ink.pick-hover : Ink.pick) : self.hot ? Ink.hover-well : Ink.well;
+        opacity: root.c.style == 2 && !self.hot ? 0.45 : 1;
+        HorizontalLayout {
+            padding-left: root.c.on ? 9px : 12px;
+            padding-right: 12px;
+            spacing: 5px;
+            if root.c.on: Path {
+                y: (parent.height - 12px) / 2;
+                width: 12px;
+                height: 12px;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                commands: "M5 12.5l4.5 4.5L19 7.5";
+                fill: transparent;
+                stroke: Ink.bright;
+                stroke-width: 2.6px;
+            }
+            Text {
+                text: root.c.text;
+                font-family: Font.ui;
+                font-size: Font.note;
+                color: root.c.on || ar-ta.has-hover || root.c.value > 0.5 ? Ink.bright : Ink.soft;
+                vertical-alignment: center;
+            }
+        }
+        ar-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+            changed has-hover => { root.hovered(root.c.index, self.has-hover); }
+        }
+    }
+    // a dropdown on a well: what is chosen, and a chevron
+    // a dropdown on a well (style 1: its value followed from elsewhere, in gray)
+    // (style 2: its value needs choosing again, an amber line round it)
+    if root.c.kind == 46: Rectangle {
+        border-radius: Radius.control;
+        background: dr-ta.has-hover || root.c.on ? Ink.hover-box : Ink.well;
+        border-width: root.c.style == 2 ? 1px : 0;
+        border-color: #f0b35a80;
+        if root.c.value > 0: Image {
+            x: 12px;
+            y: (parent.height - 14px) / 2;
+            width: 14px;
+            height: 14px;
+            source: root.chips[round(root.c.value) - 1];
+            image-fit: fill;
+        }
+        Text {
+            x: root.c.value > 0 ? 12px + 14px + 9px : 12px;
+            width: parent.width - self.x - 28px;
+            text: root.c.text;
+            font-family: Font.ui;
+            font-size: Font.control;
+            color: root.c.style == 1 ? Ink.soft : Ink.bright;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        Path {
+            x: parent.width - 24px;
+            y: (parent.height - 12px) / 2;
+            width: 12px;
+            height: 12px;
+            viewbox-width: 12;
+            viewbox-height: 12;
+            commands: "M3 4.5l3 3 3-3";
+            fill: transparent;
+            stroke: Ink.quiet;
+            stroke-width: 1.6px;
+        }
+        dr-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+        }
+    }
+    // a link in a sentence: its words brighter than the note round them, which select it
+    if root.c.kind == 18: Text {
+        text: root.c.text;
+        font-family: Font.ui;
+        font-size: Font.note;
+        color: il-ta.has-hover ? #ffffff : Ink.bright;
+        vertical-alignment: center;
+        il-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+        }
+    }
+    // a quiet link: Reset (with its icon), Select all, Scatter colors (style 1: a text
+    // button in a plugin's section, its icon on 14 units; 2: the same, not to be used now, faded)
+    if root.c.kind == 47 && root.c.style == 0: LinkButton {
+        width: parent.width;
+        height: parent.height;
+        text: root.c.text;
+        icon: root.c.lines;
+        units: 24;
+        clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+    }
+    if root.c.kind == 47 && root.c.style != 0: TextButton {
+        width: parent.width;
+        height: parent.height;
+        text: root.c.text;
+        icon: root.c.lines;
+        enabled: root.c.style != 2;
+        clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+    }
+    // a thing the firmware adds: a tick, then its name
+    if root.c.kind == 49: Rectangle {
+        Path {
+            x: 0;
+            y: (parent.height - 12px) / 2;
+            width: 12px;
+            height: 12px;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            commands: "M5 12.5l4.5 4.5L19 7.5";
+            fill: transparent;
+            stroke: Ink.good;
+            stroke-width: 2.4px;
+        }
+        Text {
+            x: 19px;
+            width: parent.width - 19px;
+            text: root.c.text;
+            font-family: Font.ui;
+            font-size: Font.control;
+            color: Ink.dim;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+    // a fold's heading in a plugin's section: its chevron (turned down while open) and its
+    // words, which open and shut it
+    if root.c.kind == 53: Rectangle {
+        Path {
+            x: 0;
+            y: (parent.height - 12px) / 2;
+            width: 12px;
+            height: 12px;
+            viewbox-width: 12;
+            viewbox-height: 12;
+            commands: root.c.on ? "M2.5 4.5l3.5 3.5 3.5-3.5" : "M4.5 2.5l3.5 3.5-3.5 3.5";
+            fill: transparent;
+            stroke: fold-ta.has-hover ? Ink.ink : Ink.soft;
+            stroke-width: 1.6px;
+            stroke-line-cap: round;
+            stroke-line-join: round;
+        }
+        Text {
+            x: 20px;
+            width: parent.width - 20px;
+            text: root.c.text;
+            font-family: Font.ui;
+            font-size: Font.text;
+            color: fold-ta.has-hover ? Ink.ink : Ink.soft;
+            vertical-alignment: center;
+        }
+        fold-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.pick(root.c.id, root.c.index, 0, 0, 0); }
+        }
+    }
+    // a checkbox on a box, and its words (style 1: one that can't be changed now, faint and
+    // unticked; 2: one held on by another setting, ticked in gray)
+    if root.c.kind == 48: CheckBox {
+        width: parent.width;
+        height: parent.height;
+        text: root.c.text;
+        on: root.c.on;
+        state: root.c.style;
+        clicked => { root.pick(root.c.id, root.c.index * 2 + (root.c.on ? 0 : 1), 0, 0, 0); }
+    }
+}
+
+// A box of pieces laid out in Rust, for a row of boxes: its title, the least
+// width the row grows it from, how tall its pieces are at the width the row
+// gave it, and the pieces themselves
+export struct LaidBox {
+    title: string,
+    least: length,
+    h: length,
+    cells: [Cell],
+}
+
+// A box in a device page's row whose pieces are laid out in Rust, from what a
+// core or a plugin describes (an effect's settings, a mouse's): the row places
+// it as it does any box and it says how wide it came out (`resized`), so Rust
+// lays its pieces out to that width. Holding more than its height, it scrolls.
+export component CellBox inherits ScrollBox {
+    in property <LaidBox> b;
+    callback resized(length);
+    callback pick(int, int, length, length, length);
+    callback slide(int, float);
+    callback typed(int, int, string);
+    callback hovered(int, bool);
+    min-width: root.b.least;
+    preferred-width: root.b.least;
+    preferred-height: root.b.h;
+    need: root.b.h;
+    init => { root.resized(self.width); }
+    changed width => { root.resized(self.width); }
+    PageBox {
+        width: parent.width;
+        height: max(root.b.h, root.height);
+        fill: transparent;
+        title: root.b.title;
+        for c in root.b.cells: CellView {
+            c: c;
+            pick(id, index, x, y, h) => { root.pick(id, index, x, y, h); }
+            slide(id, v) => { root.slide(id, v); }
+            typed(id, index, t) => { root.typed(id, index, t); }
+            hovered(i, on) => { root.hovered(i, on); }
+        }
+    }
+}

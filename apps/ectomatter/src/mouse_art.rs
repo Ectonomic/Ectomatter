@@ -909,10 +909,10 @@ mod timing {
             let mut hdr = super::Hdr::new(&l, &light, super::px_mm(w, 520.0 / 125.1));
             eprintln!("{w} px wide: the lamps in {:?}", t.elapsed());
             let (bw, bh) = (l.base.width() as usize, l.base.height() as usize);
-            let _ = hdr.picture(&l, [0x1b, 0x1b, 0x1f], None, None, 0, [Some([255, 0, 0]); 2], 254.0, 3.9, (0, 0, bw, bh));
+            let _ = hdr.picture(&l, crate::tokens::ink::STAGE, None, None, 0, [Some([255, 0, 0]); 2], 254.0, 3.9, (0, 0, bw, bh));
             let t = std::time::Instant::now();
             for k in 0..30u8 {
-                let _ = hdr.picture(&l, [0x1b, 0x1b, 0x1f], None, None, 0, [Some([255, k * 8, 0]); 2], 254.0, 3.9, (0, 0, bw, bh));
+                let _ = hdr.picture(&l, crate::tokens::ink::STAGE, None, None, 0, [Some([255, k * 8, 0]); 2], 254.0, 3.9, (0, 0, bw, bh));
             }
             eprintln!("{w} px wide: a frame in {:?}", t.elapsed() / 30);
         }

@@ -800,7 +800,8 @@ impl LayoutPage {
         let ed = ed.unwrap();
         self.ui.set_name(page.name.as_str().into());
         let says = cx.screens.delete_says(ed.page, cx.onboard, |n| cx.profiles[n as usize - 1].clone());
-        self.ui.set_confirm_text(format!("Delete {}? {says}", page.name).into());
+        self.ui.set_confirm_title(format!("Delete {}?", page.name).into());
+        self.ui.set_confirm_body(says.into());
         self.ui.set_grid(ed.grid);
         self.ui.set_own_light(page.light.is_some());
         let own = page.light.unwrap_or(default);
@@ -873,13 +874,13 @@ impl LayoutPage {
         let rows = crate::lcd_page::render_at(&shown, cx.readings, cx.t);
         self.draw(&rows, page.light.unwrap_or(default), cx.light[0]);
         // the box of the block selected
-        let rig_w = self.ui.get_window_width() - 290.0 - 36.0;
+        let rig_w = self.ui.get_window_width() - 290.0 - 2.0 * crate::tokens::space::MARGIN;
         let open = match self.menu {
             Some(Menu::Shows(_)) => Some(Ctl::ScrSource),
             Some(Menu::Formats(_)) => Some(Ctl::ScrFormat),
             _ => None,
         };
-        let b = screen_edit::block_box(page, ed.chosen, cx.readings, cx.avail, open, &cx.from, (rig_w - 12.0) / 2.0);
+        let b = screen_edit::block_box(page, ed.chosen, cx.readings, cx.avail, open, &cx.from, (rig_w - crate::tokens::space::GAP) / 2.0);
         self.ui.set_box_kind(b.kind);
         self.ui.set_box_title(b.title.into());
         self.ui.set_box_h(b.h);
