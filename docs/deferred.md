@@ -37,13 +37,17 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 - The keyboard is one: `cores::keyboard()` is the first core describing a
   keyboard, and its page, screen and counts are that one's. A second
   keyboard's core starts but has no page.
-- The mouse page is the Sensei 310's: its device id (`mouse.rs:22`), buttons
-  (`mouse.rs:178-187`), lights (`mouse.rs:470`), callout positions
-  (`mouse.rs:192-206`), and its picture read by Inkscape's shape ids
-  (`mouse_art.rs:19-42`), not the pieces the description names. Its light and
-  art are read from `cores::dir()`, not its package (`mouse.rs:1227`,
-  `front.rs:5582`, `main.rs:3885-3890`). Fallback names and sizes typed in:
-  `front.rs:5923-5936,6733-6735`, `main.rs:3886`.
+- The mouse is one, with two lights: `mouse::shape()` is the first core
+  describing a mouse, and the picture and the scenes keep two lights' colors
+  (`mouse_art.rs` `[Lit; 2]`, `front.rs` `scene_colors`, `scene_mouse`,
+  `mouse.rs` `plays`). A mouse with another number of lights shows only two.
+- A mouse's callouts are in its mock's canvas (`callout`), not placed from
+  its buttons' pieces.
+- The mouse fixture the offscreen renders read was recorded from an older
+  core; it's kept current by hand (the scratchpad's his-mouse-state3.json).
+- One run of `tests/stranger.rs`, beside another full build, saw the app stop
+  silently after its first lines; twelve runs since didn't. The test prints
+  how the app ended now.
 - Pages are found by device name: `place == "z10"` / `"mouse"` in
   `ui/app.slint:1568,1576,2447,3118,4478`, 58 literals in `front.rs`,
   `main.rs:1395,2451`. Saved jobs, scenes and Library choices key devices as

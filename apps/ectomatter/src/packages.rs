@@ -353,11 +353,11 @@ pub fn move_old_folders() {
     // (Custom Scripts, a plugin once, is Ectomatter's own now: its empty folder goes)
     let _ = std::fs::remove_dir(data.join("cores").join("scripts"));
     let mut moves = vec![
-        (data.join("cores").join("steelseries"), data.join("cores").join(crate::mouse::CORE)),
         (data.join("cores").join("monitors"), data.join("plugins").join(renamed_id("monitors"))),
         (data.join("cores").join("openrgb"), data.join("plugins").join(renamed_id("openrgb"))),
     ];
     moves.extend(RENAMED.iter().map(|(old, new)| (data.join("plugins").join(old), data.join("plugins").join(new))));
+    moves.extend(crate::old_name::core_folders(&data));
     for (from, to) in moves {
         // (a folder already where it goes is taken only if it's empty)
         if from.is_dir() && (!to.exists() || std::fs::remove_dir(&to).is_ok()) {
@@ -517,7 +517,7 @@ mod tests {
         let plugins = all_in(&builtin_dir(Kind::Plugin), &none);
         let can = |list: &[Package], id: &str| list.iter().find(|p| p.id() == id).map(|p| p.can()).unwrap_or_default();
         assert_eq!(can(&cores, "evga-z10"), vec!["Talks to the EVGA Z10 RGB over USB.".to_string()]);
-        assert_eq!(can(&cores, crate::mouse::CORE), vec!["Talks to the SteelSeries Sensei 310 over USB.".to_string()]);
+        assert_eq!(can(&cores, "steelseries-sensei-310"), vec!["Talks to the SteelSeries Sensei 310 over USB.".to_string()]);
         assert_eq!(can(&plugins, "openrgb-link"), vec!["Talks to OpenRGB on this computer.".to_string()]);
         assert_eq!(can(&plugins, "monitor-switcher"), vec!["Changes your monitors’ settings while a game runs.".to_string()]);
         assert!(cores.iter().all(|p| p.kind() == Kind::Core), "the cores folder holds cores");

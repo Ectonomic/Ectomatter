@@ -1,15 +1,14 @@
-//! The mouse's page: the SteelSeries Sensei 310, through SteelSeries' core
-//! (cores/steelseries-sensei-310), built from the keyboard page's parts as its mock has
-//! it (mock/sensei-310.html): Buttons, Lighting, Performance and Settings.
+//! The mouse's page: a mouse whose profiles Ectomatter keeps, through its
+//! core, drawn from what the core describes (its buttons, lights, picture
+//! and callouts), built from the keyboard page's parts as its mock has it
+//! (mock/sensei-310.html): Buttons, Lighting, Performance and Settings.
 //!
 //! The core is asked on a thread of its own, which tells the page what the
 //! mouse is set to after each change and whenever the mouse comes or goes.
 
-
-/// The mouse's core: the SteelSeries Sensei 310's, by its folder's name.
-pub const CORE: &str = "steelseries-sensei-310";
-
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
@@ -19,7 +18,110 @@ use crate::core_host::Core;
 use crate::lighting::{Ctl, Stack};
 use crate::{Cell, MouseCall, MouseRow};
 
-pub const DEVICE: &str = "sensei310-1";
+/// A button, as the mouse's core describes it: its id, its name, the cap
+/// beside it in the Key detail box, its surfaces in the drawing (`pieces`),
+/// and its callout on the page (on the left or not, how far down its words
+/// are, and the line from them to its dot, in the mock's canvas).
+#[derive(Clone, Debug)]
+pub struct Button {
+    pub id: String,
+    pub label: String,
+    pub short: String,
+    pub pieces: Vec<String>,
+    pub callout: (bool, f32, Vec<(f32, f32)>),
+}
+
+/// The mouse Ectomatter shows, as its core describes it: the core's id and
+/// folder, the device's id, its art's file, its buttons, its lights in the order its colors
+/// stream (`direct`, `lights`), each light's groups in the drawing (each by
+/// its index among the lights) in the order they're laid, what of them is the
+/// drawing's own glow, the part of the drawing the mouse fills, and its settings.
+#[derive(Debug, Default)]
+pub struct Shape {
+    pub core: String,
+    pub folder: PathBuf,
+    pub device: String,
+    pub art: PathBuf,
+    pub buttons: Vec<Button>,
+    pub lights: Vec<String>,
+    pub groups: Vec<(usize, String)>,
+    pub glow: Vec<String>,
+    pub view: (f32, f32, f32, f32),
+    /// the ids of its settings (`settings`, `items`)
+    pub settings: Vec<String>,
+    /// all it describes, under what it tells of the device once met
+    pub described: Value,
+}
+
+impl Shape {
+    /// The mouse its core (`core`, in `folder`) describes so (`device/describe`).
+    pub fn of(core: &str, folder: &Path, d: &Value) -> Shape {
+        let n = |v: &Value| v.as_f64().unwrap_or(0.0) as f32;
+        let buttons = d["controls"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|c| {
+                let id = c["id"].as_str()?.to_string();
+                let word = |k: &str| c[k].as_str().map(String::from);
+                let label = word("label").unwrap_or_else(|| id.clone());
+                let co = &c["callout"];
+                let line = co["line"].as_array().into_iter().flatten().map(|p| (n(&p[0]), n(&p[1]))).collect();
+                Some(Button { short: word("short").unwrap_or_else(|| label.clone()), pieces: c["pieces"].as_array().into_iter().flatten().filter_map(|p| p.as_str().map(String::from)).collect(), callout: (co["side"] == "left", n(&co["at"]), line), label, id })
+            })
+            .collect();
+        let described = d["capabilities"]["lighting"]["lights"].as_array().cloned().unwrap_or_default();
+        let lights: Vec<String> = d["capabilities"]["lighting"]["direct"]["lights"].as_array().map(|l| l.iter().filter_map(|l| l.as_str().map(String::from)).collect()).unwrap_or_else(|| described.iter().filter_map(|l| l["id"].as_str().map(String::from)).collect());
+        // (each light's pieces, those under the buttons first, then those over everything)
+        let art = |l: &str| described.iter().find(|x| x["id"] == l).map(|x| x["art"].as_array().into_iter().flatten().filter_map(Value::as_u64).collect::<Vec<_>>()).unwrap_or_default();
+        let mut groups = Vec::new();
+        for over in [false, true] {
+            for (i, l) in lights.iter().enumerate() {
+                groups.extend(art(l).into_iter().filter(|a| (*a >= 200) == over).map(|a| (i, format!("illumination_{a}"))));
+            }
+        }
+        let glow = described.iter().filter_map(|l| l["glow"].as_u64()).map(|a| format!("illumination_{a}")).collect();
+        let v = &d["view"];
+        let settings = d["capabilities"]["settings"]["items"].as_array().into_iter().flatten().filter_map(|i| i["id"].as_str().map(String::from)).collect();
+        Shape { core: core.to_string(), folder: folder.to_path_buf(), device: d["device"].as_str().unwrap_or_default().to_string(), art: folder.join(d["art"].as_str().unwrap_or_default()), buttons, lights, groups, glow, view: (n(&v[0]), n(&v[1]), n(&v[2]), n(&v[3])), settings, described: d.clone() }
+    }
+}
+
+static SHAPE: OnceLock<Shape> = OnceLock::new();
+
+/// The mouse Ectomatter shows, once its core has described it (`describe`);
+/// with none, a mouse of nothing.
+pub fn shape() -> &'static Shape {
+    #[cfg(test)]
+    if SHAPE.get().is_none() {
+        let _ = SHAPE.set(described_alone());
+    }
+    static NONE: OnceLock<Shape> = OnceLock::new();
+    SHAPE.get().unwrap_or_else(|| NONE.get_or_init(Shape::default))
+}
+
+/// The mouse's record, from what its core, started, describes.
+pub fn describe(core: &str, folder: &Path, described: &Value) {
+    if described["kind"] == "mouse" {
+        let _ = SHAPE.set(Shape::of(core, folder, described));
+    }
+}
+
+/// A test's mouse: the first core that describes one, run alone with no device.
+#[cfg(test)]
+fn described_alone() -> Shape {
+    for p in crate::packages::of(crate::packages::Kind::Core) {
+        let data = std::env::temp_dir().join(format!("ectomatter-mouse-shape-{}-{}", p.id(), std::process::id()));
+        let Ok(core) = crate::core_host::Core::start(&p.dir, data.clone(), Box::new(crate::core_host::NoDevices)) else { continue };
+        let d = crate::core_host::initialize(&core, Value::Null).and_then(|_| core.call("device/describe", &Value::Null)).unwrap_or(Value::Null);
+        let _ = core.call("shutdown", &Value::Null);
+        let _ = std::fs::remove_dir_all(data);
+        if d["kind"] == "mouse" {
+            return Shape::of(p.id(), &p.dir, &d);
+        }
+    }
+    Shape::default()
+}
 
 /// What the page asks of the mouse.
 pub enum Ask {
@@ -59,17 +161,19 @@ pub fn start(core: Core, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
     core.on_told(move || {
         let _ = nudge.lock().map(|n| n.send(Ask::Nudge));
     });
+    // (the device, as the mouse's core names it, in every call)
+    let device_id = shape().device.clone();
     std::thread::spawn(move || {
         // every button heard as it's pressed, as the keyboard's every key is
         // (Home's desk answers each with a ripple)
-        if let Err(e) = core.call("input/watch", &json!({ "device": DEVICE, "all": true })) {
+        if let Err(e) = core.call("input/watch", &json!({ "device": device_id, "all": true })) {
             eprintln!("ectomatter: the mouse's buttons won't be heard: {e}");
         }
         // (what the mouse ships as, which a new profile starts as)
-        let factory = core.call("profiles/factory", &json!({ "device": DEVICE })).unwrap_or(Value::Null);
+        let factory = core.call("profiles/factory", &json!({ "device": device_id })).unwrap_or(Value::Null);
         let (mut present, mut device) = (false, Value::Null);
         let read = |present: bool, device: &Value| {
-            let d = json!({ "device": DEVICE });
+            let d = json!({ "device": device_id });
             json!({
                 "present": present,
                 "device": device,
@@ -125,30 +229,30 @@ pub fn start(core: Core, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
                     }
                     for a in newest {
                         let r = match a {
-                            Ask::Key(control, action) => core.call("keys/set", &json!({ "device": DEVICE, "layer": "base", "control": control, "action": action })).map(|_| ()),
-                            Ask::ResetKey(control) => core.call("keys/reset", &json!({ "device": DEVICE, "control": control })).map(|_| ()),
+                            Ask::Key(control, action) => core.call("keys/set", &json!({ "device": device_id, "layer": "base", "control": control, "action": action })).map(|_| ()),
+                            Ask::ResetKey(control) => core.call("keys/reset", &json!({ "device": device_id, "control": control })).map(|_| ()),
                             // (the moment the mouse takes an effect is when it starts its cycle)
-                            Ask::Light(light, l) => core.call("lighting/set", &json!({ "device": DEVICE, "light": light, "effect": l["effect"], "params": l["params"] })).map(|v| {
+                            Ask::Light(light, l) => core.call("lighting/set", &json!({ "device": device_id, "light": light, "effect": l["effect"], "params": l["params"] })).map(|v| {
                                 let _ = tell.send(Heard::Played(light, v["plays"].clone(), Instant::now()));
                             }),
-                            Ask::Setting(setting, v) => core.call("settings/set", &json!({ "device": DEVICE, "id": setting, "value": v })).map(|_| ()),
+                            Ask::Setting(setting, v) => core.call("settings/set", &json!({ "device": device_id, "id": setting, "value": v })).map(|_| ()),
                             // (what the core told is read at the top of the loop)
                             Ask::Nudge => Ok(()),
-                            Ask::Direct(colors) => core.call("lighting/direct", &json!({ "device": DEVICE, "colors": colors })).map(|_| ()),
-                            Ask::HandBack => core.call("lighting/hand-back", &json!({ "device": DEVICE })).map(|v| {
+                            Ask::Direct(colors) => core.call("lighting/direct", &json!({ "device": device_id, "colors": colors })).map(|_| ()),
+                            Ask::HandBack => core.call("lighting/hand-back", &json!({ "device": device_id })).map(|v| {
                                 let at = Instant::now();
-                                for l in LIGHTS {
+                                for l in shape().lights.iter().map(String::as_str) {
                                     if v["plays"][l].is_object() {
                                         let _ = tell.send(Heard::Played(l.into(), v["plays"][l].clone(), at));
                                     }
                                 }
                             }),
                             Ask::Apply(mut body) => {
-                                body["device"] = json!(DEVICE);
+                                body["device"] = json!(device_id);
                                 core.call("profiles/apply", &body).map(|v| {
                                     // (each light from the moment the mouse took the whole)
                                     let at = Instant::now();
-                                    for l in LIGHTS {
+                                    for l in shape().lights.iter().map(String::as_str) {
                                         let _ = tell.send(Heard::Played(l.into(), v["plays"][l].clone(), at));
                                     }
                                 })
@@ -169,33 +273,6 @@ pub fn start(core: Core, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
 }
 
 // ---------------------------------------------------------------- the buttons
-
-/// The buttons as the core lists them, with their short names on the Key
-/// detail box's cap, and the callout each has on the picture.
-pub const BUTTONS: [(&str, &str, &str); 8] = [
-    ("left", "Left button", "L"),
-    ("right", "Right button", "R"),
-    ("wheel-click", "Wheel click", "W"),
-    ("left-side-back", "Left side, back", "LB"),
-    ("left-side-front", "Left side, front", "LF"),
-    ("right-side-back", "Right side, back", "RB"),
-    ("right-side-front", "Right side, front", "RF"),
-    ("cpi", "CPI button", "CPI"),
-];
-
-/// Each button's callout on the stage, in the mock's own canvas (1092 by 470,
-/// the mouse at 480, 30, 240 by 410): its side, how far down its words are,
-/// and the line from them to its dot on the button.
-pub const CALLS: [(bool, f32, &[(f32, f32)]); 8] = [
-    (true, 70.0, &[(424.0, 96.0), (538.0, 96.0), (552.0, 110.0)]),
-    (false, 70.0, &[(776.0, 96.0), (662.0, 96.0), (648.0, 110.0)]),
-    (true, 128.0, &[(424.0, 154.0), (565.0, 154.0), (599.0, 118.0)]),
-    (true, 245.0, &[(424.0, 271.0), (486.0, 271.0), (499.0, 260.0)]),
-    (true, 193.0, &[(424.0, 219.0), (490.0, 219.0), (501.0, 200.0)]),
-    (false, 245.0, &[(776.0, 271.0), (714.0, 271.0), (701.0, 260.0)]),
-    (false, 193.0, &[(776.0, 219.0), (710.0, 219.0), (699.0, 200.0)]),
-    (false, 128.0, &[(776.0, 154.0), (640.0, 154.0), (601.0, 186.0)]),
-];
 
 /// The kinds of job a button can have, as the Key detail box's switch shows
 /// them, each drawn on its 24 grid (the Key, Media, Mouse and Nothing glyphs
@@ -411,9 +488,9 @@ pub fn chord_of(steps: &Value) -> Option<Vec<String>> {
 pub fn rewrite_macro(store: &mut crate::profiles::Store, n: u32, to: &Value) -> Vec<usize> {
     let (active, mut in_use, mut changed) = (store.active, Vec::new(), false);
     for (pi, p) in store.list.iter_mut().enumerate() {
-        for (bi, (id, ..)) in BUTTONS.iter().enumerate() {
-            if matches!(ectomatter_protocol::Action::read(&p.body["keys"]["base"][*id]), Some(ectomatter_protocol::Action::Macro { n: m, .. }) if m == n) {
-                p.body["keys"]["base"][*id] = to.clone();
+        for (bi, id) in shape().buttons.iter().map(|b| b.id.as_str()).enumerate() {
+            if matches!(ectomatter_protocol::Action::read(&p.body["keys"]["base"][id]), Some(ectomatter_protocol::Action::Macro { n: m, .. }) if m == n) {
+                p.body["keys"]["base"][id] = to.clone();
                 changed = true;
                 if pi == active {
                     in_use.push(bi);
@@ -463,8 +540,6 @@ pub struct Page {
 /// How long Undo stays in the bar after a profile is deleted.
 pub const UNDO_FOR: Duration = Duration::from_secs(6);
 
-/// The lights, as the core names them, in the page's order.
-pub const LIGHTS: [&str; 2] = ["logo", "wheel"];
 
 /// What a light plays, as the core says the mouse runs it: one color held,
 /// or colors at points through a cycle (0 to 255), blended straight from
@@ -513,7 +588,14 @@ impl Page {
     /// What the core says of the mouse: what each light plays is kept with
     /// when it began, unless the light plays something new.
     pub fn heard_state(&mut self, v: Value) {
-        for (i, l) in LIGHTS.iter().enumerate() {
+        // (the mouse as its core described it at the start, what it told since over it)
+        let mut v = v;
+        if let (Some(told), Some(described)) = (v["device"].as_object_mut(), shape().described.as_object()) {
+            for (k, d) in described {
+                told.entry(k.clone()).or_insert_with(|| d.clone());
+            }
+        }
+        for (i, l) in shape().lights.iter().map(String::as_str).enumerate() {
             let now = Plays::of(&v["lighting"][l]["plays"]);
             if now.as_ref() != self.plays[i].as_ref().map(|(p, _)| p) {
                 self.plays[i] = now.map(|p| (p, Instant::now()));
@@ -538,13 +620,15 @@ impl Page {
     /// mouse can't say and Ectomatter hasn't set left out, so putting the
     /// profile on the mouse never writes a guess.
     pub fn body_now(&self) -> Value {
-        let lights: serde_json::Map<String, Value> = LIGHTS
+        let lights: serde_json::Map<String, Value> = shape()
+            .lights
             .iter()
             .filter(|l| self.light_known(l))
             .map(|l| (l.to_string(), json!({ "effect": self.state["lighting"][l]["effect"], "params": self.state["lighting"][l]["params"] })))
             .collect();
         let (v, known) = (&self.state["settings"]["values"], &self.state["settings"]["known"]);
-        let settings: serde_json::Map<String, Value> = ["cpi1", "cpi2", "polling"].iter().filter(|id| known[**id].as_bool() != Some(false)).map(|id| (id.to_string(), v[*id].clone())).collect();
+        // (each setting the core describes)
+        let settings: serde_json::Map<String, Value> = shape().settings.iter().filter(|id| known[id.as_str()].as_bool() != Some(false)).map(|id| (id.clone(), v[id.as_str()].clone())).collect();
         let mut body = json!({ "lighting": lights, "settings": settings });
         if self.buttons_known() {
             body["keys"] = json!({ "base": self.state["keys"]["layers"]["base"] });
@@ -561,7 +645,7 @@ impl Page {
     /// Whether a button's job is known: Ectomatter has set the mouse's
     /// buttons, or the profile in use keeps a job for it.
     pub fn job_known(&self, i: usize) -> bool {
-        self.buttons_known() || self.profiles.as_ref().is_some_and(|p| !p.current().body["keys"]["base"][BUTTONS[i].0].is_null())
+        self.buttons_known() || self.profiles.as_ref().is_some_and(|p| !p.current().body["keys"]["base"][shape().buttons[i].id.as_str()].is_null())
     }
 
     /// Whether a light's effect is known. The mouse says only its color, so
@@ -578,7 +662,7 @@ impl Page {
         let mut body = body.clone();
         if let Some(base) = body["keys"]["base"].as_object_mut() {
             for (id, a) in base.iter_mut() {
-                if let Some(i) = BUTTONS.iter().position(|(b, _, _)| b == id) {
+                if let Some(i) = shape().buttons.iter().position(|b| b.id == *id) {
                     *a = for_mouse(i, a);
                 }
             }
@@ -589,7 +673,7 @@ impl Page {
                 self.state["keys"]["layers"]["base"][id] = a.clone();
             }
         }
-        for l in LIGHTS {
+        for l in shape().lights.iter().map(String::as_str) {
             if body["lighting"][l].is_object() {
                 self.state["lighting"][l]["effect"] = body["lighting"][l]["effect"].clone();
                 self.state["lighting"][l]["params"] = body["lighting"][l]["params"].clone();
@@ -710,7 +794,7 @@ impl Page {
 
     /// A light's effect taken by the mouse at `at`: the light plays it from then.
     pub fn played(&mut self, light: &str, v: &Value, at: Instant) {
-        if let (Some(i), Some(p)) = (LIGHTS.iter().position(|l| *l == light), Plays::of(v)) {
+        if let (Some(i), Some(p)) = (shape().lights.iter().position(|l| *l == light), Plays::of(v)) {
             self.plays[i] = Some((p, at));
         }
     }
@@ -719,7 +803,7 @@ impl Page {
     pub fn color_at(&self, i: usize, now: Instant) -> [u8; 3] {
         match &self.plays[i] {
             Some((p, from)) => p.at(now.saturating_duration_since(*from)),
-            None => self.lit(LIGHTS[i]).unwrap_or([0; 3]),
+            None => self.lit(&shape().lights[i]).unwrap_or([0; 3]),
         }
     }
 
@@ -757,12 +841,12 @@ impl Page {
     /// A button's job: as the profile in use keeps it (a macro is Ectomatter's
     /// to play, which the mouse knows only as a host slot), or as the mouse says.
     pub fn job(&self, i: usize) -> Value {
-        let kept = self.profiles.as_ref().map(|p| p.current().body["keys"]["base"][BUTTONS[i].0].clone()).filter(|a| !a.is_null());
-        kept.unwrap_or_else(|| self.state["keys"]["layers"]["base"][BUTTONS[i].0].clone())
+        let kept = self.profiles.as_ref().map(|p| p.current().body["keys"]["base"][shape().buttons[i].id.as_str()].clone()).filter(|a| !a.is_null());
+        kept.unwrap_or_else(|| self.state["keys"]["layers"]["base"][shape().buttons[i].id.as_str()].clone())
     }
 
     pub fn factory(&self, i: usize) -> Value {
-        self.state["keys"]["factory"]["base"][BUTTONS[i].0].clone()
+        self.state["keys"]["factory"]["base"][shape().buttons[i].id.as_str()].clone()
     }
 
     pub fn rebound(&self, i: usize) -> bool {
@@ -784,18 +868,18 @@ impl Page {
     }
 
     /// The lights in the order the core lists them (as they are on the
-    /// mouse, front to back), each by its place in LIGHTS, its id and its
-    /// name; in LIGHTS' order where the core says nothing of them.
+    /// mouse, front to back), each by its place among Shape's lights, its id and its
+    /// name; in that order where the core says nothing of them.
     pub fn light_order(&self) -> Vec<(usize, &'static str, String)> {
         let listed = self.state["device"]["capabilities"]["lighting"]["lights"].as_array().cloned().unwrap_or_default();
         let mut out: Vec<(usize, &'static str, String)> = listed
             .iter()
             .filter_map(|l| {
-                let i = LIGHTS.iter().position(|id| l["id"] == *id)?;
-                Some((i, LIGHTS[i], l["label"].as_str().unwrap_or(LIGHTS[i]).to_string()))
+                let i = shape().lights.iter().position(|id| l["id"] == id.as_str())?;
+                Some((i, shape().lights[i].as_str(), l["label"].as_str().unwrap_or(&shape().lights[i]).to_string()))
             })
             .collect();
-        for (i, id) in LIGHTS.iter().enumerate() {
+        for (i, id) in shape().lights.iter().map(String::as_str).enumerate() {
             if !out.iter().any(|(j, ..)| *j == i) {
                 let mut c = id.chars();
                 let name = c.next().map_or_else(String::new, |f| f.to_uppercase().collect::<String>() + c.as_str());
@@ -865,18 +949,18 @@ impl Page {
         let f = self.factory(i);
         if !f.is_null() {
             self.knowing_buttons();
-            self.state["keys"]["layers"]["base"][BUTTONS[i].0] = f.clone();
-            self.keep_in_profile(|b| b["keys"]["base"][BUTTONS[i].0] = f);
-            self.send(Ask::ResetKey(BUTTONS[i].0.into()));
+            self.state["keys"]["layers"]["base"][shape().buttons[i].id.as_str()] = f.clone();
+            self.keep_in_profile(|b| b["keys"]["base"][shape().buttons[i].id.as_str()] = f);
+            self.send(Ask::ResetKey(shape().buttons[i].id.clone()));
         }
     }
 
     pub fn set_job(&mut self, i: usize, a: Value) {
         self.knowing_buttons();
         let on_mouse = for_mouse(i, &a);
-        self.state["keys"]["layers"]["base"][BUTTONS[i].0] = on_mouse.clone();
-        self.keep_in_profile(|b| b["keys"]["base"][BUTTONS[i].0] = a);
-        self.send(Ask::Key(BUTTONS[i].0.into(), on_mouse));
+        self.state["keys"]["layers"]["base"][shape().buttons[i].id.as_str()] = on_mouse.clone();
+        self.keep_in_profile(|b| b["keys"]["base"][shape().buttons[i].id.as_str()] = a);
+        self.send(Ask::Key(shape().buttons[i].id.clone(), on_mouse));
     }
 
     /// Before a button is set while the mouse's buttons aren't known: the
@@ -888,10 +972,10 @@ impl Page {
             return;
         }
         let base = self.state["keys"]["layers"]["base"].clone();
-        let kept: Vec<(usize, Value)> = (0..BUTTONS.len()).filter(|&j| !self.job_known(j)).map(|j| (j, base[BUTTONS[j].0].clone())).collect();
+        let kept: Vec<(usize, Value)> = (0..shape().buttons.len()).filter(|&j| !self.job_known(j)).map(|j| (j, base[shape().buttons[j].id.as_str()].clone())).collect();
         self.keep_in_profile(|b| {
             for (j, a) in kept {
-                b["keys"]["base"][BUTTONS[j].0] = a;
+                b["keys"]["base"][shape().buttons[j].id.as_str()] = a;
             }
         });
         self.state["keys"]["known"] = json!(true);
@@ -916,14 +1000,9 @@ impl Page {
 
     // ------------------------------------------------------------ what the core describes
 
-    /// The effects the core offers the lights, as it describes them (before
-    /// it has, the mouse's own four, by name).
+    /// The effects the core offers the lights, as it describes them.
     pub fn effects(&self) -> Vec<Value> {
-        self.state["device"]["capabilities"]["lighting"]["effects"]
-            .as_array()
-            .filter(|a| !a.is_empty())
-            .cloned()
-            .unwrap_or_else(|| EFFECTS.iter().map(|(id, label)| json!({ "id": id, "label": label })).collect())
+        self.state["device"]["capabilities"]["lighting"]["effects"].as_array().cloned().unwrap_or_default()
     }
 
     /// One effect, as the core describes it.
@@ -1003,10 +1082,11 @@ impl Page {
                 })
                 .collect();
         }
-        BUTTONS
+        shape()
+            .buttons
             .iter()
             .enumerate()
-            .map(|(i, (_, name, _))| MouseRow { name: (*name).into(), job: self.job_words(i).into(), chosen: Some(i) == self.button, rebound: self.rebound(i), swatch: color([0; 3]), swatched: false })
+            .map(|(i, b)| MouseRow { name: b.label.as_str().into(), job: self.job_words(i).into(), chosen: Some(i) == self.button, rebound: self.rebound(i), swatch: color([0; 3]), swatched: false })
             .collect()
     }
 
@@ -1019,7 +1099,8 @@ impl Page {
     pub fn lib_list(&self, query: &str) -> Vec<(String, usize, Vec<(usize, String, String, String, bool)>)> {
         let controls = self.state["device"]["controls"].as_array();
         let mut groups: Vec<(String, usize, Vec<(usize, String, String, String, bool)>)> = Vec::new();
-        for (i, (id, name, short)) in BUTTONS.iter().enumerate() {
+        for (i, b) in shape().buttons.iter().enumerate() {
+            let (id, name, short) = (b.id.as_str(), b.label.as_str(), b.short.as_str());
             let c = controls.and_then(|cs| cs.iter().find(|c| c["id"].as_str() == Some(id)));
             let field = |k: &str| c.and_then(|c| c[k].as_str()).filter(|v| !v.is_empty());
             let group = field("group").unwrap_or("Buttons").to_string();
@@ -1042,12 +1123,13 @@ impl Page {
 
     /// Each button's words on the picture, its line and its dot.
     pub fn calls(&self) -> Vec<MouseCall> {
-        BUTTONS
+        shape()
+            .buttons
             .iter()
             .enumerate()
-            .map(|(i, (_, name, _))| {
-                let (left, top, _) = CALLS[i];
-                MouseCall { name: (*name).into(), job: self.job_words(i).into(), left, top, chosen: Some(i) == self.button, rebound: self.rebound(i) }
+            .map(|(i, b)| {
+                let (left, top) = (b.callout.0, b.callout.1);
+                MouseCall { name: b.label.as_str().into(), job: self.job_words(i).into(), left, top, chosen: Some(i) == self.button, rebound: self.rebound(i) }
             })
             .collect()
     }
@@ -1055,7 +1137,7 @@ impl Page {
     /// The callouts' lines and dots, as path commands: the others', and the chosen button's.
     pub fn lines(&self) -> (String, String, String, String) {
         let (mut lines, mut dots, mut on_line, mut on_dot) = (String::new(), String::new(), String::new(), String::new());
-        for (i, (_, _, pts)) in CALLS.iter().enumerate() {
+        for (i, pts) in shape().buttons.iter().map(|b| &b.callout.2).enumerate().filter(|(_, p)| !p.is_empty()) {
             let (l, d) = if Some(i) == self.button { (&mut on_line, &mut on_dot) } else { (&mut lines, &mut dots) };
             for (k, (x, y)) in pts.iter().enumerate() {
                 l.push_str(&format!("{}{x} {y} ", if k == 0 { "M" } else { "L" }));
@@ -1100,7 +1182,7 @@ impl Page {
         } else {
             String::new()
         };
-        (BUTTONS[i].2.into(), BUTTONS[i].1.into(), format!("From the factory: {}", job_label(&factory)), state, rebound, kind_of(&job), note)
+        (shape().buttons[i].short.as_str().into(), shape().buttons[i].label.as_str().into(), format!("From the factory: {}", job_label(&factory)), state, rebound, kind_of(&job), note)
     }
 
     /// With no button chosen, the box for every button: what it says, and
@@ -1110,7 +1192,7 @@ impl Page {
         if !self.buttons_known() {
             return ("The mouse can’t tell Ectomatter what its buttons do. Giving one a job sets all eight, and the others get their factory jobs.".into(), true);
         }
-        let n = (0..BUTTONS.len()).filter(|&i| self.rebound(i)).count();
+        let n = (0..shape().buttons.len()).filter(|&i| self.rebound(i)).count();
         let note = match n {
             0 => "Every button does what it did from the factory.".to_string(),
             1 => "One button has a new job, shown in amber. Back to factory gives it its old one.".to_string(),
@@ -1212,28 +1294,26 @@ impl Page {
     }
 }
 
-/// The mouse's effects by name, before the core has described them.
-pub const EFFECTS: [(&str, &str); 4] = [("off", "Off"), ("static", "Static"), ("breathing", "Breathing"), ("colorshift", "Color shift")];
-
 /// How the mouse's lights are made, as its core's light says (see
 /// ectomatter_draw's lamp): the file in the core's folder its description
 /// names, or the light the description carries itself; nothing, for a core
 /// that says nothing of it.
 pub fn light_model(desc: &Value) -> Value {
     match &desc["light"] {
-        Value::String(file) => std::fs::read_to_string(crate::cores::dir().join(CORE).join(file)).ok().and_then(|t| ectomatter_draw::jsonc::parse(&t).ok()).unwrap_or(Value::Null),
+        Value::String(file) => std::fs::read_to_string(shape().folder.join(file)).ok().and_then(|t| ectomatter_draw::jsonc::parse(&t).ok()).unwrap_or(Value::Null),
         v => v.clone(),
     }
 }
 
 /// The tile an effect's picture borrows from the keyboard's effects, and how
-/// it moves (1 a breath, 3 a wave); an effect the app has no picture for
-/// shows Static's.
-pub fn tile_of(e: &str) -> (&'static str, i32) {
-    match e {
+/// it moves (1 a breath, 3 a wave): its own id's, or that of the one its
+/// description says it looks like (`like`); an effect the app has no
+/// picture for shows Static's.
+pub fn tile_of(effect: &Value) -> (&'static str, i32) {
+    match effect["like"].as_str().or(effect["id"].as_str()).unwrap_or("") {
         "off" => ("off", 0),
         "breathing" => ("breathing", 1),
-        "colorshift" => ("wave", 3),
+        "wave" => ("wave", 3),
         _ => ("static", 0),
     }
 }
@@ -1306,11 +1386,11 @@ mod tests {
     #[test]
     fn the_buttons_are_listed_in_the_cores_groups() {
         let mut p = Page::new();
-        let base: serde_json::Map<String, Value> = BUTTONS.iter().map(|(id, _, _)| (id.to_string(), json!({ "mouse": 1 }))).collect();
+        let base: serde_json::Map<String, Value> = shape().buttons.iter().map(|b| (b.id.clone(), json!({ "mouse": 1 }))).collect();
         let mut keys = json!({ "layers": { "base": base }, "factory": { "base": base }, "known": true });
         keys["layers"]["base"]["right-side-back"] = json!({ "key": "F5" });
         let groups = ["Top", "Top", "Top", "Side", "Side", "Side", "Side", "Top"];
-        let controls: Vec<Value> = BUTTONS.iter().zip(groups).map(|((id, label, _), g)| json!({ "id": id, "label": label, "short": format!("{}!", &id[..2]), "group": g })).collect();
+        let controls: Vec<Value> = shape().buttons.iter().zip(groups).map(|(b, g)| json!({ "id": b.id, "label": b.label, "short": format!("{}!", &b.id[..2]), "group": g })).collect();
         p.state = json!({ "present": true, "device": { "controls": controls }, "keys": keys });
         let list = p.lib_list("");
         let names: Vec<(&str, usize, Vec<usize>)> = list.iter().map(|(g, n, rows)| (g.as_str(), *n, rows.iter().map(|r| r.0).collect())).collect();
@@ -1321,7 +1401,7 @@ mod tests {
         let found = p.lib_list("f5");
         assert_eq!(found.iter().map(|(g, n, rows)| (g.as_str(), *n, rows.len())).collect::<Vec<_>>(), [("Top", 4, 0), ("Side", 4, 1)]);
         // a core that gives no groups
-        p.state["device"]["controls"] = json!(BUTTONS.iter().map(|(id, label, _)| json!({ "id": id, "label": label })).collect::<Vec<_>>());
+        p.state["device"]["controls"] = json!(shape().buttons.iter().map(|b| json!({ "id": b.id, "label": b.label })).collect::<Vec<_>>());
         let one = p.lib_list("");
         assert_eq!(one.iter().map(|(g, n, _)| (g.as_str(), *n)).collect::<Vec<_>>(), [("Buttons", 8)]);
         assert_eq!(one[0].2[7].1, "CPI", "the page's own short name where the core gives none");
@@ -1332,10 +1412,37 @@ mod tests {
     /// guess; its buttons, and the effect it can't say, show as not known;
     /// and a job given to one button sets all eight, so the others are kept
     /// in the profile, as the mouse has them from then.
+    /// docs/core-protocol.md, section 4: a mouse Ectomatter has never seen
+    /// gets its page from its core's description alone: its buttons, their
+    /// surfaces and callouts; its lights in the order their colors stream,
+    /// each one's pieces laid under the buttons first, then over everything;
+    /// its glow; its view and its settings.
+    #[test]
+    fn a_mouse_of_its_own_gets_its_page_from_its_description() {
+        let d = json!({ "device": "puck-1", "kind": "mouse", "art": "art/puck.svg", "view": [0, 0, 100, 200],
+            "controls": [
+                { "id": "tip", "label": "Tip", "short": "T", "pieces": ["tip-a", "tip-b"], "callout": { "side": "left", "at": 40, "line": [[10, 20], [30, 40]] } },
+                { "id": "back", "label": "Back" }
+            ],
+            "capabilities": {
+                "lighting": { "lights": [{ "id": "ring", "art": [2, 202], "glow": 2 }, { "id": "dot", "art": [5] }], "direct": { "lights": ["dot", "ring"] } },
+                "settings": { "items": [{ "id": "dpi" }] }
+            } });
+        let s = Shape::of("made-up-puck", Path::new("/made-up"), &d);
+        assert_eq!((s.core.as_str(), s.device.as_str(), s.art.as_path()), ("made-up-puck", "puck-1", Path::new("/made-up/art/puck.svg")));
+        assert_eq!(s.buttons.iter().map(|b| (b.id.as_str(), b.short.as_str())).collect::<Vec<_>>(), [("tip", "T"), ("back", "Back")]);
+        assert_eq!(s.buttons[0].pieces, ["tip-a", "tip-b"]);
+        assert_eq!(s.buttons[0].callout, (true, 40.0, vec![(10.0, 20.0), (30.0, 40.0)]));
+        assert_eq!(s.lights, ["dot", "ring"], "in the order their colors stream");
+        assert_eq!(s.groups, [(0, "illumination_5".to_string()), (1, "illumination_2".to_string()), (1, "illumination_202".to_string())]);
+        assert_eq!(s.glow, ["illumination_2"]);
+        assert_eq!((s.view, s.settings.clone()), ((0.0, 0.0, 100.0, 200.0), vec!["dpi".to_string()]));
+    }
+
     #[test]
     fn what_the_mouse_cant_say_is_never_written_as_a_guess() {
         let mut p = Page::new();
-        let base: serde_json::Map<String, Value> = BUTTONS.iter().map(|(id, _, _)| (id.to_string(), json!({ "mouse": 1 }))).collect();
+        let base: serde_json::Map<String, Value> = shape().buttons.iter().map(|b| (b.id.clone(), json!({ "mouse": 1 }))).collect();
         p.state = json!({
             "present": true,
             "keys": { "layers": { "base": base }, "factory": { "base": base }, "known": false },
@@ -1357,8 +1464,8 @@ mod tests {
         p.profiles = Some(crate::profiles::Store::first(None, body));
         p.set_job(3, json!({ "key": "F5" }));
         let kept = &p.profiles.as_ref().unwrap().current().body["keys"]["base"];
-        assert_eq!(kept.as_object().unwrap().len(), BUTTONS.len());
-        assert_eq!(kept[BUTTONS[3].0], json!({ "key": "F5" }));
+        assert_eq!(kept.as_object().unwrap().len(), shape().buttons.len());
+        assert_eq!(kept[shape().buttons[3].id.as_str()], json!({ "key": "F5" }));
         assert!(p.buttons_known() && p.rows().iter().all(|r| r.job != "Not known"));
     }
 

@@ -759,6 +759,9 @@ fn slow(m: &Manifest, what: &str, since: Instant) {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    /// The core these tests check against a fake mouse: SteelSeries'.
+    const SENSEI: &str = "steelseries-sensei-310";
     use std::collections::VecDeque;
     use std::io::Read;
     use std::sync::{Arc, Mutex};
@@ -1081,7 +1084,7 @@ pub(crate) mod tests {
         let fake = FakeMouse { sent: sent.clone(), waiting: VecDeque::new() };
         let data = std::env::temp_dir().join(format!("ectomatter-mouse-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&data);
-        let dir = crate::cores::dir().join(crate::mouse::CORE);
+        let dir = crate::cores::dir().join(SENSEI);
         assert!(dir.join("core.wasm").exists(), "the SteelSeries module isn't built: run tools/build-cores.sh");
         let core = Core::start(&dir, data.clone(), Box::new(One(Some(Box::new(fake))))).unwrap();
         initialize(&core, Value::Null).unwrap();
@@ -1133,7 +1136,7 @@ pub(crate) mod tests {
         let usb = MouseAndKeys(Some(Box::new(FakeMouse { sent: sent.clone(), waiting: VecDeque::new() })), Some(Box::new(FakeKeys(reports.clone()))));
         let data = std::env::temp_dir().join(format!("ectomatter-mouse-host-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&data);
-        let core = Core::start(&crate::cores::dir().join(crate::mouse::CORE), data.clone(), Box::new(usb)).unwrap();
+        let core = Core::start(&crate::cores::dir().join(SENSEI), data.clone(), Box::new(usb)).unwrap();
         initialize(&core, Value::Null).unwrap();
         let woken = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let w = woken.clone();
@@ -1204,7 +1207,7 @@ pub(crate) mod tests {
         let usb = MouseWhole(Some(Box::new(FakeMouse { sent: sent.clone(), waiting: VecDeque::new() })), pointer.clone(), keys.clone());
         let data = std::env::temp_dir().join(format!("ectomatter-mouse-watch-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&data);
-        let core = Core::start(&crate::cores::dir().join(crate::mouse::CORE), data.clone(), Box::new(usb)).unwrap();
+        let core = Core::start(&crate::cores::dir().join(SENSEI), data.clone(), Box::new(usb)).unwrap();
         initialize(&core, Value::Null).unwrap();
         let before = sent.lock().unwrap().len();
         let heard = |n: usize| {
@@ -1448,7 +1451,7 @@ pub(crate) mod tests {
         }
         let data = std::env::temp_dir().join(format!("ectomatter-mouse-live-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&data);
-        let core = Core::start(&crate::cores::dir().join(crate::mouse::CORE), data.clone(), Box::new(Hidapi::new())).unwrap();
+        let core = Core::start(&crate::cores::dir().join(SENSEI), data.clone(), Box::new(Hidapi::new())).unwrap();
         initialize(&core, Value::Null).unwrap();
         let d = serde_json::json!({ "device": "sensei310-1" });
         let was = core.call("settings/get", &d).unwrap()["values"]["cpi1"].as_u64().unwrap();
@@ -1457,7 +1460,7 @@ pub(crate) mod tests {
             // the mouse's own answer, through a core met anew (its record kept apart)
             let d2 = std::env::temp_dir().join(format!("ectomatter-mouse-read-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&d2);
-            let c = Core::start(&crate::cores::dir().join(crate::mouse::CORE), d2.clone(), Box::new(Hidapi::new())).unwrap();
+            let c = Core::start(&crate::cores::dir().join(SENSEI), d2.clone(), Box::new(Hidapi::new())).unwrap();
             initialize(&c, Value::Null).unwrap();
             let v = c.call("settings/get", &serde_json::json!({ "device": "sensei310-1" })).unwrap()["values"]["cpi1"].as_u64().unwrap();
             let _ = std::fs::remove_dir_all(&d2);
@@ -1521,7 +1524,7 @@ pub(crate) mod tests {
         drop(core);
         // met again, the mouse saying #FF1000, not the green Ectomatter set
         let fake = FakeMouse { sent: Arc::new(Mutex::new(Vec::new())), waiting: VecDeque::new() };
-        let core = Core::start(&crate::cores::dir().join(crate::mouse::CORE), data.clone(), Box::new(One(Some(Box::new(fake))))).unwrap();
+        let core = Core::start(&crate::cores::dir().join(SENSEI), data.clone(), Box::new(One(Some(Box::new(fake))))).unwrap();
         initialize(&core, Value::Null).unwrap();
         let l = core.call("lighting/get", &d).unwrap();
         core.call("shutdown", &Value::Null).unwrap();

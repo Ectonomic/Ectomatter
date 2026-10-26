@@ -3800,7 +3800,7 @@ mod tests {
     /// under its id, and the file's comments kept.
     #[test]
     fn a_light_file_of_its_own_saves_whole() {
-        let file = std::fs::read_to_string(crate::cores::dir().join(crate::mouse::CORE).join("light.json")).unwrap();
+        let file = std::fs::read_to_string(crate::mouse::shape().folder.join("light.json")).unwrap();
         let mut light = jsonc::parse(&file).unwrap();
         light["window"]["lumens"] = json!(1.2);
         light["keys"]["logo"] = json!({ "window": { "depth": 5.0 } });

@@ -1774,7 +1774,7 @@ impl Front {
                 Ask::MouseResetAll => {
                     // (every button, while the mouse can't say what they do)
                     let all = !self.mouse.buttons_known();
-                    for b in 0..crate::mouse::BUTTONS.len() {
+                    for b in 0..crate::mouse::shape().buttons.len() {
                         if all || self.mouse.rebound(b) {
                             self.mouse.reset_job(b);
                         }
@@ -3636,7 +3636,7 @@ impl Front {
     /// ripple comes from where the pointer clicks the desk, and from nowhere
     /// when the click is elsewhere.
     pub fn ripple_from_button(&mut self, control: &str, age: Duration) {
-        let Some(b) = crate::mouse::BUTTONS.iter().position(|(id, ..)| *id == control) else { return };
+        let Some(b) = crate::mouse::shape().buttons.iter().position(|b| b.id == control) else { return };
         if self.mouse.job(b)["mouse"].as_u64() == Some(1) {
             return;
         }
@@ -3697,11 +3697,11 @@ impl Front {
         Some((kx + ((x - vx) / vw) as f32 * kw - self.ui.get_desk_x(), ky + ((y - vy) / vh) as f32 * kh - self.ui.get_desk_y()))
     }
 
-    /// The same for a point of the mouse's drawing (see mouse_art::VIEW).
+    /// The same for a point of the mouse's drawing (see mouse_art::view).
     fn on_desk_mouse(&self, x: f32, y: f32) -> Option<(f32, f32)> {
         let i = self.desk.items.iter().position(|it| it.id == "mouse")?;
         let [mx, my, mw, mh] = self.desk.screen(i);
-        let v = crate::mouse_art::VIEW;
+        let v = crate::mouse_art::view();
         Some((mx + (x - v.0) / v.2 * mw, my + (y - v.1) / v.3 * mh))
     }
 
@@ -3940,9 +3940,11 @@ impl Front {
                 let (x0, y0, w) = (ui.get_mouse_wx(), ui.get_mouse_wy(), ui.get_mouse_w());
                 let (sy, sh) = (y0 + ui.get_mouse_stage_y(), ui.get_mouse_stage_height());
                 let canvas = x0 + w / 2.0 - 600.0;
-                let mut k: Vec<(f32, f32, f32, f32)> = crate::mouse::CALLS
+                let mut k: Vec<(f32, f32, f32, f32)> = crate::mouse::shape()
+                    .buttons
                     .iter()
-                    .map(|(left, top, _)| {
+                    .map(|b| (&b.callout.0, &b.callout.1))
+                    .map(|(left, top)| {
                         let (lx, ly) = (canvas + if *left { 220.0 } else { 780.0 }, sy + top);
                         let (a, b) = (lx.max(x0), (lx + 200.0).min(x0 + w));
                         let (c, d) = (ly.max(sy), (ly + 40.0).min(sy + sh));
@@ -5212,8 +5214,8 @@ impl Front {
         if let Some(store) = &self.mouse.profiles {
             for (pi, p) in store.list.iter().enumerate() {
                 names.push(p.name.clone());
-                for (bi, (id, label, _)) in crate::mouse::BUTTONS.iter().enumerate() {
-                    if let Some(Action::Macro { n, plays }) = Action::read(&p.body["keys"]["base"][*id]) {
+                for (bi, (id, label)) in crate::mouse::shape().buttons.iter().map(|b| (b.id.as_str(), b.label.as_str())).enumerate() {
+                    if let Some(Action::Macro { n, plays }) = Action::read(&p.body["keys"]["base"][id]) {
                         runs.push(crate::macros::Elsewhere { profile: pi as u8, control: format!("The mouse’s {}", label.to_lowercase()), at: bi as u32, n, plays });
                     }
                 }
@@ -5267,7 +5269,7 @@ impl Front {
     /// buttons that runs it told again, for the mouse to hold the macro as it
     /// is now (or to leave it to Ectomatter, if it can't hold it any more).
     pub fn macro_saved(&mut self, n: u32) {
-        for bi in 0..crate::mouse::BUTTONS.len() {
+        for bi in 0..crate::mouse::shape().buttons.len() {
             let job = self.mouse.job(bi);
             if matches!(Action::read(&job), Some(Action::Macro { n: m, .. }) if m == n) {
                 self.mouse.set_job(bi, job);
@@ -5502,7 +5504,7 @@ impl Front {
             // macros plays it (let go ends one that plays while it's held)
             Heard::Input(control, down) => {
                 // (held down on its pictures as it is on the mouse)
-                if let Some(b) = crate::mouse::BUTTONS.iter().position(|(id, ..)| *id == control) {
+                if let Some(b) = crate::mouse::shape().buttons.iter().position(|b| b.id == control) {
                     let held = if down { self.mouse_down | 1 << b } else { self.mouse_down & !(1 << b) };
                     if held != self.mouse_down {
                         self.mouse_down = held;
@@ -5512,7 +5514,7 @@ impl Front {
                 if down {
                     self.ripple_from_button(&control, Duration::ZERO);
                 }
-                self.play_for(&format!("mouse/{control}"), crate::mouse::BUTTONS.iter().position(|(b, ..)| *b == control).map(|i| self.mouse.job(i)), down);
+                self.play_for(&format!("mouse/{control}"), crate::mouse::shape().buttons.iter().position(|b| b.id == control).map(|i| self.mouse.job(i)), down);
                 return;
             }
         }
@@ -5544,7 +5546,7 @@ impl Front {
         let scale = self.scale;
         let draw = move || {
             // (ECTOMATTER_MOUSE_ART: another copy of the drawing, to try a change to it offscreen)
-            let path = std::env::var_os("ECTOMATTER_MOUSE_ART").map(std::path::PathBuf::from).unwrap_or_else(|| crate::cores::dir().join(crate::mouse::CORE).join("art/sensei-310.svg"));
+            let path = std::env::var_os("ECTOMATTER_MOUSE_ART").map(std::path::PathBuf::from).unwrap_or_else(|| crate::mouse::shape().art.clone());
             let art = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
             crate::mouse_art::layers(&art, w, &crate::stage_shadow(scale), crate::STAGE_SHADOW_OPACITY)
         };
@@ -5594,7 +5596,7 @@ impl Front {
         self.mouse_px_mm = crate::mouse_art::px_mm(w, units_mm);
         self.mouse_hdr = Some((scale, crate::mouse_art::Hdr::new(&imgs.layers, &self.mouse_light_model(), self.mouse_px_mm)));
         self.mouse_lit = None;
-        // (in the drawing's order: see mouse_art::GROUPS)
+        // (in the order they.re laid: see mouse::Shape)
         self.ui.set_mouse_logo_under(imgs.lights[0].clone());
         self.ui.set_mouse_wheel_under(imgs.lights[1].clone());
         self.ui.set_mouse_logo(imgs.lights[2].clone());
@@ -5761,7 +5763,7 @@ impl Front {
                 .light_order()
                 .into_iter()
                 .filter_map(|(i, id, label)| {
-                    let b = *boxes.get(crate::mouse_art::LIGHT_IDS.iter().position(|l| *l == id)?)?;
+                    let b = *boxes.get(crate::mouse::shape().lights.iter().position(|l| *l == id)?)?;
                     let _ = i;
                     Some(ectomatter_draw::hdr::CapShape { id: id.to_string(), label, short: None, foot: b, lit: true, legend: false, button: false, face: b, print: None, bump: Default::default() })
                 })
@@ -5892,7 +5894,7 @@ impl Front {
         }
         if self.mouse.known() || self.desk.keeps("mouse") {
             let dev = &self.mouse.state["device"];
-            let v = crate::mouse_art::VIEW;
+            let v = crate::mouse_art::view();
             let per = dev["scale"].as_f64().unwrap_or(520.0 / 125.1) as f32;
             let size = (v.2 / per * crate::desk::PER_MM, v.3 / per * crate::desk::PER_MM);
             let name = dev["name"].as_str().unwrap_or("SteelSeries Sensei 310").to_string();
@@ -6336,7 +6338,7 @@ impl Front {
             .iter()
             .enumerate()
             .map(|(i, e)| {
-                let (tile, motion) = crate::mouse::tile_of(e["id"].as_str().unwrap_or(""));
+                let (tile, motion) = crate::mouse::tile_of(e);
                 let icon = self.mouse_icons.as_ref().unwrap().2[["off", "static", "breathing", "wave"].iter().position(|t| *t == tile).unwrap_or(1)].clone();
                 EffectItem { name: e["label"].as_str().unwrap_or("").into(), icon, on: i == fx && known, motion }
             })
@@ -6695,7 +6697,7 @@ impl Front {
     fn device_kind(&self, id: &str) -> String {
         let told = if id == crate::z10::CORE {
             crate::cores::keyboard().and_then(|c| c.device["kind"].as_str().map(String::from)).or(Some("keyboard".into()))
-        } else if id == crate::mouse::CORE {
+        } else if id == crate::mouse::shape().core {
             self.mouse.state["device"]["kind"].as_str().map(String::from).or(Some("mouse".into()))
         } else {
             self.hosted.devices().into_iter().find(|(p, _)| p == id).and_then(|(_, d)| d["kind"].as_str().map(String::from))
@@ -9254,15 +9256,15 @@ impl Front {
             }).collect();
         }
         if let Some(r) = item("mouse") {
-            let v = crate::mouse_art::VIEW;
+            let v = crate::mouse_art::view();
             let view = (v.0 as f64, v.1 as f64, v.2 as f64, v.3 as f64);
             let middles = match &self.mouse_layers {
-                Some((scale, imgs)) => crate::mouse_art::light_boxes(&imgs.layers, (240.0 * scale).round() as u32).map(|b| ((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0)),
-                None => crate::mouse_art::LIGHT_MIDDLES,
+                Some((scale, imgs)) => crate::mouse_art::light_boxes(&imgs.layers, (240.0 * scale).round() as u32).into_iter().map(|b| ((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0)).collect(),
+                None => crate::mouse_art::light_middles(),
             };
-            out.mouse = crate::mouse_art::LIGHT_IDS.iter().zip(middles).map(|(id, (x, y))| {
+            out.mouse = crate::mouse::shape().lights.iter().zip(middles).map(|(id, (x, y))| {
                 let (dx, dy) = crate::scenes::on_desk(view, r, x as f64, y as f64);
-                (*id, dx, dy)
+                (id.as_str(), dx, dy)
             }).collect();
         }
         out
@@ -9289,7 +9291,7 @@ impl Front {
             Part::AsIs => HashMap::new(),
         };
         let lights = [0, 1].map(|i| match &mouse {
-            Part::Look(l) => places.mouse.iter().find(|(id, ..)| *id == crate::mouse_art::LIGHT_IDS[i]).map(|(_, x, _)| crate::scenes::color(l, *x, t)),
+            Part::Look(l) => places.mouse.iter().find(|(id, ..)| crate::mouse::shape().lights.get(i).is_some_and(|l| l == id)).map(|(_, x, _)| crate::scenes::color(l, *x, t)),
             Part::AsIs => None,
         });
         self.scene_colors = (keys, lights);
@@ -9364,7 +9366,7 @@ impl Front {
                 return Some(c);
             }
         }
-        self.mouse.lit(crate::mouse::LIGHTS[i]).map(|_| self.mouse.color_at(i, now))
+        self.mouse.lit(&crate::mouse::shape().lights[i]).map(|_| self.mouse.color_at(i, now))
     }
 
     // ------------------------------------------------------------ the screen

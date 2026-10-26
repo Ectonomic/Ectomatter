@@ -469,13 +469,17 @@ fn device_in_use(core: &cores::Core, settings: &settings::Settings) -> serde_jso
     device
 }
 
-/// The keyboard's record given what its core, started, describes: its
-/// profiles, its lights and its screen, which the pages are drawn from.
-fn keyboard_described(hosted: &hosted::Hosted) {
+/// The devices' records given what their cores, started, describe, which
+/// their pages are drawn from: the keyboard's profiles, lights and screen,
+/// and the first mouse's buttons, lights and picture.
+fn devices_described(hosted: &hosted::Hosted) {
     if let Some(k) = cores::keyboard() {
         if let Some(r) = hosted.get(&k.id) {
             k.describe(&r.describes);
         }
+    }
+    if let Some(r) = hosted.cores.iter().find(|r| r.describes["kind"] == "mouse") {
+        mouse::describe(r.package.id(), &r.package.dir, &r.describes);
     }
 }
 
@@ -684,7 +688,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     packages::rename_settings(&settings);
     let mut hosted = hosted::Hosted::new(std::sync::Arc::new(computer::ThisComputer::new()));
     hosted.start_all(&settings);
-    keyboard_described(&hosted);
+    devices_described(&hosted);
     let mut front = Front::new(ui, hosted, None, true, settings);
     if let Some(state) = std::env::var_os("ECTOMATTER_STATE") {
         // (as the keyboard's core reads it, device/read)
@@ -1418,7 +1422,7 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
     // ECTOMATTER_LAB=mouse: the lab on the mouse's lights (its picture drawn first)
     let mut lab = if mouse {
         front.ready_mouse_picture();
-        let setup = setups::in_use(&front.settings, mouse::CORE).map(|s| s.id);
+        let setup = setups::in_use(&front.settings, &mouse::shape().core).map(|s| s.id);
         lab::LabPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false), front.mouse_light_model(), mouse_lab_device(&front).expect("the mouse's picture"), setup)
     } else {
         let setup = setups::in_use(&front.settings, &core.id).map(|s| s.id);
@@ -1963,7 +1967,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
     packages::rename_settings(&settings);
     let mut hosted = hosted::Hosted::new(std::sync::Arc::new(computer::ThisComputer::new()));
     hosted.start_all(&settings);
-    keyboard_described(&hosted);
+    devices_described(&hosted);
     let keyboard = cores::keyboard().and_then(|k| hosted.drive_id(&k.id));
     // (the keyboard's core off, Ectomatter leaves the keyboard to other programs)
     let controlled = cores::keyboard().is_none_or(|c| settings.on(&packages::switch_of(packages::Kind::Core, &c.id)));
@@ -2488,7 +2492,7 @@ impl App {
             let (light, device, core, name) = if mouse {
                 let Some(d) = mouse_lab_device(&self.front) else { return };
                 let name = format!("{} / {}", d.name, d.lab());
-                (self.front.mouse_light_model(), d, mouse::CORE.to_string(), name)
+                (self.front.mouse_light_model(), d, mouse::shape().core.clone(), name)
             } else {
                 let Some(core) = cores::keyboard() else { return };
                 let d = lab_device(core, self.board.as_ref());
@@ -3913,12 +3917,14 @@ fn lab_device(core: &cores::Core, board: Option<&Board>) -> lab::LabDevice {
 fn mouse_lab_device(front: &Front) -> Option<lab::LabDevice> {
     let parts = front.mouse_lab_parts()?;
     let desc = &front.mouse.state["device"];
-    let file = desc["light"].as_str().unwrap_or("light.json");
+    // (its light's file, as its core names it, in its core's folder)
+    let shape = mouse::shape();
+    let file = desc["light"].as_str()?;
     Some(lab::LabDevice {
-        name: desc["name"].as_str().unwrap_or("SteelSeries Sensei 310").to_string(),
+        name: desc["name"].as_str().unwrap_or(&shape.core).to_string(),
         kind: desc["kind"].as_str().unwrap_or("mouse").to_string(),
-        core: mouse::CORE.into(),
-        path: cores::dir().join(mouse::CORE).join(file),
+        core: shape.core.clone(),
+        path: shape.folder.join(file),
         keys: false,
         wells: false,
         screens: false,

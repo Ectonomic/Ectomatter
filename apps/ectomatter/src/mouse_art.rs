@@ -15,32 +15,38 @@
 use resvg::tiny_skia::{FillRule, Mask, Pixmap, PixmapPaint, Transform};
 use resvg::usvg;
 
-/// The drawing's mouse, in its own units: it spans this box.
-pub const VIEW: (f32, f32, f32, f32) = (28.0, 30.0, 304.0, 520.0);
+/// The drawing's mouse, in its own units: the box it spans, as its core
+/// describes it (`view`).
+pub fn view() -> (f32, f32, f32, f32) {
+    crate::mouse::shape().view
+}
 
-/// The surfaces of each button, by its number in the art (the mouse's own
-/// button number), for picking it out.
-const SURFACES: [&[&str]; 8] = [
-    &["path20", "left-middle", "path21"],
-    &["path22", "right-middle", "path23"],
-    &["rect23"],
-    &["path26"],
-    &["path25"],
-    &["path28"],
-    &["path27"],
-    &["rect24"],
-];
+/// The lights' groups in the drawing, each with its light (its index among
+/// the mouse's lights), in the order they're laid: what lies under the
+/// buttons, then what lies over everything (mouse::Shape). Each is a layer
+/// of its own, in its light's color, so a light dimmed shows as the drawing
+/// does with its groups faded.
+fn groups() -> &'static [(usize, String)] {
+    &crate::mouse::shape().groups
+}
 
-/// The lights' groups in the drawing, each with its light (0 the logo, 1 the
-/// wheel), in the drawing's order: what lies under the buttons, then what
-/// lies over everything. Each is a layer of its own, in its light's color,
-/// so a light dimmed shows as the drawing does with its groups faded.
-const GROUPS: [(usize, &str); 4] = [(0, "illumination_9"), (1, "illumination_3"), (0, "illumination_209"), (1, "illumination_203")];
-
-/// The drawing's own glow round the logo on the palm, drawn before the light
-/// was simulated: no part of the logo's window. In HDR the lamp's halo is the
+/// Whether a group is the drawing's own glow round a light, drawn before the
+/// light was simulated: no part of its window. In HDR the lamp's halo is the
 /// glow (as much as the light's `halo` says, none at 0%).
-const GLOW: &str = "illumination_9";
+fn is_glow(id: &str) -> bool {
+    crate::mouse::shape().glow.iter().any(|g| g == id)
+}
+
+/// The surfaces of the button `n` (from 1), by their ids in the drawing,
+/// for picking it out.
+fn surfaces(n: usize) -> &'static [String] {
+    crate::mouse::shape().buttons.get(n.wrapping_sub(1)).map_or(&[], |b| &b.pieces)
+}
+
+/// How many buttons the mouse has.
+fn buttons() -> usize {
+    crate::mouse::shape().buttons.len()
+}
 
 /// How a light shows: its color, or off.
 pub type Lit = Option<[u8; 3]>;
@@ -67,7 +73,7 @@ pub struct Layers {
     pub base: Pixmap,
     /// how far the shadow reaches past the mouse at each side, in pixels
     pub margin: u32,
-    /// each light's group (see GROUPS): how much of it shows at each pixel,
+    /// each light's group (see groups): how much of it shows at each pixel,
     /// as white
     pub lights: Vec<Patch>,
     /// each button, 1 to 8, picked out as the chosen button is
@@ -98,7 +104,7 @@ impl Layers {
             let (lx, ly) = (x - p.x as f32, y - p.y as f32);
             lx >= 0.0 && ly >= 0.0 && p.px.pixel(lx as u32, ly as u32).is_some_and(|c| c.alpha() > 40)
         })?;
-        Some(GROUPS[i].0)
+        groups().get(i).map(|g| g.0)
     }
 
     /// The whole picture as one, as the page puts it together: the lights
@@ -109,8 +115,8 @@ impl Layers {
         if let Some(p) = chosen.and_then(|n| self.chosen.get((n as usize).wrapping_sub(1))) {
             out.draw_pixmap(p.x as i32, p.y as i32, p.px.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
         }
-        for (p, (light, _)) in self.lights.iter().zip(GROUPS) {
-            let Some(v) = lit[light] else { continue };
+        for (p, (light, _)) in self.lights.iter().zip(groups()) {
+            let Some(v) = lit[*light] else { continue };
             let (c, k) = level(v);
             let mut tinted = p.px.clone();
             for px in tinted.data_mut().chunks_exact_mut(4) {
@@ -128,40 +134,54 @@ impl Layers {
 
 // ---------------------------------------------------------------- in HDR
 
-/// The lights' ids, by their places (0 the logo, 1 the wheel), as the core names them.
-pub const LIGHT_IDS: [&str; 2] = ["logo", "wheel"];
-
-/// Each light's middle on the drawing, in its own units (the logo's ring, the
-/// wheel), for where the light is on Home's desk before its picture is drawn.
-pub const LIGHT_MIDDLES: [(f32, f32); 2] = [(180.5, 482.1), (180.0, 120.0)];
+/// Each light's middle on the drawing, in its own units (the middle of its
+/// groups there), for where the light is on Home's desk before its picture
+/// is drawn: read from the drawing once.
+pub fn light_middles() -> Vec<(f32, f32)> {
+    static MIDDLES: std::sync::OnceLock<Vec<(f32, f32)>> = std::sync::OnceLock::new();
+    MIDDLES
+        .get_or_init(|| {
+            let shape = crate::mouse::shape();
+            let tree = std::fs::read_to_string(&shape.art).ok().and_then(|a| usvg::Tree::from_str(&a, &usvg::Options::default()).ok());
+            (0..shape.lights.len())
+                .map(|li| {
+                    let boxes: Vec<usvg::Rect> = groups().iter().filter(|(g, id)| *g == li && !is_glow(id)).filter_map(|(_, id)| tree.as_ref()?.node_by_id(id)?.abs_bounding_box().into()).collect();
+                    let (x0, y0) = boxes.iter().fold((f32::MAX, f32::MAX), |(x, y), b| (x.min(b.left()), y.min(b.top())));
+                    let (x1, y1) = boxes.iter().fold((f32::MIN, f32::MIN), |(x, y), b| (x.max(b.right()), y.max(b.bottom())));
+                    if boxes.is_empty() { (view().0 + view().2 / 2.0, view().1 + view().3 / 2.0) } else { ((x0 + x1) / 2.0, (y0 + y1) / 2.0) }
+                })
+                .collect()
+        })
+        .clone()
+}
 
 /// The drawing's pixels to a millimeter, for the mouse drawn `w` pixels wide,
 /// the drawing `units_mm` of its units to the millimeter (the core's scale:
 /// the mouse's 520 units long are 125.1 mm).
 pub fn px_mm(w: u32, units_mm: f32) -> f32 {
-    w as f32 / VIEW.2 * units_mm
+    w as f32 / view().2 * units_mm
 }
 
 /// Each light's window on the drawing, in the drawing's own units (x, y,
 /// right, bottom): what its groups cover, for the mouse drawn `w` pixels wide.
-pub fn light_boxes(l: &Layers, w: u32) -> [[f32; 4]; 2] {
-    let k = w as f32 / VIEW.2;
+pub fn light_boxes(l: &Layers, w: u32) -> Vec<[f32; 4]> {
+    let k = w as f32 / view().2;
     let m = l.margin as f32;
-    std::array::from_fn(|li| {
-        let ps: Vec<&Patch> = l.lights.iter().zip(GROUPS).filter(|(_, (g, _))| *g == li).map(|(p, _)| p).collect();
+    (0..crate::mouse::shape().lights.len()).map(|li| {
+        let ps: Vec<&Patch> = l.lights.iter().zip(groups()).filter(|(_, (g, _))| *g == li).map(|(p, _)| p).collect();
         let x0 = ps.iter().map(|p| p.x).min().unwrap_or(0) as f32;
         let y0 = ps.iter().map(|p| p.y).min().unwrap_or(0) as f32;
         let x1 = ps.iter().map(|p| p.x + p.px.width()).max().unwrap_or(1) as f32;
         let y1 = ps.iter().map(|p| p.y + p.px.height()).max().unwrap_or(1) as f32;
-        [VIEW.0 + (x0 - m) / k, VIEW.1 + (y0 - m) / k, VIEW.0 + (x1 - m) / k, VIEW.1 + (y1 - m) / k]
-    })
+        [view().0 + (x0 - m) / k, view().1 + (y0 - m) / k, view().0 + (x1 - m) / k, view().1 + (y1 - m) / k]
+    }).collect()
 }
 
 /// Each button's middle on the drawing, in the drawing's own units, in the
 /// mouse's order of its buttons (see mouse::BUTTONS): the middle of its shape
 /// where it shows, for the mouse drawn `w` pixels wide.
 pub fn button_middles(l: &Layers, w: u32) -> Vec<(f32, f32)> {
-    let k = w as f32 / VIEW.2;
+    let k = w as f32 / view().2;
     let m = l.margin as f32;
     l.shapes
         .iter()
@@ -175,7 +195,7 @@ pub fn button_middles(l: &Layers, w: u32) -> Vec<(f32, f32)> {
                 sa += a;
             }
             let (cx, cy) = if sa > 0.0 { (sx / sa, sy / sa) } else { (p.px.width() as f32 / 2.0, p.px.height() as f32 / 2.0) };
-            (VIEW.0 + (p.x as f32 + cx - m) / k, VIEW.1 + (p.y as f32 + cy - m) / k)
+            (view().0 + (p.x as f32 + cx - m) / k, view().1 + (p.y as f32 + cy - m) / k)
         })
         .collect()
 }
@@ -199,7 +219,7 @@ impl Hdr {
     pub fn new(l: &Layers, light: &serde_json::Value, px_mm: f32) -> Hdr {
         let lamps = (0..2)
             .map(|li| {
-                let ps: Vec<&Patch> = l.lights.iter().zip(GROUPS).filter(|(_, (g, id))| *g == li && *id != GLOW).map(|(p, _)| p).collect();
+                let ps: Vec<&Patch> = l.lights.iter().zip(groups()).filter(|(_, (g, id))| *g == li && !is_glow(id)).map(|(p, _)| p).collect();
                 let x0 = ps.iter().map(|p| p.x).min().unwrap_or(0);
                 let y0 = ps.iter().map(|p| p.y).min().unwrap_or(0);
                 let x1 = ps.iter().map(|p| p.x + p.px.width()).max().unwrap_or(1);
@@ -215,7 +235,7 @@ impl Hdr {
                         cover[j] = 1.0 - (1.0 - cover[j]) * (1.0 - a);
                     }
                 }
-                ectomatter_draw::hdr::lamp::Lamp::new(&cover, w, h, x0 as i32, y0 as i32, px_mm, &ectomatter_draw::hdr::lamp::Make::of(light, LIGHT_IDS[li]))
+                ectomatter_draw::hdr::lamp::Lamp::new(&cover, w, h, x0 as i32, y0 as i32, px_mm, &ectomatter_draw::hdr::lamp::Make::of(light, &crate::mouse::shape().lights[li]))
             })
             .collect();
         Hdr { lamps, unlit: Vec::new(), unlit_for: None, scratch: Vec::new(), loose: Vec::new(), loose_for: None }
@@ -417,16 +437,17 @@ pub fn level(v: [u8; 3]) -> ([u8; 3], f32) {
 /// on a thread of its own.
 pub fn layers(art: &str, w: u32, shadow: &[ectomatter_draw::hdr::ShadowLayer], opacity: f32) -> Result<Layers, String> {
     // the mouse with its lights off, then with each light's group alone white, then each button chosen
-    let mut svgs = vec![dressed(art, [None; 4], None)];
-    svgs.extend((0..GROUPS.len()).map(|g| dressed(art, std::array::from_fn(|i| (i == g).then_some([255, 255, 255])), None)));
-    svgs.extend((1..=8).map(|n| dressed(art, [None; 4], Some(n))));
+    let off = vec![None; groups().len()];
+    let mut svgs = vec![dressed(art, &off, None)];
+    svgs.extend((0..groups().len()).map(|g| dressed(art, &(0..groups().len()).map(|i| (i == g).then_some([255, 255, 255])).collect::<Vec<_>>(), None)));
+    svgs.extend((1..=buttons()).map(|n| dressed(art, &off, Some(n))));
     let drawn: Vec<Result<(Pixmap, usvg::Tree, Transform), String>> = std::thread::scope(|s| {
         let all: Vec<_> = svgs.iter().map(|svg| s.spawn(move || render(svg, w))).collect();
         all.into_iter().map(|t| t.join().unwrap_or_else(|_| Err("the drawing failed".into()))).collect()
     });
     let mut drawn = drawn.into_iter().collect::<Result<Vec<_>, _>>()?.into_iter();
     let (off, tree, tf) = drawn.next().ok_or("no drawing")?;
-    let lit: Vec<Pixmap> = drawn.by_ref().take(GROUPS.len()).map(|d| d.0).collect();
+    let lit: Vec<Pixmap> = drawn.by_ref().take(groups().len()).map(|d| d.0).collect();
     let picked: Vec<Pixmap> = drawn.map(|d| d.0).collect();
     let (w, h) = (off.width(), off.height());
 
@@ -481,11 +502,11 @@ pub fn layers(art: &str, w: u32, shadow: &[ectomatter_draw::hdr::ShadowLayer], o
     // numbers' order)
     let (bw, bh) = (base.width(), base.height());
     let at = Transform::from_translate(m as f32, m as f32).pre_concat(tf);
-    let masks: Vec<Mask> = SURFACES
-        .iter()
+    let masks: Vec<Mask> = (1..=buttons())
+        .map(surfaces)
         .map(|ids| {
             let mut mask = Mask::new(bw, bh).unwrap();
-            for id in *ids {
+            for id in ids {
                 if let Some(usvg::Node::Path(p)) = tree.node_by_id(id) {
                     let rule = match p.fill().map(|f| f.rule()) {
                         Some(usvg::FillRule::EvenOdd) => FillRule::EvenOdd,
@@ -499,10 +520,10 @@ pub fn layers(art: &str, w: u32, shadow: &[ectomatter_draw::hdr::ShadowLayer], o
         .collect();
     let n = (bw * bh) as usize;
     let mut hit = vec![0u8; n];
-    let mut shows = vec![vec![0u8; n]; 8];
+    let mut shows = vec![vec![0u8; n]; buttons()];
     for i in 0..n {
         let mut above = 1.0f32;
-        for b in (0..8).rev() {
+        for b in (0..buttons()).rev() {
             let v = masks[b].data()[i] as f32 / 255.0;
             shows[b][i] = (v * above * 255.0).round() as u8;
             above *= 1.0 - v;
@@ -548,30 +569,30 @@ fn crop(a: &[u8], w: u32, h: u32, m: u32, px: impl Fn(u8) -> [u8; 4]) -> Patch {
 /// drawing's place on the pixels.
 fn render(svg: &str, w: u32) -> Result<(Pixmap, usvg::Tree, Transform), String> {
     let tree = usvg::Tree::from_str(svg, &usvg::Options::default()).map_err(|e| e.to_string())?;
-    let k = w as f32 / VIEW.2;
-    let h = (VIEW.3 * k).round() as u32;
+    let k = w as f32 / view().2;
+    let h = (view().3 * k).round() as u32;
     let mut mouse = Pixmap::new(w, h).ok_or("the mouse too small to draw")?;
     // (the drawing's units to the tree's: its size over its viewBox's)
     let units = tree.size().width() / view_width(svg).unwrap_or(tree.size().width());
     let t = k / units;
-    let tf = Transform::from_row(t, 0.0, 0.0, t, -VIEW.0 * k, -VIEW.1 * k);
+    let tf = Transform::from_row(t, 0.0, 0.0, t, -view().0 * k, -view().1 * k);
     resvg::render(&tree, tf, &mut mouse.as_mut());
     Ok((mouse, tree, tf))
 }
 
 /// The drawing as the page shows it: without its reference photo and guides,
-/// each of the lights' groups (see GROUPS) white in its color, or gone, and
+/// each of the lights' groups (see groups) white in its color, or gone, and
 /// the chosen button outlined and a shade lighter.
-fn dressed(art: &str, groups: [Lit; 4], chosen: Option<u8>) -> String {
+fn dressed(art: &str, lits: &[Lit], chosen: Option<usize>) -> String {
     let mut s = art.to_string();
     for layer in ["reference", "guides"] {
         s = without_group(&s, layer);
     }
-    for ((_, id), l) in GROUPS.iter().zip(groups) {
-        s = recolor_group(&s, id, l);
+    for ((_, id), l) in groups().iter().zip(lits) {
+        s = recolor_group(&s, id, *l);
     }
-    if let Some(n) = chosen.filter(|n| (1..=8).contains(n)) {
-        let sel: Vec<String> = SURFACES[n as usize - 1].iter().map(|id| format!("#{id}")).collect();
+    if let Some(n) = chosen.filter(|n| (1..=buttons()).contains(n)) {
+        let sel: Vec<String> = surfaces(n).iter().map(|id| format!("#{id}")).collect();
         let style = format!("<style>{} {{ fill: #5a5a62; stroke: #f4f4f5; stroke-width: 1.8; }}</style>", sel.join(", "));
         if let Some(i) = s.find("<defs") {
             s.insert_str(i, &style);
@@ -642,7 +663,7 @@ mod tests {
     use super::*;
 
     fn art() -> String {
-        std::fs::read_to_string(crate::cores::dir().join(crate::mouse::CORE).join("art/sensei-310.svg")).unwrap()
+        std::fs::read_to_string(crate::mouse::shape().art.clone()).unwrap()
     }
 
     fn shadow() -> [ectomatter_draw::hdr::ShadowLayer; 1] {
@@ -659,8 +680,8 @@ mod tests {
         assert!(m > 0, "a shadow round it");
         let px = |p: &Pixmap, x: u32, y: u32| p.pixel(x, y).map(|c| (c.red(), c.green(), c.blue(), c.alpha())).unwrap();
         // on the logo's ring, in the drawing round (180.5, 482.1)
-        let k = 240.0 / VIEW.2;
-        let at = |x: f32, y: f32| (m + ((x - VIEW.0) * k) as u32, m + ((y - VIEW.1) * k) as u32);
+        let k = 240.0 / view().2;
+        let at = |x: f32, y: f32| (m + ((x - view().0) * k) as u32, m + ((y - view().1) * k) as u32);
         let (lx, ly) = at(152.5, 482.1);
         let (r, g, _, _) = px(&red, lx, ly);
         assert!(r > 150 && g < 60, "the logo lit red: {:?}", px(&red, lx, ly));
@@ -686,9 +707,9 @@ mod tests {
             let v = c.map(|x| (x as f32 * k).round() as u8);
             let ours = l.flat([Some(v); 2], None);
             // the drawing itself, its lights' groups in the color, at that strength
-            let mut svg = dressed(&art, [Some(c); 4], None);
+            let mut svg = dressed(&art, &vec![Some(c); groups().len()], None);
             if k < 1.0 {
-                for (_, id) in GROUPS {
+                for (_, id) in groups() {
                     svg = svg.replacen(&format!("id=\"{id}\""), &format!("id=\"{id}\" opacity=\"{k}\""), 1);
                 }
             }
@@ -718,8 +739,8 @@ mod tests {
     #[test]
     fn a_click_on_the_drawing_finds_its_button() {
         let l = layers(&art(), 240, &shadow(), 0.5).unwrap();
-        let k = 240.0 / VIEW.2;
-        let at = |x: f32, y: f32| (l.margin as f32 + (x - VIEW.0) * k, l.margin as f32 + (y - VIEW.1) * k);
+        let k = 240.0 / view().2;
+        let at = |x: f32, y: f32| (l.margin as f32 + (x - view().0) * k, l.margin as f32 + (y - view().1) * k);
         let b = |x, y| {
             let (px, py) = at(x, y);
             l.button_at(px, py)
@@ -745,8 +766,8 @@ mod tests {
         let lit = [Some([255, 60, 0]); 2];
         let up = hdr.on_ground(&l, lit, 1.0, 0, 254.0, 3.9);
         let held = hdr.on_ground(&l, lit, 1.0, 1, 254.0, 3.9);
-        let (k, m) = (240.0 / VIEW.2, l.margin as f32);
-        let at = |(x, y): (f32, f32)| ((m + (x - VIEW.0) * k) as usize, (m + (y - VIEW.1) * k) as usize);
+        let (k, m) = (240.0 / view().2, l.margin as f32);
+        let at = |(x, y): (f32, f32)| ((m + (x - view().0) * k) as usize, (m + (y - view().1) * k) as usize);
         let middles = button_middles(&l, 240);
         let px = |p: &crate::picture::Lit, (x, y): (usize, usize)| [0, 1, 2].map(|c| p.px[(y * p.w + x) * 4 + c]);
         let (a, b) = (px(&up, at(middles[0])), px(&held, at(middles[0])));
@@ -766,17 +787,17 @@ mod hdr_tests {
     /// in the lab glows under the page's white.
     #[test]
     fn the_lights_are_as_bright_as_their_leds_make_them() {
-        let art = std::fs::read_to_string(crate::cores::dir().join(crate::mouse::CORE).join("art/sensei-310.svg")).unwrap();
+        let art = std::fs::read_to_string(crate::mouse::shape().art.clone()).unwrap();
         let l = layers(&art, 240, &[ectomatter_draw::hdr::ShadowLayer { down: 8.0, blur: 22.0, strength: 0.6 }], 0.5).unwrap();
         let light = crate::mouse::light_model(&serde_json::json!({ "light": "light.json" }));
         let px_mm = px_mm(240, 520.0 / 125.1);
         let hdr = Hdr::new(&l, &light, px_mm);
         for (i, lamp) in hdr.lamps.iter().enumerate() {
-            let m = ectomatter_draw::hdr::lamp::Make::of(&light, LIGHT_IDS[i]);
+            let m = ectomatter_draw::hdr::lamp::Make::of(&light, &crate::mouse::shape().lights[i]);
             let got = lamp.lumens(px_mm);
-            eprintln!("{}: peak {:.0} nits at full white, {got:.4} lumens of {:.4}", LIGHT_IDS[i], lamp.peak(), m.lumens * (m.through + m.halo));
-            assert!((got - m.lumens * (m.through + m.halo)).abs() < 0.02 * m.lumens, "{} gives off what its LED lets out", LIGHT_IDS[i]);
-            assert!(lamp.peak() > 0.0, "{} lit", LIGHT_IDS[i]);
+            eprintln!("{}: peak {:.0} nits at full white, {got:.4} lumens of {:.4}", crate::mouse::shape().lights[i], lamp.peak(), m.lumens * (m.through + m.halo));
+            assert!((got - m.lumens * (m.through + m.halo)).abs() < 0.02 * m.lumens, "{} gives off what its LED lets out", crate::mouse::shape().lights[i]);
+            assert!(lamp.peak() > 0.0, "{} lit", crate::mouse::shape().lights[i]);
         }
     }
 }
@@ -789,13 +810,13 @@ mod halo_tests {
     /// palm round it. (Its window is the lit logo, not the drawing's own glow.)
     #[test]
     fn no_halo_lights_nothing_past_the_window() {
-        let art = std::fs::read_to_string(crate::cores::dir().join(crate::mouse::CORE).join("art/sensei-310.svg")).unwrap();
+        let art = std::fs::read_to_string(crate::mouse::shape().art.clone()).unwrap();
         let l = layers(&art, 240, &[ectomatter_draw::hdr::ShadowLayer { down: 8.0, blur: 22.0, strength: 0.6 }], 0.5).unwrap();
         let light = serde_json::json!({ "window": { "halo": 0.0 } });
         let hdr = Hdr::new(&l, &light, px_mm(240, 520.0 / 125.1));
         let logo = &hdr.lamps[0];
         // the lit logo's own coverage, where light may be
-        let ps: Vec<&Patch> = l.lights.iter().zip(GROUPS).filter(|(_, (g, id))| *g == 0 && *id != GLOW).map(|(p, _)| p).collect();
+        let ps: Vec<&Patch> = l.lights.iter().zip(groups()).filter(|(_, (g, id))| *g == 0 && !is_glow(id)).map(|(p, _)| p).collect();
         let on_window = |x: i32, y: i32| ps.iter().any(|p| {
             let (lx, ly) = (x - p.x as i32, y - p.y as i32);
             lx >= 0 && ly >= 0 && p.px.pixel(lx as u32, ly as u32).is_some_and(|c| c.alpha() > 0)
@@ -820,7 +841,7 @@ mod halo_fit {
 
     /// The logo's window from the groups `ids`, as Hdr::new makes it.
     fn lamp(l: &Layers, ids: &[&str], px_mm: f32, make: &Make) -> Lamp {
-        let ps: Vec<&Patch> = l.lights.iter().zip(GROUPS).filter(|(_, (_, g))| ids.contains(g)).map(|(p, _)| p).collect();
+        let ps: Vec<&Patch> = l.lights.iter().zip(groups()).filter(|(_, (_, g))| ids.contains(&g.as_str())).map(|(p, _)| p).collect();
         let x0 = ps.iter().map(|p| p.x).min().unwrap();
         let y0 = ps.iter().map(|p| p.y).min().unwrap();
         let x1 = ps.iter().map(|p| p.x + p.px.width()).max().unwrap();
@@ -844,7 +865,7 @@ mod halo_fit {
     #[test]
     #[ignore]
     fn fit_the_logo_halo() {
-        let art = std::fs::read_to_string(crate::cores::dir().join(crate::mouse::CORE).join("art/sensei-310.svg")).unwrap();
+        let art = std::fs::read_to_string(crate::mouse::shape().art.clone()).unwrap();
         let l = layers(&art, 240, &[ectomatter_draw::hdr::ShadowLayer { down: 8.0, blur: 22.0, strength: 0.6 }], 0.5).unwrap();
         let px_mm = px_mm(240, 520.0 / 125.1);
         let was = Make::DEFAULT;
@@ -900,7 +921,7 @@ mod timing {
     #[test]
     #[ignore]
     fn how_long_a_frame_takes() {
-        let art = std::fs::read_to_string(crate::cores::dir().join(crate::mouse::CORE).join("art/sensei-310.svg")).unwrap();
+        let art = std::fs::read_to_string(crate::mouse::shape().art.clone()).unwrap();
         let layers = [ectomatter_draw::hdr::ShadowLayer { down: 16.0, blur: 44.0, strength: 0.6 }];
         let light = crate::mouse::light_model(&serde_json::json!({ "light": "light.json" }));
         for w in [240u32, 480] {
@@ -921,7 +942,7 @@ mod timing {
     #[test]
     #[ignore]
     fn how_long_the_layers_take() {
-        let art = std::fs::read_to_string(crate::cores::dir().join(crate::mouse::CORE).join("art/sensei-310.svg")).unwrap();
+        let art = std::fs::read_to_string(crate::mouse::shape().art.clone()).unwrap();
         let layers = [ectomatter_draw::hdr::ShadowLayer { down: 16.0, blur: 44.0, strength: 0.6 }, ectomatter_draw::hdr::ShadowLayer { down: 4.0, blur: 14.0, strength: 0.35 }];
         for w in [240u32, 480] {
             let t = std::time::Instant::now();

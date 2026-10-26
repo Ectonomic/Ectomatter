@@ -50,6 +50,12 @@ pub fn move_old_settings(settings: &crate::settings::Settings) {
     }
 }
 
+/// The cores' folders of files kept under the names they had before: the
+/// mouse's core was "steelseries" before it was named for its model.
+pub fn core_folders(data: &Path) -> Vec<(PathBuf, PathBuf)> {
+    vec![(data.join("cores").join("steelseries"), data.join("cores").join("steelseries-sensei-310"))]
+}
+
 /// A file with every `from` in it made `to`, written only where there was one.
 fn replace_in(path: &Path, from: &str, to: &str) {
     let Ok(text) = std::fs::read_to_string(path) else { return };
