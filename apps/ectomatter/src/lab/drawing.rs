@@ -25,6 +25,7 @@ use serde_json::Value;
 use super::{ends, get, PARAMS};
 use ectomatter_draw::hdr::KeyGeometry;
 use crate::text;
+use crate::tokens::{line, size, space};
 
 // the lab's own colors
 const PLOT: &str = "#131316";
@@ -98,16 +99,20 @@ const USUAL_TOP: f64 = 16.0;
 const USUAL_BUTTON: f64 = 8.0;
 const USUAL_DEPTH: f64 = 3.0;
 
-// the stage: a column of sliders either side of the panel the drawing is in
+// the stage: a column of sliders either side of the panel the drawing is in;
+// a slider's row (app.slint's LabControl) its name's line, as tall as its
+// number box, and the Slider Space.tight under that
 pub const CTRL_W: f32 = 280.0;
-pub const CTRL_H: f32 = 48.0;
+pub const CTRL_H: f32 = size::QUIET + space::TIGHT + size::SLIDER;
 /// how much taller a share's slider is, for the words under its track
-pub const ENDS_H: f32 = 14.0;
-/// how far down a slider its line leaves it, and how far apart sliders stand
-pub const ATTACH: f32 = 13.0;
+pub const ENDS_H: f32 = space::TIGHT + line::SMALL;
+/// how far down a slider its line leaves it (its name's line's middle), and how far apart sliders stand
+pub const ATTACH: f32 = size::QUIET / 2.0;
 /// how much of its column a choice takes, its name over its options
 pub const CHOICE_H: f32 = 74.0;
-const PITCH: f64 = 62.0;
+/// how far a slider stands above the next: its row, and the 7 px its zone
+/// takes round it above and below (LabControl's), so the zones meet
+const PITCH: f64 = CTRL_H as f64 + 14.0;
 const COL: f64 = 20.0;
 const GAP: f64 = 28.0;
 const MARGIN: f64 = 24.0;

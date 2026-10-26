@@ -6802,15 +6802,22 @@ component LabControl inherits Rectangle {
     x: root.r.x - 10px; // art: a lab slider's row
     y: root.r.y - 7px; // art: a lab slider's row
     width: root.r.w + 20px; // art: a lab slider's row
-    height: root.r.low != "" ? 76px : 62px; // art: a lab slider's row
+    // its name's line, as tall as the number box; its slider Space.tight under
+    // that, and a share's ends Space.tight under its slider; 7 px round them all
+    // (drawing.rs stands the rows apart by these: CTRL_H, ENDS_H)
+    property <length> slider-y: 7px + Size.quiet + Space.tight; // art: a lab slider's row, round it
+    property <length> ends-y: self.slider-y + Size.slider + Space.tight;
+    height: (root.r.low != "" ? self.ends-y + Line.small : self.slider-y + Size.slider) + 7px; // art: a lab slider's row, round it
     border-radius: Radius.panel;
-    background: root.r.hot ? Ink.white.with-alpha(0.043) : transparent;
+    // lit under the pointer: a shade over the stage's box
+    property <float> lit: 0.043; // art: a lab slider's row, lit
+    background: root.r.hot ? Ink.white.with-alpha(root.lit) : transparent;
     zone := TouchArea {
         changed has-hover => { root.hovered(root.r.id, self.has-hover); }
         Text {
             x: 10px; // art: a lab slider's row
             y: 7px; // art: a lab slider's row
-            height: 26px; // art: a lab slider's row
+            height: Size.quiet;
             text: root.r.name;
             font-family: Font.ui;
             font-size: Font.text;
@@ -6818,7 +6825,7 @@ component LabControl inherits Rectangle {
             vertical-alignment: center;
         }
         CellView {
-            c: { kind: 15, x: root.r.w + 10px - 58px - 7px - 60px, y: 7px, w: 60px, h: 26px, text: root.r.number, id: root.r.id }; // art: a lab slider's row
+            c: { kind: 15, x: root.r.w + 10px - 58px - 7px - 60px, y: 7px, w: 60px, h: Size.quiet, text: root.r.number, id: root.r.id }; // art: a lab slider's row
             entered(id, t) => { root.entered(id, t); }
             focused(id, on) => { root.focused(id, on); }
         }
@@ -6826,24 +6833,32 @@ component LabControl inherits Rectangle {
             x: root.r.w + 10px - 58px; // art: a lab slider's row
             y: 7px; // art: a lab slider's row
             width: 58px; // art: a lab slider's row
-            height: 26px; // art: a lab slider's row
+            height: Size.quiet;
             text: root.r.unit;
             font-family: Font.ui;
             font-size: Font.control;
             color: root.r.derived ? Ink.quiet : Ink.soft;
             vertical-alignment: center;
         }
-        // its track, short of the reset at its end
-        CellView {
-            c: { kind: 3, x: 10px, y: 39px, w: root.r.w - 26px, h: 16px, value: root.r.at, id: root.r.id }; // art: a lab slider's row
-            slide(id, v) => { root.slide(id, v); }
-            reset(id) => { root.reset(id); }
+        // its slider, the app's one, short of the reset at its end, marking
+        // where its value was saved once it has moved from there
+        Slider {
+            x: 10px; // art: a lab slider's row
+            y: root.slider-y;
+            width: root.r.w - 26px; // art: a lab slider's row, short of its reset
+            value: root.r.at;
+            fill: Ink.soft;
+            saved: root.r.moved ? root.r.was : -1;
+            // (its knob ringed in the row as lit: the stage's box, a shade brighter)
+            ground: root.r.hot ? Ink.white.mix(Ink.box, root.lit) : Ink.box;
+            moved(v) => { root.slide(root.r.id, v); }
+            reset => { root.reset(root.r.id); }
         }
         // what each end of its track stands for, under its ends
         if root.r.low != "": Text {
             x: 10px; // art: a lab slider's row
-            y: 55px; // art: a lab slider's row
-            height: 14px; // art: a lab slider's row
+            y: root.ends-y;
+            height: Line.small;
             text: root.r.low;
             font-family: Font.ui;
             font-size: Font.caption;
@@ -6852,9 +6867,9 @@ component LabControl inherits Rectangle {
         }
         if root.r.high != "": Text {
             x: 10px; // art: a lab slider's row
-            y: 55px; // art: a lab slider's row
+            y: root.ends-y;
             width: root.r.w - 26px; // art: a lab slider's row
-            height: 14px; // art: a lab slider's row
+            height: Line.small;
             text: root.r.high;
             font-family: Font.ui;
             font-size: Font.caption;
@@ -6862,21 +6877,12 @@ component LabControl inherits Rectangle {
             horizontal-alignment: right;
             vertical-alignment: center;
         }
-        // where it was saved, on its track
-        if root.r.moved: Rectangle {
-            x: 10px + 8px + root.r.was * (root.r.w - 26px - 16px) - 1px; // art: a lab slider's row
-            y: 41px; // art: a lab slider's row
-            width: 2px; // art: a lab slider's row
-            height: 12px; // art: a lab slider's row
-            border-radius: self.width / 2;
-            background: Ink.placeholder;
-        }
         // its reset, at the end of its track: the arrow alone, as gray as the
         // track while the value is the saved one, brighter once it differs,
         // and brighter still under the pointer; a click puts the value back
         Path {
             x: 10px + root.r.w - 18px; // art: a lab slider's row
-            y: 40px; // art: a lab slider's row
+            y: root.slider-y + (Size.slider - self.height) / 2;
             width: 14px; // art: a lab slider's row
             height: 14px; // art: a lab slider's row
             viewbox-width: 24;
@@ -6888,7 +6894,7 @@ component LabControl inherits Rectangle {
         }
         back := TouchArea {
             x: 10px + root.r.w - 22px; // art: a lab slider's row
-            y: 36px; // art: a lab slider's row
+            y: root.slider-y + (Size.slider - self.height) / 2;
             width: 22px; // art: a lab slider's row
             height: 22px; // art: a lab slider's row
             // (nothing to put back at the saved value)

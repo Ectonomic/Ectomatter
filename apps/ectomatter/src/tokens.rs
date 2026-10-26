@@ -328,6 +328,60 @@ mod system {
     }
 
     #[test]
+    fn cells_placed_are_drawn() {
+        // (every kind of cell placed, by name from Rust or by number from a page, is one
+        // ui/system/cells.slint draws, and lighting.rs names each kind it draws and no
+        // other: the lab's sliders went blank, with nothing failing, when their kind was
+        // taken out of the renderer as placed by no page, 2026-10-25)
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let number = |s: &str| s.trim_start().split(|c: char| !c.is_ascii_digit()).next().and_then(|n| n.parse::<i32>().ok());
+        // what the renderer draws: each `root.c.kind == N`, each run `root.c.kind >= A && root.c.kind <= B`
+        let mut drawn = std::collections::BTreeSet::new();
+        for line in std::fs::read_to_string(root.join("ui/system/cells.slint")).unwrap().lines() {
+            let code = line.split("//").next().unwrap_or("");
+            drawn.extend(code.split("root.c.kind == ").skip(1).filter_map(number));
+            for rest in code.split("root.c.kind >= ").skip(1) {
+                if let (Some(lo), Some(hi)) = (number(rest), rest.split("root.c.kind <= ").nth(1).and_then(number)) {
+                    drawn.extend(lo..=hi);
+                }
+            }
+        }
+        // the kinds by name, as lighting.rs's `mod kind` has them
+        let lighting = std::fs::read_to_string(root.join("src/lighting.rs")).unwrap();
+        let block = lighting.split("pub mod kind {").nth(1).and_then(|b| b.split("\n}").next()).unwrap();
+        let named: Vec<(&str, i32)> = block.lines().filter_map(|l| {
+            let (name, n) = l.trim().strip_prefix("pub const ")?.split_once(": i32 = ")?;
+            Some((name, n.trim_end_matches(';').parse().ok()?))
+        }).collect();
+        let mut bad = Vec::new();
+        for (name, n) in &named {
+            if !drawn.contains(n) {
+                bad.push(format!("lighting.rs: kind::{name} ({n}), which cells.slint doesn't draw"));
+            }
+        }
+        for n in &drawn {
+            if !named.iter().any(|(_, m)| m == n) {
+                bad.push(format!("cells.slint: kind {n}, which lighting.rs doesn't name"));
+            }
+        }
+        // what a page places itself: a cell's `c: { kind: N, ... }`
+        for (name, text) in slint_files() {
+            for (i, line) in text.lines().enumerate() {
+                let code = line.split("//").next().unwrap_or("");
+                for rest in code.split("c: {").skip(1) {
+                    if let Some(n) = rest.trim_start().strip_prefix("kind:").and_then(number) {
+                        if !drawn.contains(&n) {
+                            bad.push(format!("{name}:{}: kind {n}, which cells.slint doesn't draw", i + 1));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(!drawn.is_empty() && !named.is_empty(), "the renderer's kinds and lighting.rs's names read");
+        assert!(bad.is_empty(), "a cell's kind placed or named that the renderer doesn't draw:\n{}", bad.join("\n"));
+    }
+
+    #[test]
     fn rust_layouts_measure_and_color_with_tokens() {
         let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut bad = Vec::new();

@@ -143,7 +143,9 @@ In `ui/system/`, each drawn once:
   menu), `RenameField` (a name renamed in place), `DropField` (every dropdown:
   `subtle` at a panel's head, `followed`, `warn`, a chip), `SegSwitch` and its
   pieces `SegGround` and `SegChoice` (a choice's icon, a color's dot or square,
-  a `menu` chevron), `CheckBox`, `RadioRow`, `Slider` (the one slider), `Tag`,
+  a `menu` chevron), `CheckBox`, `RadioRow`, `Slider` (the one slider, the
+  lab's too: `saved` marks where a value was saved once it has moved, and
+  `ground` is what it sits on where that is lit otherwise), `Tag`,
   `ColorButton`, `ColorSquare`, `Fold` (a heading that opens and shuts),
   `ScrollBar`, `Spinner`, `PickField`, `SmallCap`, `StripIcon`, `PlayButton`,
   and `Glyph` (the app's own glyphs).
@@ -248,6 +250,10 @@ or a dropdown says how wide it is, so its menu knows.
    - a page sets a padding or a gap of its own, or draws a line to type in or
      a dropdown's chevron itself rather than using the part;
    - a menu is handed a width of its own (`menus_open_by_one_rule`);
+   - a cell is placed, from Rust by its name or from a page by its number, in a
+     kind `CellView` doesn't draw, or `lighting.rs`'s `kind` names one it
+     doesn't (`cells_placed_are_drawn`: the lab's sliders went blank when their
+     kind was taken out of the renderer as unused, while the lab still placed it);
    - Rust measures text or sets a color by hand in a page it lays out, or
      places a piece with a number of its own (a token, a part's measure or a
      named measure said once). The lab is one of those pages now.

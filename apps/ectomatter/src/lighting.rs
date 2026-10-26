@@ -181,14 +181,12 @@ pub fn id(c: Ctl) -> i32 {
     CTLS.iter().position(|x| *x == c).unwrap_or(0) as i32
 }
 
-/// the pieces' kinds, as the page draws them (every kind it draws is named
-/// here, used from Rust or not)
+/// the pieces' kinds, as ui/system/cells.slint draws them: every kind it draws
+/// is named here, used from Rust or not, and none it doesn't draw
+/// (tokens::system::cells_placed_are_drawn)
 #[allow(dead_code)]
 pub mod kind {
     pub const TEXT: i32 = 0;
-    pub const SWATCH: i32 = 1;
-    pub const CHECK: i32 = 2;
-    pub const SLIDER: i32 = 3;
     pub const SEG: i32 = 4;
     pub const SEG_BUTTON: i32 = 5;
     pub const CHIP: i32 = 6;
@@ -196,10 +194,11 @@ pub mod kind {
     pub const LINK: i32 = 8;
     pub const TILE: i32 = 9;
     pub const FIELD: i32 = 10;
-    pub const DROPDOWN: i32 = 11;
     pub const DEVICE: i32 = 12;
     pub const WBOX: i32 = 13;
     pub const DOT: i32 = 14;
+    /// a number to type, as the lab's values are (its rows place it themselves)
+    pub const NUMBER: i32 = 15;
     /// a box in its color, rounded at its ends
     pub const BOX: i32 = 16;
     /// a place that tells the page when the pointer is over it

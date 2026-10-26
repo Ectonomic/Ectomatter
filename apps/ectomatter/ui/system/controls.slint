@@ -1029,11 +1029,16 @@ export component DropField inherits Rectangle {
 // clicked, it goes back as it was (`reset`). `style`, by what it sits on: 0 a box
 // (its track a well), 1 a box of the well's own shade, 2 the page itself, 3 a box
 // (its track a step lighter), 4 as 3 with a notch at its middle, its default,
-// which holds the knob as it passes.
+// which holds the knob as it passes. `saved`, 0 to 1, marks where the value was
+// saved while it has moved from there (below 0, as it is unless given, no mark).
+// `ground`, what it sits on, its knob's ring: as its style says, unless what it
+// sits on is lit otherwise (a row lit under the pointer).
 export component Slider inherits Rectangle {
     in property <float> value;
     in property <color> fill;
     in property <int> style;
+    in property <float> saved: -1;
+    in property <color> ground: root.style == 2 ? Ink.base : root.style == 1 ? Ink.well : Ink.box;
     callback moved(float);
     callback reset();
     height: Size.slider;
@@ -1063,6 +1068,15 @@ export component Slider inherits Rectangle {
         border-radius: self.width / 2;
         background: Ink.quiet;
     }
+    // where the value was saved: a shorter line across the track, under the knob
+    if root.saved >= 0: Rectangle {
+        x: root.half + root.saved * (parent.width - 2 * root.half) - 1px; // art: the saved value's mark
+        y: (parent.height - 12px) / 2; // art: the saved value's mark
+        width: 2px; // art: the saved value's mark
+        height: 12px; // art: the saved value's mark
+        border-radius: self.width / 2;
+        background: Ink.placeholder;
+    }
     // the knob, ringed in what it sits on
     Rectangle {
         property <length> d: drag.has-hover || drag.pressed ? 19.5px : 18px; // art: the knob, larger under the pointer
@@ -1071,7 +1085,7 @@ export component Slider inherits Rectangle {
         width: self.d + 6px; // art: the knob's ring
         height: self.d + 6px; // art: the knob's ring
         border-radius: self.width / 2;
-        background: root.style == 2 ? Ink.base : root.style == 1 ? Ink.well : Ink.box;
+        background: root.ground;
         drop-shadow-blur: Shadow.knob.blur;
         drop-shadow-offset-y: Shadow.knob.y;
         drop-shadow-color: Shadow.knob.color;
