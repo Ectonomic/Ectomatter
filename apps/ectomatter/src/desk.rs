@@ -1,11 +1,13 @@
 //! Home as a desk: each device drawn as its own page draws it, to scale with
-//! the others, its name under it. Selecting one opens its page. Arrange (edit
-//! mode) shows dots, lets the desk zoom and pan (a drag on the empty desk),
-//! and moves devices onto the dots; pads are added at their makers' sizes or
-//! drawn, one at a time, once asked for. Done fits the desk to the window
-//! again. Day to day the desk always fits the window and nothing on it
-//! moves. Where each device sits is kept in the window's state ("desk"), in
-//! the desk's own units.
+//! the others, its name under it. Selecting one opens its page. The wheel
+//! zooms the desk where the pointer is, as a map does: day to day from the fit
+//! (every device as large as the window allows) in, a drag then moving round
+//! it as far as the devices go; nothing on it moves. Arrange (edit mode) shows
+//! dots, lets the desk zoom out past the fit too and pan (a drag on the empty
+//! desk), and moves devices onto the dots; pads are added at their makers'
+//! sizes or drawn, one at a time, once asked for. Done fits the desk to the
+//! window again. Where each device sits is kept in the window's state
+//! ("desk"), in the desk's own units.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -87,6 +89,9 @@ enum Drag {
     /// as Pan does; let go where it was, it's a click, which lets the chosen
     /// pad go
     Ground { at: (f32, f32), from: View, moved: bool },
+    /// day to day, zoomed in: the desk or a device pressed; dragged, it moves round
+    /// the desk; let go where it was, a click (a device's opens it)
+    Look { at: (f32, f32), from: View, moved: bool, i: Option<usize> },
     /// a device: which, from where, its place then, and whether it has moved yet
     Item { i: usize, at: (f32, f32), from: (f32, f32), moved: bool },
     /// a pad drawn, in edit mode, once Draw your own was chosen: from the dot
@@ -278,6 +283,10 @@ pub struct Desk {
     fade: Option<(Instant, f32, f32)>,
     /// when the view last changed, for pictures drawn for its size to wait till it settles
     pub changed: Instant,
+    /// day to day, the zoom the wheel left the desk at, kept as the fit's zoom times
+    /// this and the desk's point at the middle of the window, so it follows the window
+    /// as it's sized and the devices as they come and go (none: at the fit)
+    pub everyday: Option<(f32, (f32, f32))>,
     /// where each device Ectomatter has seen sits, as kept between runs: its id
     /// and its place (one not met yet this run keeps its place too)
     kept: Vec<(String, f32, f32)>,
@@ -329,7 +338,7 @@ impl Desk {
         // (the tests start from a desk nothing was kept for)
         let kept = if cfg!(test) { Vec::new() } else { Desk::saved() };
         let pads = if cfg!(test) { Vec::new() } else { pads_of(&crate::uistate::get("desk_pads").unwrap_or_default()) };
-        Desk { items: Vec::new(), editing: false, view: View { z: 1.0, px: 0.0, py: 0.0 }, size: (0.0, 0.0), hover: None, pressed: None, drag: None, ease: None, dots: 0.0, fade: None, changed: Instant::now(), kept, pads, pad_chosen: None, pad_hover: None, draw_tool: false, rings: Vec::new(), now: Instant::now() }
+        Desk { items: Vec::new(), editing: false, view: View { z: 1.0, px: 0.0, py: 0.0 }, size: (0.0, 0.0), hover: None, pressed: None, drag: None, ease: None, dots: 0.0, fade: None, changed: Instant::now(), everyday: None, kept, pads, pad_chosen: None, pad_hover: None, draw_tool: false, rings: Vec::new(), now: Instant::now() }
     }
 
     /// A ripple from a point of the desk (its logical pixels), in a light's
@@ -517,19 +526,54 @@ impl Desk {
     /// smoothly as it is sized, never a dot at a time.
     pub fn fitted_free(&self) -> View {
         let (w, h) = self.size;
-        if self.items.is_empty() || w <= 0.0 || h <= 0.0 {
+        let Some([x0, y0, x1, y1]) = self.bounds().filter(|_| w > 0.0 && h > 0.0) else {
             return View { z: 1.0, px: w / 2.0, py: h / 2.0 };
-        }
-        // (the devices and the pads under them, all of it)
-        let boxes: Vec<[f32; 4]> = self.items.iter().map(|i| [i.x, i.y, i.x + i.w, i.y + i.h]).chain(self.pads.iter().map(|p| [p.x, p.y, p.x + p.w, p.y + p.h])).collect();
-        let x0 = boxes.iter().map(|b| b[0]).fold(f32::INFINITY, f32::min);
-        let y0 = boxes.iter().map(|b| b[1]).fold(f32::INFINITY, f32::min);
-        let x1 = boxes.iter().map(|b| b[2]).fold(f32::NEG_INFINITY, f32::max);
-        let y1 = boxes.iter().map(|b| b[3]).fold(f32::NEG_INFINITY, f32::max);
+        };
         let (bw, bh) = ((x1 - x0).max(1.0), (y1 - y0).max(1.0));
         let z = ((w - 2.0 * PAD) / bw).min((h - 2.0 * PAD - BELOW) / bh).clamp(ZOOM.0, ZOOM.1);
         let (px, py) = ((w - bw * z) / 2.0 - x0 * z, (h - bh * z - BELOW) / 2.0 - y0 * z);
         View { z, px, py }
+    }
+
+    /// The devices and the pads under them, all of it, in the desk's units; none on an
+    /// empty desk.
+    fn bounds(&self) -> Option<[f32; 4]> {
+        if self.items.is_empty() {
+            return None;
+        }
+        let boxes = self.items.iter().map(|i| [i.x, i.y, i.x + i.w, i.y + i.h]).chain(self.pads.iter().map(|p| [p.x, p.y, p.x + p.w, p.y + p.h]));
+        Some(boxes.fold([f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY], |a, b| [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]))
+    }
+
+    /// A day-to-day view held on the desk, as a photo is held in its window: where the
+    /// devices (with the room the fit keeps round them, and their names under them) are
+    /// wider or taller than the window, the view goes only as far as their edge; where
+    /// they're narrower or shorter, they stay in the middle, as at the fit.
+    fn held(&self, v: View) -> View {
+        let (w, h) = self.size;
+        let Some([x0, y0, x1, y1]) = self.bounds() else { return v };
+        let hold = |p: f32, lo: f32, hi: f32, room: f32, before: f32, after: f32| {
+            let span = (hi - lo) * v.z + before + after;
+            if span <= room { (room - span) / 2.0 + before - lo * v.z } else { p.clamp(room - after - hi * v.z, before - lo * v.z) }
+        };
+        View { z: v.z, px: hold(v.px, x0, x1, w, PAD, PAD), py: hold(v.py, y0, y1, h, PAD, PAD + BELOW) }
+    }
+
+    /// Day to day, the view: the fit, or the zoom the wheel left it at.
+    fn everyday_view(&self) -> View {
+        let f = self.fitted_free();
+        let Some((times, (cx, cy))) = self.everyday else { return f };
+        let (w, h) = self.size;
+        let z = (f.z * times).clamp(f.z, ZOOM.1.max(f.z));
+        self.held(View { z, px: w / 2.0 - cx * z, py: h / 2.0 - cy * z })
+    }
+
+    /// A day-to-day view kept as the zoom it is from the fit, and the desk's point at the
+    /// window's middle (none at the fit).
+    fn keep_everyday(&mut self, v: View) {
+        let f = self.fitted_free();
+        let (w, h) = self.size;
+        self.everyday = (v.z > f.z * 1.001).then(|| (v.z / f.z, ((w / 2.0 - v.px) / v.z, (h / 2.0 - v.py) / v.z)));
     }
 
     /// A view moved the least it takes for the dots to line up the same
@@ -545,9 +589,10 @@ impl Desk {
         View { z: v.z, px: mx + ((v.px - mx) / s).round() * s, py: my + ((v.py - my) / s).round() * s }
     }
 
-    /// The fit: day to day exactly, in Arrange with the dots lined up.
+    /// The fit: day to day exactly (or the zoom the wheel left it at, from the fit as it
+    /// is now), in Arrange with the dots lined up.
     pub fn fit(&mut self) {
-        self.set_view(if self.editing { self.fitted() } else { self.fitted_free() });
+        self.set_view(if self.editing { self.fitted() } else { self.everyday_view() });
     }
 
     fn set_view(&mut self, v: View) {
@@ -579,14 +624,28 @@ impl Desk {
         self.ease_to(to);
     }
 
-    /// The wheel, in edit mode: zoom where the pointer is, at once.
+    /// The wheel: zoom where the pointer is, at once. In Arrange out to ZOOM's least; day
+    /// to day out to the fit and no further (where it stops, at the fit exactly), the view
+    /// held on the devices. Whether the view moved.
     pub fn wheel(&mut self, at: (f32, f32), dy: f32) -> bool {
-        if !self.editing {
+        let z = self.view.z * (dy * 0.01).exp();
+        if self.editing {
+            self.ease = None;
+            let v = self.zoomed(z, at);
+            self.set_view(v);
+            return true;
+        }
+        if self.items.is_empty() {
+            return false;
+        }
+        let f = self.fitted_free();
+        let v = if z <= f.z { f } else { self.held(self.zoomed(z, at)) };
+        if v == self.view {
             return false;
         }
         self.ease = None;
-        let v = self.zoomed(self.view.z * (dy * 0.01).exp(), at);
         self.set_view(v);
+        self.keep_everyday(v);
         true
     }
 
@@ -602,6 +661,10 @@ impl Desk {
         self.editing = on;
         self.drag = None;
         self.pressed = None;
+        // (Done fits the desk to the window again)
+        if !on {
+            self.everyday = None;
+        }
         self.pad_chosen = None;
         self.pad_hover = None;
         self.draw_tool = false;
@@ -655,6 +718,11 @@ impl Desk {
     pub fn press(&mut self, i: Option<usize>, at: (f32, f32)) {
         let i = i.filter(|i| *i < self.items.len());
         self.pressed = i;
+        // (day to day, zoomed in, a drag anywhere moves round the desk; a click still opens)
+        if !self.editing && self.everyday.is_some() {
+            self.drag = Some(Drag::Look { at, from: self.view, moved: false, i });
+            return;
+        }
         self.drag = i.map(|i| Drag::Item { i, at, from: (self.items[i].x, self.items[i].y), moved: false });
         // in edit mode, a press on a device lets the chosen pad go; one on the
         // empty desk: with Draw your own chosen, a pad is drawn from the
@@ -681,9 +749,9 @@ impl Desk {
     }
 
     /// The middle button pressed on the desk, on a device or not: in edit
-    /// mode its drag moves around the desk.
+    /// mode, or zoomed in day to day, its drag moves around the desk.
     pub fn pan_from(&mut self, at: (f32, f32)) {
-        if self.editing {
+        if self.editing || self.everyday.is_some() {
             self.pressed = None;
             self.drag = Some(Drag::Pan { at, from: self.view });
         }
@@ -693,6 +761,17 @@ impl Desk {
     pub fn moved(&mut self, to: (f32, f32)) -> bool {
         let editing = self.editing;
         let z = self.view.z;
+        let far = |at: &(f32, f32)| (to.0 - at.0).abs() + (to.1 - at.1).abs() >= crate::tokens::part::DRAG;
+        // (day to day, round the desk only as far as the devices go)
+        if let Some(Drag::Pan { at, from } | Drag::Look { at, from, moved: true, .. }) = &self.drag
+            && !editing
+        {
+            let v = self.held(View { px: from.px + to.0 - at.0, py: from.py + to.1 - at.1, ..*from });
+            self.ease = None;
+            self.set_view(v);
+            self.keep_everyday(v);
+            return true;
+        }
         match &mut self.drag {
             Some(Drag::Pan { at, from }) => {
                 let v = View { px: from.px + to.0 - at.0, py: from.py + to.1 - at.1, ..*from };
@@ -700,8 +779,16 @@ impl Desk {
                 self.set_view(v);
                 true
             }
+            Some(Drag::Look { at, moved, .. }) => {
+                if !far(at) {
+                    return false;
+                }
+                *moved = true;
+                self.pressed = None;
+                self.moved(to)
+            }
             Some(Drag::Ground { at, from, moved }) => {
-                if !*moved && (to.0 - at.0).abs() + (to.1 - at.1).abs() < 5.0 {
+                if !*moved && !far(at) {
                     return false;
                 }
                 *moved = true;
@@ -712,7 +799,7 @@ impl Desk {
             }
             Some(Drag::Item { i, at, from, moved }) => {
                 let (dx, dy) = (to.0 - at.0, to.1 - at.1);
-                if !*moved && dx.abs() + dy.abs() < 5.0 {
+                if !*moved && !far(at) {
                     return false;
                 }
                 *moved = true;
@@ -736,7 +823,7 @@ impl Desk {
             }
             Some(Drag::Pad { i, at, from, moved, .. }) => {
                 let (dx, dy) = (to.0 - at.0, to.1 - at.1);
-                if !*moved && dx.abs() + dy.abs() < 5.0 {
+                if !*moved && !far(at) {
                     return false;
                 }
                 *moved = true;
@@ -769,6 +856,7 @@ impl Desk {
         let drawn = self.drawing();
         let clicked = match self.drag.take() {
             Some(Drag::Item { i, moved: false, .. }) if !self.editing => Some(i),
+            Some(Drag::Look { i, moved: false, .. }) => i,
             Some(Drag::Item { moved: true, .. }) if self.editing => {
                 self.save();
                 None
@@ -819,7 +907,7 @@ impl Desk {
 
 
     pub fn panning(&self) -> bool {
-        matches!(self.drag, Some(Drag::Pan { .. }) | Some(Drag::Ground { moved: true, .. }))
+        matches!(self.drag, Some(Drag::Pan { .. }) | Some(Drag::Ground { moved: true, .. }) | Some(Drag::Look { moved: true, .. }))
     }
 
     /// A pad added at one of SIZES (by its place there), at its real size,
@@ -1320,26 +1408,68 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// Outside edit mode nothing moves: no zoom, no pan, no device; a press
-    /// and let go without moving is a click.
+    /// Day to day the wheel zooms the desk where the pointer is, from the fit in and no
+    /// further out than the fit, where it stops exactly; zoomed in, a drag anywhere moves
+    /// round the desk as far as the devices go and a click still opens a device. At the
+    /// fit a drag moves nothing, no device ever moves, and Done fits the desk again.
     #[test]
-    fn day_to_day_nothing_moves() {
+    fn day_to_day_the_wheel_zooms_and_a_drag_looks_round() {
         let mut d = desk();
-        let v = d.view;
-        assert!(!d.wheel((400.0, 300.0), 120.0));
+        let fit = d.view;
         d.press(None, (40.0, 900.0));
         d.moved((140.0, 860.0));
         assert_eq!(d.release(), None);
         d.pan_from((40.0, 900.0));
         d.moved((140.0, 860.0));
         assert_eq!(d.release(), None);
-        d.press(Some(1), (1200.0, 500.0));
-        d.moved((1260.0, 540.0));
+        assert!(!d.wheel((400.0, 300.0), -120.0), "no further out than the fit");
+        assert_eq!(d.view, fit, "at the fit a drag moves nothing");
+        // in, about the pointer (far enough that the desk is wider and taller than the
+        // window: in a way it's still narrower it stays in the middle, as a photo does)
+        let at = (690.0, 400.0);
+        let under = |d: &Desk| ((at.0 - d.view.px) / d.view.z, (at.1 - d.view.py) / d.view.z);
+        let before = under(&d);
+        assert!(d.wheel(at, 100.0));
+        assert!(d.view.z > fit.z && d.everyday.is_some());
+        let after = under(&d);
+        assert!((before.0 - after.0).abs() < 1e-3 && (before.1 - after.1).abs() < 1e-3, "the point under the pointer stays");
+        // a drag moves round the desk, and isn't a click; as far as the devices go
+        let v = d.view;
+        d.press(None, at);
+        d.moved((at.0 + 30.0, at.1 + 10.0));
+        assert!(d.panning());
         assert_eq!(d.release(), None, "a drag isn't a click");
-        assert_eq!((d.items[1].x, d.items[1].y), (864.0, 72.0));
-        assert_eq!(d.view, v);
-        d.press(Some(1), (1200.0, 500.0));
+        assert!(d.view != v);
+        d.press(None, at);
+        d.moved((at.0 + 100_000.0, at.1));
+        d.release();
+        let [x0, ..] = d.bounds().unwrap();
+        assert!((d.view.px + x0 * d.view.z - PAD).abs() < 1e-3, "held at the devices' left: {:?}", d.view);
+        // a click on a device opens it; a drag from it looks round; the device stays put
+        let kept = (d.items[1].x, d.items[1].y);
+        d.press(Some(1), at);
         assert_eq!(d.release(), Some(1), "a click opens the device");
+        d.press(Some(1), at);
+        d.moved((at.0 - 60.0, at.1 - 20.0));
+        assert_eq!(d.release(), None, "a drag isn't a click");
+        assert_eq!((d.items[1].x, d.items[1].y), kept);
+        // sized, the window keeps the zoom as many times the fit
+        let (times, _) = d.everyday.unwrap();
+        d.resize(1100.0, 800.0);
+        assert!((d.view.z / d.fitted_free().z - times).abs() < 1e-3);
+        // out, to the fit exactly, and no further
+        for _ in 0..40 {
+            d.wheel((300.0, 300.0), -120.0);
+        }
+        assert_eq!(d.view, d.fitted_free());
+        assert!(d.everyday.is_none());
+        // zoomed again, Arrange's Done fits the desk again
+        d.wheel(at, 60.0);
+        d.set_editing(true);
+        d.set_editing(false);
+        d.tick(Instant::now() + EASE + FADE);
+        assert_eq!(d.view, d.fitted_free());
+        assert!(d.everyday.is_none());
     }
 
     /// In edit mode the wheel zooms about the pointer, a drag with the middle
