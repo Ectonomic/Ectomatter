@@ -9,7 +9,12 @@ This is where they live in this repository.
   turn it into an ordinary test only when the code holds. The checks that read
   the source are in `apps/ectomatter/src/boundaries.rs`; the ones that run a
   core or plugin sit beside the code they try (`core_host.rs`, `hosted.rs`),
-  named for the boundary.
+  named for the boundary. The checks for package knowledge in the app take
+  their words from the packages themselves: their manifests' ids, names,
+  programs and variables (`boundaries.rs`), and the settings, buttons and
+  folds the plugins describe when run (`hosted.rs`,
+  `no_plugins_setting_or_button_is_written_into_the_app`). A new check
+  counts only after it has failed on a planted violation.
 - **Deferred list.** `docs/deferred.md`. Anything put off, stubbed, faked or
   hardcoded goes there with its file and line the moment it's put off. Every
   report starts from it.
@@ -28,9 +33,11 @@ This is where they live in this repository.
 ## Never
 
 - Push this repository.
-- Commit Grant's tuning: `cores/evga-z10/device.json` and
-  `cores/steelseries-sensei-310/light.json` stay uncommitted. Stage explicit
-  paths only; never `git stash`, `git checkout -- file` or `git reset --hard`.
+- Commit Grant's tuning from the lab (`cores/evga-z10/device.json`,
+  `cores/steelseries-sensei-310/light.json`) without his word. He had his
+  tuning as of 2026-10-26 shipped as the cores' defaults (d8a03d1); later
+  tuning waits for him again. Stage explicit paths only; never `git stash`,
+  `git checkout -- file` or `git reset --hard`.
 - Commit untracked art, `before-*.svg`, `tools/sensei-310-art/`, untracked
   mocks, `cores/*/module/target` or `docs/drafts`.
 - Write to a device from a test or a scratch tool without Grant's go. Set

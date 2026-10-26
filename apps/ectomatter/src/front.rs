@@ -966,9 +966,8 @@ impl Front {
     /// started), the keyboard's thread (`kb`) and whether Ectomatter controls
     /// the keyboard.
     pub fn new(ui: AppWindow, hosted: crate::hosted::Hosted, kb: Option<mpsc::Sender<device::Ask>>, controlled: bool, settings: crate::settings::Settings) -> Front {
-        // (which sensors the screen's layouts can show, as last chosen; the Sensors card's
-        // choices before, carried over once the layouts are read)
-        let (setup, before) = crate::sensors::Setup::of(&settings.all()["sensors"]);
+        // (which sensors the screen's layouts can show, as last chosen)
+        let setup = crate::sensors::Setup::of(&settings.all()["sensors"]);
         crate::sensors::set_up(setup);
         let asks = Rc::new(RefCell::new(Vec::new()));
         macro_rules! on {
@@ -1382,9 +1381,6 @@ impl Front {
         )
         .with_onboard(f.settings.get(&crate::cores::keyboard_setting("screen.onboard")).as_ref());
         f.give_built_ins();
-        if let Some(b) = before {
-            f.carry_sensors(&b);
-        }
         f.keyed = f
             .settings
             .get(&crate::cores::keyboard_setting("screen.keyed"))
@@ -1407,16 +1403,6 @@ impl Front {
         crate::jobs::rename_in_macros();
         f.screens_noted = f.screens.clone();
         f.screens_saved = f.screens.clone();
-        // (the weather Ectomatter kept itself before the Weather Feed plugin, the plugin's now)
-        if let Some(old) = f.settings.take("weather").filter(|_| f.settings.get("plugins.weather-feed").is_none()) {
-            let mut v = serde_json::json!({});
-            for (key, from) in [("place", &old["place"]), ("temperature", &old["units"]["temperature"]), ("wind", &old["units"]["wind"])] {
-                if !from.is_null() {
-                    v[key] = from.clone();
-                }
-            }
-            let _ = f.settings.set("plugins.weather-feed", v);
-        }
         f.hand_values(None);
         // the scene, as it was left on (the setting Home kept before there were scenes, taken in as it)
         if let Some(old) = f.settings.take("desk.light") {
@@ -2805,20 +2791,14 @@ impl Front {
         window
     }
 
-    /// The display's text from the file another program's frames are written to: the
-    /// keyboard will not read its display back, so the z10-lcd service writes each frame it
-    /// sends there; if nothing has written it for ten seconds, the panel is drawn unlit rather
-    /// than stale. (While Ectomatter's own player drives the screen, the picture follows each
-    /// frame as the player sends it instead: see [Front::screen_news].)
+    /// The display in the picture of the keyboard while Ectomatter's own player isn't
+    /// driving the screen: unlit, as nothing Ectomatter knows of is on it. (While the player
+    /// drives it, the picture follows each frame as the player sends it: see
+    /// [Front::screen_news].)
     fn poll_lcd(&mut self) {
-        if self.player_drives() {
-            return;
+        if !self.player_drives() {
+            self.show_lcd(false, &[]);
         }
-        let dir = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir);
-        let f = dir.join("z10-lcd/frame");
-        let fresh = std::fs::metadata(&f).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|a| a.as_secs() < 10);
-        let rows: Vec<String> = std::fs::read_to_string(&f).map(|s| s.split('\n').map(String::from).collect()).unwrap_or_default();
-        self.show_lcd(fresh, &rows);
     }
 
     /// Whether Ectomatter's own player is what the keyboard's screen shows now.
@@ -3067,9 +3047,7 @@ impl Front {
             Ctl::LibSpot => {
                 self.close_menu();
                 if let Some((plugin, action)) = self.games.spot_picked(index, &self.ui) {
-                    if self.hosted.launcher() == Some(plugin.as_str()) {
-                        self.launch_action(&action);
-                    }
+                    self.section_action(&plugin, &action);
                 }
                 self.refresh();
                 return;
@@ -4591,7 +4569,7 @@ impl Front {
                     self.screen_key(code);
                 }
             }
-            Some(j) => self.play_for(&format!("z10/{code}"), Some(j.write()), down),
+            Some(j) => self.play_for(&format!("keyboard/{code}"), Some(j.write()), down),
             None if down => self.screen_key(code),
             None => {}
         }
@@ -7152,9 +7130,10 @@ impl Front {
             Ok(r) => {
                 // (what the person typed in the plugin's settings: their own variables)
                 let own: Vec<String> = self.hosted.launcher().map(|p| [values(p), every_values(p)].iter().flat_map(|v| v.as_object().into_iter().flatten().filter_map(|(_, x)| x.as_object()).flat_map(|o| o.keys().cloned()).collect::<Vec<_>>()).collect()).unwrap_or_default();
-                let (r, left_out) = crate::launcher::checked_recipe(&r, &facts, &own);
+                let starts = self.hosted.launch_grant().cloned().unwrap_or_default();
+                let (r, left_out) = crate::launcher::checked_recipe(&r, &facts, &starts, &own);
                 if !left_out.is_empty() {
-                    eprintln!("ectomatter: how {} starts, left out as Ectomatter doesn't know them safe: {}", if every { "every game" } else { name.as_str() }, left_out.join(", "));
+                    eprintln!("ectomatter: how {} starts, left out as the plugin’s manifest doesn’t name them, or they run code: {}", if every { "every game" } else { name.as_str() }, left_out.join(", "));
                 }
                 Some(r)
             }
@@ -7331,7 +7310,7 @@ impl Front {
                 let id = id.clone();
                 self.run_pick = None;
                 if let Some(p) = chosen {
-                    self.in_prefix(&id, vec![p.to_string_lossy().into_owned()]);
+                    self.in_prefix(&id, true, vec![p.to_string_lossy().into_owned()]);
                 }
             }
         }
@@ -7352,13 +7331,13 @@ impl Front {
         news
     }
 
-    /// The Proton build a game starts with (its own, else Every game's, else
-    /// Steam's default), as installed.
+    /// The Proton build a game starts with: the one its recipe names (the
+    /// plugin that says how games start answers it), else Steam's default,
+    /// as installed.
     fn build_for(&self, id: &str) -> Option<crate::launcher::Build> {
         let k = self.known.as_ref()?;
-        let plugin = self.hosted.launcher()?;
-        let want = self.games.library.wanted_values(id, plugin)["version"].as_str().map(String::from).unwrap_or_else(|| k.default.clone());
-        k.builds.iter().find(|b| b.id == want).or_else(|| k.builds.iter().find(|b| b.id == k.default)).or_else(|| k.builds.first()).cloned()
+        let want = self.recipe_of(id).and_then(|r| r["proton"].as_str().map(std::path::PathBuf::from));
+        k.builds.iter().find(|b| want.as_ref() == Some(&b.path)).or_else(|| k.builds.iter().find(|b| b.id == k.default)).or_else(|| k.builds.first()).cloned()
     }
 
     /// A Steam game's number and library, for its prefix.
@@ -7368,59 +7347,61 @@ impl Front {
         Some((app, lib))
     }
 
-    /// A program run in a game's prefix with the game's Proton build (Wine's
-    /// configuration, Winetricks, or one the person chose).
-    fn in_prefix(&mut self, id: &str, what: Vec<String>) {
+    /// A program run for a game's prefix with the game's Proton build:
+    /// inside it (a Windows program), or a program of this computer's given
+    /// the prefix and the build's Wine (launcher::in_prefix).
+    fn in_prefix(&mut self, id: &str, inside: bool, what: Vec<String>) {
         let name = self.games.name(id, &self.front_apps);
         let (Some((app, lib)), Some(b), Some(root)) = (self.prefix_place(id), self.build_for(id), self.known.as_ref().map(|k| k.root.clone())) else {
             self.games.say(format!("Ectomatter can’t find {name}’s prefix or a Proton build for it."), true);
             return;
         };
-        if what.first().is_some_and(|w| w == "winetricks") && !crate::launcher::on_path("winetricks") {
-            self.games.say("Winetricks isn’t installed. Install it from your system’s software center, then try again.", true);
+        if let Some(p) = what.first().filter(|p| !inside && !crate::launcher::on_path(p)) {
+            self.games.say(format!("{p} isn’t installed. Install it from your system’s software center, then try again."), true);
             return;
         }
-        match crate::launcher::in_prefix(&root, &lib, app, &b.path, &what).spawn() {
+        match crate::launcher::in_prefix(&root, &lib, app, &b.path, inside, &what).spawn() {
             Ok(_) => self.games.say(format!("Opening it in {name}’s prefix, with {}.", b.name), false),
             Err(e) => self.games.say(format!("It didn’t open: {e}"), true),
         }
     }
 
-    /// One of the Game Configurator's actions on the open page.
-    fn launch_action(&mut self, action: &str) {
+    /// A button in a plugin's section on the open page, which does what it
+    /// says it does (`does`, docs/core-protocol.md, section 11): one of the
+    /// actions Ectomatter makes, on the page's game. A game's start and its
+    /// prefix are only a plugin's that uses `launch`, and a program run in
+    /// the prefix only one its manifest names among its `tools` (or one the
+    /// person picks). A disabled button, or one that says nothing Ectomatter
+    /// makes, does nothing.
+    fn section_action(&mut self, plugin: &str, action: &serde_json::Value) {
+        use crate::launcher::Does;
         let Some(id) = self.games.open.clone() else { return };
+        let Some(does) = self.hosted.uses_of(plugin).and_then(|u| Does::of(action, u)) else { return };
         let name = self.games.name(&id, &self.front_apps);
         let running = self.games.running.iter().any(|r| r.id == id);
-        match action {
-            "through" => {
+        match does {
+            Does::StartThrough => {
                 if let Some(app) = crate::games::steam_number(&id) {
                     self.start_through(vec![app]);
                 }
             }
-            "through-all" => {
+            Does::StartEveryThrough => {
                 let Some(k) = &self.known else { return };
                 let apps: Vec<u32> = self.games.library.steam.as_ref().map(|s| s.apps.iter().filter(|a| a.kind == crate::steam::Kind::Game && !k.through(a.id)).map(|a| a.id).collect()).unwrap_or_default();
                 self.start_through(apps);
             }
-            "open-prefix" => {
+            Does::OpenPrefix => {
                 if let Some((app, lib)) = self.prefix_place(&id) {
-                    let _ = std::process::Command::new("xdg-open").arg(crate::launcher::prefix_of(&lib, app)).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
+                    crate::picker::show_folder(&crate::launcher::prefix_of(&lib, app));
                 }
             }
-            "wine-configuration" => self.in_prefix(&id, vec!["winecfg".into()]),
-            "winetricks" => self.in_prefix(&id, vec!["winetricks".into()]),
-            "run-in-prefix" => {
-                if self.run_pick.is_none() {
-                    self.run_pick = Some((id.clone(), crate::picker::open_file(&format!("Choose a program to run in {name}’s prefix"), "Windows programs", &["*.exe", "*.msi", "*.bat"])));
-                }
-            }
-            "back-up-prefix" | "reset-prefix" => {
+            Does::BackUpPrefix | Does::ResetPrefix => {
                 if running {
                     self.games.say(format!("Quit {name} first: its prefix is in use."), true);
                     return;
                 }
                 let Some((app, lib)) = self.prefix_place(&id) else { return };
-                let reset = action == "reset-prefix";
+                let reset = does == Does::ResetPrefix;
                 let (tx, rx) = mpsc::channel();
                 self.games.say(if reset { format!("Backing up {name}’s prefix, then resetting it…") } else { format!("Backing up {name}’s prefix…") }, false);
                 let _ = std::thread::Builder::new().name("prefix".into()).spawn(move || {
@@ -7433,14 +7414,20 @@ impl Front {
                 });
                 self.jobs.push(rx);
             }
-            _ => {}
+            Does::RunInPrefix(None) => {
+                if self.run_pick.is_none() {
+                    self.run_pick = Some((id.clone(), crate::picker::open_file(&format!("Choose a program to run in {name}’s prefix"), "Windows programs", &["*.exe", "*.msi", "*.bat"])));
+                }
+            }
+            Does::RunInPrefix(Some(p)) => self.in_prefix(&id, true, vec![p]),
+            Does::RunWithPrefix(p) => self.in_prefix(&id, false, vec![p]),
         }
     }
 
     /// Games set to start through Ectomatter in Steam (each of `apps`, by
-    /// its Steam number): each one's Proton build and game-helper line
-    /// carried over into the Library first, then Steam closed, its settings
-    /// changed (the line taken out), and Steam opened again if it was open.
+    /// its Steam number): what the plugin that says how games start keeps for
+    /// each from how Steam started it, first (keep_through), then Steam
+    /// closed, its settings changed, and Steam opened again if it was open.
     /// Refused while a Steam game runs, which Steam closing would end.
     fn start_through(&mut self, apps: Vec<u32>) {
         if apps.is_empty() || self.steam_busy.as_ref().is_some_and(|b| b.load(std::sync::atomic::Ordering::Relaxed)) {
@@ -7451,12 +7438,15 @@ impl Front {
             self.games.say(format!("Quit {n} first: Steam has to close for this change."), true);
             return;
         }
-        let (Some(k), Some(plugin)) = (self.known.clone(), self.hosted.launcher().map(String::from)) else { return };
-        let lines = crate::launcher::launch_options(&k.root);
-        let mouse = self.mouse.profiles.as_ref().and_then(crate::launcher::game_profile);
+        let Some(k) = self.known.clone() else { return };
+        if self.hosted.launcher().is_none() {
+            return;
+        }
         let linux: Vec<u32> = self.games.library.steam.as_ref().map(|s| s.apps.iter().filter(|a| k.native(a.id, a.linux)).map(|a| a.id).collect()).unwrap_or_default();
-        let which: Vec<(u32, bool, bool)> = apps.iter().map(|a| (*a, linux.contains(a), true)).collect();
-        let switches = crate::launcher::carry_over(&mut self.games.library, &k, &which, &lines, mouse.as_deref(), &plugin);
+        for app in &apps {
+            self.keep_through(*app);
+        }
+        let switches: Vec<crate::launcher::Switch> = apps.iter().map(|a| crate::launcher::Switch { app: a.to_string(), through: if linux.contains(a) { crate::launcher::TOOL_LINUX } else { crate::launcher::TOOL } }).collect();
         let n = apps.len();
         let busy = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
         self.steam_busy = Some(busy.clone());
@@ -7489,6 +7479,32 @@ impl Front {
             busy.store(false, std::sync::atomic::Ordering::Relaxed);
         });
         self.jobs.push(rx);
+    }
+
+    /// What the plugin that says how games start keeps for a game about to
+    /// start through Ectomatter, put on the game's page where the page has
+    /// none of its own (game/through).
+    fn keep_through(&mut self, app: u32) {
+        let id = crate::games::steam_id(app);
+        let facts = self.launch_facts(&id);
+        let Some(plugin) = self.hosted.launcher().map(String::from) else { return };
+        if facts.is_null() {
+            return;
+        }
+        let own = self.games.library.plugin_values(&id, &plugin);
+        let every = self.games.library.plugin_values(crate::games::EVERY, &plugin);
+        let game = serde_json::json!({ "id": id, "name": self.games.name(&id, &self.front_apps), "app": app });
+        match self.hosted.through(&game, &own, &every, &facts) {
+            Some(Ok(keep)) => {
+                for (key, v) in keep.as_object().into_iter().flatten() {
+                    if self.games.library.plugin_values(&id, &plugin).get(key).is_none() {
+                        self.games.library.set_plugin_value(&id, &plugin, key, Some(v.clone()));
+                    }
+                }
+            }
+            Some(Err(e)) => eprintln!("ectomatter: what {} keeps as it starts through Ectomatter: {e}", game["name"].as_str().unwrap_or("")),
+            None => {}
+        }
     }
 
     /// What the put-back thread said: a command run (kept with it), what was
@@ -8152,7 +8168,8 @@ impl Front {
             self.sensors_seen = Some((Instant::now(), cat, values));
         }
         let (_, cat, values) = self.sensors_seen.clone().unwrap();
-        crate::ecto_settings::Sensors { cat, setup: crate::sensors::setup(), values, tab: self.sensor_tab, open: self.sensor_open.clone(), renaming: self.renaming.clone() }
+        let from = self.hosted.readings().with_catalog().and_then(|id| self.hosted.name_of(&id)).unwrap_or_else(|| "Sensors".into());
+        crate::ecto_settings::Sensors { from, cat, setup: crate::sensors::setup(), values, tab: self.sensor_tab, open: self.sensor_open.clone(), renaming: self.renaming.clone() }
     }
 
     /// The sensors' choices changed: kept in the settings, and gone by at once by every
@@ -8212,40 +8229,6 @@ impl Front {
         self.ui.set_confirm_do("Uncheck".into());
         self.unchecking = Some(id.to_string());
         self.ui.set_confirm_open(true);
-    }
-
-    /// The Sensors card's choices carried over into the sensors checked: the sensor and the
-    /// clock it chose are checked, its card is the main card, and a layout showing the CPU
-    /// temperature or clock from other than the usual sensor shows that sensor, as it did.
-    fn carry_sensors(&mut self, b: &crate::sensors::Before) {
-        use crate::lcd_page::{Kind, Source};
-        // (the sensors as the Sensor Feed lists them)
-        let cat = self.reader.get_or_insert_with(|| crate::lcd_stats::Stats::of(self.hosted.readings(), "page")).catalog().clone();
-        if cat.devices.is_empty() {
-            return;
-        }
-        let mut setup = crate::sensors::setup();
-        let shows = setup.carry(b, &cat);
-        let mut moved = false;
-        for page in &mut self.screens.library {
-            for p in &mut page.pieces {
-                if let Kind::Data(s, _) | Kind::Bar(s) = &mut p.kind {
-                    if let Some((_, id)) = shows.iter().find(|(from, _)| from == s) {
-                        *s = Source::Sensor(crate::sensors::number(id));
-                        moved = true;
-                    }
-                }
-            }
-        }
-        if moved {
-            if let Err(e) = self.settings.set(&crate::cores::keyboard_setting("screen.pages"), self.screens.to_json()["pages"].clone()) {
-                eprintln!("ectomatter: the screen layouts were not saved with their sensors: {e}");
-            }
-        }
-        if let Err(e) = self.settings.set("sensors", setup.to_json()) {
-            eprintln!("ectomatter: the sensors were not saved: {e}");
-        }
-        crate::sensors::set_up(setup);
     }
 
     /// Layout `k`'s Delete chosen from its card's menu: first the question, over the window,
@@ -9901,7 +9884,6 @@ impl Front {
         use crate::lcd_player::State;
         match (self.lcd.state, self.lcd.sequence) {
             (_, _) if !self.controlled => "Ectomatter leaves this keyboard to other programs.".into(),
-            (State::Other, _) => "Another program is using the screen. Ectomatter plays it once that stops.".into(),
             (State::Missing, _) => "Ectomatter can’t reach the keyboard’s screen.".into(),
             // (the strip shows what plays, paused or not, and a script's screen)
             _ => String::new(),
@@ -10062,7 +10044,6 @@ impl Front {
             _ if !self.controlled => 4,
             State::Playing => 0,
             State::Paused => 1,
-            State::Other => 2,
             State::Missing => 3,
         };
         self.ui.set_lcd_state(state);

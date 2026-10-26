@@ -64,8 +64,7 @@ impl Change {
 
     fn of(v: &Value) -> Option<Change> {
         Some(Change {
-            // (one recorded under a plugin's old id, by the one it has now)
-            plugin: crate::packages::renamed_id(v["plugin"].as_str()?).to_string(),
+            plugin: v["plugin"].as_str()?.to_string(),
             what: v["what"].clone(),
             label: v["label"].as_str().unwrap_or("").to_string(),
             words: v["words"].as_str().unwrap_or("").to_string(),
@@ -518,13 +517,6 @@ mod tests {
             }
         }
         out
-    }
-
-    /// A change recorded under a plugin's old id is its new one's, to put back.
-    #[test]
-    fn a_change_recorded_under_an_old_name_is_kept() {
-        let c = Change::of(&json!({ "plugin": "monitors", "what": { "monitor": "side", "set": "brightness", "to": 0 }, "label": "BRIGHTNESS", "words": "the side’s brightness", "before": 3500, "made": true })).unwrap();
-        assert_eq!(c.plugin, "monitor-switcher");
     }
 
     /// A game's start is said once its changes are made, for a game started

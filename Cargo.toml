@@ -5,7 +5,7 @@ members = ["crates/evga-z10", "crates/ectomatter-tokens", "crates/ectomatter-wea
 [workspace.package]
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/OMGrant/Ectomatter"
+repository = "https://github.com/Ectonomic/Ectomatter"
 
 # The HDR keyboard is drawn on the CPU each time its light changes, and the
 # pieces it is drawn from are rendered with resvg; unoptimized, both are too

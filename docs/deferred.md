@@ -91,9 +91,6 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 
 ## Stage 3: plugins on equal footing
 
-- A plugin reading's source says only "A plugin", not which (`lcd_page.rs`,
-  `Source::from`): the screen's registry of plugin readings keeps the
-  plugin's id as its name (`lcd_stats.rs`, `plugin_readings`).
 - The window's own thread still calls plugins for a page's sections, a
   game's changes and its start (`hosted.rs` `sections`, `changes`,
   `launch`), each waiting up to three seconds (`WINDOW_WAITS`), and starts a
@@ -106,23 +103,35 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 - Review looks up the latest release again: what it shows (and what Add
   then puts in place, held to the manifest shown) can be a newer version
   than the one the row said was waiting (`front.rs`, `Ctl::PackageReview`).
-- A game's start may set only the variables Ectomatter names
-  (`launcher.rs`, `VARIABLES`), each with what its value may be written with;
-  a plugin needing another waits for Ectomatter to name it. MangoHud's
-  options are checked against a list of the ones that run, read or write
-  something (`plain_as`, `Overlay`), not against the options it has; the
-  person's own variables against a list of names that load code.
-- Past 65,535 different plugin readings in one run, a block's reading has
-  no number (`lcd_page.rs`, `NO_READING`): it shows nothing, and the layout
-  saved after loses which reading it was.
-- Ectomatter's other pages (Settings' Sensor Feed box, the screen editor)
-  ask a plugin for every reading it lists while they're open; only the
-  keyboard's screen asks for just those its pages show (`lcd_stats.rs`,
-  `showing`).
-- Review opens the whole list of what the newer version can do, not only
-  what's new (`front.rs`, `Ctl::PackageReview`); the Review link was checked
-  by a test of the row (`ecto_settings.rs`), not seen in a render (an
-  offscreen run reads no record of updates).
+- A game's start holds what the plugin's manifest names (`launch.wrap`,
+  `launch.env`); the floor under it is two lists Ectomatter keeps, of
+  programs that run what they're given (`launcher.rs`, `runs_code`) and of
+  variables that load code (`loads_code`), and one rule for list values (no
+  setting naming a command, a file, a folder or a log: `plain_as`). Neither
+  list can name every such program or variable; the person sees the
+  programs by name before adding the plugin.
+- Found by the audit of 2026-10-26 (evening), the same kind as the launch
+  lists, and not fixed yet (the rest of what it found is fixed: a plugin's
+  buttons say what they do, game-helper's import is gone, the Proton builds
+  aren't sorted for the plugin, the screen finds its readings by part and
+  kind, the variable form's words are the plugin's, the plugins' old ids
+  are gone with their migrations, the held key isn't named for the Z10, and
+  the name checks read every package's manifest):
+  - game-helper's session note is read, for its launch steps on the screen
+    (`lcd_player.rs`, `Core::new` with `z10-lcd/session`; game-helper's
+    `lcd-announce.sh` still writes it when game-helper runs a game, and
+    game-helper is still installed on Grant's computer).
+  - The keyboard's two sliders are the Z10's: their names (`front.rs`,
+    `"dimmer"`, `"volume"`), what each can control (`display.rs`,
+    `BIND_CHOICES`, `drives`), and the firmware features that free them or
+    hold the backlight (`front.rs`, `tell_modes`, `hold_backlight`,
+    `release_sliders`: `volume.quiet`, `dimmer.keep`, `dimmer.set`;
+    `keyboard.rs`, `reads_sliders`: `sliders.read`).
+  - The Z10's own screen readings and onboard pieces (`lcd_page.rs`,
+    `Source::ProfileNumber`, `GameMode`, `KeyRollover`, `onboard_can`, the
+    defaults "PC MODE" and "6 KEY" in `render_onboard`; the copy
+    "Ectomatter’s firmware build 5 or later" in `Source::from`), and the
+    onboard layout's firmware feature (`front.rs`, `screen.onboard`).
 
 ## Stage 4: maintainable
 
@@ -143,11 +152,12 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 ## Stage 1: installable on Linux
 
 - No install layout, release build of the cores, udev rule or desktop entry.
-- The lab saves into the source folder (`lab.rs:2181`); Grant's uncommitted
-  tuning (`cores/evga-z10/device.json`, `cores/steelseries-sensei-310/light.json`)
-  belongs in his data folder over what the core ships.
+- The lab saves into the source folder (`lab.rs:2181`), over what the core
+  ships.
 - A damaged settings file is read as empty and replaced (`settings.rs:22`).
   Safe writes are copied in nine places; no saved file has a version.
-- License gaps: Slint's attribution, the fonts' licenses, the Z10's screen
-  font read from EVGA's firmware.
-- The GitHub repository the app checks for updates doesn't exist yet.
+- License gaps: Slint's attribution, the fonts' licenses.
+- The GitHub repositories exist in the Ectonomic organization
+  (Ectonomic/Ectomatter and one per package, `ectomatter-<package id>`,
+  private, empty since 2026-10-26); nothing is in them, and no package's
+  manifest names its repository yet.

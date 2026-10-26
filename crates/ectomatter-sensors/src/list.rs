@@ -267,7 +267,7 @@ impl Catalog {
     /// The processor's own temperature that the ready-made layouts show: Tctl, or on Intel
     /// Package id 0, else its first.
     pub fn cpu_temp(&self) -> Option<&Sensor> {
-        self.device("cpu")?.sensors.iter().find(|s| s.what == What::Temperature && s.usual)
+        self.devices.iter().find(|d| d.part == Part::Processor)?.sensors.iter().find(|s| s.what == What::Temperature && s.usual)
     }
 
     /// The cards, and the main card by the rule: the card of its own with the most video

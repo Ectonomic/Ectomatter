@@ -26,6 +26,11 @@ pub fn open_file(title: &str, kind: &str, patterns: &[&str]) -> mpsc::Receiver<O
     rx
 }
 
+/// A folder shown in the desktop's file manager.
+pub fn show_folder(folder: &std::path::Path) {
+    let _ = std::process::Command::new("xdg-open").arg(folder).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
+}
+
 fn ask(title: &str, kind: &str, patterns: &[String]) -> zbus::Result<Option<PathBuf>> {
     let conn = zbus::blocking::Connection::session()?;
     // the request's path is known before asking, so its answer cannot be missed

@@ -1,20 +1,17 @@
-//! Ectomatter playing the Z10's screen, as the z10-lcd service did: the Stats
+//! Ectomatter playing the keyboard's screen, as the z10-lcd service did: the Stats
 //! page once a second, and the launch and exit sequences breaking in when a
 //! game starts or quits, as the Screen tab's Game launch says (Ectomatter sees
 //! a game start and quit itself, games.rs; game-helper's note, while it runs,
 //! names the steps it takes and how far it has got). The loop is z10lcd.py's main loop, carried over
 //! step for step (see [Core::tick]), so the keyboard shows the same frames at
 //! the same moments; what Ectomatter adds sits around it: a pause, whether
-//! launches break in, standing aside while the old service still runs or while
-//! the Screen tab shows the keyboard's own status screen, and handing the screen
-//! back to the keyboard's own screens on quitting.
+//! launches break in, standing aside while the Screen tab shows the keyboard's
+//! own status screen, and handing the screen back to the keyboard's own screens
+//! on quitting.
 //!
 //! Each frame goes to the keyboard through its core (`displays/show`), which
 //! sends it between its other exchanges with the keyboard, so a frame never
-//! meets the editor's own on the way. Each is also written to
-//! `$XDG_RUNTIME_DIR/z10-lcd/frame`, as the service wrote it: the keyboard
-//! will not read its screen back, so that file is how anything else knows
-//! what it shows.
+//! meets the editor's own on the way.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -96,24 +93,6 @@ impl Sink for CoreSink {
         let r = if cmd == 0 { core.call("displays/hand-back", &serde_json::json!({ "control": control })) } else { core.call("displays/show", &serde_json::json!({ "control": control, "rows": rows })) };
         self.failed = r.is_err().then(Instant::now);
         r.map(|_| ()).map_err(|_| ())
-    }
-}
-
-/// Write the frame just sent where other programs read it, a line for each of the
-/// screen's rows, each as wide as the screen: whole, then moved into place, so a
-/// reader never catches it half written. A courtesy: a failure never stops the screen.
-fn publish(path: &Path, rows: &[String]) {
-    let (cols, n) = crate::lcd_page::size();
-    let text: Vec<String> = (0..n).map(|i| {
-        let r: String = rows.get(i).map_or("", |s| s.as_str()).chars().take(cols).collect();
-        format!("{r:<cols$}")
-    }).collect();
-    let tmp = path.with_extension("new");
-    if let Some(d) = path.parent() {
-        let _ = std::fs::create_dir_all(d);
-    }
-    if std::fs::write(&tmp, text.join("\n")).is_ok() {
-        let _ = std::fs::rename(&tmp, path);
     }
 }
 
@@ -335,8 +314,6 @@ pub struct News {
 pub enum State {
     Playing,
     Paused,
-    /// the z10-lcd service is drawing on the screen: Ectomatter waits for it to stop
-    Other,
     /// the keyboard's screen isn't there
     Missing,
 }
@@ -346,7 +323,6 @@ pub struct Core {
     pub sink: Box<dyn Sink>,
     pub stats: Ask<Vec<String>>,
     pub event: PathBuf,
-    pub frame_file: Option<PathBuf>,
     pub trace: Option<PathBuf>,
     /// the seed each new sequence's random choices start from
     pub seeds: Box<dyn FnMut() -> u64 + Send>,
@@ -410,7 +386,6 @@ impl Core {
             sink,
             stats,
             event,
-            frame_file: None,
             trace: None,
             seeds,
             session: Session::new(),
@@ -531,9 +506,6 @@ impl Core {
             return;
         }
         if self.sink.send(&rows, 1).is_ok() {
-            if let Some(f) = &self.frame_file {
-                publish(f, &rows);
-            }
             if let Some(t) = &self.trace {
                 use std::io::Write;
                 if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(t) {
@@ -822,24 +794,9 @@ impl Core {
         let mut done = false;
         if self.sink.send(&blank, 1).is_ok() {
             done = !own || self.sink.send(&blank, 0).is_ok();
-            if let Some(f) = &self.frame_file {
-                publish(f, &blank);
-            }
         }
         done
     }
-}
-
-/// Whether the z10-lcd service (z10lcd.py) is running: then it draws on the
-/// screen, and Ectomatter stands aside rather than fight it frame for frame.
-fn other_running() -> bool {
-    let me = std::process::id().to_string();
-    let Ok(dir) = std::fs::read_dir("/proc") else { return false };
-    dir.flatten().any(|e| {
-        let n = e.file_name();
-        let n = n.to_string_lossy();
-        n.bytes().all(|b| b.is_ascii_digit()) && n != me && std::fs::read(e.path().join("cmdline")).is_ok_and(|c| c.split(|&b| b == 0).any(|a| a.ends_with(b"z10lcd.py")))
-    })
 }
 
 /// The player, on a thread of its own.
@@ -922,14 +879,12 @@ impl Player {
             core.own = own;
             let drawing = read.clone();
             core.draw = Some(Arc::new(move |p: &crate::lcd_page::Page, t: f64| crate::lcd_page::render_at(p, &drawing(), t)));
-            core.frame_file = Some(runtime_dir().join("z10-lcd/frame"));
             core.trace = std::env::var_os("ECTOMATTER_LCD_TRACE").map(PathBuf::from);
             core.announce = announce;
             core.paused = paused;
             core.current = current;
             core.pace = pace;
             let start = Instant::now();
-            let (mut other, mut other_at) = (other_running(), Instant::now());
             let mut told: Option<(State, Option<&'static str>, usize, bool, u64)> = None;
             loop {
                 // what Ectomatter asks
@@ -966,26 +921,16 @@ impl Player {
                             }
                         }
                         Control::Quit(own, done) => {
-                            if !other {
-                                let done = core.hand_back(own);
-                                eprintln!("ectomatter: the screen {}", if !done { "could not be handed back" } else if own { "handed back to the keyboard's own screens" } else { "left blank" });
-                            }
+                            let done_back = core.hand_back(own);
+                            eprintln!("ectomatter: the screen {}", if !done_back { "could not be handed back" } else if own { "handed back to the keyboard's own screens" } else { "left blank" });
                             let _ = done.send(());
                             return;
                         }
                     }
                 }
-                if other_at.elapsed() > Duration::from_secs(2) {
-                    other_at = Instant::now();
-                    let was = other;
-                    other = other_running();
-                    if was && !other {
-                        core.forget_shown();
-                    }
-                }
-                let again = if other { true } else { core.tick(start.elapsed().as_secs_f64()) };
-                let found = other || core.sink.find();
-                let state = if other { State::Other } else if !found { State::Missing } else if core.paused && !core.playing_sequence() { State::Paused } else { State::Playing };
+                let again = core.tick(start.elapsed().as_secs_f64());
+                let found = core.sink.find();
+                let state = if !found { State::Missing } else if core.paused && !core.playing_sequence() { State::Paused } else { State::Playing };
                 let (sequence, page) = (core.sequence(), core.page());
                 let (turning, elapsed, length) = core.standing(start.elapsed().as_secs_f64());
                 // (said again as the page comes on after coming in, so the time it shows from is right)

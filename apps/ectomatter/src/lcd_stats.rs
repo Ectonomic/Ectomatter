@@ -19,7 +19,7 @@ use std::time::Instant;
 
 #[cfg(test)]
 use ectomatter_sensors::list::Nvidia;
-use ectomatter_sensors::list::{Catalog, Sensor, Val};
+use ectomatter_sensors::list::{Catalog, Device, Part, Sensor, Val, What};
 
 /// One reading of the main card: its temperature, load, core clock, and its video memory
 /// used and in all (GiB), each where its driver reports it and it is checked.
@@ -140,24 +140,28 @@ impl Stats {
         let checked = setup.checked_in(&cat);
         let want: Vec<&Sensor> = cat.devices.iter().flat_map(|d| d.sensors.iter()).filter(|s| checked.contains(&s.id)).collect();
         let v = self.values(&want);
-        let one = |id: &str| v.get(id).map(|x| x.one());
-        let cpu_temp = cat.cpu_temp().and_then(|s| one(&s.id));
-        let ram = match v.get("memory/used") {
-            Some(Val::Of(u, t)) => Some((*u, *t)),
+        // (each block's reading found as the catalog marks it, by its part and its kind: the
+        // part's usual one of that kind, whatever its sensor plugin names it)
+        let usual = |d: Option<&Device>, what: What| d.and_then(|d| d.sensors.iter().find(|s| s.what == what && s.usual)).and_then(|s| v.get(&s.id).copied());
+        let part = |p: Part| cat.devices.iter().find(|d| d.part == p);
+        let cpu_temp = usual(part(Part::Processor), What::Temperature).map(|x| x.one());
+        let cpu_load = usual(part(Part::Processor), What::Load).map(|x| x.one());
+        let cpu_ghz = usual(part(Part::Processor), What::Clock).map(|x| x.one() / 1000.0);
+        let ram = match usual(part(Part::Memory), What::InUse) {
+            Some(Val::Of(u, t)) => Some((u, t)),
             _ => None,
         };
         let gpu = setup.main_card(&cat).map(|d| {
-            let at = |k: &str| v.get(&format!("{}/{k}", d.key)).copied();
-            let n = |k: &str| at(k).map(|x| x.one().round().max(0.0) as u32);
-            let vram = match at("video-memory") {
+            let n = |w: What| usual(Some(d), w).map(|x| x.one().round().max(0.0) as u32);
+            let vram = match usual(Some(d), What::InUse) {
                 Some(Val::Of(u, t)) if t > 0.0 => Some((u, t)),
                 _ => None,
             };
-            Gpu { temp: n("temperature"), load: n("load"), clock: n("clock"), vram }
+            Gpu { temp: n(What::Temperature), load: n(What::Load), clock: n(What::Clock), vram }
         });
         let sensors = want.iter().filter_map(|s| Some((crate::sensors::number(&s.id), (s.what, *v.get(&s.id)?)))).collect();
         let plugins = self.plugin_readings();
-        crate::lcd_page::Readings { cpu_temp, cpu_load: one("cpu/load"), cpu_ghz: one("cpu/clock/average").map(|mhz| mhz / 1000.0), ram, gpu, sensors, plugins, ..Default::default() }
+        crate::lcd_page::Readings { cpu_temp, cpu_load, cpu_ghz, ram, gpu, sensors, plugins, ..Default::default() }
     }
 
     /// Every reading the plugins list (but the sensors' catalog), each as it
@@ -173,13 +177,14 @@ impl Stats {
         let mut out = std::collections::HashMap::new();
         let mut by: std::collections::BTreeMap<String, Vec<String>> = Default::default();
         for (plugin, listed) in r.all() {
+            let name = r.of(&plugin).map(|t| t.name).filter(|n| !n.is_empty()).unwrap_or_else(|| plugin.clone());
             let Some(id) = listed["id"].as_str() else { continue };
             // (the weather is the screen's own blocks')
             if matches!(listed["kind"].as_str(), Some(crate::lcd_page::OUTSIDE_TEMPERATURE | crate::lcd_page::SKY)) {
                 continue;
             }
             let word = |k: &str| listed[k].as_str().unwrap_or("").to_string();
-            let n = crate::lcd_page::reading_listed(crate::lcd_page::PluginReading { plugin: plugin.clone(), plugin_name: plugin.clone(), id: id.into(), label: listed["label"].as_str().unwrap_or(id).into(), unit: word("unit") });
+            let n = crate::lcd_page::reading_listed(crate::lcd_page::PluginReading { plugin: plugin.clone(), plugin_name: name, id: id.into(), label: listed["label"].as_str().unwrap_or(id).into(), unit: word("unit") });
             let wanted = by.entry(plugin.clone()).or_default();
             if self.shows.as_ref().is_some_and(|s| !s.contains(&n)) {
                 continue;

@@ -69,13 +69,6 @@ pub fn set(keys: &mut Vec<(String, Node)>, key: &str, value: Node) {
     }
 }
 
-/// A key taken out of a group; whether it was there.
-pub fn remove(keys: &mut Vec<(String, Node)>, key: &str) -> bool {
-    let before = keys.len();
-    keys.retain(|(n, _)| !n.eq_ignore_ascii_case(key));
-    keys.len() != before
-}
-
 /// A file read: its keys at the top, in order.
 pub fn parse(text: &str) -> Result<Node, String> {
     let mut toks: Vec<Tok> = Vec::new();
@@ -210,17 +203,16 @@ mod tests {
         assert_eq!(lo, Some("PROTON_DLSS_UPGRADE=\"1\" game-helper -b -- %command%"));
     }
 
-    /// A game's Compatibility setting added where Steam keeps them, its
-    /// launch options taken out, everything else where it was.
+    /// A game's Compatibility setting added where Steam keeps them,
+    /// everything else where it was.
     #[test]
     fn a_games_settings_change_in_place() {
         let mut n = parse(CONFIG).unwrap();
         let map = n.group_at(&["InstallConfigStore", "Software", "Valve", "Steam", "CompatToolMapping"]);
         set(map, "1808500", Node::Keys(vec![("name".into(), Node::Words("ectomatter".into())), ("config".into(), Node::Words("".into())), ("priority".into(), Node::Words("250".into()))]));
-        assert!(remove(n.group_at(&["InstallConfigStore", "Software", "Valve", "Steam"]), "LaunchOptions"));
         let out = write(&n);
         assert!(out.contains("\t\t\t\t\t\"1808500\"\n\t\t\t\t\t{\n\t\t\t\t\t\t\"name\"\t\t\"ectomatter\"\n"), "{out}");
-        assert!(!out.contains("LaunchOptions"));
+        assert!(out.contains("LaunchOptions"), "the rest where it was");
         assert_eq!(parse(&out).unwrap().at(&["InstallConfigStore", "Software", "Valve", "Steam", "CompatToolMapping", "0", "name"]).and_then(Node::words), Some("Proton-GE Latest"));
     }
 

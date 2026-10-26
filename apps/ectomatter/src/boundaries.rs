@@ -10,21 +10,21 @@
 //! beside the code they try.
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::path::{Path, PathBuf};
 
-    fn repo() -> PathBuf {
+    pub(crate) fn repo() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
     }
 
-    fn read(rel: &str) -> String {
+    pub(crate) fn read(rel: &str) -> String {
         std::fs::read_to_string(repo().join(rel)).unwrap_or_else(|e| panic!("{rel}: {e}"))
     }
 
     /// A Rust file's code, each line with its number: its comments out, and
     /// every item under `#[cfg(test)]` left out (found by reading the file
     /// as Rust).
-    fn code(rel: &str) -> Vec<(usize, String)> {
+    pub(crate) fn code(rel: &str) -> Vec<(usize, String)> {
         let text = read(rel);
         let file = syn::parse_file(&text).unwrap_or_else(|e| panic!("{rel}: {e}"));
         let mut tests = Vec::new();
@@ -87,9 +87,13 @@ mod tests {
         }
     }
 
-    fn rust_files() -> Vec<String> {
+    /// The app's own Rust: the window's, the launcher's, and the crates it
+    /// builds in that are no package's (the cores' and plugins' shared
+    /// crates, crates/ectomatter-sensors and crates/ectomatter-weather, and
+    /// the Z10's driver are theirs).
+    pub(crate) fn rust_files() -> Vec<String> {
         let mut out = Vec::new();
-        let mut dirs = vec![repo().join("apps/ectomatter/src")];
+        let mut dirs: Vec<PathBuf> = ["apps/ectomatter/src", "apps/ectomatter-launch/src", "crates/ectomatter-draw/src", "crates/ectomatter-tokens/src", "crates/ectomatter-protocol/src"].iter().map(|d| repo().join(d)).collect();
         while let Some(d) = dirs.pop() {
             for e in std::fs::read_dir(&d).unwrap().flatten() {
                 let p = e.path();
@@ -104,7 +108,31 @@ mod tests {
         out
     }
 
-    fn manifests() -> Vec<(String, serde_json::Value)> {
+    /// The window's Slint files, each line with its number, comments out.
+    pub(crate) fn ui_code() -> Vec<(String, usize, String)> {
+        let mut out = Vec::new();
+        let mut dirs = vec![repo().join("apps/ectomatter/ui")];
+        while let Some(d) = dirs.pop() {
+            for e in std::fs::read_dir(&d).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    dirs.push(p);
+                } else if p.extension().is_some_and(|x| x == "slint") {
+                    let rel = p.strip_prefix(repo()).unwrap().to_string_lossy().into_owned();
+                    for (i, line) in std::fs::read_to_string(&p).unwrap().lines().enumerate() {
+                        let line = line.split("//").next().unwrap_or("");
+                        if !line.trim().is_empty() {
+                            out.push((rel.clone(), i + 1, line.to_string()));
+                        }
+                    }
+                }
+            }
+        }
+        out.sort();
+        out
+    }
+
+    pub(crate) fn manifests() -> Vec<(String, serde_json::Value)> {
         let mut out = Vec::new();
         for folder in ["cores", "plugins"] {
             for e in std::fs::read_dir(repo().join(folder)).unwrap().flatten() {
@@ -119,7 +147,7 @@ mod tests {
         out
     }
 
-    fn fail_on(found: Vec<String>, what: &str) {
+    pub(crate) fn fail_on(found: Vec<String>, what: &str) {
         assert!(found.is_empty(), "{what}:\n  {}", found.join("\n  "));
     }
 
@@ -153,11 +181,9 @@ mod tests {
                 }
             }
         }
-        let ui = read("apps/ectomatter/ui/app.slint");
-        for (i, line) in ui.lines().enumerate() {
-            let line = line.split("//").next().unwrap_or("");
+        for (f, n, line) in ui_code() {
             if let Some(name) = names.iter().find(|x| line.contains(*x)) {
-                found.push(format!("apps/ectomatter/ui/app.slint:{} {name}", i + 1));
+                found.push(format!("{f}:{n} {name}"));
             }
         }
         fail_on(found, "a device named in the app");
@@ -191,27 +217,65 @@ mod tests {
     }
 
     /// docs/core-protocol.md, section 11: plugins are on equal footing; none
-    /// is reached by its name, so a plugin of anyone's does what the ones
-    /// Ectomatter comes with do. (A plugin's old name is read once and moved
-    /// on: packages.rs, RENAMED.)
+    /// is reached or named by the app, so a plugin of anyone's does what the
+    /// ones Ectomatter comes with do. Each plugin's id and name, from its
+    /// manifest, found anywhere in the app's code or its window's (inside a
+    /// longer string too: "plugins.weather-feed" is Weather Feed's).
     #[test]
     fn no_plugin_is_reached_by_its_name() {
-        let names = ["\"weather-feed\"", "\"sensor-feed\"", "\"openrgb-link\"", "\"game-configurator\"", "\"monitor-switcher\""];
+        let mut names: Vec<String> = Vec::new();
+        for (folder, m) in manifests() {
+            if folder.starts_with("plugins/") {
+                names.extend(["id", "name"].iter().filter_map(|k| m[*k].as_str().map(String::from)));
+            }
+        }
+        assert!(names.len() >= 10, "{names:?}");
         let mut found = Vec::new();
         for f in rust_files() {
-            if f.ends_with("old_name.rs") || f.ends_with("boundaries.rs") {
+            if f.ends_with("boundaries.rs") {
                 continue;
             }
             for (n, line) in code(&f) {
-                if f.ends_with("packages.rs") && line.trim_start().starts_with("(\"") {
-                    continue;
-                }
-                if let Some(name) = names.iter().find(|x| line.contains(*x)) {
+                if let Some(name) = names.iter().find(|x| line.contains(x.as_str())) {
                     found.push(format!("{f}:{n} {name}"));
                 }
             }
         }
-        fail_on(found, "a plugin reached by its name");
+        for (f, n, line) in ui_code() {
+            if let Some(name) = names.iter().find(|x| line.contains(x.as_str())) {
+                found.push(format!("{f}:{n} {name}"));
+            }
+        }
+        fail_on(found, "a plugin named in the app");
+    }
+
+    /// docs/core-protocol.md, section 11, A game's start: a plugin names the
+    /// programs its games run through and the variables it sets in its own
+    /// manifest, so none of them is written into the app, and a plugin of
+    /// anyone's gets its own start without Ectomatter changing.
+    #[test]
+    fn no_plugins_start_is_written_into_the_app() {
+        let mut names: Vec<String> = Vec::new();
+        for (_, m) in manifests() {
+            for u in m["uses"].as_array().into_iter().flatten() {
+                let l = &u["launch"];
+                names.extend(l["wrap"].as_object().into_iter().flatten().map(|(p, _)| format!("\"{p}\"")));
+                names.extend(l["env"].as_object().into_iter().flatten().map(|(k, _)| format!("\"{k}\"")));
+            }
+        }
+        assert!(names.len() > 20, "the Game Configurator's own start is in its manifest");
+        let mut found = Vec::new();
+        for f in rust_files() {
+            if f.ends_with("boundaries.rs") {
+                continue;
+            }
+            for (n, line) in code(&f) {
+                if let Some(name) = names.iter().find(|x| line.contains(x.as_str())) {
+                    found.push(format!("{f}:{n} {name}"));
+                }
+            }
+        }
+        fail_on(found, "a plugin's program or variable written into the app");
     }
 
     /// Ectomatter installed on a computer without its source finds its cores

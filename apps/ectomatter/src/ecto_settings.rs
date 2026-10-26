@@ -28,6 +28,8 @@ const CTRL: f32 = crate::tokens::size::LABEL + crate::tokens::space::PAD;
 /// sensor being renamed with what is typed so far.
 #[derive(Clone)]
 pub struct Sensors {
+    /// the name of the plugin that lists them, as its manifest gives it
+    pub from: String,
     pub cat: Catalog,
     pub setup: crate::sensors::Setup,
     pub values: HashMap<String, Val>,
@@ -180,7 +182,7 @@ struct Row<'a> {
 /// sensor a checkbox with its name, its driver's name and its reading, three to a line; long
 /// runs of like readings folded into one line that opens; and at its foot what checking does.
 fn sensors_box(f: &mut Form, v: &Sensors, map: &mut SensorMap) {
-    f.heading("Sensor Feed", "");
+    f.heading(&v.from, "");
     map.top = f.y - line::NOTE - space::LABEL;
     let (x0, w0) = (f.x, f.w);
     let parts = v.cat.parts();

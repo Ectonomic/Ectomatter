@@ -191,7 +191,19 @@ pub fn can_words(m: &Value) -> Vec<String> {
         out.push("Reads NVIDIA graphics cards through NVIDIA’s driver.".into());
     }
     if uses.launch {
-        out.push("Changes how games start, and runs Wine’s tools.".into());
+        out.push("Changes how games start.".into());
+        let programs: Vec<String> = uses.starts.wrappers.iter().map(|w| w.program.clone()).collect();
+        if !programs.is_empty() {
+            out.push(format!("Runs games through {}.", joined(&programs)));
+        }
+        if !uses.starts.tools.is_empty() {
+            out.push(format!("Runs {} in a game’s prefix.", joined(&uses.starts.tools)));
+        }
+        match uses.starts.variables.len() {
+            0 => {}
+            1 => out.push("Sets one environment variable for each game.".into()),
+            n => out.push(format!("Sets {n} environment variables for each game.")),
+        }
     }
     for o in &uses.other {
         out.push(match o.as_str() {
@@ -318,47 +330,13 @@ pub fn all_in(builtin: &Path, added: &Path) -> Vec<Package> {
     out
 }
 
-/// The plugins' old ids, each with the one it has now (Monitors was Monitor
-/// Configurator before it), for everything kept under a plugin's id: its
-/// folder, the Library's choices, Settings, the record of changes to put back.
-pub const RENAMED: [(&str, &str); 5] = [
-    ("monitor-configurator", "monitor-switcher"),
-    ("monitors", "monitor-switcher"),
-    ("openrgb", "openrgb-link"),
-    ("sensors", "sensor-feed"),
-    ("weather", "weather-feed"),
-];
-
-/// A plugin's id as it is now, for one kept under an old one.
-pub fn renamed_id(id: &str) -> &str {
-    RENAMED.iter().find(|(old, _)| *old == id).map_or(id, |(_, new)| new)
-}
-
-/// Each plugin's settings kept under an id it had before (RENAMED), under
-/// the one it has now: its own values and its switch alike.
-pub fn rename_settings(settings: &crate::settings::Settings) {
-    for (old, new) in RENAMED {
-        if let Some(kept) = settings.take(&format!("plugins.{old}")).filter(|_| settings.get(&format!("plugins.{new}")).is_none()) {
-            let _ = settings.set(&format!("plugins.{new}"), kept);
-        }
-    }
-}
-
-/// Where each package's own files were kept before cores and plugins were
-/// kept apart (every one in the data folder's cores/, the mouse's core as
-/// "steelseries"), and under each plugin's old id (RENAMED), moved to where
-/// they're kept now, once.
+/// Where each core's own files were kept before (the mouse's core as
+/// "steelseries"), moved to where they're kept now, once.
 pub fn move_old_folders() {
     let data = crate::data_dir();
     // (Custom Scripts, a plugin once, is Ectomatter's own now: its empty folder goes)
     let _ = std::fs::remove_dir(data.join("cores").join("scripts"));
-    let mut moves = vec![
-        (data.join("cores").join("monitors"), data.join("plugins").join(renamed_id("monitors"))),
-        (data.join("cores").join("openrgb"), data.join("plugins").join(renamed_id("openrgb"))),
-    ];
-    moves.extend(RENAMED.iter().map(|(old, new)| (data.join("plugins").join(old), data.join("plugins").join(new))));
-    moves.extend(crate::old_name::core_folders(&data));
-    for (from, to) in moves {
+    for (from, to) in crate::old_name::core_folders(&data) {
         // (a folder already where it goes is taken only if it's empty)
         if from.is_dir() && (!to.exists() || std::fs::remove_dir(&to).is_ok()) {
             if let Some(parent) = to.parent() {
@@ -459,8 +437,8 @@ mod tests {
 
     #[test]
     fn a_repository_is_read_from_an_address() {
-        assert_eq!(repository_of("OMGrant/ectomatter-monitors").as_deref(), Some("OMGrant/ectomatter-monitors"));
-        assert_eq!(repository_of("https://github.com/OMGrant/ectomatter-monitors/").as_deref(), Some("OMGrant/ectomatter-monitors"));
+        assert_eq!(repository_of("Ectonomic/ectomatter-monitor-switcher").as_deref(), Some("Ectonomic/ectomatter-monitor-switcher"));
+        assert_eq!(repository_of("https://github.com/Ectonomic/ectomatter-monitor-switcher/").as_deref(), Some("Ectonomic/ectomatter-monitor-switcher"));
         assert_eq!(repository_of("github.com/a/b.git").as_deref(), Some("a/b"));
         assert_eq!(repository_of("../etc/passwd"), None);
         assert_eq!(repository_of("just-a-name"), None);
@@ -476,20 +454,6 @@ mod tests {
     /// Every package with Ectomatter says what it can do in Ectomatter's words:
     /// the cores their devices, the plugins their uses; and each kind is in
     /// its own folder, the cores in cores/ and the plugins in plugins/.
-    /// A plugin's settings kept under its old id are under its new one at
-    /// the next start: the Weather Feed's place, the Monitor Switcher's switch.
-    #[test]
-    fn settings_follow_a_plugins_new_name() {
-        let f = std::env::temp_dir().join(format!("ectomatter-renamed-settings-{}.json", std::process::id()));
-        std::fs::write(&f, r#"{ "plugins": { "weather": { "place": { "name": "Springfield" } }, "monitors": { "on": false } } }"#).unwrap();
-        let s = crate::settings::Settings::load(f.clone());
-        rename_settings(&s);
-        assert_eq!(s.get("plugins.weather-feed.place.name").and_then(|v| v.as_str().map(String::from)).as_deref(), Some("Springfield"));
-        assert!(!s.on("plugins.monitor-switcher.on"), "its switch kept");
-        assert!(s.get("plugins.weather").is_none() && s.get("plugins.monitors").is_none(), "nothing left under the old names");
-        let _ = std::fs::remove_file(&f);
-    }
-
     /// Each plugin says the systems it works on, a tag each in Settings:
     /// every one, where its manifest names none; and one made for other
     /// systems isn't taken here, and says why.
@@ -523,7 +487,7 @@ mod tests {
         assert!(cores.iter().all(|p| p.kind() == Kind::Core), "the cores folder holds cores");
         assert!(plugins.iter().all(|p| p.kind() == Kind::Plugin), "the plugins folder holds plugins");
         assert_eq!(plugins.iter().map(|p| p.name()).collect::<Vec<_>>(), vec!["Game Configurator", "Monitor Switcher", "OpenRGB Link", "Sensor Feed", "Weather Feed"]);
-        assert_eq!(can(&plugins, "game-configurator"), vec!["Changes how games start, and runs Wine’s tools.".to_string()]);
+        assert_eq!(can(&plugins, "game-configurator"), ["Changes how games start.", "Runs games through gamescope, gamemoderun and mangohud.", "Runs winecfg and winetricks in a game’s prefix.", "Sets 23 environment variables for each game."]);
         assert_eq!(can(&plugins, "weather-feed"), vec!["Reaches Open-Meteo, Photon, the National Weather Service, Environment and Climate Change Canada and MeteoAlarm over the internet.".to_string()]);
         assert_eq!(
             can(&plugins, "sensor-feed"),

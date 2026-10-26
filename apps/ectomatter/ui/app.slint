@@ -1270,6 +1270,11 @@ export component AppWindow inherits Window {
     // value as typed, and why it can't be added as it is
     in property <string> gl-var-title;
     in property <string> gl-var-sub;
+    // the pair's words, as its plugin's setting gives them: each field's label and the example it shows empty
+    in property <string> gl-var-name-label: "Name";
+    in property <string> gl-var-value-label: "Value";
+    in property <string> gl-var-name-hint;
+    in property <string> gl-var-value-hint;
     in-out property <string> gl-var-name;
     in-out property <string> gl-var-value;
     in property <bool> gl-var-editing;
@@ -4665,11 +4670,11 @@ export component AppWindow inherits Window {
                 VerticalLayout {
                     spacing: 0;
                     FormLabel {
-                        text: "Name";
+                        text: root.gl-var-name-label;
                     }
                     Rectangle { height: Space.label; }
                     FieldBox {
-                        placeholder: "PROTON_ENABLE_NVAPI";
+                        placeholder: root.gl-var-name-hint;
                         mono: true;
                         text <=> root.gl-var-name;
                         edited => { root.gl-var-typed(); }
@@ -4680,11 +4685,11 @@ export component AppWindow inherits Window {
                 VerticalLayout {
                     spacing: 0;
                     FormLabel {
-                        text: "Value";
+                        text: root.gl-var-value-label;
                     }
                     Rectangle { height: Space.label; }
                     FieldBox {
-                        placeholder: "1";
+                        placeholder: root.gl-var-value-hint;
                         mono: true;
                         text <=> root.gl-var-value;
                         edited => { root.gl-var-typed(); }

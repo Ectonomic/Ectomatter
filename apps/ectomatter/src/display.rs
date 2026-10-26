@@ -33,11 +33,6 @@ pub fn game_keys() -> Vec<(u64, String)> {
     bits(&["capabilities", "keys", "game_keys"])
 }
 
-/// Who makes the keyboard, as its core says, for its firmware's words.
-fn maker() -> String {
-    crate::cores::keyboard().and_then(|k| k.described()["vendor"].as_str().map(String::from)).unwrap_or_else(|| "its maker".into())
-}
-
 /// What each slider can control. "own" is what the keyboard does by itself.
 pub const BIND_CHOICES: [[(&str, &str); 4]; 2] = [
     [("own", "Keyboard brightness"), ("output", "System volume"), ("microphone", "Microphone volume"), ("none", "Nothing")],
@@ -70,53 +65,57 @@ pub fn tiles(fw: &Value, connected: Option<bool>, room: f32) -> Tiles {
             None => (0, "Ectomatter leaves this keyboard to other programs."),
         };
         k.status_row(tone, words);
-        match fw["kind"].as_str().unwrap_or("unknown") {
-            "custom" => {
-                let v = format!("Ectomatter v{}, build {}", fw["version"].as_str().unwrap_or(""), fw["build"]);
+        // the firmware, in its core's own words: its row (with a tag beside it), what it
+        // adds, and what later builds would
+        let words = fw["words"].as_str().map(String::from).unwrap_or_else(|| match fw["version"].as_str().filter(|v| !v.is_empty()) {
+            Some(v) => format!("v{v}"),
+            None => "Not known".into(),
+        });
+        match fw["tag"].as_str() {
+            Some(tag) => {
                 k.row();
                 k.label_text("Firmware");
                 let (x, top) = (k.control_x(), k.y);
-                let w = crate::text::width(font::REGULAR, font::TEXT, &v).ceil() + 2.0;
-                k.cells.push(text_cell(style::VALUE_BRIGHT, x, top, w, line::TEXT, &v));
-                crate::form::pill(&mut k.cells, 1, x + w + space::INLINE, top, "Unofficial");
+                let w = crate::text::width(font::REGULAR, font::TEXT, &words).ceil() + 2.0;
+                k.cells.push(text_cell(style::VALUE_BRIGHT, x, top, w, line::TEXT, &words));
+                crate::form::pill(&mut k.cells, 1, x + w + space::INLINE, top, tag);
                 k.next(top, line::TEXT);
-                let adds: Vec<String> = fw["features"].as_array().map(|a| a.iter().filter_map(|x| x["name"].as_str().map(String::from)).collect()).unwrap_or_default();
-                k.row();
-                k.label_text("Adds");
-                let top = k.y;
-                if adds.is_empty() {
-                    let end = k.note_at(k.control_x(), top + 1.0, k.control_w(), "Nothing Ectomatter controls yet. This build fixes how the volume slider steps.");
+                if let Some(n) = fw["note"].as_str() {
+                    let top = k.y;
+                    let end = k.note_at(k.control_x(), top + 1.0, k.control_w(), n);
                     k.next(top, end - top);
-                } else {
-                    // two across, a tick before each, Space.tight between the lines
-                    let (x, col) = (k.control_x(), k.control_w() / 2.0);
-                    let pitch = line::TEXT + space::TIGHT;
-                    for (i, a) in adds.iter().enumerate() {
-                        k.cells.push(Cell { text: a.into(), ..cell(kind::TICKED, x + (i % 2) as f32 * col, top + (i / 2) as f32 * pitch, col - space::INLINE, line::TEXT) });
-                    }
-                    k.next(top, adds.len().div_ceil(2) as f32 * pitch - space::TIGHT);
-                }
-                let later: Vec<String> = fw["later"].as_array().map(|a| a.iter().map(|x| format!("{} (build {})", x["name"].as_str().unwrap_or(""), x["since"])).collect()).unwrap_or_default();
-                if !later.is_empty() {
-                    k.row();
-                    k.label_text("In later builds");
-                    let (x, w, top) = (k.control_x(), k.control_w(), k.y);
-                    let pitch = line::TEXT + space::TIGHT;
-                    for (i, l) in later.iter().enumerate() {
-                        k.cells.push(text_cell(style::VALUE_BRIGHT, x, top + i as f32 * pitch, w, line::TEXT, l));
-                    }
-                    k.next(top, later.len() as f32 * pitch - space::TIGHT);
                 }
             }
-            "retail" => {
-                let v = format!("{} v{}", maker(), fw["version"].as_str().unwrap_or(""));
-                k.fact("Firmware", &v, "Features that need Ectomatter’s custom firmware show here when the keyboard runs it.");
+            None => k.fact("Firmware", &words, fw["note"].as_str().unwrap_or("")),
+        }
+        let adds: Vec<String> = fw["features"].as_array().map(|a| a.iter().filter_map(|x| x["name"].as_str().map(String::from)).collect()).unwrap_or_default();
+        if !adds.is_empty() || fw["none"].is_string() {
+            k.row();
+            k.label_text("Adds");
+            let top = k.y;
+            if adds.is_empty() {
+                let end = k.note_at(k.control_x(), top + 1.0, k.control_w(), fw["none"].as_str().unwrap_or(""));
+                k.next(top, end - top);
+            } else {
+                // two across, a tick before each, Space.tight between the lines
+                let (x, col) = (k.control_x(), k.control_w() / 2.0);
+                let pitch = line::TEXT + space::TIGHT;
+                for (i, a) in adds.iter().enumerate() {
+                    k.cells.push(Cell { text: a.into(), ..cell(kind::TICKED, x + (i % 2) as f32 * col, top + (i / 2) as f32 * pitch, col - space::INLINE, line::TEXT) });
+                }
+                k.next(top, adds.len().div_ceil(2) as f32 * pitch - space::TIGHT);
             }
-            _ => {
-                let v = fw["version"].as_str().unwrap_or("");
-                let v = if v.is_empty() { "Not known".to_string() } else { format!("v{v}") };
-                k.fact("Firmware", &v, &format!("This version is neither {}’s nor Ectomatter’s, so no custom features are offered.", maker()));
+        }
+        let later: Vec<String> = fw["later"].as_array().map(|a| a.iter().filter_map(|x| x["words"].as_str().or(x["name"].as_str()).map(String::from)).collect()).unwrap_or_default();
+        if !later.is_empty() {
+            k.row();
+            k.label_text("In later builds");
+            let (x, w, top) = (k.control_x(), k.control_w(), k.y);
+            let pitch = line::TEXT + space::TIGHT;
+            for (i, l) in later.iter().enumerate() {
+                k.cells.push(text_cell(style::VALUE_BRIGHT, x, top + i as f32 * pitch, w, line::TEXT, l));
             }
+            k.next(top, later.len() as f32 * pitch - space::TIGHT);
         }
         // (the keyboard as its core names it, and the USB device its manifest matches)
         if let Some(core) = crate::cores::keyboard() {

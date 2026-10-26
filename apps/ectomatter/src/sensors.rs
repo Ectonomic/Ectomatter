@@ -3,7 +3,7 @@
 //! given them, and the main card, the card the ready-made layouts' GPU readings come from.
 //! Until a sensor is first checked or unchecked, the usual ones are: those the ready-made
 //! layouts show. Every reader of the screen's readings goes by the same choices, and knows
-//! each sensor a layout shows by a number of its own ([Source::Sensor]), as this keeps it.
+//! each sensor a layout shows by a number of its own ([crate::lcd_page::Source::Sensor]), as this keeps it.
 //!
 //! Here too: the processor's, the motherboard's and the graphics cards' names, found on
 //! this computer under `root` (`/` but for tests).
@@ -13,7 +13,6 @@ use std::sync::{Mutex, OnceLock};
 
 use serde_json::{json, Value};
 
-use crate::lcd_page::Source;
 use ectomatter_sensors::list::{Catalog, Device, Part, What};
 
 // ------------------------------------------------------------------ the choices
@@ -35,29 +34,13 @@ pub struct Setup {
     pub seen: BTreeSet<String>,
 }
 
-/// The Sensors card's choices before there was a library: the CPU sensor by its driver and
-/// label, whether the clock was the fastest core's, and the card by its PCI address and name.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Before {
-    pub cpu: Option<(String, String)>,
-    pub fastest: bool,
-    pub card: Option<(String, String)>,
-}
-
 impl Setup {
-    /// The choices as the settings keep them, and the Sensors card's choices where they are
-    /// still kept as it kept them.
-    pub fn of(v: &Value) -> (Setup, Option<Before>) {
+    /// The choices as the settings keep them.
+    pub fn of(v: &Value) -> Setup {
         let ids = |v: &Value| -> BTreeSet<String> { v.as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default() };
         let pair = |o: &Value, a: &str, b: &str| Some((o[a].as_str()?.to_string(), o[b].as_str()?.to_string()));
-        // (the Sensors card always kept how the clock was counted)
-        if v.get("cpu_clock").is_some() {
-            let before = Before { cpu: pair(&v["cpu_temp"], "driver", "label"), fastest: v["cpu_clock"].as_str() == Some("fastest"), card: pair(&v["card"], "pci", "name") };
-            return (Setup::default(), Some(before));
-        }
         let names = v["names"].as_object().map(|m| m.iter().filter_map(|(k, n)| Some((k.clone(), n.as_str()?.to_string()))).collect()).unwrap_or_default();
-        let setup = Setup { checked: v["checked"].is_array().then(|| ids(&v["checked"])), also: ids(&v["also"]), names, main: pair(&v["main"], "pci", "name"), seen: ids(&v["seen"]) };
-        (setup, None)
+        Setup { checked: v["checked"].is_array().then(|| ids(&v["checked"])), also: ids(&v["also"]), names, main: pair(&v["main"], "pci", "name"), seen: ids(&v["seen"]) }
     }
 
     pub fn to_json(&self) -> Value {
@@ -72,27 +55,6 @@ impl Setup {
             v["main"] = json!({ "pci": p, "name": n });
         }
         v
-    }
-
-    /// The Sensors card's choices carried over, on a computer listed as `cat`: the CPU
-    /// sensor chosen and the clock chosen are checked, and the card chosen is the main card.
-    /// What the layouts showing the CPU temperature or clock read from where those weren't
-    /// the usual ones, to show the same: each with the sensor it now shows.
-    pub fn carry(&mut self, b: &Before, cat: &Catalog) -> Vec<(Source, String)> {
-        let mut shows = Vec::new();
-        if let Some((driver, label)) = &b.cpu {
-            let id = cat.devices.iter().flat_map(|d| d.sensors.iter()).find(|s| s.id.starts_with(&format!("{driver}@")) && s.id.ends_with(&format!("/temp/{label}"))).map(|s| s.id.clone());
-            if let Some(id) = id.filter(|id| cat.cpu_temp().is_none_or(|u| u.id != *id)) {
-                self.also.insert(id.clone());
-                shows.push((Source::CpuTemp, id));
-            }
-        }
-        if b.fastest {
-            self.also.insert("cpu/clock/fastest".into());
-            shows.push((Source::CpuClock, "cpu/clock/fastest".into()));
-        }
-        self.main = b.card.clone();
-        shows
     }
 
     /// The main card on a computer listed as `cat`: the one made main while it is in it (by its
@@ -260,8 +222,7 @@ mod tests {
         let dir = temp_dir("setup");
         computer(&dir);
         let cat = catalog(&dir, &mut nvidia());
-        let (mut s, before) = Setup::of(&Value::Null);
-        assert!(before.is_none());
+        let mut s = Setup::of(&Value::Null);
         let usual: Vec<&str> = ["k10temp@0000:00:18.3/temp/Tctl", "cpu/load", "cpu/clock/average", "memory/used", "card@0000:01:00.0/temperature", "card@0000:01:00.0/load", "card@0000:01:00.0/clock", "card@0000:01:00.0/video-memory"].into();
         assert_eq!(s.checked_in(&cat), usual.iter().map(|x| x.to_string()).collect());
         assert_eq!(s.main_card(&cat).map(|d| d.name.as_str()), Some("RTX 5090"));
@@ -281,7 +242,7 @@ mod tests {
         assert_eq!(s.main_card(&cat).map(|d| d.name.as_str()), Some("Arc Pro B50"));
         s.main = kept;
         // kept and read back as it was
-        assert_eq!(Setup::of(&s.to_json()), (s.clone(), None));
+        assert_eq!(Setup::of(&s.to_json()), s.clone());
         // a name taken back by giving it nothing
         s.rename(&cat, "nct6687@nct6687.2592/fan/Pump Fan", "");
         assert!(s.names.is_empty());
@@ -308,24 +269,6 @@ mod tests {
         assert!(!c.contains("card@0000:01:00.0/power"));
         // and a second look changes nothing
         assert!(!s.settle(&after));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn the_sensors_card_s_choices_carried_over() {
-        let dir = temp_dir("setup-before");
-        computer(&dir);
-        let cat = catalog(&dir, &mut nvidia());
-        let old = json!({ "cpu_temp": { "driver": "nct6687", "label": "CPU" }, "cpu_clock": "fastest", "card": { "pci": "0000:18:00.0", "name": "AMD Radeon Graphics" } });
-        let (mut s, before) = Setup::of(&old);
-        let shows = s.carry(&before.unwrap(), &cat);
-        assert_eq!(shows, [(Source::CpuTemp, "nct6687@nct6687.2592/temp/CPU".to_string()), (Source::CpuClock, "cpu/clock/fastest".to_string())]);
-        let c = s.checked_in(&cat);
-        assert!(c.contains("nct6687@nct6687.2592/temp/CPU") && c.contains("cpu/clock/fastest") && c.contains("k10temp@0000:00:18.3/temp/Tctl"));
-        assert_eq!(s.main_card(&cat).map(|d| d.name.as_str()), Some("Radeon Graphics"));
-        // Tctl and the average, as they were by default: nothing for a layout to change
-        let (mut s, before) = Setup::of(&json!({ "cpu_temp": { "driver": "k10temp", "label": "Tctl" }, "cpu_clock": "average" }));
-        assert!(s.carry(&before.unwrap(), &cat).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

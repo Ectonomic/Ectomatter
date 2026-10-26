@@ -48,18 +48,20 @@ const HOLD: Duration = Duration::from_secs(30);
 
 /// A Proton build installed: its id as Steam's Compatibility setting names
 /// it, its name as people know it, its folder, the Steam Linux Runtime it
-/// runs in, and who made it ("ge", "cachyos", "valve" or "other").
+/// runs in, and whether Steam installs it itself, as one of its apps
+/// (Valve's builds), rather than it sitting in compatibilitytools.d.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Build {
     pub id: String,
     pub name: String,
     pub path: PathBuf,
     pub runtime: Option<PathBuf>,
-    pub family: &'static str,
+    pub from_steam: bool,
 }
 
-/// Valve's Proton builds by their Steam number: each one's id in Steam's
-/// Compatibility setting, and its name.
+/// The Proton builds Steam installs as its apps, by their Steam numbers:
+/// each one's id in Steam's Compatibility setting, and its name, newest
+/// first. One Steam has since added is found all the same (steam_builds).
 const VALVE: [(&str, &str, &str); 8] = [
     ("1493710", "proton_experimental", "Proton Experimental"),
     ("2180100", "proton_hotfix", "Proton Hotfix"),
@@ -70,6 +72,16 @@ const VALVE: [(&str, &str, &str); 8] = [
     ("1580130", "proton_63", "Proton 6.3"),
     ("1420170", "proton_513", "Proton 5.13"),
 ];
+
+/// The id Steam's Compatibility setting gives a build of its own named as
+/// its folder is ("Proton 11.0" is proton_11, "Proton 6.3" proton_63), for
+/// one newer than VALVE.
+fn steam_id_of(folder: &str) -> String {
+    let rest = folder.to_lowercase();
+    let rest = rest.trim_start_matches("proton").trim().trim_start_matches('-').trim();
+    let rest = rest.strip_suffix(".0").unwrap_or(rest);
+    format!("proton_{}", rest.replace(['.', ' '], "").replace('-', "_"))
+}
 
 /// Steam's libraries: its own folder and each its libraryfolders.vdf names.
 pub fn libraries(root: &Path) -> Vec<PathBuf> {
@@ -128,18 +140,37 @@ pub fn builds(root: &Path) -> Vec<Build> {
                 let n = d.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                 (n.clone(), n)
             });
-        let low = format!("{id} {name}").to_lowercase();
-        let family = if low.contains("cachyos") { "cachyos" } else if low.contains("ge-proton") || low.contains("proton-ge") || low.starts_with("ge") { "ge" } else { "other" };
         let runtime = runtime_for(&d, &libs);
-        out.push(Build { id, name, path: d, runtime, family });
+        out.push(Build { id, name, path: d, runtime, from_steam: false });
     }
-    for (app, id, name) in VALVE {
-        if let Some(d) = install_dir(&libs, app).filter(|d| d.join("proton").is_file()) {
-            let runtime = runtime_for(&d, &libs);
-            out.push(Build { id: id.into(), name: name.into(), path: d, runtime, family: "valve" });
+    out.extend(steam_builds(&libs));
+    out
+}
+
+/// The Proton builds Steam installs as its apps: VALVE's, newest first, after
+/// any Steam has added since (an app whose folder holds a `proton` and a
+/// `toolmanifest.vdf`).
+fn steam_builds(libs: &[PathBuf]) -> Vec<Build> {
+    let mut known = Vec::new();
+    let mut newer = Vec::new();
+    for lib in libs {
+        let apps = std::fs::read_dir(lib.join("steamapps")).map(|rd| rd.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect::<Vec<_>>()).unwrap_or_default();
+        for f in apps {
+            let Some(app) = f.strip_prefix("appmanifest_").and_then(|a| a.strip_suffix(".acf")) else { continue };
+            let Some(d) = install_dir(std::slice::from_ref(lib), app).filter(|d| d.join("proton").is_file() && d.join("toolmanifest.vdf").is_file()) else { continue };
+            let runtime = runtime_for(&d, libs);
+            match VALVE.iter().position(|(a, _, _)| *a == app) {
+                Some(k) => known.push((k, Build { id: VALVE[k].1.into(), name: VALVE[k].2.into(), path: d, runtime, from_steam: true })),
+                None => {
+                    let folder = d.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    newer.push(Build { id: steam_id_of(&folder), name: folder, path: d, runtime, from_steam: true });
+                }
+            }
         }
     }
-    out
+    known.sort_by_key(|(k, _)| *k);
+    newer.sort_by(|a, b| b.name.cmp(&a.name));
+    newer.into_iter().chain(known.into_iter().map(|(_, b)| b)).collect()
 }
 
 // ---------------------------------------------------------------- Steam's own settings
@@ -148,15 +179,7 @@ fn config_file(root: &Path) -> PathBuf {
     root.join("config/config.vdf")
 }
 
-/// Each user's own settings in Steam (localconfig.vdf, where launch options are).
-fn local_files(root: &Path) -> Vec<PathBuf> {
-    let mut out: Vec<PathBuf> = std::fs::read_dir(root.join("userdata")).map(|rd| rd.flatten().map(|e| e.path().join("config/localconfig.vdf")).filter(|p| p.is_file()).collect()).unwrap_or_default();
-    out.sort();
-    out
-}
-
 const MAPPING: [&str; 5] = ["InstallConfigStore", "Software", "Valve", "Steam", "CompatToolMapping"];
-const APPS: [&str; 5] = ["UserLocalConfigStore", "Software", "Valve", "Steam", "apps"];
 
 /// Steam's Compatibility setting, by each app's number ("0" is Steam's
 /// default for every game): the tool it names.
@@ -167,23 +190,6 @@ pub fn mapping(root: &Path) -> HashMap<String, String> {
         Some(Node::Keys(k)) => k.iter().filter_map(|(app, v)| Some((app.clone(), v.get("name")?.words()?.to_string()))).collect(),
         _ => HashMap::new(),
     }
-}
-
-/// Each app's launch options in Steam, by its number, from every user's settings.
-pub fn launch_options(root: &Path) -> HashMap<String, String> {
-    let mut out = HashMap::new();
-    for f in local_files(root) {
-        let text = std::fs::read_to_string(&f).unwrap_or_default();
-        let Ok(n) = vdf::parse(&text) else { continue };
-        if let Some(Node::Keys(apps)) = n.at(&APPS) {
-            for (app, v) in apps {
-                if let Some(lo) = v.get("LaunchOptions").and_then(Node::words).filter(|l| !l.trim().is_empty()) {
-                    out.insert(app.clone(), lo.to_string());
-                }
-            }
-        }
-    }
-    out
 }
 
 /// Whether Steam is running: its client's own process, the 64-bit one
@@ -283,15 +289,11 @@ pub fn open_steam() -> bool {
 }
 
 /// A game's change in Steam's own settings: its Compatibility setting naming
-/// one of Ectomatter's tools (TOOL, or TOOL_LINUX for its Linux version),
-/// and its launch options: the line as it was read, and as it's to be (none:
-/// taken out), changed only while it's still that line (one typed in Steam
-/// before it closed is kept).
+/// one of Ectomatter's tools (TOOL, or TOOL_LINUX for its Linux version).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Switch {
     pub app: String,
-    pub through: Option<&'static str>,
-    pub launch: Option<(String, Option<String>)>,
+    pub through: &'static str,
 }
 
 /// Steam's settings changed for each game, Steam closed: both files copied
@@ -309,44 +311,15 @@ fn change_files(root: &Path, switches: &[Switch], backups: &Path) -> Result<Path
     let aside = backups.join(stamp());
     std::fs::create_dir_all(&aside).map_err(|e| e.to_string())?;
     let config = config_file(root);
-    if switches.iter().any(|s| s.through.is_some()) {
+    if !switches.is_empty() {
         let text = std::fs::read_to_string(&config).map_err(|e| format!("Steam’s settings couldn’t be read: {e}"))?;
         std::fs::write(aside.join("config.vdf"), &text).map_err(|e| e.to_string())?;
         let mut n = vdf::parse(&text)?;
         let map = n.group_at(&MAPPING);
         for s in switches {
-            let Some(tool) = s.through else { continue };
-            vdf::set(map, &s.app, Node::Keys(vec![("name".into(), Node::Words(tool.into())), ("config".into(), Node::Words(String::new())), ("priority".into(), Node::Words("250".into()))]));
+            vdf::set(map, &s.app, Node::Keys(vec![("name".into(), Node::Words(s.through.into())), ("config".into(), Node::Words(String::new())), ("priority".into(), Node::Words("250".into()))]));
         }
         replace(&config, &vdf::write(&n))?;
-    }
-    if switches.iter().any(|s| s.launch.is_some()) {
-        for (k, f) in local_files(root).iter().enumerate() {
-            let text = std::fs::read_to_string(f).map_err(|e| e.to_string())?;
-            std::fs::write(aside.join(format!("localconfig-{k}.vdf")), &text).map_err(|e| e.to_string())?;
-            let mut n = vdf::parse(&text)?;
-            let mut changed = false;
-            for s in switches {
-                let Some((was, want)) = &s.launch else { continue };
-                let now = n.at(&APPS).and_then(|a| a.get(&s.app)).and_then(|a| a.get("LaunchOptions")).and_then(Node::words).map(String::from);
-                if now.as_deref() != Some(was.as_str()) {
-                    continue;
-                }
-                let mut path: Vec<&str> = APPS.to_vec();
-                path.push(&s.app);
-                let app = n.group_at(&path);
-                changed |= match want {
-                    Some(l) => {
-                        vdf::set(app, "LaunchOptions", Node::Words(l.clone()));
-                        true
-                    }
-                    None => vdf::remove(app, "LaunchOptions"),
-                };
-            }
-            if changed {
-                replace(f, &vdf::write(&n))?;
-            }
-        }
     }
     Ok(aside)
 }
@@ -397,135 +370,236 @@ pub fn install(root: &Path) -> Result<bool, String> {
 
 // ---------------------------------------------------------------- recipes
 
-/// The programs a recipe may wrap a game in, each with the options it may
-/// be given, and whether each takes a value (`None`: none at all):
-/// gamescope's own size, rate, scaling, HDR and overlay options, ending
-/// with `--`; GameMode and MangoHud as they are.
-const WRAPPERS: [(&str, Option<&[(&str, bool)]>); 3] = [
-    (
-        "gamescope",
-        Some(&[
-            ("-W", true), ("-H", true), ("-w", true), ("-h", true), ("-r", true), ("-F", true), ("-S", true),
-            ("--hdr-itm-sdr-nits", true), ("--hdr-itm-target-nits", true),
-            ("-f", false), ("-b", false), ("--hdr-enabled", false), ("--hdr-itm-enabled", false), ("--mangoapp", false), ("--force-grab-cursor", false), ("--adaptive-sync", false),
-        ]),
-    ),
-    ("gamemoderun", None),
-    ("mangohud", None),
-];
+/// How a value in a game's start may be written, as the plugin's manifest
+/// names it (docs/core-protocol.md, section 11, A game's start).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Written {
+    /// `"number"`: a plain number or switch (`1`, `120`, `1.5`)
+    Number,
+    /// `"word"`: one word (`fsr`, `top-left`)
+    Word,
+    /// `"list"`: items and their settings (`dwrite=n,b;d3d9=n`, `8:0,1,2,3`,
+    /// `0xbeef/0xdead`), none naming a command, a file, a folder or a log
+    List,
+}
 
-/// Whether a wrapper is one of WRAPPERS, given only the options it knows:
-/// each a known one, each value after an option that takes one (a plain
-/// number or word), and gamescope's `--` last, so nothing before the game is
-/// a program of its own.
-fn known_wrapper(w: &[&str]) -> bool {
-    match WRAPPERS.iter().find(|(n, _)| w.first() == Some(n)) {
-        Some((_, None)) => w.len() == 1,
-        Some((_, Some(opts))) => {
-            if w.last() != Some(&"--") {
-                return false;
-            }
-            let mut args = w[1..w.len() - 1].iter();
-            while let Some(a) = args.next() {
-                match opts.iter().find(|(o, _)| o == a) {
-                    Some((_, true)) => {
-                        if !args.next().is_some_and(|v| !v.is_empty() && v.chars().all(|c| c.is_ascii_alphanumeric() || c == '.')) {
-                            return false;
-                        }
-                    }
-                    Some((_, false)) => {}
-                    None => return false,
+impl Written {
+    const ALL: [Written; 3] = [Written::Number, Written::Word, Written::List];
+
+    fn of(v: &Value) -> Option<Written> {
+        Written::ALL.into_iter().find(|w| v.as_str() == Some(w.name()))
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Written::Number => "number",
+            Written::Word => "word",
+            Written::List => "list",
+        }
+    }
+
+    /// The ways of writing this one allows, from the narrowest up (a list
+    /// takes any word, a word any number).
+    pub fn within(self) -> &'static [Written] {
+        let at = Written::ALL.iter().position(|w| *w == self).unwrap_or(0);
+        &Written::ALL[..=at]
+    }
+}
+
+/// A program a plugin may wrap a game in: its name, the options it may be
+/// given (each with how its value is written; none, an option that takes
+/// none) and what comes last, before the game (gamescope's `--`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Wrapper {
+    pub program: String,
+    pub options: Vec<(String, Option<Written>)>,
+    pub last: Option<String>,
+}
+
+/// What a plugin's manifest says its games' starts may hold (its
+/// `{"launch": {"wrap", "env"}}` use): the programs a game may be wrapped
+/// in, and the variables it may set, each with how its value is written.
+/// Neither a program that runs what it's given (`runs_code`) nor a variable
+/// that loads code (`loads_code`) is taken, whatever the manifest says.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Starts {
+    pub wrappers: Vec<Wrapper>,
+    pub variables: Vec<(String, Written)>,
+    /// the programs its buttons may run in a game's prefix (`tools`)
+    pub tools: Vec<String>,
+}
+
+impl Starts {
+    pub fn of(v: &Value) -> Starts {
+        let plain = |s: &str, extra: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || extra.contains(c));
+        let wrappers = v["wrap"].as_object().into_iter().flatten().filter(|(p, _)| plain(p, "-_.") && !p.starts_with(['-', '.']) && !runs_code(p)).map(|(p, w)| Wrapper {
+            program: p.clone(),
+            // (an option is a dash and a plain name; one written another way than these, none)
+            options: w["options"].as_object().into_iter().flatten().filter(|(o, x)| o.starts_with('-') && plain(o, "-_") && (x.is_null() || Written::of(x).is_some())).map(|(o, x)| (o.clone(), Written::of(x))).collect(),
+            last: w["last"].as_str().filter(|l| l.starts_with('-') && plain(l, "-")).map(String::from),
+        }).collect();
+        let variables = v["env"].as_object().into_iter().flatten().filter(|(k, _)| plain(k, "_") && !loads_code(k)).filter_map(|(k, x)| Some((k.clone(), Written::of(x)?))).collect();
+        let tools = v["tools"].as_array().into_iter().flatten().filter_map(Value::as_str).filter(|p| plain(p, "-_.") && !p.starts_with(['-', '.']) && !runs_code(p)).map(String::from).collect();
+        Starts { wrappers, variables, tools }
+    }
+}
+
+/// Whether a program runs what it's given rather than wrapping a game: a
+/// shell, an interpreter, a way to run as someone else, or a program that
+/// starts another from its arguments. A plugin can't wrap a game in one.
+fn runs_code(p: &str) -> bool {
+    const RUNS: [&str; 52] = [
+        "sh", "bash", "dash", "zsh", "fish", "ksh", "mksh", "csh", "tcsh", "nu", "elvish", "xonsh", "busybox", "toybox",
+        "env", "sudo", "doas", "pkexec", "su", "runuser", "setpriv", "unshare", "nsenter", "chroot", "bwrap",
+        "node", "nodejs", "deno", "bun", "tclsh", "wish", "awk", "gawk", "mawk", "nawk", "sed", "xargs", "find",
+        "nohup", "setsid", "timeout", "stdbuf", "strace", "ltrace", "gdb", "valgrind",
+        "flatpak", "flatpak-spawn", "systemd-run", "xdg-open", "ssh", "socat",
+    ];
+    let p = p.to_ascii_lowercase();
+    RUNS.contains(&p.as_str()) || ["wine", "wine64", "wine-preloader", "wine64-preloader", "cmd", "cmd.exe"].contains(&p.as_str()) || ["python", "perl", "ruby", "lua", "php", "pwsh", "powershell", "osascript"].iter().any(|i| p.starts_with(i))
+}
+
+/// Whether a wrapper is one the plugin may wrap a game in, given only the
+/// options its manifest names: each a known one, each value after an option
+/// that takes one written as it says, and its last one last, so nothing
+/// before the game is a program of its own.
+fn known_wrapper(w: &[&str], wrappers: &[Wrapper]) -> bool {
+    let Some(known) = wrappers.iter().find(|k| w.first() == Some(&k.program.as_str())) else { return false };
+    let mut rest = &w[1..];
+    if let Some(last) = &known.last {
+        let Some((l, before)) = rest.split_last() else { return false };
+        if l != last {
+            return false;
+        }
+        rest = before;
+    }
+    let mut args = rest.iter();
+    while let Some(a) = args.next() {
+        match known.options.iter().find(|(o, _)| o == a) {
+            Some((_, Some(how))) => {
+                if !args.next().is_some_and(|v| plain_as(*how, v)) {
+                    return false;
                 }
             }
-            true
+            Some((_, None)) => {}
+            None => return false,
         }
-        None => false,
     }
+    true
 }
 
-/// How a variable's value may be written.
-#[derive(Clone, Copy, PartialEq)]
-enum Written {
-    /// 0 or 1, or another plain number
-    Number,
-    /// a list of DLLs and how Wine loads each (`dwrite=n,b;d3d9=n`)
-    Dlls,
-    /// Wine's cores (`8:0,1,2,3`)
-    Cores,
-    /// USB ids (`0xbeef/0xdead,0x1234/0x5678`)
-    UsbIds,
-    /// MangoHud's options (`fps_limit=120,position=top-left`), none that runs
-    /// a command or writes a file
-    Overlay,
-}
-
-/// The variables a recipe may set without the person having typed them,
-/// each with how its value may be written: Proton's, Wine's, DXVK's,
-/// VKD3D's, SDL's, MangoHud's and gamescope's that tune a game and run
-/// nothing of their own.
-const VARIABLES: [(&str, Written); 28] = [
-    ("PROTON_ENABLE_HDR", Written::Number),
-    ("PROTON_DLSS_UPGRADE", Written::Number),
-    ("PROTON_FSR4_UPGRADE", Written::Number),
-    ("PROTON_XESS_UPGRADE", Written::Number),
-    ("PROTON_NO_NTSYNC", Written::Number),
-    ("PROTON_ENABLE_WAYLAND", Written::Number),
-    ("PROTON_PREFER_SDL", Written::Number),
-    ("PROTON_USE_SDL", Written::Number),
-    ("PROTON_DISABLE_HIDRAW", Written::Number),
-    ("PROTON_SONY_AUTO_XINPUT", Written::Number),
-    ("PROTON_ENABLE_NVAPI", Written::Number),
-    ("PROTON_HIDE_NVIDIA_GPU", Written::Number),
-    ("PROTON_LOG", Written::Number),
-    ("PROTON_NO_ESYNC", Written::Number),
-    ("PROTON_NO_FSYNC", Written::Number),
-    ("PROTON_USE_NTSYNC", Written::Number),
-    ("PROTON_USE_WINED3D", Written::Number),
-    ("DXVK_HDR", Written::Number),
-    ("DXVK_FRAME_RATE", Written::Number),
-    ("DXVK_ASYNC", Written::Number),
-    ("VKD3D_FRAME_RATE", Written::Number),
-    ("ENABLE_GAMESCOPE_WSI", Written::Number),
-    ("WINEDLLOVERRIDES", Written::Dlls),
-    ("WINE_CPU_TOPOLOGY", Written::Cores),
-    ("WINEESYNC", Written::Number),
-    ("WINEFSYNC", Written::Number),
-    ("SDL_GAMECONTROLLER_IGNORE_DEVICES", Written::UsbIds),
-    ("MANGOHUD_CONFIG", Written::Overlay),
-];
-
-/// Whether a value is written as `how` allows.
+/// Whether a value is written as `how` allows: plain signs only, no longer
+/// than 512 characters; a list's items each a plain name, none starting a
+/// path, and none whose setting names a command, a file, a folder or a log
+/// (MangoHud's `exec=` and `output_folder=`, any program's `config_file=`).
 fn plain_as(how: Written, v: &str) -> bool {
-    let only = |extra: &str| v.chars().all(|c| c.is_ascii_alphanumeric() || extra.contains(c));
+    let only = |extra: &str| !v.is_empty() && v.len() <= 512 && v.chars().all(|c| c.is_ascii_alphanumeric() || extra.contains(c));
     match how {
         Written::Number => only("."),
-        Written::Dlls => only("_.=,;*-"),
-        Written::Cores => only(":,"),
-        Written::UsbIds => only("/,"),
-        // (no option that runs a command, reads a file of options or writes one)
-        Written::Overlay => only("_=,.+#-") && !["exec", "config_file", "output_folder", "autostart_log", "log_duration", "blacklist"].iter().any(|k| v.contains(k)),
+        Written::Word => only("_.-"),
+        Written::List => {
+            const NAMES: [&str; 13] = ["exec", "cmd", "command", "run", "file", "files", "folder", "dir", "path", "script", "autostart", "log", "output"];
+            only("_.=,;:/+#*-")
+                && v.split([',', ';']).all(|item| {
+                    let key = item.split('=').next().unwrap_or("");
+                    !item.starts_with(['/', '.']) && !item.contains("..") && !key.to_ascii_lowercase().split(['_', '-', ':']).any(|part| NAMES.contains(&part) || part == "config")
+                })
+        }
     }
+}
+
+/// What a button in a plugin's section does, as its `does` says, of the
+/// actions Ectomatter makes on a game's page (docs/core-protocol.md,
+/// section 11, A game's start).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Does {
+    StartThrough,
+    StartEveryThrough,
+    OpenPrefix,
+    BackUpPrefix,
+    ResetPrefix,
+    /// a Windows program inside the prefix: one of the tools, or one the
+    /// person picks (none)
+    RunInPrefix(Option<String>),
+    /// a program of this computer's, given the prefix and the build's Wine
+    RunWithPrefix(String),
+}
+
+impl Does {
+    /// What a button does for the plugin whose manifest says `uses`: none for
+    /// a disabled one, one that names nothing Ectomatter makes, a plugin that
+    /// doesn't use `launch`, or a program its `tools` don't name.
+    pub fn of(action: &Value, uses: &crate::core_host::Uses) -> Option<Does> {
+        if action["disabled"] == true || !uses.launch {
+            return None;
+        }
+        let does = &action["does"];
+        let tool = |key: &str| does[key].as_str().filter(|p| uses.starts.tools.iter().any(|t| t == p)).map(String::from);
+        match does.as_str() {
+            Some("start-through") => Some(Does::StartThrough),
+            Some("start-every-through") => Some(Does::StartEveryThrough),
+            Some("open-prefix") => Some(Does::OpenPrefix),
+            Some("back-up-prefix") => Some(Does::BackUpPrefix),
+            Some("reset-prefix") => Some(Does::ResetPrefix),
+            Some(_) => None,
+            None if does["run-in-prefix"] == "pick" => Some(Does::RunInPrefix(None)),
+            None => tool("run-in-prefix").map(|p| Does::RunInPrefix(Some(p))).or_else(|| tool("run-with-prefix").map(Does::RunWithPrefix)),
+        }
+    }
+}
+
+/// Words split as a shell splits them, each quote taken out.
+fn words(line: &str) -> Vec<String> {
+    let (mut out, mut cur, mut quote, mut any) = (Vec::new(), String::new(), None::<char>, false);
+    for c in line.chars() {
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), c) => cur.push(c),
+            (None, '"' | '\'') => {
+                quote = Some(c);
+                any = true;
+            }
+            (None, c) if c.is_whitespace() => {
+                if any || !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                }
+                any = false;
+            }
+            (None, c) => cur.push(c),
+        }
+    }
+    if any || !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+/// Whether a variable loads code or points a program at files, which no
+/// plugin and no person may set through Ectomatter: the dynamic loader's,
+/// Vulkan's loader's, SDL's own library, Proton's debugger, Wine's loader
+/// and paths, the shell's and Python's start files, any search path, any
+/// file of settings.
+fn loads_code(k: &str) -> bool {
+    let named = ["SDL_DYNAMIC_API", "PROTON_REMOTE_DEBUG_CMD", "WINELOADER", "WINESERVER", "WINEPREFIX", "WINEDLLPATH", "HOME", "SHELL", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "PYTHONSTARTUP", "BASH_ENV", "ENV"].contains(&k);
+    named || k.starts_with("LD_") || k.starts_with("VK_") || k.contains("PRELOAD") || k.ends_with("PATH") || k.ends_with("_FILENAMES") || k.ends_with("_FILES") || k.contains("CONFIGFILE") || k.contains("CONFIG_FILE")
 }
 
 /// Whether a variable the person typed may be set: any but those that load
-/// code or point a program at files (the dynamic loader's, Vulkan's
-/// loader's, SDL's own library, Proton's debugger, Wine's loader and paths,
-/// any search path), its value plain (no path, no shell's signs).
+/// code (`loads_code`), its value plain (no path, no shell's signs).
 fn own_may(k: &str, v: &str) -> bool {
-    let loads = k.starts_with("LD_") || k.starts_with("VK_") || k.contains("PRELOAD") || k.ends_with("PATH") || k.ends_with("_FILENAMES") || k.ends_with("_FILES") || k.contains("CONFIGFILE") || k.contains("CONFIG_FILE");
-    let named = ["SDL_DYNAMIC_API", "PROTON_REMOTE_DEBUG_CMD", "WINELOADER", "WINESERVER", "WINEPREFIX", "WINEDLLPATH", "HOME", "SHELL", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "PYTHONSTARTUP", "BASH_ENV", "ENV"].contains(&k);
-    !loads && !named && v.chars().all(|c| c.is_ascii_alphanumeric() || "_.=,;:+#-".contains(c))
+    !loads_code(k) && v.chars().all(|c| c.is_ascii_alphanumeric() || "_.=,;:+#-".contains(c))
 }
 
 /// A plugin's recipe for how a game starts, as Ectomatter writes it for the
-/// launcher: only what Ectomatter knows to be safe to run (docs/
-/// core-protocol.md, section 11, A game's start). Each wrapper is one of
-/// WRAPPERS, by name, with the options it may take (gamescope's last is
-/// `--`, so nothing after is a program of its own); the Proton build and
-/// the runtime are ones Steam has (`facts`, `protons`, or the game's own
-/// runtime); a variable is one of VARIABLES', or one the person typed in the
-/// plugin's settings (`own`). What's left out, in words, for the log.
-pub fn checked_recipe(recipe: &Value, facts: &Value, own: &[String]) -> (Value, Vec<String>) {
+/// launcher: only what the plugin's manifest says it may hold (`starts`),
+/// and nothing that runs code of its own (docs/core-protocol.md, section 11,
+/// A game's start). Each wrapper is one the manifest names, with the options
+/// it names (its last one last, so nothing after is a program of its own);
+/// the Proton build and the runtime are ones Steam has (`facts`, `protons`,
+/// or the game's own runtime); a variable is one the manifest names, its
+/// value written as it says, or one the person typed in the plugin's
+/// settings (`own`). What's left out, in words, for the log.
+pub fn checked_recipe(recipe: &Value, facts: &Value, starts: &Starts, own: &[String]) -> (Value, Vec<String>) {
     // (anything but a recipe is none)
     if !recipe.is_object() {
         return (Value::Null, vec!["the recipe, which isn’t one".into()]);
@@ -534,7 +608,7 @@ pub fn checked_recipe(recipe: &Value, facts: &Value, own: &[String]) -> (Value, 
     let mut out = Vec::new();
     let wraps: Vec<Value> = recipe["wrap"].as_array().into_iter().flatten().filter(|w| {
         let w: Vec<&str> = w.as_array().into_iter().flatten().filter_map(Value::as_str).collect();
-        let fine = known_wrapper(&w);
+        let fine = known_wrapper(&w, &starts.wrappers);
         if !fine {
             out.push(format!("the wrapper {}", w.join(" ")));
         }
@@ -546,15 +620,25 @@ pub fn checked_recipe(recipe: &Value, facts: &Value, own: &[String]) -> (Value, 
         out.push(format!("the Proton build {p}"));
         r.as_object_mut().map(|o| o.remove("proton"));
     }
+    if let Some(i) = r.get_mut("instead").and_then(Value::as_array_mut) {
+        let known = paths("path");
+        i.retain(|p| {
+            let fine = p.as_str().is_some_and(|p| known.iter().any(|q| q == p));
+            if !fine {
+                out.push(format!("the Proton build {p}"));
+            }
+            fine
+        });
+    }
     let runtimes: Vec<String> = paths("runtime").into_iter().chain(facts["game"]["runtime"].as_str().map(String::from)).collect();
     if let Some(p) = recipe["runtime"].as_str().filter(|p| !runtimes.iter().any(|q| q == p)) {
         out.push(format!("the runtime {p}"));
         r.as_object_mut().map(|o| o.remove("runtime"));
     }
-    // (a variable Ectomatter knows, its value as it may be written; or one the person typed, that loads nothing)
+    // (a variable the manifest names, its value as it says; or one the person typed, that loads nothing)
     let may = |k: &str, v: &Value| {
         let Some(v) = v.as_str() else { return false };
-        match VARIABLES.iter().find(|(n, _)| *n == k) {
+        match starts.variables.iter().find(|(n, _)| n == k) {
             Some((_, how)) => plain_as(*how, v),
             None => own.iter().any(|o| o == k) && own_may(k, v),
         }
@@ -740,7 +824,7 @@ impl Known {
         json!({
             "default": self.default,
             "home": std::env::var("HOME").unwrap_or_default(),
-            "protons": self.builds.iter().map(|b| json!({ "id": b.id, "name": b.name, "path": b.path, "runtime": b.runtime, "family": b.family })).collect::<Vec<_>>(),
+            "protons": self.builds.iter().map(|b| json!({ "id": b.id, "name": b.name, "path": b.path, "runtime": b.runtime, "from_steam": b.from_steam })).collect::<Vec<_>>(),
             "main": self.main,
             "cores": self.cores,
         })
@@ -873,15 +957,23 @@ pub fn reset(library: &Path, app: u32) -> Result<PathBuf, String> {
     Ok(kept)
 }
 
-/// A program run inside a game's prefix with the game's Proton build: Wine's
-/// configuration, Winetricks, or a program the person chose.
-pub fn in_prefix(root: &Path, library: &Path, app: u32, proton: &Path, what: &[String]) -> std::process::Command {
+/// A program run for a game's prefix with the game's Proton build: inside
+/// it (`inside`, a Windows program, as `proton run` runs one), or a program
+/// of this computer's given the prefix and the build's own Wine (`WINEPREFIX`,
+/// `WINE`, `WINESERVER`), as Wine's tools that work on a prefix take them.
+pub fn in_prefix(root: &Path, library: &Path, app: u32, proton: &Path, inside: bool, what: &[String]) -> std::process::Command {
     let compat = prefix_of(library, app);
     let mut c;
-    if what.first().is_some_and(|w| w == "winetricks") {
-        // (Winetricks with the build's own Wine, in the prefix's Windows files)
-        c = std::process::Command::new("winetricks");
-        c.args(&what[1..]);
+    if inside {
+        c = std::process::Command::new(proton.join("proton"));
+        c.arg("run").args(what);
+        c.env("STEAM_COMPAT_DATA_PATH", &compat);
+        c.env("STEAM_COMPAT_CLIENT_INSTALL_PATH", root);
+        c.env("SteamAppId", app.to_string());
+        c.env("SteamGameId", app.to_string());
+    } else {
+        c = std::process::Command::new(what.first().map_or("", String::as_str));
+        c.args(what.iter().skip(1));
         c.env("WINEPREFIX", compat.join("pfx"));
         for (var, bin) in [("WINE", "wine"), ("WINESERVER", "wineserver")] {
             let p = proton.join("files/bin").join(bin);
@@ -889,13 +981,6 @@ pub fn in_prefix(root: &Path, library: &Path, app: u32, proton: &Path, what: &[S
                 c.env(var, p);
             }
         }
-    } else {
-        c = std::process::Command::new(proton.join("proton"));
-        c.arg("run").args(what);
-        c.env("STEAM_COMPAT_DATA_PATH", &compat);
-        c.env("STEAM_COMPAT_CLIENT_INSTALL_PATH", root);
-        c.env("SteamAppId", app.to_string());
-        c.env("SteamGameId", app.to_string());
     }
     c.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
     c
@@ -930,258 +1015,37 @@ pub fn cache_cores() -> Option<String> {
     best.map(|(_, l)| l)
 }
 
-// ---------------------------------------------------------------- game-helper's games, moved over
-
-/// What a game's launch line through game-helper becomes in Ectomatter: its
-/// Game Configurator values, the devices' profiles it switched (by the
-/// Library's device keys), and what's left of the line for Steam (none,
-/// once all of it is Ectomatter's).
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Moved {
-    pub values: Vec<(String, Value)>,
-    pub profiles: Vec<(String, String)>,
-    pub left: Option<String>,
-}
-
-/// Games set to start through Ectomatter, carried over first: for each Steam
-/// number in `apps` (with whether Steam starts its Linux version), the
-/// Proton build Steam started it with, as named, where Every game's is
-/// another; and its launch line through game-helper, as the Game
-/// Configurator's values (`plugin`'s) and its devices' profiles, where the
-/// game has none of its own, the line then taken out. An app (`switch`
-/// false, as SteamVR) only has its line taken out. The changes to make in
-/// Steam's own settings.
-pub fn carry_over(lib: &mut crate::games::Library, k: &Known, apps: &[(u32, bool, bool)], lines: &HashMap<String, String>, mouse: Option<&str>, plugin: &str) -> Vec<Switch> {
-    let every_build = lib.plugin_values(crate::games::EVERY, plugin)["version"].as_str().map_or_else(|| k.default.clone(), String::from);
-    let mut out = Vec::new();
-    for &(app, native, switch) in apps {
-        let id = crate::games::steam_id(app);
-        let old = k.steam_build(app);
-        if switch && !native && old != every_build && !old.is_empty() && lib.plugin_values(&id, plugin).get("version").is_none() {
-            lib.set_plugin_value(&id, plugin, "version", Some(json!(old)));
-        }
-        let line = lines.get(&app.to_string());
-        let launch = match line.and_then(|l| from_game_helper(l, "2", mouse)) {
-            Some(m) => {
-                for (key, v) in m.values {
-                    if lib.plugin_values(&id, plugin).get(&key).is_none() {
-                        lib.set_plugin_value(&id, plugin, &key, Some(v));
-                    }
-                }
-                for (device, p) in m.profiles {
-                    if lib.choice(&id, &device).is_none() {
-                        lib.set_choice(&id, &device, Some(crate::games::Choice::Profile(p)));
-                    }
-                }
-                line.map(|l| (l.clone(), m.left))
-            }
-            None => None,
-        };
-        let through = switch.then_some(if native { TOOL_LINUX } else { TOOL });
-        if through.is_some() || launch.is_some() {
-            out.push(Switch { app: app.to_string(), through, launch });
-        }
-    }
-    out
-}
-
-/// The mouse's profile game-helper's -m switched to (its "game" profile):
-/// the one named Gaming, or Game.
-pub fn game_profile(store: &crate::profiles::Store) -> Option<String> {
-    store.list.iter().find(|p| p.name.eq_ignore_ascii_case("gaming") || p.name.eq_ignore_ascii_case("game")).map(|p| p.id.clone())
-}
-
-/// Every game whose launch line in Steam runs game-helper, set to start
-/// through Ectomatter with its flags carried over (carry_over), Steam closed
-/// for it and opened again if it was open, as `ectomatter --move-game-helper`
-/// asks: what was done, in a sentence. Refused while a Steam game runs, and
-/// while another Ectomatter runs, which would write its own Library over this one's.
-pub fn move_game_helper(plugin: &str) -> Result<String, String> {
-    let me = std::process::id();
-    let other = std::fs::read_dir("/proc").into_iter().flatten().flatten().any(|e| {
-        e.file_name().to_str().and_then(|n| n.parse::<u32>().ok()).is_some_and(|pid| pid != me) && std::fs::read_link(e.path().join("exe")).is_ok_and(|p| p.file_name().is_some_and(|n| n == "ectomatter"))
-    });
-    if other {
-        return Err("Quit Ectomatter first: its window would write its own Library over this change.".into());
-    }
-    if !crate::steam::running().is_empty() {
-        return Err("Quit the game first: Steam has to close for this change.".into());
-    }
-    let steam = crate::steam::read().ok_or("Steam isn’t on this computer.")?;
-    let root = steam.root.clone();
-    let lines = launch_options(&root);
-    let k = know(&root, &[]);
-    let mut lib = crate::games::Library::load();
-    let mouse = crate::profiles::path_for(crate::mouse::key()).and_then(crate::profiles::Store::read_only).as_ref().and_then(game_profile);
-    let mut apps: Vec<(u32, bool, bool)> = Vec::new();
-    for (app, line) in &lines {
-        let (Ok(n), Some(_)) = (app.parse::<u32>(), from_game_helper(line, "2", None)) else { continue };
-        let known = steam.apps.iter().find(|a| a.id == n);
-        // (an app, as SteamVR is, keeps how Steam starts it; a game not installed is a Windows one)
-        let switch = known.is_none_or(|a| a.kind == crate::steam::Kind::Game);
-        apps.push((n, known.is_some_and(|a| k.native(n, a.linux)), switch));
-    }
-    if apps.is_empty() {
-        return Ok("No launch line in Steam runs game-helper.".into());
-    }
-    apps.sort();
-    let switches = carry_over(&mut lib, &k, &apps, &lines, mouse.as_deref(), plugin);
-    install(&root)?;
-    let was_open = steam_running();
-    close_steam()?;
-    let aside = change_steam(&root, &switches, &crate::data_dir().join("steam-backups"));
-    let reopened = !was_open || open_steam();
-    let aside = aside?;
-    let games = switches.iter().filter(|s| s.through.is_some()).count();
-    let mut said = format!("{games} games start through Ectomatter now, and game-helper is out of {} launch lines. Steam’s settings were copied to {} first.", switches.iter().filter(|s| s.launch.is_some()).count(), shown(&aside));
-    if !reopened {
-        said.push_str(" Steam didn’t open again: open it from your apps.");
-    }
-    Ok(said)
-}
-
-/// Words split as a shell splits them, each quote taken out.
-fn words(line: &str) -> Vec<String> {
-    let (mut out, mut cur, mut quote, mut any) = (Vec::new(), String::new(), None::<char>, false);
-    for c in line.chars() {
-        match (quote, c) {
-            (Some(q), c) if c == q => quote = None,
-            (Some(_), c) => cur.push(c),
-            (None, '"' | '\'') => {
-                quote = Some(c);
-                any = true;
-            }
-            (None, c) if c.is_whitespace() => {
-                if any || !cur.is_empty() {
-                    out.push(std::mem::take(&mut cur));
-                }
-                any = false;
-            }
-            (None, c) => cur.push(c),
-        }
-    }
-    if any || !cur.is_empty() {
-        out.push(cur);
-    }
-    out
-}
-
-/// An environment variable as a launch line sets it (NAME=value), if the
-/// word is one.
-fn assignment(w: &str) -> Option<(String, String)> {
-    let (k, v) = w.split_once('=')?;
-    (!k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && !k.starts_with(|c: char| c.is_ascii_digit())).then(|| (k.to_string(), v.to_string()))
-}
-
-/// A word as a shell would need it written.
-fn shell_word(w: &str) -> String {
-    if !w.is_empty() && w.chars().all(|c| c.is_ascii_alphanumeric() || "-_./=:,+%@".contains(c)) { w.to_string() } else { format!("\"{}\"", w.replace('"', "\\\"")) }
-}
-
-/// A launch line through game-helper, carried over: -r as Proton's HDR, -g
-/// as gamescope's, -c as the pad straight to the game, -x as GE's Xbox copy,
-/// --orgb as OpenRGB's profile for the game, -k and -m as the keyboard's and
-/// the mouse's (the profiles `keyboard` and `mouse` name, where given); the
-/// line's own variables and the game's arguments as the Game Configurator's,
-/// the upgrades and DLL overrides among them. -b and -v are left out
-/// (Ectomatter's Monitors does them). None for a line without game-helper.
-pub fn from_game_helper(line: &str, keyboard: &str, mouse: Option<&str>) -> Option<Moved> {
-    let w = words(line);
-    let at = w.iter().position(|x| x == "game-helper" || x.ends_with("/game-helper"))?;
-    let mut m = Moved::default();
-    let mut env: Vec<(String, String)> = w[..at].iter().filter_map(|x| assignment(x)).collect();
-    let mut i = at + 1;
-    let mut hdr: Option<&str> = None;
-    // the flags, up to "--"
-    while i < w.len() && w[i] != "--" {
-        let has_value = |j: usize| w.get(j).is_some_and(|v| v != "--" && !v.starts_with('-'));
-        match w[i].as_str() {
-            "-r" | "--hdr" => hdr = hdr.or(Some("proton")),
-            "-g" | "--gamescope" => hdr = Some("gamescope"),
-            "-c" | "--native-controller" => m.values.push(("pad".into(), json!("native"))),
-            "-x" | "--sony-xinput-backup" => m.values.push(("xbox".into(), json!(true))),
-            "-k" | "--keyboard-profile" => {
-                let p = if has_value(i + 1) { i += 1; w[i].clone() } else { keyboard.to_string() };
-                m.profiles.push((crate::cores::keyboard_key().into(), p));
-            }
-            "-m" | "--mouse-profile" => {
-                if has_value(i + 1) {
-                    i += 1;
-                }
-                if let Some(p) = mouse {
-                    m.profiles.push((crate::mouse::key().into(), p.to_string()));
-                }
-            }
-            "-orgb" | "--orgb" => {
-                let mut name = Vec::new();
-                while has_value(i + 1) {
-                    i += 1;
-                    name.push(w[i].clone());
-                }
-                if !name.is_empty() {
-                    m.profiles.push(("openrgb".into(), name.join(" ")));
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    if let Some(h) = hdr {
-        m.values.push(("hdr".into(), json!(h)));
-    }
-    // after "--": variables set in front of the game's command, the command, the game's arguments
-    let rest = w.get(i + 1..).unwrap_or(&[]);
-    let cmd = rest.iter().position(|x| x == "%command%");
-    let (before, after) = match cmd {
-        Some(c) => (&rest[..c], &rest[c + 1..]),
-        None => (rest, &[][..]),
-    };
-    env.extend(before.iter().filter_map(|x| assignment(x)));
-    let mut kept = serde_json::Map::new();
-    for (k, v) in env {
-        match (k.as_str(), v.as_str()) {
-            ("PROTON_DLSS_UPGRADE", "1") => m.values.push(("dlss".into(), json!(true))),
-            ("PROTON_FSR4_UPGRADE", "1") => m.values.push(("fsr4".into(), json!(true))),
-            ("PROTON_XESS_UPGRADE", "1") => m.values.push(("xess".into(), json!(true))),
-            ("WINEDLLOVERRIDES", d) => m.values.push(("dll".into(), json!(d))),
-            _ => {
-                kept.insert(k, json!(v));
-            }
-        }
-    }
-    if !kept.is_empty() {
-        m.values.push(("env".into(), Value::Object(kept)));
-    }
-    if !after.is_empty() {
-        m.values.push(("args".into(), json!(after.iter().map(|a| shell_word(a)).collect::<Vec<_>>().join(" "))));
-    }
-    Some(m)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// docs/core-protocol.md, section 11: a plugin's recipe runs only what
-    /// Ectomatter knows to be safe. The Game Configurator's own (gamescope with
-    /// its options, GameMode, MangoHud, a build Steam has, Proton's and DXVK's
+    /// The Game Configurator's grant, as its manifest gives it.
+    fn configurator() -> Starts {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/game-configurator");
+        crate::core_host::Manifest::read(&dir).unwrap().uses.starts
+    }
+
+    /// docs/core-protocol.md, section 11: a plugin's recipe holds only what
+    /// its manifest names. The Game Configurator's own (gamescope with its
+    /// options, GameMode, MangoHud, a build Steam has, Proton's and DXVK's
     /// variables, the person's own) is kept whole; a program to wrap the game
-    /// in that isn't one of those, a program slipped into gamescope's
+    /// in that its manifest doesn't name, a program slipped into gamescope's
     /// options, a build or runtime Steam doesn't have, or a variable that
     /// loads code is left out, and said.
     #[test]
-    fn a_recipe_runs_only_what_ectomatter_knows() {
+    fn a_recipe_holds_only_what_its_plugins_manifest_names() {
+        let starts = configurator();
         let facts = json!({ "protons": [{ "path": "/steam/compatibilitytools.d/GE-Proton10-1", "runtime": "/steam/steamapps/common/SteamLinuxRuntime_sniper" }] });
         let good = json!({ "proton": "/steam/compatibilitytools.d/GE-Proton10-1", "runtime": "/steam/steamapps/common/SteamLinuxRuntime_sniper",
             "wrap": [["gamescope", "-W", "3440", "-H", "1440", "-w", "2560", "-h", "1080", "-r", "165", "-f", "-F", "fsr", "--hdr-enabled", "--hdr-itm-enabled", "--hdr-itm-sdr-nits", "203", "--mangoapp", "--"], ["gamemoderun"], ["mangohud"]],
             "env": { "PROTON_ENABLE_HDR": "1", "DXVK_HDR": "1", "WINEDLLOVERRIDES": "dwrite=n,b", "MY_MOD": "on" }, "env_default": { "PROTON_SONY_AUTO_XINPUT": "1" }, "args": ["-novid"] });
-        let (r, out) = checked_recipe(&good, &facts, &["MY_MOD".to_string()]);
+        let (r, out) = checked_recipe(&good, &facts, &starts, &["MY_MOD".to_string()]);
         assert_eq!((r, out), (good.clone(), Vec::<String>::new()), "kept whole");
         let bad = json!({ "proton": "/tmp/evil",  "runtime": "/tmp/evil-runtime",
             "wrap": [["sh", "-c", "evil"], ["gamescope", "evil", "--"], ["gamescope", "-W", "3440", "--", "evil"], ["gamescope", "-W", "$(evil)", "--"], ["gamemoderun", "evil"], ["mangohud"]],
             "env": { "LD_PRELOAD": "/tmp/evil.so", "PROTON_LOG": "1", "SDL_DYNAMIC_API": "/data/x.so", "VK_ICD_FILENAMES": "/data/x.json", "MANGOHUD_CONFIG": "exec=evil", "PROTON_REMOTE_DEBUG_CMD": "evil", "PROTON_ENABLE_HDR": "$(evil)", "WINEDLLOVERRIDES": "../evil=n" },
             "env_append": { "PATH": "/tmp" }, "args": ["-novid"], "unset": ["PROTON_PREFER_SDL", "A;B"] });
-        let (r, out) = checked_recipe(&bad, &facts, &[]);
+        let (r, out) = checked_recipe(&bad, &facts, &starts, &[]);
         assert_eq!(r["wrap"], json!([["mangohud"]]));
         assert!(r.get("proton").is_none() && r.get("runtime").is_none(), "Steam's own builds only: the launcher picks one");
         assert_eq!(r["env"], json!({ "PROTON_LOG": "1" }), "the variables that load code or run a command, and values that aren't plain, left out");
@@ -1189,69 +1053,71 @@ mod tests {
         assert_eq!((r["args"].clone(), r["unset"].clone()), (json!(["-novid"]), json!(["PROTON_PREFER_SDL"])));
         assert_eq!(out.len(), 15, "{out:?}");
         // (the person's own variable is theirs to set, unless it loads code, or its value is a path)
-        let own = |k: &str, v: &str| checked_recipe(&json!({ "env": { k: v } }), &facts, &[k.to_string()]).0["env"][k].clone();
+        let own = |k: &str, v: &str| checked_recipe(&json!({ "env": { k: v } }), &facts, &starts, &[k.to_string()]).0["env"][k].clone();
         assert_eq!(own("MY_MOD", "on"), "on");
         assert_eq!(own("LD_PRELOAD", "/tmp/evil.so"), Value::Null);
         assert_eq!(own("SDL_DYNAMIC_API", "x.so"), Value::Null);
         assert_eq!(own("MY_MOD", "/tmp/x"), Value::Null);
         // (and a recipe that isn't one is none, not a crash)
-        assert_eq!(checked_recipe(&json!([]), &facts, &[]).0, Value::Null);
-        assert_eq!(checked_recipe(&json!("x"), &facts, &[]).0, Value::Null);
+        assert_eq!(checked_recipe(&json!([]), &facts, &starts, &[]).0, Value::Null);
+        assert_eq!(checked_recipe(&json!("x"), &facts, &starts, &[]).0, Value::Null);
     }
 
-    fn moved(line: &str) -> Moved {
-        from_game_helper(line, "2", Some("p65e5e7d567f370")).expect("a game-helper line")
-    }
-
-    fn value<'a>(m: &'a Moved, k: &str) -> Option<&'a Value> {
-        m.values.iter().find(|(key, _)| key == k).map(|(_, v)| v)
-    }
-
-    /// Grant's launch lines, as Steam held them, each carried over whole.
+    /// Boundary: a plugin Ectomatter has never seen names its own start in
+    /// its manifest, and Ectomatter writes just that: its own wrapper with the
+    /// options it names, its own variables, each value written as it says.
+    /// Whatever it names, no program that runs what it's given wraps a game,
+    /// no variable that loads code is set, and no value names a command, a
+    /// file or a folder; nor does it get another plugin's (gamescope here).
     #[test]
-    fn game_helpers_lines_are_carried_over() {
-        let arc = moved("game-helper --orgb ARC Raiders -b --gamescope -m -k -- %command%");
-        assert_eq!(value(&arc, "hdr"), Some(&json!("gamescope")));
-        let p = |d: &str, v: &str| (d.to_string(), v.to_string());
-        assert_eq!(arc.profiles, [p("openrgb", "ARC Raiders"), p("sensei310", "p65e5e7d567f370"), p("z10", "2")]);
-        assert_eq!(arc.left, None);
-        let bg3 = moved("WINEDLLOVERRIDES=DWrite.dll=n,b game-helper --hdr -b -- %command% --skip-launcher ");
-        assert_eq!((value(&bg3, "hdr"), value(&bg3, "dll"), value(&bg3, "args")), (Some(&json!("proton")), Some(&json!("DWrite.dll=n,b")), Some(&json!("--skip-launcher"))));
-        let hfw = moved("PROTON_DLSS_UPGRADE=1 game-helper -r -b -c -- %command% -nolauncher");
-        assert_eq!((value(&hfw, "dlss"), value(&hfw, "pad"), value(&hfw, "args")), (Some(&json!(true)), Some(&json!("native")), Some(&json!("-nolauncher"))));
-        let wukong = moved("PROTON_DLSS_UPGRADE=\"1\" game-helper -b  -r -- %command%");
-        assert_eq!(value(&wukong, "dlss"), Some(&json!(true)));
-        let outlaws = moved("game-helper -b -r -- PROTON_ENABLE_NVAPI=1 %command%     ");
-        assert_eq!(value(&outlaws, "env"), Some(&json!({ "PROTON_ENABLE_NVAPI": "1" })));
-        let gotg = moved("game-helper -r -b -c -- %command% -nosplash -nolauncher");
-        assert_eq!(value(&gotg, "args"), Some(&json!("-nosplash -nolauncher")));
-        let k3 = moved("game-helper -k 3 -- %command%");
-        assert_eq!(k3.profiles, [("z10".to_string(), "3".to_string())]);
-        let vr = moved("game-helper -v -- %command%");
-        assert!(vr.values.is_empty() && vr.profiles.is_empty(), "SteamVR's -v is Monitors' now");
-        assert!(from_game_helper("PROTON_SONY_AUTO_XINPUT=0 %command%", "2", None).is_none(), "a line without game-helper stays as it is");
+    fn a_plugin_names_its_own_start() {
+        let starts = Starts::of(&json!({
+            "wrap": { "foowrap": { "options": { "--level": "number", "--quiet": null } }, "bash": { "options": { "-c": "word" } }, "/tmp/evil": {}, "sh": {} },
+            "env": { "FOO_TUNE": "word", "FOO_LIST": "list", "LD_PRELOAD": "word", "FOO_PATH": "word", "VK_LAYER_FOO": "word", "BAD-NAME": "word", "FOO_ODD": "colour" },
+        }));
+        assert_eq!(starts.wrappers.iter().map(|w| w.program.as_str()).collect::<Vec<_>>(), ["foowrap"], "no shell, no path");
+        let mut named = starts.variables.clone();
+        named.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(named, [("FOO_LIST".to_string(), Written::List), ("FOO_TUNE".to_string(), Written::Word)], "none that loads code, none written an unknown way");
+        let facts = json!({ "protons": [] });
+        let good = json!({ "wrap": [["foowrap", "--level", "3", "--quiet"]], "env": { "FOO_TUNE": "fast-1", "FOO_LIST": "a=1,b;c:2,0xbeef/0xdead" } });
+        assert_eq!(checked_recipe(&good, &facts, &starts, &[]), (good.clone(), Vec::<String>::new()), "kept whole");
+        let bad = json!({
+            "wrap": [["gamescope", "-W", "3440", "--"], ["bash", "-c", "evil"], ["foowrap", "--level", "$(evil)"], ["foowrap", "--other"], ["foowrap", "evil"]],
+            "env": { "FOO_TUNE": "a b", "LD_PRELOAD": "x.so", "PROTON_ENABLE_HDR": "1" },
+            "env_default": { "FOO_LIST": "exec=evil" }, "env_append": { "FOO_LIST": "output_folder=x" },
+        });
+        let (r, out) = checked_recipe(&bad, &facts, &starts, &[]);
+        assert_eq!(r["wrap"], json!([]), "{r}");
+        assert_eq!((r["env"].clone(), r["env_default"].clone(), r["env_append"].clone()), (json!({}), json!({}), json!({})), "{r}");
+        assert_eq!(out.len(), 10, "{out:?}");
+        for (v, fine) in [("dwrite=n,b;d3d9=n", true), ("fps_limit=120,position=top-left", true), ("config_file=x", false), ("../evil=n", false), ("/x=n", false), ("a,exec", false), ("log_duration=5", false)] {
+            assert_eq!(plain_as(Written::List, v), fine, "{v}");
+        }
     }
 
-    /// game-helper's games carried over: ARC Raiders keeps its Hotfix build
-    /// and gets gamescope's HDR and its profiles (its keyboard's choice kept,
-    /// being its own already); SteamVR, an app, only loses its line.
+    /// Boundary: a button in the section of a plugin Ectomatter has never
+    /// seen does what it says, with the programs its manifest names: its own
+    /// tool, run with the game's prefix. A program its manifest doesn't name,
+    /// a disabled button, one that names nothing Ectomatter makes, and any
+    /// button of a plugin that doesn't use `launch`, do nothing.
     #[test]
-    fn game_helpers_games_are_carried_over() {
-        let mut lib = crate::games::Library::of(json!({ "choices": { "steam_app_1808500": { "z10": "1" } } }), None);
-        let k = Known { default: "Proton-GE Latest".into(), mapping: HashMap::from([("1808500".to_string(), "proton_hotfix".to_string())]), ..Known::default() };
-        let lines = HashMap::from([("1808500".to_string(), "game-helper --orgb ARC Raiders -b --gamescope -m -k -- %command%".to_string()), ("250820".to_string(), "game-helper -v -- %command%".to_string())]);
-        let s = carry_over(&mut lib, &k, &[(1808500, false, true), (250820, false, false)], &lines, Some("p65e5e7d567f370"), "game-configurator");
-        assert_eq!(s, [
-            Switch { app: "1808500".into(), through: Some(TOOL), launch: Some(("game-helper --orgb ARC Raiders -b --gamescope -m -k -- %command%".into(), None)) },
-            Switch { app: "250820".into(), through: None, launch: Some(("game-helper -v -- %command%".into(), None)) },
-        ]);
-        assert_eq!(lib.plugin_values("steam_app_1808500", "game-configurator"), json!({ "version": "proton_hotfix", "hdr": "gamescope" }));
-        assert_eq!(lib.choice("steam_app_1808500", "openrgb"), Some(crate::games::Choice::Profile("ARC Raiders".into())));
-        assert_eq!(lib.choice("steam_app_1808500", "sensei310"), Some(crate::games::Choice::Profile("p65e5e7d567f370".into())));
-        assert_eq!(lib.choice("steam_app_1808500", "z10"), Some(crate::games::Choice::Profile("1".into())), "its own choice kept");
+    fn a_plugins_button_does_what_it_says() {
+        let uses = crate::core_host::Uses::of(&json!([{ "launch": { "tools": ["foo-tool", "bash", "wine", "python3"] } }]));
+        assert_eq!(uses.starts.tools, ["foo-tool"], "no shell, Wine's own launcher or interpreter");
+        let does = |a: Value| Does::of(&a, &uses);
+        assert_eq!(does(json!({ "id": "mine", "does": { "run-with-prefix": "foo-tool" } })), Some(Does::RunWithPrefix("foo-tool".into())));
+        assert_eq!(does(json!({ "id": "pick", "does": { "run-in-prefix": "pick" } })), Some(Does::RunInPrefix(None)));
+        assert_eq!(does(json!({ "id": "b", "does": "back-up-prefix" })), Some(Does::BackUpPrefix));
+        assert_eq!(does(json!({ "id": "x", "does": { "run-with-prefix": "winetricks" } })), None, "not among its tools");
+        assert_eq!(does(json!({ "id": "x", "does": { "run-with-prefix": "bash" } })), None, "a shell is never a tool");
+        assert_eq!(does(json!({ "id": "x", "does": "open-prefix", "disabled": true })), None);
+        assert_eq!(does(json!({ "id": "x", "does": "format-the-disk" })), None);
+        assert_eq!(does(json!({ "id": "open-prefix" })), None, "the id is the plugin's, not what it does");
+        let plain = crate::core_host::Uses::of(&json!(["monitors"]));
+        assert_eq!(Does::of(&json!({ "does": "start-through" }), &plain), None, "a game's start is only a launch plugin's");
     }
 
-    /// Steam opened again as the desktop's menu opens it, its own options kept.
     #[test]
     fn steam_starts_as_its_menu_starts_it() {
         let entry = "[Desktop Entry]\nName=Steam\nExec=/usr/bin/steam -pipewire %U\n\n[Desktop Action Store]\nExec=/usr/bin/steam steam://store\n";
@@ -1320,38 +1186,37 @@ mod tests {
         put(lib.join("steamapps/appmanifest_2180100.acf"), "\"AppState\" { \"installdir\" \"Proton Hotfix\" }");
         put(lib.join("steamapps/common/Proton Hotfix/proton"), "");
         put(lib.join("steamapps/common/Proton Hotfix/toolmanifest.vdf"), "\"manifest\" { \"require_tool_appid\" \"4183110\" }");
+        put(lib.join("steamapps/appmanifest_9999990.acf"), "\"AppState\" { \"installdir\" \"Proton 11.0\" }");
+        put(lib.join("steamapps/common/Proton 11.0/proton"), "");
+        put(lib.join("steamapps/common/Proton 11.0/toolmanifest.vdf"), "\"manifest\" { \"require_tool_appid\" \"4183110\" }");
+        put(lib.join("steamapps/appmanifest_9999991.acf"), "\"AppState\" { \"installdir\" \"Some Game\" }");
+        put(lib.join("steamapps/common/Some Game/game.exe"), "");
         put(root.join("steamapps/appmanifest_4183110.acf"), "\"AppState\" { \"installdir\" \"SteamLinuxRuntime_4\" }");
         put(root.join("steamapps/common/SteamLinuxRuntime_4/_v2-entry-point"), "");
         let b = builds(&root);
-        let ids: Vec<(&str, &str)> = b.iter().map(|b| (b.id.as_str(), b.family)).collect();
-        assert_eq!(ids, [("Proton-GE Latest", "ge"), ("proton_hotfix", "valve")]);
+        let ids: Vec<(&str, bool)> = b.iter().map(|b| (b.id.as_str(), b.from_steam)).collect();
+        assert_eq!(ids, [("Proton-GE Latest", false), ("proton_11", true), ("proton_hotfix", true)], "Steam's own, a newer one too");
+        assert_eq!((steam_id_of("Proton 6.3"), steam_id_of("Proton - Experimental"), steam_id_of("Proton 10.0")), ("proton_63".into(), "proton_experimental".into(), "proton_10".into()));
         assert!(b.iter().all(|b| b.runtime.as_deref() == Some(root.join("steamapps/common/SteamLinuxRuntime_4").as_path())));
         let _ = std::fs::remove_dir_all(&s);
     }
 
-    /// Steam's settings changed (as they are with Steam closed; the test's
-    /// Steam is only files): the games set to start through Ectomatter, their game-helper lines taken out, the other
-    /// games as they were, and both files copied aside first.
+    /// Steam's Compatibility setting changed in place (in a made-up Steam,
+    /// as Steam is only files): the games set to start through Ectomatter,
+    /// the other games as they were, and the file copied aside first.
     #[test]
     fn steams_settings_change_for_the_games_moved() {
         let s = std::env::temp_dir().join(format!("ectomatter-steam-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&s);
         let root = s.join("Steam");
         std::fs::create_dir_all(root.join("config")).unwrap();
-        std::fs::create_dir_all(root.join("userdata/10122646/config")).unwrap();
-        std::fs::write(root.join("config/config.vdf"), "\"InstallConfigStore\"\n{\n\t\"Software\"\n\t{\n\t\t\"Valve\"\n\t\t{\n\t\t\t\"Steam\"\n\t\t\t{\n\t\t\t\t\"CompatToolMapping\"\n\t\t\t\t{\n\t\t\t\t\t\"1808500\"\n\t\t\t\t\t{\n\t\t\t\t\t\t\"name\"\t\t\"proton_hotfix\"\n\t\t\t\t\t\t\"config\"\t\t\"\"\n\t\t\t\t\t\t\"priority\"\t\t\"250\"\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n}\n").unwrap();
-        std::fs::write(root.join("userdata/10122646/config/localconfig.vdf"), "\"UserLocalConfigStore\"\n{\n\t\"Software\"\n\t{\n\t\t\"Valve\"\n\t\t{\n\t\t\t\"Steam\"\n\t\t\t{\n\t\t\t\t\"apps\"\n\t\t\t\t{\n\t\t\t\t\t\"1808500\"\n\t\t\t\t\t{\n\t\t\t\t\t\t\"Playtime\"\t\t\"21842\"\n\t\t\t\t\t\t\"LaunchOptions\"\t\t\"game-helper --orgb ARC Raiders -b --gamescope -m -k -- %command%\"\n\t\t\t\t\t}\n\t\t\t\t\t\"418530\"\n\t\t\t\t\t{\n\t\t\t\t\t\t\"LaunchOptions\"\t\t\"PROTON_SONY_AUTO_XINPUT=0 %command%\"\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n}\n").unwrap();
+        std::fs::write(root.join("config/config.vdf"), "\"InstallConfigStore\"\n{\n\t\"Software\"\n\t{\n\t\t\"Valve\"\n\t\t{\n\t\t\t\"Steam\"\n\t\t\t{\n\t\t\t\t\"CompatToolMapping\"\n\t\t\t\t{\n\t\t\t\t\t\"1808500\"\n\t\t\t\t\t{\n\t\t\t\t\t\t\"name\"\t\t\"proton_hotfix\"\n\t\t\t\t\t\t\"config\"\t\t\"\"\n\t\t\t\t\t\t\"priority\"\t\t\"250\"\n\t\t\t\t\t}\n\t\t\t\t\t\"418530\"\n\t\t\t\t\t{\n\t\t\t\t\t\t\"name\"\t\t\"proton_9\"\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n}\n").unwrap();
         // (the copies in the test's own folder, so Grant's data is never touched)
-        let gh = "game-helper --orgb ARC Raiders -b --gamescope -m -k -- %command%".to_string();
-        let typed = Switch { app: "418530".into(), through: None, launch: Some(("game-helper -- %command%".into(), None)) };
-        let aside = change_files(&root, &[Switch { app: "1808500".into(), through: Some(TOOL), launch: Some((gh, None)) }, typed], &s.join("backups")).unwrap();
+        let aside = change_files(&root, &[Switch { app: "1808500".into(), through: TOOL }], &s.join("backups")).unwrap();
         assert!(aside.starts_with(s.join("backups")));
         assert_eq!(mapping(&root).get("1808500").map(String::as_str), Some(TOOL));
-        let lo = launch_options(&root);
-        assert!(lo.get("1808500").is_none(), "game-helper's line taken out");
-        assert_eq!(lo.get("418530").map(String::as_str), Some("PROTON_SONY_AUTO_XINPUT=0 %command%"), "a line no longer the one read is kept");
+        assert_eq!(mapping(&root).get("418530").map(String::as_str), Some("proton_9"), "another game as it was");
         assert!(std::fs::read_to_string(aside.join("config.vdf")).unwrap().contains("proton_hotfix"), "copied aside first");
-        assert!(std::fs::read_to_string(root.join("userdata/10122646/config/localconfig.vdf")).unwrap().contains("\"Playtime\"\t\t\"21842\""));
         let _ = std::fs::remove_dir_all(&s);
     }
 }

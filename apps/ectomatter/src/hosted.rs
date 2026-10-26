@@ -101,6 +101,8 @@ struct Kept {
 
 #[derive(Clone, Debug, Default)]
 pub struct Told {
+    /// the plugin's name, as its manifest gives it
+    pub name: String,
     /// its readings, each `{id, label, unit, kind}`
     pub list: Value,
     /// the computer's sensors, as ectomatter_sensors' Catalog lists them,
@@ -390,7 +392,8 @@ impl Hosted {
                         changed = true;
                     }
                     "readings/list" => {
-                        self.readings.with(p.package.id(), |t| (t.list, t.catalog) = (params["readings"].clone(), params["catalog"].clone()));
+                        let name = p.package.name().to_string();
+                        self.readings.with(p.package.id(), |t| (t.name, t.list, t.catalog) = (name, params["readings"].clone(), params["catalog"].clone()));
                         changed = true;
                     }
                     "readings/changed" => {
@@ -504,6 +507,21 @@ impl Hosted {
         self.plugins.iter().find(|p| p.package.adds_to_games() && p.package.manifest.uses.launch).map(|p| p.package.id())
     }
 
+    /// A plugin's name, as its manifest gives it.
+    pub fn name_of(&self, id: &str) -> Option<String> {
+        self.plugins.iter().find(|p| p.package.id() == id).map(|p| p.package.name().to_string())
+    }
+
+    /// What a plugin running here may reach, as its manifest says.
+    pub fn uses_of(&self, id: &str) -> Option<&crate::core_host::Uses> {
+        self.plugins.iter().find(|p| p.package.id() == id).map(|p| &p.package.manifest.uses)
+    }
+
+    /// What that plugin's manifest says its games' starts may hold.
+    pub fn launch_grant(&self) -> Option<&crate::launcher::Starts> {
+        self.plugins.iter().find(|p| p.package.adds_to_games() && p.package.manifest.uses.launch).map(|p| &p.package.manifest.uses.starts)
+    }
+
     /// A game's start as that plugin says it (game/launch): the recipe the
     /// launcher starts it from, for the game (`game`: its id, name and Steam
     /// number), its values (its own over Every game's) and what Ectomatter
@@ -511,6 +529,15 @@ impl Hosted {
     pub fn launch(&self, game: &Value, values: &dyn Fn(&str) -> Value, every: &dyn Fn(&str) -> Value, facts: &Value) -> Option<Result<Value, String>> {
         let p = self.plugins.iter().find(|p| p.package.adds_to_games() && p.package.manifest.uses.launch)?;
         Some(p.core.call_within("game/launch", &json!({ "game": game, "values": values(p.package.id()), "every": every(p.package.id()), "facts": facts }), WINDOW_WAITS).map(|v| v["recipe"].clone()))
+    }
+
+    /// What that plugin keeps for a game about to start through Ectomatter
+    /// (game/through): values for the game's page, from how Steam started it
+    /// (`facts`), given its own values and Every game's. None without such a
+    /// plugin; nothing kept where it answers none.
+    pub fn through(&self, game: &Value, own: &Value, every: &Value, facts: &Value) -> Option<Result<Value, String>> {
+        let p = self.plugins.iter().find(|p| p.package.adds_to_games() && p.package.manifest.uses.launch)?;
+        Some(p.core.call_within("game/through", &json!({ "game": game, "own": own, "every": every, "facts": facts }), WINDOW_WAITS).map(|v| v["keep"].clone()))
     }
 
     /// The devices the packages running here told (a plugin's, from the
@@ -899,6 +926,82 @@ mod tests {
         assert!(!asked.is_empty() && asked.iter().all(|u| u.starts_with("https://")), "{asked:?}");
     }
 
+    /// Boundary: what each plugin calls its settings, its buttons and its
+    /// folds is its own, found in what it describes (its sections on a
+    /// game's page, Every game's and an app's, and its Settings section).
+    /// None of it is written into the app, beyond the protocol's own words
+    /// (each in quotes or backticks in docs/core-protocol.md), so a plugin of
+    /// anyone's is drawn and run the same.
+    #[test]
+    fn no_plugins_setting_or_button_is_written_into_the_app() {
+        use crate::boundaries::tests as b;
+        let facts = json!({ "default": "Proton-GE Latest", "home": "/home/someone", "cores": "0-7",
+            "protons": [{ "id": "Proton-GE Latest", "name": "Proton-GE Latest", "path": "/s/compatibilitytools.d/Proton-GE Latest", "runtime": "/s/common/SteamLinuxRuntime_4" }],
+            "main": { "width": 2560, "height": 1440, "refresh": 144, "hdr": false }, "through": [1, 2],
+            "game": { "id": "steam_app_1", "name": "A Game", "app": 1, "native": false, "through": true, "prefix": { "path": "/s/compatdata/1", "bytes": 1u64, "made": true }, "backups": 0 } });
+        fn collect(v: &Value, words: &mut std::collections::BTreeSet<String>) {
+            match v {
+                Value::Object(o) => {
+                    words.extend(o.get("settings").and_then(Value::as_object).into_iter().flatten().map(|(k, _)| k.clone()));
+                    words.extend(o.get("actions").and_then(Value::as_array).into_iter().flatten().filter_map(|a| a["id"].as_str().map(String::from)));
+                    words.extend(o.get("fold").and_then(|f| f["id"].as_str()).map(String::from));
+                    o.values().for_each(|x| collect(x, words));
+                }
+                Value::Array(a) => a.iter().for_each(|x| collect(x, words)),
+                _ => {}
+            }
+        }
+        let mut words = std::collections::BTreeSet::new();
+        let dir = crate::packages::builtin_dir(Kind::Plugin);
+        let mut ids: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().filter(|e| e.path().join("core.json").exists()).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        ids.sort();
+        for id in &ids {
+            let mut ps = Hosted::new(Arc::new(Desk));
+            ps.start(crate::packages::Package::read(&dir.join(id), false).unwrap());
+            ps.poll();
+            for page in ["game", "every", "app"] {
+                for (_, s) in ps.sections(page, "A Game", &|_| json!({ "facts": facts.clone(), "values": {} })) {
+                    collect(&s, &mut words);
+                }
+            }
+            for (_, s) in ps.settings_sections() {
+                collect(&s, &mut words);
+            }
+        }
+        assert!(words.len() > 20, "every plugin described itself: {words:?}");
+        // (the protocol's own words, as its doc writes them as code: in its code
+        // blocks and its `code` spans, never its prose)
+        let doc = b::read("docs/core-protocol.md");
+        let mut code = Vec::new();
+        for (i, part) in doc.split("```").enumerate() {
+            if i % 2 == 1 {
+                code.push(part.to_string());
+            } else {
+                code.extend(part.split('`').skip(1).step_by(2).map(String::from));
+            }
+        }
+        let protocol: std::collections::BTreeSet<String> = code.iter().flat_map(|c| c.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-')).filter(|w| !w.is_empty()).map(String::from).collect::<Vec<_>>()).collect();
+        let theirs: Vec<&String> = words.iter().filter(|w| !protocol.contains(*w)).collect();
+        assert!(theirs.len() >= 10, "the plugins' own words, beyond the protocol's: {theirs:?}");
+        let mut found = Vec::new();
+        for f in b::rust_files() {
+            if f.ends_with("boundaries.rs") {
+                continue;
+            }
+            for (n, line) in b::code(&f) {
+                if let Some(w) = theirs.iter().find(|w| line.contains(&format!("\"{w}\""))) {
+                    found.push(format!("{f}:{n} {w}"));
+                }
+            }
+        }
+        for (f, n, line) in b::ui_code() {
+            if let Some(w) = theirs.iter().find(|w| line.contains(&format!("\"{w}\""))) {
+                found.push(format!("{f}:{n} {w}"));
+            }
+        }
+        b::fail_on(found, "a plugin's setting, button or fold written into the app");
+    }
+
     /// The Monitor Switcher's section: a column for each monitor, a cell
     /// saying why where a monitor can't do something, and the main monitor.
     #[test]
@@ -928,7 +1031,7 @@ mod tests {
         assert_eq!(ps.launcher(), Some("game-configurator"));
         let facts = json!({
             "default": "Proton-GE Latest", "home": "/home/someone", "cores": "0-7,16-23",
-            "protons": [{ "id": "Proton-GE Latest", "name": "Proton-GE Latest", "path": "/s/compatibilitytools.d/Proton-GE Latest", "runtime": "/s/common/SteamLinuxRuntime_4", "family": "ge" }],
+            "protons": [{ "id": "Proton-GE Latest", "name": "Proton-GE Latest", "path": "/s/compatibilitytools.d/Proton-GE Latest", "runtime": "/s/common/SteamLinuxRuntime_4" }],
             "main": { "width": 3440, "height": 1440, "refresh": 240, "hdr": true },
             "game": { "id": "steam_app_1808500", "name": "ARC Raiders", "app": 1808500, "native": false, "through": true, "prefix": { "path": "/home/someone/.local/share/Steam/steamapps/compatdata/1808500", "bytes": 662000000u64, "made": true }, "backups": 1 },
         });
@@ -948,7 +1051,7 @@ mod tests {
         // too, is all Ectomatter knows safe: written whole)
         for values in [json!({ "hdr": "proton" }), json!({ "hdr": "gamescope", "gs": true, "mangohud": true, "cap": "120", "env": { "MY_MOD": "1" }, "dll": "dwrite=n,b" }), json!({ "hdr": "proton", "dlss": true, "fsr4": true, "xess": true, "log": true, "wined3d": true, "nofsync": true, "nontsync": true, "hidenv": true, "xbox": true, "gamemode": true })] {
             let r = ps.launch(&json!({ "id": "steam_app_1808500", "name": "ARC Raiders", "app": 1808500 }), &|_| values.clone(), &|_| json!({}), &facts).unwrap().unwrap();
-            let (checked, left_out) = crate::launcher::checked_recipe(&r, &facts, &["MY_MOD".to_string()]);
+            let (checked, left_out) = crate::launcher::checked_recipe(&r, &facts, ps.launch_grant().unwrap(), &["MY_MOD".to_string()]);
             assert_eq!((&checked, left_out), (&r, Vec::<String>::new()), "{r}");
             if values["dlss"] == true {
                 for v in ["PROTON_DLSS_UPGRADE", "PROTON_FSR4_UPGRADE", "PROTON_XESS_UPGRADE", "PROTON_NO_NTSYNC", "PROTON_LOG"] {

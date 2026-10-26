@@ -108,32 +108,11 @@ fn kept_at() -> (Option<PathBuf>, Option<PathBuf>) {
     (Some(p.clone()), Some(p))
 }
 
-/// Each plugin's choices kept under an id it had before (packages::RENAMED),
-/// put under the one it has now; whether any were.
-fn renamed(v: &mut Value) -> bool {
-    let Some(m) = v["plugins"].as_object_mut() else { return false };
-    let mut any = false;
-    for (old, new) in crate::packages::RENAMED {
-        if !m.contains_key(new) {
-            if let Some(kept) = m.remove(old) {
-                m.insert(new.into(), kept);
-                any = true;
-            }
-        }
-    }
-    any
-}
-
 impl Library {
     pub fn load() -> Library {
         let (read, write) = kept_at();
-        let mut v = read.and_then(|p| std::fs::read(p).ok()).and_then(|b| serde_json::from_slice::<Value>(&b).ok()).filter(|v| v.is_object()).unwrap_or_else(|| json!({}));
-        let renamed = renamed(&mut v);
-        let l = Library { path: write, v, steam: None };
-        if renamed {
-            l.save();
-        }
-        l
+        let v = read.and_then(|p| std::fs::read(p).ok()).and_then(|b| serde_json::from_slice::<Value>(&b).ok()).filter(|v| v.is_object()).unwrap_or_else(|| json!({}));
+        Library { path: write, v, steam: None }
     }
 
     /// A Library kept nowhere, as given (for the tests).
@@ -885,19 +864,6 @@ mod tests {
         let ids: Vec<String> = l.entries(&|i| i.into()).into_iter().map(|e| e.id).collect();
         assert_eq!(ids, vec![a.clone(), b]);
         assert!(l.is_favorite(&a) && l.choice(&a, "z10") == Some(Choice::Profile("2".into())));
-    }
-
-    /// A plugin's choices kept under an id it had before are its own again,
-    /// as Monitor Configurator's and Monitors' are the Monitor Switcher's;
-    /// none are lost, and none are moved twice.
-    #[test]
-    fn a_plugins_choices_follow_its_new_name() {
-        let mut v = json!({ "plugins": { "monitor-configurator": { "game:*": { "edid:MSI/brightness": "100" } }, "weather": { "x": 1 }, "game-configurator": {} } });
-        assert!(renamed(&mut v));
-        assert_eq!(v["plugins"]["monitor-switcher"]["game:*"]["edid:MSI/brightness"], "100");
-        assert_eq!(v["plugins"]["weather-feed"]["x"], 1);
-        assert!(v["plugins"].get("monitor-configurator").is_none() && v["plugins"].get("weather").is_none() && v["plugins"].get("game-configurator").is_some());
-        assert!(!renamed(&mut v), "once only");
     }
 
     /// A game's choices in a plugin's section are its own over Every game's;

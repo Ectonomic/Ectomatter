@@ -104,7 +104,7 @@ pub enum Menu {
 pub enum Spot {
     Option { plugin: String, key: String, value: Value },
     Check { plugin: String, key: String },
-    Action { plugin: String, action: String },
+    Action { plugin: String, action: Value },
     Fold(String),
     Text { plugin: String, key: String },
     Pair { plugin: String, key: String, name: String },
@@ -1207,7 +1207,7 @@ impl Games {
                     y += h + gap;
                     col.reach(y + h);
                 }
-                let index = self.spot(Spot::Action { plugin: sec.plugin.clone(), action: a["id"].as_str().unwrap_or("").to_string() });
+                let index = self.spot(Spot::Action { plugin: sec.plugin.clone(), action: a.clone() });
                 out.push(if quiet {
                     Cell { text: label.into(), lines: glyph.into(), style: if off { 2 } else { 1 }, id: id_of(Ctl::LibSpot), index, ..cell(kind::QUIET, x, y, bw, h) }
                 } else {
@@ -1739,10 +1739,15 @@ impl Games {
             }
             Form::Var(f) => {
                 ui.set_gl_modal(5);
-                let page = self.open.clone().unwrap_or_default();
-                let n = if page == EVERY { "each game".to_string() } else { self.name(&page, seen) };
-                ui.set_gl_var_title(if f.editing.is_some() { "Change the variable" } else { "Add a variable" }.into());
-                ui.set_gl_var_sub(format!("Ectomatter sets it before {n} starts.").into());
+                // (its words are its plugin's, as the setting describes the pairs)
+                let d = self.sections.iter().find(|s| s.plugin == f.plugin).map(|s| s.desc["settings"][f.key.as_str()].clone()).unwrap_or_default();
+                let words = |k: &str, or: &str| d[k].as_str().unwrap_or(or).to_string();
+                ui.set_gl_var_title(if f.editing.is_some() { words("change", "Change it") } else { words("add", "Add") }.into());
+                ui.set_gl_var_sub(words("note", "").into());
+                ui.set_gl_var_name_label(words("name", "Name").into());
+                ui.set_gl_var_value_label(words("value", "Value").into());
+                ui.set_gl_var_name_hint(d["hints"][0].as_str().unwrap_or("").into());
+                ui.set_gl_var_value_hint(d["hints"][1].as_str().unwrap_or("").into());
                 ui.set_gl_var_editing(f.editing.is_some());
                 let (ok, warn) = self.var_check(&f, ui);
                 ui.set_gl_var_warning(warn.into());
@@ -1910,7 +1915,7 @@ impl Games {
     /// One of a section's controls used (LibSpot, by its place): an option
     /// chosen, a fold opened or shut, a variable's form opened. An action is
     /// the window's to make: its plugin and its id.
-    pub fn spot_picked(&mut self, k: usize, ui: &AppWindow) -> Option<(String, String)> {
+    pub fn spot_picked(&mut self, k: usize, ui: &AppWindow) -> Option<(String, Value)> {
         self.commit_typed();
         let s = self.spots.get(k)?.clone();
         self.menu = None;

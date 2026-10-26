@@ -322,22 +322,21 @@ impl Source {
         }
     }
 
-    /// Where the reading comes from, as the piece's box says it.
-    pub fn from(self) -> &'static str {
-        match self {
-            Source::CpuTemp => "This computer’s temperature sensor (k10temp)",
-            Source::CpuLoad | Source::Memory => "This computer (/proc)",
-            Source::CpuClock => "This computer (/sys)",
-            Source::GpuTemp | Source::GpuLoad | Source::GpuClock | Source::VideoMemory => "NVIDIA’s driver (NVML)",
+    /// Where the reading comes from, as the piece's box says it: a plugin's
+    /// reading, by its plugin's name.
+    pub fn from(self) -> String {
+        let says = match self {
+            Source::Reading(n) => return plugin_reading_of(n).map_or_else(|| "A plugin".to_string(), |r| r.plugin_name),
+            Source::CpuTemp | Source::CpuLoad | Source::Memory | Source::CpuClock | Source::GpuTemp | Source::GpuLoad | Source::GpuClock | Source::VideoMemory => "This computer’s sensors",
             Source::Date => "This computer’s clock",
             Source::Profile | Source::ProfileNumber => "The profile the keyboard is using",
             Source::GameMode | Source::KeyRollover => "The keyboard, with Ectomatter’s firmware build 5 or later",
             Source::OutsideTemp | Source::Sky => "The weather plugin, for the place set in Settings",
             Source::Sensor(_) => "One of this computer’s sensors",
-            Source::Reading(_) => "A plugin",
             Source::GameName | Source::SessionTime | Source::TimePlayed | Source::LastPlayed => "The game in Ectomatter’s Library starting, playing or quitting",
             Source::ChangingNow | Source::ChangesDone => "What Ectomatter sets as a game starts, and puts back as it quits",
-        }
+        };
+        says.to_string()
     }
 
     /// Whether a temperature, which can be shown in °C or °F.

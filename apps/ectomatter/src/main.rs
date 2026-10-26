@@ -18,8 +18,6 @@
 //! ECTOMATTER_TYPE, so each state of the page can be checked offscreen.
 //!
 //! `ectomatter --hide` starts into the tray, as it starts at login.
-//! `ectomatter --move-game-helper` moves every game whose launch line in Steam
-//! runs game-helper to start through Ectomatter, and stops.
 
 // A function that can only call itself is a crash waiting for its caller, so
 // it stops the build rather than warning (one slipped through in 1da0b0b).
@@ -630,28 +628,6 @@ fn main() {
         return;
     }
 
-    // `--move-game-helper`: every game whose launch line in Steam runs game-helper set to
-    // start through Ectomatter, its flags carried over into the Library, and stop
-    if args.iter().any(|a| a == "--move-game-helper") {
-        // (the devices' keys, as their cores describe them, started with no device)
-        let mut hosted = hosted::Hosted::with_usb(std::sync::Arc::new(computer::ThisComputer::new()), Box::new(|| Box::new(core_host::NoDevices)));
-        hosted.start_all(&settings::Settings::load(config_dir().join("settings.json")));
-        devices_described(&hosted);
-        // (into the values of the plugin that says how games start)
-        let Some(plugin) = hosted.launcher().map(String::from) else {
-            eprintln!("ectomatter: no plugin says how games start, so there's nothing to move game-helper's flags into");
-            std::process::exit(1);
-        };
-        match launcher::move_game_helper(&plugin) {
-            Ok(said) => println!("{said}"),
-            Err(e) => {
-                eprintln!("ectomatter: {e}");
-                std::process::exit(1);
-            }
-        }
-        return;
-    }
-
     let made = Rc::new(RefCell::new(Vec::new()));
     slint::platform::set_platform(Box::new(Platform { made: made.clone(), start: Instant::now() })).unwrap();
     glyph_fonts_in_windows();
@@ -711,7 +687,6 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         .unwrap_or(SIZE);
     window.set_size(PhysicalSize::new(w, h));
     let settings = settings::Settings::load(config_dir().join("settings.json"));
-    packages::rename_settings(&settings);
     let mut hosted = hosted::Hosted::new(std::sync::Arc::new(computer::ThisComputer::new()));
     hosted.start_all(&settings);
     devices_described(&hosted);
@@ -723,13 +698,12 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     }
     // the screen as the player would have it: this computer's Stats, or
     // ECTOMATTER_LCD's rows (split by |), in ECTOMATTER_LCD_STATE
-    // (playing, paused, other, missing, launch, exit)
+    // (playing, paused, missing, launch, exit)
     {
         let rows = std::env::var("ECTOMATTER_LCD").map(|r| r.split('|').map(String::from).collect()).unwrap_or_else(|_| lcd_stats::Stats::of(front.hosted.readings(), "snapshot").rows());
         let st = std::env::var("ECTOMATTER_LCD_STATE").unwrap_or_default();
         let state = match st.as_str() {
             "paused" => lcd_player::State::Paused,
-            "other" => lcd_player::State::Other,
             "missing" => lcd_player::State::Missing,
             _ => lcd_player::State::Playing,
         };
@@ -1990,7 +1964,6 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
     // keyboard's page talks to the first core describing a keyboard, the
     // mouse's to the first describing a mouse
     old_name::move_old_settings(&settings);
-    packages::rename_settings(&settings);
     let mut hosted = hosted::Hosted::new(std::sync::Arc::new(computer::ThisComputer::new()));
     hosted.start_all(&settings);
     devices_described(&hosted);

@@ -82,20 +82,22 @@ fn bare(label: &str) -> bool {
 pub fn from_line(src: Source, cat: &Catalog, setup: &crate::sensors::Setup) -> Option<(String, &'static str)> {
     let more = "Add more sensors";
     let main = setup.main_card(cat);
-    // the sensor it reads, by id
+    // the sensor it reads, by id: the part's usual one of its kind, as the catalog marks it
+    let usual = |d: Option<&ectomatter_sensors::list::Device>, w: What| d.and_then(|d| d.sensors.iter().find(|s| s.what == w && s.usual)).map(|s| s.id.clone());
+    let part = |p: Part| cat.devices.iter().find(|d| d.part == p);
     let id = match src {
-        Source::CpuTemp => cat.cpu_temp().map(|s| s.id.clone()),
-        Source::CpuLoad => Some("cpu/load".to_string()),
-        Source::CpuClock => Some("cpu/clock/average".to_string()),
-        Source::Memory => Some("memory/used".to_string()),
+        Source::CpuTemp => usual(part(Part::Processor), What::Temperature),
+        Source::CpuLoad => usual(part(Part::Processor), What::Load),
+        Source::CpuClock => usual(part(Part::Processor), What::Clock),
+        Source::Memory => usual(part(Part::Memory), What::InUse),
         Source::GpuTemp | Source::GpuLoad | Source::GpuClock | Source::VideoMemory => {
-            let k = ["temperature", "load", "clock", "video-memory"][[Source::GpuTemp, Source::GpuLoad, Source::GpuClock, Source::VideoMemory].iter().position(|s| *s == src).unwrap()];
+            let w = [What::Temperature, What::Load, What::Clock, What::InUse][[Source::GpuTemp, Source::GpuLoad, Source::GpuClock, Source::VideoMemory].iter().position(|s| *s == src).unwrap()];
             let d = main?;
             // (a reading the main card's driver doesn't report: the card's note says why)
-            if cat.sensor(&format!("{}/{k}", d.key)).is_none() {
-                return Some((format!("The main card, now the {}, doesn’t report this. Change the main card in Settings.", d.card.as_ref()?.name), "Change the main card"));
+            match usual(Some(d), w) {
+                Some(id) => Some(id),
+                None => return Some((format!("The main card, now the {}, doesn’t report this. Change the main card in Settings.", d.card.as_ref()?.name), "Change the main card")),
             }
-            Some(format!("{}/{k}", d.key))
         }
         Source::Sensor(n) => Some(crate::sensors::id_of(n)),
         _ => None,
@@ -384,7 +386,7 @@ pub fn block_box(page: &Page, chosen: Option<usize>, r: &Readings, avail: &[Sour
             g.value("Looks like", &looks(p, r));
             match &from.line {
                 Some((line, link)) => g.note_link(Some("From"), line, link, Ctl::OpenSettings),
-                None if avail.contains(src) => g.note(Some("From"), src.from()),
+                None if avail.contains(src) => g.note(Some("From"), &src.from()),
                 None => g.note(Some("From"), &format!("Ectomatter can’t read the {} on this computer, so the block says “unavailable”.", src.title().to_lowercase())),
             }
             g.note(None, DRAG);

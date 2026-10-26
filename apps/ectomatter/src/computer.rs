@@ -96,7 +96,7 @@ impl crate::core_host::Computer for ThisComputer {
     }
 
     fn fetch(&self, url: &str, timeout: Duration) -> Result<String, String> {
-        let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(timeout)).user_agent("Ectomatter (github.com/OMGrant/Ectomatter)").build().into();
+        let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(timeout)).user_agent("Ectomatter (github.com/Ectonomic/Ectomatter)").build().into();
         let mut answer = agent.get(url).call().map_err(|e| match e {
             ureq::Error::StatusCode(code) => format!("{url} answered {code}"),
             e => e.to_string(),

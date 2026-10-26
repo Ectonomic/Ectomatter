@@ -5,7 +5,7 @@
 //! Ectomatter keeps for it (launch/<app>.json in Ectomatter's data folder,
 //! else launch/default.json, Every game's): the Proton build, the Steam Linux
 //! Runtime that build runs in, the environment, what wraps the game
-//! (gamescope, GameMode, MangoHud) and the game's own arguments.
+//! (the programs its plugin names) and the game's own arguments.
 //!
 //! Before the game starts, it asks Ectomatter, if it's running, to make the
 //! game's changes first (its devices' profiles, its monitors, its scripts),
@@ -261,8 +261,8 @@ fn recipe(data: &Path, app: &str, notes: &mut Vec<String>) -> Value {
 }
 
 /// The Proton build to start the game with: the recipe's, while it's
-/// installed; else the first installed of GE-Proton, Proton-CachyOS, then
-/// Valve's newest.
+/// installed; else the first installed of those it names instead, in its
+/// order (the plugin's); else any installed, the last by name first.
 fn proton_of(recipe: &Value, steam: &Path, libraries: &[PathBuf], notes: &mut Vec<String>) -> Option<PathBuf> {
     let is_proton = |p: &Path| p.join("proton").is_file();
     if let Some(p) = recipe["proton"].as_str().map(PathBuf::from) {
@@ -271,17 +271,19 @@ fn proton_of(recipe: &Value, steam: &Path, libraries: &[PathBuf], notes: &mut Ve
         }
         notes.push(format!("{} isn't installed anymore", p.display()));
     }
+    for p in recipe["instead"].as_array().into_iter().flatten().filter_map(Value::as_str).map(PathBuf::from) {
+        if is_proton(&p) {
+            notes.push(format!("started with {}", p.display()));
+            return Some(p);
+        }
+    }
     let mut found: Vec<PathBuf> = Vec::new();
     for dir in std::iter::once(steam.join("compatibilitytools.d")).chain(libraries.iter().map(|l| l.join("steamapps/common"))) {
         if let Ok(rd) = std::fs::read_dir(&dir) {
             found.extend(rd.flatten().map(|e| e.path()).filter(|p| is_proton(p)));
         }
     }
-    let rank = |p: &PathBuf| {
-        let n = p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
-        if n.contains("ge") && n.contains("proton") { 0 } else if n.contains("cachyos") { 1 } else if n.contains("experimental") { 2 } else { 3 }
-    };
-    found.sort_by(|a, b| rank(a).cmp(&rank(b)).then_with(|| b.cmp(a)));
+    found.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
     let pick = found.into_iter().next()?;
     notes.push(format!("started with {}", pick.display()));
     Some(pick)
@@ -512,22 +514,30 @@ mod tests {
     }
 
     /// A game with no recipe of its own takes Every game's; a Proton build
-    /// that's gone falls back to one that's installed; a wrapper that isn't
-    /// installed is left out. Each is said in the notes, and the game starts.
+    /// that's gone falls back to the first installed of those the recipe
+    /// names instead, else to any installed; a wrapper that isn't installed
+    /// is left out. Each is said in the notes, and the game starts.
     #[test]
     fn a_game_always_starts() {
         let s = Scratch::new("fallback");
         let env = steam(&s);
+        s.file("Steam/compatibilitytools.d/Proton-Other 2/proton", "#!/bin/sh\n");
+        let gone = s.0.join("Steam/compatibilitytools.d/proton-cachyos-10.0-20260420-slr-x86_64");
+        let ge = s.0.join("Steam/compatibilitytools.d/Proton-GE Latest");
+        let other = s.0.join("Steam/compatibilitytools.d/Proton-Other 2");
         s.file("data/com.ectonomic.ectomatter/launch/default.json", &json!({
-            "proton": s.0.join("Steam/compatibilitytools.d/proton-cachyos-10.0-20260420-slr-x86_64"),
+            "proton": gone, "instead": [s.0.join("Steam/compatibilitytools.d/also-gone"), ge],
             "wrap": [["gamescope", "-W", "3440", "--"], ["gamemoderun"]],
         }).to_string());
         let p = plan(START, &game(), &env);
-        let ge = s.0.join("Steam/compatibilitytools.d/Proton-GE Latest/proton");
         assert_eq!(p.argv[0], "gamemoderun", "gamescope isn't installed here");
-        assert!(p.argv.contains(&ge.display().to_string()), "{:?}", p.argv);
+        assert!(p.argv.contains(&ge.join("proton").display().to_string()), "the recipe's own next pick: {:?}", p.argv);
         let notes = p.notes.join(" | ");
         assert!(notes.contains("no recipe of its own") && notes.contains("isn't installed anymore") && notes.contains("gamescope isn't installed"), "{notes}");
+        // (and with none named instead, any installed)
+        s.file("data/com.ectonomic.ectomatter/launch/default.json", &json!({ "proton": gone }).to_string());
+        let p = plan(START, &game(), &env);
+        assert!(p.argv.contains(&other.join("proton").display().to_string()) || p.argv.contains(&ge.join("proton").display().to_string()), "{:?}", p.argv);
     }
 
     /// Steam's other verbs: an install script and a path asked for run in

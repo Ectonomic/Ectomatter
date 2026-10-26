@@ -7,7 +7,7 @@ name = "ectomatter-tokens"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/OMGrant/Ectomatter"
+repository = "https://github.com/Ectonomic/Ectomatter"
 description = "Ectomatter's design tokens, as Slint globals and Rust constants."
 
 [dependencies]

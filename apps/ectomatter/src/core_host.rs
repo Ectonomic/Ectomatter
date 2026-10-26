@@ -69,6 +69,9 @@ pub struct Uses {
     /// how games start: the recipe Ectomatter's launcher starts each game
     /// from, and the Wine tools run in a game's prefix (game/launch)
     pub launch: bool,
+    /// what those starts may hold: the programs a game may be wrapped in and
+    /// the variables it may set (`{"launch": {"wrap", "env"}}`)
+    pub starts: crate::launcher::Starts,
     /// anything else it names, as it names it ("sound-capture")
     pub other: Vec<String>,
 }
@@ -84,6 +87,10 @@ impl Uses {
                 Value::String(s) => u.other.push(s.clone()),
                 Value::Object(o) => {
                     let to = |a: &str| o.get("to").and_then(Value::as_str).unwrap_or(a).to_string();
+                    if let Some(l) = o.get("launch") {
+                        u.launch = true;
+                        u.starts = crate::launcher::Starts::of(l);
+                    }
                     if let Some(a) = o.get("network").and_then(Value::as_str) {
                         u.network.push((a.to_string(), to(a)));
                     }

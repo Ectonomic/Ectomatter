@@ -1103,17 +1103,12 @@ impl Page {
         self.dev.as_ref().is_some_and(|d| crate::display::has(&d["firmware"], "sliders.read"))
     }
 
-    /// The line under the keyboard's name, and the chip beside it for
-    /// firmware that isn't its maker's, as its core describes the firmware.
+    /// The line under the keyboard's name, and the chip beside it (for
+    /// firmware that isn't its maker's), as its core describes the firmware.
     pub fn firmware_line(&self) -> (String, Option<String>) {
         let fw = self.dev.as_ref().map_or(&Value::Null, |d| &d["firmware"]);
         let line = format!("Connected, firmware v{}", fw["version"].as_str().unwrap_or(""));
-        let chip = match fw["kind"].as_str() {
-            Some("custom") => Some(fw["build"].as_u64().map_or("Unofficial build".to_string(), |b| format!("Unofficial build {b}"))),
-            Some("unknown") => Some("Unofficial build".into()),
-            _ => None,
-        };
-        (line, chip)
+        (line, fw["chip"].as_str().map(String::from))
     }
 }
 

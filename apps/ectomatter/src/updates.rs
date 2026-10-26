@@ -133,6 +133,22 @@ fn reach(m: &Value) -> Vec<String> {
     out.extend(u.read.iter().map(|r| format!("read {r}")));
     out.extend([(u.monitors, "monitors"), (u.nvidia, "nvidia"), (u.launch, "launch")].into_iter().filter(|(on, _)| *on).map(|(_, w)| w.to_string()));
     out.extend(u.other.iter().cloned());
+    // (each program a game may run through, each option it may be given, and
+    // each variable a game may be given, each with every way its value may be
+    // written, so a wider one is more)
+    for w in &u.starts.wrappers {
+        out.push(format!("wrap {}", w.program));
+        for (o, how) in &w.options {
+            out.push(format!("wrap {} {o}", w.program));
+            out.extend(how.iter().flat_map(|h| h.within()).map(|k| format!("wrap {} {o} as {}", w.program, k.name())));
+        }
+        out.extend(w.last.iter().map(|l| format!("wrap {} {l}", w.program)));
+    }
+    out.extend(u.starts.tools.iter().map(|p| format!("tool {p}")));
+    for (k, how) in &u.starts.variables {
+        out.push(format!("env {k}"));
+        out.extend(how.within().iter().map(|h| format!("env {k} as {}", h.name())));
+    }
     out
 }
 
@@ -143,17 +159,32 @@ fn reach(m: &Value) -> Vec<String> {
 pub fn more_than(new: &Value, now: &Value) -> Vec<String> {
     let had = reach(now);
     let u = crate::core_host::Uses::of(&new["uses"]);
-    reach(new)
-        .into_iter()
-        .filter(|r| !had.contains(r))
-        .map(|r| match r.split_once(' ') {
-            Some(("web", h)) => format!("Reaches {} over the internet, at {h}.", u.web.iter().find(|(x, _)| x == h).map_or(h, |(_, to)| to.as_str())),
-            Some(("network", a)) => format!("Talks to {} at {a}.", u.network.iter().find(|(x, _)| x == a).map_or(a, |(_, to)| to.as_str())),
-            Some(("read", p)) => format!("Reads {p} without changing it."),
-            Some(("usb", _)) => "Talks to another USB device.".into(),
-            _ => packages::can_words(&json!({ "uses": [r] })).into_iter().next().unwrap_or(r),
-        })
-        .collect()
+    let more: Vec<String> = reach(new).into_iter().filter(|r| !had.contains(r)).collect();
+    let mut out: Vec<String> = Vec::new();
+    for r in &more {
+        // (a wider way of writing is said only of what was there before)
+        if r.split_once(" as ").is_some_and(|(of, _)| more.iter().any(|m| m == of)) {
+            continue;
+        }
+        let parts: Vec<&str> = r.split(' ').collect();
+        let words = match parts[..] {
+            ["web", h] => format!("Reaches {} over the internet, at {h}.", u.web.iter().find(|(x, _)| x == h).map_or(h, |(_, to)| to.as_str())),
+            ["network", a] => format!("Talks to {} at {a}.", u.network.iter().find(|(x, _)| x == a).map_or(a, |(_, to)| to.as_str())),
+            ["read", p] => format!("Reads {p} without changing it."),
+            ["usb", ..] => "Talks to another USB device.".into(),
+            ["wrap", p] => format!("Runs games through {p}."),
+            ["wrap", p, o] => format!("Runs {p} with the option {o}."),
+            ["wrap", p, o, "as", _] => format!("Runs {p} with more kinds of values for the option {o}."),
+            ["tool", p] => format!("Runs {p} in a game’s prefix."),
+            ["env", k] => format!("Sets {k} for each game."),
+            ["env", k, "as", _] => format!("Sets {k} to more kinds of values than before."),
+            _ => packages::can_words(&json!({ "uses": [r] })).into_iter().next().unwrap_or(r.clone()),
+        };
+        if !out.contains(&words) {
+            out.push(words);
+        }
+    }
+    out
 }
 
 /// Where a package's updates stand: up to date (when it was checked); a
@@ -392,6 +423,14 @@ pub mod tests {
         let renamed = json!({ "uses": [{ "web": "elsewhere.example", "to": "Example" }] });
         assert_eq!(more_than(&renamed, &json!({ "uses": [{ "web": "example.com", "to": "Example" }] })), ["Reaches Example over the internet, at elsewhere.example."]);
         assert!(more_than(&json!({ "uses": ["monitors"] }), &json!({ "uses": ["monitors", "nvidia"] })).is_empty(), "less is no more");
+        // (a game's start: a new program, a new option, a new variable and a wider one are each more)
+        let start = |wrap: Value, env: Value| json!({ "uses": [{ "launch": { "wrap": wrap, "env": env } }] });
+        let now = start(json!({ "foowrap": { "options": { "--level": "number" } } }), json!({ "FOO_TUNE": "number" }));
+        let new = start(json!({ "foowrap": { "options": { "--level": "number", "--fast": null } }, "barwrap": {} }), json!({ "FOO_TUNE": "list", "FOO_NEW": "word" }));
+        let mut more = more_than(&new, &now);
+        more.sort();
+        assert_eq!(more, ["Runs foowrap with the option --fast.", "Runs games through barwrap.", "Sets FOO_NEW for each game.", "Sets FOO_TUNE to more kinds of values than before."]);
+        assert!(more_than(&now, &new).is_empty(), "less is no more");
         // (a package that isn't what its checksum says, and one with no checksum)
         let (manifest, package) = package_of("1.0.2");
         let at = fake_github(vec![(format!("{base}/core.json"), manifest.clone()), (format!("{base}/monitor-switcher.ectocore"), package.clone()), (format!("{base}/monitor-switcher.ectocore.sha256"), b"0000  monitor-switcher.ectocore".to_vec())]);
