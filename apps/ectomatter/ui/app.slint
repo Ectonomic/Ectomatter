@@ -4379,9 +4379,10 @@ export component AppWindow inherits Window {
         background: Ink.frame;
         border-bottom-left-radius: root.radius;
         clip: !root.rail-open ? false : true;
-        // (its items in from its edges by as much as its width leaves, Space.tight apart;
+        // (its items in from its edges as far as the shut rail has them, open or shut, so
+        // opened its items widen for their names and stay where they were; Space.tight apart;
         // the devices Space.pad under Home; Library and Settings at its foot)
-        property <length> rail-in: (rail-w - Size.rail) / 2;
+        property <length> rail-in: (Size.rail-shut - Size.rail) / 2;
         property <length> pitch: Size.rail + Space.tight;
         r-home := RailItem {
             x: parent.rail-in;
