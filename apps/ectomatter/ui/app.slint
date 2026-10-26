@@ -2621,11 +2621,13 @@ export component AppWindow inherits Window {
                     y: low-y;
                     width: pws-w - mouse-pro-w;
                     height: max(self.preferred-height, mouse-band-min);
+                    // (as tall as the box that goes with it, beside it or, in a narrow
+                    // window, under it)
                     if root.mouse-tab == 0: KeyLibrary {
                         min-width: Size.library;
                         preferred-width: Size.library;
                         max-height: mouse-band-max;
-                        preferred-height: mouse-band-min;
+                        preferred-height: max(mouse-band-min, mouse-second-need);
                         layer: 0;
                         layers: root.mouse-layers;
                         placeholder: "Find a button or what it does";
@@ -3224,11 +3226,13 @@ export component AppWindow inherits Window {
                     width: under-w;
                     // (at least as tall as the Profiles column beside it, its one line then as tall)
                     height: max(self.preferred-height, band-min);
+                    // (as tall as the box that goes with it, beside it or, in a narrow
+                    // window, under it)
                     if root.tab == 0 && root.boot == 0: KeyLibrary {
                         min-width: Size.library;
                         preferred-width: Size.library;
                         max-height: band-max;
-                        preferred-height: band-min;
+                        preferred-height: max(band-min, second-need);
                         layer: root.layer;
                         reveal-y: root.lib-reveal-y;
                         reveal-n: root.lib-reveal-n;

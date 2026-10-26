@@ -67,7 +67,7 @@
     "box-head": { "$value": { "value": 48, "unit": "px" }, "$description": "A box's head: its title's band (Space.pad's worth less 2 above it, 22 tall), where what the box holds starts." },
     "column": { "$value": { "value": 240, "unit": "px" }, "$description": "A page's first column: the Profiles box, a side list (the mouse's lights)." },
     "library": { "$value": { "value": 440, "unit": "px" }, "$description": "The Key library's box, at its least (a row of boxes grows a box from its least)." },
-    "detail": { "$value": { "value": 460, "unit": "px" }, "$description": "A key's or a button's job box, at its least." },
+    "detail": { "$value": { "value": 456, "unit": "px" }, "$description": "A key's or a button's job box, at its least: as narrow as its kinds' switch still reads whole (the mouse's eight, Sensitivity the longest), so the row of boxes holds it beside the Key library with the rail open in a 1440 window." },
     "game": { "$value": { "value": 340, "unit": "px" }, "$description": "Game mode's box, at its least." },
     "effects": { "$value": { "value": 300, "unit": "px" }, "$description": "The effects' box (three tiles across), at its least." },
     "settings": { "$value": { "value": 360, "unit": "px" }, "$description": "A box of settings laid out from a description (an effect's, a mouse's section) and a slider's box, at their least." },
