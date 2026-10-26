@@ -17,15 +17,17 @@ use crate::picture::{Decor, Dots, PadLaid, Photo, Plate, RingLaid};
 
 /// The desk's units: at 100% a logical pixel; the Z10's 470 mm are 760 of them.
 pub const PER_MM: f32 = 760.0 / 470.0;
-/// The dots' spacing, in the desk's units; devices sit on them.
+/// Every other dot's spacing, in the desk's units: where a device is put the
+/// first time it's met, and a pad is added (in Arrange, what's carried moves
+/// a dot at a time, `on_dots`).
 pub const SNAP: f32 = 24.0;
 /// At the fit, the dots' least margin from the window's edges; and at any
 /// view, how near the edge a dot may be.
 const EDGE: f32 = 24.0;
 const CULL: f32 = 16.0;
 /// A dot's radius on the screen, whatever the zoom, and its white's opacity.
-/// The dots lie at half the spacing devices snap to, at rest too; in edit mode
-/// the ones devices snap onto, every other one each way, show brighter.
+/// The dots lie at half SNAP, at rest too; in edit mode every other one each
+/// way shows brighter.
 const DOT_R: f32 = 1.25;
 pub const DOT_ALPHA: f32 = 0.06;
 const SNAP_LIFT: f32 = 0.7;
@@ -721,7 +723,8 @@ impl Desk {
                     self.pressed = None;
                     return true;
                 }
-                let (i, x, y) = (*i, snap(from.0 + dx / z), snap(from.1 + dy / z));
+                // (a dot at a time, as the dots show at this zoom)
+                let (i, x, y) = (*i, on_dots(from.0 + dx / z, z), on_dots(from.1 + dy / z, z));
                 let it = &mut self.items[i];
                 (it.x, it.y) = (x, y);
                 // (lifted as it is carried, so the desk changes on its first move)
@@ -729,7 +732,7 @@ impl Desk {
             }
             Some(Drag::Draw { to: end, .. }) => {
                 let v = self.view;
-                let (x, y) = (snap((to.0 - v.px) / v.z), snap((to.1 - v.py) / v.z));
+                let (x, y) = (on_dots((to.0 - v.px) / v.z, v.z), on_dots((to.1 - v.py) / v.z, v.z));
                 let changed = *end != (x, y);
                 *end = (x, y);
                 changed
@@ -740,7 +743,7 @@ impl Desk {
                     return false;
                 }
                 *moved = true;
-                let (i, x, y) = (*i, snap(from.0 + dx / z), snap(from.1 + dy / z));
+                let (i, x, y) = (*i, on_dots(from.0 + dx / z, z), on_dots(from.1 + dy / z, z));
                 if let Some(p) = self.pads.get_mut(i) {
                     (p.x, p.y) = (x, y);
                 }
@@ -751,10 +754,10 @@ impl Desk {
                 let (dx, dy) = ((to.0 - at.0) / z, (to.1 - at.1) / z);
                 let [x, y, w, h] = *from;
                 // each edge that moves, onto the dots, the pad kept two dots across
-                let x0 = if edges[0] { snap(x + dx).min(x + w - PAD_LEAST) } else { x };
-                let y0 = if edges[1] { snap(y + dy).min(y + h - PAD_LEAST) } else { y };
-                let x1 = if edges[2] { snap(x + w + dx).max(x + PAD_LEAST) } else { x + w };
-                let y1 = if edges[3] { snap(y + h + dy).max(y + PAD_LEAST) } else { y + h };
+                let x0 = if edges[0] { on_dots(x + dx, z).min(x + w - PAD_LEAST) } else { x };
+                let y0 = if edges[1] { on_dots(y + dy, z).min(y + h - PAD_LEAST) } else { y };
+                let x1 = if edges[2] { on_dots(x + w + dx, z).max(x + PAD_LEAST) } else { x + w };
+                let y1 = if edges[3] { on_dots(y + h + dy, z).max(y + PAD_LEAST) } else { y + h };
                 let Some(p) = self.pads.get_mut(*i) else { return false };
                 let changed = [p.x, p.y, p.w, p.h] != [x0, y0, x1 - x0, y1 - y0];
                 (p.x, p.y, p.w, p.h) = (x0, y0, x1 - x0, y1 - y0);
@@ -968,6 +971,14 @@ impl Desk {
 /// A place in the desk's units, onto the nearest dot.
 pub fn snap(v: f32) -> f32 {
     (v / SNAP).round() * SNAP
+}
+
+/// `v` on the nearest of the dots as they show at zoom `z`: what's carried
+/// or drawn in Arrange moves a dot row or column at a time (Grant,
+/// 2026-10-26), half SNAP, or SNAP where the dots show every other one.
+pub fn on_dots(v: f32, z: f32) -> f32 {
+    let d = Desk::step(z) / 2.0;
+    (v / d).round() * d
 }
 
 /// A device's size on the desk, in its units, from its whole drawing (its
@@ -1371,8 +1382,17 @@ mod tests {
         assert!(d.carrying());
         d.release();
         let it = &d.items[1];
-        assert!(it.x % SNAP == 0.0 && it.y % SNAP == 0.0, "on the dots: {} {}", it.x, it.y);
+        let dot = Desk::step(d.view.z) / 2.0;
+        assert!(it.x % dot == 0.0 && it.y % dot == 0.0, "on the dots: {} {}", it.x, it.y);
         assert_ne!((it.x, it.y), (864.0, 72.0));
+        // (carried a dot's width across and a dot down, it moves one dot each way, not two)
+        let (x, y) = (it.x, it.y);
+        let [sx, sy, ..] = d.screen(1);
+        d.press(Some(1), (sx + 5.0, sy + 5.0));
+        d.moved((sx + 5.0 + dot * d.view.z, sy + 5.0 + dot * d.view.z));
+        d.release();
+        assert_eq!((d.items[1].x, d.items[1].y), (x + dot, y + dot), "a dot at a time");
+        assert_eq!(dot, SNAP / 2.0, "the dots at this zoom are half SNAP apart");
         d.set_editing(false);
         d.tick(Instant::now() + EASE + FADE);
         assert_eq!(d.view, d.fitted_free(), "back to the fit");
