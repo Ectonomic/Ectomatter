@@ -23,6 +23,8 @@ zbus = { version = "5.19", default-features = false, features = ["async-io", "bl
 resvg = "0.45"
 rustybuzz = "0.20.1"
 serde_json = "1.0.151"
+# a package's update checked against the checksum its release gives (updates.rs)
+sha2 = "0.10"
 # the window adapter says which cursor Slint asks for, through its internal hook
 i-slint-core = "=1.18.1"
 slint = { version = "=1.18.1", default-features = false, features = ["compat-1-2", "std", "renderer-software", "software-renderer-systemfonts"] }

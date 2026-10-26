@@ -64,6 +64,8 @@ pub struct PackageRow {
     pub glyph: usize,
     /// added, rather than come with Ectomatter: it can be taken out
     pub removable: bool,
+    /// a newer version that can do more waits for the person to review it
+    pub review: bool,
     /// the systems it works on, as people say them ("Linux"), each a tag beside its name
     pub systems: Vec<String>,
 }
@@ -639,9 +641,13 @@ fn devices_section(f: &mut Form, devices: &[DeviceRow]) {
             let v = if r.status.is_empty() { r.version.clone() } else { format!("{} · {}", r.version, r.status) };
             let cw = c.control_w();
             c.cells.push(text_cell(style::VALUE_BRIGHT, cx, top, cw, line::TEXT, &v));
+            // (Review, then Remove, after the version, each its words Space.row after the last's)
+            let mut vx = cx + text::width(font::REGULAR, font::TEXT, &v).ceil() + space::ROW - part::QUIET_PAD;
+            if r.review {
+                form::link(&mut c.cells, vx, top, line::TEXT, "Review", id(Ctl::PackageReview), r.glyph as i32);
+                vx += crate::lighting::quiet_width("Review", false) + space::ROW - 2.0 * part::QUIET_PAD;
+            }
             if r.removable {
-                // (Remove after the version, its words Space.row after the version's)
-                let vx = cx + text::width(font::REGULAR, font::TEXT, &v).ceil() + space::ROW - part::QUIET_PAD;
                 form::link(&mut c.cells, vx, top, line::TEXT, "Remove", id(Ctl::PackageRemove), r.glyph as i32);
             }
             let mut end = c.note(top + line::TEXT, &r.description);
@@ -685,6 +691,11 @@ fn packages_section(f: &mut Form, title: &str, add: i32, rows: &[PackageRow], ad
             c.cells.push(text_cell(style::NOTE, right - w1, ry, w1, line::NOTE, &r.version));
             c.cells.push(Cell { color: crate::tokens::color(soft), ..text_cell(style::NOTE_IN, right - w2, ry + line::NOTE, w2, line::NOTE, &r.status) });
             let mut right_h = 2.0 * line::NOTE;
+            if r.review {
+                let w3 = crate::lighting::quiet_width("Review", false);
+                form::link(&mut c.cells, right - w3 + part::QUIET_PAD, ry + right_h, size::QUIET, "Review", id(Ctl::PackageReview), r.glyph as i32);
+                right_h += size::QUIET;
+            }
             if r.removable {
                 let w3 = crate::lighting::quiet_width("Remove", false);
                 form::link(&mut c.cells, right - w3 + part::QUIET_PAD, ry + right_h, size::QUIET, "Remove", id(Ctl::PackageRemove), r.glyph as i32);
@@ -752,13 +763,33 @@ mod tests {
     use super::*;
 
     fn row(name: &str, glyph: usize, on: bool, removable: bool, status: &str) -> PackageRow {
-        PackageRow { name: name.into(), description: format!("What the {name} is for."), can: vec![format!("Talks to the {name} over USB.")], version: "1.0.0".into(), status: status.into(), on, warning: None, glyph, removable, systems: Vec::new() }
+        PackageRow { name: name.into(), description: format!("What the {name} is for."), can: vec![format!("Talks to the {name} over USB.")], version: "1.0.0".into(), status: status.into(), on, warning: None, glyph, removable, review: false, systems: Vec::new() }
     }
 
     /// The words on the page, each piece once.
     fn texts(devices: Vec<DeviceRow>) -> Vec<String> {
         let s = State { sensors: None, devices, plugins: Vec::new(), sections: Vec::new(), settings: Value::Null, top_peak: 1000.0, reference: 254.0 };
         page(&s, 1440.0).0.into_iter().map(|c| c.text.to_string()).filter(|t| !t.is_empty()).collect()
+    }
+
+    /// A package whose newer version waits for the person offers Review, on
+    /// a device's core and on a plugin alike, beside Remove where it has one.
+    #[test]
+    fn a_waiting_version_offers_review() {
+        let waiting = |mut r: PackageRow| {
+            r.review = true;
+            r.status = "1.2.0 asks to do more: waiting for your OK".into();
+            r
+        };
+        let core = DeviceRow { core: waiting(row("Logitech G502", 4, true, true, "")), kind: "mouse".into(), present: true, reachable: Some(true), holders: Vec::new(), holders_note: String::new() };
+        let s = State { sensors: None, devices: vec![core], plugins: vec![waiting(row("Weather Feed", 2, true, false, "")), row("Monitor Switcher", 3, true, true, "Up to date")], sections: Vec::new(), settings: Value::Null, top_peak: 1000.0, reference: 254.0 };
+        let cells = page(&s, 1440.0).0;
+        let t: Vec<String> = cells.iter().map(|c| c.text.to_string()).collect();
+        assert_eq!(t.iter().filter(|x| *x == "Review").count(), 2, "on the core and the plugin waiting, not the one up to date");
+        assert!(t.iter().any(|x| x == "1.0.0 · 1.2.0 asks to do more: waiting for your OK"), "the core's version and where it stands");
+        assert!(t.iter().any(|x| x == "1.2.0 asks to do more: waiting for your OK"), "the plugin's");
+        let review = cells.iter().filter(|c| c.text == "Review").map(|c| c.id).collect::<Vec<_>>();
+        assert!(review.iter().all(|i| crate::lighting::ctl(*i) == Ctl::PackageReview), "a press opens its review");
     }
 
     /// Peak nits reaches the brightest screen's peak wherever the window is:

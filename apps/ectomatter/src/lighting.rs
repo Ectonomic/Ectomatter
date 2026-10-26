@@ -110,9 +110,12 @@ pub enum Ctl {
     SceneSpeed,
     ScenePart,
     ScenePlugin,
+    /// Settings' Devices and Plugins: Review on a package whose newer version
+    /// waits for the person, by its place among the packages
+    PackageReview,
 }
 
-const CTLS: [Ctl; 59] = [
+const CTLS: [Ctl; 60] = [
     Ctl::None,
     Ctl::Paint,
     Ctl::Demo,
@@ -172,6 +175,7 @@ const CTLS: [Ctl; 59] = [
     Ctl::SceneSpeed,
     Ctl::ScenePart,
     Ctl::ScenePlugin,
+    Ctl::PackageReview,
 ];
 
 pub fn ctl(id: i32) -> Ctl {

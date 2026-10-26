@@ -1182,6 +1182,7 @@ dependencies = [
  "resvg 0.45.1",
  "rustybuzz",
  "serde_json",
+ "sha2",
  "slint",
  "slint-build",
  "smithay-client-toolkit",

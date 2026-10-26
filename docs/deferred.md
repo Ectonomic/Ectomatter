@@ -94,8 +94,10 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 - A package stuck inside one of Ectomatter's own calls (a USB read, a web
   fetch) isn't stopped by its time until it's back in its own code; its
   caller stops waiting after a minute (`Limits::wait`).
-- Updates don't ask again when a plugin wants more, and aren't checked against
-  a checksum (`updates.rs`).
+- Review opens the whole list of what the newer version can do, not only
+  what's new (`front.rs`, `Ctl::PackageReview`); the Review link was checked
+  by a test of the row (`ecto_settings.rs`), not seen in a render (an
+  offscreen run reads no record of updates).
 
 ## Stage 4: maintainable
 

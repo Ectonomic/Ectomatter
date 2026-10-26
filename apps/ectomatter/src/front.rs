@@ -3097,6 +3097,19 @@ impl Front {
                 self.refresh();
                 return;
             }
+            // (a newer version waiting: the form a package is added from, on its release)
+            Ctl::PackageReview => {
+                let Some(p) = self.packages.get(index).cloned() else { return };
+                let Some(repo) = p.repository() else { return };
+                self.add_package_form(p.kind());
+                self.ui.set_gl_plugin_address(format!("github.com/{repo}").into());
+                if let Some(f) = &mut self.package_form {
+                    f.typed_at = Some(Instant::now() - Duration::from_secs(1));
+                }
+                self.package_form_tick();
+                self.refresh();
+                return;
+            }
             Ctl::PackageRemove => {
                 // first the question, saying what's left after
                 let Some(p) = self.packages.get(index).cloned() else { return };
@@ -6669,6 +6682,7 @@ impl Front {
                     warning: running.and_then(|r| r.warning.clone()).or_else(|| self.hosted.refused(p.id()).map(String::from)).filter(|_| on),
                     glyph: i,
                     removable: p.added,
+                    review: crate::updates::waiting(p).is_some(),
                     systems: p.systems().iter().map(|s| s.to_string()).collect(),
                 }
             })
@@ -6946,7 +6960,10 @@ impl Front {
     fn package_added(&mut self, id: &str, name: &str) {
         self.give_packages();
         if let Some(p) = self.packages.iter().find(|p| p.id() == id).cloned() {
-            if self.settings.on(&p.switch()) {
+            // (a core runs the new version from Ectomatter's next start, with its device's page)
+            if p.kind() == crate::packages::Kind::Core && self.hosted.get(id).is_some() {
+                self.restart = Some("settings".into());
+            } else if self.settings.on(&p.switch()) {
                 self.hosted.stop(id);
                 self.start_package(p);
             }
