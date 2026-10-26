@@ -636,7 +636,7 @@ fn devices_section(f: &mut Form, devices: &[DeviceRow]) {
             c.row();
             c.label_text("Core");
             let top = c.y;
-            let v = format!("{} · {}", r.version, r.status);
+            let v = if r.status.is_empty() { r.version.clone() } else { format!("{} · {}", r.version, r.status) };
             let cw = c.control_w();
             c.cells.push(text_cell(style::VALUE_BRIGHT, cx, top, cw, line::TEXT, &v));
             if r.removable {
@@ -783,8 +783,8 @@ mod tests {
     fn each_device_shows_with_its_core() {
         let dev = |core, kind: &str, present, reachable, holders: &[&str]| DeviceRow { core, kind: kind.into(), present, reachable, holders: holders.iter().map(|h| h.to_string()).collect(), holders_note: "Another program has it open.".into() };
         let t = texts(vec![
-            dev(row("EVGA Z10 RGB", 0, true, false, "Comes with Ectomatter"), "keyboard", true, Some(true), &[]),
-            dev(row("SteelSeries Sensei 310", 1, true, false, "Comes with Ectomatter"), "mouse", false, Some(false), &["openrgb"]),
+            dev(row("EVGA Z10 RGB", 0, true, false, ""), "keyboard", true, Some(true), &[]),
+            dev(row("SteelSeries Sensei 310", 1, true, false, ""), "mouse", false, Some(false), &["openrgb"]),
             dev(row("Logitech G502", 4, false, true, "Added from a file"), "mouse", true, Some(true), &[]),
         ]);
         let has = |s: &str| t.iter().any(|x| x == s);
@@ -792,7 +792,7 @@ mod tests {
         assert!(has("Not connected") && has("Checked when the mouse is connected"), "a mouse not plugged in: its permission waits for it");
         assert!(has("openrgb") && has("Another program has it open."), "who else has it open, and what that means");
         assert!(has("Control is off"), "a core turned off says so");
-        assert!(has("1.0.0 · Comes with Ectomatter") && has("1.0.0 · Added from a file"), "each core's version and where it came from");
+        assert!(has("1.0.0") && has("1.0.0 · Added from a file") && !t.iter().any(|x| x.contains("Comes with")), "each core's version, and where it came from only when added");
         assert_eq!(t.iter().filter(|x| *x == "Remove").count(), 1, "only an added core can be taken out");
         assert!(has("When off, Ectomatter leaves the keyboard to other programs.") && has("When off, Ectomatter leaves the mouse to other programs."));
         assert!(has("Add a core") && !has("Cores"), "Add a core under Devices, and no Cores section of its own");

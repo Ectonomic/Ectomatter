@@ -6672,7 +6672,8 @@ impl Front {
             .map(|(i, p)| {
                 let on = if p.id() == crate::z10::CORE { self.controlled } else { self.settings.on(&p.switch()) };
                 let running = self.hosted.get(p.id());
-                let status = if p.repository().is_none() { if p.added { "Added from a file".to_string() } else { "Comes with Ectomatter".to_string() } } else { crate::updates::status_of(p) };
+                // (one that names no repository says nothing more, but that it was added from a file)
+                let status = if p.repository().is_none() { if p.added { "Added from a file".to_string() } else { String::new() } } else { crate::updates::status_of(p) };
                 crate::ecto_settings::PackageRow {
                     name: p.name().to_string(),
                     description: p.description(),
