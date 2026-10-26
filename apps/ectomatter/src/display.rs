@@ -93,8 +93,14 @@ pub fn tiles(fw: &Value, connected: Option<bool>, room: f32) -> Tiles {
                 k.fact("Firmware", &v, "This version is neither EVGA’s nor Ectomatter’s, so no custom features are offered.");
             }
         }
-        let model = format!("EVGA Z10 RGB, USB {:04x}:{:04x}", evga_z10::protocol::VID, evga_z10::protocol::PID);
-        k.fact("Model", &model, "");
+        // (the keyboard as its core names it, and the USB device its manifest matches)
+        if let Some(core) = crate::cores::keyboard() {
+            let model = match crate::core_host::Manifest::read(&core.folder).ok().and_then(|m| m.usb_ids()) {
+                Some((vendor, product)) => format!("{}, USB {vendor:04x}:{product:04x}", core.name()),
+                None => core.name().to_string(),
+            };
+            k.fact("Model", &model, "");
+        }
     });
     let (cells, height) = f.end();
     Tiles { cells, height }

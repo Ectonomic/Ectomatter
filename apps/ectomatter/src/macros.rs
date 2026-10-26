@@ -20,8 +20,6 @@ use crate::Cell;
 
 pub use ectomatter_protocol::Plays as How;
 
-/// bytes of steps the keyboard keeps a macro
-pub const ROOM: usize = 967;
 /// The ways a macro plays on its keys, as the Plays menu lists them (a number
 /// of times is one choice, whatever the number).
 pub const PLAYS: [(How, &str); 4] = [(How::Once, "Play once"), (How::Times(2), "Play a number of times"), (How::WhileHeld, "Repeat while held"), (How::UntilPressedAgain, "Repeat until pressed again")];
@@ -132,8 +130,9 @@ fn down(st: &Value) -> bool {
 fn delay(st: &Value) -> u64 {
     st["after"].as_u64().unwrap_or(0)
 }
-pub fn bytes(steps: &[Value]) -> usize {
-    steps.iter().map(|s| if is_media(s) { 3 } else { 1 } + 3).sum()
+/// What a macro's steps cost of a keyboard's room, at its costs.
+pub fn bytes(steps: &[Value], costs: crate::recording::Costs) -> usize {
+    steps.iter().map(|s| costs.of_step(s)).sum()
 }
 
 /// A macro in a few words: the keys it presses together, then each job it

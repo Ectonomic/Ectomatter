@@ -253,8 +253,8 @@ An **action** is one of a fixed set the frontend knows how to present: a key (`{
 - `macros/list`, `macros/get`, `macros/set`, `macros/delete`.
 - Steps are one shared shape across cores: `{"key": "LeftCtrl", "down": true, "after": 120}` (`after` is the wait before the next step, in milliseconds), `{"media": "Mute", "down": true, "after": 0}`, and a wait before the first press, `{"wait": 40, "after": 0}`. A key a device's macros can't name travels as its usage number.
 - `macros/list` gives each stored macro by its slot: its `name`, `steps`, how the device keeps it playing (the Z10 keeps `run`, `repeat` and `unit`), its `length`, and whether the core can rewrite its steps exactly (`editable`). `macros/set {device, macro, name, steps, ...}` and `macros/delete {device, macro}` answer with every macro.
-- `budget` lets the frontend show how much room a macro has left before the device refuses it.
-- `record` means the core can record from the device itself. `macros/record/start` takes the device's input for the recording alone (so its keys reach nothing else), `macros/record/status` reports progress, and `macros/record/stop` returns the steps. A device without `record` can still have macros; the frontend records them from the system's keyboard.
+- `budget` lets the frontend show how much room a macro has left before the device refuses it: its `bytes`, and what each step `cost`s of them. A device with no budget takes any number of steps.
+- `record` means the core can record from the device itself. `macros/record/start` takes the device's input for the recording alone (so its keys reach nothing else), `macros/record/status` reports progress, and `macros/record/stop` returns the steps. A device without `record` can still have macros; the frontend records them, from the device's own keys where the system lists them (the USB device the core's manifest matches), taken for the recording alone, in the shared steps and at the budget's costs. The Z10's core doesn't record; Ectomatter records its keys.
 - A device with `"stored": "host"` gets its macros played by the frontend when its controls send input.
 
 ### lighting: effects, previews and live color

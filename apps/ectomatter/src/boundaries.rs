@@ -127,7 +127,6 @@ mod tests {
     /// every device that offers a capability is edited the same way." A device
     /// is only its core, so the app builds in no device's driver.
     #[test]
-    #[ignore = "known failure: the app links the EVGA Z10's driver (docs/deferred.md, stage 2)"]
     fn the_app_links_no_devices_driver() {
         let toml = read("apps/ectomatter/Cargo.toml");
         let deps = toml.split("[dependencies]").nth(1).unwrap_or("").split("\n[").next().unwrap_or("");

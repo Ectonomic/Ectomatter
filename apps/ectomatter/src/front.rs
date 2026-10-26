@@ -7872,10 +7872,10 @@ impl Front {
         sync_cells(&self.cells, cells);
     }
 
-    /// What the keyboard's firmware can do beyond EVGA's.
+    /// The keyboard's firmware, as its core describes it (section 4,
+    /// firmware): whose it is, and what a custom build can do.
     fn firmware(&self) -> serde_json::Value {
-        let v = self.page.dev.as_ref().and_then(|d| d["firmware"].as_u64()).unwrap_or(0) as u16;
-        evga_z10::firmware::describe(v)
+        self.page.dev.as_ref().map_or(serde_json::Value::Null, |d| d["firmware"].clone())
     }
 
     // ------------------------------------------------------------ the sliders' jobs

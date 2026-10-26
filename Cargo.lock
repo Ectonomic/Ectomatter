@@ -1365,7 +1365,6 @@ dependencies = [
  "ectomatter-protocol",
  "flate2",
  "hidapi",
- "libc",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

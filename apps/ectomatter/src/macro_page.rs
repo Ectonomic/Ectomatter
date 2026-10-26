@@ -14,7 +14,7 @@ use crate::tokens::{font, line, part, size, space};
 
 use crate::device;
 use crate::front::WindowAsk;
-use crate::macros::{self, hit, piece, Draft, Editor, Lib, Plays, Recording, Timing, MEDIA, PLAYS, ROOM};
+use crate::macros::{self, hit, piece, Draft, Editor, Lib, Plays, Recording, Timing, MEDIA, PLAYS};
 use crate::z10::Page;
 use crate::{Cell, MacroItem, MacroWindow, MenuRow};
 
@@ -123,7 +123,7 @@ pub struct MacroPage {
     asks: Rc<RefCell<Vec<Ask>>>,
     menu: Option<Menu>,
     shut: Option<((f32, f32), Instant, bool)>,
-    rec: evga_z10::Recorder,
+    rec: crate::recording::Recorder,
     rec_timer: slint::Timer,
     confirm: bool,
     status: (String, i32),
@@ -161,7 +161,23 @@ fn lib_of(l: i32) -> Lib {
 }
 
 /// The keyboard whose memory keeps its macros, by the name its library has.
-const KEYBOARD: &str = "EVGA Z10 RGB";
+/// The keyboard whose macros the editor shows beside Ectomatter's own, by
+/// its name; and by the shorter name its core gives its model, for a line
+/// about typing on it.
+fn keyboard_name() -> String {
+    crate::cores::keyboard().map_or(String::new(), |k| k.name().to_string())
+}
+
+fn keyboard_model() -> String {
+    crate::cores::keyboard().and_then(|k| k.described()["model"].as_str().map(String::from)).unwrap_or_else(keyboard_name)
+}
+
+/// The keyboard's room for a macro and what each step costs of it, as its
+/// core describes them (`macros`, `budget`); none, and no room, without one.
+fn keyboard_budget() -> (Option<usize>, crate::recording::Costs) {
+    let budget = crate::cores::keyboard().map_or(Value::Null, |k| k.described()["capabilities"]["macros"]["budget"].clone());
+    (budget["bytes"].as_u64().map(|b| b as usize), crate::recording::Costs::of(&budget))
+}
 
 /// The list's measures (ui/app.slint's MacroWindow): where the library's note starts
 /// (its first line at the middle of its New button, which takes the button's room of
@@ -236,7 +252,7 @@ impl MacroPage {
             asks,
             menu: None,
             shut: None,
-            rec: evga_z10::Recorder::new(),
+            rec: crate::recording::Recorder::new(),
             other: Editor::new(Lib::Ectomatter),
             rec_timer: slint::Timer::default(),
             confirm: false,
@@ -629,9 +645,9 @@ impl MacroPage {
         let mut out = vec![(Lib::Ectomatter, "Ectomatter".to_string(), format!("{} saved", ed(Lib::Ectomatter).macros_count(page)))];
         if page.dev.is_some() {
             let k = ed(Lib::Keyboard);
-            out.push((Lib::Keyboard, KEYBOARD.to_string(), format!("{} of {} used", k.macros_count(page), k.room().unwrap_or(0))));
+            out.push((Lib::Keyboard, keyboard_name(), format!("{} of {} used", k.macros_count(page), k.room().unwrap_or(0))));
         } else if self.ed.lib == Lib::Keyboard {
-            out.push((Lib::Keyboard, KEYBOARD.to_string(), "Reading…".to_string()));
+            out.push((Lib::Keyboard, keyboard_name(), "Reading…".to_string()));
         }
         out
     }
@@ -979,22 +995,31 @@ impl MacroPage {
             d.timing = Timing::Keep;
         }
         // (Ectomatter's own macros hold any number of steps)
-        let room = if keyboard { ROOM.saturating_sub(macros::bytes(&d.steps)) } else { 1 << 24 };
+        let (budget, costs) = keyboard_budget();
+        let room = match budget.filter(|_| keyboard) {
+            Some(b) => b.saturating_sub(macros::bytes(&d.steps, costs)),
+            None => usize::MAX,
+        };
+        let costs = if keyboard { costs } else { crate::recording::Costs::default() };
         self.close_menu(false);
         self.ed.sel_step = None;
         self.ed.edit_wait = None;
         // ECTOMATTER_FAKE_REC: steps as JSON, to check how a recording
         // looks offscreen without taking the keyboard
         if let Some(steps) = std::env::var("ECTOMATTER_FAKE_REC").ok().and_then(|v| serde_json::from_str::<Vec<Value>>(&v).ok()) {
-            self.ed.rec = Some(Recording { used: macros::bytes(&steps), steps, elapsed: 3.4 });
-            self.status("Recording. The Z10\u{2019}s keys go only to the recording until you press Stop.", 0);
+            self.ed.rec = Some(Recording { used: macros::bytes(&steps, costs), steps, elapsed: 3.4 });
+            self.status(format!("Recording. The {}\u{2019}s keys go only to the recording until you press Stop.", keyboard_model()), 0);
             self.fake_rec = true;
             return;
         }
-        match self.rec.start(room, self.ed.record_waits) {
+        // (the keyboard by the USB device its core's manifest matches)
+        let Some(usb) = crate::cores::keyboard().and_then(|k| crate::core_host::Manifest::read(&k.folder).ok()?.usb_ids()) else {
+            return self.status("Recording did not start: there's no keyboard to record from.", 2);
+        };
+        match self.rec.start(usb, room, costs, self.ed.record_waits) {
             Ok(_) => {
                 self.ed.rec = Some(Recording { steps: Vec::new(), used: 0, elapsed: 0.0 });
-                self.status("Recording. The Z10\u{2019}s keys go only to the recording until you press Stop.", 0);
+                self.status(format!("Recording. The {}\u{2019}s keys go only to the recording until you press Stop.", keyboard_model()), 0);
                 let a = self.asks.clone();
                 self.rec_timer.start(slint::TimerMode::Repeated, Duration::from_millis(150), move || a.borrow_mut().push(Ask::RecTick));
             }
@@ -1008,8 +1033,7 @@ impl MacroPage {
         }
         let r = self.rec.status();
         if let Some(rec) = &mut self.ed.rec {
-            // (the keyboard's recorder gives its own steps: as the protocol's)
-            rec.steps = evga_z10::shared::steps_of(&r["steps"].as_array().cloned().unwrap_or_default());
+            rec.steps = r["steps"].as_array().cloned().unwrap_or_default();
             rec.used = r["used"].as_u64().unwrap_or(0) as usize;
             rec.elapsed = r["elapsed"].as_f64().unwrap_or(0.0);
         }
@@ -1025,7 +1049,7 @@ impl MacroPage {
         }
         self.rec_timer.stop();
         let r = self.rec.stop(keep);
-        let got = evga_z10::shared::steps_of(&r["steps"].as_array().cloned().unwrap_or_default());
+        let got = r["steps"].as_array().cloned().unwrap_or_default();
         if !got.is_empty() {
             self.ed.insert_at(page, got.clone());
         }
@@ -1070,7 +1094,7 @@ impl MacroPage {
             // (how it plays, if that changed, else its steps, go to the controls that run it)
             return Some(d.plays.map_or(WindowAsk::MacroSaved(n), |(how, count)| WindowAsk::MacroPlays(n, macros::with_count(how, count))));
         }
-        if macros::bytes(&steps) > ROOM {
+        if keyboard_budget().0.is_some_and(|room| macros::bytes(&steps, keyboard_budget().1) > room) {
             self.status("This macro is too long for the keyboard. Remove some steps and save again.", 2);
             return None;
         }
@@ -1256,13 +1280,13 @@ impl MacroPage {
     pub fn refresh(&mut self, page: &Page) {
         let keyboard = self.ed.lib == Lib::Keyboard;
         // (Ectomatter's own macros belong to no one device)
-        self.ui.set_lib_title(if keyboard { KEYBOARD.into() } else { "".into() });
+        self.ui.set_lib_title(if keyboard { keyboard_name().into() } else { "".into() });
         let read = !keyboard || page.dev.is_some();
         if read {
             self.ed.settle(page);
         }
         // the library shown, on its drop-down
-        self.ui.set_lib_name(if keyboard { KEYBOARD } else { "Ectomatter" }.into());
+        self.ui.set_lib_name(if keyboard { keyboard_name() } else { "Ectomatter".to_string() }.into());
         let items = self.sections(page);
         let end = items.last().map_or(0.0, |m| m.y + m.h);
         // the chosen one brought into view, as the web page scrolled it to the
@@ -1323,23 +1347,29 @@ impl MacroPage {
         // (a recording is typed on the keyboard, for either library, while there's one)
         // (Ectomatter's own macros also take actions and other macros)
         let hint = if rec {
-            "Type the keys on your Z10. Press Stop to finish."
+            format!("Type the keys on your {}. Press Stop to finish.", keyboard_model())
         } else if page.dev.is_some() && keyboard {
-            "Press Record and type the keys on your Z10, or add keys, media keys and waits with the buttons below."
+            format!("Press Record and type the keys on your {}, or add keys, media keys and waits with the buttons below.", keyboard_model())
         } else if page.dev.is_some() {
-            "Press Record and type the keys on your Z10, or add keys, media keys, waits, actions and other macros with the buttons below."
+            format!("Press Record and type the keys on your {}, or add keys, media keys, waits, actions and other macros with the buttons below.", keyboard_model())
         } else {
-            "Add keys, media keys, waits, actions and other macros with the buttons below."
+            "Add keys, media keys, waits, actions and other macros with the buttons below.".to_string()
         };
-        let lines: Vec<SharedString> = crate::text::wrap(font::REGULAR, font::CONTROL, hint, size::EMPTY).into_iter().map(Into::into).collect();
+        let lines: Vec<SharedString> = crate::text::wrap(font::REGULAR, font::CONTROL, &hint, size::EMPTY).into_iter().map(Into::into).collect();
         ui.set_empty_lines(ModelRc::new(VecModel::from(lines)));
 
         // (the keyboard's macros have room for so many steps; Ectomatter's, any number)
-        let used = macros::bytes(&eff) + ed.rec.as_ref().map_or(0, |r| r.used);
-        let left = if keyboard { ROOM as i64 - used as i64 } else { i64::MAX };
+        let (budget, costs) = keyboard_budget();
+        let used = macros::bytes(&eff, costs) + ed.rec.as_ref().map_or(0, |r| r.used);
+        let left = match budget.filter(|_| keyboard) {
+            Some(room) => room as i64 - used as i64,
+            None => i64::MAX,
+        };
         let count = eff.len() + eff.iter().filter(|s| s["after"].as_u64().unwrap_or(0) > 0).count();
-        let (meter, warn) = if left < 60 {
-            (if left < 4 { "Full".to_string() } else { format!("Nearly full: room for about {} more key presses", left / 4) }, true)
+        // (nearly full with room for fifteen more key presses, at what a key costs)
+        let key = costs.key.max(1) as i64;
+        let (meter, warn) = if left < 15 * key {
+            (if left < key { "Full".to_string() } else { format!("Nearly full: room for about {} more key presses", left / key) }, true)
         } else {
             (if count > 0 { format!("{count} step{}", if count == 1 { "" } else { "s" }) } else { String::new() }, false)
         };

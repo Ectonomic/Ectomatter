@@ -19,17 +19,14 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 - A core's update runs from Ectomatter's next start, with nothing said: its
   device's page holds the core it started with (`front.rs`, the updates
   loop).
-- The app links the Z10's driver (`Cargo.toml:13`) and uses it outside tests
-  in 13 places: `display.rs:96`, `lcd_player.rs:49`, `lcd_page.rs` (8 uses of
-  `lcd::lcd_text`), `layout_page.rs:905`, `macros.rs:345`,
-  `macro_page.rs:126,239,1012,1028`, `z10.rs:636,1162`, `front.rs:5265,7867,9350`,
-  `main.rs:671`, `overlays.rs:97`.
-- Macro recording reads the Z10 through Linux's input devices, by the Z10's
-  ids, outside the core: `crates/evga-z10/src/recorder.rs:333-368`, driven
-  from `macro_page.rs:994-1027`.
+- The app's tests of the Z10's core check it against the original editor
+  with the Z10's driver crate (a dev-dependency only: `apps/ectomatter/Cargo.toml`,
+  `core_host.rs` tests, `lcd_parity.rs`); they belong with the core once it
+  has a repository of its own.
 - The keyboard page is the Z10's: the Z10's geometry built in
-  (`z10.rs:459-461`, `overlays.rs:92-97`, `lcd_draw.rs:18`), its firmware table
-  (`front.rs:7867`), its screen's built-in apps (`display.rs:13`).
+  (`z10.rs:459-461`, `overlays.rs:92-97`, `lcd_draw.rs:18`), its screen's
+  built-in apps (`display.rs:13`), and the Z10's own setting ids
+  (`device.rs`: `dimmer`, `modes`, `displays/light`, `displays/apps`).
 - The screen is fixed at 20 by 4 (`lcd_page.rs:27-28`, `lcd_anim.rs:13-14`,
   `layout_page.rs:555,906`, `screen_edit.rs`, `overlays.rs:14-15`,
   `lcd_player.rs:94`), though the core describes its displays.
@@ -85,9 +82,9 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 
 ## Stage 5: Windows and macOS
 
-- The window, tray, file picker, macro typing, the app in front and sound are
-  Linux only and always built (`main.rs`, `tray.rs`, `picker.rs`,
-  `typist.rs`, `kde_output.rs`, `sound.rs`); the window refuses to open
+- The window, tray, file picker, macro typing and recording, the app in front
+  and sound are Linux only and always built (`main.rs`, `tray.rs`,
+  `picker.rs`, `typist.rs`, `recording.rs`, `kde_output.rs`, `sound.rs`); the window refuses to open
   without KWin's color management (`main.rs:1876,1885`).
 
 ## Stage 1: installable on Linux

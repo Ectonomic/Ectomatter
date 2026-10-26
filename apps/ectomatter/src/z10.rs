@@ -631,7 +631,8 @@ impl Page {
             Action::Media(code) => media::label(*code).map_or(format!("Media code {code}"), String::from),
             Action::Macro { n, .. } => format!("Macro: {}", self.macro_name(*n).unwrap_or(format!("number {n}"))),
             Action::Fn => "Fn".into(),
-            Action::Own(id) => evga_z10::shared::OWN.iter().find(|(o, _)| o == id).map_or(id.clone(), |(_, l)| l.to_string()),
+            // (the keyboard's own actions, by the names its core gives them)
+            Action::Own(id) => self.desc["capabilities"]["keys"]["own"].as_array().and_then(|o| o.iter().find(|o| o["id"] == id.as_str())?["label"].as_str()).map_or(id.clone(), String::from),
             Action::Scroll { up } => if *up { "Scroll up".into() } else { "Scroll down".into() },
             Action::Mouse(1) => "Left click".into(),
             Action::Mouse(2) => "Right click".into(),
@@ -1242,16 +1243,19 @@ impl Page {
 
     /// Whether the keyboard's firmware can say where its sliders are.
     pub fn reads_sliders(&self) -> bool {
-        let fw = self.dev.as_ref().map_or(0, |d| u(&d["firmware"]));
-        let minor = fw & 0xff;
-        minor >= 171 && minor - 170 >= 2
+        self.dev.as_ref().is_some_and(|d| crate::display::has(&d["firmware"], "sliders.read"))
     }
 
+    /// The line under the keyboard's name, and the chip beside it for
+    /// firmware that isn't its maker's, as its core describes the firmware.
     pub fn firmware_line(&self) -> (String, Option<String>) {
-        let fw = self.dev.as_ref().map_or(0, |d| u(&d["firmware"]));
-        let minor = fw & 0xff;
-        let line = format!("Connected, firmware v{}.{:02}", fw >> 8, minor);
-        let chip = (minor >= 100).then(|| if minor > 170 { format!("Unofficial build {}", minor - 170) } else { "Unofficial build".into() });
+        let fw = self.dev.as_ref().map_or(&Value::Null, |d| &d["firmware"]);
+        let line = format!("Connected, firmware v{}", fw["version"].as_str().unwrap_or(""));
+        let chip = match fw["kind"].as_str() {
+            Some("custom") => Some(fw["build"].as_u64().map_or("Unofficial build".to_string(), |b| format!("Unofficial build {b}"))),
+            Some("unknown") => Some("Unofficial build".into()),
+            _ => None,
+        };
         (line, chip)
     }
 }

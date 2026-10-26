@@ -78,6 +78,7 @@ mod picker;
 mod picture;
 mod profiles;
 mod putback;
+mod recording;
 mod screen_edit;
 mod screen_keys;
 mod scenes;
@@ -690,9 +691,8 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     keyboard_described(&hosted);
     let mut front = Front::new(ui, hosted, None, true, settings);
     if let Some(state) = std::env::var_os("ECTOMATTER_STATE") {
+        // (as the keyboard's core reads it, device/read)
         let dev: serde_json::Value = serde_json::from_slice(&std::fs::read(state).expect("the saved state")).expect("the saved state as JSON");
-        // (a state an older Ectomatter saved, in the keyboard code's own shapes, read in the shared ones)
-        let dev = if evga_z10::shared::is_own_state(&dev) { evga_z10::shared::read_of_state(&dev) } else { dev };
         front.heard(device::Heard::State(Ok(dev)));
     }
     // the screen as the player would have it: this computer's Stats, or
