@@ -454,7 +454,7 @@ pub fn page(s: &State, room: f32) -> (Vec<Cell>, f32, SensorMap, PluginMap) {
         // its right, Space.row after it (as wide at every place as at its brightest, so the
         // slider never shifts under the pointer)
         let vw = text::width(font::REGULAR, font::CONTROL, &format!("{} nits", hi)).ceil() + 2.0;
-        c.cells.push(Cell { value: frac, color: crate::tokens::color(ink::SOFT), style: 3, id: id(Ctl::PeakNits), ..cell(kind::FILLED, cx, top + (form::LINE - size::SLIDER) / 2.0, cw - vw - space::ROW, size::SLIDER) });
+        c.cells.push(Cell { value: frac, color: crate::lighting::run(), id: id(Ctl::PeakNits), ..cell(kind::FILLED, cx, top + (form::LINE - size::SLIDER) / 2.0, cw - vw - space::ROW, size::SLIDER) });
         c.cells.push(text_cell(style::VALUE, cx + cw - vw, top, vw, form::LINE, &format!("{} nits", nits.round())));
         c.next(top, form::LINE);
     });

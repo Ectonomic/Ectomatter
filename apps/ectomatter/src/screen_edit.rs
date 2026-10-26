@@ -292,7 +292,7 @@ impl Grid {
         let (x, w, y) = (self.x(), self.col_w(), self.y + top + (size::CONTROL - size::SLIDER) / 2.0);
         let (lw, rw) = (crate::text::width(font::REGULAR, font::SMALL, ends.0).ceil(), crate::text::width(font::REGULAR, font::SMALL, ends.1).ceil());
         self.cells.push(text_cell(style::END_L, x, y, lw, size::SLIDER, ends.0));
-        self.cells.push(Cell { value: frac, color: crate::tokens::color(crate::tokens::ink::SOFT), id: id(c), style: if notch { 4 } else { 3 }, ..cell(kind::FILLED, x + lw + space::INLINE, y, w - lw - rw - 2.0 * space::INLINE, size::SLIDER) });
+        self.cells.push(Cell { value: frac, color: crate::lighting::run(), id: id(c), style: if notch { 4 } else { 0 }, ..cell(kind::FILLED, x + lw + space::INLINE, y, w - lw - rw - 2.0 * space::INLINE, size::SLIDER) });
         self.cells.push(text_cell(style::END_R, x + w - rw, y, rw, size::SLIDER, ends.1));
         self.done(top + size::CONTROL);
     }

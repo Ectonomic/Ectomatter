@@ -108,12 +108,13 @@ picture), `ring` 2 (a ring round what's carried, dropped onto or selected, the
 playhead).
 
 **Shadow**, how far a surface lifts: `lift` (a cover, a tooltip), `float` (a
-menu, the picker, a floating bar, something carried), `modal` (a dialog), and
-`knob` (a slider's knob on its track).
+menu, the picker, a floating bar, something carried) and `modal` (a dialog).
 
 **Ink**, the colors: the window's shades, each control's four states, the
 outlines, the words (`bright`, `dim`, `soft`, `quiet`, `placeholder`, `off`),
-and the signals (`warn`, `bad`, `good`, `danger`, `record`, `close`, `media`).
+and the signals (`warn`, `bad`, `good`, `danger`, `record`, `close`, `media`);
+`brand` is Ecto green, the family's own color, which a slider runs in where it
+sets no light's color, and `track` the gray of a slider's line beyond its run.
 A part's light or dark wash is `white` or `black` at an opacity of the part's
 own. Ink can be set while the app runs (`ECTOMATTER_INK`) for a color mock.
 
@@ -144,8 +145,9 @@ In `ui/system/`, each drawn once:
   `subtle` at a panel's head, `followed`, `warn`, a chip), `SegSwitch` and its
   pieces `SegGround` and `SegChoice` (a choice's icon, a color's dot or square,
   a `menu` chevron), `CheckBox`, `RadioRow`, `Slider` (the one slider, the
-  lab's too: `saved` marks where a value was saved once it has moved, and
-  `ground` is what it sits on where that is lit otherwise), `Tag`,
+  lab's too: a 2 px line run in Ecto green, or in the color of the light it
+  sets, up to a small plain knob; `notch` marks its middle, `saved` where a
+  value was saved once it has moved), `Tag`,
   `ColorButton`, `ColorSquare`, `Fold` (a heading that opens and shuts),
   `ScrollBar`, `Spinner`, `PickField`, `SmallCap`, `StripIcon`, `PlayButton`,
   and `Glyph` (the app's own glyphs).
@@ -259,7 +261,7 @@ or a dropdown says how wide it is, so its menu knows.
      named measure said once). The lab is one of those pages now.
    A drawing's own measures are the exception, each saying what it draws: the
    parts that draw a device or a glyph (`KeyBox`, `MouseLayers`, `WayGlyph`,
-   `BlockGlyph`, `MacroIcon`), a line marked `// art:` (a knob's ring, a
+   `BlockGlyph`, `MacroIcon`), a line marked `// art:` (a slider's knob, a
    glyph's stroke, the mouse's picture from its mock's canvas), and, for sizes,
    an instrument's own marks between `// drawn: begin` and `// drawn: end`.
 
@@ -319,7 +321,7 @@ or a dropdown says how wide it is, so its menu knows.
   Home's desk and its grips, the playlist's strip, the macro chain, the Screen
   Editor's screen and blocks, the layout cards, and the lab's cross-section and
   slider rows. Their controls that are controls elsewhere use the parts.
-- Inside a part, its own drawing (a glyph's size, a knob's ring, a tooltip's
+- Inside a part, its own drawing (a glyph's size, a slider's knob, a tooltip's
   padding) is the part's, marked; what Rust measures it by is a token.
 - A few boxes start at a height of their own until they say how tall they are
   (the Key detail box, so the mouse's row starts that tall), marked art.

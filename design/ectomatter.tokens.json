@@ -174,12 +174,11 @@
   },
   "shadow": {
     "$type": "shadow",
-    "$description": "How far a surface lifts off the page, in three steps, and a knob's own on its track.",
+    "$description": "How far a surface lifts off the page, in three steps.",
     "$extensions": { "com.ectonomic.ectomatter": { "global": "Shadow" } },
     "lift": { "$value": { "color": "#00000066", "offsetX": "0px", "offsetY": "6px", "blur": "18px" }, "$description": "A little: a cover, a tooltip." },
     "float": { "$value": { "color": "#00000080", "offsetX": "0px", "offsetY": "14px", "blur": "34px" }, "$description": "A menu, the color picker, a popover, a floating bar, something carried; a cover under the pointer." },
-    "modal": { "$value": { "color": "#000000cc", "offsetX": "0px", "offsetY": "30px", "blur": "80px" }, "$description": "A dialog over its scrim." },
-    "knob": { "$value": { "color": "#000000aa", "offsetX": "0px", "offsetY": "2px", "blur": "6px" }, "$description": "A slider's knob, on its track." }
+    "modal": { "$value": { "color": "#000000cc", "offsetX": "0px", "offsetY": "30px", "blur": "80px" }, "$description": "A dialog over its scrim." }
   },
   "ink": {
     "$type": "color",
@@ -225,6 +224,7 @@
     "shade3": { "$value": "{ink.pick}" },
     "shade4": { "$value": "{ink.pick-hover}" },
     "ink": { "$value": "{ink.bright}" },
-    "track": { "$value": "{ink.well}", "$description": "A slider's track." }
+    "track": { "$value": "{ink.edge}", "$description": "A slider's line where its run hasn't reached; the lab's reset arrow while there's nothing to put back." },
+    "brand": { "$value": "#99ed02", "$description": "Ecto green, the family's own color: a slider's run, where the slider sets no light's color (one that does runs in that light's)." }
   }
 }

@@ -150,7 +150,7 @@ pub fn screen_cells(page: &Page, w: f32, from: f32, own: Option<(&str, [u8; 3])>
     c.push(Cell { text: v.into(), style: 2, ..cell(kind::PILL, x, mid(size::PILL), pw, size::PILL) });
     x -= space::ROW + sl;
     let at = (br / 255.0) as f32;
-    c.push(Cell { value: at, color: col, style: 2, id: id(Ctl::LcdBrightness), ..cell(kind::FILLED, x, mid(size::SLIDER), sl, size::SLIDER) });
+    c.push(Cell { value: at, color: col, id: id(Ctl::LcdBrightness), ..cell(kind::FILLED, x, mid(size::SLIDER), sl, size::SLIDER) });
     if with_bright {
         x -= word + bw;
         c.push(text_cell(style::SMALL, x, mid(line::TEXT), bw + 2.0, line::TEXT, "Brightness"));

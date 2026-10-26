@@ -1024,79 +1024,63 @@ export component DropField inherits Rectangle {
     }
 }
 
-// A slider, the same wherever one is: a track filled to its place in `fill`, and a
-// knob, ringed in what it sits on, that follows the pointer while held; double-
-// clicked, it goes back as it was (`reset`). `style`, by what it sits on: 0 a box
-// (its track a well), 1 a box of the well's own shade, 2 the page itself, 3 a box
-// (its track a step lighter), 4 as 3 with a notch at its middle, its default,
-// which holds the knob as it passes. `saved`, 0 to 1, marks where the value was
-// saved while it has moved from there (below 0, as it is unless given, no mark).
-// `ground`, what it sits on, its knob's ring: as its style says, unless what it
-// sits on is lit otherwise (a row lit under the pointer).
+// A slider, the same wherever one is: a line, run up to its knob in `fill` (Ecto
+// green, or the color of the light it sets), and a small plain knob that follows
+// the pointer while held, a step larger under the pointer; double-clicked, it goes
+// back as it was (`reset`). `notch` marks its middle, its default, which holds the
+// knob as it passes. `saved`, 0 to 1, marks where the value was saved while it has
+// moved from there (below 0, as it is unless given, no mark).
 export component Slider inherits Rectangle {
     in property <float> value;
-    in property <color> fill;
-    in property <int> style;
+    in property <color> fill: Ink.brand;
+    in property <bool> notch;
     in property <float> saved: -1;
-    in property <color> ground: root.style == 2 ? Ink.base : root.style == 1 ? Ink.well : Ink.box;
     callback moved(float);
     callback reset();
     height: Size.slider;
-    // (the knob's half: the track runs from one knob's center to the other's)
-    property <length> half: 9px; // art: the slider's knob, half across
+    // (the knob's half at rest: its run goes from the knob's center at one end to its center at the other)
+    property <length> half: 7px; // art: the slider's knob, half across
     property <float> held: max(0, min(1, (drag.mouse-x - self.half) / (self.width - 2 * self.half)));
-    property <float> at: drag.pressed ? (root.style == 4 && abs(self.held - 0.5) <= 0.04 ? 0.5 : self.held) : root.value;
+    property <float> at: drag.pressed ? (root.notch && abs(self.held - 0.5) <= 0.04 ? 0.5 : self.held) : root.value;
+    // the line, and its run up to the knob
     Rectangle {
-        y: (parent.height - 6px) / 2; // art: the slider's track
-        height: 6px; // art: the slider's track
+        y: (parent.height - self.height) / 2;
+        height: 2px; // art: the slider's line
         border-radius: self.height / 2;
-        background: root.style >= 1 ? Ink.hover-box : Ink.well;
-        clip: true;
+        background: Ink.track;
         Rectangle {
             x: 0;
             width: root.half + root.at * (parent.width - 2 * root.half);
-            border-radius: 3px; // art: the slider's track
+            border-radius: self.height / 2;
             background: root.fill;
         }
     }
-    // the notch: a short line across the track at its middle, under the knob
-    if root.style == 4: Rectangle {
-        x: root.half + 0.5 * (parent.width - 2 * root.half) - 1px; // art: the track's middle mark
-        y: (parent.height - 14px) / 2; // art: the track's middle mark
-        width: 2px; // art: the track's middle mark
-        height: 14px; // art: the track's middle mark
+    // the notch: a short line across the slider at its middle, under the knob
+    if root.notch: Rectangle {
+        x: root.half + 0.5 * (parent.width - 2 * root.half) - self.width / 2;
+        y: (parent.height - self.height) / 2;
+        width: 2px; // art: the slider's middle mark
+        height: 12px; // art: the slider's middle mark
         border-radius: self.width / 2;
         background: Ink.quiet;
     }
-    // where the value was saved: a shorter line across the track, under the knob
+    // where the value was saved: a shorter line across, under the knob
     if root.saved >= 0: Rectangle {
-        x: root.half + root.saved * (parent.width - 2 * root.half) - 1px; // art: the saved value's mark
-        y: (parent.height - 12px) / 2; // art: the saved value's mark
+        x: root.half + root.saved * (parent.width - 2 * root.half) - self.width / 2;
+        y: (parent.height - self.height) / 2;
         width: 2px; // art: the saved value's mark
-        height: 12px; // art: the saved value's mark
+        height: 10px; // art: the saved value's mark
         border-radius: self.width / 2;
         background: Ink.placeholder;
     }
-    // the knob, ringed in what it sits on
+    // the knob, a step larger under the pointer and while held
     Rectangle {
-        property <length> d: drag.has-hover || drag.pressed ? 19.5px : 18px; // art: the knob, larger under the pointer
-        x: root.at * (parent.width - 2 * root.half) + root.half - self.d / 2 - 3px; // art: the knob's ring
-        y: parent.height / 2 - self.d / 2 - 3px; // art: the knob's ring
-        width: self.d + 6px; // art: the knob's ring
-        height: self.d + 6px; // art: the knob's ring
+        width: drag.has-hover || drag.pressed ? 2 * root.half + 2px : 2 * root.half; // art: the knob, larger under the pointer
+        height: self.width;
+        x: root.half + root.at * (parent.width - 2 * root.half) - self.width / 2;
+        y: (parent.height - self.height) / 2;
         border-radius: self.width / 2;
-        background: root.ground;
-        drop-shadow-blur: Shadow.knob.blur;
-        drop-shadow-offset-y: Shadow.knob.y;
-        drop-shadow-color: Shadow.knob.color;
-        Rectangle {
-            x: 3px; // art: the knob, in its ring
-            y: 3px; // art: the knob, in its ring
-            width: parent.d;
-            height: parent.d;
-            border-radius: self.width / 2;
-            background: Ink.bright;
-        }
+        background: Ink.bright;
     }
     drag := TouchArea {
         mouse-cursor: pointer;

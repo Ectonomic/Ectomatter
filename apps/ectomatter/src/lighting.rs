@@ -181,6 +181,11 @@ pub fn id(c: Ctl) -> i32 {
     CTLS.iter().position(|x| *x == c).unwrap_or(0) as i32
 }
 
+/// A slider's run, where the slider sets no light's color: Ecto green.
+pub(crate) fn run() -> slint::Color {
+    crate::tokens::color(crate::tokens::ink::BRAND)
+}
+
 /// the pieces' kinds, as ui/system/cells.slint draws them: every kind it draws
 /// is named here, used from Rust or not, and none it doesn't draw
 /// (tokens::system::cells_placed_are_drawn)
@@ -409,7 +414,7 @@ impl Stack {
         self.y += line::TEXT + space::LABEL;
         self.empty = true;
     }
-    /// a slider, filled to its place in `fill`, its ends named under it
+    /// a slider, run to its place in `fill` (run(), or the light's color it sets), its ends named under it
     pub(crate) fn slider_at(&mut self, id: i32, frac: f32, fill: slint::Color, ends: Option<(&str, &str)>) {
         self.cells.push(Cell { value: frac, color: fill, id, ..cell(kind::FILLED, self.x, self.y, self.iw, size::SLIDER) });
         self.y += size::SLIDER;

@@ -6847,10 +6847,7 @@ component LabControl inherits Rectangle {
             y: root.slider-y;
             width: root.r.w - 26px; // art: a lab slider's row, short of its reset
             value: root.r.at;
-            fill: Ink.soft;
             saved: root.r.moved ? root.r.was : -1;
-            // (its knob ringed in the row as lit: the stage's box, a shade brighter)
-            ground: root.r.hot ? Ink.white.mix(Ink.box, root.lit) : Ink.box;
             moved(v) => { root.slide(root.r.id, v); }
             reset => { root.reset(root.r.id); }
         }

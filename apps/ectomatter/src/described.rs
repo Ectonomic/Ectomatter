@@ -223,11 +223,6 @@ pub fn with_color(d: &Value, v: &Value, index: usize, c: [u8; 3]) -> Value {
     }
 }
 
-/// The sliders' fill.
-fn fill() -> slint::Color {
-    crate::tokens::color(crate::tokens::ink::SOFT)
-}
-
 /// An effect's settings, under its note, into a box's stack. `params` are
 /// the light's, and `open` the color the picker is open on: its setting's
 /// place, and the color's.
@@ -259,16 +254,16 @@ pub fn draw_effect(s: &mut Stack, effect: &Value, params: &Value, open: Option<(
                 if is_speed(id) {
                     s.head(&label(id, d), Some(&format!("{secs:.1} s a cycle")));
                     // quick at the right, as the keyboard's speed sliders run
-                    s.slider_at(at, frac(id, d, v), fill(), Some(("Slow", "Fast")));
+                    s.slider_at(at, frac(id, d, v), crate::lighting::run(), Some(("Slow", "Fast")));
                 } else {
                     s.head(&label(id, d), Some(&format!("{secs:.1} s")));
-                    s.slider_at(at, frac(id, d, v), fill(), None);
+                    s.slider_at(at, frac(id, d, v), crate::lighting::run(), None);
                 }
             }
             "int" | "number" => {
                 s.next();
                 s.head(&label(id, d), Some(&amount(d, v)));
-                s.slider_at(at, frac(id, d, v), fill(), None);
+                s.slider_at(at, frac(id, d, v), crate::lighting::run(), None);
             }
             "choice" => {
                 s.next();
@@ -364,7 +359,7 @@ pub fn draw_section(s: &mut Stack, desc: &Value, sec: &Section, values: &Value, 
             "int" | "number" | "duration" => {
                 let shown = if d["type"] == "duration" { format!("{:.1} s", v.as_f64().unwrap_or(0.0) / 1000.0) } else { amount(d, v) };
                 s.head(&words, Some(&shown));
-                s.slider_at(at, frac(id, d, v), fill(), None);
+                s.slider_at(at, frac(id, d, v), crate::lighting::run(), None);
             }
             "choice" => {
                 if own_name {
@@ -712,8 +707,6 @@ pub struct Boxes {
 /// (ui/app.slint's Lighting row has them too)
 pub const SET_W: f32 = crate::tokens::size::SETTINGS;
 pub const PLACE_W: f32 = crate::tokens::size::PLACES;
-/// a speed's slider's fill
-const SPEED_FILL: [u8; 3] = [0xd4, 0xd4, 0xd8];
 
 /// A note's words with the profile's name and the device's kind in them.
 fn words(s: &str, look: &Look) -> String {
@@ -838,7 +831,7 @@ fn drawn(s: &mut Stack, k: usize, id: &str, d: &Value, v: &Value, look: &Look, t
             let n = v.as_f64().unwrap_or(min);
             let shown = if d["percent"] == true { format!("{}%", ((n - min) / (max - min) * 100.0).round()) } else { amount(d, v) };
             s.head(&label(id, d), Some(&shown));
-            s.slider_at(at, ((n - min) / (max - min)) as f32, if d["tint"] == true { crate::tokens::color(tint) } else { fill() }, None);
+            s.slider_at(at, ((n - min) / (max - min)) as f32, if d["tint"] == true { crate::tokens::color(tint) } else { crate::lighting::run() }, None);
         }
         "duration" => {
             let (min, max, _) = span(d);
@@ -846,9 +839,9 @@ fn drawn(s: &mut Stack, k: usize, id: &str, d: &Value, v: &Value, look: &Look, t
             s.head(&label(id, d), Some(&format!("{:.1} s", n / 1000.0)));
             if is_speed_of(id, d) {
                 // the slider runs slow to fast: right is faster
-                s.slider_at(at, ((max - n) / (max - min)) as f32, crate::tokens::color(SPEED_FILL), Some(("Slow", "Fast")));
+                s.slider_at(at, ((max - n) / (max - min)) as f32, crate::lighting::run(), Some(("Slow", "Fast")));
             } else {
-                s.slider_at(at, ((n - min) / (max - min)) as f32, fill(), None);
+                s.slider_at(at, ((n - min) / (max - min)) as f32, crate::lighting::run(), None);
             }
         }
         "choice" if d["menu"] == true => {

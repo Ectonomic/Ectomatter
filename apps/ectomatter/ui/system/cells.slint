@@ -686,13 +686,14 @@ export component CellView inherits Rectangle {
             vertical-alignment: center;
         }
     }
-    // a slider, filled to its place in its color: the Slider, `style` by what it sits on
+    // a slider, run in its color (Ecto green, or the light's it sets): the Slider; style 4
+    // with a notch at its middle
     if root.c.kind == 41: Slider {
         width: parent.width;
         height: parent.height;
         value: root.c.value;
         fill: root.c.color;
-        style: root.c.style;
+        notch: root.c.style == 4;
         moved(v) => { root.slide(root.c.id, v); }
         reset => { root.reset(root.c.id); }
     }

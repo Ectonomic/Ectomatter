@@ -9076,7 +9076,7 @@ impl Front {
                 let ww = crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, words).ceil() + 2.0;
                 cells.push(text_cell(style::NOTE, W - ww, y, ww, line::TEXT, words));
                 y += line::TEXT + space::LABEL;
-                cells.push(Cell { value: l.speed, color: crate::tokens::color(crate::tokens::ink::SOFT), style: 3, id: id(Ctl::SceneSpeed), ..cell(kind::FILLED, 0.0, y, W, size::SLIDER) });
+                cells.push(Cell { value: l.speed, color: crate::lighting::run(), id: id(Ctl::SceneSpeed), ..cell(kind::FILLED, 0.0, y, W, size::SLIDER) });
                 y += size::SLIDER + space::PAD;
             }
             for (k, (dev, name, _, profiles)) in self.scene_form_plugins().iter().enumerate() {
