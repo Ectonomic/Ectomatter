@@ -113,8 +113,9 @@ menu, the picker, a floating bar, something carried) and `modal` (a dialog).
 **Ink**, the colors: the window's shades, each control's four states, the
 outlines, the words (`bright`, `dim`, `soft`, `quiet`, `placeholder`, `off`),
 and the signals (`warn`, `bad`, `good`, `danger`, `record`, `close`, `media`);
-`brand` is Ecto green, the family's own color, which a slider runs in where it
-sets no light's color, and `track` the gray of a slider's line beyond its run.
+`run` is the gray a slider runs in where it sets no light's color (the only
+colors on a page are the lights' it sets), and `track` the gray of a slider's
+line beyond its run.
 A part's light or dark wash is `white` or `black` at an opacity of the part's
 own. Ink can be set while the app runs (`ECTOMATTER_INK`) for a color mock.
 
@@ -145,8 +146,8 @@ In `ui/system/`, each drawn once:
   `subtle` at a panel's head, `followed`, `warn`, a chip), `SegSwitch` and its
   pieces `SegGround` and `SegChoice` (a choice's icon, a color's dot or square,
   a `menu` chevron), `CheckBox`, `RadioRow`, `Slider` (the one slider, the
-  lab's too: a 2 px line run in Ecto green, or in the color of the light it
-  sets, up to a small plain knob; `notch` marks its middle, `saved` where a
+  lab's too: a 2 px line run in the window's gray, or in the color of the light
+  it sets, up to a small plain knob; `notch` marks its middle, `saved` where a
   value was saved once it has moved), `Tag`,
   `ColorButton`, `ColorSquare`, `Fold` (a heading that opens and shuts),
   `ScrollBar`, `Spinner`, `PickField`, `SmallCap`, `StripIcon`, `PlayButton`,

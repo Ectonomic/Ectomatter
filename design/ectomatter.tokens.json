@@ -225,6 +225,6 @@
     "shade4": { "$value": "{ink.pick-hover}" },
     "ink": { "$value": "{ink.bright}" },
     "track": { "$value": "{ink.edge}", "$description": "A slider's line where its run hasn't reached; the lab's reset arrow while there's nothing to put back." },
-    "brand": { "$value": "#99ed02", "$description": "Ecto green, the family's own color: a slider's run, where the slider sets no light's color (one that does runs in that light's)." }
+    "run": { "$value": "{ink.soft}", "$description": "A slider's run, where the slider sets no light's color: the window's own gray, as its ends' words are, so the only colors on a page are the lights' it sets (one that sets a light runs in that light's)." }
   }
 }

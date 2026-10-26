@@ -1024,15 +1024,15 @@ export component DropField inherits Rectangle {
     }
 }
 
-// A slider, the same wherever one is: a line, run up to its knob in `fill` (Ecto
-// green, or the color of the light it sets), and a small plain knob that follows
+// A slider, the same wherever one is: a line, run up to its knob in `fill` (the
+// window's gray, or the color of the light it sets), and a small plain knob that follows
 // the pointer while held, a step larger under the pointer; double-clicked, it goes
 // back as it was (`reset`). `notch` marks its middle, its default, which holds the
 // knob as it passes. `saved`, 0 to 1, marks where the value was saved while it has
 // moved from there (below 0, as it is unless given, no mark).
 export component Slider inherits Rectangle {
     in property <float> value;
-    in property <color> fill: Ink.brand;
+    in property <color> fill: Ink.run;
     in property <bool> notch;
     in property <float> saved: -1;
     callback moved(float);

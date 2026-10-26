@@ -181,9 +181,10 @@ pub fn id(c: Ctl) -> i32 {
     CTLS.iter().position(|x| *x == c).unwrap_or(0) as i32
 }
 
-/// A slider's run, where the slider sets no light's color: Ecto green.
+/// A slider's run, where the slider sets no light's color: the window's own
+/// gray, so the only colors on a page are the lights' it sets.
 pub(crate) fn run() -> slint::Color {
-    crate::tokens::color(crate::tokens::ink::BRAND)
+    crate::tokens::color(crate::tokens::ink::RUN)
 }
 
 /// the pieces' kinds, as ui/system/cells.slint draws them: every kind it draws
