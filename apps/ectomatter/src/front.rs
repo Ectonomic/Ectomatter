@@ -1011,7 +1011,10 @@ fn swatch(cols: &[[f64; 3]]) -> (i32, [Color; 4]) {
 }
 
 impl Front {
-    pub fn new(ui: AppWindow, kb: Option<mpsc::Sender<device::Ask>>, controlled: bool, settings: crate::settings::Settings) -> Front {
+    /// The pages over the packages running (`hosted`, every one that's on
+    /// started), the keyboard's thread (`kb`) and whether Ectomatter controls
+    /// the keyboard.
+    pub fn new(ui: AppWindow, hosted: crate::hosted::Hosted, kb: Option<mpsc::Sender<device::Ask>>, controlled: bool, settings: crate::settings::Settings) -> Front {
         // (which sensors the screen's layouts can show, as last chosen; the Sensors card's
         // choices before, carried over once the layouts are read)
         let (setup, before) = crate::sensors::Setup::of(&settings.all()["sensors"]);
@@ -1209,10 +1212,6 @@ impl Front {
             })
             .collect();
         let slider_ends = crate::uistate::get("slider_ends").and_then(|v| serde_json::from_value(v).ok()).unwrap_or([[400.0, 3700.0], [400.0, 3700.0]]);
-        let mut hosted = crate::hosted::Hosted::new(std::sync::Arc::new(crate::computer::ThisComputer::new()));
-        // (each plugin's settings under the id it has now first, its switch among them)
-        crate::packages::rename_settings(&settings);
-        hosted.start_all(&settings);
         // (offscreen, nothing is changed: the thread has no monitors to reach)
         let screens: Option<Box<dyn crate::putback::Screens>> = if crate::desk::offscreen() { None } else { Some(Box::new(crate::monitors::Hands)) };
         let worker = crate::putback::Worker::start(crate::putback::Journal::load(crate::putback::kept_at()), screens);
@@ -2316,7 +2315,8 @@ impl Front {
                         // an update put in place: its plugin started again on it
                         self.give_packages();
                         if let Some(p) = self.packages.iter().find(|p| p.id() == id).cloned() {
-                            if self.hosted.get(&id).is_some() {
+                            // (a core runs the new version from Ectomatter's next start, with its device's page)
+                            if self.hosted.get(&id).is_some() && p.kind() == crate::packages::Kind::Plugin {
                                 self.hosted.stop(&id);
                                 self.start_package(p);
                             }
@@ -3227,10 +3227,15 @@ impl Front {
             }
             Ctl::Control | Ctl::HdrMode => {
                 let Some(v) = crate::ecto_settings::choice(c, index) else { return };
+                // (the keyboard's Control is its core's switch)
                 let path = match c {
-                    Ctl::Control => "devices.z10.control",
-                    _ => "hdr.lighting",
+                    Ctl::Control => match crate::cores::keyboard() {
+                        Some(k) => crate::packages::switch_of(crate::packages::Kind::Core, &k.id),
+                        None => return,
+                    },
+                    _ => "hdr.lighting".to_string(),
                 };
+                let path = path.as_str();
                 if self.settings.get(path).as_ref() == Some(&v) || (c == Ctl::Control && v == serde_json::json!(self.controlled)) {
                     return;
                 }
@@ -6673,7 +6678,7 @@ impl Front {
             .enumerate()
             .filter(|(_, p)| p.kind() == kind)
             .map(|(i, p)| {
-                let on = if p.id() == crate::z10::CORE { self.controlled } else { self.settings.on(&p.switch()) };
+                let on = self.settings.on(&p.switch());
                 let running = self.hosted.get(p.id());
                 // (one that names no repository says nothing more, but that it was added from a file)
                 let status = if p.repository().is_none() { if p.added { "Added from a file".to_string() } else { String::new() } } else { crate::updates::status_of(p) };
@@ -6969,7 +6974,7 @@ impl Front {
     fn package_added(&mut self, id: &str, name: &str) {
         self.give_packages();
         if let Some(p) = self.packages.iter().find(|p| p.id() == id).cloned() {
-            if !crate::hosted::started_elsewhere(id) && self.settings.on(&p.switch()) {
+            if self.settings.on(&p.switch()) {
                 self.hosted.stop(id);
                 self.start_package(p);
             }
@@ -6997,7 +7002,7 @@ impl Front {
         }
         self.give_packages();
         if let Some(p) = self.packages.iter().find(|p| p.id() == id).cloned() {
-            if self.settings.on(&p.switch()) && !crate::hosted::started_elsewhere(id) {
+            if self.settings.on(&p.switch()) {
                 self.start_package(p);
             }
         }
@@ -7007,12 +7012,12 @@ impl Front {
     }
 
     /// A package turned on or off in Settings: the keyboard's core is the
-    /// keyboard's Control, and it and the mouse's core start again with
-    /// Ectomatter; a plugin starts or stops at once, what it changed for a game
-    /// running put back first.
+    /// keyboard's Control, and every core starts again with Ectomatter, its
+    /// device's page with it; a plugin starts or stops at once, what it
+    /// changed for a game running put back first.
     fn package_switch(&mut self, row: usize, on: bool) {
         let Some(p) = self.packages.get(row).cloned() else { return };
-        if p.id() == crate::z10::CORE {
+        if crate::cores::keyboard().is_some_and(|k| k.id == p.id()) {
             self.cell_pick(Ctl::Control, if on { 0 } else { 1 }, (0.0, 0.0, 0.0), 0.0);
             return;
         }
@@ -7023,7 +7028,7 @@ impl Front {
             self.status(format!("The setting was not saved: {e}"), 2);
             return;
         }
-        if p.id() == crate::mouse::CORE {
+        if p.kind() == crate::packages::Kind::Core {
             self.restart = Some("settings".into());
             return;
         }

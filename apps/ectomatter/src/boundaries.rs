@@ -213,7 +213,6 @@ mod tests {
     /// devices its manifest names." Every core is started the same way, and
     /// none by name.
     #[test]
-    #[ignore = "known failure: the Z10's and the mouse's cores are started by name (docs/deferred.md, stage 2)"]
     fn every_core_starts_the_same_way() {
         let mut found = Vec::new();
         for f in rust_files() {

@@ -36,6 +36,20 @@ pub fn move_old_home() {
     }
 }
 
+/// The settings kept under names from before, moved to the names they have
+/// now: the keyboard's Control was `devices.z10.control` before every core
+/// was turned on and off alike, by its switch. A check run offscreen, or a
+/// test, moves nothing.
+pub fn move_old_settings(settings: &crate::settings::Settings) {
+    if crate::desk::keeps_nothing() {
+        return;
+    }
+    let switch = crate::packages::switch_of(crate::packages::Kind::Core, "evga-z10");
+    if let Some(v) = settings.take("devices.z10.control").filter(|_| settings.get(&switch).is_none()) {
+        let _ = settings.set(&switch, v);
+    }
+}
+
 /// A file with every `from` in it made `to`, written only where there was one.
 fn replace_in(path: &Path, from: &str, to: &str) {
     let Ok(text) = std::fs::read_to_string(path) else { return };

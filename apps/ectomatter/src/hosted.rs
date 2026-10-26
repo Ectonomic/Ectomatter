@@ -17,17 +17,21 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
-use crate::core_host::{Computer, Core, NoDevices};
+use crate::core_host::{Computer, Core, NoDevices, Usb};
 use crate::packages::{Kind, Package};
 
 /// A package running: its package, its core, what it said last of how it is
 /// (a warning to show beside it, such as a server it can't reach), and, for
-/// a core, the devices it told, each as it told it.
+/// a core, the devices it told, each as it told it, and what it describes
+/// before any is met (`device/describe`).
 pub struct Run {
     pub package: Package,
     pub core: Core,
     pub warning: Option<String>,
     pub devices: Vec<Value>,
+    pub describes: Value,
+    /// whether a device's page talks to it (drive), and hears what it tells
+    driven: bool,
     /// its sections, as last described for each page, and when
     described: Vec<(String, Value, Instant)>,
     /// its own Settings section, as it last told it (settings/section)
@@ -55,6 +59,10 @@ pub struct Hosted {
     added: Vec<String>,
     /// the packages that wouldn't start, each with why, for Settings to say
     refused: std::collections::HashMap<String, String>,
+    /// the USB devices a core is lent, through which it reaches those its
+    /// manifest names and no others (core_host.rs): this computer's, but
+    /// none offscreen or in a test
+    usb: Box<dyn Fn() -> Box<dyn Usb>>,
 }
 
 /// The readings the plugins told, by plugin: what each lists it can read
@@ -139,14 +147,14 @@ impl Readings {
     }
 }
 
-/// Packages Ectomatter starts elsewhere: the keyboard's and the mouse's cores.
-pub fn started_elsewhere(id: &str) -> bool {
-    id == crate::z10::CORE || id == crate::mouse::CORE
-}
-
 impl Hosted {
     pub fn new(computer: Arc<dyn Computer>) -> Hosted {
-        Hosted { cores: Vec::new(), plugins: Vec::new(), computer, readings: Readings::default(), added: Vec::new(), refused: std::collections::HashMap::new() }
+        Hosted::with_usb(computer, Box::new(crate::core_host::computers_usb))
+    }
+
+    /// Hosted with the USB devices a core is lent made by `usb`, a test's own.
+    pub fn with_usb(computer: Arc<dyn Computer>, usb: Box<dyn Fn() -> Box<dyn Usb>>) -> Hosted {
+        Hosted { cores: Vec::new(), plugins: Vec::new(), computer, readings: Readings::default(), added: Vec::new(), refused: std::collections::HashMap::new(), usb }
     }
 
     /// The plugins' readings as they tell them, for whoever shows them.
@@ -178,16 +186,25 @@ impl Hosted {
         self.cores.iter().chain(self.plugins.iter())
     }
 
-    /// Each package that's on and isn't started elsewhere, started (offscreen
-    /// too: a page's sections are drawn from what plugins describe; none of
-    /// them changes anything there, nothing being made offscreen).
+    /// Each package that's on, started (offscreen too: a page's sections are
+    /// drawn from what plugins describe, and a device's page from what its
+    /// core describes; none of them changes anything there, nothing being
+    /// made offscreen, and no core is lent a device).
     pub fn start_all(&mut self, settings: &crate::settings::Settings) {
         for p in crate::packages::all() {
-            if started_elsewhere(p.id()) || !settings.on(&p.switch()) {
-                continue;
+            if settings.on(&p.switch()) {
+                self.start(p);
             }
-            self.start(p);
         }
+    }
+
+    /// The first core running that describes a device of `kind` (`keyboard`,
+    /// `mouse`) and no page talks to yet, for that kind's page to talk to:
+    /// its package and its core. From then on the page hears what it tells.
+    pub fn drive(&mut self, kind: &str) -> Option<(Package, Core)> {
+        let r = self.cores.iter_mut().find(|r| !r.driven && r.describes["kind"] == kind)?;
+        r.driven = true;
+        Some((r.package.clone(), r.core.clone()))
     }
 
     pub fn start(&mut self, p: Package) {
@@ -207,7 +224,9 @@ impl Hosted {
             self.refused.insert(p.id().to_string(), e);
             return;
         }
-        match Core::start_with(&p.dir, data, Box::new(NoDevices), Some(self.computer.clone())) {
+        // (a core reaches the devices its manifest names; a plugin, none)
+        let usb: Box<dyn Usb> = if kind == Kind::Core { (self.usb)() } else { Box::new(NoDevices) };
+        match Core::start_with(&p.dir, data, usb, Some(self.computer.clone())) {
             Ok(core) => {
                 // (one that speaks another protocol, or won't start, is stopped, and Settings says why)
                 if let Err(e) = crate::core_host::initialize(&core, Value::Null) {
@@ -220,8 +239,10 @@ impl Hosted {
                     return;
                 }
                 eprintln!("ectomatter: the {} {} started", p.id(), kind.word());
+                // (what a core's devices are, before any is met: a core that can't say, nothing)
+                let describes = if kind == Kind::Core { core.call("device/describe", &Value::Null).unwrap_or(Value::Null) } else { Value::Null };
                 self.readings.told_again(p.id());
-                let run = Run { package: p, core, warning: None, devices: Vec::new(), described: Vec::new(), section: None, scratch };
+                let run = Run { package: p, core, warning: None, devices: Vec::new(), describes, driven: false, described: Vec::new(), section: None, scratch };
                 match kind {
                     Kind::Core => self.cores.push(run),
                     Kind::Plugin => self.plugins.push(run),
@@ -261,7 +282,8 @@ impl Hosted {
     /// the devices they brought in. True if anything changed.
     pub fn poll(&mut self) -> bool {
         let mut changed = false;
-        for p in self.cores.iter_mut().chain(self.plugins.iter_mut()) {
+        // (a core a device's page talks to tells the page)
+        for p in self.cores.iter_mut().filter(|r| !r.driven).chain(self.plugins.iter_mut()) {
             for (method, params) in p.core.told() {
                 match method.as_str() {
                     "plugin/status" => {
@@ -460,6 +482,59 @@ mod tests {
 
     fn plugin(id: &str) -> Hosted {
         hosted(Kind::Plugin, id)
+    }
+
+    /// A copy of the Sensei 310's core under `id`, its manifest changed by `change`.
+    fn made_up_core(id: &str, change: impl Fn(String) -> String) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ectomatter-{id}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let from = crate::packages::builtin_dir(Kind::Core).join("steelseries-sensei-310");
+        assert!(from.join("core.wasm").exists(), "the SteelSeries module isn't built: run tools/build-cores.sh");
+        std::fs::create_dir_all(&dir).unwrap();
+        for f in ["core.wasm", "glyph.svg", "light.json"] {
+            std::fs::copy(from.join(f), dir.join(f)).unwrap();
+        }
+        let manifest = std::fs::read_to_string(from.join("core.json")).unwrap().replace("\"steelseries-sensei-310\"", &format!("\"{id}\""));
+        std::fs::write(dir.join("core.json"), change(manifest)).unwrap();
+        dir
+    }
+
+    /// Whether a core tells it met a device in two seconds.
+    fn meets(core: &Core) -> bool {
+        let until = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < until {
+            if core.told().iter().any(|(m, _)| m == "device/added") {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        false
+    }
+
+    /// docs/core-protocol.md, principle 1: a core Ectomatter has never seen,
+    /// started as every core is, is lent the devices its manifest names and
+    /// meets its own, and the page for the kind of device it describes talks
+    /// to it; the same core naming another device is lent none.
+    #[test]
+    fn a_core_of_its_own_reaches_its_device_and_its_page() {
+        let fake = || -> Box<dyn crate::core_host::Usb> { Box::new(crate::core_host::tests::One(Some(Box::new(crate::core_host::tests::FakeMouse::new())))) };
+        let dir = made_up_core("made-up-mouse", |m| m);
+        let mut ps = Hosted::with_usb(Arc::new(Desk), Box::new(fake));
+        ps.start(crate::packages::Package::read(&dir, true).unwrap());
+        let (p, core) = ps.drive("mouse").expect("the mouse's page talks to it");
+        assert_eq!(p.id(), "made-up-mouse");
+        assert!(meets(&core), "it met the mouse");
+        assert!(ps.drive("mouse").is_none(), "one page to a core");
+        ps.stop("made-up-mouse");
+
+        let other = made_up_core("made-up-other", |m| m.replace("\"vendor\": \"1038\"", "\"vendor\": \"1234\""));
+        let mut ps = Hosted::with_usb(Arc::new(Desk), Box::new(fake));
+        ps.start(crate::packages::Package::read(&other, true).unwrap());
+        let (_, core) = ps.drive("mouse").expect("it describes a mouse, met or not");
+        assert!(!meets(&core), "it reached a device its manifest doesn't name");
+        ps.stop("made-up-other");
+        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(other);
     }
 
     /// docs/core-protocol.md, section 9: a package whose manifest says another

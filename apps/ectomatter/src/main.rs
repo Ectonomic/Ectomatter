@@ -584,9 +584,13 @@ fn main() {
     ectomatter_draw::print::warm();
     // `--read-state FILE`: read the keyboard's state once, for the snapshots, and stop
     if let Some(path) = args.iter().position(|a| a == "--read-state").and_then(|i| args.get(i + 1)) {
-        let kb = device::z10(&cores::dir().join(z10::CORE), core_data(z10::CORE));
+        // (the keyboard's core alone, started as any core is)
+        let mut hosted = hosted::Hosted::new(std::sync::Arc::new(computer::ThisComputer::new()));
+        if let Some(p) = packages::of(packages::Kind::Core).into_iter().find(|p| cores::keyboard().is_some_and(|k| k.id == p.id())) {
+            hosted.start(p);
+        }
+        let kb = hosted.drive("keyboard").map(|(_, core)| core).ok_or_else(|| "Ectomatter has no keyboard's core".to_string());
         let state = kb.as_ref().map_err(|e| e.clone()).and_then(|k| {
-            core_host::initialize(k, serde_json::Value::Null)?;
             let s = k.call("device/read", &serde_json::Value::Null);
             let _ = k.call("device/release", &serde_json::Value::Null);
             s
@@ -669,7 +673,11 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         .and_then(|s| s.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
         .unwrap_or(SIZE);
     window.set_size(PhysicalSize::new(w, h));
-    let mut front = Front::new(ui, None, true, settings::Settings::load(config_dir().join("settings.json")));
+    let settings = settings::Settings::load(config_dir().join("settings.json"));
+    packages::rename_settings(&settings);
+    let mut hosted = hosted::Hosted::new(std::sync::Arc::new(computer::ThisComputer::new()));
+    hosted.start_all(&settings);
+    let mut front = Front::new(ui, hosted, None, true, settings);
     if let Some(state) = std::env::var_os("ECTOMATTER_STATE") {
         let dev: serde_json::Value = serde_json::from_slice(&std::fs::read(state).expect("the saved state")).expect("the saved state as JSON");
         // (a state an older Ectomatter saved, in the keyboard code's own shapes, read in the shared ones)
@@ -1940,8 +1948,17 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
     // core, which the keyboard's thread and the screen's player both talk
     // through, and which hears its keys (each press told, whichever window
     // has the keyboard)
-    let controlled = settings.on("devices.z10.control");
-    let z10_core = controlled.then(|| device::z10(&cores::dir().join(z10::CORE), core_data(z10::CORE)));
+    // every core and plugin that's on, started the one way (hosted.rs); the
+    // keyboard's page talks to the first core describing a keyboard, the
+    // mouse's to the first describing a mouse
+    old_name::move_old_settings(&settings);
+    packages::rename_settings(&settings);
+    let mut hosted = hosted::Hosted::new(std::sync::Arc::new(computer::ThisComputer::new()));
+    hosted.start_all(&settings);
+    let keyboard = hosted.drive("keyboard");
+    // (the keyboard's core off, Ectomatter leaves the keyboard to other programs)
+    let controlled = cores::keyboard().is_none_or(|c| settings.on(&packages::switch_of(packages::Kind::Core, &c.id)));
+    let z10_core = keyboard.map(|(_, core)| Ok(core));
     // (whether the keyboard is plugged in, as its core tells, for the screen's player)
     let z10_there = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
     let kb = z10_core.clone().map(|core| {
@@ -1970,13 +1987,10 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         device::start(core, heard_tx, z10_there.clone())
     });
 
-    // the SteelSeries Sensei 310's core, and the mouse's page's thread on it:
-    // it meets the mouse, and writes to it only what the page changes; none
-    // while the core is turned off in Settings, which leaves the mouse alone
-    let mouse_on = settings.on(&format!("cores.{}.on", mouse::CORE));
-    let mouse = mouse_on
-        .then(|| core_host::Core::start(&cores::dir().join(mouse::CORE), core_data(mouse::CORE), Box::new(core_host::Hidapi::new())).map_err(|e| eprintln!("ectomatter: the Sensei 310's core: {e}")).ok())
-        .flatten();
+    // the mouse's core, and the mouse's page's thread on it: it meets the
+    // mouse, and writes to it only what the page changes; none while the core
+    // is turned off in Settings, which leaves the mouse alone
+    let mouse = hosted.drive("mouse").map(|(_, core)| core);
     // (the page's picture comes back the same way, drawn on a thread of its own)
     let mouse_ask = mouse.clone().map(|m| {
         let (heard_tx, heard_rx) = calloop::channel::channel::<mouse::Heard>();
@@ -2042,7 +2056,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
         levels: (0.0, 0.0),
         slint,
         front: {
-            let mut f = Front::new(ui, kb, controlled, settings);
+            let mut f = Front::new(ui, hosted, kb, controlled, settings);
             (f.mouse.ask, f.mouse.tell) = mouse_ask.unzip();
             f
         },

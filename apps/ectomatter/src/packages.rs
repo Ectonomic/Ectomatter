@@ -142,15 +142,16 @@ impl Package {
         can_words(&self.manifest.all)
     }
 
-    /// The setting that turns it on or off. The keyboard's core is the
-    /// keyboard's own Control, which Settings' Devices shows too.
+    /// The setting that turns it on or off. A keyboard's core is the
+    /// keyboard's own Control too, on its Settings tab.
     pub fn switch(&self) -> String {
-        if self.id() == crate::z10::CORE {
-            "devices.z10.control".into()
-        } else {
-            format!("{}.{}.on", self.kind().folder(), self.id())
-        }
+        switch_of(self.kind(), self.id())
     }
+}
+
+/// The setting that turns a package of a kind on or off, by its id.
+pub fn switch_of(kind: Kind, id: &str) -> String {
+    format!("{}.{id}.on", kind.folder())
 }
 
 /// What a package can do on the computer, a sentence each, in Ectomatter's

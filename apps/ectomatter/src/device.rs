@@ -5,7 +5,6 @@
 //! back through the event loop. What the core tells unasked, each key's
 //! press as it hears the keyboard's own reports, goes to the page at once.
 
-use std::path::PathBuf;
 use std::sync::mpsc;
 
 use serde_json::{Value, json};
@@ -57,12 +56,6 @@ pub enum Heard {
     Done,
 }
 
-/// The Z10's core, started: its manifest and module in `dir`, its own files
-/// (where the first write of a session saves what it replaces) in `data`.
-pub fn z10(dir: &std::path::Path, data: PathBuf) -> Result<crate::core_host::Core, String> {
-    crate::core_host::Core::start(dir, data, Box::new(crate::core_host::Hidapi::new()))
-}
-
 /// What a preview's body asks of the keyboard, as the protocol's call for it.
 fn preview_call(body: &Value) -> &'static str {
     if body.get("stop").is_some() {
@@ -99,15 +92,6 @@ impl Kb {
 /// keyboard is plugged in, as it tells, is kept in `there`.
 pub fn start(z10: Result<crate::core_host::Core, String>, tell: Sender<Heard>, there: std::sync::Arc<std::sync::atomic::AtomicBool>) -> mpsc::Sender<Ask> {
     let (ask, asked) = mpsc::channel::<Ask>();
-    // (a core that speaks another protocol is let go: the keyboard's page says it can't reach it)
-    let z10 = z10.and_then(|core| match crate::core_host::initialize(&core, Value::Null) {
-        Ok(_) => Ok(core),
-        Err(e) => {
-            eprintln!("ectomatter: the keyboard's core wouldn’t start: {e}");
-            let _ = core.call("shutdown", &Value::Null);
-            Err(e)
-        }
-    });
     let kb = Kb(z10);
     if let Ok(core) = &kb.0 {
         // (what the Lighting page is drawn from: no device is asked, so it comes at once)

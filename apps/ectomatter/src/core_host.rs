@@ -549,6 +549,12 @@ pub fn initialize(core: &Core, more: Value) -> Result<Value, String> {
     }
 }
 
+/// The USB devices a core is lent: this computer's, over hidapi; none in a
+/// check run offscreen or a test, so neither ever reaches a device.
+pub fn computers_usb() -> Box<dyn Usb> {
+    if crate::desk::keeps_nothing() { Box::new(NoDevices) } else { Box::new(Hidapi::new()) }
+}
+
 /// The system Ectomatter runs on, as the protocol's initialize names it.
 pub fn platform() -> String {
     format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
@@ -761,7 +767,7 @@ fn slow(m: &Manifest, what: &str, since: Instant) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::collections::VecDeque;
     use std::io::Read;
@@ -791,8 +797,8 @@ mod tests {
         DeviceInfo { vendor: 0x3842, product: 0x2611, interface: 1, usage_page: 0x0008, usage: 0x004B, path: "fake".into() }
     }
 
-    /// A computer with one fake Z10, whose collection is `hid`.
-    struct One(Option<Box<dyn Hid>>);
+    /// A computer with one fake Z10 and a fake Sensei 310: the one opened is `hid`.
+    pub(crate) struct One(pub(crate) Option<Box<dyn Hid>>);
 
     impl Usb for One {
         fn devices(&mut self) -> Vec<DeviceInfo> {
@@ -1041,9 +1047,16 @@ mod tests {
     /// answers the firmware and settings questions as Grant's mouse did
     /// (firmware 24 01, presets 800 and 1600 with the first in use, both
     /// lights #FF1000).
-    struct FakeMouse {
+    pub(crate) struct FakeMouse {
         sent: Arc<Mutex<Vec<(Instant, bool, Vec<u8>)>>>,
         waiting: VecDeque<Vec<u8>>,
+    }
+
+    impl FakeMouse {
+        /// A fake Sensei 310 that keeps nothing of what it's sent.
+        pub(crate) fn new() -> FakeMouse {
+            FakeMouse { sent: Arc::new(Mutex::new(Vec::new())), waiting: VecDeque::new() }
+        }
     }
 
     const MOUSE_SETTINGS: [u8; 12] = [0x01, 0x01, 0x07, 0x00, 0x0f, 0x00, 0xff, 0x10, 0x00, 0xff, 0x10, 0x00];
