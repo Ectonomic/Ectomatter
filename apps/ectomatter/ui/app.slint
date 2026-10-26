@@ -28,7 +28,7 @@ import "../../../crates/ectomatter-draw/typefaces/JetBrainsMono.ttf";
 import { Space, Radius, Font, Line, Size, Part, Stroke, Shadow, Ink } from "tokens.slint";
 export { Ink }
 // The design system's parts (ui/system/), which every page is built from.
-import { ColorSquare, DialogHead, FormLabel, FormNote, FormWarning, CarryChip, ScreenBay, RenameField, FloatBar, Fold, RecordButton, Tag, RadioRow, FolderTab, Slider, ColorButton, SegGround, SegChoice, TipBox, Tip, EmptyState, ListRow, EditorHeader, EffectTile, Glyph, IconButton, MoreButton, PencilButton, BoxRow, Scrim, DialogBox, Confirm, Dot, TitleBar, PageBar, HintRow, Typing, WinButton, Tab, WordButton, TextButton, Spinner, ScrollBar, PickField, Well, LinkButton, SmallCap, FieldBox, CheckBox, Star, StarButton, StripIcon, PlayButton, SegSwitch, DropField, BarButton, Stage, PageBox, ScrollBox, MenuRow, Menu, Picker, Cell, CellView, LaidBox, CellBox, ProfileItem, RailItem, AnchorRow, AnchorHead, ListBox, AnchorColumn } from "system/system.slint";
+import { ColorSquare, DialogHead, FormLabel, FormNote, FormWarning, CarryChip, ScreenBay, FormDialog, RenameField, FloatBar, Fold, RecordButton, Tag, RadioRow, FolderTab, Slider, ColorButton, SegGround, SegChoice, TipBox, Tip, EmptyState, ListRow, EditorHeader, EffectTile, Glyph, IconButton, MoreButton, PencilButton, BoxRow, Scrim, DialogBox, Confirm, Dot, TitleBar, PageBar, HintRow, Typing, WinButton, Tab, WordButton, TextButton, Spinner, ScrollBar, PickField, Well, LinkButton, SmallCap, FieldBox, CheckBox, Star, StarButton, StripIcon, PlayButton, SegSwitch, DropField, BarButton, Stage, PageBox, ScrollBox, MenuRow, Menu, Picker, Cell, CellView, LaidBox, CellBox, ProfileItem, RailItem, AnchorRow, AnchorHead, ListBox, AnchorColumn } from "system/system.slint";
 export { Typing, MenuRow, Cell, LaidBox, ProfileItem }
 
 // a key over the keyboard: where it is in the drawing's units, from the
@@ -4510,342 +4510,305 @@ export component AppWindow inherits Window {
     // a form over the Library: Add a game (its program and its name) or Add an
     // app (one seen in front); the page dims under it, and a press on the dim,
     // Cancel or Escape closes it
-    if root.gl-modal != 0: Scrim {
+    if root.gl-modal != 0: FormDialog {
         corner: root.radius;
         cancel => { root.gl-modal-close(); }
-        DialogBox {
-            width: min(Size.dialog, parent.width - 2 * Space.pad);
-            height: form.preferred-height + 2 * Space.margin;
-            form := VerticalLayout {
-                x: Space.margin;
-                y: Space.margin;
-                width: parent.width - 2 * Space.margin;
-                height: self.preferred-height;
-                spacing: 0;
-                DialogHead {
-                    title: root.gl-modal == 1 ? "Add a game" : root.gl-modal == 3 ? root.gl-script-title : root.gl-modal == 4 ? root.gl-plugin-title : root.gl-modal == 5 ? root.gl-var-title : "Add an app";
-                    text: root.gl-modal == 1 ? "Choose the game’s program. The game joins Games, with a page of its own." : root.gl-modal == 3 ? root.gl-script-sub
-                        : root.gl-modal == 4 ? root.gl-plugin-sub : root.gl-modal == 5 ? root.gl-var-sub
-                        : "Choose an app you’ve had open while Ectomatter was running. The app joins Apps, with a page of its own.";
+        title: root.gl-modal == 1 ? "Add a game" : root.gl-modal == 3 ? root.gl-script-title : root.gl-modal == 4 ? root.gl-plugin-title : root.gl-modal == 5 ? root.gl-var-title : "Add an app";
+        text: root.gl-modal == 1 ? "Choose the game’s program. The game joins Games, with a page of its own." : root.gl-modal == 3 ? root.gl-script-sub
+            : root.gl-modal == 4 ? root.gl-plugin-sub : root.gl-modal == 5 ? root.gl-var-sub
+            : "Choose an app you’ve had open while Ectomatter was running. The app joins Apps, with a page of its own.";
+        go: (root.gl-modal == 3 && root.gl-script-editing) || (root.gl-modal == 5 && root.gl-var-editing) ? "Save" : "Add";
+        go-enabled: root.gl-can-add;
+        go-pressed => { root.gl-add-done(); }
+        // (Remove, where the form changes a script or a value already there)
+        aside: (root.gl-modal == 3 && root.gl-script-editing) || (root.gl-modal == 5 && root.gl-var-editing) ? "Remove" : "";
+        aside-pressed => {
+            if (root.gl-modal == 3) {
+                root.gl-script-remove();
+            } else {
+                root.gl-var-remove();
+            }
+        }
+        if root.gl-modal == 1: VerticalLayout {
+            spacing: 0;
+            FormLabel {
+                text: "Program";
+            }
+            Rectangle { height: Space.label; }
+            HorizontalLayout {
+                spacing: Space.inline;
+                FieldBox {
+                    horizontal-stretch: 1;
+                    read-only: true;
+                    text: root.gl-program;
+                    placeholder: "No program chosen";
                 }
-                Rectangle { height: Space.pad; }
-                if root.gl-modal == 1: VerticalLayout {
-                    spacing: 0;
-                    FormLabel {
-                        text: "Program";
-                    }
-                    Rectangle { height: Space.label; }
-                    HorizontalLayout {
-                        spacing: Space.inline;
-                        FieldBox {
-                            horizontal-stretch: 1;
-                            read-only: true;
-                            text: root.gl-program;
-                            placeholder: "No program chosen";
-                        }
-                        VerticalLayout {
-                            alignment: center;
-                            WordButton {
-                                text: "Choose…";
-                                on-box: true;
-                                clicked => { root.gl-choose-program(); }
-                            }
-                        }
-                    }
-                    Rectangle { height: Space.tight; }
-                    FormNote {
-                        text: "Ectomatter notices the game starting, from Play here or anywhere else.";
-                    }
-                    Rectangle { height: Space.pad; }
-                    FormLabel {
-                        text: "Name";
-                    }
-                    Rectangle { height: Space.label; }
-                    FieldBox {
-                        placeholder: root.gl-name-hint;
-                        text <=> root.gl-name-typed;
-                        accepted => { if (root.gl-can-add) { root.gl-add-done(); } }
-                        escape => { root.gl-modal-close(); }
+                VerticalLayout {
+                    alignment: center;
+                    WordButton {
+                        text: "Choose…";
+                        on-box: true;
+                        clicked => { root.gl-choose-program(); }
                     }
                 }
-                // a plugin: from its GitHub address or its file, and what it is once found
-                if root.gl-modal == 4: VerticalLayout {
-                    spacing: 0;
-                    FormLabel {
-                        text: "GitHub address";
+            }
+            Rectangle { height: Space.tight; }
+            FormNote {
+                text: "Ectomatter notices the game starting, from Play here or anywhere else.";
+            }
+            Rectangle { height: Space.pad; }
+            FormLabel {
+                text: "Name";
+            }
+            Rectangle { height: Space.label; }
+            FieldBox {
+                placeholder: root.gl-name-hint;
+                text <=> root.gl-name-typed;
+                accepted => { if (root.gl-can-add) { root.gl-add-done(); } }
+                escape => { root.gl-modal-close(); }
+            }
+        }
+        // a plugin: from its GitHub address or its file, and what it is once found
+        if root.gl-modal == 4: VerticalLayout {
+            spacing: 0;
+            FormLabel {
+                text: "GitHub address";
+            }
+            Rectangle { height: Space.label; }
+            FieldBox {
+                placeholder: "Its GitHub address, or its owner/name";
+                text <=> root.gl-plugin-address;
+                edited => { root.gl-plugin-typed(); }
+                accepted => { if (root.gl-can-add) { root.gl-add-done(); } }
+                escape => { root.gl-modal-close(); }
+            }
+            Rectangle { height: Space.pad; }
+            FormLabel {
+                text: "Or a file";
+            }
+            Rectangle { height: Space.label; }
+            HorizontalLayout {
+                spacing: Space.inline;
+                FieldBox {
+                    horizontal-stretch: 1;
+                    read-only: true;
+                    text: root.gl-plugin-file;
+                    placeholder: "No file chosen";
+                }
+                VerticalLayout {
+                    alignment: center;
+                    WordButton {
+                        text: "Choose…";
+                        on-box: true;
+                        clicked => { root.gl-plugin-choose-file(); }
                     }
-                    Rectangle { height: Space.label; }
-                    FieldBox {
-                        placeholder: "Its GitHub address, or its owner/name";
-                        text <=> root.gl-plugin-address;
-                        edited => { root.gl-plugin-typed(); }
-                        accepted => { if (root.gl-can-add) { root.gl-add-done(); } }
-                        escape => { root.gl-modal-close(); }
+                }
+            }
+            Rectangle { height: Space.tight; }
+            FormNote {
+                text: "Its file ends in .ectocore.";
+            }
+            if root.gl-plugin-found != "": Rectangle { height: Space.pad; }
+            if root.gl-plugin-found != "": Rectangle {
+                height: found-words.preferred-height;
+                border-radius: Radius.panel;
+                background: Ink.well;
+                found-words := VerticalLayout {
+                    padding: Space.row;
+                    spacing: Space.list;
+                    Text {
+                        text: root.gl-plugin-found;
+                        font-family: Font.ui;
+                        font-size: Font.name;
+                        font-weight: Font.medium;
+                        color: Ink.ink;
                     }
-                    Rectangle { height: Space.pad; }
-                    FormLabel {
-                        text: "Or a file";
-                    }
-                    Rectangle { height: Space.label; }
-                    HorizontalLayout {
-                        spacing: Space.inline;
-                        FieldBox {
-                            horizontal-stretch: 1;
-                            read-only: true;
-                            text: root.gl-plugin-file;
-                            placeholder: "No file chosen";
-                        }
-                        VerticalLayout {
-                            alignment: center;
-                            WordButton {
-                                text: "Choose…";
-                                on-box: true;
-                                clicked => { root.gl-plugin-choose-file(); }
-                            }
-                        }
-                    }
-                    Rectangle { height: Space.tight; }
-                    FormNote {
-                        text: "Its file ends in .ectocore.";
-                    }
-                    if root.gl-plugin-found != "": Rectangle { height: Space.pad; }
-                    if root.gl-plugin-found != "": Rectangle {
-                        height: found-words.preferred-height;
-                        border-radius: Radius.panel;
-                        background: Ink.well;
-                        found-words := VerticalLayout {
-                            padding: Space.row;
-                            spacing: Space.list;
-                            Text {
-                                text: root.gl-plugin-found;
-                                font-family: Font.ui;
-                                font-size: Font.name;
-                                font-weight: Font.medium;
-                                color: Ink.ink;
-                            }
-                            if root.gl-plugin-found-sub != "": Text {
-                                text: root.gl-plugin-found-sub;
-                                font-family: Font.ui;
-                                font-size: Font.note;
-                                color: Ink.soft;
-                                wrap: word-wrap;
-                            }
-                            FormNote {
-                                text: root.gl-plugin-can;
-                            }
-                        }
-                    }
-                    if root.gl-plugin-state != "": Rectangle { height: Space.inline; }
-                    if root.gl-plugin-state != "": Text {
-                        text: root.gl-plugin-state;
+                    if root.gl-plugin-found-sub != "": Text {
+                        text: root.gl-plugin-found-sub;
                         font-family: Font.ui;
                         font-size: Font.note;
-                        color: root.gl-plugin-bad ? Ink.bad : Ink.quiet;
+                        color: Ink.soft;
                         wrap: word-wrap;
                     }
-                }
-                // a variable: its name and its value side by side, as a launch line sets them
-                if root.gl-modal == 5: VerticalLayout {
-                    spacing: 0;
-                    HorizontalLayout {
-                        spacing: Space.pad;
-                        VerticalLayout {
-                            spacing: 0;
-                            FormLabel {
-                                text: "Name";
-                            }
-                            Rectangle { height: Space.label; }
-                            FieldBox {
-                                placeholder: "PROTON_ENABLE_NVAPI";
-                                mono: true;
-                                text <=> root.gl-var-name;
-                                edited => { root.gl-var-typed(); }
-                                accepted => { if (root.gl-can-add) { root.gl-add-done(); } }
-                                escape => { root.gl-modal-close(); }
-                            }
-                        }
-                        VerticalLayout {
-                            spacing: 0;
-                            FormLabel {
-                                text: "Value";
-                            }
-                            Rectangle { height: Space.label; }
-                            FieldBox {
-                                placeholder: "1";
-                                mono: true;
-                                text <=> root.gl-var-value;
-                                edited => { root.gl-var-typed(); }
-                                accepted => { if (root.gl-can-add) { root.gl-add-done(); } }
-                                escape => { root.gl-modal-close(); }
-                            }
-                        }
+                    FormNote {
+                        text: root.gl-plugin-can;
                     }
-                    if root.gl-var-warning != "": Rectangle { height: Space.tight; }
-                    if root.gl-var-warning != "": FormWarning { text: root.gl-var-warning; }
                 }
-                // a script: its name, its command and its undo side by side, how it runs, its time limit
-                if root.gl-modal == 3: VerticalLayout {
+            }
+            if root.gl-plugin-state != "": Rectangle { height: Space.inline; }
+            if root.gl-plugin-state != "": Text {
+                text: root.gl-plugin-state;
+                font-family: Font.ui;
+                font-size: Font.note;
+                color: root.gl-plugin-bad ? Ink.bad : Ink.quiet;
+                wrap: word-wrap;
+            }
+        }
+        // a variable: its name and its value side by side, as a launch line sets them
+        if root.gl-modal == 5: VerticalLayout {
+            spacing: 0;
+            HorizontalLayout {
+                spacing: Space.pad;
+                VerticalLayout {
                     spacing: 0;
                     FormLabel {
                         text: "Name";
                     }
                     Rectangle { height: Space.label; }
                     FieldBox {
-                        placeholder: "For example, Pause the local AI";
-                        text <=> root.gl-script-name;
+                        placeholder: "PROTON_ENABLE_NVAPI";
+                        mono: true;
+                        text <=> root.gl-var-name;
+                        edited => { root.gl-var-typed(); }
+                        accepted => { if (root.gl-can-add) { root.gl-add-done(); } }
+                        escape => { root.gl-modal-close(); }
+                    }
+                }
+                VerticalLayout {
+                    spacing: 0;
+                    FormLabel {
+                        text: "Value";
+                    }
+                    Rectangle { height: Space.label; }
+                    FieldBox {
+                        placeholder: "1";
+                        mono: true;
+                        text <=> root.gl-var-value;
+                        edited => { root.gl-var-typed(); }
+                        accepted => { if (root.gl-can-add) { root.gl-add-done(); } }
+                        escape => { root.gl-modal-close(); }
+                    }
+                }
+            }
+            if root.gl-var-warning != "": Rectangle { height: Space.tight; }
+            if root.gl-var-warning != "": FormWarning { text: root.gl-var-warning; }
+        }
+        // a script: its name, its command and its undo side by side, how it runs, its time limit
+        if root.gl-modal == 3: VerticalLayout {
+            spacing: 0;
+            FormLabel {
+                text: "Name";
+            }
+            Rectangle { height: Space.label; }
+            FieldBox {
+                placeholder: "For example, Pause the local AI";
+                text <=> root.gl-script-name;
+                edited => { root.gl-script-typed(); }
+                accepted => { if (root.gl-can-add) { root.gl-add-done(); } }
+                escape => { root.gl-modal-close(); }
+            }
+            Rectangle { height: Space.pad; }
+            HorizontalLayout {
+                spacing: Space.pad;
+                VerticalLayout {
+                    spacing: 0;
+                    FormLabel {
+                        text: root.gl-script-start-label;
+                    }
+                    Rectangle { height: Space.label; }
+                    FieldBox {
+                        placeholder: "A command or a file";
+                        mono: true;
+                        text <=> root.gl-script-start;
                         edited => { root.gl-script-typed(); }
                         accepted => { if (root.gl-can-add) { root.gl-add-done(); } }
                         escape => { root.gl-modal-close(); }
                     }
-                    Rectangle { height: Space.pad; }
-                    HorizontalLayout {
-                        spacing: Space.pad;
-                        VerticalLayout {
-                            spacing: 0;
-                            FormLabel {
-                                text: root.gl-script-start-label;
-                            }
-                            Rectangle { height: Space.label; }
-                            FieldBox {
-                                placeholder: "A command or a file";
-                                mono: true;
-                                text <=> root.gl-script-start;
-                                edited => { root.gl-script-typed(); }
-                                accepted => { if (root.gl-can-add) { root.gl-add-done(); } }
-                                escape => { root.gl-modal-close(); }
-                            }
-                        }
-                        VerticalLayout {
-                            spacing: 0;
-                            FormLabel {
-                                text: root.gl-script-quit-label;
-                            }
-                            Rectangle { height: Space.label; }
-                            FieldBox {
-                                placeholder: "Optional";
-                                mono: true;
-                                text <=> root.gl-script-quit;
-                                edited => { root.gl-script-typed(); }
-                                accepted => { if (root.gl-can-add) { root.gl-add-done(); } }
-                                escape => { root.gl-modal-close(); }
-                            }
-                        }
-                    }
-                    if root.gl-script-warning != "": Rectangle { height: Space.tight; }
-                    if root.gl-script-warning != "": FormWarning { text: root.gl-script-warning; }
-                    Rectangle { height: Space.pad; }
-                    CheckBox {
-                        text: root.gl-script-wait-label;
-                        on: root.gl-script-wait;
-                        clicked => { root.gl-script-wait-toggle(); }
-                    }
-                    Rectangle { height: Space.tight; }
-                    CheckBox {
-                        text: root.gl-script-keep-label;
-                        on: root.gl-script-keep;
-                        clicked => { root.gl-script-keep-toggle(); }
-                    }
-                    Rectangle { height: Space.pad; }
+                }
+                VerticalLayout {
+                    spacing: 0;
                     FormLabel {
-                        text: "Time limit";
+                        text: root.gl-script-quit-label;
                     }
                     Rectangle { height: Space.label; }
-                    HorizontalLayout {
-                        alignment: start;
-                        DropField {
-                            width: Size.chooser;
-                            text: root.gl-script-limit;
-                            open: root.menu-open;
-                            clicked(x, y, h) => { root.gl-script-limit-menu(x, y, h, self.width); }
-                        }
-                    }
-                    Rectangle { height: Space.tight; }
-                    FormNote {
-                        text: root.gl-script-limit-note;
+                    FieldBox {
+                        placeholder: "Optional";
+                        mono: true;
+                        text <=> root.gl-script-quit;
+                        edited => { root.gl-script-typed(); }
+                        accepted => { if (root.gl-can-add) { root.gl-add-done(); } }
+                        escape => { root.gl-modal-close(); }
                     }
                 }
-                if root.gl-modal == 2 && root.gl-seen.length == 0: Text {
-                    text: "Apps show here once they’ve been in front while Ectomatter is running.";
-                    font-family: Font.ui;
-                    font-size: Font.control;
-                    color: Ink.quiet;
-                    wrap: word-wrap;
+            }
+            if root.gl-script-warning != "": Rectangle { height: Space.tight; }
+            if root.gl-script-warning != "": FormWarning { text: root.gl-script-warning; }
+            Rectangle { height: Space.pad; }
+            CheckBox {
+                text: root.gl-script-wait-label;
+                on: root.gl-script-wait;
+                clicked => { root.gl-script-wait-toggle(); }
+            }
+            Rectangle { height: Space.tight; }
+            CheckBox {
+                text: root.gl-script-keep-label;
+                on: root.gl-script-keep;
+                clicked => { root.gl-script-keep-toggle(); }
+            }
+            Rectangle { height: Space.pad; }
+            FormLabel {
+                text: "Time limit";
+            }
+            Rectangle { height: Space.label; }
+            HorizontalLayout {
+                alignment: start;
+                DropField {
+                    width: Size.chooser;
+                    text: root.gl-script-limit;
+                    open: root.menu-open;
+                    clicked(x, y, h) => { root.gl-script-limit-menu(x, y, h, self.width); }
                 }
-                if root.gl-modal == 2 && root.gl-seen.length > 0: Rectangle {
-                    height: min(root.gl-seen.length * Size.pick-row + 2 * Space.tight, 320px); // art: the list at most, before it scrolls
-                    border-radius: Radius.panel;
-                    background: Ink.well;
-                    clip: true;
-                    seen-flick := Flickable {
-                        width: parent.width;
+            }
+            Rectangle { height: Space.tight; }
+            FormNote {
+                text: root.gl-script-limit-note;
+            }
+        }
+        if root.gl-modal == 2 && root.gl-seen.length == 0: Text {
+            text: "Apps show here once they’ve been in front while Ectomatter is running.";
+            font-family: Font.ui;
+            font-size: Font.control;
+            color: Ink.quiet;
+            wrap: word-wrap;
+        }
+        if root.gl-modal == 2 && root.gl-seen.length > 0: Rectangle {
+            height: min(root.gl-seen.length * Size.pick-row + 2 * Space.tight, 320px); // art: the list at most, before it scrolls
+            border-radius: Radius.panel;
+            background: Ink.well;
+            clip: true;
+            seen-flick := Flickable {
+                width: parent.width;
+                height: parent.height;
+                content-height: root.gl-seen.length * Size.pick-row + 2 * Space.tight;
+                mouse-drag-pan-enabled: false;
+                for a[i] in root.gl-seen: Rectangle {
+                    x: Space.tight;
+                    y: Space.tight + i * Size.pick-row;
+                    width: parent.width - 2 * Space.tight;
+                    height: Size.pick-row;
+                    border-radius: Radius.control;
+                    background: root.gl-seen-chosen == i ? (seen-ta.has-hover ? Ink.pick-hover : Ink.pick) : seen-ta.has-hover ? Ink.hover-well : transparent;
+                    if a.has-icon: Image {
+                        x: Space.row;
+                        y: (parent.height - self.height) / 2;
+                        width: Size.pick-icon;
+                        height: Size.pick-icon;
+                        source: a.icon;
+                    }
+                    Text {
+                        x: Space.row + Size.pick-icon + Space.row;
+                        width: parent.width - self.x - Space.row;
                         height: parent.height;
-                        content-height: root.gl-seen.length * Size.pick-row + 2 * Space.tight;
-                        mouse-drag-pan-enabled: false;
-                        for a[i] in root.gl-seen: Rectangle {
-                            x: Space.tight;
-                            y: Space.tight + i * Size.pick-row;
-                            width: parent.width - 2 * Space.tight;
-                            height: Size.pick-row;
-                            border-radius: Radius.control;
-                            background: root.gl-seen-chosen == i ? (seen-ta.has-hover ? Ink.pick-hover : Ink.pick) : seen-ta.has-hover ? Ink.hover-well : transparent;
-                            if a.has-icon: Image {
-                                x: Space.row;
-                                y: (parent.height - self.height) / 2;
-                                width: Size.pick-icon;
-                                height: Size.pick-icon;
-                                source: a.icon;
-                            }
-                            Text {
-                                x: Space.row + Size.pick-icon + Space.row;
-                                width: parent.width - self.x - Space.row;
-                                height: parent.height;
-                                text: a.name;
-                                font-family: Font.ui;
-                                font-size: Font.text;
-                                color: Ink.ink;
-                                vertical-alignment: center;
-                                overflow: elide;
-                            }
-                            seen-ta := TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => { root.gl-seen-pick(i); }
-                            }
-                        }
+                        text: a.name;
+                        font-family: Font.ui;
+                        font-size: Font.text;
+                        color: Ink.ink;
+                        vertical-alignment: center;
+                        overflow: elide;
                     }
-                }
-                Rectangle { height: Space.margin; }
-                HorizontalLayout {
-                    spacing: Space.inline;
-                    if root.gl-modal == 3 && root.gl-script-editing: VerticalLayout {
-                        alignment: center;
-                        WordButton {
-                            text: "Remove";
-                            on-box: true;
-                            clicked => { root.gl-script-remove(); }
-                        }
-                    }
-                    if root.gl-modal == 5 && root.gl-var-editing: VerticalLayout {
-                        alignment: center;
-                        WordButton {
-                            text: "Remove";
-                            on-box: true;
-                            clicked => { root.gl-var-remove(); }
-                        }
-                    }
-                    Rectangle { horizontal-stretch: 1; }
-                    VerticalLayout {
-                        alignment: center;
-                        WordButton {
-                            text: "Cancel";
-                            on-box: true;
-                            clicked => { root.gl-modal-close(); }
-                        }
-                    }
-                    WordButton {
-                        primary: true;
-                        text: (root.gl-modal == 3 && root.gl-script-editing) || (root.gl-modal == 5 && root.gl-var-editing) ? "Save" : "Add";
-                        enabled: root.gl-can-add;
-                        clicked => { root.gl-add-done(); }
+                    seen-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.gl-seen-pick(i); }
                     }
                 }
             }
@@ -7215,49 +7178,24 @@ export component LabWindow inherits Window {
     }
 
     // a setup's name: Save as a new setup, or Rename, in a dialog
-    if root.ask == 1: Scrim {
+    if root.ask == 1: FormDialog {
         corner: root.radius;
         cancel => { root.ask-done(false); }
-        DialogBox {
-            width: min(Size.ask, parent.width - 2 * Space.pad);
-            height: ask-form.preferred-height + 2 * Space.margin;
-            ask-form := VerticalLayout {
-                x: Space.margin;
-                y: Space.margin;
-                width: parent.width - 2 * Space.margin;
-                height: self.preferred-height;
-                spacing: Space.pad;
-                DialogHead {
-                    title: root.ask-title;
-                }
-                VerticalLayout {
-                    spacing: Space.tight;
-                    FieldBox {
-                        text <=> root.ask-name;
-                        edited => { root.ask-typed(self.text); }
-                        accepted => { root.ask-done(true); }
-                        escape => { root.ask-done(false); }
-                        init => { self.start-typing(); }
-                    }
-                    if root.ask-warn != "": FormWarning { text: root.ask-warn; }
-                    if root.ask-text != "": FormNote { text: root.ask-text; }
-                }
-                HorizontalLayout {
-                    padding-top: Space.inline;
-                    spacing: Space.inline;
-                    alignment: end;
-                    WordButton {
-                        text: "Cancel";
-                        on-box: true;
-                        clicked => { root.ask-done(false); }
-                    }
-                    WordButton {
-                        primary: true;
-                        text: root.ask-go;
-                        clicked => { root.ask-done(true); }
-                    }
-                }
+        across: Size.ask;
+        title: root.ask-title;
+        go: root.ask-go;
+        go-pressed => { root.ask-done(true); }
+        VerticalLayout {
+            spacing: Space.tight;
+            FieldBox {
+                text <=> root.ask-name;
+                edited => { root.ask-typed(self.text); }
+                accepted => { root.ask-done(true); }
+                escape => { root.ask-done(false); }
+                init => { self.start-typing(); }
             }
+            if root.ask-warn != "": FormWarning { text: root.ask-warn; }
+            if root.ask-text != "": FormNote { text: root.ask-text; }
         }
     }
 

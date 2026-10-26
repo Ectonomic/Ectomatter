@@ -337,6 +337,67 @@ export component Confirm inherits Scrim {
     }
 }
 
+// A form in a dialog, every one's (adding a game, an app, a script or a plugin's value
+// to the Library; naming a setup in the lab): `across` wide, its head (DialogHead), Space.pad
+// under it what's asked (its children), and Space.margin under that its buttons: one at the
+// left where it has one (`aside`, Remove), then Cancel and the one that does it (`go`, the
+// primary, or `danger` where it deletes), at the middle of their row. A press on the dim,
+// Cancel or Escape cancels.
+export component FormDialog inherits Scrim {
+    in property <length> across: Size.dialog;
+    in property <string> title;
+    in property <string> text;
+    in property <string> go;
+    in property <bool> go-enabled: true;
+    in property <string> aside;
+    callback go-pressed();
+    callback aside-pressed();
+    DialogBox {
+        width: min(root.across, root.width - 2 * Space.pad);
+        height: form.preferred-height + 2 * Space.margin;
+        form := VerticalLayout {
+            x: Space.margin;
+            y: Space.margin;
+            width: parent.width - 2 * Space.margin;
+            height: self.preferred-height;
+            spacing: 0;
+            DialogHead {
+                title: root.title;
+                text: root.text;
+            }
+            Rectangle { height: Space.pad; }
+            @children
+            Rectangle { height: Space.margin; }
+            HorizontalLayout {
+                spacing: Space.inline;
+                if root.aside != "": VerticalLayout {
+                    alignment: center;
+                    WordButton {
+                        text: root.aside;
+                        on-box: true;
+                        clicked => { root.aside-pressed(); }
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                VerticalLayout {
+                    alignment: center;
+                    WordButton {
+                        text: "Cancel";
+                        on-box: true;
+                        clicked => { root.cancel(); }
+                    }
+                }
+                WordButton {
+                    primary: true;
+                    text: root.go;
+                    enabled: root.go-enabled;
+                    clicked => { root.go-pressed(); }
+                }
+            }
+        }
+    }
+}
+
 // What an area says while it has nothing to show, the same everywhere: what's
 // missing (its title), what to do about it (its words, wrapped, or `lines` as
 // Rust broke them), and the way to it (its children: a button), each line
