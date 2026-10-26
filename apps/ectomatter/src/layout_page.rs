@@ -93,7 +93,7 @@ pub struct Cx<'a> {
     /// for what deleting a layout takes with it: whether the keyboard keeps a layout by
     /// itself (its onboard layouts), and the profiles' names
     pub onboard: bool,
-    pub profiles: [String; 5],
+    pub profiles: Vec<String>,
     /// where the chosen block's reading comes from now, for its From line
     pub from: screen_edit::From,
     /// the computer's readings the Shows menu lists, by device
@@ -902,7 +902,7 @@ impl LayoutPage {
             let (w, h) = ((tile_w * sc).round() as u32, (tile_w / 5.0 * sc).round() as u32);
             let rgb = crate::z10::as_lit(page.light.unwrap_or(default));
             let lv = cx.light[0] as f32 / 255.0;
-            let word = evga_z10::lcd::lcd_text(word);
+            let word = crate::lcd_page::spell(word);
             let rows_of = |f: [[char; 20]; 4]| -> Vec<String> { f.iter().map(|r| r.iter().collect()).collect() };
             let key = (rgb, cx.light[0], w, word.clone());
             if self.stills.as_ref().is_none_or(|(k, _)| *k != key) {

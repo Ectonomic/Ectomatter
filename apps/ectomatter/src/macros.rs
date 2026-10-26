@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 
 use crate::lighting::cell;
 use crate::text;
-use crate::z10::{Page, PROFILE_NUMBERS};
+use crate::z10::Page;
 use crate::Cell;
 
 pub use ectomatter_protocol::Plays as How;
@@ -340,9 +340,9 @@ impl Editor {
             return self.elsewhere.iter().filter(|e| e.n == n).map(|e| (e.profile, e.control.clone(), e.at, e.plays)).collect();
         }
         let mut out = Vec::new();
-        for p in PROFILE_NUMBERS {
+        for p in crate::cores::profiles() {
             for layer in ["base", "fn"] {
-                for pos in 0..evga_z10::protocol::NKEYS as u32 {
+                for pos in 0..crate::cores::places() as u32 {
                     let v = page.drafts.get(&p).map(|d| &d["keys"][layer][page.id(pos)]);
                     if let Some(Action::Macro { n: m, plays }) = v.and_then(Action::read) {
                         if m == n {

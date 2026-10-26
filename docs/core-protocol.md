@@ -289,7 +289,7 @@ An **action** is one of a fixed set the frontend knows how to present: a key (`{
 
 ```json
 "displays": [
-  { "control": "lcd", "kind": "text", "cols": 20, "rows": 4, "charset": "cp1252" }
+  { "control": "lcd", "kind": "text", "cols": 20, "rows": 4, "draws": [" ~", "°", "█"] }
 ]
 ```
 
@@ -301,7 +301,7 @@ A core draws its own displays. The M3 is a whole screen with magnetic keys over 
 - **Preview.** Nearly everything on a screen like the M3's moves, so one still frame would misrepresent it. A preview is a short feed of its own: `display/preview/start {device, control, content, rate}` draws how some content would look, such as a new background, without sending it to the device, until `display/preview/stop`. A preview running beside the live screen roughly doubles the core's drawing work, so the frontend runs one only while it is on screen.
 - **Content.** `display/show {device, control, content}` applies it. Content is what to show, such as text, an image, a key's label and icon, or a background by name.
 
-**A text display** takes its rows with `displays/show {device, control, rows}`, as many rows as it has, each cut to its columns, and `displays/hand-back {device, control}` leaves it to the device's own screens, as the device's own software does on closing. A core sends either between the exchanges of a long call (a whole read, a save), as it does a preview, so a screen that changes every tenth of a second keeps its time while the frontend reads the device. The Z10's core spells each row in the characters its screen draws (printable ASCII, the degree sign and the full block) before sending it.
+**A text display** takes its rows with `displays/show {device, control, rows}`, as many rows as it has, each cut to its columns, and `displays/hand-back {device, control}` leaves it to the device's own screens, as the device's own software does on closing. A core sends either between the exchanges of a long call (a whole read, a save), as it does a preview, so a screen that changes every tenth of a second keeps its time while the frontend reads the device. A text display lists the characters it draws (`draws`, each a character, or two for the run between them; printable ASCII where it gives none). The core spells each row in them before sending it, and the frontend spells what it shows of the display the same way, so the two agree: what the display doesn't draw is folded into what it does (accents dropped, Cyrillic and Greek in Latin letters, typographic punctuation made plain), and anything else is a question mark. The crate `ectomatter-protocol` does this (`text`).
 
 **Frames travel on their own channel.** Text displays send their rows in the feed's notifications. Image frames are too large for the message line (60 frames a second of JPEG is several megabytes a second), so `display/feed/start` and `display/preview/start` answer with a frame channel: a local socket (a named pipe on Windows) on which each frame arrives as a small header (`type`, `width`, `height`, `length`) and then its bytes. A frame is whatever the core already makes, JPEG or PNG, as its header says; the M3 core already compresses every frame it sends the deck as a JPEG, so the feed costs it nothing extra.
 

@@ -143,18 +143,6 @@ impl Usb for NoDevices {
     }
 }
 
-/// What the core in `dir` says of itself (`device/describe`), asked with no
-/// devices to reach and its files in a folder of its own, gone after: for a
-/// window drawn offscreen, which never reaches a device.
-pub fn describe(dir: &Path) -> Option<Value> {
-    let data = std::env::temp_dir().join(format!("ectomatter-describe-{}", std::process::id()));
-    let core = Core::start(dir, data.clone(), Box::new(NoDevices)).ok()?;
-    let d = initialize(&core, Value::Null).and_then(|_| core.call("device/describe", &Value::Null)).ok();
-    let _ = core.call("shutdown", &Value::Null);
-    let _ = std::fs::remove_dir_all(&data);
-    d
-}
-
 /// The devices on this computer, over hidapi.
 pub struct Hidapi(Option<hidapi::HidApi>);
 

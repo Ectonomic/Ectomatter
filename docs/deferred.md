@@ -27,15 +27,15 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 - Macro recording reads the Z10 through Linux's input devices, by the Z10's
   ids, outside the core: `crates/evga-z10/src/recorder.rs:333-368`, driven
   from `macro_page.rs:994-1027`.
-- The keyboard page is the Z10's: 5 profiles (`z10.rs:18`, `z10.rs:570`,
-  `lcd_page.rs:946`, `layout_page.rs:96`, `front.rs:1631,3498,3555`), 116 keys
-  (`z10.rs:540,1218,1230`, `lighting.rs:297`), the Z10's geometry built in
+- The keyboard page is the Z10's: the Z10's geometry built in
   (`z10.rs:459-461`, `overlays.rs:92-97`, `lcd_draw.rs:18`), its firmware table
   (`front.rs:7867`), its screen's built-in apps (`display.rs:13`).
 - The screen is fixed at 20 by 4 (`lcd_page.rs:27-28`, `lcd_anim.rs:13-14`,
-  `layout_page.rs:555,906`, `screen_edit.rs`, `lcd_player.rs:94`) and its
-  character set at the Z10's (`lcd_player.rs:49`), though the core describes
-  its displays.
+  `layout_page.rs:555,906`, `screen_edit.rs`, `overlays.rs:14-15`,
+  `lcd_player.rs:94`), though the core describes its displays.
+- The keyboard is one: `cores::keyboard()` is the first core describing a
+  keyboard, and its page, screen and counts are that one's. A second
+  keyboard's core starts but has no page.
 - The mouse page is the Sensei 310's: its device id (`mouse.rs:22`), buttons
   (`mouse.rs:178-187`), lights (`mouse.rs:470`), callout positions
   (`mouse.rs:192-206`), and its picture read by Inkscape's shape ids

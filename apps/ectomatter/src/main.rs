@@ -472,6 +472,16 @@ fn device_in_use(core: &cores::Core, settings: &settings::Settings) -> serde_jso
     device
 }
 
+/// The keyboard's record given what its core, started, describes: its
+/// profiles, its lights and its screen, which the pages are drawn from.
+fn keyboard_described(hosted: &hosted::Hosted) {
+    if let Some(k) = cores::keyboard() {
+        if let Some(r) = hosted.get(&k.id) {
+            k.describe(&r.describes);
+        }
+    }
+}
+
 /// A key as Slint takes it: its own text, or the name Slint gives a key with none.
 fn key_text(e: &KeyEvent) -> Option<SharedString> {
     let k = match e.keysym {
@@ -589,7 +599,7 @@ fn main() {
         if let Some(p) = packages::of(packages::Kind::Core).into_iter().find(|p| cores::keyboard().is_some_and(|k| k.id == p.id())) {
             hosted.start(p);
         }
-        let kb = hosted.drive("keyboard").map(|(_, core)| core).ok_or_else(|| "Ectomatter has no keyboard's core".to_string());
+        let kb = cores::keyboard().and_then(|k| hosted.drive_id(&k.id)).map(|(_, core)| core).ok_or_else(|| "Ectomatter has no keyboard's core".to_string());
         let state = kb.as_ref().map_err(|e| e.clone()).and_then(|k| {
             let s = k.call("device/read", &serde_json::Value::Null);
             let _ = k.call("device/release", &serde_json::Value::Null);
@@ -677,6 +687,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     packages::rename_settings(&settings);
     let mut hosted = hosted::Hosted::new(std::sync::Arc::new(computer::ThisComputer::new()));
     hosted.start_all(&settings);
+    keyboard_described(&hosted);
     let mut front = Front::new(ui, hosted, None, true, settings);
     if let Some(state) = std::env::var_os("ECTOMATTER_STATE") {
         let dev: serde_json::Value = serde_json::from_slice(&std::fs::read(state).expect("the saved state")).expect("the saved state as JSON");
@@ -728,7 +739,8 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         front.poll_pads();
     }
     // what the keyboard's core says of it, the Lighting page's effects among it
-    front.page.desc = core_host::describe(&cores::dir().join(z10::CORE)).unwrap_or_default();
+    // (as its core, started offscreen with no device, describes it)
+    front.page.desc = cores::keyboard().and_then(|k| front.hosted.get(&k.id)).map(|r| r.describes.clone()).unwrap_or_default();
     // ECTOMATTER_LIGHT_AT=ms: the keys' light at that moment of its effect
     front.light_at = std::env::var("ECTOMATTER_LIGHT_AT").ok().and_then(|v| v.parse().ok());
     // ECTOMATTER_MOUSE=FILE: the mouse as its core last told it (what the mouse's
@@ -1955,7 +1967,8 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
     packages::rename_settings(&settings);
     let mut hosted = hosted::Hosted::new(std::sync::Arc::new(computer::ThisComputer::new()));
     hosted.start_all(&settings);
-    let keyboard = hosted.drive("keyboard");
+    keyboard_described(&hosted);
+    let keyboard = cores::keyboard().and_then(|k| hosted.drive_id(&k.id));
     // (the keyboard's core off, Ectomatter leaves the keyboard to other programs)
     let controlled = cores::keyboard().is_none_or(|c| settings.on(&packages::switch_of(packages::Kind::Core, &c.id)));
     let z10_core = keyboard.map(|(_, core)| Ok(core));

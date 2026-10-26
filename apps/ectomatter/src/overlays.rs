@@ -39,7 +39,6 @@ pub struct Overlays {
     sliders: Vec<[f32; 4]>,
     glass_box: [f32; 4],
     font: HashMap<char, [u8; 5]>,
-    fold: HashMap<char, String>,
     /// the board these were drawn for, in the buffer's pixels, and its scale
     size: (u32, u32),
     scale: f32,
@@ -95,7 +94,6 @@ impl Overlays {
         let sliders = board["sliders"].as_array().map(|a| a.iter().map(|s| [num(&s[0]), num(&s[1]), num(&s[2]), num(&s[3])]).collect()).unwrap_or_default();
         let g = &board["glass"];
         let font: Value = serde_json::from_str(include_str!("../data/lcdfont.json")).unwrap();
-        let fold: Value = serde_json::from_str(include_str!("../../../crates/evga-z10/data/lcdfold.json")).unwrap_or(Value::Null);
         let font = font
             .as_object()
             .map(|m| {
@@ -108,14 +106,12 @@ impl Overlays {
                     .collect()
             })
             .unwrap_or_default();
-        let fold = fold.as_object().map(|m| m.iter().filter_map(|(k, v)| Some((k.chars().next()?, v.as_str()?.to_string()))).collect()).unwrap_or_default();
         Overlays {
             tree,
             view: (num(&v[0]), num(&v[1])),
             sliders,
             glass_box: [num(&g[0]), num(&g[1]), num(&g[2]), num(&g[3])],
             font,
-            fold,
             size: (0, 0),
             scale: 1.0,
             knobs: Vec::new(),
@@ -174,19 +170,9 @@ impl Overlays {
         [room_x * l / (l + r), room_y * t / (t + b), w, h]
     }
 
-    /// The display's text as the keyboard draws it: printable ASCII, the
-    /// degree sign and the solid block as themselves, anything else spelled
-    /// in those first.
+    /// The display's text as the keyboard draws it (lcd_page::spell).
     fn lcd_text(&self, s: &str) -> Vec<char> {
-        let mut out = Vec::new();
-        for c in s.chars() {
-            if (' '..='~').contains(&c) || c == '\u{b0}' || c == '\u{2588}' {
-                out.push(c);
-            } else {
-                out.extend(self.fold.get(&c).map_or("?".chars().collect::<Vec<_>>(), |f| f.chars().collect()));
-            }
-        }
-        out
+        crate::lcd_page::spell(s).chars().collect()
     }
 
     /// The panel drawn at its size in real pixels, as the web app drew it: a

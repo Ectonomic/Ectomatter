@@ -1521,6 +1521,9 @@ impl Front {
         }
         match h {
             device::Heard::Described(d) => {
+                if let Some(k) = crate::cores::keyboard() {
+                    k.describe(&d);
+                }
                 self.page.desc = d;
                 self.icons = None;
             }
@@ -1627,7 +1630,7 @@ impl Front {
             device::Heard::ActiveNow(r) => {
                 self.active_asked = false;
                 if let Ok(Some(n)) = r {
-                    if (1..=5).contains(&n) && n != self.page.active() {
+                    if crate::cores::profiles().contains(&(n as u8)) && n != self.page.active() {
                         self.page.set_active(n);
                         self.page.choose(n);
                         self.status(format!("The keyboard switched to {}.", self.page.profile_name(n)), 0);
@@ -3500,7 +3503,7 @@ impl Front {
             return;
         }
         let quiet = |t: Option<&Instant>| t.is_some_and(|t| t.elapsed() >= Duration::from_millis(1200));
-        let due = (1..=5u8).find(|n| self.page.is_dirty(*n) && quiet(self.changed_at.get(n)));
+        let due = crate::cores::profiles().into_iter().find(|n| self.page.is_dirty(*n) && quiet(self.changed_at.get(n)));
         if let Some(n) = due {
             self.save_now(n);
         }
@@ -3557,11 +3560,11 @@ impl Front {
             return true;
         }
         if !self.page.busy {
-            if let Some(n) = (1..=5u8).find(|n| self.page.is_dirty(*n) && self.changed_at.contains_key(n)) {
+            if let Some(n) = crate::cores::profiles().into_iter().find(|n| self.page.is_dirty(*n) && self.changed_at.contains_key(n)) {
                 self.save_now(n);
             }
         }
-        !self.page.busy && !(1..=5u8).any(|n| self.page.is_dirty(n) && self.changed_at.contains_key(&n))
+        !self.page.busy && !crate::cores::profiles().into_iter().any(|n| self.page.is_dirty(n) && self.changed_at.contains_key(&n))
     }
 
     /// What the page's typing goes to: a box being typed in takes Ctrl+Z itself.
@@ -4879,7 +4882,7 @@ impl Front {
         });
         let loaded = p.dev.is_some();
         if loaded {
-            let profiles: Vec<ProfileItem> = z10::PROFILE_NUMBERS
+            let profiles: Vec<ProfileItem> = crate::cores::profiles()
                 .iter()
                 .map(|&n| {
                     let (colors, [c1, c2, c3, c4]) = swatch(&p.profile_swatch(n));
@@ -5267,11 +5270,11 @@ impl Front {
         // profiles (named after the mouse's)
         if self.page.dev.is_some() {
             let first = names.len();
-            for (k, &p) in z10::PROFILE_NUMBERS.iter().enumerate() {
+            for (k, &p) in crate::cores::profiles().iter().enumerate() {
                 names.push(format!("keyboard’s {}", self.page.profile_name(p)));
                 let Some(d) = self.page.drafts.get(&p) else { continue };
                 for (layer, words) in [("base", ""), ("fn", "Fn + ")] {
-                    for pos in 0..evga_z10::protocol::NKEYS as u32 {
+                    for pos in 0..crate::cores::places() as u32 {
                         let Some(code) = Action::read(&d["keys"][layer][self.page.id(pos)]).as_ref().and_then(z10::screen_job) else { continue };
                         let job = self.keyed.get(&code).and_then(|id| id.strip_prefix(crate::jobs::ON_KEY)).and_then(crate::jobs::Job::of);
                         if let Some(crate::jobs::Job::Macro { n, plays }) = job {
@@ -5409,10 +5412,10 @@ impl Front {
                         Ok(n) => n,
                         Err(_) => return,
                     },
-                    To::Next => z10::PROFILE_NUMBERS[crate::jobs::stepped(now.saturating_sub(1), z10::PROFILE_NUMBERS.len(), true)] as usize,
-                    To::Previous => z10::PROFILE_NUMBERS[crate::jobs::stepped(now.saturating_sub(1), z10::PROFILE_NUMBERS.len(), false)] as usize,
+                    To::Next => crate::cores::profiles()[crate::jobs::stepped(now.saturating_sub(1), crate::cores::profiles().len(), true)] as usize,
+                    To::Previous => crate::cores::profiles()[crate::jobs::stepped(now.saturating_sub(1), crate::cores::profiles().len(), false)] as usize,
                 };
-                if z10::PROFILE_NUMBERS.contains(&(n as u8)) && n != now {
+                if crate::cores::profiles().contains(&(n as u8)) && n != now {
                     self.choose_profile(n as u8);
                     self.refresh();
                 }
@@ -6573,7 +6576,7 @@ impl Front {
             match place.as_str() {
                 "z10" => {
                     let known = self.page.dev.is_some();
-                    let profiles = z10::PROFILE_NUMBERS.iter().map(|n| (n.to_string(), if known { self.page.profile_name(*n) } else { format!("Profile {n}") })).collect();
+                    let profiles = crate::cores::profiles().iter().map(|n| (n.to_string(), if known { self.page.profile_name(*n) } else { format!("Profile {n}") })).collect();
                     out.push(crate::games_page::Device { key: "z10".into(), name, kind, profiles, glyph: None, sub: String::new(), chips: Vec::new() });
                 }
                 "mouse" => {
@@ -7628,7 +7631,7 @@ impl Front {
         // the keyboard
         if self.page.dev.is_some() {
             let active = self.page.active();
-            match kb_wants.filter(|n| z10::PROFILE_NUMBERS.contains(n)) {
+            match kb_wants.filter(|n| crate::cores::profiles().contains(n)) {
                 Some(n) if n != active => {
                     self.follow_back[0].get_or_insert(active as usize);
                     self.choose_profile(n);
@@ -9355,7 +9358,7 @@ impl Front {
         self.desk_aside = aside;
         if self.page.dev.is_some() && !aside.0 {
             if matches!(kb, Part::Look(_)) {
-                let colors: Vec<[u8; 3]> = (0..evga_z10::protocol::NKEYS as u32).map(|p| self.scene_colors.0.get(&p).copied().unwrap_or([0; 3])).collect();
+                let colors: Vec<[u8; 3]> = (0..crate::cores::places() as u32).map(|p| self.scene_colors.0.get(&p).copied().unwrap_or([0; 3])).collect();
                 self.ask_kb(device::Ask::Preview(serde_json::json!({ "colors": colors, "tab": "native", "claim": true })));
                 self.scene_claim.0 = true;
             } else if self.scene_claim.0 {
@@ -9802,7 +9805,7 @@ impl Front {
         let avail = crate::lcd_page::available(&self.readings, self.outside().is_some());
         let light = self.layouts_light();
         let t = self.edit_t();
-        let (onboard, profiles, from, groups) = (self.onboard_ready(), crate::lcd_page::PROFILES.map(|n| self.page.profile_name(n)), self.reading_from(), self.shows_groups());
+        let (onboard, profiles, from, groups) = (self.onboard_ready(), crate::cores::profiles().into_iter().map(|n| self.page.profile_name(n)).collect(), self.reading_from(), self.shows_groups());
         let Some(l) = &mut self.layouts else { return Vec::new() };
         let mut cx = crate::layout_page::Cx { screens: &mut self.screens, editor: &mut self.editor, readings: &self.readings, avail: &avail, light, t, onboard, profiles, from, groups };
         let out = l.act(&mut cx);
@@ -9836,7 +9839,7 @@ impl Front {
         let avail = crate::lcd_page::available(&self.readings, self.outside().is_some());
         let light = self.layouts_light();
         let t = self.edit_t();
-        let (onboard, profiles, from, groups) = (self.onboard_ready(), crate::lcd_page::PROFILES.map(|n| self.page.profile_name(n)), self.reading_from(), self.shows_groups());
+        let (onboard, profiles, from, groups) = (self.onboard_ready(), crate::cores::profiles().into_iter().map(|n| self.page.profile_name(n)).collect(), self.reading_from(), self.shows_groups());
         let Some(l) = &mut self.layouts else { return };
         let cx = crate::layout_page::Cx { screens: &mut self.screens, editor: &mut self.editor, readings: &self.readings, avail: &avail, light, t, onboard, profiles, from, groups };
         l.show(&cx);

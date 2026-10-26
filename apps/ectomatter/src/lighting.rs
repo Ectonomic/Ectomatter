@@ -294,7 +294,7 @@ pub(crate) fn text_cell(style: i32, x: f32, y: f32, w: f32, h: f32, s: &str) -> 
 /// The colors a profile paints its keys with, one a key: kept by the window,
 /// since the keyboard stores none.
 pub fn custom_colors(n: u8) -> Vec<[u8; 3]> {
-    crate::uistate::get(&format!("custom:{n}")).and_then(|v| serde_json::from_value(v).ok()).unwrap_or_else(|| vec![[0; 3]; 116])
+    crate::uistate::get(&format!("custom:{n}")).and_then(|v| serde_json::from_value(v).ok()).unwrap_or_else(|| vec![[0; 3]; crate::cores::places()])
 }
 pub fn save_custom(n: u8, cols: &[[u8; 3]]) {
     crate::uistate::set(&format!("custom:{n}"), json!(cols));

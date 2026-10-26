@@ -5,10 +5,12 @@
 //! - [keys]: the USB HID keyboard usages, by the names actions use, and the
 //!   words Ectomatter shows for each;
 //! - [media]: the USB HID consumer usages a media key sends, the same way;
+//! - [text]: text spelled in the characters a text display draws;
 //! - [Action]: what a control can be given, as the protocol writes it.
 
 pub mod keys;
 pub mod media;
+pub mod text;
 
 /// The version of the protocol this crate writes (docs/core-protocol.md,
 /// section 9): what Ectomatter says in `initialize`, and what each core's and

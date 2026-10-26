@@ -15,8 +15,6 @@ pub const CORE: &str = "evga-z10";
 /// drawn gap between neighboring keys, in the drawing's units
 pub const GAP: f64 = 3.0;
 
-pub const PROFILE_NUMBERS: [u8; 5] = [1, 2, 3, 4, 5];
-
 /// A key as the page knows it: where it is in the drawing, and whether a
 /// light sits behind it.
 #[derive(Clone, Debug)]
@@ -537,7 +535,7 @@ impl Page {
             pressed: HashSet::new(),
             locks: 0,
             dimmer: None,
-            custom: vec![[0; 3]; 116],
+            custom: vec![[0; 3]; crate::cores::places()],
             demo: false,
             playlist_keys: Default::default(),
             job_keys: Default::default(),
@@ -559,15 +557,15 @@ impl Page {
 
     /// The keyboard's state has come: keep it, and start a draft of each profile.
     pub fn loaded(&mut self, mut dev: Value) {
-        for n in PROFILE_NUMBERS {
+        for n in crate::cores::profiles() {
             if let Some(p) = dev.pointer_mut(&format!("/profiles/{n}")) {
                 lit_screen(p);
             }
         }
-        for n in PROFILE_NUMBERS {
+        for n in crate::cores::profiles() {
             self.drafts.entry(n).or_insert_with(|| pick(&dev["profiles"][n.to_string()]));
         }
-        self.editing = dev["active"].as_u64().filter(|n| (1..=5).contains(n)).unwrap_or(1) as u8;
+        self.editing = dev["active"].as_u64().filter(|n| crate::cores::profiles().contains(&(*n as u8))).unwrap_or(1) as u8;
         self.custom = crate::lighting::custom_colors(self.editing);
         self.dev = Some(dev);
     }
@@ -758,7 +756,7 @@ impl Page {
     pub fn with_macro_play(&self, a: &Action) -> Action {
         let Action::Macro { n: which, .. } = a else { return a.clone() };
         let mut plays = Vec::new();
-        for n in PROFILE_NUMBERS {
+        for n in crate::cores::profiles() {
             for layer in ["base", "fn"] {
                 if let Some(m) = self.drafts[&n]["keys"][layer].as_object() {
                     for v in m.values() {
@@ -822,7 +820,7 @@ impl Page {
             .into_iter()
             .map(|(l, act)| Entry { label: l.into(), act, tag: "Mouse" })
             .collect();
-        let profiles = PROFILE_NUMBERS
+        let profiles = crate::cores::profiles()
             .iter()
             .map(|n| Entry { label: format!("Switch to {}", self.profile_name(*n)), act: Action::Profile(Jump::To(*n as u32)), tag: "Profile" })
             .chain([
@@ -1159,7 +1157,7 @@ impl Page {
             _ => 0,
         };
         ["base", "fn"].iter().find_map(|layer| {
-            let best = (0..evga_z10::protocol::NKEYS as u32)
+            let best = (0..crate::cores::places() as u32)
                 .filter_map(|pos| Some((sends(&action_of(profile["keys"][*layer].get(self.id(pos))?)), pos)))
                 .filter(|(m, _)| *m > 0)
                 .max_by_key(|(m, pos)| (*m, std::cmp::Reverse(*pos)))?;
@@ -1215,7 +1213,7 @@ impl Page {
     pub fn preview_body(&self) -> Value {
         let l = &self.draft()["lighting"];
         match effect(l) {
-            "custom" => json!({ "colors": (0..116).map(|i| self.custom.get(i).copied().unwrap_or([0; 3])).collect::<Vec<_>>() }),
+            "custom" => json!({ "colors": (0..crate::cores::places()).map(|i| self.custom.get(i).copied().unwrap_or([0; 3])).collect::<Vec<_>>() }),
             "stars" | "trigger" => json!({ "colors": self.streamed() }),
             _ => json!({ "lighting": l }),
         }

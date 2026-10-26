@@ -198,6 +198,14 @@ impl Hosted {
         }
     }
 
+    /// The core running of the package `id`, for its device's page to talk
+    /// to, as drive does.
+    pub fn drive_id(&mut self, id: &str) -> Option<(Package, Core)> {
+        let r = self.cores.iter_mut().find(|r| !r.driven && r.package.id() == id)?;
+        r.driven = true;
+        Some((r.package.clone(), r.core.clone()))
+    }
+
     /// The first core running that describes a device of `kind` (`keyboard`,
     /// `mouse`) and no page talks to yet, for that kind's page to talk to:
     /// its package and its core. From then on the page hears what it tells.

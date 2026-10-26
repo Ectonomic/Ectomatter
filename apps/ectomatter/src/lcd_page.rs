@@ -27,6 +27,22 @@ use ectomatter_sensors::list::{Val, What};
 pub const COLS: u8 = 20;
 pub const ROWS: u8 = 4;
 
+/// The keyboard's text display as its core describes it (`displays`), Null with none.
+pub fn screen() -> &'static Value {
+    static NONE: Value = Value::Null;
+    crate::cores::keyboard().and_then(|k| k.described()["capabilities"]["displays"].as_array()?.iter().find(|d| d["kind"] == "text")).unwrap_or(&NONE)
+}
+
+/// Text as the keyboard's screen shows it: in the characters it draws, as
+/// its core describes them (printable ASCII where it doesn't).
+pub fn spell(s: &str) -> String {
+    static DRAWS: std::sync::OnceLock<ectomatter_protocol::text::Draws> = std::sync::OnceLock::new();
+    match crate::cores::keyboard().filter(|k| !k.described().is_null()) {
+        Some(_) => DRAWS.get_or_init(|| ectomatter_protocol::text::Draws::of(&screen()["draws"])).spell(s),
+        None => ectomatter_protocol::text::Draws::of(&Value::Null).spell(s),
+    }
+}
+
 /// What a reading or a bar shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Source {
@@ -942,9 +958,6 @@ impl Playlist {
     }
 }
 
-/// The profiles there are, 1 to 5.
-pub const PROFILES: [u8; 5] = [1, 2, 3, 4, 5];
-
 /// The Library, the playlists, and the playlist each profile plays, as
 /// Ectomatter keeps them. A profile not given one plays the first.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -1017,7 +1030,7 @@ impl Screens {
                     .filter_map(|(k, v)| {
                         let n: u8 = k.parse().ok()?;
                         let id = v.as_str()?;
-                        (PROFILES.contains(&n) && lists.iter().any(|l| l.id == id)).then(|| (n, id.to_string()))
+                        (crate::cores::profiles().contains(&n) && lists.iter().any(|l| l.id == id)).then(|| (n, id.to_string()))
                     })
                     .collect()
             })
@@ -1029,7 +1042,7 @@ impl Screens {
     pub fn with_onboard(mut self, onboard: Option<&Value>) -> Screens {
         self.onboard = onboard
             .and_then(|v| v.as_object())
-            .map(|o| o.iter().filter_map(|(k, v)| Some((k.parse::<u8>().ok().filter(|n| PROFILES.contains(n))?, v.as_str()?.to_string()))).collect())
+            .map(|o| o.iter().filter_map(|(k, v)| Some((k.parse::<u8>().ok().filter(|n| crate::cores::profiles().contains(n))?, v.as_str()?.to_string()))).collect())
             .unwrap_or_default();
         self
     }
@@ -1131,7 +1144,7 @@ impl Screens {
 
     /// The profiles that play playlist `id`.
     pub fn profiles_of(&self, id: &str) -> Vec<u8> {
-        PROFILES.iter().copied().filter(|p| self.playlist(*p).id == id).collect()
+        crate::cores::profiles().into_iter().filter(|p| self.playlist(*p).id == id).collect()
     }
 
     /// Profile `p` plays playlist `id` from now on.
@@ -1261,7 +1274,7 @@ impl Screens {
     pub fn delete_says(&self, i: usize, onboard: bool, name: impl Fn(u8) -> String) -> String {
         let Some(page) = self.library.get(i) else { return String::new() };
         let lists: Vec<String> = self.playlists.iter().filter(|l| l.turns.iter().any(|e| e.page == page.id)).map(|l| l.name.clone()).collect();
-        let kept: Vec<u8> = PROFILES.into_iter().filter(|p| onboard && self.onboard_of(*p).is_some_and(|k| k.id == page.id)).collect();
+        let kept: Vec<u8> = crate::cores::profiles().into_iter().filter(|p| onboard && self.onboard_of(*p).is_some_and(|k| k.id == page.id)).collect();
         let mut says = Vec::new();
         if !lists.is_empty() {
             let count = ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine"].get(lists.len() - 1).map_or_else(|| lists.len().to_string(), |w| w.to_string());
@@ -1411,18 +1424,18 @@ fn text_of(s: Source, f: bool, date: DateFormat, r: &Readings) -> Option<String>
             format!("{used:.1} / {total:.1} GB")
         }
         Source::Date => date.write(r.now.as_ref()?),
-        Source::Profile => evga_z10::lcd::lcd_text(r.profile.as_deref()?),
+        Source::Profile => spell(r.profile.as_deref()?),
         Source::ProfileNumber => r.profile_number?.to_string(),
         Source::GameMode => r.mode.clone()?,
         Source::KeyRollover => r.rollover.clone()?,
         Source::OutsideTemp => format!("{:.0}°", deg(r.outside.as_ref()?.0)),
-        Source::Sky => evga_z10::lcd::lcd_text(&r.outside.as_ref()?.1),
+        Source::Sky => spell(&r.outside.as_ref()?.1),
         Source::Sensor(n) => {
             let (what, v) = r.sensors.get(&n)?;
             ectomatter_sensors::read::on_screen(*what, *v, f)
         }
         // (in capitals, as the keyboard has always written a game's name)
-        Source::GameName => evga_z10::lcd::lcd_text(&r.game.as_ref()?.name.to_uppercase()),
+        Source::GameName => spell(&r.game.as_ref()?.name.to_uppercase()),
         Source::SessionTime => hours(r.game.as_ref()?.session(now_secs())),
         Source::TimePlayed => {
             let g = r.game.as_ref()?;
@@ -1439,7 +1452,7 @@ fn text_of(s: Source, f: bool, date: DateFormat, r: &Readings) -> Option<String>
                 if this_year { format!("{} {}", MONTHS[t.month as usize % 12], t.day) } else { format!("{} {} {}", MONTHS[t.month as usize % 12], t.day, t.year) }
             }
         }
-        Source::ChangingNow => evga_z10::lcd::lcd_text(&r.game.as_ref()?.changing.to_uppercase()),
+        Source::ChangingNow => spell(&r.game.as_ref()?.changing.to_uppercase()),
         Source::ChangesDone => {
             let (done, of) = r.game.as_ref()?.done;
             if of == 0 { String::new() } else { format!("{done}/{of}") }
@@ -1518,7 +1531,7 @@ pub fn says(p: &Piece, r: &Readings) -> Option<String> {
 fn show(p: &Piece, r: &Readings) -> Result<String, &'static str> {
     let fail = |s: Source| s.reads_from().unwrap_or("");
     match &p.kind {
-        Kind::Text(t) => Ok(evga_z10::lcd::lcd_text(t)),
+        Kind::Text(t) => Ok(spell(t)),
         Kind::Data(s, f) => text_of(*s, *f, p.date_format, r).ok_or(fail(*s)),
         // (a game with nothing to change has no bar of its changes, as its launch screen has none)
         Kind::Bar(Source::ChangesDone) if r.game.as_ref().is_some_and(|g| g.done.1 == 0) => Ok(String::new()),
@@ -1824,7 +1837,7 @@ fn lay_out(page: &Page, r: &Readings, t: f64, still: bool) -> (Vec<String>, Vec<
     for p in page.pieces.iter().filter(|p| effect(p)) {
         if let Kind::Effect { fx, speed, word } = &p.kind {
             let (at, live) = if still { (crate::lcd_fx::still(*fx), crate::lcd_fx::Live::sample()) } else { (crate::lcd_fx::tenths(*fx, t, *speed), crate::lcd_fx::live(*fx, *speed, r.cpu_load.unwrap_or(0.0))) };
-            let f = crate::lcd_fx::frame(*fx, at, &evga_z10::lcd::lcd_text(word), &live);
+            let f = crate::lcd_fx::frame(*fx, at, &spell(word), &live);
             for row in p.row..(p.row + p.height.max(1)).min(ROWS) {
                 for c in p.col..(p.col + p.width).min(COLS) {
                     behind[row as usize][c as usize] = f[row as usize][c as usize];
@@ -1852,7 +1865,7 @@ fn lay_out(page: &Page, r: &Readings, t: f64, still: bool) -> (Vec<String>, Vec<
                 if new {
                     // the row's own first words, or what it read
                     let label = pieces.iter().find_map(|(_, p)| match &p.kind {
-                        Kind::Text(t) if !t.trim().is_empty() => Some(evga_z10::lcd::lcd_text(t.trim())),
+                        Kind::Text(t) if !t.trim().is_empty() => Some(spell(t.trim())),
                         _ => None,
                     });
                     let label = label.unwrap_or_else(|| {
@@ -1924,7 +1937,7 @@ fn lay_out(page: &Page, r: &Readings, t: f64, still: bool) -> (Vec<String>, Vec<
 pub fn status_rows(apps: u64, profile: u8, name: &str, clock: Option<(u16, [u8; 5])>) -> Vec<String> {
     let mut rows = vec![String::new(); 4];
     if apps & 0x04 != 0 {
-        let name: String = evga_z10::lcd::lcd_text(name).chars().take(10).collect();
+        let name: String = spell(name).chars().take(10).collect();
         rows[0] = format!("PROFILE {profile}:{name}");
     }
     let rollover = if apps & 0x01 != 0 { "6 KEY" } else { "" };

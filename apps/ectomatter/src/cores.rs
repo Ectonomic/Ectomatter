@@ -17,6 +17,10 @@ pub struct Core {
     pub device: serde_json::Value,
     pub path: PathBuf,
     pub art: String,
+    /// what the core says of the device as it runs (`device/describe`): its
+    /// capabilities, so its profiles, its lights and its displays; set once
+    /// it's said (`describe`)
+    described: OnceLock<serde_json::Value>,
 }
 
 impl Core {
@@ -32,7 +36,7 @@ impl Core {
         let device = ectomatter_draw::jsonc::parse(&text).map_err(|e| format!("{}: {e}", path.display()))?;
         let art_path = folder.join(device["art"].as_str().ok_or("its device description names no art")?);
         let art = std::fs::read_to_string(&art_path).map_err(|e| format!("{}: {e}", art_path.display()))?;
-        Ok(Core { id: manifest.id, folder: folder.to_path_buf(), device, path, art })
+        Ok(Core { id: manifest.id, folder: folder.to_path_buf(), device, path, art, described: OnceLock::new() })
     }
 
     /// Its art, read as the device is drawn from it.
@@ -44,6 +48,33 @@ impl Core {
     pub fn fonts(&self) -> Vec<PathBuf> {
         let folder = &self.folder;
         self.device["print"]["fonts"].as_array().into_iter().flatten().filter_map(|f| f.as_str()).map(|f| folder.join(f)).collect()
+    }
+
+    /// What its core says of the device as it runs, kept from the first time
+    /// it's said: the keyboard's page, its screen and its counts are drawn
+    /// from it.
+    pub fn describe(&self, described: &serde_json::Value) {
+        if described.is_object() {
+            let _ = self.described.set(described.clone());
+        }
+    }
+
+    pub fn described(&self) -> &serde_json::Value {
+        static NONE: serde_json::Value = serde_json::Value::Null;
+        self.described.get().unwrap_or(&NONE)
+    }
+
+    /// Its profiles, by number from 1, as many as its core describes.
+    pub fn profiles(&self) -> Vec<u8> {
+        let count = self.described()["capabilities"]["profiles"]["count"].as_u64().unwrap_or(0).min(u8::MAX as u64) as u8;
+        (1..=count).collect()
+    }
+
+    /// How many controls it lights one by one: a color for each in the
+    /// order of their places (`lighting`, `direct`), or one for each control
+    /// with a place where the core doesn't say.
+    pub fn places(&self) -> usize {
+        self.described()["capabilities"]["lighting"]["direct"]["controls"].as_u64().map(|n| n as usize).unwrap_or_else(|| self.device["controls"].as_array().map_or(0, |c| c.iter().filter_map(|c| c["pos"].as_u64()).max().map_or(0, |m| m as usize + 1)))
     }
 
     /// What the device is called.
@@ -101,6 +132,16 @@ pub fn plugins_dir() -> PathBuf {
     home().join("plugins")
 }
 
+/// The keyboard's profiles, by number (none with no keyboard).
+pub fn profiles() -> Vec<u8> {
+    keyboard().map(Core::profiles).unwrap_or_default()
+}
+
+/// How many of the keyboard's controls are lit one by one (none with no keyboard).
+pub fn places() -> usize {
+    keyboard().map_or(0, Core::places)
+}
+
 /// The keyboard Ectomatter shows, read once: the first core whose device
 /// description says it's a keyboard, of those Ectomatter has (packages.rs
 /// orders them). None when there's none, and Ectomatter runs without a
@@ -110,7 +151,12 @@ pub fn keyboard() -> Option<&'static Core> {
     SHOWN
         .get_or_init(|| {
             crate::packages::of(crate::packages::Kind::Core).into_iter().filter(|p| p.manifest.all["deviceFile"].is_string()).find_map(|p| match Core::load(&p.dir) {
-                Ok(c) if c.device["kind"] == "keyboard" => Some(c),
+                Ok(c) if c.device["kind"] == "keyboard" => {
+                    // (a test reads it as its core, run with no device, describes it, as a check offscreen does)
+                    #[cfg(test)]
+                    c.describe(&described_alone(&p));
+                    Some(c)
+                }
                 Ok(_) => None,
                 Err(e) => {
                     eprintln!("ectomatter: {e}");
@@ -119,4 +165,15 @@ pub fn keyboard() -> Option<&'static Core> {
             })
         })
         .as_ref()
+}
+
+/// What a core describes, run alone with no device, for a test.
+#[cfg(test)]
+fn described_alone(p: &crate::packages::Package) -> serde_json::Value {
+    let data = std::env::temp_dir().join(format!("ectomatter-described-{}-{}", p.id(), std::process::id()));
+    let core = crate::core_host::Core::start(&p.dir, data.clone(), Box::new(crate::core_host::NoDevices)).expect("the keyboard's core starts");
+    let d = crate::core_host::initialize(&core, serde_json::Value::Null).and_then(|_| core.call("device/describe", &serde_json::Value::Null)).expect("the keyboard's core describes it");
+    let _ = core.call("shutdown", &serde_json::Value::Null);
+    let _ = std::fs::remove_dir_all(data);
+    d
 }
