@@ -1,6 +1,6 @@
 // What lifts off a page to choose from: a menu and the color picker.
 
-import { Space, Radius, Font, Line, Size, Part, Shadow, Ink } from "tokens.slint";
+import { Space, Radius, Font, Line, Size, Part, Stroke, Shadow, Ink } from "tokens.slint";
 import { Typing } from "state.slint";
 import { ScrollBar, PickField, Well, FieldBox, Tag, PencilButton } from "controls.slint";
 
@@ -118,8 +118,8 @@ export component Menu inherits Rectangle {
                 if row.kind == 2: Rectangle {
                     x: Space.tight;
                     y: (Size.menu-rule - self.height) / 2;
-                    width: parent.width - 8px;
-                    height: 1px;
+                    width: parent.width - 2 * Space.tight;
+                    height: Stroke.line;
                     // (the app's line is too near the menu's own gray to be seen on it)
                     background: Ink.white.with-alpha(0.09);
                 }
@@ -323,6 +323,22 @@ export component Picker inherits Rectangle {
     callback well(color);
     callback enter();
     callback dismiss();
+    // art: the picker's own anatomy, laid out as design tools lay theirs: the square, the
+    // hue, two rows of numbers, then the wells, nine to a row
+    property <length> pad: Part.menu-pad;
+    property <length> gap: 10px; // art: between its parts
+    property <length> square: 160px; // art: the square
+    property <length> hue-h: 12px; // art: the hue's strip
+    property <length> fields-h: 45px; // art: a row of numbers, its labels over its boxes
+    property <length> label-h: 16px; // art: Presets, Recent
+    property <length> label-gap: 6px; // art: a label over its wells
+    property <length> well-gap: 5px; // art: between wells
+    property <length> well-w: (root.width - 2 * root.pad - 8 * root.well-gap) / 9;
+    property <length> fields-y: root.pad + root.square + root.gap + root.hue-h + root.gap;
+    property <length> presets-y: root.fields-y + 2 * root.fields-h + 2 * root.gap;
+    property <length> recent-y: root.presets-y + root.label-h + root.label-gap + root.well-w + root.gap;
+    // how tall it is, for the window to hang it by: with the wells used lately, or without
+    out property <length> natural: (root.recent.length > 0 ? root.recent-y : root.presets-y) + root.label-h + root.label-gap + root.well-w + root.pad;
     width: Size.picker;
     border-radius: Radius.panel;
     background: Ink.shade2;
@@ -331,10 +347,10 @@ export component Picker inherits Rectangle {
     drop-shadow-color: Shadow.float.color;
     // the square: white to the hue across, then to black downward
     Rectangle {
-        x: Part.menu-pad;
-        y: 6px;
-        width: parent.width - 2 * Part.menu-pad;
-        height: 160px;
+        x: root.pad;
+        y: root.pad;
+        width: parent.width - 2 * root.pad;
+        height: root.square;
         Image {
             width: parent.width;
             height: parent.height;
@@ -354,24 +370,24 @@ export component Picker inherits Rectangle {
             }
         }
         Rectangle {
-            x: root.sat * parent.width - 10px;
-            y: (1 - root.val) * parent.height - 10px;
-            width: 20px;
-            height: 20px;
+            x: root.sat * parent.width - 10px; // art: the square's knob
+            y: (1 - root.val) * parent.height - 10px; // art: the square's knob
+            width: 20px; // art: the square's knob
+            height: 20px; // art: the square's knob
             border-radius: self.width / 2;
             background: Ink.black.with-alpha(0.4);
             Rectangle {
-                x: 1px;
-                y: 1px;
-                width: 18px;
-                height: 18px;
+                x: 1px; // art: the square's knob
+                y: 1px; // art: the square's knob
+                width: 18px; // art: the square's knob
+                height: 18px; // art: the square's knob
                 border-radius: self.width / 2;
                 background: Ink.white;
                 Rectangle {
-                    x: 2px;
-                    y: 2px;
-                    width: 14px;
-                    height: 14px;
+                    x: 2px; // art: the square's knob
+                    y: 2px; // art: the square's knob
+                    width: 14px; // art: the square's knob
+                    height: 14px; // art: the square's knob
                     border-radius: self.width / 2;
                     background: root.now;
                 }
@@ -380,10 +396,10 @@ export component Picker inherits Rectangle {
     }
     // the hue
     Rectangle {
-        x: Part.menu-pad;
-        y: 6px + 160px + 10px;
-        width: parent.width - 2 * Part.menu-pad;
-        height: 12px;
+        x: root.pad;
+        y: root.pad + root.square + root.gap;
+        width: parent.width - 2 * root.pad;
+        height: root.hue-h;
         Image {
             width: parent.width;
             height: parent.height;
@@ -403,74 +419,76 @@ export component Picker inherits Rectangle {
             }
         }
         Rectangle {
-            x: root.hue / 360 * parent.width - 10px;
+            x: root.hue / 360 * parent.width - 10px; // art: the hue's knob
             y: -4px;
-            width: 20px;
-            height: 20px;
+            width: 20px; // art: the hue's knob
+            height: 20px; // art: the hue's knob
             border-radius: self.width / 2;
-            border-width: 1px;
+            border-width: 1px; // art: the hue's knob
             border-color: Ink.black.with-alpha(0.4);
             Rectangle {
-                x: 1px;
-                y: 1px;
-                width: 18px;
-                height: 18px;
+                x: 1px; // art: the hue's knob
+                y: 1px; // art: the hue's knob
+                width: 18px; // art: the hue's knob
+                height: 18px; // art: the hue's knob
                 border-radius: self.width / 2;
-                border-width: 2px;
+                border-width: 2px; // art: the hue's knob
                 border-color: Ink.white;
             }
         }
     }
     // the color as numbers
     HorizontalLayout {
-        x: Part.menu-pad;
-        y: 6px + 160px + 10px + 12px + 10px;
-        width: parent.width - 2 * Part.menu-pad;
-        height: 45px;
-        spacing: 6px;
+        x: root.pad;
+        y: root.fields-y;
+        width: parent.width - 2 * root.pad;
+        height: root.fields-h;
+        spacing: root.pad;
         PickField { horizontal-stretch: 1.7; label: "Hex"; which: 0; value <=> root.t-hex; edited(i, t) => { root.field(i, t); } enter => { root.enter(); } dismiss => { root.dismiss(); } }
         PickField { horizontal-stretch: 1; label: "R"; which: 1; value <=> root.t-r; edited(i, t) => { root.field(i, t); } enter => { root.enter(); } dismiss => { root.dismiss(); } }
         PickField { horizontal-stretch: 1; label: "G"; which: 2; value <=> root.t-g; edited(i, t) => { root.field(i, t); } enter => { root.enter(); } dismiss => { root.dismiss(); } }
         PickField { horizontal-stretch: 1; label: "B"; which: 3; value <=> root.t-b; edited(i, t) => { root.field(i, t); } enter => { root.enter(); } dismiss => { root.dismiss(); } }
     }
     HorizontalLayout {
-        x: Part.menu-pad;
-        y: 6px + 160px + 10px + 12px + 10px + 45px + 10px;
-        width: parent.width - 2 * Part.menu-pad;
-        height: 45px;
-        spacing: 6px;
+        x: root.pad;
+        y: root.fields-y + root.fields-h + root.gap;
+        width: parent.width - 2 * root.pad;
+        height: root.fields-h;
+        spacing: root.pad;
         PickField { label: "H°"; which: 4; value <=> root.t-h; edited(i, t) => { root.field(i, t); } enter => { root.enter(); } dismiss => { root.dismiss(); } }
         PickField { label: "S%"; which: 5; value <=> root.t-s; edited(i, t) => { root.field(i, t); } enter => { root.enter(); } dismiss => { root.dismiss(); } }
         PickField { label: "B%"; which: 6; value <=> root.t-v; edited(i, t) => { root.field(i, t); } enter => { root.enter(); } dismiss => { root.dismiss(); } }
     }
     // preset colors, then the ones used lately
     Text {
-        x: Part.menu-pad;
-        y: 308px;
-        height: 16px;
+        x: root.pad;
+        y: root.presets-y;
+        height: root.label-h;
         text: "Presets";
         font-family: Font.ui;
         font-size: Font.caption;
         color: Ink.quiet;
     }
     for c[i] in root.presets: Well {
-        x: 6px + i * (23.56px + 5px);
-        y: 330px;
+        x: root.pad + i * (root.well-w + root.well-gap);
+        y: root.presets-y + root.label-h + root.label-gap;
+        width: root.well-w;
         c: c;
         clicked => { root.well(c); }
     }
     if root.recent.length > 0: Text {
-        x: Part.menu-pad;
-        y: 363.56px;
-        height: 16px;
+        x: root.pad;
+        y: root.recent-y;
+        height: root.label-h;
         text: "Recent";
         font-family: Font.ui;
         font-size: Font.caption;
         color: Ink.quiet;
     }
     for c[i] in root.recent: Well {
-        x: 6px + i * (23.56px + 5px);
-        y: 385.56px;
+        x: root.pad + i * (root.well-w + root.well-gap);
+        y: root.recent-y + root.label-h + root.label-gap;
+        width: root.well-w;
         c: c;
         clicked => { root.well(c); }
     }

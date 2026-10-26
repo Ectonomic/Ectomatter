@@ -1,7 +1,7 @@
 // Lists down a page's side: the rail's items, and the anchoring column of a
 // device's page (its profiles) with its rows and its heading.
 
-import { Space, Radius, Font, Line, Size, Part, Shadow, Ink } from "tokens.slint";
+import { Space, Radius, Font, Line, Size, Part, Stroke, Shadow, Ink } from "tokens.slint";
 import { Typing } from "state.slint";
 import { PencilButton, MoreButton, RenameField } from "controls.slint";
 import { Tip } from "surfaces.slint";
@@ -38,7 +38,7 @@ export component RailItem inherits Rectangle {
     border-radius: Radius.panel;
     background: root.on ? (ta.has-hover ? Ink.pick : Ink.hover-box) : ta.has-hover ? Ink.box : transparent;
     // (its glyph at the square's middle; its name Space.row after it, sliding in as it shows)
-    property <length> glyph-w: 22px;
+    property <length> glyph-w: 22px; // art: a rail glyph's box
     property <length> glyph-in: (Size.rail - self.glyph-w) / 2;
     Image {
         x: root.glyph-in;
@@ -49,7 +49,7 @@ export component RailItem inherits Rectangle {
         colorize: (root.on || ta.has-hover) ? Ink.bright : Ink.soft;
     }
     if root.reveal > 0: Text {
-        x: root.glyph-in + root.glyph-w + Space.row - 6px * (1 - root.reveal);
+        x: root.glyph-in + root.glyph-w + Space.row - 6px * (1 - root.reveal); // art: its words slide in as the rail opens
         width: parent.width - self.x - root.glyph-in;
         height: parent.height;
         text: root.name;
@@ -294,14 +294,14 @@ export component AnchorColumn inherits ListBox {
             spacing: Space.inline;
             alignment: start;
             Path {
-                y: (parent.height - 12px) / 2;
-                width: 12px;
-                height: 12px;
+                y: (parent.height - Part.chevron) / 2;
+                width: Part.chevron;
+                height: Part.chevron;
                 viewbox-width: 12;
                 viewbox-height: 12;
                 commands: "M6 1.5v9M1.5 6h9";
                 stroke: new-row.hover ? Ink.bright : Ink.soft;
-                stroke-width: 1.8px;
+                stroke-width: 1.8px; // art: the chevron's stroke
                 fill: transparent;
             }
             Text {

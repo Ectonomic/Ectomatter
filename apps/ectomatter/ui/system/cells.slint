@@ -2,7 +2,7 @@
 // game's page, the Lighting page's boxes, a plugin's settings): Rust says where
 // each goes and what it is, and each kind is drawn here once, from the tokens.
 
-import { Space, Radius, Font, Line, Size, Part, Shadow, Ink } from "tokens.slint";
+import { Space, Radius, Font, Line, Size, Part, Stroke, Shadow, Ink } from "tokens.slint";
 import { Typing } from "state.slint";
 import { CheckBox, LinkButton, TextButton, WordButton, DropField, SegGround, SegChoice, Slider, ColorButton, FolderTab, PencilButton, Fold } from "controls.slint";
 import { ScrollBox, PageBox, Tip, TipBox } from "surfaces.slint";
@@ -34,6 +34,8 @@ export struct Cell {
 export component CellView inherits Rectangle {
     in property <Cell> c;
     callback pick(int, int, length, length, length, length);
+    // a field left: its words kept (true), or put back with Escape (false)
+    callback field-left(int, int, bool);
     callback slide(int, float);
     // typed into a box: its id, its index (which of the boxes with that id) and what it holds now
     callback typed(int, int, string);
@@ -142,7 +144,7 @@ export component CellView inherits Rectangle {
         border-radius: root.c.style == 30 ? Radius.control : Radius.box;
         border-top-left-radius: root.c.style == 2 ? 0 : root.c.style == 30 ? Radius.control : Radius.box;
         background: root.c.style == 27 ? Ink.pop : root.c.style == 28 ? Ink.well.with-alpha(0.722) : root.c.style == 30 ? Ink.shade4 : Ink.shade1;
-        border-width: root.c.style == 27 ? 1px : 0;
+        border-width: root.c.style == 27 ? Stroke.line : 0;
         border-color: Ink.seam;
         drop-shadow-blur: root.c.style == 27 ? Shadow.float.blur : 0;
         drop-shadow-offset-y: root.c.style == 27 ? Shadow.float.y : 0;
@@ -195,14 +197,14 @@ export component CellView inherits Rectangle {
             clicked => { root.pick(root.c.id, root.c.index, 0, 0, 0, 0); }
         }
         Rectangle {
-            width: 20px;
-            height: 20px;
+            width: Size.reset;
+            height: Size.reset;
             border-radius: self.width / 2;
             background: reset-ta.has-hover ? Ink.white.with-alpha(0.078) : transparent;
         }
         Rectangle {
-            width: 6px;
-            height: 6px;
+            width: 6px; // art: the reset's dot
+            height: 6px; // art: the reset's dot
             border-radius: self.width / 2;
             background: Ink.ink;
         }
@@ -246,7 +248,7 @@ export component CellView inherits Rectangle {
         // (the pencil's room at the chip's right while it shows)
         property <length> pen-w: chip.hot && !chip.run ? Size.quiet : 0;
         // the name's room: the chip less its checkbox, its driver's name and its reading
-        property <length> room: max(24px, self.width - chip-name.x - (root.c.fill != "" ? orig.preferred-width + Part.sensor-pad : 0) - Part.sensor-pad - chip-val.preferred-width - Part.sensor-pad - self.pen-w);
+        property <length> room: max(24px, self.width - chip-name.x - (root.c.fill != "" ? orig.preferred-width + Part.sensor-pad : 0) - Part.sensor-pad - chip-val.preferred-width - Part.sensor-pad - self.pen-w); // art: the name's least room
         border-radius: Radius.control;
         background: self.hot ? Ink.hover-well : transparent;
         chip-ta := TouchArea {
@@ -260,7 +262,7 @@ export component CellView inherits Rectangle {
             height: Size.check;
             border-radius: Radius.tiny;
             background: root.c.on ? (chip.hot ? Ink.bright : Ink.dim) : chip.hot ? Ink.hover-box : Ink.well;
-            border-width: root.c.on ? 0 : 1px;
+            border-width: root.c.on ? 0 : Stroke.line;
             border-color: chip.hot ? Ink.edge-hover : Ink.edge;
             if root.c.on: Path {
                 width: parent.width;
@@ -270,20 +272,20 @@ export component CellView inherits Rectangle {
                 commands: "M5.2 9.3 L7.9 11.9 L12.9 6.4";
                 fill: transparent;
                 stroke: Ink.base;
-                stroke-width: 2px;
+                stroke-width: 2px; // art: the tick's stroke
             }
         }
         if chip.run: Path {
             x: Part.sensor-pad + (Size.check - self.width) / 2;
             y: (parent.height - self.height) / 2;
-            width: 10px;
-            height: 10px;
+            width: 10px; // art: the open chevron, drawn
+            height: 10px; // art: the open chevron, drawn
             viewbox-width: 10;
             viewbox-height: 10;
             commands: root.c.style == 3 ? "M2 3.5l3 3 3-3" : "M3.5 2l3 3-3 3";
             fill: transparent;
             stroke: Ink.soft;
-            stroke-width: 1.4px;
+            stroke-width: 1.4px; // art: the chevron's stroke
         }
         chip-name := Text {
             x: Part.sensor-pad + Size.check + Part.check-gap;
@@ -331,7 +333,7 @@ export component CellView inherits Rectangle {
     if root.c.kind == 10: Rectangle {
         border-radius: root.c.style == 7 ? Radius.small : Radius.control;
         background: root.c.style == 7 ? Ink.base : Ink.well;
-        border-width: root.c.style == 7 ? 1px : 0;
+        border-width: root.c.style == 7 ? Stroke.line : 0;
         border-color: Ink.edge;
         if root.c.style == 2 && input.text == "": Text {
             x: Part.field-pad;
@@ -402,19 +404,19 @@ export component CellView inherits Rectangle {
         // name, and the button that takes it off
         if root.c.style == 6: Path {
             x: Part.field-pad;
-            y: (parent.height - 14px) / 2;
-            width: 16px;
-            height: 14px;
+            y: (parent.height - 14px) / 2; // art: a picture's glyph
+            width: 16px; // art: a picture's glyph
+            height: 14px; // art: a picture's glyph
             viewbox-width: 16;
             viewbox-height: 14;
             commands: "M1.5 1.5h13v11h-13z M3.5 10.5l3.5-4 2.5 2.5 1.5-1.5 2.5 3";
             fill: transparent;
             stroke: Ink.quiet;
-            stroke-width: 1.2px;
+            stroke-width: 1.2px; // art: the glyph's stroke
         }
         if root.c.style == 6: Text {
-            x: 34px;
-            width: parent.width - 34px - 36px;
+            x: Part.field-pad + Part.glyph + Space.inline;
+            width: parent.width - self.x - Size.compact - Space.inline;
             height: parent.height;
             text: root.c.text;
             font-family: Font.ui;
@@ -425,15 +427,15 @@ export component CellView inherits Rectangle {
         }
         // (the box tells the page the pointer is over it, for its note)
         if root.c.style == 6: TouchArea {
-            width: parent.width - 36px;
+            width: parent.width - Size.compact - Space.inline;
             height: parent.height;
             changed has-hover => { root.hovered(root.c.id, self.has-hover); }
         }
         if root.c.style == 6: Rectangle {
-            x: parent.width - 32px;
-            y: 3px;
-            width: 28px;
-            height: 28px;
+            x: parent.width - Size.compact - Space.tight;
+            y: (parent.height - Size.compact) / 2;
+            width: Size.compact;
+            height: Size.compact;
             border-radius: Radius.small;
             background: off.has-hover ? Ink.white.with-alpha(0.078) : transparent;
             Text {
@@ -450,10 +452,10 @@ export component CellView inherits Rectangle {
         }
         // a key's text: its glyphs' button, which gives the box the keys and opens their list
         if root.c.style == 4 || root.c.style == 5: Rectangle {
-            x: parent.width - 32px;
-            y: 3px;
-            width: 28px;
-            height: 28px;
+            x: parent.width - Size.compact - Space.tight;
+            y: (parent.height - Size.compact) / 2;
+            width: Size.compact;
+            height: Size.compact;
             border-radius: Radius.small;
             background: glyphs.has-hover ? Ink.white.with-alpha(0.078) : transparent;
             Text {
@@ -481,10 +483,10 @@ export component CellView inherits Rectangle {
             enabled: root.c.style != 6;
             property <bool> plugin-value: root.c.style == 8;
             // (style 7, a name typed on a sensor's chip, close in from the chip's edge)
-            x: root.c.style == 7 ? 8px : Part.field-pad;
-            y: root.c.style == 5 ? 8px : 0;
-            width: parent.width - 2 * self.x - (root.c.style >= 4 && root.c.style <= 6 ? 30px : 0);
-            height: root.c.style == 5 ? parent.height - 16px : parent.height;
+            x: root.c.style == 7 ? Space.inline : Part.field-pad;
+            y: root.c.style == 5 ? Space.inline : 0;
+            width: parent.width - 2 * self.x - (root.c.style >= 4 && root.c.style <= 6 ? Size.compact + Space.tight : 0);
+            height: root.c.style == 5 ? parent.height - 2 * Space.inline : parent.height;
             text: root.c.text;
             font-family: self.plugin-value ? Font.mono : Font.ui;
             font-size: self.plugin-value ? Font.caption : root.c.style == 7 ? Font.note : Font.control;
@@ -502,7 +504,7 @@ export component CellView inherits Rectangle {
                     root.pick(root.c.id, 1, 0, 0, 0, 0);
                 }
                 if (self.plugin-value && !self.has-focus) {
-                    root.pick(root.c.id, root.c.index, 1px, 0, 0, 0);
+                    root.field-left(root.c.id, root.c.index, true);
                 }
             }
             // (style 3, a name to give, 7, and 10, the words a block on a screen says: it
@@ -523,7 +525,7 @@ export component CellView inherits Rectangle {
             }
             key-pressed(e) => {
                 if (self.plugin-value && e.text == Key.Escape) {
-                    root.pick(root.c.id, root.c.index, 2px, 0, 0, 0);
+                    root.field-left(root.c.id, root.c.index, false);
                     self.text = root.c.text;
                     self.clear-focus();
                     return accept;
@@ -607,9 +609,8 @@ export component CellView inherits Rectangle {
     }
     // the lab's own pieces: a switch's button that tells the page the pointer is over it, a
     // key on its map, a menu's rows, a button on a shade; and a card that opens (36)
-    // (style 24: it opens a list, a chevron after its words; 25: a key on the
-    // lab's map, its words small; 26: not to be chosen here, its words
-    // faint; 29: the page round a menu, which shuts it, with no shade or hand)
+    // (style 25: a key on the lab's map, its words small; 26: not to be chosen here, its
+    // words faint; 29: the page round a list, which shuts it, with no shade or hand)
     if (root.c.kind >= 5 && root.c.kind <= 8) && !(root.c.kind == 7 && (root.c.style == 0 || root.c.style == 33 || root.c.style == 35 || root.c.style == 37)): Rectangle {
         // (style 36: a card that opens, in the well's shade on a box: a script's; 37: a
         // button that can't be used now, faded)
@@ -622,76 +623,39 @@ export component CellView inherits Rectangle {
             : root.c.kind == 5 ? (b.has-hover ? Ink.hover-well : transparent)
             : root.c.kind == 8 ? (b.has-hover && root.c.style != 29 ? Ink.white.with-alpha(0.059) : transparent)
             : (b.has-hover ? Ink.pick : Ink.hover-box);
-        // style 32: a color's button, its color in a small square before its words
-        if root.c.style == 32: Rectangle {
-            x: 9px;
-            y: (parent.height - 16px) / 2;
-            width: 16px;
-            height: 16px;
-            border-radius: Radius.tiny;
-            background: root.c.color;
-            border-width: 1px;
-            border-color: Ink.white.with-alpha(0.2);
-        }
-        // style 35: an icon before its words, drawn as the bar's buttons draw theirs (its lines, on 16 units)
-        if root.c.style == 35: Path {
-            x: 12px;
-            y: (parent.height - 14px) / 2;
-            width: 14px;
-            height: 14px;
-            viewbox-width: 16;
-            viewbox-height: 16;
-            commands: root.c.lines;
-            fill: transparent;
-            stroke: Ink.ink;
-            stroke-width: 1.14px;
-            stroke-line-cap: round;
-        }
         // style 31 with an icon's shapes: the icon, as its key prints it
         if root.c.style == 31 && (root.c.fill != "" || root.c.lines != ""): Rectangle {
-            x: (parent.width - 20px) / 2;
-            y: (parent.height - 20px) / 2;
-            width: 20px;
-            height: 20px;
+            x: (parent.width - 20px) / 2; // art: a key's icon, as its key prints it
+            y: (parent.height - 20px) / 2; // art: a key's icon, as its key prints it
+            width: 20px; // art: a key's icon, as its key prints it
+            height: 20px; // art: a key's icon, as its key prints it
             Path {
-                width: 20px;
-                height: 20px;
+                width: 20px; // art: a key's icon, as its key prints it
+                height: 20px; // art: a key's icon, as its key prints it
                 viewbox-width: 24;
                 viewbox-height: 24;
                 commands: root.c.fill;
                 fill: b.has-hover ? Ink.white : Ink.dim;
             }
             Path {
-                width: 20px;
-                height: 20px;
+                width: 20px; // art: a key's icon, as its key prints it
+                height: 20px; // art: a key's icon, as its key prints it
                 viewbox-width: 24;
                 viewbox-height: 24;
                 commands: root.c.lines;
                 fill: transparent;
                 stroke: b.has-hover ? Ink.white : Ink.dim;
-                stroke-width: 1.67px;
+                stroke-width: 1.67px; // art: the icon's stroke
             }
         }
         Text {
-            x: root.c.style == 32 ? 32px : root.c.style == 35 ? 12px + 14px + 7px : (parent.width - self.width) / 2 - (root.c.style == 24 ? 7px : 0);
-            y: (parent.height - self.height) / 2 + (b.pressed && (root.c.kind == 7 || root.c.kind == 8) ? 1px : 0);
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2 + (b.pressed && (root.c.kind == 7 || root.c.kind == 8) ? Part.press : 0);
             text: root.c.text;
             font-family: Font.ui;
             font-size: root.c.style == 25 ? Font.small : root.c.style == 31 ? Font.title : root.c.style == 33 ? Font.caption : root.c.kind == 8 ? Font.note : Font.control;
             font-weight: root.c.kind >= 7 && root.c.style != 33 ? Font.medium : Font.regular;
             color: root.c.on ? Ink.bright : root.c.style == 26 ? Ink.off : root.c.style == 33 ? (b.has-hover ? Ink.bright : Ink.dim) : root.c.kind == 8 ? (b.has-hover ? Ink.ink : Ink.quiet) : root.c.kind == 7 ? Ink.ink : b.has-hover ? Ink.white : Ink.dim;
-        }
-        if root.c.style == 24 || root.c.style == 32: Path {
-            x: parent.width - 19px;
-            y: (parent.height - 6px) / 2;
-            width: 9px;
-            height: 6px;
-            viewbox-width: 10;
-            viewbox-height: 6;
-            commands: "M1 1l4 4 4-4";
-            fill: transparent;
-            stroke: root.c.on ? Ink.base : Ink.quiet;
-            stroke-width: 1.35px;
         }
         b := TouchArea {
             enabled: root.c.style != 26 && root.c.style != 37;
@@ -736,29 +700,29 @@ export component CellView inherits Rectangle {
     // (in a cell under 28 across, as a narrow box has them: the dot 20 across, its ring a
     // hairline of the brightest ink, kept apart from it by the box's own shade)
     if root.c.kind == 42 && root.c.style != 2: dotcell := Rectangle {
-        property <bool> small: root.width < 28px;
+        property <bool> small: root.width < 28px; // art: a narrow box's dot
         border-radius: self.width / 2;
-        border-width: root.c.on ? (self.small ? 1.5px : 2px) : 0;
+        border-width: root.c.on ? (self.small ? 1.5px : 2px) : 0; // art: the dot's ring
         border-color: self.small ? Ink.bright : Ink.dim;
         Rectangle {
-            property <length> d: dotcell.small ? (dot-ta.has-hover ? 22px : 20px) : dot-ta.has-hover ? 26px : 24px;
+            property <length> d: dotcell.small ? (dot-ta.has-hover ? 22px : 20px) : dot-ta.has-hover ? 26px : 24px; // art: the dot, larger under the pointer
             x: (parent.width - self.d) / 2;
             y: (parent.height - self.d) / 2;
             width: self.d;
             height: self.d;
             border-radius: self.d / 2;
             background: root.c.style == 1 ? (dot-ta.has-hover ? Ink.hover-box : transparent) : root.c.color;
-            border-width: root.c.style == 1 || !dotcell.small ? 1px : 0;
+            border-width: root.c.style == 1 || !dotcell.small ? Stroke.line : 0;
             border-color: root.c.style == 1 ? (dot-ta.has-hover ? Ink.placeholder : Ink.edge) : Ink.white.with-alpha(0.165);
             if root.c.style == 1: Path {
-                width: dotcell.small ? 10px : 12px;
-                height: dotcell.small ? 10px : 12px;
+                width: dotcell.small ? 10px : 12px; // art: the plus, drawn
+                height: dotcell.small ? 10px : 12px; // art: the plus, drawn
                 viewbox-width: 12;
                 viewbox-height: 12;
                 commands: "M6 1.5v9M1.5 6h9";
                 fill: transparent;
                 stroke: dot-ta.has-hover ? Ink.bright : Ink.soft;
-                stroke-width: 1.5px;
+                stroke-width: 1.5px; // art: the plus's stroke
             }
         }
         dot-ta := TouchArea {
@@ -817,19 +781,19 @@ export component CellView inherits Rectangle {
         // (the tick, 12, and its gap, 5, take Part.chip-tick: the 3 more come out of the
         // chip's left side)
         HorizontalLayout {
-            padding-left: root.c.on ? Part.chip-pad + Part.chip-tick - 17px : Part.chip-pad;
+            padding-left: root.c.on ? Part.chip-pad + Part.chip-tick - 17px : Part.chip-pad; // art: its tick in from its side
             padding-right: Part.chip-pad;
-            spacing: 5px;
+            spacing: 5px; // art: its tick and its words
             if root.c.on: Path {
-                y: (parent.height - 12px) / 2;
-                width: 12px;
-                height: 12px;
+                y: (parent.height - Part.chevron) / 2;
+                width: Part.chevron;
+                height: Part.chevron;
                 viewbox-width: 24;
                 viewbox-height: 24;
                 commands: "M5 12.5l4.5 4.5L19 7.5";
                 fill: transparent;
                 stroke: Ink.bright;
-                stroke-width: 2.6px;
+                stroke-width: 2.6px; // art: the tick's stroke
             }
             Text {
                 text: root.c.text;
@@ -893,19 +857,19 @@ export component CellView inherits Rectangle {
     if root.c.kind == 49: Rectangle {
         Path {
             x: 0;
-            y: (parent.height - 12px) / 2;
-            width: 12px;
-            height: 12px;
+            y: (parent.height - Part.chevron) / 2;
+            width: Part.chevron;
+            height: Part.chevron;
             viewbox-width: 24;
             viewbox-height: 24;
             commands: "M5 12.5l4.5 4.5L19 7.5";
             fill: transparent;
             stroke: Ink.good;
-            stroke-width: 2.4px;
+            stroke-width: 2.4px; // art: the tick's stroke
         }
         Text {
-            x: 19px;
-            width: parent.width - 19px;
+            x: Part.chevron + Part.glyph-gap;
+            width: parent.width - Part.chevron - Part.glyph-gap;
             text: root.c.text;
             font-family: Font.ui;
             font-size: Font.control;
@@ -952,6 +916,8 @@ export component CellBox inherits ScrollBox {
     in property <LaidBox> b;
     callback resized(length);
     callback pick(int, int, length, length, length, length);
+    // a field left: its words kept (true), or put back with Escape (false)
+    callback field-left(int, int, bool);
     callback slide(int, float);
     callback typed(int, int, string);
     callback hovered(int, bool);
@@ -969,6 +935,7 @@ export component CellBox inherits ScrollBox {
         for c in root.b.cells: CellView {
             c: c;
             pick(id, index, x, y, h, w) => { root.pick(id, index, x, y, h, w); }
+            field-left(id, index, kept) => { root.field-left(id, index, kept); }
             slide(id, v) => { root.slide(id, v); }
             typed(id, index, t) => { root.typed(id, index, t); }
             hovered(i, on) => { root.hovered(i, on); }

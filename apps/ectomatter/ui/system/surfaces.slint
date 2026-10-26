@@ -1,7 +1,7 @@
 // The surfaces a page lays its parts on: a box, a box that scrolls, the stage a
 // device is drawn on. Each is drawn here once, from the tokens.
 
-import { Space, Radius, Font, Line, Size, Part, Shadow, Ink } from "tokens.slint";
+import { Space, Radius, Font, Line, Size, Part, Stroke, Shadow, Ink } from "tokens.slint";
 import { ScrollBar, WordButton } from "controls.slint";
 
 // the stage a device is drawn on, the same on every device's page: its shade round
@@ -14,7 +14,7 @@ export component Stage inherits Rectangle {
     in property <length> hole-w;
     in property <length> hole-h;
     in property <bool> filled;
-    property <length> r: 12px;
+    property <length> r: Radius.box;
     // left and right of the hole, the whole height, rounded at the box's corners
     Rectangle {
         x: 0;
@@ -61,7 +61,7 @@ export component Stage inherits Rectangle {
 export component PageBox inherits Rectangle {
     in property <string> title;
     // where the title sits: lower when something comes before it in the box
-    in property <length> title-y: 14px;
+    in property <length> title-y: Part.title-top;
     // (clear inside a ScrollBox, which draws the box itself)
     in property <brush> fill: Ink.box;
     background: root.fill;
@@ -69,7 +69,7 @@ export component PageBox inherits Rectangle {
     Text {
         x: Space.pad;
         y: root.title-y;
-        height: 22px;
+        height: Line.title;
         text: root.title;
         font-family: Font.ui;
         font-size: Font.text;
@@ -77,7 +77,7 @@ export component PageBox inherits Rectangle {
         color: Ink.bright;
         vertical-alignment: center;
         overflow: elide;
-        width: parent.width - 120px;
+        width: parent.width - 120px; // art: room for what's beside the title
     }
     @children
 }
@@ -100,8 +100,8 @@ export component ScrollBox inherits Rectangle {
     }
     ScrollBar {
         x: parent.width - Part.scroll-in;
-        y: 8px;
-        height: parent.height - 16px;
+        y: Space.inline;
+        height: parent.height - 2 * Space.inline;
         view: sb-flick.height;
         content: sb-flick.content-height;
         offset: -sb-flick.content-y;
@@ -121,7 +121,7 @@ export component FloatBar inherits Rectangle {
     width: row.preferred-width;
     border-radius: Radius.panel;
     background: root.fill;
-    border-width: 1px;
+    border-width: Stroke.line;
     border-color: Ink.line;
     drop-shadow-blur: Shadow.float.blur;
     drop-shadow-offset-y: Shadow.float.y;
@@ -132,6 +132,63 @@ export component FloatBar inherits Rectangle {
         spacing: Space.tight;
         alignment: start;
         @children
+    }
+}
+
+// The bay a device's screen is set into, the same wherever the screen shows (the Screen
+// tab, the Screen Editor): the screen's own background color (`field`) between plain
+// walls, its corners rounded inside its box's, its top edge shaded as a step down into
+// it; the screen, `screen-w` by `screen-h`, Space.margin in from the walls, at
+// `screen-x` and `screen-y` (where its children draw the screen and what's over it).
+export component ScreenBay inherits Rectangle {
+    in property <length> screen-w;
+    in property <length> screen-h;
+    in property <color> field;
+    out property <length> screen-x: Space.margin;
+    out property <length> screen-y: Space.margin;
+    width: root.screen-w + 2 * Space.margin;
+    height: root.screen-h + 2 * Space.margin;
+    border-radius: Radius.panel;
+    background: root.field;
+    animate background { duration: 450ms; easing: ease; }
+    border-width: Stroke.line;
+    border-color: Ink.black.with-alpha(0.549);
+    clip: true;
+    // art: the step down into the bay, a shade at its top edge
+    Rectangle {
+        y: 0;
+        height: 14px; // art: the step's shade
+        background: @linear-gradient(180deg, Ink.black.with-alpha(0.451) 0%, Ink.black.with-alpha(0) 100%);
+    }
+    @children
+}
+
+// What's being carried, under the pointer, the same for every carry (a screen layout to
+// the playlist, a block onto the screen): its name on a chip lifted off the page, a
+// glyph before it where it has one (its children).
+export component CarryChip inherits Rectangle {
+    in property <string> text;
+    height: Size.compact;
+    width: row.preferred-width + 2 * Part.chip-pad;
+    border-radius: Radius.control;
+    background: Ink.hover-box;
+    drop-shadow-blur: Shadow.float.blur;
+    drop-shadow-offset-y: Shadow.float.y;
+    drop-shadow-color: Shadow.float.color;
+    row := HorizontalLayout {
+        x: Part.chip-pad;
+        height: parent.height;
+        spacing: Part.glyph-gap;
+        alignment: start;
+        @children
+        Text {
+            text: root.text;
+            font-family: Font.ui;
+            font-size: Font.note;
+            font-weight: Font.strong;
+            color: Ink.bright;
+            vertical-alignment: center;
+        }
     }
 }
 
@@ -170,7 +227,7 @@ export component Scrim inherits Rectangle {
 export component DialogBox inherits Rectangle {
     border-radius: Radius.box;
     background: Ink.box;
-    border-width: 1px;
+    border-width: Stroke.line;
     border-color: Ink.glass;
     drop-shadow-blur: Shadow.modal.blur;
     drop-shadow-offset-y: Shadow.modal.y;
@@ -288,7 +345,7 @@ export component EmptyState inherits VerticalLayout {
     in property <string> title;
     in property <string> text;
     in property <[string]> lines;
-    width: 440px;
+    width: Size.empty;
     spacing: Space.label;
     alignment: center;
     if root.title != "": Text {
@@ -310,7 +367,7 @@ export component EmptyState inherits VerticalLayout {
     }
     if root.lines.length > 0: VerticalLayout {
         for line in root.lines: Text {
-            height: 20px;
+            height: Line.text;
             text: line;
             font-family: Font.ui;
             font-size: Font.control;
@@ -328,17 +385,17 @@ export component EmptyState inherits VerticalLayout {
 export component TipBox inherits Rectangle {
     border-radius: Radius.control;
     background: Ink.hover-box;
-    border-width: 1px;
+    border-width: Stroke.line;
     border-color: Ink.seam;
     drop-shadow-blur: Shadow.lift.blur;
     drop-shadow-offset-y: Shadow.lift.y;
     drop-shadow-color: Shadow.lift.color;
     VerticalLayout {
-        padding-left: 10px;
-        padding-right: 10px;
-        padding-top: 7px;
-        padding-bottom: 7px;
-        spacing: 2px;
+        padding-left: 10px; // art: the tip's own padding
+        padding-right: 10px; // art: the tip's own padding
+        padding-top: 7px; // art: the tip's own padding
+        padding-bottom: 7px; // art: the tip's own padding
+        spacing: 2px; // art: the tip's lines
         @children
     }
 }

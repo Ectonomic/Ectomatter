@@ -525,8 +525,8 @@ impl LayoutPage {
             }
         }
         if self.pick.is_some() {
-            let (px, py, ph) = (self.ui.get_picker_x().max(8.0).min(self.ui.get_window_width() - 272.0), self.ui.get_picker_top(), self.ui.get_picker_height());
-            if !(x >= px && x < px + 264.0 && y >= py && y < py + ph) {
+            let (px, py, ph) = (self.ui.get_picker_x().max(crate::tokens::space::INLINE).min(self.ui.get_window_width() - crate::tokens::size::PICKER - crate::tokens::space::INLINE), self.ui.get_picker_top(), self.ui.get_picker_height());
+            if !(x >= px && x < px + crate::tokens::size::PICKER && y >= py && y < py + ph) {
                 self.shut = Some(((x, y), Instant::now()));
                 self.close_picker();
             }

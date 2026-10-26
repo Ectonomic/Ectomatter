@@ -251,6 +251,7 @@ pub enum Ask {
     PollActive,
     Effect(i32),
     CellPick(i32, i32, f32, f32, f32, f32),
+    CellLeft(i32, i32, bool),
     CellSlide(i32, f32),
     /// time to send the preview again: the effect every two seconds, streamed colors 14 times a second
     PreviewTick,
@@ -1142,6 +1143,7 @@ impl Front {
         on!(on_screen_editor, Ask::ScreenEditor);
         on!(on_effect, |i| Ask::Effect(i));
         on!(on_cell_pick, |id, i, x, y, h, w| Ask::CellPick(id, i, x, y, h, w));
+        on!(on_cell_left, |id, i, kept| Ask::CellLeft(id, i, kept));
         on!(on_cell_slide, |id, v| Ask::CellSlide(id, v));
         on!(on_pk_sv, |x, y| Ask::PkSv(x, y));
         on!(on_pk_hue_at, |x| Ask::PkHue(x));
@@ -2061,6 +2063,12 @@ impl Front {
                     changed = false;
                     self.desk.draw_tool = false;
                     self.show_desk();
+                }
+                // (a plugin's value on a Library page, its box left: kept, or put back)
+                Ask::CellLeft(id, _, kept) => {
+                    if lighting::ctl(id) == Ctl::LibText {
+                        self.games.text_done(if kept { 1 } else { 2 });
+                    }
                 }
                 Ask::CellPick(id, i, x, y, h, w) => match crate::described::piece_of(id) {
                     Some(piece) if self.on_keyboard() => self.kb_described_pick(piece, i.max(0) as usize, (x, y, h), w),
@@ -3106,11 +3114,6 @@ impl Front {
                 self.refresh();
                 return;
             }
-            Ctl::LibText => {
-                self.games.text_done(_anchor.0 as u8);
-                self.refresh();
-                return;
-            }
             Ctl::PackageOn => {
                 self.package_switch(index / 2, index % 2 == 0);
                 self.refresh();
@@ -3898,8 +3901,8 @@ impl Front {
         }
         // away from the open picker closes it; on the swatch it hangs from too
         if self.pick.is_some() {
-            let (px, py, ph) = (self.ui.get_picker_x().max(8.0).min(self.ui.get_window_width() - 272.0), self.ui.get_picker_top(), self.ui.get_picker_height());
-            if !(x >= px && x < px + 264.0 && y >= py && y < py + ph) {
+            let (px, py, ph) = (self.ui.get_picker_x().max(crate::tokens::space::INLINE).min(self.ui.get_window_width() - crate::tokens::size::PICKER - crate::tokens::space::INLINE), self.ui.get_picker_top(), self.ui.get_picker_height());
+            if !(x >= px && x < px + crate::tokens::size::PICKER && y >= py && y < py + ph) {
                 let (ax, ay, ah) = self.pick.as_ref().unwrap().anchor;
                 // (a swatch is 34 wide; a pad's Color button, its swatch and its word)
                 let aw = if self.pick.as_ref().is_some_and(|p| p.ctl == Ctl::DeskPad) { crate::text::width(crate::tokens::font::MEDIUM, crate::tokens::font::CONTROL, "Color") + 42.0 } else { 34.0 };

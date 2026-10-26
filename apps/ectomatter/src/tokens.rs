@@ -22,7 +22,7 @@ mod system {
     use std::path::Path;
 
     /// the parts that draw a device's own picture, in its own colors
-    const ART: &[&str] = &["KeyBox", "MouseLayers"];
+    const ART: &[&str] = &["KeyBox", "MouseLayers", "WayGlyph", "BlockGlyph", "MacroIcon"];
 
     fn slint_files() -> Vec<(String, String)> {
         let ui = Path::new(env!("CARGO_MANIFEST_DIR")).join("ui");
@@ -36,17 +36,31 @@ mod system {
         out
     }
 
+    /// Whether a line is art: in a part that draws a device's picture, marked `// art:`,
+    /// or between `// art: begin` and `// art: end` (a drawing of a part's own, drawn once:
+    /// a glyph, an instrument's marks); `within` carries whether a region is open.
+    fn is_art(part: &str, line: &str, within: &mut bool) -> bool {
+        if line.contains("// art: begin") {
+            *within = true;
+        } else if line.contains("// art: end") {
+            *within = false;
+            return true;
+        }
+        ART.contains(&part) || line.contains("// art:") || *within
+    }
+
     /// Each line of code that isn't art: its file, number, and code (comments and strings out).
     fn code_lines() -> Vec<(String, usize, String)> {
         let mut out = Vec::new();
         for (name, text) in slint_files() {
             let mut part = String::new();
+            let mut within = false;
             for (i, line) in text.lines().enumerate() {
                 let t = line.trim_start();
                 if let Some(rest) = t.strip_prefix("export component ").or_else(|| t.strip_prefix("component ")) {
                     part = rest.split_whitespace().next().unwrap_or("").to_string();
                 }
-                if ART.contains(&part.as_str()) || line.contains("// art:") {
+                if is_art(&part, line, &mut within) {
                     continue;
                 }
                 let code = line.split("//").next().unwrap_or("");
@@ -84,6 +98,41 @@ mod system {
             return None;
         }
         Some(code[at + prop.len() + 1..].split(';').next().unwrap_or(""))
+    }
+
+    #[test]
+    fn sizes_are_tokens() {
+        // (every size, place and line's width on the pages and in the parts is a token's,
+        // a part's or worked out from them; a part's own drawing is marked art. A 1 px
+        // that only turns a number into a length, or back, isn't a size.)
+        // (an instrument's own marks, drawn once, sit between `// drawn: begin` and
+        // `// drawn: end`: the playlist's strip, the mouse's picture, Home's grips)
+        let mut drawn = std::collections::HashSet::new();
+        for (name, text) in slint_files() {
+            let mut within = false;
+            for (i, line) in text.lines().enumerate() {
+                if line.contains("// drawn: begin") {
+                    within = true;
+                }
+                if within {
+                    drawn.insert((name.clone(), i + 1));
+                }
+                if line.contains("// drawn: end") {
+                    within = false;
+                }
+            }
+        }
+        let mut bad = Vec::new();
+        for (f, n, c) in code_lines() {
+            if drawn.contains(&(f.clone(), n)) {
+                continue;
+            }
+            let unit = c.replace("/ 1px", "").replace("* 1px", "").replace("(1px,", "(").replace("max(1px", "max(").replace("(0px", "(");
+            if px_values(&unit).iter().any(|&v| v != 0.0) {
+                bad.push(format!("{f}:{n}: {}", c.trim()));
+            }
+        }
+        assert!(bad.is_empty(), "{} sizes set by hand, not from the tokens:\n{}", bad.len(), bad.join("\n"));
     }
 
     #[test]
@@ -148,13 +197,14 @@ mod system {
     fn page_lines() -> Vec<(usize, String, String)> {
         let text = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/app.slint")).unwrap();
         let mut part = String::new();
+        let mut within = false;
         let mut out = Vec::new();
         for (i, line) in text.lines().enumerate() {
             let t = line.trim_start();
             if let Some(rest) = t.strip_prefix("export component ").or_else(|| t.strip_prefix("component ")) {
                 part = rest.split_whitespace().next().unwrap_or("").to_string();
             }
-            if ART.contains(&part.as_str()) || line.contains("// art:") {
+            if is_art(&part, line, &mut within) {
                 continue;
             }
             out.push((i + 1, line.to_string(), line.split("//").next().unwrap_or("").to_string()));

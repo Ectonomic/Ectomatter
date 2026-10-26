@@ -2,18 +2,18 @@
 // switches, drop-downs, scrollbars. Each is drawn here once, from the tokens;
 // a page sets what it says and does, never how it looks.
 
-import { Space, Radius, Font, Line, Size, Part, Shadow, Ink } from "tokens.slint";
+import { Space, Radius, Font, Line, Size, Part, Stroke, Shadow, Ink } from "tokens.slint";
 import { Typing } from "state.slint";
 
 // one of the window's own buttons: minimize, maximize, close
 export component WinButton inherits Rectangle {
     in property <string> commands;
-    in property <length> size: 14px;
+    in property <length> size: Part.glyph;
     in property <bool> danger;
     // (the close button, at the window's corner: rounded as the window is)
     in property <length> corner;
     callback clicked;
-    width: 40px;
+    width: Size.win-button;
     border-top-right-radius: root.corner;
     background: ta.has-hover ? (root.danger ? Ink.close : Ink.hover-box) : transparent;
     Path {
@@ -24,7 +24,7 @@ export component WinButton inherits Rectangle {
         commands: root.commands;
         fill: transparent;
         stroke: ta.has-hover ? (root.danger ? Ink.white : Ink.bright) : Ink.soft;
-        stroke-width: 1.4px * root.size / 16px;
+        stroke-width: 1.4px * root.size / 16px; // art: the glyph's stroke, as wide as its size keeps it
     }
     ta := TouchArea {
         clicked => { root.clicked(); }
@@ -37,10 +37,10 @@ export component Tab inherits Rectangle {
     in property <bool> selected;
     out property <bool> hover: ta.has-hover;
     callback clicked;
-    width: label.preferred-width + 28px;
+    width: label.preferred-width + 2 * Part.tab-in;
     label := Text {
         y: 0;
-        height: parent.height - 2px;
+        height: parent.height - Stroke.ring;
         text: root.text;
         font-family: Font.ui;
         font-size: Font.tab;
@@ -62,7 +62,7 @@ export component ColorSquare inherits Rectangle {
     height: Part.glyph;
     border-radius: Radius.tiny;
     background: root.swatch;
-    border-width: 1px;
+    border-width: Stroke.line;
     border-color: Ink.white.with-alpha(0.18);
 }
 
@@ -96,10 +96,10 @@ export component WordButton inherits Rectangle {
     out property <bool> hover: ta.has-hover && root.enabled;
     out property <bool> down: ta.pressed && root.enabled;
     callback clicked;
-    height: root.compact ? Size.compact : root.primary ? Size.button + 2px : Size.button;
+    height: root.compact ? Size.compact : root.primary ? Size.button + Part.primary : Size.button;
     property <length> icon-w: root.icon != "" || root.lines != "" || root.swatched ? Part.glyph + Part.glyph-gap : 0;
-    property <length> menu-w: root.menu ? Part.glyph-gap + 12px : 0;
-    width: root.wide > 0 ? root.wide : label.preferred-width + 2 * Part.button-pad + root.icon-w + root.menu-w + (root.primary ? 2px : 0);
+    property <length> menu-w: root.menu ? Part.glyph-gap + Part.chevron : 0;
+    width: root.wide > 0 ? root.wide : label.preferred-width + 2 * Part.button-pad + root.icon-w + root.menu-w + (root.primary ? Part.primary : 0);
     border-radius: root.small ? Radius.small : Radius.control;
     // turned off, the whole button fades to 35% over the page's ground, as the
     // web app's does; faded piece by piece, its words would come out lighter
@@ -109,9 +109,9 @@ export component WordButton inherits Rectangle {
     background: root.enabled ? root.face : root.face.mix(Ink.base, 0.35);
     if root.icon != "": Path {
         x: (parent.width - label.width - root.icon-w - root.menu-w) / 2;
-        y: (parent.height - 14px) / 2 + (ta.pressed && root.enabled ? 1px : 0);
-        width: 14px;
-        height: 14px;
+        y: (parent.height - Part.glyph) / 2 + (ta.pressed && root.enabled ? Part.press : 0);
+        width: Part.glyph;
+        height: Part.glyph;
         viewbox-width: 14;
         viewbox-height: 14;
         commands: root.icon;
@@ -119,24 +119,24 @@ export component WordButton inherits Rectangle {
     }
     if root.swatched: ColorSquare {
         x: (parent.width - label.width - root.icon-w - root.menu-w) / 2;
-        y: (parent.height - self.height) / 2 + (ta.pressed && root.enabled ? 1px : 0);
+        y: (parent.height - self.height) / 2 + (ta.pressed && root.enabled ? Part.press : 0);
         swatch: root.swatch;
     }
     if root.menu: Path {
         x: (parent.width + label.width + root.icon-w - root.menu-w) / 2 + Part.glyph-gap;
-        y: (parent.height - self.height) / 2 + (ta.pressed && root.enabled ? 1px : 0);
-        width: 12px;
-        height: 12px;
+        y: (parent.height - self.height) / 2 + (ta.pressed && root.enabled ? Part.press : 0);
+        width: Part.chevron;
+        height: Part.chevron;
         viewbox-width: 12;
         viewbox-height: 12;
         commands: "M3 4.5l3 3 3-3";
         fill: transparent;
         stroke: Ink.quiet;
-        stroke-width: 1.6px;
+        stroke-width: 1.6px; // art: the chevron's stroke
     }
     if root.lines != "": Path {
         x: (parent.width - label.width - root.icon-w - root.menu-w) / 2;
-        y: (parent.height - Part.glyph) / 2 + (ta.pressed && root.enabled ? 1px : 0);
+        y: (parent.height - Part.glyph) / 2 + (ta.pressed && root.enabled ? Part.press : 0);
         width: Part.glyph;
         height: Part.glyph;
         viewbox-width: 16;
@@ -144,12 +144,12 @@ export component WordButton inherits Rectangle {
         commands: root.lines;
         fill: transparent;
         stroke: root.enabled ? root.ink : root.ink.mix(Ink.base, 0.35);
-        stroke-width: 1.14px;
+        stroke-width: 1.14px; // art: the glyph's stroke
         stroke-line-cap: round;
     }
     label := Text {
         x: (parent.width - self.width + root.icon-w - root.menu-w) / 2;
-        y: (parent.height - self.height) / 2 + (ta.pressed && root.enabled ? 1px : 0);
+        y: (parent.height - self.height) / 2 + (ta.pressed && root.enabled ? Part.press : 0);
         text: root.text;
         font-family: Font.ui;
         font-size: root.small ? Font.caption : Font.control;
@@ -176,7 +176,7 @@ export component TextButton inherits Rectangle {
     in property <float> units: 14;
     out property <bool> hover: ta.has-hover && root.enabled;
     callback clicked;
-    height: 28px;
+    height: Size.compact;
     width: row.preferred-width;
     border-radius: Radius.small;
     opacity: root.enabled ? 1 : 0.4;
@@ -185,7 +185,7 @@ export component TextButton inherits Rectangle {
         padding-left: Part.quiet-pad;
         padding-right: Part.quiet-pad;
         spacing: Part.glyph-gap;
-        y: ta.pressed && root.enabled ? 1px : 0;
+        y: ta.pressed && root.enabled ? Part.press : 0;
         if root.icon != "": Path {
             y: (parent.height - self.height) / 2;
             width: Part.glyph;
@@ -195,7 +195,7 @@ export component TextButton inherits Rectangle {
             commands: root.icon;
             fill: transparent;
             stroke: root.on ? Ink.warn : root.hover ? Ink.bright : Ink.dim;
-            stroke-width: 1.2px * root.units / 14;
+            stroke-width: 1.2px * root.units / 14; // art: the glyph's stroke
             stroke-line-join: round;
         }
         Text {
@@ -216,22 +216,22 @@ export component TextButton inherits Rectangle {
 
 // the small ring that turns while the keyboard is read
 export component Spinner inherits Rectangle {
-    width: 16px;
-    height: 16px;
+    width: Size.spinner;
+    height: Size.spinner;
     property <angle> a: mod(animation-tick() / 800ms, 1) * 360deg;
     Rectangle {
         border-radius: self.width / 2;
-        border-width: 2px;
+        border-width: 2px; // art: the spinner's ring
         border-color: Ink.line;
     }
     Path {
-        width: 16px;
-        height: 16px;
+        width: Size.spinner;
+        height: Size.spinner;
         viewbox-width: 16;
         viewbox-height: 16;
         fill: transparent;
         stroke: Ink.ink;
-        stroke-width: 2px;
+        stroke-width: 2px; // art: the spinner's ring
         commands: "M " + (8 + 7 * cos(root.a)) + " " + (8 + 7 * sin(root.a)) + " A 7 7 0 0 1 " + (8 + 7 * cos(root.a + 90deg)) + " " + (8 + 7 * sin(root.a + 90deg));
     }
 }
@@ -249,10 +249,10 @@ export component ScrollBar inherits Rectangle {
     // the page's has a dark rim round the thumb; a list's is the thumb alone
     in property <bool> framed: true;
     callback scroll-to(length);
-    width: 12px;
-    visible: root.content > root.view + 1px;
+    width: Part.scroll-in;
+    visible: root.content > root.view + 1px; // art: more than a pixel to scroll
     property <length> travel: max(1px, root.content - root.view);
-    property <length> th: max(24px, root.height * root.view / max(1px, root.content));
+    property <length> th: max(24px, root.height * root.view / max(1px, root.content)); // art: the thumb at its least
     property <length> ty: min(1, max(0, root.offset / root.travel)) * (root.height - root.th);
     property <length> grab;
     property <bool> held;
@@ -260,15 +260,15 @@ export component ScrollBar inherits Rectangle {
         max(0px, min(root.travel, (y - root.grab) / max(1px, root.height - root.th) * root.travel))
     }
     Rectangle {
-        x: parent.width - 7px;
+        x: parent.width - 7px; // art: the thumb's track, in from the edge
         y: root.ty;
-        width: 5px;
+        width: 5px; // art: the thumb's track
         height: root.th;
-        border-radius: 2px;
+        border-radius: 2px; // art: the thumb's track
         background: root.framed ? Ink.frame : transparent;
         Rectangle {
-            x: 1px;
-            width: 3px;
+            x: 1px; // art: the thumb, in its track
+            width: 3px; // art: the thumb
             border-radius: self.width / 2;
             background: bar-ta.has-hover || root.held ? Ink.edge-hover : root.thumb-color;
         }
@@ -309,17 +309,17 @@ export component PickField inherits VerticalLayout {
     callback edited(int, string);
     callback enter();
     callback dismiss();
-    spacing: 3px;
+    spacing: 3px; // art: the picker's field: its label over its box
     Rectangle {
-        height: 27px;
+        height: 27px; // art: the picker's field
         border-radius: Radius.small;
         background: Ink.shade1;
-        border-width: input.has-focus ? 1px : 0;
+        border-width: input.has-focus ? Stroke.line : 0;
         border-color: Ink.edge-hover;
         input := TextInput {
             changed has-focus => { Typing.on = self.has-focus; }
-            x: 6px;
-            width: parent.width - 12px;
+            x: 6px; // art: the picker's field: its number in from its ends
+            width: parent.width - 12px; // art: the picker's field
             height: parent.height;
             text <=> root.value;
             font-family: Font.ui;
@@ -341,7 +341,7 @@ export component PickField inherits VerticalLayout {
         }
     }
     Text {
-        height: 15px;
+        height: 15px; // art: the picker's field's label
         text: root.label;
         font-family: Font.ui;
         font-size: Font.small;
@@ -354,14 +354,15 @@ export component PickField inherits VerticalLayout {
 export component Well inherits Rectangle {
     in property <color> c;
     callback clicked;
-    width: 23.56px;
-    height: 23.56px;
+    // (the picker sets how wide; a circle)
+    width: 23.56px; // art: the picker's well, nine to its row
+    height: self.width;
     // round, as every color dot in the app is
     border-radius: self.width / 2;
     background: root.c;
     Rectangle {
         border-radius: self.width / 2;
-        border-width: 1px;
+        border-width: Stroke.line;
         border-color: ta.has-hover ? Ink.white.with-alpha(0.6) : Ink.white.with-alpha(0.141);
     }
     ta := TouchArea {
@@ -409,7 +410,7 @@ export component LinkButton inherits Rectangle {
             commands: root.icon;
             fill: transparent;
             stroke: root.hover ? Ink.bright : Ink.soft;
-            stroke-width: 1.4px * root.units / 14;
+            stroke-width: 1.4px * root.units / 14; // art: the glyph's stroke
             stroke-line-cap: round;
             stroke-line-join: round;
         }
@@ -433,22 +434,22 @@ export component LinkButton inherits Rectangle {
 export component SmallCap inherits Rectangle {
     in property <string> text;
     in property <length> size: Font.small;
-    width: 34px;
-    height: 26px;
+    width: 34px; // art: a small cap, drawn
+    height: 26px; // art: a small cap, drawn
     // the cap's edge, deeper at its front, all of it following the rounded corners
-    border-radius: Radius.tiny + 1px;
+    border-radius: Radius.tiny + 1px; // art: a small cap, drawn
     background: Ink.seam;
     Rectangle {
-        x: 1px;
-        y: 1px;
-        width: parent.width - 2px;
-        height: parent.height - 4px;
+        x: 1px; // art: a small cap, drawn
+        y: 1px; // art: a small cap, drawn
+        width: parent.width - 2px; // art: a small cap, drawn
+        height: parent.height - 4px; // art: a small cap, drawn
         border-radius: Radius.tiny;
         background: Ink.well;
     }
     Text {
         y: 0;
-        height: parent.height - 3px;
+        height: parent.height - 3px; // art: a small cap, drawn
         text: root.text;
         font-family: Font.ui;
         font-size: root.size;
@@ -457,8 +458,8 @@ export component SmallCap inherits Rectangle {
         horizontal-alignment: center;
         vertical-alignment: center;
         overflow: elide;
-        width: parent.width - 4px;
-        x: 2px;
+        width: parent.width - 4px; // art: a small cap, drawn
+        x: 2px; // art: a small cap, drawn
     }
 }
 
@@ -504,7 +505,7 @@ export component FieldBox inherits Rectangle {
         commands: root.glyph;
         fill: transparent;
         stroke: Ink.quiet;
-        stroke-width: 1.5px;
+        stroke-width: 1.5px; // art: the glyph's stroke
         stroke-line-cap: round;
     }
     if field-in.text == "": Text {
@@ -564,16 +565,16 @@ export component RecordButton inherits Rectangle {
     background: root.on ? Ink.record.with-alpha(0.2) : ta.has-hover && root.enabled ? Ink.pick-hover : Ink.pick;
     opacity: root.on || root.enabled ? 1 : 0.35;
     row := HorizontalLayout {
-        padding-left: Part.button-pad - 2px;
+        padding-left: Part.button-pad - 2px; // art: its dot set in a little, to sit with its words
         padding-right: Part.button-pad;
         spacing: Part.glyph-gap;
         Rectangle {
-            width: root.on ? 8px : 9px;
+            width: root.on ? 8px : 9px; // art: the record dot, or the stop square
             Rectangle {
                 y: (parent.height - self.height) / 2;
-                width: root.on ? 8px : 9px;
+                width: root.on ? 8px : 9px; // art: the record dot, or the stop square
                 height: self.width;
-                border-radius: root.on ? 2px : self.width / 2;
+                border-radius: root.on ? 2px : self.width / 2; // art: the stop square's corners
                 background: root.on ? Ink.bad : Ink.record;
             }
         }
@@ -623,16 +624,16 @@ export component RadioRow inherits Rectangle {
     border-radius: Radius.control;
     background: root.on ? (ta.has-hover ? Ink.pick-hover : Ink.pick) : ta.has-hover ? Ink.hover-box : transparent;
     Rectangle {
-        x: Part.field-pad - 2px;
+        x: Part.field-pad - 2px; // art: the ring set in a little, to sit with its words
         y: (parent.height - self.height) / 2;
         width: Part.glyph;
         height: Part.glyph;
         border-radius: self.width / 2;
-        border-width: root.on ? 4px : 1.5px;
+        border-width: root.on ? 4px : 1.5px; // art: the ring, filled in when chosen
         border-color: root.on ? Ink.bright : Ink.edge-hover;
     }
     Text {
-        x: Part.field-pad - 2px + Part.glyph + Part.field-pad - 2px;
+        x: Part.field-pad - 2px + Part.glyph + Part.field-pad - 2px; // art: its words, after the ring
         height: parent.height;
         text: root.text;
         font-family: Font.ui;
@@ -662,14 +663,14 @@ export component Fold inherits Rectangle {
     Path {
         x: Part.tile-inset;
         y: (parent.height - self.height) / 2;
-        width: 12px;
-        height: 12px;
+        width: Part.chevron;
+        height: Part.chevron;
         viewbox-width: 12;
         viewbox-height: 12;
         commands: root.open ? "M3 4.5l3 3 3-3" : "M4.5 3l3 3-3 3";
         fill: transparent;
         stroke: ta.has-hover ? Ink.bright : Ink.quiet;
-        stroke-width: 1.6px;
+        stroke-width: 1.6px; // art: the chevron's stroke
         stroke-line-cap: round;
         stroke-line-join: round;
     }
@@ -712,7 +713,7 @@ export component CheckBox inherits Rectangle {
         height: Size.check;
         border-radius: Radius.tiny;
         background: root.held ? Ink.off : root.off ? transparent : root.on ? (root.hot ? Ink.bright : Ink.dim) : root.hot ? Ink.hover-box : Ink.well;
-        border-width: (root.on && !root.off) || root.held ? 0 : 1px;
+        border-width: (root.on && !root.off) || root.held ? 0 : Stroke.line;
         border-color: root.off ? Ink.seam : root.hot ? Ink.edge-hover : Ink.edge;
         if (root.on && !root.off) || root.held: Path {
             width: parent.width;
@@ -722,7 +723,7 @@ export component CheckBox inherits Rectangle {
             commands: "M5.2 9.3 L7.9 11.9 L12.9 6.4";
             fill: transparent;
             stroke: Ink.base;
-            stroke-width: 2px;
+            stroke-width: 2px; // art: the tick's stroke
         }
     }
     words := Text {
@@ -760,7 +761,7 @@ export component StarButton inherits Rectangle {
     border-radius: Radius.control;
     background: root.on-picture ? (ta.has-hover ? Ink.hover-box.with-alpha(0.949) : Ink.well.with-alpha(0.851)) : ta.has-hover ? Ink.shade2 : Ink.shade1;
     Path {
-        y: (parent.height - Part.glyph) / 2 + (ta.pressed ? 1px : 0);
+        y: (parent.height - Part.glyph) / 2 + (ta.pressed ? Part.press : 0);
         width: Part.glyph;
         height: Part.glyph;
         viewbox-width: 16;
@@ -768,7 +769,7 @@ export component StarButton inherits Rectangle {
         commands: Star.path;
         fill: root.on ? Ink.ink : transparent;
         stroke: Ink.ink;
-        stroke-width: 1.3px;
+        stroke-width: 1.3px; // art: the star's stroke
     }
     ta := TouchArea {
         mouse-cursor: pointer;
@@ -780,21 +781,21 @@ export component StarButton inherits Rectangle {
 export component StripIcon inherits Rectangle {
     in property <string> commands;
     callback clicked;
-    width: 20px;
-    height: 20px;
+    width: 20px; // art: the strip's glyph, drawn
+    height: 20px; // art: the strip's glyph, drawn
     border-radius: Radius.small;
     background: ta.pressed ? Ink.pick : ta.has-hover ? Ink.hover-box : transparent;
     Path {
-        x: 4px;
-        y: 4px;
-        width: 12px;
-        height: 12px;
+        x: 4px; // art: the strip's glyph, drawn
+        y: 4px; // art: the strip's glyph, drawn
+        width: 12px; // art: the strip's glyph, drawn
+        height: 12px; // art: the strip's glyph, drawn
         viewbox-width: 24;
         viewbox-height: 24;
         commands: root.commands;
         fill: transparent;
         stroke: ta.has-hover ? Ink.bright : Ink.soft;
-        stroke-width: 1.8px;
+        stroke-width: 1.8px; // art: the strip's glyph, drawn
     }
     ta := TouchArea {
         mouse-cursor: pointer;
@@ -806,15 +807,15 @@ export component StripIcon inherits Rectangle {
 export component PlayButton inherits Rectangle {
     in property <bool> paused;
     callback clicked;
-    width: 28px;
-    height: 28px;
+    width: Size.compact;
+    height: Size.compact;
     border-radius: Radius.control;
     background: ta.pressed ? Ink.pick-hover : ta.has-hover ? Ink.pick : Ink.hover-box;
     Path {
-        x: 8px;
-        y: 8px;
-        width: 12px;
-        height: 12px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: Part.chevron;
+        height: Part.chevron;
         viewbox-width: 24;
         viewbox-height: 24;
         commands: root.paused ? "M8 5.5v13a1 1 0 0 0 1.5.9l10-6.5a1 1 0 0 0 0-1.7l-10-6.6A1 1 0 0 0 8 5.5z"
@@ -861,11 +862,11 @@ export component SegChoice inherits Rectangle {
         if root.swatched: VerticalLayout {
             alignment: center;
             Rectangle {
-                width: 9px;
-                height: 9px;
+                width: 9px; // art: a color's dot
+                height: 9px; // art: a color's dot
                 border-radius: self.width / 2;
                 background: root.swatch;
-                border-width: 1px;
+                border-width: Stroke.line;
                 border-color: Ink.black.with-alpha(0.122);
             }
         }
@@ -882,7 +883,7 @@ export component SegChoice inherits Rectangle {
             commands: root.icon;
             fill: transparent;
             stroke: root.on || ta.has-hover ? Ink.bright : Ink.soft;
-            stroke-width: 1.8px;
+            stroke-width: 1.8px; // art: the glyph's stroke
         }
         Text {
             text: root.text;
@@ -895,14 +896,14 @@ export component SegChoice inherits Rectangle {
         if root.menu: VerticalLayout {
             alignment: center;
             Path {
-                width: 12px;
-                height: 12px;
+                width: Part.chevron;
+                height: Part.chevron;
                 viewbox-width: 12;
                 viewbox-height: 12;
                 commands: "M3 4.5l3 3 3-3";
                 fill: transparent;
                 stroke: root.on || ta.has-hover ? Ink.bright : Ink.quiet;
-                stroke-width: 1.6px;
+                stroke-width: 1.6px; // art: the chevron's stroke
             }
         }
     }
@@ -921,7 +922,7 @@ export component SegSwitch inherits SegGround {
     in property <int> chosen;
     in property <bool> tall;
     callback picked(int, length, length, length);
-    height: root.tall ? 50px : Size.control;
+    height: root.tall ? Size.seg-tall : Size.control;
     for o[i] in root.options: Rectangle {
         x: Part.inset + i * (parent.width - 2 * Part.inset + Part.seg-gap) / root.options.length;
         y: Part.inset;
@@ -930,21 +931,21 @@ export component SegSwitch inherits SegGround {
         border-radius: Radius.small;
         background: root.chosen == i ? (seg-ta.has-hover ? Ink.pick-hover : Ink.pick) : seg-ta.has-hover ? Ink.hover-well : transparent;
         if root.tall && root.icons.length > i: Path {
-            x: (parent.width - 15px) / 2;
-            y: 7px;
-            width: 15px;
-            height: 15px;
+            x: (parent.width - 15px) / 2; // art: the tall switch: its glyph over its words
+            y: 7px; // art: the tall switch: its glyph over its words
+            width: 15px; // art: the tall switch: its glyph over its words
+            height: 15px; // art: the tall switch: its glyph over its words
             viewbox-width: 24;
             viewbox-height: 24;
             commands: root.icons[i];
             fill: transparent;
             stroke: root.chosen == i || seg-ta.has-hover ? Ink.bright : Ink.soft;
-            stroke-width: 1.7px;
+            stroke-width: 1.7px; // art: the glyph's stroke
         }
         Text {
-            y: root.tall ? 25px : 0;
+            y: root.tall ? 25px : 0; // art: the tall switch: its words under its glyph
             width: parent.width;
-            height: root.tall ? 16px : parent.height;
+            height: root.tall ? 16px : parent.height; // art: the tall switch: its words under its glyph
             text: o;
             font-family: Font.ui;
             font-size: root.tall ? Font.small : Font.note;
@@ -981,7 +982,7 @@ export component DropField inherits Rectangle {
     border-radius: Radius.control;
     opacity: root.enabled ? 1 : 0.35;
     background: (ta.has-hover && root.enabled) || root.open ? (root.subtle && !root.on-box ? Ink.hover-well : Ink.hover-box) : root.subtle ? transparent : Ink.well;
-    border-width: root.warn ? 1px : 0;
+    border-width: root.warn ? Stroke.line : 0;
     border-color: Ink.warn.with-alpha(0.502);
     if root.chip-on: Image {
         x: Part.field-pad;
@@ -993,7 +994,7 @@ export component DropField inherits Rectangle {
     }
     Text {
         x: root.chip-on ? Part.field-pad + Part.glyph + Part.glyph-gap : Part.field-pad;
-        width: parent.width - self.x - Part.field-pad - 16px;
+        width: parent.width - self.x - Part.field-pad - Part.chevron - Space.tight;
         height: parent.height;
         text: root.text;
         font-family: Font.ui;
@@ -1005,16 +1006,16 @@ export component DropField inherits Rectangle {
         overflow: elide;
     }
     Path {
-        x: parent.width - Part.field-pad - 12px;
-        y: (parent.height - 12px) / 2;
-        width: 12px;
-        height: 12px;
+        x: parent.width - Part.field-pad - Part.chevron;
+        y: (parent.height - Part.chevron) / 2;
+        width: Part.chevron;
+        height: Part.chevron;
         viewbox-width: 12;
         viewbox-height: 12;
         commands: "M3 4.5l3 3 3-3";
         fill: transparent;
         stroke: Ink.quiet;
-        stroke-width: 1.6px;
+        stroke-width: 1.6px; // art: the chevron's stroke
     }
     ta := TouchArea {
         enabled: root.enabled;
@@ -1037,46 +1038,46 @@ export component Slider inherits Rectangle {
     callback reset();
     height: Size.slider;
     // (the knob's half: the track runs from one knob's center to the other's)
-    property <length> half: 9px;
+    property <length> half: 9px; // art: the slider's knob, half across
     property <float> held: max(0, min(1, (drag.mouse-x - self.half) / (self.width - 2 * self.half)));
     property <float> at: drag.pressed ? (root.style == 4 && abs(self.held - 0.5) <= 0.04 ? 0.5 : self.held) : root.value;
     Rectangle {
-        y: (parent.height - 6px) / 2;
-        height: 6px;
+        y: (parent.height - 6px) / 2; // art: the slider's track
+        height: 6px; // art: the slider's track
         border-radius: self.height / 2;
         background: root.style >= 1 ? Ink.hover-box : Ink.well;
         clip: true;
         Rectangle {
             x: 0;
             width: root.half + root.at * (parent.width - 2 * root.half);
-            border-radius: 3px;
+            border-radius: 3px; // art: the slider's track
             background: root.fill;
         }
     }
     // the notch: a short line across the track at its middle, under the knob
     if root.style == 4: Rectangle {
-        x: root.half + 0.5 * (parent.width - 2 * root.half) - 1px;
-        y: (parent.height - 14px) / 2;
-        width: 2px;
-        height: 14px;
+        x: root.half + 0.5 * (parent.width - 2 * root.half) - 1px; // art: the track's middle mark
+        y: (parent.height - 14px) / 2; // art: the track's middle mark
+        width: 2px; // art: the track's middle mark
+        height: 14px; // art: the track's middle mark
         border-radius: self.width / 2;
         background: Ink.quiet;
     }
     // the knob, ringed in what it sits on
     Rectangle {
-        property <length> d: drag.has-hover || drag.pressed ? 19.5px : 18px;
-        x: root.at * (parent.width - 2 * root.half) + root.half - self.d / 2 - 3px;
-        y: parent.height / 2 - self.d / 2 - 3px;
-        width: self.d + 6px;
-        height: self.d + 6px;
+        property <length> d: drag.has-hover || drag.pressed ? 19.5px : 18px; // art: the knob, larger under the pointer
+        x: root.at * (parent.width - 2 * root.half) + root.half - self.d / 2 - 3px; // art: the knob's ring
+        y: parent.height / 2 - self.d / 2 - 3px; // art: the knob's ring
+        width: self.d + 6px; // art: the knob's ring
+        height: self.d + 6px; // art: the knob's ring
         border-radius: self.width / 2;
         background: root.style == 2 ? Ink.base : root.style == 1 ? Ink.well : Ink.box;
         drop-shadow-blur: Shadow.knob.blur;
         drop-shadow-offset-y: Shadow.knob.y;
         drop-shadow-color: Shadow.knob.color;
         Rectangle {
-            x: 3px;
-            y: 3px;
+            x: 3px; // art: the knob, in its ring
+            y: 3px; // art: the knob, in its ring
             width: parent.d;
             height: parent.d;
             border-radius: self.width / 2;
@@ -1111,13 +1112,13 @@ export component ColorButton inherits Rectangle {
     border-radius: Radius.control;
     background: ta.has-hover || root.open ? Ink.hover-box : transparent;
     Rectangle {
-        x: 4px;
+        x: 4px; // art: its dot, 4 in (Part.swatch-words)
         y: (parent.height - self.height) / 2;
-        width: 20px;
-        height: 20px;
+        width: 20px; // art: its dot (Part.swatch-words)
+        height: 20px; // art: its dot (Part.swatch-words)
         border-radius: self.width / 2;
         background: root.swatch;
-        border-width: 1px;
+        border-width: Stroke.line;
         border-color: Ink.white.with-alpha(0.165);
     }
     code-t := Text {
@@ -1214,27 +1215,27 @@ export component BarButton inherits Rectangle {
     width: ceil(row.preferred-width / 1px) * 1px;
     Rectangle {
         x: 0;
-        y: (parent.height - 30px) / 2;
+        y: (parent.height - Size.button) / 2;
         width: parent.width;
-        height: 30px;
+        height: Size.button;
         border-radius: Radius.control;
         background: ta.has-hover ? Ink.shade2 : Ink.shade1;
         // (with no name, a square round its glyph)
         row := HorizontalLayout {
-            padding-left: root.text == "" ? 8px : Part.button-pad;
-            padding-right: root.text == "" ? 8px : Part.button-pad;
+            padding-left: root.text == "" ? Space.inline : Part.button-pad;
+            padding-right: root.text == "" ? Space.inline : Part.button-pad;
             spacing: Part.glyph-gap;
             alignment: start;
             Path {
                 width: Part.glyph;
                 height: Part.glyph;
-                y: (30px - self.height) / 2;
+                y: (Size.button - self.height) / 2;
                 viewbox-width: 16;
                 viewbox-height: 16;
                 commands: root.commands;
                 fill: transparent;
                 stroke: Ink.ink;
-                stroke-width: 1.14px;
+                stroke-width: 1.14px; // art: the glyph's stroke
                 stroke-line-cap: root.round ? LineCap.round : LineCap.butt;
             }
             if root.text != "": Text {
@@ -1284,14 +1285,14 @@ export component IconButton inherits Rectangle {
     background: root.hot ? root.hover-fill : transparent;
     opacity: root.enabled ? 1 : 0.35;
     Path {
-        width: 14px;
-        height: 14px;
+        width: Part.glyph;
+        height: Part.glyph;
         viewbox-width: root.units;
         viewbox-height: root.units;
         commands: root.icon;
         fill: root.filled ? (root.hot ? Ink.bright : Ink.quiet) : transparent;
         stroke: root.filled ? transparent : root.hot ? Ink.bright : Ink.quiet;
-        stroke-width: 1.8px * 14 / root.units;
+        stroke-width: 1.8px * 14 / root.units; // art: the glyph's stroke, as wide as its size keeps it
         stroke-line-join: round;
     }
     ta := TouchArea {
@@ -1328,7 +1329,7 @@ export component RenameField inherits Rectangle {
     height: Size.control;
     border-radius: Radius.control;
     background: Ink.box;
-    border-width: 1px;
+    border-width: Stroke.line;
     border-color: Ink.edge-hover;
     property <length> tick-w: root.tick ? self.height - 2 * Part.inset : 0;
     // (a press on the field, off its words and the tick, stays in it)

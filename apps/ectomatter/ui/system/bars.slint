@@ -2,7 +2,7 @@
 // bar. Each is drawn here once, from the tokens, so every window and every page
 // opens the same way.
 
-import { Space, Radius, Font, Line, Size, Part, Shadow, Ink } from "tokens.slint";
+import { Space, Radius, Font, Line, Size, Part, Stroke, Shadow, Ink } from "tokens.slint";
 import { WinButton, Tab, LinkButton, PencilButton, MoreButton, RenameField } from "controls.slint";
 import { Typing } from "state.slint";
 
@@ -44,8 +44,8 @@ export component TitleBar inherits Rectangle {
     mark-i := Image {
         x: Space.row;
         y: (root.height - self.height) / 2;
-        width: 16px;
-        height: 16px;
+        width: 16px; // art: the app's mark
+        height: 16px; // art: the app's mark
         source: root.mark;
     }
     wordmark := Text {
@@ -91,7 +91,7 @@ export component TitleBar inherits Rectangle {
             clicked => { root.minimize(); }
         }
         WinButton {
-            size: 12px;
+            size: Part.chevron;
             commands: "M3.5 2.5h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z";
             clicked => { root.maximize(); }
         }
@@ -158,14 +158,14 @@ export component PageBar inherits Rectangle {
             }
             if root.back != "": Path {
                 y: (root.height - self.height) / 2;
-                width: 12px;
-                height: 12px;
+                width: Part.chevron;
+                height: Part.chevron;
                 viewbox-width: 12;
                 viewbox-height: 12;
                 commands: "M4.5 2.5l3.5 3.5-3.5 3.5";
                 fill: transparent;
                 stroke: Ink.quiet;
-                stroke-width: 1.6px;
+                stroke-width: 1.6px; // art: the glyph's stroke
                 stroke-line-cap: round;
             }
             Text {
@@ -190,8 +190,8 @@ export component PageBar inherits Rectangle {
                     clicked => { root.tab-chosen(i); }
                 }
                 if root.tab == i: Rectangle {
-                    y: parent.height - 2px;
-                    height: 2px;
+                    y: parent.height - Stroke.ring;
+                    height: Stroke.ring;
                     background: Ink.bright;
                 }
             }
@@ -223,8 +223,8 @@ export component PageBar inherits Rectangle {
         }
     }
     Rectangle {
-        y: parent.height - 1px;
-        height: 1px;
+        y: parent.height - Stroke.line;
+        height: Stroke.line;
         background: Ink.line;
     }
 }

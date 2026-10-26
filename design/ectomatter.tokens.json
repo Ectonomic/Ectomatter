@@ -6,6 +6,7 @@
     "$extensions": { "com.ectonomic.ectomatter": { "global": "Space" } },
     "margin": { "$value": { "value": 24, "unit": "px" }, "$description": "A page's margin, round what it holds, its bar's too; also the gap between cards in a grid (the Library's covers)." },
     "gap": { "$value": { "value": 12, "unit": "px" }, "$description": "Between boxes, side by side or one above another, and between a stage and the boxes under it." },
+    "stage": { "$value": { "value": 48, "unit": "px" }, "$description": "The gutter round a device on its stage, across (Space.margin above and below it): the keyboard's, from its approved page." },
     "section": { "$value": { "value": 32, "unit": "px" }, "$description": "Between a section's box and the next section's heading; in a box, from one group's last setting to the next group's heading (a rule Space.pad under the setting)." },
     "label": { "$value": { "value": 8, "unit": "px" }, "$description": "From a section's heading down to its box; from a setting's name down to its control." },
     "pad": { "$value": { "value": 16, "unit": "px" }, "$description": "A box's padding: from its edges to its title and what it holds, and under the last of it; between a form's label column and its controls; between two settings stacked in a box, or a stacked form's fields; between a box's two columns." },
@@ -73,6 +74,14 @@
     "places": { "$value": { "value": 320, "unit": "px" }, "$description": "The box of where and when an effect plays, at its least." },
     "sidebar": { "$value": { "value": 290, "unit": "px" }, "$description": "An editor window's list down its left side." },
     "form": { "$value": { "value": 860, "unit": "px" }, "$description": "The widest a form's column grows (Settings, a device's Settings, a game's page)." },
+    "edit-screen": { "$value": { "value": 780, "unit": "px" }, "$description": "A device's screen in the Screen Editor, across: the Z10's 20 by 4 cells, 39 square." },
+    "win-button": { "$value": { "value": 40, "unit": "px" }, "$description": "A window button in the title bar (minimize, maximize, close), across." },
+    "seg-tall": { "$value": { "value": 50, "unit": "px" }, "$description": "A tall switch, a glyph over each choice's words (a key's kinds of job)." },
+    "rail-open": { "$value": { "value": 232, "unit": "px" }, "$description": "The rail down the window's left, opened into its blade with each place's name, across." },
+    "rail-shut": { "$value": { "value": 60, "unit": "px" }, "$description": "The rail shut: a column of its glyphs, across." },
+    "layout-card": { "$value": { "value": 454, "unit": "px" }, "$description": "A screen layout's card in Layouts at its least, across: two to a row while each has this." },
+    "layout-card-h": { "$value": { "value": 96, "unit": "px" }, "$description": "A screen layout's card in Layouts, tall: its screen's picture and its words beside it." },
+    "chooser": { "$value": { "value": 200, "unit": "px" }, "$description": "A chooser of a few short choices (a script's time limit), across; a chooser named for its choice is as wide as its words, up to this." },
     "dialog": { "$value": { "value": 600, "unit": "px" }, "$description": "A form's dialog across: the scene form, adding a game or an app." },
     "ask": { "$value": { "value": 440, "unit": "px" }, "$description": "A dialog that asks one thing (whether to go ahead, or a name for something), across." },
     "label": { "$value": { "value": 200, "unit": "px" }, "$description": "A form's label column." },
@@ -114,6 +123,7 @@
     "strip": { "$value": { "value": 10, "unit": "px" }, "$description": "A run of colors' height, as an effect blends them." },
     "hint": { "$value": { "value": 36, "unit": "px" }, "$description": "The hint line under a page's bar, and the controls on it (the screen's default backlight), each at its middle." },
     "dot": { "$value": { "value": 7, "unit": "px" }, "$description": "A status dot (a device's connection, a setting's state)." },
+    "spinner": { "$value": { "value": 16, "unit": "px" }, "$description": "A spinner, while something is read or loads, across." },
     "check": { "$value": { "value": 18, "unit": "px" }, "$description": "A checkbox." }
   },
   "part": {
@@ -140,6 +150,12 @@
     "chain-in": { "$value": { "value": 18, "unit": "px" }, "$description": "A macro's chain, in from its canvas's edges (macros.rs lays the chain's steps from it)." },
     "menu-pad": { "$value": { "value": 6, "unit": "px" }, "$description": "A menu's rows, its search box and its Back, in from its edges and apart." },
     "menu-in": { "$value": { "value": 10, "unit": "px" }, "$description": "A menu row's words, in from the row's ends." },
+    "ring-out": { "$value": { "value": 3, "unit": "px" }, "$description": "A ring round what's dropped onto (a screen layout carried over the screen), this far out from its edge." },
+    "press": { "$value": { "value": 1, "unit": "px" }, "$description": "How far a pressed control's words and glyph sink, so the press is felt." },
+    "chevron": { "$value": { "value": 12, "unit": "px" }, "$description": "A chevron, and the small glyphs a control carries: a drop-down's, a fold's, a strip's, a play button's." },
+    "primary": { "$value": { "value": 2, "unit": "px" }, "$description": "How much taller and wider a primary button stands than its neighbors, so it leads its row." },
+    "tab-in": { "$value": { "value": 14, "unit": "px" }, "$description": "A device bar's tab: its words in from its ends (a folder tab's are Part.tab-pad)." },
+    "drag": { "$value": { "value": 4, "unit": "px" }, "$description": "How far a press moves before it carries what it pressed (a card, a turn, a block, a step), rather than selecting it: Windows' drag threshold." },
     "menu-aside": { "$type": "number", "$value": 0.55, "$description": "What a menu's row says on its right (a playlist's profiles, a count), at most this share of the menu's width, so it never crowds out the row's own name." },
     "menu-number": { "$value": { "value": 64, "unit": "px" }, "$description": "A number typed on a menu's row (a pad's width, a turn's time), across: room for four digits." },
     "fold-in": { "$value": { "value": 18, "unit": "px" }, "$description": "What a fold opens, set in under its words: the fold's chevron and the gaps round it." },
@@ -147,6 +163,14 @@
     "tile-pic": { "$value": { "value": 40, "unit": "px" }, "$description": "An effect tile's picture's height (Rust draws the picture at the tile's width less its insets)." },
     "span-gap": { "$value": { "value": 3, "unit": "px" }, "$description": "Between the devices' parts of a scene's preview, each device's name under its part." },
     "swatch-words": { "$value": { "value": 32, "unit": "px" }, "$description": "From a color's button's left edge to its code: its dot, 20 across and 4 in, and the gap after it." }
+  },
+  "stroke": {
+    "$type": "dimension",
+    "$description": "How thick a line is, by what it draws (Fluent 2's and Primer's border widths, 1 and 2, with the half step the app's chosen edges have).",
+    "$extensions": { "com.ectonomic.ectomatter": { "global": "Stroke" } },
+    "line": { "$value": { "value": 1, "unit": "px" }, "$description": "A line: an edge, a rule, a box's border, a grid's line." },
+    "chosen": { "$value": { "value": 1.5, "unit": "px" }, "$description": "The edge of what's chosen on a picture: a device on Home, a key, a block's cells on their way in." },
+    "ring": { "$value": { "value": 2, "unit": "px" }, "$description": "A ring round what's carried, dropped onto or selected to change, and the playhead." }
   },
   "shadow": {
     "$type": "shadow",

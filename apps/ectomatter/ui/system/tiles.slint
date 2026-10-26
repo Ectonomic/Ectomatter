@@ -1,6 +1,6 @@
 // Tiles in a grid: an effect to choose, wherever effects are chosen.
 
-import { Space, Radius, Font, Line, Size, Part, Shadow, Ink } from "tokens.slint";
+import { Space, Radius, Font, Line, Size, Part, Stroke, Shadow, Ink } from "tokens.slint";
 
 // An effect as a tile, the same wherever one is chosen (the Lighting tab, the
 // mouse's, the scene form, the Screen Editor): a well with the effect's small
@@ -60,8 +60,8 @@ export component EffectTile inherits Rectangle {
         }
     }
     Text {
-        y: 53px;
-        height: 15px;
+        y: Part.tile-inset + Part.tile-pic + Part.glyph-gap;
+        height: Line.small;
         width: parent.width;
         text: root.name;
         font-family: Font.ui;
