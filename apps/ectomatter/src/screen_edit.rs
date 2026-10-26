@@ -5,7 +5,7 @@
 //! layout_page.rs.
 
 use ectomatter_sensors::list::{Catalog, Part, What};
-use crate::lcd_page::{DateFormat, Kind, Page, Piece, Readings, Source, COLS, ROWS};
+use crate::lcd_page::{DateFormat, Kind, Page, Piece, Readings, Size, Source};
 use crate::lighting::{cell, id, kind, style, text_cell, Ctl};
 use crate::tokens::{font, line, size, space};
 use crate::Cell;
@@ -218,7 +218,7 @@ fn looks(p: &Piece, r: &Readings) -> String {
         return crate::lcd_page::says(p, r).map_or("Unavailable".into(), |s| s.trim().to_string());
     }
     let page = Page { pieces: vec![Piece { row: 0, col: 0, gap: 0, height: 1, ..p.clone() }], ..Page::stats() };
-    let row = crate::lcd_page::render(&page, r).remove(0);
+    let row = crate::lcd_page::render(&page, r).into_iter().next().unwrap_or_default();
     if row.ends_with(" unavailable") || row.is_empty() { "Unavailable".into() } else { row.trim().to_string() }
 }
 
@@ -530,8 +530,8 @@ pub fn shows_of(p: &Piece) -> Option<Shows> {
     }
 }
 
-/// Use a control of the box on the page.
-pub fn act(page: &mut Page, ed: &mut Editor, c: Ctl, index: usize, words: Option<&str>) {
+/// Use a control of the box on the page, on a screen of `size`.
+pub fn act(page: &mut Page, ed: &mut Editor, c: Ctl, index: usize, words: Option<&str>, (cols, rows): Size) {
     let Some(i) = ed.chosen.filter(|i| *i < page.pieces.len()) else { return };
     if c == Ctl::ScrRemove {
         page.pieces.remove(i);
@@ -542,9 +542,9 @@ pub fn act(page: &mut Page, ed: &mut Editor, c: Ctl, index: usize, words: Option
     match c {
         Ctl::ScrText => match (&mut p.kind, words) {
             // (Bounce's word, as wide as the screen)
-            (Kind::Effect { word, .. }, Some(t)) => *word = t.chars().take(COLS as usize).collect(),
+            (Kind::Effect { word, .. }, Some(t)) => *word = t.chars().take(cols).collect(),
             // (a whole screen's worth, since words that don't fit can scroll)
-            (_, Some(t)) => p.kind = Kind::Text(t.chars().take((COLS * ROWS) as usize).collect()),
+            (_, Some(t)) => p.kind = Kind::Text(t.chars().take(cols * rows).collect()),
             _ => {}
         },
         Ctl::ScrFit => p.scroll = index == 1,
@@ -602,32 +602,40 @@ pub fn set_shows(page: &mut Page, ed: &Editor, s: Shows) {
 
 /// Whether piece `q` takes a cell of `row`.
 fn covers(q: &Piece, row: u8) -> bool {
-    q.row <= row && row < q.row + q.height.max(1)
+    q.row <= row && (row as usize) < q.row as usize + q.height.max(1) as usize
 }
 
-/// A piece moved on the screen to start at a cell: into the free cells there in every
-/// row it takes (see [fit]), as wide as it was or as they let it be; where it doesn't
+/// The screen's size in cells, as the editor counts them, its columns and rows (a block's
+/// place is kept in a byte, as [crate::lcd_page::size_of] bounds a screen).
+fn cells_of((cols, rows): Size) -> (u8, u8) {
+    (cols.min(u8::MAX as usize) as u8, rows.min(u8::MAX as usize) as u8)
+}
+
+/// A piece moved on the screen (of `size`) to start at a cell: into the free cells there in
+/// every row it takes (see [fit]), as wide as it was or as they let it be; where it doesn't
 /// fit, it stays. `least` is the fewest cells it shows its whole self in (see
-/// [crate::lcd_page::least]).
-pub fn move_to(page: &mut Page, i: usize, row: i32, col: i32, least: u8) {
-    let Some(p) = page.pieces.get(i) else { return };
-    let h = p.height.clamp(1, ROWS);
-    let (row, col) = (row.clamp(0, (ROWS - h) as i32) as u8, col.clamp(0, COLS as i32 - 1) as u8);
-    if let Some((row, col, width)) = fit(page, row, col, p.width, h, least.min(p.width), Some(i)) {
+/// [crate::lcd_page::least]). A block of a layout made for a larger screen, moved, comes
+/// onto this one.
+pub fn move_to(page: &mut Page, i: usize, row: i32, col: i32, least: u8, size: Size) {
+    let (cols, rows) = cells_of(size);
+    let Some(p) = page.pieces.get(i).filter(|_| cols > 0 && rows > 0) else { return };
+    let h = p.height.clamp(1, rows);
+    let (row, col) = (row.clamp(0, (rows - h) as i32) as u8, col.clamp(0, cols as i32 - 1) as u8);
+    if let Some((row, col, width)) = fit(page, row, col, p.width, h, least.min(p.width), Some(i), size) {
         let p = &mut page.pieces[i];
-        (p.row, p.col, p.width) = (row, col, width);
+        (p.row, p.col, p.width, p.height) = (row, col, width, h);
     }
 }
 
 /// A piece's corner moved: `width` cells wide and `height` rows tall from its first cell,
 /// as far as the free cells to its right and below it let it (see [room]), and no
 /// narrower than `least` gives for that height (see [crate::lcd_page::least_at]).
-pub fn size_to(page: &mut Page, i: usize, width: i32, height: i32, least: impl Fn(u8) -> u8) {
-    let ends = room(page, i, &least);
+pub fn size_to(page: &mut Page, i: usize, width: i32, height: i32, least: impl Fn(u8) -> u8, size: Size) {
+    let ends = room(page, i, &least, size);
     let Some(p) = page.pieces.get(i) else { return };
     let tallest = ends.iter().take_while(|e| e.is_some()).count().max(1);
     let h = height.clamp(1, tallest as i32) as usize;
-    let Some(end) = ends[h - 1] else { return };
+    let Some(end) = ends.get(h - 1).copied().flatten() else { return };
     let most = end as i32 - p.col as i32;
     let w = width.clamp((floor(p, h as u8, &least) as i32).min(most), most);
     let p = &mut page.pieces[i];
@@ -642,19 +650,22 @@ pub fn floor(p: &Piece, height: u8, least: impl Fn(u8) -> u8) -> u8 {
     if height == 1 || height == p.height { l.min(p.width.max(1)) } else { l }
 }
 
-/// How far piece `i`'s corner can reach: for each height from one row to four, the column
-/// after the last free cell to its right in every row that height takes; None from the
-/// first height that can't be had (the screen's foot, or a block below it leaving fewer
-/// cells than the piece can be at that height, `least`).
-pub fn room(page: &Page, i: usize, least: impl Fn(u8) -> u8) -> [Option<u8>; ROWS as usize] {
-    let mut ends = [None; ROWS as usize];
-    let Some(p) = page.pieces.get(i) else { return ends };
-    let mut end = COLS;
-    for h in 1..=ROWS - p.row {
+/// How far piece `i`'s corner can reach on a screen of `size`: for each height from one row
+/// to as many as the screen has, the column after the last free cell to its right in every
+/// row that height takes; None from the first height that can't be had (the screen's foot,
+/// or a block below it leaving fewer cells than the piece can be at that height, `least`).
+/// A block starting past the screen's edge or its foot (a layout made for a larger screen)
+/// can't be had at any height there.
+pub fn room(page: &Page, i: usize, least: impl Fn(u8) -> u8, size: Size) -> Vec<Option<u8>> {
+    let (cols, rows) = cells_of(size);
+    let mut ends = vec![None; rows as usize];
+    let Some(p) = page.pieces.get(i).filter(|p| p.row < rows && p.col < cols) else { return ends };
+    let mut end = cols;
+    for h in 1..=rows - p.row {
         // the free cells from its first column on, in the row this height adds
-        let Some((_, hi)) = run_at(page, p.row + h - 1, p.col, Some(i)) else { break };
+        let Some((_, hi)) = run_at(page, p.row + h - 1, p.col, Some(i), size) else { break };
         end = end.min(hi);
-        if end < p.col + floor(p, h, &least).min(COLS - p.col) {
+        if end < p.col + floor(p, h, &least).min(cols - p.col) {
             break;
         }
         ends[h as usize - 1] = Some(end);
@@ -668,17 +679,18 @@ pub const NEW_LEAST: u8 = 3;
 
 /// A new block: `what` 0 Text, 1 Data, 2 Bar, 3 Effect, at `at` (its row, first column,
 /// width and height, from [fit] or [effect_spot]), or else in the first free cells it fits
-/// (see [first_room]; an effect, the whole screen or what other effects leave of it);
-/// chosen. `first` is a reading this computer has, which a new Data block shows. Whether
-/// there was room for it.
-pub fn add(page: &mut Page, ed: &mut Editor, what: usize, first: Source, r: &Readings, at: Option<(u8, u8, u8, u8)>) -> bool {
-    let (kind, width, right) = new_block(what, first);
+/// on a screen of `size` (see [first_room]; an effect, the whole screen or what other effects
+/// leave of it); chosen. `first` is a reading this computer has, which a new Data block
+/// shows. Whether there was room for it.
+#[allow(clippy::too_many_arguments)]
+pub fn add(page: &mut Page, ed: &mut Editor, what: usize, first: Source, r: &Readings, at: Option<(u8, u8, u8, u8)>, size: Size) -> bool {
+    let (kind, width, right) = new_block(what, first, size);
     let mut p = Piece { kind, row: 0, col: 0, width, right, center: false, gap: 1, height: 1, scroll: true, date_format: Default::default() };
     let at = if what == 3 {
-        at.or_else(|| effect_spot(page, None))
+        at.or_else(|| effect_spot(page, None, size))
     } else {
         let least = crate::lcd_page::least(&p, r).max(NEW_LEAST).min(width);
-        at.or_else(|| first_room(page, width, least).map(|(row, col, w)| (row, col, w, 1)))
+        at.or_else(|| first_room(page, width, least, size).map(|(row, col, w)| (row, col, w, 1)))
     };
     let Some((row, col, width, height)) = at else { return false };
     (p.row, p.col, p.width, p.height) = (row, col, width, height);
@@ -687,71 +699,83 @@ pub fn add(page: &mut Page, ed: &mut Editor, what: usize, first: Source, r: &Rea
     true
 }
 
-/// A new block of a kind, as it starts: its kind, width, and whether set against its right
-/// edge. An effect starts as Rain, across the screen.
-pub fn new_block(what: usize, first: Source) -> (Kind, u8, bool) {
+/// A new block of a kind, as it starts on a screen of `size`: its kind, width, and whether
+/// set against its right edge. An effect starts as Rain, across the screen.
+pub fn new_block(what: usize, first: Source, size: Size) -> (Kind, u8, bool) {
     match what {
         0 => (Kind::Text("TEXT".into()), 4, false),
         1 => (Kind::Data(first, first.starts_in_fahrenheit()), 7, true),
         2 => (Kind::Bar(if first.barred() { first } else { Source::CpuLoad }), 10, false),
-        _ => (Kind::Effect { fx: crate::lcd_page::Fx::Rain, speed: SPEED, word: "EVGA".into() }, COLS, false),
+        _ => (Kind::Effect { fx: crate::lcd_page::Fx::Rain, speed: SPEED, word: "EVGA".into() }, cells_of(size).0, false),
     }
 }
 
-/// Where a new effect goes, put at cell (`row`, `col`), or added with no cell (None): the
-/// whole screen while no other effect is on it; else the cells round that one (or the first
-/// free) that no effect takes, as wide as their run in its row and as many rows as that run
-/// stays free, as its row, first column, width and height. None on another effect, or when
-/// effects fill the screen.
-pub fn effect_spot(page: &Page, at: Option<(u8, u8)>) -> Option<(u8, u8, u8, u8)> {
+/// Where a new effect goes on a screen of `size`, put at cell (`row`, `col`), or added with no
+/// cell (None): the whole screen while no other effect is on it; else the cells round that one
+/// (or the first free) that no effect takes, as wide as their run in its row and as many rows
+/// as that run stays free, as its row, first column, width and height. None on another
+/// effect, when effects fill the screen, or with no screen.
+pub fn effect_spot(page: &Page, at: Option<(u8, u8)>, size: Size) -> Option<(u8, u8, u8, u8)> {
+    let (cols, rows) = cells_of(size);
+    if cols == 0 || rows == 0 {
+        return None;
+    }
     let effects: Vec<&Piece> = page.pieces.iter().filter(|p| behind(p)).collect();
     if effects.is_empty() {
-        return Some((0, 0, COLS, ROWS));
+        return Some((0, 0, cols, rows));
     }
-    let free = |row: u8, col: u8| !effects.iter().any(|q| covers(q, row) && col >= q.col && col < q.col + q.width);
+    let free = |row: u8, col: u8| !effects.iter().any(|q| covers(q, row) && col >= q.col && (col as usize) < q.col as usize + q.width as usize);
     let (row, col) = match at {
-        Some(rc) => Some(rc).filter(|&(r, c)| free(r, c))?,
-        None => (0..ROWS).flat_map(|r| (0..COLS).map(move |c| (r, c))).find(|&(r, c)| free(r, c))?,
+        Some(rc) => Some(rc).filter(|&(r, c)| r < rows && c < cols && free(r, c))?,
+        None => (0..rows).flat_map(|r| (0..cols).map(move |c| (r, c))).find(|&(r, c)| free(r, c))?,
     };
     let lo = (0..=col).rev().take_while(|&c| free(row, c)).last()?;
-    let hi = (col..COLS).take_while(|&c| free(row, c)).last()? + 1;
+    let hi = (col..cols).take_while(|&c| free(row, c)).last()? + 1;
     let whole = |r: u8| (lo..hi).all(|c| free(r, c));
     let top = (0..=row).rev().take_while(|&r| whole(r)).last()?;
-    let bottom = (row..ROWS).take_while(|&r| whole(r)).last()?;
+    let bottom = (row..rows).take_while(|&r| whole(r)).last()?;
     Some((top, lo, hi - lo, bottom - top + 1))
 }
 
-/// The free cells round cell `col` of `row`, which no block but `skip` (one being moved)
-/// takes: the first column and the column after the last. None where a block takes the cell.
-/// Effects lie behind the other blocks: for an effect (`skip` one) only effects take cells,
-/// and for any other block only the other blocks do.
-pub fn run_at(page: &Page, row: u8, col: u8, skip: Option<usize>) -> Option<(u8, u8)> {
+/// The free cells round cell `col` of `row`, on a screen of `size`, which no block but `skip`
+/// (one being moved) takes: the first column and the column after the last, the screen's edge
+/// at most. None where a block takes the cell. Effects lie behind the other blocks: for an
+/// effect (`skip` one) only effects take cells, and for any other block only the other
+/// blocks do.
+pub fn run_at(page: &Page, row: u8, col: u8, skip: Option<usize>, size: Size) -> Option<(u8, u8)> {
+    let cols = cells_of(size).0;
     let layer = skip.and_then(|i| page.pieces.get(i)).is_some_and(behind);
+    let end = |p: &Piece| p.col as usize + p.width as usize;
     let others = page.pieces.iter().enumerate().filter(|(k, p)| Some(*k) != skip && behind(p) == layer && covers(p, row));
-    if others.clone().any(|(_, p)| col >= p.col && col < p.col + p.width) {
+    if others.clone().any(|(_, p)| col >= p.col && (col as usize) < end(p)) {
         return None;
     }
-    let lo = others.clone().filter(|(_, p)| p.col + p.width <= col).map(|(_, p)| p.col + p.width).max().unwrap_or(0);
-    let hi = others.filter(|(_, p)| p.col > col).map(|(_, p)| p.col).min().unwrap_or(COLS);
+    let lo = others.clone().filter(|(_, p)| end(p) <= col as usize).map(|(_, p)| end(p) as u8).max().unwrap_or(0);
+    let hi = others.filter(|(_, p)| p.col > col).map(|(_, p)| p.col).min().unwrap_or(cols).min(cols);
     Some((lo, hi))
 }
 
 /// Where a block `width` cells wide and `height` rows tall, that shows its whole self in
-/// `least`, lands when it is put at cell (`row`, `col`): in the cells free round that cell
-/// in every row it takes, starting at that cell or as near it as they let it fit, and no
-/// wider than they are, as its row, first column and width. None over another block, past
-/// the screen's foot, or where the free cells are fewer than `least`: blocks never cover
-/// each other.
-pub fn fit(page: &Page, row: u8, col: u8, width: u8, height: u8, least: u8, skip: Option<usize>) -> Option<(u8, u8, u8)> {
-    let (mut lo, mut hi) = (0, COLS);
-    for r in row..row + height.max(1) {
-        if r >= ROWS {
+/// `least`, lands when it is put at cell (`row`, `col`) of a screen of `size`: in the cells
+/// free round that cell in every row it takes, starting at that cell or as near it as they let
+/// it fit, and no wider than they are, as its row, first column and width. None over another
+/// block, past the screen's foot or its edge, or where the free cells are fewer than `least`:
+/// blocks never cover each other.
+#[allow(clippy::too_many_arguments)]
+pub fn fit(page: &Page, row: u8, col: u8, width: u8, height: u8, least: u8, skip: Option<usize>, size: Size) -> Option<(u8, u8, u8)> {
+    let (cols, rows) = cells_of(size);
+    if col >= cols {
+        return None;
+    }
+    let (mut lo, mut hi) = (0, cols);
+    for r in row as usize..row as usize + height.max(1) as usize {
+        if r >= rows as usize {
             return None;
         }
-        let (a, b) = run_at(page, r, col, skip)?;
+        let (a, b) = run_at(page, r as u8, col, skip, size)?;
         (lo, hi) = (lo.max(a), hi.min(b));
     }
-    let room = hi - lo;
+    let room = hi.saturating_sub(lo);
     let least = least.max(1);
     if room < least {
         return None;
@@ -760,16 +784,17 @@ pub fn fit(page: &Page, row: u8, col: u8, width: u8, height: u8, least: u8, skip
     Some((row, col.min(hi - width).max(lo), width))
 }
 
-/// The first free cells a new block fits in, row by row: a run as wide as `width`, or
-/// else the first with at least `least` cells, the block narrowed to it. None when no
-/// run has room.
-pub fn first_room(page: &Page, width: u8, least: u8) -> Option<(u8, u8, u8)> {
-    let runs: Vec<(u8, u8, u8)> = (0..ROWS)
+/// The first free cells a new block fits in on a screen of `size`, row by row: a run as wide
+/// as `width`, or else the first with at least `least` cells, the block narrowed to it. None
+/// when no run has room.
+pub fn first_room(page: &Page, width: u8, least: u8, size: Size) -> Option<(u8, u8, u8)> {
+    let (cols, rows) = cells_of(size);
+    let runs: Vec<(u8, u8, u8)> = (0..rows)
         .flat_map(|row| {
             let mut runs = Vec::new();
             let mut col = 0;
-            while col < COLS {
-                match run_at(page, row, col, None) {
+            while col < cols {
+                match run_at(page, row, col, None, size) {
                     Some((lo, hi)) => {
                         runs.push((row, lo, hi));
                         col = hi;
@@ -784,14 +809,69 @@ pub fn first_room(page: &Page, width: u8, least: u8) -> Option<(u8, u8, u8)> {
     fits(width).or_else(|| fits(least.max(1)))
 }
 
-/// Whether any row has `cells` free cells in a run, room for another block.
-pub fn has_room(page: &Page, cells: u8) -> bool {
-    first_room(page, cells, cells).is_some()
+/// Whether any row of a screen of `size` has `cells` free cells in a run, room for another block.
+pub fn has_room(page: &Page, cells: u8, size: Size) -> bool {
+    first_room(page, cells, cells, size).is_some()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The Z10's screen.
+    const Z10: Size = (20, 4);
+
+    /// The editor's grid is the screen's, whatever its size: a new block lands within it, a
+    /// block's corner reaches its edge and its foot, no further, and a layout made for a larger
+    /// screen keeps its blocks past the edge, which can be moved onto it.
+    #[test]
+    fn the_editor_s_grid_is_the_screen_s_whatever_its_size() {
+        let r = Readings { cpu_temp: Some(45.0), ..Default::default() };
+        let mut ed = Editor { page: 0, chosen: None, grid: true };
+        let small = (16, 2);
+        // two rows of sixteen: a new effect takes the whole screen, a block lands on it
+        let mut p = Page::blank();
+        assert!(add(&mut p, &mut ed, 3, Source::CpuTemp, &r, None, small));
+        assert_eq!((p.pieces[0].row, p.pieces[0].col, p.pieces[0].width, p.pieces[0].height), (0, 0, 16, 2));
+        assert!(add(&mut p, &mut ed, 1, Source::CpuTemp, &r, None, small));
+        assert_eq!((p.pieces[1].row, p.pieces[1].col, p.pieces[1].width), (0, 0, 7));
+        assert_eq!(fit(&p, 1, 14, 7, 1, 3, None, small), Some((1, 9, 7)), "as near the edge as it fits");
+        assert_eq!(fit(&p, 1, 0, 4, 2, 3, None, small), None, "past the foot of two rows");
+        assert_eq!(fit(&p, 0, 16, 4, 1, 3, None, small), None, "past the edge");
+        assert_eq!(room(&p, 1, |_| 3, small), [Some(16), Some(16)]);
+        assert_eq!(room(&p, 0, |_| 1, small), [Some(16), Some(16)], "the effect, to the screen's corner");
+        size_to(&mut p, 1, 40, 9, |_| 3, small);
+        assert_eq!((p.pieces[1].width, p.pieces[1].height), (16, 2));
+        // forty by four: twice the cells to a row
+        let mut wide = Page::blank();
+        assert!(add(&mut wide, &mut ed, 3, Source::CpuTemp, &r, None, (40, 4)));
+        assert_eq!((wide.pieces[0].width, wide.pieces[0].height), (40, 4));
+        assert_eq!(first_room(&wide, 30, 3, (40, 4)), Some((0, 0, 30)));
+        assert_eq!(fit(&wide, 3, 39, 7, 1, 3, None, (40, 4)), Some((3, 33, 7)));
+        assert!(has_room(&Page::stats(), 3, (40, 4)), "Stats leaves twenty columns free on forty");
+        // the Stats layout, made for the Z10, on two rows of sixteen: CPU's clock (13 to 19)
+        // reaches only the screen's edge; the rows below the foot can't be had at any height
+        let stats = Page::stats();
+        assert_eq!(room(&stats, 3, |_| 3, small), [Some(16), None]);
+        assert_eq!(room(&stats, 9, |_| 3, small), [None, None], "RAM's reading, on the third row");
+        assert!(!has_room(&stats, 3, small));
+        // a block past the foot and the edge, moved, comes onto the screen, as tall as it can be there
+        let mut past = Page { pieces: vec![Piece { kind: Kind::Text("FAR".into()), row: 3, col: 18, width: 6, right: false, center: false, gap: 1, height: 3, scroll: true, date_format: Default::default() }], ..Page::blank() };
+        assert_eq!(room(&past, 0, |_| 1, small), [None, None]);
+        size_to(&mut past, 0, 2, 1, |_| 1, small);
+        assert_eq!((past.pieces[0].width, past.pieces[0].height), (6, 3), "not sized where it can't be had");
+        move_to(&mut past, 0, 3, 18, 1, small);
+        assert_eq!((past.pieces[0].row, past.pieces[0].col, past.pieces[0].width, past.pieces[0].height), (0, 10, 6, 2));
+        // and no screen at all: nothing goes on it, nothing moves, nothing panics
+        let none = (0, 0);
+        let mut q = Page::stats();
+        assert!(!add(&mut q, &mut ed, 0, Source::CpuTemp, &r, None, none) && !add(&mut q, &mut ed, 3, Source::CpuTemp, &r, None, none));
+        assert!(room(&q, 1, |_| 3, none).is_empty() && !has_room(&q, 1, none));
+        assert_eq!((fit(&q, 0, 0, 4, 1, 1, None, none), effect_spot(&q, None, none), first_room(&q, 4, 1, none)), (None, None, None));
+        move_to(&mut q, 1, 0, 0, 3, none);
+        size_to(&mut q, 1, 9, 9, |_| 3, none);
+        assert_eq!(q, Page::stats());
+    }
 
     /// The Shows menu has a Game group, after the keyboard's readings and before the
     /// weather: the game's name, the session, the time played, when last played, what's
@@ -839,32 +919,32 @@ mod tests {
         let mut p = Page::stats();
         let mut ed = Editor { page: 0, chosen: None, grid: true };
         // Stats has no three free cells in a row: no block fits
-        assert!(!add(&mut p, &mut ed, 0, Source::CpuTemp, &r, None));
+        assert!(!add(&mut p, &mut ed, 0, Source::CpuTemp, &r, None, Z10));
         assert_eq!((p.pieces.len(), ed.chosen), (12, None));
-        assert!(!has_room(&p, 3) && has_room(&p, 1));
+        assert!(!has_room(&p, 3, Z10) && has_room(&p, 1, Z10));
         let mut empty = Page { pieces: Vec::new(), ..Page::stats() };
-        assert!(add(&mut empty, &mut ed, 1, Source::GpuTemp, &r, None));
+        assert!(add(&mut empty, &mut ed, 1, Source::GpuTemp, &r, None, Z10));
         assert_eq!((empty.pieces[0].row, empty.pieces[0].col, empty.pieces[0].width), (0, 0, 7));
-        assert!(add(&mut empty, &mut ed, 0, Source::GpuTemp, &r, None));
+        assert!(add(&mut empty, &mut ed, 0, Source::GpuTemp, &r, None, Z10));
         assert_eq!((empty.pieces[1].row, empty.pieces[1].col), (0, 7));
         // put at a cell: from that cell, or as near it as the free cells let it fit
-        assert_eq!(fit(&empty, 2, 15, 10, 1, 3, None), Some((2, 10, 10)));
-        assert_eq!(fit(&empty, 0, 12, 7, 1, 3, None), Some((0, 12, 7)));
+        assert_eq!(fit(&empty, 2, 15, 10, 1, 3, None, Z10), Some((2, 10, 10)));
+        assert_eq!(fit(&empty, 0, 12, 7, 1, 3, None, Z10), Some((0, 12, 7)));
         // narrowed to the free cells, but never past what it shows; over a block, nowhere
-        assert_eq!(fit(&empty, 0, 11, 10, 1, 3, None), Some((0, 11, 9)));
-        assert_eq!(fit(&Page::stats(), 0, 3, 7, 1, 3, None), None, "one free cell between CPU and its temperature");
-        assert_eq!(fit(&empty, 0, 2, 7, 1, 3, None), None);
+        assert_eq!(fit(&empty, 0, 11, 10, 1, 3, None, Z10), Some((0, 11, 9)));
+        assert_eq!(fit(&Page::stats(), 0, 3, 7, 1, 3, None, Z10), None, "one free cell between CPU and its temperature");
+        assert_eq!(fit(&empty, 0, 2, 7, 1, 3, None, Z10), None);
         // a block two rows tall needs the cells free in both: the Data block on row 0 is in the way
-        assert_eq!(fit(&empty, 0, 12, 7, 2, 3, None), Some((0, 12, 7)));
-        assert_eq!(fit(&empty, 0, 3, 4, 2, 3, None), None);
-        assert_eq!(fit(&empty, 3, 0, 4, 2, 3, None), None, "past the screen's foot");
+        assert_eq!(fit(&empty, 0, 12, 7, 2, 3, None, Z10), Some((0, 12, 7)));
+        assert_eq!(fit(&empty, 0, 3, 4, 2, 3, None, Z10), None);
+        assert_eq!(fit(&empty, 3, 0, 4, 2, 3, None, Z10), None, "past the screen's foot");
         // the first room a block can have: a run as wide as it, or else narrowed to one
         let mut row = Page { pieces: Vec::new(), ..Page::stats() };
         for r in 0..4 {
             row.pieces.push(Piece { kind: Kind::Text("X".into()), row: r, col: 0, width: 16, right: false, center: false, gap: 1, height: 1, scroll: true, date_format: Default::default() });
         }
-        assert_eq!(first_room(&row, 7, 3), Some((0, 16, 4)));
-        assert_eq!(first_room(&row, 7, 5), None);
+        assert_eq!(first_room(&row, 7, 3, Z10), Some((0, 16, 4)));
+        assert_eq!(first_room(&row, 7, 5, Z10), None);
     }
 
     #[test]
@@ -873,20 +953,20 @@ mod tests {
         let mut p = Page::stats();
         let mut ed = Editor { page: 0, chosen: None, grid: true };
         // dropped on a full screen of blocks, an effect fills the whole screen behind them
-        assert!(add(&mut p, &mut ed, 3, Source::CpuTemp, &r, None));
+        assert!(add(&mut p, &mut ed, 3, Source::CpuTemp, &r, None, Z10));
         let fx = p.pieces.len() - 1;
         assert_eq!((p.pieces[fx].row, p.pieces[fx].col, p.pieces[fx].width, p.pieces[fx].height), (0, 0, 20, 4));
         // another can't go on it
-        assert_eq!(effect_spot(&p, None), None);
-        assert!(!add(&mut p, &mut ed, 3, Source::CpuTemp, &r, None));
+        assert_eq!(effect_spot(&p, None, Z10), None);
+        assert!(!add(&mut p, &mut ed, 3, Source::CpuTemp, &r, None, Z10));
         // cut to the left half, it leaves the right half to a second effect
         ed.chosen = Some(fx);
-        size_to(&mut p, fx, 10, 4, |_| 1);
+        size_to(&mut p, fx, 10, 4, |_| 1, Z10);
         assert_eq!((p.pieces[fx].width, p.pieces[fx].height), (10, 4), "the blocks on it don't stop its corner");
-        assert_eq!(effect_spot(&p, Some((2, 15))), Some((0, 10, 10, 4)));
-        assert_eq!(effect_spot(&p, Some((2, 5))), None, "on the first effect");
+        assert_eq!(effect_spot(&p, Some((2, 15)), Z10), Some((0, 10, 10, 4)));
+        assert_eq!(effect_spot(&p, Some((2, 5)), Z10), None, "on the first effect");
         // and the blocks on an effect still take their cells only from each other
-        assert_eq!(run_at(&p, 0, 3, None), Some((3, 4)), "the cell between CPU and its temperature");
+        assert_eq!(run_at(&p, 0, 3, None, Z10), Some((3, 4)), "the cell between CPU and its temperature");
     }
 
     #[test]
@@ -894,30 +974,30 @@ mod tests {
         let p = Page::stats();
         // CPU's temperature, cells 4 to 6: its load starts at 8, and the GPU's temperature
         // under it keeps it one row
-        assert_eq!(room(&p, 1, |_| 3), [Some(8), None, None, None]);
+        assert_eq!(room(&p, 1, |_| 3, Z10), [Some(8), None, None, None]);
         let mut q = p.clone();
-        size_to(&mut q, 1, 20, 4, |_| 3);
+        size_to(&mut q, 1, 20, 4, |_| 3, Z10);
         assert_eq!((q.pieces[1].col, q.pieces[1].width, q.pieces[1].height), (4, 4, 1));
         // on one row no narrower than what it shows: 45° takes three cells
-        size_to(&mut q, 1, 1, 1, |_| 3);
+        size_to(&mut q, 1, 1, 1, |_| 3, Z10);
         assert_eq!(q.pieces[1].width, 3);
         // words take more rows, as far as the free cells below them go
         let mut w = Page { pieces: vec![Piece { kind: Kind::Data(Source::Sky, false), row: 0, col: 0, width: 6, right: false, center: false, gap: 1, height: 1, scroll: true, date_format: Default::default() }], ..Page::stats() };
         w.pieces.push(Piece { kind: Kind::Data(Source::CpuTemp, false), row: 2, col: 3, width: 3, right: true, center: false, gap: 1, height: 1, scroll: true, date_format: Default::default() });
-        assert_eq!(room(&w, 0, |_| 1), [Some(20), Some(20), Some(3), Some(3)]);
-        size_to(&mut w, 0, 10, 4, |_| 1);
+        assert_eq!(room(&w, 0, |_| 1, Z10), [Some(20), Some(20), Some(3), Some(3)]);
+        size_to(&mut w, 0, 10, 4, |_| 1, Z10);
         assert_eq!((w.pieces[0].width, w.pieces[0].height), (3, 4), "four rows tall, so only as wide as the cells beside the reading below");
-        size_to(&mut w, 0, 10, 2, |_| 1);
+        size_to(&mut w, 0, 10, 2, |_| 1, Z10);
         assert_eq!((w.pieces[0].width, w.pieces[0].height), (10, 2));
         // a reading takes more rows too, to the screen's foot, and on more rows can be
         // narrower than it reads (what doesn't fit stops after its last row)
         let mut two = w.clone();
         let r = Readings { cpu_temp: Some(45.0), ..Readings::default() };
         let q = two.pieces[1].clone();
-        size_to(&mut two, 1, 1, 3, |h| crate::lcd_page::least_at(&q, &r, h));
+        size_to(&mut two, 1, 1, 3, |h| crate::lcd_page::least_at(&q, &r, h), Z10);
         assert_eq!((two.pieces[1].width, two.pieces[1].height), (1, 2));
         let q = two.pieces[1].clone();
-        size_to(&mut two, 1, 1, 1, |h| crate::lcd_page::least_at(&q, &r, h));
+        size_to(&mut two, 1, 1, 1, |h| crate::lcd_page::least_at(&q, &r, h), Z10);
         assert_eq!((two.pieces[1].width, two.pieces[1].height), (1, 1), "its size kept: back on one row it runs long");
         // a reading chosen for words keeps their rows
         let mut ed = Editor { page: 0, chosen: Some(0), grid: true };
@@ -926,9 +1006,9 @@ mod tests {
         // Text holds a whole screen's worth, and keeps what its words do when they don't fit
         let mut t = Page { pieces: vec![Piece { kind: Kind::Text(String::new()), row: 0, col: 0, width: 4, right: false, center: false, gap: 1, height: 1, scroll: true, date_format: Default::default() }], ..Page::stats() };
         ed.chosen = Some(0);
-        act(&mut t, &mut ed, Ctl::ScrText, 0, Some(&"x".repeat(100)));
+        act(&mut t, &mut ed, Ctl::ScrText, 0, Some(&"x".repeat(100)), Z10);
         assert_eq!(t.pieces[0].kind, Kind::Text("x".repeat(80)));
-        act(&mut t, &mut ed, Ctl::ScrFit, 0, None);
+        act(&mut t, &mut ed, Ctl::ScrFit, 0, None, Z10);
         assert!(!t.pieces[0].scroll, "Cut off");
     }
 
@@ -936,15 +1016,15 @@ mod tests {
     fn the_controls_change_the_chosen_block() {
         let mut p = Page::stats();
         let mut ed = Editor { page: 0, chosen: Some(1), grid: true };
-        act(&mut p, &mut ed, Ctl::ScrUnits, 1, None);
+        act(&mut p, &mut ed, Ctl::ScrUnits, 1, None, Z10);
         assert_eq!(p.pieces[1].kind, Kind::Data(Source::CpuTemp, true));
-        act(&mut p, &mut ed, Ctl::ScrAlign, 1, None);
+        act(&mut p, &mut ed, Ctl::ScrAlign, 1, None, Z10);
         assert!(p.pieces[1].center && !p.pieces[1].right);
         // a temperature keeps its unit as another of its kind; the weather starts in °F, and
         // a reading that isn't a temperature drops it
         set_shows(&mut p, &ed, Shows::Reading(Source::GpuTemp));
         assert_eq!(p.pieces[1].kind, Kind::Data(Source::GpuTemp, true));
-        act(&mut p, &mut ed, Ctl::ScrUnits, 0, None);
+        act(&mut p, &mut ed, Ctl::ScrUnits, 0, None, Z10);
         set_shows(&mut p, &ed, Shows::Reading(Source::OutsideTemp));
         assert_eq!(p.pieces[1].kind, Kind::Data(Source::OutsideTemp, true), "the weather in °F");
         set_shows(&mut p, &ed, Shows::Reading(Source::CpuTemp));
@@ -954,16 +1034,16 @@ mod tests {
         // a Data block turns into the time, on a 12-hour clock, and back
         set_shows(&mut p, &ed, Shows::Time);
         assert_eq!(p.pieces[1].kind, Kind::Clock(true));
-        act(&mut p, &mut ed, Ctl::ScrHours, 0, None);
+        act(&mut p, &mut ed, Ctl::ScrHours, 0, None, Z10);
         assert_eq!(p.pieces[1].kind, Kind::Clock(false), "24-hour");
         set_shows(&mut p, &ed, Shows::Reading(Source::Date));
         assert_eq!(p.pieces[1].kind, Kind::Data(Source::Date, false));
         // moved into free cells; onto another block, it stays
-        move_to(&mut p, 1, 0, 3, 3);
+        move_to(&mut p, 1, 0, 3, 3, Z10);
         assert_eq!((p.pieces[1].row, p.pieces[1].col, p.pieces[1].width), (0, 3, 3));
-        move_to(&mut p, 1, 1, 0, 3);
+        move_to(&mut p, 1, 1, 0, 3, Z10);
         assert_eq!((p.pieces[1].row, p.pieces[1].col), (0, 3), "the word GPU takes that cell");
-        act(&mut p, &mut ed, Ctl::ScrRemove, 0, None);
+        act(&mut p, &mut ed, Ctl::ScrRemove, 0, None, Z10);
         assert_eq!((p.pieces.len(), ed.chosen), (11, None));
     }
 

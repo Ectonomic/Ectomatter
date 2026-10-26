@@ -1399,6 +1399,10 @@ export component AppWindow inherits Window {
     // Ectomatter plays, or (screen-closed) the onboard layout, which the keyboard
     // shows by itself, told to the page as it changes
     in property <image> lcd-big;
+    // the keyboard's screen's columns and rows, as its core describes them (none, 0 by 0,
+    // before it does), which the screen's picture takes the shape of
+    in property <int> screen-cols;
+    in property <int> screen-rows;
     // the device's shadow on its box, round the device (the part under it is
     // in the device's own picture), and how far past the device it reaches
     in property <image> board-shadow;
@@ -1919,8 +1923,10 @@ export component AppWindow inherits Window {
     property <length> bay-pad: Space.pad;
     // the screen as large as its box leaves it, the gutter and the padding kept, in whole
     // pixels (the page draws its picture at this size)
-    out property <length> lcd-h: floor(min(stage-h - 2 * bay-pad - 2 * kb-pad-y, (under-w - 2 * bay-pad - 2 * kb-pad-y) / 5) / 1px) * 1px;
-    out property <length> lcd-w: lcd-h * 5;
+    // (in the shape of the screen the keyboard's core describes, its cells square; no screen
+    // before it does)
+    out property <length> lcd-h: root.screen-cols > 0 && root.screen-rows > 0 ? floor(min(stage-h - 2 * bay-pad - 2 * kb-pad-y, (under-w - 2 * bay-pad - 2 * kb-pad-y) * root.screen-rows / root.screen-cols) / 1px) * 1px : 0;
+    out property <length> lcd-w: root.screen-rows > 0 ? lcd-h * root.screen-cols / root.screen-rows : 0;
     // under the panel: the Library, its cards two to a row while each has room for its
     // picture and its words, otherwise one; after them, an empty block for a new screen
     // (Layouts' cards two to a row where each still has its least, Space.pad in from the
@@ -6050,11 +6056,15 @@ export component LayoutWindow inherits Window {
     in-out property <string> pk-v;
     in property <[color]> pk-presets;
     in property <[color]> pk-recent;
+    // the screen's columns and rows, as the keyboard's core describes them (none, 0 by 0,
+    // before it does)
+    in property <int> screen-cols;
+    in property <int> screen-rows;
     // where the screen's cells are in the window, for a block carried from the bar
     out property <length> cells-x: lcd.absolute-position.x;
     out property <length> cells-y: lcd.absolute-position.y;
-    out property <length> cell-w: lcd.width / 20;
-    out property <length> cell-h: lcd.height / 4;
+    out property <length> cell-w: root.screen-cols > 0 ? lcd.width / root.screen-cols : 0;
+    out property <length> cell-h: root.screen-rows > 0 ? lcd.height / root.screen-rows : 0;
 
     callback minimize();
     callback maximize();
@@ -6291,7 +6301,7 @@ export component LayoutWindow inherits Window {
             background: Ink.box;
         }
         // the screen's box, and the bay the screen is set into, as on the Screen tab (the
-        // screen's 20 by 4 cells square)
+        // screen's cells square)
         screen-box := Rectangle {
             visible: root.has-layout;
             x: Space.margin;
@@ -6304,7 +6314,7 @@ export component LayoutWindow inherits Window {
                 x: (parent.width - self.width) / 2;
                 y: Space.pad;
                 screen-w: Size.edit-screen;
-                screen-h: Size.edit-screen * 4 / 20;
+                screen-h: root.screen-cols > 0 ? Size.edit-screen * root.screen-rows / root.screen-cols : 0;
                 field: root.field;
                 lcd := Rectangle {
                     x: bay.screen-x;
@@ -6330,25 +6340,25 @@ export component LayoutWindow inherits Window {
                             }
                         }
                     }
-                    // the screen's 20 by 4 cells
+                    // the screen's cells
                     if root.grid: Rectangle {
-                        for k in 19: Rectangle {
-                            x: (k + 1) * parent.width / 20 - 0.5px; // art: the screen's cells' lines
+                        for k in root.screen-cols - 1: Rectangle {
+                            x: (k + 1) * parent.width / root.screen-cols - 0.5px; // art: the screen's cells' lines
                             width: 1px; // art: the screen's cells' lines
                             background: Ink.white.with-alpha(0.11);
                         }
-                        for k in 3: Rectangle {
-                            y: (k + 1) * parent.height / 4 - 0.5px; // art: the screen's cells' lines
+                        for k in root.screen-rows - 1: Rectangle {
+                            y: (k + 1) * parent.height / root.screen-rows - 0.5px; // art: the screen's cells' lines
                             height: 1px; // art: the screen's cells' lines
                             background: Ink.white.with-alpha(0.11);
                         }
                     }
                     // a block on its way in: the cells it would take
                     if root.ghost-on: Rectangle {
-                        x: root.ghost.col * parent.width / 20 + 1px; // art: the cells a block on its way in would take
-                        y: root.ghost.row * parent.height / 4 + 1px; // art: the cells a block on its way in would take
-                        width: root.ghost.width * parent.width / 20 - 2px; // art: the cells a block on its way in would take
-                        height: root.ghost.height * parent.height / 4 - 2px; // art: the cells a block on its way in would take
+                        x: root.ghost.col * parent.width / root.screen-cols + 1px; // art: the cells a block on its way in would take
+                        y: root.ghost.row * parent.height / root.screen-rows + 1px; // art: the cells a block on its way in would take
+                        width: root.ghost.width * parent.width / root.screen-cols - 2px; // art: the cells a block on its way in would take
+                        height: root.ghost.height * parent.height / root.screen-rows - 2px; // art: the cells a block on its way in would take
                         border-radius: 3px; // art: the cells a block on its way in would take
                         border-width: 1.5px; // art: the cells a block on its way in would take
                         border-color: Ink.white.with-alpha(0.69);
@@ -6359,8 +6369,8 @@ export component LayoutWindow inherits Window {
                     // corner dragged takes the block wider or narrower (and words taller or
                     // shorter), as far as the free cells and the screen let it
                     for b[i] in root.blocks: blk := Rectangle {
-                        property <length> cw: parent.width / 20;
-                        property <length> ch: parent.height / 4;
+                        property <length> cw: root.cell-w;
+                        property <length> ch: root.cell-h;
                         // a move: how many cells across and down; the corner (the selected block's,
                         // dragged): how many cells wider and rows taller
                         property <int> dc: 0;
@@ -6370,8 +6380,8 @@ export component LayoutWindow inherits Window {
                         property <bool> sizing: b.on && root.corner-on;
                         // carried by the pointer (past a few pixels from where it was pressed)
                         property <bool> moving: false;
-                        property <int> at-col: max(0, min(20 - b.width, b.col + dc));
-                        property <int> at-row: max(0, min(4 - b.height, b.row + dr));
+                        property <int> at-col: max(0, min(root.screen-cols - b.width, b.col + dc));
+                        property <int> at-row: max(0, min(root.screen-rows - b.height, b.row + dr));
                         // (the corner: as tall as asked within the rows the block can have, then
                         // as wide as that height's free cells let it, and no narrower than the
                         // block can be at that height)
@@ -6379,9 +6389,12 @@ export component LayoutWindow inherits Window {
                         property <int> s-end: max(b.lows[s-h - 1], min(b.ends[s-h - 1], b.col + b.width + dw));
                         property <int> show-w: sizing ? s-end - b.col : b.width;
                         property <int> show-h: sizing ? s-h : b.height;
-                        property <int> home: b.row * 10000 + b.col * 100 + b.width * 4 + b.height;
+                        // (where it is and its size, each a byte's worth, see lcd_page::size_of)
+                        property <int> home: b.row * 256 + b.col;
+                        property <int> span: b.width * 256 + b.height;
                         property <int> settled: root.settled;
                         changed home => { self.rest(); }
+                        changed span => { self.rest(); }
                         changed settled => { self.rest(); }
                         function rest() {
                             self.dc = 0;
@@ -6455,15 +6468,17 @@ export component LayoutWindow inherits Window {
                     // is carried, and the × while the corner is dragged)
                     if root.sel-block >= 0 && root.sel-block < root.blocks.length && !root.sel-moving: sel := Rectangle {
                         property <EdBlock> sb: root.blocks[root.sel-block];
-                        property <length> cw: parent.width / 20;
-                        property <length> ch: parent.height / 4;
+                        property <length> cw: root.cell-w;
+                        property <length> ch: root.cell-h;
                         property <int> s-h: max(1, min(sb.ends.length, sb.height + root.corner-dh));
                         property <int> s-end: max(sb.lows[s-h - 1], min(sb.ends[s-h - 1], sb.col + sb.width + root.corner-dw));
                         property <int> show-w: root.corner-on ? s-end - sb.col : sb.width;
                         property <int> show-h: root.corner-on ? s-h : sb.height;
-                        property <int> home: sb.row * 10000 + sb.col * 100 + sb.width * 4 + sb.height;
+                        property <int> home: sb.row * 256 + sb.col;
+                        property <int> span: sb.width * 256 + sb.height;
                         property <int> settled: root.settled;
                         changed home => { self.rest(); }
+                        changed span => { self.rest(); }
                         changed settled => { self.rest(); }
                         function rest() {
                             root.corner-on = false;

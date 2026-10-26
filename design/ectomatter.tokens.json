@@ -74,7 +74,7 @@
     "places": { "$value": { "value": 320, "unit": "px" }, "$description": "The box of where and when an effect plays, at its least." },
     "sidebar": { "$value": { "value": 290, "unit": "px" }, "$description": "An editor window's list down its left side." },
     "form": { "$value": { "value": 860, "unit": "px" }, "$description": "The widest a form's column grows (Settings, a device's Settings, a game's page)." },
-    "edit-screen": { "$value": { "value": 780, "unit": "px" }, "$description": "A device's screen in the Screen Editor, across: the Z10's 20 by 4 cells, 39 square." },
+    "edit-screen": { "$value": { "value": 780, "unit": "px" }, "$description": "A device's screen in the Screen Editor, across: as many cells as its core describes, square, 39 a cell on the Z10's twenty." },
     "win-button": { "$value": { "value": 40, "unit": "px" }, "$description": "A window button in the title bar (minimize, maximize, close), across." },
     "seg-tall": { "$value": { "value": 50, "unit": "px" }, "$description": "A tall switch, a glyph over each choice's words (a key's kinds of job)." },
     "rail-open": { "$value": { "value": 232, "unit": "px" }, "$description": "The rail down the window's left, opened into its blade with each place's name, across." },

@@ -226,4 +226,40 @@ mod tests {
         }
         fail_on(found, "a core started on its own");
     }
+
+    /// docs/core-protocol.md, displays: a text display is described with its
+    /// `cols` and `rows`, and takes "as many rows as it has". The screen's
+    /// engine takes the keyboard's screen's size from its core's description
+    /// (lcd_page::size) and types none of its own: no constant for its columns
+    /// or rows, no grid of a fixed size, no row cut or padded to twenty, and in
+    /// the Slint pages, no grid of twenty by four and no picture of its shape.
+    /// (The layouts Ectomatter ships keep their places as data, laid out on the
+    /// Z10's, as a saved layout keeps its.)
+    #[test]
+    fn the_screen_is_the_size_its_core_describes() {
+        let engine = ["lcd_page.rs", "lcd_anim.rs", "lcd_fx.rs", "lcd_draw.rs", "lcd_player.rs", "layout_page.rs", "screen_edit.rs", "overlays.rs"];
+        let typed = ["const COLS", "const ROWS", "const W:", "const H:", "const PW", "const PH", "; W]", "; H]", "; 4]]", "; 20]", "take(20)", ":<20"];
+        let mut found = Vec::new();
+        for f in engine.map(|f| format!("apps/ectomatter/src/{f}")) {
+            for (n, line) in code(&f) {
+                if let Some(t) = typed.iter().find(|t| line.contains(*t)) {
+                    found.push(format!("{f}:{n} {t}"));
+                }
+            }
+        }
+        // (front.rs draws the screen too: its picture, its card's and the keyboard's display)
+        for (n, line) in code("apps/ectomatter/src/front.rs") {
+            if line.contains("lcd") && (line.contains(":<20") || line.contains("take(20)") || line.contains("take(4)")) {
+                found.push(format!("apps/ectomatter/src/front.rs:{n}"));
+            }
+        }
+        let ui = read("apps/ectomatter/ui/app.slint");
+        for (i, line) in ui.lines().enumerate() {
+            let line = line.split("//").next().unwrap_or("");
+            if ["/ 20", "* 4 / 20", "for k in 19", "for k in 3:", "lcd-h * 5", "20 - b.width", "4 - b.height"].iter().any(|t| line.contains(t)) {
+                found.push(format!("apps/ectomatter/ui/app.slint:{} {}", i + 1, line.trim()));
+            }
+        }
+        fail_on(found, "the screen's size typed in");
+    }
 }

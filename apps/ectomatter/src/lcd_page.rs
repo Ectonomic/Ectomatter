@@ -1,5 +1,5 @@
-//! A page of the Z10's screen as pieces: words, readings, bars and a clock,
-//! each in a row of the 20 by 4 screen at a column and a width. The pages are
+//! A page of the keyboard's screen as pieces: words, readings, bars and a clock,
+//! each in a row of the screen at a column and a width. The pages are
 //! the Library, every screen there is (devices.z10.screen.pages). Playlists
 //! play some of them in turn, each for its own time and coming in its own
 //! way (devices.z10.screen.playlists), and each profile plays one of them
@@ -24,14 +24,37 @@ use serde_json::{json, Value};
 use crate::lcd_stats::Gpu;
 use ectomatter_sensors::list::{Val, What};
 
-pub const COLS: u8 = 20;
-pub const ROWS: u8 = 4;
-
 /// The keyboard's text display as its core describes it (`displays`), Null with none.
 pub fn screen() -> &'static Value {
     static NONE: Value = Value::Null;
     crate::cores::keyboard().and_then(|k| k.described()["capabilities"]["displays"].as_array()?.iter().find(|d| d["kind"] == "text")).unwrap_or(&NONE)
 }
+
+/// A screen's size, its columns and rows.
+pub type Size = (usize, usize);
+
+/// The keyboard's text display's size, as its core describes it: its columns and rows. Every
+/// part of the screen's engine draws on this, the pages, the effects, the launch and exit
+/// sequences, the editor's grid and the screen's picture. With no keyboard, or none whose core
+/// describes a text display yet, there is no screen (0 by 0): a page draws no rows at all.
+pub fn size() -> Size {
+    size_of(screen())
+}
+
+/// A text display's size as `display`, its description, gives it (see [size]): at most 255
+/// either way, as a block's place on it is kept in a byte, and none where either is missing.
+pub fn size_of(display: &Value) -> Size {
+    let n = |k: &str| display[k].as_u64().map_or(0, |n| n.min(u8::MAX as u64) as usize);
+    match (n("cols"), n("rows")) {
+        (0, _) | (_, 0) => (0, 0),
+        s => s,
+    }
+}
+
+/// The screen the layouts Ectomatter ships are laid out on, the Z10's, its columns and rows:
+/// their blocks' places are data, kept as a saved layout's are, and a screen of another size
+/// shows them as it shows any layout, what lies past its edges left out.
+const LAID_OUT_ON: (u8, u8) = (20, 4);
 
 /// Text as the keyboard's screen shows it: in the characters it draws, as
 /// its core describes them (printable ASCII where it doesn't).
@@ -498,9 +521,9 @@ fn reading(row: u8, col: u8, width: u8, s: Source, gap: u8) -> Piece {
     Piece { kind: Kind::Data(s, false), row, col, width, right: true, center: false, gap, height: 1, scroll: true, date_format: DateFormat::Short }
 }
 
-/// A piece across the whole of a row, in its middle.
+/// A piece across the whole of a row of the screen the shipped layouts are laid out on, in its middle.
 fn middle(row: u8, kind: Kind) -> Piece {
-    Piece { kind, row, col: 0, width: COLS, right: false, center: true, gap: 1, height: 1, scroll: true, date_format: DateFormat::Short }
+    Piece { kind, row, col: 0, width: LAID_OUT_ON.0, right: false, center: true, gap: 1, height: 1, scroll: true, date_format: DateFormat::Short }
 }
 
 /// A piece set at the left of its width, a row high.
@@ -508,10 +531,10 @@ fn block(row: u8, col: u8, width: u8, kind: Kind) -> Piece {
     Piece { kind, row, col, width, right: false, center: false, gap: 1, height: 1, scroll: true, date_format: DateFormat::Short }
 }
 
-/// An effect across whole rows, `height` of them from `row` down, at `speed`, with the word
-/// a new Effect block has.
+/// An effect across whole rows of the screen the shipped layouts are laid out on, `height` of
+/// them from `row` down, at `speed`, with the word a new Effect block has.
 fn behind(row: u8, height: u8, fx: Fx, speed: u8) -> Piece {
-    Piece { height, ..block(row, 0, COLS, Kind::Effect { fx, speed, word: "EVGA".into() }) }
+    Piece { height, ..block(row, 0, LAID_OUT_ON.0, Kind::Effect { fx, speed, word: "EVGA".into() }) }
 }
 
 /// The layouts Ectomatter ships, by key, in the order a new Library has them: the three
@@ -617,7 +640,7 @@ impl Page {
             "clock" => return Some(Page::clock()),
             "weather" => return Some(Page::weather()),
             // (the date written short, Wed Oct 14, as the longest dates written out run past
-            // the screen's 20 cells; the sky in 15, as wide as every sky but the three longest,
+            // the Z10's 20 cells; the sky in 15, as wide as every sky but the three longest,
             // Freezing drizzle, Heavy snow showers and Thunderstorm with hail, which scroll)
             "today" => (
                 "Today",
@@ -645,11 +668,11 @@ impl Page {
             ),
             "profile" => ("Profile", vec![middle(1, Kind::Data(Source::Profile, false)), words(2, 5, "Profile"), block(2, 13, 2, Kind::Data(Source::ProfileNumber, false))]),
             // (the effects alone, across the whole screen)
-            "rain" => ("Rain", vec![behind(0, ROWS, Fx::Rain, 40)]),
-            "starfield" => ("Starfield", vec![behind(0, ROWS, Fx::Stars, 40)]),
-            "campfire" => ("Campfire", vec![behind(0, ROWS, Fx::Fire, 100)]),
-            "aquarium" => ("Aquarium", vec![behind(0, ROWS, Fx::Aquarium, 40)]),
-            "music" => ("Music", vec![behind(0, ROWS, Fx::Spectrum, 100)]),
+            "rain" => ("Rain", vec![behind(0, LAID_OUT_ON.1, Fx::Rain, 40)]),
+            "starfield" => ("Starfield", vec![behind(0, LAID_OUT_ON.1, Fx::Stars, 40)]),
+            "campfire" => ("Campfire", vec![behind(0, LAID_OUT_ON.1, Fx::Fire, 100)]),
+            "aquarium" => ("Aquarium", vec![behind(0, LAID_OUT_ON.1, Fx::Aquarium, 40)]),
+            "music" => ("Music", vec![behind(0, LAID_OUT_ON.1, Fx::Spectrum, 100)]),
             // (as the keyboard showed a game starting: its name in the middle, what is being
             // set, and a bar of the changes done with their count, as wide as the screen)
             "game-launch" => (
@@ -838,18 +861,20 @@ impl Page {
                     "effect" => Kind::Effect {
                         fx: Fx::from_key(p["effect"].as_str().unwrap_or("")).unwrap_or(Fx::Rain),
                         speed: b(&p["speed"]).unwrap_or(50).min(100),
-                        word: p["word"].as_str().unwrap_or("EVGA").chars().take(COLS as usize).collect(),
+                        word: p["word"].as_str().unwrap_or("EVGA").chars().take(u8::MAX as usize).collect(),
                     },
                     _ => return None,
                 };
-                let row = b(&p["row"])?.min(ROWS - 1);
-                // (never past the screen's foot)
-                let height = b(&p["height"]).unwrap_or(1).clamp(1, ROWS - row);
+                // (kept as it was made, whatever the screen it was made on: a screen it doesn't
+                // fit draws it cut off at its edges, see [lay_out]; its far edge and its foot
+                // within a byte's reach too)
+                let (row, col) = (b(&p["row"])?.min(u8::MAX - 1), b(&p["col"])?.min(u8::MAX - 1));
+                let height = b(&p["height"]).unwrap_or(1).clamp(1, u8::MAX - row);
                 Some(Piece {
                     kind,
                     row,
-                    col: b(&p["col"])?.min(COLS - 1),
-                    width: b(&p["width"])?.clamp(1, COLS),
+                    col,
+                    width: b(&p["width"])?.clamp(1, u8::MAX - col),
                     right: p["right"].as_bool().unwrap_or(false),
                     center: p["center"].as_bool().unwrap_or(false),
                     gap: b(&p["gap"]).unwrap_or(1).min(1),
@@ -1506,7 +1531,8 @@ pub fn least_at(p: &Piece, r: &Readings, height: u8) -> u8 {
         Kind::Effect { .. } => 1,
         Kind::Bar(_) => 3,
         _ if height > 1 => 1,
-        _ => show(p, r).map_or(1, |s| s.chars().count().clamp(1, COLS as usize) as u8),
+        // (never wider than the screen)
+        _ => show(p, r).map_or(1, |s| s.chars().count().min(size().0).max(1) as u8),
     }
 }
 
@@ -1551,23 +1577,24 @@ pub fn twelve_hour(hour: u32, minute: u32) -> String {
     format!("{h}:{minute:02} {}", if hour < 12 { "AM" } else { "PM" })
 }
 
-/// The page's four rows, with these readings, as the page comes in (words that scroll
-/// at their start).
+/// The page's rows, with these readings, as the page comes in (words that scroll at their
+/// start): a row for each of the screen's (see [size]), and none with no screen (see
+/// [lay_out] for a row that runs past its edge).
 pub fn render(page: &Page, r: &Readings) -> Vec<String> {
     render_at(page, r, 0.0)
 }
 
-/// The page's four rows `t` seconds after it came in: words that scroll have moved on.
+/// The page's rows `t` seconds after it came in: words that scroll have moved on.
 pub fn render_at(page: &Page, r: &Readings, t: f64) -> Vec<String> {
-    lay_out(page, r, t, false).0
+    lay_out(page, r, t, false, size()).0
 }
 
-/// The page's four rows as its card in the Library pictures them: as the page comes in,
-/// but each effect at the moment its tile pictures it (see [crate::lcd_fx::still]), fed the
-/// tiles' sample sound and heartbeat, so the picture holds still and shows the effect well
-/// (Highway with traffic on the road, not the empty road it starts on).
+/// The page's rows as its card in the Library pictures them: as the page comes in, but each
+/// effect at the moment its tile pictures it (see [crate::lcd_fx::still]), fed the tiles'
+/// sample sound and heartbeat, so the picture holds still and shows the effect well (Highway
+/// with traffic on the road, not the empty road it starts on).
 pub fn render_still(page: &Page, r: &Readings) -> Vec<String> {
-    lay_out(page, r, 0.0, true).0
+    lay_out(page, r, 0.0, true, size()).0
 }
 
 /// Whether the page's rows change between readings: an effect on it, or words that scroll
@@ -1580,6 +1607,7 @@ pub fn moving(page: &Page, r: &Readings) -> bool {
 /// tenth of a second at most, its shortest step if shorter), or the step of words scrolling a
 /// cell at a time (see [SCROLL_STEP]); None while it holds still.
 pub fn pace(page: &Page, r: &Readings) -> Option<f64> {
+    let page = &fitted(page, size());
     let steps = page.pieces.iter().filter_map(|p| if let Kind::Effect { speed, .. } = p.kind { Some(crate::lcd_fx::period(speed)) } else { None });
     if let Some(shortest) = steps.reduce(f64::min) {
         return Some(shortest.min(0.1));
@@ -1817,14 +1845,31 @@ impl Gaps {
 /// the rest of its row along). A row said to be unavailable keeps its
 /// pieces where they were put, as words always are.
 pub fn spans(page: &Page, r: &Readings) -> Vec<(u8, usize, usize)> {
-    lay_out(page, r, 0.0, false).1
+    lay_out(page, r, 0.0, false, size()).1
 }
 
-/// The rows, and where each piece lands, `t` seconds in. A row holds its one-row pieces,
-/// left to right, a reading that runs long pushing the ones after it along; and the rows
-/// of any taller piece of words passing through it, which keeps its cells (a reading
-/// pushed up to one stops at its edge).
-fn lay_out(page: &Page, r: &Readings, t: f64, still: bool) -> (Vec<String>, Vec<(u8, usize, usize)>) {
+/// The page as a screen of `size` has room for its blocks: each as tall as the rows from its
+/// first to the screen's foot at most, and no wider than the screen. A layout keeps its
+/// blocks as they were made (see [Page::from_json]), for a screen of another size, or one whose
+/// sizes were typed into the settings; drawn, a block taller than the room below it carries
+/// its words on, scrolls them or cuts them off in the rows it has, as one made that tall does.
+fn fitted(page: &Page, (cols, rows): Size) -> Page {
+    let (cols, rows) = (cols.min(u8::MAX as usize) as u8, rows.min(u8::MAX as usize) as u8);
+    let pieces = page.pieces.iter().map(|p| Piece { height: p.height.min(rows.saturating_sub(p.row)).max(1), width: p.width.min(cols).max(1), ..p.clone() }).collect();
+    Page { pieces, ..page.clone() }
+}
+
+/// The rows, and where each piece lands, `t` seconds in, on a screen of `size`. A row holds
+/// its one-row pieces, left to right, a reading that runs long pushing the ones after it
+/// along; and the rows of any taller piece of words passing through it, which keeps its
+/// cells (a reading pushed up to one stops at its edge). The screen shows what lies on it: a
+/// row for each of its rows, the effects in its own cells, and of a layout made for a larger
+/// screen, nothing below its foot (a piece there lands nowhere and keeps its place). A row
+/// that runs past the screen's edge (a reading pushed along, or a piece made for a wider
+/// screen) is kept whole, as the z10-lcd service kept its rows, and cut there by whatever
+/// shows it: the keyboard's core (`displays/show`), its picture (lcd_draw), the frame file.
+fn lay_out(page: &Page, r: &Readings, t: f64, still: bool, (cols, rows): Size) -> (Vec<String>, Vec<(u8, usize, usize)>) {
+    let page = &fitted(page, (cols, rows));
     let mut said: Vec<&'static str> = Vec::new();
     let mut spans: Vec<(u8, usize, usize)> = page.pieces.iter().map(|p| (p.row, p.col as usize, p.width as usize)).collect();
     let effect = |p: &Piece| matches!(p.kind, Kind::Effect { .. });
@@ -1833,19 +1878,20 @@ fn lay_out(page: &Page, r: &Readings, t: f64, still: bool) -> (Vec<String>, Vec<
     let walls: Vec<(&Piece, Result<Vec<String>, &'static str>)> = page.pieces.iter().filter(|p| tall(p)).map(|p| (p, show(p, r).map(|s| block_rows(p, &s, t)))).collect();
     // the effects, behind every other block: each fills its own cells from its pattern at
     // its moment, and the other blocks cover it in theirs
-    let mut behind = vec![vec![' '; COLS as usize]; ROWS as usize];
+    let mut behind = vec![vec![' '; cols]; rows];
     for p in page.pieces.iter().filter(|p| effect(p)) {
         if let Kind::Effect { fx, speed, word } = &p.kind {
-            let (at, live) = if still { (crate::lcd_fx::still(*fx), crate::lcd_fx::Live::sample()) } else { (crate::lcd_fx::tenths(*fx, t, *speed), crate::lcd_fx::live(*fx, *speed, r.cpu_load.unwrap_or(0.0))) };
-            let f = crate::lcd_fx::frame(*fx, at, &spell(word), &live);
-            for row in p.row..(p.row + p.height.max(1)).min(ROWS) {
-                for c in p.col..(p.col + p.width).min(COLS) {
-                    behind[row as usize][c as usize] = f[row as usize][c as usize];
+            let (at, live) = if still { (crate::lcd_fx::still(*fx), crate::lcd_fx::Live::sample(cols)) } else { (crate::lcd_fx::tenths(*fx, t, *speed), crate::lcd_fx::live(*fx, *speed, r.cpu_load.unwrap_or(0.0), cols)) };
+            let f = crate::lcd_fx::frame(*fx, at, &spell(word), &live, (cols, rows));
+            for row in p.row as usize..(p.row as usize + p.height.max(1) as usize).min(rows) {
+                for c in p.col as usize..(p.col as usize + p.width as usize).min(cols) {
+                    behind[row][c] = f[row][c];
                 }
             }
         }
     }
-    let rows = (0..ROWS)
+    // (a row is a byte's worth at most, as the screen is, see [size_of])
+    let shown = (0..rows as u8)
         .map(|row| {
             let mut pieces: Vec<(usize, &Piece)> = page.pieces.iter().enumerate().filter(|(_, p)| p.row == row && !tall(p) && !effect(p)).collect();
             pieces.sort_by_key(|(_, p)| p.col);
@@ -1921,7 +1967,7 @@ fn lay_out(page: &Page, r: &Readings, t: f64, still: bool) -> (Vec<String>, Vec<
             cells.into_iter().collect::<String>().trim_end().to_string()
         })
         .collect();
-    (rows, spans)
+    (shown, spans)
 }
 
 /// The keyboard's own status screen, the native layout its firmware draws when no program
@@ -2034,12 +2080,17 @@ mod tests {
         q.pieces[1].scroll = false;
         let back = Page::from_json(&q.to_json()).unwrap();
         assert_eq!((back.pieces[1].height, back.pieces[1].scroll), (2, false));
-        // a reading takes more rows too, never past the screen's foot
+        // a reading takes more rows too, and is drawn never past the screen's foot: kept as
+        // made (for a screen with more rows), drawn as tall as the rows the screen has for it
         let mut v = q.to_json();
         v["pieces"][0]["height"] = json!(3);
         assert_eq!(Page::from_json(&v).unwrap().pieces[0].height, 3);
         v["pieces"][0]["row"] = json!(2);
-        assert_eq!(Page::from_json(&v).unwrap().pieces[0].height, 2);
+        let tall = Page::from_json(&v).unwrap();
+        assert_eq!(tall.pieces[0].height, 3);
+        v["pieces"][0]["height"] = json!(2);
+        let room = Page::from_json(&v).unwrap();
+        assert_eq!((render(&tall, &r), spans(&tall, &r), pace(&tall, &r)), (render(&room, &r), spans(&room, &r), pace(&room, &r)));
     }
 
     #[test]
@@ -2142,7 +2193,7 @@ mod tests {
         let time = Piece { kind: Kind::Clock(false), row: 1, col: 7, width: 5, right: false, center: false, gap: 1, height: 1, scroll: true, date_format: DateFormat::Short };
         let p = Page { pieces: vec![rain.clone(), time], ..Page::blank() };
         let rows = render_at(&p, &r, 4.0);
-        let fx: Vec<String> = crate::lcd_fx::frame(Fx::Rain, crate::lcd_fx::tenths(Fx::Rain, 4.0, 50), "", &crate::lcd_fx::Live::quiet()).iter().map(|row| row.iter().collect()).collect();
+        let fx: Vec<String> = crate::lcd_fx::frame(Fx::Rain, crate::lcd_fx::tenths(Fx::Rain, 4.0, 50), "", &crate::lcd_fx::Live::quiet(), size()).iter().map(|row| row.iter().collect()).collect();
         // the time covers the rain in its own five cells, and the rain falls round it
         assert_eq!(&rows[1].chars().skip(7).take(5).collect::<String>(), "04:40");
         for (k, row) in rows.iter().enumerate() {
@@ -2562,7 +2613,7 @@ mod tests {
             let cells = |q: &Piece| (q.row..q.row + q.height).flat_map(move |row| (q.col..q.col + q.width).map(move |c| (row, c))).collect::<Vec<_>>();
             let mut taken = Vec::new();
             for q in &p.pieces {
-                assert!(q.row + q.height <= ROWS && q.col + q.width <= COLS, "{key}: a block past the screen");
+                assert!(q.row + q.height <= LAID_OUT_ON.1 && q.col + q.width <= LAID_OUT_ON.0, "{key}: a block past the screen");
                 if !matches!(q.kind, Kind::Effect { .. }) {
                     for cell in cells(q) {
                         assert!(!taken.contains(&cell), "{key}: two blocks at {cell:?}");
@@ -2577,7 +2628,7 @@ mod tests {
             changed.pieces.pop();
             assert_ne!(changed.about(), p.about(), "{key}, changed");
             // and it draws: no row past the screen's width
-            assert!(render(&p, &r).iter().all(|row| row.chars().count() <= COLS as usize));
+            assert!(render(&p, &r).iter().all(|row| row.chars().count() <= size().0));
         }
         assert!(Page::built_in("blank").is_none() && Page::built_in("snow").is_none());
     }
@@ -2611,7 +2662,7 @@ mod tests {
         for key in ["rain", "starfield", "campfire", "aquarium", "music"] {
             let p = Page::built_in(key).unwrap();
             let Kind::Effect { fx, .. } = p.pieces[0].kind else { panic!("{key} is an effect") };
-            let tile: Vec<String> = crate::lcd_fx::frame(fx, crate::lcd_fx::still(fx), "EVGA", &crate::lcd_fx::Live::sample()).iter().map(|row| row.iter().collect::<String>().trim_end().to_string()).collect();
+            let tile: Vec<String> = crate::lcd_fx::frame(fx, crate::lcd_fx::still(fx), "EVGA", &crate::lcd_fx::Live::sample(size().0), size()).iter().map(|row| row.iter().collect::<String>().trim_end().to_string()).collect();
             assert_eq!(render_still(&p, &r), tile, "{key}");
         }
         // and words as the page comes in
@@ -2654,5 +2705,170 @@ mod tests {
         assert_eq!((at, &old.library[at]), (old.library.len() - 1, &Page::built_in("rain").unwrap()));
         assert_eq!(missing_built_ins(&old.library), ["weather"]);
         assert!(old.add_built_in("blank").is_none() && old.add_built_in("snow").is_none());
+    }
+
+    #[test]
+    fn the_screen_is_the_size_its_core_describes() {
+        // the Z10's core describes twenty by four, which the tests' keyboard is
+        assert_eq!(size(), (20, 4));
+        assert_eq!(screen()["control"], "lcd");
+        assert_eq!(size_of(&json!({ "control": "lcd", "kind": "text", "cols": 16, "rows": 2 })), (16, 2));
+        assert_eq!(size_of(&json!({ "cols": 300, "rows": 4 })), (255, 4), "a byte's worth at most");
+        assert_eq!(size_of(&json!({ "cols": 20 })), (0, 0), "none without its rows");
+        assert_eq!(size_of(&json!({ "cols": 20, "rows": 0 })), (0, 0));
+        assert_eq!(size_of(&Value::Null), (0, 0));
+    }
+
+    /// The readings the old code drew the fixture with (tests/fixtures/lcd_z10.json).
+    fn z10_readings() -> Readings {
+        Readings {
+            cpu_temp: Some(64.5),
+            cpu_load: Some(15.0),
+            cpu_ghz: Some(4.36875),
+            ram: Some((25.1, 60.2)),
+            gpu: Some(Gpu::of(45, 12, 1837, 13.13, 31.84)),
+            now: Some(Moment { hour: 21, minute: 5, weekday: 5, day: 9, month: 9, year: 2026 }),
+            profile: Some("DEFAULT 1".into()),
+            profile_number: Some(1),
+            mode: Some("PC MODE".into()),
+            rollover: Some("6 KEY".into()),
+            outside: Some((19.0, "Thunderstorm with hail".into())),
+            sensors: Default::default(),
+            game: Some(Game { name: "Hollow Knight Silksong".into(), since: 1000, ended: 1000 + 3720, minutes: 95, last: 0, changing: "Monitor to 120 Hz".into(), done: (2, 5) }),
+        }
+    }
+
+    /// FNV-1a, 64 bits, as the fixture's digests are.
+    fn fnv(text: &str) -> String {
+        let h = text.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x0100_0000_01b3));
+        format!("{h:016x}")
+    }
+
+    /// On a description of twenty by four the screen's engine draws what it drew before it took
+    /// the screen's size from the description (tests/fixtures/lcd_z10.json, written by the code at
+    /// 26095f5 from these readings): every layout Ectomatter ships and fifty of its own, at
+    /// moments, still, onboard, where each block lands and how far its corner reaches; every
+    /// effect's frames from the tiles' sample, from nothing heard and from a sound; where the
+    /// editor lands a block at each cell; and a page coming in each way.
+    #[test]
+    fn on_twenty_by_four_the_engine_draws_what_it_drew_before() {
+        assert_eq!(size(), (20, 4));
+        let fixture: Value = serde_json::from_str(&std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/lcd_z10.json")).unwrap()).unwrap();
+        let r = z10_readings();
+        let strings = |v: &Value| -> Vec<String> { v.as_array().unwrap().iter().map(|s| s.as_str().unwrap().to_string()).collect() };
+        let opt = |o: Option<(u8, u8, u8)>| o.map_or("-".to_string(), |(a, b, c)| format!("{a},{b},{c}"));
+        let opt4 = |o: Option<(u8, u8, u8, u8)>| o.map_or("-".to_string(), |(a, b, c, d)| format!("{a},{b},{c},{d}"));
+        let moments: Vec<f64> = fixture["moments"].as_array().unwrap().iter().map(|t| t.as_f64().unwrap()).collect();
+        for want in fixture["pages"].as_array().unwrap() {
+            let id = want["id"].as_str().unwrap();
+            let p = if want["page"].is_null() { Page::built_in(id).unwrap() } else { Page::from_json(&want["page"]).unwrap() };
+            for (k, t) in moments.iter().enumerate().filter(|_| !want["at"].as_array().unwrap().is_empty()) {
+                assert_eq!(render_at(&p, &r, *t), strings(&want["at"][k]), "{id} at {t}");
+            }
+            assert_eq!(render_still(&p, &r), strings(&want["still"]), "{id}, still");
+            assert_eq!(render_onboard(&p, &r), strings(&want["onboard"]), "{id}, onboard");
+            assert_eq!(json!(spans(&p, &r)), want["spans"], "{id}, where its blocks land");
+            assert_eq!(json!(pace(&p, &r)), want["pace"], "{id}, its pace");
+            for (i, q) in p.pieces.iter().enumerate() {
+                let reach = crate::screen_edit::room(&p, i, |h| least_at(q, &r, h), size());
+                assert_eq!(json!(reach), want["room"][i], "{id}, block {i}'s corner");
+            }
+            let s = size();
+            assert_eq!(json!([crate::screen_edit::first_room(&p, 4, 3, s), crate::screen_edit::first_room(&p, 20, 3, s)]), want["first_room"], "{id}, its first room");
+            assert_eq!(json!(crate::screen_edit::has_room(&p, crate::screen_edit::NEW_LEAST, s)), want["has_room"], "{id}");
+            assert_eq!(json!(crate::screen_edit::effect_spot(&p, None, s)), want["effect_spot"], "{id}, an effect's spot");
+            let fits: Vec<String> = (0..4u8)
+                .flat_map(|row| (0..20u8).map(move |col| (row, col)))
+                .map(|(row, col)| [opt(crate::screen_edit::fit(&p, row, col, 7, 1, 3, None, s)), opt(crate::screen_edit::fit(&p, row, col, 4, 2, 2, None, s)), opt4(crate::screen_edit::effect_spot(&p, Some((row, col)), s))].join(";"))
+                .collect();
+            assert_eq!(fnv(&fits.join("|")), want["fits"].as_str().unwrap(), "{id}, where a block lands at each cell");
+        }
+        // every effect, its frames on the whole screen
+        let moments: Vec<f64> = fixture["fx_moments"].as_array().unwrap().iter().map(|t| t.as_f64().unwrap()).collect();
+        let loud = crate::lcd_fx::Live { sound: (0..20).map(|c| (c as f32 * 0.7) % 13.0).collect(), pulse: (0..20).map(|c| (c * 3 % 7) as u8).collect() };
+        for fx in crate::lcd_fx::FXS {
+            for (name, live) in [("sample", crate::lcd_fx::Live::sample(20)), ("quiet", crate::lcd_fx::Live::quiet()), ("loud", loud.clone())] {
+                for word in ["EVGA", "", "ABCDEFGHIJKLMNOPQRSTUVWXYZ"] {
+                    let frames: Vec<String> = moments.iter().map(|t| crate::lcd_fx::frame(fx, *t, word, &live, size()).iter().map(|row| row.iter().collect::<String>()).collect::<Vec<_>>().join("\n")).collect();
+                    assert_eq!(fnv(&frames.join("\u{1e}")), fixture["fx"][fx.key()][format!("{name}/{word}")].as_str().unwrap(), "{fx:?}, {name}, {word:?}");
+                }
+            }
+        }
+        // a page coming in after another, each way
+        let turns = &fixture["turns"];
+        let (old, new) = (strings(&turns["old"]), strings(&turns["new"]));
+        for how in TRANSITIONS {
+            for seed in [1u64, 2, 7] {
+                let frames: Vec<Value> = crate::lcd_anim::page_turn(&old, &new, how, seed, size()).into_iter().map(|f| json!({ "rows": f.rows, "ms": f.ms, "phase": f.phase })).collect();
+                assert_eq!(json!(frames), turns["frames"][format!("{}/{seed}", how.key())], "{how:?}, seed {seed}");
+            }
+        }
+    }
+
+    /// A layout drawn on screens of other sizes: a row for each of the screen's rows, what lies
+    /// below its foot left out, a row running past its edge kept whole for what shows it to cut;
+    /// an effect across the whole screen draws that screen's frame of it; and with no screen, no
+    /// rows.
+    #[test]
+    fn a_layout_draws_on_a_screen_of_any_size() {
+        let r = z10_readings();
+        let library: Vec<Page> = BUILT_INS.iter().filter_map(|k| Page::built_in(k)).collect();
+        for screen in [(16, 2), (40, 4), (20, 8), (24, 3), (8, 1), (1, 1), (0, 0)] {
+            for p in &library {
+                for (t, still) in [(0.0, false), (4.2, false), (0.0, true)] {
+                    let (rows, spans) = lay_out(p, &r, t, still, screen);
+                    assert_eq!(rows.len(), screen.1, "{} on {screen:?}", p.id);
+                    // (on a screen as wide as the Z10's or wider, each row as the Z10 has it, as
+                    // far as the screen goes)
+                    let z10 = lay_out(p, &r, t, still, size());
+                    for (k, row) in rows.iter().enumerate().filter(|_| screen.0 >= 20 && !p.pieces.iter().any(|q| matches!(q.kind, Kind::Effect { .. }))) {
+                        let cut = |s: &str| s.chars().take(screen.0).collect::<String>().trim_end().to_string();
+                        assert_eq!(cut(row), cut(z10.0.get(k).map_or("", |s| s.as_str())), "{} on {screen:?}, row {k}", p.id);
+                    }
+                    assert_eq!(spans.len(), p.pieces.len());
+                }
+            }
+        }
+        // Stats, laid out for the Z10, on two rows of sixteen: its first two rows, which the
+        // screen's picture cuts at its edge
+        let stats = lay_out(&Page::stats(), &r, 0.0, false, (16, 2)).0;
+        assert_eq!(stats, ["CPU 64°  15% 4369MHz", "GPU 45°  12% 1837MHz"]);
+        assert_eq!(crate::lcd_draw::dots(&stats, (16, 2)), crate::lcd_draw::dots(&["CPU 64°  15% 436".into(), "GPU 45°  12% 183".into()], (16, 2)));
+        // and on forty by four as on the Z10, the rest of each row empty
+        assert_eq!(lay_out(&Page::stats(), &r, 0.0, false, (40, 4)).0, render(&Page::stats(), &r));
+        // a block wider than the screen is drawn as wide as the screen: the time in the middle
+        // of sixteen columns, as it is in the middle of the Z10's twenty
+        assert_eq!(lay_out(&Page::clock(), &r, 0.0, false, (16, 2)).0, ["", "    9:05 PM"]);
+        // each effect across the whole of a screen draws that screen's frame of it, behind a block
+        for size in [(16, 2), (40, 4), (20, 8)] {
+            for fx in crate::lcd_fx::FXS {
+                let (cols, rows) = (size.0 as u8, size.1 as u8);
+                let p = Page { pieces: vec![Piece { height: rows, ..block(0, 0, cols, Kind::Effect { fx, speed: 50, word: "EVGA".into() }) }, block(0, 0, 3, Kind::Text("TOP".into()))], ..Page::blank() };
+                let frame: Vec<String> = crate::lcd_fx::frame(fx, crate::lcd_fx::still(fx), "EVGA", &crate::lcd_fx::Live::sample(size.0), size).iter().map(|row| row.iter().collect::<String>()).collect();
+                let mut want: Vec<String> = frame.iter().map(|row| row.trim_end().to_string()).collect();
+                want[0] = format!("TOP{}", frame[0].chars().skip(3).collect::<String>()).trim_end().to_string();
+                assert_eq!(lay_out(&p, &r, 0.0, true, size).0, want, "{fx:?} on {size:?}");
+            }
+        }
+        // a block below the foot of a smaller screen lands nowhere and keeps its place; one
+        // running past its edge is kept whole, for what shows it to cut
+        let mut p = Page::blank();
+        p.pieces.push(block(3, 2, 6, Kind::Text("FOOT".into())));
+        p.pieces.push(Piece { height: 2, ..block(0, 12, 8, Kind::Text("A LONG WORD".into())) });
+        let (rows, spans) = lay_out(&p, &r, 0.0, false, (16, 2));
+        assert_eq!(rows, ["            A LONG", "            WORD"]);
+        assert_eq!(spans[0], (3, 2, 6));
+        // a saved layout's blocks past a smaller screen are kept, not cut to it, so the screen
+        // they were made for shows them again
+        let wide = json!({ "id": "w", "name": "Wide", "pieces": [{ "type": "text", "text": "FAR RIGHT", "row": 6, "col": 30, "width": 9, "right": false, "gap": 1, "height": 2 }] });
+        let back = Page::from_json(&wide).unwrap();
+        assert_eq!((back.pieces[0].row, back.pieces[0].col, back.pieces[0].width, back.pieces[0].height), (6, 30, 9, 2));
+        assert_eq!(render(&back, &r), ["", "", "", ""], "nothing of it on the Z10's");
+        assert_eq!(lay_out(&back, &r, 0.0, false, (40, 8)).0[6], format!("{}FAR RIGHT", " ".repeat(30)));
+        // (and a place past a byte's reach is brought within it)
+        let far = Page::from_json(&json!({ "id": "f", "name": "Far", "pieces": [{ "type": "text", "text": "X", "row": 900, "col": 255, "width": 255, "right": false, "gap": 1, "height": 255 }] })).unwrap();
+        assert_eq!((far.pieces[0].row, far.pieces[0].col, far.pieces[0].width, far.pieces[0].height), (254, 254, 1, 1));
+        // no screen: no rows, and nothing else to do
+        assert!(lay_out(&Page::stats(), &r, 0.0, false, (0, 0)).0.is_empty());
     }
 }

@@ -2814,7 +2814,8 @@ impl Front {
     /// The display in the picture of the keyboard showing `rows` (unlit unless `live`),
     /// in the screen's light, drawn again only when that changes.
     fn show_lcd(&mut self, live: bool, rows: &[String]) {
-        let rows: Vec<String> = rows.iter().take(4).map(|r| format!("{:<20}", r.chars().take(20).collect::<String>())).collect();
+        let (cols, lines) = crate::lcd_page::size();
+        let rows: Vec<String> = rows.iter().take(lines).map(|r| format!("{:<cols$}", r.chars().take(cols).collect::<String>())).collect();
         let lcd = (live && !rows.is_empty(), rows, self.page.lcd_color());
         if lcd != self.overlays.lcd {
             self.overlays.lcd = lcd;
@@ -9981,7 +9982,7 @@ impl Front {
                 line1: line1.into(),
                 line2: line2.into(),
                 pic,
-                field: crate::lcd_draw::field(rgb, lv, px(260.0)),
+                field: crate::lcd_draw::field(rgb, lv, px(260.0), px(52.0)),
                 on: false,
                 now: false,
                 paused: false,
@@ -10010,6 +10011,10 @@ impl Front {
             State::Missing => 3,
         };
         self.ui.set_lcd_state(state);
+        // (the screen's shape, as the keyboard's core describes it)
+        let (cols, rows) = crate::lcd_page::size();
+        self.ui.set_screen_cols(cols as i32);
+        self.ui.set_screen_rows(rows as i32);
         if self.page.dev.is_none() {
             return;
         }
@@ -10047,11 +10052,11 @@ impl Front {
             Some(p) => crate::lcd_page::render_at(p, &self.readings, t),
             None if game_tab => match game_page.flatten() {
                 Some(p) => crate::lcd_page::render_at(&p, &self.readings, t),
-                None => vec![String::new(); 4],
+                None => Vec::new(),
             },
             None => match &onboard {
                 Some(Some(p)) => crate::lcd_page::render_onboard(p, &self.onboard_readings()),
-                Some(None) => vec![String::new(); 4],
+                Some(None) => Vec::new(),
                 // (nothing sends the keyboard the time, so its clock's row is blank)
                 None if closed => {
                     let d = self.page.draft();
@@ -10066,7 +10071,7 @@ impl Front {
         if self.lcd_drawn.as_ref() != Some(&key) {
             let lv = level as f32 / 255.0;
             self.ui.set_lcd_big(crate::lcd_draw::picture(&rows, rgb, lv, px(lw), px(lh)));
-            self.ui.set_lcd_field(crate::lcd_draw::field(rgb, lv, px(lw)));
+            self.ui.set_lcd_field(crate::lcd_draw::field(rgb, lv, px(lw), px(lh)));
             self.lcd_drawn = Some(key);
         }
         self.refresh_playlist([light[1], light[2], light[3]], light[0]);

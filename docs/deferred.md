@@ -24,16 +24,20 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   `core_host.rs` tests, `lcd_parity.rs`); they belong with the core once it
   has a repository of its own.
 - The keyboard page still holds the Z10's: its board's regions and the
-  screen's fonts built in (`overlays.rs:92-97`, `lcd_draw.rs:18`, the knobs
+  screen's fonts built in (`overlays.rs`, `lcd_draw.rs`, the knobs
   `control_117`/`control_118` in `overlays.rs`), its screen's built-in apps
-  (`display.rs:13`), and the Z10's own setting ids (`device.rs`: `dimmer`,
-  `modes`, `displays/light`, `displays/apps`). The page's module is still
-  named for it (`z10.rs`, `z10::Page`).
+  (`display.rs:13`), its screen's own status screen, four rows as its firmware
+  draws them (`lcd_page.rs`, `status_rows`), and the Z10's own setting ids
+  (`device.rs`: `dimmer`, `modes`, `displays/light`, `displays/apps`). The
+  page's module is still named for it (`z10.rs`, `z10::Page`).
 - A key's box on the page is given in the description (`box`, EVGA's own
   editor's), not found from its piece in the art.
-- The screen is fixed at 20 by 4 (`lcd_page.rs:27-28`, `lcd_anim.rs:13-14`,
-  `layout_page.rs:555,906`, `screen_edit.rs`, `overlays.rs:14-15`,
-  `lcd_player.rs:94`), though the core describes its displays.
+- The layouts Ectomatter ships are laid out on the Z10's 20 by 4
+  (`lcd_page.rs`, `LAID_OUT_ON`, kept as data, as a saved layout's places
+  are): a screen of another size shows them cut off at its edges, or with room
+  to spare, and nothing lays them out anew for it. (The screen's size itself
+  is the one its core describes, `lcd_page::size`: boundary
+  `the_screen_is_the_size_its_core_describes`.)
 - The keyboard is one: `cores::keyboard()` is the first core describing a
   keyboard, and its page, screen and counts are that one's. A second
   keyboard's core starts but has no page.

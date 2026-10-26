@@ -10,11 +10,15 @@ use serde_json::Value;
 
 use crate::Overlay;
 
-/// the display: 20 x 4 cells of 8 x 8 pixels, each glyph 5 x 7 in columns 1 to 5
-const COLS: usize = 20;
-const ROWS: usize = 4;
-const PW: usize = COLS * 8;
-const PH: usize = ROWS * 8;
+/// the display: a cell of 8 x 8 pixels for each of the characters its core describes (see
+/// lcd_page::size), each glyph 5 x 7 in columns 1 to 5
+const CELL: usize = 8;
+
+/// The display's dots across and down, for its characters as its core describes them.
+fn dots() -> (usize, usize) {
+    let (cols, rows) = crate::lcd_page::size();
+    (cols * CELL, rows * CELL)
+}
 
 /// Where the real panel's dots sit in the screen's window: the room round
 /// them, in dots, on the left, the top, the right and the bottom. They sit
@@ -51,9 +55,11 @@ pub struct Overlays {
     pub panel_rev: u64,
     /// each slider's place along its travel, 0 to 1, once the keyboard says
     pub fracs: [Option<f32>; 2],
-    /// what the display shows: whether something drives it, its four rows, its backlight
+    /// what the display shows: whether something drives it, its rows, its backlight
     pub lcd: (bool, Vec<String>, [f64; 3]),
-    drawn_lcd: Option<(bool, Vec<String>, [f64; 3], (u32, u32), u32)>,
+    /// what it was drawn for: those, the panel's size, its dots' share of their cells, and the
+    /// display's own size in characters
+    drawn_lcd: Option<(bool, Vec<String>, [f64; 3], (u32, u32), u32, (usize, usize))>,
     /// how strong the glass's sheen is over the display, 1 as the art draws it
     pub glass_opacity: f32,
 }
@@ -162,10 +168,13 @@ impl Overlays {
     /// dots and the gutters either side of them fill its width, and the room
     /// above and below them is shared as the real panel's gutters share it
     /// (the window is a little taller than the gutters alone would make it).
-    fn dots_box(&self, pw: u32, ph: u32) -> [f32; 4] {
+    /// Dots too many rows for that keep their gutters above and below, and
+    /// the room either side is shared as the gutters there share it. `dots`
+    /// is how many the display has across and down (see [dots]).
+    fn dots_box(&self, pw: u32, ph: u32, (dw, dh): (usize, usize)) -> [f32; 4] {
         let [l, t, r, b] = GUTTER;
-        let pitch = pw as f32 / (PW as f32 + l + r);
-        let (w, h) = (PW as f32 * pitch, PH as f32 * pitch);
+        let pitch = (pw as f32 / (dw as f32 + l + r)).min(ph as f32 / (dh as f32 + t + b));
+        let (w, h) = (dw as f32 * pitch, dh as f32 * pitch);
         let (room_x, room_y) = (pw as f32 - w, ph as f32 - h);
         [room_x * l / (l + r), room_y * t / (t + b), w, h]
     }
@@ -181,21 +190,22 @@ impl Overlays {
     fn draw_panel(&mut self, bw: u32, dot: f32) {
         let [_, _, w, h] = self.panel_box(bw);
         let (pw, ph) = ((w.round().max(1.0)) as u32, (h.round().max(1.0)) as u32);
-        let key = (self.lcd.0, self.lcd.1.clone(), self.lcd.2, (pw, ph), (dot * 1000.0).round() as u32);
+        let key = (self.lcd.0, self.lcd.1.clone(), self.lcd.2, (pw, ph), (dot * 1000.0).round() as u32, crate::lcd_page::size());
         if self.drawn_lcd.as_ref() == Some(&key) && self.panel.is_some() {
             return;
         }
         let (live, rows, back) = (self.lcd.0, &self.lcd.1, self.lcd.2);
-        let mut lit = vec![false; PW * PH];
+        let ((cols, lines), (dw, dh)) = (crate::lcd_page::size(), dots());
+        let mut lit = vec![false; dw * dh];
         if live {
-            for r in 0..ROWS {
+            for r in 0..lines {
                 let mut text = self.lcd_text(rows.get(r).map_or("", |s| s.as_str()));
-                text.resize(COLS.max(text.len()), ' ');
-                for (c, ch) in text.iter().take(COLS).enumerate() {
+                text.resize(cols.max(text.len()), ' ');
+                for (c, ch) in text.iter().take(cols).enumerate() {
                     if *ch == '\u{2588}' {
-                        for y in 0..8 {
-                            for x in 0..8 {
-                                lit[(r * 8 + y) * PW + c * 8 + x] = true;
+                        for y in 0..CELL {
+                            for x in 0..CELL {
+                                lit[(r * CELL + y) * dw + c * CELL + x] = true;
                             }
                         }
                         continue;
@@ -204,23 +214,23 @@ impl Overlays {
                     for (x, col) in g.iter().enumerate() {
                         for y in 0..7 {
                             if (col >> y) & 1 == 1 {
-                                lit[(r * 8 + y) * PW + c * 8 + 1 + x] = true;
+                                lit[(r * CELL + y) * dw + c * CELL + 1 + x] = true;
                             }
                         }
                     }
                 }
             }
         }
-        let [mx, my, mw, mh] = self.dots_box(pw, ph);
-        let (cx, cy) = (mw / PW as f32, mh / PH as f32);
+        let [mx, my, mw, mh] = self.dots_box(pw, ph, (dw, dh));
+        let (cx, cy) = (mw / dw as f32, mh / dh as f32);
         // a gap round each dot where the cells are big enough to show one
         let dot = if cx >= 2.5 { dot } else { 1.0 };
         let n = (pw * ph) as usize;
         let (mut on, mut off) = (vec![0f32; n], vec![0f32; n]);
         // each dot a square, its edges shared out by how much of each pixel they cover
-        for y in 0..PH {
-            for x in 0..PW {
-                let into = if lit[y * PW + x] { &mut on } else { &mut off };
+        for y in 0..dh {
+            for x in 0..dw {
+                let into = if lit[y * dw + x] { &mut on } else { &mut off };
                 let (x0, y0) = (mx + x as f32 * cx, my + y as f32 * cy);
                 let (x1, y1) = (x0 + cx * dot, y0 + cy * dot);
                 for py in (y0.floor() as u32)..(y1.ceil() as u32).min(ph) {
@@ -306,13 +316,31 @@ mod tests {
         for bw in [649, 1264, 2528] {
             let [_, _, w, h] = o.panel_box(bw);
             let (pw, ph) = (w.round() as u32, h.round() as u32);
-            let [x, y, dw, dh] = o.dots_box(pw, ph);
-            let pitch = dw / PW as f32;
+            let [x, y, dw, dh] = o.dots_box(pw, ph, dots());
+            let pitch = dw / dots().0 as f32;
             let (left, top, right, bottom) = (x / pitch, y / pitch, (pw as f32 - x - dw) / pitch, (ph as f32 - y - dh) / pitch);
             eprintln!("board {bw} px: window {pw} x {ph} px, a dot {pitch:.3} px; room left {left:.2}, top {top:.2}, right {right:.2}, bottom {bottom:.2} dots");
-            assert!((dh / pitch - PH as f32).abs() < 1e-3, "the dots are square");
+            assert!((dh / pitch - dots().1 as f32).abs() < 1e-3, "the dots are square");
             assert!((left - 1.0).abs() < 1e-3 && (right - 3.0).abs() < 1e-3);
             assert!((top / bottom - 3.0).abs() < 1e-3);
+        }
+    }
+
+    /// A display of another size in the same window: its dots square and inside it, the room
+    /// round them shared as the gutters share it, its gutters kept on the side it fills.
+    #[test]
+    fn a_display_of_another_size_sits_in_the_window_as_the_z10_s_does() {
+        let o = Overlays::new();
+        let [_, _, w, h] = o.panel_box(1264);
+        let (pw, ph) = (w.round() as u32, h.round() as u32);
+        for (cols, rows) in [(16, 2), (40, 4), (20, 8), (8, 8)] {
+            let [x, y, dw, dh] = o.dots_box(pw, ph, (cols * 8, rows * 8));
+            let pitch = dw / (cols * 8) as f32;
+            assert!((dh / pitch - (rows * 8) as f32).abs() < 1e-3, "{cols} by {rows}: the dots are square");
+            let (left, top, right, bottom) = (x / pitch, y / pitch, (pw as f32 - x - dw) / pitch, (ph as f32 - y - dh) / pitch);
+            assert!(left >= 1.0 - 1e-3 && top >= 3.0 - 1e-3 && right >= 3.0 - 1e-3 && bottom >= 1.0 - 1e-3, "{cols} by {rows}: {left} {top} {right} {bottom}");
+            assert!((right / left - 3.0).abs() < 1e-3 && (top / bottom - 3.0).abs() < 1e-3, "{cols} by {rows}: {left} {top} {right} {bottom}");
+            assert!((left - 1.0).abs() < 1e-3 || (top - 3.0).abs() < 1e-3, "{cols} by {rows}: filling the window one way");
         }
     }
 }

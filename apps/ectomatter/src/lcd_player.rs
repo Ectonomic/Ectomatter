@@ -63,12 +63,13 @@ pub trait Sink: Send {
     fn send(&mut self, rows: &[String], cmd: u8) -> Result<(), ()>;
 }
 
-/// The Z10's screen, through the keyboard's core: each frame a call to it,
+/// The keyboard's screen, through the keyboard's core: each frame a call to it,
 /// `displays/show` with the rows, and handing the screen back
-/// `displays/hand-back`. The screen is there while the core says the
-/// keyboard is (`there`, kept by the keyboard's thread from the core's
-/// `device/added` and `device/removed`); a frame that doesn't go is tried
-/// again a moment later.
+/// `displays/hand-back`, each to the text display its core describes, by its
+/// `control` (none goes before it describes one). The screen is there while
+/// the core says the keyboard is (`there`, kept by the keyboard's thread from
+/// the core's `device/added` and `device/removed`); a frame that doesn't go is
+/// tried again a moment later.
 pub struct CoreSink {
     core: Option<crate::core_host::Core>,
     there: Arc<AtomicBool>,
@@ -91,19 +92,21 @@ impl Sink for CoreSink {
 
     fn send(&mut self, rows: &[String], cmd: u8) -> Result<(), ()> {
         let Some(core) = &self.core else { return Err(()) };
-        let r = if cmd == 0 { core.call("displays/hand-back", &serde_json::json!({ "control": "lcd" })) } else { core.call("displays/show", &serde_json::json!({ "control": "lcd", "rows": rows })) };
+        let Some(control) = crate::lcd_page::screen()["control"].as_str() else { return Err(()) };
+        let r = if cmd == 0 { core.call("displays/hand-back", &serde_json::json!({ "control": control })) } else { core.call("displays/show", &serde_json::json!({ "control": control, "rows": rows })) };
         self.failed = r.is_err().then(Instant::now);
         r.map(|_| ()).map_err(|_| ())
     }
 }
 
-/// Write the frame just sent where other programs read it: whole, then moved
-/// into place, so a reader never catches it half written. A courtesy: a
-/// failure never stops the screen.
+/// Write the frame just sent where other programs read it, a line for each of the
+/// screen's rows, each as wide as the screen: whole, then moved into place, so a
+/// reader never catches it half written. A courtesy: a failure never stops the screen.
 fn publish(path: &Path, rows: &[String]) {
-    let text: Vec<String> = (0..4).map(|i| {
-        let r: String = rows.get(i).map_or("", |s| s.as_str()).chars().take(20).collect();
-        format!("{r:<20}")
+    let (cols, n) = crate::lcd_page::size();
+    let text: Vec<String> = (0..n).map(|i| {
+        let r: String = rows.get(i).map_or("", |s| s.as_str()).chars().take(cols).collect();
+        format!("{r:<cols$}")
     }).collect();
     let tmp = path.with_extension("new");
     if let Some(d) = path.parent() {
@@ -494,14 +497,16 @@ impl Core {
         });
         let seed = (self.seeds)();
         let layout = show.layout.clone().filter(|p| p.as_shipped_game().is_none());
+        // (on the screen the keyboard's core describes)
+        let size = crate::lcd_page::size();
         self.session.frames = Some(match (layout, &self.draw) {
             (Some(page), Some(draw)) => {
                 let draw = draw.clone();
                 let from = Instant::now();
-                Playing::layout(seed, Arc::new(move || draw(&page, from.elapsed().as_secs_f64())), until, phase == "exit", self.stats.clone(), start)
+                Playing::layout(seed, size, Arc::new(move || draw(&page, from.elapsed().as_secs_f64())), until, phase == "exit", self.stats.clone(), start)
             }
-            _ if phase == "launch" => Playing::launch(seed, name, steps, done, until, self.stats.clone(), start),
-            _ => Playing::exit(seed, name, steps, minutes, done, until, self.stats.clone(), start),
+            _ if phase == "launch" => Playing::launch(seed, size, name, steps, done, until, self.stats.clone(), start),
+            _ => Playing::exit(seed, size, name, steps, minutes, done, until, self.stats.clone(), start),
         });
         self.session.kind = Some(phase);
         self.frame_until = 0.0;
@@ -643,7 +648,7 @@ impl Core {
         self.current.store(to, Ordering::Relaxed);
         let new = (self.stats)();
         let seed = (self.seeds)();
-        let frames = crate::lcd_anim::page_turn(&old, &new, self.playlist[to].1, seed);
+        let frames = crate::lcd_anim::page_turn(&old, &new, self.playlist[to].1, seed, crate::lcd_page::size());
         self.page_since = None;
         if self.paused {
             self.held = Some(0.0);
@@ -813,7 +818,7 @@ impl Core {
         if !self.sink.find() {
             return false;
         }
-        let blank = vec![String::new(); 4];
+        let blank = vec![String::new(); crate::lcd_page::size().1];
         let mut done = false;
         if self.sink.send(&blank, 1).is_ok() {
             done = !own || self.sink.send(&blank, 0).is_ok();

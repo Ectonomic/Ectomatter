@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::front::{color, hsv2rgb, hue_bar, keep_recent, new_rows, recent_colors, rgb2hsv, sv_square, NewFrom, WindowAsk, PRESETS};
-use crate::lcd_page::{DateFormat, Page, Readings, Screens, Source, COLS};
+use crate::lcd_page::{DateFormat, Page, Readings, Screens, Source};
 use crate::lighting::{ctl, Ctl};
 use crate::screen_edit::{self, Editor, Shows};
 use crate::{Cell, EdBlock, LayoutRow, LayoutWindow, MenuRow};
@@ -122,16 +122,19 @@ pub struct LayoutPage {
     /// column, width and height; none away from the screen and over other blocks)
     carry: Option<(usize, Option<(u8, u8, u8, u8)>)>,
     /// the effects' tiles in the Effect box, and the still pictures of the ones not chosen
-    /// as last drawn: for the light, the size and Bounce's word they were drawn for
+    /// as last drawn: for the light, the size and Bounce's word they were drawn for, and the
+    /// screen's own size
     tiles: Rc<VecModel<crate::FxTile>>,
-    stills: Option<(([u8; 3], u8, u32, String), Vec<slint::Image>)>,
+    stills: Option<(([u8; 3], u8, u32, String, crate::lcd_page::Size), Vec<slint::Image>)>,
     pick: Option<Pick>,
     /// a menu or the picker a press just closed, so its button's click doesn't open it again
     shut: Option<((f32, f32), Instant)>,
     rows: Rc<VecModel<LayoutRow>>,
     blocks: Rc<VecModel<EdBlock>>,
     cells: Rc<VecModel<Cell>>,
-    drawn: Option<(Vec<String>, [u8; 3], u8, u32)>,
+    /// the screen's picture as last drawn: its rows, light and level, its size in pixels, and
+    /// the screen's own size
+    drawn: Option<(Vec<String>, [u8; 3], u8, (u32, u32), crate::lcd_page::Size)>,
     /// the window changed under a resting pointer: what is under it now (its hover
     /// and its cursor) is asked for again, as if the pointer had moved
     rehover: bool,
@@ -304,7 +307,7 @@ impl LayoutPage {
                         if let Some(p) = cx.screens.library.get_mut(ed.page) {
                             let i = i.max(0) as usize;
                             let least = p.pieces.get(i).map_or(1, |q| crate::lcd_page::least(q, cx.readings));
-                            screen_edit::move_to(p, i, r, c, least);
+                            screen_edit::move_to(p, i, r, c, least, crate::lcd_page::size());
                             ed.chosen = Some(i);
                             out.edited = true;
                         }
@@ -318,7 +321,7 @@ impl LayoutPage {
                             let i = i.max(0) as usize;
                             // (how narrow it can be at each height it can have)
                             let q = p.pieces.get(i).cloned();
-                            screen_edit::size_to(p, i, w, h, |rows| q.as_ref().map_or(1, |q| crate::lcd_page::least_at(q, cx.readings, rows)));
+                            screen_edit::size_to(p, i, w, h, |rows| q.as_ref().map_or(1, |q| crate::lcd_page::least_at(q, cx.readings, rows)), crate::lcd_page::size());
                             out.edited = true;
                         }
                     }
@@ -327,7 +330,7 @@ impl LayoutPage {
                 Ask::Remove => {
                     if let Some(ed) = cx.editor.as_mut() {
                         if let (Some(_), Some(p)) = (ed.chosen, cx.screens.library.get_mut(ed.page)) {
-                            screen_edit::act(p, ed, Ctl::ScrRemove, 0, None);
+                            screen_edit::act(p, ed, Ctl::ScrRemove, 0, None, crate::lcd_page::size());
                             out.edited = true;
                         }
                     }
@@ -336,7 +339,7 @@ impl LayoutPage {
                     let first = cx.avail.first().copied().unwrap_or(Source::CpuTemp);
                     if let Some(ed) = cx.editor.as_mut() {
                         if let Some(p) = cx.screens.library.get_mut(ed.page) {
-                            out.edited |= screen_edit::add(p, ed, k.clamp(0, 3) as usize, first, cx.readings, None);
+                            out.edited |= screen_edit::add(p, ed, k.clamp(0, 3) as usize, first, cx.readings, None, crate::lcd_page::size());
                         }
                     }
                 }
@@ -361,7 +364,7 @@ impl LayoutPage {
                         let first = cx.avail.first().copied().unwrap_or(Source::CpuTemp);
                         if let Some(ed) = cx.editor.as_mut() {
                             if let Some(p) = cx.screens.library.get_mut(ed.page) {
-                                out.edited |= screen_edit::add(p, ed, kind, first, cx.readings, Some(at));
+                                out.edited |= screen_edit::add(p, ed, kind, first, cx.readings, Some(at), crate::lcd_page::size());
                             }
                         }
                     }
@@ -401,7 +404,7 @@ impl LayoutPage {
                         Ctl::ScrAlign | Ctl::ScrUnits | Ctl::ScrHours | Ctl::ScrFit => {
                             if let Some(ed) = cx.editor.as_mut() {
                                 if let Some(p) = cx.screens.library.get_mut(ed.page) {
-                                    screen_edit::act(p, ed, c, index.max(0) as usize, None);
+                                    screen_edit::act(p, ed, c, index.max(0) as usize, None, crate::lcd_page::size());
                                     out.edited = true;
                                 }
                             }
@@ -431,7 +434,7 @@ impl LayoutPage {
                     if ctl(id) == Ctl::ScrText {
                         if let Some(ed) = cx.editor.as_mut() {
                             if let Some(p) = cx.screens.library.get_mut(ed.page) {
-                                screen_edit::act(p, ed, Ctl::ScrText, 0, Some(&t));
+                                screen_edit::act(p, ed, Ctl::ScrText, 0, Some(&t), crate::lcd_page::size());
                                 out.edited = true;
                             }
                         }
@@ -551,20 +554,22 @@ impl LayoutPage {
     /// free cells under the pointer (see [screen_edit::fit]); None away from the screen and
     /// over other blocks.
     fn landing_at(&self, cx: &Cx, kind: usize, x: f32, y: f32) -> Option<(u8, u8, u8, u8)> {
+        let size = crate::lcd_page::size();
+        let (cols, rows) = (size.0 as f32, size.1 as f32);
         let (sx, sy, cw, ch) = (self.ui.get_cells_x(), self.ui.get_cells_y(), self.ui.get_cell_w(), self.ui.get_cell_h());
-        if x < sx || y < sy || x >= sx + cw * 20.0 || y >= sy + ch * 4.0 {
+        if x < sx || y < sy || x >= sx + cw * cols || y >= sy + ch * rows {
             return None;
         }
         let page = LayoutPage::page(cx)?;
         let first = cx.avail.first().copied().unwrap_or(Source::CpuTemp);
-        let (k, width, right) = screen_edit::new_block(kind, first);
+        let (k, width, right) = screen_edit::new_block(kind, first, size);
         let least = crate::lcd_page::least(&crate::lcd_page::Piece { kind: k, row: 0, col: 0, width, right, center: false, gap: 1, height: 1, scroll: true, date_format: Default::default() }, cx.readings).max(screen_edit::NEW_LEAST).min(width);
-        let (row, col) = (((y - sy) / ch).floor().clamp(0.0, 3.0) as u8, ((x - sx) / cw).floor().clamp(0.0, 19.0) as u8);
+        let (row, col) = (((y - sy) / ch).floor().clamp(0.0, rows - 1.0) as u8, ((x - sx) / cw).floor().clamp(0.0, cols - 1.0) as u8);
         // (an effect: the whole screen, or what other effects leave round the cell)
         if kind == 3 {
-            return screen_edit::effect_spot(page, Some((row, col)));
+            return screen_edit::effect_spot(page, Some((row, col)), size);
         }
-        screen_edit::fit(page, row, col, width, 1, least, None).map(|(r, c, w)| (r, c, w, 1))
+        screen_edit::fit(page, row, col, width, 1, least, None, size).map(|(r, c, w)| (r, c, w, 1))
     }
 
     fn close_menu(&mut self) {
@@ -804,6 +809,11 @@ impl LayoutPage {
             return;
         };
         let ed = ed.unwrap();
+        // (the screen's cells, as its core describes them, for its grid)
+        let size = crate::lcd_page::size();
+        let (cols, rows) = size;
+        self.ui.set_screen_cols(cols as i32);
+        self.ui.set_screen_rows(rows as i32);
         self.ui.set_name(page.name.as_str().into());
         let says = cx.screens.delete_says(ed.page, cx.onboard, |n| cx.profiles[n as usize - 1].clone());
         self.ui.set_confirm_title(format!("Delete {}?", page.name).into());
@@ -819,15 +829,16 @@ impl LayoutPage {
         let mut shown = page.clone();
         if let Some((kind, Some((r, c, width, height)))) = self.carry {
             let first = cx.avail.first().copied().unwrap_or(Source::CpuTemp);
-            let (k, _, right) = screen_edit::new_block(kind, first);
+            let (k, _, right) = screen_edit::new_block(kind, first, size);
             shown.pieces.push(crate::lcd_page::Piece { kind: k, row: r, col: c, width, right, center: false, gap: 1, height, scroll: true, date_format: Default::default() });
         }
         // each block outlined where it lands (a reading that runs long pushes the rest of
-        // its row along), with how far its corner can reach at each height it can have
+        // its row along), with how far its corner can reach at each height it can have; a
+        // block past the screen's edge (a layout made for a larger screen) at its edge
         let spans = crate::lcd_page::spans(&shown, cx.readings);
         let outline = |(row, start, len): (u8, usize, usize)| {
-            let col = start.min(COLS as usize - 1);
-            (row, col, len.clamp(1, COLS as usize - col))
+            let col = start.min(cols.saturating_sub(1));
+            (row, col, len.min(cols - col).max(1))
         };
         let blocks: Vec<EdBlock> = page
             .pieces
@@ -840,14 +851,15 @@ impl LayoutPage {
                 // for each height it can have: how far its corner reaches, and how near it may
                 // pull the block in, on one row never past where the block lands (a reading
                 // that runs long), on more rows as narrow as the block can be there
-                let reach: Vec<u8> = screen_edit::room(page, i, least).iter().map_while(|e| *e).collect();
+                let reach: Vec<u8> = screen_edit::room(page, i, least, size).iter().map_while(|e| *e).collect();
                 let ends: Vec<i32> = reach.iter().enumerate().map(|(k, e)| if k == 0 { (*e as i32).max((col + width) as i32) } else { *e as i32 }).collect();
                 let lows: Vec<i32> = (1..=reach.len() as u8).map(|h| (col + if h == 1 { (screen_edit::floor(p, 1, least) as usize).min(width) } else { screen_edit::floor(p, h, least) as usize }) as i32).collect();
                 EdBlock {
                     row: row as i32,
                     col: col as i32,
                     width: width as i32,
-                    height: p.height.max(1) as i32,
+                    // (as tall as the rows below it on the screen, as it's drawn, see lcd_page::fitted)
+                    height: (p.height as usize).min(rows.saturating_sub(row as usize)).max(1) as i32,
                     on: ed.chosen == Some(i),
                     fx: screen_edit::behind(p),
                     // (taller or shorter from its corner, where there is room for that)
@@ -877,8 +889,8 @@ impl LayoutPage {
                 self.ui.set_lit_chip(-1);
             }
         }
-        let rows = crate::lcd_page::render_at(&shown, cx.readings, cx.t);
-        self.draw(&rows, page.light.unwrap_or(default), cx.light[0]);
+        let lines = crate::lcd_page::render_at(&shown, cx.readings, cx.t);
+        self.draw(&lines, size, page.light.unwrap_or(default), cx.light[0]);
         // the box of the block selected
         let rig_w = self.ui.get_window_width() - crate::tokens::size::SIDEBAR - 2.0 * crate::tokens::space::MARGIN;
         let open = match self.menu {
@@ -892,28 +904,29 @@ impl LayoutPage {
         self.ui.set_box_h(b.h);
         self.ui.set_has_blocks(!page.pieces.is_empty());
         // (room for the least a new block starts in)
-        self.ui.set_bar_hint(if screen_edit::has_room(page, screen_edit::NEW_LEAST) { "Drag a block onto the screen." } else { "No room for another block. Narrow a block or remove one." }.into());
+        self.ui.set_bar_hint(if screen_edit::has_room(page, screen_edit::NEW_LEAST, size) { "Drag a block onto the screen." } else { "No room for another block. Narrow a block or remove one." }.into());
         crate::front::set_rows(&self.cells, b.cells);
         // an effect selected: the effects' tiles, its own lit and moving
         let chosen = ed.chosen.and_then(|i| page.pieces.get(i));
         if let Some(crate::lcd_page::Kind::Effect { fx, speed, word }) = chosen.map(|p| &p.kind) {
             let tile_w = (((rig_w - 12.0) / 2.0 - 32.0 - 24.0) / 4.0 - 12.0).max(20.0);
             let sc = self.scale().max(1.0);
+            // (each tile's picture its art's shape, the screen's in its middle, see [crate::lcd_draw::picture])
             let (w, h) = ((tile_w * sc).round() as u32, (tile_w / 5.0 * sc).round() as u32);
             let rgb = crate::z10::as_lit(page.light.unwrap_or(default));
             let lv = cx.light[0] as f32 / 255.0;
             let word = crate::lcd_page::spell(word);
-            let rows_of = |f: [[char; 20]; 4]| -> Vec<String> { f.iter().map(|r| r.iter().collect()).collect() };
-            let key = (rgb, cx.light[0], w, word.clone());
+            let rows_of = |f: crate::lcd_fx::Grid| -> Vec<String> { f.iter().map(|r| r.iter().collect()).collect() };
+            let key = (rgb, cx.light[0], w, word.clone(), size);
             if self.stills.as_ref().is_none_or(|(k, _)| *k != key) {
                 // (each as the mock's tiles stand still: four seconds in)
-                let sample = crate::lcd_fx::Live::sample();
-                let pics = crate::lcd_fx::FXS.iter().map(|f| crate::lcd_draw::picture(&rows_of(crate::lcd_fx::frame(*f, crate::lcd_fx::still(*f), &word, &sample)), rgb, lv, w, h)).collect();
+                let sample = crate::lcd_fx::Live::sample(cols);
+                let pics = crate::lcd_fx::FXS.iter().map(|f| crate::lcd_draw::picture_on(&rows_of(crate::lcd_fx::frame(*f, crate::lcd_fx::still(*f), &word, &sample, size)), size, rgb, lv, w, h)).collect();
                 self.stills = Some((key, pics));
             }
             let stills = &self.stills.as_ref().unwrap().1;
-            let live = crate::lcd_fx::live(*fx, *speed, cx.readings.cpu_load.unwrap_or(0.0));
-            let moving = crate::lcd_draw::picture(&rows_of(crate::lcd_fx::frame(*fx, crate::lcd_fx::tenths(*fx, cx.t, *speed), &word, &live)), rgb, lv, w, h);
+            let live = crate::lcd_fx::live(*fx, *speed, cx.readings.cpu_load.unwrap_or(0.0), cols);
+            let moving = crate::lcd_draw::picture_on(&rows_of(crate::lcd_fx::frame(*fx, crate::lcd_fx::tenths(*fx, cx.t, *speed), &word, &live, size)), size, rgb, lv, w, h);
             let tiles: Vec<crate::FxTile> = crate::lcd_fx::FXS
                 .iter()
                 .enumerate()
@@ -923,18 +936,22 @@ impl LayoutPage {
         }
     }
 
-    /// The screen's picture, as the keyboard shows it, drawn at the window's own pixels.
-    fn draw(&mut self, rows: &[String], light: [u8; 3], level: u8) {
+    /// The screen's picture, as the keyboard shows it, drawn at the window's own pixels: as
+    /// wide as the editor shows a screen, and as tall as a screen of `size` is for that, its
+    /// cells square.
+    fn draw(&mut self, rows: &[String], size: crate::lcd_page::Size, light: [u8; 3], level: u8) {
         let sc = self.scale().max(1.0);
-        let (w, h) = ((780.0 * sc).round() as u32, (156.0 * sc).round() as u32);
+        let across = crate::tokens::size::EDIT_SCREEN;
+        let down = if size.0 > 0 { across * size.1 as f32 / size.0 as f32 } else { 0.0 };
+        let (w, h) = ((across * sc).round() as u32, (down * sc).round() as u32);
         let rgb = crate::z10::as_lit(light);
-        let key = (rows.to_vec(), rgb, level, w);
+        let key = (rows.to_vec(), rgb, level, (w, h), size);
         if self.drawn.as_ref() == Some(&key) {
             return;
         }
         let lv = level as f32 / 255.0;
-        self.ui.set_picture(crate::lcd_draw::picture(rows, rgb, lv, w, h));
-        self.ui.set_field(crate::lcd_draw::field(rgb, lv, w));
+        self.ui.set_picture(crate::lcd_draw::picture_on(rows, size, rgb, lv, w, h));
+        self.ui.set_field(crate::lcd_draw::field_on(size, rgb, lv, w, h));
         self.drawn = Some(key);
     }
 
