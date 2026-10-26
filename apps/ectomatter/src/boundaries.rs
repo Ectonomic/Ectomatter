@@ -167,7 +167,6 @@ mod tests {
     /// versions and says which it speaks in `initialize`." Every package and
     /// every example in the doc speaks the protocol the app speaks.
     #[test]
-    #[ignore = "known failure: the manifests say 3 and 4, the doc's examples 2 and 1 (docs/deferred.md, stage 2)"]
     fn every_package_speaks_the_apps_protocol() {
         let speaks = ectomatter_protocol::PROTOCOL;
         let mut found = Vec::new();

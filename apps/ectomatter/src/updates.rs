@@ -54,8 +54,12 @@ pub fn runs_here(m: &Value) -> Result<(), String> {
     if packages::version_key(needs) > packages::version_key(env!("CARGO_PKG_VERSION")) {
         return Err(format!("it needs Ectomatter {needs} or later"));
     }
-    if m["protocol"].as_u64().is_some_and(|p| p > 4) {
-        return Err("it speaks a newer core protocol than this Ectomatter".into());
+    let speaks = ectomatter_protocol::PROTOCOL as u64;
+    match m["protocol"].as_u64() {
+        Some(p) if p > speaks => return Err("it speaks a newer core protocol than this Ectomatter".into()),
+        Some(p) if p < speaks => return Err("it speaks an older core protocol than this Ectomatter".into()),
+        Some(_) => {}
+        None => return Err("it doesn’t say which core protocol it speaks".into()),
     }
     if !packages::works_here(m) {
         let names: Vec<String> = packages::systems_of(m).iter().map(|s| s.to_string()).collect();

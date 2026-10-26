@@ -60,7 +60,7 @@ pub fn start(core: Core, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
         let _ = nudge.lock().map(|n| n.send(Ask::Nudge));
     });
     std::thread::spawn(move || {
-        if let Err(e) = core.call("initialize", &json!({ "protocol": 3 })) {
+        if let Err(e) = crate::core_host::initialize(&core, Value::Null) {
             let _ = tell.send(Heard::Failed(e));
         }
         // every button heard as it's pressed, as the keyboard's every key is

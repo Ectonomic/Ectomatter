@@ -6684,7 +6684,7 @@ impl Front {
                     version: p.version().to_string(),
                     status,
                     on,
-                    warning: running.and_then(|r| r.warning.clone()).filter(|_| on),
+                    warning: running.and_then(|r| r.warning.clone()).or_else(|| self.hosted.refused(p.id()).map(String::from)).filter(|_| on),
                     glyph: i,
                     removable: p.added,
                     systems: p.systems().iter().map(|s| s.to_string()).collect(),

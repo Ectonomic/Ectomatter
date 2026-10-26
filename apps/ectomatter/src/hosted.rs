@@ -53,6 +53,8 @@ pub struct Hosted {
     readings: Readings,
     /// the devices told added since last asked, by plugin/device
     added: Vec<String>,
+    /// the packages that wouldn't start, each with why, for Settings to say
+    refused: std::collections::HashMap<String, String>,
 }
 
 /// The readings the plugins told, by plugin: what each lists it can read
@@ -144,7 +146,7 @@ pub fn started_elsewhere(id: &str) -> bool {
 
 impl Hosted {
     pub fn new(computer: Arc<dyn Computer>) -> Hosted {
-        Hosted { cores: Vec::new(), plugins: Vec::new(), computer, readings: Readings::default(), added: Vec::new() }
+        Hosted { cores: Vec::new(), plugins: Vec::new(), computer, readings: Readings::default(), added: Vec::new(), refused: std::collections::HashMap::new() }
     }
 
     /// The plugins' readings as they tell them, for whoever shows them.
@@ -196,12 +198,28 @@ impl Hosted {
         // (offscreen or in a test, a folder of its own that's gone after, so a check keeps nothing)
         let scratch = crate::desk::keeps_nothing().then(|| std::env::temp_dir().join(format!("ectomatter-{}-{}-{}", kind.word(), p.id(), std::process::id())));
         let data = scratch.clone().unwrap_or_else(|| p.data());
+        self.refused.remove(p.id());
+        // (a manifest saying another version of the protocol is never started)
+        let speaks = p.manifest.all["protocol"].as_u64();
+        if speaks != Some(ectomatter_protocol::PROTOCOL as u64) {
+            let e = format!("It speaks version {} of Ectomatter's core protocol, and this Ectomatter speaks {}.", speaks.map_or("(none said)".to_string(), |n| n.to_string()), ectomatter_protocol::PROTOCOL);
+            eprintln!("ectomatter: the {} {} wouldn’t start: {e}", p.id(), kind.word());
+            self.refused.insert(p.id().to_string(), e);
+            return;
+        }
         match Core::start_with(&p.dir, data, Box::new(NoDevices), Some(self.computer.clone())) {
             Ok(core) => {
-                match core.call("initialize", &json!({ "protocol": 4, "frontend": concat!("ectomatter ", env!("CARGO_PKG_VERSION")), "platform": platform(), "locale": crate::locale() })) {
-                    Ok(_) => eprintln!("ectomatter: the {} {} started", p.id(), kind.word()),
-                    Err(e) => eprintln!("ectomatter: the {} {}: {e}", p.id(), kind.word()),
+                // (one that speaks another protocol, or won't start, is stopped, and Settings says why)
+                if let Err(e) = crate::core_host::initialize(&core, Value::Null) {
+                    eprintln!("ectomatter: the {} {} wouldn’t start: {e}", p.id(), kind.word());
+                    let _ = core.call("shutdown", &Value::Null);
+                    self.refused.insert(p.id().to_string(), e);
+                    if let Some(d) = scratch {
+                        let _ = std::fs::remove_dir_all(d);
+                    }
+                    return;
                 }
+                eprintln!("ectomatter: the {} {} started", p.id(), kind.word());
                 self.readings.told_again(p.id());
                 let run = Run { package: p, core, warning: None, devices: Vec::new(), described: Vec::new(), section: None, scratch };
                 match kind {
@@ -211,6 +229,7 @@ impl Hosted {
             }
             Err(e) => {
                 eprintln!("ectomatter: the {} {} wouldn’t start: {e}", p.id(), kind.word());
+                self.refused.insert(p.id().to_string(), e);
                 if let Some(d) = scratch {
                     let _ = std::fs::remove_dir_all(d);
                 }
@@ -227,6 +246,11 @@ impl Hosted {
                 let _ = p.core.call("shutdown", &Value::Null);
             }
         }
+    }
+
+    /// Why a package wouldn't start, if it wouldn't.
+    pub fn refused(&self, id: &str) -> Option<&str> {
+        self.refused.get(id).map(String::as_str)
     }
 
     pub fn get(&self, id: &str) -> Option<&Run> {
@@ -389,11 +413,6 @@ impl Hosted {
     }
 }
 
-/// The system Ectomatter runs on, as the protocol's initialize names it.
-pub fn platform() -> String {
-    format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -441,6 +460,31 @@ mod tests {
 
     fn plugin(id: &str) -> Hosted {
         hosted(Kind::Plugin, id)
+    }
+
+    /// docs/core-protocol.md, section 9: a package whose manifest says another
+    /// version of the protocol isn't started, and Settings is told why; the
+    /// same package saying this one starts.
+    #[test]
+    fn a_package_speaking_another_protocol_isnt_started() {
+        let dir = std::env::temp_dir().join(format!("ectomatter-old-protocol-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let from = crate::packages::builtin_dir(Kind::Plugin).join("monitor-switcher");
+        std::fs::create_dir_all(&dir).unwrap();
+        for f in ["core.json", "core.wasm", "glyph.svg"] {
+            std::fs::copy(from.join(f), dir.join(f)).unwrap();
+        }
+        let manifest = std::fs::read_to_string(dir.join("core.json")).unwrap();
+        std::fs::write(dir.join("core.json"), manifest.replace("\"protocol\": 4", "\"protocol\": 3")).unwrap();
+        let mut ps = Hosted::new(Arc::new(Desk));
+        ps.start(crate::packages::Package::read(&dir, true).unwrap());
+        assert!(ps.get("monitor-switcher").is_none(), "not started");
+        assert_eq!(ps.refused("monitor-switcher"), Some("It speaks version 3 of Ectomatter's core protocol, and this Ectomatter speaks 4."));
+        std::fs::write(dir.join("core.json"), manifest).unwrap();
+        ps.start(crate::packages::Package::read(&dir, true).unwrap());
+        assert!(ps.get("monitor-switcher").is_some() && ps.refused("monitor-switcher").is_none(), "started, saying this one");
+        ps.stop("monitor-switcher");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A computer whose web answers as Open-Meteo, the National Weather

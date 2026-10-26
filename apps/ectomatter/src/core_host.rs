@@ -149,7 +149,7 @@ impl Usb for NoDevices {
 pub fn describe(dir: &Path) -> Option<Value> {
     let data = std::env::temp_dir().join(format!("ectomatter-describe-{}", std::process::id()));
     let core = Core::start(dir, data.clone(), Box::new(NoDevices)).ok()?;
-    let d = core.call("device/describe", &Value::Null).ok();
+    let d = initialize(&core, Value::Null).and_then(|_| core.call("device/describe", &Value::Null)).ok();
     let _ = core.call("shutdown", &Value::Null);
     let _ = std::fs::remove_dir_all(&data);
     d
@@ -525,6 +525,33 @@ impl Run {
             let _ = tell.send(Err(format!("the {} core took a call and never answered it", self.id)));
         }
     }
+}
+
+/// Meet a package as the protocol starts (docs/core-protocol.md, section 3):
+/// Ectomatter says the version of the protocol it speaks and what it is, and
+/// the package answers with the version it speaks, which must be the same.
+/// `more` adds to what's said (a test's `backups`). What it answered, or why
+/// it wouldn't start, in words for the person.
+pub fn initialize(core: &Core, more: Value) -> Result<Value, String> {
+    let mut params = serde_json::json!({
+        "protocol": ectomatter_protocol::PROTOCOL,
+        "frontend": concat!("ectomatter ", env!("CARGO_PKG_VERSION")),
+        "platform": platform(),
+        "locale": crate::locale(),
+    });
+    if let (Some(p), Value::Object(m)) = (params.as_object_mut(), more) {
+        p.extend(m);
+    }
+    let met = core.call("initialize", &params)?;
+    match met["protocol"].as_u64() {
+        Some(n) if n == ectomatter_protocol::PROTOCOL as u64 => Ok(met),
+        n => Err(format!("It speaks version {} of Ectomatter's core protocol, and this Ectomatter speaks {}.", n.map_or("(none said)".to_string(), |n| n.to_string()), ectomatter_protocol::PROTOCOL)),
+    }
+}
+
+/// The system Ectomatter runs on, as the protocol's initialize names it.
+pub fn platform() -> String {
+    format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
 }
 
 /// A core's manifest, as Ectomatter reads it (and the whole of it as written,
@@ -938,7 +965,7 @@ mod tests {
                 let wrong = Arc::new(Mutex::new(None));
                 let hid = Replay { log: log.clone(), wrong: wrong.clone() };
                 let core = Core::start(&core_dir(), data.clone(), Box::new(One(Some(Box::new(hid))))).unwrap();
-                core.call("initialize", &serde_json::json!({ "backups": false })).unwrap();
+                initialize(&core, serde_json::json!({ "backups": false })).unwrap();
                 let kind = c["name"].as_str().unwrap().split(' ').next().unwrap();
                 let (got, want) = match kind {
                     "state" => (core.call("device/read", &Value::Null), shared_state(&c["result"])),
@@ -1054,7 +1081,7 @@ mod tests {
         let dir = crate::cores::dir().join(crate::mouse::CORE);
         assert!(dir.join("core.wasm").exists(), "the SteelSeries module isn't built: run tools/build-cores.sh");
         let core = Core::start(&dir, data.clone(), Box::new(One(Some(Box::new(fake))))).unwrap();
-        core.call("initialize", &serde_json::json!({ "protocol": 3 })).unwrap();
+        initialize(&core, Value::Null).unwrap();
         (core, sent, data)
     }
 
@@ -1104,7 +1131,7 @@ mod tests {
         let data = std::env::temp_dir().join(format!("ectomatter-mouse-host-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&data);
         let core = Core::start(&crate::cores::dir().join(crate::mouse::CORE), data.clone(), Box::new(usb)).unwrap();
-        core.call("initialize", &serde_json::json!({ "protocol": 3 })).unwrap();
+        initialize(&core, Value::Null).unwrap();
         let woken = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let w = woken.clone();
         core.on_told(move || {
@@ -1175,7 +1202,7 @@ mod tests {
         let data = std::env::temp_dir().join(format!("ectomatter-mouse-watch-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&data);
         let core = Core::start(&crate::cores::dir().join(crate::mouse::CORE), data.clone(), Box::new(usb)).unwrap();
-        core.call("initialize", &serde_json::json!({ "protocol": 3 })).unwrap();
+        initialize(&core, Value::Null).unwrap();
         let before = sent.lock().unwrap().len();
         let heard = |n: usize| {
             let mut got: Vec<(String, Value)> = Vec::new();
@@ -1283,7 +1310,7 @@ mod tests {
         let usb = Z10Whole { editor: Some(Box::new(editor)), reports: reports.clone(), gone: gone.clone() };
         let data = std::env::temp_dir().join(format!("ectomatter-core-keys-{}", std::process::id()));
         let core = Core::start(&core_dir(), data.clone(), Box::new(usb)).unwrap();
-        core.call("initialize", &serde_json::json!({ "backups": false })).unwrap();
+        initialize(&core, serde_json::json!({ "backups": false })).unwrap();
         assert_eq!(core.call("input/watch", &serde_json::json!({ "all": false })).unwrap()["listening"], true);
         let heard = |n: usize| {
             let mut got: Vec<(String, Value)> = Vec::new();
@@ -1343,7 +1370,7 @@ mod tests {
         let editor = Sent(sent.clone(), Clock(Arc::new(Mutex::new(Vec::new())), Vec::new()), Arc::new(Mutex::new(Vec::new())));
         let data = std::env::temp_dir().join(format!("ectomatter-core-lcd-{}", std::process::id()));
         let core = Core::start(&core_dir(), data.clone(), Box::new(One(Some(Box::new(editor))))).unwrap();
-        core.call("initialize", &serde_json::json!({ "backups": false })).unwrap();
+        initialize(&core, serde_json::json!({ "backups": false })).unwrap();
         let rows: Vec<String> = ["CPU  40\u{b0}C   5%", "GPU  38C   2%", "\u{2588}\u{2588}\u{2588} RAM 8.1/31 GB", "VRAM 2.0/31 GB      x"].map(String::from).to_vec();
         core.call("displays/show", &serde_json::json!({ "rows": rows })).unwrap();
         core.call("displays/hand-back", &Value::Null).unwrap();
@@ -1419,7 +1446,7 @@ mod tests {
         let data = std::env::temp_dir().join(format!("ectomatter-mouse-live-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&data);
         let core = Core::start(&crate::cores::dir().join(crate::mouse::CORE), data.clone(), Box::new(Hidapi::new())).unwrap();
-        core.call("initialize", &serde_json::json!({ "protocol": 3 })).unwrap();
+        initialize(&core, Value::Null).unwrap();
         let d = serde_json::json!({ "device": "sensei310-1" });
         let was = core.call("settings/get", &d).unwrap()["values"]["cpi1"].as_u64().unwrap();
         eprintln!("the first preset was {was} CPI");
@@ -1428,7 +1455,7 @@ mod tests {
             let d2 = std::env::temp_dir().join(format!("ectomatter-mouse-read-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&d2);
             let c = Core::start(&crate::cores::dir().join(crate::mouse::CORE), d2.clone(), Box::new(Hidapi::new())).unwrap();
-            c.call("initialize", &serde_json::json!({ "protocol": 3 })).unwrap();
+            initialize(&c, Value::Null).unwrap();
             let v = c.call("settings/get", &serde_json::json!({ "device": "sensei310-1" })).unwrap()["values"]["cpi1"].as_u64().unwrap();
             let _ = std::fs::remove_dir_all(&d2);
             v
@@ -1492,7 +1519,7 @@ mod tests {
         // met again, the mouse saying #FF1000, not the green Ectomatter set
         let fake = FakeMouse { sent: Arc::new(Mutex::new(Vec::new())), waiting: VecDeque::new() };
         let core = Core::start(&crate::cores::dir().join(crate::mouse::CORE), data.clone(), Box::new(One(Some(Box::new(fake))))).unwrap();
-        core.call("initialize", &serde_json::json!({ "protocol": 3 })).unwrap();
+        initialize(&core, Value::Null).unwrap();
         let l = core.call("lighting/get", &d).unwrap();
         core.call("shutdown", &Value::Null).unwrap();
         let _ = std::fs::remove_dir_all(&data);
@@ -1682,7 +1709,7 @@ mod tests {
         let fake = Recorded { answers, pending: None, delay: Duration::from_millis(20), frames: frames.clone() };
         let data = std::env::temp_dir().join(format!("ectomatter-core-during-{}", std::process::id()));
         let core = Core::start(&core_dir(), data.clone(), Box::new(One(Some(Box::new(fake))))).unwrap();
-        core.call("initialize", &serde_json::json!({ "backups": false })).unwrap();
+        initialize(&core, serde_json::json!({ "backups": false })).unwrap();
         let reader = core.clone();
         let read = std::thread::spawn(move || {
             let t = Instant::now();
@@ -1743,7 +1770,7 @@ mod tests {
         let when = Arc::new(Mutex::new(Vec::new()));
         let fake = Sent(sent.clone(), Clock(Arc::new(Mutex::new(Vec::new())), Vec::new()), when.clone());
         let core = Core::start(&core_dir(), data.clone(), Box::new(One(Some(Box::new(fake))))).unwrap();
-        core.call("initialize", &serde_json::json!({ "backups": false })).unwrap();
+        initialize(&core, serde_json::json!({ "backups": false })).unwrap();
         let wave = serde_json::json!({ "keys": { "effect": "wave", "effects": { "wave": { "cycle": 1000 } } } });
         core.call("lighting/preview", &serde_json::json!({ "lighting": wave, "tab": "test" })).unwrap();
         std::thread::sleep(Duration::from_millis(200));
@@ -1783,7 +1810,7 @@ mod tests {
         let frames = Arc::new(Mutex::new(Vec::new()));
         let data = std::env::temp_dir().join(format!("ectomatter-core-beat-{}", std::process::id()));
         let core = Core::start(&core_dir(), data.clone(), Box::new(One(Some(Box::new(Clock(frames.clone(), Vec::new())))))).unwrap();
-        core.call("initialize", &serde_json::json!({ "backups": false })).unwrap();
+        initialize(&core, serde_json::json!({ "backups": false })).unwrap();
         let lighting = serde_json::json!({ "mode": "breathing", "breathing": { "speed": 2, "colors": [{ "brightness": 255, "color": [255, 0, 0] }] } });
         core.call("lighting/preview", &serde_json::json!({ "lighting": evga_z10::shared::lighting_of(&lighting), "tab": "test" })).unwrap();
         std::thread::sleep(Duration::from_millis(2100));

@@ -99,6 +99,15 @@ impl Kb {
 /// keyboard is plugged in, as it tells, is kept in `there`.
 pub fn start(z10: Result<crate::core_host::Core, String>, tell: Sender<Heard>, there: std::sync::Arc<std::sync::atomic::AtomicBool>) -> mpsc::Sender<Ask> {
     let (ask, asked) = mpsc::channel::<Ask>();
+    // (a core that speaks another protocol is let go: the keyboard's page says it can't reach it)
+    let z10 = z10.and_then(|core| match crate::core_host::initialize(&core, Value::Null) {
+        Ok(_) => Ok(core),
+        Err(e) => {
+            eprintln!("ectomatter: the keyboard's core wouldn’t start: {e}");
+            let _ = core.call("shutdown", &Value::Null);
+            Err(e)
+        }
+    });
     let kb = Kb(z10);
     if let Ok(core) = &kb.0 {
         // (what the Lighting page is drawn from: no device is asked, so it comes at once)

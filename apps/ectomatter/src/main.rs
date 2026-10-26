@@ -586,6 +586,7 @@ fn main() {
     if let Some(path) = args.iter().position(|a| a == "--read-state").and_then(|i| args.get(i + 1)) {
         let kb = device::z10(&cores::dir().join(z10::CORE), core_data(z10::CORE));
         let state = kb.as_ref().map_err(|e| e.clone()).and_then(|k| {
+            core_host::initialize(k, serde_json::Value::Null)?;
             let s = k.call("device/read", &serde_json::Value::Null);
             let _ = k.call("device/release", &serde_json::Value::Null);
             s

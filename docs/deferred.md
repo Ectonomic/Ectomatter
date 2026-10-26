@@ -21,11 +21,6 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   (`hosted.rs:141-143` `started_elsewhere`, `main.rs:1937-1938`,
   `main.rs:1969-1972`, `main.rs:583`), with switch keys of their own
   (`packages.rs:147-153`).
-- Protocol versions drift and nothing checks them: the app sends 4 to plugins
-  (`hosted.rs:201`), 3 to the mouse (`mouse.rs:63`) and nothing to the Z10;
-  both cores' manifests and answers say 3; the doc's examples say 2 and 1
-  (`docs/core-protocol.md`, section 3); the answer is ignored
-  (`hosted.rs:202`). `wit/core.wit:12` is `@2.0.0`.
 - The app links the Z10's driver (`Cargo.toml:13`) and uses it outside tests
   in 13 places: `display.rs:96`, `lcd_player.rs:49`, `lcd_page.rs` (8 uses of
   `lcd::lcd_text`), `layout_page.rs:905`, `macros.rs:345`,

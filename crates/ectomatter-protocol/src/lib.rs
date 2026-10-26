@@ -15,6 +15,17 @@ pub mod media;
 /// plugin's manifest says it speaks.
 pub const PROTOCOL: u32 = 4;
 
+/// A package's answer to `initialize` (section 3): the protocol it speaks,
+/// its name and version, when Ectomatter asks for the one it speaks; a
+/// message for the person when it asks for another, or says none.
+pub fn meet(params: &Value, name: &str, version: &str) -> Result<Value, String> {
+    match params["protocol"].as_u64() {
+        Some(n) if n == PROTOCOL as u64 => Ok(json!({ "protocol": PROTOCOL, "name": name, "version": version })),
+        Some(n) => Err(format!("{name} speaks version {PROTOCOL} of Ectomatter's core protocol, and this Ectomatter speaks {n}. Update whichever is older.")),
+        None => Err(format!("{name} speaks version {PROTOCOL} of Ectomatter's core protocol, and wasn't told which this Ectomatter speaks.")),
+    }
+}
+
 use serde_json::{Value, json};
 
 /// How a stored macro plays on a control, by the protocol's names.
@@ -196,6 +207,15 @@ impl Action {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A package meets Ectomatter speaking this version, and declines one
+    /// asking for another or for none, in words for the person.
+    #[test]
+    fn a_package_meets_only_its_own_version() {
+        assert_eq!(meet(&json!({ "protocol": PROTOCOL }), "Weather Feed", "1.0.0").unwrap(), json!({ "protocol": PROTOCOL, "name": "Weather Feed", "version": "1.0.0" }));
+        assert_eq!(meet(&json!({ "protocol": 3 }), "Weather Feed", "1.0.0").unwrap_err(), "Weather Feed speaks version 4 of Ectomatter's core protocol, and this Ectomatter speaks 3. Update whichever is older.");
+        assert!(meet(&Value::Null, "Weather Feed", "1.0.0").is_err());
+    }
 
     /// Every action reads back as itself once written, and the words a person
     /// can read are used where the protocol has them.
