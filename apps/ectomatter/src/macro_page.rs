@@ -25,7 +25,7 @@ pub enum Ask {
     Maximize,
     Close,
     /// the libraries' drop-down opened, under the list's top
-    Libs(f32, f32, f32),
+    Libs(f32, f32, f32, f32),
     /// a macro chosen, its menu opened, a new one made: in a library (0 the
     /// keyboard's, 1 Ectomatter's), which then shows
     Choose(i32, i32),
@@ -40,8 +40,8 @@ pub enum Ask {
     ChainDrag(i32, f32, f32, f32, f32),
     WaitDone(i32, String),
     WaitCancel,
-    Tool(i32, f32, f32, f32),
-    Plays(f32, f32, f32),
+    Tool(i32, f32, f32, f32, f32),
+    Plays(f32, f32, f32, f32),
     CountDone(String),
     Revert,
     Save,
@@ -94,8 +94,11 @@ enum Pick {
 struct Menu {
     kind: Kind,
     anchor: (f32, f32, f32),
+    /// how wide what opened it is (a menu is never narrower), and how wide the menu is,
+    /// as its rows need (src/menu_size.rs)
+    under: f32,
     width: f32,
-    /// its right edge on the button's, as the More button's menu hangs
+    /// its right edge on the button's, as the More button's menu hangs: the button's width
     right: f32,
     /// dismissed, nothing in the chain stays chosen
     let_go: bool,
@@ -197,7 +200,7 @@ impl MacroPage {
         on!(on_minimize, Ask::Minimize);
         on!(on_maximize, Ask::Maximize);
         on!(on_close_window, Ask::Close);
-        on!(on_libs, |x, y, h| Ask::Libs(x, y, h));
+        on!(on_libs, |x, y, h, w| Ask::Libs(x, y, h, w));
         on!(on_choose, |l, n| Ask::Choose(l, n));
         on!(on_row_menu, |l, n, x, y| Ask::RowMenu(l, n, x, y));
         on!(on_new_in, |l| Ask::NewIn(l));
@@ -210,8 +213,8 @@ impl MacroPage {
         on!(on_chain_drag, |i, x, y, ox, oy| Ask::ChainDrag(i, x, y, ox, oy));
         on!(on_wait_done, |i, t| Ask::WaitDone(i, t.to_string()));
         on!(on_wait_cancel, Ask::WaitCancel);
-        on!(on_tool, |k, x, y, h| Ask::Tool(k, x, y, h));
-        on!(on_plays, |x, y, h| Ask::Plays(x, y, h));
+        on!(on_tool, |k, x, y, h, w| Ask::Tool(k, x, y, h, w));
+        on!(on_plays, |x, y, h, w| Ask::Plays(x, y, h, w));
         on!(on_count_done, |t| Ask::CountDone(t.to_string()));
         on!(on_revert, Ask::Revert);
         on!(on_save, Ask::Save);
@@ -285,9 +288,9 @@ impl MacroPage {
         for ask in asks {
             // (the libraries' drop-down, and a library chosen on it, work while the
             // keyboard's is still being read, so another can always be shown)
-            if let Ask::Libs(x, y, h) = ask {
-                // (the menu as wide as the drop-down, which is all its button)
-                self.open_menu(page, Kind::Libs, (x, y, h), 270.0, 270.0, false);
+            if let Ask::Libs(x, y, h, w) = ask {
+                // (the menu at least as wide as the drop-down, which is all its button)
+                self.open_menu(page, Kind::Libs, (x, y, h), w, 0.0, false);
                 continue;
             }
             if let (Ask::MenuChose(i), Some(Kind::Libs)) = (&ask, self.menu.as_ref().map(|m| m.kind)) {
@@ -346,7 +349,7 @@ impl MacroPage {
                         self.ed.ins = None;
                         self.ed.edit_name = false;
                     }
-                    self.open_menu(page, Kind::Macro, (x, y, 0.0), 220.0, 0.0, false);
+                    self.open_menu(page, Kind::Macro, (x, y, 0.0), 0.0, 0.0, false);
                 }
                 Ask::NewIn(_) => {
                     if self.ed.rec.is_none() {
@@ -357,7 +360,7 @@ impl MacroPage {
                 Ask::Rename => self.start_rename(page),
                 Ask::NameDone(t) => self.ed.commit_name(page, &t),
                 Ask::NameCancel => self.ed.edit_name = false,
-                Ask::More(x, y, h) => self.open_menu(page, Kind::Macro, (x, y, h), 240.0, 26.0, false),
+                Ask::More(x, y, h) => self.open_menu(page, Kind::Macro, (x, y, h), 0.0, crate::tokens::size::QUIET, false),
                 Ask::ChainClick(id, i, x, y, h) => {
                     let (locked, rec) = (self.locked(page), self.ed.rec.is_some());
                     if locked || rec {
@@ -368,12 +371,12 @@ impl MacroPage {
                         hit::STEP => {
                             self.ed.sel_step = Some(i);
                             self.ed.ins = Some(i + 1);
-                            self.open_menu(page, Kind::Step(i), (x, y, h), 220.0, 0.0, true);
+                            self.open_menu(page, Kind::Step(i), (x, y, h), 0.0, 0.0, true);
                         }
                         hit::JOINT => {
                             self.ed.ins = Some(i);
                             self.ed.sel_step = None;
-                            self.open_menu(page, Kind::Insert, (x, y, h), 220.0, 0.0, true);
+                            self.open_menu(page, Kind::Insert, (x, y, h), 0.0, 0.0, true);
                         }
                         hit::WAIT => self.ed.start_wait_edit(page, i),
                         hit::END => self.ed.ins = None,
@@ -402,8 +405,8 @@ impl MacroPage {
                 }
                 Ask::WaitDone(i, t) => self.ed.set_wait(page, i.max(0) as usize, &t),
                 Ask::WaitCancel => self.ed.edit_wait = None,
-                Ask::Tool(k, x, y, h) => match k {
-                    0 => self.open_menu(page, Kind::Timing, (x, y, h), 290.0, 0.0, false),
+                Ask::Tool(k, x, y, h, w) => match k {
+                    0 => self.open_menu(page, Kind::Timing, (x, y, h), w, 0.0, false),
                     1 => {
                         if let Some(d) = self.current_draft(page) {
                             d.steps.clear();
@@ -411,10 +414,10 @@ impl MacroPage {
                         self.ed.ins = None;
                         self.ed.sel_step = None;
                     }
-                    2 | 3 => self.open_menu(page, Kind::Keys { media: k == 3, change: None }, (x, y, h), 260.0, 0.0, false),
+                    2 | 3 => self.open_menu(page, Kind::Keys { media: k == 3, change: None }, (x, y, h), w, 0.0, false),
                     4 => self.ed.insert_wait(page),
                     // (an action, or another macro: Ectomatter's own macros only)
-                    6 | 7 if self.ed.lib == Lib::Ectomatter => self.open_menu(page, Kind::Jobs { macros: k == 7, change: None }, (x, y, h), 280.0, 0.0, false),
+                    6 | 7 if self.ed.lib == Lib::Ectomatter => self.open_menu(page, Kind::Jobs { macros: k == 7, change: None }, (x, y, h), w, 0.0, false),
                     5 => {
                         if self.ed.rec.is_some() {
                             self.stop_recording(page, true, None);
@@ -424,7 +427,7 @@ impl MacroPage {
                     }
                     _ => {}
                 },
-                Ask::Plays(x, y, h) => self.open_menu(page, Kind::Plays, (x, y, h), 260.0, 0.0, false),
+                Ask::Plays(x, y, h, w) => self.open_menu(page, Kind::Plays, (x, y, h), w, 0.0, false),
                 Ask::CountDone(t) => {
                     let c: u32 = t.trim().parse().unwrap_or(2);
                     if let Some(d) = self.current_draft(page) {
@@ -500,7 +503,7 @@ impl MacroPage {
 
     // ------------------------------------------------------------ menus
 
-    fn open_menu(&mut self, page: &Page, kind: Kind, anchor: (f32, f32, f32), width: f32, right: f32, let_go: bool) {
+    fn open_menu(&mut self, page: &Page, kind: Kind, anchor: (f32, f32, f32), under: f32, right: f32, let_go: bool) {
         // the second click on the button whose menu a press just closed
         if let Some((at, when, go)) = self.shut.take() {
             if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
@@ -512,7 +515,7 @@ impl MacroPage {
             }
         }
         self.close_menu(false);
-        self.menu = Some(Menu { kind, anchor, width, right, let_go, query: String::new(), picks: Vec::new() });
+        self.menu = Some(Menu { kind, anchor, under, width: under, right, let_go, query: String::new(), picks: Vec::new() });
         self.ui.set_menu_query("".into());
         self.build_menu(page);
         self.place_menu();
@@ -528,13 +531,11 @@ impl MacroPage {
         let Some(m) = &self.menu else { return };
         let (ax, ay, ah) = m.anchor;
         let (h, win) = (self.ui.get_menu_natural(), self.ui.get_window_height());
-        let (below, above) = (win - ay - ah - 14.0, ay - 70.0);
-        let down = h <= below || below >= h.min(260.0) || below >= above;
-        let room = if down { below } else { above };
+        let (top, most) = crate::menu_size::hang(win, (ay, ah), h);
         self.ui.set_menu_w(m.width);
         self.ui.set_menu_ax(if m.right > 0.0 { ax + m.right - m.width } else { ax });
-        self.ui.set_menu_top(if down { ay + ah + 6.0 } else { ay - 6.0 - h.min(room) });
-        self.ui.set_menu_max(if h > room { room } else { win * 0.7 });
+        self.ui.set_menu_top(top);
+        self.ui.set_menu_max(most);
     }
 
     fn close_menu(&mut self, dismissed: bool) {
@@ -586,13 +587,25 @@ impl MacroPage {
             rows.push(MenuRow { sub: count.into(), ..row(if still && !shown { 5 } else { 0 }, &name, shown) });
             picks.push(if still && !shown { Pick::Nothing } else { Pick::Lib(lib) });
         }
-        self.ui.set_menu_search(false);
+        self.show_rows(rows, picks, false, String::new());
+    }
+
+    /// The open menu's rows, and what each does, shown as every menu shows them
+    /// (src/menu_size.rs): one with a search box Size.menu-search wide, so it keeps its width
+    /// as it's searched, the rest as wide as their rows need; never narrower than what
+    /// opened it.
+    fn show_rows(&mut self, mut rows: Vec<MenuRow>, picks: Vec<Pick>, search: bool, placeholder: String) {
+        let under = self.menu.as_ref().map_or(0.0, |m| m.under);
+        let w = if search { crate::tokens::size::MENU_SEARCH.max(under) } else { crate::menu_size::width(&rows, self.ui.get_menu_marks(), under) };
+        crate::menu_size::fit_notes(&mut rows, w);
+        self.ui.set_menu_search(search);
         self.ui.set_menu_back(false);
-        self.ui.set_menu_placeholder("".into());
-        self.ui.set_menu_natural(crate::menu_size::height(&rows, false, false, f32::MAX));
+        self.ui.set_menu_placeholder(placeholder.into());
+        self.ui.set_menu_natural(crate::menu_size::height(&rows, search, false, f32::MAX));
         self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
         if let Some(m) = &mut self.menu {
             m.picks = picks;
+            m.width = w;
         }
     }
 
@@ -784,20 +797,13 @@ impl MacroPage {
                 picks.push(Pick::Delete);
             }
         }
-        self.ui.set_menu_search(search);
-        self.ui.set_menu_back(false);
-        self.ui.set_menu_placeholder(placeholder.into());
-        self.ui.set_menu_natural(crate::menu_size::height(&rows, search, false, f32::MAX));
-        self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
-        if let Some(m) = &mut self.menu {
-            m.picks = picks;
-        }
+        self.show_rows(rows, picks, search, placeholder);
     }
 
     fn menu_chose(&mut self, page: &mut Page, i: usize) {
         let Some(m) = &self.menu else { return };
         let Some(p) = m.picks.get(i).cloned() else { return };
-        let (anchor, let_go) = (m.anchor, m.let_go);
+        let (anchor, under, let_go) = (m.anchor, m.under, m.let_go);
         match p {
             Pick::Nothing => return,
             Pick::Tap(v) => {
@@ -827,7 +833,7 @@ impl MacroPage {
             Pick::Keys(media, change) => {
                 // the next menu hangs from the same place
                 self.menu.take();
-                self.menu = Some(Menu { kind: Kind::Keys { media, change }, anchor, width: 260.0, right: 0.0, let_go, query: String::new(), picks: Vec::new() });
+                self.menu = Some(Menu { kind: Kind::Keys { media, change }, anchor, under, width: under, right: 0.0, let_go, query: String::new(), picks: Vec::new() });
                 self.ui.set_menu_query("".into());
                 self.build_menu(page);
                 self.place_menu();
@@ -888,7 +894,7 @@ impl MacroPage {
             Pick::ChangeJob(i, macros) => {
                 // the next menu hangs from the same place
                 self.menu.take();
-                self.menu = Some(Menu { kind: Kind::Jobs { macros, change: Some(i) }, anchor, width: 280.0, right: 0.0, let_go, query: String::new(), picks: Vec::new() });
+                self.menu = Some(Menu { kind: Kind::Jobs { macros, change: Some(i) }, anchor, under, width: under, right: 0.0, let_go, query: String::new(), picks: Vec::new() });
                 self.ui.set_menu_query("".into());
                 self.build_menu(page);
                 self.place_menu();
@@ -1424,7 +1430,7 @@ mod tests {
             mp.act(page, &|_| {});
         };
         // + Action: each device's under its own name, the keyboard's profiles and screen jobs, then the mouse's
-        mp.ui.invoke_tool(6, 0.0, 0.0, 30.0);
+        mp.ui.invoke_tool(6, 0.0, 0.0, 30.0, 0.0);
         mp.act(&mut page, &|_| {});
         let rows = menu(&mp);
         assert_eq!(rows[..5], [(1, "EVGA Z10 RGB".into()), (0, "Studio".into()), (0, "FPS Gaming".into()), (0, "Next profile".into()), (0, "Previous profile".into())]);
@@ -1436,10 +1442,10 @@ mod tests {
         assert!(scenes > mouse);
         assert_eq!(rows[scenes + 1..], [(0, "Wave across the desk".into()), (0, "DOOM".into()), (0, "Next scene".into()), (0, "Previous scene".into()), (0, "Scene off".into())]);
         choose(&mut mp, &mut page, "FPS Gaming", 0);
-        mp.ui.invoke_tool(6, 0.0, 0.0, 30.0);
+        mp.ui.invoke_tool(6, 0.0, 0.0, 30.0, 0.0);
         mp.act(&mut page, &|_| {});
         choose(&mut mp, &mut page, "Gaming", mouse);
-        mp.ui.invoke_tool(6, 0.0, 0.0, 30.0);
+        mp.ui.invoke_tool(6, 0.0, 0.0, 30.0, 0.0);
         mp.act(&mut page, &|_| {});
         choose(&mut mp, &mut page, "DOOM", scenes);
         let steps = mp.ed.drafts[&81].steps.clone();
@@ -1448,7 +1454,7 @@ mod tests {
         let chips: Vec<(i32, String)> = mp.chain.iter().filter(|c| c.kind == piece::STEP).map(|c| (c.style, c.text.to_string())).collect();
         assert_eq!(chips, [(2, "EVGA Z10 RGB: FPS Gaming".into()), (2, "SteelSeries Sensei 310: Gaming".into()), (2, "Scene: DOOM".into())]);
         // + Macro: the other macros, not this one nor the one that plays it
-        mp.ui.invoke_tool(7, 0.0, 0.0, 30.0);
+        mp.ui.invoke_tool(7, 0.0, 0.0, 30.0, 0.0);
         mp.act(&mut page, &|_| {});
         assert_eq!(menu(&mp), [(1, "Ectomatter’s macros".to_string()), (0, "Another".to_string())]);
         choose(&mut mp, &mut page, "Another", 0);
@@ -1489,7 +1495,7 @@ mod tests {
         let rows = |mp: &MacroPage| mp.items.iter().map(|m| (m.kind, m.lib, m.n, m.current)).collect::<Vec<_>>();
         // the libraries' menu, opened, and what it lists: each name, ticked, and its count
         let menu = |mp: &mut MacroPage, page: &mut Page| {
-            mp.ui.invoke_libs(10.0, 47.0, 32.0);
+            mp.ui.invoke_libs(10.0, 47.0, 32.0, 0.0);
             mp.act(page, &|_| {});
             mp.ui.get_menu_rows().iter().map(|r| (r.kind, r.label.to_string(), r.tick, r.sub.to_string())).collect::<Vec<_>>()
         };

@@ -103,7 +103,7 @@ pub enum Ask {
     /// form shut, an app chosen in it
     GlTab(i32),
     GlFind(String),
-    GlMenu(crate::games_page::Menu, f32, f32, f32),
+    GlMenu(crate::games_page::Menu, f32, f32, f32, f32),
     GlOpen(i32),
     GlStar(i32),
     GlEvery,
@@ -122,7 +122,7 @@ pub enum Ask {
     GlToc(i32),
     GlScriptWait,
     GlScriptKeep,
-    GlScriptLimit(f32, f32, f32),
+    GlScriptLimit(f32, f32, f32, f32),
     GlScriptRemove,
     GlScriptTyped,
     /// a variable's form: Remove, and a word typed (Add turns on for a name)
@@ -136,7 +136,7 @@ pub enum Ask {
     /// -1, and its place in Layouts)
     GlRowOn(i32),
     GlRowPick(i32),
-    GlRowUntil(i32, f32, f32, f32),
+    GlRowUntil(i32, f32, f32, f32, f32),
     GlCarryMove(i32, i32),
     /// the mouse's page: a tab, a button or light from its list or its picture,
     /// a kind of job (and where its switch is), the job's menu opened, the
@@ -154,7 +154,7 @@ pub enum Ask {
     MouseLibToggle(String),
     MouseLibFind(String),
     MouseKind(i32, f32, f32, f32),
-    MouseJob(f32, f32, f32),
+    MouseJob(f32, f32, f32, f32),
     MouseReset,
     MouseResetAll,
     MouseEffect(i32),
@@ -224,7 +224,7 @@ pub enum Ask {
     Profile(i32),
     Key(i32),
     Board,
-    ActionMenu(i32, f32, f32, f32),
+    ActionMenu(i32, f32, f32, f32, f32),
     Listen(i32),
     Reset,
     MenuChose(i32),
@@ -250,7 +250,7 @@ pub enum Ask {
     PollLcd,
     PollActive,
     Effect(i32),
-    CellPick(i32, i32, f32, f32, f32),
+    CellPick(i32, i32, f32, f32, f32, f32),
     CellSlide(i32, f32),
     /// time to send the preview again: the effect every two seconds, streamed colors 14 times a second
     PreviewTick,
@@ -428,13 +428,6 @@ pub enum WindowAsk {
     /// bring the main window forward on Ectomatter's Settings (from the screen editor's
     /// From line, which links to where its sensor is chosen)
     ShowSettings,
-}
-
-/// A menu `w` wide's notes set to wrap, and how tall the menu is with no search box
-/// or Back (src/menu_size.rs, every menu's).
-fn fit_notes(rows: &mut [MenuRow], w: f32) -> f32 {
-    crate::menu_size::fit_notes(rows, w);
-    crate::menu_size::height(rows, false, false, f32::MAX)
 }
 
 /// What a row of Home's Scenes menu does: No scene, a scene turned on (or
@@ -1043,7 +1036,7 @@ impl Front {
         on!(on_key_clicked, |p| Ask::Key(p));
         on!(on_board_clicked, Ask::Board);
         on!(on_show_rebindings, Ask::ShowRebindings);
-        on!(on_action_menu, |l, x, y, h| Ask::ActionMenu(l, x, y, h));
+        on!(on_action_menu, |l, x, y, h, w| Ask::ActionMenu(l, x, y, h, w));
         on!(on_listen, |l| Ask::Listen(l));
         on!(on_reset_key, Ask::Reset);
         on!(on_menu_chose, |i| Ask::MenuChose(i));
@@ -1074,7 +1067,7 @@ impl Front {
         on!(on_mouse_lib_toggle, |g| Ask::MouseLibToggle(g.to_string()));
         on!(on_mouse_lib_find, |t| Ask::MouseLibFind(t.to_string()));
         on!(on_mouse_kind_picked, |i, x, y, h| Ask::MouseKind(i, x, y, h));
-        on!(on_mouse_job_clicked, |x, y, h| Ask::MouseJob(x, y, h));
+        on!(on_mouse_job_clicked, |x, y, h, w| Ask::MouseJob(x, y, h, w));
         on!(on_mouse_reset, Ask::MouseReset);
         on!(on_mouse_reset_all, Ask::MouseResetAll);
         on!(on_mouse_pic_moved, |x, y, over| Ask::MousePicMoved(x, y, over));
@@ -1116,8 +1109,8 @@ impl Front {
         on!(on_rail, |p| Ask::Rail(p.to_string()));
         on!(on_gl_tab_chosen, |i| Ask::GlTab(i));
         on!(on_gl_find, |t| Ask::GlFind(t.to_string()));
-        on!(on_gl_store_menu, |x, y, h| Ask::GlMenu(crate::games_page::Menu::Shop, x, y, h));
-        on!(on_gl_sort_menu, |x, y, h| Ask::GlMenu(crate::games_page::Menu::Order, x, y, h));
+        on!(on_gl_store_menu, |x, y, h, w| Ask::GlMenu(crate::games_page::Menu::Shop, x, y, h, w));
+        on!(on_gl_sort_menu, |x, y, h, w| Ask::GlMenu(crate::games_page::Menu::Order, x, y, h, w));
         on!(on_gl_open, |i| Ask::GlOpen(i));
         on!(on_gl_star, |i| Ask::GlStar(i));
         on!(on_gl_every_page, Ask::GlEvery);
@@ -1134,7 +1127,7 @@ impl Front {
         on!(on_gl_toc_jump, |i| Ask::GlToc(i));
         on!(on_gl_script_wait_toggle, Ask::GlScriptWait);
         on!(on_gl_script_keep_toggle, Ask::GlScriptKeep);
-        on!(on_gl_script_limit_menu, |x, y, h| Ask::GlScriptLimit(x, y, h));
+        on!(on_gl_script_limit_menu, |x, y, h, w| Ask::GlScriptLimit(x, y, h, w));
         on!(on_gl_script_remove, Ask::GlScriptRemove);
         on!(on_gl_script_typed, Ask::GlScriptTyped);
         on!(on_gl_var_remove, Ask::GlVarRemove);
@@ -1143,12 +1136,12 @@ impl Front {
         on!(on_gl_plugin_typed, Ask::GlPluginTyped);
         on!(on_gl_row_on, |i| Ask::GlRowOn(i));
         on!(on_gl_row_pick, |i| Ask::GlRowPick(i));
-        on!(on_gl_row_until, |i, x, y, h| Ask::GlRowUntil(i, x, y, h));
+        on!(on_gl_row_until, |i, x, y, h, w| Ask::GlRowUntil(i, x, y, h, w));
         on!(on_gl_carry_move, |row, shelf| Ask::GlCarryMove(row, shelf));
         on!(on_macro_editor, |l| Ask::MacroEditor(l));
         on!(on_screen_editor, Ask::ScreenEditor);
         on!(on_effect, |i| Ask::Effect(i));
-        on!(on_cell_pick, |id, i, x, y, h| Ask::CellPick(id, i, x, y, h));
+        on!(on_cell_pick, |id, i, x, y, h, w| Ask::CellPick(id, i, x, y, h, w));
         on!(on_cell_slide, |id, v| Ask::CellSlide(id, v));
         on!(on_pk_sv, |x, y| Ask::PkSv(x, y));
         on!(on_pk_hue_at, |x| Ask::PkHue(x));
@@ -1708,26 +1701,16 @@ impl Front {
                 .map(|f| MenuRow { kind: 0, label: f["label"].as_str().unwrap_or("").into(), tag: "".into(), tick: false, sub: f["sub"].as_str().unwrap_or("").into(), ..Default::default() })
                 .collect()
         };
-        // (at most PLUGIN_MENU_MOST of rows; the rest scroll)
-        let natural = crate::menu_size::height(&rows, false, false, PLUGIN_MENU_MOST);
-        // under the box typed in, as wide as it
+        // under the box typed in, at least as wide as it (at most PLUGIN_MENU_MOST of its
+        // rows; the rest scroll), with nothing to tick
         let at = self.typing.as_ref().and_then(|(p, s, _)| self.plugin_map.fields.iter().position(|(fp, fs)| fp == p && fs == s)).map(|i| i as i32);
         let field = (0..self.cells.row_count()).filter_map(|i| self.cells.row_data(i)).find(|c| c.kind == lighting::kind::FIELD && lighting::ctl(c.id) == Ctl::PluginField && Some(c.index) == at);
         let Some(f) = field else { return };
         let scroll = self.ui.get_settings_scroll();
         // (the page under the title bar and its own bar)
         let (x, y) = (self.ui.get_rail_width() + f.x, crate::tokens::size::TITLE_BAR + crate::tokens::size::BAR + f.y + scroll);
-        self.ui.set_menu_search(false);
-        self.ui.set_menu_back(false);
-        self.ui.set_menu_natural(natural);
-        self.ui.set_menu_w(f.w);
-        self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
-        self.ui.set_menu_ax(x);
-        self.ui.set_menu_ay(y);
-        self.ui.set_menu_ah(f.h);
-        self.ui.set_menu_top(y + f.h + 6.0);
-        self.ui.set_menu_max(320.0 + 12.0);
-        self.ui.set_menu_open(true);
+        self.ui.set_menu_marks(false);
+        self.hang_menu_most(rows, f.w, (x, y, f.h), PLUGIN_MENU_MOST);
         self.search_menu = true;
     }
 
@@ -1736,7 +1719,6 @@ impl Front {
             self.search_menu = false;
             self.ui.set_menu_open(false);
             self.ui.set_menu_search(true);
-            self.ui.set_menu_w(300.0);
         }
     }
 
@@ -1818,13 +1800,13 @@ impl Front {
                             self.mouse.set_job(b, choices[0].1.clone());
                         }
                     } else {
-                        self.open_mouse_menu(k, (x, y, h));
+                        self.open_mouse_menu(k, (x, y, h), 0.0);
                     }
                 }
-                Ask::MouseJob(x, y, h) => {
+                Ask::MouseJob(x, y, h, w) => {
                     if let Some(b) = self.mouse.button {
                         let k = crate::mouse::kind_of(&self.mouse.job(b));
-                        self.open_mouse_menu(k, (x, y, h));
+                        self.open_mouse_menu(k, (x, y, h), w);
                     }
                 }
                 Ask::MouseReset => {
@@ -2080,10 +2062,10 @@ impl Front {
                     self.desk.draw_tool = false;
                     self.show_desk();
                 }
-                Ask::CellPick(id, i, x, y, h) => match crate::described::piece_of(id) {
-                    Some(piece) if self.on_keyboard() => self.kb_described_pick(piece, i.max(0) as usize, (x, y, h)),
+                Ask::CellPick(id, i, x, y, h, w) => match crate::described::piece_of(id) {
+                    Some(piece) if self.on_keyboard() => self.kb_described_pick(piece, i.max(0) as usize, (x, y, h), w),
                     Some(piece) => self.described_pick(piece, i.max(0) as usize, (x, y, h)),
-                    None => self.cell_pick(lighting::ctl(id), i.max(0) as usize, (x, y, h)),
+                    None => self.cell_pick(lighting::ctl(id), i.max(0) as usize, (x, y, h), w),
                 },
                 // (a setting a core described: the value its slider stands for)
                 Ask::CellSlide(id, v) if crate::described::piece_of(id).is_some() => {
@@ -2436,7 +2418,7 @@ impl Front {
                         _ => {
                             let screen = self.page.sel.map(|pos| self.page.def(LAYERS[self.layer].0, pos)).filter(|d| !self.is_job_key(d)).and_then(|d| z10::screen_job(&d)).map_or(LAYOUT_PAGE, screen_page);
                             let page = [0, 1, 2, MACRO_PAGE, 3, screen, 6][i.clamp(0, 6) as usize];
-                            self.open_menu_on(self.layer, (x, y, h), Some(page));
+                            self.open_menu_on(self.layer, (x, y, h), Some(page), 0.0);
                         }
                     }
                 }
@@ -2550,7 +2532,7 @@ impl Front {
                         self.close_menu();
                     }
                 }
-                Ask::ActionMenu(l, x, y, h) => self.open_menu(l as usize, (x, y, h)),
+                Ask::ActionMenu(l, x, y, h, w) => self.open_menu(l as usize, (x, y, h), w),
                 Ask::Listen(l) => {
                     if self.listening.is_none() {
                         self.close_menu();
@@ -2589,7 +2571,7 @@ impl Front {
                     self.games.tab_chosen(i, &self.ui);
                 }
                 Ask::GlFind(t) => self.games.find(&t),
-                Ask::GlMenu(m, x, y, h) => self.open_games_menu(m, (x, y, h)),
+                Ask::GlMenu(m, x, y, h, w) => self.open_games_menu(m, (x, y, h), w),
                 Ask::GlOpen(i) => {
                     self.close_menu();
                     self.games.open_at(i.max(0) as usize);
@@ -2655,7 +2637,7 @@ impl Front {
                 Ask::GlToc(i) => self.games.toc_jump(i.max(0) as usize, &self.ui),
                 Ask::GlScriptWait => self.games.script_wait(),
                 Ask::GlScriptKeep => self.games.script_keep(),
-                Ask::GlScriptLimit(x, y, h) => self.open_games_menu(crate::games_page::Menu::Limit, (x, y, h)),
+                Ask::GlScriptLimit(x, y, h, w) => self.open_games_menu(crate::games_page::Menu::Limit, (x, y, h), w),
                 Ask::GlScriptRemove => {
                     self.close_menu();
                     self.games.remove_script();
@@ -2681,7 +2663,7 @@ impl Front {
                     self.gl_pick = if self.gl_pick == Some(i) { None } else { Some(i) };
                     self.lcd_drawn = None;
                 }
-                Ask::GlRowUntil(i, x, y, h) => self.open_until_menu(i.max(0) as usize, (x, y, h)),
+                Ask::GlRowUntil(i, x, y, h, w) => self.open_until_menu(i.max(0) as usize, (x, y, h), w),
                 Ask::GlCarryMove(row, shelf) => {
                     changed = false;
                     let n = self.screens.library.len();
@@ -3001,7 +2983,7 @@ impl Front {
     /// used: a color opens the color picker, a menu choice its menu, the
     /// zones their switch or a zone, and a choice or a checkbox takes its
     /// new value.
-    fn kb_described_pick(&mut self, piece: crate::described::Piece, index: usize, anchor: (f32, f32, f32)) {
+    fn kb_described_pick(&mut self, piece: crate::described::Piece, index: usize, anchor: (f32, f32, f32), under: f32) {
         let Some((id, d, e)) = self.page.described(piece) else { return };
         match d["type"].as_str().unwrap_or("") {
             "color" | "colors" => {
@@ -3009,7 +2991,7 @@ impl Front {
                 return;
             }
             "choice" if d["menu"] == true => {
-                self.open_light_menu(piece, anchor);
+                self.open_light_menu(piece, anchor, under);
                 return;
             }
             "zones" => {
@@ -3031,12 +3013,12 @@ impl Front {
     fn kb_zone(&mut self, zone: usize) {
         let effect = self.page.effect_desc(&self.page.effect_id());
         if let Some(k) = crate::described::params(&effect).iter().position(|(_, d)| d["type"] == "zones") {
-            self.kb_described_pick(crate::described::Piece::Effect(k), zone, (0.0, 0.0, 0.0));
+            self.kb_described_pick(crate::described::Piece::Effect(k), zone, (0.0, 0.0, 0.0), 0.0);
         }
     }
 
     /// A piece of the tile used: a swatch opens the color picker, the rest change the draft.
-    fn cell_pick(&mut self, c: Ctl, index: usize, _anchor: (f32, f32, f32)) {
+    fn cell_pick(&mut self, c: Ctl, index: usize, _anchor: (f32, f32, f32), under: f32) {
         match c {
             Ctl::SceneName if index == 2 => {
                 self.scene_form_escape();
@@ -3063,23 +3045,23 @@ impl Front {
             }
             Ctl::ScenePart => {
                 if let Some((key, ..)) = self.scene_form_devices().get(index).cloned() {
-                    self.open_scene_form_menu(FormMenu::Part(key), _anchor);
+                    self.open_scene_form_menu(FormMenu::Part(key), _anchor, under);
                 }
                 return;
             }
             Ctl::ScenePlugin => {
                 if let Some((dev, ..)) = self.scene_form_plugins().get(index).cloned() {
-                    self.open_scene_form_menu(FormMenu::Plugin(dev), _anchor);
+                    self.open_scene_form_menu(FormMenu::Plugin(dev), _anchor, under);
                 }
                 return;
             }
             Ctl::LibChoice => {
-                self.open_games_menu(crate::games_page::Menu::Device(index), _anchor);
+                self.open_games_menu(crate::games_page::Menu::Device(index), _anchor, under);
                 self.refresh();
                 return;
             }
             Ctl::LibSetting => {
-                self.open_games_menu(crate::games_page::Menu::Setting(index), _anchor);
+                self.open_games_menu(crate::games_page::Menu::Setting(index), _anchor, under);
                 self.refresh();
                 return;
             }
@@ -3181,7 +3163,7 @@ impl Front {
             Ctl::LcdApp | Ctl::GameKey => crate::display::act(&mut self.page, c, index / 2, (index % 2) as f32, None),
             Ctl::LcdPreset => crate::display::act(&mut self.page, c, index, 0.0, None),
             Ctl::SliderBind => {
-                self.open_bind_menu(index, _anchor);
+                self.open_bind_menu(index, _anchor, under);
                 return;
             }
             Ctl::SensorTab => {
@@ -3294,10 +3276,8 @@ impl Front {
 
     fn open_picker(&mut self, c: Ctl, piece: Option<crate::described::Piece>, index: usize, anchor: (f32, f32, f32)) {
         // the second click on the swatch whose picker a press just closed
-        if let Some((at, when)) = self.shut.take() {
-            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
-                return;
-            }
+        if self.just_shut(anchor) {
+            return;
         }
         self.close_menu();
         self.close_picker();
@@ -3321,11 +3301,9 @@ impl Front {
         // under the swatch when it fits there, or when there is a fair amount of room there anyway; over it when below is cramped
         let (ax, ay, ah) = anchor;
         let (h, win) = (self.ui.get_picker_height(), self.ui.get_window_height());
-        let (below, above) = (win - ay - ah - 14.0, ay - 70.0);
-        let down = h <= below || below >= h.min(260.0) || below >= above;
-        let room = if down { below } else { above };
+        let (top, _) = crate::menu_size::hang(win, (ay, ah), h);
         self.ui.set_picker_x(ax);
-        self.ui.set_picker_top(if down { ay + ah + 6.0 } else { ay - 6.0 - h.min(room) });
+        self.ui.set_picker_top(top);
         self.ui.set_pk_hue_img(hue_bar(self.scale));
         self.show_pick(None);
         self.ui.set_picker_open(true);
@@ -3783,7 +3761,7 @@ impl Front {
 
     // ------------------------------------------------------------ the action menu
 
-    fn open_menu(&mut self, layer: usize, anchor: (f32, f32, f32)) {
+    fn open_menu(&mut self, layer: usize, anchor: (f32, f32, f32), under: f32) {
         // the job's own kind of list, or the whole menu for a key that does nothing (a key
         // with a job Ectomatter does sends one of the codes a playlist could: its job's page)
         let page = self.page.sel.map(|pos| self.page.def(LAYERS[layer].0, pos)).and_then(|d| match if self.is_job_key(&d) { self.key_tag(&d) } else { z10::kind_of(&d) } {
@@ -3796,16 +3774,14 @@ impl Front {
             "Keyboard" => Some(6),
             _ => None,
         });
-        self.open_menu_on(layer, anchor, page);
+        self.open_menu_on(layer, anchor, page, under);
     }
 
-    fn open_menu_on(&mut self, layer: usize, anchor: (f32, f32, f32), page: Option<usize>) {
+    fn open_menu_on(&mut self, layer: usize, anchor: (f32, f32, f32), page: Option<usize>, under: f32) {
         let Some(pos) = self.page.sel else { return };
         // the second click on the button whose menu a press just closed
-        if let Some((at, when)) = self.shut.take() {
-            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
-                return;
-            }
+        if self.just_shut(anchor) {
+            return;
         }
         if self.menu.as_ref().is_some_and(|m| m.layer == layer && m.page == page) {
             self.close_menu();
@@ -3814,20 +3790,21 @@ impl Front {
         self.listening = None;
         self.menu = Some(Menu { layer, pos, page, query: String::new(), anchor, choices: Vec::new() });
         self.ui.set_menu_query("".into());
+        // (with its search box, one width as it's searched: Size.menu-search, or its field's)
+        self.ui.set_menu_search(true);
+        self.ui.set_menu_w(crate::tokens::size::MENU_SEARCH.max(under));
         self.build_menu();
         // under the button when it fits there, or when there is a fair amount of
         // room there anyway (the menu then scrolls); over it only when below is
         // cramped. Where it hangs is fixed now, so it stays put as it is searched.
         let (_, ay, ah) = anchor;
         let (h, win) = (self.ui.get_menu_natural(), self.ui.get_window_height());
-        let (below, above) = (win - ay - ah - 14.0, ay - 70.0);
-        let down = h <= below || below >= h.min(260.0) || below >= above;
+        let (top, most) = crate::menu_size::hang(win, (ay, ah), h);
         if std::env::var_os("ECTOMATTER_DEBUG").is_some() {
-            eprintln!("menu: natural {h} window {win} anchor {ay}+{ah} below {below} above {above} down {down}");
+            eprintln!("menu: natural {h} window {win} anchor {ay}+{ah} top {top} most {most}");
         }
-        let room = if down { below } else { above };
-        self.ui.set_menu_top(if down { ay + ah + 6.0 } else { ay - 6.0 - h.min(room) });
-        self.ui.set_menu_max(if h > room { room } else { win * 0.7 });
+        self.ui.set_menu_top(top);
+        self.ui.set_menu_max(most);
         self.ui.set_menu_open(true);
         self.ui.invoke_focus_menu();
     }
@@ -3840,13 +3817,11 @@ impl Front {
         // (one of the scene form's dropdowns: shut, and drawn shut)
         if self.scene_form_menu.take().is_some() {
             self.ui.set_menu_open(false);
-            self.ui.set_menu_w(300.0);
             self.show_scene_form();
         }
         if self.bind_menu.take().is_some() || self.light_menu.take().is_some() || self.way_menu.take().is_some() || self.time_menu.take().is_some() || std::mem::take(&mut self.pl_menu) || std::mem::take(&mut self.add_menu) || std::mem::take(&mut self.ob_menu) || self.lib_menu.take().is_some() || self.new_menu.take().is_some() {
             self.ui.set_menu_open(false);
             self.ui.set_menu_search(true);
-            self.ui.set_menu_w(300.0);
             self.ui.set_pl_menu(-1);
             self.ui.set_pl_timing(-1);
             self.ui.set_pl_choosing(false);
@@ -3859,7 +3834,6 @@ impl Front {
         }
         if self.mouse.menu.take().is_some() || std::mem::take(&mut self.profile_menu) || std::mem::take(&mut self.kb_profile_menu) || self.apps_menu.take().is_some() || self.scene_menu.take().is_some() || self.pad_menu.take().is_some() || self.games.menu.take().is_some() || self.until_menu.take().is_some() {
             self.ui.set_menu_open(false);
-            self.ui.set_menu_w(300.0);
             self.ui.set_mouse_menu_open(false);
         }
         // (the next menu keeps a column for ticks, unless it has none)
@@ -4217,7 +4191,6 @@ impl Front {
         if let Some(k) = self.light_menu.take() {
             self.ui.set_menu_open(false);
             self.ui.set_menu_search(true);
-            self.ui.set_menu_w(300.0);
             // (a rule, or the value no option has, after a rule of its own, changes nothing)
             if let Some((id, d, _)) = self.page.described(crate::described::Piece::Effect(k)) {
                 if let Some(v) = crate::described::menu_pick(&d, i) {
@@ -4231,7 +4204,6 @@ impl Front {
         if let Some((s, _)) = self.bind_menu.take() {
             self.ui.set_menu_open(false);
             self.ui.set_menu_search(true);
-            self.ui.set_menu_w(300.0);
             if let Some((v, _)) = i.checked_sub(1).and_then(|k| crate::display::BIND_CHOICES[s].get(k)) {
                 self.set_slider_bind(s, v);
             }
@@ -4368,7 +4340,6 @@ impl Front {
         if let Some(t) = self.time_menu.take() {
             self.ui.set_menu_open(false);
             self.ui.set_menu_search(true);
-            self.ui.set_menu_w(300.0);
             self.ui.set_pl_timing(-1);
             if let (Some(pick), Some(e)) = (i.checked_sub(1).and_then(|k| t.picks.get(k)), self.screens.turns_mut(self.page.editing).get_mut(t.turn)) {
                 let (secs, stays) = match pick {
@@ -4387,7 +4358,6 @@ impl Front {
         if let Some(t) = self.way_menu.take() {
             self.ui.set_menu_open(false);
             self.ui.set_menu_search(true);
-            self.ui.set_menu_w(300.0);
             self.ui.set_pl_menu(-1);
             if let (Some(way), Some(e)) = (i.checked_sub(1).and_then(|k| crate::lcd_page::TRANSITIONS.get(k)), self.screens.turns_mut(self.page.editing).get_mut(t)) {
                 if e.comes_in != *way {
@@ -4848,8 +4818,8 @@ impl Front {
         self.ui.set_menu_placeholder(placeholder.into());
         // its height as the page lays its rows out: Slint lays a list's rows out
         // only as it draws them, so the window works it out
-        // (the action menu is ACTION_MENU_W wide, with its search box)
-        crate::menu_size::fit_notes(&mut rows, ACTION_MENU_W);
+        // (its notes wrapped to the width it opened at)
+        crate::menu_size::fit_notes(&mut rows, self.ui.get_menu_w());
         self.ui.set_menu_natural(crate::menu_size::height(&rows, true, back, f32::MAX));
         self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
         if let Some(m) = &mut self.menu {
@@ -6423,10 +6393,8 @@ impl Front {
     /// The menu on the mouse's profile in use: Duplicate, and Delete, which
     /// the only profile can't be.
     fn open_profile_menu(&mut self, anchor: (f32, f32, f32)) {
-        if let Some((at, when)) = self.shut.take() {
-            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
-                return;
-            }
+        if self.just_shut(anchor) {
+            return;
         }
         self.close_menu();
         self.close_picker();
@@ -6436,14 +6404,30 @@ impl Front {
         if only {
             rows.push(row(3, "Your only profile can’t be deleted."));
         }
-        self.hang_menu(rows, 220.0, anchor);
+        self.hang_menu(rows, 0.0, anchor);
         self.profile_menu = true;
     }
 
-    /// A small menu of `rows`, `w` wide, open from `anchor`: under it where
-    /// it fits, over it where there's more room there.
-    fn hang_menu(&mut self, mut rows: Vec<MenuRow>, w: f32, anchor: (f32, f32, f32)) {
-        let h = fit_notes(&mut rows, w);
+    /// Whether a press off the open menu shut it a moment ago, on what opens this one (so
+    /// the press on its button doesn't open it again).
+    fn just_shut(&mut self, anchor: (f32, f32, f32)) -> bool {
+        self.shut.take().is_some_and(|(at, when)| (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800))
+    }
+
+    /// A menu of `rows` open from `anchor` (what opened it: its left, its top and its
+    /// height; for one opened at the pointer, the point), as every menu opens
+    /// (src/menu_size.rs): as wide as its rows need and never narrower than `under`, the
+    /// field it drops from (none for a button's); under what opened it where it fits, over
+    /// it where there's more room there.
+    fn hang_menu(&mut self, rows: Vec<MenuRow>, under: f32, anchor: (f32, f32, f32)) {
+        self.hang_menu_most(rows, under, anchor, f32::MAX);
+    }
+
+    /// hang_menu, showing at most `most` of its rows' height before they scroll.
+    fn hang_menu_most(&mut self, mut rows: Vec<MenuRow>, under: f32, anchor: (f32, f32, f32), most: f32) {
+        let w = crate::menu_size::width(&rows, self.ui.get_menu_marks(), under);
+        crate::menu_size::fit_notes(&mut rows, w);
+        let h = crate::menu_size::height(&rows, false, false, most);
         self.ui.set_menu_search(false);
         self.ui.set_menu_back(false);
         self.ui.set_menu_natural(h);
@@ -6451,27 +6435,24 @@ impl Front {
         self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
         let (ax, ay, ah) = anchor;
         let win = self.ui.get_window_height();
-        let (below, above) = (win - ay - ah - 14.0, ay - 70.0);
-        let down = h <= below || below >= above;
+        let (top, most) = crate::menu_size::hang(win, (ay, ah), h);
         self.ui.set_menu_ax(ax);
         self.ui.set_menu_ay(ay);
         self.ui.set_menu_ah(ah);
-        self.ui.set_menu_top(if down { ay + ah + 6.0 } else { ay - 6.0 - h.min(above) });
-        self.ui.set_menu_max(if down { below.max(win * 0.3) } else { above });
+        self.ui.set_menu_top(top);
+        self.ui.set_menu_max(most);
         self.ui.set_menu_open(true);
     }
 
     /// The menu on the keyboard's profile being edited: Use with an app.
     fn open_kb_profile_menu(&mut self, anchor: (f32, f32, f32)) {
-        if let Some((at, when)) = self.shut.take() {
-            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
-                return;
-            }
+        if self.just_shut(anchor) {
+            return;
         }
         self.close_menu();
         self.close_picker();
         let row = |kind: i32, label: &str| MenuRow { kind, label: label.into(), tag: "".into(), tick: false, sub: "".into(), ..Default::default() };
-        self.hang_menu(vec![row(0, "Use with an app…")], 220.0, anchor);
+        self.hang_menu(vec![row(0, "Use with an app…")], 0.0, anchor);
         self.kb_profile_menu = true;
     }
 
@@ -6492,7 +6473,7 @@ impl Front {
         if apps.is_empty() {
             rows.push(MenuRow { kind: 3, label: "Apps show here once they’ve been in front while Ectomatter is running.".into(), tag: "".into(), tick: false, sub: "".into(), ..Default::default() });
         }
-        self.hang_menu(rows, 300.0, anchor);
+        self.hang_menu(rows, 0.0, anchor);
         self.apps_menu = Some((device, profile, anchor));
     }
 
@@ -6647,21 +6628,15 @@ impl Front {
 
     /// One of the Library's menus opened: the store's, the order's, or a
     /// device's on a page, under what opened it.
-    fn open_games_menu(&mut self, m: crate::games_page::Menu, anchor: (f32, f32, f32)) {
-        if let Some((at, when)) = self.shut.take() {
-            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
-                return;
-            }
+    fn open_games_menu(&mut self, m: crate::games_page::Menu, anchor: (f32, f32, f32), under: f32) {
+        if self.just_shut(anchor) {
+            return;
         }
         self.close_menu();
         self.close_picker();
         let counts = self.games.counts(&self.front_apps);
         let rows = self.games.menu_rows(&m, counts);
-        let w = match m {
-            crate::games_page::Menu::Device(_) => 300.0,
-            _ => 220.0,
-        };
-        self.hang_menu(rows, w, anchor);
+        self.hang_menu(rows, under, anchor);
         self.games.menu = Some(m);
     }
 
@@ -7021,7 +6996,7 @@ impl Front {
     fn package_switch(&mut self, row: usize, on: bool) {
         let Some(p) = self.packages.get(row).cloned() else { return };
         if p.id() == crate::z10::CORE {
-            self.cell_pick(Ctl::Control, if on { 0 } else { 1 }, (0.0, 0.0, 0.0));
+            self.cell_pick(Ctl::Control, if on { 0 } else { 1 }, (0.0, 0.0, 0.0), 0.0);
             return;
         }
         if self.settings.on(&p.switch()) == on {
@@ -7699,11 +7674,9 @@ impl Front {
     }
 
     /// The chosen button's jobs of one kind, under the Key detail box's menu field.
-    fn open_mouse_menu(&mut self, kind: usize, anchor: (f32, f32, f32)) {
-        if let Some((at, when)) = self.shut.take() {
-            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
-                return;
-            }
+    fn open_mouse_menu(&mut self, kind: usize, anchor: (f32, f32, f32), under: f32) {
+        if self.just_shut(anchor) {
+            return;
         }
         self.close_menu();
         self.close_picker();
@@ -7751,23 +7724,7 @@ impl Front {
             picks.push(None);
         }
         self.mouse.menu_picks = picks;
-        let h = fit_notes(&mut rows, MOUSE_MENU_W);
-        self.ui.set_menu_search(false);
-        self.ui.set_menu_back(false);
-        self.ui.set_menu_natural(h);
-        self.ui.set_menu_w(260.0);
-        self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
-        let (ax, ay, ah) = anchor;
-        let win = self.ui.get_window_height();
-        let (below, above) = (win - ay - ah - 14.0, ay - 70.0);
-        let down = h <= below || below >= h.min(260.0) || below >= above;
-        let room = if down { below } else { above };
-        self.ui.set_menu_ax(ax);
-        self.ui.set_menu_ay(ay);
-        self.ui.set_menu_ah(ah);
-        self.ui.set_menu_top(if down { ay + ah + 6.0 } else { ay - 6.0 - h.min(room) });
-        self.ui.set_menu_max(if h > room { room } else { win * 0.7 });
-        self.ui.set_menu_open(true);
+        self.hang_menu(rows, under, anchor);
         self.ui.set_mouse_menu_open(true);
         self.mouse.menu = Some(kind);
     }
@@ -7899,46 +7856,23 @@ impl Front {
     // ------------------------------------------------------------ the sliders' jobs
 
     /// A dropdown on the Lighting page opened: its choices, under it, as wide as it is.
-    fn open_light_menu(&mut self, piece: crate::described::Piece, anchor: (f32, f32, f32)) {
-        if let Some((at, when)) = self.shut.take() {
-            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
-                return;
-            }
+    fn open_light_menu(&mut self, piece: crate::described::Piece, anchor: (f32, f32, f32), under: f32) {
+        if self.just_shut(anchor) {
+            return;
         }
         let crate::described::Piece::Effect(k) = piece else { return };
         let Some((id, d, e)) = self.page.described(piece) else { return };
         let rows: Vec<MenuRow> = crate::described::menu_rows(&d, &crate::described::kept(&e, &id, &d)).into_iter().map(|(kind, label, tick)| MenuRow { kind, label: label.into(), tag: "".into(), tick, sub: "".into(), ..Default::default() }).collect();
-        let in_place = crate::described::in_place_box(&self.page.effect_desc(&self.page.effect_id()), &id);
         self.close_menu();
         self.close_picker();
-        let h = crate::menu_size::height(&rows, false, false, f32::MAX);
-        self.ui.set_menu_search(false);
-        self.ui.set_menu_back(false);
-        self.ui.set_menu_natural(h);
-        let (set_w, place_w) = self.light_box_widths();
-        let w = if in_place { place_w } else { set_w } - 32.0;
-        self.ui.set_menu_w(w);
-        self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
-        let (ax, ay, ah) = anchor;
-        let win = self.ui.get_window_height();
-        let (below, above) = (win - ay - ah - 14.0, ay - 70.0);
-        let down = h <= below || below >= h.min(260.0) || below >= above;
-        let room = if down { below } else { above };
-        self.ui.set_menu_ax(ax);
-        self.ui.set_menu_ay(ay);
-        self.ui.set_menu_ah(ah);
-        self.ui.set_menu_top(if down { ay + ah + 6.0 } else { ay - 6.0 - h.min(room) });
-        self.ui.set_menu_max(if h > room { room } else { win * 0.7 });
-        self.ui.set_menu_open(true);
+        self.hang_menu(rows, under, anchor);
         self.light_menu = Some(k);
     }
 
     /// A turn's mark selected: the ways in, under it, the turn's own ticked.
     fn open_way_menu(&mut self, i: usize, anchor: (f32, f32, f32)) {
-        if let Some((at, when)) = self.shut.take() {
-            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
-                return;
-            }
+        if self.just_shut(anchor) {
+            return;
         }
         let Some(e) = self.screens.turns(self.page.editing).get(i) else { return };
         let name = self.screens.page_of(e).map_or("The screen".to_string(), |p| p.name.clone());
@@ -7947,32 +7881,12 @@ impl Front {
             rows.push(MenuRow { kind: 0, label: t.name().into(), tag: "".into(), tick: t == e.comes_in, sub: "".into(), ..Default::default() });
         }
         // the only turn: nothing comes in after it, so its way in waits for another
-        // (the menu as wide as the line, on one line: its 6s, the note's 10s and room to spare)
-        let mut w = 200.0f32;
         if self.screens.turns(self.page.editing).len() == 1 {
-            let note = "Plays once the playlist has a second layout.";
-            w = w.max(crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::CONTROL, note) + 44.0).ceil();
-            rows.push(MenuRow { kind: 3, label: note.into(), tag: "".into(), tick: false, sub: "".into(), ..Default::default() });
+            rows.push(MenuRow { kind: 3, label: "Plays once the playlist has a second layout.".into(), tag: "".into(), tick: false, sub: "".into(), ..Default::default() });
         }
         self.close_menu();
         self.close_picker();
-        let h = fit_notes(&mut rows, w);
-        self.ui.set_menu_search(false);
-        self.ui.set_menu_back(false);
-        self.ui.set_menu_natural(h);
-        self.ui.set_menu_w(w);
-        self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
-        let (ax, ay, ah) = anchor;
-        let win = self.ui.get_window_height();
-        let (below, above) = (win - ay - ah - 14.0, ay - 70.0);
-        let down = h <= below || below >= h.min(260.0) || below >= above;
-        let room = if down { below } else { above };
-        self.ui.set_menu_ax(ax);
-        self.ui.set_menu_ay(ay);
-        self.ui.set_menu_ah(ah);
-        self.ui.set_menu_top(if down { ay + ah + 6.0 } else { ay - 6.0 - h.min(room) });
-        self.ui.set_menu_max(if h > room { room } else { win * 0.7 });
-        self.ui.set_menu_open(true);
+        self.hang_menu(rows, 0.0, anchor);
         self.way_menu = Some(i);
         self.ui.set_pl_menu(i as i32);
     }
@@ -7980,10 +7894,8 @@ impl Front {
     /// A turn's time selected: under it, the times a turn often has, its own among them, and
     /// staying until the layouts are switched; the turn's own ticked.
     fn open_time_menu(&mut self, i: usize, anchor: (f32, f32, f32), aw: f32) {
-        if let Some((at, when)) = self.shut.take() {
-            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
-                return;
-            }
+        if self.just_shut(anchor) {
+            return;
         }
         let Some(e) = self.screens.turns(self.page.editing).get(i) else { return };
         let name = self.screens.page_of(e).map_or("The screen".to_string(), |p| p.name.clone());
@@ -8005,25 +7917,7 @@ impl Front {
         self.close_menu();
         self.close_picker();
         self.ui.set_menu_marks(true);
-        let h = crate::menu_size::height(&rows, false, false, f32::MAX);
-        // (as wide as the longest line needs)
-        let w = rows.iter().map(|r| crate::text::width(if r.kind == 1 { 500 } else { 400 }, 13.5, &r.label) + 58.0).fold(200.0f32, f32::max).ceil();
-        self.ui.set_menu_search(false);
-        self.ui.set_menu_back(false);
-        self.ui.set_menu_natural(h);
-        self.ui.set_menu_w(w);
-        self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
-        let (ax, ay, ah) = anchor;
-        let win = self.ui.get_window_height();
-        let (below, above) = (win - ay - ah - 14.0, ay - 70.0);
-        let down = h <= below || below >= h.min(260.0) || below >= above;
-        let room = if down { below } else { above };
-        self.ui.set_menu_ax(ax);
-        self.ui.set_menu_ay(ay);
-        self.ui.set_menu_ah(ah);
-        self.ui.set_menu_top(if down { ay + ah + 6.0 } else { ay - 6.0 - h.min(room) });
-        self.ui.set_menu_max(if h > room { room } else { win * 0.7 });
-        self.ui.set_menu_open(true);
+        self.hang_menu(rows, aw, anchor);
         self.time_menu = Some(TimeMenu { turn: i, aw, picks });
         self.ui.set_pl_timing(i as i32);
     }
@@ -8032,10 +7926,8 @@ impl Front {
     /// profile plays ticked, each with the profiles that play it), then a new
     /// one, and this one renamed or deleted (never the last).
     fn open_pl_menu(&mut self, anchor: (f32, f32, f32)) {
-        if let Some((at, when)) = self.shut.take() {
-            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
-                return;
-            }
+        if self.just_shut(anchor) {
+            return;
         }
         let n = self.page.editing;
         let mine = self.screens.of_profile(n);
@@ -8054,25 +7946,7 @@ impl Front {
         rows.push(row(if self.screens.playlists.len() > 1 { 4 } else { 5 }, format!("Delete {name}"), false, String::new()));
         self.close_menu();
         self.close_picker();
-        let h = crate::menu_size::height(&rows, false, false, f32::MAX);
-        self.ui.set_menu_search(false);
-        self.ui.set_menu_back(false);
-        self.ui.set_menu_natural(h);
-        // (wide enough for the profiles' names beside each playlist's, up to a point)
-        let widest = rows.iter().filter(|r| r.kind == 0).map(|r| crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, &r.label) + if r.sub.is_empty() { 0.0 } else { 12.0 + crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, &r.sub) }).fold(0.0, f32::max);
-        self.ui.set_menu_w((widest + 74.0).clamp(248.0, 360.0));
-        self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
-        let (ax, ay, ah) = anchor;
-        let win = self.ui.get_window_height();
-        let (below, above) = (win - ay - ah - 14.0, ay - 70.0);
-        let down = h <= below || below >= h.min(260.0) || below >= above;
-        let room = if down { below } else { above };
-        self.ui.set_menu_ax(ax);
-        self.ui.set_menu_ay(ay);
-        self.ui.set_menu_ah(ah);
-        self.ui.set_menu_top(if down { ay + ah + 6.0 } else { ay - 6.0 - h.min(room) });
-        self.ui.set_menu_max(if h > room { room } else { win * 0.7 });
-        self.ui.set_menu_open(true);
+        self.hang_menu(rows, self.ui.get_pl_chooser_w(), anchor);
         self.pl_menu = true;
         self.ui.set_pl_choosing(true);
     }
@@ -8081,10 +7955,8 @@ impl Front {
     /// layout, each that the keyboard can't show whole saying what stays blank, then the
     /// layout kept, to edit.
     fn open_ob_menu(&mut self, anchor: (f32, f32, f32)) {
-        if let Some((at, when)) = self.shut.take() {
-            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
-                return;
-            }
+        if self.just_shut(anchor) {
+            return;
         }
         let n = self.page.editing;
         let kept = self.screens.onboard_of(n).map(|p| (p.id.clone(), p.name.clone()));
@@ -8101,25 +7973,7 @@ impl Front {
         }
         self.close_menu();
         self.close_picker();
-        let h = crate::menu_size::height(&rows, false, false, f32::MAX);
-        // (as wide as the longest row needs, its note too, from 248 to 340)
-        let w = rows.iter().map(|r| crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, &r.label) + if r.sub.is_empty() { 0.0 } else { crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, &r.sub) + 8.0 } + 64.0).fold(248.0f32, f32::max).min(340.0).ceil();
-        self.ui.set_menu_search(false);
-        self.ui.set_menu_back(false);
-        self.ui.set_menu_natural(h);
-        self.ui.set_menu_w(w);
-        self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
-        let (ax, ay, ah) = anchor;
-        let win = self.ui.get_window_height();
-        let (below, above) = (win - ay - ah - 14.0, ay - 70.0);
-        let down = h <= below || below >= h.min(260.0) || below >= above;
-        let room = if down { below } else { above };
-        self.ui.set_menu_ax(ax);
-        self.ui.set_menu_ay(ay);
-        self.ui.set_menu_ah(ah);
-        self.ui.set_menu_top(if down { ay + ah + 6.0 } else { ay - 6.0 - h.min(room) });
-        self.ui.set_menu_max(if h > room { room } else { win * 0.7 });
-        self.ui.set_menu_open(true);
+        self.hang_menu(rows, self.ui.get_ob_chooser_w(), anchor);
         self.ob_menu = true;
         self.ui.set_ob_choosing(true);
     }
@@ -8181,21 +8035,7 @@ impl Front {
         self.close_picker();
         // (nothing in it is ticked)
         self.ui.set_menu_marks(false);
-        let h = crate::menu_size::height(&rows, false, false, f32::MAX);
-        let w = rows.iter().map(|r| crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, &r.label) + 64.0).fold(200.0f32, f32::max).min(320.0).ceil();
-        self.ui.set_menu_search(false);
-        self.ui.set_menu_back(false);
-        self.ui.set_menu_natural(h);
-        self.ui.set_menu_w(w);
-        self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
-        let win = self.ui.get_window_height();
-        let down = h <= win - y - 14.0;
-        self.ui.set_menu_ax(x);
-        self.ui.set_menu_ay(y);
-        self.ui.set_menu_ah(0.0);
-        self.ui.set_menu_top(if down { y + 2.0 } else { (y - 2.0 - h).max(14.0) });
-        self.ui.set_menu_max(win * 0.7);
-        self.ui.set_menu_open(true);
+        self.hang_menu(rows, 0.0, (x, y, 0.0));
         self.new_menu = Some(made);
     }
 
@@ -8424,31 +8264,14 @@ impl Front {
         self.close_picker();
         // (nothing in it is ticked)
         self.ui.set_menu_marks(false);
-        let h = crate::menu_size::height(&rows, false, false, f32::MAX);
-        let w = rows.iter().map(|r| crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, &r.label) + 64.0).fold(200.0f32, f32::max).min(320.0).ceil();
-        self.ui.set_menu_search(false);
-        self.ui.set_menu_back(false);
-        self.ui.set_menu_natural(h);
-        self.ui.set_menu_w(w);
-        self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
-        // (from the pointer, down when it fits, else up)
         let (x, y) = at;
-        let win = self.ui.get_window_height();
-        let down = h <= win - y - 14.0;
-        self.ui.set_menu_ax(x);
-        self.ui.set_menu_ay(y);
-        self.ui.set_menu_ah(0.0);
-        self.ui.set_menu_top(if down { y + 2.0 } else { (y - 2.0 - h).max(14.0) });
-        self.ui.set_menu_max(win * 0.7);
-        self.ui.set_menu_open(true);
+        self.hang_menu(rows, 0.0, (x, y, 0.0));
         self.lib_menu = Some(k);
     }
 
     fn open_add_menu(&mut self, anchor: (f32, f32, f32)) {
-        if let Some((at, when)) = self.shut.take() {
-            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
-                return;
-            }
+        if self.just_shut(anchor) {
+            return;
         }
         let row = |kind: i32, label: &str| MenuRow { kind, label: label.into(), tag: "".into(), tick: false, sub: "".into(), ..Default::default() };
         let mut rows = vec![row(1, "Add a screen layout")];
@@ -8458,25 +8281,7 @@ impl Front {
         self.close_menu();
         self.close_picker();
         self.ui.set_menu_marks(false);
-        let h = crate::menu_size::height(&rows, false, false, f32::MAX);
-        // (as wide as the longest name needs, to 300)
-        let w = rows.iter().map(|r| crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, &r.label) + 64.0).fold(200.0f32, f32::max).min(300.0).ceil();
-        self.ui.set_menu_search(false);
-        self.ui.set_menu_back(false);
-        self.ui.set_menu_natural(h);
-        self.ui.set_menu_w(w);
-        self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
-        let (ax, ay, ah) = anchor;
-        let win = self.ui.get_window_height();
-        let (below, above) = (win - ay - ah - 14.0, ay - 70.0);
-        let down = h <= below || below >= h.min(260.0) || below >= above;
-        let room = if down { below } else { above };
-        self.ui.set_menu_ax(ax);
-        self.ui.set_menu_ay(ay);
-        self.ui.set_menu_ah(ah);
-        self.ui.set_menu_top(if down { ay + ah + 6.0 } else { ay - 6.0 - h.min(room) });
-        self.ui.set_menu_max(if h > room { room } else { win * 0.7 });
-        self.ui.set_menu_open(true);
+        self.hang_menu(rows, 0.0, anchor);
         self.add_menu = true;
         self.ui.set_pl_adding(true);
     }
@@ -8510,32 +8315,14 @@ impl Front {
         self.lcd.page = 0;
     }
 
-    fn open_bind_menu(&mut self, i: usize, anchor: (f32, f32, f32)) {
+    fn open_bind_menu(&mut self, i: usize, anchor: (f32, f32, f32), under: f32) {
         self.close_menu();
         let name = if i == 0 { "dimmer" } else { "volume" };
         let mut rows = vec![MenuRow { kind: 1, label: format!("The {name} controls").into(), tag: "".into(), tick: false, sub: "".into(), ..Default::default() }];
         for (v, label) in crate::display::BIND_CHOICES[i] {
             rows.push(MenuRow { kind: 0, label: label.into(), tag: "".into(), tick: self.bind[i] == v, sub: "".into(), ..Default::default() });
         }
-        let h = crate::menu_size::height(&rows, false, false, f32::MAX);
-        self.ui.set_menu_search(false);
-        self.ui.set_menu_back(false);
-        self.ui.set_menu_natural(h);
-        self.ui.set_menu_w(240.0);
-        self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
-        let (ax, ay, ah) = anchor;
-        let win = self.ui.get_window_height();
-        // under the button, or over it when below is cramped, as every menu
-        // opens, and never up onto the title bar
-        let (below, above) = (win - ay - ah - 14.0, ay - 70.0);
-        let down = h <= below || below >= h.min(260.0) || below >= above;
-        let room = if down { below } else { above };
-        self.ui.set_menu_ax(ax);
-        self.ui.set_menu_ay(ay);
-        self.ui.set_menu_ah(ah);
-        self.ui.set_menu_top(if down { ay + ah + 6.0 } else { ay - 6.0 - h.min(room) });
-        self.ui.set_menu_max(if h > room { room } else { win * 0.7 });
-        self.ui.set_menu_open(true);
+        self.hang_menu(rows, under, anchor);
         self.bind_menu = Some((i, anchor));
     }
 
@@ -8668,10 +8455,8 @@ impl Front {
     /// person's own (each with a pencil to change it), and New scene…; the one
     /// on ticked, each with a chip of its colors.
     fn open_scene_menu(&mut self, anchor: (f32, f32, f32)) {
-        if let Some((at, when)) = self.shut.take() {
-            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
-                return;
-            }
+        if self.just_shut(anchor) {
+            return;
         }
         self.close_menu();
         self.close_picker();
@@ -8696,7 +8481,7 @@ impl Front {
         rows.push(MenuRow { kind: 0, label: "New scene…".into(), chip: crate::plus_glyph((14.0 * self.scale).round() as u32), chipped: true, ..Default::default() });
         does.push(SceneRow::New);
         self.ui.set_menu_marks(true);
-        self.hang_menu(rows, 272.0, anchor);
+        self.hang_menu(rows, 0.0, anchor);
         self.scene_menu = Some(does);
     }
 
@@ -8704,17 +8489,15 @@ impl Front {
     /// pad's Size menu (the sizes, its own ticked, and a width and depth to
     /// type), under its button.
     fn open_pad_menu(&mut self, which: PadMenu, anchor: (f32, f32, f32)) {
-        if let Some((at, when)) = self.shut.take() {
-            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
-                return;
-            }
+        if self.just_shut(anchor) {
+            return;
         }
         self.close_menu();
         self.close_picker();
         let (rows, _) = self.pad_rows(which);
         // (Add pad ticks nothing, so it keeps no column for ticks)
         self.ui.set_menu_marks(which == PadMenu::Size);
-        self.hang_menu(rows, 270.0, anchor);
+        self.hang_menu(rows, 0.0, anchor);
         self.pad_menu = Some(which);
     }
 
@@ -9374,11 +9157,9 @@ impl Front {
 
     /// One of the form's dropdowns opened, under it: a device's effects (or
     /// Leave as it is), or a plugin device's profiles.
-    fn open_scene_form_menu(&mut self, m: FormMenu, anchor: (f32, f32, f32)) {
-        if let Some((at, when)) = self.shut.take() {
-            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
-                return;
-            }
+    fn open_scene_form_menu(&mut self, m: FormMenu, anchor: (f32, f32, f32), under: f32) {
+        if self.just_shut(anchor) {
+            return;
         }
         self.close_menu();
         self.close_picker();
@@ -9400,7 +9181,7 @@ impl Front {
             }
         };
         self.ui.set_menu_marks(true);
-        self.hang_menu(rows, 240.0, anchor);
+        self.hang_menu(rows, under, anchor);
         self.scene_form_menu = Some(m);
         self.show_scene_form();
     }
@@ -9701,16 +9482,14 @@ impl Front {
     }
 
     /// A row's until menu, under its dropdown.
-    fn open_until_menu(&mut self, row: usize, anchor: (f32, f32, f32)) {
-        if let Some((at, when)) = self.shut.take() {
-            if (at.0 - anchor.0).abs() < 2.0 && (at.1 - anchor.1).abs() < 2.0 && when.elapsed() < Duration::from_millis(800) {
-                return;
-            }
+    fn open_until_menu(&mut self, row: usize, anchor: (f32, f32, f32), under: f32) {
+        if self.just_shut(anchor) {
+            return;
         }
         self.close_menu();
         let kept = self.game_launch_value(Self::launch_key(row as i32))["until"].as_str().unwrap_or(if row == 0 { "window" } else { "done" }).to_string();
         let rows: Vec<MenuRow> = Self::until_choices(row).iter().map(|(k, w)| MenuRow { kind: 0, label: (*w).into(), tag: "".into(), tick: *k == kept, sub: "".into(), ..Default::default() }).collect();
-        self.hang_menu(rows, 250.0, anchor);
+        self.hang_menu(rows, under, anchor);
         self.until_menu = Some(row);
     }
 
@@ -10687,12 +10466,7 @@ mod tests {
     }
 }
 
-/// How wide an effect's tile shows its picture, as the page's grid of effects
-/// says (in whole pixels; the grid's least until it has drawn it).
-/// the menus' widths: the action menu's (a key's job), the mouse's; a plugin's search's
-/// rows at most, before they scroll
-const ACTION_MENU_W: f32 = 300.0;
-const MOUSE_MENU_W: f32 = 260.0;
+/// a plugin's search's rows at most, before they scroll
 const PLUGIN_MENU_MOST: f32 = 320.0;
 
 /// the playlist's chooser at its widest, and the field its playlist is renamed in; the

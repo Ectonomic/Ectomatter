@@ -33,7 +33,7 @@ export struct Cell {
 // one piece of the Lighting page's tile, drawn where the window placed it
 export component CellView inherits Rectangle {
     in property <Cell> c;
-    callback pick(int, int, length, length, length);
+    callback pick(int, int, length, length, length, length);
     callback slide(int, float);
     // typed into a box: its id, its index (which of the boxes with that id) and what it holds now
     callback typed(int, int, string);
@@ -184,7 +184,7 @@ export component CellView inherits Rectangle {
         first: root.c.style == 1 || root.c.style == 3;
         warn: root.c.style >= 2;
         fill: Ink.box;
-        clicked => { root.pick(root.c.id, root.c.index, 0, 0, 0); }
+        clicked => { root.pick(root.c.id, root.c.index, 0, 0, 0, 0); }
     }
     // a dot beside a label on a game's page, where the game changed the row from Every
     // game's: selecting it puts the row back; under the pointer, a well round it and, a
@@ -192,7 +192,7 @@ export component CellView inherits Rectangle {
     if root.c.kind == 54: Rectangle {
         reset-ta := TouchArea {
             mouse-cursor: pointer;
-            clicked => { root.pick(root.c.id, root.c.index, 0, 0, 0); }
+            clicked => { root.pick(root.c.id, root.c.index, 0, 0, 0, 0); }
         }
         Rectangle {
             width: 20px;
@@ -251,7 +251,7 @@ export component CellView inherits Rectangle {
         background: self.hot ? Ink.hover-well : transparent;
         chip-ta := TouchArea {
             mouse-cursor: pointer;
-            clicked => { root.pick(root.c.id, root.c.index, 0, 0, 0); }
+            clicked => { root.pick(root.c.id, root.c.index, 0, 0, 0, 0); }
         }
         if !chip.run: Rectangle {
             x: Part.sensor-pad;
@@ -322,7 +322,7 @@ export component CellView inherits Rectangle {
             y: (parent.height - self.height) / 2;
             visible: chip.hot && !chip.run;
             hover-fill: Ink.pick;
-            clicked => { root.pick(root.c.id + 1, root.c.index, 0, 0, 0); }
+            clicked => { root.pick(root.c.id + 1, root.c.index, 0, 0, 0, 0); }
         }
     }
     // a line to type in: the profile's name, or the weather's place
@@ -445,7 +445,7 @@ export component CellView inherits Rectangle {
             }
             off := TouchArea {
                 mouse-cursor: pointer;
-                clicked => { root.pick(root.c.id, 2, 0, 0, 0); }
+                clicked => { root.pick(root.c.id, 2, 0, 0, 0, 0); }
             }
         }
         // a key's text: its glyphs' button, which gives the box the keys and opens their list
@@ -472,7 +472,7 @@ export component CellView inherits Rectangle {
                         input.focus();
                         input.select-all();
                     }
-                    root.pick(root.c.id, 1, 0, 0, 0);
+                    root.pick(root.c.id, 1, 0, 0, 0, 0);
                 }
             }
         }
@@ -499,10 +499,10 @@ export component CellView inherits Rectangle {
                     root.focused(root.c.id, self.has-focus);
                 }
                 if ((root.c.style == 7 || root.c.style == 10) && !self.has-focus) {
-                    root.pick(root.c.id, 1, 0, 0, 0);
+                    root.pick(root.c.id, 1, 0, 0, 0, 0);
                 }
                 if (self.plugin-value && !self.has-focus) {
-                    root.pick(root.c.id, root.c.index, 1px, 0, 0);
+                    root.pick(root.c.id, root.c.index, 1px, 0, 0, 0);
                 }
             }
             // (style 3, a name to give, 7, and 10, the words a block on a screen says: it
@@ -515,7 +515,7 @@ export component CellView inherits Rectangle {
             }
             accepted => {
                 if (root.c.style == 3 || root.c.style == 7 || root.c.style == 10) {
-                    root.pick(root.c.id, 1, 0, 0, 0);
+                    root.pick(root.c.id, 1, 0, 0, 0, 0);
                 }
                 if (self.plugin-value) {
                     self.clear-focus();
@@ -523,13 +523,13 @@ export component CellView inherits Rectangle {
             }
             key-pressed(e) => {
                 if (self.plugin-value && e.text == Key.Escape) {
-                    root.pick(root.c.id, root.c.index, 2px, 0, 0);
+                    root.pick(root.c.id, root.c.index, 2px, 0, 0, 0);
                     self.text = root.c.text;
                     self.clear-focus();
                     return accept;
                 }
                 if ((root.c.style == 3 || root.c.style == 7 || root.c.style == 9 || root.c.style == 10) && e.text == Key.Escape) {
-                    root.pick(root.c.id, 2, 0, 0, 0);
+                    root.pick(root.c.id, 2, 0, 0, 0, 0);
                     return accept;
                 }
                 if (root.c.style >= 4 && root.c.style <= 6 && e.text == Key.Escape) {
@@ -603,7 +603,7 @@ export component CellView inherits Rectangle {
         lines: root.c.style == 35 ? root.c.lines : "";
         text: root.c.text;
         enabled: root.c.style != 37;
-        clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+        clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height, root.width); }
     }
     // the lab's own pieces: a switch's button that tells the page the pointer is over it, a
     // key on its map, a menu's rows, a button on a shade; and a card that opens (36)
@@ -696,7 +696,7 @@ export component CellView inherits Rectangle {
         b := TouchArea {
             enabled: root.c.style != 26 && root.c.style != 37;
             mouse-cursor: root.c.style == 29 ? MouseCursor.default : MouseCursor.pointer;
-            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height, root.width); }
             // style 23: it tells the page the pointer is over it, as a zone does
             changed has-hover => {
                 if (root.c.style == 23 || root.c.style == 31 || root.c.style == 32) {
@@ -763,7 +763,7 @@ export component CellView inherits Rectangle {
         }
         dot-ta := TouchArea {
             mouse-cursor: pointer;
-            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height, root.width); }
         }
     }
     // style 2: a color's dot and its code as one button (the screen's default backlight)
@@ -773,7 +773,7 @@ export component CellView inherits Rectangle {
         swatch: root.c.color;
         code: root.c.text;
         open: root.c.on;
-        clicked(x, y, h) => { root.pick(root.c.id, root.c.index, x, y, root.height); }
+        clicked(x, y, h) => { root.pick(root.c.id, root.c.index, x, y, root.height, root.width); }
     }
     // a piece of a run of colors, from its color to the next (its red, green and blue packed in
     // `value`, as 65536 r + 256 g + b); style says which ends are round
@@ -799,7 +799,7 @@ export component CellView inherits Rectangle {
         menu: root.c.style == 24 || root.c.style == 32;
         square: root.c.style == 32;
         swatch: root.c.color;
-        clicked(x, y, h) => { root.pick(root.c.id, root.c.index, x, y, root.height); }
+        clicked(x, y, h) => { root.pick(root.c.id, root.c.index, x, y, root.height, root.width); }
         changed hover => {
             if (root.c.style == 23 || root.c.style == 32) {
                 root.hovered(root.c.id, self.hover);
@@ -841,7 +841,7 @@ export component CellView inherits Rectangle {
         }
         ar-ta := TouchArea {
             mouse-cursor: pointer;
-            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height, root.width); }
             changed has-hover => { root.hovered(root.c.index, self.has-hover); }
         }
     }
@@ -857,7 +857,7 @@ export component CellView inherits Rectangle {
         warn: root.c.style == 2;
         chip-on: root.c.value > 0;
         chip: root.c.value > 0 ? root.chips[round(root.c.value) - 1] : root.glyph;
-        clicked(x, y, h) => { root.pick(root.c.id, root.c.index, x, y, root.height); }
+        clicked(x, y, h) => { root.pick(root.c.id, root.c.index, x, y, root.height, root.width); }
     }
     // a link in a sentence: its words brighter than the note round them, which select it
     if root.c.kind == 18: Text {
@@ -868,7 +868,7 @@ export component CellView inherits Rectangle {
         vertical-alignment: center;
         il-ta := TouchArea {
             mouse-cursor: pointer;
-            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+            clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height, root.width); }
         }
     }
     // a quiet link: Reset (with its icon), Select all, Scatter colors (style 1: a text
@@ -879,7 +879,7 @@ export component CellView inherits Rectangle {
         text: root.c.text;
         icon: root.c.lines;
         units: 24;
-        clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+        clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height, root.width); }
     }
     if root.c.kind == 47 && root.c.style != 0: TextButton {
         width: parent.width;
@@ -887,7 +887,7 @@ export component CellView inherits Rectangle {
         text: root.c.text;
         icon: root.c.lines;
         enabled: root.c.style != 2;
-        clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height); }
+        clicked => { root.pick(root.c.id, root.c.index, self.absolute-position.x, self.absolute-position.y, root.height, root.width); }
     }
     // a thing the firmware adds: a tick, then its name
     if root.c.kind == 49: Rectangle {
@@ -920,7 +920,7 @@ export component CellView inherits Rectangle {
         height: parent.height;
         text: root.c.text;
         open: root.c.on;
-        clicked => { root.pick(root.c.id, root.c.index, 0, 0, 0); }
+        clicked => { root.pick(root.c.id, root.c.index, 0, 0, 0, 0); }
     }
     // a checkbox on a box, and its words (style 1: one that can't be changed now, faint and
     // unticked; 2: one held on by another setting, ticked in gray)
@@ -930,7 +930,7 @@ export component CellView inherits Rectangle {
         text: root.c.text;
         on: root.c.on;
         state: root.c.style;
-        clicked => { root.pick(root.c.id, root.c.index * 2 + (root.c.on ? 0 : 1), 0, 0, 0); }
+        clicked => { root.pick(root.c.id, root.c.index * 2 + (root.c.on ? 0 : 1), 0, 0, 0, 0); }
     }
 }
 
@@ -951,7 +951,7 @@ export struct LaidBox {
 export component CellBox inherits ScrollBox {
     in property <LaidBox> b;
     callback resized(length);
-    callback pick(int, int, length, length, length);
+    callback pick(int, int, length, length, length, length);
     callback slide(int, float);
     callback typed(int, int, string);
     callback hovered(int, bool);
@@ -968,7 +968,7 @@ export component CellBox inherits ScrollBox {
         title: root.b.title;
         for c in root.b.cells: CellView {
             c: c;
-            pick(id, index, x, y, h) => { root.pick(id, index, x, y, h); }
+            pick(id, index, x, y, h, w) => { root.pick(id, index, x, y, h, w); }
             slide(id, v) => { root.slide(id, v); }
             typed(id, index, t) => { root.typed(id, index, t); }
             hovered(i, on) => { root.hovered(i, on); }

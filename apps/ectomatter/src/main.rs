@@ -1432,6 +1432,7 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
         let mut xy = click.split(',').map(|v| v.trim().parse::<f32>().unwrap_or(0.0));
         let position = LogicalPosition::new(xy.next().unwrap_or(0.0), xy.next().unwrap_or(0.0));
         window.dispatch_event(WindowEvent::PointerMoved { position });
+        lab.pressed_at(position.x, position.y);
         window.dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Left });
         window.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
         lab.act();
@@ -2645,6 +2646,11 @@ impl App {
                 }
                 if which == LAYOUTS {
                     if let Some(l) = &mut self.front.layouts {
+                        l.pressed_at(x as f32, y as f32);
+                    }
+                }
+                if which == LAB {
+                    if let Some(l) = &mut self.front.lab {
                         l.pressed_at(x as f32, y as f32);
                     }
                 }

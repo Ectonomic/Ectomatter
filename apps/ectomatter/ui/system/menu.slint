@@ -2,7 +2,7 @@
 
 import { Space, Radius, Font, Line, Size, Part, Shadow, Ink } from "tokens.slint";
 import { Typing } from "state.slint";
-import { ScrollBar, PickField, Well, FieldBox } from "controls.slint";
+import { ScrollBar, PickField, Well, FieldBox, Tag, PencilButton } from "controls.slint";
 
 // a row in a menu: 0 a choice, 1 a heading, 2 a rule, 3 a note, 4 a choice
 // in red (one that deletes), 5 a choice that can't be made now
@@ -20,6 +20,8 @@ export struct MenuRow {
     edit: bool,
     // a note's lines, where it takes more than one (its words wrap, its row as tall as they need)
     lines: int,
+    // an amber dot after its name: something of its own (a light with its own setup)
+    dot: bool,
 }
 
 // a drop-down: its way back (on a page of it), a search, then its rows. It
@@ -97,9 +99,11 @@ export component Menu inherits Rectangle {
         content-height: list.preferred-height;
         mouse-drag-pan-enabled: false;
         list := VerticalLayout {
-            for row[i] in root.rows: Rectangle {
+            for row[i] in root.rows: mrow := Rectangle {
+                // (its pencil under the pointer: the row stays lit)
+                property <bool> pen-hot;
                 height: row.kind == 1 ? Size.menu-head : row.kind == 2 ? Size.menu-rule : row.kind == 3 && row.lines > 1 ? 2 * Space.inline + row.lines * Line.text : Size.control;
-                background: (row.kind == 0 || row.kind == 4 || row.kind == 7) && (item.has-hover || (row.edit && pen.has-hover)) ? Ink.tint : transparent;
+                background: (row.kind == 0 || row.kind == 4 || row.kind == 7) && (item.has-hover || (row.edit && mrow.pen-hot)) ? Ink.tint : transparent;
                 border-radius: Radius.control;
                 if row.kind == 1: Text {
                     x: Part.menu-in;
@@ -144,9 +148,9 @@ export component Menu inherits Rectangle {
                 if row.kind == 6: HorizontalLayout {
                     padding-left: Part.menu-in;
                     padding-right: Part.menu-in;
-                    spacing: 8px;
+                    spacing: Space.inline;
                     Text {
-                        width: 14px;
+                        width: Part.glyph;
                         text: row.tick ? "✓" : "";
                         font-family: Font.ui;
                         font-size: Font.text;
@@ -164,20 +168,17 @@ export component Menu inherits Rectangle {
                             clicked => { root.chose(i); }
                         }
                     }
-                    Rectangle {
-                        width: 64px + 6px;
+                    // (the number in a field's look: a well, a shade lighter while it's typed in)
+                    VerticalLayout {
+                        alignment: center;
                         Rectangle {
-                            x: 6px;
-                            y: (parent.height - 24px) / 2;
-                            width: 64px;
-                            height: 24px;
+                            width: Part.menu-number;
+                            height: Size.quiet;
                             border-radius: Radius.small;
-                            border-width: 1px;
-                            border-color: Ink.line;
-                            background: Ink.base;
-                            TextInput {
-                                x: 7px;
-                                width: parent.width - 14px;
+                            background: number.has-focus ? Ink.hover-well : Ink.well;
+                            number := TextInput {
+                                x: Part.pill-pad;
+                                width: parent.width - 2 * Part.pill-pad;
                                 height: parent.height;
                                 text: row.tag;
                                 font-family: Font.ui;
@@ -198,49 +199,41 @@ export component Menu inherits Rectangle {
                         vertical-alignment: center;
                     }
                 }
+                // (its pieces Space.inline apart; src/menu_size.rs measures a row's width from the
+                // same tokens)
                 if row.kind == 0 || row.kind == 4 || row.kind == 5: HorizontalLayout {
                     opacity: row.kind == 5 ? 0.35 : 1;
                     padding-left: root.marks ? Part.menu-in : Space.row;
                     padding-right: Part.menu-in;
-                    spacing: root.marks ? 8px : 0;
+                    spacing: Space.inline;
                     // (a column for ticks only in a menu that ticks what is chosen)
-                    Text {
-                        width: root.marks ? 14px : 0;
+                    if root.marks: Text {
+                        width: Part.glyph;
                         text: row.tick ? "✓" : "";
                         font-family: Font.ui;
                         font-size: Font.text;
                         color: Ink.ink;
                         vertical-alignment: center;
                     }
+                    // (its words a check's gap after it, as a check's are)
                     if row.chipped: Rectangle {
-                        width: 14px + 2px;
+                        width: Part.glyph + Part.check-gap - Space.inline;
                         Image {
                             x: 0;
-                            y: (parent.height - 14px) / 2;
-                            width: 14px;
-                            height: 14px;
+                            y: (parent.height - self.height) / 2;
+                            width: Part.glyph;
+                            height: Part.glyph;
                             source: row.chip;
                             image-fit: fill;
                         }
                     }
-                    if row.tag != "": Rectangle {
-                        width: tag.preferred-width + 12px;
-                        Rectangle {
-                            y: (parent.height - self.height) / 2;
-                            height: tag.preferred-height + 2px;
-                            border-width: 1px;
-                            border-color: Ink.line;
-                            border-radius: Radius.tiny;
-                            tag := Text {
-                                text: row.tag;
-                                font-family: Font.ui;
-                                font-size: Font.small;
-                                color: Ink.quiet;
-                            }
-                        }
+                    // (a tag, the Tag, before its name)
+                    if row.tag != "": VerticalLayout {
+                        alignment: center;
+                        Tag { text: row.tag; }
                     }
                     Text {
-                        horizontal-stretch: 1;
+                        horizontal-stretch: row.dot ? 0 : 1;
                         text: row.label;
                         font-family: Font.ui;
                         font-size: Font.text;
@@ -248,9 +241,23 @@ export component Menu inherits Rectangle {
                         vertical-alignment: center;
                         overflow: elide;
                     }
+                    // (its dot after its name)
+                    if row.dot: HorizontalLayout {
+                        horizontal-stretch: 1;
+                        alignment: start;
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: Size.dot;
+                                height: Size.dot;
+                                border-radius: self.width / 2;
+                                background: Ink.warn;
+                            }
+                        }
+                    }
                     // (what a row says on its right never crowds out its own name)
                     if row.sub != "": Text {
-                        max-width: root.width * 0.55;
+                        max-width: root.width * Part.menu-aside;
                         text: row.sub;
                         font-family: Font.ui;
                         font-size: Font.caption;
@@ -264,29 +271,13 @@ export component Menu inherits Rectangle {
                     mouse-cursor: pointer;
                     clicked => { root.chose(i); }
                 }
-                if row.edit && (item.has-hover || pen.has-hover): Rectangle {
-                    x: parent.width - 30px;
-                    y: (parent.height - 24px) / 2;
-                    width: 24px;
-                    height: 24px;
-                    border-radius: Radius.small;
-                    background: pen.has-hover ? Ink.white.with-alpha(0.078) : transparent;
-                    Path {
-                        width: 13px;
-                        height: 13px;
-                        viewbox-width: 14;
-                        viewbox-height: 14;
-                        commands: "M9.6 2.2l2.2 2.2-7 7H2.6V9.2ZM8.3 3.5l2.2 2.2";
-                        fill: transparent;
-                        stroke: pen.has-hover ? Ink.bright : Ink.soft;
-                        stroke-width: 1.3px;
-                    }
-                }
-                pen := TouchArea {
-                    x: parent.width - 30px;
-                    width: row.edit ? 24px : 0;
-                    enabled: row.edit;
-                    mouse-cursor: pointer;
+                // (the pencil, as everything renamed in place has, at its end under the pointer)
+                if row.edit: PencilButton {
+                    x: parent.width - self.width - Space.tight;
+                    y: (parent.height - self.height) / 2;
+                    visible: item.has-hover || self.hover;
+                    hover-fill: Ink.white.with-alpha(0.078);
+                    changed hover => { mrow.pen-hot = self.hover; }
                     clicked => { root.edit(i); }
                 }
             }

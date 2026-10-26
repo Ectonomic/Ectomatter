@@ -241,6 +241,43 @@ mod system {
     }
 
     #[test]
+    fn menus_open_by_one_rule() {
+        // (a menu's width is set where each window opens its menus, by src/menu_size.rs's
+        // rule, never typed: no opener hands a menu a number for its width or its field's)
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let openers = ["fn hang_menu_most(", "fn open_menu_on(", "fn place_menu(", "fn show_rows(", "fn show_menus("];
+        let mut bad = Vec::new();
+        for entry in std::fs::read_dir(&src).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            let text = std::fs::read_to_string(&path).unwrap();
+            let mut within = "";
+            for (i, line) in text.lines().enumerate() {
+                if line.trim_start().starts_with("#[cfg(test)]") {
+                    break;
+                }
+                let code = line.split("//").next().unwrap_or("");
+                if let Some(f) = openers.iter().find(|f| code.contains(**f)) {
+                    within = f;
+                } else if code.trim_start().starts_with("fn ") || code.trim_start().starts_with("pub fn ") {
+                    within = "";
+                }
+                let typed = |call: &str| code.split(call).skip(1).any(|rest| rest.split(',').skip(1).take(2).chain(rest.split(')').take(1)).any(|a| a.trim().parse::<f32>().is_ok_and(|v| v != 0.0)));
+                if code.contains("set_menu_w(") && (within.is_empty() || typed("set_menu_w(")) {
+                    bad.push(format!("{name}:{}: {}", i + 1, line.trim()));
+                }
+                if ["hang_menu(", "hang_menu_most(", "place_menu(", "open_menu("].iter().any(|c| !code.contains(&format!("fn {c}")) && typed(c)) {
+                    bad.push(format!("{name}:{}: {}", i + 1, line.trim()));
+                }
+            }
+        }
+        assert!(bad.is_empty(), "a menu's width typed, not the menus' rule:\n{}", bad.join("\n"));
+    }
+
+    #[test]
     fn rust_layouts_measure_and_color_with_tokens() {
         let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut bad = Vec::new();

@@ -34,7 +34,7 @@ use crate::front::WindowAsk;
 use crate::lighting::{cell, kind, style, text_cell};
 use crate::setups::{self, Setup};
 use crate::text::{self, elide};
-use crate::{Cell, LabRow, LabWindow, Sketch};
+use crate::{Cell, LabRow, LabWindow, MenuRow, Sketch};
 use ectomatter_draw::hdr::sim::{key_light, Caps, Physics, Switch};
 use ectomatter_draw::hdr::{CapShape, KeyGeometry};
 use ectomatter_draw::jsonc;
@@ -42,6 +42,12 @@ use ectomatter_draw::jsonc;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Ask {
     Move,
+    /// a row of the open menu chosen (by its place), the menu let go, a setup's
+    /// name typed in its dialog, and the dialog done (given, or let go)
+    MenuChose(i32),
+    MenuDismiss,
+    AskTyped(String),
+    AskDone(bool),
     Minimize,
     Maximize,
     Close,
@@ -512,8 +518,6 @@ const TABS: i32 = 900;
 /// value's mark that it is the key's own, and the switch pad
 const SCOPE: i32 = 940;
 const MAP: i32 = 950;
-/// a light's row on the lights' list
-const PART_ROW: f32 = 36.0;
 const OWN: i32 = 960;
 const PAD: i32 = 970;
 /// a slider's reset: this, plus its slider's id
@@ -527,6 +531,9 @@ const SETUP: i32 = 930;
 const NAME: i32 = 935;
 /// a setup's words in the menu and on Save: as long as fits
 const SETUP_W: f32 = 200.0;
+/// a light chosen on the lights' list, among what the open menu's rows do: this, plus
+/// the light's place (the setups' menu's asks are under it)
+const KEY_PICK: i32 = 1000;
 /// what the core's own setup is called, beside the person's custom ones
 const DEFAULT: &str = "Default";
 /// a key's own text for the parts of its legend (see print::TEXTS): their
@@ -771,7 +778,6 @@ pub struct LabPage {
     /// with more lights than it has room for)
     scope: Option<usize>,
     picking: bool,
-    part_first: usize,
     /// the switch pad as last drawn, where it has the key, and what it was drawn from
     pad: Option<(drawing::Stage, drawing::PadMap, slint::Image)>,
     pad_of: Option<(Value, usize, bool, f32)>,
@@ -795,6 +801,12 @@ pub struct LabPage {
     /// the setups' menu, and the name being typed for one
     menu: Menu,
     naming: String,
+    /// what each row of the open menu does: a setups' menu's ask (setups_menu's), or a
+    /// light chosen (KEY_PICK past its place); the rows shown, and when a press off the
+    /// menu last shut it (so the press on its button doesn't open it again)
+    menu_picks: Vec<i32>,
+    menu_rows: Vec<MenuRow>,
+    shut: Option<Instant>,
     top: Rc<VecModel<Cell>>,
     /// the chosen key's text boxes, in a list of their own so a box keeps
     /// the keys while it is typed in, whatever else the page redraws; and
@@ -1116,6 +1128,10 @@ impl LabPage {
         on!(on_pk_dismiss, Ask::PkDismiss);
         on!(on_pad, |id, x, y| if id == LEGEND_PAD { Ask::MoveLegend(x, y) } else { Ask::Pad(x, y) });
         on!(on_list_scroll, |dy| Ask::FacesScroll(dy));
+        on!(on_menu_chose, |i| Ask::MenuChose(i));
+        on!(on_menu_dismiss, Ask::MenuDismiss);
+        on!(on_ask_typed, |t| Ask::AskTyped(t.to_string()));
+        on!(on_ask_done, |go| Ask::AskDone(go));
         on!(on_hovered, |id, on| Ask::Hover(id, on));
         on!(on_compare, |on| Ask::Compare(on));
         on!(on_reset, |id| Ask::Reset(id));
@@ -1176,7 +1192,9 @@ impl LabPage {
             foot,
             scope: None,
             picking: false,
-            part_first: 0,
+            menu_picks: Vec::new(),
+            menu_rows: Vec::new(),
+            shut: None,
             pad: None,
             pad_of: None,
             // (the typefaces and their weights, for the Weight choice from the start)
@@ -1255,7 +1273,28 @@ impl LabPage {
 
     /// Do what the page asked; what only its window can do is handed back.
     pub fn act(&mut self) -> Vec<WindowAsk> {
-        let asks: Vec<Ask> = self.asks.borrow_mut().drain(..).collect();
+        // (a row of the menu is what its setups' menu or its list asked for; letting the
+        // menu or the dialog go shuts it)
+        let picks = self.menu_picks.clone();
+        let setups_open = self.menu != Menu::Shut;
+        let asks: Vec<Ask> = self
+            .asks
+            .borrow_mut()
+            .drain(..)
+            .filter_map(|a| match a {
+                Ask::MenuChose(i) => match picks.get(i.max(0) as usize).copied() {
+                    Some(p) if p >= KEY_PICK => Some(Ask::Key(p - KEY_PICK)),
+                    Some(p) if p >= 0 => Some(Ask::Setups(p)),
+                    _ => None,
+                },
+                Ask::MenuDismiss if setups_open => Some(Ask::Setups(1)),
+                Ask::MenuDismiss => Some(Ask::Scope(1)),
+                Ask::AskTyped(t) => Some(Ask::Typed(NAME, t)),
+                Ask::AskDone(true) => Some(Ask::Setups(5)),
+                Ask::AskDone(false) => Some(Ask::Setups(1)),
+                a => Some(a),
+            })
+            .collect();
         let mut window = Vec::new();
         if asks.is_empty() {
             return window;
@@ -1266,6 +1305,8 @@ impl LabPage {
                 self.close_pick();
             }
             match ask {
+                // (the menu's and the dialog's own asks, said as the page's above)
+                Ask::MenuChose(_) | Ask::MenuDismiss | Ask::AskTyped(_) | Ask::AskDone(_) => {}
                 Ask::Color(part) => {
                     let open = self.pick.as_ref().map(|p| p.part as i32);
                     self.close_pick();
@@ -1611,12 +1652,7 @@ impl LabPage {
                     }
                     self.faces_open = false;
                 }
-                // (the lights' list turns where it is open; the typefaces' list otherwise)
-                Ask::FacesScroll(dy) if self.listing() => {
-                    let most = self.device.caps.len().saturating_sub(self.part_rows());
-                    let by = (dy / PART_ROW).round() as i64;
-                    self.part_first = (self.part_first as i64 - by).clamp(0, most as i64) as usize;
-                }
+                // (the typefaces' list turns by the wheel; the lights' list is a menu, which turns itself)
                 Ask::FacesScroll(dy) => {
                     let most = self.face_list().len().saturating_sub(1 + self.face_rows());
                     let by = (dy / 34.0).round() as i64;
@@ -1626,16 +1662,11 @@ impl LabPage {
                     self.scope = None;
                     self.picking = false;
                 }
-                // (a click on the lights' list between its rows stays on it)
-                Ask::Scope(2) => {}
+                // (the button that opens the map or the list, pressed again just as a press
+                // off the list shut it, leaves it shut)
+                Ask::Scope(_) if !self.picking && self.just_shut() => {}
                 Ask::Scope(_) => {
                     self.picking = !self.picking;
-                    // (the list opened with the chosen light in view)
-                    if self.listing() {
-                        let rows = self.part_rows();
-                        let most = self.device.caps.len().saturating_sub(rows);
-                        self.part_first = self.scope.map_or(0, |i| i.saturating_sub(rows / 2)).min(most);
-                    }
                 }
                 // (the chosen key or light chosen again lets go: back to all of them)
                 Ask::Key(i) if self.scope == Some(i.max(0) as usize) => {
@@ -1817,27 +1848,6 @@ impl LabPage {
     /// their button, as long as its core makes it (a mouse may have a dozen).
     fn listing(&self) -> bool {
         self.picking && self.device.windows
-    }
-
-    /// The lights' list, under its button (its left edge at `x`): where it
-    /// is and how wide, how many rows it shows (all of them, or as many as
-    /// the window has room for, turned by the wheel), and its note's lines.
-    fn part_box(&self, x: f32) -> (f32, f32, f32, usize, Vec<String>) {
-        let (w, h, _, _) = self.sizes();
-        let widest = self.device.caps.iter().map(|(c, _)| text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, &c.label)).fold(0.0, f32::max);
-        let mw = (widest + 76.0).clamp(260.0, 380.0);
-        let (mx, my) = (x.min(w - 24.0 - mw), 59.0);
-        let note = format!("Changes you make to a chosen {0} are for it alone. A dot marks a {0} with its own setup.", self.parts().1);
-        let lines = wrap_after(&note, mw - 40.0, mw - 40.0);
-        // (the page above the foot, less the list's padding, its rule and its note)
-        let room = h - crate::tokens::size::TITLE_BAR - crate::tokens::size::FOOT - 16.0 - my - 36.0 - 18.0 * lines.len() as f32;
-        let rows = ((room / PART_ROW).floor().max(1.0) as usize).min(self.device.caps.len());
-        (mx, my, mw, rows, lines)
-    }
-
-    /// How many lights the list has room to show at once.
-    fn part_rows(&self) -> usize {
-        self.part_box(0.0).3
     }
 
     /// Escape: shuts what is open over the page (the lights' list or the
@@ -2507,8 +2517,16 @@ impl LabPage {
     fn setups_menu(&mut self, i: i32) {
         let changed = self.light != self.saved;
         match i {
+            // (its button pressed again just as a press off the menu shut it leaves it shut)
+            0 if self.menu == Menu::Shut && self.just_shut() => {}
             0 => self.menu = if self.menu == Menu::Shut { Menu::Open } else { Menu::Shut },
-            1 | 6 => self.menu = if self.menu == Menu::Open || i == 1 { Menu::Shut } else { Menu::Open },
+            1 | 6 => {
+                // (a name not taken goes with the dialog it was typed in)
+                if matches!(self.menu, Menu::New | Menu::Rename) && self.status.1 == 2 {
+                    self.status = (String::new(), 0);
+                }
+                self.menu = if self.menu == Menu::Open || i == 1 { Menu::Shut } else { Menu::Open };
+            }
             2 => {
                 self.menu = Menu::New;
                 self.naming.clear();
@@ -2635,192 +2653,142 @@ impl LabPage {
         }
     }
 
-    /// The setups' menu, open under its button (its segment from `x`): the
-    /// core's setup and the person's own, the one in use lit, each with
-    /// what it changes; and what can be done; or a name being given, or a
-    /// delete asked about.
-    fn menu_cells(&self, x: f32, w: f32) -> Vec<Cell> {
-        let mut top = Vec::new();
-        if self.menu == Menu::Shut {
-            return top;
-        }
-        let (_, h, _, _) = self.sizes();
-        let color = |c: [u8; 3]| slint::Color::from_rgb_u8(c[0], c[1], c[2]);
-        let (quiet, faint, dim, bright) = ([0x9a, 0x9a, 0x9a], [0x5a, 0x5a, 0x5a], [0xd4, 0xd4, 0xd4], [0xf5, 0xf5, 0xf5]);
-        let words = |x: f32, y: f32, s: &str, c: [u8; 3]| Cell { color: color(c), ..text_cell(style::WORDS_IN, x, y, text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, s) + 2.0, 20.0, s) };
-        let mw = 380.0;
-        let (mx, my) = (x.min(w - 24.0 - mw), 59.0);
-        // anywhere else on the page shuts it
-        top.push(Cell { id: SETUP, index: 1, style: 29, ..cell(kind::LINK, 0.0, 0.0, w, h - crate::tokens::size::TITLE_BAR - crate::tokens::size::FOOT) });
-        let mut items = Vec::new();
+    /// The setups' menu or the lights' list, open under its button as every menu is (the
+    /// window's Menu, src/menu_size.rs), or neither; and a setup's name being given, or
+    /// its delete asked about, in a dialog. `cells` are the page's, its buttons among them.
+    fn show_menus(&mut self, cells: &[Cell]) {
+        use crate::tokens::size;
+        let row = |kind: i32, label: &str| MenuRow { kind, label: label.into(), ..Default::default() };
+        // (where a button is in the window: the page sits under the title bar)
+        let button = |id: i32, index: i32| cells.iter().find(|c| c.id == id && c.index == index).map_or((0.0, 0.0, 0.0), |c| (c.x, c.y + size::TITLE_BAR, c.h));
         let changed = self.light != self.saved;
-        let naming = matches!(self.menu, Menu::New | Menu::Rename | Menu::Delete);
-        // a setup's row: its name, and under the name what the setup is;
-        // lit if in use; faint where changes not saved would be lost by
-        // choosing it. How tall it is.
-        let row = |items: &mut Vec<Cell>, y: f32, index: i32, name: &str, note: &str, in_use: bool| -> f32 {
-            let can = in_use || (!changed && !naming);
-            let lines = wrap_after(note, mw - 40.0, mw - 40.0);
-            let h = if lines.is_empty() { 36.0 } else { 34.0 + 18.0 * lines.len() as f32 };
-            if in_use {
-                items.push(Cell { style: 30, ..cell(kind::TILE, mx + 8.0, my + y, mw - 16.0, h) });
+        let (mut rows, mut picks) = (Vec::new(), Vec::new());
+        let (at, w) = if self.menu == Menu::Open {
+            // the core's setup and the person's own, the one in use ticked, those that
+            // can't be chosen now faint; then what can be done
+            let can = |in_use: bool| in_use || !changed;
+            rows.push(MenuRow { tick: self.setup.is_none(), ..row(if can(self.setup.is_none()) { 0 } else { 5 }, DEFAULT) });
+            picks.push(10);
+            rows.push(row(3, "The standard lighting for this keyboard."));
+            picks.push(-1);
+            rows.push(row(1, "Custom"));
+            picks.push(-1);
+            rows.push(row(3, "For a keyboard you've changed, such as new keycaps."));
+            picks.push(-1);
+            if self.setups.is_empty() {
+                rows.push(row(3, "None yet. Choose Save as a new setup to make one."));
+                picks.push(-1);
             }
-            let name = elide(name, SETUP_W, 400, 13.5);
-            items.push(words(mx + 20.0, my + y + 8.0, &name, if in_use { bright } else if can { dim } else { faint }));
-            for (k, line) in lines.iter().enumerate() {
-                items.push(Cell { color: color(if can { quiet } else { faint }), ..text_cell(style::NOTE_IN, mx + 20.0, my + y + 27.0 + 18.0 * k as f32, mw - 40.0, 18.0, line) });
+            for (k, st) in self.setups.iter().enumerate() {
+                let in_use = self.setup.as_ref() == Some(&st.id);
+                rows.push(MenuRow { tick: in_use, ..row(if can(in_use) { 0 } else { 5 }, &st.name) });
+                picks.push(11 + k as i32);
             }
-            if can && !naming {
-                items.push(Cell { id: SETUP, index, ..cell(kind::LINK, mx + 8.0, my + y, mw - 16.0, h) });
+            if changed {
+                rows.push(row(3, "Save or revert your changes before switching setups."));
+                picks.push(-1);
             }
-            h
+            rows.push(row(2, ""));
+            picks.push(-1);
+            rows.push(row(0, "Save as a new setup…"));
+            picks.push(2);
+            if self.setup.is_some() {
+                let name = elide(&self.setup_name(), SETUP_W, crate::tokens::font::REGULAR, crate::tokens::font::TEXT);
+                rows.push(row(0, &format!("Rename {name}…")));
+                picks.push(3);
+                rows.push(row(4, &format!("Delete {name}…")));
+                picks.push(4);
+            }
+            (button(SETUP, 0), crate::menu_size::width(&rows, true, 0.0))
+        } else if self.listing() {
+            // each light by its name, the chosen one ticked, those with a setup of their
+            // own marked by a dot; and what choosing one does
+            for (i, (c, _)) in self.device.caps.iter().enumerate() {
+                rows.push(MenuRow { tick: self.scope == Some(i), dot: self.light["keys"][c.id.as_str()].is_object(), ..row(0, &c.label) });
+                picks.push(KEY_PICK + i as i32);
+            }
+            rows.push(row(2, ""));
+            picks.push(-1);
+            rows.push(row(3, &format!("Changes you make to a chosen {0} are for it alone. A dot marks a {0} with its own setup.", self.parts().1)));
+            picks.push(-1);
+            (button(SCOPE, 1), crate::menu_size::width(&rows, true, 0.0))
+        } else {
+            if !self.menu_rows.is_empty() {
+                self.menu_rows.clear();
+                self.ui.set_menu_open(false);
+            }
+            self.show_ask();
+            return;
         };
-        let mut y = 8.0;
-        y += row(&mut items, y, 10, DEFAULT, "The standard lighting for this keyboard.", self.setup.is_none());
-        y += 10.0;
-        items.push(Cell { color: color([0xa3, 0xa3, 0xa3]), ..text_cell(style::LABEL_IN, mx + 20.0, my + y, 200.0, 18.0, "Custom") });
-        y += 20.0;
-        for line in wrap_after("For a keyboard you've changed, such as new keycaps.", mw - 40.0, mw - 40.0) {
-            items.push(Cell { color: color(quiet), ..text_cell(style::NOTE_IN, mx + 20.0, my + y, mw - 40.0, 18.0, &line) });
-            y += 18.0;
+        crate::menu_size::fit_notes(&mut rows, w);
+        if rows != self.menu_rows {
+            let h = crate::menu_size::height(&rows, false, false, f32::MAX);
+            let (ax, ay, ah) = at;
+            let (top, most) = crate::menu_size::hang(self.ui.get_window_height(), (ay, ah), h);
+            self.ui.set_menu_w(w);
+            self.ui.set_menu_ax(ax);
+            self.ui.set_menu_top(top);
+            self.ui.set_menu_max(most);
+            self.ui.set_menu_natural(h);
+            // (both tick what's chosen, so both keep the column for it)
+            self.ui.set_menu_marks(true);
+            self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows.clone())));
+            self.ui.set_menu_open(true);
+            self.menu_rows = rows;
         }
-        y += 6.0;
-        if self.setups.is_empty() {
-            for line in wrap_after("None yet. Choose Save as a new setup to make one.", mw - 40.0, mw - 40.0) {
-                items.push(Cell { color: color(dim), ..text_cell(style::NOTE_IN, mx + 20.0, my + y + 4.0, mw - 40.0, 18.0, &line) });
-                y += 18.0;
-            }
-            y += 12.0;
-        }
-        for (k, s) in self.setups.iter().enumerate() {
-            y += row(&mut items, y, 11 + k as i32, &s.name, "", self.setup.as_ref() == Some(&s.id));
-        }
-        if changed && !naming {
-            for line in wrap_after("Save or revert your changes before switching setups.", mw - 40.0, mw - 40.0) {
-                items.push(text_cell(style::NOTE, mx + 20.0, my + y + 6.0, mw - 40.0, 18.0, &line));
-                y += 18.0;
-            }
-            y += 8.0;
-        }
-        y += 6.0;
-        items.push(Cell { color: color([0x3a, 0x3a, 0x3a]), ..cell(kind::BOX, mx + 8.0, my + y, mw - 16.0, 1.0) });
-        y += 7.0;
-        let action = |items: &mut Vec<Cell>, y: f32, index: i32, s: &str| {
-            items.push(words(mx + 20.0, my + y + 8.0, s, dim));
-            items.push(Cell { id: SETUP, index, ..cell(kind::LINK, mx + 8.0, my + y, mw - 16.0, 36.0) });
-        };
-        match self.menu {
-            Menu::New | Menu::Rename => {
-                let head = if self.menu == Menu::New { "Save as a new setup".to_string() } else { format!("Rename {}", elide(&self.setup_name(), SETUP_W, 400, 13.5)) };
-                items.push(text_cell(style::LABEL, mx + 20.0, my + y + 6.0, mw - 40.0, 26.0, &head));
-                y += 36.0;
-                items.push(Cell { id: NAME, style: 3, text: self.naming.clone().into(), ..cell(kind::FIELD, mx + 16.0, my + y, mw - 32.0, 34.0) });
-                y += 34.0;
-                if self.menu == Menu::New {
-                    let note = if changed { format!("Your unsaved changes go into the new setup. {} is not changed.", self.setup_name()) } else { format!("The new setup starts as a copy of {}.", self.setup_name()) };
-                    y += 8.0;
-                    for line in wrap_after(&note, mw - 40.0, mw - 40.0) {
-                        items.push(text_cell(style::NOTE, mx + 20.0, my + y, mw - 40.0, 18.0, &line));
-                        y += 18.0;
-                    }
-                    y += 8.0;
-                } else {
-                    y += 12.0;
-                }
-            }
-            Menu::Delete => {
-                items.push(text_cell(style::LABEL, mx + 20.0, my + y + 6.0, mw - 40.0, 26.0, &format!("Delete {}?", elide(&self.setup_name(), SETUP_W, 400, 13.5))));
-                y += 34.0;
-                for line in wrap_after(&format!("This deletes {}. The keyboard switches back to {DEFAULT}.", self.setup_name()), mw - 40.0, mw - 40.0) {
-                    items.push(text_cell(style::NOTE, mx + 20.0, my + y, mw - 40.0, 18.0, &line));
-                    y += 18.0;
-                }
-                y += 10.0;
-            }
-            _ => {
-                action(&mut items, y, 2, "Save as a new setup…");
-                y += 36.0;
-                if self.setup.is_some() {
-                    let name = elide(&self.setup_name(), SETUP_W - 60.0, 400, 13.5);
-                    action(&mut items, y, 3, &format!("Rename {name}…"));
-                    y += 36.0;
-                    action(&mut items, y, 4, &format!("Delete {name}…"));
-                    y += 36.0;
-                }
-            }
-        }
-        if naming {
-            // Cancel, and the name given or the delete agreed to
-            let go = match self.menu {
-                Menu::New => "Save",
-                Menu::Rename => "Rename",
-                _ => "Delete",
-            };
-            let (gw, cw) = (text::width(crate::tokens::font::MEDIUM, crate::tokens::font::CONTROL, go) + 28.0, text::width(crate::tokens::font::MEDIUM, crate::tokens::font::CONTROL, "Cancel") + 28.0);
-            items.push(Cell { text: go.into(), on: true, id: SETUP, index: 5, ..cell(kind::SEG_BUTTON, mx + mw - 16.0 - gw, my + y, gw, 30.0) });
-            items.push(Cell { text: "Cancel".into(), id: SETUP, index: 6, ..cell(kind::GHOST, mx + mw - 16.0 - gw - 8.0 - cw, my + y, cw, 30.0) });
-            y += 30.0;
-        }
-        y += 8.0;
-        top.push(Cell { style: 27, ..cell(kind::TILE, mx, my, mw, y) });
-        // (a click on the menu between its rows stays on it)
-        top.push(Cell { id: SETUP, index: 7, style: 29, ..cell(kind::LINK, mx, my, mw, y) });
-        top.extend(items);
-        top
+        self.menu_picks = picks;
+        self.show_ask();
     }
 
-    /// The lights' list, open under its button (from `x`), as the setups'
-    /// menu opens under its own: each light by its name, the chosen one lit,
-    /// those with a setup of their own marked by a dot, and what choosing one
-    /// does. Where a device has more lights than the window has room for, the
-    /// wheel turns the list, a bar at its side showing how far.
-    fn part_list(&self, x: f32, w: f32) -> Vec<Cell> {
-        let mut top = Vec::new();
-        if !self.listing() {
-            return top;
+    /// A setup's name being given (Save as a new setup, Rename) in a dialog, or its
+    /// delete asked about first, as everything that deletes is; or neither.
+    fn show_ask(&self) {
+        let changed = self.light != self.saved;
+        let name = elide(&self.setup_name(), SETUP_W, crate::tokens::font::REGULAR, crate::tokens::font::TEXT);
+        let (ask, title, text, go) = match self.menu {
+            Menu::New => (
+                1,
+                "Save as a new setup".to_string(),
+                if changed { format!("Your unsaved changes go into the new setup. {} is not changed.", self.setup_name()) } else { format!("The new setup starts as a copy of {}.", self.setup_name()) },
+                "Save",
+            ),
+            Menu::Rename => (1, format!("Rename {name}"), String::new(), "Rename"),
+            Menu::Delete => (2, format!("Delete {name}?"), format!("This deletes {}. The keyboard switches back to {DEFAULT}.", self.setup_name()), "Delete"),
+            _ => (0, String::new(), String::new(), ""),
+        };
+        if self.ui.get_ask() != ask {
+            // (the name to give as the dialog opens: the setup's own, to rename it)
+            self.ui.set_ask_name(self.naming.clone().into());
         }
-        let (_, h, _, _) = self.sizes();
-        let color = |c: [u8; 3]| slint::Color::from_rgb_u8(c[0], c[1], c[2]);
-        let (quiet, dim, bright) = ([0x9a, 0x9a, 0x9a], [0xd4, 0xd4, 0xd4], [0xf5, 0xf5, 0xf5]);
-        let (mx, my, mw, rows, lines) = self.part_box(x);
-        // anywhere else on the page shuts it
-        top.push(Cell { id: SCOPE, index: 1, style: 29, ..cell(kind::LINK, 0.0, 0.0, w, h - crate::tokens::size::TITLE_BAR - crate::tokens::size::FOOT) });
-        let mut items = Vec::new();
-        let mut y = 8.0;
-        for (i, (c, _)) in self.device.caps.iter().enumerate().skip(self.part_first).take(rows) {
-            let chosen = self.scope == Some(i);
-            if chosen {
-                items.push(Cell { style: 30, ..cell(kind::TILE, mx + 8.0, my + y, mw - 16.0, PART_ROW) });
+        // (what's wrong with the name typed: the status a name not taken left, while naming)
+        let warn = if ask == 1 && self.status.1 == 2 { self.status.0.clone() } else { String::new() };
+        self.ui.set_ask_warn(warn.into());
+        self.ui.set_ask(ask);
+        self.ui.set_ask_title(title.into());
+        self.ui.set_ask_text(text.into());
+        self.ui.set_ask_go(go.into());
+    }
+
+    /// Whether a press off the open menu shut it a moment ago.
+    fn just_shut(&self) -> bool {
+        self.shut.is_some_and(|t| t.elapsed() < Duration::from_millis(400))
+    }
+
+    /// A press anywhere in the window: away from the open menu, it shuts it.
+    pub fn pressed_at(&mut self, x: f32, y: f32) {
+        if self.menu != Menu::Open && !self.listing() {
+            return;
+        }
+        let (mx, my, mw, mh) = (self.ui.get_menu_x(), self.ui.get_menu_y(), self.ui.get_menu_width(), self.ui.get_menu_height());
+        if !(x >= mx && x < mx + mw && y >= my && y < my + mh) {
+            self.shut = Some(Instant::now());
+            if self.menu == Menu::Open {
+                self.menu = Menu::Shut;
+            } else {
+                self.picking = false;
             }
-            let name = elide(&c.label, mw - 76.0, 400, 13.5);
-            let nw = text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, &name) + 2.0;
-            items.push(Cell { color: color(if chosen { bright } else { dim }), ..text_cell(style::WORDS_IN, mx + 20.0, my + y + 8.0, nw, 20.0, &name) });
-            if self.light["keys"][c.id.as_str()].is_object() {
-                items.push(Cell { style: 3, ..cell(kind::DOT, mx + 20.0 + nw + 8.0, my + y + 15.0, 6.0, 6.0) });
-            }
-            items.push(Cell { id: MAP, index: i as i32, ..cell(kind::LINK, mx + 8.0, my + y, mw - 16.0, PART_ROW) });
-            y += PART_ROW;
+            self.refresh();
         }
-        // (the bar beside the rows, where there are more than show)
-        let all = self.device.caps.len();
-        if rows < all {
-            let track = rows as f32 * PART_ROW;
-            let (bar_h, bar_y) = (track * rows as f32 / all as f32, track * self.part_first as f32 / all as f32);
-            items.push(Cell { color: color([0x5a, 0x5a, 0x5a]), ..cell(kind::BOX, mx + mw - 7.0, my + 8.0 + bar_y, 3.0, bar_h.max(12.0)) });
-        }
-        y += 6.0;
-        items.push(Cell { color: color([0x3a, 0x3a, 0x3a]), ..cell(kind::BOX, mx + 8.0, my + y, mw - 16.0, 1.0) });
-        y += 10.0;
-        for line in &lines {
-            items.push(Cell { color: color(quiet), ..text_cell(style::NOTE_IN, mx + 20.0, my + y, mw - 40.0, 18.0, line) });
-            y += 18.0;
-        }
-        y += 12.0;
-        top.push(Cell { style: 27, ..cell(kind::TILE, mx, my, mw, y) });
-        // (a click on the list between its rows stays on it)
-        top.push(Cell { id: SCOPE, index: 2, style: 29, ..cell(kind::LINK, mx, my, mw, y) });
-        top.extend(items);
-        top
     }
 
     // ------------------------------------------------------------ the page
@@ -2829,8 +2797,7 @@ impl LabPage {
         self.draw_stage();
         let (cells, (sketches, over, rows), foot, mut top) = self.layout();
         let (w, _, _, _) = self.sizes();
-        // (where the lights' list hangs: under the button that opens it)
-        let one_x = cells.iter().find(|c| c.id == SCOPE && c.index == 1).map_or(0.0, |c| c.x);
+        self.show_menus(&cells);
         top.extend(self.glyph_cells(w));
         // anywhere off the open picker shuts it
         if self.pick.is_some() {
@@ -2862,13 +2829,8 @@ impl LabPage {
         } else {
             self.rows.set_vec(rows);
         }
-        // where a list turns with the wheel: the lights' list's rows, or the
-        // typefaces' list (nowhere while both are shut)
+        // where a list turns with the wheel: the typefaces' list (nowhere while it's shut)
         let (lx, ly, lw, lh) = match (&self.face_sketch, self.faces_open && self.section == LEGENDS) {
-            _ if self.listing() => {
-                let (mx, my, mw, rows, _) = self.part_box(one_x);
-                (mx, my + 8.0, mw, rows as f32 * PART_ROW)
-            }
             (Some((_, st, _)), true) => {
                 let (fx, fy, _, _) = self.face_box();
                 (fx, fy, st.w, st.h)
@@ -3488,9 +3450,7 @@ impl LabPage {
             let line = if k == 1 && lines.len() > 2 { elide(&format!("{line}…"), w - 48.0, 400, 12.5) } else { line.clone() };
             cells.push(text_cell(style::NOTE, x, hy + 18.125 * k as f32, w - 48.0, 18.0, &line));
         }
-        let mut top = self.menu_cells(ux, w);
-        top.extend(self.part_list(one_x, w));
-        (cells, (sketches, over, rows), self.readout_line(), top)
+        (cells, (sketches, over, rows), self.readout_line(), Vec::new())
     }
 
     /// The foot's readout of what is on the keyboard now, each number with

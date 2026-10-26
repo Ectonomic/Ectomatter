@@ -45,7 +45,7 @@ pub enum Ask {
     LightOwn(bool),
     LightColor(f32, f32, f32),
     Grid,
-    CellPick(i32, i32, f32, f32, f32),
+    CellPick(i32, i32, f32, f32, f32, f32),
     /// a slider in the box moved: an effect's speed
     CellSlide(i32, f32),
     /// an effect's tile chosen
@@ -179,7 +179,7 @@ impl LayoutPage {
         on!(on_grid_toggle, Ask::Grid);
         on!(on_cell_slide, |id, v| Ask::CellSlide(id, v));
         on!(on_fx_chose, |k| Ask::FxChose(k));
-        on!(on_cell_pick, |id, i, x, y, h| Ask::CellPick(id, i, x, y, h));
+        on!(on_cell_pick, |id, i, x, y, h, w| Ask::CellPick(id, i, x, y, h, w));
         on!(on_cell_typed, |id, _index, t| Ask::CellTyped(id, t.to_string()));
         on!(on_menu_chose, |i| Ask::MenuChose(i));
         on!(on_menu_dismiss, Ask::MenuDismiss);
@@ -392,12 +392,12 @@ impl LayoutPage {
                         crate::uistate::set("screen_grid", serde_json::json!(ed.grid));
                     }
                 }
-                Ask::CellPick(id, index, x, y, h) => {
+                Ask::CellPick(id, index, x, y, h, w) => {
                     let c = ctl(id);
                     match c {
-                        Ctl::ScrSource => self.open_shows(cx, (x, y, h)),
+                        Ctl::ScrSource => self.open_shows(cx, (x, y, h), w),
                         Ctl::OpenSettings => out.window.push(WindowAsk::ShowSettings),
-                        Ctl::ScrFormat => self.open_formats(cx, (x, y, h)),
+                        Ctl::ScrFormat => self.open_formats(cx, (x, y, h), w),
                         Ctl::ScrAlign | Ctl::ScrUnits | Ctl::ScrHours | Ctl::ScrFit => {
                             if let Some(ed) = cx.editor.as_mut() {
                                 if let Some(p) = cx.screens.library.get_mut(ed.page) {
@@ -573,21 +573,27 @@ impl LayoutPage {
         }
     }
 
-    fn place_menu(&mut self, rows: Vec<MenuRow>, w: f32, anchor: (f32, f32, f32)) {
+    /// A menu of `rows` open from `anchor`, as every menu opens (src/menu_size.rs): as
+    /// wide as its rows need and never narrower than `under`, the field it drops from; or,
+    /// `right`, with its right edge at the right edge of the button it drops from, `under`
+    /// wide.
+    fn place_menu(&mut self, mut rows: Vec<MenuRow>, under: f32, anchor: (f32, f32, f32), right: bool) {
+        // (a column for ticks only when something in the menu is ticked)
+        let marks = rows.iter().any(|r| r.tick);
+        let w = crate::menu_size::width(&rows, marks, if right { 0.0 } else { under });
+        crate::menu_size::fit_notes(&mut rows, w);
         let h = crate::menu_size::height(&rows, false, false, f32::MAX);
         self.ui.set_menu_natural(h);
         self.ui.set_menu_w(w);
-        // (a column for ticks only when something in the menu is ticked)
-        self.ui.set_menu_marks(rows.iter().any(|r| r.tick));
+        self.ui.set_menu_marks(marks);
         self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
         let (ax, ay, ah) = anchor;
+        let ax = if right { ax + under - w } else { ax };
         let win = self.ui.get_window_height();
-        let (below, above) = (win - ay - ah - 14.0, ay - 70.0);
-        let down = h <= below || below >= h.min(260.0) || below >= above;
-        let room = if down { below } else { above };
+        let (top, most) = crate::menu_size::hang(win, (ay, ah), h);
         self.ui.set_menu_ax(ax);
-        self.ui.set_menu_top(if down { ay + ah + 6.0 } else { ay - 6.0 - h.min(room) });
-        self.ui.set_menu_max(if h > room { room } else { win * 0.7 });
+        self.ui.set_menu_top(top);
+        self.ui.set_menu_max(most);
         self.ui.set_menu_open(true);
     }
 
@@ -599,9 +605,8 @@ impl LayoutPage {
         let Some(p) = LayoutPage::page(cx) else { return };
         self.close_picker();
         let rows = vec![row(0, &format!("Duplicate {}", p.name), false, ""), row(4, &format!("Delete {}…", p.name), false, "")];
-        let w = rows.iter().map(|r| crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, &r.label) + 64.0).fold(200.0f32, f32::max).min(320.0).ceil();
-        // (its right edge at the button's)
-        self.place_menu(rows, w, (anchor.0 + 30.0 - w, anchor.1, anchor.2));
+        // (its right edge at the button's, the More button every header has)
+        self.place_menu(rows, crate::tokens::size::QUIET, anchor, true);
         self.menu = Some(Menu::More);
     }
 
@@ -613,13 +618,12 @@ impl LayoutPage {
         }
         self.close_picker();
         let (rows, made) = new_rows(&cx.screens.library);
-        let w = rows.iter().map(|r| crate::text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, &r.label) + 64.0).fold(200.0f32, f32::max).min(320.0).ceil();
-        self.place_menu(rows, w, (anchor.0 + bw - w, anchor.1, anchor.2));
+        self.place_menu(rows, bw, anchor, true);
         self.menu = Some(Menu::New(made));
     }
 
     /// Format, in the box of a Data block showing the date: each format as the date reads today.
-    fn open_formats(&mut self, cx: &Cx, anchor: (f32, f32, f32)) {
+    fn open_formats(&mut self, cx: &Cx, anchor: (f32, f32, f32), under: f32) {
         if self.just_shut(anchor) {
             return;
         }
@@ -628,12 +632,12 @@ impl LayoutPage {
         let listed = screen_edit::format_menu(piece.date_format, cx.readings);
         let rows: Vec<MenuRow> = listed.iter().map(|(k, label, sub, tick, _)| row(*k, label, *tick, sub)).collect();
         let choices = listed.into_iter().map(|r| r.4).collect();
-        self.place_menu(rows, 250.0, anchor);
+        self.place_menu(rows, under, anchor, false);
         self.menu = Some(Menu::Formats(choices));
     }
 
     /// Shows, in the box of a Data block or a bar: what it can show, each with what it reads now.
-    fn open_shows(&mut self, cx: &Cx, anchor: (f32, f32, f32)) {
+    fn open_shows(&mut self, cx: &Cx, anchor: (f32, f32, f32), under: f32) {
         if self.just_shut(anchor) {
             return;
         }
@@ -644,7 +648,7 @@ impl LayoutPage {
         let listed = screen_edit::source_menu(current, bars, piece.date_format, &cx.groups, cx.avail, cx.readings);
         let rows: Vec<MenuRow> = listed.iter().map(|(k, label, sub, tick, _)| row(*k, label, *tick, sub)).collect();
         let choices = listed.into_iter().map(|r| r.4).collect();
-        self.place_menu(rows, 330.0, anchor);
+        self.place_menu(rows, under, anchor, false);
         self.menu = Some(Menu::Shows(choices));
     }
 

@@ -28,7 +28,7 @@ import "../../../crates/ectomatter-draw/typefaces/JetBrainsMono.ttf";
 import { Space, Radius, Font, Line, Size, Part, Shadow, Ink } from "tokens.slint";
 export { Ink }
 // The design system's parts (ui/system/), which every page is built from.
-import { ColorSquare, DialogHead, FormLabel, FormNote, RenameField, FloatBar, Fold, RecordButton, Tag, RadioRow, FolderTab, Slider, ColorButton, SegGround, SegChoice, TipBox, Tip, EmptyState, ListRow, EditorHeader, EffectTile, Glyph, IconButton, MoreButton, PencilButton, BoxRow, Scrim, DialogBox, Confirm, Dot, TitleBar, PageBar, HintRow, Typing, WinButton, Tab, WordButton, TextButton, Spinner, ScrollBar, PickField, Well, LinkButton, SmallCap, FieldBox, CheckBox, Star, StarButton, StripIcon, PlayButton, SegSwitch, DropField, BarButton, Stage, PageBox, ScrollBox, MenuRow, Menu, Picker, Cell, CellView, LaidBox, CellBox, ProfileItem, RailItem, AnchorRow, AnchorHead, ListBox, AnchorColumn } from "system/system.slint";
+import { ColorSquare, DialogHead, FormLabel, FormNote, FormWarning, RenameField, FloatBar, Fold, RecordButton, Tag, RadioRow, FolderTab, Slider, ColorButton, SegGround, SegChoice, TipBox, Tip, EmptyState, ListRow, EditorHeader, EffectTile, Glyph, IconButton, MoreButton, PencilButton, BoxRow, Scrim, DialogBox, Confirm, Dot, TitleBar, PageBar, HintRow, Typing, WinButton, Tab, WordButton, TextButton, Spinner, ScrollBar, PickField, Well, LinkButton, SmallCap, FieldBox, CheckBox, Star, StarButton, StripIcon, PlayButton, SegSwitch, DropField, BarButton, Stage, PageBox, ScrollBox, MenuRow, Menu, Picker, Cell, CellView, LaidBox, CellBox, ProfileItem, RailItem, AnchorRow, AnchorHead, ListBox, AnchorColumn } from "system/system.slint";
 export { Typing, MenuRow, Cell, LaidBox, ProfileItem }
 
 // a key over the keyboard: where it is in the drawing's units, from the
@@ -857,7 +857,7 @@ component KeyDetail inherits PageBox {
     callback done();
     callback reset();
     callback kind-picked(int, length, length, length);
-    callback job-clicked(length, length, length);
+    callback job-clicked(length, length, length, length);
     callback record();
     // how tall what it holds is (the page gives the box this much at least)
     out property <length> need: Size.box-head + body.preferred-height + Space.pad;
@@ -952,7 +952,7 @@ component KeyDetail inherits PageBox {
                         DropField {
                             text: root.job;
                             open: root.menu-open;
-                            clicked(x, y, h) => { root.job-clicked(x, y, h); }
+                            clicked(x, y, h) => { root.job-clicked(x, y, h, self.width); }
                         }
                         // Record: takes the next key pressed on the keyboard
                         if root.recordable: VerticalLayout {
@@ -1294,7 +1294,7 @@ export component AppWindow inherits Window {
     in property <bool> gl-script-editing;
     callback gl-script-wait-toggle();
     callback gl-script-keep-toggle();
-    callback gl-script-limit-menu(length, length, length);
+    callback gl-script-limit-menu(length, length, length, length);
     callback gl-script-remove();
     callback gl-script-typed();
     // what was last done or went wrong, at the bar's right for a moment
@@ -1319,8 +1319,8 @@ export component AppWindow inherits Window {
     out property <length> gl-scroll: -gl-flick.content-y;
     callback gl-tab-chosen(int);
     callback gl-find(string);
-    callback gl-store-menu(length, length, length);
-    callback gl-sort-menu(length, length, length);
+    callback gl-store-menu(length, length, length, length);
+    callback gl-sort-menu(length, length, length, length);
     callback gl-open(int);
     callback gl-star(int);
     callback gl-every-page();
@@ -1411,7 +1411,7 @@ export component AppWindow inherits Window {
     in property <[GlRow]> gl-rows;
     callback gl-row-on(int);
     callback gl-row-pick(int);
-    callback gl-row-until(int, length, length, length);
+    callback gl-row-until(int, length, length, length, length);
     // a layout carried over the rows: the row it's over (-1 neither), and its place in Layouts
     callback gl-carry-move(int, int);
     callback screen-state();
@@ -1804,7 +1804,7 @@ export component AppWindow inherits Window {
     callback mouse-tab-chosen(int);
     callback mouse-row(int);
     callback mouse-kind-picked(int, length, length, length);
-    callback mouse-job-clicked(length, length, length);
+    callback mouse-job-clicked(length, length, length, length);
     callback mouse-reset();
     callback mouse-effect(int);
     callback view-changed(int);
@@ -1845,7 +1845,7 @@ export component AppWindow inherits Window {
     in property <[CheckItem]> slider-choices;
     callback slider-chosen-at(int);
     callback slider-bind-at(int);
-    callback action-menu(int, length, length, length);
+    callback action-menu(int, length, length, length, length);
     callback listen(int);
     callback reset-key();
     callback macro-editor(int);  // the layer whose macro to open, or -1
@@ -1859,7 +1859,7 @@ export component AppWindow inherits Window {
     // a field in the open menu typed in and set, by its row
     callback menu-field(int, string);
     callback effect(int);
-    callback cell-pick(int, int, length, length, length);
+    callback cell-pick(int, int, length, length, length, length);
     callback cell-slide(int, float);
     callback cell-typed(int, int, string);
 
@@ -2689,7 +2689,7 @@ export component AppWindow inherits Window {
                         note: root.mouse-note;
                         reset => { root.mouse-reset(); }
                         kind-picked(i, x, y, h) => { root.mouse-kind-picked(i, x, y, h); }
-                        job-clicked(x, y, h) => { root.mouse-job-clicked(x, y, h); }
+                        job-clicked(x, y, h, w) => { root.mouse-job-clicked(x, y, h, w); }
                     }
                     if root.mouse-tab == 1: ListBox {
                         heading: "LIGHTS";
@@ -2733,7 +2733,7 @@ export component AppWindow inherits Window {
                         b: b;
                         max-height: mouse-band-max;
                         resized(w) => { root.mouse-box-resized(i, w); }
-                        pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
+                        pick(id, index, x, y, h, w) => { root.cell-pick(id, index, x, y, h, w); }
                         slide(id, v) => { root.cell-slide(id, v); }
                         typed(id, index, t) => { root.cell-typed(id, index, t); }
                     }
@@ -2747,7 +2747,7 @@ export component AppWindow inherits Window {
                     for c in root.cells: CellView {
                         c: c;
                         glyph: root.mouse-tile;
-                        pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
+                        pick(id, index, x, y, h, w) => { root.cell-pick(id, index, x, y, h, w); }
                         slide(id, v) => { root.cell-slide(id, v); }
                         typed(id, index, t) => { root.cell-typed(id, index, t); }
                     }
@@ -2817,13 +2817,13 @@ export component AppWindow inherits Window {
                             width: root.gl-store-w;
                             height: Size.button;
                             text: root.gl-store;
-                            clicked(x, y, h) => { root.gl-store-menu(x, y, h); }
+                            clicked(x, y, h) => { root.gl-store-menu(x, y, h, self.width); }
                         }
                         if root.gl-tab < 2: DropField {
                             width: root.gl-sort-w;
                             height: Size.button;
                             text: root.gl-sort;
-                            clicked(x, y, h) => { root.gl-sort-menu(x, y, h); }
+                            clicked(x, y, h) => { root.gl-sort-menu(x, y, h, self.width); }
                         }
                     }
                 }
@@ -2958,7 +2958,7 @@ export component AppWindow inherits Window {
                     glyphs: root.package-glyphs;
                     glyph3: root.scene-glyph;
                     chips: root.scene-chips;
-                    pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
+                    pick(id, index, x, y, h, w) => { root.cell-pick(id, index, x, y, h, w); }
                     slide(id, v) => { root.cell-slide(id, v); }
                     typed(id, index, t) => { root.cell-typed(id, index, t); }
                 }
@@ -3095,7 +3095,7 @@ export component AppWindow inherits Window {
                 glyph: root.keyboard-tile;
                 glyph2: root.mouse-tile;
                 glyphs: root.package-tiles;
-                pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
+                pick(id, index, x, y, h, w) => { root.cell-pick(id, index, x, y, h, w); }
                 slide(id, v) => { root.cell-slide(id, v); }
                 typed(id, index, t) => { root.cell-typed(id, index, t); }
             }
@@ -3271,7 +3271,7 @@ export component AppWindow inherits Window {
                             done => { root.board-clicked(); }
                             reset => { root.reset-key(); }
                             kind-picked(i, x, y, h) => { root.kind-picked(i, x, y, h); }
-                            job-clicked(x, y, h) => { root.action-menu(root.layer, x, y, h); }
+                            job-clicked(x, y, h, w) => { root.action-menu(root.layer, x, y, h, w); }
                             record => { root.listen(root.layer); }
                         }
                         if root.slider-chosen != 0: SliderDetail {
@@ -3321,7 +3321,7 @@ export component AppWindow inherits Window {
                         b: b;
                         max-height: band-max;
                         resized(w) => { root.light-box-resized(i, w); }
-                        pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
+                        pick(id, index, x, y, h, w) => { root.cell-pick(id, index, x, y, h, w); }
                         slide(id, v) => { root.cell-slide(id, v); }
                         hovered(k, on) => { root.area-hover(k, on); }
                     }
@@ -3589,7 +3589,7 @@ export component AppWindow inherits Window {
                                         height: 28px;
                                         opacity: g.on ? 1 : 0.45;
                                         text: g.until;
-                                        clicked(x, y, h) => { root.gl-row-until(i, x, y, h); }
+                                        clicked(x, y, h) => { root.gl-row-until(i, x, y, h, self.width); }
                                     }
                                 }
                             }
@@ -4229,7 +4229,7 @@ export component AppWindow inherits Window {
                     if root.boot == 0: Rectangle {
                         for c in root.cells: CellView {
                             c: c;
-                            pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
+                            pick(id, index, x, y, h, w) => { root.cell-pick(id, index, x, y, h, w); }
                             slide(id, v) => { root.cell-slide(id, v); }
                         }
                     }
@@ -4269,7 +4269,7 @@ export component AppWindow inherits Window {
                     height: root.tile-height;
                     for c in root.cells: CellView {
                         c: c;
-                        pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
+                        pick(id, index, x, y, h, w) => { root.cell-pick(id, index, x, y, h, w); }
                         slide(id, v) => { root.cell-slide(id, v); }
                         typed(id, index, t) => { root.cell-typed(id, index, t); }
                     }
@@ -4701,13 +4701,7 @@ export component AppWindow inherits Window {
                         }
                     }
                     if root.gl-var-warning != "": Rectangle { height: Space.tight; }
-                    if root.gl-var-warning != "": Text {
-                        text: root.gl-var-warning;
-                        font-family: Font.ui;
-                        font-size: Font.note;
-                        color: Ink.bad;
-                        wrap: word-wrap;
-                    }
+                    if root.gl-var-warning != "": FormWarning { text: root.gl-var-warning; }
                 }
                 // a script: its name, its command and its undo side by side, how it runs, its time limit
                 if root.gl-modal == 3: VerticalLayout {
@@ -4758,13 +4752,7 @@ export component AppWindow inherits Window {
                         }
                     }
                     if root.gl-script-warning != "": Rectangle { height: Space.tight; }
-                    if root.gl-script-warning != "": Text {
-                        text: root.gl-script-warning;
-                        font-family: Font.ui;
-                        font-size: Font.note;
-                        color: Ink.bad;
-                        wrap: word-wrap;
-                    }
+                    if root.gl-script-warning != "": FormWarning { text: root.gl-script-warning; }
                     Rectangle { height: Space.pad; }
                     CheckBox {
                         text: root.gl-script-wait-label;
@@ -4788,7 +4776,7 @@ export component AppWindow inherits Window {
                             width: 200px;
                             text: root.gl-script-limit;
                             open: root.menu-open;
-                            clicked(x, y, h) => { root.gl-script-limit-menu(x, y, h); }
+                            clicked(x, y, h) => { root.gl-script-limit-menu(x, y, h, self.width); }
                         }
                     }
                     Rectangle { height: Space.tight; }
@@ -4932,7 +4920,7 @@ export component AppWindow inherits Window {
                     glyph: root.keyboard-glyph;
                     glyph2: root.mouse-glyph;
                     glyphs: root.package-glyphs;
-                    pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
+                    pick(id, index, x, y, h, w) => { root.cell-pick(id, index, x, y, h, w); }
                     slide(id, v) => { root.cell-slide(id, v); }
                     typed(id, index, t) => { root.cell-typed(id, index, t); }
                 }
@@ -5439,7 +5427,7 @@ export component MacroWindow inherits Window {
     // the library shown, and its drop-down at the list's top, which opens the
     // menu of every library: Ectomatter's own, then each device's that keeps macros
     in property <string> lib-name;
-    callback libs(length, length, length);
+    callback libs(length, length, length, length);
     // a macro by its library and number, and a new one in a library
     callback choose(int, int);
     callback new-in(int);
@@ -5453,8 +5441,8 @@ export component MacroWindow inherits Window {
     callback chain-drag(int, length, length, length, length);
     callback wait-done(int, string);
     callback wait-cancel();
-    callback tool(int, length, length, length);
-    callback plays(length, length, length);
+    callback tool(int, length, length, length, length);
+    callback plays(length, length, length, length);
     callback count-done(string);
     callback revert();
     callback save();
@@ -5512,7 +5500,7 @@ export component MacroWindow inherits Window {
             subtle: true;
             on-box: true;
             text: root.lib-name;
-            clicked(x, y, h) => { root.libs(x, y, h); }
+            clicked(x, y, h) => { root.libs(x, y, h, self.width); }
         }
         // the list, Space.inline in from the column's sides, as a list's in a box is
         Flickable {
@@ -5703,19 +5691,19 @@ export component MacroWindow inherits Window {
                     icon: "M10.3 8a2.3 2.3 0 1 1-4.6 0a2.3 2.3 0 1 1 4.6 0zM8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4";
                     units: 16;
                     enabled: !root.tools-off;
-                    clicked(x, y, h) => { root.tool(0, x, y, h); }
+                    clicked(x, y, h) => { root.tool(0, x, y, h, self.width); }
                 }
-                TextButton { text: "Clear"; enabled: root.can-clear; clicked => { root.tool(1, self.absolute-position.x, self.absolute-position.y, self.height); } }
+                TextButton { text: "Clear"; enabled: root.can-clear; clicked => { root.tool(1, self.absolute-position.x, self.absolute-position.y, self.height, self.width); } }
                 // (a rule between clearing and adding, Space.tight either side of it)
                 Rectangle {
                     width: 2 * Space.tight + 1px;
                     Rectangle { x: Space.tight; y: (parent.height - self.height) / 2; width: 1px; height: Line.small; background: Ink.line; }
                 }
-                TextButton { text: "+ Key"; enabled: root.can-key; clicked => { root.tool(2, self.absolute-position.x, self.absolute-position.y, self.height); } }
-                TextButton { text: "+ Media key"; enabled: root.can-media; clicked => { root.tool(3, self.absolute-position.x, self.absolute-position.y, self.height); } }
-                TextButton { text: "+ Wait"; enabled: root.can-wait; clicked => { root.tool(4, self.absolute-position.x, self.absolute-position.y, self.height); } }
-                if root.jobs-shown: TextButton { text: "+ Action"; enabled: root.can-jobs; clicked => { root.tool(6, self.absolute-position.x, self.absolute-position.y, self.height); } }
-                if root.jobs-shown: TextButton { text: "+ Macro"; enabled: root.can-jobs; clicked => { root.tool(7, self.absolute-position.x, self.absolute-position.y, self.height); } }
+                TextButton { text: "+ Key"; enabled: root.can-key; clicked => { root.tool(2, self.absolute-position.x, self.absolute-position.y, self.height, self.width); } }
+                TextButton { text: "+ Media key"; enabled: root.can-media; clicked => { root.tool(3, self.absolute-position.x, self.absolute-position.y, self.height, self.width); } }
+                TextButton { text: "+ Wait"; enabled: root.can-wait; clicked => { root.tool(4, self.absolute-position.x, self.absolute-position.y, self.height, self.width); } }
+                if root.jobs-shown: TextButton { text: "+ Action"; enabled: root.can-jobs; clicked => { root.tool(6, self.absolute-position.x, self.absolute-position.y, self.height, self.width); } }
+                if root.jobs-shown: TextButton { text: "+ Macro"; enabled: root.can-jobs; clicked => { root.tool(7, self.absolute-position.x, self.absolute-position.y, self.height, self.width); } }
                 Rectangle { horizontal-stretch: 1; }
                 Text {
                     text: root.meter-text;
@@ -5737,7 +5725,7 @@ export component MacroWindow inherits Window {
                 RecordButton {
                     on: root.recording;
                     enabled: root.can-record;
-                    clicked(x, y, h) => { root.tool(5, x, y, h); }
+                    clicked(x, y, h) => { root.tool(5, x, y, h, self.width); }
                 }
             }
         }
@@ -5757,7 +5745,7 @@ export component MacroWindow inherits Window {
                 height: Size.button;
                 text: root.plays-text;
                 enabled: root.plays-on;
-                clicked(x, y, h) => { root.plays(x, y, h); }
+                clicked(x, y, h) => { root.plays(x, y, h, self.width); }
             }
             if root.count-shown: FieldBox {
                 width: 56px;
@@ -6136,7 +6124,7 @@ export component LayoutWindow inherits Window {
     callback light-own(bool);
     callback light-color(length, length, length);
     callback grid-toggle();
-    callback cell-pick(int, int, length, length, length);
+    callback cell-pick(int, int, length, length, length, length);
     callback cell-slide(int, float);
     callback cell-typed(int, int, string);
     callback menu-chose(int);
@@ -6718,7 +6706,7 @@ export component LayoutWindow inherits Window {
             }
             for c in root.box-cells: CellView {
                 c: c;
-                pick(id, index, x, y, h) => { root.cell-pick(id, index, x, y, h); }
+                pick(id, index, x, y, h, w) => { root.cell-pick(id, index, x, y, h, w); }
                 slide(id, v) => { root.cell-slide(id, v); }
                 typed(id, index, t) => { root.cell-typed(id, index, t); }
             }
@@ -7058,6 +7046,32 @@ export component LabWindow inherits Window {
     callback pk-enter();
     callback pk-dismiss();
 
+    // the open menu: the setups', or the lights' list
+    in property <bool> menu-open;
+    in property <bool> menu-marks: true;
+    in property <length> menu-ax;
+    in property <length> menu-w: 380px;
+    in property <[MenuRow]> menu-rows;
+    in property <length> menu-top;
+    in property <length> menu-max;
+    in property <length> menu-natural;
+    out property <length> menu-x: menu.x;
+    out property <length> menu-y: menu.y;
+    out property <length> menu-width: menu.width;
+    out property <length> menu-height: menu.height;
+    callback menu-chose(int);
+    callback menu-dismiss();
+    // a setup's name being given (1: Save as a new setup, Rename) or a delete asked about (2)
+    in property <int> ask;
+    in property <string> ask-title;
+    in property <string> ask-text;
+    in property <string> ask-go;
+    in-out property <string> ask-name;
+    // what's wrong with the name typed (none yet, or one already used)
+    in property <string> ask-warn;
+    callback ask-typed(string);
+    callback ask-done(bool);
+
     background: transparent;
     default-font-family: Font.ui;
     property <length> radius: root.is-maximized ? 0 : Radius.window;
@@ -7081,7 +7095,7 @@ export component LabWindow inherits Window {
         background: Ink.base;
         for c in root.cells: CellView {
             c: c;
-            pick(id, i, x, y, h) => { root.pick(id, i); }
+            pick(id, i, x, y, h, w) => { root.pick(id, i); }
             hovered(id, on) => { root.hovered(id, on); }
         }
         for s in root.sketches: Image {
@@ -7105,14 +7119,14 @@ export component LabWindow inherits Window {
         // the words on the stage, and the section's choices over it
         for c in root.over: CellView {
             c: c;
-            pick(id, i, x, y, h) => { root.pick(id, i); }
+            pick(id, i, x, y, h, w) => { root.pick(id, i); }
             hovered(id, on) => { root.hovered(id, on); }
             pad(id, x, y) => { root.pad(id, x, y); }
             typed(id, t) => { root.entered(id, t); }
         }
         for c in root.boxes: CellView {
             c: c;
-            pick(id, i, x, y, h) => { root.pick(id, i); }
+            pick(id, i, x, y, h, w) => { root.pick(id, i); }
             typed(id, t) => { root.entered(id, t); }
             focused(id, on) => { root.focused(id, on); }
         }
@@ -7126,7 +7140,7 @@ export component LabWindow inherits Window {
         }
         for c in root.top: CellView {
             c: c;
-            pick(id, i, x, y, h) => { root.pick(id, i); }
+            pick(id, i, x, y, h, w) => { root.pick(id, i); }
             hovered(id, on) => { root.hovered(id, on); }
             typed(id, t) => { root.entered(id, t); }
         }
@@ -7223,4 +7237,76 @@ export component LabWindow inherits Window {
             }
         }
     }
+
+    // the open menu, over everything
+    menu := Menu {
+        marks: root.menu-marks;
+        visible: root.menu-open;
+        x: max(Space.inline, min(root.menu-ax, root.width - root.menu-w - Space.inline));
+        width: root.menu-w;
+        height: min(root.menu-natural, min(root.menu-max, root.height - root.menu-top - Space.inline));
+        y: root.menu-top;
+        rows: root.menu-rows;
+        search: false;
+        chose(i) => { root.menu-chose(i); }
+        dismiss => { root.menu-dismiss(); }
+    }
+
+    // a setup's name: Save as a new setup, or Rename, in a dialog
+    if root.ask == 1: Scrim {
+        corner: root.radius;
+        cancel => { root.ask-done(false); }
+        DialogBox {
+            width: min(Size.ask, parent.width - 2 * Space.pad);
+            height: ask-form.preferred-height + 2 * Space.margin;
+            ask-form := VerticalLayout {
+                x: Space.margin;
+                y: Space.margin;
+                width: parent.width - 2 * Space.margin;
+                height: self.preferred-height;
+                spacing: Space.pad;
+                DialogHead {
+                    title: root.ask-title;
+                }
+                VerticalLayout {
+                    spacing: Space.tight;
+                    FieldBox {
+                        text <=> root.ask-name;
+                        edited => { root.ask-typed(self.text); }
+                        accepted => { root.ask-done(true); }
+                        escape => { root.ask-done(false); }
+                        init => { self.start-typing(); }
+                    }
+                    if root.ask-warn != "": FormWarning { text: root.ask-warn; }
+                    if root.ask-text != "": FormNote { text: root.ask-text; }
+                }
+                HorizontalLayout {
+                    padding-top: Space.inline;
+                    spacing: Space.inline;
+                    alignment: end;
+                    WordButton {
+                        text: "Cancel";
+                        on-box: true;
+                        clicked => { root.ask-done(false); }
+                    }
+                    WordButton {
+                        primary: true;
+                        text: root.ask-go;
+                        clicked => { root.ask-done(true); }
+                    }
+                }
+            }
+        }
+    }
+
+    // a setup to delete: asked first, as everything that deletes is
+    if root.ask == 2: Confirm {
+        corner: root.radius;
+        title: root.ask-title;
+        body: root.ask-text;
+        do: root.ask-go;
+        cancel => { root.ask-done(false); }
+        yes => { root.ask-done(true); }
+    }
+
 }

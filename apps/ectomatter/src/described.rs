@@ -720,11 +720,6 @@ fn words(s: &str, look: &Look) -> String {
     s.replace("{profile}", look.profile).replace("{kind}", look.kind)
 }
 
-/// Which box a setting of an effect with a layout is in: true for where and when.
-pub fn in_place_box(effect: &Value, id: &str) -> bool {
-    effect["layout"].as_array().into_iter().flatten().any(|g| g["box"] == "place" && g["show"].as_array().is_some_and(|s| s.iter().any(|x| item_id(x) == Some(id))))
-}
-
 /// The boxes for an effect with a layout of its own, its settings read from
 /// `e`, the effect's own settings in the device's profile; `light` the light
 /// it plays on (its zones); the boxes `set_w` and `place_w` wide.

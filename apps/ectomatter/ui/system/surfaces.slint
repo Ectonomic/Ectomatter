@@ -222,6 +222,14 @@ export component FormNote inherits Text {
     wrap: word-wrap;
 }
 
+// What's wrong with what was typed, under its field in a form: a note's type, in red, wrapped.
+export component FormWarning inherits Text {
+    font-family: Font.ui;
+    font-size: Font.note;
+    color: Ink.bad;
+    wrap: word-wrap;
+}
+
 // Are you sure: a question in a dialog, what it changes, and its two answers,
 // keeping things as they are and doing it (in red, as it deletes)
 export component Confirm inherits Scrim {
@@ -232,7 +240,7 @@ export component Confirm inherits Scrim {
     in property <string> do;
     callback yes();
     DialogBox {
-        width: min(440px, root.width - 32px);
+        width: min(Size.ask, root.width - 2 * Space.pad);
         height: dlg.preferred-height + 2 * Space.margin;
         dlg := VerticalLayout {
             x: Space.margin;
