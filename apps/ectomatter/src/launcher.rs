@@ -439,7 +439,12 @@ impl Starts {
             last: w["last"].as_str().filter(|l| l.starts_with('-') && plain(l, "-")).map(String::from),
         }).collect();
         let variables = v["env"].as_object().into_iter().flatten().filter(|(k, _)| plain(k, "_") && !loads_code(k)).filter_map(|(k, x)| Some((k.clone(), Written::of(x)?))).collect();
-        let tools = v["tools"].as_array().into_iter().flatten().filter_map(Value::as_str).filter(|p| plain(p, "-_.") && !p.starts_with(['-', '.']) && !runs_code(p)).map(String::from).collect();
+        let mut tools: Vec<String> = v["tools"].as_array().into_iter().flatten().filter_map(Value::as_str).filter(|p| plain(p, "-_.") && !p.starts_with(['-', '.']) && !runs_code(p)).map(String::from).collect();
+        // (each in one order, whatever order a JSON object's keys come in)
+        let (mut wrappers, mut variables): (Vec<Wrapper>, Vec<(String, Written)>) = (wrappers, variables);
+        wrappers.sort_by(|a, b| a.program.cmp(&b.program));
+        variables.sort_by(|a, b| a.0.cmp(&b.0));
+        tools.sort();
         Starts { wrappers, variables, tools }
     }
 }
@@ -1076,9 +1081,7 @@ mod tests {
             "env": { "FOO_TUNE": "word", "FOO_LIST": "list", "LD_PRELOAD": "word", "FOO_PATH": "word", "VK_LAYER_FOO": "word", "BAD-NAME": "word", "FOO_ODD": "colour" },
         }));
         assert_eq!(starts.wrappers.iter().map(|w| w.program.as_str()).collect::<Vec<_>>(), ["foowrap"], "no shell, no path");
-        let mut named = starts.variables.clone();
-        named.sort_by(|a, b| a.0.cmp(&b.0));
-        assert_eq!(named, [("FOO_LIST".to_string(), Written::List), ("FOO_TUNE".to_string(), Written::Word)], "none that loads code, none written an unknown way");
+        assert_eq!(starts.variables, [("FOO_LIST".to_string(), Written::List), ("FOO_TUNE".to_string(), Written::Word)], "none that loads code, none written an unknown way");
         let facts = json!({ "protons": [] });
         let good = json!({ "wrap": [["foowrap", "--level", "3", "--quiet"]], "env": { "FOO_TUNE": "fast-1", "FOO_LIST": "a=1,b;c:2,0xbeef/0xdead" } });
         assert_eq!(checked_recipe(&good, &facts, &starts, &[]), (good.clone(), Vec::<String>::new()), "kept whole");

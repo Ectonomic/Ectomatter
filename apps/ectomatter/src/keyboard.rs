@@ -1098,9 +1098,10 @@ impl Page {
         look.map(|v| (v as f64 * (0.3 + 0.7 * b / 255.0)).round())
     }
 
-    /// Whether the keyboard's firmware can say where its sliders are.
+    /// Whether the keyboard's firmware can say where its sliders are (the
+    /// feature its core names for reading one).
     pub fn reads_sliders(&self) -> bool {
-        self.dev.as_ref().is_some_and(|d| crate::display::has(&d["firmware"], "sliders.read"))
+        self.dev.as_ref().is_some_and(|d| crate::display::sliders().iter().any(|s| s.reads.as_ref().is_some_and(|f| crate::display::has(&d["firmware"], f))))
     }
 
     /// The line under the keyboard's name, and the chip beside it (for

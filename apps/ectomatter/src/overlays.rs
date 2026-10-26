@@ -54,7 +54,7 @@ pub struct Overlays {
     panel: Option<Panel>,
     pub panel_rev: u64,
     /// each slider's place along its travel, 0 to 1, once the keyboard says
-    pub fracs: [Option<f32>; 2],
+    pub fracs: Vec<Option<f32>>,
     /// what the display shows: whether something drives it, its rows, its backlight
     pub lcd: (bool, Vec<String>, [f64; 3]),
     /// what it was drawn for: those, the panel's size, its dots' share of their cells, and the
@@ -124,7 +124,7 @@ impl Overlays {
             glass: None,
             panel: None,
             panel_rev: 0,
-            fracs: [None, None],
+            fracs: Vec::new(),
             lcd: (false, Vec::new(), [90.0; 3]),
             drawn_lcd: None,
             glass_opacity: 1.0,

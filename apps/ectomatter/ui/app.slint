@@ -88,7 +88,7 @@ export struct EffectItem {
 
 // the Key library: every key and slider, in the groups the keyboard has them in
 export struct LibRow {
-    // the key's place in the keyboard's reports, or -1 the dimmer, -2 the volume slider
+    // the key's place in the keyboard's reports, or a slider's: -1 the first, -2 the second
     id: int,
     cap: string,
     name: string,
@@ -1850,10 +1850,12 @@ export component AppWindow inherits Window {
     in property <bool> key-listening;
     in property <string> key-note;
     callback kind-picked(int, length, length, length);
-    // a slider chosen in the library: 0 none, 1 the dimmer, 2 the volume slider
+    // a slider chosen in the library: 0 none, else its place among the keyboard's, from 1
     in property <int> slider-chosen;
     in property <float> slider-at;
     in property <[CheckItem]> slider-choices;
+    // the chosen slider's name, as the keyboard's core gives it
+    in property <string> slider-title;
     callback slider-chosen-at(int);
     callback slider-bind-at(int);
     callback action-menu(int, length, length, length, length);
@@ -3303,7 +3305,7 @@ export component AppWindow inherits Window {
                             fill: transparent;
                             init => { root.slider-need = self.need; }
                             changed need => { root.slider-need = self.need; }
-                            title: root.slider-chosen == 1 ? "Dimmer" : "Volume";
+                            title: root.slider-title;
                             side: root.slider-chosen == 1 ? "left" : "right";
                             at: root.slider-at;
                             choices: root.slider-choices;

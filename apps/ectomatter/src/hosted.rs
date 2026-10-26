@@ -969,37 +969,40 @@ mod tests {
             }
         }
         assert!(words.len() > 20, "every plugin described itself: {words:?}");
-        // (the protocol's own words, as its doc writes them as code: in its code
-        // blocks and its `code` spans, never its prose)
-        let doc = b::read("docs/core-protocol.md");
-        let mut code = Vec::new();
-        for (i, part) in doc.split("```").enumerate() {
-            if i % 2 == 1 {
-                code.push(part.to_string());
-            } else {
-                code.extend(part.split('`').skip(1).step_by(2).map(String::from));
-            }
-        }
-        let protocol: std::collections::BTreeSet<String> = code.iter().flat_map(|c| c.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-')).filter(|w| !w.is_empty()).map(String::from).collect::<Vec<_>>()).collect();
+        let protocol = b::protocol_words();
         let theirs: Vec<&String> = words.iter().filter(|w| !protocol.contains(*w)).collect();
         assert!(theirs.len() >= 10, "the plugins' own words, beyond the protocol's: {theirs:?}");
-        let mut found = Vec::new();
-        for f in b::rust_files() {
-            if f.ends_with("boundaries.rs") {
-                continue;
+        b::fail_on(b::quoted_in_app(&theirs), "a plugin's setting, button or fold written into the app");
+    }
+
+    /// Boundary: what each core calls its settings, its sliders and the
+    /// firmware features they and its screens need is its own, found in its description
+    /// (device/describe, started alone). None of it is written into the app,
+    /// beyond the protocol's own words, so a keyboard of anyone's is run
+    /// the same.
+    #[test]
+    fn no_cores_setting_or_slider_is_written_into_the_app() {
+        use crate::boundaries::tests as b;
+        let mut words = std::collections::BTreeSet::new();
+        let dir = crate::packages::builtin_dir(Kind::Core);
+        for e in std::fs::read_dir(&dir).unwrap().flatten().filter(|e| e.path().join("core.json").exists()) {
+            let d = crate::core_host::described_alone(&e.path(), std::time::Duration::from_secs(10));
+            assert!(d.is_object(), "{} described itself", e.path().display());
+            let caps = &d["capabilities"];
+            for s in caps["settings"]["items"].as_array().into_iter().flatten() {
+                words.extend(["id", "feature"].iter().filter_map(|k| s[*k].as_str().map(String::from)));
             }
-            for (n, line) in b::code(&f) {
-                if let Some(w) = theirs.iter().find(|w| line.contains(&format!("\"{w}\""))) {
-                    found.push(format!("{f}:{n} {w}"));
-                }
+            for s in caps["input"]["sliders"].as_array().into_iter().flatten() {
+                words.extend(["id", "reads", "frees"].iter().filter_map(|k| s[*k].as_str().map(String::from)));
+            }
+            for s in caps["displays"].as_array().into_iter().flatten() {
+                words.extend(["onboard", "status"].iter().filter_map(|k| s[*k]["feature"].as_str().map(String::from)));
             }
         }
-        for (f, n, line) in b::ui_code() {
-            if let Some(w) = theirs.iter().find(|w| line.contains(&format!("\"{w}\""))) {
-                found.push(format!("{f}:{n} {w}"));
-            }
-        }
-        b::fail_on(found, "a plugin's setting, button or fold written into the app");
+        assert!(words.len() >= 5, "the cores described their settings and sliders: {words:?}");
+        let protocol = b::protocol_words();
+        let theirs: Vec<&String> = words.iter().filter(|w| !protocol.contains(*w)).collect();
+        b::fail_on(b::quoted_in_app(&theirs), "a core's setting, slider or feature written into the app");
     }
 
     /// The Monitor Switcher's section: a column for each monitor, a cell

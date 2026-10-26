@@ -24,10 +24,11 @@ pub enum Ask {
     /// show a preview on the keyboard: an effect (`lighting`), each key's
     /// color (`colors`), or stop (`stop`)
     Preview(Value),
-    /// hold the dimmer at a level, or give it back to the slider
-    Dimmer(Option<u8>),
-    /// ask the keyboard to stop doing a slider's job itself: (quiet volume, keep dimmer)
-    Modes(bool, bool),
+    /// hold the backlight at a level, or give it back to its slider (the
+    /// setting whose role is the backlight)
+    Backlight(Option<u8>),
+    /// free a slider of its own job, or give it back (input/free)
+    Free(String, bool),
     /// save or delete a macro: its name, steps (shared) and play settings, or `delete: true`
     WriteMacro(u8, Value),
     /// save a profile's keys only (`keys`, by layer), to change how a macro plays on them
@@ -231,8 +232,10 @@ pub fn start(z10: Result<crate::core_host::Core, String>, tell: Sender<Heard>, t
                 Ask::Sliders => Heard::Sliders(kb.call("input/state", Value::Null)),
                 // previews go on a thread of their own (above)
                 Ask::Preview(_) => continue,
-                Ask::Dimmer(level) => {
-                    let _ = kb.call("settings/set", json!({ "id": "dimmer", "value": level }));
+                Ask::Backlight(level) => {
+                    if let Some((id, _)) = crate::display::backlight_setting() {
+                        let _ = kb.call("settings/set", json!({ "id": id, "value": level }));
+                    }
                     Heard::Done
                 }
                 Ask::Screen(light, apps) => {
@@ -261,8 +264,8 @@ pub fn start(z10: Result<crate::core_host::Core, String>, tell: Sender<Heard>, t
                     body["profile"] = json!(n);
                     Heard::KeysSaved(n, kb.call("profiles/set", body))
                 }
-                Ask::Modes(quiet, keep) => {
-                    let _ = kb.call("settings/set", json!({ "id": "modes", "value": { "quiet_volume": quiet, "keep_dimmer": keep } }));
+                Ask::Free(slider, free) => {
+                    let _ = kb.call("input/free", json!({ "slider": slider, "free": free }));
                     Heard::Done
                 }
             };

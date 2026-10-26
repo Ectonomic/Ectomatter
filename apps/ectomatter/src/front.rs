@@ -640,7 +640,7 @@ pub struct Front {
     active_asked: bool,
     /// the lowest and highest reading seen for each slider, which widen as the
     /// sliders are moved, so a knob reaches both ends when its slider does
-    slider_ends: [[f64; 2]; 2],
+    slider_ends: Vec<[f64; 2]>,
     _timers: Vec<slint::Timer>,
     /// the Lighting page: the color Per key paints with, whether the keyboard
     /// is being sent the preview, and the pieces of the tile as last laid out
@@ -808,7 +808,7 @@ pub struct Front {
     overlay_model: Rc<VecModel<crate::Overlay>>,
     /// what each slider controls, which slider's menu is open, and what the
     /// sliders last read and last set
-    bind: [String; 2],
+    bind: Vec<String>,
     bind_menu: Option<(usize, (f32, f32, f32))>,
     /// the menu on the mouse's profile in use is open
     profile_menu: bool,
@@ -836,10 +836,10 @@ pub struct Front {
     typist: Option<crate::typist::Player>,
     pub macro_jobs: Option<smithay_client_toolkit::reexports::calloop::channel::Sender<String>>,
     /// a slider set to Nothing because the other took its job: the job it had
-    idled: [Option<String>; 2],
+    idled: Vec<Option<String>>,
     last_sliders: Option<serde_json::Value>,
     held: Option<u8>,
-    sent: [Option<f64>; 2],
+    sent: Vec<Option<f64>>,
     /// quitting: when the keyboard was asked to take its sliders back, which
     /// Ectomatter waits a moment for before it goes
     released: Option<Instant>,
@@ -1161,7 +1161,15 @@ impl Front {
                 t
             })
             .collect();
-        let slider_ends = crate::uistate::get("slider_ends").and_then(|v| serde_json::from_value(v).ok()).unwrap_or([[400.0, 3700.0], [400.0, 3700.0]]);
+        // (each of the keyboard's sliders, as its core describes them: the ends seen of each one's
+        // readings, from the range its core gives; what each controls; one rested from its job)
+        let sliders = crate::display::sliders();
+        let mut slider_ends: Vec<[f64; 2]> = crate::uistate::get("slider_ends").and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
+        slider_ends.extend(sliders.iter().skip(slider_ends.len()).map(|s| s.range));
+        let mut bind: Vec<String> = crate::uistate::get("slider_bind").and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
+        bind.resize(sliders.len(), "own".into());
+        let mut idled: Vec<Option<String>> = crate::uistate::get("slider_idled").and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
+        idled.resize(sliders.len(), None);
         // (offscreen, nothing is changed: the thread has no monitors to reach)
         let screens: Option<Box<dyn crate::putback::Screens>> = if crate::desk::offscreen() { None } else { Some(Box::new(crate::monitors::Hands)) };
         let worker = crate::putback::Worker::start(crate::putback::Journal::load(crate::putback::kept_at()), screens);
@@ -1296,7 +1304,7 @@ impl Front {
             scale: 1.0,
             pick: None,
             overlay_model: Rc::new(VecModel::default()),
-            bind: crate::uistate::get("slider_bind").and_then(|v| serde_json::from_value(v).ok()).unwrap_or(["own".into(), "own".into()]),
+            bind,
             bind_menu: None,
             profile_menu: false,
             kb_profile_menu: false,
@@ -1310,10 +1318,10 @@ impl Front {
             game_now: None,
             typist: None,
             macro_jobs: None,
-            idled: crate::uistate::get("slider_idled").and_then(|v| serde_json::from_value(v).ok()).unwrap_or([None, None]),
+            idled,
             last_sliders: None,
             held: None,
-            sent: [None, None],
+            sent: vec![None; sliders.len()],
             released: None,
             settings,
             typing: None,
@@ -1473,7 +1481,7 @@ impl Front {
                 // the keyboard already shows the screen of the profile it is using
                 let n = self.page.active();
                 self.screen_sent = self.page.dev.as_ref().map(|d| screen_of(&d["profiles"][n.to_string()]["lighting"]));
-                self.tell_modes();
+                self.tell_free();
                 let (line, chip) = self.page.firmware_line();
                 self.ui.set_conn_state(1);
                 self.ui.set_conn_text(line.into());
@@ -2388,7 +2396,7 @@ impl Front {
                     }
                 }
                 Ask::SliderSel(i) => {
-                    self.slider_sel = i.clamp(0, 2) as usize;
+                    self.slider_sel = i.clamp(0, crate::display::sliders().len() as i32) as usize;
                     if self.slider_sel != 0 {
                         self.page.sel = None;
                         self.listening = None;
@@ -2398,8 +2406,8 @@ impl Front {
                 Ask::SliderBind(i) => {
                     if self.slider_sel != 0 {
                         let s = self.slider_sel - 1;
-                        if let Some((v, _)) = crate::display::BIND_CHOICES[s].get(i as usize) {
-                            self.set_slider_bind(s, v);
+                        if let Some((v, _)) = self.slider_choices(s).get(i as usize).cloned() {
+                            self.set_slider_bind(s, &v);
                         }
                     }
                 }
@@ -2821,8 +2829,11 @@ impl Front {
     /// Where the sliders are: each reading becomes a knob's place between the
     /// lowest and highest readings seen for its slider.
     fn move_knobs(&mut self, v: &serde_json::Value) {
-        let raws = [v["dimmer_raw"].as_f64(), v["volume_raw"].as_f64()];
+        let sliders = crate::display::sliders();
+        let raws: Vec<Option<f64>> = sliders.iter().map(|s| v[format!("{}_raw", s.id)].as_f64()).collect();
         let mut wider = false;
+        self.overlays.fracs.resize(sliders.len(), None);
+        self.slider_ends.extend(sliders.iter().skip(self.slider_ends.len()).map(|s| s.range));
         for (i, raw) in raws.iter().enumerate() {
             let Some(raw) = *raw else { continue };
             let e = &mut self.slider_ends[i];
@@ -2836,12 +2847,12 @@ impl Front {
             }
             self.overlays.fracs[i] = Some(((raw - e[0]) / (e[1] - e[0]).max(1.0)).clamp(0.0, 1.0) as f32);
         }
-        let fr = [self.overlays.fracs[0].unwrap_or(0.0), self.overlays.fracs[1].unwrap_or(0.0)];
+        let fr: Vec<f32> = self.overlays.fracs.iter().map(|f| f.unwrap_or(0.0)).collect();
         // the chosen slider's box follows it as it moves
         if self.slider_sel != 0 {
-            self.ui.set_slider_at(fr[self.slider_sel - 1]);
+            self.ui.set_slider_at(fr.get(self.slider_sel - 1).copied().unwrap_or(0.0));
         }
-        self.drive_sliders(v, fr);
+        self.drive_sliders(v, &fr);
         if wider {
             crate::uistate::set("slider_ends", serde_json::json!(self.slider_ends));
         }
@@ -3210,8 +3221,7 @@ impl Front {
                 }
                 if c == Ctl::Control && v == serde_json::json!(false) {
                     // give the keyboard back what Ectomatter borrowed before letting it go
-                    self.ask_kb(device::Ask::Modes(false, false));
-                    self.ask_kb(device::Ask::Dimmer(None));
+                    self.give_sliders_back();
                     self.stop_preview();
                 }
                 if let Err(e) = self.settings.set(path, v) {
@@ -4190,8 +4200,8 @@ impl Front {
         if let Some((s, _)) = self.bind_menu.take() {
             self.ui.set_menu_open(false);
             self.ui.set_menu_search(true);
-            if let Some((v, _)) = i.checked_sub(1).and_then(|k| crate::display::BIND_CHOICES[s].get(k)) {
-                self.set_slider_bind(s, v);
+            if let Some((v, _)) = i.checked_sub(1).and_then(|k| self.slider_choices(s).get(k).cloned()) {
+                self.set_slider_bind(s, &v);
             }
             return;
         }
@@ -5016,11 +5026,12 @@ impl Front {
             let q = self.lib_query.trim().to_lowercase();
             let mut groups: Vec<LibGroup> = Vec::new();
             // the sliders first, as keys are listed
-            let bind_label = |i: usize| crate::display::BIND_CHOICES[i].iter().find(|(v, _)| *v == self.bind[i]).map_or("", |c| c.1).to_string();
-            let mut slider_rows = vec![
-                LibRow { id: -1, cap: "◐".into(), name: "Dimmer".into(), job: bind_label(0).into(), rebound: false, chosen: self.slider_sel == 1 },
-                LibRow { id: -2, cap: "♪".into(), name: "Volume".into(), job: bind_label(1).into(), rebound: false, chosen: self.slider_sel == 2 },
-            ];
+            let bind_label = |i: usize| self.slider_choices(i).into_iter().find(|(v, _)| Some(v) == self.bind.get(i)).map_or_else(String::new, |c| c.1);
+            let mut slider_rows: Vec<LibRow> = crate::display::sliders()
+                .iter()
+                .enumerate()
+                .map(|(i, s)| LibRow { id: -(i as i32) - 1, cap: s.glyph.as_str().into(), name: s.label.as_str().into(), job: bind_label(i).into(), rebound: false, chosen: self.slider_sel == i + 1 })
+                .collect();
             slider_rows.retain(|r| q.is_empty() || r.name.to_lowercase().contains(&q) || r.job.to_lowercase().contains(&q));
             // each group's rows keep one list, changed in place, so a click on a
             // heading or a row is never lost to a refresh between press and release
@@ -5086,26 +5097,32 @@ impl Front {
             ui.set_slider_chosen(self.slider_sel as i32);
             if self.slider_sel != 0 {
                 let s = self.slider_sel - 1;
-                ui.set_slider_at(self.overlays.fracs[s].unwrap_or(0.0));
-                let choices: Vec<CheckItem> = crate::display::BIND_CHOICES[s].iter().map(|(v, l)| CheckItem { name: (*l).into(), on: self.bind[s] == *v }).collect();
+                let sliders = crate::display::sliders();
+                let Some(me) = sliders.get(s) else { return };
+                ui.set_slider_title(me.label.as_str().into());
+                ui.set_slider_at(self.overlays.fracs.get(s).copied().flatten().unwrap_or(0.0));
+                let bound = self.bind.get(s).cloned().unwrap_or_else(|| "own".into());
+                let choices: Vec<CheckItem> = self.slider_choices(s).iter().map(|(v, l)| CheckItem { name: l.as_str().into(), on: bound == *v }).collect();
                 show_rows(ui.get_slider_choices(), |m| ui.set_slider_choices(m), choices);
-                // what the firmware can't do yet, said where it matters
+                // what the firmware can't do yet, said where it matters, in the keyboard's words
                 let fw = self.firmware();
-                let resting = self.idled[s].as_ref().filter(|_| self.bind[s] == "none").and_then(|job| crate::display::BIND_CHOICES[s].iter().find(|(v, _)| v == job)).map(|(_, l)| *l);
-                let other = if s == 0 { "volume slider" } else { "dimmer" };
-                let rest_note = resting.map(|l| format!("Set to Nothing while the {other} does {}. It goes back to {} when the {other} does something else.", l.to_lowercase(), l.to_lowercase()));
-                let note = if let Some(n) = &rest_note {
-                    n.as_str()
-                } else if s == 1 && self.bind[1] != "own" && !crate::display::has(&fw, "volume.quiet") {
-                    "The keyboard still sends volume keys from this slider as well. Its firmware can be told not to, from build 3."
-                } else if s == 0 && self.bind[0] != "own" {
-                    if crate::display::has(&fw, "dimmer.keep") {
-                        "The backlight stays where it was, and follows the volume slider if that is on keyboard brightness."
-                    } else {
-                        "The backlight stays where it was, though it may flicker as this slider moves. Its firmware can hold it steady, from build 3."
+                let resting = self.idled.get(s).cloned().flatten().filter(|_| bound == "none").and_then(|job| self.slider_choices(s).into_iter().find(|(v, _)| *v == job)).map(|(_, l)| l);
+                // (the slider that has its job now)
+                let other = resting.as_ref().and_then(|_| {
+                    let job = self.idled.get(s).cloned().flatten()?;
+                    let want = crate::display::drives(me, &job);
+                    sliders.iter().enumerate().find(|(j, o)| *j != s && self.bind.get(*j).is_some_and(|b| crate::display::drives(o, b) == want)).map(|(_, o)| o.called.clone())
+                });
+                let rest_note = resting.map(|l| {
+                    let other = other.unwrap_or_else(|| "other slider".into());
+                    format!("Set to Nothing while the {other} does {}. It goes back to {} when the {other} does something else.", l.to_lowercase(), l.to_lowercase())
+                });
+                let note = match &rest_note {
+                    Some(n) => n.clone(),
+                    None if bound != "own" => {
+                        if me.frees.as_ref().is_some_and(|f| crate::display::has(&fw, f)) { me.freed.clone() } else { me.busy.clone() }
                     }
-                } else {
-                    ""
+                    None => String::new(),
                 };
                 ui.set_slider_note(note.into());
             }
@@ -8030,10 +8047,12 @@ impl Front {
         self.ui.set_ob_choosing(true);
     }
 
-    /// Whether the keyboard can keep an onboard layout: from build 5 of Ectomatter's
-    /// firmware on (or, for the window's pictures of the tab, ECTOMATTER_ONBOARD).
+    /// Whether the keyboard can keep an onboard layout: its screen has one, and its
+    /// firmware the feature its core names for it (or, for the window's pictures of the tab,
+    /// ECTOMATTER_ONBOARD).
     fn onboard_ready(&self) -> bool {
-        crate::display::has(&self.firmware(), "screen.onboard") || std::env::var_os("ECTOMATTER_ONBOARD").is_some()
+        let onboard = &crate::lcd_page::screen()["onboard"];
+        onboard.is_object() && onboard["feature"].as_str().is_none_or(|f| crate::display::has(&self.firmware(), f)) || std::env::var_os("ECTOMATTER_ONBOARD").is_some()
     }
 
     /// What the keyboard knows by itself, for the picture of its onboard layout: the time
@@ -8334,29 +8353,40 @@ impl Front {
         self.lcd.page = 0;
     }
 
+    /// What a slider can control (display::choices), on this keyboard.
+    fn slider_choices(&self, i: usize) -> Vec<(String, String)> {
+        crate::display::sliders().get(i).map_or_else(Vec::new, |s| crate::display::choices(s, crate::display::backlight_setting().is_some()))
+    }
+
     fn open_bind_menu(&mut self, i: usize, anchor: (f32, f32, f32), under: f32) {
         self.close_menu();
-        let name = if i == 0 { "dimmer" } else { "volume" };
-        let mut rows = vec![MenuRow { kind: 1, label: format!("The {name} controls").into(), tag: "".into(), tick: false, sub: "".into(), ..Default::default() }];
-        for (v, label) in crate::display::BIND_CHOICES[i] {
-            rows.push(MenuRow { kind: 0, label: label.into(), tag: "".into(), tick: self.bind[i] == v, sub: "".into(), ..Default::default() });
+        let Some(s) = crate::display::sliders().get(i).cloned() else { return };
+        let mut rows = vec![MenuRow { kind: 1, label: format!("The {} controls", s.called).into(), tag: "".into(), tick: false, sub: "".into(), ..Default::default() }];
+        for (v, label) in self.slider_choices(i) {
+            rows.push(MenuRow { kind: 0, label: label.into(), tag: "".into(), tick: self.bind.get(i) == Some(&v), sub: "".into(), ..Default::default() });
         }
         self.hang_menu(rows, under, anchor);
         self.bind_menu = Some((i, anchor));
     }
 
-    /// One job, one slider: taking a job the other one does leaves it idle,
-    /// rather than the two of them sending it different positions.
+    /// One job, one slider: taking a job another one does leaves that one
+    /// idle, rather than the two of them sending it different positions.
     fn set_slider_bind(&mut self, i: usize, v: &str) {
-        let other = 1 - i;
+        let sliders = crate::display::sliders();
+        let Some(me) = sliders.get(i) else { return };
+        self.bind.resize(sliders.len(), "own".into());
+        self.idled.resize(sliders.len(), None);
         self.bind[i] = v.into();
-        if v != "none" && crate::display::drives(other, &self.bind[other]) == crate::display::drives(i, v) {
-            // the other slider did this job: it rests, and remembers the job
-            self.idled[other] = Some(std::mem::replace(&mut self.bind[other], "none".into()));
-        } else if let Some(job) = self.idled[other].take() {
-            // this slider has given up the other's job: the other has it back
-            if self.bind[other] == "none" && crate::display::drives(other, &job) != crate::display::drives(i, v) {
-                self.bind[other] = job;
+        let want = crate::display::drives(me, v);
+        for (other, o) in sliders.iter().enumerate().filter(|(j, _)| *j != i) {
+            if v != "none" && crate::display::drives(o, &self.bind[other]) == want {
+                // the other slider did this job: it rests, and remembers the job
+                self.idled[other] = Some(std::mem::replace(&mut self.bind[other], "none".into()));
+            } else if let Some(job) = self.idled[other].take() {
+                // this slider has given up the other's job: the other has it back
+                if self.bind[other] == "none" && crate::display::drives(o, &job) != want {
+                    self.bind[other] = job;
+                }
             }
         }
         // (a slider given a job of its own forgets the one it rested from)
@@ -8364,85 +8394,104 @@ impl Front {
         crate::uistate::set("slider_bind", serde_json::json!(self.bind));
         crate::uistate::set("slider_idled", serde_json::json!(self.idled));
         self.hold_backlight();
-        self.sent = [None, None];
-        self.tell_modes();
+        self.sent = vec![None; sliders.len()];
+        self.tell_free();
+    }
+
+    /// The keyboard does its sliders' jobs by itself again (each one the
+    /// firmware can free, given back), and lets a held backlight go.
+    fn give_sliders_back(&mut self) {
+        let fw = self.firmware();
+        for s in crate::display::sliders() {
+            if s.frees.as_ref().is_some_and(|f| crate::display::has(&fw, f)) {
+                self.ask_kb(device::Ask::Free(s.id.clone(), false));
+            }
+        }
+        if crate::display::backlight_setting().is_some_and(|(_, f)| f.is_none_or(|f| crate::display::has(&fw, &f))) {
+            self.ask_kb(device::Ask::Backlight(None));
+        }
     }
 
     /// Quitting: the keyboard does its sliders' jobs by itself again, so
     /// they keep working with Ectomatter gone.
     pub fn release_sliders(&mut self) {
-        let fw = self.firmware();
         if self.kb.is_none() || self.released.is_some() {
             return;
         }
-        if crate::display::has(&fw, "volume.quiet") || crate::display::has(&fw, "dimmer.keep") {
-            self.ask_kb(device::Ask::Modes(false, false));
-        }
-        if crate::display::has(&fw, "dimmer.set") {
-            self.ask_kb(device::Ask::Dimmer(None));
-        }
+        self.give_sliders_back();
         self.released = Some(Instant::now());
     }
 
-    /// The backlight follows the dimmer inside the keyboard, so taking the
-    /// dimmer off it means asking the keyboard to hold the backlight where it is.
+    /// The slider whose own job is the keyboard's backlight, if it has one.
+    fn backlight_slider(&self) -> Option<(usize, crate::display::Slider)> {
+        crate::display::sliders().into_iter().enumerate().find(|(_, s)| s.own == "backlight")
+    }
+
+    /// The backlight follows its slider inside the keyboard, so taking that
+    /// slider off it means asking the keyboard to hold the backlight where it is.
     fn hold_backlight(&mut self) {
-        if self.bind[0] == "own" {
+        let Some((i, s)) = self.backlight_slider() else { return };
+        if self.bind.get(i).is_none_or(|b| b == "own") {
             self.held = None;
-            self.ask_kb(device::Ask::Dimmer(None));
+            self.ask_kb(device::Ask::Backlight(None));
             return;
         }
         if self.held.is_none() {
-            self.held = Some(self.last_sliders.as_ref().and_then(|r| r["dimmer"].as_u64()).unwrap_or(255) as u8);
+            self.held = Some(self.last_sliders.as_ref().and_then(|r| r[s.id.as_str()].as_u64()).unwrap_or(255) as u8);
         }
-        self.ask_kb(device::Ask::Dimmer(self.held));
+        self.ask_kb(device::Ask::Backlight(self.held));
     }
 
-    /// From firmware build 3 the keyboard can be asked to stop doing a
-    /// slider's job itself, so the two do not fight.
-    fn tell_modes(&mut self) {
+    /// A slider doing another job is freed of its own, where the keyboard's
+    /// firmware can free it, so the two do not fight.
+    fn tell_free(&mut self) {
         let fw = self.firmware();
-        let (vq, dk) = (crate::display::has(&fw, "volume.quiet"), crate::display::has(&fw, "dimmer.keep"));
-        if vq || dk {
-            self.ask_kb(device::Ask::Modes(vq && self.bind[1] != "own", dk && self.bind[0] != "own"));
+        for (i, s) in crate::display::sliders().iter().enumerate() {
+            if s.frees.as_ref().is_some_and(|f| crate::display::has(&fw, f)) {
+                let free = self.bind.get(i).is_some_and(|b| b != "own");
+                self.ask_kb(device::Ask::Free(s.id.clone(), free));
+            }
         }
     }
 
     /// Set what a slider drives, but only once it has really moved, so opening
     /// Ectomatter never throws the volume to wherever the slider sits.
-    fn drive_sliders(&mut self, r: &serde_json::Value, f: [f32; 2]) {
-        // the dimmer's level, which every key's light inside the keyboard is scaled by
-        self.page.dimmer = r["dimmer"].as_u64().map(|v| v.min(255) as u8);
+    fn drive_sliders(&mut self, r: &serde_json::Value, f: &[f32]) {
+        let sliders = crate::display::sliders();
+        // the backlight's level, which every key's light inside the keyboard is scaled by
+        if let Some((_, s)) = self.backlight_slider() {
+            self.page.dimmer = r[s.id.as_str()].as_u64().map(|v| v.min(255) as u8);
+        }
         let prev = self.last_sliders.replace(r.clone());
         let Some(prev) = prev else { return };
-        let raw = |v: &serde_json::Value, k: &str| v[k].as_f64().unwrap_or(0.0);
-        let moved = [(raw(r, "dimmer_raw") - raw(&prev, "dimmer_raw")).abs() > 12.0, (raw(r, "volume_raw") - raw(&prev, "volume_raw")).abs() > 12.0];
+        let raw = |v: &serde_json::Value, s: &crate::display::Slider| v[format!("{}_raw", s.id)].as_f64().unwrap_or(0.0);
+        self.sent.resize(sliders.len(), None);
         let send = |me: &mut Self, i: usize, target: &str| {
-            let level = (f[i] as f64 * 100.0).round() / 100.0;
+            let level = (f.get(i).copied().unwrap_or(0.0) as f64 * 100.0).round() / 100.0;
             if me.sent[i] == Some(level) {
                 return;
             }
             me.sent[i] = Some(level);
             if target == "backlight" {
                 me.held = Some((level * 255.0).round() as u8);
-                me.ask_kb(device::Ask::Dimmer(me.held));
+                me.ask_kb(device::Ask::Backlight(me.held));
             } else {
                 set_audio(target, level);
             }
         };
-        if self.bind[0] != "own" {
+        for (i, s) in sliders.iter().enumerate() {
+            let bound = self.bind.get(i).cloned().unwrap_or_else(|| "own".into());
+            if bound == "own" {
+                continue;
+            }
             // the keyboard lets a held level go when its slider moves; hold it again
-            if !r["dimmer_held"].as_bool().unwrap_or(false) && self.held.is_some() {
-                self.ask_kb(device::Ask::Dimmer(self.held));
+            if s.own == "backlight" && !r[format!("{}_held", s.id)].as_bool().unwrap_or(false) && self.held.is_some() {
+                self.ask_kb(device::Ask::Backlight(self.held));
             }
-            if moved[0] && (self.bind[0] == "output" || self.bind[0] == "microphone") {
-                let t = self.bind[0].clone();
-                send(self, 0, &t);
+            let moved = (raw(r, s) - raw(&prev, s)).abs() > 12.0;
+            if moved && bound != "none" {
+                send(self, i, &bound);
             }
-        }
-        if moved[1] && (self.bind[1] == "backlight" || self.bind[1] == "microphone") {
-            let t = self.bind[1].clone();
-            send(self, 1, &t);
         }
     }
 

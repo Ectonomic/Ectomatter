@@ -147,6 +147,45 @@ pub(crate) mod tests {
         out
     }
 
+    /// The protocol's own words, as its doc writes them as code: each
+    /// inline `code` span whole (its quotes off), and each word of its code
+    /// blocks; never its prose. A package's word that is one of these is the
+    /// protocol's, which the app may name.
+    pub(crate) fn protocol_words() -> std::collections::BTreeSet<String> {
+        let doc = read("docs/core-protocol.md");
+        let mut out = std::collections::BTreeSet::new();
+        for (i, part) in doc.split("```").enumerate() {
+            if i % 2 == 1 {
+                out.extend(part.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.' || c == '/')).filter(|w| !w.is_empty()).map(String::from));
+            } else {
+                out.extend(part.split('`').skip(1).step_by(2).map(|s| s.trim_matches('"').to_string()));
+            }
+        }
+        out
+    }
+
+    /// The lines of the app's code and its window's that name one of these
+    /// words in quotes, each as file:line word.
+    pub(crate) fn quoted_in_app(words: &[&String]) -> Vec<String> {
+        let mut found = Vec::new();
+        for f in rust_files() {
+            if f.ends_with("boundaries.rs") {
+                continue;
+            }
+            for (n, line) in code(&f) {
+                if let Some(w) = words.iter().find(|w| line.contains(&format!("\"{w}\""))) {
+                    found.push(format!("{f}:{n} {w}"));
+                }
+            }
+        }
+        for (f, n, line) in ui_code() {
+            if let Some(w) = words.iter().find(|w| line.contains(&format!("\"{w}\""))) {
+                found.push(format!("{f}:{n} {w}"));
+            }
+        }
+        found
+    }
+
     pub(crate) fn fail_on(found: Vec<String>, what: &str) {
         assert!(found.is_empty(), "{what}:\n  {}", found.join("\n  "));
     }

@@ -330,7 +330,7 @@ impl Source {
             Source::CpuTemp | Source::CpuLoad | Source::Memory | Source::CpuClock | Source::GpuTemp | Source::GpuLoad | Source::GpuClock | Source::VideoMemory => "This computer’s sensors",
             Source::Date => "This computer’s clock",
             Source::Profile | Source::ProfileNumber => "The profile the keyboard is using",
-            Source::GameMode | Source::KeyRollover => "The keyboard, with Ectomatter’s firmware build 5 or later",
+            Source::GameMode | Source::KeyRollover => return screen()["status"]["from"].as_str().unwrap_or("The keyboard").to_string(),
             Source::OutsideTemp | Source::Sky => "The weather plugin, for the place set in Settings",
             Source::Sensor(_) => "One of this computer’s sensors",
             Source::GameName | Source::SessionTime | Source::TimePlayed | Source::LastPlayed => "The game in Ectomatter’s Library starting, playing or quitting",
@@ -1857,23 +1857,33 @@ fn block_rows(p: &Piece, s: &str, t: f64) -> Vec<String> {
 }
 
 /// Whether the keyboard can draw a piece by itself, with no program on the computer to
-/// send it (with Ectomatter's firmware build 5): words, the time and the date, and what the
-/// keyboard knows about itself. The computer's readings, and bars of them, it can't.
+/// send it: the pieces its core says its onboard layout can hold (`onboard.pieces`, by
+/// a piece's type, or a reading's key).
 pub fn onboard_can(kind: &Kind) -> bool {
+    let pieces = &screen()["onboard"]["pieces"];
+    let has = |k: &str| pieces.as_array().is_some_and(|a| a.iter().any(|x| x == k));
     match kind {
-        Kind::Text(_) | Kind::Clock(_) => true,
-        Kind::Data(s, _) => matches!(s, Source::Date | Source::Profile | Source::ProfileNumber | Source::GameMode | Source::KeyRollover),
-        Kind::Bar(_) | Kind::Effect { .. } => false,
+        Kind::Text(_) => has("text"),
+        Kind::Clock(_) => has("clock"),
+        Kind::Data(s, _) => has(s.key()),
+        Kind::Bar(_) => has("bar"),
+        Kind::Effect { .. } => has("effect"),
     }
 }
 
 /// The page as the keyboard draws it by itself, as its onboard layout: the pieces it
 /// can't draw left out, their cells blank. Until the keyboard can say them, its mode and
-/// key rollover show as it starts up.
+/// key rollover show as its core says it shows them (`onboard.until`).
 pub fn render_onboard(page: &Page, r: &Readings) -> Vec<String> {
     let mut r = r.clone();
-    r.mode.get_or_insert_with(|| "PC MODE".into());
-    r.rollover.get_or_insert_with(|| "6 KEY".into());
+    let until = &screen()["onboard"]["until"];
+    let word = |k: &str| until[k].as_str().map(String::from);
+    if r.mode.is_none() {
+        r.mode = word(Source::GameMode.key());
+    }
+    if r.rollover.is_none() {
+        r.rollover = word(Source::KeyRollover.key());
+    }
     let kept = Page { pieces: page.pieces.iter().filter(|p| onboard_can(&p.kind)).cloned().collect(), ..page.clone() };
     render(&kept, &r)
 }

@@ -27,8 +27,11 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   screen's fonts built in (`overlays.rs`, `lcd_draw.rs`, the knobs
   `control_117`/`control_118` in `overlays.rs`), its screen's built-in apps
   (`display.rs:13`), its screen's own status screen, four rows as its firmware
-  draws them (`lcd_page.rs`, `status_rows`), and the Z10's own setting ids
-  (`device.rs`: `dimmer`, `modes`, `displays/light`, `displays/apps`).
+  draws them (`lcd_page.rs`, `status_rows`), and the Z10's own methods for
+  its screen's light and apps (`device.rs`: `displays/light`,
+  `displays/apps`, which the protocol doc doesn't define). (Its sliders and
+  backlight, its onboard layout's pieces and its status readings come from
+  its description now: `display.rs`, `Slider`; `lcd_page.rs`, `onboard_can`.)
 - A key's box on the page is given in the description (`box`, EVGA's own
   editor's), not found from its piece in the art.
 - The layouts Ectomatter ships are laid out on the Z10's 20 by 4
@@ -121,19 +124,20 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
     (`lcd_player.rs`, `Core::new` with `z10-lcd/session`; game-helper's
     `lcd-announce.sh` still writes it when game-helper runs a game, and
     game-helper is still installed on Grant's computer).
-  - The keyboard's two sliders are the Z10's: their names (`front.rs`,
-    `"dimmer"`, `"volume"`), what each can control (`display.rs`,
-    `BIND_CHOICES`, `drives`), and the firmware features that free them or
-    hold the backlight (`front.rs`, `tell_modes`, `hold_backlight`,
-    `release_sliders`: `volume.quiet`, `dimmer.keep`, `dimmer.set`;
-    `keyboard.rs`, `reads_sliders`: `sliders.read`).
-  - The Z10's own screen readings and onboard pieces (`lcd_page.rs`,
-    `Source::ProfileNumber`, `GameMode`, `KeyRollover`, `onboard_can`, the
-    defaults "PC MODE" and "6 KEY" in `render_onboard`; the copy
-    "Ectomatter’s firmware build 5 or later" in `Source::from`), and the
-    onboard layout's firmware feature (`front.rs`, `screen.onboard`).
+  - The new sliders code (2026-10-26) was tested offscreen and by unit
+    tests, not by moving the Z10's sliders: freeing a slider is now one
+    call each (`input/free`) where it was one call for both, and a slider's
+    job, its hold on the backlight and its notes come from the core.
 
 ## Stage 4: maintainable
+
+- The tests and the app read JSON objects' keys in different orders: a
+  test run that builds `ectomatter-tokens` too turns on serde_json's
+  `preserve_order` for the app (`crates/ectomatter-tokens/Cargo.toml`), and
+  the app built alone keeps keys sorted. Anything shown in a JSON object's
+  key order can pass its test and look otherwise in the app (found
+  2026-10-26: the Game Configurator's programs; now sorted,
+  `launcher.rs`, `Starts::of`).
 
 - One object runs every page: `front.rs`, 10,506 lines, about 200 fields.
 - One window component holds every page: `ui/app.slint`, 7,236 lines.

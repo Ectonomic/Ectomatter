@@ -487,7 +487,7 @@ mod tests {
         assert!(cores.iter().all(|p| p.kind() == Kind::Core), "the cores folder holds cores");
         assert!(plugins.iter().all(|p| p.kind() == Kind::Plugin), "the plugins folder holds plugins");
         assert_eq!(plugins.iter().map(|p| p.name()).collect::<Vec<_>>(), vec!["Game Configurator", "Monitor Switcher", "OpenRGB Link", "Sensor Feed", "Weather Feed"]);
-        assert_eq!(can(&plugins, "game-configurator"), ["Changes how games start.", "Runs games through gamescope, gamemoderun and mangohud.", "Runs winecfg and winetricks in a game’s prefix.", "Sets 23 environment variables for each game."]);
+        assert_eq!(can(&plugins, "game-configurator"), ["Changes how games start.", "Runs games through gamemoderun, gamescope and mangohud.", "Runs winecfg and winetricks in a game’s prefix.", "Sets 23 environment variables for each game."]);
         assert_eq!(can(&plugins, "weather-feed"), vec!["Reaches Open-Meteo, Photon, the National Weather Service, Environment and Climate Change Canada and MeteoAlarm over the internet.".to_string()]);
         assert_eq!(
             can(&plugins, "sensor-feed"),

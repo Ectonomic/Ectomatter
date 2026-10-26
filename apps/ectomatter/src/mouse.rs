@@ -1283,11 +1283,15 @@ impl Page {
         for (k, sec) in secs.iter().enumerate() {
             let mut s = Stack::new(width(k, least));
             crate::described::draw_section(&mut s, desc, sec, values, known);
-            // (the mouse's own word on which of its sensitivities was in use)
-            let has_cpi = sec.items.iter().any(|&k| crate::described::setting(desc, k).is_some_and(|(id, _)| id == "cpi1"));
-            if let Some(p) = self.state["settings"]["active"].as_u64().filter(|_| has_cpi) {
+            // (the device's own word on which of its presets was in use: the setting its core
+            // numbers as that preset, in a section that shows one)
+            let active = self.state["settings"]["active"].as_u64();
+            let used = sec.items.iter().filter_map(|&k| crate::described::setting(desc, k)).find(|(_, s)| active.is_some() && s["preset"].as_u64() == active);
+            if let Some((_, item)) = used {
+                let kind = desc["kind"].as_str().unwrap_or("device");
                 s.close();
-                s.note(&format!("When Ectomatter last asked, the mouse was using the {}.", if p == 1 { "first" } else { "second" }));
+                let name = item["short"].as_str().or(item["label"].as_str()).unwrap_or("").to_lowercase();
+                s.note(&format!("When Ectomatter last asked, the {kind} was using the {name}."));
             }
             out.push(crate::boxes::Laid { title: sec.title.clone(), least, h: s.height(), cells: s.cells });
         }

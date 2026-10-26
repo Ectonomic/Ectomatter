@@ -20,6 +20,7 @@ runs=(
   a_plugin_names_its_own_start
   a_plugins_button_does_what_it_says
   no_plugins_setting_or_button_is_written_into_the_app
+  no_cores_setting_or_slider_is_written_into_the_app
   a_core_sees_only_the_devices_its_manifest_names
   a_core_of_its_own_reaches_its_device_and_its_page
   a_package_speaking_another_protocol_isnt_started
@@ -28,6 +29,7 @@ runs=(
   the_screen_asks_only_for_what_it_shows_and_rests_from_every_plugin
   a_plugins_reading_goes_on_the_screen
   a_keyboard_of_its_own_gets_its_page_from_its_description
+  a_keyboard_of_its_own_gets_its_sliders
   a_recipe_holds_only_what_its_plugins_manifest_names
   an_update_that_can_do_more_waits_and_a_package_must_match_its_checksum
   a_waiting_version_offers_review

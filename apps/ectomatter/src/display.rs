@@ -33,16 +33,89 @@ pub fn game_keys() -> Vec<(u64, String)> {
     bits(&["capabilities", "keys", "game_keys"])
 }
 
-/// What each slider can control. "own" is what the keyboard does by itself.
-pub const BIND_CHOICES: [[(&str, &str); 4]; 2] = [
-    [("own", "Keyboard brightness"), ("output", "System volume"), ("microphone", "Microphone volume"), ("none", "Nothing")],
-    [("own", "System volume"), ("backlight", "Keyboard brightness"), ("microphone", "Microphone volume"), ("none", "Nothing")],
-];
+/// A slider as the keyboard's core describes it (its input capability's
+/// `sliders`, docs/core-protocol.md, section 5, input): its control's id, its
+/// name (`label`) and how a sentence calls it (`called`), its glyph, its job
+/// when the keyboard does it by itself (`own`), the firmware features it can
+/// be read with and freed with, and the keyboard's words for while it does
+/// another job (`busy` while it can't be freed, `freed` once it is). Its
+/// place among them is its number in the keyboard's picture.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Slider {
+    pub id: String,
+    pub label: String,
+    pub called: String,
+    pub glyph: String,
+    pub own: String,
+    pub reads: Option<String>,
+    pub frees: Option<String>,
+    pub busy: String,
+    pub freed: String,
+    /// the lowest and highest the keyboard reads it at, as its core expects
+    /// them (widened as the slider is seen further)
+    pub range: [f64; 2],
+}
 
-/// What a slider really drives: left on its own job, the dimmer drives the
-/// backlight and the volume slider the computer's volume.
-pub fn drives(i: usize, v: &str) -> String {
-    if v == "own" { if i == 0 { "backlight".into() } else { "output".into() } } else { v.into() }
+/// The keyboard's sliders, as its core describes them.
+pub fn sliders() -> Vec<Slider> {
+    crate::cores::keyboard().map_or_else(Vec::new, |k| sliders_of(k.described()))
+}
+
+pub fn sliders_of(d: &Value) -> Vec<Slider> {
+    let word = |v: &Value| v.as_str().map(String::from);
+    d["capabilities"]["input"]["sliders"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|s| {
+            let id = word(&s["id"])?;
+            let label = word(&s["label"]).unwrap_or_else(|| id.clone());
+            Some(Slider {
+                called: word(&s["called"]).unwrap_or_else(|| label.to_lowercase()),
+                glyph: word(&s["glyph"]).unwrap_or_default(),
+                own: word(&s["own"]).unwrap_or_else(|| "none".into()),
+                reads: word(&s["reads"]),
+                frees: word(&s["frees"]),
+                busy: word(&s["notes"]["busy"]).unwrap_or_default(),
+                freed: word(&s["notes"]["freed"]).unwrap_or_default(),
+                // (none given: the first reading is both ends, until the slider is moved)
+                range: match (s["range"][0].as_f64(), s["range"][1].as_f64()) {
+                    (Some(a), Some(b)) => [a, b],
+                    _ => [f64::MAX, f64::MIN],
+                },
+                id,
+                label,
+            })
+        })
+        .collect()
+}
+
+/// The jobs Ectomatter can give a slider besides its own, each in the words
+/// a menu says it with.
+const JOBS: [(&str, &str); 3] = [("output", "System volume"), ("backlight", "Keyboard brightness"), ("microphone", "Microphone volume")];
+
+/// What a slider can control: its own job ("own", what the keyboard does
+/// by itself), the others (the backlight only on a keyboard with a backlight
+/// setting), and nothing.
+pub fn choices(s: &Slider, backlight: bool) -> Vec<(String, String)> {
+    let own = JOBS.iter().find(|(j, _)| *j == s.own).map_or_else(|| s.label.clone(), |(_, w)| w.to_string());
+    let mut out = vec![("own".to_string(), own)];
+    out.extend(JOBS.iter().filter(|(j, _)| *j != s.own && (*j != "backlight" || backlight)).map(|(j, w)| (j.to_string(), w.to_string())));
+    out.push(("none".into(), "Nothing".into()));
+    out
+}
+
+/// What a slider really drives: left on its own job, the one it does by itself.
+pub fn drives(s: &Slider, v: &str) -> String {
+    if v == "own" { s.own.clone() } else { v.into() }
+}
+
+/// The setting that holds the keyboard's backlight (the one whose `role` is
+/// "backlight"), and the firmware feature it needs, if any.
+pub fn backlight_setting() -> Option<(String, Option<String>)> {
+    let d = crate::cores::keyboard()?.described().clone();
+    let s = d["capabilities"]["settings"]["items"].as_array()?.iter().find(|s| s["role"] == "backlight")?.clone();
+    Some((s["id"].as_str()?.to_string(), s["feature"].as_str().map(String::from)))
 }
 
 pub fn has(fw: &Value, feature: &str) -> bool {
@@ -240,5 +313,46 @@ pub fn act(page: &mut Page, c: Ctl, index: usize, value: f32, text: Option<&str>
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// Boundary: a keyboard Ectomatter has never seen, with three sliders of
+    /// its own, gets each one as its core describes it: its name, how a
+    /// sentence calls it, its own job, and what else it can control (the
+    /// backlight only on a keyboard with a backlight setting); a slider
+    /// described without a range reads its ends from the slider itself.
+    #[test]
+    fn a_keyboard_of_its_own_gets_its_sliders() {
+        let d = json!({ "capabilities": { "input": { "sliders": [
+            { "id": "knob-a", "label": "Knob A", "own": "output", "frees": "quiet.knob", "notes": { "busy": "It still turns the volume too." } },
+            { "id": "knob-b", "label": "Knob B", "called": "right knob", "own": "backlight", "range": [0, 1023] },
+            { "id": "knob-c", "label": "Knob C" },
+        ] } } });
+        let s = sliders_of(&d);
+        assert_eq!(s.iter().map(|s| (s.id.as_str(), s.called.as_str(), s.own.as_str())).collect::<Vec<_>>(), [("knob-a", "knob a", "output"), ("knob-b", "right knob", "backlight"), ("knob-c", "knob c", "none")]);
+        assert_eq!((s[0].frees.as_deref(), s[0].busy.as_str()), (Some("quiet.knob"), "It still turns the volume too."));
+        assert_eq!((s[1].range, s[0].range), ([0.0, 1023.0], [f64::MAX, f64::MIN]));
+        let words = |s: &Slider, backlight: bool| choices(s, backlight).into_iter().map(|(_, w)| w).collect::<Vec<_>>();
+        assert_eq!(words(&s[0], true), ["System volume", "Keyboard brightness", "Microphone volume", "Nothing"]);
+        assert_eq!(words(&s[0], false), ["System volume", "Microphone volume", "Nothing"], "no backlight to set");
+        assert_eq!(words(&s[1], true), ["Keyboard brightness", "System volume", "Microphone volume", "Nothing"]);
+        assert_eq!(words(&s[2], true)[0], "Knob C", "a slider with no job of its own: its own name");
+        assert_eq!((drives(&s[0], "own"), drives(&s[1], "own"), drives(&s[0], "microphone")), ("output".to_string(), "backlight".to_string(), "microphone".to_string()));
+    }
+
+    /// The Z10's two sliders, as its core describes them, offer what they
+    /// always did.
+    #[test]
+    fn the_z10s_sliders_offer_what_they_did() {
+        let s = sliders_of(&json!({ "capabilities": evga_z10::shared::capabilities() }));
+        let words = |s: &Slider| choices(s, true).into_iter().map(|(_, w)| w).collect::<Vec<_>>();
+        assert_eq!(words(&s[0]), ["Keyboard brightness", "System volume", "Microphone volume", "Nothing"]);
+        assert_eq!(words(&s[1]), ["System volume", "Keyboard brightness", "Microphone volume", "Nothing"]);
+        assert_eq!((s[0].called.as_str(), s[1].called.as_str()), ("dimmer", "volume slider"));
     }
 }
