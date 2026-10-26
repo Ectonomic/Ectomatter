@@ -8,9 +8,10 @@
 //! video memory, and each other sensor checked. A reading unchecked can't be
 //! had, as one the computer doesn't have.
 //!
-//! Ectomatter never reads the sensors itself: the Sensor Feed lists them
-//! and reads those it's asked to watch ([crate::hosted::Readings]), and this
-//! asks for what it shows. Tests hand in a made-up computer, read here.
+//! Ectomatter never reads the sensors itself: the plugin that lists them
+//! as a catalog (the Sensor Feed, or any other) reads those it's asked to
+//! watch ([crate::hosted::Readings]), and this asks for what it shows. Tests
+//! hand in a made-up computer, read here.
 
 #[cfg(test)]
 use std::path::{Path, PathBuf};
@@ -19,9 +20,6 @@ use std::time::Instant;
 #[cfg(test)]
 use ectomatter_sensors::list::Nvidia;
 use ectomatter_sensors::list::{Catalog, Sensor, Val};
-
-/// The Sensor Feed, by its id.
-pub const SENSORS: &str = "sensor-feed";
 
 /// One reading of the main card: its temperature, load, core clock, and its video memory
 /// used and in all (GiB), each where its driver reports it and it is checked.
@@ -77,7 +75,7 @@ impl Stats {
     pub fn catalog(&mut self) -> &Catalog {
         if self.listed.as_ref().is_none_or(|(at, _)| at.elapsed().as_secs() >= 30) {
             let cat = match &mut self.from {
-                From::Plugin(r, _) => r.of(SENSORS).and_then(|t| serde_json::from_value::<Catalog>(t.list).ok()).unwrap_or_default(),
+                From::Plugin(r, _) => r.with_catalog().and_then(|p| r.of(&p)).and_then(|t| serde_json::from_value::<Catalog>(t.catalog).ok()).unwrap_or_default(),
                 #[cfg(test)]
                 From::Here(root, reader) => ectomatter_sensors::list::catalog(root, reader.nvidia()),
             };
@@ -100,8 +98,9 @@ impl Stats {
     fn values(&mut self, want: &[&Sensor]) -> std::collections::HashMap<String, Val> {
         match &mut self.from {
             From::Plugin(r, who) => {
-                r.want(SENSORS, who, want.iter().map(|s| s.id.clone()).collect());
-                let told = r.of(SENSORS).map(|t| t.values).unwrap_or_default();
+                let Some(plugin) = r.with_catalog() else { return Default::default() };
+                r.want(&plugin, who, want.iter().map(|s| s.id.clone()).collect());
+                let told = r.of(&plugin).map(|t| t.values).unwrap_or_default();
                 want.iter().filter_map(|s| Some((s.id.clone(), serde_json::from_value::<Val>(told.get(&s.id)?.clone()).ok()?))).collect()
             }
             #[cfg(test)]
@@ -117,8 +116,10 @@ impl Stats {
 
     /// Nothing read for this one any longer (a page left).
     pub fn rest(&mut self) {
-        if let From::Plugin(r, who) = &self.from {
-            r.want(SENSORS, who, Vec::new());
+        if let From::Plugin(r, who) = &self.from
+            && let Some(plugin) = r.with_catalog()
+        {
+            r.want(&plugin, who, Vec::new());
         }
     }
 
@@ -146,7 +147,34 @@ impl Stats {
             Gpu { temp: n("temperature"), load: n("load"), clock: n("clock"), vram }
         });
         let sensors = want.iter().filter_map(|s| Some((crate::sensors::number(&s.id), (s.what, *v.get(&s.id)?)))).collect();
-        crate::lcd_page::Readings { cpu_temp, cpu_load: one("cpu/load"), cpu_ghz: one("cpu/clock/average").map(|mhz| mhz / 1000.0), ram, gpu, sensors, ..Default::default() }
+        let plugins = self.plugin_readings();
+        crate::lcd_page::Readings { cpu_temp, cpu_load: one("cpu/load"), cpu_ghz: one("cpu/clock/average").map(|mhz| mhz / 1000.0), ram, gpu, sensors, plugins, ..Default::default() }
+    }
+
+    /// Every reading the plugins list (but the sensors' catalog), each as it
+    /// last told it, by the number a layout knows it by; each asked to be
+    /// read for this one from now on.
+    fn plugin_readings(&mut self) -> std::collections::HashMap<u16, serde_json::Value> {
+        let From::Plugin(r, who) = &self.from else { return Default::default() };
+        let mut out = std::collections::HashMap::new();
+        let mut by: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+        for (plugin, listed) in r.all() {
+            let Some(id) = listed["id"].as_str() else { continue };
+            // (the weather is the screen's own blocks')
+            if matches!(listed["kind"].as_str(), Some(crate::lcd_page::OUTSIDE_TEMPERATURE | crate::lcd_page::SKY)) {
+                continue;
+            }
+            let word = |k: &str| listed[k].as_str().unwrap_or("").to_string();
+            let n = crate::lcd_page::reading_listed(crate::lcd_page::PluginReading { plugin: plugin.clone(), plugin_name: plugin.clone(), id: id.into(), label: listed["label"].as_str().unwrap_or(id).into(), unit: word("unit") });
+            by.entry(plugin.clone()).or_default().push(id.to_string());
+            if let Some(v) = r.value(&plugin, id).filter(|v| !v.is_null()) {
+                out.insert(n, v);
+            }
+        }
+        for (plugin, ids) in by {
+            r.want(&plugin, who, ids);
+        }
+        out
     }
 
     /// The Stats page's four rows, as the service wrote them. A reading that

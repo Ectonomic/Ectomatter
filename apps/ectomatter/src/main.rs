@@ -620,7 +620,12 @@ fn main() {
         let mut hosted = hosted::Hosted::with_usb(std::sync::Arc::new(computer::ThisComputer::new()), Box::new(|| Box::new(core_host::NoDevices)));
         hosted.start_all(&settings::Settings::load(config_dir().join("settings.json")));
         devices_described(&hosted);
-        match launcher::move_game_helper() {
+        // (into the values of the plugin that says how games start)
+        let Some(plugin) = hosted.launcher().map(String::from) else {
+            eprintln!("ectomatter: no plugin says how games start, so there's nothing to move game-helper's flags into");
+            std::process::exit(1);
+        };
+        match launcher::move_game_helper(&plugin) {
             Ok(said) => println!("{said}"),
             Err(e) => {
                 eprintln!("ectomatter: {e}");
@@ -756,8 +761,8 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         front.mouse.tab = t;
     }
     if let Ok(place) = std::env::var("ECTOMATTER_PLACE") {
-        // ("sensor-feed": Settings, at the Sensor Feed box, as the screen editor's links open it)
-        if place == "sensor-feed" {
+        // ("sensors": Settings, at the sensors' box, as the screen editor's links open it)
+        if place == "sensors" {
             front.show_sensors();
         } else {
             front.ui.set_place(place.into());

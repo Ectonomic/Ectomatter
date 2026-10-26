@@ -903,7 +903,7 @@ pub fn game_profile(store: &crate::profiles::Store) -> Option<String> {
 /// for it and opened again if it was open, as `ectomatter --move-game-helper`
 /// asks: what was done, in a sentence. Refused while a Steam game runs, and
 /// while another Ectomatter runs, which would write its own Library over this one's.
-pub fn move_game_helper() -> Result<String, String> {
+pub fn move_game_helper(plugin: &str) -> Result<String, String> {
     let me = std::process::id();
     let other = std::fs::read_dir("/proc").into_iter().flatten().flatten().any(|e| {
         e.file_name().to_str().and_then(|n| n.parse::<u32>().ok()).is_some_and(|pid| pid != me) && std::fs::read_link(e.path().join("exe")).is_ok_and(|p| p.file_name().is_some_and(|n| n == "ectomatter"))
@@ -932,7 +932,7 @@ pub fn move_game_helper() -> Result<String, String> {
         return Ok("No launch line in Steam runs game-helper.".into());
     }
     apps.sort();
-    let switches = carry_over(&mut lib, &k, &apps, &lines, mouse.as_deref(), "game-configurator");
+    let switches = carry_over(&mut lib, &k, &apps, &lines, mouse.as_deref(), plugin);
     install(&root)?;
     let was_open = steam_running();
     close_steam()?;

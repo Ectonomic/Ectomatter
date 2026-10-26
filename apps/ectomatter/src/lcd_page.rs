@@ -89,6 +89,9 @@ pub enum Source {
     /// one of the computer's sensors checked in Settings, by the number [crate::sensors]
     /// knows it by (kept in a layout by its id)
     Sensor(u16),
+    /// a reading any plugin lists (readings/list), by the number `reading` knows it by
+    /// (kept in a layout by its plugin's id and its own)
+    Reading(u16),
     /// the game starting, playing or quitting (or the last one): its name, how long this
     /// session has lasted, how long it's been played in all, when it was last played, what
     /// Ectomatter is setting or putting back now, and how many of those changes are done
@@ -124,6 +127,49 @@ pub const SOURCES: [Source; 21] = [
     Source::ChangesDone,
 ];
 
+/// The kinds of reading the screen has blocks of its own for (Outside
+/// temperature, Weather): the first plugin telling one of each is read for
+/// them, and its readings of these kinds aren't listed again as plugin readings.
+pub const OUTSIDE_TEMPERATURE: &str = "outside-temperature";
+pub const SKY: &str = "sky";
+
+/// A reading a plugin lists, as Ectomatter knows it: its plugin's id and
+/// name, its own id, its label and its unit ("°C", "%", or none).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PluginReading {
+    pub plugin: String,
+    pub plugin_name: String,
+    pub id: String,
+    pub label: String,
+    pub unit: String,
+}
+
+/// The plugins' readings a layout can show, each by its number, once each.
+static PLUGIN_READINGS: std::sync::RwLock<Vec<PluginReading>> = std::sync::RwLock::new(Vec::new());
+
+/// A plugin's reading by its number, made if new: what a layout keeps it by
+/// is its plugin's id and its own, the number only while Ectomatter runs.
+pub fn reading_number(plugin: &str, id: &str) -> u16 {
+    let mut all = PLUGIN_READINGS.write().unwrap_or_else(|p| p.into_inner());
+    if let Some(i) = all.iter().position(|x| x.plugin == plugin && x.id == id) {
+        return i as u16;
+    }
+    all.push(PluginReading { plugin: plugin.into(), plugin_name: plugin.into(), id: id.into(), label: id.into(), unit: String::new() });
+    (all.len() - 1) as u16
+}
+
+/// A plugin's reading as it lists it now (its label, unit and plugin's name): its number.
+pub fn reading_listed(r: PluginReading) -> u16 {
+    let n = reading_number(&r.plugin, &r.id);
+    PLUGIN_READINGS.write().unwrap_or_else(|p| p.into_inner())[n as usize] = r;
+    n
+}
+
+/// A plugin's reading by its number.
+pub fn plugin_reading_of(n: u16) -> Option<PluginReading> {
+    PLUGIN_READINGS.read().unwrap_or_else(|p| p.into_inner()).get(n as usize).cloned()
+}
+
 impl Source {
     pub fn key(self) -> &'static str {
         match self {
@@ -143,6 +189,7 @@ impl Source {
             Source::OutsideTemp => "outside-temp",
             Source::Sky => "sky",
             Source::Sensor(_) => "sensor",
+            Source::Reading(_) => "reading",
             Source::GameName => "game-name",
             Source::SessionTime => "session-time",
             Source::TimePlayed => "time-played",
@@ -150,6 +197,11 @@ impl Source {
             Source::ChangingNow => "changing-now",
             Source::ChangesDone => "changes-done",
         }
+    }
+
+    /// The plugin's reading it is, if it is one.
+    pub fn plugin_reading(self) -> Option<PluginReading> {
+        if let Source::Reading(n) = self { plugin_reading_of(n) } else { None }
     }
 
     fn from_key(k: &str) -> Option<Source> {
@@ -160,6 +212,7 @@ impl Source {
     fn of_json(p: &Value) -> Option<Source> {
         match p["source"].as_str()? {
             "sensor" => Some(Source::Sensor(crate::sensors::number(p["sensor"].as_str()?))),
+            "reading" => Some(Source::Reading(reading_number(p["plugin"].as_str()?, p["reading"].as_str()?))),
             k => Source::from_key(k),
         }
     }
@@ -182,6 +235,7 @@ impl Source {
             Source::OutsideTemp => "Outside temperature",
             Source::Sky => "Weather",
             Source::Sensor(_) => "Sensor",
+            Source::Reading(_) => "Reading",
             Source::GameName => "Game name",
             Source::SessionTime => "Session time",
             Source::TimePlayed => "Time played",
@@ -195,6 +249,7 @@ impl Source {
     pub fn title(self) -> String {
         match self {
             Source::Sensor(n) => crate::sensors::known(n).map_or_else(|| sensor_label(n), |k| k.name),
+            Source::Reading(n) => plugin_reading_of(n).map_or_else(|| "Reading".into(), |r| r.label),
             s => s.name().to_string(),
         }
     }
@@ -203,6 +258,9 @@ impl Source {
     pub fn phrase(self) -> String {
         if let Source::Sensor(n) = self {
             return crate::sensors::known(n).map_or_else(|| sensor_label(n), |k| k.name);
+        }
+        if let Source::Reading(n) = self {
+            return plugin_reading_of(n).map_or_else(|| "a plugin’s reading".into(), |r| r.label);
         }
         match self {
             Source::CpuTemp | Source::CpuLoad | Source::CpuClock => "CPU",
@@ -217,6 +275,7 @@ impl Source {
             Source::OutsideTemp => "the temperature outside",
             Source::Sky => "the sky outside",
             Source::Sensor(_) => "a sensor",
+            Source::Reading(_) => "a plugin’s reading",
             Source::GameName => "the game’s name",
             Source::SessionTime => "how long this session has lasted",
             Source::TimePlayed => "the time played in all",
@@ -235,7 +294,7 @@ impl Source {
             Source::Memory => "Memory",
             Source::Profile | Source::ProfileNumber | Source::GameMode | Source::KeyRollover => "Keyboard",
             Source::Date => "Time and date",
-            Source::OutsideTemp | Source::Sky => "More",
+            Source::OutsideTemp | Source::Sky | Source::Reading(_) => "More",
             Source::Sensor(_) => "Sensors",
             Source::GameName | Source::SessionTime | Source::TimePlayed | Source::LastPlayed | Source::ChangingNow | Source::ChangesDone => "Game",
         }
@@ -251,8 +310,9 @@ impl Source {
             Source::Date => "This computer’s clock",
             Source::Profile | Source::ProfileNumber => "The profile the keyboard is using",
             Source::GameMode | Source::KeyRollover => "The keyboard, with Ectomatter’s firmware build 5 or later",
-            Source::OutsideTemp | Source::Sky => "Open-Meteo, for the place in Ectomatter’s settings",
+            Source::OutsideTemp | Source::Sky => "The weather plugin, for the place set in Settings",
             Source::Sensor(_) => "One of this computer’s sensors",
+            Source::Reading(_) => "A plugin",
             Source::GameName | Source::SessionTime | Source::TimePlayed | Source::LastPlayed => "The game in Ectomatter’s Library starting, playing or quitting",
             Source::ChangingNow | Source::ChangesDone => "What Ectomatter sets as a game starts, and puts back as it quits",
         }
@@ -262,12 +322,14 @@ impl Source {
     /// Whether the reading is words (the weather, the active profile's name), which
     /// carry on to the next row, scroll or are cut off, as Text does.
     pub fn is_words(self) -> bool {
-        matches!(self, Source::Sky | Source::Profile | Source::GameName | Source::ChangingNow)
+        // (a plugin's reading with no unit: words, as the sky is)
+        matches!(self, Source::Sky | Source::Profile | Source::GameName | Source::ChangingNow) || matches!(self, Source::Reading(n) if plugin_reading_of(n).is_some_and(|r| r.unit.is_empty()))
     }
 
     pub fn is_temperature(self) -> bool {
         match self {
             Source::Sensor(n) => crate::sensors::known(n).is_some_and(|k| k.what == What::Temperature),
+            Source::Reading(n) => plugin_reading_of(n).is_some_and(|r| r.unit == "°C"),
             s => matches!(s, Source::CpuTemp | Source::GpuTemp | Source::OutsideTemp),
         }
     }
@@ -283,6 +345,8 @@ impl Source {
     pub fn barred(self) -> bool {
         match self {
             Source::Sensor(n) => crate::sensors::known(n).is_some_and(|k| matches!(k.what, What::Temperature | What::Load | What::Charge | What::FanShare | What::InUse)),
+            // (a plugin's share of something, a percent)
+            Source::Reading(n) => plugin_reading_of(n).is_some_and(|r| r.unit == "%"),
             s => matches!(s, Source::CpuTemp | Source::CpuLoad | Source::GpuTemp | Source::GpuLoad | Source::Memory | Source::VideoMemory | Source::ChangesDone),
         }
     }
@@ -294,10 +358,11 @@ impl Source {
             Source::CpuTemp | Source::CpuClock => Some("cpu"),
             Source::GpuTemp | Source::GpuLoad | Source::GpuClock | Source::VideoMemory => Some("gpu"),
             Source::Memory => Some("memory"),
-            Source::OutsideTemp | Source::Sky => Some("weather-feed"),
+            Source::OutsideTemp | Source::Sky => Some("outside"),
             Source::GameMode | Source::KeyRollover => Some("keyboard"),
             // (a sensor's part: its readings said unavailable once)
             Source::Sensor(n) => Some(crate::sensors::known(n).map_or("Sensor", |k| k.part.short())),
+            Source::Reading(_) => Some("plugin"),
             Source::GameName | Source::SessionTime | Source::TimePlayed | Source::LastPlayed | Source::ChangingNow | Source::ChangesDone => Some("game"),
             Source::CpuLoad | Source::Date | Source::Profile | Source::ProfileNumber => None,
         }
@@ -316,6 +381,7 @@ impl Source {
             Source::KeyRollover => "Rollover",
             Source::OutsideTemp | Source::Sky => "Weather",
             Source::Sensor(n) => crate::sensors::known(n).map_or("Sensor", |k| k.part.short()),
+            Source::Reading(_) => "Plugin",
             Source::GameName | Source::SessionTime | Source::TimePlayed | Source::LastPlayed | Source::ChangingNow | Source::ChangesDone => "Game",
         }
     }
@@ -816,6 +882,9 @@ impl Page {
                         if let Source::Sensor(n) = s {
                             v["sensor"] = json!(crate::sensors::id_of(*n));
                         }
+                        if let Some(r) = s.plugin_reading() {
+                            (v["plugin"], v["reading"]) = (json!(r.plugin), json!(r.id));
+                        }
                         v["fahrenheit"] = json!(f);
                         if *s == Source::Date && p.date_format != DateFormat::Short {
                             v["format"] = json!(p.date_format.key());
@@ -826,6 +895,9 @@ impl Page {
                         v["source"] = json!(s.key());
                         if let Source::Sensor(n) = s {
                             v["sensor"] = json!(crate::sensors::id_of(*n));
+                        }
+                        if let Some(r) = s.plugin_reading() {
+                            (v["plugin"], v["reading"]) = (json!(r.plugin), json!(r.id));
                         }
                     }
                     Kind::Clock(twelve) => {
@@ -1393,6 +1465,8 @@ pub struct Readings {
     pub outside: Option<(f64, String)>,
     /// each checked sensor's reading, by the number a layout knows it by, and what it reads
     pub sensors: std::collections::HashMap<u16, (What, Val)>,
+    /// each plugin's reading it told, by the number a layout knows it by (Source::Reading)
+    pub plugins: std::collections::HashMap<u16, Value>,
     /// the game starting, playing or quitting, or the last one
     pub game: Option<Game>,
 }
@@ -1434,6 +1508,27 @@ fn fahrenheit(c: f64) -> f64 {
 }
 
 /// A reading as the piece shows it (the date as `date` writes it), or None when it can't be had.
+/// A plugin's reading as the screen shows it: a number to one place at most,
+/// then its unit (a temperature in °F where asked); a share, `used / all`;
+/// words in the characters the screen draws.
+fn plugin_reading_text(v: &Value, unit: &str, f: bool) -> Option<String> {
+    let num = |x: f64| if x.fract().abs() < 0.05 { format!("{x:.0}") } else { format!("{x:.1}") };
+    Some(match v {
+        Value::Number(x) => {
+            let x = x.as_f64()?;
+            match unit {
+                // (a temperature in whole degrees, as the weather's)
+                "°C" if f => format!("{:.0}°", fahrenheit(x)),
+                "°C" => format!("{x:.0}°"),
+                u => format!("{}{u}", num(x)),
+            }
+        }
+        Value::Array(a) => format!("{} / {}{}", num(a.first()?.as_f64()?), num(a.get(1)?.as_f64()?), if unit.is_empty() { String::new() } else { format!(" {unit}") }),
+        Value::String(t) => spell(t),
+        _ => return None,
+    })
+}
+
 fn text_of(s: Source, f: bool, date: DateFormat, r: &Readings) -> Option<String> {
     let deg = |c: f64| if f { fahrenheit(c) } else { c };
     Some(match s {
@@ -1465,6 +1560,7 @@ fn text_of(s: Source, f: bool, date: DateFormat, r: &Readings) -> Option<String>
             let (what, v) = r.sensors.get(&n)?;
             ectomatter_sensors::read::on_screen(*what, *v, f)
         }
+        Source::Reading(n) => plugin_reading_text(r.plugins.get(&n)?, &plugin_reading_of(n)?.unit, f)?,
         // (in capitals, as the keyboard has always written a game's name)
         Source::GameName => spell(&r.game.as_ref()?.name.to_uppercase()),
         Source::SessionTime => hours(r.game.as_ref()?.session(now_secs())),
@@ -2026,8 +2122,15 @@ pub fn available(r: &Readings, weather: bool) -> Vec<Source> {
             Source::Memory => r.ram.is_some(),
             Source::OutsideTemp | Source::Sky => weather,
             Source::Sensor(n) => r.sensors.contains_key(n),
+            Source::Reading(n) => r.plugins.contains_key(n),
             // (the game's readings are there to choose whether a game has run or not)
             Source::GameName | Source::SessionTime | Source::TimePlayed | Source::LastPlayed | Source::ChangingNow | Source::ChangesDone => true,
+        })
+        // (and every plugin's reading told, in the order of their numbers)
+        .chain({
+            let mut n: Vec<u16> = r.plugins.keys().copied().collect();
+            n.sort();
+            n.into_iter().map(Source::Reading)
         })
         .collect()
 }
@@ -2328,6 +2431,7 @@ mod tests {
             mode: None,
             rollover: None,
             outside: None,
+            plugins: Default::default(),
             sensors: Default::default(),
             game: None,
         }
@@ -2713,6 +2817,34 @@ mod tests {
         assert!(old.add_built_in("blank").is_none() && old.add_built_in("snow").is_none());
     }
 
+    /// docs/core-protocol.md, section 11, Readings: any plugin's reading can
+    /// be shown on the screen: a layout keeps it by its plugin's id and its
+    /// own, reads it back the same, spells it with its unit (a temperature
+    /// in °F where asked, a share as used of all, words in what the screen
+    /// draws), and the menu of readings lists it once it's told.
+    #[test]
+    fn a_plugins_reading_goes_on_the_screen() {
+        let n = reading_listed(PluginReading { plugin: "made-up-stocks".into(), plugin_name: "Made-up Stocks".into(), id: "acme".into(), label: "ACME shares".into(), unit: "$".into() });
+        let t = reading_listed(PluginReading { plugin: "made-up-stocks".into(), plugin_name: "Made-up Stocks".into(), id: "room".into(), label: "Room".into(), unit: "°C".into() });
+        let w = reading_listed(PluginReading { plugin: "made-up-stocks".into(), plugin_name: "Made-up Stocks".into(), id: "mood".into(), label: "Market mood".into(), unit: String::new() });
+        let page = Page { pieces: vec![block(0, 0, 10, Kind::Data(Source::Reading(n), false)), block(1, 0, 10, Kind::Data(Source::Reading(t), true)), block(2, 0, 20, Kind::Data(Source::Reading(w), false))], ..Page::blank() };
+        let saved = page.to_json();
+        assert_eq!((saved["pieces"][0]["source"].as_str(), saved["pieces"][0]["plugin"].as_str(), saved["pieces"][0]["reading"].as_str()), (Some("reading"), Some("made-up-stocks"), Some("acme")));
+        assert_eq!(Page::from_json(&saved).unwrap().pieces, page.pieces, "read back as it was kept");
+        let mut r = Readings::default();
+        r.plugins.insert(n, json!(12.25));
+        r.plugins.insert(t, json!(21));
+        r.plugins.insert(w, json!("Bullish ☀"));
+        let rows = render(&page, &r);
+        assert_eq!(rows[0].trim(), "12.2$");
+        assert_eq!(rows[1].trim(), "70°", "°F, as asked");
+        assert_eq!(rows[2].trim(), "Bullish ?", "words in what the screen draws");
+        assert!(Source::Reading(w).is_words() && Source::Reading(t).is_temperature() && !Source::Reading(n).is_words());
+        assert_eq!(Source::Reading(n).title(), "ACME shares");
+        assert!(available(&r, false).contains(&Source::Reading(n)), "on the menu of readings once told");
+        assert!(!available(&Readings::default(), false).contains(&Source::Reading(n)), "not before");
+    }
+
     #[test]
     fn the_keyboards_screen_is_twenty_by_four_as_the_z10_describes_it() {
         // the Z10's core describes twenty by four, which the tests' keyboard is
@@ -2739,6 +2871,7 @@ mod tests {
             mode: Some("PC MODE".into()),
             rollover: Some("6 KEY".into()),
             outside: Some((19.0, "Thunderstorm with hail".into())),
+            plugins: Default::default(),
             sensors: Default::default(),
             game: Some(Game { name: "Hollow Knight Silksong".into(), since: 1000, ended: 1000 + 3720, minutes: 95, last: 0, changing: "Monitor to 120 Hz".into(), done: (2, 5) }),
         }

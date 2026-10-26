@@ -190,6 +190,30 @@ mod tests {
         fail_on(found, &format!("not protocol {speaks}"));
     }
 
+    /// docs/core-protocol.md, section 11: plugins are on equal footing; none
+    /// is reached by its name, so a plugin of anyone's does what the ones
+    /// Ectomatter comes with do. (A plugin's old name is read once and moved
+    /// on: packages.rs, RENAMED.)
+    #[test]
+    fn no_plugin_is_reached_by_its_name() {
+        let names = ["\"weather-feed\"", "\"sensor-feed\"", "\"openrgb-link\"", "\"game-configurator\"", "\"monitor-switcher\""];
+        let mut found = Vec::new();
+        for f in rust_files() {
+            if f.ends_with("old_name.rs") || f.ends_with("boundaries.rs") {
+                continue;
+            }
+            for (n, line) in code(&f) {
+                if f.ends_with("packages.rs") && line.trim_start().starts_with("(\"") {
+                    continue;
+                }
+                if let Some(name) = names.iter().find(|x| line.contains(*x)) {
+                    found.push(format!("{f}:{n} {name}"));
+                }
+            }
+        }
+        fail_on(found, "a plugin reached by its name");
+    }
+
     /// Ectomatter installed on a computer without its source finds its cores
     /// and plugins: no path into the source folder is built into it.
     #[test]

@@ -75,7 +75,9 @@ pub struct Hosted {
 }
 
 /// The readings the plugins told, by plugin: what each lists it can read
-/// (readings/list), and each reading's latest value (readings/changed); and
+/// (readings/list: each reading's id, label, unit and kind, and a catalog of
+/// the computer's sensors where it reads them), and each reading's latest
+/// value (readings/changed); and
 /// which readings each one showing them wants read, which the plugin is told
 /// (readings/watch). Shared with the keyboard screen's own thread, which
 /// never waits on a plugin.
@@ -93,7 +95,11 @@ struct Kept {
 
 #[derive(Clone, Debug, Default)]
 pub struct Told {
+    /// its readings, each `{id, label, unit, kind}`
     pub list: Value,
+    /// the computer's sensors, as ectomatter_sensors' Catalog lists them,
+    /// where it reads them (Null where it doesn't)
+    pub catalog: Value,
     pub values: serde_json::Map<String, Value>,
 }
 
@@ -105,6 +111,36 @@ impl Readings {
     /// What a plugin told, if it's running and has told any.
     pub fn of(&self, plugin: &str) -> Option<Told> {
         self.kept().told.get(plugin).cloned()
+    }
+
+    /// The first plugin (by its id) telling a reading of `kind`
+    /// ("outside-temperature", "sky"), and the reading's id: what the
+    /// frontend's own blocks of that kind show.
+    pub fn of_kind(&self, kind: &str) -> Option<(String, String)> {
+        let k = self.kept();
+        let mut plugins: Vec<&String> = k.told.keys().collect();
+        plugins.sort();
+        plugins.into_iter().find_map(|p| {
+            let r = k.told[p].list.as_array()?.iter().find(|r| r["kind"] == kind)?;
+            Some((p.clone(), r["id"].as_str()?.to_string()))
+        })
+    }
+
+    /// The first plugin (by its id) telling a catalog of the computer's
+    /// sensors: the one Settings' sensors and the screen's stats read.
+    pub fn with_catalog(&self) -> Option<String> {
+        let k = self.kept();
+        let mut plugins: Vec<&String> = k.told.iter().filter(|(_, t)| t.catalog.is_object()).map(|(p, _)| p).collect();
+        plugins.sort();
+        plugins.first().map(|p| p.to_string())
+    }
+
+    /// Every reading every plugin lists, each with its plugin's id, by plugin.
+    pub fn all(&self) -> Vec<(String, Value)> {
+        let k = self.kept();
+        let mut plugins: Vec<&String> = k.told.keys().collect();
+        plugins.sort();
+        plugins.into_iter().flat_map(|p| k.told[p].list.as_array().into_iter().flatten().map(move |r| (p.clone(), r.clone()))).collect()
     }
 
     /// One reading's latest value.
@@ -332,7 +368,7 @@ impl Hosted {
                         changed = true;
                     }
                     "readings/list" => {
-                        self.readings.with(p.package.id(), |t| t.list = params["readings"].clone());
+                        self.readings.with(p.package.id(), |t| (t.list, t.catalog) = (params["readings"].clone(), params["catalog"].clone()));
                         changed = true;
                     }
                     "readings/changed" => {
@@ -520,6 +556,26 @@ mod tests {
 
     fn plugin(id: &str) -> Hosted {
         hosted(Kind::Plugin, id)
+    }
+
+    /// docs/core-protocol.md, section 11, Readings: readings are found by what
+    /// they are, from any plugin: the outside temperature and the sky by
+    /// their kinds, and the computer's sensors from whichever plugin tells
+    /// a catalog of them, not from the Weather Feed and the Sensor Feed by name.
+    #[test]
+    fn readings_are_found_by_what_they_are_from_any_plugin() {
+        let r = Readings::default();
+        r.with("made-up-weather", |t| {
+            t.list = json!([{ "id": "t", "label": "Outdoors", "unit": "°C", "kind": "outside-temperature" }, { "id": "s", "label": "Sky", "kind": "sky" }, { "id": "uv", "label": "UV index" }]);
+            t.values.insert("t".into(), json!(12.5));
+        });
+        r.with("made-up-sensors", |t| t.catalog = json!({ "devices": [], "missing": [] }));
+        assert_eq!(r.of_kind("outside-temperature"), Some(("made-up-weather".to_string(), "t".to_string())));
+        assert_eq!(r.of_kind("sky"), Some(("made-up-weather".to_string(), "s".to_string())));
+        assert_eq!(r.of_kind("rain"), None);
+        assert_eq!(r.with_catalog().as_deref(), Some("made-up-sensors"));
+        assert_eq!(r.all().len(), 3, "every reading every plugin lists");
+        assert_eq!(r.value("made-up-weather", "t"), Some(json!(12.5)));
     }
 
     /// A copy of the Sensei 310's core under `id`, its manifest changed by `change`.
@@ -727,7 +783,7 @@ mod tests {
         let mut cat = ectomatter_sensors::list::Catalog::default();
         for _ in 0..200 {
             ps.poll();
-            if let Some(c) = r.of("sensor-feed").and_then(|t| serde_json::from_value::<ectomatter_sensors::list::Catalog>(t.list).ok()) {
+            if let Some(c) = r.of("sensor-feed").and_then(|t| serde_json::from_value::<ectomatter_sensors::list::Catalog>(t.catalog).ok()) {
                 cat = c;
                 break;
             }

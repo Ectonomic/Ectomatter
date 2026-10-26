@@ -83,10 +83,9 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 
 ## Stage 3: plugins on equal footing
 
-- Readings come from two plugins by id: `lcd_stats.rs:24` (`sensor-feed`),
-  `front.rs:10496` (`weather-feed`), `front.rs:6791-6794`. The two send
-  `readings/list` in different shapes (`plugins/weather-feed/module/src/lib.rs:204`,
-  `plugins/sensor-feed/module/src/lib.rs:90`).
+- A plugin reading's source says only "A plugin", not which (`lcd_page.rs`,
+  `Source::from`): the screen's registry of plugin readings keeps the
+  plugin's id as its name (`lcd_stats.rs`, `plugin_readings`).
 - The window's own thread still calls plugins for a page's sections, a
   game's changes and its start (`hosted.rs` `sections`, `changes`,
   `launch`), each waiting up to three seconds (`WINDOW_WAITS`), not off the
