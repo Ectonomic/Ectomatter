@@ -397,6 +397,102 @@ pub fn install(root: &Path) -> Result<bool, String> {
 
 // ---------------------------------------------------------------- recipes
 
+/// The programs a recipe may wrap a game in, each with the options it may
+/// be given, and whether each takes a value (`None`: none at all):
+/// gamescope's own size, rate, scaling, HDR and overlay options, ending
+/// with `--`; GameMode and MangoHud as they are.
+const WRAPPERS: [(&str, Option<&[(&str, bool)]>); 3] = [
+    (
+        "gamescope",
+        Some(&[
+            ("-W", true), ("-H", true), ("-w", true), ("-h", true), ("-r", true), ("-F", true), ("-S", true),
+            ("--hdr-itm-sdr-nits", true), ("--hdr-itm-target-nits", true),
+            ("-f", false), ("-b", false), ("--hdr-enabled", false), ("--hdr-itm-enabled", false), ("--mangoapp", false), ("--force-grab-cursor", false), ("--adaptive-sync", false),
+        ]),
+    ),
+    ("gamemoderun", None),
+    ("mangohud", None),
+];
+
+/// Whether a wrapper is one of WRAPPERS, given only the options it knows:
+/// each a known one, each value after an option that takes one (a plain
+/// number or word), and gamescope's `--` last, so nothing before the game is
+/// a program of its own.
+fn known_wrapper(w: &[&str]) -> bool {
+    match WRAPPERS.iter().find(|(n, _)| w.first() == Some(n)) {
+        Some((_, None)) => w.len() == 1,
+        Some((_, Some(opts))) => {
+            if w.last() != Some(&"--") {
+                return false;
+            }
+            let mut args = w[1..w.len() - 1].iter();
+            while let Some(a) = args.next() {
+                match opts.iter().find(|(o, _)| o == a) {
+                    Some((_, true)) => {
+                        if !args.next().is_some_and(|v| !v.is_empty() && v.chars().all(|c| c.is_ascii_alphanumeric() || c == '.')) {
+                            return false;
+                        }
+                    }
+                    Some((_, false)) => {}
+                    None => return false,
+                }
+            }
+            true
+        }
+        None => false,
+    }
+}
+
+/// The variables a recipe may set without the person having typed them:
+/// those of Proton, Wine, DXVK, VKD3D, SDL, MangoHud, gamescope and the
+/// graphics drivers, which tune a game and run nothing of their own.
+const VARIABLES: [&str; 12] = ["PROTON_", "WINE", "DXVK_", "VKD3D_", "SDL_", "MANGOHUD", "ENABLE_GAMESCOPE_WSI", "__GL_", "VK_", "RADV_", "MESA_", "PULSE_LATENCY_MSEC"];
+
+/// A plugin's recipe for how a game starts, as Ectomatter writes it for the
+/// launcher: only what Ectomatter knows to be safe to run (docs/
+/// core-protocol.md, section 11, A game's start). Each wrapper is one of
+/// WRAPPERS, by name, with the options it may take (gamescope's last is
+/// `--`, so nothing after is a program of its own); the Proton build and
+/// the runtime are ones Steam has (`facts`, `protons`, or the game's own
+/// runtime); a variable is one of VARIABLES', or one the person typed in the
+/// plugin's settings (`own`). What's left out, in words, for the log.
+pub fn checked_recipe(recipe: &Value, facts: &Value, own: &[String]) -> (Value, Vec<String>) {
+    let mut r = recipe.clone();
+    let mut out = Vec::new();
+    let wraps: Vec<Value> = recipe["wrap"].as_array().into_iter().flatten().filter(|w| {
+        let w: Vec<&str> = w.as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+        let fine = known_wrapper(&w);
+        if !fine {
+            out.push(format!("the wrapper {}", w.join(" ")));
+        }
+        fine
+    }).cloned().collect();
+    r["wrap"] = Value::Array(wraps);
+    let paths = |k: &str| -> Vec<String> { facts["protons"].as_array().into_iter().flatten().filter_map(|b| b[k].as_str().map(String::from)).collect() };
+    if let Some(p) = recipe["proton"].as_str().filter(|p| !paths("path").iter().any(|q| q == p)) {
+        out.push(format!("the Proton build {p}"));
+        r.as_object_mut().map(|o| o.remove("proton"));
+    }
+    let runtimes: Vec<String> = paths("runtime").into_iter().chain(facts["game"]["runtime"].as_str().map(String::from)).collect();
+    if let Some(p) = recipe["runtime"].as_str().filter(|p| !runtimes.iter().any(|q| q == p)) {
+        out.push(format!("the runtime {p}"));
+        r.as_object_mut().map(|o| o.remove("runtime"));
+    }
+    let may = |k: &str| VARIABLES.iter().any(|v| k.starts_with(v)) || own.iter().any(|o| o == k);
+    for key in ["env", "env_default", "env_append"] {
+        if let Some(o) = r.get_mut(key).and_then(Value::as_object_mut) {
+            o.retain(|k, _| {
+                let fine = may(k);
+                if !fine {
+                    out.push(format!("the variable {k}"));
+                }
+                fine
+            });
+        }
+    }
+    (r, out)
+}
+
 /// A game's recipe written where the launcher reads it (launch/<app>.json;
 /// "default" for Every game's), when it's changed.
 pub fn write_recipe(name: &str, recipe: &Value) -> Result<(), String> {
@@ -972,6 +1068,35 @@ pub fn from_game_helper(line: &str, keyboard: &str, mouse: Option<&str>) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// docs/core-protocol.md, section 11: a plugin's recipe runs only what
+    /// Ectomatter knows to be safe. The Game Configurator's own (gamescope with
+    /// its options, GameMode, MangoHud, a build Steam has, Proton's and DXVK's
+    /// variables, the person's own) is kept whole; a program to wrap the game
+    /// in that isn't one of those, a program slipped into gamescope's
+    /// options, a build or runtime Steam doesn't have, or a variable that
+    /// loads code is left out, and said.
+    #[test]
+    fn a_recipe_runs_only_what_ectomatter_knows() {
+        let facts = json!({ "protons": [{ "path": "/steam/compatibilitytools.d/GE-Proton10-1", "runtime": "/steam/steamapps/common/SteamLinuxRuntime_sniper" }] });
+        let good = json!({ "proton": "/steam/compatibilitytools.d/GE-Proton10-1", "runtime": "/steam/steamapps/common/SteamLinuxRuntime_sniper",
+            "wrap": [["gamescope", "-W", "3440", "-H", "1440", "-w", "2560", "-h", "1080", "-r", "165", "-f", "-F", "fsr", "--hdr-enabled", "--hdr-itm-enabled", "--hdr-itm-sdr-nits", "203", "--mangoapp", "--"], ["gamemoderun"], ["mangohud"]],
+            "env": { "PROTON_ENABLE_HDR": "1", "DXVK_HDR": "1", "WINEDLLOVERRIDES": "dwrite=n,b", "MY_MOD": "on" }, "env_default": { "PROTON_SONY_AUTO_XINPUT": "1" }, "args": ["-novid"] });
+        let (r, out) = checked_recipe(&good, &facts, &["MY_MOD".to_string()]);
+        assert_eq!((r, out), (good.clone(), Vec::<String>::new()), "kept whole");
+        let bad = json!({ "proton": "/tmp/evil",  "runtime": "/tmp/evil-runtime",
+            "wrap": [["sh", "-c", "evil"], ["gamescope", "evil", "--"], ["gamescope", "-W", "3440", "--", "evil"], ["gamescope", "-W", "$(evil)", "--"], ["gamemoderun", "evil"], ["mangohud"]],
+            "env": { "LD_PRELOAD": "/tmp/evil.so", "PROTON_LOG": "1" }, "env_append": { "PATH": "/tmp" } });
+        let (r, out) = checked_recipe(&bad, &facts, &[]);
+        assert_eq!(r["wrap"], json!([["mangohud"]]));
+        assert!(r.get("proton").is_none() && r.get("runtime").is_none(), "Steam's own builds only: the launcher picks one");
+        assert_eq!(r["env"], json!({ "PROTON_LOG": "1" }));
+        assert_eq!(r["env_append"], json!({}));
+        assert_eq!(out.len(), 9, "{out:?}");
+        // (the person's own variable, typed in the plugin's settings, is theirs to set)
+        let (r, _) = checked_recipe(&bad, &facts, &["LD_PRELOAD".to_string()]);
+        assert_eq!(r["env"]["LD_PRELOAD"], "/tmp/evil.so");
+    }
 
     fn moved(line: &str) -> Moved {
         from_game_helper(line, "2", Some("p65e5e7d567f370")).expect("a game-helper line")

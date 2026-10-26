@@ -94,9 +94,6 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 - A package stuck inside one of Ectomatter's own calls (a USB read, a web
   fetch) isn't stopped by its time until it's back in its own code; its
   caller stops waiting after a minute (`Limits::wait`).
-- The launch permission runs what the plugin hands it: `apps/ectomatter-launch`
-  accepts any program for `wrap` (`:122-127`, `:384-389`), any folder holding
-  a `proton` file (`:266-270`), and any environment (`:136-156`).
 - Updates don't ask again when a plugin wants more, and aren't checked against
   a checksum (`updates.rs`).
 

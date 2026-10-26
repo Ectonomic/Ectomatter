@@ -7115,7 +7115,15 @@ impl Front {
         let every_values = |plugin: &str| lib.plugin_values(crate::games::EVERY, plugin);
         let game = serde_json::json!({ "id": id, "name": name, "app": crate::games::steam_number(id).unwrap_or(0) });
         match self.hosted.launch(&game, &values, &every_values, &facts)? {
-            Ok(r) => Some(r),
+            Ok(r) => {
+                // (what the person typed in the plugin's settings: their own variables)
+                let own: Vec<String> = self.hosted.launcher().map(|p| [values(p), every_values(p)].iter().flat_map(|v| v.as_object().into_iter().flatten().filter_map(|(_, x)| x.as_object()).flat_map(|o| o.keys().cloned()).collect::<Vec<_>>()).collect()).unwrap_or_default();
+                let (r, left_out) = crate::launcher::checked_recipe(&r, &facts, &own);
+                if !left_out.is_empty() {
+                    eprintln!("ectomatter: how {} starts, left out as Ectomatter doesn't know them safe: {}", if every { "every game" } else { name.as_str() }, left_out.join(", "));
+                }
+                Some(r)
+            }
             Err(e) => {
                 eprintln!("ectomatter: how {} starts: {e}", if every { "every game" } else { name.as_str() });
                 None

@@ -846,6 +846,13 @@ mod tests {
         assert_eq!(r["proton"], "/s/compatibilitytools.d/Proton-GE Latest");
         assert_eq!(r["env"]["PROTON_ENABLE_HDR"], "1");
         assert_eq!(r["wrap"], json!([["gamemoderun"]]));
+        // (what it makes, gamescope and MangoHud and the person's own variables
+        // too, is all Ectomatter knows safe: written whole)
+        for values in [json!({ "hdr": "proton" }), json!({ "hdr": "gamescope", "gs": true, "mangohud": true, "cap": "120", "env": { "MY_MOD": "1" }, "dll": "dwrite=n,b" })] {
+            let r = ps.launch(&json!({ "id": "steam_app_1808500", "name": "ARC Raiders", "app": 1808500 }), &|_| values.clone(), &|_| json!({}), &facts).unwrap().unwrap();
+            let (checked, left_out) = crate::launcher::checked_recipe(&r, &facts, &["MY_MOD".to_string()]);
+            assert_eq!((&checked, left_out), (&r, Vec::<String>::new()), "{r}");
+        }
     }
 
     /// A game's choices become changes, in order, each a change of a monitor;
