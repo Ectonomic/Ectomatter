@@ -261,6 +261,8 @@ struct Run {
     next_id: u32,
     /// what the core has told unasked (device/added and the like), until read
     told: Told,
+    /// how much memory it may take
+    limits: wasmtime::StoreLimits,
 }
 
 /// A core's notices, as its thread keeps them and its handle reads them, and
@@ -268,6 +270,82 @@ struct Run {
 /// for its page to look.
 #[derive(Clone, Default)]
 struct Told(std::sync::Arc<std::sync::Mutex<Notices>>);
+
+impl Told {
+    /// A notice in the list, its waker woken: the core's own, or one of
+    /// Ectomatter's about the core (STOPPED, RESTARTED).
+    fn push(&self, method: &str, params: Value) {
+        let mut n = self.0.lock().unwrap_or_else(|p| p.into_inner());
+        n.list.push((method.to_string(), params));
+        if let Some(wake) = &n.wake {
+            wake();
+        }
+    }
+}
+
+/// Ectomatter's own notices among a core's, about the core itself: it
+/// stopped (crashed, ran out of its time or its memory), with `why` and
+/// when it starts again (`again`, in seconds); and it started again, met
+/// anew, so whoever talks to it sets up what it asked of it before.
+pub const STOPPED: &str = "ectomatter/stopped";
+pub const RESTARTED: &str = "ectomatter/restarted";
+
+/// How long and how large a package may run: each call into it, and each
+/// of its timers, for so long (then it's stopped and started again); its
+/// memory, so much; and how long a caller waits for an answer before it
+/// gives up on one (a package stuck in a call to Ectomatter itself, which
+/// its time can't stop).
+#[derive(Clone, Copy, Debug)]
+pub struct Limits {
+    pub call: Duration,
+    pub timer: Duration,
+    pub memory: usize,
+    pub wait: Duration,
+}
+
+impl Default for Limits {
+    fn default() -> Limits {
+        Limits { call: Duration::from_secs(30), timer: Duration::from_secs(10), memory: 256 << 20, wait: Duration::from_secs(60) }
+    }
+}
+
+/// How often the engine's clock ticks for every package's time (an epoch):
+/// a call past its time stops within one tick.
+const TICK: Duration = Duration::from_millis(50);
+
+/// The one engine every package runs on, its clock ticking on a thread of
+/// its own for as long as Ectomatter runs.
+fn engine() -> &'static Engine {
+    static ENGINE: std::sync::OnceLock<Engine> = std::sync::OnceLock::new();
+    ENGINE.get_or_init(|| {
+        let mut config = wasmtime::Config::new();
+        config.epoch_interruption(true);
+        let engine = Engine::new(&config).expect("the engine packages run on");
+        let ticks = engine.clone();
+        let _ = std::thread::Builder::new().name("package clock".into()).spawn(move || loop {
+            std::thread::sleep(TICK);
+            ticks.increment_epoch();
+        });
+        engine
+    })
+}
+
+/// When a package that stopped starts again, in words: "in a second", "in 4 seconds".
+pub fn again_in(secs: u64) -> String {
+    if secs == 1 { "in a second".into() } else { format!("in {secs} seconds") }
+}
+
+/// A span of time as the engine's ticks, at least one.
+fn ticks(d: Duration) -> u64 {
+    (d.as_millis() / TICK.as_millis()).max(1) as u64
+}
+
+/// How long a package that stopped waits before it's started again: a
+/// second the first time, twice as long each time after, up to a minute;
+/// back to a second once it has run five minutes since.
+fn again_after(stops: u32) -> Duration {
+    Duration::from_secs((1u64 << stops.min(6)).min(60))
+}
 
 #[derive(Default)]
 struct Notices {
@@ -465,12 +543,11 @@ impl ectomatter::core::host::Host for Run {
         if !method.starts_with("input/") {
             eprintln!("ectomatter: {} told {method}", self.id);
         }
-        let p = serde_json::from_str(&params).unwrap_or(Value::Null);
-        let mut n = self.told.0.lock().unwrap_or_else(|p| p.into_inner());
-        n.list.push((method, p));
-        if let Some(wake) = &n.wake {
-            wake();
+        // (a package can't speak for Ectomatter)
+        if method.starts_with("ectomatter/") {
+            return;
         }
+        self.told.push(&method, serde_json::from_str(&params).unwrap_or(Value::Null));
     }
     fn after(&mut self, ms: u32, tag: u32) {
         self.timers.retain(|&(_, t)| t != tag);
@@ -602,6 +679,8 @@ pub struct Core {
     pub id: String,
     ask: mpsc::Sender<Ask>,
     told: Told,
+    /// how long a call waits for its answer
+    wait: Duration,
 }
 
 impl Core {
@@ -617,6 +696,11 @@ impl Core {
     /// The same, the core also reaching the computer as its manifest's `uses`
     /// allows (its monitors, through `computer`).
     pub fn start_with(dir: &Path, data: PathBuf, usb: Box<dyn Usb>, computer: Option<std::sync::Arc<dyn Computer>>) -> Result<Core, String> {
+        Core::start_within(dir, data, usb, computer, Limits::default())
+    }
+
+    /// The same, within `limits`.
+    pub fn start_within(dir: &Path, data: PathBuf, usb: Box<dyn Usb>, computer: Option<std::sync::Arc<dyn Computer>>, limits: Limits) -> Result<Core, String> {
         let manifest = Manifest::read(dir)?;
         let id = manifest.id.clone();
         let (ask, asked) = mpsc::channel::<Ask>();
@@ -625,9 +709,9 @@ impl Core {
         let t = told.clone();
         std::thread::Builder::new()
             .name(name)
-            .spawn(move || run(manifest, data, usb, computer, asked, t))
+            .spawn(move || run(manifest, data, usb, computer, asked, t, limits))
             .map_err(|e| e.to_string())?;
-        Ok(Core { id, ask, told })
+        Ok(Core { id, ask, told, wait: limits.wait })
     }
 
     /// What the core has told since this was last asked, oldest first.
@@ -652,10 +736,20 @@ impl Core {
 
     /// Call `method` with `params`, and wait for the core's answer.
     pub fn call(&self, method: &str, params: &Value) -> Result<Value, String> {
+        self.call_within(method, params, self.wait)
+    }
+
+    /// A call, waiting no longer than `wait` for its answer: for a page that
+    /// can't wait on a package for long (the window's own thread).
+    pub fn call_within(&self, method: &str, params: &Value, wait: Duration) -> Result<Value, String> {
         let (tell, told) = mpsc::channel();
         let params = if params.is_null() { String::new() } else { params.to_string() };
         self.ask.send(Ask::Call(method.to_string(), params, tell)).map_err(|_| format!("the {} core has stopped", self.id))?;
-        let answer = told.recv().map_err(|_| format!("the {} core has stopped", self.id))??;
+        let answer = match told.recv_timeout(wait) {
+            Ok(a) => a?,
+            Err(mpsc::RecvTimeoutError::Timeout) => return Err(format!("the {} core didn’t answer {method} in {} seconds", self.id, wait.as_secs_f32())),
+            Err(mpsc::RecvTimeoutError::Disconnected) => return Err(format!("the {} core has stopped", self.id)),
+        };
         if answer.is_empty() {
             return Ok(Value::Null);
         }
@@ -669,42 +763,49 @@ struct Live {
     core: World,
 }
 
-fn make(engine: &Engine, component: &Component, m: &Manifest, data: &Path, usb: Box<dyn Usb>, computer: Option<std::sync::Arc<dyn Computer>>, asked: Inbox, told: Told) -> Result<Live, String> {
+fn make(engine: &Engine, component: &Component, m: &Manifest, data: &Path, usb: Box<dyn Usb>, computer: Option<std::sync::Arc<dyn Computer>>, asked: Inbox, told: Told, limits: Limits) -> Result<Live, String> {
     std::fs::create_dir_all(data).map_err(|e| format!("{}: {e}", data.display()))?;
     let wasi = WasiCtxBuilder::new()
         .inherit_stderr()
         .preopened_dir(data, "/data", FsPerms::ReadWrite)
         .map_err(|e| format!("{}: {e}", data.display()))?
         .build();
-    let run = Run { wasi, table: ResourceTable::new(), usb, matches: m.matches.clone(), uses: m.uses.clone(), computer, timers: Vec::new(), id: m.id.clone(), asked, held: VecDeque::new(), taken: Vec::new(), next_id: 0, told };
+    let memory = wasmtime::StoreLimitsBuilder::new().memory_size(limits.memory).trap_on_grow_failure(true).build();
+    let run = Run { wasi, table: ResourceTable::new(), usb, matches: m.matches.clone(), uses: m.uses.clone(), computer, timers: Vec::new(), id: m.id.clone(), asked, held: VecDeque::new(), taken: Vec::new(), next_id: 0, told, limits: memory };
     let mut linker = Linker::<Run>::new(engine);
     wasmtime_wasi::p2::add_to_linker_sync(&mut linker).map_err(|e| e.to_string())?;
     World::add_to_linker::<_, HasSelf<_>>(&mut linker, |r| r).map_err(|e| e.to_string())?;
     let mut store = Store::new(engine, run);
+    store.limiter(|r| &mut r.limits);
+    // (a call past its time traps, and the package is started again)
+    store.epoch_deadline_trap();
+    store.set_epoch_deadline(ticks(limits.call));
     let core = World::instantiate(&mut store, component, &linker).map_err(|e| format!("the {} core would not start: {e}", m.id))?;
     Ok(Live { store, core })
 }
 
-fn run(m: Manifest, data: PathBuf, usb: Box<dyn Usb>, computer: Option<std::sync::Arc<dyn Computer>>, asked: mpsc::Receiver<Ask>, told: Told) {
+fn run(m: Manifest, data: PathBuf, usb: Box<dyn Usb>, computer: Option<std::sync::Arc<dyn Computer>>, asked: mpsc::Receiver<Ask>, told: Told, limits: Limits) {
     let t0 = Instant::now();
-    let engine = Engine::default();
+    let engine = engine();
     let inbox: Inbox = std::sync::Arc::new(std::sync::Mutex::new(asked));
-    let made = Component::from_file(&engine, &m.module)
+    let word = crate::packages::Kind::of(&m.all).word();
+    let made = Component::from_file(engine, &m.module)
         .map_err(|e| format!("the {} core's module ({}) would not load: {e}", m.id, m.module.display()))
-        .and_then(|c| make(&engine, &c, &m, &data, usb, computer, inbox.clone(), told));
+        .and_then(|c| make(engine, &c, &m, &data, usb, computer, inbox.clone(), told.clone(), limits).map(|l| (c, l)));
     let asked = inbox;
-    eprintln!("ectomatter: the {} {} ({} {}) made ready in {} ms", m.id, crate::packages::Kind::of(&m.all).word(), m.name, m.version, t0.elapsed().as_millis());
-    let mut live = match made {
+    eprintln!("ectomatter: the {} {word} ({} {}) made ready in {} ms", m.id, m.name, m.version, t0.elapsed().as_millis());
+    let (component, mut live) = match made {
         Ok(l) => l,
         Err(e) => {
             eprintln!("ectomatter: {e}");
-            // every call hears why
-            while let Ok(Ask::Call(_, _, tell)) = asked.lock().unwrap_or_else(|p| p.into_inner()).recv() {
-                let _ = tell.send(Err(e.clone()));
-            }
+            answer_all(&asked, &e);
             return;
         }
     };
+    // (what it was met with, to meet it again as it starts again; and how
+    // often it stopped lately, for how long it waits)
+    let mut met: Option<String> = None;
+    let (mut stops, mut since) = (0u32, Instant::now());
     loop {
         // a call held from during the last, or the next to come in before
         // the next timer due, if any
@@ -727,23 +828,90 @@ fn run(m: Manifest, data: PathBuf, usb: Box<dyn Usb>, computer: Option<std::sync
                 }
             }
         };
+        let mut stopped: Option<String> = None;
         if let Some(Ask::Call(method, params, tell)) = a {
+            if method == "initialize" {
+                met = Some(params.clone());
+            }
             let t = Instant::now();
-            let r = live.core.call_call(&mut live.store, &method, &params).unwrap_or_else(|trap| Err(format!("the {} core failed: {trap}", m.id)));
+            live.store.set_epoch_deadline(ticks(limits.call));
+            let r = match live.core.call_call(&mut live.store, &method, &params) {
+                Ok(r) => r,
+                Err(trap) => {
+                    let why = why_stopped(&trap, limits.call);
+                    stopped = Some(why.clone());
+                    Err(format!("the {} {word} stopped on {method}: {why}", m.id))
+                }
+            };
             live.store.data_mut().unanswered();
             slow(&m, &method, t);
             let _ = tell.send(r);
         }
         let now = Instant::now();
-        while let Some(i) = live.store.data().timers.iter().position(|&(at, _)| at <= now) {
+        while stopped.is_none()
+            && let Some(i) = live.store.data().timers.iter().position(|&(at, _)| at <= now)
+        {
             let (_, tag) = live.store.data_mut().timers.remove(i);
             let t = Instant::now();
+            live.store.set_epoch_deadline(ticks(limits.timer));
             if let Err(trap) = live.core.call_timer(&mut live.store, tag) {
-                eprintln!("ectomatter: the {} {} failed on its timer: {trap}", m.id, crate::packages::Kind::of(&m.all).word());
+                stopped = Some(why_stopped(&trap, limits.timer));
             }
             live.store.data_mut().unanswered();
             slow(&m, &format!("timer {tag}"), t);
         }
+        // Stopped (crashed, or past its time or its memory): started again
+        // after a wait that grows each time it stops soon after the last,
+        // met again as it was, and whoever talks to it told both.
+        if let Some(why) = stopped {
+            if since.elapsed() > Duration::from_secs(300) {
+                stops = 0;
+            }
+            let wait = again_after(stops);
+            stops += 1;
+            eprintln!("ectomatter: the {} {word} stopped ({why}); starting it again in {} s", m.id, wait.as_secs());
+            told.push(STOPPED, serde_json::json!({ "why": why, "again": wait.as_secs() }));
+            std::thread::sleep(wait);
+            let mut old = live.store.into_data();
+            let held = std::mem::take(&mut old.held);
+            match make(engine, &component, &m, &data, old.usb, old.computer, old.asked, old.told, limits) {
+                Ok(l) => live = l,
+                Err(e) => {
+                    eprintln!("ectomatter: {e}");
+                    answer_all(&asked, &e);
+                    return;
+                }
+            }
+            live.store.data_mut().held = held;
+            if let Some(p) = &met {
+                live.store.set_epoch_deadline(ticks(limits.call));
+                if let Err(e) = live.core.call_call(&mut live.store, "initialize", p).map_err(|t| t.to_string()).and_then(|r| r) {
+                    eprintln!("ectomatter: the {} {word} wouldn’t start again: {e}", m.id);
+                }
+            }
+            since = Instant::now();
+            told.push(RESTARTED, Value::Null);
+        }
+    }
+}
+
+/// Every call that comes, answered with why the package can't take it.
+fn answer_all(asked: &Inbox, why: &str) {
+    while let Ok(Ask::Call(_, _, tell)) = asked.lock().unwrap_or_else(|p| p.into_inner()).recv() {
+        let _ = tell.send(Err(why.to_string()));
+    }
+}
+
+/// Why a package stopped, in words for the person: past its time, out of
+/// its memory, or crashed.
+fn why_stopped(trap: &wasmtime::Error, time: Duration) -> String {
+    let said = format!("{trap:?}");
+    if trap.downcast_ref::<wasmtime::Trap>() == Some(&wasmtime::Trap::Interrupt) {
+        format!("it ran past its {} seconds", time.as_secs())
+    } else if said.contains("forcing trap when growing memory") || said.contains("memory") && said.contains("grow") {
+        "it ran out of the memory it may take".into()
+    } else {
+        "it crashed".into()
     }
 }
 
@@ -762,6 +930,88 @@ pub(crate) mod tests {
 
     /// The core these tests check against a fake mouse: SteelSeries'.
     const SENSEI: &str = "steelseries-sensei-310";
+
+    /// The plugin made to misbehave (tests/packages/misbehaving), started
+    /// within short limits, met.
+    fn misbehaving(name: &str) -> (Core, PathBuf) {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/packages/misbehaving");
+        assert!(dir.join("core.wasm").exists(), "the misbehaving plugin isn't built: run tools/build-test-packages.sh");
+        let data = std::env::temp_dir().join(format!("ectomatter-misbehaving-{name}-{}", std::process::id()));
+        let limits = Limits { call: Duration::from_millis(400), timer: Duration::from_millis(400), memory: 64 << 20, wait: Duration::from_secs(10) };
+        let core = Core::start_within(&dir, data.clone(), Box::new(NoDevices), None, limits).unwrap();
+        initialize(&core, Value::Null).unwrap();
+        (core, data)
+    }
+
+    /// What the core tells, waited for until `method` comes (up to `secs`).
+    fn told_until(core: &Core, method: &str, secs: u64) -> Vec<(String, Value)> {
+        let (mut all, until) = (Vec::new(), Instant::now() + Duration::from_secs(secs));
+        while Instant::now() < until {
+            all.extend(core.told());
+            if all.iter().any(|(m, _)| m == method) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        all
+    }
+
+    /// docs/core-protocol.md, principle 1 and section 3: a package that runs
+    /// past its time is stopped, its caller told why, and started again a
+    /// second later, met as it was; the next time it stops soon after, it
+    /// waits two seconds. Ectomatter's other packages, and the window, never
+    /// wait on it longer than its time.
+    #[test]
+    fn a_package_past_its_time_is_stopped_and_started_again() {
+        let (core, data) = misbehaving("time");
+        assert_eq!(core.call("met", &Value::Null).unwrap(), 1);
+        let t = Instant::now();
+        let e = core.call("spin", &Value::Null).unwrap_err();
+        assert!(e.contains("ran past its 0 seconds") || e.contains("ran past"), "{e}");
+        assert!(t.elapsed() < Duration::from_secs(2), "stopped near its time, not left to spin: {:?}", t.elapsed());
+        let told = told_until(&core, RESTARTED, 5);
+        let stopped = told.iter().find(|(m, _)| m == STOPPED).expect("told it stopped");
+        assert_eq!(stopped.1["again"], 1);
+        assert!(told.iter().any(|(m, _)| m == RESTARTED), "told it started again");
+        assert_eq!(core.call("ping", &Value::Null).unwrap(), "pong");
+        assert_eq!(core.call("met", &Value::Null).unwrap(), 1, "met again as it was, once");
+        let _ = core.call("spin", &Value::Null);
+        let told = told_until(&core, RESTARTED, 6);
+        assert_eq!(told.iter().find(|(m, _)| m == STOPPED).unwrap().1["again"], 2, "longer the second time");
+        let _ = std::fs::remove_dir_all(data);
+    }
+
+    /// A package that takes more memory than it may, or crashes, is stopped
+    /// and started again the same way, and says which.
+    #[test]
+    fn a_package_out_of_memory_or_crashed_is_stopped_and_started_again() {
+        let (core, data) = misbehaving("memory");
+        let e = core.call("grow", &Value::Null).unwrap_err();
+        assert!(e.contains("ran out of the memory"), "{e}");
+        told_until(&core, RESTARTED, 5);
+        assert_eq!(core.call("ping", &Value::Null).unwrap(), "pong");
+        let e = core.call("crash", &Value::Null).unwrap_err();
+        assert!(e.contains("crashed"), "{e}");
+        told_until(&core, RESTARTED, 6);
+        assert_eq!(core.call("ping", &Value::Null).unwrap(), "pong");
+        let _ = std::fs::remove_dir_all(data);
+    }
+
+    /// A timer that runs past its time stops the package too; and a caller
+    /// that can't wait long hears so in its time, not the package's.
+    #[test]
+    fn a_timer_past_its_time_stops_it_and_a_caller_waits_no_longer_than_it_may() {
+        let (core, data) = misbehaving("timer");
+        core.call("spin-later", &Value::Null).unwrap();
+        let told = told_until(&core, STOPPED, 3);
+        assert!(told.iter().any(|(m, p)| m == STOPPED && p["why"].as_str().is_some_and(|w| w.contains("ran past"))), "{told:?}");
+        told_until(&core, RESTARTED, 5);
+        let t = Instant::now();
+        let e = core.call_within("slow", &serde_json::json!({ "loops": 2_000_000_000u64 }), Duration::from_millis(100)).unwrap_err();
+        assert!(e.contains("didn’t answer"), "{e}");
+        assert!(t.elapsed() < Duration::from_millis(400), "the caller waited only its own time");
+        let _ = std::fs::remove_dir_all(data);
+    }
     use std::collections::VecDeque;
     use std::io::Read;
     use std::sync::{Arc, Mutex};

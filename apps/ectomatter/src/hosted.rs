@@ -48,6 +48,11 @@ impl Drop for Run {
     }
 }
 
+/// How long the window's own thread waits on a package (a page's sections,
+/// a game's changes and its start, a package stopped): no plugin may hold
+/// the window longer, whatever its own time.
+const WINDOW_WAITS: Duration = Duration::from_secs(3);
+
 pub struct Hosted {
     pub cores: Vec<Run>,
     pub plugins: Vec<Run>,
@@ -59,6 +64,10 @@ pub struct Hosted {
     added: Vec<String>,
     /// the packages that wouldn't start, each with why, for Settings to say
     refused: std::collections::HashMap<String, String>,
+    /// the packages started again since last asked, after they stopped
+    restarted: Vec<String>,
+    /// how long and how large each package may run (core_host::Limits)
+    pub limits: crate::core_host::Limits,
     /// the USB devices a core is lent, through which it reaches those its
     /// manifest names and no others (core_host.rs): this computer's, but
     /// none offscreen or in a test
@@ -154,7 +163,7 @@ impl Hosted {
 
     /// Hosted with the USB devices a core is lent made by `usb`, a test's own.
     pub fn with_usb(computer: Arc<dyn Computer>, usb: Box<dyn Fn() -> Box<dyn Usb>>) -> Hosted {
-        Hosted { cores: Vec::new(), plugins: Vec::new(), computer, readings: Readings::default(), added: Vec::new(), refused: std::collections::HashMap::new(), usb }
+        Hosted { cores: Vec::new(), plugins: Vec::new(), computer, readings: Readings::default(), added: Vec::new(), refused: std::collections::HashMap::new(), restarted: Vec::new(), limits: Default::default(), usb }
     }
 
     /// The plugins' readings as they tell them, for whoever shows them.
@@ -234,7 +243,7 @@ impl Hosted {
         }
         // (a core reaches the devices its manifest names; a plugin, none)
         let usb: Box<dyn Usb> = if kind == Kind::Core { (self.usb)() } else { Box::new(NoDevices) };
-        match Core::start_with(&p.dir, data, usb, Some(self.computer.clone())) {
+        match Core::start_within(&p.dir, data, usb, Some(self.computer.clone()), self.limits) {
             Ok(core) => {
                 // (one that speaks another protocol, or won't start, is stopped, and Settings says why)
                 if let Err(e) = crate::core_host::initialize(&core, Value::Null) {
@@ -272,7 +281,7 @@ impl Hosted {
             if let Some(i) = list.iter().position(|x| x.package.id() == id) {
                 let p = list.remove(i);
                 self.readings.forget(id);
-                let _ = p.core.call("shutdown", &Value::Null);
+                let _ = p.core.call_within("shutdown", &Value::Null, WINDOW_WAITS);
             }
         }
     }
@@ -331,6 +340,21 @@ impl Hosted {
                             self.readings.with(p.package.id(), |t| t.values.extend(v.clone()));
                         }
                     }
+                    // (it stopped: Settings says so, its devices are gone until it's back;
+                    // started again, it's told again what it was told before)
+                    crate::core_host::STOPPED => {
+                        let why = params["why"].as_str().unwrap_or("it stopped");
+                        p.warning = Some(format!("It stopped: {why}. Ectomatter starts it again {}.", crate::core_host::again_in(params["again"].as_u64().unwrap_or(1))));
+                        p.devices.clear();
+                        p.described.clear();
+                        changed = true;
+                    }
+                    crate::core_host::RESTARTED => {
+                        p.warning = None;
+                        self.readings.told_again(p.package.id());
+                        self.restarted.push(p.package.id().to_string());
+                        changed = true;
+                    }
                     _ => {}
                 }
             }
@@ -363,7 +387,7 @@ impl Hosted {
             let section = match fresh {
                 Some(s) => s,
                 None => {
-                    let s = p.core.call("game/describe", &asked).map(|v| v["section"].clone()).unwrap_or_else(|e| json!({ "label": p.package.name(), "layout": [{ "note": e }] }));
+                    let s = p.core.call_within("game/describe", &asked, WINDOW_WAITS).map(|v| v["section"].clone()).unwrap_or_else(|e| json!({ "label": p.package.name(), "layout": [{ "note": e }] }));
                     p.described.retain(|(k, _, t)| *k != key && t.elapsed() < Duration::from_secs(3));
                     p.described.push((key, s.clone(), Instant::now()));
                     s
@@ -394,7 +418,7 @@ impl Hosted {
             }
             let uses = &p.package.manifest.uses;
             let asked = json!({ "game": { "id": game.id, "name": game.name, "kind": kind }, "values": values(p.package.id()) });
-            let answer = match p.core.call("game/changes", &asked) {
+            let answer = match p.core.call_within("game/changes", &asked, WINDOW_WAITS) {
                 Ok(a) => a,
                 Err(e) => {
                     eprintln!("ectomatter: the {} plugin’s changes for {}: {e}", p.package.id(), game.name);
@@ -428,7 +452,7 @@ impl Hosted {
     /// knows. None without such a plugin.
     pub fn launch(&self, game: &Value, values: &dyn Fn(&str) -> Value, every: &dyn Fn(&str) -> Value, facts: &Value) -> Option<Result<Value, String>> {
         let p = self.plugins.iter().find(|p| p.package.adds_to_games() && p.package.manifest.uses.launch)?;
-        Some(p.core.call("game/launch", &json!({ "game": game, "values": values(p.package.id()), "every": every(p.package.id()), "facts": facts })).map(|v| v["recipe"].clone()))
+        Some(p.core.call_within("game/launch", &json!({ "game": game, "values": values(p.package.id()), "every": every(p.package.id()), "facts": facts }), WINDOW_WAITS).map(|v| v["recipe"].clone()))
     }
 
     /// The devices the packages running here told (a plugin's, from the
@@ -436,6 +460,12 @@ impl Hosted {
     /// The devices told added since this was last asked, by plugin/device.
     pub fn take_added(&mut self) -> Vec<String> {
         std::mem::take(&mut self.added)
+    }
+
+    /// The packages started again since last asked, after they stopped: each
+    /// to be handed again what it was handed (its Settings values).
+    pub fn take_restarted(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.restarted)
     }
 
     pub fn devices(&self) -> Vec<(String, Value)> {
@@ -543,6 +573,34 @@ mod tests {
         ps.stop("made-up-other");
         let _ = std::fs::remove_dir_all(dir);
         let _ = std::fs::remove_dir_all(other);
+    }
+
+    /// docs/core-protocol.md, section 3: a plugin that stops is said to have
+    /// stopped, in Settings, until it's started again, and is then handed
+    /// again what it was handed before.
+    #[test]
+    fn a_plugin_that_stops_says_so_until_it_is_back() {
+        let mut ps = Hosted::new(Arc::new(Desk));
+        ps.limits = crate::core_host::Limits { call: Duration::from_millis(300), timer: Duration::from_millis(300), memory: 64 << 20, wait: Duration::from_secs(10) };
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/packages/misbehaving");
+        assert!(dir.join("core.wasm").exists(), "the misbehaving plugin isn't built: run tools/build-test-packages.sh");
+        ps.start(crate::packages::Package::read(&dir, true).unwrap());
+        let core = ps.core_of("misbehaving").expect("started");
+        assert!(core.call("crash", &Value::Null).is_err());
+        let until = Instant::now() + Duration::from_secs(3);
+        while ps.get("misbehaving").unwrap().warning.is_none() && Instant::now() < until {
+            ps.poll();
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(ps.get("misbehaving").unwrap().warning.as_deref(), Some("It stopped: it crashed. Ectomatter starts it again in a second."));
+        let until = Instant::now() + Duration::from_secs(5);
+        while ps.get("misbehaving").unwrap().warning.is_some() && Instant::now() < until {
+            ps.poll();
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(ps.get("misbehaving").unwrap().warning.is_none(), "back");
+        assert_eq!(ps.take_restarted(), ["misbehaving"], "to be handed its values again");
+        ps.stop("misbehaving");
     }
 
     /// docs/core-protocol.md, section 9: a package whose manifest says another

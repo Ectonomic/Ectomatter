@@ -87,11 +87,13 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   `front.rs:10496` (`weather-feed`), `front.rs:6791-6794`. The two send
   `readings/list` in different shapes (`plugins/weather-feed/module/src/lib.rs:204`,
   `plugins/sensor-feed/module/src/lib.rs:90`).
-- No time limit on any call (`core_host.rs:631-640`), no CPU or memory limit
-  (`core_host.rs:667`, `Engine::default()`). Calls that block the window:
-  `hosted.rs:227,312,343,377`, from `front.rs:6630,7078,7137`.
-- Nothing restarts a core or plugin that crashed (`core_host.rs:709`), though
-  `docs/core-protocol.md` section 3 says the app does.
+- The window's own thread still calls plugins for a page's sections, a
+  game's changes and its start (`hosted.rs` `sections`, `changes`,
+  `launch`), each waiting up to three seconds (`WINDOW_WAITS`), not off the
+  thread.
+- A package stuck inside one of Ectomatter's own calls (a USB read, a web
+  fetch) isn't stopped by its time until it's back in its own code; its
+  caller stops waiting after a minute (`Limits::wait`).
 - The launch permission runs what the plugin hands it: `apps/ectomatter-launch`
   accepts any program for `wrap` (`:122-127`, `:384-389`), any folder holding
   a `proton` file (`:266-270`), and any environment (`:136-156`).

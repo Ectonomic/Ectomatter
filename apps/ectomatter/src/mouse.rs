@@ -203,6 +203,19 @@ pub fn start(core: Core, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
                         let control = p["control"].as_str().unwrap_or_default().to_string();
                         let _ = tell.send(Heard::Input(control, method == "input/down"));
                     }
+                    // (its core stopped: the mouse is gone until it's back, and the page
+                    // says why; started again, it meets the mouse anew, and is asked to
+                    // hear every button again)
+                    crate::core_host::STOPPED => {
+                        present = false;
+                        let why = p["why"].as_str().unwrap_or("it stopped");
+                        let _ = tell.send(Heard::Failed(format!("The mouse’s core stopped: {why}. Ectomatter starts it again {}.", crate::core_host::again_in(p["again"].as_u64().unwrap_or(1)))));
+                    }
+                    crate::core_host::RESTARTED => {
+                        if let Err(e) = core.call("input/watch", &json!({ "device": device_id, "all": true })) {
+                            eprintln!("ectomatter: the mouse's buttons won't be heard: {e}");
+                        }
+                    }
                     _ => {}
                 }
             }

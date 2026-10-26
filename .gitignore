@@ -9,3 +9,6 @@ __pycache__/
 # each core's WebAssembly module, built by tools/build-cores.sh
 /cores/*/core.wasm
 /plugins/*/core.wasm
+# the test packages' modules, built by tools/build-test-packages.sh
+/apps/ectomatter/tests/packages/*/core.wasm
+/apps/ectomatter/tests/packages/*/module/target/

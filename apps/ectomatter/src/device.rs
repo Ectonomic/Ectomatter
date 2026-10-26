@@ -53,6 +53,10 @@ pub enum Heard {
     Input(Value, bool),
     /// what the keyboard's core says of it (`device/describe`), as it starts
     Described(Value),
+    /// its core stopped (why, and in how many seconds it starts again), and
+    /// started again
+    Stopped(String, u64),
+    Restarted,
     Done,
 }
 
@@ -118,6 +122,22 @@ pub fn start(z10: Result<crate::core_host::Core, String>, tell: Sender<Heard>, t
                         "device/removed" => there.store(false, std::sync::atomic::Ordering::Relaxed),
                         "input/down" | "input/up" => {
                             if told.send(Heard::Input(p, method == "input/down")).is_err() {
+                                return;
+                            }
+                        }
+                        // (its core stopped: the page says so; started again, it listens to
+                        // the keys again, and the page reads the keyboard anew)
+                        crate::core_host::STOPPED => {
+                            let why = p["why"].as_str().unwrap_or("it stopped").to_string();
+                            if told.send(Heard::Stopped(why, p["again"].as_u64().unwrap_or(1))).is_err() {
+                                return;
+                            }
+                        }
+                        crate::core_host::RESTARTED => {
+                            if let Err(e) = c.call("input/watch", &json!({ "all": true })) {
+                                eprintln!("ectomatter: the keyboard's keys won't be heard: {e}");
+                            }
+                            if told.send(Heard::Restarted).is_err() {
                                 return;
                             }
                         }

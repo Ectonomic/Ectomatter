@@ -1,0 +1,15 @@
+// A plugin made to misbehave, for the tests of how Ectomatter holds a package
+// that hangs, runs out of memory or crashes (core_host.rs). It ships with
+// nothing; tools/build-test-packages.sh builds its module beside this.
+{
+  "id": "misbehaving",
+  "kind": "plugin",
+  "name": "Misbehaving",
+  "version": "1.0.0",
+  "protocol": 4,
+  "ectomatter": "0.1.0",
+  "module": "core.wasm",
+  "license": "MIT",
+  "description": "A plugin that hangs, eats memory or crashes when asked to.",
+  "uses": []
+}

@@ -1535,6 +1535,15 @@ impl Front {
                 }
             }
             device::Heard::Done => return,
+            device::Heard::Stopped(why, again) => {
+                self.status(format!("The keyboard’s core stopped: {why}. Ectomatter starts it again {}.", crate::core_host::again_in(again)), 2);
+                return;
+            }
+            device::Heard::Restarted => {
+                self.status("The keyboard’s core started again.", 1);
+                self.ask_kb(device::Ask::State);
+                return;
+            }
             device::Heard::Input(p, down) => {
                 self.keyboard_input(&p, down);
                 return;
@@ -2255,6 +2264,10 @@ impl Front {
                         }
                     }
                     // (a device a plugin met again, OpenRGB's after its program restarted, put on its profile afresh)
+                    // (a plugin started again after it stopped, handed its values again)
+                    for id in self.hosted.take_restarted() {
+                        self.hand_values(Some(&id));
+                    }
                     let met = self.hosted.take_added();
                     if !met.is_empty() {
                         for k in &met {
