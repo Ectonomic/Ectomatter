@@ -6789,7 +6789,7 @@ impl Front {
     /// the sky in words.
     fn outside(&self) -> Option<(f64, String)> {
         let r = self.hosted.readings();
-        Some((r.value("weather", "temperature")?.as_f64()?, r.value("weather", "sky")?.as_str()?.to_string()))
+        Some((r.value(WEATHER_FEED, "temperature")?.as_f64()?, r.value(WEATHER_FEED, "sky")?.as_str()?.to_string()))
     }
 
     /// Add a core or Add a plugin, from Settings: its form.
@@ -10370,6 +10370,14 @@ pub fn sync_cells(model: &VecModel<Cell>, rows: Vec<Cell>) {
 mod tests {
     use super::*;
 
+    /// The screens' weather is read from the plugin Ectomatter ships for it, by the id its
+    /// manifest gives it (a rename once left the screens asking the old one).
+    #[test]
+    fn the_weather_is_read_from_the_weather_feed() {
+        let manifest = crate::packages::Package::read(&crate::packages::builtin_dir(crate::packages::Kind::Plugin).join(WEATHER_FEED), false).expect("the Weather Feed ships");
+        assert_eq!(manifest.id(), WEATHER_FEED);
+    }
+
     /// The keys' light glows up to Peak nits, but on a dimmer screen no
     /// higher than that screen's own peak; with the HDR interface off, or the
     /// slider at its left end, it keeps the design's brightness.
@@ -10481,6 +10489,10 @@ mod tests {
 
 /// a plugin's search's rows at most, before they scroll
 const PLUGIN_MENU_MOST: f32 = 320.0;
+
+/// the Weather Feed plugin's id, as its manifest names it (the screens' weather is its
+/// readings)
+const WEATHER_FEED: &str = "weather-feed";
 
 /// the playlist's chooser at its widest, and the field its playlist is renamed in; the
 /// onboard layout's at its widest; and the strip after the chooser at its least
