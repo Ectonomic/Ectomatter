@@ -140,7 +140,7 @@ mod tests {
     fn no_page_is_found_by_a_devices_name() {
         // (a page's kind, "keyboard" or "mouse", is the protocol's word for a
         // sort of device, not a device's name)
-        let names = ["\"z10\"", "\"sensei310\"", "\"sensei310-1\"", "\"evga-z10\"", "\"steelseries-sensei-310\"", "EVGA", "Z10", "Sensei", "SteelSeries"];
+        let names = ["\"z10\"", ".z10.", ".z10\"", "\"sensei310\"", ".sensei310", "\"sensei310-1\"", "\"evga-z10\"", "\"steelseries-sensei-310\"", "EVGA", "Z10", "Sensei", "SteelSeries"];
         let mut found = Vec::new();
         for f in rust_files() {
             // a saved name from before is read once and moved on (old_name.rs)

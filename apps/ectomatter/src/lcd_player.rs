@@ -873,7 +873,11 @@ impl Player {
                 Arc::new(move || {
                     let mut k = kept.lock().unwrap();
                     if k.0.as_ref().is_none_or(|(t, _)| t.elapsed() >= Duration::from_millis(990)) {
-                        k.0 = Some((Instant::now(), reader.lock().unwrap().read()));
+                        // (only the plugins' readings the pages playing show are asked for)
+                        let shows = crate::lcd_page::readings_shown(&page.lock().unwrap().0);
+                        let mut stats = reader.lock().unwrap();
+                        stats.showing(shows);
+                        k.0 = Some((Instant::now(), stats.read()));
                     }
                     let mut r = k.0.as_ref().unwrap().1.clone();
                     let p = page.lock().unwrap();

@@ -597,7 +597,14 @@ impl Run {
 /// the package answers with the version it speaks, which must be the same.
 /// `more` adds to what's said (a test's `backups`). What it answered, or why
 /// it wouldn't start, in words for the person.
+#[cfg(test)]
 pub fn initialize(core: &Core, more: Value) -> Result<Value, String> {
+    initialize_within(core, more, core.wait)
+}
+
+/// The same, waiting no longer than `wait` (its module made ready first):
+/// for a package started from the window's own thread.
+pub fn initialize_within(core: &Core, more: Value, wait: Duration) -> Result<Value, String> {
     let mut params = serde_json::json!({
         "protocol": ectomatter_protocol::PROTOCOL,
         "frontend": concat!("ectomatter ", env!("CARGO_PKG_VERSION")),
@@ -607,11 +614,30 @@ pub fn initialize(core: &Core, more: Value) -> Result<Value, String> {
     if let (Some(p), Value::Object(m)) = (params.as_object_mut(), more) {
         p.extend(m);
     }
-    let met = core.call("initialize", &params)?;
+    let met = core.call_within("initialize", &params, wait)?;
     match met["protocol"].as_u64() {
         Some(n) if n == ectomatter_protocol::PROTOCOL as u64 => Ok(met),
-        n => Err(format!("It speaks version {} of Ectomatter's core protocol, and this Ectomatter speaks {}.", n.map_or("(none said)".to_string(), |n| n.to_string()), ectomatter_protocol::PROTOCOL)),
+        n => Err(format!("It speaks version {} of Ectomatter’s core protocol, and this Ectomatter speaks {}.", n.map_or("(none said)".to_string(), |n| n.to_string()), ectomatter_protocol::PROTOCOL)),
     }
+}
+
+/// What a core says its devices are, started alone with no device and a
+/// folder of its own that's gone after: for a core that's off, whose
+/// devices' settings are still kept by the ids it gives them. Nothing, for
+/// a core that won't start or say within `wait`.
+pub fn described_alone(dir: &Path, wait: Duration) -> Value {
+    let name = dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let data = std::env::temp_dir().join(format!("ectomatter-described-{name}-{}", std::process::id()));
+    let d = match Core::start_within(dir, data.clone(), Box::new(NoDevices), None, Limits::default()) {
+        Ok(core) => {
+            let d = initialize_within(&core, Value::Null, wait).and_then(|_| core.call_within("device/describe", &Value::Null, wait)).unwrap_or(Value::Null);
+            let _ = core.call_within("shutdown", &Value::Null, wait);
+            d
+        }
+        Err(_) => Value::Null,
+    };
+    let _ = std::fs::remove_dir_all(data);
+    d
 }
 
 /// The USB devices a core is lent: this computer's, over hidapi; none in a
@@ -690,16 +716,11 @@ impl Core {
     /// Ectomatter starts its packages through Hosted.)
     #[cfg(test)]
     pub fn start(dir: &Path, data: PathBuf, usb: Box<dyn Usb>) -> Result<Core, String> {
-        Core::start_with(dir, data, usb, None)
+        Core::start_within(dir, data, usb, None, Limits::default())
     }
 
     /// The same, the core also reaching the computer as its manifest's `uses`
-    /// allows (its monitors, through `computer`).
-    pub fn start_with(dir: &Path, data: PathBuf, usb: Box<dyn Usb>, computer: Option<std::sync::Arc<dyn Computer>>) -> Result<Core, String> {
-        Core::start_within(dir, data, usb, computer, Limits::default())
-    }
-
-    /// The same, within `limits`.
+    /// allows (its monitors, through `computer`), within `limits`.
     pub fn start_within(dir: &Path, data: PathBuf, usb: Box<dyn Usb>, computer: Option<std::sync::Arc<dyn Computer>>, limits: Limits) -> Result<Core, String> {
         let manifest = Manifest::read(dir)?;
         let id = manifest.id.clone();
@@ -941,6 +962,20 @@ pub(crate) mod tests {
         let core = Core::start_within(&dir, data.clone(), Box::new(NoDevices), None, limits).unwrap();
         initialize(&core, Value::Null).unwrap();
         (core, data)
+    }
+
+    /// docs/core-protocol.md, section 3: a package can't speak for
+    /// Ectomatter. Its own notices named ectomatter/… (as if it had been
+    /// stopped or started again) never reach the page; its others do.
+    #[test]
+    fn a_package_cant_say_it_was_stopped_or_started_again() {
+        let (core, data) = misbehaving("spoof");
+        core.call("spoof", &Value::Null).unwrap();
+        let told = told_until(&core, "spoofed", 5);
+        assert!(told.iter().any(|(m, _)| m == "spoofed"), "{told:?}");
+        assert!(told.iter().all(|(m, _)| !m.starts_with("ectomatter/")), "{told:?}");
+        let _ = core.call("shutdown", &Value::Null);
+        let _ = std::fs::remove_dir_all(data);
     }
 
     /// What the core tells, waited for until `method` comes (up to `secs`).

@@ -3,7 +3,7 @@
 //! One JSON file in the app's configuration folder, read once at start and
 //! written whole each time something changes, by way of a temporary file so a
 //! crash mid-write never leaves half a file. The screens read it all and set
-//! one value at a time by its path, such as `devices.z10.control`.
+//! one value at a time by its path, such as `cores.evga-z10.on`.
 
 use std::path::PathBuf;
 use std::sync::Mutex;

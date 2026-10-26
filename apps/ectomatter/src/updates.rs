@@ -73,8 +73,10 @@ pub fn runs_here(m: &Value) -> Result<(), String> {
 }
 
 /// A repository's latest release put in place (its package downloaded and
-/// unpacked into `into`): its manifest.
-pub fn install_latest(repo: &str, id: &str, into: &Path) -> Result<crate::core_host::Manifest, String> {
+/// unpacked into `into`): its manifest. Only the package `expected` says,
+/// the manifest that was checked or shown to the person: the same package
+/// and version, reaching nothing more than it says.
+pub fn install_latest(repo: &str, id: &str, expected: &Value, into: &Path) -> Result<crate::core_host::Manifest, String> {
     let bytes = latest(repo, &format!("{id}.ectocore"))?;
     // (only the package its release says it is: its SHA-256, as the release gives it)
     let sum = latest(repo, &format!("{id}.ectocore.sha256")).map_err(|_| format!("its release gives no checksum ({id}.ectocore.sha256), so Ectomatter can’t tell the package is whole"))?;
@@ -84,7 +86,7 @@ pub fn install_latest(repo: &str, id: &str, into: &Path) -> Result<crate::core_h
     }
     let tmp = std::env::temp_dir().join(format!("ectomatter-{id}-{}.ectocore", std::process::id()));
     std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
-    let m = packages::install_file(&tmp, into);
+    let m = packages::manifest_in_file(&tmp).and_then(|inside| as_expected(&inside, expected)).and_then(|_| packages::install_file(&tmp, into));
     let _ = std::fs::remove_file(&tmp);
     let m = m?;
     if m.id != id {
@@ -93,6 +95,24 @@ pub fn install_latest(repo: &str, id: &str, into: &Path) -> Result<crate::core_h
     // (where it came from, for its updates, whether or not its manifest says)
     let _ = std::fs::write(into.join(id).join("source.json"), json!({ "repository": repo }).to_string());
     Ok(m)
+}
+
+/// Whether the manifest inside a package is the one that was checked or
+/// shown: the same id and version, reaching nothing the other doesn't.
+fn as_expected(inside: &Value, expected: &Value) -> Result<(), String> {
+    if inside["id"] != expected["id"] || inside["version"] != expected["version"] {
+        return Err(format!(
+            "its package is {} {}, not the {} {} its release describes",
+            inside["id"].as_str().unwrap_or("?"),
+            inside["version"].as_str().unwrap_or("?"),
+            expected["id"].as_str().unwrap_or("?"),
+            expected["version"].as_str().unwrap_or("?")
+        ));
+    }
+    if !more_than(inside, expected).is_empty() {
+        return Err("its package can do more on the computer than its release describes".into());
+    }
+    Ok(())
 }
 
 /// A file's SHA-256, in hex.
@@ -252,7 +272,7 @@ pub fn check(p: &Package, repo: &str, into: &Path) -> Status {
     if !more.is_empty() {
         return Status::Asks(v.to_string(), more);
     }
-    match install_latest(repo, p.id(), into) {
+    match install_latest(repo, p.id(), &m, into) {
         Ok(m) => Status::Updated(m.version),
         Err(e) => Status::Failed(e),
     }
@@ -381,6 +401,16 @@ pub mod tests {
         unsafe { std::env::set_var("ECTOMATTER_GITHUB", &at) };
         assert!(matches!(check(&p, "test/monitor-switcher", &into), Status::Failed(why) if why.contains("gives no checksum")));
         assert!(!into.join("monitor-switcher").exists(), "nothing put in place");
+        // (a whole package whose own manifest isn't the one its release
+        // describes: another version, or reaching more)
+        let (described, _) = package_of("1.0.2");
+        for (inside, why) in [(package_of("1.0.3").1, "not the monitor-switcher 1.0.2"), (package_using("1.0.2", "[\"monitors\", { \"web\": \"example.com\", \"to\": \"Example\" }]").1, "can do more on the computer")] {
+            let sum = format!("{}  monitor-switcher.ectocore", sha256(&inside)).into_bytes();
+            let at = fake_github(vec![(format!("{base}/core.json"), described.clone()), (format!("{base}/monitor-switcher.ectocore"), inside), (format!("{base}/monitor-switcher.ectocore.sha256"), sum)]);
+            unsafe { std::env::set_var("ECTOMATTER_GITHUB", &at) };
+            assert!(matches!(check(&p, "test/monitor-switcher", &into), Status::Failed(w) if w.contains(why)), "{why}");
+            assert!(!into.join("monitor-switcher").exists(), "nothing put in place");
+        }
         let _ = std::fs::remove_dir_all(&into);
         unsafe { std::env::remove_var("ECTOMATTER_GITHUB") };
     }

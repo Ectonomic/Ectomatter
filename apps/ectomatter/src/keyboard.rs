@@ -509,7 +509,7 @@ impl Page {
             Action::Profile(Jump::Previous) => "Previous profile".into(),
             Action::Off => "Disabled".into(),
             Action::Sensitivity => "Next sensitivity".into(),
-            Action::Host(n) => format!("Ectomatter's job {n}"),
+            Action::Host(n) => format!("Ectomatter’s job {n}"),
             Action::Raw(b) => format!("Keyboard code {}", b.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(" ")),
         }
     }

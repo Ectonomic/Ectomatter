@@ -54,20 +54,23 @@ pub struct Stats {
     listed: Option<(Instant, Catalog)>,
     /// the choices read by, where they aren't Ectomatter's own (a test's)
     pub setup: Option<crate::sensors::Setup>,
+    /// the plugins' readings shown, by number, the only ones asked to be
+    /// read (see showing); None, every one listed
+    shows: Option<std::collections::BTreeSet<u16>>,
 }
 
 impl Stats {
     /// The readings the Sensor Feed tells, for `who` (the screen, a page),
     /// which asks it to watch what it shows.
     pub fn of(readings: crate::hosted::Readings, who: &'static str) -> Stats {
-        Stats { from: From::Plugin(readings, who), listed: None, setup: None }
+        Stats { from: From::Plugin(readings, who), listed: None, setup: None, shows: None }
     }
 
     /// A made-up computer under `root`, its NVIDIA cards as `nv` says, read here.
     #[cfg(test)]
     pub fn new(root: impl Into<PathBuf>, nv: Box<dyn Nvidia>) -> Stats {
         let root = root.into();
-        Stats { from: From::Here(root.clone(), ectomatter_sensors::read::Reader::new(root, nv)), listed: None, setup: None }
+        Stats { from: From::Here(root.clone(), ectomatter_sensors::read::Reader::new(root, nv)), listed: None, setup: None, shows: None }
     }
 
     /// The computer's sensors as last listed (again when half a minute old):
@@ -114,13 +117,19 @@ impl Stats {
         self.values(&all.iter().collect::<Vec<_>>())
     }
 
-    /// Nothing read for this one any longer (a page left).
+    /// Nothing read for this one any longer (a page left), from any plugin.
     pub fn rest(&mut self) {
-        if let From::Plugin(r, who) = &self.from
-            && let Some(plugin) = r.with_catalog()
-        {
-            r.want(&plugin, who, Vec::new());
+        match &self.from {
+            From::Plugin(r, who) => r.rest(who),
+            #[cfg(test)]
+            From::Here(..) => {}
         }
+    }
+
+    /// Only these of the plugins' readings asked to be read from now on (by
+    /// number): those the screen's pages show.
+    pub fn showing(&mut self, shows: std::collections::BTreeSet<u16>) {
+        self.shows = Some(shows);
     }
 
     /// Everything the computer reads now, for a page (the time, the profile and the
@@ -152,10 +161,15 @@ impl Stats {
     }
 
     /// Every reading the plugins list (but the sensors' catalog), each as it
-    /// last told it, by the number a layout knows it by; each asked to be
-    /// read for this one from now on.
+    /// last told it, by the number a layout knows it by; each shown (see
+    /// showing) asked to be read for this one from now on, apart from what
+    /// it asks of the sensors' catalog.
     fn plugin_readings(&mut self) -> std::collections::HashMap<u16, serde_json::Value> {
-        let From::Plugin(r, who) = &self.from else { return Default::default() };
+        let (r, who) = match &self.from {
+            From::Plugin(r, who) => (r, format!("{who}/readings")),
+            #[cfg(test)]
+            From::Here(..) => return Default::default(),
+        };
         let mut out = std::collections::HashMap::new();
         let mut by: std::collections::BTreeMap<String, Vec<String>> = Default::default();
         for (plugin, listed) in r.all() {
@@ -166,13 +180,17 @@ impl Stats {
             }
             let word = |k: &str| listed[k].as_str().unwrap_or("").to_string();
             let n = crate::lcd_page::reading_listed(crate::lcd_page::PluginReading { plugin: plugin.clone(), plugin_name: plugin.clone(), id: id.into(), label: listed["label"].as_str().unwrap_or(id).into(), unit: word("unit") });
-            by.entry(plugin.clone()).or_default().push(id.to_string());
+            let wanted = by.entry(plugin.clone()).or_default();
+            if self.shows.as_ref().is_some_and(|s| !s.contains(&n)) {
+                continue;
+            }
+            wanted.push(id.to_string());
             if let Some(v) = r.value(&plugin, id).filter(|v| !v.is_null()) {
                 out.insert(n, v);
             }
         }
         for (plugin, ids) in by {
-            r.want(&plugin, who, ids);
+            r.want(&plugin, &who, ids);
         }
         out
     }

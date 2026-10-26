@@ -1,6 +1,6 @@
-//! The packages Ectomatter runs itself (packages.rs), each started as a core
-//! is (core_host.rs) while it's on, and kept in two lists, as Settings keeps
-//! them: the cores that have no page of their own, and the plugins. A plugin
+//! The packages Ectomatter runs (packages.rs), each started as a core is
+//! (core_host.rs) while it's on, and kept in two lists, as Settings keeps
+//! them: the cores and the plugins. A plugin
 //! describes its section of a game's page in the shared settings language
 //! (game/describe), and says what a game's choices change as the game starts
 //! (game/changes); Ectomatter draws the one and makes the other (putback.rs).
@@ -8,8 +8,9 @@
 //! does: it tells its devices as a core does, each with its profiles, for
 //! the Library's Devices.
 //!
-//! The keyboard's and the mouse's cores are started where their pages are
-//! (main.rs); this is for the rest.
+//! Every core is started here, one that drives a device with a page of its
+//! own (a keyboard, a mouse) too: the page is handed its core (drive), and
+//! hears it from then on.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -53,6 +54,11 @@ impl Drop for Run {
 /// the window longer, whatever its own time.
 const WINDOW_WAITS: Duration = Duration::from_secs(3);
 
+/// How long a package being started may take to be made ready and meet
+/// Ectomatter: the window waits on it, as a package is turned on in
+/// Settings.
+const START_WAITS: Duration = Duration::from_secs(10);
+
 pub struct Hosted {
     pub cores: Vec<Run>,
     pub plugins: Vec<Run>,
@@ -88,7 +94,7 @@ pub struct Readings(Arc<std::sync::Mutex<Kept>>);
 struct Kept {
     told: std::collections::HashMap<String, Told>,
     /// by plugin, by who shows them: the readings wanted
-    wants: std::collections::HashMap<String, std::collections::HashMap<&'static str, Vec<String>>>,
+    wants: std::collections::HashMap<String, std::collections::HashMap<String, Vec<String>>>,
     /// the plugins whose watch has changed since it was last told
     changed: std::collections::BTreeSet<String>,
 }
@@ -150,14 +156,30 @@ impl Readings {
 
     /// The readings `who` wants read from now on (none: it has stopped
     /// showing them); the plugin is told all that's wanted of it as it changes.
-    pub fn want(&self, plugin: &str, who: &'static str, mut ids: Vec<String>) {
+    pub fn want(&self, plugin: &str, who: &str, mut ids: Vec<String>) {
         ids.sort();
         ids.dedup();
         let mut k = self.kept();
-        let had = k.wants.entry(plugin.to_string()).or_default().insert(who, ids.clone());
+        let had = k.wants.entry(plugin.to_string()).or_default().insert(who.to_string(), ids.clone());
         if had.unwrap_or_default() != ids {
             k.changed.insert(plugin.to_string());
         }
+    }
+
+    /// Nothing read for `who` any longer, from any plugin (nor for what it
+    /// asks as "<who>/…"): it has stopped showing readings.
+    pub fn rest(&self, who: &str) {
+        let mut k = self.kept();
+        let mine = |w: &String| w == who || w.strip_prefix(who).is_some_and(|r| r.starts_with('/'));
+        let mut changed = Vec::new();
+        for (plugin, wants) in k.wants.iter_mut() {
+            let before = wants.len();
+            wants.retain(|w, ids| !mine(w) || ids.is_empty());
+            if wants.len() != before {
+                changed.push(plugin.clone());
+            }
+        }
+        k.changed.extend(changed);
     }
 
     /// Each plugin whose watch changed, with all that's wanted of it now.
@@ -272,7 +294,7 @@ impl Hosted {
         // (a manifest saying another version of the protocol is never started)
         let speaks = p.manifest.all["protocol"].as_u64();
         if speaks != Some(ectomatter_protocol::PROTOCOL as u64) {
-            let e = format!("It speaks version {} of Ectomatter's core protocol, and this Ectomatter speaks {}.", speaks.map_or("(none said)".to_string(), |n| n.to_string()), ectomatter_protocol::PROTOCOL);
+            let e = format!("It speaks version {} of Ectomatter’s core protocol, and this Ectomatter speaks {}.", speaks.map_or("(none said)".to_string(), |n| n.to_string()), ectomatter_protocol::PROTOCOL);
             eprintln!("ectomatter: the {} {} wouldn’t start: {e}", p.id(), kind.word());
             self.refused.insert(p.id().to_string(), e);
             return;
@@ -282,9 +304,9 @@ impl Hosted {
         match Core::start_within(&p.dir, data, usb, Some(self.computer.clone()), self.limits) {
             Ok(core) => {
                 // (one that speaks another protocol, or won't start, is stopped, and Settings says why)
-                if let Err(e) = crate::core_host::initialize(&core, Value::Null) {
+                if let Err(e) = crate::core_host::initialize_within(&core, Value::Null, START_WAITS) {
                     eprintln!("ectomatter: the {} {} wouldn’t start: {e}", p.id(), kind.word());
-                    let _ = core.call("shutdown", &Value::Null);
+                    core.tell("shutdown", &Value::Null);
                     self.refused.insert(p.id().to_string(), e);
                     if let Some(d) = scratch {
                         let _ = std::fs::remove_dir_all(d);
@@ -293,7 +315,7 @@ impl Hosted {
                 }
                 eprintln!("ectomatter: the {} {} started", p.id(), kind.word());
                 // (what a core's devices are, before any is met: a core that can't say, nothing)
-                let describes = if kind == Kind::Core { core.call("device/describe", &Value::Null).unwrap_or(Value::Null) } else { Value::Null };
+                let describes = if kind == Kind::Core { core.call_within("device/describe", &Value::Null, WINDOW_WAITS).unwrap_or(Value::Null) } else { Value::Null };
                 self.readings.told_again(p.id());
                 let run = Run { package: p, core, warning: None, devices: Vec::new(), describes, driven: false, described: Vec::new(), section: None, scratch };
                 match kind {
@@ -558,6 +580,26 @@ mod tests {
         hosted(Kind::Plugin, id)
     }
 
+    /// The keyboard's screen asks a plugin to read only the readings its
+    /// pages show (apart from what it asks of the sensors' catalog), and
+    /// once it rests, asks nothing of any plugin.
+    #[test]
+    fn the_screen_asks_only_for_what_it_shows_and_rests_from_every_plugin() {
+        let r = Readings::default();
+        r.with("made-up-sensors", |t| t.catalog = json!({ "devices": [] }));
+        r.with("made-up-stocks", |t| t.list = json!([{ "id": "acme", "label": "ACME shares", "unit": "$" }, { "id": "room", "label": "Room", "unit": "°C" }]));
+        let mut s = crate::lcd_stats::Stats::of(r.clone(), "screen");
+        let acme = crate::lcd_page::reading_number("made-up-stocks", "acme");
+        s.showing([acme].into());
+        let _ = s.read();
+        let w: std::collections::HashMap<String, Vec<String>> = r.watches().into_iter().collect();
+        assert_eq!(w.get("made-up-stocks").map(Vec::as_slice), Some(&["acme".to_string()][..]), "{w:?}");
+        s.rest();
+        let w = r.watches();
+        assert!(w.iter().any(|(p, _)| p == "made-up-stocks"), "{w:?}");
+        assert!(w.iter().all(|(_, ids)| ids.is_empty()), "{w:?}");
+    }
+
     /// docs/core-protocol.md, section 11, Readings: readings are found by what
     /// they are, from any plugin: the outside temperature and the sky by
     /// their kinds, and the computer's sensors from whichever plugin tells
@@ -676,7 +718,7 @@ mod tests {
         let mut ps = Hosted::new(Arc::new(Desk));
         ps.start(crate::packages::Package::read(&dir, true).unwrap());
         assert!(ps.get("monitor-switcher").is_none(), "not started");
-        assert_eq!(ps.refused("monitor-switcher"), Some("It speaks version 3 of Ectomatter's core protocol, and this Ectomatter speaks 4."));
+        assert_eq!(ps.refused("monitor-switcher"), Some("It speaks version 3 of Ectomatter’s core protocol, and this Ectomatter speaks 4."));
         std::fs::write(dir.join("core.json"), manifest).unwrap();
         ps.start(crate::packages::Package::read(&dir, true).unwrap());
         assert!(ps.get("monitor-switcher").is_some() && ps.refused("monitor-switcher").is_none(), "started, saying this one");

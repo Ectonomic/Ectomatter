@@ -28,8 +28,7 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   `control_117`/`control_118` in `overlays.rs`), its screen's built-in apps
   (`display.rs:13`), its screen's own status screen, four rows as its firmware
   draws them (`lcd_page.rs`, `status_rows`), and the Z10's own setting ids
-  (`device.rs`: `dimmer`, `modes`, `displays/light`, `displays/apps`). The
-  page's module is still named for it (`z10.rs`, `z10::Page`).
+  (`device.rs`: `dimmer`, `modes`, `displays/light`, `displays/apps`).
 - A key's box on the page is given in the description (`box`, EVGA's own
   editor's), not found from its piece in the art.
 - The layouts Ectomatter ships are laid out on the Z10's 20 by 4
@@ -52,6 +51,9 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 - The boundary check `the_screen_is_the_size_its_core_describes` looks for
   the old spellings of 20 by 4 (`const COLS`, `; 20]`, `take(20)`), not every
   way a size could be typed again.
+- The boundary check `every_core_starts_the_same_way` looks only for a
+  second `Hidapi::new()` outside `core_host.rs`, not every way a device
+  could be opened again.
 - A saved layout with blocks beyond the screen (hand-edited or imported) now
   keeps them where they were saved and draws them cut at the screen's edges;
   before, it moved them onto the screen. The editor can't make one.
@@ -74,9 +76,15 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   how the app ended now.
 - The mouse lab's offscreen snapshot needs the keyboard's core: its readout
   is the keyboard's board's (`main.rs`, `snap_lab`).
-- The Z10's core sends only its name in `device/added`; the app reads
-  `device.json` from disk (`cores.rs:25`) though the core's describe names it
-  (`cores/evga-z10/module/src/lib.rs:379`).
+- The Z10's core sends only its name in `device/added`; the app reads the
+  description its manifest names (`deviceFile`) from the core's folder
+  (`cores.rs`, `Core::load`), not from what the core tells.
+- A core that's off is started alone for a moment as Ectomatter starts, with
+  no device, to say its device's id (`main.rs`, `devices_described`), up to
+  ten seconds each; its device's settings, jobs and Library choices are kept
+  by that id. With no keyboard core at all, the keyboard's settings path has
+  no id in it (`cores::keyboard_setting`, "devices..screen.pages"); nothing
+  writes it, there being no screen page.
 - Cores can't leave this repository: they depend on it by path
   (`cores/evga-z10/module/Cargo.toml:16,18`), and their built modules exist
   only after `tools/build-cores.sh` runs here.
@@ -88,11 +96,29 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   plugin's id as its name (`lcd_stats.rs`, `plugin_readings`).
 - The window's own thread still calls plugins for a page's sections, a
   game's changes and its start (`hosted.rs` `sections`, `changes`,
-  `launch`), each waiting up to three seconds (`WINDOW_WAITS`), not off the
-  thread.
+  `launch`), each waiting up to three seconds (`WINDOW_WAITS`), and starts a
+  package turned on or added, waiting up to ten for it to be made ready and
+  met (`START_WAITS`) and three for a core to describe its devices; none of
+  it is off the thread.
 - A package stuck inside one of Ectomatter's own calls (a USB read, a web
   fetch) isn't stopped by its time until it's back in its own code; its
   caller stops waiting after a minute (`Limits::wait`).
+- Review looks up the latest release again: what it shows (and what Add
+  then puts in place, held to the manifest shown) can be a newer version
+  than the one the row said was waiting (`front.rs`, `Ctl::PackageReview`).
+- A game's start may set only the variables Ectomatter names
+  (`launcher.rs`, `VARIABLES`), each with what its value may be written with;
+  a plugin needing another waits for Ectomatter to name it. MangoHud's
+  options are checked against a list of the ones that run, read or write
+  something (`plain_as`, `Overlay`), not against the options it has; the
+  person's own variables against a list of names that load code.
+- Past 65,535 different plugin readings in one run, a block's reading has
+  no number (`lcd_page.rs`, `NO_READING`): it shows nothing, and the layout
+  saved after loses which reading it was.
+- Ectomatter's other pages (Settings' Sensor Feed box, the screen editor)
+  ask a plugin for every reading it lists while they're open; only the
+  keyboard's screen asks for just those its pages show (`lcd_stats.rs`,
+  `showing`).
 - Review opens the whole list of what the newer version can do, not only
   what's new (`front.rs`, `Ctl::PackageReview`); the Review link was checked
   by a test of the row (`ecto_settings.rs`), not seen in a render (an

@@ -128,6 +128,8 @@ pub fn start(z10: Result<crate::core_host::Core, String>, tell: Sender<Heard>, t
                         // (its core stopped: the page says so; started again, it listens to
                         // the keys again, and the page reads the keyboard anew)
                         crate::core_host::STOPPED => {
+                            // (gone with it, till the core started again finds it)
+                            there.store(false, std::sync::atomic::Ordering::Relaxed);
                             let why = p["why"].as_str().unwrap_or("it stopped").to_string();
                             if told.send(Heard::Stopped(why, p["again"].as_u64().unwrap_or(1))).is_err() {
                                 return;

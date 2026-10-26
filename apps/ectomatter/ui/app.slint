@@ -4085,7 +4085,7 @@ export component AppWindow inherits Window {
                                 x: Part.glyph + Part.glyph-gap;
                                 width: parent.width - self.x;
                                 height: parent.height;
-                                text: "Onboard layouts need Ectomatter’s firmware on the keyboard. Until then, the keyboard shows " + root.kb-maker + "’s status screen when Ectomatter isn’t running.";
+                                text: "Onboard layouts need Ectomatter’s firmware on the keyboard. Until then, the keyboard shows " + (root.kb-maker == "" ? "its maker’s" : root.kb-maker + "’s") + " status screen when Ectomatter isn’t running.";
                                 font-family: Font.ui;
                                 font-size: Font.note;
                                 color: Ink.soft;

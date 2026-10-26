@@ -131,6 +131,10 @@ impl Job {
             "mouse-profile" => mouse(),
             _ => return None,
         };
+        // (kept as it was until the device's core has said its id)
+        if device.is_empty() {
+            return None;
+        }
         Some(match rest {
             "next" => format!("next-profile:{device}"),
             "previous" => format!("previous-profile:{device}"),

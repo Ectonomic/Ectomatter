@@ -23,8 +23,8 @@ pub const PROTOCOL: u32 = 4;
 pub fn meet(params: &Value, name: &str, version: &str) -> Result<Value, String> {
     match params["protocol"].as_u64() {
         Some(n) if n == PROTOCOL as u64 => Ok(json!({ "protocol": PROTOCOL, "name": name, "version": version })),
-        Some(n) => Err(format!("{name} speaks version {PROTOCOL} of Ectomatter's core protocol, and this Ectomatter speaks {n}. Update whichever is older.")),
-        None => Err(format!("{name} speaks version {PROTOCOL} of Ectomatter's core protocol, and wasn't told which this Ectomatter speaks.")),
+        Some(n) => Err(format!("{name} speaks version {PROTOCOL} of Ectomatter’s core protocol, and this Ectomatter speaks {n}. Update whichever is older.")),
+        None => Err(format!("{name} speaks version {PROTOCOL} of Ectomatter’s core protocol, and wasn’t told which this Ectomatter speaks.")),
     }
 }
 
@@ -215,7 +215,7 @@ mod tests {
     #[test]
     fn a_package_meets_only_its_own_version() {
         assert_eq!(meet(&json!({ "protocol": PROTOCOL }), "Weather Feed", "1.0.0").unwrap(), json!({ "protocol": PROTOCOL, "name": "Weather Feed", "version": "1.0.0" }));
-        assert_eq!(meet(&json!({ "protocol": 3 }), "Weather Feed", "1.0.0").unwrap_err(), "Weather Feed speaks version 4 of Ectomatter's core protocol, and this Ectomatter speaks 3. Update whichever is older.");
+        assert_eq!(meet(&json!({ "protocol": 3 }), "Weather Feed", "1.0.0").unwrap_err(), "Weather Feed speaks version 4 of Ectomatter’s core protocol, and this Ectomatter speaks 3. Update whichever is older.");
         assert!(meet(&Value::Null, "Weather Feed", "1.0.0").is_err());
     }
 

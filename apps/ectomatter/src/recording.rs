@@ -220,7 +220,7 @@ impl Recorder {
             return Err("a recording is already running".into());
         }
         #[cfg(not(target_os = "linux"))]
-        return Err("recording isn't available on this system yet".into());
+        return Err("recording isn’t available on this system yet".into());
         #[cfg(target_os = "linux")]
         {
             let fds = linux::grab_all(usb)?;
@@ -317,7 +317,7 @@ mod linux {
     pub fn grab_all(usb: (u16, u16)) -> Result<Vec<i32>, String> {
         let nodes = nodes(usb);
         if nodes.is_empty() {
-            return Err("the keyboard isn't plugged in".into());
+            return Err("the keyboard isn’t plugged in".into());
         }
         let mut fds = Vec::new();
         for n in nodes {
@@ -331,7 +331,7 @@ mod linux {
                 for f in fds {
                     ungrab(f);
                 }
-                return Err(format!("the keyboard's keys couldn't be taken for recording: {e}"));
+                return Err(format!("the keyboard’s keys couldn’t be taken for recording: {e}"));
             }
             fds.push(fd);
         }

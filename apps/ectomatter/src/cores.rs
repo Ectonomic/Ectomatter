@@ -139,6 +139,12 @@ pub fn keyboard_key() -> &'static str {
     keyboard().and_then(|k| k.described()["device"].as_str()).unwrap_or("")
 }
 
+/// Where a setting of the keyboard's is kept in Ectomatter's settings: under
+/// its device's id, as its core describes it ("devices.<id>.<rest>").
+pub fn keyboard_setting(rest: &str) -> String {
+    format!("devices.{}.{rest}", keyboard_key())
+}
+
 /// The keyboard's profiles, by number (none with no keyboard).
 pub fn profiles() -> Vec<u8> {
     keyboard().map(Core::profiles).unwrap_or_default()
@@ -177,10 +183,7 @@ pub fn keyboard() -> Option<&'static Core> {
 /// What a core describes, run alone with no device, for a test.
 #[cfg(test)]
 fn described_alone(p: &crate::packages::Package) -> serde_json::Value {
-    let data = std::env::temp_dir().join(format!("ectomatter-described-{}-{}", p.id(), std::process::id()));
-    let core = crate::core_host::Core::start(&p.dir, data.clone(), Box::new(crate::core_host::NoDevices)).expect("the keyboard's core starts");
-    let d = crate::core_host::initialize(&core, serde_json::Value::Null).and_then(|_| core.call("device/describe", &serde_json::Value::Null)).expect("the keyboard's core describes it");
-    let _ = core.call("shutdown", &serde_json::Value::Null);
-    let _ = std::fs::remove_dir_all(data);
+    let d = crate::core_host::described_alone(&p.dir, std::time::Duration::from_secs(60));
+    assert!(d.is_object(), "the keyboard's core describes it");
     d
 }

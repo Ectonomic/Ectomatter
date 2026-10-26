@@ -13,8 +13,10 @@ use serde_json::{json, Map, Value};
 
 use ectomatter_draw::jsonc;
 
-/// Where the setup lighting the Z10 is kept in Ectomatter's settings.
-pub const IN_USE: &str = "devices.z10.light";
+/// Where the setup lighting the keyboard is kept in Ectomatter's settings.
+pub fn in_use_at() -> String {
+    crate::cores::keyboard_setting("light")
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Setup {
@@ -60,7 +62,7 @@ pub fn read(core: &str, id: &str) -> Option<Setup> {
 
 /// The setup the settings say lights the device, if it is still there.
 pub fn in_use(settings: &crate::settings::Settings, core: &str) -> Option<Setup> {
-    read(core, settings.get(IN_USE)?.as_str()?)
+    read(core, settings.get(&in_use_at())?.as_str()?)
 }
 
 /// The words beside a value in a setup's file, by the value's path from

@@ -1014,7 +1014,7 @@ impl MacroPage {
         }
         // (the keyboard by the USB device its core's manifest matches)
         let Some(usb) = crate::cores::keyboard().and_then(|k| crate::core_host::Manifest::read(&k.folder).ok()?.usb_ids()) else {
-            return self.status("Recording did not start: there's no keyboard to record from.", 2);
+            return self.status("Recording did not start: there’s no keyboard to record from.", 2);
         };
         match self.rec.start(usb, room, costs, self.ed.record_waits) {
             Ok(_) => {

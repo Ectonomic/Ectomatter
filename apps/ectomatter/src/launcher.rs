@@ -443,10 +443,75 @@ fn known_wrapper(w: &[&str]) -> bool {
     }
 }
 
-/// The variables a recipe may set without the person having typed them:
-/// those of Proton, Wine, DXVK, VKD3D, SDL, MangoHud, gamescope and the
-/// graphics drivers, which tune a game and run nothing of their own.
-const VARIABLES: [&str; 12] = ["PROTON_", "WINE", "DXVK_", "VKD3D_", "SDL_", "MANGOHUD", "ENABLE_GAMESCOPE_WSI", "__GL_", "VK_", "RADV_", "MESA_", "PULSE_LATENCY_MSEC"];
+/// How a variable's value may be written.
+#[derive(Clone, Copy, PartialEq)]
+enum Written {
+    /// 0 or 1, or another plain number
+    Number,
+    /// a list of DLLs and how Wine loads each (`dwrite=n,b;d3d9=n`)
+    Dlls,
+    /// Wine's cores (`8:0,1,2,3`)
+    Cores,
+    /// USB ids (`0xbeef/0xdead,0x1234/0x5678`)
+    UsbIds,
+    /// MangoHud's options (`fps_limit=120,position=top-left`), none that runs
+    /// a command or writes a file
+    Overlay,
+}
+
+/// The variables a recipe may set without the person having typed them,
+/// each with how its value may be written: Proton's, Wine's, DXVK's,
+/// VKD3D's, SDL's, MangoHud's and gamescope's that tune a game and run
+/// nothing of their own.
+const VARIABLES: [(&str, Written); 24] = [
+    ("PROTON_ENABLE_HDR", Written::Number),
+    ("PROTON_ENABLE_WAYLAND", Written::Number),
+    ("PROTON_PREFER_SDL", Written::Number),
+    ("PROTON_USE_SDL", Written::Number),
+    ("PROTON_DISABLE_HIDRAW", Written::Number),
+    ("PROTON_SONY_AUTO_XINPUT", Written::Number),
+    ("PROTON_ENABLE_NVAPI", Written::Number),
+    ("PROTON_HIDE_NVIDIA_GPU", Written::Number),
+    ("PROTON_LOG", Written::Number),
+    ("PROTON_NO_ESYNC", Written::Number),
+    ("PROTON_NO_FSYNC", Written::Number),
+    ("PROTON_USE_NTSYNC", Written::Number),
+    ("PROTON_USE_WINED3D", Written::Number),
+    ("DXVK_HDR", Written::Number),
+    ("DXVK_FRAME_RATE", Written::Number),
+    ("DXVK_ASYNC", Written::Number),
+    ("VKD3D_FRAME_RATE", Written::Number),
+    ("ENABLE_GAMESCOPE_WSI", Written::Number),
+    ("WINEDLLOVERRIDES", Written::Dlls),
+    ("WINE_CPU_TOPOLOGY", Written::Cores),
+    ("WINEESYNC", Written::Number),
+    ("WINEFSYNC", Written::Number),
+    ("SDL_GAMECONTROLLER_IGNORE_DEVICES", Written::UsbIds),
+    ("MANGOHUD_CONFIG", Written::Overlay),
+];
+
+/// Whether a value is written as `how` allows.
+fn plain_as(how: Written, v: &str) -> bool {
+    let only = |extra: &str| v.chars().all(|c| c.is_ascii_alphanumeric() || extra.contains(c));
+    match how {
+        Written::Number => only("."),
+        Written::Dlls => only("_.=,;*-"),
+        Written::Cores => only(":,"),
+        Written::UsbIds => only("/,"),
+        // (no option that runs a command, reads a file of options or writes one)
+        Written::Overlay => only("_=,.+#-") && !["exec", "config_file", "output_folder", "autostart_log", "log_duration", "blacklist"].iter().any(|k| v.contains(k)),
+    }
+}
+
+/// Whether a variable the person typed may be set: any but those that load
+/// code or point a program at files (the dynamic loader's, Vulkan's
+/// loader's, SDL's own library, Proton's debugger, Wine's loader and paths,
+/// any search path), its value plain (no path, no shell's signs).
+fn own_may(k: &str, v: &str) -> bool {
+    let loads = k.starts_with("LD_") || k.starts_with("VK_") || k.contains("PRELOAD") || k.ends_with("PATH") || k.ends_with("_FILENAMES") || k.ends_with("_FILES") || k.contains("CONFIGFILE") || k.contains("CONFIG_FILE");
+    let named = ["SDL_DYNAMIC_API", "PROTON_REMOTE_DEBUG_CMD", "WINELOADER", "WINESERVER", "WINEPREFIX", "WINEDLLPATH", "HOME", "SHELL", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "PYTHONSTARTUP", "BASH_ENV", "ENV"].contains(&k);
+    !loads && !named && v.chars().all(|c| c.is_ascii_alphanumeric() || "_.=,;:+#-".contains(c))
+}
 
 /// A plugin's recipe for how a game starts, as Ectomatter writes it for the
 /// launcher: only what Ectomatter knows to be safe to run (docs/
@@ -457,6 +522,10 @@ const VARIABLES: [&str; 12] = ["PROTON_", "WINE", "DXVK_", "VKD3D_", "SDL_", "MA
 /// runtime); a variable is one of VARIABLES', or one the person typed in the
 /// plugin's settings (`own`). What's left out, in words, for the log.
 pub fn checked_recipe(recipe: &Value, facts: &Value, own: &[String]) -> (Value, Vec<String>) {
+    // (anything but a recipe is none)
+    if !recipe.is_object() {
+        return (Value::Null, vec!["the recipe, which isn’t one".into()]);
+    }
     let mut r = recipe.clone();
     let mut out = Vec::new();
     let wraps: Vec<Value> = recipe["wrap"].as_array().into_iter().flatten().filter(|w| {
@@ -478,17 +547,37 @@ pub fn checked_recipe(recipe: &Value, facts: &Value, own: &[String]) -> (Value, 
         out.push(format!("the runtime {p}"));
         r.as_object_mut().map(|o| o.remove("runtime"));
     }
-    let may = |k: &str| VARIABLES.iter().any(|v| k.starts_with(v)) || own.iter().any(|o| o == k);
+    // (a variable Ectomatter knows, its value as it may be written; or one the person typed, that loads nothing)
+    let may = |k: &str, v: &Value| {
+        let Some(v) = v.as_str() else { return false };
+        match VARIABLES.iter().find(|(n, _)| *n == k) {
+            Some((_, how)) => plain_as(*how, v),
+            None => own.iter().any(|o| o == k) && own_may(k, v),
+        }
+    };
     for key in ["env", "env_default", "env_append"] {
         if let Some(o) = r.get_mut(key).and_then(Value::as_object_mut) {
-            o.retain(|k, _| {
-                let fine = may(k);
+            o.retain(|k, v| {
+                let fine = may(k, v);
                 if !fine {
                     out.push(format!("the variable {k}"));
                 }
                 fine
             });
         }
+    }
+    // (the game's own arguments, plain words; the variables taken away, by plain names)
+    if let Some(a) = r.get_mut("args").and_then(Value::as_array_mut) {
+        a.retain(|x| {
+            let fine = x.as_str().is_some_and(|x| !x.contains('\0') && x.len() <= 512);
+            if !fine {
+                out.push(format!("the argument {x}"));
+            }
+            fine
+        });
+    }
+    if let Some(u) = r.get_mut("unset").and_then(Value::as_array_mut) {
+        u.retain(|x| x.as_str().is_some_and(|x| x.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')));
     }
     (r, out)
 }
@@ -1086,16 +1175,24 @@ mod tests {
         assert_eq!((r, out), (good.clone(), Vec::<String>::new()), "kept whole");
         let bad = json!({ "proton": "/tmp/evil",  "runtime": "/tmp/evil-runtime",
             "wrap": [["sh", "-c", "evil"], ["gamescope", "evil", "--"], ["gamescope", "-W", "3440", "--", "evil"], ["gamescope", "-W", "$(evil)", "--"], ["gamemoderun", "evil"], ["mangohud"]],
-            "env": { "LD_PRELOAD": "/tmp/evil.so", "PROTON_LOG": "1" }, "env_append": { "PATH": "/tmp" } });
+            "env": { "LD_PRELOAD": "/tmp/evil.so", "PROTON_LOG": "1", "SDL_DYNAMIC_API": "/data/x.so", "VK_ICD_FILENAMES": "/data/x.json", "MANGOHUD_CONFIG": "exec=evil", "PROTON_REMOTE_DEBUG_CMD": "evil", "PROTON_ENABLE_HDR": "$(evil)", "WINEDLLOVERRIDES": "../evil=n" },
+            "env_append": { "PATH": "/tmp" }, "args": ["-novid"], "unset": ["PROTON_PREFER_SDL", "A;B"] });
         let (r, out) = checked_recipe(&bad, &facts, &[]);
         assert_eq!(r["wrap"], json!([["mangohud"]]));
         assert!(r.get("proton").is_none() && r.get("runtime").is_none(), "Steam's own builds only: the launcher picks one");
-        assert_eq!(r["env"], json!({ "PROTON_LOG": "1" }));
+        assert_eq!(r["env"], json!({ "PROTON_LOG": "1" }), "the variables that load code or run a command, and values that aren't plain, left out");
         assert_eq!(r["env_append"], json!({}));
-        assert_eq!(out.len(), 9, "{out:?}");
-        // (the person's own variable, typed in the plugin's settings, is theirs to set)
-        let (r, _) = checked_recipe(&bad, &facts, &["LD_PRELOAD".to_string()]);
-        assert_eq!(r["env"]["LD_PRELOAD"], "/tmp/evil.so");
+        assert_eq!((r["args"].clone(), r["unset"].clone()), (json!(["-novid"]), json!(["PROTON_PREFER_SDL"])));
+        assert_eq!(out.len(), 15, "{out:?}");
+        // (the person's own variable is theirs to set, unless it loads code, or its value is a path)
+        let own = |k: &str, v: &str| checked_recipe(&json!({ "env": { k: v } }), &facts, &[k.to_string()]).0["env"][k].clone();
+        assert_eq!(own("MY_MOD", "on"), "on");
+        assert_eq!(own("LD_PRELOAD", "/tmp/evil.so"), Value::Null);
+        assert_eq!(own("SDL_DYNAMIC_API", "x.so"), Value::Null);
+        assert_eq!(own("MY_MOD", "/tmp/x"), Value::Null);
+        // (and a recipe that isn't one is none, not a crash)
+        assert_eq!(checked_recipe(&json!([]), &facts, &[]).0, Value::Null);
+        assert_eq!(checked_recipe(&json!("x"), &facts, &[]).0, Value::Null);
     }
 
     fn moved(line: &str) -> Moved {

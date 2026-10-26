@@ -1375,19 +1375,19 @@ impl Front {
             read_at: None,
         };
         f.screens = crate::lcd_page::Screens::of(
-            f.settings.get("devices.z10.screen.pages").as_ref(),
-            f.settings.get("devices.z10.screen.playlists").as_ref(),
-            f.settings.get("devices.z10.screen.plays").as_ref(),
-            f.settings.get("devices.z10.screen.playlist").as_ref(),
+            f.settings.get(&crate::cores::keyboard_setting("screen.pages")).as_ref(),
+            f.settings.get(&crate::cores::keyboard_setting("screen.playlists")).as_ref(),
+            f.settings.get(&crate::cores::keyboard_setting("screen.plays")).as_ref(),
+            f.settings.get(&crate::cores::keyboard_setting("screen.playlist")).as_ref(),
         )
-        .with_onboard(f.settings.get("devices.z10.screen.onboard").as_ref());
+        .with_onboard(f.settings.get(&crate::cores::keyboard_setting("screen.onboard")).as_ref());
         f.give_built_ins();
         if let Some(b) = before {
             f.carry_sensors(&b);
         }
         f.keyed = f
             .settings
-            .get("devices.z10.screen.keyed")
+            .get(&crate::cores::keyboard_setting("screen.keyed"))
             .and_then(|v| v.as_object().cloned())
             .map(|m| m.iter().filter_map(|(c, id)| Some((c.parse::<u32>().ok().filter(|c| keyboard::PLAY_CODES.contains(c))?, id.as_str()?.to_string()))).collect())
             .unwrap_or_default();
@@ -1402,7 +1402,7 @@ impl Front {
         }
         if renamed {
             let kept: serde_json::Map<String, serde_json::Value> = f.keyed.iter().map(|(c, id)| (c.to_string(), serde_json::json!(id))).collect();
-            let _ = f.settings.set("devices.z10.screen.keyed", serde_json::Value::Object(kept));
+            let _ = f.settings.set(&crate::cores::keyboard_setting("screen.keyed"), serde_json::Value::Object(kept));
         }
         crate::jobs::rename_in_macros();
         f.screens_noted = f.screens.clone();
@@ -2748,7 +2748,7 @@ impl Front {
         let window = l.act();
         // the light setup chosen to light the keyboard, kept for next time
         if let Some(setup) = l.switched.take() {
-            let _ = self.settings.set(crate::setups::IN_USE, setup.map_or(serde_json::Value::Null, serde_json::Value::from));
+            let _ = self.settings.set(&crate::setups::in_use_at(), setup.map_or(serde_json::Value::Null, serde_json::Value::from));
         }
         // a picture asked for: the desktop's own file picker, and the file
         // chosen there put on the key, kept in Ectomatter's data
@@ -3113,10 +3113,17 @@ impl Front {
             Ctl::PackageRemove => {
                 // first the question, saying what's left after
                 let Some(p) = self.packages.get(index).cloned() else { return };
-                let after = if crate::packages::all_in(&crate::cores::dir(), std::path::Path::new("")).iter().any(|b| b.id() == p.id()) {
+                let built_in = crate::packages::all_in(&crate::packages::builtin_dir(p.kind()), std::path::Path::new("")).iter().any(|b| b.id() == p.id());
+                let after = if built_in {
                     format!("Ectomatter goes back to the {} that comes with it.", p.name())
                 } else {
                     format!("Its sections and devices go from Ectomatter, and what it changed for a game running is put back. The choices made in its sections are kept, for if you add {} again.", p.name())
+                };
+                // (a core: its device's page goes with it, and Ectomatter starts again to let go of it)
+                let after = match p.kind() {
+                    crate::packages::Kind::Core if built_in => format!("Ectomatter restarts and goes back to the {} that comes with it.", p.name()),
+                    crate::packages::Kind::Core => format!("Ectomatter restarts without it, and its device’s page is gone until you add {} again.", p.name()),
+                    crate::packages::Kind::Plugin => after,
                 };
                 self.ui.set_confirm_title(format!("Remove {} {}?", p.name(), p.version()).into());
                 self.ui.set_confirm_body(after.into());
@@ -4417,7 +4424,7 @@ impl Front {
         if self.keyed.get(&code).map(String::as_str) != Some(id) {
             self.keyed.insert(code, id.to_string());
             let kept: serde_json::Map<String, serde_json::Value> = self.keyed.iter().map(|(c, id)| (c.to_string(), serde_json::json!(id))).collect();
-            if let Err(e) = self.settings.set("devices.z10.screen.keyed", serde_json::Value::Object(kept)) {
+            if let Err(e) = self.settings.set(&crate::cores::keyboard_setting("screen.keyed"), serde_json::Value::Object(kept)) {
                 self.status(format!("The key's playlist was not saved: {e}"), 2);
             }
             self.sync_playlist_keys();
@@ -5320,7 +5327,7 @@ impl Front {
         }
         if changed {
             let kept: serde_json::Map<String, serde_json::Value> = self.keyed.iter().map(|(c, id)| (c.to_string(), serde_json::json!(id))).collect();
-            if let Err(e) = self.settings.set("devices.z10.screen.keyed", serde_json::Value::Object(kept)) {
+            if let Err(e) = self.settings.set(&crate::cores::keyboard_setting("screen.keyed"), serde_json::Value::Object(kept)) {
                 self.status(format!("The keys' jobs were not saved: {e}"), 2);
             }
             self.sync_playlist_keys();
@@ -6531,15 +6538,16 @@ impl Front {
     /// where they were: the keyboard's from Ectomatter's settings, the mouse's
     /// from its profiles' file (once the mouse's profiles have been read).
     fn take_old_ties(&mut self) {
-        if !self.ties_taken[0] {
+        // (moved only to a device whose id is known: its core described it)
+        if !self.ties_taken[0] && !crate::cores::keyboard_key().is_empty() {
             self.ties_taken[0] = true;
-            if let Some(all) = self.settings.get("devices.z10.profile_apps").and_then(|v| v.as_object().cloned()) {
+            if let Some(all) = self.settings.get(&crate::cores::keyboard_setting("profile_apps")).and_then(|v| v.as_object().cloned()) {
                 let ties: Vec<(String, Vec<String>)> = all.iter().map(|(n, a)| (n.clone(), a.as_array().into_iter().flatten().filter_map(|v| v.as_str().map(String::from)).collect())).collect();
                 self.games.library.take_ties(crate::cores::keyboard_key(), &ties);
-                let _ = self.settings.set("devices.z10.profile_apps", serde_json::Value::Null);
+                let _ = self.settings.set(&crate::cores::keyboard_setting("profile_apps"), serde_json::Value::Null);
             }
         }
-        if !self.ties_taken[1] {
+        if !self.ties_taken[1] && !crate::mouse::key().is_empty() {
             if let Some(store) = &mut self.mouse.profiles {
                 self.ties_taken[1] = true;
                 let ties: Vec<(String, Vec<String>)> = store.list.iter().filter(|p| !p.apps.is_empty()).map(|p| (p.id.clone(), p.apps.clone())).collect();
@@ -6717,7 +6725,8 @@ impl Front {
                     core,
                     present: st["present"].as_bool().unwrap_or(false),
                     reachable: st["reachable"].as_bool(),
-                    holders: st["holders"].as_array().map(|a| a.iter().filter_map(|h| h["name"].as_str().map(String::from)).collect()).unwrap_or_default(),
+                    // (each program once, in the same order every time)
+                    holders: st["holders"].as_array().map(|a| a.iter().filter_map(|h| h["name"].as_str().map(String::from)).collect::<std::collections::BTreeSet<_>>().into_iter().collect()).unwrap_or_default(),
                     holders_note,
                     kind,
                 }
@@ -6937,7 +6946,7 @@ impl Front {
         if let Some(repo) = f.repo.clone() {
             let (tx, rx) = mpsc::channel();
             let _ = std::thread::Builder::new().name("plugin add".into()).spawn(move || {
-                let _ = tx.send(crate::updates::install_latest(&repo, &id, &crate::packages::added_dir(crate::packages::Kind::of(&m))));
+                let _ = tx.send(crate::updates::install_latest(&repo, &id, &m, &crate::packages::added_dir(crate::packages::Kind::of(&m))));
             });
             f.adding = Some(rx);
             self.show_package_form();
@@ -6978,11 +6987,14 @@ impl Front {
     /// gone; one that came with Ectomatter too is used again in its place.
     fn remove_package(&mut self, id: &str) {
         let name = self.packages.iter().find(|p| p.id() == id).map(|p| p.name().to_string()).unwrap_or_else(|| id.to_string());
-        self.worker.drop_plugin(id);
-        self.hosted.stop(id);
-        self.following.retain(|k, _| !k.starts_with(&format!("{id}/")));
-        self.plugin_applied.retain(|k, _| !k.starts_with(&format!("{id}/")));
         let kind = self.packages.iter().find(|p| p.id() == id).map_or(crate::packages::Kind::Plugin, |p| p.kind());
+        // (a core's device page keeps driving it until Ectomatter starts again, below)
+        if kind == crate::packages::Kind::Plugin {
+            self.worker.drop_plugin(id);
+            self.hosted.stop(id);
+            self.following.retain(|k, _| !k.starts_with(&format!("{id}/")));
+            self.plugin_applied.retain(|k, _| !k.starts_with(&format!("{id}/")));
+        }
         let root = crate::packages::added_dir(kind);
         let dir = root.join(id);
         if dir.starts_with(&root) && dir != root {
@@ -6992,7 +7004,10 @@ impl Front {
             }
         }
         self.give_packages();
-        if let Some(p) = self.packages.iter().find(|p| p.id() == id).cloned() {
+        // (a core: Ectomatter starts again, its device's page with the one that comes with it, if one does)
+        if kind == crate::packages::Kind::Core {
+            self.restart = Some("settings".into());
+        } else if let Some(p) = self.packages.iter().find(|p| p.id() == id).cloned() {
             if self.settings.on(&p.switch()) {
                 self.start_package(p);
             }
@@ -8223,7 +8238,7 @@ impl Front {
             }
         }
         if moved {
-            if let Err(e) = self.settings.set("devices.z10.screen.pages", self.screens.to_json()["pages"].clone()) {
+            if let Err(e) = self.settings.set(&crate::cores::keyboard_setting("screen.pages"), self.screens.to_json()["pages"].clone()) {
                 eprintln!("ectomatter: the screen layouts were not saved with their sensors: {e}");
             }
         }
@@ -8419,7 +8434,7 @@ impl Front {
         let Some(prev) = prev else { return };
         let raw = |v: &serde_json::Value, k: &str| v[k].as_f64().unwrap_or(0.0);
         let moved = [(raw(r, "dimmer_raw") - raw(&prev, "dimmer_raw")).abs() > 12.0, (raw(r, "volume_raw") - raw(&prev, "volume_raw")).abs() > 12.0];
-        let mut send = |me: &mut Self, i: usize, target: &str| {
+        let send = |me: &mut Self, i: usize, target: &str| {
             let level = (f[i] as f64 * 100.0).round() / 100.0;
             if me.sent[i] == Some(level) {
                 return;
@@ -9429,13 +9444,13 @@ impl Front {
         if i <= 0 { "start" } else { "quit" }
     }
 
-    /// What Ectomatter's settings keep for a row of Game launch (devices.z10.screen.game).
+    /// What Ectomatter's settings keep for a row of Game launch (devices.<keyboard>.screen.game).
     fn game_launch_value(&self, k: &str) -> serde_json::Value {
-        self.settings.get("devices.z10.screen.game").map(|v| v[k].clone()).filter(|v| v.is_object()).unwrap_or_else(|| serde_json::json!({}))
+        self.settings.get(&crate::cores::keyboard_setting("screen.game")).map(|v| v[k].clone()).filter(|v| v.is_object()).unwrap_or_else(|| serde_json::json!({}))
     }
 
     fn set_game_launch(&mut self, k: &str, field: &str, v: serde_json::Value) {
-        if let Err(e) = self.settings.set(&format!("devices.z10.screen.game.{k}.{field}"), v) {
+        if let Err(e) = self.settings.set(&crate::cores::keyboard_setting(&format!("screen.game.{k}.{field}")), v) {
             self.status(format!("Game launch was not saved: {e}"), 2);
         }
         self.tell_game_launch();
@@ -9456,7 +9471,7 @@ impl Front {
     /// launch, the screen's announce said whether launches broke in).
     pub fn game_launch(&self) -> crate::lcd_player::Launch {
         use crate::lcd_player::{Showing, Until};
-        let was_on = self.settings.on("devices.z10.screen.announce");
+        let was_on = self.settings.on(&crate::cores::keyboard_setting("screen.announce"));
         let show = |row: usize| {
             let v = self.game_launch_value(Self::launch_key(row as i32));
             let id = v["layout"].as_str().unwrap_or(crate::lcd_page::GAME_LAYOUTS[row.min(1)]);
@@ -9589,15 +9604,15 @@ impl Front {
     /// saved, with the list of those given, so a layout deleted after stays deleted (and a
     /// layout Ectomatter ships later is given once too).
     fn give_built_ins(&mut self) {
-        let given = self.settings.get("devices.z10.screen.built_ins");
+        let given = self.settings.get(&crate::cores::keyboard_setting("screen.built_ins"));
         let all = serde_json::json!(crate::lcd_page::BUILT_INS);
         if given.as_ref() == Some(&all) {
             return;
         }
         let added = self.screens.give_built_ins(given.as_ref());
         // (the layouts first, so the list never names layouts the Library wasn't saved with)
-        let saved = if added > 0 { self.settings.set("devices.z10.screen.pages", self.screens.to_json()["pages"].clone()) } else { Ok(()) };
-        if let Err(e) = saved.and_then(|_| self.settings.set("devices.z10.screen.built_ins", all)) {
+        let saved = if added > 0 { self.settings.set(&crate::cores::keyboard_setting("screen.pages"), self.screens.to_json()["pages"].clone()) } else { Ok(()) };
+        if let Err(e) = saved.and_then(|_| self.settings.set(&crate::cores::keyboard_setting("screen.built_ins"), all)) {
             eprintln!("ectomatter: the new screen layouts were not saved: {e}");
         }
     }
@@ -9612,10 +9627,10 @@ impl Front {
         let v = self.screens.to_json();
         let saved = self
             .settings
-            .set("devices.z10.screen.pages", v["pages"].clone())
-            .and_then(|_| self.settings.set("devices.z10.screen.playlists", v["playlists"].clone()))
-            .and_then(|_| self.settings.set("devices.z10.screen.plays", v["plays"].clone()))
-            .and_then(|_| self.settings.set("devices.z10.screen.onboard", v["onboard"].clone()));
+            .set(&crate::cores::keyboard_setting("screen.pages"), v["pages"].clone())
+            .and_then(|_| self.settings.set(&crate::cores::keyboard_setting("screen.playlists"), v["playlists"].clone()))
+            .and_then(|_| self.settings.set(&crate::cores::keyboard_setting("screen.plays"), v["plays"].clone()))
+            .and_then(|_| self.settings.set(&crate::cores::keyboard_setting("screen.onboard"), v["onboard"].clone()));
         match saved {
             Ok(()) => {
                 self.screens_saved = self.screens.clone();

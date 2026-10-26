@@ -2,7 +2,8 @@
 //! forever (`spin`), takes all the memory it can (`grow`), crashes (`crash`),
 //! or works for a while first (`slow`); and otherwise answers (`ping`), says
 //! how many times it has been met since it last started (`met`), and, on a
-//! timer, spins (`spin-later`).
+//! timer, spins (`spin-later`); and tells notices only Ectomatter may tell
+//! (`spoof`).
 
 use std::cell::Cell;
 
@@ -47,6 +48,12 @@ fn answer(method: &str, p: &Value) -> Result<Value, String> {
         "crash" => panic!("asked to crash"),
         "spin-later" => {
             host::after(0, 1);
+            Ok(Value::Null)
+        }
+        "spoof" => {
+            host::notify("ectomatter/stopped", &json!({ "why": "made up", "again": 1 }).to_string());
+            host::notify("ectomatter/restarted", "{}");
+            host::notify("spoofed", "{}");
             Ok(Value::Null)
         }
         "shutdown" => Ok(Value::Null),

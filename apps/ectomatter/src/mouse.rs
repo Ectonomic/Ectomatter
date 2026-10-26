@@ -118,11 +118,7 @@ pub fn describe(core: &str, folder: &Path, described: &Value) {
 #[cfg(test)]
 fn described_alone() -> Shape {
     for p in crate::packages::of(crate::packages::Kind::Core) {
-        let data = std::env::temp_dir().join(format!("ectomatter-mouse-shape-{}-{}", p.id(), std::process::id()));
-        let Ok(core) = crate::core_host::Core::start(&p.dir, data.clone(), Box::new(crate::core_host::NoDevices)) else { continue };
-        let d = crate::core_host::initialize(&core, Value::Null).and_then(|_| core.call("device/describe", &Value::Null)).unwrap_or(Value::Null);
-        let _ = core.call("shutdown", &Value::Null);
-        let _ = std::fs::remove_dir_all(data);
+        let d = crate::core_host::described_alone(&p.dir, std::time::Duration::from_secs(60));
         if d["kind"] == "mouse" {
             return Shape::of(p.id(), &p.dir, &d);
         }
@@ -160,7 +156,7 @@ pub enum Heard {
     Input(String, bool),
 }
 
-/// Start the mouse's thread, with SteelSeries' core.
+/// Start the mouse's thread, with the mouse's core.
 pub fn start(core: Core, tell: Sender<Heard>) -> mpsc::Sender<Ask> {
     let (ask, asked) = mpsc::channel::<Ask>();
     // (a button pressed is told at once, not at the next look)

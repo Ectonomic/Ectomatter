@@ -565,7 +565,7 @@ impl Editor {
 
     pub fn duplicate(&mut self, page: &Page) -> Result<(), String> {
         let Some(n) = self.current else { return Ok(()) };
-        let Some(k) = self.free_slots(page).first().copied() else { return Err("All 100 of the keyboard's macro slots are full.".into()) };
+        let Some(k) = self.free_slots(page).first().copied() else { return Err("All 100 of the keyboard’s macro slots are full.".into()) };
         let Some(d) = self.draft(page, n).cloned() else { return Ok(()) };
         self.drafts.insert(k, Draft { name: format!("Copy of {}", d.name).chars().take(50).collect(), blank_name: None, steps: Self::effective(&d), is_new: true, starter: false, timing: Timing::Keep, same: 20, plays: None });
         self.current = Some(k);

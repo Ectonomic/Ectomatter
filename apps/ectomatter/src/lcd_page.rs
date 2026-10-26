@@ -1,9 +1,9 @@
 //! A page of the keyboard's screen as pieces: words, readings, bars and a clock,
 //! each in a row of the screen at a column and a width. The pages are
-//! the Library, every screen there is (devices.z10.screen.pages). Playlists
+//! the Library, every screen there is (devices.<keyboard>.screen.pages, under the keyboard's device id). Playlists
 //! play some of them in turn, each for its own time and coming in its own
-//! way (devices.z10.screen.playlists), and each profile plays one of them
-//! (devices.z10.screen.plays). All of it is kept in Ectomatter's settings.
+//! way (devices.<keyboard>.screen.playlists), and each profile plays one of them
+//! (devices.<keyboard>.screen.plays). All of it is kept in Ectomatter's settings.
 //!
 //! A row is laid out as the z10-lcd service's format strings laid out the
 //! Stats page, so the Stats page made of pieces shows what it always showed,
@@ -149,20 +149,42 @@ static PLUGIN_READINGS: std::sync::RwLock<Vec<PluginReading>> = std::sync::RwLoc
 
 /// A plugin's reading by its number, made if new: what a layout keeps it by
 /// is its plugin's id and its own, the number only while Ectomatter runs.
+/// Past every number there is (u16::MAX), a reading has none: NO_READING,
+/// which reads as nothing.
 pub fn reading_number(plugin: &str, id: &str) -> u16 {
     let mut all = PLUGIN_READINGS.write().unwrap_or_else(|p| p.into_inner());
     if let Some(i) = all.iter().position(|x| x.plugin == plugin && x.id == id) {
         return i as u16;
     }
+    if all.len() >= NO_READING as usize {
+        return NO_READING;
+    }
     all.push(PluginReading { plugin: plugin.into(), plugin_name: plugin.into(), id: id.into(), label: id.into(), unit: String::new() });
     (all.len() - 1) as u16
 }
 
+/// The number no plugin reading has.
+pub const NO_READING: u16 = u16::MAX;
+
 /// A plugin's reading as it lists it now (its label, unit and plugin's name): its number.
 pub fn reading_listed(r: PluginReading) -> u16 {
     let n = reading_number(&r.plugin, &r.id);
-    PLUGIN_READINGS.write().unwrap_or_else(|p| p.into_inner())[n as usize] = r;
+    if let Some(at) = PLUGIN_READINGS.write().unwrap_or_else(|p| p.into_inner()).get_mut(n as usize) {
+        *at = r;
+    }
     n
+}
+
+/// The plugins' readings these pages show, by number.
+pub fn readings_shown(pages: &[Page]) -> std::collections::BTreeSet<u16> {
+    pages
+        .iter()
+        .flat_map(|p| p.pieces.iter())
+        .filter_map(|p| match p.kind {
+            Kind::Data(Source::Reading(n), _) | Kind::Bar(Source::Reading(n)) => Some(n),
+            _ => None,
+        })
+        .collect()
 }
 
 /// A plugin's reading by its number.

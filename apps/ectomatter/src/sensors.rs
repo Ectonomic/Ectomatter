@@ -9,7 +9,6 @@
 //! this computer under `root` (`/` but for tests).
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 use serde_json::{json, Value};

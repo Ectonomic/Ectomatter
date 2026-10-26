@@ -473,13 +473,30 @@ fn device_in_use(core: &cores::Core, settings: &settings::Settings) -> serde_jso
 /// their pages are drawn from: the keyboard's profiles, lights and screen,
 /// and the first mouse's buttons, lights and picture.
 fn devices_described(hosted: &hosted::Hosted) {
+    // (a core that's off is started alone for a moment to say, so its
+    // device's settings, jobs and Library choices are still found by its id)
+    let wait = std::time::Duration::from_secs(10);
+    let off: Vec<packages::Package> = packages::of(packages::Kind::Core).into_iter().filter(|p| hosted.get(p.id()).is_none()).collect();
     if let Some(k) = cores::keyboard() {
-        if let Some(r) = hosted.get(&k.id) {
-            k.describe(&r.describes);
+        match hosted.get(&k.id) {
+            Some(r) => k.describe(&r.describes),
+            None => {
+                if let Some(p) = off.iter().find(|p| p.id() == k.id) {
+                    k.describe(&core_host::described_alone(&p.dir, wait));
+                }
+            }
         }
     }
     if let Some(r) = hosted.cores.iter().find(|r| r.describes["kind"] == "mouse") {
         mouse::describe(r.package.id(), &r.package.dir, &r.describes);
+    } else {
+        for p in off.iter().filter(|p| cores::keyboard().is_none_or(|k| k.id != p.id())) {
+            let d = core_host::described_alone(&p.dir, wait);
+            if d["kind"] == "mouse" {
+                mouse::describe(p.id(), &p.dir, &d);
+                break;
+            }
+        }
     }
 }
 
@@ -2150,7 +2167,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
             move |n| {
                 let _ = news_tx.send(n);
             },
-            app.front.settings.on("devices.z10.screen.announce"),
+            app.front.settings.on(&crate::cores::keyboard_setting("screen.announce")),
             app.front.game_launch(),
             false,
             Box::new(screen),

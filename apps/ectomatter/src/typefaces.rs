@@ -29,7 +29,7 @@ pub fn files() -> Vec<PathBuf> {
 pub fn add(from: &Path) -> Result<Vec<String>, String> {
     let families = ectomatter_draw::print::families_in(from);
     if families.is_empty() {
-        return Err("That file isn't a typeface Ectomatter can read. Choose a .ttf or .otf file.".into());
+        return Err("That file isn’t a typeface Ectomatter can read. Choose a .ttf or .otf file.".into());
     }
     let folder = dir();
     std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
