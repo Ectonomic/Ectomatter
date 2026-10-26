@@ -131,20 +131,18 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 
 ## Stage 4: maintainable
 
-- The tests and the app read JSON objects' keys in different orders: a
-  test run that builds `ectomatter-tokens` too turns on serde_json's
-  `preserve_order` for the app (`crates/ectomatter-tokens/Cargo.toml`), and
-  the app built alone keeps keys sorted. Anything shown in a JSON object's
-  key order can pass its test and look otherwise in the app (found
-  2026-10-26: the Game Configurator's programs; now sorted,
-  `launcher.rs`, `Starts::of`).
-
 - One object runs every page: `front.rs`, 10,506 lines, about 200 fields.
 - One window component holds every page: `ui/app.slint`, 7,236 lines.
 - Untyped JSON at every file and protocol boundary.
 - No test runs the whole app and compares its renders with approved pictures.
-- The design checks skip lines marked as art, with no cap on how many.
-- No log file.
+- The design checks skip 501 lines marked art (`// art:` and its regions),
+  capped at that (`tokens.rs`, `ART_LINES_AT_MOST`). Many aren't a device's
+  own drawing but a page's pieces drawn by hand: the playlist's strip (73),
+  the selected block's corner (30), the edit mode's grips (26), a macro
+  step (25), the layer tabs (20), a lab slider's row (20), a layout's card
+  (17). Each is a part to make, and the cap comes down as they go.
+- The log is copied from stderr on Linux and macOS only (`log.rs`, `tee`);
+  on Windows nothing is written to the file yet.
 
 ## Stage 5: Windows and macOS
 

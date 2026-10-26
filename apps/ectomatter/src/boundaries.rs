@@ -201,6 +201,42 @@ pub(crate) mod tests {
         fail_on(found, "apps/ectomatter/Cargo.toml depends on a device's driver");
     }
 
+    /// The tests see what the app does: a dependency the workspace names is
+    /// taken from it by every crate, so its features are the same however
+    /// the app is built (a crate asking for its own features changes them for
+    /// every crate built with it, and `cargo test` builds more crates than
+    /// the app). The members and the dependencies come from the workspace's
+    /// Cargo.toml.
+    #[test]
+    fn every_crate_takes_the_workspaces_dependencies() {
+        let ws = read("Cargo.toml");
+        let section = |text: &str, name: &str| -> String {
+            text.split(&format!("[{name}]")).nth(1).unwrap_or("").split("\n[").next().unwrap_or("").to_string()
+        };
+        let names = |text: &str| -> Vec<String> {
+            text.lines().filter_map(|l| l.split(['=', '.']).next()).map(|n| n.trim().to_string()).filter(|n| !n.is_empty() && !n.starts_with('#')).collect()
+        };
+        let shared = names(&section(&ws, "workspace.dependencies"));
+        assert!(!shared.is_empty(), "the workspace names no dependencies");
+        let members = section(&ws, "workspace");
+        let members: Vec<&str> = members.split("members").nth(1).unwrap_or("").split(']').next().unwrap_or("").split('"').skip(1).step_by(2).collect();
+        assert!(members.len() > 1, "the workspace names no members");
+        let mut found = Vec::new();
+        for m in members {
+            let f = format!("{m}/Cargo.toml");
+            let toml = read(&f);
+            for kind in ["dependencies", "dev-dependencies", "build-dependencies"] {
+                for line in section(&toml, kind).lines() {
+                    let name = line.split(['=', '.']).next().unwrap_or("").trim();
+                    if shared.iter().any(|s| s == name) && line.replace(' ', "") != format!("{name}.workspace=true") {
+                        found.push(format!("{f} [{kind}] {}", line.trim()));
+                    }
+                }
+            }
+        }
+        fail_on(found, "a crate asks for its own version of a dependency the workspace names");
+    }
+
     /// docs/core-protocol.md: "has no page of its own for any device". No page
     /// is found by a device's name, and nothing is kept under one.
     #[test]

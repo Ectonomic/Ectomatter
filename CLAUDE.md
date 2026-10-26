@@ -27,6 +27,10 @@ This is where they live in this repository.
   the app runs (`cores::home()`): `ECTOMATTER_PACKAGES`, else the source
   folder above the program, else `share/ectomatter` beside its folder, else
   `XDG_DATA_DIRS`.
+- **Log.** `~/.local/state/com.ectonomic.ectomatter/ectomatter.log`
+  (`$XDG_STATE_HOME`), the run before's as `ectomatter.log.1`: everything
+  the app writes to stderr, stamped. Snapshots and `--read-state` don't write
+  it.
 - **Design system.** `cargo test -p ectomatter tokens::system`; see
   `docs/design-system.md`.
 

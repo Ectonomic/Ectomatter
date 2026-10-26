@@ -24,15 +24,24 @@ mod system {
     /// the parts that draw a device's own picture, in its own colors
     const ART: &[&str] = &["KeyBox", "MouseLayers", "WayGlyph", "BlockGlyph", "MacroIcon"];
 
-    fn slint_files() -> Vec<(String, String)> {
-        let ui = Path::new(env!("CARGO_MANIFEST_DIR")).join("ui");
-        let mut out = vec![("app.slint".to_string(), std::fs::read_to_string(ui.join("app.slint")).unwrap())];
-        for e in std::fs::read_dir(ui.join("system")).unwrap().flatten() {
-            let p = e.path();
-            if p.extension().is_some_and(|x| x == "slint") {
-                out.push((format!("system/{}", p.file_name().unwrap().to_string_lossy()), std::fs::read_to_string(&p).unwrap()));
+    /// Every Slint file under ui/, by its path there (app.slint first).
+    pub(crate) fn slint_files() -> Vec<(String, String)> {
+        fn walk(dir: &Path, rel: &str, out: &mut Vec<(String, String)>) {
+            let mut entries: Vec<_> = std::fs::read_dir(dir).unwrap().flatten().map(|e| e.path()).collect();
+            entries.sort();
+            for p in entries {
+                let name = p.file_name().unwrap().to_string_lossy().to_string();
+                let at = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
+                if p.is_dir() {
+                    walk(&p, &at, out);
+                } else if p.extension().is_some_and(|x| x == "slint") {
+                    out.push((at, std::fs::read_to_string(&p).unwrap()));
+                }
             }
         }
+        let mut out = Vec::new();
+        walk(&Path::new(env!("CARGO_MANIFEST_DIR")).join("ui"), "", &mut out);
+        out.sort_by_key(|(name, _)| name != "app.slint");
         out
     }
 
@@ -70,6 +79,34 @@ mod system {
             }
         }
         out
+    }
+
+    /// The most lines the checks may skip for being marked art (`// art:` and
+    /// the regions it opens; the parts in `ART` aside). A mark is for a
+    /// device's own drawing, not a way around the system: a page's row, a tab
+    /// or a card drawn by hand is a part to make. Lower it as marks go; it is
+    /// raised only with Grant's word.
+    const ART_LINES_AT_MOST: usize = 501;
+
+    /// How many lines are skipped for being marked art, and where the most are.
+    fn marked_art() -> (usize, Vec<String>) {
+        let mut total = 0;
+        let mut by_file = Vec::new();
+        for (name, text) in slint_files() {
+            let mut within = false;
+            let n = text.lines().filter(|line| is_art("", line, &mut within)).count();
+            total += n;
+            if n > 0 {
+                by_file.push(format!("{name}: {n}"));
+            }
+        }
+        (total, by_file)
+    }
+
+    #[test]
+    fn art_marks_are_capped() {
+        let (total, by_file) = marked_art();
+        assert!(total <= ART_LINES_AT_MOST, "{total} lines are marked art, more than the {ART_LINES_AT_MOST} allowed:\n  {}", by_file.join("\n  "));
     }
 
     fn px_values(s: &str) -> Vec<f32> {
@@ -192,22 +229,24 @@ mod system {
         assert!(bad.is_empty(), "shadows set by hand, not from Shadow:\n{}", bad.join("\n"));
     }
 
-    /// The pages' own lines (app.slint's, the parts aside): their file, number, the line
-    /// as written, and its code (comments out), art and lines marked `// art:` left out.
-    fn page_lines() -> Vec<(usize, String, String)> {
-        let text = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/app.slint")).unwrap();
-        let mut part = String::new();
-        let mut within = false;
+    /// The pages' own lines (every Slint file but the system's parts, under
+    /// ui/system/): their file, number, the line as written, and its code
+    /// (comments out), art and lines marked `// art:` left out.
+    fn page_lines() -> Vec<(String, usize, String, String)> {
         let mut out = Vec::new();
-        for (i, line) in text.lines().enumerate() {
-            let t = line.trim_start();
-            if let Some(rest) = t.strip_prefix("export component ").or_else(|| t.strip_prefix("component ")) {
-                part = rest.split_whitespace().next().unwrap_or("").to_string();
+        for (name, text) in slint_files().into_iter().filter(|(name, _)| !name.starts_with("system/")) {
+            let mut part = String::new();
+            let mut within = false;
+            for (i, line) in text.lines().enumerate() {
+                let t = line.trim_start();
+                if let Some(rest) = t.strip_prefix("export component ").or_else(|| t.strip_prefix("component ")) {
+                    part = rest.split_whitespace().next().unwrap_or("").to_string();
+                }
+                if is_art(&part, line, &mut within) {
+                    continue;
+                }
+                out.push((name.clone(), i + 1, line.to_string(), line.split("//").next().unwrap_or("").to_string()));
             }
-            if is_art(&part, line, &mut within) {
-                continue;
-            }
-            out.push((i + 1, line.to_string(), line.split("//").next().unwrap_or("").to_string()));
         }
         out
     }
@@ -215,11 +254,11 @@ mod system {
     #[test]
     fn page_gaps_are_tokens() {
         let mut bad = Vec::new();
-        for (n, line, code) in page_lines() {
+        for (f, n, line, code) in page_lines() {
             for prop in ["padding", "padding-left", "padding-right", "padding-top", "padding-bottom", "spacing"] {
                 let Some(v) = value_of(&code, prop) else { continue };
                 if px_values(v).iter().any(|&p| p > 0.0) {
-                    bad.push(format!("app.slint:{n}: {}", line.trim()));
+                    bad.push(format!("{f}:{n}: {}", line.trim()));
                 }
             }
         }
@@ -232,9 +271,9 @@ mod system {
         // menu's chevron is the DropField's or the WordButton's)
         const CHEVRONS: &[&str] = &["M3 4.5l3 3 3-3", "M1 1l4 4 4-4", "M2 3.5l3 3 3-3", "M6 9l6 6 6-6"];
         let mut bad = Vec::new();
-        for (n, line, code) in page_lines() {
+        for (f, n, line, code) in page_lines() {
             if code.contains("TextInput {") || CHEVRONS.iter().any(|c| line.contains(c)) {
-                bad.push(format!("app.slint:{n}: {}", line.trim()));
+                bad.push(format!("{f}:{n}: {}", line.trim()));
             }
         }
         assert!(bad.is_empty(), "a field or a dropdown drawn on a page, not the system's part:\n{}", bad.join("\n"));

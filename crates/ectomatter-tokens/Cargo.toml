@@ -11,4 +11,4 @@ repository = "https://github.com/Ectonomic/Ectomatter"
 description = "Ectomatter's design tokens, as Slint globals and Rust constants."
 
 [dependencies]
-serde_json = { version = "1", features = ["preserve_order"] }
+serde_json.workspace = true

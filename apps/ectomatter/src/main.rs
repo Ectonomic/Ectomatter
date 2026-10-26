@@ -64,6 +64,7 @@ mod lcd_stats;
 mod library;
 mod lighting;
 mod locks;
+mod log;
 mod macro_page;
 mod macros;
 mod monitors;
@@ -590,6 +591,11 @@ extern "C" fn on_term(_: libc::c_int) {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let snapshot = args.iter().position(|a| a == "--snapshot").and_then(|i| args.get(i + 1)).cloned();
+    // (a snapshot or a read of the keyboard is a tool's run, not the app's, and
+    // leaves the person's log as it was)
+    if snapshot.is_none() && !args.iter().any(|a| a == "--read-state") {
+        log::start();
+    }
     // what Ectomatter kept when it was named Ectodeck, moved to its own folders first
     old_name::move_old_home();
     // the typefaces legends can be set in: Ectomatter's own, the core's and
