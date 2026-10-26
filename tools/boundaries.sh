@@ -6,8 +6,10 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
-out=$(cargo test --release -p ectomatter -- --include-ignored boundar 2>&1)
-lines=$(printf '%s\n' "$out" | grep -E '^test .*boundar.* \.\.\. ' | sort)
+# the checks of the source (boundaries.rs), then Ectomatter run as a stranger's
+# computer has it (tests/stranger.rs)
+out=$(cargo test --release -p ectomatter --bin ectomatter -- --include-ignored boundar 2>&1; cargo test --release -p ectomatter --test stranger -- --include-ignored 2>&1)
+lines=$(printf '%s\n' "$out" | grep -E '^test .* \.\.\. (ok|FAILED)$' | sort)
 if [ -z "$lines" ]; then printf '%s\n' "$out" | tail -30; exit 2; fi
 held=$(printf '%s\n' "$lines" | grep -c ' ok$')
 not=$(printf '%s\n' "$lines" | grep -c ' FAILED$')

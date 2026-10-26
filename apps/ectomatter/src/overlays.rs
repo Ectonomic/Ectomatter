@@ -88,7 +88,8 @@ fn num(v: &Value) -> f32 {
 
 impl Overlays {
     pub fn new() -> Overlays {
-        let tree = crate::cores::shown().tree();
+        // (with no keyboard, an empty drawing: no board is ever laid)
+        let tree = crate::cores::keyboard().map_or_else(|| resvg::usvg::Tree::from_str("<svg xmlns='http://www.w3.org/2000/svg'/>", &resvg::usvg::Options::default()).unwrap(), |c| c.tree());
         let board: Value = serde_json::from_str(include_str!("../data/board.json")).unwrap();
         let v = &board["view"];
         let sliders = board["sliders"].as_array().map(|a| a.iter().map(|s| [num(&s[0]), num(&s[1]), num(&s[2]), num(&s[3])]).collect()).unwrap_or_default();

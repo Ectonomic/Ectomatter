@@ -21,31 +21,70 @@ mod tests {
         std::fs::read_to_string(repo().join(rel)).unwrap_or_else(|e| panic!("{rel}: {e}"))
     }
 
-    /// A Rust file's code, each line with its number: comments out, and every
-    /// item under `#[cfg(test)]` (counted by its braces) left out.
+    /// A Rust file's code, each line with its number: its comments out, and
+    /// every item under `#[cfg(test)]` left out (found by reading the file
+    /// as Rust).
     fn code(rel: &str) -> Vec<(usize, String)> {
         let text = read(rel);
+        let file = syn::parse_file(&text).unwrap_or_else(|e| panic!("{rel}: {e}"));
+        let mut tests = Vec::new();
+        tested(&file.items, &mut tests);
         let mut out = Vec::new();
-        let (mut skipping, mut depth, mut opened) = (false, 0i32, false);
         for (i, line) in text.lines().enumerate() {
+            let n = i + 1;
+            if tests.iter().any(|(a, b)| (*a..=*b).contains(&n)) {
+                continue;
+            }
             let line = line.split("//").next().unwrap_or("");
-            if line.trim_start().starts_with("#[cfg(test)]") {
-                (skipping, depth, opened) = (true, 0, false);
-                continue;
-            }
-            if skipping {
-                depth += line.matches('{').count() as i32 - line.matches('}').count() as i32;
-                opened |= line.contains('{');
-                if (opened && depth <= 0) || (!opened && line.trim_end().ends_with(';')) {
-                    skipping = false;
-                }
-                continue;
-            }
             if !line.trim().is_empty() {
-                out.push((i + 1, line.to_string()));
+                out.push((n, line.to_string()));
             }
         }
         out
+    }
+
+    fn is_test(attrs: &[syn::Attribute]) -> bool {
+        attrs.iter().any(|a| a.path().is_ident("cfg") && a.parse_args::<syn::Ident>().is_ok_and(|i| i == "test"))
+    }
+
+    fn lines_of(s: proc_macro2::Span) -> (usize, usize) {
+        (s.start().line, s.end().line)
+    }
+
+    /// The lines of each item under `#[cfg(test)]`, in modules and impls too.
+    fn tested(items: &[syn::Item], out: &mut Vec<(usize, usize)>) {
+        use syn::spanned::Spanned;
+        for item in items {
+            let attrs: &[syn::Attribute] = match item {
+                syn::Item::Fn(f) => &f.attrs,
+                syn::Item::Mod(m) => &m.attrs,
+                syn::Item::Impl(i) => &i.attrs,
+                syn::Item::Struct(s) => &s.attrs,
+                syn::Item::Enum(e) => &e.attrs,
+                syn::Item::Const(c) => &c.attrs,
+                syn::Item::Static(s) => &s.attrs,
+                syn::Item::Use(u) => &u.attrs,
+                syn::Item::Trait(t) => &t.attrs,
+                syn::Item::Type(t) => &t.attrs,
+                syn::Item::Macro(m) => &m.attrs,
+                _ => &[],
+            };
+            if is_test(attrs) {
+                out.push(lines_of(item.span()));
+            } else if let syn::Item::Mod(m) = item
+                && let Some((_, inner)) = &m.content
+            {
+                tested(inner, out);
+            } else if let syn::Item::Impl(i) = item {
+                for ii in &i.items {
+                    if let syn::ImplItem::Fn(f) = ii
+                        && is_test(&f.attrs)
+                    {
+                        out.push(lines_of(f.span()));
+                    }
+                }
+            }
+        }
     }
 
     fn rust_files() -> Vec<String> {
@@ -155,11 +194,11 @@ mod tests {
     /// Ectomatter installed on a computer without its source finds its cores
     /// and plugins: no path into the source folder is built into it.
     #[test]
-    #[ignore = "known failure: packages are found through the source folder (docs/deferred.md, stage 2)"]
     fn packages_are_found_where_ectomatter_is() {
         let mut found = Vec::new();
         for f in rust_files() {
-            if f.ends_with("boundaries.rs") || f.ends_with("tokens.rs") {
+            // (the tests' own fixtures, lcd_parity.rs a module of tests whole)
+            if f.ends_with("boundaries.rs") || f.ends_with("tokens.rs") || f.ends_with("lcd_parity.rs") {
                 continue;
             }
             for (n, line) in code(&f) {

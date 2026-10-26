@@ -8,18 +8,14 @@ proves it (`tools/boundaries.sh` shows which boundary tests pass).
 Found by the architecture audit of 2026-10-26 (at 814f96c). The stages run in
 the order Grant set: a device is only a core, plugins on equal footing,
 maintainable, other systems, and installable on Linux last. Two items of the
-installable stage come first because a device can't be only a core without
-them: finding packages at run time, and starting without the Z10's core.
+installable stage came first because a device can't be only a core without
+them: finding packages at run time, and starting without the Z10's core
+(both done: `tests/stranger.rs`).
 
 Paths are under `apps/ectomatter/src/` unless they say otherwise.
 
 ## Stage 2: a device is only a core
 
-- Packages are found through the source folder, fixed at build time:
-  `cores.rs:57-63` (`CARGO_MANIFEST_DIR`). `desk.rs:991-1000` reads
-  `cores::dir()/*/core.json` directly.
-- The app stops at startup without the Z10's core: `cores.rs:68-70`
-  (`shown()` panics), used in 31 places.
 - A core started like any other gets no USB: `hosted.rs:199` (`NoDevices`).
   The Z10's and the mouse's cores are started by name instead
   (`hosted.rs:141-143` `started_elsewhere`, `main.rs:1937-1938`,
@@ -59,6 +55,8 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   `main.rs:1395,2451`. Saved jobs, scenes and Library choices key devices as
   `"z10"` and `"sensei310"` (`jobs.rs:23-24`, `front.rs:6569,6573,8811`,
   `launcher.rs:916`).
+- The mouse lab's offscreen snapshot needs the keyboard's core: its readout
+  is the keyboard's board's (`main.rs`, `snap_lab`).
 - The Z10's core sends only its name in `device/added`; the app reads
   `device.json` from disk (`cores.rs:25`) though the core's describe names it
   (`cores/evga-z10/module/src/lib.rs:379`).

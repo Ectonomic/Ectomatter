@@ -2767,7 +2767,7 @@ impl Front {
     /// The keyboard's light as it lights it now: which caps are pale.
     pub fn light_caps(&mut self, light: &serde_json::Value) {
         crate::z10::set_bleeds(light);
-        let controls = crate::cores::shown().device["controls"].as_array().cloned().unwrap_or_default();
+        let controls = crate::cores::keyboard().and_then(|c| c.device["controls"].as_array().cloned()).unwrap_or_default();
         self.pale = controls.iter().filter_map(|c| Some((c["id"].as_str()?, c["pos"].as_u64()? as u32))).filter(|(id, _)| ectomatter_draw::hdr::pale_top(light, id)).map(|(_, pos)| pos).collect();
     }
 
@@ -2800,7 +2800,7 @@ impl Front {
                             Ok(families) => l.typeface_added(&families),
                             Err(why) => l.image_refused(&why),
                         },
-                        (Some(path), _) => match crate::setups::import_image(&crate::cores::shown().id, &path) {
+                        (Some(path), _) => match crate::setups::import_image(l.core(), &path) {
                             Ok(name) => l.put_image(part, &name),
                             Err(why) => l.image_refused(&why),
                         },
@@ -4747,7 +4747,7 @@ impl Front {
                         })
                         .collect();
                     // (this keyboard's own, then each other device's, then the scenes, each under its name)
-                    let mine = crate::cores::shown().name().to_string();
+                    let mine = crate::cores::keyboard().map_or("", |c| c.name()).to_string();
                     let mut groups: Vec<(&str, Vec<(Entry, Choice, i32)>)> = vec![(mine.as_str(), own)];
                     groups.extend(by_device_h.iter().map(|(h, v)| (h.as_str(), v.clone())));
                     groups.push(("Scenes", scene_jobs_h.clone()));
@@ -4841,6 +4841,10 @@ impl Front {
 
     /// Draw the page from the page's state.
     pub fn refresh(&mut self) {
+        // (a device's page with no core for the device isn't shown: Home is)
+        if self.ui.get_place() == "z10" && crate::cores::keyboard().is_none() {
+            self.ui.set_place("home".into());
+        }
         // (the page's sensors read only while Settings or the screen editor shows them)
         if self.ui.get_place() != "settings" && self.layouts.is_none() {
             if let Some(r) = &mut self.reader {
@@ -5472,7 +5476,7 @@ impl Front {
     /// and whether it is plugged in. The keyboard is always among them, the
     /// mouse once Ectomatter has met it.
     pub fn devices_in_order(&self) -> Vec<(String, String, String, bool)> {
-        let kb = || ("z10".to_string(), crate::cores::shown().name().to_string(), "keyboard".to_string(), self.ui.get_conn_state() == 1);
+        let kb = |core: &crate::cores::Core| ("z10".to_string(), core.name().to_string(), "keyboard".to_string(), self.ui.get_conn_state() == 1);
         let mouse = || {
             let name = self.mouse.state["device"]["name"].as_str().unwrap_or("SteelSeries Sensei 310").to_string();
             ("mouse".to_string(), name, "mouse".to_string(), self.mouse.present())
@@ -5483,7 +5487,7 @@ impl Front {
                 continue;
             }
             match id {
-                "z10" => out.push(kb()),
+                "z10" => out.extend(crate::cores::keyboard().map(kb)),
                 "mouse" if self.mouse.known() => out.push(mouse()),
                 _ => {}
             }
@@ -5919,8 +5923,7 @@ impl Front {
     /// those it has kept a place for; each at its size, and whether it is
     /// plugged in.
     fn desk_meet(&mut self) {
-        if self.page.dev.is_some() || self.desk.keeps("z10") {
-            let core = crate::cores::shown();
+        if let Some(core) = crate::cores::keyboard().filter(|_| self.page.dev.is_some() || self.desk.keeps("z10")) {
             let size = crate::desk::size_of(&core.art, core.device["light"]["scale"].as_f64().unwrap_or(1.38) as f32);
             // (not yet known to be plugged in, it is drawn as plugged in: only a keyboard gone shows dimmed)
             let kind = core.device["kind"].as_str().unwrap_or("keyboard").to_string();
@@ -6730,7 +6733,7 @@ impl Front {
     /// own description says; the keyboard's and the mouse's before they're met.
     fn device_kind(&self, id: &str) -> String {
         let told = if id == crate::z10::CORE {
-            crate::cores::shown().device["kind"].as_str().map(String::from).or(Some("keyboard".into()))
+            crate::cores::keyboard().and_then(|c| c.device["kind"].as_str().map(String::from)).or(Some("keyboard".into()))
         } else if id == crate::mouse::CORE {
             self.mouse.state["device"]["kind"].as_str().map(String::from).or(Some("mouse".into()))
         } else {

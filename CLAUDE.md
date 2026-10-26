@@ -16,10 +16,12 @@ This is where they live in this repository.
 - **Docs are claims.** `docs/core-protocol.md` and `docs/design-system.md`
   describe what's built. Check the code before repeating them; where a claim
   can be checked, a test in `boundaries.rs` or `tokens.rs` checks it.
-- **Stranger check.** Not available yet: the app still finds its packages
-  through this source folder (deferred list, stage 2). Once it doesn't, the
-  check is to run the release build from a copy outside the repo with a fresh
-  `XDG_CONFIG_HOME` and `XDG_DATA_HOME` and no devices.
+- **Stranger check.** `apps/ectomatter/tests/stranger.rs` (run by
+  `tools/boundaries.sh`): the release build copied away from the repo with
+  fresh `XDG_*` folders and no devices, drawn offscreen. Packages are found as
+  the app runs (`cores::home()`): `ECTOMATTER_PACKAGES`, else the source
+  folder above the program, else `share/ectomatter` beside its folder, else
+  `XDG_DATA_DIRS`.
 - **Design system.** `cargo test -p ectomatter tokens::system`; see
   `docs/design-system.md`.
 

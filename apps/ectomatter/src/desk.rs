@@ -988,16 +988,11 @@ fn view_box(svg: &str) -> Option<[f32; 4]> {
 /// What the empty desk says: the devices Ectomatter works with, by the cores it has.
 pub fn works_with() -> String {
     let mut names: Vec<String> = Vec::new();
-    if let Ok(dirs) = std::fs::read_dir(crate::cores::dir()) {
-        let mut dirs: Vec<_> = dirs.flatten().map(|d| d.path()).collect();
-        dirs.sort();
-        for d in dirs {
-            let Ok(t) = std::fs::read_to_string(d.join("core.json")) else { continue };
-            let Ok(c) = ectomatter_draw::jsonc::parse(&t) else { continue };
-            match c["devices"].as_array() {
-                Some(a) => names.extend(a.iter().filter_map(|n| n.as_str()).map(|n| format!("the {n}"))),
-                None => names.extend(c["name"].as_str().map(|n| format!("the {n}"))),
-            }
+    for p in crate::packages::of(crate::packages::Kind::Core) {
+        let c = &p.manifest.all;
+        match c["devices"].as_array() {
+            Some(a) => names.extend(a.iter().filter_map(|n| n.as_str()).map(|n| format!("the {n}"))),
+            None => names.extend(c["name"].as_str().map(|n| format!("the {n}"))),
         }
     }
     let list = match names.len() {

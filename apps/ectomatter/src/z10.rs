@@ -503,8 +503,8 @@ impl Page {
             k.cy = k.y + k.h / 2.0;
         }
         let by_pos = keys.iter().enumerate().map(|(i, k)| (k.pos, i)).collect();
-        let ids = crate::cores::shown().device["controls"]
-            .as_array()
+        let ids = crate::cores::keyboard()
+            .and_then(|c| c.device["controls"].as_array())
             .map(|c| c.iter().filter_map(|c| Some((c["pos"].as_u64()? as u32, c["id"].as_str()?.to_string()))).collect())
             .unwrap_or_default();
         let list = |name: &str| zones[name].as_array().map(|a| a.iter().map(u).collect()).unwrap_or_default();

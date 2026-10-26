@@ -52,6 +52,9 @@ ureq = { version = "3", default-features = false, features = ["rustls"] }
 ectomatter-sensors = { path = "../../crates/ectomatter-sensors", features = ["read", "fake"] }
 # the parity vectors the Z10 module is checked against are gzipped
 flate2 = "1"
+# the boundary checks read the app's source as Rust, its tests set apart by line (boundaries.rs)
+syn = { version = "2", features = ["full", "parsing"] }
+proc-macro2 = { version = "1", features = ["span-locations"] }
 
 [build-dependencies]
 slint-build = "1.18.1"

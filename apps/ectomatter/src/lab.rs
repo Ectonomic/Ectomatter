@@ -1085,6 +1085,11 @@ fn plain(light: Value, print: &Value) -> Value {
 }
 
 impl LabPage {
+    /// The id of the core whose device it tunes, which its setups and pictures are kept under.
+    pub fn core(&self) -> &str {
+        &self.device.core
+    }
+
     /// Whether the device tuned has lights that are windows of their own
     /// (a mouse): the window lights it, not the keyboard.
     pub fn windows(&self) -> bool {

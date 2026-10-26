@@ -314,8 +314,8 @@ mod kept_tests {
 
     /// The device's keys to simulate, and a make of their light for each beam.
     fn scene() -> (Scene, impl Fn(f32) -> Setup) {
-        let device: serde_json::Value = cores::shown().device_now();
-        let tree = cores::shown().tree();
+        let core = cores::keyboard().expect("the keyboard's core");
+        let (device, tree) = (core.device_now(), core.tree());
         let board = Board::new(&tree, &device, ink_env::rgb("stage", STAGE), 632, 253).unwrap();
         let base = Physics::from(&device["light"]);
         (Scene::of(&board), move |beam: f32| Setup::alike(Physics { beam, led: 7.0, ..base }))
@@ -364,8 +364,9 @@ mod kept_tests {
 fn board_builder(done: calloop::channel::Sender<(bool, Board)>, home: bool) -> std::sync::mpsc::Sender<(u32, u32, serde_json::Value, f32)> {
     let (ask, asked) = std::sync::mpsc::channel::<(u32, u32, serde_json::Value, f32)>();
     std::thread::spawn(move || {
-        let tree = cores::shown().tree();
-        let device: serde_json::Value = cores::shown().device_now();
+        // (with no keyboard, nothing to build: every ask is let go)
+        let Some(core) = cores::keyboard() else { return asked.into_iter().for_each(drop) };
+        let (tree, device) = (core.tree(), core.device_now());
         while let Ok(mut size) = asked.recv() {
             // only the latest size matters
             while let Ok(s) = asked.try_recv() {
@@ -463,8 +464,7 @@ fn settled(tree: &usvg::Tree, device: &serde_json::Value, ground: [u8; 3], w: u3
 
 /// The core's device description, its light as the setup in use makes it
 /// (the core's own, with none of the person's own in use).
-fn device_in_use(settings: &settings::Settings) -> serde_json::Value {
-    let core = cores::shown();
+fn device_in_use(core: &cores::Core, settings: &settings::Settings) -> serde_json::Value {
     let mut device = core.device_now();
     if let Some(s) = setups::in_use(settings, &core.id) {
         device["light"] = setups::merged(&device["light"], &s.changes);
@@ -523,9 +523,9 @@ mod key_tests {
 
 /// The typefaces the person's setups and the core's light name, all keys'
 /// and keys' own.
-fn setups_typefaces(core: &str) -> Vec<String> {
-    let mut lights: Vec<serde_json::Value> = setups::list(core).into_iter().map(|s| s.changes).collect();
-    lights.push(cores::shown().device_now()["light"].clone());
+fn setups_typefaces(core: &cores::Core) -> Vec<String> {
+    let mut lights: Vec<serde_json::Value> = setups::list(&core.id).into_iter().map(|s| s.changes).collect();
+    lights.push(core.device_now()["light"].clone());
     let mut out: Vec<String> = Vec::new();
     for l in &lights {
         let keys = l["keys"].as_object().map(|k| k.values().cloned().collect::<Vec<_>>()).unwrap_or_default();
@@ -570,14 +570,17 @@ fn main() {
     // the person's added, loaded in the background so the lab's list of
     // them opens at once; and a typeface a setup names from before Ectomatter
     // kept its own, taken in from this computer
-    ectomatter_draw::print::add_fonts(cores::shown().fonts());
-    ectomatter_draw::print::add_fonts(typefaces::files());
-    let named = setups_typefaces(&cores::shown().id);
-    for name in typefaces::adopt_named(&named) {
-        eprintln!("ectomatter: the typeface {name} taken into Ectomatter's own from this computer");
+    if let Some(core) = cores::keyboard() {
+        ectomatter_draw::print::add_fonts(core.fonts());
     }
-    // the person's own pictures, put on keys in place of their text
-    setups::load_images(&cores::shown().id);
+    ectomatter_draw::print::add_fonts(typefaces::files());
+    if let Some(core) = cores::keyboard() {
+        for name in typefaces::adopt_named(&setups_typefaces(core)) {
+            eprintln!("ectomatter: the typeface {name} taken into Ectomatter's own from this computer");
+        }
+        // the person's own pictures, put on keys in place of their text
+        setups::load_images(&core.id);
+    }
     ectomatter_draw::print::warm();
     // `--read-state FILE`: read the keyboard's state once, for the snapshots, and stop
     if let Some(path) = args.iter().position(|a| a == "--read-state").and_then(|i| args.get(i + 1)) {
@@ -994,9 +997,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
             window.dispatch_event(WindowEvent::PointerMoved { position: at(0.0) });
             window.dispatch_event(WindowEvent::PointerPressed { position: at(0.0), button });
             let rect = board_rect(&front.ui, 1.0);
-            let tree = cores::shown().tree();
-            let device = device_in_use(&front.settings);
-            let board = (rect.2 > 0).then(|| settled(&tree, &device, ink_env::rgb("stage", STAGE), rect.2 as u32, rect.3 as u32));
+            let board = cores::keyboard().filter(|_| rect.2 > 0).map(|core| settled(&core.tree(), &device_in_use(core, &front.settings), ink_env::rgb("stage", STAGE), rect.2 as u32, rect.3 as u32));
             for k in 1..=30 {
                 let t0 = Instant::now();
                 window.dispatch_event(WindowEvent::PointerMoved { position: at(k as f32 / 30.0) });
@@ -1031,8 +1032,9 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     }
     eprintln!("the cursor: {:?}", window.pointer());
     // (the caps' colors, for what is printed over the keys)
-    let in_use = device_in_use(&front.settings)["light"].clone();
-    front.light_caps(&in_use);
+    if let Some(core) = cores::keyboard() {
+        front.light_caps(&device_in_use(core, &front.settings)["light"]);
+    }
     front.refresh();
     window.request_redraw();
     window.draw_if_needed(|r| {
@@ -1047,9 +1049,9 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         r.render(&mut pic.ui, w as usize);
     });
     lay_ground(&mut pic, &front.ui, 1.0);
-    if rect.2 > 0 {
-        let tree = cores::shown().tree();
-        let device = device_in_use(&front.settings);
+    if let Some(core) = cores::keyboard().filter(|_| rect.2 > 0) {
+        let tree = core.tree();
+        let device = device_in_use(core, &front.settings);
         let t = Instant::now();
         let mut board = settled(&tree, &device, ink_env::rgb("stage", STAGE), rect.2 as u32, rect.3 as u32);
         // its shadow, as the window lays it
@@ -1104,10 +1106,10 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     }
     // Home's desk: the keyboard on it drawn for its place there, on the app's
     // ground, and laid as the window lays it
-    if let Some([x, y, kw, kh]) = front.desk_keyboard() {
+    if let (Some([x, y, kw, kh]), Some(core)) = (front.desk_keyboard(), cores::keyboard()) {
         let (bw, bh) = (kw.round().max(1.0) as u32, kh.round().max(1.0) as u32);
-        let tree = cores::shown().tree();
-        let device = device_in_use(&front.settings);
+        let tree = core.tree();
+        let device = device_in_use(core, &front.settings);
         let mut board = settled(&tree, &device, ink_env::rgb("base", HOME_GROUND), bw, bh);
         board.lay_shadow(&stage_shadow(1.0), STAGE_SHADOW_OPACITY);
         if let Some(s) = &board.cast {
@@ -1279,7 +1281,7 @@ fn snap_layouts(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow
         .and_then(|s| s.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
         .unwrap_or(LAYOUT_SIZE);
     let ui = LayoutWindow::new().unwrap();
-    ui.set_device_name(cores::shown().name().into());
+    ui.set_device_name(cores::keyboard().map_or("", |c| c.name()).into());
     let _ = slint::ComponentHandle::window(&ui);
     let window = made.borrow().last().cloned().unwrap();
     slint::ComponentHandle::show(&ui).unwrap();
@@ -1384,23 +1386,26 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
         .ok()
         .and_then(|s| s.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
         .unwrap_or(LAB_SIZE);
-    let device = device_in_use(&front.settings);
-    let tree = cores::shown().tree();
-    let board = settled(&tree, &device, ink_env::rgb("stage", STAGE), 1264, 506);
+    let mouse = std::env::var("ECTOMATTER_LAB").is_ok_and(|v| v == "mouse");
+    // (the readout is the keyboard's board's, the mouse's lab too)
+    let Some(core) = cores::keyboard() else {
+        return eprintln!("ectomatter: there's no keyboard's core for the lab's snapshot");
+    };
+    let device = device_in_use(core, &front.settings);
+    let board = settled(&core.tree(), &device, ink_env::rgb("stage", STAGE), 1264, 506);
     let ui = LabWindow::new().unwrap();
     let _ = slint::ComponentHandle::window(&ui);
     let window = made.borrow().last().cloned().unwrap();
     slint::ComponentHandle::show(&ui).unwrap();
     window.set_size(PhysicalSize::new(w, h));
     // ECTOMATTER_LAB=mouse: the lab on the mouse's lights (its picture drawn first)
-    let mouse = std::env::var("ECTOMATTER_LAB").is_ok_and(|v| v == "mouse");
     let mut lab = if mouse {
         front.ready_mouse_picture();
         let setup = setups::in_use(&front.settings, mouse::CORE).map(|s| s.id);
         lab::LabPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false), front.mouse_light_model(), mouse_lab_device(&front).expect("the mouse's picture"), setup)
     } else {
-        let setup = setups::in_use(&front.settings, &cores::shown().id).map(|s| s.id);
-        lab::LabPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false), device["light"].clone(), lab_device(Some(&board)), setup)
+        let setup = setups::in_use(&front.settings, &core.id).map(|s| s.id);
+        lab::LabPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false), device["light"].clone(), lab_device(core, Some(&board)), setup)
     };
     let lights = front.lights().unwrap_or_default();
     let gain = front.light_gain(reference);
@@ -1447,7 +1452,7 @@ fn snap_lab(mut front: Front, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>
         }
         // ECTOMATTER_IMPORT=file: the picture chosen when the file picker opens
         if let (Some(part), Some(file)) = (lab.image_wanted.take(), std::env::var_os("ECTOMATTER_IMPORT")) {
-            match setups::import_image(&cores::shown().id, std::path::Path::new(&file)) {
+            match setups::import_image(&core.id, std::path::Path::new(&file)) {
                 Ok(name) => lab.put_image(part, &name),
                 Err(why) => lab.image_refused(&why),
             }
@@ -1986,7 +1991,7 @@ fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<MinimalSoftware
     });
 
     // the keyboard lit by the light setup in use, if it is one of the person's own
-    let lit_by = setups::in_use(&settings, &cores::shown().id).map(|s| setups::merged(&cores::shown().device_now()["light"], &s.changes));
+    let lit_by = cores::keyboard().and_then(|core| setups::in_use(&settings, &core.id).map(|s| setups::merged(&core.device_now()["light"], &s.changes)));
     let mut app = App {
         registry: RegistryState::new(&globals),
         seats: SeatState::new(&globals, &qh),
@@ -2428,11 +2433,12 @@ impl App {
     fn open_layouts(&mut self, i: usize) {
         if self.front.layouts.is_none() {
             let ui = LayoutWindow::new().unwrap();
-            ui.set_device_name(cores::shown().name().into());
+            let name = cores::keyboard().map_or("", |c| c.name());
+            ui.set_device_name(name.into());
             let _ = slint::ComponentHandle::window(&ui);
             slint::ComponentHandle::show(&ui).unwrap();
             self.front.layouts = Some(layout_page::LayoutPage::new(ui, glyph(include_str!("../ui/glyphs/mark.svg"), 16, false)));
-            self.subs[LAYOUTS] = Some(self.make_sub(&format!("{} / Screen layouts", cores::shown().name()), LAYOUT_SIZE, LAYOUT_MIN_SIZE));
+            self.subs[LAYOUTS] = Some(self.make_sub(&format!("{name} / Screen layouts"), LAYOUT_SIZE, LAYOUT_MIN_SIZE));
         } else {
             self.show_sub(LAYOUTS);
         }
@@ -2442,7 +2448,7 @@ impl App {
     /// The light the keyboard is lit by: the lab's, if it has tuned
     /// one, or that of the setup in use (the core's, or one of the person's own).
     fn light_now(&self) -> serde_json::Value {
-        self.light.clone().unwrap_or_else(|| cores::shown().device_now()["light"].clone())
+        self.light.clone().or_else(|| cores::keyboard().map(|c| c.device_now()["light"].clone())).unwrap_or_default()
     }
 
     /// Open the lab, made the first time, on the light the keyboard is
@@ -2460,9 +2466,10 @@ impl App {
                 let name = format!("{} / {}", d.name, d.lab());
                 (self.front.mouse_light_model(), d, mouse::CORE.to_string(), name)
             } else {
-                let d = lab_device(self.board.as_ref());
+                let Some(core) = cores::keyboard() else { return };
+                let d = lab_device(core, self.board.as_ref());
                 let name = format!("{} / {}", d.name, d.lab());
-                (self.light_now(), d, cores::shown().id.clone(), name)
+                (self.light_now(), d, core.id.clone(), name)
             };
             let ui = LabWindow::new().unwrap();
             let _ = slint::ComponentHandle::window(&ui);
@@ -2781,8 +2788,8 @@ impl App {
             }
         }
         // the lab, open before the device was first drawn, takes its caps
-        if let Some(l) = self.front.lab.as_mut().filter(|l| !l.has_caps() && !home && !l.windows()) {
-            l.set_caps(lab_device(Some(&board)).caps);
+        if let (Some(l), Some(core)) = (self.front.lab.as_mut().filter(|l| !l.has_caps() && !home && !l.windows()), cores::keyboard()) {
+            l.set_caps(lab_device(core, Some(&board)).caps);
         }
         if let Some(l) = &self.light {
             board.set_light(l);
@@ -2875,7 +2882,7 @@ impl App {
     /// Legends set as the light asks: put them on the keyboard, and light it again.
     fn legends_ready(&mut self, legends: ectomatter_draw::hdr::Legends) {
         // (set for one size: the keyboard of that size takes them)
-        let light = self.light.clone().unwrap_or_else(|| cores::shown().device_now()["light"].clone());
+        let light = self.light_now();
         // (each that takes them: the page's and Home's may be drawn at one size)
         for board in [self.board.as_mut(), self.home_board.as_mut()].into_iter().flatten() {
             if board.takes(&legends) {
@@ -3855,8 +3862,7 @@ fn edge_cursor(e: Option<ResizeEdge>) -> Option<CursorIcon> {
 /// The device the lab tunes, as the shown core describes it: its
 /// name, where its description is, which of the light's parts it has, and
 /// (once its board is drawn) every cap, each in section as the art has it.
-fn lab_device(board: Option<&Board>) -> lab::LabDevice {
-    let core = cores::shown();
+fn lab_device(core: &cores::Core, board: Option<&Board>) -> lab::LabDevice {
     let light = core.device_now()["light"].clone();
     let mm = sim::Physics::from(&light).units_per_mm;
     let typical = light["typical"].as_str().map(str::to_string).or_else(|| light["typical"].as_u64().map(|n| n.to_string()));
