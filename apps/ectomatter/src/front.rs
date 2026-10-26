@@ -505,70 +505,21 @@ fn screen_page(code: u32) -> usize {
     if code >= z10::NEXT_PLAYLIST { PLAYLIST_PAGE } else { LAYOUT_PAGE }
 }
 
-/// The Key library's groups after the sliders and the buttons, and the keys in each by their ids.
-const LIB_GROUPS: [&str; 7] = ["Macro keys", "F-keys", "Number row", "Letters and symbols", "Modifiers and space", "Navigation", "Number pad"];
-fn lib_group_of(id: &str) -> &'static str {
-    match id {
-        "GameMode" | "MultimediaStop" | "MultimediaPreviousTrack" | "MultimediaPlayPause" | "MultimediaNextTrack" => "Buttons",
-        "E1" | "E2" | "E3" | "E4" | "E5" => "Macro keys",
-        "ESC" | "PrintScreen" | "ScrollLock" | "PauseBreak" => "F-keys",
-        f if f.len() <= 3 && f.starts_with('F') && f[1..].parse::<u8>().is_ok() => "F-keys",
-        "GraveAccent" | "Minus" | "Equals" | "Backspace" => "Number row",
-        d if d.len() == 1 && d.chars().all(|c| c.is_ascii_digit()) => "Number row",
-        "Tab" | "CapsLock" | "LSHIFT" | "RSHIFT" | "LCONTROL" | "RCONTROL" | "WIN" | "LALT" | "RALT" | "FN" | "Menu" | "Space" | "Enter" => "Modifiers and space",
-        "Insert" | "Home" | "PageUp" | "Delete" | "End" | "PageDown" | "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" | "E6" | "E7" => "Navigation",
-        k if k.starts_with("Keypad") || k == "NumLock" => "Number pad",
-        _ => "Letters and symbols",
-    }
-}
-
-/// The Key library's groups and their keys, in the order the keyboard has them.
+/// The Key library's groups and their keys, in the order the keyboard's
+/// description lists the groups (`groups`) and the keys (each its `group`).
 fn lib_groups(p: &Page) -> Vec<(String, Vec<z10::Key>)> {
-    let mut out: Vec<(String, Vec<z10::Key>)> = ["Buttons"].iter().chain(LIB_GROUPS.iter()).map(|g| (g.to_string(), Vec::new())).collect();
+    let mut out: Vec<(String, Vec<z10::Key>)> = lib_group_names().into_iter().map(|g| (g, Vec::new())).collect();
     for k in &p.layout {
-        let g = lib_group_of(&k.id);
-        if let Some(e) = out.iter_mut().find(|(n, _)| n == g) {
+        if let Some(e) = out.iter_mut().find(|(n, _)| *n == k.group) {
             e.1.push(k.clone());
         }
     }
     out
 }
 
-/// A key's cap, short, for the Key library.
-fn lib_cap(id: &str, name: &str) -> String {
-    let fixed = match id {
-        "GameMode" => "G/PC",
-        "MultimediaStop" => "Stop",
-        "MultimediaPreviousTrack" => "Prev",
-        "MultimediaPlayPause" => "Play",
-        "MultimediaNextTrack" => "Next",
-        "WIN" => "Win",
-        "LCONTROL" | "RCONTROL" => "Ctrl",
-        "LALT" | "RALT" => "Alt",
-        "LSHIFT" | "RSHIFT" => "Shift",
-        "ArrowUp" => "↑",
-        "ArrowDown" => "↓",
-        "ArrowLeft" => "←",
-        "ArrowRight" => "→",
-        "NumLock" => "Num",
-        "KeypadEnter" => "Ent",
-        "KeypadPlus" => "+",
-        "KeypadMinus" => "−",
-        "KeypadMultiply" => "*",
-        "KeypadDivide" => "/",
-        "KeypadPeriod" => ".",
-        _ => "",
-    };
-    if !fixed.is_empty() {
-        return fixed.into();
-    }
-    if let Some(d) = id.strip_prefix("Keypad") {
-        return d.into();
-    }
-    if name.chars().count() <= 3 {
-        return name.into();
-    }
-    name.split_whitespace().next().unwrap_or(name).chars().take(4).collect()
+/// The keyboard's groups of controls, as its description orders them.
+fn lib_group_names() -> Vec<String> {
+    crate::cores::keyboard().and_then(|k| k.device["groups"].as_array().map(|g| g.iter().filter_map(|g| g.as_str().map(String::from)).collect())).unwrap_or_default()
 }
 
 #[derive(Clone)]
@@ -1290,7 +1241,8 @@ impl Front {
             asks,
             menu: None,
             layer: 0,
-            lib_shut: LIB_GROUPS.iter().map(|g| g.to_string()).chain(["Sliders".to_string(), "Buttons".to_string()]).collect(),
+            // (every group shut at first)
+            lib_shut: lib_group_names().into_iter().chain(["Sliders".to_string()]).collect(),
             lib_query: String::new(),
             last_drafts: HashMap::new(),
             changed_at: HashMap::new(),
@@ -4936,7 +4888,7 @@ impl Front {
                 y: (k.y - y0 + z10::GAP / 2.0) as f32,
                 w: (k.w - z10::GAP) as f32,
                 h: (k.h - z10::GAP) as f32,
-                molded: k.id.starts_with("Multimedia"),
+                molded: k.molded,
                 remap: p.remap(k.pos, &names).filter(|_| self.rebindings).map(|s| s.to_uppercase()).unwrap_or_default().into(),
                 pale: self.pale.contains(&k.pos),
                 selected: p.view == View::Keys && p.sel == Some(k.pos),
@@ -5001,7 +4953,7 @@ impl Front {
             } else {
                 p.describe(&d)
             };
-            ui.set_key_cap(lib_cap(&k.id, &name).into());
+            ui.set_key_cap(k.short.as_str().into());
             ui.set_key_state((if rebound { format!("Rebound on {}.", p.profile_name(p.editing)) } else { "As it came from the factory.".to_string() }).into());
             ui.set_key_rebound(rebound);
             ui.set_layer_rebound(rebound_here);
@@ -5037,7 +4989,7 @@ impl Front {
                 self.lib_revealed = chosen;
                 let group = match chosen {
                     Some(-1) | Some(-2) => Some("Sliders"),
-                    Some(pos) => p.key(pos as u32).map(|k| lib_group_of(&k.id)),
+                    Some(pos) => p.key(pos as u32).map(|k| k.group.as_str()),
                     None => None,
                 };
                 if let Some(g) = group {
@@ -5082,12 +5034,13 @@ impl Front {
                         let re = d != fac;
                         let job = if re {
                             if let Action::Macro { n, .. } = d { p.macro_label(n) } else if z10::is_nothing(&d) { "Nothing".into() } else { p.describe(&d) }
-                        } else if g == "Buttons" && !z10::is_nothing(&fac) && p.describe(&fac) != name {
+                        // (a button, with nothing printed on it, is known by what it does)
+                        } else if !k.printed && !z10::is_nothing(&fac) && p.describe(&fac) != name {
                             p.describe(&fac)
                         } else {
                             String::new()
                         };
-                        LibRow { id: k.pos as i32, cap: lib_cap(&k.id, &name).into(), name: name.clone().into(), job: job.into(), rebound: re, chosen: p.sel == Some(k.pos) }
+                        LibRow { id: k.pos as i32, cap: k.short.as_str().into(), name: name.clone().into(), job: job.into(), rebound: re, chosen: p.sel == Some(k.pos) }
                     })
                     .filter(|r| q.is_empty() || r.name.to_lowercase().contains(&q) || r.job.to_lowercase().contains(&q))
                     .collect();

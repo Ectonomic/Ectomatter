@@ -23,10 +23,14 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   with the Z10's driver crate (a dev-dependency only: `apps/ectomatter/Cargo.toml`,
   `core_host.rs` tests, `lcd_parity.rs`); they belong with the core once it
   has a repository of its own.
-- The keyboard page is the Z10's: the Z10's geometry built in
-  (`z10.rs:459-461`, `overlays.rs:92-97`, `lcd_draw.rs:18`), its screen's
-  built-in apps (`display.rs:13`), and the Z10's own setting ids
-  (`device.rs`: `dimmer`, `modes`, `displays/light`, `displays/apps`).
+- The keyboard page still holds the Z10's: its board's regions and the
+  screen's fonts built in (`overlays.rs:92-97`, `lcd_draw.rs:18`, the knobs
+  `control_117`/`control_118` in `overlays.rs`), its screen's built-in apps
+  (`display.rs:13`), and the Z10's own setting ids (`device.rs`: `dimmer`,
+  `modes`, `displays/light`, `displays/apps`). The page's module is still
+  named for it (`z10.rs`, `z10::Page`).
+- A key's box on the page is given in the description (`box`, EVGA's own
+  editor's), not found from its piece in the art.
 - The screen is fixed at 20 by 4 (`lcd_page.rs:27-28`, `lcd_anim.rs:13-14`,
   `layout_page.rs:555,906`, `screen_edit.rs`, `overlays.rs:14-15`,
   `lcd_player.rs:94`), though the core describes its displays.

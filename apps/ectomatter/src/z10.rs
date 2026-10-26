@@ -15,12 +15,21 @@ pub const CORE: &str = "evga-z10";
 /// drawn gap between neighboring keys, in the drawing's units
 pub const GAP: f64 = 3.0;
 
-/// A key as the page knows it: where it is in the drawing, and whether a
-/// light sits behind it.
+/// A key as the page knows it, from its core's description: its place and
+/// id, its name, the cap it has in the Key library and the group it's
+/// listed under, whether it's molded into the case and whether its cap is
+/// printed, where it is in the drawing, and whether a light sits behind it.
 #[derive(Clone, Debug)]
 pub struct Key {
     pub pos: u32,
     pub id: String,
+    pub label: String,
+    pub short: String,
+    pub group: String,
+    pub molded: bool,
+    /// whether its cap has anything printed on it (`print`): one with none,
+    /// a button, is known by its job
+    pub printed: bool,
     pub x: f64,
     pub y: f64,
     pub w: f64,
@@ -38,131 +47,6 @@ pub enum View {
     Display,
     /// the screen: what Ectomatter plays on it, and what it shows when Ectomatter is closed
     Screen,
-}
-
-/// Each cap's legend, for the key's name where it has no full name.
-fn legend_main(id: &str) -> Option<&'static str> {
-    Some(match id {
-        "ESC" => "ESC",
-        "PrintScreen" => "PRINT",
-        "ScrollLock" => "SCROLL",
-        "PauseBreak" => "PAUSE",
-        "GraveAccent" => "`",
-        "Minus" => "-",
-        "Equals" => "=",
-        "Backspace" => "BACKSPACE",
-        "Insert" => "INSERT",
-        "Home" => "HOME",
-        "PageUp" => "PG",
-        "Tab" => "TAB",
-        "LBracket" => "[",
-        "RBracket" => "]",
-        "BackSlash" => "\\",
-        "Delete" => "DELETE",
-        "End" => "END",
-        "PageDown" => "PG",
-        "CapsLock" => "CAPS",
-        "Semicolon" => ";",
-        "SingleQuotation" => "'",
-        "Enter" => "ENTER",
-        "LSHIFT" | "RSHIFT" => "SHIFT",
-        "Comma" => ",",
-        "Period" => ".",
-        "Slash" => "/",
-        "LCONTROL" | "RCONTROL" => "CTRL",
-        "FN" => "FN",
-        "LALT" | "RALT" => "ALT",
-        "WIN" => "\u{229e}",
-        "Menu" => "\u{2261}",
-        "ArrowUp" => "\u{25b2}",
-        "ArrowDown" => "\u{25bc}",
-        "ArrowLeft" => "\u{25c0}",
-        "ArrowRight" => "\u{25b6}",
-        "NumLock" => "NUM",
-        "KeypadDivide" => "/",
-        "KeypadMultiply" => "*",
-        "KeypadMinus" => "-",
-        "KeypadPlus" => "+",
-        "KeypadEnter" => "ENTER",
-        "Keypad0" => "0",
-        "Keypad1" => "1",
-        "Keypad2" => "2",
-        "Keypad3" => "3",
-        "Keypad4" => "4",
-        "Keypad5" => "5",
-        "Keypad6" => "6",
-        "Keypad7" => "7",
-        "Keypad8" => "8",
-        "Keypad9" => "9",
-        "KeypadPeriod" => ".",
-        "0" => "0",
-        "1" => "1",
-        "2" => "2",
-        "3" => "3",
-        "4" => "4",
-        "5" => "5",
-        "6" => "6",
-        "7" => "7",
-        "8" => "8",
-        "9" => "9",
-        "F1" => "F1",
-        "F2" => "F2",
-        "F3" => "F3",
-        "F4" => "F4",
-        "F5" => "F5",
-        "F6" => "F6",
-        "F7" => "F7",
-        "F8" => "F8",
-        "F9" => "F9",
-        "F10" => "F10",
-        "F11" => "F11",
-        "F12" => "F12",
-        _ => return None,
-    })
-}
-
-fn full_name(id: &str) -> Option<&'static str> {
-    Some(match id {
-        "ESC" => "Escape",
-        "GraveAccent" => "Grave accent",
-        "LBracket" => "Left bracket",
-        "RBracket" => "Right bracket",
-        "BackSlash" => "Backslash",
-        "SingleQuotation" => "Quote",
-        "LSHIFT" => "Left Shift",
-        "RSHIFT" => "Right Shift",
-        "LCONTROL" => "Left Ctrl",
-        "RCONTROL" => "Right Ctrl",
-        "LALT" => "Left Alt",
-        "RALT" => "Right Alt",
-        "FN" => "Fn",
-        "WIN" => "Win",
-        "GameMode" => "Game mode button",
-        "MultimediaStop" => "Media stop",
-        "MultimediaPreviousTrack" => "Previous track",
-        "MultimediaPlayPause" => "Play/pause",
-        "MultimediaNextTrack" => "Next track",
-        "KeypadDivide" => "Keypad /",
-        "KeypadMultiply" => "Keypad *",
-        "KeypadMinus" => "Keypad -",
-        "KeypadPlus" => "Keypad +",
-        "KeypadEnter" => "Keypad Enter",
-        "KeypadPeriod" => "Keypad .",
-        "ArrowUp" => "Up arrow",
-        "ArrowDown" => "Down arrow",
-        "ArrowLeft" => "Left arrow",
-        "ArrowRight" => "Right arrow",
-        "PrintScreen" => "Print Screen",
-        "ScrollLock" => "Scroll Lock",
-        "PauseBreak" => "Pause/Break",
-        "CapsLock" => "Caps Lock",
-        "NumLock" => "Num Lock",
-        "PageUp" => "Page Up",
-        "PageDown" => "Page Down",
-        "Space" => "Space",
-        "Menu" => "Menu",
-        _ => return None,
-    })
 }
 
 /// USB HID keyboard usages, by the names the page shows: the core protocol's
@@ -408,7 +292,8 @@ pub struct Page {
     by_pos: HashMap<u32, usize>,
     /// each key's id in the core's description, by its place in the keyboard's reports
     ids: HashMap<u32, String>,
-    zones: Vec<(u8, Vec<u32>)>,
+    /// the keys' light's zones: each one's bit, the keys it lights, and whether it lights them all
+    zones: Vec<(u8, Vec<u32>, bool)>,
     /// the drawing's view: its left, top, width and height
     pub view_box: (f64, f64, f64, f64),
     center: (f64, f64),
@@ -453,60 +338,43 @@ pub struct Page {
 }
 
 impl Page {
+    /// The page of the keyboard Ectomatter shows, from its core's
+    /// description: each control with a place and a box on the page, in the
+    /// description's order (whether a light sits behind it, its `lit`), the
+    /// part of the drawing the page shows (`view`), and the keys each zone
+    /// of the keys' light lights, as its core describes them. With no
+    /// keyboard, a page of nothing.
     pub fn new() -> Page {
-        let layout: Value = serde_json::from_str(include_str!("../data/layout.json")).unwrap();
-        let board: Value = serde_json::from_str(include_str!("../data/board.json")).unwrap();
-        let zones: Value = serde_json::from_str(include_str!("../data/zones.json")).unwrap();
-        let v = &board["view"];
-        let view_box = (f(&v[0]), f(&v[1]), f(&v[2]) - f(&v[0]), f(&v[3]) - f(&v[1]));
-        let mut keys: Vec<Key> = layout
+        let k = crate::cores::keyboard();
+        Page::of(k.map_or(&Value::Null, |k| &k.device), k.map_or(&Value::Null, |k| k.described()))
+    }
+
+    /// The page of a keyboard its core describes so: in its device file
+    /// (`device`) and as it runs (`described`).
+    pub fn of(device: &Value, described: &Value) -> Page {
+        let v = &device["view"];
+        let view_box = (f(&v[0]), f(&v[1]), f(&v[2]), f(&v[3]));
+        let mut keys: Vec<Key> = device["controls"]
             .as_array()
-            .unwrap()
-            .iter()
-            .map(|k| Key {
-                pos: u(&k["pos"]),
-                id: k["id"].as_str().unwrap_or("").to_string(),
-                x: f(&k["x"]),
-                y: f(&k["y"]),
-                w: f(&k["w"]),
-                h: f(&k["h"]),
-                led: k["led"].as_bool().unwrap_or(false),
-                cx: 0.0,
-                cy: 0.0,
+            .into_iter()
+            .flatten()
+            .filter_map(|c| {
+                let (pos, b) = (c["pos"].as_u64()? as u32, c["box"].as_array()?);
+                let id = c["id"].as_str()?.to_string();
+                let word = |k: &str| c[k].as_str().map(String::from);
+                let label = word("label").unwrap_or_else(|| id.clone());
+                Some(Key { pos, short: word("short").unwrap_or_else(|| label.clone()), group: word("group").unwrap_or_default(), molded: c["molded"] == true, printed: c["print"].as_array().is_some_and(|p| !p.is_empty()), label, id, x: f(&b[0]), y: f(&b[1]), w: f(&b[2]), h: f(&b[3]), led: c["lit"] != false, cx: 0.0, cy: 0.0 })
             })
             .collect();
-        // the spacebar stands taller than its row and overhangs the front of its well
-        if let Some(s) = keys.iter_mut().find(|k| k.id == "Space") {
-            s.h = f(&board["space"][3]) + GAP / 2.0 - s.y;
-        }
-        // the keys EVGA's layout leaves out: the mode button and the four media keys
-        let extra = |pos: u32, id: &str, b: &Value| Key {
-            pos,
-            id: id.into(),
-            x: f(&b[0]) - GAP / 2.0,
-            y: f(&b[1]) - GAP / 2.0,
-            w: f(&b[2]) - f(&b[0]) + GAP,
-            h: f(&b[3]) - f(&b[1]) + GAP,
-            led: false,
-            cx: 0.0,
-            cy: 0.0,
-        };
-        keys.push(extra(0, "GameMode", &board["gpc"]));
-        keys.push(extra(17, "MultimediaStop", &board["media"][0]));
-        keys.push(extra(18, "MultimediaPreviousTrack", &board["media"][1]));
-        keys.push(extra(19, "MultimediaPlayPause", &board["media"][2]));
-        keys.push(extra(20, "MultimediaNextTrack", &board["media"][3]));
         for k in &mut keys {
             k.cx = k.x + k.w / 2.0;
             k.cy = k.y + k.h / 2.0;
         }
         let by_pos = keys.iter().enumerate().map(|(i, k)| (k.pos, i)).collect();
-        let ids = crate::cores::keyboard()
-            .and_then(|c| c.device["controls"].as_array())
-            .map(|c| c.iter().filter_map(|c| Some((c["pos"].as_u64()? as u32, c["id"].as_str()?.to_string()))).collect())
-            .unwrap_or_default();
-        let list = |name: &str| zones[name].as_array().map(|a| a.iter().map(u).collect()).unwrap_or_default();
-        let zones = vec![(0x10, list("WASD")), (0x08, list("Arrows")), (0x04, list("Numbers")), (0x02, list("FKeys")), (0x01, list("Numpad"))];
+        let ids = keys.iter().map(|k| (k.pos, k.id.clone())).collect();
+        let light = described["capabilities"]["lighting"]["lights"].as_array().and_then(|l| l.iter().find(|l| l["id"] == "keys").cloned()).unwrap_or(Value::Null);
+        // (the whole keyboard's zone names no keys: it lights every one)
+        let zones = light["zones"].as_array().into_iter().flatten().filter_map(|z| Some((z["bit"].as_u64()? as u8, z["controls"].as_array().map(|c| c.iter().map(u).collect()).unwrap_or_default(), z["whole"] == true))).collect();
         let (mut x0, mut x1, mut y0, mut y1) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
         for k in &keys {
             x0 = x0.min(k.cx);
@@ -714,19 +582,9 @@ impl Page {
         }
     }
 
+    /// A key's name, as its core's description gives it.
     pub fn key_label(&self, k: &Key) -> String {
-        if let Some(n) = full_name(&k.id) {
-            return n.into();
-        }
-        match legend_main(&k.id) {
-            Some(m) if m.chars().count() > 1 => {
-                let mut c = m.chars();
-                let first = c.next().unwrap();
-                format!("{first}{}", c.as_str().to_lowercase())
-            }
-            Some(m) => m.into(),
-            None => k.id.clone(),
-        }
+        k.label.clone()
     }
 
     /// What a key does on a layer ("base", or "fn" with Fn held), in the profile being edited.
@@ -975,12 +833,13 @@ impl Page {
         }
     }
 
+    /// The keys the zones `zone` (their bits) light; None for every key.
     pub fn zone_set(&self, zone: u8) -> Option<Vec<u32>> {
-        if zone & 0x80 != 0 {
+        if self.zones.iter().any(|(bit, _, whole)| *whole && zone & bit != 0) {
             return None;
         }
         let mut s = Vec::new();
-        for (bit, list) in &self.zones {
+        for (bit, list, _) in &self.zones {
             if zone & bit != 0 {
                 s.extend(list.iter().copied());
             }
@@ -1402,6 +1261,32 @@ mod saving_tests {
         assert_eq!(p.save_body_of(1)["lighting"]["keys"]["effect"], "off");
         p.drafts.get_mut(&1).unwrap()["lighting"]["keys"]["effect"] = json!("static");
         assert!(p.is_dirty(1));
+    }
+
+    /// docs/core-protocol.md, section 4: a keyboard Ectomatter has never seen
+    /// gets its page from its core's description alone: its keys where their
+    /// boxes put them, named and grouped as it says, its unlit and molded
+    /// ones as it says, and its zones lighting the keys it names.
+    #[test]
+    fn a_keyboard_of_its_own_gets_its_page_from_its_description() {
+        let device = json!({ "name": "Made-up board", "kind": "keyboard", "view": [0, 0, 100, 40], "groups": ["Letters", "Buttons"],
+            "controls": [
+                { "id": "q", "label": "Q", "pos": 0, "art": 1, "print": [{ "text": "Q" }], "box": [0, 0, 20, 20], "group": "Letters" },
+                { "id": "w", "label": "W", "pos": 1, "art": 2, "print": [{ "text": "W" }], "box": [20, 0, 20, 20], "group": "Letters", "short": "Wu" },
+                { "id": "play", "label": "Play", "pos": 2, "art": 3, "box": [60, 0, 10, 10], "group": "Buttons", "lit": false, "molded": true },
+                { "id": "knob", "label": "Knob", "art": 4 }
+            ] });
+        let described = json!({ "capabilities": { "lighting": { "lights": [{ "id": "keys", "zones": [{ "bit": 2, "label": "All", "whole": true }, { "bit": 1, "label": "Left", "controls": [0] }] }] } } });
+        let p = Page::of(&device, &described);
+        assert_eq!(p.layout.iter().map(|k| k.id.as_str()).collect::<Vec<_>>(), ["q", "w", "play"], "a control with no box isn't on the page");
+        assert_eq!(p.view_box, (0.0, 0.0, 100.0, 40.0));
+        let w = p.key(1).unwrap();
+        assert_eq!((w.label.as_str(), w.short.as_str(), w.group.as_str(), w.cx, w.cy), ("W", "Wu", "Letters", 30.0, 10.0));
+        let play = p.key(2).unwrap();
+        assert!(!play.led && play.molded && !play.printed);
+        assert_eq!(p.key(0).unwrap().short, "Q", "its label where it gives no short");
+        assert_eq!(p.zone_set(1), Some(vec![0]));
+        assert_eq!(p.zone_set(2), None, "the whole zone lights every key");
     }
 
     #[test]

@@ -80,7 +80,7 @@ fn snapshot(exe: &Path, home: &Path, packages: Option<&Path>, place: &str) -> (b
         c.env("ECTOMATTER_PACKAGES", p);
     }
     let run = c.output().unwrap();
-    let said = String::from_utf8_lossy(&run.stderr).into_owned();
+    let said = format!("{}\n(it ended: {})", String::from_utf8_lossy(&run.stderr), run.status);
     let drawn = run.status.success() && std::fs::metadata(&out).is_ok_and(|m| m.len() == 1000 * 700 * 8);
     (drawn, said)
 }

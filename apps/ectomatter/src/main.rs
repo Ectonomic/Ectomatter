@@ -292,10 +292,6 @@ fn config_dir() -> PathBuf {
 fn data_dir() -> PathBuf {
     std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/share")).join("com.ectonomic.ectomatter")
 }
-/// A core's own folder of files, which the core sees as /data.
-fn core_data(id: &str) -> PathBuf {
-    data_dir().join("cores").join(id)
-}
 
 /// How bright the desktop's white is and how bright the keys' light can go
 /// on the brightest screen: up to Peak nits, and no higher than its peak.
@@ -1156,7 +1152,7 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     if front.ui.get_place() == "home" {
         front.ready_desk_mouse();
     }
-    // ECTOMATTER_HOLD="J;mouse/right": those keys (by the layout's ids) and mouse
+    // ECTOMATTER_HOLD="j;mouse/right": those keys (by the core's ids) and mouse
     // buttons (by the core's) held down, as the devices' presses hold them
     for id in std::env::var("ECTOMATTER_HOLD").unwrap_or_default().split(';').map(str::trim).filter(|p| !p.is_empty()) {
         if let Some(button) = id.strip_prefix("mouse/") {
@@ -1170,8 +1166,8 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     if pic.mouse_rect().2 > 0 {
         eprintln!("the mouse laid at {:?}", pic.mouse_rect());
     }
-    // ECTOMATTER_RIPPLE="F,400;Enter,900;mouse/left,600": ripples from those
-    // keys (by the layout's ids) and mouse buttons (by the core's), each that
+    // ECTOMATTER_RIPPLE="f,400;enter,900;mouse/left,600": ripples from those
+    // keys and mouse buttons (by their cores' ids), each that
     // many milliseconds into its run, as pressing them sends across Home's
     // desk, in the devices' light as they're drawn
     for part in std::env::var("ECTOMATTER_RIPPLE").unwrap_or_default().split(';').filter(|p| !p.is_empty()) {

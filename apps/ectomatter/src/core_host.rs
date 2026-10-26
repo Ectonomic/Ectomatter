@@ -607,7 +607,9 @@ pub struct Core {
 impl Core {
     /// Start the core in `dir` (its manifest and module), its own files in
     /// `data`, its devices reached through `usb`. The module is made ready
-    /// on the core's thread, so the first call waits for that.
+    /// on the core's thread, so the first call waits for that. (A test's:
+    /// Ectomatter starts its packages through Hosted.)
+    #[cfg(test)]
     pub fn start(dir: &Path, data: PathBuf, usb: Box<dyn Usb>) -> Result<Core, String> {
         Core::start_with(dir, data, usb, None)
     }
