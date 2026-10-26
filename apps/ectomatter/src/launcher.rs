@@ -463,8 +463,12 @@ enum Written {
 /// each with how its value may be written: Proton's, Wine's, DXVK's,
 /// VKD3D's, SDL's, MangoHud's and gamescope's that tune a game and run
 /// nothing of their own.
-const VARIABLES: [(&str, Written); 24] = [
+const VARIABLES: [(&str, Written); 28] = [
     ("PROTON_ENABLE_HDR", Written::Number),
+    ("PROTON_DLSS_UPGRADE", Written::Number),
+    ("PROTON_FSR4_UPGRADE", Written::Number),
+    ("PROTON_XESS_UPGRADE", Written::Number),
+    ("PROTON_NO_NTSYNC", Written::Number),
     ("PROTON_ENABLE_WAYLAND", Written::Number),
     ("PROTON_PREFER_SDL", Written::Number),
     ("PROTON_USE_SDL", Written::Number),

@@ -946,10 +946,15 @@ mod tests {
         assert_eq!(r["wrap"], json!([["gamemoderun"]]));
         // (what it makes, gamescope and MangoHud and the person's own variables
         // too, is all Ectomatter knows safe: written whole)
-        for values in [json!({ "hdr": "proton" }), json!({ "hdr": "gamescope", "gs": true, "mangohud": true, "cap": "120", "env": { "MY_MOD": "1" }, "dll": "dwrite=n,b" })] {
+        for values in [json!({ "hdr": "proton" }), json!({ "hdr": "gamescope", "gs": true, "mangohud": true, "cap": "120", "env": { "MY_MOD": "1" }, "dll": "dwrite=n,b" }), json!({ "hdr": "proton", "dlss": true, "fsr4": true, "xess": true, "log": true, "wined3d": true, "nofsync": true, "nontsync": true, "hidenv": true, "xbox": true, "gamemode": true })] {
             let r = ps.launch(&json!({ "id": "steam_app_1808500", "name": "ARC Raiders", "app": 1808500 }), &|_| values.clone(), &|_| json!({}), &facts).unwrap().unwrap();
             let (checked, left_out) = crate::launcher::checked_recipe(&r, &facts, &["MY_MOD".to_string()]);
             assert_eq!((&checked, left_out), (&r, Vec::<String>::new()), "{r}");
+            if values["dlss"] == true {
+                for v in ["PROTON_DLSS_UPGRADE", "PROTON_FSR4_UPGRADE", "PROTON_XESS_UPGRADE", "PROTON_NO_NTSYNC", "PROTON_LOG"] {
+                    assert_eq!(r["env"][v], "1", "{v} in {r}");
+                }
+            }
         }
     }
 
