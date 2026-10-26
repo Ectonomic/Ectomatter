@@ -241,7 +241,7 @@ mod system {
     }
 
     /// the pages laid out in Rust, and the parts they're laid out with
-    const LAID: &[&str] = &["boxes.rs", "described.rs", "display.rs", "ecto_settings.rs", "form.rs", "games_page.rs", "lighting.rs", "menu_size.rs", "mouse.rs", "screen_edit.rs"];
+    const LAID: &[&str] = &["boxes.rs", "described.rs", "display.rs", "ecto_settings.rs", "form.rs", "games_page.rs", "lab.rs", "lighting.rs", "menu_size.rs", "mouse.rs", "screen_edit.rs"];
 
     /// The floats written on a line of code, as numbers.
     fn floats(code: &str) -> Vec<f32> {

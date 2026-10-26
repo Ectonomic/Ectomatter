@@ -536,6 +536,21 @@ const SETUP_W: f32 = 200.0;
 const KEY_PICK: i32 = 1000;
 /// what the core's own setup is called, beside the person's custom ones
 const DEFAULT: &str = "Default";
+/// the head's intro and the line under the stage at their least; Save at its least
+const INTRO_LEAST: f32 = 200.0;
+const TOLD_LEAST: f32 = 100.0;
+const SAVE_LEAST: f32 = 176.0;
+/// the foot's readout: a reading's name and its value apart, readings apart, a reading's
+/// zone (the room that tells of it), and the line between groups, its room either side
+const READ_GAP: f32 = 6.0;
+const READ_APART: f32 = 14.0;
+const ZONE_H: f32 = 32.0;
+const SEP_IN: f32 = 2.0;
+const SEP_OUT: f32 = 15.0;
+/// the room a line of words keeps past its last letter, so it never clips
+const WORDS_ROOM: f32 = 2.0;
+/// a part's name beside its text box, across
+const TEXT_NAME_W: f32 = 70.0;
 /// a key's own text for the parts of its legend (see print::TEXTS): their
 /// boxes, by part; and the glyphs' list's glyphs, by their place on it,
 /// with the page round the list after them
@@ -2320,7 +2335,7 @@ impl LabPage {
                 let lines = if self.image_of(part).is_some() { 1.0 } else { self.text_of(part).split('\n').count().clamp(1, 3) as f32 };
                 let h = 34.0 + 18.0 * (lines - 1.0);
                 let b = (cx + 72.0, y, drawing::CTRL_W - 72.0, h);
-                y += h + 6.0;
+                y += h + 6.0; // art: a part's text box, the next under it
                 b
             })
             .collect()
@@ -2494,14 +2509,14 @@ impl LabPage {
         ];
         for (g, (glyph, _)) in GLYPHS.iter().enumerate() {
             let (c, r) = at(g);
-            out.push(Cell { text: (*glyph).into(), id: GLYPH + g as i32, style: 31, ..cell(kind::SEG_BUTTON, lx + 12.0 + c * (side + gap), ly + 12.0 + r * (side + gap), side, side) });
+            out.push(Cell { text: (*glyph).into(), id: GLYPH + g as i32, style: 31, ..cell(kind::SEG_BUTTON, lx + crate::tokens::space::ROW + c * (side + gap), ly + crate::tokens::space::ROW + r * (side + gap), side, side) });
         }
         for (n, name) in names.iter().enumerate() {
             let Some(icon) = icons.get(name) else { continue };
             let (c, r) = at(GLYPHS.len() + n);
-            out.push(Cell { fill: icon.fill.as_str().into(), lines: icon.stroke.as_str().into(), id: GLYPH_ICON + n as i32, style: 31, ..cell(kind::SEG_BUTTON, lx + 12.0 + c * (side + gap), ly + 12.0 + r * (side + gap), side, side) });
+            out.push(Cell { fill: icon.fill.as_str().into(), lines: icon.stroke.as_str().into(), id: GLYPH_ICON + n as i32, style: 31, ..cell(kind::SEG_BUTTON, lx + crate::tokens::space::ROW + c * (side + gap), ly + crate::tokens::space::ROW + r * (side + gap), side, side) });
         }
-        out.push(Cell { text: "Choose a picture…".into(), id: IMAGE_CHOOSE, style: 23, ..cell(kind::GHOST, lx + 12.0, ly + lh - 12.0 - 32.0, lw - 24.0, 32.0) });
+        out.push(Cell { text: "Choose a picture…".into(), id: IMAGE_CHOOSE, style: 23, ..cell(kind::GHOST, lx + crate::tokens::space::ROW, ly + lh - crate::tokens::space::ROW - crate::tokens::size::BUTTON, lw - 2.0 * crate::tokens::space::ROW, crate::tokens::size::BUTTON) });
         out
     }
 
@@ -2639,16 +2654,18 @@ impl LabPage {
     /// How wide Save is: as its words need, and no narrower than it was.
     /// The section reset button's width, as its words make it.
     fn default_w(&self) -> f32 {
-        text::width(crate::tokens::font::MEDIUM, crate::tokens::font::CONTROL, &self.section_reset_words().0) + 24.0
+        crate::form::button_width(&self.section_reset_words().0, false)
     }
 
     fn save_w(&self) -> f32 {
-        (text::width(crate::tokens::font::STRONG, crate::tokens::font::CONTROL, &self.save_text()) + 26.0).max(176.0)
+        use crate::tokens::{font, part};
+        // (a primary button: its words strong, Part.primary wider than its neighbors)
+        (text::width(font::STRONG, font::CONTROL, &self.save_text()).ceil() + 2.0 * part::BUTTON_PAD + part::PRIMARY).max(SAVE_LEAST)
     }
 
     fn save_text(&self) -> String {
         match self.setup {
-            Some(_) => format!("Save to {}", elide(&self.setup_name(), SETUP_W, 600, 13.0)),
+            Some(_) => format!("Save to {}", elide(&self.setup_name(), SETUP_W, crate::tokens::font::STRONG, crate::tokens::font::CONTROL)),
             None => format!("Save to {DEFAULT}"),
         }
     }
@@ -3148,8 +3165,8 @@ impl LabPage {
         let color = |c: [u8; 3]| slint::Color::from_rgb_u8(c[0], c[1], c[2]);
         let in_color = |st: i32, x: f32, y: f32, ww: f32, hh: f32, s: &str, c: [u8; 3]| Cell { color: color(c), ..text_cell(st, x, y, ww, hh, s) };
         // the head: the title and what the lab is, and the sections
-        let mut cells = vec![text_cell(style::TITLE, 24.0, 14.0, 300.0, 29.0, &self.device.lab())];
-        use crate::tokens::{part, size, space};
+        use crate::tokens::{font, ink, line, part, size, space};
+        let mut cells = Vec::new();
         // (its switches the app's: a ground a control's height, its buttons Part.inset in,
         // as wide as their words, Part.seg-gap apart; Space.row between the switches, the
         // last at the page's margin)
@@ -3180,11 +3197,12 @@ impl LabPage {
         let uw = crate::form::choice_w(&setup, true, false);
         let ux = qx - space::ROW - (uw + 2.0 * part::INSET);
         // what the page is, or whose own setup it shows; shorter where the head is narrow
-        let room = (ux - 48.0).max(200.0);
+        let room = (ux - 2.0 * space::MARGIN).max(INTRO_LEAST);
         let (full, brief) = self.intro();
         // (cut short where even the brief one does not fit)
-        let intro = if text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, &full) <= room { full } else { elide(&brief, room, 400, 12.5) };
-        cells.push(text_cell(style::NOTE, 24.0, 44.0, room, 18.0, &intro));
+        let intro = if text::width(font::REGULAR, font::NOTE, &full) <= room { full } else { elide(&brief, room, font::REGULAR, font::NOTE) };
+        cells.push(text_cell(style::TITLE, space::MARGIN, part::TITLE_TOP, room, line::TITLE, &self.device.lab()));
+        cells.push(text_cell(style::NOTE, space::MARGIN, part::TITLE_TOP + line::TITLE + space::TIGHT, room, line::NOTE, &intro));
         cells.push(ground(ux, uw + 2.0 * part::INSET));
         cells.push(Cell { text: setup.into(), on: self.menu != Menu::Shut, id: SETUP, index: 0, style: 24, ..cell(kind::CHOICE, ux + part::INSET, by, uw, bh) });
         cells.push(ground(qx, scope_w));
@@ -3201,11 +3219,11 @@ impl LabPage {
         let saved_work = self.work_of(&self.saved);
         // a value of the chosen key's own: a mark before its name, which gives it back to all keys
         let own_mark = |over: &mut Vec<Cell>, x: f32, y: f32, index: i32| {
-            over.push(Cell { style: 3, ..cell(kind::DOT, x - 19.0, y + 9.5, 7.0, 7.0) });
-            over.push(Cell { id: OWN, index, ..cell(kind::LINK, x - 25.0, y + 4.0, 19.0, 18.0) });
+            over.push(Cell { style: 3, ..cell(kind::DOT, x - 19.0, y + 9.5, size::DOT, size::DOT) }); // art: the mark before its name
+            over.push(Cell { id: OWN, index, ..cell(kind::LINK, x - 25.0, y + 4.0, 19.0, 18.0) }); // art: the mark's own room to press
         };
         // the stage, and the words on it
-        let (sx, sy) = (24.0, HEAD_H);
+        let (sx, sy) = (space::MARGIN, HEAD_H);
         let mut sketches = Vec::new();
         let mut over = Vec::new();
         if let Some((st, image)) = &self.drawn {
@@ -3224,8 +3242,8 @@ impl LabPage {
             // the typeface: its name on a button that opens the list of them
             let family = style.as_ref().map_or(String::new(), |s| s.typeface.clone());
             let y = sy + drawing::choice_y(1);
-            over.push(Cell { id: TYPEFACE, ..cell(kind::ZONE, cx - 10.0, y - 7.0, drawing::CTRL_W + 20.0, drawing::CHOICE_H) });
-            over.push(text_cell(style::LABEL, cx, y, drawing::CTRL_W, 26.0, "Typeface"));
+            over.push(Cell { id: TYPEFACE, ..cell(kind::ZONE, cx - 10.0, y - 7.0, drawing::CTRL_W + 20.0, drawing::CHOICE_H) }); // art: the zone round a choice, as a slider's row has
+            over.push(text_cell(style::LABEL, cx, y, drawing::CTRL_W, size::QUIET, "Typeface"));
             if self.owns(("legends", "typeface")) {
                 own_mark(&mut over, cx, y, TYPEFACE);
             }
@@ -3243,8 +3261,8 @@ impl LabPage {
             let y = sy + drawing::choice_y(k);
             let id = CHOICE + c as i32;
             let rows = self.option_rows(c);
-            over.push(Cell { id, ..cell(kind::ZONE, cx - 10.0, y - 7.0, drawing::CTRL_W + 20.0, drawing::CHOICE_H + ROW_H * (rows.len() as f32 - 1.0)) });
-            over.push(text_cell(style::LABEL, cx, y, drawing::CTRL_W, 26.0, choice.label));
+            over.push(Cell { id, ..cell(kind::ZONE, cx - 10.0, y - 7.0, drawing::CTRL_W + 20.0, drawing::CHOICE_H + ROW_H * (rows.len() as f32 - 1.0)) }); // art: the zone round a choice, as a slider's row has
+            over.push(text_cell(style::LABEL, cx, y, drawing::CTRL_W, size::QUIET, choice.label));
             if self.owns(CHOSEN[c][0]) {
                 own_mark(&mut over, cx, y, CHOICE + c as i32);
             }
@@ -3266,8 +3284,8 @@ impl LabPage {
         // tops and one for their sides, each in its color, opening the picker
         if self.section == 1 {
             let y = sy + drawing::choice_y(self.choices().len());
-            over.push(Cell { id: COLOR, ..cell(kind::ZONE, cx - 10.0, y - 7.0, drawing::CTRL_W + 20.0, drawing::CHOICE_H) });
-            over.push(text_cell(style::LABEL, cx, y, drawing::CTRL_W, 26.0, "Color"));
+            over.push(Cell { id: COLOR, ..cell(kind::ZONE, cx - 10.0, y - 7.0, drawing::CTRL_W + 20.0, drawing::CHOICE_H) }); // art: the zone round a choice, as a slider's row has
+            over.push(text_cell(style::LABEL, cx, y, drawing::CTRL_W, size::QUIET, "Color"));
             if COLOR_PATHS.iter().any(|&p| self.owns(p)) {
                 own_mark(&mut over, cx, y, COLOR);
             }
@@ -3284,8 +3302,8 @@ impl LabPage {
         // key's legend has
         if self.section == LEGENDS && !self.mapping() && !self.choices().is_empty() {
             let (rx, y) = (sx + drawing::column_x(false, sw), sy + drawing::choice_y(0));
-            over.push(Cell { id: PART, ..cell(kind::ZONE, rx - 10.0, y - 7.0, drawing::CTRL_W + 20.0, drawing::CHOICE_H) });
-            over.push(text_cell(style::LABEL, rx, y, drawing::CTRL_W, 26.0, "Adjust"));
+            over.push(Cell { id: PART, ..cell(kind::ZONE, rx - 10.0, y - 7.0, drawing::CTRL_W + 20.0, drawing::CHOICE_H) }); // art: the zone round a choice, as a slider's row has
+            over.push(text_cell(style::LABEL, rx, y, drawing::CTRL_W, size::QUIET, "Adjust"));
             let here = self.parts_here();
             let options: Vec<(usize, &str)> = PART_NAMES.iter().copied().enumerate().filter(|&(j, _)| j == 0 || here[j - 1]).collect();
             let widths: Vec<f32> = options.iter().map(|(_, name)| crate::form::choice_w(name, false, false)).collect();
@@ -3308,15 +3326,15 @@ impl LabPage {
         // its mark where the key has text of its own; for all keys, the way there
         if self.section == LEGENDS && !self.mapping() && !self.faces_open && !self.choices().is_empty() {
             let y = sy + drawing::choice_y(3) + self.text_drop();
-            over.push(text_cell(style::LABEL, cx, y, drawing::CTRL_W, 26.0, "Text"));
+            over.push(text_cell(style::LABEL, cx, y, drawing::CTRL_W, size::QUIET, "Text"));
             let boxes = self.text_boxes();
             if boxes.is_empty() {
                 for (n, line) in wrap_after("Choose One key above to change a key's text.", drawing::CTRL_W, drawing::CTRL_W).iter().enumerate() {
-                    over.push(text_cell(style::NOTE, cx, y + 30.0 + 18.0 * n as f32, drawing::CTRL_W, 18.0, line));
+                    over.push(text_cell(style::NOTE, cx, y + CHOICE_TOP + line::NOTE * n as f32, drawing::CTRL_W, line::NOTE, line));
                 }
             }
             for (part, &(_, by, _, _)) in boxes.iter().enumerate() {
-                over.push(text_cell(style::NOTE, cx, by + 8.0, 70.0, 18.0, TEXT_NAMES[part].0));
+                over.push(text_cell(style::NOTE, cx, by + space::INLINE, TEXT_NAME_W, line::NOTE, TEXT_NAMES[part].0));
                 if self.owns(("legends", ectomatter_draw::print::TEXTS[part].0)) || self.owns(("legends", IMAGE_KEYS[part])) {
                     own_mark(&mut over, cx, by + 4.0, TEXT + part as i32);
                 }
@@ -3365,7 +3383,7 @@ impl LabPage {
         // where it sits, and how far that is from the cap's middle each way
         if let (false, Some((st, _, image))) = (self.mapping(), &self.pad) {
             let (px, py, pw, ph) = self.pad_box();
-            over.push(text_cell(style::LABEL, px, py - 30.0, pw, 26.0, "Switch's place"));
+            over.push(text_cell(style::LABEL, px, py - CHOICE_TOP, pw, size::QUIET, "Switch's place"));
             sketches.push(Sketch { x: px, y: py, w: st.w, h: st.h, image: image.clone() });
             for word in &st.words {
                 let top = py + word.y - 1.005 * 11.5 - (16.0 - 1.3 * 11.5) / 2.0;
@@ -3392,13 +3410,13 @@ impl LabPage {
                 over.push(in_color(style::SMALL_IN, fx + word.x, top, text::width(crate::tokens::font::REGULAR, crate::tokens::font::CAPTION, &word.text) + 2.0, 16.0, &word.text, word.color));
             }
             let (first, rows) = (self.face_first, self.face_rows());
-            over.push(Cell { id: FIND, style: 2, text: self.face_query.clone().into(), ..cell(kind::FIELD, fx + 12.0, fy + 12.0, fw - 24.0, 34.0) });
-            over.push(Cell { id: FACE, index: 0, ..cell(kind::LINK, fx + 8.0, fy + 66.0, fw - 16.0, 34.0) });
+            over.push(Cell { id: FIND, style: 2, text: self.face_query.clone().into(), ..cell(kind::FIELD, fx + space::ROW, fy + space::ROW, fw - 2.0 * space::ROW, size::CONTROL) });
+            over.push(Cell { id: FACE, index: 0, ..cell(kind::LINK, fx + space::INLINE, fy + 66.0, fw - 2.0 * space::INLINE, size::CONTROL) }); // art: the list's first row, under its find box
             for i in 0..rows.min(self.face_list().len().saturating_sub(1 + first)) {
-                over.push(Cell { id: FACE, index: (first + i + 1) as i32, ..cell(kind::LINK, fx + 8.0, fy + 132.0 + i as f32 * 34.0, fw - 16.0, 34.0) });
+                over.push(Cell { id: FACE, index: (first + i + 1) as i32, ..cell(kind::LINK, fx + space::INLINE, fy + 132.0 + i as f32 * size::CONTROL, fw - 2.0 * space::INLINE, size::CONTROL) }); // art: the rest, under the one in use
             }
             // (at its foot, the button that adds a typeface of the person's own)
-            over.push(Cell { text: "Add a typeface…".into(), id: ADD_TYPEFACE, style: 23, ..cell(kind::GHOST, fx + 12.0, fy + st.h - 12.0 - 34.0, fw - 24.0, 34.0) });
+            over.push(Cell { text: "Add a typeface…".into(), id: ADD_TYPEFACE, style: 23, ..cell(kind::GHOST, fx + space::ROW, fy + st.h - space::ROW - size::BUTTON, fw - 2.0 * space::ROW, size::BUTTON) });
         }
         // the map, open to choose a key: every cap where the art has it, the
         // chosen one lit, those with a setup of their own marked
@@ -3415,12 +3433,12 @@ impl LabPage {
             let x0 = x0 - ((mw - 48.0) / k - (x1 - x0)) / 2.0;
             // the page behind it dimmed, the map raised over it
             over.push(Cell { style: 28, ..cell(kind::TILE, sx, sy, sw, sh) });
-            over.push(Cell { style: 27, ..cell(kind::TILE, mx, my, mw, map_h + 92.0) });
+            over.push(Cell { style: 27, ..cell(kind::TILE, mx, my, mw, map_h + 92.0) }); // art: the map, its head over its keys
             let one = self.parts().1;
             let title = format!("Choose a {one}");
-            over.push(text_cell(style::LABEL, mx + 24.0, my + 18.0, 200.0, 26.0, &title));
+            over.push(text_cell(style::LABEL, mx + space::MARGIN, my + 18.0, size::LABEL, size::QUIET, &title)); // art: the map's head
             let note = format!("Changes you make to a chosen {one} are for it alone. A dot marks a {one} with its own setup.");
-            over.push(text_cell(style::NOTE, mx + 24.0 + text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, &title) + 14.0, my + 22.0, mw - 200.0, 18.0, &note));
+            over.push(text_cell(style::NOTE, mx + space::MARGIN + text::width(crate::tokens::font::REGULAR, crate::tokens::font::TEXT, &title) + 14.0, my + 22.0, mw - size::LABEL, line::NOTE, &note)); // art: the map's head
             for (i, (c, _)) in self.device.caps.iter().enumerate() {
                 let (mut kx, mut ky) = (mx + 24.0 + (c.foot[0] - x0) * k, my + 64.0 + (c.foot[1] - y0) * k);
                 let (mut kw, mut kh) = ((c.foot[2] - c.foot[0]) * k, (c.foot[3] - c.foot[1]) * k);
@@ -3431,24 +3449,25 @@ impl LabPage {
                     let (bw, bh) = (kw.max(text::width(crate::tokens::font::REGULAR, crate::tokens::font::SMALL, &name) + 24.0), kh.max(32.0));
                     (kx, ky, kw, kh) = (kx + (kw - bw) / 2.0, ky + (kh - bh) / 2.0, bw, bh);
                 }
-                over.push(Cell { text: name.into(), on: self.scope == Some(i), id: MAP, index: i as i32, style: 25, ..cell(kind::GHOST, kx + 1.5, ky + 1.5, kw - 3.0, kh - 3.0) });
+                over.push(Cell { text: name.into(), on: self.scope == Some(i), id: MAP, index: i as i32, style: 25, ..cell(kind::GHOST, kx + 1.5, ky + 1.5, kw - 3.0, kh - 3.0) }); // art: a key on the map, a little in from its cap
                 if self.light["keys"][c.id.as_str()].is_object() {
-                    over.push(Cell { style: 3, ..cell(kind::DOT, kx + kw - 10.0, ky + 4.5, 6.0, 6.0) });
+                    over.push(Cell { style: 3, ..cell(kind::DOT, kx + kw - 10.0, ky + 4.5, 6.0, 6.0) }); // art: a key's dot, at its corner
                 }
             }
         }
         // the line under the stage: what the slider under the pointer does, or what the section is
         let (name, note) = self.told();
-        let hy = sy + sh + 10.0;
-        let nw = text::width(crate::tokens::font::MEDIUM, crate::tokens::font::NOTE, &name) + 2.0;
-        cells.push(in_color(style::LABEL_IN, 24.0, hy, nw, 18.0, &name, [0xe5, 0xe5, 0xe5]));
-        let first = (w - 48.0 - nw - 6.0).max(100.0);
+        let hy = sy + sh + space::ROW;
+        let nw = text::width(font::MEDIUM, font::NOTE, &name) + WORDS_ROOM;
+        cells.push(Cell { color: crate::tokens::color(ink::BRIGHT), ..text_cell(style::LABEL_IN, space::MARGIN, hy, nw, line::NOTE, &name) });
+        let across = w - 2.0 * space::MARGIN;
+        let first = (across - nw - space::INLINE).max(TOLD_LEAST);
         // (two lines of it, the second ending in an ellipsis where it goes on)
-        let lines = wrap_after(&note, first, w - 48.0);
-        for (k, line) in lines.iter().take(2).enumerate() {
-            let x = if k == 0 { 24.0 + nw + 6.0 } else { 24.0 };
-            let line = if k == 1 && lines.len() > 2 { elide(&format!("{line}…"), w - 48.0, 400, 12.5) } else { line.clone() };
-            cells.push(text_cell(style::NOTE, x, hy + 18.125 * k as f32, w - 48.0, 18.0, &line));
+        let lines = wrap_after(&note, first, across);
+        for (k, words) in lines.iter().take(2).enumerate() {
+            let x = if k == 0 { space::MARGIN + nw + space::INLINE } else { space::MARGIN };
+            let words = if k == 1 && lines.len() > 2 { elide(&format!("{words}…"), across, font::REGULAR, font::NOTE) } else { words.clone() };
+            cells.push(text_cell(style::NOTE, x, hy + line::NOTE * k as f32, across, line::NOTE, &words));
         }
         (cells, (sketches, over, rows), self.readout_line(), Vec::new())
     }
@@ -3481,77 +3500,84 @@ impl LabPage {
     /// The foot's room for its readout and what was last done, beside its buttons.
     fn foot_room(&self) -> f32 {
         let (w, _, _, _) = self.sizes();
-        let reset = if self.setup.is_some() { self.default_w() + 10.0 } else { 0.0 };
-        w - 24.0 - self.save_w() - 10.0 - 68.0 - 10.0 - reset - 132.0 - 10.0 - 24.0
+        use crate::tokens::space;
+        // (the foot's buttons Space.inline apart, its margin either side)
+        let button = |words: &str| crate::form::button_width(words, false) + space::INLINE;
+        let reset = if self.setup.is_some() { self.default_w() + space::INLINE } else { 0.0 };
+        w - 2.0 * space::MARGIN - self.save_w() - button("Revert") - reset - button("Hold to compare") - space::INLINE
     }
 
     /// The most room what was last done takes: what the shortest readout leaves.
     fn status_room(&self) -> f32 {
-        self.foot_room() - (self.readout_at(4).1 - 24.0) - 16.0
+        self.foot_room() - (self.readout_at(4).1 - crate::tokens::space::MARGIN) - crate::tokens::space::PAD
     }
 
     /// The readout laid out, saying less as `level` rises; and where it ends.
     fn readout_at(&self, level: u8) -> (Vec<Cell>, f32) {
+        use crate::tokens::{color, font, ink, line, size, space, stroke};
         let r = self.readout;
-        let color = |c: [u8; 3]| slint::Color::from_rgb_u8(c[0], c[1], c[2]);
+        // (each reading on the foot's line, in the middle of the foot; its zone round it)
+        let ly = (size::FOOT - line::NOTE) / 2.0;
+        let zy = (size::FOOT - ZONE_H) / 2.0;
         let in_color = |st: i32, x: f32, s: &str, c: [u8; 3]| {
-            let wgt = if st == style::LABEL_IN { 500 } else { 400 };
-            Cell { color: color(c), ..text_cell(st, x, 23.0, text::width(wgt, 12.5, s) + 2.0, 18.0, s) }
+            let wgt = if st == style::LABEL_IN { font::MEDIUM } else { font::REGULAR };
+            Cell { color: color(c), ..text_cell(st, x, ly, text::width(wgt, font::NOTE, s) + WORDS_ROOM, line::NOTE, s) }
         };
+        let note_w = |s: &str| text::width(font::REGULAR, font::NOTE, s);
         let clearing = r.photons > 0 && !r.settled;
-        let value_color = if clearing { [0x7c, 0x7c, 0x7c] } else { [0xe5, 0xe5, 0xe5] };
+        let value_color = if clearing { ink::QUIET } else { ink::BRIGHT };
         let nits = |v: f64| if v < 10.0 { format!("{v:.1}") } else { format!("{v:.0}") };
         let mut out = Vec::new();
-        let mut x = 24.0;
+        let mut x = space::MARGIN;
         if level < 2 {
             let head = "Brightest now";
-            out.push(in_color(style::LABEL_IN, x, head, [0xa3, 0xa3, 0xa3]));
-            x += text::width(crate::tokens::font::MEDIUM, crate::tokens::font::NOTE, head) + 12.0;
+            out.push(in_color(style::LABEL_IN, x, head, ink::SOFT));
+            x += text::width(font::MEDIUM, font::NOTE, head) + space::ROW;
         }
         // (a device whose lights are windows: each light's brightest, then the desktop's white)
         if self.device.windows {
             for (k, (c, _)) in self.device.caps.iter().take(2).enumerate() {
                 let value = format!("{} nits", nits(r.lights[k]));
                 let x0 = x;
-                out.push(text_cell(style::NOTE, x, 23.0, text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, &c.label) + 2.0, 18.0, &c.label));
-                x += text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, &c.label) + 6.0;
+                out.push(text_cell(style::NOTE, x, ly, note_w(&c.label) + WORDS_ROOM, line::NOTE, &c.label));
+                x += note_w(&c.label) + READ_GAP;
                 out.push(in_color(style::LABEL_IN, x, &value, value_color));
-                x += text::width(crate::tokens::font::MEDIUM, crate::tokens::font::NOTE, &value);
-                out.insert(out.len() - 2, Cell { id: READING + 5, ..cell(kind::ZONE, x0 - 4.0, 16.0, x - x0 + 8.0, 32.0) });
-                x += 14.0;
+                x += text::width(font::MEDIUM, font::NOTE, &value);
+                out.insert(out.len() - 2, Cell { id: READING + 5, ..cell(kind::ZONE, x0 - space::TIGHT, zy, x - x0 + 2.0 * space::TIGHT, ZONE_H) });
+                x += READ_APART;
             }
-            x += 2.0;
-            out.push(Cell { color: color([0x3a, 0x3a, 0x3a]), ..cell(kind::BOX, x, 25.0, 1.0, 14.0) });
-            x += 15.0;
+            x += SEP_IN;
+            out.push(Cell { color: color(ink::SEAM), ..cell(kind::BOX, x, (size::FOOT - line::SMALL) / 2.0, stroke::LINE, line::SMALL) });
+            x += SEP_OUT;
             let white = format!("{} nits", nits(r.white));
-            out.push(text_cell(style::NOTE, x, 23.0, text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, "Desktop white") + 2.0, 18.0, "Desktop white"));
-            x += text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, "Desktop white") + 6.0;
+            out.push(text_cell(style::NOTE, x, ly, note_w("Desktop white") + WORDS_ROOM, line::NOTE, "Desktop white"));
+            x += note_w("Desktop white") + READ_GAP;
             out.push(in_color(style::LABEL_IN, x, &white, value_color));
-            x += text::width(crate::tokens::font::MEDIUM, crate::tokens::font::NOTE, &white);
+            x += text::width(font::MEDIUM, font::NOTE, &white);
             return (out, x);
         }
         let held = self.legend_note().is_some();
         let items: [(&str, String); 5] = [("Legend", nits(r.legend)), ("Deck", nits(r.deck)), ("Skirt", nits(r.skirt)), ("Chassis", nits(r.chassis)), ("Display", format!("{} nits", nits(r.lcd)))];
         let item = |out: &mut Vec<Cell>, x: &mut f32, id: i32, label: &str, value: &str, c: [u8; 3]| {
             let x0 = *x;
-            out.push(text_cell(style::NOTE, *x, 23.0, text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, label) + 2.0, 18.0, label));
-            *x += text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, label) + 6.0;
+            out.push(text_cell(style::NOTE, *x, ly, note_w(label) + WORDS_ROOM, line::NOTE, label));
+            *x += note_w(label) + READ_GAP;
             out.push(in_color(style::LABEL_IN, *x, value, c));
-            *x += text::width(crate::tokens::font::MEDIUM, crate::tokens::font::NOTE, value);
-            out.insert(out.len() - 2, Cell { id, ..cell(kind::ZONE, x0 - 4.0, 16.0, *x - x0 + 8.0, 32.0) });
-            *x += 14.0;
+            *x += text::width(font::MEDIUM, font::NOTE, value);
+            out.insert(out.len() - 2, Cell { id, ..cell(kind::ZONE, x0 - space::TIGHT, zy, *x - x0 + 2.0 * space::TIGHT, ZONE_H) });
+            *x += READ_APART;
         };
         for (k, (label, value)) in items.iter().enumerate() {
             if k == 4 && level >= 4 {
                 continue;
             }
-            let c = if k == 0 && held { [0xf0, 0xb3, 0x5a] } else { value_color };
+            let c = if k == 0 && held { ink::WARN } else { value_color };
             item(&mut out, &mut x, READING + k as i32, label, value, c);
         }
         let sep = |out: &mut Vec<Cell>, x: &mut f32| {
-            *x += 2.0;
-            out.push(Cell { color: color([0x3a, 0x3a, 0x3a]), ..cell(kind::BOX, *x, 25.0, 1.0, 14.0) });
-            *x += 15.0;
+            *x += SEP_IN;
+            out.push(Cell { color: color(ink::SEAM), ..cell(kind::BOX, *x, (size::FOOT - line::SMALL) / 2.0, stroke::LINE, line::SMALL) });
+            *x += SEP_OUT;
         };
         sep(&mut out, &mut x);
         if level < 3 {
@@ -3566,9 +3592,9 @@ impl LabPage {
         } else {
             format!("Clearing{photons}")
         };
-        let sw = text::width(crate::tokens::font::REGULAR, crate::tokens::font::NOTE, &sim) + 2.0;
-        out.push(Cell { id: READING + 6, ..cell(kind::ZONE, x - 4.0, 16.0, sw + 8.0, 32.0) });
-        out.push(text_cell(style::NOTE, x, 23.0, sw, 18.0, &sim));
+        let sw = note_w(&sim) + WORDS_ROOM;
+        out.push(Cell { id: READING + 6, ..cell(kind::ZONE, x - space::TIGHT, zy, sw + 2.0 * space::TIGHT, ZONE_H) });
+        out.push(text_cell(style::NOTE, x, ly, sw, line::NOTE, &sim));
         (out, x + sw)
     }
 }
