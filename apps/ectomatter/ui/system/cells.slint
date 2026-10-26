@@ -433,7 +433,7 @@ export component CellView inherits Rectangle {
         }
         if root.c.style == 6: Rectangle {
             x: parent.width - Size.compact - Space.tight;
-            y: (parent.height - Size.compact) / 2;
+            y: (Size.control - Size.compact) / 2; // (by its first line, however many lines the box has)
             width: Size.compact;
             height: Size.compact;
             border-radius: Radius.small;
@@ -453,7 +453,7 @@ export component CellView inherits Rectangle {
         // a key's text: its glyphs' button, which gives the box the keys and opens their list
         if root.c.style == 4 || root.c.style == 5: Rectangle {
             x: parent.width - Size.compact - Space.tight;
-            y: (parent.height - Size.compact) / 2;
+            y: (Size.control - Size.compact) / 2; // (by its first line, however many lines the box has)
             width: Size.compact;
             height: Size.compact;
             border-radius: Radius.small;

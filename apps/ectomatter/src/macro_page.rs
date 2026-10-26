@@ -529,13 +529,25 @@ impl MacroPage {
     /// there anyway (the menu then scrolls); above it only when below is cramped.
     fn place_menu(&mut self) {
         let Some(m) = &self.menu else { return };
-        let (ax, ay, ah) = m.anchor;
+        let (_, ay, ah) = m.anchor;
         let (h, win) = (self.ui.get_menu_natural(), self.ui.get_window_height());
         let (top, most) = crate::menu_size::hang(win, (ay, ah), h);
-        self.ui.set_menu_w(m.width);
-        self.ui.set_menu_ax(if m.right > 0.0 { ax + m.right - m.width } else { ax });
+        self.fit_menu_width();
         self.ui.set_menu_top(top);
         self.ui.set_menu_max(most);
+        // (turned to what's chosen, where that's out of view)
+        let rows: Vec<MenuRow> = self.ui.get_menu_rows().iter().collect();
+        let head = crate::menu_size::height(&[], self.ui.get_menu_search(), self.ui.get_menu_back(), 0.0);
+        self.ui.invoke_scroll_menu(crate::menu_size::reveal(&rows, h.min(most) - head));
+    }
+
+    /// The open menu as wide as its rows say, its right edge kept where it hangs from the
+    /// More button (a menu's rows can change while it's open; where it hangs doesn't).
+    fn fit_menu_width(&self) {
+        let Some(m) = &self.menu else { return };
+        let ax = m.anchor.0;
+        self.ui.set_menu_w(m.width);
+        self.ui.set_menu_ax(if m.right > 0.0 { ax + m.right - m.width } else { ax });
     }
 
     fn close_menu(&mut self, dismissed: bool) {
@@ -1373,6 +1385,7 @@ impl MacroPage {
         ui.set_confirm_open(self.confirm);
         if self.menu.is_some() {
             self.build_menu(page);
+            self.fit_menu_width();
         }
     }
 }

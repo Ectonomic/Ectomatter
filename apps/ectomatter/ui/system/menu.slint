@@ -56,6 +56,10 @@ export component Menu inherits Rectangle {
     public function blur-search() {
         search.stop-typing();
     }
+    // its list turned `y` down (as it opens: to what's chosen, else its top)
+    public function scroll-to(y: length) {
+        mflick.content-y = -y;
+    }
     if root.back: Rectangle {
         x: Part.menu-pad;
         y: Part.menu-pad;

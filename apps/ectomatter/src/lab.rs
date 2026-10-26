@@ -813,9 +813,11 @@ pub struct LabPage {
     setups: Vec<Setup>,
     core_saved: Value,
     pub switched: Option<Option<String>>,
-    /// the setups' menu, and the name being typed for one
+    /// the setups' menu, the name being typed for one, and what's wrong with that name
+    /// (shown in its dialog, not on the foot)
     menu: Menu,
     naming: String,
+    name_warn: String,
     /// what each row of the open menu does: a setups' menu's ask (setups_menu's), or a
     /// light chosen (KEY_PICK past its place); the rows shown, and when a press off the
     /// menu last shut it (so the press on its button doesn't open it again)
@@ -1224,6 +1226,7 @@ impl LabPage {
             switched: None,
             menu: Menu::Shut,
             naming: String::new(),
+            name_warn: String::new(),
             top,
             boxes,
             glyphs: None,
@@ -1440,7 +1443,7 @@ impl LabPage {
                 }
                 Ask::Typed(NAME, t) => {
                     self.naming = t;
-                    self.status = (String::new(), 0);
+                    self.name_warn.clear();
                 }
                 Ask::Setups(i) => self.setups_menu(i),
                 Ask::Typed(id, t) => {
@@ -2536,19 +2539,19 @@ impl LabPage {
             0 if self.menu == Menu::Shut && self.just_shut() => {}
             0 => self.menu = if self.menu == Menu::Shut { Menu::Open } else { Menu::Shut },
             1 | 6 => {
-                // (a name not taken goes with the dialog it was typed in)
-                if matches!(self.menu, Menu::New | Menu::Rename) && self.status.1 == 2 {
-                    self.status = (String::new(), 0);
-                }
+                // (what was wrong with a name goes with the dialog it was typed in)
+                self.name_warn.clear();
                 self.menu = if self.menu == Menu::Open || i == 1 { Menu::Shut } else { Menu::Open };
             }
             2 => {
                 self.menu = Menu::New;
                 self.naming.clear();
+                self.name_warn.clear();
             }
             3 if self.setup.is_some() => {
                 self.menu = Menu::Rename;
                 self.naming = self.setup_name();
+                self.name_warn.clear();
             }
             4 if self.setup.is_some() => self.menu = Menu::Delete,
             5 => match self.menu {
@@ -2593,15 +2596,15 @@ impl LabPage {
         let name = self.naming.trim().to_string();
         let taken = |n: &str| n.eq_ignore_ascii_case(DEFAULT) || self.setups.iter().any(|s| s.name.eq_ignore_ascii_case(n) && (self.menu == Menu::New || Some(&s.id) != self.setup.as_ref()));
         if name.is_empty() {
-            self.status = ("Type a name for the setup.".into(), 2);
+            self.name_warn = "Type a name for the setup.".into();
             return;
         }
         if name.eq_ignore_ascii_case(DEFAULT) {
-            self.status = (format!("{DEFAULT} is already used. Choose another name."), 2);
+            self.name_warn = format!("{DEFAULT} is already used. Choose another name.");
             return;
         }
         if taken(&name) {
-            self.status = (format!("{name} is already used. Choose another name."), 2);
+            self.name_warn = format!("{name} is already used. Choose another name.");
             return;
         }
         let core = self.device.core.clone();
@@ -2632,7 +2635,7 @@ impl LabPage {
                 self.menu = Menu::Shut;
                 self.status = (if new { format!("Saved as {name}.") } else { format!("Renamed to {name}.") }, 1);
             }
-            Err(e) => self.status = (format!("Not saved: {e}."), 2),
+            Err(e) => self.name_warn = format!("Not saved: {e}."),
         }
     }
 
@@ -2647,7 +2650,10 @@ impl LabPage {
                 self.switch_to(None);
                 self.status = (format!("Deleted {name}. Switched to {DEFAULT}."), 0);
             }
-            Err(e) => self.status = (format!("Not deleted: {e}."), 2),
+            Err(e) => {
+                self.menu = Menu::Shut;
+                self.status = (format!("Not deleted: {e}."), 2);
+            }
         }
     }
 
@@ -2742,6 +2748,8 @@ impl LabPage {
             let h = crate::menu_size::height(&rows, false, false, f32::MAX);
             let (ax, ay, ah) = at;
             let (top, most) = crate::menu_size::hang(self.ui.get_window_height(), (ay, ah), h);
+            // (turned to what's chosen, where that's out of view: a light on a long list)
+            let reveal = crate::menu_size::reveal(&rows, h.min(most) - 2.0 * crate::tokens::part::MENU_PAD);
             self.ui.set_menu_w(w);
             self.ui.set_menu_ax(ax);
             self.ui.set_menu_top(top);
@@ -2751,6 +2759,7 @@ impl LabPage {
             self.ui.set_menu_marks(true);
             self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows.clone())));
             self.ui.set_menu_open(true);
+            self.ui.invoke_scroll_menu(reveal);
             self.menu_rows = rows;
         }
         self.menu_picks = picks;
@@ -2777,9 +2786,7 @@ impl LabPage {
             // (the name to give as the dialog opens: the setup's own, to rename it)
             self.ui.set_ask_name(self.naming.clone().into());
         }
-        // (what's wrong with the name typed: the status a name not taken left, while naming)
-        let warn = if ask == 1 && self.status.1 == 2 { self.status.0.clone() } else { String::new() };
-        self.ui.set_ask_warn(warn.into());
+        self.ui.set_ask_warn(if ask == 1 { self.name_warn.clone() } else { String::new() }.into());
         self.ui.set_ask(ask);
         self.ui.set_ask_title(title.into());
         self.ui.set_ask_text(text.into());

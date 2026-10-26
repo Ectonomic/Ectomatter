@@ -295,7 +295,7 @@ mod system {
         // (a menu's width is set where each window opens its menus, by src/menu_size.rs's
         // rule, never typed: no opener hands a menu a number for its width or its field's)
         let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let openers = ["fn hang_menu_most(", "fn open_menu_on(", "fn place_menu(", "fn show_rows(", "fn show_menus("];
+        let openers = ["fn hang_menu_most(", "fn open_menu_on(", "fn place_menu(", "fn fit_menu_width(", "fn show_rows(", "fn show_menus("];
         let mut bad = Vec::new();
         for entry in std::fs::read_dir(&src).unwrap() {
             let path = entry.unwrap().path();

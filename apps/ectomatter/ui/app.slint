@@ -4918,6 +4918,10 @@ export component AppWindow inherits Window {
     }
 
     // the open menu, over everything
+    // the open menu turned `y` down as it opens (src/menu_size.rs's reveal)
+    public function scroll-menu(y: length) {
+        menu.scroll-to(y);
+    }
     menu := Menu {
         marks: root.menu-marks;
         visible: root.menu-open;
@@ -5739,6 +5743,10 @@ export component MacroWindow inherits Window {
     }
 
     // the open menu, over everything
+    // the open menu turned `y` down as it opens (src/menu_size.rs's reveal)
+    public function scroll-menu(y: length) {
+        menu.scroll-to(y);
+    }
     menu := Menu {
         marks: root.menu-marks;
         visible: root.menu-open;
@@ -6685,6 +6693,10 @@ export component LayoutWindow inherits Window {
     }
 
     // the open menu, over everything
+    // the open menu turned `y` down as it opens (src/menu_size.rs's reveal)
+    public function scroll-menu(y: length) {
+        menu.scroll-to(y);
+    }
     menu := Menu {
         marks: root.menu-marks;
         visible: root.menu-open;
@@ -7164,6 +7176,10 @@ export component LabWindow inherits Window {
     }
 
     // the open menu, over everything
+    // the open menu turned `y` down as it opens (src/menu_size.rs's reveal)
+    public function scroll-menu(y: length) {
+        menu.scroll-to(y);
+    }
     menu := Menu {
         marks: root.menu-marks;
         visible: root.menu-open;

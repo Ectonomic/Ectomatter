@@ -583,18 +583,21 @@ impl LayoutPage {
         let w = crate::menu_size::width(&rows, marks, if right { 0.0 } else { under });
         crate::menu_size::fit_notes(&mut rows, w);
         let h = crate::menu_size::height(&rows, false, false, f32::MAX);
-        self.ui.set_menu_natural(h);
-        self.ui.set_menu_w(w);
-        self.ui.set_menu_marks(marks);
-        self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
         let (ax, ay, ah) = anchor;
         let ax = if right { ax + under - w } else { ax };
         let win = self.ui.get_window_height();
         let (top, most) = crate::menu_size::hang(win, (ay, ah), h);
+        // (turned to what's chosen, where that's out of view)
+        let reveal = crate::menu_size::reveal(&rows, h.min(most) - 2.0 * crate::tokens::part::MENU_PAD);
+        self.ui.set_menu_natural(h);
+        self.ui.set_menu_w(w);
+        self.ui.set_menu_marks(marks);
+        self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
         self.ui.set_menu_ax(ax);
         self.ui.set_menu_top(top);
         self.ui.set_menu_max(most);
         self.ui.set_menu_open(true);
+        self.ui.invoke_scroll_menu(reveal);
     }
 
     /// "···" in the header: Duplicate the layout, or Delete it (which asks first).

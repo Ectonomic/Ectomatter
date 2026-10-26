@@ -1720,6 +1720,7 @@ impl Front {
         if self.search_menu {
             self.search_menu = false;
             self.ui.set_menu_open(false);
+            self.ui.set_menu_marks(true);
             self.ui.set_menu_search(true);
         }
     }
@@ -3793,8 +3794,10 @@ impl Front {
         self.listening = None;
         self.menu = Some(Menu { layer, pos, page, query: String::new(), anchor, choices: Vec::new() });
         self.ui.set_menu_query("".into());
-        // (with its search box, one width as it's searched: Size.menu-search, or its field's)
+        // (with its search box, one width as it's searched: Size.menu-search, or its field's;
+        // a column for the tick on the key's own job)
         self.ui.set_menu_search(true);
+        self.ui.set_menu_marks(true);
         self.ui.set_menu_w(crate::tokens::size::MENU_SEARCH.max(under));
         self.build_menu();
         // under the button when it fits there, or when there is a fair amount of
@@ -3809,6 +3812,10 @@ impl Front {
         self.ui.set_menu_top(top);
         self.ui.set_menu_max(most);
         self.ui.set_menu_open(true);
+        // (turned to what the key does now, where that's out of view)
+        let rows: Vec<MenuRow> = self.ui.get_menu_rows().iter().collect();
+        let head = crate::menu_size::height(&[], true, self.ui.get_menu_back(), 0.0);
+        self.ui.invoke_scroll_menu(crate::menu_size::reveal(&rows, h.min(most) - head));
         self.ui.invoke_focus_menu();
     }
 
@@ -6431,20 +6438,23 @@ impl Front {
         let w = crate::menu_size::width(&rows, self.ui.get_menu_marks(), under);
         crate::menu_size::fit_notes(&mut rows, w);
         let h = crate::menu_size::height(&rows, false, false, most);
+        let (ax, ay, ah) = anchor;
+        let win = self.ui.get_window_height();
+        let (top, most) = crate::menu_size::hang(win, (ay, ah), h);
+        // (turned to what's chosen, where that's out of view)
+        let reveal = crate::menu_size::reveal(&rows, h.min(most) - 2.0 * crate::tokens::part::MENU_PAD);
         self.ui.set_menu_search(false);
         self.ui.set_menu_back(false);
         self.ui.set_menu_natural(h);
         self.ui.set_menu_w(w);
         self.ui.set_menu_rows(ModelRc::new(VecModel::from(rows)));
-        let (ax, ay, ah) = anchor;
-        let win = self.ui.get_window_height();
-        let (top, most) = crate::menu_size::hang(win, (ay, ah), h);
         self.ui.set_menu_ax(ax);
         self.ui.set_menu_ay(ay);
         self.ui.set_menu_ah(ah);
         self.ui.set_menu_top(top);
         self.ui.set_menu_max(most);
         self.ui.set_menu_open(true);
+        self.ui.invoke_scroll_menu(reveal);
     }
 
     /// The menu on the keyboard's profile being edited: Use with an app.

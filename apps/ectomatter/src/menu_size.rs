@@ -44,6 +44,17 @@ pub fn height(rows: &[MenuRow], search: bool, back: bool, most: f32) -> f32 {
     part::MENU_PAD + head + list.min(most) + part::MENU_PAD
 }
 
+/// How far down a menu's list is turned as it opens, `shown` of its rows' height in view:
+/// to its first ticked row where that row would be out of view, the row as near the
+/// middle as the list lets it; else its top.
+pub fn reveal(rows: &[MenuRow], shown: f32) -> f32 {
+    let Some(at) = rows.iter().position(|r| r.tick) else { return 0.0 };
+    let top: f32 = rows[..at].iter().map(row).sum();
+    let h = row(&rows[at]);
+    let all: f32 = rows.iter().map(row).sum();
+    if top + h <= shown { 0.0 } else { (top - (shown - h) / 2.0).clamp(0.0, (all - shown).max(0.0)) }
+}
+
 /// How wide a menu is: as wide as its rows need, each measured as the window's Menu lays
 /// it out from the same tokens, from Size.menu to Size.menu-most, and never narrower than
 /// `under`, the field it drops from (none for a menu a button opens). `marks`: whether it
@@ -85,5 +96,28 @@ pub fn fit_notes(rows: &mut [MenuRow], w: f32) {
     let room = w - 2.0 * part::MENU_PAD - 2.0 * part::MENU_IN - part::MENU_PAD;
     for r in rows.iter_mut().filter(|r| r.kind == 3) {
         r.lines = crate::text::wrap(font::REGULAR, font::CONTROL, &r.label, room).len() as i32;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rows(n: usize, ticked: Option<usize>) -> Vec<MenuRow> {
+        (0..n).map(|i| MenuRow { kind: 0, label: format!("Light {i}").into(), tick: Some(i) == ticked, ..Default::default() }).collect()
+    }
+
+    #[test]
+    fn a_menu_opens_at_what_is_chosen() {
+        let shown = 5.0 * size::CONTROL;
+        // nothing chosen, or the chosen row in view: the top
+        assert_eq!(reveal(&rows(20, None), shown), 0.0);
+        assert_eq!(reveal(&rows(20, Some(3)), shown), 0.0);
+        // the chosen row further down: turned to it, near the middle, the row in view
+        let y = reveal(&rows(20, Some(12)), shown);
+        let top = 12.0 * size::CONTROL;
+        assert!(y > 0.0 && top >= y && top + size::CONTROL <= y + shown, "{y}");
+        // the last row: as far as the list goes, no further
+        assert_eq!(reveal(&rows(20, Some(19)), shown), 20.0 * size::CONTROL - shown);
     }
 }
