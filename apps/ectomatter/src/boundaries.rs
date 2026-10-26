@@ -137,9 +137,10 @@ mod tests {
     /// docs/core-protocol.md: "has no page of its own for any device". No page
     /// is found by a device's name, and nothing is kept under one.
     #[test]
-    #[ignore = "known failure: the keyboard and mouse pages are the Z10's and the Sensei 310's (docs/deferred.md, stage 2)"]
     fn no_page_is_found_by_a_devices_name() {
-        let names = ["\"z10\"", "\"mouse\"", "\"sensei310\"", "\"sensei310-1\"", "\"evga-z10\"", "\"steelseries-sensei-310\""];
+        // (a page's kind, "keyboard" or "mouse", is the protocol's word for a
+        // sort of device, not a device's name)
+        let names = ["\"z10\"", "\"sensei310\"", "\"sensei310-1\"", "\"evga-z10\"", "\"steelseries-sensei-310\"", "EVGA", "Z10", "Sensei", "SteelSeries"];
         let mut found = Vec::new();
         for f in rust_files() {
             // a saved name from before is read once and moved on (old_name.rs)

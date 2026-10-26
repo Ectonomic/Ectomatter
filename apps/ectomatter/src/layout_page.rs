@@ -913,7 +913,7 @@ impl LayoutPage {
             let sc = self.scale().max(1.0);
             // (each tile's picture its art's shape, the screen's in its middle, see [crate::lcd_draw::picture])
             let (w, h) = ((tile_w * sc).round() as u32, (tile_w / 5.0 * sc).round() as u32);
-            let rgb = crate::z10::as_lit(page.light.unwrap_or(default));
+            let rgb = crate::keyboard::as_lit(page.light.unwrap_or(default));
             let lv = cx.light[0] as f32 / 255.0;
             let word = crate::lcd_page::spell(word);
             let rows_of = |f: crate::lcd_fx::Grid| -> Vec<String> { f.iter().map(|r| r.iter().collect()).collect() };
@@ -944,7 +944,7 @@ impl LayoutPage {
         let across = crate::tokens::size::EDIT_SCREEN;
         let down = if size.0 > 0 { across * size.1 as f32 / size.0 as f32 } else { 0.0 };
         let (w, h) = ((across * sc).round() as u32, (down * sc).round() as u32);
-        let rgb = crate::z10::as_lit(light);
+        let rgb = crate::keyboard::as_lit(light);
         let key = (rows.to_vec(), rgb, level, (w, h), size);
         if self.drawn.as_ref() == Some(&key) {
             return;

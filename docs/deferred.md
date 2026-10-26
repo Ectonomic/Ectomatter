@@ -41,6 +41,26 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 - The keyboard is one: `cores::keyboard()` is the first core describing a
   keyboard, and its page, screen and counts are that one's. A second
   keyboard's core starts but has no page.
+- Devices are kept by their cores' device ids with no instance in them
+  (`z10`, `sensei310`): two of the same model would share their jobs, scenes,
+  Library choices and place on the desk.
+- No test runs a keyboard core describing another screen size end to end:
+  the keyboard is one (`cores::keyboard()`, the Z10's in tests), so the
+  player's frames, the keyboard picture's panel, the Screen tab and the
+  window's grid are only run at 20 by 4. The other sizes are tested through
+  the screen engine's functions (`lcd_fx`, `screen_edit`, `lcd_page`).
+- The boundary check `the_screen_is_the_size_its_core_describes` looks for
+  the old spellings of 20 by 4 (`const COLS`, `; 20]`, `take(20)`), not every
+  way a size could be typed again.
+- A saved layout with blocks beyond the screen (hand-edited or imported) now
+  keeps them where they were saved and draws them cut at the screen's edges;
+  before, it moved them onto the screen. The editor can't make one.
+- The Library's cards draw a layout's picture at the Z10 screen's shape
+  (260 by 52, `front.rs`, `app.slint`); another shape is letterboxed.
+- The heartbeat's trace takes its width from the first time it's drawn
+  (`lcd_fx::pulse`); drawn first at 0 by 0, it starts flat.
+- A block past the screen's edge gets an outline clamped to the last row or
+  column in the editor, over whatever block is there.
 - The mouse is one, with two lights: `mouse::shape()` is the first core
   describing a mouse, and the picture and the scenes keep two lights' colors
   (`mouse_art.rs` `[Lit; 2]`, `front.rs` `scene_colors`, `scene_mouse`,
@@ -52,11 +72,6 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 - One run of `tests/stranger.rs`, beside another full build, saw the app stop
   silently after its first lines; twelve runs since didn't. The test prints
   how the app ended now.
-- Pages are found by device name: `place == "z10"` / `"mouse"` in
-  `ui/app.slint:1568,1576,2447,3118,4478`, 58 literals in `front.rs`,
-  `main.rs:1395,2451`. Saved jobs, scenes and Library choices key devices as
-  `"z10"` and `"sensei310"` (`jobs.rs:23-24`, `front.rs:6569,6573,8811`,
-  `launcher.rs:916`).
 - The mouse lab's offscreen snapshot needs the keyboard's core: its readout
   is the keyboard's board's (`main.rs`, `snap_lab`).
 - The Z10's core sends only its name in `device/added`; the app reads

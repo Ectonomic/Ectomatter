@@ -919,7 +919,7 @@ impl Player {
             let drawing = read.clone();
             core.draw = Some(Arc::new(move |p: &crate::lcd_page::Page, t: f64| crate::lcd_page::render_at(p, &drawing(), t)));
             core.frame_file = Some(runtime_dir().join("z10-lcd/frame"));
-            core.trace = std::env::var_os("Z10_LCD_TRACE").map(PathBuf::from);
+            core.trace = std::env::var_os("ECTOMATTER_LCD_TRACE").map(PathBuf::from);
             core.announce = announce;
             core.paused = paused;
             core.current = current;

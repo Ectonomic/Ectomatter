@@ -527,6 +527,12 @@ fn middle(row: u8, kind: Kind) -> Piece {
 }
 
 /// A piece set at the left of its width, a row high.
+/// The word an Effect block spells where it's given none: the keyboard's
+/// maker's name, as its core gives it, in capitals.
+pub fn default_word() -> String {
+    crate::cores::keyboard().and_then(|k| k.described()["vendor"].as_str()).unwrap_or("Ectomatter").to_uppercase()
+}
+
 fn block(row: u8, col: u8, width: u8, kind: Kind) -> Piece {
     Piece { kind, row, col, width, right: false, center: false, gap: 1, height: 1, scroll: true, date_format: DateFormat::Short }
 }
@@ -534,7 +540,7 @@ fn block(row: u8, col: u8, width: u8, kind: Kind) -> Piece {
 /// An effect across whole rows of the screen the shipped layouts are laid out on, `height` of
 /// them from `row` down, at `speed`, with the word a new Effect block has.
 fn behind(row: u8, height: u8, fx: Fx, speed: u8) -> Piece {
-    Piece { height, ..block(row, 0, LAID_OUT_ON.0, Kind::Effect { fx, speed, word: "EVGA".into() }) }
+    Piece { height, ..block(row, 0, LAID_OUT_ON.0, Kind::Effect { fx, speed, word: default_word() }) }
 }
 
 /// The layouts Ectomatter ships, by key, in the order a new Library has them: the three
@@ -861,7 +867,7 @@ impl Page {
                     "effect" => Kind::Effect {
                         fx: Fx::from_key(p["effect"].as_str().unwrap_or("")).unwrap_or(Fx::Rain),
                         speed: b(&p["speed"]).unwrap_or(50).min(100),
-                        word: p["word"].as_str().unwrap_or("EVGA").chars().take(u8::MAX as usize).collect(),
+                        word: p["word"].as_str().map(String::from).unwrap_or_else(default_word).chars().take(u8::MAX as usize).collect(),
                     },
                     _ => return None,
                 };
@@ -2708,7 +2714,7 @@ mod tests {
     }
 
     #[test]
-    fn the_screen_is_the_size_its_core_describes() {
+    fn the_keyboards_screen_is_twenty_by_four_as_the_z10_describes_it() {
         // the Z10's core describes twenty by four, which the tests' keyboard is
         assert_eq!(size(), (20, 4));
         assert_eq!(screen()["control"], "lcd");

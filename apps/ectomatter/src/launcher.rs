@@ -823,7 +823,7 @@ pub fn move_game_helper() -> Result<String, String> {
     let lines = launch_options(&root);
     let k = know(&root, &[]);
     let mut lib = crate::games::Library::load();
-    let mouse = crate::profiles::path_for("sensei310").and_then(crate::profiles::Store::read_only).as_ref().and_then(game_profile);
+    let mouse = crate::profiles::path_for(crate::mouse::key()).and_then(crate::profiles::Store::read_only).as_ref().and_then(game_profile);
     let mut apps: Vec<(u32, bool, bool)> = Vec::new();
     for (app, line) in &lines {
         let (Ok(n), Some(_)) = (app.parse::<u32>(), from_game_helper(line, "2", None)) else { continue };
@@ -913,14 +913,14 @@ pub fn from_game_helper(line: &str, keyboard: &str, mouse: Option<&str>) -> Opti
             "-x" | "--sony-xinput-backup" => m.values.push(("xbox".into(), json!(true))),
             "-k" | "--keyboard-profile" => {
                 let p = if has_value(i + 1) { i += 1; w[i].clone() } else { keyboard.to_string() };
-                m.profiles.push(("z10".into(), p));
+                m.profiles.push((crate::cores::keyboard_key().into(), p));
             }
             "-m" | "--mouse-profile" => {
                 if has_value(i + 1) {
                     i += 1;
                 }
                 if let Some(p) = mouse {
-                    m.profiles.push(("sensei310".into(), p.to_string()));
+                    m.profiles.push((crate::mouse::key().into(), p.to_string()));
                 }
             }
             "-orgb" | "--orgb" => {

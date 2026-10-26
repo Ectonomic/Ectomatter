@@ -47,6 +47,7 @@ mod games_page;
 mod hosted;
 mod ink_env;
 mod jobs;
+mod keyboard;
 mod menu_size;
 mod kde_output;
 mod launcher;
@@ -95,7 +96,6 @@ mod typist;
 mod updates;
 mod uistate;
 mod vdf;
-mod z10;
 
 slint::include_modules!();
 
@@ -616,6 +616,10 @@ fn main() {
     // `--move-game-helper`: every game whose launch line in Steam runs game-helper set to
     // start through Ectomatter, its flags carried over into the Library, and stop
     if args.iter().any(|a| a == "--move-game-helper") {
+        // (the devices' keys, as their cores describe them, started with no device)
+        let mut hosted = hosted::Hosted::with_usb(std::sync::Arc::new(computer::ThisComputer::new()), Box::new(|| Box::new(core_host::NoDevices)));
+        hosted.start_all(&settings::Settings::load(config_dir().join("settings.json")));
+        devices_described(&hosted);
         match launcher::move_game_helper() {
             Ok(said) => println!("{said}"),
             Err(e) => {
@@ -849,9 +853,9 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
     }
     if let Some(code) = std::env::var("ECTOMATTER_KEY_CODE").ok().and_then(|v| v.parse::<u32>().ok()) {
         // (as the keyboard's core tells it: the key's host slot, by its code)
-        let slot = code.saturating_sub(z10::NEXT_LAYOUT);
+        let slot = code.saturating_sub(keyboard::NEXT_LAYOUT);
         for down in [true, false] {
-            front.heard(device::Heard::Input(serde_json::json!({ "device": "z10", "host": slot, "sends": { "host": slot } }), down));
+            front.heard(device::Heard::Input(serde_json::json!({ "device": cores::keyboard_key(), "host": slot, "sends": { "host": slot } }), down));
         }
         front.act();
     }
@@ -969,9 +973,9 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         let (code, down) = (k.trim_end_matches(['+', '-']).parse().unwrap_or(0), k.ends_with('+'));
         front.typed(code, down);
         // (what the key sent, as its core reads it from the keyboard's report)
-        if let Some((mods, hid)) = z10::evdev_to_hid(code) {
+        if let Some((mods, hid)) = keyboard::evdev_to_hid(code) {
             let usage = if hid != 0 { hid as u8 } else { ectomatter_protocol::keys::FIRST_MODIFIER + mods.trailing_zeros() as u8 };
-            front.heard(device::Heard::Input(serde_json::json!({ "device": "z10", "sends": ectomatter_protocol::Action::Key(usage).write() }), down));
+            front.heard(device::Heard::Input(serde_json::json!({ "device": cores::keyboard_key(), "sends": ectomatter_protocol::Action::Key(usage).write() }), down));
         }
         front.refresh();
     }

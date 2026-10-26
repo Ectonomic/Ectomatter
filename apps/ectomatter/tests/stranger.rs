@@ -91,7 +91,7 @@ fn snapshot(exe: &Path, home: &Path, packages: Option<&Path>, place: &str) -> (b
 fn ectomatter_starts_without_the_keyboards_core() {
     let s = Scratch::new("no-keyboard");
     packages(&s.0.join("share"), &["evga-z10"]);
-    for place in ["home", "settings", "z10"] {
+    for place in ["home", "settings", "keyboard"] {
         let (drawn, said) = snapshot(Path::new(env!("CARGO_BIN_EXE_ectomatter")), &s.0, Some(&s.0.join("share")), place);
         assert!(drawn, "{place} wasn't drawn:\n{said}");
         assert!(!said.contains("panicked"), "{place}:\n{said}");

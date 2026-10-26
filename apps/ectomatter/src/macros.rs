@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 
 use crate::lighting::cell;
 use crate::text;
-use crate::z10::Page;
+use crate::keyboard::Page;
 use crate::Cell;
 
 pub use ectomatter_protocol::Plays as How;
@@ -46,11 +46,11 @@ pub const MEDIA: [(u32, &str); 16] = [
 /// then each key the menu lists, as (words for it, the step's key).
 pub fn step_keys() -> (Vec<(String, Value)>, Vec<(String, Value)>) {
     let mods = hid::MODIFIERS.iter().map(|(name, label, _)| (label.to_string(), json!(name))).collect();
-    let keys = (1u8..104).filter_map(|u| crate::z10::hid_name(u as u32).map(|label| (label, hid::name(u).map_or(json!(u), |n| json!(n))))).collect();
+    let keys = (1u8..104).filter_map(|u| crate::keyboard::hid_name(u as u32).map(|label| (label, hid::name(u).map_or(json!(u), |n| json!(n))))).collect();
     (mods, keys)
 }
 
-pub use crate::z10::step_name;
+pub use crate::keyboard::step_name;
 
 fn is_media(st: &Value) -> bool {
     st.get("media").is_some()

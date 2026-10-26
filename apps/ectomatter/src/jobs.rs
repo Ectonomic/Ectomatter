@@ -19,9 +19,15 @@ use ectomatter_protocol::Plays;
 use serde_json::{Value, json};
 
 /// The keys of the devices whose pages give their controls jobs: the
-/// keyboard's and the mouse's (each lists every other device's jobs).
-pub const KEYBOARD: &str = "z10";
-pub const MOUSE: &str = "sensei310";
+/// keyboard's and the mouse's (each lists every other device's jobs), each
+/// its device's id as its core names it.
+pub fn keyboard() -> &'static str {
+    crate::cores::keyboard_key()
+}
+
+pub fn mouse() -> &'static str {
+    crate::mouse::key()
+}
 
 /// What a keyboard's key's slot keeps, before the job's id, so a job is never
 /// taken for a playlist (whose ids the same slots keep).
@@ -29,7 +35,7 @@ pub const ON_KEY: &str = "ectomatter-job:";
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Job {
-    /// a device's profile, the device by its key ("z10", "sensei310", a plugin's
+    /// a device's profile, the device by its key (its id as its core names it, a plugin's
     /// device's id): one by its id (the keyboard's by its number), the next or the one before
     Profile { device: String, to: To },
     /// one of Ectomatter's macros, played as it says
@@ -121,8 +127,8 @@ impl Job {
     pub fn renamed(id: &str) -> Option<String> {
         let (kind, rest) = id.split_once(':')?;
         let device = match kind {
-            "keyboard-profile" => KEYBOARD,
-            "mouse-profile" => MOUSE,
+            "keyboard-profile" => keyboard(),
+            "mouse-profile" => mouse(),
             _ => return None,
         };
         Some(match rest {
@@ -178,7 +184,7 @@ impl Profiled {
             out.extend([profile(To::Next), profile(To::Previous)]);
         }
         if self.screen {
-            out.extend([crate::z10::NEXT_LAYOUT, crate::z10::PREV_LAYOUT, crate::z10::NEXT_PLAYLIST, crate::z10::PREV_PLAYLIST].map(Job::Screen));
+            out.extend([crate::keyboard::NEXT_LAYOUT, crate::keyboard::PREV_LAYOUT, crate::keyboard::NEXT_PLAYLIST, crate::keyboard::PREV_PLAYLIST].map(Job::Screen));
         }
         out
     }
@@ -212,10 +218,10 @@ impl Names {
                 None => "Deleted macro".into(),
             },
             Job::Screen(code) => match *code {
-                crate::z10::NEXT_LAYOUT => "Screen: next layout".into(),
-                crate::z10::PREV_LAYOUT => "Screen: previous layout".into(),
-                crate::z10::NEXT_PLAYLIST => "Screen: next playlist".into(),
-                crate::z10::PREV_PLAYLIST => "Screen: previous playlist".into(),
+                crate::keyboard::NEXT_LAYOUT => "Screen: next layout".into(),
+                crate::keyboard::PREV_LAYOUT => "Screen: previous layout".into(),
+                crate::keyboard::NEXT_PLAYLIST => "Screen: next playlist".into(),
+                crate::keyboard::PREV_PLAYLIST => "Screen: previous playlist".into(),
                 _ => "Screen".into(),
             },
             Job::Scene(SceneTo::Id(id)) => match self.scenes.iter().find(|(k, _)| k == id) {
@@ -376,8 +382,8 @@ mod tests {
         };
         Names {
             devices: vec![
-                device(KEYBOARD, "EVGA Z10 RGB", &[("1", "Work"), ("2", "Profile 2")], true, true),
-                device(MOUSE, "SteelSeries Sensei 310", &[("pa", "Games")], true, false),
+                device(keyboard(), "EVGA Z10 RGB", &[("1", "Work"), ("2", "Profile 2")], true, true),
+                device(mouse(), "SteelSeries Sensei 310", &[("pa", "Games")], true, false),
                 device("openrgb", "OpenRGB", &[("Studio Low", "Studio Low")], false, false),
             ],
             macros: vec![(1, "Copy".into())],
@@ -390,15 +396,15 @@ mod tests {
     fn each_job_reads_back_as_itself() {
         let profile = |device: &str, to: To| Job::Profile { device: device.into(), to };
         let jobs = [
-            profile(KEYBOARD, To::Id("3".into())),
-            profile(KEYBOARD, To::Next),
-            profile(MOUSE, To::Id("p18f2a".into())),
-            profile(MOUSE, To::Previous),
+            profile(keyboard(), To::Id("3".into())),
+            profile(keyboard(), To::Next),
+            profile(mouse(), To::Id("p18f2a".into())),
+            profile(mouse(), To::Previous),
             // (an id with what it likes in it: OpenRGB's are its profiles' names)
             profile("openrgb", To::Id("Studio: Low".into())),
             Job::Macro { n: 4, plays: Plays::Times(3) },
             Job::Macro { n: 2, plays: Plays::WhileHeld },
-            Job::Screen(crate::z10::NEXT_PLAYLIST),
+            Job::Screen(crate::keyboard::NEXT_PLAYLIST),
             Job::Scene(SceneTo::Id("scene-3".into())),
             Job::Scene(SceneTo::Next),
             Job::Scene(SceneTo::Previous),
@@ -434,12 +440,12 @@ mod tests {
     fn a_device_is_offered_the_others_jobs() {
         let names = desk();
         let words = |d| names.for_device(d).into_iter().map(|(w, _)| w).collect::<Vec<_>>();
-        assert_eq!(words(MOUSE)[..4], ["EVGA Z10 RGB: Work", "EVGA Z10 RGB: Profile 2", "EVGA Z10 RGB: next profile", "EVGA Z10 RGB: previous profile"]);
-        assert!(words(MOUSE).contains(&"Screen: next layout".to_string()));
-        assert!(words(MOUSE).iter().all(|w| !w.starts_with("SteelSeries")), "none of its own");
-        assert_eq!(words(KEYBOARD), ["SteelSeries Sensei 310: Games", "SteelSeries Sensei 310: next profile", "SteelSeries Sensei 310: previous profile", "OpenRGB: Studio Low"]);
+        assert_eq!(words(mouse())[..4], ["EVGA Z10 RGB: Work", "EVGA Z10 RGB: Profile 2", "EVGA Z10 RGB: next profile", "EVGA Z10 RGB: previous profile"]);
+        assert!(words(mouse()).contains(&"Screen: next layout".to_string()));
+        assert!(words(mouse()).iter().all(|w| !w.starts_with("SteelSeries")), "none of its own");
+        assert_eq!(words(keyboard()), ["SteelSeries Sensei 310: Games", "SteelSeries Sensei 310: next profile", "SteelSeries Sensei 310: previous profile", "OpenRGB: Studio Low"]);
         let profile = |device: &str, id: &str| Job::Profile { device: device.into(), to: To::Id(id.into()) };
-        assert_eq!(names.of(&profile(MOUSE, "gone")), "SteelSeries Sensei 310: a deleted profile");
+        assert_eq!(names.of(&profile(mouse(), "gone")), "SteelSeries Sensei 310: a deleted profile");
         assert_eq!(names.of(&profile("deck", "1")), "A profile of a device that isn’t here");
         assert_eq!((stepped(0, 3, false), stepped(2, 3, true)), (2, 0));
     }
@@ -463,13 +469,13 @@ mod tests {
     fn a_new_device_is_offered_as_it_comes() {
         let mut names = desk();
         names.devices.push(Profiled { key: "m3".into(), name: "OpenDeck M3".into(), profiles: vec![("a".into(), "Streaming".into())], steps: true, here: true, ..Default::default() });
-        let jobs = names.for_device(KEYBOARD);
+        let jobs = names.for_device(keyboard());
         assert!(jobs.iter().any(|(w, _)| w == "OpenDeck M3: Streaming"));
         assert_eq!(names.group(&jobs.last().unwrap().1), Some(("m3".into(), "OpenDeck M3".into())));
         // (one not here isn't offered, but its jobs are still said by its name)
         names.devices[0].here = false;
-        assert!(names.for_device(MOUSE).iter().all(|(_, j)| !matches!(j, Job::Profile { device, .. } if device == KEYBOARD)));
-        assert_eq!(names.of(&Job::Profile { device: KEYBOARD.into(), to: To::Id("1".into()) }), "EVGA Z10 RGB: Work");
+        assert!(names.for_device(mouse()).iter().all(|(_, j)| !matches!(j, Job::Profile { device, .. } if device == keyboard())));
+        assert_eq!(names.of(&Job::Profile { device: keyboard().into(), to: To::Id("1".into()) }), "EVGA Z10 RGB: Work");
     }
 
     /// Both devices are offered the scenes' jobs, each scene by its name, then
@@ -478,8 +484,8 @@ mod tests {
     fn both_devices_are_offered_the_scenes() {
         let names = Names { scenes: vec![("wave".into(), "Wave across the desk".into()), ("scene-1".into(), "DOOM".into())], macros: vec![(1, "Copy".into())], ..Default::default() };
         let words = |d| names.for_device(d).into_iter().map(|(w, _)| w).collect::<Vec<_>>();
-        assert_eq!(words(MOUSE), ["Scene: Wave across the desk", "Scene: DOOM", "Next scene", "Previous scene", "Scene off"]);
-        assert_eq!(words(KEYBOARD), words(MOUSE));
+        assert_eq!(words(mouse()), ["Scene: Wave across the desk", "Scene: DOOM", "Next scene", "Previous scene", "Scene off"]);
+        assert_eq!(words(keyboard()), words(mouse()));
         assert_eq!(names.of(&Job::Scene(SceneTo::Id("gone".into()))), "Scene: a deleted scene");
     }
 
@@ -491,15 +497,15 @@ mod tests {
         names.scenes = vec![("scene-1".into(), "DOOM".into())];
         let profile = |device: &str, to: To| Job::Profile { device: device.into(), to };
         let short = |j: Job| names.short(&j);
-        assert_eq!(short(profile(KEYBOARD, To::Id("1".into()))), "Work");
-        assert_eq!(short(profile(MOUSE, To::Id("pa".into()))), "Games");
-        assert_eq!([short(profile(MOUSE, To::Next)), short(profile(KEYBOARD, To::Previous))], ["Next profile", "Previous profile"]);
+        assert_eq!(short(profile(keyboard(), To::Id("1".into()))), "Work");
+        assert_eq!(short(profile(mouse(), To::Id("pa".into()))), "Games");
+        assert_eq!([short(profile(mouse(), To::Next)), short(profile(keyboard(), To::Previous))], ["Next profile", "Previous profile"]);
         assert_eq!(short(Job::Scene(SceneTo::Id("scene-1".into()))), "DOOM");
         assert_eq!([short(Job::Scene(SceneTo::Next)), short(Job::Scene(SceneTo::Off))], ["Next scene", "Scene off"]);
-        assert_eq!(short(Job::Screen(crate::z10::NEXT_LAYOUT)), "Screen: next layout");
+        assert_eq!(short(Job::Screen(crate::keyboard::NEXT_LAYOUT)), "Screen: next layout");
         let heading = |j: Job| names.group(&j).map(|(_, h)| h);
-        assert_eq!(heading(profile(MOUSE, To::Next)).as_deref(), Some("SteelSeries Sensei 310"));
-        assert_eq!(heading(Job::Screen(crate::z10::NEXT_LAYOUT)).as_deref(), Some("EVGA Z10 RGB"));
+        assert_eq!(heading(profile(mouse(), To::Next)).as_deref(), Some("SteelSeries Sensei 310"));
+        assert_eq!(heading(Job::Screen(crate::keyboard::NEXT_LAYOUT)).as_deref(), Some("EVGA Z10 RGB"));
         assert_eq!(heading(Job::Scene(SceneTo::Off)).as_deref(), Some("Scenes"));
     }
 

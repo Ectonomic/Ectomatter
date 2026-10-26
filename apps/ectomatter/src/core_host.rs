@@ -1143,14 +1143,14 @@ pub(crate) mod tests {
         core.on_told(move || {
             w.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         });
-        core.call("keys/set", &serde_json::json!({ "device": "sensei310-1", "layer": "base", "control": "right-side-front", "action": { "host": 6 } })).unwrap();
+        core.call("keys/set", &serde_json::json!({ "device": "sensei310", "layer": "base", "control": "right-side-front", "action": { "host": 6 } })).unwrap();
         let buttons = sent.lock().unwrap().iter().rev().find(|(_, _, b)| b[..2] == [0x00, 0x31]).map(|(_, _, b)| b.clone()).expect("the buttons sent");
         assert_eq!(buttons[3 + 6 * 5..3 + 6 * 5 + 2], [0x51, 0xAB], "button 7 sends the slot's reserved code");
         let _ = core.told();
         let heard = |want: &str| {
             for _ in 0..50 {
                 std::thread::sleep(Duration::from_millis(10));
-                let _ = core.call("settings/get", &serde_json::json!({ "device": "sensei310-1" }));
+                let _ = core.call("settings/get", &serde_json::json!({ "device": "sensei310" }));
                 if let Some((_, p)) = core.told().into_iter().find(|(m, _)| m == want) {
                     return p;
                 }
@@ -1167,7 +1167,7 @@ pub(crate) mod tests {
         // a key the button sends for the computer is no slot's
         reports.lock().unwrap().push_back(vec![1, 0, 0, 0x04, 0, 0, 0, 0, 0]);
         std::thread::sleep(Duration::from_millis(60));
-        let _ = core.call("settings/get", &serde_json::json!({ "device": "sensei310-1" }));
+        let _ = core.call("settings/get", &serde_json::json!({ "device": "sensei310" }));
         assert!(core.told().iter().all(|(m, _)| !m.starts_with("input/")));
         let _ = std::fs::remove_dir_all(&data);
     }
@@ -1225,7 +1225,7 @@ pub(crate) mod tests {
         };
         let ev = |m: &str, c: &str, v: Value| (m.to_string(), c.to_string(), v);
         let push = |q: &Arc<Mutex<VecDeque<Vec<u8>>>>, r: Vec<u8>| q.lock().unwrap().push_back(r);
-        assert_eq!(core.call("input/watch", &serde_json::json!({ "device": "sensei310-1", "all": true })).unwrap()["listening"], true);
+        assert_eq!(core.call("input/watch", &serde_json::json!({ "device": "sensei310", "all": true })).unwrap()["listening"], true);
         // the left button, then the left side's back one with it held (the
         // mouse's buttons 1 and 4, from the factory), then both let go
         push(&pointer, vec![0x01, 0, 0, 0, 0, 0, 0, 0, 0]);
@@ -1242,7 +1242,7 @@ pub(crate) mod tests {
         push(&pointer, vec![0x00, 7, 0, 3, 0, 0, 0, 0, 0]);
         assert!(heard(1).is_empty());
         // no longer watched: a click is the computer's alone
-        core.call("input/watch", &serde_json::json!({ "device": "sensei310-1", "all": false })).unwrap();
+        core.call("input/watch", &serde_json::json!({ "device": "sensei310", "all": false })).unwrap();
         push(&pointer, vec![0x02, 0, 0, 0, 0, 0, 0, 0, 0]);
         push(&keys, vec![1, 0, 0, 0x4E, 0, 0, 0, 0, 0]);
         assert!(heard(1).is_empty());
@@ -1394,7 +1394,7 @@ pub(crate) mod tests {
     #[test]
     fn a_shortcut_goes_on_a_button_as_libratbag_writes_it() {
         let (core, sent, data) = mouse_core("chord");
-        let d = "sensei310-1";
+        let d = "sensei310";
         for (control, action) in [
             ("left-side-back", serde_json::json!({ "shortcut": ["LeftCtrl", "LeftShift", "Tab"] })),
             ("left-side-front", serde_json::json!({ "shortcut": ["LeftCtrl", "T"] })),
@@ -1429,7 +1429,7 @@ pub(crate) mod tests {
         let Ok(out) = std::env::var("MOUSE_STATE_OUT") else { return };
         let (core, _, data) = mouse_core("state");
         let device = core.told().into_iter().find(|(m, _)| m == "device/added").map(|(_, p)| p).unwrap();
-        let d = serde_json::json!({ "device": "sensei310-1" });
+        let d = serde_json::json!({ "device": "sensei310" });
         let state = serde_json::json!({
             "present": true,
             "device": device,
@@ -1453,7 +1453,7 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&data);
         let core = Core::start(&crate::cores::dir().join(SENSEI), data.clone(), Box::new(Hidapi::new())).unwrap();
         initialize(&core, Value::Null).unwrap();
-        let d = serde_json::json!({ "device": "sensei310-1" });
+        let d = serde_json::json!({ "device": "sensei310" });
         let was = core.call("settings/get", &d).unwrap()["values"]["cpi1"].as_u64().unwrap();
         eprintln!("the first preset was {was} CPI");
         let read = || -> u64 {
@@ -1462,15 +1462,15 @@ pub(crate) mod tests {
             let _ = std::fs::remove_dir_all(&d2);
             let c = Core::start(&crate::cores::dir().join(SENSEI), d2.clone(), Box::new(Hidapi::new())).unwrap();
             initialize(&c, Value::Null).unwrap();
-            let v = c.call("settings/get", &serde_json::json!({ "device": "sensei310-1" })).unwrap()["values"]["cpi1"].as_u64().unwrap();
+            let v = c.call("settings/get", &serde_json::json!({ "device": "sensei310" })).unwrap()["values"]["cpi1"].as_u64().unwrap();
             let _ = std::fs::remove_dir_all(&d2);
             v
         };
-        core.call("settings/set", &serde_json::json!({ "device": "sensei310-1", "id": "cpi1", "value": 900 })).unwrap();
+        core.call("settings/set", &serde_json::json!({ "device": "sensei310", "id": "cpi1", "value": 900 })).unwrap();
         std::thread::sleep(Duration::from_millis(200));
         let now = read();
         eprintln!("the mouse says {now} CPI after the change");
-        core.call("settings/set", &serde_json::json!({ "device": "sensei310-1", "id": "cpi1", "value": was })).unwrap();
+        core.call("settings/set", &serde_json::json!({ "device": "sensei310", "id": "cpi1", "value": was })).unwrap();
         std::thread::sleep(Duration::from_millis(1800));
         let _ = core.call("settings/get", &d);
         let back = read();
@@ -1496,10 +1496,10 @@ pub(crate) mod tests {
         if let Ok(out) = std::env::var("ECTOMATTER_DESCRIPTION_OUT") {
             std::fs::write(out, serde_json::to_vec_pretty(&added).unwrap()).unwrap();
         }
-        let s = core.call("settings/get", &serde_json::json!({ "device": "sensei310-1" })).unwrap();
+        let s = core.call("settings/get", &serde_json::json!({ "device": "sensei310" })).unwrap();
         assert_eq!((s["values"]["cpi1"].as_u64(), s["values"]["cpi2"].as_u64()), (Some(800), Some(1600)));
         assert_eq!((s["known"]["cpi1"].as_bool(), s["known"]["polling"].as_bool()), (Some(true), Some(false)));
-        let l = core.call("lighting/get", &serde_json::json!({ "device": "sensei310-1" })).unwrap();
+        let l = core.call("lighting/get", &serde_json::json!({ "device": "sensei310" })).unwrap();
         assert_eq!(l["logo"]["params"]["color"], "#FF1000");
         core.call("shutdown", &Value::Null).unwrap();
         let sent: Vec<Vec<u8>> = sent.lock().unwrap().iter().map(|(_, _, b)| b.clone()).collect();
@@ -1516,9 +1516,9 @@ pub(crate) mod tests {
     #[test]
     fn a_light_is_known_once_ectomatter_sets_it() {
         let (core, _sent, data) = mouse_core("known");
-        let d = serde_json::json!({ "device": "sensei310-1" });
+        let d = serde_json::json!({ "device": "sensei310" });
         assert_eq!(core.call("lighting/get", &d).unwrap()["known"], serde_json::json!({ "logo": "colors", "wheel": "colors" }));
-        core.call("lighting/set", &serde_json::json!({ "device": "sensei310-1", "light": "logo", "effect": "static", "params": { "color": "#00FF00" } })).unwrap();
+        core.call("lighting/set", &serde_json::json!({ "device": "sensei310", "light": "logo", "effect": "static", "params": { "color": "#00FF00" } })).unwrap();
         assert_eq!(core.call("lighting/get", &d).unwrap()["known"], serde_json::json!({ "logo": true, "wheel": "colors" }));
         core.call("shutdown", &Value::Null).unwrap();
         drop(core);
@@ -1540,11 +1540,11 @@ pub(crate) mod tests {
     fn a_change_is_sent_then_kept_once() {
         let (core, sent, data) = mouse_core("change");
         let at = sent.lock().unwrap().len();
-        let d = serde_json::json!({ "device": "sensei310-1" });
-        core.call("settings/set", &serde_json::json!({ "device": "sensei310-1", "id": "cpi1", "value": 1200 })).unwrap();
-        core.call("settings/set", &serde_json::json!({ "device": "sensei310-1", "id": "polling", "value": 500 })).unwrap();
-        core.call("lighting/set", &serde_json::json!({ "device": "sensei310-1", "light": "logo", "effect": "static", "params": { "color": "#FF0000" } })).unwrap();
-        core.call("keys/set", &serde_json::json!({ "device": "sensei310-1", "layer": "base", "control": "right-side-front", "action": { "key": "F13" } })).unwrap();
+        let d = serde_json::json!({ "device": "sensei310" });
+        core.call("settings/set", &serde_json::json!({ "device": "sensei310", "id": "cpi1", "value": 1200 })).unwrap();
+        core.call("settings/set", &serde_json::json!({ "device": "sensei310", "id": "polling", "value": 500 })).unwrap();
+        core.call("lighting/set", &serde_json::json!({ "device": "sensei310", "light": "logo", "effect": "static", "params": { "color": "#FF0000" } })).unwrap();
+        core.call("keys/set", &serde_json::json!({ "device": "sensei310", "layer": "base", "control": "right-side-front", "action": { "key": "F13" } })).unwrap();
         let soon = sent.lock().unwrap().len();
         std::thread::sleep(Duration::from_millis(1800));
         // (a call, so the core's thread has run its timer)
@@ -1584,12 +1584,12 @@ pub(crate) mod tests {
     fn a_profile_goes_to_the_mouse_whole_and_is_kept_once() {
         let (core, sent, data) = mouse_core("apply");
         let at = sent.lock().unwrap().len();
-        let d = serde_json::json!({ "device": "sensei310-1" });
+        let d = serde_json::json!({ "device": "sensei310" });
         let mut p = core.call("profiles/factory", &d).unwrap();
         assert_eq!(p["settings"], serde_json::json!({ "cpi1": 800, "cpi2": 1600, "polling": 1000 }));
         assert_eq!(p["keys"]["base"]["right-side-back"], serde_json::json!({ "key": "PageDown" }));
         assert_eq!(p["lighting"]["logo"]["params"]["colors"], serde_json::json!(["#FF0000", "#00FF00", "#0000FF"]));
-        p["device"] = serde_json::json!("sensei310-1");
+        p["device"] = serde_json::json!("sensei310");
         p["settings"]["cpi1"] = serde_json::json!(1200);
         let answer = core.call("profiles/apply", &p).unwrap();
         let plays = &answer["plays"]["logo"];
@@ -1619,10 +1619,10 @@ pub(crate) mod tests {
     #[test]
     fn streamed_colors_are_never_kept() {
         let (core, sent, data) = mouse_core("direct");
-        let d = serde_json::json!({ "device": "sensei310-1" });
+        let d = serde_json::json!({ "device": "sensei310" });
         let at = sent.lock().unwrap().len();
-        core.call("lighting/direct", &serde_json::json!({ "device": "sensei310-1", "colors": { "logo": "#00FF00", "wheel": "#0000FF" } })).unwrap();
-        core.call("settings/set", &serde_json::json!({ "device": "sensei310-1", "id": "cpi1", "value": 1200 })).unwrap();
+        core.call("lighting/direct", &serde_json::json!({ "device": "sensei310", "colors": { "logo": "#00FF00", "wheel": "#0000FF" } })).unwrap();
+        core.call("settings/set", &serde_json::json!({ "device": "sensei310", "id": "cpi1", "value": 1200 })).unwrap();
         std::thread::sleep(Duration::from_millis(1800));
         let _ = core.call("settings/get", &d);
         let during: Vec<Vec<u8>> = sent.lock().unwrap()[at..].iter().map(|(_, _, b)| b.clone()).collect();
@@ -1645,12 +1645,12 @@ pub(crate) mod tests {
     fn a_cycle_ends_where_it_starts() {
         let (core, sent, data) = mouse_core("cycle");
         let at = sent.lock().unwrap().len();
-        let set = core.call("lighting/set", &serde_json::json!({ "device": "sensei310-1", "light": "logo", "effect": "breathing", "params": { "color": "#FF0000" } })).unwrap();
-        core.call("lighting/set", &serde_json::json!({ "device": "sensei310-1", "light": "wheel", "effect": "colorshift", "params": {} })).unwrap();
+        let set = core.call("lighting/set", &serde_json::json!({ "device": "sensei310", "light": "logo", "effect": "breathing", "params": { "color": "#FF0000" } })).unwrap();
+        core.call("lighting/set", &serde_json::json!({ "device": "sensei310", "light": "wheel", "effect": "colorshift", "params": {} })).unwrap();
         // what the light plays, as sent: told back for the page to play it on the drawing
         let told = serde_json::json!({ "ms": 3000, "held": false, "stops": [{ "at": 0, "color": "#000000" }, { "at": 127, "color": "#FF0000" }, { "at": 255, "color": "#000000" }] });
         assert_eq!(set["plays"], told, "lighting/set says what the light plays");
-        let got = core.call("lighting/get", &serde_json::json!({ "device": "sensei310-1" })).unwrap();
+        let got = core.call("lighting/get", &serde_json::json!({ "device": "sensei310" })).unwrap();
         assert_eq!(got["logo"]["plays"], told, "and lighting/get");
         assert_eq!(got["wheel"]["plays"]["stops"].as_array().map(|a| a.len()), Some(7));
         let all = sent.lock().unwrap()[at..].to_vec();

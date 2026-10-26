@@ -1,11 +1,11 @@
-//! The codes the keys given a screen job send (see [crate::z10::screen_job]): codes the
+//! The codes the keys given a screen job send (see [crate::keyboard::screen_job]): codes the
 //! USB standard reserves, which Linux never turns into key presses, so the keyboard's core
 //! hears them in the keyboard's own reports and tells Ectomatter which host slot it was (see
 //! cores/evga-z10). Here, the code each playlist and each of Ectomatter's own jobs keeps.
 
 use std::collections::{BTreeMap, HashSet};
 
-use crate::z10::PLAY_CODES;
+use crate::keyboard::PLAY_CODES;
 
 /// The code a key plays playlist `id` with: the playlist's own, if it has one; else one no key
 /// sends (`sent`), first one no playlist has, then one a deleted playlist had, then one whose

@@ -14,7 +14,7 @@ use slint::{Color, Model, ModelRc, SharedString, VecModel};
 use crate::device;
 use crate::lighting::{self, Ctl};
 use crate::overlays::Overlays;
-use crate::z10::{self, Entry, Page, View};
+use crate::keyboard::{self, Entry, Page, View};
 use ectomatter_protocol::Action;
 use crate::{AppWindow, Cell, CheckItem, DeskItem, DeskPad, EffectItem, KeyItem, LayerItem, LayerTab, LibGroup, LibRow, MenuRow, MousePatch, ProfileItem};
 
@@ -502,13 +502,13 @@ const MACRO_PAGE: usize = 7;
 
 /// The page of the action menu a screen job is on.
 fn screen_page(code: u32) -> usize {
-    if code >= z10::NEXT_PLAYLIST { PLAYLIST_PAGE } else { LAYOUT_PAGE }
+    if code >= keyboard::NEXT_PLAYLIST { PLAYLIST_PAGE } else { LAYOUT_PAGE }
 }
 
 /// The Key library's groups and their keys, in the order the keyboard's
 /// description lists the groups (`groups`) and the keys (each its `group`).
-fn lib_groups(p: &Page) -> Vec<(String, Vec<z10::Key>)> {
-    let mut out: Vec<(String, Vec<z10::Key>)> = lib_group_names().into_iter().map(|g| (g, Vec::new())).collect();
+fn lib_groups(p: &Page) -> Vec<(String, Vec<keyboard::Key>)> {
+    let mut out: Vec<(String, Vec<keyboard::Key>)> = lib_group_names().into_iter().map(|g| (g, Vec::new())).collect();
     for k in &p.layout {
         if let Some(e) = out.iter_mut().find(|(n, _)| *n == k.group) {
             e.1.push(k.clone());
@@ -626,7 +626,7 @@ pub struct Front {
     /// the player told to stand aside, the keyboard showing its own status screen for the
     /// Screen tab's picture of it (see [Front::status_showing])
     aside: bool,
-    /// the playlist each code a key may play one with plays (see z10::PLAY_CODES), by its
+    /// the playlist each code a key may play one with plays (see keyboard::PLAY_CODES), by its
     /// id, as Ectomatter's settings keep it
     keyed: std::collections::BTreeMap<u32, String>,
     /// the onboard layout's chooser open; on the second tab, a layout carried over the
@@ -1389,7 +1389,7 @@ impl Front {
             .settings
             .get("devices.z10.screen.keyed")
             .and_then(|v| v.as_object().cloned())
-            .map(|m| m.iter().filter_map(|(c, id)| Some((c.parse::<u32>().ok().filter(|c| z10::PLAY_CODES.contains(c))?, id.as_str()?.to_string()))).collect())
+            .map(|m| m.iter().filter_map(|(c, id)| Some((c.parse::<u32>().ok().filter(|c| keyboard::PLAY_CODES.contains(c))?, id.as_str()?.to_string()))).collect())
             .unwrap_or_default();
         // (a key's job, and a macro's step, kept by an old id from when a job named the
         // keyboard or the mouse in place of a device: kept by the device's key now)
@@ -1434,6 +1434,8 @@ impl Front {
         f.ui.set_cells(ModelRc::from(f.cells.clone()));
         f.ui.set_scene_cells(ModelRc::from(f.scene_cells.clone()));
         f.ui.set_light_boxes(ModelRc::from(f.light_boxes.model.clone()));
+        // (who makes the keyboard, as its core says, for the page's words about its own screens)
+        f.ui.set_kb_maker(crate::cores::keyboard().and_then(|k| k.described()["vendor"].as_str()).unwrap_or_default().into());
         f.ui.set_mouse_boxes(ModelRc::from(f.mouse_boxes.model.clone()));
         f.ui.set_pl_blocks(ModelRc::from(f.blocks.clone()));
         f.poll_lcd();
@@ -1713,7 +1715,7 @@ impl Front {
                     if let Some(id) = self.page.effects().get(i.max(0) as usize).and_then(|e| e["id"].as_str().map(String::from)) {
                         self.page.set_effect(&id);
                         // (the desk matches what was just chosen: the scene lighting it goes off)
-                        if self.scene_lighting("z10").is_some() {
+                        if self.scene_lighting(crate::cores::keyboard_key()).is_some() {
                             self.set_scene(None, true);
                         }
                     }
@@ -1815,7 +1817,7 @@ impl Front {
                     if let Some(e) = self.mouse.effects().get(i.max(0) as usize) {
                         let old = self.mouse.light_of(self.mouse.light_name());
                         self.mouse.set_light(crate::described::with_effect(&old, e));
-                        if self.scene_lighting("sensei310").is_some() {
+                        if self.scene_lighting(crate::mouse::key()).is_some() {
                             self.set_scene(None, true);
                         }
                     }
@@ -2289,7 +2291,7 @@ impl Front {
                     }
                     // the readings again each second: for the page being edited (its
                     // picture and its boxes), or the playlist's pictures of its pages
-                    let on_screen = self.page.view == View::Screen && self.ui.get_place() == "z10";
+                    let on_screen = self.page.view == View::Screen && self.ui.get_place() == "keyboard";
                     if (self.editor.is_some() || on_screen) && self.read_at.is_none_or(|t| t.elapsed() >= Duration::from_secs(1)) {
                         self.read_now();
                         if self.editor.is_some() {
@@ -2368,7 +2370,7 @@ impl Front {
                 Ask::LibFind(t) => self.lib_query = t,
                 Ask::Game(i) => {
                     let blocked = !self.page.draft()["lighting"]["game_keys"].as_u64().unwrap_or(0) & 0x7f;
-                    let on = crate::display::GAME_KEYS.get(i as usize).is_some_and(|g| blocked & g.0 != 0);
+                    let on = crate::display::game_keys().get(i as usize).is_some_and(|g| blocked & g.0 != 0);
                     crate::display::act(&mut self.page, Ctl::GameKey, i as usize, if on { 0.0 } else { 1.0 }, None);
                 }
                 Ask::Kind(i, x, y, h) => {
@@ -2380,7 +2382,7 @@ impl Front {
                             self.assign(self.layer, Action::None);
                         }
                         _ => {
-                            let screen = self.page.sel.map(|pos| self.page.def(LAYERS[self.layer].0, pos)).filter(|d| !self.is_job_key(d)).and_then(|d| z10::screen_job(&d)).map_or(LAYOUT_PAGE, screen_page);
+                            let screen = self.page.sel.map(|pos| self.page.def(LAYERS[self.layer].0, pos)).filter(|d| !self.is_job_key(d)).and_then(|d| keyboard::screen_job(&d)).map_or(LAYOUT_PAGE, screen_page);
                             let page = [0, 1, 2, MACRO_PAGE, 3, screen, 6][i.clamp(0, 6) as usize];
                             self.open_menu_on(self.layer, (x, y, h), Some(page), 0.0);
                         }
@@ -2667,7 +2669,7 @@ impl Front {
                 }
                 Ask::PollSliders => {
                     changed = false;
-                    if self.page.reads_sliders() && self.ui.get_place() == "z10" && !self.sliders_asked && self.kb.is_some() {
+                    if self.page.reads_sliders() && self.ui.get_place() == "keyboard" && !self.sliders_asked && self.kb.is_some() {
                         self.sliders_asked = true;
                         self.ask_kb(device::Ask::Sliders);
                     }
@@ -2721,7 +2723,7 @@ impl Front {
 
     /// The keyboard's light as it lights it now: which caps are pale.
     pub fn light_caps(&mut self, light: &serde_json::Value) {
-        crate::z10::set_bleeds(light);
+        crate::keyboard::set_bleeds(light);
         let controls = crate::cores::keyboard().and_then(|c| c.device["controls"].as_array().cloned()).unwrap_or_default();
         self.pale = controls.iter().filter_map(|c| Some((c["id"].as_str()?, c["pos"].as_u64()? as u32))).filter(|(id, _)| ectomatter_draw::hdr::pale_top(light, id)).map(|(_, pos)| pos).collect();
     }
@@ -2941,7 +2943,7 @@ impl Front {
     /// Whether the keyboard's page is the one showing, whose Lighting boxes
     /// are drawn from its description.
     fn on_keyboard(&self) -> bool {
-        self.ui.get_place() == "z10"
+        self.ui.get_place() == "keyboard"
     }
 
     /// A piece of the keyboard's Lighting boxes, drawn from its description,
@@ -3577,18 +3579,18 @@ impl Front {
     /// a key" takes. True if it was taken. (The board shows the keyboard's
     /// keys going down and coming up from the keyboard itself: see [watched].)
     pub fn typed(&mut self, code: u32, down: bool) -> bool {
-        let Some((mods, hid)) = z10::evdev_to_hid(code) else { return self.listening.is_some() };
+        let Some((mods, hid)) = keyboard::evdev_to_hid(code) else { return self.listening.is_some() };
         if let Some((layer, held)) = self.listening {
             if down {
                 if hid == 0 {
                     self.listening = Some((layer, held | mods));
                 } else {
-                    self.assign(layer, z10::pressed_action(held, hid));
+                    self.assign(layer, keyboard::pressed_action(held, hid));
                 }
             } else if hid == 0 {
                 // a lone modifier pressed and let go assigns that modifier
                 if held == mods {
-                    self.assign(layer, z10::pressed_action(held, 0));
+                    self.assign(layer, keyboard::pressed_action(held, 0));
                 } else {
                     self.listening = Some((layer, held & !mods));
                 }
@@ -3607,7 +3609,7 @@ impl Front {
     /// key that sends what it sent.
     pub fn keyboard_input(&mut self, p: &serde_json::Value, down: bool) {
         if let Some(n) = p["host"].as_u64() {
-            self.screen_key_event(z10::NEXT_LAYOUT + n as u32, down);
+            self.screen_key_event(keyboard::NEXT_LAYOUT + n as u32, down);
         }
         let Some(sent) = Action::read(&p["sends"]) else { return };
         let Some(pos) = self.page.pos_for(&sent).filter(|p| self.page.key(*p).is_some()) else { return };
@@ -3700,7 +3702,7 @@ impl Front {
 
     /// The same for a point of the mouse's drawing (see mouse_art::view).
     fn on_desk_mouse(&self, x: f32, y: f32) -> Option<(f32, f32)> {
-        let i = self.desk.items.iter().position(|it| it.id == "mouse")?;
+        let i = self.desk.items.iter().position(|it| it.id == crate::mouse::key())?;
         let [mx, my, mw, mh] = self.desk.screen(i);
         let v = crate::mouse_art::view();
         Some((mx + (x - v.0) / v.2 * mw, my + (y - v.1) / v.3 * mh))
@@ -3729,13 +3731,13 @@ impl Front {
     fn open_menu(&mut self, layer: usize, anchor: (f32, f32, f32), under: f32) {
         // the job's own kind of list, or the whole menu for a key that does nothing (a key
         // with a job Ectomatter does sends one of the codes a playlist could: its job's page)
-        let page = self.page.sel.map(|pos| self.page.def(LAYERS[layer].0, pos)).and_then(|d| match if self.is_job_key(&d) { self.key_tag(&d) } else { z10::kind_of(&d) } {
+        let page = self.page.sel.map(|pos| self.page.def(LAYERS[layer].0, pos)).and_then(|d| match if self.is_job_key(&d) { self.key_tag(&d) } else { keyboard::kind_of(&d) } {
             "Key" => Some(0),
             "Media" => Some(1),
             "Mouse" => Some(2),
             "Macro" => Some(MACRO_PAGE),
             "Profile" => Some(3),
-            "Screen" => z10::screen_job(&d).map(screen_page),
+            "Screen" => keyboard::screen_job(&d).map(screen_page),
             "Keyboard" => Some(6),
             _ => None,
         });
@@ -3925,7 +3927,7 @@ impl Front {
         match ui.get_place().as_str() {
             // the keyboard (a key there is chosen instead, and the chassis
             // lets it go itself) and the key's editor
-            "z10" if self.page.view == View::Keys && self.page.sel.is_some() => {
+            "keyboard" if self.page.view == View::Keys && self.page.sel.is_some() => {
                 let mut k = Vec::new();
                 if ui.get_board_shown() {
                     k.push((ui.get_board_x(), ui.get_board_y(), ui.get_board_width(), ui.get_board_height()));
@@ -3968,7 +3970,7 @@ impl Front {
     /// The page's chosen thing let go.
     fn let_chosen_go_now(&mut self) {
         match self.ui.get_place().as_str() {
-            "z10" => {
+            "keyboard" => {
                 self.page.sel = None;
                 self.listening = None;
             }
@@ -4363,7 +4365,7 @@ impl Front {
                 self.close_menu();
                 if let Some(code) = self.play_code(&id) {
                     if self.page.sel == Some(pos) {
-                        self.page.set_def(LAYERS[layer].0, pos, &z10::screen_slot(code));
+                        self.page.set_def(LAYERS[layer].0, pos, &keyboard::screen_slot(code));
                     }
                 }
             }
@@ -4372,7 +4374,7 @@ impl Front {
                 self.close_menu();
                 if let Some(code) = self.play_code(&id) {
                     if self.page.sel == Some(pos) {
-                        self.page.set_def(LAYERS[layer].0, pos, &z10::screen_slot(code));
+                        self.page.set_def(LAYERS[layer].0, pos, &keyboard::screen_slot(code));
                     }
                 }
             }
@@ -4454,14 +4456,14 @@ impl Front {
     /// The job a key's action is, if it is one of Ectomatter's own (its host
     /// slot's code kept for one; see jobs.rs).
     fn key_job(&self, a: &Action) -> Option<crate::jobs::Job> {
-        let code = z10::screen_job(a)?;
+        let code = keyboard::screen_job(a)?;
         crate::jobs::Job::of(self.keyed.get(&code)?.strip_prefix(crate::jobs::ON_KEY)?)
     }
 
     /// Whether a key's action is one of Ectomatter's own jobs' codes, a job
     /// deleted since included.
     fn is_job_key(&self, a: &Action) -> bool {
-        z10::screen_job(a).and_then(|c| self.keyed.get(&c)).is_some_and(|id| id.starts_with(crate::jobs::ON_KEY))
+        keyboard::screen_job(a).and_then(|c| self.keyed.get(&c)).is_some_and(|id| id.starts_with(crate::jobs::ON_KEY))
     }
 
     /// What kind of job a key has, as its kind switch and the menu's pages
@@ -4473,7 +4475,7 @@ impl Front {
             Some(crate::jobs::Job::Macro { .. }) => "Macro",
             Some(crate::jobs::Job::Screen(_)) => "Screen",
             None if self.is_job_key(a) => "Macro",
-            None => z10::kind_of(a),
+            None => keyboard::kind_of(a),
         }
     }
 
@@ -4489,7 +4491,7 @@ impl Front {
         let lists = &self.screens.playlists;
         let (mut groups, mut macros, mut scenes) = (Vec::<(String, String, Vec<(Entry, Choice, i32, String)>)>::new(), Vec::new(), Vec::new());
         let names = self.job_names();
-        let mut jobs = names.for_device(crate::jobs::KEYBOARD);
+        let mut jobs = names.for_device(crate::jobs::keyboard());
         jobs.extend(names.macros.iter().map(|(n, _)| crate::jobs::Job::Macro { n: *n, plays: ectomatter_protocol::Plays::Once }).map(|j| (names.of(&j), j)));
         for (words, j) in jobs {
             let short = names.short(&j);
@@ -4502,7 +4504,7 @@ impl Front {
                 crate::jobs::Job::Scene(_) => "Scene",
                 _ => names.sort_of(&j),
             };
-            let a = Entry { label: words, act: code.map_or(Action::Raw(Vec::new()), z10::screen_slot), tag };
+            let a = Entry { label: words, act: code.map_or(Action::Raw(Vec::new()), keyboard::screen_slot), tag };
             let row = if can { (a, Choice::Job(j.id()), 0, short) } else { (a, Choice::Nothing, 5, short) };
             match &j {
                 crate::jobs::Job::Macro { .. } => macros.push(row),
@@ -4533,13 +4535,13 @@ impl Front {
                 let code = self.keyed.iter().find(|(_, id)| **id == l.id).map(|(c, _)| *c);
                 let can = code.is_some() || crate::screen_keys::code_for(&l.id, &self.keyed, &sent, |p| lists.iter().any(|x| x.id == p)).is_some();
                 // (a playlist no key plays yet has no job to tick: an empty code matches no key's)
-                let a = Entry { label: format!("Play {}", l.name), act: code.map_or(Action::Raw(Vec::new()), z10::screen_slot), tag: "Screen" };
+                let a = Entry { label: format!("Play {}", l.name), act: code.map_or(Action::Raw(Vec::new()), keyboard::screen_slot), tag: "Screen" };
                 if can { (a, Choice::Play(l.id.clone()), 0) } else { (a, Choice::Nothing, 5) }
             })
             .collect()
     }
 
-    /// A key with a screen job pressed (its code, see z10::screen_job), as the keyboard's own
+    /// A key with a screen job pressed (its code, see keyboard::screen_job), as the keyboard's own
     /// reports tell of it: Record takes it as the key's job; else, while Ectomatter plays the
     /// screen, the job is done for the profile whose playlist plays. Nothing while a layout is
     /// open in the Screen Editor, the Onboard layout tab has the screen, or another program's
@@ -4564,15 +4566,15 @@ impl Front {
 
     pub fn screen_key(&mut self, code: u32) {
         if let Some((layer, _)) = self.listening {
-            self.assign(layer, z10::screen_slot(code));
+            self.assign(layer, keyboard::screen_slot(code));
             return;
         }
         if !self.controlled || self.editor.is_some() || self.aside || self.lcd.sequence.is_some() {
             return;
         }
-        if code == z10::NEXT_LAYOUT || code == z10::PREV_LAYOUT {
+        if code == keyboard::NEXT_LAYOUT || code == keyboard::PREV_LAYOUT {
             if let Some(pl) = &self.player {
-                pl.tell(crate::lcd_player::Control::Step(if code == z10::NEXT_LAYOUT { 1 } else { -1 }));
+                pl.tell(crate::lcd_player::Control::Step(if code == keyboard::NEXT_LAYOUT { 1 } else { -1 }));
             }
             return;
         }
@@ -4580,8 +4582,8 @@ impl Front {
         let count = self.screens.playlists.len();
         let mine = self.screens.of_profile(n);
         let to = match code {
-            z10::NEXT_PLAYLIST => (count > 1).then(|| (mine + 1) % count),
-            z10::PREV_PLAYLIST => (count > 1).then(|| (mine + count - 1) % count),
+            keyboard::NEXT_PLAYLIST => (count > 1).then(|| (mine + 1) % count),
+            keyboard::PREV_PLAYLIST => (count > 1).then(|| (mine + count - 1) % count),
             c => self.keyed.get(&c).and_then(|id| self.screens.playlists.iter().position(|l| &l.id == id)).filter(|k| *k != mine),
         };
         if let Some(k) = to {
@@ -4607,10 +4609,10 @@ impl Front {
         }
         let pl = &self.screens.playlist(self.page.editing).name;
         match code {
-            z10::NEXT_LAYOUT => format!("Shows the next layout in {pl} while Ectomatter is running."),
-            z10::PREV_LAYOUT => format!("Shows the previous layout in {pl} while Ectomatter is running."),
-            z10::NEXT_PLAYLIST => format!("Plays the playlist after {pl} while Ectomatter is running."),
-            z10::PREV_PLAYLIST => format!("Plays the playlist before {pl} while Ectomatter is running."),
+            keyboard::NEXT_LAYOUT => format!("Shows the next layout in {pl} while Ectomatter is running."),
+            keyboard::PREV_LAYOUT => format!("Shows the previous layout in {pl} while Ectomatter is running."),
+            keyboard::NEXT_PLAYLIST => format!("Plays the playlist after {pl} while Ectomatter is running."),
+            keyboard::PREV_PLAYLIST => format!("Plays the playlist before {pl} while Ectomatter is running."),
             c => match self.page.playlist_keys.get(&c) {
                 Some(name) => format!("Plays {name} while Ectomatter is running."),
                 None => "The playlist this key played was deleted, so the key does nothing until you give it another job.".into(),
@@ -4767,7 +4769,7 @@ impl Front {
                         // (the screen's two pages each ticked for their own jobs; another
                         // device's job's code is no screen job)
                         let tick = if p == LAYOUT_PAGE || p == PLAYLIST_PAGE {
-                            !job_key && z10::screen_job(&def).is_some_and(|c| screen_page(c) == p)
+                            !job_key && keyboard::screen_job(&def).is_some_and(|c| screen_page(c) == p)
                         } else if p == PROFILE_PAGE && job_key {
                             def_tag == "Profile"
                         } else {
@@ -4777,7 +4779,7 @@ impl Front {
                         rows.push(row(0, &format!("{title} ›"), "", tick));
                         choices.push(Choice::Page(p));
                     }
-                    rows.push(row(0, "Nothing", "", z10::is_nothing(&def)));
+                    rows.push(row(0, "Nothing", "", keyboard::is_nothing(&def)));
                     choices.push(Choice::Set(Action::None));
                 }
             }
@@ -4805,7 +4807,7 @@ impl Front {
     /// Draw the page from the page's state.
     pub fn refresh(&mut self) {
         // (a device's page with no core for the device isn't shown: Home is)
-        if self.ui.get_place() == "z10" && crate::cores::keyboard().is_none() {
+        if self.ui.get_place() == "keyboard" && crate::cores::keyboard().is_none() {
             self.ui.set_place("home".into());
         }
         // (the page's sensors read only while Settings or the screen editor shows them)
@@ -4819,7 +4821,7 @@ impl Front {
         self.follow_profile();
         self.sync_aside();
         // (a scene that lights the keyboard says so in place of the Lighting page's hint)
-        let kb_scene = self.scene_lighting("z10");
+        let kb_scene = self.scene_lighting(crate::cores::keyboard_key());
         let lighting_hint = match &kb_scene {
             Some(name) => format!("The {name} scene is lighting the desk. Choosing an effect here turns the scene off."),
             None => "Choose a lighting effect for this profile, then set the colors, speed and zones below.".to_string(),
@@ -4887,10 +4889,10 @@ impl Front {
             .iter()
             .map(|k| KeyItem {
                 pos: k.pos as i32,
-                x: (k.x - x0 + z10::GAP / 2.0) as f32,
-                y: (k.y - y0 + z10::GAP / 2.0) as f32,
-                w: (k.w - z10::GAP) as f32,
-                h: (k.h - z10::GAP) as f32,
+                x: (k.x - x0 + keyboard::GAP / 2.0) as f32,
+                y: (k.y - y0 + keyboard::GAP / 2.0) as f32,
+                w: (k.w - keyboard::GAP) as f32,
+                h: (k.h - keyboard::GAP) as f32,
                 molded: k.molded,
                 remap: p.remap(k.pos, &names).filter(|_| self.rebindings).map(|s| s.to_uppercase()).unwrap_or_default().into(),
                 pale: self.pale.contains(&k.pos),
@@ -4918,7 +4920,7 @@ impl Front {
             let fac = p.factory("base", k.pos);
             let name = p.key_label(&k);
             ui.set_key_name(name.clone().into());
-            ui.set_key_factory(format!("Factory: {}", if z10::is_nothing(&fac) { "does nothing".to_string() } else { p.describe(&fac) }).into());
+            ui.set_key_factory(format!("Factory: {}", if keyboard::is_nothing(&fac) { "does nothing".to_string() } else { p.describe(&fac) }).into());
             ui.set_reset_label(format!("Reset {name} to factory").into());
             let layers: Vec<LayerItem> = LAYERS
                 .iter()
@@ -4926,14 +4928,14 @@ impl Front {
                 .map(|(i, (layer, title))| {
                     let d = p.def(layer, k.pos);
                     let mac = if let Action::Macro { n, .. } = d { Some(n) } else { None };
-                    let label = if let Some(n) = mac { p.macro_label(n) } else if z10::is_nothing(&d) { "Nothing".into() } else { p.describe(&d) };
+                    let label = if let Some(n) = mac { p.macro_label(n) } else if keyboard::is_nothing(&d) { "Nothing".into() } else { p.describe(&d) };
                     let held: Vec<SharedString> = mac.map(|n| p.macro_keys_held(n).into_iter().map(Into::into).collect()).unwrap_or_default();
                     let is_macro = mac.is_some();
                     LayerItem {
                         title: (*title).into(),
-                        kind: z10::kind_of(&d).into(),
+                        kind: keyboard::kind_of(&d).into(),
                         label: label.into(),
-                        nothing: z10::is_nothing(&d),
+                        nothing: keyboard::is_nothing(&d),
                         held: ModelRc::new(VecModel::from(held)),
                         r#macro: is_macro,
                         listening: self.listening.is_some_and(|(l, _)| l == i),
@@ -4951,7 +4953,7 @@ impl Front {
                 "Same as on Base".to_string()
             } else if let Action::Macro { n, .. } = d {
                 p.macro_label(n)
-            } else if z10::is_nothing(&d) {
+            } else if keyboard::is_nothing(&d) {
                 "Nothing".into()
             } else {
                 p.describe(&d)
@@ -4975,7 +4977,7 @@ impl Front {
             let note = if fn_unset {
                 "On the Function layer this key does what it does on Base, until you choose a job here.".to_string()
             } else {
-                z10::screen_job(&d).map_or(String::new(), |c| self.screen_note(c))
+                keyboard::screen_job(&d).map_or(String::new(), |c| self.screen_note(c))
             };
             ui.set_key_note(note.into());
         }
@@ -5036,9 +5038,9 @@ impl Front {
                         let fac = p.factory(layer, k.pos);
                         let re = d != fac;
                         let job = if re {
-                            if let Action::Macro { n, .. } = d { p.macro_label(n) } else if z10::is_nothing(&d) { "Nothing".into() } else { p.describe(&d) }
+                            if let Action::Macro { n, .. } = d { p.macro_label(n) } else if keyboard::is_nothing(&d) { "Nothing".into() } else { p.describe(&d) }
                         // (a button, with nothing printed on it, is known by what it does)
-                        } else if !k.printed && !z10::is_nothing(&fac) && p.describe(&fac) != name {
+                        } else if !k.printed && !keyboard::is_nothing(&fac) && p.describe(&fac) != name {
                             p.describe(&fac)
                         } else {
                             String::new()
@@ -5067,7 +5069,7 @@ impl Front {
             show_rows(ui.get_lib_groups(), |m| ui.set_lib_groups(m), groups);
             // Game mode's keys, blocked or not
             let blocked = !p.draft()["lighting"]["game_keys"].as_u64().unwrap_or(0) & 0x7f;
-            let items: Vec<CheckItem> = crate::display::GAME_KEYS.iter().map(|(bit, n)| CheckItem { name: (*n).into(), on: blocked & bit != 0 }).collect();
+            let items: Vec<CheckItem> = crate::display::game_keys().into_iter().map(|(bit, n)| CheckItem { name: n.into(), on: blocked & bit != 0 }).collect();
             show_rows(ui.get_game_items(), |m| ui.set_game_items(m), items);
             // a slider chosen: where it sits, what it controls
             ui.set_slider_chosen(self.slider_sel as i32);
@@ -5100,7 +5102,7 @@ impl Front {
         if self.menu.is_some() {
             self.build_menu();
         }
-        if loaded && self.page.view == View::Lighting && self.ui.get_place() == "z10" {
+        if loaded && self.page.view == View::Lighting && self.ui.get_place() == "keyboard" {
             self.refresh_lighting();
         }
         self.desk_meet();
@@ -5231,7 +5233,7 @@ impl Front {
                 let Some(d) = self.page.drafts.get(&p) else { continue };
                 for (layer, words) in [("base", ""), ("fn", "Fn + ")] {
                     for pos in 0..crate::cores::places() as u32 {
-                        let Some(code) = Action::read(&d["keys"][layer][self.page.id(pos)]).as_ref().and_then(z10::screen_job) else { continue };
+                        let Some(code) = Action::read(&d["keys"][layer][self.page.id(pos)]).as_ref().and_then(keyboard::screen_job) else { continue };
                         let job = self.keyed.get(&code).and_then(|id| id.strip_prefix(crate::jobs::ON_KEY)).and_then(crate::jobs::Job::of);
                         if let Some(crate::jobs::Job::Macro { n, plays }) = job {
                             let key = self.page.key(pos).map(|k| self.page.key_label(k)).unwrap_or_else(|| format!("Key {pos}"));
@@ -5358,7 +5360,7 @@ impl Front {
         match j {
             // (each device's profiles switched as its page switches them; a plugin's device
             // through its plugin)
-            Job::Profile { device, to } if device == crate::jobs::KEYBOARD => {
+            Job::Profile { device, to } if device == crate::jobs::keyboard() => {
                 if self.page.dev.is_none() {
                     return;
                 }
@@ -5376,7 +5378,7 @@ impl Front {
                     self.refresh();
                 }
             }
-            Job::Profile { device, to } if device == crate::jobs::MOUSE => {
+            Job::Profile { device, to } if device == crate::jobs::mouse() => {
                 let Some(store) = &self.mouse.profiles else { return };
                 let i = match to {
                     To::Id(id) => store.list.iter().position(|p| &p.id == id),
@@ -5416,7 +5418,7 @@ impl Front {
         let mut devices: Vec<crate::jobs::Profiled> = self
             .lib_devices()
             .into_iter()
-            .map(|d| crate::jobs::Profiled { steps: true, screen: d.key == crate::jobs::KEYBOARD, here: d.key != crate::jobs::KEYBOARD || self.page.dev.is_some(), key: d.key, name: d.name, kind: d.kind, profiles: d.profiles })
+            .map(|d| crate::jobs::Profiled { steps: true, screen: d.key == crate::jobs::keyboard(), here: d.key != crate::jobs::keyboard() || self.page.dev.is_some(), key: d.key, name: d.name, kind: d.kind, profiles: d.profiles })
             .collect();
         for (_, d) in self.hosted.devices() {
             let cap = &d["capabilities"]["profiles"];
@@ -5436,23 +5438,26 @@ impl Front {
     }
 
     /// The devices Ectomatter shows, as they sit on Home's desk (left to right),
-    /// then any not on it yet: each one's place, its name, what sort it is,
+    /// then any not on it yet: each one's page, its name, what sort it is,
     /// and whether it is plugged in. The keyboard is always among them, the
-    /// mouse once Ectomatter has met it.
+    /// mouse once Ectomatter has met it; each by its key on the desk.
     pub fn devices_in_order(&self) -> Vec<(String, String, String, bool)> {
-        let kb = |core: &crate::cores::Core| ("z10".to_string(), core.name().to_string(), "keyboard".to_string(), self.ui.get_conn_state() == 1);
+        let kb = |core: &crate::cores::Core| ("keyboard".to_string(), core.name().to_string(), "keyboard".to_string(), self.ui.get_conn_state() == 1);
         let mouse = || {
-            let name = self.mouse.state["device"]["name"].as_str().unwrap_or("SteelSeries Sensei 310").to_string();
+            let name = self.mouse.state["device"]["name"].as_str().or(crate::mouse::shape().described["name"].as_str()).unwrap_or_default().to_string();
             ("mouse".to_string(), name, "mouse".to_string(), self.mouse.present())
         };
         let mut out: Vec<(String, String, String, bool)> = Vec::new();
-        for id in self.desk.order().iter().map(String::as_str).chain(["z10", "mouse"]) {
-            if out.iter().any(|d| d.0 == id) {
+        let mut seen: Vec<String> = Vec::new();
+        for id in self.desk.order().iter().map(String::as_str).chain([crate::cores::keyboard_key(), crate::mouse::key()]) {
+            // (each device once, by its key)
+            if seen.iter().any(|s| s == id) {
                 continue;
             }
+            seen.push(id.to_string());
             match id {
-                "z10" => out.extend(crate::cores::keyboard().map(kb)),
-                "mouse" if self.mouse.known() => out.push(mouse()),
+                k if k == crate::cores::keyboard_key() && !k.is_empty() => out.extend(crate::cores::keyboard().map(kb)),
+                m if m == crate::mouse::key() && !m.is_empty() && self.mouse.known() => out.push(mouse()),
                 _ => {}
             }
         }
@@ -5466,7 +5471,7 @@ impl Front {
         // (each device's page names it in its bar as the rail does)
         for r in &rows {
             match r.place.as_str() {
-                "z10" if ui.get_kb_name() != r.name => ui.set_kb_name(r.name.clone()),
+                "keyboard" if ui.get_kb_name() != r.name => ui.set_kb_name(r.name.clone()),
                 "mouse" if ui.get_mouse_name() != r.name => ui.set_mouse_name(r.name.clone()),
                 _ => {}
             }
@@ -5678,7 +5683,7 @@ impl Front {
     /// not, as the window draws it once the desk settles (a snapshot has no
     /// moment to wait for that).
     pub fn ready_desk_mouse(&mut self) {
-        let Some(i) = self.desk.items.iter().position(|it| it.id == "mouse") else { return };
+        let Some(i) = self.desk.items.iter().position(|it| it.id == crate::mouse::key()) else { return };
         self.mouse_draw();
         let w = ((self.desk.screen(i)[2] * self.scale / 4.0).round() * 4.0).clamp(32.0, 1600.0) as u32;
         if w != (240.0 * self.scale).round() as u32 && self.desk_mouse.as_ref().is_none_or(|(dw, _)| *dw != w) {
@@ -5716,7 +5721,7 @@ impl Front {
     /// The mouse lit in HDR for Home's desk, as it shows now: dark and half
     /// shown while it isn't plugged in.
     fn light_desk_mouse(&mut self) {
-        let Some(item) = self.desk.items.iter().find(|it| it.id == "mouse") else { return };
+        let Some(item) = self.desk.items.iter().find(|it| it.id == crate::mouse::key()) else { return };
         let on = item.connected;
         let (white, ceiling) = (self.levels.0 as f32, self.light_gain(self.levels.0));
         let now = Instant::now();
@@ -5796,7 +5801,7 @@ impl Front {
         let none = ((0, 0, 0, 0), None);
         // on Home's desk: where the desk has it, with its shadow round it
         if self.ui.get_place() == "home" {
-            let Some(i) = self.desk.items.iter().position(|it| it.id == "mouse") else { return none };
+            let Some(i) = self.desk.items.iter().position(|it| it.id == crate::mouse::key()) else { return none };
             if self.desk_mouse_lit.is_none() {
                 self.light_desk_mouse();
             }
@@ -5876,7 +5881,7 @@ impl Front {
     fn mouse_pictured(&self) -> bool {
         match self.ui.get_place().as_str() {
             "mouse" => self.mouse.tab < 2,
-            "home" => self.desk.items.iter().any(|i| i.id == "mouse"),
+            "home" => self.desk.items.iter().any(|i| i.id == crate::mouse::key()),
             _ => false,
         }
     }
@@ -5887,20 +5892,20 @@ impl Front {
     /// those it has kept a place for; each at its size, and whether it is
     /// plugged in.
     fn desk_meet(&mut self) {
-        if let Some(core) = crate::cores::keyboard().filter(|_| self.page.dev.is_some() || self.desk.keeps("z10")) {
+        if let Some(core) = crate::cores::keyboard().filter(|_| self.page.dev.is_some() || self.desk.keeps(crate::cores::keyboard_key())) {
             let size = crate::desk::size_of(&core.art, core.device["light"]["scale"].as_f64().unwrap_or(1.38) as f32);
             // (not yet known to be plugged in, it is drawn as plugged in: only a keyboard gone shows dimmed)
             let kind = core.device["kind"].as_str().unwrap_or("keyboard").to_string();
-            self.desk.meet("z10", core.name(), "z10", &kind, size, self.ui.get_conn_state() != 2, true);
+            self.desk.meet(crate::cores::keyboard_key(), core.name(), "keyboard", &kind, size, self.ui.get_conn_state() != 2, true);
         }
-        if self.mouse.known() || self.desk.keeps("mouse") {
+        if !crate::mouse::key().is_empty() && (self.mouse.known() || self.desk.keeps(crate::mouse::key())) {
             let dev = &self.mouse.state["device"];
             let v = crate::mouse_art::view();
             let per = dev["scale"].as_f64().unwrap_or(520.0 / 125.1) as f32;
             let size = (v.2 / per * crate::desk::PER_MM, v.3 / per * crate::desk::PER_MM);
-            let name = dev["name"].as_str().unwrap_or("SteelSeries Sensei 310").to_string();
+            let name = dev["name"].as_str().or(crate::mouse::shape().described["name"].as_str()).unwrap_or_default().to_string();
             let kind = dev["kind"].as_str().unwrap_or("mouse").to_string();
-            self.desk.meet("mouse", &name, "mouse", &kind, size, self.mouse.present() || self.mouse.state.is_null(), false);
+            self.desk.meet(crate::mouse::key(), &name, "mouse", &kind, size, self.mouse.present() || self.mouse.state.is_null(), false);
         }
     }
 
@@ -5918,7 +5923,7 @@ impl Front {
             .map(|(i, it)| {
                 let [x, y, w, h] = d.screen(i);
                 let backed = d.name_backed(names[i]);
-                DeskItem { kind: if it.id == "z10" { 0 } else { 1 }, name: it.name.as_str().into(), sub: if it.connected { "".into() } else { "Not connected".into() }, x, y, w, h, off: !it.connected, hover: d.hover == Some(i), backed }
+                DeskItem { kind: if it.kind == "keyboard" { 0 } else { 1 }, name: it.name.as_str().into(), sub: if it.connected { "".into() } else { "Not connected".into() }, x, y, w, h, off: !it.connected, hover: d.hover == Some(i), backed }
             })
             .collect();
         show_rows(ui.get_desk_items(), |r| ui.set_desk_items(r), items);
@@ -5954,7 +5959,7 @@ impl Front {
     /// The mouse on the desk: its picture as drawn for its size there, or its
     /// page's shown at that size while that one is drawn.
     fn show_desk_mouse(&mut self) {
-        let Some(i) = self.desk.items.iter().position(|it| it.id == "mouse") else { return };
+        let Some(i) = self.desk.items.iter().position(|it| it.id == crate::mouse::key()) else { return };
         let shown = self.desk.screen(i)[2];
         let scale = self.scale;
         let imgs = match (&self.desk_mouse, &self.mouse_layers) {
@@ -5977,7 +5982,7 @@ impl Front {
     /// Once the desk has settled, the mouse's picture drawn for its size on
     /// it (to the nearest four pixels), unless it is drawn or being drawn.
     fn desk_mouse_want(&mut self) {
-        let Some(i) = self.desk.items.iter().position(|it| it.id == "mouse") else { return };
+        let Some(i) = self.desk.items.iter().position(|it| it.id == crate::mouse::key()) else { return };
         if !self.desk_settled() || self.mouse_layers.is_none() {
             return;
         }
@@ -6022,7 +6027,7 @@ impl Front {
         if self.ui.get_place() != "home" {
             return None;
         }
-        let i = self.desk.items.iter().position(|it| it.id == "z10")?;
+        let i = self.desk.items.iter().position(|it| it.id == crate::cores::keyboard_key())?;
         let [x, y, w, h] = self.desk.screen(i);
         Some([self.ui.get_desk_x() + x, self.ui.get_desk_y() + y, w, h])
     }
@@ -6030,14 +6035,14 @@ impl Front {
     /// The keyboard's size on Home's desk as the view has it, in logical
     /// pixels, whatever shows: for its picture to be drawn ahead of Home's opening.
     pub fn desk_keyboard_size(&self) -> Option<(f32, f32)> {
-        let i = self.desk.items.iter().position(|it| it.id == "z10")?;
+        let i = self.desk.items.iter().position(|it| it.id == crate::cores::keyboard_key())?;
         let [_, _, w, h] = self.desk.screen(i);
         (self.desk.size.0 > 0.0).then_some((w, h))
     }
 
     /// Whether the keyboard on the desk is plugged in.
     pub fn desk_keyboard_on(&self) -> bool {
-        self.desk.items.iter().find(|it| it.id == "z10").is_none_or(|it| it.connected)
+        self.desk.items.iter().find(|it| it.id == crate::cores::keyboard_key()).is_none_or(|it| it.connected)
     }
 
     /// What the desk lays on the window's ground, in the buffer's pixels, while Home shows.
@@ -6213,7 +6218,7 @@ impl Front {
         if self.mouse.names != names {
             self.mouse.names = names;
         }
-        let mouse_scene = (self.mouse.tab == 1).then(|| self.scene_lighting("sensei310")).flatten();
+        let mouse_scene = (self.mouse.tab == 1).then(|| self.scene_lighting(crate::mouse::key())).flatten();
         if mouse_scene.is_some() {
             self.ui.set_mouse_hint_chip(self.scene_chip(self.scene_on().as_ref()));
         }
@@ -6462,9 +6467,9 @@ impl Front {
     /// the id Ectomatter gave it (from its place in the list).
     fn tie_key(&self, device: usize, profile: usize) -> Option<(&'static str, String)> {
         if device == 1 {
-            return self.mouse.profiles.as_ref().and_then(|s| s.list.get(profile)).map(|p| ("sensei310", p.id.clone()));
+            return self.mouse.profiles.as_ref().and_then(|s| s.list.get(profile)).map(|p| (crate::mouse::key(), p.id.clone()));
         }
-        Some(("z10", profile.to_string()))
+        Some((crate::cores::keyboard_key(), profile.to_string()))
     }
 
     /// The games and apps a profile is chosen for, as the Library keeps them
@@ -6504,7 +6509,7 @@ impl Front {
             self.ties_taken[0] = true;
             if let Some(all) = self.settings.get("devices.z10.profile_apps").and_then(|v| v.as_object().cloned()) {
                 let ties: Vec<(String, Vec<String>)> = all.iter().map(|(n, a)| (n.clone(), a.as_array().into_iter().flatten().filter_map(|v| v.as_str().map(String::from)).collect())).collect();
-                self.games.library.take_ties("z10", &ties);
+                self.games.library.take_ties(crate::cores::keyboard_key(), &ties);
                 let _ = self.settings.set("devices.z10.profile_apps", serde_json::Value::Null);
             }
         }
@@ -6513,7 +6518,7 @@ impl Front {
                 self.ties_taken[1] = true;
                 let ties: Vec<(String, Vec<String>)> = store.list.iter().filter(|p| !p.apps.is_empty()).map(|p| (p.id.clone(), p.apps.clone())).collect();
                 if !ties.is_empty() {
-                    self.games.library.take_ties("sensei310", &ties);
+                    self.games.library.take_ties(crate::mouse::key(), &ties);
                     for p in &mut store.list {
                         p.apps.clear();
                     }
@@ -6530,14 +6535,14 @@ impl Front {
         let mut out = Vec::new();
         for (place, name, kind, _) in self.devices_in_order() {
             match place.as_str() {
-                "z10" => {
+                "keyboard" => {
                     let known = self.page.dev.is_some();
                     let profiles = crate::cores::profiles().iter().map(|n| (n.to_string(), if known { self.page.profile_name(*n) } else { format!("Profile {n}") })).collect();
-                    out.push(crate::games_page::Device { key: "z10".into(), name, kind, profiles, glyph: None, sub: String::new(), chips: Vec::new() });
+                    out.push(crate::games_page::Device { key: crate::cores::keyboard_key().into(), name, kind, profiles, glyph: None, sub: String::new(), chips: Vec::new() });
                 }
                 "mouse" => {
                     if let Some(s) = &self.mouse.profiles {
-                        out.push(crate::games_page::Device { key: "sensei310".into(), name, kind, profiles: s.list.iter().map(|p| (p.id.clone(), p.name.clone())).collect(), glyph: None, sub: String::new(), chips: Vec::new() });
+                        out.push(crate::games_page::Device { key: crate::mouse::key().into(), name, kind, profiles: s.list.iter().map(|p| (p.id.clone(), p.name.clone())).collect(), glyph: None, sub: String::new(), chips: Vec::new() });
                     }
                 }
                 _ => {}
@@ -6694,15 +6699,10 @@ impl Front {
     }
 
     /// What a core's device is called in words about it ("keyboard"), as its
-    /// own description says; the keyboard's and the mouse's before they're met.
+    /// own description says: as it describes it before it's met, or as it
+    /// told it once it was.
     fn device_kind(&self, id: &str) -> String {
-        let told = if id == crate::z10::CORE {
-            crate::cores::keyboard().and_then(|c| c.device["kind"].as_str().map(String::from)).or(Some("keyboard".into()))
-        } else if id == crate::mouse::shape().core {
-            self.mouse.state["device"]["kind"].as_str().map(String::from).or(Some("mouse".into()))
-        } else {
-            self.hosted.devices().into_iter().find(|(p, _)| p == id).and_then(|(_, d)| d["kind"].as_str().map(String::from))
-        };
+        let told = self.hosted.get(id).and_then(|r| r.describes["kind"].as_str().map(String::from)).or_else(|| self.hosted.devices().into_iter().find(|(p, _)| p == id).and_then(|(_, d)| d["kind"].as_str().map(String::from)));
         told.unwrap_or_else(|| "device".into())
     }
 
@@ -7554,7 +7554,7 @@ impl Front {
             Some(crate::games::Choice::Profile(p)) => Some(p),
             _ => None,
         };
-        let (mouse_wants, kb_wants) = (wanted("sensei310"), wanted("z10").and_then(|p| p.parse::<u8>().ok()));
+        let (mouse_wants, kb_wants) = (wanted(crate::mouse::key()), wanted(crate::cores::keyboard_key()).and_then(|p| p.parse::<u8>().ok()));
         let wants: Vec<(String, String, String, Option<String>)> = self
             .hosted
             .devices()
@@ -7815,7 +7815,7 @@ impl Front {
                 .layout
                 .iter()
                 .filter(|k| keys.contains(&k.pos))
-                .map(|k| [((k.x - x0 + z10::GAP / 2.0) * s) as f32, ((k.y - y0 + z10::GAP / 2.0) * s) as f32, ((k.w - z10::GAP) * s) as f32, ((k.h - z10::GAP) * s) as f32])
+                .map(|k| [((k.x - x0 + keyboard::GAP / 2.0) * s) as f32, ((k.y - y0 + keyboard::GAP / 2.0) * s) as f32, ((k.w - keyboard::GAP) * s) as f32, ((k.h - keyboard::GAP) * s) as f32])
                 .collect(),
         )
     }
@@ -8774,9 +8774,9 @@ impl Front {
             .items
             .iter()
             .filter_map(|it| {
-                let key = match it.id.as_str() {
-                    "z10" => "z10",
-                    "mouse" => "sensei310",
+                // (the desk keeps each device by its key)
+                let key = match it.kind.as_str() {
+                    "keyboard" | "mouse" => it.id.as_str(),
                     _ => return None,
                 };
                 Some(crate::scenes::Span { key: key.into(), x0: it.x / crate::desk::PER_MM, x1: (it.x + it.w) / crate::desk::PER_MM })
@@ -8817,7 +8817,7 @@ impl Front {
         self.close_menu();
         self.close_picker();
         let start = Part::Look(Look::new(Effect::Static));
-        let keys = ["z10", "sensei310"];
+        let keys = [crate::cores::keyboard_key(), crate::mouse::key()];
         let mut form = SceneForm { editing: None, name: String::new(), desk: true, look: Look::new(Effect::Wave), parts: keys.iter().map(|k| (k.to_string(), start.clone())).collect(), plugins: Vec::new() };
         if let Some(sc) = editing.and_then(|id| self.scenes().into_iter().find(|s| s.id == id && !s.built_in)) {
             form.editing = Some(sc.id.clone());
@@ -8935,8 +8935,8 @@ impl Front {
         self.scene_spans()
             .into_iter()
             .map(|sp| {
-                let (place, style) = if sp.key == "z10" { ("z10", 0) } else { ("mouse", 1) };
-                let name = named.get(place).cloned().unwrap_or_else(|| if place == "z10" { "Keyboard".to_string() } else { "Mouse".to_string() });
+                let (place, style) = if sp.key == crate::cores::keyboard_key() { ("keyboard", 0) } else { ("mouse", 1) };
+                let name = named.get(place).cloned().unwrap_or_else(|| if place == "keyboard" { "Keyboard".to_string() } else { "Mouse".to_string() });
                 (sp.key, name, style)
             })
             .collect()
@@ -9241,7 +9241,7 @@ impl Front {
     /// chosen, on itself and on its picture, out of the desk's light.
     fn lighting_open(&self) -> (bool, bool) {
         let place = self.ui.get_place();
-        (place == "z10" && self.page.view == View::Lighting, place == "mouse" && self.mouse.tab == 1)
+        (place == "keyboard" && self.page.view == View::Lighting, place == "mouse" && self.mouse.tab == 1)
     }
 
     /// Where each device's lights are on Home's desk, in millimeters: the
@@ -9249,14 +9249,14 @@ impl Front {
     fn desk_places(&self) -> crate::scenes::Places {
         let mut out = crate::scenes::Places::default();
         let item = |id: &str| self.desk.items.iter().find(|it| it.id == id).map(|it| [it.x, it.y, it.w, it.h]);
-        if let (Some(r), true) = (item("z10"), self.page.dev.is_some()) {
+        if let (Some(r), true) = (item(crate::cores::keyboard_key()), self.page.dev.is_some()) {
             let vb = self.page.view_box;
             out.keys = self.page.layout.iter().filter(|k| k.led).map(|k| {
                 let (x, y) = crate::scenes::on_desk(vb, r, k.cx, k.cy);
                 (k.pos, x, y)
             }).collect();
         }
-        if let Some(r) = item("mouse") {
+        if let Some(r) = item(crate::mouse::key()) {
             let v = crate::mouse_art::view();
             let view = (v.0 as f64, v.1 as f64, v.2 as f64, v.3 as f64);
             let middles = match &self.mouse_layers {
@@ -9286,7 +9286,7 @@ impl Front {
         let Some(scene) = self.playing() else { return };
         let t = self.scene_t0.elapsed().as_secs_f32();
         let places = self.desk_places();
-        let (kb, mouse) = (scene.lights.part("z10"), scene.lights.part("sensei310"));
+        let (kb, mouse) = (scene.lights.part(crate::cores::keyboard_key()), scene.lights.part(crate::mouse::key()));
         let keys: HashMap<u32, [u8; 3]> = match &kb {
             Part::Look(l) => places.keys.iter().map(|(pos, x, _)| (*pos, crate::scenes::color(l, *x, t))).collect(),
             Part::AsIs => HashMap::new(),
@@ -9639,7 +9639,7 @@ impl Front {
             self.show_lcd(true, &rows);
         }
         self.set_playhead();
-        if self.page.view == View::Screen && self.ui.get_place() == "z10" {
+        if self.page.view == View::Screen && self.ui.get_place() == "keyboard" {
             if state_changed {
                 self.refresh();
             } else {
@@ -9677,7 +9677,7 @@ impl Front {
             && self.page.dev.is_some()
             && !self.hidden
             && self.editor.is_none()
-            && self.ui.get_place() == "z10"
+            && self.ui.get_place() == "keyboard"
             && self.page.view == View::Screen
             && self.ui.get_screen_closed()
     }
@@ -9966,7 +9966,7 @@ impl Front {
         self.ui.set_lib_gap(along.map_or(-1, |(_, to)| to as i32));
         let mut cards = Vec::with_capacity(self.screens.library.len());
         for (k, p) in self.screens.library.iter().enumerate() {
-            let rgb = crate::z10::as_lit(p.light.unwrap_or(profile));
+            let rgb = crate::keyboard::as_lit(p.light.unwrap_or(profile));
             let key: PicKey = (crate::lcd_page::render_still(p, &self.readings), rgb, level, px(260.0));
             let pic = match &self.pl_thumbs[k] {
                 Some((had, img)) if *had == key => img.clone(),
@@ -10043,7 +10043,7 @@ impl Front {
         // the light as the keyboard's screen shows it, bled as its backlight bleeds (and none
         // with the screen off)
         let level = if matches!(onboard, Some(None)) { 0 } else { light[0] };
-        let rgb = crate::z10::as_lit(lit);
+        let rgb = crate::keyboard::as_lit(lit);
         let sc = self.scale.max(1.0);
         let px = |w: f32| (w * sc).round() as u32;
         // editing: the page as edited, read here; otherwise what the keyboard shows

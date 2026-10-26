@@ -541,10 +541,11 @@ pub fn act(page: &mut Page, ed: &mut Editor, c: Ctl, index: usize, words: Option
     let p = &mut page.pieces[i];
     match c {
         Ctl::ScrText => match (&mut p.kind, words) {
-            // (Bounce's word, as wide as the screen)
-            (Kind::Effect { word, .. }, Some(t)) => *word = t.chars().take(cols).collect(),
-            // (a whole screen's worth, since words that don't fit can scroll)
-            (_, Some(t)) => p.kind = Kind::Text(t.chars().take(cols * rows).collect()),
+            // (Bounce's word, as wide as the screen; a whole screen's worth of
+            // text, since words that don't fit can scroll; with no screen
+            // described yet, as typed, so nothing typed is lost)
+            (Kind::Effect { word, .. }, Some(t)) => *word = t.chars().take(if cols == 0 { usize::from(u8::MAX) } else { cols }).collect(),
+            (_, Some(t)) => p.kind = Kind::Text(t.chars().take(if cols * rows == 0 { usize::from(u8::MAX) } else { cols * rows }).collect()),
             _ => {}
         },
         Ctl::ScrFit => p.scroll = index == 1,
@@ -706,7 +707,7 @@ pub fn new_block(what: usize, first: Source, size: Size) -> (Kind, u8, bool) {
         0 => (Kind::Text("TEXT".into()), 4, false),
         1 => (Kind::Data(first, first.starts_in_fahrenheit()), 7, true),
         2 => (Kind::Bar(if first.barred() { first } else { Source::CpuLoad }), 10, false),
-        _ => (Kind::Effect { fx: crate::lcd_page::Fx::Rain, speed: SPEED, word: "EVGA".into() }, cells_of(size).0, false),
+        _ => (Kind::Effect { fx: crate::lcd_page::Fx::Rain, speed: SPEED, word: crate::lcd_page::default_word() }, cells_of(size).0, false),
     }
 }
 
@@ -817,6 +818,23 @@ pub fn has_room(page: &Page, cells: u8, size: Size) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Typing into a block keeps what's typed with no screen described yet
+    /// (the editor open before the keyboard's core has said its size), and
+    /// cuts it to the screen once there's one.
+    #[test]
+    fn typing_keeps_its_words_with_no_screen_described() {
+        let text = |kind: Kind| Page { pieces: vec![Piece { kind, row: 0, col: 0, width: 5, right: false, center: false, gap: 1, height: 1, scroll: true, date_format: Default::default() }], ..Page::blank() };
+        let mut ed = Editor { page: 0, chosen: Some(0), grid: true };
+        let mut p = text(Kind::Text(String::new()));
+        act(&mut p, &mut ed, Ctl::ScrText, 0, Some("HELLO THERE"), (0, 0));
+        assert_eq!(p.pieces[0].kind, Kind::Text("HELLO THERE".into()));
+        act(&mut p, &mut ed, Ctl::ScrText, 0, Some("HELLO THERE"), (4, 2));
+        assert_eq!(p.pieces[0].kind, Kind::Text("HELLO TH".into()), "a whole screen's worth");
+        let mut b = text(Kind::Effect { fx: crate::lcd_page::Fx::Rain, speed: 50, word: String::new() });
+        act(&mut b, &mut ed, Ctl::ScrText, 0, Some("BOUNCE"), (0, 0));
+        assert!(matches!(&b.pieces[0].kind, Kind::Effect { word, .. } if word == "BOUNCE"));
+    }
 
     /// The Z10's screen.
     const Z10: Size = (20, 4);

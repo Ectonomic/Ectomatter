@@ -1,16 +1,14 @@
-//! The Z10's page: where its keys are, what each is set to, and how the
-//! keyboard on screen is lit. Ported from the web app that came before it
-//! (its app.js, kept in design/, where the mocks still draw with it): the
-//! same tables, the same drafts and the same preview, so the two agree.
+//! The keyboard's page: where its keys are, what each is set to, and how the
+//! keyboard on screen is lit, all from what its core describes. Ported from
+//! the Z10's web app that came before it (its app.js, kept in design/, where
+//! the mocks still draw with it): the same drafts and the same preview, so
+//! the two agree.
 
 use std::collections::{HashMap, HashSet};
 
 use ectomatter_draw::hdr::Light;
 use ectomatter_protocol::{keys as hid, media, Action, Jump, Plays};
 use serde_json::{json, Value};
-
-/// The Z10's core: its folder among Ectomatter's cores.
-pub const CORE: &str = "evga-z10";
 
 /// drawn gap between neighboring keys, in the drawing's units
 pub const GAP: f64 = 3.0;

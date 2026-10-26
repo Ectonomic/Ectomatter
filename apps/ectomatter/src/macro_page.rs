@@ -15,7 +15,7 @@ use crate::tokens::{font, line, part, size, space};
 use crate::device;
 use crate::front::WindowAsk;
 use crate::macros::{self, hit, piece, Draft, Editor, Lib, Plays, Recording, Timing, MEDIA, PLAYS};
-use crate::z10::Page;
+use crate::keyboard::Page;
 use crate::{Cell, MacroItem, MacroWindow, MenuRow};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1176,7 +1176,7 @@ impl MacroPage {
                 }
             }
             device::Heard::KeysSaved(p, Ok(mut prof)) => {
-                crate::z10::lit_screen(&mut prof);
+                crate::keyboard::lit_screen(&mut prof);
                 if let Some(dev) = &mut page.dev {
                     dev["profiles"][p.to_string()] = prof;
                 }

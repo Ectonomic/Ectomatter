@@ -1336,7 +1336,9 @@ export component AppWindow inherits Window {
     // how the keyboard is: 0 being looked for, 1 connected, 2 not connected, 3 left to other programs
     in property <int> conn-state: 0;
     // the devices' names, as their cores give them (each page's bar shows its own)
-    in property <string> kb-name: "EVGA Z10 RGB";
+    in property <string> kb-name;
+    // who makes the keyboard, as its core says
+    in property <string> kb-maker;
     // the Lighting tab's boxes laid out in Rust, and how wide the row of boxes made each,
     // so Rust lays their pieces out to it; the mouse's, the same
     in property <[LaidBox]> light-boxes;
@@ -1348,7 +1350,7 @@ export component AppWindow inherits Window {
     in-out property <length> light-fx-w;
     in-out property <length> mouse-fx-w;
     callback boxes-resized();
-    in property <string> mouse-name: "SteelSeries Sensei 310";
+    in property <string> mouse-name;
     in property <string> conn-text: "Looking for the keyboard…";
     in property <string> conn-chip;
     // what was last done, in the device's bar: 0 said quietly, 1 went well, 2 went wrong
@@ -1577,7 +1579,7 @@ export component AppWindow inherits Window {
     out property <length> mouse-stage-width: pws-w;
     in property <bool> mouse-hdr-ready;
     // where the keyboard goes, for the window to draw it there, when its page shows
-    out property <bool> board-shown: root.place == "z10" && root.tab < 2;
+    out property <bool> board-shown: root.place == "keyboard" && root.tab < 2;
     // the keyboard has been drawn: its knobs and display come with it, never before
     in property <bool> board-ready;
     in property <duration> knob-glide: 120ms;
@@ -3121,7 +3123,7 @@ export component AppWindow inherits Window {
         }
 
         Rectangle {
-            visible: root.place == "z10";
+            visible: root.place == "keyboard";
             // the page scrolls under the device's bar, as the web page did
             flick := Flickable {
                 y: Size.bar;
@@ -4083,7 +4085,7 @@ export component AppWindow inherits Window {
                                 x: Part.glyph + Part.glyph-gap;
                                 width: parent.width - self.x;
                                 height: parent.height;
-                                text: "Onboard layouts need Ectomatter’s firmware on the keyboard. Until then, the keyboard shows EVGA’s status screen when Ectomatter isn’t running.";
+                                text: "Onboard layouts need Ectomatter’s firmware on the keyboard. Until then, the keyboard shows " + root.kb-maker + "’s status screen when Ectomatter isn’t running.";
                                 font-family: Font.ui;
                                 font-size: Font.note;
                                 color: Ink.soft;
@@ -4481,7 +4483,7 @@ export component AppWindow inherits Window {
     // Each page's scrollbar runs beside what scrolls and nothing else: under
     // the title bar, under the device's bar on its page (which stays put), and
     // Space.inline short of either end, as every scrollbar is (ScrollBox's).
-    if root.place == "z10": ScrollBar {
+    if root.place == "keyboard": ScrollBar {
         x: root.width - Part.scroll-in;
         y: root.page-scroll-y;
         height: root.page-scroll-h;
@@ -5962,7 +5964,7 @@ component LayoutListRow inherits ListRow {
 // selected. Changes save as they are made.
 export component LayoutWindow inherits Window {
     // the keyboard whose screen this is, as its core names it
-    in property <string> device-name: "EVGA Z10 RGB";
+    in property <string> device-name;
     in property <bool> is-maximized;
     in property <image> mark;
     in property <[LayoutRow]> rows;
@@ -6926,7 +6928,7 @@ component LabControl inherits Rectangle {
 export component LabWindow inherits Window {
     in property <bool> is-maximized;
     // the device the lab tunes, for its title bar
-    in property <string> device-name: "EVGA Z10 RGB";
+    in property <string> device-name;
     // the lab's name for the device: its kind's (Keyboard lab, Mouse lab)
     in property <string> lab-name: "Keyboard lab";
     in property <image> mark;

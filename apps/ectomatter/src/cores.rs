@@ -132,6 +132,13 @@ pub fn plugins_dir() -> PathBuf {
     home().join("plugins")
 }
 
+/// The keyboard's key, what Ectomatter keeps its jobs, scenes, Library
+/// choices and place on the desk under: its device's id as its core names it
+/// ("" with no keyboard).
+pub fn keyboard_key() -> &'static str {
+    keyboard().and_then(|k| k.described()["device"].as_str()).unwrap_or("")
+}
+
 /// The keyboard's profiles, by number (none with no keyboard).
 pub fn profiles() -> Vec<u8> {
     keyboard().map(Core::profiles).unwrap_or_default()

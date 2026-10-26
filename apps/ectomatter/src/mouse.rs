@@ -100,6 +100,13 @@ pub fn shape() -> &'static Shape {
     SHAPE.get().unwrap_or_else(|| NONE.get_or_init(Shape::default))
 }
 
+/// The mouse's key, what Ectomatter keeps its profiles, jobs, scenes, Library
+/// choices and place on the desk under: its device's id as its core names it
+/// ("" with no mouse).
+pub fn key() -> &'static str {
+    &shape().device
+}
+
 /// The mouse's record, from what its core, started, describes.
 pub fn describe(core: &str, folder: &Path, described: &Value) {
     if described["kind"] == "mouse" {
@@ -339,7 +346,7 @@ fn key_label(usage: u32) -> String {
         228 => "Right Ctrl".into(),
         229 => "Right Shift".into(),
         230 => "Right Alt".into(),
-        u => crate::z10::hid_name(u).unwrap_or_else(|| format!("Key {u}")),
+        u => crate::keyboard::hid_name(u).unwrap_or_else(|| format!("Key {u}")),
     }
 }
 
@@ -605,7 +612,7 @@ impl Page {
         // the first time the mouse is met: its profiles as kept, or what it is
         // set to now as Profile 1
         if self.profiles.is_none() && self.known() {
-            let path = crate::profiles::path_for("sensei310");
+            let path = crate::profiles::path_for(key());
             let mut store = crate::profiles::Store::load(path.clone()).unwrap_or_else(|| crate::profiles::Store::first(path, self.body_now()));
             // (a button's job kept by an old id, from when a job named the keyboard or the
             // mouse in place of a device: kept by the device's key now)
@@ -833,7 +840,7 @@ impl Page {
     /// them: another device's, as the pages last named them, or the kind's own.
     pub fn choices_for(&self, kind: usize) -> Vec<(String, Value)> {
         if kind == DEVICES_KIND {
-            return self.names.for_device(crate::jobs::MOUSE).into_iter().map(|(w, j)| (w, j.write())).collect();
+            return self.names.for_device(crate::jobs::mouse()).into_iter().map(|(w, j)| (w, j.write())).collect();
         }
         choices(kind)
     }
@@ -1285,10 +1292,18 @@ impl Page {
         f.section("Mouse", "", |k| {
             let present = self.present();
             k.status_row(if present { 1 } else { 2 }, if present { "Connected by USB." } else { "Not connected. Plug the mouse in to change it; what it was set to stays here." });
-            let firmware = self.state["device"]["firmware"]["version"].as_str().map_or("Not known yet".to_string(), |v| format!("SteelSeries {v}"));
+            let d = &self.state["device"];
+            let maker = d["vendor"].as_str().or(shape().described["vendor"].as_str()).unwrap_or_default();
+            let firmware = d["firmware"]["version"].as_str().map_or("Not known yet".to_string(), |v| format!("{maker} {v}").trim().to_string());
             k.fact("Firmware", &firmware, "");
             k.fact("Settings kept", "Your profiles are kept in Ectomatter. The one in use is also on the mouse, so the mouse keeps working that way without Ectomatter. A change made to the mouse in another app won’t show here.", "");
-            k.fact("Model", "SteelSeries Sensei 310, USB 1038:1722", "");
+            // (the mouse as its core names it, and the USB device its manifest matches)
+            let name = d["name"].as_str().or(shape().described["name"].as_str()).unwrap_or_default();
+            let model = match crate::core_host::Manifest::read(&shape().folder).ok().and_then(|m| m.usb_ids()) {
+                Some((vendor, product)) => format!("{name}, USB {vendor:04x}:{product:04x}"),
+                None => name.to_string(),
+            };
+            k.fact("Model", &model, "");
         });
         f.end()
     }

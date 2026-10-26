@@ -7,11 +7,36 @@ use serde_json::{json, Value};
 
 use crate::lighting::{cell, id, kind, style, text_cell, Ctl};
 use crate::tokens::{font, line, part, size, space};
-use crate::z10::Page;
+use crate::keyboard::Page;
 use crate::Cell;
 
-pub const LCD_APPS: [(u64, &str); 5] = [(0x20, "Time"), (0x04, "Profile number"), (0x08, "Game mode"), (0x01, "Key rollover"), (0x02, "EVGA Precision X1 stats")];
-pub const GAME_KEYS: [(u64, &str); 7] = [(0x40, "Windows key"), (0x01, "Alt+Tab"), (0x08, "Alt+F4"), (0x04, "Ctrl+Esc"), (0x02, "Tab"), (0x10, "Left Shift"), (0x20, "Menu key")];
+/// Bits and their names, as the keyboard's core describes them at `at`.
+fn bits(at: &[&str]) -> Vec<(u64, String)> {
+    let d = crate::cores::keyboard().map_or(&Value::Null, |k| k.described());
+    let v = at.iter().fold(d, |v, k| match k.parse::<usize>() {
+        Ok(i) => &v[i],
+        Err(_) => &v[*k],
+    });
+    v.as_array().into_iter().flatten().filter_map(|b| Some((b["bit"].as_u64()?, b["label"].as_str()?.to_string()))).collect()
+}
+
+/// The screens the keyboard's screen shows by itself when Ectomatter
+/// doesn't, each by its bit in a profile's `screen.apps`, as its core
+/// describes them (`displays`, `apps`).
+pub fn screen_apps() -> Vec<(u64, String)> {
+    bits(&["capabilities", "displays", "0", "apps"])
+}
+
+/// The keys game mode can turn off, each by its bit in a profile's
+/// `game_keys`, as the keyboard's core describes them (`keys`, `game_keys`).
+pub fn game_keys() -> Vec<(u64, String)> {
+    bits(&["capabilities", "keys", "game_keys"])
+}
+
+/// Who makes the keyboard, as its core says, for its firmware's words.
+fn maker() -> String {
+    crate::cores::keyboard().and_then(|k| k.described()["vendor"].as_str().map(String::from)).unwrap_or_else(|| "its maker".into())
+}
 
 /// What each slider can control. "own" is what the keyboard does by itself.
 pub const BIND_CHOICES: [[(&str, &str); 4]; 2] = [
@@ -84,13 +109,13 @@ pub fn tiles(fw: &Value, connected: Option<bool>, room: f32) -> Tiles {
                 }
             }
             "retail" => {
-                let v = format!("EVGA v{}", fw["version"].as_str().unwrap_or(""));
+                let v = format!("{} v{}", maker(), fw["version"].as_str().unwrap_or(""));
                 k.fact("Firmware", &v, "Features that need Ectomatter’s custom firmware show here when the keyboard runs it.");
             }
             _ => {
                 let v = fw["version"].as_str().unwrap_or("");
                 let v = if v.is_empty() { "Not known".to_string() } else { format!("v{v}") };
-                k.fact("Firmware", &v, "This version is neither EVGA’s nor Ectomatter’s, so no custom features are offered.");
+                k.fact("Firmware", &v, &format!("This version is neither {}’s nor Ectomatter’s, so no custom features are offered.", maker()));
             }
         }
         // (the keyboard as its core names it, and the USB device its manifest matches)
@@ -200,12 +225,12 @@ pub fn act(page: &mut Page, c: Ctl, index: usize, value: f32, text: Option<&str>
             }
         }
         Ctl::LcdApp => {
-            let bit = LCD_APPS.get(index).map_or(0, |a| a.0);
+            let bit = screen_apps().get(index).map_or(0, |a| a.0);
             let apps = l["screen"]["apps"].as_u64().unwrap_or(0);
             l["screen"]["apps"] = json!(if value > 0.5 { apps | bit } else { apps & !bit });
         }
         Ctl::GameKey => {
-            let bit = GAME_KEYS.get(index).map_or(0, |a| a.0);
+            let bit = game_keys().get(index).map_or(0, |a| a.0);
             let blocked = !l["game_keys"].as_u64().unwrap_or(0) & 0x7f;
             let b = if value > 0.5 { blocked | bit } else { blocked & !bit };
             l["game_keys"] = json!((!b & 0x7f) | 0x80);

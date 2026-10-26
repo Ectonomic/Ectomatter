@@ -13,7 +13,7 @@ use serde_json::json;
 
 use crate::text;
 use crate::tokens::{font, line, part, size, space};
-use crate::z10::Page;
+use crate::keyboard::Page;
 use crate::Cell;
 
 /// What a piece of the tile does when used.

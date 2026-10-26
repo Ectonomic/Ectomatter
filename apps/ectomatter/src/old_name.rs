@@ -38,8 +38,8 @@ pub fn move_old_home() {
 
 /// The settings kept under names from before, moved to the names they have
 /// now: the keyboard's Control was `devices.z10.control` before every core
-/// was turned on and off alike, by its switch. A check run offscreen, or a
-/// test, moves nothing.
+/// was turned on and off alike, by its switch, and Home's desk kept the
+/// mouse as "mouse". A check run offscreen, or a test, moves nothing.
 pub fn move_old_settings(settings: &crate::settings::Settings) {
     if crate::desk::keeps_nothing() {
         return;
@@ -47,6 +47,25 @@ pub fn move_old_settings(settings: &crate::settings::Settings) {
     let switch = crate::packages::switch_of(crate::packages::Kind::Core, "evga-z10");
     if let Some(v) = settings.take("devices.z10.control").filter(|_| settings.get(&switch).is_none()) {
         let _ = settings.set(&switch, v);
+    }
+    // (Home's desk kept the mouse as "mouse" before every device was kept by
+    // its key, the Sensei 310's "sensei310"; the window's state copied first)
+    if let Some(mut desk) = crate::uistate::get("desk").and_then(|d| d.as_object().cloned()).filter(|d| d.contains_key("mouse")) {
+        let file = crate::config_dir().join("window.json");
+        let kept = file.with_file_name("window.json.before-device-keys");
+        if !kept.exists() {
+            let _ = std::fs::copy(&file, &kept);
+        }
+        desk_by_key(&mut desk);
+        crate::uistate::set("desk", serde_json::Value::Object(desk));
+    }
+}
+
+/// Home's desk's places, the mouse's under its key, "sensei310", where it
+/// was kept as "mouse"; a place kept under the key already stays.
+fn desk_by_key(desk: &mut serde_json::Map<String, serde_json::Value>) {
+    if let Some(at) = desk.remove("mouse") {
+        desk.entry("sensei310".to_string()).or_insert(at);
     }
 }
 
@@ -79,4 +98,21 @@ fn files_in(dir: &Path) -> Vec<PathBuf> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    /// The mouse's place on Home's desk moves to its key, and one already
+    /// kept there stays.
+    #[test]
+    fn the_desk_keeps_the_mouse_by_its_key() {
+        let mut desk = json!({ "z10": [-720.0, 48.0], "mouse": [-1008.0, 96.0] }).as_object().unwrap().clone();
+        super::desk_by_key(&mut desk);
+        assert_eq!(serde_json::Value::Object(desk.clone()), json!({ "z10": [-720.0, 48.0], "sensei310": [-1008.0, 96.0] }));
+        let mut both = json!({ "mouse": [0.0, 0.0], "sensei310": [5.0, 5.0] }).as_object().unwrap().clone();
+        super::desk_by_key(&mut both);
+        assert_eq!(serde_json::Value::Object(both), json!({ "sensei310": [5.0, 5.0] }));
+    }
 }

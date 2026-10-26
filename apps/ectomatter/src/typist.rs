@@ -123,7 +123,7 @@ pub fn code_of(step: &Value) -> Option<u16> {
         return Some(MODIFIERS[(usage - keys::FIRST_MODIFIER) as usize]);
     }
     // (the page's table of the kernel's codes for each usage, turned round)
-    (1..256u32).find(|c| crate::z10::evdev_to_hid(*c) == Some((0, usage as u32))).map(|c| c as u16)
+    (1..256u32).find(|c| crate::keyboard::evdev_to_hid(*c) == Some((0, usage as u32))).map(|c| c as u16)
 }
 
 /// The kernel's codes for the modifiers, in the order of their usages (0xE0 up).
