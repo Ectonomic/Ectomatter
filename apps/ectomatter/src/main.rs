@@ -27,6 +27,7 @@
 
 mod adapter;
 mod boxes;
+mod boundaries;
 mod clipboard;
 mod commands;
 mod computer;

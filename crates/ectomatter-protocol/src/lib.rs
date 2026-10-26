@@ -10,6 +10,11 @@
 pub mod keys;
 pub mod media;
 
+/// The version of the protocol this crate writes (docs/core-protocol.md,
+/// section 9): what Ectomatter says in `initialize`, and what each core's and
+/// plugin's manifest says it speaks.
+pub const PROTOCOL: u32 = 4;
+
 use serde_json::{Value, json};
 
 /// How a stored macro plays on a control, by the protocol's names.
