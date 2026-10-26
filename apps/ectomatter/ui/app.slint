@@ -1709,8 +1709,6 @@ export component AppWindow inherits Window {
     in property <[DeskItem]> desk-items;
     in property <bool> desk-editing;
     in property <bool> desk-panning;
-    // day to day, zoomed in past the fit: a drag moves round the desk
-    in property <bool> desk-zoomed;
     in property <bool> desk-carrying;
     in property <string> desk-zoom;
     in property <string> desk-empty;
@@ -1990,8 +1988,7 @@ export component AppWindow inherits Window {
         height: root.height - bar;
 
         // Home: the devices on a desk, each as its page draws it, to scale, its
-        // name under it. Day to day the desk fits the window, the wheel zooms it
-        // in where the pointer is (a drag then moving round it), and a device opens
+        // name under it. Day to day the desk fits the window and a device opens
         // its page; Arrange shows the dots, the desk zooms and pans, and the
         // devices move onto the dots. (The window lays the dots and the
         // highlight under a device on the ground, and draws the keyboard.)
@@ -1999,7 +1996,7 @@ export component AppWindow inherits Window {
             desk-ta := TouchArea {
                 // (in edit mode a drag on the empty desk moves round it; with
                 // Draw your own on, it draws a pad)
-                mouse-cursor: root.desk-panning ? MouseCursor.grabbing : root.desk-drawing ? MouseCursor.crosshair : root.desk-zoomed ? MouseCursor.grab : MouseCursor.default;
+                mouse-cursor: root.desk-panning ? MouseCursor.grabbing : root.desk-drawing ? MouseCursor.crosshair : MouseCursor.default;
                 // (in edit mode a drag with the middle button moves around the desk)
                 pointer-event(e) => {
                     if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
@@ -2013,10 +2010,12 @@ export component AppWindow inherits Window {
                     }
                 }
                 moved => { root.desk-move(self.mouse-x, self.mouse-y); }
-                // (the wheel zooms the desk where the pointer is, day to day and in Arrange)
                 scroll-event(e) => {
-                    root.desk-wheel(self.mouse-x, self.mouse-y, e.delta-y);
-                    return accept;
+                    if (root.desk-editing) {
+                        root.desk-wheel(self.mouse-x, self.mouse-y, e.delta-y);
+                        return accept;
+                    }
+                    return reject;
                 }
                 // the pads, under the devices (the window draws them on the ground):
                 // in edit mode, a ring round the one chosen or being drawn, and a
@@ -2269,7 +2268,7 @@ export component AppWindow inherits Window {
                     TouchArea {
                         y: 0;
                         height: parent.height + 16px + 40px; // art: the device and its name, pressed as one
-                        mouse-cursor: root.desk-editing ? (root.desk-carrying ? MouseCursor.grabbing : MouseCursor.grab) : root.desk-panning ? MouseCursor.grabbing : MouseCursor.pointer;
+                        mouse-cursor: root.desk-editing ? (root.desk-carrying ? MouseCursor.grabbing : MouseCursor.grab) : MouseCursor.pointer;
                         changed has-hover => { root.desk-hover(i, self.has-hover); }
                         pointer-event(e) => {
                             if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {

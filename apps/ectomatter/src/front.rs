@@ -5975,7 +5975,6 @@ impl Front {
         ui.set_desk_editing(d.editing);
         self.show_rail();
         ui.set_desk_panning(d.panning());
-        ui.set_desk_zoomed(!d.editing && d.everyday.is_some());
         ui.set_desk_carrying(d.carrying());
         ui.set_desk_zoom(d.zoom_text().into());
         ui.set_desk_empty(if d.items.is_empty() { crate::desk::works_with().into() } else { "".into() });
