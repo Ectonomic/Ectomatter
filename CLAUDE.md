@@ -68,10 +68,12 @@ This is where they live in this repository.
   licenses `deny.toml` approves. Adding a dependency, or a license to that
   list, is Grant's call: ask him first, with the dependency's license. A
   crate whose decision waits is named in `docs/deferred.md` as a known
-  failure. Slint is taken under the GPLv3 (deny.toml's exceptions): the
-  app as a whole is distributed under it, and its own files stay MIT. Each
-  license an exception approves has its text in `LICENSES/`, which
-  `tools/licenses.sh` checks and the install ships (`tests/install.rs`).
+  failure. Ectomatter and every part of it are GPL-3.0-only (`LICENSE`;
+  Grant, 2026-10-27), which `tools/licenses.sh` checks in each crate's
+  and package's own license; Slint comes under the same license. A license
+  approved for some crates alone is a `deny.toml` exception with its text
+  in `LICENSES/`, which `tools/licenses.sh` checks and the install ships
+  (`tests/install.rs`).
 - **Design system.** `cargo test -p ectomatter tokens::system`; see
   `docs/design-system.md`.
 

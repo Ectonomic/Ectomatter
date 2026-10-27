@@ -9,7 +9,9 @@
 # a family) is one whose decision waits: it's reported, and the check exits
 # 3; any other crate not approved exits 1, as does a license deny.toml
 # approves for some crates alone (its exceptions) whose text isn't in
-# LICENSES/<its id>.txt, which the install ships with the app.
+# LICENSES/<its id>.txt, which the install ships with the app, and a part
+# of Ectomatter (a crate of the workspace, a package's module or manifest)
+# under another license than Ectomatter's own (Cargo.toml's, LICENSE).
 #   tools/licenses.sh          check
 #   tools/licenses.sh --list   each license and the crates under it
 set -uo pipefail
@@ -36,6 +38,20 @@ for id in $(awk '/^\[\[licenses\.exceptions\]\]/{x=1; next} /^\[/{x=0} x && /^al
     bad=1
   fi
 done
+own=$(sed -n 's/^license = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+for m in "${projects[@]}"; do
+  cargo metadata --manifest-path "$m" --locked --no-deps --format-version 1 2>/dev/null \
+    | python3 -I -c 'import json, sys; [print(p["name"], p["license"]) for p in json.load(sys.stdin)["packages"]]'
+done > "$tmp"
+for d in cores/*/ plugins/*/; do
+  [ -f "$d/core.json" ] && [ -f "$d/module/Cargo.toml" ] && echo "${d%/}/core.json $(sed -n 's/^ *"license": *"\([^"]*\)".*/\1/p' "$d/core.json")" >> "$tmp"
+done
+while read -r part lic; do
+  if [ "$lic" != "$own" ]; then
+    echo "licenses: $part is under ${lic:-no license}, not Ectomatter's $own"
+    bad=1
+  fi
+done < "$tmp"
 for m in "${projects[@]}"; do
   name=$(dirname "$m"); [ "$name" = . ] && name=ectomatter || name=${name%/module}
   if [ "${1:-}" = --list ]; then

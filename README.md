@@ -79,9 +79,9 @@ when present.
 
 ## License
 
-Ectomatter's own files are MIT (`LICENSE`). The app draws its windows with
-[Slint](https://slint.dev), which it takes under the GNU GPL version 3, so
-the Ectomatter app as a whole is distributed under the GPLv3
-(`LICENSES/GPL-3.0-only.txt`). A version of Ectomatter that isn't open
-source would need another license for Slint, or no Slint. The cores and
-plugins don't include Slint and are MIT.
+Copyright (C) 2026 Grant Garrison.
+
+Ectomatter, its cores and its plugins are free software under the GNU
+General Public License, version 3 (`LICENSE`): you may share and change
+them under its terms. They come with no warranty. The app draws its windows
+with [Slint](https://slint.dev), which it takes under the same license.

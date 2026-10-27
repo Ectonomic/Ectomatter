@@ -4,7 +4,7 @@ members = ["crates/evga-z10", "crates/ectomatter-tokens", "crates/ectomatter-wea
 
 [workspace.package]
 edition = "2024"
-license = "MIT"
+license = "GPL-3.0-only"
 repository = "https://github.com/Ectonomic/Ectomatter"
 
 # One serde_json for every crate: features unify across a build, so a crate

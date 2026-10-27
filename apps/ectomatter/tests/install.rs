@@ -32,9 +32,11 @@ fn an_install_lays_ectomatter_out_and_it_starts_from_there() {
     for f in ["bin/ectomatter", "share/applications/com.ectonomic.ectomatter.desktop", "share/icons/hicolor/scalable/apps/com.ectonomic.ectomatter.svg", "lib/udev/rules.d/70-ectomatter.rules", "share/licenses/ectomatter/LICENSE"] {
         assert!(usr.join(f).is_file(), "{f} not installed");
     }
-    // every license the app as a whole is distributed under (LICENSES/,
-    // which tools/licenses.sh holds to deny.toml's exceptions), as it is
-    for e in std::fs::read_dir(repo().join("LICENSES")).unwrap().flatten() {
+    // Ectomatter's license, and every license some of its dependencies alone
+    // come under (LICENSES/, which tools/licenses.sh holds to deny.toml's
+    // exceptions), as they are
+    assert!(std::fs::read(usr.join("share/licenses/ectomatter/LICENSE")).ok() == std::fs::read(repo().join("LICENSE")).ok(), "LICENSE not installed as it is");
+    for e in std::fs::read_dir(repo().join("LICENSES")).into_iter().flatten().flatten() {
         let at = usr.join("share/licenses/ectomatter").join(e.file_name());
         assert!(std::fs::read(&at).ok() == std::fs::read(e.path()).ok(), "{} not installed as it is", e.path().display());
     }

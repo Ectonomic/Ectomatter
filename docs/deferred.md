@@ -273,15 +273,15 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   what one holds is read by its keys alone.
 - The libraries' notices: most of what the app ships is under MIT, Apache,
   BSD or another permissive license that asks for its notice to go with the
-  program. The install carries Ectomatter's license, the GPLv3 and the
-  typefaces' licenses (`tools/install.sh` lines 65 to 74), and none of the
+  program. The install carries Ectomatter's license (the GPLv3) and the
+  typefaces' licenses (`tools/install.sh` lines 65 to 75), and none of the
   libraries' notices yet. The files carried from others that aren't crates
   (the KDE protocols in `apps/ectomatter/protocols/`, under MIT-CMU and
   LGPL-2.1-or-later; Phosphor's glyphs; the weather data's sources,
   `crates/ectomatter-weather/data/NOTICE.md`) aren't held to `deny.toml` by
   `tools/licenses.sh`, which reads crates alone.
-- The source beside each download: the app as a whole is distributed under
-  the GPLv3 (it takes Slint under it; Grant, 2026-10-27), which asks that
+- The source beside each download: Ectomatter is under the GPLv3 (Grant,
+  2026-10-27), which asks that
   directions to the source sit beside the program wherever it's offered
   (GPLv3 section 6). Nothing is offered yet; a release needs them.
 - The GitHub repositories exist in the Ectonomic organization
