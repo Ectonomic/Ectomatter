@@ -1,0 +1,56 @@
+#!/bin/bash
+# Holds Ectomatter and every package that comes with it (each folder under
+# cores/ and plugins/ with a manifest and a module, as tools/install.sh
+# installs them) to the licenses deny.toml approves (cargo-deny finds it
+# above each project): every dependency that
+# ships, on every system, checked by cargo-deny. Prints each project's
+# result. A crate docs/deferred.md names as a known failure (its line
+# "`tools/licenses.sh` known failures:", each crate in backticks, `name-*` for
+# a family) is one whose decision waits: it's reported, and the check exits
+# 3; any other crate not approved exits 1.
+#   tools/licenses.sh          check
+#   tools/licenses.sh --list   each license and the crates under it
+set -uo pipefail
+cd "$(dirname "$0")/.."
+export PATH="$HOME/.cargo/bin:$PATH"
+if ! command -v cargo-deny > /dev/null; then
+  echo "licenses: cargo-deny isn't installed (cargo install --locked cargo-deny)"
+  exit 2
+fi
+projects=(Cargo.toml)
+for kind in cores plugins; do
+  for d in "$kind"/*/; do
+    [ -f "$d/core.json" ] && [ -f "$d/module/Cargo.toml" ] && projects+=("$d"module/Cargo.toml)
+  done
+done
+# (the list's lines joined, as the entry may wrap)
+known=$(tr '\n' ' ' < docs/deferred.md | sed 's/  */ /g' | grep -oE 'tools/licenses.sh` known failures: [^)]*' | sed 's/^[^:]*: //' | grep -oE '`[^`]+`' | tr -d '`')
+is_known() { local k; for k in $known; do [[ $1 == $k ]] && return 0; done; return 1; }
+tmp=$(mktemp); trap 'rm -f "$tmp"' EXIT
+bad=0
+for m in "${projects[@]}"; do
+  name=$(dirname "$m"); [ "$name" = . ] && name=ectomatter || name=${name%/module}
+  if [ "${1:-}" = --list ]; then
+    echo "== $name"
+    cargo deny --manifest-path "$m" --locked -L error list 2>&1
+    continue
+  fi
+  said=$(cargo deny --manifest-path "$m" --locked -L error -c never check licenses 2>&1)
+  if [ $? -eq 0 ]; then
+    echo "licenses: $name holds"
+  else
+    echo "licenses: $name has dependencies whose license isn't approved:"
+    # (each rejected crate, and the licenses it offers: its line in the
+    # report under the license it gives)
+    printf '%s\n' "$said" | awk '/^[0-9 ]+│ license = /{sub(/^[^"]*"/,""); sub(/".*/,""); lic=$0} /^ +├ [A-Za-z0-9_-]+ v[0-9][^ ]*$/{print $2 " " $3 ": " lic}' | sort -u > "$tmp"
+    while read -r crate rest; do
+      if is_known "$crate"; then
+        echo "  $crate $rest (known: docs/deferred.md)"; [ $bad -eq 1 ] || bad=3
+      else
+        echo "  $crate $rest"; bad=1
+      fi
+    done < "$tmp"
+    [ -s "$tmp" ] || bad=1
+  fi
+done
+exit $bad

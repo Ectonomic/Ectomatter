@@ -57,10 +57,18 @@ This is where they live in this repository.
   Read the file to check a relaunch. Snapshots and `--read-state` don't
   write it.
 - **Private words.** `tools/private-words.sh` (run by `tools/boundaries.sh`
-  and by the commit hook, `.git/hooks/pre-commit`, which a fresh clone has
-  to be given again) holds the files to a list kept outside the repository,
-  `~/.config/ectomatter-dev/private-words`: Grant's own details, which
-  never go in. `--history` checks every commit and message.
+  and by the commit hook, `tools/pre-commit`, which a fresh clone links
+  with `ln -s ../../tools/pre-commit .git/hooks/pre-commit`) holds the files
+  to a list kept outside the repository,
+  `~/.config/ectomatter-dev/private-words`: Grant's own details, which never
+  go in. `--history` checks every commit and message.
+- **Licenses.** `tools/licenses.sh` (run by `tools/boundaries.sh` and by
+  the commit hook when a dependency changes; needs `cargo install --locked
+  cargo-deny`) holds the app and every package that ships with it to the
+  licenses `deny.toml` approves. Adding a dependency, or a license to that
+  list, is Grant's call: ask him first, with the dependency's license. A
+  crate whose decision waits is named in `docs/deferred.md` as a known
+  failure.
 - **Design system.** `cargo test -p ectomatter tokens::system`; see
   `docs/design-system.md`.
 

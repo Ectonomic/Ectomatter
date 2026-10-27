@@ -1,0 +1,13 @@
+#!/bin/bash
+# The commit hook (.git/hooks/pre-commit runs it; a fresh clone links it with
+# `ln -s ../../tools/pre-commit .git/hooks/pre-commit`): no private word in
+# what the commit adds, and, when it changes a dependency, no dependency
+# under a license deny.toml doesn't approve, other than the known failures
+# docs/deferred.md names (tools/licenses.sh checks the files as they are).
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)"
+tools/private-words.sh --staged || exit 1
+if git diff --cached --name-only | grep -qE '(^|/)(Cargo\.toml|Cargo\.lock|deny\.toml)$|^docs/deferred\.md$'; then
+  tools/licenses.sh
+  case $? in 0|3) ;; *) echo "commit stopped: a dependency's license isn't approved (deny.toml)"; exit 1 ;; esac
+fi

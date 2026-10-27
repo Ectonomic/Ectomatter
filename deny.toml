@@ -1,0 +1,30 @@
+# The licenses Ectomatter's dependencies may come under (tools/licenses.sh
+# holds the app and every package that comes with it to this list). Each is
+# permissive: it lets Ectomatter, under MIT, ship the dependency inside it
+# with the dependency's notice, and asks nothing of the rest. A dependency
+# under anything else isn't approved until it's added here, which is
+# Grant's call; one that offers a choice (`MIT OR Apache-2.0`) is approved
+# when one of its choices is.
+[graph]
+# (what ships: not the tests' own dependencies; every feature and every
+# system, so a dependency only Windows or macOS takes is held too)
+exclude-dev = true
+all-features = true
+
+[licenses]
+confidence-threshold = 0.9
+unused-allowed-license = "allow"
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "Unicode-3.0",
+  "BSL-1.0",
+  "0BSD",
+  "Unlicense",
+  "CDLA-Permissive-2.0",
+]
