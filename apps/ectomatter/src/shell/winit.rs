@@ -10,7 +10,8 @@
 //! itself, which a Vulkan swapchain there can't yet: docs/deferred.md).
 //! The windows of their own (the Macro Editor, the lab, the screen layout
 //! editor) are windows of winit's too, in SDR as the Wayland shell has them,
-//! drawn through softbuffer. The clipboard and drags aren't in this shell yet.
+//! drawn through softbuffer. The clipboard is the system's own (arboard);
+//! drags aren't in this shell yet.
 
 use std::sync::Arc;
 
@@ -94,6 +95,8 @@ pub(crate) fn run(slint: Rc<MinimalSoftwareWindow>, made: Rc<RefCell<Vec<Rc<Mini
     let wake: shell::Wake = Arc::new(move || {
         let _ = proxy.send_event(());
     });
+    // (the system's own clipboard, the shell having none of its own)
+    clipboard::use_system();
     let session = Session::start(slint, made, ui, settings, reference, gain, &wake);
     let mut app = App { s: session, shown: None, subs: [None, None, None], soft: None, keys_on: None, lab_asked: std::env::var_os("ECTOMATTER_OPEN_LAB").is_some(), open_macros: std::env::var("ECTOMATTER_OPEN_MACROS").ok().and_then(|v| v.parse().ok()), at: (0.0, 0.0), mods: ModifiersState::default(), reference, peak: 1000.0, unit: 80.0, exit: false, poke: true, redraw_asked: false, occluded: false, fps: std::env::var_os("ECTOMATTER_FPS").map(|_| (Instant::now(), 0, Duration::ZERO)) };
     if let Err(e) = event_loop.run_app(&mut app) {

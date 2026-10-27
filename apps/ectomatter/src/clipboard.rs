@@ -1,9 +1,11 @@
 //! The desktop's clipboard for the windows' text boxes. Slint asks the
 //! platform to hold text that is copied or cut and for the text to paste;
-//! these answer through Wayland's clipboard: copied text is offered to the
-//! desktop at the next key press's serial (main.rs offers it), and what
-//! another program copies is read in the background as it is offered, so a
-//! paste has it at once.
+//! in the Wayland shell these answer through Wayland's clipboard: copied
+//! text is offered to the desktop at the next key press's serial (the shell
+//! offers it), and what another program copies is read in the background as
+//! it is offered, so a paste has it at once. A shell that hands the
+//! clipboard to the system's own (`use_system`: the winit shell) has them
+//! answered there, through arboard.
 
 use std::cell::RefCell;
 use std::io::Read;
@@ -21,8 +23,26 @@ thread_local! {
 /// the text another program holds on the clipboard, as last read
 static THEIRS: Mutex<Option<String>> = Mutex::new(None);
 
+/// The system's own clipboard, where the shell hands it there.
+static SYSTEM: Mutex<Option<arboard::Clipboard>> = Mutex::new(None);
+
+/// The clipboard is the system's own from here on (the winit shell's), or
+/// none where the system has none Ectomatter can reach.
+pub fn use_system() {
+    match arboard::Clipboard::new() {
+        Ok(c) => *SYSTEM.lock().unwrap_or_else(|p| p.into_inner()) = Some(c),
+        Err(e) => eprintln!("ectomatter: no clipboard: {e}"),
+    }
+}
+
 /// Text copied or cut in a window.
 pub fn copied(text: &str) {
+    if let Some(c) = SYSTEM.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
+        if let Err(e) = c.set_text(text) {
+            eprintln!("ectomatter: the text wasn’t copied: {e}");
+        }
+        return;
+    }
     PENDING.with(|p| *p.borrow_mut() = Some(text.to_string()));
 }
 
@@ -44,6 +64,9 @@ pub fn ours() -> Option<String> {
 /// The text to paste: Ectomatter's own while it holds the clipboard, or what
 /// another program holds.
 pub fn text() -> Option<String> {
+    if let Some(c) = SYSTEM.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
+        return c.get_text().ok();
+    }
     ours().or_else(|| THEIRS.lock().ok().and_then(|t| t.clone()))
 }
 
