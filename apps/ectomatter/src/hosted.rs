@@ -380,6 +380,10 @@ impl Hosted {
                         }
                     }
                     "device/added" => {
+                        let unknown = ectomatter_protocol::device::Description::unknown(&params);
+                        if !unknown.is_empty() {
+                            eprintln!("ectomatter: {}'s device gives what this Ectomatter's protocol doesn’t name, passed over: {}", p.package.id(), unknown.join(", "));
+                        }
                         let id = params["device"].clone();
                         self.added.push(format!("{}/{}", p.package.id(), id.as_str().unwrap_or("")));
                         p.devices.retain(|d| d["device"] != id);

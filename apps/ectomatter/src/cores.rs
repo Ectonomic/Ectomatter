@@ -35,6 +35,11 @@ impl Core {
         let read = tuning_read(&manifest.id, &path);
         let text = std::fs::read_to_string(&read).map_err(|e| format!("{}: {e}", read.display()))?;
         let device = ectomatter_draw::jsonc::parse(&text).map_err(|e| format!("{}: {e}", read.display()))?;
+        // (what the protocol doesn't name is passed over, told to the log for the core's author)
+        let unknown = ectomatter_protocol::device::Description::unknown(&device);
+        if !unknown.is_empty() {
+            eprintln!("ectomatter: {} gives what this Ectomatter's protocol doesn’t name, passed over: {}", read.display(), unknown.join(", "));
+        }
         let art_path = folder.join(device["art"].as_str().ok_or("its device description names no art")?);
         let art = std::fs::read_to_string(&art_path).map_err(|e| format!("{}: {e}", art_path.display()))?;
         Ok(Core { id: manifest.id, folder: folder.to_path_buf(), device, path, art, described: OnceLock::new() })

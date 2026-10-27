@@ -8,6 +8,7 @@
 //! - [text]: text spelled in the characters a text display draws;
 //! - [Action]: what a control can be given, as the protocol writes it.
 
+pub mod device;
 pub mod keys;
 pub mod manifest;
 pub mod media;

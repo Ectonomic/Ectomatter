@@ -332,6 +332,53 @@ pub(crate) mod tests {
         fail_on(found, "a manifest that isn't the protocol's");
     }
 
+    /// docs/core-protocol.md, section 4: every field a device's description
+    /// gives is one the protocol names (ectomatter_protocol::device): each
+    /// core's description file here, and the description a core told as it
+    /// met its device (the render tests' mouse, recorded from its core).
+    #[test]
+    fn every_devices_description_is_the_protocols() {
+        let mut found = Vec::new();
+        let mut seen = 0;
+        let mut check = |at: String, v: &serde_json::Value| {
+            seen += 1;
+            if let Err(e) = ectomatter_protocol::device::Description::of(v) {
+                found.push(format!("{at}: {e}"));
+            }
+            for u in ectomatter_protocol::device::Description::unknown(v) {
+                found.push(format!("{at}: {u}, which the protocol doesn’t name"));
+            }
+        };
+        for (name, m) in manifests().into_iter().filter(|(n, _)| n.starts_with("cores/")) {
+            if let Some(file) = m["deviceFile"].as_str() {
+                let at = format!("{name}/{file}");
+                check(at.clone(), &ectomatter_draw::jsonc::parse(&read(&at)).unwrap_or_else(|e| panic!("{at}: {e}")));
+            }
+        }
+        let mouse: serde_json::Value = serde_json::from_str(&read("apps/ectomatter/tests/renders/desk/mouse.json")).unwrap();
+        check("apps/ectomatter/tests/renders/desk/mouse.json (device)".into(), &mouse["device"]);
+        assert!(seen > 1, "no description read");
+        fail_on(found, "a description that isn't the protocol's");
+    }
+
+    /// The protocol crate's lists of what a manifest and a description may
+    /// give are the doc's: each is a name the doc writes as code.
+    #[test]
+    fn the_protocols_field_lists_are_the_docs() {
+        use ectomatter_protocol::{device, manifest};
+        let words = protocol_words();
+        let lists: [(&str, &[&str]); 7] = [("manifest", manifest::FIELDS), ("usb", manifest::USB_FIELDS), ("systems", manifest::SYSTEMS), ("description", device::FIELDS), ("firmware", device::FIRMWARE_FIELDS), ("screen", device::SCREEN_FIELDS), ("capabilities", device::CAPABILITIES)];
+        let mut found = Vec::new();
+        for (list, names) in lists {
+            for n in names {
+                if !words.contains(*n) {
+                    found.push(format!("{list}: {n}"));
+                }
+            }
+        }
+        fail_on(found, "a field the protocol's crate names that docs/core-protocol.md doesn't");
+    }
+
     /// docs/core-protocol.md, section 9: "A frontend supports a range of
     /// versions and says which it speaks in `initialize`." Every package and
     /// every example in the doc speaks the protocol the app speaks.

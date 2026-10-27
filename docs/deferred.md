@@ -148,9 +148,13 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   `every_packages_manifest_is_the_protocols`), though what reads it here
   still takes it as JSON in places (`packages.rs` `works_here`,
   `systems_of`, `can_words`; `updates.rs` `more_than`; a game's start,
-  `launch`, inside it). Untyped yet: a device's description and its
-  capabilities (section 4 and 5), every call's params and answer, a
-  plugin's sections and cells, readings, and Ectomatter's own saved files.
+  `launch`, inside it). A device's description is typed at its top, its
+  firmware, its controls and its screens (`ectomatter_protocol::device`,
+  every core's held to it by `every_devices_description_is_the_protocols`),
+  but the app still reads it as JSON everywhere, and its print, its light
+  and each capability's own description are untyped. Untyped too: every
+  call's params and answer, a plugin's sections and cells, readings, and
+  Ectomatter's own saved files.
 - The render tests (`apps/ectomatter/tests/renders.rs`) draw in a sandbox
   (bubblewrap) on a made-up desk, but the sandbox lends them this system's
   programs, libraries and typefaces (/usr, /etc/fonts), so their pictures
