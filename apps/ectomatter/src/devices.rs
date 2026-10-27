@@ -22,7 +22,7 @@ fn this_computers(vid: u16, pid: u16) -> Value {
     let read = |p: &str| fs::read_to_string(p).map(|s| s.trim().to_string()).unwrap_or_default();
 
     // plugged in: a USB device with these ids
-    let present = fs::read_dir("/sys/bus/usb/devices").into_iter().flatten().flatten().any(|d| {
+    let present = fs::read_dir(crate::computer::here("/sys/bus/usb/devices")).into_iter().flatten().flatten().any(|d| {
         let p = d.path();
         read(&format!("{}/idVendor", p.display())) == format!("{vid:04x}")
             && read(&format!("{}/idProduct", p.display())) == format!("{pid:04x}")
@@ -30,7 +30,7 @@ fn this_computers(vid: u16, pid: u16) -> Value {
 
     // the device's HID nodes, which are what programs open
     let id = format!("HID_ID=0003:{:08X}:{:08X}", vid, pid);
-    let nodes: Vec<String> = fs::read_dir("/sys/class/hidraw").into_iter().flatten().flatten()
+    let nodes: Vec<String> = fs::read_dir(crate::computer::here("/sys/class/hidraw")).into_iter().flatten().flatten()
         .filter(|d| read(&format!("{}/device/uevent", d.path().display())).to_uppercase().contains(&id))
         .map(|d| format!("/dev/{}", d.file_name().to_string_lossy()))
         .collect();
@@ -42,7 +42,7 @@ fn this_computers(vid: u16, pid: u16) -> Value {
     // who else has it open: any other process of this user's holding a node
     let me = std::process::id();
     let mut holders: Vec<Value> = Vec::new();
-    for p in fs::read_dir("/proc").into_iter().flatten().flatten() {
+    for p in fs::read_dir(crate::computer::here("/proc")).into_iter().flatten().flatten() {
         let Ok(pid) = p.file_name().to_string_lossy().parse::<u32>() else { continue };
         if pid == me {
             continue;
@@ -61,7 +61,7 @@ fn this_computers(vid: u16, pid: u16) -> Value {
 /// module rather than the interpreter, and a path's last part.
 #[cfg(target_os = "linux")]
 fn program_name(pid: u32) -> String {
-    let raw = std::fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
+    let raw = std::fs::read(crate::computer::here(format!("/proc/{pid}/cmdline"))).unwrap_or_default();
     let args: Vec<String> = raw.split(|b| *b == 0).filter(|a| !a.is_empty())
         .map(|a| String::from_utf8_lossy(a).into_owned()).collect();
     let base = |s: &str| s.rsplit('/').next().unwrap_or(s).to_string();

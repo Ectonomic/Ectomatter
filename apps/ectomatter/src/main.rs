@@ -694,6 +694,24 @@ fn front_apps_told(front: &mut Front, var: &str) {
     }
 }
 
+/// A snapshot waits for the packages to go still: until nothing new has
+/// been heard from any (a reading's value, a device, a warning) for a second
+/// and a half, or twenty seconds have gone. It waits in real time and lets
+/// no frame pass, so the window's animations stand where they were; a slower
+/// computer waits longer and draws the same picture.
+fn settle(front: &mut Front) {
+    let (start, mut last, mut since) = (Instant::now(), front.hosted.heard, Instant::now());
+    while since.elapsed() < Duration::from_millis(1500) && start.elapsed() < Duration::from_secs(20) {
+        std::thread::sleep(clock::FRAME);
+        // (what the window's tick would ask: the packages heard, and told what's wanted of them)
+        front.hosted.poll();
+        front.act();
+        if front.hosted.heard != last {
+            (last, since) = (front.hosted.heard, Instant::now());
+        }
+    }
+}
+
 /// One frame without a window, saved for checking.
 fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>, ui: AppWindow, reference: f64, gain: f32, path: &str) {
     let (mut w, mut h) = std::env::var("ECTOMATTER_SIZE")
@@ -721,11 +739,20 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
         let dev: serde_json::Value = serde_json::from_slice(&std::fs::read(state).expect("the saved state")).expect("the saved state as JSON");
         front.heard(device::Heard::State(Ok(dev)));
     }
+    // (the packages' first answers in: their devices, sections and readings)
+    settle(&mut front);
     // the screen as the player would have it: this computer's Stats, or
     // ECTOMATTER_LCD's rows (split by |), in ECTOMATTER_LCD_STATE
     // (playing, paused, missing, launch, exit)
     {
-        let rows = std::env::var("ECTOMATTER_LCD").map(|r| r.split('|').map(String::from).collect()).unwrap_or_else(|_| lcd_stats::Stats::of(front.hosted.readings(), "snapshot").rows());
+        let rows = std::env::var("ECTOMATTER_LCD").map(|r| r.split('|').map(String::from).collect()).unwrap_or_else(|_| {
+            // (asked for once, so the plugins read them, and read again once they've answered)
+            let mut stats = lcd_stats::Stats::of(front.hosted.readings(), "snapshot");
+            let _ = stats.rows();
+            settle(&mut front);
+            stats.rows()
+        });
+        eprintln!("the screen's rows: {rows:?}");
         let st = std::env::var("ECTOMATTER_LCD_STATE").unwrap_or_default();
         let state = match st.as_str() {
             "paused" => lcd_player::State::Paused,
@@ -1072,6 +1099,8 @@ fn snap(window: &Rc<MinimalSoftwareWindow>, made: &Rc<RefCell<Vec<Rc<MinimalSoft
             slint::platform::update_timers_and_animations();
             front.act();
         }
+        // (and what the clicks asked of the packages answered)
+        settle(&mut front);
     }
     eprintln!("the cursor: {:?}", window.pointer());
     // (the caps' colors, for what is printed over the keys)

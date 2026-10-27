@@ -134,6 +134,17 @@ pub fn described() -> Option<Described> {
     DESCRIBED.get().cloned().map(Described)
 }
 
+/// Where Ectomatter itself reads a path of this computer's (a file under /proc
+/// or /sys): there, or in the computer described for a snapshot, if there is
+/// one, so a snapshot reads nothing of the computer it runs on.
+pub fn here(path: impl AsRef<Path>) -> PathBuf {
+    let path = path.as_ref();
+    match DESCRIBED.get() {
+        Some(d) => d.join("files").join(path.strip_prefix("/").unwrap_or(path)),
+        None => path.to_path_buf(),
+    }
+}
+
 impl Described {
     fn here(&self, path: &Path) -> PathBuf {
         self.0.join("files").join(path.strip_prefix("/").unwrap_or(path))

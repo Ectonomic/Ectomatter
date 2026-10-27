@@ -324,26 +324,33 @@ impl Default for Limits {
 /// a call past its time stops within one tick.
 const TICK: Duration = Duration::from_millis(50);
 
-/// A package's module, compiled once for as long as Ectomatter runs: a
-/// package started again (turned off and on, or restarted after it stopped)
-/// takes the same one. Compiled code is never let go while the process
-/// exits, when a package's thread ending as Ectomatter quits would unload it
-/// under the exit's own cleanup and abort the process; a module replaced
-/// (its file changed, an update) lets the old one go then.
+/// A package's module, compiled once and kept for as long as Ectomatter runs:
+/// a package started again (turned off and on, or restarted after it
+/// stopped) takes the same one. Nothing compiled is ever let go, so none is
+/// unloaded while the process exits, when a package's thread ending as
+/// Ectomatter quits would unload its module under the exit's own cleanup and
+/// abort the process. A module that changes (rebuilt, or an update in a
+/// folder of its own) is compiled again and kept beside the old, so each
+/// update a running Ectomatter takes in keeps one more module until it quits.
 fn compiled(engine: &Engine, module: &Path) -> wasmtime::Result<Component> {
-    type Kept = std::collections::HashMap<PathBuf, (Option<std::time::SystemTime>, u64, Component)>;
+    type Kept = Vec<(PathBuf, Option<std::time::SystemTime>, u64, Component)>;
     static KEPT: std::sync::OnceLock<std::sync::Mutex<Kept>> = std::sync::OnceLock::new();
     let meta = std::fs::metadata(module)?;
-    let stamp = (meta.modified().ok(), meta.len());
+    let (at, len) = (meta.modified().ok(), meta.len());
     let kept = || KEPT.get_or_init(Default::default).lock().unwrap_or_else(|p| p.into_inner());
-    if let Some((at, len, c)) = kept().get(module)
-        && (*at, *len) == stamp
-    {
-        return Ok(c.clone());
+    let found = |k: &Kept| k.iter().find(|(p, a, l, _)| p == module && *a == at && *l == len).map(|(.., c)| c.clone());
+    if let Some(c) = found(&kept()) {
+        return Ok(c);
     }
-    // (compiled with nothing held, so packages starting together compile together)
+    // (compiled with nothing held, so packages starting together compile
+    // together; two compiling the same take the one kept first, and the
+    // other's goes now, while Ectomatter runs)
     let c = Component::from_file(engine, module)?;
-    kept().insert(module.to_path_buf(), (stamp.0, stamp.1, c.clone()));
+    let mut k = kept();
+    if let Some(first) = found(&k) {
+        return Ok(first);
+    }
+    k.push((module.to_path_buf(), at, len, c.clone()));
     Ok(c)
 }
 

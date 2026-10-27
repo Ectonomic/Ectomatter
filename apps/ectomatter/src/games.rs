@@ -688,9 +688,9 @@ pub fn started_at(pid: u32) -> Option<u64> {
 
 #[cfg(target_os = "linux")]
 fn started(pid: u32) -> Option<u64> {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let stat = std::fs::read_to_string(crate::computer::here(format!("/proc/{pid}/stat"))).ok()?;
     let ticks: u64 = stat.rsplit_once(')')?.1.split_whitespace().nth(19)?.parse().ok()?;
-    let boot: u64 = std::fs::read_to_string("/proc/stat").ok()?.lines().find_map(|l| l.strip_prefix("btime "))?.trim().parse().ok()?;
+    let boot: u64 = std::fs::read_to_string(crate::computer::here("/proc/stat")).ok()?.lines().find_map(|l| l.strip_prefix("btime "))?.trim().parse().ok()?;
     // SAFETY: sysconf only reads a constant of the system's
     let per_second = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
     Some(boot + ticks / u64::try_from(per_second).ok().filter(|t| *t > 0)?)
@@ -710,11 +710,11 @@ fn hand_running(programs: &[(String, PathBuf)]) -> Vec<(String, u32)> {
     if programs.is_empty() {
         return out;
     }
-    let mut pids: Vec<u32> = std::fs::read_dir("/proc").into_iter().flatten().flatten().filter_map(|e| e.file_name().to_str()?.parse().ok()).collect();
+    let mut pids: Vec<u32> = std::fs::read_dir(crate::computer::here("/proc")).into_iter().flatten().flatten().filter_map(|e| e.file_name().to_str()?.parse().ok()).collect();
     pids.sort_unstable();
     for pid in pids {
-        let exe = std::fs::read_link(format!("/proc/{pid}/exe")).ok();
-        let cmd = std::fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
+        let exe = std::fs::read_link(crate::computer::here(format!("/proc/{pid}/exe"))).ok();
+        let cmd = std::fs::read(crate::computer::here(format!("/proc/{pid}/cmdline"))).unwrap_or_default();
         for (id, program) in programs {
             if out.iter().any(|(i, _)| i == id) {
                 continue;
@@ -760,7 +760,7 @@ pub fn game_of(pid: u32, running: &[Running]) -> Option<String> {
 
 #[cfg(target_os = "linux")]
 fn parent(pid: u32) -> Option<u32> {
-    steam::parent_in(&std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)
+    steam::parent_in(&std::fs::read_to_string(crate::computer::here(format!("/proc/{pid}/stat"))).ok()?)
 }
 
 #[cfg(not(target_os = "linux"))]

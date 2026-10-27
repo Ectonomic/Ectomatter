@@ -206,35 +206,70 @@ pub(crate) mod tests {
     /// the app is built (a crate asking for its own features changes them for
     /// every crate built with it, and `cargo test` builds more crates than
     /// the app). The members and the dependencies come from the workspace's
-    /// Cargo.toml.
+    /// Cargo.toml, read as TOML: every kind of dependency table, a system's
+    /// own (`[target.'cfg(..)'.dependencies]`), and one renamed (`package =`).
     #[test]
     fn every_crate_takes_the_workspaces_dependencies() {
-        let ws = read("Cargo.toml");
-        let section = |text: &str, name: &str| -> String {
-            text.split(&format!("[{name}]")).nth(1).unwrap_or("").split("\n[").next().unwrap_or("").to_string()
-        };
-        let names = |text: &str| -> Vec<String> {
-            text.lines().filter_map(|l| l.split(['=', '.']).next()).map(|n| n.trim().to_string()).filter(|n| !n.is_empty() && !n.starts_with('#')).collect()
-        };
-        let shared = names(&section(&ws, "workspace.dependencies"));
+        let toml = |rel: &str| -> toml::Table { read(rel).parse().unwrap_or_else(|e| panic!("{rel}: {e}")) };
+        let ws = toml("Cargo.toml");
+        let shared: Vec<String> = ws["workspace"]["dependencies"].as_table().map(|t| t.keys().cloned().collect()).unwrap_or_default();
         assert!(!shared.is_empty(), "the workspace names no dependencies");
-        let members = section(&ws, "workspace");
-        let members: Vec<&str> = members.split("members").nth(1).unwrap_or("").split(']').next().unwrap_or("").split('"').skip(1).step_by(2).collect();
+        let members: Vec<String> = ws["workspace"]["members"].as_array().into_iter().flatten().filter_map(|m| m.as_str().map(String::from)).collect();
         assert!(members.len() > 1, "the workspace names no members");
         let mut found = Vec::new();
         for m in members {
             let f = format!("{m}/Cargo.toml");
-            let toml = read(&f);
+            let t = toml(&f);
+            // every dependency table: the crate's own and each system's
+            let mut tables: Vec<(String, &toml::Table)> = Vec::new();
             for kind in ["dependencies", "dev-dependencies", "build-dependencies"] {
-                for line in section(&toml, kind).lines() {
-                    let name = line.split(['=', '.']).next().unwrap_or("").trim();
-                    if shared.iter().any(|s| s == name) && line.replace(' ', "") != format!("{name}.workspace=true") {
-                        found.push(format!("{f} [{kind}] {}", line.trim()));
+                if let Some(d) = t.get(kind).and_then(|d| d.as_table()) {
+                    tables.push((kind.to_string(), d));
+                }
+                for (target, v) in t.get("target").and_then(|x| x.as_table()).into_iter().flatten() {
+                    if let Some(d) = v.get(kind).and_then(|d| d.as_table()) {
+                        tables.push((format!("target.{target}.{kind}"), d));
+                    }
+                }
+            }
+            for (kind, deps) in tables {
+                for (name, spec) in deps {
+                    // (the crate it is, where a dependency is renamed)
+                    let crate_name = spec.get("package").and_then(|p| p.as_str()).unwrap_or(name);
+                    if !shared.iter().any(|s| s == crate_name) {
+                        continue;
+                    }
+                    if spec.get("workspace").and_then(|w| w.as_bool()) != Some(true) {
+                        found.push(format!("{f} [{kind}] {name} = {spec}"));
                     }
                 }
             }
         }
         fail_on(found, "a crate asks for its own version of a dependency the workspace names");
+    }
+
+    /// A snapshot reads nothing of the computer it runs on (tests/renders.rs):
+    /// every path of this computer's that Ectomatter reads itself, under /proc
+    /// or /sys, goes through `computer::here`, which a snapshot points at the
+    /// computer described for it. (Its own process's files, /proc/self, are
+    /// its own.)
+    #[test]
+    fn the_app_reads_this_computer_in_one_place() {
+        let mut found = Vec::new();
+        let mut seen = 0;
+        for f in rust_files().into_iter().filter(|f| f.starts_with("apps/ectomatter/src/")) {
+            for (n, line) in code(&f) {
+                if !(line.contains("\"/proc") || line.contains("\"/sys")) {
+                    continue;
+                }
+                seen += 1;
+                if !line.contains("computer::here(") && !line.contains("\"/proc/self") {
+                    found.push(format!("{f}:{n} {}", line.trim()));
+                }
+            }
+        }
+        assert!(seen > 0, "no path of the computer's read anywhere: the check reads nothing");
+        fail_on(found, "a path of this computer's read past computer::here");
     }
 
     /// docs/core-protocol.md: "has no page of its own for any device". No page
@@ -412,7 +447,9 @@ pub(crate) mod tests {
             }
         }
         // (the pages' code draws the screen too: its picture, its card's and the keyboard's display)
-        for f in rust_files().into_iter().filter(|f| f.starts_with("apps/ectomatter/src/front")) {
+        let pages: Vec<String> = rust_files().into_iter().filter(|f| f.starts_with("apps/ectomatter/src/front")).collect();
+        assert!(!pages.is_empty(), "the pages' code isn't where the check looks");
+        for f in pages {
             for (n, line) in code(&f) {
                 if line.contains("lcd") && (line.contains(":<20") || line.contains("take(20)") || line.contains("take(4)")) {
                     found.push(format!("{f}:{n}"));

@@ -39,7 +39,7 @@ pub fn start(tell: impl Fn(u8) + Send + 'static) {
 
 /// Every keyboard's lock lights: each one's brightness file, and its bit.
 fn find() -> Vec<(std::path::PathBuf, u8)> {
-    let Ok(dir) = std::fs::read_dir("/sys/class/leds") else { return Vec::new() };
+    let Ok(dir) = std::fs::read_dir(crate::computer::here("/sys/class/leds")) else { return Vec::new() };
     dir.flatten()
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().to_string();

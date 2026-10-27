@@ -1191,6 +1191,7 @@ dependencies = [
  "steamlocate",
  "syn 2.0.119",
  "sys-locale",
+ "toml",
  "unicode-normalization",
  "ureq",
  "wasmtime",

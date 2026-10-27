@@ -6525,7 +6525,7 @@
  },
  "macros": {
   "2": {
-   "name": "KDE Switch Desktop Left",
+   "name": "Shortcut A",
    "editable": true,
    "repeat": 0,
    "unit": 1,
@@ -6537,27 +6537,27 @@
      "after": 0
     },
     {
-     "key": "LeftMeta",
+     "key": "LeftAlt",
      "down": true,
      "after": 0
     },
     {
-     "key": "ArrowLeft",
+     "key": "A",
      "down": true,
+     "after": 0
+    },
+    {
+     "key": "A",
+     "down": false,
+     "after": 0
+    },
+    {
+     "key": "LeftAlt",
+     "down": false,
      "after": 0
     },
     {
      "key": "LeftCtrl",
-     "down": false,
-     "after": 0
-    },
-    {
-     "key": "LeftMeta",
-     "down": false,
-     "after": 0
-    },
-    {
-     "key": "ArrowLeft",
      "down": false,
      "after": 0
     }
@@ -6565,7 +6565,7 @@
    "run": 9
   },
   "3": {
-   "name": "KDE Switch Desktop Right",
+   "name": "Shortcut B",
    "editable": true,
    "repeat": 0,
    "unit": 1,
@@ -6577,27 +6577,27 @@
      "after": 0
     },
     {
-     "key": "LeftMeta",
+     "key": "LeftAlt",
      "down": true,
      "after": 0
     },
     {
-     "key": "ArrowRight",
+     "key": "B",
      "down": true,
+     "after": 0
+    },
+    {
+     "key": "B",
+     "down": false,
+     "after": 0
+    },
+    {
+     "key": "LeftAlt",
+     "down": false,
      "after": 0
     },
     {
      "key": "LeftCtrl",
-     "down": false,
-     "after": 0
-    },
-    {
-     "key": "LeftMeta",
-     "down": false,
-     "after": 0
-    },
-    {
-     "key": "ArrowRight",
      "down": false,
      "after": 0
     }
@@ -6605,7 +6605,7 @@
    "run": 9
   },
   "4": {
-   "name": "KDE Switch Desktop Up",
+   "name": "Shortcut C",
    "editable": true,
    "repeat": 0,
    "unit": 1,
@@ -6617,27 +6617,27 @@
      "after": 0
     },
     {
-     "key": "LeftMeta",
+     "key": "LeftAlt",
      "down": true,
      "after": 0
     },
     {
-     "key": "ArrowUp",
+     "key": "C",
      "down": true,
+     "after": 0
+    },
+    {
+     "key": "C",
+     "down": false,
+     "after": 0
+    },
+    {
+     "key": "LeftAlt",
+     "down": false,
      "after": 0
     },
     {
      "key": "LeftCtrl",
-     "down": false,
-     "after": 0
-    },
-    {
-     "key": "LeftMeta",
-     "down": false,
-     "after": 0
-    },
-    {
-     "key": "ArrowUp",
      "down": false,
      "after": 0
     }
@@ -6645,7 +6645,7 @@
    "run": 9
   },
   "5": {
-   "name": "KDE Switch Desktop Down",
+   "name": "Shortcut D",
    "editable": true,
    "repeat": 0,
    "unit": 1,
@@ -6657,27 +6657,27 @@
      "after": 0
     },
     {
-     "key": "LeftMeta",
+     "key": "LeftAlt",
      "down": true,
      "after": 0
     },
     {
-     "key": "ArrowDown",
+     "key": "D",
      "down": true,
+     "after": 0
+    },
+    {
+     "key": "D",
+     "down": false,
+     "after": 0
+    },
+    {
+     "key": "LeftAlt",
+     "down": false,
      "after": 0
     },
     {
      "key": "LeftCtrl",
-     "down": false,
-     "after": 0
-    },
-    {
-     "key": "LeftMeta",
-     "down": false,
-     "after": 0
-    },
-    {
-     "key": "ArrowDown",
      "down": false,
      "after": 0
     }
@@ -6685,7 +6685,7 @@
    "run": 9
   },
   "6": {
-   "name": "KDE Brightness Up",
+   "name": "Shortcut E",
    "editable": true,
    "repeat": 0,
    "unit": 1,
@@ -6697,27 +6697,27 @@
      "after": 0
     },
     {
-     "key": "LeftMeta",
+     "key": "LeftAlt",
      "down": true,
      "after": 0
     },
     {
-     "key": "F12",
+     "key": "E",
      "down": true,
+     "after": 0
+    },
+    {
+     "key": "E",
+     "down": false,
+     "after": 0
+    },
+    {
+     "key": "LeftAlt",
+     "down": false,
      "after": 0
     },
     {
      "key": "LeftCtrl",
-     "down": false,
-     "after": 0
-    },
-    {
-     "key": "LeftMeta",
-     "down": false,
-     "after": 0
-    },
-    {
-     "key": "F12",
      "down": false,
      "after": 0
     }
@@ -6725,7 +6725,7 @@
    "run": 9
   },
   "7": {
-   "name": "KDE Brightness Down",
+   "name": "Shortcut F",
    "editable": true,
    "repeat": 0,
    "unit": 1,
@@ -6737,27 +6737,27 @@
      "after": 0
     },
     {
-     "key": "LeftMeta",
+     "key": "LeftAlt",
      "down": true,
      "after": 0
     },
     {
-     "key": "F11",
+     "key": "F",
      "down": true,
+     "after": 0
+    },
+    {
+     "key": "F",
+     "down": false,
+     "after": 0
+    },
+    {
+     "key": "LeftAlt",
+     "down": false,
      "after": 0
     },
     {
      "key": "LeftCtrl",
-     "down": false,
-     "after": 0
-    },
-    {
-     "key": "LeftMeta",
-     "down": false,
-     "after": 0
-    },
-    {
-     "key": "F11",
      "down": false,
      "after": 0
     }
@@ -6765,29 +6765,39 @@
    "run": 9
   },
   "8": {
-   "name": "KDE Maximize Window",
+   "name": "Shortcut G",
    "editable": true,
    "repeat": 0,
    "unit": 1,
-   "length": 16,
+   "length": 24,
    "steps": [
     {
-     "key": "LeftMeta",
+     "key": "LeftCtrl",
      "down": true,
      "after": 0
     },
     {
-     "key": "PageUp",
+     "key": "LeftAlt",
      "down": true,
      "after": 0
     },
     {
-     "key": "LeftMeta",
+     "key": "G",
+     "down": true,
+     "after": 0
+    },
+    {
+     "key": "G",
      "down": false,
      "after": 0
     },
     {
-     "key": "PageUp",
+     "key": "LeftAlt",
+     "down": false,
+     "after": 0
+    },
+    {
+     "key": "LeftCtrl",
      "down": false,
      "after": 0
     }
@@ -6795,29 +6805,39 @@
    "run": 9
   },
   "9": {
-   "name": "KDE Minimize Window",
+   "name": "Shortcut H",
    "editable": true,
    "repeat": 0,
    "unit": 1,
-   "length": 16,
+   "length": 24,
    "steps": [
     {
-     "key": "LeftMeta",
+     "key": "LeftCtrl",
      "down": true,
      "after": 0
     },
     {
-     "key": "PageDown",
+     "key": "LeftAlt",
      "down": true,
      "after": 0
     },
     {
-     "key": "LeftMeta",
+     "key": "H",
+     "down": true,
+     "after": 0
+    },
+    {
+     "key": "H",
      "down": false,
      "after": 0
     },
     {
-     "key": "PageDown",
+     "key": "LeftAlt",
+     "down": false,
+     "after": 0
+    },
+    {
+     "key": "LeftCtrl",
      "down": false,
      "after": 0
     }
@@ -6825,29 +6845,39 @@
    "run": 9
   },
   "10": {
-   "name": "KDE Microphone Mute",
+   "name": "Shortcut I",
    "editable": true,
    "repeat": 0,
    "unit": 1,
-   "length": 20,
+   "length": 24,
    "steps": [
     {
-     "key": "LeftMeta",
+     "key": "LeftCtrl",
      "down": true,
      "after": 0
     },
     {
-     "media": "Mute",
+     "key": "LeftAlt",
      "down": true,
      "after": 0
     },
     {
-     "key": "LeftMeta",
+     "key": "I",
+     "down": true,
+     "after": 0
+    },
+    {
+     "key": "I",
      "down": false,
      "after": 0
     },
     {
-     "media": "Mute",
+     "key": "LeftAlt",
+     "down": false,
+     "after": 0
+    },
+    {
+     "key": "LeftCtrl",
      "down": false,
      "after": 0
     }

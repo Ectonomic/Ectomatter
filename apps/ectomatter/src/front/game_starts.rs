@@ -193,7 +193,7 @@ impl Front {
         // (the launchers waiting, and starts made early, looked after first: the tool stays
         // in Steam's settings while the plugin that says how games start is off)
         self.holds.retain(|(_, _, _, t)| t.elapsed() < Duration::from_secs(31));
-        let gone: Vec<String> = self.early.iter().filter(|(_, pid, t)| t.elapsed() > Duration::from_secs(10) && !std::path::Path::new(&format!("/proc/{pid}")).exists()).map(|(id, _, _)| id.clone()).collect();
+        let gone: Vec<String> = self.early.iter().filter(|(_, pid, t)| t.elapsed() > Duration::from_secs(10) && !crate::computer::here(format!("/proc/{pid}")).exists()).map(|(id, _, _)| id.clone()).collect();
         for id in gone {
             self.early.retain(|(g, _, _)| *g != id);
             if !self.games.running.iter().any(|r| r.id == id) {

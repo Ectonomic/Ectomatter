@@ -222,7 +222,7 @@ fn merged(ev: &HashMap<String, String>, own: &Option<crate::putback::Steps>, gam
 }
 
 fn alive(ev: &HashMap<String, String>) -> bool {
-    Path::new(&format!("/proc/{}", int(ev.get("pid"), -1))).exists()
+    crate::computer::here(format!("/proc/{}", int(ev.get("pid"), -1))).exists()
 }
 
 impl Session {

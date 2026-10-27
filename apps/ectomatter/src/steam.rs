@@ -240,14 +240,14 @@ fn art(root: &Path, user: Option<u32>, id: u32) -> Art {
 #[cfg(target_os = "linux")]
 pub fn running() -> Vec<(u32, u32)> {
     let mut out = Vec::new();
-    for e in std::fs::read_dir("/proc").into_iter().flatten().flatten() {
+    for e in std::fs::read_dir(crate::computer::here("/proc")).into_iter().flatten().flatten() {
         let Some(pid) = e.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) else { continue };
         // (only a process by that name is read further)
-        let comm = std::fs::read_to_string(format!("/proc/{pid}/comm")).unwrap_or_default();
+        let comm = std::fs::read_to_string(crate::computer::here(format!("/proc/{pid}/comm"))).unwrap_or_default();
         if comm.trim_end() != "reaper" {
             continue;
         }
-        if let Some(id) = std::fs::read(format!("/proc/{pid}/cmdline")).ok().and_then(|c| app_of_reaper(&c)) {
+        if let Some(id) = std::fs::read(crate::computer::here(format!("/proc/{pid}/cmdline"))).ok().and_then(|c| app_of_reaper(&c)) {
             out.push((id, pid));
         }
     }

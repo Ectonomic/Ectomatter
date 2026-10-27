@@ -198,7 +198,7 @@ fn load(conn: &zbus::blocking::Connection) -> Result<(), String> {
     let mut stale = vec![SCRIPT.to_string()];
     if let Ok(before) = std::fs::read_to_string(loaded_file()) {
         let before = before.trim().to_string();
-        let gone = before.rsplit_once('-').and_then(|(_, pid)| pid.parse::<u32>().ok()).is_none_or(|pid| !PathBuf::from(format!("/proc/{pid}")).exists());
+        let gone = before.rsplit_once('-').and_then(|(_, pid)| pid.parse::<u32>().ok()).is_none_or(|pid| !crate::computer::here(format!("/proc/{pid}")).exists());
         if gone {
             stale.push(before);
         }

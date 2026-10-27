@@ -81,20 +81,33 @@ mod system {
         out
     }
 
-    /// The most lines the checks may skip for being marked art (`// art:` and
-    /// the regions it opens; the parts in `ART` aside). A mark is for a
-    /// device's own drawing, not a way around the system: a page's row, a tab
-    /// or a card drawn by hand is a part to make. Lower it as marks go; it is
-    /// raised only with Grant's word.
-    const ART_LINES_AT_MOST: usize = 501;
+    /// The most lines the checks may skip as art (`// art:`, the regions it
+    /// opens, and the parts in `ART` whole). Art is a device's own drawing,
+    /// not a way around the system: a page's row, a tab or a card drawn by
+    /// hand is a part to make. Lower it as marks go; it is raised only with
+    /// Grant's word.
+    const ART_LINES_AT_MOST: usize = 773;
 
-    /// How many lines are skipped for being marked art, and where the most are.
+    /// How many lines the checks skip as art (marked `// art:`, its regions,
+    /// and the parts in `ART` whole), and in which files.
     fn marked_art() -> (usize, Vec<String>) {
         let mut total = 0;
         let mut by_file = Vec::new();
-        for (name, text) in slint_files() {
+        let files = slint_files();
+        assert!(files.len() > 1, "the window's Slint wasn't read");
+        for (name, text) in files {
             let mut within = false;
-            let n = text.lines().filter(|line| is_art("", line, &mut within)).count();
+            let mut part = String::new();
+            let n = text
+                .lines()
+                .filter(|line| {
+                    let t = line.trim_start();
+                    if let Some(rest) = t.strip_prefix("export component ").or_else(|| t.strip_prefix("component ")) {
+                        part = rest.split_whitespace().next().unwrap_or("").to_string();
+                    }
+                    is_art(&part, line, &mut within)
+                })
+                .count();
             total += n;
             if n > 0 {
                 by_file.push(format!("{name}: {n}"));
@@ -329,6 +342,39 @@ mod system {
         assert!(bad.is_empty(), "placed with a number of its own, not a token:\n{}", bad.join("\n"));
     }
 
+    /// Whether a line starts a function: `fn`, after any visibility
+    /// (`pub`, `pub(crate)`, `pub(in ..)`) and qualifiers (`const`, `async`,
+    /// `unsafe`, `extern ".."`).
+    fn is_fn(code: &str) -> bool {
+        let mut t = code.trim_start();
+        if let Some(r) = t.strip_prefix("pub") {
+            t = r.trim_start();
+            if t.starts_with('(') {
+                t = t.split_once(')').map_or("", |(_, r)| r).trim_start();
+            }
+        }
+        loop {
+            if let Some(r) = ["const ", "async ", "unsafe "].iter().find_map(|q| t.strip_prefix(q)) {
+                t = r.trim_start();
+            } else if let Some(r) = t.strip_prefix("extern ") {
+                t = r.trim_start().strip_prefix('"').and_then(|r| r.split_once('"')).map_or(r, |(_, r)| r).trim_start();
+            } else {
+                break;
+            }
+        }
+        t.starts_with("fn ")
+    }
+
+    #[test]
+    fn a_line_that_starts_a_function_is_one() {
+        for f in ["fn a(", "pub fn a(", "pub(super) fn a(", "pub(in crate::front) fn a(", "const fn a(", "pub async fn a(", "pub(crate) unsafe extern \"C\" fn a("] {
+            assert!(is_fn(f), "{f}");
+        }
+        for f in ["let fnord = 1;", "// fn a(", "x.fn_a()"] {
+            assert!(!is_fn(f), "{f}");
+        }
+    }
+
     #[test]
     fn menus_open_by_one_rule() {
         // (a menu's width is set where each window opens its menus, by src/menu_size.rs's
@@ -361,7 +407,7 @@ mod system {
                 let code = line.split("//").next().unwrap_or("");
                 if let Some(f) = openers.iter().find(|f| code.contains(**f)) {
                     within = f;
-                } else if ["fn ", "pub fn ", "pub(super) fn ", "pub(crate) fn "].iter().any(|f| code.trim_start().starts_with(f)) {
+                } else if is_fn(code) {
                     within = "";
                 }
                 let typed = |call: &str| code.split(call).skip(1).any(|rest| rest.split(',').skip(1).take(2).chain(rest.split(')').take(1)).any(|a| a.trim().parse::<f32>().is_ok_and(|v| v != 0.0)));

@@ -28,18 +28,22 @@ This is where they live in this repository.
   folder above the program, else `share/ectomatter` beside its folder, else
   `XDG_DATA_DIRS`.
 - **Render tests.** `cargo test --release -p ectomatter --test renders`
-  (run by `tools/boundaries.sh` too): every page drawn offscreen on a made-up
-  desk (`apps/ectomatter/tests/renders/desk/`, a computer described in a
-  folder, a made-up Steam, the time fixed, no session) and held pixel for
-  pixel to `apps/ectomatter/tests/renders/approved/`, and every page drawn
-  twice the same. A page that changes writes its picture, where it differs
-  and its log to `target/renders/`; when the change is meant, look at them,
-  then `ECTOMATTER_APPROVE=1` the same command. Nothing of Grant's goes into
-  the desk or the pictures. `ECTOMATTER_RENDERS=name,name` runs only those.
+  (run by `tools/boundaries.sh` too; needs `bwrap`): every page drawn
+  offscreen in a sandbox that hides this computer, on a made-up desk
+  (`apps/ectomatter/tests/renders/desk/`, a computer described in a folder, a
+  made-up Steam, the time fixed), held pixel for pixel to
+  `apps/ectomatter/tests/renders/approved/`; both desks' pages drawn twice the
+  same; every place of the window drawn. A page that changes writes its
+  picture, where it differs and its log to `target/renders/`; when the change
+  is meant, look at them, then `ECTOMATTER_APPROVE=1` the same command.
+  Nothing of Grant's goes into the desk or the pictures.
+  `ECTOMATTER_RENDERS=name,name` runs only those; `ECTOMATTER_RENDERS_LOG=1`
+  keeps every page's log.
 - **Log.** `~/.local/state/com.ectonomic.ectomatter/ectomatter.log`
-  (`$XDG_STATE_HOME`), the run before's as `ectomatter.log.1`: everything
-  the app writes to stderr, stamped. Snapshots and `--read-state` don't write
-  it.
+  (`$XDG_STATE_HOME`), the run before's as `ectomatter.log.1`: the app's
+  stderr is the file itself, so the terminal shows only where the log is.
+  Read the file to check a relaunch. Snapshots and `--read-state` don't
+  write it.
 - **Design system.** `cargo test -p ectomatter tokens::system`; see
   `docs/design-system.md`.
 

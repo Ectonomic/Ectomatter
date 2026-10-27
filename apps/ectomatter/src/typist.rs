@@ -474,7 +474,7 @@ mod tests {
         let kb = Keyboard::new().expect("the keyboard");
         let name = kb.sysname().expect("its name");
         std::thread::sleep(Duration::from_millis(300));
-        let node = std::fs::read_dir(format!("/sys/devices/virtual/input/{name}")).unwrap().flatten().find_map(|e| e.file_name().to_str().filter(|n| n.starts_with("event")).map(String::from)).expect("its event device");
+        let node = std::fs::read_dir(crate::computer::here(format!("/sys/devices/virtual/input/{name}"))).unwrap().flatten().find_map(|e| e.file_name().to_str().filter(|n| n.starts_with("event")).map(String::from)).expect("its event device");
         let path = std::ffi::CString::new(format!("/dev/input/{node}")).unwrap();
         let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDONLY | libc::O_NONBLOCK) };
         assert!(fd >= 0, "its event device opens");

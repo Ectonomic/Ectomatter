@@ -78,6 +78,10 @@ pub struct Hosted {
     /// manifest names and no others (core_host.rs): this computer's, but
     /// none offscreen or in a test
     usb: Box<dyn Fn() -> Box<dyn Usb>>,
+    /// how many notices have told something new since the packages started
+    /// (a reading told again with the same value doesn't count): what a
+    /// snapshot waits on to go still (main.rs, `settle`)
+    pub heard: u64,
 }
 
 /// The readings the plugins told, by plugin: what each lists it can read
@@ -223,7 +227,7 @@ impl Hosted {
 
     /// Hosted with the USB devices a core is lent made by `usb`, a test's own.
     pub fn with_usb(computer: Arc<dyn Computer>, usb: Box<dyn Fn() -> Box<dyn Usb>>) -> Hosted {
-        Hosted { cores: Vec::new(), plugins: Vec::new(), computer, readings: Readings::default(), added: Vec::new(), refused: std::collections::HashMap::new(), restarted: Vec::new(), limits: Default::default(), usb }
+        Hosted { cores: Vec::new(), plugins: Vec::new(), computer, readings: Readings::default(), added: Vec::new(), refused: std::collections::HashMap::new(), restarted: Vec::new(), limits: Default::default(), usb, heard: 0 }
     }
 
     /// The plugins' readings as they tell them, for whoever shows them.
@@ -362,6 +366,11 @@ impl Hosted {
         // (a core a device's page talks to tells the page)
         for p in self.cores.iter_mut().filter(|r| !r.driven).chain(self.plugins.iter_mut()) {
             for (method, params) in p.core.told() {
+                let same = method == "readings/changed"
+                    && params["values"].as_object().is_some_and(|v| self.readings.of(p.package.id()).is_some_and(|t| v.iter().all(|(k, x)| t.values.get(k) == Some(x))));
+                if !same {
+                    self.heard += 1;
+                }
                 match method.as_str() {
                     "plugin/status" => {
                         let w = params["warning"].as_str().filter(|w| !w.is_empty()).map(String::from);

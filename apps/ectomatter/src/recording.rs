@@ -299,13 +299,13 @@ mod linux {
     /// The input devices the kernel made for the USB device `(vendor, product)`.
     fn nodes((vendor, product): (u16, u16)) -> Vec<String> {
         let mut out = Vec::new();
-        let Ok(dir) = fs::read_dir("/sys/class/input") else {
+        let Ok(dir) = fs::read_dir(crate::computer::here("/sys/class/input")) else {
             return out;
         };
         let mut names: Vec<String> = dir.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.starts_with("event")).collect();
         names.sort();
         for n in names {
-            let id = |f: &str| fs::read_to_string(format!("/sys/class/input/{n}/device/id/{f}")).map(|s| s.trim().to_string());
+            let id = |f: &str| fs::read_to_string(crate::computer::here(format!("/sys/class/input/{n}/device/id/{f}"))).map(|s| s.trim().to_string());
             if id("vendor").ok() == Some(format!("{vendor:04x}")) && id("product").ok() == Some(format!("{product:04x}")) {
                 out.push(format!("/dev/input/{n}"));
             }

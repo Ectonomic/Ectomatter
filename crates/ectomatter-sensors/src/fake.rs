@@ -33,6 +33,19 @@ impl Nvidia for FakeNvidia {
 /// sticks of DDR5, two drives, an NVIDIA card, an Intel Arc card and the processor's own
 /// Radeon graphics, an Aquantia Ethernet chip and a MediaTek Wi-Fi card.
 pub fn computer(dir: &Path) {
+    // (each link leads where it would from its own folder, so the computer
+    // reads the same wherever its folder is seen from: moved, or in a sandbox)
+    let link = |to: &Path, at: &Path| {
+        let from = at.parent().unwrap();
+        let common = to.ancestors().find(|a| from.starts_with(a)).unwrap();
+        let ups = from.strip_prefix(common).unwrap().components().count();
+        let mut rel = PathBuf::new();
+        for _ in 0..ups {
+            rel.push("..");
+        }
+        rel.push(to.strip_prefix(common).unwrap());
+        std::os::unix::fs::symlink(rel, at).unwrap();
+    };
     let w = |p: &str, s: &str| {
         let f = dir.join(p);
         std::fs::create_dir_all(f.parent().unwrap()).unwrap();
@@ -46,7 +59,7 @@ pub fn computer(dir: &Path) {
         std::fs::write(h.join("name"), format!("{name}\n")).unwrap();
         let d = dir.join(dev);
         std::fs::create_dir_all(&d).unwrap();
-        std::os::unix::fs::symlink(&d, h.join("device")).unwrap();
+        link(&d, &h.join("device"));
         for (f, v) in files {
             std::fs::write(h.join(f), format!("{v}\n")).unwrap();
         }
@@ -83,10 +96,10 @@ pub fn computer(dir: &Path) {
         }
         let at = dir.join("sys/bus/pci/devices");
         std::fs::create_dir_all(&at).unwrap();
-        std::os::unix::fs::symlink(dir.join("sys/devices").join(path), at.join(path.rsplit('/').next().unwrap())).unwrap();
+        link(&dir.join("sys/devices").join(path), &at.join(path.rsplit('/').next().unwrap()));
         // (a driver running it)
         std::fs::create_dir_all(dir.join("sys/bus/pci/drivers/gpu")).unwrap();
-        std::os::unix::fs::symlink(dir.join("sys/bus/pci/drivers/gpu"), dir.join("sys/devices").join(path).join("driver")).unwrap();
+        link(&dir.join("sys/bus/pci/drivers/gpu"), &dir.join("sys/devices").join(path).join("driver"));
     };
     card("pci0000:00/0000:00:01.1/0000:01:00.0", "0x10de", "0x2b85");
     let arc = "pci0000:00/0000:00:02.2/0000:16:00.0";

@@ -459,7 +459,7 @@ impl Hands {
 /// still the process it started (one started no earlier than its game).
 #[cfg(unix)]
 fn stop_left(pid: u32, since: u64) {
-    let still = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok().is_some_and(|_| crate::games::started_at(pid).is_none_or(|t| t + 1 >= since));
+    let still = std::fs::read_to_string(crate::computer::here(format!("/proc/{pid}/stat"))).ok().is_some_and(|_| crate::games::started_at(pid).is_none_or(|t| t + 1 >= since));
     if still {
         // SAFETY: signalling the process group that command led
         unsafe {

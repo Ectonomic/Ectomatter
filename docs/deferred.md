@@ -131,33 +131,51 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
 - One object runs every page: `Front`, about 200 fields. Its code is split by
   page and part into `src/front/` (eleven files, 2026-10-26), but its state
   isn't: every part reaches every field, and no page's state is a type of its
-  own. Its largest file is `front/mod.rs` (3,266 lines: the types, `new`, and
+  own. Its largest file is `front/mod.rs` (3,278 lines: the types, `new`, and
   what every page shares, such as acting on the window's controls).
-- One window component holds every page: `AppWindow` in `ui/app.slint`
-  (about 3,800 of its 5,000 lines), every page's properties and callbacks on
-  it. The windows of their own are in `ui/windows/` (2026-10-26); the main
-  window's pages aren't components of their own yet.
+- One window component holds most pages: `AppWindow` in `ui/app.slint`, every
+  page's properties and callbacks on it. The windows of their own are in
+  `ui/windows/`, the pages' shared parts in `ui/pages/shared.slint`, and the
+  mouse's page is a component of its own (`ui/pages/mouse.slint`, bound to the
+  window's properties one by one); Home, the keyboard's page, the Library and
+  Settings aren't yet.
 - Untyped JSON at every file and protocol boundary.
-- The render tests (`apps/ectomatter/tests/renders.rs`) draw on a made-up
-  desk, but some of what they draw can still come from the computer running
-  them: any typeface the system has that a page falls back to beyond
-  Ectomatter's own, and, where a page asks, the Steam games running now
-  (`steam.rs`, `running`, from /proc). Their pictures are
-  approved on Linux; another system draws no picture for them yet.
-- The made-up computer's files don't change, so the processor's load is
-  "unavailable" on every screen the render tests draw (`renders.rs`,
-  `computer`).
-- The render tests keep their desks in `/tmp/ectomatter-renders/` by a fixed
-  name (a game's prefix shows the path), so two runs at once on one computer
-  share them.
-- The design checks skip 501 lines marked art (`// art:` and its regions),
-  capped at that (`tokens.rs`, `ART_LINES_AT_MOST`). Many aren't a device's
-  own drawing but a page's pieces drawn by hand: the playlist's strip (73),
-  the selected block's corner (30), the edit mode's grips (26), a macro
-  step (25), the layer tabs (20), a lab slider's row (20), a layout's card
-  (17). Each is a part to make, and the cap comes down as they go.
-- The log is copied from stderr on Linux and macOS only (`log.rs`, `tee`);
-  on Windows nothing is written to the file yet.
+- The render tests (`apps/ectomatter/tests/renders.rs`) draw in a sandbox
+  (bubblewrap) on a made-up desk, but the sandbox lends them this system's
+  programs, libraries and typefaces (/usr, /etc/fonts), so their pictures
+  hold for a Linux like the one that approved them; another system draws no
+  picture for them yet. They need `bwrap`, and a kernel that lets a user make
+  namespaces.
+- The render tests' pages are a list typed in `renders.rs`, with the clicks
+  that reach a tab or a box by where it is. A check holds every place of the
+  window to a page drawn (`every_place_of_the_window_is_drawn`), but a new tab,
+  box or dialog isn't drawn until someone adds it. A click that misses draws
+  the page as it was (the lab's slider case did, and was taken out).
+- A snapshot settles (`main.rs`, `settle`) by waiting, in real time, until no
+  package has told anything new for a second and a half, up to twenty
+  seconds: a plugin whose readings keep changing (on a computer that isn't
+  made up) never settles and is drawn at twenty seconds.
+- The design checks skip 773 lines as art, capped at that (`tokens.rs`,
+  `ART_LINES_AT_MOST`): 501 marked `// art:` (and its regions) and the rest the
+  parts named in `ART`, whole. Many aren't a device's own drawing but a page's
+  pieces drawn by hand: the playlist's strip (73), the selected block's
+  corner (30), the edit mode's grips (26), a macro step (25), the layer tabs
+  (20), a lab slider's row (20), a layout's card (17); and of `ART`, the
+  glyphs (`WayGlyph`, `BlockGlyph`, `MacroIcon`). Each is a part to make, and
+  the cap comes down as they go.
+- The log is stderr itself only on Linux and macOS (`log.rs`,
+  `become_stderr`); on Windows nothing is written to the file yet. The lines
+  aren't stamped with their time.
+- Every package's compiled module is kept until Ectomatter quits
+  (`core_host.rs`, `compiled`), so a session that takes in updates keeps one
+  more module for each. It's there because package threads still run while
+  the process exits (nothing stops and waits for them first); a module let go
+  by the last of them then aborted the process. Both core dumps of
+  2026-10-26 were this, in snapshots (one the stranger test's run that
+  stopped silently); no test makes it happen on purpose.
+- A device's page opened while its device isn't plugged in says it's reading
+  the device ("Reading your keyboard"), and its button stays on the rail:
+  the first-run render shows it (`first-keyboard`).
 
 ## Before any repository goes public
 
@@ -166,9 +184,14 @@ Paths are under `apps/ectomatter/src/` unless they say otherwise.
   names and EDIDs (`hosted.rs` `Desk`, `monitors.rs`), his drives' serial
   numbers (`crates/ectomatter-sensors/src/fake.rs`, `list.rs`), his
   computer's name (`macro_page.rs`, `jobs.rs`, `setups.rs`, `described.rs`,
-  `picker.rs`, `crates/ectomatter-draw/src/hdr.rs`), his home folder's path
-  (`plugins/game-configurator/module/src/lib.rs`). Found with `git grep` on
-  2026-10-26. The history holds them too.
+  `picker.rs`, `crates/ectomatter-draw/src/hdr.rs`; "studio" six times in
+  `hosted.rs`), his home folder's path (`plugins/game-configurator/module/src/lib.rs`,
+  `hosted.rs` near line 1043, `picker.rs` near line 85), his OpenRGB
+  profiles and games ("ARC Raiders", "Deepdriver II" in `hosted.rs`). The
+  sensors crate's made-up computer is his (`fake.rs`: his processor, board,
+  cards and two drives' serial numbers); the render tests rename all of it.
+  Found with `git grep` and a review on 2026-10-26. The history holds them
+  too.
 
 ## Stage 5: Windows and macOS
 

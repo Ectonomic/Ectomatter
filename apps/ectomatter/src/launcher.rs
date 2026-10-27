@@ -195,7 +195,7 @@ pub fn mapping(root: &Path) -> HashMap<String, String> {
 /// Whether Steam is running: its client's own process, the 64-bit one
 /// (steamrt64/steam) or the 32-bit one it replaced (ubuntu12_32/steam).
 pub fn steam_running() -> bool {
-    std::fs::read_dir("/proc").into_iter().flatten().flatten().any(|e| {
+    std::fs::read_dir(crate::computer::here("/proc")).into_iter().flatten().flatten().any(|e| {
         e.file_name().to_string_lossy().bytes().all(|b| b.is_ascii_digit()) && std::fs::read_link(e.path().join("exe")).is_ok_and(|p| p.ends_with("steamrt64/steam") || p.ends_with("ubuntu12_32/steam"))
     })
 }
@@ -247,7 +247,7 @@ fn exec_of(text: &str) -> Option<Vec<String>> {
 /// Whether any of Steam's own processes is left from one that closed: its
 /// client, its web helper, or its steam.sh.
 fn steam_left() -> bool {
-    std::fs::read_dir("/proc").into_iter().flatten().flatten().any(|e| {
+    std::fs::read_dir(crate::computer::here("/proc")).into_iter().flatten().flatten().any(|e| {
         if !e.file_name().to_string_lossy().bytes().all(|b| b.is_ascii_digit()) {
             return false;
         }
@@ -761,10 +761,10 @@ fn listen_at(path: &Path, tell: smithay_client_toolkit::reexports::calloop::chan
 pub fn reaper_above(pid: u32) -> Option<u32> {
     let mut at = pid;
     for _ in 0..16 {
-        if std::fs::read_to_string(format!("/proc/{at}/comm")).is_ok_and(|c| c.trim_end() == "reaper") && std::fs::read(format!("/proc/{at}/cmdline")).ok().and_then(|c| crate::steam::app_of_reaper(&c)).is_some() {
+        if std::fs::read_to_string(crate::computer::here(format!("/proc/{at}/comm"))).is_ok_and(|c| c.trim_end() == "reaper") && std::fs::read(crate::computer::here(format!("/proc/{at}/cmdline"))).ok().and_then(|c| crate::steam::app_of_reaper(&c)).is_some() {
             return Some(at);
         }
-        at = crate::steam::parent_in(&std::fs::read_to_string(format!("/proc/{at}/stat")).ok()?)?;
+        at = crate::steam::parent_in(&std::fs::read_to_string(crate::computer::here(format!("/proc/{at}/stat"))).ok()?)?;
         if at <= 1 {
             return None;
         }
@@ -840,9 +840,15 @@ impl Known {
 /// in hertz, and whether HDR is on (from ECTOMATTER_MONITORS's file
 /// offscreen, as the plugins' monitors are).
 pub fn main_monitor() -> Value {
-    let list: Vec<crate::monitors::Monitor> = match std::env::var_os("ECTOMATTER_MONITORS") {
-        Some(f) => {
-            let v: Value = std::fs::read_to_string(&f).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
+    // (a snapshot's monitors: those of the computer described for it, or of ECTOMATTER_MONITORS's file)
+    use crate::core_host::Computer;
+    let told = match (crate::computer::described(), std::env::var_os("ECTOMATTER_MONITORS")) {
+        (Some(c), _) => Some(c.monitors().unwrap_or(Value::Null)),
+        (None, Some(f)) => Some(std::fs::read_to_string(&f).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null)),
+        (None, None) => None,
+    };
+    let list: Vec<crate::monitors::Monitor> = match told {
+        Some(v) => {
             let main = v.as_array().into_iter().flatten().find(|m| m["main"] == true).cloned().unwrap_or(Value::Null);
             let mode = crate::monitors::Mode::of(&main["mode"]);
             return match mode {
@@ -1009,7 +1015,7 @@ pub fn shown(p: &Path) -> String {
 /// GameMode keeps a game on), as Linux lists them ("0-7,16-23").
 pub fn cache_cores() -> Option<String> {
     let mut best: Option<(u64, String)> = None;
-    for e in std::fs::read_dir("/sys/devices/system/cpu").ok()?.flatten() {
+    for e in std::fs::read_dir(crate::computer::here("/sys/devices/system/cpu")).ok()?.flatten() {
         let d = e.path().join("cache/index3");
         let (Ok(size), Ok(list)) = (std::fs::read_to_string(d.join("size")), std::fs::read_to_string(d.join("shared_cpu_list"))) else { continue };
         let Ok(kb) = size.trim().trim_end_matches('K').parse::<u64>() else { continue };

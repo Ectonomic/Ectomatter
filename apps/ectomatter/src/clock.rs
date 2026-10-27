@@ -3,8 +3,10 @@
 //! seconds since 1970) so its pictures come out the same at any hour; then
 //! the animations' clock moves only a frame's 16 ms each frame the snapshot
 //! lets pass (`frame`), however long a frame really takes, so an animation
-//! stands at the same place in every drawing. A running Ectomatter reads the
-//! computer's clocks. Timers and waits keep the real time either way.
+//! stands at the same place in every drawing, and the window's own timers
+//! (Slint's, which keep its clock) wait in frames too. A running Ectomatter
+//! reads the computer's clocks. Waits outside the window (a package's
+//! timers, a call's time) keep the real time either way.
 
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};

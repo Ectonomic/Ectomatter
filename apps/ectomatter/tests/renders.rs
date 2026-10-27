@@ -1,15 +1,18 @@
 //! Ectomatter's pages drawn offscreen on a made-up desk, each compared pixel
 //! for pixel with the picture approved for it (`tests/renders/approved/`).
 //!
-//! The desk is the same on any computer and holds nothing of Grant's: the
-//! keyboard's and the mouse's states in `tests/renders/desk/`, a computer
-//! described in a folder (`ECTOMATTER_COMPUTER`: the sensors crate's made-up
-//! computer, two made-up monitors, the weather's answers), a Steam library of
-//! made-up games, fresh settings folders, no Wayland or D-Bus session, the
-//! time of day fixed (`ECTOMATTER_NOW`) and the time zone UTC, and the
-//! lights' effects and the screen's playlist each at a moment fixed. Two desks are
-//! drawn: one set up (scenes, a place for the weather) and one as a stranger
-//! first opens Ectomatter.
+//! The desk is made up and holds nothing of Grant's: the keyboard's and the
+//! mouse's states in `tests/renders/desk/`, a computer described in a folder
+//! (`ECTOMATTER_COMPUTER`: the sensors crate's made-up computer with made-up
+//! names, two made-up monitors, the weather's answers), a Steam library of
+//! made-up games, fresh settings folders, the time of day fixed
+//! (`ECTOMATTER_NOW`) and the time zone UTC, and the lights' effects and the
+//! screen's playlist each at a moment fixed. Each page is drawn in a sandbox
+//! (bubblewrap, `bwrap`) that hides the computer running the test: no
+//! network, no session, an empty /sys, a /proc and /dev of the sandbox's own,
+//! no home folder, the source read-only at /opt/ectomatter-source. Two desks
+//! are drawn: one set up (scenes, a place for the weather), and one as a
+//! stranger first opens Ectomatter, with no settings and no device plugged in.
 //!
 //! A page that comes out otherwise fails the test, its picture and where it
 //! differs written to `target/renders/`. When the change is meant, look at
@@ -87,7 +90,6 @@ const SET_UP: &[Case] = &[
     Case { name: "lab-wells.window", size: (1280, 800), set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_LAB", "1"), ("ECTOMATTER_CLICKS", "1155,70")] },
     Case { name: "lab-display.window", size: (1280, 800), set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_LAB", "1"), ("ECTOMATTER_CLICKS", "1210,70")] },
     Case { name: "lab-mouse.window", size: (1280, 800), set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_LAB", "mouse")] },
-    Case { name: "lab-slid.window", size: (1280, 800), set: &[("ECTOMATTER_PLACE", "keyboard"), ("ECTOMATTER_LAB", "1"), ("ECTOMATTER_CLICKS", "100,416"), ("ECTOMATTER_HOVER", "600,700")] },
 ];
 
 /// The main window's places on the desk of a stranger opening Ectomatter
@@ -100,19 +102,29 @@ const FIRST_RUN: &[Case] = &[
     Case { name: "first-library", size: WIDE, set: &[("ECTOMATTER_PLACE", "library")] },
 ];
 
-/// A folder of the test's own, empty, gone after it. Its path is the same on
-/// every computer and every run (a page can show it: a game's prefix), so
-/// two runs of these tests at once on one computer would share it.
+/// A folder of the test's own, empty, gone after it.
 struct Scratch(PathBuf);
 
 impl Scratch {
     fn new(name: &str) -> Scratch {
-        let d = Path::new("/tmp/ectomatter-renders").join(name);
+        let d = std::env::temp_dir().join(format!("ectomatter-renders-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         Scratch(d)
     }
 }
+
+/// Where a desk's folder is in the sandbox, the same on every computer and
+/// every run (a page can show it: a game's prefix).
+fn inside(name: &str) -> PathBuf {
+    Path::new("/tmp/ectomatter-renders").join(name)
+}
+
+/// Where the source folder is in the sandbox.
+const SOURCE: &str = "/opt/ectomatter-source";
+
+/// Where Ectomatter's program is in the sandbox.
+const PROGRAM: &str = "/opt/ectomatter/bin/ectomatter";
 
 impl Drop for Scratch {
     fn drop(&mut self) {
@@ -150,8 +162,8 @@ const GAMES: &[(u32, &str, [u8; 3], [u8; 3])] = &[
 
 /// A Steam library as Steam lays its folder out, with the made-up games
 /// installed and their covers chosen in Steam's grid.
-fn steam(root: &Path) {
-    put(&root.join("steamapps/libraryfolders.vdf"), &format!("\"libraryfolders\"\n{{\n\t\"0\"\n\t{{\n\t\t\"path\"\t\t\"{}\"\n\t}}\n}}\n", root.display()));
+fn steam(root: &Path, seen_at: &Path) {
+    put(&root.join("steamapps/libraryfolders.vdf"), &format!("\"libraryfolders\"\n{{\n\t\"0\"\n\t{{\n\t\t\"path\"\t\t\"{}\"\n\t}}\n}}\n", seen_at.display()));
     // (the account 76561198000000001, which Steam keeps its grid under as 39734273)
     put(&root.join("config/loginusers.vdf"), "\"users\"\n{\n\t\"76561198000000001\"\n\t{\n\t\t\"AccountName\"\t\t\"stranger\"\n\t\t\"MostRecent\"\t\t\"1\"\n\t\t\"Timestamp\"\t\t\"1792600000\"\n\t}\n}\n");
     for (id, name, back, band) in GAMES {
@@ -162,12 +174,23 @@ fn steam(root: &Path) {
 }
 
 /// The computer the packages and Ectomatter reach (computer::Described): the
-/// sensors crate's made-up computer, two made-up monitors, its NVIDIA card's
-/// readings, the weather's answers for a clear morning in Reykjavík, and the
-/// cores' devices plugged in. (Its files don't change, so the processor's
-/// load, which takes two different readings of /proc/stat, is unavailable.)
-fn computer(dir: &Path) {
-    ectomatter_sensors::fake::computer(&dir.join("files"));
+/// sensors crate's made-up computer, its processor, board, cards and drives
+/// given made-up names; two made-up monitors; its NVIDIA card's readings;
+/// the weather's answers for a clear morning in Reykjavík; and, if `plugged`,
+/// the cores' devices plugged in. (Its files don't change, so the processor's
+/// load, the change between two readings of /proc/stat, is 0.)
+fn computer(dir: &Path, plugged: bool) {
+    let files = dir.join("files");
+    ectomatter_sensors::fake::computer(&files);
+    put(&files.join("proc/cpuinfo"), "processor\t: 0\nmodel name\t: Example 8-Core Processor\ncpu cores\t: 4\n");
+    put(&files.join("proc/stat"), "cpu  4000 0 2000 32000 400 0 100 0 0 0\ncpu0 1000 0 500 8000 100 0 25 0 0 0\ncpu1 1000 0 500 8000 100 0 25 0 0 0\ncpu2 1000 0 500 8000 100 0 25 0 0 0\ncpu3 1000 0 500 8000 100 0 25 0 0 0\nbtime 1792670000\n");
+    put(&files.join("sys/class/dmi/id/board_vendor"), "Example Boards\n");
+    put(&files.join("sys/class/dmi/id/board_name"), "EX-1000\n");
+    put(&files.join("usr/share/hwdata/pci.ids"), "1002  Example Graphics\n\t13c0  Built-in Graphics\n10de  Example Cards\n\t2b85  Example Card 9000\n14c3  Example Radios\n\t0616  Example Wi-Fi\n1d6a  Example Networks\n\t94c0  Example 10G Ethernet\n8086  Example Silicon\n\te212  Example Card 500\n");
+    for (drive, model, serial) in [("0000:00:01.2/0000:02:00.0/nvme/nvme0", "Example SSD 4TB", "EXAMPLE0001"), ("0000:00:02.1/0000:0f:00.0/nvme/nvme3", "Example SSD 2TB", "EXAMPLE0002")] {
+        put(&files.join(format!("sys/devices/pci0000:00/{drive}/model")), &format!("{model}\n"));
+        put(&files.join(format!("sys/devices/pci0000:00/{drive}/serial")), &format!("{serial}\n"));
+    }
     let nv = serde_json::json!({ "0000:01:00.0": {
         "probe": { "has": ["temp", "load", "clock", "vram", "mem-clock", "power", "fan"], "vram": 31.8 },
         "temp": 43.0, "load": 6.0, "clock": 1882.0, "mem-clock": 7001.0, "vram": [4.8, 31.8], "power": 73.4, "fan": 0.0 } });
@@ -203,6 +226,9 @@ fn computer(dir: &Path) {
         }
     }
     assert!(!devices.is_empty(), "no core names a USB device");
+    if !plugged {
+        devices.clear();
+    }
     put(&dir.join("devices.json"), &serde_json::Value::Object(devices).to_string());
 }
 
@@ -295,14 +321,18 @@ impl Picture {
     }
 }
 
-/// A desk's folders: a home, its settings, its computer and its Steam.
+/// A desk's folders: a home, its settings, its computer and its Steam; where
+/// they are in the sandbox; and whether its devices are plugged in.
 struct Desk {
     scratch: Scratch,
+    at: PathBuf,
+    plugged: bool,
 }
 
 impl Desk {
-    fn new(name: &str, settings: bool) -> Desk {
+    fn new(name: &str, settings: bool, plugged: bool) -> Desk {
         let scratch = Scratch::new(name);
+        let at = inside(name);
         let d = &scratch.0;
         for f in ["home", "config", "data", "state", "cache", "run"] {
             std::fs::create_dir_all(d.join(f)).unwrap();
@@ -312,25 +342,39 @@ impl Desk {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(d.join("run"), std::fs::Permissions::from_mode(0o700)).unwrap();
         }
-        computer(&d.join("computer"));
-        steam(&d.join("steam"));
+        computer(&d.join("computer"), plugged);
+        steam(&d.join("steam"), &at.join("steam"));
         if settings {
             set_up(&d.join("config"));
         }
-        Desk { scratch }
+        Desk { scratch, at, plugged }
     }
 
     /// One page drawn (to a file named for it and `tag`): its picture and
     /// what the program said, or why it wasn't drawn.
     fn draw(&self, case: &Case, tag: &str) -> Result<(Picture, String), String> {
-        let d = &self.scratch.0;
+        let (host, d) = (&self.scratch.0, &self.at);
         let window = case.name.ends_with(".window");
-        let out = d.join(format!("{}{tag}.{}", case.name, if window { "png" } else { "raw" }));
-        let mut c = Command::new(env!("CARGO_BIN_EXE_ectomatter"));
+        let file = format!("{}{tag}.{}", case.name, if window { "png" } else { "raw" });
+        let out = host.join(&file);
+        let fixture = |f: &str| Path::new(SOURCE).join("apps/ectomatter/tests/renders/desk").join(f);
+        // the sandbox: the system's programs, libraries and typefaces read-only,
+        // and nothing else of this computer's but the desk, the source and the
+        // program
+        let mut c = Command::new("bwrap");
+        c.args(["--die-with-parent", "--unshare-all", "--new-session", "--hostname", "ectomatter-renders"])
+            .args(["--ro-bind", "/usr", "/usr", "--symlink", "usr/lib64", "/lib64", "--symlink", "usr/lib", "/lib", "--symlink", "usr/bin", "/bin", "--symlink", "usr/sbin", "/sbin"])
+            .args(["--ro-bind-try", "/etc/fonts", "/etc/fonts", "--ro-bind-try", "/etc/ld.so.cache", "/etc/ld.so.cache"])
+            .args(["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/sys"])
+            .arg("--bind").arg(host).arg(d)
+            .arg("--ro-bind").arg(repo()).arg(SOURCE)
+            .arg("--ro-bind").arg(env!("CARGO_BIN_EXE_ectomatter")).arg(PROGRAM)
+            .arg("--chdir").arg(d)
+            .arg(PROGRAM)
+            .arg("--snapshot")
+            .arg(d.join(&file));
         // (nothing of this computer's session: only what's set here)
         c.env_clear()
-            .arg("--snapshot")
-            .arg(&out)
             .env("PATH", "/usr/bin:/bin")
             .env("HOME", d.join("home"))
             .env("XDG_CONFIG_HOME", d.join("config"))
@@ -340,24 +384,25 @@ impl Desk {
             .env("XDG_RUNTIME_DIR", d.join("run"))
             .env("TZ", "UTC")
             .env("LANG", "C.UTF-8")
-            .env("ECTOMATTER_PACKAGES", repo())
+            .env("ECTOMATTER_PACKAGES", SOURCE)
             .env("ECTOMATTER_COMPUTER", d.join("computer"))
             .env("ECTOMATTER_STEAM", d.join("steam"))
             .env("ECTOMATTER_NOW", NOW.to_string())
-            .env("ECTOMATTER_STATE", here().join("tests/renders/desk/keyboard.json"))
-            .env("ECTOMATTER_MOUSE", here().join("tests/renders/desk/mouse.json"))
             .env("ECTOMATTER_SIZE", format!("{}x{}", case.size.0, case.size.1))
             // (the packages' first answers in and the animations run out
             // before the picture is taken, unless the case says otherwise)
             .env("ECTOMATTER_WAIT", "1500")
             // (the lights' effects and the screen's playlist at a moment of their own)
             .env("ECTOMATTER_LIGHT_AT", "2000")
-            .env("ECTOMATTER_LCD_AT", "3")
-            .current_dir(d);
+            .env("ECTOMATTER_LCD_AT", "3");
+        // (the devices as their cores last read them, where they're plugged in)
+        if self.plugged {
+            c.env("ECTOMATTER_STATE", fixture("keyboard.json")).env("ECTOMATTER_MOUSE", fixture("mouse.json"));
+        }
         for (k, v) in case.set {
             c.env(k, v);
         }
-        let run = c.output().map_err(|e| e.to_string())?;
+        let run = c.output().map_err(|e| format!("bubblewrap (bwrap) didn't run, which the render tests need: {e}"))?;
         let said = String::from_utf8_lossy(&run.stderr).into_owned();
         if !run.status.success() {
             return Err(format!("it ended {}:\n{said}", run.status));
@@ -381,9 +426,7 @@ fn check(desk: &Desk, cases: &[Case]) -> Vec<String> {
     let approved = here().join("tests/renders/approved");
     let changed = repo().join("target/renders");
     let approve = std::env::var_os("ECTOMATTER_APPROVE").is_some();
-    // (ECTOMATTER_RENDERS=name,name: only those pages)
-    let only: Vec<String> = std::env::var("ECTOMATTER_RENDERS").unwrap_or_default().split(',').filter(|n| !n.is_empty()).map(String::from).collect();
-    let cases: Vec<&Case> = cases.iter().filter(|c| only.is_empty() || only.iter().any(|o| o == c.name.trim_end_matches(".window"))).collect();
+    let cases = chosen(cases);
     let drawn: Vec<(&Case, Result<(Picture, String), String>)> = std::thread::scope(|s| {
         let mut out = Vec::new();
         for group in cases.chunks(4) {
@@ -408,6 +451,10 @@ fn check(desk: &Desk, cases: &[Case]) -> Vec<String> {
             put(&changed.join(format!("{name}.log")), &said);
             wrong.push(why);
         };
+        // (ECTOMATTER_RENDERS_LOG: every page's log, whatever came out)
+        if std::env::var_os("ECTOMATTER_RENDERS_LOG").is_some() {
+            put(&changed.join(format!("{name}.log")), &said);
+        }
         let file = approved.join(format!("{name}.png"));
         if approve {
             picture.write_png(&file);
@@ -433,6 +480,16 @@ fn check(desk: &Desk, cases: &[Case]) -> Vec<String> {
     wrong
 }
 
+/// The cases ECTOMATTER_RENDERS names (name,name), or every one: each name
+/// asked for one of the cases somewhere.
+fn chosen(cases: &[Case]) -> Vec<&Case> {
+    let only: Vec<String> = std::env::var("ECTOMATTER_RENDERS").unwrap_or_default().split(',').filter(|n| !n.is_empty()).map(String::from).collect();
+    for o in &only {
+        assert!(SET_UP.iter().chain(FIRST_RUN).any(|c| c.name.trim_end_matches(".window") == o), "ECTOMATTER_RENDERS names {o}, which is no page here");
+    }
+    cases.iter().filter(|c| only.is_empty() || only.iter().any(|o| o == c.name.trim_end_matches(".window"))).collect()
+}
+
 fn built() {
     for folder in ["cores", "plugins"] {
         for e in std::fs::read_dir(repo().join(folder)).unwrap().flatten() {
@@ -447,7 +504,7 @@ fn built() {
 #[test]
 fn every_page_looks_as_approved() {
     built();
-    let desk = Desk::new("set-up", true);
+    let desk = Desk::new("set-up", true, true);
     let wrong = check(&desk, SET_UP);
     assert!(wrong.is_empty(), "pages that came out otherwise:\n  {}", wrong.join("\n  "));
 }
@@ -456,7 +513,7 @@ fn every_page_looks_as_approved() {
 #[test]
 fn the_first_run_looks_as_approved() {
     built();
-    let desk = Desk::new("first-run", false);
+    let desk = Desk::new("first-run", false, false);
     let wrong = check(&desk, FIRST_RUN);
     assert!(wrong.is_empty(), "pages that came out otherwise:\n  {}", wrong.join("\n  "));
 }
@@ -467,10 +524,9 @@ fn the_first_run_looks_as_approved() {
 #[test]
 fn a_page_drawn_twice_is_the_same() {
     built();
-    let desk = Desk::new("twice", true);
     let mut wrong = Vec::new();
-    let only: Vec<String> = std::env::var("ECTOMATTER_RENDERS").unwrap_or_default().split(',').filter(|n| !n.is_empty()).map(String::from).collect();
-    for case in SET_UP.iter().filter(|c| only.is_empty() || only.iter().any(|o| o == c.name.trim_end_matches(".window"))) {
+    let desks = [(Desk::new("twice-set-up", true, true), SET_UP), (Desk::new("twice-first-run", false, false), FIRST_RUN)];
+    for (desk, case) in desks.iter().flat_map(|(d, cases)| chosen(cases).into_iter().map(move |c| (d, c))) {
         let (a, b) = std::thread::scope(|s| {
             let a = s.spawn(|| desk.draw(case, "-a"));
             let b = s.spawn(|| desk.draw(case, "-b"));
@@ -492,4 +548,29 @@ fn a_page_drawn_twice_is_the_same() {
         }
     }
     assert!(wrong.is_empty(), "pages that move between drawings:\n  {}", wrong.join("\n  "));
+}
+
+/// Every place the window shows is drawn: each `place` the window's Slint
+/// compares with (`root.place == "..."`) has a page here.
+#[test]
+fn every_place_of_the_window_is_drawn() {
+    let mut places = std::collections::BTreeSet::new();
+    let mut dirs = vec![here().join("ui")];
+    while let Some(d) = dirs.pop() {
+        for e in std::fs::read_dir(&d).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                dirs.push(p);
+            } else if p.extension().is_some_and(|x| x == "slint") {
+                let text = std::fs::read_to_string(&p).unwrap();
+                for rest in text.split("place == \"").skip(1) {
+                    places.insert(rest.split('"').next().unwrap().to_string());
+                }
+            }
+        }
+    }
+    assert!(!places.is_empty(), "the window's places weren't found");
+    let drawn: Vec<&str> = SET_UP.iter().flat_map(|c| c.set.iter()).filter(|(k, _)| *k == "ECTOMATTER_PLACE").map(|(_, v)| *v).collect();
+    let missing: Vec<&String> = places.iter().filter(|p| !drawn.contains(&p.as_str())).collect();
+    assert!(missing.is_empty(), "places of the window no page draws: {missing:?}");
 }
